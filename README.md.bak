@@ -1,0 +1,65 @@
+# 项目说明
+
+这是一个基于 Python 的项目，使用了 Anthropic API 进行开发。
+
+## 依赖项
+
+本项目依赖以下 Python 包：
+
+### 核心依赖
+
+- **anthropic** (0.89.0) - Anthropic API 的官方 Python 客户端库
+- **pydantic** (2.12.5) - 数据验证和设置管理
+- **pydantic_core** (2.41.5) - Pydantic 的核心组件
+
+### 网络通信
+
+- **httpx** (0.28.1) - 现代化的 HTTP 客户端
+- **httpcore** (1.0.9) - HTTP 核心功能库
+- **h11** (0.16.0) - HTTP/1.1 协议实现
+- **certifi** (2026.2.25) - SSL/TLS 证书包
+
+### 异步编程
+
+- **anyio** (4.13.0) - 异步编程兼容层
+- **sniffio** (1.3.1) - 异步库检测工具
+
+### 数据处理
+
+- **jiter** (0.13.0) - JSON 迭代解析器
+- **idna** (3.11) - 国际化域名支持
+
+### 类型注解和文档
+
+- **annotated-types** (0.7.0) - 类型注解工具
+- **typing_extensions** (4.15.0) - 向后兼容的类型提示
+- **typing-inspection** (0.4.2) - 类型检查工具
+- **docstring_parser** (0.17.0) - 文档字符串解析器
+
+### 环境配置
+
+- **python-dotenv** (1.2.2) - 从 .env 文件加载环境变量
+- **distro** (1.9.0) - Linux 发行版信息获取
+
+## 安装
+
+使用以下命令安装所有依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+## 环境变量配置
+
+请确保在项目根目录下创建 `.env` 文件，并配置必要的环境变量（如 API 密钥等）。
+
+## 主要特性
+
+- 🤖 Anthropic API 集成
+- 🚀 异步 HTTP 请求支持
+- ✅ 强大的数据验证能力
+- 🔧 环境变量管理
+
+## 开发说明
+
+本项目使用了 Pydantic 进行数据模型定义和验证，通过 python-dotenv 管理环境配置，并使用 httpx 进行 HTTP 通信。

@@ -4,3 +4,4 @@ __pycache__
 .venv
 agent_log.jsonl
 session_snapshots/
+sessions/

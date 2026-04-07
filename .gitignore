@@ -2,6 +2,7 @@
 __pycache__
 *.pyc
 .venv
+.README.md*
 agent_log.jsonl
 session_snapshots/
 sessions/

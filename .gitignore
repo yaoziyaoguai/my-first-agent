@@ -1,0 +1,6 @@
+.env
+__pycache__
+*.pyc
+.venv
+agent_log.jsonl
+session_snapshots/

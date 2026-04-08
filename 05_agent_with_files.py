@@ -29,10 +29,13 @@ PROJECT_DIR = Path.cwd().resolve()
 PROTECTED_EXTENSIONS = {".py"}
 
 def is_protected_source_file(path):
-    """项目目录下的 .py 文件视为受保护源码文件，禁止 Agent 写入"""
     try:
         file_path = Path(path).expanduser().resolve(strict=False)
-        return file_path.is_relative_to(PROJECT_DIR) and file_path.suffix.lower() in PROTECTED_EXTENSIONS
+        return (
+            file_path.is_relative_to(PROJECT_DIR)
+            and file_path.suffix.lower() in PROTECTED_EXTENSIONS
+            and file_path.exists()  # ← 只保护已存在的文件
+        )
     except Exception:
         return False
 
@@ -108,8 +111,20 @@ def confirm_tool_call(tool_name, tool_input):
 
 MAX_MESSAGES = 10  # 超过这个数量就触发压缩
 
-import os
-import json
+MAX_MESSAGE_CHARS = 50000
+
+
+def estimate_messages_size(msgs):
+    """
+    估算 messages 的总大小（字符数）
+    """
+    try:
+        serializable = make_serializable(msgs)
+        return len(json.dumps(serializable, ensure_ascii=False))
+    except Exception as e:
+        print(f"[系统] 估算 messages 大小时出错: {e}")
+        return 0
+
 
 def _truncate_tool_result_content(obj, threshold=200, keep_prefix=200):
     """
@@ -117,18 +132,12 @@ def _truncate_tool_result_content(obj, threshold=200, keep_prefix=200):
     - 如果发现 type == "tool_result" 的 block
     - 且其 content 长度超过 threshold
     - 就截断为前 keep_prefix 个字符 + ...(已截断)
-
-    注意：
-    1. 这里假设 make_serializable 后的数据结构主要是 dict / list / str
-    2. 如果 tool_result.content 不是字符串，会先转成 JSON 字符串再判断长度
     """
     if isinstance(obj, list):
         return [_truncate_tool_result_content(item, threshold, keep_prefix) for item in obj]
 
     if isinstance(obj, dict):
-        # 先复制，避免原地修改
         new_obj = {}
-
         is_tool_result = obj.get("type") == "tool_result"
 
         for k, v in obj.items():
@@ -154,22 +163,31 @@ def compress_history():
     """把较早的消息压缩成摘要"""
     global messages
 
-    if len(messages) <= MAX_MESSAGES:
+    total_size = estimate_messages_size(messages)
+
+    # 第二个触发条件：条数超过 MAX_MESSAGES 或 总字符数超过 MAX_MESSAGE_CHARS
+    if len(messages) <= MAX_MESSAGES and total_size <= MAX_MESSAGE_CHARS:
         return
 
-    print("\n[系统] 上下文较长，正在压缩历史记录...")
-    log_event("context_compression_start", {"message_count": len(messages)})
+    print(
+        f"\n[系统] 上下文较长，正在压缩历史记录..."
+        f"（message_count={len(messages)}, total_chars={total_size}）"
+    )
+    log_event("context_compression_start", {
+        "message_count": len(messages),
+        "total_chars": total_size,
+    })
 
     # 保留最近的 6 条消息（3 轮对话）
     recent = messages[-6:]
     old = messages[:-6]
 
-    # 先转成可序列化结构，再对 tool_result 做截断，避免超长工具输出占满总结上下文
+    # 先转成可序列化结构，再对 tool_result 做截断
     old_for_summary = make_serializable(old)
     old_for_summary = _truncate_tool_result_content(
         old_for_summary,
-        threshold=200,   # 超过这个长度就截断
-        keep_prefix=200  # 保留前 200 个字符
+        threshold=200,
+        keep_prefix=200
     )
 
     # 用模型来总结旧的消息
@@ -201,14 +219,20 @@ def compress_history():
         {"role": "assistant", "content": "好的，我了解了之前的对话内容。请继续。"},
     ] + recent
 
+    new_total_size = estimate_messages_size(messages)
+
     log_event("context_compression_done", {
         "old_count": len(old) + len(recent),
         "new_count": len(messages),
         "summary": summary_text,
+        "old_total_chars": total_size,
+        "new_total_chars": new_total_size,
     })
 
-    print(f"[系统] 压缩完成：{len(old) + len(recent)} 条 → {len(messages)} 条\n")
-
+    print(
+        f"[系统] 压缩完成：{len(old) + len(recent)} 条 → {len(messages)} 条，"
+        f"{total_size} 字符 → {new_total_size} 字符\n"
+    )
 # ============================================
 # 工具实现
 # ============================================
@@ -449,8 +473,11 @@ tools = [
 
 SYSTEM_PROMPT = """你是一个有用的助手，能够进行数学计算和文件操作。
 你可以读取文件来了解信息，也可以创建和编辑文件。
-对于大文件，请优先使用 read_file 查看概览，再根据需要使用 read_file_lines 按行读取具体范围。
-在操作文件时请谨慎，先告诉用户你打算做什么，再执行操作。"""
+在操作文件时请谨慎，先告诉用户你打算做什么，再执行操作。
+
+重要规则：
+- 如果任务涉及创建多个文件，请逐个创建，每次只写一个文件，写完后询问用户是否继续下一个。
+- 不要试图在一次回复中完成所有文件的创建。"""
 
 # ============================================
 # Agent Loop
@@ -531,6 +558,10 @@ def chat(user_input):
                     if approved:
                         result = execute_tool(tool_name, tool_input)
                         log_event("tool_executed", {"tool": tool_name, "result": result})
+                        
+                        # 写文件成功后，强制要求模型停下来等用户确认
+                        if tool_name == "write_file" and not result.startswith("拒绝"):
+                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
                     else:
                         result = "用户拒绝了此操作"
                         log_event("tool_rejected", {"tool": tool_name})

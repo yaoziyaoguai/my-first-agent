@@ -1,0 +1,34 @@
+# Agent with Files - 项目说明
+
+## 项目概述
+这是一个基于 Claude API 的智能 Agent 系统，能够执行数学计算和文件操作。
+
+## 核心功能
+1. **数学计算**: 支持基础数学表达式求值
+2. **文件读取**: 读取项目内/外文件（项目外需确认）
+3. **文件写入**: 自动备份已存在文件后写入新内容
+
+## 技术栈
+- anthropic (0.89.0) - Claude API 客户端
+- python-dotenv (1.2.2) - 环境变量管理
+- pydantic (2.12.5) - 数据验证
+
+## 安全特性
+- 分级权限控制：写操作需确认，项目外读操作需确认
+- 文件修改自动备份
+- 完整日志记录（JSONL 格式）
+- 会话快照保存
+
+## 文件结构
+- 05_agent_with_files.py - 主程序
+- requirements.txt - 依赖列表
+- agent_log.jsonl - 操作日志
+- sessions/ - 会话快照存储目录
+
+## 使用方法
+1. 设置 ANTHROPIC_API_KEY 环境变量
+2. 运行 `python 05_agent_with_files.py`
+3. 输入任务或输入 'quit' 退出
+
+---
+生成时间: 2025-01-10

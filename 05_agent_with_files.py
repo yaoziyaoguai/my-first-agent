@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 import anthropic
+import re
 
 load_dotenv()
 
@@ -17,6 +18,10 @@ SESSION_ID = str(uuid.uuid4())
 LOG_FILE = "agent_log.jsonl"
 SNAPSHOT_DIR = Path("sessions")
 SNAPSHOT_DIR.mkdir(exist_ok=True)
+ENABLE_REVIEW = True
+SHOW_REVIEW_RESULT = True
+SHOW_REVIEW_DETAILS = False
+REVIEW_ONLY_MEANINGFUL_TURNS = True
 
 # ============================================
 # 项目目录：Agent 在这个目录下读文件不需要确认
@@ -272,13 +277,239 @@ def extract_python_outline(content):
     return outline
 
 
+def extract_markdown_outline(content):
+    """提取 Markdown 文件中的标题结构"""
+    outline = []
+    lines = content.splitlines()
+
+    for idx, line in enumerate(lines, start=1):
+        stripped = line.lstrip()
+
+        if not stripped.startswith("#"):
+            continue
+
+        level = 0
+        for ch in stripped:
+            if ch == "#":
+                level += 1
+            else:
+                break
+
+        # 合法 markdown 标题：# 后面至少跟一个空格
+        if 1 <= level <= 6 and len(stripped) > level and stripped[level] == " ":
+            title = stripped[level + 1:].strip()
+            if title:
+                outline.append(f"Line {idx}: H{level} {title}")
+
+    return outline
+
+
+def extract_json_outline(content):
+    """提取 JSON 文件的浅层结构"""
+    try:
+        data = json.loads(content)
+    except Exception:
+        return ["(JSON 解析失败，无法提取结构)"]
+
+    outline = []
+
+    def walk(obj, prefix="", depth=0, max_items=100):
+        nonlocal outline
+        if len(outline) >= max_items:
+            return
+        if depth > 2:
+            return
+
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if len(outline) >= max_items:
+                    return
+                path = f"{prefix}.{key}" if prefix else str(key)
+                value_type = type(value).__name__
+                outline.append(f"JSON: {path} ({value_type})")
+
+                if isinstance(value, dict):
+                    walk(value, path, depth + 1, max_items)
+                elif isinstance(value, list) and value:
+                    first = value[0]
+                    first_type = type(first).__name__
+                    outline.append(f"JSON: {path}[0] ({first_type})")
+                    if isinstance(first, dict):
+                        walk(first, f"{path}[0]", depth + 1, max_items)
+
+        elif isinstance(obj, list):
+            outline.append(f"JSON: root (list, len={len(obj)})")
+            if obj:
+                first = obj[0]
+                first_type = type(first).__name__
+                outline.append(f"JSON: root[0] ({first_type})")
+                if isinstance(first, dict):
+                    walk(first, "root[0]", depth + 1, max_items)
+        else:
+            outline.append(f"JSON: root ({type(obj).__name__})")
+
+    walk(data)
+    return outline if outline else ["(JSON 未识别到可展示结构)"]
+
+
+def extract_yaml_outline(content):
+    """
+    提取 YAML 的浅层结构（轻量启发式，不依赖第三方库）
+    """
+    outline = []
+    lines = content.splitlines()
+
+    for idx, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+
+        stripped = line.strip()
+
+        if stripped.startswith("#"):
+            continue
+
+        candidate = stripped
+        if candidate.startswith("- "):
+            candidate = candidate[2:].strip()
+
+        if ":" not in candidate:
+            continue
+
+        key_part = candidate.split(":", 1)[0].strip()
+
+        if not key_part:
+            continue
+        if " " in key_part and not (
+            key_part.startswith('"') and key_part.endswith('"')
+        ) and not (
+            key_part.startswith("'") and key_part.endswith("'")
+        ):
+            continue
+
+        indent = len(line) - len(line.lstrip(" "))
+        level = indent // 2 + 1
+        outline.append(f"Line {idx}: Y{level} {key_part}")
+
+    return outline if outline else ["(未识别到 YAML 结构)"]
+
+
+def extract_sql_outline(content):
+    """提取 SQL 文件中的主要结构块"""
+    outline = []
+    lines = content.splitlines()
+
+    patterns = [
+        (r"^\s*create\s+table\s+([^\s(]+)", "CREATE TABLE"),
+        (r"^\s*create\s+view\s+([^\s(]+)", "CREATE VIEW"),
+        (r"^\s*create\s+index\s+([^\s(]+)", "CREATE INDEX"),
+        (r"^\s*with\s+([a-zA-Z0-9_]+)\s+as\s*\(", "WITH"),
+        (r"^\s*insert\s+into\s+([^\s(]+)", "INSERT INTO"),
+        (r"^\s*update\s+([^\s(]+)", "UPDATE"),
+        (r"^\s*delete\s+from\s+([^\s(]+)", "DELETE FROM"),
+        (r"^\s*select\b", "SELECT"),
+    ]
+
+    for idx, line in enumerate(lines, start=1):
+        for pattern, label in patterns:
+            match = re.search(pattern, line, flags=re.IGNORECASE)
+            if match:
+                if match.lastindex:
+                    outline.append(f"Line {idx}: {label} {match.group(1)}")
+                else:
+                    outline.append(f"Line {idx}: {label}")
+                break
+
+    return outline if outline else ["(未识别到 SQL 主要结构)"]
+
+
+def extract_js_ts_outline(content):
+    """提取 JS / TS 文件中的函数、类、导出结构"""
+    outline = []
+    lines = content.splitlines()
+
+    patterns = [
+        (r"^\s*export\s+default\s+class\s+([A-Za-z0-9_]+)", "export default class"),
+        (r"^\s*export\s+class\s+([A-Za-z0-9_]+)", "export class"),
+        (r"^\s*class\s+([A-Za-z0-9_]+)", "class"),
+        (r"^\s*export\s+function\s+([A-Za-z0-9_]+)", "export function"),
+        (r"^\s*function\s+([A-Za-z0-9_]+)", "function"),
+        (r"^\s*const\s+([A-Za-z0-9_]+)\s*=\s*\(", "const fn"),
+        (r"^\s*const\s+([A-Za-z0-9_]+)\s*=\s*async\s*\(", "const async fn"),
+        (r"^\s*interface\s+([A-Za-z0-9_]+)", "interface"),
+        (r"^\s*type\s+([A-Za-z0-9_]+)\s*=", "type"),
+    ]
+
+    for idx, line in enumerate(lines, start=1):
+        for pattern, label in patterns:
+            match = re.search(pattern, line)
+            if match:
+                outline.append(f"Line {idx}: {label} {match.group(1)}")
+                break
+
+    return outline if outline else ["(未识别到 JS/TS 主要结构)"]
+
+
+def extract_generic_outline(content):
+    """
+    通用兜底结构提取：
+    尝试识别看起来像标题/分节的行
+    """
+    outline = []
+    lines = content.splitlines()
+
+    for idx, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if re.match(r"^\d+(\.\d+)*[\.\)]?\s+\S+", stripped):
+            outline.append(f"Line {idx}: SECTION {stripped}")
+            continue
+
+        if len(stripped) <= 80 and stripped.isupper() and len(stripped.split()) <= 8:
+            outline.append(f"Line {idx}: TITLE {stripped}")
+            continue
+
+        if stripped.endswith(":") and len(stripped) <= 80:
+            outline.append(f"Line {idx}: SECTION {stripped}")
+            continue
+
+    return outline if outline else ["(该文件类型暂不提供明确结构目录)"]
+
+
+def extract_file_outline(content, suffix):
+    """根据文件后缀提取结构目录"""
+
+    if suffix == ".py":
+        outline = extract_python_outline(content)
+        return outline if outline else ["(未识别到 class / def 定义)"]
+
+    if suffix == ".md":
+        outline = extract_markdown_outline(content)
+        return outline if outline else ["(未识别到 Markdown 标题结构)"]
+
+    if suffix == ".json":
+        return extract_json_outline(content)
+
+    if suffix in {".yaml", ".yml"}:
+        return extract_yaml_outline(content)
+
+    if suffix == ".sql":
+        return extract_sql_outline(content)
+
+    if suffix in {".js", ".ts", ".jsx", ".tsx"}:
+        return extract_js_ts_outline(content)
+
+    return extract_generic_outline(content)
+
+
 def read_file(path):
     try:
         file_path = Path(path)
         if not file_path.exists():
             return f"错误：文件 '{path}' 不存在"
 
-        content = file_path.read_text(encoding="utf-8")
+        content = file_path.read_text(encoding="utf-8", errors="replace")
         total_lines = len(content.splitlines())
 
         # 小文件：直接返回全部内容
@@ -289,18 +520,13 @@ def read_file(path):
         preview = content[:3000]
         suffix = file_path.suffix.lower()
 
-        if suffix == ".py":
-            outline = extract_python_outline(content)
-            if outline:
-                outline_text = "\n".join(outline[:200])  # 防止目录本身过长
-            else:
-                outline_text = "(未识别到 class / def 定义)"
-        else:
-            outline_text = "(该文件不是 Python 文件，不提供函数/类目录)"
+        outline = extract_file_outline(content, suffix)
+        outline_text = "\n".join(outline[:200])  # 防止目录本身过长
 
         return (
             f"[文件概览]\n"
             f"路径: {path}\n"
+            f"文件类型: {suffix or '(无后缀)'}\n"
             f"总字符数: {len(content)}\n"
             f"总行数: {total_lines}\n\n"
             f"[开头预览（前 3000 字符）]\n"
@@ -326,7 +552,7 @@ def read_file_lines(path, start_line, end_line):
         if start_line > end_line:
             return "错误：start_line 不能大于 end_line"
 
-        lines = file_path.read_text(encoding="utf-8").splitlines()
+        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
         total_lines = len(lines)
 
         if start_line > total_lines:
@@ -495,6 +721,10 @@ SYSTEM_PROMPT = """你是一个有用的助手，能够进行数学计算和文�
 # 这不是同一个对话，而是一个独立的、专门做审查的调用
 # ============================================
 
+
+
+
+
 def truncate_for_review(value, max_len=800):
     """
     给审查 prompt 用的轻量截断：
@@ -512,6 +742,47 @@ def truncate_for_review(value, max_len=800):
     if len(text) > max_len:
         return text[:max_len] + "...(已截断)"
     return text
+
+def should_review_turn(user_input, assistant_text, tool_traces):
+    """
+    只在本轮出现写操作相关事件时才评测。
+    包括：
+    - 真正执行了 write_file
+    - write_file 被用户拒绝
+    - write_file 被保护策略拦截
+    """
+    if not ENABLE_REVIEW:
+        return False
+
+    for trace in tool_traces:
+        if trace.get("tool") == "write_file":
+            return True
+
+    return False
+
+
+def print_review_summary(review):
+    if not review or review.get("parse_error"):
+        print("\n[评测] 本轮评测结果解析失败")
+        return
+
+    overall = review.get("overall", "未知")
+
+    if overall == "通过":
+        suggestion = "建议继续"
+    elif overall == "需要注意":
+        suggestion = "建议人工看一下再继续"
+    elif overall == "不通过":
+        suggestion = "建议本轮重试，或先补验证再继续"
+    else:
+        suggestion = "请人工判断"
+
+    print(f"\n[评测] {overall}，{suggestion}")
+
+    if SHOW_REVIEW_DETAILS:
+        for dim in ["completeness", "accuracy", "safety"]:
+            if dim in review:
+                print(f"  {dim}: {review[dim]['score']}/5 - {review[dim]['reason']}")
 
 
 def review_agent_output(user_request, agent_response, tool_traces):
@@ -561,9 +832,7 @@ Agent 的最终回复：
                 review_text = block.text
                 break
 
-        # 尝试解析 JSON
         try:
-            # 剥掉模型可能添加的 markdown 代码块标记
             clean_text = review_text.strip()
             if clean_text.startswith("```"):
                 clean_text = clean_text.split("\n", 1)[1]
@@ -624,7 +893,7 @@ def chat(user_input):
 
             # 流结束后拿到完整 response
             response = stream.get_final_message()
-            print()  # 换行
+            print()
 
         log_event("llm_response", {"stop_reason": response.stop_reason})
 
@@ -637,16 +906,16 @@ def chat(user_input):
             messages.append({"role": "assistant", "content": response.content})
             log_event("agent_reply", {"content": assistant_text})
 
-            # 推理型 Sensor：审查输出质量
-            review = review_agent_output(user_input, assistant_text, round_tool_traces)
-            print(f"[DEBUG] review result: {review}")
-            if review and not review.get("parse_error"):
-                overall = review.get("overall", "未知")
-                print(f"\n[审查结果] {overall}")
-                for dim in ["completeness", "accuracy", "safety"]:
-                    if dim in review:
-                        print(f"  {dim}: {review[dim]['score']}/5 - {review[dim]['reason']}")
+            # 推理型 Sensor：只在写操作回合做评测
+            if should_review_turn(user_input, assistant_text, round_tool_traces):
+                print("\n[系统] 检测到本轮有写操作，正在进行结果评测，请稍等...", flush=True)
 
+                review = review_agent_output(user_input, assistant_text, round_tool_traces)
+
+                print("[系统] 本轮评测完成", flush=True)
+
+                if SHOW_REVIEW_RESULT:
+                    print_review_summary(review)
             return assistant_text
 
         if response.stop_reason == "tool_use":
@@ -686,7 +955,6 @@ def chat(user_input):
                         })
                         continue
 
-                    # 分级控制：根据你设计的规则决定是否需要确认
                     if needs_confirmation(tool_name, tool_input):
                         approved = confirm_tool_call(tool_name, tool_input)
                     else:
@@ -705,7 +973,6 @@ def chat(user_input):
                             "result": truncate_for_review(result),
                         })
 
-                        # 写文件成功后，强制要求模型停下来等用户确认
                         if tool_name == "write_file" and not result.startswith("拒绝"):
                             result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
                     else:

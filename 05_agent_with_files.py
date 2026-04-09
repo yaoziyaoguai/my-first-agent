@@ -33,6 +33,72 @@ PROJECT_DIR = Path.cwd().resolve()
 # 源码保护：项目目录下的 .py 文件禁止写入
 # ============================================
 PROTECTED_EXTENSIONS = {".py"}
+SENSITIVE_EXACT_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.dev",
+    ".env.development",
+    ".env.test",
+    ".env.prod",
+    ".env.production",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    ".git-credentials",
+    ".netrc",
+}
+
+SENSITIVE_SUFFIXES = {
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".crt",
+    ".cer",
+    ".der",
+    ".jks",
+    ".keystore",
+}
+
+SENSITIVE_NAME_KEYWORDS = {
+    "secret",
+    "token",
+    "credential",
+    "credentials",
+    "passwd",
+    "password",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "client_secret",
+}
+
+
+def is_sensitive_file(path):
+    """
+    判断一个文件是否属于敏感文件。
+    """
+    try:
+        file_path = Path(path).expanduser().resolve(strict=False)
+        name = file_path.name.lower()
+
+        if name in SENSITIVE_EXACT_NAMES:
+            return True
+
+        if file_path.suffix.lower() in SENSITIVE_SUFFIXES:
+            return True
+
+        for keyword in SENSITIVE_NAME_KEYWORDS:
+            if keyword in name:
+                return True
+
+        return False
+    except Exception:
+        return False
 
 
 def is_protected_source_file(path):
@@ -75,22 +141,30 @@ def needs_confirmation(tool_name, tool_input):
         return True
 
     if tool_name == "read_file":
-        # 读操作：检查路径是否在项目目录内
         file_path = Path(tool_input["path"]).resolve()
+
+        # 敏感文件绝不静默读取
+        if is_sensitive_file(file_path):
+            return True
+
         if file_path.is_relative_to(PROJECT_DIR):
-            return False  # 项目内，静默执行
+            return False
         else:
-            return True   # 项目外，需要确认
+            return True
 
     if tool_name == "read_file_lines":
-        # 读操作：检查路径是否在项目目录内
         file_path = Path(tool_input["path"]).resolve()
-        if file_path.is_relative_to(PROJECT_DIR):
-            return False  # 项目内，静默执行
-        else:
-            return True   # 项目外，需要确认
 
-    if tool_name == "calculate":
+        # 敏感文件绝不静默读取
+        if is_sensitive_file(file_path):
+            return True
+
+        if file_path.is_relative_to(PROJECT_DIR):
+            return False
+        else:
+            return True
+
+    if tool_name == "calculate_safe":
         return False  # 计算器不需要确认
 
     # 未知工具：默认需要确认
@@ -280,16 +354,55 @@ def compress_history():
 # 工具实现
 # ============================================
 
-ALLOWED_TOOLS = {"calculate", "read_file", "read_file_lines", "write_file"}
+ALLOWED_TOOLS = {"calculate_safe", "read_file", "read_file_lines", "write_file"}
 
 
-def calculate(expression):
+import ast
+import operator
+
+def calculate_safe(expression):
+    """安全的数学表达式计算，基于 AST 白名单"""
+    
+    # 允许的运算符
+    SAFE_OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,  # 负号
+    }
+    
+    def _eval_node(node):
+        # 数字：直接返回
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        
+        # 二元运算：如 1 + 2
+        if isinstance(node, ast.BinOp):
+            op_func = SAFE_OPS.get(type(node.op))
+            if op_func is None:
+                raise ValueError(f"不允许的运算符: {type(node.op).__name__}")
+            return op_func(_eval_node(node.left), _eval_node(node.right))
+        
+        # 一元运算：如 -5
+        if isinstance(node, ast.UnaryOp):
+            op_func = SAFE_OPS.get(type(node.op))
+            if op_func is None:
+                raise ValueError(f"不允许的运算符: {type(node.op).__name__}")
+            return op_func(_eval_node(node.operand))
+        
+        # 其他任何节点类型：拒绝
+        raise ValueError(f"不允许的表达式类型: {type(node).__name__}")
+    
     try:
-        allowed = set("0123456789+-*/.() ")
-        if not all(c in allowed for c in expression):
-            return "错误：表达式包含不允许的字符"
-        result = eval(expression)
+        tree = ast.parse(expression, mode='eval')
+        result = _eval_node(tree.body)
         return str(result)
+    except (ValueError, SyntaxError) as e:
+        return f"计算错误：{e}"
+    except ZeroDivisionError:
+        return "计算错误：除数不能为零"
     except Exception as e:
         return f"计算错误：{e}"
 
@@ -559,7 +672,7 @@ def read_file(path):
         outline_text = "\n".join(outline[:200])  # 防止目录本身过长
 
         return (
-            f"[文件概览]\n"
+            f"[读取成功 - 文件较大，以下为概览]\n"
             f"路径: {path}\n"
             f"文件类型: {suffix or '(无后缀)'}\n"
             f"总字符数: {len(content)}\n"
@@ -568,9 +681,9 @@ def read_file(path):
             f"{preview}\n\n"
             f"[文件结构目录]\n"
             f"{outline_text}\n\n"
-            f"[提示]\n"
-            f"这个文件较大。请使用 read_file_lines 按行读取你感兴趣的范围。"
-        )
+            f"[说明] 文件已成功读取。以上是概览信息。如需查看具体行范围，请使用 read_file_lines 工具。不要重复调用 read_file。"
+            )
+        
     except Exception as e:
         return f"读取错误：{e}"
 
@@ -641,6 +754,15 @@ def execute_tool(tool_name, tool_input):
         error_msg = f"工具 '{tool_name}' 不在允许列表中"
         log_event("tool_blocked", {"tool": tool_name})
         return error_msg
+    
+        # 前置策略拦截：敏感文件禁止读取，避免内容进入 messages 并发送到模型服务
+    if tool_name in {"read_file", "read_file_lines"} and is_sensitive_file(tool_input["path"]):
+        error_msg = f"工具 '{tool_name}' 被阻止：'{tool_input['path']}' 属于敏感文件，不允许 Agent 读取"
+        log_event("tool_blocked_sensitive_read", {
+            "tool": tool_name,
+            "path": tool_input["path"],
+        })
+        return error_msg
 
     # 前置策略拦截：保护源码文件
     if tool_name == "write_file" and is_protected_source_file(tool_input["path"]):
@@ -651,8 +773,8 @@ def execute_tool(tool_name, tool_input):
         })
         return error_msg
 
-    if tool_name == "calculate":
-        return calculate(tool_input["expression"])
+    if tool_name == "calculate_safe":
+        return calculate_safe(tool_input["expression"])
     elif tool_name == "read_file":
         return read_file(tool_input["path"])
     elif tool_name == "read_file_lines":
@@ -671,7 +793,7 @@ def execute_tool(tool_name, tool_input):
 
 tools = [
     {
-        "name": "calculate",
+        "name": "calculate_safe",
         "description": "计算一个数学表达式。",
         "input_schema": {
             "type": "object",
@@ -686,7 +808,7 @@ tools = [
     },
     {
         "name": "read_file",
-        "description": "读取一个文件的内容。如果文件较大，会返回文件概览：前 3000 字符、总行数，以及常见结构化文件的目录信息（如 Python、Markdown、JSON、YAML、SQL、JS/TS 等）。",
+        "description": "读取一个文件的内容。如果文件较大（超过10000字符），会返回文件概览而非完整内容，此时请使用 read_file_lines 按行读取具体部分，不要重复调用 read_file 尝试不同路径。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1088,11 +1210,14 @@ def chat(user_input):
                         "status": "executed",
                         "result": truncate_for_review(result),
                     })
-                if tool_name == "write_file" and not result.startswith("拒绝"):
-                    if ENABLE_REVIEW:
-                        result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
-                    else:
-                        result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
+
+                    # 只有 write_file 成功时才注入停止指令
+                    if tool_name == "write_file" and not result.startswith("拒绝"):
+                        if ENABLE_REVIEW:
+                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
+                        else:
+                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
+
                 else:
                     result = "用户拒绝了此操作"
                     log_event("tool_rejected", {"tool": tool_name})

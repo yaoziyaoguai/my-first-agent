@@ -21,7 +21,8 @@ SNAPSHOT_DIR.mkdir(exist_ok=True)
 ENABLE_REVIEW = True
 SHOW_REVIEW_RESULT = True
 SHOW_REVIEW_DETAILS = False
-REVIEW_ONLY_MEANINGFUL_TURNS = True
+CURRENT_TASK_REQUEST = None
+
 
 # ============================================
 # 项目目录：Agent 在这个目录下读文件不需要确认
@@ -96,6 +97,8 @@ def needs_confirmation(tool_name, tool_input):
     return True
 
 
+
+
 def confirm_tool_call(tool_name, tool_input):
     print(f"\n{'='*50}")
     print(f"⚠️  Agent 想要执行以下操作：")
@@ -107,6 +110,38 @@ def confirm_tool_call(tool_name, tool_input):
         if choice in ("y", "n"):
             return choice == "y"
         print("请输入 y 或 n")
+
+
+def is_control_message(text):
+    """
+    判断用户输入是否只是流程控制语句，而不是新的真实任务。
+    """
+    if not text:
+        return False
+
+    normalized = text.strip().lower()
+
+    control_messages = {
+        "y", "yes", "n", "no",
+        "继续", "继续吧", "继续创建", "继续创建下一个文件",
+        "好的", "好", "可以", "行", "开始", "继续做",
+    }
+
+    return normalized in control_messages
+
+
+def get_effective_review_request(user_input):
+    """
+    给评测器使用的“真实任务请求”：
+    - 如果本轮输入是新的真实任务，就更新 CURRENT_TASK_REQUEST
+    - 如果本轮只是“继续/好的/y”之类，就沿用之前的任务请求
+    """
+    global CURRENT_TASK_REQUEST
+
+    if not is_control_message(user_input):
+        CURRENT_TASK_REQUEST = user_input
+
+    return CURRENT_TASK_REQUEST or user_input
 
 
 # ============================================
@@ -588,7 +623,7 @@ def write_file(path, content):
         backup_path = None
         if file_path.exists():
             backup_path = file_path.with_suffix(file_path.suffix + ".bak")
-            backup_path.write_text(file_path.read_text(encoding="utf-8"), encoding="utf-8")
+            backup_path.write_text(file_path.read_text(encoding="utf-8", errors="replace"),encoding="utf-8")
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
@@ -651,7 +686,7 @@ tools = [
     },
     {
         "name": "read_file",
-        "description": "读取一个文件的内容。如果文件较大，会返回文件概览：前 3000 字符、总行数，以及 Python 文件中的函数/类目录。",
+        "description": "读取一个文件的内容。如果文件较大，会返回文件概览：前 3000 字符、总行数，以及常见结构化文件的目录信息（如 Python、Markdown、JSON、YAML、SQL、JS/TS 等）。",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -866,8 +901,13 @@ messages = []
 
 def chat(user_input):
     compress_history()
+    effective_review_request = get_effective_review_request(user_input)
+
     messages.append({"role": "user", "content": user_input})
-    log_event("user_input", {"content": user_input})
+    log_event("user_input", {
+        "content": user_input,
+        "effective_review_request": effective_review_request,
+    })
 
     # 收集本轮对话中所有工具调用和结果
     round_tool_traces = []
@@ -898,10 +938,12 @@ def chat(user_input):
         log_event("llm_response", {"stop_reason": response.stop_reason})
 
         if response.stop_reason == "end_turn":
-            assistant_text = ""
+            assistant_text_parts = []
             for block in response.content:
                 if block.type == "text":
-                    assistant_text = block.text
+                    assistant_text_parts.append(block.text)
+
+            assistant_text = "\n".join(part for part in assistant_text_parts if part).strip()
 
             messages.append({"role": "assistant", "content": response.content})
             log_event("agent_reply", {"content": assistant_text})
@@ -910,16 +952,19 @@ def chat(user_input):
             if should_review_turn(user_input, assistant_text, round_tool_traces):
                 print("\n[系统] 检测到本轮有写操作，正在进行结果评测，请稍等...", flush=True)
 
-                review = review_agent_output(user_input, assistant_text, round_tool_traces)
+                review = review_agent_output(effective_review_request, assistant_text, round_tool_traces)
 
                 print("[系统] 本轮评测完成", flush=True)
 
                 if SHOW_REVIEW_RESULT:
                     print_review_summary(review)
+
             return assistant_text
 
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})
+
+            write_file_executed_in_this_turn = False
 
             for block in response.content:
                 if block.type == "tool_use":
@@ -928,6 +973,32 @@ def chat(user_input):
                     tool_use_id = block.id
 
                     log_event("tool_requested", {"tool": tool_name, "input": tool_input})
+
+                    # 同一轮最多只允许一个 write_file
+                    if tool_name == "write_file" and write_file_executed_in_this_turn:
+                        result = "拒绝执行：同一轮响应中只允许执行一个 write_file，请先等待用户确认后再继续下一个文件。"
+                        log_event("tool_blocked_multiple_write_same_turn", {
+                            "tool": tool_name,
+                            "path": tool_input.get("path"),
+                        })
+
+                        round_tool_traces.append({
+                            "tool_use_id": tool_use_id,
+                            "tool": tool_name,
+                            "input": tool_input,
+                            "status": "blocked_multiple_write_same_turn",
+                            "result": truncate_for_review(result),
+                        })
+
+                        messages.append({
+                            "role": "user",
+                            "content": [{
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "content": result
+                            }],
+                        })
+                        continue
 
                     # 受保护源码文件直接拒绝，不进入确认流程
                     if tool_name == "write_file" and is_protected_source_file(tool_input["path"]):
@@ -964,6 +1035,9 @@ def chat(user_input):
                     if approved:
                         result = execute_tool(tool_name, tool_input)
                         log_event("tool_executed", {"tool": tool_name, "result": result})
+
+                        if tool_name == "write_file" and not result.startswith("拒绝"):
+                            write_file_executed_in_this_turn = True
 
                         round_tool_traces.append({
                             "tool_use_id": tool_use_id,

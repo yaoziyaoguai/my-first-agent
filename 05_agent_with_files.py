@@ -818,6 +818,9 @@ def print_review_summary(review):
         for dim in ["completeness", "accuracy", "safety"]:
             if dim in review:
                 print(f"  {dim}: {review[dim]['score']}/5 - {review[dim]['reason']}")
+    # 评测通过后再提示用户操作
+    if overall == "通过":
+        print("\n[系统] 评测已通过，如需继续请输入指令。")
 
 
 def review_agent_output(user_request, agent_response, tool_traces):
@@ -911,7 +914,7 @@ def chat(user_input):
 
     # 收集本轮对话中所有工具调用和结果
     round_tool_traces = []
-
+    auto_retry_count = 0
     while True:
         log_event("llm_call", {"message_count": len(messages)})
 
@@ -952,30 +955,69 @@ def chat(user_input):
             if should_review_turn(user_input, assistant_text, round_tool_traces):
                 print("\n[系统] 检测到本轮有写操作，正在进行结果评测，请稍等...", flush=True)
 
-                review = review_agent_output(effective_review_request, assistant_text, round_tool_traces)
+                review = review_agent_output(
+                    effective_review_request,
+                    assistant_text,
+                    round_tool_traces,
+                )
 
                 print("[系统] 本轮评测完成", flush=True)
 
                 if SHOW_REVIEW_RESULT:
                     print_review_summary(review)
 
+                # ========== 新增：自动重试逻辑 ==========
+                MAX_AUTO_RETRY = 2  # 最多自动重试 2 次
+
+                if (review 
+                    and not review.get("parse_error")
+                    and review.get("overall") != "通过"
+                    and auto_retry_count < MAX_AUTO_RETRY):
+                    
+                    auto_retry_count += 1
+                    
+                    # 构建反馈信息
+                    feedback_parts = ["[系统评测反馈] 你的上一次输出未通过质量审查，请根据以下反馈修改："]
+                    for dim in ["completeness", "accuracy", "safety"]:
+                        if dim in review:
+                            feedback_parts.append(f"- {dim}: {review[dim]['score']}/5 - {review[dim]['reason']}")
+                    feedback_parts.append("\n请重新执行任务，修正上述问题。")
+                    
+                    feedback_msg = "\n".join(feedback_parts)
+                    
+                    print(f"\n[系统] 评测未通过，自动重试（{auto_retry_count}/{MAX_AUTO_RETRY}）...\n")
+                    log_event("auto_retry", {
+                        "attempt": auto_retry_count,
+                        "review_overall": review.get("overall"),
+                    })
+                    
+                    # 把审查反馈塞回 messages，继续循环
+                    messages.append({"role": "user", "content": feedback_msg})
+                    round_tool_traces = []  # 重置工具记录
+                    continue  # ← 关键：不 return，继续 while True 循环
+                # ========== 新增结束 ==========
+
             return assistant_text
 
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})
 
-            write_file_executed_in_this_turn = False
+            # 同一轮最多只允许出现一个 write_file 请求
+            write_file_seen_in_this_turn = False
 
             for block in response.content:
-                if block.type == "tool_use":
-                    tool_name = block.name
-                    tool_input = block.input
-                    tool_use_id = block.id
+                if block.type != "tool_use":
+                    continue
 
-                    log_event("tool_requested", {"tool": tool_name, "input": tool_input})
+                tool_name = block.name
+                tool_input = block.input
+                tool_use_id = block.id
 
-                    # 同一轮最多只允许一个 write_file
-                    if tool_name == "write_file" and write_file_executed_in_this_turn:
+                log_event("tool_requested", {"tool": tool_name, "input": tool_input})
+
+                # 同一轮最多只允许出现一个 write_file 请求
+                if tool_name == "write_file":
+                    if write_file_seen_in_this_turn:
                         result = "拒绝执行：同一轮响应中只允许执行一个 write_file，请先等待用户确认后再继续下一个文件。"
                         log_event("tool_blocked_multiple_write_same_turn", {
                             "tool": tool_name,
@@ -1000,66 +1042,24 @@ def chat(user_input):
                         })
                         continue
 
-                    # 受保护源码文件直接拒绝，不进入确认流程
-                    if tool_name == "write_file" and is_protected_source_file(tool_input["path"]):
-                        result = f"拒绝执行：'{tool_input['path']}' 属于受保护源码文件（.py），不允许 Agent 修改"
-                        log_event("tool_blocked_protected_source", {
-                            "tool": tool_name,
-                            "path": tool_input["path"],
-                        })
+                    # 只要本轮已经看到第一个 write_file，请求就占位
+                    write_file_seen_in_this_turn = True
 
-                        round_tool_traces.append({
-                            "tool_use_id": tool_use_id,
-                            "tool": tool_name,
-                            "input": tool_input,
-                            "status": "blocked_protected_source",
-                            "result": truncate_for_review(result),
-                        })
+                # 受保护源码文件直接拒绝，不进入确认流程
+                if tool_name == "write_file" and is_protected_source_file(tool_input["path"]):
+                    result = f"拒绝执行：'{tool_input['path']}' 属于受保护源码文件（.py），不允许 Agent 修改"
+                    log_event("tool_blocked_protected_source", {
+                        "tool": tool_name,
+                        "path": tool_input["path"],
+                    })
 
-                        messages.append({
-                            "role": "user",
-                            "content": [{
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": result
-                            }],
-                        })
-                        continue
-
-                    if needs_confirmation(tool_name, tool_input):
-                        approved = confirm_tool_call(tool_name, tool_input)
-                    else:
-                        print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
-                        approved = True
-
-                    if approved:
-                        result = execute_tool(tool_name, tool_input)
-                        log_event("tool_executed", {"tool": tool_name, "result": result})
-
-                        if tool_name == "write_file" and not result.startswith("拒绝"):
-                            write_file_executed_in_this_turn = True
-
-                        round_tool_traces.append({
-                            "tool_use_id": tool_use_id,
-                            "tool": tool_name,
-                            "input": tool_input,
-                            "status": "executed",
-                            "result": truncate_for_review(result),
-                        })
-
-                        if tool_name == "write_file" and not result.startswith("拒绝"):
-                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
-                    else:
-                        result = "用户拒绝了此操作"
-                        log_event("tool_rejected", {"tool": tool_name})
-
-                        round_tool_traces.append({
-                            "tool_use_id": tool_use_id,
-                            "tool": tool_name,
-                            "input": tool_input,
-                            "status": "rejected_by_user",
-                            "result": result,
-                        })
+                    round_tool_traces.append({
+                        "tool_use_id": tool_use_id,
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "status": "blocked_protected_source",
+                        "result": truncate_for_review(result),
+                    })
 
                     messages.append({
                         "role": "user",
@@ -1069,11 +1069,54 @@ def chat(user_input):
                             "content": result
                         }],
                     })
+                    continue
+
+                if needs_confirmation(tool_name, tool_input):
+                    approved = confirm_tool_call(tool_name, tool_input)
+                else:
+                    print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
+                    approved = True
+
+                if approved:
+                    result = execute_tool(tool_name, tool_input)
+                    log_event("tool_executed", {"tool": tool_name, "result": result})
+
+                    round_tool_traces.append({
+                        "tool_use_id": tool_use_id,
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "status": "executed",
+                        "result": truncate_for_review(result),
+                    })
+                if tool_name == "write_file" and not result.startswith("拒绝"):
+                    if ENABLE_REVIEW:
+                        result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
+                    else:
+                        result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
+                else:
+                    result = "用户拒绝了此操作"
+                    log_event("tool_rejected", {"tool": tool_name})
+
+                    round_tool_traces.append({
+                        "tool_use_id": tool_use_id,
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "status": "rejected_by_user",
+                        "result": result,
+                    })
+
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": result
+                    }],
+                })
             continue
 
         print(f"[DEBUG] 未知的 stop_reason: {response.stop_reason}")
         return "意外的响应"
-
 
 def make_serializable(messages):
     result = []

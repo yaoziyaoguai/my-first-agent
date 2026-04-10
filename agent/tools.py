@@ -3,9 +3,9 @@ import re
 import ast
 import operator
 from pathlib import Path
-from config import ALLOWED_TOOLS, ENABLE_REVIEW
+from config import ALLOWED_TOOLS,PROJECT_DIR
 from agent.logger import log_event
-from agent.security import is_protected_source_file
+from agent.security import is_protected_source_file, _extract_script_path
 
 
 # ============================================
@@ -295,6 +295,95 @@ def write_file(path, content):
         return msg
     except Exception as e:
         return f"写入错误：{e}"
+    
+
+
+import subprocess
+import shlex
+
+# Shell 命令黑名单（正则模式）
+SHELL_BLACKLIST = [
+    r"\brm\s+(-[a-zA-Z]*f|-[a-zA-Z]*r|--force|--recursive)",  # rm -rf 等
+    r"\bsudo\b",
+    r"\bmkfs\b",
+    r"\bshutdown\b",
+    r"\breboot\b",
+    r"\bpoweroff\b",
+    r"\bdd\s+",
+    r"\b:(){ :\|:& };:",  # fork bomb
+    r"\b>\s*/dev/sd",      # 覆写磁盘
+    r"\bchmod\s+777",
+    r"\bchown\b",
+    r"\bpasswd\b",
+    r"\bkill\s+-9",
+]
+
+SHELL_TIMEOUT = 30  # 秒
+
+def check_shell_blacklist(command):
+    """检查命令是否匹配黑名单，返回匹配到的模式或 None"""
+    for pattern in SHELL_BLACKLIST:
+        if re.search(pattern, command):
+            return pattern
+    return None
+
+
+
+
+
+def run_shell(command):
+    # Guide: 命令本身的黑名单检查
+    blocked_pattern = check_shell_blacklist(command)
+    if blocked_pattern:
+        return f"拒绝执行：命令匹配危险模式 '{blocked_pattern}'，禁止运行。"
+    
+    # Guide: 如果是执行脚本文件，检查脚本内容
+    script_path = _extract_script_path(command)
+    if script_path:
+        script_file = Path(script_path)
+        if not script_file.exists():
+            script_file = PROJECT_DIR / script_path
+        if script_file.exists():
+            try:
+                script_content = script_file.read_text(encoding="utf-8", errors="replace")
+                blocked_pattern = check_shell_blacklist(script_content)
+                if blocked_pattern:
+                    return f"拒绝执行：脚本文件 '{script_path}' 内容匹配危险模式 '{blocked_pattern}'，禁止运行。"
+            except Exception:
+                pass
+
+    # 后面的执行逻辑不变
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=SHELL_TIMEOUT,
+            cwd=str(PROJECT_DIR),
+        )
+        
+        output = ""
+        if result.stdout:
+            output += f"[stdout]\n{result.stdout}"
+        if result.stderr:
+            output += f"\n[stderr]\n{result.stderr}"
+        if not output.strip():
+            output = "(无输出)"
+        
+        # Sensor: 截断过长的输出
+        if len(output) > 5000:
+            output = output[:5000] + f"\n\n...(输出过长，已截断，共 {len(output)} 字符)"
+        
+        output = f"[退出码: {result.returncode}]\n{output}"
+        return output
+        
+    except subprocess.TimeoutExpired:
+        return f"执行超时：命令在 {SHELL_TIMEOUT} 秒内未完成，已被终止。"
+    except Exception as e:
+        print(f"[DEBUG] run_shell 错误: {e}")
+        return f"执行错误：{e}"
+
 
 
 # ============================================
@@ -318,6 +407,9 @@ def execute_tool(tool_name, tool_input):
         )
     elif tool_name == "write_file":
         return write_file(tool_input["path"], tool_input["content"])
+    elif tool_name == "run_shell":
+        return run_shell(tool_input["command"])
+
 
 
 # ============================================
@@ -333,7 +425,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "数学表达式，例如 '2 + 3 * 4'"
+                    "description": "计算一个数学表达式。仅在用户明确要求进行数学计算时使用。不要对文档内容、文件中出现的数字或表达式主动调用此工具。"
                 }
             },
             "required": ["expression"]
@@ -391,6 +483,21 @@ TOOL_DEFINITIONS = [
                 }
             },
             "required": ["path", "content"]
+        }
+    },
+
+    {
+        "name": "run_shell",
+        "description": "在项目目录下执行一条 Shell 命令。仅在用户明确要求执行命令时使用。不要主动执行命令来探索文件系统——使用 read_file 代替。危险命令（如 rm -rf、sudo）会被自动拦截。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "要执行的 Shell 命令"
+                }
+            },
+            "required": ["command"]
         }
     }
 ]

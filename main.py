@@ -1,10 +1,12 @@
 from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.core import chat, messages
+from agent.health_check import run_health_check
 from config import SYSTEM_PROMPT
 
 log_event("session_start", {"system_prompt": SYSTEM_PROMPT})
 
-print(f"=== My First Agent (Refactored) ===")
+run_health_check()
+print("=== My First Agent (Refactored) ===")
 print(f"Session: {SESSION_ID}")
 print("输入 'quit' 退出\n")
 

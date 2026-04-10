@@ -1,5 +1,6 @@
 import json
 import anthropic
+from agent.checks import run_linter
 from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, ENABLE_REVIEW, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY
 from agent.logger import log_event
 from agent.security import is_protected_source_file, needs_confirmation, confirm_tool_call
@@ -187,11 +188,21 @@ def chat(user_input):
 
                     # 写文件成功后注入停止指令
                     if tool_name == "write_file" and not result.startswith("拒绝"):
-                        if ENABLE_REVIEW:
-                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
+                        # 计算型 Sensor：自动 linter 检查
+                        linter_result = run_linter(tool_input["path"])
+                        
+                        if linter_result and "发现以下问题" in linter_result:
+                            # linter 有问题：让模型修复，不注入停止指令
+                            result += f"\n\n{linter_result}"
+                            result += "\n\n[系统指令] 请根据以上 linter 反馈修复代码，然后重新写入文件。"
                         else:
-                            result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
-
+                            # linter 通过或不适用：正常停止
+                            if linter_result:
+                                result += f"\n\n{linter_result}"
+                            if ENABLE_REVIEW:
+                                result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
+                            else:
+                                result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
                 else:
                     result = "用户拒绝了此操作"
                     log_event("tool_rejected", {"tool": tool_name})

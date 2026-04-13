@@ -168,7 +168,24 @@ def chat(user_input):
                     continue
 
                 # 分级确认
-                if needs_confirmation(tool_name, tool_input):
+                confirmation = needs_confirmation(tool_name, tool_input)
+
+                if confirmation == "block":
+                    result = f"拒绝执行：'{tool_input.get('path', '')}' 是敏感文件，禁止 Agent 访问"
+                    log_event("tool_blocked_sensitive", {"tool": tool_name, "path": tool_input.get("path")})
+                    round_tool_traces.append({
+                        "tool_use_id": tool_use_id,
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "status": "blocked_sensitive",
+                        "result": result,
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": result}],
+                    })
+                    continue
+                elif confirmation:
                     approved = confirm_tool_call(tool_name, tool_input)
                 else:
                     print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")

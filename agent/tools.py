@@ -10,6 +10,7 @@ from pathlib import Path
 from config import ALLOWED_TOOLS, PROJECT_DIR
 from agent.logger import log_event
 from agent.security import is_protected_source_file, _extract_script_path
+from agent.security import is_sensitive_file
 
 FETCH_TIMEOUT = 15  # 秒
 FETCH_MAX_CHARS = 10000  # 最多返回的字符数
@@ -406,6 +407,11 @@ def run_shell(command):
     blocked_pattern = check_shell_blacklist(command)
     if blocked_pattern:
         return f"拒绝执行：命令匹配危险模式 '{blocked_pattern}'，禁止运行。"
+        # Guide: 敏感文件保护——检查命令是否试图读取敏感文件
+    words = command.split()
+    for word in words:
+        if is_sensitive_file(word):
+            return f"拒绝执行：命令涉及敏感文件 '{word}'，禁止访问。"
     
     # Guide: 如果是执行脚本文件，检查脚本内容
     script_path = _extract_script_path(command)

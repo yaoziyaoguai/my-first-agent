@@ -1,6 +1,34 @@
 import json
 from pathlib import Path
-from config import PROJECT_DIR, PROTECTED_EXTENSIONS, ALLOWED_TOOLS, ENABLE_REVIEW
+import re
+from config import PROJECT_DIR, PROTECTED_EXTENSIONS
+
+SENSITIVE_PATTERNS = {".env", ".env.local", ".env.production"}
+SENSITIVE_KEYWORDS = {"secret", "credential", "password", "token", "apikey"}
+
+def is_sensitive_file(path):
+    """检查文件是否为敏感文件，禁止 Agent 读取"""
+    try:
+        file_path = Path(path).expanduser().resolve(strict=False)
+        name_lower = file_path.name.lower()
+        
+        # 文件名匹配
+        if name_lower in SENSITIVE_PATTERNS:
+            return True
+        
+        # .env 开头的文件
+        if name_lower.startswith(".env"):
+            return True
+        
+        # 文件名包含敏感关键词
+        for keyword in SENSITIVE_KEYWORDS:
+            if keyword in name_lower:
+                return True
+        
+        return False
+    except Exception:
+        return False
+
 
 
 
@@ -24,6 +52,8 @@ def needs_confirmation(tool_name, tool_input):
         return True
 
     if tool_name in ("read_file", "read_file_lines"):
+        if is_sensitive_file(tool_input["path"]):
+            return "block"  # 新增：返回 "block" 表示直接拦截
         file_path = Path(tool_input["path"]).resolve()
         if file_path.is_relative_to(PROJECT_DIR):
             return False
@@ -85,7 +115,7 @@ def _print_script_content(script_path):
 def confirm_tool_call(tool_name, tool_input):
     """在工具执行前请求人类确认"""
     print(f"\n{'='*50}")
-    print(f"⚠️  Agent 想要执行以下操作：")
+    print("⚠️  Agent 想要执行以下操作：")
     print(f"   工具: {tool_name}")
     print(f"   参数: {json.dumps(tool_input, ensure_ascii=False)}")
     print(f"{'='*50}")

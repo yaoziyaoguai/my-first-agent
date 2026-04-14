@@ -1,10 +1,9 @@
 import json
 import anthropic
-from agent.checks import run_linter
-from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, ENABLE_REVIEW, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY
+from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY
 from agent.logger import log_event
 from agent.context import compress_history
-from agent.security import is_protected_source_file, confirm_tool_call
+from agent.security import  confirm_tool_call
 from agent.review import (
     get_effective_review_request,
     truncate_for_review,
@@ -114,7 +113,9 @@ def chat(user_input):
         # ========== tool_use：模型想用工具 ==========
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})
-            write_file_seen_in_this_turn = False
+
+            # 构建执行上下文，供钩子使用
+            turn_context = {}
 
             for block in response.content:
                 if block.type != "tool_use":
@@ -125,48 +126,6 @@ def chat(user_input):
                 tool_use_id = block.id
 
                 log_event("tool_requested", {"tool": tool_name, "input": tool_input})
-
-                # 同一轮只允许一次 write_file
-                if tool_name == "write_file":
-                    if write_file_seen_in_this_turn:
-                        result = "拒绝执行：同一轮响应中只允许执行一个 write_file，请先等待用户确认后再继续下一个文件。"
-                        log_event("tool_blocked_multiple_write_same_turn", {
-                            "tool": tool_name,
-                            "path": tool_input.get("path"),
-                        })
-                        round_tool_traces.append({
-                            "tool_use_id": tool_use_id,
-                            "tool": tool_name,
-                            "input": tool_input,
-                            "status": "blocked_multiple_write_same_turn",
-                            "result": truncate_for_review(result),
-                        })
-                        messages.append({
-                            "role": "user",
-                            "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": result}],
-                        })
-                        continue
-                    write_file_seen_in_this_turn = True
-
-                # 源码保护
-                if tool_name == "write_file" and is_protected_source_file(tool_input["path"]):
-                    result = f"拒绝执行：'{tool_input['path']}' 属于受保护源码文件（.py），不允许 Agent 修改"
-                    log_event("tool_blocked_protected_source", {
-                        "tool": tool_name,
-                        "path": tool_input["path"],
-                    })
-                    round_tool_traces.append({
-                        "tool_use_id": tool_use_id,
-                        "tool": tool_name,
-                        "input": tool_input,
-                        "status": "blocked_protected_source",
-                        "result": truncate_for_review(result),
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": result}],
-                    })
-                    continue
 
                 # 分级确认
                 confirmation = needs_tool_confirmation(tool_name, tool_input)
@@ -193,8 +152,12 @@ def chat(user_input):
                     approved = True
 
                 if approved:
-                    result = execute_tool(tool_name, tool_input)
+                    result = execute_tool(tool_name, tool_input, context=turn_context)
                     log_event("tool_executed", {"tool": tool_name, "result": result})
+
+                    # 更新上下文（供后续工具的钩子使用）
+                    if tool_name == "write_file":
+                        turn_context["write_file_seen"] = True
 
                     round_tool_traces.append({
                         "tool_use_id": tool_use_id,
@@ -203,24 +166,6 @@ def chat(user_input):
                         "status": "executed",
                         "result": truncate_for_review(result),
                     })
-
-                    # 写文件成功后注入停止指令
-                    if tool_name == "write_file" and not result.startswith("拒绝"):
-                        # 计算型 Sensor：自动 linter 检查
-                        linter_result = run_linter(tool_input["path"])
-                        
-                        if linter_result and "发现以下问题" in linter_result:
-                            # linter 有问题：让模型修复，不注入停止指令
-                            result += f"\n\n{linter_result}"
-                            result += "\n\n[系统指令] 请根据以上 linter 反馈修复代码，然后重新写入文件。"
-                        else:
-                            # linter 通过或不适用：正常停止
-                            if linter_result:
-                                result += f"\n\n{linter_result}"
-                            if ENABLE_REVIEW:
-                                result += "\n\n[系统指令] 文件已写入。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
-                            else:
-                                result += "\n\n[系统指令] 文件已写入。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
                 else:
                     result = "用户拒绝了此操作"
                     log_event("tool_rejected", {"tool": tool_name})

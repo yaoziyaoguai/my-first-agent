@@ -22,7 +22,6 @@ MAX_MESSAGE_CHARS = 50000
 
 # 安全配置
 PROTECTED_EXTENSIONS = {".py"}
-ALLOWED_TOOLS = {"calculate", "read_file", "read_file_lines", "write_file","run_shell","fetch_url"}
 
 # 审查配置
 ENABLE_REVIEW = True

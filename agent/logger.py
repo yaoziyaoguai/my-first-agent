@@ -1,9 +1,9 @@
 import json
 import datetime
-from pathlib import Path
 from config import LOG_FILE, SNAPSHOT_DIR
 import uuid
 SESSION_ID = str(uuid.uuid4())
+
 
 def log_event(event_type, data):
     entry = {

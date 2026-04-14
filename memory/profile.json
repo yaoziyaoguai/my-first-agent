@@ -2,7 +2,11 @@
   "user": {
     "name": "Jinkun",
     "role": "数据仓库工程师",
-    "tech_stack": ["Python", "Node.js", "TypeScript"],
+    "tech_stack": [
+      "Python",
+      "Node.js",
+      "TypeScript"
+    ],
     "os": "Mac"
   },
   "preferences": {
@@ -10,11 +14,47 @@
     "communication": "概念先行，解释为什么再动手",
     "file_reading": "先看概览再看细节"
   },
-  "knowledge": [],
+  "knowledge": [
+    {
+      "fact": "项目中使用延迟导入(from agent.logger import make_serializable放在函数内部)来避免循环导入问题",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "security.py实现了多层敏感文件保护：文件名匹配(.env等)、敏感关键词检测(secret/credential/password/token/apikey)、以及路径白名单检查",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "Agent的确认机制对run_shell有特殊处理：会尝试提取并打印脚本文件内容供人工审查",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "config.py中的PROTECTED_EXTENSIONS仅包含.py，表示只有已存在的Python源文件禁止Agent修改",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "context.py使用JSON序列化后的大小来估算消息体积，并对tool_result内容进行智能截断(保留前200字符)",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "linter检查使用ruff工具，对非Python文件跳过检查，输出超过2000字符时自动截断",
+      "confidence": "medium",
+      "source": "2026-04-14"
+    }
+  ],
   "projects": {
     "my-first-agent": {
       "path": "/Users/jinkun.wang/work_space/my-first-agent",
-      "tech_stack": ["Python", "Anthropic SDK", "Kimi", "Qwen"],
+      "tech_stack": [
+        "Python",
+        "Anthropic SDK",
+        "Kimi",
+        "Qwen"
+      ],
       "description": "从零构建的 AI Agent 学习项目",
       "last_active": "2026-04-10"
     }

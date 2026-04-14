@@ -1,5 +1,5 @@
 import json
-from config import ENABLE_REVIEW, SHOW_REVIEW_RESULT, SHOW_REVIEW_DETAILS, REVIEW_MODEL_NAME, MAX_AUTO_RETRY
+from config import ENABLE_REVIEW, SHOW_REVIEW_DETAILS, REVIEW_MODEL_NAME
 from agent.logger import log_event
 
 

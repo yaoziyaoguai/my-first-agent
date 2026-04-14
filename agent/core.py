@@ -29,6 +29,7 @@ messages = []
 def chat(user_input):
     global messages
     messages = compress_history(messages, client)
+    memory_prompt = build_memory_prompt()
 
     effective_review_request = get_effective_review_request(user_input)
 
@@ -39,15 +40,22 @@ def chat(user_input):
     })
 
     round_tool_traces = []
+    tool_call_count = 0          # ← 加这一行
+    MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
     auto_retry_count = 0
 
     while True:
         log_event("llm_call", {"message_count": len(messages)})
-
+        tool_call_count += 1
+        if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+            print("\n[系统] 工具调用次数超过上限，强制停止。")
+            log_event("tool_loop_limit", {"count": tool_call_count})
+            return "工具调用次数超过上限，请简化任务或分步执行。"
+        
         with client.messages.stream(
             model=MODEL_NAME,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT + "\n\n" + build_memory_prompt(),
+            system=SYSTEM_PROMPT + "\n\n" + memory_prompt,
             messages=messages,
             tools=get_tool_definitions(),
         ) as stream:

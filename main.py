@@ -2,13 +2,13 @@ from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.core import chat, messages
 from agent.health_check import run_health_check
 from config import SYSTEM_PROMPT
-from agent.memory import init_memory, cleanup_old_episodes, extract_memories_from_session
+from agent.memory import init_memory, cleanup_old_episodes, extract_memories_from_session,build_memory_prompt
 # 初始化记忆目录
 init_memory()
 # 清理过期情景记忆
 cleanup_old_episodes()
-
-log_event("session_start", {"system_prompt": SYSTEM_PROMPT})
+memory_prompt = build_memory_prompt()
+log_event("session_start", {"system_prompt": SYSTEM_PROMPT + "\n\n" + memory_prompt})
 
 run_health_check()
 

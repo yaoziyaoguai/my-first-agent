@@ -2,12 +2,12 @@ import json
 from pathlib import Path
 import re
 from config import PROJECT_DIR, PROTECTED_EXTENSIONS
-
-SENSITIVE_PATTERNS = {".env", ".env.local", ".env.production"}
+SENSITIVE_PATTERNS = {".env", ".env.local", ".env.production","id_rsa",".pem",".key"}
 SENSITIVE_KEYWORDS = {"secret", "credential", "password", "token", "apikey"}
 
 def is_sensitive_file(path):
     """检查文件是否为敏感文件，禁止 Agent 读取"""
+
     try:
         file_path = Path(path).expanduser().resolve(strict=False)
         name_lower = file_path.name.lower()

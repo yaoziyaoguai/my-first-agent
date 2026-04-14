@@ -4,6 +4,7 @@ from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, SHO
 from agent.logger import log_event
 from agent.context import compress_history
 from agent.security import  confirm_tool_call
+from agent.planner import generate_plan, format_plan_for_display, format_plan_for_context
 from agent.review import (
     get_effective_review_request,
     truncate_for_review,
@@ -39,10 +40,32 @@ def chat(user_input):
         "effective_review_request": effective_review_request,
     })
 
+    # ========== 任务规划 ==========
+    plan = generate_plan(user_input, client, MODEL_NAME, messages)
+
+    if plan:
+        print(format_plan_for_display(plan))
+
+        confirm = input("按此计划执行吗？(y/n/输入修改意见): ").strip()
+        if confirm.lower() == "n":
+            messages.append({"role": "assistant", "content": "好的，已取消。"})
+            return "好的，已取消。"
+        elif confirm.lower() != "y":
+            user_input = user_input + f"\n\n用户补充：{confirm}"
+            messages[-1] = {"role": "user", "content": user_input}
+
+        plan_context = format_plan_for_context(plan)
+        messages[-1] = {
+            "role": "user",
+            "content": messages[-1]["content"] + f"\n\n{plan_context}"
+        }
+    # ========== 规划结束 ==========
+  
+    auto_retry_count = 0
     round_tool_traces = []
     tool_call_count = 0          # ← 加这一行
     MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
-    auto_retry_count = 0
+
 
     while True:
         log_event("llm_call", {"message_count": len(messages)})

@@ -1,0 +1,1 @@
+工具通过装饰器@register_tool注册，包含name、description、parameters和confirmation等元数据

@@ -30,7 +30,7 @@ SHOW_REVIEW_DETAILS = False
 MAX_AUTO_RETRY = 2
 
 # System Prompt
-SYSTEM_PROMPT = SYSTEM_PROMPT = """你是一个通用智能 Agent。
+SYSTEM_PROMPT = """你是一个通用智能 Agent。
 你的职责是理解用户的真实目标，结合上下文、记忆和可用工具，以可靠、简洁的方式帮助用户完成任务。
 
 核心原则：

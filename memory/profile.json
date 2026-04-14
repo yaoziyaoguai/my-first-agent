@@ -44,6 +44,76 @@
       "fact": "linter检查使用ruff工具，对非Python文件跳过检查，输出超过2000字符时自动截断",
       "confidence": "medium",
       "source": "2026-04-14"
+    },
+    {
+      "fact": "记忆系统采用三层架构：情景记忆（episodes，保留20天）、语义记忆（profile.json，持久化用户信息和知识）、程序性记忆（rules/*.md，行为规则）",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "任务规划系统通过LLM判断是否需要多步骤计划，标准包括：简单问答/单次操作不需要，多文件读取/信息收集需要，步骤控制在2-6步",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "代码检查使用 ruff，对.py文件自动运行，超时10秒，输出截断至2000字符",
+      "confidence": "medium",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "会话快照保存为 session_{UUID}.json，包含完整消息历史，日志使用JSON行格式追加写入",
+      "confidence": "medium",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "fetch_url工具使用httpx进行HTTP请求，超时时间为15秒，最大字符限制为10000字符",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "fetch_url工具使用BeautifulSoup解析HTML，会移除script、style、nav、footer、header、iframe、noscript等标签",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "当网页内容超过10000字符时，fetch_url会将完整内容保存到workspace/fetched_{hash}.txt文件，并返回前3000字符的预览",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "outline.py模块支持提取Python、Markdown、JSON、YAML、SQL等文件的结构大纲",
+      "confidence": "medium",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "Agent Harness机制包含三种核心组件：Sensor（日志系统，事后审查）、Guide（人类确认+工具白名单，事前拦截）、Guard（安全执行环境）",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "messages列表是Context Engineering的核心对象，通过不断追加user和assistant消息实现对话记忆",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "Anthropic SDK中response.stop_reason字段用于判断模型停止原因，包括'end_turn'（正常结束）和'tool_use'（需要调用工具）",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "工具白名单机制可防止模型幻觉出不存在工具名时的误执行，属于前馈控制",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "使用eval执行计算表达式时需进行字符白名单过滤（只允许0123456789+-*/.() ）以防止代码注入",
+      "confidence": "high",
+      "source": "2026-04-14"
+    },
+    {
+      "fact": "SDK对象可通过model_dump()方法序列化为普通字典，便于持久化存储",
+      "confidence": "medium",
+      "source": "2026-04-14"
     }
   ],
   "projects": {

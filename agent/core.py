@@ -3,9 +3,8 @@ import anthropic
 from agent.checks import run_linter
 from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, ENABLE_REVIEW, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY
 from agent.logger import log_event
-from agent.security import is_protected_source_file, needs_confirmation, confirm_tool_call
-from agent.tools import execute_tool, TOOL_DEFINITIONS
 from agent.context import compress_history
+from agent.security import is_protected_source_file, confirm_tool_call
 from agent.review import (
     get_effective_review_request,
     truncate_for_review,
@@ -14,6 +13,8 @@ from agent.review import (
     print_review_summary,
     build_retry_feedback,
 )
+from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
+import agent.tools  # noqa: F401  # 触发所有工具注册
 
 # API 客户端
 client = anthropic.Anthropic(
@@ -48,7 +49,7 @@ def chat(user_input):
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,
-            tools=TOOL_DEFINITIONS,
+            tools=get_tool_definitions(),
         ) as stream:
             for event in stream:
                 if hasattr(event, "type") and event.type == "content_block_start":
@@ -168,7 +169,7 @@ def chat(user_input):
                     continue
 
                 # 分级确认
-                confirmation = needs_confirmation(tool_name, tool_input)
+                confirmation = needs_tool_confirmation(tool_name, tool_input)
 
                 if confirmation == "block":
                     result = f"拒绝执行：'{tool_input.get('path', '')}' 是敏感文件，禁止 Agent 访问"

@@ -14,6 +14,7 @@ from agent.review import (
 )
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 import agent.tools  # noqa: F401  # 触发所有工具注册
+from agent.memory import build_memory_prompt
 
 # API 客户端
 client = anthropic.Anthropic(
@@ -46,7 +47,7 @@ def chat(user_input):
         with client.messages.stream(
             model=MODEL_NAME,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=SYSTEM_PROMPT + "\n\n" + build_memory_prompt(),
             messages=messages,
             tools=get_tool_definitions(),
         ) as stream:

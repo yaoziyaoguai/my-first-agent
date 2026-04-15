@@ -70,6 +70,7 @@ def chat(user_input):
     tool_call_count = 0          # ← 加这一行
     MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
     recent_calls = []
+    consecutive_rejections = 0
 
 
     while True:
@@ -208,9 +209,8 @@ def chat(user_input):
                     log_event("tool_executed", {"tool": tool_name, "result": result})
 
                     # 更新上下文（供后续工具的钩子使用）
-                    if tool_name == "write_file":
+                    if tool_name in ("write_file", "edit_file"):
                         turn_context["write_file_seen"] = True
-
                     round_tool_traces.append({
                         "tool_use_id": tool_use_id,
                         "tool": tool_name,
@@ -219,12 +219,18 @@ def chat(user_input):
                         "result": truncate_for_review(result),
                     })
                 elif isinstance(approved, str):
-                    # 用户给了反馈意见
+                    consecutive_rejections += 1
                     result = f"用户拒绝了此操作，反馈如下：{approved}\n请根据用户反馈调整方案，不要重复相同的操作。"
                     log_event("tool_rejected_with_feedback", {"tool": tool_name, "feedback": approved})
                 else:
+                    consecutive_rejections += 1
                     result = "用户拒绝了此操作。请停下来询问用户需要什么调整，不要重复相同的操作。"
                     log_event("tool_rejected", {"tool": tool_name})
+
+                # 计算型控制：连续拒绝 2 次强制停止
+                if consecutive_rejections >= 2:
+                    result += "\n\n[系统指令] 用户已连续拒绝 2 次操作。立即停止所有工具调用，向用户询问下一步该怎么做。"
+                    log_event("consecutive_rejections_limit", {"count": consecutive_rejections})
                     
 
                 messages.append({

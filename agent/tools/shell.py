@@ -21,6 +21,27 @@ SHELL_BLACKLIST = [
     r"\bkill\s+-9",
 ]
 
+# 只读命令白名单——这些命令不会修改系统状态
+READONLY_COMMANDS = {
+    "ls", "cat", "find", "grep", "wc", "head", 
+    "tail", "pwd", "which", "echo", "tree", "file",
+    "ruff", "python -c",
+}
+
+def _check_shell_confirmation(tool_input):
+    """shell 命令的智能确认规则"""
+    command = tool_input.get("command", "").strip()
+    first_word = command.split()[0] if command.split() else ""
+    
+    # 只读命令：静默执行
+    if first_word in READONLY_COMMANDS:
+        return False
+    
+    # 其他命令：需要确认
+    return True
+
+
+
 SHELL_TIMEOUT = 30
 
 
@@ -40,7 +61,7 @@ def check_shell_blacklist(command):
             "description": "要执行的 Shell 命令"
         },
     },
-    confirmation="always",
+    confirmation=_check_shell_confirmation,
 )
 def run_shell(command):
     blocked_pattern = check_shell_blacklist(command)

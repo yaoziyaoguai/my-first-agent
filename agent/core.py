@@ -16,6 +16,7 @@ from agent.review import (
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 import agent.tools  # noqa: F401  # 触发所有工具注册
 from agent.memory import build_memory_prompt
+from agent.checkpoint import save_checkpoint, clear_checkpoint
 
 # API 客户端
 client = anthropic.Anthropic(
@@ -42,7 +43,7 @@ def chat(user_input):
 
     # ========== 任务规划 ==========
     plan = generate_plan(user_input, client, MODEL_NAME, messages)
-
+    
     if plan:
         print(format_plan_for_display(plan))
 
@@ -59,12 +60,15 @@ def chat(user_input):
             "role": "user",
             "content": messages[-1]["content"] + f"\n\n{plan_context}"
         }
+
+        # 保存断点
+        save_checkpoint(user_input, plan, messages)
     # ========== 规划结束 ==========
   
     auto_retry_count = 0
     round_tool_traces = []
     tool_call_count = 0          # ← 加这一行
-    MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
+    MAX_TOOL_CALLS_PER_TURN = 100  # ← 加这一行
 
 
     while True:
@@ -139,7 +143,7 @@ def chat(user_input):
                     messages.append({"role": "user", "content": feedback_msg})
                     round_tool_traces = []
                     continue
-
+            clear_checkpoint()
             return assistant_text
 
         # ========== tool_use：模型想用工具 ==========

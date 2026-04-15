@@ -83,9 +83,12 @@ def format_plan_for_display(plan):
 
 
 def format_plan_for_context(plan):
-    """把计划格式化成注入上下文的文本"""
     lines = [f"[任务计划] 目标：{plan['goal']}"]
     for step in plan["steps"]:
         lines.append(f"步骤{step['id']}：{step['action']}")
-    lines.append("\n请按以上计划逐步执行。完成所有步骤后停止，输出最终结果。不要执行计划之外的操作。")
+    lines.append("\n执行规则：")
+    lines.append("- 严格按步骤顺序逐个执行，不要合并步骤")
+    lines.append("- 每完成一个步骤后，简要说明该步骤的结果")
+    lines.append("- 完成所有步骤后停止，输出最终结果")
+    lines.append("- 不要执行计划之外的操作")
     return "\n".join(lines)

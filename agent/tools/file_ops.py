@@ -1,6 +1,7 @@
 from pathlib import Path
 from agent.tool_registry import register_tool
 from config import PROJECT_DIR
+FILE_CONTENT_LIMIT = 50000
 
 
 def _check_read_permission(tool_input):
@@ -42,7 +43,7 @@ def read_file(path):
         content = file_path.read_text(encoding="utf-8", errors="replace")
         total_lines = len(content.splitlines())
         
-        if len(content) <= 10000:
+        if len(content) <=FILE_CONTENT_LIMIT:
             return content
         
         from agent.tools.outline import extract_file_outline

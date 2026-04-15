@@ -114,6 +114,31 @@
       "fact": "SDK对象可通过model_dump()方法序列化为普通字典，便于持久化存储",
       "confidence": "medium",
       "source": "2026-04-14"
+    },
+    {
+      "fact": "fetch_url工具实现了网页内容抓取，包含超时控制(15秒)、最大字符限制(10000)、HTML标签过滤(script/style/nav/footer/header/iframe/noscript)和长内容自动保存机制",
+      "confidence": "high",
+      "source": "2026-04-15"
+    },
+    {
+      "fact": "write_file工具实现了写前检查(源码保护、单轮限制)和写后检查(linter检查)，支持自动备份原文件",
+      "confidence": "high",
+      "source": "2026-04-15"
+    },
+    {
+      "fact": "shell工具实现了敏感文件检查、脚本内容黑名单检查、执行超时控制(变量名为SHELL_TIMEOUT)和输出截断(5000字符限制)",
+      "confidence": "high",
+      "source": "2026-04-15"
+    },
+    {
+      "fact": "工具注册使用@register_tool装饰器，支持pre_execute和post_execute钩子函数",
+      "confidence": "high",
+      "source": "2026-04-15"
+    },
+    {
+      "fact": "当文件内容超过FETCH_MAX_CHARS(10000)时，fetch_url工具会使用MD5哈希生成文件名并保存到workspace目录",
+      "confidence": "high",
+      "source": "2026-04-15"
     }
   ],
   "projects": {

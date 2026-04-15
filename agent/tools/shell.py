@@ -61,7 +61,7 @@ def check_shell_blacklist(command):
             "description": "要执行的 Shell 命令"
         },
     },
-    confirmation=_check_shell_confirmation,
+    confirmation="always",
 )
 def run_shell(command):
     blocked_pattern = check_shell_blacklist(command)

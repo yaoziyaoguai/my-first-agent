@@ -92,5 +92,4 @@ def format_resume_context(checkpoint):
 
     lines.append("\n之前的对话历史已恢复。请根据已有的上下文判断哪些步骤已经完成，从未完成的步骤继续执行。")
     lines.append("完成所有步骤后停止，输出最终结果。")
-    lines.append("完成所有步骤后停止，输出最终结果。")
     return "\n".join(lines)

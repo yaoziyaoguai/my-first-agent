@@ -91,7 +91,11 @@ def build_memory_prompt():
             parts.append("[用户偏好]\n" + "\n".join(pref_lines))
 
     if profile.get("knowledge"):
-        knowledge_lines = [f"- {item['fact']}" for item in profile["knowledge"] if item.get("fact")]
+        knowledge_lines = [
+            f"- {item['fact']}（{item.get('reason', '')}）"
+            for item in profile["knowledge"]
+            if item.get("fact")
+        ]
         if knowledge_lines:
             parts.append("[已知知识]\n" + "\n".join(knowledge_lines))
 
@@ -259,17 +263,40 @@ def extract_memories_from_session(messages, client, model_name):
     extract_prompt = """请从以下对话中提取有长期价值的信息，严格按 JSON 格式输出，不要有其他内容。
 
 提取规则：
-1. episodes：本次对话中发生的关键事件（做了什么、结果如何），每条带 summary 和 tags
-2. knowledge：新发现的通用知识或事实，每条带 fact 和 confidence（high/medium/low）
-3. rules：新的行为规则或教训（如果有的话），每条带 name 和 content
+1. episodes：本次对话中的关键事件，重点关注：
+   - 用户做了什么决策，怎么回应模型的建议
+   - 任务的关键转折点（遇到问题、改变方向、做出选择）
+   - 不要记录每一步的工具调用细节，只记事件级别的摘要
+   每条带 summary 和 tags
+
+2. knowledge：从对话中提取关于用户的长期偏好和决策习惯，重点关注：
+   - 用户主动表达的观点和偏好（"我觉得..."、"我更偏向..."）
+   - 用户在多个方案中的选择，以及选择的理由
+   - 用户对建议的接受或拒绝
+   - 用户反复提及或深入追问的话题
+   - 用户有明显情绪反应的观点和决策
+   - 尽量将具体行为抽象为习惯或模式
+   不要提取：
+   - 模型单方面的输出内容（代码细节、工具返回值、具体参数）
+   - 没有经过用户确认或选择的信息
+   - 一次性的任务细节
+   每条带 fact、confidence（high/medium/low）和 reason（为什么提取这条）
+
+3. rules：从对话中提炼可复用的行为模式，重点关注：
+   - 用户多次纠正 Agent 的同一类行为（需要形成新规则）
+   - 用户明确描述的操作流程（"遇到 X 应该先做 A 再做 B"）
+   - 一个成功完成的复杂任务的步骤模式（可复用到类似任务）
+   规则必须包含具体的操作步骤，不能只是一个观点
+   每条带 name 和 content
+
 4. 如果某个类别没有值得提取的内容，返回空列表
-5. 不要提取一次性的、临时的、无长期价值的信息
 
 输出格式：
-{"episodes": [{"summary": "...", "tags": ["..."]}], "knowledge": [{"fact": "...", "confidence": "high"}], "rules": [{"name": "rule_name", "content": "规则内容"}]}
+{"episodes": [{"summary": "...", "tags": ["..."]}], "knowledge": [{"fact": "...", "confidence": "high", "reason": "..."}], "rules": [{"name": "rule_name", "content": "规则内容"}]}
 
 对话内容：
 """ + conversation_text
+
 
     try:
         response = client.messages.create(

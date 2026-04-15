@@ -68,7 +68,8 @@ def chat(user_input):
     auto_retry_count = 0
     round_tool_traces = []
     tool_call_count = 0          # ← 加这一行
-    MAX_TOOL_CALLS_PER_TURN = 100  # ← 加这一行
+    MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
+    recent_calls = []
 
 
     while True:
@@ -163,6 +164,21 @@ def chat(user_input):
 
                 log_event("tool_requested", {"tool": tool_name, "input": tool_input})
 
+                # 通用防循环检测
+                call_signature = f"{tool_name}:{json.dumps(tool_input, sort_keys=True)}"
+                recent_calls.append(call_signature)
+                if len(recent_calls) >= 3 and len(set(recent_calls[-3:])) == 1:
+                    result = f"检测到重复调用 {tool_name}，相同参数已调用 3 次。请基于已有信息继续下一步，不要重复此操作。"
+                    messages.append({
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": result}],
+                    })
+                    log_event("tool_repeat_blocked", {"tool": tool_name, "input": tool_input})
+                    continue
+
+                # 分级确认
+                confirmation = needs_tool_confirmation(tool_name, tool_input)
+
                 # 分级确认
                 confirmation = needs_tool_confirmation(tool_name, tool_input)
 
@@ -187,7 +203,7 @@ def chat(user_input):
                     print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
                     approved = True
 
-                if approved:
+                if approved is True:
                     result = execute_tool(tool_name, tool_input, context=turn_context)
                     log_event("tool_executed", {"tool": tool_name, "result": result})
 
@@ -202,17 +218,14 @@ def chat(user_input):
                         "status": "executed",
                         "result": truncate_for_review(result),
                     })
+                elif isinstance(approved, str):
+                    # 用户给了反馈意见
+                    result = f"用户拒绝了此操作，反馈如下：{approved}\n请根据用户反馈调整方案，不要重复相同的操作。"
+                    log_event("tool_rejected_with_feedback", {"tool": tool_name, "feedback": approved})
                 else:
-                    result = "用户拒绝了此操作"
+                    result = "用户拒绝了此操作。请停下来询问用户需要什么调整，不要重复相同的操作。"
                     log_event("tool_rejected", {"tool": tool_name})
-
-                    round_tool_traces.append({
-                        "tool_use_id": tool_use_id,
-                        "tool": tool_name,
-                        "input": tool_input,
-                        "status": "rejected_by_user",
-                        "result": result,
-                    })
+                    
 
                 messages.append({
                     "role": "user",

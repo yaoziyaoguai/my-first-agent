@@ -1,23 +1,24 @@
 from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.core import chat, messages
 from agent.health_check import run_health_check
-from agent.memory import init_memory, build_memory_prompt, cleanup_old_episodes, extract_memories_from_session
+from agent.memory import init_memory, cleanup_old_episodes, extract_memories_from_session
 from agent.checkpoint import load_checkpoint, clear_checkpoint, format_resume_context
 from config import SYSTEM_PROMPT
 import time
+from agent.prompt_builder import build_system_prompt
+
 
 # 初始化
 init_memory()
 cleanup_old_episodes()
 
-memory_prompt = build_memory_prompt()
-full_system_prompt = SYSTEM_PROMPT + "\n\n" + memory_prompt
 
+full_system_prompt = build_system_prompt()
 log_event("session_start", {
-    "system_prompt": SYSTEM_PROMPT,
-    "memory_prompt_length": len(memory_prompt),
+    "system_prompt_length": len(SYSTEM_PROMPT),
     "full_prompt_length": len(full_system_prompt),
 })
+
 
 run_health_check()
 

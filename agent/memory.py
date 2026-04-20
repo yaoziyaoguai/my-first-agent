@@ -61,7 +61,7 @@ def load_rules():
     return rules
 
 
-def build_memory_prompt():
+def build_memory_section():
     """
     把语义记忆和程序性记忆组装成一段文本，
     追加到 system prompt 里。

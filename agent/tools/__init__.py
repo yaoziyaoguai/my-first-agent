@@ -5,3 +5,5 @@ from agent.tools.write import write_file as write_file  # noqa: F401
 from agent.tools.shell import run_shell as run_shell  # noqa: F401
 from agent.tools.web import fetch_url as fetch_url  # noqa: F401
 from agent.tools.edit import edit_file as edit_file  # noqa: F401
+from agent.tools.skill import load_skill as load_skill  # noqa: F401
+from agent.tools.install_skill import install_skill as install_skill  # noqa: F401

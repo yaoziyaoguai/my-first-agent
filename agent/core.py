@@ -1,6 +1,6 @@
 import json
 import anthropic
-from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SYSTEM_PROMPT, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY
+from config import API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS, SHOW_REVIEW_RESULT, MAX_AUTO_RETRY, MAX_CONTINUE_ATTEMPTS
 from agent.logger import log_event
 from agent.context import compress_history
 from agent.security import  confirm_tool_call
@@ -15,8 +15,8 @@ from agent.review import (
 )
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 import agent.tools  # noqa: F401  # 触发所有工具注册
-from agent.memory import build_memory_prompt
 from agent.checkpoint import save_checkpoint, clear_checkpoint
+from agent.prompt_builder import build_system_prompt
 
 # API 客户端
 client = anthropic.Anthropic(
@@ -31,7 +31,7 @@ messages = []
 def chat(user_input):
     global messages
     messages = compress_history(messages, client)
-    memory_prompt = build_memory_prompt()
+    system_prompt = build_system_prompt()
 
     effective_review_request = get_effective_review_request(user_input)
 
@@ -64,13 +64,14 @@ def chat(user_input):
         # 保存断点
         save_checkpoint(user_input, plan, messages)
     # ========== 规划结束 ==========
-  
+    round_tool_traces = []
     auto_retry_count = 0
     round_tool_traces = []
     tool_call_count = 0          # ← 加这一行
     MAX_TOOL_CALLS_PER_TURN = 20  # ← 加这一行
     recent_calls = []
     consecutive_rejections = 0
+    consecutive_max_tokens = 0 
 
 
     while True:
@@ -84,7 +85,7 @@ def chat(user_input):
         with client.messages.stream(
             model=MODEL_NAME,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT + "\n\n" + memory_prompt,
+            system=system_prompt,
             messages=messages,
             tools=get_tool_definitions(),
         ) as stream:
@@ -100,8 +101,25 @@ def chat(user_input):
 
         log_event("llm_response", {"stop_reason": response.stop_reason})
 
+
+                # ========== max_tokens 处理 ==========
+        if response.stop_reason == "max_tokens":
+            consecutive_max_tokens += 1
+            if consecutive_max_tokens >= MAX_CONTINUE_ATTEMPTS:
+                print(f"\n[系统] 已连续 {consecutive_max_tokens} 次触发输出上限，强制停止。")
+                log_event("max_tokens_limit_reached", {"attempts": consecutive_max_tokens})
+                messages.append({"role": "assistant", "content": response.content})
+                return "内容过长，已自动截断。如需完整输出，请分步请求。"
+
+            print(f"\n[系统] 回复被截断，自动继续（{consecutive_max_tokens}/{MAX_CONTINUE_ATTEMPTS}）...", flush=True)
+            log_event("auto_continue", {"attempt": consecutive_max_tokens})
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": "请继续你刚才的输出，不要重复已经说过的内容。"})
+            continue
+
         # ========== end_turn：模型说完了 ==========
         if response.stop_reason == "end_turn":
+            consecutive_max_tokens = 0
             assistant_text_parts = []
             for block in response.content:
                 if block.type == "text":
@@ -151,6 +169,8 @@ def chat(user_input):
         # ========== tool_use：模型想用工具 ==========
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})
+
+            consecutive_max_tokens = 0  
 
             # 构建执行上下文，供钩子使用
             turn_context = {}
@@ -231,6 +251,11 @@ def chat(user_input):
                 if consecutive_rejections >= 2:
                     result += "\n\n[系统指令] 用户已连续拒绝 2 次操作。立即停止所有工具调用，向用户询问下一步该怎么做。"
                     log_event("consecutive_rejections_limit", {"count": consecutive_rejections})
+                    
+                if consecutive_rejections >= 3:
+                    print("\n[系统] 用户已连续拒绝 3 次，强制停止当前任务。")
+                    log_event("force_stop_rejections", {"count": consecutive_rejections})
+                    return "用户连续拒绝了多次操作，任务已停止。请告诉我您希望怎么调整。"
                     
 
                 messages.append({

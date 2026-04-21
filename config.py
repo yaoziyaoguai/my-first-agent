@@ -16,9 +16,10 @@ SNAPSHOT_DIR.mkdir(exist_ok=True)
 LOG_FILE = "agent_log.jsonl"
 
 # Agent 配置
-MAX_TOKENS = 40960
+MAX_TOKENS = 128000
 MAX_MESSAGES = 100
 MAX_MESSAGE_CHARS = 400000
+MAX_CONTINUE_ATTEMPTS = 5  # 遇到 max_tokens 时最多自动继续几次
 # 安全配置
 PROTECTED_EXTENSIONS = {".py"}
 

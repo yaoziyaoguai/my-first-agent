@@ -131,7 +131,12 @@ def confirm_tool_call(tool_name, tool_input):
 
 
     while True:
-        choice = input("允许执行吗？(y/n): ").strip().lower()
-        if choice in ("y", "n"):
-            return choice == "y"
-        print("请输入 y 或 n")
+        choice = input("允许执行吗？(y/n/输入反馈意见): ").strip()
+        if choice.lower() == "y":
+            return True
+        elif choice.lower() == "n":
+            return False
+        elif len(choice) > 1:
+            # 用户输入了反馈意见
+            return choice  # 返回字符串
+        print("请输入 y、n 或反馈意见")

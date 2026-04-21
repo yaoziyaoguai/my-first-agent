@@ -1,5 +1,4 @@
 import os
-import json
 from dotenv import load_dotenv
 import anthropic
 
@@ -23,7 +22,7 @@ def calculate(expression):
         # 只允许数字和基本运算符，防止执行危险代码
         allowed = set("0123456789+-*/.() ")
         if not all(c in allowed for c in expression):
-            return f"错误：表达式包含不允许的字符"
+            return "错误：表达式包含不允许的字符"
         result = eval(expression)
         return str(result)
     except Exception as e:

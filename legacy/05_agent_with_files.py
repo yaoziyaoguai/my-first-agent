@@ -6,6 +6,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import anthropic
 import re
+import ast
+import operator
 
 load_dotenv()
 
@@ -175,7 +177,7 @@ def needs_confirmation(tool_name, tool_input):
 
 def confirm_tool_call(tool_name, tool_input):
     print(f"\n{'='*50}")
-    print(f"⚠️  Agent 想要执行以下操作：")
+    print("⚠️  Agent 想要执行以下操作：")
     print(f"   工具: {tool_name}")
     print(f"   参数: {json.dumps(tool_input, ensure_ascii=False)}")
     print(f"{'='*50}")
@@ -357,8 +359,7 @@ def compress_history():
 ALLOWED_TOOLS = {"calculate_safe", "read_file", "read_file_lines", "write_file"}
 
 
-import ast
-import operator
+
 
 def calculate_safe(expression):
     """安全的数学表达式计算，基于 AST 白名单"""

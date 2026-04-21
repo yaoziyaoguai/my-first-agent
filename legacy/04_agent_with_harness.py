@@ -44,7 +44,7 @@ def log_event(event_type, data):
 def confirm_tool_call(tool_name, tool_input):
     """在工具执行前请求人类确认"""
     print(f"\n{'='*50}")
-    print(f"⚠️  Agent 想要执行以下操作：")
+    print("⚠️  Agent 想要执行以下操作：")
     print(f"   工具: {tool_name}")
     print(f"   参数: {json.dumps(tool_input, ensure_ascii=False)}")
     print(f"{'='*50}")
@@ -84,7 +84,7 @@ def calculate(expression):
     try:
         allowed = set("0123456789+-*/.() ")
         if not all(c in allowed for c in expression):
-            return f"错误：表达式包含不允许的字符"
+            return "错误：表达式包含不允许的字符"
         result = eval(expression)
         return str(result)
     except Exception as e:

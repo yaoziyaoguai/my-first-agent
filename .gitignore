@@ -7,3 +7,4 @@ agent_log.jsonl
 session_snapshots/
 sessions/
 workspace/
+memory/

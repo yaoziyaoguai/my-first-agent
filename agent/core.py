@@ -2,8 +2,12 @@
 import json
 from dataclasses import dataclass, field
 from typing import Optional
-
 import anthropic
+from agent.prompt_builder import build_system_prompt
+from agent.state import AgentState, create_agent_state
+import agent.tools  # noqa: F401  触发所有工具注册
+
+
 
 from config import (
     API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS,
@@ -23,8 +27,8 @@ from agent.review import (
 )
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 from agent.checkpoint import save_checkpoint, clear_checkpoint
-from agent.prompt_builder import build_system_prompt
-import agent.tools  # noqa: F401  触发所有工具注册
+
+
 
 
 # ========== 常量 ==========
@@ -38,8 +42,20 @@ REPEAT_DETECTION_WINDOW = 3           # 防循环检测窗口大小
 
 # ========== 全局 ==========
 
+# client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
+# messages = []  # session 级消息历史
+
 client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
-messages = []  # session 级消息历史
+
+# 统一会话状态：
+# 先把 system prompt 放进 runtime，
+# conversation / memory / task 先用默认空值初始化。
+state = create_agent_state(
+    system_prompt=build_system_prompt(),
+    model_name=MODEL_NAME,
+    review_enabled=True,
+    max_recent_messages=6,
+)
 
 
 # ========== 循环状态 ==========
@@ -58,36 +74,75 @@ class TurnState:
     consecutive_max_tokens: int = 0
 
 
+def get_state() -> AgentState:
+
+    """
+
+    读取当前全局 AgentState。
+
+    先保留全局单例写法，后面再考虑彻底去全局化。
+
+    """
+
+    return state
+
+def get_messages() -> list[dict]:
+
+    """
+
+    兼容旧逻辑：统一从 state.conversation.messages 取消息历史。
+
+    """
+
+    return state.conversation.messages
+
+
 # ========== 对外主入口 ==========
 
 def chat(user_input: str) -> str:
     """主入口：对话 + 规划 + 工具执行 + 评测 + 自动重试。"""
-    global messages
-    messages = compress_history(messages, client)
-    
-    state = TurnState(
+
+    global state
+
+    # 先取出旧消息列表
+
+    messages = state.conversation.messages
+
+    # 暂时继续沿用旧的 compress_history 逻辑
+
+    compressed_messages = compress_history(messages, client)
+    state.conversation.messages = compressed_messages
+    turn_state = TurnState(
+
         effective_review_request=get_effective_review_request(user_input),
-        system_prompt=build_system_prompt(),
+
+        system_prompt=state.runtime.system_prompt,
     )
-    
-    messages.append({"role": "user", "content": user_input})
+
+    state.conversation.messages.append({"role": "user", "content": user_input})
+
     log_event("user_input", {
+
         "content": user_input,
-        "effective_review_request": state.effective_review_request,
+
+        "effective_review_request": turn_state.effective_review_request,
+
     })
-    
+
     plan_result = _run_planning_phase(user_input)
+
     if plan_result == "cancelled":
+
         return "好的，已取消。"
-    
-    return _run_main_loop(state)
+
+    return _run_main_loop(turn_state)
 
 
 # ========== 规划阶段 ==========
 
 def _run_planning_phase(user_input: str) -> str:
     """任务规划 + 用户确认 + 上下文注入。返回 'cancelled' 或 'ok'。"""
-    plan = generate_plan(user_input, client, MODEL_NAME, messages)
+    plan = generate_plan(user_input, client, MODEL_NAME, get_messages())
     if not plan:
         return "ok"
     
@@ -95,21 +150,21 @@ def _run_planning_phase(user_input: str) -> str:
     confirm = input("按此计划执行吗？(y/n/输入修改意见): ").strip()
     
     if confirm.lower() == "n":
-        messages.append({"role": "assistant", "content": "好的，已取消。"})
+        get_messages().append({"role": "assistant", "content": "好的，已取消。"})
         return "cancelled"
     
     # 空输入和 "y" 都视为同意
     if confirm and confirm.lower() != "y":
         updated = user_input + f"\n\n用户补充：{confirm}"
-        messages[-1] = {"role": "user", "content": updated}
+        get_messages()[-1] = {"role": "user", "content": updated}
     
     plan_context = format_plan_for_context(plan)
-    messages[-1] = {
+    get_messages()[-1] = {
         "role": "user",
-        "content": messages[-1]["content"] + f"\n\n{plan_context}"
+        "content": get_messages()[-1]["content"] + f"\n\n{plan_context}"
     }
     
-    save_checkpoint(user_input, plan, messages)
+    save_checkpoint(user_input, plan, get_messages())
     return "ok"
 
 
@@ -151,13 +206,13 @@ def _run_main_loop(state: TurnState) -> str:
 
 def _call_model(state: TurnState):
     """调用模型（流式）并返回最终 response。"""
-    log_event("llm_call", {"message_count": len(messages)})
+    log_event("llm_call", {"message_count": len(get_messages())})
     
-    with client.messages.stream(
+    with client.get_messages().stream(
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
         system=state.system_prompt,
-        messages=messages,
+        messages=get_messages(),
         tools=get_tool_definitions(),
     ) as stream:
         for event in stream:
@@ -188,14 +243,14 @@ def _handle_max_tokens(response, state: TurnState) -> Optional[str]:
     if state.consecutive_max_tokens >= MAX_CONTINUE_ATTEMPTS:
         print(f"\n[系统] 已连续 {state.consecutive_max_tokens} 次触发输出上限，强制停止。")
         log_event("max_tokens_limit_reached", {"attempts": state.consecutive_max_tokens})
-        messages.append({"role": "assistant", "content": response.content})
+        get_messages().append({"role": "assistant", "content": response.content})
         return "内容过长，已自动截断。如需完整输出，请分步请求。"
     
     print(f"\n[系统] 回复被截断，自动继续（{state.consecutive_max_tokens}/{MAX_CONTINUE_ATTEMPTS}）...", flush=True)
     log_event("auto_continue", {"attempt": state.consecutive_max_tokens})
     
-    messages.append({"role": "assistant", "content": response.content})
-    messages.append({"role": "user", "content": "请继续你刚才的输出，不要重复已经说过的内容。"})
+    get_messages().append({"role": "assistant", "content": response.content})
+    get_messages().append({"role": "user", "content": "请继续你刚才的输出，不要重复已经说过的内容。"})
     return None
 
 
@@ -207,7 +262,7 @@ def _handle_end_turn(response, state: TurnState) -> Optional[str]:
     if not assistant_text:
         assistant_text = "[任务完成]"
     
-    messages.append({"role": "assistant", "content": response.content})
+    get_messages().append({"role": "assistant", "content": response.content})
     log_event("agent_reply", {"content": assistant_text})
     
     # 不需要 Review
@@ -257,7 +312,7 @@ def _handle_end_turn(response, state: TurnState) -> Optional[str]:
             "review_overall": review.get("overall"),
         })
         
-        messages.append({"role": "user", "content": feedback_msg})
+        get_messages().append({"role": "user", "content": feedback_msg})
         state.round_tool_traces = []
         return None  # 继续循环重试
     
@@ -267,7 +322,7 @@ def _handle_end_turn(response, state: TurnState) -> Optional[str]:
 
 def _handle_tool_use(response, state: TurnState) -> Optional[str]:
     """处理一轮工具调用。"""
-    messages.append({"role": "assistant", "content": response.content})
+    get_messages().append({"role": "assistant", "content": response.content})
     state.consecutive_max_tokens = 0
     
     # 真正数工具调用次数
@@ -404,7 +459,7 @@ def _is_repeated_recently(recent_calls: list) -> bool:
 
 
 def _append_tool_result(tool_use_id: str, result: str) -> None:
-    messages.append({
+    get_messages().append({
         "role": "user",
         "content": [{
             "type": "tool_result",

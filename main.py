@@ -1,7 +1,7 @@
 """程序入口：输入循环 + 调用 session 模块。"""
 import time
 
-from agent.core import chat, messages
+from agent.core import chat,  get_messages
 from agent.session import (
     init_session,
     try_resume_from_checkpoint,
@@ -39,28 +39,28 @@ def main_loop():
             user_input = input("你: ")
             
             if user_input.strip().lower() == "quit":
-                finalize_session(messages)
+                finalize_session(get_messages())
                 break
             
             if handle_slash_command(user_input):
                 continue
             
             chat(user_input)
-            print(f"[DEBUG] 当前消息历史: {len(messages)} 条")
+            print(f"[DEBUG] 当前消息历史: {len(get_messages())} 条")
         
         except KeyboardInterrupt:
             now = time.time()
             
             if now - last_interrupt_time < CTRL_C_DOUBLE_PRESS_WINDOW:
-                handle_double_interrupt(messages)
+                handle_double_interrupt(get_messages())
                 break
             
             last_interrupt_time = now
             
             if load_checkpoint():
-                should_exit = handle_interrupt_with_checkpoint(messages)
+                should_exit = handle_interrupt_with_checkpoint(get_messages())
             else:
-                should_exit = handle_interrupt_without_checkpoint(messages)
+                should_exit = handle_interrupt_without_checkpoint(get_messages())
             
             if should_exit:
                 break

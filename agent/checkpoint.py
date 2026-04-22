@@ -1,8 +1,6 @@
 import json
-import uuid
 from datetime import datetime
 from config import PROJECT_DIR
-from agent.logger import log_event, make_serializable
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
 
@@ -15,8 +13,8 @@ def _now_iso() -> str:
 
 
 def _truncate_messages_for_checkpoint(messages):
-    """截断 messages 中的大块内容，但保留'已完成'的语义"""
-    serializable = make_serializable(messages)
+    """截断 messages 中过大的 tool_result 内容，只做体积控制，不做语义加工。"""
+    serializable = messages
     truncated = []
     for msg in serializable:
         if isinstance(msg.get("content"), list):
@@ -26,12 +24,7 @@ def _truncate_messages_for_checkpoint(messages):
                     content = block.get("content", "")
                     if isinstance(content, str) and len(content) > MAX_RESULT_LENGTH:
                         block = dict(block)
-                        # 关键：让模型知道这一步已经成功完成了
-                        block["content"] = (
-                            f"[此步骤已成功完成，结果已省略]\n"
-                            f"原始输出前 {MAX_RESULT_LENGTH} 字符：\n"
-                            f"{content[:MAX_RESULT_LENGTH]}"
-                        )
+                        block["content"] = content[:MAX_RESULT_LENGTH]
                     new_content.append(block)
                 else:
                     new_content.append(block)
@@ -43,7 +36,7 @@ def _truncate_messages_for_checkpoint(messages):
 
 def _build_checkpoint_from_state(state):
     """
-    按新的 state 世界观构造 checkpoint 数据。
+    按当前 state 构造 checkpoint 数据。
 
     当前只保存最小必要子集：
     - task：当前任务目标 / 状态 / 当前步骤 / 当前计划
@@ -51,7 +44,6 @@ def _build_checkpoint_from_state(state):
     - conversation：messages
     """
     return {
-        "version": 2,
         "meta": {
             "session_id": state.memory.session_id,
             "created_at": _now_iso(),
@@ -74,46 +66,17 @@ def _build_checkpoint_from_state(state):
     }
 
 
-def save_checkpoint(original_input, plan, messages):
-    """保存断点（计划 + 截断后的消息历史）"""
-    checkpoint = {
-        "task_id": str(uuid.uuid4())[:8],
-        "original_input": original_input,
-        "plan": plan,
-        "messages": _truncate_messages_for_checkpoint(messages),
-        "created_at": datetime.now().isoformat(),
-        "interrupted_at": datetime.now().isoformat(),
-    }
-    try:
-        CHECKPOINT_PATH.write_text(
-            json.dumps(checkpoint, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-        log_event("checkpoint_saved", {
-            "task_id": checkpoint["task_id"],
-            "steps": len(plan.get("steps", [])),
-            "message_count": len(messages),
-        })
-    except Exception as e:
-        log_event("checkpoint_save_error", {"error": str(e)})
-
-
-def save_checkpoint_from_state(state):
-    """按新的 state 结构保存断点。"""
+def save_checkpoint(state):
+    """按当前 state 结构保存断点。"""
     checkpoint = _build_checkpoint_from_state(state)
     try:
+        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
         CHECKPOINT_PATH.write_text(
             json.dumps(checkpoint, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        log_event("checkpoint_saved_v2", {
-            "version": checkpoint["version"],
-            "task_status": checkpoint["task"]["status"],
-            "current_step_index": checkpoint["task"]["current_step_index"],
-            "message_count": len(checkpoint["conversation"]["messages"]),
-        })
-    except Exception as e:
-        log_event("checkpoint_save_error_v2", {"error": str(e)})
+    except Exception:
+        pass
 
 
 def load_checkpoint():
@@ -126,19 +89,13 @@ def load_checkpoint():
         return None
 
 
-# 从 v2 checkpoint 恢复到当前 state
+# 从 checkpoint 恢复到当前 state
 def load_checkpoint_to_state(state):
     """
-    从 v2 checkpoint 恢复到当前 state。
-    - 只处理 version == 2 的新结构
-    - 不支持旧 checkpoint 自动迁移（先简单处理）
+    从 checkpoint 恢复到当前 state。
     """
     checkpoint = load_checkpoint()
     if not checkpoint:
-        return False
-
-    if checkpoint.get("version") != 2:
-        # 暂不处理旧版本
         return False
 
     try:
@@ -155,18 +112,11 @@ def load_checkpoint_to_state(state):
 
         # 恢复 conversation
         conv_data = checkpoint.get("conversation", {})
-        state.conversation.messages = conv_data.get("messages", [])
-
-        log_event("checkpoint_loaded_v2", {
-            "task_status": state.task.status,
-            "current_step_index": state.task.current_step_index,
-            "message_count": len(state.conversation.messages),
-        })
+        state.conversation.messages = conv_data.get("messages", []) or []
 
         return True
 
-    except Exception as e:
-        log_event("checkpoint_load_error_v2", {"error": str(e)})
+    except Exception:
         return False
 
 
@@ -174,22 +124,3 @@ def clear_checkpoint():
     """任务完成后清除断点"""
     if CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
-        log_event("checkpoint_cleared", {})
-
-
-def format_resume_context(checkpoint):
-    """把断点信息格式化成注入上下文的文本"""
-    plan = checkpoint["plan"]
-    lines = [
-        "[恢复任务] 你之前在执行一个任务但被中断了。",
-        f"原始请求：{checkpoint['original_input']}",
-        f"任务目标：{plan['goal']}",
-        "",
-        "计划步骤："
-    ]
-    for step in plan["steps"]:
-        lines.append(f"  {step['id']}. {step['action']}")
-
-    lines.append("\n之前的对话历史已恢复。请根据已有的上下文判断哪些步骤已经完成，从未完成的步骤继续执行。")
-    lines.append("完成所有步骤后停止，输出最终结果。")
-    return "\n".join(lines)

@@ -9,7 +9,7 @@ from agent.memory import init_memory, cleanup_old_episodes, extract_memories_fro
 from agent.checkpoint import (
     load_checkpoint,
     load_checkpoint_to_state,
-    save_checkpoint_from_state,
+    save_checkpoint,
     clear_checkpoint,
 )
 from config import SYSTEM_PROMPT, MODEL_NAME
@@ -40,12 +40,6 @@ def try_resume_from_checkpoint():
 
     checkpoint = load_checkpoint()
     if not checkpoint:
-        return
-
-    # 只优先处理新的 v2 checkpoint
-    if checkpoint.get("version") != 2:
-        print("\n[系统] 发现旧版本断点，当前暂不自动恢复。")
-        print("[系统] 你可以清除断点后继续使用新版本流程。\n")
         return
 
     task_data = checkpoint.get("task", {})
@@ -85,7 +79,7 @@ def finalize_session():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint_from_state(state)
+        save_checkpoint(state)
         print("[系统] 未完成的任务断点已保存，下次启动可继续。")
 
     print("会话已保存，再见！")
@@ -99,7 +93,7 @@ def handle_interrupt_with_checkpoint() -> bool:
 
     state = get_state()
     messages = state.conversation.messages
-    save_checkpoint_from_state(state)
+    save_checkpoint(state)
 
     print("\n\n[系统] 当前任务已暂停，断点已保存。")
     print("  1. 继续当前任务")
@@ -149,7 +143,7 @@ def handle_double_interrupt():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint_from_state(state)
+        save_checkpoint(state)
         print("[系统] 任务断点已更新。")
 
     print("[系统] 下次启动可继续未完成的任务。再见！")

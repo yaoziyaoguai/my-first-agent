@@ -22,6 +22,9 @@ class RuntimeState:
     """
 
     # 系统提示词：定义 agent 是谁、做事规则、能力边界等
+    # 它代表当前这次 agent 会话真正使用的顶层规则文本
+    # 后续如果 prompt_builder 有变化，最终产物也应该落到这里
+
     system_prompt: str
 
     # 当前使用的模型名，可为空
@@ -160,6 +163,56 @@ class AgentState:
 
     # 当前任务区
     task: TaskState = field(default_factory=TaskState)
+
+    def get_system_prompt(self) -> str:
+        """
+        读取当前运行态真正生效的 system prompt。
+        """
+        return self.runtime.system_prompt
+
+
+    def set_system_prompt(self, system_prompt: str) -> None:
+        """
+        更新当前运行态的 system prompt。
+
+        参数:
+            system_prompt: 新的完整 system prompt 文本
+        """
+        self.runtime.system_prompt = system_prompt
+
+
+    def update_runtime(
+        self,
+        *,
+        system_prompt: str | None = None,
+        model_name: str | None = None,
+        review_enabled: bool | None = None,
+        max_recent_messages: int | None = None,
+    ) -> None:
+        """
+        统一更新运行态配置。
+
+        用途：
+        - 只改 system prompt
+        - 或者顺手更新 model / review / recent message 策略
+        """
+        if system_prompt is not None:
+            self.runtime.system_prompt = system_prompt
+
+        if model_name is not None:
+            self.runtime.model_name = model_name
+
+        if review_enabled is not None:
+            self.runtime.review_enabled = review_enabled
+
+        if max_recent_messages is not None:
+            self.runtime.max_recent_messages = max_recent_messages
+
+
+
+
+
+    
 
     def add_user_message(self, content: str) -> None:
         """

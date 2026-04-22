@@ -109,6 +109,8 @@ class TaskState:
     # 先用 dict[str, Any]，后面如果 plan 结构稳定了再单独定义 Plan 类
     current_plan: dict[str, Any] | None = None
 
+    current_step_index: int = 0
+
     # 当前任务状态
     # 可选值示例：
     # idle / planning / running / reviewing / done / failed
@@ -204,6 +206,7 @@ class AgentState:
         self.task.current_plan = None
         self.task.status = "idle"
         self.task.retry_count = 0
+        self.task.current_step_index = 0
         self.task.loop_iterations = 0
         self.task.consecutive_rejections = 0
         self.task.consecutive_max_tokens = 0

@@ -73,15 +73,17 @@ def try_resume_from_checkpoint():
 
 # ========== 退出 ==========
 
-def finalize_session(messages):
+def finalize_session():
     """正常退出（quit 或双 Ctrl+C）：提取记忆 + 保存快照 + 保存 state 断点"""
     from agent.core import client, get_state
+
+    state = get_state()
+    messages = state.conversation.messages
 
     print("\n[系统] 正在提取本次对话的记忆...")
     extract_memories_from_session(messages, client, MODEL_NAME)
     save_session_snapshot(messages)
 
-    state = get_state()
     if state.task.current_plan:
         save_checkpoint_from_state(state)
         print("[系统] 未完成的任务断点已保存，下次启动可继续。")
@@ -91,11 +93,12 @@ def finalize_session(messages):
 
 # ========== 中断处理 ==========
 
-def handle_interrupt_with_checkpoint(messages) -> bool:
+def handle_interrupt_with_checkpoint() -> bool:
     """单次 Ctrl+C + 有 checkpoint：弹菜单。返回 True 表示要退出程序。"""
     from agent.core import get_state
 
     state = get_state()
+    messages = state.conversation.messages
     save_checkpoint_from_state(state)
 
     print("\n\n[系统] 当前任务已暂停，断点已保存。")
@@ -124,21 +127,27 @@ def handle_interrupt_with_checkpoint(messages) -> bool:
     return False
 
 
-def handle_interrupt_without_checkpoint(messages) -> bool:
+def handle_interrupt_without_checkpoint() -> bool:
     """单次 Ctrl+C + 无 checkpoint：提示再按一次退出。返回 False（不退出）"""
+    from agent.core import get_state
+
+    messages = get_state().conversation.messages
+
     print("\n\n[系统] 再按一次 Ctrl+C 退出程序，或继续输入。")
     save_session_snapshot(messages)
     return False
 
 
-def handle_double_interrupt(messages):
+def handle_double_interrupt():
     """连续两次 Ctrl+C：保存并退出"""
     from agent.core import get_state
 
     print("\n\n[系统] 检测到连续中断，正在保存...")
-    save_session_snapshot(messages)
 
     state = get_state()
+    messages = state.conversation.messages
+    save_session_snapshot(messages)
+
     if state.task.current_plan:
         save_checkpoint_from_state(state)
         print("[系统] 任务断点已更新。")

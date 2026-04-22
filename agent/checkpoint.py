@@ -61,7 +61,7 @@ def _build_checkpoint_from_state(state):
             "user_goal": state.task.user_goal,
             "status": state.task.status,
             "current_step_index": state.task.current_step_index,
-            "current_plan": make_serializable(state.task.current_plan),
+            "current_plan": state.task.current_plan,
         },
         "memory": {
             "working_summary": state.memory.working_summary,

@@ -463,39 +463,33 @@ def _handle_max_tokens(response, turn_state: TurnState) -> Optional[str]:
 
 
 def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
-    """模型说完了，按当前步骤完成情况决定是否进入 step confirmation。"""
     turn_state.consecutive_max_tokens = 0
 
     assistant_text = _extract_text(response.content)
     if not assistant_text:
         assistant_text = "[任务完成]"
 
-    get_messages().append({"role": "assistant", "content": response.content})
+    # ✅ 不再塞 response.content
+    get_messages().append({
+        "role": "assistant",
+        "content": assistant_text
+    })
 
     if is_current_step_completed(assistant_text):
-        print("[DEBUG] current task status before end_turn:", state.task.status)
-
-        # 如果当前任务还有后续步骤，则先进入 step confirmation，
-        # 不立即推进 current_step_index，等待用户确认“继续下一步”。
         if state.task.current_plan:
             plan = Plan.model_validate(state.task.current_plan)
-            current_index = state.task.current_step_index
-            last_index = len(plan.steps) - 1
+            idx = state.task.current_step_index
 
-            if current_index < last_index:
-                print("[DEBUG] entering awaiting_step_confirmation")
+            if idx < len(plan.steps) - 1:
                 state.task.status = "awaiting_step_confirmation"
                 save_checkpoint(state)
                 return (
                     assistant_text
-                    + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止当前任务，"
-                      "或输入补充信息以调整后续计划。"
+                    + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止任务。"
                 )
 
-        # 已经是最后一步：直接收口为 done
         _advance_current_step_if_needed()
 
-    # 只有当任务真正完成时才清理 checkpoint
     if state.task.status == "done":
         clear_checkpoint()
 
@@ -503,14 +497,6 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
 
 
 def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
-    """
-    处理“等待用户确认是否进入下一步”的状态。
-
-    协议：
-    - y：推进到下一步并继续执行
-    - n：停止当前任务
-    - 其他任意输入：视为对后续步骤的修改意见，重新生成计划
-    """
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
@@ -526,20 +512,17 @@ def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
         clear_checkpoint()
         return "好的，当前任务已停止。"
 
-    # 其他输入：视为对后续步骤的修改意见，重新生成计划
-    get_messages().append({"role": "user", "content": user_input})
-    _append_control_event("step_feedback", {"feedback": confirm})
-    revised_goal = (
-        f"{state.task.user_goal}\n\n"
-        f"用户在步骤确认阶段的补充意见：{confirm}"
-    )
-    state.task.user_goal = revised_goal
+    # ✅ 只保留 plan_feedback（删除 step_feedback + 原始 user 输入）
     _append_control_event("plan_feedback", {"feedback": confirm})
+
+    revised_goal = f"{state.task.user_goal}\n\n用户补充：{confirm}"
+    state.task.user_goal = revised_goal
+
     plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages(revised_goal))
     if not plan:
         state.reset_task()
         clear_checkpoint()
-        return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
+        return "未能生成新计划"
 
     state.task.current_plan = plan.model_dump()
     state.task.current_step_index = 0
@@ -547,31 +530,35 @@ def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
     save_checkpoint(state)
 
     print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    print("按此计划执行吗？(y/n): ", end="", flush=True)
     return ""
 
 
 def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
     """处理一轮工具调用。"""
-    get_messages().append({"role": "assistant", "content": response.content})
+
+    # ✅ 只保留 text，不污染 messages
+    assistant_text = _extract_text(response.content)
+    if assistant_text:
+        get_messages().append({
+            "role": "assistant",
+            "content": assistant_text
+        })
+
     turn_state.consecutive_max_tokens = 0
 
-    # 真正数工具调用次数
     tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
     turn_state.tool_call_count += len(tool_use_blocks)
 
     if turn_state.tool_call_count > MAX_TOOL_CALLS_PER_TURN:
-        print(f"\n[系统] 工具调用次数超过上限 {MAX_TOOL_CALLS_PER_TURN}，强制停止。")
         return "工具调用次数过多，请简化任务或分步执行。"
 
-    turn_context = {}  # 本轮所有工具共享的上下文（供钩子用）
+    turn_context = {}
 
     for block in tool_use_blocks:
         result = _execute_single_tool(block, turn_state, turn_context)
-
         if result == "__force_stop__":
-            print("\n[系统] 用户已连续拒绝 3 次，强制停止当前任务。")
-            return "用户连续拒绝了多次操作，任务已停止。请告诉我您希望怎么调整。"
+            return "用户连续拒绝多次操作，任务已停止。"
 
     return None
 
@@ -725,66 +712,49 @@ def _append_tool_result(tool_use_id: str, result: str) -> None:
     })
 # 新增：处理工具确认（state 驱动）
 def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
-    """
-    处理工具确认（state 驱动）
-
-    协议：
-    - y：执行工具
-    - n：拒绝执行
-    - 其他输入：作为反馈
-    """
     confirm = user_input.strip()
 
     pending = state.task.pending_tool
     if not pending:
-        return "[系统] 未找到待确认的工具。"
+        return "[系统] 未找到待确认工具"
 
     tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
     tool_input = pending["input"]
 
-    # 清理 pending
     state.task.pending_tool = None
 
     if confirm.lower() == "y":
         _append_control_event("tool_confirm_yes", pending)
+
         result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
 
-        # 幂等记录
         state.task.tool_execution_log[tool_use_id] = {
             "tool": tool_name,
             "input": tool_input,
             "result": result,
         }
-        # 工具 trace logging
-        turn_state.round_tool_traces.append({
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-            "status": "executed",
-            "result": result,
-        })
+
+        _append_tool_result(tool_use_id, result)
 
         state.task.status = "running"
         save_checkpoint(state)
-
-        _append_tool_result(tool_use_id, result)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
         _append_control_event("tool_confirm_no", pending)
+
+        # ❗关键：不生成 tool_result
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
-    # 其他输入：作为反馈
+    # ✅ 反馈：只记录，不生成 tool_result
     _append_control_event("tool_feedback", {
         "feedback": confirm,
         "tool": tool_name,
-        "input": tool_input,
     })
-    result = f"用户反馈：{confirm}"
-    _append_tool_result(tool_use_id, result)
+
     state.task.status = "running"
     save_checkpoint(state)
     return _run_main_loop(turn_state)

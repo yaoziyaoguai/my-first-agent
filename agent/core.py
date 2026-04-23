@@ -30,7 +30,6 @@ MAX_TOOL_CALLS_PER_TURN = 20          # 实际工具调用上限
 MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）
 MAX_CONSECUTIVE_REJECTIONS = 3        # 连续拒绝强制停止阈值
 FORCE_STOP_REJECTION_THRESHOLD = 2    # 追加系统指令的拒绝阈值
-REPEAT_DETECTION_WINDOW = 3           # 防循环检测窗口大小
 
 
 # ========== 全局 ==========
@@ -58,7 +57,6 @@ class TurnState:
     """一次 chat 调用内部的循环状态。"""
     system_prompt: str
     round_tool_traces: list = field(default_factory=list)
-    recent_calls: list = field(default_factory=list)
     auto_retry_count: int = 0
     tool_call_count: int = 0        # 真实工具调用次数
     loop_iterations: int = 0        # 循环次数
@@ -105,7 +103,7 @@ refresh_runtime_system_prompt()
 
 
 
-def build_planning_messages() -> list[dict]:
+def build_planning_messages(current_user_input: str) -> list[dict]:
     """
     构造给 planner 使用的轻量 messages。
 
@@ -113,6 +111,7 @@ def build_planning_messages() -> list[dict]:
     - 只提供历史摘要 + 最近原始消息
     - 不注入 current_plan / current_step / completion_criteria
     - 避免让 planner 被执行态上下文污染
+    - 当前轮输入只在这里临时加入，不提前写回 conversation state
     """
     model_messages: list[dict] = []
 
@@ -127,6 +126,7 @@ def build_planning_messages() -> list[dict]:
         })
 
     model_messages.extend(state.conversation.messages)
+    model_messages.append({"role": "user", "content": current_user_input})
     return model_messages
 
 
@@ -306,14 +306,12 @@ def is_current_step_completed(assistant_text: str) -> bool:
 def chat(user_input: str) -> str:
     """主入口：对话 + 规划 + 工具执行。"""
 
-    # 先取出旧消息列表
     messages = state.conversation.messages
     compressed_messages, new_summary = compress_history(
         messages,
         client,
         existing_summary=state.memory.working_summary,
         max_recent_messages=state.runtime.max_recent_messages,
-
     )
     
     state.conversation.messages = compressed_messages
@@ -325,12 +323,22 @@ def chat(user_input: str) -> str:
         system_prompt=runtime_system_prompt,
     )
 
-    state.conversation.messages.append({"role": "user", "content": user_input})
+    # 先处理“等待用户确认计划”的状态：
+    # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
+    if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
+        return _handle_plan_confirmation(user_input, turn_state)
+
+    # 如果当前已有运行中的任务，则默认把这次输入视为“继续当前任务”的反馈。
+    if state.task.current_plan and state.task.status == "running":
+        state.conversation.messages.append({"role": "user", "content": user_input})
+        return _run_main_loop(turn_state)
 
     plan_result = _run_planning_phase(user_input)
     if plan_result == "cancelled":
-
         return "好的，已取消。"
+
+    if plan_result == "awaiting_plan_confirmation":
+        return ""
 
     return _run_main_loop(turn_state)
 
@@ -338,33 +346,64 @@ def chat(user_input: str) -> str:
 # ========== 规划阶段 ==========
 
 def _run_planning_phase(user_input: str) -> str:
-    """任务规划 + 用户确认 + 上下文注入。返回 'cancelled' 或 'ok'。"""
-    plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages())
+    """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。"""
+    plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages(user_input))
     if not plan:
+        get_messages().append({"role": "user", "content": user_input})
         return "ok"
-    
 
     state.task.current_plan = plan.model_dump()
     state.task.user_goal = user_input
     state.task.current_step_index = 0
-    state.task.status = "planning"
+    state.task.status = "awaiting_plan_confirmation"
+
+    # 计划展示给用户，但此时还没有正式接受执行。
     print(format_plan_for_display(plan))
-    confirm = input("按此计划执行吗？(y/n/输入修改意见): ").strip()
+    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    return "awaiting_plan_confirmation"
+
+
+# 新增：处理“等待用户确认计划”阶段的输入
+def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
+    """
+    处理“等待用户确认计划”阶段的输入。
+
+    规则：
+    - y：接受当前计划，进入 running 并开始执行
+    - n：取消当前计划，回到 idle
+    - 其他任意输入：视为对当前计划的修改意见，重新生成计划
+    """
+    confirm = user_input.strip()
+
+    if confirm.lower() == "y":
+        get_messages().append({"role": "user", "content": state.task.user_goal})
+        state.task.status = "running"
+        save_checkpoint(state)
+        return _run_main_loop(turn_state)
+
     if confirm.lower() == "n":
+        get_messages().append({"role": "user", "content": state.task.user_goal})
         get_messages().append({"role": "assistant", "content": "好的，已取消。"})
-        state.task.status = "idle"
-        return "cancelled"
-    # 空输入和 "y" 都视为同意
-    if confirm and confirm.lower() != "y":
-        extra_feedback = f"用户补充：{confirm}"
-        get_messages().append({"role": "user", "content": extra_feedback})
-        state.task.user_goal = user_input + f"\n\n{extra_feedback}"
-    
-    # 当前计划已经正式存入 state.task.current_plan，
-    # 不再通过篡改原始 user message 来传递计划上下文。
-    save_checkpoint(state)
-    state.task.status = "running"
-    return "ok"
+        state.reset_task()
+        return "好的，已取消。"
+
+    # 其他任何输入都视为对计划的修改意见：
+    # 基于原始目标 + 修改意见重新生成计划，而不是继续执行。
+    revised_goal = f"{state.task.user_goal}\n\n用户对计划的修改意见：{confirm}"
+    state.task.user_goal = revised_goal
+
+    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages(revised_goal))
+    if not plan:
+        state.reset_task()
+        return "未能根据你的修改意见重新生成计划，请重新描述你的需求。"
+
+    state.task.current_plan = plan.model_dump()
+    state.task.current_step_index = 0
+    state.task.status = "awaiting_plan_confirmation"
+
+    print(format_plan_for_display(plan))
+    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    return ""
 
 
 # ========== 主循环 ==========
@@ -403,7 +442,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
 
 def _call_model(turn_state: TurnState):
     """调用模型（流式）并返回最终 response。"""
-    with client.get_messages().stream(
+    with client.messages.stream(
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
         system=turn_state.system_prompt,
@@ -498,21 +537,7 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
     tool_input = block.input
     tool_use_id = block.id
 
-    # 1. 防循环检测
-    _record_tool_call(tool_name, tool_input, turn_state.recent_calls)
-    if _is_repeated_recently(turn_state.recent_calls):
-        result = f"检测到重复调用 {tool_name}，相同参数已调用 {REPEAT_DETECTION_WINDOW} 次。请基于已有信息继续下一步，不要重复此操作。"
-        turn_state.round_tool_traces.append({
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-            "status": "blocked_repeat",
-            "result": result,
-        })
-        _append_tool_result(tool_use_id, result)
-        return None
-
-    # 2. 分级确认
+    # 1. 分级确认
     confirmation = needs_tool_confirmation(tool_name, tool_input)
 
     if confirmation == "block":
@@ -527,14 +552,14 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
         _append_tool_result(tool_use_id, result)
         return None
 
-    # 3. 用户确认
+    # 2. 用户确认
     if confirmation:
         approved = confirm_tool_call(tool_name, tool_input)
     else:
         print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
         approved = True
 
-    # 4. 执行或处理拒绝
+    # 3. 执行或处理拒绝
     if approved is True:
         result = execute_tool(tool_name, tool_input, context=turn_context)
 
@@ -583,16 +608,6 @@ def _extract_text(content_blocks) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
-def _record_tool_call(tool_name: str, tool_input: dict, recent_calls: list) -> None:
-    signature = f"{tool_name}:{json.dumps(tool_input, sort_keys=True)}"
-    recent_calls.append(signature)
-
-
-def _is_repeated_recently(recent_calls: list) -> bool:
-    if len(recent_calls) < REPEAT_DETECTION_WINDOW:
-        return False
-    window = recent_calls[-REPEAT_DETECTION_WINDOW:]
-    return len(set(window)) == 1
 
 
 def _append_tool_result(tool_use_id: str, result: str) -> None:

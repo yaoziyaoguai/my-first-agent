@@ -66,7 +66,6 @@ def generate_plan(user_input, client, model_name, messages=None):
                 result_text = block.text
                 break
 
-        print(f"[DEBUG] plan raw response: '{result_text[:200]}'")
 
         clean_text = result_text.strip()
         if clean_text.startswith("```"):

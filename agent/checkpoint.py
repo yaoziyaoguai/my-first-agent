@@ -34,30 +34,40 @@ def _truncate_messages_for_checkpoint(messages):
     return truncated
 
 
+def _copy_state_dict(obj) -> dict:
+    """
+    复制 dataclass / 普通对象的浅层状态字典。
+
+    目的：
+    - 避免手工挑字段导致后续新增状态漏存
+    - checkpoint 尽量保存当前运行态的完整快照
+    """
+    return dict(getattr(obj, "__dict__", {}))
+
+
 def _build_checkpoint_from_state(state):
     """
     按当前 state 构造 checkpoint 数据。
 
-    当前只保存最小必要子集：
-    - task：当前任务目标 / 状态 / 当前步骤 / 当前计划
-    - memory：working_summary
-    - conversation：messages
+    当前策略：
+    - task：尽量保存完整 task 快照，避免后续新增状态漏存
+    - memory：保存 memory 快照，但 conversation 仍单独处理
+    - conversation：只保存 messages，并对过大的 tool_result 做截断
     """
+    existing = load_checkpoint() or {}
+    existing_meta = existing.get("meta", {})
+
+    task_data = _copy_state_dict(state.task)
+    memory_data = _copy_state_dict(state.memory)
+
     return {
         "meta": {
             "session_id": state.memory.session_id,
-            "created_at": _now_iso(),
+            "created_at": existing_meta.get("created_at", _now_iso()),
             "interrupted_at": _now_iso(),
         },
-        "task": {
-            "user_goal": state.task.user_goal,
-            "status": state.task.status,
-            "current_step_index": state.task.current_step_index,
-            "current_plan": state.task.current_plan,
-        },
-        "memory": {
-            "working_summary": state.memory.working_summary,
-        },
+        "task": task_data,
+        "memory": memory_data,
         "conversation": {
             "messages": _truncate_messages_for_checkpoint(
                 state.conversation.messages
@@ -99,16 +109,15 @@ def load_checkpoint_to_state(state):
         return False
 
     try:
-        # 恢复 task
+        # 恢复 task（尽量按 checkpoint 中已有字段完整恢复）
         task_data = checkpoint.get("task", {})
-        state.task.user_goal = task_data.get("user_goal")
-        state.task.status = task_data.get("status", "idle")
-        state.task.current_step_index = task_data.get("current_step_index", 0)
-        state.task.current_plan = task_data.get("current_plan")
+        for key, value in task_data.items():
+            setattr(state.task, key, value)
 
-        # 恢复 memory
+        # 恢复 memory（尽量按 checkpoint 中已有字段完整恢复）
         memory_data = checkpoint.get("memory", {})
-        state.memory.working_summary = memory_data.get("working_summary")
+        for key, value in memory_data.items():
+            setattr(state.memory, key, value)
 
         # 恢复 conversation
         conv_data = checkpoint.get("conversation", {})

@@ -13,24 +13,43 @@ def _now_iso() -> str:
 
 
 def _truncate_messages_for_checkpoint(messages):
-    """截断 messages 中过大的 tool_result 内容，只做体积控制，不做语义加工。"""
-    serializable = messages
+    """截断 messages 中过大的 tool_result 内容，并保证整体可 JSON 序列化"""
     truncated = []
-    for msg in serializable:
-        if isinstance(msg.get("content"), list):
+
+    def _safe(obj):
+        """确保对象可序列化，不可序列化则转为字符串"""
+        try:
+            json.dumps(obj)
+            return obj
+        except Exception:
+            return str(obj)
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+
+        # Anthropic content block（list 结构）
+        if isinstance(content, list):
             new_content = []
-            for block in msg["content"]:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    content = block.get("content", "")
-                    if isinstance(content, str) and len(content) > MAX_RESULT_LENGTH:
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "tool_result":
                         block = dict(block)
-                        block["content"] = content[:MAX_RESULT_LENGTH]
-                    new_content.append(block)
+                        c = block.get("content", "")
+                        if isinstance(c, str) and len(c) > MAX_RESULT_LENGTH:
+                            block["content"] = c[:MAX_RESULT_LENGTH]
+                        else:
+                            block["content"] = _safe(c)
+                        new_content.append(block)
+                    else:
+                        new_content.append(_safe(block))
                 else:
-                    new_content.append(block)
-            truncated.append({"role": msg["role"], "content": new_content})
+                    new_content.append(_safe(block))
+            truncated.append({"role": role, "content": new_content})
+
         else:
-            truncated.append(msg)
+            truncated.append({"role": role, "content": _safe(content)})
+
     return truncated
 
 
@@ -85,17 +104,22 @@ def save_checkpoint(state):
             json.dumps(checkpoint, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    except Exception:
-        pass
+        print(f"[CHECKPOINT] saved (status={getattr(state.task, 'status', None)})")
+    except Exception as e:
+        print(f"[CHECKPOINT] save failed: {e}")
 
 
 def load_checkpoint():
     """加载未完成的断点"""
     if not CHECKPOINT_PATH.exists():
+        print("[CHECKPOINT] no file")
         return None
     try:
-        return json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
-    except Exception:
+        data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        print("[CHECKPOINT] loaded")
+        return data
+    except Exception as e:
+        print(f"[CHECKPOINT] load failed: {e}")
         return None
 
 
@@ -133,3 +157,4 @@ def clear_checkpoint():
     """任务完成后清除断点"""
     if CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
+        print("[CHECKPOINT] cleared")

@@ -137,6 +137,15 @@ class TaskState:
     # 当前轮是否有效开启了 review 请求
     effective_review_request: bool = False
 
+    # 当前待确认的工具（control plane）
+    # 结构：{"tool_use_id": str, "tool": str, "input": dict}
+    pending_tool: dict[str, Any] | None = None
+
+    # 工具执行记录（用于幂等执行）
+    # key: tool_use_id
+    # value: {"tool": str, "input": dict, "result": Any}
+    tool_execution_log: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class AgentState:

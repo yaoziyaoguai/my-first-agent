@@ -16,7 +16,6 @@ from config import (
     MAX_CONTINUE_ATTEMPTS,
 )
 from agent.memory import compress_history
-from agent.security import confirm_tool_call
 from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 from agent.checkpoint import save_checkpoint, clear_checkpoint
@@ -171,6 +170,15 @@ def build_execution_messages() -> list[dict]:
 
             step_lines.extend([
                 f"[当前执行进度]：正在执行第 {current_step + 1} 步 / 共 {len(plan.steps)} 步",
+            ])
+            # Step Memory（已完成步骤注入）
+            completed_steps = plan.steps[:current_step]
+            if completed_steps:
+                step_lines.append("\n【已完成步骤】")
+                for i, s in enumerate(completed_steps):
+                    step_lines.append(f"{i+1}. {s.title}（已完成）")
+
+            step_lines.extend([
                 f"[当前步骤标题]：{step.title}",
                 f"[当前步骤说明]：{step.description}",
                 f"[步骤类型]：{step.step_type}",
@@ -187,12 +195,27 @@ def build_execution_messages() -> list[dict]:
 
             step_lines.extend([
                 "",
-                "执行要求：",
-                "- 只执行当前这一步，不要提前执行后续步骤",
-                "- 如果当前步骤有完成标准，优先以完成标准作为收口依据",
-                "- 完成当前步骤后，用自然语言明确说明“本步骤已完成”或等价表达",
-                "- 如果当前步骤需要工具，就调用合适的工具",
-                "- 不要重复已经完成的步骤",
+                "【执行上下文】",
+                f"- 当前任务：{plan.goal}",
+                f"- 当前步骤：第 {current_step + 1} 步 / 共 {len(plan.steps)} 步",
+                f"- 步骤名称：{step.title}",
+                "",
+                "【执行目标】",
+                f"{step.description}",
+                "",
+                "【执行约束（必须严格遵守）】",
+                "- 你只能执行当前步骤",
+                "- 不允许执行已完成步骤的内容",
+                "- 不允许执行与当前步骤无关的行为",
+                "- 不要重复【已完成步骤】中的任何行为",
+                "",
+                "【行为判断规则】",
+                "- 如果你的行为与当前步骤目标不一致，这是错误",
+                "- 如果重复之前步骤，这是错误",
+                "- 如果偏离当前步骤目标，这是错误",
+                "",
+                "【完成要求】",
+                "- 完成后必须明确说明：本步骤已完成",
             ])
 
             model_messages.append({
@@ -224,15 +247,16 @@ def _advance_current_step_if_needed() -> None:
 
 def is_current_step_completed(assistant_text: str) -> bool:
     """
-    初级版 step 完成判定。
+    轻量版 step 完成判定。
 
-    规则：
-    - 如果当前没有计划，默认视为完成
-    - 如果当前 step 没有定义 completion_criteria，保持旧行为：一轮结束即完成
-    - 如果定义了 completion_criteria：
-        1. assistant 输出里要有“完成信号”关键词
-        2. assistant 输出里最好还要体现 completion_criteria 中的部分关键信息
-    - 对部分 step_type，再增加一点轻量规则
+    当前策略：
+    - 在 step confirmation 模式下，不再用 completion_criteria 作为硬门槛
+    - 只要当前存在有效 step，并且模型这一轮已经正常 end_turn，
+      就允许进入后续的 step confirmation / step 推进流程
+
+    说明：
+    - 真正是否进入下一步，由 awaiting_step_confirmation + 用户确认决定
+    - completion_criteria 仍可作为提示信息给模型看，但不再阻断状态推进
     """
     if not state.task.current_plan:
         return True
@@ -244,61 +268,6 @@ def is_current_step_completed(assistant_text: str) -> bool:
     if not (0 <= idx < len(plan.steps)):
         return True
 
-    step = plan.steps[idx]
-
-    # 如果没有定义 completion_criteria，保持旧逻辑
-    if not step.completion_criteria:
-        return True
-
-    text = assistant_text.lower()
-    criteria_text = step.completion_criteria.lower()
-
-    # 1) 完成信号关键词
-    completion_keywords = ["完成", "已完成", "done", "finished"]
-    has_completion_signal = any(keyword in text for keyword in completion_keywords)
-
-    if not has_completion_signal:
-        return False
-
-    # 2) completion_criteria 关键词匹配（非常粗粒度）
-    raw_parts = re.split(r"[，。；、,;\n]+", criteria_text)
-    criteria_parts = [part.strip() for part in raw_parts if part.strip()]
-
-    criteria_matched = False
-    if not criteria_parts:
-        criteria_matched = True
-    else:
-        for part in criteria_parts:
-            if len(part) >= 4 and part in text:
-                criteria_matched = True
-                break
-
-    if not criteria_matched:
-        return False
-
-    # 3) step_type 的轻量附加规则
-    step_type = (step.step_type or "").strip().lower()
-
-    if step_type == "report":
-        report_keywords = ["总结", "结论", "结果", "report", "summary"]
-        return any(keyword in text for keyword in report_keywords)
-
-    if step_type == "analyze":
-        analyze_keywords = ["分析", "判断", "发现", "结论", "analysis"]
-        return any(keyword in text for keyword in analyze_keywords)
-
-    if step_type == "read":
-        read_keywords = ["读取", "已读", "查看", "read"]
-        return any(keyword in text for keyword in read_keywords)
-    if step_type == "edit":
-        edit_keywords = ["修改", "已修改", "更新", "edit", "changed", "patched"]
-        return any(keyword in text for keyword in edit_keywords)
-
-    if step_type == "run_command":
-        cmd_keywords = ["执行", "已执行", "运行", "command", "ran", "output", "结果"]
-        return any(keyword in text for keyword in cmd_keywords)
-
-    # 其他类型先不加更强规则，通过上面的通用规则即可
     return True
 
 # ========== 对外主入口 ==========
@@ -327,6 +296,14 @@ def chat(user_input: str) -> str:
     # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
     if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
         return _handle_plan_confirmation(user_input, turn_state)
+
+    # 处理“等待用户确认是否进入下一步”的状态。
+    if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
+        return _handle_step_confirmation(user_input, turn_state)
+
+    # 新增：处理工具确认（state 驱动）
+    if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
+        return _handle_tool_confirmation(user_input, turn_state)
 
     # 如果当前已有运行中的任务，则默认把这次输入视为“继续当前任务”的反馈。
     if state.task.current_plan and state.task.status == "running":
@@ -376,14 +353,13 @@ def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
-        get_messages().append({"role": "user", "content": state.task.user_goal})
+        _append_control_event("plan_confirm_yes", {})
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        get_messages().append({"role": "user", "content": state.task.user_goal})
-        get_messages().append({"role": "assistant", "content": "好的，已取消。"})
+        _append_control_event("plan_confirm_no", {})
         state.reset_task()
         return "好的，已取消。"
 
@@ -487,7 +463,7 @@ def _handle_max_tokens(response, turn_state: TurnState) -> Optional[str]:
 
 
 def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
-    """模型说完了，直接结束当前一轮。"""
+    """模型说完了，按当前步骤完成情况决定是否进入 step confirmation。"""
     turn_state.consecutive_max_tokens = 0
 
     assistant_text = _extract_text(response.content)
@@ -497,6 +473,26 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
     get_messages().append({"role": "assistant", "content": response.content})
 
     if is_current_step_completed(assistant_text):
+        print("[DEBUG] current task status before end_turn:", state.task.status)
+
+        # 如果当前任务还有后续步骤，则先进入 step confirmation，
+        # 不立即推进 current_step_index，等待用户确认“继续下一步”。
+        if state.task.current_plan:
+            plan = Plan.model_validate(state.task.current_plan)
+            current_index = state.task.current_step_index
+            last_index = len(plan.steps) - 1
+
+            if current_index < last_index:
+                print("[DEBUG] entering awaiting_step_confirmation")
+                state.task.status = "awaiting_step_confirmation"
+                save_checkpoint(state)
+                return (
+                    assistant_text
+                    + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止当前任务，"
+                      "或输入补充信息以调整后续计划。"
+                )
+
+        # 已经是最后一步：直接收口为 done
         _advance_current_step_if_needed()
 
     # 只有当任务真正完成时才清理 checkpoint
@@ -504,6 +500,55 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
         clear_checkpoint()
 
     return assistant_text
+
+
+def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
+    """
+    处理“等待用户确认是否进入下一步”的状态。
+
+    协议：
+    - y：推进到下一步并继续执行
+    - n：停止当前任务
+    - 其他任意输入：视为对后续步骤的修改意见，重新生成计划
+    """
+    confirm = user_input.strip()
+
+    if confirm.lower() == "y":
+        _append_control_event("step_confirm_yes", {})
+        _advance_current_step_if_needed()
+        state.task.status = "running"
+        save_checkpoint(state)
+        return _run_main_loop(turn_state)
+
+    if confirm.lower() == "n":
+        _append_control_event("step_confirm_no", {})
+        state.reset_task()
+        clear_checkpoint()
+        return "好的，当前任务已停止。"
+
+    # 其他输入：视为对后续步骤的修改意见，重新生成计划
+    get_messages().append({"role": "user", "content": user_input})
+    _append_control_event("step_feedback", {"feedback": confirm})
+    revised_goal = (
+        f"{state.task.user_goal}\n\n"
+        f"用户在步骤确认阶段的补充意见：{confirm}"
+    )
+    state.task.user_goal = revised_goal
+    _append_control_event("plan_feedback", {"feedback": confirm})
+    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages(revised_goal))
+    if not plan:
+        state.reset_task()
+        clear_checkpoint()
+        return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
+
+    state.task.current_plan = plan.model_dump()
+    state.task.current_step_index = 0
+    state.task.status = "awaiting_plan_confirmation"
+    save_checkpoint(state)
+
+    print(format_plan_for_display(plan))
+    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    return ""
 
 
 def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
@@ -531,11 +576,30 @@ def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
     return None
 
 
+def _has_tool_result(tool_use_id: str) -> bool:
+    """Check whether the current conversation already contains a tool_result for this tool_use_id."""
+    for msg in state.conversation.messages:
+        content = msg.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") == tool_use_id:
+                    return True
+    return False
+
 def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Optional[str]:
     """执行单个工具调用。返回 __force_stop__ 或 None。"""
     tool_name = block.name
     tool_input = block.input
     tool_use_id = block.id
+
+    # 幂等检查：同一个 tool_use_id 只执行一次
+    execution_log = state.task.tool_execution_log
+    if tool_use_id in execution_log:
+        cached = execution_log[tool_use_id]["result"]
+        print(f"\n[系统] 工具 {tool_name} 已执行过，跳过执行")
+        if not _has_tool_result(tool_use_id):
+            _append_tool_result(tool_use_id, cached)
+        return None
 
     # 1. 分级确认
     confirmation = needs_tool_confirmation(tool_name, tool_input)
@@ -552,50 +616,43 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
         _append_tool_result(tool_use_id, result)
         return None
 
-    # 2. 用户确认
+    # 2. 工具确认改为 state 驱动（不再直接 input）
     if confirmation:
-        approved = confirm_tool_call(tool_name, tool_input)
+        # 记录待确认工具
+        state.task.pending_tool = {
+            "tool_use_id": tool_use_id,
+            "tool": tool_name,
+            "input": tool_input,
+        }
+        state.task.status = "awaiting_tool_confirmation"
+        save_checkpoint(state)
+        print(f"\n⚠️ 需要确认执行工具：{tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
+        print("是否执行？(y/n/输入反馈意见): ", end="", flush=True)
+        return None
     else:
         print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
-        approved = True
 
-    # 3. 执行或处理拒绝
-    if approved is True:
-        result = execute_tool(tool_name, tool_input, context=turn_context)
+    # 3. 执行工具（confirmation 已在上方处理）
+    result = execute_tool(tool_name, tool_input, context=turn_context)
 
-        if tool_name in ("write_file", "edit_file"):
-            turn_context["write_file_seen"] = True
+    # 写入执行记录（用于幂等执行）
+    state.task.tool_execution_log[tool_use_id] = {
+        "tool": tool_name,
+        "input": tool_input,
+        "result": result,
+    }
+    save_checkpoint(state)
 
-        turn_state.round_tool_traces.append({
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-            "status": "executed",
-            "result": result,
-        })
-    else:
-        # 拒绝
-        turn_state.consecutive_rejections += 1
+    if tool_name in ("write_file", "edit_file"):
+        turn_context["write_file_seen"] = True
 
-        if isinstance(approved, str):
-            result = f"用户拒绝了此操作，反馈如下：{approved}\n请根据用户反馈调整方案，不要重复相同的操作。"
-        else:
-            result = "用户拒绝了此操作。请停下来询问用户需要什么调整，不要重复相同的操作。"
-
-        turn_state.round_tool_traces.append({
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-            "status": "rejected",
-            "result": result,
-        })
-
-        if turn_state.consecutive_rejections >= FORCE_STOP_REJECTION_THRESHOLD:
-            result += "\n\n[系统指令] 用户已连续拒绝 2 次操作。立即停止所有工具调用，向用户询问下一步该怎么做。"
-
-        if turn_state.consecutive_rejections >= MAX_CONSECUTIVE_REJECTIONS:
-            _append_tool_result(tool_use_id, result)
-            return "__force_stop__"
+    turn_state.round_tool_traces.append({
+        "tool_use_id": tool_use_id,
+        "tool": tool_name,
+        "input": tool_input,
+        "status": "executed",
+        "result": result,
+    })
 
     _append_tool_result(tool_use_id, result)
     return None
@@ -610,6 +667,53 @@ def _extract_text(content_blocks) -> str:
 
 
 
+# 新增：控制事件注入
+def _append_control_event(event_type: str, payload: dict) -> None:
+    content = []
+
+    # ===== tool =====
+    if event_type == "tool_confirm_yes":
+        content.append({"type": "text", "text": "用户确认执行工具"})
+
+    elif event_type == "tool_confirm_no":
+        content.append({"type": "text", "text": "用户拒绝执行工具"})
+
+    elif event_type == "tool_feedback":
+        content.append({
+            "type": "text",
+            "text": f"用户对工具执行提出了补充意见：{payload.get('feedback')}"
+        })
+
+    # ===== plan =====
+    elif event_type == "plan_confirm_yes":
+        content.append({"type": "text", "text": "用户接受当前计划"})
+
+    elif event_type == "plan_confirm_no":
+        content.append({"type": "text", "text": "用户拒绝当前计划"})
+
+    elif event_type == "plan_feedback":
+        content.append({
+            "type": "text",
+            "text": f"用户对计划提出了修改意见：{payload.get('feedback')}"
+        })
+
+    # ===== step =====
+    elif event_type == "step_confirm_yes":
+        content.append({"type": "text", "text": "用户确认继续执行下一步"})
+
+    elif event_type == "step_confirm_no":
+        content.append({"type": "text", "text": "用户停止当前任务"})
+
+    elif event_type == "step_feedback":
+        content.append({
+            "type": "text",
+            "text": f"用户对后续步骤提出了补充意见：{payload.get('feedback')}"
+        })
+
+    get_messages().append({
+        "role": "user",
+        "content": content
+    })
 def _append_tool_result(tool_use_id: str, result: str) -> None:
     get_messages().append({
         "role": "user",
@@ -619,3 +723,68 @@ def _append_tool_result(tool_use_id: str, result: str) -> None:
             "content": result,
         }],
     })
+# 新增：处理工具确认（state 驱动）
+def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
+    """
+    处理工具确认（state 驱动）
+
+    协议：
+    - y：执行工具
+    - n：拒绝执行
+    - 其他输入：作为反馈
+    """
+    confirm = user_input.strip()
+
+    pending = state.task.pending_tool
+    if not pending:
+        return "[系统] 未找到待确认的工具。"
+
+    tool_use_id = pending["tool_use_id"]
+    tool_name = pending["tool"]
+    tool_input = pending["input"]
+
+    # 清理 pending
+    state.task.pending_tool = None
+
+    if confirm.lower() == "y":
+        _append_control_event("tool_confirm_yes", pending)
+        result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
+
+        # 幂等记录
+        state.task.tool_execution_log[tool_use_id] = {
+            "tool": tool_name,
+            "input": tool_input,
+            "result": result,
+        }
+        # 工具 trace logging
+        turn_state.round_tool_traces.append({
+            "tool_use_id": tool_use_id,
+            "tool": tool_name,
+            "input": tool_input,
+            "status": "executed",
+            "result": result,
+        })
+
+        state.task.status = "running"
+        save_checkpoint(state)
+
+        _append_tool_result(tool_use_id, result)
+        return _run_main_loop(turn_state)
+
+    if confirm.lower() == "n":
+        _append_control_event("tool_confirm_no", pending)
+        state.task.status = "running"
+        save_checkpoint(state)
+        return _run_main_loop(turn_state)
+
+    # 其他输入：作为反馈
+    _append_control_event("tool_feedback", {
+        "feedback": confirm,
+        "tool": tool_name,
+        "input": tool_input,
+    })
+    result = f"用户反馈：{confirm}"
+    _append_tool_result(tool_use_id, result)
+    state.task.status = "running"
+    save_checkpoint(state)
+    return _run_main_loop(turn_state)

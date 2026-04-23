@@ -36,16 +36,22 @@ def main_loop():
     
     while True:
         try:
-            user_input = input("你: ")
+            user_input = input("你: ").strip()
+
+            # 1️⃣ 空输入过滤
+            if not user_input:
+                continue
             
-            if user_input.strip().lower() == "quit":
+            if user_input.lower() == "quit":
                 finalize_session()
                 break
             
             if handle_slash_command(user_input):
                 continue
             
-            chat(user_input)
+            reply = chat(user_input)
+            if reply:
+                print(reply)
         
         except KeyboardInterrupt:
             now = time.time()

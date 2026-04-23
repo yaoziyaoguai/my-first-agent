@@ -39,6 +39,7 @@ def try_resume_from_checkpoint():
     from agent.core import get_state
 
     checkpoint = load_checkpoint()
+    print("[DEBUG] checkpoint:", checkpoint)
     if not checkpoint:
         return
 
@@ -60,7 +61,7 @@ def try_resume_from_checkpoint():
 
     restored = load_checkpoint_to_state(get_state())
     if restored:
-        print("\n[系统] 已恢复任务状态。继续对话即可。\n")
+        pass 
     else:
         print("\n[系统] 恢复断点失败。\n")
 

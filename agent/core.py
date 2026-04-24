@@ -18,10 +18,16 @@ from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 from agent.checkpoint import save_checkpoint, clear_checkpoint
-from agent.conversation_events import append_control_event, append_tool_result, has_tool_result
+from agent.conversation_events import  append_tool_result, has_tool_result
 from agent.context_builder import (
     build_planning_messages as build_planning_messages_from_state,
     build_execution_messages as build_execution_messages_from_state,
+)
+
+from agent.confirm_handlers import (
+    handle_plan_confirmation,
+    handle_step_confirmation,
+    handle_tool_confirmation,
 )
 
 
@@ -173,15 +179,37 @@ def chat(user_input: str) -> str:
     # 先处理“等待用户确认计划”的状态：
     # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
     if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
-        return _handle_plan_confirmation(user_input, turn_state)
+        return handle_plan_confirmation(
+            user_input,
+            state=state,
+            turn_state=turn_state,
+            client=client,
+            model_name=MODEL_NAME,
+            continue_fn=_run_main_loop,
+            build_planning_messages_fn=build_planning_messages_from_state,
+        )
 
     # 处理“等待用户确认是否进入下一步”的状态。
     if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
-        return _handle_step_confirmation(user_input, turn_state)
+        return handle_step_confirmation(
+            user_input,
+            state=state,
+            turn_state=turn_state,
+            client=client,
+            model_name=MODEL_NAME,
+            continue_fn=_run_main_loop,
+            advance_step_fn=_advance_current_step_if_needed,
+            build_planning_messages_fn=build_planning_messages_from_state,
+        )
 
     # 新增：处理工具确认（state 驱动）
     if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
-        return _handle_tool_confirmation(user_input, turn_state)
+        return handle_tool_confirmation(
+            user_input,
+            state=state,
+            turn_state=turn_state,
+            continue_fn=_run_main_loop,
+        )
 
     # 如果当前已有运行中的任务，则默认把这次输入视为“继续当前任务”的反馈。
     if state.task.current_plan and state.task.status == "running":
@@ -218,48 +246,6 @@ def _run_planning_phase(user_input: str) -> str:
     return "awaiting_plan_confirmation"
 
 
-# 新增：处理“等待用户确认计划”阶段的输入
-def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
-    """
-    处理“等待用户确认计划”阶段的输入。
-
-    规则：
-    - y：接受当前计划，进入 running 并开始执行
-    - n：取消当前计划，回到 idle
-    - 其他任意输入：视为对当前计划的修改意见，重新生成计划
-    """
-    confirm = user_input.strip()
-
-    if confirm.lower() == "y":
-        
-        append_control_event(get_messages(),"plan_confirm_yes", {})
-        state.task.status = "running"
-        save_checkpoint(state)
-        return _run_main_loop(turn_state)
-
-    if confirm.lower() == "n":
-        
-        append_control_event(get_messages(),"plan_confirm_no", {})
-        state.reset_task()
-        return "好的，已取消。"
-
-    # 其他任何输入都视为对计划的修改意见：
-    # 基于原始目标 + 修改意见重新生成计划，而不是继续执行。
-    revised_goal = f"{state.task.user_goal}\n\n用户对计划的修改意见：{confirm}"
-    state.task.user_goal = revised_goal
-
-    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages_from_state(state,revised_goal))
-    if not plan:
-        state.reset_task()
-        return "未能根据你的修改意见重新生成计划，请重新描述你的需求。"
-
-    state.task.current_plan = plan.model_dump()
-    state.task.current_step_index = 0
-    state.task.status = "awaiting_plan_confirmation"
-
-    print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
-    return ""
 
 
 # ========== 主循环 ==========
@@ -376,45 +362,6 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
     return assistant_text
 
 
-def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
-    confirm = user_input.strip()
-
-    if confirm.lower() == "y":
-        
-        append_control_event(get_messages(),"step_confirm_yes", {})
-        _advance_current_step_if_needed()
-        state.task.status = "running"
-        save_checkpoint(state)
-        return _run_main_loop(turn_state)
-
-    if confirm.lower() == "n":
-        
-        append_control_event(get_messages(),"step_confirm_no", {})
-        state.reset_task()
-        clear_checkpoint()
-        return "好的，当前任务已停止。"
-
-    # ✅ 只保留 plan_feedback（删除 step_feedback + 原始 user 输入）
-    
-    append_control_event(get_messages(),"plan_feedback", {"feedback": confirm})
-
-    revised_goal = f"{state.task.user_goal}\n\n用户补充：{confirm}"
-    state.task.user_goal = revised_goal
-
-    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages_from_state(state,revised_goal))
-    if not plan:
-        state.reset_task()
-        clear_checkpoint()
-        return "未能生成新计划"
-
-    state.task.current_plan = plan.model_dump()
-    state.task.current_step_index = 0
-    state.task.status = "awaiting_plan_confirmation"
-    save_checkpoint(state)
-
-    print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n): ", end="", flush=True)
-    return ""
 
 
 def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
@@ -525,54 +472,3 @@ def _extract_text(content_blocks) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
-# 新增：处理工具确认（state 驱动）
-def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
-    confirm = user_input.strip()
-
-    pending = state.task.pending_tool
-    if not pending:
-        return "[系统] 未找到待确认工具"
-
-    tool_use_id = pending["tool_use_id"]
-    tool_name = pending["tool"]
-    tool_input = pending["input"]
-
-    state.task.pending_tool = None
-
-    if confirm.lower() == "y":
-        
-        append_control_event(get_messages(),"tool_confirm_yes", pending)
-
-        result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
-
-        state.task.tool_execution_log[tool_use_id] = {
-            "tool": tool_name,
-            "input": tool_input,
-            "result": result,
-        }
-
-        append_tool_result(get_messages(), tool_use_id, result)
-
-        state.task.status = "running"
-        save_checkpoint(state)
-        return _run_main_loop(turn_state)
-
-    if confirm.lower() == "n":
-        
-        append_control_event(get_messages(),"tool_confirm_no", pending)
-
-        # ❗关键：不生成 tool_result
-        state.task.status = "running"
-        save_checkpoint(state)
-        return _run_main_loop(turn_state)
-
-    # ✅ 反馈：只记录，不生成 tool_result
-    
-    append_control_event(get_messages(),"tool_feedback", {
-        "feedback": confirm,
-        "tool": tool_name,
-    })
-
-    state.task.status = "running"
-    save_checkpoint(state)
-    return _run_main_loop(turn_state)

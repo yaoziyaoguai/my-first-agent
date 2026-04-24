@@ -1,5 +1,4 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
-import json
 from agent.plan_schema import Plan
 from dataclasses import dataclass, field
 from typing import Optional
@@ -16,19 +15,21 @@ from config import (
 )
 from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
-from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
+from agent.tool_registry import get_tool_definitions
 from agent.checkpoint import save_checkpoint, clear_checkpoint
-from agent.conversation_events import  append_tool_result, has_tool_result
 from agent.context_builder import (
     build_planning_messages as build_planning_messages_from_state,
     build_execution_messages as build_execution_messages_from_state,
 )
+
 
 from agent.confirm_handlers import (
     handle_plan_confirmation,
     handle_step_confirmation,
     handle_tool_confirmation,
 )
+
+from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
 
 
 
@@ -386,83 +387,20 @@ def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
     turn_context = {}
 
     for block in tool_use_blocks:
-        result = _execute_single_tool(block, turn_state, turn_context)
-        if result == "__force_stop__":
+        result = execute_single_tool(
+            block,
+            state=state,
+            turn_state=turn_state,
+            turn_context=turn_context,
+            messages=get_messages(),
+        )
+        if result == FORCE_STOP:
             return "用户连续拒绝多次操作，任务已停止。"
+        if result == AWAITING_USER:
+            return ""
 
     return None
 
-
-def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Optional[str]:
-    """执行单个工具调用。返回 __force_stop__ 或 None。"""
-    tool_name = block.name
-    tool_input = block.input
-    tool_use_id = block.id
-
-    # 幂等检查：同一个 tool_use_id 只执行一次
-    execution_log = state.task.tool_execution_log
-    if tool_use_id in execution_log:
-        cached = execution_log[tool_use_id]["result"]
-        print(f"\n[系统] 工具 {tool_name} 已执行过，跳过执行")
-        if not has_tool_result(get_messages(), tool_use_id):
-            append_tool_result(get_messages(), tool_use_id, cached)
-        return None
-
-    # 1. 分级确认
-    confirmation = needs_tool_confirmation(tool_name, tool_input)
-
-    if confirmation == "block":
-        result = f"拒绝执行：'{tool_input.get('path', '')}' 是敏感文件，禁止 Agent 访问"
-        turn_state.round_tool_traces.append({
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-            "status": "blocked_sensitive",
-            "result": result,
-        })
-        append_tool_result(get_messages(), tool_use_id, result)
-        return None
-
-    # 2. 工具确认改为 state 驱动（不再直接 input）
-    if confirmation:
-        # 记录待确认工具
-        state.task.pending_tool = {
-            "tool_use_id": tool_use_id,
-            "tool": tool_name,
-            "input": tool_input,
-        }
-        state.task.status = "awaiting_tool_confirmation"
-        save_checkpoint(state)
-        print(f"\n⚠️ 需要确认执行工具：{tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
-        print("是否执行？(y/n/输入反馈意见): ", end="", flush=True)
-        return None
-    else:
-        print(f"  [自动执行] {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
-
-    # 3. 执行工具（confirmation 已在上方处理）
-    result = execute_tool(tool_name, tool_input, context=turn_context)
-
-    # 写入执行记录（用于幂等执行）
-    state.task.tool_execution_log[tool_use_id] = {
-        "tool": tool_name,
-        "input": tool_input,
-        "result": result,
-    }
-    save_checkpoint(state)
-
-    if tool_name in ("write_file", "edit_file"):
-        turn_context["write_file_seen"] = True
-
-    turn_state.round_tool_traces.append({
-        "tool_use_id": tool_use_id,
-        "tool": tool_name,
-        "input": tool_input,
-        "status": "executed",
-        "result": result,
-    })
-
-    append_tool_result(get_messages(), tool_use_id, result)
-    return None
 
 
 # ========== 辅助 ==========

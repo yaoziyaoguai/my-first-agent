@@ -29,7 +29,7 @@ from agent.confirm_handlers import (
     handle_tool_confirmation,
 )
 
-from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
+from agent.response_handlers import handle_tool_use_response
 
 
 
@@ -274,7 +274,13 @@ def _run_main_loop(turn_state: TurnState) -> str:
             continue
 
         if response.stop_reason == "tool_use":
-            result = _handle_tool_use(response, turn_state)
+            result = handle_tool_use_response(
+                response,
+                state=state,
+                turn_state=turn_state,
+                messages=get_messages(),
+                extract_text_fn=_extract_text,
+            )
             if result is not None:
                 return result
             continue
@@ -362,44 +368,6 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
 
     return assistant_text
 
-
-
-
-def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
-    """处理一轮工具调用。"""
-
-    # ✅ 只保留 text，不污染 messages
-    assistant_text = _extract_text(response.content)
-    if assistant_text:
-        get_messages().append({
-            "role": "assistant",
-            "content": assistant_text
-        })
-
-    turn_state.consecutive_max_tokens = 0
-
-    tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-    turn_state.tool_call_count += len(tool_use_blocks)
-
-    if turn_state.tool_call_count > MAX_TOOL_CALLS_PER_TURN:
-        return "工具调用次数过多，请简化任务或分步执行。"
-
-    turn_context = {}
-
-    for block in tool_use_blocks:
-        result = execute_single_tool(
-            block,
-            state=state,
-            turn_state=turn_state,
-            turn_context=turn_context,
-            messages=get_messages(),
-        )
-        if result == FORCE_STOP:
-            return "用户连续拒绝多次操作，任务已停止。"
-        if result == AWAITING_USER:
-            return ""
-
-    return None
 
 
 

@@ -1,5 +1,3 @@
-
-
 """Response handlers for model responses.
 
 These helpers sit at the boundary between raw model responses and the agent
@@ -65,3 +63,87 @@ def handle_tool_use_response(
             return ""
 
     return None
+
+
+def handle_max_tokens_response(
+    response: Any,
+    *,
+    turn_state: Any,
+    messages: list[dict[str, Any]],
+    extract_text_fn,
+    max_consecutive_max_tokens: int,
+) -> str | None:
+    """Handle a model response whose stop_reason is max_tokens.
+
+    This preserves the core.py behavior:
+    - keep the assistant text in conversation messages
+    - increment consecutive max_tokens count
+    - stop when the configured threshold is exceeded
+    """
+    assistant_text = extract_text_fn(response.content)
+    if assistant_text:
+        messages.append({
+            "role": "assistant",
+            "content": assistant_text,
+        })
+
+    turn_state.consecutive_max_tokens += 1
+
+    if turn_state.consecutive_max_tokens >= max_consecutive_max_tokens:
+        return "模型连续多次达到最大输出长度，任务已停止。请缩小任务范围后重试。"
+
+    return None
+
+
+def handle_end_turn_response(
+    response: Any,
+    *,
+    state: Any,
+    turn_state: Any,
+    messages: list[dict[str, Any]],
+    extract_text_fn,
+    is_current_step_completed_fn,
+    advance_step_fn,
+    save_checkpoint_fn,
+    clear_checkpoint_fn,
+    plan_model,
+) -> str:
+    """Handle a model response whose stop_reason is end_turn.
+
+    This keeps end-turn behavior outside core.py while preserving state-driven
+    execution semantics:
+    - append assistant text into conversation messages
+    - detect whether current step completed
+    - move to awaiting_step_confirmation when there are more steps
+    - advance / clear checkpoint when the task is done
+    """
+    turn_state.consecutive_max_tokens = 0
+
+    assistant_text = extract_text_fn(response.content)
+    if not assistant_text:
+        assistant_text = "[任务完成]"
+
+    messages.append({
+        "role": "assistant",
+        "content": assistant_text,
+    })
+
+    if is_current_step_completed_fn(assistant_text):
+        if state.task.current_plan:
+            plan = plan_model.model_validate(state.task.current_plan)
+            idx = state.task.current_step_index
+
+            if idx < len(plan.steps) - 1:
+                state.task.status = "awaiting_step_confirmation"
+                save_checkpoint_fn(state)
+                return (
+                    assistant_text
+                    + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止任务。"
+                )
+
+        advance_step_fn()
+
+    if state.task.status == "done":
+        clear_checkpoint_fn()
+
+    return assistant_text

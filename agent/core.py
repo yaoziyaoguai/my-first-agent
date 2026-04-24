@@ -29,17 +29,19 @@ from agent.confirm_handlers import (
     handle_tool_confirmation,
 )
 
-from agent.response_handlers import handle_tool_use_response
+from agent.response_handlers import (
+    handle_end_turn_response,
+    handle_max_tokens_response,
+    handle_tool_use_response,
+)
 
 
 
 
 # ========== 常量 ==========
 
-MAX_TOOL_CALLS_PER_TURN = 20          # 实际工具调用上限
+
 MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）
-MAX_CONSECUTIVE_REJECTIONS = 3        # 连续拒绝强制停止阈值
-FORCE_STOP_REJECTION_THRESHOLD = 2    # 追加系统指令的拒绝阈值
 
 
 # ========== 全局 ==========
@@ -262,13 +264,30 @@ def _run_main_loop(turn_state: TurnState) -> str:
         response = _call_model(turn_state)
 
         if response.stop_reason == "max_tokens":
-            result = _handle_max_tokens(response, turn_state)
+            result = handle_max_tokens_response(
+                response,
+                turn_state=turn_state,
+                messages=get_messages(),
+                extract_text_fn=_extract_text,
+                max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
+            )
             if result is not None:
                 return result
             continue
 
         if response.stop_reason == "end_turn":
-            result = _handle_end_turn(response, turn_state)
+            result = handle_end_turn_response(
+                response,
+                state=state,
+                turn_state=turn_state,
+                messages=get_messages(),
+                extract_text_fn=_extract_text,
+                is_current_step_completed_fn=is_current_step_completed,
+                advance_step_fn=_advance_current_step_if_needed,
+                save_checkpoint_fn=save_checkpoint,
+                clear_checkpoint_fn=clear_checkpoint,
+                plan_model=Plan,
+            )
             if result is not None:
                 return result
             continue
@@ -317,58 +336,6 @@ def _call_model(turn_state: TurnState):
     return response
 
 
-# ========== stop_reason 处理器 ==========
-
-def _handle_max_tokens(response, turn_state: TurnState) -> Optional[str]:
-    """输出被截断。返回字符串表示结束，None 表示继续循环。"""
-    turn_state.consecutive_max_tokens += 1
-
-    if turn_state.consecutive_max_tokens >= MAX_CONTINUE_ATTEMPTS:
-        print(f"\n[系统] 已连续 {turn_state.consecutive_max_tokens} 次触发输出上限，强制停止。")
-        get_messages().append({"role": "assistant", "content": response.content})
-        return "内容过长，已自动截断。如需完整输出，请分步请求。"
-
-    print(f"\n[系统] 回复被截断，自动继续（{turn_state.consecutive_max_tokens}/{MAX_CONTINUE_ATTEMPTS}）...", flush=True)
-
-    get_messages().append({"role": "assistant", "content": response.content})
-    get_messages().append({"role": "user", "content": "请继续你刚才的输出，不要重复已经说过的内容。"})
-    return None
-
-
-def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
-    turn_state.consecutive_max_tokens = 0
-
-    assistant_text = _extract_text(response.content)
-    if not assistant_text:
-        assistant_text = "[任务完成]"
-
-    # ✅ 不再塞 response.content
-    get_messages().append({
-        "role": "assistant",
-        "content": assistant_text
-    })
-
-    if is_current_step_completed(assistant_text):
-        if state.task.current_plan:
-            plan = Plan.model_validate(state.task.current_plan)
-            idx = state.task.current_step_index
-
-            if idx < len(plan.steps) - 1:
-                state.task.status = "awaiting_step_confirmation"
-                save_checkpoint(state)
-                return (
-                    assistant_text
-                    + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止任务。"
-                )
-
-        _advance_current_step_if_needed()
-
-    if state.task.status == "done":
-        clear_checkpoint()
-
-    return assistant_text
-
-
 
 
 # ========== 辅助 ==========
@@ -376,5 +343,3 @@ def _handle_end_turn(response, turn_state: TurnState) -> Optional[str]:
 def _extract_text(content_blocks) -> str:
     parts = [block.text for block in content_blocks if block.type == "text"]
     return "\n".join(p for p in parts if p).strip()
-
-

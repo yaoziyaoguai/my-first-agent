@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.planner import Plan
+from agent.task_runtime import advance_current_step_if_needed, is_current_step_completed
 
 from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
 
@@ -104,8 +105,6 @@ def handle_end_turn_response(
     turn_state: Any,
     messages: list[dict[str, Any]],
     extract_text_fn,
-    is_current_step_completed_fn,
-    advance_step_fn,
 ) -> str:
     """Handle a model response whose stop_reason is end_turn.
 
@@ -127,7 +126,7 @@ def handle_end_turn_response(
         "content": assistant_text,
     })
 
-    if is_current_step_completed_fn(assistant_text):
+    if is_current_step_completed(state, assistant_text):
         if state.task.current_plan:
             plan = Plan.model_validate(state.task.current_plan)
             idx = state.task.current_step_index
@@ -140,7 +139,7 @@ def handle_end_turn_response(
                     + "\n\n本步骤已完成。回复 y 继续下一步，回复 n 停止任务。"
                 )
 
-        advance_step_fn()
+        advance_current_step_if_needed(state)
 
     if state.task.status == "done":
         clear_checkpoint()

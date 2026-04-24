@@ -1,5 +1,4 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
-from agent.plan_schema import Plan
 from dataclasses import dataclass, field
 import anthropic
 from agent.prompt_builder import build_system_prompt
@@ -15,7 +14,6 @@ from config import (
 from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import get_tool_definitions
-from agent.checkpoint import save_checkpoint, clear_checkpoint
 from agent.context_builder import (
     build_planning_messages as build_planning_messages_from_state,
     build_execution_messages as build_execution_messages_from_state,
@@ -34,7 +32,7 @@ from agent.response_handlers import (
     handle_tool_use_response,
 )
 
-
+from agent.task_runtime import advance_current_step_if_needed
 
 
 # ========== 常量 ==========
@@ -112,49 +110,8 @@ def refresh_runtime_system_prompt() -> str:
 
 refresh_runtime_system_prompt()
 
-def _advance_current_step_if_needed() -> None:
-    if not state.task.current_plan:
-        return
 
-    plan = Plan.model_validate(state.task.current_plan)
-    if not plan.steps:
-        return
 
-    current_index = state.task.current_step_index
-    last_index = len(plan.steps) - 1
-
-    if current_index < last_index:
-        state.task.current_step_index += 1
-    else:
-        # ✅ 已完成最后一步
-        state.task.status = "done"
-        state.task.current_plan = None
-        state.task.current_step_index = 0
-
-def is_current_step_completed(assistant_text: str) -> bool:
-    """
-    轻量版 step 完成判定。
-
-    当前策略：
-    - 在 step confirmation 模式下，不再用 completion_criteria 作为硬门槛
-    - 只要当前存在有效 step，并且模型这一轮已经正常 end_turn，
-      就允许进入后续的 step confirmation / step 推进流程
-
-    说明：
-    - 真正是否进入下一步，由 awaiting_step_confirmation + 用户确认决定
-    - completion_criteria 仍可作为提示信息给模型看，但不再阻断状态推进
-    """
-    if not state.task.current_plan:
-        return True
-
-    plan = Plan.model_validate(state.task.current_plan)
-    idx = state.task.current_step_index
-
-    # 当前 step 索引不合法，默认视为完成，避免卡死
-    if not (0 <= idx < len(plan.steps)):
-        return True
-
-    return True
 
 # ========== 对外主入口 ==========
 
@@ -200,7 +157,7 @@ def chat(user_input: str) -> str:
             client=client,
             model_name=MODEL_NAME,
             continue_fn=_run_main_loop,
-            advance_step_fn=_advance_current_step_if_needed,
+            advance_step_fn=lambda: advance_current_step_if_needed(state),
             build_planning_messages_fn=build_planning_messages_from_state,
         )
 
@@ -281,11 +238,6 @@ def _run_main_loop(turn_state: TurnState) -> str:
                 turn_state=turn_state,
                 messages=get_messages(),
                 extract_text_fn=_extract_text,
-                is_current_step_completed_fn=is_current_step_completed,
-                advance_step_fn=_advance_current_step_if_needed,
-                save_checkpoint_fn=save_checkpoint,
-                clear_checkpoint_fn=clear_checkpoint,
-                plan_model=Plan,
             )
             if result is not None:
                 return result

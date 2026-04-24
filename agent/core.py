@@ -21,6 +21,7 @@ from agent.context_builder import (
 
 
 from agent.confirm_handlers import (
+    ConfirmationContext,
     handle_plan_confirmation,
     handle_step_confirmation,
     handle_tool_confirmation,
@@ -32,7 +33,8 @@ from agent.response_handlers import (
     handle_tool_use_response,
 )
 
-from agent.task_runtime import advance_current_step_if_needed
+
+
 
 
 # ========== 常量 ==========
@@ -71,29 +73,6 @@ class TurnState:
     loop_iterations: int = 0        # 循环次数
     consecutive_rejections: int = 0
     consecutive_max_tokens: int = 0
-
-
-def get_state():
-
-    """
-
-    读取当前全局 AgentState。
-
-    先保留全局单例写法，后面再考虑彻底去全局化。
-
-    """
-
-    return state
-
-def get_messages() -> list[dict]:
-
-    """
-
-    兼容旧逻辑：统一从 state.conversation.messages 取消息历史。
-
-    """
-
-    return state.conversation.messages
 
 
 def refresh_runtime_system_prompt() -> str:
@@ -135,40 +114,26 @@ def chat(user_input: str) -> str:
         system_prompt=runtime_system_prompt,
     )
 
+    confirmation_ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=client,
+        model_name=MODEL_NAME,
+        continue_fn=_run_main_loop,
+    )
+
     # 先处理“等待用户确认计划”的状态：
     # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
     if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
-        return handle_plan_confirmation(
-            user_input,
-            state=state,
-            turn_state=turn_state,
-            client=client,
-            model_name=MODEL_NAME,
-            continue_fn=_run_main_loop,
-            build_planning_messages_fn=build_planning_messages_from_state,
-        )
+        return handle_plan_confirmation(user_input, confirmation_ctx)
 
     # 处理“等待用户确认是否进入下一步”的状态。
     if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
-        return handle_step_confirmation(
-            user_input,
-            state=state,
-            turn_state=turn_state,
-            client=client,
-            model_name=MODEL_NAME,
-            continue_fn=_run_main_loop,
-            advance_step_fn=lambda: advance_current_step_if_needed(state),
-            build_planning_messages_fn=build_planning_messages_from_state,
-        )
+        return handle_step_confirmation(user_input, confirmation_ctx)
 
     # 新增：处理工具确认（state 驱动）
     if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
-        return handle_tool_confirmation(
-            user_input,
-            state=state,
-            turn_state=turn_state,
-            continue_fn=_run_main_loop,
-        )
+        return handle_tool_confirmation(user_input, confirmation_ctx)
 
     # 如果当前已有运行中的任务，则默认把这次输入视为“继续当前任务”的反馈。
     if state.task.current_plan and state.task.status == "running":
@@ -191,7 +156,7 @@ def _run_planning_phase(user_input: str) -> str:
     """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。"""
     plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages_from_state(state,user_input))
     if not plan:
-        get_messages().append({"role": "user", "content": user_input})
+        state.conversation.messages.append({"role": "user", "content": user_input})
         return "ok"
 
     state.task.current_plan = plan.model_dump()
@@ -223,7 +188,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
             result = handle_max_tokens_response(
                 response,
                 turn_state=turn_state,
-                messages=get_messages(),
+                messages=state.conversation.messages,
                 extract_text_fn=_extract_text,
                 max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
             )
@@ -236,7 +201,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
                 response,
                 state=state,
                 turn_state=turn_state,
-                messages=get_messages(),
+                messages=state.conversation.messages,
                 extract_text_fn=_extract_text,
             )
             if result is not None:
@@ -248,7 +213,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
                 response,
                 state=state,
                 turn_state=turn_state,
-                messages=get_messages(),
+                messages=state.conversation.messages,
                 extract_text_fn=_extract_text,
             )
             if result is not None:

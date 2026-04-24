@@ -1,7 +1,6 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
 from agent.plan_schema import Plan
 from dataclasses import dataclass, field
-from typing import Optional
 import anthropic
 from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state

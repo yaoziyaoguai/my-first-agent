@@ -1,6 +1,5 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
 import json
-import re
 from agent.plan_schema import Plan
 from dataclasses import dataclass, field
 from typing import Optional
@@ -19,6 +18,7 @@ from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 from agent.checkpoint import save_checkpoint, clear_checkpoint
+from agent.conversation_events import append_control_event, append_tool_result, has_tool_result
 
 
 
@@ -353,13 +353,13 @@ def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
-        _append_control_event("plan_confirm_yes", {})
+        append_control_event("plan_confirm_yes", {})
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        _append_control_event("plan_confirm_no", {})
+        append_control_event("plan_confirm_no", {})
         state.reset_task()
         return "好的，已取消。"
 
@@ -500,20 +500,20 @@ def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
-        _append_control_event("step_confirm_yes", {})
+        append_control_event("step_confirm_yes", {})
         _advance_current_step_if_needed()
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        _append_control_event("step_confirm_no", {})
+        append_control_event("step_confirm_no", {})
         state.reset_task()
         clear_checkpoint()
         return "好的，当前任务已停止。"
 
     # ✅ 只保留 plan_feedback（删除 step_feedback + 原始 user 输入）
-    _append_control_event("plan_feedback", {"feedback": confirm})
+    append_control_event("plan_feedback", {"feedback": confirm})
 
     revised_goal = f"{state.task.user_goal}\n\n用户补充：{confirm}"
     state.task.user_goal = revised_goal
@@ -563,16 +563,6 @@ def _handle_tool_use(response, turn_state: TurnState) -> Optional[str]:
     return None
 
 
-def _has_tool_result(tool_use_id: str) -> bool:
-    """Check whether the current conversation already contains a tool_result for this tool_use_id."""
-    for msg in state.conversation.messages:
-        content = msg.get("content", [])
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") == tool_use_id:
-                    return True
-    return False
-
 def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Optional[str]:
     """执行单个工具调用。返回 __force_stop__ 或 None。"""
     tool_name = block.name
@@ -584,8 +574,8 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
     if tool_use_id in execution_log:
         cached = execution_log[tool_use_id]["result"]
         print(f"\n[系统] 工具 {tool_name} 已执行过，跳过执行")
-        if not _has_tool_result(tool_use_id):
-            _append_tool_result(tool_use_id, cached)
+        if not has_tool_result(get_messages(), tool_use_id):
+            append_tool_result(get_messages(), tool_use_id, cached)
         return None
 
     # 1. 分级确认
@@ -600,7 +590,7 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
             "status": "blocked_sensitive",
             "result": result,
         })
-        _append_tool_result(tool_use_id, result)
+        append_tool_result(get_messages(), tool_use_id, result)
         return None
 
     # 2. 工具确认改为 state 驱动（不再直接 input）
@@ -641,7 +631,7 @@ def _execute_single_tool(block, turn_state: TurnState, turn_context: dict) -> Op
         "result": result,
     })
 
-    _append_tool_result(tool_use_id, result)
+    append_tool_result(get_messages(), tool_use_id, result)
     return None
 
 
@@ -652,64 +642,6 @@ def _extract_text(content_blocks) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
-
-
-# 新增：控制事件注入
-def _append_control_event(event_type: str, payload: dict) -> None:
-    content = []
-
-    # ===== tool =====
-    if event_type == "tool_confirm_yes":
-        content.append({"type": "text", "text": "用户确认执行工具"})
-
-    elif event_type == "tool_confirm_no":
-        content.append({"type": "text", "text": "用户拒绝执行工具"})
-
-    elif event_type == "tool_feedback":
-        content.append({
-            "type": "text",
-            "text": f"用户对工具执行提出了补充意见：{payload.get('feedback')}"
-        })
-
-    # ===== plan =====
-    elif event_type == "plan_confirm_yes":
-        content.append({"type": "text", "text": "用户接受当前计划"})
-
-    elif event_type == "plan_confirm_no":
-        content.append({"type": "text", "text": "用户拒绝当前计划"})
-
-    elif event_type == "plan_feedback":
-        content.append({
-            "type": "text",
-            "text": f"用户对计划提出了修改意见：{payload.get('feedback')}"
-        })
-
-    # ===== step =====
-    elif event_type == "step_confirm_yes":
-        content.append({"type": "text", "text": "用户确认继续执行下一步"})
-
-    elif event_type == "step_confirm_no":
-        content.append({"type": "text", "text": "用户停止当前任务"})
-
-    elif event_type == "step_feedback":
-        content.append({
-            "type": "text",
-            "text": f"用户对后续步骤提出了补充意见：{payload.get('feedback')}"
-        })
-
-    get_messages().append({
-        "role": "user",
-        "content": content
-    })
-def _append_tool_result(tool_use_id: str, result: str) -> None:
-    get_messages().append({
-        "role": "user",
-        "content": [{
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": result,
-        }],
-    })
 # 新增：处理工具确认（state 驱动）
 def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
@@ -725,7 +657,7 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
     state.task.pending_tool = None
 
     if confirm.lower() == "y":
-        _append_control_event("tool_confirm_yes", pending)
+        append_control_event("tool_confirm_yes", pending)
 
         result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
 
@@ -735,14 +667,14 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
             "result": result,
         }
 
-        _append_tool_result(tool_use_id, result)
+        append_tool_result(get_messages(), tool_use_id, result)
 
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        _append_control_event("tool_confirm_no", pending)
+        append_control_event("tool_confirm_no", pending)
 
         # ❗关键：不生成 tool_result
         state.task.status = "running"
@@ -750,7 +682,7 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
         return _run_main_loop(turn_state)
 
     # ✅ 反馈：只记录，不生成 tool_result
-    _append_control_event("tool_feedback", {
+    append_control_event("tool_feedback", {
         "feedback": confirm,
         "tool": tool_name,
     })

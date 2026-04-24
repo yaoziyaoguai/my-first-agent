@@ -19,6 +19,10 @@ from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import execute_tool, get_tool_definitions, needs_tool_confirmation
 from agent.checkpoint import save_checkpoint, clear_checkpoint
 from agent.conversation_events import append_control_event, append_tool_result, has_tool_result
+from agent.context_builder import (
+    build_planning_messages as build_planning_messages_from_state,
+    build_execution_messages as build_execution_messages_from_state,
+)
 
 
 
@@ -99,132 +103,6 @@ def refresh_runtime_system_prompt() -> str:
     return state.get_system_prompt()
 
 refresh_runtime_system_prompt()
-
-
-
-def build_planning_messages(current_user_input: str) -> list[dict]:
-    """
-    构造给 planner 使用的轻量 messages。
-
-    规则：
-    - 只提供历史摘要 + 最近原始消息
-    - 不注入 current_plan / current_step / completion_criteria
-    - 避免让 planner 被执行态上下文污染
-    - 当前轮输入只在这里临时加入，不提前写回 conversation state
-    """
-    model_messages: list[dict] = []
-
-    if state.memory.working_summary:
-        model_messages.append({
-            "role": "user",
-            "content": f"[以下是之前对话的摘要]\n{state.memory.working_summary}",
-        })
-        model_messages.append({
-            "role": "assistant",
-            "content": "好的，我了解了之前的对话内容。请继续。",
-        })
-
-    model_messages.extend(state.conversation.messages)
-    model_messages.append({"role": "user", "content": current_user_input})
-    return model_messages
-
-
-
-def build_execution_messages() -> list[dict]:
-    """
-    构造真正喂给执行阶段模型的 messages。
-
-    规则：
-    - summary 不存到 conversation.messages
-    - current_plan 不存到 conversation.messages
-    - 只在这里临时拼接
-    - 只给模型当前步骤，而不是整份计划
-    """
-    model_messages: list[dict] = []
-
-    # 历史摘要
-    if state.memory.working_summary:
-        model_messages.append({
-            "role": "user",
-            "content": f"[以下是之前对话的摘要]\n{state.memory.working_summary}",
-        })
-        model_messages.append({
-            "role": "assistant",
-            "content": "好的，我了解了之前的对话内容。请继续。",
-        })
-
-    # 当前任务步骤
-    if state.task.current_plan:
-        plan = Plan.model_validate(state.task.current_plan)
-        current_step = state.task.current_step_index
-
-        if 0 <= current_step < len(plan.steps):
-            step = plan.steps[current_step]
-
-            step_lines = [
-                f"[当前任务] {plan.goal}",
-            ]
-
-            if plan.thinking:
-                step_lines.append(f"规划思路：{plan.thinking}")
-
-            step_lines.extend([
-                f"[当前执行进度]：正在执行第 {current_step + 1} 步 / 共 {len(plan.steps)} 步",
-            ])
-            # Step Memory（已完成步骤注入）
-            completed_steps = plan.steps[:current_step]
-            if completed_steps:
-                step_lines.append("\n【已完成步骤】")
-                for i, s in enumerate(completed_steps):
-                    step_lines.append(f"{i+1}. {s.title}（已完成）")
-
-            step_lines.extend([
-                f"[当前步骤标题]：{step.title}",
-                f"[当前步骤说明]：{step.description}",
-                f"[步骤类型]：{step.step_type}",
-            ])
-
-            if step.suggested_tool:
-                step_lines.append(f"[建议工具]：{step.suggested_tool}")
-
-            if step.expected_outcome:
-                step_lines.append(f"[预期结果]：{step.expected_outcome}")
-
-            if step.completion_criteria:
-                step_lines.append(f"[完成标准]：{step.completion_criteria}")
-
-            step_lines.extend([
-                "",
-                "【执行上下文】",
-                f"- 当前任务：{plan.goal}",
-                f"- 当前步骤：第 {current_step + 1} 步 / 共 {len(plan.steps)} 步",
-                f"- 步骤名称：{step.title}",
-                "",
-                "【执行目标】",
-                f"{step.description}",
-                "",
-                "【执行约束（必须严格遵守）】",
-                "- 你只能执行当前步骤",
-                "- 不允许执行已完成步骤的内容",
-                "- 不允许执行与当前步骤无关的行为",
-                "- 不要重复【已完成步骤】中的任何行为",
-                "",
-                "【行为判断规则】",
-                "- 如果你的行为与当前步骤目标不一致，这是错误",
-                "- 如果重复之前步骤，这是错误",
-                "- 如果偏离当前步骤目标，这是错误",
-                "",
-                "【完成要求】",
-                "- 完成后必须明确说明：本步骤已完成",
-            ])
-
-            model_messages.append({
-                "role": "user",
-                "content": "\n".join(step_lines),
-            })
-
-    model_messages.extend(state.conversation.messages)
-    return model_messages
 
 def _advance_current_step_if_needed() -> None:
     if not state.task.current_plan:
@@ -324,7 +202,7 @@ def chat(user_input: str) -> str:
 
 def _run_planning_phase(user_input: str) -> str:
     """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。"""
-    plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages(user_input))
+    plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages_from_state(state,user_input))
     if not plan:
         get_messages().append({"role": "user", "content": user_input})
         return "ok"
@@ -353,13 +231,15 @@ def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
-        append_control_event("plan_confirm_yes", {})
+        
+        append_control_event(get_messages(),"plan_confirm_yes", {})
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        append_control_event("plan_confirm_no", {})
+        
+        append_control_event(get_messages(),"plan_confirm_no", {})
         state.reset_task()
         return "好的，已取消。"
 
@@ -368,7 +248,7 @@ def _handle_plan_confirmation(user_input: str, turn_state: TurnState) -> str:
     revised_goal = f"{state.task.user_goal}\n\n用户对计划的修改意见：{confirm}"
     state.task.user_goal = revised_goal
 
-    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages(revised_goal))
+    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages_from_state(state,revised_goal))
     if not plan:
         state.reset_task()
         return "未能根据你的修改意见重新生成计划，请重新描述你的需求。"
@@ -422,7 +302,7 @@ def _call_model(turn_state: TurnState):
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
         system=turn_state.system_prompt,
-        messages=build_execution_messages(),
+        messages=build_execution_messages_from_state(state),
         tools=get_tool_definitions(),
     ) as stream:
         for event in stream:
@@ -500,25 +380,28 @@ def _handle_step_confirmation(user_input: str, turn_state: TurnState) -> str:
     confirm = user_input.strip()
 
     if confirm.lower() == "y":
-        append_control_event("step_confirm_yes", {})
+        
+        append_control_event(get_messages(),"step_confirm_yes", {})
         _advance_current_step_if_needed()
         state.task.status = "running"
         save_checkpoint(state)
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        append_control_event("step_confirm_no", {})
+        
+        append_control_event(get_messages(),"step_confirm_no", {})
         state.reset_task()
         clear_checkpoint()
         return "好的，当前任务已停止。"
 
     # ✅ 只保留 plan_feedback（删除 step_feedback + 原始 user 输入）
-    append_control_event("plan_feedback", {"feedback": confirm})
+    
+    append_control_event(get_messages(),"plan_feedback", {"feedback": confirm})
 
     revised_goal = f"{state.task.user_goal}\n\n用户补充：{confirm}"
     state.task.user_goal = revised_goal
 
-    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages(revised_goal))
+    plan = generate_plan(revised_goal, client, MODEL_NAME, build_planning_messages_from_state(state,revised_goal))
     if not plan:
         state.reset_task()
         clear_checkpoint()
@@ -657,7 +540,8 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
     state.task.pending_tool = None
 
     if confirm.lower() == "y":
-        append_control_event("tool_confirm_yes", pending)
+        
+        append_control_event(get_messages(),"tool_confirm_yes", pending)
 
         result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
 
@@ -674,7 +558,8 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
         return _run_main_loop(turn_state)
 
     if confirm.lower() == "n":
-        append_control_event("tool_confirm_no", pending)
+        
+        append_control_event(get_messages(),"tool_confirm_no", pending)
 
         # ❗关键：不生成 tool_result
         state.task.status = "running"
@@ -682,7 +567,8 @@ def _handle_tool_confirmation(user_input: str, turn_state: TurnState) -> str:
         return _run_main_loop(turn_state)
 
     # ✅ 反馈：只记录，不生成 tool_result
-    append_control_event("tool_feedback", {
+    
+    append_control_event(get_messages(),"tool_feedback", {
         "feedback": confirm,
         "tool": tool_name,
     })

@@ -128,3 +128,8 @@ def build_execution_messages(state: Any) -> list[dict]:
 
     model_messages.extend(state.conversation.messages)
     return model_messages
+
+
+def extract_text(content_blocks) -> str:
+    parts = [block.text for block in content_blocks if block.type == "text"]
+    return "\n".join(p for p in parts if p).strip()

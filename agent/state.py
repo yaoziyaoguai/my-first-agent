@@ -116,7 +116,7 @@ class TaskState:
 
     # 当前任务状态
     # 可选值示例：
-    # idle / planning / running / awaiting_plan_confirmation / awaiting_step_confirmation / done / failed
+    # idle / planning / running / awaiting_plan_confirmation / awaiting_step_confirmation/awaiting_tool_confirmation/ done / failed
     status: str = "idle"
 
     # 当前轮重试次数

@@ -16,7 +16,7 @@ from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
 from agent.conversation_events import append_tool_result, has_tool_result
 
 
-MAX_TOOL_CALLS_PER_TURN = 10
+MAX_TOOL_CALLS_PER_TURN = 50
 
 
 def _serialize_assistant_content(content_blocks: list[Any]) -> list[dict[str, Any]]:

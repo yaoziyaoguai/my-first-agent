@@ -38,22 +38,32 @@ def get_allowed_tools():
 def execute_tool(name, tool_input, context=None):
     if name not in TOOL_REGISTRY:
         return f"工具 '{name}' 不在允许列表中"
-    
+
     info = TOOL_REGISTRY[name]
-    
+
     # 执行前钩子
     if info.get("pre_execute"):
-        block_reason = info["pre_execute"](name, tool_input, context)
+        try:
+            block_reason = info["pre_execute"](name, tool_input, context)
+        except Exception as e:
+            return f"[工具 {name} 的 pre_execute 钩子异常] {e}"
         if block_reason:
             return block_reason
-    
-    # 执行工具函数
-    result = info["func"](**tool_input)
-    
+
+    # 执行工具函数：任何异常都转换为字符串返回，确保调用方一定能拿到
+    # 一个可写入 tool_result 的结果，避免 messages 出现悬空 tool_use。
+    try:
+        result = info["func"](**tool_input)
+    except Exception as e:
+        return f"[工具 {name} 执行异常] {type(e).__name__}: {e}"
+
     # 执行后钩子
     if info.get("post_execute"):
-        result = info["post_execute"](name, tool_input, result)
-    
+        try:
+            result = info["post_execute"](name, tool_input, result)
+        except Exception as e:
+            return f"[工具 {name} 的 post_execute 钩子异常] {e}"
+
     return result
 
 

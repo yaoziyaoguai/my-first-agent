@@ -131,6 +131,9 @@ class TaskState:
     # 连续达到 max_tokens 的次数
     consecutive_max_tokens: int = 0
 
+    # 当前任务已发生的工具调用次数（持久化的真实计数，防止跨确认轮被清零）
+    tool_call_count: int = 0
+
     # 最近一次错误信息
     last_error: str | None = None
 
@@ -272,8 +275,11 @@ class AgentState:
         self.task.loop_iterations = 0
         self.task.consecutive_rejections = 0
         self.task.consecutive_max_tokens = 0
+        self.task.tool_call_count = 0
         self.task.last_error = None
         self.task.effective_review_request = False
+        self.task.pending_tool = None
+        self.task.tool_execution_log = {}
 
 
 def create_agent_state(

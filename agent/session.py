@@ -61,9 +61,44 @@ def try_resume_from_checkpoint():
 
     restored = load_checkpoint_to_state(get_state())
     if restored:
-        pass 
+        _replay_awaiting_prompt(get_state())
     else:
         print("\n[系统] 恢复断点失败。\n")
+
+
+def _replay_awaiting_prompt(state):
+    """按恢复后的 task.status 重新打印对应的询问提示。
+
+    目的：checkpoint 存的是一个「等待用户某种输入」的断点，恢复后用户
+    如果不知道当前处于哪个 awaiting 状态，就不知道该输入 y/n。
+    """
+    from agent.planner import Plan, format_plan_for_display
+
+    status = state.task.status
+    plan_dict = state.task.current_plan
+
+    if status == "awaiting_plan_confirmation" and plan_dict:
+        try:
+            plan = Plan.model_validate(plan_dict)
+            print(format_plan_for_display(plan))
+        except Exception:
+            pass
+        print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+        return
+
+    if status == "awaiting_step_confirmation":
+        print("\n上一步已完成。回复 y 继续下一步，回复 n 停止任务。")
+        return
+
+    if status == "awaiting_tool_confirmation" and state.task.pending_tool:
+        pending = state.task.pending_tool
+        print(
+            f"\n⚠️ 有待确认的工具：{pending.get('tool')}({pending.get('input')})"
+        )
+        print("是否执行？(y/n/输入反馈意见): ", end="", flush=True)
+        return
+
+    print(f"\n[系统] 已恢复断点（状态：{status}）。\n")
 
 
 # ========== 退出 ==========

@@ -13,7 +13,7 @@ from typing import Any
 
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.context_builder import build_planning_messages
-from agent.conversation_events import append_control_event, append_tool_result
+from agent.conversation_events import append_control_event
 from agent.planner import generate_plan, format_plan_for_display
 from agent.task_runtime import advance_current_step_if_needed
 from agent.tool_executor import execute_pending_tool
@@ -91,7 +91,15 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     if confirm.lower() == "y":
         append_control_event(messages, "step_confirm_yes", {})
         advance_current_step_if_needed(state)
-        state.task.status = "running"
+        # 不要在这里手工 status = "running"：advance_current_step_if_needed
+        # 已经按规则把 status 置为 "running"（还有下一步）或 "done"（最后一步）。
+        # 手工覆盖会把 "done" 遮蔽成 "running"，让主循环再跑一次空转。
+        if state.task.status == "done":
+            # 最后一步的确认落在这里：清理任务后直接返回。
+            from agent.checkpoint import clear_checkpoint as _clear_ck
+            _clear_ck()
+            state.reset_task()
+            return "好的，任务已完成。"
         save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
@@ -142,24 +150,49 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     if not pending:
         return "[系统] 未找到待确认的工具。"
 
-    tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
-    tool_input = pending["input"]
-
-    # Clear pending before continuing so the next loop is not intercepted again.
-    state.task.pending_tool = None
 
     if confirm.lower() == "y":
         append_control_event(messages, "tool_confirm_yes", pending)
-        execute_pending_tool(
-            state=state,
-            turn_state=turn_state,
-            messages=messages,
-            pending=pending,
-        )
+        try:
+            execute_pending_tool(
+                state=state,
+                turn_state=turn_state,
+                messages=messages,
+                pending=pending,
+            )
+        except Exception as e:
+            # 执行失败时保留 pending_tool 以便排查；同时写一条 tool_result，
+            # 避免下次调用 API 因 tool_use 悬空而失败。
+            from agent.conversation_events import append_tool_result, has_tool_result
+            if not has_tool_result(messages, pending["tool_use_id"]):
+                append_tool_result(
+                    messages,
+                    pending["tool_use_id"],
+                    f"[工具 {tool_name} 执行异常] {type(e).__name__}: {e}",
+                )
+            state.task.status = "running"
+            save_checkpoint(state)
+            return ctx.continue_fn(turn_state)
+
+        # 成功后再清空 pending_tool，失败情况下保留以便人工排查。
+        state.task.pending_tool = None
         state.task.status = "running"
         save_checkpoint(state)
         return ctx.continue_fn(turn_state)
+
+    # 未执行分支（n / feedback）也要清空 pending_tool 并为悬空 tool_use 补占位结果。
+    state.task.pending_tool = None
+
+    from agent.conversation_events import append_tool_result, has_tool_result
+    if not has_tool_result(messages, pending["tool_use_id"]):
+        append_tool_result(
+            messages,
+            pending["tool_use_id"],
+            "[系统] 用户拒绝执行该工具，已跳过。"
+            if confirm.lower() == "n"
+            else f"[系统] 用户未批准该工具，改为反馈意见：{confirm}",
+        )
 
     if confirm.lower() == "n":
         append_control_event(messages, "tool_confirm_no", pending)

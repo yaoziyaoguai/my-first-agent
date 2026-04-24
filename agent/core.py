@@ -59,20 +59,23 @@ state = create_agent_state(
     review_enabled=False,
     max_recent_messages=6,
 )
+def get_state():
+    """获取当前会话状态。"""
+    return state
 
 
 # ========== 循环状态 ==========
 
 @dataclass
 class TurnState:
-    """一次 chat 调用内部的循环状态。"""
+    """一次 chat 调用内部的循环状态。
+
+    注意：这里只保留**本次 chat 调用内**确实 ephemeral 的字段。
+    所有需要跨多次 chat 调用（例如工具确认来回）累积的计数，
+    都放在 state.task 上，由 handlers 直接读写。
+    """
     system_prompt: str
     round_tool_traces: list = field(default_factory=list)
-    auto_retry_count: int = 0
-    tool_call_count: int = 0        # 真实工具调用次数
-    loop_iterations: int = 0        # 循环次数
-    consecutive_rejections: int = 0
-    consecutive_max_tokens: int = 0
 
 
 def refresh_runtime_system_prompt() -> str:
@@ -97,16 +100,10 @@ refresh_runtime_system_prompt()
 def chat(user_input: str) -> str:
     """主入口：对话 + 规划 + 工具执行。"""
 
-    messages = state.conversation.messages
-    compressed_messages, new_summary = compress_history(
-        messages,
-        client,
-        existing_summary=state.memory.working_summary,
-        max_recent_messages=state.runtime.max_recent_messages,
-    )
-    
-    state.conversation.messages = compressed_messages
-    state.memory.working_summary = new_summary
+    # 注意：不要在这里无条件压缩历史。
+    # 当处于 awaiting_tool_confirmation 时，上一条 assistant 里有未闭合的
+    # tool_use 块，它必须与稍后的 tool_result 配对。若此刻压缩，可能把该
+    # tool_use 丢进摘要，留下悬空 tool_result，下次调用 API 会直接报错。
 
     runtime_system_prompt = refresh_runtime_system_prompt()
 
@@ -122,12 +119,12 @@ def chat(user_input: str) -> str:
         continue_fn=_run_main_loop,
     )
 
-    # 先处理“等待用户确认计划”的状态：
+    # 先处理"等待用户确认计划"的状态：
     # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
     if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
         return handle_plan_confirmation(user_input, confirmation_ctx)
 
-    # 处理“等待用户确认是否进入下一步”的状态。
+    # 处理"等待用户确认是否进入下一步"的状态。
     if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
         return handle_step_confirmation(user_input, confirmation_ctx)
 
@@ -135,10 +132,34 @@ def chat(user_input: str) -> str:
     if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
         return handle_tool_confirmation(user_input, confirmation_ctx)
 
-    # 如果当前已有运行中的任务，则默认把这次输入视为“继续当前任务”的反馈。
+    # 到这里才是真正的「新一轮对话」：可以安全做压缩。
+    messages = state.conversation.messages
+    compressed_messages, new_summary = compress_history(
+        messages,
+        client,
+        existing_summary=state.memory.working_summary,
+        max_recent_messages=state.runtime.max_recent_messages,
+    )
+    compression_happened = (
+        compressed_messages is not messages or new_summary != state.memory.working_summary
+    )
+    state.conversation.messages = compressed_messages
+    state.memory.working_summary = new_summary
+    # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
+    if compression_happened and state.task.current_plan:
+        from agent.checkpoint import save_checkpoint as _save_checkpoint
+        _save_checkpoint(state)
+
+    # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
         return _run_main_loop(turn_state)
+
+    # 到这里意味着要开启一轮全新的任务：重置持久化的循环计数，避免旧值影响新任务。
+    state.task.loop_iterations = 0
+    state.task.tool_call_count = 0
+    state.task.consecutive_max_tokens = 0
+    state.task.consecutive_rejections = 0
 
     plan_result = _run_planning_phase(user_input)
     if plan_result == "cancelled":
@@ -155,14 +176,27 @@ def chat(user_input: str) -> str:
 def _run_planning_phase(user_input: str) -> str:
     """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。"""
     plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages_from_state(state,user_input))
+
+    # 无论走哪条分支，用户原始输入都必须归档到 conversation.messages。
+    # 否则「多步计划 → y 确认 → 执行」路径里，执行阶段模型看不到用户原话，
+    # 只能依赖 planner 的二次总结 plan.goal，丢失细节。
+    state.conversation.messages.append({"role": "user", "content": user_input})
+
     if not plan:
-        state.conversation.messages.append({"role": "user", "content": user_input})
+        # 这里可能是：planner 判定单步任务，或 planner 自身出错。
+        # 单步分支是预期路径；但出错也会走这里，给用户一行轻量提示以便察觉。
+        print("[系统] 未生成多步计划，按单步处理。")
         return "ok"
 
     state.task.current_plan = plan.model_dump()
     state.task.user_goal = user_input
     state.task.current_step_index = 0
     state.task.status = "awaiting_plan_confirmation"
+
+    # 一旦计划生成完毕且状态切到 awaiting_plan_confirmation，必须立刻落盘。
+    # 否则用户此时 Ctrl+C，计划会完全丢失、重启后无感。
+    from agent.checkpoint import save_checkpoint as _save_checkpoint
+    _save_checkpoint(state)
 
     # 计划展示给用户，但此时还没有正式接受执行。
     print(format_plan_for_display(plan))
@@ -177,8 +211,8 @@ def _run_planning_phase(user_input: str) -> str:
 def _run_main_loop(turn_state: TurnState) -> str:
     """模型调用循环，按 stop_reason 分派处理。"""
     while True:
-        turn_state.loop_iterations += 1
-        if turn_state.loop_iterations > MAX_LOOP_ITERATIONS:
+        state.task.loop_iterations += 1
+        if state.task.loop_iterations > MAX_LOOP_ITERATIONS:
             print(f"\n[系统] 循环次数超过上限 {MAX_LOOP_ITERATIONS}，强制停止。")
             return "对话循环次数过多，请简化任务或分步执行。"
 
@@ -187,6 +221,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
         if response.stop_reason == "max_tokens":
             result = handle_max_tokens_response(
                 response,
+                state=state,
                 turn_state=turn_state,
                 messages=state.conversation.messages,
                 extract_text_fn=_extract_text,
@@ -226,11 +261,15 @@ def _run_main_loop(turn_state: TurnState) -> str:
 
 def _call_model(turn_state: TurnState):
     """调用模型（流式）并返回最终 response。"""
+    # ===== 协议观察：构造 request payload 并打印 =====
+    request_messages = build_execution_messages_from_state(state)
+    _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
+
     with client.messages.stream(
         model=MODEL_NAME,
         max_tokens=MAX_TOKENS,
         system=turn_state.system_prompt,
-        messages=build_execution_messages_from_state(state),
+        messages=request_messages,
         tools=get_tool_definitions(),
     ) as stream:
         for event in stream:
@@ -249,6 +288,9 @@ def _call_model(turn_state: TurnState):
         response = stream.get_final_message()
         print()
 
+    # ===== 协议观察：打印返回结构 =====
+    _debug_print_response(response)
+
     return response
 
 
@@ -259,3 +301,94 @@ def _call_model(turn_state: TurnState):
 def _extract_text(content_blocks) -> str:
     parts = [block.text for block in content_blocks if block.type == "text"]
     return "\n".join(p for p in parts if p).strip()
+
+
+# ========== 协议观察（调试用，稳定后可关）==========
+
+DEBUG_PROTOCOL = True   # 想关闭把这里改成 False
+
+
+def _truncate(s: str, n: int = 200) -> str:
+    if len(s) <= n:
+        return s
+    return s[:n] + f"...(共 {len(s)} 字，截 {n})"
+
+
+def _summarize_content(content) -> str:
+    """把一条 message 的 content 压成一行人类可读的描述。"""
+    if isinstance(content, str):
+        return f"text: {_truncate(content, 150)!r}"
+    if not isinstance(content, list):
+        return f"<未知形态 {type(content).__name__}>"
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(f"<非 dict 块 {type(block).__name__}>")
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append(f"text {_truncate(block.get('text',''), 120)!r}")
+        elif btype == "tool_use":
+            parts.append(
+                f"tool_use(id={block.get('id')}, "
+                f"name={block.get('name')}, "
+                f"input={_truncate(str(block.get('input')), 120)})"
+            )
+        elif btype == "tool_result":
+            content_text = block.get("content", "")
+            if not isinstance(content_text, str):
+                content_text = str(content_text)
+            parts.append(
+                f"tool_result(tool_use_id={block.get('tool_use_id')}, "
+                f"content={_truncate(content_text, 120)!r})"
+            )
+        else:
+            parts.append(f"{btype}(...)")
+    return " | ".join(parts)
+
+
+def _debug_print_request(system_prompt: str, messages: list, tools: list) -> None:
+    if not DEBUG_PROTOCOL:
+        return
+    print("\n" + "=" * 12 + " REQUEST → Anthropic " + "=" * 12)
+    print(f"model:  {MODEL_NAME}")
+    print(f"system: {_truncate(system_prompt, 200)}")
+    print(f"tools:  {[t['name'] for t in tools]}")
+    print(f"messages ({len(messages)} 条):")
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        summary = _summarize_content(msg.get("content"))
+        print(f"  [{i}] role={role}")
+        print(f"       {summary}")
+    print("=" * 45 + "\n")
+
+
+def _debug_print_response(response) -> None:
+    if not DEBUG_PROTOCOL:
+        return
+    print("\n" + "=" * 12 + " RESPONSE ← Anthropic " + "=" * 11)
+    print(f"stop_reason: {response.stop_reason}")
+    print("content blocks:")
+    for i, block in enumerate(response.content):
+        btype = getattr(block, "type", "?")
+        if btype == "text":
+            print(f"  [{i}] text: {_truncate(block.text, 150)!r}")
+        elif btype == "tool_use":
+            print(
+                f"  [{i}] tool_use: {block.name}"
+                f"(id={block.id}, input={_truncate(str(block.input), 150)})"
+            )
+        else:
+            print(f"  [{i}] {btype}: ...")
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        print(
+            f"usage: input_tokens={usage.input_tokens}, "
+            f"output_tokens={usage.output_tokens}"
+            + (
+                f", cache_read={getattr(usage, 'cache_read_input_tokens', 0)}, "
+                f"cache_create={getattr(usage, 'cache_creation_input_tokens', 0)}"
+                if hasattr(usage, "cache_read_input_tokens") else ""
+            )
+        )
+    print("=" * 45 + "\n")

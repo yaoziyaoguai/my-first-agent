@@ -52,7 +52,9 @@ def generate_plan(user_input, client, model_name, messages=None):
     返回 None（不需要计划）或 Plan 对象。
     """
     try:
-        plan_messages = [{"role": "user", "content": user_input}]
+        # 若调用方构造了完整的 planning messages（历史摘要 + 最近对话 + 当前输入），
+        # 优先使用；否则回退为只包含当前输入的单条消息。
+        plan_messages = messages if messages else [{"role": "user", "content": user_input}]
         response = client.messages.create(
             model=model_name,
             max_tokens=1024,

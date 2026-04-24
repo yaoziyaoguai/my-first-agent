@@ -32,9 +32,17 @@ def is_current_step_completed(state: Any, assistant_text: str) -> bool:
 
 
 def advance_current_step_if_needed(state: Any) -> None:
-    """Advance current task step, or mark task done when all steps are complete."""
+    """Advance current task step, or mark task done when all steps are complete.
+
+    任何让 status 跨状态跳变（done / running with new step_index）的 mutate
+    都必须立刻 save_checkpoint，否则重启后会进入"旧步骤已过、新步骤未记录"的
+    不一致态。
+    """
+    from agent.checkpoint import save_checkpoint
+
     if not state.task.current_plan:
         state.task.status = "done"
+        save_checkpoint(state)
         return
 
     plan = Plan.model_validate(state.task.current_plan)
@@ -44,3 +52,5 @@ def advance_current_step_if_needed(state: Any) -> None:
         state.task.status = "running"
     else:
         state.task.status = "done"
+
+    save_checkpoint(state)

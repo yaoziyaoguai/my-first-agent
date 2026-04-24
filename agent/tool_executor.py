@@ -12,8 +12,8 @@ from typing import Any
 
 from agent.checkpoint import save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
-from agent.review import needs_tool_confirmation
 from agent.tool_registry import execute_tool
+from agent.tool_registry import needs_tool_confirmation
 
 
 AWAITING_USER = "__awaiting_user__"
@@ -95,3 +95,36 @@ def execute_single_tool(
     append_tool_result(messages, tool_use_id, result)
     save_checkpoint(state)
     return None
+
+
+def execute_pending_tool(
+    *,
+    state: Any,
+    turn_state: Any,
+    messages: list[dict[str, Any]],
+    pending: dict[str, Any],
+) -> str:
+    """Execute a previously suspended pending tool after user confirmation."""
+    tool_use_id = pending["tool_use_id"]
+    tool_name = pending["tool"]
+    tool_input = pending["input"]
+
+    result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
+
+    state.task.tool_execution_log[tool_use_id] = {
+        "tool": tool_name,
+        "input": tool_input,
+        "result": result,
+        "status": "executed",
+    }
+
+    turn_state.round_tool_traces.append({
+        "tool_use_id": tool_use_id,
+        "tool": tool_name,
+        "input": tool_input,
+        "status": "executed",
+        "result": result,
+    })
+
+    append_tool_result(messages, tool_use_id, result)
+    return result

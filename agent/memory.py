@@ -33,6 +33,75 @@ def _truncate_tool_result_content(obj, threshold=200, keep_prefix=200):
     return obj
 
 
+def _collect_tool_use_ids(messages) -> set:
+    """收集 messages 里 assistant 端声明过的 tool_use id。"""
+    ids = set()
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        content = m.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                bid = block.get("id")
+                if bid:
+                    ids.add(bid)
+    return ids
+
+
+def _collect_tool_result_ids(messages) -> set:
+    """收集 messages 里 user 端回传的 tool_result 对应的 tool_use_id。"""
+    ids = set()
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                bid = block.get("tool_use_id")
+                if bid:
+                    ids.add(bid)
+    return ids
+
+
+def _find_safe_split_index(messages, preferred_recent: int) -> int:
+    """计算一个不切断 tool_use/tool_result 配对的切分点。
+
+    返回 split_index：messages[:split_index] 归摘要，messages[split_index:]
+    保留为 recent。若找不到合法切点（例如所有 tool_use/result 穿插太深），
+    返回 0，表示本次不做压缩。
+    """
+    n = len(messages)
+    if preferred_recent >= n:
+        return 0
+
+    split = n - preferred_recent
+
+    # 把 split 向前推，直到 recent 部分里不存在「对应 tool_use 不在 recent 里」的孤悬 tool_result，
+    # 也不存在「对应 tool_result 不在 recent 里」的孤悬 tool_use。
+    max_iter = n  # 防止死循环
+    for _ in range(max_iter):
+        if split <= 0:
+            return 0
+
+        recent = messages[split:]
+        recent_tool_uses = _collect_tool_use_ids(recent)
+        recent_tool_results = _collect_tool_result_ids(recent)
+
+        # recent 里有 tool_result 但对应 tool_use 不在 recent —— 需要把 tool_use 也拉进 recent
+        orphan_results = recent_tool_results - recent_tool_uses
+        # recent 里有 tool_use 但对应 tool_result 不在 recent —— 同样要扩大 recent
+        orphan_uses = recent_tool_uses - recent_tool_results
+
+        if not orphan_results and not orphan_uses:
+            return split
+
+        split -= 1  # 把 split 再向前一步，把更多消息纳入 recent
+
+    return 0  # 兜底：放弃压缩
+
+
 def compress_history(messages, client, existing_summary: str | None = None, max_recent_messages: int = 6):
     """
     检查并压缩消息历史。
@@ -64,6 +133,16 @@ def compress_history(messages, client, existing_summary: str | None = None, max_
 
     recent = messages[-max_recent_messages:]
     old = messages[:-max_recent_messages]
+
+    # 防护：切分点不能切断 tool_use / tool_result 的配对。
+    # 否则压缩后 recent 里会留下孤悬 tool_result（对应 tool_use 已进摘要），
+    # 或孤悬 tool_use（对应 tool_result 已进摘要），下次调用 API 必然报错。
+    safe_split = _find_safe_split_index(messages, max_recent_messages)
+    if safe_split == 0:
+        print("[系统] 压缩放弃：找不到不切断 tool_use/tool_result 的切点。")
+        return messages, existing_summary
+    old = messages[:safe_split]
+    recent = messages[safe_split:]
 
     old_for_summary = make_serializable(old)
     old_for_summary = _truncate_tool_result_content(
@@ -107,14 +186,6 @@ def compress_history(messages, client, existing_summary: str | None = None, max_
             break
 
     new_total_size = estimate_messages_size(recent)
-
-    log_event("context_compression_done", {
-        "old_count": len(messages),
-        "new_count": len(recent),
-        "summary": summary_text,
-        "old_total_chars": total_size,
-        "new_total_chars": new_total_size,
-    })
 
     print(
         f"[系统] 压缩完成：{len(messages)} 条 → {len(recent)} 条，"

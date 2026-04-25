@@ -65,17 +65,30 @@ def append_control_event(messages: list[Message], event_type: str, payload: dict
         # 两种来源共用 step_input：
         # - collect_input/clarify 步骤的常规收尾：payload 只含 content
         # - request_user_input 触发的执行期求助回复：payload 含 question + why_needed + content
-        # 区分依据是 payload 里有没有 question 字段——有就渲染配对文案，让模型在
-        # 下一轮上下文里能看到「问的是什么 / 为什么问 / 用户答了什么」。
+        # 区分依据是 payload 里有没有 question 字段——有就渲染更强的配对文案，
+        # 让模型在下一轮上下文里把用户答复视为已收集事实。
         question = payload.get("question")
+        answer = payload.get("content", "")
         if question:
             text_lines = [
-                f'用户针对问题「{question}」补充了当前步骤所需信息：',
-                f"- 补充内容：{payload.get('content', '')}",
+                "【当前步骤用户补充信息】",
+                "上一轮系统向用户询问：",
+                str(question),
+                "",
+                "用户已经回答：",
+                str(answer),
+                "",
+                "这条回复应视为当前步骤已经收集到的约束/事实。",
+                "后续执行当前步骤时，请优先使用这些信息，不要重复追问已经由用户回答过的内容。",
+                "只有在仍缺少新的关键信息，且无法通过已有回答合理推断时，才可以再次请求用户补充。",
             ]
             why_needed = payload.get("why_needed")
             if why_needed:
-                text_lines.append(f"- 需要该信息的原因：{why_needed}")
+                text_lines.extend([
+                    "",
+                    "需要该信息的原因：",
+                    str(why_needed),
+                ])
             content.append({
                 "type": "text",
                 "text": "\n".join(text_lines),
@@ -83,7 +96,7 @@ def append_control_event(messages: list[Message], event_type: str, payload: dict
         else:
             content.append({
                 "type": "text",
-                "text": f"用户补充了当前步骤所需信息：{payload.get('content')}",
+                "text": f"【当前步骤用户补充信息】\n{answer}",
             })
 
     else:

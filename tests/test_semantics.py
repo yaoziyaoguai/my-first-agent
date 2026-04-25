@@ -180,8 +180,31 @@ def test_append_control_event_step_input_is_semantic():
 
     content = messages[0]["content"]
     text = content[0]["text"]
-    assert "用户补充了当前步骤所需信息" in text
+    assert "【当前步骤用户补充信息】" in text
     assert "旅游出行，舒适型" in text
+
+
+def test_step_input_with_question_renders_as_authoritative_context():
+    """request_user_input/fallback 回复应渲染成权威的已收集上下文。"""
+    messages: list = []
+    user_reply = (
+        "从北京出发\n"
+        "优先高铁\n"
+        "高端酒店\n"
+        "先武汉后宜昌"
+    )
+    append_control_event(messages, "step_input", {
+        "question": "请补充出行偏好？",
+        "why_needed": "无偏好无法制定行程",
+        "content": user_reply,
+    })
+
+    text = messages[0]["content"][0]["text"]
+    assert "用户已经回答" in text
+    assert "请补充出行偏好？" in text
+    assert user_reply in text
+    assert "不要重复追问已经由用户回答过的内容" in text
+    assert "无偏好无法制定行程" in text
 
 
 def test_append_tool_result_writes_user_message():

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from agent.conversation_events import append_control_event
 from agent.context_builder import build_execution_messages, build_planning_messages
 
 
@@ -106,3 +107,48 @@ def test_planning_messages_does_not_include_current_plan(fresh_state, two_step_p
         if isinstance(c, str):
             assert "[当前任务]" not in c, "planning messages 不应含 step 指令块"
             assert "[当前步骤标题]" not in c
+
+
+def test_execution_messages_keep_full_multiline_step_input(fresh_state, two_step_plan):
+    """用户多行补充信息必须完整进入最终 execution messages。"""
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "running"
+
+    user_reply = (
+        "从北京出发\n"
+        "偏好高铁\n"
+        "高端酒店\n"
+        "先武汉后宜昌\n"
+        "自然风光和历史文化\n"
+        "预算 3500 元左右\n"
+        "单人出行\n"
+        "必须去黄鹤楼"
+    )
+    append_control_event(fresh_state.conversation.messages, "step_input", {
+        "question": "请补充武汉和宜昌行程偏好？",
+        "why_needed": "需要这些信息才能制定三日行程",
+        "content": user_reply,
+    })
+
+    msgs = build_execution_messages(fresh_state)
+    all_text = "\n".join(
+        block.get("text", "")
+        for msg in msgs
+        if isinstance(msg.get("content"), list)
+        for block in msg["content"]
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+    assert "用户已经回答" in all_text
+    assert "不要重复追问已经由用户回答过的内容" in all_text
+    for expected in (
+        "北京出发",
+        "高铁",
+        "高端酒店",
+        "先武汉后宜昌",
+        "自然风光和历史文化",
+        "3500 元左右",
+        "单人出行",
+        "黄鹤楼",
+    ):
+        assert expected in all_text

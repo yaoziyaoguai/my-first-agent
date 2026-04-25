@@ -64,6 +64,16 @@ def _copy_state_dict(obj) -> dict:
     return dict(getattr(obj, "__dict__", {}))
 
 
+def _load_checkpoint_silent():
+    """静默读取 checkpoint，仅供保存时继承旧 meta 使用。"""
+    if not CHECKPOINT_PATH.exists():
+        return None
+    try:
+        return json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _build_checkpoint_from_state(state):
     """
     按当前 state 构造 checkpoint 数据。
@@ -73,7 +83,7 @@ def _build_checkpoint_from_state(state):
     - memory：保存 memory 快照，但 conversation 仍单独处理
     - conversation：只保存 messages，并对过大的 tool_result 做截断
     """
-    existing = load_checkpoint() or {}
+    existing = _load_checkpoint_silent() or {}
     existing_meta = existing.get("meta", {})
 
     task_data = _copy_state_dict(state.task)

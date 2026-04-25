@@ -131,6 +131,26 @@ def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
     )
 
 
+def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys):
+    """保存 checkpoint 时为了继承旧 meta 读取旧文件，不应打印 loaded 误导为恢复。"""
+    from agent.checkpoint import save_checkpoint
+    from agent.state import create_agent_state
+
+    src = create_agent_state(system_prompt="test")
+    src.task.status = "running"
+
+    save_checkpoint(src)
+    first = capsys.readouterr().out
+    assert "[CHECKPOINT] loaded" not in first
+    assert "[CHECKPOINT] saved" in first
+
+    # 第二次保存时磁盘已有 checkpoint；仍然只能打印 saved，不能打印 loaded。
+    save_checkpoint(src)
+    second = capsys.readouterr().out
+    assert "[CHECKPOINT] loaded" not in second
+    assert "[CHECKPOINT] saved" in second
+
+
 def test_load_returns_false_when_no_file(tmp_checkpoint_path):
     """checkpoint 文件不存在时 load 应当返回 False，而不是崩。"""
     from agent.checkpoint import load_checkpoint_to_state

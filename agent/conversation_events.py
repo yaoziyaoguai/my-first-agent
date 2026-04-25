@@ -61,6 +61,12 @@ def append_control_event(messages: list[Message], event_type: str, payload: dict
             "text": f"用户对后续步骤提出了补充意见：{payload.get('feedback')}",
         })
 
+    elif event_type == "step_input":
+        content.append({
+            "type": "text",
+            "text": f"用户补充了当前步骤所需信息：{payload.get('content')}",
+        })
+
     else:
         content.append({"type": "text", "text": f"系统记录了未知控制事件：{event_type}"})
 

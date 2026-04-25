@@ -14,6 +14,9 @@ from agent.planner import Plan
 from config import STEP_COMPLETION_THRESHOLD
 
 
+USER_INPUT_STEP_TYPES = {"collect_input", "clarify"}
+
+
 def get_latest_step_completion(state: Any) -> dict | None:
     """返回当前步骤**最近一次** mark_step_complete 的 input（如果有）。
 

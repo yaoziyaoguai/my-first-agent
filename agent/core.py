@@ -24,6 +24,7 @@ from agent.confirm_handlers import (
     ConfirmationContext,
     handle_plan_confirmation,
     handle_step_confirmation,
+    handle_user_input_step,
     handle_tool_confirmation,
 )
 
@@ -48,8 +49,6 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）
 # client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 # messages = []  # session 级消息历史
 
-print("APIKEYYYYYYYYYYYYYY"+API_KEY)
-print("APIFFFFFFFFFFFFF"+BASE_URL)
 client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 
 # 统一会话状态：
@@ -113,6 +112,7 @@ def chat(user_input: str) -> str:
     # 状态一致性自愈：只有**必须有 plan 才合法**的状态下，plan=None 才算不一致。
     # - running / awaiting_plan_confirmation / awaiting_step_confirmation
     #   这三个状态的语义都依赖 current_plan 的存在
+    # - awaiting_user_input 也依赖 current_plan
     # - awaiting_tool_confirmation 则**不强制需要 plan**
     #   （单步任务 planner 返 None，执行阶段工具等确认时 plan 就是 None，这是合法的）
     _inconsistent = (
@@ -120,6 +120,7 @@ def chat(user_input: str) -> str:
             "running",
             "awaiting_plan_confirmation",
             "awaiting_step_confirmation",
+            "awaiting_user_input",
         )
         and state.task.current_plan is None
     )
@@ -156,6 +157,10 @@ def chat(user_input: str) -> str:
     # 处理"等待用户确认是否进入下一步"的状态。
     if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
         return handle_step_confirmation(user_input, confirmation_ctx)
+
+    # 处理"等待用户补充信息"的状态。
+    if state.task.current_plan and state.task.status == "awaiting_user_input":
+        return handle_user_input_step(user_input, confirmation_ctx)
 
     # 新增：处理工具确认（state 驱动）
     if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
@@ -221,6 +226,27 @@ def _run_planning_phase(user_input: str) -> str:
     state.task.current_plan = plan.model_dump()
     state.task.user_goal = user_input
     state.task.current_step_index = 0
+    state.task.confirm_each_step = any(
+        marker in user_input
+        for marker in (
+            "每步确认",
+            "每一步确认",
+            "每一步都确认",
+            "每步都确认",
+            "每一步都让我确认",
+            "每步都让我确认",
+            "做完一步问我",
+            "每做完一步问我",
+            "一步一确认",
+            "每步推理",
+            "每一步推理",
+            "逐步推理",
+            "一步一步推理",
+            "不要自动下一步",
+            "不要自动继续",
+            "先别自动执行下一步",
+        )
+    )
     state.task.status = "awaiting_plan_confirmation"
 
     # 一旦计划生成完毕且状态切到 awaiting_plan_confirmation，必须立刻落盘。
@@ -244,6 +270,9 @@ def _run_main_loop(turn_state: TurnState) -> str:
         state.task.loop_iterations += 1
         if state.task.loop_iterations > MAX_LOOP_ITERATIONS:
             print(f"\n[系统] 循环次数超过上限 {MAX_LOOP_ITERATIONS}，强制停止。")
+            from agent.checkpoint import clear_checkpoint as _clear_checkpoint
+            _clear_checkpoint()
+            state.reset_task()
             return "对话循环次数过多，请简化任务或分步执行。"
 
         response = _call_model(turn_state)
@@ -293,7 +322,7 @@ def _call_model(turn_state: TurnState):
     """调用模型（流式）并返回最终 response。"""
     # ===== 协议观察：构造 request payload 并打印 =====
     request_messages = build_execution_messages_from_state(state)
-    _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
+    # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
     with client.messages.stream(
         model=MODEL_NAME,
@@ -319,7 +348,7 @@ def _call_model(turn_state: TurnState):
         print()
 
     # ===== 协议观察：打印返回结构 =====
-    _debug_print_response(response)
+    # _debug_print_response(response)
 
     return response
 

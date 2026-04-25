@@ -90,6 +90,10 @@ def _replay_awaiting_prompt(state):
         print("\n上一步已完成。回复 y 继续下一步，回复 n 停止任务。")
         return
 
+    if status == "awaiting_user_input":
+        print("\n上一步需要补充信息，请直接回复。")
+        return
+
     if status == "awaiting_tool_confirmation" and state.task.pending_tool:
         pending = state.task.pending_tool
         print(

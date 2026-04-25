@@ -2,7 +2,7 @@
 from typing import Any
 
 from agent.planner import Plan
-from agent.task_runtime import get_latest_step_completion
+from agent.task_runtime import USER_INPUT_STEP_TYPES, get_latest_step_completion
 from config import STEP_COMPLETION_THRESHOLD
 
 
@@ -269,33 +269,47 @@ def build_execution_messages(state: Any) -> list[dict]:
                 "- 不允许执行已完成步骤的内容",
                 "- 不允许执行与当前步骤无关的行为",
                 "- 不要重复【已完成步骤】中的任何行为",
-                "",
-                "【行为判断规则】",
-                "- 如果你的行为与当前步骤目标不一致，这是错误",
-                "- 如果重复之前步骤，这是错误",
-                "- 如果偏离当前步骤目标，这是错误",
-                "",
-                "【完成要求】",
-                "- 本步骤工作收尾时，**必须调用 `mark_step_complete` 工具**声明结束并打分（0-100）。",
-                f"- 分值 ≥ {STEP_COMPLETION_THRESHOLD} 才算真正完成；低于该阈值系统会把 outstanding 注入下一轮让你继续。",
-                "- 严禁只在文本里说\"本步骤已完成\"而不调用工具——系统只认工具信号。",
             ])
 
-            # 上一轮自评未达阈值：把 outstanding 注入，让模型看到"还欠什么"。
-            latest = get_latest_step_completion(state)
-            if latest is not None:
-                score = latest.get("completion_score")
-                outstanding = latest.get("outstanding") or ""
-                summary = latest.get("summary") or ""
-                if isinstance(score, int) and score < STEP_COMPLETION_THRESHOLD:
-                    step_lines.extend([
-                        "",
-                        "【上一轮自评（未达阈值，必须继续）】",
-                        f"- 上次打分：{score}/100（阈值 {STEP_COMPLETION_THRESHOLD}）",
-                        f"- 上次自述完成度：{summary}",
-                        f"- 上次承认的未完成项：{outstanding}",
-                        "- 请优先补齐未完成项，而不是重复已做过的工作；再次调用 mark_step_complete 时给出更客观的分值。",
-                    ])
+            if step.step_type in USER_INPUT_STEP_TYPES:
+                step_lines.extend([
+                    "",
+                    "【当前步骤语义】",
+                    "- 这是一个信息收集步骤，需要先向用户询问缺失信息。",
+                    "- 不要调用 `mark_step_complete`。",
+                    "- 把需要用户补充的内容问清楚后结束本轮，等待用户回复。",
+                    "- 用户回复后，系统会自动把这一步视为完成并继续后续步骤。",
+                ])
+            else:
+                step_lines.extend([
+                    "",
+                    "【行为判断规则】",
+                    "- 如果你的行为与当前步骤目标不一致，这是错误",
+                    "- 如果重复之前步骤，这是错误",
+                    "- 如果偏离当前步骤目标，这是错误",
+                    "",
+                    "【完成要求】",
+                    "- 本步骤工作收尾时，**必须调用 `mark_step_complete` 工具**声明结束并打分（0-100）。",
+                    f"- 分值 ≥ {STEP_COMPLETION_THRESHOLD} 才算真正完成；低于该阈值系统会把 outstanding 注入下一轮让你继续。",
+                    "- 严禁只在文本里说\"本步骤已完成\"而不调用工具——系统只认工具信号。",
+                ])
+
+            if step.step_type not in USER_INPUT_STEP_TYPES:
+                # 上一轮自评未达阈值：把 outstanding 注入，让模型看到"还欠什么"。
+                latest = get_latest_step_completion(state)
+                if latest is not None:
+                    score = latest.get("completion_score")
+                    outstanding = latest.get("outstanding") or ""
+                    summary = latest.get("summary") or ""
+                    if isinstance(score, int) and score < STEP_COMPLETION_THRESHOLD:
+                        step_lines.extend([
+                            "",
+                            "【上一轮自评（未达阈值，必须继续）】",
+                            f"- 上次打分：{score}/100（阈值 {STEP_COMPLETION_THRESHOLD}）",
+                            f"- 上次自述完成度：{summary}",
+                            f"- 上次承认的未完成项：{outstanding}",
+                            "- 请优先补齐未完成项，而不是重复已做过的工作；再次调用 mark_step_complete 时给出更客观的分值。",
+                        ])
 
             model_messages.append({
                 "role": "user",
@@ -306,4 +320,3 @@ def build_execution_messages(state: Any) -> list[dict]:
     # 保证交给 API 的 messages 严格合规（tool_result 合并 / 删控制事件）。
     model_messages.extend(_project_to_api(state.conversation.messages))
     return model_messages
-

@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.planner import Plan
-from agent.task_runtime import advance_current_step_if_needed, is_current_step_completed
+from agent.task_runtime import (
+    USER_INPUT_STEP_TYPES,
+    advance_current_step_if_needed,
+    is_current_step_completed,
+)
 
 from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
 from agent.conversation_events import append_tool_result, has_tool_result
@@ -18,6 +22,7 @@ from agent.tool_registry import is_meta_tool
 
 
 MAX_TOOL_CALLS_PER_TURN = 50
+MAX_REPEATED_TOOL_INPUTS = 3
 
 
 def _serialize_assistant_content(content_blocks: list[Any]) -> list[dict[str, Any]]:
@@ -95,11 +100,53 @@ def handle_tool_use_response(
 
     if state.task.tool_call_count > MAX_TOOL_CALLS_PER_TURN:
         _fill_placeholder_results(messages, business_blocks, reason="工具调用次数超限，未执行")
+        clear_checkpoint()
+        state.reset_task()
         return "工具调用次数过多，请简化任务或分步执行。"
 
     turn_context: dict[str, Any] = {}
 
     for idx, block in enumerate(tool_use_blocks):
+        if not is_meta_tool(block.name):
+            failed_same_input_count = sum(
+                1
+                for entry in state.task.tool_execution_log.values()
+                if entry.get("tool") == block.name
+                and entry.get("input") == block.input
+                and entry.get("status") == "failed"
+            )
+            if failed_same_input_count:
+                _fill_placeholder_results(
+                    messages,
+                    [block],
+                    reason=(
+                        "同一工具和同一输入此前已失败，本轮不会再次请求用户确认或执行；"
+                        "请换用其他来源、使用已有信息继续，或说明该来源不可用"
+                    ),
+                )
+                continue
+
+            same_input_count = sum(
+                1
+                for entry in state.task.tool_execution_log.values()
+                if entry.get("tool") == block.name
+                and entry.get("input") == block.input
+                and entry.get("status") == "executed"
+            )
+            if same_input_count >= MAX_REPEATED_TOOL_INPUTS:
+                remaining_business = [b for b in tool_use_blocks[idx:] if not is_meta_tool(b.name)]
+                _fill_placeholder_results(
+                    messages,
+                    remaining_business,
+                    reason=(
+                        "检测到同一工具和同一输入被重复请求多次，"
+                        "为避免无限重试，本轮未执行"
+                    ),
+                )
+                clear_checkpoint()
+                state.reset_task()
+                return "检测到重复工具调用过多，任务已停止。请调整目标或换一种信息来源。"
+
         result = execute_single_tool(
             block,
             state=state,
@@ -156,17 +203,26 @@ def _maybe_advance_step(state: Any) -> str | None:
     if state.task.current_plan:
         plan = Plan.model_validate(state.task.current_plan)
         idx = state.task.current_step_index
+        current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
 
         if idx < len(plan.steps) - 1:
-            state.task.status = "awaiting_step_confirmation"
-            save_checkpoint(state)
-            return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
+            if state.task.confirm_each_step:
+                state.task.status = "awaiting_step_confirmation"
+                save_checkpoint(state)
+                return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
+            advance_current_step_if_needed(state)
+            return None
 
     advance_current_step_if_needed(state)
 
     if state.task.status == "done":
         clear_checkpoint()
+        state.conversation.messages.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "好的，任务已完成。"}],
+        })
         state.reset_task()
+        return "好的，任务已完成。"
 
     return ""
 
@@ -217,7 +273,7 @@ def handle_end_turn_response(
     turn_state: Any,
     messages: list[dict[str, Any]],
     extract_text_fn,
-) -> str:
+) -> str | None:
     """Handle a model response whose stop_reason is end_turn.
 
     This keeps end-turn behavior outside core.py while preserving state-driven
@@ -236,6 +292,15 @@ def handle_end_turn_response(
 
     _append_assistant_response(messages, response)
 
+    if state.task.current_plan:
+        plan = Plan.model_validate(state.task.current_plan)
+        idx = state.task.current_step_index
+        current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
+        if current_step and current_step.step_type in USER_INPUT_STEP_TYPES:
+            state.task.status = "awaiting_user_input"
+            save_checkpoint(state)
+            return "\n[请补充上面的信息后继续]"
+
     # 步骤推进逻辑统一走 _maybe_advance_step——它读 mark_step_complete 日志判完成，
     # 而不是关键词匹配。end_turn 这条路径通常用于：
     #   - 模型在 tool_use 那一轮已经调过 mark_step_complete + 走完步骤推进，
@@ -244,6 +309,22 @@ def handle_end_turn_response(
     advance_reply = _maybe_advance_step(state)
     if advance_reply is not None:
         return advance_reply
+
+    if state.task.current_plan and state.task.status == "running":
+        messages.append({
+            "role": "user",
+            "content": (
+                "[系统] 当前计划步骤尚未收到 mark_step_complete 完成信号。"
+                "如果本步骤已经完成，请立即调用 mark_step_complete；"
+                "如果尚未完成，请继续执行当前步骤。"
+            ),
+        })
+        save_checkpoint(state)
+        return None
+
+    if not state.task.current_plan:
+        clear_checkpoint()
+        state.reset_task()
 
     # 普通 end_turn：返回空串。正文已流式打过，main_loop 不会重复打印。
     return ""

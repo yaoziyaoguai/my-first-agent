@@ -19,6 +19,17 @@ from agent.tool_registry import needs_tool_confirmation
 AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
 
+TOOL_FAILURE_PREFIXES = (
+    "错误：",
+    "读取超时：",
+    "HTTP 错误：",
+    "读取失败：",
+    "执行超时：",
+    "[工具 ",
+    "[安装失败]",
+    "[更新失败]",
+)
+
 
 def execute_single_tool(
     block: Any,
@@ -98,12 +109,21 @@ def execute_single_tool(
         return AWAITING_USER
 
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
+    failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
+    if failed:
+        result = (
+            f"{result}\n\n"
+            "[系统提示] 该工具调用没有获得可用结果。"
+            f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
+            "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
+        )
+    status = "failed" if failed else "executed"
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
         "input": tool_input,
         "result": result,
-        "status": "executed",
+        "status": status,
         "step_index": state.task.current_step_index,
     }
 
@@ -111,7 +131,7 @@ def execute_single_tool(
         "tool_use_id": tool_use_id,
         "tool": tool_name,
         "input": tool_input,
-        "status": "executed",
+        "status": status,
         "result": result,
     })
 
@@ -134,12 +154,21 @@ def execute_pending_tool(
     tool_input = pending["input"]
 
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
+    failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
+    if failed:
+        result = (
+            f"{result}\n\n"
+            "[系统提示] 该工具调用没有获得可用结果。"
+            f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
+            "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
+        )
+    status = "failed" if failed else "executed"
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
         "input": tool_input,
         "result": result,
-        "status": "executed",
+        "status": status,
         "step_index": state.task.current_step_index,
     }
 
@@ -147,7 +176,7 @@ def execute_pending_tool(
         "tool_use_id": tool_use_id,
         "tool": tool_name,
         "input": tool_input,
-        "status": "executed",
+        "status": status,
         "result": result,
     })
 

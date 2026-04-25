@@ -20,7 +20,7 @@ class PlanStep(BaseModel):
     description: str = Field(..., description="详细步骤说明")
 
     # 步骤类型，用于后续判断这一步是否完成
-    # 可选值例如：read / analyze / edit / run_command / report
+    # 可选值例如：read / analyze / edit / run_command / report / collect_input / clarify
     step_type: str = Field(..., description="步骤类型")
 
     # 建议使用的工具名；如果没有明确工具，可为 None

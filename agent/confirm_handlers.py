@@ -155,6 +155,38 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     return ""
 
 
+def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
+    """Handle input when task status is awaiting_user_input."""
+    state = ctx.state
+    turn_state = ctx.turn_state
+    messages = state.conversation.messages
+    current_plan = state.task.current_plan
+
+    if not current_plan:
+        state.reset_task()
+        clear_checkpoint()
+        return ""
+
+    append_control_event(messages, "step_input", {"content": user_input.strip()})
+    total_steps = len(current_plan.get("steps", []))
+    is_last_step = state.task.current_step_index >= max(total_steps - 1, 0)
+
+    if state.task.confirm_each_step and not is_last_step:
+        state.task.status = "awaiting_step_confirmation"
+        save_checkpoint(state)
+        return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
+
+    advance_current_step_if_needed(state)
+
+    if state.task.status == "done":
+        clear_checkpoint()
+        state.reset_task()
+        return "好的，任务已完成。"
+
+    save_checkpoint(state)
+    return ctx.continue_fn(turn_state)
+
+
 def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     """Handle input when task status is awaiting_tool_confirmation."""
     confirm = user_input.strip()

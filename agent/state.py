@@ -116,7 +116,7 @@ class TaskState:
 
     # 当前任务状态
     # 可选值示例：
-    # idle / planning / running / awaiting_plan_confirmation / awaiting_step_confirmation/awaiting_tool_confirmation/ done / failed
+    # idle / planning / running / awaiting_plan_confirmation / awaiting_step_confirmation / awaiting_user_input / awaiting_tool_confirmation / done / failed
     status: str = "idle"
 
     # 当前轮重试次数
@@ -143,6 +143,10 @@ class TaskState:
     # 当前待确认的工具（control plane）
     # 结构：{"tool_use_id": str, "tool": str, "input": dict}
     pending_tool: dict[str, Any] | None = None
+
+    # 是否每完成一个计划步骤都等待用户确认后再继续。
+    # 默认关闭：用户确认整体 plan 后，普通步骤自动推进；高风险工具仍走工具确认。
+    confirm_each_step: bool = False
 
     # 工具执行记录（用于幂等执行）
     # key: tool_use_id
@@ -279,6 +283,7 @@ class AgentState:
         self.task.last_error = None
         self.task.effective_review_request = False
         self.task.pending_tool = None
+        self.task.confirm_each_step = False
         self.task.tool_execution_log = {}
 
 

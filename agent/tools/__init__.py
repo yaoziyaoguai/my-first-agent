@@ -7,3 +7,5 @@ from agent.tools.web import fetch_url as fetch_url  # noqa: F401
 from agent.tools.edit import edit_file as edit_file  # noqa: F401
 from agent.tools.skill import load_skill as load_skill  # noqa: F401
 from agent.tools.install_skill import install_skill as install_skill  # noqa: F401
+# 元工具（meta_tool=True，不污染对话上下文）
+from agent.tools.meta import mark_step_complete as mark_step_complete  # noqa: F401

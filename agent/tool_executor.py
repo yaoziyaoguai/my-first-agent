@@ -12,7 +12,7 @@ from typing import Any
 
 from agent.checkpoint import save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
-from agent.tool_registry import execute_tool
+from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
 
@@ -34,10 +34,32 @@ def execute_single_tool(
     - None: normal execution completed, caller may continue processing tools
     - AWAITING_USER: tool requires human confirmation; caller should stop loop
     - FORCE_STOP: tool was blocked or rejected enough times; caller should stop task
+
+    **元工具特殊路径**：`mark_step_complete` 这类系统控制信号工具，只写 state.task.
+    tool_execution_log（供 task_runtime 读分值判断），不写 messages——它们的
+    tool_use 已经在 _serialize_assistant_content 里过滤掉了，自然也不能有
+    tool_result（否则 tool_result 会"挂空"，下轮 API 调用 400）。
     """
     tool_use_id = block.id
     tool_name = block.name
     tool_input = block.input
+
+    # 元工具分支：走独立路径，既不需要确认，也不需要在 messages 里配对。
+    if is_meta_tool(tool_name):
+        execution_log = state.task.tool_execution_log
+        if tool_use_id in execution_log:
+            # 已记录（幂等），什么都不做——messages 里本来就没有它。
+            return None
+
+        state.task.tool_execution_log[tool_use_id] = {
+            "tool": tool_name,
+            "input": tool_input,
+            "result": "",   # 元工具没有业务语义上的返回值
+            "status": "meta_recorded",
+            "step_index": state.task.current_step_index,
+        }
+        save_checkpoint(state)
+        return None
 
     # Idempotency: never execute the same tool_use_id twice.
     execution_log = state.task.tool_execution_log
@@ -58,6 +80,7 @@ def execute_single_tool(
             "input": tool_input,
             "result": result,
             "status": "blocked",
+            "step_index": state.task.current_step_index,
         }
         save_checkpoint(state)
         return FORCE_STOP
@@ -81,6 +104,7 @@ def execute_single_tool(
         "input": tool_input,
         "result": result,
         "status": "executed",
+        "step_index": state.task.current_step_index,
     }
 
     turn_state.round_tool_traces.append({
@@ -116,6 +140,7 @@ def execute_pending_tool(
         "input": tool_input,
         "result": result,
         "status": "executed",
+        "step_index": state.task.current_step_index,
     }
 
     turn_state.round_tool_traces.append({

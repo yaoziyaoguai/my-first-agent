@@ -20,6 +20,11 @@ MAX_TOKENS = 128000
 MAX_MESSAGES = 100
 MAX_MESSAGE_CHARS = 400000
 MAX_CONTINUE_ATTEMPTS = 3  # 遇到 max_tokens 时最多自动继续几次
+
+# 步骤完成度阈值：模型用 mark_step_complete 自评，≥ 此值才真推进下一步。
+# 低于此值则把"未完成部分"（outstanding）注入下轮 step block 让模型继续。
+STEP_COMPLETION_THRESHOLD = 80
+
 # 安全配置
 PROTECTED_EXTENSIONS = {".py"}
 

@@ -48,6 +48,8 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）
 # client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 # messages = []  # session 级消息历史
 
+print("APIKEYYYYYYYYYYYYYY"+API_KEY)
+print("APIFFFFFFFFFFFFF"+BASE_URL)
 client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 
 # 统一会话状态：
@@ -99,6 +101,33 @@ refresh_runtime_system_prompt()
 
 def chat(user_input: str) -> str:
     """主入口：对话 + 规划 + 工具执行。"""
+
+    # 空输入守卫：strip 后为空串的输入直接过滤掉。
+    # 这是 chat() 内部的第二层守卫（main.py::main_loop 已有第一层），
+    # 目的是让任何直接调 chat() 的前端也不会因空串触发：
+    #   - 不必要的 LLM 调用（浪费 token）
+    #   - awaiting 分支把空串当 feedback 触发重规划
+    if not user_input or not user_input.strip():
+        return ""
+
+    # 状态一致性自愈：只有**必须有 plan 才合法**的状态下，plan=None 才算不一致。
+    # - running / awaiting_plan_confirmation / awaiting_step_confirmation
+    #   这三个状态的语义都依赖 current_plan 的存在
+    # - awaiting_tool_confirmation 则**不强制需要 plan**
+    #   （单步任务 planner 返 None，执行阶段工具等确认时 plan 就是 None，这是合法的）
+    _inconsistent = (
+        state.task.status in (
+            "running",
+            "awaiting_plan_confirmation",
+            "awaiting_step_confirmation",
+        )
+        and state.task.current_plan is None
+    )
+    if _inconsistent:
+        print(
+            f"[系统] 检测到不一致状态（status={state.task.status}, plan=None），已重置。"
+        )
+        state.reset_task()
 
     # 注意：不要在这里无条件压缩历史。
     # 当处于 awaiting_tool_confirmation 时，上一条 assistant 里有未闭合的
@@ -155,11 +184,12 @@ def chat(user_input: str) -> str:
         state.conversation.messages.append({"role": "user", "content": user_input})
         return _run_main_loop(turn_state)
 
-    # 到这里意味着要开启一轮全新的任务：重置持久化的循环计数，避免旧值影响新任务。
-    state.task.loop_iterations = 0
-    state.task.tool_call_count = 0
-    state.task.consecutive_max_tokens = 0
-    state.task.consecutive_rejections = 0
+    # 到这里意味着要开启一轮全新的任务。
+    # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
+    # 不触发 done 路径、tool_execution_log / pending_tool 残留到下一个任务"
+    # 这种 bug。之前这里只重置 4 个计数字段，其他字段（log/pending/user_goal
+    # 等）都有可能带着旧值进新任务。
+    state.reset_task()
 
     plan_result = _run_planning_phase(user_input)
     if plan_result == "cancelled":

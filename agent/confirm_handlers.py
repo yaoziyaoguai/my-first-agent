@@ -22,6 +22,22 @@ from agent.tool_executor import execute_pending_tool
 ContinueFn = Callable[[Any], str]
 
 
+# ===== 用户意图识别 =====
+# 三处 handle_*_confirmation 原来都是 `confirm.lower() == "y"` 精确匹配，
+# 导致 "yes"、"好的"、"OK" 这些常见肯定词全部落入 feedback 分支触发错误重规划。
+# 统一用集合判断；两个集合保证不相交。
+_ACCEPT = {"y", "yes", "ok", "okay", "好", "好的", "是", "是的", "行", "可以"}
+_REJECT = {"n", "no", "不", "不要", "否", "取消"}
+
+
+def _is_accept(confirm: str) -> bool:
+    return confirm.strip().lower() in _ACCEPT
+
+
+def _is_reject(confirm: str) -> bool:
+    return confirm.strip().lower() in _REJECT
+
+
 @dataclass(slots=True)
 class ConfirmationContext:
     """Dependencies needed by confirmation handlers.
@@ -43,13 +59,13 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state = ctx.state
     messages = state.conversation.messages
 
-    if confirm.lower() == "y":
+    if _is_accept(confirm):
         append_control_event(messages, "plan_confirm_yes", {})
         state.task.status = "running"
         save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
-    if confirm.lower() == "n":
+    if _is_reject(confirm):
         append_control_event(messages, "plan_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，已取消。"})
         state.reset_task()
@@ -88,7 +104,7 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state = ctx.state
     messages = state.conversation.messages
 
-    if confirm.lower() == "y":
+    if _is_accept(confirm):
         append_control_event(messages, "step_confirm_yes", {})
         advance_current_step_if_needed(state)
         # 不要在这里手工 status = "running"：advance_current_step_if_needed
@@ -103,7 +119,7 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
-    if confirm.lower() == "n":
+    if _is_reject(confirm):
         append_control_event(messages, "step_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，当前任务已停止。"})
         state.reset_task()
@@ -152,7 +168,7 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
 
     tool_name = pending["tool"]
 
-    if confirm.lower() == "y":
+    if _is_accept(confirm):
         append_control_event(messages, "tool_confirm_yes", pending)
         try:
             execute_pending_tool(
@@ -190,11 +206,11 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
             messages,
             pending["tool_use_id"],
             "[系统] 用户拒绝执行该工具，已跳过。"
-            if confirm.lower() == "n"
+            if _is_reject(confirm)
             else f"[系统] 用户未批准该工具，改为反馈意见：{confirm}",
         )
 
-    if confirm.lower() == "n":
+    if _is_reject(confirm):
         append_control_event(messages, "tool_confirm_no", pending)
         state.task.status = "running"
         save_checkpoint(state)

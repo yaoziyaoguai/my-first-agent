@@ -2,6 +2,7 @@
 __pycache__
 *.pyc
 .venv
+pytest.ini
 .README.md*
 agent_log.jsonl
 session_snapshots/
@@ -10,3 +11,4 @@ workspace/
 memory/
 skills/
 docs/
+tests/

@@ -90,6 +90,11 @@ def handle_tool_use_response(
     _append_assistant_response(messages, response)
 
     state.task.consecutive_max_tokens = 0
+    # 任何工具调用（业务或元）都视为"有效推进"，清零 end_turn 兜底计数器。
+    # 这一步必须在 for 循环之前——即使本轮里调的工具触发了 AWAITING_USER /
+    # FORCE_STOP / awaiting_user_input 提前 return，模型确实"动起来了"，
+    # 死循环兜底就不该把它算成"无进展"。
+    state.task.consecutive_end_turn_without_progress = 0
 
     tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
     # 元工具不算"业务工具调用"——既不吃 per-turn 配额，也不需要在 messages 里
@@ -339,12 +344,55 @@ def handle_end_turn_response(
         return advance_reply
 
     if state.task.current_plan and state.task.status == "running":
+        # 双层兜底：模型 end_turn 但没调任何工具、也没 mark_step_complete。
+        # 旧实现硬塞"请打分或继续"会陷入死循环——若模型违反协议（用文本散问而非
+        # request_user_input），它会再次散问 → end_turn → 再注入 → 永远刷屏。
+        #
+        # 第一层：启发式判断 assistant 文本是否在向用户提阻塞性问题。命中即停。
+        # 第二层：连续 2 次没有任何工具调用（计数在 handle_tool_use_response 里清零）
+        #         强制停。覆盖陈述句问题之类启发式漏判的场景。
+        text_content = extract_text_fn(response.content)
+
+        looks_like_question = bool(text_content) and (
+            "?" in text_content
+            or "？" in text_content
+            or any(p in text_content for p in (
+                "请告诉我", "请提供", "请说明", "请回复",
+                "请补充", "麻烦您", "您能否", "请确认",
+            ))
+        )
+
+        state.task.consecutive_end_turn_without_progress += 1
+
+        if looks_like_question or state.task.consecutive_end_turn_without_progress >= 2:
+            state.task.pending_user_input_request = {
+                "question": (
+                    text_content[:500] if text_content
+                    else "[模型 end_turn 但未声明步骤完成；请你介入]"
+                ),
+                "why_needed": (
+                    "模型未调用 request_user_input；为防 loop 死循环，"
+                    "系统强制暂停等你回应"
+                ),
+                "options": [],
+                "context": "",
+                "tool_use_id": "",
+                "step_index": state.task.current_step_index,
+            }
+            state.task.status = "awaiting_user_input"
+            save_checkpoint(state)
+            return ""
+
+        # 第一次：温和软驱动（保留现有"模型在思考、注入提示推它继续"的行为）。
+        # 提示里同时把 request_user_input 的协议要求重申一遍，引导模型回到正轨。
         messages.append({
             "role": "user",
             "content": (
                 "[系统] 当前计划步骤尚未收到 mark_step_complete 完成信号。"
                 "如果本步骤已经完成，请立即调用 mark_step_complete；"
                 "如果尚未完成，请继续执行当前步骤。"
+                "如果你需要用户补充信息，请调用 request_user_input 元工具，"
+                "**不要**只用普通文本向用户提问。"
             ),
         })
         save_checkpoint(state)

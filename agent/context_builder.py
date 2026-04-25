@@ -300,6 +300,8 @@ def build_execution_messages(state: Any) -> list[dict]:
                     "- 一次只问一个最关键问题，不要把多个问题串在一起。",
                     "- 调用 `request_user_input` 时**不要同轮调用 `mark_step_complete`**（求助意味着步骤未完成）。",
                     "- 调用 `request_user_input` 时**不要同轮混用普通业务工具**（先暂停、等用户回复后再继续）。",
+                    "- **禁止**只用普通自然语言向用户提问然后 end_turn——必须调 `request_user_input`。",
+                    "  违反协议时系统兜底会强制暂停 loop（你将看不到下一轮的「请继续」提示）。",
                 ])
 
             if step.step_type not in USER_INPUT_STEP_TYPES:

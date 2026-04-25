@@ -131,6 +131,11 @@ class TaskState:
     # 连续达到 max_tokens 的次数
     consecutive_max_tokens: int = 0
 
+    # 连续 end_turn 但没有任何"有效推进"的次数。
+    # "有效推进"= 调任何工具（业务或元）。每次模型 end_turn 且当前 plan running 时 ++；
+    # 任何工具被执行时清零。达到阈值（>=2）触发兜底切 awaiting_user_input，防死循环。
+    consecutive_end_turn_without_progress: int = 0
+
     # 当前任务已发生的工具调用次数（持久化的真实计数，防止跨确认轮被清零）
     tool_call_count: int = 0
 
@@ -287,6 +292,7 @@ class AgentState:
         self.task.loop_iterations = 0
         self.task.consecutive_rejections = 0
         self.task.consecutive_max_tokens = 0
+        self.task.consecutive_end_turn_without_progress = 0
         self.task.tool_call_count = 0
         self.task.last_error = None
         self.task.effective_review_request = False

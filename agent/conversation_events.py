@@ -62,10 +62,29 @@ def append_control_event(messages: list[Message], event_type: str, payload: dict
         })
 
     elif event_type == "step_input":
-        content.append({
-            "type": "text",
-            "text": f"用户补充了当前步骤所需信息：{payload.get('content')}",
-        })
+        # 两种来源共用 step_input：
+        # - collect_input/clarify 步骤的常规收尾：payload 只含 content
+        # - request_user_input 触发的执行期求助回复：payload 含 question + why_needed + content
+        # 区分依据是 payload 里有没有 question 字段——有就渲染配对文案，让模型在
+        # 下一轮上下文里能看到「问的是什么 / 为什么问 / 用户答了什么」。
+        question = payload.get("question")
+        if question:
+            text_lines = [
+                f'用户针对问题「{question}」补充了当前步骤所需信息：',
+                f"- 补充内容：{payload.get('content', '')}",
+            ]
+            why_needed = payload.get("why_needed")
+            if why_needed:
+                text_lines.append(f"- 需要该信息的原因：{why_needed}")
+            content.append({
+                "type": "text",
+                "text": "\n".join(text_lines),
+            })
+        else:
+            content.append({
+                "type": "text",
+                "text": f"用户补充了当前步骤所需信息：{payload.get('content')}",
+            })
 
     else:
         content.append({"type": "text", "text": f"系统记录了未知控制事件：{event_type}"})

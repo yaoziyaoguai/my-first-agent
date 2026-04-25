@@ -72,3 +72,68 @@ def mark_step_complete(completion_score: int, summary: str, outstanding: str) ->
     供 task_runtime.is_current_step_completed 读取判断。
     """
     return ""
+
+
+_REQUEST_USER_INPUT_DESCRIPTION = """当你在执行某个步骤的过程中，发现**缺少关键用户信息且无法通过推理或读取上下文继续**时，调用此工具向用户提一个问题。
+
+**何时调用**：
+  - 路径 / 参数 / 标识不明确，且无法从已有 messages 或代码里推断
+  - 用户给的目标里有歧义，需要二选一才能继续
+  - 缺少关键事实导致下一步操作有误删 / 误改 / 误判风险
+
+**何时不要调用**：
+  - 你能通过读文件、看上下文、合理假设继续——优先合理假设
+  - 只是想"和用户确认一下"而不是真的不知道
+  - 当前步骤本来就是 collect_input / clarify 类型——这些步骤本身就是问用户，不需要再调用本工具
+
+**调用纪律**：
+  - 一次只问一个最关键的问题；不要把多个问题串在一起
+  - 调用本工具时，**不要同轮调用 mark_step_complete**（求助意味着步骤未完成）
+  - 调用本工具时，**不要同轮混用普通业务工具**（先暂停等用户）
+  - options 若无明确候选传 `[]`；context 若无相关信息摘要传空字符串
+
+调用本工具会让系统暂停 loop、把问题展示给用户。用户回复后，系统会把答复以普通文本形式注入下一轮上下文，你可以继续执行当前步骤。
+"""
+
+
+@register_tool(
+    name="request_user_input",
+    description=_REQUEST_USER_INPUT_DESCRIPTION,
+    parameters={
+        "question": {
+            "type": "string",
+            "description": "要问用户的唯一问题（一次只问一个）",
+        },
+        "why_needed": {
+            "type": "string",
+            "description": "为什么没有这个信息你无法继续执行当前步骤",
+        },
+        "options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "给用户的快捷选项列表；若无明确候选，传空数组 []",
+        },
+        "context": {
+            "type": "string",
+            "description": "当前已确认的相关信息摘要，便于用户定位问题；若无可填空字符串",
+        },
+    },
+    confirmation="never",   # 元工具由系统处理，不需要用户确认
+    meta_tool=True,         # 关键：走特殊执行路径，不写 messages
+)
+def request_user_input(
+    question: str,
+    why_needed: str,
+    options: list[str],
+    context: str,
+) -> str:
+    """
+    工具函数体本身什么都不做——tool_executor 检测到 meta_tool=True 会走
+    特殊路径。实际副作用在 tool_executor.execute_single_tool 的元工具分支里：
+    - 把 question / why_needed / options / context 存入 state.task.pending_user_input_request
+    - 把 state.task.status 切到 "awaiting_user_input"
+    - 剔除当前 step_index 的 mark_step_complete log（防同轮残留分值导致下一轮错误推进）
+    - save_checkpoint
+    - **不**写 conversation.messages，**不**生成 tool_result
+    """
+    return ""

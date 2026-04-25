@@ -178,6 +178,35 @@ def handle_tool_use_response(
             )
             return ""
 
+        # request_user_input 元工具触发的执行期求助：tool_executor 已经把 status
+        # 切到 awaiting_user_input 并写好 pending_user_input_request。
+        # 这里负责本轮收尾：
+        # - 给本轮剩余未执行的"业务" tool_use 补占位 tool_result，避免 API 协议悬空
+        # - 把 question / why_needed / options 打印给用户
+        # - 跳出 loop 等用户输入，避免本轮里继续误执行剩余工具或走 _maybe_advance_step
+        if state.task.status == "awaiting_user_input":
+            remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
+            _fill_placeholder_results(
+                messages,
+                remaining_business,
+                reason=(
+                    "前序工具调用了 request_user_input 暂停了执行，本工具本轮未运行；"
+                    "等用户回复后再决定是否需要它"
+                ),
+            )
+            pending = state.task.pending_user_input_request or {}
+            print("\n[需要你补充信息]")
+            if pending.get("question"):
+                print(f"  问题：{pending['question']}")
+            if pending.get("why_needed"):
+                print(f"  原因：{pending['why_needed']}")
+            options = pending.get("options") or []
+            if options:
+                print("  可选项：")
+                for o in options:
+                    print(f"    - {o}")
+            return ""
+
     # 元工具触发的步骤推进：本轮里若模型调用了 mark_step_complete 且分值达阈值，
     # 立刻在 tool_use 这一轮就处理"步骤推进 / 等用户确认 / 任务完成"——避免再多
     # 一次没必要的 API 调用，也避免 messages 出现"assistant(text) 后没 tool_result"
@@ -203,8 +232,7 @@ def _maybe_advance_step(state: Any) -> str | None:
     if state.task.current_plan:
         plan = Plan.model_validate(state.task.current_plan)
         idx = state.task.current_step_index
-        current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
-
+        
         if idx < len(plan.steps) - 1:
             if state.task.confirm_each_step:
                 state.task.status = "awaiting_step_confirmation"

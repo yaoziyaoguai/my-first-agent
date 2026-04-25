@@ -69,6 +69,34 @@ def execute_single_tool(
             "status": "meta_recorded",
             "step_index": state.task.current_step_index,
         }
+
+        # request_user_input：执行期求助元工具。
+        # 副作用：暂停 loop（切 status）+ 记录待回答的请求 + 清掉同轮可能写入的
+        # mark_step_complete 残留分值（求助语义即"当前步骤未完成"，必须作废任何已写
+        # 入的完成声明，否则用户回复后下一轮 _maybe_advance_step 会读到残留分值
+        # 错误推进步骤）。这条清洗只针对**当前 step_index** 的记录，其他步骤的
+        # 完成声明不动。
+        if tool_name == "request_user_input":
+            current_idx = state.task.current_step_index
+            stale_mark_ids = [
+                tid
+                for tid, entry in state.task.tool_execution_log.items()
+                if entry.get("tool") == "mark_step_complete"
+                and entry.get("step_index") == current_idx
+            ]
+            for tid in stale_mark_ids:
+                state.task.tool_execution_log.pop(tid, None)
+
+            state.task.pending_user_input_request = {
+                "question": tool_input.get("question", ""),
+                "why_needed": tool_input.get("why_needed", ""),
+                "options": tool_input.get("options") or [],
+                "context": tool_input.get("context", ""),
+                "tool_use_id": tool_use_id,
+                "step_index": current_idx,
+            }
+            state.task.status = "awaiting_user_input"
+
         save_checkpoint(state)
         return None
 

@@ -156,7 +156,19 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
 
 
 def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
-    """Handle input when task status is awaiting_user_input."""
+    """Handle input when task status is awaiting_user_input.
+
+    awaiting_user_input 现在有两种触发来源：
+    1. **执行期求助**：模型在普通 step 里调用了 request_user_input 元工具。
+       特征：state.task.pending_user_input_request 非 None。
+       语义：当前 step 还没完成，用户只是为它补充信息。
+       行为：写 step_input（含 question / why_needed），清 pending，status=running，
+            **不调** advance_current_step_if_needed——回到 loop 让模型继续做当前 step。
+    2. **collect_input / clarify 步骤收尾**：planner 提前规划出来的"问用户"步骤。
+       特征：pending_user_input_request 为 None。
+       语义：这一步的目标本就是问用户，用户回了就算这步完成。
+       行为：原有逻辑——写 step_input，按 confirm_each_step 决定推进 / 等确认 / 收任务。
+    """
     state = ctx.state
     turn_state = ctx.turn_state
     messages = state.conversation.messages
@@ -167,6 +179,20 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
         clear_checkpoint()
         return ""
 
+    # 分支 1：执行期求助
+    pending = state.task.pending_user_input_request
+    if pending is not None:
+        append_control_event(messages, "step_input", {
+            "question": pending.get("question", ""),
+            "why_needed": pending.get("why_needed", ""),
+            "content": user_input.strip(),
+        })
+        state.task.pending_user_input_request = None
+        state.task.status = "running"
+        save_checkpoint(state)
+        return ctx.continue_fn(turn_state)
+
+    # 分支 2：collect_input / clarify 步骤的常规收尾（原有逻辑）
     append_control_event(messages, "step_input", {"content": user_input.strip()})
     total_steps = len(current_plan.get("steps", []))
     is_last_step = state.task.current_step_index >= max(total_steps - 1, 0)

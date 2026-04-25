@@ -144,6 +144,14 @@ class TaskState:
     # 结构：{"tool_use_id": str, "tool": str, "input": dict}
     pending_tool: dict[str, Any] | None = None
 
+    # 当前阻塞中的"执行期求助"请求（来自 request_user_input 元工具）。
+    # 结构：{"question": str, "why_needed": str, "options": list[str], "context": str,
+    #        "tool_use_id": str, "step_index": int}
+    # 仅当 status == "awaiting_user_input" 且本轮由 request_user_input 触发时才非 None；
+    # collect_input/clarify 步骤进入 awaiting_user_input 时此字段保持 None，
+    # handle_user_input_step 据此区分两种 awaiting_user_input。
+    pending_user_input_request: dict[str, Any] | None = None
+
     # 是否每完成一个计划步骤都等待用户确认后再继续。
     # 默认关闭：用户确认整体 plan 后，普通步骤自动推进；高风险工具仍走工具确认。
     confirm_each_step: bool = False
@@ -283,6 +291,7 @@ class AgentState:
         self.task.last_error = None
         self.task.effective_review_request = False
         self.task.pending_tool = None
+        self.task.pending_user_input_request = None
         self.task.confirm_each_step = False
         self.task.tool_execution_log = {}
 

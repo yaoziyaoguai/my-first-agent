@@ -91,7 +91,24 @@ def _replay_awaiting_prompt(state):
         return
 
     if status == "awaiting_user_input":
-        print("\n上一步需要补充信息，请直接回复。")
+        # 区分两种来源：
+        # - 执行期求助（pending_user_input_request 非 None）：回放当时的问题/原因/选项
+        # - collect_input/clarify 收尾：保留旧文案
+        pending = getattr(state.task, "pending_user_input_request", None)
+        if pending:
+            print("\n上一轮需要你补充信息后才能继续：")
+            if pending.get("question"):
+                print(f"  问题：{pending['question']}")
+            if pending.get("why_needed"):
+                print(f"  原因：{pending['why_needed']}")
+            options = pending.get("options") or []
+            if options:
+                print("  可选项：")
+                for o in options:
+                    print(f"    - {o}")
+            print("  请直接回复你的答复。")
+        else:
+            print("\n上一步需要补充信息，请直接回复。")
         return
 
     if status == "awaiting_tool_confirmation" and state.task.pending_tool:

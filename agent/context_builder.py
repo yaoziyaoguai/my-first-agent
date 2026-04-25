@@ -292,6 +292,14 @@ def build_execution_messages(state: Any) -> list[dict]:
                     "- 本步骤工作收尾时，**必须调用 `mark_step_complete` 工具**声明结束并打分（0-100）。",
                     f"- 分值 ≥ {STEP_COMPLETION_THRESHOLD} 才算真正完成；低于该阈值系统会把 outstanding 注入下一轮让你继续。",
                     "- 严禁只在文本里说\"本步骤已完成\"而不调用工具——系统只认工具信号。",
+                    "",
+                    "【遇到信息缺口的处理纪律】",
+                    "- 如果当前步骤执行过程中发现缺少关键用户信息，且无法通过读文件 / 已有上下文 / 合理假设继续，",
+                    "  调用元工具 `request_user_input` 暂停执行并向用户提一个最关键的问题。",
+                    "- 只在真正阻塞继续执行时才调用；能通过合理假设继续就不要请求用户输入。",
+                    "- 一次只问一个最关键问题，不要把多个问题串在一起。",
+                    "- 调用 `request_user_input` 时**不要同轮调用 `mark_step_complete`**（求助意味着步骤未完成）。",
+                    "- 调用 `request_user_input` 时**不要同轮混用普通业务工具**（先暂停、等用户回复后再继续）。",
                 ])
 
             if step.step_type not in USER_INPUT_STEP_TYPES:

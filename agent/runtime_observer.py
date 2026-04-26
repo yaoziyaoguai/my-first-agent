@@ -1,8 +1,19 @@
-"""Lightweight runtime observation logs.
+"""Runtime 观测日志层，不参与业务决策。
 
-This module centralizes human-readable runtime logs without changing runtime
-state. It deliberately keeps the first version as plain stdout output: no
-logging framework, no JSONL, no checkpoint writes, and no state mutation.
+这个模块统一输出 Event / Resolution / Transition / Actions 相关日志，帮助调试
+Agent Runtime 的状态流转。它只负责“让发生了什么可见”，不是状态机本身。
+
+重要边界：
+- 不修改 state；
+- 不写 checkpoint；
+- 不写 conversation.messages；
+- 不执行工具；
+- 第一版仍然用 print，暂不引入 logging 框架或 JSONL。
+
+命名约定：
+- event_source：谁产生了事件，例如 model / user / runtime / tool；
+- event_channel：事件是通过什么通道被观察到，例如 tool_use / assistant_text /
+  cli / fallback。它不是事件来源，只是观测入口。
 """
 
 from __future__ import annotations
@@ -11,6 +22,11 @@ from typing import Any
 
 
 RUNTIME_DEBUG_LOGS = True
+"""Runtime 观测开关。
+
+这是日志开关，不是业务开关。关闭它只应减少 stdout 输出，不应该改变 Agent
+状态转移、工具执行、checkpoint 或 messages 行为。
+"""
 
 
 def _format_value(value: Any) -> str:
@@ -36,7 +52,15 @@ def log_event(
     event_payload: dict[str, Any] | None = None,
     event_channel: str | None = None,
 ) -> None:
-    """Log a resolved runtime event without printing full event payload."""
+    """记录 RuntimeEvent 的核心字段。
+
+    event_payload 传进来是为了保留 API 边界，但第一版不完整打印 payload 值：
+    - 避免日志过长；
+    - 避免泄露用户输入、工具参数或敏感内容；
+    - 观测日志只需要确认 event_type / event_source / event_channel 是否正确。
+
+    如果后续需要更细粒度观测，也应优先打印 payload_keys，而不是 payload values。
+    """
     if not RUNTIME_DEBUG_LOGS:
         return
 
@@ -57,7 +81,12 @@ def log_resolution(
     event_channel: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> None:
-    """Log how raw input/output was resolved into runtime semantics."""
+    """记录输入/输出被解析成哪种 runtime 语义。
+
+    Resolution 是“判断结果”，不是 Action。这里打印 `resolution_kind` 等字段，
+    只是帮助确认 resolver 如何分类；真正的 append / advance / save 等副作用
+    应发生在 transition/action 层。
+    """
     if not RUNTIME_DEBUG_LOGS:
         return
 
@@ -80,7 +109,11 @@ def log_transition(
     target_state: str,
     guard_name: str | None = None,
 ) -> None:
-    """Log a runtime state transition."""
+    """记录一次状态转移的 from_state / event_type / target_state。
+
+    这里不执行 transition，只打印 transition 已经发生或即将由调用方表达的语义。
+    guard_name 用于未来补充“为什么这条转移可以走”，第一版可为空。
+    """
     if not RUNTIME_DEBUG_LOGS:
         return
 
@@ -94,7 +127,7 @@ def log_transition(
 
 
 def log_actions(action_names: list[str]) -> None:
-    """Log transition action names without executing any action."""
+    """记录 transition 中执行的 action 名称，不执行任何 action。"""
     if not RUNTIME_DEBUG_LOGS:
         return
 

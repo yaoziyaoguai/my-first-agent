@@ -35,6 +35,11 @@ MAX_REPEATED_TOOL_INPUTS = 3
 
 
 def _log_model_event(event: RuntimeEvent, *, event_channel: str | None = None) -> None:
+    """把 ModelOutputResolution 的结果送进 observer。
+
+    这是纯观测接入点：只打印模型输出事件，不改变工具执行、状态转移、messages
+    或 checkpoint 行为。
+    """
     log_event(
         event.event_type,
         event_source=event.event_source,
@@ -130,6 +135,8 @@ def handle_tool_use_response(
     turn_context: dict[str, Any] = {}
 
     for idx, block in enumerate(tool_use_blocks):
+        # 先把模型输出归类成事件并记录下来；后续仍沿用原来的
+        # execute_single_tool 路径。这样第一阶段只做到“事件可见”，不迁移执行层。
         model_event = resolve_tool_use_block(block)
         _log_model_event(model_event, event_channel="tool_use")
 
@@ -376,6 +383,9 @@ def handle_end_turn_response(
         text_content = extract_text_fn(response.content)
         state.task.consecutive_end_turn_without_progress += 1
 
+        # end_turn 没有 tool_use 结构：text_requested_user_input 是协议外文本兜底，
+        # runtime.no_progress 是 runtime 观察到的无进展事件。当前仍由本 handler
+        # 负责真正切 awaiting_user_input；resolver 只提供事件分类。
         model_event = resolve_end_turn_output(
             text_content,
             state.task.consecutive_end_turn_without_progress,

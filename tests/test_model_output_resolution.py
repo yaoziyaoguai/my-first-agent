@@ -1,4 +1,9 @@
-"""ModelOutputResolution 的只读事件解析测试。"""
+"""ModelOutputResolution 的只读事件解析测试。
+
+这些测试保护的是“模型输出 -> RuntimeEvent”的映射关系，而不是工具执行或状态
+转移。resolver 不接收 state，是为了让模型输出解析层保持只读边界：它只能判断
+事件类型，不能顺手修改 task、messages 或 checkpoint。
+"""
 
 from __future__ import annotations
 
@@ -123,6 +128,7 @@ def test_max_tokens_resolves_to_model_hit_max_tokens():
 
 
 def test_resolvers_do_not_accept_state_parameter():
+    """resolver 没有 state 参数，能防止解析层悄悄承担 transition/action 职责。"""
     from agent.model_output_resolution import (
         resolve_end_turn_output,
         resolve_max_tokens_output,

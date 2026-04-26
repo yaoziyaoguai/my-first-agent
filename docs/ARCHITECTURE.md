@@ -182,6 +182,70 @@ done                             # 任务完成（暂态，紧接 reset_task）
 failed                           # 预留，目前未使用
 ```
 
+### Runtime 命名规范
+
+这套命名规范用于后续轻量状态机化，尤其是下一阶段可能新增的 ModelOutputResolution。
+
+1. **State**
+   - 表示当前系统阶段。
+   - 状态值保持 `running` / `awaiting_user_input` / `awaiting_tool_confirmation` 这类小写字符串。
+   - 如果未来抽常量，使用 `STATE_` 前缀。
+
+2. **Event**
+   - 表示用户输入、模型输出、工具结果或 runtime 信号。
+   - 事件常量使用 `EVENT_` 前缀。
+   - 事件对象字段统一为：
+     - `event_type`
+     - `event_source`
+     - `event_payload`
+   - 事件值使用 `source.action_object` 风格。
+   - 示例：
+     - `EVENT_USER_REPLIED = "user.replied"`
+     - `EVENT_MODEL_REQUESTED_USER_INPUT = "model.requested_user_input"`
+     - `EVENT_MODEL_TEXT_REQUESTED_USER_INPUT = "model.text_requested_user_input"`
+     - `EVENT_MODEL_COMPLETED_STEP = "model.completed_step"`
+     - `EVENT_MODEL_USED_BUSINESS_TOOL = "model.used_business_tool"`
+     - `EVENT_MODEL_HIT_MAX_TOKENS = "model.hit_max_tokens"`
+     - `EVENT_RUNTIME_NO_PROGRESS = "runtime.no_progress"`
+     - `EVENT_TOOL_RESULT_RECEIVED = "tool.result_received"`
+
+3. **Guard**
+   - 表示 transition 条件判断。
+   - 函数使用 `guard_` 前缀。
+   - 只返回 bool，不修改 state，不调用模型，不执行工具。
+
+4. **Target**
+   - 表示 transition 目标状态。
+   - 字段名使用 `target_state`。
+   - 不再使用 `TargetType` 这个词。
+   - 如果要表达 `awaiting_user_input` 的细分来源，使用 `awaiting_kind`。
+   - 例如：
+     - `awaiting_kind = "collect_input"`
+     - `awaiting_kind = "request_user_input"`
+     - `awaiting_kind = "fallback_question"`
+     - `awaiting_kind = "no_progress"`
+
+5. **Action**
+   - 表示 transition 发生时执行的副作用。
+   - 函数使用 `action_` 前缀。
+   - 例如：
+     - `action_append_step_input`
+     - `action_clear_pending_user_input`
+     - `action_advance_step`
+     - `action_save_checkpoint`
+
+6. **Transition**
+   - 表示：`from_state + event_type + guard -> target_state + actions`。
+   - 如果未来定义 `TransitionSpec`，字段包括：
+     - `transition_name`
+     - `from_state`
+     - `event_type`
+     - `guard_name`
+     - `target_state`
+     - `action_names`
+
+当前代码只在 `InputResolution` / `transitions.py` 中开始轻量落地该方向；尚未实现完整 transition table，也尚未实现 ModelOutputResolution。
+
 **`awaiting_user_input` 的两种来源**（同一个状态值，不同语义）：
 
 | 来源 | 触发 | 区分依据 | 用户回复后行为 |

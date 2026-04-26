@@ -17,6 +17,7 @@ from agent.model_output_resolution import (
     resolve_max_tokens_output,
     resolve_tool_use_block,
 )
+from agent.runtime_observer import log_event
 from agent.planner import Plan
 from agent.task_runtime import (
     USER_INPUT_STEP_TYPES,
@@ -33,11 +34,12 @@ MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
 
 
-def _log_model_event(event: RuntimeEvent) -> None:
-    print(
-        "[MODEL_EVENT] "
-        f"event_type={event.event_type} "
-        f"source={event.event_payload.get('source', event.event_source)}"
+def _log_model_event(event: RuntimeEvent, *, event_channel: str | None = None) -> None:
+    log_event(
+        event.event_type,
+        event_source=event.event_source,
+        event_payload=event.event_payload,
+        event_channel=event_channel,
     )
 
 
@@ -129,11 +131,7 @@ def handle_tool_use_response(
 
     for idx, block in enumerate(tool_use_blocks):
         model_event = resolve_tool_use_block(block)
-        _log_model_event(RuntimeEvent(
-            event_type=model_event.event_type,
-            event_source=model_event.event_source,
-            event_payload={**model_event.event_payload, "source": "tool_use"},
-        ))
+        _log_model_event(model_event, event_channel="tool_use")
 
         if not is_meta_tool(block.name):
             failed_same_input_count = sum(
@@ -313,7 +311,7 @@ def handle_max_tokens_response(
     - stop when the configured threshold is exceeded
     """
     _append_assistant_response(messages, response)
-    _log_model_event(resolve_max_tokens_output())
+    _log_model_event(resolve_max_tokens_output(), event_channel="stop_reason")
 
     state.task.consecutive_max_tokens += 1
 
@@ -383,7 +381,7 @@ def handle_end_turn_response(
             state.task.consecutive_end_turn_without_progress,
         )
         if model_event is not None:
-            _log_model_event(model_event)
+            _log_model_event(model_event, event_channel="assistant_text")
 
         if (
             model_event is not None

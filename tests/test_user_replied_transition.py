@@ -71,9 +71,15 @@ def test_collect_input_transition_advances_step_and_saves(
     assert any("旅游出行，舒适型" in text for text in _step_input_texts(fresh_state))
 
     out = capsys.readouterr().out
-    assert "[INPUT_RESOLUTION] kind=collect_input_answer advance_step=true" in out
-    assert "[TRANSITION] awaiting_user_input -> running" in out
-    assert "[ACTIONS] append_step_input, advance_step, save_checkpoint" in out
+    assert (
+        "[INPUT_RESOLUTION] resolution_kind=collect_input_answer "
+        "event_type=user.replied event_source=user should_advance_step=true"
+    ) in out
+    assert (
+        "[TRANSITION] from_state=awaiting_user_input "
+        "event_type=user.replied target_state=running"
+    ) in out
+    assert "[ACTIONS] action_names=append_step_input,advance_step,save_checkpoint" in out
 
 
 def test_runtime_user_input_transition_keeps_step_clears_pending_and_saves(
@@ -116,9 +122,18 @@ def test_runtime_user_input_transition_keeps_step_clears_pending_and_saves(
     assert any("用于规划当前步骤" in text for text in texts)
 
     out = capsys.readouterr().out
-    assert "[INPUT_RESOLUTION] kind=runtime_user_input_answer advance_step=false" in out
-    assert "[TRANSITION] awaiting_user_input -> running" in out
-    assert "[ACTIONS] append_step_input_with_question, clear_pending, save_checkpoint" in out
+    assert (
+        "[INPUT_RESOLUTION] resolution_kind=runtime_user_input_answer "
+        "event_type=user.replied event_source=user should_advance_step=false"
+    ) in out
+    assert (
+        "[TRANSITION] from_state=awaiting_user_input "
+        "event_type=user.replied target_state=running"
+    ) in out
+    assert (
+        "[ACTIONS] "
+        "action_names=append_step_input_with_question,clear_pending_user_input,save_checkpoint"
+    ) in out
 
 
 def test_checkpoint_restore_with_pending_resolves_as_runtime_answer(

@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.runtime_observer import log_resolution
+
 
 COLLECT_INPUT_ANSWER = "collect_input_answer"
 RUNTIME_USER_INPUT_ANSWER = "runtime_user_input_answer"
@@ -95,9 +97,10 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
             should_advance_step=False,
         )
 
-    print(
-        "[INPUT_RESOLUTION] "
-        f"kind={resolution.kind} "
-        f"advance_step={str(resolution.should_advance_step).lower()}"
+    log_resolution(
+        resolution.kind,
+        event_type="user.replied",
+        event_source="user",
+        details={"should_advance_step": resolution.should_advance_step},
     )
     return resolution

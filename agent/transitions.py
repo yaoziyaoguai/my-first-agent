@@ -21,7 +21,11 @@ from agent.input_resolution import (
     RUNTIME_USER_INPUT_ANSWER,
     InputResolution,
 )
+from agent.runtime_observer import log_actions, log_transition
 from agent.task_runtime import advance_current_step_if_needed
+
+
+EVENT_USER_REPLIED = "user.replied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +77,16 @@ def apply_user_replied_transition(
         state.task.pending_user_input_request = None
         state.task.status = "running"
         checkpoint.save_checkpoint(state)
-        print("[TRANSITION] awaiting_user_input -> running")
-        print("[ACTIONS] append_step_input_with_question, clear_pending, save_checkpoint")
+        log_transition(
+            from_state="awaiting_user_input",
+            event_type=EVENT_USER_REPLIED,
+            target_state="running",
+        )
+        log_actions([
+            "append_step_input_with_question",
+            "clear_pending_user_input",
+            "save_checkpoint",
+        ])
         return TransitionResult(should_continue_loop=True)
 
     if resolution.kind == COLLECT_INPUT_ANSWER:
@@ -90,8 +102,12 @@ def apply_user_replied_transition(
             # 仍交给用户确认，所以这里不直接 advance。
             state.task.status = "awaiting_step_confirmation"
             checkpoint.save_checkpoint(state)
-            print("[TRANSITION] awaiting_user_input -> awaiting_step_confirmation")
-            print("[ACTIONS] append_step_input, save_checkpoint")
+            log_transition(
+                from_state="awaiting_user_input",
+                event_type=EVENT_USER_REPLIED,
+                target_state="awaiting_step_confirmation",
+            )
+            log_actions(["append_step_input", "save_checkpoint"])
             return TransitionResult(
                 should_continue_loop=False,
                 reply="\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]",
@@ -103,16 +119,29 @@ def apply_user_replied_transition(
             # 最后一个 collect_input/clarify step 被用户答复后，任务可能直接完成。
             checkpoint.clear_checkpoint()
             state.reset_task()
-            print("[TRANSITION] awaiting_user_input -> done")
-            print("[ACTIONS] append_step_input, advance_step, clear_checkpoint, reset_task")
+            log_transition(
+                from_state="awaiting_user_input",
+                event_type=EVENT_USER_REPLIED,
+                target_state="done",
+            )
+            log_actions([
+                "append_step_input",
+                "advance_step",
+                "clear_checkpoint",
+                "reset_task",
+            ])
             return TransitionResult(
                 should_continue_loop=False,
                 reply="好的，任务已完成。",
             )
 
         checkpoint.save_checkpoint(state)
-        print("[TRANSITION] awaiting_user_input -> running")
-        print("[ACTIONS] append_step_input, advance_step, save_checkpoint")
+        log_transition(
+            from_state="awaiting_user_input",
+            event_type=EVENT_USER_REPLIED,
+            target_state="running",
+        )
+        log_actions(["append_step_input", "advance_step", "save_checkpoint"])
         return TransitionResult(should_continue_loop=True)
 
     return TransitionResult(should_continue_loop=False)

@@ -29,6 +29,7 @@ def test_resolve_awaiting_user_input_without_pending_as_collect_answer(fresh_sta
 def test_resolve_awaiting_user_input_with_pending_as_runtime_answer(fresh_state):
     """有 pending 表示执行中途求助的回答，只补当前 step，不推进 step。"""
     pending = {
+        "awaiting_kind": "request_user_input",
         "question": "预算是多少？",
         "why_needed": "用于制定方案",
     }
@@ -43,10 +44,27 @@ def test_resolve_awaiting_user_input_with_pending_as_runtime_answer(fresh_state)
     assert resolution.should_advance_step is False
 
 
+def test_resolve_runtime_answer_without_awaiting_kind_keeps_legacy_compat(fresh_state):
+    """旧 checkpoint 里的 pending 没有 awaiting_kind，仍应按 runtime 答复处理。"""
+    pending = {
+        "question": "预算是多少？",
+        "why_needed": "用于制定方案",
+    }
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.pending_user_input_request = pending
+
+    resolution = resolve_user_input(fresh_state, "预算 3500 元左右")
+
+    assert resolution.kind == RUNTIME_USER_INPUT_ANSWER
+    assert resolution.pending_user_input_request == pending
+    assert resolution.should_advance_step is False
+
+
 def test_resolve_user_input_preserves_multiline_content(fresh_state):
     """解析层必须保留用户原文，不能在进入 transition 前丢掉多行信息。"""
     fresh_state.task.status = "awaiting_user_input"
     fresh_state.task.pending_user_input_request = {
+        "awaiting_kind": "request_user_input",
         "question": "请补充行程偏好",
         "why_needed": "用于规划行程",
     }

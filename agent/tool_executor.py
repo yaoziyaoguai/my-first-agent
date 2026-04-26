@@ -88,6 +88,9 @@ def execute_single_tool(
                 state.task.tool_execution_log.pop(tid, None)
 
             state.task.pending_user_input_request = {
+                # awaiting_kind 是 pending 内部的等待来源标记，不是新的 status。
+                # 它随现有 task 快照进 checkpoint，但不改变 checkpoint 顶层结构。
+                "awaiting_kind": "request_user_input",
                 "question": tool_input.get("question", ""),
                 "why_needed": tool_input.get("why_needed", ""),
                 "options": tool_input.get("options") or [],

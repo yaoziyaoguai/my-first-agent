@@ -348,9 +348,12 @@ def test_request_user_input_pauses_loop_in_normal_step(monkeypatch):
     )
     pending = state.task.pending_user_input_request
     assert pending is not None, "pending_user_input_request 必须被写入"
+    assert pending["awaiting_kind"] == "request_user_input"
     assert pending["question"] == "项目根目录在哪里？"
     assert pending["why_needed"] == "无路径无法 read_file"
     assert pending["options"] == ["./agent", "/abs/path"]
+    assert pending["context"] == "用户说想读 main.py"
+    assert pending["tool_use_id"] == "ru_1"
     assert pending["step_index"] == 0
     assert state.task.current_step_index == 0, "step_index 不能在求助时推进"
 
@@ -573,9 +576,11 @@ def test_endturn_with_question_text_triggers_pause(monkeypatch):
     )
     pending = state.task.pending_user_input_request
     assert pending is not None, "必须写入 pending_user_input_request"
+    assert pending["awaiting_kind"] == "fallback_question"
     assert "预算" in pending["question"] and "出发地" in pending["question"], (
         f"pending.question 应当保留 assistant 原文，实际={pending['question']}"
     )
+    assert "模型未调用 request_user_input" in pending["why_needed"]
     assert state.task.current_step_index == 0, "兜底不能推进 step"
 
 
@@ -609,9 +614,11 @@ def test_two_consecutive_endturns_without_progress_trigger_pause(monkeypatch):
     )
     pending = state.task.pending_user_input_request
     assert pending is not None
+    assert pending["awaiting_kind"] == "no_progress"
     assert "继续思考中" in pending["question"], (
         f"pending.question 应当是最近一次 assistant 文本，实际={pending['question']}"
     )
+    assert "模型未调用 request_user_input" in pending["why_needed"]
     assert state.task.consecutive_end_turn_without_progress >= 2
 
 

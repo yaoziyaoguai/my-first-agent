@@ -400,7 +400,16 @@ def handle_end_turn_response(
                 EVENT_RUNTIME_NO_PROGRESS,
             )
         ):
+            # awaiting_kind 只标记“为什么 runtime 正在等用户”，不改变 status。
+            # fallback_question 来自模型普通文本求助；no_progress 来自 runtime 观察到
+            # 连续无进展。两者恢复后都仍按 runtime_user_input_answer 处理。
+            awaiting_kind = (
+                "fallback_question"
+                if model_event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
+                else "no_progress"
+            )
             state.task.pending_user_input_request = {
+                "awaiting_kind": awaiting_kind,
                 "question": (
                     text_content[:500] if text_content
                     else "[模型 end_turn 但未声明步骤完成；请你介入]"

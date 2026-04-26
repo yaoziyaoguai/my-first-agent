@@ -14,6 +14,10 @@ transition 再根据 resolution 做真正的 state mutation。
 - 不调用模型；
 - 不调用工具；
 - 不做 slot filling 或复杂意图识别。
+
+第一阶段的 `awaiting_kind` 只存在于 `pending_user_input_request` 内部，用来标记
+runtime 为什么等待用户。它不是新的 status，也不是 checkpoint 顶层 schema。
+旧 checkpoint 没有该字段时仍按 runtime 求助答复处理。
 """
 
 from __future__ import annotations
@@ -39,7 +43,8 @@ class InputResolution:
     - content：用户原始答复，也就是设计讨论里的 answer。这里保留完整原文，
       包括多行内容，避免解析层提前丢信息。
     - pending_user_input_request：如果这是执行中途求助的回答，这里保存当时
-      pending 里的 question / why_needed 等上下文；collect_input 答案没有 pending。
+      pending 里的 question / why_needed / awaiting_kind 等上下文；collect_input
+      答案没有 pending。
     - should_advance_step：解析层给 transition 的流程提示。collect_input 答完
       默认推进 step；runtime 求助答完只补充当前 step，不推进。
 
@@ -83,6 +88,7 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
         return InputResolution(kind=UNKNOWN_INPUT, content=content)
 
     pending = getattr(state.task, "pending_user_input_request", None)
+    awaiting_kind = None
     if pending is None:
         resolution = InputResolution(
             kind=COLLECT_INPUT_ANSWER,
@@ -90,6 +96,9 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
             should_advance_step=True,
         )
     else:
+        # pending 存在就仍然按 runtime 求助答复处理。awaiting_kind 只是让来源
+        # 更可观测；旧 checkpoint 缺失该字段时不能让恢复链路失效。
+        awaiting_kind = pending.get("awaiting_kind")
         resolution = InputResolution(
             kind=RUNTIME_USER_INPUT_ANSWER,
             content=content,
@@ -101,6 +110,13 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
         resolution.kind,
         event_type="user.replied",
         event_source="user",
-        details={"should_advance_step": resolution.should_advance_step},
+        details={
+            "should_advance_step": resolution.should_advance_step,
+            "awaiting_kind": (
+                awaiting_kind
+                if resolution.kind == RUNTIME_USER_INPUT_ANSWER
+                else None
+            ),
+        },
     )
     return resolution

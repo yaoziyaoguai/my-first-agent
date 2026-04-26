@@ -59,8 +59,14 @@ def execute_single_tool(
     if is_meta_tool(tool_name):
         execution_log = state.task.tool_execution_log
         if tool_use_id in execution_log:
-            # 已记录（幂等），什么都不做——messages 里本来就没有它。
-            return None
+            existing = execution_log[tool_use_id]
+            if existing.get("step_index") == state.task.current_step_index:
+                # 同一步里重复收到同一个元工具 id，按幂等处理；messages 里本来就没有它。
+                return None
+            # 有些模型/网关会在不同 step 复用形如
+            # toolu_functions.mark_step_complete:0 的工具 id。元工具完成判定按
+            # step_index 隔离，不能让旧 step 的幂等记录挡住当前 step 的完成声明。
+            tool_use_id = f"{tool_use_id}#step:{state.task.current_step_index}"
 
         state.task.tool_execution_log[tool_use_id] = {
             "tool": tool_name,

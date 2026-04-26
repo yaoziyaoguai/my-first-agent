@@ -235,6 +235,36 @@ def test_meta_tool_log_entry_tagged_with_correct_step_index(monkeypatch):
         cleanup()
 
 
+def test_meta_tool_reused_tool_use_id_can_complete_later_step(monkeypatch):
+    """不同步骤复用同一个元工具 id 时，后续步骤仍必须能记录完成。
+
+    真实网关可能为 mark_step_complete 反复给出
+    ``toolu_functions.mark_step_complete:0`` 这类稳定 id。元工具完成判定按
+    step_index 隔离；如果只按 tool_use_id 幂等，后续步骤会被误判为未完成，
+    Runtime 继续请求模型，用户就会看到最后一条 assistant 总结被真实重复输出。
+    """
+    fake = FakeAnthropicClient(
+        responses=[
+            _plan_response([("s1", "规划", "read"), ("s2", "出方案", "report")]),
+            meta_complete_response(score=90, text="step1 完", tool_id="reused_meta"),
+            meta_complete_response(score=95, text="step2 完", tool_id="reused_meta"),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+    from agent.core import chat
+
+    chat("两步任务")
+    chat("y")
+
+    assert state.task.status == "idle"
+    meta_entries = [
+        e for e in state.task.tool_execution_log.values()
+        if e.get("tool") == "mark_step_complete"
+    ]
+    assert len(meta_entries) == 0, "任务完成 reset 后不应残留元工具日志"
+    assert fake.responses == [], "两步完成后不应继续请求第三次模型响应"
+
+
 # ============================================================
 # 5. mark_step_complete 不吃 per-turn tool_call_count 配额
 # ============================================================

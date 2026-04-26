@@ -85,7 +85,7 @@ def test_business_tool_resolves_to_model_used_business_tool():
     assert event.event_payload["tool_input"] == {"path": "README.md"}
 
 
-def test_text_question_resolves_to_model_text_requested_user_input():
+def test_blocking_text_question_resolves_to_model_text_requested_user_input():
     from agent.model_output_resolution import (
         EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
         resolve_end_turn_output,
@@ -97,6 +97,51 @@ def test_text_question_resolves_to_model_text_requested_user_input():
     assert event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
     assert event.event_source == "model"
     assert event.event_payload["text"] == "请补充你的预算是多少？"
+
+
+def test_non_blocking_followups_do_not_resolve_to_text_requested_user_input():
+    """最终答案后的开放式 follow-up 不是阻塞请求，不能让 runtime 进入等待态。"""
+    from agent.model_output_resolution import resolve_end_turn_output
+
+    for text in (
+        "如需调整任何细节，请告诉我",
+        "如果你想，我可以继续优化",
+        "需要我进一步调整吗",
+        "如需我帮你修改方案，可以继续告诉我",
+    ):
+        assert resolve_end_turn_output(text, no_progress_count=1) is None
+
+
+def test_full_answer_with_followup_does_not_trigger_text_fallback():
+    """已有完整结果时，结尾客套追问不能覆盖前面的完成态语义。"""
+    from agent.model_output_resolution import resolve_end_turn_output
+
+    text = (
+        "第一天：抵达武汉，游览黄鹤楼和长江大桥。\n"
+        "第二天：高铁前往宜昌，参观三峡大坝。\n"
+        "第三天：游览清江画廊后返程。\n\n"
+        "如需调整任何细节，请告诉我。"
+    )
+
+    assert resolve_end_turn_output(text, no_progress_count=1) is None
+
+
+def test_blocking_text_requests_still_trigger_text_fallback():
+    """协议外兜底仍保留：只有缺信息导致无法继续时才暂停等用户。"""
+    from agent.model_output_resolution import (
+        EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
+        resolve_end_turn_output,
+    )
+
+    for text in (
+        "为了继续执行，请提供预算范围",
+        "缺少必要信息：出行日期，请补充",
+        "我需要知道你的出发日期才能继续",
+        "无法继续，除非你提供出发城市",
+    ):
+        event = resolve_end_turn_output(text, no_progress_count=1)
+        assert event is not None
+        assert event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
 
 
 def test_no_progress_count_resolves_to_runtime_no_progress():

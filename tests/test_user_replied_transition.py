@@ -41,6 +41,93 @@ def _step_input_texts(state):
     return texts
 
 
+def test_empty_input_guard_does_not_enter_transition_for_collect_path(
+    fresh_state,
+    two_step_plan,
+    monkeypatch,
+):
+    """空输入没有产生事实，handler 应留在等待态，不执行任何 transition action。"""
+    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
+    import agent.confirm_handlers as confirm_handlers
+
+    def fail_transition(**_kwargs):
+        raise AssertionError("empty_user_input 不应进入 transition/action 层")
+
+    called = {"continue": 0}
+    monkeypatch.setattr(
+        confirm_handlers,
+        "apply_user_replied_transition",
+        fail_transition,
+    )
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.current_step_index = 0
+    fresh_state.task.pending_user_input_request = None
+    before_messages = list(fresh_state.conversation.messages)
+
+    ctx = ConfirmationContext(
+        state=fresh_state,
+        turn_state=object(),
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda _turn_state: called.__setitem__("continue", 1) or "",
+    )
+    reply = handle_user_input_step("", ctx)
+
+    assert reply == "请输入有效内容，或输入取消/退出。"
+    assert fresh_state.task.status == "awaiting_user_input"
+    assert fresh_state.task.current_step_index == 0
+    assert fresh_state.task.pending_user_input_request is None
+    assert fresh_state.conversation.messages == before_messages
+    assert called["continue"] == 0
+
+
+def test_empty_input_guard_preserves_runtime_pending(
+    fresh_state,
+    two_step_plan,
+    monkeypatch,
+):
+    """runtime 求助等待用户时，空白输入不能清 pending，也不能继续 loop。"""
+    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
+    import agent.confirm_handlers as confirm_handlers
+
+    def fail_transition(**_kwargs):
+        raise AssertionError("empty_user_input 不应进入 transition/action 层")
+
+    called = {"continue": 0}
+    pending = {
+        "awaiting_kind": "request_user_input",
+        "question": "预算是多少？",
+        "why_needed": "用于制定方案",
+    }
+    monkeypatch.setattr(
+        confirm_handlers,
+        "apply_user_replied_transition",
+        fail_transition,
+    )
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.current_step_index = 0
+    fresh_state.task.pending_user_input_request = pending
+    before_messages = list(fresh_state.conversation.messages)
+
+    ctx = ConfirmationContext(
+        state=fresh_state,
+        turn_state=object(),
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda _turn_state: called.__setitem__("continue", 1) or "",
+    )
+    reply = handle_user_input_step("   ", ctx)
+
+    assert reply == "请输入有效内容，或输入取消/退出。"
+    assert fresh_state.task.status == "awaiting_user_input"
+    assert fresh_state.task.current_step_index == 0
+    assert fresh_state.task.pending_user_input_request == pending
+    assert fresh_state.conversation.messages == before_messages
+    assert called["continue"] == 0
+
+
 def test_collect_input_transition_advances_step_and_saves(
     fresh_state,
     two_step_plan,

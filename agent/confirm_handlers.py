@@ -14,7 +14,7 @@ from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.context_builder import build_planning_messages
 from agent.conversation_events import append_control_event
-from agent.input_resolution import resolve_user_input
+from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
 from agent.task_runtime import advance_current_step_if_needed
 from agent.tool_executor import execute_pending_tool
@@ -186,6 +186,11 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     # 2. transitions：集中执行 append / clear pending / advance / save 等动作。
     # handler 只负责把 transition 结果接回主循环，后续更多事件也可以沿用这个边界。
     resolution = resolve_user_input(state, user_input)
+    if resolution.kind == EMPTY_USER_INPUT:
+        # 这是正式 User Input Layer 前的 runtime 防御：空输入没有产生有效事实，
+        # 所以不能进入 transition/action 层，也就不能清 pending、推进 step 或保存 checkpoint。
+        return "请输入有效内容，或输入取消/退出。"
+
     transition = apply_user_replied_transition(
         state=state,
         messages=messages,

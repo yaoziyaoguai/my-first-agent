@@ -356,6 +356,10 @@ def test_request_user_input_pauses_loop_in_normal_step(monkeypatch):
     assert pending["tool_use_id"] == "ru_1"
     assert pending["step_index"] == 0
     assert state.task.current_step_index == 0, "step_index 不能在求助时推进"
+    assert len(fake.requests) == 1, (
+        "request_user_input 是阻塞式 runtime 事件；模型调用后本轮 loop 必须停住，"
+        "不能同一轮继续请求模型导致重复追问"
+    )
 
     # ---- messages 干净：没有 request_user_input 的 tool_use / tool_result ----
     for msg in state.conversation.messages:

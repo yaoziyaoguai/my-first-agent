@@ -8,6 +8,52 @@
 
 ---
 
+## User Input Layer productization（输入层产品化）
+
+> **状态（2026-04-26）：阶段 1 止血中，尚未终局化**
+
+真实 CLI 冒烟测试已经证明：用户自然粘贴编号列表、多行文本或大段说明是正常
+产品行为，不能要求用户必须使用 `/multi`。`/multi` 可以继续保留为显式高级协议，
+但不能成为唯一正确用法。
+
+### 阶段 1 · Runtime 防御（止血，不是终局）
+
+- `empty_user_input` guard：空输入 / 纯空白不应被当作有效回答，不能 append
+  `step_input`、不能清 pending、不能推进 step、不能保存 checkpoint。
+- text fallback 收紧：只有“缺少必要信息导致无法继续/完成”的阻塞式文本，才应
+  触发 `model.text_requested_user_input`；最终答案后的“如需调整请告诉我”这类
+  开放式 follow-up 不应进入 `awaiting_user_input`。
+- 补 context projection / request_user_input loop stop 测试：验证现有 Runtime 链路
+  没有丢多行答复，也不会在 request_user_input 后继续重复调模型。
+
+这一步只是减少真实使用中的误伤，不代表用户输入层已经产品化。
+
+### 阶段 2 · UserInputEnvelope（正式输入层）
+
+中期应新增 `UserInputEnvelope`，让 CLI / frontend 读入的内容先被包装成明确输入
+对象，再交给 `InputResolution`。最小字段：
+
+- `raw_text`
+- `normalized_text`
+- `input_mode`
+- `source`
+- `line_count`
+- `is_empty`
+
+届时 `read_user_input -> str` 应逐步演进为返回 envelope，
+`resolve_user_input(state, user_input: str)` 也应演进为接收 envelope。
+日志只打印 `input_mode` / `line_count` / `is_empty` 等元信息，不打印完整用户原文。
+
+### 长期 · 多行粘贴 UX
+
+- 短期：保留 `/multi`，但提示更清楚。
+- 中期：评估普通 CLI 下自动 paste burst 合并。
+- 长期：考虑 `prompt_toolkit` / bracketed paste / multiline UX。
+
+目标是支持用户自然粘贴多行、编号列表、大段文本，而不是把输入协议负担转嫁给用户。
+
+---
+
 ## 总览：6 个阶段 × 22 个 block
 
 ```

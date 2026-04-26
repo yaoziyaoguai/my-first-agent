@@ -110,7 +110,7 @@ def test_planning_messages_does_not_include_current_plan(fresh_state, two_step_p
 
 
 def test_execution_messages_keep_full_multiline_step_input(fresh_state, two_step_plan):
-    """用户多行补充信息必须完整进入最终 execution messages。"""
+    """request_user_input 的多行回复必须完整投影到模型下一轮上下文。"""
     fresh_state.task.current_plan = two_step_plan
     fresh_state.task.status = "running"
 
@@ -140,6 +140,9 @@ def test_execution_messages_keep_full_multiline_step_input(fresh_state, two_step
     )
 
     assert "用户已经回答" in all_text
+    assert "上一轮系统向用户询问" in all_text
+    assert "请补充武汉和宜昌行程偏好？" in all_text
+    assert "需要这些信息才能制定三日行程" in all_text
     assert "不要重复追问已经由用户回答过的内容" in all_text
     for expected in (
         "北京出发",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from agent.input_resolution import (
     COLLECT_INPUT_ANSWER,
+    EMPTY_USER_INPUT,
     RUNTIME_USER_INPUT_ANSWER,
     resolve_user_input,
 )
@@ -82,3 +83,34 @@ def test_resolve_user_input_preserves_multiline_content(fresh_state):
     resolution = resolve_user_input(fresh_state, user_input)
 
     assert resolution.content == user_input
+
+
+def test_empty_input_resolves_to_empty_for_collect_input_path(fresh_state):
+    """空输入是 User Input Layer 前的防御事件，不能被当作 collect_input 答案。"""
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.pending_user_input_request = None
+
+    resolution = resolve_user_input(fresh_state, "")
+
+    assert resolution.kind == EMPTY_USER_INPUT
+    assert resolution.content == ""
+    assert resolution.pending_user_input_request is None
+    assert resolution.should_advance_step is False
+
+
+def test_blank_input_resolves_to_empty_for_runtime_pending_path(fresh_state):
+    """pending 存在时空白输入也不是有效回答，尤其不能清掉旧 pending。"""
+    pending = {
+        "awaiting_kind": "request_user_input",
+        "question": "预算是多少？",
+        "why_needed": "用于制定方案",
+    }
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.pending_user_input_request = pending
+
+    resolution = resolve_user_input(fresh_state, "   ")
+
+    assert resolution.kind == EMPTY_USER_INPUT
+    assert resolution.content == "   "
+    assert resolution.pending_user_input_request == pending
+    assert resolution.should_advance_step is False

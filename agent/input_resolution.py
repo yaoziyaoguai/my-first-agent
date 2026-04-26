@@ -5,6 +5,10 @@
 另一种是执行中途 `request_user_input` 或 fallback 暂停后的补充信息，答完后
 只应继续当前 step，不能推进 step。
 
+真实 CLI 冒烟测试还暴露了一个更靠近 User Input Layer 的问题：空输入不能被
+当作有效回答。当前项目还没有正式的 `UserInputEnvelope`，所以这里先做
+`empty_user_input` 的 runtime 防御，阻止空白内容进入 transition/action 层。
+
 过去这些判断直接散落在 handler 的 if/else 里。这里把它抽成一个可测试、
 可观察的输入解析层：user input 先进来，被解析成 `InputResolution`，后续
 transition 再根据 resolution 做真正的 state mutation。
@@ -30,6 +34,7 @@ from agent.runtime_observer import log_resolution
 
 COLLECT_INPUT_ANSWER = "collect_input_answer"
 RUNTIME_USER_INPUT_ANSWER = "runtime_user_input_answer"
+EMPTY_USER_INPUT = "empty_user_input"
 UNKNOWN_INPUT = "unknown"
 
 
@@ -38,8 +43,9 @@ class InputResolution:
     """一次用户输入的解析结果。
 
     字段含义：
-    - kind：输入类型，也就是设计讨论里的 input_kind。第一阶段只有
-      `collect_input_answer`、`runtime_user_input_answer` 和 `unknown`。
+    - kind：输入类型，也就是设计讨论里的 input_kind。第一阶段包括
+      `collect_input_answer`、`runtime_user_input_answer`、`empty_user_input`
+      和 `unknown`。
     - content：用户原始答复，也就是设计讨论里的 answer。这里保留完整原文，
       包括多行内容，避免解析层提前丢信息。
     - pending_user_input_request：如果这是执行中途求助的回答，这里保存当时
@@ -47,6 +53,9 @@ class InputResolution:
       答案没有 pending。
     - should_advance_step：解析层给 transition 的流程提示。collect_input 答完
       默认推进 step；runtime 求助答完只补充当前 step，不推进。
+
+    `empty_user_input` 是 User Input Layer 正式化前的止血防御：它仍是只读
+    resolution，不会修改 state，也不会自行决定提示文案。
 
     第一阶段暂不引入 event/source/should_continue 字段：这些语义目前由 kind 和
     transition 返回值表达，避免为了框架完整性提前扩大数据结构。
@@ -79,6 +88,10 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
     - runtime_user_input_answer：用户回答的是执行中途的 request_user_input /
       fallback；当前 step 还没完成，只是多了补充上下文，所以不能推进 step。
 
+    空输入会被解析成 `empty_user_input`，由 handler 拦截并提示用户重新输入；
+    它不会进入 transition/action，因此不会 append step_input、清 pending、
+    推进 step 或保存 checkpoint。
+
     这里不做 slot filling、不抽取预算/偏好/人数，也不做复杂换话题判断。原因是
     第一阶段目标是明确状态机边界，而不是把自然语言理解逻辑塞进 runtime。
     """
@@ -89,7 +102,19 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
 
     pending = getattr(state.task, "pending_user_input_request", None)
     awaiting_kind = None
-    if pending is None:
+    if pending is not None:
+        awaiting_kind = pending.get("awaiting_kind")
+
+    if user_input.strip() == "":
+        # 这是 User Input Layer 正式化前的最小防御：空输入不是“用户已回答”，
+        # 不能让 collect_input 推进，也不能让 runtime 求助清掉 pending。
+        resolution = InputResolution(
+            kind=EMPTY_USER_INPUT,
+            content=content,
+            pending_user_input_request=pending,
+            should_advance_step=False,
+        )
+    elif pending is None:
         resolution = InputResolution(
             kind=COLLECT_INPUT_ANSWER,
             content=content,
@@ -98,7 +123,6 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
     else:
         # pending 存在就仍然按 runtime 求助答复处理。awaiting_kind 只是让来源
         # 更可观测；旧 checkpoint 缺失该字段时不能让恢复链路失效。
-        awaiting_kind = pending.get("awaiting_kind")
         resolution = InputResolution(
             kind=RUNTIME_USER_INPUT_ANSWER,
             content=content,
@@ -117,6 +141,7 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
                 if resolution.kind == RUNTIME_USER_INPUT_ANSWER
                 else None
             ),
+            "is_empty": resolution.kind == EMPTY_USER_INPUT,
         },
     )
     return resolution

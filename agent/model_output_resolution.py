@@ -28,17 +28,44 @@ EVENT_RUNTIME_NO_PROGRESS = "runtime.no_progress"
 EVENT_SOURCE_MODEL = "model"
 EVENT_SOURCE_RUNTIME = "runtime"
 
-TEXT_USER_INPUT_PATTERNS = (
-    "?",
-    "？",
-    "请告诉我",
+BLOCKING_USER_INPUT_PATTERNS = (
+    "为了继续",
+    "无法继续",
+    "无法完成",
+    "还缺少",
+    "缺少必要信息",
+    "请提供必要",
+    "请补充必要",
     "请提供",
-    "请说明",
-    "请回复",
     "请补充",
-    "麻烦您",
-    "您能否",
-    "请确认",
+    "需要你提供",
+    "需要您提供",
+    "我需要知道",
+    "需要知道",
+    "需要先确认",
+    "必须提供",
+    "才能继续",
+    "否则无法",
+    "除非你提供",
+    "除非您提供",
+)
+
+NON_BLOCKING_FOLLOWUP_PATTERNS = (
+    "如需调整",
+    "如需修改",
+    "如需进一步",
+    "如需我帮你修改",
+    "如果你想",
+    "如果您想",
+    "如果需要",
+    "可以继续告诉我",
+    "欢迎告诉我",
+    "需要我进一步调整吗",
+    "需要我帮你调整吗",
+    "需要我进一步优化吗",
+    "我可以继续优化",
+    "我可以帮你继续优化",
+    "是否需要我继续",
 )
 
 
@@ -58,6 +85,31 @@ class RuntimeEvent:
     event_type: str
     event_source: str
     event_payload: dict[str, Any]
+
+
+def is_non_blocking_followup(text_content: str) -> bool:
+    """判断文本是否只是最终答案后的开放式 follow-up。
+
+    这类句子通常是产品体验上的礼貌收尾，例如“如需调整请告诉我”。它不是
+    Runtime 阻塞点，不能触发 awaiting_user_input。这里先用保守关键词防御真实
+    CLI 暴露的误判；长期应该由更正式的 ModelOutputResolution + transition
+    语义来承接。
+    """
+    return any(pattern in text_content for pattern in NON_BLOCKING_FOLLOWUP_PATTERNS)
+
+
+def is_blocking_user_input_request(text_content: str) -> bool:
+    """判断普通 assistant 文本是否在阻塞性请求用户输入。
+
+    这是 request_user_input 协议外的兜底，只处理“没有这条信息就无法继续/完成”
+    的情况。它不做复杂 NLP，也不因为问号或“请告诉我”这类宽泛表达就暂停任务；
+    第一阶段宁可少触发 fallback，也避免把完整答案后的客套追问误判成阻塞请求。
+    """
+    if not text_content.strip():
+        return False
+    if is_non_blocking_followup(text_content):
+        return False
+    return any(pattern in text_content for pattern in BLOCKING_USER_INPUT_PATTERNS)
 
 
 def resolve_tool_use_block(block: Any) -> RuntimeEvent:
@@ -123,16 +175,22 @@ def resolve_end_turn_output(
     """解析 end_turn 文本求助 / no_progress，不决定暂停或推进。
 
     end_turn 没有 tool_use 结构，所以这里做的是 guardrail 式归类：
-    - 文本像是在问用户：记为 `model.text_requested_user_input`。这是协议外兜底，
-      用来捕获模型没有调用 request_user_input、却直接用普通文本提问的情况。
+    - 文本是阻塞性求助：记为 `model.text_requested_user_input`。这是协议外兜底，
+      用来捕获模型没有调用 request_user_input、却直接用普通文本表达“缺信息无法继续”的情况。
     - 连续无进展达到阈值：记为 `runtime.no_progress`。这是 runtime 观察事件，
       不是模型主动表达的事件。
 
-    当前优先级是“文本求助优先于 no_progress”。如果同一轮文本已经像阻塞性问题，
-    runtime 先保留模型问了什么；真正是否切到 awaiting_user_input 仍由
-    response handler 决定。
+    当前优先级是：
+    1. 非阻塞 follow-up 直接忽略，避免完整答案后的“如需调整请告诉我”进入等待态；
+    2. 阻塞性文本求助优先于 no_progress；
+    3. 再看 runtime 观察到的连续无进展。
+
+    真正是否切到 awaiting_user_input 仍由 response handler 决定。
     """
-    if text_content and any(pattern in text_content for pattern in TEXT_USER_INPUT_PATTERNS):
+    if text_content and is_non_blocking_followup(text_content):
+        return None
+
+    if is_blocking_user_input_request(text_content):
         return RuntimeEvent(
             event_type=EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
             event_source=EVENT_SOURCE_MODEL,

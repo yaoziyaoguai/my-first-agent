@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 
 from tests.conftest import (
     FakeAnthropicClient,
@@ -111,6 +113,71 @@ def test_chat_single_turn_end_turn(monkeypatch):
     # planner + executor 各调了一次
     assert len(fake.create_requests) == 1   # planner 用 create
     assert len(fake.requests) == 1          # executor 用 stream
+
+
+def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
+    """传入 on_output_chunk 时，模型 delta 应作为用户可见 chunk 回调出去。"""
+
+    final_response = text_response("你好")
+
+    class StreamingFakeStream:
+        """模拟 Anthropic stream：先产出两个 text delta，再返回最终消息。"""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __iter__(self):
+            return iter([
+                SimpleNamespace(
+                    type="content_block_delta",
+                    delta=SimpleNamespace(text="你"),
+                ),
+                SimpleNamespace(
+                    type="content_block_delta",
+                    delta=SimpleNamespace(text="好"),
+                ),
+            ])
+
+        def get_final_message(self):
+            return final_response
+
+    class StreamingFakeClient:
+        """planner 走 create，executor 走带 delta 的 stream。"""
+
+        def __init__(self):
+            self.create_requests = []
+            self.requests = []
+
+            outer = self
+
+            class _Messages:
+                def create(self, **kwargs):
+                    outer.create_requests.append(kwargs)
+                    return _planner_no_plan_response()
+
+                def stream(self, **kwargs):
+                    outer.requests.append(kwargs)
+                    return StreamingFakeStream()
+
+            self.messages = _Messages()
+
+    fake = StreamingFakeClient()
+    _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    chunks = []
+    reply = chat("你好", on_output_chunk=chunks.append)
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert chunks == ["你", "好"]
+    assert "你好" not in captured.out
+    assert len(fake.create_requests) == 1
+    assert len(fake.requests) == 1
 
 
 # ---------- 测试 2：一次 tool_use 循环 ----------

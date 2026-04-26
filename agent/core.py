@@ -1,4 +1,5 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import anthropic
 from agent.prompt_builder import build_system_prompt
@@ -98,8 +99,16 @@ refresh_runtime_system_prompt()
 
 # ========== 对外主入口 ==========
 
-def chat(user_input: str) -> str:
-    """主入口：对话 + 规划 + 工具执行。"""
+def chat(
+    user_input: str,
+    *,
+    on_output_chunk: Callable[[str], None] | None = None,
+) -> str:
+    """主入口：对话 + 规划 + 工具执行。
+
+    on_output_chunk 是 TUI 这类 I/O adapter 的可选流式出口，只传用户可见的
+    assistant 文本 delta。默认 None 时保持 CLI 旧行为：delta 继续 print 到终端。
+    """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
     # 这是 chat() 内部的第二层守卫（main.py::main_loop 已有第一层），
@@ -138,7 +147,10 @@ def chat(user_input: str) -> str:
         turn_state=turn_state,
         client=client,
         model_name=MODEL_NAME,
-        continue_fn=_run_main_loop,
+        continue_fn=lambda ts: _run_main_loop(
+            ts,
+            on_output_chunk=on_output_chunk,
+        ),
     )
 
     # 先处理"等待用户确认计划"的状态：
@@ -182,7 +194,7 @@ def chat(user_input: str) -> str:
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(turn_state)
+        return _run_main_loop(turn_state, on_output_chunk=on_output_chunk)
 
     # 到这里意味着要开启一轮全新的任务。
     # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
@@ -198,7 +210,7 @@ def chat(user_input: str) -> str:
     if plan_result == "awaiting_plan_confirmation":
         return ""
 
-    return _run_main_loop(turn_state)
+    return _run_main_loop(turn_state, on_output_chunk=on_output_chunk)
 
 
 # ========== 规划阶段 ==========
@@ -259,7 +271,11 @@ def _run_planning_phase(user_input: str) -> str:
 
 # ========== 主循环 ==========
 
-def _run_main_loop(turn_state: TurnState) -> str:
+def _run_main_loop(
+    turn_state: TurnState,
+    *,
+    on_output_chunk: Callable[[str], None] | None = None,
+) -> str:
     """模型调用循环，按 stop_reason 分派处理。"""
     while True:
         state.task.loop_iterations += 1
@@ -270,7 +286,7 @@ def _run_main_loop(turn_state: TurnState) -> str:
             state.reset_task()
             return "对话循环次数过多，请简化任务或分步执行。"
 
-        response = _call_model(turn_state)
+        response = _call_model(turn_state, on_output_chunk=on_output_chunk)
 
         if response.stop_reason == "max_tokens":
             result = handle_max_tokens_response(
@@ -313,8 +329,16 @@ def _run_main_loop(turn_state: TurnState) -> str:
         return "意外的响应"
 
 
-def _call_model(turn_state: TurnState):
-    """调用模型（流式）并返回最终 response。"""
+def _call_model(
+    turn_state: TurnState,
+    *,
+    on_output_chunk: Callable[[str], None] | None = None,
+):
+    """调用模型（流式）并返回最终 response。
+
+    模型 SDK 已经给出 content_block_delta。CLI 路径继续 print；TUI 路径传入
+    on_output_chunk 后，delta 直接成为 output.chunk，不混入 debug/checkpoint 日志。
+    """
     # ===== 协议观察：构造 request payload 并打印 =====
     request_messages = build_execution_messages_from_state(state)
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
@@ -337,10 +361,14 @@ def _call_model(turn_state: TurnState):
             elif event_type == "content_block_delta":
                 delta_text = getattr(event.delta, "text", None)
                 if delta_text:
-                    print(delta_text, end="", flush=True)
+                    if on_output_chunk is not None:
+                        on_output_chunk(delta_text)
+                    else:
+                        print(delta_text, end="", flush=True)
 
         response = stream.get_final_message()
-        print()
+        if on_output_chunk is None:
+            print()
 
     # ===== 协议观察：打印返回结构 =====
     # _debug_print_response(response)

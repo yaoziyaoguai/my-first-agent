@@ -11,6 +11,13 @@
 
 from __future__ import annotations
 
+from agent.user_input import (
+    build_user_input_envelope,
+    cancelled_input_event,
+    closed_input_event,
+    submitted_input_event,
+)
+
 
 def _make_reader(lines):
     """把字符串列表包成一个一次性 reader：每次 reader() 弹出一行。"""
@@ -172,3 +179,227 @@ def test_multi_mode_eof_treats_as_done():
         writer=_silent_writer,
     )
     assert out == "first\nsecond"
+
+
+def test_main_loop_passes_latest_reply_to_next_input_event(monkeypatch):
+    """Textual 下一轮输入应拿到上一轮用户可见回复，但 main 不解释输出语义。"""
+
+    import main
+
+    seen_latest_outputs = []
+    events = [
+        submitted_input_event(
+            build_user_input_envelope("你是哪种大模型", source="cli"),
+            source="simple",
+            channel="test",
+        ),
+        closed_input_event(source="simple", channel="test"),
+    ]
+
+    def fake_read_user_input_event(*, latest_output: str = "", **_kwargs):
+        """记录 main loop 传给输入后端的最近输出，并返回预置事件。"""
+
+        seen_latest_outputs.append(latest_output)
+        return events.pop(0)
+
+    monkeypatch.setattr(main, "read_user_input_event", fake_read_user_input_event)
+    monkeypatch.setattr(main, "chat", lambda _user_input: "我是一个测试回复")
+    monkeypatch.setattr(main, "finalize_session", lambda: None)
+    monkeypatch.setattr(main, "print", lambda *_args, **_kwargs: None, raising=False)
+
+    main.main_loop()
+
+    assert seen_latest_outputs == ["", "我是一个测试回复"]
+
+
+def test_textual_main_loop_captures_printed_chat_output_as_latest_output(monkeypatch):
+    """Textual 下普通 assistant 流式 print 也应进入下一轮 output_panel。"""
+
+    import main
+
+    monkeypatch.setenv(main.INPUT_BACKEND_ENV, "textual")
+
+    seen_latest_outputs = []
+    events = [
+        submitted_input_event(
+            build_user_input_envelope("你是哪种大模型", source="tui"),
+            source="tui",
+            channel="test",
+        ),
+        cancelled_input_event(source="tui", channel="test"),
+        closed_input_event(source="tui", channel="test"),
+    ]
+
+    def fake_read_user_input_event(*, latest_output: str = "", **_kwargs):
+        """记录每一轮传给 textual backend 的 latest_output。"""
+
+        seen_latest_outputs.append(latest_output)
+        return events.pop(0)
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+        """模拟 core.chat 普通 end_turn：正文 print，返回空串避免重复打印。"""
+
+        print("我是流式测试回复")
+        return ""
+
+    monkeypatch.setattr(main, "read_user_input_event", fake_read_user_input_event)
+    monkeypatch.setattr(main, "chat", fake_chat)
+    monkeypatch.setattr(main, "load_checkpoint", lambda: False)
+    monkeypatch.setattr(main, "handle_interrupt_without_checkpoint", lambda: False)
+    monkeypatch.setattr(main, "finalize_session", lambda: None)
+
+    main.main_loop()
+
+    assert seen_latest_outputs == [
+        "",
+        "我是流式测试回复",
+        "我是流式测试回复",
+    ]
+
+
+def test_textual_latest_output_filters_debug_observer_lines():
+    """checkpoint/runtime 观测日志不应被塞进 TUI output_panel。"""
+
+    import main
+
+    captured = "\n".join([
+        "[CHECKPOINT] saved (status=running)",
+        "[RUNTIME_EVENT] event_type=debug",
+        "用户可见回复",
+    ])
+
+    assert main._merge_chat_outputs("", captured) == "用户可见回复"
+
+
+def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
+    """常驻 Textual Shell 通过 main 桥接拿到普通 assistant 流式输出。"""
+
+    import main
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+        """模拟 core.chat：正文 print，返回空串。"""
+
+        print("我是常驻 TUI 回复")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input("你好") == "我是常驻 TUI 回复"
+
+
+def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
+    """main bridge 应把 on_output_chunk 透传给 core.chat。"""
+
+    import main
+
+    seen_chunks = []
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+        assert on_output_chunk is not None
+        on_output_chunk("你")
+        on_output_chunk("好")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    result = main._handle_textual_shell_input(
+        "你好",
+        on_output_chunk=seen_chunks.append,
+    )
+
+    assert seen_chunks == ["你", "好"]
+    assert result == ""
+
+
+def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):
+    """TUI 输入 y 时，main bridge 只能原样交给 Runtime，不解释确认语义。"""
+
+    import main
+
+    seen_calls = []
+
+    def fake_chat(user_input: str, *, on_output_chunk=None) -> str:
+        """记录 main.py 传给 core.chat 的原始文本。"""
+
+        seen_calls.append((user_input, on_output_chunk is not None))
+        return "继续执行"
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    chunks = []
+    result = main._handle_textual_shell_input(
+        "y",
+        on_output_chunk=chunks.append,
+    )
+
+    assert seen_calls == [("y", True)]
+    assert result == "继续执行"
+    assert chunks == []
+
+
+def test_textual_shell_input_handler_drops_stdout_when_chunks_streamed(monkeypatch):
+    """streaming 已写入 TUI 时，stdout capture 不能再作为 completion 重复返回。"""
+
+    import main
+
+    seen_chunks = []
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+        assert on_output_chunk is not None
+        on_output_chunk("你")
+        on_output_chunk("好")
+        print("你好")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    result = main._handle_textual_shell_input(
+        "你好",
+        on_output_chunk=seen_chunks.append,
+    )
+
+    assert seen_chunks == ["你", "好"]
+    assert result == ""
+
+
+def test_textual_shell_input_handler_filters_debug_output(monkeypatch):
+    """debug/checkpoint/runtime observer 文本不能进入 conversation view。"""
+
+    import main
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+        """模拟 stdout 混有用户可见文本和内部观测日志。"""
+
+        print("[CHECKPOINT] saved (status=running)")
+        print("[RUNTIME_EVENT] event_type=assistant_text")
+        print("用户可见回复")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input("你好") == "用户可见回复"
+
+
+def test_run_textual_main_loop_uses_persistent_shell_and_finalizes(monkeypatch):
+    """textual backend 入口应走常驻 Shell，不再每轮创建 one-shot App。"""
+
+    import main
+    import agent.input_backends.textual as textual_backend
+
+    calls = []
+
+    def fake_shell(*, chat_handler, prompt_text="你: "):
+        """记录 main 传入的 chat_handler，避免启动真实 TUI。"""
+
+        calls.append((chat_handler, prompt_text))
+
+    finalized = []
+
+    monkeypatch.setattr(textual_backend, "run_textual_io_shell", fake_shell)
+    monkeypatch.setattr(main, "finalize_session", lambda: finalized.append(True))
+
+    main.run_textual_main_loop()
+
+    assert len(calls) == 1
+    assert calls[0][0] is main._handle_textual_shell_input
+    assert finalized == [True]

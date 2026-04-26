@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+MAX_LOG_TEXT_PREVIEW = 120
+
 
 RUNTIME_DEBUG_LOGS = True
 """Runtime 观测开关。
@@ -45,6 +47,58 @@ def _format_fields(fields: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _safe_log_value(value: Any) -> Any:
+    """把 observer payload 压成适合 JSONL 的短字段。
+
+    Runtime 观测日志只回答“发生了什么”，不保存完整 prompt/messages/tool input。
+    字符串统一截断，容器只保留浅层短值，避免 TUI/terminal 再次被大 JSON 污染。
+    """
+
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        if len(value) <= MAX_LOG_TEXT_PREVIEW:
+            return value
+        return value[:MAX_LOG_TEXT_PREVIEW] + "..."
+    if isinstance(value, list):
+        return [_safe_log_value(item) for item in value[:20]]
+    if isinstance(value, tuple):
+        return [_safe_log_value(item) for item in value[:20]]
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_log_value(val)
+            for key, val in list(value.items())[:30]
+        }
+    return str(value)[:MAX_LOG_TEXT_PREVIEW]
+
+
+def _persist_observer_event(
+    event_type: str,
+    *,
+    event_source: str | None,
+    event_payload: dict[str, Any] | None,
+    event_channel: str | None,
+) -> None:
+    """把 observer 事件同步写入 agent_log.jsonl。
+
+    这里故意吞掉日志写入异常：可观测性不能改变 Runtime 行为。
+    """
+
+    try:
+        from agent.logger import log_event as _log_event
+
+        data: dict[str, Any] = {
+            "event_type": event_type,
+            "event_source": event_source,
+            "event_channel": event_channel,
+        }
+        if event_payload:
+            data["payload"] = _safe_log_value(event_payload)
+        _log_event("runtime_observer", data)
+    except Exception:
+        return
+
+
 def log_event(
     event_type: str,
     *,
@@ -64,7 +118,12 @@ def log_event(
     if not RUNTIME_DEBUG_LOGS:
         return
 
-    _ = event_payload
+    _persist_observer_event(
+        event_type,
+        event_source=event_source,
+        event_payload=event_payload,
+        event_channel=event_channel,
+    )
     fields = {
         "event_type": event_type,
         "event_source": event_source,

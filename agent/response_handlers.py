@@ -32,6 +32,7 @@ from agent.tool_registry import is_meta_tool
 
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
+TEXT_PREVIEW_LIMIT = 120
 
 
 def _log_model_event(event: RuntimeEvent, *, event_channel: str | None = None) -> None:
@@ -46,6 +47,72 @@ def _log_model_event(event: RuntimeEvent, *, event_channel: str | None = None) -
         event_payload=event.event_payload,
         event_channel=event_channel,
     )
+
+
+def _current_step_fields(state: Any) -> dict[str, Any]:
+    """提取当前步骤的短观测字段，不改变 Runtime 状态。"""
+
+    fields: dict[str, Any] = {
+        "task_status": getattr(state.task, "status", None),
+        "current_step_index": getattr(state.task, "current_step_index", None),
+        "loop_iterations": getattr(state.task, "loop_iterations", None),
+        "consecutive_end_turn_without_progress": getattr(
+            state.task,
+            "consecutive_end_turn_without_progress",
+            None,
+        ),
+        "has_pending_tool": bool(getattr(state.task, "pending_tool", None)),
+        "has_pending_user_input": bool(
+            getattr(state.task, "pending_user_input_request", None)
+        ),
+    }
+    if state.task.current_plan:
+        try:
+            plan = Plan.model_validate(state.task.current_plan)
+            idx = state.task.current_step_index
+            if 0 <= idx < len(plan.steps):
+                step = plan.steps[idx]
+                fields["current_step_title"] = step.title
+                fields["current_step_type"] = step.step_type
+        except Exception:
+            fields["current_step_title"] = "[invalid_plan]"
+    return fields
+
+
+def _text_preview(text: str) -> str:
+    """返回短文本预览，避免日志写入完整 assistant 输出。"""
+
+    compact = " ".join(text.split())
+    if len(compact) <= TEXT_PREVIEW_LIMIT:
+        return compact
+    return compact[:TEXT_PREVIEW_LIMIT] + "..."
+
+
+def _response_observation(
+    response: Any,
+    *,
+    state: Any,
+    extract_text_fn,
+) -> dict[str, Any]:
+    """把模型 response 压缩成可排查 stop_reason 的短字段。"""
+
+    text = extract_text_fn(response.content)
+    tool_names = [
+        block.name
+        for block in response.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    return {
+        **_current_step_fields(state),
+        "stop_reason": getattr(response, "stop_reason", None),
+        "text_length": len(text),
+        "text_preview": _text_preview(text),
+        "tool_use_names": tool_names,
+        "called_mark_step_complete": "mark_step_complete" in tool_names,
+        "called_request_user_input": "request_user_input" in tool_names,
+        "has_tool_use": bool(tool_names),
+        "has_meta_tool": any(is_meta_tool(name) for name in tool_names),
+    }
 
 
 def _serialize_assistant_content(content_blocks: list[Any]) -> list[dict[str, Any]]:
@@ -110,6 +177,24 @@ def handle_tool_use_response(
     - 遇到 AWAITING_USER / FORCE_STOP 时，为剩余未处理的 tool_use 写占位
       tool_result，保证下一次调用 API 时 tool_use/tool_result 配对完整。
     """
+    observation = _response_observation(
+        response,
+        state=state,
+        extract_text_fn=extract_text_fn,
+    )
+    log_event(
+        "model.response_received",
+        event_source="model",
+        event_payload=observation,
+        event_channel="tool_use",
+    )
+    log_event(
+        "model.tool_use",
+        event_source="model",
+        event_payload=observation,
+        event_channel="tool_use",
+    )
+
     _append_assistant_response(messages, response)
 
     state.task.consecutive_max_tokens = 0
@@ -199,6 +284,21 @@ def handle_tool_use_response(
             )
             return "用户连续拒绝多次操作，任务已停止。"
         if result == AWAITING_USER:
+            log_event(
+                "loop.stop",
+                event_source="runtime",
+                event_payload={
+                    **_current_step_fields(state),
+                    "reason_for_stop": "awaiting_tool_or_user_confirmation",
+                    "pending_tool_name": (
+                        state.task.pending_tool or {}
+                    ).get("tool"),
+                    "pending_user_input_kind": (
+                        state.task.pending_user_input_request or {}
+                    ).get("awaiting_kind"),
+                },
+                event_channel="tool_use",
+            )
             remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
             _fill_placeholder_results(
                 messages,
@@ -259,8 +359,30 @@ def _maybe_advance_step(state: Any) -> str | None:
     - "\n[请确认: ...]"：进入下一步前需要用户确认（多步且非最后一步）
     - ""：任务完成或单步推进完成（无需用户确认）
     """
+    before_index = getattr(state.task, "current_step_index", None)
     if not is_current_step_completed(state):
+        log_event(
+            "runtime.no_progress_detected",
+            event_source="runtime",
+            event_payload={
+                **_current_step_fields(state),
+                "no_progress_reason": "mark_step_complete_missing_or_below_threshold",
+                "mark_step_complete_called": False,
+            },
+            event_channel="progress",
+        )
         return None
+
+    log_event(
+        "runtime.progress_detected",
+        event_source="runtime",
+        event_payload={
+            **_current_step_fields(state),
+            "current_step_index_before": before_index,
+            "mark_step_complete_called": True,
+        },
+        event_channel="progress",
+    )
 
     if state.task.current_plan:
         plan = Plan.model_validate(state.task.current_plan)
@@ -272,9 +394,31 @@ def _maybe_advance_step(state: Any) -> str | None:
                 save_checkpoint(state)
                 return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
             advance_current_step_if_needed(state)
+            log_event(
+                "runtime.progress_applied",
+                event_source="runtime",
+                event_payload={
+                    **_current_step_fields(state),
+                    "current_step_index_before": before_index,
+                    "current_step_index_after": state.task.current_step_index,
+                    "should_continue_loop": True,
+                },
+                event_channel="progress",
+            )
             return None
 
     advance_current_step_if_needed(state)
+    log_event(
+        "runtime.progress_applied",
+        event_source="runtime",
+        event_payload={
+            **_current_step_fields(state),
+            "current_step_index_before": before_index,
+            "current_step_index_after": state.task.current_step_index,
+            "should_continue_loop": state.task.status != "done",
+        },
+        event_channel="progress",
+    )
 
     if state.task.status == "done":
         clear_checkpoint()
@@ -317,6 +461,23 @@ def handle_max_tokens_response(
     - increment consecutive max_tokens count on state.task (持久化)
     - stop when the configured threshold is exceeded
     """
+    observation = _response_observation(
+        response,
+        state=state,
+        extract_text_fn=extract_text_fn,
+    )
+    log_event(
+        "model.response_received",
+        event_source="model",
+        event_payload=observation,
+        event_channel="max_tokens",
+    )
+    log_event(
+        "model.max_tokens",
+        event_source="model",
+        event_payload=observation,
+        event_channel="max_tokens",
+    )
     _append_assistant_response(messages, response)
     _log_model_event(resolve_max_tokens_output(), event_channel="stop_reason")
 
@@ -350,6 +511,23 @@ def handle_end_turn_response(
     这种给用户的提示。普通 end_turn 返回空串，main_loop 的 `if reply: print(reply)`
     判假不再打印，避免正文重复输出两次。
     """
+    observation = _response_observation(
+        response,
+        state=state,
+        extract_text_fn=extract_text_fn,
+    )
+    log_event(
+        "model.response_received",
+        event_source="model",
+        event_payload=observation,
+        event_channel="end_turn",
+    )
+    log_event(
+        "model.end_turn",
+        event_source="model",
+        event_payload=observation,
+        event_channel="end_turn",
+    )
     state.task.consecutive_max_tokens = 0
 
     _append_assistant_response(messages, response)
@@ -382,6 +560,18 @@ def handle_end_turn_response(
         #         强制停。覆盖陈述句问题之类启发式漏判的场景。
         text_content = extract_text_fn(response.content)
         state.task.consecutive_end_turn_without_progress += 1
+        log_event(
+            "runtime.end_turn_without_completion",
+            event_source="runtime",
+            event_payload={
+                **_current_step_fields(state),
+                "had_text_output": bool(text_content),
+                "had_tool_use": False,
+                "mark_step_complete_called": False,
+                "request_user_input_called": False,
+            },
+            event_channel="assistant_text",
+        )
 
         # end_turn 没有 tool_use 结构：text_requested_user_input 是协议外文本兜底，
         # runtime.no_progress 是 runtime 观察到的无进展事件。当前仍由本 handler
@@ -400,6 +590,16 @@ def handle_end_turn_response(
                 EVENT_RUNTIME_NO_PROGRESS,
             )
         ):
+            log_event(
+                "runtime.no_progress_detected",
+                event_source="runtime",
+                event_payload={
+                    **_current_step_fields(state),
+                    "no_progress_reason": model_event.event_type,
+                    "text_preview": _text_preview(text_content),
+                },
+                event_channel="assistant_text",
+            )
             # awaiting_kind 只标记“为什么 runtime 正在等用户”，不改变 status。
             # fallback_question 来自模型普通文本求助；no_progress 来自 runtime 观察到
             # 连续无进展。两者恢复后都仍按 runtime_user_input_answer 处理。

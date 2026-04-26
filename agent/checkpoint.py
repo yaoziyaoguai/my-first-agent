@@ -120,6 +120,34 @@ def save_checkpoint(state, source: str | None = None):
             encoding="utf-8",
         )
         status = getattr(state.task, "status", None)
+        try:
+            from agent.logger import log_event
+
+            pending_user_input = getattr(
+                state.task,
+                "pending_user_input_request",
+                None,
+            ) or {}
+            pending_tool = getattr(state.task, "pending_tool", None) or {}
+            log_event(
+                "checkpoint_saved",
+                {
+                    "checkpoint_source": source,
+                    "task_status": status,
+                    "current_step_index": getattr(
+                        state.task,
+                        "current_step_index",
+                        None,
+                    ),
+                    "pending_user_input_kind": pending_user_input.get(
+                        "awaiting_kind"
+                    ),
+                    "pending_tool_name": pending_tool.get("tool"),
+                },
+            )
+        except Exception:
+            # checkpoint 本身已保存成功；观测日志失败不能改变业务行为。
+            pass
         if source:
             print(f"[CHECKPOINT] saved (status={status}, source={source})")
         else:

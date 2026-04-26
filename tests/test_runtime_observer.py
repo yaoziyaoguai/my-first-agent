@@ -8,6 +8,18 @@ observer 是 Harness 的观测层：它让 Event / Resolution / Transition / Act
 
 from __future__ import annotations
 
+import json
+
+
+def _read_jsonl(path):
+    """读取测试专用 JSONL 日志。"""
+
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
 
 def test_log_event_outputs_event_fields(capsys):
     from agent.runtime_observer import log_event
@@ -26,6 +38,31 @@ def test_log_event_outputs_event_fields(capsys):
     assert "event_source=model" in out
     assert "event_channel=tool_use" in out
     assert "不应完整打印" not in out
+
+
+def test_log_event_persists_short_payload_without_full_text(monkeypatch, tmp_path):
+    """observer 持久日志只写短字段，不写完整长文本。"""
+
+    import agent.logger as logger
+    from agent.runtime_observer import log_event
+
+    log_path = tmp_path / "agent_log.jsonl"
+    monkeypatch.setattr(logger, "LOG_FILE", log_path)
+
+    long_text = "x" * 300
+    log_event(
+        "model.end_turn",
+        event_source="model",
+        event_payload={"text_preview": long_text, "text_length": len(long_text)},
+        event_channel="end_turn",
+    )
+
+    entries = _read_jsonl(log_path)
+    assert entries[-1]["event"] == "runtime_observer"
+    payload = entries[-1]["data"]["payload"]
+    assert payload["text_length"] == 300
+    assert len(payload["text_preview"]) < 140
+    assert long_text not in json.dumps(entries[-1], ensure_ascii=False)
 
 
 def test_log_resolution_outputs_resolution_kind_and_simple_details(capsys):

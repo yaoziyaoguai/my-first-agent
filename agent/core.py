@@ -34,6 +34,7 @@ from agent.response_handlers import (
     handle_max_tokens_response,
     handle_tool_use_response,
 )
+from agent.runtime_observer import log_event as log_runtime_event
 
 
 
@@ -271,15 +272,55 @@ def _run_planning_phase(user_input: str) -> str:
 
 # ========== 主循环 ==========
 
+def _runtime_loop_fields() -> dict:
+    """提取主循环观测字段，只用于日志，不参与业务判断。"""
+
+    fields = {
+        "task_status": state.task.status,
+        "current_step_index": state.task.current_step_index,
+        "loop_iterations": state.task.loop_iterations,
+        "has_pending_tool": bool(state.task.pending_tool),
+        "has_pending_user_input": bool(state.task.pending_user_input_request),
+    }
+    plan = state.task.current_plan or {}
+    steps = plan.get("steps") or []
+    idx = state.task.current_step_index
+    if 0 <= idx < len(steps):
+        step = steps[idx]
+        fields["current_step_title"] = step.get("title")
+        fields["current_step_type"] = step.get("step_type")
+    return fields
+
 def _run_main_loop(
     turn_state: TurnState,
     *,
     on_output_chunk: Callable[[str], None] | None = None,
 ) -> str:
     """模型调用循环，按 stop_reason 分派处理。"""
+    log_runtime_event(
+        "loop.start",
+        event_source="runtime",
+        event_payload=_runtime_loop_fields(),
+        event_channel="loop",
+    )
     while True:
         state.task.loop_iterations += 1
+        log_runtime_event(
+            "loop.iteration_start",
+            event_source="runtime",
+            event_payload=_runtime_loop_fields(),
+            event_channel="loop",
+        )
         if state.task.loop_iterations > MAX_LOOP_ITERATIONS:
+            log_runtime_event(
+                "loop.guard_triggered",
+                event_source="runtime",
+                event_payload={
+                    **_runtime_loop_fields(),
+                    "reason_for_stop": "max_loop_iterations",
+                },
+                event_channel="loop",
+            )
             print(f"\n[系统] 循环次数超过上限 {MAX_LOOP_ITERATIONS}，强制停止。")
             from agent.checkpoint import clear_checkpoint as _clear_checkpoint
             _clear_checkpoint()
@@ -287,6 +328,15 @@ def _run_main_loop(
             return "对话循环次数过多，请简化任务或分步执行。"
 
         response = _call_model(turn_state, on_output_chunk=on_output_chunk)
+        log_runtime_event(
+            "loop.iteration_end",
+            event_source="runtime",
+            event_payload={
+                **_runtime_loop_fields(),
+                "stop_reason": response.stop_reason,
+            },
+            event_channel="loop",
+        )
 
         if response.stop_reason == "max_tokens":
             result = handle_max_tokens_response(
@@ -298,6 +348,16 @@ def _run_main_loop(
                 max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
             )
             if result is not None:
+                log_runtime_event(
+                    "loop.stop",
+                    event_source="runtime",
+                    event_payload={
+                        **_runtime_loop_fields(),
+                        "stop_reason": response.stop_reason,
+                        "reason_for_stop": "handler_returned",
+                    },
+                    event_channel="loop",
+                )
                 return result
             continue
 
@@ -310,6 +370,16 @@ def _run_main_loop(
                 extract_text_fn=_extract_text,
             )
             if result is not None:
+                log_runtime_event(
+                    "loop.stop",
+                    event_source="runtime",
+                    event_payload={
+                        **_runtime_loop_fields(),
+                        "stop_reason": response.stop_reason,
+                        "reason_for_stop": "handler_returned",
+                    },
+                    event_channel="loop",
+                )
                 return result
             continue
 
@@ -322,10 +392,30 @@ def _run_main_loop(
                 extract_text_fn=_extract_text,
             )
             if result is not None:
+                log_runtime_event(
+                    "loop.stop",
+                    event_source="runtime",
+                    event_payload={
+                        **_runtime_loop_fields(),
+                        "stop_reason": response.stop_reason,
+                        "reason_for_stop": "handler_returned",
+                    },
+                    event_channel="loop",
+                )
                 return result
             continue
 
         print(f"[DEBUG] 未知的 stop_reason: {response.stop_reason}")
+        log_runtime_event(
+            "loop.stop",
+            event_source="runtime",
+            event_payload={
+                **_runtime_loop_fields(),
+                "stop_reason": response.stop_reason,
+                "reason_for_stop": "unknown_stop_reason",
+            },
+            event_channel="loop",
+        )
         return "意外的响应"
 
 

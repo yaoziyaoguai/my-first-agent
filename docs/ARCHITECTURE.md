@@ -98,6 +98,8 @@
 |---|---|
 | `agent/planner.py` | `generate_plan`——用独立 LLM 调用判断单步/多步 |
 | `agent/task_runtime.py` | 步骤完成检测 + 步骤推进（含 checkpoint 保存） |
+| `agent/input_resolution.py` | 用户输入解析层。第一阶段只把 `awaiting_user_input + USER_REPLIED` 解析成 `collect_input_answer` / `runtime_user_input_answer`，只判断、不改 state、不调模型、不调工具 |
+| `agent/transitions.py` | 轻量 transition action 层。第一阶段只执行 user replied transition 的 append / clear pending / advance / save 等动作，不是完整状态机框架 |
 
 ### 第七层 · 响应与确认分派
 | 文件 | 职责 |
@@ -188,7 +190,18 @@ failed                           # 预留，目前未使用
 | **request_user_input 元工具** | 模型在普通 step 执行中调元工具暂停 | `pending_user_input_request != None`（保存 question / why_needed / options / context / step_index） | 是给当前 step 补信息。**不推进 step**，回 running 继续 |
 | **runtime 兜底**（启发式 / 计数） | 模型不调元工具违纪时 runtime 强制切（详见 §3.1） | 同上：`pending_user_input_request != None`，question 是 assistant 文本 | 同 request_user_input 路径，**不推进 step** |
 
-`handle_user_input_step` 靠 `pending_user_input_request` 是否为 `None` 二选一。
+当前实现已经把这条恢复链路拆成两步：
+
+1. `handle_user_input_step` 先调用 `resolve_user_input(state, user_input)`，把 `awaiting_user_input + USER_REPLIED` 解析成 `InputResolution`：
+   - `pending_user_input_request is None` → `collect_input_answer`
+   - `pending_user_input_request != None` → `runtime_user_input_answer`
+2. 再调用 `apply_user_replied_transition(...)` 执行状态转移动作：
+   - append `step_input`
+   - 清理 `pending_user_input_request`（仅 runtime 求助路径）
+   - 推进 step 或保持当前 step
+   - `save_checkpoint`
+
+这只是第一阶段轻量状态机化：只显式化用户回复恢复链路，还没有完整 transition table，也没有 ModelOutputResolution。
 
 ### 状态转换图（关键边）
 
@@ -385,7 +398,7 @@ chat(user_input):
   ─── 半开事务处理区（绝不可压缩）─────
   if status == "awaiting_plan_confirmation": return handle_plan_confirmation(...)
   if status == "awaiting_step_confirmation": return handle_step_confirmation(...)
-  if status == "awaiting_user_input":         return handle_user_input_step(...)   # 求助 / collect_input 双轨
+  if status == "awaiting_user_input":         return handle_user_input_step(...)   # 内部走 InputResolution + user replied transition
   if status == "awaiting_tool_confirmation":  return handle_tool_confirmation(...)
 
   ─── 到这里才是"全新/继续对话"，可以压缩 ───

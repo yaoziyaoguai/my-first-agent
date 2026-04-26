@@ -76,7 +76,7 @@ def apply_user_replied_transition(
         # 必须清掉 pending，否则下一轮用户输入还会被误认为是在回答旧问题。
         state.task.pending_user_input_request = None
         state.task.status = "running"
-        checkpoint.save_checkpoint(state)
+        checkpoint.save_checkpoint(state, source="transitions.runtime_user_input_answer")
         log_transition(
             from_state="awaiting_user_input",
             event_type=EVENT_USER_REPLIED,
@@ -101,7 +101,7 @@ def apply_user_replied_transition(
             # 保留原有“每步确认”语义：collect_input 已完成，但是否进入下一步
             # 仍交给用户确认，所以这里不直接 advance。
             state.task.status = "awaiting_step_confirmation"
-            checkpoint.save_checkpoint(state)
+            checkpoint.save_checkpoint(state, source="transitions.collect_input_answer")
             log_transition(
                 from_state="awaiting_user_input",
                 event_type=EVENT_USER_REPLIED,
@@ -135,7 +135,7 @@ def apply_user_replied_transition(
                 reply="好的，任务已完成。",
             )
 
-        checkpoint.save_checkpoint(state)
+        checkpoint.save_checkpoint(state, source="transitions.collect_input_answer")
         log_transition(
             from_state="awaiting_user_input",
             event_type=EVENT_USER_REPLIED,

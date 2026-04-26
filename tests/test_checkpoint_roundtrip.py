@@ -151,6 +151,43 @@ def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys):
     assert "[CHECKPOINT] saved" in second
 
 
+def test_save_checkpoint_without_source_keeps_existing_log_shape(tmp_checkpoint_path, capsys):
+    """不传 source 时保持旧日志形态，避免 source 观测影响现有调用语义。"""
+    from agent.checkpoint import save_checkpoint
+    from agent.state import create_agent_state
+
+    src = create_agent_state(system_prompt="test")
+    src.task.status = "running"
+
+    save_checkpoint(src)
+
+    out = capsys.readouterr().out
+    assert "[CHECKPOINT] saved (status=running)" in out
+    assert "source=" not in out
+
+
+def test_save_checkpoint_with_source_logs_source_but_does_not_persist_it(
+    tmp_checkpoint_path,
+    capsys,
+):
+    """source 是观测字段，只进 stdout，不进入 checkpoint JSON。"""
+    from agent.checkpoint import save_checkpoint
+    from agent.state import create_agent_state
+
+    src = create_agent_state(system_prompt="test")
+    src.task.status = "running"
+
+    save_checkpoint(src, source="x.y")
+
+    out = capsys.readouterr().out
+    assert "[CHECKPOINT] saved (status=running, source=x.y)" in out
+
+    on_disk = json.loads(tmp_checkpoint_path.read_text(encoding="utf-8"))
+    assert "source" not in on_disk
+    assert "source" not in on_disk["meta"]
+    assert "source" not in on_disk["task"]
+
+
 def test_load_returns_false_when_no_file(tmp_checkpoint_path):
     """checkpoint 文件不存在时 load 应当返回 False，而不是崩。"""
     from agent.checkpoint import load_checkpoint_to_state

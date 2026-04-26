@@ -117,7 +117,7 @@ def test_get_latest_step_completion_returns_last_recorded_for_current_step():
 def test_advance_from_non_last_step_moves_to_next(monkeypatch):
     """第 1 步 → 第 2 步：step_index++，status=running。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s: None)
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
 
     state = _FakeState(_make_plan_dict(), step_index=0)
     advance_current_step_if_needed(state)
@@ -128,7 +128,7 @@ def test_advance_from_non_last_step_moves_to_next(monkeypatch):
 def test_advance_from_last_step_marks_done(monkeypatch):
     """最后一步完成后 status=done。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s: None)
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
 
     state = _FakeState(_make_plan_dict(), step_index=1)
     advance_current_step_if_needed(state)
@@ -138,7 +138,7 @@ def test_advance_from_last_step_marks_done(monkeypatch):
 def test_advance_without_plan_marks_done(monkeypatch):
     """没有 plan 时直接 done，不会 crash。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s: None)
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
 
     state = _FakeState(plan_dict=None)
     advance_current_step_if_needed(state)

@@ -79,7 +79,7 @@ def advance_current_step_if_needed(state: Any) -> None:
 
     if not state.task.current_plan:
         state.task.status = "done"
-        save_checkpoint(state)
+        save_checkpoint(state, source="task_runtime.advance_current_step")
         return
 
     plan = Plan.model_validate(state.task.current_plan)
@@ -90,4 +90,4 @@ def advance_current_step_if_needed(state: Any) -> None:
     else:
         state.task.status = "done"
 
-    save_checkpoint(state)
+    save_checkpoint(state, source="task_runtime.advance_current_step")

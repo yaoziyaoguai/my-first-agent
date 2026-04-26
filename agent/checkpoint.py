@@ -105,8 +105,13 @@ def _build_checkpoint_from_state(state):
     }
 
 
-def save_checkpoint(state):
-    """按当前 state 结构保存断点。"""
+def save_checkpoint(state, source: str | None = None):
+    """按当前 state 结构保存断点。
+
+    source 是 Runtime 观测字段，用来标记“是谁触发了这次保存”，帮助后续梳理
+    checkpoint save ownership。它不是状态字段，不写入 checkpoint JSON，也不改变
+    保存时机；第一阶段只让保存来源可见，后续再决定是否迁移保存责任。
+    """
     checkpoint = _build_checkpoint_from_state(state)
     try:
         CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +119,11 @@ def save_checkpoint(state):
             json.dumps(checkpoint, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        print(f"[CHECKPOINT] saved (status={getattr(state.task, 'status', None)})")
+        status = getattr(state.task, "status", None)
+        if source:
+            print(f"[CHECKPOINT] saved (status={status}, source={source})")
+        else:
+            print(f"[CHECKPOINT] saved (status={status})")
     except Exception as e:
         print(f"[CHECKPOINT] save failed: {e}")
 

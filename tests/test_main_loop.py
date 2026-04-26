@@ -43,14 +43,14 @@ def _reset_core_module(monkeypatch, fake_client):
     monkeypatch.setattr(core, "client", fake_client)
     # core.confirm_handlers 里 save_checkpoint 会写盘——用 stub 替掉避免污染真实磁盘
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s: None)
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
     monkeypatch.setattr(checkpoint, "clear_checkpoint", lambda: None)
     # response_handlers / tool_executor / task_runtime 也各自 import 了 save_checkpoint
     # 以模块名 from checkpoint import save_checkpoint 的拷贝形式引入——要挨个 patch
     from agent import response_handlers, tool_executor, task_runtime, confirm_handlers, session
     for mod in (response_handlers, tool_executor, task_runtime, confirm_handlers, session):
         if hasattr(mod, "save_checkpoint"):
-            monkeypatch.setattr(mod, "save_checkpoint", lambda s: None)
+            monkeypatch.setattr(mod, "save_checkpoint", lambda s, source=None: None)
         if hasattr(mod, "clear_checkpoint"):
             monkeypatch.setattr(mod, "clear_checkpoint", lambda: None)
     return fresh

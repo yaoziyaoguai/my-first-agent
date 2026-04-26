@@ -15,7 +15,7 @@ def _patch_checkpoint_counter(monkeypatch):
 
     calls = {"save": 0, "clear": 0}
 
-    def save_checkpoint(_state):
+    def save_checkpoint(_state, source=None):
         calls["save"] += 1
 
     def clear_checkpoint():

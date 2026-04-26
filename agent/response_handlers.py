@@ -9,6 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
+from agent.model_output_resolution import (
+    EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
+    EVENT_RUNTIME_NO_PROGRESS,
+    RuntimeEvent,
+    resolve_end_turn_output,
+    resolve_max_tokens_output,
+    resolve_tool_use_block,
+)
 from agent.planner import Plan
 from agent.task_runtime import (
     USER_INPUT_STEP_TYPES,
@@ -23,6 +31,14 @@ from agent.tool_registry import is_meta_tool
 
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
+
+
+def _log_model_event(event: RuntimeEvent) -> None:
+    print(
+        "[MODEL_EVENT] "
+        f"event_type={event.event_type} "
+        f"source={event.event_payload.get('source', event.event_source)}"
+    )
 
 
 def _serialize_assistant_content(content_blocks: list[Any]) -> list[dict[str, Any]]:
@@ -112,6 +128,13 @@ def handle_tool_use_response(
     turn_context: dict[str, Any] = {}
 
     for idx, block in enumerate(tool_use_blocks):
+        model_event = resolve_tool_use_block(block)
+        _log_model_event(RuntimeEvent(
+            event_type=model_event.event_type,
+            event_source=model_event.event_source,
+            event_payload={**model_event.event_payload, "source": "tool_use"},
+        ))
+
         if not is_meta_tool(block.name):
             failed_same_input_count = sum(
                 1
@@ -290,6 +313,7 @@ def handle_max_tokens_response(
     - stop when the configured threshold is exceeded
     """
     _append_assistant_response(messages, response)
+    _log_model_event(resolve_max_tokens_output())
 
     state.task.consecutive_max_tokens += 1
 
@@ -352,19 +376,22 @@ def handle_end_turn_response(
         # 第二层：连续 2 次没有任何工具调用（计数在 handle_tool_use_response 里清零）
         #         强制停。覆盖陈述句问题之类启发式漏判的场景。
         text_content = extract_text_fn(response.content)
-
-        looks_like_question = bool(text_content) and (
-            "?" in text_content
-            or "？" in text_content
-            or any(p in text_content for p in (
-                "请告诉我", "请提供", "请说明", "请回复",
-                "请补充", "麻烦您", "您能否", "请确认",
-            ))
-        )
-
         state.task.consecutive_end_turn_without_progress += 1
 
-        if looks_like_question or state.task.consecutive_end_turn_without_progress >= 2:
+        model_event = resolve_end_turn_output(
+            text_content,
+            state.task.consecutive_end_turn_without_progress,
+        )
+        if model_event is not None:
+            _log_model_event(model_event)
+
+        if (
+            model_event is not None
+            and model_event.event_type in (
+                EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
+                EVENT_RUNTIME_NO_PROGRESS,
+            )
+        ):
             state.task.pending_user_input_request = {
                 "question": (
                     text_content[:500] if text_content

@@ -4,6 +4,77 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+# TaskState.status 目前仍是单字段，里面混合了 task 生命周期、plan 确认、
+# step 确认、用户输入等待、工具确认等多个维度。下面这组 helper 是拆分状态模型
+# 前的过渡层：先把硬编码字符串判断收口到一个地方，避免 core.py / handler 继续
+# 散落 tuple。长期更清晰的方向是拆成 lifecycle_status / plan_status /
+# user_input_status / tool_status，但第一阶段不迁移 schema，也不改 checkpoint。
+KNOWN_TASK_STATUSES = {
+    "idle",
+    "planning",
+    "running",
+    "awaiting_plan_confirmation",
+    "awaiting_step_confirmation",
+    "awaiting_user_input",
+    "awaiting_tool_confirmation",
+    "done",
+    "failed",
+    "cancelled",
+}
+
+TERMINAL_TASK_STATUSES = {"done", "failed", "cancelled"}
+PLAN_CONFIRMATION_STATUSES = {"awaiting_plan_confirmation"}
+STEP_CONFIRMATION_STATUSES = {"awaiting_step_confirmation"}
+USER_INPUT_WAIT_STATUSES = {"awaiting_user_input"}
+TOOL_CONFIRMATION_STATUSES = {"awaiting_tool_confirmation"}
+
+
+def is_known_task_status(status: str) -> bool:
+    """判断 status 是否属于当前 Runtime 已知的任务状态集合。
+
+    这是状态 schema 拆分前的集中枚举，不代表这些状态在同一维度上等价。
+    """
+    return status in KNOWN_TASK_STATUSES
+
+
+def is_terminal_task_status(status: str) -> bool:
+    """判断 status 是否表示任务已进入终止态。
+
+    `done / failed / cancelled` 不应该因为 `current_plan is None` 被当作损坏态；
+    它们通常已经完成清理，或者未来会进入独立的失败/取消收尾路径。
+    """
+    return status in TERMINAL_TASK_STATUSES
+
+
+def task_status_requires_plan(task: "TaskState") -> bool:
+    """判断当前 task.status 在 `current_plan is None` 时是否不一致。
+
+    这个 helper 只服务第一阶段的 core invariant，不改变状态 schema：
+    - plan / step confirmation 必须有 plan；
+    - collect_input/clarify 的 awaiting_user_input 通过 pending=None 表达，也必须有 plan；
+    - runtime request_user_input/fallback/no_progress 有 pending，本身携带恢复问题，
+      第一阶段不强制要求 plan；
+    - awaiting_tool_confirmation 由 pending_tool 表达工具审批子状态，单步无 plan
+      工具确认是合法路径；
+    - running 继续保持旧行为：plan=None 会被视为不一致。这里的语义确实混合，
+      后续应在更正式的生命周期/step 状态拆分中处理；
+    - unknown status 视为不一致，让 core 在 plan=None 时自愈 reset。
+    """
+    status = task.status
+
+    if status == "running":
+        return True
+    if status in PLAN_CONFIRMATION_STATUSES | STEP_CONFIRMATION_STATUSES:
+        return True
+    if status in USER_INPUT_WAIT_STATUSES:
+        return task.pending_user_input_request is None
+    if status in TOOL_CONFIRMATION_STATUSES:
+        return False
+    if is_terminal_task_status(status) or status in {"idle", "planning"}:
+        return False
+    return not is_known_task_status(status)
+
+
 @dataclass
 class RuntimeState:
     """

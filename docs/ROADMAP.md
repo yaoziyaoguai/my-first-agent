@@ -54,6 +54,34 @@
 
 ---
 
+## TaskState status dimensions（状态维度收口）
+
+> **状态（2026-04-26）：第一阶段 helper 收口中，未迁移 schema**
+
+`TaskState.status` 当前仍是一个字符串字段，但实际混合了承载：
+
+- 任务生命周期：`idle` / `running` / `done`
+- plan 确认：`awaiting_plan_confirmation`
+- step 确认：`awaiting_step_confirmation`
+- 用户输入等待：`awaiting_user_input`
+- 工具确认：`awaiting_tool_confirmation`
+
+第一阶段只做轻量收口：新增 status 分类常量和 helper，把 `core.py` 里
+`current_plan is None` 的硬编码 tuple 替换为 `task_status_requires_plan(...)`。
+这样能先让状态一致性规则可测试、可集中维护。
+
+中长期再评估是否拆出：
+
+- `lifecycle_status`
+- `plan_status`
+- `tool_status`
+- `user_input_status`
+
+暂不做 checkpoint schema migration，也不新增 `TaskState` 字段。拆字段前需要先设计
+旧 checkpoint 到新状态模型的兼容映射。
+
+---
+
 ## 总览：6 个阶段 × 22 个 block
 
 ```

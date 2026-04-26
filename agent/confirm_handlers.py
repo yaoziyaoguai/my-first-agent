@@ -176,7 +176,9 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     messages = state.conversation.messages
     current_plan = state.task.current_plan
 
-    if not current_plan:
+    if not current_plan and not state.task.pending_user_input_request:
+        # 没有 plan、也没有 runtime pending，说明无法判断用户在回答哪个等待点；
+        # 这是损坏态，重置。若有 pending，则允许无 plan 的单步任务恢复 request_user_input。
         state.reset_task()
         clear_checkpoint()
         return ""

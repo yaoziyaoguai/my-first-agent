@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import anthropic
 from agent.prompt_builder import build_system_prompt
-from agent.state import create_agent_state
+from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
 
 
@@ -109,19 +109,11 @@ def chat(user_input: str) -> str:
     if not user_input or not user_input.strip():
         return ""
 
-    # 状态一致性自愈：只有**必须有 plan 才合法**的状态下，plan=None 才算不一致。
-    # - running / awaiting_plan_confirmation / awaiting_step_confirmation
-    #   这三个状态的语义都依赖 current_plan 的存在
-    # - awaiting_user_input 也依赖 current_plan
-    # - awaiting_tool_confirmation 则**不强制需要 plan**
-    #   （单步任务 planner 返 None，执行阶段工具等确认时 plan 就是 None，这是合法的）
+    # 状态一致性自愈：是否必须有 current_plan 统一交给 state helper 判断。
+    # 这避免 core.py 继续散落硬编码 status tuple；更细的 plan/tool/user-input
+    # 维度未来再拆 schema，当前阶段只收口 invariant。
     _inconsistent = (
-        state.task.status in (
-            "running",
-            "awaiting_plan_confirmation",
-            "awaiting_step_confirmation",
-            "awaiting_user_input",
-        )
+        task_status_requires_plan(state.task)
         and state.task.current_plan is None
     )
     if _inconsistent:
@@ -159,7 +151,10 @@ def chat(user_input: str) -> str:
         return handle_step_confirmation(user_input, confirmation_ctx)
 
     # 处理"等待用户补充信息"的状态。
-    if state.task.current_plan and state.task.status == "awaiting_user_input":
+    if (
+        state.task.status == "awaiting_user_input"
+        and (state.task.current_plan or state.task.pending_user_input_request)
+    ):
         return handle_user_input_step(user_input, confirmation_ctx)
 
     # 新增：处理工具确认（state 驱动）

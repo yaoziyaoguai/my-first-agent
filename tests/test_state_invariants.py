@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from agent.state import TaskState, create_agent_state
+from agent.state import (
+    TaskState,
+    create_agent_state,
+    is_known_task_status,
+    is_terminal_task_status,
+    task_status_requires_plan,
+)
 
 
 # 下面这组字段是已知"用户会话结束应该归零"的字段。
@@ -98,3 +104,131 @@ def test_resettable_fields_covers_all_task_fields():
         "  1) 这个字段应该在 reset_task 里清 → 加进 RESETTABLE_FIELDS 和 reset_task\n"
         "  2) 这个字段应该跨任务保留 → 在 RESETTABLE_FIELDS 之外再维护一个 allowlist"
     )
+
+
+def test_task_status_requires_plan_for_plan_and_step_confirmation():
+    """plan / step 确认态是计划子状态，没有 current_plan 就无法恢复 UI。"""
+    assert task_status_requires_plan(TaskState(status="awaiting_plan_confirmation"))
+    assert task_status_requires_plan(TaskState(status="awaiting_step_confirmation"))
+
+
+def test_task_status_requires_plan_for_collect_input_but_not_runtime_pending():
+    """awaiting_user_input 内部有两类语义：collect_input 需要 plan，runtime pending 不强制。"""
+    collect_input_task = TaskState(
+        status="awaiting_user_input",
+        pending_user_input_request=None,
+    )
+    runtime_pending_task = TaskState(
+        status="awaiting_user_input",
+        pending_user_input_request={
+            "awaiting_kind": "request_user_input",
+            "question": "预算是多少？",
+        },
+    )
+
+    assert task_status_requires_plan(collect_input_task)
+    assert not task_status_requires_plan(runtime_pending_task)
+
+
+def test_task_status_requires_plan_keeps_tool_confirmation_and_terminal_states_free():
+    """工具确认由 pending_tool 表达；terminal / idle 状态也不应因 plan=None 被重置。"""
+    assert not task_status_requires_plan(TaskState(status="awaiting_tool_confirmation"))
+    assert not task_status_requires_plan(TaskState(status="idle"))
+    assert not task_status_requires_plan(TaskState(status="done"))
+    assert not task_status_requires_plan(TaskState(status="failed"))
+    assert not task_status_requires_plan(TaskState(status="cancelled"))
+
+
+def test_task_status_requires_plan_keeps_legacy_running_behavior():
+    """running 当前仍混合了 plan step 执行和生命周期语义，第一阶段保持旧 reset 行为。"""
+    assert task_status_requires_plan(TaskState(status="running"))
+
+
+def test_unknown_task_status_is_treated_as_inconsistent_without_plan():
+    """未知 status 多半来自损坏 checkpoint 或未来版本，plan=None 时让 core 自愈。"""
+    task = TaskState(status="mystery_status")
+
+    assert not is_known_task_status(task.status)
+    assert task_status_requires_plan(task)
+
+
+def test_terminal_task_status_helper():
+    """terminal helper 集中表达未来 done / failed / cancelled 的同类语义。"""
+    assert is_terminal_task_status("done")
+    assert is_terminal_task_status("failed")
+    assert is_terminal_task_status("cancelled")
+    assert not is_terminal_task_status("running")
+
+
+def test_core_resets_requires_plan_status_when_plan_missing(monkeypatch, capsys):
+    """core invariant 应通过 helper 识别“必须有 plan”的损坏态并 reset。"""
+    from tests.conftest import FakeAnthropicClient, text_response
+    from tests.test_main_loop import _planner_no_plan_response, _reset_core_module
+
+    fake = FakeAnthropicClient(
+        responses=[
+            _planner_no_plan_response(),
+            text_response("收到"),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+    state.task.status = "awaiting_user_input"
+    state.task.current_plan = None
+    state.task.pending_user_input_request = None
+
+    from agent.core import chat
+
+    chat("继续")
+
+    out = capsys.readouterr().out
+    assert "检测到不一致状态" in out
+
+
+def test_core_does_not_reset_tool_confirmation_without_plan(monkeypatch):
+    """awaiting_tool_confirmation + pending_tool 可来自单步无 plan 任务，不应被 plan invariant reset。"""
+    from tests.conftest import FakeAnthropicClient
+    from tests.test_main_loop import _reset_core_module
+
+    fake = FakeAnthropicClient(responses=[])
+    state = _reset_core_module(monkeypatch, fake)
+    state.task.status = "awaiting_tool_confirmation"
+    state.task.current_plan = None
+    state.task.pending_tool = {"tool_use_id": "T1", "tool": "w", "input": {}}
+
+    import agent.core as core
+
+    monkeypatch.setattr(
+        core,
+        "handle_tool_confirmation",
+        lambda _user_input, _ctx: "tool handled",
+    )
+
+    assert core.chat("n") == "tool handled"
+    assert state.task.pending_tool is not None
+
+
+def test_core_does_not_reset_runtime_user_input_pending_without_plan(monkeypatch):
+    """runtime pending 自带恢复问题；没有 plan 时也不应被 current_plan invariant 误伤。"""
+    from tests.conftest import FakeAnthropicClient
+    from tests.test_main_loop import _reset_core_module
+
+    fake = FakeAnthropicClient(responses=[])
+    state = _reset_core_module(monkeypatch, fake)
+    state.task.status = "awaiting_user_input"
+    state.task.current_plan = None
+    state.task.pending_user_input_request = {
+        "awaiting_kind": "request_user_input",
+        "question": "预算是多少？",
+        "why_needed": "用于继续当前任务",
+    }
+
+    import agent.core as core
+
+    monkeypatch.setattr(
+        core,
+        "handle_user_input_step",
+        lambda _user_input, _ctx: "input handled",
+    )
+
+    assert core.chat("3500") == "input handled"
+    assert state.task.pending_user_input_request is not None

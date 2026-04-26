@@ -1,8 +1,14 @@
 """程序入口：输入循环 + 调用 session 模块。"""
+import os
 import time
 from collections.abc import Callable
 
 from agent.core import chat
+from agent.input_backends.simple import (
+    read_user_input_event as read_simple_user_input_event,
+    read_user_input_text,
+)
+from agent.user_input import UserInputEvent
 from agent.session import (
     init_session,
     try_resume_from_checkpoint,
@@ -16,12 +22,7 @@ from agent.skills.registry import reload_registry
 
 
 CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
-
-# 多行输入协议
-MULTI_START = "/multi"        # 显式进入多行收集
-MULTI_DONE = "/done"          # 提交多行
-MULTI_CANCEL = "/cancel"      # 取消多行（read_user_input 返回 None）
-PASTE_FENCE = "```"           # 三引号围栏，再次 ``` 结束（无 cancel）
+INPUT_BACKEND_ENV = "MY_FIRST_AGENT_INPUT_BACKEND"
 
 
 def handle_slash_command(user_input: str) -> bool:
@@ -38,38 +39,6 @@ def handle_slash_command(user_input: str) -> bool:
     return False
 
 
-def _collect_multiline(
-    *,
-    reader: Callable[[str], str],
-    writer: Callable[[str], None],
-    done_token: str,
-    cancel_token: str | None,
-    hint: str,
-    continuation_prompt: str = "... ",
-) -> str | None:
-    """收集多行输入直到 done_token。
-
-    - 命中 cancel_token（仅 /multi 模式有此 token）→ 返回 None
-    - 命中 done_token → 返回各行 "\\n".join 拼接
-    - reader 抛 EOFError（stdin 关闭）→ 视同 done，提交已有行
-    """
-    writer(f"[多行模式] {hint}")
-    lines: list[str] = []
-    while True:
-        try:
-            line = reader(continuation_prompt)
-        except EOFError:
-            # stdin 关闭：把已收集的内容当作 done 提交，不丢数据
-            return "\n".join(lines)
-
-        stripped = line.strip()
-        if stripped == done_token:
-            return "\n".join(lines)
-        if cancel_token is not None and stripped == cancel_token:
-            return None
-        lines.append(line)
-
-
 def read_user_input(
     prompt: str = "你: ",
     *,
@@ -82,37 +51,33 @@ def read_user_input(
 
     输入分支：
     - `/multi` 起头 → 进入显式多行模式，单独一行 `/done` 提交、`/cancel` 取消
-    - `\`\`\`` 起头 → 进入粘贴围栏模式，再次单独一行 `\`\`\`` 结束（无 cancel 路径，
+    - ``` 起头 → 进入粘贴围栏模式，再次单独一行 ``` 结束（无 cancel 路径，
       若需中断请用 Ctrl+C 让 main_loop 走 KeyboardInterrupt 分支）
     - 其它 → 普通单行，原样返回（与历史行为一致）
 
     reader / writer 通过参数注入，方便单元测试用 fake 替换 input / print。
     """
-    first = reader(prompt)
-    stripped = first.strip()
+    return read_user_input_text(prompt=prompt, reader=reader, writer=writer)
 
-    if stripped == MULTI_START:
-        return _collect_multiline(
-            reader=reader,
-            writer=writer,
-            done_token=MULTI_DONE,
-            cancel_token=MULTI_CANCEL,
-            hint=(
-                f"输入多行内容；单独一行 {MULTI_DONE} 提交，"
-                f"{MULTI_CANCEL} 取消"
-            ),
-        )
 
-    if stripped == PASTE_FENCE:
-        return _collect_multiline(
-            reader=reader,
-            writer=writer,
-            done_token=PASTE_FENCE,
-            cancel_token=None,
-            hint=f"粘贴模式；单独一行 {PASTE_FENCE} 结束（Ctrl+C 中断）",
-        )
+def read_user_input_event(prompt_text: str = "你: ") -> UserInputEvent:
+    """按环境变量选择输入后端并读取一轮 UserInputEvent。
 
-    return first
+    这是 main loop 和 User Input Layer 的薄适配：submitted 才会进入 chat；
+    cancelled/closed 不会被伪造成空字符串。这里不解释输入语义，也不直接
+    保存 checkpoint，保持 Runtime action 的职责边界。
+    """
+
+    backend = os.getenv(INPUT_BACKEND_ENV, "simple").strip().lower()
+    if backend == "textual":
+        from agent.input_backends.textual import read_user_input_event_tui
+
+        return read_user_input_event_tui(prompt_text=prompt_text)
+
+    if backend not in ("", "simple"):
+        print(f"[系统] 未知输入后端 {backend!r}，已回退到 simple")
+
+    return read_simple_user_input_event(prompt=prompt_text)
 
 
 def main_loop():
@@ -120,12 +85,21 @@ def main_loop():
 
     while True:
         try:
-            raw = read_user_input()
+            event = read_user_input_event()
 
-            # /cancel 取消多行：跳过本轮，不进入 chat
-            if raw is None:
+            # cancelled 复用现有 Ctrl+C interrupt 流程；它不是空输入。
+            if event.event_type == "input.cancelled":
+                raise KeyboardInterrupt
+
+            # closed 表示输入会话结束/EOF，不进入 chat，也不触发 empty guard。
+            if event.event_type == "input.closed":
+                finalize_session()
+                break
+
+            if event.envelope is None:
                 continue
 
+            raw = event.envelope.raw_text
             user_input = raw.strip()
 
             # 空输入过滤

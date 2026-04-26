@@ -823,6 +823,38 @@ def test_textual_shell_cancel_clears_input_without_submitting():
     asyncio.run(run_smoke())
 
 
+def test_textual_shell_ctrl_q_close_does_not_submit_draft():
+    """Ctrl+Q 绑定的 close action 只能退出 Shell，不能误提交草稿。"""
+
+    _require_textual()
+
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        """直接调用 action_close_input 保护 Ctrl+Q binding 的核心语义。"""
+
+        seen_inputs = []
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(
+            chat_handler=lambda text, on_output_chunk=None: (
+                seen_inputs.append(text) or "unused"
+            )
+        )
+
+        async with app.run_test():
+            input_area = app.query_one("#input-area", TextArea)
+            input_area.load_text("这是一段尚未提交的草稿")
+
+            app.action_close_input()
+
+            assert seen_inputs == []
+            assert app.conversation_history == []
+
+    asyncio.run(run_smoke())
+
+
 @pytest.mark.xfail(
     reason=(
         "当前只实现 output.chunk 流式回调；core/chat 还没有 cancel_token 或模型"

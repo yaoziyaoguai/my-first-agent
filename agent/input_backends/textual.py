@@ -201,6 +201,11 @@ def _build_textual_shell_app_class() -> type[Any]:
         conversation_history 是 TUI adapter 内部的轻量显示缓存，不是 Runtime
         state，也不会写入 checkpoint。它只保存用户可见的 You/Assistant 文本，
         debug/checkpoint/runtime observer 日志由 main.py 在进入这里前过滤。
+
+        这层不理解 y/n，也不读取 awaiting_plan_confirmation /
+        awaiting_tool_confirmation 等 Runtime 状态。无论用户输入“y”、补充信息还是
+        普通问题，TUI 都只提交 raw_text；确认语义必须由 main.py -> core.chat ->
+        confirm_handlers / Runtime 链路判断。
         """
 
         CSS = """
@@ -250,6 +255,8 @@ def _build_textual_shell_app_class() -> type[Any]:
             self.prompt_text = prompt_text
             self.conversation_history: list[tuple[str, str]] = []
             self.cancelled_events: list[UserInputEvent] = []
+            # 仅表达 UI 当前有 worker 在生成，不能用它吞掉下一次输入。真实 bug 曾
+            # 出现在“计划提示已显示但 worker 未完全收尾”时，用户输入 y 被阻断。
             self.is_generating = False
 
         def compose(self) -> ComposeResult:
@@ -285,7 +292,12 @@ def _build_textual_shell_app_class() -> type[Any]:
             return self.query_one("#input-area", TextArea)
 
         def _redraw_conversation(self) -> None:
-            """重绘 RichLog；用于占位替换和 chunk 追加后保持显示一致。"""
+            """重绘 conversation projection，并滚到最新内容。
+
+            这里是覆盖式 update，不是追加式 write；重复 redraw 不应制造重复历史。
+            scroll_end 是为了长计划/长报告输出后，用户能看到最后的 y/n 确认或
+            收尾提示，而不是停在中间误以为输出被截断。
+            """
 
             view = self.query_one("#conversation-view", Static)
             if not self.conversation_history:

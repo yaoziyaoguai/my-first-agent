@@ -55,6 +55,60 @@
 4. **工具有两类**：业务工具（read/write/shell 等）参与对话、占 context；**元工具**（`mark_step_complete` / `request_user_input`）是系统控制信号，**只写 log 不写 messages**——前者供状态机读分值判断步骤完成，后者把"执行期需要用户介入"变成可持久化、可恢复的 runtime 状态事件。
 5. 模型可能不遵守协议——所以 runtime 层有**双层 loop guard**（启发式词表 + 连续 end_turn 计数）+ `MAX_LOOP_ITERATIONS` 终极安全阀，保证不会陷入死循环。
 
+### 当前里程碑：Persistent Textual I/O Shell
+
+> **状态（2026-04-27）：`experiment-persistent-textual-shell` 实验分支阶段性完成**
+
+交互层现在有两条 backend：
+
+- simple backend：默认路径，保留原有轻量 CLI 行为。
+- Textual backend：显式启用的常驻 TUI shell：
+
+```bash
+MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
+```
+
+Textual backend 的设计边界很明确：它只做 I/O，不理解 Runtime 状态，不判断
+`y/n`，不保存 checkpoint，不判断 plan / tool / step。用户输入仍作为 raw text
+经 `chat_handler` 进入 `main.py`，再进入 `core.chat(...)` 和 Runtime 确认链路。
+
+输出链路上，`core.chat(..., on_output_chunk=...)` 把 assistant streaming delta
+送到 TUI conversation view。TUI 维护轻量 `conversation_history` 用于显示
+`You` / `Assistant`，长输出自动滚动到底部；`chat()` 的 final return 只作为
+非 streaming fallback 或控制文案，不应把已 streaming 的正文再追加一遍。
+
+近期修复过一个重要 Runtime 根因：真实模型/网关可能在不同 step 复用同一个
+`mark_step_complete` `tool_use_id`。元工具幂等现在按 step 隔离，避免后续 step
+完成声明被旧 id 跳过，进而导致 `no_progress` loop 和最后一条 assistant 总结
+被模型真实重复输出。
+
+Runtime observability 也已增强：loop / model / progress / checkpoint 关键节点会
+记录结构化短字段，例如 `stop_reason`、当前 step、是否调用
+`mark_step_complete` / `request_user_input`、是否进入 no-progress、checkpoint
+source 等。日志只保留 preview 和关键字段，不把完整 prompt 或超长 assistant
+正文打进 terminal debug。
+
+### Current Transitional Bridges / Technical Debt
+
+当前仍有几条刻意保留的过渡桥，后续要逐步收敛：
+
+- **stdout capture**：`main.py` 通过捕获 stdout 并过滤 debug/checkpoint 前缀，把
+  print-era Runtime 输出投影到 TUI。这是过渡方案；最终应由 RuntimeEvent /
+  DisplayEvent 从源头区分用户可见输出和内部日志。
+- **`on_output_chunk` callback**：它是当前 streaming bridge，不是一等事件流。
+  长期应演进为 `chat_stream` / RuntimeEvent iterator，让调用方消费
+  `assistant.delta`、`assistant.done`、tool lifecycle、debug 等不同事件。
+- **TUI `conversation_history`**：这是 UI projection/cache，不是 Runtime
+  conversation，也不应参与 checkpoint 或状态判断。
+- **tool confirmation**：当前仍主要依赖文本提示和 stdout 进入 UI。后续应升级为
+  `ToolLifecycleEvent`：`tool.requested` / `tool.awaiting_confirmation` /
+  `tool.executing` / `tool.completed` / `tool.failed`。
+- **checkpoint/debug hygiene**：`[CHECKPOINT]` / `[RUNTIME_EVENT]` 等调试输出不应
+  进入用户 conversation view。当前靠 main.py 过滤，长期应改为结构化日志 +
+  显式 debug flag。
+- **Textual backend 边界**：Textual 只做 I/O，不耦合 Runtime state，不判断 y/n，
+  不保存 checkpoint；任何新功能都应先确认没有把 Runtime 语义下沉到 TUI。
+
 ---
 
 ## 1. 分层架构
@@ -66,6 +120,7 @@
 |---|---|
 | `config.py` | 唯一配置入口；环境变量、路径、尺寸阈值、system prompt 常量 |
 | `agent/logger.py` | 结构化日志（`log_event` → `agent_log.jsonl`）+ session snapshot + `make_serializable` 序列化辅助 |
+| `agent/runtime_observer.py` | Runtime 观测事件入口；记录 loop / model / progress / checkpoint 的短结构化字段 |
 
 ### 第二层 · 数据模型
 | 文件 | 职责 |
@@ -116,7 +171,9 @@
 | 文件 | 职责 |
 |---|---|
 | `agent/core.py` | `chat()` 入口 + `_run_main_loop()` |
-| `main.py` | 用户输入循环 + `quit` / `/reload_skills` / Ctrl+C 路由 |
+| `agent/input_backends/simple.py` | 默认 simple 输入 backend，保留原 CLI 路径 |
+| `agent/input_backends/textual.py` | 显式启用的 Textual 常驻 I/O shell；只显示输出、收集输入、产生 raw text 事件 |
+| `main.py` | backend 选择 + 用户输入循环 + `quit` / `/reload_skills` / Ctrl+C 路由 + streaming bridge |
 
 ---
 

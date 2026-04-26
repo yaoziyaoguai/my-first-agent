@@ -109,6 +109,11 @@ def chat(
 
     on_output_chunk 是 TUI 这类 I/O adapter 的可选流式出口，只传用户可见的
     assistant 文本 delta。默认 None 时保持 CLI 旧行为：delta 继续 print 到终端。
+
+    这是当前阶段的 streaming bridge，不是一等事件流。传入 callback 时，模型
+    delta 不能再重复 print 到 stdout；否则 TUI 会同时从 output.chunk 和 stdout
+    capture 收到同一段正文。长期更干净的形态应是 chat_stream / RuntimeEvent
+    iterator，由调用方消费 assistant.delta、tool lifecycle、debug 等不同事件。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -446,6 +451,8 @@ def _call_model(
             if event_type == "content_block_start":
                 block_type = getattr(event.content_block, "type", None)
                 if block_type == "tool_use":
+                    # 临时用户可见工具提示：当前仍走 print/stdout。后续 tool
+                    # lifecycle 事件化后，应改为 tool.requested / tool.executing。
                     print("\n🔧 正在规划工具调用...", flush=True)
 
             elif event_type == "content_block_delta":

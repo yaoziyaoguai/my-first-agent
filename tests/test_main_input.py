@@ -271,6 +271,28 @@ def test_textual_latest_output_filters_debug_observer_lines():
     assert main._merge_chat_outputs("", captured) == "用户可见回复"
 
 
+def test_textual_latest_output_filters_checkpoint_debug_resolution_prefixes():
+    """TUI 只接收用户可见文本，不接收 runtime/checkpoint/debug 前缀日志。"""
+
+    import main
+
+    captured = "\n".join([
+        "[CHECKPOINT] saved (status=running, source=test)",
+        "[DEBUG] checkpoint payload would be noisy",
+        "[RUNTIME_EVENT] event_type=loop.stop",
+        "[INPUT_RESOLUTION] resolution_kind=runtime_user_input_answer",
+        "[TRANSITION] from_state=awaiting_user_input target_state=running",
+        "[ACTIONS] action_names=append_step_input,save_checkpoint",
+        "真正用户可见文本",
+        "[提示] 这行是用户可见文本，不应因为有中括号被误过滤",
+    ])
+
+    assert main._merge_chat_outputs("", captured) == (
+        "真正用户可见文本\n"
+        "[提示] 这行是用户可见文本，不应因为有中括号被误过滤"
+    )
+
+
 def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
     """常驻 Textual Shell 通过 main 桥接拿到普通 assistant 流式输出。"""
 

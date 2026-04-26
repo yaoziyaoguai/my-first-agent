@@ -66,6 +66,8 @@ def execute_single_tool(
             # 有些模型/网关会在不同 step 复用形如
             # toolu_functions.mark_step_complete:0 的工具 id。元工具完成判定按
             # step_index 隔离，不能让旧 step 的幂等记录挡住当前 step 的完成声明。
+            # 否则 Runtime 会误判“当前 step 没完成”，进入 no_progress 循环，并让
+            # 模型真实重复输出最后一条 Assistant 总结。
             tool_use_id = f"{tool_use_id}#step:{state.task.current_step_index}"
 
         state.task.tool_execution_log[tool_use_id] = {
@@ -185,7 +187,12 @@ def execute_pending_tool(
     messages: list[dict[str, Any]],
     pending: dict[str, Any],
 ) -> str:
-    """Execute a previously suspended pending tool after user confirmation."""
+    """用户确认后执行此前挂起的 pending tool。
+
+    这个函数只负责“确认已到达后的执行”，不负责展示确认 UI。当前用户可见提示
+    仍主要依赖 print/stdout；后续应由 ToolLifecycleEvent 表达 awaiting /
+    executing / completed / failed，避免 TUI 解析文本。
+    """
     tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
     tool_input = pending["input"]

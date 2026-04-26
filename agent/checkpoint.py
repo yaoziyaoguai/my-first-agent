@@ -111,6 +111,10 @@ def save_checkpoint(state, source: str | None = None):
     source 是 Runtime 观测字段，用来标记“是谁触发了这次保存”，帮助后续梳理
     checkpoint save ownership。它不是状态字段，不写入 checkpoint JSON，也不改变
     保存时机；第一阶段只让保存来源可见，后续再决定是否迁移保存责任。
+
+    注意：这里的 [CHECKPOINT] print 仍是调试期输出，不应进入 TUI conversation
+    view。Textual backend 当前在 main.py 里过滤这类前缀；长期应把 checkpoint
+    观测完全收敛到 structured logger / debug flag。
     """
     checkpoint = _build_checkpoint_from_state(state)
     try:

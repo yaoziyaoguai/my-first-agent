@@ -558,6 +558,8 @@ def handle_end_turn_response(
         # 第一层：启发式判断 assistant 文本是否在向用户提阻塞性问题。命中即停。
         # 第二层：连续 2 次没有任何工具调用（计数在 handle_tool_use_response 里清零）
         #         强制停。覆盖陈述句问题之类启发式漏判的场景。
+        # no_progress 是安全阀，不是正常完成机制；正常路径仍应由
+        # mark_step_complete / request_user_input 等结构化信号驱动。
         text_content = extract_text_fn(response.content)
         state.task.consecutive_end_turn_without_progress += 1
         log_event(

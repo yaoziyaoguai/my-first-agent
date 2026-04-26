@@ -265,6 +265,58 @@ def test_meta_tool_reused_tool_use_id_can_complete_later_step(monkeypatch):
     assert fake.responses == [], "两步完成后不应继续请求第三次模型响应"
 
 
+def test_meta_tool_repeated_same_id_in_same_step_is_idempotent(monkeypatch):
+    """同一步内重复 mark_step_complete 只能记录一次，不能重复推进。
+
+    跨 step 复用同一 id 需要被接受；但同 step 的重复 id 仍然表示同一个模型
+    tool_use 的幂等重放，不能写两条完成记录，也不能绕过 awaiting_step 确认。
+    """
+    fake = FakeAnthropicClient(
+        responses=[
+            _plan_response([("s1", "规划", "read"), ("s2", "出方案", "report")]),
+            FakeResponse(
+                content=[
+                    FakeTextBlock(text="step1 完"),
+                    FakeToolUseBlock(
+                        id="same_step_meta",
+                        name="mark_step_complete",
+                        input={
+                            "completion_score": 90,
+                            "summary": "完成一次",
+                            "outstanding": "无",
+                        },
+                    ),
+                    FakeToolUseBlock(
+                        id="same_step_meta",
+                        name="mark_step_complete",
+                        input={
+                            "completion_score": 95,
+                            "summary": "重复完成",
+                            "outstanding": "无",
+                        },
+                    ),
+                ],
+                stop_reason="tool_use",
+            ),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+    from agent.core import chat
+
+    chat("两步任务，每步确认")
+    chat("y")
+
+    assert state.task.status == "awaiting_step_confirmation"
+    assert state.task.current_step_index == 0
+    meta_entries = [
+        e for e in state.task.tool_execution_log.values()
+        if e.get("tool") == "mark_step_complete"
+    ]
+    assert len(meta_entries) == 1
+    assert meta_entries[0]["step_index"] == 0
+    assert meta_entries[0]["input"]["summary"] == "完成一次"
+
+
 # ============================================================
 # 5. mark_step_complete 不吃 per-turn tool_call_count 配额
 # ============================================================

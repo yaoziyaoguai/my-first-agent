@@ -28,6 +28,9 @@ RUNTIME_DEBUG_LOGS = True
 
 这是日志开关，不是业务开关。关闭它只应减少 stdout 输出，不应该改变 Agent
 状态转移、工具执行、checkpoint 或 messages 行为。
+
+实验分支默认开启是为了定位 loop / no_progress 问题；产品化时应改为环境变量或
+配置项控制，并优先写结构化日志文件，避免 debug 输出污染 TUI conversation view。
 """
 
 

@@ -47,6 +47,11 @@ def _user_visible_stdout(captured_stdout: str) -> str:
     这是 textual backend 的过渡桥接：core.chat 普通 assistant 正文当前通过
     流式 print 输出而不是 return。这里只过滤明显的 debug/checkpoint/runtime
     观测日志，不解析模型语义，也不保存 checkpoint。
+
+    这不是最终架构。长期应由 RuntimeEvent / DisplayEvent 把“用户可见输出”
+    和“内部调试日志”从源头分开，而不是靠 stdout prefix 做后处理。当前保留
+    这层，是为了在 print-era Runtime 尚未完全事件化前，保证 checkpoint/debug/
+    runtime observer 日志不会进入 TUI conversation view。
     """
 
     lines = []
@@ -61,7 +66,12 @@ def _user_visible_stdout(captured_stdout: str) -> str:
 
 
 def _merge_chat_outputs(reply: str, captured_stdout: str) -> str:
-    """合并 chat 返回值和 textual 捕获到的用户可见 stdout。"""
+    """合并 chat 返回值和 textual 捕获到的用户可见 stdout。
+
+    这是兼容旧输出模型的 fallback：有些控制文案来自 return，有些正文仍来自
+    print。这里不能把同一段 assistant 文本双写进 TUI；长期应由事件流明确区分
+    assistant.delta / assistant.done / control.message。
+    """
 
     visible_stdout = _user_visible_stdout(captured_stdout)
     reply_text = reply.strip()
@@ -81,6 +91,10 @@ def _run_chat_for_backend(
     simple backend 保持原有行为：chat 内部流式输出照常打到终端，main 只打印
     reply。textual backend 若传入 on_output_chunk，会把模型 delta 直接送回
     TUI；未覆盖到的用户可见 stdout 仍作为过渡兜底。
+
+    关键边界：streaming chunk 已经进入 TUI 后，final return / stdout capture
+    不能再作为第二条 Assistant 正文追加，否则长任务结束时会重复显示最后一条
+    assistant 消息。这里切断的是输出写入路径，不改变 Runtime 状态推进。
     """
 
     if backend == "textual":

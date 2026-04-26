@@ -8,6 +8,72 @@
 
 ---
 
+## Milestone · Persistent Textual I/O Shell 阶段性完成
+
+> **状态（2026-04-27）：实验分支已形成可回退里程碑**
+>
+> 当前分支：`experiment-persistent-textual-shell`
+>
+> 关键提交：
+> - `887c6ec feat(input): add persistent textual shell streaming`
+> - `4750a26 fix(runtime): allow reused meta tool ids across steps`
+> - `177dbc5 chore(runtime): add loop observability logs`
+
+这一阶段把交互入口从裸 `input()` / one-shot TUI 演进到常驻 Textual I/O
+Shell，但仍保持 simple backend 作为默认路径。Textual backend 必须显式启用：
+
+```bash
+MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
+```
+
+已完成能力：
+
+- simple backend 仍然保留为默认路径，Textual backend 不默认启用。
+- `UserInputEvent` / `UserInputEnvelope` 作为输入层边界继续保留。
+- conversation view 支持 `You` / `Assistant` 对话显示。
+- `Enter` 提交，`Shift+Enter` / `Ctrl+Enter` 换行，`F10` 备用提交，`Esc` 清空，`Ctrl+Q` 退出。
+- assistant 输出通过 `on_output_chunk` bridge 进入 TUI conversation view。
+- 长输出自动滚动到底部，用户能看到末尾确认或总结。
+- 已验证可以完成武汉 + 宜昌旅游规划这类长任务。
+- `write_file` 工具确认链路已能走通。
+- runtime observability 已补充 loop / model / progress / checkpoint 相关事件。
+- 修复 `mark_step_complete` 跨 step 复用 `tool_use_id` 导致的重复输出 / `no_progress` 循环问题。
+
+当前仍需优化：
+
+- Textual backend 仍在实验分支，默认 backend 仍是 simple。
+- tool lifecycle 可见性仍需优化：
+  - `tool.requested`
+  - `tool.awaiting_confirmation`
+  - `tool.executing`
+  - `tool.completed`
+  - `tool.failed`
+- `write_file` 内容很长时，TUI 应显示 preview，而不是让用户误以为卡住。
+- checkpoint / debug 输出仍可能污染终端体验，需要后续收敛。
+- stdout capture 只是从 print-era 到 event-era 的过渡方案，不应长期作为 UI
+  projection 的数据来源。
+- `on_output_chunk` callback 是阶段性 streaming bridge；长期目标是
+  `chat_stream` / `RuntimeEvent` iterator。
+- generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
+
+下一阶段建议优先聚焦两件事：
+
+1. **Tool lifecycle visibility**：把工具请求、确认、执行、成功/失败从文本提示
+   升级为结构化显示事件，避免 TUI 解析 stdout。
+2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 默认写结构化日志，
+   terminal debug 改为显式开启，用户 conversation view 永远只接收 DisplayEvent。
+
+当前验证结果：
+
+- `python -m pytest tests/test_input_backends_textual.py tests/test_main_input.py tests/test_main_loop.py -q`
+  - `42 passed, 1 xfailed`
+- `python -m ruff check agent/ tests/`
+  - `All checks passed`
+- `python -m pytest tests/ -q`
+  - `214 passed, 6 xfailed`
+
+---
+
 ## User Input Layer productization（输入层产品化）
 
 > **状态（2026-04-26）：阶段 1 止血中，尚未终局化**

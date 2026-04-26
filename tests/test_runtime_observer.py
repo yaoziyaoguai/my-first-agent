@@ -21,8 +21,11 @@ def _read_jsonl(path):
     ]
 
 
-def test_log_event_outputs_event_fields(capsys):
+def test_log_event_outputs_event_fields(monkeypatch, capsys):
     from agent.runtime_observer import log_event
+    import agent.runtime_observer as observer
+
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
     # event_channel 表示“从哪个通道观察到事件”，不是事件来源主体。
     log_event(
@@ -65,8 +68,11 @@ def test_log_event_persists_short_payload_without_full_text(monkeypatch, tmp_pat
     assert long_text not in json.dumps(entries[-1], ensure_ascii=False)
 
 
-def test_log_resolution_outputs_resolution_kind_and_simple_details(capsys):
+def test_log_resolution_outputs_resolution_kind_and_simple_details(monkeypatch, capsys):
     from agent.runtime_observer import log_resolution
+    import agent.runtime_observer as observer
+
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
     log_resolution(
         "runtime_user_input_answer",
@@ -81,8 +87,11 @@ def test_log_resolution_outputs_resolution_kind_and_simple_details(capsys):
     assert "should_advance_step=false" in out
 
 
-def test_log_transition_outputs_state_fields(capsys):
+def test_log_transition_outputs_state_fields(monkeypatch, capsys):
     from agent.runtime_observer import log_transition
+    import agent.runtime_observer as observer
+
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
     log_transition(
         from_state="awaiting_user_input",
@@ -97,8 +106,11 @@ def test_log_transition_outputs_state_fields(capsys):
     assert "target_state=running" in out
 
 
-def test_log_actions_outputs_action_names(capsys):
+def test_log_actions_outputs_action_names(monkeypatch, capsys):
     from agent.runtime_observer import log_actions
+    import agent.runtime_observer as observer
+
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
     log_actions(["append_step_input", "advance_step", "save_checkpoint"])
 
@@ -123,3 +135,29 @@ def test_runtime_debug_logs_false_suppresses_output(monkeypatch, capsys):
     observer.log_actions(["save_checkpoint"])
 
     assert capsys.readouterr().out == ""
+
+
+def test_log_event_still_persists_when_terminal_debug_is_disabled(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    """关闭 terminal debug 只影响 stdout，不影响 agent_log.jsonl 结构化证据。"""
+
+    import agent.logger as logger
+    import agent.runtime_observer as observer
+
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", False)
+    monkeypatch.setattr(logger, "LOG_FILE", tmp_path / "agent_log.jsonl")
+
+    observer.log_event(
+        "model.end_turn",
+        event_source="model",
+        event_payload={"text_preview": "hello"},
+        event_channel="end_turn",
+    )
+
+    assert capsys.readouterr().out == ""
+    entries = _read_jsonl(logger.LOG_FILE)
+    assert entries[-1]["event"] == "runtime_observer"
+    assert entries[-1]["data"]["event_type"] == "model.end_turn"

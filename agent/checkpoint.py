@@ -1,10 +1,27 @@
 import json
+import os
 from datetime import datetime
 from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
 
 MAX_RESULT_LENGTH = 2000  # checkpoint 中 tool_result 的截断长度
+
+
+def _debug_stdout_enabled() -> bool:
+    """checkpoint terminal debug 开关。
+
+    checkpoint 保存/加载本身已经通过结构化日志和返回值表达；默认不再把
+    [CHECKPOINT] 打到 stdout，避免 Textual TUI 和普通终端混入内部状态噪声。
+    临时排查状态恢复链路时，可设置 MY_FIRST_AGENT_DEBUG=1 打开短日志。
+    """
+
+    return os.getenv("MY_FIRST_AGENT_DEBUG", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _now_iso() -> str:
@@ -112,9 +129,9 @@ def save_checkpoint(state, source: str | None = None):
     checkpoint save ownership。它不是状态字段，不写入 checkpoint JSON，也不改变
     保存时机；第一阶段只让保存来源可见，后续再决定是否迁移保存责任。
 
-    注意：这里的 [CHECKPOINT] print 仍是调试期输出，不应进入 TUI conversation
-    view。Textual backend 当前在 main.py 里过滤这类前缀；长期应把 checkpoint
-    观测完全收敛到 structured logger / debug flag。
+    注意：checkpoint/debug 与用户可见输出是不同通道。默认只写 checkpoint 文件
+    和 `checkpoint_saved` 结构化日志；只有设置 MY_FIRST_AGENT_DEBUG=1 时才把
+    [CHECKPOINT] 短日志打印到 terminal。
     """
     checkpoint = _build_checkpoint_from_state(state)
     try:
@@ -152,10 +169,11 @@ def save_checkpoint(state, source: str | None = None):
         except Exception:
             # checkpoint 本身已保存成功；观测日志失败不能改变业务行为。
             pass
-        if source:
-            print(f"[CHECKPOINT] saved (status={status}, source={source})")
-        else:
-            print(f"[CHECKPOINT] saved (status={status})")
+        if _debug_stdout_enabled():
+            if source:
+                print(f"[CHECKPOINT] saved (status={status}, source={source})")
+            else:
+                print(f"[CHECKPOINT] saved (status={status})")
     except Exception as e:
         print(f"[CHECKPOINT] save failed: {e}")
 
@@ -163,11 +181,13 @@ def save_checkpoint(state, source: str | None = None):
 def load_checkpoint():
     """加载未完成的断点"""
     if not CHECKPOINT_PATH.exists():
-        print("[CHECKPOINT] no file")
+        if _debug_stdout_enabled():
+            print("[CHECKPOINT] no file")
         return None
     try:
         data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
-        print("[CHECKPOINT] loaded")
+        if _debug_stdout_enabled():
+            print("[CHECKPOINT] loaded")
         return data
     except Exception as e:
         print(f"[CHECKPOINT] load failed: {e}")
@@ -208,4 +228,5 @@ def clear_checkpoint():
     """任务完成后清除断点"""
     if CHECKPOINT_PATH.exists():
         CHECKPOINT_PATH.unlink()
-        print("[CHECKPOINT] cleared")
+        if _debug_stdout_enabled():
+            print("[CHECKPOINT] cleared")

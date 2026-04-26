@@ -280,6 +280,7 @@ def test_textual_latest_output_filters_checkpoint_debug_resolution_prefixes():
         "[CHECKPOINT] saved (status=running, source=test)",
         "[DEBUG] checkpoint payload would be noisy",
         "[RUNTIME_EVENT] event_type=loop.stop",
+        "event_type=loop.stop event_source=runtime",
         "[INPUT_RESOLUTION] resolution_kind=runtime_user_input_answer",
         "[TRANSITION] from_state=awaiting_user_input target_state=running",
         "[ACTIONS] action_names=append_step_input,save_checkpoint",

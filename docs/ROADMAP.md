@@ -49,7 +49,8 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   - `tool.completed`
   - `tool.failed`
 - `write_file` 内容很长时，TUI 应显示 preview，而不是让用户误以为卡住。
-- checkpoint / debug 输出仍可能污染终端体验，需要后续收敛。
+- checkpoint / runtime observer 已默认收敛为结构化日志；需要 terminal 短日志时
+  显式设置 `MY_FIRST_AGENT_DEBUG=1`。仍需继续清理其他 print-era 调试输出。
 - stdout capture 只是从 print-era 到 event-era 的过渡方案，不应长期作为 UI
   projection 的数据来源。
 - `on_output_chunk` callback 是阶段性 streaming bridge；长期目标是
@@ -60,8 +61,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 
 1. **Tool lifecycle visibility**：把工具请求、确认、执行、成功/失败从文本提示
    升级为结构化显示事件，避免 TUI 解析 stdout。
-2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 默认写结构化日志，
-   terminal debug 改为显式开启，用户 conversation view 永远只接收 DisplayEvent。
+2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
+   结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
+   到 DisplayEvent / structured logger。
 
 当前验证结果：
 

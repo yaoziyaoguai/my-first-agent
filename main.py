@@ -32,6 +32,9 @@ DEBUG_OUTPUT_PREFIXES = (
     "[INPUT_RESOLUTION]",
     "[TRANSITION]",
     "[ACTIONS]",
+    # 兼容早期/手写 observer 输出：即使没有 [RUNTIME_EVENT] 前缀，也不应把
+    # event_type=... 这类内部观测字段投进 TUI conversation view。
+    "event_type=",
 )
 
 

@@ -131,11 +131,12 @@ def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
     )
 
 
-def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys):
+def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys, monkeypatch):
     """保存 checkpoint 时为了继承旧 meta 读取旧文件，不应打印 loaded 误导为恢复。"""
     from agent.checkpoint import save_checkpoint
     from agent.state import create_agent_state
 
+    monkeypatch.setenv("MY_FIRST_AGENT_DEBUG", "1")
     src = create_agent_state(system_prompt="test")
     src.task.status = "running"
 
@@ -151,11 +152,16 @@ def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys):
     assert "[CHECKPOINT] saved" in second
 
 
-def test_save_checkpoint_without_source_keeps_existing_log_shape(tmp_checkpoint_path, capsys):
-    """不传 source 时保持旧日志形态，避免 source 观测影响现有调用语义。"""
+def test_save_checkpoint_without_source_keeps_existing_log_shape(
+    tmp_checkpoint_path,
+    capsys,
+    monkeypatch,
+):
+    """打开 debug 时，不传 source 仍保持旧短日志形态。"""
     from agent.checkpoint import save_checkpoint
     from agent.state import create_agent_state
 
+    monkeypatch.setenv("MY_FIRST_AGENT_DEBUG", "1")
     src = create_agent_state(system_prompt="test")
     src.task.status = "running"
 
@@ -169,11 +175,13 @@ def test_save_checkpoint_without_source_keeps_existing_log_shape(tmp_checkpoint_
 def test_save_checkpoint_with_source_logs_source_but_does_not_persist_it(
     tmp_checkpoint_path,
     capsys,
+    monkeypatch,
 ):
-    """source 是观测字段，只进 stdout，不进入 checkpoint JSON。"""
+    """source 是观测字段；debug stdout 可见，但不进入 checkpoint JSON。"""
     from agent.checkpoint import save_checkpoint
     from agent.state import create_agent_state
 
+    monkeypatch.setenv("MY_FIRST_AGENT_DEBUG", "1")
     src = create_agent_state(system_prompt="test")
     src.task.status = "running"
 
@@ -186,6 +194,20 @@ def test_save_checkpoint_with_source_logs_source_but_does_not_persist_it(
     assert "source" not in on_disk
     assert "source" not in on_disk["meta"]
     assert "source" not in on_disk["task"]
+
+
+def test_checkpoint_terminal_debug_is_silent_by_default(tmp_checkpoint_path, capsys):
+    """默认不把 [CHECKPOINT] 打到 terminal，避免污染 TUI conversation view。"""
+    from agent.checkpoint import load_checkpoint, save_checkpoint
+    from agent.state import create_agent_state
+
+    src = create_agent_state(system_prompt="test")
+    src.task.status = "running"
+
+    save_checkpoint(src, source="tests.silent_default")
+    assert load_checkpoint() is not None
+
+    assert "[CHECKPOINT]" not in capsys.readouterr().out
 
 
 def test_load_returns_false_when_no_file(tmp_checkpoint_path):

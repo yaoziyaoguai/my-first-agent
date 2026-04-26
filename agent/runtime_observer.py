@@ -8,7 +8,8 @@ Agent Runtime 的状态流转。它只负责“让发生了什么可见”，不
 - 不写 checkpoint；
 - 不写 conversation.messages；
 - 不执行工具；
-- 第一版仍然用 print，暂不引入 logging 框架或 JSONL。
+- 结构化事件默认写入 agent_log.jsonl；terminal 短日志只有
+  MY_FIRST_AGENT_DEBUG=1 时才打印，避免污染 TUI conversation view。
 
 命名约定：
 - event_source：谁产生了事件，例如 model / user / runtime / tool；
@@ -18,19 +19,27 @@ Agent Runtime 的状态流转。它只负责“让发生了什么可见”，不
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 MAX_LOG_TEXT_PREVIEW = 120
 
 
-RUNTIME_DEBUG_LOGS = True
+RUNTIME_DEBUG_LOGS = os.getenv("MY_FIRST_AGENT_DEBUG", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 """Runtime 观测开关。
 
-这是日志开关，不是业务开关。关闭它只应减少 stdout 输出，不应该改变 Agent
-状态转移、工具执行、checkpoint 或 messages 行为。
+这是 terminal debug 开关，不是业务开关。关闭它只应减少 stdout 输出，不应该
+改变 Agent 状态转移、工具执行、checkpoint、messages，或 agent_log.jsonl 里的
+结构化观测记录。
 
-实验分支默认开启是为了定位 loop / no_progress 问题；产品化时应改为环境变量或
-配置项控制，并优先写结构化日志文件，避免 debug 输出污染 TUI conversation view。
+默认关闭是为了让 TUI/普通终端只看到用户可见输出。需要临时排查时可设置
+MY_FIRST_AGENT_DEBUG=1，把 [RUNTIME_EVENT] / [INPUT_RESOLUTION] 等短日志打印到
+terminal；结构化 JSONL 日志不依赖这个开关。
 """
 
 
@@ -118,15 +127,15 @@ def log_event(
 
     如果后续需要更细粒度观测，也应优先打印 payload_keys，而不是 payload values。
     """
-    if not RUNTIME_DEBUG_LOGS:
-        return
-
     _persist_observer_event(
         event_type,
         event_source=event_source,
         event_payload=event_payload,
         event_channel=event_channel,
     )
+    if not RUNTIME_DEBUG_LOGS:
+        return
+
     fields = {
         "event_type": event_type,
         "event_source": event_source,

@@ -137,8 +137,10 @@ def test_collect_input_transition_advances_step_and_saves(
     """collect_input 答复落地后应推进 step，并记录为普通 step_input。"""
     from agent.input_resolution import resolve_user_input
     from agent.transitions import apply_user_replied_transition
+    import agent.runtime_observer as observer
 
     calls = _patch_checkpoint_counter(monkeypatch)
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
     fresh_state.task.current_plan = two_step_plan
     fresh_state.task.status = "awaiting_user_input"
     fresh_state.task.current_step_index = 0
@@ -178,8 +180,10 @@ def test_runtime_user_input_transition_keeps_step_clears_pending_and_saves(
     """执行期求助答复只补当前 step：清 pending，但不推进 step_index。"""
     from agent.input_resolution import resolve_user_input
     from agent.transitions import apply_user_replied_transition
+    import agent.runtime_observer as observer
 
     calls = _patch_checkpoint_counter(monkeypatch)
+    monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
     pending = {
         "question": "请补充旅行偏好？",
         "why_needed": "用于规划当前步骤",

@@ -196,9 +196,6 @@ class TaskState:
     # 主循环已经跑了多少轮
     loop_iterations: int = 0
 
-    # 连续被拒绝的次数
-    consecutive_rejections: int = 0
-
     # 连续达到 max_tokens 的次数
     consecutive_max_tokens: int = 0
 
@@ -361,7 +358,6 @@ class AgentState:
         self.task.retry_count = 0
         self.task.current_step_index = 0
         self.task.loop_iterations = 0
-        self.task.consecutive_rejections = 0
         self.task.consecutive_max_tokens = 0
         self.task.consecutive_end_turn_without_progress = 0
         self.task.tool_call_count = 0

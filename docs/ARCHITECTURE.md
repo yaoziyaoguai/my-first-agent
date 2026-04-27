@@ -1200,7 +1200,7 @@ return 0                              # 放弃
 
 | 问题 | 位置 | 为什么不修 |
 |---|---|---|
-| `state.task.consecutive_rejections` 声明但从不读写 | state.py | 死代码，不影响运行 |
+| ~~`state.task.consecutive_rejections` 声明但从不读写~~ | ~~state.py~~ | ~~死代码~~ ✅ 已在 P3 清理中删除 |
 | `tool_call_count > MAX_TOOL_CALLS_PER_TURN` 是 `>` 不是 `>=` | response_handlers.py | 差一个，不致命 |
 | `save_checkpoint` 不调 `log_event` | checkpoint.py | 观测性缺口，不影响正确性 |
 | `PROJECT_DIR = Path.cwd().resolve()` 依赖启动 cwd | config.py | 重构级，不在 bug 范围 |
@@ -1316,7 +1316,7 @@ if not user_input:     # 空输入过滤
 ### 4 个 xfail（已识别但暂不修的设计债）
 
 - `test_parallel_tool_use_result_order_matches_declaration`：并行 tool_use 遇 awaiting 时结果顺序与声明顺序相反
-- `test_consecutive_rejections_is_actually_used`：`consecutive_rejections` 字段是 dead code
+- ~~`test_consecutive_rejections_is_actually_used`~~：~~`consecutive_rejections` 字段是 dead code~~ ✅ 已在 P3 清理中字段与测试一并删除
 - `test_plan_feedback_does_not_accumulate_goal_string_indefinitely`：plan feedback 单向累加，goal 字符串无限膨胀
 - `test_user_switches_topic_mid_task`：awaiting_step 时用户换话题被当 feedback，goal 被错误拼接
 

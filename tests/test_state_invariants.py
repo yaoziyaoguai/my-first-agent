@@ -20,6 +20,14 @@ from agent.state import (
 # 下面这组字段是已知"用户会话结束应该归零"的字段。
 # 如果你给 TaskState 加了新字段又应该跨任务清零，请把它加进这个列表；
 # 加进来后对应的 reset_task 也要清掉，否则测试会提醒你。
+#
+# 注：历史上这里曾包含 `consecutive_rejections`，但全仓 grep 证实它只有声明和
+# reset 归零，agent/ 下没有任何累加 / 读取 / 比较使用——是真·死字段。已在同
+# 一笔 P3 清理 commit 中从 TaskState 删除，本不变量集合同步移除以保证
+# `RESETTABLE_FIELDS == 全部 dataclass 字段` 这条测试不变量继续成立。该删除
+# 不触碰 RuntimeEvent / InputIntent / CommandResult / checkpoint schema /
+# context_builder._project_to_api / tool_use_id 配对 / tool_result placeholder /
+# request_user_input 任何主线语义。
 RESETTABLE_FIELDS = {
     "user_goal",
     "current_plan",
@@ -27,7 +35,6 @@ RESETTABLE_FIELDS = {
     "retry_count",
     "current_step_index",
     "loop_iterations",
-    "consecutive_rejections",
     "consecutive_max_tokens",
     "consecutive_end_turn_without_progress",
     "tool_call_count",
@@ -48,7 +55,6 @@ def _set_dirty(state) -> None:
     state.task.retry_count = 5
     state.task.current_step_index = 3
     state.task.loop_iterations = 42
-    state.task.consecutive_rejections = 7
     state.task.consecutive_max_tokens = 2
     state.task.consecutive_end_turn_without_progress = 3
     state.task.tool_call_count = 11
@@ -80,7 +86,6 @@ def test_reset_task_clears_all_resettable_fields():
     assert state.task.retry_count == 0
     assert state.task.current_step_index == 0
     assert state.task.loop_iterations == 0
-    assert state.task.consecutive_rejections == 0
     assert state.task.consecutive_max_tokens == 0
     assert state.task.consecutive_end_turn_without_progress == 0
     assert state.task.tool_call_count == 0

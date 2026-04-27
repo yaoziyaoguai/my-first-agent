@@ -7,12 +7,12 @@
 - 空/畸形用户输入
 - 主循环到达 MAX_LOOP_ITERATIONS 之后的 state 一致性
 - 幂等 tool_execution_log 跨任务残留
-- dead field `consecutive_rejections`（声明但未被任何代码读写）
+- ~~dead field `consecutive_rejections`~~（已在 P3 清理中从 TaskState 移除）
 """
 
 from __future__ import annotations
 
-import pytest
+import pytest  # noqa: F401  其它 xfail 测试可能未来重新接入；保留 import 不显著
 
 from tests.conftest import (
     FakeAnthropicClient,
@@ -176,8 +176,8 @@ def test_tool_execution_log_cleared_between_tasks(monkeypatch):
     这是 reset_task 的职责。如果漏清，第二个任务万一命中同 id 会返回旧结果。
 
     ⚠️ 当前 xfail：已发现真实 bug。core.chat() 开新任务时只重置了计数字段
-    （loop_iterations / tool_call_count / consecutive_max_tokens /
-    consecutive_rejections），没有清 tool_execution_log 也没有清 pending_tool。
+    （loop_iterations / tool_call_count / consecutive_max_tokens），
+    没有清 tool_execution_log 也没有清 pending_tool。
 
     只在"多步任务走到 status=done" 的路径上会触发 reset_task；
     "单步任务（planner 返 None）" 跑完后 status 仍是 'idle'，
@@ -272,44 +272,24 @@ def test_consecutive_user_messages_not_merged_but_kept(monkeypatch):
 
 
 # ============================================================
-# Bug 候选 5：dead field `consecutive_rejections`
+# Bug 候选 5：dead field `consecutive_rejections`（已在 P3 清理中删除）
 # ============================================================
-
-def test_consecutive_rejections_is_actually_used():
-    """consecutive_rejections 字段被声明了，但全代码里没有任何地方读写它。
-    如果是死字段，应该考虑删掉或接入真正的功能。
-
-    ⚠️ 当前 xfail：已确认是 dead code。grep 结果只有：
-    - state.py:129 声明
-    - state.py:276 reset_task 里清零
-    - core.py:162 新任务入口清零
-    三处全是"归零"，没有任何地方累加、比较、或读它的值——真·死字段。
-
-    建议删掉或者接入真正的功能（比如"连续 N 次拒绝就终止任务"）。
-    """
-    pytest.xfail("consecutive_rejections 确认是 dead field，待清理或接入功能")
-
-    import subprocess
-    import pathlib
-
-    agent_dir = pathlib.Path(__file__).parent.parent / "agent"
-    result = subprocess.run(
-        [
-            "grep", "-rn", "--include=*.py",   # 只搜 .py 源文件，排除 pyc 噪声
-            "consecutive_rejections", str(agent_dir),
-        ],
-        capture_output=True, text=True,
-    )
-
-    # 排除纯"= 0"式的归零语句
-    lines = [
-        ln for ln in result.stdout.strip().split("\n")
-        if ln and "= 0" not in ln and ": int = 0" not in ln
-    ]
-
-    assert lines, (
-        "consecutive_rejections 只有归零语句，没有任何地方在累加或读取——是 dead field。"
-    )
+#
+# 历史上 TaskState 声明了 `consecutive_rejections: int = 0`，但全 agent/ 仓
+# grep 证实只有 dataclass 声明和 reset_task 归零，没有任何累加 / 读取 /
+# 比较——真·死字段。原本这里有一个 xfail 测试 `test_consecutive_rejections_is_actually_used`
+# 用 grep 断言"如果还能在 agent/ 下找到非归零引用就 PASS"。
+#
+# 该字段已在 P3 清理 commit 中从 `agent/state.py` 删除，对应不变量
+# `tests/test_state_invariants.py::RESETTABLE_FIELDS` 同步删除该项以保持
+# `RESETTABLE_FIELDS == 全部 dataclass 字段` 这条测试不变量。删除不触碰
+# Runtime 状态机 / RuntimeEvent / InputIntent / CommandResult / checkpoint
+# schema / context_builder._project_to_api / tool_use_id 配对 /
+# tool_result placeholder / request_user_input 任何主线语义。
+#
+# 删除原 xfail 测试（而不是把它改成 PASS）的理由：
+# 测试本身是"dead-field 探测器"，字段不存在后探测器没有探测对象，留着只会
+# 误导后续维护者以为还存在死字段。文档化这段历史就够了。
 
 
 # ============================================================

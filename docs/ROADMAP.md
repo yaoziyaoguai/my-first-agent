@@ -1202,7 +1202,7 @@ Anthropic 协议里 tool_use / tool_result 是线性的。能不能扩展成 **D
 - **新候选 · checkpoint save ownership 梳理**：现在 `advance_current_step_if_needed` 内部会保存，部分 transition / handler 外层也会保存。行为上可接受，但 ownership 不够清晰，后续应明确到底由 step runtime 还是 transition 层负责落盘，减少重复保存和日志噪声
 - **新候选 · pending_user_input_request.source**：当前 `runtime_user_input_answer` 统一覆盖 `request_user_input`、`fallback_question`、`no_progress`。下一步可给 pending 加轻量 `source` 字段，只增强可观测性，不改变状态转移
 - **新候选 · 用户答复 strip / 原文保留策略**：CLI 路径会先 strip，但直接调用 `chat()` 时 InputResolution 保留原文。后续需要明确 runtime 层是统一 strip，还是保留原始 answer 以避免丢多行/格式信息
-- **新候选 · 清理 dead field**：`state.task.consecutive_rejections` 一直是 dead code（见 §11 / xfail），可以删；`effective_review_request` 同理
+- **新候选 · 清理 dead field**：~~`state.task.consecutive_rejections` 一直是 dead code（见 §11 / xfail），可以删~~ ✅ 已在 P3 清理中删除；`effective_review_request` 同理待清理
 - **新候选 · 消化 xfail 中的状态机边界**：4 个 xfail 都是"已识别但暂不修"的设计债，值得逐个挑出来做
 - 其余 0.2 类型、1.2 history、0.5 observability 属于"加分但非阻塞"
 

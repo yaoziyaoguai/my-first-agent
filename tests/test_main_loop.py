@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 
@@ -82,6 +83,44 @@ def _planner_no_plan_response() -> FakeResponse:
     """构造 planner 的 'steps_estimate=1' 响应（让 chat 走单步分支）。"""
     return FakeResponse(
         content=[FakeTextBlock(text='{"steps_estimate": 1}')],
+        stop_reason="end_turn",
+    )
+
+
+def _planner_two_step_response() -> FakeResponse:
+    """构造 planner 的两步计划响应，用于验证计划确认 UI 事件。"""
+
+    return FakeResponse(
+        content=[
+            FakeTextBlock(
+                text=json.dumps({
+                    "steps_estimate": 2,
+                    "goal": "测试多步任务",
+                    "thinking": "先读再写",
+                    "needs_confirmation": True,
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "title": "读取",
+                            "description": "读取输入",
+                            "step_type": "read",
+                            "suggested_tool": None,
+                            "expected_outcome": "得到材料",
+                            "completion_criteria": "材料已读取",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "title": "报告",
+                            "description": "生成报告",
+                            "step_type": "report",
+                            "suggested_tool": None,
+                            "expected_outcome": "得到报告",
+                            "completion_criteria": "报告已生成",
+                        },
+                    ],
+                })
+            )
+        ],
         stop_reason="end_turn",
     )
 
@@ -180,6 +219,30 @@ def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
     assert len(fake.requests) == 1
 
 
+def test_plan_confirmation_uses_runtime_event_not_stdout(monkeypatch, capsys):
+    """计划确认提示应走 RuntimeEvent，而不是依赖 Textual stdout capture。"""
+
+    fake = FakeAnthropicClient(responses=[_planner_two_step_response()])
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    events = []
+    reply = chat("请分两步做", on_runtime_event=events.append)
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert state.task.status == "awaiting_plan_confirmation"
+    plan_events = [
+        event for event in events
+        if event.event_type == "plan.confirmation_requested"
+    ]
+    assert len(plan_events) == 1
+    assert "📋 任务规划：测试多步任务" in plan_events[0].text
+    assert "按此计划执行吗？" in plan_events[0].text
+    assert "按此计划执行吗？" not in captured.out
+
+
 def test_chat_tool_confirmation_emits_display_event_with_file_preview(monkeypatch):
     """write_file 挂起确认时，应发出结构化 DisplayEvent，而不是只靠 stdout。"""
 
@@ -215,6 +278,45 @@ def test_chat_tool_confirmation_emits_display_event_with_file_preview(monkeypatc
     assert "内容预览" in event.body
     assert "是否执行？" in event.body
     assert len(event.metadata["content_preview"]) < len(long_content)
+
+
+def test_request_user_input_emits_runtime_event(monkeypatch, capsys):
+    """request_user_input 元工具暂停后，用户提示应通过 RuntimeEvent 投影。"""
+
+    fake = FakeAnthropicClient(
+        responses=[
+            _planner_no_plan_response(),
+            tool_use_response(
+                "request_user_input",
+                {
+                    "question": "预算是多少？",
+                    "why_needed": "用于制定方案",
+                    "options": ["1000", "3000"],
+                    "context": "旅行规划",
+                },
+                tool_id="T_INPUT",
+            ),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    events = []
+    reply = chat("做旅行计划", on_runtime_event=events.append)
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert state.task.status == "awaiting_user_input"
+    assert state.task.pending_user_input_request["question"] == "预算是多少？"
+    request_events = [
+        event for event in events
+        if event.event_type == "user_input.requested"
+    ]
+    assert len(request_events) == 1
+    assert "问题：预算是多少？" in request_events[0].text
+    assert "可选项" in request_events[0].text
+    assert "预算是多少？" not in captured.out
 
 
 def test_new_question_after_confirmed_pending_tool_reenters_planning(monkeypatch):

@@ -416,6 +416,34 @@ def test_textual_shell_input_handler_renders_runtime_events_without_stdout(monke
     assert [event.text for event in seen_events] == ["工具等待确认"]
 
 
+def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
+    """Textual slash command 主路径应走 command.result，而不是 stdout capture。"""
+
+    import main
+
+    class FakeRegistry:
+        def count(self):
+            return 2
+
+        def get_warnings(self):
+            return ["忽略了重复 skill"]
+
+    monkeypatch.setattr(main, "reload_registry", lambda: FakeRegistry())
+
+    events = []
+    result = main._handle_textual_shell_input(
+        "/reload_skills",
+        on_runtime_event=events.append,
+    )
+    captured = capsys.readouterr()
+
+    assert result == ""
+    assert [event.event_type for event in events] == ["command.result"]
+    assert "Skill 已重新加载" in events[0].text
+    assert "忽略了重复 skill" in events[0].text
+    assert "Skill 已重新加载" not in captured.out
+
+
 def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):
     """TUI 输入 y 时，main bridge 只能原样交给 Runtime，不解释确认语义。"""
 

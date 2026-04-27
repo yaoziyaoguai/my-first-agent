@@ -21,7 +21,6 @@ from typing import Any
 
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
-    EVENT_DISPLAY_EVENT,
     DisplayEvent,
     RuntimeEvent,
     render_display_event,
@@ -380,7 +379,7 @@ def _build_textual_shell_app_class() -> type[Any]:
                 self._append_assistant_chunk(message_index, event.text)
                 return
 
-            if event.event_type == EVENT_DISPLAY_EVENT and event.display_event is not None:
+            if event.display_event is not None:
                 self.append_display_event(event.display_event)
                 return
 

@@ -44,6 +44,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `control.message`、`tool.requested` 可统一从 Runtime 投影到 UI。RuntimeEvent
   不写 checkpoint，不进入 `conversation.messages`，不是 runtime_observer debug
   event，也不是 Anthropic API messages。
+- 第二阶段继续迁移旧 print-era 交互路径：计划确认提示走
+  `plan.confirmation_requested`，slash command 结果走 `command.result`，
+  执行期求助走 `user_input.requested`，工具确认/结果提示规范为
+  `tool.confirmation_requested` / `tool.result_visible`。
 - runtime observability 已补充 loop / model / progress / checkpoint 相关事件。
 - 修复 `mark_step_complete` 跨 step 复用 `tool_use_id` 导致的重复输出 / `no_progress` 循环问题。
 - 补充跨任务回归：确认型 pending_tool 完成后，下一条新问题会重新进入 planner，
@@ -61,8 +65,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - checkpoint / runtime observer 已默认收敛为结构化日志；需要 terminal 短日志时
   显式设置 `MY_FIRST_AGENT_DEBUG=1`。仍需继续清理其他 print-era 调试输出。
 - stdout capture 只是从 print-era 到 event-era 的过渡方案，不应长期作为 UI
-  projection 的数据来源。assistant delta、DisplayEvent 和 `tool.requested` 已开始
-  脱离 stdout，但 session/slash/plan 相关少量系统提示仍未完全事件化。
+  projection 的数据来源。assistant delta、DisplayEvent、plan confirmation、slash
+  command、request_user_input 和 `tool.requested` 已开始脱离 stdout；仍保留它是为
+  了兜住 session/interruption、旧调用方和少量异常兜底输出。
 - `on_output_chunk` / `on_display_event` callback 是阶段性兼容桥；当前 core 会先
   生成 RuntimeEvent 再转发给旧 callback。长期目标是 `chat_stream` /
   `RuntimeEvent` iterator。
@@ -71,8 +76,8 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 下一阶段建议优先聚焦两件事：
 
 1. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
-   `chat_stream` / RuntimeEvent iterator，统一承载 assistant delta、tool lifecycle
-   和用户确认提示。debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
+   `chat_stream` / RuntimeEvent iterator，并逐步移除旧 callback/stdout capture。
+   debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
 2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。

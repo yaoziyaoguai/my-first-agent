@@ -90,10 +90,11 @@ Runtime observability 也已增强：loop / model / progress / checkpoint 关键
 source 等。日志只保留 preview 和关键字段，不把完整 prompt 或超长 assistant
 正文打进 terminal debug。
 
-本次进一步补了最小 RuntimeEvent / DisplayEvent 桥：`agent/display_events.py`
+本次进一步补了 RuntimeEvent / DisplayEvent 桥：`agent/display_events.py`
 定义 UI 投影事件，`core.chat(..., on_runtime_event=...)` 统一把 assistant delta、
-DisplayEvent 和 `tool.requested` 等用户可见提示送给调用方；旧
-`on_output_chunk` / `on_display_event` 仍是兼容桥。
+DisplayEvent、计划确认、slash command 结果、`request_user_input` 提示和
+`tool.requested` 等用户可见提示送给调用方；旧 `on_output_chunk` /
+`on_display_event` 仍是兼容桥。
 `write_file` 等需要确认的工具在进入 `awaiting_tool_confirmation` 时会产生
 `tool.awaiting_confirmation`，包含工具名、路径和内容 preview；用户仍通过 raw
 text 回复 `y/n/反馈`，确认语义继续由 `confirm_handlers.py` 处理。Textual backend
@@ -108,12 +109,22 @@ Runtime state，也不保存 checkpoint。
   显式 debug 开关。
 - 它不是 Anthropic API messages，不改变 `tool_use ↔ tool_result` 配对协议。
 
+第二阶段已迁移的旧 print-era 交互输出：
+
+- 计划生成 / 计划修改后的确认提示：`plan.confirmation_requested`。
+- slash command 结果：`command.result`，不进入模型对话。
+- 执行期求助：`user_input.requested`，只投影 `pending_user_input_request`。
+- 工具确认 / 工具完成失败提示：DisplayEvent 会映射为
+  `tool.confirmation_requested` / `tool.result_visible`。
+- 重复工具 id 的幂等跳过提示：`control.message`。
+
 ### Current Transitional Bridges / Technical Debt
 
 当前仍有几条刻意保留的过渡桥，后续要逐步收敛：
 
 - **stdout capture**：`main.py` 仍捕获 stdout 并过滤 debug/checkpoint 前缀，但它
-  现在只兜住尚未迁移的 print-era session/slash/plan 文案。assistant delta、
+  现在只兜住尚未迁移的 print-era session/interruption、少量异常兜底和旧调用方
+  文案。assistant delta、plan confirmation、slash command、request_user_input、
   DisplayEvent、`tool.requested` 已开始走 RuntimeEvent，不应再依赖 stdout capture。
 - **旧 callback**：`on_output_chunk` / `on_display_event` 仍保留给老调用方，但
   `core.chat()` 内部会先生成 RuntimeEvent，再由兼容桥转发。长期应演进为

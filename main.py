@@ -8,9 +8,9 @@ from collections.abc import Callable
 from agent.core import chat
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
-    EVENT_DISPLAY_EVENT,
     DisplayEvent,
     RuntimeEvent,
+    command_result,
     render_runtime_event_for_cli,
 )
 from agent.input_backends.simple import (
@@ -141,11 +141,7 @@ def _run_chat_for_backend(
                 streamed_any_chunk = True
                 if on_output_chunk is not None:
                     on_output_chunk(event.text)
-            elif (
-                event.event_type == EVENT_DISPLAY_EVENT
-                and event.display_event is not None
-                and on_display_event is not None
-            ):
+            elif event.display_event is not None and on_display_event is not None:
                 on_display_event(event.display_event)
 
             if on_runtime_event is not None:
@@ -208,6 +204,10 @@ def _handle_textual_shell_input(
         return "[系统] 常驻 TUI 请按 Ctrl+Q 退出并保存会话。"
 
     if text.startswith("/"):
+        if on_runtime_event is not None:
+            handled = handle_slash_command(text, on_runtime_event=on_runtime_event)
+            if handled:
+                return ""
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
             handled = handle_slash_command(text)
@@ -238,15 +238,29 @@ def run_textual_main_loop() -> None:
     finalize_session()
 
 
-def handle_slash_command(user_input: str) -> bool:
-    """处理 / 开头的系统命令。返回 True 表示已处理（不再走 chat）。"""
+def handle_slash_command(
+    user_input: str,
+    *,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
+) -> bool:
+    """处理 / 开头的本地系统命令。
+
+    slash command 是 main.py 的 I/O 控制命令，不是模型消息，不写
+    conversation.messages，也不影响 checkpoint。新 Textual 路径通过
+    command.result RuntimeEvent 展示结果；没有 sink 的 simple CLI 仍打印。stdout
+    capture 只作为旧调用方兜底，不能继续扩展成新的输出协议。
+    """
     cmd = user_input.strip()
 
     if cmd == "/reload_skills":
         registry = reload_registry()
-        print(f"\n[系统] Skill 已重新加载，当前 {registry.count()} 个可用")
-        for w in registry.get_warnings():
-            print(f"  {w}")
+        lines = [f"[系统] Skill 已重新加载，当前 {registry.count()} 个可用"]
+        lines.extend(f"  {warning}" for warning in registry.get_warnings())
+        event = command_result("\n".join(lines), command=cmd)
+        if on_runtime_event is not None:
+            on_runtime_event(event)
+        else:
+            print(f"\n{render_runtime_event_for_cli(event)}")
         return True
 
     return False

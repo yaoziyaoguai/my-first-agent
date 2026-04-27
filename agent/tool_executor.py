@@ -15,6 +15,7 @@ from agent.conversation_events import append_tool_result, has_tool_result
 from agent.display_events import (
     build_tool_awaiting_confirmation_event,
     build_tool_status_event,
+    control_message,
     emit_display_event,
 )
 from agent.tool_registry import execute_tool, is_meta_tool
@@ -120,7 +121,12 @@ def execute_single_tool(
     execution_log = state.task.tool_execution_log
     if tool_use_id in execution_log:
         cached = execution_log[tool_use_id]["result"]
-        print(f"\n[系统] 工具 {tool_name} 已执行过，跳过执行")
+        emit = getattr(turn_state, "on_runtime_event", None)
+        if emit is not None:
+            # 重复 tool_use 的幂等处理属于工具执行边界：状态和 tool_result 配对逻辑不变，
+            # 这里只把“已跳过”投影给 UI，避免继续依赖 stdout capture。不要把完整
+            # checkpoint/debug/Anthropic messages 混进这个 RuntimeEvent。
+            emit(control_message(f"[系统] 工具 {tool_name} 已执行过，跳过执行"))
         if not has_tool_result(messages, tool_use_id):
             append_tool_result(messages, tool_use_id, cached)
         return None

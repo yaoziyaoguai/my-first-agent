@@ -18,6 +18,11 @@ EVENT_ASSISTANT_DELTA = "assistant.delta"
 EVENT_DISPLAY_EVENT = "display.event"
 EVENT_CONTROL_MESSAGE = "control.message"
 EVENT_TOOL_REQUESTED = "tool.requested"
+EVENT_PLAN_CONFIRMATION_REQUESTED = "plan.confirmation_requested"
+EVENT_USER_INPUT_REQUESTED = "user_input.requested"
+EVENT_COMMAND_RESULT = "command.result"
+EVENT_TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
+EVENT_TOOL_RESULT_VISIBLE = "tool.result_visible"
 
 
 @dataclass(slots=True, frozen=True)
@@ -68,10 +73,22 @@ def assistant_delta(text: str) -> RuntimeEvent:
 
 
 def runtime_display_event(display_event: DisplayEvent) -> RuntimeEvent:
-    """把已有 DisplayEvent 包装进统一 RuntimeEvent 出口。"""
+    """把已有 DisplayEvent 包装进统一 RuntimeEvent 出口。
+
+    DisplayEvent 仍是工具/控制提示的结构化 UI payload；RuntimeEvent 是 Runtime 到
+    UI 的统一投递边界。这里按 DisplayEvent 的业务类型映射成更稳定的 RuntimeEvent
+    事件名，方便 Textual/CLI 不再只看到泛化的 display.event。这个映射只改变 UI
+    projection，不改变 pending_tool、tool_result、checkpoint 或 Anthropic messages。
+    """
+
+    event_type = EVENT_DISPLAY_EVENT
+    if display_event.event_type == "tool.awaiting_confirmation":
+        event_type = EVENT_TOOL_CONFIRMATION_REQUESTED
+    elif display_event.event_type in {"tool.completed", "tool.failed"}:
+        event_type = EVENT_TOOL_RESULT_VISIBLE
 
     return RuntimeEvent(
-        event_type=EVENT_DISPLAY_EVENT,
+        event_type=event_type,
         display_event=display_event,
         metadata={"display_event_type": display_event.event_type},
     )
@@ -98,6 +115,109 @@ def tool_requested(
         event_type=EVENT_TOOL_REQUESTED,
         text=text,
         metadata=dict(metadata or {}),
+    )
+
+
+def plan_confirmation_requested(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造计划确认提示事件。
+
+    计划文本是用户确认前的 UI 投影，不是新的模型消息，也不应为了 TUI 展示重复写入
+    conversation.messages。真正的 plan 状态仍在 TaskState/current_plan 和 checkpoint
+    中维护；这个事件只替代旧 print-era 的“展示计划 + 询问 y/n”输出。
+    """
+
+    return RuntimeEvent(
+        event_type=EVENT_PLAN_CONFIRMATION_REQUESTED,
+        text=text,
+        metadata=dict(metadata or {}),
+    )
+
+
+def command_result(
+    text: str,
+    *,
+    command: str,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造 slash command 的用户可见结果。
+
+    slash command 是 main.py 的本地控制命令，不是模型对话，也不进入 checkpoint。
+    通过 command.result 事件投影到 UI，可以让 Textual 不再靠 stdout capture 解析命令
+    输出；旧 CLI 没有 sink 时仍由兼容桥打印。
+    """
+
+    payload = dict(metadata or {})
+    payload["command"] = command
+    return RuntimeEvent(
+        event_type=EVENT_COMMAND_RESULT,
+        text=text,
+        metadata=payload,
+    )
+
+
+def _format_user_input_request(pending: dict[str, Any]) -> str:
+    """把 pending_user_input_request 转成用户可读文本，保持状态与 UI 分离。"""
+
+    lines = ["[需要你补充信息]"]
+    if pending.get("question"):
+        lines.append(f"  问题：{pending['question']}")
+    if pending.get("why_needed"):
+        lines.append(f"  原因：{pending['why_needed']}")
+    options = pending.get("options") or []
+    if options:
+        lines.append("  可选项：")
+        lines.extend(f"    - {option}" for option in options)
+    return "\n".join(lines)
+
+
+def user_input_requested(
+    pending: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造执行期向用户补充信息的可见提示。
+
+    pending_user_input_request 是 TaskState 里的等待事实；这个 helper 只把它投影成
+    UI 文本。它不能清 pending、不能推进状态机、不能写 conversation.messages，也
+    不能生成 Anthropic tool_result；这些仍由 transitions/tool_executor/response
+    handlers 按原有协议负责。
+    """
+
+    payload = dict(metadata or {})
+    payload.update({
+        "awaiting_kind": pending.get("awaiting_kind"),
+        "step_index": pending.get("step_index"),
+    })
+    return RuntimeEvent(
+        event_type=EVENT_USER_INPUT_REQUESTED,
+        text=_format_user_input_request(pending),
+        metadata=payload,
+    )
+
+
+def tool_result_visible(
+    text: str,
+    *,
+    tool_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造工具结果的用户可见摘要事件。
+
+    工具完整结果仍通过 tool_result 进入模型协议；这里仅展示短摘要，避免 UI 用户只
+    看到“执行完成”却不知道结果去向。它不改变 tool_use_id 配对、不写 checkpoint，
+    也不替代 messages 里的 tool_result。
+    """
+
+    payload = dict(metadata or {})
+    payload["tool"] = tool_name
+    return RuntimeEvent(
+        event_type=EVENT_TOOL_RESULT_VISIBLE,
+        text=text,
+        metadata=payload,
     )
 
 
@@ -195,7 +315,7 @@ def render_runtime_event_for_cli(event: RuntimeEvent) -> str:
     经过这个 renderer。
     """
 
-    if event.event_type == EVENT_DISPLAY_EVENT and event.display_event is not None:
+    if event.display_event is not None:
         return render_display_event(event.display_event)
     return event.text.strip() if event.event_type != EVENT_ASSISTANT_DELTA else event.text
 

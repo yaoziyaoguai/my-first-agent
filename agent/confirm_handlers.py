@@ -14,6 +14,7 @@ from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.context_builder import build_planning_messages
 from agent.conversation_events import append_control_event
+from agent.display_events import plan_confirmation_requested
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
 from agent.task_runtime import advance_current_step_if_needed
@@ -53,6 +54,26 @@ class ConfirmationContext:
     client: Any
     model_name: str
     continue_fn: ContinueFn
+
+
+def _emit_plan_confirmation(ctx: ConfirmationContext, plan: Any, *, source: str) -> None:
+    """把重规划后的确认提示投影到 UI。
+
+    confirmation handler 负责状态机和语义控制事件；计划文本展示只是 Runtime -> UI
+    输出，不应写入 conversation.messages，也不应改变 checkpoint schema。这里通过
+    turn_state.on_runtime_event 走统一出口；若测试用的简化 turn_state 没有该字段，
+    则保持无输出而不把兼容逻辑扩大成 stdout 猜测。
+    """
+
+    emit = getattr(ctx.turn_state, "on_runtime_event", None)
+    if emit is None:
+        return
+    emit(
+        plan_confirmation_requested(
+            f"{format_plan_for_display(plan)}\n按此计划执行吗？(y/n/输入修改意见):",
+            metadata={"source": source},
+        )
+    )
 
 
 def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -95,8 +116,7 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state.task.status = "awaiting_plan_confirmation"
     save_checkpoint(state)
 
-    print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    _emit_plan_confirmation(ctx, plan, source="plan_feedback")
     return ""
 
 
@@ -152,8 +172,7 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state.task.status = "awaiting_plan_confirmation"
     save_checkpoint(state)
 
-    print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    _emit_plan_confirmation(ctx, plan, source="step_feedback")
     return ""
 
 

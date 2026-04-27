@@ -17,6 +17,7 @@ from agent.model_output_resolution import (
     resolve_max_tokens_output,
     resolve_tool_use_block,
 )
+from agent.display_events import user_input_requested
 from agent.runtime_observer import log_event
 from agent.planner import Plan
 from agent.task_runtime import (
@@ -315,7 +316,7 @@ def handle_tool_use_response(
         # 切到 awaiting_user_input 并写好 pending_user_input_request。
         # 这里负责本轮收尾：
         # - 给本轮剩余未执行的"业务" tool_use 补占位 tool_result，避免 API 协议悬空
-        # - 把 question / why_needed / options 打印给用户
+        # - 把 question / why_needed / options 通过 RuntimeEvent 投影给用户
         # - 跳出 loop 等用户输入，避免本轮里继续误执行剩余工具或走 _maybe_advance_step
         if state.task.status == "awaiting_user_input":
             remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
@@ -328,16 +329,13 @@ def handle_tool_use_response(
                 ),
             )
             pending = state.task.pending_user_input_request or {}
-            print("\n[需要你补充信息]")
-            if pending.get("question"):
-                print(f"  问题：{pending['question']}")
-            if pending.get("why_needed"):
-                print(f"  原因：{pending['why_needed']}")
-            options = pending.get("options") or []
-            if options:
-                print("  可选项：")
-                for o in options:
-                    print(f"    - {o}")
+            emit = getattr(turn_state, "on_runtime_event", None)
+            if emit is not None:
+                # request_user_input 是 Runtime 控制信号：pending 写在 TaskState，
+                # tool_use/tool_result 不进入 Anthropic messages。这里仅把等待问题投影
+                # 到 UI，不能清 pending、不能推进状态机，也不能把 observer/debug 日志
+                # 混进 RuntimeEvent。
+                emit(user_input_requested(pending))
             return ""
 
     # 元工具触发的步骤推进：本轮里若模型调用了 mark_step_complete 且分值达阈值，

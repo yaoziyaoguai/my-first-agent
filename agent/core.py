@@ -4,12 +4,13 @@ from dataclasses import dataclass, field
 import anthropic
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
-    EVENT_DISPLAY_EVENT,
     DisplayEvent,
     DisplayEventSink,
     RuntimeEvent,
     RuntimeEventSink,
     assistant_delta,
+    control_message,
+    plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
     tool_requested,
@@ -183,7 +184,7 @@ def chat(
             print(render_runtime_event_for_cli(event), end="", flush=True)
             return
 
-        if event.event_type == EVENT_DISPLAY_EVENT and event.display_event is not None:
+        if event.display_event is not None:
             if on_display_event is not None:
                 on_display_event(event.display_event)
                 return
@@ -268,7 +269,7 @@ def chat(
     # 等）都有可能带着旧值进新任务。
     state.reset_task()
 
-    plan_result = _run_planning_phase(user_input)
+    plan_result = _run_planning_phase(user_input, turn_state)
     if plan_result == "cancelled":
         return "好的，已取消。"
 
@@ -280,8 +281,13 @@ def chat(
 
 # ========== 规划阶段 ==========
 
-def _run_planning_phase(user_input: str) -> str:
-    """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。"""
+def _run_planning_phase(user_input: str, turn_state: TurnState) -> str:
+    """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。
+
+    这里仍然只负责规划状态推进；计划展示属于 Runtime -> UI projection，所以通过
+    RuntimeEvent 发出。不要为了让 TUI 看到计划而把展示文本写进 conversation.messages，
+    也不要改变 checkpoint schema 或 TaskState 结构。
+    """
     plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages_from_state(state,user_input))
 
     # 无论走哪条分支，用户原始输入都必须归档到 conversation.messages。
@@ -292,7 +298,8 @@ def _run_planning_phase(user_input: str) -> str:
     if not plan:
         # 这里可能是：planner 判定单步任务，或 planner 自身出错。
         # 单步分支是预期路径；但出错也会走这里，给用户一行轻量提示以便察觉。
-        print("[系统] 未生成多步计划，按单步处理。")
+        if turn_state.on_runtime_event is not None:
+            turn_state.on_runtime_event(control_message("[系统] 未生成多步计划，按单步处理。"))
         return "ok"
 
     state.task.current_plan = plan.model_dump()
@@ -326,9 +333,15 @@ def _run_planning_phase(user_input: str) -> str:
     from agent.checkpoint import save_checkpoint as _save_checkpoint
     _save_checkpoint(state)
 
-    # 计划展示给用户，但此时还没有正式接受执行。
-    print(format_plan_for_display(plan))
-    print("按此计划执行吗？(y/n/输入修改意见): ", end="", flush=True)
+    # 计划展示给用户，但此时还没有正式接受执行。RuntimeEvent 只投影 UI，不改变
+    # current_plan / checkpoint / conversation.messages 的业务边界。
+    if turn_state.on_runtime_event is not None:
+        turn_state.on_runtime_event(
+            plan_confirmation_requested(
+                f"{format_plan_for_display(plan)}\n按此计划执行吗？(y/n/输入修改意见):",
+                metadata={"source": "planning_phase"},
+            )
+        )
     return "awaiting_plan_confirmation"
 
 

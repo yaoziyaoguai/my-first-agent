@@ -14,6 +14,11 @@ from config import STEP_COMPLETION_THRESHOLD
 #   - user 消息、assistant 消息
 #   - tool_use / tool_result（被 `append_tool_result` 拆成独立 user 消息）
 #   - 控制事件（"用户接受计划" 等，通过 `append_control_event` 写成独立 user 消息）
+# 注意这个边界只处理“模型协议消息”。RuntimeEvent 是 Runtime -> UI 的输出流，
+# InputIntent 是 UI Adapter -> Runtime 的输入分类，它们都不能进入
+# state.conversation.messages，也不应该被 _project_to_api 认识。request_user_input
+# 虽然由模型以元工具 tool_use 触发，但元工具 tool_use 已在持久化时剔除；用户回复
+# 以 step_input 文本投影给模型，不生成 tool_result。
 #
 # 但 Anthropic 协议对 messages 有**硬性**要求：
 #   1. assistant 消息里的每一个 tool_use，对应的 tool_result 必须出现在
@@ -60,6 +65,13 @@ def _extract_tool_results(user_content: Any) -> tuple[list[dict], bool]:
 def _project_to_api(raw_messages: list[dict]) -> list[dict]:
     """
     把内部 raw messages 投影成协议严格合规的 messages。
+
+    这是 conversation.messages -> Anthropic API messages 的唯一协议投影边界。
+    它解决的是真实模型协议根因：业务 tool_use 必须紧跟合法 tool_result，而内部
+    控制事件不能夹在中间。它不是 UI 输出层，不能接收 RuntimeEvent；也不是输入层，
+    不能接收 InputIntent；更不能为了填补元工具 request_user_input 而伪造
+    tool_result。request_user_input 的用户回复已经在 transitions 层写成 step_input
+    文本，模型会在普通 user text 中看到，不参与 tool_use_id 配对。
 
     核心算法：
       - 走到 assistant(tool_use) 时，向后扫描收集所有匹配的 tool_result
@@ -189,6 +201,12 @@ def build_planning_messages(state: Any, current_user_input: str) -> list[dict]:
 def build_execution_messages(state: Any) -> list[dict]:
     """
     构造真正喂给执行阶段模型的 messages。
+
+    这里是 Runtime state -> 模型协议上下文的临时投影层。current_plan/current_step
+    来自 TaskState，但不会写回 conversation.messages；RuntimeEvent 和 InputIntent
+    也不能混进来。request_user_input 的回复若存在，只会作为 conversation 里的
+    step_input 文本进入模型上下文，不会变成 tool_result；业务 tool_use/tool_result
+    的合法配对仍由 `_project_to_api` 负责。
 
     规则：
     - summary 不存到 conversation.messages

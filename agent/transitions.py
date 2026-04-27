@@ -65,8 +65,13 @@ def apply_user_replied_transition(
     """
     if resolution.kind == RUNTIME_USER_INPUT_ANSWER:
         pending = resolution.pending_user_input_request or {}
-        # request_user_input 是 runtime 控制信号，不把它的 tool_use/tool_result
-        # 放进 messages；真正给模型看的，是用户答复被渲染成 step_input 后的文本。
+        # request_user_input 回复落地在 Runtime transition 边界：InputIntent 已经在
+        # adapter 层完成分类，RuntimeEvent 只负责输出提示，二者都不能进入
+        # conversation.messages 或 checkpoint。这里写入的是给下一轮模型阅读的
+        # step_input 文本事实，不是 Anthropic tool_result；元工具 tool_use 在
+        # response_handlers 序列化时已被剔除，因此不能为了“配对”制造 ru_* 结果。
+        # 若未来要改成 tool_result 语义，必须单独设计 tool_use_id 配对、checkpoint
+        # migration 和旧会话恢复，不能在 transition 层扩大兼容补丁。
         append_control_event(messages, "step_input", {
             "question": pending.get("question", ""),
             "why_needed": pending.get("why_needed", ""),

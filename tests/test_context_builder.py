@@ -155,3 +155,84 @@ def test_execution_messages_keep_full_multiline_step_input(fresh_state, two_step
         "黄鹤楼",
     ):
         assert expected in all_text
+
+
+def test_request_user_input_reply_projects_as_step_input_not_tool_result(
+    fresh_state,
+    two_step_plan,
+):
+    """request_user_input 回复进入模型上下文，但不是 tool_result。
+
+    这是模型协议投影边界的回归测试：request_user_input 是 Runtime 元工具控制信号，
+    它的 tool_use 不写 conversation.messages；用户回复通过 user_replied/step_input
+    变成普通 user text 给模型看。这里不能为了“补配对”制造 `ru_1` tool_result，
+    也不能把 RuntimeEvent/InputIntent/checkpoint/TaskState 直接混进 API messages。
+    """
+
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "running"
+    fresh_state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "T_business",
+                    "name": "read_file",
+                    "input": {"path": "agent/core.py"},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "T_business",
+                    "content": "core content",
+                },
+            ],
+        },
+    ]
+    append_control_event(fresh_state.conversation.messages, "step_input", {
+        "question": "项目根目录在哪里？",
+        "why_needed": "无路径无法 read_file",
+        "content": "./agent",
+    })
+
+    msgs = build_execution_messages(fresh_state)
+    tool_results = [
+        block
+        for msg in msgs
+        if isinstance(msg.get("content"), list)
+        for block in msg["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_result"
+    ]
+    request_user_tool_uses = [
+        block
+        for msg in msgs
+        if isinstance(msg.get("content"), list)
+        for block in msg["content"]
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == "request_user_input"
+        )
+    ]
+    text_blocks = [
+        block.get("text", "")
+        for msg in msgs
+        if isinstance(msg.get("content"), list)
+        for block in msg["content"]
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    all_text = "\n".join(text_blocks)
+
+    assert request_user_tool_uses == []
+    assert [block.get("tool_use_id") for block in tool_results] == ["T_business"]
+    assert all(block.get("tool_use_id") != "ru_1" for block in tool_results)
+    assert "上一轮系统向用户询问" in all_text
+    assert "项目根目录在哪里？" in all_text
+    assert "用户已经回答" in all_text
+    assert "./agent" in all_text
+    assert "无路径无法 read_file" in all_text

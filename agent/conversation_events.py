@@ -65,6 +65,11 @@ def append_control_event(messages: list[Message], event_type: str, payload: dict
         # 两种来源共用 step_input：
         # - collect_input/clarify 步骤的常规收尾：payload 只含 content
         # - request_user_input 触发的执行期求助回复：payload 含 question + why_needed + content
+        # 这里处在 Runtime 语义事件 -> conversation.messages 的边界。它写的是给模型
+        # 下一轮可读的用户事实，不是 RuntimeEvent，不是 InputIntent，也不是 Anthropic
+        # tool_result。request_user_input 是元工具控制信号，元工具 tool_use 不进
+        # messages，因此这里不能为了“看起来配对”伪造 tool_result；否则会破坏
+        # tool_use_id 配对和 API messages 投影。
         # 区分依据是 payload 里有没有 question 字段——有就渲染更强的配对文案，
         # 让模型在下一轮上下文里把用户答复视为已收集事实。
         question = payload.get("question")

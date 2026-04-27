@@ -232,6 +232,10 @@ def test_control_inputs_keep_current_priority_over_pending_states():
     slash = classify_user_input("/status", source="tui", state=request_state)
     assert slash.kind == "slash_command"
     assert slash.metadata["command_name"] == "status"
+    help_command = classify_user_input("/help", source="simple", state=request_state)
+    assert help_command.kind == "slash_command"
+    assert help_command.metadata["command_name"] == "help"
+    assert "awaiting_kind" not in help_command.metadata
     assert classify_user_input("   ", source="tui", state=request_state).kind == "empty"
     assert classify_user_input("/exit", source="tui", state=request_state).kind == "exit"
 

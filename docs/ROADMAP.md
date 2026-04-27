@@ -121,6 +121,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   messages，用户回复也不生成 tool_result，而是写成 step_input 给下一轮模型。如果未来
   要改成 Anthropic tool_result 语义，必须一起设计 tool_use_id 配对、checkpoint 兼容、
   API messages migration 和旧会话恢复，不能用 placeholder 补丁临时补齐。
+- Runtime 语义深化阶段已补齐 messages 投影边界：`RuntimeEvent` 是输出边界，
+  `InputIntent` 是输入边界，二者都不进入 `context_builder` 的 Anthropic messages
+  投影。`request_user_input` 回复以 `step_input` 文本进入 execution messages，不生成
+  `ru_*` tool_result；业务 tool_result placeholder 仍只服务真实业务 tool_use 配对。
 - pending 状态下 slash command 的当前行为已经按代码固化：`empty` / `exit` /
   `slash_command` 优先于 pending_user_input_request、pending_tool 和 plan confirmation，
   因此 slash 可以作为 UI/control 输入打断 pending 状态。是否需要禁止或确认这种打断，
@@ -132,6 +136,8 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 1. **request_user_input 语义决策**：明确它长期是 `user_replied/step_input` 控制信号，
    还是要迁移为可配对 tool_result 协议；任何选择都不能破坏 tool_use_id 配对、
    checkpoint 恢复和 Anthropic API messages。
+   当前推荐先保持 `step_input` 语义，除非能证明模型协议或上下文理解需要 tool_result
+   形态；否则不应为元工具伪造 placeholder。
 2. **Slash command registry 决策**：当前只结构化了 slash metadata 和 `/reload_skills`
    执行入口，尚未建立正式 command registry。后续若新增 `/help` / `/status` /
    `/clear` 等命令，应先设计 registry 和 pending 状态下是否允许打断，而不是继续在

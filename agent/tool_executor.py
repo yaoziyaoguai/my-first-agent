@@ -90,6 +90,13 @@ def execute_single_tool(
         # 入的完成声明，否则用户回复后下一轮 _maybe_advance_step 会读到残留分值
         # 错误推进步骤）。这条清洗只针对**当前 step_index** 的记录，其他步骤的
         # 完成声明不动。
+        #
+        # 关键协议边界：虽然它来自模型 tool_use，但 request_user_input 是元工具控制
+        # 信号，不是业务工具。元工具 tool_use 已在 response_handlers 序列化时剔除，
+        # 所以后续用户回复必须走 user_replied/step_input，而不能生成 tool_result
+        # placeholder。pending 里的 tool_use_id 只用于恢复/观测来源，不参与 Anthropic
+        # API messages 配对；如果未来要改成可配对 tool_result 语义，需要单独设计
+        # checkpoint migration、tool_use_id 配对和旧会话恢复。
         if tool_name == "request_user_input":
             current_idx = state.task.current_step_index
             stale_mark_ids = [

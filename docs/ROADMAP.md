@@ -91,13 +91,20 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `_run_simple_cli_runtime_turn(...)` 两个 adapter 边界，避免 terminal
   `input()`/`print()` 时代的协议继续支配 TUI 主路径。这个阶段不引入 InputIntent，
   不写 checkpoint/messages，不改变 TaskState，也不把 RuntimeEvent 和输入语义混用。
+- 输入边界治理已开始第一刀：新增 `InputIntent` 分类层，把 UI adapter 收到的 raw
+  input 先归类为普通消息、slash command、confirmation、request_user_input 回复、
+  empty/exit/cancel/eof。`InputIntent` 的方向是 UI Adapter -> Runtime，和
+  Runtime -> UI 的 `RuntimeEvent` 相反；它不写 checkpoint/messages，不改变
+  Anthropic API messages，也不替代 TaskState。当前只用于 adapter 层集中判断，
+  confirmation 和 request_user_input 的真正状态推进仍留在 `core.chat()` /
+  `confirm_handlers.py`。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
 
 1. **TUI-first adapter cleanup**：继续把 `main.py` 的 Textual 产品路径、simple CLI
-   fallback、slash command 和 session lifecycle 分层，必要时再引入轻量
-   InputIntent/InputEnvelope，但仍不得写入 checkpoint/messages 或混入 RuntimeEvent。
+   fallback、slash command 和 session lifecycle 分层；继续扩展 InputIntent 只读分类，
+   但仍不得写入 checkpoint/messages 或混入 RuntimeEvent。
 2. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
    stdout fallback 使用率；session lifecycle、debug/checkpoint/runtime_observer 仍保持
    在各自边界，不混入 UI event。

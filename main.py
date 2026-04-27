@@ -5,7 +5,7 @@ import os
 import time
 from collections.abc import Callable
 
-from agent.core import chat
+from agent.core import chat, get_state
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
     DisplayEvent,
@@ -17,6 +17,7 @@ from agent.input_backends.simple import (
     read_user_input_event as read_simple_user_input_event,
     read_user_input_text,
 )
+from agent.input_intents import classify_user_input
 from agent.user_input import UserInputEvent
 from agent.session import (
     init_session,
@@ -343,14 +344,23 @@ def _handle_textual_shell_input(
     这层 capture。
     """
 
-    text = user_input.strip()
-    if not text:
+    intent = classify_user_input(
+        user_input,
+        source="tui",
+        state=get_state(),
+    )
+    # InputIntent 是 TUI adapter 进入 Runtime 前的只读分类：这里只用它集中
+    # empty/exit/slash 这类 UI 控制输入，confirmation/request_user_input 仍交给
+    # core.chat() 按 TaskState 分派。不要把 intent 写进 checkpoint、messages、
+    # RuntimeEvent 或 Anthropic API messages，也不要把它扩展成状态机本体。
+    text = intent.normalized_text
+    if intent.kind == "empty":
         return ""
 
-    if text.lower() == "quit":
+    if intent.kind == "exit":
         return "[系统] 常驻 TUI 请按 Ctrl+Q 退出并保存会话。"
 
-    if text.startswith("/"):
+    if intent.kind == "slash_command":
         if on_runtime_event is not None:
             handled = handle_slash_command(text, on_runtime_event=on_runtime_event)
             if handled:
@@ -480,31 +490,40 @@ def main_loop():
         try:
             backend = _selected_input_backend()
             event = read_user_input_event(latest_output=latest_output)
+            intent = classify_user_input(
+                event.envelope.raw_text if event.envelope is not None else None,
+                source=event.event_source,
+                state=get_state(),
+                event_type=event.event_type,
+            )
+            # main_loop 是 simple CLI fallback 和 legacy one-shot textual backend 的调度层。
+            # InputIntent 只帮助这里统一 cancel/eof/empty/exit/slash 的输入边界；
+            # plan/tool/request_user_input 等 Runtime 语义仍由 chat() 的 TaskState 分派处理。
+            # 不能把 intent 持久化，也不能把它混进 RuntimeEvent 输出边界。
 
             # cancelled 复用现有 Ctrl+C interrupt 流程；它不是空输入。
-            if event.event_type == "input.cancelled":
+            if intent.kind == "cancel":
                 raise KeyboardInterrupt
 
             # closed 表示输入会话结束/EOF，不进入 chat，也不触发 empty guard。
-            if event.event_type == "input.closed":
+            if intent.kind == "eof":
                 finalize_session()
                 break
 
             if event.envelope is None:
                 continue
 
-            raw = event.envelope.raw_text
-            user_input = raw.strip()
+            user_input = intent.normalized_text
 
             # 空输入过滤
-            if not user_input:
+            if intent.kind == "empty":
                 continue
 
-            if user_input.lower() == "quit":
+            if intent.kind == "exit":
                 finalize_session()
                 break
 
-            if handle_slash_command(user_input):
+            if intent.kind == "slash_command" and handle_slash_command(user_input):
                 continue
 
             reply, new_latest_output = _run_chat_for_backend(

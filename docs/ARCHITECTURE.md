@@ -166,8 +166,10 @@ Runtime state，也不保存 checkpoint。
   `conversation.messages`，也不是 Anthropic API messages；它只负责把用户可见事件
   打到普通终端。
 - **旧 callback**：`on_output_chunk` / `on_display_event` 仍保留给老调用方，但
-  `core.chat()` 内部会先生成 RuntimeEvent，再由兼容桥转发。长期应演进为
-  `chat_stream` / RuntimeEvent iterator，并逐步删除旧 callback。
+  它们已经降级为 deprecated compatibility bridge。`core.chat()` 内部会先生成
+  RuntimeEvent；只有调用方没有提供 `on_runtime_event` 时，旧 callback 才作为
+  assistant delta / DisplayEvent 的兼容转发目标。新功能不应继续接入旧 callback；
+  长期应演进为 `chat_stream` / RuntimeEvent iterator，并逐步删除旧 callback。
 - **TUI `conversation_history`**：这是 UI projection/cache，不是 Runtime
   conversation，也不应参与 checkpoint 或状态判断。
 - **tool lifecycle**：当前已有最小 DisplayEvent 覆盖

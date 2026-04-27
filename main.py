@@ -114,10 +114,12 @@ def _forward_runtime_event_to_legacy_callbacks(
 ) -> bool:
     """把 RuntimeEvent 转发给旧 callback，并返回是否产生 assistant streaming。
 
-    这是 main.py 的兼容边界：Textual 主路径已经消费 RuntimeEvent；旧
-    on_output_chunk/on_display_event 只服务未迁移的调用方和测试。这里不能继续扩展
-    成新的输出协议，也不能把 checkpoint、runtime_observer、debug print、
-    conversation.messages 或 Anthropic API messages 混进来。
+    这是 main.py 的 deprecated compatibility bridge：Textual/simple CLI 主路径已经
+    消费 RuntimeEvent；旧 `on_output_chunk` / `on_display_event` 只服务未迁移调用方和
+    回归测试，不能作为新功能入口。这里只做 RuntimeEvent -> old callback 的集中转发，
+    不能继续扩展成新的输出协议，也不能把 checkpoint、runtime_observer、debug print、
+    terminal observer log、conversation.messages、Anthropic API messages、TaskState
+    状态机本体、用户输入边界或用户可见输出边界混在一起。
     """
 
     if event.event_type == EVENT_ASSISTANT_DELTA:
@@ -179,10 +181,11 @@ def _run_chat_for_backend(
         streamed_any_chunk = False
 
         def forward_output_chunk(chunk: str) -> None:
-            """旧 output_chunk callback 的兼容桥。
+            """旧 output_chunk callback 的 deprecated 兼容桥。
 
             Textual 新路径应走 RuntimeEvent；这层只保证尚未迁移的测试或调用方仍能
-            避免 stdout/final return 双写。不要在这里继续新增事件类型或字符串过滤。
+            避免 stdout/final return 双写。不要在这里继续新增事件类型、字符串过滤或
+            新的 UI 输出协议；新代码应传 on_runtime_event。
             """
 
             nonlocal streamed_any_chunk
@@ -195,13 +198,19 @@ def _run_chat_for_backend(
 
             main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
             runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
-            让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event。
+            让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event，
+            simple CLI 也使用 RuntimeEvent renderer。旧 callback 在这里是 deprecated
+            compatibility bridge，不能继续成为新功能入口。
             一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
             兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
             """
 
             nonlocal emitted_runtime_event, streamed_any_chunk
             emitted_runtime_event = True
+            if on_runtime_event is not None:
+                on_runtime_event(event)
+                return
+
             streamed_any_chunk = (
                 _forward_runtime_event_to_legacy_callbacks(
                     event,
@@ -210,10 +219,6 @@ def _run_chat_for_backend(
                 )
                 or streamed_any_chunk
             )
-
-            if on_runtime_event is not None:
-                on_runtime_event(event)
-                return
 
             if on_output_chunk is None and on_display_event is None:
                 rendered = render_runtime_event_for_cli(event)

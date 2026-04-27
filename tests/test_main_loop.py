@@ -155,7 +155,12 @@ def test_chat_single_turn_end_turn(monkeypatch):
 
 
 def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
-    """传入 on_output_chunk 时，模型 delta 应作为用户可见 chunk 回调出去。"""
+    """deprecated on_output_chunk 兼容层仍能接收 assistant delta。
+
+    RuntimeEvent 是新主路径；这个测试只保护旧调用方不被破坏。兼容层不能写
+    checkpoint、runtime_observer、conversation.messages 或 Anthropic API messages，也
+    不能变成新 UI 输出入口。
+    """
 
     final_response = text_response("你好")
 
@@ -219,6 +224,78 @@ def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
     assert len(fake.requests) == 1
 
 
+def test_chat_runtime_event_takes_precedence_over_output_callback(monkeypatch, capsys):
+    """同时传 RuntimeEvent 和旧 output callback 时，只走 RuntimeEvent 主路径。
+
+    这是第六阶段的防重复回归：旧 callback 是 deprecated compatibility bridge；
+    一旦调用方提供 on_runtime_event，assistant.delta 不应再被转发到 on_output_chunk，
+    避免 RuntimeEvent 主路径和旧 callback 双写同一段用户可见输出。
+    """
+
+    final_response = text_response("你好")
+
+    class StreamingFakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __iter__(self):
+            return iter([
+                SimpleNamespace(
+                    type="content_block_delta",
+                    delta=SimpleNamespace(text="你"),
+                ),
+                SimpleNamespace(
+                    type="content_block_delta",
+                    delta=SimpleNamespace(text="好"),
+                ),
+            ])
+
+        def get_final_message(self):
+            return final_response
+
+    class StreamingFakeClient:
+        def __init__(self):
+            self.create_requests = []
+            self.requests = []
+            outer = self
+
+            class _Messages:
+                def create(self, **kwargs):
+                    outer.create_requests.append(kwargs)
+                    return _planner_no_plan_response()
+
+                def stream(self, **kwargs):
+                    outer.requests.append(kwargs)
+                    return StreamingFakeStream()
+
+            self.messages = _Messages()
+
+    fake = StreamingFakeClient()
+    _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    events = []
+    chunks = []
+    reply = chat(
+        "你好",
+        on_runtime_event=events.append,
+        on_output_chunk=chunks.append,
+    )
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert [event.text for event in events if event.event_type == "assistant.delta"] == [
+        "你",
+        "好",
+    ]
+    assert chunks == []
+    assert captured.out == ""
+
+
 def test_plan_confirmation_uses_runtime_event_not_stdout(monkeypatch, capsys):
     """计划确认提示应走 RuntimeEvent，而不是依赖 Textual stdout capture。"""
 
@@ -244,7 +321,11 @@ def test_plan_confirmation_uses_runtime_event_not_stdout(monkeypatch, capsys):
 
 
 def test_chat_tool_confirmation_emits_display_event_with_file_preview(monkeypatch):
-    """write_file 挂起确认时，应发出结构化 DisplayEvent，而不是只靠 stdout。"""
+    """deprecated on_display_event 兼容层仍能接收 DisplayEvent。
+
+    新主路径应使用 RuntimeEvent；这里只保护旧调用方继续收到工具确认 UI 投影，不改变
+    pending_tool、checkpoint、conversation.messages 或 Anthropic tool_result 协议。
+    """
 
     long_content = "第一行\n" + ("0123456789" * 80)
     fake = FakeAnthropicClient(

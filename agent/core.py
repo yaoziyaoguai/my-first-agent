@@ -130,10 +130,11 @@ def chat(
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
-    RuntimeEvent 是新的用户可见输出出口。on_output_chunk / on_display_event 暂时
-    作为兼容桥保留：老调用方仍能收到 assistant delta 和 DisplayEvent，但新输出
-    会先被包装成 RuntimeEvent，再由这里转发。这个桥只迁移 UI projection，不改变
-    checkpoint、runtime_observer、conversation.messages 或 Anthropic API messages。
+    `on_runtime_event` 是 Runtime -> UI 用户可见输出的主路径。`on_output_chunk` 和
+    `on_display_event` 只作为 deprecated compatibility bridge 保留，分别兼容旧调用方
+    接收 assistant delta 和 DisplayEvent；新调用方不应继续把它们当入口。这个函数
+    只迁移 UI projection，不改变 checkpoint、runtime_observer、conversation.messages、
+    Anthropic API messages 或 TaskState 状态机本体。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -165,12 +166,15 @@ def chat(
     runtime_system_prompt = refresh_runtime_system_prompt()
 
     def _emit_runtime_event(event: RuntimeEvent) -> None:
-        """统一投递本轮用户可见输出，并兼容旧 callback。
+        """统一投递本轮用户可见输出，并集中兼容旧 callback。
 
-        这里是第一阶段的临时桥：Runtime 先产生 RuntimeEvent；若调用方已经传入
-        on_runtime_event，就只走新出口。若仍是老接口，则按事件类型转发到
-        on_output_chunk/on_display_event。simple CLI 没有任何 sink 时才在这里打印。
-        这个兼容层不能继续扩大成字符串过滤器，也不能承载 checkpoint/debug 日志。
+        这是 core.py 内 RuntimeEvent 的唯一投递出口：Runtime 内部先生成
+        RuntimeEvent，再由这里决定发给新主路径、deprecated 旧 callback，或无 sink 的
+        simple CLI print fallback。旧 `on_output_chunk` / `on_display_event` 的转发必须
+        保持集中，不能散落到模型流、工具执行或状态处理里；这个兼容层不能继续扩大成
+        新协议，也不能承载 checkpoint、runtime_observer、conversation.messages、
+        Anthropic API messages、TaskState 状态机本体、debug print 或 terminal observer
+        log。
         """
 
         if on_runtime_event is not None:

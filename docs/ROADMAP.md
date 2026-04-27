@@ -81,25 +81,26 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - 第五阶段已进一步降级 stdout capture：Textual 收到 RuntimeEvent 后不再合并同轮
   captured stdout；slash command 有 RuntimeEvent sink 时不再执行 stdout capture，
   只有没有 sink 的旧调用方才保留 print-era fallback。
+- 第六阶段已把旧 callback 明确标记为 deprecated compatibility bridge：
+  `on_runtime_event` 是 Textual + simple CLI 的主输出边界；`on_output_chunk` /
+  `on_display_event` 只在没有 RuntimeEvent sink 的旧调用方路径中保留，避免同一条
+  assistant delta 或 DisplayEvent 同时走新旧双轨。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
 
-1. **Sixth-stage cleanup**：清理旧 `on_output_chunk` / `on_display_event` 兼容层，先
-   标注它们是 deprecated 迁移桥，再逐步降低测试对旧 callback 的依赖；不要把它们
-   当成新功能入口。
+1. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
+   stdout fallback 使用率；session lifecycle、debug/checkpoint/runtime_observer 仍保持
+   在各自边界，不混入 UI event。
 2. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
    `chat_stream` / RuntimeEvent iterator，并逐步移除旧 callback/stdout capture。
    debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
-3. **残留 print-era 输出事件化**：继续把确认为用户可见的 legacy print 迁移为
-   RuntimeEvent；session lifecycle、debug/checkpoint/runtime_observer 仍保持在各自
-   边界，不混入 UI event。
-4. **Input boundary later**：普通 CLI 多行粘贴 / paste burst 属于输入层产品化，之后
+3. **Input boundary later**：普通 CLI 多行粘贴 / paste burst 属于输入层产品化，之后
    单独设计，不和 RuntimeEvent 输出边界混改。
-5. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
+4. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
    类型，先做边界设计，不急着碰复杂 stream abort，也不与 runtime_observer debug
    event 混用。
-6. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
+5. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。
 

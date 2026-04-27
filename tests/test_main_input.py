@@ -394,7 +394,12 @@ def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
 
 
 def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
-    """main bridge 应把 on_output_chunk 透传给 core.chat。"""
+    """deprecated on_output_chunk 兼容层仍可用，但不是 Textual 主路径。
+
+    Textual Shell 新路径只传 on_runtime_event；这个测试只保护旧调用方显式传
+    on_output_chunk 时仍能收到 assistant delta。兼容层不能扩大成新 UI 输出协议，也不
+    写 checkpoint、runtime_observer、conversation.messages 或 Anthropic API messages。
+    """
 
     import main
 
@@ -418,7 +423,11 @@ def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
 
 
 def test_textual_shell_input_handler_forwards_display_events(monkeypatch):
-    """main bridge 应把 DisplayEvent 透传给常驻 TUI，而不是写入 debug/stdout。"""
+    """deprecated on_display_event 兼容层仍可用，但不是 Textual 主路径。
+
+    新 DisplayEvent 应先包装成 RuntimeEvent；这里仅验证旧调用方显式传
+    on_display_event 时仍能收到结构化 UI 投影，不把 debug/stdout 当作主出口。
+    """
 
     import main
     from agent.display_events import DisplayEvent
@@ -603,8 +612,13 @@ def test_textual_stdout_fallback_filters_debug_when_runtime_event_sink_has_no_ev
     ) == "旧路径用户可见文本"
 
 
-def test_runtime_event_still_forwards_legacy_callbacks(monkeypatch):
-    """RuntimeEvent 主出口仍兼容旧 output/display callback，但不要求 stdout 参与。"""
+def test_runtime_event_helper_still_forwards_legacy_callbacks():
+    """RuntimeEvent 可集中转发到 deprecated 旧 callback，且不要求 stdout 参与。
+
+    这是 main.py 的兼容桥回归：RuntimeEvent 仍是唯一输入，旧 output/display callback
+    只作为临时转发目标存在。这里不能引入 checkpoint、runtime_observer、
+    conversation.messages、Anthropic API messages 或新的输出协议。
+    """
 
     import main
     from agent.display_events import DisplayEvent, assistant_delta, runtime_display_event
@@ -617,10 +631,47 @@ def test_runtime_event_still_forwards_legacy_callbacks(monkeypatch):
         body="工具: write_file",
     )
 
+    streamed = main._forward_runtime_event_to_legacy_callbacks(
+        assistant_delta("你"),
+        on_output_chunk=chunks.append,
+        on_display_event=display_events.append,
+    )
+    display_streamed = main._forward_runtime_event_to_legacy_callbacks(
+        runtime_display_event(event),
+        on_output_chunk=chunks.append,
+        on_display_event=display_events.append,
+    )
+
+    assert chunks == ["你"]
+    assert display_events == [event]
+    assert streamed is True
+    assert display_streamed is False
+
+
+def test_textual_runtime_event_does_not_duplicate_into_legacy_callbacks(monkeypatch):
+    """Textual 主路径提供 RuntimeEvent sink 时，不应再触发旧 callback。
+
+    旧 callback 是 deprecated compatibility bridge；如果 on_runtime_event 已经存在，
+    同一条 assistant.delta 或 DisplayEvent 不能再通过 on_output_chunk/on_display_event
+    重复进入 UI。这个测试保护 RuntimeEvent 主路径优先级，不涉及状态机或 API messages。
+    """
+
+    import main
+    from agent.display_events import DisplayEvent, assistant_delta, runtime_display_event
+
+    events = []
+    chunks = []
+    display_events = []
+    display_event = DisplayEvent(
+        event_type="tool.awaiting_confirmation",
+        title="需要确认工具调用",
+        body="工具: write_file",
+    )
+
     def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
-        on_runtime_event(runtime_display_event(event))
+        on_runtime_event(runtime_display_event(display_event))
         return ""
 
     monkeypatch.setattr(main, "chat", fake_chat)
@@ -628,13 +679,17 @@ def test_runtime_event_still_forwards_legacy_callbacks(monkeypatch):
     _reply, latest = main._run_chat_for_backend(
         "写文件",
         backend="textual",
-        on_runtime_event=lambda _event: None,
+        on_runtime_event=events.append,
         on_output_chunk=chunks.append,
         on_display_event=display_events.append,
     )
 
-    assert chunks == ["你"]
-    assert display_events == [event]
+    assert [event.event_type for event in events] == [
+        "assistant.delta",
+        "tool.confirmation_requested",
+    ]
+    assert chunks == []
+    assert display_events == []
     assert latest == ""
 
 

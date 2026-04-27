@@ -934,12 +934,21 @@ def test_textual_shell_ctrl_q_close_does_not_submit_draft():
 
 @pytest.mark.xfail(
     reason=(
-        "当前只实现 output.chunk 流式回调；core/chat 还没有 cancel_token 或模型"
-        "stream abort 机制。生成中 Esc 只能作为后续 generation.cancelled 设计项，"
-        "未来接入 cancel_token 后应转为普通测试。"
-    )
+        "当前 Esc 只属于 Textual 输入编辑边界；core/chat 还没有 cancel_token、"
+        "模型 stream abort 或 generation.cancelled RuntimeEvent。删除条件："
+        "RuntimeEvent 先定义生成生命周期，main/core 能把 cancel_token 传到模型流，"
+        "Textual 再把 Esc 从编辑取消升级为生成取消。"
+    ),
+    strict=True,
 )
 def test_textual_shell_escape_can_cancel_running_generation():
-    """生成阶段 Esc 应停止继续 append chunk，并标记 Assistant 已中断。"""
+    """生成阶段 Esc 应停止继续 append chunk，并标记 Assistant 已中断。
+
+    这是 cancellation 设计债的严格 xfail，不是待补一行代码的 UI bug。当前
+    Textual 的 Esc 只在输入后端边界产生 input.cancelled/清空草稿；生成取消需要
+    RuntimeEvent 输出生命周期、core cancel_token、模型 stream abort 和 main.py
+    adapter 协作。测试不能把 RuntimeEvent、InputIntent、checkpoint、
+    conversation.messages、TaskState 或 simple CLI fallback 混成一个临时补丁。
+    """
 
     raise AssertionError("generation.cancelled 尚未接入 cancel_token")

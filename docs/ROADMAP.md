@@ -136,7 +136,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `slash_command` 优先于 pending_user_input_request、pending_tool 和 plan confirmation，
   因此 slash 可以作为 UI/control 输入打断 pending 状态。是否需要禁止或确认这种打断，
   属于后续产品/架构决策，不能在本阶段通过状态机或 checkpoint 补丁临时处理。
-- generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
+- generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。已将
+  对应 xfail 收紧为 strict 设计标记：删除条件不是“Textual 停止 append chunk”，而是
+  Runtime 先具备 cancel_token、stream abort 和 `generation.cancelled` 用户可见事件。
 
 下一阶段建议优先聚焦两件事：
 
@@ -157,9 +159,11 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
    debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
 5. **Input boundary later**：普通 CLI 多行粘贴 / paste burst 属于输入层产品化，之后
    单独设计，不和 RuntimeEvent 输出边界混改。
-6. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
-   类型，先做边界设计，不急着碰复杂 stream abort，也不与 runtime_observer debug
-   event 混用。
+6. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 设计完整
+   lifecycle：Textual 只发起取消意图，main.py 传递 cancel_token，core/chat 和模型
+   stream 负责 abort，RuntimeEvent 只投影用户可见的取消结果。不能把 Esc 编辑取消、
+   InputIntent、CommandResult、checkpoint、runtime_observer 或 simple CLI fallback
+   混成一个临时补丁。
 7. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。

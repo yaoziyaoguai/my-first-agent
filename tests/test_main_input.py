@@ -416,6 +416,87 @@ def test_textual_shell_input_handler_renders_runtime_events_without_stdout(monke
     assert [event.text for event in seen_events] == ["工具等待确认"]
 
 
+def test_textual_runtime_event_suppresses_duplicate_stdout_completion(monkeypatch):
+    """RuntimeEvent 主路径已投递时，stdout capture 不能再返回同一语义。
+
+    这是 Runtime -> UI 边界的回归保护：新输出已经由 on_runtime_event 进入 Textual，
+    captured stdout 只允许作为没有事件时的旧代码兜底，不能再制造 final reply 覆盖
+    或重复追加。测试不新增字符串过滤，只验证桥接职责收窄。
+    """
+
+    import main
+    from agent.display_events import control_message
+
+    seen_events = []
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(control_message("等待确认"))
+        print("等待确认")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input(
+        "写文件",
+        on_runtime_event=seen_events.append,
+    ) == ""
+    assert [event.text for event in seen_events] == ["等待确认"]
+
+
+def test_textual_runtime_event_sink_keeps_stdout_fallback_when_no_event(monkeypatch):
+    """未迁移旧代码没有发 RuntimeEvent 时，stdout capture 仍作为兜底。"""
+
+    import main
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        print("旧路径用户可见输出")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input(
+        "旧路径",
+        on_runtime_event=lambda _event: None,
+    ) == "旧路径用户可见输出"
+
+
+def test_runtime_event_still_forwards_legacy_callbacks(monkeypatch):
+    """RuntimeEvent 主出口仍兼容旧 output/display callback，但不要求 stdout 参与。"""
+
+    import main
+    from agent.display_events import DisplayEvent, assistant_delta, runtime_display_event
+
+    chunks = []
+    display_events = []
+    event = DisplayEvent(
+        event_type="tool.awaiting_confirmation",
+        title="需要确认工具调用",
+        body="工具: write_file",
+    )
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你"))
+        on_runtime_event(runtime_display_event(event))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    _reply, latest = main._run_chat_for_backend(
+        "写文件",
+        backend="textual",
+        on_runtime_event=lambda _event: None,
+        on_output_chunk=chunks.append,
+        on_display_event=display_events.append,
+    )
+
+    assert chunks == ["你"]
+    assert display_events == [event]
+    assert latest == ""
+
+
 def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
     """Textual slash command 主路径应走 command.result，而不是 stdout capture。"""
 

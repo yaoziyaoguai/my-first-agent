@@ -54,14 +54,15 @@ def _selected_input_backend() -> str:
 def _user_visible_stdout(captured_stdout: str) -> str:
     """从 chat 的 stdout 里提取可给 TUI 展示的轻量用户可见输出。
 
-    这是 textual backend 的过渡桥接：core.chat 普通 assistant 正文当前通过
-    流式 print 输出而不是 return。这里只过滤明显的 debug/checkpoint/runtime
-    观测日志，不解析模型语义，也不保存 checkpoint。
+    这是 textual backend 的过渡桥接：RuntimeEvent 已是主路径，这里只兜住还没
+    迁移的 print-era session/异常/旧调用方输出。这里只过滤明显的
+    debug/checkpoint/runtime 观测日志，不解析模型语义，也不保存 checkpoint。
 
     这不是最终架构。长期应由 RuntimeEvent / DisplayEvent 把“用户可见输出”
     和“内部调试日志”从源头分开，而不是靠 stdout prefix 做后处理。当前保留
     这层，是为了在 print-era Runtime 尚未完全事件化前，保证 checkpoint/debug/
-    runtime observer 日志不会进入 TUI conversation view。
+    runtime observer 日志不会进入 TUI conversation view。不要扩大
+    DEBUG_OUTPUT_PREFIXES；新增用户可见输出应优先发 RuntimeEvent。
     """
 
     lines = []
@@ -88,6 +89,29 @@ def _merge_chat_outputs(reply: str, captured_stdout: str) -> str:
     if reply_text and visible_stdout and reply_text not in visible_stdout:
         return f"{visible_stdout}\n{reply_text}"
     return reply_text or visible_stdout
+
+
+def _forward_runtime_event_to_legacy_callbacks(
+    event: RuntimeEvent,
+    *,
+    on_output_chunk: Callable[[str], None] | None,
+    on_display_event: Callable[[DisplayEvent], None] | None,
+) -> bool:
+    """把 RuntimeEvent 转发给旧 callback，并返回是否产生 assistant streaming。
+
+    这是 main.py 的兼容边界：Textual 主路径已经消费 RuntimeEvent；旧
+    on_output_chunk/on_display_event 只服务未迁移的调用方和测试。这里不能继续扩展
+    成新的输出协议，也不能把 checkpoint、runtime_observer、debug print、
+    conversation.messages 或 Anthropic API messages 混进来。
+    """
+
+    if event.event_type == EVENT_ASSISTANT_DELTA:
+        if on_output_chunk is not None:
+            on_output_chunk(event.text)
+        return True
+    if event.display_event is not None and on_display_event is not None:
+        on_display_event(event.display_event)
+    return False
 
 
 def _run_chat_for_backend(
@@ -133,16 +157,20 @@ def _run_chat_for_backend(
             main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
             runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
             让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event。
+            一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
+            兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
             """
 
             nonlocal emitted_runtime_event, streamed_any_chunk
             emitted_runtime_event = True
-            if event.event_type == EVENT_ASSISTANT_DELTA:
-                streamed_any_chunk = True
-                if on_output_chunk is not None:
-                    on_output_chunk(event.text)
-            elif event.display_event is not None and on_display_event is not None:
-                on_display_event(event.display_event)
+            streamed_any_chunk = (
+                _forward_runtime_event_to_legacy_callbacks(
+                    event,
+                    on_output_chunk=on_output_chunk,
+                    on_display_event=on_display_event,
+                )
+                or streamed_any_chunk
+            )
 
             if on_runtime_event is not None:
                 on_runtime_event(event)
@@ -170,6 +198,12 @@ def _run_chat_for_backend(
                 "".join(runtime_event_outputs),
             )
             return reply, latest_output
+        if emitted_runtime_event and on_runtime_event is not None:
+            # Textual 主路径已经通过 on_runtime_event 实时追加了用户可见内容。这里不再
+            # 合并 captured stdout，避免旧 print-era 文案把同一语义作为 final reply
+            # 再盖到 Assistant 占位上。若本轮完全没有 RuntimeEvent，后面的 stdout
+            # fallback 仍会兜住尚未迁移的 session/异常旧输出。
+            return reply, reply.strip()
         if streamed_any_chunk:
             # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
             # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
@@ -192,8 +226,9 @@ def _handle_textual_shell_input(
     这里是 main.py 的 I/O 桥接层：TUI 不 import Runtime state，也不
     save_checkpoint；main 负责复用现有 slash/chat 流程，再把可展示文本交还给
     conversation view。stdout capture 仍保留，是为了兜住尚未迁移的 print-era
-    session/slash/plan 文案；已经事件化的 assistant.delta、DisplayEvent 和工具
-    lifecycle 不应再依赖这层 capture。
+    session/异常/旧调用方文案；已经事件化的 assistant.delta、plan confirmation、
+    slash command、request_user_input、DisplayEvent 和工具 lifecycle 不应再依赖
+    这层 capture。
     """
 
     text = user_input.strip()

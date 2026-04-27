@@ -118,6 +118,14 @@ Runtime state，也不保存 checkpoint。
   `tool.confirmation_requested` / `tool.result_visible`。
 - 重复工具 id 的幂等跳过提示：`control.message`。
 
+第三阶段进一步收窄了 legacy bridge：
+
+- Textual 主路径一旦收到 RuntimeEvent，就不再把同轮 captured stdout 当 final
+  completion 返回，避免 RuntimeEvent 和旧 print 同时存在时重复渲染。
+- `main.py` 中 RuntimeEvent 到 `on_output_chunk` / `on_display_event` 的转发集中到
+  一个兼容 helper；旧 callback 只服务未迁移调用方，不作为新功能入口。
+- stdout capture 只在“本轮没有 RuntimeEvent”的旧路径兜底，不承接新的交互语义。
+
 ### Current Transitional Bridges / Technical Debt
 
 当前仍有几条刻意保留的过渡桥，后续要逐步收敛：
@@ -126,6 +134,7 @@ Runtime state，也不保存 checkpoint。
   现在只兜住尚未迁移的 print-era session/interruption、少量异常兜底和旧调用方
   文案。assistant delta、plan confirmation、slash command、request_user_input、
   DisplayEvent、`tool.requested` 已开始走 RuntimeEvent，不应再依赖 stdout capture。
+  当 RuntimeEvent 已发出时，stdout 不再作为同轮 Textual completion 返回。
 - **旧 callback**：`on_output_chunk` / `on_display_event` 仍保留给老调用方，但
   `core.chat()` 内部会先生成 RuntimeEvent，再由兼容桥转发。长期应演进为
   `chat_stream` / RuntimeEvent iterator，并逐步删除旧 callback。

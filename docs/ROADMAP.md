@@ -71,6 +71,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - `on_output_chunk` / `on_display_event` callback 是阶段性兼容桥；当前 core 会先
   生成 RuntimeEvent 再转发给旧 callback。长期目标是 `chat_stream` /
   `RuntimeEvent` iterator。
+- 第三阶段已收窄 legacy bridge：Textual 主路径收到 RuntimeEvent 后不再合并同轮
+  stdout capture，避免重复 completion；RuntimeEvent 到旧 callback 的转发集中在
+  main.py 兼容 helper 中。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
@@ -78,6 +81,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 1. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
    `chat_stream` / RuntimeEvent iterator，并逐步移除旧 callback/stdout capture。
    debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
+2. **Fourth-stage cleanup**：把 simple CLI 也完全改成 RuntimeEvent renderer，继续
+   缩小 stdout capture；移除旧 callback 测试依赖；为 cancellation /
+   `generation.cancelled` 预留事件类型，但不与 runtime_observer debug event 混用。
 2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。

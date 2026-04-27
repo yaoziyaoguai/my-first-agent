@@ -472,6 +472,20 @@ def test_request_user_input_pauses_loop_in_normal_step(monkeypatch):
         f"两步 mark 后任务应已收尾，实际 status={state.task.status}"
     )
 
+    # request_user_input 是元工具控制信号：它不写 tool_use 到 messages，所以用户回复后
+    # 也不能为了“补配对”再生成 tool_result。当前语义是 user_replied/step_input，
+    # 不是 Anthropic tool_result；如果未来要改成可配对工具协议，必须单独设计
+    # tool_use_id 配对、checkpoint migration 和 API messages 结构，不能在这里加占位补丁。
+    for msg in state.conversation.messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                assert b.get("tool_use_id") != "ru_1", (
+                    f"request_user_input 回复不应生成 tool_result: {b}"
+                )
+
     # ---- 下一轮上下文里要能看到「问的是什么 / 为什么 / 用户答了什么」 ----
     step_input_seen = False
     for msg in state.conversation.messages:

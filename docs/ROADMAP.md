@@ -85,6 +85,12 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `on_runtime_event` 是 Textual + simple CLI 的主输出边界；`on_output_chunk` /
   `on_display_event` 只在没有 RuntimeEvent sink 的旧调用方路径中保留，避免同一条
   assistant delta 或 DisplayEvent 同时走新旧双轨。
+- 补丁治理阶段已收窄 Textual 旧 callback 入口：`_run_textual_runtime_turn(...)`
+  现在始终用 RuntimeEvent sink 调 `core.chat()`，旧 `on_output_chunk` /
+  `on_display_event` 只由 main.py 的 RuntimeEvent bridge 兼容转发。这个改动解决的是
+  “旧 callback 仍像主入口”的根因，不改变 RuntimeEvent 语义、checkpoint、
+  `conversation.messages`、TaskState 或 Anthropic API messages。stdout capture 仍保留
+  作为 print-era fallback；删除条件是所有用户可见 print 都完成事件化或明确不再投影。
 - TUI-first 架构债务治理已经开始第一刀：Textual 常驻 Shell 被明确为产品主路径，
   simple CLI 降级为 debug/fallback adapter。`main.py` 仍保留 backend dispatch，但
   一轮 Runtime 调用已拆出 `_run_textual_runtime_turn(...)` 和
@@ -111,6 +117,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   request_user_input reply 在 pending 状态下归为 `request_user_reply`，后续仍由
   `core.chat()` / `confirm_handlers.py` 投影成 `user_replied` / `step_input`，不生成
   tool_result placeholder，也不改变 Anthropic API messages。
+- request_user_input 仍需要专项语义决策：当前它是元工具控制信号，tool_use 不进入
+  messages，用户回复也不生成 tool_result，而是写成 step_input 给下一轮模型。如果未来
+  要改成 Anthropic tool_result 语义，必须一起设计 tool_use_id 配对、checkpoint 兼容、
+  API messages migration 和旧会话恢复，不能用 placeholder 补丁临时补齐。
 - pending 状态下 slash command 的当前行为已经按代码固化：`empty` / `exit` /
   `slash_command` 优先于 pending_user_input_request、pending_tool 和 plan confirmation，
   因此 slash 可以作为 UI/control 输入打断 pending 状态。是否需要禁止或确认这种打断，
@@ -119,9 +129,9 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 
 下一阶段建议优先聚焦两件事：
 
-1. **TUI-first adapter cleanup**：继续把 `main.py` 的 Textual 产品路径、simple CLI
-   fallback、slash command 和 session lifecycle 分层；继续扩展 InputIntent 只读分类，
-   但仍不得写入 checkpoint/messages 或混入 RuntimeEvent。
+1. **request_user_input 语义决策**：明确它长期是 `user_replied/step_input` 控制信号，
+   还是要迁移为可配对 tool_result 协议；任何选择都不能破坏 tool_use_id 配对、
+   checkpoint 恢复和 Anthropic API messages。
 2. **Slash command registry 决策**：当前只结构化了 slash metadata 和 `/reload_skills`
    执行入口，尚未建立正式 command registry。后续若新增 `/help` / `/status` /
    `/clear` 等命令，应先设计 registry 和 pending 状态下是否允许打断，而不是继续在

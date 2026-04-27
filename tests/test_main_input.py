@@ -389,9 +389,10 @@ def test_textual_main_loop_captures_printed_chat_output_as_latest_output(monkeyp
         seen_latest_outputs.append(latest_output)
         return events.pop(0)
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
         """模拟 core.chat 普通 end_turn：正文 print，返回空串避免重复打印。"""
 
+        assert on_runtime_event is not None
         print("我是流式测试回复")
         return ""
 
@@ -452,9 +453,10 @@ def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
 
     import main
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
         """模拟 core.chat：正文 print，返回空串。"""
 
+        assert on_runtime_event is not None
         print("我是常驻 TUI 回复")
         return ""
 
@@ -466,19 +468,21 @@ def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
 def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
     """deprecated on_output_chunk 兼容层仍可用，但不是 Textual 主路径。
 
-    Textual Shell 新路径只传 on_runtime_event；这个测试只保护旧调用方显式传
-    on_output_chunk 时仍能收到 assistant delta。兼容层不能扩大成新 UI 输出协议，也不
-    写 checkpoint、runtime_observer、conversation.messages 或 Anthropic API messages。
+    Textual Shell 新路径只传 on_runtime_event 给 core.chat；这个测试保护旧调用方显式
+    传 on_output_chunk 时仍能通过 main.py 的 RuntimeEvent 兼容桥收到 assistant delta。
+    兼容层不能扩大成新 UI 输出协议，也不写 checkpoint、runtime_observer、
+    conversation.messages 或 Anthropic API messages。
     """
 
     import main
+    from agent.display_events import assistant_delta
 
     seen_chunks = []
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
-        assert on_output_chunk is not None
-        on_output_chunk("你")
-        on_output_chunk("好")
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你"))
+        on_runtime_event(assistant_delta("好"))
         return ""
 
     monkeypatch.setattr(main, "chat", fake_chat)
@@ -495,12 +499,13 @@ def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
 def test_textual_shell_input_handler_forwards_display_events(monkeypatch):
     """deprecated on_display_event 兼容层仍可用，但不是 Textual 主路径。
 
-    新 DisplayEvent 应先包装成 RuntimeEvent；这里仅验证旧调用方显式传
-    on_display_event 时仍能收到结构化 UI 投影，不把 debug/stdout 当作主出口。
+    新 DisplayEvent 应先包装成 RuntimeEvent；这里验证旧调用方显式传
+    on_display_event 时，仍通过 main.py 的 RuntimeEvent 兼容桥收到结构化 UI 投影，
+    不把 debug/stdout 当作主出口。
     """
 
     import main
-    from agent.display_events import DisplayEvent
+    from agent.display_events import DisplayEvent, runtime_display_event
 
     seen_events = []
     event = DisplayEvent(
@@ -509,9 +514,9 @@ def test_textual_shell_input_handler_forwards_display_events(monkeypatch):
         body="工具: write_file\n路径: demo.md",
     )
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None, on_display_event=None) -> str:
-        assert on_display_event is not None
-        on_display_event(event)
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(runtime_display_event(event))
         return ""
 
     monkeypatch.setattr(main, "chat", fake_chat)
@@ -942,16 +947,20 @@ def test_textual_shell_unknown_slash_with_runtime_sink_falls_through_without_cap
 
 
 def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):
-    """TUI 输入 y 时，main bridge 只能原样交给 Runtime，不解释确认语义。"""
+    """TUI 输入 y 时，main bridge 只能原样交给 Runtime，不解释确认语义。
+
+    这条同时保护本阶段收窄：Textual runtime turn 调用 core.chat 时只传
+    RuntimeEvent sink，不再把旧 on_output_chunk 当作进入 Runtime 的主入口。
+    """
 
     import main
 
     seen_calls = []
 
-    def fake_chat(user_input: str, *, on_output_chunk=None) -> str:
+    def fake_chat(user_input: str, *, on_runtime_event=None) -> str:
         """记录 main.py 传给 core.chat 的原始文本。"""
 
-        seen_calls.append((user_input, on_output_chunk is not None))
+        seen_calls.append((user_input, on_runtime_event is not None))
         return "继续执行"
 
     monkeypatch.setattr(main, "chat", fake_chat)
@@ -974,10 +983,12 @@ def test_textual_shell_input_handler_drops_stdout_when_chunks_streamed(monkeypat
 
     seen_chunks = []
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
-        assert on_output_chunk is not None
-        on_output_chunk("你")
-        on_output_chunk("好")
+    from agent.display_events import assistant_delta
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你"))
+        on_runtime_event(assistant_delta("好"))
         print("你好")
         return ""
 
@@ -997,9 +1008,10 @@ def test_textual_shell_input_handler_filters_debug_output(monkeypatch):
 
     import main
 
-    def fake_chat(_user_input: str, *, on_output_chunk=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
         """模拟 stdout 混有用户可见文本和内部观测日志。"""
 
+        assert on_runtime_event is not None
         print("[CHECKPOINT] saved (status=running)")
         print("[RUNTIME_EVENT] event_type=assistant_text")
         print("用户可见回复")

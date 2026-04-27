@@ -165,9 +165,11 @@ def _run_textual_runtime_turn(
     """执行一轮 Textual 产品主路径，并返回 latest_output fallback。
 
     这是 TUI-first 第一刀的边界函数：Textual 是正式产品交互路径，必须优先消费
-    RuntimeEvent，而不是把旧 CLI 的 print/stdout 当主语义。这里仍保留
-    stdout capture 和 deprecated callback，是为了兼容未迁移的 print-era 输出与旧测试；
-    它们不能继续扩大，也不能承载 RuntimeEvent 以外的输入协议、checkpoint、
+    RuntimeEvent，而不是把旧 CLI 的 print/stdout 当主语义。本阶段进一步收窄旧
+    callback 补丁：这里总是以 `on_runtime_event` 调用 core.chat，再把事件集中转发给
+    deprecated callback；不再把 `on_output_chunk` / `on_display_event` 直接作为
+    Textual 调 Runtime 的入口。stdout capture 仍保留，是为了兼容未迁移的 print-era
+    输出与旧测试；它不能继续扩大，也不能承载 RuntimeEvent 以外的输入协议、checkpoint、
     runtime_observer、conversation.messages、Anthropic API messages、TaskState 状态机、
     debug print、terminal observer log 或 simple CLI fallback 语义。
 
@@ -181,19 +183,6 @@ def _run_textual_runtime_turn(
     emitted_runtime_event = False
     streamed_any_chunk = False
 
-    def forward_output_chunk(chunk: str) -> None:
-        """旧 output_chunk callback 的 deprecated 兼容桥。
-
-        Textual 新路径应走 RuntimeEvent；这层只保证尚未迁移的测试或调用方仍能
-        避免 stdout/final return 双写。不要在这里继续新增事件类型、字符串过滤或
-        新的 UI 输出协议；新代码应传 on_runtime_event。
-        """
-
-        nonlocal streamed_any_chunk
-        streamed_any_chunk = True
-        if on_output_chunk is not None:
-            on_output_chunk(chunk)
-
     def forward_runtime_event(event: RuntimeEvent) -> None:
         """记录并转发 RuntimeEvent，替代 stdout-era 输出猜测。
 
@@ -202,6 +191,9 @@ def _run_textual_runtime_turn(
         让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event，
         simple CLI 也使用 RuntimeEvent renderer。旧 callback 在这里是 deprecated
         compatibility bridge，不能继续成为新功能入口。
+        本阶段删除了 Textual 直接把旧 callback 传给 core.chat 的分支：core 只看见
+        RuntimeEvent sink，旧 callback 只在 main.py 这一层兼容转发。删除条件是旧
+        callback 调用方和 stdout fallback 都迁移到 RuntimeEvent iterator。
         一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
         兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
         """
@@ -227,16 +219,7 @@ def _run_textual_runtime_turn(
                 runtime_event_outputs.append(rendered)
 
     with contextlib.redirect_stdout(captured):
-        if on_runtime_event is not None:
-            reply = chat(user_input, on_runtime_event=forward_runtime_event)
-        elif on_display_event is None:
-            reply = chat(user_input, on_output_chunk=forward_output_chunk)
-        else:
-            reply = chat(
-                user_input,
-                on_output_chunk=forward_output_chunk,
-                on_display_event=on_display_event,
-            )
+        reply = chat(user_input, on_runtime_event=forward_runtime_event)
     if emitted_runtime_event and runtime_event_outputs:
         latest_output = _merge_chat_outputs(
             reply,

@@ -14,7 +14,10 @@ from typing import Any
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.context_builder import build_planning_messages
 from agent.conversation_events import append_control_event
-from agent.display_events import plan_confirmation_requested
+from agent.display_events import (
+    feedback_intent_requested,
+    plan_confirmation_requested,
+)
 from agent.input_intents import classify_confirmation_response
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
@@ -24,6 +27,30 @@ from agent.transitions import apply_user_replied_transition
 
 
 ContinueFn = Callable[[Any], str]
+StartPlanningFn = Callable[[str, Any], str]
+
+
+# P1 反馈意图三选一固定文案。常量在模块级声明而不是写在 handler 里，方便测试
+# 和 UI adapter 共享同一份选项标签；也避免后续在多处出现"看起来差不多但又微
+# 妙不同"的提示文本。文案不依赖模型、不依赖任何启发式，是 Runtime 的产品契约。
+FEEDBACK_INTENT_QUESTION = (
+    "你刚才的输入既可能是对当前计划的修改意见，也可能是一个新任务，"
+    "请告诉系统怎么处理。"
+)
+FEEDBACK_INTENT_WHY = (
+    "Runtime 不允许在没有明确信号的情况下猜测意图（红线：禁止关键词/启发式/"
+    "LLM 二次分类）。请用 1/2/3 显式选择。"
+)
+FEEDBACK_INTENT_OPTIONS: tuple[str, ...] = (
+    "1. 当作对当前计划的修改意见（在原任务上重新规划）",
+    "2. 切换为新任务（放弃当前计划）",
+    "3. 取消（保持当前计划，不做任何事）",
+)
+# 精确匹配集合：任何不在此集合内的输入都按"模糊"处理，触发 RuntimeEvent 重发。
+# 这是反 heuristic 的硬约束——不接受 "1." / "选 1" / "第一项" 等等价写法，
+# 任何放宽都会让"猜测意图"的边界悄悄回流。如未来 UI 提供按钮，按钮回填的
+# 字面值必须是 "1"/"2"/"3" 之一，而不是新增同义词。
+_FEEDBACK_INTENT_VALID_CHOICES = frozenset({"1", "2", "3"})
 
 
 def _confirmation_response(confirm: str) -> str:
@@ -61,6 +88,12 @@ class ConfirmationContext:
     client: Any
     model_name: str
     continue_fn: ContinueFn
+    # P1 注入：when 用户在 awaiting_feedback_intent 选 [2] 切新任务时，handler
+    # 需要走与正常 chat() 入口完全同构的"reset_task + _run_planning_phase + 后续
+    # 主循环"路径。把这个能力以函数引用的方式注入，避免 confirm_handlers 反向
+    # 依赖 core.chat / _run_planning_phase。函数引用只在内存里传递，不写
+    # checkpoint、不进 messages、不属于 schema。
+    start_planning_fn: StartPlanningFn | None = None
 
 
 def _emit_plan_confirmation(ctx: ConfirmationContext, plan: Any, *, source: str) -> None:
@@ -81,6 +114,49 @@ def _emit_plan_confirmation(ctx: ConfirmationContext, plan: Any, *, source: str)
             metadata={"source": source},
         )
     )
+
+
+def _request_feedback_intent_choice(
+    ctx: ConfirmationContext, confirm: str, *, origin_status: str
+) -> str:
+    """切换到 awaiting_feedback_intent 子状态，等待用户三选一。
+
+    架构边界（与设计稿 §4.2 对齐）：
+    - **不**写 plan_feedback control event：归属未定时 messages 是 append-only，
+      若先写则用户后续选 [2] 切新任务时旧反馈会污染新 planner 上下文，无法撤销。
+    - **不**调 planner：避免无谓 LLM 调用，也防止旧 plan 被新话题污染。
+    - 复用 `pending_user_input_request` 字段（仅通过 `awaiting_kind="feedback_intent"`
+      区分新分流路径），避免新增 task 顶层字段——红线 #4：checkpoint schema
+      顶层字段不变，旧 checkpoint 兼容自然成立。
+    - 通过 `RuntimeEvent` 出口暴露三选一选项，**不**通过 stdout / print /
+      conversation.messages。RuntimeEvent 不进 checkpoint、不进 messages、
+      也不进 Anthropic API messages。
+    """
+
+    state = ctx.state
+    pending = {
+        "awaiting_kind": "feedback_intent",
+        "question": FEEDBACK_INTENT_QUESTION,
+        "why_needed": FEEDBACK_INTENT_WHY,
+        "options": list(FEEDBACK_INTENT_OPTIONS),
+        "context": "",
+        "tool_use_id": "",
+        "step_index": state.task.current_step_index,
+        # 私有内部 key：仅供 handle_feedback_intent_choice 分流读取。
+        # 它们存在于 pending 字典内部，不暴露给 _project_to_api 或 messages，
+        # 也不会被 RuntimeEvent payload 序列化（feedback_intent_requested 只读
+        # options/awaiting_kind/step_index）。
+        "pending_feedback_text": confirm,
+        "origin_status": origin_status,
+    }
+    state.task.pending_user_input_request = pending
+    state.task.status = "awaiting_feedback_intent"
+    save_checkpoint(state, source="confirm_handlers.feedback_intent_request")
+
+    emit = getattr(ctx.turn_state, "on_runtime_event", None)
+    if emit is not None:
+        emit(feedback_intent_requested(pending))
+    return ""
 
 
 def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -104,34 +180,12 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         clear_checkpoint()
         return "好的，已取消。"
 
-    append_control_event(messages, "plan_feedback", {"feedback": confirm})
-
-    # 反馈分支只在本地组装 revised_goal 给 planner，**不再**写回 state.task.user_goal。
-    # 旧实现会把每次反馈拼进 user_goal，导致连续反馈时字符串无限膨胀（plan/step
-    # feedback 单向累加 bug）。架构上 user_goal 应该忠实记录“用户最初提出的任务”，
-    # 反馈只是 planning 的临时上下文；plan 重生成本来就能在 planner 端融合反馈，
-    # 不需要把累积态塞进 task 状态。这样改不动 checkpoint schema，不影响
-    # tool_use_id / tool_result placeholder / request_user_input 语义。
-    revised_goal = f"{state.task.user_goal}\n\n用户对计划的修改意见：{confirm}"
-
-    plan = generate_plan(
-        revised_goal,
-        ctx.client,
-        ctx.model_name,
-        build_planning_messages(state, revised_goal),
+    # P1：feedback 分支不再立刻调 planner，而是切到 awaiting_feedback_intent
+    # 子状态等用户显式三选一。这样 awaiting_plan_confirmation 与
+    # awaiting_step_confirmation 两个入口共用同一条分流（_request_feedback_intent_choice）。
+    return _request_feedback_intent_choice(
+        ctx, confirm, origin_status="awaiting_plan_confirmation"
     )
-    if not plan:
-        state.reset_task()
-        clear_checkpoint()
-        return "未能根据你的修改意见重新生成计划，请重新描述你的需求。"
-
-    state.task.current_plan = plan.model_dump()
-    state.task.current_step_index = 0
-    state.task.status = "awaiting_plan_confirmation"
-    save_checkpoint(state)
-
-    _emit_plan_confirmation(ctx, plan, source="plan_feedback")
-    return ""
 
 
 def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -164,35 +218,103 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         clear_checkpoint()
         return "好的，当前任务已停止。"
 
-    append_control_event(messages, "plan_feedback", {"feedback": confirm})
-
-    # step 反馈分支同样只在本地组装 revised_goal，**不再**写回 state.task.user_goal。
-    # 见 handle_plan_confirmation 中的注释：单向累加会让 user_goal 字符串随反馈
-    # 次数线性膨胀，每次 planning 都被旧反馈污染。fix 的边界：只动 planner 输入
-    # 的临时上下文，state 字段语义保持“用户最初提出的任务”。
-    revised_goal = (
-        f"{state.task.user_goal}\n\n"
-        f"用户在步骤确认阶段的补充意见：{confirm}"
+    # P1：feedback 分支与 plan_confirmation 对称——切到 awaiting_feedback_intent
+    # 子状态等用户三选一。仅在用户明确选 [1] 时才回写 plan_feedback control event
+    # 并调 planner；选 [2] 走 reset_task + _run_planning_phase；选 [3] 完全无副作用。
+    return _request_feedback_intent_choice(
+        ctx, confirm, origin_status="awaiting_step_confirmation"
     )
 
-    plan = generate_plan(
-        revised_goal,
-        ctx.client,
-        ctx.model_name,
-        build_planning_messages(state, revised_goal),
-    )
-    if not plan:
+
+def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> str:
+    """awaiting_feedback_intent 状态下分流用户三选一。
+
+    红线（与 docs/P1_TOPIC_SWITCH_PLAN.md §3 对齐）：
+    - 仅识别精确匹配 "1" / "2" / "3"。任何其他输入（包括"看起来像反馈"的
+      自然语言）只重发同一 RuntimeEvent，绝不通过关键词、字符重叠率、长度阈值
+      或 LLM 二次分类来猜测意图。
+    - "1" = 当作对当前计划的反馈：恢复 origin_status 视角，写一条 plan_feedback
+      control event 到 messages（**这是 messages 唯一的写入时机**），调 planner
+      用本地 revised_goal 重生成 plan。`state.task.user_goal` 保持不变，与
+      hardcore #6 的不膨胀不变量保持一致。
+    - "2" = 切换为新任务：reset_task + clear_checkpoint + start_planning_fn(
+      pending_feedback_text)，与正常 chat() 新任务入口完全同构。新 plan 的
+      user_goal == 新话题原文，不与旧目标拼接。
+    - "3" = 取消：恢复 origin_status，清 pending，**不**写任何 control event，
+      **不**调 planner。完全无副作用。
+    - 模糊输入：状态 / pending / messages 完全不变，仅再次 emit
+      EVENT_FEEDBACK_INTENT_REQUESTED。
+    """
+
+    state = ctx.state
+    pending = state.task.pending_user_input_request or {}
+    choice_raw = (user_input or "").strip()
+
+    if choice_raw not in _FEEDBACK_INTENT_VALID_CHOICES:
+        # 模糊输入：不动状态、不动 pending、不动 messages，只重发提示。
+        # 这是反 heuristic 红线最关键的执行点——任何"看起来像 X"的猜测都会
+        # 在这里被无条件拒绝。
+        emit = getattr(ctx.turn_state, "on_runtime_event", None)
+        if emit is not None:
+            emit(feedback_intent_requested(pending))
+        return ""
+
+    feedback_text = pending.get("pending_feedback_text", "") or ""
+    origin_status = pending.get("origin_status") or "awaiting_plan_confirmation"
+    messages = state.conversation.messages
+
+    if choice_raw == "3":
+        # cancel：复原 origin_status，清 pending，不写 messages，不调 planner。
+        # 这条路径**不能**写 plan_feedback——否则就破坏了"取消 = 完全无副作用"
+        # 的产品语义，并让 messages 残留一条永远无法撤销的反馈记录。
+        state.task.pending_user_input_request = None
+        state.task.status = origin_status
+        save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
+        return ""
+
+    if choice_raw == "1":
+        # as_feedback：恢复 origin 视角后再走原 feedback 路径。
+        state.task.pending_user_input_request = None
+        state.task.status = origin_status
+        # ★ messages 唯一写入时机：分流确认归属为"反馈"之后。
+        append_control_event(messages, "plan_feedback", {"feedback": feedback_text})
+        # 本地 revised_goal 仅用于喂 planner，绝不写回 state.task.user_goal。
+        # 这是 c252795 / hardcore #6 保留的结构化收益：user_goal 忠实记录用户
+        # 最初的任务，反馈只是 planning 的临时上下文。
+        revised_goal = (
+            f"{state.task.user_goal}\n\n"
+            f"用户在确认阶段的补充意见：{feedback_text}"
+        )
+        plan = generate_plan(
+            revised_goal,
+            ctx.client,
+            ctx.model_name,
+            build_planning_messages(state, revised_goal),
+        )
+        if not plan:
+            state.reset_task()
+            clear_checkpoint()
+            return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
+        state.task.current_plan = plan.model_dump()
+        state.task.current_step_index = 0
+        state.task.status = "awaiting_plan_confirmation"
+        save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
+        _emit_plan_confirmation(ctx, plan, source="feedback_intent_choice")
+        return ""
+
+    # choice_raw == "2": as_new_task —— 与正常 chat() 新任务入口完全同构。
+    # reset_task() 把 user_goal/current_plan/pending/log 等全部清掉；clear_checkpoint
+    # 抹掉旧任务持久化痕迹；start_planning_fn 走 _run_planning_phase，由它把
+    # state.task.user_goal 直接赋值为新话题原文（不与旧目标拼接）。
+    if ctx.start_planning_fn is None:
+        # 防御：注入未生效。降级为 reset 让用户重新发起，避免悄悄丢话题。
         state.reset_task()
         clear_checkpoint()
-        return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
+        return "请重新输入你的新任务。"
 
-    state.task.current_plan = plan.model_dump()
-    state.task.current_step_index = 0
-    state.task.status = "awaiting_plan_confirmation"
-    save_checkpoint(state)
-
-    _emit_plan_confirmation(ctx, plan, source="step_feedback")
-    return ""
+    state.reset_task()
+    clear_checkpoint()
+    return ctx.start_planning_fn(feedback_text, ctx.turn_state)
 
 
 def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:

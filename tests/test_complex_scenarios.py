@@ -124,18 +124,23 @@ def test_plan_feedback_cycle_three_rounds_then_accept(monkeypatch):
 
         # 第一次反馈
         chat("我想要更详细一点的分解")
+        # P1：plan 阶段收到模糊反馈 → 切到 awaiting_feedback_intent 等显式三选一。
+        # 用 chat("1") 显式确认为"对当前计划的反馈"，触发重规划。
+        chat("1")
         assert state.task.status == "awaiting_plan_confirmation"
         assert state.task.current_plan["steps"][0]["title"] == "方案B-第一步"
         assert len(state.task.current_plan["steps"]) == 3
 
         # 第二次反馈
         chat("又改主意了，还是两步就行")
+        chat("1")
         assert state.task.status == "awaiting_plan_confirmation"
         assert state.task.current_plan["steps"][0]["title"] == "方案C-步骤1"
         assert len(state.task.current_plan["steps"]) == 2
 
         # 第三次反馈
         chat("换成 edit 类型的")
+        chat("1")
         assert state.task.status == "awaiting_plan_confirmation"
         assert state.task.current_plan["steps"][0]["step_type"] == "edit"
 
@@ -340,6 +345,9 @@ def test_mid_task_user_gives_step_feedback_triggers_replan(monkeypatch):
 
         # 用户给反馈
         chat("我想改一下计划，重新规划")
+        # P1：step 阶段收到模糊反馈 → 切到 awaiting_feedback_intent 等显式三选一。
+        # 用 chat("1") 显式确认为"对当前计划的反馈"，触发重规划。
+        chat("1")
 
         # 应当触发重规划，回到 awaiting_plan_confirmation
         assert state.task.status == "awaiting_plan_confirmation"
@@ -450,8 +458,9 @@ def test_chaotic_user_journey(monkeypatch):
         chat("一个复杂任务，每步确认")
         assert state.task.current_plan["steps"][0]["title"] == "原方案-1"
 
-        # 2. feedback
+        # 2. feedback —— P1 后需要先 chat("1") 显式确认归属为反馈再触发重规划。
         chat("不够好，重做")
+        chat("1")
         assert state.task.current_plan["steps"][0]["title"] == "新方案step1"
 
         # 3. y
@@ -462,8 +471,9 @@ def test_chaotic_user_journey(monkeypatch):
         chat("n")
         assert state.task.status == "awaiting_step_confirmation"
 
-        # 5. step feedback → 重规划
+        # 5. step feedback → 重规划（同样需要 chat("1") 显式确认）
         chat("我想改方案")
+        chat("1")
         assert state.task.status == "awaiting_plan_confirmation"
         assert state.task.current_plan["steps"][0]["title"] == "最终方案-1"
 

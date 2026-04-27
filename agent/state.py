@@ -17,6 +17,12 @@ KNOWN_TASK_STATUSES = {
     "awaiting_step_confirmation",
     "awaiting_user_input",
     "awaiting_tool_confirmation",
+    # P1 新增：plan/step confirmation 收到模糊 free-form 文本后，Runtime 切到这个
+    # 子状态，等用户通过 RuntimeEvent 显式三选一（继续当前任务/切换新任务/取消）。
+    # 这是状态机枚举扩展，不是 schema 破坏：TaskState 顶层字段集合保持不变，
+    # 旧 checkpoint 不带这个 status 仍能正常加载（旧集合是新集合的子集）。
+    # 详见 docs/P1_TOPIC_SWITCH_PLAN.md §4.1。
+    "awaiting_feedback_intent",
     "done",
     "failed",
     "cancelled",
@@ -27,6 +33,10 @@ PLAN_CONFIRMATION_STATUSES = {"awaiting_plan_confirmation"}
 STEP_CONFIRMATION_STATUSES = {"awaiting_step_confirmation"}
 USER_INPUT_WAIT_STATUSES = {"awaiting_user_input"}
 TOOL_CONFIRMATION_STATUSES = {"awaiting_tool_confirmation"}
+# P1 反馈意图等待态：与 USER_INPUT_WAIT_STATUSES 同构——靠 pending_user_input_request
+# 携带原 awaiting status / 待分流文本等恢复信息。本状态不需要 plan 一定存在（用户
+# 可能随时取消），由 task_status_requires_plan 单独判定。
+FEEDBACK_INTENT_WAIT_STATUSES = {"awaiting_feedback_intent"}
 
 
 def is_known_task_status(status: str) -> bool:
@@ -67,6 +77,11 @@ def task_status_requires_plan(task: "TaskState") -> bool:
     if status in PLAN_CONFIRMATION_STATUSES | STEP_CONFIRMATION_STATUSES:
         return True
     if status in USER_INPUT_WAIT_STATUSES:
+        return task.pending_user_input_request is None
+    if status in FEEDBACK_INTENT_WAIT_STATUSES:
+        # 与 awaiting_user_input 同构：pending 携带恢复上下文（待分流文本 +
+        # origin_status），非空时不强制要求 plan；为空属于损坏态，让 core 自愈
+        # reset。这样 P1 不引入新字段，旧 checkpoint 兼容自然成立。
         return task.pending_user_input_request is None
     if status in TOOL_CONFIRMATION_STATUSES:
         return False

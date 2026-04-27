@@ -22,6 +22,11 @@ EVENT_PLAN_CONFIRMATION_REQUESTED = "plan.confirmation_requested"
 EVENT_USER_INPUT_REQUESTED = "user_input.requested"
 EVENT_TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
 EVENT_TOOL_RESULT_VISIBLE = "tool.result_visible"
+# P1：plan/step confirmation 阶段收到模糊文本后，Runtime 通过这条 RuntimeEvent
+# 让用户在三个互斥选项里显式选择。它只是 Runtime → UI 投影，不写 messages、
+# 不写 checkpoint，也不影响 tool_use_id 配对或 Anthropic API messages 投影。
+# 详见 docs/P1_TOPIC_SWITCH_PLAN.md §4.4。
+EVENT_FEEDBACK_INTENT_REQUESTED = "feedback.intent_requested"
 
 
 @dataclass(slots=True, frozen=True)
@@ -171,6 +176,39 @@ def user_input_requested(
     })
     return RuntimeEvent(
         event_type=EVENT_USER_INPUT_REQUESTED,
+        text=_format_user_input_request(pending),
+        metadata=payload,
+    )
+
+
+def feedback_intent_requested(
+    pending: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造"模糊反馈 → 用户三选一"的 UI 投影事件。
+
+    架构边界：
+    - pending_user_input_request 是 TaskState 里的等待事实；本 helper 只把它
+      投影成 UI 文本和结构化 payload，**不**清 pending、**不**推进状态机、
+      **不**写 conversation.messages、**不**生成 Anthropic tool_result。
+    - payload 必须显式暴露 `options=[3 项]`，让 Textual / CLI 都能渲染三选一
+      （例如按钮、菜单或数字提示）。这样 UI adapter 不需要再去解析 text 字段
+      才能拿到选项；同时也是测试可以验证"系统通过可观察出口要求用户做选择"
+      的契约入口。
+    - 不复用 `user_input_requested`：那个 helper 服务于 request_user_input
+      元工具的"执行期求助"语义；本事件服务于"plan/step confirmation 阶段
+      模糊反馈分流"，两者 awaiting_kind 不同、状态机出口不同，UI 渲染策略
+      也可能不同（例如未来 Textual 可以为本事件渲染快捷按钮）。
+    """
+
+    payload = dict(metadata or {})
+    options = pending.get("options") or []
+    payload["options"] = list(options)
+    payload["awaiting_kind"] = pending.get("awaiting_kind")
+    payload["step_index"] = pending.get("step_index")
+    return RuntimeEvent(
+        event_type=EVENT_FEEDBACK_INTENT_REQUESTED,
         text=_format_user_input_request(pending),
         metadata=payload,
     )

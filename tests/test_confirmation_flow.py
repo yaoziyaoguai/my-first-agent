@@ -205,6 +205,9 @@ def test_plan_confirmation_feedback_still_replans(monkeypatch):
     assert state.task.status == "awaiting_plan_confirmation"
 
     reply = chat("请把第二步改成先分析")
+    # P1：plan 阶段模糊反馈 → 切到 awaiting_feedback_intent 等三选一；用 "1"
+    # 显式确认归属为"对当前计划的反馈"，触发重规划。
+    chat("1")
 
     assert reply == ""
     assert state.task.status == "awaiting_plan_confirmation"

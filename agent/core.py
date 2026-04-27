@@ -40,6 +40,7 @@ from agent.confirm_handlers import (
     handle_step_confirmation,
     handle_user_input_step,
     handle_tool_confirmation,
+    handle_feedback_intent_choice,
 )
 
 from agent.response_handlers import (
@@ -221,6 +222,11 @@ def chat(
         continue_fn=lambda ts: _run_main_loop(
             ts,
         ),
+        # P1：注入"切新任务"分流路径——与正常 chat() 新任务入口完全同构。
+        # 把 _run_planning_phase 后续的 awaiting/cancelled/main_loop 处理也封进
+        # 这个 lambda，让 handle_feedback_intent_choice 不需要知道 chat() 的结构。
+        # 函数引用只在内存中传递，不写 checkpoint、不进 messages，不属于 schema。
+        start_planning_fn=lambda inp, ts: _start_planning_for_handler(inp, ts),
     )
 
     # 先处理"等待用户确认计划"的状态：
@@ -238,6 +244,14 @@ def chat(
         and (state.task.current_plan or state.task.pending_user_input_request)
     ):
         return handle_user_input_step(user_input, confirmation_ctx)
+
+    # P1：处理"等待用户对模糊反馈做三选一"的状态。
+    # 这里独立分派而不是塞进 awaiting_user_input 分支，是为了让 status 单字段
+    # 仍然能直观表达"系统正在等什么"，避免再让 handle_user_input_step 内部按
+    # awaiting_kind 分流——那样会让 user_input 路径承担两种语义责任，违反
+    # "一个状态机分支只表达一种等待来源"的边界。
+    if state.task.status == "awaiting_feedback_intent":
+        return handle_feedback_intent_choice(user_input, confirmation_ctx)
 
     # 新增：处理工具确认（state 驱动）
     if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
@@ -350,6 +364,23 @@ def _run_planning_phase(user_input: str, turn_state: TurnState) -> str:
     return "awaiting_plan_confirmation"
 
 
+def _start_planning_for_handler(user_input: str, turn_state: TurnState) -> str:
+    """与 chat() 主分支共用的"启动新任务"出口，供 confirm_handlers 注入。
+
+    P1 中 awaiting_feedback_intent 选 [2] 切新任务时调用。它复制 chat() 在
+    `_run_planning_phase` 后的三种路径处理（cancelled / awaiting_plan_confirmation /
+    继续主循环），保证"用户主动开新任务"和"模糊反馈分流为新任务"走完全相同的
+    后续路径——不会因为入口不同而出现 plan 展示、checkpoint 落盘、主循环触发
+    时机的微妙差异。该函数只做路由，不修改任何 task 字段（`_run_planning_phase`
+    自己负责赋值 user_goal/current_plan）。
+    """
+
+    plan_result = _run_planning_phase(user_input, turn_state)
+    if plan_result == "cancelled":
+        return "好的，已取消。"
+    if plan_result == "awaiting_plan_confirmation":
+        return ""
+    return _run_main_loop(turn_state)
 
 
 # ========== 主循环 ==========

@@ -139,6 +139,13 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。已将
   对应 xfail 收紧为 strict 设计标记：删除条件不是“Textual 停止 append chunk”，而是
   Runtime 先具备 cancel_token、stream abort 和 `generation.cancelled` 用户可见事件。
+- 并行 tool_use / tool_result 顺序债务已收口到模型协议投影层：raw
+  `conversation.messages` 仍是 Runtime append-only 事件流，pending_tool 可能导致
+  placeholder 与真实 result 的落地顺序不同；但 `context_builder._project_to_api(...)`
+  会按 assistant tool_use 声明顺序合并 result，Anthropic API messages 不再按执行完成
+  顺序暴露给模型。旧 xfail 已改为普通回归测试；如果未来想让 raw messages 本身也
+  有序，需要单独设计半开 tool_use queue，而不是改 checkpoint schema 或 placeholder
+  语义。
 
 下一阶段建议优先聚焦两件事：
 
@@ -164,7 +171,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
    stream 负责 abort，RuntimeEvent 只投影用户可见的取消结果。不能把 Esc 编辑取消、
    InputIntent、CommandResult、checkpoint、runtime_observer 或 simple CLI fallback
    混成一个临时补丁。
-7. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
+7. **Raw tool transaction ordering**：API 投影已按 declaration order 稳定输出，但 raw
+   conversation 仍按 Runtime 事件发生顺序追加。如果后续确实需要 raw 层也有序，再设计
+   pending tool transaction queue；这会触及 checkpoint 恢复和半开事务，不应顺手改。
+8. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。
 

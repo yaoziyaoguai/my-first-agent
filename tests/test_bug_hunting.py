@@ -32,22 +32,18 @@ from tests.test_main_loop import (
 # ============================================================
 
 def test_parallel_tool_use_result_order_matches_declaration(monkeypatch):
-    """模型同一轮返回 [T_CONFIRM, T_AUTO]——按声明顺序。
-    理想情况下，messages 里 tool_result 的顺序应当也是 T_CONFIRM 先、T_AUTO 后。
+    """并行 tool_use 遇到 pending 时，API 投影必须按声明顺序输出 result。
 
-    但当前实现会把 T_AUTO 的占位 tool_result **立刻写入**，而 T_CONFIRM 要等
-    用户 y 之后才写真实结果。最终 messages 顺序：
-      [assistant 两个 tool_use] → [T_AUTO placeholder] → [T_CONFIRM real]
-    这和声明顺序相反——对模型而言可能造成语义错位。
+    这里的根因边界很关键：`state.conversation.messages` 是 Runtime append-only
+    事件流，pending_tool 会让后续业务工具的 placeholder 先落地，用户确认后的真实
+    result 后落地。raw 顺序不等于 Anthropic API 协议顺序。
 
-    ⚠️ 当前 xfail：这是已知设计债。修法有两种——
-    (a) 紧跟半开 tool_use 的后续工具延迟处理（改 tool_executor 结构）
-    (b) 承认 API 配对只看 id 不看顺序，保留现状但加强占位文案
-
-    选 (a) 更干净但复杂；选 (b) 更务实。ROADMAP 里标为 Block 1.x。
+    真正的模型协议边界在 `context_builder._project_to_api`：它必须按 assistant
+    tool_use 的声明顺序合并 tool_result，不能按执行完成顺序或 raw append 顺序。
+    这个测试删除旧 xfail，但不引入半开 tool_use queue，不改 checkpoint schema，
+    不改变 tool_use_id 配对或 tool_result placeholder，也不能把 RuntimeEvent、
+    InputIntent、CommandResult、TaskState、Textual/simple CLI 边界混进 messages。
     """
-    pytest.xfail("已知设计债：并行 tool_use 遇 awaiting 时结果顺序与声明顺序相反")
-
     cleanup1 = _register_test_tool("confirm_tool", confirmation="always", result="conf-out")
     cleanup2 = _register_test_tool("auto_tool", confirmation="never", result="auto-out")
     try:
@@ -75,17 +71,37 @@ def test_parallel_tool_use_result_order_matches_declaration(monkeypatch):
         chat("跑两个工具")
         chat("y")   # 确认 T_CONFIRM
 
-        ordered_result_ids = []
+        raw_result_ids = []
         for msg in state.conversation.messages:
             content = msg.get("content")
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
-                        ordered_result_ids.append(block.get("tool_use_id"))
+                        raw_result_ids.append(block.get("tool_use_id"))
+        assert set(raw_result_ids) == {"T_CONFIRM", "T_AUTO"}
 
-        assert ordered_result_ids == ["T_CONFIRM", "T_AUTO"], (
-            f"tool_result 顺序应当和 tool_use 声明顺序一致，"
-            f"实际 {ordered_result_ids}"
+        assert len(fake.requests) == 2, f"期望确认后发起第二次模型请求，实际 {len(fake.requests)}"
+        second_request_messages = fake.requests[1]["messages"]
+        assistant_idx = next(
+            i
+            for i, msg in enumerate(second_request_messages)
+            if msg["role"] == "assistant"
+            and isinstance(msg.get("content"), list)
+            and any(block.get("type") == "tool_use" for block in msg["content"])
+        )
+        merged_user = second_request_messages[assistant_idx + 1]
+        assert merged_user["role"] == "user"
+        assert isinstance(merged_user["content"], list)
+
+        projected_result_ids = [
+            block["tool_use_id"]
+            for block in merged_user["content"]
+            if block.get("type") == "tool_result"
+        ]
+
+        assert projected_result_ids == ["T_CONFIRM", "T_AUTO"], (
+            "Anthropic API messages 中 tool_result 必须按 tool_use 声明顺序投影，"
+            f"不能按 raw append/执行完成顺序；实际 {projected_result_ids}"
         )
     finally:
         cleanup1()

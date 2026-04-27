@@ -658,10 +658,22 @@ user 消息的 content blocks:                    │
 |---|---|---|
 | assistant 消息存成纯文本 | 之前 `extract_text_fn` 把 `tool_use` 块丢了 | `_serialize_assistant_content`（response_handlers.py）保留完整 content blocks |
 | 多个 tool_use 其中一个阻断 | `FORCE_STOP` / `AWAITING_USER` 早退时，剩余 tool_use 没写 tool_result | `_fill_placeholder_results` 给剩余块补占位（**只作用业务工具**，见下文） |
+| 并行 tool_use 遇到 pending，raw result 顺序错位 | `pending_tool` 半开事务会让后续 placeholder 先写、用户确认后的真实 result 后写 | `context_builder._project_to_api(...)` 按 assistant tool_use 声明顺序合并 result；raw conversation 是 Runtime 事件流，不是最终 Anthropic messages |
 | `execute_tool` 抛异常 | tool_use 声明了但没 tool_result | `tool_registry.execute_tool` try/except 把异常转成字符串结果 |
 | 用户拒绝/反馈工具 | tool_use 在 messages 但 tool_result 从没写 | `handle_tool_confirmation` 的 n/feedback 分支补占位 |
 | `compress_history` 切在中间 | 把 tool_use 压进摘要、tool_result 留在 recent | `_find_safe_split_index` 向前回溯切点 |
 | `awaiting_tool_confirmation` 时触发压缩 | 同上更隐蔽 | `core.chat()` 把压缩推迟到 awaiting 分支之后 |
+
+### tool_result 顺序的协议边界
+
+`state.conversation.messages` 是 Runtime append-only 事件流，记录工具确认、placeholder
+和真实 result 的发生顺序；它不承诺与模型同一轮 `tool_use` 声明顺序一致。真正喂给
+模型的是 `context_builder._project_to_api(...)` 的投影结果：该函数先按 id 收集后续
+`tool_result`，再按 assistant content 中 `tool_use` 的声明顺序输出到同一条 user
+message。这个保证解决的是模型协议根因，不是兼容补丁；不能把 RuntimeEvent、
+InputIntent、CommandResult、checkpoint、runtime_observer、TaskState 或 UI adapter
+输出混进这层。若未来要求 raw messages 自身也有序，需要单独设计半开 tool_use queue，
+不能改变现有 tool_use_id 配对或 tool_result placeholder 语义。
 
 ### 例外：元工具**故意打破**配对
 

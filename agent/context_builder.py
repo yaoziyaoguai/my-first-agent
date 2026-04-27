@@ -75,7 +75,7 @@ def _project_to_api(raw_messages: list[dict]) -> list[dict]:
 
     核心算法：
       - 走到 assistant(tool_use) 时，向后扫描收集所有匹配的 tool_result
-      - 合并成一条 user 消息（tool_use 声明顺序）
+      - 合并成一条 user 消息（tool_use 声明顺序，而不是 raw append / 执行完成顺序）
       - 扫描过程中跳过的控制事件（纯文本 user 消息），从 API 视图里**删掉**
         ——它们的语义已经通过 state 转换体现，模型不需要再看一次
       - 扫描收集时，若某个 user 消息里既有 tool_result 也有非 tool_result 块，
@@ -129,7 +129,11 @@ def _project_to_api(raw_messages: list[dict]) -> list[dict]:
                 j += 1
                 continue
 
-            # 有 tool_result——挑出我们需要的
+            # 有 tool_result——挑出我们需要的。这里先按 id 收集到 dict，刻意不沿用
+            # raw messages 里的出现顺序：pending_tool 会让“后续工具 placeholder 先写、
+            # 用户确认后的前序工具真实结果后写”。raw conversation 是 Runtime 事件流，
+            # Anthropic API messages 才是模型协议投影；RuntimeEvent / InputIntent /
+            # CommandResult / checkpoint / TaskState 都不能混到这个排序规则里。
             for b in tr_blocks:
                 tid = b.get("tool_use_id")
                 if tid in tool_use_ids and tid not in results_by_id:
@@ -144,7 +148,11 @@ def _project_to_api(raw_messages: list[dict]) -> list[dict]:
 
             j += 1
 
-        # 组装合并后的 user 消息：tool_result 严格按 tool_use 声明顺序
+        # 组装合并后的 user 消息：tool_result 严格按 tool_use 声明顺序。
+        # 这是本函数解决的根因，不是兼容补丁：即使 raw append-only messages 里
+        # placeholder 和真实结果顺序错位，模型也只看到按声明顺序配对后的协议消息。
+        # 后续若要让 raw messages 本身也有序，需要单独设计半开 tool_use queue；
+        # 不能在这里改变 tool_use_id、placeholder 语义或 checkpoint schema。
         merged_blocks: list[dict] = []
         for tid in tool_use_ids:
             if tid in results_by_id:

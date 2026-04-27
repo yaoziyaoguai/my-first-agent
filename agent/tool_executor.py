@@ -12,6 +12,11 @@ from typing import Any
 
 from agent.checkpoint import save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
+from agent.display_events import (
+    build_tool_awaiting_confirmation_event,
+    build_tool_status_event,
+    emit_display_event,
+)
 from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
@@ -143,10 +148,26 @@ def execute_single_tool(
         }
         state.task.status = "awaiting_tool_confirmation"
         save_checkpoint(state)
-        print(f"\n⚠️ 需要确认执行工具：{tool_name}({tool_input})")
-        print("是否执行？(y/n/输入反馈意见): ", end="", flush=True)
+        # 工具确认是 Runtime 的 control plane 状态；DisplayEvent 只是 UI 投影。
+        # 不把这段预览写进 conversation.messages，避免模型在下一轮把 UI 文案当事实。
+        emit_display_event(
+            turn_state.on_display_event,
+            build_tool_awaiting_confirmation_event(
+                tool_name=tool_name,
+                tool_input=tool_input,
+            ),
+        )
         return AWAITING_USER
 
+    emit_display_event(
+        turn_state.on_display_event,
+        build_tool_status_event(
+            event_type="tool.executing",
+            tool_name=tool_name,
+            tool_input=tool_input,
+            status_text="正在执行。",
+        ),
+    )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
     if failed:
@@ -176,6 +197,15 @@ def execute_single_tool(
 
     turn_context[tool_use_id] = result
     append_tool_result(messages, tool_use_id, result)
+    emit_display_event(
+        turn_state.on_display_event,
+        build_tool_status_event(
+            event_type="tool.failed" if failed else "tool.completed",
+            tool_name=tool_name,
+            tool_input=tool_input,
+            status_text="执行失败。" if failed else "执行完成。",
+        ),
+    )
     save_checkpoint(state)
     return None
 
@@ -189,14 +219,22 @@ def execute_pending_tool(
 ) -> str:
     """用户确认后执行此前挂起的 pending tool。
 
-    这个函数只负责“确认已到达后的执行”，不负责展示确认 UI。当前用户可见提示
-    仍主要依赖 print/stdout；后续应由 ToolLifecycleEvent 表达 awaiting /
-    executing / completed / failed，避免 TUI 解析文本。
+    这个函数只负责“确认已到达后的执行”。确认 UI 已在 pending_tool 生成时通过
+    DisplayEvent 发出；这里补执行中/完成事件，仍不让 TUI 读取 Runtime state。
     """
     tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
     tool_input = pending["input"]
 
+    emit_display_event(
+        turn_state.on_display_event,
+        build_tool_status_event(
+            event_type="tool.executing",
+            tool_name=tool_name,
+            tool_input=tool_input,
+            status_text="用户已确认，正在执行。",
+        ),
+    )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
     if failed:
@@ -225,4 +263,13 @@ def execute_pending_tool(
     })
 
     append_tool_result(messages, tool_use_id, result)
+    emit_display_event(
+        turn_state.on_display_event,
+        build_tool_status_event(
+            event_type="tool.failed" if failed else "tool.completed",
+            tool_name=tool_name,
+            tool_input=tool_input,
+            status_text="执行失败。" if failed else "执行完成。",
+        ),
+    )
     return result

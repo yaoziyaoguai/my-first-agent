@@ -14,6 +14,8 @@ import threading
 
 import pytest
 
+from agent.display_events import assistant_delta, control_message, runtime_display_event
+
 
 def _require_textual():
     """Textual 是可选依赖；未安装时用 xfail 记录当前可观测风险。"""
@@ -150,7 +152,7 @@ def test_textual_shell_headless_smoke_exposes_conversation_and_input_widgets():
 
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda _text, on_output_chunk=None: "ok",
+            chat_handler=lambda _text, on_runtime_event=None: "ok",
             prompt_text="你: ",
         )
 
@@ -189,7 +191,7 @@ def test_textual_shell_submit_shows_user_and_assistant_placeholder_immediately()
         app_cls = _build_textual_shell_app_class()
         call_order = []
 
-        def fake_chat_handler(text: str, on_output_chunk=None) -> str:
+        def fake_chat_handler(text: str, on_runtime_event=None) -> str:
             """记录模型调用发生在 You 消息之后。"""
 
             call_order.append(("chat", list(app.conversation_history)))
@@ -242,7 +244,7 @@ def test_textual_shell_preserves_user_message_when_chat_handler_fails():
     async def run_smoke() -> None:
         """错误提示不能包含 traceback 大段内容。"""
 
-        def failing_handler(_text: str, on_output_chunk=None) -> str:
+        def failing_handler(_text: str, on_runtime_event=None) -> str:
             raise RuntimeError("boom")
 
         app_cls = _build_textual_shell_app_class()
@@ -281,10 +283,10 @@ def test_textual_shell_appends_output_chunks_before_completion():
     async def run_smoke() -> None:
         """只断言最终 chunk 聚合结果，不写脆弱时间依赖。"""
 
-        def streaming_handler(_text: str, on_output_chunk=None) -> str:
-            assert on_output_chunk is not None
-            on_output_chunk("你")
-            on_output_chunk("好")
+        def streaming_handler(_text: str, on_runtime_event=None) -> str:
+            assert on_runtime_event is not None
+            on_runtime_event(assistant_delta("你"))
+            on_runtime_event(assistant_delta("好"))
             return ""
 
         app_cls = _build_textual_shell_app_class()
@@ -318,10 +320,10 @@ def test_textual_shell_streaming_chunks_are_not_duplicated_by_final_reply():
     async def run_smoke() -> None:
         """最终稳定内容应是一次完整回复。"""
 
-        def streaming_handler(_text: str, on_output_chunk=None) -> str:
-            assert on_output_chunk is not None
-            on_output_chunk("你")
-            on_output_chunk("好")
+        def streaming_handler(_text: str, on_runtime_event=None) -> str:
+            assert on_runtime_event is not None
+            on_runtime_event(assistant_delta("你"))
+            on_runtime_event(assistant_delta("好"))
             return "你好"
 
         app_cls = _build_textual_shell_app_class()
@@ -355,10 +357,10 @@ def test_textual_shell_streaming_chunks_with_different_final_reply_stay_single_m
     async def run_smoke() -> None:
         """chunk 聚合内容不能被 final reply 再追加一遍。"""
 
-        def streaming_handler(_text: str, on_output_chunk=None) -> str:
-            assert on_output_chunk is not None
-            on_output_chunk("已经完成")
-            on_output_chunk("方案")
+        def streaming_handler(_text: str, on_runtime_event=None) -> str:
+            assert on_runtime_event is not None
+            on_runtime_event(assistant_delta("已经完成"))
+            on_runtime_event(assistant_delta("方案"))
             return "已经完成方案"
 
         app_cls = _build_textual_shell_app_class()
@@ -396,7 +398,7 @@ def test_textual_shell_non_streaming_reply_replaces_placeholder():
 
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda _text, on_output_chunk=None: "完整回复",
+            chat_handler=lambda _text, on_runtime_event=None: "完整回复",
             prompt_text="你: ",
         )
 
@@ -416,6 +418,81 @@ def test_textual_shell_non_streaming_reply_replaces_placeholder():
     asyncio.run(run_smoke())
 
 
+def test_textual_shell_renders_display_event_as_tool_message():
+    """DisplayEvent 应作为 Tool 消息显示，不混进 Assistant streaming 文本。"""
+
+    _require_textual()
+
+    from agent.display_events import DisplayEvent
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(
+            chat_handler=lambda _text, on_runtime_event=None: "unused",
+            prompt_text="你: ",
+        )
+
+        async with app.run_test():
+            event = DisplayEvent(
+                event_type="tool.awaiting_confirmation",
+                title="需要确认工具调用",
+                body="工具: write_file\n路径: demo.md\n是否执行？",
+            )
+            app.append_display_event(event)
+
+            assert app.conversation_history == [
+                (
+                    "Tool",
+                    "[需要确认工具调用]\n工具: write_file\n路径: demo.md\n是否执行？",
+                )
+            ]
+
+    asyncio.run(run_smoke())
+
+
+def test_textual_shell_renders_runtime_display_and_control_events():
+    """RuntimeEvent 是 Textual 的统一入口，不再靠 display callback 猜接口。"""
+
+    _require_textual()
+
+    from textual.widgets import TextArea
+
+    from agent.display_events import DisplayEvent
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        event = DisplayEvent(
+            event_type="tool.awaiting_confirmation",
+            title="需要确认工具调用",
+            body="工具: write_file\n路径: demo.md",
+        )
+
+        def handler(_text: str, on_runtime_event=None) -> str:
+            assert on_runtime_event is not None
+            on_runtime_event(runtime_display_event(event))
+            on_runtime_event(control_message("等待确认"))
+            return ""
+
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(chat_handler=handler, prompt_text="你: ")
+
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            input_area.load_text("写文件")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+            assert ("Tool", "[需要确认工具调用]\n工具: write_file\n路径: demo.md") in (
+                app.conversation_history
+            )
+            assert ("System", "等待确认") in app.conversation_history
+            assert app.conversation_history[1] == ("Assistant", "[无输出]")
+
+    asyncio.run(run_smoke())
+
+
 def test_textual_shell_redraw_conversation_is_idempotent():
     """重复 redraw 不应让 conversation view 出现重复 transcript。"""
 
@@ -430,7 +507,7 @@ def test_textual_shell_redraw_conversation_is_idempotent():
 
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda _text, on_output_chunk=None: "unused",
+            chat_handler=lambda _text, on_runtime_event=None: "unused",
             prompt_text="你: ",
         )
 
@@ -476,7 +553,7 @@ def test_textual_shell_long_plan_prompt_scrolls_to_confirmation_question():
 
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda _text, on_output_chunk=None: plan_text,
+            chat_handler=lambda _text, on_runtime_event=None: plan_text,
             prompt_text="你: ",
         )
 
@@ -513,7 +590,7 @@ def test_textual_shell_plan_confirmation_prompt_releases_next_submit():
 
         calls = []
 
-        def fake_handler(text: str, on_output_chunk=None) -> str:
+        def fake_handler(text: str, on_runtime_event=None) -> str:
             calls.append(text)
             if len(calls) == 1:
                 return "📋 任务规划...\n按此计划执行吗？(y/n/输入修改意见):"
@@ -563,12 +640,12 @@ def test_textual_shell_streaming_plan_prompt_releases_next_submit():
 
         calls = []
 
-        def fake_handler(text: str, on_output_chunk=None) -> str:
+        def fake_handler(text: str, on_runtime_event=None) -> str:
             calls.append(text)
             if len(calls) == 1:
-                assert on_output_chunk is not None
-                on_output_chunk("📋 任务规划...")
-                on_output_chunk("\n按此计划执行吗？(y/n/输入修改意见):")
+                assert on_runtime_event is not None
+                on_runtime_event(assistant_delta("📋 任务规划..."))
+                on_runtime_event(assistant_delta("\n按此计划执行吗？(y/n/输入修改意见):"))
                 return ""
             return "已确认"
 
@@ -615,12 +692,12 @@ def test_textual_shell_busy_does_not_swallow_confirmation_input():
         calls = []
         first_handler_entered = threading.Event()
 
-        def fake_handler(text: str, on_output_chunk=None) -> str:
+        def fake_handler(text: str, on_runtime_event=None) -> str:
             calls.append(text)
             if len(calls) == 1:
-                assert on_output_chunk is not None
-                on_output_chunk("📋 任务规划...")
-                on_output_chunk("\n按此计划执行吗？(y/n/输入修改意见):")
+                assert on_runtime_event is not None
+                on_runtime_event(assistant_delta("📋 任务规划..."))
+                on_runtime_event(assistant_delta("\n按此计划执行吗？(y/n/输入修改意见):"))
                 first_handler_entered.set()
                 threading.Event().wait(timeout=0.3)
                 return ""
@@ -671,7 +748,7 @@ def test_textual_shell_request_user_input_prompt_releases_next_submit():
 
         calls = []
 
-        def fake_handler(text: str, on_output_chunk=None) -> str:
+        def fake_handler(text: str, on_runtime_event=None) -> str:
             calls.append(text)
             if len(calls) == 1:
                 return "请补充预算、人数、出发城市"
@@ -714,7 +791,7 @@ def test_textual_shell_error_path_releases_next_submit():
 
         calls = []
 
-        def fake_handler(text: str, on_output_chunk=None) -> str:
+        def fake_handler(text: str, on_runtime_event=None) -> str:
             calls.append(text)
             if len(calls) == 1:
                 raise RuntimeError("boom")
@@ -761,7 +838,7 @@ def test_textual_shell_enter_submits_and_modifier_enter_inserts_newline():
         seen_inputs = []
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda text, on_output_chunk=None: (
+            chat_handler=lambda text, on_runtime_event=None: (
                 seen_inputs.append(text) or "assistant"
             ),
             prompt_text="你: ",
@@ -804,7 +881,7 @@ def test_textual_shell_cancel_clears_input_without_submitting():
         seen_inputs = []
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda text, on_output_chunk=None: (
+            chat_handler=lambda text, on_runtime_event=None: (
                 seen_inputs.append(text) or "unused"
             )
         )
@@ -838,7 +915,7 @@ def test_textual_shell_ctrl_q_close_does_not_submit_draft():
         seen_inputs = []
         app_cls = _build_textual_shell_app_class()
         app = app_cls(
-            chat_handler=lambda text, on_output_chunk=None: (
+            chat_handler=lambda text, on_runtime_event=None: (
                 seen_inputs.append(text) or "unused"
             )
         )

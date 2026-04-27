@@ -6,6 +6,13 @@ import time
 from collections.abc import Callable
 
 from agent.core import chat
+from agent.display_events import (
+    EVENT_ASSISTANT_DELTA,
+    EVENT_DISPLAY_EVENT,
+    DisplayEvent,
+    RuntimeEvent,
+    render_runtime_event_for_cli,
+)
 from agent.input_backends.simple import (
     read_user_input_event as read_simple_user_input_event,
     read_user_input_text,
@@ -88,12 +95,14 @@ def _run_chat_for_backend(
     *,
     backend: str,
     on_output_chunk: Callable[[str], None] | None = None,
+    on_display_event: Callable[[DisplayEvent], None] | None = None,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> tuple[str, str]:
     """执行 chat，并返回应打印文本和应进入 latest_output 的文本。
 
     simple backend 保持原有行为：chat 内部流式输出照常打到终端，main 只打印
-    reply。textual backend 若传入 on_output_chunk，会把模型 delta 直接送回
-    TUI；未覆盖到的用户可见 stdout 仍作为过渡兜底。
+    reply。textual backend 优先消费 RuntimeEvent；旧 on_output_chunk/on_display_event
+    仅作为迁移期兼容。
 
     关键边界：streaming chunk 已经进入 TUI 后，final return / stdout capture
     不能再作为第二条 Assistant 正文追加，否则长任务结束时会重复显示最后一条
@@ -102,18 +111,69 @@ def _run_chat_for_backend(
 
     if backend == "textual":
         captured = io.StringIO()
+        runtime_event_outputs: list[str] = []
+        emitted_runtime_event = False
         streamed_any_chunk = False
 
         def forward_output_chunk(chunk: str) -> None:
-            """记录本轮是否已走真 streaming，并继续把 chunk 交给 TUI。"""
+            """旧 output_chunk callback 的兼容桥。
+
+            Textual 新路径应走 RuntimeEvent；这层只保证尚未迁移的测试或调用方仍能
+            避免 stdout/final return 双写。不要在这里继续新增事件类型或字符串过滤。
+            """
 
             nonlocal streamed_any_chunk
             streamed_any_chunk = True
             if on_output_chunk is not None:
                 on_output_chunk(chunk)
 
+        def forward_runtime_event(event: RuntimeEvent) -> None:
+            """记录并转发 RuntimeEvent，替代 stdout-era 输出猜测。
+
+            main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
+            runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
+            让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event。
+            """
+
+            nonlocal emitted_runtime_event, streamed_any_chunk
+            emitted_runtime_event = True
+            if event.event_type == EVENT_ASSISTANT_DELTA:
+                streamed_any_chunk = True
+                if on_output_chunk is not None:
+                    on_output_chunk(event.text)
+            elif (
+                event.event_type == EVENT_DISPLAY_EVENT
+                and event.display_event is not None
+                and on_display_event is not None
+            ):
+                on_display_event(event.display_event)
+
+            if on_runtime_event is not None:
+                on_runtime_event(event)
+                return
+
+            if on_output_chunk is None and on_display_event is None:
+                rendered = render_runtime_event_for_cli(event)
+                if rendered:
+                    runtime_event_outputs.append(rendered)
+
         with contextlib.redirect_stdout(captured):
-            reply = chat(user_input, on_output_chunk=forward_output_chunk)
+            if on_runtime_event is not None:
+                reply = chat(user_input, on_runtime_event=forward_runtime_event)
+            elif on_display_event is None:
+                reply = chat(user_input, on_output_chunk=forward_output_chunk)
+            else:
+                reply = chat(
+                    user_input,
+                    on_output_chunk=forward_output_chunk,
+                    on_display_event=on_display_event,
+                )
+        if emitted_runtime_event and runtime_event_outputs:
+            latest_output = _merge_chat_outputs(
+                reply,
+                "".join(runtime_event_outputs),
+            )
+            return reply, latest_output
         if streamed_any_chunk:
             # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
             # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
@@ -128,13 +188,16 @@ def _run_chat_for_backend(
 def _handle_textual_shell_input(
     user_input: str,
     on_output_chunk: Callable[[str], None] | None = None,
+    on_display_event: Callable[[DisplayEvent], None] | None = None,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> str:
     """处理常驻 Textual Shell 提交的文本，并返回用户可见输出。
 
     这里是 main.py 的 I/O 桥接层：TUI 不 import Runtime state，也不
     save_checkpoint；main 负责复用现有 slash/chat 流程，再把可展示文本交还给
-    conversation view。debug/checkpoint/runtime observer 日志会在 stdout capture
-    后被过滤，避免大段内部日志进入对话区。
+    conversation view。stdout capture 仍保留，是为了兜住尚未迁移的 print-era
+    session/slash/plan 文案；已经事件化的 assistant.delta、DisplayEvent 和工具
+    lifecycle 不应再依赖这层 capture。
     """
 
     text = user_input.strip()
@@ -155,6 +218,8 @@ def _handle_textual_shell_input(
         text,
         backend="textual",
         on_output_chunk=on_output_chunk,
+        on_display_event=on_display_event,
+        on_runtime_event=on_runtime_event,
     )
     return latest_output
 

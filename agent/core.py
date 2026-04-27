@@ -2,6 +2,18 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import anthropic
+from agent.display_events import (
+    EVENT_ASSISTANT_DELTA,
+    EVENT_DISPLAY_EVENT,
+    DisplayEvent,
+    DisplayEventSink,
+    RuntimeEvent,
+    RuntimeEventSink,
+    assistant_delta,
+    render_runtime_event_for_cli,
+    runtime_display_event,
+    tool_requested,
+)
 from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
@@ -79,6 +91,14 @@ class TurnState:
     """
     system_prompt: str
     round_tool_traces: list = field(default_factory=list)
+    # DisplayEvent 是 Runtime 到 UI 的单向投影出口。它不写入 conversation，也不让
+    # tool_executor 反向依赖 TUI；simple backend 没传 sink 时会回退到 stdout。
+    on_display_event: DisplayEventSink | None = None
+    # RuntimeEvent 是本轮 chat 的用户可见输出总线。它只服务 UI projection，
+    # 不能混入 checkpoint、runtime_observer、conversation.messages 或 Anthropic
+    # API messages；这些边界仍由各自模块负责。
+    on_runtime_event: RuntimeEventSink | None = None
+    print_assistant_newline: bool = False
 
 
 def refresh_runtime_system_prompt() -> str:
@@ -104,16 +124,15 @@ def chat(
     user_input: str,
     *,
     on_output_chunk: Callable[[str], None] | None = None,
+    on_display_event: Callable[[DisplayEvent], None] | None = None,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
-    on_output_chunk 是 TUI 这类 I/O adapter 的可选流式出口，只传用户可见的
-    assistant 文本 delta。默认 None 时保持 CLI 旧行为：delta 继续 print 到终端。
-
-    这是当前阶段的 streaming bridge，不是一等事件流。传入 callback 时，模型
-    delta 不能再重复 print 到 stdout；否则 TUI 会同时从 output.chunk 和 stdout
-    capture 收到同一段正文。长期更干净的形态应是 chat_stream / RuntimeEvent
-    iterator，由调用方消费 assistant.delta、tool lifecycle、debug 等不同事件。
+    RuntimeEvent 是新的用户可见输出出口。on_output_chunk / on_display_event 暂时
+    作为兼容桥保留：老调用方仍能收到 assistant delta 和 DisplayEvent，但新输出
+    会先被包装成 RuntimeEvent，再由这里转发。这个桥只迁移 UI projection，不改变
+    checkpoint、runtime_observer、conversation.messages 或 Anthropic API messages。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -144,8 +163,49 @@ def chat(
 
     runtime_system_prompt = refresh_runtime_system_prompt()
 
+    def _emit_runtime_event(event: RuntimeEvent) -> None:
+        """统一投递本轮用户可见输出，并兼容旧 callback。
+
+        这里是第一阶段的临时桥：Runtime 先产生 RuntimeEvent；若调用方已经传入
+        on_runtime_event，就只走新出口。若仍是老接口，则按事件类型转发到
+        on_output_chunk/on_display_event。simple CLI 没有任何 sink 时才在这里打印。
+        这个兼容层不能继续扩大成字符串过滤器，也不能承载 checkpoint/debug 日志。
+        """
+
+        if on_runtime_event is not None:
+            on_runtime_event(event)
+            return
+
+        if event.event_type == EVENT_ASSISTANT_DELTA:
+            if on_output_chunk is not None:
+                on_output_chunk(event.text)
+                return
+            print(render_runtime_event_for_cli(event), end="", flush=True)
+            return
+
+        if event.event_type == EVENT_DISPLAY_EVENT and event.display_event is not None:
+            if on_display_event is not None:
+                on_display_event(event.display_event)
+                return
+            print(f"\n{render_runtime_event_for_cli(event)}", flush=True)
+            return
+
+        rendered = render_runtime_event_for_cli(event)
+        if rendered:
+            print(f"\n{rendered}", flush=True)
+
+    def _emit_display_event(event: DisplayEvent) -> None:
+        """把旧 DisplayEvent sink 收口到 RuntimeEvent，再交给统一投递桥。"""
+
+        _emit_runtime_event(runtime_display_event(event))
+
     turn_state = TurnState(
         system_prompt=runtime_system_prompt,
+        on_display_event=_emit_display_event,
+        on_runtime_event=_emit_runtime_event,
+        print_assistant_newline=(
+            on_runtime_event is None and on_output_chunk is None
+        ),
     )
 
     confirmation_ctx = ConfirmationContext(
@@ -155,7 +215,6 @@ def chat(
         model_name=MODEL_NAME,
         continue_fn=lambda ts: _run_main_loop(
             ts,
-            on_output_chunk=on_output_chunk,
         ),
     )
 
@@ -200,7 +259,7 @@ def chat(
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(turn_state, on_output_chunk=on_output_chunk)
+        return _run_main_loop(turn_state)
 
     # 到这里意味着要开启一轮全新的任务。
     # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
@@ -216,7 +275,7 @@ def chat(
     if plan_result == "awaiting_plan_confirmation":
         return ""
 
-    return _run_main_loop(turn_state, on_output_chunk=on_output_chunk)
+    return _run_main_loop(turn_state)
 
 
 # ========== 规划阶段 ==========
@@ -298,8 +357,6 @@ def _runtime_loop_fields() -> dict:
 
 def _run_main_loop(
     turn_state: TurnState,
-    *,
-    on_output_chunk: Callable[[str], None] | None = None,
 ) -> str:
     """模型调用循环，按 stop_reason 分派处理。"""
     log_runtime_event(
@@ -332,7 +389,7 @@ def _run_main_loop(
             state.reset_task()
             return "对话循环次数过多，请简化任务或分步执行。"
 
-        response = _call_model(turn_state, on_output_chunk=on_output_chunk)
+        response = _call_model(turn_state)
         log_runtime_event(
             "loop.iteration_end",
             event_source="runtime",
@@ -426,13 +483,13 @@ def _run_main_loop(
 
 def _call_model(
     turn_state: TurnState,
-    *,
-    on_output_chunk: Callable[[str], None] | None = None,
 ):
     """调用模型（流式）并返回最终 response。
 
-    模型 SDK 已经给出 content_block_delta。CLI 路径继续 print；TUI 路径传入
-    on_output_chunk 后，delta 直接成为 output.chunk，不混入 debug/checkpoint 日志。
+    模型 SDK 已经给出 content_block_delta。这里不再直接 print/callback，而是先
+    生成 RuntimeEvent；chat() 的兼容桥再决定送给 TUI、旧 callback 还是 simple CLI。
+    这样 assistant.delta 和 tool lifecycle 属于同一条 UI projection 流，仍然不进入
+    checkpoint、conversation.messages、runtime_observer 或 Anthropic API messages。
     """
     # ===== 协议观察：构造 request payload 并打印 =====
     request_messages = build_execution_messages_from_state(state)
@@ -450,21 +507,16 @@ def _call_model(
 
             if event_type == "content_block_start":
                 block_type = getattr(event.content_block, "type", None)
-                if block_type == "tool_use":
-                    # 临时用户可见工具提示：当前仍走 print/stdout。后续 tool
-                    # lifecycle 事件化后，应改为 tool.requested / tool.executing。
-                    print("\n🔧 正在规划工具调用...", flush=True)
+                if block_type == "tool_use" and turn_state.on_runtime_event is not None:
+                    turn_state.on_runtime_event(tool_requested())
 
             elif event_type == "content_block_delta":
                 delta_text = getattr(event.delta, "text", None)
-                if delta_text:
-                    if on_output_chunk is not None:
-                        on_output_chunk(delta_text)
-                    else:
-                        print(delta_text, end="", flush=True)
+                if delta_text and turn_state.on_runtime_event is not None:
+                    turn_state.on_runtime_event(assistant_delta(delta_text))
 
         response = stream.get_final_message()
-        if on_output_chunk is None:
+        if turn_state.print_assistant_newline:
             print()
 
     # ===== 协议观察：打印返回结构 =====

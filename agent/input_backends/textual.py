@@ -19,6 +19,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from agent.display_events import (
+    EVENT_ASSISTANT_DELTA,
+    EVENT_DISPLAY_EVENT,
+    DisplayEvent,
+    RuntimeEvent,
+    render_display_event,
+    render_runtime_event_for_cli,
+)
 from agent.user_input import (
     UserInputEvent,
     build_user_input_envelope,
@@ -288,6 +296,16 @@ def _build_textual_shell_app_class() -> type[Any]:
             self.conversation_history.append((role, clean_text))
             self._redraw_conversation()
 
+        def append_display_event(self, event: DisplayEvent) -> None:
+            """把 Runtime DisplayEvent 投影成单独 UI 消息。
+
+            TUI 不解释 event_type，也不读取 pending_tool；它只渲染 main/core 已经
+            判定为“用户可见”的事件。这样 debug 日志仍被隔离在 observer/logger。
+            """
+
+            role = "Tool" if event.event_type.startswith("tool.") else "System"
+            self.append_message(role, render_display_event(event))
+
         def _input_area(self) -> Any:
             return self.query_one("#input-area", TextArea)
 
@@ -325,8 +343,9 @@ def _build_textual_shell_app_class() -> type[Any]:
         def _append_assistant_chunk(self, message_index: int, chunk: str) -> None:
             """追加一个 output.chunk 到当前 Assistant 消息。
 
-            这是 model-level streaming 的 TUI 接入口。core.chat 通过 callback 把
-            用户可见 delta 传进来；debug/checkpoint 日志不会走这个 callback。
+            这是 assistant.delta 的 TUI 接入口。core.chat 先产生 RuntimeEvent，
+            再由 _append_runtime_event 分发到这里；debug/checkpoint 日志不会走这个
+            用户可见投影通道。
             """
 
             if not chunk:
@@ -342,6 +361,33 @@ def _build_textual_shell_app_class() -> type[Any]:
                 next_text = f"{current_text}{chunk}"
             self.conversation_history[message_index] = ("Assistant", next_text)
             self._redraw_conversation()
+
+        def _append_runtime_event(
+            self,
+            message_index: int,
+            event: RuntimeEvent,
+        ) -> None:
+            """把 RuntimeEvent 投影到 Textual conversation view。
+
+            Textual 只消费 Runtime -> UI 的用户可见事件，不读取 TaskState，不保存
+            checkpoint，也不把事件写回 conversation.messages。assistant.delta 聚合到
+            当前 Assistant 占位；DisplayEvent 作为 Tool/System 消息显示；control 和
+            tool lifecycle 是可见控制文案。runtime_observer 的 debug event、checkpoint
+            日志和 Anthropic API messages 不能混入这里。
+            """
+
+            if event.event_type == EVENT_ASSISTANT_DELTA:
+                self._append_assistant_chunk(message_index, event.text)
+                return
+
+            if event.event_type == EVENT_DISPLAY_EVENT and event.display_event is not None:
+                self.append_display_event(event.display_event)
+                return
+
+            rendered = render_runtime_event_for_cli(event)
+            if rendered:
+                role = "Tool" if event.event_type.startswith("tool.") else "System"
+                self.append_message(role, rendered)
 
         def _complete_assistant_response(
             self,
@@ -387,19 +433,24 @@ def _build_textual_shell_app_class() -> type[Any]:
             You 消息也已经保留。
             """
 
-            def on_output_chunk(chunk: str) -> None:
-                """从 Runtime 线程安全地把模型 delta 投递回 Textual UI。"""
+            def on_runtime_event(event: RuntimeEvent) -> None:
+                """从 Runtime 线程安全地把统一用户可见事件投递回 Textual UI。
+
+                这是第一阶段的新出口；旧 output_chunk/display_event callback 不再由
+                Textual 主动传入，避免继续靠 inspect.signature 猜测 handler 能力。
+                兼容旧 callback 的责任收敛到 main.py / core.chat 的桥接层。
+                """
 
                 self.call_from_thread(
-                    self._append_assistant_chunk,
+                    self._append_runtime_event,
                     message_index,
-                    chunk,
+                    event,
                 )
 
             try:
                 assistant_output = self.chat_handler(
                     raw_text,
-                    on_output_chunk=on_output_chunk,
+                    on_runtime_event=on_runtime_event,
                 )
             except Exception as exc:  # pragma: no cover - 真实终端兜底
                 # traceback 不进入 conversation view，只给用户一个短提示。
@@ -467,7 +518,7 @@ def _build_textual_shell_app_class() -> type[Any]:
 
 def run_textual_io_shell(
     *,
-    chat_handler: Callable[[str], str],
+    chat_handler: Callable[..., str],
     prompt_text: str = "你: ",
 ) -> None:
     """运行常驻 Textual I/O Shell。

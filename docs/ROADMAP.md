@@ -32,47 +32,59 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - `UserInputEvent` / `UserInputEnvelope` 作为输入层边界继续保留。
 - conversation view 支持 `You` / `Assistant` 对话显示。
 - `Enter` 提交，`Shift+Enter` / `Ctrl+Enter` 换行，`F10` 备用提交，`Esc` 清空，`Ctrl+Q` 退出。
-- assistant 输出通过 `on_output_chunk` bridge 进入 TUI conversation view。
+- assistant 输出已先包装成 `RuntimeEvent(assistant.delta)`，再进入 TUI
+  conversation view；`on_output_chunk` 只作为旧调用方兼容桥保留。
 - 长输出自动滚动到底部，用户能看到末尾确认或总结。
 - 已验证可以完成武汉 + 宜昌旅游规划这类长任务。
 - `write_file` 工具确认链路已能走通。
+- 新增最小 DisplayEvent 桥：工具确认、执行中、完成/失败可通过
+  `on_display_event` 投影到 TUI；`write_file` 确认提示会展示工具名、路径和内容
+  preview，用户仍用 raw text 确认。
+- 新增最小 RuntimeEvent 边界：`assistant.delta`、`display.event`、
+  `control.message`、`tool.requested` 可统一从 Runtime 投影到 UI。RuntimeEvent
+  不写 checkpoint，不进入 `conversation.messages`，不是 runtime_observer debug
+  event，也不是 Anthropic API messages。
 - runtime observability 已补充 loop / model / progress / checkpoint 相关事件。
 - 修复 `mark_step_complete` 跨 step 复用 `tool_use_id` 导致的重复输出 / `no_progress` 循环问题。
+- 补充跨任务回归：确认型 pending_tool 完成后，下一条新问题会重新进入 planner，
+  不会被旧 pending 状态吞掉。
 
 当前仍需优化：
 
 - Textual backend 仍在实验分支，默认 backend 仍是 simple。
-- tool lifecycle 可见性仍需优化：
-  - `tool.requested`
-  - `tool.awaiting_confirmation`
-  - `tool.executing`
-  - `tool.completed`
-  - `tool.failed`
-- `write_file` 内容很长时，TUI 应显示 preview，而不是让用户误以为卡住。
+- tool lifecycle 可见性仍需优化，但第一阶段债务已收敛：
+  - 已有：`tool.awaiting_confirmation` / `tool.executing` / `tool.completed` /
+    `tool.failed` 的最小 DisplayEvent 投影。
+  - 已有：`write_file` 长内容 preview，避免 TUI 看起来卡住或让用户看不清写入目标。
+  - 已有：模型开始规划工具调用时的 `tool.requested` 已事件化。
+  - 待做：工具结果摘要、失败详情结构化、统一 RuntimeEvent iterator。
 - checkpoint / runtime observer 已默认收敛为结构化日志；需要 terminal 短日志时
   显式设置 `MY_FIRST_AGENT_DEBUG=1`。仍需继续清理其他 print-era 调试输出。
 - stdout capture 只是从 print-era 到 event-era 的过渡方案，不应长期作为 UI
-  projection 的数据来源。
-- `on_output_chunk` callback 是阶段性 streaming bridge；长期目标是
-  `chat_stream` / `RuntimeEvent` iterator。
+  projection 的数据来源。assistant delta、DisplayEvent 和 `tool.requested` 已开始
+  脱离 stdout，但 session/slash/plan 相关少量系统提示仍未完全事件化。
+- `on_output_chunk` / `on_display_event` callback 是阶段性兼容桥；当前 core 会先
+  生成 RuntimeEvent 再转发给旧 callback。长期目标是 `chat_stream` /
+  `RuntimeEvent` iterator。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
 
-1. **Tool lifecycle visibility**：把工具请求、确认、执行、成功/失败从文本提示
-   升级为结构化显示事件，避免 TUI 解析 stdout。
+1. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
+   `chat_stream` / RuntimeEvent iterator，统一承载 assistant delta、tool lifecycle
+   和用户确认提示。debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
 2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。
 
 当前验证结果：
 
-- `python -m pytest tests/test_input_backends_textual.py tests/test_main_input.py tests/test_main_loop.py -q`
-  - `42 passed, 1 xfailed`
+- `python -m pytest tests/test_input_backends_textual.py tests/test_main_input.py tests/test_main_loop.py tests/test_meta_tool.py tests/test_runtime_observer.py tests/test_runtime_observability.py -q`
+  - `72 passed, 1 xfailed`
 - `python -m ruff check agent/ tests/`
   - `All checks passed`
 - `python -m pytest tests/ -q`
-  - `214 passed, 6 xfailed`
+  - `223 passed, 6 xfailed`
 
 ---
 

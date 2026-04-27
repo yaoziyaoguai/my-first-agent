@@ -180,6 +180,83 @@ def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
     assert len(fake.requests) == 1
 
 
+def test_chat_tool_confirmation_emits_display_event_with_file_preview(monkeypatch):
+    """write_file 挂起确认时，应发出结构化 DisplayEvent，而不是只靠 stdout。"""
+
+    long_content = "第一行\n" + ("0123456789" * 80)
+    fake = FakeAnthropicClient(
+        responses=[
+            _planner_no_plan_response(),
+            tool_use_response(
+                "write_file",
+                {"path": "demo.md", "content": long_content},
+                tool_id="T_WRITE",
+            ),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    events = []
+    reply = chat("写一个文件", on_display_event=events.append)
+
+    assert reply == ""
+    assert state.task.status == "awaiting_tool_confirmation"
+    assert state.task.pending_tool["tool"] == "write_file"
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "tool.awaiting_confirmation"
+    assert event.metadata["tool"] == "write_file"
+    assert event.metadata["path"] == "demo.md"
+    assert event.metadata["content_length"] == len(long_content)
+    assert "工具: write_file" in event.body
+    assert "路径: demo.md" in event.body
+    assert "内容预览" in event.body
+    assert "是否执行？" in event.body
+    assert len(event.metadata["content_preview"]) < len(long_content)
+
+
+def test_new_question_after_confirmed_pending_tool_reenters_planning(monkeypatch):
+    """旧 pending_tool 完成后，新 raw_text 不能被旧等待状态吞掉。"""
+
+    cleanup = _register_test_tool("confirm_tool", confirmation="always", result="done")
+    try:
+        fake = FakeAnthropicClient(
+            responses=[
+                _planner_no_plan_response(),
+                tool_use_response(
+                    "confirm_tool",
+                    {"arg": "x"},
+                    tool_id="T_CONFIRM",
+                ),
+                text_response("工具已完成"),
+                _planner_no_plan_response(),
+                text_response("新问题回答"),
+            ]
+        )
+        state = _reset_core_module(monkeypatch, fake)
+
+        from agent.core import chat
+
+        assert chat("先跑工具") == ""
+        assert state.task.status == "awaiting_tool_confirmation"
+
+        assert chat("y") == ""
+        assert state.task.pending_tool is None
+
+        assert chat("新的问题") == ""
+
+        assert len(fake.create_requests) == 2
+        assert fake.create_requests[-1]["messages"][-1]["content"] == "新的问题"
+        assert any(
+            message.get("role") == "user" and message.get("content") == "新的问题"
+            for message in state.conversation.messages
+        )
+    finally:
+        cleanup()
+
+
 # ---------- 测试 2：一次 tool_use 循环 ----------
 
 def test_chat_tool_use_cycle_completes(monkeypatch):

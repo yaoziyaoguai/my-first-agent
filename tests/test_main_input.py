@@ -334,6 +334,88 @@ def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
     assert result == ""
 
 
+def test_textual_shell_input_handler_forwards_display_events(monkeypatch):
+    """main bridge 应把 DisplayEvent 透传给常驻 TUI，而不是写入 debug/stdout。"""
+
+    import main
+    from agent.display_events import DisplayEvent
+
+    seen_events = []
+    event = DisplayEvent(
+        event_type="tool.awaiting_confirmation",
+        title="需要确认工具调用",
+        body="工具: write_file\n路径: demo.md",
+    )
+
+    def fake_chat(_user_input: str, *, on_output_chunk=None, on_display_event=None) -> str:
+        assert on_display_event is not None
+        on_display_event(event)
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    result = main._handle_textual_shell_input(
+        "写文件",
+        on_display_event=seen_events.append,
+    )
+
+    assert seen_events == [event]
+    assert result == ""
+
+
+def test_textual_shell_input_handler_forwards_runtime_events(monkeypatch):
+    """main bridge 优先用 RuntimeEvent，不再让新输出依赖 stdout capture。"""
+
+    import main
+    from agent.display_events import assistant_delta, control_message
+
+    seen_events = []
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你"))
+        on_runtime_event(assistant_delta("好"))
+        on_runtime_event(control_message("等待确认"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    result = main._handle_textual_shell_input(
+        "你好",
+        on_runtime_event=seen_events.append,
+    )
+
+    assert [event.event_type for event in seen_events] == [
+        "assistant.delta",
+        "assistant.delta",
+        "control.message",
+    ]
+    assert [event.text for event in seen_events] == ["你", "好", "等待确认"]
+    assert result == ""
+
+
+def test_textual_shell_input_handler_renders_runtime_events_without_stdout(monkeypatch):
+    """传入 RuntimeEvent sink 后，新控制文案不需要经过 stdout capture。"""
+
+    import main
+    from agent.display_events import control_message
+
+    seen_events = []
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(control_message("工具等待确认"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input(
+        "写文件",
+        on_runtime_event=seen_events.append,
+    ) == ""
+    assert [event.text for event in seen_events] == ["工具等待确认"]
+
+
 def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):
     """TUI 输入 y 时，main bridge 只能原样交给 Runtime，不解释确认语义。"""
 

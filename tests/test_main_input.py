@@ -527,6 +527,36 @@ def test_textual_runtime_event_suppresses_duplicate_stdout_completion(monkeypatc
     assert [event.text for event in seen_events] == ["等待确认"]
 
 
+def test_textual_runtime_event_ignores_unrelated_captured_stdout(monkeypatch):
+    """RuntimeEvent 主路径已覆盖用户可见输出时，不再合并 captured stdout。
+
+    这是第五阶段 stdout capture 收窄的关键回归：captured stdout 只兜底没有
+    RuntimeEvent 的旧 print-era 路径。只要 RuntimeEvent 已投递到 Textual，main.py
+    就不能把同轮 print 文案当 final completion 再塞回 conversation view；这里不把
+    checkpoint、runtime_observer、conversation.messages、Anthropic API messages 或
+    debug print 混进 UI 输出边界。
+    """
+
+    import main
+    from agent.display_events import control_message
+
+    seen_events = []
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(control_message("RuntimeEvent 主路径"))
+        print("旧 stdout 文案不应进入 Textual latest_output")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input(
+        "触发事件",
+        on_runtime_event=seen_events.append,
+    ) == ""
+    assert [event.text for event in seen_events] == ["RuntimeEvent 主路径"]
+
+
 def test_textual_runtime_event_sink_keeps_stdout_fallback_when_no_event(monkeypatch):
     """未迁移旧代码没有发 RuntimeEvent 时，stdout capture 仍作为兜底。"""
 
@@ -543,6 +573,34 @@ def test_textual_runtime_event_sink_keeps_stdout_fallback_when_no_event(monkeypa
         "旧路径",
         on_runtime_event=lambda _event: None,
     ) == "旧路径用户可见输出"
+
+
+def test_textual_stdout_fallback_filters_debug_when_runtime_event_sink_has_no_event(
+    monkeypatch,
+):
+    """有 RuntimeEvent sink 但本轮无事件时，stdout fallback 仍过滤内部观测日志。
+
+    这是兼容层的边界测试：fallback 只服务旧 print-era 用户可见文案，不能把
+    checkpoint/runtime_observer/debug terminal log 投进 TUI；同时不新增任何字符串前缀
+    规则，只验证既有隔离仍然生效。
+    """
+
+    import main
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        print("[CHECKPOINT] saved (status=running)")
+        print("[RUNTIME_EVENT] event_type=loop.stop")
+        print("[INPUT_RESOLUTION] resolution_kind=test")
+        print("旧路径用户可见文本")
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    assert main._handle_textual_shell_input(
+        "旧路径",
+        on_runtime_event=lambda _event: None,
+    ) == "旧路径用户可见文本"
 
 
 def test_runtime_event_still_forwards_legacy_callbacks(monkeypatch):
@@ -606,6 +664,65 @@ def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
     assert "Skill 已重新加载" in events[0].text
     assert "忽略了重复 skill" in events[0].text
     assert "Skill 已重新加载" not in captured.out
+
+
+def test_textual_shell_slash_command_stdout_fallback_only_without_runtime_sink(
+    monkeypatch,
+    capsys,
+):
+    """slash command 的 stdout capture 只保留给没有 RuntimeEvent sink 的旧路径。
+
+    `/reload_skills` 已有 command.result 主路径；本测试只保护旧调用方仍能看到 print
+    fallback。这里不是新的 command 系统，也不写 checkpoint、conversation.messages
+    或 Anthropic API messages；后续新增 slash command 应优先事件化。
+    """
+
+    import main
+
+    class FakeRegistry:
+        def count(self):
+            return 1
+
+        def get_warnings(self):
+            return []
+
+    monkeypatch.setattr(main, "reload_registry", lambda: FakeRegistry())
+
+    result = main._handle_textual_shell_input("/reload_skills")
+    captured = capsys.readouterr()
+
+    assert "Skill 已重新加载" in result
+    assert "Skill 已重新加载" not in captured.out
+
+
+def test_textual_shell_unknown_slash_with_runtime_sink_falls_through_without_capture(
+    monkeypatch,
+):
+    """未识别 slash 在 RuntimeEvent 主路径下不再走 slash stdout capture。
+
+    这是第五阶段的范围控制：有 RuntimeEvent sink 时，已知 slash command 事件化；
+    未知 slash 保持 raw text 进入 chat，由 Runtime 自己判断。main.py 不靠捕获
+    handle_slash_command 的 print 来猜测交互语义，也不把输入边界问题混进输出边界。
+    """
+
+    import main
+
+    seen_calls = []
+
+    def fake_chat(user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        seen_calls.append(user_input)
+        return "交给 Runtime 处理"
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    result = main._handle_textual_shell_input(
+        "/unknown_command",
+        on_runtime_event=lambda _event: None,
+    )
+
+    assert result == "交给 Runtime 处理"
+    assert seen_calls == ["/unknown_command"]
 
 
 def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):

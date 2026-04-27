@@ -91,6 +91,21 @@ def _merge_chat_outputs(reply: str, captured_stdout: str) -> str:
     return reply_text or visible_stdout
 
 
+def _textual_stdout_fallback_output(reply: str, captured_stdout: str) -> str:
+    """把 Textual 旧 stdout capture 限定为无 RuntimeEvent 时的 fallback。
+
+    这是 Runtime -> UI 输出边界上的临时兼容层：Textual 和 simple CLI 的主路径已经
+    是 RuntimeEvent；这里只兜住还没事件化的 print-era 用户可见文案，例如旧测试
+    fake、历史调用方或少量 session/异常输出。它不能继续扩展成新的输出协议，不能
+    承载 checkpoint、runtime_observer、conversation.messages、Anthropic API messages、
+    TaskState 状态机本体、debug print 或 terminal observer log。删除条件是所有用户
+    可见 Runtime 输出都能从源头发 RuntimeEvent，且旧 print-era 调用方不再需要投影到
+    Textual conversation view。
+    """
+
+    return _merge_chat_outputs(reply, captured_stdout)
+
+
 def _forward_runtime_event_to_legacy_callbacks(
     event: RuntimeEvent,
     *,
@@ -232,7 +247,7 @@ def _run_chat_for_backend(
             # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
             # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
             return reply, reply.strip()
-        latest_output = _merge_chat_outputs(reply, captured.getvalue())
+        latest_output = _textual_stdout_fallback_output(reply, captured.getvalue())
         return reply, latest_output
 
     simple_streamed_any_chunk = False
@@ -297,11 +312,19 @@ def _handle_textual_shell_input(
             handled = handle_slash_command(text, on_runtime_event=on_runtime_event)
             if handled:
                 return ""
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            handled = handle_slash_command(text)
-        if handled:
-            return _user_visible_stdout(captured.getvalue())
+            # 有 RuntimeEvent sink 的 Textual 主路径不再执行 slash stdout capture。
+            # 未识别的 slash 输入应继续交给 chat，当作普通 raw text 由 Runtime 判断；
+            # 这里不把旧 print fallback 扩展成新的 command 协议，也不把 shell/debug
+            # 输出混进 RuntimeEvent、checkpoint、conversation.messages 或 API messages。
+        else:
+            captured = io.StringIO()
+            # 这是 slash command 的旧 print-era fallback：只服务没有 RuntimeEvent sink
+            # 的调用方。已事件化的 command.result 不应再经过 stdout capture，后续新增
+            # slash command 也应优先发 RuntimeEvent，而不是依赖这里抓 print。
+            with contextlib.redirect_stdout(captured):
+                handled = handle_slash_command(text)
+            if handled:
+                return _user_visible_stdout(captured.getvalue())
 
     _reply, latest_output = _run_chat_for_backend(
         text,

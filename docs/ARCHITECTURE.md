@@ -138,6 +138,18 @@ Runtime state，也不保存 checkpoint。
 - `core.chat()` 的无 sink print fallback 仍保留给直接调用 core 的旧路径；新 UI adapter
   应优先传 RuntimeEvent sink。
 
+第五阶段继续把 stdout capture 降级为旧路径 fallback：
+
+- `main.py` 中 Textual 的 `redirect_stdout` 仍保留，但只在本轮没有 RuntimeEvent /
+  streaming callback 输出时读取，用来兜住还没事件化的 print-era 用户可见文案。
+- 已经通过 RuntimeEvent 到达 Textual 的内容不会再从 captured stdout 合并成 final
+  completion，避免一条用户可见语义在 TUI 里显示两次。
+- slash command 有 RuntimeEvent sink 时直接走 `command.result`；只有没有 sink 的旧
+  调用方才会捕获 slash command 的 print fallback。
+- 这个 fallback 不是新的输出协议，不写 checkpoint，不进入 `conversation.messages`，
+  不构造 Anthropic API messages，也不承载 `runtime_observer` / checkpoint / debug
+  terminal 日志。
+
 ### Current Transitional Bridges / Technical Debt
 
 当前仍有几条刻意保留的过渡桥，后续要逐步收敛：
@@ -146,7 +158,9 @@ Runtime state，也不保存 checkpoint。
   现在只兜住尚未迁移的 print-era session/interruption、少量异常兜底和旧调用方
   文案。assistant delta、plan confirmation、slash command、request_user_input、
   DisplayEvent、`tool.requested` 已开始走 RuntimeEvent，不应再依赖 stdout capture。
-  当 RuntimeEvent 已发出时，stdout 不再作为同轮 Textual completion 返回。
+  当 RuntimeEvent 已发出时，stdout 不再作为同轮 Textual completion 返回。当前还不能
+  完全删除它，因为旧 fake/旧调用方和少量未事件化 print 仍需要在 Textual 中可见；
+  删除条件是这些用户可见 print 都迁移为 RuntimeEvent 或明确不再投影到 TUI。
 - **simple CLI renderer**：simple backend 已用 RuntimeEvent sink 作为主输出路径，
   renderer 只做终端投影。它不是 checkpoint、不是 runtime_observer、不是
   `conversation.messages`，也不是 Anthropic API messages；它只负责把用户可见事件

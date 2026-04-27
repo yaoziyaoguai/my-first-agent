@@ -49,8 +49,9 @@ def parse_slash_command(text: str) -> dict[str, Any]:
     slash command 是 UI Adapter -> Runtime 的控制输入，不是用户给模型的自然语言
     消息。这个 helper 只做字符串解析，不执行命令，不写 checkpoint，不写
     conversation.messages，不触发 RuntimeEvent，也不读取或修改 TaskState。它解决的是
-    main.py 和测试里反复 `startswith("/")` / `split()` 的散落判断；真正命令执行仍在
-    command handler，且不能扩展成复杂 command registry。
+    main.py 和测试里反复 `startswith("/")` / `split()` 的散落判断；真正命令执行在
+    CommandRegistry，且不能反向把 CommandResult、checkpoint 或用户可见输出混进
+    输入分类层。
     """
 
     normalized = text.strip()

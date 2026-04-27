@@ -32,8 +32,8 @@ def test_classifies_normal_message():
 def test_classifies_slash_commands_without_writing_runtime_state():
     """slash command 是 UI adapter 控制输入，不应写 messages/checkpoint。
 
-    本测试只验证分类；真正命令执行仍在 main.handle_slash_command。InputIntent
-    不能进入 conversation.messages，也不能变成 RuntimeEvent 或 command registry。
+    本测试只验证分类；真正命令执行在 CommandRegistry/main adapter。InputIntent
+    不能进入 conversation.messages，也不能变成 RuntimeEvent 或 CommandResult。
     """
 
     from agent.input_intents import classify_user_input
@@ -62,11 +62,11 @@ def test_classifies_slash_commands_without_writing_runtime_state():
 
 
 def test_slash_command_metadata_covers_known_unknown_and_exit_inputs():
-    """slash metadata 只服务 adapter 控制输入，不成为 command registry。
+    """slash metadata 只服务 adapter 控制输入，不执行 command。
 
     `/exit` 当前先归类为 exit，说明退出是 shell 控制输入；其它 slash command 只
     解析名称和参数，不写 checkpoint/messages，不触发 RuntimeEvent，也不替代
-    main.py 的 command handler。
+    CommandRegistry 的执行结果。
     """
 
     from agent.input_intents import classify_user_input

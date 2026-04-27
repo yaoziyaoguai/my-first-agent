@@ -218,6 +218,46 @@ def test_main_loop_passes_latest_reply_to_next_input_event(monkeypatch):
     assert seen_latest_outputs == ["", "我是一个测试回复"]
 
 
+def test_main_loop_simple_cli_uses_command_registry_for_help(monkeypatch, capsys):
+    """simple CLI fallback 和 Textual 共用同一个 command 执行层。
+
+    simple CLI 没有 Textual 的 RuntimeEvent sink，所以 main.py 会把 CommandResult
+    投影成 command.result 后再渲染到终端。这里不能让 `/help` 进入 chat，也不能写
+    checkpoint/messages；它只是 debug/fallback adapter 的输出方式不同。
+    """
+
+    import main
+
+    events = [
+        submitted_input_event(
+            build_user_input_envelope("/help", source="cli"),
+            source="simple",
+            channel="test",
+        ),
+        closed_input_event(source="simple", channel="test"),
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "read_user_input_event",
+        lambda **_kwargs: events.pop(0),
+    )
+    monkeypatch.setattr(
+        main,
+        "chat",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("/help 不应进入 chat")
+        ),
+    )
+    monkeypatch.setattr(main, "finalize_session", lambda: None)
+
+    main.main_loop()
+
+    out = capsys.readouterr().out
+    assert "可用命令" in out
+    assert "/help" in out
+
+
 def test_simple_backend_passes_runtime_event_sink_to_chat(monkeypatch, capsys):
     """simple CLI 应消费 RuntimeEvent，而不是依赖 core.py 无 sink print fallback。
 
@@ -773,7 +813,7 @@ def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
 
     这是 adapter 控制输入，不是模型 user message；识别后不应进入 chat，也不写
     conversation.messages/checkpoint。InputIntent metadata 只把 command_name/args
-    传给 handler，不能变成 RuntimeEvent 输入或复杂 command registry。
+    传给 CommandRegistry，不能变成 RuntimeEvent 输入或复杂插件系统。
     """
 
     import main
@@ -824,12 +864,13 @@ def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
     assert checkpoint_calls == {"save": 0}
 
 
-def test_handle_slash_command_respects_intent_command_args(monkeypatch, capsys):
-    """command handler 消费 InputIntent metadata，不重新猜 `/reload_skills extra`。
+def test_handle_slash_command_rejects_invalid_args_without_reparsing(monkeypatch, capsys):
+    """command handler 消费 InputIntent metadata，并结构化拒绝非法参数。
 
-    `/reload_skills` 当前只支持无参数形式；带参数的 slash command 应保持未处理，
-    继续由 adapter 决定是否交给 Runtime。这里保留旧解析 fallback，但新路径不能把
-    handler 扩展成 command registry，也不能写 messages/checkpoint。
+    `/reload_skills` 当前只支持无参数形式；带参数的 slash command 应由
+    CommandRegistry 消费成 control error，不能继续掉入 chat/model。这里保留旧解析
+    fallback，但新路径不能写 messages/checkpoint，不能混入 RuntimeEvent 输入或
+    tool_result placeholder。
     """
 
     import main
@@ -848,8 +889,50 @@ def test_handle_slash_command_respects_intent_command_args(monkeypatch, capsys):
         command_args="extra",
     )
 
-    assert handled is False
-    assert capsys.readouterr().out == ""
+    assert handled is True
+    out = capsys.readouterr().out
+    assert "/reload_skills 不接受参数" in out
+
+
+def test_textual_shell_help_status_and_clear_use_command_registry(monkeypatch):
+    """Textual 产品路径通过 CommandRegistry 输出 command.result。
+
+    这是 RuntimeEvent/InputIntent/CommandResult 三层边界测试：command 不进入
+    conversation.messages，不写 checkpoint，不调用 chat；`/clear` 只暴露 UI 清屏信号，
+    不 reset Runtime state。
+    """
+
+    import main
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_user_input"
+    state.task.pending_user_input_request = {"question": "预算是多少？"}
+    state.conversation.messages.append({"role": "user", "content": "历史仍保留"})
+
+    monkeypatch.setattr(main, "get_state", lambda: state)
+    monkeypatch.setattr(
+        main,
+        "chat",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("slash command 不应进入 chat")
+        ),
+    )
+
+    events = []
+    for command in ("/help", "/status", "/clear"):
+        assert main._handle_textual_shell_input(command, on_runtime_event=events.append) == ""
+
+    assert [event.event_type for event in events] == [
+        "command.result",
+        "command.result",
+        "command.result",
+    ]
+    assert "/help" in events[0].text
+    assert "awaiting_user_input" in events[1].text
+    assert "预算是多少？" in events[1].text
+    assert events[2].metadata["should_clear"] is True
+    assert state.conversation.messages == [{"role": "user", "content": "历史仍保留"}]
 
 
 def test_textual_request_user_reply_is_forwarded_to_runtime(monkeypatch):
@@ -893,9 +976,9 @@ def test_textual_shell_slash_command_stdout_fallback_only_without_runtime_sink(
 ):
     """slash command 的 stdout capture 只保留给没有 RuntimeEvent sink 的旧路径。
 
-    `/reload_skills` 已有 command.result 主路径；本测试只保护旧调用方仍能看到 print
-    fallback。这里不是新的 command 系统，也不写 checkpoint、conversation.messages
-    或 Anthropic API messages；后续新增 slash command 应优先事件化。
+    CommandRegistry 已有 command.result 主路径；本测试只保护旧调用方仍能看到
+    print fallback。这里不写 checkpoint、conversation.messages 或 Anthropic API
+    messages；后续新增 slash command 应优先事件化。
     """
 
     import main
@@ -916,34 +999,66 @@ def test_textual_shell_slash_command_stdout_fallback_only_without_runtime_sink(
     assert "Skill 已重新加载" not in captured.out
 
 
-def test_textual_shell_unknown_slash_with_runtime_sink_falls_through_without_capture(
+def test_textual_shell_unknown_slash_with_runtime_sink_returns_command_error(
     monkeypatch,
 ):
-    """未识别 slash 在 RuntimeEvent 主路径下不再走 slash stdout capture。
+    """未知 slash command 由 CommandRegistry 消费，不再落入模型消息。
 
-    这是第五阶段的范围控制：有 RuntimeEvent sink 时，已知 slash command 事件化；
-    未知 slash 保持 raw text 进入 chat，由 Runtime 自己判断。main.py 不靠捕获
-    handle_slash_command 的 print 来猜测交互语义，也不把输入边界问题混进输出边界。
+    这是 command 结构化后的边界：未知 command 仍是 UI/control 输入，不是用户给模型
+    的 normal message；输出走 command.result RuntimeEvent，不写 checkpoint/messages。
     """
 
     import main
 
-    seen_calls = []
-
     def fake_chat(user_input: str, *, on_runtime_event=None) -> str:
-        assert on_runtime_event is not None
-        seen_calls.append(user_input)
-        return "交给 Runtime 处理"
+        raise AssertionError(f"未知 command 不应进入 chat: {user_input}")
 
     monkeypatch.setattr(main, "chat", fake_chat)
 
+    events = []
     result = main._handle_textual_shell_input(
         "/unknown_command",
-        on_runtime_event=lambda _event: None,
+        on_runtime_event=events.append,
     )
 
-    assert result == "交给 Runtime 处理"
-    assert seen_calls == ["/unknown_command"]
+    assert result == ""
+    assert [event.event_type for event in events] == ["command.result"]
+    assert "未知命令 /unknown_command" in events[0].text
+
+
+def test_pending_user_input_help_command_interrupts_current_pending(monkeypatch):
+    """pending 状态下 slash command 当前允许打断业务等待。
+
+    这里固化的是现有产品语义：InputIntent 在 pending_user_input_request 前先识别
+    slash/control 输入，CommandRegistry 消费 `/help`，不会把它当 request_user_reply，
+    也不会写 conversation.messages/checkpoint。若未来要禁止这种打断，需要单独产品
+    决策，不能在 command handler 里偷偷读取 pending 状态改行为。
+    """
+
+    import main
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_user_input"
+    state.task.pending_user_input_request = {"question": "预算是多少？"}
+    before_messages = list(state.conversation.messages)
+    monkeypatch.setattr(main, "get_state", lambda: state)
+    monkeypatch.setattr(
+        main,
+        "chat",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("/help 不应作为 request_user_reply 进入 chat")
+        ),
+    )
+
+    events = []
+    result = main._handle_textual_shell_input("/help", on_runtime_event=events.append)
+
+    assert result == ""
+    assert [event.event_type for event in events] == ["command.result"]
+    assert "/help" in events[0].text
+    assert state.task.pending_user_input_request == {"question": "预算是多少？"}
+    assert state.conversation.messages == before_messages
 
 
 def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatch):

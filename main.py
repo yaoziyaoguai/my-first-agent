@@ -5,6 +5,11 @@ import os
 import time
 from collections.abc import Callable
 
+from agent.commands import (
+    CommandContext,
+    CommandResult,
+    DEFAULT_COMMAND_REGISTRY,
+)
 from agent.core import chat, get_state
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
@@ -345,31 +350,27 @@ def _handle_textual_shell_input(
 
     if intent.kind == "slash_command":
         if on_runtime_event is not None:
-            handled = handle_slash_command(
+            handle_slash_command(
                 text,
                 command_name=intent.metadata.get("command_name"),
                 command_args=intent.metadata.get("command_args", ""),
                 on_runtime_event=on_runtime_event,
             )
-            if handled:
-                return ""
-            # 有 RuntimeEvent sink 的 Textual 主路径不再执行 slash stdout capture。
-            # 未识别的 slash 输入应继续交给 chat，当作普通 raw text 由 Runtime 判断；
-            # 这里不把旧 print fallback 扩展成新的 command 协议，也不把 shell/debug
-            # 输出混进 RuntimeEvent、checkpoint、conversation.messages 或 API messages。
-        else:
-            captured = io.StringIO()
-            # 这是 slash command 的旧 print-era fallback：只服务没有 RuntimeEvent sink
-            # 的调用方。已事件化的 command.result 不应再经过 stdout capture，后续新增
-            # slash command 也应优先发 RuntimeEvent，而不是依赖这里抓 print。
-            with contextlib.redirect_stdout(captured):
-                handled = handle_slash_command(
-                    text,
-                    command_name=intent.metadata.get("command_name"),
-                    command_args=intent.metadata.get("command_args", ""),
-                )
-            if handled:
-                return _user_visible_stdout(captured.getvalue())
+            return ""
+
+        # 这是 slash command 的旧 print-era fallback：只服务没有 RuntimeEvent sink
+        # 的调用方。CommandRegistry 已经集中消费未知 command，避免 `/unknown` 再落入
+        # 模型消息；但输出仍不能扩大成新协议，也不能写 checkpoint/messages。
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            handle_slash_command(
+                text,
+                command_name=intent.metadata.get("command_name"),
+                command_args=intent.metadata.get("command_args", ""),
+            )
+        if captured.getvalue():
+            return _user_visible_stdout(captured.getvalue())
+        return ""
 
     _reply, latest_output = _run_chat_for_backend(
         text,
@@ -404,16 +405,15 @@ def handle_slash_command(
 ) -> bool:
     """处理 / 开头的本地系统命令。
 
-    slash command 是 main.py 的 I/O 控制命令，不是模型消息，不写
-    conversation.messages，也不影响 checkpoint。新 Textual 路径通过
-    command.result RuntimeEvent 展示结果；没有 sink 的 simple CLI 仍打印。stdout
-    capture 只作为旧调用方兜底，不能继续扩展成新的输出协议。
+    这里是 main.py 接入 CommandRegistry 的 adapter 边界：InputIntent 已经解析出
+    command_name/command_args，CommandRegistry 负责本地控制语义，main.py 只把
+    CommandResult 投影成 RuntimeEvent 或 simple CLI print。CommandResult 不是
+    RuntimeEvent，也不是 InputIntent；它不能写 checkpoint、conversation.messages、
+    Anthropic API messages、TaskState、tool_use_id 配对或 tool_result placeholder。
 
     新 adapter 路径会把 InputIntent 解析出的 command_name/command_args 传进来，
     避免 command handler 继续猜测输入 kind。这里保留 user_input 解析 fallback 是为了
-    兼容旧测试/旧调用方；这个兼容层不能扩大成 command registry，也不能混入
-    RuntimeEvent 输入、checkpoint、conversation.messages、Anthropic API messages、
-    TaskState、tool_use_id 配对或 tool_result placeholder。
+    兼容旧测试/旧调用方；兼容层只能解析 metadata，不能再新增散落 command 分支。
     """
     cmd = user_input.strip()
     if command_name is None:
@@ -421,18 +421,48 @@ def handle_slash_command(
         command_name = parsed["command_name"]
         command_args = parsed["command_args"]
 
-    if command_name == "reload_skills" and not command_args:
-        registry = reload_registry()
-        lines = [f"[系统] Skill 已重新加载，当前 {registry.count()} 个可用"]
-        lines.extend(f"  {warning}" for warning in registry.get_warnings())
-        event = command_result("\n".join(lines), command=cmd)
-        if on_runtime_event is not None:
-            on_runtime_event(event)
-        else:
-            print(f"\n{render_runtime_event_for_cli(event)}")
-        return True
+    result = DEFAULT_COMMAND_REGISTRY.execute(
+        command_name or "",
+        command_args,
+        context=CommandContext(
+            state=get_state(),
+            reload_registry=reload_registry,
+        ),
+    )
+    _emit_command_result(cmd, result, on_runtime_event=on_runtime_event)
+    return result.handled
 
-    return False
+
+def _emit_command_result(
+    raw_command: str,
+    result: CommandResult,
+    *,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
+) -> None:
+    """把 CommandResult 投影到用户可见输出边界。
+
+    CommandRegistry 不直接构造 RuntimeEvent，是为了保持三层边界清楚：
+    InputIntent 负责输入分类，CommandResult 表达本地 command 控制语义，RuntimeEvent
+    才是 Runtime/UI 输出边界。这里不写 checkpoint/messages，不读取 TaskState 推进
+    逻辑，也不把 command metadata 混进 Anthropic API messages。无 RuntimeEvent sink
+    时保留 simple CLI print fallback；删除条件是所有 CLI 调用方都消费事件流。
+    """
+
+    if result.message is None:
+        return
+
+    metadata = {
+        "command_name": result.command_name,
+        "result_kind": result.kind,
+        "should_exit": result.should_exit,
+        "should_clear": result.should_clear,
+        **result.metadata,
+    }
+    event = command_result(result.message, command=raw_command, metadata=metadata)
+    if on_runtime_event is not None:
+        on_runtime_event(event)
+        return
+    print(f"\n{render_runtime_event_for_cli(event)}")
 
 
 def read_user_input(

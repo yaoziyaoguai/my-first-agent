@@ -125,6 +125,13 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `InputIntent` 是输入边界，二者都不进入 `context_builder` 的 Anthropic messages
   投影。`request_user_input` 回复以 `step_input` 文本进入 execution messages，不生成
   `ru_*` tool_result；业务 tool_result placeholder 仍只服务真实业务 tool_use 配对。
+- slash command 结构化治理已落地轻量 `agent.commands`：InputIntent 仍只负责识别
+  slash metadata，CommandRegistry 集中执行 `/help`、`/status`、`/clear`、
+  `/reload_skills` 并返回 CommandResult，main.py 再投影成 `command.result`
+  RuntimeEvent 或 simple CLI print。CommandSpec/CommandResult 不进入
+  `conversation.messages`，不写 checkpoint，不改变 TaskState、Anthropic API messages、
+  tool_use_id 配对或 tool_result placeholder；未知 slash command 现在由 registry
+  消费成明确错误，不再落入模型消息。
 - pending 状态下 slash command 的当前行为已经按代码固化：`empty` / `exit` /
   `slash_command` 优先于 pending_user_input_request、pending_tool 和 plan confirmation，
   因此 slash 可以作为 UI/control 输入打断 pending 状态。是否需要禁止或确认这种打断，
@@ -138,10 +145,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
    checkpoint 恢复和 Anthropic API messages。
    当前推荐先保持 `step_input` 语义，除非能证明模型协议或上下文理解需要 tool_result
    形态；否则不应为元工具伪造 placeholder。
-2. **Slash command registry 决策**：当前只结构化了 slash metadata 和 `/reload_skills`
-   执行入口，尚未建立正式 command registry。后续若新增 `/help` / `/status` /
-   `/clear` 等命令，应先设计 registry 和 pending 状态下是否允许打断，而不是继续在
-   `main.py` 里散落字符串判断。
+2. **Slash command policy 决策**：轻量 CommandRegistry 已建立，但 pending 状态下
+   command 是否都允许打断仍按现有行为固化。后续若要改成“只有 `/exit` / `/cancel`
+   可打断 pending，其它 command 作为回复或暂缓执行”，需要单独设计产品语义和测试，
+   不能在 registry 里读取 pending 状态临时补丁。
 3. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
    stdout fallback 使用率；session lifecycle、debug/checkpoint/runtime_observer 仍保持
    在各自边界，不混入 UI event。

@@ -26,6 +26,143 @@ InputIntentKind = Literal[
 ]
 ConfirmationResponse = Literal["accept", "reject", "feedback"]
 
+# ---------------------------------------------------------------------------
+# Feedback 输入二次分类（plan/step confirmation 反馈分支专用）
+# ---------------------------------------------------------------------------
+# 这里**不是** InputIntent 状态机本体，也不是新的输入协议。它只是 confirm_handlers
+# 在 awaiting_plan / awaiting_step 反馈分支上做的二次结构化分类：当基础 classifier
+# 把输入归为 `feedback` 之后，再判断这条 feedback 究竟是“对当前 plan 的修订意见”
+# 还是“用户其实在抛出一个新任务”。
+#
+# 架构边界刻意保持清晰：
+#   - InputIntent 仍然只在 UI Adapter -> Runtime 边界做语义归一；
+#   - RuntimeEvent 仍然只在 Runtime -> UI 边界投影输出；
+#   - state.conversation.messages 仍然是 append-only 事件流；
+#   - checkpoint schema、tool_use_id / tool_result placeholder、request_user_input
+#     语义都不受影响；
+#   - 这里产生的 `FeedbackIntent` 不会写入 messages、不会进 checkpoint、不会
+#     变成 RuntimeEvent。confirm_handlers 才决定后续动作（继续 feedback 路径，
+#     或发 control_message + 路由到 start_new_task_fn）。
+#
+# 设计原则刻意结构化、避免补丁式黑名单：
+#   - **正向信号**：少而强的“新任务祈使前缀”集合（帮我 / 请帮 / 替我 / 另外 …）。
+#     这是中文里开新任务最确定的句式标记，不会被反馈类语境占用。
+#   - **结构性回退**：要求文本与当前 plan 的语义字符集合**零重叠**。这把
+#     “帮我把这步改成 edit”这种仍在谈论 plan 的句子排除掉，无需维护反馈词表。
+#   - 默认值保守地落在 "feedback_to_current_plan"，因此不会破坏既有反馈用例。
+#
+# 未来若要进一步引入 LLM judge / 三态分类（含 "unclear_user_input"），应当在
+# 此函数之上加一层置信度评估，并通过独立的 RuntimeEvent + 用户确认 flow 表达，
+# 而不是悄悄放宽这里的判定规则。
+FeedbackIntent = Literal[
+    "feedback_to_current_plan",
+    "new_task_topic_switch",
+]
+
+
+_NEW_TASK_IMPERATIVE_PREFIXES = (
+    "帮我",
+    "请帮",
+    "请帮我",
+    "麻烦帮",
+    "麻烦帮我",
+    "替我",
+    "给我",
+    "另外",
+    "另外帮我",
+    "现在做",
+    "现在改做",
+    "新任务",
+    "切换到",
+    "换个任务",
+    "换一个任务",
+)
+
+
+def classify_feedback_intent(
+    text: str,
+    *,
+    plan: dict | None = None,
+) -> FeedbackIntent:
+    """对“被基础 classifier 判为 feedback 的输入”做结构化二次分类。
+
+    返回 `"new_task_topic_switch"` 仅当**同时满足**：
+      1. 文本以一个明确的“新任务祈使前缀”开头（`_NEW_TASK_IMPERATIVE_PREFIXES`）。
+         这是少而强的正向信号，不依赖维护反馈关键词黑名单。
+      2. 文本与当前 plan 的语义字符集合**零重叠**（结构性条件，由
+         `_collect_plan_vocab` + `_shares_meaningful_chars` 给出）。
+
+    其它任何情况（空白、只是反馈措辞、谈到 plan 词汇、带祈使语但仍涉及 plan
+    范畴…）都返回 `"feedback_to_current_plan"`。这样既能识别“帮我写一首关于
+    春天的诗”这种与原任务“分析文档”毫无关系的明显话题切换，又能保住
+    “我想要更详细一点的分解 / 又改主意了 / 换成 edit 类型的”等历史反馈用例
+    继续走 feedback 路径——避免一次启发式调整把 confirm_handlers 的反馈语义
+    全部漂移。
+
+    本函数是纯函数：只读 raw text 和 plan metadata；不修改 state，不写
+    checkpoint / messages，不发 RuntimeEvent，不影响 tool_use_id / tool_result
+    placeholder / request_user_input 语义。
+    """
+
+    normalized = (text or "").strip()
+    if not normalized:
+        return "feedback_to_current_plan"
+
+    if not any(
+        normalized.startswith(prefix) for prefix in _NEW_TASK_IMPERATIVE_PREFIXES
+    ):
+        return "feedback_to_current_plan"
+
+    if plan:
+        plan_vocab = _collect_plan_vocab(plan)
+        if plan_vocab and _shares_meaningful_chars(normalized, plan_vocab):
+            return "feedback_to_current_plan"
+
+    return "new_task_topic_switch"
+
+
+_PLAN_VOCAB_STOP_CHARS = set(
+    "的了和与及或者啊呢吗呀哦嗯，。、；：？！\"'“”‘’()（）《》<>「」 \t\n\r"
+)
+
+
+def _collect_plan_vocab(plan: dict) -> set[str]:
+    """收集 plan 中的语义字符集合，供 feedback 二次分类做结构性重叠判断。
+
+    这里只读取 `plan.goal` / `step.title` / `step.description` 的 unicode 字符。
+    它不解析 plan_schema、不依赖 planner 内部结构；plan 字段缺失或类型异常都按
+    “没有词表”处理，绝不抛错——这是 UI 输入边界上的辅助函数，必须对脏数据保守。
+    停用词集合排除了助词、标点和空白，避免“的/了”这种几乎必中的字符把所有
+    输入都误判为反馈。
+    """
+
+    chars: set[str] = set()
+    goal = plan.get("goal") if isinstance(plan, dict) else None
+    if isinstance(goal, str):
+        chars.update(goal)
+    steps = plan.get("steps") if isinstance(plan, dict) else None
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for key in ("title", "description"):
+                value = step.get(key)
+                if isinstance(value, str):
+                    chars.update(value)
+    return {ch for ch in chars if ch not in _PLAN_VOCAB_STOP_CHARS}
+
+
+def _shares_meaningful_chars(text: str, plan_chars: set[str]) -> bool:
+    """文本是否与 plan 词表存在“非停用词”级别的字符重叠。
+
+    用字符级而非分词级做重叠是有意为之：避免引入分词依赖，同时对中文长 goal
+    依然有信号。这里只做只读判断，不会改变 state、checkpoint 或任何模型协议。
+    """
+
+    text_chars = {ch for ch in text if ch not in _PLAN_VOCAB_STOP_CHARS}
+    return bool(text_chars & plan_chars)
+
+
 _ACCEPT_CONFIRMATIONS = {
     "y",
     "yes",

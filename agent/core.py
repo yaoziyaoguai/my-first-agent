@@ -221,6 +221,14 @@ def chat(
         continue_fn=lambda ts: _run_main_loop(
             ts,
         ),
+        # start_new_task_fn 用于 awaiting_plan/step 反馈分支检测到“话题切换”时
+        # 路由到一次完整的“新任务”入口：reset_task + planning_phase + main_loop。
+        # 这里把它做成回调注入 ConfirmationContext，是为了让 confirm_handlers 不
+        # 反向 import core；调用语义和 chat() 末尾的“开新任务”分支一致。它不写
+        # checkpoint schema、不改 RuntimeEvent / InputIntent / messages 协议边界。
+        start_new_task_fn=lambda new_input, ts: _start_new_task_from_handler(
+            new_input, ts
+        ),
     )
 
     # 先处理"等待用户确认计划"的状态：
@@ -284,6 +292,24 @@ def chat(
 
 
 # ========== 规划阶段 ==========
+
+
+def _start_new_task_from_handler(user_input: str, turn_state: TurnState) -> str:
+    """confirm_handlers 检测到话题切换后路由进来的“开新任务”入口。
+
+    这里复用 chat() 末尾“开新任务”路径的语义：reset_task 已由 confirm_handlers
+    在切换分流处完成，这个函数只负责 planning_phase + main_loop 的标准串联。把
+    它作为一个独立函数，是为了让 ConfirmationContext.start_new_task_fn 在不引
+    入跨模块循环 import 的前提下复用主循环逻辑；不要在这里再加状态判断或
+    checkpoint 写入分支——那些仍然属于既有 chat() / handlers 的职责边界。
+    """
+
+    plan_result = _run_planning_phase(user_input, turn_state)
+    if plan_result == "cancelled":
+        return "好的，已取消。"
+    if plan_result == "awaiting_plan_confirmation":
+        return ""
+    return _run_main_loop(turn_state)
 
 def _run_planning_phase(user_input: str, turn_state: TurnState) -> str:
     """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。

@@ -323,3 +323,88 @@ def test_input_intent_does_not_enter_messages_or_checkpoint(monkeypatch):
     assert intent.kind == "plan_confirmation"
     assert state.conversation.messages == before_messages
     assert calls == {"save": 0, "clear": 0}
+
+
+# ---------------------------------------------------------------------------
+# classify_feedback_intent: feedback 输入二次分类（结构化策略）
+# ---------------------------------------------------------------------------
+# 这一组测试保护“awaiting_plan/step confirmation 反馈分支”上的二次分类边界：
+# 它只读 raw text 和 plan metadata，不修改 state、不写 messages/checkpoint、不发
+# RuntimeEvent，也不影响 tool_use_id / tool_result placeholder / request_user_input
+# 语义。结构性规则：明确的“新任务祈使前缀”+ 与 plan 词表零字符重叠 → 视为话题
+# 切换；其它一律保守落在 feedback_to_current_plan，避免反馈语义漂移。
+
+
+def _plan(goal: str, *step_titles: str) -> dict:
+    """构造最小 plan dict 供分类器消费；不触发 planner 或 schema 校验。"""
+
+    return {
+        "goal": goal,
+        "steps": [
+            {"title": title, "description": title, "step_type": "read"}
+            for title in step_titles
+        ],
+    }
+
+
+def test_classify_feedback_intent_detects_obvious_topic_switch():
+    """“帮我写一首关于春天的诗” 与“分析文档”任务零重叠 → 话题切换。"""
+
+    from agent.input_intents import classify_feedback_intent
+
+    plan = _plan("原任务：分析文档", "原任务-s1", "原任务-s2")
+    assert (
+        classify_feedback_intent("帮我写一首关于春天的诗", plan=plan)
+        == "new_task_topic_switch"
+    )
+
+
+def test_classify_feedback_intent_keeps_plan_modifying_inputs_as_feedback():
+    """历史反馈用例不应被误判为话题切换，避免 confirm_handlers 反馈语义漂移。"""
+
+    from agent.input_intents import classify_feedback_intent
+
+    plan = _plan("做个复杂任务", "方案A-第一步", "方案A-第二步")
+    # 没有强“新任务祈使前缀”——一律走 feedback。
+    assert (
+        classify_feedback_intent("我想要更详细一点的分解", plan=plan)
+        == "feedback_to_current_plan"
+    )
+    assert (
+        classify_feedback_intent("又改主意了，还是两步就行", plan=plan)
+        == "feedback_to_current_plan"
+    )
+    assert (
+        classify_feedback_intent("换成 edit 类型的", plan=plan)
+        == "feedback_to_current_plan"
+    )
+
+
+def test_classify_feedback_intent_blocks_switch_when_text_overlaps_plan_vocab():
+    """带“帮我”祈使但仍引用 plan 词汇时，结构性回退为 feedback。
+
+    这条用例固化“正向信号 + 结构性零重叠”双条件——避免引入反馈关键词黑名单。
+    """
+
+    from agent.input_intents import classify_feedback_intent
+
+    plan = _plan("整理报告", "读取文档", "撰写小结")
+    # “帮我”祈使语，但内容仍然在谈“文档/小结/报告”——仍是反馈。
+    assert (
+        classify_feedback_intent("帮我把读取文档那一步拆成两步", plan=plan)
+        == "feedback_to_current_plan"
+    )
+
+
+def test_classify_feedback_intent_handles_missing_plan_safely():
+    """无 plan / 空白输入下行为可预测，不抛错。"""
+
+    from agent.input_intents import classify_feedback_intent
+
+    assert classify_feedback_intent("", plan=None) == "feedback_to_current_plan"
+    assert classify_feedback_intent("   ", plan=None) == "feedback_to_current_plan"
+    # 没有 plan 时，新任务祈使语足以归类为 topic_switch。
+    assert (
+        classify_feedback_intent("帮我写一首诗", plan=None)
+        == "new_task_topic_switch"
+    )

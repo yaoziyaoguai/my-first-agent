@@ -45,9 +45,10 @@ def test_plan_feedback_does_not_accumulate_goal_string_indefinitely(monkeypatch)
     (a) 只保留**最后一次 feedback**——revised_goal = f"{原 goal}\\n反馈：{最新}"
     (b) 用数组存 feedback history，拼接时只取最后几条
     (c) 由 planner 自己融合（现在的做法）但加长度上限
-    """
-    pytest.xfail("Bug：plan feedback 单向累加，goal 字符串无限膨胀")
 
+    fix 后：confirm_handlers 反馈分支不再写回 state.task.user_goal，反馈仅在
+    本地 revised_goal 临时拼接给 planner；user_goal 长度保持稳定。
+    """
     cleanup = _register_test_tool("w", confirmation="never", result="done")
     try:
         fake = FakeAnthropicClient(
@@ -308,9 +309,13 @@ def test_user_switches_topic_mid_task(monkeypatch):
     (a) 在 awaiting_step_confirmation 时，如果输入既不是 y/n 也不像 feedback
         （比如长度很长或包含完整句号），打印"现在是在确认 step，要切新任务请先 n 取消"
     (b) 识别意图：如果用户输入里没包含任何和当前 plan 相关的词，提示用户确认
-    """
-    pytest.xfail("Bug：awaiting_step 时用户换话题被当 feedback，goal 被错误拼接")
 
+    fix 后：confirm_handlers 在 awaiting_step 反馈分支用 looks_like_topic_switch
+    做轻量启发式判定，命中则发一个 control_message RuntimeEvent 提示切换、清掉
+    旧任务，再走新一轮 planning_phase + main_loop；这条路径不改 checkpoint
+    schema、不写 conversation.messages、不影响 tool_use_id / tool_result
+    placeholder 或 request_user_input 语义。
+    """
     cleanup = _register_test_tool("w", confirmation="never", result="done")
     try:
         fake = FakeAnthropicClient(

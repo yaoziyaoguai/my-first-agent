@@ -203,13 +203,96 @@ def test_main_loop_passes_latest_reply_to_next_input_event(monkeypatch):
         return events.pop(0)
 
     monkeypatch.setattr(main, "read_user_input_event", fake_read_user_input_event)
-    monkeypatch.setattr(main, "chat", lambda _user_input: "我是一个测试回复")
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        """simple CLI 新主路径会传 RuntimeEvent sink；旧 return 语义仍可兜底。"""
+
+        assert on_runtime_event is not None
+        return "我是一个测试回复"
+
+    monkeypatch.setattr(main, "chat", fake_chat)
     monkeypatch.setattr(main, "finalize_session", lambda: None)
     monkeypatch.setattr(main, "print", lambda *_args, **_kwargs: None, raising=False)
 
     main.main_loop()
 
     assert seen_latest_outputs == ["", "我是一个测试回复"]
+
+
+def test_simple_backend_passes_runtime_event_sink_to_chat(monkeypatch, capsys):
+    """simple CLI 应消费 RuntimeEvent，而不是依赖 core.py 无 sink print fallback。
+
+    这个测试保护第四阶段边界：RuntimeEvent 是 Runtime -> UI 的用户可见输出主路径；
+    simple CLI renderer 只负责终端投影，不写 checkpoint、conversation.messages 或
+    Anthropic API messages，也不接收 runtime_observer/debug 日志。
+    """
+
+    import main
+    from agent.display_events import assistant_delta
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你"))
+        on_runtime_event(assistant_delta("好"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    reply, latest = main._run_chat_for_backend("你好", backend="simple")
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert latest == "你好"
+    assert captured.out == "你好\n"
+
+
+def test_simple_backend_renders_control_runtime_event(monkeypatch, capsys):
+    """control/tool lifecycle 类 RuntimeEvent 在 simple CLI 也应直接可见。
+
+    这里不把控制文案塞进模型消息或 checkpoint；测试只验证 I/O adapter 消费
+    RuntimeEvent 后终端可见，避免回退到 stdout capture 或字符串过滤补丁。
+    """
+
+    import main
+    from agent.display_events import control_message
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(control_message("等待用户确认"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    reply, latest = main._run_chat_for_backend("写文件", backend="simple")
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert latest == ""
+    assert "等待用户确认" in captured.out
+
+
+def test_simple_backend_does_not_repeat_streamed_final_reply(monkeypatch, capsys):
+    """已 streaming 的 assistant.delta 不应再通过 final reply 打印第二遍。
+
+    这是 simple CLI 的防重复回归：RuntimeEvent sink 已经输出正文时，旧 return-value
+    兼容层只能更新 latest_output，不能让 main_loop 把同一段 assistant 文本再 print。
+    """
+
+    import main
+    from agent.display_events import assistant_delta
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("你好"))
+        return "你好"
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    reply, latest = main._run_chat_for_backend("你好", backend="simple")
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert latest == "你好"
+    assert captured.out == "你好\n"
 
 
 def test_textual_main_loop_captures_printed_chat_output_as_latest_output(monkeypatch):

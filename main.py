@@ -114,6 +114,29 @@ def _forward_runtime_event_to_legacy_callbacks(
     return False
 
 
+def _render_runtime_event_for_simple_cli(event: RuntimeEvent) -> bool:
+    """把 RuntimeEvent 投影到 simple CLI，并返回是否输出了 assistant delta。
+
+    这里是 simple CLI 的 RuntimeEvent sink：它只负责终端投影，不反向修改
+    Runtime state，不写 checkpoint，不追加 conversation.messages，也不构造
+    Anthropic API messages。这样做是为了让 simple CLI 和 Textual 共享同一条
+    Runtime -> UI 用户可见输出边界，而不是继续依赖 core.py 的无 sink print
+    fallback。debug print、terminal observer log、checkpoint 日志不能从这里混入；
+    那些仍走各自的结构化日志/显式 debug 通道。
+    """
+
+    rendered = render_runtime_event_for_cli(event)
+    if not rendered:
+        return False
+
+    if event.event_type == EVENT_ASSISTANT_DELTA:
+        print(rendered, end="", flush=True)
+        return True
+
+    print(f"\n{rendered}", flush=True)
+    return False
+
+
 def _run_chat_for_backend(
     user_input: str,
     *,
@@ -124,9 +147,10 @@ def _run_chat_for_backend(
 ) -> tuple[str, str]:
     """执行 chat，并返回应打印文本和应进入 latest_output 的文本。
 
-    simple backend 保持原有行为：chat 内部流式输出照常打到终端，main 只打印
-    reply。textual backend 优先消费 RuntimeEvent；旧 on_output_chunk/on_display_event
-    仅作为迁移期兼容。
+    simple backend 现在也优先传入 RuntimeEvent sink，并用 CLI renderer 投影用户
+    可见输出；chat 内部无 sink print fallback 只留给直接调用 core.chat 的旧路径。
+    textual backend 优先消费 RuntimeEvent；旧 on_output_chunk/on_display_event 仅作为
+    迁移期兼容。
 
     关键边界：streaming chunk 已经进入 TUI 后，final return / stdout capture
     不能再作为第二条 Assistant 正文追加，否则长任务结束时会重复显示最后一条
@@ -211,8 +235,38 @@ def _run_chat_for_backend(
         latest_output = _merge_chat_outputs(reply, captured.getvalue())
         return reply, latest_output
 
-    reply = chat(user_input)
-    return reply, reply.strip()
+    simple_streamed_any_chunk = False
+    simple_assistant_parts: list[str] = []
+
+    def forward_simple_runtime_event(event: RuntimeEvent) -> None:
+        """simple CLI 主输出桥，避免 RuntimeEvent 又回落到 core.py print fallback。
+
+        这是第四阶段的收口点：simple CLI 与 Textual 一样消费 RuntimeEvent，只是渲染
+        目标不同。这里记录 assistant.delta 是为了防止 final return 又把已经流式输出
+        的正文打印一遍；这是兼容旧 return-value 语义的防重复保护，不应继续扩展成
+        新状态机，也不能塞入 checkpoint、runtime_observer、conversation.messages、
+        Anthropic API messages 或 TaskState 本体。
+        """
+
+        nonlocal simple_streamed_any_chunk
+        if event.event_type == EVENT_ASSISTANT_DELTA:
+            simple_assistant_parts.append(event.text)
+        simple_streamed_any_chunk = (
+            _render_runtime_event_for_simple_cli(event)
+            or simple_streamed_any_chunk
+        )
+
+    reply = chat(user_input, on_runtime_event=forward_simple_runtime_event)
+    if simple_streamed_any_chunk:
+        # core.py 在无 sink 时代负责补这个换行；simple CLI 接管 RuntimeEvent 后，
+        # 换行也必须留在 I/O adapter。这里不是业务输出，不能变成 RuntimeEvent。
+        print()
+
+    reply_text = reply.strip()
+    streamed_text = "".join(simple_assistant_parts).strip()
+    if simple_streamed_any_chunk and reply_text and reply_text == streamed_text:
+        return "", streamed_text
+    return reply, reply_text or streamed_text
 
 
 def _handle_textual_shell_input(

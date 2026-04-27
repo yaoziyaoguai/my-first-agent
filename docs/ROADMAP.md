@@ -74,17 +74,24 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 - 第三阶段已收窄 legacy bridge：Textual 主路径收到 RuntimeEvent 后不再合并同轮
   stdout capture，避免重复 completion；RuntimeEvent 到旧 callback 的转发集中在
   main.py 兼容 helper 中。
+- 第四阶段已把 simple CLI 接到 RuntimeEvent renderer：simple backend 调用
+  `chat(..., on_runtime_event=...)`，assistant delta、control/tool lifecycle 和
+  DisplayEvent 都通过 `render_runtime_event_for_cli` 投影到普通终端。启动 prompt、
+  session lifecycle、退出/中断提示仍可 direct print；这些不是 Runtime 输出事件。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
 
-1. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
+1. **Fifth-stage cleanup**：继续极小化 stdout capture，逐步删除旧
+   `on_output_chunk` / `on_display_event` 测试依赖，让 Textual 与 simple CLI 都只通过
+   RuntimeEvent sink 接收新的用户可见输出。
+2. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
    `chat_stream` / RuntimeEvent iterator，并逐步移除旧 callback/stdout capture。
    debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
-2. **Fourth-stage cleanup**：把 simple CLI 也完全改成 RuntimeEvent renderer，继续
-   缩小 stdout capture；移除旧 callback 测试依赖；为 cancellation /
-   `generation.cancelled` 预留事件类型，但不与 runtime_observer debug event 混用。
-2. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
+3. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
+   类型，先做边界设计，不急着碰复杂 stream abort，也不与 runtime_observer debug
+   event 混用。
+4. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。
 

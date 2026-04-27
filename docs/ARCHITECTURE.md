@@ -126,6 +126,18 @@ Runtime state，也不保存 checkpoint。
   一个兼容 helper；旧 callback 只服务未迁移调用方，不作为新功能入口。
 - stdout capture 只在“本轮没有 RuntimeEvent”的旧路径兜底，不承接新的交互语义。
 
+第四阶段把 simple CLI 也接到 RuntimeEvent 主路径：
+
+- `main.py` 的 simple backend 调用 `core.chat(..., on_runtime_event=...)`，并用
+  `render_runtime_event_for_cli(event)` 投影到终端。
+- assistant delta 由 simple CLI sink 负责流式打印；如果旧 return value 恰好返回了
+  同一段正文，`main.py` 会避免再次打印，防止 streaming + final reply 双写。
+- 启动 banner、输入 prompt、退出/中断/session lifecycle 仍可以是 direct print；这些
+  是 shell 生命周期，不是 Runtime -> UI 事件。debug print、terminal observer log 和
+  checkpoint 日志仍不能混进 RuntimeEvent。
+- `core.chat()` 的无 sink print fallback 仍保留给直接调用 core 的旧路径；新 UI adapter
+  应优先传 RuntimeEvent sink。
+
 ### Current Transitional Bridges / Technical Debt
 
 当前仍有几条刻意保留的过渡桥，后续要逐步收敛：
@@ -135,6 +147,10 @@ Runtime state，也不保存 checkpoint。
   文案。assistant delta、plan confirmation、slash command、request_user_input、
   DisplayEvent、`tool.requested` 已开始走 RuntimeEvent，不应再依赖 stdout capture。
   当 RuntimeEvent 已发出时，stdout 不再作为同轮 Textual completion 返回。
+- **simple CLI renderer**：simple backend 已用 RuntimeEvent sink 作为主输出路径，
+  renderer 只做终端投影。它不是 checkpoint、不是 runtime_observer、不是
+  `conversation.messages`，也不是 Anthropic API messages；它只负责把用户可见事件
+  打到普通终端。
 - **旧 callback**：`on_output_chunk` / `on_display_event` 仍保留给老调用方，但
   `core.chat()` 内部会先生成 RuntimeEvent，再由兼容桥转发。长期应演进为
   `chat_stream` / RuntimeEvent iterator，并逐步删除旧 callback。

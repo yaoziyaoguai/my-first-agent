@@ -150,6 +150,28 @@ Runtime state，也不保存 checkpoint。
   不构造 Anthropic API messages，也不承载 `runtime_observer` / checkpoint / debug
   terminal 日志。
 
+第六阶段已把旧 callback 明确降级为 deprecated compatibility bridge：
+
+- `on_runtime_event` 是 Textual + simple CLI 的主输出边界。
+- `on_output_chunk` / `on_display_event` 只在没有 RuntimeEvent sink 的旧调用方路径中
+  保留，避免同一条 assistant delta 或 DisplayEvent 同时走新旧双轨。
+- 旧 callback 转发必须集中，不能散落到模型流、工具执行或状态处理里。
+
+当前进入 TUI-first 架构债务治理：Textual 常驻 Shell 是正式产品主路径，simple CLI
+重新定位为 debug/fallback adapter。`main.py` 仍暂时负责 backend dispatch、slash
+command、Ctrl+C/session lifecycle 和旧 stdout fallback，但一轮 Runtime 调用已经拆成
+两个 adapter 边界：
+
+- `_run_textual_runtime_turn(...)`：Textual 产品路径，只把 raw text 交给 Runtime，并
+  通过 RuntimeEvent 投影用户可见输出；stdout capture / 旧 callback 只兜底未迁移
+  print-era 文案，不能继续扩大。
+- `_run_simple_cli_runtime_turn(...)`：simple CLI fallback，通过
+  `render_runtime_event_for_cli` 把 RuntimeEvent 打到终端；`input()`、`/multi`、
+  EOF/KeyboardInterrupt 等终端协议不能反向定义 Textual 产品能力。
+
+这个阶段只明确 adapter 边界，不把 InputIntent 写入 checkpoint/messages，不改变
+TaskState，不改变 Anthropic API messages，也不把 RuntimeEvent 和输入语义混用。
+
 ### Current Transitional Bridges / Technical Debt
 
 当前仍有几条刻意保留的过渡桥，后续要逐步收敛：

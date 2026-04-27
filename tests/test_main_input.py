@@ -245,6 +245,76 @@ def test_simple_backend_passes_runtime_event_sink_to_chat(monkeypatch, capsys):
     assert captured.out == "你好\n"
 
 
+def test_textual_runtime_turn_is_product_adapter_not_simple_cli(monkeypatch, capsys):
+    """Textual 产品路径只投递 RuntimeEvent sink，不调用 simple CLI renderer。
+
+    这是 TUI-first 边界回归：main.py 可以继续做 adapter dispatch，但 Textual
+    主路径不能把 simple CLI fallback 的 print renderer 当作产品输出源，也不能把
+    checkpoint、runtime_observer、conversation.messages、Anthropic API messages 或
+    TaskState 语义混进 UI adapter。
+    """
+
+    import main
+    from agent.display_events import assistant_delta
+
+    events = []
+
+    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("TUI"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    reply, latest = main._run_textual_runtime_turn(
+        "你好",
+        on_runtime_event=events.append,
+    )
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert latest == ""
+    assert [event.text for event in events] == ["TUI"]
+    assert captured.out == ""
+
+
+def test_simple_cli_runtime_turn_is_fallback_adapter_without_legacy_callbacks(
+    monkeypatch,
+    capsys,
+):
+    """simple CLI fallback 通过 RuntimeEvent renderer 输出，不接旧 callback。
+
+    simple CLI 是调试/兜底 adapter，不应反过来定义 Textual 产品能力。这个测试保护
+    它只给 core.chat 传 on_runtime_event，不传 on_output_chunk/on_display_event；
+    输入协议、checkpoint、runtime_observer 和状态机本体都不应进入这个输出边界。
+    """
+
+    import main
+    from agent.display_events import assistant_delta
+
+    def fake_chat(
+        _user_input: str,
+        *,
+        on_runtime_event=None,
+        on_output_chunk=None,
+        on_display_event=None,
+    ) -> str:
+        assert on_runtime_event is not None
+        assert on_output_chunk is None
+        assert on_display_event is None
+        on_runtime_event(assistant_delta("CLI"))
+        return ""
+
+    monkeypatch.setattr(main, "chat", fake_chat)
+
+    reply, latest = main._run_simple_cli_runtime_turn("你好")
+    captured = capsys.readouterr()
+
+    assert reply == ""
+    assert latest == "CLI"
+    assert captured.out == "CLI\n"
+
+
 def test_simple_backend_renders_control_runtime_event(monkeypatch, capsys):
     """control/tool lifecycle 类 RuntimeEvent 在 simple CLI 也应直接可见。
 

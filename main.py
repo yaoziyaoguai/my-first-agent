@@ -154,106 +154,117 @@ def _render_runtime_event_for_simple_cli(event: RuntimeEvent) -> bool:
     return False
 
 
-def _run_chat_for_backend(
+def _run_textual_runtime_turn(
     user_input: str,
     *,
-    backend: str,
     on_output_chunk: Callable[[str], None] | None = None,
     on_display_event: Callable[[DisplayEvent], None] | None = None,
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> tuple[str, str]:
-    """执行 chat，并返回应打印文本和应进入 latest_output 的文本。
+    """执行一轮 Textual 产品主路径，并返回 latest_output fallback。
 
-    simple backend 现在也优先传入 RuntimeEvent sink，并用 CLI renderer 投影用户
-    可见输出；chat 内部无 sink print fallback 只留给直接调用 core.chat 的旧路径。
-    textual backend 优先消费 RuntimeEvent；旧 on_output_chunk/on_display_event 仅作为
-    迁移期兼容。
+    这是 TUI-first 第一刀的边界函数：Textual 是正式产品交互路径，必须优先消费
+    RuntimeEvent，而不是把旧 CLI 的 print/stdout 当主语义。这里仍保留
+    stdout capture 和 deprecated callback，是为了兼容未迁移的 print-era 输出与旧测试；
+    它们不能继续扩大，也不能承载 RuntimeEvent 以外的输入协议、checkpoint、
+    runtime_observer、conversation.messages、Anthropic API messages、TaskState 状态机、
+    debug print、terminal observer log 或 simple CLI fallback 语义。
 
     关键边界：streaming chunk 已经进入 TUI 后，final return / stdout capture
     不能再作为第二条 Assistant 正文追加，否则长任务结束时会重复显示最后一条
     assistant 消息。这里切断的是输出写入路径，不改变 Runtime 状态推进。
     """
 
-    if backend == "textual":
-        captured = io.StringIO()
-        runtime_event_outputs: list[str] = []
-        emitted_runtime_event = False
-        streamed_any_chunk = False
+    captured = io.StringIO()
+    runtime_event_outputs: list[str] = []
+    emitted_runtime_event = False
+    streamed_any_chunk = False
 
-        def forward_output_chunk(chunk: str) -> None:
-            """旧 output_chunk callback 的 deprecated 兼容桥。
+    def forward_output_chunk(chunk: str) -> None:
+        """旧 output_chunk callback 的 deprecated 兼容桥。
 
-            Textual 新路径应走 RuntimeEvent；这层只保证尚未迁移的测试或调用方仍能
-            避免 stdout/final return 双写。不要在这里继续新增事件类型、字符串过滤或
-            新的 UI 输出协议；新代码应传 on_runtime_event。
-            """
+        Textual 新路径应走 RuntimeEvent；这层只保证尚未迁移的测试或调用方仍能
+        避免 stdout/final return 双写。不要在这里继续新增事件类型、字符串过滤或
+        新的 UI 输出协议；新代码应传 on_runtime_event。
+        """
 
-            nonlocal streamed_any_chunk
-            streamed_any_chunk = True
-            if on_output_chunk is not None:
-                on_output_chunk(chunk)
+        nonlocal streamed_any_chunk
+        streamed_any_chunk = True
+        if on_output_chunk is not None:
+            on_output_chunk(chunk)
 
-        def forward_runtime_event(event: RuntimeEvent) -> None:
-            """记录并转发 RuntimeEvent，替代 stdout-era 输出猜测。
+    def forward_runtime_event(event: RuntimeEvent) -> None:
+        """记录并转发 RuntimeEvent，替代 stdout-era 输出猜测。
 
-            main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
-            runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
-            让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event，
-            simple CLI 也使用 RuntimeEvent renderer。旧 callback 在这里是 deprecated
-            compatibility bridge，不能继续成为新功能入口。
-            一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
-            兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
-            """
+        main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
+        runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
+        让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event，
+        simple CLI 也使用 RuntimeEvent renderer。旧 callback 在这里是 deprecated
+        compatibility bridge，不能继续成为新功能入口。
+        一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
+        兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
+        """
 
-            nonlocal emitted_runtime_event, streamed_any_chunk
-            emitted_runtime_event = True
-            if on_runtime_event is not None:
-                on_runtime_event(event)
-                return
+        nonlocal emitted_runtime_event, streamed_any_chunk
+        emitted_runtime_event = True
+        if on_runtime_event is not None:
+            on_runtime_event(event)
+            return
 
-            streamed_any_chunk = (
-                _forward_runtime_event_to_legacy_callbacks(
-                    event,
-                    on_output_chunk=on_output_chunk,
-                    on_display_event=on_display_event,
-                )
-                or streamed_any_chunk
+        streamed_any_chunk = (
+            _forward_runtime_event_to_legacy_callbacks(
+                event,
+                on_output_chunk=on_output_chunk,
+                on_display_event=on_display_event,
             )
+            or streamed_any_chunk
+        )
 
-            if on_output_chunk is None and on_display_event is None:
-                rendered = render_runtime_event_for_cli(event)
-                if rendered:
-                    runtime_event_outputs.append(rendered)
+        if on_output_chunk is None and on_display_event is None:
+            rendered = render_runtime_event_for_cli(event)
+            if rendered:
+                runtime_event_outputs.append(rendered)
 
-        with contextlib.redirect_stdout(captured):
-            if on_runtime_event is not None:
-                reply = chat(user_input, on_runtime_event=forward_runtime_event)
-            elif on_display_event is None:
-                reply = chat(user_input, on_output_chunk=forward_output_chunk)
-            else:
-                reply = chat(
-                    user_input,
-                    on_output_chunk=forward_output_chunk,
-                    on_display_event=on_display_event,
-                )
-        if emitted_runtime_event and runtime_event_outputs:
-            latest_output = _merge_chat_outputs(
-                reply,
-                "".join(runtime_event_outputs),
+    with contextlib.redirect_stdout(captured):
+        if on_runtime_event is not None:
+            reply = chat(user_input, on_runtime_event=forward_runtime_event)
+        elif on_display_event is None:
+            reply = chat(user_input, on_output_chunk=forward_output_chunk)
+        else:
+            reply = chat(
+                user_input,
+                on_output_chunk=forward_output_chunk,
+                on_display_event=on_display_event,
             )
-            return reply, latest_output
-        if emitted_runtime_event and on_runtime_event is not None:
-            # Textual 主路径已经通过 on_runtime_event 实时追加了用户可见内容。这里不再
-            # 合并 captured stdout，避免旧 print-era 文案把同一语义作为 final reply
-            # 再盖到 Assistant 占位上。若本轮完全没有 RuntimeEvent，后面的 stdout
-            # fallback 仍会兜住尚未迁移的 session/异常旧输出。
-            return reply, reply.strip()
-        if streamed_any_chunk:
-            # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
-            # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
-            return reply, reply.strip()
-        latest_output = _textual_stdout_fallback_output(reply, captured.getvalue())
+    if emitted_runtime_event and runtime_event_outputs:
+        latest_output = _merge_chat_outputs(
+            reply,
+            "".join(runtime_event_outputs),
+        )
         return reply, latest_output
+    if emitted_runtime_event and on_runtime_event is not None:
+        # Textual 主路径已经通过 on_runtime_event 实时追加了用户可见内容。这里不再
+        # 合并 captured stdout，避免旧 print-era 文案把同一语义作为 final reply
+        # 再盖到 Assistant 占位上。若本轮完全没有 RuntimeEvent，后面的 stdout
+        # fallback 仍会兜住尚未迁移的 session/异常旧输出。
+        return reply, reply.strip()
+    if streamed_any_chunk:
+        # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
+        # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
+        return reply, reply.strip()
+    latest_output = _textual_stdout_fallback_output(reply, captured.getvalue())
+    return reply, latest_output
+
+
+def _run_simple_cli_runtime_turn(user_input: str) -> tuple[str, str]:
+    """执行一轮 simple CLI fallback adapter。
+
+    simple CLI 现在也通过 RuntimeEvent renderer 接收用户可见输出，但它不是产品能力
+    的源头，也不能反过来决定 Textual TUI 的输入/确认/取消语义。这里保留 direct
+    print 是终端 adapter 的渲染行为；它不写 checkpoint、runtime_observer、
+    conversation.messages、Anthropic API messages 或 TaskState，也不把 simple CLI 的
+    `/multi`、EOF、KeyboardInterrupt 等输入协议混进 RuntimeEvent 输出边界。
+    """
 
     simple_streamed_any_chunk = False
     simple_assistant_parts: list[str] = []
@@ -287,6 +298,33 @@ def _run_chat_for_backend(
     if simple_streamed_any_chunk and reply_text and reply_text == streamed_text:
         return "", streamed_text
     return reply, reply_text or streamed_text
+
+
+def _run_chat_for_backend(
+    user_input: str,
+    *,
+    backend: str,
+    on_output_chunk: Callable[[str], None] | None = None,
+    on_display_event: Callable[[DisplayEvent], None] | None = None,
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
+) -> tuple[str, str]:
+    """按 UI adapter 分派一轮 Runtime 调用。
+
+    这是为了兼容现有测试和调用方保留的薄 dispatcher，不再承载具体交互语义。
+    Textual 产品路径和 simple CLI fallback 已拆到独立函数，避免 main.py 继续把
+    terminal input()/print 时代的行为当成 TUI 主路径。这里不能新增 RuntimeEvent 类型、
+    InputIntent、checkpoint 写入、状态机判断或新的 stdout 字符串过滤。
+    """
+
+    if backend == "textual":
+        return _run_textual_runtime_turn(
+            user_input,
+            on_output_chunk=on_output_chunk,
+            on_display_event=on_display_event,
+            on_runtime_event=on_runtime_event,
+        )
+
+    return _run_simple_cli_runtime_turn(user_input)
 
 
 def _handle_textual_shell_input(

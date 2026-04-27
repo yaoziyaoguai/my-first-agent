@@ -20,7 +20,6 @@ EVENT_CONTROL_MESSAGE = "control.message"
 EVENT_TOOL_REQUESTED = "tool.requested"
 EVENT_PLAN_CONFIRMATION_REQUESTED = "plan.confirmation_requested"
 EVENT_USER_INPUT_REQUESTED = "user_input.requested"
-EVENT_COMMAND_RESULT = "command.result"
 EVENT_TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
 EVENT_TOOL_RESULT_VISIBLE = "tool.result_visible"
 
@@ -134,28 +133,6 @@ def plan_confirmation_requested(
         event_type=EVENT_PLAN_CONFIRMATION_REQUESTED,
         text=text,
         metadata=dict(metadata or {}),
-    )
-
-
-def command_result(
-    text: str,
-    *,
-    command: str,
-    metadata: dict[str, Any] | None = None,
-) -> RuntimeEvent:
-    """构造 slash command 的用户可见结果。
-
-    slash command 是 main.py 的本地控制命令，不是模型对话，也不进入 checkpoint。
-    通过 command.result 事件投影到 UI，可以让 Textual 不再靠 stdout capture 解析命令
-    输出；旧 CLI 没有 sink 时仍由兼容桥打印。
-    """
-
-    payload = dict(metadata or {})
-    payload["command"] = command
-    return RuntimeEvent(
-        event_type=EVENT_COMMAND_RESULT,
-        text=text,
-        metadata=payload,
     )
 
 

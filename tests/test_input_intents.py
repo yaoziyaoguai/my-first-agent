@@ -29,73 +29,20 @@ def test_classifies_normal_message():
     assert intent.source == "tui"
 
 
-def test_classifies_slash_commands_without_writing_runtime_state():
-    """slash command 是 UI adapter 控制输入，不应写 messages/checkpoint。
-
-    本测试只验证分类；真正命令执行在 CommandRegistry/main adapter。InputIntent
-    不能进入 conversation.messages，也不能变成 RuntimeEvent 或 CommandResult。
-    """
-
-    from agent.input_intents import classify_user_input
-
-    state = _fresh_state()
-    before_messages = list(state.conversation.messages)
-
-    help_intent = classify_user_input("/help", source="tui", state=state)
-    status_intent = classify_user_input("/status now", source="simple", state=state)
-
-    assert help_intent.kind == "slash_command"
-    assert help_intent.metadata == {
-        "command": "/help",
-        "command_name": "help",
-        "command_args": "",
-        "is_exit_command": False,
-    }
-    assert status_intent.kind == "slash_command"
-    assert status_intent.metadata == {
-        "command": "/status",
-        "command_name": "status",
-        "command_args": "now",
-        "is_exit_command": False,
-    }
-    assert state.conversation.messages == before_messages
-
-
-def test_slash_command_metadata_covers_known_unknown_and_exit_inputs():
-    """slash metadata 只服务 adapter 控制输入，不执行 command。
-
-    `/exit` 当前先归类为 exit，说明退出是 shell 控制输入；其它 slash command 只
-    解析名称和参数，不写 checkpoint/messages，不触发 RuntimeEvent，也不替代
-    CommandRegistry 的执行结果。
-    """
-
-    from agent.input_intents import classify_user_input
-
-    cases = {
-        "/clear": ("clear", ""),
-        "/unknown abc": ("unknown", "abc"),
-        "/reload_skills": ("reload_skills", ""),
-    }
-
-    for raw, (name, args) in cases.items():
-        intent = classify_user_input(raw, source="tui")
-        assert intent.kind == "slash_command"
-        assert intent.metadata["command_name"] == name
-        assert intent.metadata["command_args"] == args
-        assert intent.metadata["is_exit_command"] is False
-
-    exit_intent = classify_user_input("/exit", source="tui")
-    assert exit_intent.kind == "exit"
-
-
 def test_classifies_empty_exit_cancel_and_eof():
-    """empty/exit/cancel/eof 是 adapter 控制输入，不应落入普通消息。"""
+    """empty/exit/cancel/eof 是 adapter 控制输入，不应落入普通消息。
+
+    本轮 slash command 整体下线后，`/exit` 不再被识别为退出；只有 bare
+    `exit` / `quit` 字面串才走 exit 分支，其余 `/` 输入按普通消息处理。
+    """
 
     from agent.input_intents import classify_user_input
 
     assert classify_user_input("   ", source="tui").kind == "empty"
     assert classify_user_input("quit", source="simple").kind == "exit"
-    assert classify_user_input("/exit", source="tui").kind == "exit"
+    assert classify_user_input("exit", source="tui").kind == "exit"
+    # `/exit` 不再是退出语义；slash 协议整体下线，归为普通消息。
+    assert classify_user_input("/exit", source="tui").kind == "normal_message"
     assert classify_user_input(
         None,
         source="simple",
@@ -214,9 +161,10 @@ def test_request_user_reply_priority_keeps_yes_as_pending_reply():
 def test_control_inputs_keep_current_priority_over_pending_states():
     """固化当前 adapter 优先级：control 输入先于 pending 状态。
 
-    这是当前产品语义，不在本阶段私自改变：empty/exit/slash 属于 UI/control
-    输入，可以在 pending_user_input_request、pending_tool 或 plan confirmation
-    期间被 adapter 先识别。后续若要禁止 slash 打断 pending 状态，应单独设计，
+    本轮 slash command 整体下线后，pending_user_input_request / pending_tool /
+    awaiting_plan_confirmation 期间的 `/...` 输入不再被识别为控制输入；只有
+    empty / bare exit / quit 仍然先于 pending 状态被 adapter 识别。后续若要新增
+    UI/control 输入语义，应通过明确的 InputIntent kind + RuntimeEvent 用户确认流，
     不能把 InputIntent 写进 checkpoint/messages 或混入 RuntimeEvent。
     """
 
@@ -229,28 +177,13 @@ def test_control_inputs_keep_current_priority_over_pending_states():
         "question": "预算？",
     }
 
-    slash = classify_user_input("/status", source="tui", state=request_state)
-    assert slash.kind == "slash_command"
-    assert slash.metadata["command_name"] == "status"
-    help_command = classify_user_input("/help", source="simple", state=request_state)
-    assert help_command.kind == "slash_command"
-    assert help_command.metadata["command_name"] == "help"
-    assert "awaiting_kind" not in help_command.metadata
     assert classify_user_input("   ", source="tui", state=request_state).kind == "empty"
-    assert classify_user_input("/exit", source="tui", state=request_state).kind == "exit"
-
-    tool_state = _fresh_state()
-    tool_state.task.status = "awaiting_tool_confirmation"
-    tool_state.task.pending_tool = {"tool_use_id": "T1", "tool": "write_file"}
-    tool_slash = classify_user_input("/status", source="simple", state=tool_state)
-    assert tool_slash.kind == "slash_command"
-    assert tool_slash.metadata["command_name"] == "status"
-
-    plan_state = _fresh_state()
-    plan_state.task.status = "awaiting_plan_confirmation"
-    plan_slash = classify_user_input("/status", source="tui", state=plan_state)
-    assert plan_slash.kind == "slash_command"
-    assert plan_slash.metadata["command_name"] == "status"
+    assert classify_user_input("exit", source="tui", state=request_state).kind == "exit"
+    # `/exit` 在 slash 下线后被当作 pending 回复正常处理。
+    assert (
+        classify_user_input("/exit", source="tui", state=request_state).kind
+        == "request_user_reply"
+    )
 
 
 def test_textual_and_simple_classify_same_raw_input_consistently():
@@ -272,24 +205,6 @@ def test_textual_and_simple_classify_same_raw_input_consistently():
     assert textual.metadata == simple.metadata == {"confirmation_response": "accept"}
     assert textual.source == "tui"
     assert simple.source == "simple"
-
-
-def test_textual_and_simple_classify_slash_commands_consistently():
-    """Textual 和 simple 对 slash command 的 metadata 应一致。
-
-    source 只记录 adapter 来源；command_name/command_args 这类输入语义必须共享，
-    避免 simple CLI 历史字符串协议继续散落到 Textual 产品主路径。
-    """
-
-    from agent.input_intents import classify_user_input
-
-    textual = classify_user_input("/status now", source="tui")
-    simple = classify_user_input("/status now", source="simple")
-
-    assert textual.kind == simple.kind == "slash_command"
-    assert textual.metadata == simple.metadata
-    assert textual.metadata["command_name"] == "status"
-    assert textual.metadata["command_args"] == "now"
 
 
 def test_input_intent_does_not_enter_messages_or_checkpoint(monkeypatch):
@@ -323,88 +238,3 @@ def test_input_intent_does_not_enter_messages_or_checkpoint(monkeypatch):
     assert intent.kind == "plan_confirmation"
     assert state.conversation.messages == before_messages
     assert calls == {"save": 0, "clear": 0}
-
-
-# ---------------------------------------------------------------------------
-# classify_feedback_intent: feedback 输入二次分类（结构化策略）
-# ---------------------------------------------------------------------------
-# 这一组测试保护“awaiting_plan/step confirmation 反馈分支”上的二次分类边界：
-# 它只读 raw text 和 plan metadata，不修改 state、不写 messages/checkpoint、不发
-# RuntimeEvent，也不影响 tool_use_id / tool_result placeholder / request_user_input
-# 语义。结构性规则：明确的“新任务祈使前缀”+ 与 plan 词表零字符重叠 → 视为话题
-# 切换；其它一律保守落在 feedback_to_current_plan，避免反馈语义漂移。
-
-
-def _plan(goal: str, *step_titles: str) -> dict:
-    """构造最小 plan dict 供分类器消费；不触发 planner 或 schema 校验。"""
-
-    return {
-        "goal": goal,
-        "steps": [
-            {"title": title, "description": title, "step_type": "read"}
-            for title in step_titles
-        ],
-    }
-
-
-def test_classify_feedback_intent_detects_obvious_topic_switch():
-    """“帮我写一首关于春天的诗” 与“分析文档”任务零重叠 → 话题切换。"""
-
-    from agent.input_intents import classify_feedback_intent
-
-    plan = _plan("原任务：分析文档", "原任务-s1", "原任务-s2")
-    assert (
-        classify_feedback_intent("帮我写一首关于春天的诗", plan=plan)
-        == "new_task_topic_switch"
-    )
-
-
-def test_classify_feedback_intent_keeps_plan_modifying_inputs_as_feedback():
-    """历史反馈用例不应被误判为话题切换，避免 confirm_handlers 反馈语义漂移。"""
-
-    from agent.input_intents import classify_feedback_intent
-
-    plan = _plan("做个复杂任务", "方案A-第一步", "方案A-第二步")
-    # 没有强“新任务祈使前缀”——一律走 feedback。
-    assert (
-        classify_feedback_intent("我想要更详细一点的分解", plan=plan)
-        == "feedback_to_current_plan"
-    )
-    assert (
-        classify_feedback_intent("又改主意了，还是两步就行", plan=plan)
-        == "feedback_to_current_plan"
-    )
-    assert (
-        classify_feedback_intent("换成 edit 类型的", plan=plan)
-        == "feedback_to_current_plan"
-    )
-
-
-def test_classify_feedback_intent_blocks_switch_when_text_overlaps_plan_vocab():
-    """带“帮我”祈使但仍引用 plan 词汇时，结构性回退为 feedback。
-
-    这条用例固化“正向信号 + 结构性零重叠”双条件——避免引入反馈关键词黑名单。
-    """
-
-    from agent.input_intents import classify_feedback_intent
-
-    plan = _plan("整理报告", "读取文档", "撰写小结")
-    # “帮我”祈使语，但内容仍然在谈“文档/小结/报告”——仍是反馈。
-    assert (
-        classify_feedback_intent("帮我把读取文档那一步拆成两步", plan=plan)
-        == "feedback_to_current_plan"
-    )
-
-
-def test_classify_feedback_intent_handles_missing_plan_safely():
-    """无 plan / 空白输入下行为可预测，不抛错。"""
-
-    from agent.input_intents import classify_feedback_intent
-
-    assert classify_feedback_intent("", plan=None) == "feedback_to_current_plan"
-    assert classify_feedback_intent("   ", plan=None) == "feedback_to_current_plan"
-    # 没有 plan 时，新任务祈使语足以归类为 topic_switch。
-    assert (
-        classify_feedback_intent("帮我写一首诗", plan=None)
-        == "new_task_topic_switch"
-    )

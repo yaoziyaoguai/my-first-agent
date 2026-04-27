@@ -5,24 +5,18 @@ import os
 import time
 from collections.abc import Callable
 
-from agent.commands import (
-    CommandContext,
-    CommandResult,
-    DEFAULT_COMMAND_REGISTRY,
-)
 from agent.core import chat, get_state
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
     DisplayEvent,
     RuntimeEvent,
-    command_result,
     render_runtime_event_for_cli,
 )
 from agent.input_backends.simple import (
     read_user_input_event as read_simple_user_input_event,
     read_user_input_text,
 )
-from agent.input_intents import classify_user_input, parse_slash_command
+from agent.input_intents import classify_user_input
 from agent.user_input import UserInputEvent
 from agent.session import (
     init_session,
@@ -33,7 +27,6 @@ from agent.session import (
     handle_double_interrupt,
 )
 from agent.checkpoint import load_checkpoint
-from agent.skills.registry import reload_registry
 
 
 CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
@@ -325,11 +318,15 @@ def _handle_textual_shell_input(
     """处理常驻 Textual Shell 提交的文本，并返回用户可见输出。
 
     这里是 main.py 的 I/O 桥接层：TUI 不 import Runtime state，也不
-    save_checkpoint；main 负责复用现有 slash/chat 流程，再把可展示文本交还给
+    save_checkpoint；main 负责复用现有 chat 流程，再把可展示文本交还给
     conversation view。stdout capture 仍保留，是为了兜住尚未迁移的 print-era
     session/异常/旧调用方文案；已经事件化的 assistant.delta、plan confirmation、
-    slash command、request_user_input、DisplayEvent 和工具 lifecycle 不应再依赖
-    这层 capture。
+    request_user_input、DisplayEvent 和工具 lifecycle 不应再依赖这层 capture。
+
+    本轮（slash command 整体下线）：以 `/` 起头的输入不再走 CommandRegistry/
+    handle_slash_command 分流，而是按普通自然语言输入交给 chat()。后续如要
+    补回类似能力，应通过自然语言归一 InputIntent + 明确 RuntimeEvent 用户确认
+    流来表达，不再恢复 `/xxx` 字符串协议。
     """
 
     intent = classify_user_input(
@@ -338,7 +335,7 @@ def _handle_textual_shell_input(
         state=get_state(),
     )
     # InputIntent 是 TUI adapter 进入 Runtime 前的只读分类：这里只用它集中
-    # empty/exit/slash 这类 UI 控制输入，confirmation/request_user_input 仍交给
+    # empty/exit 这类 UI 控制输入，confirmation/request_user_input 仍交给
     # core.chat() 按 TaskState 分派。不要把 intent 写进 checkpoint、messages、
     # RuntimeEvent 或 Anthropic API messages，也不要把它扩展成状态机本体。
     text = intent.normalized_text
@@ -347,30 +344,6 @@ def _handle_textual_shell_input(
 
     if intent.kind == "exit":
         return "[系统] 常驻 TUI 请按 Ctrl+Q 退出并保存会话。"
-
-    if intent.kind == "slash_command":
-        if on_runtime_event is not None:
-            handle_slash_command(
-                text,
-                command_name=intent.metadata.get("command_name"),
-                command_args=intent.metadata.get("command_args", ""),
-                on_runtime_event=on_runtime_event,
-            )
-            return ""
-
-        # 这是 slash command 的旧 print-era fallback：只服务没有 RuntimeEvent sink
-        # 的调用方。CommandRegistry 已经集中消费未知 command，避免 `/unknown` 再落入
-        # 模型消息；但输出仍不能扩大成新协议，也不能写 checkpoint/messages。
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            handle_slash_command(
-                text,
-                command_name=intent.metadata.get("command_name"),
-                command_args=intent.metadata.get("command_args", ""),
-            )
-        if captured.getvalue():
-            return _user_visible_stdout(captured.getvalue())
-        return ""
 
     _reply, latest_output = _run_chat_for_backend(
         text,
@@ -394,75 +367,6 @@ def run_textual_main_loop() -> None:
 
     run_textual_io_shell(chat_handler=_handle_textual_shell_input)
     finalize_session()
-
-
-def handle_slash_command(
-    user_input: str,
-    *,
-    command_name: str | None = None,
-    command_args: str = "",
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-) -> bool:
-    """处理 / 开头的本地系统命令。
-
-    这里是 main.py 接入 CommandRegistry 的 adapter 边界：InputIntent 已经解析出
-    command_name/command_args，CommandRegistry 负责本地控制语义，main.py 只把
-    CommandResult 投影成 RuntimeEvent 或 simple CLI print。CommandResult 不是
-    RuntimeEvent，也不是 InputIntent；它不能写 checkpoint、conversation.messages、
-    Anthropic API messages、TaskState、tool_use_id 配对或 tool_result placeholder。
-
-    新 adapter 路径会把 InputIntent 解析出的 command_name/command_args 传进来，
-    避免 command handler 继续猜测输入 kind。这里保留 user_input 解析 fallback 是为了
-    兼容旧测试/旧调用方；兼容层只能解析 metadata，不能再新增散落 command 分支。
-    """
-    cmd = user_input.strip()
-    if command_name is None:
-        parsed = parse_slash_command(cmd)
-        command_name = parsed["command_name"]
-        command_args = parsed["command_args"]
-
-    result = DEFAULT_COMMAND_REGISTRY.execute(
-        command_name or "",
-        command_args,
-        context=CommandContext(
-            state=get_state(),
-            reload_registry=reload_registry,
-        ),
-    )
-    _emit_command_result(cmd, result, on_runtime_event=on_runtime_event)
-    return result.handled
-
-
-def _emit_command_result(
-    raw_command: str,
-    result: CommandResult,
-    *,
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-) -> None:
-    """把 CommandResult 投影到用户可见输出边界。
-
-    CommandRegistry 不直接构造 RuntimeEvent，是为了保持三层边界清楚：
-    InputIntent 负责输入分类，CommandResult 表达本地 command 控制语义，RuntimeEvent
-    才是 Runtime/UI 输出边界。这里不写 checkpoint/messages，不读取 TaskState 推进
-    逻辑，也不把 command metadata 混进 Anthropic API messages。无 RuntimeEvent sink
-    时保留 simple CLI print fallback；删除条件是所有 CLI 调用方都消费事件流。
-    """
-
-    if result.message is None:
-        return
-
-    metadata = {
-        "command_name": result.command_name,
-        "result_kind": result.kind,
-        "should_exit": result.should_exit,
-        "should_clear": result.should_clear,
-        **result.metadata,
-    }
-    event = command_result(result.message, command=raw_command, metadata=metadata)
-    if on_runtime_event is not None:
-        on_runtime_event(event)
-        return
-    print(f"\n{render_runtime_event_for_cli(event)}")
 
 
 def read_user_input(
@@ -531,7 +435,7 @@ def main_loop():
                 event_type=event.event_type,
             )
             # main_loop 是 simple CLI fallback 和 legacy one-shot textual backend 的调度层。
-            # InputIntent 只帮助这里统一 cancel/eof/empty/exit/slash 的输入边界；
+            # InputIntent 只帮助这里统一 cancel/eof/empty/exit 的输入边界；
             # plan/tool/request_user_input 等 Runtime 语义仍由 chat() 的 TaskState 分派处理。
             # 不能把 intent 持久化，也不能把它混进 RuntimeEvent 输出边界。
 
@@ -556,13 +460,6 @@ def main_loop():
             if intent.kind == "exit":
                 finalize_session()
                 break
-
-            if intent.kind == "slash_command" and handle_slash_command(
-                user_input,
-                command_name=intent.metadata.get("command_name"),
-                command_args=intent.metadata.get("command_args", ""),
-            ):
-                continue
 
             reply, new_latest_output = _run_chat_for_backend(
                 user_input,

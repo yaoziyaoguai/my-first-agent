@@ -301,21 +301,29 @@ def test_user_switches_topic_mid_task(monkeypatch):
     当前代码的 handle_step_confirmation 会把它当作 plan_feedback
     （触发 planner 重算当前任务）。但用户真正的意图是"我换话题了"。
 
-    ⚠️ 当前 xfail：代码无法区分"对当前 plan 的反馈" 和"全新任务"。
-    用户换话题会让 user_goal 被错误拼接（旧目标 + 新话题文字），
-    planner 被喂了混合意图，产生一个不伦不类的 plan。
+    ⚠️ 当前 xfail（slash command 整体下线 + 启发式回退后重新挂上）：
+    Runtime 当前没有任何机制可以在单次 chat() 调用里区分"对当前 plan 的反馈"
+    和"切换到新任务"。可行的解只有以下几种，本轮都不引入：
+      (a) `/newtask` 类显式控制输入 —— slash command 已整体下线，不再恢复字符串协议；
+      (b) LLM 二次分类器 + `awaiting_topic_switch_confirmation` 状态 —— 设计较重，
+          需要 RuntimeEvent 用户确认流，超出本轮范围；
+      (c) 浅层关键词/字符启发式（c252695 引入的 imperative-prefix + plan vocab
+          no-overlap）—— 已在本轮回退，不允许靠这种猜测；
+      (d) 改写测试为两步交互（先 n 取消旧任务，再提新任务）—— 用户不接受。
+    在引入 (a)/(b) 中的某一种之前，本测试保留 xfail；它仍然是产品方向的真实
+    缺口提醒。
 
-    修法（两选一）：
-    (a) 在 awaiting_step_confirmation 时，如果输入既不是 y/n 也不像 feedback
-        （比如长度很长或包含完整句号），打印"现在是在确认 step，要切新任务请先 n 取消"
-    (b) 识别意图：如果用户输入里没包含任何和当前 plan 相关的词，提示用户确认
-
-    fix 后：confirm_handlers 在 awaiting_step 反馈分支用 looks_like_topic_switch
-    做轻量启发式判定，命中则发一个 control_message RuntimeEvent 提示切换、清掉
-    旧任务，再走新一轮 planning_phase + main_loop；这条路径不改 checkpoint
-    schema、不写 conversation.messages、不影响 tool_use_id / tool_result
-    placeholder 或 request_user_input 语义。
+    本轮**保留**的结构化收益：feedback 分支不再写回 state.task.user_goal，避免
+    plan/step feedback 单向累加导致 user_goal 字符串无限膨胀
+    （见 test_plan_feedback_does_not_accumulate_goal_string_indefinitely）。
     """
+
+    import pytest as _pytest
+    _pytest.xfail(
+        "slash command 整体下线 + 启发式回退后无信号源：Runtime 在单次 chat() "
+        "里无法可靠区分 plan feedback 与新任务话题切换；解此缺口需要明确的"
+        "RuntimeEvent 用户确认流或 LLM 二次分类，本轮不引入。"
+    )
     cleanup = _register_test_tool("w", confirmation="never", result="done")
     try:
         fake = FakeAnthropicClient(

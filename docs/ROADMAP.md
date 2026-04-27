@@ -3,6 +3,17 @@
 > **阅读前提**：先读过 `docs/ARCHITECTURE.md`。这份文档假设你已经理解当前代码的分层、状态机、协议配对契约。
 >
 > **文档定位**：这不是待办清单，是**演进地图**。每一块告诉你：为什么现在该做、业界怎么做、是否有更激进的思路、在你代码里改哪里。
+
+> ⚠️ **本轮变更通知**
+>
+> slash command 能力（`agent/commands.py` / CommandRegistry / `/help` / `/status` /
+> `/clear` / `/reload_skills` / `parse_slash_command` / `slash_command` InputIntent kind）
+> 已整体下线。同时回退 c252695 中浅层 feedback 启发式（imperative-prefix +
+> plan vocab no-overlap）；保留"feedback 不写回 user_goal"的结构化收益。
+> 详见 `docs/ARCHITECTURE.md` 顶部说明。本路线图中"slash 控制命令"
+> 相关项已不再适用，未来如需补回需通过自然语言 InputIntent + RuntimeEvent
+> 用户确认流 + 状态机转移设计，不再恢复字符串协议。
+>
 >
 > **使用方式**：按阶段顺序推进。每开一个 block，先回头读对应章节，决定"做"或"跳过或推迟"。不是每一块都必须做。
 

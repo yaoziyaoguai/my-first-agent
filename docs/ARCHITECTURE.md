@@ -2,6 +2,29 @@
 
 > 目的：这篇文档不是 README，也不是 API reference。它是**帮你阅读现有代码**的路线图——告诉你每一块在整体里的位置、为什么这样设计、踩过哪些坑、哪里是难点、未来会扩展到哪里。读完之后你应该能自己翻代码不迷路。
 
+> ⚠️ **本轮变更通知（slash command 整体下线 + 启发式回退）**
+>
+> 为了保护 RuntimeEvent / InputIntent / CommandResult / checkpoint / messages /
+> `context_builder._project_to_api` / tool_use_id / tool_result placeholder /
+> request_user_input 这一组主线边界的清晰度，本轮已将 slash command 能力**整体移除**：
+> - 删除 `agent/commands.py`（`CommandSpec` / `CommandResult` / `CommandRegistry` /
+>   `DEFAULT_COMMAND_REGISTRY` / 5 个内置命令）；
+> - `InputIntent` 移除 `slash_command` kind、`parse_slash_command` 解析器、
+>   `_EXIT_INPUTS` 中的 `/exit`；以 `/` 起头的输入按普通自然语言进入 `chat()`；
+> - `main.py` 移除 `handle_slash_command` / `_emit_command_result` / 两处 dispatch；
+> - `display_events.py` 移除 `command_result` helper / `EVENT_COMMAND_RESULT` 常量；
+> - 同时**回退** c252695 引入的浅层 feedback 启发式（imperative-prefix +
+>   plan vocab no-overlap）：删除 `FeedbackIntent` / `classify_feedback_intent` /
+>   `_try_route_topic_switch` / `start_new_task_fn` 注入。
+>
+> **保留**的 c252695 结构化收益：feedback 分支不再写回 `state.task.user_goal`，
+> 避免单向累加导致 user_goal 字符串无限膨胀。
+>
+> 后续如需补回类似能力，必须通过普通方式（自然语言归一 `InputIntent` + 明确
+> `RuntimeEvent` 用户确认流 + 状态机转移 + UI 菜单/普通 CLI 参数），而不是
+> 再恢复 `/xxx` 字符串协议或浅层关键词启发式。下方文档对 slash command /
+> CommandRegistry 的旧描述属于历史背景，请以本通知为准。
+
 ---
 
 ## 0. TL;DR —— 一张图看懂整体

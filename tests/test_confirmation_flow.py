@@ -57,6 +57,23 @@ def _planner_two_step_response() -> FakeResponse:
     )
 
 
+def _control_event_texts(state):
+    """提取语义控制事件文本，避免测试依赖 InputIntent 被写入 messages。
+
+    confirmation 分类可以集中到 InputIntent 层，但 messages 里仍只能出现
+    confirm_handlers 写入的业务语义事件，不能出现 InputIntent 对象、RuntimeEvent、
+    checkpoint/debug 信息或 Anthropic API 以外的结构。
+    """
+
+    return [
+        block.get("text", "")
+        for msg in state.conversation.messages
+        if isinstance(msg.get("content"), list)
+        for block in msg["content"]
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+
+
 # ---------- plan confirmation ----------
 
 def test_plan_confirmation_yes_advances_to_running(monkeypatch):
@@ -118,6 +135,81 @@ def test_plan_confirmation_no_cancels_and_resets(monkeypatch):
     assert "取消" in reply
     assert state.task.status == "idle"
     assert state.task.current_plan is None
+
+
+def test_plan_confirmation_uses_unified_chinese_accept(monkeypatch):
+    """plan confirmation 应使用 InputIntent 的统一中文确认分类。
+
+    这里验证的是状态推进层接入统一分类后仍然只写语义控制事件，不把 InputIntent
+    持久化进 messages/checkpoint，也不改变 TaskState 或 Anthropic API messages。
+    """
+
+    fake = FakeAnthropicClient(
+        responses=[
+            _planner_two_step_response(),
+            meta_complete_response(score=95, text="第一步做完了"),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    chat("帮我做个两步任务，每步确认")
+    assert state.task.status == "awaiting_plan_confirmation"
+
+    chat("确认")
+
+    assert state.task.current_plan is not None
+    assert state.task.status in (
+        "running",
+        "awaiting_step_confirmation",
+        "awaiting_tool_confirmation",
+    )
+    texts = _control_event_texts(state)
+    assert any("用户接受当前计划" in text for text in texts)
+    assert all("InputIntent" not in text for text in texts)
+
+
+def test_plan_confirmation_uses_unified_uppercase_reject(monkeypatch):
+    """plan confirmation 的 NO 应通过统一分类走 reject 分支。"""
+
+    fake = FakeAnthropicClient(responses=[_planner_two_step_response()])
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    chat("帮我做个两步任务")
+    assert state.task.status == "awaiting_plan_confirmation"
+
+    reply = chat(" NO ")
+
+    assert "取消" in reply
+    assert state.task.status == "idle"
+    assert state.task.current_plan is None
+
+
+def test_plan_confirmation_feedback_still_replans(monkeypatch):
+    """普通反馈文本不能被统一分类误判为 yes/no，仍应走重规划分支。"""
+
+    fake = FakeAnthropicClient(
+        responses=[
+            _planner_two_step_response(),
+            _planner_two_step_response(),
+        ]
+    )
+    state = _reset_core_module(monkeypatch, fake)
+
+    from agent.core import chat
+
+    chat("帮我做个两步任务")
+    assert state.task.status == "awaiting_plan_confirmation"
+
+    reply = chat("请把第二步改成先分析")
+
+    assert reply == ""
+    assert state.task.status == "awaiting_plan_confirmation"
+    texts = _control_event_texts(state)
+    assert any("修改意见" in text for text in texts)
 
 
 # ---------- tool confirmation ----------
@@ -222,6 +314,51 @@ def test_tool_confirmation_yes_executes_and_continues(monkeypatch):
         assert state.task.tool_execution_log == {}
         from agent.conversation_events import has_tool_result
         assert has_tool_result(state.conversation.messages, "T_SAFE")
+    finally:
+        cleanup()
+
+
+def test_tool_confirmation_uses_unified_chinese_reject_placeholder(monkeypatch):
+    """tool confirmation 的中文拒绝仍必须补 placeholder tool_result。
+
+    统一分类只能替代 yes/no 字符串判断，不能改变 tool_use_id 配对或
+    tool_result placeholder 语义；否则下一轮 Anthropic API messages 会出现悬空
+    tool_use。
+    """
+
+    from agent.conversation_events import has_tool_result
+    from tests.conftest import FakeToolUseBlock
+
+    cleanup = _register_test_tool("risky_tool_cn", confirmation="always")
+    try:
+        fake = FakeAnthropicClient(
+            responses=[
+                _planner_no_plan_response(),
+                FakeResponse(
+                    content=[
+                        FakeTextBlock(text="我要跑危险工具"),
+                        FakeToolUseBlock(
+                            id="T_RISKY_CN",
+                            name="risky_tool_cn",
+                            input={"arg": "dangerous"},
+                        ),
+                    ],
+                    stop_reason="tool_use",
+                ),
+                text_response("好的，跳过了"),
+            ]
+        )
+        state = _reset_core_module(monkeypatch, fake)
+
+        from agent.core import chat
+
+        chat("跑个危险工具")
+        assert state.task.status == "awaiting_tool_confirmation"
+
+        chat("否")
+
+        assert state.task.pending_tool is None
+        assert has_tool_result(state.conversation.messages, "T_RISKY_CN")
     finally:
         cleanup()
 

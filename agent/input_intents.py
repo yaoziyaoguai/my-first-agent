@@ -35,6 +35,7 @@ _ACCEPT_CONFIRMATIONS = {
     "好的",
     "是",
     "是的",
+    "确认",
     "行",
     "可以",
 }
@@ -66,9 +67,15 @@ class InputIntent:
 def classify_confirmation_response(text: str) -> ConfirmationResponse:
     """把确认输入归一成 accept/reject/feedback。
 
-    这是 adapter 层的只读分类 helper，用来让测试和后续 UI command 能共享同一套
-    yes/no 词表。真正的状态推进仍在 confirm_handlers；本函数不改 state、不写
-    checkpoint/messages、不调用模型，也不影响 tool_use/tool_result 配对。
+    这是 UI Adapter -> Runtime 输入边界上的只读分类 helper，用来让 adapter 和
+    confirm_handlers 共享同一套 yes/no/中文确认词表。它解决的是旧 CLI 时代
+    plan/step/tool confirmation 各自散落字符串判断的根因；真正的状态推进仍在
+    confirm_handlers。
+
+    本函数不能修改 state，不能写 checkpoint 或 conversation.messages，不能触发
+    RuntimeEvent，不能改变 Anthropic API messages，也不能影响 tool_use_id 配对或
+    tool_result placeholder。普通文本和空文本都归为 feedback，交给状态推进层按当前
+    awaiting 状态处理。
     """
 
     normalized = text.strip().lower()

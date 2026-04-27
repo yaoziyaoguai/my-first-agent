@@ -98,6 +98,11 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   Anthropic API messages，也不替代 TaskState。当前只用于 adapter 层集中判断，
   confirmation 和 request_user_input 的真正状态推进仍留在 `core.chat()` /
   `confirm_handlers.py`。
+- confirmation 输入判断已开始收敛：`classify_confirmation_response(...)` 成为
+  plan/step/tool confirmation 共享的 accept/reject/feedback 分类入口。
+  `confirm_handlers.py` 不再维护自己的 yes/no/中文词表，但仍是状态推进层，继续负责
+  checkpoint 保存、control event、pending_tool 清理和 tool_result placeholder；不能把
+  InputIntent 写入 messages/checkpoint，也不能影响 tool_use_id 配对。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
@@ -105,18 +110,21 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 1. **TUI-first adapter cleanup**：继续把 `main.py` 的 Textual 产品路径、simple CLI
    fallback、slash command 和 session lifecycle 分层；继续扩展 InputIntent 只读分类，
    但仍不得写入 checkpoint/messages 或混入 RuntimeEvent。
-2. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
+2. **Structured slash command**：下一步可以把 slash command 从字符串判断继续收敛到
+   InputIntent / command adapter 边界，但不要重写 command 系统，也不要写入
+   conversation.messages 或 checkpoint。
+3. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
    stdout fallback 使用率；session lifecycle、debug/checkpoint/runtime_observer 仍保持
    在各自边界，不混入 UI event。
-3. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
+4. **RuntimeEvent iterator**：在已有 RuntimeEvent callback 骨架上继续演进为
    `chat_stream` / RuntimeEvent iterator，并逐步移除旧 callback/stdout capture。
    debug/checkpoint 仍不进入 UI RuntimeEvent，继续走结构化日志。
-4. **Input boundary later**：普通 CLI 多行粘贴 / paste burst 属于输入层产品化，之后
+5. **Input boundary later**：普通 CLI 多行粘贴 / paste burst 属于输入层产品化，之后
    单独设计，不和 RuntimeEvent 输出边界混改。
-5. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
+6. **Cancellation design**：之后再为 cancellation / `generation.cancelled` 预留事件
    类型，先做边界设计，不急着碰复杂 stream abort，也不与 runtime_observer debug
    event 混用。
-6. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
+7. **Checkpoint/debug hygiene**：checkpoint / runtime observer 已先收敛为默认写
    结构化日志、terminal debug 显式开启；下一步应把其余 print-era debug 也迁移
    到 DisplayEvent / structured logger。
 

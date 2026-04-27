@@ -15,6 +15,7 @@ from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.context_builder import build_planning_messages
 from agent.conversation_events import append_control_event
 from agent.display_events import plan_confirmation_requested
+from agent.input_intents import classify_confirmation_response
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
 from agent.task_runtime import advance_current_step_if_needed
@@ -25,20 +26,17 @@ from agent.transitions import apply_user_replied_transition
 ContinueFn = Callable[[Any], str]
 
 
-# ===== 用户意图识别 =====
-# 三处 handle_*_confirmation 原来都是 `confirm.lower() == "y"` 精确匹配，
-# 导致 "yes"、"好的"、"OK" 这些常见肯定词全部落入 feedback 分支触发错误重规划。
-# 统一用集合判断；两个集合保证不相交。
-_ACCEPT = {"y", "yes", "ok", "okay", "好", "好的", "是", "是的", "行", "可以"}
-_REJECT = {"n", "no", "不", "不要", "否", "取消"}
+def _confirmation_response(confirm: str) -> str:
+    """把确认输入委托给 InputIntent 分类层。
 
+    confirm_handlers 是状态推进层，不应该继续维护自己的 yes/no/中文词表；否则
+    Textual/simple CLI adapter 和 Runtime handler 会再次出现字符串判断分叉。这里仅
+    读取分类结果，然后保留原有 plan/step/tool 状态推进、checkpoint 保存、
+    tool_use_id 配对和 tool_result placeholder 语义。InputIntent 本身不会写入
+    conversation.messages，也不会混入 RuntimeEvent 或 Anthropic API messages。
+    """
 
-def _is_accept(confirm: str) -> bool:
-    return confirm.strip().lower() in _ACCEPT
-
-
-def _is_reject(confirm: str) -> bool:
-    return confirm.strip().lower() in _REJECT
+    return classify_confirmation_response(confirm)
 
 
 @dataclass(slots=True)
@@ -82,13 +80,15 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state = ctx.state
     messages = state.conversation.messages
 
-    if _is_accept(confirm):
+    response = _confirmation_response(confirm)
+
+    if response == "accept":
         append_control_event(messages, "plan_confirm_yes", {})
         state.task.status = "running"
         save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
-    if _is_reject(confirm):
+    if response == "reject":
         append_control_event(messages, "plan_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，已取消。"})
         state.reset_task()
@@ -126,7 +126,9 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state = ctx.state
     messages = state.conversation.messages
 
-    if _is_accept(confirm):
+    response = _confirmation_response(confirm)
+
+    if response == "accept":
         append_control_event(messages, "step_confirm_yes", {})
         advance_current_step_if_needed(state)
         # 不要在这里手工 status = "running"：advance_current_step_if_needed
@@ -141,7 +143,7 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
-    if _is_reject(confirm):
+    if response == "reject":
         append_control_event(messages, "step_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，当前任务已停止。"})
         state.reset_task()
@@ -235,7 +237,9 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
 
     tool_name = pending["tool"]
 
-    if _is_accept(confirm):
+    response = _confirmation_response(confirm)
+
+    if response == "accept":
         append_control_event(messages, "tool_confirm_yes", pending)
         try:
             execute_pending_tool(
@@ -273,11 +277,11 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
             messages,
             pending["tool_use_id"],
             "[系统] 用户拒绝执行该工具，已跳过。"
-            if _is_reject(confirm)
+            if response == "reject"
             else f"[系统] 用户未批准该工具，改为反馈意见：{confirm}",
         )
 
-    if _is_reject(confirm):
+    if response == "reject":
         append_control_event(messages, "tool_confirm_no", pending)
         state.task.status = "running"
         save_checkpoint(state)

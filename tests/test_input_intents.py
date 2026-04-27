@@ -93,6 +93,26 @@ def test_classifies_plan_confirmation_accept_and_feedback():
     assert feedback.metadata["confirmation_response"] == "feedback"
 
 
+def test_classify_confirmation_response_words_and_feedback():
+    """确认词表应集中在 InputIntent 层，覆盖大小写、空格和中文。
+
+    这是输入边界的回归测试：plan/step/tool confirmation 共享同一分类 helper；
+    helper 不能把空文本或中文反馈误判为 accept/reject，也不能写 checkpoint/messages
+    或影响 tool_result placeholder。
+    """
+
+    from agent.input_intents import classify_confirmation_response
+
+    for raw in ("y", "yes", "Y", "YES", "  yes  ", "是", "确认", "可以", "好"):
+        assert classify_confirmation_response(raw) == "accept"
+
+    for raw in ("n", "no", "N", "NO", "  no  ", "否", "不", "取消"):
+        assert classify_confirmation_response(raw) == "reject"
+
+    for raw in ("", "   ", "请把第二步改成先分析", "不是这个意思，换一种方案"):
+        assert classify_confirmation_response(raw) == "feedback"
+
+
 def test_classifies_tool_confirmation_reject():
     """pending_tool 下，n/no/否 应统一标记为 tool_confirmation reject。"""
 

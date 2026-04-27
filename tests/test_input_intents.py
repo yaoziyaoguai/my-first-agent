@@ -45,10 +45,47 @@ def test_classifies_slash_commands_without_writing_runtime_state():
     status_intent = classify_user_input("/status now", source="simple", state=state)
 
     assert help_intent.kind == "slash_command"
-    assert help_intent.metadata == {"command": "/help"}
+    assert help_intent.metadata == {
+        "command": "/help",
+        "command_name": "help",
+        "command_args": "",
+        "is_exit_command": False,
+    }
     assert status_intent.kind == "slash_command"
-    assert status_intent.metadata == {"command": "/status"}
+    assert status_intent.metadata == {
+        "command": "/status",
+        "command_name": "status",
+        "command_args": "now",
+        "is_exit_command": False,
+    }
     assert state.conversation.messages == before_messages
+
+
+def test_slash_command_metadata_covers_known_unknown_and_exit_inputs():
+    """slash metadata 只服务 adapter 控制输入，不成为 command registry。
+
+    `/exit` 当前先归类为 exit，说明退出是 shell 控制输入；其它 slash command 只
+    解析名称和参数，不写 checkpoint/messages，不触发 RuntimeEvent，也不替代
+    main.py 的 command handler。
+    """
+
+    from agent.input_intents import classify_user_input
+
+    cases = {
+        "/clear": ("clear", ""),
+        "/unknown abc": ("unknown", "abc"),
+        "/reload_skills": ("reload_skills", ""),
+    }
+
+    for raw, (name, args) in cases.items():
+        intent = classify_user_input(raw, source="tui")
+        assert intent.kind == "slash_command"
+        assert intent.metadata["command_name"] == name
+        assert intent.metadata["command_args"] == args
+        assert intent.metadata["is_exit_command"] is False
+
+    exit_intent = classify_user_input("/exit", source="tui")
+    assert exit_intent.kind == "exit"
 
 
 def test_classifies_empty_exit_cancel_and_eof():
@@ -150,6 +187,68 @@ def test_classifies_request_user_input_reply_and_collect_input_reply():
     assert collect_reply.metadata["awaiting_kind"] == "collect_input"
 
 
+def test_request_user_reply_priority_keeps_yes_as_pending_reply():
+    """pending_user_input_request 下的 yes 是用户答复，不是 confirmation。
+
+    这条保护 request_user_input 的输入边界：pending 请求的回复会在 Runtime 层继续
+    投影为 user_replied/step_input 语义，而不是被 adapter 误判成普通新任务或
+    plan/tool confirmation。这里不改变 tool_result placeholder 或 checkpoint schema。
+    """
+
+    from agent.input_intents import classify_user_input
+
+    state = _fresh_state()
+    state.task.status = "awaiting_user_input"
+    state.task.pending_user_input_request = {
+        "awaiting_kind": "request_user_input",
+        "question": "是否需要高铁？",
+        "why_needed": "用于继续当前步骤",
+    }
+
+    intent = classify_user_input("yes", source="tui", state=state)
+
+    assert intent.kind == "request_user_reply"
+    assert intent.metadata == {"awaiting_kind": "request_user_input"}
+
+
+def test_control_inputs_keep_current_priority_over_pending_states():
+    """固化当前 adapter 优先级：control 输入先于 pending 状态。
+
+    这是当前产品语义，不在本阶段私自改变：empty/exit/slash 属于 UI/control
+    输入，可以在 pending_user_input_request、pending_tool 或 plan confirmation
+    期间被 adapter 先识别。后续若要禁止 slash 打断 pending 状态，应单独设计，
+    不能把 InputIntent 写进 checkpoint/messages 或混入 RuntimeEvent。
+    """
+
+    from agent.input_intents import classify_user_input
+
+    request_state = _fresh_state()
+    request_state.task.status = "awaiting_user_input"
+    request_state.task.pending_user_input_request = {
+        "awaiting_kind": "request_user_input",
+        "question": "预算？",
+    }
+
+    slash = classify_user_input("/status", source="tui", state=request_state)
+    assert slash.kind == "slash_command"
+    assert slash.metadata["command_name"] == "status"
+    assert classify_user_input("   ", source="tui", state=request_state).kind == "empty"
+    assert classify_user_input("/exit", source="tui", state=request_state).kind == "exit"
+
+    tool_state = _fresh_state()
+    tool_state.task.status = "awaiting_tool_confirmation"
+    tool_state.task.pending_tool = {"tool_use_id": "T1", "tool": "write_file"}
+    tool_slash = classify_user_input("/status", source="simple", state=tool_state)
+    assert tool_slash.kind == "slash_command"
+    assert tool_slash.metadata["command_name"] == "status"
+
+    plan_state = _fresh_state()
+    plan_state.task.status = "awaiting_plan_confirmation"
+    plan_slash = classify_user_input("/status", source="tui", state=plan_state)
+    assert plan_slash.kind == "slash_command"
+    assert plan_slash.metadata["command_name"] == "status"
+
+
 def test_textual_and_simple_classify_same_raw_input_consistently():
     """Textual 产品路径和 simple CLI fallback 应共享输入语义分类。
 
@@ -169,6 +268,24 @@ def test_textual_and_simple_classify_same_raw_input_consistently():
     assert textual.metadata == simple.metadata == {"confirmation_response": "accept"}
     assert textual.source == "tui"
     assert simple.source == "simple"
+
+
+def test_textual_and_simple_classify_slash_commands_consistently():
+    """Textual 和 simple 对 slash command 的 metadata 应一致。
+
+    source 只记录 adapter 来源；command_name/command_args 这类输入语义必须共享，
+    避免 simple CLI 历史字符串协议继续散落到 Textual 产品主路径。
+    """
+
+    from agent.input_intents import classify_user_input
+
+    textual = classify_user_input("/status now", source="tui")
+    simple = classify_user_input("/status now", source="simple")
+
+    assert textual.kind == simple.kind == "slash_command"
+    assert textual.metadata == simple.metadata
+    assert textual.metadata["command_name"] == "status"
+    assert textual.metadata["command_args"] == "now"
 
 
 def test_input_intent_does_not_enter_messages_or_checkpoint(monkeypatch):

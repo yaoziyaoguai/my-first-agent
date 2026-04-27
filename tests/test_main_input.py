@@ -764,9 +764,16 @@ def test_textual_runtime_event_does_not_duplicate_into_legacy_callbacks(monkeypa
 
 
 def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
-    """Textual slash command 主路径应走 command.result，而不是 stdout capture。"""
+    """Textual slash command 主路径应走 command.result，而不是 stdout capture。
+
+    这是 adapter 控制输入，不是模型 user message；识别后不应进入 chat，也不写
+    conversation.messages/checkpoint。InputIntent metadata 只把 command_name/args
+    传给 handler，不能变成 RuntimeEvent 输入或复杂 command registry。
+    """
 
     import main
+    from agent import checkpoint
+    from agent.state import create_agent_state
 
     class FakeRegistry:
         def count(self):
@@ -776,6 +783,25 @@ def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
             return ["忽略了重复 skill"]
 
     monkeypatch.setattr(main, "reload_registry", lambda: FakeRegistry())
+    monkeypatch.setattr(
+        main,
+        "chat",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recognized slash command 不应进入 chat")
+        ),
+    )
+    state = create_agent_state(system_prompt="test")
+    before_messages = list(state.conversation.messages)
+    checkpoint_calls = {"save": 0}
+    monkeypatch.setattr(main, "get_state", lambda: state)
+    monkeypatch.setattr(
+        checkpoint,
+        "save_checkpoint",
+        lambda *_args, **_kwargs: checkpoint_calls.__setitem__(
+            "save",
+            checkpoint_calls["save"] + 1,
+        ),
+    )
 
     events = []
     result = main._handle_textual_shell_input(
@@ -789,6 +815,71 @@ def test_textual_shell_slash_command_uses_runtime_event(monkeypatch, capsys):
     assert "Skill 已重新加载" in events[0].text
     assert "忽略了重复 skill" in events[0].text
     assert "Skill 已重新加载" not in captured.out
+    assert state.conversation.messages == before_messages
+    assert checkpoint_calls == {"save": 0}
+
+
+def test_handle_slash_command_respects_intent_command_args(monkeypatch, capsys):
+    """command handler 消费 InputIntent metadata，不重新猜 `/reload_skills extra`。
+
+    `/reload_skills` 当前只支持无参数形式；带参数的 slash command 应保持未处理，
+    继续由 adapter 决定是否交给 Runtime。这里保留旧解析 fallback，但新路径不能把
+    handler 扩展成 command registry，也不能写 messages/checkpoint。
+    """
+
+    import main
+
+    monkeypatch.setattr(
+        main,
+        "reload_registry",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("带参数的 reload_skills 不应执行")
+        ),
+    )
+
+    handled = main.handle_slash_command(
+        "/reload_skills extra",
+        command_name="reload_skills",
+        command_args="extra",
+    )
+
+    assert handled is False
+    assert capsys.readouterr().out == ""
+
+
+def test_textual_request_user_reply_is_forwarded_to_runtime(monkeypatch):
+    """request_user_input reply 不在 main.py 被当成新任务或 confirmation 消费。
+
+    pending_user_input_request 的状态推进仍属于 core/chat/confirm_handlers；Textual
+    adapter 只分类并把原始回复交给 Runtime，不写 checkpoint/messages，也不改变
+    user_replied/step_input 或 tool_result placeholder 语义。
+    """
+
+    import main
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_user_input"
+    state.task.pending_user_input_request = {
+        "awaiting_kind": "request_user_input",
+        "question": "是否选择高铁？",
+        "why_needed": "继续当前 step",
+    }
+    calls = []
+
+    def fake_run_chat_for_backend(user_input: str, **kwargs):
+        calls.append((user_input, kwargs))
+        return "ok", "ok"
+
+    monkeypatch.setattr(main, "get_state", lambda: state)
+    monkeypatch.setattr(main, "_run_chat_for_backend", fake_run_chat_for_backend)
+
+    result = main._handle_textual_shell_input("yes")
+
+    assert result == "ok"
+    assert len(calls) == 1
+    assert calls[0][0] == "yes"
+    assert calls[0][1]["backend"] == "textual"
 
 
 def test_textual_shell_slash_command_stdout_fallback_only_without_runtime_sink(

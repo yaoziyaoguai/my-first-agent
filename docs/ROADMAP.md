@@ -103,6 +103,18 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
   `confirm_handlers.py` 不再维护自己的 yes/no/中文词表，但仍是状态推进层，继续负责
   checkpoint 保存、control event、pending_tool 清理和 tool_result placeholder；不能把
   InputIntent 写入 messages/checkpoint，也不能影响 tool_use_id 配对。
+- structured slash command / request_user_input 输入收敛已完成第一刀：
+  `parse_slash_command(...)` 只解析 UI/control 输入 metadata（`command_name` /
+  `command_args` / `is_exit_command`），`main.py::handle_slash_command(...)` 仍负责
+  执行命令。slash command 不进入 `conversation.messages`，不写 checkpoint，不混入
+  RuntimeEvent 输入；Textual 产品路径和 simple CLI fallback 共享同一分类。当前
+  request_user_input reply 在 pending 状态下归为 `request_user_reply`，后续仍由
+  `core.chat()` / `confirm_handlers.py` 投影成 `user_replied` / `step_input`，不生成
+  tool_result placeholder，也不改变 Anthropic API messages。
+- pending 状态下 slash command 的当前行为已经按代码固化：`empty` / `exit` /
+  `slash_command` 优先于 pending_user_input_request、pending_tool 和 plan confirmation，
+  因此 slash 可以作为 UI/control 输入打断 pending 状态。是否需要禁止或确认这种打断，
+  属于后续产品/架构决策，不能在本阶段通过状态机或 checkpoint 补丁临时处理。
 - generation cancel / `Esc` 打断模型生成尚未实现；当前 `Esc` 只清空编辑区。
 
 下一阶段建议优先聚焦两件事：
@@ -110,9 +122,10 @@ MY_FIRST_AGENT_INPUT_BACKEND=textual python main.py
 1. **TUI-first adapter cleanup**：继续把 `main.py` 的 Textual 产品路径、simple CLI
    fallback、slash command 和 session lifecycle 分层；继续扩展 InputIntent 只读分类，
    但仍不得写入 checkpoint/messages 或混入 RuntimeEvent。
-2. **Structured slash command**：下一步可以把 slash command 从字符串判断继续收敛到
-   InputIntent / command adapter 边界，但不要重写 command 系统，也不要写入
-   conversation.messages 或 checkpoint。
+2. **Slash command registry 决策**：当前只结构化了 slash metadata 和 `/reload_skills`
+   执行入口，尚未建立正式 command registry。后续若新增 `/help` / `/status` /
+   `/clear` 等命令，应先设计 registry 和 pending 状态下是否允许打断，而不是继续在
+   `main.py` 里散落字符串判断。
 3. **Seventh-stage cleanup**：继续事件化残留 print-era 用户可见输出，逐步降低
    stdout fallback 使用率；session lifecycle、debug/checkpoint/runtime_observer 仍保持
    在各自边界，不混入 UI event。

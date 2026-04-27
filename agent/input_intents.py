@@ -43,6 +43,27 @@ _REJECT_CONFIRMATIONS = {"n", "no", "不", "不要", "否", "取消"}
 _EXIT_INPUTS = {"quit", "exit", "/exit"}
 
 
+def parse_slash_command(text: str) -> dict[str, Any]:
+    """解析 UI/control slash command 的轻量 metadata。
+
+    slash command 是 UI Adapter -> Runtime 的控制输入，不是用户给模型的自然语言
+    消息。这个 helper 只做字符串解析，不执行命令，不写 checkpoint，不写
+    conversation.messages，不触发 RuntimeEvent，也不读取或修改 TaskState。它解决的是
+    main.py 和测试里反复 `startswith("/")` / `split()` 的散落判断；真正命令执行仍在
+    command handler，且不能扩展成复杂 command registry。
+    """
+
+    normalized = text.strip()
+    command_token, _, args = normalized.partition(" ")
+    command_name = command_token[1:] if command_token.startswith("/") else command_token
+    return {
+        "command": command_token,
+        "command_name": command_name,
+        "command_args": args.strip(),
+        "is_exit_command": command_token in {"/exit"},
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class InputIntent:
     """UI Adapter -> Runtime 的输入语义归一结果。
@@ -52,7 +73,7 @@ class InputIntent:
     Anthropic API messages，也不替代 TaskState 状态机本体。它只帮助 Textual 产品
     主路径和 simple CLI fallback 在进入 Runtime 前少靠散落字符串猜测。
 
-    metadata 只放分类辅助信息，例如 confirmation_response 或 slash command 名称。
+    metadata 只放分类辅助信息，例如 confirmation_response 或 slash command 名称/参数。
     它不能承载 runtime_observer、debug print、terminal observer log，也不能变成新的
     持久化 schema。
     """
@@ -99,10 +120,15 @@ def classify_user_input(
     不修改 Runtime state，不触发 RuntimeEvent，不调用模型，不执行工具，不写
     checkpoint，也不把分类结果写进 conversation.messages 或 Anthropic API messages。
 
-    分类优先级刻意贴近 adapter 边界：cancel/eof/empty/exit/slash 先在 UI 层识别；
-    plan/step/tool/request_user_input 的具体执行仍交给 core.chat() 按 TaskState 分派。
+    分类优先级刻意贴近 adapter 边界：cancel/eof/empty/exit/slash 先在 UI 层识别。
+    这固化的是当前产品语义：pending_user_input_request、pending_tool 或 plan
+    confirmation 期间，slash command 仍可作为 UI/control 输入打断，而不会进入模型
+    messages。plan/step/tool/request_user_input 的具体状态推进仍交给 core.chat() 按
+    TaskState 分派。
+
     后续如果引入更正式的 InputEnvelope/UserAction，也应沿用这个“只分类、不持久化”
-    的边界，不能把 Textual 产品主路径和 simple CLI fallback 的协议混在一起。
+    的边界，不能把 Textual 产品主路径和 simple CLI fallback 的协议混在一起，也不能
+    改变 tool_use_id 配对或 tool_result placeholder 语义。
     """
 
     if event_type == "input.cancelled":
@@ -123,7 +149,7 @@ def classify_user_input(
             raw_text,
             normalized,
             source,
-            {"command": normalized.split(maxsplit=1)[0]},
+            parse_slash_command(normalized),
         )
 
     task = getattr(state, "task", None)

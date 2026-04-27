@@ -17,7 +17,7 @@ from agent.input_backends.simple import (
     read_user_input_event as read_simple_user_input_event,
     read_user_input_text,
 )
-from agent.input_intents import classify_user_input
+from agent.input_intents import classify_user_input, parse_slash_command
 from agent.user_input import UserInputEvent
 from agent.session import (
     init_session,
@@ -362,7 +362,12 @@ def _handle_textual_shell_input(
 
     if intent.kind == "slash_command":
         if on_runtime_event is not None:
-            handled = handle_slash_command(text, on_runtime_event=on_runtime_event)
+            handled = handle_slash_command(
+                text,
+                command_name=intent.metadata.get("command_name"),
+                command_args=intent.metadata.get("command_args", ""),
+                on_runtime_event=on_runtime_event,
+            )
             if handled:
                 return ""
             # 有 RuntimeEvent sink 的 Textual 主路径不再执行 slash stdout capture。
@@ -375,7 +380,11 @@ def _handle_textual_shell_input(
             # 的调用方。已事件化的 command.result 不应再经过 stdout capture，后续新增
             # slash command 也应优先发 RuntimeEvent，而不是依赖这里抓 print。
             with contextlib.redirect_stdout(captured):
-                handled = handle_slash_command(text)
+                handled = handle_slash_command(
+                    text,
+                    command_name=intent.metadata.get("command_name"),
+                    command_args=intent.metadata.get("command_args", ""),
+                )
             if handled:
                 return _user_visible_stdout(captured.getvalue())
 
@@ -406,6 +415,8 @@ def run_textual_main_loop() -> None:
 def handle_slash_command(
     user_input: str,
     *,
+    command_name: str | None = None,
+    command_args: str = "",
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> bool:
     """处理 / 开头的本地系统命令。
@@ -414,10 +425,20 @@ def handle_slash_command(
     conversation.messages，也不影响 checkpoint。新 Textual 路径通过
     command.result RuntimeEvent 展示结果；没有 sink 的 simple CLI 仍打印。stdout
     capture 只作为旧调用方兜底，不能继续扩展成新的输出协议。
+
+    新 adapter 路径会把 InputIntent 解析出的 command_name/command_args 传进来，
+    避免 command handler 继续猜测输入 kind。这里保留 user_input 解析 fallback 是为了
+    兼容旧测试/旧调用方；这个兼容层不能扩大成 command registry，也不能混入
+    RuntimeEvent 输入、checkpoint、conversation.messages、Anthropic API messages、
+    TaskState、tool_use_id 配对或 tool_result placeholder。
     """
     cmd = user_input.strip()
+    if command_name is None:
+        parsed = parse_slash_command(cmd)
+        command_name = parsed["command_name"]
+        command_args = parsed["command_args"]
 
-    if cmd == "/reload_skills":
+    if command_name == "reload_skills" and not command_args:
         registry = reload_registry()
         lines = [f"[系统] Skill 已重新加载，当前 {registry.count()} 个可用"]
         lines.extend(f"  {warning}" for warning in registry.get_warnings())
@@ -523,7 +544,11 @@ def main_loop():
                 finalize_session()
                 break
 
-            if intent.kind == "slash_command" and handle_slash_command(user_input):
+            if intent.kind == "slash_command" and handle_slash_command(
+                user_input,
+                command_name=intent.metadata.get("command_name"),
+                command_args=intent.metadata.get("command_args", ""),
+            ):
                 continue
 
             reply, new_latest_output = _run_chat_for_backend(

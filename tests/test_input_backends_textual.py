@@ -934,6 +934,10 @@ def test_textual_shell_ctrl_q_close_does_not_submit_draft():
 
 @pytest.mark.xfail(
     reason=(
+        "[归属：v0.2 cancel 生命周期 + v0.3 TUI Esc 集成 · 解锁条件：先在 "
+        "agent/core.py chat() 引入 cancel_token、模型 stream abort、"
+        "generation.cancelled RuntimeEvent（v0.2），再在 Textual backend "
+        "把 Esc 从草稿取消升级为生成取消（v0.3）] "
         "当前 Esc 只属于 Textual 输入编辑边界；core/chat 还没有 cancel_token、"
         "模型 stream abort 或 generation.cancelled RuntimeEvent。删除条件："
         "RuntimeEvent 先定义生成生命周期，main/core 能把 cancel_token 传到模型流，"

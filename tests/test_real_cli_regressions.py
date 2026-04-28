@@ -82,6 +82,9 @@ def _all_text_from_messages(messages: list[dict]) -> str:
 
 @pytest.mark.xfail(
     reason=(
+        "[归属：v0.3 高级 TUI（paste burst）· 解锁条件：输入层引入 prompt_toolkit / "
+        "bracketed paste / UserInputEnvelope paste burst 包装，把一次粘贴的多行编号列表"
+        "当作同一个 user intent；禁止通过强制用户使用 /multi 等命令绕过] "
         "真实产品化缺口：普通 CLI input() 当前只读取第一行，用户自然粘贴编号列表/"
         "多行旅行偏好会被拆成多轮输入。修复后应由 UserInputEnvelope / paste burst / "
         "prompt_toolkit / bracketed paste 等输入层方案把一次粘贴包装成同一个用户意图，"

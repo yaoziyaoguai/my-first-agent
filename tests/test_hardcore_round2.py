@@ -320,9 +320,12 @@ def test_user_switches_topic_mid_task(monkeypatch):
 
     import pytest as _pytest
     _pytest.xfail(
+        "[归属：v0.2 输入语义治理 · 解锁条件：引入 awaiting_feedback_intent 之上"
+        "成熟的 topic-switch 信号源（显式控制输入或 LLM 二次分类 + "
+        "awaiting_topic_switch_confirmation），禁止靠浅层启发式回退或改写测试为两步交互绕过] "
         "slash command 整体下线 + 启发式回退后无信号源：Runtime 在单次 chat() "
         "里无法可靠区分 plan feedback 与新任务话题切换；解此缺口需要明确的"
-        "RuntimeEvent 用户确认流或 LLM 二次分类，本轮不引入。"
+        "RuntimeEvent 用户确认流或 LLM 二次分类，本轮（v0.1）不引入。"
     )
     cleanup = _register_test_tool("w", confirmation="never", result="done")
     try:

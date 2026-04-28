@@ -100,14 +100,33 @@ stdout debug capture。
 
 ---
 
-## 7. 实施前置条件（**当前未满足，所以本轮只做 planning**）
+## 7. 实施前置条件（已部分满足，本轮按 M7-A 切片落地）
 
 - [x] M1-M6 RC 主线闭环（已完成）
 - [x] 自动 smoke 全覆盖（已完成）
-- [ ] 用户人工试用 RC，明确「现在 simple CLI 哪些场景最痛」（**未做**）
-- [ ] 与 user 确认基础 TUI 是 v0.2 后续而非 v0.3 起点（**未做**）
+- [x] M7-A 切片：工具 pre/post hook 拒绝 vs 真实失败 vs 成功 三类区分
+      （已落地：`_classify_tool_outcome` + `tool.rejected` 显示事件 +
+      `rejected_by_check` 审计 status；测试 `tests/test_cli_output_ux.py`）
+- [ ] M7-B/C/D：RuntimeEvent 渲染统一 / checkpoint resume 可见性提升 /
+      文档+完整测试覆盖（待用户人工试用反馈再评估范围）
 
-只有上面 4 条都打钩后，才能开 PR 启动 M7 实现。
+只有上面前 3 条已落地；M7-B/C/D 等待用户人工试用反馈再决定是否启动，
+避免在没有真实痛点的情况下提前重构。
+
+### 7.1 M7-A 已交付（实际修复一个真实 bug）
+
+旧 `tool_executor` 只看 `TOOL_FAILURE_PREFIXES` 区分 failed / executed。
+工具内部 pre/post hook（`pre_write_check` / `check_shell_blacklist` /
+`_check_dangerous_content`）拒绝时返回 `"拒绝执行：..."` 字符串，
+**不命中**任何失败前缀，结果：
+
+- UI 显示「执行完成。」（用户看不出工具被拒）
+- `tool_execution_log[...]["status"] == "executed"`（审计错记成功）
+- 模型在下一轮没收到「不要重复同一调用」的系统提示
+
+修复后：`"拒绝执行："` 走独立的 `rejected_by_check` 分支，emit
+`tool.rejected` 显示事件 + 「已被工具内部安全检查拒绝。」，并附加
+重复调用阻止提示。这是 RC smoke 之外的第三个真实文案区分缺口。
 
 ---
 

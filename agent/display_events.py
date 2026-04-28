@@ -88,7 +88,7 @@ def runtime_display_event(display_event: DisplayEvent) -> RuntimeEvent:
     event_type = EVENT_DISPLAY_EVENT
     if display_event.event_type == "tool.awaiting_confirmation":
         event_type = EVENT_TOOL_CONFIRMATION_REQUESTED
-    elif display_event.event_type in {"tool.completed", "tool.failed"}:
+    elif display_event.event_type in {"tool.completed", "tool.failed", "tool.rejected"}:
         event_type = EVENT_TOOL_RESULT_VISIBLE
 
     return RuntimeEvent(

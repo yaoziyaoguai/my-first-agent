@@ -26,6 +26,27 @@ AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
 
 
+def _classify_tool_outcome(result: str) -> tuple[str, str, str]:
+    """根据工具返回字符串判定结果类别，返回 (status, display_event_type, status_text)。
+
+    三类结果：
+    - rejected_by_check: 工具的 pre/post hook 主动拒绝（「拒绝执行：...」），
+      属于「安全检查通过 confirm 之后但工具内部仍拒绝」的情况；
+      tool.rejected 显示事件 + 「已被工具内部安全检查拒绝。」status_text。
+    - failed: 工具执行报错（如文件不存在、超时、HTTP 错误），见
+      TOOL_FAILURE_PREFIXES；tool.failed + 「执行失败。」。
+    - executed: 真实成功；tool.completed + 「执行完成。」。
+
+    注意：rejection 和 failure 都不会让 Agent 在下一轮自动重试同一调用
+    （response_handlers 已有「不要再次调用同一工具和同一输入」提示）。
+    """
+    if any(result.startswith(prefix) for prefix in TOOL_REJECTION_PREFIXES):
+        return "rejected_by_check", "tool.rejected", "已被工具内部安全检查拒绝。"
+    if any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES):
+        return "failed", "tool.failed", "执行失败。"
+    return "executed", "tool.completed", "执行完成。"
+
+
 def _describe_policy_denial(tool_name: str, tool_input: dict[str, Any]) -> str:
     """根据工具名 + 输入，生成具体的安全策略拒绝原因（中文，用户可读）。
 
@@ -67,6 +88,23 @@ TOOL_FAILURE_PREFIXES = (
     "[安装失败]",
     "[更新失败]",
 )
+
+# v0.2 M7-A 真实修复：工具的 pre/post-execute 钩子（如 pre_write_check、
+# check_shell_blacklist、_check_dangerous_content）拒绝执行时返回的字符串
+# 都以「拒绝执行：」开头。旧实现没有把这条前缀纳入 TOOL_FAILURE_PREFIXES，
+# 也没有独立分支，结果是：
+#   - tool_executor 显示「执行完成。」，与「执行成功」无法区分
+#   - tool_execution_log.status = "executed"，让审计/重试逻辑误以为成功
+#   - 用户体验上：刚说「用户已确认，正在执行」，紧接着又说「执行完成」，
+#     但实际上工具被安全检查拒绝了。
+# 把「拒绝执行：」单独成一类 status："rejected_by_check"，并 emit 独立
+# 的 tool.rejected 显示事件，让 UI / 审计 / 用户三方都能区分：
+#   policy denial（confirmation == "block"，发生在执行前）
+#   ↓ 不同
+#   pre/post-execute 拒绝（执行入口已经过 confirm 才被工具内部检查拒绝）
+#   ↓ 不同
+#   tool failure（工具运行报错，如读不存在的文件）
+TOOL_REJECTION_PREFIXES = ("拒绝执行：",)
 
 
 def execute_single_tool(
@@ -217,15 +255,16 @@ def execute_single_tool(
         ),
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
-    failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
-    if failed:
+    status, display_event_type, status_text = _classify_tool_outcome(result)
+    if status in ("failed", "rejected_by_check"):
+        # 失败 / 拒绝都不应让模型在下一轮重试同一调用；提示语言一致
+        # （rejected 通常是路径/内容触犯安全检查，failure 是运行报错）。
         result = (
             f"{result}\n\n"
             "[系统提示] 该工具调用没有获得可用结果。"
             f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
             "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
         )
-    status = "failed" if failed else "executed"
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
@@ -248,10 +287,10 @@ def execute_single_tool(
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type="tool.failed" if failed else "tool.completed",
+            event_type=display_event_type,
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text="执行失败。" if failed else "执行完成。",
+            status_text=status_text,
         ),
     )
     save_checkpoint(state)
@@ -267,8 +306,13 @@ def execute_pending_tool(
 ) -> str:
     """用户确认后执行此前挂起的 pending tool。
 
-    这个函数只负责“确认已到达后的执行”。确认 UI 已在 pending_tool 生成时通过
+    这个函数只负责「确认已到达后的执行」。确认 UI 已在 pending_tool 生成时通过
     DisplayEvent 发出；这里补执行中/完成事件，仍不让 TUI 读取 Runtime state。
+
+    M7-A 文案修复：执行中提示从「用户已确认，正在执行」改为「已收到确认，
+    开始执行（执行前/中可能仍被工具内部安全检查拒绝）」——更准确，避免
+    用户先看到「正在执行」紧接着看到「拒绝执行：XXX」时困惑「到底是
+    我的拒绝还是系统的拒绝」。
     """
     tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
@@ -280,19 +324,18 @@ def execute_pending_tool(
             event_type="tool.executing",
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text="用户已确认，正在执行。",
+            status_text="已收到确认，开始执行。",
         ),
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
-    failed = any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES)
-    if failed:
+    status, display_event_type, status_text = _classify_tool_outcome(result)
+    if status in ("failed", "rejected_by_check"):
         result = (
             f"{result}\n\n"
             "[系统提示] 该工具调用没有获得可用结果。"
             f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
             "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
         )
-    status = "failed" if failed else "executed"
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
@@ -314,10 +357,10 @@ def execute_pending_tool(
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type="tool.failed" if failed else "tool.completed",
+            event_type=display_event_type,
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text="执行失败。" if failed else "执行完成。",
+            status_text=status_text,
         ),
     )
     return result

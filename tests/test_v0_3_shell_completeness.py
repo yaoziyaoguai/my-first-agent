@@ -147,3 +147,66 @@ def test_planning_doc_keeps_non_goals_visible():
         "slash command",
     ):
         assert forbidden in text, f"PLANNING 丢失非目标声明：{forbidden}"
+
+
+# ---------- 13.5 checkpoint/resume 不裸 dict ----------
+
+def test_resume_status_never_dumps_raw_messages_or_keys():
+    # 即便 summary 里被错塞 messages / api_key，渲染层也不能把它们打到屏幕上。
+    # render_resume_status 是纯白名单消费 summary 字段（user_goal/status/...），
+    # 不会反射式 dump。这里用一个污染 dict 验证：
+    poisoned = {
+        "actionable": True,
+        "user_goal": "正常任务",
+        "status": "running",
+        "current_step_index": 1,
+        "message_count": 3,
+        "messages": [{"role": "user", "content": "raw secret"}],
+        "api_key": "sk-ant-xxxxxxxxxxxxxxxxxxxxxx",
+    }
+    out = cli_renderer.render_resume_status(poisoned)
+    assert "raw secret" not in out
+    assert "sk-ant" not in out
+    assert "messages" not in out
+    assert "api_key" not in out
+    assert "正常任务" in out
+
+
+# ---------- protocol dump 不应出现在用户面向输出里 ----------
+
+def test_logs_output_has_no_protocol_dump_markers(capsys):
+    main_module.main(["logs", "--tail", "20"])
+    out = capsys.readouterr().out
+    # v0.1 § 输出契约禁止 prefix：REQUEST / RESPONSE / [DEBUG] 全文 dump
+    assert "REQUEST:" not in out
+    assert "RESPONSE:" not in out
+    assert "[DEBUG]" not in out
+    # 历史 jsonl 里有 system_prompt 全文 / messages 数组的话，logs viewer
+    # 必须按白名单只留 *_len，不得出现明显的会话内容 marker
+    assert "\"messages\":" not in out
+    assert "\"system_prompt\":" not in out
+
+
+# ---------- tool confirmation 参数预览不泄露 secret ----------
+
+def test_log_viewer_masks_secrets_in_tool_input_preview():
+    from agent.log_viewer import format_entry, mask_secrets
+
+    fake_entry = {
+        "timestamp": "2025-01-01T00:00:00",
+        "session_id": "abcd1234",
+        "event_type": "tool_confirmation_requested",
+        "data": {
+            "tool_name": "write_file",
+            "tool_input": {
+                "path": "creds.txt",
+                "content": "api_key=sk-ant-secretvalueXXXXXXXXXX",
+            },
+        },
+    }
+    line = format_entry(fake_entry)
+    # 渲染层白名单 + 兜底 mask_secrets 至少有一道命中
+    assert "sk-ant-secretvalueXXXXXXXXXX" not in line
+    assert "api_key=sk-ant-secretvalueXXXXXXXXXX" not in line
+    # 兜底正则可独立验证
+    assert "sk-ant-" not in mask_secrets("prefix sk-ant-zzzzzzzzzzzzzzzzzzzzzz suffix")

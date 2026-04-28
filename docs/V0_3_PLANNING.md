@@ -52,7 +52,7 @@
 让人工使用更顺手。**纯渲染层强化 + 命令行 UX 增强**，不引入 Textual 多面板、
 不引入快捷键、不引入 cancel。详见本文 §5。
 
-**状态**：✅ 已完成首个迭代。落地内容：
+**状态**：✅ 已完成 + 完成态收口（v0.3 finalize round）。落地内容：
 
 - 新增 `agent/cli_renderer.py`：纯函数渲染 session header / resume status /
   status line / health 摘要，零运行时副作用。
@@ -67,10 +67,16 @@
   「无 checkpoint」也变成可见提示。
 - 给 `agent/health_check.py::run_health_check` 加 `verbose=True` 默认参数，
   v0.2 兼容；False 模式只返回 results 不打印长块。
-- 测试：`tests/test_cli_renderer.py`（13 tests）+
-  `tests/test_session_summary_and_header.py`（10 tests）。
-- 真实 smoke：`python main.py` 启动屏幕已是结构化 shell header；
-  4 类工具结局文案沿用 v0.2 契约不变。
+- 测试：`tests/test_cli_renderer.py`（13）+
+  `tests/test_session_summary_and_header.py`（10）+
+  `tests/test_v0_3_shell_completeness.py`（14，finalize round）。
+- 完成态收口：新增 `docs/V0_3_BASIC_SHELL_USAGE.md`、
+  `docs/CLI_OUTPUT_CONTRACT.md` §13；完成度测试守护「banner 含 session/
+  checkpoint/health/skill experimental、4 类 outcome 文案区分、
+  health/logs 入口在 shell+README+contract 三处一致、resume 不裸 dict、
+  logs 输出无 protocol dump、tool confirmation 参数预览不泄露 secret」。
+- 真实 smoke（pipe `quit` 进 `python main.py`）：启动屏结构化、health 单行、
+  resume 三态可见、Skill experimental 文案到位、无 raw secret 泄漏。
 
 ### v0.3 M2 · Health Maintenance 可视化 ✅ (本轮交付：MVP)
 基于 v0.2 的 `python main.py health` 子命令升级为结构化报告：

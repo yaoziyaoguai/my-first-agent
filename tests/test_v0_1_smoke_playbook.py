@@ -11,12 +11,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYBOOK = ROOT / "docs" / "V0_1_SMOKE_PLAYBOOK.md"
+ROOT_README = ROOT / "README.md"
 
 SMOKE_TASK = "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。"
 
 
 def _playbook_text() -> str:
     return PLAYBOOK.read_text(encoding="utf-8")
+
+
+def _root_readme_text() -> str:
+    return ROOT_README.read_text(encoding="utf-8")
 
 
 def test_b3_smoke_playbook_exists_and_freezes_canonical_task():
@@ -29,6 +34,50 @@ def test_b3_smoke_playbook_exists_and_freezes_canonical_task():
     assert "summary.md" in text
     assert "仓库根目录" in text
     assert "不要静默改读 `tests/README.md`" in text
+
+
+def test_b3_root_readme_exists_for_canonical_smoke_preflight():
+    """仓库根 README.md 是 B3 真实 smoke 的固定输入，不应再次缺失。"""
+
+    text = _root_readme_text()
+
+    required_markers = (
+        "Runtime v0.1",
+        "B1 complete",
+        "B2 complete",
+        "B3 in progress",
+        ".venv/bin/python -m ruff check agent/ tests/",
+        ".venv/bin/python -m pytest -q",
+        "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。",
+    )
+    for marker in required_markers:
+        assert marker in text
+
+
+def test_b3_root_readme_does_not_overstate_runtime_capabilities():
+    """README 只能描述 v0.1 原型定位，不能把后续能力写成已完成。"""
+
+    text = _root_readme_text()
+
+    required_caveats = (
+        "not a mature agent framework",
+        "not a production safety sandbox",
+        "not a complete TUI",
+        "not a Skill or sub-agent platform",
+        "Explicit Non-Goals for v0.1",
+    )
+    for marker in required_caveats:
+        assert marker in text
+
+    misleading_claims = (
+        "production-ready",
+        "stable framework",
+        "full Textual backend complete",
+        "sub-agent collaboration complete",
+        "production-grade security sandbox complete",
+    )
+    for marker in misleading_claims:
+        assert marker not in text
 
 
 def test_b3_smoke_playbook_documents_preflight_and_artifact_policy():

@@ -160,6 +160,35 @@ checkpoint 事件可在 5 秒内定位。
 
 ---
 
+## 3.5 v0.3 patch · final answer / request_user_input 协议收口
+
+**触发**：v0.3 release 后人工 smoke「5 天武汉宜昌旅游规划」。模型在 final answer 写「需要我帮你调整某些天数吗？」+ 同轮 `mark_step_complete`，Runtime 按结构化信号正确完成任务，但用户感受到「问了又不等」的协议断裂。
+
+**根因**：`config.SYSTEM_PROMPT` 完全没声明「`request_user_input` 是 Runtime 唯一识别的等待信号」「final answer 不要写待应答追问」「不要在同一响应里既追问又 `mark_step_complete`」。Runtime 状态机本身正确，缺的是 prompt 层契约。
+
+**修法（不是关键词 hack）**：
+- 扩展 `config.SYSTEM_PROMPT` 末尾「## 用户输入与任务收尾协议」段，4 条规则 + ✅/❌ 正反例
+- `agent/model_output_resolution.py` 的 `BLOCKING_USER_INPUT_PATTERNS` 上方加注释，登记为「v0.1 历史兜底，不再扩张」
+- 新建 `tests/test_final_answer_user_input_separation.py` 7 项协议级回归（守护契约而非具体业务句式，含「关键词列表上限守护」防未来回退）
+
+**显式不做**：keyword 黑名单扩张 / NLP 分类 / Reflect / 改 Runtime 状态机 / 改 core 主循环。
+
+---
+
+
+
+- M1-M4 全部 ship 或显式登记为 partial（带原因）。
+- ruff 0 错；pytest 全绿（允许永久 xfail，但每个都必须有归属说明）。
+- 至少一次真实人工 smoke（同 v0.2 的格式），结果记录在
+  `docs/V0_3_MANUAL_SMOKE_RESULT.md`。
+- 防泄漏审计延续：`tests/test_gitignore_runtime_artifacts.py` 通过，
+  `git ls-files` 复核命令在 `RELEASE_NOTES_v0.3.md` 写明。
+- v0.3 backlog 没有被偷偷做掉。
+
+---
+
+---
+
 ## 4. 完成标准（v0.3 release readiness 时再核对）
 
 - M1-M4 全部 ship 或显式登记为 partial（带原因）。

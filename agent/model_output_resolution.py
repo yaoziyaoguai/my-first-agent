@@ -49,6 +49,25 @@ BLOCKING_USER_INPUT_PATTERNS = (
     "除非你提供",
     "除非您提供",
 )
+# 关于 BLOCKING_USER_INPUT_PATTERNS / NON_BLOCKING_FOLLOWUP_PATTERNS 的边界：
+#
+# 这两个 pattern 列表是 v0.1 引入的**协议外兜底防线**：当模型违反协议、用普通
+# assistant 文本表达「缺信息无法继续」时，Runtime 用关键词匹配把它分类成
+# `model.text_requested_user_input`，避免任务空跑。
+#
+# 这是**历史关键词 hack**，不是 Runtime 真正的等待信号源。v0.3 之后的协议
+# 边界已经明确：
+#   - 真正的「等待用户输入」必须由模型调用 `request_user_input` 工具来触发，
+#     由 system prompt（config.SYSTEM_PROMPT 「用户输入与任务收尾协议」段）
+#     强制约束模型不要把求助混在普通文本里；
+#   - 这里的 patterns 只在「模型已经违反协议」时收尾，不应被扩张成业务句式
+#     黑名单；尤其不要为了某个 smoke 例子（比如 v0.3 旅游规划的"需要我帮你
+#     调整某些天数吗"）继续往里加关键词；
+#   - 长期目标是让主防线（system prompt + 结构化信号）足够稳，patterns
+#     可以淡出到只剩极少数明确"无法继续"语义的兜底词。
+#
+# 如果 smoke 又发现新的"模型用文本求助"个案，正确的修法是：在 SYSTEM_PROMPT
+# 的「用户输入与任务收尾协议」里把规则讲得更清楚，而不是在这里加关键词。
 
 NON_BLOCKING_FOLLOWUP_PATTERNS = (
     "如需调整",

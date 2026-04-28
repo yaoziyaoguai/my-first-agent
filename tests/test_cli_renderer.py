@@ -21,8 +21,11 @@ def test_session_header_includes_session_id_cwd_and_stage():
     # 完整 session id 也保留（兼容 v0.2 grep）
     assert "abc12345-deadbeef" in out
     assert "/tmp/work" in out
-    # 用法提示沿用 v0.2 关键字
-    assert "quit" in out and "/reload_skills" in out
+    # 用法提示沿用 quit；v0.3 M3 起不再印 /reload_skills（无 handler，会误导）
+    assert "quit" in out
+    assert "/reload_skills" not in out
+    # M3 必须明确告诉用户 Skill 仍是实验性能力
+    assert "实验性" in out
 
 
 def test_session_header_omits_health_line_when_none():

@@ -94,17 +94,27 @@
 完成标准（本轮已达成）：人工跑 `python main.py health` 能在一屏内
 看到「问题在哪 / 为什么是问题 / 我该执行什么命令」，不再需要回去翻文档。
 
-### v0.3 M3 · Skill 体系坦诚化
+### v0.3 M3 · Skill 体系坦诚化 ✅ (本轮交付：状态澄清 only)
 **先承认现状粗糙，再画范围**：
-- 列出当前 Skill 系统真正在做的事（提示词 / 注册表 / 偶尔 install）
-- 列出当前 Skill 提示词「偏强」的具体表现（v0.2 RC smoke 观察项）
-- 给 Skill 加最小契约：什么是 Skill、什么不是 Skill、Skill 可以触发什么
-  工具、不可以触发什么工具
-- **不**做 Skill marketplace、不做 sub-agent 触发、不做远端 Skill 加载
-- 输出文档：`docs/V0_3_SKILL_REDESIGN.md`
+- ✅ 已列出当前 Skill 系统真正在做的事（prompt 注入 + registry 单例 +
+  `load_skill` 工具 + safety 检测；详见 `docs/V0_3_SKILL_SYSTEM_STATUS.md`）
+- ✅ 已识别并修复**误导性文案**：v0.2 启动屏印的
+  `'/reload_skills' 重新加载 skill` 实际上**没有 handler**（slash command
+  在 v0.1 已下线），M3 改为「Skill 是实验性能力」
+- ✅ README v0.3 段补 Skill 实验性声明
+- ✅ 输出文档：`docs/V0_3_SKILL_SYSTEM_STATUS.md`（取代原计划的
+  `docs/V0_3_SKILL_REDESIGN.md` 名称——本轮做的是「状态澄清」不是「重设计」）
+- ✅ 测试覆盖：启动文案不再印 `/reload_skills`、必须出现「实验性」字样、
+  registry 在 skills 目录为空时不崩
 
-完成标准：能用一段中文向新读者说清「v0.3 的 Skill 是什么 / 不是什么」，
-并把过强的提示词裁剪到不会让模型反复尝试无意义工具调用。
+**M3 不做**（推迟到后续 milestone）：
+- ❌ 实现 slash command 解析器（v0.1 已下线，本轮不复活）
+- ❌ Skill 级 tool 权限白名单 / activation policy / sub-agent 触发
+- ❌ 实际改 skill 提示词强度（这要先有 skill 测试基线，本轮没做）
+- ❌ Skill marketplace / 远端加载
+
+完成标准（本轮已达成）：能用一段中文向新读者说清「v0.3 的 Skill 是什么 /
+不是什么」（见 docs §5），且启动屏文案不再撒谎。
 
 ### v0.3 M4 · Observer / Logs 可读性
 - `agent_log.jsonl` 增加按 session_id 索引和按事件类型筛选的最小 CLI

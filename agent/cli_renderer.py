@@ -51,7 +51,10 @@ def render_session_header(
     - 标题行：阶段标签
     - 元信息：session id（短哈希形式由调用方决定）/ cwd
     - 健康摘要：单行紧凑文本，无 warning 时省略，避免刷屏
-    - 用法提示：保留 v0.2 已有的 quit / reload_skills 提示
+    - 用法提示：v0.3 M3 把启动提示从「'/reload_skills' 重新加载 skill」改成
+      诚实文案——主循环并没有 slash command 解析器，`/reload_skills` 历史上
+      只是被印在屏幕上、不会真的执行；保留会让用户以为 Skill 已经成熟。
+      改成只展示 quit + 一句关于 skill 仍是实验性能力的提示。
     """
     short_session = session_id[:8] if session_id else "—"
     lines = [
@@ -66,7 +69,8 @@ def render_session_header(
     lines.extend(
         [
             _BAR,
-            "  输入 'quit' 退出，'/reload_skills' 重新加载 skill",
+            "  输入 'quit' 退出。",
+            "  Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。",
             "",
         ]
     )

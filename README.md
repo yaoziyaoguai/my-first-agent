@@ -156,7 +156,8 @@ big-bang. See `docs/V0_3_PLANNING.md` for full scope.
   cwd     : /your/project
   health  : 3 warn (workspace_lint, log_size, session_accumulation); 详情：python main.py health
 ────────────────────────────────────────────────────────────
-  输入 'quit' 退出，'/reload_skills' 重新加载 skill
+  输入 'quit' 退出。
+  Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。
 
   📭 resume : 未发现断点，可以直接开始新任务。
 你: 
@@ -177,6 +178,16 @@ $ python main.py health --json    # 机器可读 JSON，schema 稳定
 所有「建议」都是给你复制粘贴的命令，**Runtime 永不自动归档或删除**
 `agent_log.jsonl` / `sessions/` / `workspace/`。详细维护命令见
 `docs/V0_2_HEALTH_MAINTENANCE.md`。
+
+**v0.3 M3 — Skill system honesty pass** is landed locally:
+
+- 启动屏不再印 `'/reload_skills' 重新加载 skill`（该 slash command 历史上
+  **没有 handler**，纯属误导）
+- 启动屏现在明示 「Skill 是实验性能力」并指向 `docs/V0_3_SKILL_SYSTEM_STATUS.md`
+- 当前 `agent/skills/` 子系统是 **prompt 注入级别的实验性脚手架**：
+  没有 sub-agent、没有 skill 级 tool 权限白名单、没有 activation policy、
+  没有 skill 单元测试。详细现状与后续真正 Skill 化路线见
+  `docs/V0_3_SKILL_SYSTEM_STATUS.md`。
 
 v0.3 still **does not** include: full Textual multi-panel, keyboard shortcuts,
 Esc / generation cancellation, sub-agent, Reflect / Self-Correction,

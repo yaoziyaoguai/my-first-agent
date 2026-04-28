@@ -122,7 +122,7 @@ These areas are intentionally out of scope for v0.1 graduation:
 
 ## Runtime v0.2 Status
 
-v0.1 has graduated. **Runtime v0.2 is now release-ready** (local, not pushed).
+v0.1 has graduated. **Runtime v0.2 is now released as `v0.2.0`**.
 v0.2 adds:
 
 - runtime state-machine + event boundary invariants with regression tests
@@ -140,3 +140,33 @@ burst handling. Those are explicitly v0.3 or later.
 
 See `RELEASE_NOTES_v0.2.md`, `docs/V0_2_RC_DECISION.md`, and
 `docs/V0_2_MANUAL_SMOKE_RESULT.md` for details.
+
+## Runtime v0.3 Status (in progress · usability track)
+
+v0.3 is the **usability** track on top of v0.2. It is **not** a feature
+big-bang. See `docs/V0_3_PLANNING.md` for full scope.
+
+**v0.3 M1 — Basic CLI Shell MVP** is landed locally:
+
+```text
+────────────────────────────────────────────────────────────
+  Runtime v0.3 M1 shell
+────────────────────────────────────────────────────────────
+  session : d6066c90  (full: d6066c90-b6ed-...)
+  cwd     : /your/project
+  health  : 3 warn (workspace_lint, log_size, session_accumulation); 详情：python main.py health
+────────────────────────────────────────────────────────────
+  输入 'quit' 退出，'/reload_skills' 重新加载 skill
+
+  📭 resume : 未发现断点，可以直接开始新任务。
+你: 
+```
+
+Just run `python main.py` — no new flags. The four-class tool outcome
+contract from v0.2 (`completed` / `failed` / `rejected` / `user_rejected`)
+is preserved unchanged.
+
+v0.3 still **does not** include: full Textual multi-panel, keyboard shortcuts,
+Esc / generation cancellation, sub-agent, Reflect / Self-Correction,
+Skill marketplace, complex topic switch, slash commands. See
+`docs/V0_3_PLANNING.md` §2 for the explicit non-goal list.

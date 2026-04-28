@@ -3,6 +3,8 @@
 把原来散在 main.py 里的 session 相关逻辑集中到这里。
 """
 
+import os
+
 from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.health_check import run_health_check
 from agent.memory import init_memory, cleanup_old_episodes, extract_memories_from_session
@@ -12,25 +14,41 @@ from agent.checkpoint import (
     save_checkpoint,
     clear_checkpoint,
 )
+from agent.cli_renderer import (
+    STAGE_LABEL,
+    render_resume_status,
+    render_session_header,
+    summarize_health,
+)
 from config import SYSTEM_PROMPT, MODEL_NAME
 
 
 # ========== 启动 ==========
 
 def init_session():
-    """启动时调用：初始化记忆 + 健康检查 + 记日志"""
+    """启动时调用：初始化记忆 + 健康检查 + 渲染 session header。
+
+    v0.3 M1 升级：用 cli_renderer.render_session_header 替代旧的两行
+    print，把阶段标签 / cwd / 健康摘要一次性结构化显示，并把 health_check
+    切成 verbose=False 模式避免刷屏（详情仍可用 `python main.py health` 查看）。
+    """
     init_memory()
     cleanup_old_episodes()
-    
+
     log_event("session_start", {
         "system_prompt_length": len(SYSTEM_PROMPT),
     })
-    
-    run_health_check()
-    
-    print("=== My First Agent (Refactored) ===")
-    print(f"Session: {SESSION_ID}")
-    print("输入 'quit' 退出，'/reload_skills' 重新加载 skill\n")
+
+    health_results = run_health_check(verbose=False)
+
+    print(
+        render_session_header(
+            session_id=SESSION_ID,
+            cwd=os.getcwd(),
+            stage_label=STAGE_LABEL,
+            health_summary=summarize_health(health_results),
+        )
+    )
 
 
 def _checkpoint_has_actionable_resume(task_data: dict, conv_data: dict) -> bool:
@@ -80,6 +98,8 @@ def try_resume_from_checkpoint():
     if checkpoint is not None and _debug_stdout_enabled():
         print(f"[CHECKPOINT] loaded keys={list(checkpoint.keys())}")
     if not checkpoint:
+        # v0.3 M1：让「无 checkpoint」也有一行可读的状态行，不沉默退出。
+        print(render_resume_status(None))
         return
 
     task_data = checkpoint.get("task", {})
@@ -88,17 +108,12 @@ def try_resume_from_checkpoint():
     if not _checkpoint_has_actionable_resume(task_data, conv_data):
         # 静默清理历史残留，避免误导用户「有未完成的任务」。
         clear_checkpoint()
+        # v0.3 M1：把「静默清理」也变成一行可见提示，方便用户确认 resume 行为。
+        print(render_resume_status({"actionable": False}))
         return
 
-    user_goal = task_data.get("user_goal") or "（未命名任务）"
-    step_index = task_data.get("current_step_index", 0)
-    msg_count = len(conv_data.get("messages", []))
-    status = task_data.get("status") or "unknown"
-
-    print(f"\n📌 发现未完成的任务：{user_goal}")
-    print(f"   状态：{status}")
-    print(f"   当前步骤索引：{step_index}")
-    print(f"   已有 {msg_count} 条对话历史")
+    summary = _build_checkpoint_resume_summary(task_data, conv_data)
+    print(render_resume_status(summary))
 
     choice = input("要继续这个任务吗？(y/n): ").strip().lower()
     if choice != "y":
@@ -111,6 +126,64 @@ def try_resume_from_checkpoint():
         _replay_awaiting_prompt(get_state())
     else:
         print("\n[系统] 恢复断点失败。\n")
+
+
+def _build_checkpoint_resume_summary(task_data: dict, conv_data: dict) -> dict:
+    """从 checkpoint 的 task / conversation 字段抽出渲染用的脱敏摘要。
+
+    刻意只抽 cli_renderer.render_resume_status 真正需要的字段，
+    避免把整段 messages / system prompt / api 配置 print 到终端。
+    """
+    pending_tool = task_data.get("pending_tool") or {}
+    return {
+        "actionable": True,
+        "user_goal": task_data.get("user_goal"),
+        "status": task_data.get("status"),
+        "current_step_index": task_data.get("current_step_index", 0),
+        "message_count": len(conv_data.get("messages", [])),
+        "pending_tool_name": pending_tool.get("tool")
+        if isinstance(pending_tool, dict)
+        else None,
+    }
+
+
+def summarize_session_status(state) -> dict:
+    """v0.3 M1：把 AgentState 压缩成渲染层可用的脱敏摘要。
+
+    渲染层（cli_renderer）只读 dict、不持有 state 引用，可以避免：
+    - 把 raw conversation messages / api_key / base_url / headers 误打到终端
+    - 渲染逻辑反向修改 Runtime / messages / checkpoint
+
+    入参 state 是 AgentState；这里只抽取 task 区里**对人工可读、且不敏感**的字段。
+    """
+    if state is None or getattr(state, "task", None) is None:
+        return {
+            "actionable": False,
+            "user_goal": None,
+            "status": "idle",
+            "current_step_index": 0,
+            "message_count": 0,
+            "pending_tool_name": None,
+            "plan_total_steps": None,
+        }
+
+    task = state.task
+    conv = getattr(state, "conversation", None)
+    plan = task.current_plan if isinstance(task.current_plan, dict) else None
+    plan_steps = plan.get("steps") if isinstance(plan, dict) else None
+    plan_total = len(plan_steps) if isinstance(plan_steps, list) else None
+    pending = task.pending_tool if isinstance(task.pending_tool, dict) else None
+    return {
+        "actionable": task.status != "idle"
+        or bool(pending)
+        or bool(task.pending_user_input_request),
+        "user_goal": task.user_goal,
+        "status": task.status,
+        "current_step_index": task.current_step_index,
+        "message_count": len(conv.messages) if conv is not None else 0,
+        "pending_tool_name": pending.get("tool") if pending else None,
+        "plan_total_steps": plan_total,
+    }
 
 
 def _replay_awaiting_prompt(state):

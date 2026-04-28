@@ -73,42 +73,51 @@ def check_session_accumulation():
     return {"status": "pass", "count": len(sessions)}
 
 
-def run_health_check():
-    """运行所有健康检查"""
+def run_health_check(verbose: bool = True):
+    """运行所有健康检查。
+
+    v0.3 M1：新增 verbose 参数（默认 True，保持 v0.2 行为完全兼容）。
+    `verbose=False` 时只把结果写入 log_event 并返回，不打印「🏥 项目健康
+    检查报告」长块，让基础 CLI Shell 的启动屏幕不被刷屏。
+    cli_renderer.summarize_health 负责把同样的 results 渲染为一行紧凑摘要。
+    """
     checks = {
         "workspace_lint": check_workspace_lint,
         "backup_accumulation": check_backup_accumulation,
         "log_size": check_log_size,
         "session_accumulation": check_session_accumulation,
     }
-    
+
     results = {}
     warnings = []
-    
+
     for name, check_fn in checks.items():
         result = check_fn()
         results[name] = result
         if result["status"] == "warn":
             warnings.append(f"  ⚠️  {name}: {result.get('message', '有告警')}")
-    
+
     log_event("health_check", results)
-    
+
+    if not verbose:
+        return results
+
     print("\n" + "=" * 50)
     print("🏥 项目健康检查报告")
     print("=" * 50)
-    
+
     for name, result in results.items():
         status = result["status"]
         icon = {"pass": "✅", "warn": "⚠️", "skip": "⏭️", "error": "❌"}[status]
         print(f"  {icon} {name}: {status}")
-    
+
     if warnings:
         print("\n需要关注：")
         for w in warnings:
             print(w)
     else:
         print("\n所有检查通过，项目状态健康。")
-    
+
     print("=" * 50 + "\n")
-    
+
     return results

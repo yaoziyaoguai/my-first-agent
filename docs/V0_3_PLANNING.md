@@ -52,6 +52,26 @@
 让人工使用更顺手。**纯渲染层强化 + 命令行 UX 增强**，不引入 Textual 多面板、
 不引入快捷键、不引入 cancel。详见本文 §5。
 
+**状态**：✅ 已完成首个迭代。落地内容：
+
+- 新增 `agent/cli_renderer.py`：纯函数渲染 session header / resume status /
+  status line / health 摘要，零运行时副作用。
+- 新增 `agent/session.py::summarize_session_status`：把 AgentState 压成
+  脱敏摘要 dict（status / user_goal / step_index / message_count /
+  pending_tool_name / plan_total_steps / actionable）。
+- 重写 `agent/session.py::init_session`：用结构化 header 替代
+  「=== My First Agent (Refactored) ===」两行 print，并通过
+  `run_health_check(verbose=False)` 把健康检查长块压缩为单行。
+- 重写 `agent/session.py::try_resume_from_checkpoint`：用
+  `render_resume_status` 渲染三态（无 checkpoint / idle 残留 / actionable），
+  「无 checkpoint」也变成可见提示。
+- 给 `agent/health_check.py::run_health_check` 加 `verbose=True` 默认参数，
+  v0.2 兼容；False 模式只返回 results 不打印长块。
+- 测试：`tests/test_cli_renderer.py`（13 tests）+
+  `tests/test_session_summary_and_header.py`（10 tests）。
+- 真实 smoke：`python main.py` 启动屏幕已是结构化 shell header；
+  4 类工具结局文案沿用 v0.2 契约不变。
+
 ### v0.3 M2 · Health Maintenance 可视化
 基于 v0.2 的 `python main.py health` 子命令扩展为：
 - `health --json`：机器可读输出

@@ -182,27 +182,53 @@ def test_readonly_commands_baseline_set():
 
 
 # ---------------------------------------------------------------------------
-# §4 SHELL_BLACKLIST 已知缺口（preflight 文档 §3 表格第 2 行登记）
+# §4 SHELL_BLACKLIST 命令规范化（v0.2 RC P1-A）
 # ---------------------------------------------------------------------------
 
-def test_known_gap_simple_quoted_rm_can_currently_bypass_blacklist():
-    """已知缺口：简单引号转义可绕过黑名单（preflight 文档 §3 第 2 行登记）。
+def test_simple_quoted_rm_now_blocked_after_p1_normalization():
+    """v0.2 RC P1-A 已修复：简单引号绕过 `r''m -rf /` 现在被规范化后命中。
 
-    例如 `r''m -rf /` 在 shell 中等价于 `rm -rf /`，但当前正则
-    `\\brm\\s+(-...)` 不会命中。本测试**故意**断言「当前确实绕过」，
-    用于：
-    1. 让维护者意识到这不是被遗忘的盲区，是已登记的缺口。
-    2. 当 M6 最小补丁完成（命令规范化后再跑黑名单）时，本测试会 red，
-       提醒同步翻转断言并把缺口从 preflight 文档迁出。
+    历史：preflight §3 把这条记为「已知缺口」，旧测试 `test_known_gap_*`
+    断言 `is None`。P1-A 加入 `_normalize_shell_command` 后，规范化能去掉
+    成对空引号，让正则真的命中 `rm -rf /`。
 
-    修复时请把本测试改为 `assert check_shell_blacklist(...) is not None`，
-    并在 commit message 引用 docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md §3。
+    如果未来重构去掉了规范化，本测试会立刻 red，提醒在 preflight 文档
+    把缺口写回去。
     """
     assert SHELL_BLACKLIST  # sanity
     bypass_command = "r''m -rf /tmp/anything"
-    # 当前实现确实让这条命令通过——这是 preflight 登记的已知缺口。
-    assert check_shell_blacklist(bypass_command) is None, (
-        "如果本断言反向 red，说明 SHELL_BLACKLIST 已经被强化（例如先做命令"
-        " 规范化再匹配）。请把本测试翻转为 assert is not None，并在"
-        " docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md §3 把对应缺口迁出。"
+    assert check_shell_blacklist(bypass_command) is not None, (
+        "P1-A 命令规范化预期能拦截 `r''m -rf /...`；"
+        " 如果意外放过，请检查 _normalize_shell_command 是否被简化或移除。"
+    )
+
+
+@pytest.mark.parametrize("command", [
+    'r""m -rf /tmp/x',           # 双引号绕过
+    "\\rm -rf /tmp/x",           # 反斜杠转义
+    "rm\t-rf /tmp/x",            # tab
+    "rm  \t  -rf /tmp/x",        # 多空白
+    "RM -RF /tmp/x",             # 大小写
+    "rm\n-rf /tmp/x",            # 换行
+    "su''do apt install evil",   # sudo 引号绕过
+])
+def test_normalized_bypass_forms_are_blocked(command):
+    """P1-A：常见绕过形态在规范化后必须命中。"""
+    assert check_shell_blacklist(command) is not None, (
+        f"P1-A 期望规范化拦截 {command!r}，实际放过；请检查"
+        " _normalize_shell_command 与 check_shell_blacklist。"
+    )
+
+
+@pytest.mark.parametrize("command", [
+    "echo 'hello world'",         # 含字符的引号不能被破坏
+    "ls -la",
+    "cat README.md",
+    "grep -r 'foo bar' .",
+    "echo \"safe content\" > workspace/notes.txt",
+])
+def test_p1_normalization_does_not_break_safe_commands(command):
+    """P1-A：规范化不能误伤正常命令（含引号字符串、重定向到普通路径）。"""
+    assert check_shell_blacklist(command) is None, (
+        f"P1-A 误伤了正常命令 {command!r}；请收紧 _normalize_shell_command。"
     )

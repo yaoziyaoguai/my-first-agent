@@ -41,19 +41,29 @@
 - `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归测试**未补**。
 - `tool_execution_log` 长度截断**未做**。
 
-### 2.2 M6 基础安全：P0 已补，剩余 P1+ 仍待人工 smoke
+### 2.2 M6 基础安全：P0+P1 已补，剩余 P2+ 仍待人工 smoke
 
 **v0.2 RC P0 已落地**（commit `fix(runtime): close v0.2 rc security smoke gaps`）：
 - ✅ `is_sensitive_file` 现在按扩展名识别 `.pem` / `.key`（`SENSITIVE_SUFFIXES`）。
 - ✅ `SHELL_BLACKLIST` 的 fork bomb 正则改为字面匹配，真实命中。
 - ✅ `SHELL_BLACKLIST` 的 `>/dev/sd` 去掉前置 `\b`，真实命中。
 
+**v0.2 RC P1 已落地**（commit `fix(runtime): harden v0.2 rc tool safety checks`）：
+- ✅ P1-A：`_normalize_shell_command` 在原匹配未命中时跑一次规范化后再匹配，
+  覆盖空引号 / 反斜杠 / tab / 多空白 / 大小写绕过。
+- ✅ P1-B：`pre_write_check` 增加 `_check_dangerous_content`：私钥头 /
+  fork bomb / `> /dev/sd` / `mkfs` payload 全部拒写，即使路径是 `.txt` /
+  `.md`。
+- ✅ P1-C：负向断言固化（业务工具不能 meta_tool=True / `confirmation`
+  字段必须合法 / `is_meta_tool` 与 registry 一致 / 危险命令含规范化覆盖
+  必拦截 / 安全命令不被误伤）。
+
 **仍未补**（建议人工 smoke 之后再做）：
-- `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过）。
-- shell 命令规范化（去引号 + lower 后再跑黑名单）**未做**，简单引号转义
-  仍能绕过；`tests/test_security_baseline.py` 中 `test_known_gap_simple_quoted_rm_can_currently_bypass_blacklist` 仍钉死现状。
+- `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过 `read_file`）。
 - `read_file` / `write_file` 项目外路径仅 confirm，**没有**额外 ⚠️ 标签。
 - `install_skill` 下载内容**单次确认即执行**。
+- `_normalize_shell_command` 不处理 `$()` 子 shell、`eval`、十六进制
+  转义等高级绕过——v0.3 命令解析层做。
 
 > 上述全部登记在 `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` §3，
 > 由 `tests/test_security_baseline.py` 钉死「当前确实如此」，方便补丁
@@ -109,13 +119,15 @@
 | ~~`is_sensitive_file` 不识别 `.pem` / `.key` 扩展名~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
 | ~~fork bomb 正则失效~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
 | ~~`>/dev/sd` 边界正则失效~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
-| shell 引号转义绕过 | preflight §3 | **P1 · 强烈建议补** | 攻击面真实，但需要规范化函数 |
-| `is_sensitive_file` 只看文件名 | preflight §3 | **P1 · 推荐补** | 改名 `.env → notes.txt` 可绕过；需要内容前缀扫描 |
+| ~~shell 引号转义绕过~~ | preflight §3 | ✅ **v0.2 RC P1-A 已修复** | — |
+| ~~write_file 内容级危险扫描~~ | preflight §3 / §5 新增 | ✅ **v0.2 RC P1-B 已修复** | — |
+| ~~工具注册一致性负向断言~~ | preflight §4 | ✅ **v0.2 RC P1-C 已修复** | — |
+| `is_sensitive_file` 只看文件名 | preflight §3 | **P2 · 推荐补** | 改名 `.env → notes.txt` 可绕过 read 路径；需要内容前缀扫描 |
 | `read_file` / `write_file` 项目外路径仅 confirm | preflight §3 | **P2 · 建议补「⚠️ 标签」** | 本质是用户 UX 提示而非 hard block |
 | `install_skill` 单次确认即执行 | preflight §3 | **P3 · 可延期 v0.3** | 与 Skill 体系整体设计相关，不在 v0.2 范围 |
-| 工具注册一致性负向断言 | preflight §4 | **P1** | 防止业务工具被误标 meta=True |
-| `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | **P1** | 防止正则改动悄悄放过/误拒（P0 已建立基础回归网） |
-| `tool_execution_log` 截断 | preflight §4 | **P2** | 当前 checkpoint 已截断 messages，影响较小 |
+| `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | ✅ **P0/P1 已建立基础回归网** | — |
+| `tool_execution_log` 截断 | preflight §4 | **P3** | 当前 checkpoint 已截断 messages，影响较小 |
+| `$()` / `eval` / hex 转义等高级 shell 绕过 | P1-A 边界 | **v0.3 命令解析层** | 需要真实 shell parser，超出 v0.2 RC 范围 |
 
 **人工 smoke 后**：建议把 P0 + P1 一次性合并到 `M5/M6 最小补丁`
 PR；P2 / P3 单独排期或延期 v0.3。

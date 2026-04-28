@@ -224,20 +224,26 @@ rm -f memory/checkpoint.json
 - [ ] `read_file ./server.pem` → 被 block（v0.2 RC P0 修复后已支持扩展名识别）。
 - [ ] `write_file agent/core.py` → 被拒（受保护源码）。
 - [ ] `run_shell "rm -rf /"` → 被 `SHELL_BLACKLIST` 拦截。
+- [ ] `run_shell "r''m -rf /tmp/x"` → 被拦截（v0.2 RC P1-A 命令规范化）。
+- [ ] `run_shell "RM -RF /"` → 被拦截（v0.2 RC P1-A 大小写规范化）。
 - [ ] `run_shell ":(){ :|:& };:"` → 被拦截（v0.2 RC P0 修复 fork bomb 正则）。
 - [ ] `run_shell "echo data > /dev/sda1"` → 被拦截（v0.2 RC P0 修复 `>/dev/sd` 边界）。
 - [ ] `run_shell "ls"` → 静默执行（READONLY_COMMANDS）。
+- [ ] `write_file workspace/private.txt` 内容含 `-----BEGIN PRIVATE KEY-----`
+      → 被拒（v0.2 RC P1-B 内容前缀扫描），即使路径是 `.txt`。
+- [ ] `write_file workspace/safe.md` 内容是普通中文笔记 → 正常通过 confirm 后写入。
 - [ ] `write_file ~/v0_2_outside_test.txt`（项目外）→ 被要求 confirm。
       **不要**真的回 y，回 n 取消。
 
 > ⚠️ **剩余已知缺口**（见
 > `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` §3）：
 > - `read_file ./notes.txt`（内容是 `.env` 改名）当前**不会**被 block
->   （内容前缀扫描未做）；
-> - `run_shell "r''m -rf /"` 当前能绕过黑名单（命令规范化未做）。
+>   （`is_sensitive_file` 仍只看文件名/扩展名，read 路径未做内容前缀扫描）；
+> - `run_shell "$(echo rm) -rf /"` / `run_shell "eval ..."` 等高级 shell
+>   绕过当前**不会**被拦截（需要 v0.3 命令解析层）。
 >
 > 这些**预期失败**。看到「未拦截」属于已知现状，请记录而**不要**临时
-> 修补；后续 P1 补丁会统一处理。
+> 修补；后续 P2 / v0.3 补丁会统一处理。
 
 ### 5.3 CLI 输出契约不退化
 

@@ -4,19 +4,75 @@ from agent.security import is_protected_source_file
 from agent.checks import run_linter
 from config import ENABLE_REVIEW
 
+# v0.2 RC P1-B 安全边界补丁：写入内容的危险前缀/payload 扫描。
+#
+# 目标：阻止「文件扩展名看起来安全（.txt / .md / .log 等），但内容
+# 明显是密钥 / fork bomb / 块设备覆盖 payload」的写入。
+#
+# 边界：这**不**是病毒扫描器，也**不**做语义分析。只匹配少量、明确、
+# 几乎不会出现在正常文档中的危险标志串。误伤面：用户如果真的想写一份
+# 「关于 PEM 私钥格式的文档」会被拒——这种情况让用户改 confirmation 流程
+# 或更换 wording 即可，比静默写入真实密钥更安全。
+DANGEROUS_CONTENT_MARKERS = [
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+]
+# 危险 shell payload 的最小子串集合。这里**不**用正则，避免与
+# SHELL_BLACKLIST 形成两套规则；只匹配字面、稳定的攻击 payload。
+DANGEROUS_CONTENT_SUBSTRINGS = [
+    ":(){ :|:& };:",   # fork bomb 字面
+    "rm -rf /",        # 典型破坏命令
+    "rm -rf ~",
+    "> /dev/sda",
+    "> /dev/sdb",
+    ">/dev/sda",
+    ">/dev/sdb",
+    "mkfs.ext4 /dev/",
+]
+
+
+def _check_dangerous_content(content: str) -> str | None:
+    """扫描写入内容中明显的危险 payload。命中返回拒绝原因，否则 None。"""
+    if not isinstance(content, str) or not content:
+        return None
+    for marker in DANGEROUS_CONTENT_MARKERS:
+        if marker in content:
+            return (
+                f"拒绝执行：写入内容包含敏感密钥头 '{marker[:30]}...'，"
+                "禁止把私钥/密钥写入文件。"
+            )
+    for sub in DANGEROUS_CONTENT_SUBSTRINGS:
+        if sub in content:
+            return (
+                f"拒绝执行：写入内容包含危险 shell payload '{sub}'，"
+                "禁止写入此类内容。"
+            )
+    return None
+
 
 def pre_write_check(tool_name, tool_input, context):
     """写文件前的检查"""
     path = tool_input.get("path", "")
-    
+    content = tool_input.get("content", "")
+
     # 源码保护
     if is_protected_source_file(path):
         return f"拒绝执行：'{path}' 属于受保护源码文件（.py），不允许 Agent 修改"
-    
+
+    # v0.2 RC P1-B：内容级危险 payload 扫描（在 protected source 之后，
+    # 在「同轮单写」之前——payload 拒绝优先级高于流程控制）。
+    danger = _check_dangerous_content(content)
+    if danger:
+        return danger
+
     # 同一轮只允许一次 write_file
     if context and context.get("write_file_seen"):
         return "拒绝执行：同一轮响应中只允许执行一个 write_file，请先等待用户确认后再继续下一个文件。"
-    
+
     return None  # 放行
 
 

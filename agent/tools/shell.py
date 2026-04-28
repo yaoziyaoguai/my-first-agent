@@ -52,10 +52,53 @@ def _check_shell_confirmation(tool_input):
 SHELL_TIMEOUT = 30
 
 
+def _normalize_shell_command(command: str) -> str:
+    """对 shell 命令做最小规范化，把常见绕过形态归一回基础形态再跑黑名单。
+
+    v0.2 RC P1-A 安全边界补丁：**不**做完整 shell parse / 不展开变量 /
+    不处理子 shell。只做四件事：
+    1. 删除两两相邻的空引号对（`r''m` / `r""m` 这类绕过）。这是最常见的
+       手工拼接绕过，删掉空引号后等价于原命令。
+    2. 删除非空白后接的反斜杠转义（`\\rm` → `rm`），仅针对单字符位置。
+       不处理 shell 转义语义，仅消除最基础的字符串绕过。
+    3. 把所有空白字符（`\\t`、`\\n`、`\\r`、连续空格）压成单个空格，
+       让 `rm\\t-rf` / `rm\\n-rf` 等价于 `rm -rf`。
+    4. 转成小写，让大小写绕过失效（`RM -RF` → `rm -rf`）。
+
+    返回**规范化后**的命令字符串。这条函数**不**判定危险——它只把字符串
+    变形成「让正则更容易命中」的形态。判定仍由 SHELL_BLACKLIST 完成。
+
+    边界声明：这不是完整安全沙箱，更不是 shell parser。
+    `$()` / `\\x72m` / `eval` / 多 shell 转义层叠的攻击仍可能绕过。
+    完整方案在 v0.3 命令解析层做。
+    """
+    # 1. 空引号对（成对出现）
+    #    `r''m` → `rm`，`a""b` → `ab`，但保留含字符的 `'foo'`。
+    normalized = re.sub(r"''", "", command)
+    normalized = re.sub(r'""', "", normalized)
+    # 2. 单字符前反斜杠转义（`\r` `\m` 等），但保留路径分隔符 `/`。
+    normalized = re.sub(r"\\([a-zA-Z])", r"\1", normalized)
+    # 3. 空白压缩
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    # 4. 小写
+    normalized = normalized.lower()
+    return normalized
+
+
 def check_shell_blacklist(command):
+    """检查 shell 命令是否命中危险模式。
+
+    v0.2 RC P1-A：先按原命令匹配；若未命中再按规范化后的命令匹配，
+    抓住简单引号 / 反斜杠 / 空白 / 大小写绕过。任何一次命中即返回。
+    """
     for pattern in SHELL_BLACKLIST:
         if re.search(pattern, command):
             return pattern
+    normalized = _normalize_shell_command(command)
+    if normalized and normalized != command:
+        for pattern in SHELL_BLACKLIST:
+            if re.search(pattern, normalized):
+                return pattern
     return None
 
 

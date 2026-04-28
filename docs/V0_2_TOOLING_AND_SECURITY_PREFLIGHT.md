@@ -63,18 +63,20 @@
 | 缺口 | 现状 | 风险 | 最小修复（候选） |
 |---|---|---|---|
 | `is_sensitive_file` 只看文件名 | 改名后仍可读 | 用户复制 `.env` → `notes.txt` 可绕过 block | 加内容前 N 字节扫描敏感前缀（`API_KEY=` / `BEGIN PRIVATE KEY` 等） |
-| ~~`is_sensitive_file` 不识别 `.pem` / `.key` 扩展名~~ | ✅ **v0.2 RC P0 已修复**（`SENSITIVE_SUFFIXES` + `Path.suffix.lower()` 匹配） | — | — |
-| `SHELL_BLACKLIST` 用正则 | 可能被 `\x72m`/转义/拼接绕过 | 模型恶意拼接命令 | shell 命令在执行前规范化（去引号 + lower），重新跑黑名单 |
-| ~~`SHELL_BLACKLIST` fork bomb 正则失效~~ | ✅ **v0.2 RC P0 已修复**（去掉 `\b`，改为允许任意空白的字面正则） | — | — |
-| ~~`SHELL_BLACKLIST` `>/dev/sd` 重定向失效~~ | ✅ **v0.2 RC P0 已修复**（去掉前置 `\b`） | — | — |
+| ~~`is_sensitive_file` 不识别 `.pem` / `.key` 扩展名~~ | ✅ **v0.2 RC P0 已修复** | — | — |
+| ~~`SHELL_BLACKLIST` 用正则可被简单引号转义绕过~~ | ✅ **v0.2 RC P1-A 已修复**（`_normalize_shell_command` 在原匹配未命中时再跑一次规范化版本，覆盖空引号 / 反斜杠 / 空白 / 大小写绕过） | — | — |
+| ~~`SHELL_BLACKLIST` fork bomb 正则失效~~ | ✅ **v0.2 RC P0 已修复** | — | — |
+| ~~`SHELL_BLACKLIST` `>/dev/sd` 重定向失效~~ | ✅ **v0.2 RC P0 已修复** | — | — |
+| ~~`write_file` 没有内容级危险扫描~~ | ✅ **v0.2 RC P1-B 已修复**（`pre_write_check` 加 `_check_dangerous_content`：私钥头 / fork bomb / `> /dev/sd` / `mkfs` payload 全部拒写，即使路径是 `.txt` / `.md`） | — | — |
 | `write_file` 没有项目外写拦截 | 仅检查「项目内 + 受保护扩展名」 | 可写入 `~/.bashrc` 等 | `confirmation=always` 已要求确认；M6 可加「项目外路径 → 显式额外提示」 |
 | `read_file` 项目外仅 confirm | 即使确认后可读任意路径 | 用户疏忽确认即泄漏 | 同上：项目外路径在 confirm prompt 上加「⚠️ 项目外」标签 |
 | `install_skill` 下载内容确认即执行 | `safety_warnings` 仅打印 | 远程内容含恶意脚本 | M6 可强制要求第二次确认；当前在范围外 |
 
-**v0.2 RC P0 已修复**：上表第 2 / 4 / 5 项（`.pem` / `.key` 扩展名识别、
-fork bomb 字面匹配、`>/dev/sd` 边界修正）。剩余 P1 项（shell 命令规范化、
-内容前缀扫描、项目外路径 ⚠️ 标签）建议人工 smoke 后再统一推进。其余推迟到
-v0.3 或单独 spec 评审。
+**v0.2 RC P0 + P1 已落地**：上表第 2 / 3 / 4 / 5 / 6 项（`.pem`/`.key`
+扩展名识别、shell 命令规范化、fork bomb 字面匹配、`>/dev/sd` 边界修正、
+write_file 内容前缀扫描）。剩余项（`is_sensitive_file` 文件名→内容扫描升级、
+项目外路径 ⚠️ 标签、`install_skill` 二次确认）建议人工 smoke 后再判断
+是否升入 v0.2 或延期 v0.3。
 
 ## 4. M5 工具体系优化 — 最小必须项 vs 可延期
 

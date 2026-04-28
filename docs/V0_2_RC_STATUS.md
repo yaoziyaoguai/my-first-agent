@@ -58,6 +58,23 @@
   字段必须合法 / `is_meta_tool` 与 registry 一致 / 危险命令含规范化覆盖
   必拦截 / 安全命令不被误伤）。
 
+**v0.2 RC P2 后续修复（smoke 中真实暴露）**：
+- ✅ `pre_write_check` 增加 `_is_path_inside_project` 项目外硬拦截
+  （commit `fix(runtime): block writes outside project workspace`）。
+  read_file 项目外仍保持 confirm（写远比读危险，read 已有 sensitive
+  block + confirm 双层保护）。
+- ✅ FORCE_STOP 不再被误归类为「用户连续拒绝多次操作」
+  （commit `fix(runtime): distinguish policy denial from user rejection`）。
+  smoke 现象：用户单次输入「读取 ~/.env」/「读取 /tmp/server.pem」
+  即被回复「用户连续拒绝多次操作，任务已停止」——根因是
+  `tool_executor.py` 的 `confirmation == "block"` 分支只用通用文案，
+  且 `response_handlers` 把 FORCE_STOP 一律映射到该误导消息，而
+  Runtime 实际上从未存在用户拒绝计数。
+  修复：`_describe_policy_denial` 给出具体的「敏感配置/密钥文件」
+  原因；FORCE_STOP 总结改为「工具调用被安全策略阻断」；
+  `tool_execution_log.status` 改为 `blocked_by_policy`，与未来
+  可能引入的 `user_rejected` 计数语义解耦。
+
 **仍未补**（建议人工 smoke 之后再做）：
 - `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过 `read_file`）。
 - `read_file` 项目外路径仅 confirm（write_file 已硬拦截，read 暂保留 confirm 兼容）。

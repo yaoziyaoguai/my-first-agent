@@ -283,7 +283,16 @@ def handle_tool_use_response(
                     "不会在后续自动重试——如有需要请换用其他方式"
                 ),
             )
-            return "用户连续拒绝多次操作，任务已停止。"
+            # v0.2 RC smoke 修复：FORCE_STOP 的唯一来源是 policy block
+            # （tool_executor.py 的 confirmation == "block" 分支），不是
+            # 「用户连续拒绝多次」。Runtime 中也并不存在用户拒绝计数器。
+            # 旧消息「用户连续拒绝多次操作，任务已停止」会让用户在仅一次
+            # 安全拒绝后误以为系统在指责自己。改为如实陈述策略阻断，
+            # 并提示用户上文工具消息有具体拒绝原因。
+            return (
+                "工具调用被安全策略阻断，本任务已停止。"
+                "具体拒绝原因见上方工具消息。"
+            )
         if result == AWAITING_USER:
             log_event(
                 "loop.stop",

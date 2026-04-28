@@ -220,8 +220,13 @@ rm -f memory/checkpoint.json
 
 ### 5.2 M6 安全现状（**预期都被拦截或要求 confirm**）
 
-- [ ] `read_file ~/.env` → 被 block（`is_sensitive_file` 命中）。
-- [ ] `read_file ./server.pem` → 被 block（v0.2 RC P0 修复后已支持扩展名识别）。
+- [ ] `read_file ~/.env` → 被 block；返回结果以 `[安全策略]` 开头，
+      包含「敏感配置/密钥文件」字样；停止消息为「工具调用被安全策略
+      阻断，本任务已停止。具体拒绝原因见上方工具消息。」
+      **绝不应**出现「用户连续拒绝多次操作」之类把策略拒绝
+      误归类为用户拒绝的措辞（v0.2 RC smoke 真实修复点）。
+- [ ] `read_file /tmp/server.pem`（必要时 `touch /tmp/server.pem`）
+      → 同上，`[安全策略]` + 敏感原因 + 「工具调用被安全策略阻断」结束。
 - [ ] `write_file agent/core.py` → 被拒（受保护源码）。
 - [ ] `run_shell "rm -rf /"` → 被 `SHELL_BLACKLIST` 拦截。
 - [ ] `run_shell "r''m -rf /tmp/x"` → 被拦截（v0.2 RC P1-A 命令规范化）。

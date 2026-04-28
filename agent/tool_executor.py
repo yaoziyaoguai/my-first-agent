@@ -25,6 +25,38 @@ from agent.tool_registry import needs_tool_confirmation
 AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
 
+
+def _describe_policy_denial(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """根据工具名 + 输入，生成具体的安全策略拒绝原因（中文，用户可读）。
+
+    设计要点：
+    - 这是 v0.2 RC smoke 暴露的真实问题——旧实现在所有 policy block 上
+      都打印「该工具调用被安全策略阻止，未执行」这条**通用消息**，再被
+      response_handlers 误归类为「用户连续拒绝多次操作，任务已停止」。
+      用户根本不知道是路径敏感、还是文件类型敏感，更不知道是策略而非
+      自己的拒绝触发了 stop。
+    - 这里只生成消息文本，不改变 confirmation 返回值的契约（仍是
+      "block" / True / False），也不放宽任何安全边界。
+    - 不暴露 raw 路径全文以外的信息（不读文件内容、不打印环境变量）。
+    """
+    path = (tool_input or {}).get("path", "") or ""
+
+    if tool_name in ("read_file", "read_file_lines"):
+        # 用现成的安全工具反查具体原因。导入放在函数内，避免顶层循环依赖。
+        from agent.security import is_sensitive_file
+
+        if is_sensitive_file(path):
+            return (
+                f"[安全策略] 路径 '{path}' 被识别为敏感配置/密钥文件"
+                "（如 .env / .pem / .key / 含 secret/credential/password/token），"
+                "Runtime 默认禁止 Agent 读取以避免泄漏凭证；本工具调用未执行。"
+            )
+
+    # 其他 block 来源（未来扩展）：保留中性但区分于「用户拒绝」的措辞。
+    return (
+        f"[安全策略] 工具 {tool_name}({tool_input}) 被安全策略阻止，未执行。"
+    )
+
 TOOL_FAILURE_PREFIXES = (
     "错误：",
     "读取超时：",
@@ -141,13 +173,16 @@ def execute_single_tool(
     confirmation = needs_tool_confirmation(tool_name, tool_input)
 
     if confirmation == "block":
-        result = "[系统] 该工具调用被安全策略阻止，未执行。"
+        # v0.2 RC smoke 修复：把通用消息替换为具体拒绝原因，方便用户理解
+        # 「不是我拒绝的，是策略拒绝的」。status 改为 'blocked_by_policy'，
+        # 与未来真实 user_rejected 计数（如果引入）做语义区分。
+        result = _describe_policy_denial(tool_name, tool_input)
         append_tool_result(messages, tool_use_id, result)
         state.task.tool_execution_log[tool_use_id] = {
             "tool": tool_name,
             "input": tool_input,
             "result": result,
-            "status": "blocked",
+            "status": "blocked_by_policy",
             "step_index": state.task.current_step_index,
         }
         save_checkpoint(state)

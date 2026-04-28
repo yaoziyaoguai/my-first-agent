@@ -286,3 +286,139 @@ def test_write_outside_does_not_affect_read_tools():
     assert result is True, (
         f"read_file 项目外路径行为被意外修改；当前返回 {result!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# §8 安全策略拒绝 != 用户连续拒绝（v0.2 RC smoke 真实发现）
+# ---------------------------------------------------------------------------
+# smoke 现象：用户输入「读取 ~/.env」/「读取 /tmp/server.pem」，Agent 回复
+# 「用户连续拒绝多次操作，任务已停止」。但用户从未拒绝任何 confirm；这是
+# tool policy block 被 response_handlers 误归类为 user rejection。
+# 根因：
+#   1. tool_executor.py 在 confirmation == "block" 时使用通用消息，未告知具体原因。
+#   2. response_handlers.py 对 FORCE_STOP 一律返回「用户连续拒绝多次操作」——
+#      实际上 FORCE_STOP 唯一来源是 policy block，且 Runtime 从未有 user-rejection
+#      计数器（grep 不到 reject_count / consecutive_rejection）。
+
+def test_describe_policy_denial_for_dotenv_mentions_credential_reason():
+    """读取 ~/.env 必须给出可读、具体的拒绝原因，不是通用消息。"""
+    from agent.tool_executor import _describe_policy_denial
+    msg = _describe_policy_denial("read_file", {"path": "~/.env"})
+    assert "[安全策略]" in msg
+    assert "敏感配置" in msg or "密钥" in msg
+    assert "~/.env" in msg
+
+
+def test_describe_policy_denial_for_pem_mentions_credential_reason():
+    """读取项目外 .pem 同样给出敏感文件原因。"""
+    from agent.tool_executor import _describe_policy_denial
+    msg = _describe_policy_denial("read_file", {"path": "/tmp/server.pem"})
+    assert "[安全策略]" in msg
+    assert "敏感" in msg or "密钥" in msg
+    assert "/tmp/server.pem" in msg
+
+
+def test_describe_policy_denial_does_not_say_user_rejected():
+    """安全策略拒绝消息绝不能用「用户拒绝/用户连续拒绝」措辞。"""
+    from agent.tool_executor import _describe_policy_denial
+    msg = _describe_policy_denial("read_file", {"path": "~/.env"})
+    assert "用户" not in msg, (
+        f"policy denial 消息混入了「用户...」措辞，会误导用户：{msg!r}"
+    )
+    assert "连续拒绝" not in msg
+
+
+def test_describe_policy_denial_safe_path_falls_back_to_generic():
+    """非敏感路径走通用 [安全策略] 消息，仍区分于「用户拒绝」措辞。"""
+    from agent.tool_executor import _describe_policy_denial
+    msg = _describe_policy_denial("read_file", {"path": "workspace/foo.txt"})
+    assert "[安全策略]" in msg
+    assert "用户" not in msg
+
+
+def test_force_stop_response_message_does_not_misclassify_as_user_rejection():
+    """response_handlers 在 FORCE_STOP 上返回的总结字符串不能再说
+    「用户连续拒绝多次操作」。"""
+    import inspect
+    from agent import response_handlers
+
+    src = inspect.getsource(response_handlers)
+    # 注释里仍可解释历史措辞；这里检查的是「实际返回给用户的字符串」。
+    # 那个字符串字面量必须已不再出现在非注释位置。简化检查：源码里仅在
+    # 注释段（带 # 前缀）出现，不在 return 语句里。
+    forbidden = '"用户连续拒绝多次操作，任务已停止。"'
+    assert forbidden not in src, (
+        "response_handlers.py 仍在 return 旧的误导消息 "
+        f"{forbidden}；FORCE_STOP 应改为安全策略阻断措辞。"
+    )
+
+
+def test_real_user_tool_rejection_path_is_separate_from_force_stop():
+    """真实的「用户拒绝工具确认」走 confirm_handlers.handle_user_input_step，
+    生成 '[系统] 用户拒绝执行该工具，已跳过。' 这条 tool_result 文案——
+    与 FORCE_STOP 完全是两条路径，不会触发 stop。
+
+    这条测试用 grep 守护：confirm_handlers 必须仍有「用户拒绝执行该工具」
+    这条消息（用户真正 reject 的语义），且不依赖 FORCE_STOP。
+    """
+    import inspect
+    from agent import confirm_handlers
+
+    src = inspect.getsource(confirm_handlers)
+    assert "用户拒绝执行该工具" in src, (
+        "confirm_handlers 中真实的用户拒绝文案缺失；"
+        "若被合并进 policy denial，会再次混淆两种语义。"
+    )
+    assert "FORCE_STOP" not in src, (
+        "confirm_handlers 不应直接引用 FORCE_STOP；"
+        "用户拒绝与 policy block 必须各走各的语义路径。"
+    )
+
+
+def test_blocked_tool_log_status_marks_policy_origin(tmp_path, monkeypatch):
+    """tool_execution_log 中 blocked 项的 status 必须是 'blocked_by_policy'，
+    便于审计/checkpoint 区分用户拒绝（如未来引入）与策略拒绝。"""
+    from agent.tool_executor import execute_single_tool
+
+    class _Block:
+        id = "toolu_test_block_1"
+        name = "read_file"
+        input = {"path": "~/.env"}
+
+    class _TaskState:
+        def __init__(self):
+            self.tool_execution_log = {}
+            self.current_step_index = 0
+            self.pending_tool = None
+            self.pending_user_input_request = None
+            self.status = "running"
+
+    class _State:
+        def __init__(self):
+            self.task = _TaskState()
+
+    class _TurnState:
+        round_tool_traces = []
+        on_runtime_event = None
+        on_display_event = None
+
+    # 阻止 save_checkpoint 真的写盘
+    import agent.tool_executor as te
+    monkeypatch.setattr(te, "save_checkpoint", lambda s: None)
+
+    state = _State()
+    msgs = []
+    out = execute_single_tool(
+        _Block(),
+        state=state,
+        turn_state=_TurnState(),
+        turn_context={},
+        messages=msgs,
+    )
+    assert out == te.FORCE_STOP
+    entry = state.task.tool_execution_log["toolu_test_block_1"]
+    assert entry["status"] == "blocked_by_policy", (
+        f"blocked 工具的 status 应为 'blocked_by_policy'，实际：{entry['status']!r}"
+    )
+    assert "[安全策略]" in entry["result"]
+    assert "用户" not in entry["result"]

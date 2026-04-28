@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from llm.audit import build_status, scan_inputs
 from llm.cli import main as process_cli_main
 from llm.pipeline import process_file
 from llm.providers import FakeProvider
@@ -72,6 +73,7 @@ def test_process_command_uses_fake_provider_without_real_key(tmp_path, monkeypat
 
     exit_code = process_cli_main(
         [
+            "process",
             str(input_path),
             "--state-path",
             str(state_path),
@@ -127,3 +129,156 @@ def test_main_process_dispatch_does_not_start_interactive_session(
     assert exit_code == 0
     assert called["init"] is False
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+def test_scan_inputs_reports_metadata_without_persisting_raw_text(tmp_path):
+    secret = "SCAN_SECRET_RAW_TEXT"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(secret, encoding="utf-8")
+
+    entries = scan_inputs(tmp_path)
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.path == str(input_path.resolve())
+    assert entry.size == len(secret)
+    assert entry.input_file_hash
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "runs").exists()
+    assert secret not in entry.__dict__.values()
+
+
+def test_scan_command_outputs_metadata_only(tmp_path, capsys):
+    secret = "SCAN_COMMAND_SECRET"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(secret, encoding="utf-8")
+
+    exit_code = process_cli_main(["scan", str(input_path)])
+
+    assert exit_code == 0
+    output_text = capsys.readouterr().out
+    assert secret not in output_text
+    output = json.loads(output_text)
+    assert output["inputs"][0]["path"] == str(input_path.resolve())
+    assert output["inputs"][0]["size"] == len(secret)
+
+
+def test_status_handles_missing_state_and_runs(tmp_path):
+    status = build_status(
+        state_path=tmp_path / "missing-state.json",
+        runs_dir=tmp_path / "missing-runs",
+    )
+
+    assert status["latest_run"]["run_id"] is None
+    assert status["llm_calls"] == []
+    assert "state_missing" in status["warnings"]
+    assert "runs_missing_or_empty" in status["warnings"]
+
+
+def test_status_reads_llm_call_whitelist_and_skips_corrupt_jsonl(tmp_path):
+    raw_text = "STATUS_SECRET_RAW_TEXT"
+    state_path = tmp_path / "state.json"
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    run_path = runs_dir / "run-1.jsonl"
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_run_id": "run-1",
+                "status": "ok",
+                "input_file_hash": "abc123",
+                "run_path": str(run_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event": "llm_call",
+                        "payload": {
+                            "provider": "fake",
+                            "model": "fake-llm",
+                            "prompt_version": "triager.v1",
+                            "input_file_hash": "abc123",
+                            "tokens": 3,
+                            "latency": 1,
+                            "status": "ok",
+                            "error": None,
+                            "raw_text": raw_text,
+                        },
+                    }
+                ),
+                "{bad json",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_status(state_path=state_path, runs_dir=runs_dir)
+
+    assert raw_text not in json.dumps(status, ensure_ascii=False)
+    assert status["latest_run"]["run_id"] == "run-1"
+    assert status["llm_calls"] == [
+        {
+            "provider": "fake",
+            "model": "fake-llm",
+            "prompt_version": "triager.v1",
+            "input_file_hash": "abc123",
+            "tokens": 3,
+            "latency": 1,
+            "status": "ok",
+            "error": None,
+        }
+    ]
+    assert any(warning.startswith("invalid_jsonl:") for warning in status["warnings"])
+
+
+def test_status_command_outputs_warnings_without_raw_text(tmp_path, capsys):
+    raw_text = "STATUS_COMMAND_SECRET"
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    run_path = runs_dir / "latest.jsonl"
+    run_path.write_text(
+        json.dumps(
+            {
+                "event": "llm_call",
+                "payload": {
+                    "provider": "fake",
+                    "model": "fake-llm",
+                    "prompt_version": "linker.v1",
+                    "input_file_hash": "def456",
+                    "tokens": 1,
+                    "latency": 2,
+                    "status": "error",
+                    "error": "ProviderError",
+                    "completion": raw_text,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = process_cli_main(
+        [
+            "status",
+            "--state-path",
+            str(tmp_path / "missing.json"),
+            "--runs-dir",
+            str(runs_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    output_text = capsys.readouterr().out
+    assert raw_text not in output_text
+    output = json.loads(output_text)
+    assert output["errors"] == [
+        {
+            "prompt_version": "linker.v1",
+            "error": "ProviderError",
+            "status": "error",
+        }
+    ]

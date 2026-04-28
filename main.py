@@ -491,10 +491,10 @@ def main_loop():
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "process":
+    if argv and argv[0] in {"process", "scan", "status"}:
         from llm.cli import main as process_main
 
-        return process_main(argv[1:])
+        return process_main(argv)
 
     init_session()
     try_resume_from_checkpoint()

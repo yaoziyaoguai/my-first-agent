@@ -210,3 +210,22 @@ Esc / generation cancellation, sub-agent, Reflect / Self-Correction,
 Skill marketplace, complex topic switch, slash commands, automatic
 log/session/workspace pruning. See `docs/V0_3_PLANNING.md` §2 for the
 explicit non-goal list.
+
+**v0.3 patch — final answer / request_user_input protocol fix** (post-tag):
+
+A manual smoke surfaced a UX break: the model wrote a trailing open-ended
+question ("need me to adjust some days?") in its final answer in the same
+turn as a `mark_step_complete` tool call. Runtime correctly completed the
+task on the structured signal, but the user perceived "asked me a question
+then refused to wait". Fix is at the protocol boundary, not via keywords:
+
+- `config.SYSTEM_PROMPT` now declares `request_user_input` as the **only**
+  signal Runtime treats as "waiting", and forbids mixing waiting-style
+  questions with `mark_step_complete` in the same response.
+- `agent/model_output_resolution.py` keyword patterns are frozen as a
+  legacy fallback (size-capped by tests; new findings go to SYSTEM_PROMPT).
+- Guarded by `tests/test_final_answer_user_input_separation.py` (7 tests).
+
+See `docs/V0_3_PLANNING.md` §3.5 and `docs/CLI_OUTPUT_CONTRACT.md` §14
+for the full protocol contract.
+

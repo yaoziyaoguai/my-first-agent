@@ -297,3 +297,37 @@ header 结构、把 health 长块加回启动屏、或让 summarize_session_stat
 `agent/health_check.check_log_size().action` 必须包含
 `python main.py logs` 字面，引导用户先看摘要再决定归档。
 不得反向写「自动 rm / 自动归档」类命令。
+
+---
+
+## 14. v0.3 patch · final answer 与 request_user_input 协议边界
+
+> 本节冻结 v0.3 release 后人工 smoke 触发的协议级修复。任何破坏这些约束的
+> PR 都会被 `tests/test_final_answer_user_input_separation.py` 拦下。
+
+### 14.1 协议边界（Runtime 视角）
+
+- `request_user_input` 是 Runtime **唯一**识别的「等待用户输入」信号。
+  Runtime **不**根据 assistant 文本里是否含问号或某些中文词来判定是否进入
+  `awaiting_user_input`。
+- final answer / `mark_step_complete` 表示当前任务/步骤已完成，**不**等价于
+  「等待用户回答」。两者状态不可混用。
+- 若同一响应里同时出现 `request_user_input` 和 `mark_step_complete`，
+  Runtime 按 `request_user_input` 优先（已由
+  `tests/test_meta_tool.py::test_request_user_input_clears_stale_mark_step_complete`
+  守护）。
+
+### 14.2 模型契约（已写入 `config.SYSTEM_PROMPT`）
+
+- 真正需要用户补充信息时**必须**调用 `request_user_input`，不要把追问混在
+  final answer 文本里。
+- 在 `mark_step_complete` 同一轮**不要**写「需要我…吗？」「要不要…？」这种
+  待应答追问；改用「如后续需要调整，可以继续告诉我」类**非等待式收尾**。
+
+### 14.3 为什么不是关键词 hack
+
+`agent/model_output_resolution.py` 中 `BLOCKING_USER_INPUT_PATTERNS` /
+`NON_BLOCKING_FOLLOWUP_PATTERNS` 是 v0.1 历史兜底，**不再扩张**（测试用
+size cap 守护）。主防线已迁到 SYSTEM_PROMPT 协议契约，避免靠中文/英文
+关键词黑名单猜模型意图。
+

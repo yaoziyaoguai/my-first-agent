@@ -175,20 +175,6 @@ checkpoint 事件可在 5 秒内定位。
 
 ---
 
-
-
-- M1-M4 全部 ship 或显式登记为 partial（带原因）。
-- ruff 0 错；pytest 全绿（允许永久 xfail，但每个都必须有归属说明）。
-- 至少一次真实人工 smoke（同 v0.2 的格式），结果记录在
-  `docs/V0_3_MANUAL_SMOKE_RESULT.md`。
-- 防泄漏审计延续：`tests/test_gitignore_runtime_artifacts.py` 通过，
-  `git ls-files` 复核命令在 `RELEASE_NOTES_v0.3.md` 写明。
-- v0.3 backlog 没有被偷偷做掉。
-
----
-
----
-
 ## 4. 完成标准（v0.3 release readiness 时再核对）
 
 - M1-M4 全部 ship 或显式登记为 partial（带原因）。

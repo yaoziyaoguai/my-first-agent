@@ -20,7 +20,12 @@
 | M2 事件边界治理 | `docs/RUNTIME_EVENT_BOUNDARIES.md` | `tests/test_runtime_event_boundaries.py`（11） | — | `fb2f24a` |
 | M3 checkpoint 恢复语义 | `docs/CHECKPOINT_RESUME_SEMANTICS.md` | `tests/test_checkpoint_resume_semantics.py`（13） | `agent/checkpoint.py::_filter_to_declared_fields` 字段白名单 | `77d77e0` |
 | M4 错误恢复 / loop guard | `docs/RUNTIME_ERROR_RECOVERY.md` | `tests/test_runtime_error_recovery.py`（10） | — | `e54b708` |
-| M5/M6 preflight | `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` | `tests/test_security_baseline.py`（39） | — | `7254942` |
+| M5/M6 preflight | `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` | `tests/test_security_baseline.py`（60） | — | `7254942` |
+| M5/M6 P0 安全补丁 | preflight §3 | `tests/test_v0_2_rc_automated_smoke.py`（28） | `agent/security.py` SENSITIVE_SUFFIXES + shell 黑名单字面/边界 | `20d1bdf` |
+| M5/M6 P1 安全加固 | preflight §3-§5 | `tests/test_v0_2_rc_p1_negative.py`（45） | `_normalize_shell_command` + `_check_dangerous_content` + 工具注册负向断言 | `1c1d796` |
+| M5/M6 P2-1 项目外写硬拦截 | smoke 真实暴露 | 同上 §7（11） | `_is_path_inside_project` fail-closed | `e26574c` |
+| M5/M6 P2-2 policy denial 区分 | smoke 真实暴露 | 同上 §8（8） | `_describe_policy_denial` + `blocked_by_policy` status + FORCE_STOP 文案 | `7b16601` |
+| RC 自动 smoke 收口 | RC_STATUS §2.2.1 | 同上 + 文档断言 | — | `871824e` |
 
 **LLM Processing 子线已收口**（v0.2 早期落地，不在 RC 主线但确认未退化）：
 
@@ -29,7 +34,11 @@
 - M4 provider config / preflight（`6c2b55b`）
 - M5 真实 provider 错误分类 + live smoke（`5f3e0c3` + `a99498d` + `7b6ec35` + `46abac1`）
 
-**测试基线**：`387 passed, 3 xfailed`（ruff 0 错误）。
+**测试基线**：`528 passed, 3 xfailed`（ruff 0 错误）。
+
+**v0.2 RC 状态判定**：自动化 smoke 已完成，P0/P1/P2 全部闭环；剩余仅
+**人工体验观察**和**是否 push**的决策。详细判定与人工试用最短路径
+见 `docs/V0_2_RC_DECISION.md`。
 
 ---
 
@@ -41,7 +50,7 @@
 - `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归测试**未补**。
 - `tool_execution_log` 长度截断**未做**。
 
-### 2.2 M6 基础安全：P0+P1 已补，剩余 P2+ 仍待人工 smoke
+### 2.2 M6 基础安全：P0+P1+P2 全部已补，自动 smoke 已收口
 
 **v0.2 RC P0 已落地**（commit `fix(runtime): close v0.2 rc security smoke gaps`）：
 - ✅ `is_sensitive_file` 现在按扩展名识别 `.pem` / `.key`（`SENSITIVE_SUFFIXES`）。
@@ -146,20 +155,19 @@
 
 ---
 
-## 4. M5/M6 「preflight only」的含义
+## 4. M5/M6 「preflight only」的历史含义（已过时，仅留档）
 
-**preflight only 不等于「这个 milestone 算完了」**，它的语义是：
+**preflight only 在 RC 早期的语义**：
 
 1. **只读审计已完成**：清单、机制、缺口都已固化在
    `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md`。
-2. **回归网已建好**：`tests/test_security_baseline.py` 39 条钉死现状，
-   未来打补丁能立刻看到行为变化。
+2. **回归网已建好**：`tests/test_security_baseline.py` 60 条钉死现状。
 3. **最小必须项 vs 延期已切分**：每项预计 < 50 行代码改动。
-4. **真实代码补丁尚未提交**：等 §6 manual smoke 跑完后再统一一次性
-   PR，避免「未经真实 LLM 验证的代码改动」累积。
+4. ~~**真实代码补丁尚未提交**~~ → **已全部落地**（commits `20d1bdf` /
+   `1c1d796` / `e26574c` / `7b16601` / `871824e`）。
 
-进入「真正完成 M5/M6」需要：人工 smoke 通过 → 走 preflight §4 / §5
-最小必须项清单 → 一次性 PR → 翻转 baseline 测试中的「已知缺口」断言。
+**当前状态**：M5/M6 的「preflight + 最小必须项 + smoke 暴露的真实缺口」
+**全部闭环**。本节保留仅供历史追溯，新的 RC 状态见 §1 / §2.2 / §2.2.1。
 
 ---
 
@@ -173,7 +181,7 @@
 | ~~shell 引号转义绕过~~ | preflight §3 | ✅ **v0.2 RC P1-A 已修复** | — |
 | ~~write_file 内容级危险扫描~~ | preflight §3 / §5 新增 | ✅ **v0.2 RC P1-B 已修复** | — |
 | ~~工具注册一致性负向断言~~ | preflight §4 | ✅ **v0.2 RC P1-C 已修复** | — |
-| `is_sensitive_file` 只看文件名 | preflight §3 | **P2 · 推荐补** | 改名 `.env → notes.txt` 可绕过 read 路径；需要内容前缀扫描 |
+| `is_sensitive_file` 只看文件名 | preflight §3 | **P3 · 延期 v0.3** | 改名 `.env → notes.txt` 可绕过 read 路径；需要文件 IO + 性能/误伤设计；write 路径已通过 P1-B 内容前缀扫描收敛反向泄漏面 |
 | ~~`read_file` / `write_file` 项目外路径仅 confirm~~ | preflight §3 | ✅ **write_file 已硬拦截**；read_file 仍只 confirm（P3） | — |
 | `install_skill` 单次确认即执行 | preflight §3 | **P3 · 可延期 v0.3** | 与 Skill 体系整体设计相关，不在 v0.2 范围 |
 | `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | ✅ **P0/P1 已建立基础回归网** | — |
@@ -205,32 +213,32 @@ PR；P2 / P3 单独排期或延期 v0.3。
 
 ---
 
-## 7. 当前不建议 push 的原因
+## 7. 当前 push 时机建议（由 RC_DECISION.md 决策）
 
-1. **未做端到端人工 smoke**：M1-M4 全部由不变量测试守护，但「真实模型
-   + 真实 CLI 渲染 + 真实 Ctrl+C 恢复」尚未由人观察过。push 前必须
-   人工跑过 §1-§5。
-2. **M5/M6 仍是 preflight only**：远端如果有协作者拉到「文档说要做
-   M5/M6 最小补丁但代码里没有」会困惑；建议人工 smoke 通过后，把
-   M5/M6 最小补丁与 preflight 一起 push。
-3. **本地 28 commits ahead 是连续 spec + 不变量序列**，整段一起 push
-   时间线最干净；分批 push 反而难审计。
-4. **没有 PR 模板 / CI 配置可走自动化把关**（仓库目前是个人学习项目），
-   push 风险全部落在审阅时刻，越短的窗口越好。
+1. **自动化 smoke 已完成**：M1-M4 + M5/M6 P0/P1/P2 全部由不变量测试守护
+   （`528 passed, 3 xfailed`）。
+2. **本地 34 commits ahead 是连续 spec + 不变量序列**，整段一起 push
+   时间线最干净；分批 push 反而难审计；**不要重写历史**。
+3. **剩余唯一阻挡 push 的是人工体验观察**——TTY 渲染、真实 Anthropic
+   live 回路、中文表达可读性。这三类自动测试无法替代。
 
-**建议 push 时机**：人工 smoke 通过 → M5/M6 最小补丁完成并通过测试 →
-一次性 push（届时本地约 30+ commits ahead）。
+**建议 push 时机**：
+- 用户跑 `docs/V0_2_RC_DECISION.md` §人工试用最短路径（约 10-15 分钟）→
+- 无主观体验问题 → 用户决定 push 时机（由用户手动触发，本工作链不
+  自动 push）。
 
 ---
 
 ## 8. 文档索引
 
 - `docs/V0_2_PLANNING.md` — v0.2 全 8 milestone 规划
+- `docs/V0_2_RC_DECISION.md` — RC 判定 + 人工试用最短路径 + push 决策
+- `docs/V0_2_BASIC_TUI_PLAN.md` — v0.2 基础 TUI/CLI UX milestone planning（仅规划）
 - `docs/RUNTIME_STATE_MACHINE.md` — M1
 - `docs/RUNTIME_EVENT_BOUNDARIES.md` — M2
 - `docs/CHECKPOINT_RESUME_SEMANTICS.md` — M3
 - `docs/RUNTIME_ERROR_RECOVERY.md` — M4
 - `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` — M5/M6 审计 + 缺口
-- `docs/V0_2_MANUAL_SMOKE_PLAYBOOK.md` — 本 RC 配套人工 smoke 步骤
+- `docs/V0_2_MANUAL_SMOKE_PLAYBOOK.md` — 完整人工 smoke 步骤（自动化通过后可跳过 §5.2）
 - `docs/CLI_OUTPUT_CONTRACT.md` — CLI 输出契约（v0.1 冻结）
 - `docs/LLM_PROVIDER_LIVE_SMOKE.md` — LLM Processing live smoke 安全规程

@@ -32,9 +32,9 @@ The core graduation surface is:
   `docs/V0_1_CONTRACT.md`.
 - **B2 complete**: minimal CLI output contract is frozen in
   `docs/CLI_OUTPUT_CONTRACT.md` and guarded by regression tests.
-- **B3 in progress**: graduation smoke playbook exists in
-  `docs/V0_1_SMOKE_PLAYBOOK.md`; the real Anthropic API smoke still needs to be
-  executed with `ANTHROPIC_API_KEY`.
+- **B3 complete**: the real Anthropic API graduation smoke completed the
+  `README.md` -> `summary.md` task. The result is recorded in
+  `docs/V0_1_GRADUATION_REPORT.md`.
 
 ## Run Tests
 
@@ -51,7 +51,7 @@ Expected v0.1 baseline: no RED tests. Known xfails are documented in
 ## Run the v0.1 Smoke
 
 The B3 smoke task reads this root `README.md` and writes a Chinese summary to
-`summary.md`.
+`summary.md`. `summary.md` is a local smoke artifact and is ignored by git.
 
 Preflight:
 

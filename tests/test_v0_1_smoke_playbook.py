@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLAYBOOK = ROOT / "docs" / "V0_1_SMOKE_PLAYBOOK.md"
 ROOT_README = ROOT / "README.md"
+GRADUATION_REPORT = ROOT / "docs" / "V0_1_GRADUATION_REPORT.md"
 
 SMOKE_TASK = "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。"
 
@@ -22,6 +23,10 @@ def _playbook_text() -> str:
 
 def _root_readme_text() -> str:
     return ROOT_README.read_text(encoding="utf-8")
+
+
+def _graduation_report_text() -> str:
+    return GRADUATION_REPORT.read_text(encoding="utf-8")
 
 
 def test_b3_smoke_playbook_exists_and_freezes_canonical_task():
@@ -45,10 +50,12 @@ def test_b3_root_readme_exists_for_canonical_smoke_preflight():
         "Runtime v0.1",
         "B1 complete",
         "B2 complete",
-        "B3 in progress",
+        "B3 complete",
+        "docs/V0_1_GRADUATION_REPORT.md",
         ".venv/bin/python -m ruff check agent/ tests/",
         ".venv/bin/python -m pytest -q",
         "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。",
+        "`summary.md` is a local smoke artifact and is ignored by git.",
     )
     for marker in required_markers:
         assert marker in text
@@ -125,6 +132,27 @@ def test_b3_smoke_playbook_documents_checkpoint_and_offline_gates():
         ".venv/bin/python -m ruff check agent/ tests/",
         ".venv/bin/python -m pytest -q",
         "不调用真实模型",
+    )
+    for marker in required_markers:
+        assert marker in text
+
+
+def test_b3_graduation_report_records_real_smoke_result():
+    """graduation report 固定真实 smoke 结果，避免 B3 状态回退成待执行。"""
+
+    text = _graduation_report_text()
+
+    required_markers = (
+        "Runtime v0.1 已满足",
+        "ccbe13b",
+        "README.md",
+        "summary.md",
+        "read_file",
+        "write_file",
+        "CLI 输出契约检查",
+        "checkpoint_saved",
+        "279 passed, 3 xfailed",
+        "Runtime v0.1 已毕业",
     )
     for marker in required_markers:
         assert marker in text

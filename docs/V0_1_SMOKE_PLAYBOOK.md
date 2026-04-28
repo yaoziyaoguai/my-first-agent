@@ -7,6 +7,9 @@
 > **当前阶段边界**：本文档可以先被离线测试审计；离线测试不调用真实模型。
 > 真正调用 Anthropic API 的 smoke 由人工执行，且必须显式准备
 > `ANTHROPIC_API_KEY`。
+>
+> **当前状态**：B3 真实 smoke 已通过，结果记录在
+> `docs/V0_1_GRADUATION_REPORT.md`。本文档保留为后续复验 playbook。
 
 ---
 
@@ -56,7 +59,8 @@ test -x .venv/bin/python
 
 ## 3. 产物处理
 
-`summary.md` 是 B3 smoke 的唯一预期文件产物。
+`summary.md` 是 B3 smoke 的唯一预期文件产物。它是本地 smoke 产物，
+已加入 `.gitignore`，默认不提交。
 
 执行前：
 
@@ -166,6 +170,8 @@ B3 通过必须同时满足：
 - CLI 输出符合 `docs/CLI_OUTPUT_CONTRACT.md`。
 - `.venv/bin/python -m ruff check agent/ tests/` 通过。
 - `.venv/bin/python -m pytest -q` 无 RED，xfail 归类不变。
+
+本仓库当前 B3 结果：已通过，见 `docs/V0_1_GRADUATION_REPORT.md`。
 
 B3 失败包括：
 

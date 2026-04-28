@@ -210,3 +210,87 @@ def test_log_viewer_masks_secrets_in_tool_input_preview():
     assert "api_key=sk-ant-secretvalueXXXXXXXXXX" not in line
     # 兜底正则可独立验证
     assert "sk-ant-" not in mask_secrets("prefix sk-ant-zzzzzzzzzzzzzzzzzzzzzz suffix")
+
+
+# ---------- logs viewer 端到端 round-trip ----------
+# 为什么是端到端而不是单元：runtime_observer 单测和 log_viewer 单测都在
+# 自己 mock 边界上各自绿，但**真实 jsonl 写入 → viewer 读取**这条串行链路
+# 之前没有回归。如果 observer schema 变（比如 event_type 改名）或 viewer
+# 白名单字段漂移，单测可能各自仍绿，端到端却悄悄 leak / 漏渲染 / 类别错位。
+# 本测试用真实 log_event 写四类 tool outcome，再让 log_viewer 把它读回，
+# 守护这条「事件链路可还原」的小闭环。
+
+def test_log_viewer_can_recover_four_tool_outcomes_from_real_jsonl(tmp_path, monkeypatch):
+    import importlib
+
+    log_path = tmp_path / "agent_log.jsonl"
+    monkeypatch.setattr("config.LOG_FILE", str(log_path))
+
+    import agent.logger as logger_mod
+    importlib.reload(logger_mod)
+    from agent.logger import log_event
+
+    # log_event 当前签名是 (event_type, data)；session_id 由模块级 SESSION_ID 注入。
+    # 写入的 jsonl 字段名是 "event"（不是 "event_type"），log_viewer 读的也是这个。
+    log_event("tool.completed",
+              {"tool_name": "calculate", "status_text": "执行完成。"})
+    log_event("tool.failed",
+              {"tool_name": "read_file", "status_text": "执行失败。"})
+    log_event("tool.rejected",
+              {"tool_name": "read_file", "status_text": "被安全策略拒绝：…"})
+    log_event("tool.user_rejected",
+              {"tool_name": "write_file", "status_text": "用户拒绝执行，已跳过。"})
+
+    from agent.log_viewer import iter_log_entries, render_logs
+
+    entries = list(iter_log_entries(log_path, include_observer=False))
+    assert len(entries) == 4
+    types = [e.get("event") for e in entries]
+    assert types == [
+        "tool.completed",
+        "tool.failed",
+        "tool.rejected",
+        "tool.user_rejected",
+    ], types
+
+    rendered = render_logs(log_path=log_path, tail=10)
+    # 四类 outcome 必须都能在最终单行摘要里被分辨出来
+    assert "tool.completed" in rendered
+    assert "tool.failed" in rendered
+    assert "tool.rejected" in rendered
+    assert "tool.user_rejected" in rendered
+    # 不得 leak 任何 raw status_text 之外的内部字段名
+    assert "messages" not in rendered
+    assert "system_prompt" not in rendered
+
+
+# ---------- v0.3 显式不做 Reflect / Self-Correction 的三文档一致性 ----------
+# 这条非目标在 README / V0_3_PLANNING / V0_3_BASIC_SHELL_USAGE 三处都登记过，
+# 但没有回归守护。如果未来某一轮误把 Reflect 写进 v0.3 完成态，这个测试会拦下。
+
+def test_reflect_self_correction_marked_out_of_scope_in_all_user_docs():
+    docs_to_check = [
+        PROJECT_ROOT / "README.md",
+        PROJECT_ROOT / "docs" / "V0_3_PLANNING.md",
+        PROJECT_ROOT / "docs" / "V0_3_BASIC_SHELL_USAGE.md",
+    ]
+    for path in docs_to_check:
+        text = path.read_text(encoding="utf-8")
+        assert "Reflect" in text, f"{path.name} 未提到 Reflect 边界"
+        # 至少一个 Reflect 出现位置附近 200 字内必须含「非目标」标记
+        markers = ["❌", "不做", "non-goal", "not** include", "does not", "留给", "v0.4", "Roadmap"]
+        ok = False
+        start = 0
+        while True:
+            i = text.find("Reflect", start)
+            if i == -1:
+                break
+            nearby = text[max(0, i - 250): i + 250]
+            if any(m in nearby for m in markers):
+                ok = True
+                break
+            start = i + 1
+        assert ok, (
+            f"{path.name} 提到 Reflect 但所有出现位置附近 250 字内都没有「非目标」标记，"
+            f"可能被误读为已实现"
+        )

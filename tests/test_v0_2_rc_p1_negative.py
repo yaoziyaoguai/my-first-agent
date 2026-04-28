@@ -422,3 +422,30 @@ def test_blocked_tool_log_status_marks_policy_origin(tmp_path, monkeypatch):
     )
     assert "[安全策略]" in entry["result"]
     assert "用户" not in entry["result"]
+
+
+def test_describe_policy_denial_does_not_read_file_contents(tmp_path, monkeypatch):
+    """policy denial 消息生成器不能去读敏感文件内容——只看路径名/扩展名。
+
+    这是 v0.2 RC 的关键不变量：策略层永远不应读取被拒文件，否则一旦
+    日志/审计落盘就直接泄漏凭证。这里通过 monkeypatch Path.read_* 全部
+    抛错，证明 _describe_policy_denial 完全不触发文件 IO。
+    """
+    from agent.tool_executor import _describe_policy_denial
+    fake = tmp_path / ".env"
+    fake.write_text("SECRET_API_KEY=should_never_appear_in_logs\n")
+
+    import pathlib
+    def _boom(*a, **kw):
+        raise AssertionError(
+            "_describe_policy_denial 不应读取被拒文件内容（凭证泄漏风险）"
+        )
+    monkeypatch.setattr(pathlib.Path, "read_text", _boom)
+    monkeypatch.setattr(pathlib.Path, "read_bytes", _boom)
+    monkeypatch.setattr(pathlib.Path, "open", _boom)
+
+    msg = _describe_policy_denial("read_file", {"path": str(fake)})
+    # 路径名出现是合理的；文件内容绝不能出现
+    assert "SECRET_API_KEY" not in msg
+    assert "should_never_appear_in_logs" not in msg
+    assert "[安全策略]" in msg

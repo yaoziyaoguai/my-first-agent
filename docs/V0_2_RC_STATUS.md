@@ -75,12 +75,46 @@
   `tool_execution_log.status` 改为 `blocked_by_policy`，与未来
   可能引入的 `user_rejected` 计数语义解耦。
 
-**仍未补**（建议人工 smoke 之后再做）：
-- `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过 `read_file`）。
-- `read_file` 项目外路径仅 confirm（write_file 已硬拦截，read 暂保留 confirm 兼容）。
-- `install_skill` 下载内容**单次确认即执行**。
-- `_normalize_shell_command` 不处理 `$()` 子 shell、`eval`、十六进制
-  转义等高级绕过——v0.3 命令解析层做。
+**仍未补**（**非 v0.2 RC blocking**，全部已在自动 smoke 中作为已知现状钉死）：
+- `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt`
+  仍可绕过 `read_file`）。**P3 / v0.3**：read 路径加内容前缀扫描会引入文件 IO + 性能/
+  误伤问题，需要单独设计；当前已通过 write 路径 P1-B 的 `_check_dangerous_content`
+  对私钥写入做了拦截，反向泄漏面已收敛。
+- `read_file` 项目外路径仅 confirm（write_file 已硬拦截）。**P3**：read 比 write
+  风险低一个数量级，且 confirm + sensitive block 已是双层；保留。
+- `install_skill` 下载内容**单次确认即执行**。**P3**：依赖 skill 安装设计，超出 RC。
+- `_normalize_shell_command` 不处理 `$()` 子 shell / `eval` / 十六进制转义等高级
+  绕过。**v0.3 命令解析层**做。
+
+### 2.2.1 v0.2 RC 自动 smoke 覆盖快照
+
+**已 100% 自动化**（运行 `pytest -q` 即覆盖；无需人工跑）：
+- 敏感文件 read 拒绝（`.env` / `~/.env` / `/tmp/api.key` / `/tmp/server.pem`
+  / `/tmp/notes_password.txt` 等 16 种）：`tests/test_security_baseline.py` +
+  `tests/test_v0_2_rc_automated_smoke.py::test_smoke_security_sensitive_file_blocked`。
+- policy denial 文案（含具体原因 / 不混用「用户拒绝」措辞 / 不读文件内容
+  / `blocked_by_policy` status）：`tests/test_v0_2_rc_p1_negative.py` §8（共 8 项）。
+- 项目外写入硬拦截（`~/...` / `/tmp/...` / `/etc/...` / `../` 父目录绕过）：
+  `tests/test_v0_2_rc_p1_negative.py` §7。
+- 项目内 `workspace/` / `docs/` / `summary.md` 不被项目外检查误伤。
+- 写入 `agent/core.py` 等受保护源码拒绝。
+- 写入私钥头 / fork bomb / `>/dev/sd` / `mkfs` payload 即使路径 `.txt` 也拒绝。
+- shell `:(){...}` fork bomb / `RM -RF /` / `r''m -rf /` 等规范化绕过 / `>/dev/sd`
+  全部命中 SHELL_BLACKLIST。
+- 安全 shell（`ls -la` / `pwd` / `cat README.md`）不被误伤；calculate /
+  read_file / read_file_lines 不打 stdout，不返回 raw dict。
+- runtime artifacts (`.env` / `state.json` / `runs/` / `summary.md`) 不进 git。
+- 真实用户拒绝路径走 `confirm_handlers` 的 `[系统] 用户拒绝执行该工具`，
+  与 FORCE_STOP 完全解耦（`tests/test_complex_scenarios.py::test_mid_step_user_rejects_tool_task_continues`
+  + `tests/test_v0_2_rc_p1_negative.py::test_real_user_tool_rejection_path_is_separate_from_force_stop`）。
+
+**仍需人工观察**（自动测试无法替代）：
+- TTY 渲染：`uv run` / 真 CLI 中颜色、流式打印、行截断观感。
+- 真模型回路：与真实 Anthropic API（`anthropic` provider live）交互体感
+  ——已在 `docs/LLM_PROVIDER_LIVE_SMOKE.md` 单独成 playbook，**默认不跑**。
+- 主观可读性：拒绝消息和 plan/feedback 的中文表达是否自然。
+
+**v0.2 RC blocking 判定**：当前列表中没有任何项被识别为 blocking。
 
 > 上述全部登记在 `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` §3，
 > 由 `tests/test_security_baseline.py` 钉死「当前确实如此」，方便补丁

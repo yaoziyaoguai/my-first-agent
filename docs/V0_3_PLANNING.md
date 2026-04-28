@@ -116,11 +116,32 @@
 完成标准（本轮已达成）：能用一段中文向新读者说清「v0.3 的 Skill 是什么 /
 不是什么」（见 docs §5），且启动屏文案不再撒谎。
 
-### v0.3 M4 · Observer / Logs 可读性
-- `agent_log.jsonl` 增加按 session_id 索引和按事件类型筛选的最小 CLI
-  工具（`python main.py logs --session <id>` / `--event tool.failed`）
-- 给敏感字段做最后一道脱敏复核（v0.2 已经查过一轮，M4 把它固化为测试）
-- 不引入 SQLite、不引入 ELK、不引入新格式
+### v0.3 M4 · Observer / Logs 可读性 ✅ (本轮交付：MVP)
+- ✅ 新增 `python main.py logs` 入口，默认 tail 50 + 隐藏极噪的
+  `runtime_observer`（占 ~86% 条目），用 `--include-observer` 显式打开
+- ✅ 支持过滤：`--tail N` / `--session <id-prefix>` / `--event <type>` /
+  `--tool <name>`
+- ✅ 单行紧凑摘要：timestamp / 短 session id / event / 结构化元信息
+  （tool 名 / status / path / result_len / messages 等），**不展示**
+  raw content / raw result / system_prompt 正文
+- ✅ 损坏 jsonl 行不会让命令崩溃，只跳过并在末尾报计数
+- ✅ 兜底脱敏：渲染后再扫一遍输出，对 `sk-ant-` / `BEGIN PRIVATE KEY` /
+  `api_key=…` 等模式替换为 `[REDACTED]`
+- ✅ M2 health log_size 的 action 文案现在指向 `python main.py logs --tail 100`
+- ✅ 测试 +23 项守护：脱敏边界、4 类工具结局可区分、tail/filter 稳定、
+  损坏行容忍、不修改原日志、health 联动
+- ✅ 输出文档：`docs/V0_3_OBSERVER_LOGS.md`
+
+**M4 不做**（推迟到 v0.4 或更后）：
+- ❌ 不引入 SQLite / ELK / Prometheus / 新存储格式
+- ❌ 不实现 LLM judge / Reflect / 自动事件归因
+- ❌ 不自动归档/删除 agent_log.jsonl / sessions/ / memory/checkpoint
+- ❌ 不引入 follow / `--watch` 实时滚动（已经能做的方式：`watch` 命令外部包）
+- ❌ 不重写 logger 写路径（仍是 jsonl）
+
+完成标准（本轮已达成）：人工 smoke 出问题后能用一行命令从 207k 行
+日志里捞出最近 50 条「人话」事件；最新一次 tool block / policy denial /
+checkpoint 事件可在 5 秒内定位。
 
 ### v0.3 backlog（**v0.3 不实现**）
 - sub-agent / multi-agent

@@ -510,6 +510,43 @@ def main(argv: list[str] | None = None) -> int:
             print(format_health_report(results))
         return 0
 
+    # v0.3 M4：可读 observer/logs viewer。最小入口：
+    #   python main.py logs                         默认 tail 50 + 隐藏 runtime_observer
+    #   python main.py logs --tail N                改变截尾条数（N>0；非整数报错回 0）
+    #   python main.py logs --session <id-prefix>   按 session 前缀过滤
+    #   python main.py logs --event tool_executed   按事件类型过滤
+    #   python main.py logs --tool calculate        按工具名过滤
+    #   python main.py logs --include-observer      显式打开 runtime_observer
+    if argv and argv[0] == "logs":
+        from agent.log_viewer import render_logs
+
+        rest = argv[1:]
+
+        def _opt(name: str) -> str | None:
+            if name in rest:
+                idx = rest.index(name)
+                if idx + 1 < len(rest):
+                    return rest[idx + 1]
+            return None
+
+        try:
+            tail_str = _opt("--tail")
+            tail = int(tail_str) if tail_str is not None else 50
+        except ValueError:
+            print(f"--tail 需要整数，得到：{tail_str!r}")
+            return 2
+
+        print(
+            render_logs(
+                tail=tail,
+                session_id=_opt("--session"),
+                event=_opt("--event"),
+                tool=_opt("--tool"),
+                include_observer="--include-observer" in rest,
+            )
+        )
+        return 0
+
     init_session()
     try_resume_from_checkpoint()
     if _selected_input_backend() == "textual":

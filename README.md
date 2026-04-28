@@ -189,6 +189,22 @@ $ python main.py health --json    # 机器可读 JSON，schema 稳定
   没有 skill 单元测试。详细现状与后续真正 Skill 化路线见
   `docs/V0_3_SKILL_SYSTEM_STATUS.md`。
 
+**v0.3 M4 — Readable observer/logs viewer** is landed locally:
+
+```
+$ python main.py logs                          # 默认 tail 50 + 隐藏 runtime_observer
+$ python main.py logs --tail 100
+$ python main.py logs --session abc12345       # 按 session 前缀
+$ python main.py logs --event tool_executed    # 按事件类型
+$ python main.py logs --tool calculate         # 按工具名
+$ python main.py logs --include-observer       # 显式打开极噪的 runtime_observer
+```
+
+输出是单行紧凑摘要（timestamp / 短 session id / event / 结构化元信息），
+**不会**展示 raw content / raw tool_result / system_prompt / 完整 checkpoint，
+含兜底脱敏（sk-ant- / BEGIN PRIVATE KEY / api_key=…）。完整设计与脱敏边界
+见 `docs/V0_3_OBSERVER_LOGS.md`。
+
 v0.3 still **does not** include: full Textual multi-panel, keyboard shortcuts,
 Esc / generation cancellation, sub-agent, Reflect / Self-Correction,
 Skill marketplace, complex topic switch, slash commands, automatic

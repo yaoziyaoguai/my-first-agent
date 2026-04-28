@@ -170,7 +170,8 @@ def check_log_size():
                 "诊断越来越慢。"
             ),
             "action": (
-                "人工归档（不会自动执行，复制粘贴）：\n"
+                "先看摘要再决定归档（不会自动执行，复制粘贴）：\n"
+                "  python main.py logs --tail 100        # v0.3 M4 摘要查看\n"
                 f"  mv {rel_path} {rel_path}.bak.$(date +%Y%m%d-%H%M%S)\n"
                 "  mkdir -p ~/Documents/my-first-agent-archives/\n"
                 f"  mv {rel_path}.bak.* ~/Documents/my-first-agent-archives/"

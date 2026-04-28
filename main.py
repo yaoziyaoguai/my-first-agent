@@ -496,13 +496,18 @@ def main(argv: list[str] | None = None) -> int:
 
         return process_main(argv)
 
-    # v0.2 release 收口：把已有的 run_health_check 暴露为独立子命令，
-    # 让用户可以脱离主对话循环单独诊断 workspace_lint / log_size /
-    # session_accumulation 等非阻塞 warning，不引入新检查逻辑。
+    # v0.2 release：health 子命令脱离主循环单独诊断 workspace_lint / log_size /
+    # session_accumulation 等非阻塞 warning。
+    # v0.3 M2 升级：默认输出结构化报告（含 risk + 建议命令），新增 --json 给脚本用。
     if argv and argv[0] == "health":
-        from agent.health_check import run_health_check
+        from agent.health_check import collect_health_results
+        from agent.health_report import format_health_report, format_health_report_json
 
-        run_health_check()
+        results = collect_health_results()
+        if "--json" in argv[1:]:
+            print(format_health_report_json(results))
+        else:
+            print(format_health_report(results))
         return 0
 
     init_session()

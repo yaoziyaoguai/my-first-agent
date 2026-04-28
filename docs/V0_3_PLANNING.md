@@ -72,17 +72,27 @@
 - 真实 smoke：`python main.py` 启动屏幕已是结构化 shell header；
   4 类工具结局文案沿用 v0.2 契约不变。
 
-### v0.3 M2 · Health Maintenance 可视化
-基于 v0.2 的 `python main.py health` 子命令扩展为：
-- `health --json`：机器可读输出
-- `health archive logs|sessions`：把 agent_log.jsonl / sessions 归档到
-  可配置目录，**默认只移动不删除**
-- `health prune workspace --dry-run`：列出可清理的 workspace 文件，
-  默认只列不删
-- 文档：`docs/V0_3_HEALTH_MAINTENANCE.md`
+### v0.3 M2 · Health Maintenance 可视化 ✅ (本轮交付：MVP)
+基于 v0.2 的 `python main.py health` 子命令升级为结构化报告：
+- ✅ `python main.py health`：输出每项 check 的 status / current_value / path /
+  risk / suggested action（pass/skip 极简，warn/error 展开建议命令）
+- ✅ `python main.py health --json`：机器可读 JSON，schema 稳定（`overall` +
+  `checks.<name>.{status,current_value,path,risk,action,message,...}`）
+- ✅ workspace_lint warn 时给出具体来源（哪个文件 / 哪个 ruff 错误码），
+  不再是「有告警」一句话
+- ✅ 所有「建议」都是给用户复制粘贴的命令；**Runtime 不会自动归档/删除**
+  agent_log.jsonl / sessions/ / workspace/。M2 严格定位为「可视化 + 文档化」，
+  不引入 archive/prune 子命令。
+- 文档：现有 `docs/V0_2_HEALTH_MAINTENANCE.md` 仍是手动维护命令清单的来源；
+  报告里有指针到这个 doc。
 
-完成标准：人工可以「查 → 决定 → 安全归档/清理」三步走完，不再需要看
-docs 手抄命令。
+**M2 不做**（推迟到 v0.3 M2.next 或 v0.4 再讨论）：
+- ❌ `health archive logs|sessions` 子命令（任何自动移动文件的能力）
+- ❌ `health prune workspace --dry-run`（任何会触碰用户 workspace 的命令）
+- ❌ TUI 健康面板 / 实时刷新
+
+完成标准（本轮已达成）：人工跑 `python main.py health` 能在一屏内
+看到「问题在哪 / 为什么是问题 / 我该执行什么命令」，不再需要回去翻文档。
 
 ### v0.3 M3 · Skill 体系坦诚化
 **先承认现状粗糙，再画范围**：

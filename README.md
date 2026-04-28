@@ -166,7 +166,20 @@ Just run `python main.py` — no new flags. The four-class tool outcome
 contract from v0.2 (`completed` / `failed` / `rejected` / `user_rejected`)
 is preserved unchanged.
 
+**v0.3 M2 — Health Maintenance report** is landed locally:
+
+```
+$ python main.py health           # 结构化人类可读报告（每项含 risk + 建议命令）
+$ python main.py health --json    # 机器可读 JSON，schema 稳定
+```
+
+报告中每个 check 都展示 `current_value` / `path` / `risk` / `suggested action`；
+所有「建议」都是给你复制粘贴的命令，**Runtime 永不自动归档或删除**
+`agent_log.jsonl` / `sessions/` / `workspace/`。详细维护命令见
+`docs/V0_2_HEALTH_MAINTENANCE.md`。
+
 v0.3 still **does not** include: full Textual multi-panel, keyboard shortcuts,
 Esc / generation cancellation, sub-agent, Reflect / Self-Correction,
-Skill marketplace, complex topic switch, slash commands. See
-`docs/V0_3_PLANNING.md` §2 for the explicit non-goal list.
+Skill marketplace, complex topic switch, slash commands, automatic
+log/session/workspace pruning. See `docs/V0_3_PLANNING.md` §2 for the
+explicit non-goal list.

@@ -266,3 +266,67 @@ def test_rejected_status_value_is_distinct_string():
     # blocked_by_policy 来自 confirmation == "block" 路径，由 execute_single_tool
     # 写入；与本函数无关，但需要保持互不重叠的命名空间。
     assert "blocked_by_policy" not in statuses
+
+
+# ===================== M7-C: checkpoint resume 可见性 =====================
+
+def test_idle_checkpoint_with_no_messages_is_not_actionable():
+    """status='idle' + 0 条消息 + 无 pending → 视作历史残留，不该 prompt。
+
+    真实 smoke 发现：旧实现只要 checkpoint 文件存在就显示
+    「📌 发现未完成的任务：（未命名任务） 已有 0 条对话历史」并要求 y/n，
+    用户既得不到任何信息，又被强迫做选择。M7-C 修复后这种残留 checkpoint
+    应该被静默清理。
+    """
+    from agent.session import _checkpoint_has_actionable_resume
+
+    task = {
+        "status": "idle",
+        "current_step_index": 0,
+        "pending_tool": None,
+        "pending_user_input_request": None,
+        "current_plan": None,
+    }
+    conv = {"messages": []}
+    assert _checkpoint_has_actionable_resume(task, conv) is False
+
+
+def test_pending_tool_checkpoint_is_actionable():
+    """awaiting_tool_confirmation + pending_tool → 必须 prompt 让用户决定。"""
+    from agent.session import _checkpoint_has_actionable_resume
+
+    task = {
+        "status": "awaiting_tool_confirmation",
+        "pending_tool": {"tool_use_id": "x", "tool": "write_file", "input": {}},
+    }
+    assert _checkpoint_has_actionable_resume(task, {"messages": []}) is True
+
+
+def test_awaiting_user_input_checkpoint_is_actionable():
+    from agent.session import _checkpoint_has_actionable_resume
+
+    task = {
+        "status": "awaiting_user_input",
+        "pending_user_input_request": {"question": "?"},
+    }
+    assert _checkpoint_has_actionable_resume(task, {"messages": []}) is True
+
+
+def test_in_progress_plan_checkpoint_is_actionable():
+    from agent.session import _checkpoint_has_actionable_resume
+
+    task = {
+        "status": "running",
+        "current_plan": {"steps": [{"action": "x"}]},
+        "current_step_index": 1,
+    }
+    assert _checkpoint_has_actionable_resume(task, {"messages": [{"role": "user", "content": "x"}]}) is True
+
+
+def test_non_idle_with_messages_is_actionable():
+    """有真实对话历史 + 非 idle 状态：上一轮没收尾，应让用户决定。"""
+    from agent.session import _checkpoint_has_actionable_resume
+
+    task = {"status": "running"}
+    conv = {"messages": [{"role": "user", "content": "hi"}]}
+    assert _checkpoint_has_actionable_resume(task, conv) is True

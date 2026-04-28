@@ -128,6 +128,47 @@ stdout debug capture。
 `tool.rejected` 显示事件 + 「已被工具内部安全检查拒绝。」，并附加
 重复调用阻止提示。这是 RC smoke 之外的第三个真实文案区分缺口。
 
+### 7.2 M7-C 已交付（resume 可见性 + 残留 checkpoint 自清）
+
+真实 main.py smoke 发现：旧 `try_resume_from_checkpoint` 只要 checkpoint
+文件存在就 prompt。`status='idle' + 0 条消息 + 无 pending` 这种历史残留
+也会显示「📌 发现未完成的任务：（未命名任务） 已有 0 条对话历史」，
+强迫用户 y/n。同时拒绝时只输出「已清除断点。」一行（与 prompt 同行，
+无视觉分隔），用户看不出已经回到对话模式。
+
+修复后：
+
+- 新增 `_checkpoint_has_actionable_resume()`：只在 `awaiting_*` /
+  pending_tool / pending_user_input_request / 进行中 plan / 非 idle 且
+  有消息 时才提示；其他视作残留，静默 `clear_checkpoint()`。
+- prompt 显示中加 `状态：<status>` 字段，让用户看清楚断点处于什么阶段。
+- 拒绝路径文案改为带换行的 `[系统] 已清除断点，回到对话模式，可以直接输入新任务。`
+
+### 7.3 实测覆盖（tests/test_cli_output_ux.py 12 个）
+
+- 三类分类正确（rejected_by_check / failed / executed）
+- pre-check 拒绝不再误显示 completed
+- 真实失败仍走 tool.failed
+- 真实成功仍走 tool.completed
+- post-confirm 拒绝走 tool.rejected
+- runtime event 映射稳定
+- status 命名空间不与 blocked_by_policy 重叠
+- M7-C：5 类 actionable / non-actionable checkpoint 判定
+
+### 7.4 真实 main.py smoke 已通过的场景
+
+- 无 checkpoint 启动：直接进入对话模式，无虚假提示
+- idle/空残留 checkpoint：被静默清理
+- actionable checkpoint：清晰 prompt，y/n 都有可读后续
+- 真实 calculate 工具：tool.executing → tool.completed 渲染清晰
+- 真实 write_file 项目外路径：tool.executing「已收到确认，开始执行」→
+  tool.rejected「已被工具内部安全检查拒绝」，**不再显示「执行完成」**
+- 文件未真的写出去，亦未出现 `./~` 字面目录
+
+仍需用户人工观察的场景：`/tmp/server.pem` policy denial 文案、
+fork bomb shell 拒绝、私钥写入 workspace 拒绝（这些自动 smoke 覆盖
+但渲染层文案需要真实人眼判断是否易读）。
+
 ---
 
 ## 8. 与 v0.2 PLANNING 的关系

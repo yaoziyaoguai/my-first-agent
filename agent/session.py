@@ -33,8 +33,42 @@ def init_session():
     print("输入 'quit' 退出，'/reload_skills' 重新加载 skill\n")
 
 
+def _checkpoint_has_actionable_resume(task_data: dict, conv_data: dict) -> bool:
+    """判断 checkpoint 是否值得提示用户「要不要继续」。
+
+    真实 M7-C 痛点：旧实现只要 checkpoint 文件存在就 prompt，
+    哪怕 task.status='idle' + 0 条消息 + 无 pending_tool，
+    用户会看到「📌 发现未完成的任务：（未命名任务） 已有 0 条对话历史」
+    然后被强迫 y/n，体验上既无信息也无意义。
+
+    actionable 条件（任一满足即提示）：
+    - status 处于明确等待用户的状态（awaiting_*）
+    - 存在 pending_tool 或 pending_user_input_request
+    - 有进行中的 plan（current_plan + current_step_index > 0）
+    - 有非空对话历史 + 非 idle 状态（说明上一轮没正常收尾）
+    """
+    status = task_data.get("status") or "idle"
+    if status.startswith("awaiting_"):
+        return True
+    if task_data.get("pending_tool"):
+        return True
+    if task_data.get("pending_user_input_request"):
+        return True
+    if task_data.get("current_plan") and (task_data.get("current_step_index") or 0) > 0:
+        return True
+    msg_count = len(conv_data.get("messages", []))
+    if msg_count > 0 and status != "idle":
+        return True
+    return False
+
+
 def try_resume_from_checkpoint():
-    """检查有没有未完成的任务，有就问用户是否恢复。"""
+    """检查有没有未完成的任务，有就问用户是否恢复。
+
+    M7-C 修复：不再无条件 prompt；只有 checkpoint 真的处于「等待用户输入」
+    或「执行中断」状态时才提示。idle + 空消息的 checkpoint 视作历史残留，
+    静默清掉，避免干扰用户开始新对话。
+    """
     # 延迟 import，避免循环依赖
     from agent.core import get_state
 
@@ -50,18 +84,26 @@ def try_resume_from_checkpoint():
 
     task_data = checkpoint.get("task", {})
     conv_data = checkpoint.get("conversation", {})
+
+    if not _checkpoint_has_actionable_resume(task_data, conv_data):
+        # 静默清理历史残留，避免误导用户「有未完成的任务」。
+        clear_checkpoint()
+        return
+
     user_goal = task_data.get("user_goal") or "（未命名任务）"
     step_index = task_data.get("current_step_index", 0)
     msg_count = len(conv_data.get("messages", []))
+    status = task_data.get("status") or "unknown"
 
     print(f"\n📌 发现未完成的任务：{user_goal}")
+    print(f"   状态：{status}")
     print(f"   当前步骤索引：{step_index}")
     print(f"   已有 {msg_count} 条对话历史")
 
     choice = input("要继续这个任务吗？(y/n): ").strip().lower()
     if choice != "y":
         clear_checkpoint()
-        print("已清除断点。\n")
+        print("\n[系统] 已清除断点，回到对话模式，可以直接输入新任务。\n")
         return
 
     restored = load_checkpoint_to_state(get_state())

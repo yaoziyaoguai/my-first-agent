@@ -523,6 +523,39 @@ def test_runtime_event_type_for_user_rejected_is_visible():
     assert re.metadata["display_event_type"] == "tool.user_rejected"
 
 
+def test_unknown_tool_name_displays_as_failed_not_completed(_stub_state, monkeypatch):
+    """v0.2 RC 收口回归：模型把工具名写错（例如 shell vs run_shell）时，
+    tool_registry.execute_tool 返回「工具 'X' 不在允许列表中」。
+    这必须走 tool.failed 文案，否则用户会以为危险/未注册操作已成功执行。"""
+    import agent.tool_executor as te
+
+    state, turn_state, captured = _stub_state
+
+    monkeypatch.setattr(
+        te,
+        "execute_tool",
+        lambda name, inp, context=None: f"工具 '{name}' 不在允许列表中",
+    )
+
+    class _ToolUse:
+        id = "toolu_unknown_1"
+        name = "shell_typo"
+        input = {"cmd": "ls"}
+
+    te.execute_single_tool(
+        _ToolUse(),
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=[],
+    )
+
+    entry = state.task.tool_execution_log["toolu_unknown_1"]
+    assert entry["status"] == "failed"
+    assert any(e.event_type == "tool.failed" for e in captured)
+    assert not any(e.event_type == "tool.completed" for e in captured)
+
+
 def test_four_categories_have_distinct_status_text_strings():
     """四类结局的 status_text 在 CLI 上必须可被肉眼区分（首关键词不同）。"""
     from agent.tool_executor import _classify_tool_outcome

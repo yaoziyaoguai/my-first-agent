@@ -87,6 +87,12 @@ TOOL_FAILURE_PREFIXES = (
     "[工具 ",
     "[安装失败]",
     "[更新失败]",
+    # v0.2 RC 收口：未注册工具调用返回的「工具 'X' 不在允许列表中」，
+    # 旧前缀表不命中 → tool_executor 误判为 executed + 「执行完成。」
+    # 真实场景：模型把工具名写错（如 shell vs run_shell），或调用已下线工具。
+    # 这是必须显式归入 failed 类别的字符串，否则用户会以为危险/未注册操作
+    # 已经成功执行。tool_registry.execute_tool 第 77 行是唯一来源。
+    "工具 '",
 )
 
 # v0.2 M7-A 真实修复：工具的 pre/post-execute 钩子（如 pre_write_check、

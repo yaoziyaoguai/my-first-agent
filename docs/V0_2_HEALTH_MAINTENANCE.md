@@ -8,6 +8,11 @@
 > - 三类 warning 都**不属于 v0.2 RC blocking**（见 `docs/V0_2_RC_DECISION.md`）。
 > - 对应的运行产物（`agent_log.jsonl` / `sessions/` / `workspace/`）已经在
 >   `.gitignore` 内，不会被误提交。
+> - v0.2 release 收口新增 `python main.py health` 子命令，可独立跑健康检查
+>   而不进入主对话循环：
+>   ```bash
+>   .venv/bin/python main.py health
+>   ```
 
 ## 1. workspace_lint
 

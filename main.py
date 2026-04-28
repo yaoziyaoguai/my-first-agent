@@ -496,6 +496,15 @@ def main(argv: list[str] | None = None) -> int:
 
         return process_main(argv)
 
+    # v0.2 release 收口：把已有的 run_health_check 暴露为独立子命令，
+    # 让用户可以脱离主对话循环单独诊断 workspace_lint / log_size /
+    # session_accumulation 等非阻塞 warning，不引入新检查逻辑。
+    if argv and argv[0] == "health":
+        from agent.health_check import run_health_check
+
+        run_health_check()
+        return 0
+
     init_session()
     try_resume_from_checkpoint()
     if _selected_input_backend() == "textual":

@@ -119,3 +119,24 @@ These areas are intentionally out of scope for v0.1 graduation:
 - complex topic switch handling, slash commands, or LLM intent classification
 - production-grade security sandbox, permission model, or recovery policy
 - observer/eval pipeline, cost tracking, or performance SLA
+
+## Runtime v0.2 Status
+
+v0.1 has graduated. **Runtime v0.2 is now release-ready** (local, not pushed).
+v0.2 adds:
+
+- runtime state-machine + event boundary invariants with regression tests
+- checkpoint / resume semantics (idle residue is silently cleaned)
+- error recovery and loop guard invariants
+- four-class CLI tool outcome contract (`completed` / `failed` / `rejected` / `user_rejected`)
+- workspace-out-of-bounds write block, sensitive-file read block, shell blacklist
+- offline LLM Processing CLI: `process` / `scan` / `status` / `preflight`,
+  with provider error classification and secret/raw-text leak protection
+- `python main.py health` subcommand for non-blocking maintenance warnings
+
+v0.2 still **does not** include: full Textual TUI, Skill maturation, sub-agent
+collaboration, Reflect / Self-Correction, generation cancellation, or paste
+burst handling. Those are explicitly v0.3 or later.
+
+See `RELEASE_NOTES_v0.2.md`, `docs/V0_2_RC_DECISION.md`, and
+`docs/V0_2_MANUAL_SMOKE_RESULT.md` for details.

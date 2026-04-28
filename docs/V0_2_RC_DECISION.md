@@ -12,16 +12,23 @@
 
 **判定结果**：✅ **满足 release candidate 条件**。
 
+> v0.2 release 收口（commit `d98718c` 之后）已升级为：可 push、可打 tag
+> `v0.2.0`，无 blocking。详见 `RELEASE_NOTES_v0.2.md`。
+
 依据：
 - M1-M4 主线 + M5/M6（preflight + P0/P1/P2）全部闭环（见
   `docs/V0_2_RC_STATUS.md` §1）。
 - 自动化 smoke 100% 覆盖 v0.2 RC 范围内的安全断言、状态机不变量、
   checkpoint 恢复、错误恢复、CLI 输出契约（见 RC_STATUS §2.2.1）。
-- `pytest -q`：**528 passed, 3 xfailed**；`ruff check`：0 错误。
+- `pytest -q`：**576+ passed, 3 xfailed**（含 release 收口新增的
+  gitignore 守护 + health 子命令测试）；`ruff check`：0 错误。
 - 3 个 xfailed 全部归属 v0.2 输入语义治理 / v0.2 cancel 生命周期 /
   v0.3 高级 TUI，**不阻塞 RC**（见 RC_STATUS §3）。
 - 真实 smoke 暴露的两个非平凡缺口（项目外写硬拦截 / policy denial 误归类
   为用户连续拒绝）已修复并固化回归测试。
+- 健康检查三类 warning（workspace_lint / log_size / session_accumulation）
+  非阻塞，维护路径见 `docs/V0_2_HEALTH_MAINTENANCE.md`，并新增
+  `python main.py health` 独立子命令。
 
 **仍未提供，但**不阻塞 RC**的能力（明确登记非目标）：
 - 基础 TUI / 状态面板（规划在 `docs/V0_2_BASIC_TUI_PLAN.md`）

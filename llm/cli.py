@@ -8,7 +8,7 @@ from pathlib import Path
 
 from llm.audit import build_status, scan_inputs
 from llm.pipeline import process_file
-from llm.providers import build_provider
+from llm.providers import build_provider, preflight_provider
 from run_logger import RunLogger
 
 
@@ -70,6 +70,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Read a specific runs/<run-id>.jsonl file.",
     )
+
+    preflight = subparsers.add_parser(
+        "preflight",
+        help="Check provider configuration without sending a live request by default.",
+    )
+    preflight.add_argument(
+        "--provider",
+        default=None,
+        help="Provider name. Defaults to MY_FIRST_AGENT_LLM_PROVIDER or fake.",
+    )
+    preflight.add_argument("--model", default=None, help="Provider model name.")
+    preflight.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "Send a real provider request. This may consume quota; output is still "
+            "redacted."
+        ),
+    )
     return parser
 
 
@@ -102,7 +121,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    provider = build_provider(args.provider, model=args.model)
+    if args.command == "preflight":
+        # preflight 默认只检查本地配置；--live 才触发真实请求，且输出必须红线脱敏。
+        report = preflight_provider(
+            args.provider,
+            model=args.model,
+            live=args.live,
+        )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0 if report["status"] == "ok" else 1
+
+    try:
+        provider = build_provider(args.provider, model=args.model)
+    except ValueError as exc:
+        # 配置错误给机器可读错误，不让普通用户看到 traceback 或 secret。
+        print(
+            json.dumps(
+                {"status": "error", "error": str(exc)},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 1
     logger = RunLogger(state_path=args.state_path, runs_dir=args.runs_dir)
     result = process_file(args.input_file, provider=provider, logger=logger)
     print(

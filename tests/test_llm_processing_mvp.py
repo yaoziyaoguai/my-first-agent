@@ -97,6 +97,109 @@ def test_process_command_uses_fake_provider_without_real_key(tmp_path, monkeypat
     assert state["last_run_id"] == output["run_id"]
 
 
+def test_provider_preflight_fake_passes_without_real_key(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    exit_code = process_cli_main(["preflight"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["status"] == "ok"
+    assert output["provider"] == {"configured": True, "name": "fake"}
+    assert output["api_key"]["status"] == "not_required"
+    assert output["model"]["configured"] is True
+    assert output["base_url"]["configured"] is False
+    assert output["live"] == {"enabled": False, "status": "not_requested"}
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "runs").exists()
+
+
+def test_provider_preflight_missing_key_is_readable_error(monkeypatch, capsys):
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    exit_code = process_cli_main(["preflight"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output["status"] == "error"
+    assert output["api_key"] == {"env": "ANTHROPIC_API_KEY", "status": "missing"}
+    assert "api_key_missing:ANTHROPIC_API_KEY" in output["errors"]
+
+
+def test_provider_preflight_redacts_present_key(monkeypatch, capsys):
+    secret_key = "SECRET_ANTHROPIC_KEY_VALUE"
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_key)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid")
+
+    exit_code = process_cli_main(["preflight"])
+
+    output_text = capsys.readouterr().out
+    output = json.loads(output_text)
+    assert exit_code in {0, 1}
+    assert secret_key not in output_text
+    assert "https://example.invalid" not in output_text
+    assert output["api_key"] == {"env": "ANTHROPIC_API_KEY", "status": "present"}
+    assert output["base_url"] == {"configured": True}
+    assert output["model"]["name"] == "claude-test"
+
+
+def test_provider_preflight_missing_model_is_explicit(monkeypatch, capsys):
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "SECRET_KEY")
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("MODEL_NAME", raising=False)
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_BASE_URL", raising=False)
+
+    exit_code = process_cli_main(["preflight"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output["status"] == "error"
+    assert output["model"] == {"configured": False, "name": None, "source": None}
+    assert "model_missing:anthropic" in output["errors"]
+    assert "base_url_missing:anthropic" in output["warnings"]
+
+
+def test_provider_preflight_unknown_provider_is_explicit(monkeypatch, capsys):
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "unknown-provider")
+
+    exit_code = process_cli_main(["preflight"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output["status"] == "error"
+    assert output["provider"] == {"configured": False, "name": "unknown-provider"}
+    assert "unknown_provider:unknown-provider" in output["errors"]
+
+
+def test_provider_preflight_does_not_persist_secret_or_prompt(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    secret_key = "SECRET_PREFLIGHT_KEY"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_key)
+
+    process_cli_main(["preflight"])
+
+    output_text = capsys.readouterr().out
+    assert secret_key not in output_text
+    assert "Provider connectivity preflight" not in output_text
+    assert not (tmp_path / "state.json").exists()
+    assert not (tmp_path / "runs").exists()
+
+
 def test_main_process_dispatch_does_not_start_interactive_session(
     tmp_path,
     monkeypatch,
@@ -129,6 +232,27 @@ def test_main_process_dispatch_does_not_start_interactive_session(
     assert exit_code == 0
     assert called["init"] is False
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+def test_main_preflight_dispatch_does_not_start_interactive_session(
+    monkeypatch,
+    capsys,
+):
+    from main import main
+
+    called = {"init": False}
+
+    def fail_if_interactive_session_starts():
+        called["init"] = True
+        raise AssertionError("interactive session should not start")
+
+    monkeypatch.setattr("main.init_session", fail_if_interactive_session_starts)
+
+    exit_code = main(["preflight", "--provider", "fake"])
+
+    assert exit_code == 0
+    assert called["init"] is False
+    assert json.loads(capsys.readouterr().out)["provider"]["name"] == "fake"
 
 
 def test_scan_inputs_reports_metadata_without_persisting_raw_text(tmp_path):

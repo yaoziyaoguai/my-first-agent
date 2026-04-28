@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import os
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    provider: str
-    model: str
-    api_key: str | None = None
-    base_url: str | None = None
+from llm.config import ProviderConfig, build_preflight_report, load_provider_config
 
 
 @dataclass(frozen=True)
@@ -122,27 +116,72 @@ def build_provider(
     *,
     model: str | None = None,
 ) -> LLMProvider:
-    provider = (
-        provider_name
-        or os.getenv("MY_FIRST_AGENT_LLM_PROVIDER")
-        or "fake"
-    ).strip().lower()
+    """按配置构造 provider；fake 是默认路径，真实 provider 必须显式配齐。
 
-    if provider == "fake":
-        return FakeProvider(model=model or os.getenv("LLM_FAKE_MODEL", "fake-llm"))
+    ProviderConfig 里可能含有 api_key，只能交给 provider 客户端使用，不能写入
+    state.json、runs/*.jsonl 或 CLI 输出。
+    """
 
-    if provider == "anthropic":
-        model_name = (
-            model
-            or os.getenv("ANTHROPIC_MODEL")
-            or os.getenv("MODEL_NAME")
-        )
-        if not model_name:
-            raise ValueError("ANTHROPIC_MODEL or MODEL_NAME is required")
+    config = load_provider_config(provider_name, model=model)
+
+    if config.provider == "fake":
+        return FakeProvider(model=config.model)
+
+    if config.provider == "anthropic":
         return AnthropicProvider(
-            model=model_name,
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            base_url=os.getenv("ANTHROPIC_BASE_URL"),
+            model=config.model,
+            api_key=config.api_key,
+            base_url=config.base_url,
         )
 
-    raise ValueError(f"Unknown LLM provider: {provider}")
+    raise ValueError(f"Unknown LLM provider: {config.provider}")
+
+
+def preflight_provider(
+    provider_name: str | None = None,
+    *,
+    model: str | None = None,
+    live: bool = False,
+) -> dict[str, object]:
+    """执行 provider preflight，默认只做本地配置检查。
+
+    `--live` 才会发真实请求；即便 live，也只记录 token/latency/status/error 摘要，
+    不返回 prompt、completion、request body、response body 或 key。
+    """
+
+    report = build_preflight_report(provider_name, model=model, live=live)
+    if not live:
+        return report
+    if report["status"] != "ok":
+        return report
+
+    started = time.perf_counter()
+    try:
+        provider = build_provider(provider_name, model=model)
+        response = provider.complete(
+            LLMRequest(
+                prompt_version="preflight.v1",
+                input_text="Provider connectivity preflight. Do not include secrets.",
+                input_file_hash="preflight",
+            )
+        )
+        report["live"] = {
+            "enabled": True,
+            "status": "ok",
+            "tokens": response.tokens,
+            "latency": int((time.perf_counter() - started) * 1000),
+        }
+        return report
+    except Exception as exc:
+        report["status"] = "error"
+        report["live"] = {
+            "enabled": True,
+            "status": "error",
+            "tokens": None,
+            "latency": int((time.perf_counter() - started) * 1000),
+            "error": exc.__class__.__name__,
+        }
+        errors = report.setdefault("errors", [])
+        if isinstance(errors, list):
+            errors.append(f"live_preflight_failed:{exc.__class__.__name__}")
+        return report

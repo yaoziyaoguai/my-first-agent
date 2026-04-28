@@ -491,7 +491,7 @@ def main_loop():
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in {"process", "scan", "status"}:
+    if argv and argv[0] in {"process", "scan", "status", "preflight"}:
         from llm.cli import main as process_main
 
         return process_main(argv)

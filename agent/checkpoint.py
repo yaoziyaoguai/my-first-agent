@@ -194,28 +194,56 @@ def load_checkpoint():
         return None
 
 
+def _filter_to_declared_fields(cls, data: dict) -> dict:
+    """只保留 dataclass 声明字段，过滤未知 key。
+
+    背景：`load_checkpoint_to_state` 早期实现对 task / memory dict 直接
+    `setattr`，任何不在 dataclass 声明里的 key 都会被悄悄挂成「裸属性」。
+    这意味着：旧版本 checkpoint、损坏 checkpoint、或他人误写入的 key 都能
+    污染 runtime state，且无法被 `dataclasses.fields(...)` / reset_task /
+    invariant 测试检测到。M3 把这条入口收紧到声明字段白名单内，未知字段
+    被丢弃，由 dataclass 默认值兜底；这与 v0.2 M3「损坏 checkpoint 不导致
+    crash」的目标一致。
+    """
+    from dataclasses import fields
+
+    declared = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in declared}
+
+
 # 从 checkpoint 恢复到当前 state
 def load_checkpoint_to_state(state):
     """
     从 checkpoint 恢复到当前 state。
+
+    持久字段：task / memory / conversation.messages。
+    临时字段（RuntimeEvent / InputIntent / DisplayEvent / TransitionResult /
+    InputResolution / tool_traces / runtime config 等）不属于恢复语义；
+    任何在 JSON 里出现的非声明字段会在 `_filter_to_declared_fields` 被丢弃。
     """
+    from agent.state import TaskState, MemoryState
+
     checkpoint = load_checkpoint()
     if not checkpoint:
         return False
 
     try:
-        # 恢复 task（尽量按 checkpoint 中已有字段完整恢复）
-        task_data = checkpoint.get("task", {})
+        # 恢复 task：只允许 TaskState 已声明字段进入 state，未知 key 丢弃。
+        task_data = _filter_to_declared_fields(
+            TaskState, checkpoint.get("task", {}) or {}
+        )
         for key, value in task_data.items():
             setattr(state.task, key, value)
 
-        # 恢复 memory（尽量按 checkpoint 中已有字段完整恢复）
-        memory_data = checkpoint.get("memory", {})
+        # 恢复 memory：同样过滤到 MemoryState 声明字段。
+        memory_data = _filter_to_declared_fields(
+            MemoryState, checkpoint.get("memory", {}) or {}
+        )
         for key, value in memory_data.items():
             setattr(state.memory, key, value)
 
-        # 恢复 conversation
-        conv_data = checkpoint.get("conversation", {})
+        # 恢复 conversation.messages（append-only 事件流；tool_traces 不属于恢复语义）。
+        conv_data = checkpoint.get("conversation", {}) or {}
         state.conversation.messages = conv_data.get("messages", []) or []
 
         return True

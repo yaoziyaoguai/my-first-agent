@@ -808,3 +808,117 @@ def test_status_command_run_id_outputs_specific_run(tmp_path, capsys):
     assert output["query"] == {"run_id": "chosen"}
     assert output["latest_run"]["run_id"] == "chosen"
     assert output["llm_calls"][0]["input_file_hash"] == "chosen-hash"
+
+
+def test_e2e_offline_scan_process_status_audit_without_leaks(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """端到端离线回归：scan → process → status → status --run-id 闭环。
+
+    本测试只用 fake provider 与本地文件，验证 v0.2 LLM Processing 的全链路
+    审计在没有真实 API、没有 .env、没有 secret 的情况下仍然可追踪、可脚本化、
+    不泄漏 raw text，并对损坏 JSONL 行降级为 warning 而不是崩溃。
+    """
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_MODEL", raising=False)
+
+    secret = "E2E_REGRESSION_RAW_SECRET_PAYLOAD"
+    input_path = tmp_path / "note.txt"
+    input_path.write_text(secret, encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    runs_dir = tmp_path / "runs"
+
+    # scan：只输出 metadata，不把 secret 写入 state/runs 也不出现在 stdout。
+    scan_exit = process_cli_main(["scan", str(input_path)])
+    assert scan_exit == 0
+    scan_out = capsys.readouterr().out
+    assert secret not in scan_out
+    scan_payload = json.loads(scan_out)
+    assert scan_payload["inputs"][0]["path"] == str(input_path.resolve())
+    assert scan_payload["inputs"][0]["input_file_hash"]
+    assert not state_path.exists()
+    assert not runs_dir.exists()
+
+    # process：fake provider 跑三段 stage，state/runs 写入但不含 raw text。
+    process_exit = process_cli_main(
+        [
+            "process",
+            str(input_path),
+            "--state-path",
+            str(state_path),
+            "--runs-dir",
+            str(runs_dir),
+        ]
+    )
+    process_out = capsys.readouterr().out
+    assert process_exit == 0
+    process_payload = json.loads(process_out)
+    assert secret not in process_out
+    assert process_payload["status"] == "ok"
+    run_id = process_payload["run_id"]
+    run_path = Path(process_payload["run_path"])
+    assert run_path.exists()
+    assert state_path.exists()
+
+    state_text = state_path.read_text(encoding="utf-8")
+    run_text = run_path.read_text(encoding="utf-8")
+    for forbidden in (secret, "ANTHROPIC_API_KEY", "x-api-key", "Bearer "):
+        assert forbidden not in state_text
+        assert forbidden not in run_text
+
+    # 注入一行损坏 JSONL，验证 status 降级为 warning 而不是崩溃。
+    with run_path.open("a", encoding="utf-8") as fh:
+        fh.write("{not valid json\n")
+
+    # status default：定位到刚写的 run，error/warning 形态稳定。
+    status_default_exit = process_cli_main(
+        [
+            "status",
+            "--state-path",
+            str(state_path),
+            "--runs-dir",
+            str(runs_dir),
+        ]
+    )
+    status_default_out = capsys.readouterr().out
+    assert status_default_exit == 0
+    assert secret not in status_default_out
+    status_default = json.loads(status_default_out)
+    assert status_default["schema_version"] == "llm.audit.status.v1"
+    assert status_default["latest_run"]["run_id"] == run_id
+    assert status_default["latest_run"]["llm_call_count"] == 3
+    assert status_default["errors"] == []
+    assert any(
+        warning.startswith("invalid_jsonl:") for warning in status_default["warnings"]
+    )
+    for call in status_default["llm_calls"]:
+        assert set(call) == LLM_CALL_ALLOWED_FIELDS
+        assert call["provider"] == "fake"
+        assert call["status"] == "ok"
+
+    # status --run-id：按 run_id 精确查询，命中同一份 metadata。
+    status_run_exit = process_cli_main(
+        [
+            "status",
+            "--state-path",
+            str(state_path),
+            "--runs-dir",
+            str(runs_dir),
+            "--run-id",
+            run_id,
+        ]
+    )
+    status_run_out = capsys.readouterr().out
+    assert status_run_exit == 0
+    assert secret not in status_run_out
+    status_run = json.loads(status_run_out)
+    assert status_run["query"] == {"run_id": run_id}
+    assert status_run["latest_run"]["run_id"] == run_id
+    assert status_run["llm_calls"] == status_default["llm_calls"]
+    assert status_run["allowed_llm_call_fields"] == sorted(LLM_CALL_ALLOWED_FIELDS)
+

@@ -72,10 +72,13 @@ not be written to `state.json`, `runs/*.jsonl`, or status/preflight output.
 `state.json` and `runs/*.jsonl` are local run artifacts and are ignored by git.
 The status schema is documented in `docs/LLM_AUDIT_STATUS_SCHEMA.md`; provider
 configuration is documented in `docs/LLM_PROVIDER_CONFIG.md`; the live provider
-smoke playbook is documented in `docs/LLM_PROVIDER_LIVE_SMOKE.md`. Provider
-failures are classified into stable safe codes such as `missing_config`,
-`auth_error`, `rate_limited`, `network_error`, `timeout`, `bad_response`,
-`unknown_provider`, and `provider_error`.
+smoke playbook is documented in `docs/LLM_PROVIDER_LIVE_SMOKE.md`; the live
+smoke audit result is documented in `docs/LLM_PROVIDER_LIVE_SMOKE_REPORT.md`;
+the v0.2 LLM Processing capability matrix is documented in
+`docs/LLM_PROCESSING_CAPABILITY_MATRIX.md`. Provider failures are classified
+into stable safe codes such as `missing_config`, `auth_error`, `rate_limited`,
+`network_error`, `timeout`, `bad_response`, `unknown_provider`, and
+`provider_error`.
 
 ## Run the v0.1 Smoke
 

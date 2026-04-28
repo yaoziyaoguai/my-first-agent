@@ -276,3 +276,115 @@ def test_request_user_input_is_hard_stop_even_when_model_has_more_responses(monk
     assert state.task.pending_user_input_request is not None
     assert state.task.pending_user_input_request["question"] == "请补充旅行偏好"
     assert len(fake.requests) == 1
+
+
+# ============================================================
+# B2 契约护栏：普通 CLI 输出不能裸 print 内部数据 / protocol dump
+#
+# 这两条测试守护 docs/CLI_OUTPUT_CONTRACT.md §5 禁止项。它们不是覆盖
+# 新功能，而是把"v0.1 已修复的违反契约 print"钉死，避免任何回归。
+# 任何把 DEBUG_PROTOCOL 改回 True 默认值，或重新引入裸 print(checkpoint)
+# 的改动，都会被这两条测试拦下。
+# ============================================================
+
+
+def test_b2_resume_does_not_naked_print_checkpoint_dict(
+    tmp_path, monkeypatch, capsys
+):
+    """B2 契约：try_resume_from_checkpoint 不能把整段 checkpoint dict 泄到 stdout。
+
+    历史回归点：agent/session.py:42 曾有 `print("[DEBUG] checkpoint:", checkpoint)`，
+    无 env guard 直接 print 整段 dict（含 conversation messages），是 v0.1 阶段
+    "用户根本看不清 Agent 在做什么"的典型来源。B2 已修：仅在
+    MY_FIRST_AGENT_DEBUG=1 时打印 checkpoint keys（不打 values），普通 CLI 永远
+    不会泄会话历史。详见 docs/CLI_OUTPUT_CONTRACT.md §5、§6。
+    """
+
+    from agent import checkpoint as checkpoint_module
+    from agent import session as session_module
+
+    secret_marker = "SECRET_LEAK_CANARY_DO_NOT_PRINT"
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint_module, "CHECKPOINT_PATH", checkpoint_path)
+    # 不让 MY_FIRST_AGENT_DEBUG 在测试环境意外开启。
+    monkeypatch.delenv("MY_FIRST_AGENT_DEBUG", raising=False)
+
+    import json as _json
+
+    checkpoint_path.write_text(
+        _json.dumps(
+            {
+                "task": {"user_goal": "测试任务", "current_step_index": 0},
+                "conversation": {
+                    "messages": [
+                        {"role": "user", "content": secret_marker},
+                        {"role": "assistant", "content": "回复"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # try_resume_from_checkpoint 会 input("要继续这个任务吗？(y/n): ")。
+    # 我们回 "n" 让它走 clear 分支，避免触碰真实 core.state。
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "n")
+
+    session_module.try_resume_from_checkpoint()
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+
+    assert secret_marker not in combined, (
+        "B2 契约违反：checkpoint conversation messages 泄到了 stdout。"
+        f" 输出片段：\n{combined[:500]}"
+    )
+    assert "[DEBUG] checkpoint:" not in combined, (
+        "B2 契约违反：仍有裸 [DEBUG] checkpoint: 输出。详见"
+        " docs/CLI_OUTPUT_CONTRACT.md §5。"
+    )
+
+
+def test_b2_chat_default_does_not_emit_protocol_dump(monkeypatch, capsys):
+    """B2 契约：普通 CLI 默认不能出现 REQUEST/RESPONSE protocol dump。
+
+    历史回归点：agent/core.py 的 DEBUG_PROTOCOL 历史默认 True，且
+    _debug_print_request / _debug_print_response 会在每轮模型调用时 print 巨量
+    REQUEST → Anthropic / RESPONSE ← Anthropic dump。当前调用点已注释，但只要
+    任何人取消注释，污染就会立刻回归。B2 已修：DEBUG_PROTOCOL 默认 False，且
+    函数体首部加 MY_FIRST_AGENT_PROTOCOL_DUMP env guard。
+    详见 docs/CLI_OUTPUT_CONTRACT.md §4 / §5.2。
+    """
+
+    from agent import core as core_module
+
+    # 1) 模块常量层面：默认必须是 False。
+    assert core_module.DEBUG_PROTOCOL is False, (
+        "B2 契约违反：core.DEBUG_PROTOCOL 默认必须为 False。"
+    )
+
+    # 2) 函数级 guard：即便 DEBUG_PROTOCOL=True，没设环境变量也不能输出。
+    monkeypatch.delenv("MY_FIRST_AGENT_PROTOCOL_DUMP", raising=False)
+    monkeypatch.setattr(core_module, "DEBUG_PROTOCOL", True)
+    core_module._debug_print_request("sys", [], [])
+
+    class _FakeResp:
+        stop_reason = "end_turn"
+        content = []
+        usage = None
+
+    core_module._debug_print_response(_FakeResp())
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+
+    forbidden_substrings = (
+        "REQUEST → Anthropic",
+        "RESPONSE ← Anthropic",
+    )
+    for marker in forbidden_substrings:
+        assert marker not in combined, (
+            f"B2 契约违反：未启用 MY_FIRST_AGENT_PROTOCOL_DUMP 时仍输出了"
+            f" protocol dump 标记 {marker!r}。详见"
+            " docs/CLI_OUTPUT_CONTRACT.md §5.2。"
+        )

@@ -516,7 +516,10 @@ def _run_main_loop(
                 return result
             continue
 
-        print(f"[DEBUG] 未知的 stop_reason: {response.stop_reason}")
+        # B2 契约：诊断信息用户必须能看到，不能用 [DEBUG] 前缀（会被
+        # main.DEBUG_OUTPUT_PREFIXES 兜底过滤吞掉）。详见
+        # docs/CLI_OUTPUT_CONTRACT.md "允许直接 print 的 prefix 白名单"。
+        print(f"[系统] 未知的 stop_reason: {response.stop_reason}")
         log_runtime_event(
             "loop.stop",
             event_source="runtime",
@@ -585,7 +588,33 @@ def _extract_text(content_blocks) -> str:
 
 # ========== 协议观察（调试用，稳定后可关）==========
 
-DEBUG_PROTOCOL = True   # 想关闭把这里改成 False
+# B2 契约：DEBUG_PROTOCOL 默认 False。
+# 历史上这里默认 True，且 _debug_print_request / _debug_print_response 会在
+# 每轮模型调用时打印巨量 REQUEST / RESPONSE dump，是普通 CLI 下"看不清
+# Agent 在做什么"的潜在回归源（虽然当前 545/572 行调用点已注释掉，但只要
+# 任何人取消注释，污染就会立刻回归）。
+# 现在把开关收到环境变量 MY_FIRST_AGENT_PROTOCOL_DUMP，普通 CLI 永远不会
+# 触发；函数体逻辑不动，方便临时排查。详见 docs/CLI_OUTPUT_CONTRACT.md。
+DEBUG_PROTOCOL = False
+
+
+def _protocol_dump_enabled() -> bool:
+    """协议 dump 开关：普通 CLI 永远不打印，仅排查时开。
+
+    打开方式：MY_FIRST_AGENT_PROTOCOL_DUMP=1。这里独立于 DEBUG_PROTOCOL
+    常量，让函数级 guard 与模块级常量一起决定是否输出，避免任何一侧
+    被误改成 True 时直接污染普通 CLI。
+    """
+
+    if not DEBUG_PROTOCOL:
+        return False
+    import os
+    return os.getenv("MY_FIRST_AGENT_PROTOCOL_DUMP", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _truncate(s: str, n: int = 200) -> str:
@@ -628,7 +657,7 @@ def _summarize_content(content) -> str:
 
 
 def _debug_print_request(system_prompt: str, messages: list, tools: list) -> None:
-    if not DEBUG_PROTOCOL:
+    if not _protocol_dump_enabled():
         return
     print("\n" + "=" * 12 + " REQUEST → Anthropic " + "=" * 12)
     print(f"model:  {MODEL_NAME}")
@@ -644,7 +673,7 @@ def _debug_print_request(system_prompt: str, messages: list, tools: list) -> Non
 
 
 def _debug_print_response(response) -> None:
-    if not DEBUG_PROTOCOL:
+    if not _protocol_dump_enabled():
         return
     print("\n" + "=" * 12 + " RESPONSE ← Anthropic " + "=" * 11)
     print(f"stop_reason: {response.stop_reason}")

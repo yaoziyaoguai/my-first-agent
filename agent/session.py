@@ -39,7 +39,12 @@ def try_resume_from_checkpoint():
     from agent.core import get_state
 
     checkpoint = load_checkpoint()
-    print("[DEBUG] checkpoint:", checkpoint)
+    # B2 契约：普通 CLI 下不能裸 print 整段 checkpoint dict（含 conversation messages）。
+    # 这里只在 MY_FIRST_AGENT_DEBUG=1 时才打印调试信息，且打印的是 keys 而非 values，
+    # 避免把会话历史泄到终端。详见 docs/CLI_OUTPUT_CONTRACT.md "禁止项"。
+    from agent.checkpoint import _debug_stdout_enabled
+    if checkpoint is not None and _debug_stdout_enabled():
+        print(f"[CHECKPOINT] loaded keys={list(checkpoint.keys())}")
     if not checkpoint:
         return
 

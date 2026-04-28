@@ -330,3 +330,215 @@ def test_non_idle_with_messages_is_actionable():
     task = {"status": "running"}
     conv = {"messages": [{"role": "user", "content": "hi"}]}
     assert _checkpoint_has_actionable_resume(task, conv) is True
+
+
+# ===================== M7-B: 四类输出区分（policy / user / pre-check / fail / success） =====================
+
+def test_policy_denial_emits_tool_rejected_with_specific_reason(monkeypatch):
+    """confirmation == 'block'（如 read_file ~/.env / .pem）必须 emit
+    tool.rejected 且 status_text 含具体拒绝原因，绝不能 emit tool.completed。
+
+    真实 main.py smoke 发现旧版 block 分支不 emit 任何 display event，
+    用户只看到下游 FORCE_STOP 的「具体拒绝原因见上方工具消息」，但「上方」
+    其实空无一物。"""
+    import agent.tools  # noqa: F401  ensure TOOL_REGISTRY populated
+    import agent.tool_executor as te
+
+    monkeypatch.setattr(te, "save_checkpoint", lambda s: None)
+
+    class _ToolUse:
+        id = "toolu_block_1"
+        name = "read_file"
+        input = {"path": "/tmp/server.pem"}
+
+    class _TaskState:
+        def __init__(self):
+            self.tool_execution_log = {}
+            self.current_step_index = 0
+            self.pending_tool = None
+            self.pending_user_input_request = None
+            self.status = "running"
+
+    class _State:
+        def __init__(self):
+            self.task = _TaskState()
+
+    captured: list[Any] = []
+
+    class _TurnState:
+        round_tool_traces: list[Any] = []
+        on_runtime_event = None
+
+        @staticmethod
+        def on_display_event(ev):
+            captured.append(ev)
+
+    out = te.execute_single_tool(
+        _ToolUse(),
+        state=_State(),
+        turn_state=_TurnState(),
+        turn_context={},
+        messages=[],
+    )
+
+    assert out == te.FORCE_STOP
+    rejection_events = [e for e in captured if e.event_type == "tool.rejected"]
+    completed_events = [e for e in captured if e.event_type == "tool.completed"]
+    assert not completed_events, "policy denial 绝不能 emit tool.completed"
+    assert len(rejection_events) == 1, "policy denial 必须 emit 1 条 tool.rejected"
+    body = rejection_events[0].body
+    assert "被安全策略拒绝" in body
+    assert ".pem" in body or "敏感配置" in body, (
+        "status_text 必须包含具体原因，不能只说「被拒绝」"
+    )
+    assert "用户" not in body, "policy denial 文案不能误用「用户」"
+
+
+def test_policy_denial_does_not_leak_file_contents_in_display_event(monkeypatch, tmp_path):
+    """display event 的 body 来源于 _describe_policy_denial，
+    后者只读路径名/扩展名，绝不读取被拒文件内容。"""
+    import agent.tools  # noqa: F401
+    import agent.tool_executor as te
+
+    secret = tmp_path / "secret.pem"
+    secret.write_text("BEGIN PRIVATE KEY\nSUPER_SECRET_VALUE\nEND PRIVATE KEY")
+    monkeypatch.setattr(te, "save_checkpoint", lambda s: None)
+
+    class _ToolUse:
+        id = "toolu_pem"
+        name = "read_file"
+        input = {"path": str(secret)}
+
+    class _TaskState:
+        def __init__(self):
+            self.tool_execution_log = {}
+            self.current_step_index = 0
+
+    class _State:
+        def __init__(self):
+            self.task = _TaskState()
+
+    captured: list[Any] = []
+
+    class _TurnState:
+        round_tool_traces: list[Any] = []
+        on_runtime_event = None
+
+        @staticmethod
+        def on_display_event(ev):
+            captured.append(ev)
+
+    te.execute_single_tool(
+        _ToolUse(),
+        state=_State(),
+        turn_state=_TurnState(),
+        turn_context={},
+        messages=[],
+    )
+
+    rejection = next(e for e in captured if e.event_type == "tool.rejected")
+    assert "SUPER_SECRET_VALUE" not in rejection.body
+    assert "BEGIN PRIVATE KEY" not in rejection.body
+    assert "PRIVATE" not in rejection.body or ".pem" in rejection.body, (
+        "display 文案最多提到扩展名 .pem，绝不能含文件内容"
+    )
+
+
+def test_user_rejection_emits_user_rejected_event_with_distinct_text(monkeypatch):
+    """用户输入 n 拒绝工具调用时必须 emit tool.user_rejected，
+    与 tool.rejected（安全检查）/tool.failed（运行报错）区分语义，
+    避免 CLI 用户「按了 n 之后什么都没看到」的体验。"""
+    import agent.confirm_handlers as ch
+    from agent.confirm_handlers import handle_tool_confirmation, ConfirmationContext
+    from agent.conversation_events import has_tool_result
+
+    monkeypatch.setattr(ch, "save_checkpoint", lambda s: None)
+
+    class _TaskState:
+        def __init__(self):
+            self.pending_tool = {
+                "tool_use_id": "toolu_user_rej",
+                "tool": "write_file",
+                "input": {"path": "workspace/x.txt", "content": "y"},
+            }
+            self.status = "awaiting_tool_confirmation"
+            self.tool_execution_log = {}
+            self.current_step_index = 0
+
+    class _ConvState:
+        def __init__(self):
+            self.messages = [
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_user_rej", "name": "write_file", "input": {}}]},
+            ]
+
+    class _State:
+        def __init__(self):
+            self.task = _TaskState()
+            self.conversation = _ConvState()
+            self.memory = type("_M", (), {"profile": {}, "rules": [], "episodes": []})()
+            self.meta = type("_Meta", (), {"started_at": 0, "session_id": "t"})()
+
+    captured: list[Any] = []
+
+    class _TurnState:
+        round_tool_traces: list[Any] = []
+        on_runtime_event = None
+
+        @staticmethod
+        def on_display_event(ev):
+            captured.append(ev)
+
+    state = _State()
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=_TurnState(),
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda ts: "continued",
+    )
+
+    handle_tool_confirmation("n", ctx)
+
+    user_rej = [e for e in captured if e.event_type == "tool.user_rejected"]
+    assert user_rej, "用户拒绝必须 emit tool.user_rejected"
+    body = user_rej[0].body
+    assert "用户拒绝" in body
+    assert "安全策略" not in body
+    # 占位 tool_result 仍按既有约定写入 messages
+    assert has_tool_result(state.conversation.messages, "toolu_user_rej")
+
+
+def test_runtime_event_type_for_user_rejected_is_visible():
+    """tool.user_rejected 也应映射到 EVENT_TOOL_RESULT_VISIBLE，
+    与 completed/failed/rejected 同列。"""
+    from agent.display_events import (
+        EVENT_TOOL_RESULT_VISIBLE,
+        DisplayEvent,
+        runtime_display_event,
+    )
+
+    ev = DisplayEvent(event_type="tool.user_rejected", title="工具执行状态", body="用户拒绝执行。")
+    re = runtime_display_event(ev)
+    assert re.event_type == EVENT_TOOL_RESULT_VISIBLE
+    assert re.metadata["display_event_type"] == "tool.user_rejected"
+
+
+def test_four_categories_have_distinct_status_text_strings():
+    """四类结局的 status_text 在 CLI 上必须可被肉眼区分（首关键词不同）。"""
+    from agent.tool_executor import _classify_tool_outcome
+
+    success_text = _classify_tool_outcome("ok")[2]
+    failed_text = _classify_tool_outcome("错误：x")[2]
+    rejected_text = _classify_tool_outcome("拒绝执行：x")[2]
+
+    keywords = {
+        "success": success_text,         # 「执行完成。」
+        "failed": failed_text,           # 「执行失败。」
+        "pre_check_rejected": rejected_text,  # 「已被工具内部安全检查拒绝。」
+    }
+    # 三类都不能含「用户」；用户拒绝走 confirm_handlers 的 tool.user_rejected
+    for k, v in keywords.items():
+        assert "用户" not in v, f"{k} 文案不能含「用户」: {v!r}"
+    # 三类首关键字不同
+    assert success_text != failed_text != rejected_text
+    assert "完成" in success_text and "失败" in failed_text and "拒绝" in rejected_text

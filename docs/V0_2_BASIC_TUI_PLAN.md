@@ -128,7 +128,32 @@ stdout debug capture。
 `tool.rejected` 显示事件 + 「已被工具内部安全检查拒绝。」，并附加
 重复调用阻止提示。这是 RC smoke 之外的第三个真实文案区分缺口。
 
-### 7.2 M7-C 已交付（resume 可见性 + 残留 checkpoint 自清）
+### 7.2 M7-B 已交付（policy denial / user rejection 显示事件补齐）
+
+真实 main.py smoke 发现两个体验缺口：
+
+1. `confirmation == "block"` 路径（read_file ~/.env / .pem 等）执行后
+   FORCE_STOP 总结说「具体拒绝原因见上方工具消息」，但「上方」其实**空无一物**——
+   旧实现 block 分支不 emit 任何 display event。
+2. 用户输入 'n' 拒绝工具时，CLI 终端没有任何 display event 反馈，用户无法
+   确认「我的拒绝是否被系统接受」，紧接着的下一轮 chat 输出会被误解为
+   「系统继续执行了」。
+
+修复：
+
+- `tool_executor.py` block 分支补 emit `tool.rejected` event，
+  status_text 形如「被安全策略拒绝：路径 'X' 被识别为...」（取
+  `_describe_policy_denial` 首行，去掉 `[安全策略] ` 前缀避免重复）。
+  这样 FORCE_STOP 的「见上方」承诺成立。
+- `confirm_handlers.py` 拒绝/feedback 分支补 emit `tool.user_rejected`
+  event，`status_text` 「用户拒绝执行，已跳过。」/「用户未批准，改为
+  提供反馈意见。」，与 `tool.rejected` 严格区分。
+- `display_events.py` `runtime_display_event` 把 `tool.user_rejected`
+  也纳入 `EVENT_TOOL_RESULT_VISIBLE`，UI 一致渲染。
+
+四类工具结局至此**完全互不重叠**，详见 `docs/CLI_OUTPUT_CONTRACT.md` §8.1。
+
+### 7.3 M7-C 已交付（resume 可见性 + 残留 checkpoint 自清）
 
 真实 main.py smoke 发现：旧 `try_resume_from_checkpoint` 只要 checkpoint
 文件存在就 prompt。`status='idle' + 0 条消息 + 无 pending` 这种历史残留
@@ -144,18 +169,20 @@ stdout debug capture。
 - prompt 显示中加 `状态：<status>` 字段，让用户看清楚断点处于什么阶段。
 - 拒绝路径文案改为带换行的 `[系统] 已清除断点，回到对话模式，可以直接输入新任务。`
 
-### 7.3 实测覆盖（tests/test_cli_output_ux.py 12 个）
+### 7.4 实测覆盖（tests/test_cli_output_ux.py 17 个）
 
 - 三类分类正确（rejected_by_check / failed / executed）
 - pre-check 拒绝不再误显示 completed
 - 真实失败仍走 tool.failed
 - 真实成功仍走 tool.completed
 - post-confirm 拒绝走 tool.rejected
-- runtime event 映射稳定
+- runtime event 映射稳定（rejected / user_rejected）
 - status 命名空间不与 blocked_by_policy 重叠
 - M7-C：5 类 actionable / non-actionable checkpoint 判定
+- M7-B：policy denial emit tool.rejected + 不泄漏文件内容；
+  user reject emit tool.user_rejected；四类 status_text 关键字互不重叠
 
-### 7.4 真实 main.py smoke 已通过的场景
+### 7.5 真实 main.py smoke 已通过的场景
 
 - 无 checkpoint 启动：直接进入对话模式，无虚假提示
 - idle/空残留 checkpoint：被静默清理
@@ -163,11 +190,15 @@ stdout debug capture。
 - 真实 calculate 工具：tool.executing → tool.completed 渲染清晰
 - 真实 write_file 项目外路径：tool.executing「已收到确认，开始执行」→
   tool.rejected「已被工具内部安全检查拒绝」，**不再显示「执行完成」**
+- 真实 read_file /tmp/server.pem（policy denial）：先看到
+  「[工具执行状态] 被安全策略拒绝：...」具体原因，再看到 FORCE_STOP 总结
+- 真实 write_file workspace/m7_test.txt + 用户输入 'n'：看到
+  「[工具执行状态] 用户拒绝执行，已跳过。」，与策略拒绝文案完全区分
 - 文件未真的写出去，亦未出现 `./~` 字面目录
 
-仍需用户人工观察的场景：`/tmp/server.pem` policy denial 文案、
-fork bomb shell 拒绝、私钥写入 workspace 拒绝（这些自动 smoke 覆盖
-但渲染层文案需要真实人眼判断是否易读）。
+仍建议用户人工观察（M7 范围之外）：fork bomb / `echo > /dev/sd*` 在 shell
+工具白名单层的实际行为（自动 smoke 已断言文本，但模型有时会自行拒绝
+而不调用工具，需真实人眼判断这种「模型层拒绝」是否符合预期）。
 
 ---
 

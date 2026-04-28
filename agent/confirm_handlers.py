@@ -410,6 +410,26 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     # 未执行分支（n / feedback）也要清空 pending_tool 并为悬空 tool_use 补占位结果。
     state.task.pending_tool = None
 
+    # M7-B 真实修复：旧实现用户拒绝后没有任何 display event，CLI 终端
+    # 用户只看到自己输入的 'n' 然后是下一轮的 chat 输出，无法清晰确认
+    # 「我的拒绝是否被系统接受」。这里 emit 一个 tool.user_rejected 事件，
+    # 与 tool.rejected（安全检查）/tool.failed（工具运行报错）区分语义，
+    # 都映射到 EVENT_TOOL_RESULT_VISIBLE 让 UI 一致显示。
+    from agent.display_events import build_tool_status_event, emit_display_event
+    if response == "reject":
+        rejection_text = "用户拒绝执行，已跳过。"
+    else:
+        rejection_text = "用户未批准，改为提供反馈意见。"
+    emit_display_event(
+        turn_state.on_display_event,
+        build_tool_status_event(
+            event_type="tool.user_rejected",
+            tool_name=tool_name,
+            tool_input=pending.get("input") or {},
+            status_text=rejection_text,
+        ),
+    )
+
     from agent.conversation_events import append_tool_result, has_tool_result
     if not has_tool_result(messages, pending["tool_use_id"]):
         append_tool_result(

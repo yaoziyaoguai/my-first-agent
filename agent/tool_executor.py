@@ -223,6 +223,23 @@ def execute_single_tool(
             "status": "blocked_by_policy",
             "step_index": state.task.current_step_index,
         }
+        # M7-B 真实修复：旧实现 block 分支不 emit 任何 display event，
+        # 用户只看到下游 FORCE_STOP 的「具体拒绝原因见上方工具消息」，
+        # 但「上方」其实空无一物。这里补一个 tool.rejected 事件，让用户
+        # 在看到 FORCE_STOP 总结之前先看到具体「[安全策略] 已拒绝...」原因。
+        # status_text 取拒绝消息首行（去掉 [安全策略] 前缀以避免重复），
+        # 不会暴露任何文件内容（_describe_policy_denial 只看路径名）。
+        first_line = result.splitlines()[0] if result else ""
+        denial_summary = first_line.removeprefix("[安全策略] ").strip()
+        emit_display_event(
+            turn_state.on_display_event,
+            build_tool_status_event(
+                event_type="tool.rejected",
+                tool_name=tool_name,
+                tool_input=tool_input,
+                status_text=f"被安全策略拒绝：{denial_summary}",
+            ),
+        )
         save_checkpoint(state)
         return FORCE_STOP
 

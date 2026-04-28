@@ -42,22 +42,26 @@ from agent.tools.shell import (
     "/tmp/password_list.csv",
     "/tmp/api_token.txt",
     "/tmp/myapikey.conf",
+    # v0.2 RC P0 安全边界补丁：扩展名识别真实密钥文件。
+    # 这些 case 在 P0 之前会失败，因为旧的 is_sensitive_file 只看完整文件名。
+    "/tmp/server.pem",
+    "/tmp/api.key",
+    "secrets/private.pem",
+    "secrets/api.KEY",  # 大小写不敏感
 ])
 def test_sensitive_files_are_blocked(path):
-    """文件名命中 SENSITIVE_PATTERNS / 关键词 / `.env` 前缀 → 必须 block。
+    """文件名命中 SENSITIVE_PATTERNS / 关键词 / `.env` 前缀 / 敏感扩展名 → block。
 
     这条 invariant 是 read_file / read_file_lines 的 `_check_read_permission`
-    依赖项；任何对 SENSITIVE_PATTERNS 或 SENSITIVE_KEYWORDS 的修改都会让
-    本测试失败，提醒维护者评估是否要同步更新 preflight 文档。
+    依赖项；任何对 SENSITIVE_PATTERNS / SENSITIVE_KEYWORDS / SENSITIVE_SUFFIXES
+    的修改都会让本测试失败，提醒维护者评估是否要同步更新 preflight 文档。
 
-    已知缺口（preflight 文档 §3 已登记）：`.pem` / `.key` 等扩展名当前
-    走不到 block，因为 `is_sensitive_file` 用的是 `name == ".pem"` 整名
-    匹配，而非扩展名匹配。修复时请在 preflight 文档迁出该缺口并把对应
-    用例加回本 parametrize。
+    v0.2 RC P0 已修复：`.pem` / `.key` 扩展名识别。
     """
     assert is_sensitive_file(path), (
         f"敏感路径 {path!r} 未被 is_sensitive_file 识别；"
-        " 请检查 SENSITIVE_PATTERNS / SENSITIVE_KEYWORDS 是否被改弱。"
+        " 请检查 SENSITIVE_PATTERNS / SENSITIVE_KEYWORDS / SENSITIVE_SUFFIXES"
+        " 是否被改弱。"
     )
 
 
@@ -132,6 +136,12 @@ def test_nonexistent_or_outside_project_path_is_not_protected():
     "chown root:root file",
     "passwd root",
     "kill -9 1",
+    # v0.2 RC P0 安全边界补丁：fork bomb 字面匹配。
+    ":(){ :|:& };:",
+    ":() { :|:& };:",
+    # v0.2 RC P0 安全边界补丁：>/dev/sd 重定向。
+    "echo data > /dev/sda1",
+    "cat foo >/dev/sdb",
 ])
 def test_dangerous_shell_commands_are_blacklisted(command):
     """SHELL_BLACKLIST 必须拦截所有典型危险命令。
@@ -139,11 +149,7 @@ def test_dangerous_shell_commands_are_blacklisted(command):
     任何对正则的「优化」或「简化」都可能放过这些命令；本测试是回归网。
     新增危险模式时，加一条参数即可。
 
-    已知缺口（preflight 文档 §3 已登记）：
-    - fork bomb `:(){ :|:& };:` 正则当前匹配失败（特殊字符 `\\b` 边界问题）
-    - `echo data > /dev/sda1` 当前匹配失败（`\\b>` 在 `>` 前无 word
-      boundary）
-    修复后把这些用例加回本 parametrize 并从 preflight 文档迁出。
+    v0.2 RC P0 已修复：fork bomb 与 `> /dev/sd` 的 word boundary 失效问题。
     """
     matched = check_shell_blacklist(command)
     assert matched is not None, (

@@ -4,6 +4,11 @@ import re
 from config import PROJECT_DIR, PROTECTED_EXTENSIONS
 SENSITIVE_PATTERNS = {".env", ".env.local", ".env.production","id_rsa",".pem",".key"}
 SENSITIVE_KEYWORDS = {"secret", "credential", "password", "token", "apikey"}
+# v0.2 RC P0 安全边界补丁：除「整名匹配」之外，再按扩展名识别敏感文件。
+# 例如 `server.pem` / `api.key` 这类真实密钥文件，原先 `name in SENSITIVE_PATTERNS`
+# 不会命中（因为 name 是 "server.pem" 而不是 ".pem"）。这里**补一个最小集合**，
+# 不引入沙箱，不改变 confirmation 路径，仅修复扩展名识别盲区。
+SENSITIVE_SUFFIXES = {".pem", ".key"}
 
 def is_sensitive_file(path):
     """检查文件是否为敏感文件，禁止 Agent 读取"""
@@ -11,11 +16,16 @@ def is_sensitive_file(path):
     try:
         file_path = Path(path).expanduser().resolve(strict=False)
         name_lower = file_path.name.lower()
-        
+        suffix_lower = file_path.suffix.lower()
+
         # 文件名匹配
         if name_lower in SENSITIVE_PATTERNS:
             return True
-        
+
+        # v0.2 RC P0：扩展名匹配（.pem / .key 等真实密钥文件）
+        if suffix_lower in SENSITIVE_SUFFIXES:
+            return True
+
         # .env 开头的文件
         if name_lower.startswith(".env"):
             return True

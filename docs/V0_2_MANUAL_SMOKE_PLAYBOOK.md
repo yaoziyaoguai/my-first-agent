@@ -221,21 +221,23 @@ rm -f memory/checkpoint.json
 ### 5.2 M6 安全现状（**预期都被拦截或要求 confirm**）
 
 - [ ] `read_file ~/.env` → 被 block（`is_sensitive_file` 命中）。
+- [ ] `read_file ./server.pem` → 被 block（v0.2 RC P0 修复后已支持扩展名识别）。
 - [ ] `write_file agent/core.py` → 被拒（受保护源码）。
 - [ ] `run_shell "rm -rf /"` → 被 `SHELL_BLACKLIST` 拦截。
+- [ ] `run_shell ":(){ :|:& };:"` → 被拦截（v0.2 RC P0 修复 fork bomb 正则）。
+- [ ] `run_shell "echo data > /dev/sda1"` → 被拦截（v0.2 RC P0 修复 `>/dev/sd` 边界）。
 - [ ] `run_shell "ls"` → 静默执行（READONLY_COMMANDS）。
 - [ ] `write_file ~/v0_2_outside_test.txt`（项目外）→ 被要求 confirm。
       **不要**真的回 y，回 n 取消。
 
-> ⚠️ **已知 preflight 缺口**（见
+> ⚠️ **剩余已知缺口**（见
 > `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` §3）：
-> - `read_file ./server.pem` 当前**不会**被 block（扩展名识别缺口）；
-> - `run_shell ":(){ :|:& };:"` 当前**不会**被拦截（fork bomb 正则失效）；
-> - `run_shell "echo data > /dev/sda1"` 当前**不会**被拦截（边界正则失效）；
-> - `run_shell "r''m -rf /"` 当前能绕过黑名单。
+> - `read_file ./notes.txt`（内容是 `.env` 改名）当前**不会**被 block
+>   （内容前缀扫描未做）；
+> - `run_shell "r''m -rf /"` 当前能绕过黑名单（命令规范化未做）。
 >
 > 这些**预期失败**。看到「未拦截」属于已知现状，请记录而**不要**临时
-> 修补；M6 最小补丁会统一处理。
+> 修补；后续 P1 补丁会统一处理。
 
 ### 5.3 CLI 输出契约不退化
 

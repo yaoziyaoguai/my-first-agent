@@ -63,17 +63,18 @@
 | 缺口 | 现状 | 风险 | 最小修复（候选） |
 |---|---|---|---|
 | `is_sensitive_file` 只看文件名 | 改名后仍可读 | 用户复制 `.env` → `notes.txt` 可绕过 block | 加内容前 N 字节扫描敏感前缀（`API_KEY=` / `BEGIN PRIVATE KEY` 等） |
-| `is_sensitive_file` 不识别 `.pem` / `.key` 扩展名 | `SENSITIVE_PATTERNS` 中 `".pem"` / `".key"` 实际只匹配「整个文件名等于这两个字符串」，不匹配扩展名 | `server.pem` / `api.key` 等真实密钥文件未被 block | 把扩展名匹配改为 `Path.suffix.lower() in {".pem", ".key", ...}` |
+| ~~`is_sensitive_file` 不识别 `.pem` / `.key` 扩展名~~ | ✅ **v0.2 RC P0 已修复**（`SENSITIVE_SUFFIXES` + `Path.suffix.lower()` 匹配） | — | — |
 | `SHELL_BLACKLIST` 用正则 | 可能被 `\x72m`/转义/拼接绕过 | 模型恶意拼接命令 | shell 命令在执行前规范化（去引号 + lower），重新跑黑名单 |
-| `SHELL_BLACKLIST` fork bomb 正则失效 | `r"\b:(){ :\|:& };:"` 因 `\b` 与特殊字符不构成 word boundary，实际不命中 | fork bomb 不被拦截 | 改为字面子串匹配 `":(){ :|:& };:" in command` |
-| `SHELL_BLACKLIST` `>/dev/sd` 重定向失效 | `r"\b>\s*/dev/sd"` 中 `\b` 在 `>` 前不成立 | `echo data > /dev/sda1` 等覆盖块设备命令未拦截 | 去掉前面的 `\b`，改为 `r">\s*/dev/sd"` |
+| ~~`SHELL_BLACKLIST` fork bomb 正则失效~~ | ✅ **v0.2 RC P0 已修复**（去掉 `\b`，改为允许任意空白的字面正则） | — | — |
+| ~~`SHELL_BLACKLIST` `>/dev/sd` 重定向失效~~ | ✅ **v0.2 RC P0 已修复**（去掉前置 `\b`） | — | — |
 | `write_file` 没有项目外写拦截 | 仅检查「项目内 + 受保护扩展名」 | 可写入 `~/.bashrc` 等 | `confirmation=always` 已要求确认；M6 可加「项目外路径 → 显式额外提示」 |
 | `read_file` 项目外仅 confirm | 即使确认后可读任意路径 | 用户疏忽确认即泄漏 | 同上：项目外路径在 confirm prompt 上加「⚠️ 项目外」标签 |
 | `install_skill` 下载内容确认即执行 | `safety_warnings` 仅打印 | 远程内容含恶意脚本 | M6 可强制要求第二次确认；当前在范围外 |
 
-**M6 建议优先补 §3 表中第 1 / 2 / 4 / 5 项**（content-prefix scan、`.pem`/`.key`
-扩展名识别、fork bomb 字面匹配、`>/dev/sd` 边界修正）——影响面小、单测可
-覆盖、防真实风险。其余推迟到 v0.3 或单独 spec 评审。
+**v0.2 RC P0 已修复**：上表第 2 / 4 / 5 项（`.pem` / `.key` 扩展名识别、
+fork bomb 字面匹配、`>/dev/sd` 边界修正）。剩余 P1 项（shell 命令规范化、
+内容前缀扫描、项目外路径 ⚠️ 标签）建议人工 smoke 后再统一推进。其余推迟到
+v0.3 或单独 spec 评审。
 
 ## 4. M5 工具体系优化 — 最小必须项 vs 可延期
 

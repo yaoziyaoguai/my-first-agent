@@ -41,13 +41,17 @@
 - `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归测试**未补**。
 - `tool_execution_log` 长度截断**未做**。
 
-### 2.2 M6 基础安全：仅 preflight，未实施最小补丁
+### 2.2 M6 基础安全：P0 已补，剩余 P1+ 仍待人工 smoke
 
-- `is_sensitive_file` **只看完整文件名**，不识别 `.pem` / `.key` 扩展名。
+**v0.2 RC P0 已落地**（commit `fix(runtime): close v0.2 rc security smoke gaps`）：
+- ✅ `is_sensitive_file` 现在按扩展名识别 `.pem` / `.key`（`SENSITIVE_SUFFIXES`）。
+- ✅ `SHELL_BLACKLIST` 的 fork bomb 正则改为字面匹配，真实命中。
+- ✅ `SHELL_BLACKLIST` 的 `>/dev/sd` 去掉前置 `\b`，真实命中。
+
+**仍未补**（建议人工 smoke 之后再做）：
+- `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过）。
 - shell 命令规范化（去引号 + lower 后再跑黑名单）**未做**，简单引号转义
-  能绕过。
-- fork bomb 正则因 `\b` 边界问题**永不命中**。
-- `>/dev/sd` 重定向正则因 `\b` 边界问题**永不命中**。
+  仍能绕过；`tests/test_security_baseline.py` 中 `test_known_gap_simple_quoted_rm_can_currently_bypass_blacklist` 仍钉死现状。
 - `read_file` / `write_file` 项目外路径仅 confirm，**没有**额外 ⚠️ 标签。
 - `install_skill` 下载内容**单次确认即执行**。
 
@@ -102,15 +106,15 @@
 
 | 缺口 | 来源 | 建议优先级 | 理由 |
 |---|---|---|---|
-| `is_sensitive_file` 不识别 `.pem` / `.key` 扩展名 | preflight §3 | **P0 · 必须人工 smoke 后立刻补** | 真实密钥文件未被 block，安全意义清晰；改 1 行代码 |
-| fork bomb 正则失效 | preflight §3 | **P0 · 必须补** | 安全文案与现实行为不一致，误导 |
-| `>/dev/sd` 边界正则失效 | preflight §3 | **P0 · 必须补** | 同上 |
+| ~~`is_sensitive_file` 不识别 `.pem` / `.key` 扩展名~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
+| ~~fork bomb 正则失效~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
+| ~~`>/dev/sd` 边界正则失效~~ | preflight §3 | ✅ **v0.2 RC P0 已修复** | — |
 | shell 引号转义绕过 | preflight §3 | **P1 · 强烈建议补** | 攻击面真实，但需要规范化函数 |
 | `is_sensitive_file` 只看文件名 | preflight §3 | **P1 · 推荐补** | 改名 `.env → notes.txt` 可绕过；需要内容前缀扫描 |
 | `read_file` / `write_file` 项目外路径仅 confirm | preflight §3 | **P2 · 建议补「⚠️ 标签」** | 本质是用户 UX 提示而非 hard block |
 | `install_skill` 单次确认即执行 | preflight §3 | **P3 · 可延期 v0.3** | 与 Skill 体系整体设计相关，不在 v0.2 范围 |
 | 工具注册一致性负向断言 | preflight §4 | **P1** | 防止业务工具被误标 meta=True |
-| `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | **P1** | 防止正则改动悄悄放过/误拒 |
+| `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | **P1** | 防止正则改动悄悄放过/误拒（P0 已建立基础回归网） |
 | `tool_execution_log` 截断 | preflight §4 | **P2** | 当前 checkpoint 已截断 messages，影响较小 |
 
 **人工 smoke 后**：建议把 P0 + P1 一次性合并到 `M5/M6 最小补丁`

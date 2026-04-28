@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from llm.audit import build_status, scan_inputs
+from llm.audit import STATUS_SCHEMA_VERSION, build_status, scan_inputs
 from llm.cli import main as process_cli_main
 from llm.pipeline import process_file
 from llm.providers import FakeProvider
@@ -175,6 +175,75 @@ def test_status_handles_missing_state_and_runs(tmp_path):
     assert "runs_missing_or_empty" in status["warnings"]
 
 
+def test_status_default_output_schema_is_stable(tmp_path):
+    state_path = tmp_path / "state.json"
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    run_path = runs_dir / "run-stable.jsonl"
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_run_id": "run-stable",
+                "status": "ok",
+                "input_file_hash": "stable-hash",
+                "run_path": str(run_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"event": "process_started", "payload": {}}),
+                json.dumps(
+                    {
+                        "event": "llm_call",
+                        "payload": {
+                            "provider": "fake",
+                            "model": "fake-llm",
+                            "prompt_version": "triager.v1",
+                            "input_file_hash": "stable-hash",
+                            "tokens": 4,
+                            "latency": 5,
+                            "status": "ok",
+                            "error": None,
+                        },
+                    }
+                ),
+                json.dumps({"event": "process_completed", "payload": {}}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_status(state_path=state_path, runs_dir=runs_dir)
+
+    assert set(status) == {
+        "schema_version",
+        "query",
+        "state_path",
+        "runs_dir",
+        "latest_run",
+        "runs",
+        "llm_calls",
+        "errors",
+        "warnings",
+        "allowed_llm_call_fields",
+    }
+    assert status["schema_version"] == STATUS_SCHEMA_VERSION
+    assert status["query"] == {"run_id": None}
+    assert status["latest_run"] == {
+        "run_id": "run-stable",
+        "status": "ok",
+        "input_file_hash": "stable-hash",
+        "run_path": str(run_path),
+        "latest_event": "process_completed",
+        "llm_call_count": 1,
+    }
+    assert status["runs"] == [status["latest_run"]]
+    assert status["allowed_llm_call_fields"] == sorted(LLM_CALL_ALLOWED_FIELDS)
+
+
 def test_status_reads_llm_call_whitelist_and_skips_corrupt_jsonl(tmp_path):
     raw_text = "STATUS_SECRET_RAW_TEXT"
     state_path = tmp_path / "state.json"
@@ -236,6 +305,117 @@ def test_status_reads_llm_call_whitelist_and_skips_corrupt_jsonl(tmp_path):
     assert any(warning.startswith("invalid_jsonl:") for warning in status["warnings"])
 
 
+def test_status_run_id_queries_specific_run_without_state_mutation(tmp_path):
+    state_path = tmp_path / "state.json"
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_run_id": "latest",
+                "status": "ok",
+                "input_file_hash": "latest-hash",
+                "run_path": str(runs_dir / "latest.jsonl"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runs_dir / "latest.jsonl").write_text(
+        json.dumps({"event": "process_completed", "payload": {}}),
+        encoding="utf-8",
+    )
+    (runs_dir / "target.jsonl").write_text(
+        json.dumps(
+            {
+                "event": "llm_call",
+                "payload": {
+                    "provider": "fake",
+                    "model": "fake-llm",
+                    "prompt_version": "distiller.v1",
+                    "input_file_hash": "target-hash",
+                    "tokens": 8,
+                    "latency": 13,
+                    "status": "ok",
+                    "error": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    before_state = state_path.read_text(encoding="utf-8")
+
+    status = build_status(
+        state_path=state_path,
+        runs_dir=runs_dir,
+        run_id="target",
+    )
+
+    assert state_path.read_text(encoding="utf-8") == before_state
+    assert status["query"] == {"run_id": "target"}
+    assert status["latest_run"]["run_id"] == "target"
+    assert status["latest_run"]["status"] is None
+    assert status["latest_run"]["input_file_hash"] is None
+    assert status["llm_calls"][0]["prompt_version"] == "distiller.v1"
+
+
+def test_status_run_id_missing_is_stable(tmp_path):
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+
+    status = build_status(
+        state_path=tmp_path / "missing-state.json",
+        runs_dir=runs_dir,
+        run_id="does-not-exist",
+    )
+
+    assert status["query"] == {"run_id": "does-not-exist"}
+    assert status["runs"] == []
+    assert status["llm_calls"] == []
+    assert status["latest_run"] == {
+        "run_id": "does-not-exist",
+        "status": None,
+        "input_file_hash": None,
+        "run_path": None,
+        "latest_event": None,
+        "llm_call_count": 0,
+    }
+    assert "run_missing:does-not-exist" in status["warnings"]
+
+
+def test_status_run_id_rejects_path_traversal(tmp_path):
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    outside_log = tmp_path / "outside.jsonl"
+    outside_log.write_text(
+        json.dumps(
+            {
+                "event": "llm_call",
+                "payload": {
+                    "provider": "fake",
+                    "model": "fake-llm",
+                    "prompt_version": "triager.v1",
+                    "input_file_hash": "outside-hash",
+                    "tokens": 1,
+                    "latency": 1,
+                    "status": "ok",
+                    "error": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_status(
+        state_path=tmp_path / "missing-state.json",
+        runs_dir=runs_dir,
+        run_id="../outside",
+    )
+
+    assert status["runs"] == []
+    assert status["llm_calls"] == []
+    assert "run_id_invalid:../outside" in status["warnings"]
+
+
 def test_status_command_outputs_warnings_without_raw_text(tmp_path, capsys):
     raw_text = "STATUS_COMMAND_SECRET"
     runs_dir = tmp_path / "runs"
@@ -282,3 +462,47 @@ def test_status_command_outputs_warnings_without_raw_text(tmp_path, capsys):
             "status": "error",
         }
     ]
+
+
+def test_status_command_run_id_outputs_specific_run(tmp_path, capsys):
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    (runs_dir / "chosen.jsonl").write_text(
+        json.dumps(
+            {
+                "event": "llm_call",
+                "payload": {
+                    "provider": "fake",
+                    "model": "fake-llm",
+                    "prompt_version": "triager.v1",
+                    "input_file_hash": "chosen-hash",
+                    "tokens": 1,
+                    "latency": 1,
+                    "status": "ok",
+                    "error": None,
+                    "prompt": "MUST_NOT_LEAK",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = process_cli_main(
+        [
+            "status",
+            "--runs-dir",
+            str(runs_dir),
+            "--state-path",
+            str(tmp_path / "missing-state.json"),
+            "--run-id",
+            "chosen",
+        ]
+    )
+
+    output_text = capsys.readouterr().out
+    assert exit_code == 0
+    assert "MUST_NOT_LEAK" not in output_text
+    output = json.loads(output_text)
+    assert output["query"] == {"run_id": "chosen"}
+    assert output["latest_run"]["run_id"] == "chosen"
+    assert output["llm_calls"][0]["input_file_hash"] == "chosen-hash"

@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("runs"),
         help="Directory for per-run JSONL audit logs.",
     )
+    status.add_argument(
+        "--run-id",
+        default=None,
+        help="Read a specific runs/<run-id>.jsonl file.",
+    )
     return parser
 
 
@@ -86,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         # status 只读 state/runs metadata；损坏日志转 warning，不把 raw text 打出来。
         print(
             json.dumps(
-                build_status(state_path=args.state_path, runs_dir=args.runs_dir),
+                build_status(
+                    state_path=args.state_path,
+                    runs_dir=args.runs_dir,
+                    run_id=args.run_id,
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             )

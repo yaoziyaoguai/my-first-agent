@@ -56,13 +56,18 @@ The v0.2 LLM processing surface is intentionally small and auditable:
 .venv/bin/python main.py scan README.md
 .venv/bin/python main.py process README.md
 .venv/bin/python main.py status
+.venv/bin/python main.py status --run-id <run_id>
 ```
 
 `scan` only reports file metadata such as path, hash, size, and mtime. `process`
 runs the minimal triager/distiller/linker pipeline and writes `state.json` plus
 `runs/*.jsonl`. `status` reads those metadata files and tolerates missing or
-partially corrupted audit logs. Raw input text, prompts, and completions must not
-be written to `state.json` or `runs/*.jsonl`.
+partially corrupted audit logs. `status --run-id` reads a specific
+`runs/<run_id>.jsonl` file without modifying local state. Raw input text,
+prompts, and completions must not be written to `state.json`, `runs/*.jsonl`, or
+status output. `state.json` and `runs/*.jsonl` are local run artifacts and are
+ignored by git. The status schema is documented in
+`docs/LLM_AUDIT_STATUS_SCHEMA.md`.
 
 ## Run the v0.1 Smoke
 

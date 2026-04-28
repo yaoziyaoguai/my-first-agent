@@ -129,7 +129,146 @@ base_url 原值、response body。
 `git status --short` 在所有命令执行后保持干净；`state.json`、`runs/`、`.env`
 均被 `.gitignore` 覆盖，未进入 staged 区。
 
-## 6. 结论与建议
+## 6. 故意失败 live smoke（auth_error 路径）
+
+happy path 之外，必须验证真实 SDK 异常经 `classify_provider_exception` 分类后
+写入审计产物时不会泄漏 SDK 携带的 request URL、headers、response body 等细节。
+
+执行方式：在子进程中用安全方式临时覆盖错误 key，**不修改 `.env`**：
+
+```bash
+env ANTHROPIC_API_KEY="sk-ant-invalid-m6-fail-smoke" \
+  .venv/bin/python main.py preflight --provider anthropic --live
+
+env ANTHROPIC_API_KEY="sk-ant-invalid-m6-fail-smoke" \
+  .venv/bin/python main.py process /tmp/<smoke_input> --provider anthropic
+```
+
+preflight 输出关键片段（已脱敏）：
+
+```json
+{
+  "status": "error",
+  "live": {
+    "enabled": true,
+    "status": "error",
+    "tokens": null,
+    "latency": 1168,
+    "error": {
+      "code": "auth_error",
+      "type": "AuthenticationError",
+      "message": "Provider authentication failed.",
+      "retryable": false
+    }
+  },
+  "errors": [
+    {"code": "auth_error", "type": "AuthenticationError",
+     "message": "Provider authentication failed.", "retryable": false}
+  ]
+}
+```
+
+process CLI 输出：`status=error`，`error={code:auth_error, type:AuthenticationError,
+message:"Provider authentication failed.", retryable:false}`。
+
+`state.json` 失败状态：
+
+```json
+{
+  "status": "error",
+  "input_file_hash": "<sha256>",
+  "last_run_id": "<run_id>",
+  "run_path": "runs/<run_id>.jsonl",
+  "error": {"code": "auth_error", "type": "AuthenticationError",
+            "message": "Provider authentication failed.", "retryable": false},
+  "updated_ms": <ts>
+}
+```
+
+`runs/<run_id>.jsonl` 失败事件序列：
+
+| 事件 | 关键 payload |
+|---|---|
+| `process_started` | `input_file_hash`、`input_path_name` |
+| `llm_call` × 1 | `provider/model/prompt_version=triager.v1/input_file_hash/tokens=null/latency=1006/status=error/error="auth_error"` |
+| `process_failed` | `input_file_hash`、`status=error`、`error={code,type,message,retryable}` |
+
+`status` 输出：`errors=[{prompt_version:triager.v1, error:auth_error, status:error}]`，
+`latest_run.latest_event=process_failed`，`llm_call_count=1`。
+
+防泄漏核验（针对失败路径产物，全部通过）：
+
+- 错误 key 字符串：未出现。
+- 真实 key 前 8 字节：未出现。
+- `x-api-key` / `Bearer` / `request_id` / `401` / `Unauthorized` / `https://`：均未出现。
+- 即 SDK 原生异常 `__str__` / `repr` 的任何 URL、header、HTTP 状态码、响应体片段
+  都没有进入 audit 产物。
+
+结论：`classify_provider_exception` + `safe_error_dict` 在真实 `AuthenticationError`
+下表现稳定，仅暴露 `code/type/message/retryable` 四个安全字段。
+
+## 7. 本地运行产物清理 playbook
+
+`state.json`、`runs/*.jsonl` 和临时 smoke 输入是本地运行产物，按 `.gitignore`
+默认不提交。本节给出手动检查与清理步骤，帮助避免 smoke 长期堆积。
+
+### 7.1 检查产物是否已被忽略
+
+```bash
+git status --short
+git check-ignore state.json runs/
+```
+
+`git status --short` 不应出现 `state.json` 或 `runs/`；`git check-ignore` 应能
+返回这两个路径（exit 0）。如果其中任何一项不成立，先停下来，**不要 push**，
+检查 `.gitignore` 是否被改动。
+
+### 7.2 列出当前产物
+
+```bash
+ls -la state.json 2>/dev/null
+ls -la runs/ 2>/dev/null
+```
+
+### 7.3 清理前确认审计证据
+
+清理前先决定是否需要保留 audit 证据：
+
+- 如果当前 `state.json` / `runs/` 是某次需要长期参考的 smoke 结果，**先备份**到
+  仓库外（例如 `~/my-first-agent-audit-backup/<date>/`），不要把备份放回仓库。
+- 如果只是日常 smoke 累积，可以直接清理。
+
+可选的一键审计快照：
+
+```bash
+.venv/bin/python main.py status > /tmp/status_before_cleanup.json
+.venv/bin/python main.py status --run-id <run_id> > /tmp/status_run_before_cleanup.json
+```
+
+`status` 输出本身已脱敏，但仍是本地文件，按需保留或删除。
+
+### 7.4 清理
+
+```bash
+rm -f state.json
+rm -rf runs/
+```
+
+清理后 `runs/` 目录会在下次 `process` 时由 `RunLogger` 自动重建。
+
+### 7.5 临时 smoke 输入
+
+live smoke 使用的临时输入文件应放在仓库外（推荐 `/tmp/`），smoke 完成后手动
+删除：
+
+```bash
+rm -f /tmp/m6_*_smoke*.txt
+```
+
+不要把 smoke 输入提交进仓库；如果未来确实需要样例输入，应放在专门的样例
+目录并明确文档化用途，而不是混在 smoke 临时文件里。
+
+## 8. 结论与建议
 
 - M4 provider config、M5 provider 错误分类与 live preflight、M6 真实 process
   smoke 与 status 审计构成的安全闭环已在真实 provider 上跑通。

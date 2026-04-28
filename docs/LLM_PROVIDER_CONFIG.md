@@ -96,7 +96,23 @@ M4/M5 不会在自动测试里调用真实 provider；测试只覆盖 fake provi
 和环境变量配置行为。
 M5 的真实 smoke 步骤见 `docs/LLM_PROVIDER_LIVE_SMOKE.md`，默认由用户手动执行。
 
-## 7. 审计产物边界
+## 7. Pipeline prompt versions
+
+`llm/pipeline.py` 的 process 流水线目前固定使用三段 prompt，prompt_version 字段
+会写入 `runs/*.jsonl` 的 `llm_call.payload.prompt_version`，让审计读者无需读
+源码即可对照 `runs/*.jsonl` 与 `status` 输出：
+
+| prompt_version | 阶段 | 说明 |
+|---|---|---|
+| `triager.v1` | triager | 第一段：对原始输入做轻量分类 / triage |
+| `distiller.v1` | distiller | 第二段：在 triage 结论之上做精炼 |
+| `linker.v1` | linker | 第三段：在精炼结果之上做链接 / 串联 |
+
+prompt_version 的语义是 audit 标识，不是 prompt 模板治理。MVP 不在 v0.2 范围内
+做 prompt 模板版本化、A/B 切换或 prompt 仓库化；如需修改 prompt 文本，请同步
+更新 prompt_version（例如升到 `triager.v2`），让历史 `runs/` 仍可被识别。
+
+## 8. 审计产物边界
 
 `preflight` 默认不写 `state.json` 或 `runs/*.jsonl`。如果未来需要把 preflight
 结果写入审计日志，也只能写 provider/model/key status/base_url configured/live

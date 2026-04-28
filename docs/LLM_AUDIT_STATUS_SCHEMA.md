@@ -87,7 +87,7 @@ run 摘要字段：
 | `tokens` | number/null | token 数；provider 不支持时为 `null` |
 | `latency` | number/null | 调用耗时，毫秒 |
 | `status` | string/null | `ok` / `error` 等状态 |
-| `error` | string/null | 错误类型摘要；成功时为 `null` |
+| `error` | string/null | 安全错误 code；成功时为 `null` |
 
 如果 `runs/*.jsonl` 中的 `llm_call.payload` 含有额外字段，status 必须丢弃它们。
 
@@ -99,7 +99,7 @@ run 摘要字段：
 |---|---|---|
 | `prompt_version` | string/null | 失败所在 prompt version |
 | `status` | string/null | 调用状态 |
-| `error` | string/null | 错误类型摘要 |
+| `error` | string/null | 安全错误 code，如 `auth_error` / `rate_limited` |
 
 ## 7. `warnings[]`
 

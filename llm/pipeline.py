@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from llm.errors import classify_provider_exception, safe_error_dict
 from llm.providers import LLMProvider, LLMRequest, LLMResponse
 from run_logger import RunLogger, hash_file
 
@@ -27,10 +28,11 @@ class ProcessResult:
     run_id: str
     input_file_hash: str
     status: str
-    triage: StageResult
-    distillation: StageResult
-    links: StageResult
+    triage: StageResult | None
+    distillation: StageResult | None
+    links: StageResult | None
     run_path: Path
+    error: dict[str, object] | None = None
 
 
 def _call_stage(
@@ -59,9 +61,10 @@ def _call_stage(
             status=status,
         )
     except Exception as exc:
+        provider_error = classify_provider_exception(exc)
         status = "error"
-        error = exc.__class__.__name__
-        raise
+        error = provider_error.code
+        raise provider_error from exc
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         config = provider.config
@@ -147,26 +150,60 @@ def process_file(
             "input_path_name": input_path.name,
         },
     )
-    triage = triager(
-        provider=provider,
-        logger=logger,
-        input_text=raw_text,
-        input_file_hash=input_file_hash,
-    )
-    distillation = distiller(
-        provider=provider,
-        logger=logger,
-        input_text=raw_text,
-        input_file_hash=input_file_hash,
-        triage=triage,
-    )
-    links = linker(
-        provider=provider,
-        logger=logger,
-        input_text=raw_text,
-        input_file_hash=input_file_hash,
-        distillation=distillation,
-    )
+    triage: StageResult | None = None
+    distillation: StageResult | None = None
+    links: StageResult | None = None
+    try:
+        triage = triager(
+            provider=provider,
+            logger=logger,
+            input_text=raw_text,
+            input_file_hash=input_file_hash,
+        )
+        distillation = distiller(
+            provider=provider,
+            logger=logger,
+            input_text=raw_text,
+            input_file_hash=input_file_hash,
+            triage=triage,
+        )
+        links = linker(
+            provider=provider,
+            logger=logger,
+            input_text=raw_text,
+            input_file_hash=input_file_hash,
+            distillation=distillation,
+        )
+    except Exception as exc:
+        provider_error = classify_provider_exception(exc)
+        error_payload = safe_error_dict(provider_error)
+        # process 失败也要写安全状态：只记录 hash、run_path 和错误 code/type，不写正文。
+        logger.log_event(
+            "process_failed",
+            {
+                "input_file_hash": input_file_hash,
+                "status": "error",
+                "error": error_payload,
+            },
+        )
+        logger.write_state(
+            {
+                "input_file_hash": input_file_hash,
+                "status": "error",
+                "run_path": str(logger.run_path),
+                "error": error_payload,
+            }
+        )
+        return ProcessResult(
+            run_id=logger.run_id,
+            input_file_hash=input_file_hash,
+            status="error",
+            triage=triage,
+            distillation=distillation,
+            links=links,
+            run_path=logger.run_path,
+            error=error_payload,
+        )
     result = ProcessResult(
         run_id=logger.run_id,
         input_file_hash=input_file_hash,

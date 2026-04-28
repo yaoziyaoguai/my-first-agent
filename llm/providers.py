@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from llm.config import ProviderConfig, build_preflight_report, load_provider_config
+from llm.errors import (
+    ERROR_BAD_RESPONSE,
+    ERROR_UNKNOWN_PROVIDER,
+    classify_provider_exception,
+    make_provider_error,
+    safe_error_dict,
+)
 
 
 @dataclass(frozen=True)
@@ -72,34 +79,45 @@ class AnthropicProvider:
     def complete(self, request: LLMRequest) -> LLMResponse:
         from anthropic import Anthropic
 
-        kwargs = {"api_key": self.config.api_key}
-        if self.config.base_url:
-            kwargs["base_url"] = self.config.base_url
-        client = Anthropic(**kwargs)
-        response = client.messages.create(
-            model=self.config.model,
-            max_tokens=1024,
-            messages=[
-                {
-                    "role": "user",
-                    "content": _build_prompt(request),
-                }
-            ],
-        )
-        text_parts = [
-            getattr(block, "text", "")
-            for block in response.content
-            if getattr(block, "type", None) == "text"
-        ]
-        usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "input_tokens", 0) or 0
-        output_tokens = getattr(usage, "output_tokens", 0) or 0
-        return LLMResponse(
-            text="\n".join(text_parts).strip(),
-            provider=self.config.provider,
-            model=self.config.model,
-            tokens=input_tokens + output_tokens,
-        )
+        try:
+            kwargs = {"api_key": self.config.api_key}
+            if self.config.base_url:
+                kwargs["base_url"] = self.config.base_url
+            client = Anthropic(**kwargs)
+            response = client.messages.create(
+                model=self.config.model,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": _build_prompt(request),
+                    }
+                ],
+            )
+            text_parts = [
+                getattr(block, "text", "")
+                for block in response.content
+                if getattr(block, "type", None) == "text"
+            ]
+            text = "\n".join(text_parts).strip()
+            if not text:
+                raise make_provider_error(
+                    ERROR_BAD_RESPONSE,
+                    "empty_completion",
+                    retryable=False,
+                )
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+            return LLMResponse(
+                text=text,
+                provider=self.config.provider,
+                model=self.config.model,
+                tokens=input_tokens + output_tokens,
+            )
+        except Exception as exc:
+            # Anthropic SDK 异常可能含 request/response 细节；对外只抛分类摘要。
+            raise classify_provider_exception(exc) from exc
 
 
 def _build_prompt(request: LLMRequest) -> str:
@@ -134,7 +152,11 @@ def build_provider(
             base_url=config.base_url,
         )
 
-    raise ValueError(f"Unknown LLM provider: {config.provider}")
+    raise make_provider_error(
+        ERROR_UNKNOWN_PROVIDER,
+        "unknown_provider",
+        retryable=False,
+    )
 
 
 def preflight_provider(
@@ -173,15 +195,16 @@ def preflight_provider(
         }
         return report
     except Exception as exc:
+        error = classify_provider_exception(exc)
         report["status"] = "error"
         report["live"] = {
             "enabled": True,
             "status": "error",
             "tokens": None,
             "latency": int((time.perf_counter() - started) * 1000),
-            "error": exc.__class__.__name__,
+            "error": safe_error_dict(error),
         }
         errors = report.setdefault("errors", [])
         if isinstance(errors, list):
-            errors.append(f"live_preflight_failed:{exc.__class__.__name__}")
+            errors.append(safe_error_dict(error))
         return report

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from llm.audit import build_status, scan_inputs
+from llm.errors import ProviderError, safe_error_dict
 from llm.pipeline import process_file
 from llm.providers import build_provider, preflight_provider
 from run_logger import RunLogger
@@ -133,11 +134,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         provider = build_provider(args.provider, model=args.model)
-    except ValueError as exc:
+    except ProviderError as exc:
         # 配置错误给机器可读错误，不让普通用户看到 traceback 或 secret。
         print(
             json.dumps(
-                {"status": "error", "error": str(exc)},
+                {"status": "error", "error": safe_error_dict(exc)},
                 ensure_ascii=False,
                 sort_keys=True,
             )
@@ -145,16 +146,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     logger = RunLogger(state_path=args.state_path, runs_dir=args.runs_dir)
     result = process_file(args.input_file, provider=provider, logger=logger)
+    output = {
+        "run_id": result.run_id,
+        "status": result.status,
+        "input_file_hash": result.input_file_hash,
+        "run_path": str(result.run_path),
+    }
+    if result.error:
+        output["error"] = result.error
     print(
         json.dumps(
-            {
-                "run_id": result.run_id,
-                "status": result.status,
-                "input_file_hash": result.input_file_hash,
-                "run_path": str(result.run_path),
-            },
+            output,
             ensure_ascii=False,
             sort_keys=True,
         )
     )
-    return 0
+    return 0 if result.status == "ok" else 1

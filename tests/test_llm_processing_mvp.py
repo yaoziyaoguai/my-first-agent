@@ -11,7 +11,20 @@ from pathlib import Path
 
 from llm.audit import STATUS_SCHEMA_VERSION, build_status, scan_inputs
 from llm.cli import main as process_cli_main
+from llm.config import ProviderConfig
+from llm.errors import (
+    ERROR_AUTH,
+    ERROR_BAD_RESPONSE,
+    ERROR_MISSING_CONFIG,
+    ERROR_NETWORK,
+    ERROR_RATE_LIMITED,
+    ERROR_TIMEOUT,
+    ERROR_UNKNOWN_PROVIDER,
+    classify_provider_exception,
+    make_provider_error,
+)
 from llm.pipeline import process_file
+from llm.providers import LLMRequest, LLMResponse
 from llm.providers import FakeProvider
 from run_logger import LLM_CALL_ALLOWED_FIELDS, RunLogger
 
@@ -22,6 +35,19 @@ def _read_jsonl(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _error_codes(output: dict) -> list[str]:
+    return [error["code"] for error in output["errors"]]
+
+
+class _FailingProvider:
+    def __init__(self, error_code: str = ERROR_AUTH) -> None:
+        self.config = ProviderConfig(provider="anthropic", model="claude-test")
+        self.error_code = error_code
+
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        raise make_provider_error(self.error_code, "stubbed_failure")
 
 
 def test_process_file_fake_provider_logs_llm_calls_without_raw_text(tmp_path):
@@ -116,6 +142,30 @@ def test_provider_preflight_fake_passes_without_real_key(tmp_path, monkeypatch, 
     assert not (tmp_path / "runs").exists()
 
 
+def test_provider_preflight_json_schema_is_stable(monkeypatch, capsys):
+    monkeypatch.delenv("MY_FIRST_AGENT_LLM_PROVIDER", raising=False)
+
+    exit_code = process_cli_main(["preflight", "--provider", "fake"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert set(output) == {
+        "status",
+        "provider",
+        "model",
+        "base_url",
+        "api_key",
+        "dependency",
+        "live",
+        "errors",
+        "warnings",
+    }
+    assert output["errors"] == []
+    assert set(output["provider"]) == {"name", "configured"}
+    assert set(output["model"]) == {"configured", "name", "source"}
+    assert set(output["live"]) == {"enabled", "status"}
+
+
 def test_provider_preflight_missing_key_is_readable_error(monkeypatch, capsys):
     monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
@@ -127,7 +177,8 @@ def test_provider_preflight_missing_key_is_readable_error(monkeypatch, capsys):
     assert exit_code == 1
     assert output["status"] == "error"
     assert output["api_key"] == {"env": "ANTHROPIC_API_KEY", "status": "missing"}
-    assert "api_key_missing:ANTHROPIC_API_KEY" in output["errors"]
+    assert ERROR_MISSING_CONFIG in _error_codes(output)
+    assert output["errors"][0]["type"] == "api_key_missing"
 
 
 def test_provider_preflight_redacts_present_key(monkeypatch, capsys):
@@ -164,7 +215,8 @@ def test_provider_preflight_missing_model_is_explicit(monkeypatch, capsys):
     assert exit_code == 1
     assert output["status"] == "error"
     assert output["model"] == {"configured": False, "name": None, "source": None}
-    assert "model_missing:anthropic" in output["errors"]
+    assert ERROR_MISSING_CONFIG in _error_codes(output)
+    assert any(error["type"] == "model_missing" for error in output["errors"])
     assert "base_url_missing:anthropic" in output["warnings"]
 
 
@@ -177,7 +229,8 @@ def test_provider_preflight_unknown_provider_is_explicit(monkeypatch, capsys):
     assert exit_code == 1
     assert output["status"] == "error"
     assert output["provider"] == {"configured": False, "name": "unknown-provider"}
-    assert "unknown_provider:unknown-provider" in output["errors"]
+    assert _error_codes(output) == [ERROR_UNKNOWN_PROVIDER]
+    assert output["errors"][0]["type"] == "unknown_provider"
 
 
 def test_provider_preflight_does_not_persist_secret_or_prompt(
@@ -198,6 +251,131 @@ def test_provider_preflight_does_not_persist_secret_or_prompt(
     assert "Provider connectivity preflight" not in output_text
     assert not (tmp_path / "state.json").exists()
     assert not (tmp_path / "runs").exists()
+
+
+def test_provider_error_classifier_covers_required_codes():
+    class AuthError(Exception):
+        status_code = 401
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    class NetworkError(Exception):
+        pass
+
+    class TimeoutSDKError(Exception):
+        pass
+
+    class BadRequestError(Exception):
+        status_code = 400
+
+    assert classify_provider_exception(AuthError()).code == ERROR_AUTH
+    assert classify_provider_exception(RateLimitError()).code == ERROR_RATE_LIMITED
+    assert classify_provider_exception(NetworkError()).code == ERROR_NETWORK
+    assert classify_provider_exception(TimeoutSDKError()).code == ERROR_TIMEOUT
+    assert classify_provider_exception(BadRequestError()).code == ERROR_BAD_RESPONSE
+
+
+def test_preflight_live_failure_uses_safe_error_shape(monkeypatch, capsys):
+    secret_key = "SECRET_LIVE_KEY"
+    secret_body = "RAW_RESPONSE_BODY_SHOULD_NOT_LEAK"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_key)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid")
+
+    def build_failing_provider(provider_name=None, *, model=None):
+        raise make_provider_error(ERROR_RATE_LIMITED, f"RateLimit:{secret_body}", retryable=True)
+
+    monkeypatch.setattr("llm.providers.build_provider", build_failing_provider)
+
+    exit_code = process_cli_main(["preflight", "--provider", "fake", "--live"])
+
+    output_text = capsys.readouterr().out
+    output = json.loads(output_text)
+    assert exit_code == 1
+    assert secret_key not in output_text
+    assert secret_body not in output_text
+    assert "https://example.invalid" not in output_text
+    assert output["live"]["status"] == "error"
+    assert output["live"]["error"]["code"] == ERROR_RATE_LIMITED
+    assert ERROR_RATE_LIMITED in _error_codes(output)
+
+
+def test_process_failure_writes_safe_state_and_run_log(tmp_path):
+    raw_text = "PROCESS_SECRET_RAW_TEXT"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(raw_text, encoding="utf-8")
+    logger = RunLogger(
+        state_path=tmp_path / "state.json",
+        runs_dir=tmp_path / "runs",
+        run_id="failure-run",
+    )
+
+    result = process_file(
+        input_path,
+        provider=_FailingProvider(ERROR_AUTH),
+        logger=logger,
+    )
+
+    assert result.status == "error"
+    assert result.error is not None
+    assert result.error["code"] == ERROR_AUTH
+    run_log_text = result.run_path.read_text(encoding="utf-8")
+    state_text = (tmp_path / "state.json").read_text(encoding="utf-8")
+    assert raw_text not in run_log_text
+    assert raw_text not in state_text
+    assert "api_key" not in run_log_text
+    assert "headers" not in run_log_text
+    events = _read_jsonl(result.run_path)
+    llm_calls = [entry for entry in events if entry["event"] == "llm_call"]
+    assert llm_calls[0]["payload"]["status"] == "error"
+    assert llm_calls[0]["payload"]["error"] == ERROR_AUTH
+    assert events[-1]["event"] == "process_failed"
+
+
+def test_process_command_failure_returns_safe_json_and_status(tmp_path, monkeypatch, capsys):
+    raw_text = "CLI_PROCESS_SECRET"
+    secret_key = "SECRET_KEY_SHOULD_NOT_LEAK"
+    secret_completion = "RAW_COMPLETION_SHOULD_NOT_LEAK"
+    input_path = tmp_path / "input.txt"
+    input_path.write_text(raw_text, encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    runs_dir = tmp_path / "runs"
+
+    def failing_provider(provider_name=None, *, model=None):
+        return _FailingProvider(ERROR_BAD_RESPONSE)
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_key)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid")
+    monkeypatch.setattr("llm.cli.build_provider", failing_provider)
+
+    exit_code = process_cli_main(
+        [
+            "process",
+            str(input_path),
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-test",
+            "--state-path",
+            str(state_path),
+            "--runs-dir",
+            str(runs_dir),
+        ]
+    )
+
+    output_text = capsys.readouterr().out
+    output = json.loads(output_text)
+    assert exit_code == 1
+    assert output["status"] == "error"
+    assert output["error"]["code"] == ERROR_BAD_RESPONSE
+    assert raw_text not in output_text
+    assert secret_key not in output_text
+    assert secret_completion not in output_text
+    assert "https://example.invalid" not in output_text
+    assert state_path.exists()
+    status = build_status(state_path=state_path, runs_dir=runs_dir)
+    assert status["latest_run"]["status"] == "error"
+    assert status["errors"][0]["error"] == ERROR_BAD_RESPONSE
 
 
 def test_main_process_dispatch_does_not_start_interactive_session(

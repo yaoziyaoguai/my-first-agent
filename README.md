@@ -55,6 +55,7 @@ The v0.2 LLM processing surface is intentionally small and auditable:
 ```bash
 .venv/bin/python main.py scan README.md
 .venv/bin/python main.py preflight
+.venv/bin/python main.py preflight --provider anthropic --live
 .venv/bin/python main.py process README.md
 .venv/bin/python main.py status
 .venv/bin/python main.py status --run-id <run_id>
@@ -70,7 +71,11 @@ text, prompts, completions, API keys, and provider request/response bodies must
 not be written to `state.json`, `runs/*.jsonl`, or status/preflight output.
 `state.json` and `runs/*.jsonl` are local run artifacts and are ignored by git.
 The status schema is documented in `docs/LLM_AUDIT_STATUS_SCHEMA.md`; provider
-configuration is documented in `docs/LLM_PROVIDER_CONFIG.md`.
+configuration is documented in `docs/LLM_PROVIDER_CONFIG.md`; the live provider
+smoke playbook is documented in `docs/LLM_PROVIDER_LIVE_SMOKE.md`. Provider
+failures are classified into stable safe codes such as `missing_config`,
+`auth_error`, `rate_limited`, `network_error`, `timeout`, `bad_response`,
+`unknown_provider`, and `provider_error`.
 
 ## Run the v0.1 Smoke
 

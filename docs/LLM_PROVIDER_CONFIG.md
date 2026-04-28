@@ -1,6 +1,6 @@
 # LLM Provider Config
 
-> **本文目的**：说明 v0.2 M4 的 provider 配置和 preflight 边界。
+> **本文目的**：说明 v0.2 M4/M5 的 provider 配置、preflight 和错误分类边界。
 >
 > **核心边界**：M4 不是完整 provider ecosystem，也不做多模型路由、成本统计或
 > provider 选择策略。它只让 LLM Processing MVP 从默认 fake provider 过渡到
@@ -62,7 +62,26 @@ MY_FIRST_AGENT_LLM_PROVIDER=fake
 
 输出不会包含 key 值、base_url 值、prompt、completion、请求体或响应体。
 
-## 5. Live preflight
+## 5. 错误分类
+
+M5 把真实 provider 失败统一归类成固定 code：
+
+| code | 场景 |
+|---|---|
+| `missing_config` | 缺 key、model、provider 依赖等本地配置 |
+| `auth_error` | 认证或权限失败 |
+| `rate_limited` | provider 限流 |
+| `network_error` | 连接、DNS、网关等网络失败 |
+| `timeout` | 请求超时 |
+| `bad_response` | provider 返回不可用响应或 4xx bad request |
+| `unknown_provider` | provider 名称不在 MVP registry |
+| `provider_error` | 其他 provider 失败 |
+
+错误输出包含 `code/type/message/retryable`。`message` 是用户可读摘要，不是 SDK
+原始异常字符串；`type` 只用于机器诊断，不应包含 secret、headers、base URL 原值、
+prompt、completion 或 response body。
+
+## 6. Live preflight
 
 只有显式传入 `--live` 才会发真实请求：
 
@@ -73,9 +92,11 @@ MY_FIRST_AGENT_LLM_PROVIDER=fake
 `--live` 可能消耗真实配额，并会触发网络请求。即便 live 成功，输出也只包含
 `tokens`、`latency`、`status`、`error` 等摘要，不输出 provider completion。
 
-M4 不会在测试里调用真实 provider；测试只覆盖 fake provider 和环境变量配置行为。
+M4/M5 不会在自动测试里调用真实 provider；测试只覆盖 fake provider、stub provider
+和环境变量配置行为。
+M5 的真实 smoke 步骤见 `docs/LLM_PROVIDER_LIVE_SMOKE.md`，默认由用户手动执行。
 
-## 6. 审计产物边界
+## 7. 审计产物边界
 
 `preflight` 默认不写 `state.json` 或 `runs/*.jsonl`。如果未来需要把 preflight
 结果写入审计日志，也只能写 provider/model/key status/base_url configured/live

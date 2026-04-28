@@ -12,6 +12,13 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from llm.errors import (
+    ERROR_MISSING_CONFIG,
+    ERROR_UNKNOWN_PROVIDER,
+    make_provider_error,
+    safe_error_dict,
+)
+
 
 PROVIDER_ENV = "MY_FIRST_AGENT_LLM_PROVIDER"
 GENERIC_MODEL_ENV = "MY_FIRST_AGENT_LLM_MODEL"
@@ -102,17 +109,29 @@ def load_provider_config(
     provider = resolve_provider_name(provider_name, env=env)
     spec = PROVIDER_REGISTRY.get(provider)
     if spec is None:
-        raise ValueError(f"Unknown LLM provider: {provider}")
+        raise make_provider_error(
+            ERROR_UNKNOWN_PROVIDER,
+            "unknown_provider",
+            retryable=False,
+        )
 
     model_name = (model.strip() if model else None) or _first_env(env, spec.model_envs)[0]
     if not model_name and spec.default_model:
         model_name = spec.default_model
     if not model_name:
-        raise ValueError(f"Model is required for provider: {provider}")
+        raise make_provider_error(
+            ERROR_MISSING_CONFIG,
+            "model_missing",
+            retryable=False,
+        )
 
     api_key = _env_get(env, spec.key_env) if spec.key_env else None
     if spec.requires_key and not api_key:
-        raise ValueError(f"{spec.key_env} is required for provider: {provider}")
+        raise make_provider_error(
+            ERROR_MISSING_CONFIG,
+            "api_key_missing",
+            retryable=False,
+        )
 
     base_url = _first_env(env, spec.base_url_envs)[0]
     return ProviderConfig(
@@ -138,7 +157,7 @@ def build_preflight_report(
 
     if env is None:
         env = os.environ
-    errors: list[str] = []
+    errors: list[dict[str, object]] = []
     warnings: list[str] = []
     provider = resolve_provider_name(provider_name, env=env)
     spec = PROVIDER_REGISTRY.get(provider)
@@ -151,7 +170,15 @@ def build_preflight_report(
             "api_key": {"status": "not_applicable", "env": None},
             "dependency": {"name": None, "available": False},
             "live": {"enabled": live, "status": "skipped"},
-            "errors": [f"unknown_provider:{provider}"],
+            "errors": [
+                safe_error_dict(
+                    make_provider_error(
+                        ERROR_UNKNOWN_PROVIDER,
+                        "unknown_provider",
+                        retryable=False,
+                    )
+                )
+            ],
             "warnings": warnings,
         }
 
@@ -163,7 +190,15 @@ def build_preflight_report(
         model_name = spec.default_model
         model_source = "default"
     if not model_name:
-        errors.append(f"model_missing:{provider}")
+        errors.append(
+            safe_error_dict(
+                make_provider_error(
+                    ERROR_MISSING_CONFIG,
+                    "model_missing",
+                    retryable=False,
+                )
+            )
+        )
 
     base_url, _base_url_source = _first_env(env, spec.base_url_envs)
     if spec.base_url_envs and not base_url:
@@ -175,13 +210,29 @@ def build_preflight_report(
         key_status = "present"
     else:
         key_status = "missing"
-        errors.append(f"api_key_missing:{spec.key_env}")
+        errors.append(
+            safe_error_dict(
+                make_provider_error(
+                    ERROR_MISSING_CONFIG,
+                    "api_key_missing",
+                    retryable=False,
+                )
+            )
+        )
 
     dependency_available = True
     if spec.dependency:
         dependency_available = importlib.util.find_spec(spec.dependency) is not None
         if not dependency_available:
-            errors.append(f"dependency_missing:{spec.dependency}")
+            errors.append(
+                safe_error_dict(
+                    make_provider_error(
+                        ERROR_MISSING_CONFIG,
+                        "dependency_missing",
+                        retryable=False,
+                    )
+                )
+            )
 
     if live and errors:
         warnings.append("live_preflight_skipped_config_invalid")

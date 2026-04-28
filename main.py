@@ -2,6 +2,7 @@
 import contextlib
 import io
 import os
+import sys
 import time
 from collections.abc import Callable
 
@@ -488,10 +489,21 @@ def main_loop():
                 break
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "process":
+        from llm.cli import main as process_main
+
+        return process_main(argv[1:])
+
     init_session()
     try_resume_from_checkpoint()
     if _selected_input_backend() == "textual":
         run_textual_main_loop()
     else:
         main_loop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

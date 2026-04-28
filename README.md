@@ -6,6 +6,119 @@ then freeze the graduation criteria before expanding the system.
 
 v0.1 is intentionally narrow. It is not a mature agent framework, not a production safety sandbox, not a complete TUI, and not a Skill or sub-agent platform.
 
+## Quickstart (local-first trial)
+
+`my-first-agent` is **local-first only**: there is no SaaS, no hosted
+service, no remote agent runtime. To try it, clone the repo and run
+everything on your own machine.
+
+### Prerequisites
+
+- Python **3.10+** (developed on 3.12)
+- macOS / Linux shell (Windows users: WSL recommended)
+- Optional: an Anthropic API key if you want to drive the agent with a
+  real model. Without one you can still run the test suite and the
+  offline `fake` provider for the LLM Processing CLI.
+
+### Setup
+
+```bash
+git clone <this repo>
+cd my-first-agent
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Optional: configure a real provider. Copy the template and edit values
+# locally. Never commit your real .env.
+cp .env.example .env
+# then open .env and set ANTHROPIC_API_KEY / ANTHROPIC_MODEL if you have them.
+```
+
+`.env` is gitignored. `.env.example` only carries variable names and
+comments — no real keys.
+
+### Run the basic CLI shell
+
+```bash
+.venv/bin/python main.py
+```
+
+You will see a structured startup banner with session id, cwd, a one-line
+health summary, an experimental-Skill notice, and a checkpoint resume
+status. Type a task in Chinese or English; type `quit` to exit.
+
+The four-class tool outcome contract from v0.2
+(`completed` / `failed` / `rejected` / `user_rejected`) is preserved.
+"Rejected" means a safety policy blocked the call (e.g. project-outside
+write); "user_rejected" means **you** chose not to approve a tool call
+when prompted.
+
+### Subcommands you should know
+
+```bash
+.venv/bin/python main.py health           # readable maintenance report
+.venv/bin/python main.py health --json    # machine-readable JSON
+.venv/bin/python main.py logs             # tail recent runtime events
+.venv/bin/python main.py logs --tail 100  # see further back
+```
+
+`health` warnings (large `agent_log.jsonl`, accumulated `sessions/`,
+workspace lint findings) are **non-fatal** maintenance signals, not crashes.
+The runtime **never** auto-archives or deletes `agent_log.jsonl` /
+`sessions/` / `workspace/`. Suggested cleanup commands are printed for
+you to run manually.
+
+### Run the test suite
+
+```bash
+.venv/bin/python -m ruff check agent/ tests/ llm run_logger.py main.py
+.venv/bin/python -m pytest -q
+```
+
+Expected baseline: ruff clean, ~676 passed, 3 permanent xfails (each
+xfail message documents which future version owns the gap).
+
+### Local runtime artifacts
+
+Running the agent creates these files under your clone. **All are
+gitignored** and will not be uploaded if you push your fork:
+
+| Path | What it is | Cleanup |
+|---|---|---|
+| `agent_log.jsonl` | runtime event log (jsonl) | `mv agent_log.jsonl agent_log.$(date +%s).jsonl.bak` |
+| `sessions/` | per-session checkpoint snapshots | manual delete after review |
+| `state.json` | active checkpoint pointer | deleted automatically when the runtime returns to idle |
+| `runs/`, `summary.md` | LLM Processing CLI artifacts (only if you use `process`) | manual delete |
+| `workspace/` | sandbox for tools that write files | manual delete |
+| `memory/` | learning notes (committed copy is the project baseline) | do not delete in a fork |
+
+If you ever wonder where something came from, run `python main.py logs`
+and filter by session, event type, or tool name.
+
+### Common questions
+
+- **"Missing ANTHROPIC_API_KEY" on startup** — the basic CLI shell needs a
+  real key to talk to a model. The test suite and the LLM Processing
+  `fake` provider do not.
+- **Resume banner says "未发现断点"** — there is no checkpoint to resume
+  from. Just type a new task.
+- **Health report shows `warn`** — these are maintenance warnings, not
+  errors. Each warning includes a `current_value` / `path` / `risk` and a
+  copy-paste command to address it.
+- **Skill commands** — Skills in this repo are an **experimental,
+  prompt-injection-level scaffold**. There is no Skill marketplace, no
+  per-Skill tool whitelist, and no slash-command handler. See
+  `docs/V0_3_SKILL_SYSTEM_STATUS.md`.
+- **Final-answer questions** — the model's final answer should not
+  contain "do you want me to ...?"-style waiting questions; if the agent
+  truly needs your input it will use the `request_user_input` tool and
+  pause. See `docs/CLI_OUTPUT_CONTRACT.md` §14.
+
+For a deeper local-trial walkthrough, see
+`docs/V0_3_LOCAL_TRIAL.md`.
+
 ## Runtime v0.1 Scope
 
 The v0.1 runtime is meant to prove this minimal loop:

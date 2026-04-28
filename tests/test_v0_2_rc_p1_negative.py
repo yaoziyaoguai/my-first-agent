@@ -217,3 +217,72 @@ def test_non_sensitive_path_not_blocked():
     assert not is_sensitive_file("workspace/notes.txt")
     assert not is_sensitive_file("README.md")
     assert not is_sensitive_file("docs/guide.md")
+
+
+# ---------------------------------------------------------------------------
+# §7 项目外路径写入硬拦截（v0.2 RC smoke 发现的真实缺口）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", [
+    "~/v0_2_outside_test.txt",         # smoke 中实际触发的 case
+    "~/.bashrc",
+    "/tmp/v0_2_outside.txt",
+    "/etc/hosts",
+    "/Users/somebody/anywhere.txt",
+    "../outside_repo.txt",             # 父目录绕过
+    "../../outside_repo.txt",
+])
+def test_write_outside_project_dir_is_rejected(path):
+    """v0.2 RC：项目外路径写入必须被 pre_write_check 硬拒绝。
+
+    smoke 中发现：旧实现没有项目外路径检查，仅靠 confirmation=always；
+    用户回 y 即可写任意位置（包括家目录）。新实现 fail-closed：
+    解析后路径不在 PROJECT_DIR 内一律拒绝。
+    """
+    msg = pre_write_check(
+        "write_file",
+        {"path": path, "content": "v0.2 smoke"},
+        {},
+    )
+    assert msg is not None and "项目目录之外" in msg, (
+        f"项目外路径 {path!r} 应被硬拒绝，当前 pre_write_check 返回 {msg!r}"
+    )
+
+
+@pytest.mark.parametrize("path", [
+    "workspace/safe.md",
+    "workspace/v0_2_smoke_summary.md",
+    "docs/new_doc.md",                 # docs 目录是项目内
+    "summary.md",                      # 根目录文件
+    "blog/draft.md",
+])
+def test_write_inside_project_dir_passes_path_check(path):
+    """项目内路径不应被项目外检查误伤。
+
+    注意：这些路径仍可能因「内容危险」/ 「同轮单写」/ 「受保护源码」被
+    其他规则拒绝；本测试仅验证「项目外路径检查」不误伤。
+    """
+    msg = pre_write_check(
+        "write_file",
+        {"path": path, "content": "ordinary safe content"},
+        {},
+    )
+    # 可能为 None（放行），也可能因别的原因拒绝；但绝不能是「项目目录之外」
+    assert msg is None or "项目目录之外" not in msg, (
+        f"项目内路径 {path!r} 不应被项目外检查命中，返回 {msg!r}"
+    )
+
+
+def test_write_outside_does_not_affect_read_tools():
+    """项目外硬拦截只针对 write_file；read_file / read_file_lines 路径
+    保持现状（项目外 confirm，敏感文件 block）。
+
+    本测试用 import 而非调用 read_file，避免触发 confirm 流程。
+    """
+    from agent.tools.file_ops import _check_read_permission
+
+    # 项目外非敏感路径 → 仍是 True（confirm），不是 "block"
+    result = _check_read_permission({"path": "/tmp/some_outside_file.txt"})
+    assert result is True, (
+        f"read_file 项目外路径行为被意外修改；当前返回 {result!r}"
+    )

@@ -68,7 +68,7 @@
 | ~~`SHELL_BLACKLIST` fork bomb 正则失效~~ | ✅ **v0.2 RC P0 已修复** | — | — |
 | ~~`SHELL_BLACKLIST` `>/dev/sd` 重定向失效~~ | ✅ **v0.2 RC P0 已修复** | — | — |
 | ~~`write_file` 没有内容级危险扫描~~ | ✅ **v0.2 RC P1-B 已修复**（`pre_write_check` 加 `_check_dangerous_content`：私钥头 / fork bomb / `> /dev/sd` / `mkfs` payload 全部拒写，即使路径是 `.txt` / `.md`） | — | — |
-| `write_file` 没有项目外写拦截 | 仅检查「项目内 + 受保护扩展名」 | 可写入 `~/.bashrc` 等 | `confirmation=always` 已要求确认；M6 可加「项目外路径 → 显式额外提示」 |
+| ~~`write_file` 没有项目外写拦截~~ | ✅ **v0.2 RC 已修复**（`pre_write_check::_is_path_inside_project` fail-closed 硬拦截：`~/...` / 绝对路径 / `../` 父目录绕过都拒绝；不引入 allowlist） | — | — |
 | `read_file` 项目外仅 confirm | 即使确认后可读任意路径 | 用户疏忽确认即泄漏 | 同上：项目外路径在 confirm prompt 上加「⚠️ 项目外」标签 |
 | `install_skill` 下载内容确认即执行 | `safety_warnings` 仅打印 | 远程内容含恶意脚本 | M6 可强制要求第二次确认；当前在范围外 |
 

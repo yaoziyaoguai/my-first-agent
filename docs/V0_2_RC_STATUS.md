@@ -60,7 +60,7 @@
 
 **仍未补**（建议人工 smoke 之后再做）：
 - `is_sensitive_file` 仍**只看文件名/扩展名**，不读内容前缀（改名 `.env → notes.txt` 仍可绕过 `read_file`）。
-- `read_file` / `write_file` 项目外路径仅 confirm，**没有**额外 ⚠️ 标签。
+- `read_file` 项目外路径仅 confirm（write_file 已硬拦截，read 暂保留 confirm 兼容）。
 - `install_skill` 下载内容**单次确认即执行**。
 - `_normalize_shell_command` 不处理 `$()` 子 shell、`eval`、十六进制
   转义等高级绕过——v0.3 命令解析层做。
@@ -123,7 +123,7 @@
 | ~~write_file 内容级危险扫描~~ | preflight §3 / §5 新增 | ✅ **v0.2 RC P1-B 已修复** | — |
 | ~~工具注册一致性负向断言~~ | preflight §4 | ✅ **v0.2 RC P1-C 已修复** | — |
 | `is_sensitive_file` 只看文件名 | preflight §3 | **P2 · 推荐补** | 改名 `.env → notes.txt` 可绕过 read 路径；需要内容前缀扫描 |
-| `read_file` / `write_file` 项目外路径仅 confirm | preflight §3 | **P2 · 建议补「⚠️ 标签」** | 本质是用户 UX 提示而非 hard block |
+| ~~`read_file` / `write_file` 项目外路径仅 confirm~~ | preflight §3 | ✅ **write_file 已硬拦截**；read_file 仍只 confirm（P3） | — |
 | `install_skill` 单次确认即执行 | preflight §3 | **P3 · 可延期 v0.3** | 与 Skill 体系整体设计相关，不在 v0.2 范围 |
 | `SHELL_BLACKLIST` / `READONLY_COMMANDS` 双向回归 | preflight §4 | ✅ **P0/P1 已建立基础回归网** | — |
 | `tool_execution_log` 截断 | preflight §4 | **P3** | 当前 checkpoint 已截断 messages，影响较小 |

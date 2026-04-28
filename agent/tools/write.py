@@ -2,7 +2,7 @@ from pathlib import Path
 from agent.tool_registry import register_tool
 from agent.security import is_protected_source_file
 from agent.checks import run_linter
-from config import ENABLE_REVIEW
+from config import ENABLE_REVIEW, PROJECT_DIR
 
 # v0.2 RC P1-B 安全边界补丁：写入内容的危险前缀/payload 扫描。
 #
@@ -54,6 +54,31 @@ def _check_dangerous_content(content: str) -> str | None:
     return None
 
 
+def _is_path_inside_project(path: str) -> bool:
+    """判断写入路径是否在 PROJECT_DIR 内。
+
+    v0.2 RC 安全边界补丁（block writes outside project workspace）：
+    write_file 此前**没有**项目外路径硬拦截，仅靠 `confirmation=always`
+    的 UX 屏障；用户一旦回 y 即可写任意位置（`~/.bashrc` / `/etc/...`
+    都能写入）。这与 v0.2 RC 「最小工具安全边界」目标不符。
+
+    本函数把路径解析后判断是否在 `PROJECT_DIR` 内：
+    - `~` / `~user/...` 先 expanduser（避免简单的家目录绕过）。
+    - 相对路径按当前工作目录解析（main.py 由仓库根启动，等价于 PROJECT_DIR）。
+    - `strict=False` 允许目标文件尚未存在。
+    - 路径解析异常一律视为**不在**项目内（fail-closed）。
+
+    边界：本函数**不**做 allowlist（如 workspace/）；**不**做 confirm
+    升级提示。命中即拒。未来若要支持「显式允许项目外路径」需要专门
+    spec，不在 v0.2 RC 范围。
+    """
+    try:
+        resolved = Path(path).expanduser().resolve(strict=False)
+        return resolved.is_relative_to(PROJECT_DIR)
+    except Exception:
+        return False
+
+
 def pre_write_check(tool_name, tool_input, context):
     """写文件前的检查"""
     path = tool_input.get("path", "")
@@ -63,8 +88,15 @@ def pre_write_check(tool_name, tool_input, context):
     if is_protected_source_file(path):
         return f"拒绝执行：'{path}' 属于受保护源码文件（.py），不允许 Agent 修改"
 
-    # v0.2 RC P1-B：内容级危险 payload 扫描（在 protected source 之后，
-    # 在「同轮单写」之前——payload 拒绝优先级高于流程控制）。
+    # v0.2 RC：项目外路径硬拦截。
+    # 顺序：在 protected source（更具体的拒绝原因）之后、内容扫描之前。
+    if not _is_path_inside_project(path):
+        return (
+            f"拒绝执行：'{path}' 在项目目录之外，v0.2 RC 默认禁止 Agent "
+            "向项目外路径写入文件。如需在项目外写文件，请由用户手动操作。"
+        )
+
+    # v0.2 RC P1-B：内容级危险 payload 扫描。
     danger = _check_dangerous_content(content)
     if danger:
         return danger

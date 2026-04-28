@@ -232,8 +232,9 @@ rm -f memory/checkpoint.json
 - [ ] `write_file workspace/private.txt` 内容含 `-----BEGIN PRIVATE KEY-----`
       → 被拒（v0.2 RC P1-B 内容前缀扫描），即使路径是 `.txt`。
 - [ ] `write_file workspace/safe.md` 内容是普通中文笔记 → 正常通过 confirm 后写入。
-- [ ] `write_file ~/v0_2_outside_test.txt`（项目外）→ 被要求 confirm。
-      **不要**真的回 y，回 n 取消。
+- [ ] `write_file ~/v0_2_outside_test.txt`（项目外）→ **被硬拒绝**
+      （v0.2 RC smoke 发现的真实缺口已修复；不再询问 confirm）。
+- [ ] `write_file /tmp/foo.txt`（项目外绝对路径）→ 同上，硬拒绝。
 
 > ⚠️ **剩余已知缺口**（见
 > `docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md` §3）：

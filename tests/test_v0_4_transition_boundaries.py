@@ -2568,3 +2568,57 @@ def test_feedback_intent_handler_routes_through_transition_factory_for_all_four_
     assert "assert not ambiguous_transition.should_checkpoint" in src, (
         "handler 必须保留 'AMBIGUOUS 不写 checkpoint' 的 in-source assert"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 2a 设计审计落地为防回归契约
+#
+# Phase 2a 设计审计发现：_run_main_loop 已在 core.py 模块级（agent/core.py:408），
+# Phase 2a 名义上的"提到模块级"工作已被早期 baseline commit 实质完成。
+# 本块测试不是为新增功能服务的，而是为了在未来 Phase 2 dependency-injection
+# slice 中守住"不能把 _run_main_loop 退化回 chat() 闭包"。
+#
+# 历史教训：early v0.4 之前 _run_main_loop 是 chat() 内部 def，只能从 chat()
+# 调用，外部测试不可达；那一波抽到模块级是 c2abd80/f6a1539 baseline 时期就做
+# 完的隐性收益。如果未来重构以"减少模块级符号"为由把它塞回 chat()，会让所有
+# Phase 2 dependency-injection 切片的入口失效。
+# ---------------------------------------------------------------------------
+
+
+def test_run_main_loop_is_module_level_not_chat_closure():
+    """钉死 _run_main_loop 必须是 core.py 模块级函数，不允许退化为 chat() 闭包。
+
+    模拟边界：本测试只查模块属性 + 函数 qualname，不调 _run_main_loop（避免
+    引入 client/model fixture）。它守住的是"模块级入口存在"这件事，是 Phase 2
+    dependency-injection 切片的前置条件。
+    """
+    from agent import core
+
+    assert hasattr(core, "_run_main_loop"), (
+        "agent.core 必须导出 _run_main_loop 模块级符号；"
+        "如果它被收回 chat() 闭包，Phase 2 dependency-injection 入口会失效"
+    )
+    fn = core._run_main_loop
+    assert callable(fn)
+    # qualname 不带 'chat.' 前缀 = 模块级；带前缀 = 闭包
+    assert "." not in fn.__qualname__, (
+        f"_run_main_loop.__qualname__={fn.__qualname__!r}；"
+        "出现 '.' 说明它退化为某函数的内部嵌套定义，违反 Phase 2a 前置条件"
+    )
+
+
+def test_chat_module_does_not_use_nonlocal_for_loop_helpers():
+    """钉死 core.py 不依赖 nonlocal 把 loop helpers 封进 chat()。
+
+    nonlocal 关键字在 core.py 出现就意味着至少有一层闭包在共享可变状态；
+    这正是 Phase 2 dependency-injection 切片需要先排除的耦合形式。
+    本测试只读源码（不调任何函数），确保未来引入闭包时立刻失败。
+    """
+    import inspect
+    from agent import core
+
+    src = inspect.getsource(core)
+    assert "nonlocal " not in src, (
+        "agent/core.py 不允许出现 nonlocal；如需共享可变状态，请走 "
+        "Phase 2 LoopContext dataclass 注入路径而不是闭包"
+    )

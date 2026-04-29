@@ -163,9 +163,23 @@ Completed in the current baseline:
 Not completed yet:
 
 - Complete event-driven state machine.
-- `core.py` main-loop slimming (the dispatcher is still in `chat()` closure;
-  ModelOutput classification only centralises *which kind* this is, not the
-  loop structure itself).
+- `core.py` main-loop slimming: `_run_main_loop` is **already at module
+  level** (`agent/core.py:408`, takes only `turn_state`; `grep nonlocal`
+  returns 0 hits, confirming it is not a `chat()` closure). The Phase 2a
+  prep target "lift `_run_main_loop` to a clearer module entry" was
+  effectively achieved by the early baseline commits (c2abd80 / f6a1539
+  / 9882744) before this prep doc was written. The honest remaining
+  Phase 2 work is **dependency injection for the module-level `state`
+  singleton** — replacing implicit globals (`state`, `MAX_LOOP_ITERATIONS`,
+  client, model_name) with a typed `LoopContext` dataclass passed
+  through `chat()` / `_run_planning_phase` / `_run_main_loop` /
+  `_call_model`. That is a multi-slice migration touching every helper
+  signature in core.py, not a single Phase 2a slice; it should be
+  planned as **"Phase 2: state dependency injection"** with its own
+  2-3 sub-slices (LoopContext dataclass + chat() wiring; planning helper
+  wiring; loop + call_model wiring). ModelOutput classification (slice 5)
+  only centralises *which kind* the response is, not the loop structure
+  itself.
 - Full tool result message migration: current slices keep `append_tool_result`
   calls in handlers; only outcome intent / display event / checkpoint gating
   goes through `TransitionResult`. Moving `tool_result` message writing itself

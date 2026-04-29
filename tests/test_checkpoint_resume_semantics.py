@@ -517,3 +517,73 @@ def test_resume_does_not_attach_runtime_only_attrs_to_task(tmp_checkpoint_path):
             f"恶意 checkpoint 中的 runtime-only key '{attr}' 不应被 resume 后"
             f"附到 state.memory 上。"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4 follow-up：working_summary resume guard
+# ---------------------------------------------------------------------------
+# 这条测试补 v0.4 Phase 2.4 read-only audit 中识别出来的 low 风险 gap：
+# working_summary 是 MemoryState 中 agent 的"工作记忆"——被 history compression
+# 写入（agent/core.py compress_history 后），被 context_builder 读取注入到
+# 下一轮 prompt 头部。它属于 durable memory state，必须能跨 checkpoint/
+# resume 保持。
+#
+# 现状：
+#   - MemoryState.working_summary 字段存在（agent/state.py:166）；
+#   - 通过 _copy_state_dict + _filter_to_declared_fields 的白名单链路，
+#     已经能正确 roundtrip；
+#   - 但现有 checkpoint 测试只**间接**覆盖（schema 测试 / 未知 key 丢弃 /
+#     terminal 状态 / pending 字段 / tool_use-tool_result 配对等），**无**
+#     一条正面 roundtrip 断言。
+#
+# 防什么真实 bug：
+#   未来若 history compression / MemoryState schema / _build_checkpoint_from_state
+#   等任一环节误改：
+#     - 把 working_summary 从 _filter_to_declared_fields 名单中漏掉；
+#     - 把 working_summary 字段从 MemoryState 删除/改名；
+#     - compress_history 之后忘记把新 summary 写进 state.memory.working_summary；
+#     - resume 时跳过 memory 段；
+#   resume 后 agent 会**沉默地**失忆——不会报错、不会 crash，只是 context_builder
+#   注入头部突然空白，对话连贯性下降。这是 silent quality 漂移。本 guard 用
+#   正面 roundtrip 断言锁住 working_summary 必须跨 resume 保持。
+#
+# 不做的事（避免过度约束 schema）：
+#   - 不断言 MemoryState 字段集合（已被未知 key 测试与 dataclass 验证覆盖）；
+#   - 不断言 checkpoint JSON 中 memory 段的 key 顺序；
+#   - 不断言 working_summary 的具体格式或长度；
+#   - 不读取 .env / agent_log.jsonl / 真实 sessions / 真实 runs。
+# ---------------------------------------------------------------------------
+
+
+def test_resume_preserves_working_summary_in_memory():
+    """working_summary 跨 checkpoint/resume 必须保持原值。
+
+    防 silent quality 漂移：history compression 之后 working_summary 是 agent
+    工作记忆载体，被 context_builder 注入到下一轮 prompt 头部。任何 resume
+    路径丢失 working_summary 都会让 agent "失忆" 但不报错。本测试用最小
+    fixture + 真实 save/load 路径锁住正面 roundtrip。
+    """
+    src = create_agent_state(system_prompt="test")
+    src.task.user_goal = "继续之前的任务"
+    src.task.status = "running"
+    # 模拟 history compression 之后写入的 working_summary（context_builder 会
+    # 在下一轮把它注入到 prompt 头部 [以下是之前对话的摘要] 段）
+    src.memory.working_summary = (
+        "用户之前要求 agent 帮他 review 一个仓库的 auth 模块，"
+        "agent 已完成前两个文件的扫描，发现 1 个潜在的 SQL 注入风险。"
+    )
+    # long_term_notes 也是 MemoryState 的可持久字段，顺手覆盖以验证不互相冲突
+    src.memory.long_term_notes = ["用户偏好使用中文回复"]
+
+    dst = _save_then_load(src)
+
+    assert dst.memory.working_summary == src.memory.working_summary, (
+        "working_summary 在 checkpoint/resume 后丢失或改变。这是 silent "
+        "memory bug——agent 会在 resume 后沉默失忆但不报错，下一轮 "
+        "context_builder 注入到 prompt 的摘要段会突然变空，对话连贯性下降。"
+        "请走根因排查：MemoryState 字段是否还在？_build_checkpoint_from_state "
+        "是否仍持久化 memory 段？_filter_to_declared_fields 白名单是否仍含 "
+        "working_summary？"
+    )
+    # long_term_notes 顺带验证不被 working_summary 测试干扰
+    assert dst.memory.long_term_notes == src.memory.long_term_notes

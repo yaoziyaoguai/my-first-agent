@@ -3270,3 +3270,106 @@ def test_chat_loop_context_max_loop_iterations_equals_module_default():
         "chat() 构造 LoopContext 时必须写 max_loop_iterations=MAX_LOOP_ITERATIONS，"
         "保持模块级常量为默认值的视觉与实际真值一致"
     )
+
+
+# ============================================================================
+# Phase 2.3：handler dependency boundary guard（AST 级，非脆弱字符串扫描）
+# ----------------------------------------------------------------------------
+# 这一节只做一件事：用 ast 解析 agent/confirm_handlers.py，确认它没有
+# 直接 import 或实例化 LoopContext。换句话说，confirm_handlers 必须保持
+# 对 LoopContext 类型零知识，runtime dependency 只通过 ConfirmationContext
+# 注入的 callable（continue_fn / start_planning_fn）以闭包方式间接消费。
+#
+# 为什么不用 source.count("LoopContext") == 0：
+#   - 字符串扫描会被 docstring / 注释中合理引用 LoopContext 的中文学习型
+#     注释误伤；架构注释本身是有价值的，不应被测试钉死；
+#   - 字符串扫描也分不清"import 一次类型用于注解"与"在 handler 体内构造一个
+#     新 LoopContext 重建 SSOT"——前者其实是危险的（暗示直接耦合），后者
+#     是绝对禁止的——但本测试通过 AST 区分得很清楚。
+#
+# 为什么 confirm_handlers 必须对 LoopContext 零知识：
+#   - SSOT：LoopContext 唯一构造点是 chat()（已被
+#     test_chat_remains_unique_loop_context_construction_site_in_core 钉死）；
+#   - handler 一旦自己 import LoopContext，就有可能在某条分支里"为了图方便"
+#     重新构造一个对象，使得 monkeypatch / DI / 测试 fixture 注入的真值源
+#     被绕过——这正是 v0.4 Phase 2 整个迁移要消除的隐患；
+#   - handler 的运行时依赖应该是「函数引用」(callable boundary)，不是
+#     「数据容器对象」。函数引用天然单源、天然可重写、天然不会被反序列化
+#     "拷贝"。
+#
+# 这条测试不禁止什么（避免变成实现细节冻结）：
+#   - 不禁止 confirm_handlers 中的中文 docstring / 注释提到 LoopContext；
+#   - 不禁止未来给 handler 函数加除 LoopContext 之外的其它类型 hint；
+#   - 不禁止合理 helper 抽取、函数改名、参数顺序调整；
+#   - 不禁止测试文件构造 LoopContext（test fixture 当然可以）；
+#   - 不禁止 core.py / loop_context.py 内部正常引用 LoopContext。
+#
+# 触发 bug 场景（这条测试能发现的真实回退）：
+#   - 未来有人把 ConfirmationContext.client/model_name 改成
+#     ConfirmationContext.loop_ctx，并顺手在 confirm_handlers 顶部
+#     `from agent.loop_context import LoopContext`：本测试立刻报警；
+#   - 未来有人在 handle_feedback_intent_choice 里"为了在没有
+#     start_planning_fn 时降级补救"而 `LoopContext(client=..., model_name=...)`
+#     重新构造：本测试立刻报警，强制走"先注入再使用"的边界。
+# ============================================================================
+
+
+def test_confirm_handlers_must_not_import_or_construct_loop_context():
+    """AST 级守卫：agent/confirm_handlers.py 不得 import 或实例化 LoopContext。
+
+    通过 ast.parse 精确区分 import 和 call，避免字符串扫描对 docstring 的
+    误伤。保护的架构边界：runtime dependency 只通过 callable boundary 注入，
+    不通过 handler 直接持有 LoopContext 引用。
+
+    注：本测试不禁止 confirm_handlers 在注释/docstring 中提到 LoopContext
+    名字（架构说明本身是有价值的）。
+    """
+
+    import ast
+    import inspect
+
+    from agent import confirm_handlers
+
+    src = inspect.getsource(confirm_handlers)
+    tree = ast.parse(src)
+
+    bad_imports: list[str] = []
+    bad_calls: list[str] = []
+
+    for node in ast.walk(tree):
+        # 1) 禁止 `from agent.loop_context import LoopContext`
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if mod.endswith("loop_context") or mod == "agent.loop_context":
+                for alias in node.names:
+                    if alias.name == "LoopContext":
+                        bad_imports.append(
+                            f"from {mod} import {alias.name} (line {node.lineno})"
+                        )
+        # 2) 禁止 `import agent.loop_context` 形式（哪怕未直接用 LoopContext，
+        #    也意味着 handler 知道这个模块的存在——这本身就是耦合泄漏）
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if "loop_context" in alias.name:
+                    bad_imports.append(
+                        f"import {alias.name} (line {node.lineno})"
+                    )
+        # 3) 禁止任何 `LoopContext(...)` 字面构造（无论是否经 import）
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name == "LoopContext":
+                bad_calls.append(f"LoopContext(...) at line {node.lineno}")
+
+    assert not bad_imports, (
+        "confirm_handlers.py 不得 import LoopContext——runtime dependency 必须"
+        f"通过 callable boundary 注入：{bad_imports}"
+    )
+    assert not bad_calls, (
+        "confirm_handlers.py 不得调用 LoopContext(...)——SSOT 唯一构造点是 "
+        f"agent/core.py:chat()：{bad_calls}"
+    )

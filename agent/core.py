@@ -216,13 +216,12 @@ def chat(
         ),
     )
 
-    # v0.4 Phase 2.1：构造一次 LoopContext 实例作为 dependency-injection 的
-    # 显式锚点。本切片**故意不传给任何 helper**——helpers 仍读 module-level
-    # client / MODEL_NAME / MAX_LOOP_ITERATIONS。Phase 2.2/2.3 再逐步把
-    # _run_planning_phase / _run_main_loop / _call_model 改吃 loop_ctx，
-    # 完成"helpers 不再依赖 agent.core 模块单例"的迁移。本变量 underscore
-    # 前缀是因为本轮没人吃它；ruff 已配置忽略 _ 开头的未使用局部变量。
-    _loop_ctx = LoopContext(  # noqa: F841  Phase 2.1 placeholder; wired in Phase 2.2/2.3
+    # v0.4 Phase 2.1/2.2-a：构造一次 LoopContext 实例作为运行时依赖注入锚点。
+    # Phase 2.1 仅作为锚点存在；Phase 2.2-a 已让 _run_planning_phase /
+    # _start_planning_for_handler 显式从 loop_ctx 取 client / model_name，
+    # _run_main_loop / _call_model 仍读 module-level（属 Phase 2.2-c 范围）。
+    # 本变量下划线前缀沿用，强调它属于"内部依赖容器"语义而非外部 API。
+    _loop_ctx = LoopContext(
         client=client,
         model_name=MODEL_NAME,
         max_loop_iterations=MAX_LOOP_ITERATIONS,
@@ -240,7 +239,7 @@ def chat(
         # 把 _run_planning_phase 后续的 awaiting/cancelled/main_loop 处理也封进
         # 这个 lambda，让 handle_feedback_intent_choice 不需要知道 chat() 的结构。
         # 函数引用只在内存中传递，不写 checkpoint、不进 messages，不属于 schema。
-        start_planning_fn=lambda inp, ts: _start_planning_for_handler(inp, ts),
+        start_planning_fn=lambda inp, ts: _start_planning_for_handler(inp, ts, _loop_ctx),
     )
 
     # 先处理"等待用户确认计划"的状态：
@@ -301,7 +300,7 @@ def chat(
     # 等）都有可能带着旧值进新任务。
     state.reset_task()
 
-    plan_result = _run_planning_phase(user_input, turn_state)
+    plan_result = _run_planning_phase(user_input, turn_state, _loop_ctx)
     if plan_result == "cancelled":
         return "好的，已取消。"
 
@@ -314,14 +313,40 @@ def chat(
 # ========== 规划阶段 ==========
 
 
-def _run_planning_phase(user_input: str, turn_state: TurnState) -> str:
+def _run_planning_phase(
+    user_input: str,
+    turn_state: TurnState,
+    loop_ctx: LoopContext,
+) -> str:
     """任务规划阶段。返回 'cancelled' / 'awaiting_plan_confirmation' / 'ok'。
 
     这里仍然只负责规划状态推进；计划展示属于 Runtime -> UI projection，所以通过
     RuntimeEvent 发出。不要为了让 TUI 看到计划而把展示文本写进 conversation.messages，
     也不要改变 checkpoint schema 或 TaskState 结构。
+
+    v0.4 Phase 2.2-a 依赖注入边界
+    -----------------------------
+    本函数 LLM provider 依赖（``client`` / ``model_name``）从 ``loop_ctx`` 读取，
+    不再隐式引用 ``agent.core`` 的模块级 ``client`` / ``MODEL_NAME``。但 **durable
+    state**（``state.task`` / ``state.conversation.messages`` / ``state.task.
+    current_plan`` / ``current_step_index``）仍通过模块级 ``state`` 单例读写——
+    Phase 2.2-a 故意不把 state 塞进 LoopContext，否则 LoopContext 会从 runtime
+    dependency container 退化成 god-object，并污染 checkpoint schema 边界。
+
+    保持不变的契约：
+    - ``state.conversation.messages.append({"role": "user", ...})`` 的写入时机；
+    - ``state.task.user_goal / current_plan / current_step_index / confirm_each_step``
+      的赋值时机；
+    - ``save_checkpoint(state)`` 在 ``awaiting_plan_confirmation`` 切换后立即触发；
+    - ``plan_confirmation_requested`` RuntimeEvent 发射时机；
+    - ``confirm_each_step`` 关键词列表完全不动（产品契约）。
     """
-    plan = generate_plan(user_input, client, MODEL_NAME, build_planning_messages_from_state(state,user_input))
+    plan = generate_plan(
+        user_input,
+        loop_ctx.client,
+        loop_ctx.model_name,
+        build_planning_messages_from_state(state, user_input),
+    )
 
     # 无论走哪条分支，用户原始输入都必须归档到 conversation.messages。
     # 否则「多步计划 → y 确认 → 执行」路径里，执行阶段模型看不到用户原话，
@@ -378,7 +403,11 @@ def _run_planning_phase(user_input: str, turn_state: TurnState) -> str:
     return "awaiting_plan_confirmation"
 
 
-def _start_planning_for_handler(user_input: str, turn_state: TurnState) -> str:
+def _start_planning_for_handler(
+    user_input: str,
+    turn_state: TurnState,
+    loop_ctx: LoopContext,
+) -> str:
     """与 chat() 主分支共用的"启动新任务"出口，供 confirm_handlers 注入。
 
     P1 中 awaiting_feedback_intent 选 [2] 切新任务时调用。它复制 chat() 在
@@ -387,9 +416,14 @@ def _start_planning_for_handler(user_input: str, turn_state: TurnState) -> str:
     后续路径——不会因为入口不同而出现 plan 展示、checkpoint 落盘、主循环触发
     时机的微妙差异。该函数只做路由，不修改任何 task 字段（`_run_planning_phase`
     自己负责赋值 user_goal/current_plan）。
+
+    v0.4 Phase 2.2-a：``loop_ctx`` 仅向下传给 ``_run_planning_phase``，
+    本函数自己不读 ``loop_ctx`` 任何字段——它只做控制流路由。``_run_main_loop``
+    本轮**不接受 loop_ctx**（属于 Phase 2.2-c 范围），这里继续按原签名调用，
+    避免本切片越界改主循环。
     """
 
-    plan_result = _run_planning_phase(user_input, turn_state)
+    plan_result = _run_planning_phase(user_input, turn_state, loop_ctx)
     if plan_result == "cancelled":
         return "好的，已取消。"
     if plan_result == "awaiting_plan_confirmation":

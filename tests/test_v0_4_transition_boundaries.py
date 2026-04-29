@@ -2789,3 +2789,161 @@ def test_chat_constructs_loop_context_instance_at_module_level_anchor():
     assert "client=client" in src and "model_name=MODEL_NAME" in src and (
         "max_loop_iterations=MAX_LOOP_ITERATIONS" in src
     ), "LoopContext 必须从模块级运行时常量取值，避免引入新的隐式默认值"
+
+
+# ========================================================================
+# Phase 2.2-a：planning helpers 接受 LoopContext 注入边界
+# ------------------------------------------------------------------------
+# 这一组测试钉死 v0.4 Phase 2.2-a 切片的契约：
+#   1) _run_planning_phase 与 _start_planning_for_handler 签名包含 loop_ctx；
+#   2) chat() 把构造好的 _loop_ctx 传给两个 helper 的所有调用点（直接调用
+#      + 通过 ConfirmationContext.start_planning_fn 间接调用）；
+#   3) helpers 不再隐式引用 module-level client / MODEL_NAME；planner 调用
+#      读取 loop_ctx 字段——这是"运行时依赖显式化"的实质边界；
+#   4) durable state 仍走 module-level state 单例：messages / task /
+#      current_plan / save_checkpoint 都不通过 loop_ctx 传递，避免
+#      LoopContext 退化为 god-object；
+#   5) Phase 2.2-c (主循环 / _call_model 吃 loop_ctx) **本轮不能擅自做**：
+#      _run_main_loop 签名必须仍只吃 turn_state，把"分阶段迁移"钉死。
+# 任何后续切片想"顺手把 state / messages / save_checkpoint 也走 loop_ctx"
+# 都会被第 4 条立刻拦下。
+# ========================================================================
+
+
+def test_planning_phase_signature_accepts_loop_context():
+    """_run_planning_phase 与 _start_planning_for_handler 签名契约。"""
+
+    import inspect
+
+    from agent import core
+    from agent.loop_context import LoopContext
+
+    for fn_name in ("_run_planning_phase", "_start_planning_for_handler"):
+        fn = getattr(core, fn_name)
+        sig = inspect.signature(fn)
+        assert "loop_ctx" in sig.parameters, (
+            f"{fn_name} 必须接收 loop_ctx 参数（Phase 2.2-a 契约）"
+        )
+        annotation = sig.parameters["loop_ctx"].annotation
+        assert annotation is LoopContext, (
+            f"{fn_name}.loop_ctx 必须明确标注 LoopContext 类型，"
+            f"实际：{annotation!r}；禁止用 Any 或字符串前向引用绕过类型边界"
+        )
+
+
+def test_planning_phase_no_longer_reads_module_level_client_or_model_name():
+    """_run_planning_phase 不允许再隐式引用 module-level client / MODEL_NAME。
+
+    这一条是 Phase 2.2-a 的实质成果钉子：注入 loop_ctx 但函数体仍读
+    ``client`` / ``MODEL_NAME`` 等于"形迁移、神不迁移"，依赖注入名存实亡。
+    用 source-level 扫描挡住这种伪迁移。
+    """
+
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._run_planning_phase)
+    # planner 调用必须从 loop_ctx 取
+    assert "loop_ctx.client" in src and "loop_ctx.model_name" in src, (
+        "_run_planning_phase 必须从 loop_ctx 读取 client / model_name；"
+        "Phase 2.2-a 不允许形式注入而函数体不用"
+    )
+    # 函数体不允许出现裸 client 或 MODEL_NAME 引用（非 docstring）
+    # 简化：扫描 generate_plan 调用行不允许直接出现 ', client,' / ', MODEL_NAME,'
+    forbidden_patterns = ("generate_plan(\n        user_input,\n        client",)
+    for pat in forbidden_patterns:
+        assert pat not in src, (
+            f"_run_planning_phase 仍在隐式引用 module-level client：{pat!r}"
+        )
+
+
+def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
+    """chat() 三个调用点都必须把 _loop_ctx 透传出去。
+
+    当前调用点：
+    - chat() 直接调 _run_planning_phase(user_input, turn_state, _loop_ctx)
+    - chat() 在 ConfirmationContext.start_planning_fn lambda 里调
+      _start_planning_for_handler(inp, ts, _loop_ctx)
+    新增第三个调用点（如 chat() 增加新的 planning 入口）必须同步。
+    """
+
+    import inspect
+
+    from agent import core
+
+    chat_src = inspect.getsource(core.chat)
+    assert "_run_planning_phase(user_input, turn_state, _loop_ctx)" in chat_src, (
+        "chat() 直接调用 _run_planning_phase 时必须传 _loop_ctx"
+    )
+    assert "_start_planning_for_handler(inp, ts, _loop_ctx)" in chat_src, (
+        "chat() 通过 ConfirmationContext.start_planning_fn 调用时必须透传 _loop_ctx"
+    )
+
+
+def test_planning_helpers_do_not_smuggle_durable_state_through_loop_ctx():
+    """LoopContext 字段集合保持 runtime-only，禁止承载 durable state。
+
+    Phase 2.2-a 易出的 anti-pattern 是"我顺手把 state 也塞进 LoopContext"
+    让 helper 签名变短。这条测试与 Phase 2.1 字段守卫互为冗余：
+    Phase 2.1 守 LoopContext 字段名拓扑，本条守"planning helpers 不依赖
+    LoopContext 字段集合的扩展"——即使有人偷偷加字段，planning helpers
+    也不能读它。
+    """
+
+    import inspect
+
+    from agent import core
+
+    for fn_name in ("_run_planning_phase", "_start_planning_for_handler"):
+        src = inspect.getsource(getattr(core, fn_name))
+        for forbidden in ("loop_ctx.state", "loop_ctx.task", "loop_ctx.messages",
+                          "loop_ctx.checkpoint", "loop_ctx.conversation",
+                          "loop_ctx.pending"):
+            assert forbidden not in src, (
+                f"{fn_name} 不允许通过 loop_ctx 访问 durable state：{forbidden}"
+            )
+
+
+def test_main_loop_signature_unchanged_phase_2_2_a_does_not_overreach():
+    """_run_main_loop 本轮签名必须保持只接 turn_state。
+
+    Phase 2.2-a 的范围严格只覆盖 planning helpers；_run_main_loop /
+    _call_model 吃 loop_ctx 属 Phase 2.2-c。如果本切片同时改了主循环签名，
+    意味着越界——这种"顺手再改一点"是 v0.4 最危险的范围爬升模式，
+    必须靠测试钉死。
+    """
+
+    import inspect
+
+    from agent import core
+
+    sig = inspect.signature(core._run_main_loop)
+    params = list(sig.parameters.keys())
+    assert params == ["turn_state"], (
+        f"_run_main_loop 本轮签名必须只有 turn_state；当前：{params}。"
+        "如需让主循环吃 loop_ctx，请走 Phase 2.2-c 切片，不要在 2.2-a 越界"
+    )
+
+
+def test_loop_context_construction_precedes_confirmation_context_in_chat():
+    """chat() 内 _loop_ctx 必须先于 ConfirmationContext 构造。
+
+    因为 ConfirmationContext.start_planning_fn lambda 闭包捕获 _loop_ctx；
+    顺序颠倒会触发 NameError。Source-level 扫描钉住相对顺序，避免后续
+    refactor 不小心把 _loop_ctx 构造下移。
+    """
+
+    import inspect
+
+    from agent import core
+
+    chat_src = inspect.getsource(core.chat)
+    loop_ctx_pos = chat_src.find("_loop_ctx = LoopContext(")
+    confirm_ctx_pos = chat_src.find("confirmation_ctx = ConfirmationContext(")
+    assert loop_ctx_pos != -1 and confirm_ctx_pos != -1, (
+        "chat() 必须同时构造 _loop_ctx 和 confirmation_ctx"
+    )
+    assert loop_ctx_pos < confirm_ctx_pos, (
+        "_loop_ctx 必须先于 ConfirmationContext 构造（lambda 闭包依赖）"
+    )

@@ -15,18 +15,30 @@
 v0.4 计划在以下 backlog 主题中**择一为主线**（待用户确认）：
 
 - **A · Health Maintenance dry-run / archive 命令**
-  在 v0.3 M2 「只可视化、不动文件」的基础上，引入 `python main.py health
-  archive logs --dry-run` 和 `health archive sessions --dry-run`，
-  **dry-run 默认**、必须显式 `--apply` 才动文件、归档后产物可回滚。
+  在 v0.3 M2 「只可视化、不动文件」的基础上，引入 `python main.py logs
+  cleanup` 和 `python main.py logs cleanup --apply`，**dry-run 默认**、
+  必须显式 `--apply` + 输入 `yes` 二次确认才动文件、归档后产物可回滚。
   价值：长期运行的 agent_log.jsonl / sessions/ 真实可控制。
 
-  > **已知 gap（待主线 A 收口）**：本仓库实际跑出的 `agent_log.jsonl`
-  > 已超过 100MB（已 gitignore，不会被 track，但仍是真实磁盘压力）。
-  > 当前没有任何轮转 / 压缩 / 截断 / 归档策略，所有日志都追加到同一个
-  > 文件。这是 v0.4 主线 A 必须解决的「真实长跑」问题，**不属于** v0.4
-  > Phase 1 transition slice 范围；本条目仅作为后续 patch 的锚点，避免
-  > 在 transition 工作过程中临时加入 ad-hoc 清理脚本。本轮（v0.3.x
-  > hygiene）只在文档层面记录这个 gap，不引入任何 rotation 实现。
+  **进度（v0.4 主线 A）**：
+  - ✅ 第一切片（commit `91e7bc3`）：`python main.py logs cleanup`
+    DRY RUN inventory，列出 agent_log.jsonl / sessions/ / runs/ 的
+    路径 / 大小 / gitignored / git_tracked 元信息；零副作用、零内容读取；
+    `[LARGE]` 标记 ≥10MB 候选，与 v0.2 health/check_log_size 阈值对齐。
+  - ✅ 第二切片：`python main.py logs cleanup --apply`，仅对
+    `agent_log.jsonl` 做受确认的原子 rename
+    （`<stem>.archived-YYYYMMDD-HHMMSS.<suffix>`）；不 gzip / 不删除 /
+    不读取内容 / 不处理 sessions/runs/.env；必须输入精确 `yes` 才执行；
+    目标已存在时拒绝覆盖。
+  - ⏸ 后续切片（待评审）：gzip 可选 / sessions cleanup --apply /
+    per-session log 分文件 / size-based 自动 rotation（需改 logger
+    写路径，单独 milestone）。
+
+  > **已知 gap 历史背景**：本仓库实际跑出的 `agent_log.jsonl` 已超过
+  > 100MB（已 gitignore，不会被 track，但仍是真实磁盘压力）。当前 v0.4
+  > 主线 A 第二切片提供了**用户手动触发**的归档入口，**不**做后台自动
+  > rotation（rotation 会改 runtime 写入语义，需要 fd 重开 / file lock，
+  > 属于更高风险动作，留待后续 milestone）。
 
 - **B · Checkpoint / Session 管理增强**
   在现有 `agent/session.py` / `agent/checkpoint.py` 之上，引入

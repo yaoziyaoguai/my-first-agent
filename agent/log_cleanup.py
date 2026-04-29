@@ -1,61 +1,78 @@
-"""v0.4 主线 A 第一切片 · 本地 runtime artifact 清理 dry-run（只列出，不动文件）。
+"""v0.4 主线 A · 本地 runtime artifact 治理（dry-run + 受控 archive --apply）。
 
 定位（架构边界）：
-    本模块**只做** "如果你要清理本地 runtime 产物，候选清单长什么样" 的报告
-    输出，**不**真正删除/归档/压缩任何文件，**不**读取这些文件的内容。
-    它是 v0.4 主线 A（agent_log.jsonl 日志治理）的最小入口，与 v0.2
-    `python main.py health` 的 log_size warning 形成互补：
+    本模块覆盖 v0.4 主线 A 的两层操作：
+      1) **dry-run inventory**（第一切片）：列出本地 runtime 产物
+         （agent_log.jsonl / sessions/ / runs/）的 stat 元信息，零副作用。
+      2) **archive --apply**（第二切片）：仅对 agent_log.jsonl 做带二次确认
+         的原子 rename，不删除、不 gzip、不读取内容。
 
-      - `python main.py health`   → 给出 risk 等级 + 建议命令（人类可读警告）
-      - `python main.py logs cleanup` → 给出可操作清单（DRY RUN inventory）
+    模块**不**真正删除/压缩/读取这些文件的内容，**不**自动 rotate，**不**
+    处理 sessions/ 和 runs/（它们语义不同：sessions 是 checkpoint 数据、
+    runs 是外部工具产物，需要分别治理）。
 
-负责什么 / 不负责什么：
-    负责：用 stat 收集 agent_log.jsonl / sessions/ / runs/ 的 路径、大小、
-        是否存在、是否被 git tracked，渲染成 DRY RUN 报告字符串。
-    不负责：真实删除、移动、压缩、归档、按时间筛选、按大小自动 rotate、
-        读取或解析任一文件内容、修改 .gitignore、上报 telemetry、删除
-        .env（.env 永远不进入候选清单，连 stat 都不做）。
+为什么 archive --apply 默认仍是 dry-run：
+    archive 是首个真正有 fs 副作用的操作。即使是 rename（不丢数据），也
+    可能让"正在 tail -f"或"agent 主进程内嵌的 logger"短暂感知不到旧文件。
+    所以 CLI 必须显式 `--apply` 才进入真删/真改路径，否则用户复制粘贴
+    历史命令时不会误触。
 
-为什么本切片不做真删除：
-    1) 本地 runtime 产物（sessions / runs / 日志）可能正被另一个长跑进程
-       使用，盲删可能导致正在写入的进程崩溃；
-    2) 用户可能正在做诊断分析，需要保留完整证据链；
-    3) 本切片先给出 inventory + 安全提示（git tracked? 已被 ignore?），让
-       用户用 shell 命令自行决定如何处理；
-    4) `--apply` 真删需要更严格的并发安全 / 备份 / 回滚机制，属下一切片。
+为什么 --apply 必须精确等于 "yes"：
+    `Y / y / yes please / 中文"是" / 任意非空` 都不算确认。这条契约让用户
+    必须**用键盘敲 3 个字母**而不是按 Enter 一带而过；防止"无意识确认"。
+    与 `git push --force-with-lease` 的设计思路相同：让 dangerous op 多走
+    一步显式动作。
+
+为什么本切片只做 mv，不做 gzip / 删除 / 自动 rotation：
+    - mv 可逆（rename 回去即可），fs 副作用最小；
+    - gzip 不可逆且让 `python main.py logs --tail` / `less` 失效；
+    - 删除是不可恢复的；
+    - 自动 rotation 必须改 `agent/logger.py` 的写路径并加 fd 重开/file lock，
+      改 runtime 写入语义，超出"治理工具"边界，需要单独 milestone。
+
+为什么不读取真实 agent_log.jsonl 内容：
+    日志可能含历史未脱敏的 raw content（早期 prompt / tool_result 正文）。
+    本模块只关心"它有多大、被谁 track"，不需要也不应该 open。
+
+为什么 sessions / runs 不在 archive --apply 范围：
+    sessions 是 checkpoint snapshot（删了无法 resume），runs 是 agent-tool
+    -harness 等外部工具的痕迹（治理责任在外部工具）。混在一起 archive
+    会让用户误以为"清理日志会丢 checkpoint"。
 
 用户项目自定义入口：
-    本模块当前对 v0.4 标准目录布局（项目根 + sessions/ + runs/）做硬编码；
-    若用户项目结构不同，应通过 `paths_to_inspect` 参数显式覆盖（保留为
-    后续扩展点，本 MVP 默认值即可覆盖 my-first-agent 自身布局）。
+    本模块当前对 v0.4 标准目录布局做硬编码（项目根 + sessions/ + runs/
+    + agent_log.jsonl）；若用户项目结构不同，应通过参数显式覆盖。
 
 如何通过 artifacts 查问题：
-    DRY RUN 报告 stdout 自带 "DRY RUN" banner + 每条候选的 (path, size,
-    exists, gitignored, git_tracked) 元信息；不打印任何文件正文。若用户
-    报告 "为什么我的 sessions 目录没列出"，请检查 PROJECT_DIR 是否被
-    config.PROJECT_DIR 正确识别。
+    DRY RUN 报告 stdout 自带 "DRY RUN" banner + 每条候选元信息。--apply
+    输出 ArchiveResult 中 status / source / target / message 字段，可
+    grep "ARCHIVE" 定位。本模块**绝不**打印任何文件正文。
 
 未来扩展点（非本切片范围）：
-    - `--apply` 真删（需要并发锁 + 备份目录 + 回滚）
-    - size-based / age-based 自动 rotation
+    - `--apply --gzip` 归档自动压缩
     - per-session log 按 SESSION_ID 分文件
-    - gzip 归档自动压缩
-    - cleanup 后自动 vacuum（释放磁盘）
+    - size/age-based 自动 rotation（需改 logger 写路径）
+    - cleanup --apply 处理 sessions/ / runs/（需 sessions 治理 milestone）
 
-什么是 mock / demo（无）：
-    本模块所有逻辑都是真实 stat + 真实 git 检查；不存在 mock。但其默认
-    阈值（如 dry-run 中"大文件" 提示标记 >10MB）参考 v0.2 health 的
-    阈值，未来若调整需统一两处。
+什么是 mock / demo：
+    无。所有逻辑都是真实 stat / git subprocess / Path.rename。测试通过
+    tmp_path 假项目验证，**不**触碰真实 agent_log.jsonl 内容。
 """
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 # 阈值与 v0.2 health/check_log_size 对齐：超过 10MB 标记为"建议关注"，
 # 但本模块**不**因此触发任何动作，只是在报告里加视觉提示。
 _LARGE_SIZE_MB_THRESHOLD = 10.0
+
+# archive --apply 必须精确等于此字符串才执行；任何变体（Y/y/yes please）
+# 都拒绝。与 `git push --force-with-lease` 同样的"显式动作"设计哲学。
+_REQUIRED_CONFIRM_TOKEN = "yes"
 
 
 @dataclass
@@ -195,6 +212,152 @@ def format_cleanup_dry_run_report(candidates: list[CleanupCandidate]) -> str:
     lines.append("DRY RUN: no files were modified.")
     lines.append(
         "如需手动归档，可参考 python main.py health 中 log_size 检查的建议命令；"
-        "本切片不提供 --apply 真删（需要并发锁 / 备份 / 回滚，属下一切片范围）。"
+        "若要执行真实 archive，请加 --apply（仅 mv，不 gzip / 不删除；"
+        "会要求输入 'yes' 二次确认）。"
     )
     return "\n".join(lines) + "\n"
+
+
+# ============================================================
+# 第二切片 · archive --apply 受控实现
+# ============================================================
+
+
+@dataclass
+class ArchiveResult:
+    """archive 操作的结构化结果，供 CLI 渲染 + 测试断言。
+
+    字段语义：
+      status: "skipped_no_source" | "cancelled" | "target_exists" | "archived"
+      source: 原 agent_log.jsonl 路径（archive 后已不存在）
+      target: 归档后的新路径（archive 成功才有意义；其他状态可为 None）
+      message: 给用户的可读说明，包含 ARCHIVE 关键字便于 grep
+    """
+
+    status: str
+    source: Path
+    target: Path | None
+    message: str
+
+
+def _build_archive_target(source: Path, now: datetime | None = None) -> Path:
+    """生成归档目标文件名 `<stem>.archived-YYYYMMDD-HHMMSS.<suffix>`。
+
+    保留原后缀（.jsonl）的原因：
+      - 让 `python main.py logs --tail` / `less` 等现有工具不需任何改造就
+        能继续读历史归档；
+      - 防止用户看到 `.archived` 后缀以为内容格式变了。
+
+    时间戳精确到秒：实践中"同一秒内连续两次 --apply"几乎不可能（必须人工
+    输入 yes），若真发生就让 `_archive_apply` 的目标已存在分支拒绝覆盖。
+    """
+    ts = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    return source.with_name(f"{source.stem}.archived-{ts}{source.suffix}")
+
+
+def archive_agent_log(
+    project_root: Path,
+    *,
+    apply: bool,
+    confirm_input: Callable[[], str] | None = None,
+    now: datetime | None = None,
+) -> ArchiveResult:
+    """执行 agent_log.jsonl 的归档（dry-run 或受确认的 --apply）。
+
+    设计要点（中文学习型说明）：
+    1. **只动 agent_log.jsonl**：不碰 sessions/runs/.env，本模块的 sessions
+       与 runs 仅在 dry-run inventory 中露面，--apply 路径根本不读它们。
+    2. **默认 dry-run**：apply=False 时仅返回 "would archive ..." 的
+       ArchiveResult，源文件零变化。
+    3. **--apply 必须二次确认**：apply=True 时调用 confirm_input()，要求
+       严格等于 "yes"（小写、无空白）才执行；任何变体一律取消。
+    4. **零内容读取**：源文件只 stat（exists/size），从不 open。
+    5. **原子 rename**：用 Path.rename（POSIX `os.rename` 包装），同 fs
+       原子；不存在中间态。失败时 OS 抛异常，不吞。
+    6. **不覆盖**：若目标 archive 路径已存在（极端情况：1 秒内重复 --apply），
+       拒绝覆盖并返回 status="target_exists"，让用户人工介入。
+    7. **不需要 file lock**：因为 `agent/logger.py` 每次 log_event 都
+       open(LOG_FILE, "a") 而**不持久 fd**，rename 后下一次 log_event 自动
+       创建新文件，无 fd 错引。加 lock 反而引入死锁可能。
+
+    confirm_input 注入：
+      生产路径默认走 `input("type 'yes' to confirm: ")`；测试路径传入
+      lambda 返回固定字符串，避免 mock stdin 的脆弱性。
+    """
+    source = project_root / "agent_log.jsonl"
+
+    if not source.exists():
+        # 源不存在是常见情况（fresh checkout / 已 archive 过），友好退出。
+        return ArchiveResult(
+            status="skipped_no_source",
+            source=source,
+            target=None,
+            message=f"ARCHIVE skipped: {source.name} 不存在，无需 archive。",
+        )
+
+    target = _build_archive_target(source, now=now)
+
+    if not apply:
+        size_mb = round(source.stat().st_size / (1024 * 1024), 2)
+        return ArchiveResult(
+            status="dry_run",
+            source=source,
+            target=target,
+            message=(
+                f"DRY RUN: would archive {source.name} "
+                f"({size_mb} MB) -> {target.name}\n"
+                "（加 --apply 才真正执行 mv；执行前会要求输入 'yes'）"
+            ),
+        )
+
+    # --apply 路径：必须二次确认
+    confirm = confirm_input or _default_confirm_input
+    answer = confirm()
+    if answer != _REQUIRED_CONFIRM_TOKEN:
+        return ArchiveResult(
+            status="cancelled",
+            source=source,
+            target=target,
+            message=(
+                f"ARCHIVE cancelled: 输入 {answer!r} 不等于 "
+                f"{_REQUIRED_CONFIRM_TOKEN!r}，未执行任何操作。"
+            ),
+        )
+
+    if target.exists():
+        # 极端竞态：1 秒内重复 --apply。拒绝覆盖，让用户人工决定。
+        return ArchiveResult(
+            status="target_exists",
+            source=source,
+            target=target,
+            message=(
+                f"ARCHIVE refused: 目标 {target.name} 已存在，拒绝覆盖。"
+                "请稍后再试或手动处理。"
+            ),
+        )
+
+    # 真实副作用：原子 rename。失败让 OS 异常上抛，不吞。
+    source.rename(target)
+
+    return ArchiveResult(
+        status="archived",
+        source=source,
+        target=target,
+        message=(
+            f"ARCHIVE done: {source.name} -> {target.name}\n"
+            "提示：下一次 log_event 会自动创建新的 agent_log.jsonl；"
+            "若有 tail -f / TUI 监控正在运行，需重新 attach。"
+        ),
+    )
+
+
+def _default_confirm_input() -> str:
+    """生产环境默认确认读取：从 stdin 阻塞读一行并 strip。
+
+    抽出独立函数便于测试时注入替身（test 不依赖 sys.stdin mock）。
+    刻意不接受 EOF 默认值，让 Ctrl-D 也算"未确认"。
+    """
+    try:
+        return input("type 'yes' to confirm archive: ").strip()
+    except EOFError:
+        return ""

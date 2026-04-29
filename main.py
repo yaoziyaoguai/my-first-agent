@@ -562,20 +562,31 @@ def main(argv: list[str] | None = None) -> int:
         _maintenance_command_transition(RuntimeEventKind.LOGS_COMMAND)
         rest = argv[1:]
 
-        # v0.4 主线 A 第一切片：`logs cleanup` 子命令——只列出本地 runtime
-        # 产物清单（agent_log.jsonl / sessions/ / runs/），不删除/归档/压缩
-        # 任何文件，不读取文件内容。详见 agent/log_cleanup.py 顶部架构说明。
-        # 真删 (--apply) 暂未实现，需要并发锁 + 备份 + 回滚，属下一切片。
+        # v0.4 主线 A：`logs cleanup` 子命令。
+        # 第一切片：dry-run inventory（agent_log.jsonl / sessions/ / runs/）。
+        # 第二切片：`--apply` 仅对 agent_log.jsonl 做受确认的原子 rename
+        #   （仍不 gzip / 不删除 / 不读取内容；不处理 sessions/runs/.env）。
+        # 详见 agent/log_cleanup.py 顶部架构说明。
         if rest and rest[0] == "cleanup":
             from pathlib import Path
             from agent.log_cleanup import (
+                archive_agent_log,
                 collect_cleanup_candidates,
                 format_cleanup_dry_run_report,
             )
 
             project_root = Path(__file__).resolve().parent
+            cleanup_args = rest[1:]
+            apply_flag = "--apply" in cleanup_args
+
+            # 始终先打印 inventory（让 --apply 用户也能看到上下文）
             candidates = collect_cleanup_candidates(project_root)
             print(format_cleanup_dry_run_report(candidates), end="")
+
+            # archive 仅作用于 agent_log.jsonl；--apply 才进入受确认路径
+            print()
+            result = archive_agent_log(project_root, apply=apply_flag)
+            print(result.message)
             return 0
 
         def _opt(name: str) -> str | None:

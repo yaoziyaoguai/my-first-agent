@@ -17,9 +17,12 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from agent.log_cleanup import (
+    _build_archive_target,
+    archive_agent_log,
     collect_cleanup_candidates,
     format_cleanup_dry_run_report,
 )
@@ -117,7 +120,9 @@ def test_format_dry_run_report_contains_banner_and_no_apply_hint(tmp_path):
 
     assert "DRY RUN" in report
     assert "no files were modified" in report
-    assert "本切片不提供 --apply" in report
+    # 第二切片后 dry-run 报告改为提示 --apply（仍要求 yes 二次确认）
+    assert "--apply" in report
+    assert "yes" in report
     # 报告必须列出 3 个候选 label
     assert "agent_log.jsonl" in report
     assert "sessions/" in report
@@ -256,3 +261,223 @@ def test_log_cleanup_module_does_not_import_dotenv_or_secrets(tmp_path):
         f"agent/log_cleanup.py 出现了禁用调用/导入 {leaks}——"
         "日志治理只能 stat，绝不能接触 .env / 凭证 / 环境变量。"
     )
+
+
+# ============================================================
+# v0.4 主线 A 第二切片 · archive --apply 测试
+# ============================================================
+#
+# 共同设计契约：
+#   - 全部使用 tmp_path 假 agent_log.jsonl，**绝不**读取真实日志内容；
+#   - 用 confirm_input 注入替身，避免 mock sys.stdin 的脆弱性；
+#   - 每条测试都是"零内容读取" + "副作用最小"边界守卫；
+#   - 不新增 skip / xfail；不削弱已有断言。
+
+
+def _make_project_with_log(tmp_path: Path, content_bytes: bytes = b"x") -> Path:
+    """构造含 agent_log.jsonl 的假项目（不 git init，archive 测试不需要 git）。
+
+    sessions/ 与 runs/ **故意不创建**——验证 archive 路径完全不依赖它们。
+    .env 也**故意不创建**——验证即使存在也不会被本模块 stat。
+    """
+    project = tmp_path / "fake_project"
+    project.mkdir()
+    (project / "agent_log.jsonl").write_bytes(content_bytes)
+    return project
+
+
+def test_archive_dry_run_does_not_move_or_delete_log(tmp_path):
+    """apply=False（默认）：源文件 mtime + 内容字节完全不变。
+
+    防回退：未来若有人在 dry-run 路径偷偷做"先备份"操作，本测试发现。
+    """
+    project = _make_project_with_log(tmp_path, b"hello-bytes")
+    src = project / "agent_log.jsonl"
+    before_mtime = src.stat().st_mtime_ns
+    before_bytes = src.read_bytes()
+
+    result = archive_agent_log(project, apply=False)
+
+    assert result.status == "dry_run"
+    assert "DRY RUN" in result.message
+    assert src.exists()
+    assert src.stat().st_mtime_ns == before_mtime
+    assert src.read_bytes() == before_bytes
+    # 目标 archive 文件名出现在 message 中，但目标文件**不应**已被创建
+    assert result.target is not None
+    assert not result.target.exists()
+
+
+def test_archive_apply_with_wrong_confirm_does_not_move(tmp_path):
+    """apply=True 但 confirm 输入非精确 'yes'：源文件原地不动。
+
+    覆盖 'Y'、'y'、'yes\\n'、'yes please'、'是'、空字符串 5 种变体——
+    只接受精确 'yes'。这是 dangerous op 的"显式动作"契约。
+    """
+    project = _make_project_with_log(tmp_path, b"wrong-confirm")
+    src = project / "agent_log.jsonl"
+    before_bytes = src.read_bytes()
+
+    for bad in ["Y", "y", "yes please", "是", "", "yes\n"]:
+        # 注入 lambda 替身代替 stdin
+        result = archive_agent_log(
+            project, apply=True, confirm_input=lambda v=bad: v
+        )
+        assert result.status == "cancelled", (
+            f"输入 {bad!r} 不应触发 archive；实际 status={result.status}"
+        )
+        assert src.exists()
+        assert src.read_bytes() == before_bytes
+
+
+def test_archive_apply_with_yes_renames_log_atomically(tmp_path):
+    """apply=True + confirm='yes'：源不存在 + 目标存在 + 字节一致。
+
+    验证 archive 真正生效，并且 archive 的是**完全相同的字节**（rename
+    不修改内容）；同时严格断言"源 .jsonl 已不存在"——确认不是"复制+保留"。
+    """
+    project = _make_project_with_log(tmp_path, b"will-be-archived")
+    src = project / "agent_log.jsonl"
+    expected_bytes = src.read_bytes()
+
+    result = archive_agent_log(
+        project, apply=True, confirm_input=lambda: "yes"
+    )
+
+    assert result.status == "archived"
+    assert "ARCHIVE done" in result.message
+    assert not src.exists(), "rename 后源文件必须不存在"
+    assert result.target is not None and result.target.exists()
+    assert result.target.read_bytes() == expected_bytes
+
+
+def test_archive_skips_when_source_missing(tmp_path):
+    """源 agent_log.jsonl 不存在：友好退出，不报错，不创建任何文件。"""
+    project = tmp_path / "empty"
+    project.mkdir()
+
+    result = archive_agent_log(project, apply=True, confirm_input=lambda: "yes")
+
+    assert result.status == "skipped_no_source"
+    assert "不存在" in result.message
+    # 不允许"顺手创建"占位文件
+    assert not (project / "agent_log.jsonl").exists()
+    assert list(project.iterdir()) == []
+
+
+def test_archive_refuses_to_overwrite_existing_target(tmp_path):
+    """目标 archive 路径已存在：拒绝覆盖，源文件保留原状。
+
+    场景：1 秒内连续两次 --apply（极罕见但必须防）。fix-ts 通过 now=
+    参数注入，让两次调用算出相同时间戳。
+    """
+    project = _make_project_with_log(tmp_path, b"first")
+    fixed_now = datetime(2026, 4, 30, 12, 34, 56)
+
+    # 第一次成功 archive
+    first = archive_agent_log(
+        project, apply=True, confirm_input=lambda: "yes", now=fixed_now
+    )
+    assert first.status == "archived"
+
+    # 模拟 1 秒内又出现新的 agent_log.jsonl 并尝试 archive 到相同时间戳
+    (project / "agent_log.jsonl").write_bytes(b"second")
+    src = project / "agent_log.jsonl"
+    second = archive_agent_log(
+        project, apply=True, confirm_input=lambda: "yes", now=fixed_now
+    )
+
+    assert second.status == "target_exists"
+    assert "拒绝覆盖" in second.message
+    # 源文件必须保留（未被部分 rename）
+    assert src.exists()
+    assert src.read_bytes() == b"second"
+
+
+def test_archive_does_not_touch_sessions_runs_or_dotenv(tmp_path):
+    """archive 路径完全不读 / 不动 sessions/ / runs/ / .env。"""
+    project = _make_project_with_log(tmp_path, b"log")
+    (project / "sessions").mkdir()
+    (project / "sessions" / "s1.json").write_text("session-data", encoding="utf-8")
+    (project / "runs").mkdir()
+    (project / "runs" / "r1.txt").write_text("run-data", encoding="utf-8")
+    (project / ".env").write_text("SECRET=do-not-touch", encoding="utf-8")
+
+    archive_agent_log(project, apply=True, confirm_input=lambda: "yes")
+
+    # sessions / runs / .env 全部一字节未变
+    assert (project / "sessions" / "s1.json").read_text(encoding="utf-8") == "session-data"
+    assert (project / "runs" / "r1.txt").read_text(encoding="utf-8") == "run-data"
+    assert (project / ".env").read_text(encoding="utf-8") == "SECRET=do-not-touch"
+
+
+def test_archive_target_filename_preserves_jsonl_suffix(tmp_path):
+    """archive 文件名格式：<stem>.archived-YYYYMMDD-HHMMSS.jsonl。
+
+    保留 .jsonl 后缀让 log_viewer / less 等工具能直接读，不强迫用户改命令。
+    """
+    src = tmp_path / "agent_log.jsonl"
+    fixed_now = datetime(2026, 1, 2, 3, 4, 5)
+    target = _build_archive_target(src, now=fixed_now)
+    assert target.name == "agent_log.archived-20260102-030405.jsonl"
+    assert target.parent == src.parent
+
+
+def test_archive_apply_yes_message_contains_archive_keyword(tmp_path):
+    """成功 message 必须包含 'ARCHIVE'，便于 grep / 脚本识别。"""
+    project = _make_project_with_log(tmp_path, b"x")
+    result = archive_agent_log(
+        project, apply=True, confirm_input=lambda: "yes"
+    )
+    assert "ARCHIVE" in result.message
+
+
+def test_archive_module_does_not_open_or_read_log_content():
+    """AST 检查：archive_agent_log 函数体内不允许 open / read_text /
+    read_bytes 任何 Path 对象。
+
+    rename 是 fs metadata op，不需要也不应读内容；防架构回退。
+    """
+    import ast
+    import inspect
+    from agent import log_cleanup
+
+    src = inspect.getsource(log_cleanup.archive_agent_log)
+    tree = ast.parse(src)
+    bad_attrs = {"read_text", "read_bytes", "open"}
+    leaks: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in bad_attrs:
+            leaks.append(node.attr)
+        elif isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Name) and f.id == "open":
+                leaks.append("open()")
+    assert not leaks, (
+        f"archive_agent_log 不允许读取日志内容，发现禁用操作 {leaks}"
+    )
+
+
+def test_main_logs_cleanup_apply_flag_routes_to_archive(
+    tmp_path, monkeypatch, capsys
+):
+    """`python main.py logs cleanup --apply` CLI 集成（不真删，因为 confirm
+    走 stdin EOF → 取消）。
+
+    验证 CLI 能识别 --apply flag 并调用 archive_agent_log。stdin 关闭时
+    EOFError 被捕获返回空字符串 → 不等于 'yes' → status=cancelled，源文件
+    不动。这确保即使 CI 误触 --apply 也不会真删。
+    """
+    import io
+    import sys
+    import main as main_module
+
+    # 模拟 stdin EOF：替换 sys.stdin 为空 StringIO
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    rc = main_module.main(["logs", "cleanup", "--apply"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    # 应同时包含 dry-run inventory + archive cancelled 提示
+    assert "DRY RUN" in captured.out
+    assert "ARCHIVE cancelled" in captured.out or "ARCHIVE skipped" in captured.out

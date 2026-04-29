@@ -52,6 +52,14 @@ CommandResult, observer debug payloads, and UI render objects must not become ch
 - Migrate state updates gradually after tests exist.
 - Keep old CLI shell behavior working during migration.
 
+Current first-stage engineering work has started as prep only:
+
+- `agent/runtime_events.py` now provides lightweight event/result names for tests
+  and discussion. It does not drive `core.py`, write checkpoint, or replace the
+  existing `agent.display_events.RuntimeEvent`.
+- Transition boundary tests now guard maintenance commands, status-line
+  rendering, and event/result naming. This is not a full event-driven Runtime.
+
 ## 5. v0.4 first stage should not do
 
 - Do not introduce LangGraph.
@@ -62,3 +70,39 @@ CommandResult, observer debug payloads, and UI render objects must not become ch
 - Do not revive slash command.
 - Do not implement complex topic switch.
 - Do not rewrite Runtime in one pass.
+
+## 6. State update scatter audit
+
+This audit is the migration map, not the migration itself.
+
+- `core.py`: owns `chat()`, task reset, planning status, plan confirmation
+  status, loop guards, and the current orchestration order. It should stay as
+  orchestration until narrower transitions are covered.
+- `confirm_handlers.py`: accepts/rejects plan, step, tool confirmation, and
+  feedback intent. It sets/clears `pending_tool`, clears
+  `pending_user_input_request` after user replies, changes status, and calls
+  checkpoint helpers.
+- `response_handlers.py`: classifies model stop reasons, handles `tool_use`,
+  `end_turn`, `max_tokens`, no-progress fallback, step advancement, and
+  `pending_user_input_request` fallback creation.
+- `tool_executor.py`: records tool execution results, sets
+  `pending_tool`, sets `pending_user_input_request` for `request_user_input`,
+  distinguishes `blocked_by_policy`, `rejected_by_check`, `failed`, and
+  `executed`, emits display events, and saves checkpoints.
+- `checkpoint.py`: serializes durable task / memory / conversation messages and
+  filters unknown fields on load. RuntimeEvent, DisplayEvent, InputIntent,
+  retired CommandResult, observer payloads, and CLI render objects stay out of
+  checkpoint/schema.
+- `session.py`: initializes session health/header, decides actionable resume,
+  loads durable checkpoint state, and replays user prompts. It should keep
+  resume summaries detached from raw checkpoint dictionaries.
+- `main.py`, `agent/cli_renderer.py`, and `agent/display_events.py`: adapt I/O
+  and render summaries/events. They should not own task transitions or mutate
+  checkpoint state except by dispatching explicit Runtime commands.
+
+Likely migration order:
+
+1. Centralize model output -> event classification.
+2. Centralize tool result -> transition outcome.
+3. Centralize user confirmation/rejection -> transition outcome.
+4. Only then consider slimming the `core.py` loop.

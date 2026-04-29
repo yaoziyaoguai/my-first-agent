@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import is_dataclass
 from typing import Any
 
 # 当前阶段标签。后续 v0.3 M2/M3/M4 推进时同步改这里即可，
@@ -33,6 +34,10 @@ _BAR = "─" * 60
 def _safe(value: Any, fallback: str = "—") -> str:
     """把可能为 None / 空字符串的字段转成可读占位符。"""
     if value is None:
+        return fallback
+    if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        return fallback
+    if is_dataclass(value) and not isinstance(value, type):
         return fallback
     text = str(value).strip()
     return text if text else fallback
@@ -168,7 +173,7 @@ def render_status_line(summary: Mapping[str, Any] | None) -> str:
         parts.append(f"current_step={_one_line(current_step_title, 80)}")
     pending_tool = summary.get("pending_tool_name")
     if pending_tool:
-        parts.append(f"pending_tool={pending_tool}")
+        parts.append(f"pending_tool={_safe(pending_tool)}")
     msg_count = summary.get("message_count")
     if msg_count is not None:
         parts.append(f"msgs={msg_count}")
@@ -195,7 +200,7 @@ def _interaction_state_label(status: str) -> str:
 
 
 def _one_line(value: Any, limit: int) -> str:
-    text = " ".join(str(value).split())
+    text = " ".join(_safe(value, "structured value").split())
     if len(text) <= limit:
         return text
     return text[:limit] + "..."

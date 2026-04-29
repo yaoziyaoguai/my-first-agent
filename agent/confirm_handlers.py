@@ -33,6 +33,7 @@ from agent.runtime_events import (
     tool_confirmation_transition,
     tool_result_transition,
 )
+from agent.runtime_observer import log_event as _log_runtime_event
 from agent.task_runtime import advance_current_step_if_needed
 from agent.tool_executor import execute_pending_tool
 from agent.transitions import apply_user_replied_transition
@@ -40,6 +41,51 @@ from agent.transitions import apply_user_replied_transition
 
 ContinueFn = Callable[[Any], str]
 StartPlanningFn = Callable[[str, Any], str]
+
+
+# v0.5 Phase 1 第五小步（H · confirmation observer evidence）：confirmation
+# 决策的 observer 证据写入入口。落 `agent_log.jsonl`，与 docs/V0_5_OBSERVER_AUDIT.md
+# §4 Gap G2 对应。
+#
+# 学习型注释：
+# - **职责**：仅把"用户在 5 条 confirmation 链路上做出了什么 outcome"标签写入
+#   runtime_observer.log_event。observer 是只读观测面，不是状态机的一部分。
+# - **不负责**：(a) 不参与 transition 决策；(b) 不写 messages；(c) 不写
+#   checkpoint；(d) 不投递 DisplayEvent；(e) 不读取真实 agent_log.jsonl 内容。
+# - **失败隔离（产品契约）**：observer 写入抛任何异常都必须 swallow——confirmation
+#   是用户决策的关键路径，绝不能因为日志层故障让 handler 卡死或返回值改变。
+# - **payload 安全红线**：禁止把 user_input 原文 / feedback_text / tool_input
+#   完整内容塞进 payload。允许：transition kind 字符串、origin_status、
+#   tool_name、resolution_kind 等"枚举/标识"短字段。
+# - **MVP 边界**：当前直接调 runtime_observer.log_event；不引入新 dataclass 也
+#   不动 logger.log_event (legacy)。未来如需细化 schema（按 docs/V0_5_OBSERVER_AUDIT.md
+#   G2 / G4 / G5 规划），请扩展本 helper 而不是把字面 log_event 调用散落到 5
+#   个 handler 里。
+# - **为什么不在 handler 内 inline `try/except`**：会污染 5 个 handler 的可读性、
+#   重复 5 次"为什么 swallow"的注释、且未来要改 payload 字段命名时必须改 5 处。
+# - **为什么不是完整 observer 系统**：本 slice 只接入面均衡化（H），不新增
+#   ObserverEvent / 不接 TUI / 不做 _dispatch_pending_confirmation。
+# - **artifact 排查路径**：tail -n 50 agent_log.jsonl | grep '"event_type":
+#   "confirmation\.' 即可看到 confirmation 决策序列。
+def _emit_confirmation_observer_event(
+    event_type: str,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """confirmation observer evidence 写入入口（详见模块顶部 H slice 注释）。"""
+
+    try:
+        _log_runtime_event(
+            event_type,
+            event_source="confirm_handlers",
+            event_payload=payload or {},
+            event_channel="confirmation",
+        )
+    except Exception:
+        # observer 失败必须不影响 confirmation handler 的返回值与 state。
+        # 这里 swallow 是产品契约——不允许把 logging 故障扩散到主流程。
+        # 测试 test_observer_failure_does_not_break_handler 钉死该不变量。
+        pass
 
 
 # P1 反馈意图三选一固定文案。常量在模块级声明而不是写在 handler 里，方便测试
@@ -194,6 +240,11 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
             state.task.status = accept_transition.next_status
         if accept_transition.should_checkpoint:
             save_checkpoint(state)
+        # v0.5 H · observer evidence：仅记录 outcome 标签，不改 state/messages/checkpoint。
+        _emit_confirmation_observer_event(
+            "confirmation.plan.accepted",
+            payload={"intent": PlanConfirmationKind.PLAN_ACCEPTED.value},
+        )
         return ctx.continue_fn(ctx.turn_state)
 
     if response == "reject":
@@ -211,6 +262,11 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         assert not reject_transition.should_checkpoint
         state.reset_task()
         clear_checkpoint()
+        # v0.5 H · observer evidence：在 reset_task 之后记录，确保事件时序正确。
+        _emit_confirmation_observer_event(
+            "confirmation.plan.rejected",
+            payload={"intent": PlanConfirmationKind.PLAN_REJECTED.value},
+        )
         return "好的，已取消。"
 
     # P1：feedback 分支不再立刻调 planner，而是切到 awaiting_feedback_intent
@@ -251,6 +307,10 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
             from agent.checkpoint import clear_checkpoint as _clear_ck
             _clear_ck()
             state.reset_task()
+            _emit_confirmation_observer_event(
+                "confirmation.step.accepted_task_done",
+                payload={"intent": StepConfirmationKind.STEP_ACCEPTED_TASK_DONE.value},
+            )
             return "好的，任务已完成。"
         # 中间步通过：transition 表达 should_checkpoint=True，handler 负责真实落盘。
         continue_transition = step_confirmation_transition(
@@ -258,6 +318,10 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         )
         if continue_transition.should_checkpoint:
             save_checkpoint(state)
+        _emit_confirmation_observer_event(
+            "confirmation.step.accepted_continue",
+            payload={"intent": StepConfirmationKind.STEP_ACCEPTED_CONTINUE.value},
+        )
         return ctx.continue_fn(ctx.turn_state)
 
     if response == "reject":
@@ -273,6 +337,10 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         assert not reject_transition.should_checkpoint
         state.reset_task()
         clear_checkpoint()
+        _emit_confirmation_observer_event(
+            "confirmation.step.rejected",
+            payload={"intent": StepConfirmationKind.STEP_REJECTED.value},
+        )
         return "好的，当前任务已停止。"
 
     # P1：feedback 分支与 plan_confirmation 对称——切到 awaiting_feedback_intent
@@ -323,6 +391,10 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         emit = getattr(ctx.turn_state, "on_runtime_event", None)
         if emit is not None:
             emit(feedback_intent_requested(pending))
+        _emit_confirmation_observer_event(
+            "confirmation.feedback_intent.ambiguous",
+            payload={"intent": FeedbackIntentKind.AMBIGUOUS.value},
+        )
         return ""
 
     feedback_text = pending.get("pending_feedback_text", "") or ""
@@ -342,6 +414,13 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         state.task.pending_user_input_request = None
         state.task.status = origin_status
         save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
+        _emit_confirmation_observer_event(
+            "confirmation.feedback_intent.cancelled",
+            payload={
+                "intent": FeedbackIntentKind.CANCELLED.value,
+                "origin_status": origin_status,
+            },
+        )
         return ""
 
     if choice_raw == "1":
@@ -382,6 +461,13 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         state.task.status = as_feedback_transition.next_status or "awaiting_plan_confirmation"
         save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
         _emit_plan_confirmation(ctx, plan, source="feedback_intent_choice")
+        _emit_confirmation_observer_event(
+            "confirmation.feedback_intent.as_feedback",
+            payload={
+                "intent": FeedbackIntentKind.AS_FEEDBACK.value,
+                "origin_status": origin_status,
+            },
+        )
         return ""
 
     # choice_raw == "2": as_new_task —— 与正常 chat() 新任务入口完全同构。
@@ -405,6 +491,13 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
 
     state.reset_task()
     clear_checkpoint()
+    _emit_confirmation_observer_event(
+        "confirmation.feedback_intent.as_new_task",
+        payload={
+            "intent": FeedbackIntentKind.AS_NEW_TASK.value,
+            "origin_status": origin_status,
+        },
+    )
     return ctx.start_planning_fn(feedback_text, ctx.turn_state)
 
 
@@ -442,12 +535,23 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     if resolution.kind == EMPTY_USER_INPUT:
         # 这是正式 User Input Layer 前的 runtime 防御：空输入没有产生有效事实，
         # 所以不能进入 transition/action 层，也就不能清 pending、推进 step 或保存 checkpoint。
+        _emit_confirmation_observer_event(
+            "confirmation.user_input.empty",
+            payload={"resolution_kind": resolution.kind},
+        )
         return "请输入有效内容，或输入取消/退出。"
 
     transition = apply_user_replied_transition(
         state=state,
         messages=messages,
         resolution=resolution,
+    )
+    _emit_confirmation_observer_event(
+        "confirmation.user_input.resolved",
+        payload={
+            "resolution_kind": resolution.kind,
+            "should_continue_loop": bool(transition.should_continue_loop),
+        },
     )
     if transition.should_continue_loop:
         return ctx.continue_fn(turn_state)
@@ -500,6 +604,13 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
                 state.task.status = failed_transition.next_status
             if failed_transition.should_checkpoint:
                 save_checkpoint(state)
+            _emit_confirmation_observer_event(
+                "confirmation.tool.accepted_failed",
+                payload={
+                    "intent": ToolConfirmationKind.TOOL_ACCEPTED_FAILED.value,
+                    "tool_name": tool_name,
+                },
+            )
             return ctx.continue_fn(turn_state)
 
         # v0.4 Phase 1 slice 6-c（tool 子切片）：用户批准且工具成功执行。
@@ -517,6 +628,13 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
             state.task.status = success_transition.next_status
         if success_transition.should_checkpoint:
             save_checkpoint(state)
+        _emit_confirmation_observer_event(
+            "confirmation.tool.accepted_success",
+            payload={
+                "intent": ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS.value,
+                "tool_name": tool_name,
+            },
+        )
         return ctx.continue_fn(turn_state)
 
     # 未执行分支（n / feedback）也要清空 pending_tool 并为悬空 tool_use 补占位结果。
@@ -562,6 +680,10 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         state.task.status = "running"
         if transition.should_checkpoint:
             save_checkpoint(state)
+        _emit_confirmation_observer_event(
+            "confirmation.tool.rejected",
+            payload={"tool_name": tool_name},
+        )
         return ctx.continue_fn(turn_state)
 
     append_control_event(messages, "tool_feedback", {
@@ -571,4 +693,8 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     state.task.status = "running"
     if transition.should_checkpoint:
         save_checkpoint(state)
+    _emit_confirmation_observer_event(
+        "confirmation.tool.feedback",
+        payload={"tool_name": tool_name},
+    )
     return ctx.continue_fn(turn_state)

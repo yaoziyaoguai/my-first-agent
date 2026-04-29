@@ -130,6 +130,73 @@ refresh_runtime_system_prompt()
 
 # ========== 对外主入口 ==========
 
+
+def _build_loop_context(
+    client_obj,
+    *,
+    model_name: str = MODEL_NAME,
+    max_loop_iterations: int = MAX_LOOP_ITERATIONS,
+) -> LoopContext:
+    """v0.5 Phase 3 第一小步 · LoopContext 构造工厂（行为中性 helper）。
+
+    定位（架构边界）：
+        把 chat() 中字面 ``LoopContext`` 构造调用抽出为命名工厂，
+        让 chat() 主体读起来不再混杂"如何构造运行时依赖"的细节。
+
+    为什么 v0.5 第一小步选这个：
+        1) Phase 2 已经把所有 helper 改成"通过 _loop_ctx 透传依赖"，但
+           **构造**仍然散在 chat() 里——读 chat() 的人需要同时理解控制流
+           + 依赖注入。抽 helper 后 chat() 第一步就是"拿到 loop_ctx"，
+           更接近"启动 → 拿运行时依赖 → 跑业务"的清晰阶段；
+        2) 是行为中性纯重构：helper 体内只是把现有 3 行构造原样包一层，
+           **零**业务逻辑变化、**零**控制流变化、**零**字段变化；
+        3) 为 v0.5 后续 core slimming 铺路——后续若要把 chat() 拆成
+           `_initialize_turn / _route_pending_state / _begin_new_task` 等，
+           每一拆都需要"先拿 loop_ctx 再传给子函数"，本 helper 让那一步
+           只调用一行。
+
+    为什么 LoopContext 仍然是 runtime dependency bundle，而不是 durable state：
+        - client：LLM provider 句柄，不能 JSON 序列化、与进程绑定；
+        - model_name / max_loop_iterations：当前是模块常量，未来可能改为
+          env / config 读取，**但仍是启动时确定的运行配置**，不属于
+          "checkpoint 应该保存的任务进度"；
+        - 由 v0.4 Phase 2.4 的 4 项 checkpoint guard 钉死：runtime-only
+          类型名永不出现在 checkpoint JSON / state.task / state.memory。
+
+    为什么这**不是**完整 core.py slimming：
+        - chat() 函数体仍然完整保留所有控制流（pending state 路由、
+          plan/step/tool/user_input/feedback_intent 5 类 confirmation
+          dispatch、main loop 启动）；
+        - 不动 _run_main_loop / _call_model / _run_planning_phase 任何
+          一行；
+        - 不引入新依赖、新字段、新参数；
+        - SSOT 仍由 test_chat_remains_unique_loop_context_construction
+          _site_in_core 钉死（构造从 chat() 移到 helper，全文仍 1 次）。
+
+    用户项目自定义入口（未来扩展点）：
+        若以后要支持 chat() 多次启动用不同 model_name（多模型对比测试），
+        helper 已经接受 model_name kwarg，调用点显式传入即可，无需改
+        helper 签名。
+
+    什么是 mock / demo（无）：
+        helper 不含任何 mock/demo 逻辑；纯运行时依赖工厂。
+
+    重要边界 · monkeypatch 兼容：
+        chat() **必须**显式把 ``MODEL_NAME / MAX_LOOP_ITERATIONS`` 作为
+        kwargs 传给本 helper，而不是依赖 helper 默认值。原因：Python
+        函数默认参数在 def 时求值，monkeypatch 改写模块常量后默认值
+        不会跟着变；显式传入则在 chat() 调用时重新读取。已被
+        ``test_max_loop_iterations_terminal_guard_still_fires_when_double_layer_bypassed``
+        钉住——任何"省掉 kwargs 让 helper 兜默认值"的简化都会破坏
+        monkeypatch 测试场景。
+    """
+    return LoopContext(
+        client=client_obj,
+        model_name=model_name,
+        max_loop_iterations=max_loop_iterations,
+    )
+
+
 def chat(
     user_input: str,
     *,
@@ -232,8 +299,20 @@ def chat(
     # （评估属未来切片）。严禁在任何 helper 内重建 LoopContext——SSOT 单源
     # 由 test_chat_remains_unique_loop_context_construction_site_in_core 钉死。
     # 模块级 MAX_LOOP_ITERATIONS 仍保留作为默认值，并兼容现有测试 import。
-    _loop_ctx = LoopContext(
-        client=client,
+    #
+    # v0.5 Phase 3 第一小步：构造调用走 _build_loop_context() 工厂（行为
+    # 中性 helper），让 chat() 主体只剩"拿到运行时依赖"一行。SSOT 测试
+    # 用 src.count 在 core.py 全文上检查 LoopContext 字面构造，构造从
+    # chat() 移到 helper 后仍恰好 1 次（在 helper 内）。详见
+    # _build_loop_context 顶部 docstring。
+    #
+    # 注意：这里**显式**把 MODEL_NAME / MAX_LOOP_ITERATIONS 作为 kwargs
+    # 传入，而不是依赖 helper 的 def-time 默认值——否则
+    # monkeypatch.setattr(core, "MAX_LOOP_ITERATIONS", N) 这类测试场景
+    # 拿不到运行时被 patch 的值（Python 函数默认参数在 def 时求值，仅一次）。
+    # 这一行写法保证 chat() 调用时**重新**读取模块级常量。
+    _loop_ctx = _build_loop_context(
+        client,
         model_name=MODEL_NAME,
         max_loop_iterations=MAX_LOOP_ITERATIONS,
     )

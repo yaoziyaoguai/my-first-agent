@@ -2770,25 +2770,56 @@ def test_loop_context_not_imported_by_durable_layers():
 
 
 def test_chat_constructs_loop_context_instance_at_module_level_anchor():
-    """chat() 已构造一次 LoopContext 实例作为 Phase 2.2/2.3 注入锚点。
+    """LoopContext 构造点（v0.5 第一小步起在 _build_loop_context 工厂）从
+    模块级运行时常量取值。
 
-    本切片不要求实例被传给 helper（Phase 2.2/2.3 才迁移）；仅验证
-    构造调用确实存在，且字段从模块级 client / MODEL_NAME /
-    MAX_LOOP_ITERATIONS 取值——这样后续 sub-slice 把 helper 改吃
-    loop_ctx 时，调用点不需要再加构造代码。
+    历史：v0.4 Phase 2.1 时构造直接写在 chat() 函数体内；v0.5 Phase 3
+    第一小步把构造抽到 _build_loop_context() 工厂，chat() 改为调用
+    `_build_loop_context(client)`。
+
+    本测试**不弱化**——契约本质从未改变：
+      - 构造点仍存在；
+      - client / MODEL_NAME / MAX_LOOP_ITERATIONS 仍是 SSOT 默认值；
+      - 没有引入隐式新默认值。
+    只是把"构造点位置"从 chat() src 改成 helper src，因为 chat() src
+    内现在只有 `_build_loop_context(client)` 一行调用（这是抽 helper
+    的目的），原"chat() src 必须出现 LoopContext(...)"成为过时约束。
     """
 
     import inspect
 
     from agent import core
 
-    src = inspect.getsource(core.chat)
-    assert "LoopContext(" in src, (
-        "chat() 必须显式构造 LoopContext 作为 Phase 2.2/2.3 注入锚点"
+    helper_src = inspect.getsource(core._build_loop_context)
+    assert "LoopContext(" in helper_src, (
+        "_build_loop_context 必须显式构造 LoopContext 作为 SSOT 锚点"
     )
-    assert "client=client" in src and "model_name=MODEL_NAME" in src and (
-        "max_loop_iterations=MAX_LOOP_ITERATIONS" in src
-    ), "LoopContext 必须从模块级运行时常量取值，避免引入新的隐式默认值"
+    assert "client=client" in helper_src, (
+        "helper 必须把入参 client_obj 透传到 LoopContext.client"
+        "（实际写法：client=client_obj 也可，下行兼容判断）"
+    ) or "client=client_obj" in helper_src
+    assert (
+        "model_name=MODEL_NAME" in helper_src
+        or "model_name: str = MODEL_NAME" in helper_src
+    ), "helper 默认 model_name 必须是模块常量 MODEL_NAME"
+    assert (
+        "max_loop_iterations=MAX_LOOP_ITERATIONS" in helper_src
+        or "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in helper_src
+    ), "helper 默认 max_loop_iterations 必须是模块常量 MAX_LOOP_ITERATIONS"
+
+    # 同时检查 chat() 仍然显式调用 helper（不绕过 SSOT），并且
+    # 显式传入 MODEL_NAME / MAX_LOOP_ITERATIONS（保证 monkeypatch 生效）
+    chat_src = inspect.getsource(core.chat)
+    assert "_build_loop_context(" in chat_src, (
+        "chat() 必须通过 _build_loop_context(...) 走 SSOT 工厂构造"
+    )
+    assert "model_name=MODEL_NAME" in chat_src, (
+        "chat() 必须显式传 model_name=MODEL_NAME（让 monkeypatch 生效）"
+    )
+    assert "max_loop_iterations=MAX_LOOP_ITERATIONS" in chat_src, (
+        "chat() 必须显式传 max_loop_iterations=MAX_LOOP_ITERATIONS"
+        "（让 monkeypatch.setattr(core, 'MAX_LOOP_ITERATIONS', N) 生效）"
+    )
 
 
 # ========================================================================
@@ -2944,6 +2975,10 @@ def test_loop_context_construction_precedes_confirmation_context_in_chat():
     因为 ConfirmationContext.start_planning_fn lambda 闭包捕获 _loop_ctx；
     顺序颠倒会触发 NameError。Source-level 扫描钉住相对顺序，避免后续
     refactor 不小心把 _loop_ctx 构造下移。
+
+    v0.5 Phase 3 第一小步：chat() 内构造行从字面 `_loop_ctx = LoopContext(`
+    改为 `_loop_ctx = _build_loop_context(client)`，本测试随之改为扫描
+    helper 调用——契约本质（必须先于 confirmation_ctx 构造）未变。
     """
 
     import inspect
@@ -2951,10 +2986,10 @@ def test_loop_context_construction_precedes_confirmation_context_in_chat():
     from agent import core
 
     chat_src = inspect.getsource(core.chat)
-    loop_ctx_pos = chat_src.find("_loop_ctx = LoopContext(")
+    loop_ctx_pos = chat_src.find("_loop_ctx = _build_loop_context(")
     confirm_ctx_pos = chat_src.find("confirmation_ctx = ConfirmationContext(")
     assert loop_ctx_pos != -1 and confirm_ctx_pos != -1, (
-        "chat() 必须同时构造 _loop_ctx 和 confirmation_ctx"
+        "chat() 必须同时构造 _loop_ctx（通过 _build_loop_context 工厂）和 confirmation_ctx"
     )
     assert loop_ctx_pos < confirm_ctx_pos, (
         "_loop_ctx 必须先于 ConfirmationContext 构造（lambda 闭包依赖）"
@@ -3254,21 +3289,28 @@ def test_module_level_max_loop_iterations_still_exported_for_chat_default():
 
 
 def test_chat_loop_context_max_loop_iterations_equals_module_default():
-    """chat() 构造 LoopContext 时 max_loop_iterations 必须等于模块级常量。
+    """LoopContext 构造点 max_loop_iterations 必须等于模块级常量。
 
-    防止有人 Phase 2.2-c 后偷偷把 chat() 构造改成硬编码 ``max_loop_iterations=100``，
+    防止有人 Phase 2.2-c 后偷偷把构造改成硬编码 ``max_loop_iterations=100``，
     那样 module-level 常量就成了"看起来是默认值但 runtime 不用"的死代码——
     比单源更糟糕（视觉默认值与实际默认值不一致）。
+
+    v0.5 Phase 3 第一小步：构造点从 chat() 内字面调用搬到
+    _build_loop_context() helper，本测试随之扫描 helper src——
+    契约本质（默认值必须是模块常量）未变。
     """
 
     import inspect
 
     from agent import core
 
-    chat_src = inspect.getsource(core.chat)
-    assert "max_loop_iterations=MAX_LOOP_ITERATIONS" in chat_src, (
-        "chat() 构造 LoopContext 时必须写 max_loop_iterations=MAX_LOOP_ITERATIONS，"
-        "保持模块级常量为默认值的视觉与实际真值一致"
+    helper_src = inspect.getsource(core._build_loop_context)
+    assert (
+        "max_loop_iterations=MAX_LOOP_ITERATIONS" in helper_src
+        or "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in helper_src
+    ), (
+        "_build_loop_context 默认 max_loop_iterations 必须取自模块常量 "
+        "MAX_LOOP_ITERATIONS（保持视觉与运行时真值一致）"
     )
 
 
@@ -3373,3 +3415,80 @@ def test_confirm_handlers_must_not_import_or_construct_loop_context():
         "confirm_handlers.py 不得调用 LoopContext(...)——SSOT 唯一构造点是 "
         f"agent/core.py:chat()：{bad_calls}"
     )
+
+
+# ============================================================
+# v0.5 Phase 3 第一小步 · _build_loop_context 工厂边界守卫
+# ============================================================
+
+
+def test_build_loop_context_returns_loop_context_with_expected_fields():
+    """_build_loop_context() 必须返回 LoopContext 且 3 字段语义不变。
+
+    防回归契约：v0.5 Phase 3 第一小步把字面 LoopContext(...) 调用抽到
+    helper 工厂。helper 必须满足：
+      - 返回类型是 LoopContext（不是 dict / SimpleNamespace 等替身）；
+      - client 直接透传（不做 wrap）；
+      - 默认 model_name 等于模块常量 MODEL_NAME；
+      - 默认 max_loop_iterations 等于模块常量 MAX_LOOP_ITERATIONS；
+      - 不偷偷加额外字段（messages / task / plan / pending_tool 等
+        durable state 永不混进 LoopContext）。
+
+    这条测试**不**依赖 LoopContext 内部字段顺序或私有实现，仅断言公共
+    契约——属"行为中性 helper"应该被钉住的最小契约。
+    """
+    from agent import core
+    from agent.core import _build_loop_context, MAX_LOOP_ITERATIONS, MODEL_NAME
+    from agent.loop_context import LoopContext
+
+    sentinel_client = object()
+    ctx = _build_loop_context(sentinel_client)
+
+    assert isinstance(ctx, LoopContext)
+    assert ctx.client is sentinel_client
+    assert ctx.model_name == MODEL_NAME
+    assert ctx.max_loop_iterations == MAX_LOOP_ITERATIONS
+
+    # LoopContext 字段集必须仍然只有 3 个 runtime dependency；
+    # 任何 durable state 名（messages / task / plan / pending_tool 等）
+    # 都不允许出现在 dataclass 字段中（防"helper 顺手把状态塞进去"）。
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(ctx)}
+    forbidden = {
+        "messages", "task", "plan", "current_step_index",
+        "pending_tool", "pending_user_input_request",
+        "working_summary", "checkpoint_data", "tool_traces",
+    }
+    assert not (field_names & forbidden), (
+        f"LoopContext 字段被污染——出现 durable state 名 "
+        f"{field_names & forbidden}；LoopContext 必须严格只装 runtime "
+        "dependency（client / model_name / max_loop_iterations）。"
+    )
+
+    # 同时复用 core 模块名空间避免 unused import 警告
+    assert hasattr(core, "_build_loop_context")
+
+
+def test_build_loop_context_kwargs_override_defaults_without_module_mutation():
+    """helper 接收 kwarg override 时，模块常量保持不变（无副作用）。
+
+    这条防止有人未来"偷懒"用全局可变状态实现 override（例如改写
+    agent.core.MODEL_NAME）。helper 必须是纯函数：override 走 kwarg，
+    不改任何模块级状态。
+    """
+    from agent import core
+    from agent.core import _build_loop_context
+
+    before_model = core.MODEL_NAME
+    before_max = core.MAX_LOOP_ITERATIONS
+
+    ctx = _build_loop_context(
+        object(), model_name="override-model", max_loop_iterations=999
+    )
+    assert ctx.model_name == "override-model"
+    assert ctx.max_loop_iterations == 999
+
+    # 模块常量必须未被 helper 改写
+    assert core.MODEL_NAME == before_model
+    assert core.MAX_LOOP_ITERATIONS == before_max

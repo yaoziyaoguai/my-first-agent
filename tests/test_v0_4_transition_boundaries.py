@@ -2890,13 +2890,19 @@ def test_planning_phase_no_longer_reads_module_level_client_or_model_name():
 
 
 def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
-    """chat() 三个调用点都必须把 _loop_ctx 透传出去。
+    """chat() 与 _build_confirmation_context helper 三个调用点都必须把
+    _loop_ctx / loop_ctx 透传出去。
 
     当前调用点：
     - chat() 直接调 _run_planning_phase(user_input, turn_state, _loop_ctx)
-    - chat() 在 ConfirmationContext.start_planning_fn lambda 里调
-      _start_planning_for_handler(inp, ts, _loop_ctx)
+    - _build_confirmation_context.start_planning_fn lambda 调
+      _start_planning_for_handler(inp, ts, loop_ctx)
     新增第三个调用点（如 chat() 增加新的 planning 入口）必须同步。
+
+    v0.5 第二小步注意：start_planning_fn lambda 已从 chat() 内迁到
+    _build_confirmation_context helper 内，参数名也从闭包变量
+    ``_loop_ctx`` 变成 helper 形参 ``loop_ctx``——契约本质（透传未污染
+    的 LoopContext）未变。
     """
 
     import inspect
@@ -2904,11 +2910,13 @@ def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
     from agent import core
 
     chat_src = inspect.getsource(core.chat)
+    helper_src = inspect.getsource(core._build_confirmation_context)
     assert "_run_planning_phase(user_input, turn_state, _loop_ctx)" in chat_src, (
         "chat() 直接调用 _run_planning_phase 时必须传 _loop_ctx"
     )
-    assert "_start_planning_for_handler(inp, ts, _loop_ctx)" in chat_src, (
-        "chat() 通过 ConfirmationContext.start_planning_fn 调用时必须透传 _loop_ctx"
+    assert "_start_planning_for_handler(" in helper_src and "loop_ctx" in helper_src, (
+        "_build_confirmation_context.start_planning_fn lambda 必须透传 loop_ctx 到"
+        " _start_planning_for_handler"
     )
 
 
@@ -2976,9 +2984,11 @@ def test_loop_context_construction_precedes_confirmation_context_in_chat():
     顺序颠倒会触发 NameError。Source-level 扫描钉住相对顺序，避免后续
     refactor 不小心把 _loop_ctx 构造下移。
 
-    v0.5 Phase 3 第一小步：chat() 内构造行从字面 `_loop_ctx = LoopContext(`
-    改为 `_loop_ctx = _build_loop_context(client)`，本测试随之改为扫描
-    helper 调用——契约本质（必须先于 confirmation_ctx 构造）未变。
+    v0.5 Phase 3 第一/第二小步：chat() 内构造行从字面 `_loop_ctx = LoopContext(`
+    改为 `_loop_ctx = _build_loop_context(client)`，confirmation_ctx 从字面
+    `confirmation_ctx = ConfirmationContext(` 改为 `confirmation_ctx =
+    _build_confirmation_context(`。本测试随之改为扫描 helper 调用——契约本质
+    （必须先构造 _loop_ctx 才能传给 _build_confirmation_context）未变。
     """
 
     import inspect
@@ -2987,12 +2997,14 @@ def test_loop_context_construction_precedes_confirmation_context_in_chat():
 
     chat_src = inspect.getsource(core.chat)
     loop_ctx_pos = chat_src.find("_loop_ctx = _build_loop_context(")
-    confirm_ctx_pos = chat_src.find("confirmation_ctx = ConfirmationContext(")
+    confirm_ctx_pos = chat_src.find("confirmation_ctx = _build_confirmation_context(")
     assert loop_ctx_pos != -1 and confirm_ctx_pos != -1, (
-        "chat() 必须同时构造 _loop_ctx（通过 _build_loop_context 工厂）和 confirmation_ctx"
+        "chat() 必须同时构造 _loop_ctx（通过 _build_loop_context 工厂）和 "
+        "confirmation_ctx（通过 _build_confirmation_context 工厂）"
     )
     assert loop_ctx_pos < confirm_ctx_pos, (
-        "_loop_ctx 必须先于 ConfirmationContext 构造（lambda 闭包依赖）"
+        "_loop_ctx 必须先于 ConfirmationContext 构造（_build_confirmation_context "
+        "需要 loop_ctx 作为入参）"
     )
 
 
@@ -3172,14 +3184,19 @@ def test_run_main_loop_consumes_only_max_loop_iterations_from_loop_ctx():
 
 
 def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
-    """chat() 与 _start_planning_for_handler 的 _run_main_loop 调用都透传 loop_ctx。
+    """chat() / _build_confirmation_context / _start_planning_for_handler 的
+    _run_main_loop 调用都透传 loop_ctx。
 
     当前调用点（共 4 处）：
-    - chat() 内 ConfirmationContext.continue_fn lambda：_run_main_loop(ts, _loop_ctx)
+    - _build_confirmation_context.continue_fn lambda：_run_main_loop(ts, loop_ctx)
     - chat() awaiting/running 分支：_run_main_loop(turn_state, _loop_ctx)
     - chat() 新任务执行兜底分支：_run_main_loop(turn_state, _loop_ctx)
     - _start_planning_for_handler 兜底：_run_main_loop(turn_state, loop_ctx)
     任何新增 _run_main_loop 调用点都必须同步加参数。
+
+    v0.5 第二小步注意：原 ConfirmationContext.continue_fn lambda 已从
+    chat() 内迁到 _build_confirmation_context helper 内，因此 chat() 内
+    的 _run_main_loop 直接调用次数从 3 减为 2，第 3 处出现在 helper 内。
     """
 
     import inspect
@@ -3187,18 +3204,25 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
     from agent import core
 
     chat_src = inspect.getsource(core.chat)
+    helper_src = inspect.getsource(core._build_confirmation_context)
     handler_src = inspect.getsource(core._start_planning_for_handler)
 
-    # chat() 必须有 3 处带 _loop_ctx 的调用：lambda 内 + 2 个直接调用
+    # chat() 至少应有 2 处直接调用（awaiting/running 分支 + 新任务兜底分支）
     chat_call_count = chat_src.count("_run_main_loop(")
-    assert chat_call_count >= 3, (
-        f"chat() 至少应有 3 处 _run_main_loop 调用，实际：{chat_call_count}"
+    assert chat_call_count >= 2, (
+        f"chat() 至少应有 2 处直接 _run_main_loop 调用，实际：{chat_call_count}"
     )
-    # lambda 调用因换行会拆成 "_run_main_loop(\n            ts,\n            _loop_ctx,"
-    # 直接调用是 "_run_main_loop(turn_state, _loop_ctx)"
-    # 用更宽松的"调用次数 == 携带 _loop_ctx 次数"断言
+    # _build_confirmation_context helper 必须有 1 处（continue_fn lambda）
+    assert helper_src.count("_run_main_loop(") >= 1, (
+        "_build_confirmation_context.continue_fn lambda 必须调用 _run_main_loop"
+    )
+    # chat() 中所有 _run_main_loop 调用都必须传 _loop_ctx
     assert chat_src.count("_loop_ctx") >= chat_src.count("_run_main_loop("), (
         "chat() 中所有 _run_main_loop 调用都必须传 _loop_ctx"
+    )
+    # helper 中 _run_main_loop 调用必须传 loop_ctx 形参
+    assert "loop_ctx" in helper_src, (
+        "_build_confirmation_context 必须把 loop_ctx 透传给 _run_main_loop lambda"
     )
 
     # _start_planning_for_handler 应有 1 处调用并传 loop_ctx
@@ -3492,3 +3516,135 @@ def test_build_loop_context_kwargs_override_defaults_without_module_mutation():
     # 模块常量必须未被 helper 改写
     assert core.MODEL_NAME == before_model
     assert core.MAX_LOOP_ITERATIONS == before_max
+
+
+# ============================================================
+# v0.5 Phase 3 第二小步 · _build_confirmation_context 工厂边界守卫
+# ============================================================
+
+
+def test_build_confirmation_context_returns_confirmation_context_with_expected_fields():
+    """_build_confirmation_context() 必须返回 ConfirmationContext 且字段语义正确。
+
+    防回归契约：v0.5 第二小步把字面 ConfirmationContext(...) 抽到 helper。
+    helper 必须满足：
+      - 返回类型是 ConfirmationContext（不是替身 dict / Namespace）；
+      - state / turn_state 直接透传（不做 wrap）；
+      - client / model_name 取自 loop_ctx（与 v0.4 Phase 2.2-b 让 _call_model
+        走 loop_ctx 的方向一致）；
+      - continue_fn 是 callable，调用时把 ts 转给主循环；
+      - start_planning_fn 是 callable，调用时把 inp/ts 转给 planning helper；
+      - 不偷偷加额外字段（messages / task / plan / current_step_index 等
+        durable state 永不混进 ConfirmationContext）。
+
+    测试用真实 LoopContext + sentinel state/turn_state，验证字段绑定，
+    不实际触发主循环（避免引入测试副作用）。
+    """
+    from agent import core
+    from agent.core import _build_confirmation_context, _build_loop_context
+    from agent.confirm_handlers import ConfirmationContext
+
+    sentinel_client = object()
+    sentinel_state = object()
+    sentinel_turn_state = object()
+    loop_ctx = _build_loop_context(
+        sentinel_client, model_name="test-model", max_loop_iterations=7
+    )
+
+    ctx = _build_confirmation_context(
+        state=sentinel_state, turn_state=sentinel_turn_state, loop_ctx=loop_ctx
+    )
+
+    assert isinstance(ctx, ConfirmationContext)
+    assert ctx.state is sentinel_state
+    assert ctx.turn_state is sentinel_turn_state
+    assert ctx.client is sentinel_client, (
+        "client 必须从 loop_ctx 透传（与 _call_model 走 loop_ctx 方向一致）"
+    )
+    assert ctx.model_name == "test-model", (
+        "model_name 必须从 loop_ctx 透传"
+    )
+    assert callable(ctx.continue_fn), "continue_fn 必须是 callable"
+    assert callable(ctx.start_planning_fn), "start_planning_fn 必须是 callable"
+
+    # ConfirmationContext 字段集严格对齐：禁止 helper 顺手把 durable state
+    # （messages / task / plan / pending_*）塞进 ConfirmationContext。
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(ctx)}
+    forbidden = {
+        "messages", "task", "plan", "current_step_index",
+        "pending_tool", "pending_user_input_request",
+        "working_summary", "checkpoint_data", "tool_traces",
+    }
+    assert not (field_names & forbidden), (
+        f"ConfirmationContext 字段被污染——出现 durable state 名 "
+        f"{field_names & forbidden}；ConfirmationContext 必须严格只装 handler "
+        "dependency（state/turn_state/client/model_name/continue_fn/start_planning_fn）。"
+    )
+
+    # 用 core 模块名空间避免 unused import
+    assert hasattr(core, "_build_confirmation_context")
+
+
+def test_chat_remains_unique_confirmation_context_construction_site_in_core():
+    """agent/core.py 全文只能有一个 ConfirmationContext(...) 字面构造点
+    （在 _build_confirmation_context helper 内）。
+
+    与 LoopContext SSOT 测试同模式：防止 chat() 之外的任何 helper 偷偷
+    重建 ConfirmationContext，绕过 helper 工厂。
+    """
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core)
+    construction_count = src.count("ConfirmationContext(")
+    assert construction_count == 1, (
+        f"agent/core.py 中 ConfirmationContext(...) 字面构造调用必须恰好 1 次"
+        f"（在 _build_confirmation_context helper 内），实际：{construction_count} 次。"
+        "SSOT 单源是 v0.5 第二小步的核心契约"
+    )
+
+    # 同时检查 chat() 通过 helper 调用（不绕过 SSOT）
+    chat_src = inspect.getsource(core.chat)
+    assert "_build_confirmation_context(" in chat_src, (
+        "chat() 必须通过 _build_confirmation_context(...) 工厂构造 ConfirmationContext"
+    )
+
+
+def test_build_confirmation_context_lambdas_capture_loop_ctx_not_rebuild():
+    """helper 内 continue_fn / start_planning_fn lambda 必须闭包捕获
+    传入的 loop_ctx，而不是在 lambda 体里重建 LoopContext。
+
+    防止有人未来"为了灵活性"把 lambda 改成 ``lambda ts: _run_main_loop(
+    ts, _build_loop_context(client))`` 之类的写法——那会破坏 SSOT
+    （每次 lambda 调用产生一个新 LoopContext），也会破坏 monkeypatch 行为。
+
+    本测试用 AST 解析 helper 体，断言 lambda 内不包含对 _build_loop_context
+    或 LoopContext 的调用。
+    """
+    import ast
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._build_confirmation_context)
+    tree = ast.parse(src)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+
+    forbidden_names = {"_build_loop_context", "LoopContext"}
+    bad_calls: list[str] = []
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Lambda):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name) and func.id in forbidden_names:
+                        bad_calls.append(func.id)
+    assert not bad_calls, (
+        f"_build_confirmation_context 的 lambda 内禁止调用 "
+        f"{forbidden_names}——必须闭包捕获传入的 loop_ctx，不得重建。"
+        f"实际发现：{bad_calls}"
+    )

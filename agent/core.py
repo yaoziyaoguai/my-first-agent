@@ -197,6 +197,80 @@ def _build_loop_context(
     )
 
 
+def _build_confirmation_context(
+    *,
+    state,
+    turn_state,
+    loop_ctx: LoopContext,
+) -> ConfirmationContext:
+    """v0.5 Phase 3 第二小步 · ConfirmationContext 构造工厂（行为中性 helper）。
+
+    定位（架构边界）：
+        把 chat() 内 14 行字面 ``ConfirmationContext`` 构造抽出为命名工厂，
+        与 v0.5 第一小步的 ``_build_loop_context`` 对称——chat() 头部从此变成
+        清晰的"两行拿依赖"：先 _loop_ctx，再 confirmation_ctx。
+
+    为什么 v0.5 第二小步选这个：
+        1) 与第一小步同模式、同低风险的行为中性重构；
+        2) ConfirmationContext 内部已经隐式依赖 _loop_ctx——continue_fn 和
+           start_planning_fn 这两个 lambda 都闭包捕获 _loop_ctx——把构造抽到
+           helper 让这层依赖显式（helper 签名直接吃 loop_ctx）；
+        3) 同时把 client / model_name 来源从 module-level globals 切到
+           ``loop_ctx.client / loop_ctx.model_name``。值等价（loop_ctx 也是
+           从同一组 module globals 在 chat() 调用时构造的），但语义上更整齐：
+           ConfirmationContext 是 LoopContext 的下游消费者，不再单独读
+           module globals。这与 Phase 2.2-b 的"_call_model 走 loop_ctx"方向
+           一致。
+
+    为什么 ConfirmationContext 是 handler dependency bundle，不是 durable state：
+        - 5 个 confirmation handler（plan/step/tool/user_input/feedback_intent）
+          运行时需要：state（durable 单例的引用，不是值拷贝）+ turn_state
+          （单 turn 临时态）+ client/model_name（runtime dep）+ 两个 callable
+          闭包（再调用时回到主循环 / 启动新 planning）；
+        - 5 个字段都不是"任务进度"——任务进度在 state.task；
+        - continue_fn / start_planning_fn 是函数引用，**永不**写 checkpoint、
+          **永不**进 messages、**永不**属于 schema（已被
+          test_checkpoint_resume_semantics 钉死）；
+        - ConfirmationContext 自身也永不进 checkpoint。
+
+    为什么这**不是**完整 core.py slimming：
+        - chat() 函数体仍然完整保留 5 类 confirmation dispatch 的 if/elif 链
+          以及 main_loop 启动；
+        - 不动 _run_main_loop / _call_model / _run_planning_phase /
+          _start_planning_for_handler / 任何 confirm_handler 业务函数；
+        - 不引入新依赖、不改 ConfirmationContext 字段集；
+        - SSOT 仍由新增 source-locality 测试钉死（构造从 chat() 移到 helper，
+          全文仍恰好 1 次 ``ConfirmationContext`` 字面构造）。
+
+    用户项目自定义入口（未来扩展点）：
+        若以后要支持"测试时注入 fake continue_fn"或"plan-only 模式 disable
+        start_planning_fn"，helper 已经把 lambda 构造逻辑集中——可以加
+        kwarg override，无需改 chat() 主体。
+
+    什么是 mock / demo（无）：
+        helper 不含任何 mock/demo 逻辑；纯运行时依赖工厂。
+
+    重要边界 · 避免引入第二构造源：
+        SSOT 测试要求 core.py 全文 ``ConfirmationContext`` 字面构造恰好
+        1 次（在 helper 内）。任何 helper / handler 都不能就地重建
+        ConfirmationContext，必须通过 chat() 透传。
+    """
+    return ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=loop_ctx.client,
+        model_name=loop_ctx.model_name,
+        continue_fn=lambda ts: _run_main_loop(ts, loop_ctx),
+        # P1：注入"切新任务"分流路径——与正常 chat() 新任务入口完全同构。
+        # 把 _run_planning_phase 后续的 awaiting/cancelled/main_loop 处理也封进
+        # 这个 lambda，让 handle_feedback_intent_choice 不需要知道 chat() 的结构。
+        # 函数引用只在内存中传递，不写 checkpoint、不进 messages，不属于 schema。
+        start_planning_fn=lambda inp, ts: _start_planning_for_handler(
+            inp, ts, loop_ctx
+        ),
+    )
+
+
 def chat(
     user_input: str,
     *,
@@ -317,20 +391,17 @@ def chat(
         max_loop_iterations=MAX_LOOP_ITERATIONS,
     )
 
-    confirmation_ctx = ConfirmationContext(
+    # v0.5 Phase 3 第二小步：ConfirmationContext 构造走 _build_confirmation_context()
+    # 工厂（行为中性 helper），与 _loop_ctx 抽 helper 形成对称结构——chat() 头部
+    # 现在是清晰的"两行拿依赖"。client / model_name 来源从 module globals 切到
+    # loop_ctx 字段（值等价：loop_ctx 也是由同一组 module globals 构造的）。
+    # SSOT 测试 ``test_chat_remains_unique_confirmation_context_construction_site_in_core``
+    # 钉死全文 ``ConfirmationContext`` 恰好 1 次。详见 _build_confirmation_context
+    # 顶部 docstring。
+    confirmation_ctx = _build_confirmation_context(
         state=state,
         turn_state=turn_state,
-        client=client,
-        model_name=MODEL_NAME,
-        continue_fn=lambda ts: _run_main_loop(
-            ts,
-            _loop_ctx,
-        ),
-        # P1：注入"切新任务"分流路径——与正常 chat() 新任务入口完全同构。
-        # 把 _run_planning_phase 后续的 awaiting/cancelled/main_loop 处理也封进
-        # 这个 lambda，让 handle_feedback_intent_choice 不需要知道 chat() 的结构。
-        # 函数引用只在内存中传递，不写 checkpoint、不进 messages，不属于 schema。
-        start_planning_fn=lambda inp, ts: _start_planning_for_handler(inp, ts, _loop_ctx),
+        loop_ctx=_loop_ctx,
     )
 
     # 先处理"等待用户确认计划"的状态：

@@ -374,3 +374,82 @@ def step_confirmation_transition(kind: StepConfirmationKind) -> TransitionResult
             ),
         )
     raise ValueError(f"unsupported step confirmation kind: {kind.value}")
+
+
+class ToolConfirmationKind(str, Enum):
+    """v0.4 Phase 1 slice 6-c（tool 子切片）：tool 确认结局的统一词汇。
+
+    中文学习边界：
+    - 这一组值描述用户确认 tool 执行后的 Runtime 意图，让
+      ``handle_tool_confirmation`` 的 accept 分支不再仅靠 try/except
+      的隐式分流来表达「成功 vs 异常」两种真实结局。
+    - **不覆盖** reject 路径：用户拒绝执行某个工具属于 ``ToolResult`` 词
+      汇（v0.1 已有的 :class:`ToolResultTransitionKind.USER_REJECTION`），
+      它描述「这一次 tool_result 该如何映射」，与 plan/step confirmation
+      的「Runtime 状态机该如何前进」是两个不同维度。本切片刻意保留这条
+      边界：tool **确认决策** 用 ToolConfirmationKind；tool **结果映射** 用
+      ToolResultTransitionKind；不强行合并以免模糊语义。
+    - 与 step 不同：tool accept 有两种真实终态——
+        * ``TOOL_ACCEPTED_SUCCESS``：execute_pending_tool 成功返回；
+          handler 必须清 ``pending_tool`` + save_checkpoint + 继续主循环。
+        * ``TOOL_ACCEPTED_FAILED``：execute_pending_tool 抛异常；handler
+          **必须保留** ``pending_tool`` 以便人工排查（这是 confirm_handlers
+          L444 注释明确的真实诊断需求），同时仍 save_checkpoint + 继续主
+          循环让 tool_use 不再悬空。
+      这两条都 should_checkpoint=True，但 ``clear_pending_tool`` 完全不
+      同（success=True / failed=False），让"清不清 pending"的契约能从
+      transition 层一眼看清，避免 slice 6-c 之后的人误改。
+    - 不写 messages、不动 checkpoint、不调 execute_pending_tool；实际副
+      作用仍由 ``handle_tool_confirmation`` 完成，pending_tool 清理仍是
+      handler 的 single source of truth（已在
+      ``test_tool_accept_success_path_clears_pending_tool_via_handler`` /
+      ``test_tool_accept_exception_path_keeps_pending_tool_for_inspection``
+      端到端钉住）。
+    """
+
+    TOOL_ACCEPTED_SUCCESS = "tool_accepted_success"
+    TOOL_ACCEPTED_FAILED = "tool_accepted_failed"
+
+
+def tool_confirmation_transition(kind: ToolConfirmationKind) -> TransitionResult:
+    """把 tool 确认 accept 路径结局映射到轻量 :class:`TransitionResult`。
+
+    中文学习边界：
+    - 与 :func:`plan_confirmation_transition` / :func:`step_confirmation_transition`
+      同形：只描述 Runtime 意图，不替 handler 写 messages、不直接调
+      save_checkpoint、不调 execute_pending_tool、不清 pending_tool。
+    - ``TOOL_ACCEPTED_SUCCESS``：should_checkpoint=True + clear_pending_tool=True；
+      next_status="running"。
+    - ``TOOL_ACCEPTED_FAILED``：should_checkpoint=True + clear_pending_tool=False
+      （**关键**：保留 pending_tool 以便排查）；next_status="running"。
+    - 不接受 reject kind：那条路径仍走 v0.1 已有的
+      :func:`tool_result_transition` (USER_REJECTION)；本切片刻意不合并两
+      套词汇以保留 ToolResult vs ToolConfirmation 的语义边界。
+    """
+
+    if kind == ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS:
+        return TransitionResult(
+            next_status="running",
+            should_checkpoint=True,
+            clear_pending_tool=True,
+            display_events=("tool.accepted",),
+            reason=kind.value,
+            notes=(
+                "user approved tool; execution succeeded",
+                "handler still owns the actual pending_tool clear and save_checkpoint",
+            ),
+        )
+    if kind == ToolConfirmationKind.TOOL_ACCEPTED_FAILED:
+        return TransitionResult(
+            next_status="running",
+            should_checkpoint=True,
+            clear_pending_tool=False,
+            display_events=("tool.accepted_failed",),
+            reason=kind.value,
+            notes=(
+                "user approved tool; execution raised an exception",
+                "pending_tool must be preserved for human diagnostics (handler L444)",
+                "handler still writes the placeholder tool_result and saves checkpoint",
+            ),
+        )
+    raise ValueError(f"unsupported tool confirmation kind: {kind.value}")

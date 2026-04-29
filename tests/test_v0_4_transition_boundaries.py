@@ -1812,3 +1812,214 @@ def test_tool_reject_path_clears_pending_tool_via_transition_intent(tmp_path, mo
         "handler 实际执行清理。"
     )
     assert state.task.status == "running"
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-c（tool 子切片）· tool confirmation transition 边界测试
+# ---------------------------------------------------------------------------
+# 中文学习边界：本组测试钉死的「真实回归点」
+# - TOOL_ACCEPTED_SUCCESS: should_checkpoint=True + clear_pending_tool=True，
+#   防止后续重构把 success 路径改成不清 pending（旧 pending 数据复用 bug）。
+# - TOOL_ACCEPTED_FAILED: should_checkpoint=True + clear_pending_tool=False，
+#   防止 transition 模板对称化时把异常路径的 pending_tool 也清掉，破坏
+#   confirm_handlers L444 注释明确的人工排查需求。
+# - 新枚举只覆盖 accept 两种结局；reject 路径仍走 ToolResultTransitionKind
+#   (USER_REJECTION)，这是 v0.1 已存在的 ToolResult 词汇边界，本切片不
+#   合并以保留语义层次（ToolResult vs ToolConfirmation）。
+# - source-level 契约：handler 真正调用 tool_confirmation_transition 而
+#   不是回到 inline state.task.status="running" 的旧写法。
+
+def test_tool_confirmation_kind_covers_only_tool_accept_outcomes():
+    """枚举只覆盖 tool accept 的两种结局，不混入 plan/step/user_input/feedback。"""
+
+    from agent.runtime_events import ToolConfirmationKind
+
+    values = {member.value for member in ToolConfirmationKind}
+    assert values == {"tool_accepted_success", "tool_accepted_failed"}
+
+
+def test_tool_confirmation_accept_success_clears_pending_and_checkpoints():
+    """成功路径 transition 必须 should_checkpoint=True + clear_pending_tool=True。"""
+
+    from agent.runtime_events import (
+        ToolConfirmationKind,
+        tool_confirmation_transition,
+    )
+
+    result = tool_confirmation_transition(ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS)
+    assert result.should_checkpoint is True
+    assert result.clear_pending_tool is True
+    assert result.next_status == "running"
+    assert "tool.accepted" in result.display_events
+
+
+def test_tool_confirmation_accept_failed_keeps_pending_but_checkpoints():
+    """异常路径必须 should_checkpoint=True 但 clear_pending_tool=False。
+
+    回归点：如果有人对称化把 failed 路径也设为 clear_pending_tool=True，
+    人工就再也无法看到「当时在试图执行什么工具」，破坏排查能力。
+    """
+
+    from agent.runtime_events import (
+        ToolConfirmationKind,
+        tool_confirmation_transition,
+    )
+
+    result = tool_confirmation_transition(ToolConfirmationKind.TOOL_ACCEPTED_FAILED)
+    assert result.should_checkpoint is True
+    assert result.clear_pending_tool is False, (
+        "异常路径必须保留 pending_tool 以便人工排查"
+    )
+    assert result.next_status == "running"
+    assert "tool.accepted_failed" in result.display_events
+
+
+def test_tool_confirmation_transition_rejects_unknown_kinds():
+    """未知 kind（如 reject 形式的伪枚举）必须显式失败。"""
+
+    import pytest
+
+    from agent.runtime_events import tool_confirmation_transition
+
+    class _Foreign:
+        value = "tool_rejected_by_user"  # 故意：reject 不在 ToolConfirmationKind 范围
+
+    with pytest.raises(ValueError):
+        tool_confirmation_transition(_Foreign())
+
+
+def test_tool_confirmation_transition_is_pure_function():
+    """transition 工厂为纯函数；同输入恒等输出。"""
+
+    from agent.runtime_events import (
+        ToolConfirmationKind,
+        tool_confirmation_transition,
+    )
+
+    a = tool_confirmation_transition(ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS)
+    b = tool_confirmation_transition(ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS)
+    c = tool_confirmation_transition(ToolConfirmationKind.TOOL_ACCEPTED_FAILED)
+    assert a == b
+    assert a != c
+
+
+def test_handle_tool_confirmation_source_actually_routes_through_transition():
+    """source-level 契约：tool handler 必须真正调用 tool_confirmation_transition。
+
+    钉点 1：accept 两条路径都用 ToolConfirmationKind 枚举。
+    钉点 2：reject 路径仍用 ToolResultTransitionKind.USER_REJECTION（保留
+            ToolResult vs ToolConfirmation 的语义边界）。
+    钉点 3：禁止越界使用 plan/step/user_input/feedback_intent 的 *Kind。
+    """
+
+    import inspect
+
+    from agent import confirm_handlers
+
+    src = inspect.getsource(confirm_handlers.handle_tool_confirmation)
+    assert "tool_confirmation_transition" in src
+    assert "TOOL_ACCEPTED_SUCCESS" in src
+    assert "TOOL_ACCEPTED_FAILED" in src
+    # reject 路径仍归 ToolResult 词汇
+    assert "USER_REJECTION" in src
+    # 禁止越界使用其他 confirmation 的 *Kind
+    forbidden = (
+        "PlanConfirmationKind",
+        "StepConfirmationKind",
+        "UserInputConfirmationKind",
+        "FeedbackIntentKind",
+    )
+    for name in forbidden:
+        assert name not in src, (
+            f"tool handler 不应越界使用 {name}；slice 6-c 只覆盖 tool。"
+        )
+
+
+def test_tool_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatch):
+    """端到端：accept success / accept failed 两条路径，durable state 无 transition 字面量。
+
+    fake/mock 边界：monkeypatch execute_pending_tool 模拟成功 / 抛异常两条
+    路径；所有 state mutation / save_checkpoint / clear pending_tool 走
+    handler 真实代码。
+    """
+
+    import json
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    def _scan_no_leak(serialized: str) -> None:
+        for marker in (
+            "ToolConfirmationKind",
+            "tool_confirmation_transition",
+            "TransitionResult",
+        ):
+            assert marker not in serialized, (
+                f"transition 内部符号 {marker} 不应出现在 durable state 里"
+            )
+
+    def _continue(_ts):
+        return "continued"
+
+    # ----- accept success -----
+    def _fake_ok(*, state, turn_state, messages, pending):
+        from agent.conversation_events import append_tool_result
+        append_tool_result(messages, pending["tool_use_id"], "ok")
+
+    monkeypatch.setattr(ch, "execute_pending_tool", _fake_ok)
+
+    state_a = create_agent_state(system_prompt="test")
+    state_a.task.status = "awaiting_tool_confirmation"
+    state_a.task.pending_tool = {
+        "tool": "read_file",
+        "tool_use_id": "toolu_a",
+        "input": {"path": "x"},
+    }
+    ctx_a = ch.ConfirmationContext(
+        state=state_a,
+        turn_state=SimpleNamespace(on_display_event=lambda _e: None),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    ch.handle_tool_confirmation("y", ctx_a)
+    # success 契约不变（与 stage B 测试一致）
+    assert state_a.task.pending_tool is None
+    assert ckpt_file.exists()
+    _scan_no_leak(json.dumps(state_a.conversation.messages, ensure_ascii=False))
+    _scan_no_leak(ckpt_file.read_text(encoding="utf-8"))
+    ckpt_file.unlink()
+
+    # ----- accept failed -----
+    def _fake_raises(*, state, turn_state, messages, pending):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ch, "execute_pending_tool", _fake_raises)
+
+    state_b = create_agent_state(system_prompt="test")
+    state_b.task.status = "awaiting_tool_confirmation"
+    state_b.task.pending_tool = {
+        "tool": "read_file",
+        "tool_use_id": "toolu_b",
+        "input": {"path": "x"},
+    }
+    ctx_b = ch.ConfirmationContext(
+        state=state_b,
+        turn_state=SimpleNamespace(on_display_event=lambda _e: None),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    ch.handle_tool_confirmation("y", ctx_b)
+    # failed 契约：pending_tool 保留，但仍 checkpoint
+    assert state_b.task.pending_tool is not None
+    assert ckpt_file.exists(), (
+        "failed 路径 should_checkpoint=True，必须真实写入 checkpoint"
+    )
+    _scan_no_leak(json.dumps(state_b.conversation.messages, ensure_ascii=False))
+    _scan_no_leak(ckpt_file.read_text(encoding="utf-8"))

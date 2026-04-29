@@ -24,9 +24,11 @@ from agent.planner import generate_plan, format_plan_for_display
 from agent.runtime_events import (
     PlanConfirmationKind,
     StepConfirmationKind,
+    ToolConfirmationKind,
     ToolResultTransitionKind,
     plan_confirmation_transition,
     step_confirmation_transition,
+    tool_confirmation_transition,
     tool_result_transition,
 )
 from agent.task_runtime import advance_current_step_if_needed
@@ -441,8 +443,16 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
                 pending=pending,
             )
         except Exception as e:
-            # 执行失败时保留 pending_tool 以便排查；同时写一条 tool_result，
-            # 避免下次调用 API 因 tool_use 悬空而失败。
+            # v0.4 Phase 1 slice 6-c（tool 子切片）：用户已批准但执行抛异常。
+            # transition 表达 should_checkpoint=True + clear_pending_tool=False
+            # （**保留** pending_tool 以便人工排查，是 confirm_handlers L444
+            # 注释明确的真实诊断需求）；handler 仍负责实际写 tool_result
+            # 占位、status mutation、save_checkpoint，不让 transition 自己
+            # mutate 状态以保持 single source of truth。
+            failed_transition = tool_confirmation_transition(
+                ToolConfirmationKind.TOOL_ACCEPTED_FAILED
+            )
+            assert failed_transition.clear_pending_tool is False
             from agent.conversation_events import append_tool_result, has_tool_result
             if not has_tool_result(messages, pending["tool_use_id"]):
                 append_tool_result(
@@ -450,14 +460,27 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
                     pending["tool_use_id"],
                     f"[工具 {tool_name} 执行异常] {type(e).__name__}: {e}",
                 )
-            state.task.status = "running"
-            save_checkpoint(state)
+            if failed_transition.next_status:
+                state.task.status = failed_transition.next_status
+            if failed_transition.should_checkpoint:
+                save_checkpoint(state)
             return ctx.continue_fn(turn_state)
 
-        # 成功后再清空 pending_tool，失败情况下保留以便人工排查。
-        state.task.pending_tool = None
-        state.task.status = "running"
-        save_checkpoint(state)
+        # v0.4 Phase 1 slice 6-c（tool 子切片）：用户批准且工具成功执行。
+        # transition 表达 should_checkpoint=True + clear_pending_tool=True，
+        # handler 负责实际清 pending_tool（保持 L458 single source of truth，
+        # 由 test_tool_accept_success_path_clears_pending_tool_via_handler 钉死）
+        # 与 save_checkpoint。clear_pending_tool=True 只是 intent 标记，**不**
+        # 代表 transition 自己 mutate state；这一边界后续 slice 不能漂移。
+        success_transition = tool_confirmation_transition(
+            ToolConfirmationKind.TOOL_ACCEPTED_SUCCESS
+        )
+        if success_transition.clear_pending_tool:
+            state.task.pending_tool = None
+        if success_transition.next_status:
+            state.task.status = success_transition.next_status
+        if success_transition.should_checkpoint:
+            save_checkpoint(state)
         return ctx.continue_fn(turn_state)
 
     # 未执行分支（n / feedback）也要清空 pending_tool 并为悬空 tool_use 补占位结果。

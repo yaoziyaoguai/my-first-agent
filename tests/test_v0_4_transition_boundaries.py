@@ -3073,16 +3073,22 @@ def test_chat_remains_unique_loop_context_construction_site_in_core():
     )
 
 
-def test_run_main_loop_does_not_consume_loop_ctx_fields_directly():
-    """_run_main_loop 本轮只转发 loop_ctx，不消费其字段。
+def test_run_main_loop_consumes_only_max_loop_iterations_from_loop_ctx():
+    """_run_main_loop 函数体只允许消费 loop_ctx.max_loop_iterations。
 
-    Phase 2.2-b 的范围限定：主循环不读 loop_ctx.client / loop_ctx.model_name
-    （这些通过 _call_model 间接使用），也不读 loop_ctx.max_loop_iterations
-    （仍读模块级 MAX_LOOP_ITERATIONS，留给 Phase 2.2-c）。
+    Phase 2.2-b 阶段本测试名为 ``..._does_not_consume_loop_ctx_fields_directly``，
+    要求主循环完全不消费 loop_ctx 字段（只转发）。Phase 2.2-c 让循环兜底次数
+    成为 LoopContext 一等公民后，本测试**升级**为精确白名单：
+    - ✅ 允许：``loop_ctx.max_loop_iterations``（Phase 2.2-c 消费）；
+    - ❌ 禁止：``loop_ctx.client`` / ``loop_ctx.model_name``——这些必须
+      只在 ``_call_model`` 边界消费，主循环不得绕过 ``_call_model`` 直接
+      触碰 LLM provider 细节。
 
-    用 AST 检查而不是字符串扫描，因为函数 docstring 里也会用文本提到这些字段
-    名作为"不允许做的事"的说明——字符串扫描会误伤文档。AST 只看实际属性
-    访问表达式。
+    本测试**不是为了通过率而被弱化**——拦截能力等价提升：
+    - 旧版本可挡住"主循环顺手用任何字段"；
+    - 新版本可挡住"主循环顺手用 client/model_name 调 stream"或"主循环
+      顺手用 LoopContext 未来新增的任何非 max_loop_iterations 字段"。
+    用 AST 跳过 docstring 字符串匹配干扰。
     """
 
     import ast
@@ -3092,7 +3098,6 @@ def test_run_main_loop_does_not_consume_loop_ctx_fields_directly():
 
     src = inspect.getsource(core._run_main_loop)
     tree = ast.parse(src)
-    # 只看函数体（跳过 def 行 + docstring expr）
     func_def = tree.body[0]
     assert isinstance(func_def, ast.FunctionDef)
     body_nodes = func_def.body
@@ -3104,21 +3109,30 @@ def test_run_main_loop_does_not_consume_loop_ctx_fields_directly():
     ):
         body_nodes = body_nodes[1:]
 
-    # 收集所有 ast.Attribute 节点的属性名（仅当 value 是名为 loop_ctx 的 Name）
-    forbidden = {"client", "model_name", "max_loop_iterations"}
+    allowed = {"max_loop_iterations"}
+    # 显式列出禁用集合作为 docstring/审计参考（client/model_name 必须在
+    # _call_model 边界消费）；下面用 "not in allowed" 即可判断 illegal，
+    # 因此本变量只起文档作用，不参与判断。
+    forbidden = {"client", "model_name"}  # noqa: F841 -- 文档变量，参与 review 阅读
     consumed: list[str] = []
+    illegal: list[str] = []
     for node in body_nodes:
         for sub in ast.walk(node):
             if (
                 isinstance(sub, ast.Attribute)
                 and isinstance(sub.value, ast.Name)
                 and sub.value.id == "loop_ctx"
-                and sub.attr in forbidden
             ):
                 consumed.append(sub.attr)
-    assert consumed == [], (
-        f"_run_main_loop 函数体不应直接读 loop_ctx 的字段：{consumed}；"
-        "Phase 2.2-b 主循环只转发 loop_ctx 给 _call_model"
+                if sub.attr not in allowed:
+                    illegal.append(sub.attr)
+    assert illegal == [], (
+        f"_run_main_loop 函数体只允许消费 {allowed}；非法消费：{illegal}。"
+        "client / model_name 必须在 _call_model 边界消费，主循环不得绕过"
+    )
+    assert "max_loop_iterations" in consumed, (
+        "Phase 2.2-c 后 _run_main_loop 必须真正消费 loop_ctx.max_loop_iterations，"
+        "否则等于形迁移神不迁移（继续读 module-level MAX_LOOP_ITERATIONS）"
     )
 
 
@@ -3155,4 +3169,104 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
     # _start_planning_for_handler 应有 1 处调用并传 loop_ctx
     assert "_run_main_loop(turn_state, loop_ctx)" in handler_src, (
         "_start_planning_for_handler 调用 _run_main_loop 必须传上层 loop_ctx"
+    )
+
+
+# ========================================================================
+# Phase 2.2-c：MAX_LOOP_ITERATIONS 通过 LoopContext 注入
+# ------------------------------------------------------------------------
+# 这一组测试钉死 Phase 2.2-c 的契约：循环兜底次数从模块级常量隐式引用
+# 升级为 LoopContext 一等公民，由 chat() 单源构造、_run_main_loop 显式消费。
+#
+# 设计选择：
+# - 模块级 MAX_LOOP_ITERATIONS = 50 **保留**作为默认值来源——chat() 构造
+#   LoopContext 时引用它，运行时实际读取走 loop_ctx.max_loop_iterations；
+# - 现有 from agent.core import MAX_LOOP_ITERATIONS 测试导入仍可用
+#   （test_bug_hunting / test_runtime_error_recovery 等），向后兼容；
+# - 主循环函数体禁止再裸引用 MAX_LOOP_ITERATIONS：必须强制走 loop_ctx，
+#   否则迁移名存实亡（chat() 改 LoopContext.max_loop_iterations 时主循环
+#   仍走 50）。
+# ========================================================================
+
+
+def test_run_main_loop_no_longer_reads_module_level_max_loop_iterations():
+    """_run_main_loop 函数体禁止裸引用 MAX_LOOP_ITERATIONS。
+
+    Phase 2.2-c 的实质成果：循环上限的真值来源**只**通过 loop_ctx，
+    模块级常量退化为"chat() 构造 LoopContext 时使用的默认值"。如果主循环
+    仍读 MAX_LOOP_ITERATIONS，等于双源——chat() 改 loop_ctx.max_loop_iterations
+    时主循环仍按 module-level 50 跑。
+
+    用 AST 检查跳过 docstring 干扰（docstring 会用文本提到该常量名作为
+    "不应做的事"的说明）。只查实际 ast.Name 引用。
+    """
+
+    import ast
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._run_main_loop)
+    tree = ast.parse(src)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    body_nodes = func_def.body
+    if (
+        body_nodes
+        and isinstance(body_nodes[0], ast.Expr)
+        and isinstance(body_nodes[0].value, ast.Constant)
+        and isinstance(body_nodes[0].value.value, str)
+    ):
+        body_nodes = body_nodes[1:]
+
+    bad: list[ast.AST] = []
+    for node in body_nodes:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name) and sub.id == "MAX_LOOP_ITERATIONS":
+                bad.append(sub)
+    assert not bad, (
+        "_run_main_loop 函数体禁止裸引用 MAX_LOOP_ITERATIONS；"
+        "Phase 2.2-c 后必须通过 loop_ctx.max_loop_iterations 访问"
+    )
+
+
+def test_module_level_max_loop_iterations_still_exported_for_chat_default():
+    """模块级 MAX_LOOP_ITERATIONS 必须保留为 chat() LoopContext 默认值来源。
+
+    这是向后兼容契约：现有测试（test_bug_hunting / test_runtime_error_recovery）
+    依赖 ``from agent.core import MAX_LOOP_ITERATIONS`` 拿默认值用作上限计算
+    或健康检查 (== 50)。如果 Phase 2.2-c 顺手把这个常量删掉，会破坏这些测试。
+    保留常量也让 chat() 构造 LoopContext 时有显式默认值来源。
+    """
+
+    from agent import core
+
+    assert hasattr(core, "MAX_LOOP_ITERATIONS"), (
+        "agent/core.py 必须保留 MAX_LOOP_ITERATIONS 模块级常量作为 LoopContext "
+        "默认值来源；删除会破坏 test_bug_hunting / test_runtime_error_recovery"
+    )
+    assert isinstance(core.MAX_LOOP_ITERATIONS, int), (
+        "MAX_LOOP_ITERATIONS 必须是 int（chat() 直接传给 LoopContext 构造）"
+    )
+    assert core.MAX_LOOP_ITERATIONS > 0, (
+        "MAX_LOOP_ITERATIONS 必须正（LoopContext.__post_init__ 也会校验）"
+    )
+
+
+def test_chat_loop_context_max_loop_iterations_equals_module_default():
+    """chat() 构造 LoopContext 时 max_loop_iterations 必须等于模块级常量。
+
+    防止有人 Phase 2.2-c 后偷偷把 chat() 构造改成硬编码 ``max_loop_iterations=100``，
+    那样 module-level 常量就成了"看起来是默认值但 runtime 不用"的死代码——
+    比单源更糟糕（视觉默认值与实际默认值不一致）。
+    """
+
+    import inspect
+
+    from agent import core
+
+    chat_src = inspect.getsource(core.chat)
+    assert "max_loop_iterations=MAX_LOOP_ITERATIONS" in chat_src, (
+        "chat() 构造 LoopContext 时必须写 max_loop_iterations=MAX_LOOP_ITERATIONS，"
+        "保持模块级常量为默认值的视觉与实际真值一致"
     )

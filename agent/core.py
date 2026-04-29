@@ -59,7 +59,13 @@ from agent.runtime_observer import log_event as log_runtime_event
 # ========== 常量 ==========
 
 
-MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）
+MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）；
+# v0.4 Phase 2.2-c：本常量保留为**默认值来源**，由 chat() 构造 LoopContext 时
+# 引用，运行时实际读取走 loop_ctx.max_loop_iterations。同时兼容现有
+# `from agent.core import MAX_LOOP_ITERATIONS` 的测试（test_bug_hunting /
+# test_runtime_error_recovery 等）。后续如果引入 env / config 读取，应改为：
+#   MAX_LOOP_ITERATIONS = int(os.getenv("MAX_LOOP_ITERATIONS", 50))
+# 然后 chat() 仍读这个常量构造 loop_ctx。
 
 
 # ========== 全局 ==========
@@ -216,14 +222,16 @@ def chat(
         ),
     )
 
-    # v0.4 Phase 2.1/2.2-a/2.2-b：构造一次 LoopContext 实例作为运行时依赖
-    # 注入锚点，**整个调用链唯一构造点**。
-    # - Phase 2.2-a 已让 _run_planning_phase / _start_planning_for_handler 吃；
-    # - Phase 2.2-b 已让 _run_main_loop / _call_model 吃；
-    # - confirm_handlers / response_handlers 仍走 ConfirmationContext，未迁移。
-    # 严禁在 _run_main_loop / _call_model 内重建 LoopContext——那会引入
-    # 第二个构造源，破坏 SSOT 并让 chat() 改 client/model_name 时调用方拿到
-    # 旧值。本变量下划线前缀沿用，强调"内部依赖容器"语义。
+    # v0.4 Phase 2.1/2.2-a/2.2-b/2.2-c：构造一次 LoopContext 实例作为运行时
+    # 依赖注入锚点，**整个调用链唯一构造点**。
+    # - Phase 2.2-a：_run_planning_phase / _start_planning_for_handler 吃；
+    # - Phase 2.2-b：_run_main_loop / _call_model 吃；
+    # - Phase 2.2-c：_run_main_loop 开始消费 loop_ctx.max_loop_iterations
+    #   （client / model_name 仍只在 _call_model 消费）。
+    # confirm_handlers / response_handlers 仍走 ConfirmationContext，未迁移
+    # （评估属未来切片）。严禁在任何 helper 内重建 LoopContext——SSOT 单源
+    # 由 test_chat_remains_unique_loop_context_construction_site_in_core 钉死。
+    # 模块级 MAX_LOOP_ITERATIONS 仍保留作为默认值，并兼容现有测试 import。
     _loop_ctx = LoopContext(
         client=client,
         model_name=MODEL_NAME,
@@ -463,23 +471,24 @@ def _run_main_loop(
 ) -> str:
     """模型调用循环，按 stop_reason 分派处理。
 
-    v0.4 Phase 2.2-b 依赖注入边界
-    -----------------------------
-    本函数 **唯一** 改动是签名增加 ``loop_ctx``，并在调用 ``_call_model`` 时
-    原样转发——目的不是 slimming 主循环，而是修复 SSOT 双源风险：
-    ``_call_model`` 是 LLM provider 边界，必须显式吃 ``loop_ctx`` 才能让
-    ``client`` / ``model_name`` 不再隐式引用模块级单例；而 ``_call_model``
-    的唯一调用方是本函数，所以本函数必须先能拿到 ``loop_ctx`` 才能转发，
-    否则只能在函数内重建 LoopContext，造成与 chat() 构造点的双源。
+    v0.4 Phase 2.2-b/2.2-c 依赖注入边界
+    -----------------------------------
+    本函数签名增加 ``loop_ctx`` 后承担两个最小职责：
+    1. **转发**给 ``_call_model``（Phase 2.2-b）：让 LLM provider 边界
+       (``client`` / ``model_name``) 显式吃 LoopContext，不再隐式引用模块级。
+    2. **消费 ``loop_ctx.max_loop_iterations``**（Phase 2.2-c）：循环兜底次数
+       归为 runtime configuration，与 client/model_name 同级，由 chat() 单源
+       构造。模块级 ``MAX_LOOP_ITERATIONS = 50`` 仍保留作为**默认值**，供
+       chat() 构造 LoopContext 时引用，并兼容现有 ``from agent.core import
+       MAX_LOOP_ITERATIONS`` 的测试。
 
     本切片**严格不做的事**：
     - ❌ 不在函数体内构造 LoopContext（已有 chat() 唯一构造点）；
-    - ❌ 不读 ``loop_ctx.client`` / ``loop_ctx.model_name`` 自己使用——本函数
-      不直接调 SDK，只通过 ``_call_model`` 间接使用；保持"主循环不知道
-      LLM provider 细节"的边界；
+    - ❌ 不读 ``loop_ctx.client`` / ``loop_ctx.model_name`` 自己使用——这些
+      通过 ``_call_model`` 间接消费，保持"主循环不知道 LLM provider 细节"
+      的边界；
     - ❌ 不动主循环控制流（while/guard/iteration log/dispatch 全部不变）；
-    - ❌ 不动 ``state.task.loop_iterations`` / ``MAX_LOOP_ITERATIONS`` 比较；
-      Phase 2.2-c 才考虑把 max_loop_iterations 也走 loop_ctx；
+    - ❌ 不动 ``state.task.loop_iterations`` 自增逻辑；
     - ❌ 不动 ``save_checkpoint`` / ``clear_checkpoint`` / ``state.reset_task``
       调用时机；
     - ❌ 不动 ``classify_model_output`` 分类与 4 个 dispatch 分支。
@@ -498,7 +507,7 @@ def _run_main_loop(
             event_payload=_runtime_loop_fields(),
             event_channel="loop",
         )
-        if state.task.loop_iterations > MAX_LOOP_ITERATIONS:
+        if state.task.loop_iterations > loop_ctx.max_loop_iterations:
             log_runtime_event(
                 "loop.guard_triggered",
                 event_source="runtime",
@@ -508,7 +517,9 @@ def _run_main_loop(
                 },
                 event_channel="loop",
             )
-            print(f"\n[系统] 循环次数超过上限 {MAX_LOOP_ITERATIONS}，强制停止。")
+            print(
+                f"\n[系统] 循环次数超过上限 {loop_ctx.max_loop_iterations}，强制停止。"
+            )
             from agent.checkpoint import clear_checkpoint as _clear_checkpoint
             _clear_checkpoint()
             state.reset_task()

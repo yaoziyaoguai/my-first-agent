@@ -63,16 +63,30 @@ Completed in the current baseline:
   Existing `tool_result` message writing stays unchanged; the slice only makes
   failure outcome intent explicit and keeps failure distinct from policy denial,
   user rejection, and success.
+- The third ToolResult transition slice maps `ToolSuccess` to `TransitionResult`,
+  completing the symmetric tool result vocabulary at the transition layer.
+  Both `execute_single_tool` direct path and `execute_pending_tool` confirmed
+  path now route success outcome intent through a unified `_tool_outcome_transition`
+  helper, so the four tool outcomes (success / failure / policy denial / user
+  rejection) are symmetric at the transition naming layer. Existing
+  `tool_result` message writing, checkpoint persistence, tool execution
+  (`execute_tool`), and user confirmation handler boundaries all remain
+  unchanged. `rejected_by_check` (tool-internal safety reject) deliberately
+  stays on the raw `display_event_type` fallback path so it does not get
+  collapsed into success or failure semantics.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
-  separation, status-line rendering, event/result naming, and the first
-  ToolResult transition slices.
+  separation, status-line rendering, event/result naming, and the first three
+  ToolResult transition slices (policy denial, user rejection, tool failure,
+  tool success).
 
 Not completed yet:
 
 - Complete event-driven state machine.
 - `core.py` main-loop slimming.
-- Full ToolResult / tool result migration, including tool success and moving
-  `tool_result` message writing itself behind a transition boundary.
+- Full tool result message migration: current slices keep `append_tool_result`
+  calls in handlers; only outcome intent / display event / checkpoint gating
+  goes through `TransitionResult`. Moving `tool_result` message writing itself
+  behind a transition boundary is a later slice.
 - Full ModelOutput / model output classification migration.
 - Full user confirmation/rejection migration.
 

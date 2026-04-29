@@ -97,6 +97,53 @@ def _tool_failure_transition(status: str, *, from_pending_tool: bool) -> Any | N
     )
 
 
+def _tool_success_transition(status: str, *, from_pending_tool: bool) -> Any | None:
+    """把真实 success status 映射到 v0.4 TransitionResult（slice 4）。
+
+    中文学习边界：
+    - 这是 v0.4 Phase 1 第 4 个切片，目标是把 ToolFailure 已经形成的
+      ``TransitionResult`` 边界镜像到成功路径，让 tool 调用 4 类结局
+      （success / failure / policy denial / user rejection）在 transition
+      命名层完全对称，方便后续 slice 5/6 继续收敛 ModelOutput / 用户确认。
+    - 只处理 ``status == "executed"``：``rejected_by_check`` 是工具内部
+      安全检查拒绝（不是 policy denial），现阶段刻意保留它走 fallback
+      的 raw display_event_type，**不要**把它误归 success；
+      ``failed`` 由 :func:`_tool_failure_transition` 单独负责。
+    - 本切片**不**接管 ``tool_result`` 消息写入、**不**改 checkpoint schema、
+      **不**改工具实际执行（``execute_tool`` 调用）、**不**改用户确认逻辑、
+      **不**做 ModelOutput 分类、**不**瘦 ``core.py`` 主循环——这些都在
+      后续 slice / phase 单独迁移，避免一把大重构。
+    - 行为兼容：``TOOL_SUCCESS`` 的 ``display_events`` 是 ``("tool.completed",)``、
+      ``should_checkpoint=True``、``clear_pending_tool=False``（``from_pending_tool``
+      只是把意图表达给调用方，``execute_pending_tool`` 现阶段仍由
+      ``confirm_handlers`` 在外层清 pending，不在本函数内动 state）。
+    """
+
+    if status != "executed":
+        return None
+    return tool_result_transition(
+        ToolResultTransitionKind.TOOL_SUCCESS,
+        from_pending_tool=from_pending_tool,
+    )
+
+
+def _tool_outcome_transition(status: str, *, from_pending_tool: bool) -> Any | None:
+    """统一获取 success / failure 的 transition（slice 4 集中入口）。
+
+    中文学习边界：``rejected_by_check`` / ``blocked_by_policy`` 都不在这里
+    处理——前者保留 fallback 让 raw ``display_event_type`` 走 ``tool.rejected``，
+    后者由 ``execute_single_tool`` 在 confirmation block 分支里直接调用
+    :func:`tool_result_transition` (POLICY_DENIAL)。这样四类结局**只**走
+    各自专属入口，不会被 substring 判断混淆。
+    """
+
+    return _tool_failure_transition(
+        status, from_pending_tool=from_pending_tool
+    ) or _tool_success_transition(
+        status, from_pending_tool=from_pending_tool
+    )
+
+
 def _failure_retry_hint(tool_name: str, tool_input: dict[str, Any]) -> str:
     """生成失败后的重试提示，并对工具输入做脱敏。
 
@@ -341,7 +388,8 @@ def execute_single_tool(
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     status, display_event_type, status_text = _classify_tool_outcome(result)
-    transition = _tool_failure_transition(status, from_pending_tool=False)
+    transition = _tool_outcome_transition(status, from_pending_tool=False)
+    failure_transition = _tool_failure_transition(status, from_pending_tool=False)
     if status in ("failed", "rejected_by_check"):
         # 失败 / 拒绝都不应让模型在下一轮重试同一调用；提示语言一致
         # （rejected 通常是路径/内容触犯安全检查，failure 是运行报错）。
@@ -353,7 +401,10 @@ def execute_single_tool(
 
     if transition and transition.clear_pending_tool:
         state.task.pending_tool = None
-    log_input = _mask_failure_value(tool_input) if transition else tool_input
+    # 脱敏只在真实 failure 路径生效；success / rejected_by_check 的入参
+    # 由用户确认 / 安全策略层面已经把关，这里不做额外 transformation 以
+    # 避免 success 的 durable log 里出现"被本轮 slice 顺手改写"的内容。
+    log_input = _mask_failure_value(tool_input) if failure_transition else tool_input
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
@@ -419,7 +470,8 @@ def execute_pending_tool(
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     status, display_event_type, status_text = _classify_tool_outcome(result)
-    transition = _tool_failure_transition(status, from_pending_tool=True)
+    transition = _tool_outcome_transition(status, from_pending_tool=True)
+    failure_transition = _tool_failure_transition(status, from_pending_tool=True)
     if status in ("failed", "rejected_by_check"):
         result = mask_user_visible_secrets(result)
         result = (
@@ -427,7 +479,7 @@ def execute_pending_tool(
             f"{_failure_retry_hint(tool_name, tool_input)}"
         )
 
-    log_input = _mask_failure_value(tool_input) if transition else tool_input
+    log_input = _mask_failure_value(tool_input) if failure_transition else tool_input
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,

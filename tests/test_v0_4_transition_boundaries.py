@@ -1642,3 +1642,173 @@ def test_step_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatc
         "如果误调 save_checkpoint，已停止任务会在 resume 时复活。"
     )
     _scan_no_leak(json.dumps(state_c.conversation.messages, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-c 准备 · tool confirmation pending_tool single source 契约
+# ---------------------------------------------------------------------------
+# 中文学习边界：本测试钉死的「真实回归点」
+# - tool accept 路径成功执行后，pending_tool 必须由 handler 清掉。
+#   handler 的 L458 一直承担这个 single source of truth，不能漂移到
+#   transition 自动 mutate。后续做 tool confirmation transition 时，
+#   transition 字段（如 clear_pending_tool）只能表达 intent，
+#   handler 仍是实际清理的执行方。这一条防止 slice 6-c 把清理职责
+#   错位到 transition layer 引起静默漏清或重复清理。
+# - 异常路径必须保留 pending_tool 以便人工排查；这是 handler 故意保留
+#   的真实排查需求，不能因为 transition 模板"看起来对称"就强行清掉。
+#
+# fake/mock 边界：本测试用 monkeypatch 把 execute_pending_tool 替换成
+# 一个最小 fake，模拟「工具成功执行 → handler 走到 L458」与「工具抛
+# 异常 → handler 走到 L443 except 分支」两条真实路径。fake 不替代
+# handler 的清理职责，仅替代 tool 实际 IO，因为本测试要测的是 handler
+# 的清理契约，不是 tool 是否真的能跑。
+
+def test_tool_accept_success_path_clears_pending_tool_via_handler(tmp_path, monkeypatch):
+    """tool accept 成功执行后，pending_tool 必须为 None（由 handler 清理）。"""
+
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    # fake：模拟工具成功执行，不动 pending_tool。这样如果 handler 不清，
+    # pending_tool 会留在 state 里被本测试断言抓到。
+    def _fake_execute_pending_tool(*, state, turn_state, messages, pending):
+        # 模拟工具产生 tool_result（真实 execute_pending_tool 也会写）
+        from agent.conversation_events import append_tool_result
+        append_tool_result(messages, pending["tool_use_id"], "ok")
+
+    monkeypatch.setattr(ch, "execute_pending_tool", _fake_execute_pending_tool)
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_tool_confirmation"
+    state.task.pending_tool = {
+        "tool": "read_file",
+        "tool_use_id": "toolu_test_accept",
+        "input": {"path": "x"},
+    }
+
+    def _continue(_ts):
+        return "continued"
+
+    ctx = ch.ConfirmationContext(
+        state=state,
+        turn_state=SimpleNamespace(on_display_event=lambda _e: None),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out = ch.handle_tool_confirmation("y", ctx)
+    assert out == "continued"
+
+    # 核心契约：accept 成功路径，pending_tool 必须被 handler 清。
+    assert state.task.pending_tool is None, (
+        "tool accept 成功后 pending_tool 必须由 handler 清理；"
+        "如果清理职责漂移到 transition 自动 mutate 或漏掉，"
+        "下一轮 awaiting_tool_confirmation 会复用旧 pending_tool 数据。"
+    )
+    assert state.task.status == "running"
+    assert ckpt_file.exists(), "tool accept 成功路径必须真实写入 checkpoint"
+
+
+def test_tool_accept_exception_path_keeps_pending_tool_for_inspection(tmp_path, monkeypatch):
+    """tool accept 但执行抛异常时，pending_tool 必须保留以便人工排查。
+
+    这是 handler L444 注释明确的真实排查需求；transition 模板对称化时
+    不能因为「accept 路径都该清」就把这条排查路径改坏。
+    """
+
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    def _fake_raises(*, state, turn_state, messages, pending):
+        raise RuntimeError("tool execution failed for testing")
+
+    monkeypatch.setattr(ch, "execute_pending_tool", _fake_raises)
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_tool_confirmation"
+    pending_payload = {
+        "tool": "read_file",
+        "tool_use_id": "toolu_test_exc",
+        "input": {"path": "x"},
+    }
+    state.task.pending_tool = dict(pending_payload)
+
+    def _continue(_ts):
+        return "continued"
+
+    ctx = ch.ConfirmationContext(
+        state=state,
+        turn_state=SimpleNamespace(on_display_event=lambda _e: None),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out = ch.handle_tool_confirmation("y", ctx)
+    assert out == "continued"
+
+    # 核心契约：异常路径必须保留 pending_tool。
+    assert state.task.pending_tool is not None, (
+        "tool accept 但执行抛异常时，pending_tool 必须保留以便排查；"
+        "如果被错误清掉，用户/开发者无法知道当时在试图执行什么工具。"
+    )
+    assert state.task.pending_tool["tool_use_id"] == pending_payload["tool_use_id"]
+    assert state.task.status == "running"
+
+
+def test_tool_reject_path_clears_pending_tool_via_transition_intent(tmp_path, monkeypatch):
+    """tool reject 路径：清理由 handler 读 transition.clear_pending_tool 触发。
+
+    钉死 USER_REJECTION transition 的 clear_pending_tool=True 契约不会
+    在后续 slice 6-c 重命名为 ToolConfirmationKind 时被破坏。
+    """
+
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_tool_confirmation"
+    state.task.pending_tool = {
+        "tool": "read_file",
+        "tool_use_id": "toolu_test_reject",
+        "input": {"path": "x"},
+    }
+
+    def _continue(_ts):
+        return "continued"
+
+    ctx = ch.ConfirmationContext(
+        state=state,
+        turn_state=SimpleNamespace(on_display_event=lambda _e: None),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out = ch.handle_tool_confirmation("n", ctx)
+    assert out == "continued"
+
+    # reject 路径 pending_tool 必须清掉（transition.clear_pending_tool=True
+    # → handler 显式清）。
+    assert state.task.pending_tool is None, (
+        "tool reject 后 pending_tool 必须清；这条契约由 USER_REJECTION "
+        "transition 的 clear_pending_tool=True 表达 intent，"
+        "handler 实际执行清理。"
+    )
+    assert state.task.status == "running"

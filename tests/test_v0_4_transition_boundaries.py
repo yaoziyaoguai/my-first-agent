@@ -1151,3 +1151,213 @@ def test_classify_model_output_does_not_leak_into_durable_state(
     for marker in ("ModelOutputKind", "classify_model_output"):
         assert marker not in serialized_messages
         assert marker not in serialized_checkpoint
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6（plan 子切片）· plan confirmation transition 边界测试
+# ---------------------------------------------------------------------------
+# 中文学习边界：本组测试钉死的「真实回归点」
+# - PLAN_ACCEPTED 必须明确表达 next_status="running" + should_checkpoint=True，
+#   防止后续有人把 plan accept 改成不 checkpoint（resume 时会丢任务）。
+# - PLAN_REJECTED 必须明确表达 should_checkpoint=False（即将 reset_task /
+#   clear_checkpoint），防止后续有人在拒绝路径上反向 save_checkpoint，
+#   把已经清掉的 task 状态又落盘（resume 时会"复活幽灵任务"）。
+# - 纯函数性：plan_confirmation_transition 不读 state、不写 messages、不动
+#   checkpoint；这是 v0.4 transition 边界的硬约束。
+# - 不覆盖 step / tool / user_input / feedback_intent confirmation——这些
+#   slice 6 后续小步才做，本组测试不能错误覆盖它们的语义。
+# - source-level 契约：handle_plan_confirmation 的 accept / reject 路径必须
+#   真正调用 plan_confirmation_transition；这一条防止有人「绕过 transition
+#   层」直接回到 inline `state.task.status = "running"` 的旧写法。
+
+def test_plan_confirmation_kind_covers_only_plan_outcomes():
+    """枚举只覆盖 plan 的两类终结意图，不应混入 step/tool/user_input。"""
+
+    from agent.runtime_events import PlanConfirmationKind
+
+    values = {member.value for member in PlanConfirmationKind}
+    assert values == {"plan_accepted", "plan_rejected"}
+
+
+def test_plan_confirmation_transition_accept_intent_marks_checkpoint_and_running():
+    """接受 plan 必须表达 next_status=running + should_checkpoint=True。"""
+
+    from agent.runtime_events import (
+        PlanConfirmationKind,
+        plan_confirmation_transition,
+    )
+
+    result = plan_confirmation_transition(PlanConfirmationKind.PLAN_ACCEPTED)
+    assert result.next_status == "running"
+    assert result.should_checkpoint is True
+    assert result.clear_pending_tool is False
+    assert result.clear_pending_user_input is False
+    assert result.advance_step is False
+    assert "plan.accepted" in result.display_events
+
+
+def test_plan_confirmation_transition_reject_intent_does_not_checkpoint():
+    """拒绝 plan 必须表达 should_checkpoint=False，避免幽灵 checkpoint。"""
+
+    from agent.runtime_events import (
+        PlanConfirmationKind,
+        plan_confirmation_transition,
+    )
+
+    result = plan_confirmation_transition(PlanConfirmationKind.PLAN_REJECTED)
+    # 关键：拒绝路径不能再 checkpoint，因为 handler 紧接着会 reset_task +
+    # clear_checkpoint；如果 transition 反过来要求 checkpoint，会让已清空
+    # 的 task 状态又被落盘，resume 时复活已取消的任务。
+    assert result.should_checkpoint is False
+    assert result.next_status is None
+    assert "plan.rejected" in result.display_events
+
+
+def test_plan_confirmation_transition_rejects_unknown_kinds():
+    """未知 kind 必须显式失败，避免下游静默走 default 分支误判。"""
+
+    import pytest
+
+    from agent.runtime_events import plan_confirmation_transition
+
+    class _Foreign:
+        value = "step_accepted"  # 故意伪装成另一类 confirmation 的 kind
+
+    with pytest.raises(ValueError):
+        plan_confirmation_transition(_Foreign())
+
+
+def test_plan_confirmation_transition_is_pure_function():
+    """transition 工厂不读 state、不写 messages、不动 checkpoint；纯函数。
+
+    fake/mock 边界说明：本测试不实例化真实 TaskState；纯靠 'before/after
+    返回值相等' 来检测隐性副作用。如果未来 transition helper 偷偷开始读
+    全局 module-level 状态或调 logger / checkpoint，就会破坏这一条断言。
+    """
+
+    from agent.runtime_events import (
+        PlanConfirmationKind,
+        plan_confirmation_transition,
+    )
+
+    a1 = plan_confirmation_transition(PlanConfirmationKind.PLAN_ACCEPTED)
+    a2 = plan_confirmation_transition(PlanConfirmationKind.PLAN_ACCEPTED)
+    r1 = plan_confirmation_transition(PlanConfirmationKind.PLAN_REJECTED)
+    r2 = plan_confirmation_transition(PlanConfirmationKind.PLAN_REJECTED)
+    assert a1 == a2
+    assert r1 == r2
+    assert a1 != r1
+
+
+def test_handle_plan_confirmation_source_actually_routes_through_transition():
+    """source-level 契约：handler 不允许绕过 transition 层回到 inline 写法。
+
+    背景：confirm_handlers 是 chat() 间接调用的产物，handler 直接独立
+    单元测试需要构造大量 ConfirmationContext / continue_fn / turn_state；
+    现有 tests/test_complex_scenarios.py / tests/test_feedback_intent_flow.py
+    已经从端到端层面覆盖了 plan 接受 / 拒绝的真实行为（status / messages
+    / checkpoint 全部通过其他测试守住）。这里补一条 source-level 契约，
+    专门钉「handler 真的调用了 plan_confirmation_transition」，防止后续
+    有人重构时把 transition 调用删掉，让边界命名形同虚设。
+    """
+
+    import inspect
+
+    from agent import confirm_handlers
+
+    src = inspect.getsource(confirm_handlers.handle_plan_confirmation)
+    assert "plan_confirmation_transition" in src, (
+        "handle_plan_confirmation 必须通过 plan_confirmation_transition 表达"
+        "Runtime 意图，禁止回到 inline status 赋值的旧写法。"
+    )
+    assert "PlanConfirmationKind.PLAN_ACCEPTED" in src
+    assert "PlanConfirmationKind.PLAN_REJECTED" in src
+    # 不允许 step / tool / user_input / feedback_intent 的 *Kind 出现在 plan handler 里。
+    forbidden = (
+        "StepConfirmationKind",
+        "ToolConfirmationKind",
+        "UserInputConfirmationKind",
+        "FeedbackIntentKind",
+    )
+    for name in forbidden:
+        assert name not in src, (
+            f"plan handler 不应越界使用 {name}；slice 6 plan 子切片只覆盖 plan。"
+        )
+
+
+def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(tmp_path, monkeypatch):
+    """durable state 不应包含 PlanConfirmationKind / plan_confirmation_transition 字面量。
+
+    通过端到端调用 handle_plan_confirmation 的接受 / 拒绝路径，序列化
+    messages 与 checkpoint 后扫描 transition 层符号，确认它们只是 Runtime
+    内部命名，没有泄漏成持久化字段。这条防止后续重构「不小心 dump 了
+    TransitionResult」。
+    """
+
+    import json
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    # ----- accept 路径 -----
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_plan_confirmation"
+    state.task.current_plan = [{"step": 1, "description": "do x"}]
+
+    def _continue(_ts):
+        return "continued"
+
+    ctx = ch.ConfirmationContext(
+        state=state,
+        turn_state=SimpleNamespace(),
+        client=None, model_name="x", continue_fn=_continue,
+    )
+    ch.handle_plan_confirmation("y", ctx)
+    assert state.task.status == "running"
+
+    serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
+    if ckpt_file.exists():
+        serialized_ckpt = ckpt_file.read_text(encoding="utf-8")
+    else:
+        serialized_ckpt = ""
+
+    for marker in (
+        "PlanConfirmationKind",
+        "plan_confirmation_transition",
+        "TransitionResult",
+    ):
+        assert marker not in serialized_messages, (
+            f"transition 内部符号 {marker} 不应出现在 durable messages 里"
+        )
+        assert marker not in serialized_ckpt, (
+            f"transition 内部符号 {marker} 不应出现在 checkpoint 里"
+        )
+
+    # ----- reject 路径 -----
+    state2 = create_agent_state(system_prompt="test")
+    state2.task.status = "awaiting_plan_confirmation"
+    state2.task.current_plan = [{"step": 1, "description": "do y"}]
+    ctx2 = ch.ConfirmationContext(
+        state=state2,
+        turn_state=SimpleNamespace(),
+        client=None, model_name="x", continue_fn=_continue,
+    )
+    out = ch.handle_plan_confirmation("n", ctx2)
+    assert "已取消" in out
+    # reset_task 之后 task 应回到初始状态
+    assert state2.task.status == "idle"
+    # clear_checkpoint 之后文件应不存在
+    assert not ckpt_file.exists()
+
+    serialized_messages2 = json.dumps(state2.conversation.messages, ensure_ascii=False)
+    for marker in (
+        "PlanConfirmationKind",
+        "plan_confirmation_transition",
+        "TransitionResult",
+    ):
+        assert marker not in serialized_messages2

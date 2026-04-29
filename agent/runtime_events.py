@@ -211,3 +211,75 @@ def classify_model_output(stop_reason: str | None) -> ModelOutputKind:
     if stop_reason == "max_tokens":
         return ModelOutputKind.MAX_TOKENS
     return ModelOutputKind.UNKNOWN
+
+
+class PlanConfirmationKind(str, Enum):
+    """v0.4 Phase 1 slice 6（plan 子切片）：plan 确认结局的统一词汇。
+
+    中文学习边界：
+    - 这一组值描述用户对**已生成的 plan** 的最终决定（接受 / 拒绝），
+      让 ``handle_plan_confirmation`` 的两条分支不再仅靠 inline 字符串
+      （``"accept"`` / ``"reject"``）和散落的 ``state.task.status = "running"``
+      赋值来表达意图。
+    - 它**不**覆盖 step 确认（涉及 ``advance_current_step_if_needed``）、
+      也**不**覆盖 tool 确认（涉及 ``pending_tool``）、也**不**覆盖
+      user_input / feedback_intent 确认（涉及 ``pending_user_input_request``）；
+      这些 confirmation 各自有不同的 mutation 语义，强行用同一枚举会把
+      slice 6 的边界模糊化。后续每个 confirmation 走自己的 *Kind 是为了
+      让 transition 词汇直接对应真实状态变更。
+    - 「feedback 三选一」分支（用户既不接受也不直接拒绝，要求修改 plan）
+      不在这里映射：那条路径是切到 ``awaiting_feedback_intent`` 子状态，
+      不属于 plan 本身的最终结局；本切片刻意不抽象它，留给后续 slice。
+    - 不写 messages、不动 checkpoint、不调 planner、不 reset task；
+      实际副作用仍由 ``handle_plan_confirmation`` 完成。
+    """
+
+    PLAN_ACCEPTED = "plan_accepted"
+    PLAN_REJECTED = "plan_rejected"
+
+
+def plan_confirmation_transition(kind: PlanConfirmationKind) -> TransitionResult:
+    """把 plan 确认结局映射到轻量 :class:`TransitionResult`。
+
+    中文学习边界：
+    - 与 :func:`tool_result_transition` 同形：只描述「Runtime 应该如何
+      处理这次 plan 确认」的意图，不替 handler 写 messages、不直接调
+      ``save_checkpoint`` / ``clear_checkpoint`` / ``state.reset_task``。
+    - ``PLAN_ACCEPTED``：should_checkpoint=True，下一状态是 ``"running"``，
+      让循环继续按 plan 推进；display 事件用 ``plan.accepted``，与现有
+      ``plan_confirm_yes`` control event 命名意图一致但属于 transition 层
+      命名，不冲突。
+    - ``PLAN_REJECTED``：用户主动取消任务。Runtime 应该清掉 task 状态
+      （``state.reset_task()``）并删除 checkpoint，因此 ``should_checkpoint``
+      保持 False（**不**写新的 checkpoint），但 notes 里明确指出 handler
+      仍需要 ``clear_checkpoint``——这一点目前由 handler 自己执行，等后续
+      slice 把这种「负向落盘」也统一时，再扩展 :class:`TransitionResult`
+      字段，避免本切片就引入新字段污染语义。
+    - 不接受其他枚举值；任何未来扩展（plan 修改 / plan 重生成 / feedback
+      三选一）都应另起新 kind，而不是在这里加分支，避免「一个 helper 决
+      策一切」的反模式。
+    """
+
+    if kind == PlanConfirmationKind.PLAN_ACCEPTED:
+        return TransitionResult(
+            next_status="running",
+            should_checkpoint=True,
+            display_events=("plan.accepted",),
+            reason=kind.value,
+            notes=(
+                "user explicitly approved the generated plan",
+                "handler still owns messages append and save_checkpoint call",
+            ),
+        )
+    if kind == PlanConfirmationKind.PLAN_REJECTED:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=False,
+            display_events=("plan.rejected",),
+            reason=kind.value,
+            notes=(
+                "user explicitly cancelled the task; not a feedback request",
+                "handler still owns reset_task and clear_checkpoint",
+            ),
+        )
+    raise ValueError(f"unsupported plan confirmation kind: {kind.value}")

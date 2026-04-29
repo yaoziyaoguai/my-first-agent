@@ -21,7 +21,12 @@ from agent.display_events import (
 from agent.input_intents import classify_confirmation_response
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
-from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
+from agent.runtime_events import (
+    PlanConfirmationKind,
+    ToolResultTransitionKind,
+    plan_confirmation_transition,
+    tool_result_transition,
+)
 from agent.task_runtime import advance_current_step_if_needed
 from agent.tool_executor import execute_pending_tool
 from agent.transitions import apply_user_replied_transition
@@ -169,14 +174,35 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     response = _confirmation_response(confirm)
 
     if response == "accept":
+        # v0.4 Phase 1 slice 6（plan 子切片）：把"用户接受 plan"的 Runtime
+        # 意图通过 PlanConfirmationKind.PLAN_ACCEPTED 走 transition 表达；
+        # transition 只描述意图（next_status="running" + should_checkpoint=True），
+        # 实际 messages append / save_checkpoint / 继续主循环仍由本 handler
+        # 完成，**不**改变行为，仅把"该向何处去"的命名集中到 runtime_events，
+        # 与 ToolResult / ModelOutput 边界保持同一套 v0.4 方向。
+        accept_transition = plan_confirmation_transition(
+            PlanConfirmationKind.PLAN_ACCEPTED
+        )
         append_control_event(messages, "plan_confirm_yes", {})
-        state.task.status = "running"
-        save_checkpoint(state)
+        if accept_transition.next_status:
+            state.task.status = accept_transition.next_status
+        if accept_transition.should_checkpoint:
+            save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
     if response == "reject":
+        # v0.4 Phase 1 slice 6（plan 子切片）：把"用户拒绝 plan = 取消任务"
+        # 的意图通过 PlanConfirmationKind.PLAN_REJECTED 表达。transition 不
+        # 写新 checkpoint（task 即将清空），但提示 handler 仍要 reset_task
+        # + clear_checkpoint —— 这两步是真实 durable mutation，本 slice
+        # 不抽象掉，等后续 slice 把"负向落盘"也统一时再扩展 TransitionResult。
+        reject_transition = plan_confirmation_transition(
+            PlanConfirmationKind.PLAN_REJECTED
+        )
         append_control_event(messages, "plan_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，已取消。"})
+        # transition 明确不 checkpoint；handler 显式做反向清理。
+        assert not reject_transition.should_checkpoint
         state.reset_task()
         clear_checkpoint()
         return "好的，已取消。"

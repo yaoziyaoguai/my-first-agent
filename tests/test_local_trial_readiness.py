@@ -176,17 +176,22 @@ def test_readme_keeps_local_trial_entry_short() -> None:
     """README 只做入口，不复制整张试用清单。
 
     这是 Roadmap 防漂移：README 是 quickstart，不是 v0.3.2 trial 工单系统。
-    如果把 checklist 表格复制进 README，后续命令/边界会出现两份事实源。
+    如果把 checklist / manual feedback 模板复制进 README，后续命令/边界会出现
+    多份事实源。
     """
     text = _read("README.md")
     assert "docs/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
+    assert "docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md" in text
+    assert "docs/V0_4_EVENT_TRANSITION_PREP.md" in text
     copied_markers = [
         "| 1 | 启动 shell |",
         "| 2 | 普通 final answer |",
         "建议归类：v0.3.2 blocking / v0.3.x patch / v0.4 planning",
+        "category: v0.3.x patch / v0.4 candidate / out of scope",
+        "evidence: status line / log line / checkpoint summary / screenshot note",
     ]
     leaked = [marker for marker in copied_markers if marker in text]
-    assert not leaked, f"README 不应复制 checklist 正文：{leaked}"
+    assert not leaked, f"README 不应复制 trial 模板正文：{leaked}"
 
 
 def test_local_trial_checklist_feedback_format_is_stable() -> None:
@@ -322,6 +327,204 @@ def test_v0_3_2_trial_report_commands_match_cli_entrypoints(monkeypatch, capsys)
     monkeypatch.setattr(main_module, "_selected_input_backend", lambda: "simple")
     assert main_module.main(["--shell"]) == 0
     assert calls == ["init", "resume", "loop"]
+
+
+def test_v0_3_2_manual_trial_feedback_doc_exists_and_is_actionable() -> None:
+    """人工试用反馈文档必须存在，并覆盖真实 trial 会踩到的路径。
+
+    这是 v0.3.2 的反馈闭环守护：它不是为了堆文档覆盖率，而是确保用户线下
+    试用时能把问题稳定记录成 command/input/expected/actual/evidence，而不是
+    只留下无法复现的自然语言抱怨。
+    """
+    path = REPO_ROOT / "docs" / "V0_3_2_MANUAL_TRIAL_FEEDBACK.md"
+    assert path.exists(), "v0.3.2 manual trial feedback 文档必须存在"
+    text = path.read_text(encoding="utf-8")
+    lower = text.lower()
+
+    required_terms = [
+        "v0.3.2 trial candidate",
+        "baseline head",
+        "final answer",
+        "request_user_input",
+        "tool success",
+        "tool rejection",
+        "policy denial",
+        "tool failure",
+        "checkpoint/resume",
+        "python main.py health",
+        "python main.py logs --tail 5",
+        "python main.py --shell",
+    ]
+    missing = [term for term in required_terms if term.lower() not in lower]
+    assert not missing, f"manual trial feedback 缺试用任务：{missing}"
+
+    feedback_fields = [
+        "command:",
+        "input:",
+        "expected:",
+        "actual:",
+        "blocked: yes/no",
+        "category: v0.3.x patch / v0.4 candidate / out of scope",
+        "evidence: status line / log line / checkpoint summary / screenshot note",
+    ]
+    missing_fields = [term for term in feedback_fields if term not in text]
+    assert not missing_fields, f"manual trial feedback 缺反馈字段：{missing_fields}"
+
+
+def test_manual_trial_feedback_doc_routes_scope_without_overclaiming() -> None:
+    """manual feedback 文档必须把 patch / v0.4 / out-of-scope 分清楚。
+
+    Roadmap 边界在这里很具体：v0.3.x 可以修文案和轻量 bug，v0.4 才讨论
+    transition/schema/logs 结构，Reflect/sub-agent/full Textual 等不能被写成当前能力。
+    """
+    text = _read("docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
+    lower = text.lower()
+
+    for term in ["v0.3.x patch", "v0.4 candidate", "out of scope"]:
+        assert term in lower
+    for term in [
+        "wording",
+        "status line",
+        "log readability",
+        "health warning",
+        "resume prompt",
+        "scattered state updates",
+        "transition boundary",
+        "checkpoint schema boundary",
+        "observer/logs structure",
+    ]:
+        assert term in lower, f"manual feedback 缺分流关键词：{term}"
+
+    for term in [
+        "Reflect",
+        "sub-agent",
+        "full Textual IDE",
+        "LangGraph",
+        "stream abort",
+        "slash command",
+        "complex topic switch",
+    ]:
+        hits = list(re.finditer(re.escape(term), text, flags=re.IGNORECASE))
+        assert hits, f"manual feedback 应登记 out-of-scope 项：{term}"
+        assert any(
+            "out of scope" in text[max(0, hit.start() - 180): hit.end() + 180].lower()
+            for hit in hits
+        ), f"{term} 必须处在 out-of-scope 语境中"
+
+
+def test_manual_trial_feedback_doc_keeps_secret_and_artifact_boundary() -> None:
+    """manual trial 不能诱导用户提交运行产物或真实 secret。
+
+    这是本地试用安全边界：反馈材料可以记录 status/log/checkpoint 摘要，但不能把
+    `.env`、sessions、agent_log.jsonl、workspace 或 checkpoint 变成可提交材料。
+    """
+    text = _read("docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
+    lower = text.lower()
+    required = [
+        "do not enter real secrets",
+        "do not upload real private data",
+        ".env",
+        "sessions/",
+        "agent_log.jsonl",
+        "workspace/",
+        "checkpoint",
+        "state.json",
+        "runs/",
+        "summary.md",
+        "temporary smoke files",
+        "non-sensitive local test files",
+    ]
+    missing = [term for term in required if term.lower() not in lower]
+    assert not missing, f"manual feedback 安全边界缺项：{missing}"
+
+
+def test_v0_4_event_transition_prep_doc_exists_and_stays_preparatory() -> None:
+    """v0.4 prep 文档只能是边界地图，不能伪装成已实现重构。
+
+    这个测试守护 v0.4 第一阶段入口：先做事件/状态/transition 命名和测试边界，
+    不要求当前代码已经完全 event-driven，也不允许一上来重写 Runtime。
+    """
+    path = REPO_ROOT / "docs" / "V0_4_EVENT_TRANSITION_PREP.md"
+    assert path.exists(), "v0.4 event transition prep 文档必须存在"
+    text = path.read_text(encoding="utf-8")
+    lower = text.lower()
+
+    for term in [
+        "planning/prep",
+        "not implemented v0.4",
+        "not a runtime rewrite",
+        "current state-update map",
+        "event candidates",
+        "state candidates",
+        "v0.4 first stage should do",
+        "v0.4 first stage should not do",
+    ]:
+        assert term in lower, f"v0.4 prep 缺边界标记：{term}"
+
+    for path_name in [
+        "agent/core.py",
+        "agent/confirm_handlers.py",
+        "agent/response_handlers.py",
+        "agent/tool_executor.py",
+        "agent/checkpoint.py",
+        "agent/cli_shell.py",
+        "agent/output_renderer.py",
+        "agent/cli_renderer.py",
+        "agent/display_events.py",
+    ]:
+        assert path_name in text, f"v0.4 prep 缺状态更新地图路径：{path_name}"
+
+
+def test_v0_4_event_transition_prep_lists_candidates_without_requiring_event_driven_now() -> None:
+    """v0.4 prep 可以列事件候选，但不能宣称当前已完全事件驱动。
+
+    这是防漂移：候选名用于未来测试和类型边界，当前 runtime 仍是 v0.3 local-first
+    原型，不能因为文档写了 Event candidates 就被误读为架构已经迁移完成。
+    """
+    text = _read("docs/V0_4_EVENT_TRANSITION_PREP.md")
+    lower = text.lower()
+
+    for event_name in [
+        "UserInput",
+        "ModelOutput",
+        "ToolResult",
+        "PolicyDenial",
+        "UserRejection",
+        "CheckpointResume",
+        "HealthCommand",
+        "LogsCommand",
+    ]:
+        assert event_name in text, f"v0.4 prep 缺事件候选：{event_name}"
+
+    assert "do not mean the current runtime is already fully event-driven" in lower
+    assert "transition boundary tests first" in lower
+    assert "do not rewrite runtime in one pass" in lower
+    assert "checkpoint/schema boundary" in lower
+    assert "runtimeevent" in lower
+    assert "displayevent" in lower
+    assert "must not become checkpoint fields or conversation messages" in lower
+
+
+def test_v0_4_event_transition_prep_keeps_forbidden_items_out() -> None:
+    """v0.4 第一阶段禁止项必须可见。
+
+    这些禁止项是用户本轮明确限定的架构边界：v0.4 prep 只能服务轻量
+    Event/Transition 梳理，不能顺手引入重框架、sub-agent、Reflect、full Textual
+    或旧 slash command 体系。
+    """
+    text = _read("docs/V0_4_EVENT_TRANSITION_PREP.md")
+    lower = text.lower()
+    for term in [
+        "langgraph",
+        "sub-agent",
+        "reflect",
+        "full textual",
+        "stream abort",
+        "slash command",
+        "complex topic switch",
+        "rewrite runtime in one pass",
+    ]:
+        assert term in lower, f"v0.4 prep 缺禁止项：{term}"
 
 
 def test_cli_output_contract_keeps_final_answer_request_user_input_boundary() -> None:

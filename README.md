@@ -123,7 +123,9 @@ and filter by session, event type, or tool name.
 
 For a deeper local-trial walkthrough, see
 `docs/V0_3_LOCAL_TRIAL.md`; for a one-page trial checklist, see
-`docs/V0_3_LOCAL_TRIAL_CHECKLIST.md`.
+`docs/V0_3_LOCAL_TRIAL_CHECKLIST.md`. During the v0.3.2 local trial, record
+findings with `docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md`; v0.4 transition planning
+starts from `docs/V0_4_EVENT_TRANSITION_PREP.md`.
 
 ## Runtime v0.1 Scope
 

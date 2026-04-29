@@ -1381,3 +1381,264 @@ def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(
         "TransitionResult",
     ):
         assert marker not in serialized_messages2
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-b（step 子切片）· step confirmation transition 边界测试
+# ---------------------------------------------------------------------------
+# 中文学习边界：本组测试钉死的「真实回归点」
+# - STEP_ACCEPTED_CONTINUE 必须 should_checkpoint=True；防止有人改成
+#   False 导致中间步用户已批准但 resume 时丢失批准状态。
+# - STEP_ACCEPTED_TASK_DONE 必须 should_checkpoint=False；防止有人误改
+#   成 True 导致已完成 task 又被落盘 → resume 复活已结束的任务。
+# - STEP_REJECTED 必须 should_checkpoint=False；防止反向 save 让已停止任务复活。
+# - 这三类必须独立于 plan / tool / user_input / feedback_intent kind；
+#   source-level 契约钉住 step handler 不越界使用其他 *Kind。
+# - 端到端真实 handler 调用：accept (continue) / accept (done) / reject 三条路径，
+#   断言真实 checkpoint 文件存在性 + state 字段值 + transition 字面量不泄漏 durable。
+
+def test_step_confirmation_kind_covers_only_step_outcomes():
+    """枚举只覆盖 step 的三类终结意图，不应混入 plan/tool/user_input/feedback。"""
+
+    from agent.runtime_events import StepConfirmationKind
+
+    values = {member.value for member in StepConfirmationKind}
+    assert values == {"step_accepted_continue", "step_accepted_task_done", "step_rejected"}
+
+
+def test_step_confirmation_accept_continue_marks_checkpoint():
+    """中间步 accept 必须 should_checkpoint=True；否则 resume 丢批准状态。"""
+
+    from agent.runtime_events import (
+        StepConfirmationKind,
+        step_confirmation_transition,
+    )
+
+    result = step_confirmation_transition(StepConfirmationKind.STEP_ACCEPTED_CONTINUE)
+    assert result.should_checkpoint is True
+    assert result.advance_step is True
+    assert "step.accepted" in result.display_events
+
+
+def test_step_confirmation_accept_task_done_does_not_checkpoint():
+    """最后一步 accept = 任务自然完成，必须 should_checkpoint=False。
+
+    回归点：如果有人把这个改成 True，已 done 的 task 会被落盘，下次启动
+    会"复活"已经完成的任务。
+    """
+
+    from agent.runtime_events import (
+        StepConfirmationKind,
+        step_confirmation_transition,
+    )
+
+    result = step_confirmation_transition(StepConfirmationKind.STEP_ACCEPTED_TASK_DONE)
+    assert result.should_checkpoint is False
+    assert "step.task_done" in result.display_events
+
+
+def test_step_confirmation_reject_does_not_checkpoint():
+    """reject 必须 should_checkpoint=False；防止反向 save 复活停止任务。"""
+
+    from agent.runtime_events import (
+        StepConfirmationKind,
+        step_confirmation_transition,
+    )
+
+    result = step_confirmation_transition(StepConfirmationKind.STEP_REJECTED)
+    assert result.should_checkpoint is False
+    assert "step.rejected" in result.display_events
+
+
+def test_step_confirmation_transition_rejects_unknown_kinds():
+    """未知 kind 必须显式失败，禁止下游静默走 default。"""
+
+    import pytest
+
+    from agent.runtime_events import step_confirmation_transition
+
+    class _Foreign:
+        value = "plan_accepted"  # 故意伪装成 plan kind
+
+    with pytest.raises(ValueError):
+        step_confirmation_transition(_Foreign())
+
+
+def test_step_confirmation_transition_is_pure_function():
+    """transition 工厂为纯函数；同输入恒等输出。
+
+    fake/mock 边界：本测试不构造 TaskState；纯靠返回值相等检测隐性副作用。
+    如果未来 helper 偷偷依赖全局状态或 logger，这条会失败。
+    """
+
+    from agent.runtime_events import (
+        StepConfirmationKind,
+        step_confirmation_transition,
+    )
+
+    a = step_confirmation_transition(StepConfirmationKind.STEP_ACCEPTED_CONTINUE)
+    b = step_confirmation_transition(StepConfirmationKind.STEP_ACCEPTED_CONTINUE)
+    c = step_confirmation_transition(StepConfirmationKind.STEP_ACCEPTED_TASK_DONE)
+    d = step_confirmation_transition(StepConfirmationKind.STEP_REJECTED)
+    assert a == b
+    assert a != c
+    assert a != d
+    assert c != d
+
+
+def test_handle_step_confirmation_source_actually_routes_through_transition():
+    """source-level 契约：step handler 必须真正调用 transition，禁止跨边界 *Kind。"""
+
+    import inspect
+
+    from agent import confirm_handlers
+
+    src = inspect.getsource(confirm_handlers.handle_step_confirmation)
+    assert "step_confirmation_transition" in src
+    assert "STEP_ACCEPTED_CONTINUE" in src
+    assert "STEP_ACCEPTED_TASK_DONE" in src
+    assert "STEP_REJECTED" in src
+    forbidden = (
+        "PlanConfirmationKind",
+        "ToolConfirmationKind",
+        "UserInputConfirmationKind",
+        "FeedbackIntentKind",
+    )
+    for name in forbidden:
+        assert name not in src, (
+            f"step handler 不应越界使用 {name}；slice 6-b step 子切片只覆盖 step。"
+        )
+
+
+def test_step_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatch):
+    """端到端：调用真实 handler 三条路径，断言 durable state 无 transition 字面量。
+
+    fake/mock 边界说明：用 monkeypatch 把 CHECKPOINT_PATH 重定向到 tmp_path，
+    让真实 save_checkpoint / clear_checkpoint 真实写入临时文件——**不**
+    mock 这两个函数本身。advance_current_step_if_needed 走真实实现。
+    """
+
+    import json
+    from types import SimpleNamespace
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import confirm_handlers as ch
+    from agent.state import create_agent_state
+
+    ckpt_file = tmp_path / "state.json"
+    monkeypatch.setattr(checkpoint_mod, "CHECKPOINT_PATH", ckpt_file)
+
+    def _continue(_ts):
+        return "continued"
+
+    def _new_state_with_two_steps():
+        s = create_agent_state(system_prompt="test")
+        s.task.status = "awaiting_step_confirmation"
+        s.task.user_goal = "demo"
+        s.task.current_plan = {
+            "goal": "demo",
+            "steps": [
+                {
+                    "step_id": "step-1",
+                    "title": "first",
+                    "description": "first",
+                    "step_type": "report",
+                },
+                {
+                    "step_id": "step-2",
+                    "title": "second",
+                    "description": "second",
+                    "step_type": "report",
+                },
+            ],
+        }
+        s.task.current_step_index = 0
+        return s
+
+    def _scan_no_leak(serialized: str) -> None:
+        for marker in (
+            "StepConfirmationKind",
+            "step_confirmation_transition",
+            "TransitionResult",
+        ):
+            assert marker not in serialized, (
+                f"transition 内部符号 {marker} 不应出现在 durable state 里"
+            )
+
+    # ----- accept_continue：还有下一步 -----
+    state_a = _new_state_with_two_steps()
+    ctx_a = ch.ConfirmationContext(
+        state=state_a,
+        turn_state=SimpleNamespace(),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out_a = ch.handle_step_confirmation("y", ctx_a)
+    # advance_current_step_if_needed 应该把 index 推进到 1，status 仍 running
+    assert state_a.task.current_step_index == 1
+    assert state_a.task.status == "running"
+    assert out_a == "continued"
+    # 中间步 accept 必须真实落盘
+    assert ckpt_file.exists(), (
+        "step accept (continue) 路径必须真实写入 checkpoint；"
+        "如果 handler 删掉 save_checkpoint 调用，resume 会丢"
+        "「用户已批准 step」状态。"
+    )
+    _scan_no_leak(json.dumps(state_a.conversation.messages, ensure_ascii=False))
+    _scan_no_leak(ckpt_file.read_text(encoding="utf-8"))
+
+    # 清理 ckpt 文件准备下一条
+    ckpt_file.unlink()
+
+    # ----- accept_task_done：最后一步 -----
+    state_b = create_agent_state(system_prompt="test")
+    state_b.task.status = "awaiting_step_confirmation"
+    state_b.task.user_goal = "demo"
+    state_b.task.current_plan = {
+        "goal": "demo",
+        "steps": [
+            {
+                "step_id": "step-1",
+                "title": "only",
+                "description": "only",
+                "step_type": "report",
+            },
+        ],
+    }
+    state_b.task.current_step_index = 0
+    ctx_b = ch.ConfirmationContext(
+        state=state_b,
+        turn_state=SimpleNamespace(),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out_b = ch.handle_step_confirmation("y", ctx_b)
+    assert "任务已完成" in out_b
+    # reset_task 之后 task 应回 idle
+    assert state_b.task.status == "idle"
+    # 任务自然完成必须不落盘
+    assert not ckpt_file.exists(), (
+        "step accept (task_done) 路径不应残留 checkpoint；"
+        "如果 handler 在终态路径上误调 save_checkpoint，resume 会复活已完成任务。"
+    )
+    _scan_no_leak(json.dumps(state_b.conversation.messages, ensure_ascii=False))
+
+    # ----- reject -----
+    state_c = _new_state_with_two_steps()
+    ctx_c = ch.ConfirmationContext(
+        state=state_c,
+        turn_state=SimpleNamespace(),
+        client=None,
+        model_name="x",
+        continue_fn=_continue,
+    )
+    out_c = ch.handle_step_confirmation("n", ctx_c)
+    assert "已停止" in out_c
+    assert state_c.task.status == "idle"
+    assert not ckpt_file.exists(), (
+        "step reject 路径不应残留 checkpoint；"
+        "如果误调 save_checkpoint，已停止任务会在 resume 时复活。"
+    )
+    _scan_no_leak(json.dumps(state_c.conversation.messages, ensure_ascii=False))

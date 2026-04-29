@@ -283,3 +283,94 @@ def plan_confirmation_transition(kind: PlanConfirmationKind) -> TransitionResult
             ),
         )
     raise ValueError(f"unsupported plan confirmation kind: {kind.value}")
+
+
+class StepConfirmationKind(str, Enum):
+    """v0.4 Phase 1 slice 6-b（step 子切片）：step 确认结局的统一词汇。
+
+    中文学习边界：
+    - 这一组值描述用户对**当前 step 完成提示**的最终决定，让
+      ``handle_step_confirmation`` 不再仅靠 inline ``state.task.status ==
+      "done"`` 这种"事后读 status 来分流"的写法表达 Runtime 意图。
+    - 与 plan 不同：plan accept 只有一种结局（→ running + save_checkpoint），
+      而 step accept 有两种真实终态——
+        * ``STEP_ACCEPTED_CONTINUE``：还有下一步，handler 仍 save_checkpoint
+          并继续主循环；
+        * ``STEP_ACCEPTED_TASK_DONE``：当前 step 是计划最后一步，
+          ``advance_current_step_if_needed`` 把 status 置成 ``"done"``，
+          handler 必须 reset_task + clear_checkpoint，**不能** save_checkpoint
+          （否则会把 done 状态落盘 → resume 复活已结束的任务）。
+      正因为终态分裂，本切片**刻意不复用** :class:`PlanConfirmationKind`；
+      让每种 confirmation 走自己的边界，比共享一个泛 ``UserConfirmationKind``
+      更能让"transition 命名 ↔ 真实状态变更"一一对应。
+    - ``STEP_REJECTED``：用户主动停止任务，与 plan reject 同形。
+    - 不覆盖 step 的 feedback 三选一分支（切到 ``awaiting_feedback_intent``
+      子状态），原因同 plan slice：那条路径不属于 step 本身的最终结局。
+    - 不写 messages、不动 checkpoint、不调 advance_current_step_if_needed；
+      实际副作用仍由 ``handle_step_confirmation`` 完成。
+    """
+
+    STEP_ACCEPTED_CONTINUE = "step_accepted_continue"
+    STEP_ACCEPTED_TASK_DONE = "step_accepted_task_done"
+    STEP_REJECTED = "step_rejected"
+
+
+def step_confirmation_transition(kind: StepConfirmationKind) -> TransitionResult:
+    """把 step 确认结局映射到轻量 :class:`TransitionResult`。
+
+    中文学习边界：
+    - 与 :func:`plan_confirmation_transition` 同形：只描述 Runtime 意图，
+      不替 handler 写 messages、不直接调 save_checkpoint / clear_checkpoint /
+      reset_task / advance_current_step_if_needed。
+    - ``STEP_ACCEPTED_CONTINUE``：should_checkpoint=True；下一状态由
+      ``advance_current_step_if_needed`` 决定（通常仍是 ``"running"``），
+      因此 ``next_status`` 留空避免与 advance 结果冲突；display 用
+      ``step.accepted``。advance_step=True 是**意图标记**，不代表 transition
+      自己推进 step——handler 仍负责调用 advance。
+    - ``STEP_ACCEPTED_TASK_DONE``：用户接受了最后一步。should_checkpoint=False
+      （task 即将清空），display 用 ``step.task_done``；handler 必须 reset +
+      clear，**不能** save。这条与 PLAN_REJECTED 形状相似但语义完全不同：
+      用户没有拒绝，是任务自然结束。
+    - ``STEP_REJECTED``：用户主动停止。should_checkpoint=False，handler
+      reset + clear；display 用 ``step.rejected``。
+    - 任何未来扩展（step 跳过 / step 重试 / step 编辑）都应另起新 kind，
+      不在这里加分支。
+    """
+
+    if kind == StepConfirmationKind.STEP_ACCEPTED_CONTINUE:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=True,
+            advance_step=True,
+            display_events=("step.accepted",),
+            reason=kind.value,
+            notes=(
+                "user approved current step; more steps remain",
+                "handler still owns advance_current_step_if_needed and save_checkpoint",
+            ),
+        )
+    if kind == StepConfirmationKind.STEP_ACCEPTED_TASK_DONE:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=False,
+            advance_step=True,
+            display_events=("step.task_done",),
+            reason=kind.value,
+            notes=(
+                "user approved the final step; task naturally completes",
+                "handler still owns reset_task and clear_checkpoint",
+                "no positive checkpoint here: persisting 'done' would resurrect on resume",
+            ),
+        )
+    if kind == StepConfirmationKind.STEP_REJECTED:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=False,
+            display_events=("step.rejected",),
+            reason=kind.value,
+            notes=(
+                "user explicitly stopped the task at this step",
+                "handler still owns reset_task and clear_checkpoint",
+            ),
+        )
+    raise ValueError(f"unsupported step confirmation kind: {kind.value}")

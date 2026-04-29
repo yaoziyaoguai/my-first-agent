@@ -23,8 +23,10 @@ from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
 from agent.runtime_events import (
     PlanConfirmationKind,
+    StepConfirmationKind,
     ToolResultTransitionKind,
     plan_confirmation_transition,
+    step_confirmation_transition,
     tool_result_transition,
 )
 from agent.task_runtime import advance_current_step_if_needed
@@ -224,6 +226,11 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     response = _confirmation_response(confirm)
 
     if response == "accept":
+        # v0.4 Phase 1 slice 6-b（step 子切片）：把"用户接受当前 step"的
+        # Runtime 意图通过 step_confirmation_transition 表达。step accept
+        # 有两种真实终态——继续下一步 vs 任务完成——必须在 advance 之后
+        # 根据 status 选择对应 kind，因为 advance_current_step_if_needed
+        # 才是真实状态变更的源头；transition 只描述"该选哪个意图"。
         append_control_event(messages, "step_confirm_yes", {})
         advance_current_step_if_needed(state)
         # 不要在这里手工 status = "running"：advance_current_step_if_needed
@@ -231,16 +238,35 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         # 手工覆盖会把 "done" 遮蔽成 "running"，让主循环再跑一次空转。
         if state.task.status == "done":
             # 最后一步的确认落在这里：清理任务后直接返回。
+            # transition 只表明"任务自然完成"的 intent；不写新 checkpoint，
+            # 由 handler 显式 reset_task + clear_checkpoint 完成反向落盘。
+            done_transition = step_confirmation_transition(
+                StepConfirmationKind.STEP_ACCEPTED_TASK_DONE
+            )
+            assert not done_transition.should_checkpoint
             from agent.checkpoint import clear_checkpoint as _clear_ck
             _clear_ck()
             state.reset_task()
             return "好的，任务已完成。"
-        save_checkpoint(state)
+        # 中间步通过：transition 表达 should_checkpoint=True，handler 负责真实落盘。
+        continue_transition = step_confirmation_transition(
+            StepConfirmationKind.STEP_ACCEPTED_CONTINUE
+        )
+        if continue_transition.should_checkpoint:
+            save_checkpoint(state)
         return ctx.continue_fn(ctx.turn_state)
 
     if response == "reject":
+        # v0.4 Phase 1 slice 6-b（step 子切片）：用户在 step 节点主动停止任务。
+        # transition 表达 should_checkpoint=False，handler 仍负责 reset_task +
+        # clear_checkpoint 的反向落盘；与 plan reject 同形但语义独立（一个是
+        # plan 阶段取消，一个是已开始执行后的中途停止）。
+        reject_transition = step_confirmation_transition(
+            StepConfirmationKind.STEP_REJECTED
+        )
         append_control_event(messages, "step_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，当前任务已停止。"})
+        assert not reject_transition.should_checkpoint
         state.reset_task()
         clear_checkpoint()
         return "好的，当前任务已停止。"

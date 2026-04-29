@@ -2622,3 +2622,170 @@ def test_chat_module_does_not_use_nonlocal_for_loop_helpers():
         "agent/core.py 不允许出现 nonlocal；如需共享可变状态，请走 "
         "Phase 2 LoopContext dataclass 注入路径而不是闭包"
     )
+
+
+# ========================================================================
+# Phase 2.1：LoopContext dependency-injection 锚点边界
+# ------------------------------------------------------------------------
+# 这一组测试钉死 v0.4 Phase 2.1 切片的契约：
+#   1) LoopContext 已存在且字段拓扑符合预期（client / model_name /
+#      max_loop_iterations，且 frozen + 构造期 validate）；
+#   2) chat() 内部已构造一次 LoopContext 实例（Phase 2.2/2.3 会把它接到
+#      helper signature；本切片只钉"已经有锚点"）；
+#   3) LoopContext 不允许 leak 到 durable layer（checkpoint/state/
+#      conversation/transitions），防止 Phase 2.x 任意切片把运行时依赖
+#      混进 schema；
+#   4) LoopContext.__repr__ 不允许把 client（可能内嵌 api_key）打印出来；
+#   5) LoopContext 字段名禁止包含 durable 字段（messages/task/status/
+#      pending_*）——这是字段级别的 schema-vs-runtime 分层守卫。
+# 任何后续 sub-slice 想"顺手把 state / messages 塞进 LoopContext"都会被
+# 第 5 条立刻拦下，避免 dependency-injection 字段慢慢退化成 god-object。
+# ========================================================================
+
+
+def test_loop_context_module_defines_frozen_dataclass_with_expected_fields():
+    """LoopContext 字段拓扑契约。"""
+
+    import dataclasses
+
+    from agent.loop_context import LoopContext
+
+    assert dataclasses.is_dataclass(LoopContext)
+    # frozen=True：禁止 helper 偷偷 mutate 注入实例
+    assert LoopContext.__dataclass_params__.frozen is True
+
+    field_names = {f.name for f in dataclasses.fields(LoopContext)}
+    assert field_names == {"client", "model_name", "max_loop_iterations"}, (
+        f"LoopContext 字段集合漂移：{field_names}；"
+        "新增字段必须先评估是否属于 runtime dependency"
+    )
+
+
+def test_loop_context_post_init_rejects_invalid_inputs():
+    """构造期校验：空 model / 非正循环上限 / None client 必须 fail-fast。"""
+
+    from agent.loop_context import LoopContext
+
+    sentinel_client = object()  # 非 None 即可，本测试不调任何 client 方法
+
+    with pytest.raises(ValueError):
+        LoopContext(client=sentinel_client, model_name="", max_loop_iterations=10)
+    with pytest.raises(ValueError):
+        LoopContext(client=sentinel_client, model_name="m", max_loop_iterations=0)
+    with pytest.raises(ValueError):
+        LoopContext(client=None, model_name="m", max_loop_iterations=10)
+
+    # 合法构造不应抛
+    ctx = LoopContext(
+        client=sentinel_client, model_name="claude-sonnet-test", max_loop_iterations=7
+    )
+    assert ctx.model_name == "claude-sonnet-test"
+    assert ctx.max_loop_iterations == 7
+
+
+def test_loop_context_repr_does_not_leak_client_object():
+    """__repr__ 不允许把 client 字段打印出来。
+
+    SDK 实例可能在 ``__repr__`` 中包含 ``api_key='sk-...'`` 风格的字段；
+    LoopContext 已用 ``repr=False`` 标记 client，这里通过断言 repr 字符串
+    不包含 ``client=`` 来钉死该约束。如果未来有人改成 ``repr=True``，
+    本测试会立刻失败。
+    """
+
+    from agent.loop_context import LoopContext
+
+    class _FakeClientWithSecret:
+        def __repr__(self) -> str:  # pragma: no cover - 仅为 leak 探针
+            return "FakeClient(api_key='sk-leak-MUST-NOT-APPEAR')"
+
+    ctx = LoopContext(
+        client=_FakeClientWithSecret(),
+        model_name="claude-sonnet-test",
+        max_loop_iterations=10,
+    )
+    rendered = repr(ctx)
+    assert "client=" not in rendered, (
+        f"LoopContext.__repr__ 不允许暴露 client 字段：{rendered}"
+    )
+    assert "sk-leak-MUST-NOT-APPEAR" not in rendered, (
+        f"LoopContext.__repr__ 把 client repr 内容泄漏出来了：{rendered}"
+    )
+
+
+def test_loop_context_field_names_exclude_durable_state():
+    """LoopContext 字段名禁止与 durable state 字段重名。
+
+    durable state（messages / task / status / pending_*）是
+    ``checkpoint.json`` schema 的一部分；它们必须留在 ``agent.state``，
+    不允许通过 LoopContext 偷渡进 runtime dependency layer。
+    """
+
+    import dataclasses
+
+    from agent.loop_context import LoopContext
+
+    forbidden_substrings = (
+        "messages",
+        "task",
+        "status",
+        "pending",
+        "checkpoint",
+        "summary",
+        "memory",
+        "conversation",
+    )
+    field_names = [f.name for f in dataclasses.fields(LoopContext)]
+    for name in field_names:
+        for forbidden in forbidden_substrings:
+            assert forbidden not in name.lower(), (
+                f"LoopContext 字段 {name} 含禁用子串 {forbidden}："
+                "durable state 不允许进 runtime dependency container"
+            )
+
+
+def test_loop_context_not_imported_by_durable_layers():
+    """LoopContext 不允许被 checkpoint / state / transitions 层 import。
+
+    这条件同时反向证明 LoopContext 没有写入 checkpoint.json：如果未来
+    有人在 ``agent/checkpoint.py`` 里 ``from agent.loop_context import
+    LoopContext`` 想 serialize 它，本测试立刻失败。
+    """
+
+    import inspect
+
+    from agent import checkpoint as checkpoint_mod
+    from agent import state as state_mod
+    from agent import transitions as transitions_mod
+
+    for mod, label in (
+        (checkpoint_mod, "agent/checkpoint.py"),
+        (state_mod, "agent/state.py"),
+        (transitions_mod, "agent/transitions.py"),
+    ):
+        src = inspect.getsource(mod)
+        assert "LoopContext" not in src, (
+            f"{label} 不允许引用 LoopContext：runtime dependency "
+            "禁止进入 durable layer 或状态机本体"
+        )
+
+
+def test_chat_constructs_loop_context_instance_at_module_level_anchor():
+    """chat() 已构造一次 LoopContext 实例作为 Phase 2.2/2.3 注入锚点。
+
+    本切片不要求实例被传给 helper（Phase 2.2/2.3 才迁移）；仅验证
+    构造调用确实存在，且字段从模块级 client / MODEL_NAME /
+    MAX_LOOP_ITERATIONS 取值——这样后续 sub-slice 把 helper 改吃
+    loop_ctx 时，调用点不需要再加构造代码。
+    """
+
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core.chat)
+    assert "LoopContext(" in src, (
+        "chat() 必须显式构造 LoopContext 作为 Phase 2.2/2.3 注入锚点"
+    )
+    assert "client=client" in src and "model_name=MODEL_NAME" in src and (
+        "max_loop_iterations=MAX_LOOP_ITERATIONS" in src
+    ), "LoopContext 必须从模块级运行时常量取值，避免引入新的隐式默认值"

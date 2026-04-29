@@ -49,6 +49,7 @@ from agent.response_handlers import (
     handle_tool_use_response,
 )
 from agent.runtime_events import ModelOutputKind, classify_model_output
+from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
 
 
@@ -213,6 +214,18 @@ def chat(
         print_assistant_newline=(
             on_runtime_event is None and on_output_chunk is None
         ),
+    )
+
+    # v0.4 Phase 2.1：构造一次 LoopContext 实例作为 dependency-injection 的
+    # 显式锚点。本切片**故意不传给任何 helper**——helpers 仍读 module-level
+    # client / MODEL_NAME / MAX_LOOP_ITERATIONS。Phase 2.2/2.3 再逐步把
+    # _run_planning_phase / _run_main_loop / _call_model 改吃 loop_ctx，
+    # 完成"helpers 不再依赖 agent.core 模块单例"的迁移。本变量 underscore
+    # 前缀是因为本轮没人吃它；ruff 已配置忽略 _ 开头的未使用局部变量。
+    _loop_ctx = LoopContext(  # noqa: F841  Phase 2.1 placeholder; wired in Phase 2.2/2.3
+        client=client,
+        model_name=MODEL_NAME,
+        max_loop_iterations=MAX_LOOP_ITERATIONS,
     )
 
     confirmation_ctx = ConfirmationContext(

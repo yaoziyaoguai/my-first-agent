@@ -18,6 +18,7 @@ from agent.input_backends.simple import (
     read_user_input_text,
 )
 from agent.input_intents import classify_user_input
+from agent.runtime_events import RuntimeEventKind, command_event_transition
 from agent.user_input import UserInputEvent
 from agent.session import (
     init_session,
@@ -423,6 +424,27 @@ def read_user_input_event(
     return read_simple_user_input_event(prompt=prompt_text)
 
 
+def _maintenance_command_transition(kind: RuntimeEventKind):
+    """声明 health/logs 子命令是 no-op Runtime transition。
+
+    v0.4 Phase 1 先落一个低风险切片：维护命令可以输出报告，但不拥有
+    TaskState 状态迁移、不写 checkpoint、不清 pending，也不推进 step。
+    这里返回 TransitionResult 给 main() 做显式边界检查；真正的报告渲染仍由
+    health_report / log_viewer 负责。
+    """
+
+    outcome = command_event_transition(kind)
+    if outcome.next_status is not None or outcome.should_checkpoint:
+        raise RuntimeError(f"maintenance command must be no-op: {kind.value}")
+    if (
+        outcome.clear_pending_tool
+        or outcome.clear_pending_user_input
+        or outcome.advance_step
+    ):
+        raise RuntimeError(f"maintenance command cannot mutate task state: {kind.value}")
+    return outcome
+
+
 def main_loop():
     last_interrupt_time = 0
     latest_output = ""
@@ -519,6 +541,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent.health_check import collect_health_results
         from agent.health_report import format_health_report, format_health_report_json
 
+        _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
         results = collect_health_results()
         if "--json" in argv[1:]:
             print(format_health_report_json(results))
@@ -536,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "logs":
         from agent.log_viewer import render_logs
 
+        _maintenance_command_transition(RuntimeEventKind.LOGS_COMMAND)
         rest = argv[1:]
 
         def _opt(name: str) -> str | None:

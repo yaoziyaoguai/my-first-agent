@@ -8,6 +8,7 @@ CLI status line 不能把内部 dict/dataclass 原样打给用户。
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import FrozenInstanceError, dataclass, fields
 from pathlib import Path
 
@@ -37,20 +38,21 @@ def test_runtime_event_kind_names_match_v0_4_prep_scope() -> None:
     }
 
 
-def test_transition_outcome_is_frozen_and_checkpoint_neutral() -> None:
-    """TransitionOutcome 只是未来 transition 层草案，不能变成可变持久状态容器。
+def test_transition_result_is_frozen_and_checkpoint_neutral() -> None:
+    """TransitionResult 只是未来 transition 层草案，不能变成可变持久状态容器。
 
     frozen + 基础字段让它适合作为 handler 返回值草案；如果未来有人把
     DisplayEvent / RuntimeEvent / InputIntent / CommandResult 塞进来，这条边界
     应先失败，而不是等 checkpoint 被污染后再排查。
     """
-    from agent.runtime_events import TransitionOutcome
+    from agent.runtime_events import TransitionOutcome, TransitionResult
 
-    outcome = TransitionOutcome(
+    outcome = TransitionResult(
         next_status="awaiting_user_input",
         should_checkpoint=True,
+        clear_pending_user_input=True,
+        advance_step=False,
         display_events=("user_input.requested",),
-        pending_user_input_action="set",
         reason="request_user_input",
         notes=("v0.4 naming draft",),
     )
@@ -63,6 +65,71 @@ def test_transition_outcome_is_frozen_and_checkpoint_neutral() -> None:
         value = getattr(outcome, field.name)
         assert not value.__class__.__name__.endswith("Event")
         assert value.__class__.__name__ not in {"InputIntent", "CommandResult"}
+    assert TransitionOutcome is TransitionResult
+
+
+def test_command_event_transition_is_noop_for_health_and_logs() -> None:
+    """HealthCommand / LogsCommand 是本轮落地的最小 command event slice。
+
+    它们可以产生用户可见输出，但必须返回 no-op TransitionResult：不切 status、
+    不清 pending、不推进 step、不触发 checkpoint。这个测试守护的是状态边界，
+    不是靠 health/logs 输出文字做关键词判断。
+    """
+    from agent.runtime_events import RuntimeEventKind, command_event_transition
+
+    for kind in (RuntimeEventKind.HEALTH_COMMAND, RuntimeEventKind.LOGS_COMMAND):
+        outcome = command_event_transition(kind)
+        assert outcome.next_status is None
+        assert outcome.should_checkpoint is False
+        assert outcome.clear_pending_tool is False
+        assert outcome.clear_pending_user_input is False
+        assert outcome.advance_step is False
+        assert outcome.reason == kind.value
+        assert outcome.display_events
+
+
+def test_command_event_transition_rejects_business_events() -> None:
+    """no-op command slice 只能接维护命令，不能吞掉业务事件。
+
+    如果 ToolResult / UserInput 也被映射成 no-op，后续迁移会把真实状态变化
+    悄悄丢掉，所以这里先把入口收窄。
+    """
+    from agent.runtime_events import RuntimeEventKind, command_event_transition
+
+    with pytest.raises(ValueError):
+        command_event_transition(RuntimeEventKind.TOOL_RESULT)
+
+
+def test_runtime_transition_result_not_written_to_checkpoint_or_messages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """RuntimeEvent / TransitionResult 是临时决策对象，不应进入 checkpoint/messages。
+
+    这里不把对象塞进 state 再要求 checkpoint 兜底，因为那会纵容调用方污染
+    TaskState。正确边界是：正常 save_checkpoint 的 durable schema 中根本没有
+    runtime event/result 字段，conversation.messages 也只保存真实对话事实。
+    """
+    from agent import checkpoint
+    from agent.runtime_events import RuntimeEventKind, command_event_transition
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+
+    state = create_agent_state(system_prompt="test")
+    state.conversation.messages = [{"role": "user", "content": "hello"}]
+    outcome = command_event_transition(RuntimeEventKind.HEALTH_COMMAND)
+    checkpoint.save_checkpoint(state, source="tests.v0_4.command_noop")
+
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert set(payload.keys()) == {"meta", "task", "memory", "conversation"}
+    assert "RuntimeEventKind" not in serialized
+    assert "TransitionResult" not in serialized
+    assert "health_command" not in serialized
+    assert outcome.reason not in serialized
+    assert payload["conversation"]["messages"] == [{"role": "user", "content": "hello"}]
 
 
 def test_runtime_events_module_has_no_persistence_or_ui_dependencies() -> None:
@@ -87,6 +154,7 @@ def test_runtime_events_module_has_no_persistence_or_ui_dependencies() -> None:
 
 
 def test_health_and_logs_commands_do_not_mutate_task_execution_state(
+    tmp_path,
     monkeypatch,
     capsys,
 ) -> None:
@@ -98,10 +166,13 @@ def test_health_and_logs_commands_do_not_mutate_task_execution_state(
     """
     import main as main_module
     from agent import core
+    from agent import checkpoint
     from agent.state import create_agent_state
     import agent.health_check as health_check
     import agent.log_viewer as log_viewer
 
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
     state = create_agent_state(system_prompt="test")
     state.task.status = "awaiting_tool_confirmation"
     state.task.current_step_index = 2
@@ -127,6 +198,7 @@ def test_health_and_logs_commands_do_not_mutate_task_execution_state(
     assert main_module.main(["logs", "--tail", "1"]) == 0
 
     assert state.task.__dict__ == before
+    assert not checkpoint_path.exists(), "health/logs command 不应触发 task checkpoint"
     out = capsys.readouterr().out
     assert "Runtime logs" in out
 
@@ -178,6 +250,9 @@ def test_v0_4_prep_doc_records_started_boundary_work_without_claiming_runtime_re
     required = [
         "agent/runtime_events.py",
         "transition boundary tests",
+        "HealthCommand",
+        "LogsCommand",
+        "command event slice",
         "model output",
         "tool result",
         "user confirmation/rejection",

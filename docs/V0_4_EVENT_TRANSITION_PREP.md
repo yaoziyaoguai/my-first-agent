@@ -1,8 +1,10 @@
-# Runtime v0.4 Event/Transition Prep
+# Runtime v0.4 Phase 1 Event/Transition Baseline
 
-> This is a planning/prep map for a future light Event-driven State Transition
-> pass. It is not implemented v0.4, not a runtime rewrite, and not a request to
-> introduce LangGraph or a new framework.
+> This is the v0.4 Phase 1 baseline for a light Event-driven State Transition
+> pass. It is not a runtime rewrite, not a complete event-driven state machine,
+> and not a request to introduce LangGraph or a new framework.
+> It keeps the earlier planning/prep boundary visible: full event-driven Runtime
+> is not implemented v0.4, and Phase 1 still starts with transition boundary tests first.
 
 ## 1. Current state-update map
 
@@ -43,22 +45,26 @@ Checkpoint/schema boundary rule: durable state remains task / memory /
 conversation messages. RuntimeEvent, DisplayEvent, InputIntent, retired
 CommandResult, observer debug payloads, and UI render objects must not become checkpoint fields or conversation messages.
 
-## 4. v0.4 first stage should do
+## 4. v0.4 first stage should do / baseline
 
-- Add transition boundary tests first.
-- Define light event/result names before moving code.
-- Identify which state updates are still scattered across core/handlers/tools.
-- Add checkpoint/schema boundary tests where gaps are found.
-- Migrate state updates gradually after tests exist.
-- Keep old CLI shell behavior working during migration.
+Completed in the current baseline:
 
-Current first-stage engineering work has started as prep only:
+- `agent/runtime_events.py` defines the lightweight `RuntimeEventKind` and
+  `TransitionResult` naming boundary. These are runtime decision vocabulary, not
+  checkpoint schema and not conversation messages.
+- The first command event slice maps `HealthCommand` / `LogsCommand` to no-op
+  transition results: they can render maintenance output, but they do not change
+  TaskState, clear pending fields, advance steps, or trigger task checkpoint.
+- Transition boundary tests guard maintenance commands, checkpoint/messages
+  separation, status-line rendering, and event/result naming.
 
-- `agent/runtime_events.py` now provides lightweight event/result names for tests
-  and discussion. It does not drive `core.py`, write checkpoint, or replace the
-  existing `agent.display_events.RuntimeEvent`.
-- Transition boundary tests now guard maintenance commands, status-line
-  rendering, and event/result naming. This is not a full event-driven Runtime.
+Not completed yet:
+
+- Complete event-driven state machine.
+- `core.py` main-loop slimming.
+- Full ToolResult / tool result migration.
+- Full ModelOutput / model output classification migration.
+- Full user confirmation/rejection migration.
 
 ## 5. v0.4 first stage should not do
 
@@ -102,7 +108,7 @@ This audit is the migration map, not the migration itself.
 
 Likely migration order:
 
-1. Centralize model output -> event classification.
-2. Centralize tool result -> transition outcome.
-3. Centralize user confirmation/rejection -> transition outcome.
+1. Move a small ToolResult -> TransitionResult slice.
+2. Move a small UserRejection / PolicyDenial -> TransitionResult slice.
+3. Centralize ModelOutput classification.
 4. Only then consider slimming the `core.py` loop.

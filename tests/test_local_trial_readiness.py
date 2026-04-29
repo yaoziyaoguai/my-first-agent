@@ -1,4 +1,4 @@
-"""v0.3.1 local-first trial readiness 守护测试。
+"""v0.3.x local-first trial readiness 守护测试。
 
 本文件不测 Runtime 行为，只测「外部用户 clone 仓库后能不能在本地起来」
 所必需的发布物：
@@ -10,7 +10,7 @@
   `sessions/` / `agent_log.jsonl` / `summary.md`）
 - 启动屏文案仍把 Skill 标为「实验性」，不会再印 `/reload_skills`
   （v0.3 M3 honesty pass 的不变量）
-- `docs/V0_3_LOCAL_TRIAL.md` 存在并包含外部读者会用到的章节
+- `docs/V0_3_LOCAL_TRIAL.md` / checklist 存在并包含外部读者会用到的章节
 
 约束：这些断言**只**保护「公开发布物的存在性 + 关键字段」，不绑定
 全文文案。措辞调整不应让本测试假阳性。
@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+
+import main as main_module
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -110,6 +113,103 @@ def test_local_trial_doc_exists_with_outsider_sections() -> None:
     assert not missing, (
         f"docs/V0_3_LOCAL_TRIAL.md 缺少外部读者必读关键字：{missing}"
     )
+
+
+def test_local_trial_checklist_exists_and_stays_roadmap_bounded() -> None:
+    """v0.3.2 checklist 是人工试用入口，不是为了凑文档覆盖率。
+
+    这条测试守护 Roadmap 防漂移：清单必须覆盖 trial 关键路径，同时继续明确
+    Skill 只是 experimental/demo-level，且不会把 v0.4+ 能力写成当前已实现能力。
+    """
+    path = REPO_ROOT / "docs" / "V0_3_LOCAL_TRIAL_CHECKLIST.md"
+    assert path.exists(), "v0.3.2 本地试用清单必须存在"
+    text = path.read_text(encoding="utf-8")
+    lower = text.lower()
+
+    required_terms = [
+        "python main.py --shell",
+        "final answer",
+        "request_user_input",
+        "tool.completed",
+        "tool.rejected",
+        "tool.user_rejected",
+        "tool.failed",
+        "checkpoint/resume",
+        "python main.py health",
+        "python main.py health --json",
+        "python main.py logs --tail 5",
+        "现象",
+        "命令/输入",
+        "期望",
+        "实际",
+        "是否阻塞",
+        "建议归类",
+    ]
+    missing = [term for term in required_terms if term.lower() not in lower]
+    assert not missing, f"local trial checklist 缺少关键试用项：{missing}"
+
+    assert "experimental" in lower
+    assert "demo-level" in lower
+    assert "skill" in lower
+
+    # v0.4+ 能力可以作为边界出现，但附近必须带否定/规划标记，不能被写成已交付。
+    for term in ["Textual", "sub-agent", "Reflect", "slash command"]:
+        hits = list(re.finditer(re.escape(term), text, flags=re.IGNORECASE))
+        assert hits, f"checklist 应显式登记 {term} 边界"
+        assert any(
+            any(marker in text[max(0, hit.start() - 120): hit.end() + 120]
+                for marker in ["不做", "不是", "不会", "planning", "v0.4"])
+            for hit in hits
+        ), f"{term} 出现时必须带非目标/规划边界，避免能力夸大"
+
+
+def test_local_trial_checklist_referenced_from_readme() -> None:
+    """README 是外部入口，必须能把用户导到短 checklist。
+
+    这里不绑定 README 章节，只守护入口链接，防止清单落地后无人能发现。
+    """
+    text = _read("README.md")
+    assert "docs/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
+
+
+def test_local_trial_checklist_commands_match_cli_entrypoints(monkeypatch, capsys) -> None:
+    """清单里的核心命令要和 main.py 参数解析保持一致。
+
+    这是轻量防漂移测试：不启动真实交互、不调用模型，只验证 checklist 承诺的
+    health/logs/shell 入口仍由 CLI wiring 接住。
+    """
+    import agent.health_check as hc
+
+    monkeypatch.setattr(
+        hc,
+        "collect_health_results",
+        lambda: {
+            "workspace_lint": {
+                "status": "pass",
+                "current_value": "0 文件",
+                "path": "workspace",
+                "risk": "无",
+                "action": "无需操作",
+                "message": "ok",
+            }
+        },
+    )
+    assert main_module.main(["health"]) == 0
+    assert "项目健康检查报告" in capsys.readouterr().out
+
+    assert main_module.main(["health", "--json"]) == 0
+    assert '"overall"' in capsys.readouterr().out
+
+    assert main_module.main(["logs", "--tail", "5"]) == 0
+    assert "Runtime logs" in capsys.readouterr().out
+
+    calls = []
+    monkeypatch.setattr(main_module, "init_session", lambda: calls.append("init"))
+    monkeypatch.setattr(main_module, "try_resume_from_checkpoint", lambda: calls.append("resume"))
+    monkeypatch.setattr(main_module, "main_loop", lambda: calls.append("loop"))
+    monkeypatch.setattr(main_module, "_selected_input_backend", lambda: "simple")
+    assert main_module.main(["--shell"]) == 0
+    assert calls == ["init", "resume", "loop"]
 
 
 def test_release_notes_v0_3_published() -> None:

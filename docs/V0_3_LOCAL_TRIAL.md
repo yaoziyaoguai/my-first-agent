@@ -1,4 +1,4 @@
-# Runtime v0.3.1 · Local-First Manual Trial Guide
+# Runtime v0.3.x · Local-First Manual Trial Guide
 
 > 本文件目的：让外部读者 clone 仓库后，在 5-10 分钟内能在自己机器上把
 > `my-first-agent` 跑起来，并且**不被未完成的能力（Skill / sub-agent /
@@ -11,7 +11,7 @@
 
 ## 1. 试用范围（明确边界）
 
-`my-first-agent` v0.3.1 适合：
+`my-first-agent` v0.3.x 适合：
 
 - 在本地用一个简单 CLI 让 Agent 完成基础任务（读文件、写文件、跑 shell、
   做规划）
@@ -19,7 +19,7 @@
   健康检查、CLI 输出契约
 - 学习「如何把一个最小 LLM 闭环从能跑做到可观测、可维护」
 
-`my-first-agent` v0.3.1 **不**适合：
+`my-first-agent` v0.3.x **不**适合：
 
 - 当作生产 Agent 框架使用
 - 部署成 SaaS / 多人服务
@@ -123,7 +123,7 @@ api key / 私钥；命中 `sk-ant-` / `BEGIN PRIVATE KEY` / `api_key=…` 等模
 .venv/bin/python -m pytest -q
 ```
 
-预期：ruff 0 错；676 passed, 3 xfailed（3 个 xfail 都属于 v0.4+ 未启动
+预期：ruff 0 错；约 691 passed, 3 xfailed（3 个 xfail 都属于 v0.4+ 未启动
 能力，每个都有归属说明）。
 
 ---
@@ -154,7 +154,7 @@ api key / 私钥；命中 `sk-ant-` / `BEGIN PRIVATE KEY` / `api_key=…` 等模
   marketplace、没有 sub-agent、没有 skill 级 tool 权限白名单；详见
   `docs/V0_3_SKILL_SYSTEM_STATUS.md`。
 - **模型 final answer 末尾追问但 Runtime 直接完成**：v0.3 patch 已修
-  protocol；如果模型仍如此输出，更新到 v0.3.1 之后版本即可。详见
+  protocol；如果模型仍如此输出，更新到当前 v0.3.x 版本即可。详见
   `docs/CLI_OUTPUT_CONTRACT.md` §14。
 - **测试失败**：先确认 Python 版本、virtualenv、依赖完整、ruff 版本
   匹配 `requirements.txt`。
@@ -178,6 +178,7 @@ api key / 私钥；命中 `sk-ant-` / `BEGIN PRIVATE KEY` / `api_key=…` 等模
 - `RELEASE_NOTES_v0.3.md` — v0.3 已交付能力 + 显式不做的事
 - `docs/V0_3_PLANNING.md` — v0.3 milestone 与完成标准
 - `docs/V0_3_MANUAL_SMOKE_RESULT.md` — v0.3 release 前的人工 smoke 记录
+- `docs/V0_3_LOCAL_TRIAL_CHECKLIST.md` — v0.3.2 本地试用任务清单
 - `docs/V0_3_BASIC_SHELL_USAGE.md` — Basic CLI Shell 详细使用
 - `docs/V0_3_OBSERVER_LOGS.md` — logs 子命令的脱敏边界
 - `docs/V0_3_SKILL_SYSTEM_STATUS.md` — Skill 是什么 / 不是什么

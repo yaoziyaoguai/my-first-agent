@@ -82,7 +82,7 @@ you to run manually.
 .venv/bin/python -m pytest -q
 ```
 
-Expected baseline: ruff clean, ~688 passed, 3 permanent xfails (each
+Expected baseline: ruff clean, ~691 passed, 3 permanent xfails (each
 xfail message documents which future version owns the gap).
 
 ### Local runtime artifacts
@@ -122,7 +122,8 @@ and filter by session, event type, or tool name.
   pause. See `docs/CLI_OUTPUT_CONTRACT.md` §14.
 
 For a deeper local-trial walkthrough, see
-`docs/V0_3_LOCAL_TRIAL.md`.
+`docs/V0_3_LOCAL_TRIAL.md`; for a one-page trial checklist, see
+`docs/V0_3_LOCAL_TRIAL_CHECKLIST.md`.
 
 ## Runtime v0.1 Scope
 

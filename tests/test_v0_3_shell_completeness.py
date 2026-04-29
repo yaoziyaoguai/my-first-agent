@@ -155,7 +155,7 @@ def test_readme_startup_example_matches_current_header_shape():
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "Health: python main.py health；Logs: python main.py logs --tail 50。" in text
     assert "Skill 是实验性能力" in text
-    assert "~688 passed, 3 permanent xfails" in text
+    assert "~691 passed, 3 permanent xfails" in text
     assert "not a full Textual IDE" in text
 
 

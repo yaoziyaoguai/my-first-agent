@@ -2404,3 +2404,167 @@ def test_feedback_intent_as_feedback_handler_source_does_not_write_revised_goal_
     assert "revised_goal = (" in src or "revised_goal = f" in src, (
         "as_feedback 路径必须显式构造 revised_goal 局部变量，否则边界不清晰"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-e · feedback_intent confirmation transition（收口切片）
+#
+# 这是 user-confirmation 系列最后一个 transition slice，也是 slice 6 中**最危险**
+# 的一块。前置契约层（slice 6-d 之后的 5 条 contract pin）已经把"什么不能发生"
+# 钉死；本 slice 只把 4 条路径的 Runtime 意图通过 FeedbackIntentKind +
+# feedback_intent_transition 表达出来，handler 的所有真实 mutation / LLM 调用
+# / messages 写入 / start_planning_fn 反向回调 **完全不变**。
+#
+# 本块测试聚焦 transition 工厂的**意图契约**（不是行为契约——后者已在前置层
+# 钉死）。每一条路径的 should_checkpoint / clear_pending_user_input /
+# next_status 都精确钉死，防止未来"统一动作"重构悄悄改这些布尔。
+# ---------------------------------------------------------------------------
+
+
+def test_feedback_intent_kind_enum_covers_exactly_four_paths():
+    """钉死 FeedbackIntentKind 仅有 4 个值。
+
+    AS_FEEDBACK / AS_NEW_TASK / CANCELLED / AMBIGUOUS 是产品级语义，对应
+    awaiting_feedback_intent 子状态的 4 条出口。新增第 5 个值意味着引入新
+    路径（例如 'DEFER'），必须先在 docs/V0_4_EVENT_TRANSITION_PREP.md 写
+    迁移路径再加；删除任意一个意味着合并语义边界，会破坏 P1 §3 红线。
+    """
+    from agent.runtime_events import FeedbackIntentKind
+
+    assert {k.value for k in FeedbackIntentKind} == {
+        "as_feedback",
+        "as_new_task",
+        "cancelled",
+        "ambiguous",
+    }
+
+
+def test_feedback_intent_as_feedback_transition_intent():
+    """as_feedback 意图：should_checkpoint=True + clear_pending=True + next=plan_confirmation。
+
+    handler 调 generate_plan 成功后会重新进入 plan 确认；transition 把 next_status
+    显式钉成 'awaiting_plan_confirmation'，防止未来重构把它和 cancel 路径合并。
+    """
+    from agent.runtime_events import (
+        FeedbackIntentKind,
+        feedback_intent_transition,
+    )
+
+    t = feedback_intent_transition(FeedbackIntentKind.AS_FEEDBACK)
+    assert t.next_status == "awaiting_plan_confirmation"
+    assert t.should_checkpoint is True
+    assert t.clear_pending_user_input is True
+    assert t.clear_pending_tool is False
+    assert t.advance_step is False
+
+
+def test_feedback_intent_as_new_task_transition_intent():
+    """as_new_task 意图：should_checkpoint=False（由 clear_checkpoint + start_planning_fn 接管）。
+
+    next_status=None 是契约：transition 不预设新任务的 status，由 start_planning_fn
+    内部决定，避免把"新任务的初始 status"和"旧任务的终态"混在一个值里。
+    """
+    from agent.runtime_events import (
+        FeedbackIntentKind,
+        feedback_intent_transition,
+    )
+
+    t = feedback_intent_transition(FeedbackIntentKind.AS_NEW_TASK)
+    assert t.next_status is None
+    assert t.should_checkpoint is False
+    assert t.clear_pending_user_input is True
+
+
+def test_feedback_intent_cancelled_transition_intent():
+    """cancel 意图：should_checkpoint=True（origin_status 必须落盘）+ clear_pending=True。
+
+    next_status=None：transition 不替 handler 决定 origin_status 的具体值
+    （由 pending['origin_status'] 决定，可能是 awaiting_plan/step_confirmation）；
+    handler 自己回填。
+    """
+    from agent.runtime_events import (
+        FeedbackIntentKind,
+        feedback_intent_transition,
+    )
+
+    t = feedback_intent_transition(FeedbackIntentKind.CANCELLED)
+    assert t.next_status is None
+    assert t.should_checkpoint is True
+    assert t.clear_pending_user_input is True
+
+
+def test_feedback_intent_ambiguous_transition_intent_is_critical_no_op():
+    """AMBIGUOUS 意图：should_checkpoint=False + clear_pending=False + next=None。
+
+    **这是 slice 6-e 最关键的契约**。AMBIGUOUS 路径的 transition 必须是
+    "三个 False"——任何一个变 True 都会让未决意图被持久化或被悄悄推进，
+    破坏 docs/P1_TOPIC_SWITCH_PLAN.md §3 反 heuristic 红线。前置契约层
+    test_feedback_intent_ambiguous_does_not_save_checkpoint_or_mutate_state
+    钉了"行为不能发生"，这条钉"意图层不能宣告"。
+    """
+    from agent.runtime_events import (
+        FeedbackIntentKind,
+        feedback_intent_transition,
+    )
+
+    t = feedback_intent_transition(FeedbackIntentKind.AMBIGUOUS)
+    assert t.next_status is None
+    assert t.should_checkpoint is False, (
+        "AMBIGUOUS 不允许 should_checkpoint=True：未决意图禁止持久化"
+    )
+    assert t.clear_pending_user_input is False, (
+        "AMBIGUOUS 不允许清 pending：用户还没决定，pending 必须保留以再次发问"
+    )
+    assert t.advance_step is False
+    assert t.clear_pending_tool is False
+
+
+def test_feedback_intent_transition_rejects_unknown_kind():
+    """未知 kind 必须显式 ValueError，不允许静默兜底。
+
+    模拟边界：构造一个名字像 feedback intent 但实际是 plan kind 的伪装对象，
+    确保工厂不会通过 `==` 字符串巧合匹配通过——它必须严格按 enum 身份匹配。
+    """
+    from agent.runtime_events import (
+        FeedbackIntentKind,
+        PlanConfirmationKind,
+        feedback_intent_transition,
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match="unsupported feedback intent kind"):
+        feedback_intent_transition(PlanConfirmationKind.PLAN_ACCEPTED)  # type: ignore[arg-type]
+    # 4 个合法 kind 全过；防止"循环里漏一个"的回归
+    for k in FeedbackIntentKind:
+        feedback_intent_transition(k)
+
+
+def test_feedback_intent_handler_routes_through_transition_factory_for_all_four_paths():
+    """钉死 handler 4 条路径都通过 feedback_intent_transition 声明意图。
+
+    源码静态扫描：守住未来"transition 看起来多余，删掉省事"的回归。一旦某
+    条路径丢了 transition 调用，未来重构把"统一动作"加回来时，就缺少意图
+    层断言（assert not should_checkpoint 等）的保护，AMBIGUOUS 路径会第一
+    个被穿透。
+    """
+    import inspect
+    from agent import confirm_handlers as ch
+
+    src = inspect.getsource(ch.handle_feedback_intent_choice)
+    # 多行换行兼容：仅断言 'feedback_intent_transition(' 出现至少 4 次 + 4 个 kind 名
+    assert src.count("feedback_intent_transition(") >= 4, (
+        "handler 必须为 4 条路径都调用 feedback_intent_transition()"
+    )
+    for kind_name in (
+        "FeedbackIntentKind.AS_FEEDBACK",
+        "FeedbackIntentKind.AS_NEW_TASK",
+        "FeedbackIntentKind.CANCELLED",
+        "FeedbackIntentKind.AMBIGUOUS",
+    ):
+        assert kind_name in src, (
+            f"handler 必须显式引用 {kind_name}（不允许字符串别名或动态 lookup 绕过）"
+        )
+    # 关键 assert 必须留在 handler 中作为 in-source 契约护栏
+    assert "assert not ambiguous_transition.should_checkpoint" in src, (
+        "handler 必须保留 'AMBIGUOUS 不写 checkpoint' 的 in-source assert"
+    )

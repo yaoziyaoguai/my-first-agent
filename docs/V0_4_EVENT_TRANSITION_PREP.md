@@ -129,11 +129,36 @@ Completed in the current baseline:
   audited but not migrated in this slice because it carries three-way
   dispatch + `origin_status` rollback + `start_planning_fn` injection, all
   of which need a separate contract-test slice first.
+- The fifth user-confirmation transition slice (feedback_intent) introduces
+  `FeedbackIntentKind` (`AS_FEEDBACK` / `AS_NEW_TASK` / `CANCELLED` /
+  `AMBIGUOUS`) and `feedback_intent_transition()`. This is the closing
+  slice of Phase 1 user-confirmation migration and the most dangerous one:
+  feedback_intent is the only confirmation handler that calls an LLM
+  (`generate_plan`), the only one that takes a callback injection
+  (`start_planning_fn`), and the only one whose `AMBIGUOUS` path **must
+  not** be merged with `CANCELLED` — collapsing them would let undecided
+  intent be persisted to checkpoint and break the
+  `docs/P1_TOPIC_SWITCH_PLAN.md` §3 anti-heuristic red line. The
+  transition layer is therefore intentionally minimal: each path's
+  `should_checkpoint` / `clear_pending_user_input` / `next_status` is
+  pinned exactly, with `AMBIGUOUS = (False, False, None)` as the
+  three-False contract that prevents any future "unify all confirmation
+  paths to save_checkpoint" refactor from breaking the red line. Handler
+  still owns: `generate_plan` LLM call, `append_control_event(plan_feedback)`
+  message write, `state.task.current_plan` / `current_step_index`
+  assignment, `save_checkpoint`, `state.reset_task()`, `clear_checkpoint()`,
+  and `start_planning_fn` reverse callback. revised_goal stays a local
+  planner input and is never written back to `state.task.user_goal`
+  (pinned by source-level test). With slice 6-e all five user-confirmation
+  handlers (plan, step, tool, user_input via reuse, feedback_intent) are
+  routed through transition vocabulary; Phase 1 user-confirmation
+  migration is closed.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
   separation, status-line rendering, event/result naming, the first three
   ToolResult transition slices (policy denial, user rejection, tool failure,
-  tool success), the first ModelOutput classification slice, and the first
-  four user-confirmation slices (plan, step, tool, user_input reuse).
+  tool success), the first ModelOutput classification slice, and all five
+  user-confirmation slices (plan, step, tool, user_input reuse,
+  feedback_intent).
 
 Not completed yet:
 

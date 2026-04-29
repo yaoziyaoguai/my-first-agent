@@ -453,3 +453,120 @@ def tool_confirmation_transition(kind: ToolConfirmationKind) -> TransitionResult
             ),
         )
     raise ValueError(f"unsupported tool confirmation kind: {kind.value}")
+
+
+class FeedbackIntentKind(str, Enum):
+    """v0.4 Phase 1 slice 6-e（user-confirmation 收口切片）：feedback_intent 四路径词汇。
+
+    中文学习边界：
+    - awaiting_feedback_intent 子状态有 4 条出口：
+        AS_FEEDBACK   = 用户选 [1]，把当前自由文本当作对当前 plan 的修改意见；
+        AS_NEW_TASK   = 用户选 [2]，切换为新任务（reset_task + start_planning_fn）；
+        CANCELLED     = 用户选 [3]，恢复 origin_status 完全无副作用；
+        AMBIGUOUS     = 任何非 {1,2,3} 输入，仅重发 RuntimeEvent，不动状态。
+      4 个值不可合并：AMBIGUOUS 不能省略当作"什么也不做的隐式默认"，否则未来
+      容易被重构成 'CANCELLED 包含 AMBIGUOUS'，进而把"未决意图"当作"用户取消"
+      持久化到 checkpoint，破坏 docs/P1_TOPIC_SWITCH_PLAN.md §3 红线。
+    - 与 plan/step/tool 同形：transition 仅描述 Runtime 意图（要不要写
+      checkpoint、要不要清 pending），实际 mutation / LLM 调用 / messages
+      写入 / start_planning_fn 反向回调全部仍由
+      :func:`agent.confirm_handlers.handle_feedback_intent_choice` 持有。
+    - 这是 slice 6 中**最危险**的一块，因此本 slice 的 transition 边界刻意
+      最薄：只表达 should_checkpoint / clear_pending_user_input / next_status；
+      不引入任何"统一动作"（特别是禁止"任何 confirm 路径都自动 save_checkpoint"
+      这种统一化重构 —— AMBIGUOUS 路径 should_checkpoint=False 是契约，
+      已被 ``test_feedback_intent_ambiguous_does_not_save_checkpoint_or_mutate_state``
+      钉死）。
+    """
+
+    AS_FEEDBACK = "as_feedback"
+    AS_NEW_TASK = "as_new_task"
+    CANCELLED = "cancelled"
+    AMBIGUOUS = "ambiguous"
+
+
+def feedback_intent_transition(kind: FeedbackIntentKind) -> TransitionResult:
+    """把 feedback_intent 四路径映射到轻量 :class:`TransitionResult`。
+
+    中文学习边界：
+    - 与 plan/step/tool confirmation 同形：transition 是 **意图层**，不是
+      行为层。本函数 **绝不** 调 save_checkpoint、绝不调 generate_plan、
+      绝不调 reset_task、绝不调 start_planning_fn、绝不写 messages。
+    - 4 路径意图：
+        AS_FEEDBACK：should_checkpoint=True、clear_pending_user_input=True、
+          next_status="awaiting_plan_confirmation"（handler 调 planner 成功
+          后重新进入 plan 确认；planner 失败时 handler 走 reset 并显式覆盖）。
+        AS_NEW_TASK：should_checkpoint=False（handler 通过 clear_checkpoint
+          抹掉旧任务，再由 start_planning_fn 内部决定新 checkpoint 节奏）；
+          clear_pending_user_input=True（reset_task 间接清掉）；
+          next_status=None（由 start_planning_fn 决定）。
+        CANCELLED：should_checkpoint=True（确实需要把 origin_status 落盘，
+          否则下次 resume 会把 awaiting_feedback_intent 当成残留态恢复）；
+          clear_pending_user_input=True；
+          next_status 由 handler 用 origin_status 填，本意图层不预设具体值。
+        AMBIGUOUS：should_checkpoint=False（**关键契约**：未决意图禁止持久化）、
+          clear_pending_user_input=False、next_status=None；
+          唯一允许的副作用是 emit feedback_intent_requested（handler 自己做）。
+    - 不接受其它 kind；future-proof 通过 ValueError 显式失败而不是静默兜底。
+    """
+
+    if kind == FeedbackIntentKind.AS_FEEDBACK:
+        return TransitionResult(
+            next_status="awaiting_plan_confirmation",
+            should_checkpoint=True,
+            clear_pending_user_input=True,
+            display_events=("feedback_intent.as_feedback",),
+            reason=kind.value,
+            notes=(
+                "user chose [1] = treat free-form text as plan feedback",
+                "handler owns: append plan_feedback control event, call generate_plan,"
+                " write current_plan/index, save_checkpoint, emit plan_confirmation",
+                "revised_goal is local input to planner only; user_goal is NEVER"
+                " written back (pinned by"
+                " test_feedback_intent_as_feedback_handler_source_does_not_write_revised_goal_back)",
+            ),
+        )
+    if kind == FeedbackIntentKind.AS_NEW_TASK:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=False,
+            clear_pending_user_input=True,
+            display_events=("feedback_intent.as_new_task",),
+            reason=kind.value,
+            notes=(
+                "user chose [2] = switch to a new task",
+                "handler owns: reset_task, clear_checkpoint, start_planning_fn injection",
+                "reset_task MUST strictly precede start_planning_fn (pinned by"
+                " test_feedback_intent_as_new_task_reset_strictly_precedes_start_planning)",
+            ),
+        )
+    if kind == FeedbackIntentKind.CANCELLED:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=True,
+            clear_pending_user_input=True,
+            display_events=("feedback_intent.cancelled",),
+            reason=kind.value,
+            notes=(
+                "user chose [3] = cancel; restore origin_status, no messages write",
+                "handler fills next_status from pending['origin_status'] then saves",
+                "messages length MUST stay unchanged (P1 §3 红线，pinned by"
+                " test_feedback_intent_cancel_does_not_write_messages_or_call_planner)",
+            ),
+        )
+    if kind == FeedbackIntentKind.AMBIGUOUS:
+        return TransitionResult(
+            next_status=None,
+            should_checkpoint=False,
+            clear_pending_user_input=False,
+            display_events=("feedback_intent.ambiguous",),
+            reason=kind.value,
+            notes=(
+                "input outside {1,2,3}: re-emit RuntimeEvent only",
+                "should_checkpoint=False is the critical contract: pending intent"
+                " must NOT be persisted to checkpoint (pinned by"
+                " test_feedback_intent_ambiguous_does_not_save_checkpoint_or_mutate_state)",
+                "handler must not mutate state / pending / messages here",
+            ),
+        )
+    raise ValueError(f"unsupported feedback intent kind: {kind.value}")

@@ -22,10 +22,12 @@ from agent.input_intents import classify_confirmation_response
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
 from agent.runtime_events import (
+    FeedbackIntentKind,
     PlanConfirmationKind,
     StepConfirmationKind,
     ToolConfirmationKind,
     ToolResultTransitionKind,
+    feedback_intent_transition,
     plan_confirmation_transition,
     step_confirmation_transition,
     tool_confirmation_transition,
@@ -309,6 +311,15 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         # 模糊输入：不动状态、不动 pending、不动 messages，只重发提示。
         # 这是反 heuristic 红线最关键的执行点——任何"看起来像 X"的猜测都会
         # 在这里被无条件拒绝。
+        # v0.4 Phase 1 slice 6-e：transition 边界只声明意图（不写 checkpoint，
+        # 不清 pending）。AMBIGUOUS 的 should_checkpoint=False 是关键契约，
+        # 防止未来"统一动作"重构把未决意图持久化到 checkpoint，让下次 resume
+        # 从一个本不该存在的中间态恢复。
+        ambiguous_transition = feedback_intent_transition(
+            FeedbackIntentKind.AMBIGUOUS
+        )
+        assert not ambiguous_transition.should_checkpoint
+        assert not ambiguous_transition.clear_pending_user_input
         emit = getattr(ctx.turn_state, "on_runtime_event", None)
         if emit is not None:
             emit(feedback_intent_requested(pending))
@@ -322,6 +333,12 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         # cancel：复原 origin_status，清 pending，不写 messages，不调 planner。
         # 这条路径**不能**写 plan_feedback——否则就破坏了"取消 = 完全无副作用"
         # 的产品语义，并让 messages 残留一条永远无法撤销的反馈记录。
+        # v0.4 Phase 1 slice 6-e：transition 声明 should_checkpoint=True
+        # （origin_status 必须落盘，否则下次 resume 把 awaiting_feedback_intent
+        # 当残留态恢复）+ clear_pending_user_input=True；handler 仍负责真实 mutation。
+        cancel_transition = feedback_intent_transition(FeedbackIntentKind.CANCELLED)
+        assert cancel_transition.should_checkpoint
+        assert cancel_transition.clear_pending_user_input
         state.task.pending_user_input_request = None
         state.task.status = origin_status
         save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
@@ -329,6 +346,16 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
 
     if choice_raw == "1":
         # as_feedback：恢复 origin 视角后再走原 feedback 路径。
+        # v0.4 Phase 1 slice 6-e：transition 声明 next_status=
+        # "awaiting_plan_confirmation"（planner 成功路径）+ should_checkpoint=True
+        # + clear_pending_user_input=True。handler 仍负责 LLM 调用、messages 写入、
+        # current_plan 赋值与 emit。revised_goal 仅作 planner 入参，绝不回写
+        # state.task.user_goal（hardcore #6 不变量，已被 source-level 测试钉死）。
+        as_feedback_transition = feedback_intent_transition(
+            FeedbackIntentKind.AS_FEEDBACK
+        )
+        assert as_feedback_transition.should_checkpoint
+        assert as_feedback_transition.clear_pending_user_input
         state.task.pending_user_input_request = None
         state.task.status = origin_status
         # ★ messages 唯一写入时机：分流确认归属为"反馈"之后。
@@ -352,7 +379,7 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
             return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
         state.task.current_plan = plan.model_dump()
         state.task.current_step_index = 0
-        state.task.status = "awaiting_plan_confirmation"
+        state.task.status = as_feedback_transition.next_status or "awaiting_plan_confirmation"
         save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
         _emit_plan_confirmation(ctx, plan, source="feedback_intent_choice")
         return ""
@@ -361,6 +388,15 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
     # reset_task() 把 user_goal/current_plan/pending/log 等全部清掉；clear_checkpoint
     # 抹掉旧任务持久化痕迹；start_planning_fn 走 _run_planning_phase，由它把
     # state.task.user_goal 直接赋值为新话题原文（不与旧目标拼接）。
+    # v0.4 Phase 1 slice 6-e：transition 声明 should_checkpoint=False
+    # （由 clear_checkpoint 抹旧 + start_planning_fn 内部决定新 ckpt 节奏）+
+    # clear_pending_user_input=True（reset_task 间接清）。reset_task 必须严格
+    # 先于 start_planning_fn（已被契约测试钉死）。
+    as_new_task_transition = feedback_intent_transition(
+        FeedbackIntentKind.AS_NEW_TASK
+    )
+    assert not as_new_task_transition.should_checkpoint
+    assert as_new_task_transition.clear_pending_user_input
     if ctx.start_planning_fn is None:
         # 防御：注入未生效。降级为 reset 让用户重新发起，避免悄悄丢话题。
         state.reset_task()

@@ -2152,3 +2152,255 @@ def test_user_input_slice_does_not_introduce_new_confirmation_kind():
             f" apply_user_replied_transition，不新增并行 vocabulary。"
             f"如确需，请先更新 docs/V0_4_EVENT_TRANSITION_PREP.md。"
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-d 之后 / slice 6-e（feedback_intent）契约前置层
+#
+# 本块是 feedback_intent transition 迁移的"前置安全网"，不是迁移本身：
+#
+#   feedback_intent 是 confirm_handlers 中最后一个仍持有 inline state mutation
+#   且唯一在 confirm 内调 LLM 的 handler。它涉及四条路径：
+#     1) "1" as_feedback     —— 写 plan_feedback control event + 调 generate_plan
+#     2) "2" as_new_task     —— reset_task + clear_checkpoint + start_planning_fn
+#     3) "3" cancel          —— 仅恢复 origin_status + save_checkpoint，无 messages
+#     4) 任意其它输入 ambiguous —— 状态/pending/messages 三者必须全不变，仅 emit
+#
+#   tests/test_feedback_intent_flow.py 已经用全 chat() 驱动覆盖了行为契约。
+#   本块提供四条**结构契约**，专门针对未来"v0.4 化"重构最可能踩坏的不变量：
+#     - cancel 路径不允许悄悄写 messages（即使被 transition 包了也不行）；
+#     - as_new_task 路径 reset_task 调用必须**先于** start_planning_fn；
+#     - ambiguous 路径不允许调 save_checkpoint / 不允许进入 transition；
+#     - as_feedback 路径源码层禁止把 revised_goal 写回 state.task.user_goal。
+#
+#   全部尽量用直接 unit 调用（不绕全 chat）+ 调用顺序 spy + 源码静态扫描，
+#   原因：契约要钉住的是"什么不能发生"，全链路 driver 容易在被告 transition
+#   重构后被同样的重构"顺便"重写绿。结构契约更难被同步绕过。
+# ---------------------------------------------------------------------------
+
+
+def _make_feedback_intent_ctx(*, choice: str, monkeypatch, with_planning_fn=True):
+    """构造 awaiting_feedback_intent 状态下的最小 ConfirmationContext。
+
+    模拟边界说明：
+    - 直接调 handle_feedback_intent_choice，不走 chat()，避免和 flow 测试重复；
+    - generate_plan 被替换为返回 None 的 fake，避免真的调 LLM——本块不验证
+      LLM 行为，只验证 mutation 与调用顺序契约；
+    - start_planning_fn 用 spy lambda 记录调用顺序而不实际触发新 planner。
+    """
+    from agent import confirm_handlers as ch
+    from agent.checkpoint import CHECKPOINT_PATH as _orig_path  # noqa: F401
+    from agent import confirm_handlers as _ch_mod
+    from agent.state import create_agent_state
+    from types import SimpleNamespace
+
+    state = create_agent_state(system_prompt="test")
+    state.task.user_goal = "原始目标 keep me safe"
+    state.task.current_plan = {
+        "goal": "p",
+        "steps": [
+            {"step_id": 1, "title": "s", "description": "d", "step_type": "report"}
+        ],
+    }
+    state.task.status = "awaiting_feedback_intent"
+    state.task.pending_user_input_request = {
+        "awaiting_kind": "feedback_intent",
+        "origin_status": "awaiting_step_confirmation",
+        "pending_feedback_text": "请把第二步改成先分析",
+        "question": "Q",
+        "options": ["1", "2", "3"],
+    }
+
+    call_log: list[str] = []
+
+    def _fake_generate_plan(*_a, **_kw):
+        call_log.append("generate_plan")
+        return None
+
+    monkeypatch.setattr(_ch_mod, "generate_plan", _fake_generate_plan)
+
+    def _spy_start_planning(text, ts):
+        call_log.append(f"start_planning_fn:{text}")
+        return ""
+
+    ctx = ch.ConfirmationContext(
+        state=state,
+        turn_state=SimpleNamespace(on_runtime_event=lambda _e: call_log.append("emit")),
+        client=None,
+        model_name="x",
+        continue_fn=lambda _ts: "",
+        start_planning_fn=_spy_start_planning if with_planning_fn else None,
+    )
+    # spy reset_task 的调用顺序——通过 monkeypatch state 实例方法
+    orig_reset = state.reset_task
+
+    def _spy_reset():
+        call_log.append("reset_task")
+        return orig_reset()
+
+    state.reset_task = _spy_reset  # type: ignore[method-assign]
+    return ch, state, ctx, call_log, choice
+
+
+def test_feedback_intent_cancel_does_not_write_messages_or_call_planner(
+    monkeypatch, tmp_path
+):
+    """钉死 cancel ("3") 路径：不允许写 messages、不允许调 planner / start_planning_fn。
+
+    真实回归风险：未来 transition 迁移如果把 cancel 也归到统一的 'restore +
+    checkpoint' transition 里，可能顺手 append 一条 control event "用户取消了
+    反馈意图"——看起来很合理，但破坏 docs/P1_TOPIC_SWITCH_PLAN.md §3 红线
+    "cancel = 完全无副作用"，并让 messages 残留一条永远无法撤销的取消记录。
+    """
+    from agent import checkpoint as ckmod
+
+    ckpt_file = tmp_path / "ckpt.json"
+    monkeypatch.setattr(ckmod, "CHECKPOINT_PATH", ckpt_file)
+
+    ch, state, ctx, call_log, _ = _make_feedback_intent_ctx(
+        choice="3", monkeypatch=monkeypatch
+    )
+    before_msgs_len = len(state.conversation.messages)
+    before_goal = state.task.user_goal
+
+    ch.handle_feedback_intent_choice("3", ctx)
+
+    assert state.task.status == "awaiting_step_confirmation", (
+        "cancel 必须恢复 origin_status"
+    )
+    assert state.task.pending_user_input_request is None, "cancel 必须清 pending"
+    assert state.task.user_goal == before_goal, "cancel 不允许动 user_goal"
+    assert len(state.conversation.messages) == before_msgs_len, (
+        "cancel 路径不允许 append 任何 control event；这是 P1 §3 红线。"
+    )
+    assert "generate_plan" not in call_log, "cancel 路径不允许调 LLM planner"
+    assert not any(c.startswith("start_planning_fn") for c in call_log), (
+        "cancel 路径不允许调 start_planning_fn——那是 as_new_task 路径"
+    )
+
+
+def test_feedback_intent_as_new_task_reset_strictly_precedes_start_planning(
+    monkeypatch, tmp_path
+):
+    """钉死 as_new_task ("2") 路径：reset_task 调用必须**严格先于** start_planning_fn。
+
+    真实回归风险：调用顺序反了会让 start_planning_fn 看到旧 user_goal +
+    旧 current_plan，新 plan 可能被旧上下文污染（与 chat() 正常新任务入口不
+    同构），破坏 hardcore #6 'user_goal 不膨胀' 不变量。
+    """
+    from agent import checkpoint as ckmod
+
+    ckpt_file = tmp_path / "ckpt.json"
+    monkeypatch.setattr(ckmod, "CHECKPOINT_PATH", ckpt_file)
+
+    ch, state, ctx, call_log, _ = _make_feedback_intent_ctx(
+        choice="2", monkeypatch=monkeypatch
+    )
+    ch.handle_feedback_intent_choice("2", ctx)
+
+    reset_idx = call_log.index("reset_task")
+    plan_idx = next(
+        i for i, c in enumerate(call_log) if c.startswith("start_planning_fn:")
+    )
+    assert reset_idx < plan_idx, (
+        f"as_new_task 必须先 reset_task 再 start_planning_fn；"
+        f"当前调用顺序：{call_log}"
+    )
+    # start_planning_fn 必须收到 pending_feedback_text 原文，不能被旧 goal 污染
+    assert "start_planning_fn:请把第二步改成先分析" in call_log
+
+
+def test_feedback_intent_as_new_task_without_start_planning_fn_falls_back_safely(
+    monkeypatch, tmp_path
+):
+    """钉死 as_new_task 注入未生效时的安全降级：仍要 reset + clear，不允许悄悄成功。
+
+    真实回归风险：如果未来把这条防御挪到 transition 层，可能漏写"返回提示串"，
+    用户看到空字符串以为新任务已经开始，但其实 planner 没启动 → 沉默丢失任务。
+    """
+    from agent import checkpoint as ckmod
+
+    ckpt_file = tmp_path / "ckpt.json"
+    monkeypatch.setattr(ckmod, "CHECKPOINT_PATH", ckpt_file)
+
+    ch, state, ctx, call_log, _ = _make_feedback_intent_ctx(
+        choice="2", monkeypatch=monkeypatch, with_planning_fn=False
+    )
+    reply = ch.handle_feedback_intent_choice("2", ctx)
+    assert reply == "请重新输入你的新任务。", (
+        "start_planning_fn 注入失败必须显式提示用户重发，不允许返回空串"
+    )
+    assert "reset_task" in call_log
+    assert not any(c.startswith("start_planning_fn") for c in call_log)
+
+
+def test_feedback_intent_ambiguous_does_not_save_checkpoint_or_mutate_state(
+    monkeypatch, tmp_path
+):
+    """钉死 ambiguous 路径：不允许 save_checkpoint，不允许 mutate state/pending/messages。
+
+    真实回归风险：transition 迁移最危险的统一动作是"任何 confirm 路径结束都
+    save_checkpoint"。一旦 ambiguous 路径也被卷入，会把"未决意图"持久化，
+    导致下次 resume 状态机从一个本不该存在的中间态恢复。
+    """
+    from agent import checkpoint as ckmod
+
+    ckpt_file = tmp_path / "ckpt.json"
+    monkeypatch.setattr(ckmod, "CHECKPOINT_PATH", ckpt_file)
+
+    ch, state, ctx, call_log, _ = _make_feedback_intent_ctx(
+        choice="ambiguous", monkeypatch=monkeypatch
+    )
+    snap_status = state.task.status
+    snap_pending = dict(state.task.pending_user_input_request or {})
+    snap_msgs_len = len(state.conversation.messages)
+    snap_goal = state.task.user_goal
+
+    ch.handle_feedback_intent_choice("请把第二步改成先分析", ctx)
+
+    assert state.task.status == snap_status
+    assert dict(state.task.pending_user_input_request or {}) == snap_pending
+    assert len(state.conversation.messages) == snap_msgs_len
+    assert state.task.user_goal == snap_goal
+    assert not ckpt_file.exists(), (
+        "ambiguous 路径不允许写 checkpoint——未决意图不能被持久化"
+    )
+    assert "generate_plan" not in call_log
+    assert not any(c.startswith("start_planning_fn") for c in call_log)
+    assert "reset_task" not in call_log
+    assert call_log == ["emit"], (
+        f"ambiguous 路径只允许 emit feedback_intent_requested 一个动作；"
+        f"实际：{call_log}"
+    )
+
+
+def test_feedback_intent_as_feedback_handler_source_does_not_write_revised_goal_back():
+    """钉死 as_feedback ("1") 路径源码层：revised_goal 仅作 planner 输入，不允许回写 user_goal。
+
+    真实回归风险：未来 transition 迁移如果把 'feedback 等同于 new task' 当作
+    简化点，可能把 revised_goal 也赋回 state.task.user_goal——结果就是用户
+    每提一次反馈，user_goal 就被增长一段"补充意见"，违反 hardcore #6
+    'user_goal 忠实记录用户最初任务' 不变量。
+
+    这条用源码静态扫描而不是 runtime 行为：runtime 测试容易在重构里被同步
+    重写，源码契约更难被绕过。
+    """
+    import inspect
+    from agent import confirm_handlers as ch
+
+    src = inspect.getsource(ch.handle_feedback_intent_choice)
+    forbidden_patterns = [
+        "state.task.user_goal = revised_goal",
+        "state.task.user_goal=revised_goal",
+        "state.task.user_goal = f\"{state.task.user_goal}",
+        "state.task.user_goal += ",
+    ]
+    for pat in forbidden_patterns:
+        assert pat not in src, (
+            f"handle_feedback_intent_choice 不允许把 revised_goal / "
+            f"反馈文本回写 state.task.user_goal；命中禁止模式：{pat}。"
+            f"详见 hardcore #6 与 commit c252795 的不变量。"
+        )
+    assert "revised_goal = (" in src or "revised_goal = f" in src, (
+        "as_feedback 路径必须显式构造 revised_goal 局部变量，否则边界不清晰"
+    )

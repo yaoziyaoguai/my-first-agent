@@ -11,6 +11,7 @@ import copy
 import json
 from dataclasses import FrozenInstanceError, dataclass, fields
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -98,6 +99,176 @@ def test_command_event_transition_rejects_business_events() -> None:
 
     with pytest.raises(ValueError):
         command_event_transition(RuntimeEventKind.TOOL_RESULT)
+
+
+def test_tool_result_transition_kinds_keep_tool_outcomes_distinct() -> None:
+    """ToolResult -> TransitionResult 的词汇必须先区分四类工具结局。
+
+    这是 v0.4 ToolResult 切片的入口测试：我们不靠「文案里有没有拒绝/失败」
+    这种自然语言关键词来判断状态，而是让 policy denial、user rejection、
+    tool failure、tool success 各自有稳定 transition kind 和 display event。
+    """
+    from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
+
+    outcomes = {
+        kind: tool_result_transition(kind)
+        for kind in ToolResultTransitionKind
+    }
+
+    assert outcomes[ToolResultTransitionKind.TOOL_SUCCESS].display_events == (
+        "tool.completed",
+    )
+    assert outcomes[ToolResultTransitionKind.TOOL_FAILURE].display_events == (
+        "tool.failed",
+    )
+    assert outcomes[ToolResultTransitionKind.POLICY_DENIAL].display_events == (
+        "tool.rejected",
+    )
+    assert outcomes[ToolResultTransitionKind.USER_REJECTION].display_events == (
+        "tool.user_rejected",
+    )
+    assert len({outcome.reason for outcome in outcomes.values()}) == 4
+
+    for outcome in outcomes.values():
+        assert outcome.should_checkpoint is True
+        assert outcome.clear_pending_tool is True
+        assert outcome.advance_step is False
+        assert outcome.clear_pending_user_input is False
+
+
+def test_policy_denial_transition_is_applied_without_persisting_runtime_objects(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """policy denial 是本轮 ToolResult 最小切片之一。
+
+    测试真实 `execute_single_tool()` 路径，而不是只测 helper：安全策略拒绝应
+    clear pending 语义、写现有 tool_result 协议事实、emit `tool.rejected`，
+    但 RuntimeEvent / TransitionResult / ToolResultTransitionKind 不能进入
+    checkpoint 或 messages。
+    """
+    from agent import checkpoint
+    import agent.tool_executor as te
+    from agent.conversation_events import has_tool_result
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(te, "needs_tool_confirmation", lambda name, inp: "block")
+
+    state = create_agent_state(system_prompt="test")
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_policy",
+                    "name": "read_file",
+                    "input": {"path": ".env"},
+                }
+            ],
+        }
+    ]
+    captured: list[object] = []
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=None,
+        on_display_event=captured.append,
+    )
+    block = SimpleNamespace(id="toolu_policy", name="read_file", input={"path": ".env"})
+
+    result = te.execute_single_tool(
+        block,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=state.conversation.messages,
+    )
+
+    assert result == te.FORCE_STOP
+    assert state.task.pending_tool is None
+    assert state.task.tool_execution_log["toolu_policy"]["status"] == "blocked_by_policy"
+    assert has_tool_result(state.conversation.messages, "toolu_policy")
+    assert any(getattr(ev, "event_type", "") == "tool.rejected" for ev in captured)
+
+    serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    serialized_checkpoint = json.dumps(payload, ensure_ascii=False)
+    for marker in ("TransitionResult", "RuntimeEventKind", "ToolResultTransitionKind"):
+        assert marker not in serialized_messages
+        assert marker not in serialized_checkpoint
+
+
+def test_user_rejection_transition_clears_pending_and_keeps_protocol_messages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """user rejection 是本轮 ToolResult 最小切片之一。
+
+    用户拒绝和 policy denial 必须走不同 display event / control event，但都不能
+    把 TransitionResult 写进 messages 或 checkpoint。这里测真实 confirmation
+    handler，守住 pending_tool 只在明确拒绝路径清理的边界。
+    """
+    from agent import checkpoint
+    import agent.confirm_handlers as ch
+    from agent.confirm_handlers import ConfirmationContext
+    from agent.conversation_events import has_tool_result
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_tool_confirmation"
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_user_reject",
+        "tool": "write_file",
+        "input": {"path": "workspace/demo.txt", "content": "hello"},
+    }
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_user_reject",
+                    "name": "write_file",
+                    "input": {"path": "workspace/demo.txt", "content": "hello"},
+                }
+            ],
+        }
+    ]
+    captured: list[object] = []
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=None,
+        on_display_event=captured.append,
+    )
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda ts: "continued",
+    )
+
+    assert ch.handle_tool_confirmation("n", ctx) == "continued"
+
+    assert state.task.pending_tool is None
+    assert state.task.status == "running"
+    assert has_tool_result(state.conversation.messages, "toolu_user_reject")
+    assert any(getattr(ev, "event_type", "") == "tool.user_rejected" for ev in captured)
+    assert not any(getattr(ev, "event_type", "") == "tool.rejected" for ev in captured)
+
+    serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    serialized_checkpoint = json.dumps(payload, ensure_ascii=False)
+    for marker in ("TransitionResult", "RuntimeEventKind", "ToolResultTransitionKind"):
+        assert marker not in serialized_messages
+        assert marker not in serialized_checkpoint
+    assert "用户拒绝执行工具" in serialized_messages
+    assert "policy_denial" not in serialized_messages
 
 
 def test_runtime_transition_result_not_written_to_checkpoint_or_messages(

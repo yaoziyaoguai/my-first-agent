@@ -21,6 +21,7 @@ from agent.display_events import (
 from agent.input_intents import classify_confirmation_response
 from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
 from agent.planner import generate_plan, format_plan_for_display
+from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent.task_runtime import advance_current_step_if_needed
 from agent.tool_executor import execute_pending_tool
 from agent.transitions import apply_user_replied_transition
@@ -408,7 +409,12 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         return ctx.continue_fn(turn_state)
 
     # 未执行分支（n / feedback）也要清空 pending_tool 并为悬空 tool_use 补占位结果。
-    state.task.pending_tool = None
+    # v0.4 Phase 1 先把 user rejection 映射成 TransitionResult：handler 仍按
+    # 既有协议写 tool_result/control event，但清 pending / checkpoint / display
+    # 语义从临时 transition 结果读取，避免继续把状态动作散在多处注释里。
+    transition = tool_result_transition(ToolResultTransitionKind.USER_REJECTION)
+    if transition.clear_pending_tool:
+        state.task.pending_tool = None
 
     # M7-B 真实修复：旧实现用户拒绝后没有任何 display event，CLI 终端
     # 用户只看到自己输入的 'n' 然后是下一轮的 chat 输出，无法清晰确认
@@ -423,7 +429,7 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type="tool.user_rejected",
+            event_type=transition.display_events[0],
             tool_name=tool_name,
             tool_input=pending.get("input") or {},
             status_text=rejection_text,
@@ -443,7 +449,8 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     if response == "reject":
         append_control_event(messages, "tool_confirm_no", pending)
         state.task.status = "running"
-        save_checkpoint(state)
+        if transition.should_checkpoint:
+            save_checkpoint(state)
         return ctx.continue_fn(turn_state)
 
     append_control_event(messages, "tool_feedback", {
@@ -451,5 +458,6 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         "tool": tool_name,
     })
     state.task.status = "running"
-    save_checkpoint(state)
+    if transition.should_checkpoint:
+        save_checkpoint(state)
     return ctx.continue_fn(turn_state)

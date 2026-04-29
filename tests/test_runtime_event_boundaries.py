@@ -31,6 +31,7 @@ from agent.state import create_agent_state
         ("agent.input_intents", "InputIntent"),
         ("agent.input_resolution", "InputResolution"),
         ("agent.transitions", "TransitionResult"),
+        ("agent.runtime_events", "TransitionResult"),
         ("agent.display_events", "DisplayEvent"),
         ("agent.display_events", "RuntimeEvent"),
     ],
@@ -67,6 +68,7 @@ def test_event_modules_do_not_expose_persistence_hooks():
         "agent.input_intents",
         "agent.input_resolution",
         "agent.transitions",
+        "agent.runtime_events",
         "agent.display_events",
         "agent.model_output_resolution",
     ]

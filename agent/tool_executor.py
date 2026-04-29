@@ -18,6 +18,7 @@ from agent.display_events import (
     control_message,
     emit_display_event,
 )
+from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
@@ -220,6 +221,14 @@ def execute_single_tool(
         # v0.2 RC smoke 修复：把通用消息替换为具体拒绝原因，方便用户理解
         # 「不是我拒绝的，是策略拒绝的」。status 改为 'blocked_by_policy'，
         # 与未来真实 user_rejected 计数（如果引入）做语义区分。
+        #
+        # v0.4 Phase 1 最小 ToolResult transition slice：policy denial 先映射成
+        # TransitionResult，再由既有 handler 应用清 pending / checkpoint / display
+        # 语义。TransitionResult 不进 checkpoint/messages；持久事实仍是下面的
+        # tool_execution_log + tool_result message。
+        transition = tool_result_transition(ToolResultTransitionKind.POLICY_DENIAL)
+        if transition.clear_pending_tool:
+            state.task.pending_tool = None
         result = _describe_policy_denial(tool_name, tool_input)
         append_tool_result(messages, tool_use_id, result)
         state.task.tool_execution_log[tool_use_id] = {
@@ -240,13 +249,14 @@ def execute_single_tool(
         emit_display_event(
             turn_state.on_display_event,
             build_tool_status_event(
-                event_type="tool.rejected",
+                event_type=transition.display_events[0],
                 tool_name=tool_name,
                 tool_input=tool_input,
                 status_text=f"被安全策略拒绝：{denial_summary}",
             ),
         )
-        save_checkpoint(state)
+        if transition.should_checkpoint:
+            save_checkpoint(state)
         return FORCE_STOP
 
     if confirmation is True:

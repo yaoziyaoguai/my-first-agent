@@ -55,14 +55,20 @@ Completed in the current baseline:
 - The first command event slice maps `HealthCommand` / `LogsCommand` to no-op
   transition results: they can render maintenance output, but they do not change
   TaskState, clear pending fields, advance steps, or trigger task checkpoint.
+- The first ToolResult transition slice maps `PolicyDenial` and `UserRejection`
+  to `TransitionResult`. Existing handlers still own `tool_result` messages and
+  checkpoint calls; the new boundary only centralizes clear-pending /
+  checkpoint/display intent for these two low-risk outcomes.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
-  separation, status-line rendering, and event/result naming.
+  separation, status-line rendering, event/result naming, and the first
+  ToolResult transition slice.
 
 Not completed yet:
 
 - Complete event-driven state machine.
 - `core.py` main-loop slimming.
-- Full ToolResult / tool result migration.
+- Full ToolResult / tool result migration, including tool success/failure and
+  moving `tool_result` message writing itself behind a transition boundary.
 - Full ModelOutput / model output classification migration.
 - Full user confirmation/rejection migration.
 
@@ -108,7 +114,9 @@ This audit is the migration map, not the migration itself.
 
 Likely migration order:
 
-1. Move a small ToolResult -> TransitionResult slice.
-2. Move a small UserRejection / PolicyDenial -> TransitionResult slice.
+1. Move the next ToolResult -> TransitionResult slice for tool failure or tool
+   success without changing the `tool_result` protocol.
+2. Tighten UserRejection / PolicyDenial transition application only where tests
+   show duplicated state updates.
 3. Centralize ModelOutput classification.
 4. Only then consider slimming the `core.py` loop.

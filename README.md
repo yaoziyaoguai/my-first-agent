@@ -82,7 +82,7 @@ you to run manually.
 .venv/bin/python -m pytest -q
 ```
 
-Expected baseline: ruff clean, ~676 passed, 3 permanent xfails (each
+Expected baseline: ruff clean, ~688 passed, 3 permanent xfails (each
 xfail message documents which future version owns the gap).
 
 ### Local runtime artifacts
@@ -275,6 +275,7 @@ big-bang. See `docs/V0_3_PLANNING.md` for full scope.
   health  : 3 warn (workspace_lint, log_size, session_accumulation); 详情：python main.py health
 ────────────────────────────────────────────────────────────
   输入 'quit' 退出。
+  Health: python main.py health；Logs: python main.py logs --tail 50。
   Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。
 
   📭 resume : 未发现断点，可以直接开始新任务。

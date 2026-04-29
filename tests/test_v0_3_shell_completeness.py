@@ -145,6 +145,20 @@ def test_readme_documents_all_v0_3_subcommands():
         assert cmd in text, f"README 缺命令：{cmd}"
 
 
+def test_readme_startup_example_matches_current_header_shape():
+    """README 是线下试用入口，启动屏示例要跟真实 header 的关键行同步。
+
+    这里不绑定 session id / health 数字，只守护用户会照着找入口的固定文案：
+    health/logs 入口、Skill 实验性声明、以及当前测试基线。这样文档不会再次停在
+    旧的 basic shell 示例上，也不会把 v0.3 误写成成熟 TUI 或 Skill runtime。
+    """
+    text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Health: python main.py health；Logs: python main.py logs --tail 50。" in text
+    assert "Skill 是实验性能力" in text
+    assert "~688 passed, 3 permanent xfails" in text
+    assert "not a full Textual IDE" in text
+
+
 # ---------- 烟雾：health 渲染器与 logs viewer 不互崩 ----------
 
 def test_health_report_renders_without_error():

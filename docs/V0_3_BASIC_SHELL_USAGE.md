@@ -114,7 +114,8 @@ python main.py logs --include-observer       # 显式打开极噪事件类型
 | user 拒绝 | 触发需要确认的 write_file，输入 `n` | tool.user_rejected |
 
 部分需要真实 API 的场景标记为 **manual-only**：calculate / read_file 的
-完整端到端 LLM 流转。基础渲染契约由 ~650 项自动测试守护。
+完整端到端 LLM 流转。当前基础渲染契约由约 688 项自动测试 + 3 个已登记
+xfail 守护。
 
 ---
 

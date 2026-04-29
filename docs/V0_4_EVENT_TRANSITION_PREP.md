@@ -83,10 +83,57 @@ Completed in the current baseline:
   / `consecutive_*` counters are unchanged. `UNKNOWN` keeps the explicit
   `"未知的 stop_reason"` fallback so future SDK protocol drift cannot be
   silently absorbed into a known kind.
+- The first user-confirmation transition slice (plan) introduces
+  `PlanConfirmationKind` (`PLAN_ACCEPTED` / `PLAN_REJECTED`) and
+  `plan_confirmation_transition()`. `handle_plan_confirmation` accept and
+  reject branches now declare intent through `TransitionResult.should_checkpoint`;
+  handler still owns actual `state.task.status` mutation, `save_checkpoint` /
+  `clear_checkpoint`, `append_control_event`, and `state.reset_task()`.
+  Reject path explicitly asserts `not should_checkpoint` so the contract
+  prevents a future ghost checkpoint regression on cancelled plans.
+- The second user-confirmation transition slice (step) introduces
+  `StepConfirmationKind` (`STEP_ACCEPTED_CONTINUE` / `STEP_ACCEPTED_TASK_DONE` /
+  `STEP_REJECTED`). Three kinds (not two) because step accept has two real
+  terminal states: continue to next step vs. last-step natural completion.
+  The natural-completion kind sets `should_checkpoint=False` on purpose so
+  task-done flows through `clear_checkpoint` instead of a stale checkpoint
+  write; continue kind keeps `should_checkpoint=True` for normal advancement.
+- The third user-confirmation transition slice (tool) introduces
+  `ToolConfirmationKind` (`TOOL_ACCEPTED_SUCCESS` / `TOOL_ACCEPTED_FAILED`).
+  Only two kinds because tool accept has two real terminal states with an
+  asymmetric `pending_tool` cleanup contract: success clears `pending_tool`,
+  failure preserves it for human diagnostics. Reject path is intentionally
+  NOT re-routed; it stays on the v0.1 `ToolResultTransitionKind.USER_REJECTION`
+  boundary so the ToolResult vs ToolConfirmation semantic layers remain
+  distinct (ToolResult = "how to map this tool_result message"; ToolConfirmation
+  = "Runtime state-machine decision after user confirms a tool"). A pre-slice
+  contract test pins `pending_tool` cleanup as the handler's single source of
+  truth across all three paths (success / exception / reject) before the
+  kind-based dispatch is introduced.
+- The fourth user-confirmation transition slice (user_input) is intentionally
+  a **reuse slice, not a new-kind slice**. `handle_user_input_step` was
+  already reduced to a 3-line dispatcher in v0.3 by `apply_user_replied_transition`
+  (in `agent/transitions.py`), which absorbs append / clear pending /
+  advance / save_checkpoint into one transition boundary. Adding a parallel
+  `UserInputConfirmationKind` would only wrap the existing transition in a
+  second indirection without information gain, and would split the
+  `awaiting_user_input + USER_REPLIED` semantic across two vocabularies.
+  Slice 6-d therefore pins the reuse contract via source-level boundary
+  tests (handler routes through `apply_user_replied_transition`; never
+  inline-mutates `pending_user_input_request` or `state.task.status`;
+  `empty_user_input` defence stays in handler as the runtime guard before
+  the transition layer). Adding a new kind here is explicitly listed in the
+  governance forbidden-list because it would be ceremony, not a real
+  boundary improvement. `feedback_intent` confirmation is the only remaining
+  user-confirmation handler still owning inline mutation; it is read-only
+  audited but not migrated in this slice because it carries three-way
+  dispatch + `origin_status` rollback + `start_planning_fn` injection, all
+  of which need a separate contract-test slice first.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
   separation, status-line rendering, event/result naming, the first three
   ToolResult transition slices (policy denial, user rejection, tool failure,
-  tool success), and the first ModelOutput classification slice.
+  tool success), the first ModelOutput classification slice, and the first
+  four user-confirmation slices (plan, step, tool, user_input reuse).
 
 Not completed yet:
 

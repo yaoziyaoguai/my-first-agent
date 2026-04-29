@@ -2023,3 +2023,132 @@ def test_tool_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatc
     )
     _scan_no_leak(json.dumps(state_b.conversation.messages, ensure_ascii=False))
     _scan_no_leak(ckpt_file.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# v0.4 Phase 1 slice 6-d · user_input confirmation 复用契约（不新增 Kind）
+#
+# 设计原则（与 docs/V0_4_EVENT_TRANSITION_PREP.md §4 第四个 confirmation slice 对齐）：
+#
+#   handle_user_input_step 在 v0.3 已经被 apply_user_replied_transition
+#   （agent/transitions.py）抽空成 3 行 dispatcher：
+#       resolve_user_input → empty 防御 → apply_user_replied_transition → continue/reply
+#   它不像 plan/step/tool 那样 inline 写 status / pending / save_checkpoint。
+#
+#   因此 v0.4 slice 6-d 的"正确做法"是 **复用 v0.3 已有的 transition 边界**，
+#   而不是再加一个 UserInputConfirmationKind 把已经抽好的层包第二层。
+#
+#   本 slice 不修改 confirm_handlers、不修改 runtime_events、不修改 transitions；
+#   只在测试层钉两条契约，保证未来任何"v0.4 化"重构不会偷偷把 inline mutation
+#   塞回 handle_user_input_step（这是真实回归风险，过去 v0.3 之前正是这种长函数）。
+#
+# 契约 1：handler 必须委托给 apply_user_replied_transition；
+# 契约 2：handler 不允许直接 mutate pending_user_input_request / state.task.status
+#         （reset_task 损坏态分支例外，已用 not state.task.current_plan 守门）。
+#
+# 模拟边界说明：本块测试**全部是 source-level 静态扫描**，不构造 fake state、
+# 不替换 transition 函数；这是为了：
+#   - 避免和 tests/test_user_replied_transition.py 已经端到端覆盖的 6 条
+#     transition 行为测试重复（那些是行为契约，这里是结构契约）；
+#   - 避免引入"测试本身能 mock 掉的边界"——一个能被 monkeypatch 的契约不是契约。
+# ---------------------------------------------------------------------------
+
+
+def test_user_input_handler_routes_through_apply_user_replied_transition():
+    """钉死 handle_user_input_step 必须委托 v0.3 transition，不允许 inline 复刻。
+
+    这条测试守的真实 bug：未来某次"统一 v0.4 vocabulary"的重构可能把
+    apply_user_replied_transition 的 import 删掉、把 append/clear/save 三件套
+    inline 回 handler，理由听起来都很合理（"减少跨模块跳转"/"和 plan/step/tool
+    保持对称"）。一旦发生，handler 就重新承担状态机职责，v0.3 的边界收益归零。
+    """
+    import inspect
+    from agent import confirm_handlers as ch
+
+    src = inspect.getsource(ch.handle_user_input_step)
+    assert "apply_user_replied_transition" in src, (
+        "handle_user_input_step 必须委托给 apply_user_replied_transition；"
+        "如有意去掉，请先把 v0.3 transition 边界的迁移路径写进 "
+        "docs/V0_4_EVENT_TRANSITION_PREP.md 并加替代契约测试。"
+    )
+    assert "resolve_user_input" in src, (
+        "handle_user_input_step 必须先经过 resolve_user_input 输入解析层；"
+        "跳过它会让 empty_user_input 防御失效，空回复会污染 transition。"
+    )
+
+
+def test_user_input_handler_does_not_inline_mutate_pending_or_status():
+    """钉死 handler 不允许直接 mutate pending_user_input_request / task.status。
+
+    真实历史教训：confirm_handlers 早期版本里曾经有
+        state.task.pending_user_input_request = None
+        state.task.status = "running"
+    直接散在 handler 各处。每加一条触发路径就要复刻一次，最后形成"清 pending 与
+    保存 checkpoint 顺序不一致"的诡异 bug。v0.3 把它们集中到 transitions.py
+    后该问题消失。本测试守住"集中"这件事不被悄悄回滚。
+
+    例外：
+      - 文件顶层 import / 类型声明里出现的字符串不在 handler 函数体内，不算违规；
+      - reset_task 损坏态分支允许出现（已由 `not current_plan and not pending`
+        守门），那是 v0.3 之前就存在的损坏态收尾，不是状态机推进。
+    """
+    import inspect
+    from agent import confirm_handlers as ch
+
+    src = inspect.getsource(ch.handle_user_input_step)
+    forbidden_pending = "state.task.pending_user_input_request ="
+    forbidden_status = 'state.task.status = "'
+    assert forbidden_pending not in src, (
+        "handle_user_input_step 不允许直接清/设 pending_user_input_request；"
+        "这件事应当通过 apply_user_replied_transition 完成。"
+    )
+    assert forbidden_status not in src, (
+        "handle_user_input_step 不允许直接写 state.task.status；"
+        "状态推进是 transitions.py 的职责。"
+    )
+
+
+def test_user_input_handler_keeps_empty_input_guard_before_transition():
+    """空输入防御必须在 transition 调用之前。
+
+    真实 bug：如果先调 apply_user_replied_transition、再判 empty，那么空回复
+    会先把 pending 清掉、把 step 推进掉，再回头返回"请输入有效内容"——用户看
+    到的是同一个错误提示，但底层状态已经不可恢复。
+    """
+    import inspect
+    from agent import confirm_handlers as ch
+
+    src = inspect.getsource(ch.handle_user_input_step)
+    empty_idx = src.find("EMPTY_USER_INPUT")
+    transition_idx = src.find("apply_user_replied_transition(")
+    assert empty_idx != -1 and transition_idx != -1, (
+        "handler 源码必须同时引用 EMPTY_USER_INPUT 与 apply_user_replied_transition"
+    )
+    assert empty_idx < transition_idx, (
+        "empty 防御必须出现在 apply_user_replied_transition 调用之前；"
+        "顺序反了会让空回复污染 transition 状态。"
+    )
+
+
+def test_user_input_slice_does_not_introduce_new_confirmation_kind():
+    """钉死本 slice 不把 user_input 包成新的 *ConfirmationKind。
+
+    这是一条架构契约：v0.4 Phase 1 slice 6-d 显式选择"复用 v0.3 transition"
+    而不是"新增 vocabulary"。如果未来真的需要新增（例如要把 user_input 接入
+    runtime cancel / generation abort 的统一事件流），必须先在
+    docs/V0_4_EVENT_TRANSITION_PREP.md 写明动机、再删掉本测试，而不是悄悄加。
+    """
+    from agent import runtime_events as re
+
+    forbidden = [
+        "UserInputConfirmationKind",
+        "USER_INPUT_ACCEPTED",
+        "USER_INPUT_REJECTED",
+        "user_input_confirmation_transition",
+    ]
+    for name in forbidden:
+        assert not hasattr(re, name), (
+            f"runtime_events 不应导出 {name}；slice 6-d 选择复用"
+            f" apply_user_replied_transition，不新增并行 vocabulary。"
+            f"如确需，请先更新 docs/V0_4_EVENT_TRANSITION_PREP.md。"
+        )

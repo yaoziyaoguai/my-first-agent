@@ -1320,6 +1320,18 @@ def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(
     ch.handle_plan_confirmation("y", ctx)
     assert state.task.status == "running"
 
+    # 中文学习边界（accept 路径硬约束）：
+    # plan_confirmation_transition(PLAN_ACCEPTED) 显式承诺
+    # should_checkpoint=True；handler 必须真的把这次接受落盘，否则 resume
+    # 时会丢失"用户已经批准 plan"这一关键事实，下次启动会要求用户重新确认
+    # 同一份 plan，破坏 v0.4 transition 边界承诺。
+    # 这条断言钉死「accept → 真实 checkpoint 文件存在」，未来如果有人把
+    # save_checkpoint 调用从 handler 中误删，会立刻在这里失败。
+    assert ckpt_file.exists(), (
+        "plan accepted 路径必须真实写入 checkpoint 文件；"
+        "如果 handler 删掉 save_checkpoint 调用，resume 会丢任务。"
+    )
+
     serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
     if ckpt_file.exists():
         serialized_ckpt = ckpt_file.read_text(encoding="utf-8")
@@ -1351,8 +1363,16 @@ def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(
     assert "已取消" in out
     # reset_task 之后 task 应回到初始状态
     assert state2.task.status == "idle"
-    # clear_checkpoint 之后文件应不存在
-    assert not ckpt_file.exists()
+    # 中文学习边界（reject 路径硬约束）：
+    # plan_confirmation_transition(PLAN_REJECTED) 显式承诺
+    # should_checkpoint=False；handler 紧接着 reset_task + clear_checkpoint，
+    # 因此 checkpoint 文件必须**不存在**。如果未来有人在 reject 路径上
+    # 反向加 save_checkpoint，已被清空的 task 状态会被落盘 → resume 会
+    # 复活幽灵任务。这条断言钉死「reject → checkpoint 必须不存在」。
+    assert not ckpt_file.exists(), (
+        "plan rejected 路径不应残留 checkpoint 文件；"
+        "如果 handler 在拒绝路径上误调 save_checkpoint，resume 会复活幽灵任务。"
+    )
 
     serialized_messages2 = json.dumps(state2.conversation.messages, ensure_ascii=False)
     for marker in (

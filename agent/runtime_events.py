@@ -164,3 +164,50 @@ def tool_result_transition(
             notes=("user rejection is explicit human choice, not security policy",),
         )
     raise ValueError(f"unsupported tool transition kind: {kind.value}")
+
+
+class ModelOutputKind(str, Enum):
+    """v0.4 Phase 1 slice 5：模型输出分类的统一词汇。
+
+    中文学习边界：
+    - 这一组值用于把 Anthropic SDK 返回的 ``stop_reason`` 收敛成
+      Runtime 自己的分类标签，让 ``agent/core.py`` 的循环 dispatch
+      不再用四处散落的 inline 字符串比较来决定走哪个 handler。
+    - 它**不是**新的状态机、**不是**新的事件总线，也**不**接管
+      ``response_handlers.py`` 里的 state mutation / messages 写入 /
+      checkpoint / `consecutive_*` 计数器——这些仍由原 handler 各自负责，
+      slice 5 只把"是哪一种模型输出"这一条边界提取出来。
+    - ``UNKNOWN`` 必须显式存在：未知 stop_reason 不能被静默归到 end_turn /
+      tool_use / max_tokens 任何一类，否则会把 LLM SDK 的协议变更或异常
+      响应伪装成"正常完成"——本切片的核心防回归点。
+    - 后续 slice 6 用户确认 transition、Phase 2 主循环瘦身才会基于这个
+      分类层进一步把 dispatch 集中；本切片不做这些扩展。
+    """
+
+    END_TURN = "end_turn"
+    TOOL_USE = "tool_use"
+    MAX_TOKENS = "max_tokens"
+    UNKNOWN = "unknown"
+
+
+def classify_model_output(stop_reason: str | None) -> ModelOutputKind:
+    """把 ``response.stop_reason`` 收敛成 :class:`ModelOutputKind`。
+
+    中文学习边界：
+    - 纯函数：不读 state、不写 messages、不发 RuntimeEvent、不动 checkpoint。
+      调用方拿到结果再决定 dispatch / 日志 / display；分类与副作用解耦。
+    - 任何不在已知白名单内的 stop_reason（包括 ``None`` / 空串 / 大小写
+      变体 / SDK 未来新增字段）一律返回 :attr:`ModelOutputKind.UNKNOWN`，
+      避免"静默成功"——下游必须显式处理 UNKNOWN 才能继续。
+    - 不接管 stop_reason 之外的细节（比如 ``stop_sequence`` / ``refusal``）；
+      那些在未来 slice 中独立判断，本切片只覆盖当前 ``core.py`` dispatcher
+      已经在用的 4 个分支。
+    """
+
+    if stop_reason == "end_turn":
+        return ModelOutputKind.END_TURN
+    if stop_reason == "tool_use":
+        return ModelOutputKind.TOOL_USE
+    if stop_reason == "max_tokens":
+        return ModelOutputKind.MAX_TOKENS
+    return ModelOutputKind.UNKNOWN

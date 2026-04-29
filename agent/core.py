@@ -48,6 +48,7 @@ from agent.response_handlers import (
     handle_max_tokens_response,
     handle_tool_use_response,
 )
+from agent.runtime_events import ModelOutputKind, classify_model_output
 from agent.runtime_observer import log_event as log_runtime_event
 
 
@@ -439,6 +440,11 @@ def _run_main_loop(
             return "对话循环次数过多，请简化任务或分步执行。"
 
         response = _call_model(turn_state)
+        # v0.4 Phase 1 slice 5：先把 stop_reason 收敛成 ModelOutputKind 分类标签。
+        # 这一行**只**做分类，不读 state、不写 messages、不动 checkpoint；后面 4
+        # 个分支按 kind dispatch，与之前的 inline 字符串比较行为完全等价，但
+        # UNKNOWN 走显式分支后未知 stop_reason 不再被静默并入"正常完成"。
+        model_kind = classify_model_output(response.stop_reason)
         log_runtime_event(
             "loop.iteration_end",
             event_source="runtime",
@@ -449,7 +455,7 @@ def _run_main_loop(
             event_channel="loop",
         )
 
-        if response.stop_reason == "max_tokens":
+        if model_kind is ModelOutputKind.MAX_TOKENS:
             result = handle_max_tokens_response(
                 response,
                 state=state,
@@ -472,7 +478,7 @@ def _run_main_loop(
                 return result
             continue
 
-        if response.stop_reason == "end_turn":
+        if model_kind is ModelOutputKind.END_TURN:
             result = handle_end_turn_response(
                 response,
                 state=state,
@@ -494,7 +500,7 @@ def _run_main_loop(
                 return result
             continue
 
-        if response.stop_reason == "tool_use":
+        if model_kind is ModelOutputKind.TOOL_USE:
             result = handle_tool_use_response(
                 response,
                 state=state,
@@ -516,6 +522,11 @@ def _run_main_loop(
                 return result
             continue
 
+        # ModelOutputKind.UNKNOWN：未知 stop_reason 走显式分支，不能被
+        # 上面任何一类静默吸收。这里保留原"[系统] 未知的 stop_reason: …"
+        # 文案与 reason_for_stop=unknown_stop_reason 日志，行为与 slice 5
+        # 之前完全一致；分类层只是让"unknown 是一类独立结果"在测试里可以
+        # 直接钉死，避免未来 SDK 协议漂移把异常静默吞掉。
         # B2 契约：诊断信息用户必须能看到，不能用 [DEBUG] 前缀（会被
         # main.DEBUG_OUTPUT_PREFIXES 兜底过滤吞掉）。详见
         # docs/CLI_OUTPUT_CONTRACT.md "允许直接 print 的 prefix 白名单"。

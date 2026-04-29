@@ -74,20 +74,33 @@ Completed in the current baseline:
   unchanged. `rejected_by_check` (tool-internal safety reject) deliberately
   stays on the raw `display_event_type` fallback path so it does not get
   collapsed into success or failure semantics.
+- The first ModelOutput classification slice introduces `ModelOutputKind`
+  (`END_TURN` / `TOOL_USE` / `MAX_TOKENS` / `UNKNOWN`) and a pure
+  `classify_model_output(stop_reason)` function. `agent/core.py` `_run_main_loop`
+  dispatcher now routes by kind instead of inline string compares; the existing
+  3 handlers (`handle_end_turn_response`, `handle_tool_use_response`,
+  `handle_max_tokens_response`) and their state mutation / messages / checkpoint
+  / `consecutive_*` counters are unchanged. `UNKNOWN` keeps the explicit
+  `"未知的 stop_reason"` fallback so future SDK protocol drift cannot be
+  silently absorbed into a known kind.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
-  separation, status-line rendering, event/result naming, and the first three
+  separation, status-line rendering, event/result naming, the first three
   ToolResult transition slices (policy denial, user rejection, tool failure,
-  tool success).
+  tool success), and the first ModelOutput classification slice.
 
 Not completed yet:
 
 - Complete event-driven state machine.
-- `core.py` main-loop slimming.
+- `core.py` main-loop slimming (the dispatcher is still in `chat()` closure;
+  ModelOutput classification only centralises *which kind* this is, not the
+  loop structure itself).
 - Full tool result message migration: current slices keep `append_tool_result`
   calls in handlers; only outcome intent / display event / checkpoint gating
   goes through `TransitionResult`. Moving `tool_result` message writing itself
   behind a transition boundary is a later slice.
-- Full ModelOutput / model output classification migration.
+- Full ModelOutput handler-side migration: classification is centralised, but
+  `response_handlers.py` still owns state mutation, messages writing,
+  checkpoint, and the `consecutive_*` counters for each kind.
 - Full user confirmation/rejection migration.
 
 ## 5. v0.4 first stage should not do

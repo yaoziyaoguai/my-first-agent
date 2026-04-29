@@ -359,11 +359,19 @@ def test_checkpoint_does_not_leak_runtime_only_type_names(tmp_checkpoint_path):
       "<RuntimeEvent object at 0x...>" 字符串，外观正常但语义已损坏；resume
       时这些字符串会被恢复成普通字符串而非对象，行为静默漂移。
 
-    为什么避免误伤用户消息正文：
-      本测试 fixture **刻意**不在 user/assistant content 中写入这些类型名，
-      所以任何命中都必然来自结构化 runtime metadata，false-positive 为 0。
-      未来若需要测试用户正文出现这些词的情况，应在另一个独立测试里单独
-      处理，不该在 guard 里放宽断言。
+    本测试的 scope（重要，避免误解为全局禁词）：
+      本测试**只**对自己控制的 tmp_checkpoint fixture 生成的 JSON 做扫描，
+      **不**对真实 runtime 的 checkpoint 或任意用户消息正文做禁词限制。
+      用户在生产 runtime 中给 agent 发的消息正文里出现 "LoopContext" /
+      "RuntimeEvent" 等词是完全合法的（例如用户问 "什么是 LoopContext"），
+      本 guard 与之无关——它只防 handler 把 runtime 对象 str() 化后写进
+      durable payload 的 silent corruption。
+
+    防御性 fixture 自检：
+      下方有一段 `_assert_fixture_user_content_clean` 断言，确保本 fixture
+      的 user/assistant content 不含禁用词。这样万一未来有人为了"丰富测试
+      用例"在 fixture 里加入含这些词的对话，会立刻收到 "fixture 不变量被
+      破坏" 的清晰报错，而不是误以为 "checkpoint 发生 runtime leak"。
     """
     from agent.checkpoint import save_checkpoint
 
@@ -394,8 +402,6 @@ def test_checkpoint_does_not_leak_runtime_only_type_names(tmp_checkpoint_path):
 
     save_checkpoint(src, source="tests.phase_2_4.runtime_leak_guard")
 
-    raw_json = tmp_checkpoint_path.read_text(encoding="utf-8")
-
     # runtime-only 类型名清单：这些只属于 v0.4 Phase 1/2 的 runtime boundary，
     # 不应出现在 durable checkpoint 中。
     forbidden_runtime_types = [
@@ -412,6 +418,22 @@ def test_checkpoint_does_not_leak_runtime_only_type_names(tmp_checkpoint_path):
         "FeedbackIntentKind",
         "ToolResultTransitionKind",
     ]
+
+    # 防御性 fixture 不变量自检：先确认本 fixture 的 user/assistant content
+    # 不含禁用词。若未来有人改 fixture 加入这些词，本断言会先失败并提示
+    # "fixture 不变量被破坏"，而不是让下面的 guard 误报为 "runtime leak"。
+    fixture_user_text = " ".join(
+        m.get("content", "") for m in src.conversation.messages
+        if isinstance(m.get("content"), str)
+    )
+    polluted_in_fixture = [n for n in forbidden_runtime_types if n in fixture_user_text]
+    assert not polluted_in_fixture, (
+        f"本测试 fixture 不变量被破坏：user/assistant content 含禁用词"
+        f" {polluted_in_fixture}。请把这些词从 fixture 消息正文中移除——"
+        "本 guard 只防 runtime metadata 泄漏，不限制真实用户消息正文。"
+    )
+
+    raw_json = tmp_checkpoint_path.read_text(encoding="utf-8")
 
     leaked = [name for name in forbidden_runtime_types if name in raw_json]
     assert not leaked, (

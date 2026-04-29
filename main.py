@@ -614,6 +614,33 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    # v0.5 Phase 1 第三小步：``sessions inventory`` / ``runs inventory`` 子命令。
+    # 只读 metadata 盘点（DRY RUN），与 v0.4 ``logs cleanup`` 同模式但
+    # 范围更细——按文件 count / total_bytes / mtime range / by_extension /
+    # by_prefix / sample_paths 输出结构化报告。
+    # 严格不删除/不移动/不压缩/不读取文件正文（由 agent/local_artifacts.py
+    # 顶部 docstring + AST 守卫测试钉死）。详见 agent/local_artifacts.py。
+    if argv and argv[0] in {"sessions", "runs"}:
+        from pathlib import Path
+        from agent.local_artifacts import (
+            format_artifact_inventory_report,
+            inventory_known_artifact,
+        )
+
+        kind = argv[0]
+        sub = argv[1] if len(argv) > 1 else None
+        if sub != "inventory":
+            print(
+                f"用法：python main.py {kind} inventory\n"
+                f"当前 v0.5 第三小步**只**支持只读 inventory；不支持 cleanup/apply/rotation。"
+            )
+            return 2
+
+        project_root = Path(__file__).resolve().parent
+        inv = inventory_known_artifact(project_root, kind)
+        print(format_artifact_inventory_report(inv), end="")
+        return 0
+
     init_session()
     try_resume_from_checkpoint()
     if _selected_input_backend() == "textual":

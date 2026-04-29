@@ -321,3 +321,177 @@ def test_simple_cli_does_not_leak_checkpoint_meta_to_user(capsys):
         assert forbidden not in captured, (
             f"resume 用户视图意外出现 checkpoint 内部值 '{forbidden}'"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4：Checkpoint Runtime Leak Guard
+# ---------------------------------------------------------------------------
+# 这一节有 2 条 guard 测试，钉住 v0.4 Phase 2 引入的 runtime-only 类型
+# (LoopContext / RuntimeEvent / TransitionResult / 各种 *Kind 枚举)
+# **绝不能**进入 durable checkpoint。
+#
+# 当前防线（已存在）：
+#   - _filter_to_declared_fields 白名单：load 时未知 key 被丢弃；
+#   - TaskState/MemoryState 字段全部是 JSON-serializable 标量/dict；
+#   - _build_checkpoint_from_state 用 _copy_state_dict 浅拷贝 dataclass。
+#
+# 但缺少**显式断言**：万一未来某个 handler 把 RuntimeEvent / TransitionResult
+# 对象塞进 task.current_plan["last_event"] 或 tool_execution_log[id]["event"]，
+# JSON 序列化要么报错（runtime 直接挂）要么用 default=str 落成"<RuntimeEvent
+# object at 0x...>"——后者是 silent corruption。这两条 guard 是反回归网。
+#
+# 测试设计要点：
+#   - 不扫整个 JSON 文件做禁用词搜索（会误伤未来含这些词的用户消息正文）；
+#   - 而是用专门的 fixture 构造**不含**这些词的 user/assistant 消息，让任何
+#     命中都必然来自 runtime metadata 而非用户文本——这样 false-positive 为 0；
+#   - 两条都是 0 产品代码改动，预期当前 green；若意外红灯，说明产品代码已经
+#     发生 silent leak，需走根因排查（不要弱化测试）。
+# ---------------------------------------------------------------------------
+
+
+def test_checkpoint_does_not_leak_runtime_only_type_names(tmp_checkpoint_path):
+    """Phase 2.4 候选 1：checkpoint JSON 不得包含 runtime-only 类型名。
+
+    防什么真实 bug：
+      未来某 handler 误把 RuntimeEvent / TransitionResult / LoopContext 等
+      runtime 对象塞进 task.current_plan / tool_execution_log / pending_tool
+      等 dict 字段。JSON 序列化时若用 default=str 兜底，会留下
+      "<RuntimeEvent object at 0x...>" 字符串，外观正常但语义已损坏；resume
+      时这些字符串会被恢复成普通字符串而非对象，行为静默漂移。
+
+    为什么避免误伤用户消息正文：
+      本测试 fixture **刻意**不在 user/assistant content 中写入这些类型名，
+      所以任何命中都必然来自结构化 runtime metadata，false-positive 为 0。
+      未来若需要测试用户正文出现这些词的情况，应在另一个独立测试里单独
+      处理，不该在 guard 里放宽断言。
+    """
+    from agent.checkpoint import save_checkpoint
+
+    src = create_agent_state(system_prompt="test")
+    src.task.user_goal = "处理一个普通任务"
+    src.task.current_plan = {
+        "goal": "g",
+        "steps": [{"title": "步骤一"}, {"title": "步骤二"}],
+    }
+    src.task.current_step_index = 1
+    src.task.status = "awaiting_tool_confirmation"
+    src.task.pending_tool = {
+        "tool_use_id": "toolu_test_001",
+        "tool": "read_file",
+        "input": {"path": "/tmp/somefile"},
+    }
+    src.task.tool_execution_log = {
+        "toolu_test_001": {
+            "tool": "read_file",
+            "input": {"path": "/tmp/somefile"},
+            "result": {"status": "executed", "output": "ok"},
+        }
+    }
+    src.conversation.messages = [
+        {"role": "user", "content": "请帮我读取一个文件"},
+        {"role": "assistant", "content": "好的，正在读取"},
+    ]
+
+    save_checkpoint(src, source="tests.phase_2_4.runtime_leak_guard")
+
+    raw_json = tmp_checkpoint_path.read_text(encoding="utf-8")
+
+    # runtime-only 类型名清单：这些只属于 v0.4 Phase 1/2 的 runtime boundary，
+    # 不应出现在 durable checkpoint 中。
+    forbidden_runtime_types = [
+        "LoopContext",
+        "RuntimeEvent",        # 也覆盖 RuntimeEventKind
+        "TransitionResult",
+        "ToolFailureKind",
+        "ToolSuccessKind",
+        "ModelOutputKind",
+        "PlanConfirmationKind",
+        "StepConfirmationKind",
+        "ToolConfirmationKind",
+        "UserInputConfirmationKind",
+        "FeedbackIntentKind",
+        "ToolResultTransitionKind",
+    ]
+
+    leaked = [name for name in forbidden_runtime_types if name in raw_json]
+    assert not leaked, (
+        "checkpoint JSON 中检测到 runtime-only 类型名泄漏："
+        f"{leaked}。这意味着某个 handler 把 runtime 对象塞进了 durable "
+        "state（task / memory / conversation）。请走根因排查：搜索哪个 "
+        "save_checkpoint 之前的 mutation 把 RuntimeEvent / TransitionResult "
+        "等对象写进了 dict 字段，而不是修改本测试。"
+    )
+
+
+def test_resume_does_not_attach_runtime_only_attrs_to_task(tmp_checkpoint_path):
+    """Phase 2.4 候选 2：恶意/损坏 checkpoint 中的 runtime key 必须被 resume 丢弃。
+
+    防什么真实 bug：
+      未来若有人改 _filter_to_declared_fields 或绕过它（直接 setattr 整个
+      dict），恶意/损坏的 checkpoint JSON 中如果包含 loop_ctx / client /
+      model_name / transition_result / runtime_event 这类 key，会被原样
+      setattr 到 state.task 上，长出非 dataclass 声明的"裸属性"。这会让
+      runtime 行为静默漂移（例如某个 handler 之后访问 state.task.client
+      不会 AttributeError，而是拿到 dict）。
+
+    本测试通过人工构造一个含禁用 runtime key 的 checkpoint JSON，验证
+    load_checkpoint_to_state 后 state.task **不**长出这些裸属性。这间接
+    覆盖 _filter_to_declared_fields 白名单契约的核心边界。
+    """
+    import json
+    from agent.checkpoint import load_checkpoint_to_state
+
+    # 人工构造：故意往 task / memory 里放 runtime-only key + 一些声明字段
+    malicious_checkpoint = {
+        "meta": {"session_id": "s1"},
+        "task": {
+            "user_goal": "正常字段",       # 声明字段，应保留
+            "status": "running",            # 声明字段，应保留
+            # 以下全是 runtime-only key，必须被 _filter_to_declared_fields 丢弃
+            "loop_ctx": {"client": "fake", "model_name": "fake-model"},
+            "client": "fake_client_obj",
+            "model_name": "fake-model",
+            "transition_result": {"kind": "fake"},
+            "runtime_event": {"event_type": "fake"},
+            "_loop_ctx": {"client": "fake"},
+            "callbacks": ["fake_cb"],
+        },
+        "memory": {
+            "session_id": "s1",            # 声明字段，应保留
+            "loop_ctx": {"x": 1},          # runtime-only，应丢
+            "client": "fake",              # runtime-only，应丢
+        },
+        "conversation": {"messages": []},
+    }
+    tmp_checkpoint_path.write_text(
+        json.dumps(malicious_checkpoint, ensure_ascii=False), encoding="utf-8"
+    )
+
+    dst = create_agent_state(system_prompt="other")
+    assert load_checkpoint_to_state(dst)
+
+    # 声明字段保留
+    assert dst.task.user_goal == "正常字段"
+    assert dst.task.status == "running"
+    assert dst.memory.session_id == "s1"
+
+    # runtime-only 裸属性必须不存在
+    forbidden_attrs = [
+        "loop_ctx",
+        "client",
+        "model_name",
+        "transition_result",
+        "runtime_event",
+        "_loop_ctx",
+        "callbacks",
+    ]
+    for attr in forbidden_attrs:
+        assert not hasattr(dst.task, attr), (
+            f"恶意 checkpoint 中的 runtime-only key '{attr}' 不应被 resume 后"
+            f"附到 state.task 上。说明 _filter_to_declared_fields 白名单已被"
+            f"绕过——请走根因排查 agent/checkpoint.py:load_checkpoint_to_state。"
+        )
+        assert not hasattr(dst.memory, attr), (
+            f"恶意 checkpoint 中的 runtime-only key '{attr}' 不应被 resume 后"
+            f"附到 state.memory 上。"
+        )

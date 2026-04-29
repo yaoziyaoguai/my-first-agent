@@ -110,10 +110,7 @@ def test_tool_result_transition_kinds_keep_tool_outcomes_distinct() -> None:
     """
     from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 
-    outcomes = {
-        kind: tool_result_transition(kind)
-        for kind in ToolResultTransitionKind
-    }
+    outcomes = {kind: tool_result_transition(kind) for kind in ToolResultTransitionKind}
 
     assert outcomes[ToolResultTransitionKind.TOOL_SUCCESS].display_events == (
         "tool.completed",
@@ -131,9 +128,186 @@ def test_tool_result_transition_kinds_keep_tool_outcomes_distinct() -> None:
 
     for outcome in outcomes.values():
         assert outcome.should_checkpoint is True
-        assert outcome.clear_pending_tool is True
         assert outcome.advance_step is False
         assert outcome.clear_pending_user_input is False
+    assert outcomes[ToolResultTransitionKind.POLICY_DENIAL].clear_pending_tool is True
+    assert outcomes[ToolResultTransitionKind.USER_REJECTION].clear_pending_tool is True
+    assert outcomes[ToolResultTransitionKind.TOOL_FAILURE].clear_pending_tool is False
+    assert outcomes[ToolResultTransitionKind.TOOL_SUCCESS].clear_pending_tool is False
+
+    pending_failure = tool_result_transition(
+        ToolResultTransitionKind.TOOL_FAILURE,
+        from_pending_tool=True,
+    )
+    assert pending_failure.clear_pending_tool is True
+
+
+def test_tool_failure_transition_real_path_keeps_protocol_and_masks_secrets(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """tool failure 是本轮 ToolFailure -> TransitionResult 最小切片。
+
+    这里走真实 `execute_single_tool()` 路径：失败应写现有 tool_result 协议事实、
+    emit `tool.failed`、checkpoint durable state，但不能推进 step、不能把
+    TransitionResult 写进 messages/checkpoint，也不能把 token/api key 原样放进
+    失败提示。
+    """
+    from agent import checkpoint
+    import agent.tool_executor as te
+    from agent.conversation_events import has_tool_result
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(te, "needs_tool_confirmation", lambda name, inp: False)
+    monkeypatch.setattr(
+        te,
+        "execute_tool",
+        lambda name, inp, context=None: "错误：远端返回 token=raw-secret-value",
+    )
+
+    state = create_agent_state(system_prompt="test")
+    state.task.current_step_index = 3
+    state.task.pending_tool = {
+        "tool_use_id": "other_pending",
+        "tool": "write_file",
+        "input": {"path": "workspace/other.txt"},
+    }
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_failure",
+                    "name": "read_file",
+                    "input": {"path": "missing.txt"},
+                }
+            ],
+        }
+    ]
+    captured: list[object] = []
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=None,
+        on_display_event=captured.append,
+    )
+    block = SimpleNamespace(
+        id="toolu_failure",
+        name="read_file",
+        input={"path": "missing.txt", "api_key": "sk-ant-direct-secret"},
+    )
+
+    assert te.execute_single_tool(
+        block,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=state.conversation.messages,
+    ) is None
+
+    entry = state.task.tool_execution_log["toolu_failure"]
+    assert entry["status"] == "failed"
+    assert state.task.current_step_index == 3
+    assert state.task.pending_tool["tool_use_id"] == "other_pending"
+    assert has_tool_result(state.conversation.messages, "toolu_failure")
+    assert any(getattr(ev, "event_type", "") == "tool.failed" for ev in captured)
+    assert not any(getattr(ev, "event_type", "") == "tool.rejected" for ev in captured)
+    assert not any(
+        getattr(ev, "event_type", "") == "tool.user_rejected" for ev in captured
+    )
+
+    serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    serialized_checkpoint = json.dumps(payload, ensure_ascii=False)
+    for marker in ("TransitionResult", "RuntimeEventKind", "ToolResultTransitionKind"):
+        assert marker not in serialized_messages
+        assert marker not in serialized_checkpoint
+    for secret in ("raw-secret-value", "sk-ant-direct-secret"):
+        assert secret not in serialized_messages
+        assert secret not in serialized_checkpoint
+
+
+def test_pending_tool_failure_transition_clears_pending_after_confirmed_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """确认后的 tool failure 仍按既有 confirmation 边界清 pending_tool。
+
+    这条测试守护 v0.4 的迁移边界：failure transition 能表达
+    `from_pending_tool=True` 的清理意图，但 `tool_result` message 和 checkpoint
+    仍由现有 handler 落地，不能为了抽象提前重写整条 tool success/failure 流程。
+    """
+    from agent import checkpoint
+    import agent.confirm_handlers as ch
+    from agent.confirm_handlers import ConfirmationContext
+    import agent.tool_executor as te
+    from agent.conversation_events import has_tool_result
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(
+        te,
+        "execute_tool",
+        lambda name, inp, context=None: "错误：写入失败 password=raw-password",
+    )
+
+    state = create_agent_state(system_prompt="test")
+    state.task.status = "awaiting_tool_confirmation"
+    state.task.current_step_index = 2
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_pending_failure",
+        "tool": "write_file",
+        "input": {"path": "workspace/fail.txt", "content": "sk-ant-pending-secret"},
+    }
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_pending_failure",
+                    "name": "write_file",
+                    "input": {"path": "workspace/fail.txt"},
+                }
+            ],
+        }
+    ]
+    captured: list[object] = []
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=None,
+        on_display_event=captured.append,
+    )
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda ts: "continued",
+    )
+
+    assert ch.handle_tool_confirmation("y", ctx) == "continued"
+
+    assert state.task.pending_tool is None
+    assert state.task.status == "running"
+    assert state.task.current_step_index == 2
+    assert state.task.tool_execution_log["toolu_pending_failure"]["status"] == "failed"
+    assert has_tool_result(state.conversation.messages, "toolu_pending_failure")
+    assert any(getattr(ev, "event_type", "") == "tool.failed" for ev in captured)
+    assert not any(getattr(ev, "event_type", "") == "tool.completed" for ev in captured)
+
+    serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    serialized_checkpoint = json.dumps(payload, ensure_ascii=False)
+    for marker in ("TransitionResult", "RuntimeEventKind", "ToolResultTransitionKind"):
+        assert marker not in serialized_messages
+        assert marker not in serialized_checkpoint
+    for secret in ("raw-password", "sk-ant-pending-secret"):
+        assert secret not in serialized_messages
+        assert secret not in serialized_checkpoint
 
 
 def test_policy_denial_transition_is_applied_without_persisting_runtime_objects(

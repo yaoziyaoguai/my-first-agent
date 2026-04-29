@@ -17,6 +17,7 @@ from agent.display_events import (
     build_tool_status_event,
     control_message,
     emit_display_event,
+    mask_user_visible_secrets,
 )
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent.tool_registry import execute_tool, is_meta_tool
@@ -78,6 +79,57 @@ def _describe_policy_denial(tool_name: str, tool_input: dict[str, Any]) -> str:
     return (
         f"[安全策略] 工具 {tool_name}({tool_input}) 被安全策略阻止，未执行。"
     )
+
+
+def _tool_failure_transition(status: str, *, from_pending_tool: bool) -> Any | None:
+    """把真实 failure status 映射到 v0.4 TransitionResult。
+
+    只处理 `status == "failed"`：`rejected_by_check` 是工具内部安全检查拒绝，
+    policy denial 和 user rejection 已有独立切片。这样 failure 不会被混成
+    policy/user/success，也避免本轮顺手迁移 tool success。
+    """
+
+    if status != "failed":
+        return None
+    return tool_result_transition(
+        ToolResultTransitionKind.TOOL_FAILURE,
+        from_pending_tool=from_pending_tool,
+    )
+
+
+def _failure_retry_hint(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """生成失败后的重试提示，并对工具输入做脱敏。
+
+    这段文本会进入 `tool_result` messages 和 checkpoint，是 durable fact；
+    因此不能把 token/api key/private key 作为“同一输入”原样写进去。脱敏只改变
+    用户可见提示，不改变真实工具执行输入，也不改变 checkpoint schema。
+    """
+
+    safe_input = mask_user_visible_secrets(str(tool_input))
+    return (
+        "[系统提示] 该工具调用没有获得可用结果。"
+        f"不要再次调用同一工具和同一输入：{tool_name}({safe_input})；"
+        "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
+    )
+
+
+def _mask_failure_value(value: Any) -> Any:
+    """为 failure durable log 做递归脱敏。
+
+    tool_execution_log 会进入 checkpoint；failure 切片开始明确要求失败路径不把
+    token/api key/private key 原样持久化。这里仅在 failure durable log 中使用，
+    不改变真实工具执行入参，也不改变 success 的现有行为。
+    """
+
+    if isinstance(value, str):
+        return mask_user_visible_secrets(value)
+    if isinstance(value, dict):
+        return {k: _mask_failure_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask_failure_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mask_failure_value(item) for item in value)
+    return value
 
 TOOL_FAILURE_PREFIXES = (
     "错误：",
@@ -289,19 +341,23 @@ def execute_single_tool(
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     status, display_event_type, status_text = _classify_tool_outcome(result)
+    transition = _tool_failure_transition(status, from_pending_tool=False)
     if status in ("failed", "rejected_by_check"):
         # 失败 / 拒绝都不应让模型在下一轮重试同一调用；提示语言一致
         # （rejected 通常是路径/内容触犯安全检查，failure 是运行报错）。
+        result = mask_user_visible_secrets(result)
         result = (
             f"{result}\n\n"
-            "[系统提示] 该工具调用没有获得可用结果。"
-            f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
-            "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
+            f"{_failure_retry_hint(tool_name, tool_input)}"
         )
+
+    if transition and transition.clear_pending_tool:
+        state.task.pending_tool = None
+    log_input = _mask_failure_value(tool_input) if transition else tool_input
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
-        "input": tool_input,
+        "input": log_input,
         "result": result,
         "status": status,
         "step_index": state.task.current_step_index,
@@ -310,7 +366,7 @@ def execute_single_tool(
     turn_state.round_tool_traces.append({
         "tool_use_id": tool_use_id,
         "tool": tool_name,
-        "input": tool_input,
+        "input": log_input,
         "status": status,
         "result": result,
     })
@@ -320,13 +376,14 @@ def execute_single_tool(
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type=display_event_type,
+            event_type=transition.display_events[0] if transition else display_event_type,
             tool_name=tool_name,
             tool_input=tool_input,
             status_text=status_text,
         ),
     )
-    save_checkpoint(state)
+    if transition is None or transition.should_checkpoint:
+        save_checkpoint(state)
     return None
 
 
@@ -362,17 +419,19 @@ def execute_pending_tool(
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
     status, display_event_type, status_text = _classify_tool_outcome(result)
+    transition = _tool_failure_transition(status, from_pending_tool=True)
     if status in ("failed", "rejected_by_check"):
+        result = mask_user_visible_secrets(result)
         result = (
             f"{result}\n\n"
-            "[系统提示] 该工具调用没有获得可用结果。"
-            f"不要再次调用同一工具和同一输入：{tool_name}({tool_input})；"
-            "请换用其他来源、使用已有信息继续，或明确说明当前来源不可用。"
+            f"{_failure_retry_hint(tool_name, tool_input)}"
         )
+
+    log_input = _mask_failure_value(tool_input) if transition else tool_input
 
     state.task.tool_execution_log[tool_use_id] = {
         "tool": tool_name,
-        "input": tool_input,
+        "input": log_input,
         "result": result,
         "status": status,
         "step_index": state.task.current_step_index,
@@ -381,7 +440,7 @@ def execute_pending_tool(
     turn_state.round_tool_traces.append({
         "tool_use_id": tool_use_id,
         "tool": tool_name,
-        "input": tool_input,
+        "input": log_input,
         "status": status,
         "result": result,
     })
@@ -390,7 +449,7 @@ def execute_pending_tool(
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type=display_event_type,
+            event_type=transition.display_events[0] if transition else display_event_type,
             tool_name=tool_name,
             tool_input=tool_input,
             status_text=status_text,

@@ -12,8 +12,8 @@ transition boundary 测试写清楚。它不是新的 Runtime 主流程，不接
   CommandResult 这类临时 UI/协议对象混进 checkpoint 或 messages。
 - command event slice 只覆盖 health/logs 维护命令的 no-op transition，
   证明维护命令可以产生输出，但不改变 task execution state。
-- ToolResult slice 先覆盖 policy denial / user rejection 的 transition 意图，
-  不接管完整工具执行，也不改变 tool_result 消息协议。
+- ToolResult slice 先覆盖 policy denial / user rejection / tool failure 的
+  transition 意图，不接管完整工具执行，也不改变 tool_result 消息协议。
 - 本模块存在不代表 v0.4 完整事件驱动状态机已经实现。
 """
 
@@ -41,8 +41,8 @@ class ToolResultTransitionKind(str, Enum):
 
     中文学习边界：这些值只描述“工具调用之后 Runtime 应该怎么处理状态”，
     不描述 Anthropic `tool_result` 消息本身，也不应该被写入 checkpoint。
-    v0.4 Phase 1 先用它统一 policy denial / user rejection 这类低风险切片，
-    tool success / failure 的完整迁移后续再逐步收敛。
+    v0.4 Phase 1 先用它统一 policy denial / user rejection / tool failure
+    这类低风险切片，tool success 的完整迁移后续再逐步收敛。
     """
 
     TOOL_SUCCESS = "tool_success"
@@ -107,19 +107,27 @@ def command_event_transition(kind: RuntimeEventKind) -> TransitionResult:
     raise ValueError(f"unsupported command event kind: {kind.value}")
 
 
-def tool_result_transition(kind: ToolResultTransitionKind) -> TransitionResult:
+def tool_result_transition(
+    kind: ToolResultTransitionKind,
+    *,
+    from_pending_tool: bool = False,
+) -> TransitionResult:
     """把工具结局映射到轻量 TransitionResult。
 
     这是 v0.4 Phase 1 的 ToolResult 最小切片入口：返回值只告诉既有 handler
     “是否清 pending / 是否 checkpoint / 是否推进 step / 用哪个临时 display event”。
     它不写 messages、不保存 checkpoint、不执行工具，也不替代 `tool_result`
     协议配对。调用方仍然负责按现有流程写 durable facts。
+
+    `from_pending_tool` 用来表达真实语义差异：直接执行的 tool failure 没有
+    pending_tool 可清；用户确认后执行的 tool failure 则由 confirmation handler
+    在执行完成后清 pending。本 helper 只描述意图，不替调用方猜上下文。
     """
 
     if kind == ToolResultTransitionKind.TOOL_SUCCESS:
         return TransitionResult(
             should_checkpoint=True,
-            clear_pending_tool=True,
+            clear_pending_tool=from_pending_tool,
             advance_step=False,
             display_events=("tool.completed",),
             reason=kind.value,
@@ -128,11 +136,14 @@ def tool_result_transition(kind: ToolResultTransitionKind) -> TransitionResult:
     if kind == ToolResultTransitionKind.TOOL_FAILURE:
         return TransitionResult(
             should_checkpoint=True,
-            clear_pending_tool=True,
+            clear_pending_tool=from_pending_tool,
             advance_step=False,
             display_events=("tool.failed",),
             reason=kind.value,
-            notes=("tool failure is observable but does not complete a step directly",),
+            notes=(
+                "tool failure is observable but does not complete a step directly",
+                "tool result message remains the durable protocol fact",
+            ),
         )
     if kind == ToolResultTransitionKind.POLICY_DENIAL:
         return TransitionResult(

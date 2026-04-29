@@ -96,6 +96,18 @@ def _mask_preview_secrets(text: str) -> str:
     return masked
 
 
+def mask_user_visible_secrets(text: str) -> str:
+    """对用户可见 Runtime 文本做统一脱敏。
+
+    v0.4 ToolFailure 切片开始把失败结果和重试提示更明确地纳入 transition
+    边界；这些文本会进入 messages/checkpoint 作为 durable facts，所以不能只在
+    DisplayEvent 预览层脱敏。公开一个小包装，避免 tool_executor 复制一套
+    secret 正则，也避免把 DisplayEvent 对象本身混进持久状态。
+    """
+
+    return _mask_preview_secrets(text)
+
+
 def assistant_delta(text: str) -> RuntimeEvent:
     """构造 assistant streaming delta；它是 UI 投影，不是对话历史。"""
 

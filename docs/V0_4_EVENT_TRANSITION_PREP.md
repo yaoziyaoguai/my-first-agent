@@ -59,16 +59,20 @@ Completed in the current baseline:
   to `TransitionResult`. Existing handlers still own `tool_result` messages and
   checkpoint calls; the new boundary only centralizes clear-pending /
   checkpoint/display intent for these two low-risk outcomes.
+- The second ToolResult transition slice maps `ToolFailure` to `TransitionResult`.
+  Existing `tool_result` message writing stays unchanged; the slice only makes
+  failure outcome intent explicit and keeps failure distinct from policy denial,
+  user rejection, and success.
 - Transition boundary tests guard maintenance commands, checkpoint/messages
   separation, status-line rendering, event/result naming, and the first
-  ToolResult transition slice.
+  ToolResult transition slices.
 
 Not completed yet:
 
 - Complete event-driven state machine.
 - `core.py` main-loop slimming.
-- Full ToolResult / tool result migration, including tool success/failure and
-  moving `tool_result` message writing itself behind a transition boundary.
+- Full ToolResult / tool result migration, including tool success and moving
+  `tool_result` message writing itself behind a transition boundary.
 - Full ModelOutput / model output classification migration.
 - Full user confirmation/rejection migration.
 
@@ -114,9 +118,19 @@ This audit is the migration map, not the migration itself.
 
 Likely migration order:
 
-1. Move the next ToolResult -> TransitionResult slice for tool failure or tool
-   success without changing the `tool_result` protocol.
-2. Tighten UserRejection / PolicyDenial transition application only where tests
-   show duplicated state updates.
+1. Move the next ToolResult -> TransitionResult slice for tool success without
+   changing the `tool_result` protocol.
+2. Tighten UserRejection / PolicyDenial / ToolFailure transition application
+   only where tests show duplicated state updates.
 3. Centralize ModelOutput classification.
 4. Only then consider slimming the `core.py` loop.
+
+ToolSuccess next slice notes:
+
+- Success is currently classified in `tool_executor._classify_tool_outcome()`
+  as `executed`, writes a normal `tool_result` message, emits `tool.completed`,
+  and checkpoints.
+- Direct success has no pending tool to clear; confirmed pending success is
+  cleared by `confirm_handlers.handle_tool_confirmation()` after execution.
+- Success still should not directly advance a step; step advancement remains
+  driven by meta progress signals and later model output.

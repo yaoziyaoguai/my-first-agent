@@ -23,6 +23,8 @@ def test_session_header_includes_session_id_cwd_and_stage():
     assert "/tmp/work" in out
     # 用法提示沿用 quit；v0.3 M3 起不再印 /reload_skills（无 handler，会误导）
     assert "quit" in out
+    assert "python main.py health" in out
+    assert "python main.py logs" in out
     assert "/reload_skills" not in out
     # M3 必须明确告诉用户 Skill 仍是实验性能力
     assert "实验性" in out
@@ -30,7 +32,7 @@ def test_session_header_includes_session_id_cwd_and_stage():
 
 def test_session_header_omits_health_line_when_none():
     out = r.render_session_header(session_id="x", cwd=".")
-    assert "health" not in out
+    assert "  health  :" not in out
 
 
 def test_session_header_includes_health_summary_when_present():
@@ -147,10 +149,25 @@ def test_status_line_includes_status_step_pending_msgs():
             "message_count": 12,
         }
     )
+    assert "state=awaiting confirmation" in out
     assert "status=awaiting_tool_confirmation" in out
     assert "step=3/5" in out
     assert "pending_tool=write_file" in out
     assert "msgs=12" in out
+
+
+def test_status_line_includes_current_step_title_when_present():
+    out = r.render_status_line(
+        {
+            "status": "running",
+            "current_step_index": 1,
+            "plan_total_steps": 3,
+            "current_step_title": "读取 README 并总结",
+            "message_count": 4,
+        }
+    )
+    assert "state=executing tool/model" in out
+    assert "current_step=读取 README 并总结" in out
 
 
 def test_status_line_is_single_line():

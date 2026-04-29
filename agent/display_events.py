@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 
@@ -68,6 +69,31 @@ class RuntimeEvent:
 
 
 RuntimeEventSink = Callable[[RuntimeEvent], None]
+
+
+_SECRET_MASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]+"), "[REDACTED]"),
+    (re.compile(r"sk-[A-Za-z0-9_-]{12,}"), "[REDACTED]"),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|password|secret|token)\s*=\s*['\"]?[^'\"\s,;}]+"
+        ),
+        r"\1=[REDACTED]",
+    ),
+    (
+        re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+        "-----BEGIN [REDACTED]-----",
+    ),
+)
+
+
+def _mask_preview_secrets(text: str) -> str:
+    """Mask obvious secrets before any tool input preview reaches the UI."""
+
+    masked = text
+    for pattern, replacement in _SECRET_MASK_PATTERNS:
+        masked = pattern.sub(replacement, masked)
+    return masked
 
 
 def assistant_delta(text: str) -> RuntimeEvent:
@@ -244,7 +270,7 @@ def tool_result_visible(
 def _compact_preview(text: str, limit: int = TOOL_INPUT_PREVIEW_LIMIT) -> str:
     """生成适合确认框展示的短预览，避免长文件内容刷满 TUI。"""
 
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = _mask_preview_secrets(text.replace("\r\n", "\n").replace("\r", "\n"))
     if len(normalized) <= limit:
         return normalized
     return normalized[:limit] + f"\n...(已截断，原始长度 {len(normalized)} 字符)"

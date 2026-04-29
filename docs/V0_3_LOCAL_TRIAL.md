@@ -182,5 +182,5 @@ api key / 私钥；命中 `sk-ant-` / `BEGIN PRIVATE KEY` / `api_key=…` 等模
 - `docs/V0_3_OBSERVER_LOGS.md` — logs 子命令的脱敏边界
 - `docs/V0_3_SKILL_SYSTEM_STATUS.md` — Skill 是什么 / 不是什么
 - `docs/CLI_OUTPUT_CONTRACT.md` — CLI 输出契约（含 §14 协议边界）
-- `docs/V0_2_HEALTH_MAINTENANCE.md` — 手动维护命令清单
+- `docs/V0_3_HEALTH_MAINTENANCE.md` — health 入口与手动维护边界
 - `docs/V0_4_PLANNING.md` — v0.4 候选主线（**仅 planning，不是承诺**）

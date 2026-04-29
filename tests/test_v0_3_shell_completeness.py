@@ -56,6 +56,18 @@ def test_logs_subcommand_filters_wired(capsys):
         assert "Runtime logs" in out
 
 
+def test_shell_flag_enters_normal_cli_shell(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(main_module, "init_session", lambda: calls.append("init"))
+    monkeypatch.setattr(main_module, "try_resume_from_checkpoint", lambda: calls.append("resume"))
+    monkeypatch.setattr(main_module, "main_loop", lambda: calls.append("loop"))
+    monkeypatch.setattr(main_module, "_selected_input_backend", lambda: "simple")
+
+    assert main_module.main(["--shell"]) == 0
+    assert calls == ["init", "resume", "loop"]
+
+
 # ---------- 13.2 启动屏 Skill 文案（M3 锁） ----------
 
 def test_startup_header_marks_skill_experimental_and_drops_dead_command():
@@ -63,6 +75,8 @@ def test_startup_header_marks_skill_experimental_and_drops_dead_command():
     assert "/reload_skills" not in out
     assert "实验性" in out
     assert "V0_3_SKILL_SYSTEM_STATUS" in out
+    assert "python main.py health" in out
+    assert "python main.py logs" in out
 
 
 # ---------- 13.4 health/logs 联动 ----------
@@ -88,6 +102,7 @@ def test_basic_shell_usage_doc_exists_and_lists_all_subcommands():
     # 文档承诺的每个命令都应该在 doc 里出现
     for cmd in (
         "python main.py",
+        "python main.py --shell",
         "python main.py health",
         "python main.py health --json",
         "python main.py logs",
@@ -98,6 +113,16 @@ def test_basic_shell_usage_doc_exists_and_lists_all_subcommands():
         "python main.py logs --include-observer",
     ):
         assert cmd in text, f"V0_3_BASIC_SHELL_USAGE.md 缺命令：{cmd}"
+
+
+def test_v0_3_health_maintenance_doc_exists_and_matches_entrypoints():
+    doc = PROJECT_ROOT / "docs" / "V0_3_HEALTH_MAINTENANCE.md"
+    assert doc.exists()
+    text = doc.read_text(encoding="utf-8")
+    assert "python main.py health" in text
+    assert "python main.py health --json" in text
+    assert "python main.py logs --tail 100" in text
+    assert "不会自动" in text
 
 
 def test_cli_output_contract_section_13_present():
@@ -113,6 +138,7 @@ def test_cli_output_contract_section_13_present():
 def test_readme_documents_all_v0_3_subcommands():
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     for cmd in (
+        "python main.py --shell",
         "python main.py health",
         "python main.py logs",
     ):
@@ -210,6 +236,25 @@ def test_log_viewer_masks_secrets_in_tool_input_preview():
     assert "api_key=sk-ant-secretvalueXXXXXXXXXX" not in line
     # 兜底正则可独立验证
     assert "sk-ant-" not in mask_secrets("prefix sk-ant-zzzzzzzzzzzzzzzzzzzzzz suffix")
+
+
+def test_tool_confirmation_preview_masks_secret_values():
+    from agent.display_events import build_tool_awaiting_confirmation_event
+
+    event = build_tool_awaiting_confirmation_event(
+        tool_name="write_file",
+        tool_input={
+            "path": "workspace/creds.txt",
+            "content": (
+                "api_key=sk-ant-secretvalueXXXXXXXXXX\n"
+                "-----BEGIN PRIVATE KEY-----\n"
+            ),
+        },
+    )
+    assert "sk-ant-secretvalueXXXXXXXXXX" not in event.body
+    assert "api_key=sk-ant-secretvalueXXXXXXXXXX" not in event.body
+    assert "BEGIN PRIVATE KEY" not in event.body
+    assert "[REDACTED]" in event.body
 
 
 # ---------- logs viewer 端到端 round-trip ----------

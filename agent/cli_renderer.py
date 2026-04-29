@@ -24,7 +24,7 @@ from typing import Any
 
 # 当前阶段标签。后续 v0.3 M2/M3/M4 推进时同步改这里即可，
 # 不要在 main.py 多处分散 hardcode。
-STAGE_LABEL = "Runtime v0.3 M1 shell"
+STAGE_LABEL = "Runtime v0.3 basic CLI shell"
 
 # 渲染分隔线宽度。固定 60，避免按终端宽度自适应引入 curses 依赖。
 _BAR = "─" * 60
@@ -70,6 +70,7 @@ def render_session_header(
         [
             _BAR,
             "  输入 'quit' 退出。",
+            "  Health: python main.py health；Logs: python main.py logs --tail 50。",
             "  Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。",
             "",
         ]
@@ -156,11 +157,15 @@ def render_status_line(summary: Mapping[str, Any] | None) -> str:
     """
     if summary is None:
         return "[status] (no session)"
-    parts = [f"status={_safe(summary.get('status'), 'unknown')}"]
+    status = _safe(summary.get("status"), "unknown")
+    parts = [f"state={_interaction_state_label(status)}", f"status={status}"]
     step_index = summary.get("current_step_index")
     plan_total = summary.get("plan_total_steps")
     if plan_total:
         parts.append(f"step={step_index or 0}/{plan_total}")
+    current_step_title = summary.get("current_step_title")
+    if current_step_title:
+        parts.append(f"current_step={_one_line(current_step_title, 80)}")
     pending_tool = summary.get("pending_tool_name")
     if pending_tool:
         parts.append(f"pending_tool={pending_tool}")
@@ -168,3 +173,29 @@ def render_status_line(summary: Mapping[str, Any] | None) -> str:
     if msg_count is not None:
         parts.append(f"msgs={msg_count}")
     return "[status] " + " · ".join(parts)
+
+
+def _interaction_state_label(status: str) -> str:
+    """Map internal TaskState status to a user-facing interaction state."""
+
+    mapping = {
+        "idle": "waiting user input",
+        "planning": "planning",
+        "running": "executing tool/model",
+        "awaiting_plan_confirmation": "awaiting confirmation",
+        "awaiting_step_confirmation": "awaiting confirmation",
+        "awaiting_tool_confirmation": "awaiting confirmation",
+        "awaiting_user_input": "waiting user input",
+        "awaiting_feedback_intent": "waiting user input",
+        "done": "finished",
+        "failed": "failed",
+        "cancelled": "failed",
+    }
+    return mapping.get(status, status or "unknown")
+
+
+def _one_line(value: Any, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."

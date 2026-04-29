@@ -75,6 +75,9 @@
   checkpoint/health/skill experimental、4 类 outcome 文案区分、
   health/logs 入口在 shell+README+contract 三处一致、resume 不裸 dict、
   logs 输出无 protocol dump、tool confirmation 参数预览不泄露 secret」。
+- v0.3.x local-first trial 补强：`python main.py --shell` 作为显式 Shell
+  alias；simple CLI 每轮状态变化输出 `[status] state=... · status=...`；
+  pending tool resume 复用 DisplayEvent 预览并脱敏，避免 raw input dict。
 - 真实 smoke（pipe `quit` 进 `python main.py`）：启动屏结构化、health 单行、
   resume 三态可见、Skill experimental 文案到位、无 raw secret 泄漏。
 
@@ -89,8 +92,8 @@
 - ✅ 所有「建议」都是给用户复制粘贴的命令；**Runtime 不会自动归档/删除**
   agent_log.jsonl / sessions/ / workspace/。M2 严格定位为「可视化 + 文档化」，
   不引入 archive/prune 子命令。
-- 文档：现有 `docs/V0_2_HEALTH_MAINTENANCE.md` 仍是手动维护命令清单的来源；
-  报告里有指针到这个 doc。
+- 文档：`docs/V0_3_HEALTH_MAINTENANCE.md` 是当前 health 入口指南；
+  `docs/V0_2_HEALTH_MAINTENANCE.md` 仅保留为历史手动维护命令参考。
 
 **M2 不做**（推迟到 v0.3 M2.next 或 v0.4 再讨论）：
 - ❌ `health archive logs|sessions` 子命令（任何自动移动文件的能力）
@@ -212,7 +215,9 @@ checkpoint 事件可在 5 秒内定位。
 - ❌ 主题切换 / 颜色配置文件
 - ❌ paste burst（v0.3 backlog 单独条目）
 
-M1 输出**仍然是 plain stdout**，只是更结构化。Textual / 多面板留 v0.4。
+M1/M1.x 输出**仍然是 plain stdout**，只是更结构化。它是基础 CLI Shell /
+TUI-like 输出体验，不是完整 Textual IDE；Textual 多面板、快捷键、Esc
+cancel、stream abort、timeline/event viewer 留 v0.4+。
 
 ### 5.3 涉及文件（预计）
 - `agent/display_events.py`：增加 session-header / status-line 渲染

@@ -20,6 +20,10 @@ from agent.cli_renderer import (
     render_session_header,
     summarize_health,
 )
+from agent.display_events import (
+    build_tool_awaiting_confirmation_event,
+    render_display_event,
+)
 from config import SYSTEM_PROMPT, MODEL_NAME
 
 
@@ -172,6 +176,16 @@ def summarize_session_status(state) -> dict:
     plan = task.current_plan if isinstance(task.current_plan, dict) else None
     plan_steps = plan.get("steps") if isinstance(plan, dict) else None
     plan_total = len(plan_steps) if isinstance(plan_steps, list) else None
+    current_step_title = None
+    if isinstance(plan_steps, list) and 0 <= task.current_step_index < len(plan_steps):
+        step = plan_steps[task.current_step_index]
+        if isinstance(step, dict):
+            current_step_title = (
+                step.get("title")
+                or step.get("name")
+                or step.get("description")
+                or step.get("action")
+            )
     pending = task.pending_tool if isinstance(task.pending_tool, dict) else None
     return {
         "actionable": task.status != "idle"
@@ -183,6 +197,7 @@ def summarize_session_status(state) -> dict:
         "message_count": len(conv.messages) if conv is not None else 0,
         "pending_tool_name": pending.get("tool") if pending else None,
         "plan_total_steps": plan_total,
+        "current_step_title": current_step_title,
     }
 
 
@@ -233,10 +248,11 @@ def _replay_awaiting_prompt(state):
 
     if status == "awaiting_tool_confirmation" and state.task.pending_tool:
         pending = state.task.pending_tool
-        print(
-            f"\n⚠️ 有待确认的工具：{pending.get('tool')}({pending.get('input')})"
+        event = build_tool_awaiting_confirmation_event(
+            tool_name=pending.get("tool", "unknown"),
+            tool_input=pending.get("input") or {},
         )
-        print("是否执行？(y/n/输入反馈意见): ", end="", flush=True)
+        print("\n" + render_display_event(event))
         return
 
     print(f"\n[系统] 已恢复断点（状态：{status}）。\n")

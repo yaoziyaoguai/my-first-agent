@@ -84,6 +84,25 @@ def test_summarize_includes_plan_total_steps_when_plan_present():
     )
     summary = session_mod.summarize_session_status(state)
     assert summary["plan_total_steps"] == 3
+    assert summary["current_step_title"] is None
+
+
+def test_summarize_includes_current_step_title_when_present():
+    state = _FakeState(
+        _FakeTask(
+            status="running",
+            current_plan={
+                "steps": [
+                    {"title": "读取 README"},
+                    {"description": "写总结"},
+                ]
+            },
+            current_step_index=1,
+        )
+    )
+    summary = session_mod.summarize_session_status(state)
+    assert summary["plan_total_steps"] == 2
+    assert summary["current_step_title"] == "写总结"
 
 
 def test_summarize_does_not_leak_raw_messages():
@@ -125,9 +144,11 @@ def test_init_session_outputs_structured_header_without_health_dump(monkeypatch)
         session_mod.init_session()
     out = buf.getvalue()
 
-    assert "Runtime v0.3 M1 shell" in out
+    assert "Runtime v0.3 basic CLI shell" in out
     assert "session" in out
     assert "cwd" in out
+    assert "python main.py health" in out
+    assert "python main.py logs" in out
     # 健康检查只能是单行紧凑摘要，不能是长块报告
     assert "🏥 项目健康检查报告" not in out
     assert "1 warn (workspace_lint)" in out

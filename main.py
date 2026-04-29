@@ -26,7 +26,9 @@ from agent.session import (
     handle_interrupt_with_checkpoint,
     handle_interrupt_without_checkpoint,
     handle_double_interrupt,
+    summarize_session_status,
 )
+from agent.cli_renderer import render_status_line
 from agent.checkpoint import load_checkpoint
 
 
@@ -424,10 +426,16 @@ def read_user_input_event(
 def main_loop():
     last_interrupt_time = 0
     latest_output = ""
+    last_status_line = ""
 
     while True:
         try:
             backend = _selected_input_backend()
+            if backend in ("", "simple"):
+                status_line = render_status_line(summarize_session_status(get_state()))
+                if status_line != last_status_line:
+                    print(f"\n{status_line}")
+                    last_status_line = status_line
             event = read_user_input_event(latest_output=latest_output)
             intent = classify_user_input(
                 event.envelope.raw_text if event.envelope is not None else None,
@@ -470,6 +478,11 @@ def main_loop():
                 latest_output = new_latest_output
             if reply:
                 print(reply)
+            if backend in ("", "simple"):
+                status_line = render_status_line(summarize_session_status(get_state()))
+                if status_line != last_status_line:
+                    print(f"\n{status_line}")
+                    last_status_line = status_line
 
         except KeyboardInterrupt:
             now = time.time()
@@ -491,6 +504,9 @@ def main_loop():
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {"--shell", "shell"}:
+        argv = argv[1:]
+
     if argv and argv[0] in {"process", "scan", "status", "preflight"}:
         from llm.cli import main as process_main
 

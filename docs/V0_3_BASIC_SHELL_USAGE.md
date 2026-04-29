@@ -10,19 +10,21 @@
 
 ```bash
 python main.py
+python main.py --shell   # 显式进入同一个基础 CLI Shell
 ```
 
 启动屏会显示结构化 header（详见 `docs/CLI_OUTPUT_CONTRACT.md` §12.1）：
 
 ```
 ────────────────────────────────────────────────────────────
-  Runtime v0.3 M1 shell
+  Runtime v0.3 basic CLI shell
 ────────────────────────────────────────────────────────────
   session : c45e7e01  (full: c45e7e01-e427-4498-8301-025b7bb0217f)
   cwd     : /your/project
   health  : 3 warn (workspace_lint, log_size, session_accumulation); 详情：python main.py health
 ────────────────────────────────────────────────────────────
   输入 'quit' 退出。
+  Health: python main.py health；Logs: python main.py logs --tail 50。
   Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。
 
   📭 resume : 未发现断点，可以直接开始新任务。
@@ -32,9 +34,21 @@ python main.py
 关键边界：
 - header 是**单屏**结构化输出，不会刷屏。
 - health 是**单行摘要**，不展开长块；想看详情走子命令（见 §3）。
+- logs 入口在启动屏可见；viewer 只展示脱敏摘要，不展示 raw content。
 - Skill 文案明确**实验性**，不假装成熟（M3 修复了 v0.2 的误导性
   `/reload_skills` 提示）。
 - resume 三态都有可见提示：无 checkpoint / idle 残留已清理 / actionable 任务。
+
+每轮输入前后会出现一行紧凑状态，例如：
+
+```text
+[status] state=waiting user input · status=idle · msgs=0
+[status] state=awaiting confirmation · status=awaiting_tool_confirmation · pending_tool=write_file · msgs=4
+```
+
+`state=` 是用户可读交互状态；`status=` 保留 Runtime 内部状态名，方便回到
+logs/checkpoint 文档排查。当前 Shell 是基础 CLI/TUI-like 输出体验，不是完整
+Textual 多面板 IDE。
 
 ---
 

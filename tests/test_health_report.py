@@ -130,6 +130,7 @@ def test_format_health_report_renders_all_four_status_categories():
     assert "scratch 目录可能混了过期样本" in text
     assert "python -m ruff check workspace" in text
     assert "磁盘可能耗尽" in text
+    assert "docs/V0_3_HEALTH_MAINTENANCE.md" in text
     # pass / skip 不该带 risk 行（risk 字段是「无」也不渲染）
     assert "无需操作" not in text
 

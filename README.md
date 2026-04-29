@@ -1,10 +1,11 @@
 # my-first-agent
 
 `my-first-agent` is a learning-oriented Agent Runtime prototype. The current
-track is **Runtime v0.1**: make the smallest useful agent loop run end to end,
-then freeze the graduation criteria before expanding the system.
+local-first trial track is **Runtime v0.3.x usability**: keep the v0.2 runtime
+boundaries intact while making the basic CLI shell, health report, and logs
+viewer easier to use offline.
 
-v0.1 is intentionally narrow. It is not a mature agent framework, not a production safety sandbox, not a complete TUI, and not a Skill or sub-agent platform.
+It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, and not a Skill or sub-agent platform.
 
 ## Quickstart (local-first trial)
 
@@ -43,11 +44,15 @@ comments — no real keys.
 
 ```bash
 .venv/bin/python main.py
+.venv/bin/python main.py --shell  # explicit alias for the same basic shell
 ```
 
 You will see a structured startup banner with session id, cwd, a one-line
 health summary, an experimental-Skill notice, and a checkpoint resume
-status. Type a task in Chinese or English; type `quit` to exit.
+status. The shell prints a compact status line around each turn so you can
+see whether the runtime is planning, awaiting confirmation, executing, waiting
+for your input, finished, failed, or blocked by policy. Type a task in Chinese
+or English; type `quit` to exit.
 
 The four-class tool outcome contract from v0.2
 (`completed` / `failed` / `rejected` / `user_rejected`) is preserved.
@@ -263,7 +268,7 @@ big-bang. See `docs/V0_3_PLANNING.md` for full scope.
 
 ```text
 ────────────────────────────────────────────────────────────
-  Runtime v0.3 M1 shell
+  Runtime v0.3 basic CLI shell
 ────────────────────────────────────────────────────────────
   session : d6066c90  (full: d6066c90-b6ed-...)
   cwd     : /your/project
@@ -276,9 +281,10 @@ big-bang. See `docs/V0_3_PLANNING.md` for full scope.
 你: 
 ```
 
-Just run `python main.py` — no new flags. The four-class tool outcome
-contract from v0.2 (`completed` / `failed` / `rejected` / `user_rejected`)
-is preserved unchanged.
+Run `python main.py` or the explicit alias `python main.py --shell`. This is a
+basic CLI shell with TUI-like structured output, not a full Textual IDE. The
+four-class tool outcome contract from v0.2 (`completed` / `failed` /
+`rejected` / `user_rejected`) is preserved unchanged.
 
 **v0.3 M2 — Health Maintenance report** is landed locally:
 
@@ -290,7 +296,7 @@ $ python main.py health --json    # 机器可读 JSON，schema 稳定
 报告中每个 check 都展示 `current_value` / `path` / `risk` / `suggested action`；
 所有「建议」都是给你复制粘贴的命令，**Runtime 永不自动归档或删除**
 `agent_log.jsonl` / `sessions/` / `workspace/`。详细维护命令见
-`docs/V0_2_HEALTH_MAINTENANCE.md`。
+`docs/V0_3_HEALTH_MAINTENANCE.md`。
 
 **v0.3 M3 — Skill system honesty pass** is landed locally:
 
@@ -341,4 +347,3 @@ then refused to wait". Fix is at the protocol boundary, not via keywords:
 
 See `docs/V0_3_PLANNING.md` §3.5 and `docs/CLI_OUTPUT_CONTRACT.md` §14
 for the full protocol contract.
-

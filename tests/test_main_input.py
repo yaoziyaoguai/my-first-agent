@@ -202,6 +202,43 @@ def test_main_loop_passes_latest_reply_to_next_input_event(monkeypatch):
     assert seen_latest_outputs == ["", "我是一个测试回复"]
 
 
+def test_simple_main_loop_prints_status_before_and_after_turn(monkeypatch, capsys):
+    """simple CLI 每轮展示当前交互状态，避免用户只看到裸 prompt。"""
+
+    import main
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="test")
+    events = [
+        submitted_input_event(
+            build_user_input_envelope("hello", source="cli"),
+            source="simple",
+            channel="test",
+        ),
+        closed_input_event(source="simple", channel="test"),
+    ]
+
+    def fake_read_user_input_event(*, latest_output: str = "", **_kwargs):
+        return events.pop(0)
+
+    def fake_run_chat_for_backend(_user_input: str, *, backend: str):
+        assert backend == "simple"
+        state.task.status = "awaiting_tool_confirmation"
+        state.task.pending_tool = {"tool": "write_file", "input": {}}
+        return "", ""
+
+    monkeypatch.setattr(main, "get_state", lambda: state)
+    monkeypatch.setattr(main, "read_user_input_event", fake_read_user_input_event)
+    monkeypatch.setattr(main, "_run_chat_for_backend", fake_run_chat_for_backend)
+    monkeypatch.setattr(main, "finalize_session", lambda: None)
+
+    main.main_loop()
+    out = capsys.readouterr().out
+    assert "state=waiting user input" in out
+    assert "state=awaiting confirmation" in out
+    assert "pending_tool=write_file" in out
+
+
 def test_simple_backend_passes_runtime_event_sink_to_chat(monkeypatch, capsys):
     """simple CLI 应消费 RuntimeEvent，而不是依赖 core.py 无 sink print fallback。
 

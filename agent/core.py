@@ -216,11 +216,14 @@ def chat(
         ),
     )
 
-    # v0.4 Phase 2.1/2.2-a：构造一次 LoopContext 实例作为运行时依赖注入锚点。
-    # Phase 2.1 仅作为锚点存在；Phase 2.2-a 已让 _run_planning_phase /
-    # _start_planning_for_handler 显式从 loop_ctx 取 client / model_name，
-    # _run_main_loop / _call_model 仍读 module-level（属 Phase 2.2-c 范围）。
-    # 本变量下划线前缀沿用，强调它属于"内部依赖容器"语义而非外部 API。
+    # v0.4 Phase 2.1/2.2-a/2.2-b：构造一次 LoopContext 实例作为运行时依赖
+    # 注入锚点，**整个调用链唯一构造点**。
+    # - Phase 2.2-a 已让 _run_planning_phase / _start_planning_for_handler 吃；
+    # - Phase 2.2-b 已让 _run_main_loop / _call_model 吃；
+    # - confirm_handlers / response_handlers 仍走 ConfirmationContext，未迁移。
+    # 严禁在 _run_main_loop / _call_model 内重建 LoopContext——那会引入
+    # 第二个构造源，破坏 SSOT 并让 chat() 改 client/model_name 时调用方拿到
+    # 旧值。本变量下划线前缀沿用，强调"内部依赖容器"语义。
     _loop_ctx = LoopContext(
         client=client,
         model_name=MODEL_NAME,
@@ -234,6 +237,7 @@ def chat(
         model_name=MODEL_NAME,
         continue_fn=lambda ts: _run_main_loop(
             ts,
+            _loop_ctx,
         ),
         # P1：注入"切新任务"分流路径——与正常 chat() 新任务入口完全同构。
         # 把 _run_planning_phase 后续的 awaiting/cancelled/main_loop 处理也封进
@@ -291,7 +295,7 @@ def chat(
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(turn_state)
+        return _run_main_loop(turn_state, _loop_ctx)
 
     # 到这里意味着要开启一轮全新的任务。
     # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
@@ -307,7 +311,7 @@ def chat(
     if plan_result == "awaiting_plan_confirmation":
         return ""
 
-    return _run_main_loop(turn_state)
+    return _run_main_loop(turn_state, _loop_ctx)
 
 
 # ========== 规划阶段 ==========
@@ -417,10 +421,11 @@ def _start_planning_for_handler(
     时机的微妙差异。该函数只做路由，不修改任何 task 字段（`_run_planning_phase`
     自己负责赋值 user_goal/current_plan）。
 
-    v0.4 Phase 2.2-a：``loop_ctx`` 仅向下传给 ``_run_planning_phase``，
-    本函数自己不读 ``loop_ctx`` 任何字段——它只做控制流路由。``_run_main_loop``
-    本轮**不接受 loop_ctx**（属于 Phase 2.2-c 范围），这里继续按原签名调用，
-    避免本切片越界改主循环。
+    v0.4 Phase 2.2-a/2.2-b：``loop_ctx`` 既向下传给 ``_run_planning_phase``，
+    也（在 Phase 2.2-b 后）向下传给 ``_run_main_loop`` 作为兜底执行入口。本
+    函数自己不读 ``loop_ctx`` 任何字段——它只做控制流路由，把上层 chat() 构造
+    的同一个 LoopContext 单源转发到下游，避免主循环出现第二个 LoopContext
+    构造点。
     """
 
     plan_result = _run_planning_phase(user_input, turn_state, loop_ctx)
@@ -428,7 +433,7 @@ def _start_planning_for_handler(
         return "好的，已取消。"
     if plan_result == "awaiting_plan_confirmation":
         return ""
-    return _run_main_loop(turn_state)
+    return _run_main_loop(turn_state, loop_ctx)
 
 
 # ========== 主循环 ==========
@@ -454,8 +459,31 @@ def _runtime_loop_fields() -> dict:
 
 def _run_main_loop(
     turn_state: TurnState,
+    loop_ctx: LoopContext,
 ) -> str:
-    """模型调用循环，按 stop_reason 分派处理。"""
+    """模型调用循环，按 stop_reason 分派处理。
+
+    v0.4 Phase 2.2-b 依赖注入边界
+    -----------------------------
+    本函数 **唯一** 改动是签名增加 ``loop_ctx``，并在调用 ``_call_model`` 时
+    原样转发——目的不是 slimming 主循环，而是修复 SSOT 双源风险：
+    ``_call_model`` 是 LLM provider 边界，必须显式吃 ``loop_ctx`` 才能让
+    ``client`` / ``model_name`` 不再隐式引用模块级单例；而 ``_call_model``
+    的唯一调用方是本函数，所以本函数必须先能拿到 ``loop_ctx`` 才能转发，
+    否则只能在函数内重建 LoopContext，造成与 chat() 构造点的双源。
+
+    本切片**严格不做的事**：
+    - ❌ 不在函数体内构造 LoopContext（已有 chat() 唯一构造点）；
+    - ❌ 不读 ``loop_ctx.client`` / ``loop_ctx.model_name`` 自己使用——本函数
+      不直接调 SDK，只通过 ``_call_model`` 间接使用；保持"主循环不知道
+      LLM provider 细节"的边界；
+    - ❌ 不动主循环控制流（while/guard/iteration log/dispatch 全部不变）；
+    - ❌ 不动 ``state.task.loop_iterations`` / ``MAX_LOOP_ITERATIONS`` 比较；
+      Phase 2.2-c 才考虑把 max_loop_iterations 也走 loop_ctx；
+    - ❌ 不动 ``save_checkpoint`` / ``clear_checkpoint`` / ``state.reset_task``
+      调用时机；
+    - ❌ 不动 ``classify_model_output`` 分类与 4 个 dispatch 分支。
+    """
     log_runtime_event(
         "loop.start",
         event_source="runtime",
@@ -486,7 +514,7 @@ def _run_main_loop(
             state.reset_task()
             return "对话循环次数过多，请简化任务或分步执行。"
 
-        response = _call_model(turn_state)
+        response = _call_model(turn_state, loop_ctx)
         # v0.4 Phase 1 slice 5：先把 stop_reason 收敛成 ModelOutputKind 分类标签。
         # 这一行**只**做分类，不读 state、不写 messages、不动 checkpoint；后面 4
         # 个分支按 kind dispatch，与之前的 inline 字符串比较行为完全等价，但
@@ -593,6 +621,7 @@ def _run_main_loop(
 
 def _call_model(
     turn_state: TurnState,
+    loop_ctx: LoopContext,
 ):
     """调用模型（流式）并返回最终 response。
 
@@ -600,13 +629,25 @@ def _call_model(
     生成 RuntimeEvent；chat() 的兼容桥再决定送给 TUI、旧 callback 还是 simple CLI。
     这样 assistant.delta 和 tool lifecycle 属于同一条 UI projection 流，仍然不进入
     checkpoint、conversation.messages、runtime_observer 或 Anthropic API messages。
+
+    v0.4 Phase 2.2-b 依赖注入边界
+    -----------------------------
+    - LLM provider 依赖（``client`` / ``model_name``）从 ``loop_ctx`` 显式读取，
+      不再隐式引用 ``agent.core`` 的模块级 ``client`` / ``MODEL_NAME``；
+    - ``MAX_TOKENS`` 仍读模块级常量——本切片不扩张 LoopContext 字段集合（详见
+      ``agent/loop_context.py`` "MVP / mock / demo 边界"），未来如需 per-turn 调
+      max_tokens 再单独评估是否进 LoopContext；
+    - **绝不**通过 ``loop_ctx`` 取 ``request_messages`` / ``system_prompt`` /
+      ``tools``：messages 是 durable state 的派生（来自 ``state.conversation``），
+      system_prompt 是 per-turn 信息（在 ``turn_state``），tools 是 registry
+      singleton（``get_tool_definitions()``）——三者都不属于 runtime dependency。
     """
     # ===== 协议观察：构造 request payload 并打印 =====
     request_messages = build_execution_messages_from_state(state)
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
-    with client.messages.stream(
-        model=MODEL_NAME,
+    with loop_ctx.client.messages.stream(
+        model=loop_ctx.model_name,
         max_tokens=MAX_TOKENS,
         system=turn_state.system_prompt,
         messages=request_messages,

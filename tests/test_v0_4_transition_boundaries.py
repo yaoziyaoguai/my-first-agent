@@ -2905,24 +2905,36 @@ def test_planning_helpers_do_not_smuggle_durable_state_through_loop_ctx():
             )
 
 
-def test_main_loop_signature_unchanged_phase_2_2_a_does_not_overreach():
-    """_run_main_loop 本轮签名必须保持只接 turn_state。
+def test_main_loop_signature_phase_2_2_b_handoff_only():
+    """_run_main_loop 签名契约（Phase 2.2-b 后）。
 
-    Phase 2.2-a 的范围严格只覆盖 planning helpers；_run_main_loop /
-    _call_model 吃 loop_ctx 属 Phase 2.2-c。如果本切片同时改了主循环签名，
-    意味着越界——这种"顺手再改一点"是 v0.4 最危险的范围爬升模式，
-    必须靠测试钉死。
+    Phase 2.2-a 阶段本测试名为 ``..._unchanged_phase_2_2_a_does_not_overreach``，
+    要求签名仅 ``turn_state``。Phase 2.2-b 必须让 ``_run_main_loop`` 显式接受
+    ``loop_ctx``，否则 ``_call_model`` 吃 LoopContext 时只能在主循环内重建实例
+    （SSOT 双源 hack）。本测试**不是为了通过率而被放宽**——而是把"不应该越界"
+    的边界上移到"必须只有 turn_state + loop_ctx，禁止再塞其他参数"：
+    - ❌ 不允许加 ``state`` / ``task`` / ``messages`` / ``checkpoint_file`` 参数；
+    - ❌ 不允许加 ``client`` / ``model_name`` 直接参数（必须经 loop_ctx）；
+    - ❌ 不允许加 ``confirmation_ctx`` / ``response_ctx`` 等聚合容器；
+    确保 Phase 2.2-c 之后的越界被同样精确拦截。
     """
 
     import inspect
 
     from agent import core
+    from agent.loop_context import LoopContext
 
     sig = inspect.signature(core._run_main_loop)
     params = list(sig.parameters.keys())
-    assert params == ["turn_state"], (
-        f"_run_main_loop 本轮签名必须只有 turn_state；当前：{params}。"
-        "如需让主循环吃 loop_ctx，请走 Phase 2.2-c 切片，不要在 2.2-a 越界"
+    assert params == ["turn_state", "loop_ctx"], (
+        f"_run_main_loop 签名必须严格是 (turn_state, loop_ctx)；当前：{params}。"
+        "增加任何额外参数都属于范围爬升（durable state 应通过模块级 state "
+        "单例访问，runtime dep 应通过 loop_ctx 访问，per-turn 应通过 turn_state 访问）"
+    )
+    loop_ctx_annotation = sig.parameters["loop_ctx"].annotation
+    assert loop_ctx_annotation is LoopContext, (
+        f"_run_main_loop.loop_ctx 必须明确标注 LoopContext 类型，"
+        f"实际：{loop_ctx_annotation!r}"
     )
 
 
@@ -2946,4 +2958,201 @@ def test_loop_context_construction_precedes_confirmation_context_in_chat():
     )
     assert loop_ctx_pos < confirm_ctx_pos, (
         "_loop_ctx 必须先于 ConfirmationContext 构造（lambda 闭包依赖）"
+    )
+
+
+# ========================================================================
+# Phase 2.2-b：main-loop -> _call_model LoopContext handoff 边界
+# ------------------------------------------------------------------------
+# 这一组测试钉死 Phase 2.2-b 的 SSOT 修复契约：
+#   1) _call_model 签名包含 loop_ctx 且类型标注必须是 LoopContext；
+#   2) _call_model 函数体真正读 loop_ctx.client / loop_ctx.model_name
+#      （防形迁移神不迁移）；
+#   3) chat() 4 个 _run_main_loop 调用点全部传 _loop_ctx；
+#      _start_planning_for_handler 调用点传上层收到的 loop_ctx；
+#   4) **_run_main_loop 函数体绝不允许出现 LoopContext(...) 构造调用**
+#      ——这是本切片存在的根因，必须用 source-level 扫描钉死；
+#   5) chat() 仍然只有一个 _loop_ctx 构造点（agent/core.py 全文 LoopContext(...)
+#      只能出现 1 次，加上 loop_context.py 的定义点也只能出现在 LoopContext
+#      class 定义本身，不能在任何 helper 内部）；
+#   6) _run_main_loop 函数体不允许直接读 loop_ctx 字段——它只转发；
+#      Phase 2.2-c 才考虑让主循环自己消费 max_loop_iterations。
+# 任何后续切片想"顺手把 max_loop_iterations 也用上 / 顺手在主循环内构造
+# LoopContext"都会被第 4/6 条立刻拦下。
+# ========================================================================
+
+
+def test_call_model_signature_accepts_loop_context():
+    """_call_model 签名契约。"""
+
+    import inspect
+
+    from agent import core
+    from agent.loop_context import LoopContext
+
+    sig = inspect.signature(core._call_model)
+    params = list(sig.parameters.keys())
+    assert params == ["turn_state", "loop_ctx"], (
+        f"_call_model 签名必须严格是 (turn_state, loop_ctx)；当前：{params}。"
+        "禁止加 messages / state / system_prompt 参数（前两者属 durable state，"
+        "system_prompt 应通过 turn_state 传递）"
+    )
+    annotation = sig.parameters["loop_ctx"].annotation
+    assert annotation is LoopContext, (
+        f"_call_model.loop_ctx 必须标注 LoopContext，实际：{annotation!r}"
+    )
+
+
+def test_call_model_no_longer_reads_module_level_client_or_model_name():
+    """_call_model 函数体必须从 loop_ctx 读 client / model_name。
+
+    Phase 2.2-b 的实质成果：源码层防"形迁移神不迁移"。
+    """
+
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._call_model)
+    assert "loop_ctx.client.messages.stream" in src, (
+        "_call_model 必须用 loop_ctx.client 调 stream，"
+        "不允许继续用 module-level client"
+    )
+    assert "model=loop_ctx.model_name" in src, (
+        "_call_model stream 调用必须用 loop_ctx.model_name，"
+        "不允许继续用 module-level MODEL_NAME"
+    )
+    # 反向：函数体不应再出现裸 client.messages.stream 或 model=MODEL_NAME
+    forbidden_patterns = (
+        "with client.messages.stream(",
+        "model=MODEL_NAME,",
+    )
+    for pat in forbidden_patterns:
+        assert pat not in src, (
+            f"_call_model 仍隐式引用 module-level：{pat!r}"
+        )
+
+
+def test_run_main_loop_does_not_construct_loop_context():
+    """_run_main_loop 函数体绝不允许出现 LoopContext(...) 构造调用。
+
+    这是本切片存在的根因——避免 SSOT 双源。如果未来有人偷懒在主循环内
+    直接 ``LoopContext(client=..., model_name=...)`` 重建实例，会让 chat()
+    层修改 client / model_name 时主循环拿到旧值。本测试用 source-level
+    扫描钉死。
+    """
+
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._run_main_loop)
+    assert "LoopContext(" not in src, (
+        "_run_main_loop 函数体禁止构造 LoopContext；"
+        "必须由上层 chat() 单源构造并透传"
+    )
+
+
+def test_chat_remains_unique_loop_context_construction_site_in_core():
+    """agent/core.py 全文只能有一个 LoopContext(...) 构造点（在 chat() 内）。
+
+    这条比上一条更广——上一条只防 _run_main_loop；本条防整个 core.py 的
+    任何 helper 偷偷构造 LoopContext。Phase 2.2-c 之后任何新增 helper 想
+    吃 loop_ctx 都必须从 chat() 透传，不能就地构造。
+    """
+
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core)
+    construction_count = src.count("LoopContext(")
+    assert construction_count == 1, (
+        f"agent/core.py 中 LoopContext(...) 构造调用必须恰好 1 次（chat() 内），"
+        f"实际：{construction_count} 次。SSOT 单源是 Phase 2.2-b 修复的核心契约"
+    )
+
+
+def test_run_main_loop_does_not_consume_loop_ctx_fields_directly():
+    """_run_main_loop 本轮只转发 loop_ctx，不消费其字段。
+
+    Phase 2.2-b 的范围限定：主循环不读 loop_ctx.client / loop_ctx.model_name
+    （这些通过 _call_model 间接使用），也不读 loop_ctx.max_loop_iterations
+    （仍读模块级 MAX_LOOP_ITERATIONS，留给 Phase 2.2-c）。
+
+    用 AST 检查而不是字符串扫描，因为函数 docstring 里也会用文本提到这些字段
+    名作为"不允许做的事"的说明——字符串扫描会误伤文档。AST 只看实际属性
+    访问表达式。
+    """
+
+    import ast
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._run_main_loop)
+    tree = ast.parse(src)
+    # 只看函数体（跳过 def 行 + docstring expr）
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    body_nodes = func_def.body
+    if (
+        body_nodes
+        and isinstance(body_nodes[0], ast.Expr)
+        and isinstance(body_nodes[0].value, ast.Constant)
+        and isinstance(body_nodes[0].value.value, str)
+    ):
+        body_nodes = body_nodes[1:]
+
+    # 收集所有 ast.Attribute 节点的属性名（仅当 value 是名为 loop_ctx 的 Name）
+    forbidden = {"client", "model_name", "max_loop_iterations"}
+    consumed: list[str] = []
+    for node in body_nodes:
+        for sub in ast.walk(node):
+            if (
+                isinstance(sub, ast.Attribute)
+                and isinstance(sub.value, ast.Name)
+                and sub.value.id == "loop_ctx"
+                and sub.attr in forbidden
+            ):
+                consumed.append(sub.attr)
+    assert consumed == [], (
+        f"_run_main_loop 函数体不应直接读 loop_ctx 的字段：{consumed}；"
+        "Phase 2.2-b 主循环只转发 loop_ctx 给 _call_model"
+    )
+
+
+def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
+    """chat() 与 _start_planning_for_handler 的 _run_main_loop 调用都透传 loop_ctx。
+
+    当前调用点（共 4 处）：
+    - chat() 内 ConfirmationContext.continue_fn lambda：_run_main_loop(ts, _loop_ctx)
+    - chat() awaiting/running 分支：_run_main_loop(turn_state, _loop_ctx)
+    - chat() 新任务执行兜底分支：_run_main_loop(turn_state, _loop_ctx)
+    - _start_planning_for_handler 兜底：_run_main_loop(turn_state, loop_ctx)
+    任何新增 _run_main_loop 调用点都必须同步加参数。
+    """
+
+    import inspect
+
+    from agent import core
+
+    chat_src = inspect.getsource(core.chat)
+    handler_src = inspect.getsource(core._start_planning_for_handler)
+
+    # chat() 必须有 3 处带 _loop_ctx 的调用：lambda 内 + 2 个直接调用
+    chat_call_count = chat_src.count("_run_main_loop(")
+    assert chat_call_count >= 3, (
+        f"chat() 至少应有 3 处 _run_main_loop 调用，实际：{chat_call_count}"
+    )
+    # lambda 调用因换行会拆成 "_run_main_loop(\n            ts,\n            _loop_ctx,"
+    # 直接调用是 "_run_main_loop(turn_state, _loop_ctx)"
+    # 用更宽松的"调用次数 == 携带 _loop_ctx 次数"断言
+    assert chat_src.count("_loop_ctx") >= chat_src.count("_run_main_loop("), (
+        "chat() 中所有 _run_main_loop 调用都必须传 _loop_ctx"
+    )
+
+    # _start_planning_for_handler 应有 1 处调用并传 loop_ctx
+    assert "_run_main_loop(turn_state, loop_ctx)" in handler_src, (
+        "_start_planning_for_handler 调用 _run_main_loop 必须传上层 loop_ctx"
     )

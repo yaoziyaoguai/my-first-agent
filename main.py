@@ -562,6 +562,22 @@ def main(argv: list[str] | None = None) -> int:
         _maintenance_command_transition(RuntimeEventKind.LOGS_COMMAND)
         rest = argv[1:]
 
+        # v0.4 主线 A 第一切片：`logs cleanup` 子命令——只列出本地 runtime
+        # 产物清单（agent_log.jsonl / sessions/ / runs/），不删除/归档/压缩
+        # 任何文件，不读取文件内容。详见 agent/log_cleanup.py 顶部架构说明。
+        # 真删 (--apply) 暂未实现，需要并发锁 + 备份 + 回滚，属下一切片。
+        if rest and rest[0] == "cleanup":
+            from pathlib import Path
+            from agent.log_cleanup import (
+                collect_cleanup_candidates,
+                format_cleanup_dry_run_report,
+            )
+
+            project_root = Path(__file__).resolve().parent
+            candidates = collect_cleanup_candidates(project_root)
+            print(format_cleanup_dry_run_report(candidates), end="")
+            return 0
+
         def _opt(name: str) -> str | None:
             if name in rest:
                 idx = rest.index(name)

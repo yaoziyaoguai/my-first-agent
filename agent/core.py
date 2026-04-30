@@ -274,6 +274,112 @@ def _build_confirmation_context(
     )
 
 
+def _dispatch_pending_confirmation(
+    state,
+    user_input: str,
+    confirmation_ctx,
+) -> str | None:
+    """v0.5.1 第三小步 · pending confirmation 分发 helper（纯函数提取）。
+
+    职责（只做一件事）：
+        把"用户这次输入是否落在某个 pending 等待状态上"的路由决策从 ``chat()``
+        主体里搬出来。返回值语义：
+
+        - 返回 ``str``：5 个 pending 分支之一命中并由对应 handler 完成处理；
+          调用方（``chat()``）应直接 ``return`` 这个字符串，不再走压缩 / 新
+          任务路径。
+        - 返回 ``None``：5 个分支都不命中（fallthrough）；调用方继续执行
+          ``chat()`` 后半段的压缩历史 + 开启新任务逻辑。
+
+    本 helper 不负责什么：
+        - 不负责 5 个 handler 内部业务（plan/step/user_input/feedback_intent/
+          tool 各自的 confirmation outcome、observer evidence、checkpoint
+          落盘）——那些由 ``agent/confirm_handlers.py`` 各自 handler 钉死；
+        - 不负责 fallthrough 之后的压缩 / 新任务开启 / 主循环；
+        - 不负责 ``confirmation_ctx`` 的构造（由 ``_build_confirmation_context``
+          专属，SSOT 单源）；
+        - 不负责 L306 不一致 state 自愈路径（YF1 修复在 chat() 头部，独立
+          于 pending 分发）；
+        - 不负责 ``awaiting_feedback_intent`` / ``awaiting_tool_confirmation``
+          以外其他未来可能新增的 pending 状态——新增状态须显式追加分支。
+
+    为什么这样设计：
+        v0.5.0 之前 ``chat()`` 主体连续写 5 条 ``if state.task.status == ...:
+        return handler(...)``，与下方"压缩 / 新任务"逻辑混在同一函数。这导致
+        两个真实风险：
+        1) 任何在 chat() 主体里加新的 status 检查的提交，都会无意中影响
+           pending 分发顺序；
+        2) future 想做 dict-based dispatch 表 / observer hook / TUI awaitable
+           分发时，必须先把这 5 个分支抽出。
+
+        v0.5.1 第二小步 (cdd1427) 已通过 11 条 characterization tests 钉死
+        了 5 分支的顺序 + 守卫 + 互斥 + fallthrough 行为；本 helper 是在那
+        baseline 上做**纯函数提取**：分支顺序、守卫条件、handler 调用方式、
+        参数传递与原 chat() L491-L517 字面等价。
+
+    分支顺序与守卫（与提取前完全等价）：
+        1. ``current_plan`` 非空且 status == ``awaiting_plan_confirmation``
+        2. ``current_plan`` 非空且 status == ``awaiting_step_confirmation``
+        3. status == ``awaiting_user_input`` 且
+           （``current_plan`` 非空 或 ``pending_user_input_request`` 非空）
+        4. status == ``awaiting_feedback_intent``
+        5. ``pending_tool`` 非空且 status == ``awaiting_tool_confirmation``
+
+    为什么 None 表示 fallthrough：
+        所有 5 个 handler 当前的真实返回值都是非空字符串（plan_confirm_yes /
+        plan_confirm_no / 各种 user-facing 文本 / "<probe:*>" 等）。用 None
+        作为"未命中"哨兵不会与任何 handler 真实返回值冲突，调用方一行 if
+        检查即可。
+
+    用户项目自定义入口（未来扩展点）：
+        - 若加新的 pending 状态，**必须**在本函数内追加分支并补对应的
+          characterization test（参考 ``tests/test_pending_confirmation_dispatch.py``
+          的 monkeypatch 5 个 handler 为 probe 的模式）；
+        - 若想做 dict-based 分发表，可以把 5 条 if 换成 ``(predicate, handler)``
+          列表，但必须保留顺序敏感性（前面优先）；
+        - 若想加 observer hook（"哪条分支被命中"写 JSONL），加在每个
+          ``return`` 之前。
+
+    artifact 排查：
+        - 用户报告"我点了 yes 但 plan 没继续"→ 看 agent_log.jsonl 是否有
+          confirmation.* 事件（由 confirm_handlers 写）；本 helper 不写
+          observer，所以"分发是否到位"靠 ``test_pending_confirmation_dispatch.py``
+          单元层定位；
+        - 用户报告"我输入文本被当成新任务"→ 检查输入时 ``state.task.status``
+          + 各 pending 字段；可能命中第 3 条分支（user_input 守卫）也可能落
+          fallthrough。
+
+    什么是 mock / demo（无）：
+        本 helper 是真实 production code；无 mock / demo / xfail 边界。
+        ``tests/test_pending_confirmation_dispatch.py`` 中 ``dispatch_probe``
+        fixture 只是测试模式下用 monkeypatch 把 5 个 handler 替换成探针，
+        与本 helper 实现无关。
+    """
+
+    if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
+        return handle_plan_confirmation(user_input, confirmation_ctx)
+
+    if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
+        return handle_step_confirmation(user_input, confirmation_ctx)
+
+    if (
+        state.task.status == "awaiting_user_input"
+        and (state.task.current_plan or state.task.pending_user_input_request)
+    ):
+        return handle_user_input_step(user_input, confirmation_ctx)
+
+    if state.task.status == "awaiting_feedback_intent":
+        return handle_feedback_intent_choice(user_input, confirmation_ctx)
+
+    if (
+        getattr(state.task, "pending_tool", None)
+        and state.task.status == "awaiting_tool_confirmation"
+    ):
+        return handle_tool_confirmation(user_input, confirmation_ctx)
+
+    return None
+
+
 def _safe_emit_runtime_event(
     sink: RuntimeEventSink | None,
     event: RuntimeEvent,
@@ -488,33 +594,15 @@ def chat(
         loop_ctx=_loop_ctx,
     )
 
-    # 先处理"等待用户确认计划"的状态：
-    # 这时输入不再按普通 chat 语义解释，而是按确认协议处理。
-    if state.task.current_plan and state.task.status == "awaiting_plan_confirmation":
-        return handle_plan_confirmation(user_input, confirmation_ctx)
-
-    # 处理"等待用户确认是否进入下一步"的状态。
-    if state.task.current_plan and state.task.status == "awaiting_step_confirmation":
-        return handle_step_confirmation(user_input, confirmation_ctx)
-
-    # 处理"等待用户补充信息"的状态。
-    if (
-        state.task.status == "awaiting_user_input"
-        and (state.task.current_plan or state.task.pending_user_input_request)
-    ):
-        return handle_user_input_step(user_input, confirmation_ctx)
-
-    # P1：处理"等待用户对模糊反馈做三选一"的状态。
-    # 这里独立分派而不是塞进 awaiting_user_input 分支，是为了让 status 单字段
-    # 仍然能直观表达"系统正在等什么"，避免再让 handle_user_input_step 内部按
-    # awaiting_kind 分流——那样会让 user_input 路径承担两种语义责任，违反
-    # "一个状态机分支只表达一种等待来源"的边界。
-    if state.task.status == "awaiting_feedback_intent":
-        return handle_feedback_intent_choice(user_input, confirmation_ctx)
-
-    # 新增：处理工具确认（state 驱动）
-    if getattr(state.task, "pending_tool", None) and state.task.status == "awaiting_tool_confirmation":
-        return handle_tool_confirmation(user_input, confirmation_ctx)
+    # v0.5.1 第三小步：5 条 pending confirmation 分支抽进
+    # ``_dispatch_pending_confirmation`` helper（纯函数提取，行为与提取前
+    # 字面等价）。helper 返回 None 表示 fallthrough 到下方"压缩 + 新任务"
+    # 路径；返回 str 表示已被某个 confirmation handler 接管。
+    # baseline 由 tests/test_pending_confirmation_dispatch.py 11 条
+    # characterization tests 钉死（cdd1427）。详见 helper docstring。
+    _dispatched = _dispatch_pending_confirmation(state, user_input, confirmation_ctx)
+    if _dispatched is not None:
+        return _dispatched
 
     # 到这里才是真正的「新一轮对话」：可以安全做压缩。
     messages = state.conversation.messages

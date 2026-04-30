@@ -383,3 +383,43 @@ def test_dispatch_does_not_double_route_user_input(dispatch_probe, monkeypatch):
     assert dispatch_probe[0][0] == "plan", (
         "三个 pending 同时存在时, plan_confirmation 优先级最高（L493 在最前）"
     )
+
+
+# ================================================================
+# v0.5.1 第三小步 · helper 单元层契约测试
+# ================================================================
+def test_dispatch_helper_returns_none_on_fallthrough(monkeypatch):
+    """钉死 ``_dispatch_pending_confirmation`` 的 None fallthrough 契约。
+
+    与上面 11 条 characterization tests 的区别：
+    - 上面 11 条通过 ``core.chat()`` 间接观察 dispatch 选择哪个 handler；
+      它们测的是"提取前的 chat() 行为"必须保留；
+    - 本条直接调用 ``_dispatch_pending_confirmation`` helper 本身，钉死
+      "5 分支都不命中时返回 None"这个 helper-level 契约。
+
+    为什么独立加这一条：
+    - chat() 主体里 fallthrough 不是显式 return，是隐式落到下方压缩 + 新
+      任务路径；通过 chat() 间接观察 fallthrough 必须依赖 fake LLM client
+      和大量 setup（dispatch_probe 中 ``except Exception: pass`` 就是为了
+      隔离 fallthrough 后续路径所需的运行时）；
+    - 直接调用 helper 没有这些副作用，"None"作为哨兵值的契约可以独立钉死；
+    - 未来若有人把 helper 改成"未命中时返回空字符串"或"raise"或"返回特殊
+      sentinel"，本测试会立刻失败暴露契约漂移。
+
+    fake/mock 注释：
+    - 不需要 monkeypatch 任何 handler，因为 5 分支都不命中；
+    - 构造 status="idle" + current_plan=None + pending_tool=None +
+      pending_user_input_request=None 的 state，让所有守卫与 status
+      检查都 false。
+    """
+    state = create_agent_state(system_prompt="test")
+    state.task.user_goal = "test"
+    state.task.status = "idle"
+    state.task.current_plan = None
+    state.task.pending_tool = None
+    state.task.pending_user_input_request = None
+
+    result = core._dispatch_pending_confirmation(state, "hello", confirmation_ctx=None)
+    assert result is None, (
+        f"5 分支都不命中时 helper 必须返回 None（fallthrough 哨兵），实际 {result!r}"
+    )

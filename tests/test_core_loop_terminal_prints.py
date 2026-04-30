@@ -89,6 +89,11 @@ from tests.test_main_loop import (
     _register_test_tool,
     _reset_core_module,
 )
+from agent.display_events import (
+    EVENT_LOOP_MAX_ITERATIONS,
+    EVENT_STATE_INCONSISTENCY_RESET,
+    EVENT_UNKNOWN_STOP_REASON,
+)
 
 
 def _build_state_with_inconsistent_plan_required(monkeypatch):
@@ -511,4 +516,312 @@ def test_new_event_kinds_do_not_enter_messages_or_checkpoint(monkeypatch):
     assert "检测到不一致状态" not in task_dump, "诊断文本不能渗入 state.task"
     assert EVENT_STATE_INCONSISTENCY_RESET not in task_dump, (
         "RuntimeEvent event_type 不能进入 state.task / checkpoint"
+    )
+
+
+# ==================================================================
+# v0.5.1 第一小步 · YF1 callback exception contract 测试
+# ==================================================================
+# 来源：v0.5.0 RELEASE_NOTES_v0.5.md / docs/V0_5_OBSERVER_AUDIT.md §8 YF1。
+# 真实 bug：L306 / L670 / L789 三处迁移点采用 ``if cb is not None: cb(_evt)``
+# 直接调用模式。callback 实现内 raise 会沿调用栈冒到 chat() 调用方，
+# 跳过下游清理：
+#   L306: state.reset_task()（callback 之后）被跳过 → 不一致 state 残留
+#   L670: log_runtime_event("loop.guard_triggered") 已写但 clear_checkpoint /
+#         state.reset_task / return 被跳过 → checkpoint 脏 + chat() 抛异常
+#   L789: log_runtime_event("loop.stop") + return "意外的响应" 被跳过 →
+#         observer 证据链断裂 + chat() 抛异常
+#
+# **本组测试不是 TUI 实现**，只验证 callback exception contract：
+# callback 抛异常时 core runtime 必须可继续完成下游清理；
+# 异常不向上冒到 chat() 调用方；
+# observer JSONL 必须留下 callback failure 证据；
+# stdout fallback 必须仍然执行让 simple CLI 用户看到诊断；
+# conversation.messages / state.task / checkpoint 不能因 raise 进入更糟状态。
+#
+# 这些测试在 v0.5.0 HEAD（commit 32d4ca1）下**应**失败（暴露 YF1 真实 bug），
+# 修复 commit（_safe_emit_runtime_event helper）落地后**应**通过。
+
+
+class _RaisingCallback:
+    """模拟未来 TUI / IDE 插件场景下 callback 实现内部 raise 的边界。
+
+    fake/mock 注释：
+    - 这不是真实 TUI 实现，也不是 ``contextlib.suppress`` 的等价物；
+    - 只是把"渲染层 bug"压缩成最小可复现：只在 ``target_event_type`` 匹配时抛
+      RuntimeError；其他事件直接吞掉，避免污染同一个 chat() 内的其他 callback
+      触达点（v0.5.1 第一小步明确只覆盖 L306/L670/L789 三处带下游清理的 sink，
+      不覆盖 ``_emit_runtime_event`` 闭包的 ~7 个纯 UI projection 触达点）。
+    - records 用于断言 callback 的确被触发了一次（避免 sink 注入失败被误判为 fix 成功）。
+    """
+
+    def __init__(self, target_event_type: str):
+        self.records: list = []
+        self.target_event_type = target_event_type
+
+    def __call__(self, event):
+        if event.event_type != self.target_event_type:
+            return
+        self.records.append(event)
+        raise RuntimeError("simulated TUI render failure")
+
+
+def test_l306_callback_raise_must_not_skip_state_reset(monkeypatch, capsys):
+    """YF1·L306：callback 抛异常时 ``state.reset_task()`` 必须仍被调用。
+
+    当前 v0.5.0 HEAD 行为（buggy）：callback raise 让 ``state.reset_task()``
+    被跳过，``state.task.status = "awaiting_user_input"`` 与 ``current_plan = None``
+    的不一致状态残留。修复后此断言通过。
+    """
+    state = _build_state_with_inconsistent_plan_required(monkeypatch)
+
+    from agent.core import chat
+
+    raising = _RaisingCallback(EVENT_STATE_INCONSISTENCY_RESET)
+    chat("继续", on_runtime_event=raising)
+
+    assert len(raising.records) == 1, "callback 必须被触发一次（避免 sink 注入失败假阳性）"
+
+    # 关键不变量：reset_task 必须发生（否则 YF1 残留）
+    assert state.task.current_plan is None
+    assert state.task.status not in {
+        "awaiting_user_input",
+    }, (
+        "L306 callback raise 之后 state.task.status 必须已被 reset；"
+        "若仍为 awaiting_user_input 说明 callback 异常跳过了 state.reset_task()，"
+        "即 YF1 真实 bug 未修。"
+    )
+
+
+def test_l306_callback_raise_must_not_propagate_to_chat_caller(monkeypatch, capsys):
+    """YF1·L306：callback raise 不能冒到 ``chat()`` 调用方。
+
+    当前 buggy 行为：``chat("继续", on_runtime_event=raising)`` 直接抛
+    RuntimeError。修复后 chat() 应正常 return。
+    """
+    _build_state_with_inconsistent_plan_required(monkeypatch)
+
+    from agent.core import chat
+
+    raising = _RaisingCallback(EVENT_STATE_INCONSISTENCY_RESET)
+    try:
+        chat("继续", on_runtime_event=raising)
+    except RuntimeError as exc:
+        raise AssertionError(
+            f"chat() 不能让 display callback 异常向上冒；YF1 未修。原始异常: {exc!r}"
+        )
+
+
+def test_l670_callback_raise_must_not_skip_clear_checkpoint(monkeypatch, capsys):
+    """YF1·L670：callback raise 时 ``clear_checkpoint`` + ``state.reset_task``
+    + return value 必须全部仍发生。
+
+    当前 buggy 行为：callback raise 跳过 L693 ``_clear_checkpoint()`` /
+    L694 ``state.reset_task()`` / L695 ``return``，checkpoint 文件残留 +
+    chat() 抛 RuntimeError。
+    """
+    cleanup = _register_test_tool("loop_tool_yf1", confirmation="never", result="ok")
+    try:
+        from tests.test_complex_scenarios import _plan_response
+
+        fake = FakeAnthropicClient(
+            responses=[
+                _plan_response([("s1", "永不收敛", "read"), ("s2", "看不到", "report")]),
+                _tool_use_resp_with_arg("loop_tool_yf1", "T1", "a"),
+                _tool_use_resp_with_arg("loop_tool_yf1", "T2", "b"),
+                _tool_use_resp_with_arg("loop_tool_yf1", "T3", "c"),
+                _tool_use_resp_with_arg("loop_tool_yf1", "T4", "d"),
+            ]
+        )
+        state = _reset_core_module(monkeypatch, fake)
+
+        from agent import core
+        from agent.core import chat
+
+        monkeypatch.setattr(core, "MAX_LOOP_ITERATIONS", 3)
+
+        # 间接验证 clear_checkpoint 被调用：用 monkeypatch 替换为 spy
+        clear_called = {"count": 0}
+
+        def _spy_clear_checkpoint():
+            clear_called["count"] += 1
+
+        # checkpoint 模块在 core.py 内部 import；用 monkeypatch.setattr 替换
+        from agent import checkpoint as _checkpoint_mod
+        monkeypatch.setattr(_checkpoint_mod, "clear_checkpoint", _spy_clear_checkpoint)
+
+        raising = _RaisingCallback(EVENT_LOOP_MAX_ITERATIONS)
+
+        # 第一次 chat 提交计划
+        first = chat("做一个两步任务", on_runtime_event=raising)
+        # callback 在 plan_confirmation_requested 时也会被触发；
+        # 第一次 chat 至少会调用 callback 1 次（plan request），但不会进 L670 路径。
+        # 此处不断言 records 数量，让 callback 被触发即可。
+        # 注意：first 应是空字符串（plan 请求确认）。
+        assert first == ""
+
+        # 第二次 chat 接受计划，进入主循环 → 跑满 MAX_LOOP_ITERATIONS=3 → L670 触发
+        try:
+            ret = chat("y", on_runtime_event=raising)
+        except RuntimeError as exc:
+            raise AssertionError(
+                f"L670 chat() 不能因 display callback 异常而崩溃；YF1 未修。{exc!r}"
+            )
+
+        # 关键不变量：return value 必须正常返回
+        assert ret == "对话循环次数过多，请简化任务或分步执行。", (
+            f"L670 callback raise 后 chat() 返回值丢失；YF1 未修。实际: {ret!r}"
+        )
+
+        # 关键不变量：clear_checkpoint 必须仍被调用
+        assert clear_called["count"] >= 1, (
+            "L670 callback raise 跳过了 clear_checkpoint() 调用；YF1 未修。"
+        )
+
+        # 关键不变量：state.task 必须 reset
+        assert state.task.current_plan is None, (
+            "L670 callback raise 跳过了 state.reset_task()；YF1 未修。"
+        )
+    finally:
+        cleanup()
+
+
+def test_l789_callback_raise_must_not_skip_loop_stop_observer(monkeypatch, capsys):
+    """YF1·L789：callback raise 时 ``log_runtime_event("loop.stop", ...)``
+    observer 写入 + return "意外的响应" 必须仍发生。
+
+    当前 buggy 行为：callback raise 跳过 L798 observer 写入与 L808 return →
+    observer 证据链断裂 + chat() 抛 RuntimeError。
+    """
+    cleanup = _register_test_tool("w_yf1", confirmation="never", result="done")
+    try:
+        fake = FakeAnthropicClient(
+            responses=[
+                FakeResponse(
+                    content=[FakeTextBlock(text='{"steps_estimate": 1}')],
+                    stop_reason="end_turn",
+                ),
+                _fake_unknown_stop_response(),
+            ]
+        )
+        _reset_core_module(monkeypatch, fake)
+
+        # spy log_runtime_event 调用
+        observer_calls: list = []
+        from agent import core as _core_mod
+        original_log = _core_mod.log_runtime_event
+
+        def _spy_log(event_type, **kwargs):
+            observer_calls.append((event_type, kwargs))
+            return original_log(event_type, **kwargs)
+
+        monkeypatch.setattr(_core_mod, "log_runtime_event", _spy_log)
+
+        from agent.core import chat
+
+        raising = _RaisingCallback(EVENT_UNKNOWN_STOP_REASON)
+        try:
+            ret = chat("试试", on_runtime_event=raising)
+        except RuntimeError as exc:
+            raise AssertionError(
+                f"L789 chat() 不能因 display callback 异常而崩溃；YF1 未修。{exc!r}"
+            )
+
+        assert ret == "意外的响应", (
+            f"L789 callback raise 后 chat() 返回值丢失；YF1 未修。实际: {ret!r}"
+        )
+
+        loop_stop_calls = [c for c in observer_calls if c[0] == "loop.stop"]
+        assert len(loop_stop_calls) >= 1, (
+            "L789 callback raise 跳过了 log_runtime_event('loop.stop')；"
+            "observer 证据链断裂；YF1 未修。"
+        )
+        assert loop_stop_calls[-1][1].get("event_payload", {}).get("reason_for_stop") == (
+            "unknown_stop_reason"
+        ), "loop.stop 事件 reason_for_stop 字段必须保留"
+    finally:
+        cleanup()
+
+
+def test_callback_raise_writes_runtime_event_sink_failed_observer(monkeypatch, capsys):
+    """YF1 修复策略验证：callback raise 时 observer JSONL 必须留下证据
+    ``event_type="runtime_event_sink.failed"``，包含原 event_type 与异常类名，
+    **不**包含异常栈或 event 内容（避免 user_input/tool_input 泄漏）。
+
+    若 fix helper 把异常静默吞掉而无 observer 写入，本测试失败。
+    """
+    _build_state_with_inconsistent_plan_required(monkeypatch)
+
+    observer_calls: list = []
+    from agent import core as _core_mod
+    original_log = _core_mod.log_runtime_event
+
+    def _spy_log(event_type, **kwargs):
+        observer_calls.append((event_type, kwargs))
+        return original_log(event_type, **kwargs)
+
+    monkeypatch.setattr(_core_mod, "log_runtime_event", _spy_log)
+
+    from agent.core import chat
+
+    raising = _RaisingCallback(EVENT_STATE_INCONSISTENCY_RESET)
+    chat("继续", on_runtime_event=raising)
+
+    failed_events = [c for c in observer_calls if c[0] == "runtime_event_sink.failed"]
+    assert len(failed_events) == 1, (
+        f"callback raise 必须落 observer 'runtime_event_sink.failed'，实际 "
+        f"{len(failed_events)} 条；如果 fix 静默吞异常会让用户 / 维护者完全"
+        f"看不到 callback 错误。"
+    )
+    payload = failed_events[0][1].get("event_payload", {})
+    assert payload.get("original_event_type") == EVENT_STATE_INCONSISTENCY_RESET
+    assert payload.get("exception_type") == "RuntimeError"
+    # 防隐私泄漏：payload 不能含 raw event text 或 stack trace
+    assert "text" not in payload
+    assert "traceback" not in payload
+    assert "render" not in str(payload).lower()
+
+
+def test_callback_raise_falls_back_to_stdout(monkeypatch, capsys):
+    """YF1 修复策略验证：callback raise 时 simple CLI 用户必须仍看到诊断
+    （helper 必须降级到 stdout fallback，不能让 callback 失败导致用户看不到）。
+    """
+    _build_state_with_inconsistent_plan_required(monkeypatch)
+
+    from agent.core import chat
+
+    raising = _RaisingCallback(EVENT_STATE_INCONSISTENCY_RESET)
+    chat("继续", on_runtime_event=raising)
+
+    out = capsys.readouterr().out
+    assert "检测到不一致状态" in out, (
+        "callback raise 后 stdout 必须含诊断作为兜底；否则用户与 TUI 都看不到。"
+    )
+
+
+def test_callback_raise_does_not_pollute_messages(monkeypatch):
+    """YF1 修复策略验证：callback raise 不能往 conversation.messages 写入
+    诊断文本或 RuntimeEvent payload。
+    """
+    state = _build_state_with_inconsistent_plan_required(monkeypatch)
+
+    from agent.core import chat
+
+    msgs_before = list(state.conversation.messages)
+
+    raising = _RaisingCallback(EVENT_STATE_INCONSISTENCY_RESET)
+    chat("继续", on_runtime_event=raising)
+
+    # chat() 自然会追加 user message，但绝不能追加诊断文本
+    msg_dump = repr(state.conversation.messages)
+    assert "检测到不一致状态" not in msg_dump, (
+        "callback raise 时诊断文本不能渗入 conversation.messages"
+    )
+    assert "runtime_event_sink.failed" not in msg_dump, (
+        "callback failure observer event 不能渗入 messages"
+    )
+    # 数量上：相对 msgs_before 至少新增了 user message；不能因 raise 多出系统消息
+    new_count = len(state.conversation.messages) - len(msgs_before)
+    assert new_count <= 2, (  # 通常 1 user message；预留 1 容差
+        f"callback raise 不应新增超过 1-2 条 message，实际新增 {new_count}"
     )

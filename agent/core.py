@@ -274,6 +274,80 @@ def _build_confirmation_context(
     )
 
 
+def _safe_emit_runtime_event(
+    sink: RuntimeEventSink | None,
+    event: RuntimeEvent,
+    *,
+    fallback_prefix: str = "",
+) -> None:
+    """v0.5.1 第一小步 · YF1 修复 · 安全发出 RuntimeEvent 到 sink。
+
+    问题（v0.5.0 RELEASE_NOTES_v0.5.md / docs/V0_5_OBSERVER_AUDIT.md §8 YF1）：
+    ``agent/core.py`` L306 / L670 / L789 三处 D 迁移点直接 ``sink(event)``。
+    若 sink 抛异常会沿调用栈冒到 ``chat()`` 调用方，跳过下游清理（L306 的
+    ``state.reset_task()`` / L670 的 ``clear_checkpoint`` + ``state.reset_task``
+    + return / L789 的 ``log_runtime_event("loop.stop", ...)`` + return）。
+
+    本 helper 把 sink 调用包成"绝不抛"契约：
+
+    1. ``sink is None`` → print 到 stdout（保留 simple CLI fallback）；
+       ``fallback_prefix`` 用于个别调用点（如 L670）需要前缀换行的场景。
+    2. ``sink(event)`` 正常完成 → 直接返回，不打印（避免 stdout 双投）。
+    3. ``sink(event)`` 抛任何 ``Exception``：
+       a) 调用 ``log_runtime_event("runtime_event_sink.failed", ...)``
+          把"原 event_type + 异常类名"写进 observer JSONL；
+          payload **不含**异常栈、**不含** event.text、**不含** event.metadata
+          —— 防止 user_input / tool_input 在异常路径泄漏到日志；
+       b) print 到 stdout 让 simple CLI / debug 用户仍看到诊断；
+       c) **不**重新抛出异常 —— 让调用方下游清理（reset_task、clear_checkpoint
+          等）继续完成。
+    4. observer 写入再次失败也吞掉 —— 这是兜底，避免日志层 bug 把主流程拖死；
+       如果出现这种情况，stdout fallback 仍能让用户察觉异常。
+
+    职责边界：
+    - 仅吸收 sink 调用本身的异常；不吞 sink 之前 / 之后的逻辑异常。
+    - 不改 ``conversation.messages`` / 不改 ``state.task`` / 不改 checkpoint /
+      不改 transition 决策；这些由调用方在本 helper 之后继续负责。
+    - 不增加 sink 协议字段，不与 ``DisplayEvent`` 兼容层混合。
+    - 不接 TUI；TUI 自己的异常分类由前端 owner 决定。
+
+    用户接入点：``agent/core.py`` 中 3 处带下游清理的 user-facing diagnostic
+    （L306 state 自愈、L670 loop 兜底、L789 unknown stop_reason）。
+
+    artifact 排查：
+    - 若用户报告 "TUI 渲染异常后 agent 崩溃"，先看 agent_log.jsonl 是否
+      含 ``event_type="runtime_event_sink.failed"`` 行；
+    - 若有该行，说明 helper 已工作，问题出在 callback 实现内部；
+    - 若无，说明可能 callback raise 没经过本 helper 路径，需要检查调用点
+      是否仍是裸 ``sink(event)``。
+
+    未来扩展点（不在本切片做）：
+    - 把 6 个 callback 触达点统一用本 helper 包；当前只覆盖 3 处带清理的；
+    - observer 失败时降级到 stderr，提供独立可观测信号；
+    - 给 helper 加可注入 fallback_renderer 让 TUI 自定义错误兜底。
+    """
+
+    if sink is None:
+        print(f"{fallback_prefix}{render_runtime_event_for_cli(event)}")
+        return
+    try:
+        sink(event)
+    except Exception as exc:
+        try:
+            log_runtime_event(
+                "runtime_event_sink.failed",
+                event_source="runtime",
+                event_payload={
+                    "original_event_type": event.event_type,
+                    "exception_type": type(exc).__name__,
+                },
+                event_channel="display",
+            )
+        except Exception:
+            pass
+        print(f"{fallback_prefix}{render_runtime_event_for_cli(event)}")
+
+
 def chat(
     user_input: str,
     *,
@@ -313,10 +387,9 @@ def chat(
         # 注意：本处早于 ``_emit_runtime_event`` 闭包定义、早于 ``turn_state``
         # 构造，所以不能复用闭包；只能直接拿 chat() 参数。
         _evt = state_inconsistency_reset_event(state.task.status)
-        if on_runtime_event is not None:
-            on_runtime_event(_evt)
-        else:
-            print(render_runtime_event_for_cli(_evt))
+        # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
+        # 防止 callback raise 跳过下面的 state.reset_task()。
+        _safe_emit_runtime_event(on_runtime_event, _evt)
         state.reset_task()
 
     # 注意：不要在这里无条件压缩历史。
@@ -685,10 +758,11 @@ def _run_main_loop(
             #   - 上方 ``log_runtime_event("loop.guard_triggered", ...)`` observer 写入；
             #   - 下方 ``clear_checkpoint`` / ``state.reset_task`` / return value。
             _evt = loop_max_iterations_event(loop_ctx.max_loop_iterations)
-            if turn_state.on_runtime_event is not None:
-                turn_state.on_runtime_event(_evt)
-            else:
-                print(f"\n{render_runtime_event_for_cli(_evt)}")
+            # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
+            # 防止 callback raise 跳过下面的 clear_checkpoint / reset_task / return。
+            _safe_emit_runtime_event(
+                turn_state.on_runtime_event, _evt, fallback_prefix="\n"
+            )
             from agent.checkpoint import clear_checkpoint as _clear_checkpoint
             _clear_checkpoint()
             state.reset_task()
@@ -791,10 +865,9 @@ def _run_main_loop(
         # ``log_runtime_event("loop.stop", reason_for_stop="unknown_stop_reason")``
         # observer 写入与 return value。
         _evt = unknown_stop_reason_event(response.stop_reason)
-        if turn_state.on_runtime_event is not None:
-            turn_state.on_runtime_event(_evt)
-        else:
-            print(render_runtime_event_for_cli(_evt))
+        # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
+        # 防止 callback raise 跳过下面的 log_runtime_event("loop.stop") + return。
+        _safe_emit_runtime_event(turn_state.on_runtime_event, _evt)
         log_runtime_event(
             "loop.stop",
             event_source="runtime",

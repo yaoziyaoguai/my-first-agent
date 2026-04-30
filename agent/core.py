@@ -454,6 +454,219 @@ def _safe_emit_runtime_event(
         print(f"{fallback_prefix}{render_runtime_event_for_cli(event)}")
 
 
+def _dispatch_model_output(
+    response,
+    *,
+    turn_state: "TurnState",
+) -> str | None:
+    """v0.5.1 第五小步 · _run_main_loop 模型输出分发 helper（行为中性提取）。
+
+    职责（架构边界）
+    ----------------
+    把 ``_run_main_loop`` 中"按 :class:`ModelOutputKind` 把 response 路由到
+    对应 handler"的 4 个 if-branch 抽出为单一函数：
+
+        MAX_TOKENS  → handle_max_tokens_response
+        END_TURN    → handle_end_turn_response
+        TOOL_USE    → handle_tool_use_response
+        UNKNOWN     → fallback: 发 unknown_stop_reason RuntimeEvent，
+                       记 loop.stop(reason_for_stop=unknown_stop_reason)，
+                       返回 ``"意外的响应"``
+
+    返回语义（与原 inline 逻辑完全等价）：
+    - **str** = handler 已产生最终结果，调用方应 ``return result`` 退出循环；
+    - **None** = handler 返回 None（典型如 max_tokens continue 路径），
+      调用方应 ``continue`` 进入下一轮 ``while``。
+
+    本 helper **不负责**的事
+    ------------------------
+    - ❌ ``_call_model`` 调用：仍由 ``_run_main_loop`` 在主循环顶部执行；
+    - ❌ ``state.task.loop_iterations += 1`` / ``loop.iteration_start`` log /
+      ``loop.guard_triggered`` log / max_iter guard 内 ``clear_checkpoint`` +
+      ``state.reset_task`` + return —— 这些是 *循环控制*，与"输出分发"是两层
+      不同关注点；
+    - ❌ ``loop.start`` log（属循环启动一次性事件，不进 helper）；
+    - ❌ handler 内部的 messages 写入 / state mutation / checkpoint / 工具
+      执行 / consecutive 计数器 —— 全部仍由 ``response_handlers.py`` 各自
+      handler 负责；
+    - ❌ pending confirmation 路由（那是 :func:`_dispatch_pending_confirmation`
+      的职责，按 *用户输入* + *task.status* 派发，与本 helper 完全正交）。
+
+    与 :func:`_dispatch_pending_confirmation` 的区别（请勿混用）
+    -----------------------------------------------------------
+    - 输入来源不同：confirmation dispatch 拿到的是**用户输入字符串** +
+      ``task.status``；本 helper 拿到的是**模型 response 对象** +
+      ``stop_reason``；
+    - 触发时机不同：confirmation dispatch 在 ``chat()`` 顶层用户进入时；
+      本 helper 在 ``_run_main_loop`` 每轮模型调用之后；
+    - 失败 fallback 不同：confirmation dispatch 落到"开启全新任务"路径；
+      本 helper 落到 UNKNOWN fallback 文案。
+
+    为什么仍留在 ``agent/core.py``（不新建模块）
+    --------------------------------------------
+    - 4 个 handler 已 ``from agent.response_handlers import ...`` 集中在
+      ``core.py`` 顶部；新模块只会让 import 重新分散；
+    - 与 :func:`_dispatch_pending_confirmation`（bf49a84 抽出）保持对称布局，
+      便于未来读者一次看完两类 dispatch；
+    - 本切片是**函数提取**，不是新状态机、不是 callback framework、不是
+      新 API；不需要独立模块边界。
+
+    为什么先有 characterization tests 再抽 helper
+    ----------------------------------------------
+    - 605196c（``tests/test_model_output_dispatch.py`` 9 条）已经钉死：
+      4 分支路由 + None / continue 语义 + 互斥 + classify_model_output 唯一
+      truth source + UNKNOWN fallback return value + ModelOutputKind 词表稳定；
+    - 如果没有这层网，本次提取若不慎调整 ``loop.iteration_end`` log 字段顺序、
+      或把 UNKNOWN 文案改成 ``"未知响应"``，很可能在 production agent 跑出
+      silent-success 才被发现；
+    - 与 cdd1427→bf49a84 的 confirmation dispatch 提取完全同模式：
+      先 char baseline、再纯函数提取、helper-level 单测兜底 None 边界。
+
+    用户项目自定义入口（未来扩展点）
+    --------------------------------
+    - 若未来新增第 5 类 ``ModelOutputKind``（例如 ``REFUSAL``），应：
+      1) 在 ``classify_model_output`` 加映射；2) 在本 helper 的 if-chain
+      新增分支；3) 同步在 ``test_model_output_dispatch`` 加路由测试与词表
+      断言更新；不要绕过 helper 直接在 ``_run_main_loop`` 加分支。
+    - 若未来要支持"按 ModelOutputKind 注入自定义 handler"（例如插件化），
+      可以让本 helper 接受 ``handlers: dict[ModelOutputKind, Callable]``
+      参数；当前是常量 import，不接 plugin 抽象。
+
+    artifact 排查
+    -------------
+    - 用户报告"循环吃掉异常输出"时，先 grep agent_log.jsonl 中
+      ``event_type="loop.stop"`` 行的 ``reason_for_stop`` 字段：
+      * ``handler_returned`` → 走了已知分支；
+      * ``unknown_stop_reason`` → 走了 UNKNOWN fallback；
+      * 缺失 ``loop.stop`` → 可能在 max_iter guard 触发了，看
+        ``loop.guard_triggered`` 行（属 ``_run_main_loop`` 直接发，不经
+        本 helper）。
+    - 若用户报告 "tool_use 没执行"，看 ``loop.iteration_end`` 行的
+      ``stop_reason`` 是否真是 ``"tool_use"``——若不是，说明 SDK 返回的
+      stop_reason 漂移了（未来需要在 classify 层兜底新映射）。
+
+    什么是 mock / demo（无）
+    ------------------------
+    helper 不含任何 mock / demo 逻辑；纯运行时分发。测试用 fake response +
+    handler probe 见 ``tests/test_model_output_dispatch.py``。
+
+    重要边界 · 行为中性证明
+    -----------------------
+    - 本 helper 体内的 4 个分支**字面**等价于原 ``_run_main_loop`` 的
+      L860-L969 区段；唯一差别是把"if result is not None: log + return"
+      模式收敛成：handler 返回 None → helper 返回 None；handler 返回 str
+      → helper 记 ``loop.stop(reason_for_stop=handler_returned)`` 后返回
+      str。
+    - 调用方 ``_run_main_loop`` 据此 ``return``/``continue``，与原行为
+      逐字节等价；这一点由 605196c 9 条 + 本切片 1 条 helper-level None
+      fallthrough 测试共同钉死。
+    """
+    model_kind = classify_model_output(response.stop_reason)
+    log_runtime_event(
+        "loop.iteration_end",
+        event_source="runtime",
+        event_payload={
+            **_runtime_loop_fields(),
+            "stop_reason": response.stop_reason,
+        },
+        event_channel="loop",
+    )
+
+    if model_kind is ModelOutputKind.MAX_TOKENS:
+        result = handle_max_tokens_response(
+            response,
+            state=state,
+            turn_state=turn_state,
+            messages=state.conversation.messages,
+            extract_text_fn=_extract_text,
+            max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
+        )
+        if result is not None:
+            log_runtime_event(
+                "loop.stop",
+                event_source="runtime",
+                event_payload={
+                    **_runtime_loop_fields(),
+                    "stop_reason": response.stop_reason,
+                    "reason_for_stop": "handler_returned",
+                },
+                event_channel="loop",
+            )
+            return result
+        return None
+
+    if model_kind is ModelOutputKind.END_TURN:
+        result = handle_end_turn_response(
+            response,
+            state=state,
+            turn_state=turn_state,
+            messages=state.conversation.messages,
+            extract_text_fn=_extract_text,
+        )
+        if result is not None:
+            log_runtime_event(
+                "loop.stop",
+                event_source="runtime",
+                event_payload={
+                    **_runtime_loop_fields(),
+                    "stop_reason": response.stop_reason,
+                    "reason_for_stop": "handler_returned",
+                },
+                event_channel="loop",
+            )
+            return result
+        return None
+
+    if model_kind is ModelOutputKind.TOOL_USE:
+        result = handle_tool_use_response(
+            response,
+            state=state,
+            turn_state=turn_state,
+            messages=state.conversation.messages,
+            extract_text_fn=_extract_text,
+        )
+        if result is not None:
+            log_runtime_event(
+                "loop.stop",
+                event_source="runtime",
+                event_payload={
+                    **_runtime_loop_fields(),
+                    "stop_reason": response.stop_reason,
+                    "reason_for_stop": "handler_returned",
+                },
+                event_channel="loop",
+            )
+            return result
+        return None
+
+    # ModelOutputKind.UNKNOWN：未知 stop_reason 走显式分支，不能被
+    # 上面任何一类静默吸收。这里保留原 "[系统] 未知的 stop_reason: …"
+    # 文案与 reason_for_stop=unknown_stop_reason 日志，行为与提取前
+    # 完全一致；分类层只是让 "unknown 是一类独立结果" 在测试里可以
+    # 直接钉死，避免未来 SDK 协议漂移把异常静默吞掉。
+    # B2 契约：诊断信息用户必须能看到，不能用 [DEBUG] 前缀（会被
+    # main.DEBUG_OUTPUT_PREFIXES 兜底过滤吞掉）。详见
+    # docs/CLI_OUTPUT_CONTRACT.md "允许直接 print 的 prefix 白名单"。
+    # v0.5 第七小步 D · L769 print 迁移到 RuntimeEvent。
+    # 优先 ``turn_state.on_runtime_event``；callback 缺失回退 stdout
+    # 保留 simple CLI 诊断可见性。
+    # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
+    # 防止 callback raise 跳过下面的 log_runtime_event("loop.stop") + return。
+    _evt = unknown_stop_reason_event(response.stop_reason)
+    _safe_emit_runtime_event(turn_state.on_runtime_event, _evt)
+    log_runtime_event(
+        "loop.stop",
+        event_source="runtime",
+        event_payload={
+            **_runtime_loop_fields(),
+            "stop_reason": response.stop_reason,
+            "reason_for_stop": "unknown_stop_reason",
+        },
+        event_channel="loop",
+    )
+    return "意外的响应"
+
+
 def chat(
     user_input: str,
     *,
@@ -857,116 +1070,17 @@ def _run_main_loop(
             return "对话循环次数过多，请简化任务或分步执行。"
 
         response = _call_model(turn_state, loop_ctx)
-        # v0.4 Phase 1 slice 5：先把 stop_reason 收敛成 ModelOutputKind 分类标签。
-        # 这一行**只**做分类，不读 state、不写 messages、不动 checkpoint；后面 4
-        # 个分支按 kind dispatch，与之前的 inline 字符串比较行为完全等价，但
-        # UNKNOWN 走显式分支后未知 stop_reason 不再被静默并入"正常完成"。
-        model_kind = classify_model_output(response.stop_reason)
-        log_runtime_event(
-            "loop.iteration_end",
-            event_source="runtime",
-            event_payload={
-                **_runtime_loop_fields(),
-                "stop_reason": response.stop_reason,
-            },
-            event_channel="loop",
-        )
+        # v0.5.1 第五小步：4 个 ModelOutputKind 分支已抽到 _dispatch_model_output。
+        # 本调用点**只**做：拿 response → 交给 helper → 据返回值 return / continue。
+        # 行为与提取前完全等价，由 tests/test_model_output_dispatch.py 9 条
+        # characterization tests + 同文件 helper-level None fallthrough 测试
+        # 双层保护。**不**在此处再读 stop_reason / 调 classify_model_output /
+        # 写 loop.iteration_end log——那些已搬入 helper，重复会导致双发。
+        result = _dispatch_model_output(response, turn_state=turn_state)
+        if result is not None:
+            return result
+        continue
 
-        if model_kind is ModelOutputKind.MAX_TOKENS:
-            result = handle_max_tokens_response(
-                response,
-                state=state,
-                turn_state=turn_state,
-                messages=state.conversation.messages,
-                extract_text_fn=_extract_text,
-                max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
-            )
-            if result is not None:
-                log_runtime_event(
-                    "loop.stop",
-                    event_source="runtime",
-                    event_payload={
-                        **_runtime_loop_fields(),
-                        "stop_reason": response.stop_reason,
-                        "reason_for_stop": "handler_returned",
-                    },
-                    event_channel="loop",
-                )
-                return result
-            continue
-
-        if model_kind is ModelOutputKind.END_TURN:
-            result = handle_end_turn_response(
-                response,
-                state=state,
-                turn_state=turn_state,
-                messages=state.conversation.messages,
-                extract_text_fn=_extract_text,
-            )
-            if result is not None:
-                log_runtime_event(
-                    "loop.stop",
-                    event_source="runtime",
-                    event_payload={
-                        **_runtime_loop_fields(),
-                        "stop_reason": response.stop_reason,
-                        "reason_for_stop": "handler_returned",
-                    },
-                    event_channel="loop",
-                )
-                return result
-            continue
-
-        if model_kind is ModelOutputKind.TOOL_USE:
-            result = handle_tool_use_response(
-                response,
-                state=state,
-                turn_state=turn_state,
-                messages=state.conversation.messages,
-                extract_text_fn=_extract_text,
-            )
-            if result is not None:
-                log_runtime_event(
-                    "loop.stop",
-                    event_source="runtime",
-                    event_payload={
-                        **_runtime_loop_fields(),
-                        "stop_reason": response.stop_reason,
-                        "reason_for_stop": "handler_returned",
-                    },
-                    event_channel="loop",
-                )
-                return result
-            continue
-
-        # ModelOutputKind.UNKNOWN：未知 stop_reason 走显式分支，不能被
-        # 上面任何一类静默吸收。这里保留原"[系统] 未知的 stop_reason: …"
-        # 文案与 reason_for_stop=unknown_stop_reason 日志，行为与 slice 5
-        # 之前完全一致；分类层只是让"unknown 是一类独立结果"在测试里可以
-        # 直接钉死，避免未来 SDK 协议漂移把异常静默吞掉。
-        # B2 契约：诊断信息用户必须能看到，不能用 [DEBUG] 前缀（会被
-        # main.DEBUG_OUTPUT_PREFIXES 兜底过滤吞掉）。详见
-        # docs/CLI_OUTPUT_CONTRACT.md "允许直接 print 的 prefix 白名单"。
-        # v0.5 第七小步 D · L769 print 迁移到 RuntimeEvent。
-        # 优先 ``turn_state.on_runtime_event``；callback 缺失回退 stdout
-        # 保留 simple CLI 诊断可见性。**只**替换 print，**不**改下方
-        # ``log_runtime_event("loop.stop", reason_for_stop="unknown_stop_reason")``
-        # observer 写入与 return value。
-        _evt = unknown_stop_reason_event(response.stop_reason)
-        # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
-        # 防止 callback raise 跳过下面的 log_runtime_event("loop.stop") + return。
-        _safe_emit_runtime_event(turn_state.on_runtime_event, _evt)
-        log_runtime_event(
-            "loop.stop",
-            event_source="runtime",
-            event_payload={
-                **_runtime_loop_fields(),
-                "stop_reason": response.stop_reason,
-                "reason_for_stop": "unknown_stop_reason",
-            },
-            event_channel="loop",
-        )
-        return "意外的响应"
 
 
 def _call_model(

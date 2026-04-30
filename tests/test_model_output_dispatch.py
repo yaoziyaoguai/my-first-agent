@@ -355,3 +355,37 @@ def test_model_output_kind_vocabulary_remains_four_known_values():
         "max_tokens",
         "unknown",
     }
+
+
+# ================================================================
+# v0.5.1 第五小步 · helper-level 测试：直接调用 _dispatch_model_output
+# ================================================================
+def test_dispatch_helper_returns_none_when_handler_returns_none(monkeypatch):
+    """钉死 _dispatch_model_output helper 的 None fallthrough 契约。
+
+    保护边界（与 bf49a84 的 _dispatch_pending_confirmation None 测试同模式）：
+    - 当 handler 返回 None 时，helper 必须**也**返回 None；
+    - 调用方 ``_run_main_loop`` 据此决定 ``continue``——若 helper 误把
+      None 转成 "" 或 0 或某种 sentinel object，循环会被错误退出，
+      消息累积 / max_tokens 续写场景会断流；
+    - 这一条直接测 helper-level 行为，绕过 ``_run_main_loop`` 的 while
+      包装，让契约**单点可验证**：将来若有人把 helper 签名改成 ``-> str``
+      （不再允许 None），本测试立即失败。
+
+    本测试**不是**重复 ``test_handler_returning_none_continues_loop_until_
+    handler_returns_str``——那条测的是 ``_run_main_loop`` 的循环语义；本条
+    测的是 helper 契约本身。两条互补，缺一不可。
+    """
+    state = create_agent_state(system_prompt="test")
+    state.task.user_goal = "test"
+    monkeypatch.setattr(core, "state", state)
+
+    # handler 返回 None：helper 必须返回 None（fallthrough 给调用方 continue）
+    monkeypatch.setattr(core, "handle_end_turn_response", lambda response, **kw: None)
+
+    turn_state = core.TurnState(system_prompt="test")
+    response = _FakeResponse("end_turn")
+
+    result = core._dispatch_model_output(response, turn_state=turn_state)
+
+    assert result is None

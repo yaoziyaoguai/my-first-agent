@@ -59,6 +59,11 @@
 
 ## 3. core.py Print / Callback Audit
 
+> **Status update（v0.5 release prep）**：本节 §3.1 标注的 3 处 user-facing print 已由
+> commit `00aa28c`（slice 7 D）迁移到 RuntimeEvent sink，保留 stdout fallback；§3.4
+> DEBUG_PROTOCOL 双开关守卫由 `49b3816` 新增 AST 防回归测试。原"待修"清单见下方
+> §8 Gap 表的 Status 列。
+
 `grep -nE '^\s*print\(' agent/core.py` → **23 处**。逐条分类：
 
 ### 3.1 Runtime path · user-facing · 应改 DisplayEvent + log_event（3 处）
@@ -189,16 +194,32 @@ conversation:
 
 ## 8. Gaps and Invariants
 
-| Gap ID | 文件 | 函数 | 当前风险 | 必须保持的不变量 | 最小下一步 | 需要的测试 |
-|---|---|---|---|---|---|---|
-| G1 | `agent/core.py` L306/L670/L769 | (chat 内 inline) | TUI 模式下 user-facing `[系统]` 提示完全不可见 | (a) 不能引入新 callback 协议；(b) observer JSONL 已记录的 (L670, L769) 不能丢失；(c) L306 "状态重置" 必须在 observer JSONL 留痕 | 把 3 处 print 包成 `DisplayEvent`，通过 `_emit_runtime_event` 投递；同步给 L306 加 `log_runtime_event("task.state_reset", ...)` | 1 条"sink 注入时这 3 条不会再 print"；1 条"L306 触发时 JSONL 含 task.state_reset" |
-| G2 | `agent/confirm_handlers.py` 5 handler | `handle_*_confirmation` | 5 条 confirmation 决策**全部**不写 observer JSONL；用户决策不可追溯 | (a) handler 不能直接改 state；(b) handler 不能阻塞 transition；(c) `pending_*` 清理时机不变 | 在每个 handler 出口（return TransitionResult 之前）加 `log_runtime_event("confirmation.{plan/step/tool/user_input/feedback_intent}", event_payload={"intent": kind.value})` | 5 条"handler 调用一次后 JSONL 含对应 confirmation.* 事件"；5 条"handler 不改 state 字段集合"AST 守卫 |
-| G3 | `agent/tool_executor.py` 6 处 emit_display_event | (tool execution flow) | 工具调用次数/成功率在 observer JSONL 中不可统计 | (a) 不能改 tool 执行结果语义；(b) 不能改 emit_display_event 的 6 处现有签名；(c) `pending_tool` 清理时机不变 | 在 6 处 `emit_display_event(...)` 后追加 `log_runtime_event("tool.{success/failure}", event_payload={"tool_name": name})` | 1 条"成功调用一次后 JSONL 含 tool.success"；1 条"失败调用后 JSONL 含 tool.failure"；1 条"event_payload 不含 tool_input 原文（防隐私泄漏）" |
-| G4 | `agent/runtime_events.py` `RuntimeEventKind` vs `agent/display_events.RuntimeEvent` | 命名冲突 | 新人误读；grep 结果混淆 | 不能 rename 任何已 export 符号（v0.4 已 release） | 在两文件顶部 docstring 加交叉引用 + 明确"不是父子关系" | 1 条"两文件 docstring 互相引用"的 grep 测试 |
-| G5 | `agent/logger.log_event` (旧两参数) vs `agent/runtime_observer.log_event` (新关键字) | 同名不同签名 | grep 混在一起；新增调用方不知用哪个 | 不能删 legacy `agent/logger.py:8`（planner / checkpoint 仍依赖） | 在 `agent/logger.py:8` docstring 标注 "legacy；新代码用 runtime_observer.log_event"；同步在 `runtime_observer.log_event` docstring 标注与 legacy 区别 | 1 条"legacy logger.log_event 的调用点不增加"AST 守卫（白名单 `planner.py` / `checkpoint.py`） |
-| G6 | `agent/local_artifacts.py` ↔ observer | 当前无联动 | observer 看不到 inventory 触发记录 | 不能让 inventory 触发 fs 写；不能让 observer 二次读 sessions/runs 正文 | inventory CLI 出口处 `log_runtime_event("inventory.completed", event_payload={"kind": kind, "file_count": inv.file_count})` | 1 条"sessions inventory 跑完后 JSONL 含 inventory.completed"；1 条"event_payload 不含 sample_paths 原文" |
-| G7 | `core.py` L858 `DEBUG_PROTOCOL = False` | 16 处 protocol dump print 的总开关 | 任何人误改为 True 立刻回归 v0.4 之前的 stdout 污染 | (a) 模块级常量必须 False；(b) 环境变量 `MY_FIRST_AGENT_PROTOCOL_DUMP` 真值才生效 | 加 1 条防回归断言 | 1 条"`agent.core.DEBUG_PROTOCOL is False`" |
-| G8 | checkpoint ↔ observer JSONL | 无反向引用 | 给定 checkpoint 无法精确定位对应 JSONL 行 | 不能把 RuntimeEvent 流写进 checkpoint（durable state 不应膨胀） | （v0.6+ 评估）；本轮不动 | （延后） |
+> **Status update（v0.5 release prep）**：G1 / G2 / G4 / G5 / G7 已在 v0.5 各小步内
+> 落地或被防回归测试守卫；G3 / G6 / G8 仍为 v0.5.1+ backlog。详见每行 Status 列。
+> 新增 yellow flag **YF1 callback exception contract**（见本节末）。
+
+| Gap ID | 文件 | 函数 | 当前风险 | 必须保持的不变量 | 最小下一步 | 需要的测试 | Status |
+|---|---|---|---|---|---|---|---|
+| G1 | `agent/core.py` L306/L670/L789 | (chat 内 inline) | TUI 模式下 user-facing `[系统]` 提示完全不可见 | (a) 不能引入新 callback 协议；(b) observer JSONL 已记录的 (L670, L789) 不能丢失；(c) L306 "状态重置" 必须在 observer JSONL 留痕 | 把 3 处 print 包成 `RuntimeEvent`，通过 `on_runtime_event` 投递 | 1 条"sink 注入时这 3 条不会再 print"；1 条"L306 触发时 JSONL 含 task.state_reset" | ✅ 已修于 `00aa28c`（slice 7 D）：3 处 print 已路由到 RuntimeEvent sink + stdout fallback；事件类型常量见 `agent/display_events.py`；无 callback 路径仍可见 |
+| G2 | `agent/confirm_handlers.py` 5 handler | `handle_*_confirmation` | 5 条 confirmation 决策**全部**不写 observer JSONL；用户决策不可追溯 | (a) handler 不能直接改 state；(b) handler 不能阻塞 transition；(c) `pending_*` 清理时机不变 | 在每个 handler 出口（return TransitionResult 之前）加 `log_runtime_event("confirmation.{plan/step/tool/user_input/feedback_intent}", event_payload={"intent": kind.value})` | 5 条"handler 调用一次后 JSONL 含对应 confirmation.* 事件"；5 条"handler 不改 state 字段集合"AST 守卫 | ✅ 已修于 `17c5262`（slice 5）|
+| G3 | `agent/tool_executor.py` 6 处 emit_display_event | (tool execution flow) | 工具调用次数/成功率在 observer JSONL 中不可统计 | (a) 不能改 tool 执行结果语义；(b) 不能改 emit_display_event 的 6 处现有签名；(c) `pending_tool` 清理时机不变 | 在 6 处 `emit_display_event(...)` 后追加 `log_runtime_event("tool.{success/failure}", event_payload={"tool_name": name})` | 1 条"成功调用一次后 JSONL 含 tool.success"；1 条"失败调用后 JSONL 含 tool.failure"；1 条"event_payload 不含 tool_input 原文（防隐私泄漏）" | 🔵 v0.5.1+ backlog（未做）|
+| G4 | `agent/runtime_events.py` `RuntimeEventKind` vs `agent/display_events.RuntimeEvent` | 命名冲突 | 新人误读；grep 结果混淆 | 不能 rename 任何已 export 符号（v0.4 已 release） | 在两文件顶部 docstring 加交叉引用 + 明确"不是父子关系" | 1 条"两文件 docstring 互相引用"的 grep 测试 | ✅ 已守卫于 `d83ba78`（log_event signature 边界 docstring）+ `00aa28c`（display_events.py 新 EVENT_* 顶部块注释明确"不放 runtime_events.RuntimeEventKind 因为 G4"）|
+| G5 | `agent/logger.log_event` (旧两参数) vs `agent/runtime_observer.log_event` (新关键字) | 同名不同签名 | grep 混在一起；新增调用方不知用哪个 | 不能删 legacy `agent/logger.py:8`（planner / checkpoint 仍依赖） | 在 `agent/logger.py:8` docstring 标注 "legacy；新代码用 runtime_observer.log_event"；同步在 `runtime_observer.log_event` docstring 标注与 legacy 区别 | 1 条"legacy logger.log_event 的调用点不增加"AST 守卫（白名单 `planner.py` / `checkpoint.py`） | ✅ 已修于 `d83ba78`（slice 6）：两处 docstring 已加边界说明 + `tests/test_log_event_signature_collision.py` 4 条 inspect.signature 防回归 |
+| G6 | `agent/local_artifacts.py` ↔ observer | 当前无联动 | observer 看不到 inventory 触发记录 | 不能让 inventory 触发 fs 写；不能让 observer 二次读 sessions/runs 正文 | inventory CLI 出口处 `log_runtime_event("inventory.completed", event_payload={"kind": kind, "file_count": inv.file_count})` | 1 条"sessions inventory 跑完后 JSONL 含 inventory.completed"；1 条"event_payload 不含 sample_paths 原文" | 🔵 v0.5.1+ backlog（未做）|
+| G7 | `core.py` L858 `DEBUG_PROTOCOL = False` | 16 处 protocol dump print 的总开关 | 任何人误改为 True 立刻回归 v0.4 之前的 stdout 污染 | (a) 模块级常量必须 False；(b) 环境变量 `MY_FIRST_AGENT_PROTOCOL_DUMP` 真值才生效 | 加 1 条防回归断言 | 1 条"`agent.core.DEBUG_PROTOCOL is False`" | ✅ 已修于 `49b3816`（slice 7 B）：`tests/test_core_loop_terminal_prints.py` 含 DEBUG_PROTOCOL=False + env 双 guard 守卫 |
+| G8 | checkpoint ↔ observer JSONL | 无反向引用 | 给定 checkpoint 无法精确定位对应 JSONL 行 | 不能把 RuntimeEvent 流写进 checkpoint（durable state 不应膨胀） | （v0.6+ 评估）；本轮不动 | （延后） | 🔵 v0.6+ 延后 |
+
+### YF1 · callback exception contract（v0.5 release prep 新增 yellow flag）
+
+- **来源**：v0.5.0 tag readiness 评估发现。
+- **问题描述**：`agent/core.py` L306 / L670 / L789（slice 7 D 新增）以及 `_emit_runtime_event` 闭包内 L335 / L342 / L348（v0.4 既有）共 6 处采用 `if cb is not None: cb(_evt)` 直接调用。callback 内 `raise` 会沿调用栈冒到 `chat()` 调用方，可能干扰 `state.reset_task` / `clear_checkpoint` / 紧邻的 `log_runtime_event(...)` observer 写入。
+- **判定**：**yellow flag**，**非** v0.5.0 tag blocker。
+  - 默认 simple CLI 与 `--shell` 不传 callback → stdout fallback 路径不受影响；
+  - v0.4 已接受同样契约（slice 7 D 没把 contract 变弱，只把触达面从 3 处扩到 6 处）；
+  - 历史裸 print 同样可能在 stdout 关闭场景下 raise，对称性未改变；
+  - 测试 867/3 全绿，主路径 / fallback 路径均覆盖。
+- **v0.5.1 候选最小修复**：抽 `_safe_invoke_runtime_event_sink(sink, evt)` helper，try/except 包住 callback；except 落 stdout fallback + JSONL `event_type="runtime_event_sink.failed"`。**不**改任何 callback 签名、**不**新增 dataclass、**不**接 TUI。
+- **v0.5.1 候选最小测试**：传入 raising callback，断言 `state.reset_task()` / `clear_checkpoint` / `log_runtime_event` JSONL 写入仍发生、return value 不变。
 
 ## 9. v0.5 Candidate Slices
 

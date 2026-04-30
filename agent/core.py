@@ -10,10 +10,13 @@ from agent.display_events import (
     RuntimeEventSink,
     assistant_delta,
     control_message,
+    loop_max_iterations_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
+    state_inconsistency_reset_event,
     tool_requested,
+    unknown_stop_reason_event,
 )
 from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
@@ -303,9 +306,17 @@ def chat(
         and state.task.current_plan is None
     )
     if _inconsistent:
-        print(
-            f"[系统] 检测到不一致状态（status={state.task.status}, plan=None），已重置。"
-        )
+        # v0.5 第七小步 D · L306 print 迁移到 RuntimeEvent。
+        # 优先走调用方传入的 ``on_runtime_event`` callback；callback 缺失时
+        # 回退到 stdout，保证 simple CLI 用户仍能看到诊断（characterization
+        # baseline 在 tests/test_core_loop_terminal_prints.py 钉死双向行为）。
+        # 注意：本处早于 ``_emit_runtime_event`` 闭包定义、早于 ``turn_state``
+        # 构造，所以不能复用闭包；只能直接拿 chat() 参数。
+        _evt = state_inconsistency_reset_event(state.task.status)
+        if on_runtime_event is not None:
+            on_runtime_event(_evt)
+        else:
+            print(render_runtime_event_for_cli(_evt))
         state.reset_task()
 
     # 注意：不要在这里无条件压缩历史。
@@ -667,9 +678,17 @@ def _run_main_loop(
                 },
                 event_channel="loop",
             )
-            print(
-                f"\n[系统] 循环次数超过上限 {loop_ctx.max_loop_iterations}，强制停止。"
-            )
+            # v0.5 第七小步 D · L670 print 迁移到 RuntimeEvent。
+            # 在 ``_run_main_loop`` 内部通过 ``turn_state.on_runtime_event``
+            # 投递；callback 缺失时回退 stdout，保留 simple CLI 诊断可见性。
+            # 注意：本事件**只**替换原 print，**不**改：
+            #   - 上方 ``log_runtime_event("loop.guard_triggered", ...)`` observer 写入；
+            #   - 下方 ``clear_checkpoint`` / ``state.reset_task`` / return value。
+            _evt = loop_max_iterations_event(loop_ctx.max_loop_iterations)
+            if turn_state.on_runtime_event is not None:
+                turn_state.on_runtime_event(_evt)
+            else:
+                print(f"\n{render_runtime_event_for_cli(_evt)}")
             from agent.checkpoint import clear_checkpoint as _clear_checkpoint
             _clear_checkpoint()
             state.reset_task()
@@ -766,7 +785,16 @@ def _run_main_loop(
         # B2 契约：诊断信息用户必须能看到，不能用 [DEBUG] 前缀（会被
         # main.DEBUG_OUTPUT_PREFIXES 兜底过滤吞掉）。详见
         # docs/CLI_OUTPUT_CONTRACT.md "允许直接 print 的 prefix 白名单"。
-        print(f"[系统] 未知的 stop_reason: {response.stop_reason}")
+        # v0.5 第七小步 D · L769 print 迁移到 RuntimeEvent。
+        # 优先 ``turn_state.on_runtime_event``；callback 缺失回退 stdout
+        # 保留 simple CLI 诊断可见性。**只**替换 print，**不**改下方
+        # ``log_runtime_event("loop.stop", reason_for_stop="unknown_stop_reason")``
+        # observer 写入与 return value。
+        _evt = unknown_stop_reason_event(response.stop_reason)
+        if turn_state.on_runtime_event is not None:
+            turn_state.on_runtime_event(_evt)
+        else:
+            print(render_runtime_event_for_cli(_evt))
         log_runtime_event(
             "loop.stop",
             event_source="runtime",

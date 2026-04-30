@@ -28,6 +28,25 @@ EVENT_TOOL_RESULT_VISIBLE = "tool.result_visible"
 # 不写 checkpoint，也不影响 tool_use_id 配对或 Anthropic API messages 投影。
 # 详见 docs/P1_TOPIC_SWITCH_PLAN.md §4.4。
 EVENT_FEEDBACK_INTENT_REQUESTED = "feedback.intent_requested"
+# v0.5 第七小步 D · 三类 user-facing terminal diagnostic 事件
+# ───────────────────────────────────────────────────────────────────
+# 这三个事件类型对应 agent/core.py L306 / L670 / L769 三处历史裸 print
+# 的迁移目标。它们是 **Runtime → UI 用户可见诊断**，**不**是：
+#   - DisplayEvent（DisplayEvent 是工具/控制结构化 payload，本组只承载文本）
+#   - runtime_events.RuntimeEventKind 枚举（那是 runtime_observer JSONL 证据
+#     入口，与本组同名不同概念——见 docs/V0_5_OBSERVER_AUDIT.md G4 命名碰撞）
+#   - checkpoint / messages / Anthropic API 内容（永不持久化、永不投递给模型）
+#
+# 为什么独立命名而非沿用 EVENT_CONTROL_MESSAGE：
+#   未来 TUI / IDE 插件 / 远程前端需要按事件类别决定渲染样式（severity
+#   = error / warning / info），把 "状态自愈" "循环兜底" "协议未知" 三种
+#   不同语义压成同一个 control.message 会让 UI 失去分类能力。
+#
+# v0.5 audit doc §G1 真实 bug：未独立命名前，仅传 on_runtime_event 的前端
+# 完全收不到这 3 条诊断（裸 print 走 stdout 被 sink 接管后丢失）。
+EVENT_STATE_INCONSISTENCY_RESET = "control.state_inconsistency_reset"
+EVENT_LOOP_MAX_ITERATIONS = "loop.max_iterations_reached"
+EVENT_UNKNOWN_STOP_REASON = "loop.unknown_stop_reason"
 
 
 @dataclass(slots=True, frozen=True)
@@ -148,6 +167,62 @@ def control_message(text: str, *, metadata: dict[str, Any] | None = None) -> Run
         event_type=EVENT_CONTROL_MESSAGE,
         text=text,
         metadata=dict(metadata or {}),
+    )
+
+
+def state_inconsistency_reset_event(status: str) -> RuntimeEvent:
+    """构造"状态不一致已自愈"诊断事件（agent/core.py L306 迁移目标）。
+
+    场景：``task.status`` 要求有 plan 但 ``current_plan is None`` →
+    ``state.reset_task()`` 之前先发本事件。
+
+    职责：仅承载用户可见诊断文本 + ``status`` 元数据；不写 checkpoint，
+    不进 messages，不影响 ``state.reset_task()`` 调用时机。
+
+    metadata 包含 ``status``（被自愈前的状态）方便 UI 在不同 status 下
+    决定提示样式；不放任何内部对象引用，避免泄漏到持久层。
+    """
+
+    return RuntimeEvent(
+        event_type=EVENT_STATE_INCONSISTENCY_RESET,
+        text=f"[系统] 检测到不一致状态（status={status}, plan=None），已重置。",
+        metadata={"status": status},
+    )
+
+
+def loop_max_iterations_event(limit: int) -> RuntimeEvent:
+    """构造"主循环触发上限"诊断事件（agent/core.py L670 迁移目标）。
+
+    场景：``state.task.loop_iterations > loop_ctx.max_loop_iterations`` →
+    ``clear_checkpoint`` + ``state.reset_task`` 之前先发本事件。
+
+    职责：用户可见诊断；不影响 reset / clear_checkpoint 时机。
+    metadata 含 ``limit``，便于未来分析"哪种任务总在 N 步触发兜底"。
+    """
+
+    return RuntimeEvent(
+        event_type=EVENT_LOOP_MAX_ITERATIONS,
+        text=f"[系统] 循环次数超过上限 {limit}，强制停止。",
+        metadata={"limit": limit},
+    )
+
+
+def unknown_stop_reason_event(stop_reason: str) -> RuntimeEvent:
+    """构造"未知 stop_reason"诊断事件（agent/core.py L769 迁移目标）。
+
+    场景：Anthropic SDK 协议漂移返回 ``end_turn / tool_use / max_tokens``
+    之外的值。由 ``classify_model_output`` 落入 ``ModelOutputKind.UNKNOWN``
+    分支后发本事件。
+
+    职责：诊断协议异常；不改 messages、不改 tool 配对（L769 后还有
+    log_runtime_event observer 写入与 return value，本事件只替换 print）。
+    metadata 含 ``stop_reason`` 原值，便于追踪 SDK 升级。
+    """
+
+    return RuntimeEvent(
+        event_type=EVENT_UNKNOWN_STOP_REASON,
+        text=f"[系统] 未知的 stop_reason: {stop_reason}",
+        metadata={"stop_reason": stop_reason},
     )
 
 

@@ -1,331 +1,434 @@
-# my-first-agent 演进路线图
+# my-first-agent Canonical Roadmap
 
-> **本文件目的**：用阶段目标 + 毕业标准 + 非目标 + 停止规则，把"该做什么、不该做什么、什么时候停"讲清楚。
+> **本文件目的**：以 **Agent Loop / Runtime** 为长期主干，按 **8 阶段顺序**
+> 定义"该做什么、不该做什么、什么时候停"。
 >
-> **不是**：22 个 block 的待办清单（旧版结构已归档到 `docs/ROADMAP_LEGACY.md`）。
+> **本文件是 canonical**：与本文件的 8 阶段顺序冲突的旧版"按版本号
+> (v0.1/v0.2/v0.3/v1.0) 切片"内容仍保留在本文件后半部分作为**历史毕业证据**
+> 与**版本映射表**，但**不**作为后续执行的真值源。
 >
 > **不是**：架构解读（看 `docs/ARCHITECTURE.md`）。
+> **不是**：22 个 block 的待办清单（旧 22-block 结构归档在 `docs/ROADMAP_LEGACY.md`）。
 
 ---
 
-## TL;DR
+## North Star
 
-| 版本 | 主题 | 一句话 |
-|---|---|---|
-| **v0.1** | 最小 Agent Runtime 跑起来 | 只验"能跑"，不验"优雅"。当前阶段。 |
-| **v0.2** | 把 v0.1 粗糙能力工程化 | Runtime 状态机、输入语义、工具体系、checkpoint 恢复、错误恢复、基础权限、**基础 TUI/CLI UX 实现**（Textual backend 完整实现 + 状态面板 + 确认流 UI）。|
-| v0.3 | Skill 化 + 能力注册 + observer/eval + **高级 TUI** | Skill 子系统正式化、工具/skill 文档规范、observer/eval 增强、多面板/timeline/event viewer/Esc cancel/paste burst 等高级 UX。 |
-| v1.0 | 稳定可扩展的学习型 Agent 框架 | sub-agent / 多 Agent 协作 / 插件化 / 长期记忆 / 正式安全围栏 / 性能 SLA。 |
+my-first-agent 的长期形态是 **本地、自用优先、未来可下载后自行配置的一键式
+Agent Runtime**。
 
-| **当前阶段：v0.6.x readiness（TUI boundary safety net）**。v0.1 ~ v0.5.1 已 tag 并 release，详见下方 *Current status snapshot*；v0.6 主线**不是**直接实现完整 TUI，而是先把 TUI / display / input 边界用 characterization tests 钉成可校验不变量。
-**v0.1 结果**：最简版本 simple CLI 已跑通端到端 README -> `summary.md` 真实 smoke，CLI 输出可读到能看清 Agent 在做什么。后续不要把 slash command / 复杂 topic switch / LLM 意图分类 / 完整 Textual TUI / Skill 化 / 安全围栏 / observer 等高级能力回写成 v0.1 已完成。
+- ✅ **本地工具产品化**：单机/工作站可装、可配、可关、可审计
+- ❌ **不是** SaaS
+- ❌ **不是** Web UI
+- ❌ **不是** 多用户平台
+- ❌ **不是** 云端 agent 服务
+- ❌ **不是** 复杂插件市场或 model extension/plugin framework
 
----
+**最核心难点 = Agent Loop / Runtime**（state machine / dispatch / checkpoint /
+tool execution / context boundary）。
 
-## Current status snapshot
+后续 **TUI / Memory / sub-agent / Skill / Observability / Tool optimization /
+Customization** 都必须**围绕 Agent Loop**；任何上层能力**不得反向污染 runtime
+core**。
 
-> 本节用于把 ROADMAP 顶层 TL;DR 与真实 git milestones 对齐。**保守口径**：
-> 列"已 tag"只代表对应 commit 已存在 annotated tag 与 release notes，**不**代表
-> 该版本主题下的所有能力都已成熟；任何标注 ✅ 的版本背后仍有大量 v0.6.x +
-> 未来阶段的工程化欠账。
->
-> 证据来源：本仓库 `git tag --list` + `RELEASE_NOTES_v0.X.md` + `docs/audits/` + commit log。
->
-> **本节不重写 v0.1 ~ v0.3 的毕业标准章节**（仍以下文 v0.1 章节 / `V0_2_PLANNING.md` /
-> `V0_3_PLANNING.md` 为准）；它只是补一张事实表，让读者不会误以为项目仍停在
-> v0.1 毕业边界。
-
-| 版本 | 状态 | 简述 |
-|---|---|---|
-| v0.1 | ✅ Tagged（无 v0.1 tag，但下文毕业标准全 ✅） | 最小 Agent Runtime 端到端跑通；CLI/TUI 输出契约冻结 |
-| v0.2.0 | ✅ Tagged | Runtime/CLI safety/checkpoint resume/tool boundary/policy denial readiness（详见 `RELEASE_NOTES_v0.2.md`） |
-| v0.3.0 / v0.3.1 | ✅ Tagged | Usability track：cross-layer guards、local-first trial baseline、basic CLI shell、health maintenance、observer log readability（详见 `RELEASE_NOTES_v0.3.md` / `docs/V0_3_PLANNING.md`） |
-| v0.4.0 | ✅ Tagged | Health maintenance dry-run / archive、log size warnings、checkpoint runtime leak guard、loop context extraction（详见 `RELEASE_NOTES_v0.4.md` / `docs/V0_4_PLANNING.md`） |
-| v0.5.0 | ✅ Tagged（commit `32d4ca1`） | Runtime boundary and observer evidence milestone：observer signature guard、terminal print baseline、confirmation evidence events、sessions read-only inventory（详见 `RELEASE_NOTES_v0.5.md` / `docs/V0_5_OBSERVER_AUDIT.md`） |
-| v0.5.1 | ✅ Tagged（annotated `ce65bdca` → commit `240308b`） | Runtime boundary evidence hardening：display callback failure isolation、pending confirmation dispatch helper、model output dispatch helper、resume pending dispatch tests + audit doc（详见 `RELEASE_NOTES_v0.5.1.md` / `docs/audits/v0.5.1_checkpoint_resume_audit.md`） |
-| v0.6.0 | ✅ Pushed（commit `22b390c`，**docs-only**，未 tag） | TUI scope gap audit：盘点 textual.py / simple.py 现状、确认 TUI 不是从零造、给出 v0.6.x slice 策略；**不是 TUI implementation**（详见 `docs/audits/v0.6_tui_scope_gap_audit.md`） |
-| v0.6.1 | 🟡 Implemented in git，未 tag、未 release | Three-layer TUI/Display/Input boundary characterization tests：Group A/E (afd82f5) + Group C (11826cd) + Group D (08bfbe7)；19 条新增 tests；pytest 基线 920 passed / 3 xfailed；**不是 TUI implementation** |
-| v0.6.x next | 📋 Planned | v0.6.1 readiness/release notes、xfail inventory + de-xfail plan、v0.6.2 TUI MVP planning、之后再进入真正 TUI implementation |
-| v1.0 | 📋 长期目标 | sub-agent / 多 Agent 协作 / 插件化 / 长期记忆 / 正式安全围栏 / 性能 SLA |
-
-### v0.6 direction
-
-v0.6 **主线不是直接实现完整 TUI**，而是先建立 TUI readiness / boundary safety net，
-让后续真正的 TUI 重写工作能在已被测试钉死的边界上安全进行。包括：
-
-1. **dependency boundary**：textual / simple input backend 不反向 import runtime core / checkpoint / tool_executor / handlers 等
-2. **input / Ask User / free-text boundary**：UserInputEnvelope.raw_text 是 frozen 自由文本字段；request user input 不退化为打印或固定枚举
-3. **display event boundary**：DisplayEvent / RuntimeEvent frozen+slots、display_events.py 是叶子模块、render 出口只产 `str`
-4. **no sensitive read boundary**：源码字面扫描确保 `.env` / `agent_log.jsonl` / `sessions/` / `runs/` 不被 TUI/input/display 路径硬编码引用
-5. 在以上四道边界稳定后，再进入 TUI MVP（Textual backend 状态面板 / 确认流 UI 等）的实际实现
-
-### v0.6.1 scope
-
-v0.6.1 已完成的是 **tests / readiness**，**不是**完整 TUI：
-
-- **Group A/E**（`tests/test_tui_dependency_boundaries.py`）：AST import dependency boundary（白名单 + 黑名单）+ 源码字面扫描敏感路径
-- **Group C**（`tests/test_input_backend_user_contract.py`）：UserInputEnvelope frozen `raw_text` + `__post_init__` 主动校验 + Callable 委托基线 + 工厂函数引用强制
-- **Group D**（`tests/test_display_event_contract.py`）：DisplayEvent/RuntimeEvent frozen+slots + 字段集合 baseline + display_events.py 叶子模块 + EVENT_* 常量 baseline + render→`str`
-- pytest 基线 **920 passed / 3 xfailed**（来源：v0.6.1 Group D 完成后的真实运行；不是本轮重新跑的）
-- **3 xfailed 仍存在，未在 v0.6.1 解决**
-
-### What v0.6.1 is NOT
-
-- ❌ 不是完整 TUI implementation
-- ❌ 没有重构 runtime core（agent/core.py 未改）
-- ❌ 没有解决 3 xfailed
-- ❌ 没有 checkpoint/resume production rewrite
-- ❌ 没有 StateSnapshot
-- ❌ 没有 v0.6.1 tag
-- ❌ 没有 v0.6.1 release notes
-
-### Suggested next steps（不是承诺）
-
-1. v0.6.1 readiness / release notes 规划（先规划再决定是否 tag）
-2. 3 个 strict xfail 的只读 inventory + de-xfail plan
-3. v0.6.2 TUI MVP planning（继续 TUI readiness slice 或开始 MVP 实现）
-4. 在以上完成后，才进入真正 TUI implementation
+> **诚实声明**：当前 git 仓库已有 v0.5.1 等多个 tag、`agent/skills/` 已有原型代码、
+> `memory/` 目录已有数据文件，**这些不等于对应 stage 已完成**——它们只是早期
+> 阶段（Stage 0/1）跑出的副产物，正式毕业以本文件 Stage 3-8 的毕业标准为准。
 
 ---
+
+## TL;DR — 8 stage canonical
+
+| Stage | 主题 | 状态 | 主要承载版本 |
+|---|---|---|---|
+| **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
+| **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
+| **2** | **TUI interaction layer**（**当前阶段**） | 🟡 boundary safety net 已立，MVP 未做 | v0.6.x |
+| **3** | Memory system | ⏳ 未启动 | 后续 |
+| **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
+| **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
+| **6** | Observability foundation | 🟡 持续打底（v0.5 已开始） | 跨阶段 |
+| **7** | Tool system optimization | 🟡 仅最小集（v0.2 policy） | 靠后 |
+| **8** | Customization / local productization | ⏳ 未启动 | 后期 |
 
 **全局停止规则**：
-- 任何"我觉得这块还差一点"的改动，先回答："这属于当前阶段毕业标准的哪一条？"
-- 答不出 → **推迟到对应版本 backlog**，不在当前阶段做。
-- v0.1 阶段**禁止**新增 awaiting 子状态 / 新增 RuntimeEvent kind / 新工具 / 新 skill；只允许：修 bug、补缺失文档、补缺失基础测试、写 v0.1 冻结契约。
+- 任何"我觉得这块该做"的改动，先回答："这属于哪个 Stage 的毕业标准？"
+- 答不出 → **推迟到对应 Stage backlog**，不在当前 Stage 做。
+- **当前 Stage 2 未收口前，禁止启动 Stage 3/4/5 的实质实现**（Stage 6/7 可作必要补丁）。
 
 ---
 
-## 当前真实完成度（保守评估）
+## Current Position
 
-> ⚠️ **保守口径**：列出的"已具备"只表示"基础链路打通能跑端到端任务"，**不**代表"已工程化、可生产"。任何标注 ✅ 的能力背后都还有大量 v0.2/v0.3 工程化欠账。
+> **当前处于 Stage 2: TUI interaction layer (v0.6.x)。**
 
-| 能力 | 真实完成度 | 备注 |
+- ✅ HEAD `bdf0b9f` 与 `origin/main` 同步（ahead/behind 0/0）
+- ✅ v0.5.1 已 tag（annotated `ce65bdca` → commit `240308b`）；v0.5.0 → `32d4ca1` 不变
+- ✅ v0.6.1 已实现并 push（commits `afd82f5` + `11826cd` + `08bfbe7` + `bdf0b9f`）
+- 🟡 **v0.6.1 未 tag / 未 release**
+- ✅ v0.6.1 完成 **Group A/E**（dependency boundary 7 tests）+ **Group C**（input contract 7 tests）+ **Group D**（display event contract 5 tests）= **19 characterization tests**
+- 🟡 **当前仍有 3 xfailed**：
+  1. `tests/test_hardcore_round2.py::test_user_switches_topic_mid_task` — Stage 1/2 输入语义
+  2. `tests/test_input_backends_textual.py::test_textual_shell_escape_can_cancel_running_generation` — Stage 1 cancel + Stage 2 TUI Esc
+  3. `tests/test_real_cli_regressions.py::test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent` — Stage 2 paste burst
+- ❌ **当前还没有正式 TUI MVP**
+- ❌ 当前还没进入 Stage 3 Memory
+- ❌ 当前还没进入 Stage 4 sub-agent
+- ❌ 当前还没进入 Stage 5 Skill 正式化
+
+> pytest 基线 **920 passed / 3 xfailed** — *from the v0.6.1 Group D completion
+> run; not re-run in this docs-only commit.*
+
+---
+
+## Final Staged Roadmap
+
+### Stage 0 · Basic Agent Loop / early baseline
+
+**主题**：让最简版本能跑端到端任务。
+
+**主要承载**：v0.1（无 tag，毕业标准 ✅，详见 `docs/V0_1_GRADUATION_REPORT.md`）
+
+**已具备**：
+- end-to-end loop（`agent/core.py` chat() + planner）
+- 12 个工具 + tool_use/tool_result 链路
+- 最小确认流（plan + tool 确认）
+- checkpoint 雏形（roundtrip 已通）
+- CLI 输出契约（`docs/CLI_OUTPUT_CONTRACT.md` 已冻结）
+
+**已知限制**：skill / 安全围栏 / observer 高级化 / TUI MVP / Memory / sub-agent 全是后话。
+
+---
+
+### Stage 1 · Agent Loop / Runtime hardening
+
+**主题**：把 Stage 0 跑通的能力**工程化**：边界、转移、恢复、可观察。
+
+**主要承载**：v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1
+
+**毕业标准（必须全部 ✅ 才能宣布 Stage 1 收口）**：
+
+| # | 项 | 当前 | 备注 |
+|---|---|---|---|
+| 1 | model output classification | ✅ | `classify_model_output` 4-value vocabulary（v0.5.1 钉死） |
+| 2 | RuntimeEvent | ✅ | `agent/runtime_events.py` 572 行 |
+| 3 | TransitionResult | ✅ | v0.4 落地 |
+| 4 | state transitions | ✅ | 4 类 confirmation 走 TransitionResult（v0.4） |
+| 5 | pending confirmation dispatch | ✅ | `_dispatch_pending_confirmation` 5 状态分发（v0.5.1） |
+| 6 | pending user input | ✅ | feedback_intent transition 已就位 |
+| 7 | pending tool | ✅ | ToolSuccess/ToolFailure transition（v0.4） |
+| 8 | ToolSuccess / ToolFailure | ✅ | v0.4 |
+| 9 | checkpoint / resume | 🟡 | leak guard ✅（v0.4）+ resume → pending dispatch bridge ✅（v0.5.1）；schema 版本管理 / 损坏自愈 / 跨版本兼容**未做** |
+| 10 | context compression | ❌ | **未做** — Stage 1 残留 |
+| 11 | context builder | 🟡 | 已存在；未做压缩/caching |
+| 12 | prompt builder | 🟡 | 已存在；未做 prompt caching |
+| 13 | runtime observer / logging | ✅ | v0.5 readability + confirmation evidence + terminal diagnostics → runtime events |
+
+**当前完成度**：约 **80%**。第 9/10/11/12 项是 Stage 1 残留，**不阻塞** Stage 2，
+但属于 Stage 1 backlog，**未来必须回补**才能宣布 Stage 1 正式毕业。
+
+---
+
+### Stage 2 · TUI interaction layer ⭐**当前阶段**
+
+**主题**：在不污染 runtime core 的前提下，把 textual.py / simple.py 从"已可用
+但未被测试钉死"演进成"边界硬化 + TUI MVP 子集落地（解 Stage 1/2 历史 xfail）+
+收口 release"。
+
+**主要承载**：v0.6.x（v0.6.0 docs audit + v0.6.1 三层 boundary safety net + v0.6.x next）
+
+**毕业标准（必须全部 ✅ 才能宣布 Stage 2 收口、才能进入 Stage 3 Memory）**：
+
+| # | 项 | 当前 | 备注 |
+|---|---|---|---|
+| 1 | textual / simple input backend 已存在 | ✅ | textual.py 549 + simple.py 129 |
+| 2 | Ask User / request user input | 🟡 | 项目模式必须每轮触发；TUI 中 Ask User UI **未明确实现** |
+| 3 | Other / free-text 路径 | 🟡 | v0.6.0 audit §5 风险 5 已点名；characterization test **未补** |
+| 4 | input backend 不 mutate runtime state | ✅ | v0.6.1 Group A/E + C 已钉 |
+| 5 | input backend 不绕过 confirmation handlers | 🟡 | v0.6.0 audit §5 风险 4；characterization test **未补**（计划 v0.6.4） |
+| 6 | display event contract | ✅ | v0.6.1 Group D 已钉 |
+| 7 | display layer 不做 runtime decision | ✅ | v0.6.1 Group A/E AST baseline |
+| 8 | no sensitive read | ✅ | v0.6.1 Group A/E 字面扫描；word-boundary regex 防 `.envelope` 假阳性 |
+| 9 | **current 3 xfailed inventory** | ❌ | **未做**（计划 v0.6.x next） |
+| 10 | **TUI MVP planning** | ❌ | **未做** |
+| 11 | **TUI MVP minimum implementation** | ❌ | **未做** — 目标 = 解 paste burst + Esc cancel + Ask User UI 至少 1 项 |
+| 12 | **TUI MVP regression tests** | ❌ | **未做** |
+
+**口径硬约束**：
+- **只叫 TUI，不叫 TOI**
+- **TUI 不是 Web UI**
+- **Stage 2 收口前不进入 Stage 3 Memory**
+
+---
+
+### Stage 3 · Memory system
+
+**主题**：跨会话语义沉淀（与 Stage 1 的 checkpoint 是不同关注点）。
+
+**毕业标准**：
+- session summary（每会话结束的摘要）
+- project memory（项目级稳定知识）
+- user profile memory（用户偏好；现 `memory/profile.json` 仅是数据文件，无 injection 实现）
+- memory storage（持久化策略）
+- **memory injection boundary**（注入到 prompt 的边界，必须经 prompt_builder）
+- memory update policy（什么时候写、谁能写）
+- explicit approval / forget（用户可显式删除 / 忘记）
+- memory compression（避免无限增长）
+- memory safety tests（注入不污染 runtime / 不绕过 permission）
+- **memory vs checkpoint vs runtime state 的清晰边界**
+
+**口径硬约束**：
+- **Memory 优先于 sub-agent**
+- **Memory ≠ checkpoint**：checkpoint 是 runtime state 持久化（崩溃恢复）；
+  Memory 是跨会话**语义沉淀**（个性化、项目知识）
+- **Stage 2 未收口前不启动 Stage 3 实质实现**
+
+**现状**：`memory/` 目录已有 profile.json / episodes / rules / checkpoint.json 数据文件，
+**但未见对应注入/审批/遗忘代码** → 接近从零。
+
+---
+
+### Stage 4 · Sub-agent / Handoff
+
+**主题**：在 Stage 3 Memory 收口后，引入特化子 Agent。
+
+**毕业标准**：
+- sub-agent registry（注册表）
+- sub-agent definition（定义 schema）
+- **agent-as-tool first**（先把子 Agent 当工具调用）
+- handoff later（任务交接是更晚的事）
+- input/output schema（结构化）
+- result merge（合并到主 Agent context）
+- **main agent keeps final control**（主 Agent 始终是决策者）
+- sub-agent **不能绕过** runtime / permission / checkpoint
+- tests
+
+**口径硬约束**：
+- **不要一开始做复杂 autonomous multi-agent**
+- **先做 main agent calls specialist as tool**
+- **Stage 3 未收口前不启动 Stage 4 实质实现**
+
+---
+
+### Stage 5 · Skill system
+
+**主题**：把 Stage 0 的 skill 原型正式化。
+
+**毕业标准**：
+- skills directory（已有 `agent/skills/`）
+- SKILL.md（每个 skill 的契约）
+- skill discovery（发现机制）
+- skill activation（激活语义）
+- progressive disclosure（按需暴露能力）
+- skill-specific instructions（per-skill prompt）
+- **skill / tool 边界**（skill 是高层组合，tool 是原子能力）
+- tests
+
+**口径硬约束**：
+- **Skill 较轻**，不是当前最难主线
+- **Skill 可以在 Memory/sub-agent 后做**，或作为轻量能力穿插（即可在 Stage 3/4
+  期间补少量必要的 skill/SKILL.md 标准化，但不做 installer/safety 重做）
+
+**现状**：`agent/skills/{installer,loader,parser,registry,safety}.py` 已存在但是
+**原型**；evil-skill 测试目录暴露 safety 仍在原型期 → Stage 5 主战场。
+
+---
+
+### Stage 6 · Observability foundation
+
+**主题**：在 Stage 1-5 中**持续打底**，最终形成可本地查询的 trace。
+
+**毕业标准**：
+- event log schema（已开始：`agent/runtime_events.py` + observer evidence events）
+- run id / trace id / step id
+- model call span
+- tool call span
+- state transition span
+- checkpoint span
+- memory update span（待 Stage 3）
+- sub-agent span（待 Stage 4）
+- **local-only trace file**
+- **no dashboard yet**
+
+**口径硬约束**：
+- observability 底子要**持续打**（v0.5 已开始：observer signature guard、
+  confirmation evidence、terminal diagnostics → runtime events）
+- **dashboard / panel 是后期**，不是当前
+
+---
+
+### Stage 7 · Tool system optimization
+
+**主题**：靠后的 tool 工程化。
+
+**毕业标准**：
+- tool registry（已有最小版）
+- tool schema cleanup
+- permission policy（v0.2 已有 policy denial / unknown tool 分类 / workspace write block 最小集）
+- structured tool result
+- tool result truncation（长输出截断）
+- tool error taxonomy（结构化错误）
+- observation formatting
+- existing tool cleanup（12 个现有工具的接口规范）
+- tests（每个 tool 的单元测试）
+
+**口径硬约束**：
+- **靠后**，**除非**阻塞前面阶段
+- 当前最小集（policy denial 等）已够 Stage 0-2 用，不必提前
+
+---
+
+### Stage 8 · Customization / local productization
+
+**主题**：本地工具产品化收尾。
+
+**毕业标准**：
+- local config（用户/项目两级）
+- project profile
+- user preferences
+- model provider config
+- safety policy
+- per-project behavior
+- module toggles（Stage 3-7 各能力可独立开关）
+- install / setup path（一键安装）
+
+**口径硬约束**：
+- 这是**本地工具产品化**，**不是** SaaS / Web UI
+
+---
+
+## Explicit Non-goals
+
+- ❌ Web UI
+- ❌ SaaS
+- ❌ 多用户平台
+- ❌ 云端 agent 服务
+- ❌ 复杂插件市场
+- ❌ model extension / plugin framework 作为主线
+- ❌ dashboard（至少当前不做）
+- ❌ RAG / vector DB（**除非未来 Memory/Search 专项明确需要**）
+- ❌ 为写文档而写文档
+- ❌ 因为 xfail 存在就乱解
+- ❌ 为了 UI 好看污染 runtime core
+- ❌ **不再使用 TOI 这个词**
+
+---
+
+## Anti-drift Rules
+
+后续每一轮工作必须遵守：
+
+- 每一轮先说**当前 stage**（Stage 0-8 哪一个）
+- 每一轮先说 **action type**（planning / coding / audit / docs / release）
+- 每一轮必须说明**为什么是 Roadmap 下一步**（指向具体 Stage 毕业标准的某一条）
+- **docs 只能服务于 gate**，不能变成默认动作；**docs-only 连续 ≥ 2 commit 后
+  必须切换到非 docs**（避免 doc drift / planning inflation）
+- coding 必须有 **tests 或 characterization tests** 保护
+- release / tag 必须在 audit PASS 后；**tag 必须用户明确授权**
+- **xfail 必须先 inventory 再处理**，不顺手解
+- **TUI 不能污染 runtime core**（AST baseline 持续守护，见 v0.6.1 Group A/E）
+- **Memory ≠ checkpoint**
+- **sub-agent 不能绕过 main runtime**
+- **Skill 不提前做重**
+- **Tool optimization 不提前**
+- **Web UI 永不进入路线**，除非用户未来明确改方向
+- **不再使用 TOI 这个词**
+
+---
+
+## Near-term Execution Plan
+
+接下来 6 个最小 slice，按顺序执行（每个 slice 单独 commit + 单独 audit）：
+
+| # | Slice | Stage | Action type | Expected output | Quality gate | Stop condition |
+|---|---|---|---|---|---|---|
+| 1 | **Audit this canonical roadmap commit** | meta | audit | docs-only / 单文件 / 无 TOI / 无 Web UI 路线 / Stage 顺序符合 canonical | working tree clean；只动 `docs/ROADMAP.md` | audit 输出 PASS/FAIL + ask_user |
+| 2 | **Push canonical roadmap commit after audit PASS** | meta | release | `git push origin main` | ahead/behind 0/0；origin/main 包含本 commit；v0.5.0/v0.5.1 tag 不变 | push 成功 + ask_user |
+| 3 | **v0.6 xfail inventory (read-only audit)** | Stage 2 | audit | 3 xfail 的 root cause / 解锁条件 / 推荐顺序（输出在对话，不写文件） | working tree clean | 输出 + ask_user |
+| 4 | **v0.6.2 TUI MVP planning** | Stage 2 | planning | TUI MVP scope（解哪 1 个 xfail + Ask User UI 最小集），输出在对话 | working tree clean | 输出 + ask_user |
+| 5 | **v0.6.2 TUI MVP characterization tests** | Stage 2 | coding (tests) | tests-only commit，钉死 TUI MVP 入口边界 | ruff clean / pytest +N passed / 无新 xfail | commit + audit + push |
+| 6 | **v0.6.2 TUI MVP minimum implementation** | Stage 2 | coding (production + tests) | 解 1 个最小 xfail 或落地 1 项 Ask User UI | ruff / pytest 减 1 xf 或 +N passed / 无新 xf | commit + audit + push |
+
+**严禁打包**：把上述任意两个 slice 合并到一个 commit。
+
+> Slice 4 完成后，再决定是否在 Slice 5/6 之前插入 v0.6.1 readiness/release notes
+> （仅在决定给 v0.6.1 tag 时才做；否则跳过）。
+
+---
+
+## 历史毕业证据 / 版本映射
+
+> 以下章节是**历史毕业证据**与**旧版本号 → 新 Stage 映射**，**不**作为后续执行的
+> 真值源。新工作以前文 8 阶段毕业标准为准。
+
+### 版本与 Stage 对应关系
+
+| 旧版本号 | 主要归属 Stage | 历史详细文档 |
 |---|---|---|
-| 基础 Agent Loop | ✅ 相对做得还可以 | `agent/core.py` chat() 主循环 + planner |
-| 基础任务编排（plan-step） | ✅ 相对做得还可以 | planner + 主循环 + step 推进 |
-| 基础工具注册与调用 | 🟡 仅基础版 | 12 个工具文件 + tool_registry，**接口规范/权限/错误恢复/结果压缩/选择质量/工具测试/工具文档全部缺**，需 v0.2 工程化 |
-| 模型消息构建 | 🟡 基础可用 | context_builder + prompt_builder，未做 prompt caching / 上下文压缩 |
-| tool_use / tool_result 链路 | ✅ 链路打通 | tool_executor + placeholder + tool_pairing 测试覆盖；结果摘要 / 失败结构化未做 |
-| 最小状态流转 | 🟡 跑得起来但混乱 | TaskState + 6+ awaiting 子状态，**未文档化、未画转移图**，需 v0.2 整理 |
-| 最小用户确认流 | ✅ 基础够用 | confirm_handlers（plan + tool 确认是 v0.1 范围；step + feedback_intent 是超 v0.1 探索） |
-| 基础 checkpoint | 🟡 雏形 | checkpoint.py + roundtrip 测试通过；**中断恢复语义、损坏态自愈、跨版本兼容全未做**，需 v0.2 |
-| 核心测试可跑 | ✅ 279 passed / 3 xfailed | 一键 `pytest` 通过，xfail 全部明确归类 |
+| v0.1（无 tag） | Stage 0 | `docs/V0_1_GRADUATION_REPORT.md` / `docs/V0_1_CONTRACT.md` |
+| v0.2.0 (`a32facc`) | Stage 1 + Stage 7 最小集 | `RELEASE_NOTES_v0.2.md` / `docs/V0_2_PLANNING.md` / `docs/V0_2_BASIC_TUI_PLAN.md`（Stage 2 历史) |
+| v0.3.0 / v0.3.1 | Stage 1 + Stage 6 readability | `RELEASE_NOTES_v0.3.md` / `docs/V0_3_PLANNING.md` |
+| v0.4.0 (`6417606`) | Stage 1 transition + checkpoint guard | `RELEASE_NOTES_v0.4.md` / `docs/V0_4_PLANNING.md` |
+| v0.5.0 (`32d4ca1`) | Stage 1 observer evidence | `RELEASE_NOTES_v0.5.md` / `docs/V0_5_OBSERVER_AUDIT.md` |
+| v0.5.1 (`240308b` / annotated `ce65bdca`) | Stage 1 dispatch helper + resume bridge | `RELEASE_NOTES_v0.5.1.md` / `docs/audits/v0.5.1_checkpoint_resume_audit.md` |
+| v0.6.0 (`22b390c`，docs-only) | Stage 2 scope alignment | `docs/audits/v0.6_tui_scope_gap_audit.md` |
+| v0.6.1 (未 tag) | Stage 2 boundary safety net | tests `tests/test_tui_dependency_boundaries.py` + `tests/test_input_backend_user_contract.py` + `tests/test_display_event_contract.py` |
 
-### "不要高估项"专章
+### 旧 v0.1 毕业标准（已全部 ✅，保留作为 Stage 0 历史）
 
-以下能力**不要写成"已完成"**，无论代码里看起来有多少文件：
+> v0.1 5 条毕业标准与 B1/B2/B3 blocking 的详细历史细节，移至
+> `docs/V0_1_GRADUATION_REPORT.md` 与 `docs/V0_1_CONTRACT.md`。
+>
+> v0.1 阶段已**冻结**：新功能必须先归类到 Stage 1-8 backlog。
 
-| 项 | 真实状态 | 归属 |
+### 旧 v0.2/v0.3/v1.0 backlog → 新 Stage 归类
+
+| 旧 backlog 项 | 新 Stage |
+|---|---|
+| Runtime 状态机整理 / 转移图 / 不变量 spec | Stage 1（已大部分落地，spec 文档化是 Stage 1 残留） |
+| InputIntent / RuntimeEvent / DisplayEvent 边界治理 | Stage 1（v0.5.1 已大部分钉死）+ Stage 2（display event contract，v0.6.1 已钉） |
+| 工具体系优化（接口/压缩/选择质量/单测/文档） | Stage 7 |
+| checkpoint 恢复语义（中断态 / 损坏自愈 / 跨版本） | Stage 1 残留 |
+| 错误恢复 / 重试 / loop guard / no_progress | Stage 1 残留 |
+| 基础安全权限（path 白名单 / shell 黑名单 / workspace 约束） | Stage 7 最小集（v0.2 已落） |
+| generation cancel_token / 流中断生命周期 | Stage 1 残留 + Stage 2 TUI Esc 集成 |
+| 复杂 topic switch（feedback_intent 之上） | Stage 1 残留 + Stage 2 输入语义 |
+| Textual backend 完整实现 / persistent shell | Stage 2 |
+| 基础状态面板 / RuntimeEvent 友好渲染 / 确认流 UI | Stage 2 |
+| 高级 TUI（多面板 / 快捷键 / Esc cancel / paste burst / timeline） | Stage 2 |
+| Skill 子系统正式化 / loader / safety / registry | Stage 5 |
+| Observer / eval pipeline / cost 追踪 / 性能基准 | Stage 6 |
+| Sub-agent / 多 Agent 协作 | Stage 4 |
+| 长期记忆 / 用户偏好自学习 | Stage 3 |
+| 插件化 / 公开 API | （**不做** — 见 Non-goals） |
+| 多模型路由 / MCP 集成 | Stage 8 customization 子集（仅本地配置层面） |
+| 正式安全围栏 / 沙箱 | Stage 7 + Stage 8 |
+| 性能 SLA / 稳定性 SLA | Stage 8 后期 |
+
+### 22-block legacy 结构
+
+完整旧 22-block 文档保留在 `docs/ROADMAP_LEGACY.md`，仅作历史参考。
+
+### 进行中工作的版本归属
+
+| 进行中工作 | 旧归属 | 新 Stage 归属 |
 |---|---|---|
-| **Skill 体系** | **非常粗糙，几乎可忽略** | `agent/skills/` 文件齐了（installer/loader/parser/registry/safety），但没有真正成熟的 skill 生命周期、版本管理、安全审查；evil-skill 测试目录恰恰说明 safety 还在原型期 → **v0.3** |
-| **Sub-agent / 多 Agent 协作** | **从未真正实现** | 完全没有 → **v1.0** |
-| **工具体系成熟度** | 仅基础版 | 工具接口规范 / 权限边界 / 错误恢复 / 结果压缩 / 选择质量 / 工具测试 / 工具文档**全部缺** → **v0.2 主要工作量** |
-| **安全围栏 / 沙箱 / 权限模型** | 几乎没有 | `agent/security.py` / `agent/skills/safety.py` 都是雏形 → 基础权限 v0.2，正式围栏 v1.0 |
-| **Observer / eval / cost 追踪** | 仅有 runtime_observer 的若干日志事件 | 没有评测 pipeline、没有 cost 计算、没有性能基准 → **v0.3** |
-| **TUI / CLI UX** | **拆成三层** | **v0.1**：仅冻结**最小 CLI 输出契约**（文档 + 现有输出对齐契约，**不实现完整 TUI**）。**v0.2 基础 TUI/CLI UX 实现**：Textual backend 完整实现、persistent shell、基础状态面板、RuntimeEvent 友好渲染、确认流 UI、pending 提示、checkpoint resume 提示、基础 observer 入口。**v0.3 高级 TUI**：多面板、快捷键、Esc/generation cancellation、stream abort、timeline/event viewer、复杂调试器、paste burst |
-| **复杂 topic switch / awaiting_feedback_intent** | **探索性实现 / 已暂停** | 已有 commit 落地（保留不回退），但**不计入 v0.1 完成度** → **v0.2 输入语义治理** |
-| **generation cancel_token / 流中断** | 完全没有 | xfail 已记录 → **v0.2** |
-| **LLM 二次意图分类** | 完全没有，红线明确禁止 | 仅 v1.0 探索阶段评估 |
-
----
-
-## v0.1 · "最小 Agent Runtime 跑起来"
-
-### 阶段目标
-
-用户在 simple CLI 里输入一句自然语言任务，Agent 能完成下面这条最小回路：
-
-```
-plan → 用户确认计划 → 工具调用（必要时确认）→ 输出结果 → checkpoint 持久化
-```
-
-### 毕业标准（5 条，验"能跑"）
-
-1. simple CLI 主循环可以端到端跑通"读取 README、写一段中文总结到 summary.md"这类任务（手动 smoke 通过）
-2. 至少 3 类工具可用：read（file_ops/edit）、write（write）、shell（shell）
-3. 状态机至少能区分：`idle / planning / running / awaiting_plan_confirmation / awaiting_tool_confirmation / done / failed / cancelled` —— **存在即可，不要求文档化**
-4. checkpoint 写入 + 加载 roundtrip 测试通过 —— **不要求中断恢复 / 损坏态自愈 / 跨版本兼容**
-5. `pytest` 一键跑过无 RED；任何 xfail 必须明确归到 v0.2/v0.3/v1.0
-6. **最小 CLI/TUI 输出契约已冻结**（写成文档、被 main / RuntimeEvent / DisplayEvent / runtime_observer 实际遵守）—— 普通 CLI 下不再出现裸 print 把 Runtime 调试和用户操作搞乱的回归
-
-### 非目标（v0.1 明确不做、不扩展）
-
-- ❌ 工具体系工程化（接口规范 / 权限边界 / 错误恢复 / 结果压缩 / 工具选择质量 / 工具文档）→ **v0.2**
-- ❌ checkpoint 中断恢复 / 损坏态自愈 / 跨版本兼容 → **v0.2**
-- ❌ 状态机正式化（转移图 / 状态文档 / spec / 不变量）→ **v0.2**
-- ❌ InputIntent / RuntimeEvent / DisplayEvent 边界治理 → **v0.2**
-- ❌ awaiting_feedback_intent 后续扩展、复杂 topic switch、slash command 恢复、LLM 二次意图分类 → **v0.2** 或 **v1.0**
-- ❌ 错误恢复 / 重试 / 主循环 loop guard / no_progress 检测 → **v0.2**
-- ❌ 基础安全权限（path 白名单 / shell 黑名单）→ **v0.2**
-- ❌ Skill 化 / 能力注册 / install_skill / update_skill / 工具 & skill 文档规范 → **v0.3**
-- ❌ Observer / eval pipeline / cost 追踪 / runtime observability 扩展 → **v0.3**
-- ❌ **完整 Textual backend / persistent shell / 状态面板 UI 实现** → **v0.2 基础 TUI/CLI UX 实现**
-- ❌ TUI 多面板 / 快捷键 / Esc cancel / 多行编辑 / paste burst / Textual 转默认 → **v0.3 高级 TUI**
-
-> ⚠️ **v0.1 仍要做**："最小 CLI/TUI **输出契约**" 必须冻结（见 B2），但**只冻结契约，不实现完整 TUI**——契约本身是文档 + 现有 main/RuntimeEvent/DisplayEvent/runtime_observer 的输出边界对齐。Textual backend 完整实现归 v0.2。
-- ❌ Sub-agent / 多 Agent 协作 / 插件化 / 长期记忆 / 多模型路由 / MCP / 正式安全围栏 → **v1.0**
-
-### 停止规则
-
-- 5 条毕业标准全部 ✅ 且下面 3 条 blocking 全关闭 → **v0.1 范围已冻结**，新功能必须先归类到 v0.2/v0.3/v1.0 backlog
-- v0.1 阶段**禁止**：新增 awaiting 子状态、新增 RuntimeEvent kind、新工具、新 skill、新输入后端
-- v0.1 阶段**只允许**：修 bug、补缺失文档、补缺失基础测试、写 v0.1 冻结契约
-
-### v0.1 blocking issue（最多 3 条）
-
-- ✅ **B1 · 写 v0.1 冻结契约 + xfail 归类**
-  在本 ROADMAP / ARCHITECTURE 顶部明确列出当前 v0.1 范围内的模块/工具/状态白名单；其余特性（awaiting_feedback_intent、Textual backend、Skill 子系统、runtime_observer 扩展事件等）显式标注"已落地但 v0.1 阶段锁定不再扩展"。
-  同时把当前 3 个 xfail 各自打上"属于哪个版本要解决"标签：
-  - `test_user_switches_topic_mid_task` → v0.2 输入语义治理
-  - `test_textual_shell_escape_can_cancel_running_generation` → v0.2 cancel 生命周期 + v0.3 TUI Esc 集成
-  - `test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent` → v0.3 高级 TUI（paste burst）
-
-- ✅ **B2 · 冻结最小 CLI/TUI 输出契约**（**不实现完整 Textual TUI**）
-  目标：解决我们最早遇到的痛点——CLI 多行输出混乱、状态不可见、确认流提示不清、tool call/tool result 输出边界不稳定，让用户根本判断不出 Agent 在做什么。
-  做的是**契约**，不是**实现**：
-  - 写一份 `docs/CLI_OUTPUT_CONTRACT.md`（或合入 ARCHITECTURE 章节），明确普通 CLI 下以下内容的统一渲染规则：
-    - RuntimeEvent（assistant.delta / tool.* / display.event / control.message / plan.* / user_input.requested 等）
-    - plan 展示
-    - current step 提示
-    - tool call 与 tool result 的边界（前后分隔、长内容截断策略）
-    - `pending_user_input_request` 提示（含 awaiting_kind / question / options）
-    - checkpoint resume 提示（启动时显式告诉用户"正在从 checkpoint 恢复"）
-    - 错误信息（格式 / 何时打印 stack）
-    - 多行输出（缩进 / 分隔规则）
-  - 明确"哪些内容**不能裸 print**"、"哪些**必须**通过统一输出边界（RuntimeEvent / `render_runtime_event_for_cli` / DisplayEvent）渲染"
-  - 现有 `main.py` / `agent/runtime_observer.py` / `agent/display_events.py` 必须**已经遵守该契约**；任何违反契约的现有 print 列入修正项，修正本身可以放进 v0.1 范围（属于"修 bug + 让现状对齐契约"）
-  - 验收：契约文档存在 + B3 一次手动 CLI 运行的输出符合契约（清晰可读、无裸 debug print）
-
-- ✅ **B3 · 真实手动 smoke**
-  用 simple CLI 真实跑一次"读 README → 写 summary.md"端到端任务（需 `ANTHROPIC_API_KEY`），验证 v0.1 真的跑得起来 **且** 输出符合 B2 冻结的契约；不行就回头修最小路径，**不**借机扩展任何超 v0.1 能力。
-
-  结果：已通过，见 `docs/V0_1_GRADUATION_REPORT.md`。
-
-### 下一步只允许做什么
-
-- ✅ 进入 v0.2 planning / engineering，先写清 milestone 再实现
-- ❌ 不要继续推进 P1 awaiting_feedback_intent
-- ❌ 不要实现完整 Textual backend / persistent shell（归 v0.2）
-- ❌ 不要扩展 Skill 子系统
-- ❌ 不要补 LLM 意图分类 / generation cancel / slash command
-- ❌ 不要新增工具 / 新增 awaiting 状态
-- ⚠️ **B2 只做契约 + 修对齐契约的 print**，不要借机重写 main.py / 重构 RuntimeEvent 体系
-
----
-
-## v0.2 backlog · "把 v0.1 粗糙能力工程化"
-
-> 仅列举主题，**不展开**实施细节。等 v0.1 毕业后再细化每一项的目标 / 毕业标准。
-
-- Runtime 状态机整理：转移图、状态文档、不变量 spec
-- InputIntent / RuntimeEvent / DisplayEvent 边界治理（含 awaiting_feedback_intent 收口、slash 类需求评估）
-- **工具体系优化（v0.2 主要工作量）**：
-  - 工具接口规范（schema / 错误返回约定 / 描述规范）
-  - 工具结果压缩（长输出截断 / 摘要）
-  - 工具选择质量（prompt 优化 / 错用监控）
-  - 每个工具的单元测试 + 使用文档
-- checkpoint 恢复语义：中断态判定 / 损坏态自愈 / 跨版本兼容策略
-- 错误恢复 / 重试 / 主循环 loop guard / no_progress 检测
-- 基础安全权限：path 白名单、shell 命令最小审查、工作区根目录约束
-- generation cancel_token / 流中断生命周期（**只做生命周期与 RuntimeEvent，不做 TUI Esc 集成**——后者归 v0.3）
-- 复杂 topic switch（awaiting_feedback_intent 之上的真正成熟方案）
-- **基础 TUI / CLI UX 实现**（在 v0.1 冻结的 CLI 输出契约基础上，做最小可用交互界面，让 Runtime 真正可调试、可理解）：
-  - **Textual backend 完整实现 + persistent shell**（v0.1 不做，v0.2 做完整版）
-  - 基础状态面板（清晰展示当前 goal / plan / current step / status）
-  - RuntimeEvent 可读渲染（在 v0.1 契约之上做更友好的 UI）
-  - plan / step / tool / user input 确认流 UI
-  - `pending_user_input_request` 状态提示 UI（含 awaiting_kind / question / options）
-  - checkpoint resume 提示 UI
-  - 基础日志 / observer 可视化入口（最小 viewer，不做多面板 / timeline）
-  - 验收口径：simple CLI 与 Textual backend 都可用、都遵守 v0.1 输出契约、Textual 可成为可选默认
-
----
-
-## v0.3 backlog · "Skill 化 + 能力注册 + observer/eval + 高级 TUI"
-
-- Skill 子系统**正式化**（loader / installer / safety / registry 真正做成熟，evil-skill 测试通过）
-- 能力注册 + 工具/skill 文档规范统一
-- Observer / eval pipeline / cost 追踪 / 性能基准（在 v0.2 基础 observer 入口上做增强）
-- **高级 TUI / CLI**（在 v0.2 基础 UX 之上）：
-  - 多面板布局（conversation / plan / events / state / log 分区）
-  - 快捷键体系
-  - Esc / generation cancellation 与 TUI 集成、stream abort
-  - timeline / event viewer / 历史回放
-  - 复杂调试器（断点、单步、状态 inspect）
-  - persistent shell 完善 / 多行编辑 / paste burst UX
-  - Textual backend 转默认
-
----
-
-## v1.0 backlog · "稳定可扩展的学习型 Agent 框架"
-
-- Sub-agent / 多 Agent 协作（**全新实现**）
-- 插件化 / 公开 API
-- 长期记忆 / 用户偏好自学习
-- **正式**安全围栏 / 沙箱 / 权限模型
-- 多模型路由 / MCP 集成
-- Formal state machine spec
-- Self-critique / self-modify
-- 性能 SLA / 稳定性 SLA
-
----
-
-## 进行中工作的版本归属（避免误以为是 v0.1 工作）
-
-| 进行中工作 | 归属 | 处理方式 |
-|---|---|---|
-| P1 awaiting_feedback_intent 两步分流 | **探索性实现 / 已暂停** → v0.2 输入语义治理 | commit `d6a5aed` + `58c6fcb` 保留不回退；**不再追加 P2/P3**；hardcore xfail 保留 |
-| Textual backend / persistent shell | **拆成三层**：CLI 输出契约冻结 → v0.1 / Textual 完整实现 + 基础 UX → v0.2 / 高级 UX → v0.3 | 保留代码标 experimental；v0.1 阶段不实现完整 Textual，但必须冻结输出契约 |
-| Skill 子系统 / install_skill / update_skill | v0.3 Skill 化 | 保留代码；v0.1 不扩展，**不要写成已完成** |
-| slash command 历史 / 启发式回退讨论 | v0.2 输入语义治理 | 已下线，v0.1 不再讨论 |
-| runtime_observer / observability 事件 | v0.3 observer/eval | 现有事件保留；v0.1 不扩展 |
-| security.py / safety.py | 基础权限 v0.2 / 正式围栏 v1.0 | 现状是雏形；v0.1 不扩展 |
-| hardcore_round2 LLM 意图分类讨论 | v1.0 探索 | 红线禁止；v0.1/v0.2 都不引入 |
-| generation cancel_token / Textual Esc | 拆：cancel 生命周期 → v0.2 / Esc 与 TUI 集成 → v0.3 | xfail 保留 |
-
----
-
-## 附录 A · 本次重写为何砍掉旧的 22 block 结构
-
-旧 ROADMAP（1262 行 / 6 阶段 × 22 block）问题：
-- **没有阶段毕业线** —— 只有"必做/推荐/可选"，没有"v0.1 已完成"的认证
-- **抽象层级混乱** —— Block 0.1（集成测试）和 Block 5.4（Self-Modifying Agent）并列在同一推进序列
-- **被高级能力分散** —— Skill / Textual / sub-agent / observer 在同一个文档里争注意力，让"最简版本能跑"反而不优先
-
-旧 22 block 归类映射：
-
-| 旧 block | 归到新版本 | 备注 |
-|---|---|---|
-| 0.1 集成测试 | v0.1 已基本达成 | 269 测试通过 |
-| 0.2 类型系统 | v0.2 工程化 | |
-| 0.3 Prompt Caching | v0.2 工具体系优化 | |
-| 0.4 Cost 追踪 | v0.3 observer/eval | |
-| 0.5 可观测性基础 | v0.3 observer/eval | |
-| 1.1 步骤完成协议化 | v0.1 已基本达成 | mark_step_complete 已落地 |
-| 1.2 history.jsonl 审计层 | v0.3 observer/eval | |
-| 1.3 错误恢复与重试 | v0.2 错误恢复 | |
-| 1.4 流式 tool_use 处理 | v0.2 工具体系 / v0.3 体验 | |
-| 1.5 主循环 loop guard | v0.2 错误恢复 | |
-| 2.1 Sub-agent | **v1.0** | 从未实现 |
-| 2.2 MCP 集成 | v1.0 | |
-| 2.3 工具并行执行 | v0.2 或 v1.0 | |
-| 2.4 多模型路由 | v1.0 | |
-| 3.1 长期记忆提取 | v1.0 | |
-| 3.2 向量检索 | v1.0 | |
-| 3.3 用户偏好自学习 | v1.0 | |
-| 4.1 Review / Self-critique | v1.0 self-critique | |
-| 4.2 Budget & 阈值 | v0.3 observer/eval | |
-| 4.3 多会话并发 | v1.0 | |
-| 4.4 CLI 多行输入 | v0.3 高级 TUI（paste burst / 多行编辑） | |
-| 5.1-5.4 研究级 | v1.0 探索 | |
-
-完整旧文档保留在 `docs/ROADMAP_LEGACY.md`，有需要再翻。
+| awaiting_feedback_intent 两步分流 | v0.2 输入语义 | Stage 1 残留（hardcore xfail 钉住） |
+| Textual backend / persistent shell | v0.2/v0.3 拆分 | Stage 2 |
+| Skill 子系统 / install_skill / update_skill | v0.3 | Stage 5 |
+| runtime_observer / observability 事件 | v0.3 | Stage 6（持续打底） |
+| security.py / safety.py | v0.2 + v1.0 | Stage 7 + Stage 8 |
+| hardcore_round2 LLM 意图分类讨论 | v1.0 探索 | **不做主线**（Non-goals） |
+| generation cancel_token / Textual Esc | v0.2 + v0.3 | Stage 1 残留 + Stage 2 |
 
 ---
 
 ## 这份文档怎么用
 
-1. **每次开新工作前**先看一眼 TL;DR：当前阶段是什么？这个工作属于当前阶段吗？
-2. **想做点什么**前先问"这是当前阶段毕业标准的哪一条"。答不出 → 推迟。
-3. **想加新能力**前先看"非目标"列表。在里面 → 推迟。
-4. **当前阶段毕业标准全 ✅** → 写一笔 commit 标记冻结，然后才进入下一阶段。
+1. **每次开新工作前**：先看 TL;DR — 当前是 Stage 几？这个工作属于当前 Stage 吗？
+2. **想做点什么**前：先问"这是当前 Stage 毕业标准的哪一条"。答不出 → **推迟**。
+3. **想加新能力**前：先看 **Explicit Non-goals**。在里面 → **拒绝**。
+4. **当前 Stage 毕业标准全 ✅** → 写一笔 audit/commit 标记冻结，再启动下一 Stage。
+5. **每一轮**：先报**当前 Stage** + **action type** + **为什么是 Roadmap 下一步**。
+6. **doc drift 防御**：连续 docs-only commit ≥ 2 后，下一 slice 默认必须是
+   audit / coding / tests，docs-only 需特别授权。

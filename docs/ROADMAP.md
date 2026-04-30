@@ -17,8 +17,76 @@
 | v0.3 | Skill 化 + 能力注册 + observer/eval + **高级 TUI** | Skill 子系统正式化、工具/skill 文档规范、observer/eval 增强、多面板/timeline/event viewer/Esc cancel/paste burst 等高级 UX。 |
 | v1.0 | 稳定可扩展的学习型 Agent 框架 | sub-agent / 多 Agent 协作 / 插件化 / 长期记忆 / 正式安全围栏 / 性能 SLA。 |
 
-| **当前阶段：v0.1 已毕业；下一阶段进入 v0.2 planning / engineering**（v0.1 已冻结最小 CLI/TUI 输出契约，只冻结契约不实现完整 Textual TUI）。
+| **当前阶段：v0.6.x readiness（TUI boundary safety net）**。v0.1 ~ v0.5.1 已 tag 并 release，详见下方 *Current status snapshot*；v0.6 主线**不是**直接实现完整 TUI，而是先把 TUI / display / input 边界用 characterization tests 钉成可校验不变量。
 **v0.1 结果**：最简版本 simple CLI 已跑通端到端 README -> `summary.md` 真实 smoke，CLI 输出可读到能看清 Agent 在做什么。后续不要把 slash command / 复杂 topic switch / LLM 意图分类 / 完整 Textual TUI / Skill 化 / 安全围栏 / observer 等高级能力回写成 v0.1 已完成。
+
+---
+
+## Current status snapshot
+
+> 本节用于把 ROADMAP 顶层 TL;DR 与真实 git milestones 对齐。**保守口径**：
+> 列"已 tag"只代表对应 commit 已存在 annotated tag 与 release notes，**不**代表
+> 该版本主题下的所有能力都已成熟；任何标注 ✅ 的版本背后仍有大量 v0.6.x +
+> 未来阶段的工程化欠账。
+>
+> 证据来源：本仓库 `git tag --list` + `RELEASE_NOTES_v0.X.md` + `docs/audits/` + commit log。
+>
+> **本节不重写 v0.1 ~ v0.3 的毕业标准章节**（仍以下文 v0.1 章节 / `V0_2_PLANNING.md` /
+> `V0_3_PLANNING.md` 为准）；它只是补一张事实表，让读者不会误以为项目仍停在
+> v0.1 毕业边界。
+
+| 版本 | 状态 | 简述 |
+|---|---|---|
+| v0.1 | ✅ Tagged（无 v0.1 tag，但下文毕业标准全 ✅） | 最小 Agent Runtime 端到端跑通；CLI/TUI 输出契约冻结 |
+| v0.2.0 | ✅ Tagged | Runtime/CLI safety/checkpoint resume/tool boundary/policy denial readiness（详见 `RELEASE_NOTES_v0.2.md`） |
+| v0.3.0 / v0.3.1 | ✅ Tagged | Usability track：cross-layer guards、local-first trial baseline、basic CLI shell、health maintenance、observer log readability（详见 `RELEASE_NOTES_v0.3.md` / `docs/V0_3_PLANNING.md`） |
+| v0.4.0 | ✅ Tagged | Health maintenance dry-run / archive、log size warnings、checkpoint runtime leak guard、loop context extraction（详见 `RELEASE_NOTES_v0.4.md` / `docs/V0_4_PLANNING.md`） |
+| v0.5.0 | ✅ Tagged（commit `32d4ca1`） | Runtime boundary and observer evidence milestone：observer signature guard、terminal print baseline、confirmation evidence events、sessions read-only inventory（详见 `RELEASE_NOTES_v0.5.md` / `docs/V0_5_OBSERVER_AUDIT.md`） |
+| v0.5.1 | ✅ Tagged（annotated `ce65bdca` → commit `240308b`） | Runtime boundary evidence hardening：display callback failure isolation、pending confirmation dispatch helper、model output dispatch helper、resume pending dispatch tests + audit doc（详见 `RELEASE_NOTES_v0.5.1.md` / `docs/audits/v0.5.1_checkpoint_resume_audit.md`） |
+| v0.6.0 | ✅ Pushed（commit `22b390c`，**docs-only**，未 tag） | TUI scope gap audit：盘点 textual.py / simple.py 现状、确认 TUI 不是从零造、给出 v0.6.x slice 策略；**不是 TUI implementation**（详见 `docs/audits/v0.6_tui_scope_gap_audit.md`） |
+| v0.6.1 | 🟡 Implemented in git，未 tag、未 release | Three-layer TUI/Display/Input boundary characterization tests：Group A/E (afd82f5) + Group C (11826cd) + Group D (08bfbe7)；19 条新增 tests；pytest 基线 920 passed / 3 xfailed；**不是 TUI implementation** |
+| v0.6.x next | 📋 Planned | v0.6.1 readiness/release notes、xfail inventory + de-xfail plan、v0.6.2 TUI MVP planning、之后再进入真正 TUI implementation |
+| v1.0 | 📋 长期目标 | sub-agent / 多 Agent 协作 / 插件化 / 长期记忆 / 正式安全围栏 / 性能 SLA |
+
+### v0.6 direction
+
+v0.6 **主线不是直接实现完整 TUI**，而是先建立 TUI readiness / boundary safety net，
+让后续真正的 TUI 重写工作能在已被测试钉死的边界上安全进行。包括：
+
+1. **dependency boundary**：textual / simple input backend 不反向 import runtime core / checkpoint / tool_executor / handlers 等
+2. **input / Ask User / free-text boundary**：UserInputEnvelope.raw_text 是 frozen 自由文本字段；request user input 不退化为打印或固定枚举
+3. **display event boundary**：DisplayEvent / RuntimeEvent frozen+slots、display_events.py 是叶子模块、render 出口只产 `str`
+4. **no sensitive read boundary**：源码字面扫描确保 `.env` / `agent_log.jsonl` / `sessions/` / `runs/` 不被 TUI/input/display 路径硬编码引用
+5. 在以上四道边界稳定后，再进入 TUI MVP（Textual backend 状态面板 / 确认流 UI 等）的实际实现
+
+### v0.6.1 scope
+
+v0.6.1 已完成的是 **tests / readiness**，**不是**完整 TUI：
+
+- **Group A/E**（`tests/test_tui_dependency_boundaries.py`）：AST import dependency boundary（白名单 + 黑名单）+ 源码字面扫描敏感路径
+- **Group C**（`tests/test_input_backend_user_contract.py`）：UserInputEnvelope frozen `raw_text` + `__post_init__` 主动校验 + Callable 委托基线 + 工厂函数引用强制
+- **Group D**（`tests/test_display_event_contract.py`）：DisplayEvent/RuntimeEvent frozen+slots + 字段集合 baseline + display_events.py 叶子模块 + EVENT_* 常量 baseline + render→`str`
+- pytest 基线 **920 passed / 3 xfailed**（来源：v0.6.1 Group D 完成后的真实运行；不是本轮重新跑的）
+- **3 xfailed 仍存在，未在 v0.6.1 解决**
+
+### What v0.6.1 is NOT
+
+- ❌ 不是完整 TUI implementation
+- ❌ 没有重构 runtime core（agent/core.py 未改）
+- ❌ 没有解决 3 xfailed
+- ❌ 没有 checkpoint/resume production rewrite
+- ❌ 没有 StateSnapshot
+- ❌ 没有 v0.6.1 tag
+- ❌ 没有 v0.6.1 release notes
+
+### Suggested next steps（不是承诺）
+
+1. v0.6.1 readiness / release notes 规划（先规划再决定是否 tag）
+2. 3 个 strict xfail 的只读 inventory + de-xfail plan
+3. v0.6.2 TUI MVP planning（继续 TUI readiness slice 或开始 MVP 实现）
+4. 在以上完成后，才进入真正 TUI implementation
+
+---
 
 **全局停止规则**：
 - 任何"我觉得这块还差一点"的改动，先回答："这属于当前阶段毕业标准的哪一条？"

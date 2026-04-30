@@ -2,10 +2,9 @@
 
 ## 1. Release status
 
-> 本文件状态：**v0.5.1 release notes 草案**；commit 在 `main` working branch，**未 push**、**未 tag `v0.5.1`**。
-> tag 决策由人工 review 后单独授权。`v0.5.0` tag 仍指向 `32d4ca1`，本轮不移动。
+> 本文件状态：**v0.5.1 已 tag 并 push**；annotated tag `v0.5.1`（对象 `ce65bdca`）指向 commit `240308b`，已存在于 `origin/main`。`v0.5.0` tag 仍指向 `32d4ca1`，未移动。
 >
-> 当前目标：为后续 v0.5.1 tag 前 review 提供单一索引入口；详细 evidence 见
+> 单一索引入口；详细 evidence 见
 > [`docs/audits/v0.5.1_checkpoint_resume_audit.md`](docs/audits/v0.5.1_checkpoint_resume_audit.md)。
 
 ---

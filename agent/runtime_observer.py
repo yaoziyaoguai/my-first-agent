@@ -120,12 +120,53 @@ def log_event(
 ) -> None:
     """记录 RuntimeEvent 的核心字段。
 
-    event_payload 传进来是为了保留 API 边界，但第一版不完整打印 payload 值：
-    - 避免日志过长；
-    - 避免泄露用户输入、工具参数或敏感内容；
-    - 观测日志只需要确认 event_type / event_source / event_channel 是否正确。
+    ────────────────────────────────────────────────────────────────────
+    v0.5 命名碰撞警告（务必读完再写新代码）
+    ────────────────────────────────────────────────────────────────────
+    本函数与 ``agent/logger.py`` 中的 ``log_event`` **同名但签名不同**：
 
-    如果后续需要更细粒度观测，也应优先打印 payload_keys，而不是 payload values。
+    - 本函数 ``agent.runtime_observer.log_event``
+        * ``event_type`` 是唯一 positional/keyword 参数；
+        * ``event_source`` / ``event_payload`` / ``event_channel`` 全部
+          **keyword-only**；
+        * 内部走 ``_persist_observer_event`` → ``_safe_log_value`` 脱敏 →
+          兜底再调 legacy ``logger.log_event``；
+        * **任何异常一律 swallow**（产品契约：可观测性不能破坏 Runtime）；
+        * 新代码入口（v0.5 时刻调用方：``agent/core.py`` 起别名
+          ``log_runtime_event``、``agent/confirm_handlers.py`` 起别名
+          ``_log_runtime_event``）。
+
+    - 另一个 ``agent.logger.log_event(event_type, data)``
+        * 两位 positional，``data`` 任意 dict；
+        * 不脱敏、IO 异常向上冒泡；
+        * 历史 9 处 legacy 调用点（planner/memory/checks/session/review/
+          context/health_check/checkpoint 懒加载/本文件兜底转发）。
+
+    职责边界
+    --------
+    本函数 **只负责** 接 RuntimeEvent 边界 → 脱敏 → 落盘 → swallow。
+    本函数 **不负责** 替代 legacy logger（兜底仍调它）、不负责构造
+    ObserverEvent dataclass、不负责进入 TUI 渲染（DisplayEvent 走另一条线）。
+
+    payload 安全红线
+    -----------------
+    ``event_payload`` 当前仅打印 keys（见函数体），不打印 value，
+    避免泄露用户输入、工具参数、tool_result 大文本、feedback_text 等。
+    新调用方在传 payload 之前，仍应自行只放 ``origin_status`` /
+    ``resolution_kind`` / ``tool_name`` 等枚举短字段（见
+    ``agent/confirm_handlers.py`` 的 ``_emit_confirmation_observer_event``）。
+
+    为什么 v0.5 不立刻重命名
+    --------------------------
+    见 ``agent/logger.py`` 同名函数 docstring。本切片只用
+    ``tests/test_log_event_signature_collision.py`` 用 ``inspect.signature``
+    把两份签名锁死，等独立 slice 再做重命名。
+
+    artifact 排查
+    --------------
+    本函数写入 ``LOG_FILE`` 时 ``event`` 字段固定为 ``"runtime_observer"``，
+    真正的 ``event_type`` 嵌在 data 内层；筛选时 grep
+    ``"event": "runtime_observer"``，再按 data.event_type 二级过滤。
     """
     _persist_observer_event(
         event_type,

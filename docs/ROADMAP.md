@@ -159,6 +159,60 @@ core**。
 - **TUI 不是 Web UI**
 - **Stage 2 收口前不进入 Stage 3 Memory**
 
+#### v0.6.2 后 Architecture Debt Exit Criteria / Roadmap Quantification
+
+> **目的**：v0.6.2 TUI MVP 封版后，本小节只用于约束 architecture/module debt
+> 治理的退出条件，避免把"继续优化"无限扩大成新功能开发或大规模重构。
+
+**当前阶段性质**：
+
+- 这不是继续做 TUI 新功能；TUI v0.6.2 MVP 已封版，后续 TUI 改造必须单独立项。
+- 这是 v0.6.2 后的 architecture/module debt 治理：用少量 characterization
+  tests 与最小行为保持型 helper extraction，固定 checkpoint ownership、module
+  boundaries、runtime transition ownership 等已识别关键边界。
+- helper extraction 的目标不是"优化到完美"，而是消除当前已经被 inventory /
+  characterization tests 证明存在的局部 ownership/module debt。
+
+**优化目标**：
+
+1. 固定 checkpoint ownership：明确谁可以 save/load/clear checkpoint，谁不能碰
+   checkpoint，尤其是 input/display/TUI 边界层。
+2. 固定 module boundaries：防止 input backend、display layer、user_input
+   envelope 层获得 runtime state ownership。
+3. 固定 runtime transition ownership：让 pending confirmation、pending user input、
+   pending tool、tool execution log 等状态变更的 owner 清晰可审计。
+4. 只做最小 helper extraction：行为保持、低风险、可 rollback，不引入 gateway、
+   新 schema、新 runtime event 或新产品能力。
+
+**验收标准**：
+
+| # | 标准 | 当前要求 |
+|---|---|---|
+| 1 | Architecture Characterization Pack 1 | 已完成并 push 到 `origin/main` |
+| 2 | Checkpoint Ownership Characterization Tests | 已完成、审计 PASS，并 push 到 `origin/main` |
+| 3 | Roadmap quantification | 本小节写入可量化退出标准 |
+| 4 | helper extraction 类型 | 必须是最小行为保持型重构 |
+| 5 | 测试一致性 | helper extraction 前后 targeted tests / full pytest / ruff / diff check 保持通过 |
+| 6 | characterization tests | 不允许因为重构弱化、删除、跳过或 xfail characterization tests |
+| 7 | TUI scope | 不允许扩大到 TUI 新功能或 TUI 改造 |
+| 8 | Memory / sub-agent / Skill | 不允许扩大到 Stage 3/4/5 实质实现 |
+| 9 | XFAIL-1 / XFAIL-2 | 不允许顺手处理，除非后续单独立项 |
+| 10 | checkpoint gateway | 不进入 gateway planning，除非 Roadmap 后续明确作为独立阶段 |
+
+**停止条件**：
+
+当以下条件同时满足时，本轮 Architecture Debt 治理应停止：
+
+1. checkpoint ownership 边界已经被 characterization tests 固定；
+2. Roadmap exit criteria 已落文档；
+3. 最小 helper extraction 已完成，且测试结果与抽取前保持一致；
+4. 已没有继续降低复杂度的高收益、小风险切点。
+
+若下一步收益不清晰、风险变大、需要跨模块大改，必须停步 Ask User。不要为了
+"更完美"继续抽象；不要进入新功能；不要做 TUI 改造；不要做 checkpoint gateway
+planning；不要进入 Memory / sub-agent / Skill；不要处理 XFAIL-1 / XFAIL-2；不要
+push 或 tag，除非用户单独选择对应动作。
+
 ---
 
 ### Stage 3 · Memory system

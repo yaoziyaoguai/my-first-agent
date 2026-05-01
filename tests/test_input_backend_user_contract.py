@@ -64,6 +64,7 @@ MVP / Mock 边界
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import re
 from pathlib import Path
@@ -268,4 +269,145 @@ def test_tui_backend_delegates_runtime_via_callable(tui_file: Path) -> None:
     assert missing == [], (
         f"{tui_file.name} 缺少期望的 Callable 委托形参：{missing}。"
         " input backend 必须通过 callable 委托 runtime 决策，不得内联。"
+    )
+
+
+# ===================== C5 · input backend 不绕过 confirmation handlers =====================
+
+_CONFIRMATION_HANDLER_CALLS: frozenset[str] = frozenset(
+    {
+        "handle_plan_confirmation",
+        "handle_step_confirmation",
+        "handle_user_input_step",
+        "handle_tool_confirmation",
+        "handle_feedback_intent_choice",
+    }
+)
+
+_RUNTIME_PENDING_FIELD_NAMES: frozenset[str] = frozenset(
+    {
+        "pending_user_input_request",
+        "pending_tool",
+        "tool_execution_log",
+        "current_plan",
+        "current_step_index",
+    }
+)
+
+_RUNTIME_CONFIRMATION_STATUS_VALUES: frozenset[str] = frozenset(
+    {
+        "awaiting_plan_confirmation",
+        "awaiting_step_confirmation",
+        "awaiting_user_input",
+        "awaiting_feedback_intent",
+        "awaiting_tool_confirmation",
+    }
+)
+
+
+def _parse_source(path: Path) -> ast.AST:
+    """用 AST 读取 backend 源码，避免 grep docstring 造成边界假阳性。"""
+
+    return ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+    """把 Name/Attribute 调用还原成 dotted name，用于稳定识别越界调用。"""
+
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        if parent is None:
+            return node.attr
+        return f"{parent}.{node.attr}"
+    return None
+
+
+@pytest.mark.parametrize("tui_file", _TUI_FILES, ids=lambda p: p.name)
+def test_input_backend_does_not_call_confirmation_handlers(tui_file: Path) -> None:
+    """input backend 不得直接调用 confirmation handlers。
+
+    这条测试保护 HITL/Input 收口前最重要的依赖方向：backend 只产生
+    UserInputEvent / raw_text，不能把 `y`、`1`、free-text 等输入直接送进
+    handle_plan_confirmation / handle_tool_confirmation 之类 handler。确认语义
+    必须由 main/core 的 pending dispatch 路由到 confirmation handlers，否则
+    backend 会绕开 checkpoint、messages、observer event 和 pending 清理，重新
+    变成懂太多 runtime 细节的新巨石。
+    """
+
+    tree = _parse_source(tui_file)
+    calls: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        dotted = _dotted_name(node.func)
+        if dotted is None:
+            continue
+        short_name = dotted.rsplit(".", maxsplit=1)[-1]
+        if short_name in _CONFIRMATION_HANDLER_CALLS:
+            calls.append(dotted)
+
+    assert calls == [], (
+        f"{tui_file.name} 不允许直接调用 confirmation handlers：{calls}。"
+        " input backend 必须把输入交给 core/main 编排层，由 confirmation handlers"
+        " 作为 plan/step/tool/user_input/feedback_intent 语义的唯一入口。"
+    )
+
+
+@pytest.mark.parametrize("tui_file", _TUI_FILES, ids=lambda p: p.name)
+def test_input_backend_does_not_read_runtime_pending_fields(tui_file: Path) -> None:
+    """input backend 不得读取 runtime pending/checkpoint 相关字段。
+
+    读取 `pending_user_input_request`、`pending_tool` 或 `current_plan` 看似只是
+    “判断一下当前上下文”，实质会把 runtime state schema 泄漏到 UI/input 层。
+    本 slice 只允许 backend 收集输入事实；pending 的解释权属于
+    input_intents / input_resolution / confirmation handlers / core dispatch。
+    """
+
+    tree = _parse_source(tui_file)
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        dotted = _dotted_name(node)
+        if dotted is None:
+            continue
+        if node.attr in _RUNTIME_PENDING_FIELD_NAMES or dotted.endswith(".task.status"):
+            hits.append(dotted)
+
+    assert hits == [], (
+        f"{tui_file.name} 不允许读取 runtime pending/status 字段：{hits}。"
+        " 这些字段属于 TaskState/runtime 层；backend 读取它们会把输入适配器"
+        " 变成隐式 state machine。"
+    )
+
+
+@pytest.mark.parametrize("tui_file", _TUI_FILES, ids=lambda p: p.name)
+def test_input_backend_does_not_branch_on_confirmation_status_values(tui_file: Path) -> None:
+    """input backend 不得按 awaiting_* confirmation status 自行分支。
+
+    这里特意扫描 AST Compare 节点，而不是简单搜索字符串：docstring 可以解释
+    为什么 backend 不理解 awaiting 状态，但真实代码不能写
+    `if status == "awaiting_plan_confirmation"` 这类分支。否则后续 Ask User /
+    Other/free-text 会在 backend 层被提前解释，绕过 confirmation handlers。
+    """
+
+    tree = _parse_source(tui_file)
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        compared_values = [node.left, *node.comparators]
+        for value in compared_values:
+            if (
+                isinstance(value, ast.Constant)
+                and value.value in _RUNTIME_CONFIRMATION_STATUS_VALUES
+            ):
+                hits.append(str(value.value))
+
+    assert hits == [], (
+        f"{tui_file.name} 不允许按 runtime confirmation status 分支：{hits}。"
+        " 状态分发必须集中在 core._dispatch_pending_confirmation()，"
+        " 真实确认语义必须进入 confirmation handlers。"
     )

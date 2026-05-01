@@ -44,7 +44,8 @@ core**。
 | **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
-| **3** | **Memory system**（**下一阶段：Discovery / Architecture Planning**） | 🟡 只读 discovery，不实现 | 后续 |
+| **2.5** | **Tooling Foundation Milestone**（**下一步**） | 🟡 Tool audit / MCP discovery，不实现 | 后续 |
+| **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
 | **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
 | **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 持续打底（v0.5 已开始） | 跨阶段 |
@@ -54,14 +55,16 @@ core**。
 **全局停止规则**：
 - 任何"我觉得这块该做"的改动，先回答："这属于哪个 Stage 的毕业标准？"
 - 答不出 → **推迟到对应 Stage backlog**，不在当前 Stage 做。
-- **Stage 3 先做 Memory System Discovery / Architecture Planning，不直接实现 Memory/RAG**；
-  Stage 4/5 的实质实现仍必须等 Memory 边界清楚后再启动（Stage 6/7 可作必要补丁）。
+- **Stage 2.5 先做 Tooling Foundation Milestone**：先审计本地工具模块，再做 MCP
+  Client / Tool Bridge Discovery；不直接实现工具/MCP。
+- **Memory System Discovery 后移到工具体系边界清楚之后**；Stage 4/5 的实质实现
+  仍必须等 Memory 边界清楚后再启动（Stage 6/7 可作必要补丁）。
 
 ---
 
 ## Current Position
 
-> **当前处于 Stage 3 准备态：Memory System Discovery / Memory Architecture Planning。**
+> **当前处于 Stage 2.5 准备态：Tooling Foundation Milestone。**
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -70,11 +73,17 @@ core**。
   input backend 不绕过 confirmation handlers 的 tests-only safety net 已建立。
 - 🟡 仍保留已知 backlog：XFAIL-1（复杂 topic switch）与 XFAIL-2（Esc cancel /
   generation interruption）必须单独立项，不作为继续扩大 HITL/Input 的理由。
-- ❌ 当前还没进入 Memory 实现；下一步只做 Discovery / Architecture Planning。
+- ✅ Memory System Discovery Roadmap Correction 已完成：Memory 是独立逻辑模块，
+  RAG / retrieval / vector DB 只是后续 provider / recall backend 候选。
+- 🟡 下一步不是 Memory，而是 **Tool Module Architecture Audit**：先把本地工具体系
+  的 registry / schema / executor / result / error / approval / logging /
+  checkpoint / runtime 边界审计清楚，再进入 MCP Client / Tool Bridge Discovery。
+- ❌ 当前还没进入工具模块实现、MCP 实现或 Memory 实现；下一步只做 audit/discovery。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
-> 口径：下一阶段是 **Memory System Discovery**，不是 RAG Discovery。
+> 口径：下一阶段是 **Tooling Foundation Milestone**；其后才是
+> **Memory System Discovery**，且 Memory 不是 RAG Discovery。
 > Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
 > 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
 
@@ -217,7 +226,71 @@ push 或 tag，除非用户单独选择对应动作。
 
 ---
 
-### Stage 3 · Memory system ⭐**下一阶段：Discovery / Architecture Planning**
+### Stage 2.5 · Tooling Foundation Milestone ⭐**下一步**
+
+**主题**：先把本地工具体系的边界审计清楚，再考虑 MCP Client / Tool Bridge。
+
+学习型边界说明：
+- 工具体系是本地 Agent 的行动能力基础；如果 tool registry、tool schema、
+  tool executor、tool result、approval、logging、checkpoint、runtime 边界不清楚，
+  后续 MCP 会把这些模块搅在一起。
+- MCP 是外部 tools / context / capabilities 的标准接入协议；它应该作为工具体系的
+  外部协议扩展，而不是直接塞进 `core.py` 或让 `tool_executor.py` 变成新巨石。
+- Memory / Skill / Hook 都应建立在清晰的工具体系与 runtime 边界之上。
+
+#### A. Tool Module Architecture Audit（下一步）
+
+**目标**：
+- 只读审计当前工具模块；
+- 梳理 tool registry / tool schema / tool executor / tool result / tool error /
+  approval / logging / checkpoint / runtime 边界；
+- 识别 `tool_executor` 是否过重；
+- 识别 `core.py` 是否知道太多工具细节；
+- 识别工具调用是否绕过 HITL/confirmation；
+- 识别工具结果是否有统一 contract；
+- 识别工具错误是否有统一 contract；
+- 识别工具权限和安全边界缺口；
+- 识别为 MCP 接入需要预留的 seam。
+
+**非目标**：
+- 不实现 MCP；
+- 不新增真实外部工具；
+- 不新增权限系统；
+- 不新增 hook；
+- 不新增重依赖；
+- 不改 checkpoint 格式；
+- 不改 TUI/display contract。
+
+#### B. MCP Client / Tool Bridge Discovery（工具审计之后）
+
+**目标**：
+- 研究如何把外部 MCP server 暴露的 tools 映射成本地 tool registry；
+- 研究 MCP tool schema 如何适配本地 tool schema；
+- 研究 MCP tool result 如何适配本地 tool result contract；
+- 研究 MCP 工具调用如何复用本地 HITL/confirmation；
+- 研究 MCP 工具错误如何纳入本地错误 contract；
+- 研究 MCP client 边界，不把 MCP 逻辑塞进 `core.py` 或 `tool_executor.py`；
+- 研究安全边界和用户批准边界。
+
+**非目标**：
+- 不直接实现完整 MCP；
+- 不做 MCP server；
+- 不联网；
+- 不接真实私有数据源；
+- 不绕过本地工具审批；
+- 不做权限系统大改。
+
+**高内聚 / 低耦合完成标准**：
+- tool registry 不做执行；
+- tool executor 不做业务决策；
+- `core.py` 不知道具体工具细节；
+- confirmation handlers 继续处理用户确认语义；
+- MCP adapter 不污染本地 tool contract；
+- tests 保护工具 contract 和架构边界，而不仅是表面行为。
+
+---
+
+### Stage 3 · Memory system
 
 **主题**：跨会话语义沉淀（与 Stage 1 的 checkpoint 是不同关注点）。
 
@@ -296,6 +369,7 @@ push 或 tag，除非用户单独选择对应动作。
 - 其他开源 coding agent 的 memory provider 设计。
 
 **口径硬约束**：
+- **Memory Discovery 在 Tooling Foundation Milestone / MCP Tool Bridge Discovery 之后启动**；
 - **Memory 优先于 sub-agent / Skill 正式化**；
 - **先 Discovery / Architecture Planning，后 implementation**；
 - **不直接做 RAG / retrieval / embedding / vector DB**；
@@ -460,25 +534,30 @@ push 或 tag，除非用户单独选择对应动作。
 
 ## Near-term Execution Plan
 
-HITL/Input Roadmap 已阶段性收口。下一阶段只进入 **Memory System Discovery /
-Memory Architecture Planning**，不是 Memory implementation，也不是 RAG
-implementation。
+HITL/Input Roadmap 已阶段性收口。Memory System Discovery Roadmap Correction
+已完成，但 Memory 不是立刻下一步。下一阶段先进入 **Tooling Foundation
+Milestone**：先做 Tool Module Architecture Audit，再做 MCP Client / Tool
+Bridge Discovery；之后才进入 Memory System Discovery。
 
 接下来最小 slice，按顺序执行（每个 slice 单独 commit + 单独 audit）：
 
 | # | Slice | Stage | Action type | Expected output | Quality gate | Stop condition |
 |---|---|---|---|---|---|---|
-| 1 | **Audit + push HITL/Input closure commits** | meta | audit/release | tests-only boundary commit + roadmap docs commit 被人工审计后再 push | working tree clean；ahead/behind 可解释；无 tag | 输出 + ask_user |
-| 2 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 只读梳理现有 `memory/` artifact、prompt 注入点、checkpoint/session 边界；不读私人敏感内容 | 不改文件；不联网；不实现 | 输出 + ask_user |
-| 3 | **Memory Architecture Planning** | Stage 3 | planning | problem statement、non-goals、memory taxonomy、lifecycle、scope、provider seam、privacy/human approval rules | plan only；不改 production | plan + ask_user |
-| 4 | **Memory boundary characterization tests planning** | Stage 3 | planning | 决定先钉哪些边界：memory vs checkpoint/session/skill/hook、no auto-write、provider fallback | 不新增依赖；不实现 Memory | plan + ask_user |
-| 5 | **Industry memory/provider research task** | Stage 3 | research | 调研 Hermes / OpenCode / Morsey / Claude Code / Codex / LangGraph 等 memory/provider 思路 | 用户明确授权后再联网；只输出研究结论 | 输出 + ask_user |
+| 1 | **HITL/Input Roadmap Closure** | Stage 2 | done | User Input Resolution Contract + input backend confirmation boundary safety net 已完成 | 已 push；不继续扩大 HITL | closed |
+| 2 | **Memory System Discovery Roadmap Correction** | Stage 3 | done | Memory 被定义为独立逻辑模块；RAG 降级为 provider/backend 候选 | 已 push；未实现 Memory/RAG | closed |
+| 3 | **Tool Module Architecture Audit** | Stage 2.5 | read-only audit | 只读梳理 tool registry / schema / executor / result / error / approval / logging / checkpoint / runtime 边界 | 不改文件；不实现工具；不联网 | 输出 + ask_user |
+| 4 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究 MCP tools 如何映射到本地 tool registry/schema/result/error/approval contract | 不实现 MCP；不接真实私有数据源；不新增依赖 | 输出 + ask_user |
+| 5 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
+| 6 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
+| 7 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
+| 8 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
 
 **严禁打包**：不要把 Discovery、Planning、Tests、Implementation 混进同一个 commit。
 
-**RAG 口径**：RAG / retrieval / vector DB / embedding 不是与 Memory 并列的
-Roadmap 大能力；它们只能作为后续 Memory Provider backend 或 recall strategy
-候选。当前不得直接上 RAG、embedding、vector DB 或新增重依赖。
+**RAG 口径**：RAG / retrieval / vector DB / embedding 不是与 Memory / Skill /
+Hook / Tooling Foundation 并列的 Roadmap 大能力；它们只能作为后续 Memory
+Provider、Knowledge Access Provider 或 tool-backed retrieval 的实现候选。
+当前不得直接上 RAG、embedding、vector DB 或新增重依赖。
 
 ---
 

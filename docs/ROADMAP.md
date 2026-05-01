@@ -43,8 +43,8 @@ core**。
 |---|---|---|---|
 | **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
-| **2** | **TUI interaction layer**（**当前阶段**） | 🟡 boundary safety net 已立，MVP 未做 | v0.6.x |
-| **3** | Memory system | ⏳ 未启动 | 后续 |
+| **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
+| **3** | **Memory system**（**下一阶段：Discovery / Architecture Planning**） | 🟡 只读 discovery，不实现 | 后续 |
 | **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
 | **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 持续打底（v0.5 已开始） | 跨阶段 |
@@ -54,30 +54,29 @@ core**。
 **全局停止规则**：
 - 任何"我觉得这块该做"的改动，先回答："这属于哪个 Stage 的毕业标准？"
 - 答不出 → **推迟到对应 Stage backlog**，不在当前 Stage 做。
-- **当前 Stage 2 未收口前，禁止启动 Stage 3/4/5 的实质实现**（Stage 6/7 可作必要补丁）。
+- **Stage 3 先做 Memory System Discovery / Architecture Planning，不直接实现 Memory/RAG**；
+  Stage 4/5 的实质实现仍必须等 Memory 边界清楚后再启动（Stage 6/7 可作必要补丁）。
 
 ---
 
 ## Current Position
 
-> **当前处于 Stage 2: TUI interaction layer (v0.6.x)。**
+> **当前处于 Stage 3 准备态：Memory System Discovery / Memory Architecture Planning。**
 
-- ✅ HEAD `bdf0b9f` 与 `origin/main` 同步（ahead/behind 0/0）
-- ✅ v0.5.1 已 tag（annotated `ce65bdca` → commit `240308b`）；v0.5.0 → `32d4ca1` 不变
-- ✅ v0.6.1 已实现并 push（commits `afd82f5` + `11826cd` + `08bfbe7` + `bdf0b9f`）
-- 🟡 **v0.6.1 未 tag / 未 release**
-- ✅ v0.6.1 完成 **Group A/E**（dependency boundary 7 tests）+ **Group C**（input contract 7 tests）+ **Group D**（display event contract 5 tests）= **19 characterization tests**
-- 🟡 **当前仍有 3 xfailed**：
-  1. `tests/test_hardcore_round2.py::test_user_switches_topic_mid_task` — Stage 1/2 输入语义
-  2. `tests/test_input_backends_textual.py::test_textual_shell_escape_can_cancel_running_generation` — Stage 1 cancel + Stage 2 TUI Esc
-  3. `tests/test_real_cli_regressions.py::test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent` — Stage 2 paste burst
-- ❌ **当前还没有正式 TUI MVP**
-- ❌ 当前还没进入 Stage 3 Memory
-- ❌ 当前还没进入 Stage 4 sub-agent
-- ❌ 当前还没进入 Stage 5 Skill 正式化
+- ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
+- ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
+  runtime boundary、最小 helper extraction 已有 characterization tests 与 commits。
+- ✅ HITL/Input boundary 已阶段性收口：User Input Resolution Contract 与
+  input backend 不绕过 confirmation handlers 的 tests-only safety net 已建立。
+- 🟡 仍保留已知 backlog：XFAIL-1（复杂 topic switch）与 XFAIL-2（Esc cancel /
+  generation interruption）必须单独立项，不作为继续扩大 HITL/Input 的理由。
+- ❌ 当前还没进入 Memory 实现；下一步只做 Discovery / Architecture Planning。
+- ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
+  embedding / vector DB 实现。
 
-> pytest 基线 **920 passed / 3 xfailed** — *from the v0.6.1 Group D completion
-> run; not re-run in this docs-only commit.*
+> 口径：下一阶段是 **Memory System Discovery**，不是 RAG Discovery。
+> Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
+> 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
 
 ---
 
@@ -129,35 +128,38 @@ core**。
 
 ---
 
-### Stage 2 · TUI interaction layer ⭐**当前阶段**
+### Stage 2 · TUI interaction layer / HITL Input boundary ✅**阶段性收口**
 
 **主题**：在不污染 runtime core 的前提下，把 textual.py / simple.py 从"已可用
 但未被测试钉死"演进成"边界硬化 + TUI MVP 子集落地（解 Stage 1/2 历史 xfail）+
 收口 release"。
 
-**主要承载**：v0.6.x（v0.6.0 docs audit + v0.6.1 三层 boundary safety net + v0.6.x next）
+**主要承载**：v0.6.x（v0.6.0 docs audit + v0.6.1 三层 boundary safety net +
+v0.6.2 TUI MVP + HITL/Input contract closure）
 
 **毕业标准（必须全部 ✅ 才能宣布 Stage 2 收口、才能进入 Stage 3 Memory）**：
 
 | # | 项 | 当前 | 备注 |
 |---|---|---|---|
 | 1 | textual / simple input backend 已存在 | ✅ | textual.py 549 + simple.py 129 |
-| 2 | Ask User / request user input | 🟡 | 项目模式必须每轮触发；TUI 中 Ask User UI **未明确实现** |
-| 3 | Other / free-text 路径 | 🟡 | v0.6.0 audit §5 风险 5 已点名；characterization test **未补** |
+| 2 | Ask User / request user input | ✅ | User Input Resolution Contract 钉住 pending request / collect_input / normal input 边界；完整 UI polish 不继续扩大为 HITL 系统 |
+| 3 | Other / free-text 路径 | ✅ | feedback/free-text 与普通新任务边界已由 tests 保护 |
 | 4 | input backend 不 mutate runtime state | ✅ | v0.6.1 Group A/E + C 已钉 |
-| 5 | input backend 不绕过 confirmation handlers | 🟡 | v0.6.0 audit §5 风险 4；characterization test **未补**（计划 v0.6.4） |
+| 5 | input backend 不绕过 confirmation handlers | ✅ | `tests/test_input_backend_user_contract.py` C5：不 direct-call handlers、不读 pending/status、不按 awaiting status 分支 |
 | 6 | display event contract | ✅ | v0.6.1 Group D 已钉 |
 | 7 | display layer 不做 runtime decision | ✅ | v0.6.1 Group A/E AST baseline |
 | 8 | no sensitive read | ✅ | v0.6.1 Group A/E 字面扫描；word-boundary regex 防 `.envelope` 假阳性 |
-| 9 | **current 3 xfailed inventory** | ❌ | **未做**（计划 v0.6.x next） |
-| 10 | **TUI MVP planning** | ❌ | **未做** |
-| 11 | **TUI MVP minimum implementation** | ❌ | **未做** — 目标 = 解 paste burst + Esc cancel + Ask User UI 至少 1 项 |
-| 12 | **TUI MVP regression tests** | ❌ | **未做** |
+| 9 | current xfailed inventory | ✅ | XFAIL-3 已解；XFAIL-1 / XFAIL-2 保留为独立 backlog，不阻塞 HITL/Input 收口 |
+| 10 | TUI MVP planning | ✅ | v0.6.2 MVP scope 已收敛到 paste burst / multiline intent |
+| 11 | TUI MVP minimum implementation | ✅ | paste burst / multiline input intent 已落地；不顺手做 Esc cancel |
+| 12 | TUI MVP regression tests | ✅ | real CLI / user_input / simple backend contract tests 已钉 |
 
 **口径硬约束**：
 - **只叫 TUI，不叫 TOI**
 - **TUI 不是 Web UI**
-- **Stage 2 收口前不进入 Stage 3 Memory**
+- **HITL/Input 已阶段性收口后，不继续扩大成完整 HITL 系统**
+- **XFAIL-1 / XFAIL-2 仍需单独立项，不作为继续堆 input backend/core.py 的理由**
+- **下一步只进入 Memory System Discovery / Architecture Planning，不直接实现 Memory/RAG**
 
 #### v0.6.2 后 Architecture Debt Exit Criteria / Roadmap Quantification
 
@@ -215,30 +217,96 @@ push 或 tag，除非用户单独选择对应动作。
 
 ---
 
-### Stage 3 · Memory system
+### Stage 3 · Memory system ⭐**下一阶段：Discovery / Architecture Planning**
 
 **主题**：跨会话语义沉淀（与 Stage 1 的 checkpoint 是不同关注点）。
 
-**毕业标准**：
-- session summary（每会话结束的摘要）
-- project memory（项目级稳定知识）
-- user profile memory（用户偏好；现 `memory/profile.json` 仅是数据文件，无 injection 实现）
-- memory storage（持久化策略）
-- **memory injection boundary**（注入到 prompt 的边界，必须经 prompt_builder）
-- memory update policy（什么时候写、谁能写）
-- explicit approval / forget（用户可显式删除 / 忘记）
-- memory compression（避免无限增长）
-- memory safety tests（注入不污染 runtime / 不绕过 permission）
-- **memory vs checkpoint vs runtime state 的清晰边界**
+**当前只做 Discovery / Architecture Planning，不做 implementation。**
+
+学习型边界说明：
+- Memory 是 Agent Runtime 的长期语义层，回答“哪些稳定事实、偏好、项目知识、
+  历史决策、可复用流程应在未来会话中被召回”。
+- Memory **不是 checkpoint**：checkpoint 保存 runtime crash/resume 状态；
+  Memory 保存跨会话语义，不承担恢复 pending tool / pending confirmation。
+- Memory **不是 Skill / Hook**：Skill 是可调用能力或知识包，Hook 是生命周期扩展点；
+  Memory 是可保留、召回、更新、遗忘的语义记录。
+- Memory **不是 RAG 本身**：Retrieval / RAG / vector DB / embedding 只能作为
+  后续 provider backend 或 recall strategy 候选，不能作为与 Memory 并列的下一阶段能力。
+
+**Discovery 必须先回答的问题**：
+- What should be remembered?
+- Who decides what enters memory?
+- What is short-term vs long-term memory?
+- What is project memory vs user memory?
+- What is semantic vs episodic vs procedural memory?
+- What is curated vs auto-generated memory?
+- What is session summary vs checkpoint?
+- What is memory provider seam?
+- What is recall interface?
+- What is retain/update/forget interface?
+- What should remain local-only?
+- What must require human approval?
+- What should never be remembered?
+- How do we avoid RAG-first architecture?
+- How do we avoid memory becoming a new monolith?
+
+**Memory type taxonomy（Discovery 起点，不代表立即实现）**：
+- semantic memory：用户事实、项目事实、长期偏好；
+- episodic memory：历史任务、重要决策、执行经验；
+- procedural memory：可复用规则、操作流程、项目约束；
+- curated memory：人工确认过的稳定记忆；
+- session summary：会话摘要，短期压缩上下文，不等同 long-term memory；
+- project memory：项目级上下文，与 repo/workspace 绑定。
+
+**Provider seam 初步方向（后续 discovery，不实现）**：
+- 内置 Memory System 应先有清晰的本地数据模型与 lifecycle；
+- 同时预留 Memory Provider seam，使外部记忆系统可以作为 provider 接入；
+- provider 不可用时必须有 local-first fallback，不影响核心 Agent Loop；
+- provider seam 不能让 Memory 反向污染 checkpoint、core.py、input backend 或 Skill；
+- Retrieval / RAG / vector DB / embedding 只能是 provider backend/recall strategy 的后续候选，
+  当前不得直接引入 embedding、vector DB 或重依赖。
+
+**Lifecycle / scope 设计问题（后续 discovery）**：
+- retain / recall / update / forget 的调用入口与审批边界；
+- user / project / session / repo scope 的隔离规则；
+- 哪些内容必须 human approval 后才能进入 long-term memory；
+- 哪些内容只能成为 session summary，不能进入 long-term memory；
+- privacy / local-first / no sensitive read 的默认策略；
+- memory 注入 prompt 的边界必须经 prompt_builder 或后续明确 seam，不得散落在 runtime。
+
+**毕业标准（待 discovery 后细化）**：
+- memory problem statement：解决什么、不解决什么；
+- memory vs session messages / checkpoint / skills / hooks 的边界图；
+- memory record/schema 初稿；
+- memory lifecycle policy：retain / recall / update / forget；
+- memory scope policy：user / project / session / repo；
+- provider seam design；
+- provider unavailable fallback；
+- privacy / local-first / human approval rules；
+- memory safety tests：注入不污染 runtime、不绕过 permission、不读取敏感资料；
+- anti-monolith tests：Memory 不反向依赖 input backend / core 巨石 / checkpoint schema。
+
+**业界调研（后续 discovery task，本轮不联网、不实现）**：
+- Hermes Agent；
+- OpenCode；
+- Morsey Agent；
+- Claude Code memory / skills / hook 思路；
+- Codex / OpenAI coding agent approval / sandbox 思路；
+- LangChain / LangGraph memory 分类；
+- 其他开源 coding agent 的 memory provider 设计。
 
 **口径硬约束**：
-- **Memory 优先于 sub-agent**
-- **Memory ≠ checkpoint**：checkpoint 是 runtime state 持久化（崩溃恢复）；
-  Memory 是跨会话**语义沉淀**（个性化、项目知识）
-- **Stage 2 未收口前不启动 Stage 3 实质实现**
+- **Memory 优先于 sub-agent / Skill 正式化**；
+- **先 Discovery / Architecture Planning，后 implementation**；
+- **不直接做 RAG / retrieval / embedding / vector DB**；
+- **不新增重依赖**；
+- **不让 Memory 变成新巨石**；
+- **不允许 agent 自动乱写长期记忆**，进入 long-term memory 的内容必须有明确 retain 规则，
+  敏感或稳定偏好类信息必须经过 human approval。
 
 **现状**：`memory/` 目录已有 profile.json / episodes / rules / checkpoint.json 数据文件，
-**但未见对应注入/审批/遗忘代码** → 接近从零。
+**但未见对应注入/审批/遗忘代码**。这些只能作为历史 artifact / discovery 线索，
+不代表 Stage 3 已实现。
 
 ---
 
@@ -392,21 +460,25 @@ push 或 tag，除非用户单独选择对应动作。
 
 ## Near-term Execution Plan
 
-接下来 6 个最小 slice，按顺序执行（每个 slice 单独 commit + 单独 audit）：
+HITL/Input Roadmap 已阶段性收口。下一阶段只进入 **Memory System Discovery /
+Memory Architecture Planning**，不是 Memory implementation，也不是 RAG
+implementation。
+
+接下来最小 slice，按顺序执行（每个 slice 单独 commit + 单独 audit）：
 
 | # | Slice | Stage | Action type | Expected output | Quality gate | Stop condition |
 |---|---|---|---|---|---|---|
-| 1 | **Audit this canonical roadmap commit** | meta | audit | docs-only / 单文件 / 无 TOI / 无 Web UI 路线 / Stage 顺序符合 canonical | working tree clean；只动 `docs/ROADMAP.md` | audit 输出 PASS/FAIL + ask_user |
-| 2 | **Push canonical roadmap commit after audit PASS** | meta | release | `git push origin main` | ahead/behind 0/0；origin/main 包含本 commit；v0.5.0/v0.5.1 tag 不变 | push 成功 + ask_user |
-| 3 | **v0.6 xfail inventory (read-only audit)** | Stage 2 | audit | 3 xfail 的 root cause / 解锁条件 / 推荐顺序（输出在对话，不写文件） | working tree clean | 输出 + ask_user |
-| 4 | **v0.6.2 TUI MVP planning** | Stage 2 | planning | TUI MVP scope（解哪 1 个 xfail + Ask User UI 最小集），输出在对话 | working tree clean | 输出 + ask_user |
-| 5 | **v0.6.2 TUI MVP characterization tests** | Stage 2 | coding (tests) | tests-only commit，钉死 TUI MVP 入口边界 | ruff clean / pytest +N passed / 无新 xfail | commit + audit + push |
-| 6 | **v0.6.2 TUI MVP minimum implementation** | Stage 2 | coding (production + tests) | 解 1 个最小 xfail 或落地 1 项 Ask User UI | ruff / pytest 减 1 xf 或 +N passed / 无新 xf | commit + audit + push |
+| 1 | **Audit + push HITL/Input closure commits** | meta | audit/release | tests-only boundary commit + roadmap docs commit 被人工审计后再 push | working tree clean；ahead/behind 可解释；无 tag | 输出 + ask_user |
+| 2 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 只读梳理现有 `memory/` artifact、prompt 注入点、checkpoint/session 边界；不读私人敏感内容 | 不改文件；不联网；不实现 | 输出 + ask_user |
+| 3 | **Memory Architecture Planning** | Stage 3 | planning | problem statement、non-goals、memory taxonomy、lifecycle、scope、provider seam、privacy/human approval rules | plan only；不改 production | plan + ask_user |
+| 4 | **Memory boundary characterization tests planning** | Stage 3 | planning | 决定先钉哪些边界：memory vs checkpoint/session/skill/hook、no auto-write、provider fallback | 不新增依赖；不实现 Memory | plan + ask_user |
+| 5 | **Industry memory/provider research task** | Stage 3 | research | 调研 Hermes / OpenCode / Morsey / Claude Code / Codex / LangGraph 等 memory/provider 思路 | 用户明确授权后再联网；只输出研究结论 | 输出 + ask_user |
 
-**严禁打包**：把上述任意两个 slice 合并到一个 commit。
+**严禁打包**：不要把 Discovery、Planning、Tests、Implementation 混进同一个 commit。
 
-> Slice 4 完成后，再决定是否在 Slice 5/6 之前插入 v0.6.1 readiness/release notes
-> （仅在决定给 v0.6.1 tag 时才做；否则跳过）。
+**RAG 口径**：RAG / retrieval / vector DB / embedding 不是与 Memory 并列的
+Roadmap 大能力；它们只能作为后续 Memory Provider backend 或 recall strategy
+候选。当前不得直接上 RAG、embedding、vector DB 或新增重依赖。
 
 ---
 

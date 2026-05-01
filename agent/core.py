@@ -817,23 +817,7 @@ def chat(
     if _dispatched is not None:
         return _dispatched
 
-    # 到这里才是真正的「新一轮对话」：可以安全做压缩。
-    messages = state.conversation.messages
-    compressed_messages, new_summary = compress_history(
-        messages,
-        client,
-        existing_summary=state.memory.working_summary,
-        max_recent_messages=state.runtime.max_recent_messages,
-    )
-    compression_happened = (
-        compressed_messages is not messages or new_summary != state.memory.working_summary
-    )
-    state.conversation.messages = compressed_messages
-    state.memory.working_summary = new_summary
-    # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
-    if compression_happened and state.task.current_plan:
-        from agent.checkpoint import save_checkpoint as _save_checkpoint
-        _save_checkpoint(state)
+    _compress_history_and_sync_checkpoint(_loop_ctx)
 
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
@@ -852,6 +836,36 @@ def chat(
 
 
 # ========== 规划阶段 ==========
+
+
+def _compress_history_and_sync_checkpoint(loop_ctx: LoopContext) -> None:
+    """在进入新对话分支前压缩历史，并保持 active task checkpoint 同步。
+
+    这是 Architecture Debt 第二刀的最小 behavior-preserving helper extraction：
+    `chat()` 仍然决定何时进入"真正的新一轮对话"，本 helper 只封装原地已有的
+    compression + active-task checkpoint sync 时机。它不改变 checkpoint schema、
+    不改变 pending confirmation / Ask User / TUI contract，也不处理 XFAIL-1 /
+    XFAIL-2；checkpoint ownership 仍留在 `agent.core` runtime 层。
+    """
+
+    # 到这里才是真正的「新一轮对话」：可以安全做压缩。
+    messages = state.conversation.messages
+    compressed_messages, new_summary = compress_history(
+        messages,
+        loop_ctx.client,
+        existing_summary=state.memory.working_summary,
+        max_recent_messages=state.runtime.max_recent_messages,
+    )
+    compression_happened = (
+        compressed_messages is not messages or new_summary != state.memory.working_summary
+    )
+    state.conversation.messages = compressed_messages
+    state.memory.working_summary = new_summary
+    # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
+    if compression_happened and state.task.current_plan:
+        from agent.checkpoint import save_checkpoint as _save_checkpoint
+
+        _save_checkpoint(state)
 
 
 def _run_planning_phase(

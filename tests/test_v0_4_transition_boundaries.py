@@ -2934,6 +2934,50 @@ def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
     )
 
 
+def test_chat_routes_new_turn_compression_through_single_helper():
+    """第二刀 helper extraction 只收口 compression + checkpoint sync 时机。
+
+    这个 characterization 保护 Architecture Debt 治理边界：`chat()` 仍决定何时
+    进入真正的新一轮对话，helper 只复用同一个 loop_ctx 执行历史压缩与 active
+    task checkpoint 同步。它不能顺手改 Ask User、TUI contract、checkpoint
+    schema，也不能借机处理 XFAIL-1 topic switch 或 XFAIL-2 Esc cancel。
+    """
+
+    import inspect
+
+    from agent import core
+
+    chat_src = inspect.getsource(core.chat)
+    helper_src = inspect.getsource(core._compress_history_and_sync_checkpoint)
+
+    assert "_compress_history_and_sync_checkpoint(_loop_ctx)" in chat_src, (
+        "chat() 的新一轮对话压缩必须进入共享 helper，避免继续膨胀主入口"
+    )
+    assert "compress_history(" in helper_src, (
+        "_compress_history_and_sync_checkpoint 必须保留历史压缩职责"
+    )
+    assert "loop_ctx.client" in helper_src, (
+        "compression helper 必须复用 chat() 单源构造的 LoopContext client"
+    )
+    assert "_save_checkpoint(state)" in helper_src, (
+        "active task 压缩后必须仍立即同步 checkpoint，避免 summary/checkpoint 漂移"
+    )
+    forbidden = (
+        "request_user_input",
+        "pending_user_input_request",
+        "plan_confirmation_requested",
+        "display_event",
+        "Textual",
+        "cancel",
+        "topic",
+    )
+    for token in forbidden:
+        assert token not in helper_src, (
+            "_compress_history_and_sync_checkpoint 不能越界处理 Ask User/TUI/"
+            f"XFAIL 语义：{token}"
+        )
+
+
 def test_planning_helpers_do_not_smuggle_durable_state_through_loop_ctx():
     """LoopContext 字段集合保持 runtime-only，禁止承载 durable state。
 

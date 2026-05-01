@@ -305,9 +305,9 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.confirm_handlers", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.core", "_compress_history_and_sync_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
         ("agent.core", "_run_main_loop", "clear_checkpoint", "_clear_checkpoint", 1),
         ("agent.core", "_run_planning_phase", "save_checkpoint", "_save_checkpoint", 1),
-        ("agent.core", "chat", "save_checkpoint", "_save_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", "clear_checkpoint", 1),
@@ -347,7 +347,7 @@ def test_core_checkpoint_alias_calls_are_not_invisible_to_inventory() -> None:
 
     assert (
         "agent.core",
-        "chat",
+        "_compress_history_and_sync_checkpoint",
         "save_checkpoint",
         "_save_checkpoint",
     ) in calls

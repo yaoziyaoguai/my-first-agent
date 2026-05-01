@@ -259,6 +259,7 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_dispatch_model_output",
         "_dispatch_pending_confirmation",
         "_extract_text",
+        "_handle_planning_phase_result",
         "_protocol_dump_enabled",
         "_run_main_loop",
         "_run_planning_phase",

@@ -2890,14 +2890,15 @@ def test_planning_phase_no_longer_reads_module_level_client_or_model_name():
 
 
 def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
-    """chat() 与 _build_confirmation_context helper 三个调用点都必须把
-    _loop_ctx / loop_ctx 透传出去。
+    """chat()、confirmation context、planning result helper 都必须透传 loop_ctx。
 
-    当前调用点：
+    当前规划相关调用点：
     - chat() 直接调 _run_planning_phase(user_input, turn_state, _loop_ctx)
     - _build_confirmation_context.start_planning_fn lambda 调
       _start_planning_for_handler(inp, ts, loop_ctx)
-    新增第三个调用点（如 chat() 增加新的 planning 入口）必须同步。
+    - chat() 与 _start_planning_for_handler 都把 plan_result 交给
+      _handle_planning_phase_result；该 helper 负责 ok -> _run_main_loop。
+    新增 planning 入口必须同步进入同一个 helper，避免两个入口分叉。
 
     v0.5 第二小步注意：start_planning_fn lambda 已从 chat() 内迁到
     _build_confirmation_context helper 内，参数名也从闭包变量
@@ -2910,13 +2911,26 @@ def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
     from agent import core
 
     chat_src = inspect.getsource(core.chat)
-    helper_src = inspect.getsource(core._build_confirmation_context)
+    context_src = inspect.getsource(core._build_confirmation_context)
+    handler_src = inspect.getsource(core._start_planning_for_handler)
+    result_src = inspect.getsource(core._handle_planning_phase_result)
     assert "_run_planning_phase(user_input, turn_state, _loop_ctx)" in chat_src, (
         "chat() 直接调用 _run_planning_phase 时必须传 _loop_ctx"
     )
-    assert "_start_planning_for_handler(" in helper_src and "loop_ctx" in helper_src, (
+    assert "_start_planning_for_handler(" in context_src and "loop_ctx" in context_src, (
         "_build_confirmation_context.start_planning_fn lambda 必须透传 loop_ctx 到"
         " _start_planning_for_handler"
+    )
+    assert (
+        "return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx)"
+        in chat_src
+    ), "chat() 的 planning result 必须交给共享 helper，禁止复制三分支"
+    assert (
+        "return _handle_planning_phase_result(plan_result, turn_state, loop_ctx)"
+        in handler_src
+    ), "_start_planning_for_handler 必须复用共享 helper，禁止复制三分支"
+    assert "return _run_main_loop(turn_state, loop_ctx)" in result_src, (
+        "_handle_planning_phase_result 的 ok 分支必须透传同一个 loop_ctx 到主循环"
     )
 
 
@@ -2934,7 +2948,11 @@ def test_planning_helpers_do_not_smuggle_durable_state_through_loop_ctx():
 
     from agent import core
 
-    for fn_name in ("_run_planning_phase", "_start_planning_for_handler"):
+    for fn_name in (
+        "_run_planning_phase",
+        "_start_planning_for_handler",
+        "_handle_planning_phase_result",
+    ):
         src = inspect.getsource(getattr(core, fn_name))
         for forbidden in ("loop_ctx.state", "loop_ctx.task", "loop_ctx.messages",
                           "loop_ctx.checkpoint", "loop_ctx.conversation",
@@ -3184,19 +3202,20 @@ def test_run_main_loop_consumes_only_max_loop_iterations_from_loop_ctx():
 
 
 def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
-    """chat() / _build_confirmation_context / _start_planning_for_handler 的
-    _run_main_loop 调用都透传 loop_ctx。
+    """chat() / _build_confirmation_context / planning result helper 都透传 loop_ctx。
 
     当前调用点（共 4 处）：
     - _build_confirmation_context.continue_fn lambda：_run_main_loop(ts, loop_ctx)
     - chat() awaiting/running 分支：_run_main_loop(turn_state, _loop_ctx)
-    - chat() 新任务执行兜底分支：_run_main_loop(turn_state, _loop_ctx)
-    - _start_planning_for_handler 兜底：_run_main_loop(turn_state, loop_ctx)
+    - _handle_planning_phase_result 兜底：_run_main_loop(turn_state, loop_ctx)
+      （chat() 新任务与 _start_planning_for_handler 都先进入该 helper）
     任何新增 _run_main_loop 调用点都必须同步加参数。
 
     v0.5 第二小步注意：原 ConfirmationContext.continue_fn lambda 已从
     chat() 内迁到 _build_confirmation_context helper 内，因此 chat() 内
     的 _run_main_loop 直接调用次数从 3 减为 2，第 3 处出现在 helper 内。
+    v0.6.2 后第一刀 helper extraction 再把 planning result 兜底主循环从
+    chat()/handler 两处收口到 _handle_planning_phase_result。
     """
 
     import inspect
@@ -3204,16 +3223,16 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
     from agent import core
 
     chat_src = inspect.getsource(core.chat)
-    helper_src = inspect.getsource(core._build_confirmation_context)
-    handler_src = inspect.getsource(core._start_planning_for_handler)
+    context_src = inspect.getsource(core._build_confirmation_context)
+    result_src = inspect.getsource(core._handle_planning_phase_result)
 
-    # chat() 至少应有 2 处直接调用（awaiting/running 分支 + 新任务兜底分支）
+    # chat() 仍保留 awaiting/running 分支的直接调用；新任务兜底由 helper 接管。
     chat_call_count = chat_src.count("_run_main_loop(")
-    assert chat_call_count >= 2, (
-        f"chat() 至少应有 2 处直接 _run_main_loop 调用，实际：{chat_call_count}"
+    assert chat_call_count >= 1, (
+        f"chat() 至少应有 1 处直接 _run_main_loop 调用，实际：{chat_call_count}"
     )
     # _build_confirmation_context helper 必须有 1 处（continue_fn lambda）
-    assert helper_src.count("_run_main_loop(") >= 1, (
+    assert context_src.count("_run_main_loop(") >= 1, (
         "_build_confirmation_context.continue_fn lambda 必须调用 _run_main_loop"
     )
     # chat() 中所有 _run_main_loop 调用都必须传 _loop_ctx
@@ -3221,13 +3240,13 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
         "chat() 中所有 _run_main_loop 调用都必须传 _loop_ctx"
     )
     # helper 中 _run_main_loop 调用必须传 loop_ctx 形参
-    assert "loop_ctx" in helper_src, (
+    assert "loop_ctx" in context_src, (
         "_build_confirmation_context 必须把 loop_ctx 透传给 _run_main_loop lambda"
     )
 
-    # _start_planning_for_handler 应有 1 处调用并传 loop_ctx
-    assert "_run_main_loop(turn_state, loop_ctx)" in handler_src, (
-        "_start_planning_for_handler 调用 _run_main_loop 必须传上层 loop_ctx"
+    # planning result helper 应有 1 处调用并传 loop_ctx。
+    assert "_run_main_loop(turn_state, loop_ctx)" in result_src, (
+        "_handle_planning_phase_result 调用 _run_main_loop 必须传上层 loop_ctx"
     )
 
 

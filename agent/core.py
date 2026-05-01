@@ -848,13 +848,7 @@ def chat(
     state.reset_task()
 
     plan_result = _run_planning_phase(user_input, turn_state, _loop_ctx)
-    if plan_result == "cancelled":
-        return "好的，已取消。"
-
-    if plan_result == "awaiting_plan_confirmation":
-        return ""
-
-    return _run_main_loop(turn_state, _loop_ctx)
+    return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx)
 
 
 # ========== 规划阶段 ==========
@@ -950,6 +944,27 @@ def _run_planning_phase(
     return "awaiting_plan_confirmation"
 
 
+def _handle_planning_phase_result(
+    plan_result: str,
+    turn_state: TurnState,
+    loop_ctx: LoopContext,
+) -> str:
+    """统一处理规划阶段后的三种控制流结果。
+
+    这是 v0.6.2 后 Architecture Debt 第一刀的行为保持型 helper extraction：
+    `chat()` 主入口和 feedback-intent 切新任务入口都依赖同一套
+    cancelled / awaiting_plan_confirmation / ok 分流。把这段逻辑收口到一个
+    helper，避免两个入口未来漂移；helper 不写 checkpoint、不改 state、不碰 TUI
+    或 Ask User，只把既有结果映射到既有返回值或主循环。
+    """
+
+    if plan_result == "cancelled":
+        return "好的，已取消。"
+    if plan_result == "awaiting_plan_confirmation":
+        return ""
+    return _run_main_loop(turn_state, loop_ctx)
+
+
 def _start_planning_for_handler(
     user_input: str,
     turn_state: TurnState,
@@ -957,7 +972,7 @@ def _start_planning_for_handler(
 ) -> str:
     """与 chat() 主分支共用的"启动新任务"出口，供 confirm_handlers 注入。
 
-    P1 中 awaiting_feedback_intent 选 [2] 切新任务时调用。它复制 chat() 在
+    P1 中 awaiting_feedback_intent 选 [2] 切新任务时调用。它复用 chat() 在
     `_run_planning_phase` 后的三种路径处理（cancelled / awaiting_plan_confirmation /
     继续主循环），保证"用户主动开新任务"和"模糊反馈分流为新任务"走完全相同的
     后续路径——不会因为入口不同而出现 plan 展示、checkpoint 落盘、主循环触发
@@ -972,11 +987,7 @@ def _start_planning_for_handler(
     """
 
     plan_result = _run_planning_phase(user_input, turn_state, loop_ctx)
-    if plan_result == "cancelled":
-        return "好的，已取消。"
-    if plan_result == "awaiting_plan_confirmation":
-        return ""
-    return _run_main_loop(turn_state, loop_ctx)
+    return _handle_planning_phase_result(plan_result, turn_state, loop_ctx)
 
 
 # ========== 主循环 ==========

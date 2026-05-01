@@ -13,8 +13,6 @@ Runtime / Harness 风险钉住：
 
 from __future__ import annotations
 
-import pytest
-
 from tests.conftest import (
     FakeAnthropicClient,
     FakeResponse,
@@ -80,20 +78,27 @@ def _all_text_from_messages(messages: list[dict]) -> str:
     return "\n".join(texts)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "[归属：v0.3 高级 TUI（paste burst）· 解锁条件：输入层引入 prompt_toolkit / "
-        "bracketed paste / UserInputEnvelope paste burst 包装，把一次粘贴的多行编号列表"
-        "当作同一个 user intent；禁止通过强制用户使用 /multi 等命令绕过] "
-        "真实产品化缺口：普通 CLI input() 当前只读取第一行，用户自然粘贴编号列表/"
-        "多行旅行偏好会被拆成多轮输入。修复后应由 UserInputEnvelope / paste burst / "
-        "prompt_toolkit / bracketed paste 等输入层方案把一次粘贴包装成同一个用户意图，"
-        "届时本测试应移除 xfail 并断言返回完整多行文本。"
-    ),
-    strict=True,
-)
 def test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent():
-    """真实旅游 case 的产品体验回归：不能要求用户必须知道并使用 /multi。"""
+    """真实旅游 case 的产品体验回归：不能要求用户必须知道并使用 /multi。
+
+    v0.6.2 MVP（XFAIL-3 解锁）说明
+    -----------------------------
+    本测试在 v0.5.x 之前是 strict xfail：``read_user_input`` 普通分支只
+    调用 ``reader(prompt)`` 一次，paste burst 的 9 行被拆成 9 轮 user
+    intent，触发 plan/confirmation 循环混乱。
+
+    v0.6.2 在 ``agent/input_backends/simple.py`` 的 ``read_user_input_text``
+    普通分支末尾加了 ``_drain_paste_burst_lines``：
+      - fake reader（本测试场景）→ 用 try/EOFError 循环 drain，
+        9 元素 queue 被一次 pull 完，``"\\n".join`` 拼回；
+      - 真实交互（reader is builtins.input + tty）→ 用
+        ``select.select`` 零超时探测 stdin，仅当 paste 缓冲已就绪才继续
+        读，避免阻塞单行交互。
+
+    本测试 NOT 通过削弱断言或包成 try/except 假装通过；assertion 完整
+    保留。如果未来谁误把 drain 逻辑回滚或改成 substring hack，本测试
+    会立即抓到。
+    """
     from main import read_user_input
 
     pasted_lines = [

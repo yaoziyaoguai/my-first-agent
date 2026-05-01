@@ -292,3 +292,36 @@ def test_simple_backend_pasted_numbered_list_preserves_marker_chars():
     # 同时确保「粘贴整体」没有被截成单独的菜单选择字符串
     assert raw.count("\n") == 8, "9 行编号粘贴应保留 8 个换行（即 9 行整体）"
     assert event.envelope.input_mode == "multiline"
+
+
+def test_simple_backend_drains_paste_burst_queue_into_one_multiline_envelope():
+    """v0.6.2 MVP 防回归：fake reader 队列里 9 行 paste burst，应被
+    ``read_user_input_event`` 在 simple backend 内一次性 drain 进同一个
+    submitted 事件，而不是只取首行 ``"1. 北京出发"`` 后丢弃剩余 8 行。
+
+    本测试与 ``tests/test_real_cli_regressions.py`` 的 XFAIL-3 形成
+    双层防护：
+      - 上层（main.read_user_input → text 路径）：钉用户视角 join 文本；
+      - 本层（simple backend → event 路径）：钉 envelope 路径同样收完，
+        且 ``input_mode='multiline'``、``line_count==9``、``raw_text``
+        保留 9 行原样字符。
+
+    如果未来谁回滚 ``_drain_paste_burst_lines`` 或把 drain 改成只读
+    1 行，本测试会立即抓到——不允许通过弱化断言或新增 xfail 假装通过。
+
+    本测试用 fake reader（非真实 input），走 ``try/EOFError`` drain 分支；
+    真实交互 ``select.select`` 路径不在此覆盖范围（标准库 select 在
+    pytest 环境下行为不稳定，且交互行为属真实用户测试范畴）。
+    """
+
+    event = read_user_input_event(
+        reader=_make_reader(list(PASTED_NUMBERED_LINES)),
+        writer=_silent_writer,
+    )
+
+    assert event.event_type == "input.submitted"
+    assert event.envelope is not None
+    assert event.envelope.raw_text == "\n".join(PASTED_NUMBERED_LINES)
+    assert event.envelope.input_mode == "multiline"
+    assert event.envelope.line_count == 9
+    assert event.envelope.source == "cli"

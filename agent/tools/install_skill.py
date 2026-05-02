@@ -35,7 +35,10 @@ def install_skill(url: str) -> str:
     lines = [
         f"[安装成功] skill '{result['skill_name']}' 已安装到 {result['skill_path']}",
         "",
-        "skill 已加载到 registry，可以直接使用 load_skill 调用。",
+        (
+            "skill registry 已刷新；正式 Skill loading 工具将在后续 Skill System "
+            "阶段重新设计。"
+        ),
     ]
     
     if result.get("safety_warnings"):

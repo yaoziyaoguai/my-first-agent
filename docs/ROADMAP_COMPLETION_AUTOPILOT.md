@@ -16,6 +16,7 @@
 | Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
 | Observability Local Trace Foundation | complete | `agent.local_trace` + local-only trace contract tests | full runtime trace wiring deferred |
 | Structured ToolResult Envelope Foundation | complete | `ToolResultEnvelope` + `classify_tool_result` + ToolResult contract tests | full executor/tool return migration deferred |
+| Local Config Foundation | complete | `agent.local_config` + explicit safe-path config contract tests | real home config and installer/setup deferred |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -79,6 +80,18 @@
    - legacy string contract 仍兼容
    - no broad executor migration
    - no checkpoint/messages protocol rewrite
+
+9. Local Config Foundation
+   - `agent.local_config`
+   - `ProjectProfile`
+   - `SafetyPolicy`
+   - `ModuleToggles`
+   - `ModelProviderConfig`
+   - explicit tmp_path config parser
+   - 不读取真实 home config
+   - no `.env`
+   - no env secret expansion
+   - no provider/network call
 
 ## Release readiness
 

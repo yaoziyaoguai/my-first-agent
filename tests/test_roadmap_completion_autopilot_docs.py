@@ -91,3 +91,24 @@ def test_roadmap_records_structured_tool_result_envelope_foundation() -> None:
     )
     for phrase in required:
         assert phrase in roadmap or phrase in closure
+
+
+def test_roadmap_records_local_config_foundation() -> None:
+    """Stage 8 local productization 需要 safe-path config foundation。"""
+
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "Local Config Foundation 已完成",
+        "agent.local_config",
+        "ProjectProfile",
+        "SafetyPolicy",
+        "ModuleToggles",
+        "ModelProviderConfig",
+        "不读取真实 home config",
+    )
+    for phrase in required:
+        assert phrase in roadmap or phrase in closure

@@ -50,7 +50,7 @@ core**。
 | **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 **Local Trace Foundation 已完成；runtime wiring 持续打底** | 跨阶段 |
 | **7** | Tool system optimization | 🟡 **Structured ToolResult seam 已完成；executor 迁移 deferred** | 靠后 |
-| **8** | Customization / local productization | ⏳ 未启动 | 后期 |
+| **8** | Customization / local productization | 🟡 **Local Config Foundation 已完成；真实安装/用户目录写入 deferred** | 后期 |
 
 **全局停止规则**：
 - 任何"我觉得这块该做"的改动，先回答："这属于哪个 Stage 的毕业标准？"
@@ -124,6 +124,9 @@ core**。
 - ✅ Structured ToolResult Envelope Foundation 已完成：`ToolResultEnvelope` 与
   `classify_tool_result` 把 legacy string contract 投影成 status / display event /
   error taxonomy / redacted preview；legacy string contract 仍兼容，未大改 executor。
+- ✅ Local Config Foundation 已完成：`agent.local_config` 提供 `ProjectProfile` /
+  `SafetyPolicy` / `ModuleToggles` / `ModelProviderConfig` 的显式 safe-path parser；
+  不读取真实 home config，不读取 `.env`，不展开 env secret，不接 provider/network。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
@@ -739,6 +742,16 @@ push 或 tag，除非用户单独选择对应动作。
 
 **口径硬约束**：
 - 这是**本地工具产品化**，**不是** SaaS / Web UI
+
+**Local Config Foundation completion（Roadmap Completion Autopilot）**：
+- 已新增 `agent.local_config`：只读取显式 tmp_path fake/local JSON config。
+- 数据模型覆盖 `ProjectProfile`、`SafetyPolicy`、`ModuleToggles`、
+  `ModelProviderConfig`。
+- 默认 fail-closed：network / real MCP / real home writes / modules 全部默认关闭。
+- provider config 只保留 env var 名称与脱敏 marker，不读取 `.env`，不展开 env
+  secret，不输出真实 token。
+- 拒绝 `~` home config、`.env`、`agent_log.jsonl`、`sessions`、`runs` 路径。
+- 当前不做 install/setup 写入、不做真实用户目录配置、不改 runtime 启动配置。
 
 ---
 

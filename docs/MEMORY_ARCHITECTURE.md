@@ -360,6 +360,9 @@ Do not add now:
 - Readiness note: Slice 5 now provides safe operation/audit intent language.
   Slice 6 should define provider inputs/outputs only; providers must not bypass
   MemoryPolicy, confirmation, or operation audit contracts.
+- Current status: implemented as a fake/provider protocol seam. It can project
+  deterministic provider fixtures into MemoryCandidate / MemorySnapshot inputs,
+  but it is not a real provider, not an MCP client, and performs no IO/network.
 - Risk: protocol becomes too generic/anemic.
 - Stop condition: provider needs secrets/network.
 - Commit strategy: fake-only protocol tests.
@@ -372,6 +375,9 @@ Do not add now:
 - Tests first: remember/reject/forget flows with fake memory store.
 - Expected behavior: no secret reads, no real provider calls.
 - Acceptance criteria: no P0/P1/P2 before any release candidate.
+- Readiness note: Slice 6 now provides fake provider fixtures, but Slice 7
+  should still dogfood deterministic UX scenarios only. It must not read real
+  sessions/runs/logs or persist real memory.
 - Risk: dogfooding accidental real data.
 - Stop condition: requires real private memory data.
 - Commit strategy: tests/docs closure.

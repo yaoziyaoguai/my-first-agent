@@ -448,8 +448,10 @@ push 或 tag，除非用户单独选择对应动作。
 - Slice 5 forget/update safety 与 audit summary contract 已落地：
   `memory_operations` 只生成 operation intent / audit summary，不写 store、不真实
   update/forget；
-- Slice 6 下一步应先定义 External MemoryProvider adapter seam / future MCP
-  resources integration 的 fake/provider protocol；
+- Slice 6 External MemoryProvider adapter seam / future MCP resources integration
+  已落地：`memory_provider` 只提供 fake/provider protocol，把 deterministic
+  fixture 投影为 MemoryCandidate / MemorySnapshot 输入，不接真实 provider/MCP；
+- Slice 7 下一步应做 Memory UX dogfooding scenarios / docs / release readiness；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

@@ -44,7 +44,7 @@ core**。
 | **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
-| **2.5** | **Tooling Foundation Milestone**（**下一步**） | 🟡 Foundation cleanup / MCP 前 final review，不实现 MCP | 后续 |
+| **2.5** | **Tooling Foundation Milestone**（**下一步**） | ✅ 本地工具体系 + local stdio MCP validation 已可 release review | v0.7.0 候选 |
 | **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
 | **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
 | **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
@@ -64,7 +64,7 @@ core**。
 
 ## Current Position
 
-> **当前处于 Stage 2.5：Tooling Foundation Milestone cleanup / review。**
+> **当前处于 Stage 2.5：Tooling Foundation Milestone release review。**
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -75,11 +75,14 @@ core**。
   generation interruption）必须单独立项，不作为继续扩大 HITL/Input 的理由。
 - ✅ Memory System Discovery Roadmap Correction 已完成：Memory 是独立逻辑模块，
   RAG / retrieval / vector DB 只是后续 provider / recall backend 候选。
-- 🟡 下一步不是 Memory，而是 **MCP 前工具体系 final review**：Tool Module Audit
-  和 MCP 前 cleanup pack 已把 base registry / schema / result / file safety
-  边界收紧；commit 后先审计是否可阶段性收口，再进入 MCP Discovery。
-- ❌ 当前还没进入 MCP 实现或 Memory 实现；下一步只做 final review / discovery，
-  不直接接 MCP server、不联网、不引入依赖。
+- ✅ Tooling Foundation 已形成可 release review 的本地闭环：base registry /
+  ToolSpec metadata / ToolResult legacy seam / FileMutation path safety / MCP
+  architecture seam / local stdio MCP validation 均有 tests。
+- 🟡 下一步不是 Memory，也不是 MCP CLI implementation，而是 **release / push / tag
+  授权讨论**；如需继续 MCP，应单独规划 CLI config management 或外部 reference
+  server validation。
+- ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
+  sampling/roots、未做 production remote server auth、未做 release packaging。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
@@ -281,7 +284,7 @@ push 或 tag，除非用户单独选择对应动作。
 - 不绕过本地工具审批；
 - 不做权限系统大改。
 
-#### C. Tooling Foundation implementation checkpoint（MCP 未开始）
+#### C. Tooling Foundation implementation checkpoint（MCP 前基础已收口）
 
 **已形成的本地工具体系基础**：
 - base registry 已收窄：Skill lifecycle 的 `install_skill` / `load_skill` /

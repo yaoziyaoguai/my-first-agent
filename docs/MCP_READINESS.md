@@ -55,6 +55,18 @@ fixture 验证。
 - loader 不读取 `.env`，也不解析 env var。
 - `enabled=false` 的 server 不会注册任何 tool。
 
+## TUI 与 MCP CLI 的关系
+
+First Agent 已经有 TUI，但 TUI 和 MCP CLI 不在同一层：
+
+- TUI 是用户交互界面，负责输入、显示、确认体验；
+- MCP CLI 未来只应是 MCP server config management 的薄入口；
+- MCP CLI 不是 runtime 逻辑中心，也不是配置 source of truth；
+- 当前 MCP 最小闭环已经通过 config loader / client / local stdio validation / explicit
+  registry opt-in / confirmation boundary 建立，因此 MCP CLI 不是本阶段收口 blocker；
+- 如果未来 TUI 要管理 MCP server，也应该复用同一个 MCP Config Service / loader，
+  而不是把配置读写逻辑写进 TUI 或 runtime core。
+
 ## 本地 stdio 验证
 
 测试使用 `tests/fixtures/minimal_mcp_stdio_server.py`。该 fixture：

@@ -19,8 +19,8 @@ from __future__ import annotations
 import pytest
 
 from agent.security import is_protected_source_file, is_sensitive_file
+from agent.security import needs_confirmation as legacy_needs_confirmation
 from agent.tool_registry import TOOL_REGISTRY, is_meta_tool
-from agent.tools.calc import calculate
 from agent.tools.shell import check_shell_blacklist
 from agent.tools.write import _check_dangerous_content, pre_write_check
 
@@ -207,9 +207,13 @@ def test_all_tools_have_valid_confirmation_setting():
 # §6 正常工具调用不被误伤
 # ---------------------------------------------------------------------------
 
-def test_calculate_safe_expression_works():
-    """P1 加固后 calculate 不能受影响。"""
-    assert calculate("2+3*4") == "14"
+def test_removed_calculate_no_longer_has_legacy_confirmation_bypass():
+    """移除的低价值工具不能残留 legacy confirmation 直通分支。
+
+    calculate 不再是基础工具后，安全层不应继续把它当成已知免确认工具；
+    这保护 confirmation 边界不被历史工具名绕过，同时不新增任何替代工具能力。
+    """
+    assert legacy_needs_confirmation("calculate", {}) is True
 
 
 def test_non_sensitive_path_not_blocked():

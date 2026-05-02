@@ -14,11 +14,15 @@
 覆盖范围：
 - §3.3  checkpoint 损坏字段过滤（_filter_to_declared_fields）
 - §4.3  工具失败不污染 task.last_error 路径（直接调 read_file 不存在路径）
-- §5.1  read_file / read_file_lines / write_file / calculate 工具基本可用
+- §5.1  read_file / read_file_lines / write_file 工具基本可用
 - §5.2  M6 安全：sensitive 文件 block、受保护源码写拒绝、
         shell 黑名单（含 P0 修复后的 .pem/.key、fork bomb、>/dev/sd）
 - §5.3  CLI 输出契约：调用工具不会在 stdout 输出裸 dict / protocol dump
 - §5.4  运行产物 .gitignore 覆盖
+
+calculate 曾在早期 smoke 里作为基础工具被直接验证；Stage 2.5 Tooling
+Foundation 改为保留少量高价值工具，因此这里不再用历史 smoke 反向固化
+低价值窄工具，也不新增 Python/BLOB/patch/shell 替代能力。
 
 不在本文件覆盖（必须人眼）：
 - §1   完整任务流的 CLI 可读性
@@ -38,7 +42,6 @@ from pathlib import Path
 import pytest
 
 from agent.security import is_protected_source_file, is_sensitive_file
-from agent.tools.calc import calculate
 from agent.tools.file_ops import read_file, read_file_lines
 from agent.tools.shell import check_shell_blacklist
 from agent.tools.write import pre_write_check
@@ -63,11 +66,6 @@ def test_smoke_read_file_lines_returns_specific_range():
     """playbook §5.1：read_file_lines 必须能读取指定范围。"""
     out = read_file_lines("README.md", 1, 5)
     assert isinstance(out, str) and len(out) > 0
-
-
-def test_smoke_calculate_basic():
-    """playbook §5.1：calculate 必须能算 (13*17)+1。"""
-    assert calculate("(13*17)+1") == "222"
 
 
 def test_smoke_read_nonexistent_file_returns_readable_error_not_crash():
@@ -157,16 +155,6 @@ def test_smoke_corrupted_checkpoint_unknown_fields_dropped(monkeypatch, tmp_path
 # ---------------------------------------------------------------------------
 # §5.3 CLI 输出契约：工具调用不会污染 stdout
 # ---------------------------------------------------------------------------
-
-def test_smoke_calculate_does_not_print_to_stdout():
-    """playbook §5.3：calculate 不应在 stdout 写裸 dict / 调试信息。"""
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        calculate("1+1")
-    assert buf.getvalue() == "", (
-        f"calculate 不应该 print 任何东西，实际输出：{buf.getvalue()!r}"
-    )
-
 
 def test_smoke_read_file_does_not_print_to_stdout():
     """playbook §5.3：read_file 不应在 stdout 写裸 dict / 调试信息。"""

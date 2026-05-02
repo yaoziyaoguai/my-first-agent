@@ -21,7 +21,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
-    "calculate",
     "edit_file",
     "fetch_url",
     "install_skill",
@@ -34,6 +33,7 @@ EXPECTED_MODEL_VISIBLE_TOOLS = {
 }
 
 PREMATURE_SKILL_TOOL_NAMES = {"load_skill", "load_skills", "update_skill"}
+LOW_VALUE_NARROW_TOOL_NAMES = {"calculate"}
 EXPECTED_META_TOOLS = {"mark_step_complete", "request_user_input"}
 
 
@@ -102,6 +102,26 @@ def test_premature_skill_tools_do_not_pollute_tooling_foundation_registry() -> N
     assert PREMATURE_SKILL_TOOL_NAMES.isdisjoint(visible_tools)
     assert PREMATURE_SKILL_TOOL_NAMES.isdisjoint(allowed_tools)
     assert PREMATURE_SKILL_TOOL_NAMES.isdisjoint(TOOL_REGISTRY)
+
+
+def test_low_value_narrow_tools_do_not_pollute_base_tool_registry() -> None:
+    """低价值窄工具不能因为历史存在而继续污染基础工具集。
+
+    Tooling Foundation 的目标是少量稳定、高价值、边界清晰的基础工具。
+    `calculate` 能力很窄，会增加模型工具选择负担；未来若需要计算，应由
+    单独设计的 execution/sandbox seam 承担，而不是在本轮新增替代工具。
+    """
+
+    _load_builtin_tools()
+
+    from agent.tool_registry import TOOL_REGISTRY, get_allowed_tools, get_tool_definitions
+
+    visible_tools = {definition["name"] for definition in get_tool_definitions()}
+    allowed_tools = get_allowed_tools()
+
+    assert LOW_VALUE_NARROW_TOOL_NAMES.isdisjoint(visible_tools)
+    assert LOW_VALUE_NARROW_TOOL_NAMES.isdisjoint(allowed_tools)
+    assert LOW_VALUE_NARROW_TOOL_NAMES.isdisjoint(TOOL_REGISTRY)
 
 
 def test_agent_tools_does_not_auto_import_premature_skill_tool_modules() -> None:
@@ -211,3 +231,16 @@ def test_core_only_consumes_registry_schema_not_specific_tool_modules() -> None:
     assert "agent.tools" in imports
     assert "agent.tool_registry" in imports
     assert concrete_tool_imports == set()
+
+
+def test_agent_tools_does_not_auto_import_removed_low_value_tools() -> None:
+    """基础注册入口不应自动加载已移除的低价值工具模块。
+
+    这条测试保护 `agent.tools` 作为基础工具防火墙的职责：移除 calculate
+    只改变工具集合边界，不把计算能力替换成 Python/BLOB/patch/shell 新工具，
+    也不让 core.py 或 executor 为一个窄工具承担额外分支。
+    """
+
+    imports = _agent_imports(PROJECT_ROOT / "agent" / "tools" / "__init__.py")
+
+    assert "agent.tools.calc" not in imports

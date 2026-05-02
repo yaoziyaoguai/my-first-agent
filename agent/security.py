@@ -70,9 +70,6 @@ def needs_confirmation(tool_name, tool_input):
         else:
             return True
 
-    if tool_name == "calculate":
-        return False
-    
     if tool_name == "run_shell":
         return True  # Shell 命令全部需要确认
 

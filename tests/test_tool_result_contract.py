@@ -74,17 +74,29 @@ def test_missing_required_argument_is_failure_like_string() -> None:
     这是现状 characterization：项目还没有独立 ToolValidation layer，
     所以 Python 函数签名错误会在执行入口被捕获为字符串。后续若引入 schema
     validation，应把这个 failure 前移到 validation seam，而不是让异常冒泡。
+    测试使用临时工具而不是 calculate，避免低价值窄工具被 result contract
+    测试反向固化进基础工具集。
     """
 
-    _load_builtin_tools()
-
-    from agent.tool_registry import execute_tool
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
     from agent.tool_executor import _classify_tool_outcome
 
-    result = execute_tool("calculate", {})
+    @register_tool(
+        name="contract_required_arg_tool",
+        description="requires one argument for validation characterization",
+        parameters={"required_value": {"type": "string"}},
+        confirmation="never",
+    )
+    def _contract_required_arg_tool(required_value: str) -> str:
+        return required_value
+
+    try:
+        result = execute_tool("contract_required_arg_tool", {})
+    finally:
+        TOOL_REGISTRY.pop("contract_required_arg_tool", None)
 
     assert isinstance(result, str)
-    assert result.startswith("[工具 calculate 执行异常] TypeError:")
+    assert result.startswith("[工具 contract_required_arg_tool 执行异常] TypeError:")
     assert _classify_tool_outcome(result)[0] == "failed"
 
 

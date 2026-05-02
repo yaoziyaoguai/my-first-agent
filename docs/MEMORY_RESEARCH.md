@@ -47,4 +47,3 @@ itself. No source here is copied into production code; ideas are adapted to
   external.
 - **Memory policy**: the local decision layer that can retain, recall, update,
   forget, reject, no-op, or ask for clarification.
-

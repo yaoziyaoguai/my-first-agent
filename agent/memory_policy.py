@@ -355,4 +355,3 @@ def _candidate_id(*, source: MemorySource, scope: MemoryScope, content: str) -> 
 
     digest = sha256(f"{source.value}:{scope.value}:{content}".encode("utf-8")).hexdigest()
     return f"candidate:{digest[:16]}"
-

@@ -295,4 +295,3 @@ def test_memory_decision_type_vocabulary_is_closed_for_slice_1() -> None:
         "no-op",
         "clarify",
     }
-

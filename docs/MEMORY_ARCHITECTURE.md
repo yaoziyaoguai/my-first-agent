@@ -457,6 +457,20 @@ Do not add now:
 - Stop condition: requires real private memory data, real provider, automatic
   retain/recall, or prompt_builder direct store reads.
 
+## Memory Architecture Final Review Readiness
+
+- Stage 6 manual UX dogfooding is now the last fake-data review layer before any
+  future memory release/tag discussion.
+- Scope: fake/local deterministic data only.
+- no new feature stage.
+- no tag in this stage.
+- Review goal: inspect the complete architecture chain from candidate/decision
+  through fake store and governed snapshot without adding runtime integration.
+- Evidence to inspect: Stage 1-6 tests, `docs/MEMORY_DOGFOODING.md`, roadmap
+  status, and the no-real-data/no-prompt-builder-store-read boundaries.
+- Stop condition: final review requires real user data, automatic memory,
+  provider integration, retrieval/vectorization, or release tagging.
+
 ## Why this is not `memory.json + prompt injection`
 
 The proposed design makes a memory record pass through candidate extraction,

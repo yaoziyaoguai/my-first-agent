@@ -65,8 +65,8 @@ core**。
 
 ## Current Position
 
-> **当前处于 Memory-line Stage 5：governed snapshot generation publish 收口。**
-> 注意：这是 Memory 线的 Stage 5，不是 canonical Stage 5 Skill System。
+> **当前处于 Memory-line Stage 6：manual UX dogfooding publish 收口。**
+> 注意：这是 Memory 线的 Stage 6，不是 Observability 或 Skill/System roadmap stage。
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -97,14 +97,18 @@ core**。
   fake/local `MemoryRecord` 通过 scope / budget / safety / provenance 过滤成
   `MemorySnapshot`，不做真实 retrieval/recall，不做 vectorization，不让
   prompt_builder 直接读 store。
+- ✅ Memory-line Stage 6 manual UX dogfooding runbook 已完成并发布准备：只记录
+  fake/local deterministic runbook、fixtures、expected behavior 与 safety checks，
+  不读取真实 sessions/runs/logs，不接 provider/LLM/MCP/runtime。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
   sampling/roots、未做 production remote server auth、未做 release packaging。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
 > 口径：**Tooling Foundation Milestone / Stage 3 Memory foundation 已完成**；
-> Memory-line Stage 4/5 只是 fake/local storage seam + governed snapshot seam，
-> 不是完整长期 memory 产品化。后续若继续，应进入 manual UX dogfooding runbook 或单独回到
+> Memory-line Stage 4/5/6 只是 fake/local storage seam + governed snapshot seam
+> + manual UX dogfooding，不是完整长期 memory 产品化。后续若继续，应进入
+> Memory Architecture Final Review 或单独回到
 > MCP CLI Config Management。Memory 不是 RAG Discovery。
 > Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
 > 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
@@ -469,6 +473,10 @@ push 或 tag，除非用户单独选择对应动作。
   `memory_snapshot_generator` 只把 fake/local `MemoryRecord` 过滤成
   `MemorySnapshot`，负责 deterministic ordering、scope/budget/safety/provenance
   过滤，不接 prompt_builder、runtime、provider、MCP，也不实现语义检索；
+- Memory-line Stage 6 manual UX dogfooding runbook 已落地：
+  `docs/MEMORY_DOGFOODING.md` 覆盖 accept/edit/reject/use_once/forget/update、
+  audit summary、sensitive handling、fake store 到 governed snapshot、prompt_builder
+  boundary；只使用 fake/local deterministic data；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

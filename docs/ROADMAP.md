@@ -411,6 +411,34 @@ push 或 tag，除非用户单独选择对应动作。
 - 后续若进入 implementation，必须先有 retain/recall/update/forget policy 与
   human approval 边界。
 
+#### Stage 3 Memory System Research & Architecture Discovery
+
+**本轮 research / architecture 产物**：
+- `docs/MEMORY_RESEARCH.md`：记录 MemGPT / Letta、LangGraph、MCP
+  resources/prompts/tools、external memory provider/store 模式的公开资料调研与
+  架构取舍；
+- `docs/MEMORY_ARCHITECTURE.md`：提出 First Agent 适用的 Memory System 架构：
+  MemoryCandidate -> MemoryPolicy / MemoryDecision -> MemoryApproval ->
+  MemoryStore / MemoryProvider -> MemoryRetrieval -> MemorySnapshot ->
+  PromptBuilder injection -> MemoryAudit；
+- `tests/test_memory_research_architecture_docs.py`：用 docs acceptance tests
+  防止后续把 Stage 3 误写成 memory.json + prompt injection 或 provider-first
+  implementation。
+
+**本轮仍然不做**：
+- 不实现 long-term memory persistence；
+- 不读取或迁移 `memory/` 目录里的历史数据；
+- 不自动 retain / update / forget；
+- 不实现 embedding / vector store / RAG；
+- 不接 MCP resources/prompts/sampling/roots；
+- 不修改 checkpoint 语义、runtime core loop 或 TUI 主流程。
+
+**下一段 implementation 前置条件**：
+- 先 review `MEMORY_RESEARCH.md` / `MEMORY_ARCHITECTURE.md`；
+- 再决定是否进入 Slice 1 docs/contracts hardening，或 Slice 2
+  MemoryDecision / MemoryCandidate no-side-effect contract；
+- 任何真实 persistence / provider / external resource 接入都必须另行授权。
+
 学习型边界说明：
 - Memory 是 Agent Runtime 的长期语义层，回答“哪些稳定事实、偏好、项目知识、
   历史决策、可复用流程应在未来会话中被召回”。
@@ -474,14 +502,15 @@ push 或 tag，除非用户单独选择对应动作。
 - memory safety tests：注入不污染 runtime、不绕过 permission、不读取敏感资料；
 - anti-monolith tests：Memory 不反向依赖 input backend / core 巨石 / checkpoint schema。
 
-**业界调研（后续 discovery task，本轮不联网、不实现）**：
-- Hermes Agent；
-- OpenCode；
-- Morsey Agent；
-- Claude Code memory / skills / hook 思路；
-- Codex / OpenAI coding agent approval / sandbox 思路；
-- LangChain / LangGraph memory 分类；
-- 其他开源 coding agent 的 memory provider 设计。
+**已完成公开调研（research note，不代表 implementation 完成）**：
+- MemGPT / Letta：virtual context、memory tiers、memory blocks、stateful agents；
+- LangGraph：short-term thread state、long-term namespaced store、semantic /
+  episodic / procedural memory；
+- MCP resources / prompts / tools：external context / workflow / tool provider
+  边界，不能等同于内部 MemoryPolicy；
+- 常见 external memory provider/store：local JSON / SQLite / namespaced KV /
+  event log / document store / vector store / hybrid retrieval；
+- 详见 `docs/MEMORY_RESEARCH.md` 与 `docs/MEMORY_ARCHITECTURE.md`。
 
 **口径硬约束**：
 - **Memory Discovery 在 Tooling Foundation Milestone / MCP Tool Bridge Discovery 之后启动**；

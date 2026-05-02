@@ -419,20 +419,43 @@ Do not add now:
 - `prompt_builder` 仍只能消费 `MemorySnapshot`，不能直接读 store；下一阶段如果
   要把 store 内容放进 prompt，必须先经过 governed snapshot generation。
 
-## Memory-line Stage 5 readiness: governed snapshot generation
+## Memory-line Stage 5: governed snapshot generation
 
-- Candidate goal: generate a `MemorySnapshot` from fake/local store records
-  through a governed selection pipeline.
+- Goal: generate a `MemorySnapshot` from fake/local store records through a
+  governed selection pipeline.
+- Current status: implemented as `agent.memory_snapshot_generator` with
+  deterministic ordering, scope filtering, max-item budget, sensitive-record
+  omission/redaction, provenance, and safety filter summary.
 - Non-goals: no real retrieval, no vector/RAG, no real user data, no direct
   prompt_builder store read, no provider/MCP integration.
-- Expected input: fake/local `MemoryRecord` values plus explicit selection
-  reason and safety/budget constraints.
-- Expected output: approved `MemorySnapshot` view with provenance, budget, and
-  safety filter summary.
-- Required boundary: store-to-snapshot generation must remain upstream of
+- Input: fake/local `MemoryRecord` values plus explicit selection reason and
+  safety/budget constraints.
+- Output: approved `MemorySnapshot` view with provenance, scope, omitted count,
+  and safety filter summary.
+- Required boundary: store-to-snapshot generation remains upstream of
   prompt_builder; prompt_builder keeps formatting-only responsibility.
 - Stop condition: implementation requires real persistence, real retrieval,
   runtime default integration, or sensitive/private data.
+
+学习型边界说明：
+- Snapshot generation 不是 retrieval：它只选择 fake/local records，不做语义搜索、
+  embedding、vectorization 或 provider lookup。
+- Generator 不写 store，也不调用 policy / confirmation / audit mutation path；这些
+  已经在 Stage 3/4 完成，Stage 5 只负责把可用记录投影成 prompt view。
+- `MemorySnapshot` 仍是唯一 prompt input seam；prompt_builder 不能直接读 store。
+
+## Memory-line Stage 6 readiness: manual UX dogfooding runbook
+
+- Candidate goal: create a manual deterministic runbook that exercises
+  policy -> confirmation -> operation/audit -> fake store -> governed snapshot
+  -> prompt rendering with fake data only.
+- Non-goals: no runtime default integration, no automatic memory, no real user
+  data, no real provider, no semantic search/vectorization.
+- Expected input: fake user statements and fake store/snapshot fixtures.
+- Expected output: reviewable UX runbook and possibly docs/tests that prove the
+  flow remains understandable and safe.
+- Stop condition: requires real private memory data, real provider, automatic
+  retain/recall, or prompt_builder direct store reads.
 
 ## Why this is not `memory.json + prompt injection`
 

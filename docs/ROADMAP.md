@@ -451,7 +451,9 @@ push 或 tag，除非用户单独选择对应动作。
 - Slice 6 External MemoryProvider adapter seam / future MCP resources integration
   已落地：`memory_provider` 只提供 fake/provider protocol，把 deterministic
   fixture 投影为 MemoryCandidate / MemorySnapshot 输入，不接真实 provider/MCP；
-- Slice 7 下一步应做 Memory UX dogfooding scenarios / docs / release readiness；
+- Slice 7 Memory UX dogfooding scenarios / docs / release readiness 已落地：
+  使用 deterministic tests + `docs/MEMORY_DOGFOODING.md` checklist，不读取真实
+  sessions/runs/logs、不写真实 memory；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

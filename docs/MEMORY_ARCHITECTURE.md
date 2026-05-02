@@ -378,6 +378,9 @@ Do not add now:
 - Readiness note: Slice 6 now provides fake provider fixtures, but Slice 7
   should still dogfood deterministic UX scenarios only. It must not read real
   sessions/runs/logs or persist real memory.
+- Current status: implemented as deterministic dogfooding tests and a reviewable
+  checklist in `docs/MEMORY_DOGFOODING.md`; no real storage, provider, network,
+  LLM, or private data is used.
 - Risk: dogfooding accidental real data.
 - Stop condition: requires real private memory data.
 - Commit strategy: tests/docs closure.

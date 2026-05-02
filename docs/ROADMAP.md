@@ -46,8 +46,8 @@ core**。
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
 | **2.5** | **Tooling Foundation Milestone** | ✅ v0.7.0 已 release；post-release dogfooding closure 已完成 | v0.7.0 |
 | **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
-| **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
-| **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
+| **4** | Sub-agent / Handoff | 🟡 **Safe Local MVP 已完成；真实 delegation deferred** | 后续 |
+| **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 持续打底（v0.5 已开始） | 跨阶段 |
 | **7** | Tool system optimization | 🟡 仅最小集（v0.2 policy） | 靠后 |
 | **8** | Customization / local productization | ⏳ 未启动 | 后期 |
@@ -100,6 +100,25 @@ core**。
 - ✅ Memory-line Stage 6 manual UX dogfooding runbook 已完成并发布准备：只记录
   fake/local deterministic runbook、fixtures、expected behavior 与 safety checks，
   不读取真实 sessions/runs/logs，不接 provider/LLM/MCP/runtime。
+- ✅ MCP CLI Config Management safe apply governance 已完成：parser/validator/
+  redaction、CLI list/inspect/validate、plan preview、plan-first apply、`--yes`、
+  backup、deterministic serialization、redacted diff evidence、safety manifest 都已
+  落地；不读真实 MCP config、不写 home config、不执行 server command、不联网。
+- ✅ Coding-agent execution governance 已落地 AGENTS.md：沉淀 repo path、安全边界、
+  quality gates、evidence packet、P0/P1/P2/P3 与 controlled push/tag rules。
+- ✅ Skill System Safe Local MVP 已完成：`agent.skills.local` 只读取 tmp_path /
+  `tests/fixtures/skills`，生成 capability descriptor，不下载、不安装、不执行代码、
+  不读真实 skill dirs、不绕过 parent runtime/tool policy。
+- ✅ Subagent System Safe Local MVP 已完成：`agent.subagents.local` 只读取 tmp_path /
+  `tests/fixtures/subagents`，生成 profile 与 parent-controlled delegation
+  request/result，不做真实 LLM delegation、不 spawn process、不 remote delegation。
+- ✅ Skill/Subagent Integration Boundary 已完成：`docs/CAPABILITY_BOUNDARIES.md` 与
+  tests 固定 Tool = atomic execution、Skill = local descriptor、Subagent =
+  parent-controlled delegation。
+- ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
+  不属于 Safe Local MVP 默认路径。
+- ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
+  autonomous child tool execution。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
   sampling/roots、未做 production remote server auth、未做 release packaging。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
@@ -588,6 +607,15 @@ push 或 tag，除非用户单独选择对应动作。
 - **先做 main agent calls specialist as tool**
 - **Stage 3 未收口前不启动 Stage 4 实质实现**
 
+**Safe Local MVP completion（Roadmap Completion Autopilot）**：
+- 已新增 `agent.subagents.local`：只支持 fake/local profile 与
+  parent-controlled `DelegationRequest` / `DelegationResult`。
+- 已新增 `tests/fixtures/subagents/code-reviewer/SUBAGENT.md` 和
+  `tests/test_subagent_local_mvp_contract.py`。
+- 已新增 `docs/SUBAGENT_LOCAL_MVP.md` 与 `docs/CAPABILITY_BOUNDARIES.md`。
+- 仍不做真实 LLM delegation、外部进程、remote delegation、handoff 或 child tool
+  execution。
+
 ---
 
 ### Stage 5 · Skill system
@@ -611,6 +639,15 @@ push 或 tag，除非用户单独选择对应动作。
 
 **现状**：`agent/skills/{installer,loader,parser,registry,safety}.py` 已存在但是
 **原型**；evil-skill 测试目录暴露 safety 仍在原型期 → Stage 5 主战场。
+
+**Safe Local MVP completion（Roadmap Completion Autopilot）**：
+- 已新增 `agent.skills.local`：只支持显式 tmp_path / `tests/fixtures/skills` 的
+  local capability descriptor。
+- 已新增 `tests/fixtures/skills/safe-writer/SKILL.md` 和
+  `tests/test_skill_local_mvp_contract.py`。
+- 已新增 `docs/SKILL_LOCAL_MVP.md` 与 `docs/CAPABILITY_BOUNDARIES.md`。
+- 仍不做真实 Skill install / execution、远程 marketplace、任意代码执行、真实 skill
+  目录读取或 tool policy bypass。
 
 ---
 

@@ -53,3 +53,22 @@ def test_roadmap_completion_autopilot_doc_has_release_readiness_packet() -> None
     )
     for phrase in required:
         assert phrase in text
+
+
+def test_roadmap_records_observability_local_trace_foundation() -> None:
+    """Stage 6 completion 需要记录 local-only trace 基础和真实日志边界。"""
+
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "Observability Local Trace Foundation 已完成",
+        "agent.local_trace",
+        "不读取真实 agent_log.jsonl",
+        "不读取真实 sessions/runs",
+        "local-only trace file",
+    )
+    for phrase in required:
+        assert phrase in roadmap or phrase in closure

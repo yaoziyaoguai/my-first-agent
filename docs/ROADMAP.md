@@ -48,7 +48,7 @@ core**。
 | **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
 | **4** | Sub-agent / Handoff | 🟡 **Safe Local MVP 已完成；真实 delegation deferred** | 后续 |
 | **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
-| **6** | Observability foundation | 🟡 持续打底（v0.5 已开始） | 跨阶段 |
+| **6** | Observability foundation | 🟡 **Local Trace Foundation 已完成；runtime wiring 持续打底** | 跨阶段 |
 | **7** | Tool system optimization | 🟡 仅最小集（v0.2 policy） | 靠后 |
 | **8** | Customization / local productization | ⏳ 未启动 | 后期 |
 
@@ -117,6 +117,10 @@ core**。
 - ✅ Skill/Subagent Integration Boundary 已完成：`docs/CAPABILITY_BOUNDARIES.md` 与
   tests 固定 Tool = atomic execution、Skill = local descriptor、Subagent =
   parent-controlled delegation。
+- ✅ Observability Local Trace Foundation 已完成：`agent.local_trace` 提供
+  local-only trace file schema、run_id / trace_id / span_id、model/tool/state/
+  checkpoint span 类型、metadata 脱敏与显式 tmp_path recorder；不读取真实 agent_log.jsonl，
+  不读取真实 sessions/runs，不接 provider/network，不改 runtime core。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
@@ -673,6 +677,16 @@ push 或 tag，除非用户单独选择对应动作。
 - observability 底子要**持续打**（v0.5 已开始：observer signature guard、
   confirmation evidence、terminal diagnostics → runtime events）
 - **dashboard / panel 是后期**，不是当前
+
+**Local Trace Foundation completion（Roadmap Completion Autopilot）**：
+- 已新增 `agent.local_trace`：定义 `TraceEvent` 与 `LocalTraceRecorder`。
+- 支持 local-only trace file JSONL、run_id、trace_id、span_id、parent_span_id、
+  step_id、model_call / tool_call / state_transition / checkpoint / memory_update /
+  subagent span 类型。
+- recorder 只写显式 tmp_path，拒绝 `agent_log.jsonl` / `sessions` / `runs` 等
+  真实 runtime artifact 路径。
+- metadata 在输出边界脱敏，不展开 env secret；测试覆盖 token/api_key redaction。
+- 当前不把 recorder 反向接入 core.py；后续 runtime wiring 只能以小 slice 追加。
 
 ---
 

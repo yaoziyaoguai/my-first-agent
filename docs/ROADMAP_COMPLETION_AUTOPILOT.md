@@ -14,6 +14,7 @@
 | Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` + tests | real LLM/provider/process/remote delegation deferred |
 | Skill/Subagent Integration Boundary | complete | `docs/CAPABILITY_BOUNDARIES.md` + tests | real activation deferred |
 | Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
+| Observability Local Trace Foundation | complete | `agent.local_trace` + local-only trace contract tests | full runtime trace wiring deferred |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -57,6 +58,16 @@
    - Textual Esc cancels the active Assistant projection
    - cancelled projection blocks later chunks and final completion overwrite
    - no Runtime state mutation from the TUI adapter
+
+7. Observability Local Trace Foundation
+   - `agent.local_trace`
+   - local-only trace file JSONL schema
+   - run_id / trace_id / span_id / parent_span_id
+   - model/tool/state/checkpoint span vocabulary
+   - redacted metadata
+   - no real `agent_log.jsonl` read
+   - no real `sessions/runs` read
+   - explicit tmp_path writer only
 
 ## Release readiness
 

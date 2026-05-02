@@ -342,6 +342,9 @@ Do not add now:
   `MemoryConfirmationResult`, but should still produce audit/operation summaries
   only. It must not introduce real persistence or provider writes unless a later
   store slice is explicitly authorized.
+- Current status: implemented as a pure operation intent / audit summary contract.
+  It maps confirmation results to retain/update/forget/reject/use-once/clarify
+  intents without writing storage or recording sensitive full text.
 - Risk: incomplete delete semantics across future providers.
 - Stop condition: external providers cannot support deletion contract.
 - Commit strategy: policy/audit tests before store integration.
@@ -354,6 +357,9 @@ Do not add now:
 - Tests first: provider supplies candidates/snapshots; policy remains local; provider disabled fallback.
 - Expected behavior: optional provider seam only.
 - Acceptance criteria: external provider cannot bypass policy or base registry.
+- Readiness note: Slice 5 now provides safe operation/audit intent language.
+  Slice 6 should define provider inputs/outputs only; providers must not bypass
+  MemoryPolicy, confirmation, or operation audit contracts.
 - Risk: protocol becomes too generic/anemic.
 - Stop condition: provider needs secrets/network.
 - Commit strategy: fake-only protocol tests.

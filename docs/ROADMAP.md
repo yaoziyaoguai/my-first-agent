@@ -445,7 +445,11 @@ push 或 tag，除非用户单独选择对应动作。
   approved snapshot view，不做 retrieval/store/policy；
 - Slice 4 retain/update/forget user confirmation UX contract 已落地：
   `memory_confirmation` 只生成用户确认 request/result，不写 store、不改 runtime；
-- Slice 5 下一步应先定义 forget/update safety 与 audit summary contract；
+- Slice 5 forget/update safety 与 audit summary contract 已落地：
+  `memory_operations` 只生成 operation intent / audit summary，不写 store、不真实
+  update/forget；
+- Slice 6 下一步应先定义 External MemoryProvider adapter seam / future MCP
+  resources integration 的 fake/provider protocol；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

@@ -114,12 +114,12 @@ def test_memory_architecture_records_safety_ux_and_stage3_slices() -> None:
         "User explicit consent is required",
         "forget",
         "仅本次使用",
-        "Slice 1: Memory architecture docs + acceptance contracts",
-        "Slice 2: MemoryCandidate / MemoryDecision no-side-effect contracts",
-        "Slice 3: Deterministic MemoryPolicy no-op / explicit-only retain",
-        "Slice 4: MemorySnapshot prompt injection seam",
-        "Slice 5: User confirmation UX contract for retain/update/forget",
-        "Slice 7: External MemoryProvider adapter seam",
+        "Discovery pre-slice: Memory architecture docs + acceptance contracts",
+        "Slice 1: MemoryCandidate / MemoryDecision no-side-effect contracts",
+        "Slice 2: Deterministic MemoryPolicy no-op / explicit-only retain",
+        "Slice 3: MemorySnapshot prompt injection seam",
+        "Slice 4: User confirmation UX contract for retain/update/forget",
+        "Slice 6: External MemoryProvider adapter seam",
         "Why this is not `memory.json + prompt injection`",
     ]
     for marker in required_markers:
@@ -145,4 +145,3 @@ def test_roadmap_links_stage3_research_without_claiming_implementation_done() ->
     ]
     for marker in required_markers:
         assert marker in text
-

@@ -258,7 +258,7 @@ Do not add now:
 
 ## Stage 3 roadmap slices
 
-### Slice 1: Memory architecture docs + acceptance contracts
+### Discovery pre-slice: Memory architecture docs + acceptance contracts
 
 - Goal: Land this research/architecture note and tests that prevent overclaiming.
 - Non-goal: no production persistence, no dataclass skeleton.
@@ -271,9 +271,9 @@ Do not add now:
 - Stop condition: implementation pressure appears before policy review.
 - Commit strategy: docs/tests commit.
 
-### Slice 2: MemoryCandidate / MemoryDecision no-side-effect contracts
+### Slice 1: MemoryCandidate / MemoryDecision no-side-effect contracts
 
-- Goal: Add pure dataclasses or protocol skeleton only after Slice 1 review.
+- Goal: Add pure dataclasses or enum skeleton only after research review.
 - Non-goal: no store, no provider, no runtime hook.
 - Files likely touched: `agent/memory_contracts.py` or similar, tests.
 - Tests first: frozen dataclasses, allowed decision enum, no imports of runtime/checkpoint/TUI/MCP.
@@ -283,7 +283,7 @@ Do not add now:
 - Stop condition: fields require provider-specific assumptions.
 - Commit strategy: tests + minimal production skeleton.
 
-### Slice 3: Deterministic MemoryPolicy no-op / explicit-only retain
+### Slice 2: Deterministic MemoryPolicy no-op / explicit-only retain
 
 - Goal: Add a deterministic policy that returns `no-op` by default and `clarify`
   or confirmation-required `retain` only for explicit user memory requests.
@@ -296,7 +296,7 @@ Do not add now:
 - Stop condition: policy needs real LLM or external classifier.
 - Commit strategy: small production + tests.
 
-### Slice 4: MemorySnapshot prompt injection seam
+### Slice 3: MemorySnapshot prompt injection seam
 
 - Goal: Let prompt construction consume an approved no-op/empty snapshot.
 - Non-goal: no retrieval/storage.
@@ -308,7 +308,7 @@ Do not add now:
 - Stop condition: prompt_builder starts deciding recall.
 - Commit strategy: behavior-neutral seam.
 
-### Slice 5: User confirmation UX contract for retain/update/forget
+### Slice 4: User confirmation UX contract for retain/update/forget
 
 - Goal: Define Ask User style approval choices and Other/free-text behavior.
 - Non-goal: no TUI rewrite and no direct backend memory decision.
@@ -320,7 +320,7 @@ Do not add now:
 - Stop condition: requires runtime core-loop rewrite.
 - Commit strategy: contract first, runtime integration later.
 
-### Slice 6: Forget/update safety and audit summary
+### Slice 5: Forget/update safety and audit summary
 
 - Goal: Make deletion/update semantics explainable and highest-priority.
 - Non-goal: no real persistence unless explicitly authorized after store review.
@@ -332,7 +332,7 @@ Do not add now:
 - Stop condition: external providers cannot support deletion contract.
 - Commit strategy: policy/audit tests before store integration.
 
-### Slice 7: External MemoryProvider adapter seam
+### Slice 6: External MemoryProvider adapter seam
 
 - Goal: Define provider protocol for internal store, MCP resources, future vector provider.
 - Non-goal: no MCP resources implementation, no vector DB, no networking.
@@ -344,7 +344,7 @@ Do not add now:
 - Stop condition: provider needs secrets/network.
 - Commit strategy: fake-only protocol tests.
 
-### Slice 8: Dogfooding and docs
+### Slice 7: Dogfooding and docs
 
 - Goal: Test UX with fake clients and no real personal data.
 - Non-goal: no real user-profile persistence.
@@ -364,4 +364,3 @@ snapshot selection, and prompt injection. Storage is only one implementation
 detail behind policy and governance. This preserves First Agent's runtime
 boundaries and gives users the right to understand, edit, reject, and forget
 what the agent remembers.
-

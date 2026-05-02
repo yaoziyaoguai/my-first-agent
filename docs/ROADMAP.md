@@ -435,8 +435,9 @@ push 或 tag，除非用户单独选择对应动作。
 
 **下一段 implementation 前置条件**：
 - 先 review `MEMORY_RESEARCH.md` / `MEMORY_ARCHITECTURE.md`；
-- 再决定是否进入 Slice 1 docs/contracts hardening，或 Slice 2
-  MemoryDecision / MemoryCandidate no-side-effect contract；
+- research/docs 属于 Discovery pre-slice；后续实现从 Slice 1
+  MemoryDecision / MemoryCandidate no-side-effect contract 开始；
+- Slice 2 才进入 deterministic MemoryPolicy no-op / explicit-only retain；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

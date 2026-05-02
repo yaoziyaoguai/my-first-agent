@@ -266,6 +266,51 @@ def test_current_tool_error_contract_is_prefix_based() -> None:
     assert TOOL_REJECTION_PREFIXES == ("拒绝执行：",)
 
 
+def test_legacy_result_can_be_projected_to_structured_tool_result_envelope() -> None:
+    """Stage 7 先增加结构化 envelope seam，不急着迁移所有工具返回值。
+
+    Tool executor / Anthropic tool_result 仍可消费 legacy string；新的 envelope 只在
+    contract 层表达 status、display event、error taxonomy 和可见预览，避免继续把
+    这些语义散落在 executor 前缀判断里。
+    """
+
+    from agent.tool_result_contract import ToolResultEnvelope, classify_tool_result
+
+    failure = classify_tool_result("[工具 read_file 执行异常] FileNotFoundError: missing")
+    rejection = classify_tool_result("拒绝执行：危险 shell")
+    success = classify_tool_result("done")
+
+    assert isinstance(failure, ToolResultEnvelope)
+    assert failure.status == "failed"
+    assert failure.error_type == "tool_runtime_error"
+    assert failure.display_event_type == "tool.failed"
+    assert failure.to_legacy_content().startswith("[工具 read_file")
+
+    assert rejection.status == "rejected_by_check"
+    assert rejection.error_type == "tool_safety_rejected"
+    assert rejection.display_event_type == "tool.rejected"
+
+    assert success.status == "executed"
+    assert success.error_type is None
+    assert success.display_event_type == "tool.completed"
+
+
+def test_tool_result_envelope_preview_is_bounded_and_secret_redacted() -> None:
+    """结构化 ToolResult 预览用于 UI/trace，不能泄漏 token 或无限长输出。"""
+
+    from agent.tool_result_contract import classify_tool_result
+
+    raw = "执行完成 api_key=sk-test-secret " + ("x" * 1000)
+    result = classify_tool_result(raw)
+
+    assert result.content == raw
+    assert result.content_length == len(raw)
+    assert result.preview_truncated is True
+    assert len(result.safe_preview) < len(raw)
+    assert "sk-test-secret" not in result.safe_preview
+    assert "[REDACTED]" in result.safe_preview
+
+
 def test_tool_executor_delegates_outcome_classification_to_result_contract() -> None:
     """tool_executor 只编排执行流程，不拥有 result 分类词表。
 

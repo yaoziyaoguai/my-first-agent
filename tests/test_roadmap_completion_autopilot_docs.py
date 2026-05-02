@@ -72,3 +72,22 @@ def test_roadmap_records_observability_local_trace_foundation() -> None:
     )
     for phrase in required:
         assert phrase in roadmap or phrase in closure
+
+
+def test_roadmap_records_structured_tool_result_envelope_foundation() -> None:
+    """Stage 7 要记录 ToolResult 结构化 seam，而不是只保留 prefix debt。"""
+
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "Structured ToolResult Envelope Foundation 已完成",
+        "ToolResultEnvelope",
+        "classify_tool_result",
+        "legacy string contract 仍兼容",
+        "error taxonomy",
+    )
+    for phrase in required:
+        assert phrase in roadmap or phrase in closure

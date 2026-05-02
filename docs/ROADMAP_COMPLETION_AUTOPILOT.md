@@ -15,6 +15,7 @@
 | Skill/Subagent Integration Boundary | complete | `docs/CAPABILITY_BOUNDARIES.md` + tests | real activation deferred |
 | Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
 | Observability Local Trace Foundation | complete | `agent.local_trace` + local-only trace contract tests | full runtime trace wiring deferred |
+| Structured ToolResult Envelope Foundation | complete | `ToolResultEnvelope` + `classify_tool_result` + ToolResult contract tests | full executor/tool return migration deferred |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -68,6 +69,16 @@
    - no real `agent_log.jsonl` read
    - no real `sessions/runs` read
    - explicit tmp_path writer only
+
+8. Structured ToolResult Envelope Foundation
+   - `ToolResultEnvelope`
+   - `classify_tool_result`
+   - status / display event / status text
+   - error taxonomy
+   - redacted bounded preview
+   - legacy string contract 仍兼容
+   - no broad executor migration
+   - no checkpoint/messages protocol rewrite
 
 ## Release readiness
 

@@ -49,7 +49,7 @@ core**。
 | **4** | Sub-agent / Handoff | 🟡 **Safe Local MVP 已完成；真实 delegation deferred** | 后续 |
 | **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 **Local Trace Foundation 已完成；runtime wiring 持续打底** | 跨阶段 |
-| **7** | Tool system optimization | 🟡 仅最小集（v0.2 policy） | 靠后 |
+| **7** | Tool system optimization | 🟡 **Structured ToolResult seam 已完成；executor 迁移 deferred** | 靠后 |
 | **8** | Customization / local productization | ⏳ 未启动 | 后期 |
 
 **全局停止规则**：
@@ -121,6 +121,9 @@ core**。
   local-only trace file schema、run_id / trace_id / span_id、model/tool/state/
   checkpoint span 类型、metadata 脱敏与显式 tmp_path recorder；不读取真实 agent_log.jsonl，
   不读取真实 sessions/runs，不接 provider/network，不改 runtime core。
+- ✅ Structured ToolResult Envelope Foundation 已完成：`ToolResultEnvelope` 与
+  `classify_tool_result` 把 legacy string contract 投影成 status / display event /
+  error taxonomy / redacted preview；legacy string contract 仍兼容，未大改 executor。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
@@ -708,6 +711,15 @@ push 或 tag，除非用户单独选择对应动作。
 **口径硬约束**：
 - **靠后**，**除非**阻塞前面阶段
 - 当前最小集（policy denial 等）已够 Stage 0-2 用，不必提前
+
+**Structured ToolResult Envelope Foundation completion（Roadmap Completion Autopilot）**：
+- 已在 `agent.tool_result_contract` 新增 `ToolResultEnvelope` 与
+  `classify_tool_result`。
+- 结构化字段覆盖 status、display_event_type、status_text、error_type、
+  safe_preview、content_length 与 preview_truncated。
+- `classify_tool_outcome` 继续保留 tuple API，保证 legacy string contract 仍兼容
+  现有 `tool_executor` / Anthropic `tool_result.content` 路径。
+- 当前不迁移所有工具函数返回值，不改 checkpoint/messages 协议，不把 executor 大拆。
 
 ---
 

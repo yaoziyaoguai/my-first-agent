@@ -12,7 +12,11 @@ from agent.mcp_config import (
     MCPServerEntry,
     SecretValueRef,
 )
-from agent.mcp_config_service import MCPConfigPlanResult, MCPServerInspectionResult
+from agent.mcp_config_service import (
+    MCPConfigApplyResult,
+    MCPConfigPlanResult,
+    MCPServerInspectionResult,
+)
 
 
 def render_config_list(result: MCPConfigValidationResult) -> str:
@@ -106,10 +110,29 @@ def render_plan_result(result: MCPConfigPlanResult) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_apply_deferred() -> str:
-    """Pack 1 不实现 apply，避免绕过 plan-first / --yes governance。"""
+def render_apply_result(result: MCPConfigApplyResult) -> str:
+    """渲染 safe apply evidence；只展示 redacted diff 和 manifest。"""
 
-    return "MCP config apply is deferred in Pack 1; use plan preview only.\n"
+    if not result.ok:
+        return _render_issues("invalid MCP config apply", result.errors)
+
+    manifest = result.manifest
+    backup = str(result.backup_path) if result.backup_path is not None else "<none>"
+    lines = [
+        "MCP config apply completed",
+        f"backup: {backup}",
+        "Diff evidence:",
+        *result.diff.lines,
+        "Safety manifest:",
+        f"- path_allowed={manifest.path_allowed}",
+        f"- explicit_yes={manifest.explicit_yes}",
+        f"- plan_present={manifest.plan_present}",
+        f"- no_network={manifest.no_network}",
+        f"- no_command_execution={manifest.no_command_execution}",
+        f"- no_env_expansion={manifest.no_env_expansion}",
+        f"- no_real_home_write={manifest.no_real_home_write}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def render_cli_error(message: str) -> str:

@@ -186,13 +186,13 @@ def test_plan_remove_produces_diff_preview_without_writing_config(tmp_path) -> N
     assert "- beta" in output
 
 
-def test_apply_command_is_deferred() -> None:
-    """Pack 1 明确不实现 apply，避免绕过 plan-first / --yes governance。"""
+def test_apply_command_requires_plan() -> None:
+    """Safe Apply pack 后 apply 不再全量 deferred，但仍必须先有 plan packet。"""
 
     exit_code, output = _run_cli(["config", "apply", "--path", "unused", "--yes"])
 
     assert exit_code == 2
-    assert "deferred" in output.lower()
+    assert "plan" in output.lower()
 
 
 def test_cli_rejects_unsafe_home_config_path() -> None:

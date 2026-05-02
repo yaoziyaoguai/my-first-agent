@@ -11,7 +11,7 @@ import sys
 from typing import TextIO
 
 from agent.mcp_config_presenter import (
-    render_apply_deferred,
+    render_apply_result,
     render_cli_error,
     render_config_list,
     render_plan_result,
@@ -19,8 +19,11 @@ from agent.mcp_config_presenter import (
     render_validation_result,
 )
 from agent.mcp_config_service import (
+    MCPConfigApplyResult,
+    apply_mcp_config_plan,
     inspect_mcp_server,
     list_mcp_config,
+    load_mcp_config_plan,
     plan_add_mcp_server,
     plan_remove_mcp_server,
     validate_mcp_config,
@@ -41,11 +44,10 @@ def run_mcp_config_cli(args: list[str], *, stdout: TextIO | None = None) -> int:
     command = rest[0]
     command_args = rest[1:]
 
-    if command == "apply":
-        output.write(render_apply_deferred())
-        return 2
-
-    parsed, error = _parse_options(command_args)
+    parsed, error = _parse_options(
+        command_args,
+        flag_options={"--yes"} if command == "apply" else frozenset(),
+    )
     if error is not None:
         output.write(render_cli_error(error))
         return 2
@@ -58,6 +60,22 @@ def run_mcp_config_cli(args: list[str], *, stdout: TextIO | None = None) -> int:
     if command == "list":
         result = list_mcp_config(path)
         output.write(render_config_list(result))
+        return 0 if result.ok else 1
+
+    if command == "apply":
+        plan_path = _single_value(parsed, "--plan")
+        if plan_path is None:
+            output.write(render_cli_error("missing --plan"))
+            return 2
+        plan, plan_errors = load_mcp_config_plan(plan_path)
+        if plan_errors:
+            output.write(render_apply_result(MCPConfigApplyResult(
+                ok=False,
+                errors=plan_errors,
+            )))
+            return 1
+        result = apply_mcp_config_plan(path, plan=plan, yes="--yes" in parsed)
+        output.write(render_apply_result(result))
         return 0 if result.ok else 1
 
     if command == "inspect":
@@ -106,7 +124,11 @@ def run_mcp_config_cli(args: list[str], *, stdout: TextIO | None = None) -> int:
     return 2
 
 
-def _parse_options(tokens: list[str]) -> tuple[dict[str, list[str]], str | None]:
+def _parse_options(
+    tokens: list[str],
+    *,
+    flag_options: set[str] | frozenset[str] = frozenset(),
+) -> tuple[dict[str, list[str]], str | None]:
     """解析简单 flag/value；允许 `--arg --safe` 这类以短横线开头的参数值。
 
     使用这个小 parser 是为了保持 CLI adapter 可控，同时避免 argparse 把 server
@@ -119,6 +141,10 @@ def _parse_options(tokens: list[str]) -> tuple[dict[str, list[str]], str | None]
         option = tokens[index]
         if not option.startswith("--"):
             return {}, f"unexpected argument {option!r}"
+        if option in flag_options:
+            values.setdefault(option, [])
+            index += 1
+            continue
         if index + 1 >= len(tokens):
             return {}, f"missing value for {option}"
         values.setdefault(option, []).append(tokens[index + 1])

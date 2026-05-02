@@ -23,6 +23,12 @@ from typing import Any, Mapping
 SUPPORTED_TRANSPORTS = frozenset({"stdio", "http", "sse", "streamable_http"})
 SENSITIVE_PATH_NAMES = frozenset({".env", "agent_log.jsonl"})
 SENSITIVE_PATH_PARTS = frozenset({"sessions", "runs"})
+SENSITIVE_CONFIG_NAME_MARKERS = (
+    "secret",
+    "token",
+    "password",
+    "credential",
+)
 SECRET_NAME_MARKERS = (
     "TOKEN",
     "API_KEY",
@@ -174,6 +180,10 @@ class MCPConfigPathPolicy:
         if (
             raw_path.name in SENSITIVE_PATH_NAMES
             or SENSITIVE_PATH_PARTS.intersection(raw_path.parts)
+            or any(
+                marker in raw_path.name.lower()
+                for marker in SENSITIVE_CONFIG_NAME_MARKERS
+            )
         ):
             return _issue(
                 "unsafe_path",

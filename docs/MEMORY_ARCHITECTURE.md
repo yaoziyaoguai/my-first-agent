@@ -165,12 +165,13 @@ Do not add now:
 
 Phase-one fields:
 
-- `records`
+- `items`
 - `query_context`
 - `selection_reason`
 - `omitted_count`
 - `safety_filter_summary`
 - `token_budget`
+- `rendered_char_budget`
 
 Future fields:
 
@@ -182,6 +183,7 @@ Do not add now:
 
 - raw provider payloads
 - unapproved candidates
+- store write/update/delete operations
 
 ### `MemoryOperationResult`
 
@@ -304,6 +306,8 @@ Do not add now:
 - Tests first: prompt builder cannot import store/provider; only consumes snapshot text.
 - Expected behavior: current prompt remains equivalent when snapshot is empty.
 - Acceptance criteria: approved snapshot path exists without behavior change.
+- Current status: implemented as a pure `MemorySnapshot` / `MemorySnapshotItem`
+  prompt view seam; prompt_builder remains snapshot-only and does not decide recall.
 - Risk: prompt pollution.
 - Stop condition: prompt_builder starts deciding recall.
 - Commit strategy: behavior-neutral seam.
@@ -316,6 +320,9 @@ Do not add now:
 - Tests first: accept/edit/reject/session-only/forget choices; TUI does not import policy/store.
 - Expected behavior: approval can be represented but not auto-triggered broadly.
 - Acceptance criteria: confirmation semantics are recoverable and checkpoint-safe if pending.
+- Readiness note: Slice 3 now provides the approved snapshot sink; Slice 4 should
+  define the user-facing approval contract that produces retain/update/forget
+  decisions before any store or retrieval implementation exists.
 - Risk: adding a new pending status too early.
 - Stop condition: requires runtime core-loop rewrite.
 - Commit strategy: contract first, runtime integration later.

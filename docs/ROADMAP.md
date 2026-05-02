@@ -378,7 +378,8 @@ push 或 tag，除非用户单独选择对应动作。
 
 **主题**：跨会话语义沉淀（与 Stage 1 的 checkpoint 是不同关注点）。
 
-**当前只做 Discovery / Architecture Planning，不做 implementation。**
+**当前已从 Discovery / Architecture Planning 进入最小 contract-first implementation slices。**
+仍不做 persistence / retrieval / RAG / vector DB / real provider。
 
 #### Stage 3 kickoff · Memory Discovery readiness（post-tools 第一组工作）
 
@@ -407,9 +408,11 @@ push 或 tag，除非用户单独选择对应动作。
 **完成定义（readiness）**：
 - Roadmap 明确 Memory Discovery 的目标、非目标、停止条件；
 - tests 保护 Memory discovery 边界：不读真实 memory artifacts、不依赖 runtime
-  hot path、不伪装成已实现 Memory System；
-- 后续若进入 implementation，必须先有 retain/recall/update/forget policy 与
-  human approval 边界。
+  hot path、不伪装成已实现完整 Memory System；
+- contract-first slices 已启动：MemoryCandidate / MemoryDecision、
+  deterministic MemoryPolicy、MemorySnapshot prompt injection seam；
+- 后续进入 retain/update/forget implementation 前，必须先有 human approval
+  UX contract。
 
 #### Stage 3 Memory System Research & Architecture Discovery
 
@@ -434,10 +437,13 @@ push 或 tag，除非用户单独选择对应动作。
 - 不修改 checkpoint 语义、runtime core loop 或 TUI 主流程。
 
 **下一段 implementation 前置条件**：
-- 先 review `MEMORY_RESEARCH.md` / `MEMORY_ARCHITECTURE.md`；
-- research/docs 属于 Discovery pre-slice；后续实现从 Slice 1
-  MemoryDecision / MemoryCandidate no-side-effect contract 开始；
-- Slice 2 才进入 deterministic MemoryPolicy no-op / explicit-only retain；
+- `MEMORY_RESEARCH.md` / `MEMORY_ARCHITECTURE.md` 已作为 Discovery pre-slice
+  落地；
+- Slice 1 MemoryDecision / MemoryCandidate no-side-effect contract 已落地；
+- Slice 2 deterministic MemoryPolicy no-op / explicit-only retain 已落地；
+- Slice 3 MemorySnapshot prompt injection seam 已落地：prompt_builder 只消费
+  approved snapshot view，不做 retrieval/store/policy；
+- Slice 4 下一步应先定义 retain/update/forget 的 user confirmation UX contract；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

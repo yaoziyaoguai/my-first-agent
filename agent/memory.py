@@ -1,6 +1,7 @@
 import json
 from config import MAX_MESSAGES, MAX_MESSAGE_CHARS, MODEL_NAME
 from agent.logger import log_event, make_serializable
+from agent.memory_contracts import MemorySensitivity, MemorySnapshot, MemorySnapshotItem
 
 
 def estimate_messages_size(messages):
@@ -195,16 +196,68 @@ def compress_history(messages, client, existing_summary: str | None = None, max_
     return recent, summary_text
 
 
-def build_memory_section() -> str:
+def _render_snapshot_item(item: MemorySnapshotItem) -> str:
+    """把已批准 snapshot item 渲染成 prompt 行。
+
+    这里仍然只是 prompt view formatting：不做 retrieval、不做 policy、不读 store。
+    HIGH/SECRET 内容默认用过滤提示代替，避免 prompt_builder 路径泄漏敏感正文。
+    """
+
+    if item.sensitivity in {MemorySensitivity.HIGH, MemorySensitivity.SECRET}:
+        content = "[已过滤敏感记忆]"
+    else:
+        content = item.content
+    return (
+        f"- [{item.scope.value}] {content} "
+        f"(source: {item.provenance}; reason: {item.selection_reason})"
+    )
+
+
+def _render_memory_snapshot(snapshot: MemorySnapshot) -> str:
+    """渲染 MemorySnapshot；预算只限制 item 行，不限制说明性 header。"""
+
+    lines = [
+        "[Memory]",
+        "Approved memory snapshot:",
+        f"Selection reason: {snapshot.selection_reason}",
+    ]
+    used_chars = 0
+    omitted_by_budget = 0
+
+    for item in snapshot.items:
+        line = _render_snapshot_item(item)
+        line_len = len(line)
+        if (
+            snapshot.rendered_char_budget is not None
+            and used_chars + line_len > snapshot.rendered_char_budget
+        ):
+            omitted_by_budget += 1
+            continue
+        lines.append(line)
+        used_chars += line_len
+
+    omitted_total = snapshot.omitted_count + omitted_by_budget
+    if omitted_total:
+        lines.append(f"- [omitted] {omitted_total} memory item(s) omitted.")
+    if snapshot.safety_filter_summary:
+        lines.append(f"Safety filter: {snapshot.safety_filter_summary}")
+
+    return "\n".join(lines)
+
+
+def build_memory_section(snapshot: MemorySnapshot | None = None) -> str:
     """
     构造 system prompt 中使用的 memory section。
 
-    当前先只提供一个最小可用版本：
+    当前默认仍提供一个最小可用版本：
     - 不把 working_summary 混进这里
-    - 只返回一个稳定、静态的 memory 说明占位
+    - 没有 snapshot 时只返回稳定、静态的 memory 说明占位
+    - 有 snapshot 时只渲染已批准 prompt 视图，不做 policy/retrieval/store IO
 
     后续如果要接长期记忆，再在这里扩展。
     """
+    if snapshot is not None and snapshot.items:
+        return _render_memory_snapshot(snapshot)
     return "[Memory]\n当前未注入长期记忆。"
 
 

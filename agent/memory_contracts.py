@@ -171,3 +171,64 @@ class MemoryDecision:
                 "Sensitive memory decision requires user confirmation"
             )
 
+
+@dataclass(frozen=True, slots=True)
+class MemorySnapshotItem:
+    """一条已批准进入 prompt 视图的 memory item。
+
+    SnapshotItem 不是 MemoryRecord：它没有 write/update/delete/status/version，
+    只表示“当前这次 prompt 可以看到的、已被上游批准和过滤后的视图项”。
+    """
+
+    content: str
+    scope: MemoryScope
+    provenance: str
+    selection_reason: str
+    sensitivity: MemorySensitivity = MemorySensitivity.LOW
+
+    def __post_init__(self) -> None:
+        """保证 prompt 视图项至少可解释来源和选择原因。"""
+
+        if not self.content.strip():
+            raise ValueError("MemorySnapshotItem.content 不能为空")
+        if not self.provenance.strip():
+            raise ValueError("MemorySnapshotItem.provenance 不能为空")
+        if not self.selection_reason.strip():
+            raise ValueError("MemorySnapshotItem.selection_reason 不能为空")
+
+
+@dataclass(frozen=True, slots=True)
+class MemorySnapshot:
+    """prompt_builder 唯一允许消费的 memory 输入视图。
+
+    Snapshot 是已批准、已过滤、有预算的 prompt view，不是 store，也不是所有
+    memory 的 dump。它不负责 retrieval，不包含 provider handle，也不执行 IO。
+    """
+
+    items: tuple[MemorySnapshotItem, ...] = field(default_factory=tuple)
+    selection_reason: str = ""
+    omitted_count: int = 0
+    safety_filter_summary: str = ""
+    token_budget: int | None = None
+    rendered_char_budget: int | None = None
+    query_context: str | None = None
+
+    @classmethod
+    def empty(cls) -> "MemorySnapshot":
+        """返回空 snapshot；用于保持现有 prompt 行为。"""
+
+        return cls()
+
+    def __post_init__(self) -> None:
+        """固定 snapshot 的最小结构边界。"""
+
+        if not isinstance(self.items, tuple):
+            object.__setattr__(self, "items", tuple(self.items))
+        if self.omitted_count < 0:
+            raise ValueError("MemorySnapshot.omitted_count 不能为负数")
+        if self.items and not self.selection_reason.strip():
+            raise ValueError("MemorySnapshot.selection_reason 不能为空")
+        if self.token_budget is not None and self.token_budget <= 0:
+            raise ValueError("MemorySnapshot.token_budget 必须为正数")
+        if self.rendered_char_budget is not None and self.rendered_char_budget <= 0:
+            raise ValueError("MemorySnapshot.rendered_char_budget 必须为正数")

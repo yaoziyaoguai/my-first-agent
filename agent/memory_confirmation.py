@@ -201,7 +201,7 @@ def _retain_options() -> tuple[MemoryConfirmationOption, ...]:
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.ACCEPT,
             label="记住",
-            description="确认后续 slice 可以把这条 decision 交给 MemoryStore。",
+            description="确认你希望以后也使用这条信息。",
         ),
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT,
@@ -233,7 +233,7 @@ def _update_options() -> tuple[MemoryConfirmationOption, ...]:
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.ACCEPT,
             label="更新",
-            description="确认后续 slice 可以尝试更新对应记忆。",
+            description="确认你希望以后使用这条更新后的信息。",
         ),
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT,
@@ -260,7 +260,7 @@ def _forget_options() -> tuple[MemoryConfirmationOption, ...]:
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.ACCEPT,
             label="确认忘记",
-            description="确认后续 slice 可以尝试遗忘该目标。",
+            description="确认你希望以后不再使用这条信息。",
         ),
         MemoryConfirmationOption(
             choice=MemoryConfirmationChoice.CLARIFY,

@@ -169,6 +169,37 @@ def test_sensitive_confirmation_preview_is_redacted() -> None:
     assert "已隐藏敏感内容" in request.preview
 
 
+def test_confirmation_copy_avoids_architecture_terms_for_users() -> None:
+    """用户确认文案不能暴露内部架构词。
+
+    confirmation contract 可以在代码注释里解释 MemoryStore / decision 边界，但真正
+    展示给用户的 question/label/description 应该说人话，避免把 UX 变成工程接口。
+    """
+
+    from agent.memory_confirmation import build_memory_confirmation_request
+
+    policy = DeterministicMemoryPolicy()
+    requests = (
+        build_memory_confirmation_request(
+            policy.decide("remember that I prefer concise answers")
+        ),
+        build_memory_confirmation_request(
+            policy.decide("update memory: prefer detailed answers")
+        ),
+        build_memory_confirmation_request(
+            policy.decide("forget that I prefer concise answers")
+        ),
+    )
+    forbidden_terms = {"MemoryStore", "slice", "decision", "contract", "persist"}
+
+    for request in requests:
+        user_copy = [request.question]
+        for option in request.options:
+            user_copy.extend([option.label, option.description])
+        combined = "\n".join(user_copy)
+        assert forbidden_terms.isdisjoint(combined.split()), combined
+
+
 def test_resolving_confirmation_choice_is_result_only_not_store_write() -> None:
     """用户选择只生成 confirmation result，不等同于持久化写入。"""
 

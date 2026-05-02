@@ -85,6 +85,9 @@ core**。
   reading、sandbox write、Ask User / Other free-text、tool failure、checkpoint /
   resume、MCP local list/call、confirmation pressure；第二轮 smoke coverage 已固化
   在 `tests/test_second_round_dogfooding_smoke.py`。
+- ✅ Post-publish acceleration decision：下一段 canonical Roadmap part 进入
+  **Stage 3 Memory System Discovery / Architecture Planning readiness**；第一组
+  工作只允许 docs / acceptance tests / boundary tests，不实现长期记忆。
 - 🟡 当前只剩本地 post-release closure commit 需要人工 review / push 授权；这不
   改变 `v0.7.0` release 本身，也不要求补 tag。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
@@ -376,6 +379,37 @@ push 或 tag，除非用户单独选择对应动作。
 **主题**：跨会话语义沉淀（与 Stage 1 的 checkpoint 是不同关注点）。
 
 **当前只做 Discovery / Architecture Planning，不做 implementation。**
+
+#### Stage 3 kickoff · Memory Discovery readiness（post-tools 第一组工作）
+
+**为什么现在进入这里**：
+- Stage 2.5 Tooling Foundation / MCP readiness 已 release 并完成 dogfooding closure；
+- 当前没有 P0/P1/P2 要求继续 Runtime/Checkpoint/TUI hardening；
+- MCP CLI Config Management 是可选后续 thin adapter，不是 canonical stage；
+- Roadmap 的下一条主干是 Memory，但只能先做 Discovery / Architecture Planning。
+
+**第一组允许工作**：
+- 梳理 memory vs checkpoint vs session summary vs skill/hook 的边界；
+- 用 boundary tests 钉住 `agent.memory` 不反向 import `core` / checkpoint /
+  input backend / MCP / tool executor；
+- 用 acceptance tests 钉住当前 `build_memory_section()` 仍是静态占位，不读取
+  `memory/` 数据文件、不读取 `.env`、不接真实 provider；
+- 把 Memory Discovery 问题清单保持在 Roadmap 中，作为后续设计 review 的入口。
+
+**第一组禁止工作**：
+- 不实现 long-term memory；
+- 不读取或迁移 `memory/` 目录里的历史数据；
+- 不引入 embedding / vector DB / RAG dependency；
+- 不把 checkpoint schema 塞进 Memory；
+- 不让 input backend / TUI / MCP CLI 决定 memory retain/recall；
+- 不自动记录用户事实、偏好或项目知识。
+
+**完成定义（readiness）**：
+- Roadmap 明确 Memory Discovery 的目标、非目标、停止条件；
+- tests 保护 Memory discovery 边界：不读真实 memory artifacts、不依赖 runtime
+  hot path、不伪装成已实现 Memory System；
+- 后续若进入 implementation，必须先有 retain/recall/update/forget policy 与
+  human approval 边界。
 
 学习型边界说明：
 - Memory 是 Agent Runtime 的长期语义层，回答“哪些稳定事实、偏好、项目知识、

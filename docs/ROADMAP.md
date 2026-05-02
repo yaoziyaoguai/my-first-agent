@@ -65,7 +65,8 @@ core**。
 
 ## Current Position
 
-> **当前处于 Stage 2.5：Tooling Foundation Milestone post-release closure。**
+> **当前处于 Memory-line Stage 4：safe local MemoryStore skeleton publish 收口。**
+> 注意：这是 Memory 线的 Stage 4，不是 canonical Stage 4 Sub-agent / Handoff。
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -85,20 +86,22 @@ core**。
   reading、sandbox write、Ask User / Other free-text、tool failure、checkpoint /
   resume、MCP local list/call、confirmation pressure；第二轮 smoke coverage 已固化
   在 `tests/test_second_round_dogfooding_smoke.py`。
-- ✅ Post-publish acceleration decision：下一段 canonical Roadmap part 进入
-  **Stage 3 Memory System Discovery / Architecture Planning readiness**；第一组
-  工作只允许 docs / acceptance tests / boundary tests，不实现长期记忆。
-- 🟡 当前只剩本地 post-release closure commit 需要人工 review / push 授权；这不
-  改变 `v0.7.0` release 本身，也不要求补 tag。
+- ✅ Stage 3 Memory System foundation 已完成并发布：Candidate / Decision、
+  explicit-only Policy、Snapshot prompt seam、Confirmation UX、OperationIntent /
+  AuditSummary、fake Provider seam、deterministic dogfooding 都已落地。
+- ✅ Memory-line Stage 4 safe local store skeleton 已完成并发布准备：只提供
+  fake/local/test-only `MemoryStoreProtocol` + in-memory apply contract，不读取真实
+  sessions/runs/logs，不写真实长期记忆，不默认接 runtime，也不让 prompt_builder
+  直接读取 store。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
   sampling/roots、未做 production remote server auth、未做 release packaging。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
-> 口径：**Tooling Foundation Milestone / post-release dogfooding closure 已完成**；
-> 后续若继续产品化，应先人工 review 当前 closure evidence，再单独选择
-> Memory System Discovery 或 MCP CLI Config Management 等下一 milestone。Memory
-> 不是 RAG Discovery。
+> 口径：**Tooling Foundation Milestone / Stage 3 Memory foundation 已完成**；
+> Memory-line Stage 4 store skeleton 只是 fake/local storage seam，不是完整长期
+> memory 产品化。后续若继续，应进入 governed snapshot generation 或单独回到
+> MCP CLI Config Management。Memory 不是 RAG Discovery。
 > Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
 > 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
 
@@ -454,6 +457,10 @@ push 或 tag，除非用户单独选择对应动作。
 - Slice 7 Memory UX dogfooding scenarios / docs / release readiness 已落地：
   使用 deterministic tests + `docs/MEMORY_DOGFOODING.md` checklist，不读取真实
   sessions/runs/logs、不写真实 memory；
+- Memory-line Stage 4 safe local MemoryStore skeleton 已落地：`memory_store`
+  只接收已确认、已审计的 `MemoryOperationIntent` / `MemoryAuditSummary`，只写
+  fake/in-memory record，不接 runtime/checkpoint/prompt_builder，不实现真实
+  persistence / retrieval / recall；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

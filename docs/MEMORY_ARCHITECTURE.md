@@ -385,6 +385,55 @@ Do not add now:
 - Stop condition: requires real private memory data.
 - Commit strategy: tests/docs closure.
 
+## Memory-line Stage 4: Safe local MemoryStore skeleton
+
+> Naming note: this is the next Memory architecture stage, not the global Roadmap
+> "Stage 4 · Sub-agent / Handoff" product stage.
+
+- Goal: add a fake/local/test-only `MemoryStoreProtocol` + in-memory store
+  skeleton that can apply already-approved `MemoryOperationIntent` plus matching
+  `MemoryAuditSummary`.
+- Current status: implemented as `agent.memory_store` with deterministic
+  in-process records only.
+- Non-goal: no real persistence, no real user history, no sessions/runs/log
+  reads, no runtime default integration, no prompt_builder store reads, no
+  real retrieval/recall, no vector/RAG, no MCP resources/prompts integration.
+- Boundary: Store is a storage seam, not the Memory system. It cannot decide
+  policy, ask for confirmation, create operation intent, generate audit summary,
+  or inject prompt context.
+- Record semantics: `MemoryRecord` is not `MemoryCandidate`. A candidate is a
+  possible fact; a record is a fake/local result after confirmation, operation
+  intent, and audit have already happened.
+- Apply semantics:
+  - retain creates a fake record;
+  - update changes an existing fake record only;
+  - forget removes an existing fake record only;
+  - use_once / reject / clarify / no-op do not write store.
+- Safety: sensitive operation content must remain redacted in fake records.
+
+学习型边界说明：
+- 把 store 放在 Stage 4，是为了先验证 "approved operation -> storage seam"
+  的接口形状，而不是为了开始长期记忆产品化。
+- Store 不能回头调用 `MemoryPolicy` 或 `memory_confirmation`，否则会绕过 Stage 3
+  已建立的治理链，形成新的小巨石。
+- `prompt_builder` 仍只能消费 `MemorySnapshot`，不能直接读 store；下一阶段如果
+  要把 store 内容放进 prompt，必须先经过 governed snapshot generation。
+
+## Memory-line Stage 5 readiness: governed snapshot generation
+
+- Candidate goal: generate a `MemorySnapshot` from fake/local store records
+  through a governed selection pipeline.
+- Non-goals: no real retrieval, no vector/RAG, no real user data, no direct
+  prompt_builder store read, no provider/MCP integration.
+- Expected input: fake/local `MemoryRecord` values plus explicit selection
+  reason and safety/budget constraints.
+- Expected output: approved `MemorySnapshot` view with provenance, budget, and
+  safety filter summary.
+- Required boundary: store-to-snapshot generation must remain upstream of
+  prompt_builder; prompt_builder keeps formatting-only responsibility.
+- Stop condition: implementation requires real persistence, real retrieval,
+  runtime default integration, or sensitive/private data.
+
 ## Why this is not `memory.json + prompt injection`
 
 The proposed design makes a memory record pass through candidate extraction,

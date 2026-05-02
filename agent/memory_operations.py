@@ -19,7 +19,7 @@ from agent.memory_confirmation import (
     MemoryConfirmationResult,
     MemoryConfirmationStatus,
 )
-from agent.memory_contracts import MemoryDecisionType, MemorySensitivity
+from agent.memory_contracts import MemoryDecisionType, MemoryScope, MemorySensitivity
 
 
 class MemoryOperationType(StrEnum):
@@ -48,6 +48,7 @@ class MemoryOperationIntent:
     user_choice: MemoryConfirmationChoice
     content_summary: str
     source_summary: str
+    scope: MemoryScope | None
     safety_summary: str
     sensitive_redacted: bool
     user_visible_summary: str
@@ -90,6 +91,7 @@ def build_memory_operation_intent(
     sensitive_redacted = _is_sensitive(decision)
     content_summary = _content_summary(confirmation, sensitive_redacted)
     source_summary = _source_summary(confirmation)
+    scope = _scope(confirmation)
     safety_summary = _safety_summary(confirmation, sensitive_redacted)
 
     return MemoryOperationIntent(
@@ -99,6 +101,7 @@ def build_memory_operation_intent(
         user_choice=confirmation.choice,
         content_summary=content_summary,
         source_summary=source_summary,
+        scope=scope,
         safety_summary=safety_summary,
         sensitive_redacted=sensitive_redacted,
         user_visible_summary=_user_visible_summary(operation_type),
@@ -168,6 +171,18 @@ def _source_summary(confirmation: MemoryConfirmationResult) -> str:
     decision = confirmation.request.decision
     candidate = decision.target_candidate
     return decision.provenance or (candidate.id if candidate is not None else "unknown")
+
+
+def _scope(confirmation: MemoryConfirmationResult) -> MemoryScope | None:
+    """把候选 scope 带到 operation intent，供后续 fake store 记录来源范围。
+
+    Stage 4 的 store 只能消费 OperationIntent，不能回头读取 MemoryDecision /
+    ConfirmationRequest；因此 scope 必须在 Slice 5 的无副作用意图中显式携带。
+    这只是元数据传递，不执行 store IO，也不改变 confirmation/runtime 语义。
+    """
+
+    candidate = confirmation.request.decision.target_candidate
+    return candidate.scope if candidate is not None else None
 
 
 def _safety_summary(

@@ -3,16 +3,25 @@ from pathlib import Path
 from agent.tool_registry import register_tool
 from agent.security import is_protected_source_file
 from agent.checks import run_linter
+from agent.tools.path_safety import is_path_inside_project, project_boundary_rejection
 from config import ENABLE_REVIEW
 
 
 def pre_edit_check(tool_name, tool_input, context):
-    """编辑文件前的检查"""
+    """编辑文件前的检查，复用 FileMutation 的项目根 safety seam。"""
     path = tool_input.get("path", "")
 
     # 源码保护
     if is_protected_source_file(path):
         return f"拒绝执行：'{path}' 属于受保护源码文件（.py），不允许 Agent 修改"
+
+    # edit_file 与 write_file 都是文件 mutation，必须共享项目根硬边界。
+    if not is_path_inside_project(path):
+        return project_boundary_rejection(
+            path,
+            action="编辑项目外路径文件",
+            manual_action="在项目外编辑文件",
+        )
 
     # 同一轮只允许一次文件写操作
     if context and context.get("write_file_seen"):

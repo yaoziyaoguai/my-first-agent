@@ -44,7 +44,7 @@ core**。
 | **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
-| **2.5** | **Tooling Foundation Milestone**（**下一步**） | 🟡 Tool audit / MCP discovery，不实现 | 后续 |
+| **2.5** | **Tooling Foundation Milestone**（**下一步**） | 🟡 Foundation cleanup / MCP 前 final review，不实现 MCP | 后续 |
 | **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
 | **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
 | **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
@@ -64,7 +64,7 @@ core**。
 
 ## Current Position
 
-> **当前处于 Stage 2.5 准备态：Tooling Foundation Milestone。**
+> **当前处于 Stage 2.5：Tooling Foundation Milestone cleanup / review。**
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -75,10 +75,11 @@ core**。
   generation interruption）必须单独立项，不作为继续扩大 HITL/Input 的理由。
 - ✅ Memory System Discovery Roadmap Correction 已完成：Memory 是独立逻辑模块，
   RAG / retrieval / vector DB 只是后续 provider / recall backend 候选。
-- 🟡 下一步不是 Memory，而是 **Tool Module Architecture Audit**：先把本地工具体系
-  的 registry / schema / executor / result / error / approval / logging /
-  checkpoint / runtime 边界审计清楚，再进入 MCP Client / Tool Bridge Discovery。
-- ❌ 当前还没进入工具模块实现、MCP 实现或 Memory 实现；下一步只做 audit/discovery。
+- 🟡 下一步不是 Memory，而是 **MCP 前工具体系 final review**：Tool Module Audit
+  和 MCP 前 cleanup pack 已把 base registry / schema / result / file safety
+  边界收紧；commit 后先审计是否可阶段性收口，再进入 MCP Discovery。
+- ❌ 当前还没进入 MCP 实现或 Memory 实现；下一步只做 final review / discovery，
+  不直接接 MCP server、不联网、不引入依赖。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
@@ -283,24 +284,29 @@ push 或 tag，除非用户单独选择对应动作。
 #### C. Tooling Foundation implementation checkpoint（MCP 未开始）
 
 **已形成的本地工具体系基础**：
-- base registry 已收窄：未来 Skill lifecycle 的 `load_skill` / `update_skill`
-  不进入当前基础工具集，低价值窄工具 `calculate` 已移除；
+- base registry 已收窄：Skill lifecycle 的 `install_skill` / `load_skill` /
+  `update_skill` 不进入当前基础工具集，低价值窄工具 `calculate` 已移除；
 - registry 提供内部 ToolSpec 投影：`get_tool_specs()` 暴露 capability /
   risk_level / output_policy / confirmation metadata，但这些治理字段不进入
   model-visible tool schema；
+- `tool_registry.execute_tool()` 的外部签名保持不变，但内部已拆成 pre-hook /
+  dispatch / post-hook / normalization helpers；confirmation / runtime /
+  checkpoint 语义仍不进入 registry；
+- FileMutation path safety 已共享：`write_file` 与 `edit_file` 复用 project-root
+  helper，`edit_file` 不再能绕过项目根目录边界；`read_file` 仍保持项目外确认语义；
 - ToolResult 分类已从 executor 收口到 `tool_result_contract` seam；当前仍是
   legacy string prefix contract，尚未迁移为结构化 ToolResult；
 - shell / file / output policy / responsibility boundaries 已有
   characterization tests，保护 MCP 之前的本地工具边界。
 
 **MCP 前仍需人工 review / 后续 cleanup 的点**：
-- `tool_registry.execute_tool()` 仍存在，registry 还不是纯注册/查询层；
+- `tool_registry.execute_tool()` 仍作为兼容入口存在；是否进一步把 registry
+  收敛为纯注册/查询层，应在 MCP 前 final review 后单独决策；
 - `tool_executor.py` 仍负责 pending/checkpoint/log/display 编排，后续只能按
   小 slice 收口，不能大拆；
-- `edit_file` 的 project-root safety parity 已被测试记录，但尚未生产修复；
-- `install_skill` 仍是 base registry 中的 Skill lifecycle outlier，是否移出
-  需单独决策；
-- MCP 仍未实现；当前只预留本地 ToolSpec / ToolResult / safety seam。
+- ToolResult 仍是 legacy string/prefix contract，没有做结构化迁移；
+- MCP 仍未实现；当前只预留本地 ToolSpec / ToolResult / safety seam，下一步应先做
+  MCP 前 final review，而不是直接实现 MCP。
 
 **高内聚 / 低耦合完成标准**：
 - tool registry 不做执行；
@@ -567,12 +573,14 @@ Bridge Discovery；之后才进入 Memory System Discovery。
 |---|---|---|---|---|---|---|
 | 1 | **HITL/Input Roadmap Closure** | Stage 2 | done | User Input Resolution Contract + input backend confirmation boundary safety net 已完成 | 已 push；不继续扩大 HITL | closed |
 | 2 | **Memory System Discovery Roadmap Correction** | Stage 3 | done | Memory 被定义为独立逻辑模块；RAG 降级为 provider/backend 候选 | 已 push；未实现 Memory/RAG | closed |
-| 3 | **Tool Module Architecture Audit** | Stage 2.5 | read-only audit | 只读梳理 tool registry / schema / executor / result / error / approval / logging / checkpoint / runtime 边界 | 不改文件；不实现工具；不联网 | 输出 + ask_user |
-| 4 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究 MCP tools 如何映射到本地 tool registry/schema/result/error/approval contract | 不实现 MCP；不接真实私有数据源；不新增依赖 | 输出 + ask_user |
-| 5 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
-| 6 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
-| 7 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
-| 8 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
+| 3 | **Tool Module Architecture Audit + Foundation boundary contracts** | Stage 2.5 | done | registry/schema/result/output/responsibility boundaries 已有测试与最小 seams | 已完成；未实现 MCP | closed |
+| 4 | **MCP-before cleanup pack** | Stage 2.5 | commit-readiness review | split `execute_tool` 内部职责、修复 `edit_file` project-root parity、移出默认 `install_skill` | full pytest + ruff + diff check；不实现 MCP | 人工 review 后决定 commit |
+| 5 | **MCP 前 final review** | Stage 2.5 | review | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor 边界是否可阶段性收口 | 不联网；不接 MCP server；不新增依赖 | 输出 + ask_user |
+| 6 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究 MCP tools 如何映射到本地 tool registry/schema/result/error/approval contract | 不实现 MCP；不接真实私有数据源；不新增依赖 | 输出 + ask_user |
+| 7 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
+| 8 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
+| 9 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
+| 10 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
 
 **严禁打包**：不要把 Discovery、Planning、Tests、Implementation 混进同一个 commit。
 

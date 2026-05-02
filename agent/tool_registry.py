@@ -144,13 +144,14 @@ def _normalize_result(result):
     return str(result)
 
 
-def execute_tool(name, tool_input, context=None):
-    if name not in TOOL_REGISTRY:
-        return f"工具 '{name}' 不在允许列表中"
+def _run_pre_execute_hook(name, info, tool_input, context):
+    """运行工具 pre-hook，保持 safety guard 在 registry invocation 边界内。
 
-    info = TOOL_REGISTRY[name]
+    pre_execute 属于工具调用前的本地 safety seam：它可以拒绝危险输入，但不能
+    做 confirmation、checkpoint 或 runtime transition。把这段逻辑留在 registry
+    内部 helper，而不是下沉到 core/executor，可避免 runtime 巨石化。
+    """
 
-    # 执行前钩子
     if info.get("pre_execute"):
         try:
             block_reason = info["pre_execute"](name, tool_input, context)
@@ -160,17 +161,34 @@ def execute_tool(name, tool_input, context=None):
             return f"[工具 {name} 的 pre_execute 钩子异常] {type(e).__name__}: {e}"
         if block_reason:
             return _normalize_result(block_reason)
+    return None
 
-    # 执行工具函数：**任何**异常都转字符串返回（包括 SystemExit——工具误调 exit()
-    # 不应当挂掉整个 agent）。KeyboardInterrupt 例外——它必须透穿让用户能中断。
+
+def _dispatch_tool_function(name, info, tool_input):
+    """执行已注册工具函数，并把普通工具异常转成 legacy 字符串结果。
+
+    这里是 Python callable dispatch 边界，不做 registry lookup，也不写
+    tool_result message。返回 `(ok, result)` 是为了保留旧语义：工具函数异常时
+    不应继续跑 post_execute hook，但也不能让悬空 tool_use 留给下一轮 API。
+    """
+
     try:
         result = info["func"](**tool_input)
     except KeyboardInterrupt:
         raise
     except BaseException as e:
-        return f"[工具 {name} 执行异常] {type(e).__name__}: {e}"
+        return False, f"[工具 {name} 执行异常] {type(e).__name__}: {e}"
+    return True, result
 
-    # 执行后钩子
+
+def _run_post_execute_hook(name, info, tool_input, result):
+    """运行工具 post-hook，保持结果后处理不进入 runtime/core。
+
+    post_execute 是具体工具的本地收尾 seam，例如 linter 提示或 UX 文案追加。
+    它仍属于 registry invocation 的一部分；runtime 只消费最终 result，不应知道
+    每个工具的后处理细节。
+    """
+
     if info.get("post_execute"):
         try:
             result = info["post_execute"](name, tool_input, result)
@@ -178,9 +196,37 @@ def execute_tool(name, tool_input, context=None):
             raise
         except BaseException as e:
             return f"[工具 {name} 的 post_execute 钩子异常] {type(e).__name__}: {e}"
+    return result
 
-    # 统一规范化——None/dict/数值都转成字符串，保证 tool_result.content 合法
+
+def _invoke_registered_tool(name, info, tool_input, context=None):
+    """调用已查到的工具条目，集中处理 hook/dispatch/normalization。
+
+    `execute_tool` 仍负责 registry lookup；本 helper 负责 invocation pipeline。
+    这样拆分后边界更清楚，但不引入新类/新模块，也不把 confirmation、
+    checkpoint、runtime transition 或 tool_result message 语义放进 registry。
+    """
+
+    block_reason = _run_pre_execute_hook(name, info, tool_input, context)
+    if block_reason:
+        return block_reason
+
+    ok, result = _dispatch_tool_function(name, info, tool_input)
+    if not ok:
+        return result
+
+    result = _run_post_execute_hook(name, info, tool_input, result)
+
+    # 统一规范化——None/dict/数值都转成字符串，保证 tool_result.content 合法。
     return _normalize_result(result)
+
+
+def execute_tool(name, tool_input, context=None):
+    if name not in TOOL_REGISTRY:
+        return f"工具 '{name}' 不在允许列表中"
+
+    info = TOOL_REGISTRY[name]
+    return _invoke_registered_tool(name, info, tool_input, context)
 
 
 def needs_tool_confirmation(name, tool_input):

@@ -11,6 +11,8 @@ import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _load_builtin_tools() -> None:
     """显式注册内置工具，避免测试依赖 core.py 或测试顺序。"""
@@ -132,6 +134,84 @@ def test_rejected_by_check_prefix_is_not_classified_as_success() -> None:
         "tool.rejected",
         "已被工具内部安全检查拒绝。",
     )
+
+
+def test_execute_tool_preserves_pre_dispatch_post_order() -> None:
+    """execute_tool 拆 helper 时不能改变 hook/dispatch/result 语义。
+
+    本测试覆盖 registry invocation 边界：pre_execute 可读取 context 并先于工具函数
+    执行，post_execute 可基于原始结果做转换，最终仍由 registry 规范化成
+    tool_result 可接受内容。它不涉及 confirmation、checkpoint 或 runtime transition，
+    因为那些职责不属于 tool_registry。
+    """
+
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
+
+    events: list[tuple[str, object]] = []
+
+    def _pre_execute(_name, tool_input, context):
+        events.append(("pre", context["marker"]))
+        events.append(("pre_input", tool_input["value"]))
+        return None
+
+    def _post_execute(_name, _tool_input, result):
+        events.append(("post", result))
+        return {"wrapped": result}
+
+    @register_tool(
+        name="contract_hook_order_tool",
+        description="checks pre/dispatch/post order",
+        parameters={"value": {"type": "string"}},
+        confirmation="never",
+        pre_execute=_pre_execute,
+        post_execute=_post_execute,
+    )
+    def _contract_hook_order_tool(value: str) -> str:
+        events.append(("dispatch", value))
+        return value.upper()
+
+    try:
+        result = execute_tool(
+            "contract_hook_order_tool",
+            {"value": "ok"},
+            context={"marker": "ctx"},
+        )
+    finally:
+        TOOL_REGISTRY.pop("contract_hook_order_tool", None)
+
+    assert events == [
+        ("pre", "ctx"),
+        ("pre_input", "ok"),
+        ("dispatch", "ok"),
+        ("post", "OK"),
+    ]
+    assert result == "{'wrapped': 'OK'}"
+
+
+def test_execute_tool_keeps_keyboard_interrupt_as_user_cancel_signal() -> None:
+    """KeyboardInterrupt 必须透穿，不能被 result normalization 吃掉。
+
+    Ctrl+C/Esc interruption 属于用户控制边界，不是普通工具失败。registry helper
+    可以捕获 SystemExit 这类工具误调用并转字符串，但不能把 KeyboardInterrupt
+    伪装成 tool_result；否则 runtime 无法区分用户中断和工具内部错误。
+    """
+
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
+
+    @register_tool(
+        name="contract_keyboard_interrupt_tool",
+        description="raises KeyboardInterrupt for cancellation boundary",
+        parameters={},
+        confirmation="never",
+    )
+    def _contract_keyboard_interrupt_tool() -> str:
+        raise KeyboardInterrupt
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            execute_tool("contract_keyboard_interrupt_tool", {})
+    finally:
+        TOOL_REGISTRY.pop("contract_keyboard_interrupt_tool", None)
 
 
 def test_append_tool_result_message_shape_is_stable() -> None:

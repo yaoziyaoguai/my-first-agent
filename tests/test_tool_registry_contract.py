@@ -23,7 +23,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_MODEL_VISIBLE_TOOLS = {
     "edit_file",
     "fetch_url",
-    "install_skill",
     "mark_step_complete",
     "read_file",
     "read_file_lines",
@@ -32,7 +31,12 @@ EXPECTED_MODEL_VISIBLE_TOOLS = {
     "write_file",
 }
 
-PREMATURE_SKILL_TOOL_NAMES = {"load_skill", "load_skills", "update_skill"}
+PREMATURE_SKILL_TOOL_NAMES = {
+    "install_skill",
+    "load_skill",
+    "load_skills",
+    "update_skill",
+}
 LOW_VALUE_NARROW_TOOL_NAMES = {"calculate"}
 EXPECTED_META_TOOLS = {"mark_step_complete", "request_user_input"}
 EXPECTED_INTERNAL_TOOL_SPECS = {
@@ -47,13 +51,6 @@ EXPECTED_INTERNAL_TOOL_SPECS = {
         "capability": "network_fetch",
         "risk_level": "high",
         "output_policy": "artifact_text",
-        "confirmation": "always",
-        "meta_tool": False,
-    },
-    "install_skill": {
-        "capability": "skill_lifecycle",
-        "risk_level": "high",
-        "output_policy": "bounded_text",
         "confirmation": "always",
         "meta_tool": False,
     },
@@ -128,6 +125,23 @@ def _agent_imports(path: Path) -> set[str]:
     return imports
 
 
+def _call_names_in_function(path: Path, function_name: str) -> set[str]:
+    """收集指定函数内部调用的函数名，保护 registry 内部职责边界。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function_name:
+            calls: set[str] = set()
+            for child in ast.walk(node):
+                if isinstance(child, ast.Call):
+                    if isinstance(child.func, ast.Name):
+                        calls.add(child.func.id)
+                    elif isinstance(child.func, ast.Attribute):
+                        calls.add(child.func.attr)
+            return calls
+    raise AssertionError(f"{function_name} not found in {path}")
+
+
 def _assert_spec_contains(spec: dict, expected: dict) -> None:
     """断言内部 ToolSpec 含有预期治理字段，保留额外字段演进空间。"""
 
@@ -155,13 +169,13 @@ def test_model_visible_tools_match_runtime_allowed_tools() -> None:
     assert visible_tools == allowed_tools
 
 
-def test_premature_skill_tools_do_not_pollute_tooling_foundation_registry() -> None:
-    """未来 Skill System 的工具入口不能污染当前 Tooling Foundation。
+def test_skill_lifecycle_tools_do_not_pollute_tooling_foundation_registry() -> None:
+    """Skill lifecycle 工具入口不能污染当前基础工具集。
 
-    `load_skill` / `update_skill` 属于未来 Skill lifecycle，而当前阶段只在打牢
-    本地基础工具 contract。它们不应出现在 model-visible tools、allowed tools
-    或当前 registry 中；未来 Skill System 可以重新设计正式 Skill tools，但不应
-    由本阶段的基础工具快照提前固化。
+    `install_skill` / `load_skill` / `update_skill` 属于未来 Skill lifecycle。
+    当前阶段只收敛本地基础工具 contract：默认 registry 应只包含稳定、安全边界
+    清晰的工具。此测试保护的是 base/default registry 边界，不否定后续 Skill
+    System 可以通过显式 opt-in seam 重新接入这些能力。
     """
 
     _load_builtin_tools()
@@ -196,19 +210,44 @@ def test_low_value_narrow_tools_do_not_pollute_base_tool_registry() -> None:
     assert LOW_VALUE_NARROW_TOOL_NAMES.isdisjoint(TOOL_REGISTRY)
 
 
-def test_agent_tools_does_not_auto_import_premature_skill_tool_modules() -> None:
-    """基础工具注册入口不能自动加载未来 Skill lifecycle 工具。
+def test_agent_tools_does_not_auto_import_skill_lifecycle_tool_modules() -> None:
+    """基础工具注册入口不能自动加载 Skill lifecycle 工具。
 
     `agent.tools` 是当前模型可见工具的注册入口；如果它 import 了
-    `agent.tools.skill` 或 `agent.tools.update_skill`，这些未来 Skill System
-    工具就会进入当前 Tooling Foundation 的 schema/allowed tools。此测试保护
-    的是阶段边界，不是未来 Skill System 的最终设计。
+    `agent.tools.install_skill` / `agent.tools.skill` / `agent.tools.update_skill`，
+    这些 Skill System 能力就会进入当前 schema/allowed tools。此测试保护的是
+    默认工具集边界，而不是未来 Skill System 的最终设计。
     """
 
     imports = _agent_imports(PROJECT_ROOT / "agent" / "tools" / "__init__.py")
 
+    assert "agent.tools.install_skill" not in imports
     assert "agent.tools.skill" not in imports
     assert "agent.tools.update_skill" not in imports
+
+
+def test_install_skill_remains_explicit_non_default_capability() -> None:
+    """install_skill 可以显式引用，但不能默认注册给模型。
+
+    当前架构的 optional seam 是 Python 显式 import 触发装饰器注册；这不是新的
+    Skill System，也不是 MCP。测试先锁住“base registry 不包含 install_skill”，
+    再证明实现模块仍存在，避免本轮把默认工具集收窄误做成删除能力。
+    """
+
+    importlib.import_module("agent.tools")
+
+    from agent.tool_registry import TOOL_REGISTRY
+
+    assert "install_skill" not in TOOL_REGISTRY
+
+    module = importlib.import_module("agent.tools.install_skill")
+    module = importlib.reload(module)
+
+    try:
+        assert hasattr(module, "install_skill")
+        assert "install_skill" in TOOL_REGISTRY
+    finally:
+        TOOL_REGISTRY.pop("install_skill", None)
 
 
 def test_registered_tools_have_current_schema_shape() -> None:
@@ -346,6 +385,27 @@ def test_tool_registry_does_not_depend_on_runtime_or_confirmation_handlers() -> 
         "agent.checkpoint",
     }
     assert imports.isdisjoint(forbidden)
+
+
+def test_execute_tool_remains_lookup_wrapper_for_invocation_pipeline() -> None:
+    """execute_tool 应保持 registry lookup wrapper，不回退成巨型执行函数。
+
+    这个测试保护的是 registry 的内部架构边界：lookup 仍在 registry，但
+    pre-hook、dispatch、post-hook 和 result normalization 不应再次堆回
+    `execute_tool` 本体。具体 hook/dispatch 行为由 result contract 行为测试覆盖；
+    这里仅防止入口函数重新膨胀成 runtime/工具语义混杂点。
+    """
+
+    registry_path = PROJECT_ROOT / "agent" / "tool_registry.py"
+    execute_tool_calls = _call_names_in_function(registry_path, "execute_tool")
+
+    assert "_invoke_registered_tool" in execute_tool_calls
+    assert {
+        "_run_pre_execute_hook",
+        "_dispatch_tool_function",
+        "_run_post_execute_hook",
+        "_normalize_result",
+    }.isdisjoint(execute_tool_calls)
 
 
 def test_core_only_consumes_registry_schema_not_specific_tool_modules() -> None:

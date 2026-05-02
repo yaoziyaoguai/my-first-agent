@@ -534,6 +534,13 @@ def main(argv: list[str] | None = None) -> int:
 
         return process_main(argv)
 
+    # MCP config management 是开发者工作流入口，不是 runtime brain；这里必须早于
+    # init_session/main_loop 转发，避免命令行校验时误进入交互式 stdin。
+    if len(argv) >= 2 and argv[0] == "mcp" and argv[1] == "config":
+        from agent.mcp_config_cli import run_mcp_config_cli
+
+        return run_mcp_config_cli(argv[1:])
+
     # v0.2 release：health 子命令脱离主循环单独诊断 workspace_lint / log_size /
     # session_accumulation 等非阻塞 warning。
     # v0.3 M2 升级：默认输出结构化报告（含 risk + 建议命令），新增 --json 给脚本用。

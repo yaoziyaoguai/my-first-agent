@@ -296,37 +296,14 @@ def test_three_sequential_tasks_no_state_bleeding(monkeypatch):
 
 def test_user_switches_topic_mid_task(monkeypatch):
     """step1 完成、进入 awaiting_step_confirmation 后，
-    用户不说 y 也不说 n，而是**直接提了个完全无关的新任务**。
+    用户输入完全无关的新任务时，Runtime 不许靠关键词或 LLM 二次分类猜测意图。
 
-    当前代码的 handle_step_confirmation 会把它当作 plan_feedback
-    （触发 planner 重算当前任务）。但用户真正的意图是"我换话题了"。
-
-    ⚠️ 当前 xfail（slash command 整体下线 + 启发式回退后重新挂上）：
-    Runtime 当前没有任何机制可以在单次 chat() 调用里区分"对当前 plan 的反馈"
-    和"切换到新任务"。可行的解只有以下几种，本轮都不引入：
-      (a) `/newtask` 类显式控制输入 —— slash command 已整体下线，不再恢复字符串协议；
-      (b) LLM 二次分类器 + `awaiting_topic_switch_confirmation` 状态 —— 设计较重，
-          需要 RuntimeEvent 用户确认流，超出本轮范围；
-      (c) 浅层关键词/字符启发式（c252695 引入的 imperative-prefix + plan vocab
-          no-overlap）—— 已在本轮回退，不允许靠这种猜测；
-      (d) 改写测试为两步交互（先 n 取消旧任务，再提新任务）—— 用户不接受。
-    在引入 (a)/(b) 中的某一种之前，本测试保留 xfail；它仍然是产品方向的真实
-    缺口提醒。
-
-    本轮**保留**的结构化收益：feedback 分支不再写回 state.task.user_goal，避免
-    plan/step feedback 单向累加导致 user_goal 字符串无限膨胀
-    （见 test_plan_feedback_does_not_accumulate_goal_string_indefinitely）。
+    Roadmap Completion Autopilot 关闭这个历史 xfail 的关键不是恢复 slash command，
+    也不是“一句话自动切换”，而是复用已经落地的 `awaiting_feedback_intent`
+    显式三选一：第一轮自然语言只表达“这里有歧义”，第二轮精确选择 "2" 才
+    触发 reset_task + 新规划。这样既满足用户能切换话题，又不让浅层启发式重新
+    污染 confirmation handler。
     """
-
-    import pytest as _pytest
-    _pytest.xfail(
-        "[归属：v0.2 输入语义治理 · 解锁条件：引入 awaiting_feedback_intent 之上"
-        "成熟的 topic-switch 信号源（显式控制输入或 LLM 二次分类 + "
-        "awaiting_topic_switch_confirmation），禁止靠浅层启发式回退或改写测试为两步交互绕过] "
-        "slash command 整体下线 + 启发式回退后无信号源：Runtime 在单次 chat() "
-        "里无法可靠区分 plan feedback 与新任务话题切换；解此缺口需要明确的"
-        "RuntimeEvent 用户确认流或 LLM 二次分类，本轮（v0.1）不引入。"
-    )
     cleanup = _register_test_tool("w", confirmation="never", result="done")
     try:
         fake = FakeAnthropicClient(
@@ -349,6 +326,10 @@ def test_user_switches_topic_mid_task(monkeypatch):
         assert state.task.status == "awaiting_step_confirmation"
 
         chat("帮我写一首关于春天的诗")
+        assert state.task.status == "awaiting_feedback_intent"
+        assert state.task.pending_user_input_request is not None
+
+        chat("2")
 
         assert "春天的诗" in state.task.user_goal and "分析文档" not in state.task.user_goal, (
             f"用户换了新话题，user_goal 应当是新话题，"

@@ -1,12 +1,16 @@
 # Runtime v0.2 · Release Candidate Status
 
-> **本文件目的**：把 Runtime v0.2 当前的真实完成范围、未完成事项、3 个
+> **本文件目的**：把 Runtime v0.2 当前的真实完成范围、未完成事项、历史 3 个
 > xfailed 的归属、M5/M6「preflight only」的含义、登记缺口的级别、以及
 > 「现在为什么不 push」一次性写清楚。让人工测试者拿到本文档就知道
 > 「我能信什么、不能信什么、踩到什么属于已知现状」。
 >
 > **本文件不引入新功能、不重写 spec、不改路线**。它是状态报告，不是
 > 设计文档。
+>
+> **Roadmap Completion Autopilot closure addendum**：这 3 个历史 xfail 已在后续
+> roadmap packs 中闭合：paste burst 保留完整多行输入；topic switch 走
+> `awaiting_feedback_intent` 显式三选一；Textual Esc 取消当前 Assistant projection。
 
 ---
 
@@ -129,10 +133,13 @@
 > 由 `tests/test_security_baseline.py` 钉死「当前确实如此」，方便补丁
 > 落地时翻转为「不再如此」。
 
-### 2.3 M7 / M8 未启动
+### 2.3 M7 / M8 后续闭合状态
 
-- 没有 Textual TUI、状态面板、`generation.cancelled` RuntimeEvent。
-- Esc 当前只是 Textual 输入编辑边界（见 xfail #2）。
+- Textual persistent shell 已有 smoke tests。
+- 历史 Esc cancel xfail 已闭合最小 TUI projection 语义：生成中 Esc 标记当前
+  Assistant 为 `[已中断]`，并阻止后续 chunk / final completion 覆盖该提示。
+- 真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计，
+  不由 TUI adapter 直接 mutate Runtime state。
 
 ### 2.4 不在 v0.2 范围
 
@@ -142,16 +149,16 @@
 
 ---
 
-## 3. 3 个 xfailed 的归属与不阻塞 RC 的原因
+## 3. 历史 3 个 xfailed 的归属、闭合状态与不阻塞 RC 的原因
 
-| 测试 | 文件 | 归属 | 为何不阻塞 RC |
+| 测试 | 文件 | 历史归属 | 当前闭合状态 |
 |---|---|---|---|
-| `test_user_switches_topic_mid_task` | `tests/test_hardcore_round2.py` | v0.2 输入语义治理（解锁条件：明确的 RuntimeEvent 用户确认流或 LLM 二次分类 + `awaiting_topic_switch_confirmation`） | v0.1 已显式不引入；v0.2 RC 不承诺 topic switch；不靠浅启发式回退 |
-| `test_textual_shell_escape_can_cancel_running_generation` | `tests/test_input_backends_textual.py` | v0.2 cancel 生命周期（M8）+ v0.3 TUI Esc 集成（M7） | M7/M8 在 RC 主线之后；当前 Esc 仅属于 Textual 编辑边界 |
-| `test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent` | `tests/test_real_cli_regressions.py` | v0.3 高级 TUI（paste burst / bracketed paste / `UserInputEnvelope`） | 普通 CLI `input()` 限制；不通过强制 `/multi` 等命令绕过；属 v0.3 |
+| `test_user_switches_topic_mid_task` | `tests/test_hardcore_round2.py` | v0.2 输入语义治理（解锁条件：明确的 RuntimeEvent 用户确认流或 LLM 二次分类 + `awaiting_topic_switch_confirmation`） | ✅ 已转 PASS：使用 `awaiting_feedback_intent` 显式三选一，用户精确选 `2` 后切新任务；不恢复 slash command、不用浅层启发式、不做 LLM 二次分类 |
+| `test_textual_shell_escape_can_cancel_running_generation` | `tests/test_input_backends_textual.py` | v0.2 cancel 生命周期（M8）+ v0.3 TUI Esc 集成（M7） | ✅ 已转 PASS：Textual 生成中 Esc 取消当前 Assistant projection，阻止后续 chunk / completion 覆盖“已中断”；真实 provider abort deferred |
+| `test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent` | `tests/test_real_cli_regressions.py` | v0.3 高级 TUI（paste burst / bracketed paste / `UserInputEnvelope`） | ✅ 已转 PASS：一次 paste burst / multiline input 保留为一个用户意图，不把编号列表拆成菜单选择 |
 
-3 个 xfail 都被 docstring 显式说明了归属与解锁条件，不会因为「忘了」
-而长期挂着。
+这 3 个历史 xfail 的关闭都没有删除测试或弱化边界；关闭方式均为把历史缺口转成
+可执行的 production contract。
 
 ---
 

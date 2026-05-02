@@ -262,6 +262,11 @@ def _build_textual_shell_app_class() -> type[Any]:
             self.prompt_text = prompt_text
             self.conversation_history: list[tuple[str, str]] = []
             self.cancelled_events: list[UserInputEvent] = []
+            # 生成取消只属于 TUI projection 生命周期：记录 Assistant 占位索引，
+            # 让 Esc 能阻止后续 chunk/最终 completion 覆盖“已中断”提示，但不触碰
+            # Runtime state、checkpoint 或 conversation.messages。
+            self._active_assistant_index: int | None = None
+            self._cancelled_assistant_indices: set[int] = set()
             # 仅表达 UI 当前有 worker 在生成，不能用它吞掉下一次输入。真实 bug 曾
             # 出现在“计划提示已显示但 worker 未完全收尾”时，用户输入 y 被阻断。
             self.is_generating = False
@@ -349,6 +354,8 @@ def _build_textual_shell_app_class() -> type[Any]:
 
             if not chunk:
                 return
+            if message_index in self._cancelled_assistant_indices:
+                return
 
             role, current_text = self.conversation_history[message_index]
             if role != "Assistant":
@@ -402,6 +409,8 @@ def _build_textual_shell_app_class() -> type[Any]:
             """
 
             try:
+                if message_index in self._cancelled_assistant_indices:
+                    return
                 role, current_text = self.conversation_history[message_index]
                 if role != "Assistant":
                     return
@@ -421,6 +430,8 @@ def _build_textual_shell_app_class() -> type[Any]:
                 # 这个释放动作放在 UI thread，避免 worker thread 改状态后焦点没有
                 # 回到 TextArea，导致真实终端里 Enter 不再提交。
                 self.is_generating = False
+                if self._active_assistant_index == message_index:
+                    self._active_assistant_index = None
                 self._input_area().focus()
 
         def _append_assistant_response(self, raw_text: str, message_index: int) -> None:
@@ -481,6 +492,8 @@ def _build_textual_shell_app_class() -> type[Any]:
             self.append_message("Assistant", ASSISTANT_THINKING_PLACEHOLDER)
             assistant_index = len(self.conversation_history) - 1
             self.is_generating = True
+            self._active_assistant_index = assistant_index
+            self._cancelled_assistant_indices.discard(assistant_index)
             self.run_worker(
                 lambda: self._append_assistant_response(
                     event.envelope.raw_text,
@@ -496,10 +509,23 @@ def _build_textual_shell_app_class() -> type[Any]:
             self._input_area().insert("\n")
 
         def cancel_current_input(self) -> UserInputEvent:
-            """Esc 只取消当前编辑内容，不伪造成 input.submitted。"""
+            """Esc 取消草稿；生成中则取消当前 Assistant projection。
+
+            这里仍然是输入后端/UI adapter 边界：返回 input.cancelled 给测试和未来
+            adapter 观察，但不直接调用 Runtime、不写 checkpoint、不修改 TaskState。
+            """
 
             self._input_area().clear()
-            event = _cancelled_textual_event()
+            channel = "escape_key"
+            if self.is_generating and self._active_assistant_index is not None:
+                channel = "escape_generation"
+                message_index = self._active_assistant_index
+                self._cancelled_assistant_indices.add(message_index)
+                if 0 <= message_index < len(self.conversation_history):
+                    self.conversation_history[message_index] = ("Assistant", "[已中断]")
+                    self._redraw_conversation()
+                self.is_generating = False
+            event = _cancelled_textual_event(channel=channel)
             self.cancelled_events.append(event)
             return event
 

@@ -13,6 +13,7 @@
 | Skill System Safe Local MVP | complete | `agent.skills.local` + `docs/SKILL_LOCAL_MVP.md` + tests | real install/execution/marketplace deferred |
 | Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` + tests | real LLM/provider/process/remote delegation deferred |
 | Skill/Subagent Integration Boundary | complete | `docs/CAPABILITY_BOUNDARIES.md` + tests | real activation deferred |
+| Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -49,6 +50,14 @@
    - Subagent = parent-controlled delegation
    - no policy bypass
 
+6. Known XFAIL Closure
+   - topic-switch now uses explicit `awaiting_feedback_intent` choice `[2]`
+   - no slash command restoration
+   - no keyword/LLM intent guessing
+   - Textual Esc cancels the active Assistant projection
+   - cancelled projection blocks later chunks and final completion overwrite
+   - no Runtime state mutation from the TUI adapter
+
 ## Release readiness
 
 The repository is ready for human review and release/tag preparation planning only.
@@ -64,6 +73,7 @@ Safety non-goals:
 - no real provider call
 - no memory activation
 - no broad refactor
+- real provider stream abort remains deferred unless separately designed
 
 Before any release/tag:
 

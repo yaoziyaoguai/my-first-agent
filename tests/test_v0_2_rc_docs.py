@@ -126,15 +126,25 @@ def test_security_baseline_pins_known_gaps() -> None:
     )
 
 
-def test_rc_status_lists_three_xfail_origins() -> None:
-    """RC status 必须显式列出 3 个 xfailed 的归属，避免长期挂着没人管。"""
+def test_rc_status_lists_historical_xfail_origins_and_closure_status() -> None:
+    """RC status 既要保留历史 xfail 归属，也要记录后续闭合状态。
+
+    Roadmap Completion Autopilot 关闭历史 xfail 后，测试不能继续要求“仍有
+    3 个 xfailed”。正确的不变量是：历史归属不丢，闭合方式可审计，避免下次
+    又把这些缺口当成未知 backlog。
+    """
     rc_status = (REPO_ROOT / "docs/V0_2_RC_STATUS.md").read_text(encoding="utf-8")
-    for needle in [
+    required_markers = [
         "test_user_switches_topic_mid_task",
         "test_textual_shell_escape_can_cancel_running_generation",
         "test_plain_cli_pasted_numbered_multiline_should_be_one_user_intent",
-    ]:
+        "awaiting_feedback_intent",
+        "已转 PASS",
+        "真实 provider abort deferred",
+        "paste burst / multiline input",
+    ]
+    for needle in required_markers:
         assert needle in rc_status, (
-            f"docs/V0_2_RC_STATUS.md 必须显式记录 xfail 测试 {needle} 的归属，"
-            "防止 xfail 永久挂着没人对账。"
+            f"docs/V0_2_RC_STATUS.md 必须显式记录历史 xfail/闭合证据 {needle}，"
+            "防止已关闭缺口或剩余 provider-abort 边界再次漂移。"
         )

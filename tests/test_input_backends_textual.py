@@ -932,27 +932,60 @@ def test_textual_shell_ctrl_q_close_does_not_submit_draft():
     asyncio.run(run_smoke())
 
 
-@pytest.mark.xfail(
-    reason=(
-        "[归属：v0.2 cancel 生命周期 + v0.3 TUI Esc 集成 · 解锁条件：先在 "
-        "agent/core.py chat() 引入 cancel_token、模型 stream abort、"
-        "generation.cancelled RuntimeEvent（v0.2），再在 Textual backend "
-        "把 Esc 从草稿取消升级为生成取消（v0.3）] "
-        "当前 Esc 只属于 Textual 输入编辑边界；core/chat 还没有 cancel_token、"
-        "模型 stream abort 或 generation.cancelled RuntimeEvent。删除条件："
-        "RuntimeEvent 先定义生成生命周期，main/core 能把 cancel_token 传到模型流，"
-        "Textual 再把 Esc 从编辑取消升级为生成取消。"
-    ),
-    strict=True,
-)
 def test_textual_shell_escape_can_cancel_running_generation():
     """生成阶段 Esc 应停止继续 append chunk，并标记 Assistant 已中断。
 
-    这是 cancellation 设计债的严格 xfail，不是待补一行代码的 UI bug。当前
-    Textual 的 Esc 只在输入后端边界产生 input.cancelled/清空草稿；生成取消需要
-    RuntimeEvent 输出生命周期、core cancel_token、模型 stream abort 和 main.py
-    adapter 协作。测试不能把 RuntimeEvent、InputIntent、checkpoint、
-    conversation.messages、TaskState 或 simple CLI fallback 混成一个临时补丁。
+    这是 Roadmap Completion Autopilot 关闭 XFAIL-2 的最小 TUI 边界：Textual
+    adapter 可以取消自己正在展示的 generation projection，阻止后续 chunk 和
+    handler completion 覆盖“已中断”提示；但它仍不能直接 mutate Runtime state、
+    checkpoint、conversation.messages，也不能伪造 input.submitted。真实 provider
+    abort/cancel_token 以后应在 runtime 生命周期里单独补，不在 TUI 层硬塞。
     """
 
-    raise AssertionError("generation.cancelled 尚未接入 cancel_token")
+    _require_textual()
+
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    first_chunk_seen = threading.Event()
+    continue_after_cancel = threading.Event()
+
+    def streaming_handler(text: str, on_runtime_event=None) -> str:
+        assert text == "开始生成"
+        assert on_runtime_event is not None
+        on_runtime_event(assistant_delta("第一段"))
+        first_chunk_seen.set()
+        continue_after_cancel.wait(timeout=2)
+        on_runtime_event(assistant_delta("第二段不应出现"))
+        return "最终完成文本不应覆盖中断提示"
+
+    async def run_smoke() -> None:
+        """用真实 headless Textual worker 复现 Esc 发生在生成中的窗口期。"""
+
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(chat_handler=streaming_handler, prompt_text="你: ")
+
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            input_area.load_text("开始生成")
+            await pilot.press("enter")
+            assert first_chunk_seen.wait(timeout=2)
+            await pilot.pause()
+
+            await pilot.press("escape")
+            continue_after_cancel.set()
+            await pilot.pause()
+            await pilot.pause()
+
+            assert input_area.text == ""
+            assert app.cancelled_events[-1].event_type == "input.cancelled"
+            assert app.cancelled_events[-1].event_channel == "escape_generation"
+            assert app.is_generating is False
+            assert app.conversation_history[-1] == ("Assistant", "[已中断]")
+            rendered = "\n".join(message for _role, message in app.conversation_history)
+            assert "第一段" not in rendered
+            assert "第二段不应出现" not in rendered
+            assert "最终完成文本不应覆盖中断提示" not in rendered
+
+    asyncio.run(run_smoke())

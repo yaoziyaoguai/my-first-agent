@@ -44,7 +44,7 @@ core**。
 | **0** | Basic Agent Loop / early baseline | ✅ 已毕业 | v0.1（无 tag，毕业标准 ✅） |
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
-| **2.5** | **Tooling Foundation Milestone**（**下一步**） | ✅ 本地工具体系 + local stdio MCP validation 已可 release review | v0.7.0 候选 |
+| **2.5** | **Tooling Foundation Milestone** | ✅ v0.7.0 已 release；post-release dogfooding closure 已完成 | v0.7.0 |
 | **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
 | **4** | Sub-agent / Handoff | ⏳ 未启动 | 后续 |
 | **5** | Skill system | ⏳ 仅原型，**未正式化** | 后续（可轻量穿插） |
@@ -55,8 +55,9 @@ core**。
 **全局停止规则**：
 - 任何"我觉得这块该做"的改动，先回答："这属于哪个 Stage 的毕业标准？"
 - 答不出 → **推迟到对应 Stage backlog**，不在当前 Stage 做。
-- **Stage 2.5 先做 Tooling Foundation Milestone**：先审计本地工具模块，再做 MCP
-  Client / Tool Bridge Discovery；不直接实现工具/MCP。
+- **Stage 2.5 Tooling Foundation Milestone 已完成**：不要在没有新证据时重开
+  工具体系/MCP readiness；MCP CLI、外部 server 验证和 resources/prompts 等必须
+  单独规划。
 - **Memory System Discovery 后移到工具体系边界清楚之后**；Stage 4/5 的实质实现
   仍必须等 Memory 边界清楚后再启动（Stage 6/7 可作必要补丁）。
 
@@ -64,7 +65,7 @@ core**。
 
 ## Current Position
 
-> **当前处于 Stage 2.5：Tooling Foundation Milestone release review。**
+> **当前处于 Stage 2.5：Tooling Foundation Milestone post-release closure。**
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
 - ✅ Architecture / Module Debt 治理已阶段性完成：checkpoint ownership、
@@ -75,19 +76,26 @@ core**。
   generation interruption）必须单独立项，不作为继续扩大 HITL/Input 的理由。
 - ✅ Memory System Discovery Roadmap Correction 已完成：Memory 是独立逻辑模块，
   RAG / retrieval / vector DB 只是后续 provider / recall backend 候选。
-- ✅ Tooling Foundation 已形成可 release review 的本地闭环：base registry /
+- ✅ Tooling Foundation 已 release 为 `v0.7.0`：base registry /
   ToolSpec metadata / ToolResult legacy seam / FileMutation path safety / MCP
   architecture seam / local stdio MCP validation 均有 tests。
-- 🟡 下一步不是 Memory，也不是 MCP CLI implementation，而是 **release / push / tag
-  授权讨论**；如需继续 MCP，应单独规划 CLI config management 或外部 reference
-  server validation。
+- ✅ Post-release verification 已完成：本地与 remote `origin/main` / `v0.7.0`
+  release 状态已核验，tools/MCP milestone 没有 release blocker。
+- ✅ Self-dogfooding closure 已完成：第一轮和第二轮 dogfooding 覆盖 code
+  reading、sandbox write、Ask User / Other free-text、tool failure、checkpoint /
+  resume、MCP local list/call、confirmation pressure；第二轮 smoke coverage 已固化
+  在 `tests/test_second_round_dogfooding_smoke.py`。
+- 🟡 当前只剩本地 post-release closure commit 需要人工 review / push 授权；这不
+  改变 `v0.7.0` release 本身，也不要求补 tag。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
   sampling/roots、未做 production remote server auth、未做 release packaging。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 正式化，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
-> 口径：下一阶段是 **Tooling Foundation Milestone**；其后才是
-> **Memory System Discovery**，且 Memory 不是 RAG Discovery。
+> 口径：**Tooling Foundation Milestone / post-release dogfooding closure 已完成**；
+> 后续若继续产品化，应先人工 review 当前 closure evidence，再单独选择
+> Memory System Discovery 或 MCP CLI Config Management 等下一 milestone。Memory
+> 不是 RAG Discovery。
 > Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
 > 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
 
@@ -230,7 +238,7 @@ push 或 tag，除非用户单独选择对应动作。
 
 ---
 
-### Stage 2.5 · Tooling Foundation Milestone ⭐**下一步**
+### Stage 2.5 · Tooling Foundation Milestone ✅**release + dogfooding closure complete**
 
 **主题**：先把本地工具体系的边界审计清楚，再考虑 MCP Client / Tool Bridge。
 
@@ -302,14 +310,15 @@ push 或 tag，除非用户单独选择对应动作。
 - shell / file / output policy / responsibility boundaries 已有
   characterization tests，保护 MCP 之前的本地工具边界。
 
-**MCP 前仍需人工 review / 后续 cleanup 的点**：
+**后续 cleanup / milestone 候选（不阻塞本阶段 closure）**：
 - `tool_registry.execute_tool()` 仍作为兼容入口存在；是否进一步把 registry
-  收敛为纯注册/查询层，应在 MCP 前 final review 后单独决策；
+  收敛为纯注册/查询层，应在独立 tool-system cleanup slice 中单独决策；
 - `tool_executor.py` 仍负责 pending/checkpoint/log/display 编排，后续只能按
   小 slice 收口，不能大拆；
 - ToolResult 仍是 legacy string/prefix contract，没有做结构化迁移；
-- MCP 仍未实现；当前只预留本地 ToolSpec / ToolResult / safety seam，下一步应先做
-  MCP 前 final review，而不是直接实现 MCP。
+- 当前 MCP 只完成 client architecture seam + local stdio fixture validation；MCP CLI
+  Config Management、外部/reference server validation、resources/prompts/sampling/
+  roots 都是后续 milestone，不是本阶段 blocker。
 
 **高内聚 / 低耦合完成标准**：
 - tool registry 不做执行；
@@ -345,11 +354,20 @@ push 或 tag，除非用户单独选择对应动作。
 - 未把 ToolResult 半路迁移成结构化对象；
 - 未把 MCP 逻辑塞进 `core.py` / `tool_executor.py` / checkpoint / TUI。
 
-**下一步顺序**：
-1. 人工 review 当前 local stdio validation diff；
-2. 决定是否 commit MCP real-integration validation diff；
-3. 再选择外部 reference server 验证、MCP CLI config management 规划，
-   或更完整 stdio fake-to-real transition；任何真实 server / secret / networking 都需要单独授权。
+**release / dogfooding closure 状态**：
+- `v0.7.0` 已 tag + push，覆盖 Tooling Foundation / MCP readiness milestone；
+- post-release verification 已确认本地与 remote release 状态一致；
+- self-dogfooding 第一轮与第二轮已完成，未发现 P0/P1/P2；
+- 唯一 P3 是多步 always-confirm 工具可能显得确认频率偏高；当前不改
+  confirmation policy，只用 dogfooding smoke test 保护"确认多次也不重复执行、
+  不漏 tool_result"的安全语义。
+
+**后续顺序**：
+1. 人工 review / push 当前 post-release dogfooding closure docs/tests commit；
+2. 真实使用一段时间，记录自动化 smoke 无法覆盖的 TUI/UX 问题；
+3. 再单独选择 Memory System Discovery、MCP CLI Config Management、外部/reference
+   MCP server validation，或 Runtime/Checkpoint/TUI targeted hardening。任何真实
+   server / secret / networking 都需要单独授权。
 
 ---
 

@@ -1,11 +1,12 @@
 # my-first-agent
 
 `my-first-agent` is a learning-oriented Agent Runtime prototype. The current
-local-first trial track is **Runtime v0.3.x usability**: keep the v0.2 runtime
-boundaries intact while making the basic CLI shell, health report, and logs
-viewer easier to use offline.
+local-first track is **v0.7.0 Tooling Foundation / MCP readiness post-release
+closure**: the local tool registry, file-mutation safety, legacy ToolResult
+contract, MCP client seam, and local stdio MCP fixture have release and
+dogfooding coverage.
 
-It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, and not a Skill or sub-agent platform.
+It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, not a full MCP implementation, and not a Skill or sub-agent platform.
 
 ## Quickstart (local-first trial)
 
@@ -82,8 +83,20 @@ you to run manually.
 .venv/bin/python -m pytest -q
 ```
 
-Expected baseline: ruff clean, ~691 passed, 3 permanent xfails (each
-xfail message documents which future version owns the gap).
+Historical v0.3-era baseline was ruff clean with ~691 passed, 3 permanent xfails;
+keep that in mind when reading older release docs.
+
+Current v0.7.x post-release baseline: ruff clean, full pytest passing with the
+two expected xfails for topic switch and Textual Esc generation cancel. The
+dogfooding smoke coverage can be run directly with:
+
+```bash
+PYTHON_DOTENV_DISABLED=1 \
+ANTHROPIC_API_KEY=test-key \
+ANTHROPIC_BASE_URL=https://example.invalid \
+MODEL_NAME=test-model \
+.venv/bin/python -m pytest tests/test_second_round_dogfooding_smoke.py -q -rx
+```
 
 ### Local runtime artifacts
 

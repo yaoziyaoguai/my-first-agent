@@ -1,8 +1,9 @@
 # MCP Readiness and Local Stdio Validation
 
-本文件记录 First Agent 当前的 MCP 集成边界。它不是完整 MCP 使用手册，也不声明
-已经支持外部 MCP server；当前只完成了最小 client architecture seam 和本地 stdio
-fixture 验证。
+本文件记录 First Agent 当前的 MCP 集成边界。`v0.7.0` 已 release 并完成
+post-release dogfooding closure；这仍不是完整 MCP 使用手册，也不声明已经支持
+外部 MCP server。当前完成的是最小 client architecture seam、本地 stdio fixture
+验证，以及 release 后 smoke/dogfooding 覆盖。
 
 ## 当前已实现
 
@@ -25,6 +26,15 @@ fixture 验证。
 - 没有读取 `.env`、真实 secret、`agent_log.jsonl`、真实 `sessions/` 或 `runs/`。
 - 没有把 MCP tools 放进 base/default registry。
 - 没有改变 checkpoint/runtime/TUI/core loop 或 tool_result message 写入语义。
+
+## Release / dogfooding closure status
+
+- `v0.7.0` 已 tag + push，作为 Tooling Foundation / MCP readiness milestone。
+- Post-release verification 已确认本地与 remote release 状态一致。
+- Self-dogfooding 覆盖了 MCP `list_tools`、`call_tool` success/failure、explicit
+  opt-in registry boundary、confirmation policy 和 legacy ToolResult mapping。
+- `tests/test_second_round_dogfooding_smoke.py` 固化了 release 后 smoke：MCP local
+  fixture 不进 base/default registry，显式 opt-in 后才可执行，且仍需要确认。
 
 ## 配置文件与 CLI 的关系
 
@@ -104,11 +114,12 @@ First Agent 已经有 TUI，但 TUI 和 MCP CLI 不在同一层：
 
 ## 下一阶段
 
-推荐先人工 review 当前本地 stdio validation diff。之后再选择：
+推荐先人工 review / push 当前 post-release dogfooding closure commit。之后再单独选择：
 
-1. commit 当前 diff；
-2. 做 MCP CLI config management；
-3. 做外部/reference MCP server 验证；
-4. 做更完整 stdio fake-to-real transition。
+1. MCP CLI config management：只做 config source-of-truth 的薄管理入口；
+2. 外部/reference MCP server 验证：必须先明确 networking、secret、filesystem sandbox
+   授权；
+3. 更完整 stdio fake-to-real transition；
+4. resources / prompts / sampling / roots：后续增强，不属于 v0.7.0 closure。
 
 任何真实 server、secret、networking、filesystem sandbox 指向都需要单独人工授权。

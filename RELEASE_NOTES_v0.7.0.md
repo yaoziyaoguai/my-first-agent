@@ -1,6 +1,7 @@
-# Release Notes v0.7.0 Draft — Tooling Foundation / MCP Readiness
+# Release Notes v0.7.0 — Tooling Foundation / MCP Readiness
 
-> Status: release candidate evidence draft. This has not been tagged, pushed, or released.
+> Status: `v0.7.0` has been tagged and pushed. This file also records
+> post-release dogfooding closure evidence added after the tag.
 
 ## Added
 
@@ -57,6 +58,12 @@
   - MCP related pytest: pass
   - tool registry / executor / file safety related pytest: pass
   - full pytest: pass with existing expected xfails
+- Post-release dogfooding closure:
+  - first-round self-dogfooding covered code reading, sandbox write, tool failure,
+    Ask User / free-text, checkpoint/resume, and MCP local list/call;
+  - second-round dogfooding added multi-step read/write/read-back, Ask User restore
+    via temp checkpoint, MCP failure path, and confirmation-pressure smoke;
+  - `tests/test_second_round_dogfooding_smoke.py` keeps the closure evidence executable.
 
 ## Docs
 
@@ -91,9 +98,9 @@
 
 ## Next steps
 
-- Human release review of the local commits.
-- Decide whether to push local commits to `origin/main`.
-- Decide whether to tag this milestone, likely as `v0.7.0` after release authorization.
-- Plan MCP CLI config management as a thin adapter over the MCP config source of truth.
+- Human review of the post-release dogfooding closure commit.
+- Decide whether to push the closure docs/tests commit to `origin/main`.
+- Plan MCP CLI config management as a thin adapter over the MCP config source of truth,
+  only after the closure evidence is accepted.
 - Plan external/reference MCP server validation with explicit authorization for any networking, secrets, or
   filesystem sandbox paths.

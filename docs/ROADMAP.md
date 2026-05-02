@@ -280,6 +280,28 @@ push 或 tag，除非用户单独选择对应动作。
 - 不绕过本地工具审批；
 - 不做权限系统大改。
 
+#### C. Tooling Foundation implementation checkpoint（MCP 未开始）
+
+**已形成的本地工具体系基础**：
+- base registry 已收窄：未来 Skill lifecycle 的 `load_skill` / `update_skill`
+  不进入当前基础工具集，低价值窄工具 `calculate` 已移除；
+- registry 提供内部 ToolSpec 投影：`get_tool_specs()` 暴露 capability /
+  risk_level / output_policy / confirmation metadata，但这些治理字段不进入
+  model-visible tool schema；
+- ToolResult 分类已从 executor 收口到 `tool_result_contract` seam；当前仍是
+  legacy string prefix contract，尚未迁移为结构化 ToolResult；
+- shell / file / output policy / responsibility boundaries 已有
+  characterization tests，保护 MCP 之前的本地工具边界。
+
+**MCP 前仍需人工 review / 后续 cleanup 的点**：
+- `tool_registry.execute_tool()` 仍存在，registry 还不是纯注册/查询层；
+- `tool_executor.py` 仍负责 pending/checkpoint/log/display 编排，后续只能按
+  小 slice 收口，不能大拆；
+- `edit_file` 的 project-root safety parity 已被测试记录，但尚未生产修复；
+- `install_skill` 仍是 base registry 中的 Skill lifecycle outlier，是否移出
+  需单独决策；
+- MCP 仍未实现；当前只预留本地 ToolSpec / ToolResult / safety seam。
+
 **高内聚 / 低耦合完成标准**：
 - tool registry 不做执行；
 - tool executor 不做业务决策；

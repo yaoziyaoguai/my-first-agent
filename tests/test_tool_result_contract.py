@@ -162,14 +162,13 @@ def test_append_tool_result_message_shape_is_stable() -> None:
 
 
 def test_current_tool_error_contract_is_prefix_based() -> None:
-    """当前 error/result contract 仍散落在前缀表里。
+    """当前 error/result contract 仍是前缀表，但已有独立模块承载。
 
-    这条测试有意锁住 production gap：tool_executor 通过字符串前缀判断 failed /
-    rejected，而不是读取结构化 ToolResult。未来迁移到结构化 contract 时，应更新
-    这条测试和前缀 inventory，而不是继续扩大字符串判断。
+    这仍不是最终结构化 ToolResult；但前缀 inventory 必须集中在 result contract
+    seam，避免 tool_executor 继续承载可迁移的业务分类知识。
     """
 
-    from agent.tool_executor import TOOL_FAILURE_PREFIXES, TOOL_REJECTION_PREFIXES
+    from agent.tool_result_contract import TOOL_FAILURE_PREFIXES, TOOL_REJECTION_PREFIXES
 
     expected_failure_prefixes = {
         "错误：",
@@ -185,6 +184,31 @@ def test_current_tool_error_contract_is_prefix_based() -> None:
 
     assert set(TOOL_FAILURE_PREFIXES) == expected_failure_prefixes
     assert TOOL_REJECTION_PREFIXES == ("拒绝执行：",)
+
+
+def test_tool_executor_delegates_outcome_classification_to_result_contract() -> None:
+    """tool_executor 只编排执行流程，不拥有 result 分类词表。
+
+    这条测试保护责任边界：ToolResult success/failure/rejected 的判断集中在
+    `tool_result_contract`，executor 只是调用它并继续处理 checkpoint/logging/UI
+    投影，避免 executor 变成新的工具语义巨石。
+    """
+
+    import agent.tool_executor as executor
+    import agent.tool_result_contract as contract
+
+    assert executor.TOOL_FAILURE_PREFIXES is contract.TOOL_FAILURE_PREFIXES
+    assert executor.TOOL_REJECTION_PREFIXES is contract.TOOL_REJECTION_PREFIXES
+    assert executor._classify_tool_outcome("错误：boom") == (
+        "failed",
+        "tool.failed",
+        "执行失败。",
+    )
+    assert executor._classify_tool_outcome("拒绝执行：policy") == (
+        "rejected_by_check",
+        "tool.rejected",
+        "已被工具内部安全检查拒绝。",
+    )
 
 
 def test_existing_output_size_policies_are_tool_local_characterization(

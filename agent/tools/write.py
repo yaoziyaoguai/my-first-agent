@@ -147,6 +147,9 @@ def post_write_check(tool_name, tool_input, result):
     confirmation="always",
     pre_execute=pre_write_check,
     post_execute=post_write_check,
+    capability="file_write",
+    risk_level="high",
+    output_policy="bounded_text",
 )
 def write_file(path, content):
     try:

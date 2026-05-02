@@ -112,6 +112,9 @@ def check_shell_blacklist(command):
         },
     },
     confirmation="always",
+    capability="command_execution",
+    risk_level="high",
+    output_policy="bounded_text",
 )
 def run_shell(command):
     blocked_pattern = check_shell_blacklist(command)

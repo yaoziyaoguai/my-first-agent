@@ -20,6 +20,7 @@ from agent.display_events import (
     mask_user_visible_secrets,
 )
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
+from agent import tool_result_contract
 from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
@@ -27,26 +28,15 @@ from agent.tool_registry import needs_tool_confirmation
 AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
 
+# 兼容旧调用方：常量源头已经收口到 tool_result_contract，这里只保留别名。
+TOOL_FAILURE_PREFIXES = tool_result_contract.TOOL_FAILURE_PREFIXES
+TOOL_REJECTION_PREFIXES = tool_result_contract.TOOL_REJECTION_PREFIXES
+
 
 def _classify_tool_outcome(result: str) -> tuple[str, str, str]:
-    """根据工具返回字符串判定结果类别，返回 (status, display_event_type, status_text)。
+    """兼容旧测试/调用方的 thin wrapper；真实分类契约在 tool_result_contract。"""
 
-    三类结果：
-    - rejected_by_check: 工具的 pre/post hook 主动拒绝（「拒绝执行：...」），
-      属于「安全检查通过 confirm 之后但工具内部仍拒绝」的情况；
-      tool.rejected 显示事件 + 「已被工具内部安全检查拒绝。」status_text。
-    - failed: 工具执行报错（如文件不存在、超时、HTTP 错误），见
-      TOOL_FAILURE_PREFIXES；tool.failed + 「执行失败。」。
-    - executed: 真实成功；tool.completed + 「执行完成。」。
-
-    注意：rejection 和 failure 都不会让 Agent 在下一轮自动重试同一调用
-    （response_handlers 已有「不要再次调用同一工具和同一输入」提示）。
-    """
-    if any(result.startswith(prefix) for prefix in TOOL_REJECTION_PREFIXES):
-        return "rejected_by_check", "tool.rejected", "已被工具内部安全检查拒绝。"
-    if any(result.startswith(prefix) for prefix in TOOL_FAILURE_PREFIXES):
-        return "failed", "tool.failed", "执行失败。"
-    return "executed", "tool.completed", "执行完成。"
+    return tool_result_contract.classify_tool_outcome(result)
 
 
 def _describe_policy_denial(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -177,41 +167,6 @@ def _mask_failure_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_mask_failure_value(item) for item in value)
     return value
-
-TOOL_FAILURE_PREFIXES = (
-    "错误：",
-    "读取超时：",
-    "HTTP 错误：",
-    "读取失败：",
-    "执行超时：",
-    "[工具 ",
-    "[安装失败]",
-    "[更新失败]",
-    # v0.2 RC 收口：未注册工具调用返回的「工具 'X' 不在允许列表中」，
-    # 旧前缀表不命中 → tool_executor 误判为 executed + 「执行完成。」
-    # 真实场景：模型把工具名写错（如 shell vs run_shell），或调用已下线工具。
-    # 这是必须显式归入 failed 类别的字符串，否则用户会以为危险/未注册操作
-    # 已经成功执行。tool_registry.execute_tool 第 77 行是唯一来源。
-    "工具 '",
-)
-
-# v0.2 M7-A 真实修复：工具的 pre/post-execute 钩子（如 pre_write_check、
-# check_shell_blacklist、_check_dangerous_content）拒绝执行时返回的字符串
-# 都以「拒绝执行：」开头。旧实现没有把这条前缀纳入 TOOL_FAILURE_PREFIXES，
-# 也没有独立分支，结果是：
-#   - tool_executor 显示「执行完成。」，与「执行成功」无法区分
-#   - tool_execution_log.status = "executed"，让审计/重试逻辑误以为成功
-#   - 用户体验上：刚说「用户已确认，正在执行」，紧接着又说「执行完成」，
-#     但实际上工具被安全检查拒绝了。
-# 把「拒绝执行：」单独成一类 status："rejected_by_check"，并 emit 独立
-# 的 tool.rejected 显示事件，让 UI / 审计 / 用户三方都能区分：
-#   policy denial（confirmation == "block"，发生在执行前）
-#   ↓ 不同
-#   pre/post-execute 拒绝（执行入口已经过 confirm 才被工具内部检查拒绝）
-#   ↓ 不同
-#   tool failure（工具运行报错，如读不存在的文件）
-TOOL_REJECTION_PREFIXES = ("拒绝执行：",)
-
 
 def execute_single_tool(
     block: Any,

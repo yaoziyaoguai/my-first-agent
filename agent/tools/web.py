@@ -18,6 +18,9 @@ FETCH_MAX_CHARS = 10000
         },
     },
     confirmation="always",
+    capability="network_fetch",
+    risk_level="high",
+    output_policy="artifact_text",
 )
 def fetch_url(url):
     if not url.startswith(("http://", "https://")):

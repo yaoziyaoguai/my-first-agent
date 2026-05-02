@@ -35,6 +35,71 @@ EXPECTED_MODEL_VISIBLE_TOOLS = {
 PREMATURE_SKILL_TOOL_NAMES = {"load_skill", "load_skills", "update_skill"}
 LOW_VALUE_NARROW_TOOL_NAMES = {"calculate"}
 EXPECTED_META_TOOLS = {"mark_step_complete", "request_user_input"}
+EXPECTED_INTERNAL_TOOL_SPECS = {
+    "edit_file": {
+        "capability": "file_write",
+        "risk_level": "high",
+        "output_policy": "bounded_text",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+    "fetch_url": {
+        "capability": "network_fetch",
+        "risk_level": "high",
+        "output_policy": "artifact_text",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+    "install_skill": {
+        "capability": "skill_lifecycle",
+        "risk_level": "high",
+        "output_policy": "bounded_text",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+    "mark_step_complete": {
+        "capability": "runtime_control",
+        "risk_level": "low",
+        "output_policy": "none",
+        "confirmation": "never",
+        "meta_tool": True,
+    },
+    "read_file": {
+        "capability": "file_read",
+        "risk_level": "medium",
+        "output_policy": "bounded_text",
+        "confirmation": "dynamic",
+        "meta_tool": False,
+    },
+    "read_file_lines": {
+        "capability": "file_read",
+        "risk_level": "medium",
+        "output_policy": "bounded_text",
+        "confirmation": "dynamic",
+        "meta_tool": False,
+    },
+    "request_user_input": {
+        "capability": "runtime_control",
+        "risk_level": "low",
+        "output_policy": "none",
+        "confirmation": "never",
+        "meta_tool": True,
+    },
+    "run_shell": {
+        "capability": "command_execution",
+        "risk_level": "high",
+        "output_policy": "bounded_text",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+    "write_file": {
+        "capability": "file_write",
+        "risk_level": "high",
+        "output_policy": "bounded_text",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+}
 
 
 def _load_builtin_tools() -> None:
@@ -61,6 +126,13 @@ def _agent_imports(path: Path) -> set[str]:
             elif node.module.startswith("agent."):
                 imports.add(node.module)
     return imports
+
+
+def _assert_spec_contains(spec: dict, expected: dict) -> None:
+    """断言内部 ToolSpec 含有预期治理字段，保留额外字段演进空间。"""
+
+    for key, value in expected.items():
+        assert spec[key] == value
 
 
 def test_model_visible_tools_match_runtime_allowed_tools() -> None:
@@ -140,11 +212,11 @@ def test_agent_tools_does_not_auto_import_premature_skill_tool_modules() -> None
 
 
 def test_registered_tools_have_current_schema_shape() -> None:
-    """当前工具 schema 只有 input_schema，尚未显式携带 result contract。
+    """模型可见 schema 仍只暴露 Anthropic 需要的最小字段。
 
-    这条 characterization 不是认可最终设计；它把现状说清楚：模型看到的是
-    Anthropic tool schema，runtime 还没有正式 ToolSpec/result_contract 字段。
-    后续引入 ToolSpec 时，应更新本测试，而不是让 schema 形状悄悄漂移。
+    Tooling Foundation 可以给 registry 增加内部 capability/risk/output metadata，
+    但不能把这些内部治理字段泄漏进模型 schema，避免模型把 policy 字段当作
+    可调用参数或业务语义。
     """
 
     _load_builtin_tools()
@@ -164,9 +236,73 @@ def test_registered_tools_have_current_schema_shape() -> None:
         assert schema["properties"] == registry_entry["parameters"]
         assert schema["required"] == list(registry_entry["parameters"].keys())
 
-        assert "result_contract" not in registry_entry
-        assert "output_size_policy" not in registry_entry
-        assert "risk_level" not in registry_entry
+        assert "capability" not in definition
+        assert "risk_level" not in definition
+        assert "output_policy" not in definition
+
+
+def test_internal_tool_specs_expose_capability_risk_and_output_policy() -> None:
+    """内部 ToolSpec 投影提供治理 metadata，但不执行工具。
+
+    这是 MCP 前的最小 seam：未来 external/MCP tools 必须映射成本地 capability、
+    risk_level、output_policy 和 confirmation policy，才能复用本地安全与审计。
+    这些字段属于 registry/query 边界，不应该由 core.py 或 display layer 推断。
+    """
+
+    _load_builtin_tools()
+
+    from agent.tool_registry import get_tool_specs
+
+    specs = {spec["name"]: spec for spec in get_tool_specs()}
+
+    assert set(specs) == EXPECTED_MODEL_VISIBLE_TOOLS
+    for name, expected in EXPECTED_INTERNAL_TOOL_SPECS.items():
+        _assert_spec_contains(specs[name], expected)
+
+
+def test_registry_metadata_values_are_from_small_controlled_vocabularies() -> None:
+    """工具 metadata 必须来自小而明确的词表。
+
+    这避免每个工具随意发明 risk/output/capability 字符串，导致 future MCP
+    adapter、permission policy 和 audit log 无法稳定映射。
+    """
+
+    _load_builtin_tools()
+
+    from agent.tool_registry import (
+        TOOL_CAPABILITIES,
+        TOOL_OUTPUT_POLICIES,
+        TOOL_REGISTRY,
+        TOOL_RISK_LEVELS,
+    )
+
+    for entry in TOOL_REGISTRY.values():
+        assert entry["capability"] in TOOL_CAPABILITIES
+        assert entry["risk_level"] in TOOL_RISK_LEVELS
+        assert entry["output_policy"] in TOOL_OUTPUT_POLICIES
+
+
+def test_register_tool_rejects_unknown_metadata_values() -> None:
+    """registry 在注册边界拒绝未知 metadata，而不是让 policy 字符串扩散。
+
+    这证明 capability/risk/output policy 不只是注释字段：注册入口会消费并
+    验证它们。未来 MCP adapter 也必须先映射到这些受控词表，不能把外部
+    server 的任意标签直接塞进 runtime。
+    """
+
+    from agent.tool_registry import register_tool
+
+    try:
+        register_tool(
+            name="bad_metadata_contract_tool",
+            description="bad metadata should fail before decorator use",
+            parameters={},
+            capability="arbitrary_external_power",
+        )
+    except ValueError as exc:
+        assert "未知工具能力类型" in str(exc)
+    else:
+        raise AssertionError("register_tool should reject unknown capability")
 
 
 def test_meta_tools_are_explicitly_marked_but_still_model_visible() -> None:

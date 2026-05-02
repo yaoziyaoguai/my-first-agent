@@ -21,6 +21,9 @@ from agent.skills.registry import reload_registry
         },
     },
     confirmation="always",  # 下载网络内容，必须用户确认
+    capability="skill_lifecycle",
+    risk_level="high",
+    output_policy="bounded_text",
 )
 def install_skill(url: str) -> str:
     """安装 skill 并自动 reload registry。"""

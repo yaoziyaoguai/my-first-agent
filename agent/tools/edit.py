@@ -70,6 +70,9 @@ def post_edit_check(tool_name, tool_input, result):
     confirmation="always",
     pre_execute=pre_edit_check,
     post_execute=post_edit_check,
+    capability="file_write",
+    risk_level="high",
+    output_policy="bounded_text",
 )
 def edit_file(path, old, new):
     try:

@@ -33,6 +33,9 @@ def _check_read_permission(tool_input):
         }
     },
     confirmation=_check_read_permission,
+    capability="file_read",
+    risk_level="medium",
+    output_policy="bounded_text",
 )
 def read_file(path):
     try:
@@ -87,6 +90,9 @@ def read_file(path):
         },
     },
     confirmation=_check_read_permission,
+    capability="file_read",
+    risk_level="medium",
+    output_policy="bounded_text",
 )
 def read_file_lines(path, start_line, end_line):
     try:

@@ -1,5 +1,50 @@
 TOOL_REGISTRY = {}
 
+# Tooling Foundation 内部治理词表。它们不会暴露给模型，只用于 runtime /
+# audit / future MCP adapter 判断工具能力、风险和输出预算。
+TOOL_CAPABILITIES = frozenset({
+    "local_action",
+    "file_read",
+    "file_write",
+    "command_execution",
+    "network_fetch",
+    "skill_lifecycle",
+    "runtime_control",
+})
+TOOL_RISK_LEVELS = frozenset({"low", "medium", "high"})
+TOOL_OUTPUT_POLICIES = frozenset({"none", "bounded_text", "artifact_text"})
+
+
+def _validate_metadata(capability, risk_level, output_policy):
+    """验证工具治理 metadata，避免每个工具发明自己的 policy 字符串。"""
+
+    if capability not in TOOL_CAPABILITIES:
+        raise ValueError(f"未知工具能力类型: {capability}")
+    if risk_level not in TOOL_RISK_LEVELS:
+        raise ValueError(f"未知工具风险等级: {risk_level}")
+    if output_policy not in TOOL_OUTPUT_POLICIES:
+        raise ValueError(f"未知工具输出策略: {output_policy}")
+
+
+def _input_schema(info):
+    """生成 Anthropic tool schema；内部 metadata 不应泄漏给模型。"""
+
+    return {
+        "type": "object",
+        "properties": info["parameters"],
+        "required": list(info["parameters"].keys()),
+    }
+
+
+def _confirmation_label(confirmation):
+    """把 confirmation 配置投影成可审计字符串，而不是暴露 callable。"""
+
+    if confirmation in ("always", "never"):
+        return confirmation
+    if callable(confirmation):
+        return "dynamic"
+    return "unknown"
+
 
 def register_tool(
     name,
@@ -9,6 +54,9 @@ def register_tool(
     pre_execute=None,
     post_execute=None,
     meta_tool=False,
+    capability="local_action",
+    risk_level="medium",
+    output_policy="bounded_text",
 ):
     """注册一个工具。
 
@@ -17,6 +65,8 @@ def register_tool(
     元工具的调用只写入 state.task.tool_execution_log 供系统判断使用，
     模型在后续轮次里**看不到**自己之前的元工具调用——避免污染业务对话上下文。
     """
+    _validate_metadata(capability, risk_level, output_policy)
+
     def decorator(func):
         TOOL_REGISTRY[name] = {
             "name": name,
@@ -27,6 +77,9 @@ def register_tool(
             "pre_execute": pre_execute,
             "post_execute": post_execute,
             "meta_tool": meta_tool,
+            "capability": capability,
+            "risk_level": risk_level,
+            "output_policy": output_policy,
         }
         return func
     return decorator
@@ -46,13 +99,32 @@ def get_tool_definitions():
         definitions.append({
             "name": info["name"],
             "description": info["description"],
-            "input_schema": {
-                "type": "object",
-                "properties": info["parameters"],
-                "required": list(info["parameters"].keys()),
-            },
+            "input_schema": _input_schema(info),
         })
     return definitions
+
+
+def get_tool_specs():
+    """返回 runtime 内部 ToolSpec 投影，不执行工具。
+
+    这是 MCP 前的最小 seam：外部工具未来必须映射到同一组 name/schema/
+    capability/risk/output/confirmation 字段，才能复用本地 safety、logging 和
+    HITL policy。模型可见 schema 仍由 get_tool_definitions() 单独负责。
+    """
+
+    specs = []
+    for name, info in TOOL_REGISTRY.items():
+        specs.append({
+            "name": name,
+            "description": info["description"],
+            "input_schema": _input_schema(info),
+            "confirmation": _confirmation_label(info["confirmation"]),
+            "meta_tool": bool(info.get("meta_tool", False)),
+            "capability": info["capability"],
+            "risk_level": info["risk_level"],
+            "output_policy": info["output_policy"],
+        })
+    return specs
 
 
 def get_allowed_tools():

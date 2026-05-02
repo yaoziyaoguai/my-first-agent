@@ -323,6 +323,9 @@ Do not add now:
 - Readiness note: Slice 3 now provides the approved snapshot sink; Slice 4 should
   define the user-facing approval contract that produces retain/update/forget
   decisions before any store or retrieval implementation exists.
+- Current status: implemented as a pure `memory_confirmation` contract that maps
+  retain/update/forget decisions to user-facing choices and result objects; it
+  does not write storage, create runtime pending state, or modify TUI/input flow.
 - Risk: adding a new pending status too early.
 - Stop condition: requires runtime core-loop rewrite.
 - Commit strategy: contract first, runtime integration later.
@@ -335,6 +338,10 @@ Do not add now:
 - Tests first: forget beats recall; audit does not include sensitive full text.
 - Expected behavior: safe operation results.
 - Acceptance criteria: every memory operation can produce a user-visible explanation.
+- Readiness note: Slice 5 can now consume `MemoryDecision` plus
+  `MemoryConfirmationResult`, but should still produce audit/operation summaries
+  only. It must not introduce real persistence or provider writes unless a later
+  store slice is explicitly authorized.
 - Risk: incomplete delete semantics across future providers.
 - Stop condition: external providers cannot support deletion contract.
 - Commit strategy: policy/audit tests before store integration.

@@ -443,7 +443,9 @@ push 或 tag，除非用户单独选择对应动作。
 - Slice 2 deterministic MemoryPolicy no-op / explicit-only retain 已落地；
 - Slice 3 MemorySnapshot prompt injection seam 已落地：prompt_builder 只消费
   approved snapshot view，不做 retrieval/store/policy；
-- Slice 4 下一步应先定义 retain/update/forget 的 user confirmation UX contract；
+- Slice 4 retain/update/forget user confirmation UX contract 已落地：
+  `memory_confirmation` 只生成用户确认 request/result，不写 store、不改 runtime；
+- Slice 5 下一步应先定义 forget/update safety 与 audit summary contract；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
 
 学习型边界说明：

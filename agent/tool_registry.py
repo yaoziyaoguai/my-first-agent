@@ -8,6 +8,7 @@ TOOL_CAPABILITIES = frozenset({
     "file_write",
     "command_execution",
     "network_fetch",
+    "mcp_tool",
     "skill_lifecycle",
     "runtime_control",
 })

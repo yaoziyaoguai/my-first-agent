@@ -86,7 +86,14 @@ class MCPCallResult:
         """映射到现有 legacy string ToolResult contract。"""
 
         if self.is_error:
-            detail = self.error_message if self.error_message is not None else self.content
+            if self.error_message is not None:
+                detail = self.error_message
+            elif isinstance(self.content, list):
+                detail = _stringify_mcp_content_blocks(self.content)
+            elif self.content is None:
+                detail = ""
+            else:
+                detail = str(self.content)
             return f"错误：MCP 工具 {server_name}/{tool_name} 执行失败：{detail}"
         if self.content is None:
             return ""

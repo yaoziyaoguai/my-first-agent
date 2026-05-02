@@ -316,30 +316,37 @@ push 或 tag，除非用户单独选择对应动作。
 - MCP adapter 不污染本地 tool contract；
 - tests 保护工具 contract 和架构边界，而不仅是表面行为。
 
-#### D. MCP Readiness / Minimal Client Architecture Pack（真实 transport 未实现）
+#### D. MCP Readiness / Minimal Client Architecture + Local Stdio Validation Pack
 
-**本轮允许形成的 architecture seam**：
+**已形成的 architecture seam**：
 - `MCPServerConfig`：只保存显式配置；配置是 source of truth，未来 CLI 只能管理配置；
 - `MCPToolDescriptor`：描述外部 server 暴露的 tool schema，但不等于本地 registry entry；
-- `MCPCallResult`：把 fake MCP client 结果映射回现有 legacy ToolResult string/list contract；
+- `MCPCallResult`：把 fake / stdio MCP client 结果映射回现有 legacy ToolResult string contract；
 - `MCPClient` protocol + `FakeMCPClient`：只提供 list_tools / call_tool seam，供测试验证架构；
 - explicit opt-in registry adapter：只有 enabled server 经显式调用才会注册 `mcp__server__tool`
   名称；MCP tools 不进入 base/default registry，且默认 `confirmation="always"`。
 
+**已完成的低风险真实验证**：
+- `StdioMCPClient`：启动显式配置的本地命令，通过 stdio 发送最小 JSON-RPC request；
+- `tests/fixtures/minimal_mcp_stdio_server.py`：本地 test server，只提供
+  initialize / tools/list / tools/call，不读取文件、不联网、不访问 secret；
+- 端到端测试覆盖 config -> stdio client -> list_tools -> registry opt-in ->
+  execute_tool -> legacy ToolResult mapping -> confirmation boundary。
+
 **明确未实现**：
-- 未实现真实 stdio server 启动；
+- 未连接外部 / reference MCP server；
+- 未声明完整 MCP spec 兼容或 SDK 替代；
 - 未实现 HTTP / SSE / Streamable HTTP transport；
-- 未连接真实 MCP server；
 - 未支持 resources / prompts / sampling / roots；
 - 未读取 `.env` 或真实 secrets；
 - 未把 ToolResult 半路迁移成结构化对象；
 - 未把 MCP 逻辑塞进 `core.py` / `tool_executor.py` / checkpoint / TUI。
 
 **下一步顺序**：
-1. 人工 review architecture seam；
-2. 决定是否 commit MCP seam diff；
-3. 再选择真实 transport implementation 规划、MCP CLI config management 规划，
-   或 stdio fake-to-real transition；任何真实 server / secret / networking 都需要单独授权。
+1. 人工 review 当前 local stdio validation diff；
+2. 决定是否 commit MCP real-integration validation diff；
+3. 再选择外部 reference server 验证、MCP CLI config management 规划，
+   或更完整 stdio fake-to-real transition；任何真实 server / secret / networking 都需要单独授权。
 
 ---
 
@@ -598,15 +605,16 @@ Bridge Discovery；之后才进入 Memory System Discovery。
 |---|---|---|---|---|---|---|
 | 1 | **HITL/Input Roadmap Closure** | Stage 2 | done | User Input Resolution Contract + input backend confirmation boundary safety net 已完成 | 已 push；不继续扩大 HITL | closed |
 | 2 | **Memory System Discovery Roadmap Correction** | Stage 3 | done | Memory 被定义为独立逻辑模块；RAG 降级为 provider/backend 候选 | 已 push；未实现 Memory/RAG | closed |
-| 3 | **Tool Module Architecture Audit + Foundation boundary contracts** | Stage 2.5 | done | registry/schema/result/output/responsibility boundaries 已有测试与最小 seams | 已完成；未实现 MCP | closed |
-| 4 | **MCP-before cleanup pack** | Stage 2.5 | commit-readiness review | split `execute_tool` 内部职责、修复 `edit_file` project-root parity、移出默认 `install_skill` | full pytest + ruff + diff check；不实现 MCP | 人工 review 后决定 commit |
-| 5 | **MCP Readiness / Minimal Client Architecture Pack** | Stage 2.5 | architecture seam | 本地 MCP config/client/descriptor/fake-client/explicit registry opt-in seam | 不接真实 server；不联网；不新增依赖；不实现真实 transport | 输出 + ask_user |
-| 6 | **MCP 前 final review** | Stage 2.5 | review | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor / MCP seam 是否可阶段性收口 | 不联网；不接 MCP server；不新增依赖 | 输出 + ask_user |
-| 7 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究真实 MCP transport 如何映射到本地 tool registry/schema/result/error/approval contract | 不接真实私有数据源；不新增依赖；真实 server 需单独授权 | 输出 + ask_user |
-| 8 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
-| 9 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
-| 10 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
-| 11 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
+| 3 | **Tool Module Architecture Audit + Foundation boundary contracts** | Stage 2.5 | done | registry/schema/result/output/responsibility boundaries 已有测试与最小 seams | 已完成；未实现真实 MCP transport | closed |
+| 4 | **MCP-before cleanup pack** | Stage 2.5 | done | split `execute_tool` 内部职责、修复 `edit_file` project-root parity、移出默认 `install_skill` | 已 commit；不实现真实 MCP transport | closed |
+| 5 | **MCP Readiness / Minimal Client Architecture Pack** | Stage 2.5 | done | 本地 MCP config/client/descriptor/fake-client/explicit registry opt-in seam | 已 commit；不接真实 server；不联网；不新增依赖 | closed |
+| 6 | **MCP Real Integration Validation Pack** | Stage 2.5 | validation | 最小本地 stdio transport + local fixture server 端到端验证 | 不接外部 server；不读 secret；不新增依赖；full pytest + ruff | 输出 + ask_user |
+| 7 | **MCP 前 final review** | Stage 2.5 | review | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor / MCP seam 是否可阶段性收口 | 不联网；不接外部 MCP server；不新增依赖 | 输出 + ask_user |
+| 8 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究外部/reference MCP server 如何映射到本地 tool registry/schema/result/error/approval contract | 不接真实私有数据源；不新增依赖；真实 server 需单独授权 | 输出 + ask_user |
+| 9 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
+| 10 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
+| 11 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
+| 12 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
 
 **严禁打包**：不要把 Discovery、Planning、Tests、Implementation 混进同一个 commit。
 

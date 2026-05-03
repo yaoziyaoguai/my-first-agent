@@ -1,0 +1,23 @@
+{
+  "module_toggles": {
+    "memory": false,
+    "observability": true,
+    "skills": true,
+    "subagents": true
+  },
+  "model_provider": {
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url": "${ANTHROPIC_BASE_URL}",
+    "model": "test-model",
+    "name": "anthropic"
+  },
+  "project_profile": {
+    "description": "fake fixture for local config review",
+    "name": "fixture-project"
+  },
+  "safety_policy": {
+    "allow_network": false,
+    "allow_real_home_writes": false,
+    "allow_real_mcp": false
+  }
+}

@@ -24,6 +24,8 @@ _KNOWN_TOP_LEVEL_FIELDS = {
     "module_toggles",
     "model_provider",
 }
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_FIXTURE_ROOT = (_PROJECT_ROOT / "tests" / "fixtures" / "local_config").resolve()
 
 
 class LocalConfigPathPolicyError(ValueError):
@@ -137,9 +139,9 @@ def _validate_local_config_path(path: str | Path) -> Path:
 
     resolved = raw.expanduser().resolve()
     tmp_root = Path(tempfile.gettempdir()).resolve()
-    if not _is_within(tmp_root, resolved):
+    if not (_is_within(tmp_root, resolved) or _is_within(_FIXTURE_ROOT, resolved)):
         raise LocalConfigPathPolicyError(
-            "local config foundation only reads explicit temporary fixture paths"
+            "local config foundation only reads explicit tmp_path or test fixture paths"
         )
     return resolved
 

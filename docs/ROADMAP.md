@@ -125,7 +125,9 @@ core**。
   error taxonomy / redacted preview；legacy string contract 仍兼容，未大改 executor。
 - ✅ Local Config Foundation 已完成：`agent.local_config` 提供 `ProjectProfile` /
   `SafetyPolicy` / `ModuleToggles` / `ModelProviderConfig` 的显式 safe-path parser；
-  不读取真实 home config，不读取 `.env`，不展开 env secret，不接 provider/network。
+  `tests/fixtures/local_config/agent.local.json` 与 `docs/LOCAL_CONFIG_FOUNDATION.md`
+  提供 fake fixture / review doc；不读取真实 home config，不读取 `.env`，不展开 env
+  secret，不接 provider/network。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
@@ -744,6 +746,8 @@ push 或 tag，除非用户单独选择对应动作。
 
 **Local Config Foundation completion（Roadmap Completion Autopilot）**：
 - 已新增 `agent.local_config`：只读取显式 tmp_path fake/local JSON config。
+- 已新增 `tests/fixtures/local_config/agent.local.json` 与
+  `docs/LOCAL_CONFIG_FOUNDATION.md`，提供不含 secret 的 explicit safe fixture path。
 - 数据模型覆盖 `ProjectProfile`、`SafetyPolicy`、`ModuleToggles`、
   `ModelProviderConfig`。
 - 默认 fail-closed：network / real MCP / real home writes / modules 全部默认关闭。

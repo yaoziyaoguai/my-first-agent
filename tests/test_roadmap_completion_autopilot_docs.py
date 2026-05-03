@@ -109,6 +109,8 @@ def test_roadmap_records_local_config_foundation() -> None:
         "ModuleToggles",
         "ModelProviderConfig",
         "不读取真实 home config",
+        "LOCAL_CONFIG_FOUNDATION.md",
+        "tests/fixtures/local_config/agent.local.json",
     )
     for phrase in required:
         assert phrase in roadmap or phrase in closure

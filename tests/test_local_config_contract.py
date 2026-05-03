@@ -8,6 +8,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_load_local_config_from_explicit_safe_path(tmp_path) -> None:
@@ -120,3 +124,36 @@ def test_local_config_defaults_are_safe_when_optional_sections_missing(tmp_path)
     assert config.module_toggles.skills is False
     assert config.module_toggles.subagents is False
     assert config.module_toggles.observability is False
+
+
+def test_local_config_sample_fixture_is_loadable_and_documented() -> None:
+    """Stage 8 需要可审计 fake fixture，而不是只靠临时测试 JSON。
+
+    这个测试补齐 roadmap completion audit 暴露的 evidence gap：local config loader
+    仍然只解析显式 safe path，不读真实 home config；但 repo 需要一个不含 secret 的
+    fixture 和文档，让后续人工 review / dogfooding 不必临时手写配置。
+    """
+
+    from agent.local_config import load_local_agent_config
+
+    fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "local_config" / "agent.local.json"
+    docs_path = PROJECT_ROOT / "docs" / "LOCAL_CONFIG_FOUNDATION.md"
+
+    config = load_local_agent_config(fixture_path)
+    redacted = json.dumps(config.to_redacted_dict(), ensure_ascii=False, sort_keys=True)
+    docs = docs_path.read_text(encoding="utf-8")
+
+    assert config.project_profile.name == "fixture-project"
+    assert config.safety_policy.allow_network is False
+    assert config.safety_policy.allow_real_mcp is False
+    assert config.safety_policy.allow_real_home_writes is False
+    assert "ANTHROPIC_API_KEY" in redacted
+    assert "sk-" not in redacted
+    for phrase in (
+        "explicit safe fixture path",
+        "no real home config",
+        "no .env",
+        "no provider/network call",
+        "fail-closed",
+    ):
+        assert phrase in docs

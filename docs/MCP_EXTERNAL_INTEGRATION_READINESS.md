@@ -113,3 +113,6 @@ Stop and ask for guidance if the implementation requires:
 This document owns readiness for the future external integration boundary. The
 two must remain separate: config management can plan and apply safe config
 changes, but it must not become an MCP client or runtime brain.
+
+The future real integration design slice is documented in
+`docs/MCP_REAL_INTEGRATION_SLICE_DESIGN.md`.

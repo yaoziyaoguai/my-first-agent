@@ -25,6 +25,7 @@ activation, Skill activation, or Subagent activation.
 | MCP External Integration Readiness | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` | fake-first / dry-run only guardrails, `agent.mcp_external_readiness`, local stdio fixture boundary, authorization checklist |
 | Runtime Trace / ToolResult Migration Planning | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` | migration ledger, non-invasive adapter strategy, compatibility shim strategy |
 | Human Review Packet | `docs/HUMAN_REVIEW_PACKET.md` | review-only checklist, quality gate evidence, authorization decision matrix |
+| Final Authorization/Design Packets | `docs/FINAL_ROADMAP_COMPLETION_EVIDENCE.md` | release/tag authorization packet, real MCP design, runtime trace / ToolResult design |
 | Final Closure Evidence | this document + roadmap links | remaining roadmap completed to readiness/planning stage |
 
 ## Completed to readiness/planning

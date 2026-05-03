@@ -103,3 +103,6 @@ mutation is outside this planning-only document.
 human review. This document adds the release/tag-specific preflight and human
 authorization checklist. Together they prepare review; neither document performs
 the release.
+
+The final no-tag authorization design packet is
+`docs/RELEASE_TAG_AUTHORIZATION_PACKET.md`.

@@ -98,3 +98,6 @@ It must not:
 - no real `agent_log.jsonl` read
 - no provider/network/MCP call
 - no tag/release
+
+The final slice design packet is
+`docs/RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md`.

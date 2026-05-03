@@ -379,6 +379,117 @@ def test_human_review_packet_is_actionable_without_authorizing_release() -> None
     assert "HUMAN_REVIEW_PACKET.md" in closure
 
 
+def test_release_tag_authorization_packet_is_no_tag_design() -> None:
+    """release/tag authorization packet 只能描述授权门槛，不能实际打 tag。"""
+
+    packet = (
+        PROJECT_ROOT / "docs" / "RELEASE_TAG_AUTHORIZATION_PACKET.md"
+    ).read_text(encoding="utf-8")
+    prep = (PROJECT_ROOT / "docs" / "RELEASE_TAG_PREPARATION.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "Release/Tag Authorization Packet",
+        "no actual tag",
+        "no push tags",
+        "no release",
+        "explicit human sentence",
+        "proposed tag name",
+        "target commit hash",
+        "pre-tag verification checklist",
+        "rollback / recovery plan",
+    )
+    for phrase in required:
+        assert phrase in packet
+    assert "RELEASE_TAG_AUTHORIZATION_PACKET.md" in prep
+
+
+def test_real_mcp_integration_slice_design_is_authorization_gated() -> None:
+    """真实 MCP design 可以完成，但必须保持 no secret / no endpoint / no network。"""
+
+    design = (
+        PROJECT_ROOT / "docs" / "MCP_REAL_INTEGRATION_SLICE_DESIGN.md"
+    ).read_text(encoding="utf-8")
+    readiness = (
+        PROJECT_ROOT / "docs" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "Real MCP Integration Slice Design",
+        "fake-first integration lane",
+        "no-op connection strategy",
+        "explicit opt-in guardrails",
+        "no real MCP endpoint",
+        "no real MCP config",
+        "no secret read",
+        "no network call",
+        "failure modes",
+        "staged implementation plan",
+        "risk review",
+    )
+    for phrase in required:
+        assert phrase in design
+    assert "MCP_REAL_INTEGRATION_SLICE_DESIGN.md" in readiness
+
+
+def test_runtime_trace_toolresult_slice_design_is_non_rewrite() -> None:
+    """runtime trace / ToolResult design 只能规划小切片，不能授权 broad rewrite。"""
+
+    design = (
+        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md"
+    ).read_text(encoding="utf-8")
+    migration = (
+        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "Runtime Trace / ToolResult Slice Design",
+        "Runtime Trace Design",
+        "ToolResult Migration Design",
+        "current runtime behavior summary",
+        "event schema proposal",
+        "non-invasive first slice",
+        "compatibility shim plan",
+        "no broad runtime rewrite",
+        "no broad tool_executor rewrite",
+        "rollback strategy",
+    )
+    for phrase in required:
+        assert phrase in design
+    assert "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md" in migration
+
+
+def test_final_roadmap_completion_evidence_packet_links_finalization_docs() -> None:
+    """最终 evidence packet 要把授权包和两个 design 包收束到同一审计入口。"""
+
+    final = (
+        PROJECT_ROOT / "docs" / "FINAL_ROADMAP_COMPLETION_EVIDENCE.md"
+    ).read_text(encoding="utf-8")
+    human = (PROJECT_ROOT / "docs" / "HUMAN_REVIEW_PACKET.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "Final Roadmap Completion Evidence Packet",
+        "safe bounded roadmap closure",
+        "release/tag readiness",
+        "real MCP integration readiness",
+        "runtime trace / ToolResult readiness",
+        "deferred work ledger",
+        "final human review checklist",
+        "RELEASE_TAG_AUTHORIZATION_PACKET.md",
+        "MCP_REAL_INTEGRATION_SLICE_DESIGN.md",
+        "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md",
+        "no tag",
+        "no real MCP endpoint",
+        "no broad runtime rewrite",
+    )
+    for phrase in required:
+        assert phrase in final
+    assert "FINAL_ROADMAP_COMPLETION_EVIDENCE.md" in human
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

@@ -21,6 +21,7 @@ from agent.display_events import (
 )
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent import tool_result_contract
+from agent.runtime_trace_emitter import emit_tool_result_trace_event
 from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
@@ -379,6 +380,13 @@ def execute_single_tool(
 
     turn_context[tool_use_id] = result
     append_tool_result(messages, tool_use_id, result)
+    emit_tool_result_trace_event(
+        turn_state,
+        tool_use_id=tool_use_id,
+        tool_name=tool_name,
+        tool_result=result,
+        step_index=state.task.current_step_index,
+    )
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
@@ -453,6 +461,13 @@ def execute_pending_tool(
     })
 
     append_tool_result(messages, tool_use_id, result)
+    emit_tool_result_trace_event(
+        turn_state,
+        tool_use_id=tool_use_id,
+        tool_name=tool_name,
+        tool_result=result,
+        step_index=state.task.current_step_index,
+    )
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(

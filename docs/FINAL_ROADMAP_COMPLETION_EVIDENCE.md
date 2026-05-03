@@ -62,15 +62,18 @@ Design packet:
 - `docs/RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md`
 - RFC first slice: `docs/rfcs/0001-runtime-trace-toolresult-boundary.md`
 - first adapter: `agent.runtime_trace_projection`
+- RFC second slice: `docs/rfcs/0002-runtime-trace-optional-sink.md`
+- optional sink helper: `agent.runtime_trace_emitter`
+- opt-in runtime seam: `chat(on_trace_event=...)`
 
 Required future decisions:
 
-- where to inject trace sink
-- which runtime boundary to trace first
+- which non-tool runtime boundary to trace first
 - whether to add a ToolResult compatibility shim
 - how to stage provider/checkpoint migration later
 
-No broad runtime rewrite and no broad tool_executor rewrite happened now.
+No broad runtime rewrite and no broad tool_executor rewrite happened now. The
+optional sink is off by default and does not create a default recorder.
 
 ## deferred work ledger
 

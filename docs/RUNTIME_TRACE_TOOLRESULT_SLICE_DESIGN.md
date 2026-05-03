@@ -8,6 +8,10 @@ RFC-gated first slice:
 
 - `docs/rfcs/0001-runtime-trace-toolresult-boundary.md`
 - `agent.runtime_trace_projection`
+- RFC-gated second slice:
+  - `docs/rfcs/0002-runtime-trace-optional-sink.md`
+  - `agent.runtime_trace_emitter`
+  - `chat(on_trace_event=...)`
 
 ## Runtime Trace Design
 
@@ -96,7 +100,9 @@ Use `TraceEvent` fields:
 Tool execution still returns legacy strings to model-visible Anthropic
 `tool_result.content`. `ToolResultEnvelope` projects those strings into status,
 display event type, error taxonomy, and safe preview without changing model
-messages.
+messages. RFC 0002 adds an optional trace sink for direct and confirmed pending
+tool results, but it still preserves the legacy message shape as the source of
+truth.
 
 ### Compatibility risks
 

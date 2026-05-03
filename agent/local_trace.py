@@ -8,6 +8,7 @@ recorder：不读取真实 agent_log.jsonl、不扫描 sessions/runs、不连接
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
@@ -127,6 +128,9 @@ class TraceEvent:
             "step_id": self.step_id,
             "metadata": redact_trace_metadata(self.metadata),
         }
+
+
+TraceEventSink = Callable[[TraceEvent], None]
 
 
 def _is_within(parent: Path, child: Path) -> bool:

@@ -1,6 +1,8 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
+from uuid import uuid4
 import anthropic
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
@@ -111,6 +113,11 @@ class TurnState:
     # 不能混入 checkpoint、runtime_observer、conversation.messages 或 Anthropic
     # API messages；这些边界仍由各自模块负责。
     on_runtime_event: RuntimeEventSink | None = None
+    # TraceEvent 是 opt-in observability sink，不是 Runtime state。默认 None，
+    # 不创建 recorder、不写 agent_log/sessions/runs；只有调用方显式传 sink 时才投影。
+    on_trace_event: Callable[[Any], None] | None = None
+    trace_run_id: str | None = None
+    trace_id: str | None = None
     print_assistant_newline: bool = False
 
 
@@ -673,6 +680,7 @@ def chat(
     on_output_chunk: Callable[[str], None] | None = None,
     on_display_event: Callable[[DisplayEvent], None] | None = None,
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
+    on_trace_event: Callable[[Any], None] | None = None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -681,6 +689,10 @@ def chat(
     接收 assistant delta 和 DisplayEvent；新调用方不应继续把它们当入口。这个函数
     只迁移 UI projection，不改变 checkpoint、runtime_observer、conversation.messages、
     Anthropic API messages 或 TaskState 状态机本体。
+
+    `on_trace_event` 是 RFC 0002 的显式 opt-in observability seam：调用方如果需要
+    本地 TraceEvent，可以传 sink；默认不创建 recorder，也不把 trace 写入 durable
+    Runtime/checkpoint state。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -761,6 +773,9 @@ def chat(
         system_prompt=runtime_system_prompt,
         on_display_event=_emit_display_event,
         on_runtime_event=_emit_runtime_event,
+        on_trace_event=on_trace_event,
+        trace_run_id=(f"run:{uuid4().hex}" if on_trace_event is not None else None),
+        trace_id=(f"trace:{uuid4().hex}" if on_trace_event is not None else None),
         print_assistant_newline=(
             on_runtime_event is None and on_output_chunk is None
         ),

@@ -12,6 +12,8 @@ configuration changes to explicit test fixtures or temporary files.
 - thin CLI adapter for list, inspect, validate, plan-add, plan-remove, and apply
 - plan-first apply with `--yes`, backup, deterministic JSON serialization, and
   redacted diff evidence
+- external integration readiness is tracked separately in
+  `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md`
 
 ## Safety boundaries
 
@@ -29,3 +31,11 @@ configuration changes to explicit test fixtures or temporary files.
 The fixture gives review and dogfooding a stable fake config without asking the
 agent to inspect private user MCP settings. The configured command is text only:
 config management must not start the server or validate reachability.
+
+## External integration readiness boundary
+
+`docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` documents fake-first / dry-run
+readiness for future real MCP integration. Config management remains a
+developer workflow layer: it can parse, validate, plan, and safely apply config
+changes, but it must not connect to endpoints, run servers, or perform network
+reachability checks.

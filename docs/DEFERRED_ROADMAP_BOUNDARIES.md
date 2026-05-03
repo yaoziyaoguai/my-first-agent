@@ -9,6 +9,8 @@ modules.
 
 - real MCP external integration: external endpoints, transports, resources,
   prompts, sampling, roots, auth, and reachability checks
+- fake-first readiness for that boundary is documented in
+  `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md`
 - real Skill install/execution: downloading, installing, or executing external
   skill code
 - real Subagent provider delegation: real LLM/provider calls, remote agents,

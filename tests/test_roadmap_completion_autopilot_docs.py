@@ -243,6 +243,40 @@ def test_release_tag_preparation_doc_is_planning_only() -> None:
     assert "RELEASE_TAG_PREPARATION.md" in closure
 
 
+def test_mcp_external_integration_readiness_doc_is_fake_first() -> None:
+    """真实 MCP external integration 之前，必须先有 fake-first readiness 证据。
+
+    Remaining Roadmap 阶段允许把外部集成推进到 readiness，但不能偷换成真实
+    endpoint/auth/network。这个测试要求文档说明 dry-run skeleton、opt-in guardrails
+    和授权清单，确保下一步不会绕过 MCP config/service/tool registry 边界。
+    """
+
+    readiness = (
+        PROJECT_ROOT / "docs" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
+    ).read_text(encoding="utf-8")
+    config_doc = (PROJECT_ROOT / "docs" / "MCP_CONFIG_MANAGEMENT.md").read_text(
+        encoding="utf-8"
+    )
+    deferred = (PROJECT_ROOT / "docs" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "fake-first",
+        "dry-run only",
+        "no real MCP endpoint",
+        "no network reachability check",
+        "no secret read",
+        "explicit opt-in guardrails",
+        "local stdio fixture",
+        "authorization checklist",
+    )
+    for phrase in required:
+        assert phrase in readiness
+    assert "MCP_EXTERNAL_INTEGRATION_READINESS.md" in config_doc
+    assert "MCP_EXTERNAL_INTEGRATION_READINESS.md" in deferred
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

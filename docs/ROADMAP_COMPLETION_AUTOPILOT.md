@@ -21,6 +21,7 @@
 | Deferred Roadmap Boundaries | complete | `docs/DEFERRED_ROADMAP_BOUNDARIES.md` records planning-only / deferred boundaries | no real external integration or broad migration |
 | Safe-Local Release Readiness | complete | `docs/SAFE_LOCAL_RELEASE_READINESS.md` records manual smoke, known limitations, and no-tag checklist | release/tag still requires explicit authorization |
 | Release/Tag Preparation | planning-ready | `docs/RELEASE_TAG_PREPARATION.md` records pre-tag verification commands, human authorization checklist, rollback plan, and `v0.8.0 unchanged` policy | no tag creation, release creation, or push tags |
+| MCP External Integration Readiness | planning-ready | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` records fake-first / dry-run only external integration guardrails and authorization checklist | no real endpoint, network reachability check, secret read, or server execution |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -137,6 +138,17 @@
    - no tag creation
    - no release creation
    - no push tags
+
+14. MCP External Integration Readiness
+   - `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md`
+   - fake-first
+   - dry-run only
+   - explicit opt-in guardrails
+   - local stdio fixture
+   - authorization checklist
+   - no real MCP endpoint
+   - no network reachability check
+   - no secret read
 
 ## Release readiness
 

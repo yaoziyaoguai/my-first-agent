@@ -200,3 +200,37 @@ def test_stdio_mcp_transport_does_not_import_runtime_checkpoint_or_tui() -> None
     imports = _agent_imports(PROJECT_ROOT / "agent" / "mcp_stdio.py")
 
     assert imports == {"agent.mcp"}
+
+
+def test_stdio_mcp_client_rejects_external_transports_before_process_spawn(
+    monkeypatch,
+) -> None:
+    """fake-first readiness 阶段不能把 http/sse 当成真实 external integration。
+
+    StdioMCPClient 只允许本地 stdio fixture；如果配置声明 http/sse/streamable_http，
+    必须在 transport boundary 直接拒绝，不能尝试 subprocess、network 或 reachability
+    validation。真实外部 MCP transport 需要后续单独授权和设计。
+    """
+
+    from agent.mcp import MCPServerConfig
+    from agent.mcp_stdio import MCPTransportError, StdioMCPClient
+    import agent.mcp_stdio as mcp_stdio
+
+    spawned: list[object] = []
+
+    def _forbidden_popen(*args, **kwargs):
+        spawned.append((args, kwargs))
+        raise AssertionError("external transport must be rejected before process spawn")
+
+    monkeypatch.setattr(mcp_stdio.subprocess, "Popen", _forbidden_popen)
+
+    server = MCPServerConfig(
+        name="external_http",
+        transport="http",
+        command="should-not-run",
+        enabled=True,
+    )
+
+    with pytest.raises(MCPTransportError, match="stdio transport"):
+        StdioMCPClient(timeout_seconds=0.1).initialize(server)
+    assert spawned == []

@@ -176,5 +176,7 @@ def test_skill_local_mvp_docs_record_non_goals() -> None:
         "no arbitrary code execution",
         "parent runtime remains in control",
         "does not import installer",
+        "Fake dogfood example",
+        "format_skill_descriptor_for_display",
     ):
         assert phrase in text

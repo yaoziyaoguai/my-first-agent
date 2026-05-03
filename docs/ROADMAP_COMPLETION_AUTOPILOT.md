@@ -10,8 +10,8 @@
 |---|---|---|---|
 | MCP CLI Config Management | complete | parser/validator/redaction、CLI list/inspect/validate、plan preview、safe apply、backup、redacted diff、safety manifest、`tests/fixtures/mcp_config/safe-mcp.json`、`docs/MCP_CONFIG_MANAGEMENT.md` | real MCP endpoint/resources/prompts/sampling/roots deferred |
 | Coding-Agent Execution Governance | complete | `AGENTS.md` + `tests/test_agent_guidance_contract.py` | keep guidance updated after repeated mistakes |
-| Skill System Safe Local MVP | complete | `agent.skills.local` + `docs/SKILL_LOCAL_MVP.md` + tests | real install/execution/marketplace deferred |
-| Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` + tests | real LLM/provider/process/remote delegation deferred |
+| Skill System Safe Local MVP | complete | `agent.skills.local` + `docs/SKILL_LOCAL_MVP.md` fake dogfood example + tests | real install/execution/marketplace deferred |
+| Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` fake dogfood example + tests | real LLM/provider/process/remote delegation deferred |
 | Skill/Subagent Integration Boundary | complete | `docs/CAPABILITY_BOUNDARIES.md` + tests | real activation deferred |
 | Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
 | Observability Local Trace Foundation | complete | `agent.local_trace` + `docs/LOCAL_TRACE_FOUNDATION.md` + local-only trace contract tests | full runtime trace wiring deferred |
@@ -39,6 +39,7 @@
 
 3. Skill System Safe Local MVP
    - local fixture descriptor
+   - fake dogfood example
    - no network install
    - no arbitrary code execution
    - no real skill dirs
@@ -46,6 +47,7 @@
 4. Subagent System Safe Local MVP
    - fake/local profile
    - structured delegation request/result
+   - fake dogfood example
    - parent runtime remains in control
    - no real LLM/provider
    - no external process

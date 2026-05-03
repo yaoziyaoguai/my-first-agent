@@ -37,6 +37,20 @@ subprocess, or network modules.
 `tests/fixtures/subagents/code-reviewer/SUBAGENT.md` 是当前 safe local fixture。
 它只声明角色、fake model 和允许工具元数据，不会执行任何子任务。
 
+## Fake dogfood example
+
+Fake dogfood 只验证 profile、delegation request/result 和 redaction，不启动 child
+agent：
+
+1. 读取 `tests/fixtures/subagents/code-reviewer/SUBAGENT.md`。
+2. 调用 `load_local_subagent_profile(...)` 得到 fake/local profile。
+3. 调用 `build_delegation_request(..., parent_allowed_tools=(\"read_file\",))`。
+4. 调用 `complete_fake_delegation(...)` 生成 redacted fake result。
+5. 人工确认 `parent_controlled=True`，没有 real LLM/provider、external process 或
+   autonomous child tool execution。
+
+这个示例故意不做 remote delegation、不 spawn process、不调用真实 provider。
+
 ## Validation evidence
 
 `tests/test_subagent_local_mvp_contract.py` 覆盖：

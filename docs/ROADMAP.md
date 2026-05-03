@@ -628,6 +628,8 @@ push 或 tag，除非用户单独选择对应动作。
 - 已新增 `tests/fixtures/subagents/code-reviewer/SUBAGENT.md` 和
   `tests/test_subagent_local_mvp_contract.py`。
 - 已新增 `docs/SUBAGENT_LOCAL_MVP.md` 与 `docs/CAPABILITY_BOUNDARIES.md`。
+- `docs/SUBAGENT_LOCAL_MVP.md` 记录 fake dogfood example：只构造 profile /
+  delegation request/result，不启动 child agent。
 - 仍不做真实 LLM delegation、外部进程、remote delegation、handoff 或 child tool
   execution。
 
@@ -661,6 +663,8 @@ push 或 tag，除非用户单独选择对应动作。
 - 已新增 `tests/fixtures/skills/safe-writer/SKILL.md` 和
   `tests/test_skill_local_mvp_contract.py`。
 - 已新增 `docs/SKILL_LOCAL_MVP.md` 与 `docs/CAPABILITY_BOUNDARIES.md`。
+- `docs/SKILL_LOCAL_MVP.md` 记录 fake dogfood example：只加载 descriptor /
+  redacted display，不执行 skill 或 allowed tools。
 - 仍不做真实 Skill install / execution、远程 marketplace、任意代码执行、真实 skill
   目录读取或 tool policy bypass。
 

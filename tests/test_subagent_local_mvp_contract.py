@@ -183,5 +183,7 @@ def test_subagent_local_mvp_docs_record_non_goals() -> None:
         "no autonomous child tool execution",
         "parent runtime remains in control",
         "does not import runtime",
+        "Fake dogfood example",
+        "complete_fake_delegation",
     ):
         assert phrase in text

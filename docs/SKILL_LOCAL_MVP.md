@@ -39,6 +39,17 @@ MVP 的默认路径。
 `tests/fixtures/skills/safe-writer/SKILL.md` 是当前唯一 safe local fixture。它只说明
 写作指导，不会执行命令、下载依赖、读取私人目录或连接外部服务。
 
+## Fake dogfood example
+
+Fake dogfood 只验证 descriptor 和展示输出，不执行 skill，也不调用 tool：
+
+1. 读取 `tests/fixtures/skills/safe-writer/SKILL.md`。
+2. 调用 `load_local_skill_descriptor(...)` 得到 descriptor。
+3. 调用 `format_skill_descriptor_for_display(...)` 观察 redacted 输出。
+4. 人工确认 `direct_tool_execution_allowed=False`，`parent runtime remains in control`。
+
+这个示例故意不使用真实 skill dirs、不触发 installer、不执行 `allowed-tools`。
+
 ## Validation evidence
 
 `tests/test_skill_local_mvp_contract.py` 覆盖：

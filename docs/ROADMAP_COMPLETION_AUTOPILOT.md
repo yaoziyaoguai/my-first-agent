@@ -17,6 +17,7 @@
 | Observability Local Trace Foundation | complete | `agent.local_trace` + local-only trace contract tests | full runtime trace wiring deferred |
 | Structured ToolResult Envelope Foundation | complete | `ToolResultEnvelope` + `classify_tool_result` + ToolResult contract tests | full executor/tool return migration deferred |
 | Local Config Foundation | complete | `agent.local_config` + explicit safe-path config contract tests | real home config and installer/setup deferred |
+| Roadmap Status Alignment Review | complete | P3 docs drift remediation confirms historical XFAIL backlog is closed | no production/runtime change |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -92,6 +93,13 @@
    - no `.env`
    - no env secret expansion
    - no provider/network call
+
+10. Roadmap Status Alignment Review
+   - P3 docs drift remediation
+   - historical XFAIL backlog is closed
+   - provider stream abort remains deferred as separate runtime lifecycle work
+   - no production/runtime change
+   - no TUI/runtime reopening
 
 ## Release readiness
 

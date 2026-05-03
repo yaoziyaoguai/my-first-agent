@@ -136,3 +136,25 @@ def test_roadmap_no_longer_lists_historical_xfails_as_open_backlog() -> None:
     )
     for phrase in stale_phrases:
         assert phrase not in roadmap
+
+
+def test_autopilot_closure_doc_records_status_alignment_review() -> None:
+    """Autopilot closure doc 要记录最终 review remediation。
+
+    这是 evidence hygiene，不是新功能：当 ROADMAP 因强 review 修正文案后，closure
+    doc 也要说明该修正属于 P3 docs drift，而不是新的 runtime/TUI work。否则后续
+    agent 只能从 git log 推断为什么又有 docs commit。
+    """
+
+    closure = (
+        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "Roadmap Status Alignment Review",
+        "P3 docs drift",
+        "historical XFAIL backlog is closed",
+        "no production/runtime change",
+    )
+    for phrase in required:
+        assert phrase in closure

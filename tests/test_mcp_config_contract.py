@@ -229,3 +229,37 @@ def test_mcp_config_foundation_has_no_transport_runtime_or_memory_dependencies()
 
     assert agent_imports.isdisjoint(forbidden_agent_imports)
     assert module_imports.isdisjoint(forbidden_modules)
+
+
+def test_mcp_config_sample_fixture_is_loadable_and_documented() -> None:
+    """MCP config management 需要 fake fixture，而不是只靠临时 JSON。
+
+    这个测试补齐 completion audit 暴露的 evidence gap：fixture config 只用于
+    parser/CLI review，不连接真实 MCP endpoint、不执行 command、不读取 secret。
+    """
+
+    from agent.mcp_config import load_mcp_config
+    from agent.mcp_config_presenter import render_server_inspection
+    from agent.mcp_config_service import inspect_mcp_server
+
+    fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "mcp_config" / "safe-mcp.json"
+    docs_path = PROJECT_ROOT / "docs" / "MCP_CONFIG_MANAGEMENT.md"
+
+    validation = load_mcp_config(fixture_path)
+    inspection = inspect_mcp_server(fixture_path, "fixture")
+    rendered = render_server_inspection(inspection)
+    docs = docs_path.read_text(encoding="utf-8")
+
+    assert validation.ok is True
+    assert validation.config is not None
+    assert validation.config.servers_by_name["fixture"].command == "fake-mcp-server"
+    assert "ANTHROPIC_API_KEY" not in rendered
+    assert "<redacted>" in rendered
+    for phrase in (
+        "explicit safe fixture path",
+        "no real MCP endpoint",
+        "no server execution",
+        "no .env",
+        "plan-first",
+    ):
+        assert phrase in docs

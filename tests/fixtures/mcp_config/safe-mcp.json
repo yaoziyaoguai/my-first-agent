@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "fixture": {
+      "args": [
+        "--mode",
+        "fixture"
+      ],
+      "command": "fake-mcp-server",
+      "enabled": true,
+      "env": {
+        "API_KEY": "ANTHROPIC_API_KEY",
+        "LOG_LEVEL": "debug"
+      },
+      "transport": "stdio"
+    }
+  },
+  "metadata": {
+    "purpose": "fake MCP config fixture for parser and CLI review"
+  }
+}

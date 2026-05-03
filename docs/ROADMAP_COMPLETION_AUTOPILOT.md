@@ -8,7 +8,7 @@
 
 | Area | Status | Evidence | Remaining / deferred |
 |---|---|---|---|
-| MCP CLI Config Management | complete | parser/validator/redaction、CLI list/inspect/validate、plan preview、safe apply、backup、redacted diff、safety manifest | real MCP endpoint/resources/prompts/sampling/roots deferred |
+| MCP CLI Config Management | complete | parser/validator/redaction、CLI list/inspect/validate、plan preview、safe apply、backup、redacted diff、safety manifest、`tests/fixtures/mcp_config/safe-mcp.json`、`docs/MCP_CONFIG_MANAGEMENT.md` | real MCP endpoint/resources/prompts/sampling/roots deferred |
 | Coding-Agent Execution Governance | complete | `AGENTS.md` + `tests/test_agent_guidance_contract.py` | keep guidance updated after repeated mistakes |
 | Skill System Safe Local MVP | complete | `agent.skills.local` + `docs/SKILL_LOCAL_MVP.md` + tests | real install/execution/marketplace deferred |
 | Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` + tests | real LLM/provider/process/remote delegation deferred |
@@ -27,6 +27,8 @@
    - explicit `--yes`
    - deterministic serialization
    - backup and redacted diff evidence
+   - explicit safe fixture path: `tests/fixtures/mcp_config/safe-mcp.json`
+   - review doc: `docs/MCP_CONFIG_MANAGEMENT.md`
    - no real external integration
 
 2. Coding-Agent Execution Governance

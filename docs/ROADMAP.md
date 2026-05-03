@@ -104,7 +104,9 @@ core**。
 - ✅ MCP CLI Config Management safe apply governance 已完成：parser/validator/
   redaction、CLI list/inspect/validate、plan preview、plan-first apply、`--yes`、
   backup、deterministic serialization、redacted diff evidence、safety manifest 都已
-  落地；不读真实 MCP config、不写 home config、不执行 server command、不联网。
+  落地；`tests/fixtures/mcp_config/safe-mcp.json` 与 `docs/MCP_CONFIG_MANAGEMENT.md`
+  提供 fake fixture / review doc；不读真实 MCP config、不写 home config、不执行
+  server command、不联网。
 - ✅ Coding-agent execution governance 已落地 AGENTS.md：沉淀 repo path、安全边界、
   quality gates、evidence packet、P0/P1/P2/P3 与 controlled push/tag rules。
 - ✅ Skill System Safe Local MVP 已完成：`agent.skills.local` 只读取 tmp_path /

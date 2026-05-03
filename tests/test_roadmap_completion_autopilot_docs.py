@@ -20,6 +20,8 @@ def test_roadmap_records_safe_local_skill_and_subagent_mvp_status() -> None:
 
     required = (
         "MCP CLI Config Management safe apply governance 已完成",
+        "MCP_CONFIG_MANAGEMENT.md",
+        "tests/fixtures/mcp_config/safe-mcp.json",
         "Coding-agent execution governance 已落地 AGENTS.md",
         "Skill System Safe Local MVP 已完成",
         "Subagent System Safe Local MVP 已完成",

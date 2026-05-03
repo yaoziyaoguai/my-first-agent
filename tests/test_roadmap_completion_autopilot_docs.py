@@ -277,6 +277,7 @@ def test_mcp_external_integration_readiness_doc_is_fake_first() -> None:
         assert phrase in readiness
     assert "MCP_EXTERNAL_INTEGRATION_READINESS.md" in config_doc
     assert "MCP_EXTERNAL_INTEGRATION_READINESS.md" in deferred
+    assert "next pack may add dry-run checks" not in readiness
 
 
 def test_runtime_trace_toolresult_migration_doc_is_compatibility_first() -> None:

@@ -50,8 +50,8 @@ Future real MCP integration must preserve these guardrails:
 
 ## Dry-run only contract
 
-Before any real external transport work, the next pack may add dry-run checks
-that:
+Before any real external transport work, the existing dry-run readiness report
+can:
 
 - parse a fake config fixture
 - inspect enabled/disabled status

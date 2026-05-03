@@ -6,6 +6,7 @@ authorization, release authorization, or instruction to publish artifacts.
 ## Status
 
 - safe-local release readiness: ready for human review
+- release/tag preparation checklist: `docs/RELEASE_TAG_PREPARATION.md`
 - no tag authorization
 - no release creation
 - no push tags
@@ -40,6 +41,12 @@ authorization, release authorization, or instruction to publish artifacts.
 - real Skill install/execution remains deferred
 - real Subagent provider delegation remains deferred
 - release/tag remains deferred until explicit authorization
+
+## Release/tag preparation
+
+`docs/RELEASE_TAG_PREPARATION.md` contains the planning-only pre-tag
+verification commands, human authorization checklist, and rollback plan. It does
+not authorize tag creation, release creation, or pushing tags.
 
 ## Safety boundaries
 

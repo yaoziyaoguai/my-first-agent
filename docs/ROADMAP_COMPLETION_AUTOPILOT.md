@@ -20,6 +20,7 @@
 | Roadmap Status Alignment Review | complete | P3 docs drift remediation confirms historical XFAIL backlog is closed | no production/runtime change |
 | Deferred Roadmap Boundaries | complete | `docs/DEFERRED_ROADMAP_BOUNDARIES.md` records planning-only / deferred boundaries | no real external integration or broad migration |
 | Safe-Local Release Readiness | complete | `docs/SAFE_LOCAL_RELEASE_READINESS.md` records manual smoke, known limitations, and no-tag checklist | release/tag still requires explicit authorization |
+| Release/Tag Preparation | planning-ready | `docs/RELEASE_TAG_PREPARATION.md` records pre-tag verification commands, human authorization checklist, rollback plan, and `v0.8.0 unchanged` policy | no tag creation, release creation, or push tags |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -125,6 +126,17 @@
    - known limitations
    - no tag authorization
    - full pytest / ruff / diff-check quality gate checklist
+
+13. Release/Tag Preparation
+   - `docs/RELEASE_TAG_PREPARATION.md`
+   - planning-only
+   - pre-tag verification commands
+   - human authorization checklist
+   - rollback plan
+   - v0.8.0 unchanged
+   - no tag creation
+   - no release creation
+   - no push tags
 
 ## Release readiness
 

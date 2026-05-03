@@ -209,6 +209,40 @@ def test_safe_local_release_readiness_doc_exists() -> None:
         assert phrase in text
 
 
+def test_release_tag_preparation_doc_is_planning_only() -> None:
+    """release/tag 准备只能形成 preflight evidence，不能变成实际打 tag。
+
+    Remaining Roadmap 阶段允许继续推进 release readiness，但硬边界仍是：没有
+    用户显式授权前不创建 tag、不发布 release、不 push tags。这个文档测试把
+    preparation 与 execution 分开，避免后续 agent 把 checklist 误当授权。
+    """
+
+    prep = (PROJECT_ROOT / "docs" / "RELEASE_TAG_PREPARATION.md").read_text(
+        encoding="utf-8"
+    )
+    readiness = (PROJECT_ROOT / "docs" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(
+        encoding="utf-8"
+    )
+    closure = (
+        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "planning-only",
+        "no tag creation",
+        "no release creation",
+        "no push tags",
+        "pre-tag verification commands",
+        "human authorization checklist",
+        "rollback plan",
+        "v0.8.0 unchanged",
+    )
+    for phrase in required:
+        assert phrase in prep
+    assert "RELEASE_TAG_PREPARATION.md" in readiness
+    assert "RELEASE_TAG_PREPARATION.md" in closure
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

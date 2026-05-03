@@ -22,6 +22,7 @@
 | Safe-Local Release Readiness | complete | `docs/SAFE_LOCAL_RELEASE_READINESS.md` records manual smoke, known limitations, and no-tag checklist | release/tag still requires explicit authorization |
 | Release/Tag Preparation | planning-ready | `docs/RELEASE_TAG_PREPARATION.md` records pre-tag verification commands, human authorization checklist, rollback plan, and `v0.8.0 unchanged` policy | no tag creation, release creation, or push tags |
 | MCP External Integration Readiness | planning-ready | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` records fake-first / dry-run only external integration guardrails and authorization checklist | no real endpoint, network reachability check, secret read, or server execution |
+| Runtime Trace / ToolResult Migration | planning-ready | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` records migration ledger, non-invasive adapter strategy, compatibility shim strategy, and stop conditions | no broad runtime rewrite or broad tool_executor rewrite |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -149,6 +150,17 @@
    - no real MCP endpoint
    - no network reachability check
    - no secret read
+
+15. Runtime Trace / ToolResult Migration
+   - `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md`
+   - runtime trace wiring ledger
+   - ToolResult migration ledger
+   - non-invasive adapter
+   - compatibility shim
+   - LocalTraceRecorder
+   - ToolResultEnvelope
+   - no broad runtime rewrite
+   - no broad tool_executor rewrite
 
 ## Release readiness
 

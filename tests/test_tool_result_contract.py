@@ -7,11 +7,31 @@ block list，错误分类仍依赖 tool_executor 的前缀表。它暴露的是 
 
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _agent_imports(path: Path) -> set[str]:
+    """用 AST 固定 ToolResult contract 的依赖方向。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names if alias.name.startswith("agent"))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == "agent":
+                imports.update(f"agent.{alias.name}" for alias in node.names)
+            elif node.module.startswith("agent."):
+                imports.add(node.module)
+    return imports
 
 
 def _load_builtin_tools() -> None:
@@ -366,3 +386,24 @@ def test_existing_output_size_policies_are_tool_local_characterization(
     assert "[退出码: 0]" in shell_result
     assert "输出过长，已截断" in shell_result
     assert "共 6009 字符" in shell_result
+
+
+def test_tool_result_contract_does_not_import_executor_runtime_or_registry() -> None:
+    """ToolResult migration seam 不能反向依赖执行器或 runtime。
+
+    contract 层可以给 executor/UI/trace 提供分类和 envelope，但它不应调用工具、
+    写 checkpoint、注册 tool 或解释 runtime state；否则 compatibility shim 会变成
+    新巨石。
+    """
+
+    imports = _agent_imports(PROJECT_ROOT / "agent" / "tool_result_contract.py")
+
+    forbidden = {
+        "agent.core",
+        "agent.checkpoint",
+        "agent.tool_executor",
+        "agent.tool_registry",
+        "agent.mcp",
+        "agent.local_trace",
+    }
+    assert imports.isdisjoint(forbidden)

@@ -23,6 +23,8 @@ modules.
 - ToolResult executor migration: replacing legacy string tool results with
   structured envelopes touches executor, registry, checkpoint, provider messages,
   display, and compatibility tests
+- staged compatibility planning for both is recorded in
+  `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md`
 
 ## Deferred release boundary
 

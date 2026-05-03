@@ -7,7 +7,28 @@
 
 from __future__ import annotations
 
+import ast
 import json
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _agent_imports(path: Path) -> set[str]:
+    """用 AST 守住 trace foundation 依赖方向，避免 grep 注释误判。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names if alias.name.startswith("agent"))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == "agent":
+                imports.update(f"agent.{alias.name}" for alias in node.names)
+            elif node.module.startswith("agent."):
+                imports.add(node.module)
+    return imports
 
 
 def test_trace_event_requires_run_trace_and_span_identity() -> None:
@@ -126,3 +147,53 @@ def test_trace_recorder_rejects_repo_runtime_artifact_paths(tmp_path) -> None:
 
     # tmp_path 下的显式路径仍允许，方便后续 dogfooding / tests 写 fake trace。
     LocalTraceRecorder(tmp_path / "safe-trace.jsonl")
+
+
+def test_trace_event_can_carry_tool_result_envelope_preview_without_runtime_wiring() -> None:
+    """trace / ToolResult migration 先共享安全字段，不改 runtime hot path。
+
+    Remaining Roadmap 可以把 ToolResultEnvelope 的 status / error_type /
+    safe_preview 放进 TraceEvent metadata 做 compatibility 证明；但这里不调用
+    core.py、不执行工具、不写 checkpoint，只验证两个 foundation seam 可以组合。
+    """
+
+    from agent.local_trace import TraceEvent
+    from agent.tool_result_contract import classify_tool_result
+
+    envelope = classify_tool_result("错误：api_key=sk-test-secret")
+    event = TraceEvent(
+        run_id="run-test",
+        trace_id="trace-test",
+        span_id="span-tool-result",
+        parent_span_id="span-tool",
+        span_type="tool_call",
+        name="tool_result",
+        status="failed",
+        metadata={
+            "tool_result_status": envelope.status,
+            "error_type": envelope.error_type,
+            "safe_preview": envelope.safe_preview,
+        },
+    )
+    payload = event.to_json_dict()
+
+    assert payload["metadata"]["tool_result_status"] == "failed"
+    assert payload["metadata"]["error_type"] == "tool_failure"
+    assert "sk-test-secret" not in json.dumps(payload, ensure_ascii=False)
+    assert "[REDACTED]" in payload["metadata"]["safe_preview"]
+
+
+def test_local_trace_foundation_does_not_import_runtime_or_executor_layers() -> None:
+    """LocalTraceRecorder 是 sink seam，不应反向依赖 runtime/tool executor。"""
+
+    imports = _agent_imports(PROJECT_ROOT / "agent" / "local_trace.py")
+
+    forbidden = {
+        "agent.core",
+        "agent.checkpoint",
+        "agent.tool_executor",
+        "agent.memory_store",
+        "agent.mcp",
+        "agent.input_backends",
+    }
+    assert imports.isdisjoint(forbidden)

@@ -277,6 +277,41 @@ def test_mcp_external_integration_readiness_doc_is_fake_first() -> None:
     assert "MCP_EXTERNAL_INTEGRATION_READINESS.md" in deferred
 
 
+def test_runtime_trace_toolresult_migration_doc_is_compatibility_first() -> None:
+    """runtime trace / ToolResult 剩余工作要先走 compatibility ledger。
+
+    这两个方向都可能触碰 runtime hot path 或 tool executor，因此 Remaining Roadmap
+    只能先记录 non-invasive adapter、compatibility shim、分阶段 stop condition，
+    不能把 migration plan 误执行成 broad rewrite。
+    """
+
+    migration = (
+        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
+    ).read_text(encoding="utf-8")
+    local_trace = (PROJECT_ROOT / "docs" / "LOCAL_TRACE_FOUNDATION.md").read_text(
+        encoding="utf-8"
+    )
+    tool_result = (PROJECT_ROOT / "docs" / "TOOL_RESULT_ENVELOPE.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "runtime trace wiring",
+        "ToolResult migration",
+        "migration ledger",
+        "non-invasive adapter",
+        "compatibility shim",
+        "LocalTraceRecorder",
+        "ToolResultEnvelope",
+        "no broad runtime rewrite",
+        "no broad tool_executor rewrite",
+    )
+    for phrase in required:
+        assert phrase in migration
+    assert "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md" in local_trace
+    assert "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md" in tool_result
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

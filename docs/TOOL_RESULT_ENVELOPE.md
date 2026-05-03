@@ -28,3 +28,8 @@ without migrating the executor or changing model-visible tool results.
 Full migration should be a separate tool-system slice. It must preserve legacy
 compatibility until executor, registry, checkpoint, display, and provider message
 contracts are explicitly migrated together.
+
+The staged ToolResult migration ledger is recorded in
+`docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md`. That plan keeps
+`ToolResultEnvelope` as a compatibility seam first: legacy string content remains
+model-visible while UI/trace can consume redacted bounded preview fields.

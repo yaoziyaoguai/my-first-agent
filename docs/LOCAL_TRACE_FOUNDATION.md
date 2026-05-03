@@ -29,3 +29,8 @@ Runtime wiring should be a later small slice: runtime code may construct
 `TraceEvent` objects at explicit boundaries, then pass them into the recorder.
 The recorder must not read runtime state, checkpoint files, sessions, runs, or
 logs by itself.
+
+The staged compatibility plan for runtime trace wiring is recorded in
+`docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md`. That ledger keeps future work
+non-invasive: trace adapters may build `TraceEvent` from explicit boundary
+facts, but `LocalTraceRecorder` must not become runtime core.

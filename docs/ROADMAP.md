@@ -136,6 +136,11 @@ core**。
 - ✅ Safe-Local Release Readiness 已记录：`docs/SAFE_LOCAL_RELEASE_READINESS.md`
   提供 manual smoke checklist、known limitations、no tag authorization 与 full pytest /
   ruff / diff-check 质量门。
+- ✅ Remaining Roadmap Completion Autopilot 已记录：
+  `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
+  planning、MCP external integration readiness、runtime trace / ToolResult migration
+  planning，并明确所有真实 external / broad migration 动作仍 requires explicit user
+  authorization。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或

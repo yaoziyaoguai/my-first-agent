@@ -312,6 +312,40 @@ def test_runtime_trace_toolresult_migration_doc_is_compatibility_first() -> None
     assert "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md" in tool_result
 
 
+def test_remaining_roadmap_completion_doc_records_final_authorization_boundaries() -> None:
+    """Remaining Roadmap closure 要说明“已推进到 readiness”和“仍需授权”。
+
+    这不是 release/tag，也不是真实外部集成；它把本阶段执行过的 bounded packs
+    收束成 evidence packet，防止后续 agent 重复做已完成的 planning/readiness，
+    或把仍需授权的真实动作误当成自动任务。
+    """
+
+    remaining = (
+        PROJECT_ROOT / "docs" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    closure = (
+        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "Remaining Roadmap Completion Autopilot",
+        "safe-local closure accepted",
+        "release/tag preparation planning complete",
+        "MCP external integration readiness complete",
+        "runtime trace / ToolResult migration planning complete",
+        "no tag",
+        "no real MCP endpoint",
+        "no broad runtime rewrite",
+        "requires explicit user authorization",
+        "human review ready",
+    )
+    for phrase in required:
+        assert phrase in remaining
+    assert "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md" in roadmap
+    assert "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md" in closure
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

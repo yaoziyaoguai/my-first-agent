@@ -112,3 +112,27 @@ def test_roadmap_records_local_config_foundation() -> None:
     )
     for phrase in required:
         assert phrase in roadmap or phrase in closure
+
+
+def test_roadmap_no_longer_lists_historical_xfails_as_open_backlog() -> None:
+    """Roadmap 不能把已关闭的历史 XFAIL 再描述成待办。
+
+    这个测试是 review remediation：XFAIL-1 / XFAIL-2 已通过显式
+    ``awaiting_feedback_intent`` 与 TUI projection cancel 收口。Roadmap 可以保留
+    历史来源和 provider-abort deferred 边界，但不能继续说它们仍是 open backlog，
+    否则后续 agent 会重复进入已经关闭的 TUI/runtime 路径。
+    """
+
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+
+    assert "历史 XFAIL backlog 已收口" in roadmap
+    assert "safe local roadmap closure final review" in roadmap
+    assert "真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计" in roadmap
+    stale_phrases = (
+        "known XFAIL 收口",
+        "XFAIL-1 / XFAIL-2 保留为独立 backlog",
+        "XFAIL-1 / XFAIL-2 仍需单独立项",
+        "不要处理 XFAIL-1 / XFAIL-2",
+    )
+    for phrase in stale_phrases:
+        assert phrase not in roadmap

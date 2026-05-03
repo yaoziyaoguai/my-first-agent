@@ -65,8 +65,7 @@ core**。
 
 ## Current Position
 
-> **当前处于 Roadmap Completion Autopilot：safe local roadmap closure 后的
-> known XFAIL 收口。**
+> **当前处于 Roadmap Completion Autopilot：safe local roadmap closure final review。**
 > 注意：这不是重开 Web UI / SaaS / LangGraph / real external integration。
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
@@ -215,7 +214,7 @@ v0.6.2 TUI MVP + HITL/Input contract closure）
 | 6 | display event contract | ✅ | v0.6.1 Group D 已钉 |
 | 7 | display layer 不做 runtime decision | ✅ | v0.6.1 Group A/E AST baseline |
 | 8 | no sensitive read | ✅ | v0.6.1 Group A/E 字面扫描；word-boundary regex 防 `.envelope` 假阳性 |
-| 9 | current xfailed inventory | ✅ | XFAIL-3 已解；XFAIL-1 / XFAIL-2 保留为独立 backlog，不阻塞 HITL/Input 收口 |
+| 9 | historical xfailed inventory | ✅ | XFAIL-3 paste burst、XFAIL-1 topic switch、XFAIL-2 Textual Esc projection 均已闭合；真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计 |
 | 10 | TUI MVP planning | ✅ | v0.6.2 MVP scope 已收敛到 paste burst / multiline intent |
 | 11 | TUI MVP minimum implementation | ✅ | paste burst / multiline input intent 已落地；不顺手做 Esc cancel |
 | 12 | TUI MVP regression tests | ✅ | real CLI / user_input / simple backend contract tests 已钉 |
@@ -224,7 +223,7 @@ v0.6.2 TUI MVP + HITL/Input contract closure）
 - **只叫 TUI，不叫 TOI**
 - **TUI 不是 Web UI**
 - **HITL/Input 已阶段性收口后，不继续扩大成完整 HITL 系统**
-- **XFAIL-1 / XFAIL-2 仍需单独立项，不作为继续堆 input backend/core.py 的理由**
+- **历史 XFAIL backlog 已收口**；不得再把 XFAIL-1 / XFAIL-2 当成 open backlog 去继续堆 input backend/core.py
 - **下一步只进入 Memory System Discovery / Architecture Planning，不直接实现 Memory/RAG**
 
 #### v0.6.2 后 Architecture Debt Exit Criteria / Roadmap Quantification
@@ -264,7 +263,7 @@ v0.6.2 TUI MVP + HITL/Input contract closure）
 | 6 | characterization tests | 不允许因为重构弱化、删除、跳过或 xfail characterization tests |
 | 7 | TUI scope | 不允许扩大到 TUI 新功能或 TUI 改造 |
 | 8 | Memory / sub-agent / Skill | 不允许扩大到 Stage 3/4/5 实质实现 |
-| 9 | XFAIL-1 / XFAIL-2 | 不允许顺手处理，除非后续单独立项 |
+| 9 | historical XFAIL closure | 已完成；不得重开旧 XFAIL，真实 provider abort 只能作为后续单独 runtime lifecycle 设计 |
 | 10 | checkpoint gateway | 不进入 gateway planning，除非 Roadmap 后续明确作为独立阶段 |
 
 **停止条件**：
@@ -278,7 +277,7 @@ v0.6.2 TUI MVP + HITL/Input contract closure）
 
 若下一步收益不清晰、风险变大、需要跨模块大改，必须停步 Ask User。不要为了
 "更完美"继续抽象；不要进入新功能；不要做 TUI 改造；不要做 checkpoint gateway
-planning；不要进入 Memory / sub-agent / Skill；不要处理 XFAIL-1 / XFAIL-2；不要
+planning；不要进入 Memory / sub-agent / Skill；不要重开历史 XFAIL；不要
 push 或 tag，除非用户单独选择对应动作。
 
 ---

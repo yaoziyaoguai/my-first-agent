@@ -119,11 +119,11 @@ core**。
   tests 固定 Tool = atomic execution、Skill = local descriptor、Subagent =
   parent-controlled delegation。
 - ✅ Observability Local Trace Foundation 已完成：`agent.local_trace` 提供
-  local-only trace file schema、run_id / trace_id / span_id、model/tool/state/
+  local-only trace file schema、`docs/LOCAL_TRACE_FOUNDATION.md`、run_id / trace_id / span_id、model/tool/state/
   checkpoint span 类型、metadata 脱敏与显式 tmp_path recorder；不读取真实 agent_log.jsonl，
   不读取真实 sessions/runs，不接 provider/network，不改 runtime core。
 - ✅ Structured ToolResult Envelope Foundation 已完成：`ToolResultEnvelope` 与
-  `classify_tool_result` 把 legacy string contract 投影成 status / display event /
+  `classify_tool_result`（见 `docs/TOOL_RESULT_ENVELOPE.md`）把 legacy string contract 投影成 status / display event /
   error taxonomy / redacted preview；legacy string contract 仍兼容，未大改 executor。
 - ✅ Local Config Foundation 已完成：`agent.local_config` 提供 `ProjectProfile` /
   `SafetyPolicy` / `ModuleToggles` / `ModelProviderConfig` 的显式 safe-path parser；
@@ -689,6 +689,8 @@ push 或 tag，除非用户单独选择对应动作。
 
 **Local Trace Foundation completion（Roadmap Completion Autopilot）**：
 - 已新增 `agent.local_trace`：定义 `TraceEvent` 与 `LocalTraceRecorder`。
+- 已新增 `docs/LOCAL_TRACE_FOUNDATION.md`：记录 local-only trace schema 与 deferred
+  runtime wiring 边界。
 - 支持 local-only trace file JSONL、run_id、trace_id、span_id、parent_span_id、
   step_id、model_call / tool_call / state_transition / checkpoint / memory_update /
   subagent span 类型。
@@ -721,6 +723,8 @@ push 或 tag，除非用户单独选择对应动作。
 **Structured ToolResult Envelope Foundation completion（Roadmap Completion Autopilot）**：
 - 已在 `agent.tool_result_contract` 新增 `ToolResultEnvelope` 与
   `classify_tool_result`。
+- 已新增 `docs/TOOL_RESULT_ENVELOPE.md`：记录 legacy compatibility、error taxonomy
+  与 executor migration deferred 边界。
 - 结构化字段覆盖 status、display_event_type、status_text、error_type、
   safe_preview、content_length 与 preview_truncated。
 - `classify_tool_outcome` 继续保留 tuple API，保证 legacy string contract 仍兼容

@@ -68,6 +68,7 @@ def test_roadmap_records_observability_local_trace_foundation() -> None:
     required = (
         "Observability Local Trace Foundation 已完成",
         "agent.local_trace",
+        "LOCAL_TRACE_FOUNDATION.md",
         "不读取真实 agent_log.jsonl",
         "不读取真实 sessions/runs",
         "local-only trace file",
@@ -87,6 +88,7 @@ def test_roadmap_records_structured_tool_result_envelope_foundation() -> None:
     required = (
         "Structured ToolResult Envelope Foundation 已完成",
         "ToolResultEnvelope",
+        "TOOL_RESULT_ENVELOPE.md",
         "classify_tool_result",
         "legacy string contract 仍兼容",
         "error taxonomy",

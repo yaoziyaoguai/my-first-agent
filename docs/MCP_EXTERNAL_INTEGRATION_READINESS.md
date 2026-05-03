@@ -27,6 +27,8 @@ the local stdio fixture, and the authorization checklist below.
 - `agent.mcp_config_cli`: thin developer CLI adapter
 - `agent.mcp`: config/descriptor/client protocol/fake client/registry opt-in seam
 - `agent.mcp_stdio`: local stdio fixture transport only
+- `agent.mcp_external_readiness`: dry-run readiness report via
+  `build_mcp_external_readiness_report`
 - `tests/fixtures/mcp_config/safe-mcp.json`: fake config fixture
 - `tests/fixtures/minimal_mcp_stdio_server.py`: local fixture server
 
@@ -58,6 +60,12 @@ that:
 - refuse real home config paths
 - refuse secret-like paths
 - refuse http/sse/streamable_http execution through `StdioMCPClient`
+
+The first no-op skeleton now exists as
+`agent.mcp_external_readiness.build_mcp_external_readiness_report`. It reuses the
+safe MCP config parser and only reports dry-run readiness status such as
+`disabled_not_registered`, `would_require_tool_discovery_authorization`, or
+`external_transport_deferred`.
 
 The dry-run must not:
 

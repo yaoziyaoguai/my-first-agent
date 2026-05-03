@@ -21,7 +21,7 @@
 | Deferred Roadmap Boundaries | complete | `docs/DEFERRED_ROADMAP_BOUNDARIES.md` records planning-only / deferred boundaries | no real external integration or broad migration |
 | Safe-Local Release Readiness | complete | `docs/SAFE_LOCAL_RELEASE_READINESS.md` records manual smoke, known limitations, and no-tag checklist | release/tag still requires explicit authorization |
 | Release/Tag Preparation | planning-ready | `docs/RELEASE_TAG_PREPARATION.md` records pre-tag verification commands, human authorization checklist, rollback plan, and `v0.8.0 unchanged` policy | no tag creation, release creation, or push tags |
-| MCP External Integration Readiness | planning-ready | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` records fake-first / dry-run only external integration guardrails and authorization checklist | no real endpoint, network reachability check, secret read, or server execution |
+| MCP External Integration Readiness | planning-ready | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` records fake-first / dry-run only external integration guardrails, `agent.mcp_external_readiness`, and authorization checklist | no real endpoint, network reachability check, secret read, or server execution |
 | Runtime Trace / ToolResult Migration | planning-ready | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` records migration ledger, non-invasive adapter strategy, compatibility shim strategy, and stop conditions | no broad runtime rewrite or broad tool_executor rewrite |
 | Remaining Roadmap Completion Autopilot | complete-to-readiness | `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` records final matrix, safety checklist, and explicit authorization boundaries | actual release/tag, real MCP endpoint, and broad runtime/tool migration require user authorization |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
@@ -145,6 +145,8 @@
    - `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md`
    - fake-first
    - dry-run only
+   - agent.mcp_external_readiness
+   - build_mcp_external_readiness_report
    - explicit opt-in guardrails
    - local stdio fixture
    - authorization checklist

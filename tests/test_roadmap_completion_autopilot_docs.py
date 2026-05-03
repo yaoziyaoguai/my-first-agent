@@ -264,6 +264,8 @@ def test_mcp_external_integration_readiness_doc_is_fake_first() -> None:
     required = (
         "fake-first",
         "dry-run only",
+        "agent.mcp_external_readiness",
+        "build_mcp_external_readiness_report",
         "no real MCP endpoint",
         "no network reachability check",
         "no secret read",

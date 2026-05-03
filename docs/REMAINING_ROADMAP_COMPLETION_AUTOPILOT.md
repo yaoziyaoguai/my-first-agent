@@ -22,7 +22,7 @@ activation, Skill activation, or Subagent activation.
 | Pack | Evidence | Result |
 |---|---|---|
 | Release/Tag Preparation Planning | `docs/RELEASE_TAG_PREPARATION.md` | pre-tag commands, human authorization checklist, rollback plan, `v0.8.0` unchanged policy |
-| MCP External Integration Readiness | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` | fake-first / dry-run only guardrails, local stdio fixture boundary, authorization checklist |
+| MCP External Integration Readiness | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` | fake-first / dry-run only guardrails, `agent.mcp_external_readiness`, local stdio fixture boundary, authorization checklist |
 | Runtime Trace / ToolResult Migration Planning | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` | migration ledger, non-invasive adapter strategy, compatibility shim strategy |
 | Final Closure Evidence | this document + roadmap links | remaining roadmap completed to readiness/planning stage |
 

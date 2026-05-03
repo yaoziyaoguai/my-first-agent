@@ -45,10 +45,10 @@ core**。
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
 | **2.5** | **Tooling Foundation Milestone** | ✅ v0.7.0 已 release；post-release dogfooding closure 已完成 | v0.7.0 |
-| **3** | Memory system | ⏳ Tooling Foundation 后进入 Discovery | 后续 |
+| **3** | Memory system | ✅ **Safe-local foundation 已完成；真实 recall/provider deferred** | v0.8.0+ |
 | **4** | Sub-agent / Handoff | 🟡 **Safe Local MVP 已完成；真实 delegation deferred** | 后续 |
 | **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
-| **6** | Observability foundation | 🟡 **Local Trace Foundation 已完成；runtime wiring 持续打底** | 跨阶段 |
+| **6** | Observability foundation | 🟡 **Local Trace Foundation + optional sink 已完成；full runtime wiring deferred** | 跨阶段 |
 | **7** | Tool system optimization | 🟡 **Structured ToolResult seam 已完成；executor 迁移 deferred** | 靠后 |
 | **8** | Customization / local productization | 🟡 **Local Config Foundation 已完成；真实安装/用户目录写入 deferred** | 后期 |
 
@@ -58,8 +58,8 @@ core**。
 - **Stage 2.5 Tooling Foundation Milestone 已完成**：不要在没有新证据时重开
   工具体系/MCP readiness；MCP CLI、外部 server 验证和 resources/prompts 等必须
   单独规划。
-- **Memory System Discovery 后移到工具体系边界清楚之后**；Stage 4/5 的实质实现
-  仍必须等 Memory 边界清楚后再启动（Stage 6/7 可作必要补丁）。
+- **Memory safe-local foundation 已完成但未产品化**；真实 recall/provider、
+  Skill/Subagent activation 与 broader runtime wiring 仍需单独授权与切片。
 
 ---
 

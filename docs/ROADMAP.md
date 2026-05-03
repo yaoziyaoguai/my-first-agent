@@ -133,6 +133,9 @@ core**。
 - ✅ Deferred Roadmap Boundaries 已记录：`docs/DEFERRED_ROADMAP_BOUNDARIES.md` 明确
   real MCP external integration、runtime trace wiring、ToolResult executor migration、
   real Skill/Subagent activation 与 release/tag 都是 planning-only / deferred 边界。
+- ✅ Safe-Local Release Readiness 已记录：`docs/SAFE_LOCAL_RELEASE_READINESS.md`
+  提供 manual smoke checklist、known limitations、no tag authorization 与 full pytest /
+  ruff / diff-check 质量门。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或

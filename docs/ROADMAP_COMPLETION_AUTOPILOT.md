@@ -19,6 +19,7 @@
 | Local Config Foundation | complete | `agent.local_config` + `tests/fixtures/local_config/agent.local.json` + `docs/LOCAL_CONFIG_FOUNDATION.md` + explicit safe-path config contract tests | real home config and installer/setup deferred |
 | Roadmap Status Alignment Review | complete | P3 docs drift remediation confirms historical XFAIL backlog is closed | no production/runtime change |
 | Deferred Roadmap Boundaries | complete | `docs/DEFERRED_ROADMAP_BOUNDARIES.md` records planning-only / deferred boundaries | no real external integration or broad migration |
+| Safe-Local Release Readiness | complete | `docs/SAFE_LOCAL_RELEASE_READINESS.md` records manual smoke, known limitations, and no-tag checklist | release/tag still requires explicit authorization |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -117,6 +118,13 @@
    - ToolResult executor migration remains deferred
    - real Skill/Subagent activation remains deferred
    - release/tag remains planning-only
+
+12. Safe-Local Release Readiness
+   - `docs/SAFE_LOCAL_RELEASE_READINESS.md`
+   - manual smoke checklist
+   - known limitations
+   - no tag authorization
+   - full pytest / ruff / diff-check quality gate checklist
 
 ## Release readiness
 

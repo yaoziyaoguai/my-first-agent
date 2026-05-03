@@ -186,3 +186,24 @@ def test_deferred_roadmap_boundaries_doc_exists() -> None:
     )
     for phrase in required:
         assert phrase in text
+
+
+def test_safe_local_release_readiness_doc_exists() -> None:
+    """最终 release readiness 只能是可审计清单，不是 tag 授权。"""
+
+    text = (PROJECT_ROOT / "docs" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "safe-local release readiness",
+        "manual smoke checklist",
+        "known limitations",
+        "no tag authorization",
+        "no real external integration",
+        "verify v0.8.0 unchanged",
+        "git push origin main only",
+        "full pytest",
+    )
+    for phrase in required:
+        assert phrase in text

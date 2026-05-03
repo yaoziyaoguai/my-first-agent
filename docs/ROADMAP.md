@@ -813,7 +813,12 @@ push 或 tag，除非用户单独选择对应动作。
 
 ---
 
-## Near-term Execution Plan
+## Historical Near-term Execution Plan
+
+This section is historical execution evidence, not an active menu. Current
+safe-local closure status is recorded in `docs/ROADMAP_COMPLETION_AUTOPILOT.md`,
+`docs/SAFE_LOCAL_RELEASE_READINESS.md`, and
+`docs/DEFERRED_ROADMAP_BOUNDARIES.md`.
 
 HITL/Input Roadmap 已阶段性收口。Memory System Discovery Roadmap Correction
 已完成，但 Memory 不是立刻下一步。下一阶段先进入 **Tooling Foundation
@@ -829,13 +834,13 @@ Bridge Discovery；之后才进入 Memory System Discovery。
 | 3 | **Tool Module Architecture Audit + Foundation boundary contracts** | Stage 2.5 | done | registry/schema/result/output/responsibility boundaries 已有测试与最小 seams | 已完成；未实现真实 MCP transport | closed |
 | 4 | **MCP-before cleanup pack** | Stage 2.5 | done | split `execute_tool` 内部职责、修复 `edit_file` project-root parity、移出默认 `install_skill` | 已 commit；不实现真实 MCP transport | closed |
 | 5 | **MCP Readiness / Minimal Client Architecture Pack** | Stage 2.5 | done | 本地 MCP config/client/descriptor/fake-client/explicit registry opt-in seam | 已 commit；不接真实 server；不联网；不新增依赖 | closed |
-| 6 | **MCP Real Integration Validation Pack** | Stage 2.5 | validation | 最小本地 stdio transport + local fixture server 端到端验证 | 不接外部 server；不读 secret；不新增依赖；full pytest + ruff | 输出 + ask_user |
-| 7 | **MCP 前 final review** | Stage 2.5 | review | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor / MCP seam 是否可阶段性收口 | 不联网；不接外部 MCP server；不新增依赖 | 输出 + ask_user |
-| 8 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | discovery | 研究外部/reference MCP server 如何映射到本地 tool registry/schema/result/error/approval contract | 不接真实私有数据源；不新增依赖；真实 server 需单独授权 | 输出 + ask_user |
-| 9 | **Memory System Discovery inventory** | Stage 3 | read-only discovery | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | 输出 + ask_user |
-| 10 | **Skill System Discovery** | Stage 5 | discovery | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现 Skill | 输出 + ask_user |
-| 11 | **Hook / Lifecycle Event Discovery** | later | discovery | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | 输出 + ask_user |
-| 12 | **Z / Advanced Knowledge Access** | later | discovery | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | 输出 + ask_user |
+| 6 | **MCP Real Integration Validation Pack** | Stage 2.5 | done | 最小本地 stdio transport + local fixture server 端到端验证 | 不接外部 server；不读 secret；不新增依赖；full pytest + ruff | closed |
+| 7 | **MCP 前 final review** | Stage 2.5 | done | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor / MCP seam 是否可阶段性收口 | 不联网；不接外部 MCP server；不新增依赖 | closed |
+| 8 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | archived discovery | 研究外部/reference MCP server 如何映射到本地 tool registry/schema/result/error/approval contract | 不接真实私有数据源；不新增依赖；真实 server 需单独授权 | deferred boundary doc |
+| 9 | **Memory System Discovery inventory** | Stage 3 | done | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | closed |
+| 10 | **Skill System Discovery** | Stage 5 | superseded by Safe Local MVP | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现真实 Skill activation | safe local MVP complete |
+| 11 | **Hook / Lifecycle Event Discovery** | later | deferred | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | deferred boundary doc |
+| 12 | **Z / Advanced Knowledge Access** | later | deferred | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | deferred boundary doc |
 
 **严禁打包**：不要把 Discovery、Planning、Tests、Implementation 混进同一个 commit。
 

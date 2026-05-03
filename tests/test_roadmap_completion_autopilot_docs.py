@@ -207,3 +207,13 @@ def test_safe_local_release_readiness_doc_exists() -> None:
     )
     for phrase in required:
         assert phrase in text
+
+
+def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
+    """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
+
+    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+
+    assert "Historical Near-term Execution Plan" in roadmap
+    assert "not an active menu" in roadmap
+    assert "输出 + ask_user" not in roadmap

@@ -348,6 +348,36 @@ def test_remaining_roadmap_completion_doc_records_final_authorization_boundaries
     assert "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md" in closure
 
 
+def test_human_review_packet_is_actionable_without_authorizing_release() -> None:
+    """human review packet 要可执行 review，但不能授权 tag/release/真实集成。"""
+
+    packet = (PROJECT_ROOT / "docs" / "HUMAN_REVIEW_PACKET.md").read_text(
+        encoding="utf-8"
+    )
+    remaining = (
+        PROJECT_ROOT / "docs" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+    closure = (
+        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "Human Review Packet",
+        "review-only",
+        "no tag authorization",
+        "no release authorization",
+        "no real MCP endpoint authorization",
+        "review checklist",
+        "quality gate evidence",
+        "authorization decision matrix",
+        "P0/P1/P2 stop conditions",
+    )
+    for phrase in required:
+        assert phrase in packet
+    assert "HUMAN_REVIEW_PACKET.md" in remaining
+    assert "HUMAN_REVIEW_PACKET.md" in closure
+
+
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 

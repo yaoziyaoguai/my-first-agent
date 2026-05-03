@@ -24,6 +24,7 @@ activation, Skill activation, or Subagent activation.
 | Release/Tag Preparation Planning | `docs/RELEASE_TAG_PREPARATION.md` | pre-tag commands, human authorization checklist, rollback plan, `v0.8.0` unchanged policy |
 | MCP External Integration Readiness | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` | fake-first / dry-run only guardrails, `agent.mcp_external_readiness`, local stdio fixture boundary, authorization checklist |
 | Runtime Trace / ToolResult Migration Planning | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` | migration ledger, non-invasive adapter strategy, compatibility shim strategy |
+| Human Review Packet | `docs/HUMAN_REVIEW_PACKET.md` | review-only checklist, quality gate evidence, authorization decision matrix |
 | Final Closure Evidence | this document + roadmap links | remaining roadmap completed to readiness/planning stage |
 
 ## Completed to readiness/planning
@@ -33,6 +34,7 @@ activation, Skill activation, or Subagent activation.
 - runtime trace / ToolResult migration planning complete
 - safe-local release readiness complete
 - deferred boundary ledger complete
+- human review packet complete
 
 中文学习边界：Remaining Roadmap Completion 的目标不是“把真实外部能力偷偷接上”，
 而是把能安全推进的 fake-first、dry-run、contract、compatibility、planning evidence
@@ -83,8 +85,9 @@ The following require explicit user authorization before implementation:
 ## Human review ready
 
 The repository is ready for human review of the safe-local and remaining
-readiness evidence. Human review should decide whether the next authorized phase
-is actual release/tag work, real MCP external integration design, or runtime
-trace / ToolResult implementation design.
+readiness evidence. `docs/HUMAN_REVIEW_PACKET.md` provides the review-only
+checklist and authorization matrix. Human review should decide whether the next
+authorized phase is actual release/tag work, real MCP external integration
+design, or runtime trace / ToolResult implementation design.
 
 Until then, the roadmap is complete to the safe planning/readiness boundary.

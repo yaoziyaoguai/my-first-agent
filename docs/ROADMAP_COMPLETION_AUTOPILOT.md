@@ -24,6 +24,7 @@
 | MCP External Integration Readiness | planning-ready | `docs/MCP_EXTERNAL_INTEGRATION_READINESS.md` records fake-first / dry-run only external integration guardrails, `agent.mcp_external_readiness`, and authorization checklist | no real endpoint, network reachability check, secret read, or server execution |
 | Runtime Trace / ToolResult Migration | planning-ready | `docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md` records migration ledger, non-invasive adapter strategy, compatibility shim strategy, and stop conditions | no broad runtime rewrite or broad tool_executor rewrite |
 | Remaining Roadmap Completion Autopilot | complete-to-readiness | `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` records final matrix, safety checklist, and explicit authorization boundaries | actual release/tag, real MCP endpoint, and broad runtime/tool migration require user authorization |
+| Human Review Packet | review-ready | `docs/HUMAN_REVIEW_PACKET.md` records review checklist, quality gate evidence, authorization decision matrix, and P0/P1/P2 stop conditions | review-only; no tag/release/real endpoint authorization |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -173,6 +174,17 @@
    - runtime trace / ToolResult migration planning complete
    - requires explicit user authorization
    - human review ready
+
+17. Human Review Packet
+   - `docs/HUMAN_REVIEW_PACKET.md`
+   - review-only
+   - no tag authorization
+   - no release authorization
+   - no real MCP endpoint authorization
+   - review checklist
+   - quality gate evidence
+   - authorization decision matrix
+   - P0/P1/P2 stop conditions
 
 ## Release readiness
 

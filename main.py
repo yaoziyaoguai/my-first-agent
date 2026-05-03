@@ -541,6 +541,14 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_mcp_config_cli(argv[1:])
 
+    # Local Agent Productization RFC 的 thin CLI seam：``python main.py demo`` 跑一次
+    # fake provider 闭环，不需要 API key、不联网、不读 secret，只往 ``workspace/demo/``
+    # 或显式 tmp 路径写一份 demo note。所有业务逻辑在 ``agent.local_demo`` 里。
+    if argv and argv[0] == "demo":
+        from agent.local_demo import run_demo_cli
+
+        return run_demo_cli(argv[1:])
+
     # v0.2 release：health 子命令脱离主循环单独诊断 workspace_lint / log_size /
     # session_accumulation 等非阻塞 warning。
     # v0.3 M2 升级：默认输出结构化报告（含 risk + 建议命令），新增 --json 给脚本用。

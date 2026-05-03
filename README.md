@@ -43,6 +43,39 @@ cp .env.example .env
 `.env` is gitignored. `.env.example` only carries variable names and
 comments — no real keys.
 
+### Run the 5-minute fake demo (no API key, no network)
+
+The fastest way to see the local agent loop is the productized fake demo
+shipped in `agent/local_demo.py`. It uses a deterministic in-process fake
+provider, never reads `.env` / `agent_log.jsonl` / `sessions/` / `runs/` /
+real MCP config, never calls a real LLM, and only writes inside an explicit
+demo workspace under `workspace/demo/<UTC-timestamp>/` (or an explicit
+`--workspace` path under your system temp dir).
+
+```bash
+.venv/bin/python main.py demo "create a demo note about today's local run"
+```
+
+Expected output (paths and timestamps will differ):
+
+```
+[Local Agent Demo] provider=fake workspace=workspace/demo/20250101T000000Z
+Task : create a demo note about today's local run
+Step 1 demo.write_demo_note -> ok
+  path  : workspace/demo/20250101T000000Z/note.md
+  bytes : 140
+Final: wrote demo note to workspace/demo/20250101T000000Z/note.md
+Trace summary (2 events):
+  span-1 tool_call tool_result:demo.write_demo_note ok
+  span-2 state_transition demo.complete ok task='create a demo note about today's local run'
+Inspect: open workspace/demo/20250101T000000Z for the generated artifact.
+```
+
+Demo non-goals (intentional): no real LLM, no real MCP, no network, no
+release/tag, no production automation. Real provider / real MCP opt-in are
+authorization-gated tracks, not part of this demo. See
+`docs/rfcs/local-agent-productization.md` for the design.
+
 ### Run the basic CLI shell
 
 ```bash

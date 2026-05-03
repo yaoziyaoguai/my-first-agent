@@ -1,10 +1,12 @@
 # my-first-agent
 
 `my-first-agent` is a learning-oriented Agent Runtime prototype. The current
-local-first track is **v0.7.0 Tooling Foundation / MCP readiness post-release
-closure**: the local tool registry, file-mutation safety, legacy ToolResult
-contract, MCP client seam, and local stdio MCP fixture have release and
-dogfooding coverage.
+HEAD is **post-v0.8.0 safe-local / readiness / RFC-gated development**:
+local MCP config management, safe-local Skill/Subagent scaffolds, local trace
+and ToolResult foundations, and optional trace-sink RFC slices are in place.
+Release/tag work, real MCP integration, and broad runtime/ToolResult migration
+remain authorization-gated readiness/design tracks, not production-complete
+features.
 
 It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, not a full MCP implementation, and not a Skill or sub-agent platform.
 
@@ -86,9 +88,11 @@ you to run manually.
 Historical v0.3-era baseline was ruff clean with ~691 passed, 3 permanent xfails;
 keep that in mind when reading older release docs.
 
-Current v0.7.x post-release baseline: ruff clean, full pytest passing with the
-two expected xfails for topic switch and Textual Esc generation cancel. The
-dogfooding smoke coverage can be run directly with:
+Current post-v0.8.0 development baseline: ruff clean and full pytest passing at
+HEAD. Older v0.7.x notes are historical; current readiness/design work remains
+fake-first and local unless a future pack explicitly authorizes real provider,
+real MCP, release, or broad runtime migration work. The dogfooding smoke
+coverage can be run directly with:
 
 ```bash
 PYTHON_DOTENV_DISABLED=1 \

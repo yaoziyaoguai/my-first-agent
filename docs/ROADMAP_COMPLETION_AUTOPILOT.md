@@ -26,6 +26,7 @@
 | Remaining Roadmap Completion Autopilot | complete-to-readiness | `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` records final matrix, safety checklist, and explicit authorization boundaries | actual release/tag, real MCP endpoint, and broad runtime/tool migration require user authorization |
 | Human Review Packet | review-ready | `docs/HUMAN_REVIEW_PACKET.md` records review checklist, quality gate evidence, authorization decision matrix, and P0/P1/P2 stop conditions | review-only; no tag/release/real endpoint authorization |
 | Final Authorization/Design Packets | review-ready | `docs/RELEASE_TAG_AUTHORIZATION_PACKET.md`, `docs/MCP_REAL_INTEGRATION_SLICE_DESIGN.md`, `docs/RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md`, `docs/FINAL_ROADMAP_COMPLETION_EVIDENCE.md` | design/review only; no release, real MCP, or broad runtime/tool migration |
+| RFC 0001 Runtime Trace + ToolResult Boundary | draft-first-slice | `docs/rfcs/0001-runtime-trace-toolresult-boundary.md` + `agent.runtime_trace_projection` | non-invasive adapter only; no runtime/executor wiring |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed

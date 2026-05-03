@@ -60,6 +60,8 @@ No real MCP call was made.
 Design packet:
 
 - `docs/RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md`
+- RFC first slice: `docs/rfcs/0001-runtime-trace-toolresult-boundary.md`
+- first adapter: `agent.runtime_trace_projection`
 
 Required future decisions:
 

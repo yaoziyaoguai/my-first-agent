@@ -4,6 +4,11 @@ This packet designs small future slices for runtime trace and ToolResult
 migration. It is not a broad runtime rewrite, not a broad tool_executor rewrite,
 and not a checkpoint/memory migration.
 
+RFC-gated first slice:
+
+- `docs/rfcs/0001-runtime-trace-toolresult-boundary.md`
+- `agent.runtime_trace_projection`
+
 ## Runtime Trace Design
 
 ### current runtime behavior summary
@@ -53,6 +58,7 @@ Use `TraceEvent` fields:
 - docs for trace sink injection
 - optional adapter boundary only if safe
 - no core-wide tracing framework
+- first implemented adapter: `agent.runtime_trace_projection`
 
 ### What not to do yet
 

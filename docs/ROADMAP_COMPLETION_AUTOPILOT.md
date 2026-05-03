@@ -18,6 +18,7 @@
 | Structured ToolResult Envelope Foundation | complete | `ToolResultEnvelope` + `classify_tool_result` + `docs/TOOL_RESULT_ENVELOPE.md` + ToolResult contract tests | full executor/tool return migration deferred |
 | Local Config Foundation | complete | `agent.local_config` + `tests/fixtures/local_config/agent.local.json` + `docs/LOCAL_CONFIG_FOUNDATION.md` + explicit safe-path config contract tests | real home config and installer/setup deferred |
 | Roadmap Status Alignment Review | complete | P3 docs drift remediation confirms historical XFAIL backlog is closed | no production/runtime change |
+| Deferred Roadmap Boundaries | complete | `docs/DEFERRED_ROADMAP_BOUNDARIES.md` records planning-only / deferred boundaries | no real external integration or broad migration |
 | Release readiness | planning-ready | full pytest/ruff/diff gates passed in each pack | no tag; human review before release/tag |
 
 ## Packs completed
@@ -108,6 +109,14 @@
    - provider stream abort remains deferred as separate runtime lifecycle work
    - no production/runtime change
    - no TUI/runtime reopening
+
+11. Deferred Roadmap Boundaries
+   - `docs/DEFERRED_ROADMAP_BOUNDARIES.md`
+   - real MCP external integration remains deferred
+   - runtime trace wiring remains deferred
+   - ToolResult executor migration remains deferred
+   - real Skill/Subagent activation remains deferred
+   - release/tag remains planning-only
 
 ## Release readiness
 

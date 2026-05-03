@@ -164,3 +164,25 @@ def test_autopilot_closure_doc_records_status_alignment_review() -> None:
     )
     for phrase in required:
         assert phrase in closure
+
+
+def test_deferred_roadmap_boundaries_doc_exists() -> None:
+    """只剩 planning-only 边界时，也要用文档说明为什么不能自动实现。"""
+
+    text = (PROJECT_ROOT / "docs" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(
+        encoding="utf-8"
+    )
+
+    required = (
+        "real MCP external integration",
+        "runtime trace wiring",
+        "ToolResult executor migration",
+        "real Skill install/execution",
+        "real Subagent provider delegation",
+        "release/tag",
+        "planning-only",
+        "no real external integration",
+        "no broad runtime/tool executor migration",
+    )
+    for phrase in required:
+        assert phrase in text

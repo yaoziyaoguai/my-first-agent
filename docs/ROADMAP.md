@@ -130,6 +130,9 @@ core**。
   `tests/fixtures/local_config/agent.local.json` 与 `docs/LOCAL_CONFIG_FOUNDATION.md`
   提供 fake fixture / review doc；不读取真实 home config，不读取 `.env`，不展开 env
   secret，不接 provider/network。
+- ✅ Deferred Roadmap Boundaries 已记录：`docs/DEFERRED_ROADMAP_BOUNDARIES.md` 明确
+  real MCP external integration、runtime trace wiring、ToolResult executor migration、
+  real Skill/Subagent activation 与 release/tag 都是 planning-only / deferred 边界。
 - ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
   不属于 Safe Local MVP 默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或

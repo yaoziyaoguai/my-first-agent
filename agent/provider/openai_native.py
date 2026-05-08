@@ -1,4 +1,13 @@
-"""HTTP adapter for Anthropic-compatible endpoints."""
+"""OpenAI native (official API) provider adapter.
+
+本轮实现 minimal Chat Completions adapter，复用 openai_compatible 的
+消息/工具转换和响应归一化。不做 Responses API，不做 streaming。
+
+与 openai_compatible 的区别：
+- base_url 默认 https://api.openai.com/v1（无需用户配置）
+- 同样使用 OPENAI_API_KEY / OPENAI_MODEL
+- 同样使用 bearer auth
+"""
 
 from __future__ import annotations
 
@@ -7,7 +16,11 @@ from typing import Any
 import httpx
 
 from agent.provider.config import AgentProviderConfig
-from agent.provider.normalize import normalize_anthropic_response
+from agent.provider.openai_http import (
+    convert_messages_to_openai,
+    convert_tools_to_openai,
+    normalize_openai_response,
+)
 from agent.provider.protocol import (
     ProviderAuthError,
     ProviderCapabilityError,
@@ -16,9 +29,18 @@ from agent.provider.protocol import (
     ProviderTimeoutError,
 )
 
+_DEFAULT_BASE_URL = "https://api.openai.com"
 
-class AnthropicCompatibleProvider:
-    provider_type = "anthropic_compatible"
+
+class OpenAINativeProvider:
+    """OpenAI 官方 API Chat Completions provider。
+
+    不依赖 openai SDK，直接用 httpx + HTTP，复用 openai_compatible 的
+    转换/归一化逻辑。当前仅支持 non-streaming Chat Completions，
+    Responses API 明确不在本轮范围内。
+    """
+
+    provider_type = "openai_native"
     supports_tools = True
     supports_streaming = False
 
@@ -37,33 +59,19 @@ class AnthropicCompatibleProvider:
         return self._http_client
 
     def _url(self) -> str:
-        base_url = (self.config.base_url or "").rstrip("/")
-        request_path = (self.config.request_path or "").strip()
-        if not base_url:
-            raise ProviderResponseError("base_url_missing")
+        base_url = (self.config.base_url or _DEFAULT_BASE_URL).rstrip("/")
+        request_path = (self.config.request_path or "chat/completions").strip()
         if not request_path:
             return base_url
         return f"{base_url}/{request_path.lstrip('/')}"
 
     def _headers(self) -> dict[str, str]:
-        if not self.config.api_key:
-            raise ProviderAuthError("api_key_missing")
-        scheme = self.config.auth_scheme
-        # 对于 Anthropic-compatible，auto 默认为 x-api-key（Anthropic 官方 API 标准）。
-        # bearer 是 OpenAI 惯例，不是 Anthropic 惯例。
-        if scheme == "auto":
-            scheme = "x-api-key"
-        headers = {
+        headers: dict[str, str] = {
             "content-type": "application/json",
             "accept": "application/json",
         }
-        if scheme == "bearer":
+        if self.config.api_key:
             headers["authorization"] = f"Bearer {self.config.api_key}"
-        elif scheme == "x-api-key":
-            headers["x-api-key"] = self.config.api_key
-            headers["anthropic-version"] = "2023-06-01"
-        else:
-            raise ProviderAuthError("unsupported_auth_scheme")
         return headers
 
     def create(
@@ -75,14 +83,16 @@ class AnthropicCompatibleProvider:
     ) -> ProviderResponse:
         if tools and not self.config.supports_tools:
             raise ProviderCapabilityError("tools_not_supported")
+
+        openai_messages = convert_messages_to_openai(system, messages)
         body: dict[str, Any] = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
-            "system": system,
-            "messages": messages,
+            "messages": openai_messages,
         }
         if tools:
-            body["tools"] = tools
+            body["tools"] = convert_tools_to_openai(tools)
+
         try:
             response = self._client().post(
                 self._url(),
@@ -95,7 +105,10 @@ class AnthropicCompatibleProvider:
             raise ProviderResponseError("http_error") from exc
 
         if response.status_code in {401, 403}:
-            raise ProviderAuthError(f"http_status:{response.status_code}", status_code=response.status_code)
+            raise ProviderAuthError(
+                f"http_status:{response.status_code}",
+                status_code=response.status_code,
+            )
         if response.status_code >= 400:
             raise ProviderResponseError(
                 f"http_status:{response.status_code}",
@@ -106,9 +119,9 @@ class AnthropicCompatibleProvider:
             payload = response.json()
         except ValueError as exc:
             raise ProviderResponseError("malformed_json") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("content"), list):
+        if not isinstance(payload, dict):
             raise ProviderResponseError("malformed_response")
-        return normalize_anthropic_response(
+        return normalize_openai_response(
             payload,
             raw_provider_name=self.provider_type,
         )

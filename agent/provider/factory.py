@@ -7,6 +7,8 @@ import os
 from agent.provider.anthropic_http import AnthropicCompatibleProvider
 from agent.provider.anthropic_native import AnthropicNativeProvider
 from agent.provider.config import PROVIDER_ENV, AgentProviderConfig, load_agent_provider_config
+from agent.provider.openai_http import OpenAICompatibleProvider
+from agent.provider.openai_native import OpenAINativeProvider
 from agent.provider.protocol import (
     ModelProvider,
     ProviderNotImplementedError,
@@ -18,10 +20,10 @@ def build_model_provider(config: AgentProviderConfig) -> ModelProvider | None:
         return AnthropicNativeProvider(config=config)
     if config.provider_type == "anthropic_compatible":
         return AnthropicCompatibleProvider(config=config)
-    if config.provider_type in {"openai_native", "openai_compatible"}:
-        raise ProviderNotImplementedError(
-            f"{config.provider_type} provider is registered but not implemented"
-        )
+    if config.provider_type == "openai_compatible":
+        return OpenAICompatibleProvider(config=config)
+    if config.provider_type == "openai_native":
+        return OpenAINativeProvider(config=config)
     if config.provider_type == "fake":
         raise ProviderNotImplementedError("fake provider is a test-only protocol target")
     raise ProviderNotImplementedError(

@@ -11,6 +11,10 @@ import os
 import sys
 from dataclasses import dataclass, field
 
+# 用 setdefault 兜底测试替身值——setdefault 不会覆盖已存在的 env vars。
+# 不调用 load_dotenv()：真实 provider 测试通过显式 opt-in gate 运行，
+# 普通测试不应自动加载 .env 中的真实 key。
+
 # 让测试在没有真实 .env 时也能 import agent.core
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("ANTHROPIC_BASE_URL", "https://example.invalid")

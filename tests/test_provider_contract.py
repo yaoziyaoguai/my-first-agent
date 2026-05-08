@@ -70,28 +70,51 @@ def test_agent_provider_config_loads_anthropic_compatible_from_env_without_doten
     assert "secret-token-must-not-leak" not in repr(config.redacted_summary())
 
 
-@pytest.mark.parametrize("provider_type", ["openai_native", "openai_compatible"])
-def test_openai_provider_types_are_registered_but_not_implemented(provider_type: str):
+def test_openai_native_is_implemented_and_returns_provider():
     from agent.provider.config import AgentProviderConfig
-    from agent.provider.factory import ProviderNotImplementedError, build_model_provider
+    from agent.provider.factory import build_model_provider
 
     config = AgentProviderConfig(
-        provider_type=provider_type,
-        api_key=None,
+        provider_type="openai_native",
+        api_key="sk-test",
         api_key_env="OPENAI_API_KEY",
         base_url=None,
         model="gpt-test",
         max_tokens=64,
         timeout=3.0,
-        supports_tools=False,
+        supports_tools=True,
         supports_streaming=False,
         auth_scheme="bearer",
-        request_path="/v1/responses",
+        request_path="/v1/chat/completions",
         compatibility_mode="openai",
     )
 
-    with pytest.raises(ProviderNotImplementedError) as excinfo:
-        build_model_provider(config)
+    provider = build_model_provider(config)
+    assert provider.provider_type == "openai_native"
+    assert provider.supports_tools is True
+    assert provider.supports_streaming is False
 
-    assert provider_type in str(excinfo.value)
-    assert "not implemented" in str(excinfo.value)
+
+def test_openai_compatible_is_implemented_and_returns_provider():
+    from agent.provider.config import AgentProviderConfig
+    from agent.provider.factory import build_model_provider
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        api_key="sk-test",
+        api_key_env="OPENAI_API_KEY",
+        base_url="https://openai-compat.example/",
+        model="gpt-compat",
+        max_tokens=64,
+        timeout=3.0,
+        supports_tools=True,
+        supports_streaming=False,
+        auth_scheme="bearer",
+        request_path="/v1/chat/completions",
+        compatibility_mode="openai",
+    )
+
+    provider = build_model_provider(config)
+    assert provider.provider_type == "openai_compatible"
+    assert provider.supports_tools is True
+    assert provider.supports_streaming is False

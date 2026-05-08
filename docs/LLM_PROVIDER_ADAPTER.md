@@ -9,13 +9,15 @@ from the older `llm/` processing MVP provider layer.
 |---|---|---|
 | `anthropic_native` | Implemented as legacy streaming path + wrapper | AgentLoop default keeps `core.py` streaming via official Anthropic SDK. The wrapper normalizes non-streaming `messages.create()` responses for future migration. |
 | `anthropic_compatible` | Implemented vertical slice | Uses HTTP, custom `base_url`, configurable `request_path`, and `auto` / `bearer` / `x-api-key` auth. |
-| `openai_native` | Registered, not implemented | Selecting it raises an explicit provider not-implemented error. |
-| `openai_compatible` | Registered, not implemented | Selecting it raises an explicit provider not-implemented error. |
+| `openai_compatible` | Implemented vertical slice | Uses HTTP, OpenAI Chat Completions format, Anthropic→OpenAI message/tools conversion, `tool_calls` normalization. |
+| `openai_native` | Implemented minimal Chat Completions adapter | Uses HTTP, default `https://api.openai.com`, `Bearer` auth, `tool_calls` normalization. No streaming, no Responses API. |
 
 ## Configuration
 
 Configuration is read from process environment only. Do not store real API keys
 in repo files, tests, docs, checkpoints, messages, or logs.
+
+### Anthropic-compatible
 
 ```bash
 export MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible
@@ -25,20 +27,58 @@ export ANTHROPIC_MODEL=provider-model
 
 # Optional defaults:
 export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/messages
-export MY_FIRST_AGENT_LLM_AUTH_SCHEME=auto
+export MY_FIRST_AGENT_LLM_AUTH_SCHEME=auto      # auto | bearer | x-api-key
+export MY_FIRST_AGENT_LLM_MAX_TOKENS=4096
+export MY_FIRST_AGENT_LLM_TIMEOUT=30
+```
+
+### OpenAI-compatible
+
+```bash
+export MY_FIRST_AGENT_LLM_PROVIDER=openai_compatible
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://api.openai.com   # or custom endpoint
+export OPENAI_MODEL=gpt-4o                       # or DeepSeek model etc.
+
+# Optional defaults:
+export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/chat/completions
+export MY_FIRST_AGENT_LLM_AUTH_SCHEME=bearer
 export MY_FIRST_AGENT_LLM_MAX_TOKENS=4096
 export MY_FIRST_AGENT_LLM_TIMEOUT=30
 ```
 
 `MY_FIRST_AGENT_LLM_AUTH_SCHEME` accepts:
 
-- `auto`: compatible provider currently sends `Authorization: Bearer ...`.
-- `bearer`: explicit bearer token header.
-- `x-api-key`: Anthropic-style key header plus `anthropic-version`.
+- For Anthropic-compatible: `auto` (defaults to `x-api-key`), `bearer`, `x-api-key`.
+- For OpenAI-compatible: `bearer` only.
 
-`MY_FIRST_AGENT_LLM_REQUEST_PATH` can be empty, `/v1/messages`, or a provider
-specific path. The adapter joins it with `ANTHROPIC_BASE_URL` without adding
-double slashes and never puts the key into the URL.
+`MY_FIRST_AGENT_LLM_REQUEST_PATH` can be empty or a provider-specific path.
+The adapter joins it with the base URL without double slashes and never puts
+the key into the URL.
+
+## Tool Schema Conversion
+
+Internal tool definitions use Anthropic format:
+```json
+{"name": "...", "description": "...", "input_schema": {...}}
+```
+
+For OpenAI-compatible calls, `convert_tools_to_openai()` maps them to:
+```json
+{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+```
+
+For Anthropic-compatible calls, no conversion is needed.
+
+## Message Format Conversion
+
+AgentLoop stores messages in Anthropic format. For OpenAI-compatible calls,
+`convert_messages_to_openai()` handles:
+
+- System prompt → `{"role": "system", "content": "..."}` message
+- User text → `{"role": "user", "content": "..."}`
+- Assistant tool_use → `{"role": "assistant", "tool_calls": [...]}`
+- User tool_result → `{"role": "tool", "tool_call_id": "...", "content": "..."}`
 
 ## Error Classification
 
@@ -46,8 +86,8 @@ The provider layer raises safe errors:
 
 - `ProviderAuthError`: 401 / 403 or missing auth.
 - `ProviderTimeoutError`: HTTP timeout.
-- `ProviderResponseError`: malformed JSON, malformed response shape, or other
-  HTTP failures.
+- `ProviderResponseError`: malformed JSON, malformed response shape, no choices,
+  tool_call missing name, or other HTTP failures.
 - `ProviderCapabilityError`: selected provider cannot support requested
   capability.
 - `ProviderNotImplementedError`: registered but unfinished provider type.
@@ -63,24 +103,77 @@ MCP remains the tool source. The provider adapter only calls the model.
 - The provider receives only the already-filtered model-visible tool schemas.
 - Tool execution still goes through the existing confirmation gate and
   `tool_executor`.
+- `tool_executor` is provider-agnostic — it works with `ToolUseBlock` from any
+  provider.
+
+## Streaming Support
+
+| Provider | Streaming | Notes |
+|---|---|---|
+| `anthropic_native` | Yes (legacy path) | `core.py` uses `client.messages.stream()` via Anthropic SDK |
+| `anthropic_compatible` | No | Non-streaming `create()` via HTTP adapter |
+| `openai_compatible` | No | Non-streaming `create()` via HTTP adapter |
+| `openai_native` | No | Non-streaming `create()` via HTTP adapter |
+
+`core.py._call_model` checks `supports_streaming` on the provider. If false,
+it calls `provider.create()` and emits text blocks as RuntimeEvents.
 
 ## Opt-in Real Smoke
 
-Run this only when the environment is already configured. The command must not
-print key values.
+Real smoke tests call a real provider. They are skipped by default. To run them:
+
+1. Set the explicit opt-in flag: `export MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1`
+2. Ensure real (not fake) `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and
+   `ANTHROPIC_MODEL` are present.
+3. The gate rejects known fake placeholders (test-key, sk-test-*, etc.)
+
+Run these only when the environment is already configured. They never print key
+values.
+
+### Anthropic-compatible
 
 ```bash
+MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 \
 MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible \
-.venv/bin/python -m pytest tests/test_provider_real_smoke.py -q -s
+.venv/bin/python -m pytest tests/test_provider_real_smoke.py -v -s
 ```
 
-If the smoke fails, classify it by the first safe signal:
+Tests cover:
+
+- `test_real_anthropic_compatible_minimal_text_smoke` — basic text round-trip
+- `test_real_anthropic_compatible_accepts_model_visible_tools_param` — tools
+  parameter accepted and response parsed
+- `test_real_anthropic_compatible_mcp_readonly_e2e` — provider adapter +
+  `tool_executor` manual round-trip through MCP tool registration, model tool
+  selection, tool execution, tool_result append, and second provider call.
+  (This is a provider-adapter-level round-trip, not a full AgentLoop
+  `core.py`/`chat()`/`response_handlers` automatic loop.)
+
+### OpenAI-compatible (not yet in test file; requires env vars)
+
+```bash
+MY_FIRST_AGENT_LLM_PROVIDER=openai_compatible \
+.venv/bin/python -c "
+from agent.provider.config import load_agent_provider_config
+from agent.provider.factory import build_model_provider
+config = load_agent_provider_config()
+provider = build_model_provider(config)
+response = provider.create(
+    system='You are a test assistant.',
+    messages=[{'role': 'user', 'content': 'Reply: provider-ok'}],
+    tools=[],
+)
+print('stop_reason:', response.stop_reason)
+print('text:', response.content[0].text if response.content else '(empty)')
+"
+```
+
+If a smoke fails, classify by the first safe signal:
 
 - auth: 401 / 403, missing or wrong `auth_scheme`.
 - base_url/path: 404 or provider-specific route error.
 - model: provider says model is missing or unknown.
-- response format: HTTP succeeds but the body is not Anthropic Messages-style.
-- unsupported tools: provider accepts no `tools` parameter or ignores tool
-  schemas.
+- response format: HTTP succeeds but body shape is wrong.
+- unsupported tools: provider rejects `tools` parameter.
 
 Do not hard-code provider-specific paths or auth rules to make a smoke pass.

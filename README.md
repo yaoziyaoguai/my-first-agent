@@ -104,36 +104,56 @@ when prompted.
 
 ### AgentLoop LLM provider adapters
 
-AgentLoop now has a provider-neutral adapter foundation:
+AgentLoop has a provider-neutral adapter foundation supporting three active
+provider types plus one planned:
 
-- `anthropic_native` keeps the existing legacy streaming path in `core.py` and
-  also has a non-streaming wrapper for normalization tests and future migration.
-- `anthropic_compatible` uses the HTTP adapter for custom Anthropic-compatible
-  endpoints such as DashScope, enterprise proxies, or self-hosted gateways.
-- `openai_native` and `openai_compatible` are registered as planned provider
-  types, but they intentionally raise `not implemented` today.
+- `anthropic_native` — legacy streaming path in `core.py` and non-streaming
+  wrapper for normalization.
+- `anthropic_compatible` — HTTP adapter for custom Anthropic-compatible
+  endpoints (DashScope, enterprise proxies, self-hosted gateways).
+- `openai_compatible` — HTTP adapter for OpenAI Chat Completions-compatible
+  endpoints (DeepSeek, DashScope OpenAI-compatible, OpenRouter, vLLM,
+  LM Studio, Ollama-compatible, enterprise proxies).
+- `openai_native` — minimal Chat Completions HTTP adapter for the official
+  OpenAI API (default `https://api.openai.com`, bearer auth).
 
 Provider config is read from process environment only. Do not write keys into
 repo files, docs, logs, checkpoints, messages, or audit artifacts.
 
 ```bash
+# Anthropic-compatible
 export MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible
 export ANTHROPIC_API_KEY=...
 export ANTHROPIC_BASE_URL=https://your-provider.example
 export ANTHROPIC_MODEL=your-compatible-model
 
-# Optional, defaults shown:
+# Optional for Anthropic-compatible:
 export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/messages
 export MY_FIRST_AGENT_LLM_AUTH_SCHEME=auto   # auto | bearer | x-api-key
+
+# OpenAI-compatible
+export MY_FIRST_AGENT_LLM_PROVIDER=openai_compatible
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://api.openai.com
+export OPENAI_MODEL=gpt-4o
+
+# Optional for OpenAI-compatible (defaults shown):
+export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/chat/completions
+export MY_FIRST_AGENT_LLM_AUTH_SCHEME=bearer
+
+# Streaming is not yet supported for compatible providers — core.py's
+# _call_model dispatches to the non-streaming create() path when
+# supports_streaming=False.
 ```
 
 MCP and provider responsibilities stay separate: MCP discovers and registers
 tools through the existing policy gate and exposure filter; the provider adapter
 only sends the model request. `get_model_visible_tools(max_mcp_tools=5)` still
-controls what model-visible tools are included.
+controls what model-visible tools are included. Tool execution still goes
+through `tool_executor` and the confirmation gate regardless of provider type.
 
 See `docs/LLM_PROVIDER_ADAPTER.md` for provider status, error classification,
-and the opt-in real smoke command.
+tools schema conversion details, and the opt-in real smoke command.
 
 ### Subcommands you should know
 

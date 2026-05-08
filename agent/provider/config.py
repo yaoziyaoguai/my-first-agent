@@ -145,7 +145,7 @@ def load_agent_provider_config(
         base_url, _base_url_env = _first_env(env, ("OPENAI_BASE_URL", GENERIC_BASE_URL_ENV))
         supports_streaming = False
         auth_scheme = _env_get(env, AUTH_SCHEME_ENV) or "bearer"
-        request_path = _env_get(env, REQUEST_PATH_ENV) or "/v1/responses"
+        request_path = _env_get(env, REQUEST_PATH_ENV) or "/v1/chat/completions"
         compatibility_mode = _env_get(env, COMPATIBILITY_MODE_ENV) or "openai"
         requires_base_url = selected == "openai_compatible"
     else:

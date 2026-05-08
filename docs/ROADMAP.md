@@ -148,12 +148,15 @@ core**。
 	  (blocked tools never enter TOOL_REGISTRY), MCP audit trail, tool/MCP health
 	  checks, full MCP module boundary isolation (AST tests). Real MCP server
 	  activation / real tools/call still authorization-gated.
-- ✅ **LLM Provider Adapter Foundation + Anthropic-compatible vertical slice**
+- ✅ **LLM Provider Adapter Foundation + Anthropic-Compatible + OpenAI-Compatible**
   已完成：`agent.provider` 定义 provider-neutral `ToolUseBlock` /
   `ProviderResponse` / `ModelProvider` / `AgentProviderConfig`，Anthropic native
   继续保留 legacy streaming path，`anthropic_compatible` 通过 HTTP adapter
-  支持自定义 `base_url` / `request_path` / auth scheme；OpenAI native /
-  compatible 仅注册为明确 not implemented。详见 `docs/LLM_PROVIDER_ADAPTER.md`。
+  支持自定义 `base_url` / `request_path` / auth scheme，`openai_compatible`
+  通过 HTTP adapter 支持 OpenAI Chat Completions 兼容端点（含 Anthropic→OpenAI
+  消息转换 / 工具 schema 转换 / tool_calls 归一化）；`openai_native` 已实现
+  最小 Chat Completions adapter（默认 https://api.openai.com，复用
+  openai_compatible 的转换/归一化逻辑）。详见 `docs/LLM_PROVIDER_ADAPTER.md`。
 - ✅ Remaining Roadmap Completion Autopilot 已记录：
   `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
   planning、MCP external integration readiness、runtime trace / ToolResult migration

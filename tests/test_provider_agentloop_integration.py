@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 
 def test_response_handlers_serialize_provider_tool_use_block():
     from agent.provider.protocol import ProviderResponse, ProviderTextBlock, ToolUseBlock
@@ -28,6 +30,7 @@ def test_response_handlers_serialize_provider_tool_use_block():
 
 
 def test_call_model_uses_non_streaming_provider_when_loop_context_has_provider(monkeypatch):
+    pytest.importorskip("anthropic")
     import agent.core as core
     from agent.loop_context import LoopContext
     from agent.provider.protocol import ProviderResponse, ProviderTextBlock
@@ -87,6 +90,7 @@ def test_call_model_uses_non_streaming_provider_when_loop_context_has_provider(m
 
 
 def test_build_loop_context_builds_compatible_provider_from_env(monkeypatch):
+    pytest.importorskip("anthropic")
     import agent.core as core
 
     class _Provider:

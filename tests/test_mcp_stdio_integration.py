@@ -101,7 +101,10 @@ def test_stdio_mcp_tool_executes_through_registry_with_confirmation() -> None:
 
     client = StdioMCPClient(timeout_seconds=5)
     server = _local_stdio_server_config()
-    registered = register_mcp_tools([server], client)
+    registered = register_mcp_tools(
+        [server], client,
+        server_allowlist=frozenset({"local_fixture"}),
+    )
 
     try:
         assert registered == ("mcp__local_fixture__echo",)
@@ -199,7 +202,8 @@ def test_stdio_mcp_transport_does_not_import_runtime_checkpoint_or_tui() -> None
 
     imports = _agent_imports(PROJECT_ROOT / "agent" / "mcp_stdio.py")
 
-    assert imports == {"agent.mcp"}
+    # mcp_models 是共享数据模型，不是 runtime 层
+    assert imports == {"agent.mcp", "agent.mcp_models"}
 
 
 def test_stdio_mcp_client_rejects_external_transports_before_process_spawn(

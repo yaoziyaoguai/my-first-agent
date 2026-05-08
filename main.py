@@ -524,6 +524,46 @@ def main_loop():
                 break
 
 
+def _init_mcp_bridge_if_enabled() -> None:
+    """MCP bridge thin wrapper：只在 MY_FIRST_AGENT_MCP_ENABLE=1 时运行。
+
+    不修改 core.py、不绕过 policy gate、默认 disabled。
+    bridge 在 init_session 之前运行，将 MCP tools 注册到 TOOL_REGISTRY。
+    """
+    import os
+
+    enabled = os.getenv("MY_FIRST_AGENT_MCP_ENABLE", "").strip().lower()
+    if enabled not in ("1", "true", "yes", "on"):
+        return
+
+    mode = os.getenv("MY_FIRST_AGENT_MCP_MODE", "registration").strip().lower()
+    dry_run = os.getenv("MY_FIRST_AGENT_MCP_DRY_RUN", "1").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+    try:
+        from agent.mcp_bridge import run_mcp_bridge
+
+        report = run_mcp_bridge(
+            mode=mode,  # type: ignore[arg-type]
+            dry_run=dry_run,
+        )
+        # bridge report 只打印短摘要，不打印 raw descriptor / raw result
+        print(
+            f"\n[MCP Bridge] mode={report.mode} "
+            f"servers={report.servers_evaluated}/{report.servers_configured} "
+            f"tools_discovered={report.tools_discovered} "
+            f"tools_blocked={report.tools_blocked} "
+            f"tools_registered={report.tools_registered} "
+            f"decision={report.overall_decision}"
+        )
+        if report.errors:
+            for err in report.errors:
+                print(f"  [MCP Bridge error] {err}")
+    except Exception as e:
+        print(f"[MCP Bridge] 初始化异常（已跳过）: {e}")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in {"--shell", "shell"}:
@@ -656,6 +696,10 @@ def main(argv: list[str] | None = None) -> int:
         print(format_artifact_inventory_report(inv), end="")
         return 0
 
+    # MCP bridge：受控 readiness 层，默认 disabled。
+    # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
+    # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
+    _init_mcp_bridge_if_enabled()
     init_session()
     try_resume_from_checkpoint()
     if _selected_input_backend() == "textual":

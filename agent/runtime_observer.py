@@ -1,7 +1,7 @@
 """Runtime 观测日志层，不参与业务决策。
 
 这个模块统一输出 Event / Resolution / Transition / Actions 相关日志，帮助调试
-Agent Runtime 的状态流转。它只负责“让发生了什么可见”，不是状态机本身。
+Agent Runtime 的状态流转。它只负责"让发生了什么可见"，不是状态机本身。
 
 重要边界：
 - 不修改 state；
@@ -62,16 +62,20 @@ def _format_fields(fields: dict[str, Any]) -> str:
 def _safe_log_value(value: Any) -> Any:
     """把 observer payload 压成适合 JSONL 的短字段。
 
-    Runtime 观测日志只回答“发生了什么”，不保存完整 prompt/messages/tool input。
-    字符串统一截断，容器只保留浅层短值，避免 TUI/terminal 再次被大 JSON 污染。
+    Runtime 观测日志只回答"发生了什么"，不保存完整 prompt/messages/tool input。
+    字符串统一截断 + 脱敏，容器只保留浅层短值，避免 TUI/terminal 再次被大
+    JSON 污染，也避免 API key / token 泄漏到 agent_log.jsonl。
     """
 
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
-        if len(value) <= MAX_LOG_TEXT_PREVIEW:
-            return value
-        return value[:MAX_LOG_TEXT_PREVIEW] + "..."
+        from agent.display_events import mask_user_visible_secrets
+
+        masked = mask_user_visible_secrets(value)
+        if len(masked) <= MAX_LOG_TEXT_PREVIEW:
+            return masked
+        return masked[:MAX_LOG_TEXT_PREVIEW] + "..."
     if isinstance(value, list):
         return [_safe_log_value(item) for item in value[:20]]
     if isinstance(value, tuple):
@@ -81,7 +85,9 @@ def _safe_log_value(value: Any) -> Any:
             str(key): _safe_log_value(val)
             for key, val in list(value.items())[:30]
         }
-    return str(value)[:MAX_LOG_TEXT_PREVIEW]
+    from agent.display_events import mask_user_visible_secrets
+
+    return mask_user_visible_secrets(str(value))[:MAX_LOG_TEXT_PREVIEW]
 
 
 def _persist_observer_event(
@@ -195,7 +201,7 @@ def log_resolution(
 ) -> None:
     """记录输入/输出被解析成哪种 runtime 语义。
 
-    Resolution 是“判断结果”，不是 Action。这里打印 `resolution_kind` 等字段，
+    Resolution 是"判断结果"，不是 Action。这里打印 `resolution_kind` 等字段，
     只是帮助确认 resolver 如何分类；真正的 append / advance / save 等副作用
     应发生在 transition/action 层。
     """
@@ -224,7 +230,7 @@ def log_transition(
     """记录一次状态转移的 from_state / event_type / target_state。
 
     这里不执行 transition，只打印 transition 已经发生或即将由调用方表达的语义。
-    guard_name 用于未来补充“为什么这条转移可以走”，第一版可为空。
+    guard_name 用于未来补充"为什么这条转移可以走"，第一版可为空。
     """
     if not RUNTIME_DEBUG_LOGS:
         return

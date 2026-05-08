@@ -11,62 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import re
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Sequence
 
+from agent.mcp_models import (
+    MCPClient,
+    MCPServerConfig,
+    MCPToolDescriptor,
+    mcp_registry_tool_name,
+)
 from agent.tool_registry import TOOL_REGISTRY, register_tool
 
 
-MCP_TRANSPORTS = frozenset({"stdio", "http", "sse", "streamable_http"})
 SENSITIVE_CONFIG_NAMES = frozenset({".env", "agent_log.jsonl"})
 SENSITIVE_CONFIG_PARTS = frozenset({"sessions", "runs"})
-
-
-@dataclass(frozen=True)
-class MCPServerConfig:
-    """MCP server 的静态配置模型。
-
-    配置是 source of truth；CLI 未来只能管理这份配置。`enabled=False` 是安全默认：
-    写在配置里的 server 也不会自动进入 registry，必须显式启用并调用 opt-in seam。
-    本 dataclass 只保存配置，不启动 server、不解析 secret、不读取环境变量。
-    """
-
-    name: str
-    transport: str = "stdio"
-    command: str | None = None
-    args: tuple[str, ...] = ()
-    env: Mapping[str, str] = field(default_factory=dict)
-    enabled: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("MCP server name 不能为空")
-        if self.transport not in MCP_TRANSPORTS:
-            raise ValueError(f"不支持的 MCP transport: {self.transport}")
-
-
-@dataclass(frozen=True)
-class MCPToolDescriptor:
-    """MCP server 暴露的 tool 描述。
-
-    descriptor 只描述外部 tool schema；它不是本地 registry entry。只有通过
-    `register_mcp_tools()` 显式 opt-in 后，descriptor 才会映射成本地 tool。
-    """
-
-    server_name: str
-    name: str
-    description: str
-    input_schema: Mapping[str, Any] = field(default_factory=dict)
-
-    def parameters(self) -> dict[str, Any]:
-        """把 MCP object schema 映射到当前 registry 的 properties dict。"""
-
-        if self.input_schema.get("type") != "object":
-            return {}
-        properties = self.input_schema.get("properties", {})
-        if not isinstance(properties, Mapping):
-            return {}
-        return dict(properties)
 
 
 @dataclass(frozen=True)
@@ -102,25 +59,6 @@ class MCPCallResult:
         if isinstance(self.content, list):
             return _stringify_mcp_content_blocks(self.content)
         return str(self.content)
-
-
-class MCPClient(Protocol):
-    """MCP client protocol：只定义 list_tools / call_tool seam。
-
-    真实 stdio/HTTP/SSE transport 未来可以实现这个 protocol；当前阶段只用
-    FakeMCPClient 做架构测试，避免连接真实 server 或引入依赖。
-    """
-
-    def list_tools(self, server: MCPServerConfig) -> Sequence[MCPToolDescriptor]:
-        """列出一个 server 暴露的 tools。"""
-
-    def call_tool(
-        self,
-        server: MCPServerConfig,
-        tool_name: str,
-        tool_input: Mapping[str, Any],
-    ) -> MCPCallResult:
-        """调用一个 server tool。"""
 
 
 @dataclass
@@ -220,55 +158,109 @@ def load_mcp_server_configs_from_mapping(config: Mapping[str, Any]) -> tuple[MCP
     return tuple(servers)
 
 
-def mcp_registry_tool_name(server_name: str, tool_name: str) -> str:
-    """生成不会污染 base tool 命名空间的 MCP registry 名。
-
-    `mcp__server__tool` 前缀让模型和审计日志能一眼区分外部能力；MCP tools 仍需
-    显式注册，绝不会因为导入 `agent.tools` 进入 base/default registry。
-    """
-
-    return f"mcp__{_safe_token(server_name)}__{_safe_token(tool_name)}"
-
-
-def _safe_token(value: str) -> str:
-    token = re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_").lower()
-    if not token:
-        raise ValueError("MCP registry token 不能为空")
-    return token
-
-
 def register_mcp_tools(
     servers: Sequence[MCPServerConfig],
     client: MCPClient,
+    *,
+    server_allowlist: frozenset[str] | None = None,
+    dry_run: bool = True,
+    _discovery_stats: dict[str, int] | None = None,
 ) -> tuple[str, ...]:
     """显式把 enabled MCP tools 注册成本地 optional registry tools。
 
-    这是 MCP client 和 tool_registry 的唯一连接点：client 负责 list/call，registry
-    负责模型可见 schema、allowed tools 和 confirmation policy。MCP client 不写
-    checkpoint、不参与 runtime transition，也不绕过 HITL；所有注册的 MCP tools
-    默认 `confirmation="always"`。
-    """
+    中文学习边界：
+    这是 MCP client 和 tool_registry 的唯一连接点。在注册前必须经过两层
+    policy gate —— server 策略评估和 tool 策略评估。只有通过策略检查的
+    server + tool 才能进入 TOOL_REGISTRY。
 
+    policy gate 流程（对有 enabled 的 server）：
+    1. evaluate_server_policy → blocked？→ audit + skip
+    2. client.list_tools → 获取 raw descriptors
+    3. evaluate_tool_policy（逐 tool）→ blocked？→ audit + skip
+    4. allowed tool：使用 sanitized_description 注册 + audit
+
+    所有 MCP tools 默认 confirmation="always"、risk_level="high"。
+    raw descriptor 不进入 model-visible description。
+
+    注意：MCP client 不写 checkpoint、不参与 runtime transition，
+    也不绕过 HITL。
+    """
+    from agent.mcp_policy import evaluate_server_policy, evaluate_tool_policy
+    from agent.mcp_audit import (
+        emit_mcp_server_blocked,
+        emit_mcp_server_discovered,
+        emit_mcp_tools_listed,
+        emit_mcp_tool_registered,
+        emit_mcp_tool_blocked,
+    )
+
+    allowlist = server_allowlist or frozenset()
     registered: list[str] = []
+    _total_discovered = 0
+    _total_blocked = 0
+
     for server in servers:
         if not server.enabled:
             continue
-        for descriptor in client.list_tools(server):
+
+        # 第一层：server policy gate
+        server_result = evaluate_server_policy(
+            server,
+            server_allowlist=allowlist if allowlist else None,
+            dry_run=dry_run,
+        )
+        if server_result.decision == "blocked":
+            emit_mcp_server_blocked(
+                server.name,
+                reason=server_result.reason,
+            )
+            continue
+        emit_mcp_server_discovered(server.name)
+
+        # 第二层：list_tools → tool policy gate
+        descriptors = client.list_tools(server)
+        _total_discovered += len(descriptors)
+        emit_mcp_tools_listed(server.name, tool_count=len(descriptors))
+
+        for descriptor in descriptors:
             if descriptor.server_name != server.name:
                 raise ValueError(
-                    f"MCP tool '{descriptor.name}' 属于 server '{descriptor.server_name}'，"
-                    f"不能注册到 '{server.name}'"
+                    f"MCP tool '{descriptor.name}' 属于 server "
+                    f"'{descriptor.server_name}'，不能注册到 '{server.name}'"
                 )
-            registry_name = mcp_registry_tool_name(server.name, descriptor.name)
+
+            tool_result = evaluate_tool_policy(
+                server,
+                descriptor,
+                server_decision=server_result.decision,
+            )
+
+            if tool_result.decision == "blocked":
+                _total_blocked += 1
+                emit_mcp_tool_blocked(
+                    server.name,
+                    descriptor.name,
+                    reason=tool_result.reason,
+                )
+                continue
+
+            # 通过 policy gate：使用 sanitized description 注册
+            registry_name = mcp_registry_tool_name(
+                server.name, descriptor.name
+            )
             if registry_name in TOOL_REGISTRY:
-                raise ValueError(f"MCP tool registry name 已存在: {registry_name}")
+                raise ValueError(
+                    f"MCP tool registry name 已存在: {registry_name}"
+                )
 
             def _call_mcp_tool(
                 _server: MCPServerConfig = server,
                 _descriptor: MCPToolDescriptor = descriptor,
                 **tool_input: Any,
             ) -> str:
-                result = client.call_tool(_server, _descriptor.name, tool_input)
+                result = client.call_tool(
+                    _server, _descriptor.name, tool_input
+                )
                 return result.to_legacy_tool_result(
                     server_name=_server.name,
                     tool_name=_descriptor.name,
@@ -276,12 +268,18 @@ def register_mcp_tools(
 
             register_tool(
                 name=registry_name,
-                description=f"[MCP:{server.name}] {descriptor.description}",
+                description=tool_result.sanitized_description,
                 parameters=descriptor.parameters(),
                 confirmation="always",
                 capability="mcp_tool",
-                risk_level="high",
+                risk_level=tool_result.assigned_risk,
                 output_policy="bounded_text",
             )(_call_mcp_tool)
             registered.append(registry_name)
+            emit_mcp_tool_registered(server.name, descriptor.name)
+
+    if _discovery_stats is not None:
+        _discovery_stats["discovered"] = _total_discovered
+        _discovery_stats["blocked"] = _total_blocked
+        _discovery_stats["registered"] = len(registered)
     return tuple(registered)

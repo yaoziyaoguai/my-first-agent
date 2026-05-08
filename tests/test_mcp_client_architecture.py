@@ -149,7 +149,10 @@ def test_explicit_mcp_tool_registration_uses_confirmation_and_legacy_result_cont
         results_by_call={("demo", "echo"): MCPCallResult(content={"ok": True})},
     )
 
-    registered = register_mcp_tools([server], client)
+    registered = register_mcp_tools(
+        [server], client,
+        server_allowlist=frozenset({"demo"}),
+    )
 
     try:
         assert registered == ("mcp__demo__echo",)
@@ -187,7 +190,10 @@ def test_disabled_mcp_server_does_not_register_tools() -> None:
         }
     )
 
-    assert register_mcp_tools([disabled_server], client) == ()
+    assert register_mcp_tools(
+        [disabled_server], client,
+        server_allowlist=frozenset({"disabled_demo"}),
+    ) == ()
     assert client.calls == []
 
 
@@ -241,7 +247,10 @@ def test_mcp_architecture_seam_does_not_import_runtime_or_real_transport() -> No
     agent_imports = _agent_imports(mcp_path)
     module_imports = _module_imports(mcp_path)
 
-    assert agent_imports == {"agent.tool_registry"}
+    # mcp_policy / mcp_audit / mcp_models 是 MCP 层内部模块，不是 runtime 层，
+    # 它们在 register_mcp_tools 内通过懒 import 使用，不倒灌 runtime。
+    # mcp_models 提供共享数据类，打破 mcp ↔ mcp_policy 循环导入。
+    assert agent_imports == {"agent.tool_registry", "agent.mcp_policy", "agent.mcp_audit", "agent.mcp_models"}
     assert {
         "agent.core",
         "agent.tool_executor",

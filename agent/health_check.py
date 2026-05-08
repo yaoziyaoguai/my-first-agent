@@ -23,6 +23,12 @@ import subprocess
 from pathlib import Path
 
 from agent.logger import log_event
+# 中文学习边界：health check 需要检查工具注册表的完整性（tool_registry_integrity /
+# tool_risk_distribution），必须在模块加载时显式触发 agent.tools 的导入以完成
+# @register_tool 装饰器注册。不把这个 import 藏在 check 函数内部，是为了让副作用
+# （工具注册）在 health check 入口处显式可见，而不是隐藏在个别函数的执行路径中。
+# 这不会改变 tool_registry 的注册机制，也不修改任何 agent/tools/*.py。
+import agent.tools  # noqa: F401  触发所有 @register_tool 装饰器
 from config import PROJECT_DIR
 
 
@@ -234,6 +240,250 @@ def check_session_accumulation():
     }
 
 
+def check_tool_registry_integrity():
+    """检查所有注册工具是否具有完整的治理 metadata。
+
+    每个工具应包含 name / description / capability / risk_level / output_policy /
+    input_schema。缺失项可能导致工具无法被正确审计或确认策略不完整。
+    元工具（meta_tool=True）豁免 output_policy 检查。
+    """
+    from agent.tool_registry import TOOL_REGISTRY
+
+    if not TOOL_REGISTRY:
+        return {
+            "status": "error",
+            "current_value": "0 个已注册工具",
+            "path": "agent/tools/ + agent/tool_registry.py",
+            "risk": "工具注册表为空——Agent 没有任何可执行能力。",
+            "action": "检查 agent/tools/__init__.py 是否正确导入所有工具模块",
+            "message": "工具注册表为空",
+        }
+
+    required_fields = ("name", "description", "parameters", "capability", "risk_level", "output_policy")
+    issues: list[str] = []
+    meta_tool_count = 0
+    for name, info in TOOL_REGISTRY.items():
+        if info.get("meta_tool"):
+            meta_tool_count += 1
+        missing = [f for f in required_fields if not info.get(f)]
+        if missing:
+            issues.append(f"工具 '{name}' 缺少字段: {missing}")
+
+    total = len(TOOL_REGISTRY)
+    business_tools = total - meta_tool_count
+
+    if issues:
+        return {
+            "status": "error",
+            "current_value": f"{total} 工具（{meta_tool_count} 元工具），{len(issues)} 个有缺失",
+            "path": "agent/tool_registry.py",
+            "risk": "工具 metadata 缺失会导致审计不完整、策略评估失效。",
+            "action": f"检查以下工具: {', '.join(issues[:3])}",
+            "message": f"工具 registry 有 {len(issues)} 处 metadata 缺失",
+            "issues": issues,
+        }
+    return {
+        "status": "pass",
+        "current_value": f"{total} 工具（{business_tools} 业务 + {meta_tool_count} 元工具），metadata 完整",
+        "path": "agent/tool_registry.py",
+        "risk": "无",
+        "action": "无需操作",
+        "message": f"工具 registry 正常：{total} 工具",
+        "tool_count": total,
+        "business_tools": business_tools,
+        "meta_tools": meta_tool_count,
+    }
+
+
+def check_tool_risk_distribution():
+    """检查工具风险等级分布，标记异常集中。
+
+    如果所有工具都是 high risk，说明 risk 赋值过于保守或缺失细粒度分类。
+    如果所有工具都是 low risk，说明可能存在风险低估。
+    """
+    from agent.tool_registry import get_tool_specs
+
+    specs = get_tool_specs()
+    if not specs:
+        return {
+            "status": "skip",
+            "current_value": "无工具",
+            "path": "agent/tool_registry.py",
+            "risk": "无",
+            "action": "无需操作",
+            "message": "无工具，跳过风险分布检查",
+        }
+
+    risk_counts: dict[str, int] = {}
+    capability_counts: dict[str, int] = {}
+    for spec in specs:
+        risk = spec.get("risk_level", "unknown")
+        risk_counts[risk] = risk_counts.get(risk, 0) + 1
+        cap = spec.get("capability", "unknown")
+        capability_counts[cap] = capability_counts.get(cap, 0) + 1
+
+    high_count = risk_counts.get("high", 0)
+    total = len(specs)
+    high_ratio = high_count / total if total > 0 else 0
+
+    warnings: list[str] = []
+    if high_ratio > 0.8 and total > 2:
+        warnings.append(
+            f"{high_count}/{total} 工具标记为 high risk（{high_ratio:.0%}），"
+            "如果大部分是只读或低风险操作，建议细化 risk 赋值。"
+        )
+    if "unknown" in risk_counts:
+        warnings.append(
+            f"{risk_counts['unknown']} 个工具的 risk_level 未知，应补齐。"
+        )
+
+    status = "warn" if warnings else "pass"
+    return {
+        "status": status,
+        "current_value": (
+            f"risk 分布: {', '.join(f'{k}:{v}' for k, v in sorted(risk_counts.items()))}; "
+            f"capability: {', '.join(f'{k}:{v}' for k, v in sorted(capability_counts.items()))}"
+        ),
+        "path": "agent/tool_registry.py",
+        "risk": "; ".join(warnings) if warnings else "无",
+        "action": "检查高 risk 工具是否确实需要高 risk；细化工具 capability 分类" if warnings else "无需操作",
+        "message": "工具风险分布正常" if status == "pass" else f"工具风险分布需关注: {'; '.join(warnings)}",
+        "risk_counts": risk_counts,
+        "capability_counts": capability_counts,
+        "total_tools": total,
+    }
+
+
+def check_mcp_config_readiness():
+    """检查 MCP 体系的安全接入选型状态。
+
+    当前阶段默认不启用 MCP。本检查验证 MCP 模块可用性、policy/sanitizer/audit
+    核心函数可调用性、bridge 状态和 registry 中 MCP tools 的 metadata。
+    不启动 MCP server，不执行 tools/call。
+    """
+    findings: list[str] = []
+    smoke_results: dict[str, str] = {}
+
+    # 检查核心 MCP 模块是否存在
+    for mod_name in ("agent.mcp", "agent.mcp_policy", "agent.mcp_audit",
+                     "agent.mcp_sanitizer", "agent.mcp_models"):
+        try:
+            __import__(mod_name)
+            smoke_results[mod_name] = "ok"
+        except ImportError:
+            findings.append(f"{mod_name} 不可用")
+            smoke_results[mod_name] = "missing"
+
+    if findings:
+        return {
+            "status": "error",
+            "current_value": f"{len(findings)} 个 MCP 模块不可用",
+            "path": "agent/mcp*.py",
+            "risk": "MCP 安全体系不完整，无法安全接入外部工具。",
+            "action": f"修复缺失模块: {', '.join(findings)}",
+            "message": f"MCP 模块缺失: {', '.join(findings)}",
+            "missing_modules": findings,
+            "smoke_results": smoke_results,
+        }
+
+    # policy gate smoke: 用 fake config 验证 evaluate_server_policy 可调用
+    try:
+        from agent.mcp_models import MCPServerConfig
+        from agent.mcp_policy import evaluate_server_policy
+
+        fake_server = MCPServerConfig(name="smoke_test", command="echo", enabled=True)
+        result = evaluate_server_policy(
+            fake_server,
+            server_allowlist=frozenset(),
+        )
+        if result.decision == "blocked":
+            smoke_results["policy_gate"] = "ok"
+        else:
+            findings.append("policy gate smoke: 空 allowlist 未返回 blocked")
+            smoke_results["policy_gate"] = "unexpected"
+    except Exception as e:
+        findings.append(f"policy gate smoke 异常: {e}")
+        smoke_results["policy_gate"] = "error"
+
+    # sanitizer smoke: 验证 sanitize_description 可调用且返回带前缀的结果
+    try:
+        from agent.mcp_sanitizer import sanitize_description
+
+        sanitized = sanitize_description("test tool", server_name="smoke")
+        if "[MCP:smoke]" in sanitized:
+            smoke_results["sanitizer"] = "ok"
+        else:
+            findings.append("sanitizer smoke: 描述缺少来源标记")
+            smoke_results["sanitizer"] = "missing_prefix"
+    except Exception as e:
+        findings.append(f"sanitizer smoke 异常: {e}")
+        smoke_results["sanitizer"] = "error"
+
+    # audit emitter smoke: 验证 MCP audit 函数存在且可调用
+    try:
+        from agent.mcp_audit import emit_mcp_server_discovered
+
+        event = emit_mcp_server_discovered("smoke_srv")
+        if event.server_name == "smoke_srv":
+            smoke_results["audit_emitter"] = "ok"
+        else:
+            smoke_results["audit_emitter"] = "unexpected"
+    except Exception as e:
+        findings.append(f"audit emitter smoke 异常: {e}")
+        smoke_results["audit_emitter"] = "error"
+
+    # registry audit: 检查 TOOL_REGISTRY 中 MCP tools 的 metadata 完整性
+    try:
+        from agent.tool_registry import TOOL_REGISTRY
+
+        mcp_tools = {
+            name: info
+            for name, info in TOOL_REGISTRY.items()
+            if info.get("capability") == "mcp_tool"
+        }
+        mcp_missing_prefix = [
+            name
+            for name, info in mcp_tools.items()
+            if "[MCP:" not in info.get("description", "")
+        ]
+        if mcp_missing_prefix:
+            findings.append(
+                f"{len(mcp_missing_prefix)} 个 MCP tools 缺少来源标记"
+            )
+        smoke_results["registry_mcp_tools"] = str(len(mcp_tools))
+    except Exception:
+        smoke_results["registry_mcp_tools"] = "error"
+
+    # bridge mode detection
+    try:
+        import os
+        bridge_enabled = os.getenv("MY_FIRST_AGENT_MCP_ENABLE", "")
+        smoke_results["bridge_enabled"] = (
+            "yes" if bridge_enabled.strip() in ("1", "true", "yes")
+            else "no"
+        )
+    except Exception:
+        smoke_results["bridge_enabled"] = "unknown"
+
+    status = "warn" if findings else "pass"
+    return {
+        "status": status,
+        "current_value": (
+            "MCP 安全体系就绪（policy gate + audit + sanitizer + bridge readiness）。"
+            "真实 MCP server 接入默认禁用，需显式 allowlist。"
+        ),
+        "path": "agent/mcp*.py + agent/mcp_bridge.py",
+        "risk": "; ".join(findings) if findings else "无",
+        "action": (
+            "如需启用 MCP: 设置 MY_FIRST_AGENT_MCP_ENABLE=1 并提供 allowlist。"
+            "当前只支持 stdio + dry-run 模式。"
+        ),
+        "message": "MCP 安全体系就绪" if status == "pass" else f"MCP 有 {len(findings)} 个关注项",
+        "smoke_results": smoke_results,
+        "findings": findings,
+    }
+
+
 def collect_health_results():
     """运行所有健康检查并写入 log_event，但**不打印**任何东西。
 
@@ -248,6 +498,9 @@ def collect_health_results():
         "backup_accumulation": check_backup_accumulation,
         "log_size": check_log_size,
         "session_accumulation": check_session_accumulation,
+        "tool_registry_integrity": check_tool_registry_integrity,
+        "tool_risk_distribution": check_tool_risk_distribution,
+        "mcp_config_readiness": check_mcp_config_readiness,
     }
     results = {name: fn() for name, fn in checks.items()}
     log_event("health_check", results)

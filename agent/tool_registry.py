@@ -1,3 +1,5 @@
+from typing import Any
+
 TOOL_REGISTRY = {}
 
 # Tooling Foundation 内部治理词表。它们不会暴露给模型，只用于 runtime /
@@ -95,6 +97,11 @@ def is_meta_tool(name: str) -> bool:
 
 
 def get_tool_definitions():
+    """返回完整工具注册表的模型可见 schema（无过滤）。
+
+    这是 registry introspection API，用于审计和测试。
+    模型调用应使用 get_model_visible_tools() 以控制上下文预算。
+    """
     definitions = []
     for name, info in TOOL_REGISTRY.items():
         definitions.append({
@@ -103,6 +110,65 @@ def get_tool_definitions():
             "input_schema": _input_schema(info),
         })
     return definitions
+
+
+def get_model_visible_tools(
+    *,
+    max_total: int = 30,
+    max_mcp_tools: int = 5,
+    include_capabilities: frozenset[str] | None = None,
+    exclude_capabilities: frozenset[str] | None = None,
+    explicit_allowlist: frozenset[str] | None = None,
+) -> list[dict[str, Any]]:
+    """返回受控的模型可见工具定义。
+
+    中文学习边界：
+    与 get_tool_definitions()（完整 introspection API）不同，本函数专用于
+    model call 的 bounded tool list。它通过硬限制防止 MCP tools 无控制地
+    侵占模型上下文，同时保证 sanitized description 被使用，raw descriptor
+    不会出现在 model-visible tools 中。
+
+    参数：
+        max_total: 模型可见工具的最大总数（硬限制）
+        max_mcp_tools: MCP tools 的最大数量（硬限制，防止上下文膨胀）
+        include_capabilities: 如果非 None，只包含这些 capability 的工具
+        exclude_capabilities: 如果非 None，排除这些 capability 的工具
+        explicit_allowlist: 如果非 None，只包含此集合中的工具名
+    """
+    tools: list[dict[str, Any]] = []
+    mcp_count = 0
+
+    for name, info in TOOL_REGISTRY.items():
+        # explicit allowlist 优先
+        if explicit_allowlist is not None and name not in explicit_allowlist:
+            continue
+
+        cap = info.get("capability", "")
+        is_mcp = cap == "mcp_tool"
+
+        # MCP tools 硬限制
+        if is_mcp:
+            if mcp_count >= max_mcp_tools:
+                continue
+            mcp_count += 1
+
+        # capability filter
+        if include_capabilities is not None and cap not in include_capabilities:
+            continue
+        if exclude_capabilities is not None and cap in exclude_capabilities:
+            continue
+
+        tools.append({
+            "name": info["name"],
+            "description": info["description"],
+            "input_schema": _input_schema(info),
+        })
+
+        # max_total 硬限制（在所有 filter 之后）
+        if len(tools) >= max_total:
+            break
+
+    return tools
 
 
 def get_tool_specs():

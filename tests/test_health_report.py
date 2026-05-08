@@ -39,13 +39,17 @@ def test_each_check_returns_required_schema(fn):
     assert result["status"] in ALLOWED_STATUSES
 
 
-def test_collect_health_results_includes_all_four_checks():
+def test_collect_health_results_includes_all_baseline_checks():
+    """健康检查应包含环境维护 + 工具 + MCP 共 7 项检查。"""
     results = health_check.collect_health_results()
     assert set(results.keys()) == {
         "workspace_lint",
         "backup_accumulation",
         "log_size",
         "session_accumulation",
+        "tool_registry_integrity",
+        "tool_risk_distribution",
+        "mcp_config_readiness",
     }
 
 

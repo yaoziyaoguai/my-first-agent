@@ -22,6 +22,7 @@ from agent.display_events import (
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent import tool_result_contract
 from agent.runtime_trace_emitter import emit_tool_result_trace_event
+from agent.tool_audit import emit_tool_audit_event
 from agent.tool_registry import execute_tool, is_meta_tool
 from agent.tool_registry import needs_tool_confirmation
 
@@ -266,6 +267,14 @@ def execute_single_tool(
             # 这里只把“已跳过”投影给 UI，避免继续依赖 stdout capture。不要把完整
             # checkpoint/debug/Anthropic messages 混进这个 RuntimeEvent。
             emit(control_message(f"[系统] 工具 {tool_name} 已执行过，跳过执行"))
+        emit_tool_audit_event(
+            event_type="tool_skipped",
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            step_index=state.task.current_step_index,
+            status="idempotent_cache",
+            safe_preview=str(cached)[:500],
+        )
         if not has_tool_result(messages, tool_use_id):
             append_tool_result(messages, tool_use_id, cached)
         return None
@@ -301,6 +310,15 @@ def execute_single_tool(
         # 不会暴露任何文件内容（_describe_policy_denial 只看路径名）。
         first_line = result.splitlines()[0] if result else ""
         denial_summary = first_line.removeprefix("[安全策略] ").strip()
+        # 工具审计：记录策略拒绝事件，safe_preview 只保留拒绝原因首行
+        emit_tool_audit_event(
+            event_type="tool_blocked",
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            step_index=state.task.current_step_index,
+            status="blocked_by_policy",
+            safe_preview=denial_summary[:500],
+        )
         emit_display_event(
             turn_state.on_display_event,
             build_tool_status_event(
@@ -322,6 +340,14 @@ def execute_single_tool(
         }
         state.task.status = "awaiting_tool_confirmation"
         save_checkpoint(state)
+        # 工具审计：记录需要用户确认的工具调用
+        emit_tool_audit_event(
+            event_type="tool_requires_confirmation",
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            step_index=state.task.current_step_index,
+            status="awaiting_confirmation",
+        )
         # 工具确认是 Runtime 的 control plane 状态；DisplayEvent 只是 UI 投影。
         # 不把这段预览写进 conversation.messages，避免模型在下一轮把 UI 文案当事实。
         emit_display_event(
@@ -343,42 +369,49 @@ def execute_single_tool(
         ),
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
-    status, display_event_type, status_text = _classify_tool_outcome(result)
-    transition = _tool_outcome_transition(status, from_pending_tool=False)
-    failure_transition = _tool_failure_transition(status, from_pending_tool=False)
-    if status in ("failed", "rejected_by_check"):
-        # 失败 / 拒绝都不应让模型在下一轮重试同一调用；提示语言一致
-        # （rejected 通常是路径/内容触犯安全检查，failure 是运行报错）。
+    # 中文学习边界：使用 classify_tool_result 获取结构化 ToolResultEnvelope，
+    # 替代旧 legacy tuple _classify_tool_outcome。envelope 提供统一的 status /
+    # error_type / safe_preview / content_length 字段，避免字符串解构散落。
+    # 旧 _classify_tool_outcome 保留兼容测试，但 executor 主路径不再依赖它。
+    envelope = tool_result_contract.classify_tool_result(result)
+    transition = _tool_outcome_transition(envelope.status, from_pending_tool=False)
+    failure_transition = _tool_failure_transition(envelope.status, from_pending_tool=False)
+    if envelope.status in ("failed", "rejected_by_check"):
         result = mask_user_visible_secrets(result)
-        result = (
-            f"{result}\n\n"
-            f"{_failure_retry_hint(tool_name, tool_input)}"
-        )
+        # _failure_retry_hint 提供面向模型的行动建议，帮助模型理解应该换用
+        # 其他来源而非盲目重试同一调用。这里只注入行为提示，不注入内部
+        # error_type taxonomy —— error_type 只是结构化审计字段，不应以
+        # 裸字段形式进入 model-visible tool_result content。
+        result = f"{result}\n\n{_failure_retry_hint(tool_name, tool_input)}"
 
     if transition and transition.clear_pending_tool:
         state.task.pending_tool = None
-    # 脱敏只在真实 failure 路径生效；success / rejected_by_check 的入参
-    # 由用户确认 / 安全策略层面已经把关，这里不做额外 transformation 以
-    # 避免 success 的 durable log 里出现"被本轮 slice 顺手改写"的内容。
     log_input = _mask_failure_value(tool_input) if failure_transition else tool_input
 
-    state.task.tool_execution_log[tool_use_id] = {
+    # 构建 tool_execution_log 条目：error_type 作为独立结构化字段记录，
+    # 不拼接进 model-visible result 字符串，避免内部 taxonomy 污染模型上下文。
+    log_entry: dict[str, Any] = {
         "tool": tool_name,
         "input": log_input,
         "result": result,
-        "status": status,
+        "status": envelope.status,
         "step_index": state.task.current_step_index,
     }
+    if envelope.error_type:
+        log_entry["error_type"] = envelope.error_type
+    state.task.tool_execution_log[tool_use_id] = log_entry
 
     turn_state.round_tool_traces.append({
         "tool_use_id": tool_use_id,
         "tool": tool_name,
         "input": log_input,
-        "status": status,
+        "status": envelope.status,
         "result": result,
     })
 
     turn_context[tool_use_id] = result
+    # append_tool_result 写入的 result 不再包含裸 error_type taxonomy；
+    # error_type 仅在 display event / audit event / tool_execution_log 中保留
     append_tool_result(messages, tool_use_id, result)
     emit_tool_result_trace_event(
         turn_state,
@@ -387,19 +420,34 @@ def execute_single_tool(
         tool_result=result,
         step_index=state.task.current_step_index,
     )
+    event_type = transition.display_events[0] if transition else envelope.display_event_type
+    display_text = envelope.status_text
+    if envelope.error_type and envelope.status != "executed":
+        display_text = f"{envelope.status_text}（{envelope.error_type}）"
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type=transition.display_events[0] if transition else display_event_type,
+            event_type=event_type,
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text=status_text,
+            status_text=display_text,
         ),
+    )
+    # 工具审计：执行完成后发射成功/失败审计事件，safe_preview 来自 envelope
+    audit_event_type = "tool_failed" if envelope.status in ("failed", "rejected_by_check") else "tool_executed"
+    emit_tool_audit_event(
+        event_type=audit_event_type,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+        step_index=state.task.current_step_index,
+        status=envelope.status,
+        error_type=envelope.error_type,
+        safe_preview=envelope.safe_preview,
+        content_length=envelope.content_length,
     )
     if transition is None or transition.should_checkpoint:
         save_checkpoint(state)
     return None
-
 
 def execute_pending_tool(
     *,
@@ -432,31 +480,35 @@ def execute_pending_tool(
         ),
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)
-    status, display_event_type, status_text = _classify_tool_outcome(result)
-    transition = _tool_outcome_transition(status, from_pending_tool=True)
-    failure_transition = _tool_failure_transition(status, from_pending_tool=True)
-    if status in ("failed", "rejected_by_check"):
+    # 中文学习边界：与 execute_single_tool 一致的 ToolResultEnvelope 接入，
+    # 确保 pending tool 确认执行路径也走结构化 result 表示。
+    envelope = tool_result_contract.classify_tool_result(result)
+    transition = _tool_outcome_transition(envelope.status, from_pending_tool=True)
+    failure_transition = _tool_failure_transition(envelope.status, from_pending_tool=True)
+    if envelope.status in ("failed", "rejected_by_check"):
         result = mask_user_visible_secrets(result)
-        result = (
-            f"{result}\n\n"
-            f"{_failure_retry_hint(tool_name, tool_input)}"
-        )
+        # error_type 不进入 model-visible tool_result content；
+        # 只保留面向模型的行为提示，error_type 通过结构化字段记录
+        result = f"{result}\n\n{_failure_retry_hint(tool_name, tool_input)}"
 
     log_input = _mask_failure_value(tool_input) if failure_transition else tool_input
 
-    state.task.tool_execution_log[tool_use_id] = {
+    log_entry: dict[str, Any] = {
         "tool": tool_name,
         "input": log_input,
         "result": result,
-        "status": status,
+        "status": envelope.status,
         "step_index": state.task.current_step_index,
     }
+    if envelope.error_type:
+        log_entry["error_type"] = envelope.error_type
+    state.task.tool_execution_log[tool_use_id] = log_entry
 
     turn_state.round_tool_traces.append({
         "tool_use_id": tool_use_id,
         "tool": tool_name,
         "input": log_input,
-        "status": status,
+        "status": envelope.status,
         "result": result,
     })
 
@@ -468,13 +520,29 @@ def execute_pending_tool(
         tool_result=result,
         step_index=state.task.current_step_index,
     )
+    event_type = transition.display_events[0] if transition else envelope.display_event_type
+    display_text = envelope.status_text
+    if envelope.error_type and envelope.status != "executed":
+        display_text = f"{envelope.status_text}（{envelope.error_type}）"
+    # 工具审计：pending tool 确认执行完成后也发射审计事件，error_type 在此保留
+    audit_event_type = "tool_failed" if envelope.status in ("failed", "rejected_by_check") else "tool_executed"
+    emit_tool_audit_event(
+        event_type=audit_event_type,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+        step_index=state.task.current_step_index,
+        status=envelope.status,
+        error_type=envelope.error_type,
+        safe_preview=envelope.safe_preview,
+        content_length=envelope.content_length,
+    )
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(
-            event_type=transition.display_events[0] if transition else display_event_type,
+            event_type=event_type,
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text=status_text,
+            status_text=display_text,
         ),
     )
     return result

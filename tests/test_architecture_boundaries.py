@@ -224,6 +224,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.memory",
         "agent.planner",
         "agent.prompt_builder",
+        "agent.provider.factory",
         "agent.response_handlers",
         "agent.runtime_events",
         "agent.runtime_observer",

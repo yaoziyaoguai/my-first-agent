@@ -132,7 +132,7 @@ def test_roadmap_no_longer_lists_historical_xfails_as_open_backlog() -> None:
     roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
 
     assert "历史 XFAIL backlog 已收口" in roadmap
-    assert "safe local roadmap closure final review" in roadmap
+    assert "Tool System + MCP Safety Foundation Complete" in roadmap
     assert "真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计" in roadmap
     stale_phrases = (
         "known XFAIL 收口",

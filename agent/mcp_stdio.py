@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 from json import JSONDecodeError
+import os
 import subprocess
 from typing import Any, Mapping, Sequence
 
-from agent.mcp import MCPCallResult, MCPServerConfig, MCPToolDescriptor
+from agent.mcp import MCPCallResult
+from agent.mcp_models import MCPServerConfig, MCPToolDescriptor
 
 
 class MCPTransportError(RuntimeError):
@@ -104,6 +106,15 @@ class StdioMCPClient:
             "method": method,
             "params": dict(params),
         }
+        # 构造安全但可用的子进程环境：
+        # - 不继承父进程的完整 env（避免泄漏 API key 等真实环境变量）
+        # - 但继承 PATH（npx/node 等命令需要）
+        # - server.env 覆盖上述继承值
+        child_env: dict[str, str] = {}
+        parent_path = os.environ.get("PATH", "")
+        if parent_path:
+            child_env["PATH"] = parent_path
+        child_env.update(server.env)
         process = subprocess.Popen(
             [server.command, *server.args],
             stdin=subprocess.PIPE,
@@ -111,7 +122,7 @@ class StdioMCPClient:
             stderr=subprocess.PIPE,
             text=True,
             shell=False,
-            env=dict(server.env),
+            env=child_env,
         )
         try:
             stdout, stderr = process.communicate(

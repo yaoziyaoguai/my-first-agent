@@ -96,6 +96,7 @@ class LoopContext:
     client: Any = field(repr=False, compare=False, hash=False)
     model_name: str
     max_loop_iterations: int
+    model_provider: Any | None = field(default=None, repr=False, compare=False, hash=False)
 
     def __post_init__(self) -> None:
         """构造期最小契约校验。

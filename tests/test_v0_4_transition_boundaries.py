@@ -2655,7 +2655,12 @@ def test_loop_context_module_defines_frozen_dataclass_with_expected_fields():
     assert LoopContext.__dataclass_params__.frozen is True
 
     field_names = {f.name for f in dataclasses.fields(LoopContext)}
-    assert field_names == {"client", "model_name", "max_loop_iterations"}, (
+    assert field_names == {
+        "client",
+        "model_name",
+        "max_loop_iterations",
+        "model_provider",
+    }, (
         f"LoopContext 字段集合漂移：{field_names}；"
         "新增字段必须先评估是否属于 runtime dependency"
     )

@@ -1,12 +1,18 @@
 # my-first-agent
 
 `my-first-agent` is a learning-oriented Agent Runtime prototype. The current
-HEAD is **post-v0.8.0 safe-local / readiness / RFC-gated development**:
-local MCP config management, safe-local Skill/Subagent scaffolds, local trace
-and ToolResult foundations, and optional trace-sink RFC slices are in place.
-Release/tag work, real MCP integration, and broad runtime/ToolResult migration
-remain authorization-gated readiness/design tracks, not production-complete
-features.
+HEAD is **Controlled MCP Bridge Foundation Complete**:
+tool system governance (structured ToolResult, lifecycle audit, health checks),
+MCP safety foundation (policy-gated registration, descriptor sanitization,
+adversarial scanning, audit trail, boundary isolation), MCP bridge thin adapter
+(disabled/discovery/registration modes), tool exposure filter with hard limits,
+real filesystem MCP server controlled flight verified, and read-only MCP
+tools/call validated with no secret leakage.
+
+**Free-form autonomous MCP AgentLoop, arbitrary MCP server support, destructive
+tools/call, and high-permission MCP (GitHub/Slack/Notion/DB) remain
+authorization-gated.** The MCP bridge defaults to disabled; explicit opt-in
+is required via `MY_FIRST_AGENT_MCP_ENABLE=1`.
 
 It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, not a full MCP implementation, and not a Skill or sub-agent platform.
 
@@ -96,6 +102,39 @@ The four-class tool outcome contract from v0.2
 write); "user_rejected" means **you** chose not to approve a tool call
 when prompted.
 
+### AgentLoop LLM provider adapters
+
+AgentLoop now has a provider-neutral adapter foundation:
+
+- `anthropic_native` keeps the existing legacy streaming path in `core.py` and
+  also has a non-streaming wrapper for normalization tests and future migration.
+- `anthropic_compatible` uses the HTTP adapter for custom Anthropic-compatible
+  endpoints such as DashScope, enterprise proxies, or self-hosted gateways.
+- `openai_native` and `openai_compatible` are registered as planned provider
+  types, but they intentionally raise `not implemented` today.
+
+Provider config is read from process environment only. Do not write keys into
+repo files, docs, logs, checkpoints, messages, or audit artifacts.
+
+```bash
+export MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible
+export ANTHROPIC_API_KEY=...
+export ANTHROPIC_BASE_URL=https://your-provider.example
+export ANTHROPIC_MODEL=your-compatible-model
+
+# Optional, defaults shown:
+export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/messages
+export MY_FIRST_AGENT_LLM_AUTH_SCHEME=auto   # auto | bearer | x-api-key
+```
+
+MCP and provider responsibilities stay separate: MCP discovers and registers
+tools through the existing policy gate and exposure filter; the provider adapter
+only sends the model request. `get_model_visible_tools(max_mcp_tools=5)` still
+controls what model-visible tools are included.
+
+See `docs/LLM_PROVIDER_ADAPTER.md` for provider status, error classification,
+and the opt-in real smoke command.
+
 ### Subcommands you should know
 
 ```bash
@@ -157,6 +196,10 @@ and filter by session, event type, or tool name.
 - **"Missing ANTHROPIC_API_KEY" on startup** — the basic CLI shell needs a
   real key to talk to a model. The test suite and the LLM Processing
   `fake` provider do not.
+- **Anthropic-compatible endpoint returns 401/403** — check
+  `MY_FIRST_AGENT_LLM_AUTH_SCHEME`, `MY_FIRST_AGENT_LLM_REQUEST_PATH`, model
+  name, and base URL. Compatible endpoints do not always match the official
+  Anthropic SDK path/auth behavior.
 - **Resume banner says "未发现断点"** — there is no checkpoint to resume
   from. Just type a new task.
 - **Health report shows `warn`** — these are maintenance warnings, not
@@ -176,6 +219,60 @@ For a deeper local-trial walkthrough, see
 `docs/V0_3_LOCAL_TRIAL_CHECKLIST.md`. During the v0.3.2 local trial, record
 findings with `docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md`; v0.4 transition planning
 starts from `docs/V0_4_EVENT_TRANSITION_PREP.md`.
+
+## Tool System & MCP Safety Foundation (current)
+
+The tool system has been hardened with structured governance layers:
+
+- **ToolResultEnvelope** — structured result classification (executed / failed /
+  rejected_by_check) with stable error taxonomy, wired into the real executor
+  path. Legacy string contract remains compatible.
+- **ToolAuditEvent** — lifecycle audit events (executed / failed / blocked /
+  skipped / requires_confirmation) emitted on every real tool execution path,
+  with redacted safe_preview and content_length only (no raw input/output).
+- **Tool/MCP Health Checks** — registry integrity, risk distribution analysis,
+  MCP module readiness are checked by `python main.py health`.
+- **ToolSpec metadata** — capability / risk_level / output_policy / confirmation
+  governance labels on every registered tool, separated from model-visible schema.
+
+The MCP safety foundation supports policy-gated registration:
+
+- **MCP Sanitizer** (`agent/mcp_sanitizer.py`) — adversarial pattern scanning,
+  description truncation, `[MCP:server]` source labelling, unsafe URL filtering.
+- **MCP Policy Gate** (`agent/mcp_policy.py`) — server allowlist enforcement,
+  transport restriction (stdio-only in this stage), tool descriptor policy
+  evaluation before registration.
+- **MCP Audit** (`agent/mcp_audit.py`) — server discovered/blocked,
+  tools listed, tool registered/blocked events with no raw descriptor leakage.
+- **Policy-Gated Registration** (`agent/mcp.py::register_mcp_tools`) —
+  server-level and tool-level policy gates are mandatory before any MCP tool
+  enters the registry. Blocked tools never reach `TOOL_REGISTRY`.
+- **Module Boundary Isolation** — all MCP/tool modules are verified (AST tests)
+  to not import runtime internals (core.py, checkpoint, handlers).
+
+**What is NOT yet supported (authorization-gated):**
+real MCP server connection, real tools/call execution, real stdio dry-run,
+real external provider activation, MCP bridge to runtime main loop.
+
+To inspect the current state:
+```bash
+.venv/bin/python main.py health     # includes tool_registry_integrity,
+                                    # tool_risk_distribution, mcp_config_readiness
+.venv/bin/python -m pytest tests/test_mcp_policy_gate.py tests/test_mcp_registration_policy.py tests/test_mcp_boundary_isolation.py
+```
+
+Default pytest uses deterministic local MCP fixture servers for stdio,
+registration, tool exposure, read-only call, audit, and no-leak coverage. Real
+`npx @modelcontextprotocol/server-filesystem` flight is opt-in because it
+depends on npx/npm registry, proxy, server startup, and MCP handshake:
+
+```bash
+MY_FIRST_AGENT_RUN_REAL_MCP_FLIGHT=1 .venv/bin/python -m pytest tests/test_real_mcp_flight.py -v
+```
+
+An opt-in `tools/list` timeout is an external flight/environment signal, not a
+provider adapter failure and not evidence that MCP policy, sanitizer, or
+registry default coverage failed.
 
 ## Runtime v0.1 Scope
 

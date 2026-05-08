@@ -347,7 +347,10 @@ def test_second_round_mcp_local_fixture_remains_explicit_opt_in(monkeypatch):
 
     initialize_result = client.initialize(server)
     tools = client.list_tools(server)
-    registered = register_mcp_tools([server], client)
+    registered = register_mcp_tools(
+        [server], client,
+        server_allowlist=frozenset({"local_fixture"}),
+    )
     try:
         assert initialize_result["serverInfo"]["name"] == "minimal-local-mcp"
         assert [tool.name for tool in tools] == ["echo"]

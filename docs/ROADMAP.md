@@ -65,7 +65,13 @@ core**。
 
 ## Current Position
 
-> **当前处于 Roadmap Completion Autopilot：safe local roadmap closure final review。**
+> **当前处于 Tool System + MCP Safety Foundation Complete。**
+> 工具体系结构化治理（ToolResultEnvelope executor integration、ToolAuditEvent
+> lifecycle coverage、ToolSpec metadata integrity）和 MCP 安全基础
+> （policy-gated registration、descriptor sanitization、adversarial scan、
+> audit trail、boundary isolation）已阶段性收口。
+> **真实 MCP server activation、真实 tools/call、真实 external provider
+> activation 仍需用户明确授权。**
 > 注意：这不是重开 Web UI / SaaS / LangGraph / real external integration。
 
 - ✅ v0.6.2 TUI MVP 已封版：paste burst / multiline input intent 已落地并有回归测试。
@@ -136,6 +142,18 @@ core**。
 - ✅ Safe-Local Release Readiness 已记录：`docs/SAFE_LOCAL_RELEASE_READINESS.md`
   提供 manual smoke checklist、known limitations、no tag authorization 与 full pytest /
   ruff / diff-check 质量门。
+- ✅ **Tool System + MCP Safety Foundation Complete**: ToolResultEnvelope executor
+	  integration, ToolAuditEvent lifecycle coverage, MCP descriptor sanitization
+	  (adversarial scan), MCP server/tool policy gate, policy-gated registration
+	  (blocked tools never enter TOOL_REGISTRY), MCP audit trail, tool/MCP health
+	  checks, full MCP module boundary isolation (AST tests). Real MCP server
+	  activation / real tools/call still authorization-gated.
+- ✅ **LLM Provider Adapter Foundation + Anthropic-compatible vertical slice**
+  已完成：`agent.provider` 定义 provider-neutral `ToolUseBlock` /
+  `ProviderResponse` / `ModelProvider` / `AgentProviderConfig`，Anthropic native
+  继续保留 legacy streaming path，`anthropic_compatible` 通过 HTTP adapter
+  支持自定义 `base_url` / `request_path` / auth scheme；OpenAI native /
+  compatible 仅注册为明确 not implemented。详见 `docs/LLM_PROVIDER_ADAPTER.md`。
 - ✅ Remaining Roadmap Completion Autopilot 已记录：
   `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
   planning、MCP external integration readiness、runtime trace / ToolResult migration
@@ -150,13 +168,16 @@ core**。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 真实外部激活，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
-> 口径：**Tooling Foundation Milestone / Stage 3 Memory foundation 已完成**；
-> Memory-line Stage 4/5/6 只是 fake/local storage seam + governed snapshot seam
-> + manual UX dogfooding，不是完整长期 memory 产品化。后续若继续，应进入
-> Memory Architecture Final Review 或单独回到
-> MCP CLI Config Management。Memory 不是 RAG Discovery。
-> Retrieval / RAG / vector DB / embedding 只能作为后续 Memory Provider backend
-> 或 Knowledge Access strategy 的候选，不是与 Memory 并列的大 Roadmap 能力。
+> 口径：**Tool System + MCP Safety Foundation Complete**；
+> 工具体系治理（ToolResultEnvelope executor integration、ToolAuditEvent lifecycle、
+> ToolSpec metadata、tool/MCP health checks）和 MCP 安全基础（policy-gated
+> registration、descriptor sanitization、adversarial scan、audit trail、
+> boundary isolation）已阶段性收口。
+> 下一步可选：MCP discovery readiness（thin adapter + discovery validator，
+> 但仍不启动真实 server）、tools explain CLI、output_policy enforcement。
+> 真实 MCP server activation 需要用户明确授权。
+> Memory 不是 RAG Discovery。Retrieval / RAG / vector DB / embedding 只能作为
+> 后续 Memory Provider backend 或 Knowledge Access strategy 的候选。
 
 ---
 
@@ -297,7 +318,7 @@ push 或 tag，除非用户单独选择对应动作。
 
 ---
 
-### Stage 2.5 · Tooling Foundation Milestone ✅**release + dogfooding closure complete**
+### Stage 2.5 · Tooling Foundation + MCP Safety Foundation ✅**controlled bridge foundation complete**
 
 **主题**：先把本地工具体系的边界审计清楚，再考虑 MCP Client / Tool Bridge。
 

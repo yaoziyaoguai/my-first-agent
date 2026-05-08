@@ -32,7 +32,7 @@ from config import (
 )
 from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
-from agent.tool_registry import get_tool_definitions
+from agent.tool_registry import get_model_visible_tools
 from agent.context_builder import (
     build_planning_messages as build_planning_messages_from_state,
     build_execution_messages as build_execution_messages_from_state,
@@ -53,6 +53,7 @@ from agent.response_handlers import (
     handle_max_tokens_response,
     handle_tool_use_response,
 )
+from agent.provider.factory import build_model_provider_from_env
 from agent.runtime_events import ModelOutputKind, classify_model_output
 from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
@@ -204,6 +205,7 @@ def _build_loop_context(
         client=client_obj,
         model_name=model_name,
         max_loop_iterations=max_loop_iterations,
+        model_provider=build_model_provider_from_env(),
     )
 
 
@@ -1150,12 +1152,26 @@ def _call_model(
     request_messages = build_execution_messages_from_state(state)
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
+    provider = getattr(loop_ctx, "model_provider", None)
+    if provider is not None and not getattr(provider, "supports_streaming", False):
+        response = provider.create(
+            system=turn_state.system_prompt,
+            messages=request_messages,
+            tools=get_model_visible_tools(max_mcp_tools=5),
+        )
+        for block in response.content:
+            if getattr(block, "type", None) == "text":
+                text = getattr(block, "text", "")
+                if text and turn_state.on_runtime_event is not None:
+                    turn_state.on_runtime_event(assistant_delta(text))
+        return response
+
     with loop_ctx.client.messages.stream(
         model=loop_ctx.model_name,
         max_tokens=MAX_TOKENS,
         system=turn_state.system_prompt,
         messages=request_messages,
-        tools=get_tool_definitions(),
+        tools=get_model_visible_tools(max_mcp_tools=5),
     ) as stream:
         for event in stream:
             event_type = getattr(event, "type", None)

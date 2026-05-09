@@ -107,6 +107,13 @@ core**。
 - ✅ Memory-line Stage 6 manual UX dogfooding runbook 已完成并发布准备：只记录
   fake/local deterministic runbook、fixtures、expected behavior 与 safety checks，
   不读取真实 sessions/runs/logs，不接 provider/LLM/MCP/runtime。
+- ✅ **Memory Kernel v1 运行时闭环已完成**：`agent/memory_runtime.py` 提供
+  `MemoryRuntime` 高内聚协调器，通过 `MemoryConfirmationAdapter` Protocol 注入确认
+  接缝（`FakeMemoryConfirmationAdapter` 测试用 / `DeferredMemoryConfirmationAdapter`
+  生产用），`core.py` 仅 2 处薄注入（`_memory_runtime` 模块级实例 +
+  `evaluate_user_text` 调用 + `snapshot_for_prompt` → `build_system_prompt`），
+  `MemoryRecord` 已预留 `memory_type`/`source_type`/`approval_status`/`metadata`
+  未来扩展字段；21 个 deterministic 集成测试全部通过。
 - ✅ MCP CLI Config Management safe apply governance 已完成：parser/validator/
   redaction、CLI list/inspect/validate、plan preview、plan-first apply、`--yes`、
   backup、deterministic serialization、redacted diff evidence、safety manifest 都已

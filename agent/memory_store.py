@@ -4,11 +4,19 @@
 MemoryPolicy -> Confirmation UX -> OperationIntent -> AuditSummary 的结果，
 不读取真实 sessions/runs/agent_log，不写真实长期记忆，不接 runtime/checkpoint，
 也不让 prompt_builder 直接读取 store。
+
+Memory Kernel v1 — MemoryRecord 字段说明：
+- ``memory_type``: semantic / episodic / procedural，当前默认 "semantic"。
+- ``source_type``: explicit_user_request / agent_suggested / reflection / imported，
+  当前默认 "explicit_user_request"。
+- ``approval_status``: pending / approved / rejected / edited，当前默认 "approved"
+  （经过 confirmation adapter 后已是 approved）。
+- ``metadata``: 通用扩展 dict，当前默认空。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 from typing import Iterable, Protocol
@@ -52,6 +60,12 @@ class MemoryRecord:
     Record 是 apply_operation_intent 后的 fake/local 结果。这里保留 provenance、
     scope、safety、audit 信息，但不包含真实持久化路径、provider handle 或 runtime
     state。
+
+    Memory Kernel v1 显式字段：
+    - memory_type: 默认 "semantic"，未来可扩展 episodic/procedural。
+    - source_type: 默认 "explicit_user_request"，未来可扩展 agent_suggested 等。
+    - approval_status: 默认 "approved"，记录确认结果。
+    - metadata: 通用扩展 dict。
     """
 
     id: str
@@ -63,6 +77,10 @@ class MemoryRecord:
     created_by_operation: MemoryOperationType
     updated_by_operation: MemoryOperationType
     sensitive_redacted: bool = False
+    memory_type: str = "semantic"
+    source_type: str = "explicit_user_request"
+    approval_status: str = "approved"
+    metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -258,6 +276,18 @@ def _record_from_intent(
     intent: MemoryOperationIntent,
     audit_id: str,
 ) -> MemoryRecord:
+    """从 MemoryOperationIntent 构造 MemoryRecord。
+
+    v1 限制：MemoryOperationIntent 当前不携带 memory_type / source_type /
+    approval_status / metadata。这些字段全部依赖 MemoryRecord 的 Kernel v1 默认值：
+    - memory_type → "semantic"（v1 只支持 explicit semantic retain）
+    - source_type → "explicit_user_request"
+    - approval_status → "approved"（经过 confirmation adapter 后已是 approved）
+    - metadata → {}
+
+    后续 agent_suggested / episodic / procedural / reflection / imported provider
+    需要在 MemoryOperationIntent 中添加对应字段，并在此处传入。
+    """
     return MemoryRecord(
         id=derive_memory_record_id(intent.source_summary),
         content=intent.content_summary,

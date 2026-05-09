@@ -4,15 +4,21 @@
 MemoryRecord、MemoryStore、retrieval、prompt 注入或 provider adapter。
 
 架构边界：
-- Candidate 只是“可能值得记住”的候选，不代表已经保存。
-- Decision 只是“应该如何处理候选”的决策结果，不执行 IO、不写 storage。
+- Candidate 只是"可能值得记住"的候选，不代表已经保存。
+- Decision 只是"应该如何处理候选"的决策结果，不执行 IO、不写 storage。
 - 敏感候选的 retain/update/recall 必须显式要求用户确认；这是 contract-level
   safety invariant，不是完整 MemoryPolicy。
 
 为什么单独成模块：
-`agent.memory` 目前承担 context compression 和静态 memory section，占位语义
+``agent.memory`` 目前承担 context compression 和静态 memory section，占位语义
 已经较重；Slice 1 把纯 contract 放在独立文件，避免把 compression、policy、
 storage、prompt 注入继续堆进同一个模块形成新的巨石。
+
+Memory Kernel v1 — 未来扩展预留：
+- ``MemoryCandidate.metadata`` 可承载 memory_type / source_type 等未来字段，
+  避免每次演进都改 contract schema。当前默认空 dict。
+- 约定 metadata keys（暂不强制）：memory_type (semantic/episodic/procedural),
+  source_type (explicit_user_request/agent_suggested/reflection/imported).
 """
 
 from __future__ import annotations
@@ -24,8 +30,8 @@ from enum import StrEnum
 class MemoryDecisionType(StrEnum):
     """Memory 治理动作词表。
 
-    词表只描述 decision，不描述执行。比如 RETAIN 不是“已经写入”，FORGET 也
-    不是“已经删除”；执行必须留给后续 store/provider/audit slice。
+    词表只描述 decision，不描述执行。比如 RETAIN 不是"已经写入"，FORGET 也
+    不是"已经删除"；执行必须留给后续 store/provider/audit slice。
     """
 
     RETAIN = "retain"
@@ -54,7 +60,7 @@ class MemorySensitivity(StrEnum):
     """候选记忆的敏感度标记。
 
     Slice 1 不做自动分类；调用方必须显式传入敏感度。后续 MemoryPolicy 可以
-    负责分类，本 contract 只保证高敏 decision 不能声明“无需用户确认”。
+    负责分类，本 contract 只保证高敏 decision 不能声明"无需用户确认"。
     """
 
     LOW = "low"
@@ -67,7 +73,7 @@ class MemorySource(StrEnum):
     """候选来源类型。
 
     来源用于 provenance 和审计解释，不代表信任等级。tool_result / external
-    provider 的内容尤其不能因为“有来源”就自动进入长期记忆。
+    provider 的内容尤其不能因为"有来源"就自动进入长期记忆。
     """
 
     USER_INPUT = "user_input"
@@ -91,7 +97,7 @@ CONFIRMATION_REQUIRED_DECISIONS = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class MemoryCandidate:
-    """一条“可能值得记住”的候选事实。
+    """一条"可能值得记住"的候选事实。
 
     Candidate 不包含 status/version/namespace/updated_at 等持久化字段，避免
     在 Slice 1 把候选误当成已保存的 MemoryRecord。它可以来自用户输入、
@@ -110,6 +116,9 @@ class MemoryCandidate:
     confidence: float
     reason: str
     created_at: str | None = None
+    # Memory Kernel v1：预留扩展点，未来 memory_type/source_type 等放这里。
+    # 当前默认空 dict，不破坏现有构造，不影响旧测试。
+    metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """固定最小字段不变量，避免 contract 承载空候选。"""
@@ -150,7 +159,7 @@ class MemoryDecision:
 
         如果候选已经被上游标记为 HIGH/SECRET，那么 retain/update/recall
         不能宣称无需用户确认。这里不判断文本是否敏感，也不决定是否应该 retain；
-        只是防止危险 decision 以“不需确认”的形态流入后续 slice。
+        只是防止危险 decision 以"不需确认"的形态流入后续 slice。
         """
 
         if not self.action.strip():
@@ -177,7 +186,7 @@ class MemorySnapshotItem:
     """一条已批准进入 prompt 视图的 memory item。
 
     SnapshotItem 不是 MemoryRecord：它没有 write/update/delete/status/version，
-    只表示“当前这次 prompt 可以看到的、已被上游批准和过滤后的视图项”。
+    只表示"当前这次 prompt 可以看到的、已被上游批准和过滤后的视图项"。
     """
 
     content: str

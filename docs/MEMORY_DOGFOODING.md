@@ -144,6 +144,37 @@ Use only these fake strings and fake records:
 9. Snapshot rendering: render a fake snapshot and verify source provenance,
    safety filter text, and no retrieval/policy behavior in prompt construction.
 
+## Memory Kernel v1 Automated Verification
+
+The integration tests in `tests/test_memory_runtime_integration.py` provide
+automated verification of the full governance path. These tests use only
+`FakeMemoryConfirmationAdapter` + `InMemoryMemoryStore`, no real IO/provider.
+
+| # | Test | What it verifies |
+|---|---|---|
+| 1 | `test_explicit_retain_flows_to_store` | "remember that X" → store has approved record |
+| 2 | `test_chinese_retain_flows_to_store` | "记住 X" → store has approved record |
+| 3 | `test_memory_snapshot_enters_prompt` | store record → snapshot → prompt section |
+| 4 | `test_empty_store_produces_empty_snapshot` | empty store → empty snapshot → default placeholder |
+| 5 | `test_sensitive_memory_blocked` | "remember that my api key is sk-..." → BLOCKED |
+| 6 | `test_sensitive_memory_not_in_prompt` | blocked sensitive → not in snapshot |
+| 7-9 | `test_normal_message_no_memory_trigger` | 3 ordinary messages → all NO_OP |
+| 10 | `test_memory_audit_events_logged` | candidate → confirmation → stored events |
+| 11 | `test_blocked_memory_logs_blocked_event` | blocked → memory.blocked event |
+| 12 | `test_snapshot_generation_logs_injected_event` | snapshot → memory.injected event |
+| 13 | `test_rejected_memory_not_stored` | fake reject → no store record |
+| 14 | `test_memory_runtime_does_not_touch_checkpoint` | AST scan: no checkpoint imports |
+| 15 | `test_memory_runtime_does_not_import_mcp_provider_tool` | AST scan: no MCP/provider/tool imports |
+| 16 | `test_memory_candidate_has_metadata_field` | metadata field exists, defaults to {} |
+| 17 | `test_memory_record_has_future_type_fields` | memory_type/source_type/approval_status/metadata fields |
+| 18 | `test_memory_record_defaults_are_kernel_v1_values` | defaults match Kernel v1 semantics |
+| 19 | `test_memory_evaluation_result_has_decision_type_field` | NO_OP→None, STORED→RETAIN |
+| 20 | `test_memory_runtime_does_not_use_input` | AST scan: no input() calls |
+| 21 | `test_fake_confirmation_adapter_accept_and_reject` | Fake adapter accept/reject behavior |
+
+All 21 tests pass (0.14s). Combined with the existing 103 memory contract/policy/
+store/snapshot/provider tests, the total memory test suite is 124 tests (0.39s).
+
 ## Manual review questions
 
 - Does the UX clearly say what may be remembered and why?

@@ -94,7 +94,7 @@ def test_build_memory_section_is_static_placeholder_not_real_memory_reader() -> 
 
     from agent.memory import build_memory_section
 
-    assert build_memory_section() == "[Memory]\n当前未注入长期记忆。"
+    assert build_memory_section() == "--- Memory ---\n当前未注入长期记忆。\n--- End Memory ---"
 
 
 def test_roadmap_records_memory_discovery_questions_before_implementation() -> None:

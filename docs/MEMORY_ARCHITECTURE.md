@@ -471,6 +471,111 @@ Do not add now:
 - Stop condition: final review requires real user data, automatic memory,
   provider integration, retrieval/vectorization, or release tagging.
 
+## Memory Kernel v1: Runtime Integration (completed)
+
+The Memory Kernel v1 ties all previous contract/policy/store/snapshot slices
+into a minimal runtime closed loop through `agent/memory_runtime.py`.
+
+### Architecture
+
+```text
+user_text
+  -> MemoryRuntime.evaluate_user_text()
+    -> DeterministicMemoryPolicy.decide()
+    -> MemoryConfirmationAdapter.request_confirmation()
+    -> MemoryStoreProtocol.apply_operation_intent()
+    -> MemoryEventLogger (audit events)
+  -> MemoryRuntime.snapshot_for_prompt()
+    -> build_memory_snapshot_from_store()
+    -> MemorySnapshot -> build_memory_section() -> build_system_prompt()
+```
+
+### Key design decisions
+
+1. **Confirmation adapter Protocol (NOT bare input())**: `MemoryConfirmationAdapter`
+   is an injectable seam. `FakeMemoryConfirmationAdapter` returns deterministic
+   accept/reject for tests; `DeferredMemoryConfirmationAdapter` emits a
+   RuntimeEvent and auto-accepts for explicit retain in v1.
+
+2. **All dependencies injectable**: policy, store, confirmation_adapter, and
+   event_logger are all keyword-only constructor parameters. No hard-wired
+   singletons except the thin module-level `_memory_runtime` in core.py.
+
+3. **Thin core.py integration (2 call sites only)**:
+   - `evaluate_user_text(user_input, on_event=on_runtime_event)` in `chat()` —
+     after empty input guard, before any other processing.
+   - `snapshot_for_prompt()` in `refresh_runtime_system_prompt()` — feeds
+     `MemorySnapshot` into `build_system_prompt(memory_snapshot=...)`.
+
+4. **Future-ready without premature implementation**: `MemoryRecord` carries
+   `memory_type` (semantic/episodic/procedural), `source_type` (explicit_user_request/
+   agent_suggested/reflection/imported), `approval_status` (pending/approved/
+   rejected/edited), and `metadata` (dict) — all defaulted to Kernel v1 values,
+   all exercisable by future providers without schema migration.
+
+5. **Module boundaries enforced by AST tests**: `memory_runtime.py` does not
+   import checkpoint, MCP, provider adapter, tool_executor, or core.py.
+   It calls no `input()`.
+
+### Test coverage
+
+24 deterministic integration tests in `tests/test_memory_runtime_integration.py`:
+- explicit retain (English + Chinese) → store write
+- snapshot → prompt injection
+- sensitive content blocked
+- normal messages → no-op
+- audit events (candidate → confirmation → stored / blocked / injected)
+- reject → no store write
+- AST boundary scans (no checkpoint/MCP/provider/tool imports, no input() call)
+- future field presence (metadata, memory_type, source_type, approval_status)
+- confirmation adapter accept/reject behavior
+- DeferredMemoryConfirmationAdapter auto-accept (3 tests)
+
+### Files
+
+| File | Status | Role |
+|---|---|---|
+| `agent/memory_runtime.py` | new | MemoryRuntime + adapters + factory |
+| `agent/memory_contracts.py` | modified | `metadata` field on MemoryCandidate |
+| `agent/memory_store.py` | modified | `memory_type`/`source_type`/`approval_status`/`metadata` on MemoryRecord |
+| `agent/core.py` | modified | 2 call sites (evaluate + snapshot); 1 import (memory_runtime only) |
+| `agent/memory.py` | modified | `--- Memory ---` / `--- End Memory ---` boundary markers |
+| `tests/test_memory_runtime_integration.py` | new | 24 deterministic tests |
+| `tests/test_architecture_boundaries.py` | modified | updated expected import set |
+| `tests/test_memory_discovery_boundaries.py` | modified | updated boundary marker assertion |
+
+### What's NOT in Kernel v1
+
+- No persistence, files, or DB (in-memory store only)
+- No embedding, vector DB, or semantic recall
+- No automatic memory extraction from conversation
+- No external providers (Mem0, LangChain, Zep)
+- No checkpoint schema changes
+- No MCP/tool_executor/provider adapter changes
+- No `input()` calls (confirmation via injected adapter)
+- No Memory logic scattered in core.py (only 2 thin call sites)
+
+### v1 Known Limitations
+
+These are documented honestly, not as TODOs to rush into:
+- **DeferredMemoryConfirmationAdapter auto-accepts explicit retain**:
+  v1 temporary strategy because user intent is explicit in "remember that X".
+  Real interactive Ask User / request_user_input confirmation is deferred to
+  a later stage. See `agent/memory_runtime.py` docstring.
+- **Module-level _memory_runtime singleton**: `_memory_runtime` in core.py is
+  a module-level instance with shared `InMemoryMemoryStore`. Single-process
+  single-session is fine; multi-session may cross-contaminate memory. Future
+  session-scoped runtime should not require checkpoint changes.
+- **No store cap/prune**: `InMemoryMemoryStore` grows unbounded. Only the
+  prompt layer has budget limits (5 items, 500 characters). Store cap and
+  eviction are deferred.
+- **v1 only handles explicit semantic retain**: `MemoryOperationIntent` does
+  not yet carry `memory_type` / `source_type` / `approval_status`.
+  `MemoryRecord` relies on Kernel v1 defaults. Agent-suggested, episodic,
+  procedural, reflection, and imported provider memories are deferred.
+- **In-memory only**: store is lost on process restart. No persistence to
+  checkpoint, file, or DB.
+
 ## Why this is not `memory.json + prompt injection`
 
 The proposed design makes a memory record pass through candidate extraction,

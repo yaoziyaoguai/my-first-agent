@@ -58,6 +58,9 @@ from agent.runtime_events import ModelOutputKind, classify_model_output
 from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
 
+# Memory Kernel v1 imports
+from agent.memory_runtime import create_memory_runtime
+
 
 
 
@@ -80,6 +83,13 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）�
 # messages = []  # session 级消息历史
 
 client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
+
+# Memory Kernel v1 — 模块级 MemoryRuntime 实例。
+# 默认使用 InMemoryMemoryStore + DeferredMemoryConfirmationAdapter。
+# store 是 in-memory-only，不进 checkpoint、不进 State、不进文件。
+# v1 known limitation：模块级单例在多 session 下可能交叉污染 memory。
+# 测试可通过 monkeypatch 替换 _memory_runtime。
+_memory_runtime = create_memory_runtime()
 
 # 统一会话状态：
 # 先把 system prompt 放进 runtime，
@@ -129,8 +139,11 @@ def refresh_runtime_system_prompt() -> str:
     注意：
     - 当前阶段仍然沿用 build_system_prompt() 作为 system prompt 的生成器
     - 但最终真正生效的结果，以 state.runtime.system_prompt 为准
+    - Memory Kernel v1：从 _memory_runtime 获取 MemorySnapshot 并传入
+      build_system_prompt；无已批准 memory 时 snapshot 为空，不影响 prompt。
     """
-    system_prompt = build_system_prompt()
+    memory_snapshot = _memory_runtime.snapshot_for_prompt()
+    system_prompt = build_system_prompt(memory_snapshot=memory_snapshot)
     state.set_system_prompt(system_prompt)
     return state.get_system_prompt()
 
@@ -704,6 +717,12 @@ def chat(
     #   - awaiting 分支把空串当 feedback 触发重规划
     if not user_input or not user_input.strip():
         return ""
+
+    # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
+    # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、
+    # 不解析 decision。_memory_runtime 内部处理 policy → confirmation → store 全链路。
+    # 当前 on_event 直接复用 on_runtime_event callback（如果调用方传入）。
+    _memory_runtime.evaluate_user_text(user_input, on_event=on_runtime_event)
 
     # 状态一致性自愈：是否必须有 current_plan 统一交给 state helper 判断。
     # 这避免 core.py 继续散落硬编码 status tuple；更细的 plan/tool/user-input

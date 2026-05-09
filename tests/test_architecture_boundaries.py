@@ -222,6 +222,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.display_events",
         "agent.loop_context",
         "agent.memory",
+        "agent.memory_runtime",
         "agent.planner",
         "agent.prompt_builder",
         "agent.provider.factory",

@@ -217,7 +217,7 @@ def _render_memory_snapshot(snapshot: MemorySnapshot) -> str:
     """渲染 MemorySnapshot；预算只限制 item 行，不限制说明性 header。"""
 
     lines = [
-        "[Memory]",
+        "--- Memory ---",
         "Approved memory snapshot:",
         f"Selection reason: {snapshot.selection_reason}",
     ]
@@ -242,6 +242,8 @@ def _render_memory_snapshot(snapshot: MemorySnapshot) -> str:
     if snapshot.safety_filter_summary:
         lines.append(f"Safety filter: {snapshot.safety_filter_summary}")
 
+    lines.append("--- End Memory ---")
+
     return "\n".join(lines)
 
 
@@ -258,7 +260,7 @@ def build_memory_section(snapshot: MemorySnapshot | None = None) -> str:
     """
     if snapshot is not None and snapshot.items:
         return _render_memory_snapshot(snapshot)
-    return "[Memory]\n当前未注入长期记忆。"
+    return "--- Memory ---\n当前未注入长期记忆。\n--- End Memory ---"
 
 
 def init_memory() -> None:

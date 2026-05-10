@@ -37,7 +37,7 @@ from agent.memory_confirmation import (
     build_memory_confirmation_request,
     resolve_memory_confirmation_choice,
 )
-from agent.memory_contracts import MemoryDecisionType, MemorySnapshot
+from agent.memory_contracts import MemoryDecision, MemoryDecisionType, MemorySnapshot
 from agent.memory_operations import (
     build_memory_audit_summary,
     build_memory_operation_intent,
@@ -48,6 +48,7 @@ from agent.memory_snapshot_generator import (
     build_memory_snapshot_from_store,
 )
 from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus, MemoryStoreProtocol
+from agent.memory_suggestions import DeterministicSuggestionEngine
 
 
 class MemoryEvaluationAction(StrEnum):
@@ -118,6 +119,7 @@ class MemoryRuntime:
         policy: DeterministicMemoryPolicy | None = None,
         store: MemoryStoreProtocol | None = None,
         event_logger: MemoryEventLogger | None = None,
+        suggestion_engine: DeterministicSuggestionEngine | None = None,
     ):
         """
         参数全部 keyword-only，保证调用方显式声明注入意图。
@@ -126,10 +128,12 @@ class MemoryRuntime:
         - policy: DeterministicMemoryPolicy()
         - store: None（必须由调用方注入，否则 evaluate 只做 policy 不做写入）
         - event_logger: _noop_event_logger
+        - suggestion_engine: None（不启用 agent-suggested memory）
         """
         self._policy = policy or DeterministicMemoryPolicy()
         self._store = store
         self._log = event_logger or _noop_event_logger
+        self._suggestion_engine = suggestion_engine
         # 两阶段确认缓存：key=candidate_id, value=dict(decision, confirmation_request)
         self._pending_decision: dict[str, Any] | None = None
 
@@ -156,6 +160,10 @@ class MemoryRuntime:
 
         # -- NO_OP：普通消息，不做 memory 处理 --------------------------------
         if decision.decision_type is MemoryDecisionType.NO_OP:
+            if self._suggestion_engine is not None:
+                result = self._try_suggestions(user_text, on_event=on_event)
+                if result is not None:
+                    return result
             return MemoryEvaluationResult(action=MemoryEvaluationAction.NO_OP)
 
         # -- CLARIFY：模糊 memory 请求，记录但不操作 --------------------------
@@ -232,6 +240,86 @@ class MemoryRuntime:
             candidate_id=candidate_id,
             content_summary=content_summary[:200] if content_summary else "",
             reason="等待用户确认",
+        )
+
+    # -- Agent-suggested memory -----------------------------------------------
+
+    def _try_suggestions(
+        self,
+        user_text: str,
+        *,
+        on_event: Callable | None = None,
+    ) -> MemoryEvaluationResult | None:
+        """在 policy 返回 NO_OP 后尝试 agent-suggested memory candidate 识别。
+
+        确定性 heuristic 引擎生成候选 → 取第一个 → 包装为 RETAIN decision →
+        走现有确认流程。不调 LLM、不写 store、不 import core。
+        返回 None 表示没有可确认的候选。
+        """
+        if self._suggestion_engine is None:
+            return None
+
+        candidates = self._suggestion_engine.evaluate(
+            user_text,
+            existing_store=self._store,
+        )
+
+        if not candidates:
+            return None
+
+        # 取第一个候选，包装为 RETAIN decision
+        candidate = candidates[0]
+        decision = MemoryDecisionType.RETAIN
+
+        memory_decision = MemoryDecision(
+            decision_type=MemoryDecisionType.RETAIN,
+            target_candidate=candidate,
+            action="retain",
+            requires_user_confirmation=True,
+            reason=f"agent 建议记住：{candidate.reason}",
+            safety_flags=(),
+            provenance=f"candidate:{candidate.id}",
+        )
+
+        self._log("memory.agent_suggested_candidate", {
+            "candidate_id": candidate.id,
+            "content_summary": candidate.content[:200],
+            "proposed_type": candidate.proposed_type,
+            "confidence": candidate.confidence,
+        })
+
+        confirmation_request = build_memory_confirmation_request(memory_decision)
+
+        if on_event is not None:
+            try:
+                on_event({
+                    "type": "memory_confirmation_requested",
+                    "question": confirmation_request.question,
+                    "preview": confirmation_request.preview,
+                    "decision_type": decision.value,
+                    "source_type": "agent_suggested",
+                })
+            except Exception:
+                pass
+
+        self._log("memory.confirmation_requested", {
+            "decision_type": decision.value,
+            "candidate_id": candidate.id,
+            "source_type": "agent_suggested",
+        })
+
+        self._pending_decision = {
+            "decision": memory_decision,
+            "confirmation_request": confirmation_request,
+            "candidate_id": candidate.id,
+        }
+
+        return MemoryEvaluationResult(
+            action=MemoryEvaluationAction.CONFIRMATION_REQUIRED,
+            decision_type=MemoryDecisionType.RETAIN,
+            candidate_id=candidate.id,
+            content_summary=candidate.content[:200],
+            reason="agent 建议记住这条信息，等待用户确认",
         )
 
     # -- 第二阶段：应用用户确认结果 ------------------------------------------

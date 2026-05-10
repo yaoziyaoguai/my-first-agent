@@ -5,20 +5,16 @@
 
 架构原则（Memory Kernel v1）：
 - 行为简单：只处理 explicit retain（"remember that X" / "记住 X"）。
-- 架构不简化：所有依赖可注入（policy / store / confirmation adapter / event logger），
-  未来 agent_suggested / episodic / procedural / reflection / external provider 均
+- 架构不简化：所有依赖可注入（policy / store / event logger），未来
+  agent_suggested / episodic / procedural / reflection / external provider 均
   可通过注入不同实现演进，不需要重写本模块。
 
-确认流程（v1 最小方案）：
-- ``MemoryConfirmationAdapter`` Protocol 定义确认接缝。
-- ``FakeMemoryConfirmationAdapter``：测试用，确定性返回 accept/reject。
-- ``DeferredMemoryConfirmationAdapter``：生产用，v1 临时策略为 auto-accept
-  explicit retain（因为用户意图已通过输入文本明确表达）。它会 emit RuntimeEvent
-  供 UI 层展示确认问题，但当前不阻塞等待用户回复。真实交互式确认 UI 留给后续
-  stage。
-- 测试中 fake adapter accept/reject → 完整闭环可测。
-- 生产中 deferred adapter → auto-accept → store 写入 → snapshot → prompt（v1
-  deterministic kernel 闭环；真实 Ask User / request_user_input 确认后续接入）。
+确认流程（Memory Interactive Confirmation v1）：
+- 两阶段交互：evaluate_user_text → CONFIRMATION_REQUIRED（缓存 decision）→
+  resolve_confirmation(candidate_id, choice, free_text) → STORED/REJECTED。
+- 用户确认通过 pending_user_input_request（awaiting_kind="memory_confirmation"）
+  桥接到现有 awaiting_user_input 机制。
+- Memory confirmation 不使用裸 input()，不使用 auto-accept 路径。
 
 未来扩展预留：
 - ``MemoryRecord.memory_type``: semantic/episodic/procedural
@@ -31,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Callable, Protocol
+from typing import Any, Callable
 
 from agent.memory_confirmation import (
     MemoryConfirmationChoice,
@@ -81,79 +77,6 @@ class MemoryEvaluationResult:
 
 
 # ---------------------------------------------------------------------------
-# Confirmation adapter seam
-# ---------------------------------------------------------------------------
-
-
-class MemoryConfirmationAdapter(Protocol):
-    """Memory confirmation 的注入接缝。
-
-    本协议只定义"如何获取用户对 memory decision 的确认结果"。
-    它不负责 policy、不写 store、不调用 runtime/checkpoint。
-
-    v1 实现：
-    - FakeMemoryConfirmationAdapter：测试用，返回确定性结果。
-    - DeferredMemoryConfirmationAdapter：生产用，emit RuntimeEvent + 返回
-      requires_user_confirmation（确认 UI 留给后续 stage）。
-    """
-
-    def request_confirmation(
-        self,
-        request: MemoryConfirmationRequest,
-    ) -> MemoryConfirmationResult:
-        """向用户请求确认一个 memory decision，返回无副作用结果。"""
-        ...
-
-
-class FakeMemoryConfirmationAdapter:
-    """确定性 fake adapter，测试用。
-
-    不读取 stdin、不调用 TUI、不阻塞。构造时指定 preset_choice。
-    """
-
-    def __init__(self, preset_choice: MemoryConfirmationChoice = MemoryConfirmationChoice.ACCEPT):
-        self._preset_choice = preset_choice
-
-    def request_confirmation(
-        self,
-        request: MemoryConfirmationRequest,
-    ) -> MemoryConfirmationResult:
-        return resolve_memory_confirmation_choice(request, self._preset_choice)
-
-
-class DeferredMemoryConfirmationAdapter:
-    """生产用 confirmation adapter：emit RuntimeEvent + 返回 requires_user_confirmation。
-
-    v1 阶段不阻塞等用户回复——只把确认问题通过 on_event 发给 UI 层，
-    并返回 APPROVED 状态以允许 store 写入（因为 explicit retain 的用户意图
-    已通过输入文本明确表达）。后续 stage 可替换为真实交互式确认。
-    """
-
-    def __init__(self, on_event: Callable | None = None):
-        self._on_event = on_event
-
-    def request_confirmation(
-        self,
-        request: MemoryConfirmationRequest,
-    ) -> MemoryConfirmationResult:
-        # 发出确认问题，让 UI 层有机会展示
-        if self._on_event is not None:
-            try:
-                self._on_event({
-                    "type": "memory_confirmation_requested",
-                    "question": request.question,
-                    "preview": request.preview,
-                    "decision_type": request.decision.decision_type.value,
-                })
-            except Exception:
-                pass
-
-        # v1：explicit retain 的用户意图已通过输入文本明确表达，
-        # 直接返回 approved。后续 stage 可替换为真实交互式确认。
-        return resolve_memory_confirmation_choice(request, MemoryConfirmationChoice.ACCEPT)
-
-
-# ---------------------------------------------------------------------------
 # Event logger type
 # ---------------------------------------------------------------------------
 
@@ -175,13 +98,18 @@ class MemoryRuntime:
 
     职责（高内聚）：
     - 接收 user_text，调用 policy 判断是否需要 memory 操作。
-    - 需要确认时，通过注入的 confirmation adapter 获取结果。
+    - 需要确认时，缓存 decision + confirmation request，返回 CONFIRMATION_REQUIRED。
+    - 调用方通过 resolve_confirmation 应用用户选择。
     - approved → 写入 store。
     - 生成 MemorySnapshot 供 prompt_builder 消费。
     - 记录 minimal audit events。
 
-    所有依赖均可注入：policy / store / confirmation adapter / event logger。
+    所有依赖均可注入：policy / store / event logger。
     MemoryRuntime 不 import checkpoint、MCP、provider adapter、tool_executor。
+
+    两阶段交互流程（v1）：
+    1. evaluate_user_text → CONFIRMATION_REQUIRED（缓存 decision）
+    2. resolve_confirmation(candidate_id, choice, free_text) → STORED/REJECTED/...
     """
 
     def __init__(
@@ -189,7 +117,6 @@ class MemoryRuntime:
         *,
         policy: DeterministicMemoryPolicy | None = None,
         store: MemoryStoreProtocol | None = None,
-        confirmation_adapter: MemoryConfirmationAdapter | None = None,
         event_logger: MemoryEventLogger | None = None,
     ):
         """
@@ -198,13 +125,13 @@ class MemoryRuntime:
         默认值：
         - policy: DeterministicMemoryPolicy()
         - store: None（必须由调用方注入，否则 evaluate 只做 policy 不做写入）
-        - confirmation_adapter: DeferredMemoryConfirmationAdapter()
         - event_logger: _noop_event_logger
         """
         self._policy = policy or DeterministicMemoryPolicy()
         self._store = store
-        self._confirmation = confirmation_adapter or DeferredMemoryConfirmationAdapter()
         self._log = event_logger or _noop_event_logger
+        # 两阶段确认缓存：key=candidate_id, value=dict(decision, confirmation_request)
+        self._pending_decision: dict[str, Any] | None = None
 
     # -- 核心入口 ----------------------------------------------------------
 
@@ -291,8 +218,81 @@ class MemoryRuntime:
             "candidate_id": candidate_id,
         })
 
-        # 通过注入的 adapter 获取确认结果
-        confirmation_result = self._confirmation.request_confirmation(confirmation_request)
+        # v1 两阶段交互：缓存 decision + confirmation_request，返回
+        # CONFIRMATION_REQUIRED。调用方通过 resolve_confirmation 应用用户选择。
+        self._pending_decision = {
+            "decision": decision,
+            "confirmation_request": confirmation_request,
+            "candidate_id": candidate_id,
+        }
+
+        return MemoryEvaluationResult(
+            action=MemoryEvaluationAction.CONFIRMATION_REQUIRED,
+            decision_type=decision.decision_type,
+            candidate_id=candidate_id,
+            content_summary=content_summary[:200] if content_summary else "",
+            reason="等待用户确认",
+        )
+
+    # -- 第二阶段：应用用户确认结果 ------------------------------------------
+
+    def get_pending_confirmation(
+        self, candidate_id: str | None
+    ) -> MemoryConfirmationRequest | None:
+        """返回待确认的 MemoryConfirmationRequest，供 UI 层构建展示。
+
+        如果 _pending_decision 不存在或 candidate_id 不匹配，返回 None。
+        """
+        pending = self._pending_decision
+        if pending is None:
+            return None
+        if pending.get("candidate_id") != candidate_id:
+            return None
+        return pending["confirmation_request"]
+
+    def resolve_confirmation(
+        self,
+        candidate_id: str | None,
+        choice: MemoryConfirmationChoice,
+        free_text: str | None = None,
+    ) -> MemoryEvaluationResult:
+        """应用用户确认结果：生成 confirmation result → 写入 store。
+
+        这是 evaluate_user_text 的第二阶段：
+        1. 从 _pending_decision 缓存中取出 decision + confirmation_request
+        2. 用 resolve_memory_confirmation_choice 生成 MemoryConfirmationResult
+        3. approved → operation intent → store 写入
+        4. 清缓存，返回 MemoryEvaluationResult
+        """
+        pending = self._pending_decision
+        if pending is None or pending.get("candidate_id") != candidate_id:
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.REJECTED,
+                candidate_id=candidate_id,
+                reason="无匹配的待确认 decision（可能已超时或已处理）",
+            )
+
+        decision = pending["decision"]
+        confirmation_request = pending["confirmation_request"]
+        content_summary = (
+            decision.target_candidate.content[:200]
+            if decision.target_candidate is not None
+            else ""
+        )
+
+        # 解析确认结果
+        try:
+            confirmation_result: MemoryConfirmationResult = resolve_memory_confirmation_choice(
+                confirmation_request, choice, free_text=free_text
+            )
+        except ValueError as exc:
+            self._pending_decision = None
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.REJECTED,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+                reason=str(exc),
+            )
 
         # 记录确认结果
         if confirmation_result.status is MemoryConfirmationStatus.APPROVED:
@@ -307,22 +307,43 @@ class MemoryRuntime:
                 "candidate_id": candidate_id,
                 "choice": confirmation_result.choice.value,
             })
+            self._pending_decision = None
             return MemoryEvaluationResult(
                 action=MemoryEvaluationAction.REJECTED,
                 decision_type=decision.decision_type,
                 candidate_id=candidate_id,
-                content_summary=content_summary[:200] if content_summary else "",
+                content_summary=content_summary,
                 reason="用户拒绝",
+            )
+        elif confirmation_result.status is MemoryConfirmationStatus.SESSION_ONLY:
+            self._log("memory.confirmation_session_only", {
+                "decision_type": decision.decision_type.value,
+                "candidate_id": candidate_id,
+            })
+            # SESSION_ONLY：写入 store 但标记为 session scope
+            if self._store is not None:
+                intent = build_memory_operation_intent(confirmation_result)
+                audit = build_memory_audit_summary(intent)
+                self._store.apply_operation_intent(intent, audit)
+            self._pending_decision = None
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.STORED,
+                decision_type=decision.decision_type,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+                reason="仅本次会话使用，已写入",
             )
 
         # -- approved：operation intent → audit → store --------------------
+        self._pending_decision = None
+
         if self._store is None:
             return MemoryEvaluationResult(
-                action=MemoryEvaluationAction.CONFIRMATION_REQUIRED,
+                action=MemoryEvaluationAction.STORED,
                 decision_type=decision.decision_type,
                 candidate_id=candidate_id,
-                content_summary=content_summary[:200] if content_summary else "",
-                reason="store 未注入，无法写入",
+                content_summary=content_summary,
+                reason="store 未注入，确认结果未持久化",
             )
 
         intent = build_memory_operation_intent(confirmation_result)
@@ -340,15 +361,15 @@ class MemoryRuntime:
                 action=MemoryEvaluationAction.STORED,
                 decision_type=decision.decision_type,
                 candidate_id=candidate_id,
-                content_summary=content_summary[:200] if content_summary else "",
+                content_summary=content_summary,
                 reason="已写入 in-memory store",
             )
 
         return MemoryEvaluationResult(
-            action=MemoryEvaluationAction.CONFIRMATION_REQUIRED,
+            action=MemoryEvaluationAction.STORED,
             decision_type=decision.decision_type,
             candidate_id=candidate_id,
-            content_summary=content_summary[:200] if content_summary else "",
+            content_summary=content_summary,
             reason=result.message,
         )
 
@@ -400,19 +421,16 @@ class MemoryRuntime:
 def create_memory_runtime(
     *,
     store: MemoryStoreProtocol | None = None,
-    confirmation_adapter: MemoryConfirmationAdapter | None = None,
     event_logger: MemoryEventLogger | None = None,
 ) -> MemoryRuntime:
     """创建 MemoryRuntime 的便捷工厂，所有参数可选注入。
 
-    默认使用 DeterministicMemoryPolicy + InMemoryMemoryStore +
-    DeferredMemoryConfirmationAdapter。
-    测试中可注入 FakeMemoryConfirmationAdapter。
+    默认使用 DeterministicMemoryPolicy + InMemoryMemoryStore。
+    确认流程使用两阶段交互（evaluate → CONFIRMATION_REQUIRED → resolve_confirmation）。
     若不想写入 store（如只做 policy 评估），显式传 store=None。
     """
     return MemoryRuntime(
         policy=DeterministicMemoryPolicy(),
         store=store if store is not None else InMemoryMemoryStore(),
-        confirmation_adapter=confirmation_adapter or DeferredMemoryConfirmationAdapter(),
         event_logger=event_logger or _noop_event_logger,
     )

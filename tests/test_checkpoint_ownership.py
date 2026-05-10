@@ -308,6 +308,11 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.core", "_compress_history_and_sync_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
         ("agent.core", "_run_main_loop", "clear_checkpoint", "_clear_checkpoint", 1),
         ("agent.core", "_run_planning_phase", "save_checkpoint", "_save_checkpoint", 1),
+        # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支保存状态
+        ("agent.core", "chat", "save_checkpoint", "_save_ckpt", 1),
+        # Memory Interactive Confirmation v1：handle_memory_confirmation_reply
+        # 内部 lazy import save_checkpoint 以清 pending 并保存状态
+        ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", "clear_checkpoint", 1),
@@ -376,6 +381,7 @@ def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() ->
         "agent.checkpoint",
         "agent.confirm_handlers",
         "agent.core",
+        "agent.memory_interaction",
         "agent.response_handlers",
         "agent.session",
         "agent.task_runtime",
@@ -477,6 +483,9 @@ def test_pending_user_input_persistence_writers_are_reviewed() -> None:
     expected = {
         ("agent.confirm_handlers", "_request_feedback_intent_choice", "state.task.pending_user_input_request", 1),
         ("agent.confirm_handlers", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
+        # Memory Interactive Confirmation v1：chat() 设置 pending，handle_memory_confirmation_reply 清 pending
+        ("agent.core", "chat", "state.task.pending_user_input_request", 1),
+        ("agent.memory_interaction", "handle_memory_confirmation_reply", "state.task.pending_user_input_request", 1),
         ("agent.response_handlers", "handle_end_turn_response", "state.task.pending_user_input_request", 1),
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_user_input_request", 1),
         ("agent.transitions", "apply_user_replied_transition", "state.task.pending_user_input_request", 1),

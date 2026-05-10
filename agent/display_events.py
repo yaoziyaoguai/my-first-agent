@@ -47,6 +47,12 @@ EVENT_FEEDBACK_INTENT_REQUESTED = "feedback.intent_requested"
 EVENT_STATE_INCONSISTENCY_RESET = "control.state_inconsistency_reset"
 EVENT_LOOP_MAX_ITERATIONS = "loop.max_iterations_reached"
 EVENT_UNKNOWN_STOP_REASON = "loop.unknown_stop_reason"
+# Memory Kernel v1 — RuntimeEvent 类型，用于 UI 层展示 memory 操作结果
+EVENT_MEMORY_STORED = "memory.stored"
+EVENT_MEMORY_BLOCKED = "memory.blocked"
+EVENT_MEMORY_INJECTED = "memory.injected"
+# Memory Interactive Confirmation v1 — 用户确认请求事件
+EVENT_MEMORY_CONFIRMATION_REQUESTED = "memory.confirmation_requested"
 
 
 @dataclass(slots=True, frozen=True)
@@ -224,6 +230,79 @@ def unknown_stop_reason_event(stop_reason: str) -> RuntimeEvent:
         text=f"[系统] 未知的 stop_reason: {stop_reason}",
         metadata={"stop_reason": stop_reason},
     )
+
+
+def memory_stored_event(summary: str) -> RuntimeEvent:
+    """构造 memory 已记住事件。
+
+    summary 来自 MemoryEvaluationResult.content_summary，已在 MemoryRuntime 中
+    截断到 200 字符。这里再做一次脱敏，防止候选内容意外包含 secret。
+    """
+    safe_summary = _mask_preview_secrets(summary)
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_STORED,
+        text=f"已记住：{safe_summary}",
+        metadata={"content_summary": safe_summary},
+    )
+
+
+def memory_blocked_event(reason: str) -> RuntimeEvent:
+    """构造 memory 已拦截事件。
+
+    reason 来自 MemoryEvaluationResult.reason，描述为什么被拦截
+    （如"含敏感关键词"）。
+    """
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_BLOCKED,
+        text=f"已拦截敏感记忆：{reason}",
+        metadata={"reason": reason},
+    )
+
+
+def memory_injected_event(count: int) -> RuntimeEvent:
+    """构造 memory 已加载事件。
+
+    count 是注入到 system prompt 的 memory 条数。
+    """
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_INJECTED,
+        text=f"已加载记忆：{count} 条",
+        metadata={"item_count": count},
+    )
+
+
+def memory_confirmation_requested_event(
+    pending: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造 memory 确认请求的 UI 投影事件。
+
+    职责：仅把 pending_user_input_request 投影成 UI 文本和结构化 payload，
+    不清 pending、不推进状态机、不写 store。
+    """
+    payload = dict(metadata or {})
+    options = pending.get("options") or []
+    payload["options"] = list(options)
+    payload["awaiting_kind"] = "memory_confirmation"
+    payload["step_index"] = pending.get("step_index")
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_CONFIRMATION_REQUESTED,
+        text=_format_memory_pending_request(pending),
+        metadata=payload,
+    )
+
+
+def _format_memory_pending_request(pending: dict[str, Any]) -> str:
+    """把 memory confirmation pending 转成用户可读文本。"""
+    lines = ["[需要确认记忆操作]"]
+    if pending.get("question"):
+        lines.append(f"  {pending['question']}")
+    options = pending.get("options") or []
+    if options:
+        lines.append("  请选择：")
+        lines.extend(f"    {option}" for option in options)
+    return "\n".join(lines)
 
 
 def tool_requested(

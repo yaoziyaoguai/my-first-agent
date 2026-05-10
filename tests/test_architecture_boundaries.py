@@ -222,6 +222,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.display_events",
         "agent.loop_context",
         "agent.memory",
+        "agent.memory_interaction",
         "agent.memory_runtime",
         "agent.planner",
         "agent.prompt_builder",
@@ -384,6 +385,9 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.confirm_handlers", "handle_step_confirmation", "save_checkpoint", 1),
     ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", 4),
     ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", 1),
+    # Memory Interactive Confirmation v1：handle_memory_confirmation_reply 内
+    # lazy import save_checkpoint 以清 pending 并保存状态（v1 compromise）。
+    ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", 1),
     ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", 1),
     ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", 1),
     ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", 1),
@@ -427,6 +431,7 @@ _RUNTIME_MUTATION_OWNER_BASELINE = {
     "agent.checkpoint",
     "agent.confirm_handlers",
     "agent.core",
+    "agent.memory_interaction",
     "agent.response_handlers",
     "agent.session",
     "agent.task_runtime",
@@ -484,6 +489,18 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ("agent.confirm_handlers", "handle_tool_confirmation", "state.task.pending_tool"),
         ("agent.confirm_handlers", "handle_tool_confirmation", "state.task.status"),
         ("agent.confirm_handlers", "handle_user_input_step", "state.reset_task()"),
+        # Memory Interactive Confirmation v1：handle_memory_confirmation_reply
+        # 清 pending 并恢复 origin_status。
+        (
+            "agent.memory_interaction",
+            "handle_memory_confirmation_reply",
+            "state.task.pending_user_input_request",
+        ),
+        (
+            "agent.memory_interaction",
+            "handle_memory_confirmation_reply",
+            "state.task.status",
+        ),
         ("agent.core", "_run_main_loop", "state.reset_task()"),
         ("agent.core", "_run_main_loop", "state.task.loop_iterations"),
         ("agent.core", "_run_planning_phase", "state.task.confirm_each_step"),
@@ -501,6 +518,10 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "_compress_history_and_sync_checkpoint",
             "state.memory.working_summary",
         ),
+        # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支
+        # 设置 pending_user_input_request 和 status。
+        ("agent.core", "chat", "state.task.pending_user_input_request"),
+        ("agent.core", "chat", "state.task.status"),
         ("agent.core", "chat", "state.reset_task()"),
         ("agent.core", "refresh_runtime_system_prompt", "state.set_system_prompt()"),
         ("agent.response_handlers", "_maybe_advance_step", "state.reset_task()"),

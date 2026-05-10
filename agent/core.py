@@ -13,6 +13,10 @@ from agent.display_events import (
     assistant_delta,
     control_message,
     loop_max_iterations_event,
+    memory_blocked_event,
+    memory_confirmation_requested_event,
+    memory_injected_event,
+    memory_stored_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
@@ -59,7 +63,7 @@ from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
 
 # Memory Kernel v1 imports
-from agent.memory_runtime import create_memory_runtime
+from agent.memory_runtime import MemoryEvaluationAction, create_memory_runtime
 
 
 
@@ -85,7 +89,7 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）�
 client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 
 # Memory Kernel v1 — 模块级 MemoryRuntime 实例。
-# 默认使用 InMemoryMemoryStore + DeferredMemoryConfirmationAdapter。
+# 默认使用 InMemoryMemoryStore + 两阶段确认流程。
 # store 是 in-memory-only，不进 checkpoint、不进 State、不进文件。
 # v1 known limitation：模块级单例在多 session 下可能交叉污染 memory。
 # 测试可通过 monkeypatch 替换 _memory_runtime。
@@ -293,6 +297,9 @@ def _build_confirmation_context(
         start_planning_fn=lambda inp, ts: _start_planning_for_handler(
             inp, ts, loop_ctx
         ),
+        # Memory Interactive Confirmation v1：通过 context 注入 _memory_runtime，
+        # 避免 confirm_handlers → core 的反向 import cycle（P0-1 fix）。
+        memory_runtime=_memory_runtime,
     )
 
 
@@ -722,7 +729,42 @@ def chat(
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、
     # 不解析 decision。_memory_runtime 内部处理 policy → confirmation → store 全链路。
     # 当前 on_event 直接复用 on_runtime_event callback（如果调用方传入）。
-    _memory_runtime.evaluate_user_text(user_input, on_event=on_runtime_event)
+    result = _memory_runtime.evaluate_user_text(user_input, on_event=on_runtime_event)
+    if result.action is MemoryEvaluationAction.STORED:
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_stored_event(result.content_summary),
+            fallback_prefix="\n",
+        )
+    elif result.action is MemoryEvaluationAction.BLOCKED:
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_blocked_event(result.reason),
+            fallback_prefix="\n",
+        )
+    elif result.action is MemoryEvaluationAction.CONFIRMATION_REQUIRED:
+        # Memory Interactive Confirmation v1：两阶段交互。
+        # evaluate_user_text 已缓存 decision，这里设置 pending_user_input_request
+        # 复用 awaiting_user_input 机制等待用户确认。
+        confirmation_request = _memory_runtime.get_pending_confirmation(result.candidate_id)
+        if confirmation_request is not None:
+            from agent.memory_interaction import build_memory_pending_request
+            from agent.checkpoint import save_checkpoint as _save_ckpt
+
+            pending = build_memory_pending_request(
+                confirmation_request,
+                candidate_id=result.candidate_id,
+                origin_status=state.task.status,
+            )
+            state.task.pending_user_input_request = pending
+            state.task.status = "awaiting_user_input"
+            _save_ckpt(state, source="memory_confirmation")
+            _safe_emit_runtime_event(
+                on_runtime_event,
+                memory_confirmation_requested_event(pending),
+                fallback_prefix="\n",
+            )
+            return ""
 
     # 状态一致性自愈：是否必须有 current_plan 统一交给 state helper 判断。
     # 这避免 core.py 继续散落硬编码 status tuple；更细的 plan/tool/user-input
@@ -750,6 +792,17 @@ def chat(
     # tool_use 丢进摘要，留下悬空 tool_result，下次调用 API 会直接报错。
 
     runtime_system_prompt = refresh_runtime_system_prompt()
+
+    # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。
+    # 这里再次调用 snapshot_for_prompt() 以获取条数——与 refresh_runtime_system_prompt
+    # 内部的调用是重复的，但 _noop_event_logger 下不产生副作用，且避免改函数签名。
+    _memory_snapshot = _memory_runtime.snapshot_for_prompt()
+    if _memory_snapshot.items:
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_injected_event(len(_memory_snapshot.items)),
+            fallback_prefix="\n",
+        )
 
     def _emit_runtime_event(event: RuntimeEvent) -> None:
         """统一投递本轮用户可见输出，并集中兼容旧 callback。

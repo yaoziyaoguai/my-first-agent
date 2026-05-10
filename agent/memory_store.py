@@ -37,7 +37,6 @@ MUTATING_OPERATION_TYPES = frozenset({
 
 NON_WRITING_OPERATION_TYPES = frozenset({
     MemoryOperationType.REJECT,
-    MemoryOperationType.USE_ONCE,
     MemoryOperationType.CLARIFY,
     MemoryOperationType.NO_OP,
 })
@@ -168,6 +167,18 @@ class InMemoryMemoryStore:
                 message="operation does not authorize store write",
             )
 
+        # USE_ONCE：仅本次会话使用，写入 store 但不授权长期记忆
+        if intent.operation_type is MemoryOperationType.USE_ONCE:
+            record = _record_from_intent(intent, audit_id, approval_status="session_only")
+            self._records[record.id] = record
+            return MemoryStoreApplyResult(
+                status=MemoryStoreApplyStatus.APPLIED,
+                operation_type=intent.operation_type,
+                record=record,
+                audit_id=audit_id,
+                message="session-only memory record retained",
+            )
+
         if (
             intent.operation_type in MUTATING_OPERATION_TYPES
             and intent.confirmation_status.value != "approved"
@@ -275,6 +286,8 @@ class InMemoryMemoryStore:
 def _record_from_intent(
     intent: MemoryOperationIntent,
     audit_id: str,
+    *,
+    approval_status: str = "approved",
 ) -> MemoryRecord:
     """从 MemoryOperationIntent 构造 MemoryRecord。
 
@@ -282,7 +295,8 @@ def _record_from_intent(
     approval_status / metadata。这些字段全部依赖 MemoryRecord 的 Kernel v1 默认值：
     - memory_type → "semantic"（v1 只支持 explicit semantic retain）
     - source_type → "explicit_user_request"
-    - approval_status → "approved"（经过 confirmation adapter 后已是 approved）
+    - approval_status → "approved"（经过 confirmation adapter 后已是 approved；
+      USE_ONCE 路径覆盖为 "session_only"）
     - metadata → {}
 
     后续 agent_suggested / episodic / procedural / reflection / imported provider
@@ -298,6 +312,7 @@ def _record_from_intent(
         created_by_operation=intent.operation_type,
         updated_by_operation=intent.operation_type,
         sensitive_redacted=intent.sensitive_redacted,
+        approval_status=approval_status,
     )
 
 

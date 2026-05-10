@@ -45,7 +45,7 @@ core**。
 | **1** | Agent Loop / Runtime hardening | 🟡 主要落地，**未全收口** | v0.2 / v0.3 / v0.4 / v0.5.0 / v0.5.1 |
 | **2** | TUI interaction layer / HITL Input boundary | ✅ **阶段性收口** | v0.6.x |
 | **2.5** | **Tooling Foundation Milestone** | ✅ v0.7.0 已 release；post-release dogfooding closure 已完成 | v0.7.0 |
-| **3** | Memory system | ✅ **Safe-local foundation 已完成；真实 recall/provider deferred** | v0.8.0+ |
+| **3** | Memory system | ✅ **Interactive Confirmation v1 已完成；safe-local foundation 完成；真实 recall/provider deferred** | v0.8.0+ |
 | **4** | Sub-agent / Handoff | 🟡 **Safe Local MVP 已完成；真实 delegation deferred** | 后续 |
 | **5** | Skill system | 🟡 **Safe Local MVP 已完成；真实 install/execution deferred** | 后续（可轻量穿插） |
 | **6** | Observability foundation | 🟡 **Local Trace Foundation + optional sink 已完成；full runtime wiring deferred** | 跨阶段 |
@@ -108,12 +108,20 @@ core**。
   fake/local deterministic runbook、fixtures、expected behavior 与 safety checks，
   不读取真实 sessions/runs/logs，不接 provider/LLM/MCP/runtime。
 - ✅ **Memory Kernel v1 运行时闭环已完成**：`agent/memory_runtime.py` 提供
-  `MemoryRuntime` 高内聚协调器，通过 `MemoryConfirmationAdapter` Protocol 注入确认
-  接缝（`FakeMemoryConfirmationAdapter` 测试用 / `DeferredMemoryConfirmationAdapter`
-  生产用），`core.py` 仅 2 处薄注入（`_memory_runtime` 模块级实例 +
+  `MemoryRuntime` 高内聚协调器，通过两阶段确认流程（`evaluate_user_text` →
+  `CONFIRMATION_REQUIRED` → `resolve_confirmation`）桥接到 `awaiting_user_input`
+  机制，`core.py` 仅 2 处薄注入（`_memory_runtime` 模块级实例 +
   `evaluate_user_text` 调用 + `snapshot_for_prompt` → `build_system_prompt`），
   `MemoryRecord` 已预留 `memory_type`/`source_type`/`approval_status`/`metadata`
   未来扩展字段；21 个 deterministic 集成测试全部通过。
+- ✅ **Memory Interactive Confirmation v1 已完成**：`agent/memory_interaction.py`
+  (175行) 提供 `build_memory_pending_request` / `parse_memory_confirmation_reply` /
+  `handle_memory_confirmation_reply` 桥接层；`MemoryRuntime` 新增两阶段流程
+  (`evaluate_user_text` → CONFIRMATION_REQUIRED → `resolve_confirmation` → STORED/
+  REJECTED)；复用 `awaiting_user_input` + `pending_user_input_request`
+  (`awaiting_kind="memory_confirmation"`)，不新增第 6 套 pending status；5 种 choice
+  全部可交互式消费；新增 18 条 interactive confirmation 测试 + 更新 24 条已有测试；
+  不改 `TaskState`、不改 checkpoint schema、不改 TUI、不使用裸 `input()`/`print()`。
 - ✅ MCP CLI Config Management safe apply governance 已完成：parser/validator/
   redaction、CLI list/inspect/validate、plan preview、plan-first apply、`--yes`、
   backup、deterministic serialization、redacted diff evidence、safety manifest 都已
@@ -164,6 +172,34 @@ core**。
   消息转换 / 工具 schema 转换 / tool_calls 归一化）；`openai_native` 已实现
   最小 Chat Completions adapter（默认 https://api.openai.com，复用
   openai_compatible 的转换/归一化逻辑）。详见 `docs/LLM_PROVIDER_ADAPTER.md`。
+- ✅ **Phase E: Memory Interactive Confirmation v1** 已完成：
+  `agent/memory_interaction.py` (175行) 桥接层提供 `build_memory_pending_request` /
+  `parse_memory_confirmation_reply` / `handle_memory_confirmation_reply`；
+  `agent/memory_runtime.py` 新增 `_pending_decision` cache + `resolve_confirmation()`
+  两阶段流程（evaluate → CONFIRMATION_REQUIRED → resolve → STORED/REJECTED）；
+  `agent/core.py` 新增 CONFIRMATION_REQUIRED 分支（~30行）；复用
+  `awaiting_user_input` + `pending_user_input_request`（`awaiting_kind="memory_confirmation"`），
+  不新增第 6 套 pending status；5 种 choice（ACCEPT/EDIT_AND_ACCEPT/SESSION_ONLY/
+  REJECT/OTHER）全部可交互式消费；`agent/memory_store.py` USE_ONCE 独立 write 分支；
+  `tests/test_memory_interactive_confirmation.py` 18 条测试覆盖两阶段完整闭环；
+  `tests/test_memory_runtime_integration.py` 24 条测试适配新 API；
+  不新增 TaskState 字段、不改 checkpoint schema、不改 TUI、不使用裸 input()/print()。
+- ✅ **Phase D: TUI/HITL Memory RuntimeEvent Hardening** 已完成：
+  `agent/display_events.py` 新增 `EVENT_MEMORY_STORED/BLOCKED/INJECTED` 三种
+  RuntimeEvent 类型及工厂函数（含脱敏）；`agent/core.py` 桥接
+  `MemoryRuntime.evaluate_user_text` 返回值到 RuntimeEvent 发射（STORED →
+  "已记住：…"、BLOCKED → "已拦截敏感记忆：…"、INJECTED → "已加载记忆：N 条"）；
+  `docs/PENDING_INTERACTION_MODEL.md` 落地轻量 PendingInteraction 概念模型（5 节：
+  为什么需要、现有变体、Memory 未来变体、三元 vs 五选项 gap、非目标）；
+  `tests/test_memory_runtime_events.py` 29 条测试保护事件构造/渲染/脱敏/CLI 一致性；
+  不新增 pending status、不改 checkpoint schema、不改 TUI、不实现 Memory interactive
+  confirmation。
+- ✅ **Memory Next Stage Architecture Plan** 已新增：
+  `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` 覆盖 agent-suggested memory + external
+  MemoryProvider adapter 的统一架构设计，明确统一确认模型、信任边界、分阶段路线
+  （Phase 1-5）。当前不做任何实现——不接 agent-suggested runtime、不接 external
+  provider、不新增依赖、不改 checkpoint schema。下一步推荐 Phase 2: agent-suggested
+  deterministic candidate generation (heuristic-based，不接 LLM)。
 - ✅ Remaining Roadmap Completion Autopilot 已记录：
   `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
   planning、MCP external integration readiness、runtime trace / ToolResult migration
@@ -178,7 +214,7 @@ core**。
 - ❌ 当前还没进入 Stage 4 sub-agent、Stage 5 Skill 真实外部激活，也不做 Hook / RAG /
   embedding / vector DB 实现。
 
-> 口径：**Tool System + MCP Safety Foundation Complete**；
+> 口径：**Tool System + MCP Safety Foundation Complete + Memory RuntimeEvent Hardening Complete**；
 > 工具体系治理（ToolResultEnvelope executor integration、ToolAuditEvent lifecycle、
 > ToolSpec metadata、tool/MCP health checks）和 MCP 安全基础（policy-gated
 > registration、descriptor sanitization、adversarial scan、audit trail、
@@ -554,6 +590,36 @@ push 或 tag，除非用户单独选择对应动作。
   audit summary、sensitive handling、fake store 到 governed snapshot、prompt_builder
   boundary；只使用 fake/local deterministic data；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。
+
+#### Stage 3 Next Stage · Agent-suggested + External Provider Architecture Planning
+
+**本轮产物**：
+- `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md`：覆盖 agent-suggested memory 与 external
+  MemoryProvider adapter 的统一架构设计，包含信任模型、统一确认流、安全边界、
+  分阶段路线（Phase 1-5）和下一轮可执行 prompt 草案。
+
+**当前状态**：
+- ✅ Memory Interactive Confirmation v1 已完成（user-initiated explicit memory）
+- ✅ Memory Next Stage Architecture Plan 已落地（本 design doc）
+- ❌ agent-suggested runtime 未实现
+- ❌ external provider 未接
+- ❌ semantic recall / reflection / episodic memory 未实现
+
+**下一步候选**（按推荐优先级）：
+
+| 优先级 | 阶段 | 说明 | 修改范围 |
+|--------|------|------|----------|
+| **推荐** | Phase 2: agent-suggested deterministic candidate generation | 确定性 heuristic 生成候选，不接 LLM，复用现有 confirmation。验证多来源统一确认模型。 | 新增 `agent/memory_agent_suggested.py` (~150行)，不改 core.py/checkpoint schema |
+| 后续 | Phase 3: external MemoryProvider protocol only | 定义 `MemoryProviderProtocol` + fake provider + sanitizer，不接真实 provider | 新增 `agent/memory_provider.py` (~120行) |
+| 远期 | Phase 4: opt-in real provider integration | 需用户显式授权，选一个 provider 实现 adapter，real tests opt-in | 新增 provider adapter 模块 |
+| 远期 | Phase 5: reflection / episodic / procedural | 高级 memory 能力，跨会话整理和合并 | 范围待定 |
+
+**不做的**：
+- 不接 Mem0 / LangChain / Zep（Phase 3 之前）
+- 不做 semantic recall / vector DB / embedding
+- 不做 checkpoint schema 变更
+- 不做 reflection / consolidation（Phase 5）
+- 不做 persistence
 
 学习型边界说明：
 - Memory 是 Agent Runtime 的长期语义层，回答“哪些稳定事实、偏好、项目知识、

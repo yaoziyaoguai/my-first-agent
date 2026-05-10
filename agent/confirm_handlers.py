@@ -152,6 +152,10 @@ class ConfirmationContext:
     # 依赖 core.chat / _run_planning_phase。函数引用只在内存里传递，不写
     # checkpoint、不进 messages、不属于 schema。
     start_planning_fn: StartPlanningFn | None = None
+    # Memory Interactive Confirmation v1：memory_runtime 通过 context 注入，
+    # 避免 confirm_handlers → core 的反向 import cycle。
+    # 函数引用只在内存里传递，不写 checkpoint、不进 messages。
+    memory_runtime: Any | None = None
 
 
 def _emit_plan_confirmation(ctx: ConfirmationContext, plan: Any, *, source: str) -> None:
@@ -504,7 +508,7 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
 def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     """Handle input when task status is awaiting_user_input.
 
-    awaiting_user_input 现在有两种触发来源：
+    awaiting_user_input 现在有三种触发来源：
     1. **执行期求助**：模型在普通 step 里调用了 request_user_input 元工具。
        特征：state.task.pending_user_input_request 非 None。
        语义：当前 step 还没完成，用户只是为它补充信息。
@@ -514,9 +518,27 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
        特征：pending_user_input_request 为 None。
        语义：这一步的目标本就是问用户，用户回了就算这步完成。
        行为：原有逻辑——写 step_input，按 confirm_each_step 决定推进 / 等确认 / 收任务。
+    3. **memory_confirmation**：Memory Interactive Confirmation v1。
+       特征：pending_user_input_request.awaiting_kind == "memory_confirmation"。
+       语义：用户在确认是否记住某条信息。
+       行为：委托给 memory_interaction.handle_memory_confirmation_reply。
     """
     state = ctx.state
     turn_state = ctx.turn_state
+    pending = state.task.pending_user_input_request or {}
+
+    # Memory confirmation：委托给 memory_interaction handler。
+    # memory_runtime 通过 ConfirmationContext 注入，避免 confirm_handlers → core
+    # 的反向 import cycle（P0-1 fix）。
+    if pending.get("awaiting_kind") == "memory_confirmation":
+        from agent.memory_interaction import handle_memory_confirmation_reply
+        return handle_memory_confirmation_reply(
+            user_input,
+            ctx,
+            memory_runtime=ctx.memory_runtime,
+            on_runtime_event=getattr(turn_state, "on_runtime_event", None),
+        )
+
     messages = state.conversation.messages
     current_plan = state.task.current_plan
 

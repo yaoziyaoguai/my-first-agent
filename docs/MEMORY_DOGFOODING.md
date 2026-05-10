@@ -146,9 +146,10 @@ Use only these fake strings and fake records:
 
 ## Memory Kernel v1 Automated Verification
 
-The integration tests in `tests/test_memory_runtime_integration.py` provide
-automated verification of the full governance path. These tests use only
-`FakeMemoryConfirmationAdapter` + `InMemoryMemoryStore`, no real IO/provider.
+The integration tests in `tests/test_memory_runtime_integration.py` and
+`tests/test_memory_interactive_confirmation.py` provide automated verification
+of the full governance path via two-phase confirmation flow + `InMemoryMemoryStore`,
+no real IO/provider.
 
 | # | Test | What it verifies |
 |---|---|---|
@@ -170,10 +171,13 @@ automated verification of the full governance path. These tests use only
 | 18 | `test_memory_record_defaults_are_kernel_v1_values` | defaults match Kernel v1 semantics |
 | 19 | `test_memory_evaluation_result_has_decision_type_field` | NO_OP→None, STORED→RETAIN |
 | 20 | `test_memory_runtime_does_not_use_input` | AST scan: no input() calls |
-| 21 | `test_fake_confirmation_adapter_accept_and_reject` | Fake adapter accept/reject behavior |
+| 21 | `test_two_phase_confirm_flow_writes_store` | Two-phase flow writes store via evaluate → resolve_confirmation |
+| 22 | `test_evaluate_user_text_emits_on_event` | evaluate_user_text emits confirmation_requested event |
+| 23 | `test_create_memory_runtime_default_behavior` | create_memory_runtime() two-phase default behavior |
 
-All 21 tests pass (0.14s). Combined with the existing 103 memory contract/policy/
-store/snapshot/provider tests, the total memory test suite is 124 tests (0.39s).
+All 23 tests pass. Combined with the existing 103 memory contract/policy/
+store/snapshot/provider tests and 18 interactive confirmation tests, the total
+memory test suite is 142+ tests.
 
 ## Manual review questions
 

@@ -183,8 +183,13 @@ def test_forget_operation_removes_only_fake_record() -> None:
     assert store.list_records() == ()
 
 
-def test_use_once_and_reject_do_not_write_store() -> None:
-    """use_once/reject 是用户控制权边界，不能升级成 store write。"""
+def test_use_once_writes_session_record_reject_does_not_write() -> None:
+    """SESSION_ONLY 写入 session 记录 (APPLIED)，REJECT 不写入 (SKIPPED)。
+
+    Phase E 变更：USE_ONCE 从 NON_WRITING_OPERATION_TYPES 移除，新增专用 write
+    分支。SESSION_ONLY 需要写入 store 以在本会话内被 snapshot/prompt 使用，
+    但不能授权长期记忆。REJECT 仍然不写 store。
+    """
 
     from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus
 
@@ -201,9 +206,17 @@ def test_use_once_and_reject_do_not_write_store() -> None:
     use_once_result = store.apply_operation_intent(use_once_intent, use_once_audit)
     reject_result = store.apply_operation_intent(reject_intent, reject_audit)
 
-    assert use_once_result.status is MemoryStoreApplyStatus.SKIPPED
+    # SESSION_ONLY → USE_ONCE → APPLIED (session-scoped write)
+    assert use_once_result.status is MemoryStoreApplyStatus.APPLIED
+    assert use_once_result.record is not None
+    assert use_once_result.record.approval_status == "session_only"
+    # REJECT → SKIPPED (no write)
     assert reject_result.status is MemoryStoreApplyStatus.SKIPPED
-    assert store.list_records() == ()
+    # 只有 SESSION_ONLY 的记录在 store 中
+    records = store.list_records()
+    assert len(records) == 1
+    assert records[0].content == use_once_result.record.content
+    assert records[0].approval_status == "session_only"
 
 
 def test_store_requires_operation_intent_and_matching_audit_summary() -> None:

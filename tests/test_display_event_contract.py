@@ -70,6 +70,10 @@ from agent.display_events import (
     EVENT_DISPLAY_EVENT,
     EVENT_FEEDBACK_INTENT_REQUESTED,
     EVENT_LOOP_MAX_ITERATIONS,
+    EVENT_MEMORY_BLOCKED,
+    EVENT_MEMORY_CONFIRMATION_REQUESTED,
+    EVENT_MEMORY_INJECTED,
+    EVENT_MEMORY_STORED,
     EVENT_PLAN_CONFIRMATION_REQUESTED,
     EVENT_STATE_INCONSISTENCY_RESET,
     EVENT_TOOL_CONFIRMATION_REQUESTED,
@@ -191,6 +195,13 @@ _EVENT_BASELINE: frozenset[str] = frozenset(
         EVENT_STATE_INCONSISTENCY_RESET,
         EVENT_LOOP_MAX_ITERATIONS,
         EVENT_UNKNOWN_STOP_REASON,
+        # Phase D Memory RuntimeEvent hardening：memory 操作结果投影到 UI。
+        # 三者都是 display/observation event，不含 decision 语义。
+        EVENT_MEMORY_STORED,
+        EVENT_MEMORY_BLOCKED,
+        EVENT_MEMORY_INJECTED,
+        # Memory Interactive Confirmation v1：用户确认请求事件
+        EVENT_MEMORY_CONFIRMATION_REQUESTED,
     }
 )
 

@@ -457,6 +457,98 @@ Do not add now:
 - Stop condition: requires real private memory data, real provider, automatic
   retain/recall, or prompt_builder direct store reads.
 
+## Memory Interactive Confirmation v1 (Phase E, completed)
+
+The Memory Interactive Confirmation v1 transforms the Kernel v1 auto-accept flow
+into a two-phase interactive confirmation that reuses the existing `awaiting_user_input`
+mechanism without creating a new pending status.
+
+### Architecture
+
+```text
+Phase 1 — evaluate:
+  user_text
+    -> MemoryRuntime.evaluate_user_text()
+      -> MemoryPolicy.decide() -> MemoryDecision(RETAIN)
+      -> cache decision in _pending_decision
+      -> return CONFIRMATION_REQUIRED
+
+Phase 2 — resolve:
+  user choice ("1"~"5" or "N text" or free text)
+    -> handle_memory_confirmation_reply()
+      -> parse_memory_confirmation_reply() -> (choice, free_text)
+      -> MemoryRuntime.resolve_confirmation(candidate_id, choice, free_text)
+        -> resolve_memory_confirmation_choice() -> status
+        -> APPROVED/REJECTED/SESSION_ONLY/NEEDS_CLARIFICATION
+        -> store write (APPROVED/SESSION_ONLY) / skip (REJECTED)
+```
+
+### Key design decisions
+
+1. **No new pending status**: Reuses `awaiting_user_input` + `pending_user_input_request`
+   with `awaiting_kind="memory_confirmation"`. Memory-specific data (`_candidate_id`,
+   `_choice_map`, `_origin_status`) stored as `_`-prefixed keys in the pending dict.
+   No TaskState schema changes.
+
+2. **Dedicated parse_memory_confirmation_reply()**: Memory confirmation bypasses
+   `classify_confirmation_response` (which only handles accept/reject/feedback).
+   Instead, a dedicated parser handles numeric choices ("1"~"5"), "N text" patterns,
+   and free-text fallback to OTHER.
+
+3. **Two-phase flow**: `evaluate_user_text()` stops at CONFIRMATION_REQUIRED;
+   `resolve_confirmation(candidate_id, choice, free_text)` completes the write.
+   The `_pending_decision` cache bridges the two phases.
+
+4. **Bridge module (`agent/memory_interaction.py`)**: Converts `MemoryConfirmationRequest`
+   to JSON-safe pending dict, parses user replies, and handles the complete
+   confirmation lifecycle. It imports checkpoint lazily to avoid circular
+   dependencies (core → confirm_handlers → core).
+
+5. **5 choice options**: ACCEPT, EDIT_AND_ACCEPT (requires free_text), SESSION_ONLY,
+   REJECT, OTHER (requires free_text). Mapped from `MemoryConfirmationChoice` enum.
+
+6. **USE_ONCE store semantics**: `MemoryOperationType.USE_ONCE` was moved from
+   `NON_WRITING_OPERATION_TYPES` to a dedicated write branch in
+   `InMemoryMemoryStore.apply_operation_intent`. SESSION_ONLY now correctly writes
+   a session-scoped record.
+
+### Files
+
+| File | Status | Role |
+|---|---|---|
+| `agent/memory_interaction.py` | new (175 lines) | Bridge: build pending / parse reply / handle reply |
+| `agent/memory_runtime.py` | modified | `_pending_decision` cache + `resolve_confirmation()` |
+| `agent/core.py` | modified | CONFIRMATION_REQUIRED branch (~30 lines) |
+| `agent/confirm_handlers.py` | modified | `awaiting_kind="memory_confirmation"` routing |
+| `agent/display_events.py` | modified | `EVENT_MEMORY_CONFIRMATION_REQUESTED` event |
+| `agent/memory_store.py` | modified | USE_ONCE dedicated write branch |
+| `tests/test_memory_interactive_confirmation.py` | new (408 lines, 18 tests) | Full two-phase flow coverage |
+| `tests/test_memory_runtime_integration.py` | modified | 24 tests updated for new API |
+
+### What's NOT in Interactive Confirmation v1
+
+- No new pending status (`TaskState` unchanged)
+- No checkpoint schema changes
+- No `classify_confirmation_response` modification
+- No TUI button/menu rendering (text-based options only)
+- No agent-suggested memory confirmation (only user-initiated explicit retain)
+- No bare `input()` or `print()` calls
+- No new dependencies
+
+### Known Limitations
+
+- **In-memory store**: Records lost on process restart; only pending confirmation
+  state persists via checkpoint
+- **Module-level singleton**: `_memory_runtime` in core.py shares `InMemoryMemoryStore`
+- **Text-based options only**: TUI/CLI render options as text list; no buttons/menus
+- **Only user-initiated memory**: Agent-suggested memory confirmation deferred
+- **Resume E2E coverage**: Pending payload JSON round-trip safety is verified
+  (`test_pending_payload_survives_json_round_trip` +
+  `test_pending_recovery_resolve_after_checkpoint_round_trip` in
+  `tests/test_memory_interactive_confirmation.py`), but full file-system
+  checkpoint → process restart → resume → resolve E2E is not yet covered.
+  This is documented future work; no checkpoint schema change is needed.
+
 ## Memory Architecture Final Review Readiness
 
 - Stage 6 manual UX dogfooding is now the last fake-data review layer before any
@@ -482,7 +574,8 @@ into a minimal runtime closed loop through `agent/memory_runtime.py`.
 user_text
   -> MemoryRuntime.evaluate_user_text()
     -> DeterministicMemoryPolicy.decide()
-    -> MemoryConfirmationAdapter.request_confirmation()
+    -> 缓存 decision → 返回 CONFIRMATION_REQUIRED
+  -> MemoryRuntime.resolve_confirmation(candidate_id, choice, free_text)
     -> MemoryStoreProtocol.apply_operation_intent()
     -> MemoryEventLogger (audit events)
   -> MemoryRuntime.snapshot_for_prompt()
@@ -492,14 +585,14 @@ user_text
 
 ### Key design decisions
 
-1. **Confirmation adapter Protocol (NOT bare input())**: `MemoryConfirmationAdapter`
-   is an injectable seam. `FakeMemoryConfirmationAdapter` returns deterministic
-   accept/reject for tests; `DeferredMemoryConfirmationAdapter` emits a
-   RuntimeEvent and auto-accepts for explicit retain in v1.
+1. **Two-phase confirmation flow (NOT bare input())**: `evaluate_user_text()` returns
+   `CONFIRMATION_REQUIRED` and caches the decision in `_pending_decision`. The caller
+   then invokes `resolve_confirmation(candidate_id, choice, free_text)` to apply the
+   user's choice. No `input()` calls; no auto-accept path.
 
-2. **All dependencies injectable**: policy, store, confirmation_adapter, and
-   event_logger are all keyword-only constructor parameters. No hard-wired
-   singletons except the thin module-level `_memory_runtime` in core.py.
+2. **All dependencies injectable**: policy, store, and event_logger are all
+   keyword-only constructor parameters. No hard-wired singletons except the thin
+   module-level `_memory_runtime` in core.py.
 
 3. **Thin core.py integration (2 call sites only)**:
    - `evaluate_user_text(user_input, on_event=on_runtime_event)` in `chat()` —
@@ -519,7 +612,7 @@ user_text
 
 ### Test coverage
 
-24 deterministic integration tests in `tests/test_memory_runtime_integration.py`:
+24 deterministic integration tests + 18 interactive confirmation tests:
 - explicit retain (English + Chinese) → store write
 - snapshot → prompt injection
 - sensitive content blocked
@@ -528,8 +621,9 @@ user_text
 - reject → no store write
 - AST boundary scans (no checkpoint/MCP/provider/tool imports, no input() call)
 - future field presence (metadata, memory_type, source_type, approval_status)
-- confirmation adapter accept/reject behavior
-- DeferredMemoryConfirmationAdapter auto-accept (3 tests)
+- two-phase confirmation flow (evaluate → CONFIRMATION_REQUIRED → resolve_confirmation)
+- 5 choice options (accept/edit_and_accept/session_only/reject/other)
+- pending payload JSON round-trip safety
 
 ### Files
 
@@ -558,10 +652,11 @@ user_text
 ### v1 Known Limitations
 
 These are documented honestly, not as TODOs to rush into:
-- **DeferredMemoryConfirmationAdapter auto-accepts explicit retain**:
-  v1 temporary strategy because user intent is explicit in "remember that X".
-  Real interactive Ask User / request_user_input confirmation is deferred to
-  a later stage. See `agent/memory_runtime.py` docstring.
+- **Two-phase confirmation flow requires caller participation**: The caller must
+  handle `CONFIRMATION_REQUIRED` by building a pending dict, setting
+  `awaiting_user_input` status, saving checkpoint, and later calling
+  `resolve_confirmation`. This is integrated via `agent/memory_interaction.py`
+  and `core.py`'s CONFIRMATION_REQUIRED branch.
 - **Module-level _memory_runtime singleton**: `_memory_runtime` in core.py is
   a module-level instance with shared `InMemoryMemoryStore`. Single-process
   single-session is fine; multi-session may cross-contaminate memory. Future

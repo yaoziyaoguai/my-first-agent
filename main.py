@@ -27,6 +27,8 @@ from agent.session import (
     handle_interrupt_with_checkpoint,
     handle_interrupt_without_checkpoint,
     handle_double_interrupt,
+    handle_resume_choice,
+    handle_interrupt_choice,
     summarize_session_status,
 )
 from agent.cli_renderer import render_status_line
@@ -458,6 +460,31 @@ def main_loop():
                 if status_line != last_status_line:
                     print(f"\n{status_line}")
                     last_status_line = status_line
+
+            # P2 修复：resume / interrupt 选择不再在 session.py 里裸调 input()，
+            # 改为由 main_loop 通过正常输入后端收口读取。
+            state = get_state()
+            if state.task.status == "awaiting_resume_choice":
+                event = read_user_input_event(
+                    prompt_text="要继续这个任务吗？(y/n): ",
+                    latest_output="",
+                )
+                if event.envelope is not None:
+                    handle_resume_choice(event.envelope.raw_text)
+                continue
+
+            if state.task.status == "awaiting_interrupt_choice":
+                # 菜单已由 handle_interrupt_with_checkpoint 打印。
+                event = read_user_input_event(
+                    prompt_text="请选择 (1/2/3): ",
+                    latest_output="",
+                )
+                if event.envelope is not None:
+                    should_exit = handle_interrupt_choice(event.envelope.raw_text)
+                    if should_exit:
+                        break
+                continue
+
             event = read_user_input_event(latest_output=latest_output)
             intent = classify_user_input(
                 event.envelope.raw_text if event.envelope is not None else None,
@@ -702,6 +729,20 @@ def main(argv: list[str] | None = None) -> int:
     _init_mcp_bridge_if_enabled()
     init_session()
     try_resume_from_checkpoint()
+
+    # P2 修复：try_resume_from_checkpoint 可能将 status 设为
+    # awaiting_resume_choice。进入 main_loop / textual shell 前必须先解析。
+    state = get_state()
+    if state.task.status == "awaiting_resume_choice":
+        if _selected_input_backend() == "textual":
+            # Textual 后端尚未初始化，用 raw input() 做一次性解析。
+            # Textual 是 TTY-only，不存在管道 stdin 抢占问题。
+            choice = input("要继续这个任务吗？(y/n): ").strip().lower()
+            handle_resume_choice(choice)
+        else:
+            # simple 后端：交给 main_loop 通过正常输入后端收口。
+            pass
+
     if _selected_input_backend() == "textual":
         run_textual_main_loop()
     else:

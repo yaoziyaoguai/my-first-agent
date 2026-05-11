@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 
 from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.health_check import run_health_check
@@ -90,6 +91,12 @@ def try_resume_from_checkpoint():
     M7-C 修复：不再无条件 prompt；只有 checkpoint 真的处于「等待用户输入」
     或「执行中断」状态时才提示。idle + 空消息的 checkpoint 视作历史残留，
     静默清掉，避免干扰用户开始新对话。
+
+    P2 修复：不再在此函数内直接调用 input()。管道 stdin 下，这里的 input()
+    会抢跑管道内容，导致确认不可靠。改为：
+    - 管道模式（stdin 非 TTY）：自动恢复，不弹交互提示。
+    - TTY 模式：设 state.task.status = "awaiting_resume_choice"，
+      由 main_loop 通过正常输入后端收口读取用户选择。
     """
     # 延迟 import，避免循环依赖
     from agent.core import get_state
@@ -119,17 +126,16 @@ def try_resume_from_checkpoint():
     summary = _build_checkpoint_resume_summary(task_data, conv_data)
     print(render_resume_status(summary))
 
-    choice = input("要继续这个任务吗？(y/n): ").strip().lower()
-    if choice != "y":
-        clear_checkpoint()
-        print("\n[系统] 已清除断点，回到对话模式，可以直接输入新任务。\n")
+    # 管道模式：不弹交互提示，自动恢复最近任务。
+    if not sys.stdin.isatty():
+        print("[系统] 检测到管道输入，自动恢复最近任务。")
+        restored = load_checkpoint_to_state(get_state())
+        if restored:
+            _replay_awaiting_prompt(get_state())
         return
 
-    restored = load_checkpoint_to_state(get_state())
-    if restored:
-        _replay_awaiting_prompt(get_state())
-    else:
-        print("\n[系统] 恢复断点失败。\n")
+    # TTY 模式：交给 main_loop 通过正常输入后端收口读取用户选择。
+    get_state().task.status = "awaiting_resume_choice"
 
 
 def _build_checkpoint_resume_summary(task_data: dict, conv_data: dict) -> dict:
@@ -281,11 +287,16 @@ def finalize_session():
 # ========== 中断处理 ==========
 
 def handle_interrupt_with_checkpoint() -> bool:
-    """单次 Ctrl+C + 有 checkpoint：弹菜单。返回 True 表示要退出程序。"""
+    """单次 Ctrl+C + 有 checkpoint：弹菜单。
+
+    P2 修复：不再在此函数内直接调用 input()，改为设
+    state.task.status = "awaiting_interrupt_choice"，
+    由 main_loop 通过正常输入后端收口读取用户选择。
+    返回 True 表示要退出程序。
+    """
     from agent.core import get_state
 
     state = get_state()
-    messages = state.conversation.messages
     save_checkpoint(state)
 
     print("\n\n[系统] 当前任务已暂停，断点已保存。")
@@ -293,10 +304,46 @@ def handle_interrupt_with_checkpoint() -> bool:
     print("  2. 放弃任务，回到对话模式")
     print("  3. 退出程序")
 
-    choice = input("请选择 (1/2/3): ").strip()
+    state.task.status = "awaiting_interrupt_choice"
+    return False
+
+
+def handle_resume_choice(choice: str) -> None:
+    """处理 await_resume_choice 状态的用户输入。
+
+    由 main_loop 在读取到用户输入后调用。
+    """
+    from agent.core import get_state
+
+    choice = choice.strip().lower()
+    if choice != "y":
+        clear_checkpoint()
+        print("\n[系统] 已清除断点，回到对话模式，可以直接输入新任务。\n")
+        get_state().task.status = "idle"
+        return
+
+    restored = load_checkpoint_to_state(get_state())
+    if restored:
+        _replay_awaiting_prompt(get_state())
+    else:
+        print("\n[系统] 恢复断点失败。\n")
+        get_state().task.status = "idle"
+
+
+def handle_interrupt_choice(choice: str) -> bool:
+    """处理 awaiting_interrupt_choice 状态的用户输入。
+
+    由 main_loop 在读取到用户输入后调用。
+    返回 True 表示要退出程序。
+    """
+    from agent.core import get_state
+
+    state = get_state()
+    choice = choice.strip()
 
     if choice == "1":
         print("[系统] 已保留当前任务状态，继续对话。\n")
+        state.task.status = "running"
         return False
 
     if choice == "2":
@@ -306,11 +353,12 @@ def handle_interrupt_with_checkpoint() -> bool:
         return False
 
     if choice == "3":
-        save_session_snapshot(messages)
+        save_session_snapshot(state.conversation.messages)
         print("[系统] 再见！")
         return True
 
     print("[系统] 回到对话模式。\n")
+    state.task.status = "idle"
     return False
 
 

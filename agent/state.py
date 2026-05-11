@@ -23,6 +23,12 @@ KNOWN_TASK_STATUSES = {
     # 旧 checkpoint 不带这个 status 仍能正常加载（旧集合是新集合的子集）。
     # 详见 docs/P1_TOPIC_SWITCH_PLAN.md §4.1。
     "awaiting_feedback_intent",
+    # P2 新增：启动时发现可恢复 checkpoint，等待用户选择 y/n。
+    # 此状态不持久化到 checkpoint，仅用于 main_loop 内路由。
+    "awaiting_resume_choice",
+    # P2 新增：Ctrl+C 中断后等待用户选择 1/2/3。
+    # 此状态不持久化到 checkpoint，仅用于 main_loop 内路由。
+    "awaiting_interrupt_choice",
     "done",
     "failed",
     "cancelled",

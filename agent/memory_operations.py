@@ -52,6 +52,10 @@ class MemoryOperationIntent:
     safety_summary: str
     sensitive_redacted: bool
     user_visible_summary: str
+    # Memory Kernel v1 — memory_type/source_type 从 candidate metadata 流入 store。
+    # 默认值保持向后兼容：explicit_user_request 路径不携带 metadata 时，语义不变。
+    memory_type: str = "semantic"
+    source_type: str = "explicit_user_request"
 
     def __post_init__(self) -> None:
         if not self.content_summary.strip():
@@ -87,12 +91,22 @@ def build_memory_operation_intent(
     """从 confirmation result 生成 operation intent，不执行操作。"""
 
     decision = confirmation.request.decision
+    candidate = decision.target_candidate
     operation_type = _operation_type_for(confirmation)
     sensitive_redacted = _is_sensitive(decision)
     content_summary = _content_summary(confirmation, sensitive_redacted)
     source_summary = _source_summary(confirmation)
     scope = _scope(confirmation)
     safety_summary = _safety_summary(confirmation, sensitive_redacted)
+
+    # 从 candidate metadata 提取 memory_type/source_type，打通 suggestion → store 链路。
+    # explicit_user_request 路径（policy 直接生成的 candidate）无 metadata，
+    # 回退到默认值 "semantic" / "explicit_user_request"，行为不变。
+    memory_type = "semantic"
+    source_type = "explicit_user_request"
+    if candidate is not None and candidate.metadata:
+        memory_type = candidate.metadata.get("memory_type", "semantic")
+        source_type = candidate.metadata.get("source_type", "explicit_user_request")
 
     return MemoryOperationIntent(
         operation_type=operation_type,
@@ -105,6 +119,8 @@ def build_memory_operation_intent(
         safety_summary=safety_summary,
         sensitive_redacted=sensitive_redacted,
         user_visible_summary=_user_visible_summary(operation_type),
+        memory_type=memory_type,
+        source_type=source_type,
     )
 
 

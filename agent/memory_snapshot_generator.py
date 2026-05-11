@@ -115,10 +115,13 @@ def _snapshot_item_from_record(
     return MemorySnapshotItem(
         content=content,
         scope=scope,
-        provenance=f"{record.source_summary}; audit:{record.audit_id}; record:{record.id}",
+        provenance=(
+            f"{record.source_summary}; type:{record.memory_type}; "
+            f"audit:{record.audit_id}; record:{record.id}"
+        ),
         selection_reason=(
-            f"{options.selection_reason}; audit:{record.audit_id}; "
-            f"safety:{record.safety_summary}"
+            f"{options.selection_reason}; type:{record.memory_type}; "
+            f"audit:{record.audit_id}; safety:{record.safety_summary}"
         ),
         sensitivity=sensitivity,
     )

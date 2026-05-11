@@ -384,9 +384,9 @@ def _meta_from_intent(intent: MemoryOperationIntent, audit_id: str, record_id: s
     scope_str = intent.scope.value if intent.scope else "session"
     return {
         "id": record_id,
-        "memory_type": "semantic",  # v1 default
+        "memory_type": getattr(intent, "memory_type", "semantic"),
         "scope": scope_str,
-        "source_type": "explicit_user_request",
+        "source_type": getattr(intent, "source_type", "explicit_user_request"),
         "approval_status": intent.confirmation_status.value
         if hasattr(intent.confirmation_status, "value") else str(intent.confirmation_status),
         "created_at": now,
@@ -569,16 +569,17 @@ class FilesystemMemoryStore:
     def _apply_retain(self, intent: MemoryOperationIntent, audit_id: str) -> MemoryStoreApplyResult:
         record_id = derive_memory_record_id(intent.source_summary)
         meta = _meta_from_intent(intent, audit_id, record_id)
-        topic = _route_topic("semantic", intent.scope or MemoryScope.USER)
+        memory_type = getattr(intent, "memory_type", "semantic")
+        topic = _route_topic(memory_type, intent.scope or MemoryScope.USER)
         filepath = self.root_dir / topic
         write_memory_section(filepath, meta, intent.content_summary)
 
         # write-through index
         _write_index_entry(self.root_dir, record_id, {
             "file": topic,
-            "memory_type": "semantic",
+            "memory_type": memory_type,
             "scope": intent.scope.value if intent.scope else "session",
-            "source_type": "explicit_user_request",
+            "source_type": getattr(intent, "source_type", "explicit_user_request"),
             "approval_status": "approved",
             "confidence": 0.85,
             "stability": "stable",

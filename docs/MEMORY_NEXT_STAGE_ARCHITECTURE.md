@@ -1,9 +1,12 @@
 # Memory Next Stage Architecture Plan
 
+> **历史参考** — Phase 2 路线图已完成。External MemoryProvider 设计归档到
+> `docs/rfc/archived/`，当前明确不做。Canonical design source: `docs/rfc/MEMORY_CANONICAL_RFC.md`
+
 **创建日期**: 2026-05-10
-**性质**: 纯架构设计文档，不包含实现代码
+**性质**: 历史参考 — Agent-suggested memory 路线图（Phase 2 已完成）
 **范围**: Agent-suggested memory + External MemoryProvider adapter 的统一架构设计
-**状态**: Phase 2 已完成，Phase 3 待设计
+**状态**: Phase 2 已完成，External Provider 设计归档
 
 ---
 

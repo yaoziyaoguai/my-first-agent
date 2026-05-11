@@ -291,16 +291,9 @@ def _record_from_intent(
 ) -> MemoryRecord:
     """从 MemoryOperationIntent 构造 MemoryRecord。
 
-    v1 限制：MemoryOperationIntent 当前不携带 memory_type / source_type /
-    approval_status / metadata。这些字段全部依赖 MemoryRecord 的 Kernel v1 默认值：
-    - memory_type → "semantic"（v1 只支持 explicit semantic retain）
-    - source_type → "explicit_user_request"
-    - approval_status → "approved"（经过 confirmation adapter 后已是 approved；
-      USE_ONCE 路径覆盖为 "session_only"）
-    - metadata → {}
-
-    后续 agent_suggested / episodic / procedural / reflection / imported provider
-    需要在 MemoryOperationIntent 中添加对应字段，并在此处传入。
+    memory_type / source_type 优先从 intent 字段读取（由
+    build_memory_operation_intent 从 candidate metadata 提取）；
+    若 intent 字段为默认值则保持向后兼容。
     """
     return MemoryRecord(
         id=derive_memory_record_id(intent.source_summary),
@@ -312,6 +305,8 @@ def _record_from_intent(
         created_by_operation=intent.operation_type,
         updated_by_operation=intent.operation_type,
         sensitive_redacted=intent.sensitive_redacted,
+        memory_type=getattr(intent, "memory_type", "semantic"),
+        source_type=getattr(intent, "source_type", "explicit_user_request"),
         approval_status=approval_status,
     )
 

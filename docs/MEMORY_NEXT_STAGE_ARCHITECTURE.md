@@ -3,7 +3,7 @@
 **创建日期**: 2026-05-10
 **性质**: 纯架构设计文档，不包含实现代码
 **范围**: Agent-suggested memory + External MemoryProvider adapter 的统一架构设计
-**状态**: Draft — 待 review
+**状态**: Phase 2 已完成，Phase 3 待设计
 
 ---
 
@@ -766,20 +766,26 @@ self._log("memory.agent_suggested_candidate", {
 
 ### Phase 2: Agent-suggested Candidate Generation (Deterministic Heuristics)
 
-**状态**: 下一轮候选
-**预计文件**:
-- `agent/memory_agent_suggested.py` (~150 行)
-- `tests/test_memory_agent_suggested.py` (~200 行)
+**状态**: ✅ 已完成 (2026-05-11, commit `29c4bb1`)
+**实际文件**:
+- `agent/memory_suggestions.py` (397 行，命名调整为 `memory_suggestions` 而非 `memory_agent_suggested`)
+- `tests/test_memory_suggestions.py` (613 行，78 条测试)
 
-**实现内容**:
-- `AgentSuggestedCandidateGenerator` 类
-- 4 个确定性 heuristic 规则（重复偏好、project rule、bug fix lesson、架构决策）
-- 反打扰机制（频率限制、去重、confidence threshold）
-- 复用现有 `MemoryPolicy` 安全检查
-- 复用现有两阶段 confirmation 流
-- `source_type="agent_suggested"` 标记
+**实际实现内容**:
+- `DeterministicSuggestionEngine` 类 + `EngineConfig` (frozen dataclass)
+- 4 个确定性 heuristic 规则（project_rule/procedural, bug_fix_lesson/episodic, architecture_decision/semantic, repeated_preference/semantic ≥3 次）
+- 反打扰机制（频率限制 ≤3/session、置信度阈值 ≥0.6、store 去重、敏感内容/prompt injection 过滤）
+- 集成到 `MemoryRuntime._try_suggestions()`：policy NO_OP 后 fall through，复用现有两阶段 confirmation 流
+- 所有 candidate 携带 `metadata={"source_type": "agent_suggested", "memory_type": "..."}`
+- 不改 `core.py`、`memory_policy.py`、`memory_contracts.py`、`memory_store.py`
 
-**不实现**:
+**已知技术债（P2 残留）**:
+- `_pending_decision` 重启丢失（in-memory only，不跨 session）
+- `save_checkpoint` 惰性 import 在 `confirm_handlers.py` 中（为避循环依赖）
+- 敏感 marker 在 `memory_policy.py` 和 `memory_suggestions.py` 中重复定义
+- `memory_runtime.py` 行数增长至 524 行（`_try_suggestions` ~80 行），后续可能需要拆分
+
+**不实现**（与计划一致）:
 - 不接 LLM
 - 不做 reflection
 - 不做 episodic timeline
@@ -838,9 +844,9 @@ self._log("memory.agent_suggested_candidate", {
 ### 路线总览
 
 ```
-Phase 1 (本轮):     Architecture Planning ─────── ✅ 当前
-Phase 2 (下一步):    Agent-suggested Deterministic Heuristics
-Phase 3:            External MemoryProvider Protocol + Fake
+Phase 1:            Architecture Planning ─────── ✅ 已完成
+Phase 2:            Agent-suggested Deterministic Heuristics ─────── ✅ 已完成 (29c4bb1)
+Phase 3 (下一步):    External MemoryProvider Protocol + Fake ─────── 📋 待设计
 Phase 4:            Opt-in Real Provider (需授权)
 Phase 5 (远期):      Reflection / Episodic / Procedural
 ```
@@ -849,148 +855,64 @@ Phase 5 (远期):      Reflection / Episodic / Procedural
 
 ## 9. 推荐下一步
 
-### 推荐：Phase 2 — Agent-suggested Deterministic Candidate Generation
+### 推荐：Phase 3 Design First（非直接 implementation）
 
-**理由**：
+Phase 2 已完成 (2026-05-11, `29c4bb1`)，统一确认模型已通过 agent_suggested source_type 验证。
+下一步**不是**直接写 Phase 3 代码，而是先完成以下设计问题。
 
-1. **不引入外部依赖** — Phase 2 完全是本地确定性代码，不需要网络、API key、第三方库
-2. **复用现有基础设施最大化** — 复用 policy、confirmation、store、snapshot 全部现有模块，改动面极小
-3. **验证统一确认模型** — 在接外部 provider 之前，先用 agent_suggested source_type 验证多来源确认流是否顺畅
-4. **低风险** — heuristic 是确定性的，不涉及 LLM 非确定性，不会引入难以调试的 bug
-5. **独立可测** — 14 条测试全部确定性，不需要 mock 外部服务
-6. **用户感知价值高** — "Agent 能主动建议记住偏好"比"接了一个看不见的外部存储"更直观
+### Phase 3 前置设计问题
 
-**不推荐先做 Phase 3 的理由**：
+在进入 Phase 3 implementation 前，必须回答以下问题：
 
-- External provider protocol 在没有多来源确认流验证过的情况下，接口设计可能不准确
-- 先做 agent_suggested 可以让 `source_type` 的多态确认流先跑通，再做 provider 时只需加一个 `source_type="imported"`
+1. **持久化方案选型**：JSON file vs SQLite vs 其他？in-memory store 如何过渡到持久化 store？需不需要 migration path？
+2. **MemoryStore 与 checkpoint 的边界**：`_pending_decision` 重启丢失 — 跨 session 的 pending confirmation 如何恢复？是否需要在 checkpoint 中保存 pending decision？
+3. **Pending confirmation restore 语义**：用户重启后，上一个 session 未处理的 memory confirmation 应该恢复、丢弃、还是静默降级？
+4. **Recall API 范围**：跨 session memory 召回的最小接口是什么？store 需要支持什么查询原语（by scope, by memory_type, by recency）？
+5. **跨 session memory 安全边界**：外部 store 文件被篡改时如何检测？sensitive record 在持久化时如何保护？
+6. **Schema migration / compatibility**：`MemoryRecord` 字段变化时，持久化文件如何兼容？
+
+### 当前 P2 技术债（不阻塞 Phase 3 设计，但应在 Phase 3 实现前评估）
+
+| 技术债 | 位置 | 影响 |
+|--------|------|------|
+| `_pending_decision` 重启丢失 | `memory_runtime.py` | 单 session 内运行正常，跨 session 丢失未确认的 decision |
+| `save_checkpoint` 惰性 import | `confirm_handlers.py` | 为避循环依赖的折中方案 |
+| 敏感 marker 重复定义 | `memory_policy.py` + `memory_suggestions.py` | 两处维护同一份关键词列表，可能漂移 |
+| `memory_runtime.py` 行数增长 (524行) | `memory_runtime.py` | `_try_suggestions` ~80 行，后续可能需要拆模块 |
 
 ### 执行策略
 
-1. **本轮的文档**作为 Phase 2 的输入 spec
-2. Phase 2 只做 `agent/memory_agent_suggested.py` + 测试
-3. Phase 2 不改 `core.py`（CONFIRMATION_REQUIRED 分支已就位）
-4. Phase 2 不改 checkpoint schema
-5. Phase 2 完成后 review 确认流是否够通用，再进入 Phase 3
+1. Phase 3 设计文档优先于代码实现
+2. 上述 6 个设计问题的结论写入 `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` §9
+3. Phase 2 技术债在 Phase 3 设计阶段评估是否需要在实现前修复
+4. Phase 3 实现仍遵循 safe-local 原则：只做 fake provider + protocol，不接真实外部服务
 
 ---
 
-## 10. 下一轮 Coding Agent Prompt 草案
+## 10. Phase 2 历史 Prompt 归档
 
-以下 prompt 可以直接复制给下一轮的 coding agent：
-
----
-
-```
-你现在在 /Users/jinkun.wang/work_space/my-first-agent。
-
-本轮任务：Agent-suggested Memory — Deterministic Candidate Generation (Phase 2)。
-
-背景：
-
-Memory Interactive Confirmation v1 已完成。当前只支持 user-initiated explicit memory
-（"remember that X" / "记住 X"）。详见 docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md §1-2。
-
-本轮目标：
-
-实现 agent-suggested memory 的最小 deterministic candidate generation，
-不接 LLM，不接 external provider。
-
-必须实现：
-
-1. agent/memory_agent_suggested.py (~150 行)
-
-   class AgentSuggestedCandidateGenerator:
-       def generate_candidates(
-           self,
-           conversation_summary: str,
-           existing_store: MemoryStoreProtocol,
-           user_preferences: dict,
-           *,
-           max_candidates: int = 3,
-       ) -> list[MemoryCandidate]:
-           """确定性 heuristic 生成候选，不使用 LLM"""
-
-   4 个 heuristic 规则：
-   a. 重复偏好检测：同一模式在 conversation_summary 中出现 ≥ 3 次
-      → semantic candidate, confidence=0.7
-   b. 显式 project rule：匹配 "这个项目规定/禁止/必须/要求..."
-      → procedural candidate, confidence=0.8
-   c. bug fix lesson：匹配 "上次就是因为/之前踩过坑/经验教训..."
-      → episodic candidate, confidence=0.7
-   d. 架构决策：匹配 "我们选了/决定用/采用..."
-      → semantic candidate, confidence=0.75
-
-   反打扰机制：
-   - 频率限制：每 session 最多 3 次（通过调用方传入计数器）
-   - 去重：与 existing_store 中已有 record 做 content hash 去重
-   - confidence < 0.6 的 candidate 跳过
-   - 敏感内容（通过 _classify_sensitivity）的 candidate 跳过
-   - prompt injection pattern 的 candidate 跳过
-
-2. tests/test_memory_agent_suggested.py (~200 行)
-
-   至少覆盖：
-   - 4 个 heuristic 规则的确定性测试
-   - 重复偏好去重
-   - 敏感内容跳过
-   - prompt injection 跳过
-   - 频率限制
-   - 低 confidence 跳过
-   - candidate 的 memory_type 正确
-   - candidate 的 source_type="agent_suggested"（通过 metadata 传递）
-
-硬性禁止：
-
-- 不使用 LLM / API 调用
-- 不读取 .env
-- 不修改 checkpoint schema
-- 不修改 core.py
-- 不修改 TaskState
-- 不新增 pending status
-- 不新增依赖
-- 不实现 confirmation（复用现有）
-- 不实现 external provider
-- 不做 persistence
-- 不做 reflection/consolidation
-- 不实现 episodic timeline
-
-必须复用：
-
-- MemoryCandidate (agent/memory_contracts.py) — 已预留 metadata 扩展点
-- _classify_sensitivity / _looks_like_prompt_injection (agent/memory_policy.py)
-- 现有 MemoryConfirmationRequest 流（agent/memory_confirmation.py）
-
-代码质量：
-
-- 所有函数带 type annotations
-- frozen dataclass / namedtuple 优先
-- 不写超过 50 行的函数
-- 测试覆盖所有 heuristic 规则 + 边界条件
-
-完成后运行：
-- .venv/bin/python -m ruff check agent/memory_agent_suggested.py tests/test_memory_agent_suggested.py
-- .venv/bin/python -m pytest tests/test_memory_agent_suggested.py -q
-
-不 commit，不 push，不 tag。
-```
+Phase 2 已于 2026-05-11 完成（commit `29c4bb1`）。原"下一轮 Coding Agent Prompt 草案"
+是 Phase 2 的输入 spec，现仅作历史参考。实现偏差（文件命名、行数、具体 API）
+详见 §8 Phase 2 的"实际实现内容"。
 
 ---
 
-## Appendix A: 与现有模块的关系
+## Appendix A: 与现有模块的关系（实际变更记录）
 
-| 现有模块 | 本设计的影响 | 改动范围 |
-|----------|-------------|----------|
-| `agent/memory_contracts.py` | MemoryCandidate.metadata 承载 source_type/memory_type | Phase 2: 使用 metadata，不改 schema |
-| `agent/memory_policy.py` | 共享 sensitivity/injection 检测 | 不改，复用 |
-| `agent/memory_confirmation.py` | 统一 5 种 choice | 不改，复用 |
-| `agent/memory_runtime.py` | source_type 影响 question 文案 | Phase 2: 小改 question 文案逻辑 |
-| `agent/memory_interaction.py` | pending dict 新增 _source_type/_memory_type | Phase 2: 小改 build_memory_pending_request |
-| `agent/memory_store.py` | MemoryRecord.source_type 写实际值 | Phase 2: _record_from_intent 传入 source_type |
-| `agent/memory_operations.py` | MemoryOperationIntent 新增 source_type/memory_type | Phase 2: 字段扩展 |
-| `agent/core.py` | CONFIRMATION_REQUIRED 分支已就位 | 不改 |
-| `agent/confirm_handlers.py` | 路由已就位 | 不改 |
-| `agent/display_events.py` | 已有 memory 事件类型 | Phase 2: 可新增 agent_suggested 事件 |
+| 现有模块 | 原计划改动 | 实际改动 |
+|----------|-----------|----------|
+| `agent/memory_contracts.py` | 使用 metadata，不改 schema | **未改** — MemoryCandidate.metadata 已预留扩展点，直接使用 |
+| `agent/memory_policy.py` | 不改，复用 | **未改** — suggestion engine 自行复制了敏感/prompt injection marker |
+| `agent/memory_confirmation.py` | 不改，复用 | **未改** |
+| `agent/memory_runtime.py` | 小改 question 文案逻辑 | **+89/-1 行** — 新增 `suggestion_engine` 注入点 + `_try_suggestions()` 方法 |
+| `agent/memory_interaction.py` | 小改 build_memory_pending_request | **未改** — pending dict 新增字段推迟到后续 |
+| `agent/memory_store.py` | _record_from_intent 传入 source_type | **未改** |
+| `agent/memory_operations.py` | 字段扩展 | **未改** |
+| `agent/confirm_handlers.py` | 不改 | **+2 行** — `save_checkpoint` 惰性 import（避循环依赖） |
+| `agent/core.py` | 不改 | **未改** — CONFIRMATION_REQUIRED 分支已就位 |
+| `agent/display_events.py` | 可新增 agent_suggested 事件 | **未改** |
+| **新增** `agent/memory_suggestions.py` | (原计划 `memory_agent_suggested.py`) | **+397 行** — `DeterministicSuggestionEngine` + 4 heuristic 规则 |
+| **新增** `tests/test_memory_suggestions.py` | (原计划 `test_memory_agent_suggested.py`) | **+613 行，78 条测试** |
 
 ## Appendix B: 关键设计决策记录
 

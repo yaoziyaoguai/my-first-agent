@@ -138,9 +138,15 @@ def parse_memory_file(filepath: Path) -> list[dict]:
 # ── section write helpers ───────────────────────────────────────────────────
 
 def _format_section(meta: dict, content: str) -> str:
-    """Format a single memory as YAML frontmatter + content."""
+    """Format a single memory as YAML frontmatter + content.
+
+    内部键 _content（parse_memory_file 用于传递 body text）不会写入 YAML。
+    """
     lines = ["---"]
     for k, v in meta.items():
+        # 跳过内部键，避免泄露到 YAML frontmatter
+        if k.startswith("_"):
+            continue
         if v is None:
             continue
         if isinstance(v, bool):
@@ -338,7 +344,10 @@ def _derive_audit_id_fs(audit_summary: MemoryAuditSummary) -> str:
 # ── record construction ────────────────────────────────────────────────────
 
 def _record_from_frontmatter(meta: dict) -> MemoryRecord:
-    """Build a MemoryRecord from parsed frontmatter metadata."""
+    """Build a MemoryRecord from parsed frontmatter metadata。
+
+    不会修改输入的 meta dict（使用 .get() 只读访问）。
+    """
     content = meta.get("_content", "")
     rid = meta.get("id", "")
     scope_str = meta.get("scope", "session")
@@ -408,10 +417,21 @@ class FilesystemMemoryStore:
     """
 
     def __init__(self, root_dir: Path | str | None = None) -> None:
+        # 优先级：显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT > 默认 ~/.my-first-agent/memory
+        import os as _os
         if root_dir is None:
-            root_dir = Path.home() / ".my-first-agent" / "memory"
+            root_dir = (
+                _os.getenv("MEMORY_STORE_ROOT")
+                or _os.getenv("MEMORY_ROOT")
+                or (Path.home() / ".my-first-agent" / "memory")
+            )
         self.root_dir = Path(root_dir)
-        self.root_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.root_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise OSError(
+                f"无法创建 FilesystemMemoryStore 根目录 {self.root_dir}: {e}"
+            ) from e
         # Rebuild index on session start
         self._index: dict[str, dict] = build_fs_index(self.root_dir)
 
@@ -493,21 +513,40 @@ class FilesystemMemoryStore:
     def recall(
         self,
         *,
-        scope: MemoryScope | None = None,
+        scope: MemoryScope | str | None = None,
         memory_type: str | None = None,
         max_items: int = 5,
+        query_context: str | None = None,
+        recency_weight: float | None = None,
     ) -> list[MemoryRecord]:
         """Recall memory records filtered by scope, type, and recency.
 
         Deterministic filtering only — no semantic search, no weighted ranking.
         Results sorted by created_at descending (most recent first).
 
-        query_context and recency_weight are intentionally not supported in
-        Phase 4. Semantic search belongs in external provider backend.
+        query_context 和 recency_weight 是 Phase 5+ 预留参数。Phase 4 传入非默认值
+        会抛出 NotImplementedError — semantic retrieval / weighted ranking 属于
+        external provider backend，不在 FilesystemMemoryStore 范围内。
         """
+        if query_context is not None:
+            raise NotImplementedError(
+                "query_context 语义检索在 Phase 4 不支持，"
+                "请使用 external provider backend"
+            )
+        if recency_weight is not None:
+            raise NotImplementedError(
+                "recency_weight 加权排序在 Phase 4 不支持，"
+                "请使用 external provider backend"
+            )
+
+        # 兼容 str 和 MemoryScope：index 中 scope 存为字符串
+        scope_value: str | None = None
+        if scope is not None:
+            scope_value = scope.value if isinstance(scope, MemoryScope) else scope
+
         candidates = []
         for record_id, entry in self._index.items():
-            if scope is not None and entry.get("scope") != scope.value:
+            if scope_value is not None and entry.get("scope") != scope_value:
                 continue
             if memory_type is not None and entry.get("memory_type") != memory_type:
                 continue

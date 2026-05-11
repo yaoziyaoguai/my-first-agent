@@ -1,12 +1,63 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+# load_dotenv 默认 override=False，不会覆盖 shell 中已显式设置的变量。
+# 这意味着 export MODEL_NAME=foo 优先于 .env 中的同名 key。
 load_dotenv()
 
-# API 配置
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
-MODEL_NAME = os.getenv("MODEL_NAME")
+
+def _resolve_model_name() -> str | None:
+    """按优先级解析模型名：MODEL_NAME > ANTHROPIC_MODEL > OPENAI_MODEL。"""
+    return (
+        os.getenv("MODEL_NAME")
+        or os.getenv("ANTHROPIC_MODEL")
+        or os.getenv("OPENAI_MODEL")
+    )
+
+
+def _resolve_api_key() -> str | None:
+    """按优先级解析 API key：ANTHROPIC_API_KEY > OPENAI_API_KEY。"""
+    return os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+
+def _resolve_base_url() -> str | None:
+    """按优先级解析 base URL：ANTHROPIC_BASE_URL > OPENAI_BASE_URL。"""
+    return os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+
+
+def get_config_errors() -> list[str]:
+    """返回当前配置中的问题清单，不包含 secret value。
+
+    调用方（如 main.py）可在启动时调用此函数，对用户给出清晰指引。
+    """
+    errors: list[str] = []
+    model = _resolve_model_name()
+    if not model:
+        errors.append(
+            "未设置模型名。请设置 MODEL_NAME、ANTHROPIC_MODEL 或 OPENAI_MODEL 中的至少一个。"
+        )
+    key = _resolve_api_key()
+    if not key:
+        errors.append(
+            "未设置 API key。请设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 中的至少一个。"
+        )
+    return errors
+
+
+def require_config() -> None:
+    """启动时校验配置完整性。缺必要配置时抛出 ValueError 并给出清晰指引。
+
+    错误信息只包含缺失的 key name，不打印 secret value。
+    """
+    errors = get_config_errors()
+    if errors:
+        raise ValueError("\n".join(errors))
+
+
+# API 配置 — 兼容 Anthropic / OpenAI 双 provider 环境变量
+API_KEY = _resolve_api_key()
+BASE_URL = _resolve_base_url()
+MODEL_NAME = _resolve_model_name()
 REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL_NAME")
 
 # 路径配置

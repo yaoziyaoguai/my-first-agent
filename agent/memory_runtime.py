@@ -516,9 +516,36 @@ def create_memory_runtime(
     默认使用 DeterministicMemoryPolicy + InMemoryMemoryStore。
     确认流程使用两阶段交互（evaluate → CONFIRMATION_REQUIRED → resolve_confirmation）。
     若不想写入 store（如只做 policy 评估），显式传 store=None。
+
+    Store 选择策略：
+    - 显式传 store 参数 → 使用传入的 store
+    - MEMORY_STORE_BACKEND=filesystem → FilesystemMemoryStore
+      · 落盘路径由 MEMORY_STORE_ROOT / MEMORY_ROOT 控制，默认 ~/.my-first-agent/memory/
+    - 默认 → InMemoryMemoryStore
+    - 无效 MEMORY_STORE_BACKEND 值 → 抛出 ValueError
+    - FilesystemMemoryStore 初始化失败（如权限不足）→ 不静默降级，抛出 OSError
     """
+    import os as _os
+
+    if store is not None:
+        resolved_store = store
+    else:
+        backend = _os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
+        if backend in ("memory", "in_memory", "inmemory"):
+            resolved_store = InMemoryMemoryStore()
+        elif backend in ("filesystem", "memory_fs", "fs"):
+            from agent.memory_fs_store import FilesystemMemoryStore
+
+            # FilesystemMemoryStore.__init__ 自己读 MEMORY_STORE_ROOT / MEMORY_ROOT
+            resolved_store = FilesystemMemoryStore()
+        else:
+            raise ValueError(
+                f"不支持的 MEMORY_STORE_BACKEND 值：{backend!r}。"
+                f"支持的值：memory, filesystem"
+            )
+
     return MemoryRuntime(
         policy=DeterministicMemoryPolicy(),
-        store=store if store is not None else InMemoryMemoryStore(),
+        store=resolved_store,
         event_logger=event_logger or _noop_event_logger,
     )

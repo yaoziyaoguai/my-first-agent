@@ -197,9 +197,29 @@ core**。
 - ✅ **Memory Next Stage Architecture Plan** 已新增：
   `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` 覆盖 agent-suggested memory + external
   MemoryProvider adapter 的统一架构设计，明确统一确认模型、信任边界、分阶段路线
-  （Phase 1-5）。当前不做任何实现——不接 agent-suggested runtime、不接 external
-  provider、不新增依赖、不改 checkpoint schema。下一步推荐 Phase 2: agent-suggested
-  deterministic candidate generation (heuristic-based，不接 LLM)。
+  （Phase 1-5）。Phase 1 设计文档已完成。
+- ✅ **Phase 2: Deterministic Memory Suggestions 已完成**（`29c4bb1`）：
+  `agent/memory_suggestions.py` (397行) 提供 `DeterministicSuggestionEngine`，
+  4 条确定性 heuristic 规则（project_rule / bug_fix_lesson / architecture_decision /
+  repeated_preference），反 spam（频率限制 ≤3/session、置信度阈值 ≥0.6、store 去重、
+  敏感内容/prompt injection 过滤）。`agent/memory_runtime.py` 在 policy 返回 NO_OP
+  后 fall through 到 suggestion engine，通过现有两阶段 confirmation 流询问用户。
+  所有 candidate 携带 `source_type="agent_suggested"` metadata。
+  `tests/test_memory_suggestions.py` 78 条测试覆盖所有规则、反 spam、安全、集成。
+  不改 `core.py`、不改 `memory_policy.py`、不改 `memory_contracts.py`、不改
+  `memory_store.py`、不接 LLM、不接外部 provider、no auto-accept。
+- ✅ **Memory 体系 safe-local foundation 完整**：
+  当前 Memory 能力边界明确 —— **支持的**：explicit retain、interactive confirmation
+  (5 choices)、deterministic suggestions (4 rules)、snapshot → prompt injection、
+  audit events；**不支持的**：真实持久化（in-memory only）、跨 session memory、
+  真实 recall/retrieval、semantic search / RAG / embedding、外部 provider、
+  auto-accept、episodic/procedural 语义处理。所有 memory write 必须经过 human
+  confirmation，无可绕过路径。
+- 📋 **Memory 下一步：Phase 3 Design First**（非直接 implementation）：
+  在进入 Phase 3 实现前，需先完成设计：持久化方案选型（JSON file vs SQLite）、
+  memory store 与 checkpoint 的边界、pending confirmation restore 语义、
+  recall API 范围、跨 session memory 安全边界、schema migration/compatibility。
+  见 `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` §9。
 - ✅ Remaining Roadmap Completion Autopilot 已记录：
   `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
   planning、MCP external integration readiness、runtime trace / ToolResult migration
@@ -609,7 +629,7 @@ push 或 tag，除非用户单独选择对应动作。
 
 | 优先级 | 阶段 | 说明 | 修改范围 |
 |--------|------|------|----------|
-| **推荐** | Phase 2: agent-suggested deterministic candidate generation | 确定性 heuristic 生成候选，不接 LLM，复用现有 confirmation。验证多来源统一确认模型。 | 新增 `agent/memory_agent_suggested.py` (~150行)，不改 core.py/checkpoint schema |
+| ✅ **已完成** | Phase 2: agent-suggested deterministic candidate generation | 确定性 heuristic 生成候选（4 规则），复用现有 confirmation。验证多来源统一确认模型。`29c4bb1` | 新增 `agent/memory_suggestions.py` (397行) + `tests/test_memory_suggestions.py` (78 tests) |
 | 后续 | Phase 3: external MemoryProvider protocol only | 定义 `MemoryProviderProtocol` + fake provider + sanitizer，不接真实 provider | 新增 `agent/memory_provider.py` (~120行) |
 | 远期 | Phase 4: opt-in real provider integration | 需用户显式授权，选一个 provider 实现 adapter，real tests opt-in | 新增 provider adapter 模块 |
 | 远期 | Phase 5: reflection / episodic / procedural | 高级 memory 能力，跨会话整理和合并 | 范围待定 |

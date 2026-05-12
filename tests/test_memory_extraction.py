@@ -823,6 +823,129 @@ class TestLLMExtractorOptIn:
             assert 0.0 <= p.confidence <= 1.0
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Mock helpers for content block compatibility tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class _MockTextBlock:
+    """模拟 Anthropic SDK TextBlock。"""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _MockThinkingBlock:
+    """模拟 Anthropic SDK ThinkingBlock — 没有 .text 属性。"""
+
+    def __init__(self, thinking: str) -> None:
+        self.thinking = thinking
+
+
+class _MockResponse:
+    """模拟 Anthropic SDK response，包含 content blocks 列表。"""
+
+    def __init__(self, content: list) -> None:
+        self.content = content
+
+
+class _MockMessages:
+    """模拟 client.messages，调用 create 返回预设 response。"""
+
+    def __init__(self, response: _MockResponse) -> None:
+        self._response = response
+
+    def create(self, **kwargs) -> _MockResponse:
+        return self._response
+
+
+class _MockClient:
+    """模拟 Anthropic client，messages 属性返回 _MockMessages。"""
+
+    def __init__(self, response: _MockResponse) -> None:
+        self.messages = _MockMessages(response)
+
+
+_VALID_PROPOSAL_JSON = json.dumps({
+    "proposals": [
+        {
+            "memory_type": "semantic",
+            "content": "用户偏好 Python",
+            "evidence": "user: 我喜欢 Python",
+            "importance": 7,
+            "confidence": 0.85,
+            "rationale": "明确的偏好声明",
+        }
+    ]
+})
+
+
+class TestContentBlockCompatibility:
+    """provider 返回非标准 content block（如 ThinkingBlock）时的兼容性。"""
+
+    def test_thinking_block_first_then_text_block(self) -> None:
+        """第一个 block 是 ThinkingBlock（无 .text），第二个是 TextBlock — 应正确解析。"""
+        mock_response = _MockResponse([
+            _MockThinkingBlock("让我分析一下这段对话..."),
+            _MockTextBlock(_VALID_PROPOSAL_JSON),
+        ])
+        mock_client = _MockClient(mock_response)
+
+        extractor = LLMMemoryExtractor()
+        object.__setattr__(extractor, "_client", mock_client)
+
+        result = extractor.extract(
+            ExtractionInput(transcript=[{"role": "user", "content": "我喜欢 Python"}])
+        )
+        assert result.extractor_type == "llm"
+        assert len(result.proposals) == 1
+        assert result.proposals[0].content == "用户偏好 Python"
+
+    def test_pure_text_blocks_still_work(self) -> None:
+        """原有纯 TextBlock 场景不受影响。"""
+        mock_response = _MockResponse([_MockTextBlock(_VALID_PROPOSAL_JSON)])
+        mock_client = _MockClient(mock_response)
+
+        extractor = LLMMemoryExtractor()
+        object.__setattr__(extractor, "_client", mock_client)
+
+        result = extractor.extract(
+            ExtractionInput(transcript=[{"role": "user", "content": "我喜欢 Python"}])
+        )
+        assert len(result.proposals) == 1
+
+    def test_all_non_text_blocks_no_attribute_error(self) -> None:
+        """全是 ThinkingBlock（无 .text）时安全返回空，不抛 AttributeError。"""
+        mock_response = _MockResponse([
+            _MockThinkingBlock("深度思考中..."),
+            _MockThinkingBlock("继续思考..."),
+        ])
+        mock_client = _MockClient(mock_response)
+
+        extractor = LLMMemoryExtractor()
+        object.__setattr__(extractor, "_client", mock_client)
+
+        result = extractor.extract(
+            ExtractionInput(transcript=[{"role": "user", "content": "hi"}])
+        )
+        assert len(result.proposals) == 0
+        assert "llm" in result.extraction_summary
+
+    def test_empty_content_list_no_error(self) -> None:
+        """response.content 为空列表时安全返回。"""
+        mock_response = _MockResponse([])
+        mock_client = _MockClient(mock_response)
+
+        extractor = LLMMemoryExtractor()
+        object.__setattr__(extractor, "_client", mock_client)
+
+        result = extractor.extract(
+            ExtractionInput(transcript=[{"role": "user", "content": "hi"}])
+        )
+        assert len(result.proposals) == 0
+        assert "llm" in result.extraction_summary
+
+
 class TestSystemPromptContract:
     """EXTRACTION_SYSTEM_PROMPT 内容检查。"""
 

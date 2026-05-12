@@ -723,6 +723,14 @@ def main(argv: list[str] | None = None) -> int:
         print(format_artifact_inventory_report(inv), end="")
         return 0
 
+    # Memory extraction review：显式 CLI 子命令，从 checkpoint 中读取对话记录，
+    # 调用 LLM extraction → 逐条展示 proposal → 用户确认 → 写入 store。
+    # 不进入 agent loop，不修改 MemoryRuntime。
+    if argv and argv[0] == "memory" and len(argv) >= 2 and argv[1] == "extract":
+        from agent.memory_extraction_review import run_extraction_review_cli
+
+        return run_extraction_review_cli()
+
     # MCP bridge：受控 readiness 层，默认 disabled。
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。

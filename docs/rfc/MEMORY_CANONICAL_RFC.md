@@ -87,19 +87,32 @@ Phase 4 完成后，以下基础设施已就位：
 
 ## 2. Memory Taxonomy
 
-### 2.1 五类 Memory
+### 2.1 两层架构
+
+Memory 体系分为两个明确分离的层。只有 Long-Term Memory Layer 进入 Extraction / Governance / Store 链路。
+
+**Runtime/Context Layer（运行时/上下文层）** — 不进 filesystem store，不进 governance chain：
 
 | 类型 | 存活期 | 持久化 | Governance | 行为影响 |
 |------|--------|:--:|------|:--:|
 | **Working** | 1 turn | 否 | 不需要 | 直接（当前 context） |
 | **Session** | 1 session | 否（session 结束即消失） | SESSION_ONLY choice | 直接（session 内） |
+
+**Long-Term Memory Layer（长期记忆层）** — 进 filesystem store，经 governance chain：
+
+| 类型 | 存活期 | 持久化 | Governance | 行为影响 |
+|------|--------|:--:|------|:--:|
 | **Semantic** | months+ | 是 | T1 Confirmation 必需 | 间接（prompt 可见偏好） |
 | **Episodic** | months+ | 是 | T1 或 T2（见 §3.2） | 间接（precedent reference） |
 | **Procedural** | months+ | 是 | T1 Confirmation **强制** | 直接（行为约束） |
 
-Working 和 Session 是短期记忆，不进 filesystem store，属于 context builder 和 runtime 范畴。本文档后续讨论的 Extraction / Governance / Store 仅针对 Semantic / Episodic / Procedural 三类长期记忆。
+两层之间的边界是硬性的：Runtime/Context Layer 的内容 session 结束后即消失；Long-Term Memory Layer 的内容跨 session 持久化。Working/Session 属于 agent runtime 和 context builder 的范畴，本文档后续讨论的 Extraction / Governance / Store / Recall 仅针对 Semantic / Episodic / Procedural 三类长期记忆。
 
-### 2.2 三类长期记忆定义
+### 2.2 不在本 Taxonomy 中的认知类别
+
+**Sensory Memory（感觉记忆）** — 经典认知心理学中的 iconic/echoic memory：亚秒级知觉缓冲，容量极大但衰减极快（<1 秒）。在 agent 系统中，输入已经是 token 化的符号表征，不存在从原始知觉到符号的转换过程，因此没有对应的工程等价物。**本文档明确不纳入 Sensory Memory。**
+
+### 2.3 三类长期记忆定义
 
 **Semantic（语义记忆）** — "Agent 知道什么"
 - 内容：持久事实、用户偏好、项目决策、知识
@@ -107,10 +120,15 @@ Working 和 Session 是短期记忆，不进 filesystem store，属于 context b
 - 示例："用户偏好 pytest", "项目决定用 PostgreSQL", "用户是数据工程师"
 - Confidence 阈值：L1 ≥0.7, L2 ≥0.8 → T1
 
-**Episodic（情景记忆）** — "Agent 经历过什么"
-- 内容：过去事件、经验教训、故障排查、决策结果
-- 子类型：bug_fix_lesson, refactor_experience, troubleshooting, decision_outcome
-- 示例："上次迁移超时因为没加索引", "重构花了 2h 因为旧代码耦合重"
+**Episodic（情景记忆）** — "Agent 经历过什么事件"
+- 内容：以具体事件为中心的叙事性记录，包含时间锚点、上下文和因果链条
+- 核心特征：
+  - 有时间锚点（日期 / session / turn）
+  - 有因果结构（问题 → 尝试 → 结果）
+  - 可复述为完整叙事（"那次发生了什么"）
+- 子类型：bug_fix_episode, troubleshooting_episode, refactor_experience, decision_outcome
+- 示例："2026-05-11 测试迁移因缺少复合索引导致超时，加索引后恢复"
+- 与 Semantic 的边界：Episodic 回答**"那次发生了什么"**，Semantic 回答**"我知道了什么"**。Episodic 可从多次类似事件中提炼出 Semantic（如 "这个项目的测试迁移容易因缺少索引超时"），但提炼过程需经 confirmation
 - Confidence 阈值：L1 ≥0.6 → T1; L2 0.6-0.8 → T2, ≥0.8 → T1
 
 **Procedural（程序记忆）** — "Agent 应该怎么做"
@@ -119,7 +137,43 @@ Working 和 Session 是短期记忆，不进 filesystem store，属于 context b
 - 示例："用户要求 code review 前不提交", "用中文解释架构但保留代码原文"
 - Confidence 阈值：L1 ≥0.8 → T1; L2 ≥0.8 → T1
 
-### 2.3 Procedural Memory 法定判定标准（宪法级）
+> **术语说明**：本文档中的 "Procedural Memory" 不完全等同于经典认知心理学中的 *implicit procedural memory*（内隐程序性记忆）。经典 procedural memory 指的是技能自动化——无意识、难以言述、通过重复练习获得（如骑自行车、弹钢琴）。RFC 中的 procedural memory 指的是从真实交互中浮现的、经过显式确认的行为约束——有意识、可言述、通过交互学习获得。这个术语借用更接近 "用户习得的交互行为偏好"，而非认知心理学的标准定义。
+
+### 2.4 三类记忆的沉淀关系
+
+三类长期记忆不是平级的并列分类。它们之间存在方向性的沉淀/支撑关系：
+
+```
+Episodic Memory（情景记忆）
+  │
+  │ 沉淀 / 支撑
+  ▼
+Semantic Memory（语义记忆）
+  │
+  │ 沉淀 / 塑造
+  ▼
+Procedural Memory（程序性记忆）
+```
+
+**Episodic → Semantic**：
+- Episodic memory 是长期记忆的**第一层**。它记录具体事件、经历、时间锚点和因果过程，回答"那次发生了什么？"
+- Semantic memory 通常从一个或多个 episodic memory 中**沉淀**出来。它提取跨事件的稳定模式，形成持久事实、偏好和项目知识，回答"我们从这些经历中知道了什么？"
+- **设计原则**：Semantic memory 不应凭空生成。每条 semantic record 最好有 episodic evidence 作为支撑——即使当前实现尚不能自动追溯，canonical 设计上 episodic 是 semantic 的 grounding 来源
+
+**Episodic + Semantic → Procedural**：
+- Procedural memory 位于沉淀链的最上层。它通常由 episodic + semantic 共同支撑，将经历和知识转化为长期行为约束，回答"以后 Agent 应该怎么做？"
+- **设计原则**：
+  - Procedural memory 必须有真实交互、批评、纠正或反复模式作为依据，不可凭空生成
+  - Procedural memory 仍然必须经过 T1 confirmation（用户显式确认）——沉淀关系不 bypass governance
+  - Procedural memory 的行为影响力最大，因此沉淀门槛最高
+
+**这不是已实现的 consolidation**：
+- 上述沉淀关系是 **canonical design principle** 和 **future extraction guidance**，不是当前代码中已实现的自动 consolidation 流程
+- Phase 4 的实现中，三种 memory_type 的创建路径是**独立的**（显式 retain / L1 heuristic 各自独立产出 candidate），不存在自动的 episodic→semantic 或 episodic/semantic→procedural 的自动提炼
+- 自动 consolidation（跨 memory 的模式识别和沉淀）属于 Phase 6+ 远期研究，不在当前 scope
+- 但在设计任何新的 extraction 路径（Phase 5 L2 LLM、session-end extraction）时，应遵循本节的沉淀方向——例如：LLM 提取 episodic 时可以附带提示"这暗示了什么语义偏好？"，但不应直接自动生成 procedural
+
+### 2.5 Procedural Memory 法定判定标准（宪法级）
 
 Procedural memory 必须同时满足以下 5 条，缺一不可：
 
@@ -131,7 +185,7 @@ Procedural memory 必须同时满足以下 5 条，缺一不可：
 
 **一句话边界**：如果一条行为规则可以在 Agent 启动前写好，它不是 procedural memory。
 
-### 2.4 什么不属于 Memory
+### 2.6 什么不属于 Memory
 
 | 信息类型 | 属于 |
 |----------|------|

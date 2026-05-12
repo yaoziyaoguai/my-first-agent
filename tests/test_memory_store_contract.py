@@ -162,10 +162,11 @@ def test_forget_operation_removes_only_fake_record() -> None:
         "forget that I prefer concise answers",
         MemoryConfirmationChoice.ACCEPT,
     )
+    # forget 按 content 匹配 record，content 必须与 forget 提取的 payload 一致
     record_id = derive_memory_record_id(intent.source_summary)
     existing = MemoryRecord(
         id=record_id,
-        content="fake content to forget",
+        content=intent.content_summary,  # 与 forget intent 的 content 匹配
         scope=MemoryScope.USER,
         source_summary=intent.source_summary,
         safety_summary="fake preload",

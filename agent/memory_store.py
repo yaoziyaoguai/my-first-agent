@@ -134,6 +134,54 @@ def derive_memory_record_id(source_summary: str) -> str:
     return f"memory:fake:{digest[:16]}"
 
 
+def _normalize_for_dedup(content: str) -> str:
+    """规范化内容用于去重比较：strip 空白，统一内部空白。"""
+    return " ".join(content.strip().split())
+
+
+def find_duplicate_record(
+    content: str,
+    memory_type: str,
+    scope: MemoryScope | None,
+    existing_records: Iterable,
+) -> MemoryRecord | None:
+    """在所有已有 record 中 deterministic 查重。
+
+    去重依据：
+    - 规范化后的 content（去首尾空白、统一内部空白）
+    - memory_type 一致
+    - scope 一致
+
+    不做 fuzzy matching、不做 embedding similarity。返回第一条匹配到的 record，
+    或 None。
+    """
+    normalized = _normalize_for_dedup(content)
+    for record in existing_records:
+        if _normalize_for_dedup(record.content) != normalized:
+            continue
+        if record.memory_type != memory_type:
+            continue
+        if scope is not None and record.scope != scope:
+            continue
+        return record
+    return None
+
+
+def find_record_by_content(
+    content: str,
+    existing_records: Iterable,
+) -> MemoryRecord | None:
+    """按规范化后的 content 查找 record，用于 forget 等不需要 memory_type/scope 匹配的场景。
+
+    仅做确定性精确匹配，不做 fuzzy matching。
+    """
+    normalized = _normalize_for_dedup(content)
+    for record in existing_records:
+        if _normalize_for_dedup(record.content) == normalized:
+            return record
+    return None
+
+
 class InMemoryMemoryStore:
     """fake/local/test-only store。
 
@@ -192,6 +240,20 @@ class InMemoryMemoryStore:
             )
 
         if intent.operation_type is MemoryOperationType.RETAIN:
+            # 去重检查：相同 content + memory_type + scope 不重复写入
+            memory_type = getattr(intent, "memory_type", "semantic")
+            existing = find_duplicate_record(
+                intent.content_summary, memory_type, intent.scope,
+                self._records.values(),
+            )
+            if existing is not None:
+                return MemoryStoreApplyResult(
+                    status=MemoryStoreApplyStatus.APPLIED,
+                    operation_type=intent.operation_type,
+                    record=existing,
+                    audit_id=audit_id,
+                    message="dedup_hit: 内容已存在，返回已有 record，不重复写入",
+                )
             record = _record_from_intent(intent, audit_id)
             self._records[record.id] = record
             return MemoryStoreApplyResult(
@@ -263,17 +325,18 @@ class InMemoryMemoryStore:
         intent: MemoryOperationIntent,
         audit_id: str,
     ) -> MemoryStoreApplyResult:
-        record_id = derive_memory_record_id(intent.source_summary)
-        existing = self._records.pop(record_id, None)
-        if existing is None:
+        # 按 content 匹配而非 source_summary 派生 ID
+        # source_summary 的 identity 不稳定（依赖原始输入措辞）
+        target = find_record_by_content(intent.content_summary, self._records.values())
+        if target is None:
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.NOT_FOUND,
                 operation_type=intent.operation_type,
                 record=None,
                 audit_id=audit_id,
-                message="fake memory record not found for forget",
+                message="memory record not found for forget (按 content 未匹配到任何 record)",
             )
-
+        existing = self._records.pop(target.id, None)
         return MemoryStoreApplyResult(
             status=MemoryStoreApplyStatus.APPLIED,
             operation_type=intent.operation_type,

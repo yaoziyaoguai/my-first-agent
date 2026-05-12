@@ -209,6 +209,20 @@ id: "mem:empty"
         assert meta["id"] == "mem:empty"
         assert body.strip() == ""
 
+    def test_format_section_excludes_content_key(self):
+        """_format_section 不把内部键 _content 写进 YAML frontmatter。"""
+        from agent.memory_fs_store import _format_section
+
+        meta = {
+            "id": "rec1",
+            "memory_type": "semantic",
+            "_content": "this should not appear in frontmatter",
+        }
+        output = _format_section(meta, "body text")
+        assert "_content" not in output
+        assert "body text" in output
+        assert "this should not appear" not in output
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. Index tests
@@ -386,6 +400,29 @@ class TestStoreOperations:
         result = FSStore.apply_operation_intent(intent, audit)
         assert result.status.value == "applied"
         assert result.record.approval_status == "session_only"
+
+    def test_use_once_respects_memory_type(self, FSStore):
+        """USE_ONCE 写入时使用 intent 的实际 memory_type，不硬编码 semantic。"""
+        intent = _make_intent(
+            operation_type=MemoryOperationType.USE_ONCE,
+            content="仅本次使用的 procedural 规则",
+            confirmation=MemoryConfirmationStatus.SESSION_ONLY,
+            user_choice=MemoryConfirmationChoice.SESSION_ONLY,
+        )
+        # 设置非默认 memory_type
+        object.__setattr__(intent, "memory_type", "procedural")
+        object.__setattr__(intent, "source_type", "agent_suggested")
+        audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.SESSION_ONLY.value)
+        result = FSStore.apply_operation_intent(intent, audit)
+        assert result.status.value == "applied"
+        # 验证 memory_type 被正确传播到 record
+        assert result.record.memory_type == "procedural"
+        # 验证 index 中的 memory_type 不是硬编码的 semantic
+        import json
+        index_path = FSStore.root_dir / "_meta" / "index.json"
+        index_data = json.loads(index_path.read_text(encoding="utf-8"))
+        stored = index_data["records"][result.record.id]
+        assert stored["memory_type"] == "procedural"
 
     def test_list_records_persists_across_instances(self, tmp_store_dir):
         """写完后创建新的 store 实例，应能通过 index rebuild 读到数据。"""

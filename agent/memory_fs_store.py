@@ -35,6 +35,8 @@ from agent.memory_store import (
     MemoryStoreApplyResult,
     MemoryStoreApplyStatus,
     derive_memory_record_id,
+    find_duplicate_record,
+    find_record_by_content,
     _validate_apply_inputs,
 )
 
@@ -117,21 +119,37 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def parse_memory_file(filepath: Path) -> list[dict]:
-    """Parse a .md file with potentially multiple --- separated sections.
+    """解析含多个 memory section 的 .md 文件。
 
-    Returns list of {meta_fields..., _content: str} dicts.
+    每个 section 格式：``---\\n[YAML frontmatter]\\n---\\n\\n[body]``
+    Section 之间由 ``\\n\\n---\\n\\n`` 分隔。
+
+    稳健性策略：
+    - 分隔正则容忍空白变化（\\n{2,}---\\n{1,}），兼容手动编辑的格式偏差
+    - 不以 ``---`` 开头的 section 自动补前缀
+    - 单个 section 损坏不影响其余 section 的解析（per-section isolation）
     """
     text = filepath.read_text(encoding="utf-8")
-    sections = re.split(r"\n\n---\n\n", text)
-    records = []
+    # 使用更稳健的分隔模式：
+    # \\n{2,}---\\n{1,} = 至少两个换行 + --- + 至少一个换行
+    # 避免了单换行 + ---（frontmatter 关闭标记）的误匹配
+    sections = re.split(r"\n{2,}---\n{1,}", text)
+    records: list[dict] = []
     for section in sections:
         section = section.strip()
         if not section:
             continue
-        meta, content = parse_frontmatter(section)
-        if meta and content:
-            meta["_content"] = content
-            records.append(meta)
+        # 手动编辑格式可能导致 section 不以 --- 开头（前缀被分割符消费）
+        if not section.startswith("---"):
+            section = "---\n" + section
+        try:
+            meta, content = parse_frontmatter(section)
+            if meta and content:
+                meta["_content"] = content
+                records.append(meta)
+        except Exception:
+            # 单个 section 解析失败，隔离之，继续解析后续 section
+            continue
     return records
 
 
@@ -180,14 +198,20 @@ def remove_memory_section(filepath: Path, record_id: str) -> bool:
     """Remove a memory section from a grouped topic file. Returns True if removed."""
     if not filepath.exists():
         return False
-    sections = re.split(r"\n\n---\n\n", filepath.read_text(encoding="utf-8"))
-    new_sections = []
+    sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
+    new_sections: list[str] = []
     removed = False
     for section in sections:
         section = section.strip()
         if not section:
             continue
-        meta, _ = parse_frontmatter(section)
+        if not section.startswith("---"):
+            section = "---\n" + section
+        try:
+            meta, _ = parse_frontmatter(section)
+        except Exception:
+            new_sections.append(section)
+            continue
         if meta.get("id") == record_id:
             removed = True
             continue
@@ -207,14 +231,20 @@ def update_memory_section(filepath: Path, record_id: str, new_meta: dict, new_co
     """Update a specific memory section in a grouped topic file."""
     if not filepath.exists():
         return False
-    sections = re.split(r"\n\n---\n\n", filepath.read_text(encoding="utf-8"))
-    new_sections = []
+    sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
+    new_sections: list[str] = []
     updated = False
     for section in sections:
         section = section.strip()
         if not section:
             continue
-        meta, _ = parse_frontmatter(section)
+        if not section.startswith("---"):
+            section = "---\n" + section
+        try:
+            meta, _ = parse_frontmatter(section)
+        except Exception:
+            new_sections.append(section)
+            continue
         if meta.get("id") == record_id:
             new_sections.append(_format_section(new_meta, new_content))
             updated = True
@@ -521,22 +551,22 @@ class FilesystemMemoryStore:
     ) -> list[MemoryRecord]:
         """Recall memory records filtered by scope, type, and recency.
 
-        Deterministic filtering only — no semantic search, no weighted ranking.
-        Results sorted by created_at descending (most recent first).
+        Phase 4 recall only supports deterministic scope/type/recency/max_items
+        filtering.  Results sorted by created_at descending (most recent first).
 
-        query_context 和 recency_weight 是 Phase 5+ 预留参数。Phase 4 传入非默认值
-        会抛出 NotImplementedError — semantic retrieval / weighted ranking 属于
-        external provider backend，不在 FilesystemMemoryStore 范围内。
+        query_context is reserved for future semantic retrieval and is not
+        implemented.  recency_weight is reserved for future weighted ranking
+        and is not implemented.
         """
         if query_context is not None:
             raise NotImplementedError(
-                "query_context 语义检索在 Phase 4 不支持，"
-                "请使用 external provider backend"
+                "query_context is reserved for future semantic retrieval "
+                "and is not implemented in Phase 4"
             )
         if recency_weight is not None:
             raise NotImplementedError(
-                "recency_weight 加权排序在 Phase 4 不支持，"
-                "请使用 external provider backend"
+                "recency_weight is reserved for future weighted ranking "
+                "and is not implemented in Phase 4"
             )
 
         # 兼容 str 和 MemoryScope：index 中 scope 存为字符串
@@ -567,9 +597,23 @@ class FilesystemMemoryStore:
     # ── internal operations ──────────────────────────────────────────────
 
     def _apply_retain(self, intent: MemoryOperationIntent, audit_id: str) -> MemoryStoreApplyResult:
+        # 去重检查：基于 content + memory_type + scope，不求助于 embedding/similarity
+        memory_type = getattr(intent, "memory_type", "semantic")
+        existing = find_duplicate_record(
+            intent.content_summary, memory_type, intent.scope,
+            self.list_records(),
+        )
+        if existing is not None:
+            return MemoryStoreApplyResult(
+                status=MemoryStoreApplyStatus.APPLIED,
+                operation_type=intent.operation_type,
+                record=existing,
+                audit_id=audit_id,
+                message="dedup_hit: 内容已存在于 filesystem store，不重复写入",
+            )
+
         record_id = derive_memory_record_id(intent.source_summary)
         meta = _meta_from_intent(intent, audit_id, record_id)
-        memory_type = getattr(intent, "memory_type", "semantic")
         topic = _route_topic(memory_type, intent.scope or MemoryScope.USER)
         filepath = self.root_dir / topic
         write_memory_section(filepath, meta, intent.content_summary)
@@ -673,7 +717,17 @@ class FilesystemMemoryStore:
         )
 
     def _apply_forget(self, intent: MemoryOperationIntent, audit_id: str) -> MemoryStoreApplyResult:
-        record_id = derive_memory_record_id(intent.source_summary)
+        # 按 content 匹配，而非依赖 source_summary 派生的不稳定 identity
+        target = find_record_by_content(intent.content_summary, self.list_records())
+        if target is None:
+            return MemoryStoreApplyResult(
+                status=MemoryStoreApplyStatus.NOT_FOUND,
+                operation_type=intent.operation_type,
+                record=None,
+                audit_id=audit_id,
+                message="memory record not found for forget (按 content 未匹配到任何 record)",
+            )
+        record_id = target.id
         entry = self._index.get(record_id)
         if entry is None:
             return MemoryStoreApplyResult(
@@ -681,7 +735,7 @@ class FilesystemMemoryStore:
                 operation_type=intent.operation_type,
                 record=None,
                 audit_id=audit_id,
-                message="memory record not found for forget",
+                message="memory record not found for forget (content 匹配到但 index 缺失)",
             )
 
         filepath = self.root_dir / entry["file"]

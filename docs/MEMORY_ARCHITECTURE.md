@@ -379,7 +379,7 @@ Do not add now:
   should still dogfood deterministic UX scenarios only. It must not read real
   sessions/runs/logs or persist real memory.
 - Current status: implemented as deterministic dogfooding tests and a reviewable
-  checklist in `docs/MEMORY_DOGFOODING.md`; no real storage, provider, network,
+  checklist in `docs/rfc/archived/MEMORY_DOGFOODING_STAGE3.md`; no real storage, provider, network,
   LLM, or private data is used.
 - Risk: dogfooding accidental real data.
 - Stop condition: requires real private memory data.
@@ -558,7 +558,7 @@ Phase 2 — resolve:
 - no tag in this stage.
 - Review goal: inspect the complete architecture chain from candidate/decision
   through fake store and governed snapshot without adding runtime integration.
-- Evidence to inspect: Stage 1-6 tests, `docs/MEMORY_DOGFOODING.md`, roadmap
+- Evidence to inspect: Stage 1-6 tests, `docs/rfc/archived/MEMORY_DOGFOODING_STAGE3.md`, roadmap
   status, and the no-real-data/no-prompt-builder-store-read boundaries.
 - Stop condition: final review requires real user data, automatic memory,
   provider integration, retrieval/vectorization, or release tagging.

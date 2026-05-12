@@ -38,7 +38,7 @@ from agent.memory_provider import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DOGFOODING_DOC = PROJECT_ROOT / "docs" / "MEMORY_DOGFOODING.md"
+DOGFOODING_DOC = PROJECT_ROOT / "docs" / "rfc" / "archived" / "MEMORY_DOGFOODING_STAGE3.md"
 
 
 def _operation_for(text: str, choice: MemoryConfirmationChoice, *, free_text: str | None = None):

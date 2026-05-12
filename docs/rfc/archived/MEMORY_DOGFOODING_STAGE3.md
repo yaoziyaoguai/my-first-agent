@@ -1,4 +1,9 @@
-# Deterministic Memory UX Dogfooding
+# Deterministic Memory UX Dogfooding (ARCHIVED)
+
+> **This document is archived.**
+> The canonical memory dogfooding guide is `docs/DOGFOODING_MEMORY_GUIDE.md`.
+> This document was the Stage 3/6 deterministic UX checklist using fake scenarios only.
+> Superseded by the Phase 4+ dogfooding guide which covers real filesystem store, recall, and full runtime integration.
 
 This checklist started as the Stage 3 deterministic UX review and now includes
 the Stage 6 Manual UX Dogfooding Runbook over the fake local store and governed

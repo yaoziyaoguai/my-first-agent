@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RUNBOOK = PROJECT_ROOT / "docs" / "MEMORY_DOGFOODING.md"
+RUNBOOK = PROJECT_ROOT / "docs" / "rfc" / "archived" / "MEMORY_DOGFOODING_STAGE3.md"
 ARCHITECTURE = PROJECT_ROOT / "docs" / "MEMORY_ARCHITECTURE.md"
 
 

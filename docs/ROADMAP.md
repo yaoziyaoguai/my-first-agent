@@ -595,7 +595,7 @@ push 或 tag，除非用户单独选择对应动作。
   已落地：`memory_provider` 只提供 fake/provider protocol，把 deterministic
   fixture 投影为 MemoryCandidate / MemorySnapshot 输入，不接真实 provider/MCP；
 - Slice 7 Memory UX dogfooding scenarios / docs / release readiness 已落地：
-  使用 deterministic tests + `docs/MEMORY_DOGFOODING.md` checklist，不读取真实
+  使用 deterministic tests + `docs/rfc/archived/MEMORY_DOGFOODING_STAGE3.md` checklist，不读取真实
   sessions/runs/logs、不写真实 memory；
 - Memory-line Stage 4 safe local MemoryStore skeleton 已落地：`memory_store`
   只接收已确认、已审计的 `MemoryOperationIntent` / `MemoryAuditSummary`，只写
@@ -606,7 +606,7 @@ push 或 tag，除非用户单独选择对应动作。
   `MemorySnapshot`，负责 deterministic ordering、scope/budget/safety/provenance
   过滤，不接 prompt_builder、runtime、provider、MCP，也不实现语义检索；
 - Memory-line Stage 6 manual UX dogfooding runbook 已落地：
-  `docs/MEMORY_DOGFOODING.md` 覆盖 accept/edit/reject/use_once/forget/update、
+  `docs/rfc/archived/MEMORY_DOGFOODING_STAGE3.md` 覆盖 accept/edit/reject/use_once/forget/update、
   audit summary、sensitive handling、fake store 到 governed snapshot、prompt_builder
   boundary；只使用 fake/local deterministic data；
 - 任何真实 persistence / provider / external resource 接入都必须另行授权。

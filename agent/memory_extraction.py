@@ -399,8 +399,11 @@ class LLMMemoryExtractor:
                 extraction_summary=f"LLM 调用失败：{exc}",
             )
 
-        # 解析 LLM 输出
-        raw_output = response.content[0].text if response.content else ""
+        # 解析 LLM 输出（跳过 thinking/reasoning 块，只取文本）
+        raw_output = "".join(
+            block.text for block in response.content
+            if getattr(block, "text", None)
+        ) if response.content else ""
 
         proposals = self._parse_response(raw_output)
         proposals = filter_sensitive_proposals(proposals)

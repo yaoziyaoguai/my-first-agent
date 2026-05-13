@@ -19,6 +19,40 @@ from enum import StrEnum
 from agent.memory_extraction import MemoryCandidateProposal, SuggestedAction
 
 
+# ── Detector Input Contract ─────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodicEvidence:
+    """Phase 6 deterministic detector 的纯输入视图。
+
+    用于避免 consolidation 逻辑过早耦合 filesystem store。
+    后续 source evidence loader 可以把 MemoryRecord 转成 EpisodicEvidence，
+    但本轮不做 loader —— detector 只消费此轻量 contract。
+
+    domain model 层允许 source_evidence≥2 是底层 contract；
+    detector 层按 RFC §D.1 使用 N≥3 作为 semantic consolidation 门槛。
+    """
+
+    record_id: str
+    content: str
+    scope: str | None = None
+    created_at: str | None = None
+    confidence: float | None = None
+    tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.record_id.strip():
+            raise ValueError("EpisodicEvidence.record_id 不能为空")
+        if not self.content.strip():
+            raise ValueError("EpisodicEvidence.content 不能为空")
+        if self.confidence is not None and not (0.0 <= self.confidence <= 1.0):
+            raise ValueError("EpisodicEvidence.confidence 必须在 0.0-1.0 之间")
+
+
+# ── Consolidation Type ──────────────────────────────────────────────────────
+
+
 class ConsolidationType(StrEnum):
     """Consolidation 操作类型（RFC §6.3, Appendix D.3）。
 

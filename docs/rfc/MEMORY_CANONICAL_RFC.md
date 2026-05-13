@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model implemented — ConsolidationCandidate + ConsolidationType + conversion function, no engine/runtime yet. Next: consolidation engine or Phase 7 (emergence).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, zero store/runtime/LLM dependencies. No source evidence loader or runtime integration yet. Next: source evidence loader or Phase 7 (emergence).
 
 ### Core Constraints
 
@@ -854,7 +854,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 |------|:--:|------|
 | Ingestion | 🟡 | W1/W2 done, W3 skeleton done, W4/W5 planned |
 | Episodic | 🟡 | T2 auto-retain skeleton 已实现（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`） |
-| Consolidation | 🔲 | 未实现 |
+| Consolidation | 🟡 | domain model + deterministic detector 已实现，无 engine/runtime 集成 |
 | Semantic | 🟡 | W1 explicit retain 可产出，无 consolidation 来源 |
 | Emergence | 🔮 | 概念设计 |
 | Procedural | 🟡 | W1 explicit retain 可产出，无 emergence 来源 |
@@ -960,21 +960,36 @@ Snapshot 层不得丢失 auto_retained 标记。
 - semantic consolidation（Phase 6）未开始
 - procedural emergence（Phase 7）未开始
 
-### 15.4 Phase 6 — Consolidation（🟡 domain model implemented）
+### 15.4 Phase 6 — Consolidation（🟡 domain model + detector implemented）
 
 **Lifecycle 目标**：Consolidation 阶段落地。
 
-- Episodic → Semantic 沉淀引擎（W4）— 🔲 未开始
-- 跨 session 模式检测 — 🔲 未开始
-- Semantic candidate 生成 + episodic evidence 链 — 🟡 domain model 已实现
-- T1 adoption review — 🔲 未开始
+- Episodic → Semantic 沉淀引擎（W4）— 🟡 deterministic detector 已实现
+- 跨 session 模式检测 — 🟡 keyword-based grouping + Jaccard similarity 已实现
+- Semantic candidate 生成 + episodic evidence 链 — 🟡 已实现（N≥3 threshold per RFC §D.1）
+- T1 adoption review — 🔲 未开始（pending review CLI 已有，但未集成）
+- Source evidence loader（store → EpisodicEvidence）— 🔲 未开始
+- Runtime integration / session hook — 🔲 未开始
 
 **Domain Model（已实现）**:
 - `agent/memory_consolidation.py:ConsolidationCandidate` — frozen dataclass，字段校验完整
 - `ConsolidationType` 枚举：pattern_detection, merge, abstraction, clarification_needed, preference_evolved（RFC §6.3, §D.3）
+- `EpisodicEvidence` — 纯输入视图，解耦 detector 与 filesystem store
 - `to_memory_operation_intent_for_review()` — 转换到现有 proposal → governance pipeline（强制 T1，不写 store）
 - 约束：memory_type 必须 "semantic"，source_evidence ≥2，governance 必须 T1
 - 29 个确定性测试（`tests/test_memory_consolidation.py`）
+
+**Deterministic Pattern Detector（已实现）**:
+- `agent/memory_consolidation_engine.py:DeterministicConsolidationDetector` — 零依赖检测器
+- 中英文混合关键词提取（正则分词 + 停用词过滤）
+- Union-find 主题分组（tags 优先，content 关键词 fallback）
+- Jaccard similarity merge 判定（threshold 0.6，基于 content 关键词非 tags）
+- Scope-based abstraction 判定
+- Procedural-like 过滤（4 组中英文正则，RFC §D.4：不将行为约束误判为语义偏好）
+- RFC §D.2 置信度累积：`base × repetition(N/5) × consistency`，上限 0.95
+- 严格 N≥3 门槛（RFC §D.1），所有输出 memory_type="semantic"、governance_route="T1"
+- 35 个确定性测试（`tests/test_memory_consolidation_engine.py`）
+- 架构边界：不 import store / runtime / LLM / embedding 模块，幂等
 
 ### 15.5 Phase 7 — Emergence（🔮）
 

@@ -808,7 +808,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 ## 14. Current Implementation Mapping
 
-> **TLDR**: Phase 5a complete。Phase 5b complete。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。
+> **TLDR**: Phase 5a complete。Phase 5b foundation implemented + controlled dogfood verified（fake deterministic + real LLM opt-in 均通过）。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。Phase 6 semantic consolidation 尚未开始。Phase 7 procedural emergence 尚未开始。
 
 ### 14.1 状态标记
 

@@ -227,21 +227,24 @@ class InMemoryMemoryStore:
                 message="session-only memory record retained",
             )
 
+        # T1 explicit approval 和 T2 auto_retained 均可写入 store。
+        # T2 auto_retained 是 governed routing 结果，不需人类确认但需标记 provenance。
         if (
             intent.operation_type in MUTATING_OPERATION_TYPES
-            and intent.confirmation_status.value != "approved"
+            and intent.confirmation_status.value not in ("approved", "auto_retained")
         ):
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.REJECTED,
                 operation_type=intent.operation_type,
                 record=None,
                 audit_id=audit_id,
-                message="mutating memory operation requires approved confirmation",
+                message="mutating memory operation requires approved or auto_retained confirmation",
             )
 
         if intent.operation_type is MemoryOperationType.RETAIN:
             # 去重检查：相同 content + memory_type + scope 不重复写入
-            memory_type = getattr(intent, "memory_type", "semantic")
+            # Metadata Continuity (RFC §14.5): 使用 intent.memory_type，不 fallback
+            memory_type = intent.memory_type
             existing = find_duplicate_record(
                 intent.content_summary, memory_type, intent.scope,
                 self._records.values(),
@@ -254,7 +257,9 @@ class InMemoryMemoryStore:
                     audit_id=audit_id,
                     message="dedup_hit: 内容已存在，返回已有 record，不重复写入",
                 )
-            record = _record_from_intent(intent, audit_id)
+            # approval_status 跟随 confirmation_status：
+            # T1 → "approved", T2 → "auto_retained", USE_ONCE → "session_only"
+            record = _record_from_intent(intent, audit_id, approval_status=intent.confirmation_status.value)
             self._records[record.id] = record
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.APPLIED,
@@ -354,9 +359,9 @@ def _record_from_intent(
 ) -> MemoryRecord:
     """从 MemoryOperationIntent 构造 MemoryRecord。
 
-    memory_type / source_type 优先从 intent 字段读取（由
-    build_memory_operation_intent 从 candidate metadata 提取）；
-    若 intent 字段为默认值则保持向后兼容。
+    Metadata Continuity (RFC §14.5):
+    memory_type / source_type / approval_status 由 governance routing 设置，
+    store 层原样使用 intent 字段，不 fallback 硬编码值。
     """
     return MemoryRecord(
         id=derive_memory_record_id(intent.source_summary),
@@ -368,8 +373,8 @@ def _record_from_intent(
         created_by_operation=intent.operation_type,
         updated_by_operation=intent.operation_type,
         sensitive_redacted=intent.sensitive_redacted,
-        memory_type=getattr(intent, "memory_type", "semantic"),
-        source_type=getattr(intent, "source_type", "explicit_user_request"),
+        memory_type=intent.memory_type,
+        source_type=intent.source_type,
         approval_status=approval_status,
     )
 

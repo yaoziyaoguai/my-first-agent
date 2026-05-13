@@ -409,14 +409,19 @@ def _record_from_frontmatter(meta: dict) -> MemoryRecord:
 
 
 def _meta_from_intent(intent: MemoryOperationIntent, audit_id: str, record_id: str) -> dict:
-    """Build frontmatter metadata dict from MemoryOperationIntent."""
+    """Build frontmatter metadata dict from MemoryOperationIntent.
+
+    Metadata Continuity Invariant (RFC §14.5):
+    memory_type/source_type/approval_status 禁止在 store 层重新推断。
+    intent 的字段由 governance routing 设置，store 原样使用，不 fallback。
+    """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     scope_str = intent.scope.value if intent.scope else "session"
     return {
         "id": record_id,
-        "memory_type": getattr(intent, "memory_type", "semantic"),
+        "memory_type": intent.memory_type,
         "scope": scope_str,
-        "source_type": getattr(intent, "source_type", "explicit_user_request"),
+        "source_type": intent.source_type,
         "approval_status": intent.confirmation_status.value
         if hasattr(intent.confirmation_status, "value") else str(intent.confirmation_status),
         "created_at": now,
@@ -488,16 +493,17 @@ class FilesystemMemoryStore:
         if intent.operation_type is MemoryOperationType.USE_ONCE:
             return self._apply_use_once(intent, audit_id)
 
+        # T1 explicit approval 和 T2 auto_retained 均可写入 store。
         if (
             intent.operation_type in MUTATING_OPERATION_TYPES
-            and intent.confirmation_status.value != "approved"
+            and intent.confirmation_status.value not in ("approved", "auto_retained")
         ):
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.REJECTED,
                 operation_type=intent.operation_type,
                 record=None,
                 audit_id=audit_id,
-                message="mutating memory operation requires approved confirmation",
+                message="mutating memory operation requires approved or auto_retained confirmation",
             )
 
         if intent.operation_type is MemoryOperationType.RETAIN:
@@ -598,7 +604,8 @@ class FilesystemMemoryStore:
 
     def _apply_retain(self, intent: MemoryOperationIntent, audit_id: str) -> MemoryStoreApplyResult:
         # 去重检查：基于 content + memory_type + scope，不求助于 embedding/similarity
-        memory_type = getattr(intent, "memory_type", "semantic")
+        # Metadata Continuity (RFC §14.5): 使用 intent.memory_type，不 fallback
+        memory_type = intent.memory_type
         existing = find_duplicate_record(
             intent.content_summary, memory_type, intent.scope,
             self.list_records(),
@@ -623,9 +630,11 @@ class FilesystemMemoryStore:
             "file": topic,
             "memory_type": memory_type,
             "scope": intent.scope.value if intent.scope else "session",
-            "source_type": getattr(intent, "source_type", "explicit_user_request"),
-            "approval_status": "approved",
-            "confidence": 0.85,
+            "source_type": intent.source_type,
+            "approval_status": intent.confirmation_status.value
+                if hasattr(intent.confirmation_status, "value")
+                else str(intent.confirmation_status),
+            "confidence": 0.85 if intent.confirmation_status.value == "approved" else 0.5,
             "stability": "stable",
             "created_at": meta["created_at"],
             "updated_at": meta["updated_at"],
@@ -646,7 +655,8 @@ class FilesystemMemoryStore:
         record_id = derive_memory_record_id(intent.source_summary)
         meta = _meta_from_intent(intent, audit_id, record_id)
         meta["approval_status"] = "session_only"
-        memory_type = getattr(intent, "memory_type", "semantic")
+        # Metadata Continuity (RFC §14.5): 使用 intent.memory_type，不 fallback
+        memory_type = intent.memory_type
         topic = _route_topic(memory_type, intent.scope or MemoryScope.USER)
         filepath = self.root_dir / topic
         write_memory_section(filepath, meta, intent.content_summary)

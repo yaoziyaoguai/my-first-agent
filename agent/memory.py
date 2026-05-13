@@ -287,13 +287,385 @@ def cleanup_old_episodes() -> None:
 
 
 
-def extract_memories_from_session(messages, client, model_name) -> None:
-    """
-    从本次会话中提取长期记忆。
+def extract_memories_from_session(
+    messages,
+    client,
+    model_name,
+    *,
+    store=None,
+) -> dict:
+    """W3 Session-End Extraction Skeleton — 从会话 transcript 提取 episodic candidate。
 
-    当前先保留最小兼容实现：
-    - 不把 working_summary 混入长期记忆
-    - 不做实际提取
-    - 只保证退出流程可运行
+    ⚠️ Phase 5a skeleton path：当前通过 create_extractor("fake", ...) factory seam
+    使用确定性关键词匹配的 FakeMemoryExtractor 进行 pipeline validation。
+    这不代表真实 LLM extraction quality 已验证。
+    后续 L2 替换为 LLMMemoryExtractor 时，只需将 factory 的 extractor_type 改为
+    "llm"；governance routing 和 persistence 逻辑不变（factory + extract 接口一致）。
+    Fake 不定义 lifecycle / governance / persistence 语义。
+
+    Lifecycle 位置（RFC §3.1）：
+      Interaction → Extraction（本函数）→ Episodic → Consolidation → ...
+
+    Governance Routing（RFC §10.4, §5.3）：
+      - episodic + confidence [0.6, 0.8) → T2 auto_retain → 写入 store
+      - episodic + confidence ≥0.8 → T1 pending（持久化到 _pending/，待人类 review）
+      - confidence <0.6 → T3 ignore
+      - non-episodic（semantic/procedural）→ T1（session-end 不产出这些类型）
+
+    Extraction ≠ Persistence（Appendix G.1）：
+      提取器只产出 candidate，governance routing 后才写入 store。
+
+    Args:
+        messages: 本次 session 的完整对话消息列表
+        client: LLM client（skeleton 阶段不使用，预留给 L2 LLM extraction）
+        model_name: 模型名称（skeleton 阶段不使用）
+        store: 可选注入的 MemoryStoreProtocol。None 时按 MEMORY_STORE_BACKEND 创建。
+
+    Returns:
+        extraction_summary dict，包含审计观察字段（供 dogfood 分析）：
+        - total_messages: 输入消息数
+        - total_proposals: 提取到的 proposal 总数
+        - t2_auto_retained: T2 自动保留数
+        - t1_pending: T1 待确认数
+        - t3_ignored: T3 丢弃数
+        - dedup_hits: 与已有 store 重复的 proposal 数
+        - errors: 提取过程中的错误列表
+        - false_positives_note: 疑似 false positive 的 observation note
     """
-    return None
+    import os as _os
+
+    from agent.memory_extraction import (
+        ExtractionInput,
+        create_extractor,
+    )
+    from agent.memory_extraction_bridge import (
+        proposal_to_candidate,
+    )
+    from agent.memory_operations import (
+        MemoryOperationType,
+        MemoryOperationIntent,
+        build_memory_audit_summary,
+    )
+    from agent.memory_store import (
+        MemoryStoreApplyStatus,
+        find_duplicate_record,
+    )
+    from agent.memory_confirmation import (
+        MemoryConfirmationChoice,
+        MemoryConfirmationStatus,
+    )
+    from agent.memory_contracts import (
+        MemoryDecisionType,
+        MemoryScope,
+    )
+
+    # ── 初始化返回结构 ──────────────────────────────────────────────────
+    summary = {
+        "total_messages": len(messages),
+        "total_proposals": 0,
+        "t2_auto_retained": 0,
+        "t1_pending": 0,
+        "t3_ignored": 0,
+        "dedup_hits": 0,
+        "errors": [],
+        "false_positives_note": "",
+    }
+    t1_proposals: list[dict] = []  # T1 pending proposals，循环结束后持久化
+
+    # ── 创建 store ──────────────────────────────────────────────────────
+    if store is None:
+        backend = _os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
+        if backend in ("memory", "in_memory", "inmemory"):
+            from agent.memory_store import InMemoryMemoryStore
+            store = InMemoryMemoryStore()
+        elif backend in ("filesystem", "memory_fs", "fs"):
+            from agent.memory_fs_store import FilesystemMemoryStore
+            store = FilesystemMemoryStore()
+        else:
+            summary["errors"].append(
+                f"不支持的 MEMORY_STORE_BACKEND: {backend!r}"
+            )
+            return summary
+
+    # ── 构造 transcript（过滤 system 消息，保留 user/assistant）─────────
+    transcript = [
+        {"role": m.get("role", "user"), "content": _msg_content_for_extraction(m)}
+        for m in messages
+        if m.get("role") in ("user", "assistant")
+    ]
+    if not transcript:
+        summary["errors"].append("transcript 为空，无可提取内容")
+        return summary
+
+    # ── Extraction：通过 factory seam 创建 extractor（skeleton 阶段使用 fake）──
+    # factory 按 extractor_type 返回 FakeMemoryExtractor 或 LLMMemoryExtractor。
+    # 当前默认 "fake" 是 Phase 5a skeleton path，用于验证 routing / governance /
+    # persistence pipeline，不代表真实 LLM extraction quality。
+    # 后续 L2 切换为 LLMMemoryExtractor 时只需将 extractor_type 改为 "llm"，
+    # factory 返回真实 LLM 实现；governance routing 和 store 写入逻辑不变。
+    # Fake 不定义 lifecycle / governance / persistence 语义。
+    try:
+        extractor = create_extractor(
+            "fake",
+            min_confidence=0.6,
+            min_importance=3,
+        )
+        extraction_input = ExtractionInput(
+            transcript=transcript,
+            session_metadata={"source": "session_end_extraction"},
+        )
+        result = extractor.extract(extraction_input)
+    except Exception as exc:
+        summary["errors"].append(f"extraction 失败: {exc}")
+        return summary
+
+    proposals = list(result.proposals)
+    summary["total_proposals"] = len(proposals)
+
+    # ── W3 Session-End 类型约束（RFC §11.4 + Appendix G.2 LB1）──────────
+    # session-end extraction 只产出 episodic。semantic/procedural 的
+    # 生成路径是 W1 explicit retain / W4 consolidation / W5 emergence。
+    episodic_proposals = [p for p in proposals if p.memory_type == "episodic"]
+    non_episodic = [p for p in proposals if p.memory_type != "episodic"]
+    summary["t3_ignored"] += len(non_episodic)  # session-end 不处理非 episodic
+
+    # ── Governance Routing ──────────────────────────────────────────────
+    # T2 宪法锁定（RFC §10.2）：
+    #   - 仅 episodic 类型
+    #   - confidence [0.6, 0.8)
+    #   - sensitivity ≤ MEDIUM
+    #   - 单 session 上限 3 条
+    #   - 必须标记 approval_status="auto_retained"
+    MAX_T2_PER_SESSION = 3
+    t2_count = 0
+
+    for proposal in episodic_proposals:
+        confidence = proposal.confidence
+
+        # ── T3: confidence < 0.6 → ignore ────────────────────────────
+        if confidence < 0.6:
+            summary["t3_ignored"] += 1
+            continue
+
+        # ── T2: confidence [0.6, 0.8) → governed auto-retain ─────────
+        if 0.6 <= confidence < 0.8:
+            if t2_count >= MAX_T2_PER_SESSION:
+                summary["t3_ignored"] += 1
+                continue
+
+            # T2 安全锁定：sensitivity check（FakeMemoryExtractor 产出
+            # 的 proposal sensitivity 默认 LOW，但仍需显式检查）
+            # FakeMemoryExtractor 不设 sensitivity，bridge 默认 LOW
+            candidate = proposal_to_candidate(proposal)
+            if candidate.sensitivity in {
+                MemorySensitivity.HIGH,
+                MemorySensitivity.SECRET,
+            }:
+                summary["t3_ignored"] += 1
+                continue
+
+            # 去重检查（SHA256 + 规范化 content 匹配）
+            existing_records = store.list_records()
+            duplicate = find_duplicate_record(
+                candidate.content, candidate.proposed_type, candidate.scope,
+                existing_records,
+            )
+            if duplicate is not None:
+                summary["dedup_hits"] += 1
+                summary["t3_ignored"] += 1
+                continue
+
+            # ── T2 写入：构造 MemoryOperationIntent → apply_operation_intent ─
+            # 统一走 canonical write path（RFC §10.4, §14.5）：
+            # MemoryOperationIntent 携带完整 governance metadata
+            # （memory_type / source_type / confirmation_status），
+            # store.apply_operation_intent 根据 confirmation_status 决定
+            # approval_status。不再使用 hasattr(store, "_records") hack。
+            t2_intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=proposal.content,
+                source_summary=f"session_end_extraction: {proposal.evidence[:100]}",
+                scope=candidate.scope or MemoryScope.USER,
+                safety_summary="T2 auto_retained (session-end extraction)",
+                sensitive_redacted=False,
+                user_visible_summary=f"[自动记录] {proposal.content[:80]}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+            )
+            t2_audit = build_memory_audit_summary(t2_intent)
+            t2_result = store.apply_operation_intent(t2_intent, t2_audit)
+
+            if t2_result.status is MemoryStoreApplyStatus.APPLIED:
+                t2_count += 1
+                summary["t2_auto_retained"] += 1
+            else:
+                summary["errors"].append(
+                    f"T2 auto_retain apply 失败（status={t2_result.status.value}）: "
+                    f"{t2_result.message}"
+                )
+            continue
+
+        # ── T1: confidence ≥0.8 → pending confirmation ────────────────
+        # T1 proposal 需要人类 review。collect metadata 后在循环结束后
+        # 持久化到 _pending/ 目录（Phase 5a skeleton persistence）。
+        candidate = proposal_to_candidate(proposal)
+        t1_proposals.append({
+            "content": proposal.content,
+            "evidence": proposal.evidence,
+            "confidence": proposal.confidence,
+            "importance": proposal.importance,
+            "rationale": proposal.rationale,
+            "memory_type": "episodic",
+            "source_type": "agent_suggested",
+            "governance_route": "T1",
+            "approval_status": "pending",
+            "scope": candidate.scope.value if candidate.scope else "user",
+            "source": "session_end_extraction",
+            "created_at": _os.environ.get(
+                "SESSION_START_TIME", ""
+            ) or _now_utc_iso(),
+        })
+        summary["t1_pending"] += 1
+
+    # ── T1 pending 持久化 ──────────────────────────────────────────────
+    # Phase 5a skeleton persistence：将 T1 pending proposals 写入
+    # {memory_root}/_pending/ 目录。每条 proposal 独立 JSON 文件。
+    if t1_proposals:
+        try:
+            _persist_t1_pending_proposals(t1_proposals)
+        except Exception as exc:
+            summary["errors"].append(f"T1 pending 持久化失败: {exc}")
+
+    # ── Dogfood 观察笔记 ──────────────────────────────────────────────
+    if summary["total_proposals"] == 0:
+        summary["false_positives_note"] = (
+            "无 proposal 被提取。可能原因：(1) fake extractor 关键词覆盖不足，"
+            "许多值得记忆的事件未被识别（false negative）；"
+            "(2) 本次 session 确实无可提取内容。"
+        )
+    elif summary["t2_auto_retained"] == 0 and summary["t1_pending"] == 0:
+        summary["false_positives_note"] = (
+            f"提取到 {summary['total_proposals']} 条 proposal，"
+            f"但全部被 T3 过滤（confidence/类型/去重）。"
+            f"需观察是否有 false positive 或 confidence 阈值需校准。"
+        )
+
+    return summary
+
+
+def _msg_content_for_extraction(msg: dict) -> str:
+    """从消息中提取用于 memory extraction 的文本内容。
+
+    处理 Anthropic content block 格式（list of blocks）和纯文本字符串。
+    tool_use / tool_result block 提取摘要而非全文，避免噪声。
+    """
+    content = msg.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type", "")
+            if block_type == "text":
+                text = block.get("text", "")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif block_type == "tool_use":
+                name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                input_summary = _summarize_tool_input(tool_input)
+                parts.append(f"[调用工具: {name}] {input_summary}")
+            elif block_type == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, str):
+                    parts.append(
+                        f"[工具结果: {result_content[:200]}]"
+                    )
+                elif isinstance(result_content, list):
+                    text_parts = [
+                        b.get("text", "") for b in result_content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    ]
+                    combined = " ".join(text_parts)[:200]
+                    parts.append(f"[工具结果: {combined}]")
+        return "\n".join(parts)
+    return str(content)
+
+
+def _summarize_tool_input(tool_input: dict) -> str:
+    """简要摘要 tool input，避免过长内容污染 extraction。"""
+    if not tool_input:
+        return ""
+    # 只取前 3 个 key 的前 80 chars 值
+    items = []
+    for k, v in list(tool_input.items())[:3]:
+        v_str = str(v)[:80]
+        items.append(f"{k}={v_str}")
+    result = ", ".join(items)
+    if len(result) > 300:
+        result = result[:297] + "..."
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T1 Pending Persistence（Phase 5a skeleton）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _now_utc_iso() -> str:
+    """返回当前 UTC 时间的 ISO 8601 字符串。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _resolve_memory_root() -> str:
+    """解析 memory 根目录路径。
+
+    优先级与 FilesystemMemoryStore 一致：
+    MEMORY_STORE_ROOT > MEMORY_ROOT > ~/.my-first-agent/memory
+    """
+    import os as _os
+    from pathlib import Path
+    return (
+        _os.getenv("MEMORY_STORE_ROOT")
+        or _os.getenv("MEMORY_ROOT")
+        or str(Path.home() / ".my-first-agent" / "memory")
+    )
+
+
+def _persist_t1_pending_proposals(proposals: list[dict]) -> None:
+    """将 T1 pending proposals 持久化到 {memory_root}/_pending/ 目录。
+
+    Phase 5a skeleton persistence — 每条 T1 proposal 独立 JSON 文件：
+      {memory_root}/_pending/t1_{timestamp}_{hash4}.json
+
+    metadata 包含：content, evidence, confidence, importance, rationale,
+    memory_type, source_type, governance_route, approval_status, scope,
+    source, created_at。
+
+    这不是完整 review UX，仅为确保 session 结束后 T1 proposal 不丢失。
+    后续 review bridge 从 _pending/ 目录读取并展示给用户。
+    """
+    import json
+    from hashlib import sha256
+    from pathlib import Path
+
+    root = _resolve_memory_root()
+    pending_dir = Path(root) / "_pending"
+    pending_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = _now_utc_iso().replace(":", "-")
+    for i, proposal in enumerate(proposals):
+        # 用 content hash 前 4 位做文件名区分
+        content_hash = sha256(proposal["content"].encode("utf-8")).hexdigest()[:4]
+        filename = f"t1_{timestamp}_{content_hash}_{i}.json"
+        filepath = pending_dir / filename
+        filepath.write_text(
+            json.dumps(proposal, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )

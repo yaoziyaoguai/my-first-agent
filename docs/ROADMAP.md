@@ -195,9 +195,10 @@ core**。
   不新增 pending status、不改 checkpoint schema、不改 TUI、不实现 Memory interactive
   confirmation。
 - ✅ **Memory Next Stage Architecture Plan** 已新增：
-  `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` 覆盖 agent-suggested memory + external
+  `docs/rfc/archived/MEMORY_NEXT_STAGE_ARCHITECTURE.md` 覆盖 agent-suggested memory + external
   MemoryProvider adapter 的统一架构设计，明确统一确认模型、信任边界、分阶段路线
   （Phase 1-5）。Phase 1 设计文档已完成。
+  当前 canonical spec 已收口至 `docs/rfc/MEMORY_CANONICAL_RFC.md`。
 - ✅ **Phase 2: Deterministic Memory Suggestions 已完成**（`29c4bb1`）：
   `agent/memory_suggestions.py` (397行) 提供 `DeterministicSuggestionEngine`，
   4 条确定性 heuristic 规则（project_rule / bug_fix_lesson / architecture_decision /
@@ -219,7 +220,8 @@ core**。
   在进入 Phase 3 实现前，需先完成设计：持久化方案选型（JSON file vs SQLite）、
   memory store 与 checkpoint 的边界、pending confirmation restore 语义、
   recall API 范围、跨 session memory 安全边界、schema migration/compatibility。
-  见 `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` §9。
+  见 `docs/rfc/archived/MEMORY_NEXT_STAGE_ARCHITECTURE.md` §9。
+  当前 memory architecture 已收口至 `docs/rfc/MEMORY_CANONICAL_RFC.md`。
 - ✅ Remaining Roadmap Completion Autopilot 已记录：
   `docs/REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md` 汇总 release/tag preparation
   planning、MCP external integration readiness、runtime trace / ToolResult migration
@@ -614,9 +616,10 @@ push 或 tag，除非用户单独选择对应动作。
 #### Stage 3 Next Stage · Agent-suggested + External Provider Architecture Planning
 
 **本轮产物**：
-- `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md`：覆盖 agent-suggested memory 与 external
+- `docs/rfc/archived/MEMORY_NEXT_STAGE_ARCHITECTURE.md`：覆盖 agent-suggested memory 与 external
   MemoryProvider adapter 的统一架构设计，包含信任模型、统一确认流、安全边界、
   分阶段路线（Phase 1-5）和下一轮可执行 prompt 草案。
+  当前 canonical spec 已收口至 `docs/rfc/MEMORY_CANONICAL_RFC.md`。
 
 **当前状态**：
 - ✅ Memory Interactive Confirmation v1 已完成（user-initiated explicit memory）

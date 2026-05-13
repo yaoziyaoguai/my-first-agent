@@ -72,17 +72,20 @@ def test_memory_module_does_not_import_runtime_checkpoint_tui_or_mcp_layers() ->
 
 
 def test_memory_module_does_not_read_or_write_real_memory_artifacts() -> None:
-    """Discovery readiness 不允许偷偷读取真实 `memory/` 数据。
+    """Memory 模块不得读取真实 memory 数据或将其当作实现捷径。
 
-    当前 `agent.memory` 只能处理 in-memory messages 和静态 prompt section；
-    retain/recall/update/forget、artifact migration、privacy policy 都还没有
-    设计完成。因此这里先用 AST 钉住：不能出现 open/read_text/write_text/glob
-    等文件 IO 入口，避免把历史 memory 数据当作实现捷径。
+    Phase 5a skeleton 允许的受限文件 IO：
+    - write_text: T1 pending proposal 持久化（_pending/*.json）
+    - mkdir: _pending 目录创建
+
+    禁止的 IO（捷径/未设计路径）：
+    - open / read_text: 读取已有 memory 数据
+    - glob / iterdir: 枚举/发现 memory 文件
     """
 
     calls = _called_names(MEMORY_MODULE)
 
-    assert {"open", "read_text", "write_text", "glob", "iterdir"}.isdisjoint(calls)
+    assert {"open", "read_text", "glob", "iterdir"}.isdisjoint(calls)
 
 
 def test_build_memory_section_is_static_placeholder_not_real_memory_reader() -> None:

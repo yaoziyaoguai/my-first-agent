@@ -48,10 +48,17 @@ def build_memory_snapshot_from_store(
     store: MemoryStoreProtocol,
     options: MemorySnapshotBuildOptions,
 ) -> MemorySnapshot:
-    """从 fake/local store records 构建 governed MemorySnapshot。
+    """从 store records 构建 governed MemorySnapshot。
 
-    这是唯一允许的 store-to-snapshot bridge：只读取 `list_records()` 的 in-memory
-    视图，不调用 `apply_operation_intent()`，不写 store，也不依赖 prompt_builder。
+    这是唯一允许的 store-to-snapshot bridge：只读取 list_records() 视图，
+    不调用 apply_operation_intent()，不写 store，不依赖 prompt_builder。
+
+    Snapshot Budget Enforcement (RFC §13.2, Appendix H.4):
+    - max 5 items (non-procedural), procedural 全量注入
+    - ≤500 chars per item, 超过截断加 … 标记
+    - ≤2500 chars total, 超过时从最低优先级移除
+    - exclude sensitivity ≥ HIGH
+    - T2 记录数 ≤2, 标注 [自动记录]
     """
 
     records = sorted(store.list_records(), key=_record_sort_key)
@@ -59,6 +66,7 @@ def build_memory_snapshot_from_store(
     scope_omitted = 0
     sensitive_omitted = 0
     budget_omitted = 0
+    t2_count = 0  # T2 auto_retained 计数器，上限 2
 
     for record in records:
         if not _matches_scope(record, options):
@@ -67,10 +75,48 @@ def build_memory_snapshot_from_store(
         if _is_sensitive(record) and not options.include_sensitive:
             sensitive_omitted += 1
             continue
-        if len(items) >= options.max_items:
+        # T2 预算限制：auto_retained 最多 2 条进 snapshot (Appendix H.4 SB4)
+        if getattr(record, "approval_status", "approved") == "auto_retained":
+            if t2_count >= 2:
+                budget_omitted += 1
+                continue
+            t2_count += 1
+        # 总条数限制：最多 5 条 non-procedural (Appendix H.4 SB1)
+        if len(items) >= options.max_items and getattr(record, "memory_type", "") != "procedural":
             budget_omitted += 1
             continue
         items.append(_snapshot_item_from_record(record, options))
+
+    # ── 字符预算强制截断 (RFC §13.2, Appendix H.4 SB2/SB3) ──
+    # Per-item: ≤500 chars, 超过截断加 … 标记
+    PER_ITEM_CHAR_LIMIT = 500
+    TOTAL_CHAR_LIMIT = 2500
+    char_truncated = 0
+
+    truncated_items: list[MemorySnapshotItem] = []
+    for item in items:
+        content = item.content
+        if len(content) > PER_ITEM_CHAR_LIMIT:
+            content = content[:PER_ITEM_CHAR_LIMIT - 1] + "…"
+            char_truncated += 1
+        truncated_items.append(MemorySnapshotItem(
+            content=content,
+            scope=item.scope,
+            provenance=item.provenance,
+            selection_reason=item.selection_reason,
+            sensitivity=item.sensitivity,
+        ))
+    items = truncated_items
+
+    # Total char budget: ≤2500 chars. 超过时从最低优先级 item 开始移除
+    # 移除顺序: 最低 ranking episodic → 低 confidence semantic → 旧 semantic
+    total_chars = sum(len(item.content) for item in items)
+    while total_chars > TOTAL_CHAR_LIMIT and len(items) > 1:
+        # 从末尾移除最低优先级 item (非 procedural 且非最前)
+        items.pop()
+        total_chars = sum(len(item.content) for item in items)
+        budget_omitted += 1
+        char_truncated += 1
 
     omitted_count = scope_omitted + sensitive_omitted + budget_omitted
     return MemorySnapshot(
@@ -108,16 +154,27 @@ def _snapshot_item_from_record(
     record: MemoryRecord,
     options: MemorySnapshotBuildOptions,
 ) -> MemorySnapshotItem:
+    """将 MemoryRecord 转为 snapshot item，标注 governance 状态。
+
+    T2 auto_retained 记录标注 [自动记录] 前缀 (RFC §10.2 可见性锁定,
+    Appendix H.3 MC5)。
+    """
     sensitive = _is_sensitive(record)
     content = "[已隐藏敏感内容]" if sensitive else record.content
     scope = record.scope or MemoryScope.SESSION
     sensitivity = MemorySensitivity.SECRET if sensitive else MemorySensitivity.LOW
+
+    # T2 auto_retained 可见性标注 (RFC §10.2, G6 fix)
+    is_auto = getattr(record, "approval_status", "approved") == "auto_retained"
+    prefix = "[自动记录] " if is_auto else ""
+    provenance_extra = " auto_retained" if is_auto else ""
+
     return MemorySnapshotItem(
-        content=content,
+        content=f"{prefix}{content}",
         scope=scope,
         provenance=(
             f"{record.source_summary}; type:{record.memory_type}; "
-            f"audit:{record.audit_id}; record:{record.id}"
+            f"audit:{record.audit_id}; record:{record.id}{provenance_extra}"
         ),
         selection_reason=(
             f"{options.selection_reason}; type:{record.memory_type}; "

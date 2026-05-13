@@ -33,9 +33,18 @@ class MemoryConfirmationChoice(StrEnum):
 
 
 class MemoryConfirmationStatus(StrEnum):
-    """确认结果状态；它不是 store operation status。"""
+    """确认结果状态；它不是 store operation status。
+
+    Governance routing（RFC §10.4）：
+    - APPROVED: T1 explicit human confirmation 通过
+    - AUTO_RETAINED: T2 governed auto-retain（episodic + confidence [0.6, 0.8)）
+    - REJECTED: 用户/系统拒绝
+    - SESSION_ONLY: 仅本次会话
+    - NEEDS_CLARIFICATION: 需进一步澄清
+    """
 
     APPROVED = "approved"
+    AUTO_RETAINED = "auto_retained"
     REJECTED = "rejected"
     SESSION_ONLY = "session_only"
     NEEDS_CLARIFICATION = "needs_clarification"

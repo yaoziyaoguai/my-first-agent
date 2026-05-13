@@ -271,22 +271,35 @@ def _replay_awaiting_prompt(state):
 
 # ========== 退出 ==========
 
+def _run_session_end_memory_extraction(messages, client, model_name) -> dict:
+    """Session-end memory extraction 的 thin orchestration helper。
+
+    职责：
+    - 调用 extract_memories_from_session() 触发 extraction → governance → persistence
+    - 通过 _format_extraction_summary() 展示结果
+
+    不参与 T1/T2/T3 routing 决策，不直接操作 store 文件结构。
+
+    被 finalize_session() 和 handle_double_interrupt() 共用，
+    确保正常退出和 Ctrl+C×2 退出都执行 session-end extraction。
+    """
+    print("\n[系统] 正在提取本次对话的记忆...")
+    extraction_summary = extract_memories_from_session(messages, client, model_name)
+    print(_format_extraction_summary(extraction_summary))
+    return extraction_summary
+
+
 def finalize_session():
     """正常退出（quit 或双 Ctrl+C）：提取记忆 + 保存快照 + 保存 state 断点。
 
-    session.py 只做 thin runtime orchestration：
-    - 调用 extract_memories_from_session() 触发 extraction → governance → persistence
-    - 通过 _format_extraction_summary() 展示结果，不直接查询 store 内部状态
-    - 不参与 T1/T2/T3 routing 决策
+    session.py 只做 thin runtime orchestration。
     """
     from agent.core import client, get_state
 
     state = get_state()
     messages = state.conversation.messages
 
-    print("\n[系统] 正在提取本次对话的记忆...")
-    extraction_summary = extract_memories_from_session(messages, client, MODEL_NAME)
-    print(_format_extraction_summary(extraction_summary))
+    _run_session_end_memory_extraction(messages, client, MODEL_NAME)
     save_session_snapshot(messages)
 
     if state.task.current_plan:
@@ -386,13 +399,21 @@ def handle_interrupt_without_checkpoint() -> bool:
 
 
 def handle_double_interrupt():
-    """连续两次 Ctrl+C：保存并退出"""
-    from agent.core import get_state
+    """连续两次 Ctrl+C：extraction + 保存并退出。
+
+    Slice 1 P1-2 修复：复用 _run_session_end_memory_extraction()，
+    确保 Ctrl+C×2 退出路径与正常 quit 路径一样执行 session-end extraction。
+    """
+    from agent.core import client, get_state
 
     print("\n\n[系统] 检测到连续中断，正在保存...")
 
     state = get_state()
     messages = state.conversation.messages
+
+    # session-end memory extraction（与 finalize_session 共用同一 helper）
+    _run_session_end_memory_extraction(messages, client, MODEL_NAME)
+
     save_session_snapshot(messages)
 
     if state.task.current_plan:

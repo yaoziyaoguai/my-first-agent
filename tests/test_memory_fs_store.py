@@ -39,7 +39,8 @@ def _make_intent(*, operation_type=MemoryOperationType.RETAIN, content="test con
                  confirmation=MemoryConfirmationStatus.APPROVED,
                  decision_type=MemoryDecisionType.RETAIN,
                  sensitive=False,
-                 user_choice=MemoryConfirmationChoice.ACCEPT) -> MemoryOperationIntent:
+                 user_choice=MemoryConfirmationChoice.ACCEPT,
+                 confidence: float | None = None) -> MemoryOperationIntent:
     return MemoryOperationIntent(
         operation_type=operation_type,
         decision_type=decision_type,
@@ -51,6 +52,7 @@ def _make_intent(*, operation_type=MemoryOperationType.RETAIN, content="test con
         confirmation_status=confirmation,
         sensitive_redacted=sensitive,
         user_choice=user_choice,
+        confidence=confidence,
     )
 
 
@@ -677,3 +679,146 @@ class TestEdgeCases:
         # rebuild index
         index = build_fs_index(tmp_store_dir)
         assert record_id not in index
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# confidence metadata continuity（Slice 1 P1-1 修复验证）
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些测试验证 extraction confidence 通过 MemoryOperationIntent 透传到
+# filesystem frontmatter 和 index entry，不验证真实 LLM extraction quality。
+#
+# 核心 invariant：
+#   extraction confidence → MemoryOperationIntent.confidence
+#                        → _meta_from_intent() → frontmatter confidence
+#                        → _write_index_entry() → index confidence
+#                        → filesystem 落盘值与 extraction 一致
+
+
+class TestConfidenceMetadataContinuity:
+    """验证 confidence 从 MemoryOperationIntent 到 filesystem 落盘的连续性。"""
+
+    def test_t2_confidence_preserved_in_frontmatter(self, FSStore):
+        """T2 auto-retained intent 的 confidence=0.65 落到 frontmatter 中保持 0.65。
+
+        Slice 1 P1-1 修复前：store 对 auto_retained 硬编码 confidence=0.5。
+        修复后：intent.confidence 优先于 legacy fallback。
+        """
+        intent = _make_intent(
+            confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
+            confidence=0.65,
+        )
+        audit = _make_audit(intent)
+        result = FSStore.apply_operation_intent(intent, audit)
+        record = FSStore.get_record(result.record.id)
+        # metadata 中的 confidence 应为传入的真实值
+        assert record.metadata.get("confidence") == 0.65, (
+            f"frontmatter confidence 应保持 0.65，实际 {record.metadata.get('confidence')}"
+        )
+
+    def test_t2_confidence_preserved_in_index(self, FSStore):
+        """index entry 中的 confidence 也应为传入的真实值 0.65。"""
+        intent = _make_intent(
+            confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
+            confidence=0.65,
+        )
+        audit = _make_audit(intent)
+        result = FSStore.apply_operation_intent(intent, audit)
+        # 直接从 index 读取
+        entry = FSStore._index.get(result.record.id)
+        assert entry is not None, "index 中应有对应 entry"
+        assert entry.get("confidence") == 0.65, (
+            f"index confidence 应保持 0.65，实际 {entry.get('confidence')}"
+        )
+
+    def test_approved_confidence_preserved(self, FSStore):
+        """T1 approved intent 的 confidence=0.85 落到存储中保持 0.85。"""
+        intent = _make_intent(
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            confidence=0.85,
+        )
+        audit = _make_audit(intent)
+        result = FSStore.apply_operation_intent(intent, audit)
+        record = FSStore.get_record(result.record.id)
+        assert record.metadata.get("confidence") == 0.85
+
+    def test_legacy_fallback_when_confidence_none(self, FSStore):
+        """intent.confidence=None 时使用 legacy fallback（向后兼容）。
+
+        旧路径（如 explicit_user_request）不携带 confidence，
+        store 不应崩溃或写入 None，而应 fallback 到硬编码值。
+        两个 intent 使用不同的 content 和 source_summary 避免去重命中。
+        """
+        # approved → fallback 0.85
+        intent_approved = _make_intent(
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            confidence=None,
+            content="legacy approved test content",
+            source_summary="legacy approved source",
+        )
+        audit = _make_audit(intent_approved)
+        result = FSStore.apply_operation_intent(intent_approved, audit)
+        record = FSStore.get_record(result.record.id)
+        assert record.metadata.get("confidence") == 0.85, (
+            "approved + confidence=None → legacy fallback 应为 0.85"
+        )
+
+        # auto_retained → fallback 0.5（不同 content + source_summary 避免与上条去重）
+        intent_t2 = _make_intent(
+            confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
+            confidence=None,
+            content="auto retained legacy test content",
+            source_summary="auto retained legacy source",
+        )
+        audit2 = _make_audit(intent_t2)
+        result2 = FSStore.apply_operation_intent(intent_t2, audit2)
+        record2 = FSStore.get_record(result2.record.id)
+        assert record2.metadata.get("confidence") == 0.5, (
+            "auto_retained + confidence=None → legacy fallback 应为 0.5"
+        )
+
+    def test_fake_marker_t2_confidence_continuity(self, FSStore):
+        """端到端：Fake marker [t2] → extraction(0.65) → intent(0.65) → store(0.65)。
+
+        不走 fake 直调，而是构造 intent 模拟 T2 auto-retain 写入路径。
+        验证 MemoryOperationIntent(confidence=0.65) 写入后 frontmatter 和 index
+        都保持 0.65。这个测试验证 metadata continuity，不验证 LLM extraction quality。
+        """
+        from agent.memory_operations import MemoryAuditSummary
+
+        # 模拟 extraction 产出的 proposal confidence
+        intent = MemoryOperationIntent(
+            operation_type=MemoryOperationType.RETAIN,
+            decision_type=MemoryDecisionType.RETAIN,
+            confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            content_summary="我希望以后在这个项目里先给结论再给解释。",
+            source_summary="fake dogfood marker [t2]（role=user）",
+            scope=MemoryScope.USER,
+            safety_summary="T2 auto_retained",
+            sensitive_redacted=False,
+            user_visible_summary="[自动记录] 我希望以后在这个项目里先给结论再给解释。",
+            memory_type="episodic",
+            source_type="agent_suggested",
+            confidence=0.65,
+        )
+        audit = MemoryAuditSummary(
+            operation_type=intent.operation_type.value,
+            decision_type=intent.decision_type.value,
+            source_summary=intent.source_summary,
+            user_choice=intent.user_choice.value,
+            safety_summary=intent.safety_summary,
+            sensitive_redacted=intent.sensitive_redacted,
+            user_visible_summary=intent.user_visible_summary,
+        )
+        result = FSStore.apply_operation_intent(intent, audit)
+        record = FSStore.get_record(result.record.id)
+
+        # frontmatter confidence
+        assert record.metadata.get("confidence") == 0.65, (
+            f"frontmatter confidence 应保持 0.65，实际 {record.metadata.get('confidence')}"
+        )
+        # index confidence
+        entry = FSStore._index.get(result.record.id)
+        assert entry.get("confidence") == 0.65, (
+            f"index confidence 应保持 0.65，实际 {entry.get('confidence')}"
+        )

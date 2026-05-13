@@ -267,3 +267,191 @@ def test_extract_memories_default_inmemory_store(monkeypatch):
     summary = extract_memories_from_session([], None, None)
     assert summary["store_backend"] == "memory"
     assert summary["store_root"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# handle_double_interrupt extraction hook 测试（Slice 1 P1-2 验证）
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些测试验证 Ctrl+C×2 退出路径会触发 session-end memory extraction，
+# 不验证 extraction quality。
+
+
+class TestDoubleInterruptExtractionHook:
+    """验证 handle_double_interrupt() 会触发 session-end memory extraction。
+
+    所有测试使用 monkeypatch 替换 extract_memories_from_session()，
+    返回 fake summary，不调用真实 LLM，不读取 .env。
+    """
+
+    FAKE_SUMMARY = {
+        "store_backend": "memory",
+        "store_root": None,
+        "total_messages": 5,
+        "total_proposals": 2,
+        "t2_auto_retained": 1,
+        "t1_pending": 1,
+        "t3_ignored": 0,
+        "dedup_hits": 0,
+        "errors": [],
+        "false_positives_note": "",
+    }
+
+    def test_double_interrupt_calls_extraction(self, monkeypatch):
+        """handle_double_interrupt() 必须调用 extract_memories_from_session()。
+
+        修复前：Ctrl+C×2 路径只保存 snapshot，跳过 extraction。
+        修复后：复用 _run_session_end_memory_extraction() helper，
+        与 finalize_session 走同一条 extraction 路径。
+        """
+        called = {"count": 0, "messages": None}
+
+        def fake_extract(messages, client, model_name, *, store=None):
+            called["count"] += 1
+            called["messages"] = messages
+            return dict(self.FAKE_SUMMARY)
+
+        monkeypatch.setattr(
+            "agent.session.extract_memories_from_session",
+            fake_extract,
+        )
+        monkeypatch.setattr("agent.session.save_session_snapshot", lambda m: None)
+        monkeypatch.setattr("agent.session.save_checkpoint", lambda s: None)
+
+        # handle_double_interrupt 内部执行 from agent.core import get_state，
+        # 因此需 patch agent.core.get_state
+        mock_state = _make_mock_state(messages=[
+            {"role": "user", "content": "test"},
+        ])
+        monkeypatch.setattr("agent.core.get_state", lambda: mock_state)
+
+        from agent.session import handle_double_interrupt
+
+        handle_double_interrupt()
+
+        assert called["count"] == 1, (
+            f"handle_double_interrupt 应调用 extract_memories_from_session 1 次，"
+            f"实际 {called['count']} 次"
+        )
+
+    def test_double_interrupt_shows_extraction_summary(self, monkeypatch, capsys):
+        """handle_double_interrupt() 应展示 extraction summary。
+
+        _format_extraction_summary 的输出必须出现在终端中。
+        """
+        monkeypatch.setattr(
+            "agent.session.extract_memories_from_session",
+            lambda m, c, mn, **kw: dict(self.FAKE_SUMMARY),
+        )
+        monkeypatch.setattr("agent.session.save_session_snapshot", lambda m: None)
+        monkeypatch.setattr("agent.session.save_checkpoint", lambda s: None)
+
+        mock_state = _make_mock_state(messages=[
+            {"role": "user", "content": "test"},
+        ])
+        monkeypatch.setattr("agent.core.get_state", lambda: mock_state)
+
+        from agent.session import handle_double_interrupt
+
+        handle_double_interrupt()
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+
+        # summary 关键词应可见
+        assert "提取" in output, f"summary 应显示 extraction 提示，实际输出: {output[:300]}"
+        assert "记忆" in output
+
+    def test_double_interrupt_inmemory_warning_visible(self, monkeypatch, capsys):
+        """InMemory backend 时 summary 应展示 ephemeral 警告。
+
+        Ctrl+C×2 退出路径与正常 quit 一样需要通知用户 T2 未持久化。
+        """
+        inmemory_summary = dict(self.FAKE_SUMMARY)
+        inmemory_summary["store_backend"] = "memory"
+        inmemory_summary["store_root"] = None
+
+        monkeypatch.setattr(
+            "agent.session.extract_memories_from_session",
+            lambda m, c, mn, **kw: dict(inmemory_summary),
+        )
+        monkeypatch.setattr("agent.session.save_session_snapshot", lambda m: None)
+        monkeypatch.setattr("agent.session.save_checkpoint", lambda s: None)
+
+        mock_state = _make_mock_state(messages=[
+            {"role": "user", "content": "test"},
+        ])
+        monkeypatch.setattr("agent.core.get_state", lambda: mock_state)
+
+        from agent.session import handle_double_interrupt
+
+        handle_double_interrupt()
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+
+        # InMemory warning 关键词
+        assert ("inmemory" in output.lower()
+                or "InMemory" in output
+                or "内存" in output
+                or "未持久化" in output), (
+            f"InMemory backend warning 应在 double interrupt 输出中可见，"
+            f"实际: {output[:300]}"
+        )
+
+    def test_double_interrupt_filesystem_root_visible(self, monkeypatch, capsys, tmp_path):
+        """Filesystem backend 时 summary 应展示 store root 路径。
+
+        用户需要知道记忆落盘的具体位置。
+        """
+        fs_summary = dict(self.FAKE_SUMMARY)
+        fs_summary["store_backend"] = "filesystem"
+        fs_summary["store_root"] = str(tmp_path)
+
+        monkeypatch.setattr(
+            "agent.session.extract_memories_from_session",
+            lambda m, c, mn, **kw: dict(fs_summary),
+        )
+        monkeypatch.setattr("agent.session.save_session_snapshot", lambda m: None)
+        monkeypatch.setattr("agent.session.save_checkpoint", lambda s: None)
+
+        mock_state = _make_mock_state(messages=[
+            {"role": "user", "content": "test"},
+        ])
+        monkeypatch.setattr("agent.core.get_state", lambda: mock_state)
+
+        from agent.session import handle_double_interrupt
+
+        handle_double_interrupt()
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+
+        assert str(tmp_path) in output, (
+            f"filesystem root {tmp_path} 应在 double interrupt 输出中可见，"
+            f"实际: {output[:300]}"
+        )
+
+
+def _make_mock_state(messages=None):
+    """构造一个最小 mock state 用于 double-interrupt 测试。
+
+    只包含 session.py 访问的字段（conversation.messages, task.current_plan）。
+    """
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class MockConversation:
+        messages: list = field(default_factory=list)
+
+    @dataclass
+    class MockTask:
+        current_plan: dict | None = None
+        status: str = "running"
+
+    @dataclass
+    class MockState:
+        conversation: MockConversation = field(default_factory=MockConversation)
+        task: MockTask = field(default_factory=MockTask)
+
+    state = MockState()
+    if messages:
+        state.conversation.messages = list(messages)
+    state.task.current_plan = None  # 无活跃 plan — 避免触发 save_checkpoint
+    return state

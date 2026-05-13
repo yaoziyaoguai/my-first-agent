@@ -507,6 +507,9 @@ def extract_memories_from_session(
                 user_visible_summary=f"[自动记录] {proposal.content[:80]}",
                 memory_type="episodic",
                 source_type="agent_suggested",
+                # confidence metadata continuity：透传 extraction 的真实 confidence，
+                # 不再依赖 store 层硬编码 fallback（见 P1-1 修复）。
+                confidence=proposal.confidence,
             )
             t2_audit = build_memory_audit_summary(t2_intent)
             t2_result = store.apply_operation_intent(t2_intent, t2_audit)

@@ -433,7 +433,15 @@ def _meta_from_intent(intent: MemoryOperationIntent, audit_id: str, record_id: s
         "created_by_operation": intent.operation_type.value,
         "updated_by_operation": intent.operation_type.value,
         "stability": "stable",
-        "confidence": 0.85 if intent.confirmation_status.value == "approved" else 0.5,
+        # confidence metadata continuity（Slice 1 P1-1 修复）：
+        # 优先使用 intent.confidence（来自 extraction → governance routing 的真实值）。
+        # None 时使用 legacy fallback，仅兼容旧路径（如 explicit_user_request），
+        # 不做重新推断。新 extraction/governance 路径必须传入真实 confidence。
+        "confidence": (
+            intent.confidence
+            if intent.confidence is not None
+            else (0.85 if intent.confirmation_status.value == "approved" else 0.5)
+        ),
     }
 
 
@@ -625,7 +633,7 @@ class FilesystemMemoryStore:
         filepath = self.root_dir / topic
         write_memory_section(filepath, meta, intent.content_summary)
 
-        # write-through index
+        # write-through index（confidence 优先使用 intent.confidence 保真值）
         _write_index_entry(self.root_dir, record_id, {
             "file": topic,
             "memory_type": memory_type,
@@ -634,7 +642,11 @@ class FilesystemMemoryStore:
             "approval_status": intent.confirmation_status.value
                 if hasattr(intent.confirmation_status, "value")
                 else str(intent.confirmation_status),
-            "confidence": 0.85 if intent.confirmation_status.value == "approved" else 0.5,
+            "confidence": (
+                intent.confidence
+                if intent.confidence is not None
+                else (0.85 if intent.confirmation_status.value == "approved" else 0.5)
+            ),
             "stability": "stable",
             "created_at": meta["created_at"],
             "updated_at": meta["updated_at"],
@@ -667,7 +679,8 @@ class FilesystemMemoryStore:
             "scope": intent.scope.value if intent.scope else "session",
             "source_type": "explicit_user_request",
             "approval_status": "session_only",
-            "confidence": 0.5,
+            # confidence metadata continuity：优先保真值，None 时 legacy fallback
+            "confidence": intent.confidence if intent.confidence is not None else 0.5,
             "stability": "ephemeral",
             "created_at": meta["created_at"],
             "updated_at": meta["updated_at"],

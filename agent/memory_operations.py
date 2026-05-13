@@ -56,6 +56,11 @@ class MemoryOperationIntent:
     # 默认值保持向后兼容：explicit_user_request 路径不携带 metadata 时，语义不变。
     memory_type: str = "semantic"
     source_type: str = "explicit_user_request"
+    # confidence metadata continuity（Slice 1 P1-1 修复）：
+    # extraction → governance routing 的真实 confidence 通过此字段透传到 store。
+    # None 时 store 使用 legacy fallback（向后兼容旧路径，如 explicit_user_request）。
+    # 新的 extraction/governance 写入路径必须传入真实 confidence。
+    confidence: float | None = None
 
     def __post_init__(self) -> None:
         if not self.content_summary.strip():
@@ -108,6 +113,10 @@ def build_memory_operation_intent(
         memory_type = candidate.metadata.get("memory_type", "semantic")
         source_type = candidate.metadata.get("source_type", "explicit_user_request")
 
+    # confidence metadata continuity：从 candidate 透传到 store。
+    # candidate=None 时（如某些 REJECT/CLARIFY 路径）不猜测 confidence。
+    _confidence = candidate.confidence if candidate is not None else None
+
     return MemoryOperationIntent(
         operation_type=operation_type,
         decision_type=decision.decision_type,
@@ -121,6 +130,7 @@ def build_memory_operation_intent(
         user_visible_summary=_user_visible_summary(operation_type),
         memory_type=memory_type,
         source_type=source_type,
+        confidence=_confidence,
     )
 
 

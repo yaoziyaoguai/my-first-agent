@@ -270,6 +270,111 @@ def test_extract_memories_default_inmemory_store(monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MEMORY_EXTRACTION_REAL_LLM gate 测试（Slice 1 Phase 4）
+# ═══════════════════════════════════════════════════════════════════════════════
+# 验证 extract_memories_from_session() 的 opt-in gate：
+#   - 默认（未设 env）使用 fake extractor
+#   - MEMORY_EXTRACTION_REAL_LLM=1 时通过 factory seam 选择 llm extractor
+# 测试不得真实调用 LLM，不得读取 .env。
+
+
+def test_extract_session_default_uses_fake_extractor(monkeypatch):
+    """extract_memories_from_session() 默认必须使用 fake extractor。
+
+    MEMORY_EXTRACTION_REAL_LLM 未设置时，不得进入 llm 路径。
+    此测试验证 gate 的默认 safe path 不会被意外翻转。
+    """
+    monkeypatch.delenv("MEMORY_EXTRACTION_REAL_LLM", raising=False)
+
+    captured_type: list[str] = []
+
+    def fake_create_extractor(extractor_type, **kwargs):
+        captured_type.append(extractor_type)
+        from agent.memory_extraction import FakeMemoryExtractor
+
+        return FakeMemoryExtractor(min_confidence=0.6, min_importance=3)
+
+    monkeypatch.setattr(
+        "agent.memory_extraction.create_extractor",
+        fake_create_extractor,
+    )
+
+    # 非空 messages 以穿过 transcript 为空的 early return
+    extract_memories_from_session(
+        [{"role": "user", "content": "hello"}], None, None,
+    )
+
+    assert len(captured_type) == 1, (
+        f"应调用 create_extractor 1 次，实际 {len(captured_type)} 次"
+    )
+    assert captured_type[0] == "fake", (
+        f"默认 extractor_type 应为 'fake'，实际为 {captured_type[0]!r}"
+    )
+
+
+def test_extract_session_real_llm_opt_in_uses_llm_extractor(monkeypatch):
+    """MEMORY_EXTRACTION_REAL_LLM=1 时通过 factory seam 选择 llm extractor。
+
+    不实际调用 LLM API——只验证 factory 被传入 "llm"。
+    """
+    monkeypatch.setenv("MEMORY_EXTRACTION_REAL_LLM", "1")
+
+    captured_type: list[str] = []
+
+    def fake_create_extractor(extractor_type, **kwargs):
+        captured_type.append(extractor_type)
+        # 返回 fake extractor 避免真实 LLM 调用
+        from agent.memory_extraction import FakeMemoryExtractor
+
+        return FakeMemoryExtractor(min_confidence=0.6, min_importance=3)
+
+    monkeypatch.setattr(
+        "agent.memory_extraction.create_extractor",
+        fake_create_extractor,
+    )
+
+    extract_memories_from_session(
+        [{"role": "user", "content": "hello"}], None, None,
+    )
+
+    assert len(captured_type) == 1
+    assert captured_type[0] == "llm", (
+        f"MEMORY_EXTRACTION_REAL_LLM=1 时 extractor_type 应为 'llm'，"
+        f"实际为 {captured_type[0]!r}"
+    )
+
+
+def test_extract_session_real_llm_false_uses_fake(monkeypatch):
+    """MEMORY_EXTRACTION_REAL_LLM=0 仍使用 fake extractor。
+
+    只有 "1" / "true" / "yes" 视为 opt-in，其他值均回退 fake。
+    """
+    monkeypatch.setenv("MEMORY_EXTRACTION_REAL_LLM", "0")
+
+    captured_type: list[str] = []
+
+    def fake_create_extractor(extractor_type, **kwargs):
+        captured_type.append(extractor_type)
+        from agent.memory_extraction import FakeMemoryExtractor
+
+        return FakeMemoryExtractor(min_confidence=0.6, min_importance=3)
+
+    monkeypatch.setattr(
+        "agent.memory_extraction.create_extractor",
+        fake_create_extractor,
+    )
+
+    extract_memories_from_session(
+        [{"role": "user", "content": "hello"}], None, None,
+    )
+
+    assert len(captured_type) == 1
+    assert captured_type[0] == "fake", (
+        f"MEMORY_EXTRACTION_REAL_LLM='0' 应回退 fake，实际为 {captured_type[0]!r}"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # handle_double_interrupt extraction hook 测试（Slice 1 P1-2 验证）
 # ═══════════════════════════════════════════════════════════════════════════════
 # 这些测试验证 Ctrl+C×2 退出路径会触发 session-end memory extraction，

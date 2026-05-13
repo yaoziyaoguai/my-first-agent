@@ -410,16 +410,19 @@ def extract_memories_from_session(
         summary["errors"].append("transcript 为空，无可提取内容")
         return summary
 
-    # ── Extraction：通过 factory seam 创建 extractor（skeleton 阶段使用 fake）──
-    # factory 按 extractor_type 返回 FakeMemoryExtractor 或 LLMMemoryExtractor。
-    # 当前默认 "fake" 是 Phase 5a skeleton path，用于验证 routing / governance /
-    # persistence pipeline，不代表真实 LLM extraction quality。
-    # 后续 L2 切换为 LLMMemoryExtractor 时只需将 extractor_type 改为 "llm"，
-    # factory 返回真实 LLM 实现；governance routing 和 store 写入逻辑不变。
+    # ── Extraction：通过 factory seam 创建 extractor ──────────────────
+    # 默认 "fake"（skeleton safe path），不调用真实 LLM。
+    # 真实 LLM extraction 需显式 opt-in：MEMORY_EXTRACTION_REAL_LLM=1。
+    # 此 gate 与 run_extraction_review_cli() 的 opt-in 保持一致，
+    # 确保 controlled dogfood 外不触发真实 LLM 调用。
     # Fake 不定义 lifecycle / governance / persistence 语义。
+    _use_real_llm = _os.getenv("MEMORY_EXTRACTION_REAL_LLM", "").strip() in (
+        "1", "true", "yes",
+    )
+    _extractor_type = "llm" if _use_real_llm else "fake"
     try:
         extractor = create_extractor(
-            "fake",
+            _extractor_type,
             min_confidence=0.6,
             min_importance=3,
         )
@@ -434,6 +437,10 @@ def extract_memories_from_session(
 
     proposals = list(result.proposals)
     summary["total_proposals"] = len(proposals)
+    # 传播 extractor 的 extraction_summary 到 summary dict，
+    # 用于最终展示的可见性（真实 LLM 的 model name / proposal 计数等）。
+    if hasattr(result, "extraction_summary") and result.extraction_summary:
+        summary["extraction_summary"] = result.extraction_summary
 
     # ── W3 Session-End 类型约束（RFC §11.4 + Appendix G.2 LB1）──────────
     # session-end extraction 只产出 episodic。semantic/procedural 的
@@ -558,9 +565,8 @@ def extract_memories_from_session(
     # ── Dogfood 观察笔记 ──────────────────────────────────────────────
     if summary["total_proposals"] == 0:
         summary["false_positives_note"] = (
-            "无 proposal 被提取。可能原因：(1) fake extractor 关键词覆盖不足，"
-            "许多值得记忆的事件未被识别（false negative）；"
-            "(2) 本次 session 确实无可提取内容。"
+            "无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆"
+            "（false negative）；(2) 本次 session 确实无可提取内容。"
         )
     elif summary["t2_auto_retained"] == 0 and summary["t1_pending"] == 0:
         summary["false_positives_note"] = (
@@ -753,6 +759,11 @@ def _format_extraction_summary(summary: dict) -> str:
             lines.append(f"    - {err}")
         if len(errors) > 3:
             lines.append(f"    ... 及其他 {len(errors) - 3} 条错误")
+
+    # ── Extractor 元信息（LLM model name 等）──────────────────────────
+    extraction_summary = summary.get("extraction_summary", "")
+    if extraction_summary:
+        lines.append(f"  Extractor:        {extraction_summary}")
 
     # ── Dogfood 观察笔记 ──────────────────────────────────────────────
     note = summary.get("false_positives_note", "")

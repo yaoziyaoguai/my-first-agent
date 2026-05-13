@@ -680,12 +680,20 @@ def create_extractor(
 
     Args:
         extractor_type: "fake" 或 "llm"
-        **kwargs: 传递给提取器构造函数的参数
+        **kwargs: 传递给提取器构造函数的参数。
+                  FakeMemoryExtractor 接受 min_confidence、min_importance。
+                  LLMMemoryExtractor 接受 model_name、api_key、base_url、max_tokens。
+                  不匹配目标构造函数的 kwarg 会被过滤掉。
     """
     if extractor_type == "fake":
         return FakeMemoryExtractor(**kwargs)
     if extractor_type == "llm":
-        return LLMMemoryExtractor(**kwargs)
+        # LLMMemoryExtractor 不接受 min_confidence/min_importance，
+        # 这些是 governance routing 参数，由 extract_memories_from_session()
+        # 在 governance routing 阶段使用。
+        _llm_fields = {"model_name", "api_key", "base_url", "max_tokens"}
+        _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
+        return LLMMemoryExtractor(**_llm_kwargs)
     raise ValueError(
         f"不支持的 extractor_type: {extractor_type!r}。支持: fake, llm"
     )

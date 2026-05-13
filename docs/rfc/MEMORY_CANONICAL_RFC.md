@@ -31,13 +31,13 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 |:--:|-------|:--:|
 | W1 | Explicit Retain（用户主动 "记住 X"） | ✅ |
 | W2 | Inline Proactive Suggestion（L1/L2 实时） | 🟡 L1 done |
-| W3 | Session-End Extraction（批量扫描） | 🔲 |
+| W3 | Session-End Extraction（批量扫描） | 🟡 skeleton |
 | W4 | Background Consolidation（episodic → semantic） | 🔲 |
 | W5 | Emergence Detection（→ procedural candidate） | 🔮 |
 
 ### Current Phase
 
-Phase 4 baseline + G1-G6 structural gaps (~38 lines). Next: Phase 5a (W3 + T2).
+Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. Next: Phase 5b (L2 LLM Inline) or controlled dogfood.
 
 ### Core Constraints
 
@@ -303,7 +303,7 @@ Write Interface 是 memory 的**摄入入口**，不是 memory type。同一个�
 |:--:|----------|------|------|------------|:--:|
 | **W1** | Explicit Retain | 用户主动 "记住 X" | 同步 | Semantic / Procedural（用户指定） | ✅ |
 | **W2** | Inline Proactive Suggestion | 每次用户输入后（L1）/ task boundary（L2） | 同步（当前 turn） | Episodic / Semantic（heuristic/LLM 判断） | 🟡 L1 done, L2 planned |
-| **W3** | Session-End Extraction | session 结束时 | 批量（session 结束） | Episodic（主要入口） | 🔲 |
+| **W3** | Session-End Extraction | session 结束时 | 批量（session 结束） | Episodic（主要入口） | 🟡 skeleton |
 | **W4** | Background Consolidation | 跨 session 模式积累 | 异步（后台） | Semantic（从 episodic 沉淀） | 🔲 |
 | **W5** | Emergence Detection | 长期行为模式积累 | 异步（低频） | Procedural candidate | 🔮 |
 
@@ -332,20 +332,21 @@ Agent 在 session 中主动提议 "这个可能值得记住"。不是自动写�
 
 当前实现位置：`memory_runtime._try_suggestions()` → L1 only，全量 T1。
 
-### 4.5 W3: Session-End Extraction（🔲 planned）
+### 4.5 W3: Session-End Extraction（🟡 skeleton implemented）
 
 Session 结束时批量扫描整个 session 的对话，提取所有值得保留的 episodic 事件。这是 episodic memory 的**主要入口**。
 
 ```
 Session 结束
   → 扫描全部 messages（user + assistant + tool 摘要）
-  → LLM 提取 episodic candidate
+  → extractor.extract()（fake skeleton 或 LLM）
   → dedup 与已有 store
-  → T2 auto-retain（默认为 episodic）
+  → governance routing（T1/T2/T3）
+  → T2 auto-retain 写入 store / T1 pending 持久化到 _pending/
   → 返回 extraction summary
 ```
 
-当前状态：`agent/memory.py:extract_memories_from_session()` 是 no-op（`return None`）。
+当前状态：`agent/memory.py:extract_memories_from_session()` 已实现完整的 extraction → governance routing → persistence pipeline。默认使用 `create_extractor("fake", ...)` factory seam（确定性关键词匹配），不调用真实 LLM。真实 LLM extraction quality 尚未 dogfood 验证。Runtime hook 已接入 `agent/session.py:finalize_session()`（正常 quit 退出时自动触发）。
 
 ### 4.6 W4: Background Consolidation（🔲 planned）
 
@@ -641,7 +642,7 @@ T2 是对 P8 的精炼，不是违反。以下约束是宪法级锁定，不可�
 
 ## 11. Extraction Mechanisms
 
-> **TLDR**: Extraction 是 Ingestion 的实现机制。L1 (确定性, 4 rules) 已实现。L2 (LLM inline) 和 Session-End (W3) planned。Extraction 只产出 candidate，不写 store。
+> **TLDR**: Extraction 是 Ingestion 的实现机制。L1 (确定性, 4 rules) 已实现。L2 (LLM inline) planned。Session-End (W3) skeleton 已实现（fake extractor + governance routing + persistence pipeline），真实 LLM extraction quality 尚未 dogfood 验证。Extraction 只产出 candidate，不写 store。
 
 ### 11.1 定位
 
@@ -679,14 +680,22 @@ Extraction 是 Lifecycle 中 Ingestion 阶段的**实现机制**，不是独立�
 
 成本控制：Haiku 模型、session 内最多 5 次调用。
 
-### 11.4 Session-End Extraction（🔲 planned）
+### 11.4 Session-End Extraction（🟡 skeleton implemented）
 
-Session 结束时批量扫描全部 messages（user + assistant + tool 摘要），LLM 提取所有值得保留的 episodic candidate。与已有 store dedup 后，按 confidence 走 T1 或 T2。
+Session 结束时批量扫描全部 messages（user + assistant + tool 摘要），提取所有值得保留的 episodic candidate。与已有 store dedup 后，按 confidence 走 governance routing（T1/T2/T3）。
 
-跨 session pending confirmation（T1 candidate 无法在当前 session 确认时）：
-- 写入 `_pending_confirmation/` 目录
-- 下次 session 启动时展示
-- 7 天未确认的 pending candidate 自动丢弃
+当前实现（Phase 5a skeleton）：
+- `agent/memory.py:extract_memories_from_session()` — 完整 pipeline
+- 默认使用 `create_extractor("fake", ...)` factory seam（确定性关键词匹配，不调 LLM）
+- Runtime hook：`agent/session.py:finalize_session()` 在正常 quit 时自动触发
+- T2 auto-retain → `FilesystemMemoryStore.apply_operation_intent()`（需 `MEMORY_STORE_BACKEND=filesystem`）
+- T1 pending → `_pending/t1_*.json`（跨 session 可见，暂无 review CLI）
+- 真实 LLM extraction quality 尚未 dogfood 验证
+
+T1 pending confirmation（跨 session）：
+- 写入 `_pending/` 目录（`_persist_t1_pending_proposals()`）
+- 下次 session 启动时不自动展示（review CLI 待实现）
+- 无自动丢弃策略（待 Phase 5b/6）
 
 ---
 
@@ -785,7 +794,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 ## 14. Current Implementation Mapping
 
-> **TLDR**: ~4,474 行代码，12 个模块。W1/W2 L1 已实现且稳定。W3 session-end 是 no-op。T2 路径不存在。G1-G6 结构性缺口 (~38 lines) 需在 Phase 5a 前修复。
+> **TLDR**: Phase 5a complete。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。
 
 ### 14.1 状态标记
 
@@ -812,7 +821,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 | Memory Runtime | `agent/memory_runtime.py` | 🟡 | Governance | 无 T2 路径；`_pending_decision` 单 slot，重启丢失 |
 | Operation Intent/Audit | `agent/memory_operations.py` | 🟡 | Store | 不传递 suggestion metadata |
 | Snapshot Generator | `agent/memory_snapshot_generator.py` | 🟡 | Recall | 不标注 `auto_retained` 来源 |
-| Session Memory | `agent/memory.py` | ❌ | W3 Session-End | `extract_memories_from_session()` 是 no-op |
+| Session Memory | `agent/memory.py` | 🟡 | W3 Session-End | `extract_memories_from_session()` skeleton 已实现，含 governance routing + persistence pipeline |
 
 ### 14.3 Write Interface 实现状态
 
@@ -821,7 +830,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 | W1 Explicit Retain | ✅ | `memory_policy.py` + `memory_runtime.py` |
 | W2 Inline Suggestion (L1) | ✅ | `memory_suggestions.py` + `memory_runtime._try_suggestions()` |
 | W2 Inline Suggestion (L2) | 🔲 | 设计完成，未实现 |
-| W3 Session-End Extraction | 🔲 | `memory.py:290` — no-op，待重实现 |
+| W3 Session-End Extraction | 🟡 | `memory.py:290` — skeleton 已实现；默认 fake extractor，runtime hook 已接入 `session.py:finalize_session()` |
 | W4 Background Consolidation | 🔲 | 未实现 |
 | W5 Emergence Detection | 🔮 | 概念设计，未实现 |
 
@@ -829,8 +838,8 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 | 阶段 | 状态 | 说明 |
 |------|:--:|------|
-| Ingestion | 🟡 | W1/W2 done, W3/W4/W5 planned |
-| Episodic | 🔲 | T2 auto-retain 未实现 |
+| Ingestion | 🟡 | W1/W2 done, W3 skeleton done, W4/W5 planned |
+| Episodic | 🟡 | T2 auto-retain skeleton 已实现（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`） |
 | Consolidation | 🔲 | 未实现 |
 | Semantic | 🟡 | W1 explicit retain 可产出，无 consolidation 来源 |
 | Emergence | 🔮 | 概念设计 |
@@ -905,16 +914,20 @@ Snapshot 层不得丢失 auto_retained 标记。
 
 待修复：G1-G6 结构性缺口（~38 行）。
 
-### 15.2 Phase 5a — Session-End Extraction + Episodic T2（🔲）
+### 15.2 Phase 5a — Session-End Extraction + Episodic T2（🟡 skeleton implemented）
 
-**Lifecycle 目标**：Episodic Memory 阶段落地。
+**Lifecycle 目标**：Episodic Memory 阶段落地。**已完成。**
 
-- G1-G6 修复
-- `extract_memories_from_session()` 重实现（W3）
-- T2 governed auto-retain 路径（仅 episodic）
-- `approval_status="auto_retained"` 写入 + recall 可见
-- Pending confirmation 跨 session 传递
-- 单 session T2 上限 3 条
+- G1-G6 修复 ✅
+- `extract_memories_from_session()` 重实现（W3）✅ — 完整 extraction → governance routing → persistence pipeline
+- T2 governed auto-retain 路径（仅 episodic）✅ — 默认 InMemory，持久化需 `MEMORY_STORE_BACKEND=filesystem`
+- `approval_status="auto_retained"` 写入 + recall 可见 ✅
+- T1 pending confirmation 跨 session 传递 ✅ — `_pending/t1_*.json`
+- 单 session T2 上限 3 条 ✅
+- Fake/Real extractor boundary（factory seam）✅ — `create_extractor("fake", ...)` 默认安全
+- Runtime hook（`session.py:finalize_session()`）✅
+- Extraction summary 可见性 ✅
+- 遗留：真实 LLM extraction quality 尚未 dogfood 验证；T1 pending review CLI 未实现
 
 ### 15.3 Phase 5b — L2 LLM Inline Extraction（🔲）
 

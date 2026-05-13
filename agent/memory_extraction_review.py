@@ -27,6 +27,7 @@ from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmati
 from agent.memory_extraction import (
     ExtractionInput,
     LLMMemoryExtractor,
+    create_extractor,
 )
 from agent.memory_extraction_bridge import (
     proposal_to_confirmation_request,
@@ -147,7 +148,10 @@ def run_extraction_review(
     Args:
         transcript: 对话记录 [{"role": "user"|"assistant", "content": "..."}]
         store: 目标 store，None 时不写入
-        extractor: LLM 提取器，None 时创建默认 LLMMemoryExtractor
+        extractor: 提取器。None 时默认使用 create_extractor("fake", ...)
+                   （Phase 5a skeleton path，不调用真实 LLM）。
+                   真实 LLM extraction 需显式传入 LLMMemoryExtractor 实例，
+                   调用方须自行确保 API key 已配置且理解成本。
         input_fn: 用户输入函数（默认 built-in input）
         output_fn: 输出函数（默认 built-in print）
 
@@ -155,7 +159,9 @@ def run_extraction_review(
         ExtractionReviewReport 包含计数和写入结果。
     """
     if extractor is None:
-        extractor = LLMMemoryExtractor()
+        # Phase 5a skeleton path：默认 fake extractor，不调用真实 LLM。
+        # 真实 LLM extraction 需显式传入 LLMMemoryExtractor 实例。
+        extractor = create_extractor("fake", min_confidence=0.6, min_importance=3)
 
     # 1. Extraction
     if not transcript:
@@ -261,6 +267,12 @@ def run_extraction_review_cli() -> int:
     """CLI 入口：读取 checkpoint → extraction review → 打印报告 → 返回 exit code。
 
     供 main.py 的 `memory extract` 子命令调用。
+
+    ⚠️ Dogfood Safety（RFC §11.4）：
+    默认使用 create_extractor("fake", ...) factory seam，不调用真实 LLM。
+    真实 LLM extraction 需显式设置 MEMORY_EXTRACTION_REAL_LLM=1 并确保
+    API key 已配置。controlled dogfood 应走 finalize_session() 路径，
+    不应依赖此 CLI。
     """
     checkpoint_path = Path("memory/checkpoint.json")
     if not checkpoint_path.exists():
@@ -315,10 +327,28 @@ def run_extraction_review_cli() -> int:
 
         store = InMemoryMemoryStore()
 
+    # ── Extractor 选择（factory seam，fail-closed）─────────────────────
+    # 默认 fake：通过 create_extractor("fake", ...) factory seam，
+    # 不调用真实 LLM，不读取 .env / API key。
+    # 真实 LLM extraction 需显式 opt-in：MEMORY_EXTRACTION_REAL_LLM=1。
+    # controlled dogfood 应走 finalize_session() 路径，不使用此 CLI。
+    use_real_llm = _os.getenv("MEMORY_EXTRACTION_REAL_LLM", "").strip() in (
+        "1", "true", "yes",
+    )
+    if use_real_llm:
+        print("[Memory Extract] 使用真实 LLM extraction（MEMORY_EXTRACTION_REAL_LLM=1）")
+        extractor = LLMMemoryExtractor()
+    else:
+        print(
+            "[Memory Extract] 使用 fake extractor（skeleton mode）。"
+            "如需真实 LLM extraction，请设置 MEMORY_EXTRACTION_REAL_LLM=1。"
+        )
+        extractor = create_extractor("fake", min_confidence=0.6, min_importance=3)
+
     report = run_extraction_review(
         messages,
         store=store,
-        extractor=LLMMemoryExtractor(),
+        extractor=extractor,
     )
 
     # 最终报告

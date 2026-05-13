@@ -373,19 +373,32 @@ def extract_memories_from_session(
     t1_proposals: list[dict] = []  # T1 pending proposals，循环结束后持久化
 
     # ── 创建 store ──────────────────────────────────────────────────────
+    # store_backend / store_root 注入 summary，供 dogfood 可见性审计。
+    # session.py 不直接查询 store 内部；summary 是唯一的跨边界信息载体。
     if store is None:
         backend = _os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
+        summary["store_backend"] = backend
         if backend in ("memory", "in_memory", "inmemory"):
             from agent.memory_store import InMemoryMemoryStore
             store = InMemoryMemoryStore()
+            summary["store_root"] = None  # InMemory 无文件系统路径
         elif backend in ("filesystem", "memory_fs", "fs"):
             from agent.memory_fs_store import FilesystemMemoryStore
             store = FilesystemMemoryStore()
+            # FilesystemMemoryStore.root_dir 是 resolved Path
+            summary["store_root"] = str(store.root_dir) if hasattr(store, "root_dir") else None
         else:
             summary["errors"].append(
                 f"不支持的 MEMORY_STORE_BACKEND: {backend!r}"
             )
+            summary["store_backend"] = backend
+            summary["store_root"] = None
             return summary
+    else:
+        # store 被显式注入 → 从 store 实例推断 backend 信息
+        store_cls_name = type(store).__name__
+        summary["store_backend"] = "filesystem" if "Filesystem" in store_cls_name else "memory"
+        summary["store_root"] = str(store.root_dir) if hasattr(store, "root_dir") else None
 
     # ── 构造 transcript（过滤 system 消息，保留 user/assistant）─────────
     transcript = [
@@ -669,3 +682,79 @@ def _persist_t1_pending_proposals(proposals: list[dict]) -> None:
             json.dumps(proposal, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Extraction Summary 格式化（session runtime 可见性边界）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _format_extraction_summary(summary: dict) -> str:
+    """将 extract_memories_from_session 的返回 summary 格式化为终端可读文本。
+
+    这是 session.py ↔ memory.py 之间的唯一可见性边界：
+    - session.py 只拿到 dict summary，不直接查询 store 内部状态
+    - 本函数负责把 dict 转成用户可读的文本，不修改任何状态
+    - 不打印 raw memory content，只展示 counts / route / store backend / errors
+
+    Dogfood 关键信息：
+    - store backend（InMemory / filesystem）
+    - InMemory → ephemeral warning
+    - filesystem → store root path
+    - T2 auto_retained / T1 pending / T3 ignored 计数
+    - errors 摘要（不堆栈）
+    """
+    lines: list[str] = []
+    lines.append("─" * 40)
+    lines.append("Memory Extraction Summary")
+
+    # ── Store 可见性 ──────────────────────────────────────────────────
+    backend = summary.get("store_backend", "unknown")
+    store_root = summary.get("store_root")
+    if backend in ("memory", "in_memory", "inmemory"):
+        lines.append("  Store:  InMemory（ephemeral）")
+        lines.append(
+            "  ⚠️  当前使用 InMemory backend，session 退出后所有记录将丢失。"
+        )
+        lines.append(
+            "     如需持久化，请设置 MEMORY_STORE_BACKEND=filesystem。"
+        )
+    elif backend in ("filesystem", "memory_fs", "fs"):
+        root_str = store_root or "unknown"
+        lines.append("  Store:  Filesystem")
+        lines.append(f"  Root:   {root_str}")
+    else:
+        lines.append(f"  Store:  {backend}")
+
+    # ── Extraction 计数 ───────────────────────────────────────────────
+    total_msgs = summary.get("total_messages", 0)
+    total_proposals = summary.get("total_proposals", 0)
+    t2 = summary.get("t2_auto_retained", 0)
+    t1 = summary.get("t1_pending", 0)
+    t3 = summary.get("t3_ignored", 0)
+    dedup = summary.get("dedup_hits", 0)
+
+    lines.append(f"  Messages:         {total_msgs}")
+    lines.append(f"  Proposals:        {total_proposals}")
+    lines.append(f"  T2 auto-retained: {t2}")
+    lines.append(f"  T1 pending:       {t1}")
+    lines.append(f"  T3 ignored:       {t3}")
+    if dedup:
+        lines.append(f"  Dedup hits:       {dedup}")
+
+    # ── Errors ────────────────────────────────────────────────────────
+    errors: list = summary.get("errors", [])
+    if errors:
+        lines.append(f"  Errors:           {len(errors)}")
+        for err in errors[:3]:  # 最多展示前 3 条
+            lines.append(f"    - {err}")
+        if len(errors) > 3:
+            lines.append(f"    ... 及其他 {len(errors) - 3} 条错误")
+
+    # ── Dogfood 观察笔记 ──────────────────────────────────────────────
+    note = summary.get("false_positives_note", "")
+    if note:
+        lines.append(f"  Note: {note}")
+
+    lines.append("─" * 40)
+    return "\n".join(lines)

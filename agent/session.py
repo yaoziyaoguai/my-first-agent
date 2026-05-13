@@ -8,7 +8,12 @@ import sys
 
 from agent.logger import log_event, save_session_snapshot, SESSION_ID
 from agent.health_check import run_health_check
-from agent.memory import init_memory, cleanup_old_episodes, extract_memories_from_session
+from agent.memory import (
+    init_memory,
+    cleanup_old_episodes,
+    extract_memories_from_session,
+    _format_extraction_summary,
+)
 from agent.checkpoint import (
     load_checkpoint,
     load_checkpoint_to_state,
@@ -267,14 +272,21 @@ def _replay_awaiting_prompt(state):
 # ========== 退出 ==========
 
 def finalize_session():
-    """正常退出（quit 或双 Ctrl+C）：提取记忆 + 保存快照 + 保存 state 断点"""
+    """正常退出（quit 或双 Ctrl+C）：提取记忆 + 保存快照 + 保存 state 断点。
+
+    session.py 只做 thin runtime orchestration：
+    - 调用 extract_memories_from_session() 触发 extraction → governance → persistence
+    - 通过 _format_extraction_summary() 展示结果，不直接查询 store 内部状态
+    - 不参与 T1/T2/T3 routing 决策
+    """
     from agent.core import client, get_state
 
     state = get_state()
     messages = state.conversation.messages
 
     print("\n[系统] 正在提取本次对话的记忆...")
-    extract_memories_from_session(messages, client, MODEL_NAME)
+    extraction_summary = extract_memories_from_session(messages, client, MODEL_NAME)
+    print(_format_extraction_summary(extraction_summary))
     save_session_snapshot(messages)
 
     if state.task.current_plan:

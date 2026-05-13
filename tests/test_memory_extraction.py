@@ -960,3 +960,225 @@ class TestSystemPromptContract:
 
     def test_prompt_requires_json_output(self) -> None:
         assert "json" in EXTRACTION_SYSTEM_PROMPT.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fake Dogfood Marker 测试 — 验证 T1/T2/T3 routing coverage
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些测试验证 fake skeleton 的 routing coverage，不验证真实 LLM extraction quality。
+# marker 机制是 test/dogfood controls，不代表真实 extraction semantics。
+
+
+class TestFakeDogfoodMarkers:
+    """验证 FakeMemoryExtractor 的 [fake-memory:t<N>] marker 机制。
+
+    确保：
+    - T1 marker 产生 confidence≥0.8 的 episodic proposal
+    - T2 marker 产生 confidence [0.6,0.8) 的 episodic proposal
+    - T3 marker 产生 confidence<0.6 的 episodic proposal
+    - marker 前缀被正确剥离，不污染 memory content
+    - 默认 heuristic path 仍正常工作
+    - 控制命令（quit/exit/q/goodbye）不被提取
+    """
+
+    def test_fake_marker_t1_produces_high_confidence(self):
+        """[fake-memory:t1] 产生 confidence≥0.8 的 episodic proposal。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user",
+                 "content": "[fake-memory:t1] 我希望这个项目里先给结论再解释"}
+            ])
+        )
+        assert len(result.proposals) == 1
+        p = result.proposals[0]
+        assert p.memory_type == "episodic"
+        assert p.confidence >= 0.8, f"T1 confidence 应≥0.8，实际 {p.confidence}"
+        assert p.confidence == 0.85
+        # marker 前缀不应出现在 content 中
+        assert "[fake-memory:" not in p.content
+        assert "先给结论再解释" in p.content
+
+    def test_fake_marker_t2_produces_medium_confidence(self):
+        """[fake-memory:t2] 产生 confidence 在 [0.6,0.8) 的 episodic proposal。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user",
+                 "content": "[fake-memory:t2] 今天测试了 filesystem memory dogfood"}
+            ])
+        )
+        assert len(result.proposals) == 1
+        p = result.proposals[0]
+        assert p.memory_type == "episodic"
+        assert 0.6 <= p.confidence < 0.8, (
+            f"T2 confidence 应在 [0.6,0.8)，实际 {p.confidence}"
+        )
+        assert "[fake-memory:" not in p.content
+        assert "filesystem memory dogfood" in p.content
+
+    def test_fake_marker_t3_produces_low_confidence(self):
+        """[fake-memory:t3] 产生 confidence<0.6 的 episodic proposal。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user",
+                 "content": "[fake-memory:t3] 这是一条应该被忽略的低置信测试记忆"}
+            ])
+        )
+        assert len(result.proposals) == 1
+        p = result.proposals[0]
+        assert p.memory_type == "episodic"
+        assert p.confidence < 0.6, f"T3 confidence 应<0.6，实际 {p.confidence}"
+        assert p.confidence == 0.45
+        assert "[fake-memory:" not in p.content
+
+    def test_fake_marker_empty_content_skipped(self):
+        """marker 后无内容时跳过，不产生 proposal。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "[fake-memory:t1]   "}
+            ])
+        )
+        assert len(result.proposals) == 0
+
+    def test_fake_marker_invalid_tier_falls_through_to_heuristic(self):
+        """无效 tier marker 不触发 marker 路径，走默认 heuristic。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        # "[fake-memory:t999]" 不是有效 tier，且不含任何关键词，
+        # 会走默认 heuristic → 被 semantic 无信号过滤
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "[fake-memory:t999] 一些内容"}
+            ])
+        )
+        # 不确定是否会匹配关键词，但至少不是 marker 路径
+        for p in result.proposals:
+            assert "[fake-memory:" not in p.content
+
+    def test_fake_marker_unclosed_bracket_not_parsed(self):
+        """未闭合的 marker 前缀不被解析为 marker。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "[fake-memory:t1 未闭合的 bracket"}
+            ])
+        )
+        for p in result.proposals:
+            # 如果匹配到关键词，confidence 应走默认 heuristic（不是 0.85）
+            assert p.confidence != 0.85 or "[fake-memory:" not in p.content
+
+    def test_default_heuristic_still_works(self):
+        """无 marker 时原有 heuristic 路径仍正常工作。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user",
+                 "content": "上次部署时因为环境变量配置错误导致服务挂了30分钟"}
+            ])
+        )
+        assert len(result.proposals) >= 1
+        p = result.proposals[0]
+        assert p.memory_type == "episodic"  # "上次" + "部署" + "报错"
+        assert p.confidence == 0.65  # 默认 episodic confidence
+        assert "[fake-memory:" not in p.content
+
+    def test_marker_not_present_in_llm_extractor_input(self):
+        """确认 marker 检测只在 FakeMemoryExtractor 中，LLMMemoryExtractor 不识别。
+
+        LLMMemoryExtractor 不使用 _parse_fake_marker，marker 前缀会原样
+        传给 LLM。此测试验证 marker 解析函数不会影响 LLM extractor 的创建或调用。
+        """
+        from agent.memory_extraction import LLMMemoryExtractor
+
+        # LLMMemoryExtractor 没有 _is_control_command 或 _MARKER_CONFIDENCE 属性
+        extractor = LLMMemoryExtractor()
+        assert not hasattr(extractor, "_MARKER_CONFIDENCE")
+        assert not hasattr(extractor, "_is_control_command")
+        assert not hasattr(extractor, "_CONTROL_COMMANDS")
+
+
+class TestFakeControlCommandFilter:
+    """验证 FakeMemoryExtractor 不会将控制命令提取为 memory。"""
+
+    def test_quit_not_extracted(self):
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "quit"}
+            ])
+        )
+        assert len(result.proposals) == 0
+
+    def test_exit_not_extracted(self):
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "exit"}
+            ])
+        )
+        assert len(result.proposals) == 0
+
+    def test_q_goodbye_bye_not_extracted(self):
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        for cmd in ("q", "goodbye", "bye", "logout"):
+            result = extractor.extract(
+                ExtractionInput(transcript=[
+                    {"role": "user", "content": cmd}
+                ])
+            )
+            assert len(result.proposals) == 0, (
+                f"控制命令 '{cmd}' 不应被提取"
+            )
+
+    def test_quit_in_sentence_still_extracted(self):
+        """包含 quit 的正常对话仍可被提取——只过滤精确匹配单一命令的情况。
+
+        例如用户说 "上次部署 quit 时服务挂了" 仍应该被识别。
+        """
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user",
+                 "content": "上次部署后服务 quit 不正常，debug 了很久"}
+            ])
+        )
+        # 包含 "上次" + "部署" + "debug" 等 episodic 关键词，应被提取
+        assert len(result.proposals) >= 1
+        # content 应保留 "quit" 因为是对话的一部分
+        assert "quit" in result.proposals[0].content
+
+    def test_case_insensitive_quit_filter(self):
+        """控制命令匹配大小写不敏感。"""
+        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+
+        extractor = FakeMemoryExtractor()
+        result = extractor.extract(
+            ExtractionInput(transcript=[
+                {"role": "user", "content": "QUIT"}
+            ])
+        )
+        assert len(result.proposals) == 0

@@ -175,20 +175,79 @@ def _classify_by_keywords(text: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Fake Dogfood Marker 支持（仅 FakeMemoryExtractor，不进入真实 extractor）
+# ═══════════════════════════════════════════════════════════════════════════════
+# 以下 marker 是 fake skeleton 的 dogfood 控制面，用于确定性产生 T1/T2/T3
+# 并通过 lifecycle routing → governance → persistence 全链路验证。
+# 不代表真实 LLM extraction quality，不定义 lifecycle semantics，
+# 不进入 MemoryOperationIntent 或 store schema。
+
+# marker 格式: [fake-memory:t<N>] ，出现在用户消息开头时触发
+_FAKE_MARKER_PREFIX = "[fake-memory:"
+
+
+def _parse_fake_marker(
+    text: str,
+) -> tuple[str | None, str | None]:
+    """从文本中解析 fake dogfood marker，返回 (tier, stripped_text)。
+
+    只有 FakeMemoryExtractor 调用此函数。LLMMemoryExtractor 不识别 marker。
+
+    tier 可能值:
+      - "t1": confidence=0.85 (≥0.8 → T1 pending)
+      - "t2": confidence=0.65 (T2 auto-retain)
+      - "t3": confidence=0.45 (<0.6 → T3 ignored)
+      - None: 无 marker，走默认 heuristic
+
+    stripped_text 去掉 marker 前缀和后续空白，减少 marker noise 进入
+    memory content。如果 marker 是消息的唯一内容，stripped_text 为空字符串。
+    """
+    t = text.strip()
+    if not t.startswith(_FAKE_MARKER_PREFIX):
+        return None, text  # 无 marker，原样返回
+    # 找到 ] 闭合位置
+    end = t.find("]", len(_FAKE_MARKER_PREFIX))
+    if end == -1:
+        return None, text  # 未闭合，不算 marker
+    raw_tier = t[len(_FAKE_MARKER_PREFIX):end].strip().lower()
+    valid_tiers = {"t1", "t2", "t3"}
+    if raw_tier not in valid_tiers:
+        return None, text  # 无效 tier，不算 marker
+    # 去掉 marker 和后续空白
+    stripped = t[end + 1:].strip()
+    return raw_tier, stripped
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Fake Extractor
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @dataclass
 class FakeMemoryExtractor:
-    """确定性 fake extractor，用于测试和离线验证。
+    """确定性 fake extractor，用于测试、离线验证和 dogfood routing coverage。
 
     基于关键词匹配从 transcript 中提取 proposal。不调 LLM、不读文件。
     输出完全由输入决定，可预测、可断言。
+
+    支持 fake-only dogfood marker（`[fake-memory:t<N>]`）来确定性产生
+    T1/T2/T3 confidence 以触发完整的 governance routing 路径。
+    这些 marker 是 test/dogfood controls，不代表真实 LLM extraction quality，
+    不进入真实 extractor，不定义 lifecycle semantics。
     """
 
     min_confidence: float = 0.6
     min_importance: int = 3
+
+    # ── fake dogfood marker → confidence mapping ──────────────────────────
+    # 仅 FakeMemoryExtractor 使用；LLMMemoryExtractor 不识别。
+    # T1: >= 0.8 → pending confirmation; T2: [0.6,0.8) → auto-retain; T3: < 0.6 → ignored
+    _MARKER_CONFIDENCE: dict[str, float] = field(default_factory=lambda: {"t1": 0.85, "t2": 0.65, "t3": 0.45})
+
+    # ── 控制命令列表，不应被提取为 memory ─────────────────────────────
+    _CONTROL_COMMANDS: tuple[str, ...] = (
+        "quit", "exit", "q", "goodbye", "bye", "logout",
+    )
 
     def extract(self, input: ExtractionInput) -> ExtractionResult:
         proposals: list[MemoryCandidateProposal] = []
@@ -198,13 +257,56 @@ class FakeMemoryExtractor:
             if not content:
                 continue
 
+            # ── 控制命令过滤（fake skeleton hygiene）─────────────────
+            # quit/exit/q 等是 session 控制指令，不应成为 episodic memory。
+            # 此过滤仅属于 fake skeleton 的卫生处理，不改变真实 LLM extractor 行为。
+            if self._is_control_command(content):
+                continue
+
             # 跳过敏感和注入内容
             if _contains_sensitive(content):
                 continue
             if _contains_prompt_injection(content):
                 continue
 
-            # 检查是否包含可提取的关键词
+            # ── Fake dogfood marker 检测（确定 governance route）─────
+            # marker 只在 FakeMemoryExtractor 中生效，不进入真实 extractor。
+            # 解析出的 tier 用于设定 confidence；stripped_content 去掉 marker 前缀，
+            # 避免 marker noise 进入 memory record。
+            tier, stripped = _parse_fake_marker(content)
+            if tier is not None:
+                # stripped 为空时使用原始消息（去掉 marker 前缀后无内容 → 跳过）
+                if not stripped:
+                    continue
+                confidence = self._MARKER_CONFIDENCE[tier]
+                # marker 强制 episodic：W3 session-end 只处理 episodic，
+                # T1/T2 路由均基于 episodic + confidence
+                proposals.append(
+                    MemoryCandidateProposal(
+                        memory_type="episodic",
+                        content=stripped[:300],
+                        evidence=(
+                            f"fake dogfood marker [{tier}] "
+                            f"（role={msg['role']}）"
+                        ),
+                        importance=5,
+                        confidence=confidence,
+                        requires_confirmation=(tier == "t1"),
+                        suggested_action=(
+                            SuggestedAction.PROPOSE
+                            if tier == "t1"
+                            else SuggestedAction.AUTO_RETAIN_CANDIDATE
+                        ),
+                        rationale=(
+                            f"fake dogfood marker [{tier}] — "
+                            f"test/dogfood control，不代表真实 LLM extraction quality"
+                        ),
+                    )
+                )
+                continue
+
+            # ── 默认 heuristic path ────────────────────────────────────
+            # 无 marker → 走原有关键词匹配逻辑，用于普通输入
             memory_type = _classify_by_keywords(content)
             if memory_type == "semantic" and not self._has_semantic_signal(content):
                 continue  # 无足够语义信号的不提取
@@ -251,6 +353,16 @@ class FakeMemoryExtractor:
                 f"{len(input.transcript)} messages"
             ),
         )
+
+    @staticmethod
+    def _is_control_command(text: str) -> bool:
+        """判断文本是否只是 session 控制命令，不应被提取为 memory。
+
+        仅处理退化为单命令的情况：文本在去除空白后精确匹配控制命令列表。
+        不对"包含 quit 的句子"做过滤——用户可能真的在讨论 quit。
+        这是 fake skeleton 的卫生处理，不涉及真实 LLM extractor。
+        """
+        return text.strip().lower() in FakeMemoryExtractor._CONTROL_COMMANDS
 
     @staticmethod
     def _has_semantic_signal(text: str) -> bool:

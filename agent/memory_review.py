@@ -74,6 +74,9 @@ class PendingProposal:
 
     这不是 MemoryCandidate / MemoryRecord —— 它只是 pending 文件的反序列化视图。
     review 流程结束后会转为 MemoryOperationIntent → store 写入或归档。
+
+    Consolidation 特有字段（source_evidence, consolidation_type, evidence_summary）
+    默认空以保持向后兼容——非 consolidation 的 T1 proposal 不携带这些字段。
     """
 
     filepath: Path
@@ -89,6 +92,10 @@ class PendingProposal:
     scope: str
     source: str
     created_at: str
+    # Consolidation 特有字段（Phase 6, RFC §15.4）
+    source_evidence: tuple[str, ...] = ()
+    consolidation_type: str = ""
+    evidence_summary: str = ""
 
 
 def count_pending_proposals(memory_root: str | None = None) -> int:
@@ -143,6 +150,10 @@ def list_pending_proposals(
                 scope=data.get("scope", "user"),
                 source=data.get("source", ""),
                 created_at=data.get("created_at", ""),
+                # Consolidation 特有字段（Phase 6）
+                source_evidence=tuple(data.get("source_evidence", [])),
+                consolidation_type=data.get("consolidation_type", ""),
+                evidence_summary=data.get("evidence_summary", ""),
             ))
         except (ValueError, TypeError) as exc:
             print(f"[review] 警告: 字段解析失败 {filepath.name}: {exc}")
@@ -197,14 +208,26 @@ def accept_pending_proposal(
     - source_type 使用 proposal.source_type
     - confidence 使用 proposal.confidence（不再重新推断）
     - content 使用 proposal.content 原文
+    - 若为 consolidation proposal，source_evidence / consolidation_type /
+      evidence_summary 编码进 source_summary 保留
     """
+    # Consolidation metadata 保留到 source_summary 中（不修改 MemoryOperationIntent schema）
+    source_parts: list[str] = []
+    if proposal.consolidation_type:
+        source_parts.append(f"[consolidation:{proposal.consolidation_type}]")
+    if proposal.source_evidence:
+        source_parts.append(f"source_evidence={list(proposal.source_evidence)}")
+    if proposal.evidence_summary:
+        source_parts.append(f"evidence_summary={proposal.evidence_summary[:200]}")
+    source_parts.append(f"pending_review: {proposal.evidence[:100]}")
+
     intent = MemoryOperationIntent(
         operation_type=MemoryOperationType.RETAIN,
         decision_type=MemoryDecisionType.RETAIN,
         confirmation_status=MemoryConfirmationStatus.APPROVED,
         user_choice=MemoryConfirmationChoice.ACCEPT,
         content_summary=proposal.content,
-        source_summary=f"pending_review: {proposal.evidence[:100]}",
+        source_summary=" | ".join(source_parts),
         scope=_parse_scope(proposal.scope),
         safety_summary="T1 human reviewed (pending review CLI)",
         sensitive_redacted=False,
@@ -239,9 +262,21 @@ def edit_and_accept_pending_proposal(
 
     使用用户编辑后的 content 构造 MemoryOperationIntent，保留原 evidence / source /
     confidence / governance_route 等 metadata。成功后归档 pending 文件。
+    Consolidation proposal 的 source_evidence / consolidation_type /
+    evidence_summary 编码进 source_summary 保留。
     """
     if not edited_content.strip():
         raise ValueError("编辑后的 content 不能为空")
+
+    # Consolidation metadata 保留到 source_summary 中
+    source_parts: list[str] = []
+    if proposal.consolidation_type:
+        source_parts.append(f"[consolidation:{proposal.consolidation_type}]")
+    if proposal.source_evidence:
+        source_parts.append(f"source_evidence={list(proposal.source_evidence)}")
+    if proposal.evidence_summary:
+        source_parts.append(f"evidence_summary={proposal.evidence_summary[:200]}")
+    source_parts.append(f"pending_review(edited): {proposal.evidence[:100]}")
 
     intent = MemoryOperationIntent(
         operation_type=MemoryOperationType.RETAIN,
@@ -249,7 +284,7 @@ def edit_and_accept_pending_proposal(
         confirmation_status=MemoryConfirmationStatus.APPROVED,
         user_choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT,
         content_summary=edited_content.strip(),
-        source_summary=f"pending_review(edited): {proposal.evidence[:100]}",
+        source_summary=" | ".join(source_parts),
         scope=_parse_scope(proposal.scope),
         safety_summary="T1 human reviewed + edited (pending review CLI)",
         sensitive_redacted=False,
@@ -301,6 +336,7 @@ def _render_proposal(proposal: PendingProposal, index: int, total: int) -> str:
     """将一条 pending proposal 格式化为终端可读文本。
 
     这是 review CLI 的唯一展示格式——不包含交互逻辑，不修改状态。
+    Consolidation proposal 会展示额外的 source_evidence / consolidation_type / evidence_summary。
     """
     lines = [
         f"\n{'─' * 50}",
@@ -313,8 +349,18 @@ def _render_proposal(proposal: PendingProposal, index: int, total: int) -> str:
         f" 依据: {proposal.evidence[:200]}",
         f" 理由: {proposal.rationale[:200]}",
         f" 创建时间: {proposal.created_at}",
-        f"{'─' * 50}",
     ]
+    # Consolidation 特有字段（Phase 6）
+    if proposal.consolidation_type:
+        lines.append(f" 合并类型: {proposal.consolidation_type}")
+    if proposal.source_evidence:
+        evidence_list = list(proposal.source_evidence)
+        lines.append(f" 来源记录: {', '.join(evidence_list[:5])}")
+        if len(evidence_list) > 5:
+            lines.append(f"           ... 及其他 {len(evidence_list) - 5} 条")
+    if proposal.evidence_summary:
+        lines.append(f" 依据摘要: {proposal.evidence_summary[:200]}")
+    lines.append(f"{'─' * 50}")
     return "\n".join(lines)
 
 

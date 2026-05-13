@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate), defense-in-depth validation with fail-closed semantics, zero store-write/runtime/LLM dependencies. No T1 pending review CLI integration or runtime hook yet. Next: pending review integration or Phase 7 (emergence).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI. No runtime hook, scheduler, automatic semantic store write, or LLM consolidation quality verification yet. Next: runtime hook design or Phase 7 (emergence).
 
 ### Core Constraints
 
@@ -854,7 +854,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 |------|:--:|------|
 | Ingestion | 🟡 | W1/W2 done, W3 skeleton done, W4/W5 planned |
 | Episodic | 🟡 | T2 auto-retain skeleton 已实现（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`） |
-| Consolidation | 🟡 | domain model + detector + loader + pipeline 已实现，无 pending review/runtime 集成 |
+| Consolidation | 🟡 | domain model + detector + loader + pipeline + pending review dispatch 已实现，无 runtime 集成 |
 | Semantic | 🟡 | W1 explicit retain 可产出，无 consolidation 来源 |
 | Emergence | 🔮 | 概念设计 |
 | Procedural | 🟡 | W1 explicit retain 可产出，无 emergence 来源 |
@@ -967,7 +967,7 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Episodic → Semantic 沉淀引擎（W4）— 🟡 deterministic detector 已实现
 - 跨 session 模式检测 — 🟡 keyword-based grouping + Jaccard similarity 已实现
 - Semantic candidate 生成 + episodic evidence 链 — 🟡 已实现（N≥3 threshold per RFC §D.1）
-- T1 adoption review — 🔲 未开始（pending review CLI 已有，但未集成）
+- T1 adoption review — 🟡 已实现（dispatch + 复用现有 pending review CLI）
 - Source evidence loader（store → EpisodicEvidence）— 🟡 已实现
 - Runtime integration / session hook — 🔲 未开始
 - Detector pipeline integration（loader → detector → candidate）— 🟡 已实现
@@ -1013,6 +1013,19 @@ Snapshot 层不得丢失 auto_retained 标记。
 - 支持自定义 detector 注入（`detector: DeterministicConsolidationDetector | None`）
 - 31 个测试（`tests/test_memory_consolidation_pipeline.py`）
 - 架构边界：不接 T1 pending review CLI，不写 store，不调 LLM
+
+**Consolidation T1 Pending Review Dispatch（已实现）**:
+- `agent/memory_consolidation_review.py:dispatch_consolidation_candidates_to_pending_review()` — ConsolidationCandidate → _pending/ JSON
+- `ConsolidationPendingDispatchResult` — frozen dataclass（dispatched, skipped_duplicate, skipped_invalid, warnings, proposal_filepaths）
+- 复用现有 Phase 5a pending review CLI（list/accept/reject/edit-and-accept/skip）
+- Pending JSON schema 扩展：新增 source_evidence, consolidation_type, evidence_summary, proposal_id 字段
+- PendingProposal 扩展：新增 source_evidence, consolidation_type, evidence_summary 字段（默认空，向后兼容）
+- 去重：确定性 proposal identity 基于 content hash + source_evidence + consolidation_type
+- Dispatch 前置校验：memory_type=semantic, governance_route=T1, source_evidence N≥3
+- Accept 后 consolidation metadata（source_evidence/consolidation_type/evidence_summary）编码进 source_summary 保留到正式 record
+- 不自动 approve — 所有 consolidation candidate 必须经 human review 才写入 store
+- 47 个测试（`tests/test_memory_consolidation_review.py`）
+- 架构边界：不接 runtime hook，不写 store（除非通过 human accept），不调 LLM
 
 ### 15.5 Phase 7 — Emergence（🔮）
 

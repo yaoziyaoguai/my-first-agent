@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. T1 pending review CLI (minimal) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — L2TriggerGuard + L2InlineExtractor + governance routing, all default fake mode. Next: controlled dogfood with real LLM or Phase 6 (semantic consolidation).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model implemented — ConsolidationCandidate + ConsolidationType + conversion function, no engine/runtime yet. Next: consolidation engine or Phase 7 (emergence).
 
 ### Core Constraints
 
@@ -808,7 +808,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 ## 14. Current Implementation Mapping
 
-> **TLDR**: Phase 5a complete。Phase 5b foundation implemented + controlled dogfood verified（fake deterministic + real LLM opt-in 均通过）。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。Phase 6 semantic consolidation 尚未开始。Phase 7 procedural emergence 尚未开始。
+> **TLDR**: Phase 5a complete。Phase 5b foundation implemented + controlled dogfood verified（fake deterministic + real LLM opt-in 均通过）。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。Phase 6 consolidation domain model 已实现（ConsolidationCandidate + ConsolidationType + 转换函数 + 29 tests），consolidation engine 尚未开始。Phase 7 procedural emergence 尚未开始。
 
 ### 14.1 状态标记
 
@@ -960,14 +960,21 @@ Snapshot 层不得丢失 auto_retained 标记。
 - semantic consolidation（Phase 6）未开始
 - procedural emergence（Phase 7）未开始
 
-### 15.4 Phase 6 — Consolidation（🔲）
+### 15.4 Phase 6 — Consolidation（🟡 domain model implemented）
 
 **Lifecycle 目标**：Consolidation 阶段落地。
 
-- Episodic → Semantic 沉淀引擎（W4）
-- 跨 session 模式检测
-- Semantic candidate 生成 + episodic evidence 链
-- T1 adoption review
+- Episodic → Semantic 沉淀引擎（W4）— 🔲 未开始
+- 跨 session 模式检测 — 🔲 未开始
+- Semantic candidate 生成 + episodic evidence 链 — 🟡 domain model 已实现
+- T1 adoption review — 🔲 未开始
+
+**Domain Model（已实现）**:
+- `agent/memory_consolidation.py:ConsolidationCandidate` — frozen dataclass，字段校验完整
+- `ConsolidationType` 枚举：pattern_detection, merge, abstraction, clarification_needed, preference_evolved（RFC §6.3, §D.3）
+- `to_memory_operation_intent_for_review()` — 转换到现有 proposal → governance pipeline（强制 T1，不写 store）
+- 约束：memory_type 必须 "semantic"，source_evidence ≥2，governance 必须 T1
+- 29 个确定性测试（`tests/test_memory_consolidation.py`）
 
 ### 15.5 Phase 7 — Emergence（🔮）
 

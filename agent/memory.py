@@ -534,23 +534,10 @@ def extract_memories_from_session(
         # ── T1: confidence ≥0.8 → pending confirmation ────────────────
         # T1 proposal 需要人类 review。collect metadata 后在循环结束后
         # 持久化到 _pending/ 目录（Phase 5a skeleton persistence）。
-        candidate = proposal_to_candidate(proposal)
-        t1_proposals.append({
-            "content": proposal.content,
-            "evidence": proposal.evidence,
-            "confidence": proposal.confidence,
-            "importance": proposal.importance,
-            "rationale": proposal.rationale,
-            "memory_type": "episodic",
-            "source_type": "agent_suggested",
-            "governance_route": "T1",
-            "approval_status": "pending",
-            "scope": candidate.scope.value if candidate.scope else "user",
-            "source": "session_end_extraction",
-            "created_at": _os.environ.get(
-                "SESSION_START_TIME", ""
-            ) or _now_utc_iso(),
-        })
+        # 复用 _build_t1_pending_dict() 共享 helper（W3 + L2 共用）。
+        t1_proposals.append(_build_t1_pending_dict(
+            proposal, "session_end_extraction",
+        ))
         summary["t1_pending"] += 1
 
     # ── T1 pending 持久化 ──────────────────────────────────────────────
@@ -658,6 +645,37 @@ def _resolve_memory_root() -> str:
         or _os.getenv("MEMORY_ROOT")
         or str(Path.home() / ".my-first-agent" / "memory")
     )
+
+
+def _build_t1_pending_dict(
+    proposal,
+    source_label: str,
+) -> dict:
+    """构造 T1 pending proposal dict — W3 和 L2 共享的 thin helper。
+
+    不包含 governance 决策逻辑，只做字段映射。
+    memory_type 从 proposal 透传（W3 永远是 episodic，L2 可能为 semantic/procedural）。
+    source 标注来源（"session_end_extraction" / "l2_inline_extraction"）。
+    """
+    import os as _os
+
+    from agent.memory_extraction_bridge import proposal_to_candidate
+
+    candidate = proposal_to_candidate(proposal)
+    return {
+        "content": proposal.content,
+        "evidence": proposal.evidence,
+        "confidence": proposal.confidence,
+        "importance": proposal.importance,
+        "rationale": proposal.rationale,
+        "memory_type": proposal.memory_type,
+        "source_type": "agent_suggested",
+        "governance_route": "T1",
+        "approval_status": "pending",
+        "scope": candidate.scope.value if candidate.scope else "user",
+        "source": source_label,
+        "created_at": _os.environ.get("SESSION_START_TIME", "") or _now_utc_iso(),
+    }
 
 
 def _persist_t1_pending_proposals(proposals: list[dict]) -> None:

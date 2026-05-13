@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. T1 pending review CLI (minimal) implemented. Next: Phase 5b (L2 LLM Inline) or controlled dogfood.
+Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. T1 pending review CLI (minimal) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — L2TriggerGuard + L2InlineExtractor + governance routing, all default fake mode. Next: controlled dogfood with real LLM or Phase 6 (semantic consolidation).
 
 ### Core Constraints
 
@@ -664,21 +664,32 @@ Extraction 是 Lifecycle 中 Ingestion 阶段的**实现机制**，不是独立�
 
 覆盖面窄但确定性强，适合处理含关键词的显式模式。
 
-### 11.3 L2: LLM Inline Extraction（🔲 planned）
+### 11.3 L2: LLM Inline Extraction（🟡 skeleton implemented）
 
 在 task boundary / N≥5 turns / 用户显式触发时，调用 LLM 分析 conversation segment。
 
+当前实现（Phase 5b skeleton）：
+- `agent/memory_l2.py:L2TriggerGuard` — 触发守卫（turn counter、task boundary 关键词、显式触发、session 内最多 5 次）
+- `agent/memory_l2.py:run_l2_inline_extraction()` — L2 inline extraction 入口（trigger → extract → governance routing）
+- `agent/memory_extraction.py:L2InlineExtractor` — factory seam 包装，默认 FakeMemoryExtractor，真实 LLM 需 `MEMORY_EXTRACTION_REAL_LLM=1` opt-in
+- `agent/core.py` — runtime hook：每轮用户输入后 `record_turn()` → `should_trigger()` 检测 → `_maybe_run_l2_inline()` 自动运行
+- 复用现有 `MemoryCandidateProposal` schema 和 governance pipeline（不新增并行路径）
+
 触发约束（不在每条 input 后调用）：
 - 用户连续 N≥5 轮输入后
-- 检测到 task boundary（"OK", "done", "下一步" 等）
-- 用户显式触发
+- 检测到 task boundary（"OK", "done", "下一步" 等，≤20 字符短文本）
+- 用户显式触发（"记住这个", "记录一下", "remember this" 等）
 
-输出路由：
-- episodic + confidence 0.6-0.8 → T2 auto-retain
-- 其他 ≥0.8 → T1 confirmation
-- <0.6 → T3 ignore
+Governance 路由（RFC §10.4）：
+- episodic + confidence [0.6, 0.8) → T2 auto-retain
+- episodic + confidence ≥ 0.8 → T1 pending
+- semantic/procedural + confidence ≥ 0.6 → T1 pending（永不走 T2）
+- confidence < 0.6 → T3 ignore
+- T2 单 session 上限 3 条，HIGH/SECRET sensitivity 不进 T2
 
-成本控制：Haiku 模型、session 内最多 5 次调用。
+成本控制：Haiku 模型、session 内最多 5 次调用、默认 fake 模式。
+
+遗留：真实 LLM extraction quality 尚未 dogfood 验证。
 
 ### 11.4 Session-End Extraction（🟡 skeleton implemented）
 
@@ -797,7 +808,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 ## 14. Current Implementation Mapping
 
-> **TLDR**: Phase 5a complete。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。
+> **TLDR**: Phase 5a complete。Phase 5b complete。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。
 
 ### 14.1 状态标记
 
@@ -933,13 +944,21 @@ Snapshot 层不得丢失 auto_retained 标记。
 - T1 pending review CLI ✅ — `agent/memory_review.py`：list / accept / reject / edit-and-accept / skip，复用 MemoryOperationIntent → store.apply_operation_intent() 统一写入路径
 - 遗留：真实 LLM extraction quality 尚未 dogfood 验证
 
-### 15.3 Phase 5b — L2 LLM Inline Extraction（🔲）
+### 15.3 Phase 5b — L2 LLM Inline Extraction（🟡 skeleton implemented）
 
 **Lifecycle 目标**：增强 W2 Inline Suggestion。
 
-- L2 LLM 在 task boundary 触发
-- 成本控制（Haiku，session 内最多 5 次）
-- L2 输出路由（T1/T2/T3 按 confidence 分流）
+已实现：
+- L2TriggerGuard — 触发守卫（turn counter、task boundary 关键词检测、显式触发、session 内最多 5 次调用）
+- L2InlineExtractor — factory seam（默认 FakeMemoryExtractor，`MEMORY_EXTRACTION_REAL_LLM=1` opt-in 真实 LLM）
+- `run_l2_inline_extraction()` — 完整 governance routing（RFC §10.4 矩阵，与 W3 共享 `_build_t1_pending_dict` 和 `_persist_t1_pending_proposals`）
+- Runtime hook（`agent/core.py`）：`record_turn()` + `should_trigger()` + `_maybe_run_l2_inline()` 
+- 49 个测试覆盖（触发条件、成本上限、governance routing、metadata continuity、safety gates）
+
+遗留：
+- 真实 LLM extraction quality 尚未 dogfood 验证
+- semantic consolidation（Phase 6）未开始
+- procedural emergence（Phase 7）未开始
 
 ### 15.4 Phase 6 — Consolidation（🔲）
 

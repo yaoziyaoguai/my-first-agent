@@ -668,6 +668,64 @@ class LLMMemoryExtractor:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# L2 Inline Extractor — RFC §11.3 Phase 5b
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class L2InlineExtractor:
+    """Phase 5b L2 inline extractor — 在 task boundary 分析 conversation segment。
+
+    与 W3 session-end extractor 的区别：
+    - L2 处理 task boundary 时的 conversation segment（而非整个 session）
+    - L2 可产出所有三种 memory type（episodic / semantic / procedural）
+    - 复用 MemoryCandidateProposal schema，不新增并行 schema
+
+    Fake mode（默认）：
+      内部委托给 FakeMemoryExtractor，确定性关键词匹配，不调用 LLM。
+      支持 [fake-memory:t<N>] marker 用于 dogfood routing coverage。
+
+    Real mode（opt-in）：
+      内部委托给 LLMMemoryExtractor，调用 Haiku 进行结构化提取。
+      通过 use_real_llm=True + factory seam 启用。
+    """
+
+    def __init__(
+        self,
+        *,
+        use_real_llm: bool = False,
+        min_confidence: float = 0.6,
+        min_importance: int = 3,
+        model_name: str = "claude-haiku-4-5",
+        **kwargs,
+    ) -> None:
+        self._use_real_llm = use_real_llm
+        if use_real_llm:
+            _llm_fields = {"model_name", "api_key", "base_url", "max_tokens"}
+            _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
+            _llm_kwargs.setdefault("model_name", model_name)
+            self._backend = LLMMemoryExtractor(**_llm_kwargs)
+        else:
+            self._backend = FakeMemoryExtractor(
+                min_confidence=min_confidence,
+                min_importance=min_importance,
+            )
+
+    def extract(self, input: ExtractionInput) -> ExtractionResult:
+        """执行 L2 inline extraction。
+
+        委托给内部 backend（fake 或 LLM），输出相同的 MemoryCandidateProposal schema。
+        """
+        result = self._backend.extract(input)
+
+        # 覆写 extractor_type 为 "l2_inline"，与 W3 session-end 区分
+        return ExtractionResult(
+            proposals=result.proposals,
+            extractor_type=f"l2_inline_{'llm' if self._use_real_llm else 'fake'}",
+            extraction_summary=result.extraction_summary,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Convenience factory
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -675,14 +733,16 @@ class LLMMemoryExtractor:
 def create_extractor(
     extractor_type: str = "fake",
     **kwargs,
-) -> FakeMemoryExtractor | LLMMemoryExtractor:
+) -> FakeMemoryExtractor | LLMMemoryExtractor | L2InlineExtractor:
     """创建提取器的便捷工厂。
 
     Args:
-        extractor_type: "fake" 或 "llm"
+        extractor_type: "fake" / "llm" / "l2_inline"
         **kwargs: 传递给提取器构造函数的参数。
                   FakeMemoryExtractor 接受 min_confidence、min_importance。
                   LLMMemoryExtractor 接受 model_name、api_key、base_url、max_tokens。
+                  L2InlineExtractor 接受 use_real_llm、min_confidence、min_importance、
+                  model_name 以及 LLM kwarg。
                   不匹配目标构造函数的 kwarg 会被过滤掉。
     """
     if extractor_type == "fake":
@@ -694,6 +754,15 @@ def create_extractor(
         _llm_fields = {"model_name", "api_key", "base_url", "max_tokens"}
         _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
         return LLMMemoryExtractor(**_llm_kwargs)
+    if extractor_type == "l2_inline":
+        # L2InlineExtractor 接受 use_real_llm + LLM kwargs
+        _l2_fields = {
+            "use_real_llm", "min_confidence", "min_importance",
+            "model_name", "api_key", "base_url", "max_tokens",
+        }
+        _l2_kwargs = {k: v for k, v in kwargs.items() if k in _l2_fields}
+        return L2InlineExtractor(**_l2_kwargs)
     raise ValueError(
-        f"不支持的 extractor_type: {extractor_type!r}。支持: fake, llm"
+        f"不支持的 extractor_type: {extractor_type!r}。"
+        f"支持: fake, llm, l2_inline"
     )

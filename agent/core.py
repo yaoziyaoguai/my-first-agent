@@ -27,6 +27,7 @@ from agent.display_events import (
 from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
+from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
 
 
 
@@ -94,6 +95,65 @@ client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
 # v1 known limitation：模块级单例在多 session 下可能交叉污染 memory。
 # 测试可通过 monkeypatch 替换 _memory_runtime。
 _memory_runtime = create_memory_runtime()
+
+# Phase 5b L2 inline extraction trigger guard（session 级）。
+# 跟踪 turn count / task boundary / 预算消耗，决定何时触发 L2 extraction。
+# 测试可通过 monkeypatch 替换。
+_l2_trigger_guard = _L2TriggerGuard()
+
+
+def get_l2_trigger_guard():
+    """返回模块级 L2TriggerGuard 实例（供测试 inspection 用）。"""
+    return _l2_trigger_guard
+
+
+# Phase 5b L2 explicit trigger 短语（RFC §11.3 "用户显式触发"）
+_EXPLICIT_L2_TRIGGERS: tuple[str, ...] = (
+    "记住这个", "记录一下", "记住这些", "帮我记一下",
+    "remember this", "remember these",
+)
+
+
+def _is_explicit_l2_trigger(text: str) -> bool:
+    """检测用户输入是否包含 L2 explicit trigger 短语。
+
+    简单关键词匹配，不调用 LLM。
+    """
+    text_lower = text.strip().lower()
+    return any(trigger in text_lower for trigger in _EXPLICIT_L2_TRIGGERS)
+
+
+def _maybe_run_l2_inline(state) -> None:
+    """Phase 5b L2 inline extraction thin hook。
+
+    从 state.conversation.messages 中取最近消息，
+    调用 run_l2_inline_extraction() 执行 L2 extraction + governance routing。
+
+    不做 governance 决策，不阻塞 conversation flow。
+    仅当 L2 trigger guard 判定应触发时才调用。
+
+    当前 L2 extraction 结果未注入 prompt builder ——
+    这是 Phase 5b foundation，recall/injection 留待后续。
+    """
+    try:
+        from agent.memory_l2 import run_l2_inline_extraction
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        messages = state.conversation.messages
+        # 取最近 20 条消息作为 L2 inline extraction 的 segment
+        recent = list(messages[-20:]) if len(messages) > 20 else list(messages)
+        if not recent:
+            return
+
+        store = FilesystemMemoryStore()
+        run_l2_inline_extraction(
+            recent,
+            store,
+            guard=_l2_trigger_guard,
+        )
+    except Exception:
+        # L2 extraction 失败不应影响 conversation flow
+        pass
 
 # 统一会话状态：
 # 先把 system prompt 放进 runtime，
@@ -765,6 +825,17 @@ def chat(
                 fallback_prefix="\n",
             )
             return ""
+
+    # ── Phase 5b L2 Inline Extraction Trigger ──────────────────────────
+    # 每次用户输入后：记录 turn → 检查触发条件 → 触发时执行 L2 extraction。
+    # 这是 core.py 对 L2 的唯一薄调用，不做 governance 决策，不阻塞
+    # conversation flow。trigger guard 独立在 memory_l2 模块中。
+    _l2_trigger_guard.record_turn()
+    if _l2_trigger_guard.should_trigger(
+        user_input,
+        is_explicit_trigger=_is_explicit_l2_trigger(user_input),
+    ):
+        _maybe_run_l2_inline(state)
 
     # 状态一致性自愈：是否必须有 current_plan 统一交给 state helper 判断。
     # 这避免 core.py 继续散落硬编码 status tuple；更细的 plan/tool/user-input

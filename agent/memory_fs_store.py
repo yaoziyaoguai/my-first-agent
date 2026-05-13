@@ -404,6 +404,7 @@ def _record_from_frontmatter(meta: dict) -> MemoryRecord:
             "stability": meta.get("stability", "stable"),
             "created_at": meta.get("created_at", ""),
             "updated_at": meta.get("updated_at", ""),
+            "tags": meta.get("tags", ""),
         },
     )
 

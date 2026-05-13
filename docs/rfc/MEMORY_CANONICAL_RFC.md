@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, zero store/runtime/LLM dependencies. No source evidence loader or runtime integration yet. Next: source evidence loader or Phase 7 (emergence).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, zero store/runtime/LLM dependencies. No detector pipeline integration or runtime hook yet. Next: detector pipeline integration or Phase 7 (emergence).
 
 ### Core Constraints
 
@@ -854,7 +854,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 |------|:--:|------|
 | Ingestion | 🟡 | W1/W2 done, W3 skeleton done, W4/W5 planned |
 | Episodic | 🟡 | T2 auto-retain skeleton 已实现（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`） |
-| Consolidation | 🟡 | domain model + deterministic detector 已实现，无 engine/runtime 集成 |
+| Consolidation | 🟡 | domain model + detector + loader 已实现，无 pipeline/runtime 集成 |
 | Semantic | 🟡 | W1 explicit retain 可产出，无 consolidation 来源 |
 | Emergence | 🔮 | 概念设计 |
 | Procedural | 🟡 | W1 explicit retain 可产出，无 emergence 来源 |
@@ -960,7 +960,7 @@ Snapshot 层不得丢失 auto_retained 标记。
 - semantic consolidation（Phase 6）未开始
 - procedural emergence（Phase 7）未开始
 
-### 15.4 Phase 6 — Consolidation（🟡 domain model + detector implemented）
+### 15.4 Phase 6 — Consolidation（🟡 domain model + detector + loader implemented）
 
 **Lifecycle 目标**：Consolidation 阶段落地。
 
@@ -968,8 +968,9 @@ Snapshot 层不得丢失 auto_retained 标记。
 - 跨 session 模式检测 — 🟡 keyword-based grouping + Jaccard similarity 已实现
 - Semantic candidate 生成 + episodic evidence 链 — 🟡 已实现（N≥3 threshold per RFC §D.1）
 - T1 adoption review — 🔲 未开始（pending review CLI 已有，但未集成）
-- Source evidence loader（store → EpisodicEvidence）— 🔲 未开始
+- Source evidence loader（store → EpisodicEvidence）— 🟡 已实现
 - Runtime integration / session hook — 🔲 未开始
+- Detector pipeline integration（loader → detector → candidate）— 🔲 未开始
 
 **Domain Model（已实现）**:
 - `agent/memory_consolidation.py:ConsolidationCandidate` — frozen dataclass，字段校验完整
@@ -990,6 +991,17 @@ Snapshot 层不得丢失 auto_retained 标记。
 - 严格 N≥3 门槛（RFC §D.1），所有输出 memory_type="semantic"、governance_route="T1"
 - 35 个确定性测试（`tests/test_memory_consolidation_engine.py`）
 - 架构边界：不 import store / runtime / LLM / embedding 模块，幂等
+
+**Source Evidence Loader（已实现）**:
+- `agent/memory_consolidation_loader.py:load_episodic_evidence()` — 只读装载函数
+- 从 FilesystemMemoryStore 读取 episodic 记录，转换为 EpisodicEvidence
+- 过滤规则：非 episodic / rejected / pending / session_only / ephemeral / sensitive_redacted / 空 content
+- `SourceEvidenceLoadResult` — evidence + skipped_count + warnings
+- 保留 confidence / created_at / tags / scope 等 metadata
+- 只读：不调用 store 任何写方法，不修改 index.json，不创建新文件
+- 不调 detector，不调 LLM，不接 runtime
+- 39 个边界测试（`tests/test_memory_consolidation_loader.py`）
+- `memory_fs_store._record_from_frontmatter`: 新增 tags 到 metadata 传播（最小修复）
 
 ### 15.5 Phase 7 — Emergence（🔮）
 

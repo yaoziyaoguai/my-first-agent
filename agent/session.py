@@ -14,6 +14,7 @@ from agent.memory import (
     extract_memories_from_session,
     _format_extraction_summary,
 )
+from agent.memory_review import count_pending_proposals
 from agent.checkpoint import (
     load_checkpoint,
     load_checkpoint_to_state,
@@ -50,6 +51,11 @@ def init_session():
     })
 
     health_results = run_health_check(verbose=False)
+
+    # Phase 5a T1 pending review: 通知用户有未处理的 pending proposals
+    _pending_count = count_pending_proposals()
+    if _pending_count > 0:
+        print(f"\n[记忆] 有 {_pending_count} 条待确认的记忆提案。输入 'review memory' 查看并处理。")
 
     print(
         render_session_header(

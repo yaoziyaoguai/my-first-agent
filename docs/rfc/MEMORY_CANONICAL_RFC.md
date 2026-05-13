@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. Next: Phase 5b (L2 LLM Inline) or controlled dogfood.
+Phase 5a (W3 skeleton + T2) implemented. G1-G6 structural gaps resolved. T1 pending review CLI (minimal) implemented. Next: Phase 5b (L2 LLM Inline) or controlled dogfood.
 
 ### Core Constraints
 
@@ -689,12 +689,15 @@ Session 结束时批量扫描全部 messages（user + assistant + tool 摘要）
 - 默认使用 `create_extractor("fake", ...)` factory seam（确定性关键词匹配，不调 LLM）
 - Runtime hook：`agent/session.py:finalize_session()` 在正常 quit 时自动触发
 - T2 auto-retain → `FilesystemMemoryStore.apply_operation_intent()`（需 `MEMORY_STORE_BACKEND=filesystem`）
-- T1 pending → `_pending/t1_*.json`（跨 session 可见，暂无 review CLI）
+- T1 pending → `_pending/t1_*.json`（跨 session 可见）
+- Minimal review CLI implemented（`agent/memory_review.py`）：支持 list / accept / reject / edit-and-accept / skip
 - 真实 LLM extraction quality 尚未 dogfood 验证
 
 T1 pending confirmation（跨 session）：
 - 写入 `_pending/` 目录（`_persist_t1_pending_proposals()`）
-- 下次 session 启动时不自动展示（review CLI 待实现）
+- 下次 session 启动时显示 pending count，提示输入 'review memory' 进入 review
+- Review CLI 支持 accept / reject / edit-and-accept / skip，不自动 approve
+- 不执行 semantic consolidation / procedural emergence
 - 无自动丢弃策略（待 Phase 5b/6）
 
 ---
@@ -927,7 +930,8 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Fake/Real extractor boundary（factory seam）✅ — `create_extractor("fake", ...)` 默认安全
 - Runtime hook（`session.py:finalize_session()`）✅
 - Extraction summary 可见性 ✅
-- 遗留：真实 LLM extraction quality 尚未 dogfood 验证；T1 pending review CLI 未实现
+- T1 pending review CLI ✅ — `agent/memory_review.py`：list / accept / reject / edit-and-accept / skip，复用 MemoryOperationIntent → store.apply_operation_intent() 统一写入路径
+- 遗留：真实 LLM extraction quality 尚未 dogfood 验证
 
 ### 15.3 Phase 5b — L2 LLM Inline Extraction（🔲）
 

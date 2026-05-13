@@ -20,6 +20,7 @@ from agent.input_backends.simple import (
 from agent.input_intents import classify_user_input
 from agent.runtime_events import RuntimeEventKind, command_event_transition
 from agent.user_input import UserInputEvent
+from agent.memory_review import run_pending_review_cli
 from agent.session import (
     init_session,
     try_resume_from_checkpoint,
@@ -518,6 +519,16 @@ def main_loop():
             if intent.kind == "exit":
                 finalize_session()
                 break
+
+            # Phase 5a T1 pending review CLI trigger（RFC §11.4 / §15.2）
+            # slash command 已整体下线，这里用普通文本触发 review。
+            # 这不是通用 command registry，只是 Phase 5a 的最小可用入口。
+            if user_input.strip().lower() in (
+                "review memory", "查看待确认记忆", "memory review", "review pending",
+            ):
+                print()
+                run_pending_review_cli()
+                continue
 
             reply, new_latest_output = _run_chat_for_backend(
                 user_input,

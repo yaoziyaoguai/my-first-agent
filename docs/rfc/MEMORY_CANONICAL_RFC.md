@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation interface implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator). Contradiction handling, preference_evolved engine, and real LLM dogfood not yet implemented. Next: real LLM dogfood, contradiction handling, or Phase 7 (emergence).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real LLM consolidation dogfood verified (project .env provider config, 2/2 candidates enhanced, governance all_pass), RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only). Preference_evolved engine deferred — must be revisited during Phase 7 kickoff. Next: Phase 7 preflight stabilization or Phase 7 emergence.
 
 ### Core Constraints
 
@@ -971,10 +971,10 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Source evidence loader（store → EpisodicEvidence）— 🟡 已实现
 - Runtime integration / session hook — 🟡 已实现（env-gated, dispatch only）
 - RFC §D.2 recency_factor confidence scoring — 🟡 已实现（deterministic decay, newest evidence age）
-- LLM-assisted consolidation content generation — 🟡 interface + fake tests 已实现（opt-in via `MEMORY_CONSOLIDATION_LLM_ENABLED`，默认 deterministic，增强 content/evidence_summary，fail-closed validation，不改变 governance/confidence/source_evidence）。Real LLM dogfood 待执行
+- LLM-assisted consolidation content generation — 🟡 interface + fake tests + real LLM dogfood 已实现（opt-in via `MEMORY_CONSOLIDATION_LLM_ENABLED`，默认 deterministic，增强 content/evidence_summary，fail-closed validation，不改变 governance/confidence/source_evidence）。Real LLM dogfood 已验证：project .env provider config, 2/2 candidates enhanced, governance all_pass
 - LLM content generation validator — 🟡 已实现（hallucinated record_id 拦截、procedural-like content 拦截、N≥3 门槛、evidence_summary 长度检查）
-- Contradiction handling / preference_evolved — ❌ 未实现
-- LLM real dogfood — ❌ 未执行
+- Contradiction handling — 🟡 keyword-level 已实现（opposing-marker pairs, clarification_needed candidate, consistency discount 0.7, deterministic, T1-only）
+- Preference_evolved engine — ❌ deferred（接近 procedural emergence，进入 Phase 7 前必须 revisit）
 - Detector pipeline integration（loader → detector → candidate）— 🟡 已实现
 
 **Domain Model（已实现）**:
@@ -1042,8 +1042,9 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Runtime hook 通过 `create_llm_content_generator()` thin gate 接入，只读 env var
 - 复用现有 anthropic SDK 和 config（API key / model name / base URL）
 - 53 个测试（`tests/test_memory_consolidation_llm.py`）
-- Real LLM dogfood 待执行
-- contradiction / preference_evolved 仍未实现
+- Real LLM dogfood 已验证（project .env provider config, 2/2 enhanced, governance all_pass）
+- contradiction handling keyword-level 已实现（opposing-marker detection, clarification_needed candidate）
+- preference_evolved deferred（Phase 7 kickoff revisit required）
 
 ### 15.5 Phase 7 — Emergence（🔮）
 

@@ -907,18 +907,35 @@ class TestDogfoodProviderConfig:
         assert cfg.key_configured is False
 
     def test_repr_does_not_leak_key(self):
-        """repr 输出中不包含原始 api_key 值（dataclass 默认 repr 会包含）。"""
+        """repr 输出中不包含 api_key 值、prefix、suffix 或长度信息。"""
         from scripts.dogfood_phase6_llm_consolidation import DogfoodProviderConfig
 
+        key = "sk-ant-secret-key-12345"
         cfg = DogfoodProviderConfig(
             model="test-model",
             base_url="https://test.api",
-            api_key="sk-ant-secret-key-12345",
+            api_key=key,
             provider="anthropic",
         )
-        # 默认 frozen dataclass repr 包含所有字段值
-        # 这里验证 key_configured 作为公开 API 存在，外部代码应使用此属性
-        # 实际应用中通过 provider_info dict 报告状态，不直接打印 config
+
+        r = repr(cfg)
+
+        # core: 完整 key 不得出现
+        assert key not in r, f"完整 api_key 泄露于 repr: {r}"
+        # prefix
+        assert "sk-ant-secret" not in r, f"key prefix 泄露于 repr: {r}"
+        # suffix
+        assert "12345" not in r, f"key suffix 泄露于 repr: {r}"
+        # 通用 sk- 前缀
+        assert "sk-" not in r, f"sk- 前缀出现于 repr: {r}"
+
+        # 非 secret 字段正常出现
+        assert "test-model" in r
+        assert "test.api" in r
+        assert "anthropic" in r
+        assert "project .env" in r
+
+        # key_configured 仍然可访问
         assert cfg.key_configured is True
 
 

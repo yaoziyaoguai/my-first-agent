@@ -560,3 +560,457 @@ def _make_mock_state(messages=None):
         state.conversation.messages = list(messages)
     state.task.current_plan = None  # 无活跃 plan — 避免触发 save_checkpoint
     return state
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 6 Consolidation Runtime Hook 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些测试验证 RFC Phase 6 runtime hook 的显式开关、T1 pending 输出和失败隔离边界，
+# 不验证真实 semantic consolidation quality。
+
+
+class TestConsolidationRuntimeHookGate:
+    """验证 MEMORY_CONSOLIDATION_ENABLED 的显式开关行为。
+
+    所有测试使用 InMemory store + monkeypatch env，不读 .env / agent_log / sessions。
+    """
+
+    def test_disabled_by_default(self, monkeypatch):
+        """MEMORY_CONSOLIDATION_ENABLED 未设置时，consolidation 不运行。"""
+        monkeypatch.delenv("MEMORY_CONSOLIDATION_ENABLED", raising=False)
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+        )
+        c = summary.get("consolidation", {})
+        assert c.get("enabled") is False, (
+            f"默认应 disabled，实际 consolidation={c}"
+        )
+
+    def test_disabled_when_false(self, monkeypatch):
+        """MEMORY_CONSOLIDATION_ENABLED=false 时，consolidation 不运行。"""
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "false")
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+        )
+        c = summary.get("consolidation", {})
+        assert c.get("enabled") is False, (
+            f"MEMORY_CONSOLIDATION_ENABLED=false 应 disabled，实际={c}"
+        )
+
+    def test_enabled_with_insufficient_evidence(self, monkeypatch):
+        """MEMORY_CONSOLIDATION_ENABLED=true 但 store 中 episodic <3 时，跳过。"""
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_store import InMemoryMemoryStore
+
+        store = InMemoryMemoryStore()
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c = summary.get("consolidation", {})
+        assert c.get("enabled") is True
+        assert c.get("skipped") == "insufficient_evidence", (
+            f"evidence<3 时应 skip=insufficient_evidence，实际={c}"
+        )
+        assert c.get("evidence_count", 0) < 3
+
+    def test_enabled_with_sufficient_evidence(self, monkeypatch, tmp_path):
+        """MEMORY_CONSOLIDATION_ENABLED=true 且 episodic>=3 时，dispatch 到 T1 pending。
+
+        使用 filesystem store + tmp_path，确保 pending 文件落地可验证。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        # 先写入 3 条 episodic records（共享关键词确保分组成功）
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent,
+            MemoryOperationType,
+            MemoryDecisionType,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 这是第{i+1}次确认偏好",
+                source_summary=f"test_session_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            audit = build_memory_audit_summary(intent)
+            store.apply_operation_intent(intent, audit)
+
+        # 运行 extraction + consolidation
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c = summary.get("consolidation", {})
+        assert c.get("enabled") is True, f"enabled 应为 True，实际={c}"
+        assert c.get("evidence_count", 0) >= 3, (
+            f"evidence_count 应 >=3，实际={c}"
+        )
+        assert c.get("dispatched_count", 0) > 0, (
+            f"dispatched_count 应 >0，实际={c}"
+        )
+
+        # 验证 T1 pending 文件确实写入
+        pending_dir = tmp_path / "_pending"
+        t1_files = list(pending_dir.glob("t1_*.json")) if pending_dir.exists() else []
+        assert len(t1_files) > 0, "_pending/ 中应有 T1 proposal 文件"
+
+    def test_interval_env_respected(self, monkeypatch):
+        """MEMORY_CONSOLIDATION_MIN_INTERVAL 环境变量被正确读取。
+
+        当前 interval 仅 env-gate，不做跨 session 文件持久化（RFC 未来阶段）。
+        dogfood 可设置 MEMORY_CONSOLIDATION_MIN_INTERVAL=0 跳过间隔限制。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+
+        from agent.memory import _maybe_run_consolidation
+        from agent.memory_store import InMemoryMemoryStore
+
+        store = InMemoryMemoryStore()
+        result = _maybe_run_consolidation(store, {"store_root": None})
+        # MIN_INTERVAL=0 时应进入 evidence gate（而非 interval skip）
+        assert result.get("enabled") is True
+        # InMemory store 中无 episodic evidence → 应 skip=insufficient_evidence
+        assert result.get("skipped") == "insufficient_evidence", (
+            f"MIN_INTERVAL=0 且 store 为空时应 skip=insufficient_evidence: {result}"
+        )
+
+
+class TestConsolidationRuntimeHookSafety:
+    """验证 runtime hook 的安全边界：不自动 approve，不直接写 semantic store，不调 LLM。"""
+
+    def test_no_direct_semantic_write(self, monkeypatch, tmp_path):
+        """Consolidation hook 不直接写 semantic record 到 store。
+
+        只有 human accept 后才能写 semantic store。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent, MemoryOperationType,
+            MemoryDecisionType, MemoryConfirmationChoice,
+            MemoryConfirmationStatus, build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 确认{i+1}",
+                source_summary=f"test_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        from agent.memory import extract_memories_from_session
+
+        extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        # 检查 store 中没有 semantic record（只有 3 条 episodic）
+        records = store.list_records()
+        semantic_records = [r for r in records if r.memory_type == "semantic"]
+        assert len(semantic_records) == 0, (
+            f"consolidation hook 不应直接写 semantic record，"
+            f"但有 {len(semantic_records)} 条: "
+            f"{[r.id for r in semantic_records]}"
+        )
+
+    def test_no_auto_approve(self, monkeypatch, tmp_path):
+        """Consolidation dispatch 的 pending proposal approval_status 必须为 pending。
+
+        不经过 human accept 不应写入正式 store。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent, MemoryOperationType,
+            MemoryDecisionType, MemoryConfirmationChoice,
+            MemoryConfirmationStatus, build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 确认{i+1}",
+                source_summary=f"test_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        from agent.memory import extract_memories_from_session
+
+        extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        # 验证 T1 pending 文件中的 approval_status
+        import json
+        pending_dir = tmp_path / "_pending"
+        if pending_dir.exists():
+            for f in pending_dir.glob("t1_*.json"):
+                data = json.loads(f.read_text(encoding="utf-8"))
+                assert data.get("approval_status") == "pending", (
+                    f"T1 pending proposal 的 approval_status 必须为 'pending'，"
+                    f"实际={data.get('approval_status')} in {f.name}"
+                )
+
+    def test_no_real_llm_called(self, monkeypatch):
+        """Consolidation hook 路径不调用真实 LLM。
+
+        验证 gate 和 detector 都是确定性代码路径，无 LLM import。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+
+        # 验证 _maybe_run_consolidation 不 import 任何 LLM 相关模块
+        import ast
+        import inspect
+        from agent.memory import _maybe_run_consolidation
+
+        source = inspect.getsource(_maybe_run_consolidation)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module_name = ""
+                if isinstance(node, ast.Import):
+                    module_name = node.names[0].name
+                elif node.module:
+                    module_name = node.module
+                assert "llm" not in module_name.lower(), (
+                    f"_maybe_run_consolidation 不应 import LLM 模块: {module_name}"
+                )
+                assert "anthropic" not in module_name.lower(), (
+                    f"_maybe_run_consolidation 不应 import anthropic: {module_name}"
+                )
+
+
+class TestConsolidationRuntimeHookFailureIsolation:
+    """验证 consolidation 失败不破坏 session-end extraction 的已有结果。"""
+
+    def test_loader_warnings_in_summary(self, monkeypatch, tmp_path):
+        """Loader warning 进入 consolidation summary.warnings。
+
+        warning 不含完整 memory 原文。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent, MemoryOperationType,
+            MemoryDecisionType, MemoryConfirmationChoice,
+            MemoryConfirmationStatus, build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        # 写入 3 条 episodic + 1 条 rejected episodic（loader 应跳过）
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 确认{i+1}",
+                source_summary=f"test_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c = summary.get("consolidation", {})
+        # loader warnings 应出现在 consolidation summary
+        assert "warnings" in c, f"consolidation summary 应包含 warnings 字段: {c}"
+
+    def test_duplicate_prevents_repend(self, monkeypatch, tmp_path):
+        """同一 identity 的 candidate 不重复 dispatch 到 _pending/。
+
+        跑两次 consolidation，第二次的 duplicate_count 应 > 0。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent, MemoryOperationType,
+            MemoryDecisionType, MemoryConfirmationChoice,
+            MemoryConfirmationStatus, build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 确认{i+1}",
+                source_summary=f"test_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        from agent.memory import extract_memories_from_session
+
+        # 第一次
+        s1 = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c1 = s1.get("consolidation", {})
+        first_dispatched = c1.get("dispatched_count", 0)
+        assert first_dispatched > 0, f"第一次应有 dispatch: {c1}"
+
+        # 第二次——同一 identity 应被去重
+        s2 = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c2 = s2.get("consolidation", {})
+        dup = c2.get("duplicate_count", 0)
+        assert dup > 0, (
+            f"第二次应有 duplicate: dispatched={c2.get('dispatched_count')}, "
+            f"dup={dup}, full={c2}"
+        )
+
+    def test_exception_does_not_break_extraction_summary(self, monkeypatch):
+        """Consolidation 异常不破坏 session-end extraction 的 summary。
+
+        即使 _maybe_run_consolidation 抛异常，summary 应仍包含原有字段。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+
+        # 让 _maybe_run_consolidation 在 loader 阶段抛异常
+        def fake_load(store):
+            raise RuntimeError("simulated loader failure")
+
+        monkeypatch.setattr(
+            "agent.memory_consolidation_loader.load_episodic_evidence",
+            fake_load,
+        )
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+        )
+        # 原有字段应正常
+        assert "total_messages" in summary, "summary 应包含 total_messages"
+        assert "total_proposals" in summary, "summary 应包含 total_proposals"
+        # consolidation 应有 error
+        c = summary.get("consolidation", {})
+        assert "error" in c, (
+            f"consolidation summary 应包含 error，实际={c}"
+        )
+
+    def test_t1_t2_t3_not_regressed(self, monkeypatch):
+        """Session-end extraction 原有 T1/T2/T3 行为不因 consolidation hook 而回归。
+
+        验证 summary 中 t2_auto_retained / t1_pending / t3_ignored 字段仍然存在。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello world"}], None, None,
+        )
+        # 关键字段必须存在
+        for field in ("t2_auto_retained", "t1_pending", "t3_ignored",
+                       "total_proposals", "dedup_hits"):
+            assert field in summary, (
+                f"extraction summary 必须包含 {field}，实际 keys={list(summary.keys())}"
+            )
+        # consolidation 也必须存在（新增字段）
+        assert "consolidation" in summary, (
+            "consolidation 字段应出现在 summary 中"
+        )

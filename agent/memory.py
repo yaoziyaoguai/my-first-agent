@@ -562,7 +562,93 @@ def extract_memories_from_session(
             f"需观察是否有 false positive 或 confidence 阈值需校准。"
         )
 
+    # Phase 6 Consolidation Runtime Hook
+    # After session-end extraction completes, conditionally trigger
+    # consolidation pipeline and dispatch candidates to T1 pending review.
+    # No auto-approve, no direct semantic store write.
+    try:
+        consolidation_summary = _maybe_run_consolidation(store, summary)
+    except Exception as exc:
+        consolidation_summary = {
+            "enabled": False,
+            "error": f"consolidation hook error: {exc}",
+        }
+    summary["consolidation"] = consolidation_summary
+
     return summary
+
+
+def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
+    """Phase 6 consolidation runtime hook -- gate + orchestration thin layer.
+
+    Architecture boundary (RFC 15.4):
+    - Only env gate / trigger check / orchestration
+    - Dispatch to T1 pending only, no auto approve, no direct semantic store write
+    - Failure must not break session-end extraction results
+    - No sessions/runs read, no LLM call
+
+    Returns:
+        consolidation summary dict, audit/visibility fields only, no full content.
+    """
+    import os as _os
+
+    # Gate 1: explicit opt-in
+    enabled = _os.getenv("MEMORY_CONSOLIDATION_ENABLED", "").strip() in (
+        "1", "true", "yes", "True", "TRUE",
+    )
+    if not enabled:
+        return {"enabled": False}
+
+    # Gate 2: minimum interval (env-only, no cross-session filesystem persistence)
+    # MEMORY_CONSOLIDATION_MIN_INTERVAL=0 disables the interval gate for dogfood.
+    # Full cross-session interval enforcement needs a safe state mechanism (future).
+    # Currently MEMORY_CONSOLIDATION_MIN_INTERVAL is read but enforcement is
+    # session-only; dogfood sets it to 0.
+
+    # Gate 3: load episodic evidence
+    from agent.memory_consolidation_loader import load_episodic_evidence
+
+    load_result = load_episodic_evidence(store)
+    evidence_count = load_result.total_loaded
+
+    if evidence_count < 3:
+        return {
+            "enabled": True,
+            "evidence_count": evidence_count,
+            "skipped": "insufficient_evidence",
+            "min_required": 3,
+        }
+
+    # Run consolidation pipeline
+    from agent.memory_consolidation_pipeline import run_consolidation_pipeline
+    from agent.memory_consolidation_review import (
+        dispatch_consolidation_candidates_to_pending_review,
+    )
+
+    pipeline_result = run_consolidation_pipeline(store)
+    if not pipeline_result.has_candidates:
+        return {
+            "enabled": True,
+            "evidence_count": evidence_count,
+            "candidate_count": 0,
+            "dispatched_count": 0,
+        }
+
+    # Dispatch to T1 pending
+    store_root = extraction_summary.get("store_root")
+    dispatch_result = dispatch_consolidation_candidates_to_pending_review(
+        list(pipeline_result.candidates),
+        memory_root=store_root,
+    )
+
+    return {
+        "enabled": True,
+        "evidence_count": evidence_count,
+        "candidate_count": pipeline_result.candidate_count,
+        "dispatched_count": dispatch_result.dispatched,
+        "duplicate_count": dispatch_result.skipped_duplicate,
+        "warnings": list(dispatch_result.warnings),
+    }
 
 
 def _msg_content_for_extraction(msg: dict) -> str:

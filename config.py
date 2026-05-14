@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 # load_dotenv 默认 override=False，不会覆盖 shell 中已显式设置的变量。
 # 这意味着 export MODEL_NAME=foo 优先于 .env 中的同名 key。
 load_dotenv()
@@ -23,6 +23,50 @@ def _resolve_api_key() -> str | None:
 def _resolve_base_url() -> str | None:
     """按优先级解析 base URL：ANTHROPIC_BASE_URL > OPENAI_BASE_URL。"""
     return os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+
+
+def _load_project_dotenv_values(project_root: Path | None = None) -> dict[str, str]:
+    """通过项目配置层读取 dotenv 值，但不污染 ``os.environ``。
+
+    这是给 dogfood/测试用的安全边界：允许程序自动加载项目配置，
+    但返回值只在内存中传递，调用方不得打印、记录或序列化 secret value。
+    """
+    root = Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
+    dotenv_path = root / ".env"
+    if not dotenv_path.is_file():
+        return {}
+    raw_values = dotenv_values(dotenv_path)
+    values: dict[str, str] = {}
+    for key, value in raw_values.items():
+        if isinstance(key, str) and isinstance(value, str) and value.strip():
+            values[key] = value.strip()
+    return values
+
+
+def _resolve_scoped_config_value(
+    names: tuple[str, ...],
+    *,
+    project_root: Path | None = None,
+    prefer_project_dotenv: bool = False,
+) -> tuple[str | None, str]:
+    """按 source kind 解析配置值，不暴露配置值本身。
+
+    ``source kind`` 只描述来源类别：project_dotenv / shell_env / missing。
+    它用于 dogfood diagnostics，避免为了排查 provider 问题去打印 secret。
+    """
+    if prefer_project_dotenv:
+        project_values = _load_project_dotenv_values(project_root)
+        for name in names:
+            value = project_values.get(name)
+            if value:
+                return value, "project_dotenv"
+
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip(), "shell_env"
+
+    return None, "missing"
 
 
 def get_config_errors() -> list[str]:

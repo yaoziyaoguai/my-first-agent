@@ -33,9 +33,9 @@ _REVIEW_PACKET_DIR = _DOGFOOD_ROOT / "review_packet"
 
 
 # ── Provider config（用于 real LLM dogfood）──────────────────────────────────
-# 本脚本只消费 config.py 已经暴露的配置解析结果；config.py 负责通过
-# python-dotenv / 环境变量自动加载。这里不手工读取 .env 文件内容，也不打印
-# key prefix/suffix/length。
+# 本脚本只消费 config.py 暴露的配置解析能力；config.py 负责通过
+# python-dotenv / 环境变量自动加载。这里不打印 key value / prefix / suffix /
+# length，也不把 secret 写入 report。
 
 
 @dataclass(frozen=True)
@@ -48,17 +48,70 @@ class DogfoodProviderConfig:
     model: str
     base_url: str
     api_key: str = field(repr=False)
-    provider: str = "unknown"  # "anthropic" | "openai" | "unknown"
+    provider: str = "unknown"
     source: str = "config auto-load"
+    key_source_kind: str = "missing"
+    diagnostics_warnings: tuple[str, ...] = ()
 
     @property
     def key_configured(self) -> bool:
         return bool(self.api_key)
 
+    def safe_diagnostics(
+        self,
+        *,
+        auth_status: str = "not_run",
+        error_type: str | None = None,
+        sanitized_error: str | None = None,
+    ) -> dict:
+        """返回可写 report / CLI 的非敏感 diagnostics。
+
+        这里是 real provider dogfood 的报告边界：只暴露 provider/model/base_url
+        和 source kind，不暴露 key 值、前后缀、长度或 HTTP auth header。
+        """
+        return {
+            "provider_configured": self.key_configured,
+            "provider_name": self.provider,
+            "provider": self.provider,
+            "model": self.model,
+            "base_url": self.base_url,
+            "key_source_kind": self.key_source_kind,
+            "auth_status": auth_status,
+            "error_type": error_type,
+            "sanitized_error": sanitized_error,
+            "warnings": list(self.diagnostics_warnings),
+            # 兼容旧 report 字段名；值是布尔，不包含 secret。
+            "key_configured": self.key_configured,
+            "source": self.source,
+        }
+
+
+_MODEL_ENV_NAMES = (
+    "MODEL_NAME",
+    "DEEPSEEK_MODEL",
+    "DASHSCOPE_MODEL",
+    "ANTHROPIC_MODEL",
+    "OPENAI_MODEL",
+    "MY_FIRST_AGENT_LLM_MODEL",
+)
+_BASE_URL_ENV_NAMES = (
+    "ANTHROPIC_BASE_URL",
+    "DEEPSEEK_BASE_URL",
+    "DASHSCOPE_BASE_URL",
+    "OPENAI_BASE_URL",
+    "MY_FIRST_AGENT_LLM_BASE_URL",
+)
+
 
 def _infer_provider_name(*, model: str, base_url: str) -> str:
     """从非 secret 配置推断 provider 名称，不查看 API key 内容。"""
     text = f"{model} {base_url}".lower()
+    if "deepseek" in text and "anthropic" in base_url.lower():
+        return "deepseek_anthropic"
+    if "deepseek" in text:
+        return "deepseek"
+    if "dashscope" in text:
+        return "dashscope"
     if "anthropic" in text or "claude" in text:
         return "anthropic"
     if "openai" in text or "gpt" in text:
@@ -66,30 +119,79 @@ def _infer_provider_name(*, model: str, base_url: str) -> str:
     return "unknown"
 
 
+def _key_env_names_for_provider(provider: str) -> tuple[str, ...]:
+    """按 provider family 选择 key source，不返回或打印 key 值。"""
+    if provider == "deepseek_anthropic":
+        # DeepSeek 官方 Anthropic-compatible 文档使用 ANTHROPIC_API_KEY，
+        # 同时允许项目用 DEEPSEEK_API_KEY 表达 provider 归属。
+        return ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY")
+    if provider == "deepseek":
+        return ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    if provider == "dashscope":
+        return ("DASHSCOPE_API_KEY", "OPENAI_API_KEY")
+    if provider == "openai":
+        return ("OPENAI_API_KEY",)
+    if provider == "anthropic":
+        return ("ANTHROPIC_API_KEY",)
+    return ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY")
+
+
+def _provider_config_warnings(*, model: str, base_url: str, provider: str) -> tuple[str, ...]:
+    """生成非敏感 provider/model/base_url mismatch warning。"""
+    warnings: list[str] = []
+    model_l = model.lower()
+    base_l = base_url.lower()
+    if "deepseek" in model_l and "deepseek.com" not in base_l:
+        warnings.append("provider_model_base_url_mismatch")
+    if provider == "deepseek_anthropic" and "anthropic" not in base_l:
+        warnings.append("provider_model_base_url_mismatch")
+    return tuple(dict.fromkeys(warnings))
+
+
 def load_provider_config_for_dogfood(
     project_root: Path | None = None,
 ) -> DogfoodProviderConfig:
     """通过项目既有 config.py 自动加载 provider config。
 
-    project_root 参数仅保留给旧调用方；本函数不会读取该路径下的 .env。
-    config.py 在 import 时使用 load_dotenv() / 环境变量解析配置，调用方不得
-    在 dogfood 脚本里手工查看 key 或 .env 内容。
+    project_root 用于 project-scoped config 解析。config.py 使用 python-dotenv
+    读取项目配置，但本函数不把 dotenv 值写入 os.environ，也不序列化 secret。
     """
-    del project_root  # compatibility-only 参数，禁止用它读取 .env
 
     import config as _config
 
-    model = _config._resolve_model_name() or "unknown"
-    base_url = _config._resolve_base_url() or "unknown"
-    api_key = _config._resolve_api_key() or ""
+    root = project_root or _PROJECT_ROOT
+    model, _model_source = _config._resolve_scoped_config_value(
+        _MODEL_ENV_NAMES,
+        project_root=root,
+        prefer_project_dotenv=True,
+    )
+    base_url, _base_source = _config._resolve_scoped_config_value(
+        _BASE_URL_ENV_NAMES,
+        project_root=root,
+        prefer_project_dotenv=True,
+    )
+    model = model or "unknown"
+    base_url = base_url or "unknown"
     provider = _infer_provider_name(model=model, base_url=base_url)
+    api_key, key_source_kind = _config._resolve_scoped_config_value(
+        _key_env_names_for_provider(provider),
+        project_root=root,
+        prefer_project_dotenv=True,
+    )
+    warnings = _provider_config_warnings(
+        model=model,
+        base_url=base_url,
+        provider=provider,
+    )
 
     return DogfoodProviderConfig(
         model=model,
         base_url=base_url,
-        api_key=api_key,
+        api_key=api_key or "",
         provider=provider,
         source="config auto-load",
+        key_source_kind=key_source_kind,
+        diagnostics_warnings=warnings,
     )
 
 # ── 合成 episodic evidence 定义 ────────────────────────────────────────────────
@@ -262,6 +364,31 @@ def _classify_llm_error(warnings: list[str] | tuple[str, ...]) -> str | None:
     return "unknown_error"
 
 
+def _provider_sanitized_error(error_type: str | None) -> str | None:
+    """把 provider 错误收敛为通用描述，避免 report 保存原始响应体。"""
+    if error_type is None:
+        return None
+    return {
+        "auth_failed": "provider authentication failed",
+        "missing_config": "provider configuration missing",
+        "network_error": "provider network error",
+        "parse_error": "provider response parse error",
+    }.get(error_type, "provider error")
+
+
+def _safe_warning_for_report(warning: str) -> str:
+    """将 warning 转换为 report-safe 文本。
+
+    provider 原始错误可能包含被服务端 mask 过的 key suffix；即使已经 sanitize，
+    report 也只保留 error_type 级别的信息。
+    """
+    sanitized = _sanitize_str(warning)
+    error_type = _classify_llm_error([sanitized])
+    if error_type is not None:
+        return f"provider_error:{error_type}"
+    return sanitized
+
+
 # ── 步骤 0：环境检查 ───────────────────────────────────────────────────────────
 
 def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, DogfoodProviderConfig | None]:
@@ -280,13 +407,7 @@ def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, Dogfoo
 
     provider_config = load_provider_config_for_dogfood(project_root or _PROJECT_ROOT)
 
-    provider_info: dict = {
-        "model": provider_config.model,
-        "base_url": provider_config.base_url,
-        "provider": provider_config.provider,
-        "key_configured": provider_config.key_configured,
-        "source": provider_config.source,
-    }
+    provider_info: dict = provider_config.safe_diagnostics()
 
     if not provider_config.key_configured:
         return False, "API key 未配置（config auto-load 未提供 provider key）", provider_info, provider_config
@@ -395,16 +516,35 @@ def run_dogfood_pipeline(
     pipeline_result = run_consolidation_pipeline(store, llm_generator=llm_generator)
 
     # sanitize LLM 相关 warnings（不泄露 key/secret）
-    sanitized_llm_warnings: list[str] = []
-    for w in pipeline_result.llm_warnings:
-        sanitized_llm_warnings.append(_sanitize_str(w))
-    sanitized_pipeline_warnings: list[str] = []
-    for w in pipeline_result.warnings:
-        sanitized_pipeline_warnings.append(_sanitize_str(w))
+    sanitized_llm_warnings = [
+        _safe_warning_for_report(w) for w in pipeline_result.llm_warnings
+    ]
+    sanitized_pipeline_warnings = [
+        _safe_warning_for_report(w) for w in pipeline_result.warnings
+    ]
 
     llm_enhanced_ok = pipeline_result.llm_enhanced_count > 0
     provider_error_type = _classify_llm_error(sanitized_llm_warnings)
     real_llm_blocked = pipeline_result.llm_enabled and not llm_enhanced_ok
+    provider_error_type = provider_error_type if real_llm_blocked else None
+    auth_status = (
+        "success" if llm_enhanced_ok
+        else (provider_error_type or "not_run")
+    )
+    provider_sanitized_error = _provider_sanitized_error(provider_error_type)
+    safe_provider_info = dict(provider_info or {})
+    if provider_config is not None:
+        safe_provider_info = provider_config.safe_diagnostics(
+            auth_status=auth_status,
+            error_type=provider_error_type,
+            sanitized_error=provider_sanitized_error,
+        )
+    elif provider_error_type:
+        safe_provider_info.update({
+            "auth_status": auth_status,
+            "error_type": provider_error_type,
+            "sanitized_error": provider_sanitized_error,
+        })
 
     report: dict = {
         "pipeline": {
@@ -417,14 +557,15 @@ def run_dogfood_pipeline(
             "llm_enhanced_count": pipeline_result.llm_enhanced_count,
             "llm_warnings": sanitized_llm_warnings,
         },
-        "provider": provider_info or {},
+        "provider": safe_provider_info,
         "llm_status": (
             "enhanced" if llm_enhanced_ok
             else ("blocked" if real_llm_blocked
             else ("skipped" if not pipeline_result.llm_enabled
             else "failed"))
         ),
-        "provider_error_type": provider_error_type if real_llm_blocked else None,
+        "provider_error_type": provider_error_type,
+        "sanitized_error": provider_sanitized_error,
         "direct_store_write": {
             "semantic_records": len([
                 r for r in store.list_records() if r.memory_type == "semantic"
@@ -530,6 +671,7 @@ def generate_review_packet(report: dict) -> Path:
         "dispatch_report": report.get("dispatch"),
         "governance_check": report.get("governance_check"),
         "provider_error_type": report.get("provider_error_type"),
+        "sanitized_error": report.get("sanitized_error"),
         "direct_store_write": report.get("direct_store_write"),
         "pending_files": _list_pending_files(),
     }
@@ -567,9 +709,17 @@ def _build_executive_summary(report: dict) -> dict:
         "llm_warnings": len(p["llm_warnings"]),
         "direct_store_write": report.get("direct_store_write", {}),
         "provider": {
+            "provider_name": prov.get("provider_name", prov.get("provider", "unknown")),
             "model": prov.get("model", "unknown"),
             "base_url": prov.get("base_url", "unknown"),
-            "key_configured": prov.get("key_configured", False),
+            "provider_configured": prov.get(
+                "provider_configured",
+                prov.get("key_configured", False),
+            ),
+            "key_source_kind": prov.get("key_source_kind", "missing"),
+            "auth_status": prov.get("auth_status", "not_run"),
+            "error_type": prov.get("error_type"),
+            "sanitized_error": prov.get("sanitized_error"),
         },
     }
 
@@ -660,7 +810,13 @@ def _build_markdown_summary(report: dict, packet: dict) -> str:
         "- [x] 不将 secret 写入 report",
         "- [x] 不将 secret 写入 memory store",
         "- [x] 不将 secret 写入日志",
-        f"- [x] provider 状态报告：configured={prov.get('key_configured', False)}, model={prov.get('model', 'unknown')}",
+        (
+            "- [x] provider 状态报告："
+            f"configured={prov.get('provider_configured', prov.get('key_configured', False))}, "
+            f"provider={prov.get('provider_name', prov.get('provider', 'unknown'))}, "
+            f"key_source_kind={prov.get('key_source_kind', 'missing')}, "
+            f"model={prov.get('model', 'unknown')}"
+        ),
         f"- [x] real LLM dogfood 状态：{report.get('llm_status', 'unknown')}",
         "- [x] 如有 secret 泄露到此 report，则为代码缺陷",
         "",
@@ -714,16 +870,27 @@ def main(argv: list[str] | None = None) -> int:
     if not can_run:
         print(f"\n[SKIP] {reason}")
         if provider_info:
-            print(f"  provider configured: {provider_info.get('key_configured', False)}")
+            print(
+                "  provider configured: "
+                f"{provider_info.get('provider_configured', provider_info.get('key_configured', False))}"
+            )
+            print(f"  key_source_kind: {provider_info.get('key_source_kind', 'missing')}")
         print("设置 MEMORY_CONSOLIDATION_LLM_ENABLED=true 并确保 API key 可用后重试。")
         return 1
 
     # 报告 provider 配置（不含 secret）
     print("\n[OK] 环境检查通过")
     print("  provider configured: yes")
+    print(f"  provider: {provider_info.get('provider_name', provider_info.get('provider', 'unknown'))}")
     print(f"  provider source: {provider_info.get('source', 'unknown')}")
+    print(f"  key_source_kind: {provider_info.get('key_source_kind', 'missing')}")
     print(f"  model:  {provider_info.get('model', 'unknown')}")
     print(f"  base_url: {provider_info.get('base_url', 'unknown')}")
+    warnings = provider_info.get("warnings") or []
+    if warnings:
+        print(f"  config warnings: {len(warnings)} 条")
+        for warning in warnings[:5]:
+            print(f"    - {warning}")
 
     # Step 1: 准备临时 store + 合成 evidence
     print("\n[1/4] 准备临时 store ...")
@@ -744,8 +911,6 @@ def main(argv: list[str] | None = None) -> int:
         report = run_dogfood_pipeline(_STORE_ROOT, provider_info, provider_config)
     except Exception as exc:
         print(f"\n[FAIL] pipeline 运行失败: {_sanitize_error(exc)}")
-        import traceback
-        traceback.print_exc()
         return 2
 
     p = report["pipeline"]

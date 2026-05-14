@@ -783,6 +783,84 @@ class TestSecretSanitization:
             dogfood_mod._REVIEW_PACKET_DIR = original_review
             dogfood_mod._STORE_ROOT = original_store
 
+    def test_auth_failed_review_packet_uses_generic_sanitized_error(
+        self, tmp_dogfood_root,
+    ):
+        """auth_failed report 只保存通用错误类型，不保存 provider 原始响应。"""
+        import scripts.dogfood_phase6_llm_consolidation as dogfood_mod
+        from scripts.dogfood_phase6_llm_consolidation import DogfoodProviderConfig
+
+        secret = "sk-report-secret-value-that-must-not-leak"
+        cfg = DogfoodProviderConfig(
+            model="deepseek-v4-pro",
+            base_url="https://api.deepseek.com/anthropic",
+            api_key=secret,
+            provider="deepseek_anthropic",
+            key_source_kind="project_dotenv",
+        )
+        report = {
+            "pipeline": {
+                "evidence_count": 3,
+                "candidate_count": 1,
+                "skipped_count": 0,
+                "warnings": [],
+                "detector_name": "test",
+                "llm_enabled": True,
+                "llm_enhanced_count": 0,
+                "llm_warnings": ["provider_error:auth_failed"],
+            },
+            "provider": cfg.safe_diagnostics(
+                auth_status="auth_failed",
+                error_type="auth_failed",
+                sanitized_error="provider authentication failed",
+            ),
+            "llm_status": "blocked",
+            "provider_error_type": "auth_failed",
+            "sanitized_error": "provider authentication failed",
+            "dispatch": {
+                "dispatched": 1,
+                "skipped_duplicate": 0,
+                "skipped_invalid": 0,
+                "warnings": [],
+                "filepaths": [],
+            },
+            "governance_check": {
+                "all_pass": True,
+                "candidates_checked": 1,
+                "details": [],
+            },
+            "direct_store_write": {
+                "semantic_records": 0,
+                "procedural_records": 0,
+                "direct_semantic_or_procedural_write": False,
+            },
+        }
+
+        packet_dir = tmp_dogfood_root / "review_packet"
+        store_root = tmp_dogfood_root / "memory"
+        packet_dir.mkdir(parents=True, exist_ok=True)
+        store_root.mkdir(parents=True, exist_ok=True)
+
+        original_review = dogfood_mod._REVIEW_PACKET_DIR
+        original_store = dogfood_mod._STORE_ROOT
+        try:
+            dogfood_mod._REVIEW_PACKET_DIR = packet_dir
+            dogfood_mod._STORE_ROOT = store_root
+            packet_path = dogfood_mod.generate_review_packet(report)
+            packet_text = packet_path.read_text(encoding="utf-8")
+            packet = json.loads(packet_text)
+
+            assert packet["provider_error_type"] == "auth_failed"
+            assert packet["sanitized_error"] == "provider authentication failed"
+            assert secret not in packet_text
+            assert "sk-" not in packet_text
+            assert "****" not in packet_text
+            assert "api key" not in packet_text.lower()
+            assert "Bearer" not in packet_text
+        finally:
+            dogfood_mod._REVIEW_PACKET_DIR = original_review
+            dogfood_mod._STORE_ROOT = original_store
+
     def test_dogfood_script_has_no_key_print(self):
         """dogfood 脚本的主代码路径不应包含 print key/secret 的语句。"""
         src = Path(__file__).parent.parent / "scripts" / "dogfood_phase6_llm_consolidation.py"
@@ -887,10 +965,16 @@ class TestDogfoodProviderConfig:
 
 
 class TestProviderConfigAutoLoad:
-    """Provider config 只通过 config.py 自动加载，不在 dogfood 脚本中读取 .env 内容。"""
+    """Provider config 只通过项目配置机制自动加载。
 
-    def test_load_provider_config_uses_current_env_without_manual_dotenv(self, monkeypatch):
-        """通过 config 解析当前环境，不打开项目 .env 文件。"""
+    这些测试验证 real provider dogfood 的配置加载和脱敏报告边界，
+    不验证真实 API key 本身是否有效。
+    """
+
+    def test_load_provider_config_uses_shell_env_when_project_dotenv_absent(
+        self, tmp_path, monkeypatch,
+    ):
+        """fake project 无 .env 时回退 shell env，不读取真实项目 .env。"""
         from scripts.dogfood_phase6_llm_consolidation import (
             load_provider_config_for_dogfood,
         )
@@ -900,12 +984,127 @@ class TestProviderConfigAutoLoad:
         monkeypatch.setenv("ANTHROPIC_MODEL", "claude-fallback-model")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
-        cfg = load_provider_config_for_dogfood()
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
         assert cfg.model == "claude-test-model"
         assert cfg.base_url == "https://api.anthropic.com"
         assert cfg.key_configured is True
         assert cfg.provider == "anthropic"
         assert cfg.source == "config auto-load"
+        assert cfg.key_source_kind == "shell_env"
+
+    def test_project_dotenv_preferred_over_shell_env_pollution(self, tmp_path, monkeypatch):
+        """fake project .env 优先于 shell env，且 diagnostics 不泄露 key 值。"""
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        project_key = "sk-project-secret-value-that-must-not-leak"
+        shell_key = "sk-shell-secret-value-that-must-not-leak"
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MODEL_NAME=deepseek-v4-pro",
+                "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic",
+                f"ANTHROPIC_API_KEY={project_key}",
+            ]),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MODEL_NAME", "claude-shell-model")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", shell_key)
+
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+        diagnostics = cfg.safe_diagnostics()
+        diagnostics_text = json.dumps(diagnostics, ensure_ascii=False)
+
+        assert cfg.model == "deepseek-v4-pro"
+        assert cfg.base_url == "https://api.deepseek.com/anthropic"
+        assert cfg.provider == "deepseek_anthropic"
+        assert cfg.key_source_kind == "project_dotenv"
+        assert cfg.key_configured is True
+        assert project_key not in diagnostics_text
+        assert shell_key not in diagnostics_text
+        assert "sk-" not in diagnostics_text
+
+    def test_deepseek_anthropic_config_matches_official_endpoint(self, tmp_path):
+        """DeepSeek Anthropic-compatible 配置应识别为 Anthropic protocol provider。"""
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MODEL_NAME=deepseek-v4-pro",
+                "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic",
+                "ANTHROPIC_API_KEY=sk-fake-deepseek-key",
+            ]),
+            encoding="utf-8",
+        )
+
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+        diagnostics = cfg.safe_diagnostics()
+
+        assert cfg.provider == "deepseek_anthropic"
+        assert diagnostics["provider_name"] == "deepseek_anthropic"
+        assert diagnostics["key_source_kind"] == "project_dotenv"
+        assert diagnostics["auth_status"] == "not_run"
+        assert diagnostics["provider_configured"] is True
+        assert diagnostics["base_url"] == "https://api.deepseek.com/anthropic"
+        assert diagnostics["model"] == "deepseek-v4-pro"
+
+    def test_provider_model_base_url_mismatch_reports_sanitized_warning(
+        self, tmp_path,
+    ):
+        """provider/model/base_url 不一致时只报告非敏感 warning。"""
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        secret = "sk-mismatch-secret-value-that-must-not-leak"
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MODEL_NAME=deepseek-v4-pro",
+                "ANTHROPIC_BASE_URL=https://api.anthropic.com",
+                f"ANTHROPIC_API_KEY={secret}",
+            ]),
+            encoding="utf-8",
+        )
+
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+        diagnostics = cfg.safe_diagnostics()
+        diagnostics_text = json.dumps(diagnostics, ensure_ascii=False)
+
+        assert "provider_model_base_url_mismatch" in diagnostics["warnings"]
+        assert secret not in diagnostics_text
+        assert "sk-" not in diagnostics_text
+
+    def test_auth_failed_diagnostics_are_generic_and_secret_safe(self):
+        """auth_failed 只报告安全错误类型，不写 provider 原始 secret 上下文。"""
+        from scripts.dogfood_phase6_llm_consolidation import DogfoodProviderConfig
+
+        secret = "sk-auth-secret-value-that-must-not-leak"
+        cfg = DogfoodProviderConfig(
+            model="deepseek-v4-pro",
+            base_url="https://api.deepseek.com/anthropic",
+            api_key=secret,
+            provider="deepseek_anthropic",
+            key_source_kind="project_dotenv",
+        )
+
+        diagnostics = cfg.safe_diagnostics(
+            auth_status="auth_failed",
+            error_type="auth_failed",
+            sanitized_error="provider authentication failed",
+        )
+        diagnostics_text = json.dumps(diagnostics, ensure_ascii=False)
+
+        assert diagnostics["provider_configured"] is True
+        assert diagnostics["auth_status"] == "auth_failed"
+        assert diagnostics["error_type"] == "auth_failed"
+        assert diagnostics["sanitized_error"] == "provider authentication failed"
+        assert secret not in diagnostics_text
+        assert "sk-" not in diagnostics_text
+        assert str(len(secret)) not in diagnostics_text
+        assert "Bearer" not in diagnostics_text
 
     def test_provider_name_does_not_inspect_key_prefix(self):
         """provider 推断只看 model/base_url，不查看 API key prefix/suffix/length。"""
@@ -921,6 +1120,10 @@ class TestProviderConfigAutoLoad:
             model="gpt-test",
             base_url="unknown",
         ) == "openai"
+        assert _infer_provider_name(
+            model="deepseek-v4-pro",
+            base_url="https://api.deepseek.com/anthropic",
+        ) == "deepseek_anthropic"
         assert _infer_provider_name(model="unknown", base_url="unknown") == "unknown"
 
     def test_error_classifier_returns_safe_categories(self):

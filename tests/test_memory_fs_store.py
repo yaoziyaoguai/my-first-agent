@@ -28,6 +28,7 @@ from agent.memory_operations import (
     MemoryDecisionType,
     MemoryOperationIntent,
     MemoryOperationType,
+    build_memory_audit_summary,
 )
 
 
@@ -471,6 +472,115 @@ class TestStoreOperations:
         )
         result = FSStore.apply_operation_intent(intent, audit)
         assert result.status.value == "rejected"
+
+
+class TestRejectedIntentBackendConsistency:
+    """这些测试验证 store backend 对 rejected intent 的一致性，不改变 memory governance 语义。
+
+    Store 仍只消费上游 governance/confirmation 生成的 MemoryOperationIntent；
+    这里验证的是 backend 的 fail-closed 边界：如果 intent 的用户选择或确认状态
+    表达 rejected，就不能污染正式 record，也不能出现在 list_records() 中。
+    """
+
+    def test_in_memory_rejected_mutating_intent_does_not_write(self):
+        from agent.memory_store import InMemoryMemoryStore
+
+        intent = _make_intent(
+            operation_type=MemoryOperationType.RETAIN,
+            content="不应写入的 rejected intent",
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.REJECT,
+        )
+        audit = build_memory_audit_summary(intent)
+        store = InMemoryMemoryStore()
+
+        result = store.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "rejected"
+        assert result.record is None
+        assert store.list_records() == ()
+
+    def test_filesystem_rejected_mutating_intent_does_not_write(self, FSStore):
+        intent = _make_intent(
+            operation_type=MemoryOperationType.RETAIN,
+            content="不应写入 filesystem 的 rejected intent",
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.REJECT,
+        )
+        audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.REJECT.value)
+
+        result = FSStore.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "rejected"
+        assert result.record is None
+        assert FSStore.list_records() == ()
+
+    def test_in_memory_approved_intent_still_writes(self):
+        from agent.memory_store import InMemoryMemoryStore
+
+        intent = _make_intent(
+            content="approved intent 仍应写入 in-memory store",
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+        )
+        audit = build_memory_audit_summary(intent)
+        store = InMemoryMemoryStore()
+
+        result = store.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "applied"
+        assert result.record is not None
+        assert store.list_records() == (result.record,)
+
+    def test_filesystem_approved_intent_still_writes(self, FSStore):
+        intent = _make_intent(
+            content="approved intent 仍应写入 filesystem store",
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+        )
+        audit = _make_audit(intent)
+
+        result = FSStore.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "applied"
+        assert result.record is not None
+        assert FSStore.list_records() == (result.record,)
+
+    def test_edit_and_accept_approved_intent_still_writes(self, FSStore):
+        intent = _make_intent(
+            content="用户编辑后确认的内容",
+            confirmation=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT,
+        )
+        audit = _make_audit(
+            intent,
+            user_choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT.value,
+        )
+
+        result = FSStore.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "applied"
+        assert result.record is not None
+        assert result.record.content == "用户编辑后确认的内容"
+
+    def test_episodic_t2_auto_retained_still_writes(self, FSStore):
+        intent = _make_intent(
+            content="synthetic episodic T2 auto-retain evidence",
+            confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            confidence=0.65,
+        )
+        object.__setattr__(intent, "memory_type", "episodic")
+        object.__setattr__(intent, "source_type", "agent_suggested")
+        audit = _make_audit(intent)
+
+        result = FSStore.apply_operation_intent(intent, audit)
+
+        assert result.status.value == "applied"
+        assert result.record is not None
+        assert result.record.memory_type == "episodic"
+        assert result.record.approval_status == "auto_retained"
+        assert result.record.metadata["confidence"] == 0.65
 
 
 # ═══════════════════════════════════════════════════════════════════════════

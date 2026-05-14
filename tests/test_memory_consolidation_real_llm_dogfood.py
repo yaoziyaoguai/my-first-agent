@@ -624,7 +624,7 @@ class TestSecretSanitization:
         exc = RuntimeError("401 - api_key=sk-sp-42abc123def456 is invalid")
         result = _sanitize_error(exc)
         assert "sk-sp-42abc" not in result
-        assert "sk-***" in result
+        assert "api_key:***" in result
 
     def test_sanitize_error_removes_bearer_token(self):
         """_sanitize_error 应移除 Bearer token。"""
@@ -643,6 +643,15 @@ class TestSecretSanitization:
         result = _sanitize_str(text)
         assert "sk-abc123" not in result
         assert "api_key=***" in result
+
+    def test_sanitize_str_removes_masked_provider_key_suffix(self):
+        """provider 返回的 masked key suffix 也不得进入 report。"""
+        from scripts.dogfood_phase6_llm_consolidation import _sanitize_str
+
+        text = "Authentication Fails, Your api key: ****7a7d is invalid"
+        result = _sanitize_str(text)
+        assert "****7a7d" not in result
+        assert "api key:***" in result.lower()
 
     def test_sanitize_error_truncates_long_body(self):
         """_sanitize_error 应截断超过 200 字符的错误消息。"""
@@ -804,68 +813,6 @@ class TestSecretSanitization:
 # ── Phase 4: Provider Config Loading 测试 ─────────────────────────────────────
 
 
-class TestParseDotenvFile:
-    """_parse_dotenv_file() 的解析行为测试。"""
-
-    def test_parses_key_value_pairs(self, tmp_path):
-        """解析标准 KEY=VALUE 行。"""
-        from scripts.dogfood_phase6_llm_consolidation import _parse_dotenv_file
-
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "ANTHROPIC_API_KEY=sk-ant-test-key\n"
-            "ANTHROPIC_MODEL=claude-sonnet-4-6\n"
-            'BASE_URL="https://api.anthropic.com"\n'
-        )
-
-        result = _parse_dotenv_file(env_file)
-        assert result["ANTHROPIC_API_KEY"] == "sk-ant-test-key"
-        assert result["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
-        assert result["BASE_URL"] == "https://api.anthropic.com"
-
-    def test_skips_comments_and_empty_lines(self, tmp_path):
-        """跳过注释和空行。"""
-        from scripts.dogfood_phase6_llm_consolidation import _parse_dotenv_file
-
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "# 这是注释\n"
-            "  # 缩进注释\n"
-            "\n"
-            "ANTHROPIC_MODEL=claude-sonnet-4-6\n"
-            "\n"
-            "# 另一个注释\n"
-        )
-
-        result = _parse_dotenv_file(env_file)
-        assert "ANTHROPIC_MODEL" in result
-        assert "#" not in result
-        assert result["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
-
-    def test_returns_empty_dict_for_missing_file(self, tmp_path):
-        """不存在的 .env 文件返回空 dict。"""
-        from scripts.dogfood_phase6_llm_consolidation import _parse_dotenv_file
-
-        result = _parse_dotenv_file(tmp_path / "nonexistent.env")
-        assert result == {}
-
-    def test_strips_quotes_from_values(self, tmp_path):
-        """去掉值的引号。"""
-        from scripts.dogfood_phase6_llm_consolidation import _parse_dotenv_file
-
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            'SINGLE_QUOTED=\'value1\'\n'
-            'DOUBLE_QUOTED="value2"\n'
-            "NO_QUOTES=value3\n"
-        )
-
-        result = _parse_dotenv_file(env_file)
-        assert result["SINGLE_QUOTED"] == "value1"
-        assert result["DOUBLE_QUOTED"] == "value2"
-        assert result["NO_QUOTES"] == "value3"
-
-
 class TestDogfoodProviderConfig:
     """DogfoodProviderConfig 不变性测试。"""
 
@@ -933,112 +880,70 @@ class TestDogfoodProviderConfig:
         assert "test-model" in r
         assert "test.api" in r
         assert "anthropic" in r
-        assert "project .env" in r
+        assert "config auto-load" in r
 
         # key_configured 仍然可访问
         assert cfg.key_configured is True
 
 
-class TestLoadProjectDotenv:
-    """load_project_dotenv_for_dogfood() 加载优先级测试。"""
+class TestProviderConfigAutoLoad:
+    """Provider config 只通过 config.py 自动加载，不在 dogfood 脚本中读取 .env 内容。"""
 
-    def test_project_env_overrides_shell_env(self, tmp_path, monkeypatch):
-        """项目 .env 的值覆盖同名 shell env。"""
-        from scripts.dogfood_phase6_llm_consolidation import _parse_dotenv_file
-
-        # 模拟被污染的 shell env（过期 key）
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-polluted-expired-key")
-        monkeypatch.setenv("ANTHROPIC_MODEL", "polluted-model")
-        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://polluted.api")
-
-        # 写入项目 .env（正确 key）
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "ANTHROPIC_API_KEY=sk-ant-correct-key\n"
-            "ANTHROPIC_MODEL=claude-sonnet-4-6\n"
-            "ANTHROPIC_BASE_URL=https://api.anthropic.com\n"
-        )
-
-        # 由于 load_project_dotenv_for_dogfood 内部 import config，
-        # 而 config 在模块导入时就 load_dotenv(override=False) 了，
-        # 我们需要直接测试解析逻辑：项目 .env 解析结果应覆盖 shell env
-        dotenv_vars = _parse_dotenv_file(env_file)
-        assert dotenv_vars["ANTHROPIC_API_KEY"] == "sk-ant-correct-key"
-        assert dotenv_vars["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
-
-    def test_fallback_to_shell_when_env_missing(self, tmp_path, monkeypatch):
-        """项目 .env 缺少 api_key 字段时，key 回退到 shell env。"""
+    def test_load_provider_config_uses_current_env_without_manual_dotenv(self, monkeypatch):
+        """通过 config 解析当前环境，不打开项目 .env 文件。"""
         from scripts.dogfood_phase6_llm_consolidation import (
-            load_project_dotenv_for_dogfood,
+            load_provider_config_for_dogfood,
         )
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-shell-fallback-key")
-        monkeypatch.setenv("ANTHROPIC_MODEL", "shell-model")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-auto-load")
+        monkeypatch.setenv("MODEL_NAME", "claude-test-model")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-fallback-model")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
-        # 创建只有部分字段的 .env（有 model 但无 api_key）
-        env_file = tmp_path / ".env"
-        env_file.write_text("ANTHROPIC_MODEL=env-model\n")
-
-        cfg = load_project_dotenv_for_dogfood(tmp_path)
-        assert cfg is not None
-        # model 从 project .env 获取
-        assert cfg.model == "env-model"
-        # api_key 从 shell env 回退，source 标记为 shell env fallback
+        cfg = load_provider_config_for_dogfood()
+        assert cfg.model == "claude-test-model"
+        assert cfg.base_url == "https://api.anthropic.com"
         assert cfg.key_configured is True
-        assert cfg.source == "shell env fallback"
+        assert cfg.provider == "anthropic"
+        assert cfg.source == "config auto-load"
 
-    def test_source_is_project_env_when_all_from_env(self, tmp_path, monkeypatch):
-        """所有字段都从项目 .env 获取时 source 为 'project .env'。"""
+    def test_provider_name_does_not_inspect_key_prefix(self):
+        """provider 推断只看 model/base_url，不查看 API key prefix/suffix/length。"""
         from scripts.dogfood_phase6_llm_consolidation import (
-            load_project_dotenv_for_dogfood,
+            _infer_provider_name,
         )
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-polluted")
-        monkeypatch.setenv("ANTHROPIC_MODEL", "polluted-model")
+        assert _infer_provider_name(
+            model="claude-test",
+            base_url="unknown",
+        ) == "anthropic"
+        assert _infer_provider_name(
+            model="gpt-test",
+            base_url="unknown",
+        ) == "openai"
+        assert _infer_provider_name(model="unknown", base_url="unknown") == "unknown"
 
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "ANTHROPIC_API_KEY=sk-ant-env-key\n"
-            "ANTHROPIC_MODEL=claude-env-model\n"
-            "ANTHROPIC_BASE_URL=https://env.api\n"
-        )
-
-        cfg = load_project_dotenv_for_dogfood(tmp_path)
-        assert cfg.model == "claude-env-model"
-        assert cfg.key_configured is True
-        assert cfg.source == "project .env"
-
-    def test_source_marked_shell_fallback_when_no_env(self, tmp_path, monkeypatch):
-        """项目 .env 完全不存在时 source 标记为 shell env fallback。"""
+    def test_error_classifier_returns_safe_categories(self):
+        """provider 错误只暴露类型，不暴露具体 key 或 token。"""
         from scripts.dogfood_phase6_llm_consolidation import (
-            load_project_dotenv_for_dogfood,
+            _classify_llm_error,
         )
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-shell-only")
-        monkeypatch.setenv("ANTHROPIC_MODEL", "shell-model")
-
-        # tmp_path 下没有 .env
-        cfg = load_project_dotenv_for_dogfood(tmp_path)
-        assert cfg is not None
-        # 注意：api_key 从 shell env 读取，source 取决于逻辑
-        assert cfg.key_configured is True
+        assert _classify_llm_error(["401 Unauthorized"]) == "auth_failed"
+        assert _classify_llm_error(["connection timed out"]) == "network_error"
+        assert _classify_llm_error(["JSON decode failed"]) == "parse_error"
+        assert _classify_llm_error(["API key 未设置"]) == "missing_config"
 
     def test_check_env_with_explicit_project_root(self, tmp_path):
-        """check_env 接受显式 project_root 参数。"""
+        """check_env 接受显式 project_root，但不会读取该路径下的 .env。"""
         from scripts.dogfood_phase6_llm_consolidation import check_env
-
-        # 创建有完整配置的 .env
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "ANTHROPIC_API_KEY=sk-ant-test-key\n"
-            "ANTHROPIC_MODEL=claude-test\n"
-            "ANTHROPIC_BASE_URL=https://test.api\n"
-        )
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
         # 因为默认 MEMORY_CONSOLIDATION_LLM_ENABLED 未设置，应该 skip
         assert not can_run
         assert "MEMORY_CONSOLIDATION_LLM_ENABLED" in reason
+        assert prov == {}
+        assert cfg is None
 
     def test_check_env_returns_provider_config(self, tmp_path, monkeypatch):
         """check_env 返回的 provider_config 是 DogfoodProviderConfig 实例。"""
@@ -1048,19 +953,15 @@ class TestLoadProjectDotenv:
         )
 
         monkeypatch.setenv("MEMORY_CONSOLIDATION_LLM_ENABLED", "true")
-
-        # 写入临时项目 .env（可控的 key 来源）
-        env_file = tmp_path / ".env"
-        env_file.write_text(
-            "ANTHROPIC_API_KEY=sk-ant-test-key\n"
-            "ANTHROPIC_MODEL=claude-test\n"
-        )
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-auto-load")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
         assert can_run
         assert isinstance(cfg, DogfoodProviderConfig)
         assert cfg.key_configured is True
-        assert cfg.source == "project .env"
+        assert cfg.source == "config auto-load"
+        assert prov["key_configured"] is True
 
         # 清理
         monkeypatch.delenv("MEMORY_CONSOLIDATION_LLM_ENABLED")
@@ -1073,16 +974,14 @@ class TestLoadProjectDotenv:
         )
 
         monkeypatch.setenv("MEMORY_CONSOLIDATION_LLM_ENABLED", "true")
-        # 提供空的 .env 文件来隔离真实 key
-        (tmp_path / ".env").write_text("")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
         # cfg 总是返回 DogfoodProviderConfig 或 None
         assert cfg is not None
         assert isinstance(cfg, DogfoodProviderConfig)
-        # key_configured 应与 can_run 一致
-        if can_run:
-            assert cfg.key_configured is True
-        else:
-            assert cfg.key_configured is False
-            assert "API key" in reason
+        assert not can_run
+        assert cfg.key_configured is False
+        assert prov["key_configured"] is False
+        assert "API key" in reason

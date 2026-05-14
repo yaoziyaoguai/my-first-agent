@@ -37,6 +37,8 @@ from agent.memory_store import (
     derive_memory_record_id,
     find_duplicate_record,
     find_record_by_content,
+    intent_rejects_store_write,
+    mutating_intent_allows_store_write,
     _validate_apply_inputs,
 )
 
@@ -499,13 +501,22 @@ class FilesystemMemoryStore:
                 message="operation does not authorize store write",
             )
 
+        if intent_rejects_store_write(intent):
+            return MemoryStoreApplyResult(
+                status=MemoryStoreApplyStatus.REJECTED,
+                operation_type=intent.operation_type,
+                record=None,
+                audit_id=audit_id,
+                message="rejected memory intent does not authorize store write",
+            )
+
         if intent.operation_type is MemoryOperationType.USE_ONCE:
             return self._apply_use_once(intent, audit_id)
 
         # T1 explicit approval 和 T2 auto_retained 均可写入 store。
         if (
             intent.operation_type in MUTATING_OPERATION_TYPES
-            and intent.confirmation_status.value not in ("approved", "auto_retained")
+            and not mutating_intent_allows_store_write(intent)
         ):
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.REJECTED,

@@ -7,6 +7,7 @@
 - 只写 T1 pending review（不 auto-approve）
 - 所有文件写入 /tmp/dogfood_phase6_e2e/
 - 默认 skip：MEMORY_CONSOLIDATION_LLM_ENABLED 未设置或无 API key 时输出 skip reason
+- API key 只通过 config.py 的既有 load_dotenv/env 机制自动加载；本脚本不手工读取 .env 内容
 
 用法：
   MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_phase6_llm_consolidation.py
@@ -31,18 +32,15 @@ _STORE_ROOT = _DOGFOOD_ROOT / "memory"
 _REVIEW_PACKET_DIR = _DOGFOOD_ROOT / "review_packet"
 
 
-# ── 项目 .env 显式加载（用于 real LLM dogfood） ────────────────────────────────
-# 为什么需要显式加载项目 .env？
-#   Coding Agent 运行环境的 shell env 可能已被污染（如过期 key、错误的 base_url）。
-#   config.py 使用 load_dotenv(override=False)，shell env 优先级高于 .env。
-#   为了让 dogfood 使用用户明确授权的项目 .env 配置，需要独立解析 .env 文件，
-#   项目 .env 中的值覆盖同名 shell env，且不写回 os.environ。
-#   这样 dogfood 使用的 key 来源可控、可审计，且不会污染其他模块的全局配置。
+# ── Provider config（用于 real LLM dogfood）──────────────────────────────────
+# 本脚本只消费 config.py 已经暴露的配置解析结果；config.py 负责通过
+# python-dotenv / 环境变量自动加载。这里不手工读取 .env 文件内容，也不打印
+# key prefix/suffix/length。
 
 
 @dataclass(frozen=True)
 class DogfoodProviderConfig:
-    """从项目 .env 加载的 provider 配置，不写入 os.environ。
+    """通过项目既有 config 机制解析出的 provider 配置，不写入 os.environ。
 
     api_key 字段标记 repr=False，调试输出不泄露 secret。
     """
@@ -51,104 +49,47 @@ class DogfoodProviderConfig:
     base_url: str
     api_key: str = field(repr=False)
     provider: str = "unknown"  # "anthropic" | "openai" | "unknown"
-    source: str = "project .env"
+    source: str = "config auto-load"
 
     @property
     def key_configured(self) -> bool:
         return bool(self.api_key)
 
 
-def _parse_dotenv_file(env_path: Path) -> dict[str, str]:
-    """解析 .env 文件的 KEY=VALUE 行。
+def _infer_provider_name(*, model: str, base_url: str) -> str:
+    """从非 secret 配置推断 provider 名称，不查看 API key 内容。"""
+    text = f"{model} {base_url}".lower()
+    if "anthropic" in text or "claude" in text:
+        return "anthropic"
+    if "openai" in text or "gpt" in text:
+        return "openai"
+    return "unknown"
 
-    只支持简单格式：KEY=VALUE，不带引号、不带 export 前缀。
-    空行和 # 开头的注释行跳过。
-    返回值不写入 os.environ。
+
+def load_provider_config_for_dogfood(
+    project_root: Path | None = None,
+) -> DogfoodProviderConfig:
+    """通过项目既有 config.py 自动加载 provider config。
+
+    project_root 参数仅保留给旧调用方；本函数不会读取该路径下的 .env。
+    config.py 在 import 时使用 load_dotenv() / 环境变量解析配置，调用方不得
+    在 dogfood 脚本里手工查看 key 或 .env 内容。
     """
-    result: dict[str, str] = {}
-    if not env_path.exists():
-        return result
-    for line in env_path.read_text(encoding="utf-8").split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            result[key] = value
-    return result
+    del project_root  # compatibility-only 参数，禁止用它读取 .env
 
+    import config as _config
 
-def load_project_dotenv_for_dogfood(project_root: Path) -> DogfoodProviderConfig:
-    """从项目 .env 显式加载 provider config，不依赖 shell env。
-
-    优先级：
-    1. 先读取 shell env 作为 baseline（config.py 已 load_dotenv(override=False)）
-    2. 再读取项目 .env，项目 .env 的值覆盖 shell env（实现 project .env 优先）
-
-    返回的 DogfoodProviderConfig 不包含任何日志输出，不写入 os.environ。
-
-    如果 .env 中缺少必要字段，回退到 config 模块的全局值（此时 source 标记为 "shell env fallback"）。
-    """
-    env_path = project_root / ".env"
-    dotenv_vars = _parse_dotenv_file(env_path)
-
-    # model 解析优先级：项目 .env ANTHROPIC_MODEL > .env OPENAI_MODEL > .env MODEL_NAME
-    #                   > shell ANTHROPIC_MODEL > shell OPENAI_MODEL > shell MODEL_NAME
-    _env_model = (
-        dotenv_vars.get("ANTHROPIC_MODEL")
-        or dotenv_vars.get("OPENAI_MODEL")
-        or dotenv_vars.get("MODEL_NAME")
-    )
-    if _env_model:
-        source = "project .env"
-    else:
-        from config import MODEL_NAME as _shell_model
-        _env_model = _shell_model
-        source = "shell env fallback"
-
-    # base_url 解析
-    _env_base = (
-        dotenv_vars.get("ANTHROPIC_BASE_URL")
-        or dotenv_vars.get("OPENAI_BASE_URL")
-    )
-    if not _env_base:
-        from config import BASE_URL as _shell_base
-        _env_base = _shell_base
-
-    # api_key 解析
-    _env_key = (
-        dotenv_vars.get("ANTHROPIC_API_KEY")
-        or dotenv_vars.get("OPENAI_API_KEY")
-    )
-    if not _env_key:
-        from config import API_KEY as _shell_key
-        _env_key = _shell_key
-        if _env_key:
-            source = "shell env fallback"
-
-    # provider 判定
-    _provider = "unknown"
-    if _env_base:
-        base_lower = _env_base.lower()
-        if "anthropic" in base_lower:
-            _provider = "anthropic"
-        elif "openai" in base_lower:
-            _provider = "openai"
-    if _env_key and _env_key.startswith("sk-ant-"):
-        _provider = "anthropic"
-    elif _env_key and _env_key.startswith("sk-"):
-        _provider = "openai" if _provider == "unknown" else _provider
+    model = _config._resolve_model_name() or "unknown"
+    base_url = _config._resolve_base_url() or "unknown"
+    api_key = _config._resolve_api_key() or ""
+    provider = _infer_provider_name(model=model, base_url=base_url)
 
     return DogfoodProviderConfig(
-        model=_env_model or "unknown",
-        base_url=_env_base or "unknown",
-        api_key=_env_key or "",
-        provider=_provider,
-        source=source,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        provider=provider,
+        source="config auto-load",
     )
 
 # ── 合成 episodic evidence 定义 ────────────────────────────────────────────────
@@ -270,6 +211,12 @@ def _sanitize_error(exc: Exception) -> str:
     msg = _re.sub(r'sk-[a-zA-Z0-9_-]+', 'sk-***', msg)
     msg = _re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]+', 'Bearer ***', msg)
     msg = _re.sub(r'key:?\s*[a-zA-Z0-9_\-\.]{20,}', 'key:***', msg)
+    msg = _re.sub(
+        r'(api\s*key|key)\s*[:=]\s*[\*a-zA-Z0-9_\-\.]{4,}',
+        r'\1:***',
+        msg,
+        flags=_re.IGNORECASE,
+    )
     return f"{type(exc).__name__}: {msg}"
 
 
@@ -282,7 +229,37 @@ def _sanitize_str(text: str) -> str:
     text = _re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]+', 'Bearer ***', text)
     text = _re.sub(r'key:?\s*[a-zA-Z0-9_\-\.]{20,}', 'key:***', text)
     text = _re.sub(r'api_key[:=]\s*[^\s,}]+', 'api_key=***', text)
+    text = _re.sub(
+        r'(api\s*key|key)\s*[:=]\s*[\*a-zA-Z0-9_\-\.]{4,}',
+        r'\1:***',
+        text,
+        flags=_re.IGNORECASE,
+    )
     return text
+
+
+def _classify_llm_error(warnings: list[str] | tuple[str, ...]) -> str | None:
+    """将 provider/LLM 失败归类为安全可报告的错误类型。"""
+    if not warnings:
+        return None
+    text = "\n".join(warnings).lower()
+    if "api key" in text and ("未设置" in text or "missing" in text):
+        return "missing_config"
+    if any(marker in text for marker in (
+        "401", "403", "auth", "unauthorized", "invalid api key",
+        "authentication",
+    )):
+        return "auth_failed"
+    if any(marker in text for marker in (
+        "timeout", "timed out", "connection", "connect", "network",
+        "dns", "name resolution", "proxy",
+    )):
+        return "network_error"
+    if any(marker in text for marker in (
+        "json", "parse", "validation", "decode",
+    )):
+        return "parse_error"
+    return "unknown_error"
 
 
 # ── 步骤 0：环境检查 ───────────────────────────────────────────────────────────
@@ -301,8 +278,7 @@ def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, Dogfoo
     if not llm_enabled:
         return False, "MEMORY_CONSOLIDATION_LLM_ENABLED 未设置为 true", {}, None
 
-    root = project_root or _PROJECT_ROOT
-    provider_config = load_project_dotenv_for_dogfood(root)
+    provider_config = load_provider_config_for_dogfood(project_root or _PROJECT_ROOT)
 
     provider_info: dict = {
         "model": provider_config.model,
@@ -313,7 +289,7 @@ def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, Dogfoo
     }
 
     if not provider_config.key_configured:
-        return False, "API key 未配置（项目 .env 和 shell env 中均未找到）", provider_info, provider_config
+        return False, "API key 未配置（config auto-load 未提供 provider key）", provider_info, provider_config
 
     return True, "ready", provider_info, provider_config
 
@@ -386,8 +362,8 @@ def run_dogfood_pipeline(
 ) -> dict:
     """运行 Phase 6 consolidation pipeline 并收集结果。
 
-    provider_config: DogfoodProviderConfig — 显式传入 api_key/model/base_url，
-        不依赖可能被污染的 shell env 全局 config。
+    provider_config: DogfoodProviderConfig — 由 config.py 自动加载后传入，
+        不在本脚本中手工读取 .env 内容。
     """
     from agent.memory_consolidation_llm import (
         LLMConsolidationContentGenerator,
@@ -401,11 +377,11 @@ def run_dogfood_pipeline(
 
     store = FilesystemMemoryStore(root_dir=store_root)
 
-    # 构建 LLM generator —— 优先使用显式 project .env 配置
+    # 构建 LLM generator —— provider_config 已由 config.py 自动加载
     llm_generator = None
     if _is_llm_consolidation_enabled():
         if provider_config is not None and provider_config.key_configured:
-            # 显式传入 project .env 的 api_key/model/base_url
+            # 显式传入已解析配置，避免 generator 再做不透明配置选择
             llm_generator = LLMConsolidationContentGenerator(
                 model_name=provider_config.model,
                 api_key=provider_config.api_key,
@@ -426,12 +402,9 @@ def run_dogfood_pipeline(
     for w in pipeline_result.warnings:
         sanitized_pipeline_warnings.append(_sanitize_str(w))
 
-    # 判断 LLM auth 状态
-    llm_auth_failed = any(
-        "401" in w or "403" in w or "auth" in w.lower() or "Authentication" in w
-        for w in pipeline_result.llm_warnings
-    )
     llm_enhanced_ok = pipeline_result.llm_enhanced_count > 0
+    provider_error_type = _classify_llm_error(sanitized_llm_warnings)
+    real_llm_blocked = pipeline_result.llm_enabled and not llm_enhanced_ok
 
     report: dict = {
         "pipeline": {
@@ -447,10 +420,20 @@ def run_dogfood_pipeline(
         "provider": provider_info or {},
         "llm_status": (
             "enhanced" if llm_enhanced_ok
-            else ("auth_blocked" if llm_auth_failed
+            else ("blocked" if real_llm_blocked
             else ("skipped" if not pipeline_result.llm_enabled
             else "failed"))
         ),
+        "provider_error_type": provider_error_type if real_llm_blocked else None,
+        "direct_store_write": {
+            "semantic_records": len([
+                r for r in store.list_records() if r.memory_type == "semantic"
+            ]),
+            "procedural_records": len([
+                r for r in store.list_records() if r.memory_type == "procedural"
+            ]),
+            "direct_semantic_or_procedural_write": False,
+        },
         "dispatch": None,
         "governance_check": None,
     }
@@ -546,6 +529,8 @@ def generate_review_packet(report: dict) -> Path:
         "pipeline_report": report["pipeline"],
         "dispatch_report": report.get("dispatch"),
         "governance_check": report.get("governance_check"),
+        "provider_error_type": report.get("provider_error_type"),
+        "direct_store_write": report.get("direct_store_write"),
         "pending_files": _list_pending_files(),
     }
 
@@ -575,10 +560,12 @@ def _build_executive_summary(report: dict) -> dict:
         "llm_enabled": p["llm_enabled"],
         "llm_enhanced_count": p["llm_enhanced_count"],
         "llm_status": report.get("llm_status", "unknown"),
+        "provider_error_type": report.get("provider_error_type"),
         "dispatched_to_t1_pending": d.get("dispatched", 0),
         "governance_all_pass": g.get("all_pass", False),
         "pipeline_warnings": len(p["warnings"]),
         "llm_warnings": len(p["llm_warnings"]),
+        "direct_store_write": report.get("direct_store_write", {}),
         "provider": {
             "model": prov.get("model", "unknown"),
             "base_url": prov.get("base_url", "unknown"),
@@ -695,7 +682,7 @@ def main(argv: list[str] | None = None) -> int:
 
     CLI 参数：
       --project-root PATH    项目根目录（默认脚本所在仓库根目录）
-      --load-project-env     从项目 .env 加载 provider 配置（默认启用）
+      --load-project-env     legacy no-op；provider 只通过 config.py 自动加载
 
     Returns:
         0: 成功
@@ -711,7 +698,7 @@ def main(argv: list[str] | None = None) -> int:
             project_root = Path(args[i + 1]).resolve()
             i += 2
         elif args[i] == "--load-project-env":
-            # 默认行为已启用，此参数为显式声明
+            # legacy compatibility：不手工读取 .env 内容
             i += 1
         else:
             print(f"未知参数: {args[i]}", file=sys.stderr)
@@ -767,6 +754,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  llm_enabled:     {p['llm_enabled']}")
     print(f"  llm_enhanced:    {p['llm_enhanced_count']}")
     print(f"  llm_status:      {report.get('llm_status', 'unknown')}")
+    if report.get("provider_error_type"):
+        print(f"  error_type:      {report['provider_error_type']}")
 
     if p["warnings"]:
         print(f"  pipeline warnings: {len(p['warnings'])} 条")
@@ -808,11 +797,14 @@ def main(argv: list[str] | None = None) -> int:
     # 最终状态
     llm_status = report.get("llm_status", "unknown")
 
-    if llm_status == "auth_blocked":
-        print("\n⚠️  BLOCKED: provider authentication failed")
-        print("   real LLM consolidation dogfood blocked by provider authentication;")
+    if llm_status == "blocked":
+        print("\n⚠️  BLOCKED: real provider dogfood failed")
+        print(
+            "   real LLM consolidation dogfood blocked by provider/network/parse error;"
+        )
         print("   code path and fake tests pass. T1 pending dispatch completed")
         print("   with deterministic candidates only.")
+        print(f"   error_type={report.get('provider_error_type', 'unknown_error')}")
         print(f"   {d.get('dispatched', 0)} 条 deterministic candidate 已进入 T1 pending review。")
         return 3  # exit code 3 = blocked
 

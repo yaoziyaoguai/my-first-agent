@@ -41,6 +41,10 @@ NON_WRITING_OPERATION_TYPES = frozenset({
     MemoryOperationType.NO_OP,
 })
 
+WRITING_CONFIRMATION_STATUS_VALUES = frozenset({"approved", "auto_retained"})
+REJECTED_CONFIRMATION_STATUS_VALUES = frozenset({"rejected"})
+REJECTING_USER_CHOICE_VALUES = frozenset({"reject"})
+
 
 class MemoryStoreApplyStatus(StrEnum):
     """fake store apply 的结果状态；不代表真实持久化状态。"""
@@ -182,6 +186,31 @@ def find_record_by_content(
     return None
 
 
+def intent_rejects_store_write(intent: MemoryOperationIntent) -> bool:
+    """Store backend 的 rejected fail-closed 边界。
+
+    Governance/confirmation 仍在上游完成；store 不重新解释用户意图。
+    这里仅防御不一致的 MemoryOperationIntent：只要 confirmation_status 或
+    user_choice 明确表达 rejected，就不允许写正式 record，避免不同 backend
+    对 malformed intent 产生不一致副作用。
+    """
+    return (
+        intent.confirmation_status.value in REJECTED_CONFIRMATION_STATUS_VALUES
+        or intent.user_choice.value in REJECTING_USER_CHOICE_VALUES
+    )
+
+
+def mutating_intent_allows_store_write(intent: MemoryOperationIntent) -> bool:
+    """判断 mutating intent 是否授权写入正式 store。
+
+    允许值仍是 RFC 治理语义中的 T1 approved 与 T2 auto_retained；
+    rejected 是 backend fail-closed，不改变 memory governance。
+    """
+    if intent_rejects_store_write(intent):
+        return False
+    return intent.confirmation_status.value in WRITING_CONFIRMATION_STATUS_VALUES
+
+
 class InMemoryMemoryStore:
     """fake/local/test-only store。
 
@@ -215,6 +244,15 @@ class InMemoryMemoryStore:
                 message="operation does not authorize store write",
             )
 
+        if intent_rejects_store_write(intent):
+            return MemoryStoreApplyResult(
+                status=MemoryStoreApplyStatus.REJECTED,
+                operation_type=intent.operation_type,
+                record=None,
+                audit_id=audit_id,
+                message="rejected memory intent does not authorize store write",
+            )
+
         # USE_ONCE：仅本次会话使用，写入 store 但不授权长期记忆
         if intent.operation_type is MemoryOperationType.USE_ONCE:
             record = _record_from_intent(intent, audit_id, approval_status="session_only")
@@ -231,7 +269,7 @@ class InMemoryMemoryStore:
         # T2 auto_retained 是 governed routing 结果，不需人类确认但需标记 provenance。
         if (
             intent.operation_type in MUTATING_OPERATION_TYPES
-            and intent.confirmation_status.value not in ("approved", "auto_retained")
+            and not mutating_intent_allows_store_write(intent)
         ):
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.REJECTED,

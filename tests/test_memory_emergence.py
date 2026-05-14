@@ -22,12 +22,19 @@ from pathlib import Path
 import pytest
 
 from agent.memory_emergence import (
+    _DISALLOWED_CONFIRMATION_FORMS,
     CorrectionEvidence,
     DeterministicEmergenceDetector,
+    InlineConfirmationResponse,
+    InlineConfirmationRequest,
     ProceduralCandidate,
     _compute_procedural_identity,
     _normalize_correction_pattern,
+    _validate_confirmation_form,
+    accept_inline_confirmation,
+    apply_inline_confirmation_response,
     dispatch_procedural_candidates_to_pending_review,
+    prepare_procedural_inline_confirmation_request,
 )
 from agent.memory_review import (
     accept_pending_proposal,
@@ -1043,3 +1050,498 @@ class TestChineseCorrectionMarkers:
         detector = DeterministicEmergenceDetector()
         result = detector.detect(evidence, active_records_count=50)
         assert result.gate_passed is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 十一、ConfirmationForm 类型和校验测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestConfirmationForm:
+    """ConfirmationForm 类型定义和校验函数测试。"""
+
+    def test_disallowed_forms_frozenset(self):
+        """_DISALLOWED_CONFIRMATION_FORMS 包含 silent/auto_retained/none。"""
+        assert "silent" in _DISALLOWED_CONFIRMATION_FORMS
+        assert "auto_retained" in _DISALLOWED_CONFIRMATION_FORMS
+        assert "none" in _DISALLOWED_CONFIRMATION_FORMS
+        assert len(_DISALLOWED_CONFIRMATION_FORMS) == 3
+
+    def test_reject_silent(self):
+        """silent 被拒绝。"""
+        with pytest.raises(ValueError, match="不被允许"):
+            _validate_confirmation_form("silent")
+
+    def test_reject_auto_retained(self):
+        """auto_retained 被拒绝。"""
+        with pytest.raises(ValueError, match="不被允许"):
+            _validate_confirmation_form("auto_retained")
+
+    def test_reject_none(self):
+        """none 被拒绝。"""
+        with pytest.raises(ValueError, match="不被允许"):
+            _validate_confirmation_form("none")
+
+    def test_accept_pending_review(self):
+        """pending_review 通过校验。"""
+        _validate_confirmation_form("pending_review")
+
+    def test_accept_inline_confirmation(self):
+        """inline_confirmation 通过校验。"""
+        _validate_confirmation_form("inline_confirmation")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 十二、InlineConfirmationRequest Schema 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestInlineConfirmationRequest:
+    """InlineConfirmationRequest 数据模型的创建和校验测试。"""
+
+    def test_can_create(self):
+        """可以正常创建 InlineConfirmationRequest。"""
+        req = InlineConfirmationRequest(
+            candidate_content="[行为约束] 先检查 git status",
+            source_evidence=("ev1", "ev2", "ev3"),
+            correction_pattern="先检查 git status",
+            correction_type="process_order",
+            scope="git_operations",
+            evidence_summary="summary",
+            confidence=0.65,
+            confirmation_form="inline_confirmation",
+            allowed_actions=("accept", "reject", "edit", "other"),
+            proposal_id="emergence_test123",
+            created_at="2026-05-14T00:00:00Z",
+        )
+        assert req.confirmation_form == "inline_confirmation"
+        assert req.candidate_content == "[行为约束] 先检查 git status"
+        assert len(req.source_evidence) == 3
+        assert req.allowed_actions == ("accept", "reject", "edit", "other")
+        assert req.proposal_id == "emergence_test123"
+
+    def test_rejects_non_inline_confirmation_form(self):
+        """confirmation_form 必须是 inline_confirmation。"""
+        with pytest.raises(ValueError, match="inline_confirmation"):
+            InlineConfirmationRequest(
+                candidate_content="test",
+                source_evidence=("ev1", "ev2", "ev3"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=0.65,
+                confirmation_form="pending_review",  # type: ignore[arg-type]
+                allowed_actions=("accept", "reject"),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+    def test_rejects_disallowed_form(self):
+        """silent form 被 InlineConfirmationRequest 拒绝。"""
+        with pytest.raises(ValueError, match="不被允许"):
+            InlineConfirmationRequest(
+                candidate_content="test",
+                source_evidence=("ev1", "ev2", "ev3"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=0.65,
+                confirmation_form="silent",  # type: ignore[arg-type]
+                allowed_actions=("accept", "reject"),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+    def test_rejects_empty_content(self):
+        """candidate_content 不能为空。"""
+        with pytest.raises(ValueError, match="candidate_content"):
+            InlineConfirmationRequest(
+                candidate_content="",
+                source_evidence=("ev1", "ev2", "ev3"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=0.65,
+                confirmation_form="inline_confirmation",
+                allowed_actions=("accept", "reject"),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+    def test_rejects_insufficient_evidence(self):
+        """source_evidence 少于 3 条应失败。"""
+        with pytest.raises(ValueError, match="source_evidence"):
+            InlineConfirmationRequest(
+                candidate_content="test",
+                source_evidence=("ev1", "ev2"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=0.65,
+                confirmation_form="inline_confirmation",
+                allowed_actions=("accept", "reject"),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+    def test_rejects_invalid_confidence(self):
+        """confidence 超出 0-1 范围应失败。"""
+        with pytest.raises(ValueError, match="confidence"):
+            InlineConfirmationRequest(
+                candidate_content="test",
+                source_evidence=("ev1", "ev2", "ev3"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=1.5,
+                confirmation_form="inline_confirmation",
+                allowed_actions=("accept", "reject"),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+    def test_rejects_empty_allowed_actions(self):
+        """allowed_actions 不能为空。"""
+        with pytest.raises(ValueError, match="allowed_actions"):
+            InlineConfirmationRequest(
+                candidate_content="test",
+                source_evidence=("ev1", "ev2", "ev3"),
+                correction_pattern="test",
+                correction_type="process_order",
+                scope=None,
+                evidence_summary=None,
+                confidence=0.65,
+                confirmation_form="inline_confirmation",
+                allowed_actions=(),
+                proposal_id="test-id",
+                created_at="2026-05-14T00:00:00Z",
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 十三、prepare_procedural_inline_confirmation_request 行为测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPrepareInlineConfirmation:
+    """prepare_procedural_inline_confirmation_request 的输入/输出测试。"""
+
+    def test_prepare_from_valid_candidate(self):
+        """从合法 candidate 生成 inline confirmation request。"""
+        c = _make_candidate(
+            content="[行为约束] 先检查 git status",
+            evidence_ids=("ev-a", "ev-b", "ev-c"),
+            correction_pattern="先检查 git status",
+            correction_type="process_order",
+            scope="git_operations",
+            confidence=0.65,
+        )
+        req = prepare_procedural_inline_confirmation_request(c)
+        assert req.confirmation_form == "inline_confirmation"
+        assert req.candidate_content == c.content
+        assert req.source_evidence == c.source_evidence
+        assert req.correction_pattern == c.correction_pattern
+        assert req.correction_type == c.correction_type
+        assert req.scope == c.scope
+        assert req.confidence == c.confidence
+        assert req.allowed_actions == ("accept", "reject", "edit", "other")
+
+    def test_prepare_rejects_non_procedural(self):
+        """非 procedural candidate → ValueError。"""
+        with pytest.raises(ValueError, match="procedural"):
+            c = ProceduralCandidate(
+                content="test",
+                memory_type="semantic",  # type: ignore[arg-type]
+                source_evidence=("e1", "e2", "e3"),
+                correction_pattern="test",
+                correction_type="test",
+                scope=None,
+                confidence=0.65,
+                governance_route="T1",
+                evidence_summary=None,
+                created_at="2026-05-14T00:00:00Z",
+            )
+            prepare_procedural_inline_confirmation_request(c)
+
+    def test_prepare_rejects_non_t1(self):
+        """非 T1 candidate → ValueError。"""
+        with pytest.raises(ValueError, match="T1"):
+            c = ProceduralCandidate(
+                content="test",
+                memory_type="procedural",
+                source_evidence=("e1", "e2", "e3"),
+                correction_pattern="test",
+                correction_type="test",
+                scope=None,
+                confidence=0.65,
+                governance_route="T2",  # type: ignore[arg-type]
+                evidence_summary=None,
+                created_at="2026-05-14T00:00:00Z",
+            )
+            prepare_procedural_inline_confirmation_request(c)
+
+    def test_prepare_different_candidates_different_request_ids(self):
+        """不同 candidate 产生不同 proposal_id。"""
+        c1 = _make_candidate(content="先检查", evidence_ids=("a1", "a2", "a3"))
+        c2 = _make_candidate(content="先读日志", evidence_ids=("b1", "b2", "b3"))
+        r1 = prepare_procedural_inline_confirmation_request(c1)
+        r2 = prepare_procedural_inline_confirmation_request(c2)
+        assert r1.proposal_id != r2.proposal_id
+
+    def test_prepare_idempotent(self):
+        """相同 candidate 产生相同 proposal_id（确定性）。"""
+        c = _make_candidate()
+        r1 = prepare_procedural_inline_confirmation_request(c)
+        r2 = prepare_procedural_inline_confirmation_request(c)
+        assert r1.proposal_id == r2.proposal_id
+        assert r1.candidate_content == r2.candidate_content
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 十四、accept_inline_confirmation 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAcceptInlineConfirmation:
+    """RFC §10.5 / §15.5 procedural inline_confirmation seam 的写入行为测试。
+
+    inline_confirmation 是 explicit human confirmation，不是 silent retain，
+    也不是 auto approve；只有 accept / edit_accept response 才能写 store。
+    """
+
+    def test_accept_writes_to_store(self):
+        """accept → 写入 store，record 类型为 procedural。"""
+        from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        result = accept_inline_confirmation(req, store)
+        assert result.status is MemoryStoreApplyStatus.APPLIED
+
+        records = store.list_records()
+        procedural = [r for r in records if r.memory_type == "procedural"]
+        assert len(procedural) >= 1
+
+    def test_edit_and_accept_writes_to_store(self):
+        """edit → 使用编辑后的内容写入。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        edited = "[行为约束] 先检查 git status 和 lint 再提交"
+        result = accept_inline_confirmation(req, store, edited_content=edited)
+        assert result.status.value == "applied"
+        records = store.list_records()
+        matching = [r for r in records if edited in r.content]
+        assert len(matching) >= 1
+
+    def test_rejects_empty_edit(self):
+        """编辑内容为空 → ValueError。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        with pytest.raises(ValueError, match="不能为空"):
+            accept_inline_confirmation(req, store, edited_content="")
+
+    def test_accept_preserves_emergence_metadata(self):
+        """accept 写入的 record 保留 emergence metadata。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate(
+            correction_pattern="先运行测试再提交",
+            correction_type="process_order",
+            evidence_ids=("ev-x", "ev-y", "ev-z"),
+        )
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        result = accept_inline_confirmation(req, store)
+        assert result.status.value == "applied"
+
+        records = store.list_records()
+        procedural = [r for r in records if r.memory_type == "procedural"]
+        assert len(procedural) >= 1
+        source_summary = procedural[0].source_summary
+        assert "correction_pattern=先运行测试再提交" in source_summary
+        assert "correction_type=process_order" in source_summary
+        assert "inline_confirmation" in source_summary
+
+    def test_prepare_does_not_write_store(self):
+        """prepare 阶段不写入 store。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        store = InMemoryMemoryStore()
+        req = prepare_procedural_inline_confirmation_request(c)
+        # prepare 后 store 应为空
+        records = store.list_records()
+        assert len(records) == 0
+        _ = req  # used
+
+    def test_accept_only_writes_once(self):
+        """单次 accept 只写入一条 record。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        accept_inline_confirmation(req, store)
+        records = store.list_records()
+        assert len(records) == 1
+
+    def test_apply_accept_response_writes_procedural_record(self):
+        """accept response → 写正式 procedural memory，确认形式保留为 inline_confirmation。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+
+        result = apply_inline_confirmation_response(
+            req,
+            InlineConfirmationResponse(action="accept"),
+            store,
+        )
+
+        assert result.status == "applied"
+        assert result.store_result is not None
+        record = result.store_result.record
+        assert record is not None
+        assert record.memory_type == "procedural"
+        assert record.approval_status == "approved"
+        assert "confirmation_form=inline_confirmation" in record.source_summary
+
+    def test_apply_edit_accept_response_uses_edited_content(self):
+        """edit_accept response → 使用用户编辑内容写入，仍是 explicit human confirmation。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+        edited = "[行为约束] 先检查 git status，再运行 ruff 和 pytest"
+
+        result = apply_inline_confirmation_response(
+            req,
+            InlineConfirmationResponse(action="edit_accept", edited_content=edited),
+            store,
+        )
+
+        assert result.status == "applied"
+        assert result.store_result is not None
+        assert result.store_result.record is not None
+        assert result.store_result.record.content == edited
+
+    def test_apply_reject_response_does_not_write(self):
+        """reject response → 不写 store，避免把拒绝误当成 approval。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+
+        result = apply_inline_confirmation_response(
+            req,
+            InlineConfirmationResponse(action="reject"),
+            store,
+        )
+
+        assert result.status == "no_write"
+        assert result.store_result is None
+        assert store.list_records() == ()
+
+    def test_apply_other_response_does_not_write(self):
+        """other/free-text response → 需要后续澄清，不自动写入 memory。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate()
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+
+        result = apply_inline_confirmation_response(
+            req,
+            InlineConfirmationResponse(action="other", free_text="先问我更多上下文"),
+            store,
+        )
+
+        assert result.status == "needs_followup"
+        assert result.store_result is None
+        assert store.list_records() == ()
+
+    def test_apply_accept_preserves_inline_emergence_metadata(self):
+        """accept/edit_accept 写入时保留 evidence chain 和 confidence，便于后续审计。"""
+        from agent.memory_store import InMemoryMemoryStore
+
+        c = _make_candidate(
+            correction_pattern="先运行测试再提交",
+            correction_type="process_order",
+            evidence_ids=("ev-x", "ev-y", "ev-z"),
+            confidence=0.72,
+        )
+        req = prepare_procedural_inline_confirmation_request(c)
+        store = InMemoryMemoryStore()
+
+        result = apply_inline_confirmation_response(
+            req,
+            InlineConfirmationResponse(action="accept"),
+            store,
+        )
+
+        assert result.store_result is not None
+        record = result.store_result.record
+        assert record is not None
+        assert "source_evidence=['ev-x', 'ev-y', 'ev-z']" in record.source_summary
+        assert "correction_pattern=先运行测试再提交" in record.source_summary
+        assert "correction_type=process_order" in record.source_summary
+        assert "evidence_summary=evidence summary" in record.source_summary
+        assert "confidence=0.72" in record.source_summary
+
+    def test_episodic_t2_auto_retain_still_writes(self):
+        """RFC §10.5 / §15.5 seam 不改变 T2：episodic auto_retained 仍可写入。
+
+        这些测试验证 procedural inline_confirmation seam；inline_confirmation 是
+        explicit human confirmation，不是 silent retain，也不是 auto approve。
+        T2 governed auto-retain 仍只适用于 episodic。
+        """
+        from agent.memory_contracts import MemoryDecisionType, MemoryScope
+        from agent.memory_confirmation import (
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+        )
+        from agent.memory_operations import (
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
+        )
+        from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus
+
+        intent = MemoryOperationIntent(
+            operation_type=MemoryOperationType.RETAIN,
+            decision_type=MemoryDecisionType.RETAIN,
+            confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            content_summary="上次修复 pytest 超时是因为 fixture 泄漏。",
+            source_summary="synthetic episodic t2 regression",
+            scope=MemoryScope.PROJECT,
+            safety_summary="T2 auto_retained synthetic regression",
+            sensitive_redacted=False,
+            user_visible_summary="自动保留一条低风险 episodic 记录。",
+            memory_type="episodic",
+            source_type="emergence_test_synthetic",
+            confidence=0.65,
+        )
+        store = InMemoryMemoryStore()
+
+        result = store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        assert result.status is MemoryStoreApplyStatus.APPLIED
+        assert result.record is not None
+        assert result.record.memory_type == "episodic"
+        assert result.record.approval_status == "auto_retained"

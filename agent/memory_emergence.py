@@ -4,8 +4,8 @@ RFC §8: semantic + episodic + repeated correction → procedural candidate。
 silent detection + T1 强制 human review。Procedural 永不可 silent retain（T2 auto-retain）。
 
 T1 human confirmation 有两种交互形式（RFC §10.5）：
-- pending_review：candidate 写入 _pending/，用户稍后 review（当前实现）
-- inline_confirmation：agent 当场询问，用户当场确认（计划中，未实现）
+- pending_review：candidate 写入 _pending/，用户稍后 review（已接 review CLI）
+- inline_confirmation：agent 当场询问，用户当场确认（当前实现 seam；未接 Agent loop）
 
 本模块实现 Phase 7 foundation：
 - CorrectionEvidence: 用户纠正行为的纯输入视图
@@ -13,15 +13,19 @@ T1 human confirmation 有两种交互形式（RFC §10.5）：
 - EmergenceDetectionResult: 结构化检测结果（含 gate 信息）
 - DeterministicEmergenceDetector: 确定性 correction pattern 检测器
 - dispatch_procedural_candidates_to_pending_review(): T1 pending review form 分发
+- prepare_procedural_inline_confirmation_request(): T1 inline confirmation form payload 生成
+- apply_inline_confirmation_response(): 显式 accept/edit_accept 后写入 store；reject/other 不写入
 
 架构边界（RFC §15.5, §8.2, §8.5, §10.5）：
 - 确定性检测，不调 LLM
 - active_records <50 → fail closed，不产生 candidate
 - 同一 correction_pattern ≥3 条 evidence → 产生 ProceduralCandidate
 - 所有 candidate 必须经 explicit human confirmation（T1），不可 silent retain
-- 当前实现 confirmation_form="pending_review"；inline_confirmation 是后续 alignment item
+- confirmation_form 支持 "pending_review" 和 "inline_confirmation"（RFC §10.5）
+- silent / auto_retained / none 是明确禁止的 confirmation form
+- inline_confirmation 不写 store（除非 explicit accept/edit_accept），不调 LLM，不触发真实用户交互
+- inline_confirmation runtime hook / Agent loop integration 尚未接入
 - 不接 runtime hook / scheduler
-- 不写正式 memory store —— 写入只在 human accept 后发生
 - 不自动 approve
 - 不实现 procedural adoption
 """
@@ -32,7 +36,10 @@ import json
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from agent.memory_store import MemoryStoreApplyResult, MemoryStoreProtocol
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -80,7 +87,8 @@ class ProceduralCandidate:
     """RFC Phase 7 W5 的候选输出——从 correction pattern 涌现出的行为约束候选。
 
     ProceduralCandidate 不是已采纳的 procedural memory。
-    它永远必须进入 T1 pending review，不能 silent retain，不能自动写入正式 store。
+    它永远必须进入 T1 explicit human confirmation（pending_review 或
+    inline_confirmation），不能 silent retain，不能自动写入正式 store。
 
     validation 约束：
     - memory_type 必须是 "procedural"
@@ -460,7 +468,8 @@ def dispatch_procedural_candidates_to_pending_review(
     """将 ProceduralCandidate 列表分发到 T1 pending review（RFC §10.5 pending_review form）。
 
     这是 T1 confirmation 的异步形式——candidate 写入 _pending/ 等待人类 review。
-    另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认），当前未实现。
+    另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认）；
+    当前模块只提供 inline seam，不接 Agent loop/runtime hook。
 
     对每个 candidate：
     1. 验证 dispatch 前置约束（procedural, T1, source_evidence≥3）
@@ -547,9 +556,9 @@ def dispatch_procedural_candidates_to_pending_review(
             "correction_pattern": candidate.correction_pattern,
             "correction_type": candidate.correction_type,
             "evidence_summary": candidate.evidence_summary or "",
-            # T1 confirmation form（RFC §10.5）：当前默认为 pending_review。
-            # 后续 inline_confirmation 路径不会写入 _pending/，而是直接走
-            # memory_confirmation → store.apply_operation_intent。
+            # T1 confirmation form（RFC §10.5）：pending_review 已接 review CLI。
+            # inline_confirmation 不写 _pending/；它通过 explicit response adapter
+            # 在 accept/edit_accept 后才进入 store.apply_operation_intent。
             "confirmation_form": "pending_review",
         }
 
@@ -595,3 +604,298 @@ def _importance_from_confidence(confidence: float) -> int:
     """将 confidence 映射到 1-10 的 importance 值。"""
     raw = round(confidence * 10)
     return max(1, min(10, raw))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ConfirmationForm — T1 confirmation 的两种交互形式（RFC §10.5）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ConfirmationForm = Literal["pending_review", "inline_confirmation"]
+
+# 明确禁止的 confirmation form — procedural 永不可 silent/auto
+_DISALLOWED_CONFIRMATION_FORMS: frozenset[str] = frozenset({"silent", "auto_retained", "none"})
+
+
+def _validate_confirmation_form(form: str) -> None:
+    """防御性校验：confirmation_form 不得为禁止值。"""
+    if form in _DISALLOWED_CONFIRMATION_FORMS:
+        raise ValueError(
+            f"confirmation_form='{form}' 不被允许。"
+            f"Procedural memory 永不可 silent retain / auto retain。"
+            f"允许的 form: pending_review, inline_confirmation"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# InlineConfirmationRequest — T1 inline confirmation payload（RFC §10.5）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class InlineConfirmationRequest:
+    """T1 inline confirmation 的请求 payload（RFC §10.5）。
+
+    这是 procedural candidate 的 T1 inline confirmation form——
+    agent 当场呈现，用户当场确认/拒绝/编辑/其他。
+
+    约束：
+    - confirmation_form 固定为 "inline_confirmation"
+    - allowed_actions 声明用户可执行的操作
+    - 不写 store —— 只在 explicit accept / edit_accept 后写入
+    - 不调 LLM
+    - 不触发真实用户交互（本模块只负责生成 payload）
+    - 不接 runtime hook
+    """
+
+    candidate_content: str
+    source_evidence: tuple[str, ...]
+    correction_pattern: str
+    correction_type: str
+    scope: str | None
+    evidence_summary: str | None
+    confidence: float
+    confirmation_form: Literal["inline_confirmation"]
+    allowed_actions: tuple[str, ...]  # e.g. ("accept", "reject", "edit", "other")
+    proposal_id: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        _validate_confirmation_form(self.confirmation_form)
+        if self.confirmation_form != "inline_confirmation":
+            raise ValueError(
+                f"InlineConfirmationRequest.confirmation_form 必须是 'inline_confirmation'，"
+                f"当前为 '{self.confirmation_form}'"
+            )
+        if not self.allowed_actions:
+            raise ValueError("allowed_actions 不能为空")
+        if not self.candidate_content.strip():
+            raise ValueError("candidate_content 不能为空")
+        if len(self.source_evidence) < 3:
+            raise ValueError(
+                f"source_evidence 至少需要 3 条，当前仅 {len(self.source_evidence)} 条"
+            )
+        if not (0.0 <= self.confidence <= 1.0):
+            raise ValueError(f"confidence 必须在 0.0-1.0 之间，当前为 {self.confidence}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Inline Confirmation API（RFC §10.5 inline form）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+InlineConfirmationAction = Literal["accept", "edit_accept", "reject", "other"]
+InlineConfirmationApplyStatus = Literal["applied", "no_write", "needs_followup"]
+
+
+@dataclass(frozen=True, slots=True)
+class InlineConfirmationResponse:
+    """用户对 inline confirmation request 的无副作用响应。
+
+    这是 runtime/Ask User 机制可以返回给 memory emergence 层的 adapter
+    contract。它本身不写 store；只有 apply_inline_confirmation_response()
+    在 action 为 accept / edit_accept 时才会进入 store 写入路径。
+    """
+
+    action: InlineConfirmationAction
+    edited_content: str | None = None
+    free_text: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in {"accept", "edit_accept", "reject", "other"}:
+            raise ValueError(f"未知 inline confirmation action: {self.action}")
+        if self.action == "edit_accept" and not (self.edited_content or "").strip():
+            raise ValueError("edit_accept 需要非空 edited_content")
+        if self.action == "other" and not (self.free_text or "").strip():
+            raise ValueError("other 需要 free_text，用于后续澄清而非自动写入")
+
+
+@dataclass(frozen=True, slots=True)
+class InlineConfirmationApplyResult:
+    """inline confirmation response adapter 的结果。
+
+    store_result 只有在 explicit accept / edit_accept 后才会存在。
+    reject / other/free-text 都是 no-write 结果，避免把非确认响应误当批准。
+    """
+
+    status: InlineConfirmationApplyStatus
+    action: InlineConfirmationAction
+    store_result: "MemoryStoreApplyResult | None"
+    message: str
+
+
+def prepare_procedural_inline_confirmation_request(
+    candidate: ProceduralCandidate,
+) -> InlineConfirmationRequest:
+    """从 ProceduralCandidate 生成 inline confirmation 请求 payload。
+
+    这是 T1 confirmation 的同步形式——agent 用此 payload 当场询问用户，
+    用户当场确认/拒绝/编辑/其他。
+
+    不写 store。不调 LLM。不触发真实用户交互。
+    不接 runtime hook。
+
+    Args:
+        candidate: 已通过 emergence detection 的 ProceduralCandidate
+
+    Returns:
+        InlineConfirmationRequest: inline confirmation payload
+
+    Raises:
+        ValueError: candidate 不满足 inline confirmation 前置条件
+    """
+    # 前置校验
+    if candidate.memory_type != "procedural":
+        raise ValueError(
+            f"只有 procedural candidate 才能走 inline confirmation，"
+            f"当前 memory_type='{candidate.memory_type}'"
+        )
+    if candidate.governance_route != "T1":
+        raise ValueError(
+            f"只有 T1 candidate 才能走 inline confirmation，"
+            f"当前 governance_route='{candidate.governance_route}'"
+        )
+
+    proposal_id = _compute_procedural_identity(candidate)
+
+    return InlineConfirmationRequest(
+        candidate_content=candidate.content,
+        source_evidence=candidate.source_evidence,
+        correction_pattern=candidate.correction_pattern,
+        correction_type=candidate.correction_type,
+        scope=candidate.scope,
+        evidence_summary=candidate.evidence_summary,
+        confidence=candidate.confidence,
+        confirmation_form="inline_confirmation",
+        allowed_actions=("accept", "reject", "edit", "other"),
+        proposal_id=proposal_id,
+        created_at=candidate.created_at,
+    )
+
+
+def accept_inline_confirmation(
+    request: InlineConfirmationRequest,
+    store: "MemoryStoreProtocol",
+    *,
+    edited_content: str | None = None,
+) -> "MemoryStoreApplyResult":
+    """处理 inline confirmation 的 accept / edit_accept。
+
+    只在 explicit human accept 后写入 store。
+    不静默写入，不自动 approve。
+
+    Args:
+        request: inline confirmation request payload
+        store: memory store（用于 apply_operation_intent）
+        edited_content: 用户编辑后的内容（None = 直接 accept）
+
+    Returns:
+        MemoryStoreApplyResult
+
+    Raises:
+        ValueError: 编辑内容为空
+    """
+    from agent.memory_contracts import MemoryDecisionType, MemoryScope
+    from agent.memory_operations import (
+        MemoryConfirmationChoice,
+        MemoryConfirmationStatus,
+        MemoryOperationIntent,
+        MemoryOperationType,
+        build_memory_audit_summary,
+    )
+
+    is_edit = edited_content is not None and edited_content.strip()
+    final_content = edited_content.strip() if is_edit else request.candidate_content
+
+    if edited_content is not None and not edited_content.strip():
+        raise ValueError("编辑后的 content 不能为空")
+
+    source_parts: list[str] = [
+        "[emergence:inline_confirmation]",
+        "confirmation_form=inline_confirmation",
+        f"correction_pattern={request.correction_pattern}",
+        f"correction_type={request.correction_type}",
+        f"source_evidence={list(request.source_evidence)}",
+        f"confidence={request.confidence}",
+    ]
+    if request.evidence_summary:
+        source_parts.append(f"evidence_summary={request.evidence_summary[:200]}")
+
+    scope_value = request.scope or "user"
+    try:
+        scope_enum = MemoryScope(scope_value)
+    except ValueError:
+        scope_enum = MemoryScope.USER
+
+    intent = MemoryOperationIntent(
+        operation_type=MemoryOperationType.RETAIN,
+        decision_type=MemoryDecisionType.RETAIN,
+        confirmation_status=MemoryConfirmationStatus.APPROVED,
+        user_choice=(
+            MemoryConfirmationChoice.EDIT_AND_ACCEPT
+            if is_edit
+            else MemoryConfirmationChoice.ACCEPT
+        ),
+        content_summary=final_content,
+        source_summary=" | ".join(source_parts),
+        scope=scope_enum,
+        safety_summary="T1 human reviewed (inline confirmation)",
+        sensitive_redacted=False,
+        user_visible_summary=(
+            f"[已确认-已编辑] {final_content[:80]}"
+            if is_edit
+            else f"[已确认] {final_content[:80]}"
+        ),
+        memory_type="procedural",
+        source_type="emergence",
+        confidence=request.confidence,
+    )
+    audit = build_memory_audit_summary(intent)
+    return store.apply_operation_intent(intent, audit)
+
+
+def apply_inline_confirmation_response(
+    request: InlineConfirmationRequest,
+    response: InlineConfirmationResponse,
+    store: "MemoryStoreProtocol",
+) -> InlineConfirmationApplyResult:
+    """应用 inline confirmation response，集中封装写入边界。
+
+    RFC §10.5 / §15.5 的关键约束在这里落地：
+    - accept / edit_accept 是 explicit human confirmation，可以写 procedural store
+    - reject 不写 store
+    - other/free-text 只表示需要后续澄清，不自动写 store
+    - 不调 LLM，不读取真实 sessions/runs，不接 runtime hook
+    """
+    if response.action == "accept":
+        store_result = accept_inline_confirmation(request, store)
+        return InlineConfirmationApplyResult(
+            status="applied",
+            action=response.action,
+            store_result=store_result,
+            message="inline confirmation accepted; procedural memory write requested",
+        )
+
+    if response.action == "edit_accept":
+        store_result = accept_inline_confirmation(
+            request, store, edited_content=response.edited_content,
+        )
+        return InlineConfirmationApplyResult(
+            status="applied",
+            action=response.action,
+            store_result=store_result,
+            message="inline confirmation edited and accepted; procedural memory write requested",
+        )
+
+    if response.action == "reject":
+        return InlineConfirmationApplyResult(
+            status="no_write",
+            action=response.action,
+            store_result=None,
+            message="inline confirmation rejected; no procedural memory written",
+        )
+
+    return InlineConfirmationApplyResult(
+        status="needs_followup",
+        action=response.action,
+        store_result=None,
+        message="inline confirmation returned other/free-text; no procedural memory written",
+    )

@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI. No runtime hook, scheduler, automatic semantic store write, or LLM consolidation quality verification yet. Next: runtime hook design or Phase 7 (emergence).
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay based on newest evidence age). LLM-assisted consolidation quality, contradiction handling, and preference_evolved engine not yet implemented. Next: LLM content generation (Phase 6b) or Phase 7 (emergence).
 
 ### Core Constraints
 
@@ -969,7 +969,8 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Semantic candidate 生成 + episodic evidence 链 — 🟡 已实现（N≥3 threshold per RFC §D.1）
 - T1 adoption review — 🟡 已实现（dispatch + 复用现有 pending review CLI）
 - Source evidence loader（store → EpisodicEvidence）— 🟡 已实现
-- Runtime integration / session hook — 🔲 未开始
+- Runtime integration / session hook — 🟡 已实现（env-gated, dispatch only）
+- RFC §D.2 recency_factor confidence scoring — 🟡 已实现（deterministic decay, newest evidence age）
 - Detector pipeline integration（loader → detector → candidate）— 🟡 已实现
 
 **Domain Model（已实现）**:
@@ -987,9 +988,9 @@ Snapshot 层不得丢失 auto_retained 标记。
 - Jaccard similarity merge 判定（threshold 0.6，基于 content 关键词非 tags）
 - Scope-based abstraction 判定
 - Procedural-like 过滤（4 组中英文正则，RFC §D.4：不将行为约束误判为语义偏好）
-- RFC §D.2 置信度累积：`base × repetition(N/5) × consistency`，上限 0.95
+- RFC §D.2 置信度累积：`base × repetition(N/5) × consistency × recency`，上限 0.95。recency_factor 已实现（基于 newest evidence age 的确定性衰减，decay=90d，floor=0.5，缺失 created_at 使用中性 fallback）
 - 严格 N≥3 门槛（RFC §D.1），所有输出 memory_type="semantic"、governance_route="T1"
-- 35 个确定性测试（`tests/test_memory_consolidation_engine.py`）
+- 64 个确定性测试（`tests/test_memory_consolidation_engine.py`，含 recency_factor 16 个新测试）
 - 架构边界：不 import store / runtime / LLM / embedding 模块，幂等
 
 **Source Evidence Loader（已实现）**:

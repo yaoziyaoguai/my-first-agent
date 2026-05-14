@@ -147,10 +147,75 @@ def _group_by_topic(
 
 # ── 置信度计算 ────────────────────────────────────────────────────────────
 
+# recency_factor 的衰减常量
+# DECAY_DAYS 天前的 evidence 达到 floor（MIN_RECENCY）
+# MIN_RECENCY 是 recency 的地板——即使非常旧的 evidence 也不会归零
+_RECENCY_DECAY_DAYS: float = 90.0
+_RECENCY_FLOOR: float = 0.5
+# 缺失 created_at 时的中性 fallback（floor~1.0 中点）
+_RECENCY_NEUTRAL: float = 0.7
+
+
+def _parse_created_at(created_at: str | None) -> float | None:
+    """解析 created_at 字符串为 UTC epoch 秒浮点数。
+
+    支持 ISO8601 格式（含 'T' 和可能的 'Z' 结尾）。
+    解析失败返回 None。
+    """
+    if not created_at or not created_at.strip():
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        ts = created_at.strip()
+        # ISO8601: 2026-05-13T10:00:00Z 或 2026-05-13T10:00:00
+        if "T" in ts:
+            ts = ts.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts)
+        else:
+            # 简单日期: 2026-05-13
+            dt = datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _compute_recency_factor(
+    group: list[EpisodicEvidence],
+    now_epoch: float,
+) -> float:
+    """计算 group 的 recency_factor（RFC §D.2）。
+
+    算法：
+    1. 取 group 中最新的 evidence 的 created_at
+    2. 计算 age_days = (now - newest_epoch) / 86400
+    3. recency_factor = max(RECENCY_FLOOR, 1.0 - age_days / DECAY_DAYS)
+    4. 如果所有 evidence 都缺失 created_at → 使用中性 fallback
+
+    recency_factor 是 RFC §D.2 的确定性 confidence 因子，
+    用于影响 semantic consolidation 候选的可信度；
+    它不是记忆遗忘策略，也不改变 governance 路由。
+    """
+    newest_epoch: float | None = None
+    for e in group:
+        ts = _parse_created_at(e.created_at)
+        if ts is not None:
+            if newest_epoch is None or ts > newest_epoch:
+                newest_epoch = ts
+
+    if newest_epoch is None:
+        return _RECENCY_NEUTRAL
+
+    age_days = max(0.0, (now_epoch - newest_epoch) / 86400.0)
+    recency = 1.0 - (age_days / _RECENCY_DECAY_DAYS)
+    return max(_RECENCY_FLOOR, recency)
+
 
 def _compute_confidence(
     group: list[EpisodicEvidence],
     consistency: float,
+    *,
+    now_epoch: float | None = None,
 ) -> float:
     """RFC §D.2 置信度累积的确定性实现。
 
@@ -158,7 +223,11 @@ def _compute_confidence(
       base = mean(evidence confidence)，默认 0.7
       repetition_factor = min(1.0, N/5)
       consistency_factor = 1.0（一致）或 0.7（有矛盾）
-      confidence = min(0.95, base × repetition × consistency)
+      recency_factor = max(RECENCY_FLOOR, 1.0 - age_days / DECAY_DAYS)
+      confidence = min(0.95, base × repetition × consistency × recency)
+
+    now_epoch 为可选时间参考点（用于测试注入）。
+    None 时使用当前 UTC epoch。
 
     结果四舍五入到 2 位小数。
     """
@@ -168,7 +237,13 @@ def _compute_confidence(
     n = len(group)
     repetition = min(1.0, n / 5.0)
 
-    confidence = base * repetition * consistency
+    # recency_factor — 时间注入点（关键：now_epoch 用于测试确定性）
+    if now_epoch is None:
+        from datetime import datetime, timezone
+        now_epoch = datetime.now(timezone.utc).timestamp()
+    recency = _compute_recency_factor(group, now_epoch)
+
+    confidence = base * repetition * consistency * recency
     return round(min(0.95, max(0.0, confidence)), 2)
 
 
@@ -227,8 +302,15 @@ class DeterministicConsolidationDetector:
     def detect(
         self,
         evidence_list: list[EpisodicEvidence],
+        *,
+        now: float | None = None,
     ) -> list[ConsolidationCandidate]:
         """对 evidence 列表执行确定性 pattern detection。
+
+        Args:
+            evidence_list: EpisodicEvidence 列表。
+            now: 可选 UTC epoch 秒浮点数，作为 recency 计算的时间参考点。
+                 None 时使用当前 UTC 时间。测试注入此参数以保证确定性。
 
         Returns:
             list[ConsolidationCandidate] — 可能为空。
@@ -249,7 +331,7 @@ class DeterministicConsolidationDetector:
 
         # Step 3: 每组 ≥ MIN_EVIDENCE → 生成 candidate
         candidates: list[ConsolidationCandidate] = []
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        created_at_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         for group in groups:
             if len(group) < self.MIN_EVIDENCE:
@@ -257,7 +339,7 @@ class DeterministicConsolidationDetector:
 
             ctype = self._classify_group(group)
             consistency = self._compute_consistency(group)
-            confidence = _compute_confidence(group, consistency)
+            confidence = _compute_confidence(group, consistency, now_epoch=now)
             content = _generate_content(group, ctype)
             record_ids = tuple(e.record_id for e in group)
             evidence_summary = (
@@ -274,7 +356,7 @@ class DeterministicConsolidationDetector:
                 confidence=confidence,
                 governance_route="T1",
                 evidence_summary=evidence_summary,
-                created_at=now,
+                created_at=created_at_str,
             ))
 
         return candidates

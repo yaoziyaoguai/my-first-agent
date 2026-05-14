@@ -9,10 +9,11 @@ memory store。
 - pattern_detection / merge / abstraction 三类检测
 - source_evidence 引用正确性
 - governance T1 / memory_type semantic 硬约束
-- confidence ∈ [0,1]
+- confidence ∈ [0,1]（含 RFC §D.2 recency_factor）
 - deterministic 幂等性
 - procedural-like 过滤
 - store-free / LLM-free 架构边界
+- recency_factor fallenback / clamp / 确定性
 """
 
 import pytest
@@ -23,10 +24,13 @@ from agent.memory_consolidation import (
 )
 from agent.memory_consolidation_engine import (
     DeterministicConsolidationDetector,
+    _compute_confidence,
+    _compute_recency_factor,
     _extract_keywords,
-    _is_procedural_like,
-    _token_overlap,
     _group_by_topic,
+    _is_procedural_like,
+    _parse_created_at,
+    _token_overlap,
 )
 
 
@@ -408,3 +412,269 @@ class TestEpisodicEvidence:
     def test_empty_content_rejected(self):
         with pytest.raises(ValueError, match="content"):
             EpisodicEvidence(record_id="r1", content="")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RFC Appendix D.2 recency_factor 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些测试验证 RFC Appendix D.2 recency_factor 对 Phase 6 semantic
+# consolidation confidence 的确定性影响，不验证真实语义质量，也不调用 LLM。
+
+
+class TestRecencyFactor:
+    """验证 _compute_recency_factor 的核心行为。"""
+
+    def test_newer_evidence_higher_recency(self):
+        """较新的 evidence 产生更高的 recency_factor。"""
+        recent = _evidence("r1", "a", created_at="2026-05-14T10:00:00Z")
+        old = _evidence("r2", "b", created_at="2026-02-14T10:00:00Z")
+
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency_recent = _compute_recency_factor([recent], now_epoch)
+        recency_old = _compute_recency_factor([old], now_epoch)
+
+        assert recency_recent > recency_old
+
+    def test_very_recent_evidence_near_one(self):
+        """刚发生的事件 recency_factor 接近 1.0。"""
+        e = _evidence("r1", "a", created_at="2026-05-14T09:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency = _compute_recency_factor([e], now_epoch)
+        # 1 小时前 → 1/24 ≈ 0.04 days → recency ≈ 0.9995+
+        assert recency >= 0.99
+
+    def test_recency_never_below_floor(self):
+        """无论 evidence 多旧，recency_factor 不低于 RECENCY_FLOOR (0.5)。"""
+        old = _evidence("r1", "a", created_at="2020-01-01T00:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T00:00:00Z")
+        recency = _compute_recency_factor([old], now_epoch)
+        assert recency >= 0.5
+
+    def test_missing_created_at_uses_neutral(self):
+        """created_at 缺失时使用中性 fallback（不崩溃）。"""
+        e = _evidence("r1", "a")  # 无 created_at
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency = _compute_recency_factor([e], now_epoch)
+        # 中性 fallback = 0.7
+        assert recency == 0.7
+
+    def test_unparseable_created_at_uses_neutral(self):
+        """created_at 格式异常时使用中性 fallback（不崩溃）。"""
+        e = _evidence("r1", "a", created_at="not-a-date-at-all")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency = _compute_recency_factor([e], now_epoch)
+        # 解析失败 → fallback
+        assert recency == 0.7
+
+    def test_empty_string_created_at_uses_neutral(self):
+        """created_at 为空字符串时使用中性 fallback。"""
+        e = _evidence("r1", "a", created_at="")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency = _compute_recency_factor([e], now_epoch)
+        assert recency == 0.7
+
+    def test_group_uses_newest_evidence(self):
+        """group 中有多条 evidence 时，取最新的 created_at 计算 recency。"""
+        old = _evidence("r1", "a", created_at="2026-01-01T00:00:00Z")
+        recent = _evidence("r2", "b", created_at="2026-05-14T00:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T12:00:00Z")
+        # group 中有一条旧的和一条新的 → 取新的
+        recency = _compute_recency_factor([old, recent], now_epoch)
+        # 0.5 天前 → ≈ 0.994
+        assert recency > 0.99
+
+    def test_mixed_missing_and_present_created_at(self):
+        """混有缺失和存在 created_at 的 group——使用存在的。"""
+        no_date = _evidence("r1", "a")  # 缺失
+        has_date = _evidence("r2", "b", created_at="2026-05-14T10:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        recency = _compute_recency_factor([no_date, has_date], now_epoch)
+        assert recency > 0.99  # 使用 has_date 的 created_at
+
+    def test_deterministic_same_input_same_output(self):
+        """相同输入和相同 now 参数多次运行结果一致。"""
+        e = _evidence("r1", "a", created_at="2026-05-13T10:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        r1 = _compute_recency_factor([e], now_epoch)
+        r2 = _compute_recency_factor([e], now_epoch)
+        assert r1 == r2
+
+    def test_recency_in_range(self):
+        """recency_factor 始终在 [RECENCY_FLOOR, 1.0]。"""
+        cases = [
+            ("2026-05-14T10:00:00Z",),  # 最近
+            ("2025-05-14T10:00:00Z",),  # 1 年前
+            ("2020-01-01T00:00:00Z",),  # 很久前
+            (None,),  # 缺失
+        ]
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        for (created_at,) in cases:
+            e = _evidence("r1", "a", created_at=created_at)
+            r = _compute_recency_factor([e], now_epoch)
+            assert 0.5 <= r <= 1.0, f"recency={r} out of range for created_at={created_at}"
+
+
+class TestRecencyConfidenceIntegration:
+    """验证 recency_factor 在 _compute_confidence 中被正确应用。"""
+
+    def test_newer_group_higher_confidence(self):
+        """较新的 evidence group 产生更高的 candidate confidence。"""
+        recent = [
+            _evidence("r1", "a", created_at="2026-05-14T00:00:00Z"),
+            _evidence("r2", "b", created_at="2026-05-14T00:00:00Z"),
+            _evidence("r3", "c", created_at="2026-05-14T00:00:00Z"),
+        ]
+        old = [
+            _evidence("r4", "a", created_at="2026-01-01T00:00:00Z"),
+            _evidence("r5", "b", created_at="2026-01-01T00:00:00Z"),
+            _evidence("r6", "c", created_at="2026-01-01T00:00:00Z"),
+        ]
+        now_epoch = _parse_created_at("2026-05-14T12:00:00Z")
+        conf_recent = _compute_confidence(recent, consistency=1.0, now_epoch=now_epoch)
+        conf_old = _compute_confidence(old, consistency=1.0, now_epoch=now_epoch)
+        assert conf_recent > conf_old
+
+    def test_confidence_clamped_zero_to_one(self):
+        """confidence 始终 clamped 到 [0, 1]。"""
+        # 极端情况：低 base + 低 repetition + 低 consistency + 低 recency
+        items = [
+            _evidence("r1", "a", confidence=0.1, created_at="2020-01-01T00:00:00Z"),
+            _evidence("r2", "b", confidence=0.1, created_at="2020-01-01T00:00:00Z"),
+            _evidence("r3", "c", confidence=0.1, created_at="2020-01-01T00:00:00Z"),
+        ]
+        now_epoch = _parse_created_at("2026-05-14T12:00:00Z")
+        conf = _compute_confidence(items, consistency=0.7, now_epoch=now_epoch)
+        assert 0.0 <= conf <= 1.0
+
+    def test_deterministic_same_now_same_confidence(self):
+        """相同 group + 相同 consistency + 相同 now_epoch → confidence 一致。"""
+        items = [
+            _evidence("r1", "a", created_at="2026-05-01T00:00:00Z"),
+            _evidence("r2", "b", created_at="2026-05-01T00:00:00Z"),
+            _evidence("r3", "c", created_at="2026-05-01T00:00:00Z"),
+        ]
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        c1 = _compute_confidence(items, consistency=1.0, now_epoch=now_epoch)
+        c2 = _compute_confidence(items, consistency=1.0, now_epoch=now_epoch)
+        assert c1 == c2
+
+    def test_recency_does_not_change_n3_threshold(self):
+        """recency_factor 不改变 N≥3 门槛——detector 仍只对 ≥3 条 group 生成 candidate。"""
+        detector = DeterministicConsolidationDetector()
+        items = [
+            _evidence("r1", "a", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r2", "b", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+        ]
+        result = detector.detect(items, now=_parse_created_at("2026-05-14T10:00:00Z"))
+        assert len(result) == 0  # N=2 不满足 N≥3
+
+    def test_recency_does_not_change_memory_type(self):
+        """recency_factor 不改变 memory_type=semantic。"""
+        detector = DeterministicConsolidationDetector()
+        items = [
+            _evidence("r1", "a", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r2", "b", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r3", "c", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+        ]
+        result = detector.detect(items, now=_parse_created_at("2026-05-14T10:00:00Z"))
+        assert len(result) == 1
+        assert result[0].memory_type == "semantic"
+
+    def test_recency_does_not_change_governance_route(self):
+        """recency_factor 不改变 governance_route=T1。"""
+        detector = DeterministicConsolidationDetector()
+        items = [
+            _evidence("r1", "a", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r2", "b", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r3", "c", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+        ]
+        result = detector.detect(items, now=_parse_created_at("2026-05-14T10:00:00Z"))
+        assert len(result) == 1
+        assert result[0].governance_route == "T1"
+
+    def test_detector_preserves_source_evidence_with_recency(self):
+        """recency_factor 不影响 source_evidence 保留。"""
+        detector = DeterministicConsolidationDetector()
+        items = [
+            _evidence("r1", "a", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r2", "b", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+            _evidence("r3", "c", tags=("x",), created_at="2026-05-14T10:00:00Z"),
+        ]
+        result = detector.detect(items, now=_parse_created_at("2026-05-14T10:00:00Z"))
+        assert len(result) == 1
+        assert result[0].source_evidence == ("r1", "r2", "r3")
+
+
+class TestRecencyArchitectureBoundaries:
+    """验证 recency_factor 不破坏架构边界。"""
+
+    def test_recency_no_store_write(self):
+        """recency_factor 不会让 detector 写 store。"""
+        # _compute_recency_factor 只返回 float，无 IO
+        e = _evidence("r1", "a", created_at="2026-05-14T10:00:00Z")
+        now_epoch = _parse_created_at("2026-05-14T10:00:00Z")
+        result = _compute_recency_factor([e], now_epoch)
+        assert isinstance(result, float)
+
+    def test_recency_no_llm(self):
+        """recency_factor 不调用 LLM。"""
+        # _compute_recency_factor 是纯计算函数
+        import inspect
+        src = inspect.getsource(_compute_recency_factor)
+        assert "anthropic" not in src.lower()
+        assert "openai" not in src.lower()
+        assert "llm" not in src.lower()
+
+    def test_recency_no_env_read(self):
+        """recency_factor 不读取环境变量。"""
+        import inspect
+        src = inspect.getsource(_compute_recency_factor)
+        assert "os.environ" not in src
+        assert "os.getenv" not in src
+        assert "getenv" not in src
+
+    def test_recency_no_file_io(self):
+        """recency_factor 不读取文件。"""
+        import inspect
+        src = inspect.getsource(_compute_recency_factor)
+        assert "open(" not in src
+        assert "read_text" not in src
+        assert "Path(" not in src
+
+    def test_recency_no_real_sessions(self):
+        """recency_factor 不读取真实 sessions/runs。"""
+        import inspect
+        src = inspect.getsource(_compute_recency_factor)
+        assert "session" not in src.lower()
+        assert "agent_log" not in src.lower()
+
+
+class TestParseCreatedAt:
+    """验证 _parse_created_at 的健壮性。"""
+
+    def test_iso8601_with_z(self):
+        ts = _parse_created_at("2026-05-14T10:00:00Z")
+        assert ts is not None
+        assert ts > 0
+
+    def test_iso8601_without_z(self):
+        ts = _parse_created_at("2026-05-14T10:00:00")
+        assert ts is not None
+        assert ts > 0
+
+    def test_simple_date(self):
+        ts = _parse_created_at("2026-05-14")
+        assert ts is not None
+        assert ts > 0
+
+    def test_none_returns_none(self):
+        assert _parse_created_at(None) is None
+
+    def test_empty_returns_none(self):
+        assert _parse_created_at("") is None
+
+    def test_whitespace_returns_none(self):
+        assert _parse_created_at("   ") is None
+
+    def test_garbage_returns_none(self):
+        assert _parse_created_at("garbage-date-string") is None

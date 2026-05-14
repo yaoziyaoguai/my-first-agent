@@ -137,14 +137,16 @@ def _to_episodic_evidence(record) -> EpisodicEvidence:
     created_at = _get_metadata_field(record, "created_at")
     confidence = _get_metadata_field(record, "confidence")
 
-    # tags：优先从 metadata 提取，支持 list/tuple
+    # tags：优先从 metadata 提取，支持 list/tuple 和逗号分隔字符串
     tags: tuple[str, ...] = ()
     raw_tags = _get_metadata_field(record, "tags")
     if raw_tags is not None:
         if isinstance(raw_tags, (list, tuple)):
-            tags = tuple(str(t) for t in raw_tags if t)
+            tags = tuple(str(t).strip() for t in raw_tags if t)
         elif isinstance(raw_tags, str) and raw_tags.strip():
-            tags = (raw_tags.strip(),)
+            # 逗号分隔的字符串（filesystem 中 YAML frontmatter 的常见格式）
+            parts = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            tags = tuple(parts) if parts else (raw_tags.strip(),)
 
     # confidence 必须是 float 或 None
     if confidence is not None and not isinstance(confidence, (int, float)):

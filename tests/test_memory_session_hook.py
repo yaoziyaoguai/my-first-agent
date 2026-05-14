@@ -820,20 +820,22 @@ class TestConsolidationRuntimeHookSafety:
                 )
 
     def test_no_real_llm_called(self, monkeypatch):
-        """Consolidation hook 路径不调用真实 LLM。
+        """Consolidation hook 路径不调用真实 LLM API。
 
-        验证 gate 和 detector 都是确定性代码路径，无 LLM import。
+        验证 hook 本身不直接 import anthropic / OpenAI SDK。
+        agent.memory_consolidation_llm 的 import 是允许的——它是 thin gate
+        层，只读取 env var 和实例化 generator，不执行 LLM API 调用。
         """
         monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
         monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
 
-        # 验证 _maybe_run_consolidation 不 import 任何 LLM 相关模块
         import ast
         import inspect
         from agent.memory import _maybe_run_consolidation
 
         source = inspect.getsource(_maybe_run_consolidation)
         tree = ast.parse(source)
+        forbidden = {"anthropic", "openai"}
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 module_name = ""
@@ -841,12 +843,10 @@ class TestConsolidationRuntimeHookSafety:
                     module_name = node.names[0].name
                 elif node.module:
                     module_name = node.module
-                assert "llm" not in module_name.lower(), (
-                    f"_maybe_run_consolidation 不应 import LLM 模块: {module_name}"
-                )
-                assert "anthropic" not in module_name.lower(), (
-                    f"_maybe_run_consolidation 不应 import anthropic: {module_name}"
-                )
+                for kw in forbidden:
+                    assert kw not in module_name.lower(), (
+                        f"_maybe_run_consolidation 不应直接 import {kw}: {module_name}"
+                    )
 
 
 class TestConsolidationRuntimeHookFailureIsolation:

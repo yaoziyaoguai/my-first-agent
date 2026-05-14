@@ -621,17 +621,22 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
 
     # Run consolidation pipeline
     from agent.memory_consolidation_pipeline import run_consolidation_pipeline
+    from agent.memory_consolidation_llm import create_llm_content_generator
     from agent.memory_consolidation_review import (
         dispatch_consolidation_candidates_to_pending_review,
     )
 
-    pipeline_result = run_consolidation_pipeline(store)
+    llm_generator = create_llm_content_generator()
+    pipeline_result = run_consolidation_pipeline(
+        store, llm_generator=llm_generator,
+    )
     if not pipeline_result.has_candidates:
         return {
             "enabled": True,
             "evidence_count": evidence_count,
             "candidate_count": 0,
             "dispatched_count": 0,
+            "llm_enabled": pipeline_result.llm_enabled,
         }
 
     # Dispatch to T1 pending
@@ -648,6 +653,9 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
         "dispatched_count": dispatch_result.dispatched,
         "duplicate_count": dispatch_result.skipped_duplicate,
         "warnings": list(dispatch_result.warnings),
+        "llm_enabled": pipeline_result.llm_enabled,
+        "llm_enhanced_count": pipeline_result.llm_enhanced_count,
+        "llm_warnings": list(pipeline_result.llm_warnings),
     }
 
 

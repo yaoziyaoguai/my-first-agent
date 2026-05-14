@@ -1,8 +1,8 @@
 """Phase 6 — Consolidation Pipeline.
 
-只读串联 source evidence loader → deterministic detector，
+串联 source evidence loader → deterministic detector → (optional) LLM content enhancement，
 返回结构化的 ConsolidationPipelineResult。不写 store、不接 runtime、
-不接 T1 pending review CLI、不调 LLM。
+不接 T1 pending review CLI（dispatch 在 memory_consolidation_review.py）。
 
 RFC 参考：
 - §15.4 Phase 6 — Consolidation
@@ -17,14 +17,14 @@ RFC 参考：
 - 输出: ConsolidationPipelineResult（candidates + 统计 + warnings）
 - 只读：不调用 store 任何写方法
 - 不 import runtime / confirmation / policy / pending review 模块
-- 不调用 LLM
+- LLM content enhancement 是 opt-in，默认不调用
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.memory_consolidation import ConsolidationCandidate
+from agent.memory_consolidation import ConsolidationCandidate, EpisodicEvidence
 from agent.memory_consolidation_engine import DeterministicConsolidationDetector
 from agent.memory_consolidation_loader import (
     SourceEvidenceLoadResult,
@@ -78,8 +78,8 @@ def _validate_candidate(candidate: ConsolidationCandidate) -> str | None:
 class ConsolidationPipelineResult:
     """Phase 6 consolidation pipeline 的结构化结果。
 
-    串联 loader → detector 后的最终输出。不包含 store 引用，
-    不包含 pending review state。
+    串联 loader → detector → (optional) LLM enhancement 后的最终输出。
+    不包含 store 引用，不包含 pending review state。
     """
 
     candidates: tuple[ConsolidationCandidate, ...]
@@ -87,6 +87,10 @@ class ConsolidationPipelineResult:
     skipped_count: int
     warnings: tuple[str, ...]
     detector_name: str | None = None
+    # LLM content enhancement 相关字段（Phase 6b）
+    llm_enabled: bool = False
+    llm_enhanced_count: int = 0
+    llm_warnings: tuple[str, ...] = ()
 
     @property
     def candidate_count(self) -> int:
@@ -106,26 +110,35 @@ def run_consolidation_pipeline(
     store,
     *,
     detector: DeterministicConsolidationDetector | None = None,
+    llm_generator=None,  # LLMConsolidationContentGenerator | None
 ) -> ConsolidationPipelineResult:
-    """执行 Phase 6 consolidation pipeline：loader → detector。
+    """执行 Phase 6 consolidation pipeline：loader → detector → (opt) LLM enhancement。
 
     只读操作：
     1. 从 store 装载 episodic evidence
     2. 传入 detector 执行确定性 pattern detection
     3. 校验 candidate 满足强制约束（defense-in-depth）
-    4. 返回结构化结果
+    4. 若 opt-in 启用 LLM，对 valid candidates 做 content/evidence_summary 增强
+       - 增强失败：保留 deterministic candidate + warning
+       - 增强成功：替换 content/evidence_summary，其他字段不变
+    5. 返回结构化结果
 
     Args:
         store: FilesystemMemoryStore 实例（需支持 list_records() API）。
         detector: DeterministicConsolidationDetector 实例，None 则使用默认实例。
+        llm_generator: LLMConsolidationContentGenerator 实例，None 则跳过 LLM 增强。
+                       调用者可选传入，pipeline 不负责 opt-in gate。
 
     Returns:
         ConsolidationPipelineResult:
         - candidates: 通过校验的 ConsolidationCandidate 元组
         - evidence_count: 传入 detector 的 evidence 数量
         - skipped_count: loader 跳过的记录数
-        - warnings: loader 警告 + 校验失败警告
-        - detector_name: detector 类名（便于审计追踪）
+        - warnings: loader 警告 + 校验失败警告 + LLM 增强警告
+        - detector_name: detector 类名
+        - llm_enabled: 是否尝试了 LLM 增强
+        - llm_enhanced_count: 成功增强的 candidate 数
+        - llm_warnings: LLM 增强过程中的警告
     """
     if detector is None:
         detector = DeterministicConsolidationDetector()
@@ -133,10 +146,18 @@ def run_consolidation_pipeline(
     # Step 1: 从 store 装载 episodic evidence
     load_result: SourceEvidenceLoadResult = load_episodic_evidence(store)
     all_warnings: list[str] = list(load_result.warnings)
+    llm_warnings: list[str] = []
+    llm_enhanced = 0
+    llm_enabled = llm_generator is not None
 
     # Step 2: 传给 detector
     evidence_list = list(load_result.evidence)
     candidates = detector.detect(evidence_list)
+
+    # 构建 evidence lookup（record_id → EpisodicEvidence），供 LLM 增强使用
+    evidence_by_id: dict[str, EpisodicEvidence] = {
+        e.record_id: e for e in evidence_list
+    }
 
     # Step 3: 校验 candidate 强制约束（defense-in-depth）
     valid_candidates: list[ConsolidationCandidate] = []
@@ -150,11 +171,77 @@ def run_consolidation_pipeline(
             continue
         valid_candidates.append(c)
 
-    # Step 4: 构建结果
+    # Step 4: optional LLM content enhancement
+    if llm_enabled and valid_candidates:
+        valid_candidates, llm_enhanced, llm_warnings = _apply_llm_enhancement(
+            valid_candidates, evidence_by_id, llm_generator
+        )
+        all_warnings.extend(llm_warnings)
+
+    # Step 5: 构建结果
     return ConsolidationPipelineResult(
         candidates=tuple(valid_candidates),
         evidence_count=len(evidence_list),
         skipped_count=load_result.skipped_count,
         warnings=tuple(all_warnings),
         detector_name=type(detector).__name__,
+        llm_enabled=llm_enabled,
+        llm_enhanced_count=llm_enhanced,
+        llm_warnings=tuple(llm_warnings),
     )
+
+
+def _apply_llm_enhancement(
+    candidates: list[ConsolidationCandidate],
+    evidence_by_id: dict[str, EpisodicEvidence],
+    llm_generator,
+) -> tuple[list[ConsolidationCandidate], int, list[str]]:
+    """对 valid candidates 执行 LLM content/evidence_summary 增强。
+
+    增强失败时保留 deterministic candidate + warning，
+    不因 LLM 失败而丢弃有效的确定性 candidate。
+
+    Returns:
+        (enhanced_candidates, enhanced_count, warnings)
+    """
+    enhanced: list[ConsolidationCandidate] = []
+    warnings: list[str] = []
+    enhanced_count = 0
+
+    for c in candidates:
+        # 从 evidence_by_id 重构此 candidate 的 evidence group
+        group = [
+            evidence_by_id[rid]
+            for rid in c.source_evidence
+            if rid in evidence_by_id
+        ]
+        if len(group) < 3:
+            warnings.append(
+                f"[candidate evidence={list(c.source_evidence[:3])}] "
+                f"evidence group 不足 N≥3，跳过 LLM 增强，保留 deterministic"
+            )
+            enhanced.append(c)
+            continue
+
+        try:
+            llm_candidate, llm_warn = llm_generator.enhance(c, group)
+        except Exception as exc:
+            warnings.append(
+                f"[candidate evidence={list(c.source_evidence[:3])}] "
+                f"LLM 增强异常: {exc}，保留 deterministic"
+            )
+            enhanced.append(c)
+            continue
+
+        if llm_candidate is None:
+            warnings.append(
+                f"[candidate evidence={list(c.source_evidence[:3])}] "
+                f"LLM 增强失败: {llm_warn}，保留 deterministic"
+            )
+            enhanced.append(c)
+            continue
+
+        enhanced.append(llm_candidate)
+        enhanced_count += 1
+
+    return enhanced, enhanced_count, warnings

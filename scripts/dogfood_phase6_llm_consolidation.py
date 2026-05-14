@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +29,124 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 _DOGFOOD_ROOT = Path("/tmp/dogfood_phase6_e2e")
 _STORE_ROOT = _DOGFOOD_ROOT / "memory"
 _REVIEW_PACKET_DIR = _DOGFOOD_ROOT / "review_packet"
+
+
+# ── 项目 .env 显式加载（用于 real LLM dogfood） ────────────────────────────────
+# 为什么需要显式加载项目 .env？
+#   Coding Agent 运行环境的 shell env 可能已被污染（如过期 key、错误的 base_url）。
+#   config.py 使用 load_dotenv(override=False)，shell env 优先级高于 .env。
+#   为了让 dogfood 使用用户明确授权的项目 .env 配置，需要独立解析 .env 文件，
+#   项目 .env 中的值覆盖同名 shell env，且不写回 os.environ。
+#   这样 dogfood 使用的 key 来源可控、可审计，且不会污染其他模块的全局配置。
+
+
+@dataclass(frozen=True, slots=True)
+class DogfoodProviderConfig:
+    """从项目 .env 加载的 provider 配置，不写入 os.environ，不含 secret 打印路径。"""
+
+    model: str
+    base_url: str
+    api_key: str
+    provider: str  # "anthropic" | "openai" | "unknown"
+    source: str = "project .env"
+
+    @property
+    def key_configured(self) -> bool:
+        return bool(self.api_key)
+
+
+def _parse_dotenv_file(env_path: Path) -> dict[str, str]:
+    """解析 .env 文件的 KEY=VALUE 行。
+
+    只支持简单格式：KEY=VALUE，不带引号、不带 export 前缀。
+    空行和 # 开头的注释行跳过。
+    返回值不写入 os.environ。
+    """
+    result: dict[str, str] = {}
+    if not env_path.exists():
+        return result
+    for line in env_path.read_text(encoding="utf-8").split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            result[key] = value
+    return result
+
+
+def load_project_dotenv_for_dogfood(project_root: Path) -> DogfoodProviderConfig:
+    """从项目 .env 显式加载 provider config，不依赖 shell env。
+
+    优先级：
+    1. 先读取 shell env 作为 baseline（config.py 已 load_dotenv(override=False)）
+    2. 再读取项目 .env，项目 .env 的值覆盖 shell env（实现 project .env 优先）
+
+    返回的 DogfoodProviderConfig 不包含任何日志输出，不写入 os.environ。
+
+    如果 .env 中缺少必要字段，回退到 config 模块的全局值（此时 source 标记为 "shell env fallback"）。
+    """
+    env_path = project_root / ".env"
+    dotenv_vars = _parse_dotenv_file(env_path)
+
+    # model 解析优先级：项目 .env ANTHROPIC_MODEL > .env OPENAI_MODEL > .env MODEL_NAME
+    #                   > shell ANTHROPIC_MODEL > shell OPENAI_MODEL > shell MODEL_NAME
+    _env_model = (
+        dotenv_vars.get("ANTHROPIC_MODEL")
+        or dotenv_vars.get("OPENAI_MODEL")
+        or dotenv_vars.get("MODEL_NAME")
+    )
+    if _env_model:
+        source = "project .env"
+    else:
+        from config import MODEL_NAME as _shell_model
+        _env_model = _shell_model
+        source = "shell env fallback"
+
+    # base_url 解析
+    _env_base = (
+        dotenv_vars.get("ANTHROPIC_BASE_URL")
+        or dotenv_vars.get("OPENAI_BASE_URL")
+    )
+    if not _env_base:
+        from config import BASE_URL as _shell_base
+        _env_base = _shell_base
+
+    # api_key 解析
+    _env_key = (
+        dotenv_vars.get("ANTHROPIC_API_KEY")
+        or dotenv_vars.get("OPENAI_API_KEY")
+    )
+    if not _env_key:
+        from config import API_KEY as _shell_key
+        _env_key = _shell_key
+        if _env_key:
+            source = "shell env fallback"
+
+    # provider 判定
+    _provider = "unknown"
+    if _env_base:
+        base_lower = _env_base.lower()
+        if "anthropic" in base_lower:
+            _provider = "anthropic"
+        elif "openai" in base_lower:
+            _provider = "openai"
+    if _env_key and _env_key.startswith("sk-ant-"):
+        _provider = "anthropic"
+    elif _env_key and _env_key.startswith("sk-"):
+        _provider = "openai" if _provider == "unknown" else _provider
+
+    return DogfoodProviderConfig(
+        model=_env_model or "unknown",
+        base_url=_env_base or "unknown",
+        api_key=_env_key or "",
+        provider=_provider,
+        source=source,
+    )
 
 # ── 合成 episodic evidence 定义 ────────────────────────────────────────────────
 
@@ -165,30 +284,35 @@ def _sanitize_str(text: str) -> str:
 
 # ── 步骤 0：环境检查 ───────────────────────────────────────────────────────────
 
-def check_env() -> tuple[bool, str, dict]:
-    """检查 dogfood 运行前提条件。返回 (can_run, reason, provider_info)。
+def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, DogfoodProviderConfig | None]:
+    """检查 dogfood 运行前提条件。
 
-    provider_info 只含 provider/model/base_url，不包含任何 secret。
+    Returns:
+        (can_run, reason, provider_info, provider_config)
+        - provider_info: 只含 provider/model/base_url/source，不包含任何 secret
+        - provider_config: DogfoodProviderConfig，含 api_key，用于传给 run_dogfood_pipeline()
     """
     llm_enabled = os.getenv("MEMORY_CONSOLIDATION_LLM_ENABLED", "").strip() in (
         "1", "true", "yes", "True", "TRUE",
     )
     if not llm_enabled:
-        return False, "MEMORY_CONSOLIDATION_LLM_ENABLED 未设置为 true", {}
+        return False, "MEMORY_CONSOLIDATION_LLM_ENABLED 未设置为 true", {}, None
 
-    from config import API_KEY, MODEL_NAME, BASE_URL
+    root = project_root or _PROJECT_ROOT
+    provider_config = load_project_dotenv_for_dogfood(root)
 
     provider_info: dict = {
-        "model": MODEL_NAME or "unknown",
-        "base_url": BASE_URL or "unknown",
-        "provider": "anthropic" if (BASE_URL and "anthropic" in BASE_URL.lower()) else "api",
-        "key_configured": bool(API_KEY),
+        "model": provider_config.model,
+        "base_url": provider_config.base_url,
+        "provider": provider_config.provider,
+        "key_configured": provider_config.key_configured,
+        "source": provider_config.source,
     }
 
-    if not API_KEY:
-        return False, "API key 未配置（检查 ANTHROPIC_API_KEY / OPENAI_API_KEY 环境变量）", provider_info
+    if not provider_config.key_configured:
+        return False, "API key 未配置（项目 .env 和 shell env 中均未找到）", provider_info, provider_config
 
-    return True, "ready", provider_info
+    return True, "ready", provider_info, provider_config
 
 
 # ── 步骤 1：准备临时 store ─────────────────────────────────────────────────────
@@ -252,13 +376,20 @@ def seed_synthetic_evidence(store_root: Path) -> Path:
 
 # ── 步骤 2：运行 pipeline ──────────────────────────────────────────────────────
 
-def run_dogfood_pipeline(store_root: Path, provider_info: dict | None = None) -> dict:
+def run_dogfood_pipeline(
+    store_root: Path,
+    provider_info: dict | None = None,
+    provider_config: DogfoodProviderConfig | None = None,
+) -> dict:
     """运行 Phase 6 consolidation pipeline 并收集结果。
 
-    Returns:
-        dict: 包含 pipeline_result, dispatch_result, 治理验证结果, provider_info 等。
+    provider_config: DogfoodProviderConfig — 显式传入 api_key/model/base_url，
+        不依赖可能被污染的 shell env 全局 config。
     """
-    from agent.memory_consolidation_llm import create_llm_content_generator
+    from agent.memory_consolidation_llm import (
+        LLMConsolidationContentGenerator,
+        _is_llm_consolidation_enabled,
+    )
     from agent.memory_consolidation_pipeline import run_consolidation_pipeline
     from agent.memory_consolidation_review import (
         dispatch_consolidation_candidates_to_pending_review,
@@ -267,8 +398,21 @@ def run_dogfood_pipeline(store_root: Path, provider_info: dict | None = None) ->
 
     store = FilesystemMemoryStore(root_dir=store_root)
 
-    # 运行 pipeline
-    llm_generator = create_llm_content_generator()
+    # 构建 LLM generator —— 优先使用显式 project .env 配置
+    llm_generator = None
+    if _is_llm_consolidation_enabled():
+        if provider_config is not None and provider_config.key_configured:
+            # 显式传入 project .env 的 api_key/model/base_url
+            llm_generator = LLMConsolidationContentGenerator(
+                model_name=provider_config.model,
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+            )
+        else:
+            # 回退：使用全局 config（可能受 shell env 污染）
+            from agent.memory_consolidation_llm import create_llm_content_generator
+            llm_generator = create_llm_content_generator()
+
     pipeline_result = run_consolidation_pipeline(store, llm_generator=llm_generator)
 
     # sanitize LLM 相关 warnings（不泄露 key/secret）
@@ -543,20 +687,40 @@ def _build_markdown_summary(report: dict, packet: dict) -> str:
 
 # ── main ────────────────────────────────────────────────────────────────────────
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """dogfood 入口。
+
+    CLI 参数：
+      --project-root PATH    项目根目录（默认脚本所在仓库根目录）
+      --load-project-env     从项目 .env 加载 provider 配置（默认启用）
 
     Returns:
         0: 成功
         1: 跳过（环境未配置）
         2: 运行失败
     """
+    # 解析 CLI 参数
+    args = argv if argv is not None else sys.argv[1:]
+    project_root = _PROJECT_ROOT
+    i = 0
+    while i < len(args):
+        if args[i] == "--project-root" and i + 1 < len(args):
+            project_root = Path(args[i + 1]).resolve()
+            i += 2
+        elif args[i] == "--load-project-env":
+            # 默认行为已启用，此参数为显式声明
+            i += 1
+        else:
+            print(f"未知参数: {args[i]}", file=sys.stderr)
+            i += 1
+
     print("=" * 60)
     print("Phase 6 Real LLM Consolidation Dogfood")
     print("=" * 60)
+    print(f"  project_root: {project_root}")
 
     # Step 0: 环境检查
-    can_run, reason, provider_info = check_env()
+    can_run, reason, provider_info, provider_config = check_env(project_root)
     if not can_run:
         print(f"\n[SKIP] {reason}")
         if provider_info:
@@ -567,6 +731,7 @@ def main() -> int:
     # 报告 provider 配置（不含 secret）
     print("\n[OK] 环境检查通过")
     print("  provider configured: yes")
+    print(f"  provider source: {provider_info.get('source', 'unknown')}")
     print(f"  model:  {provider_info.get('model', 'unknown')}")
     print(f"  base_url: {provider_info.get('base_url', 'unknown')}")
 
@@ -586,7 +751,7 @@ def main() -> int:
     # Step 2: 运行 pipeline
     print("\n[2/4] 运行 Phase 6 consolidation pipeline ...")
     try:
-        report = run_dogfood_pipeline(_STORE_ROOT, provider_info)
+        report = run_dogfood_pipeline(_STORE_ROOT, provider_info, provider_config)
     except Exception as exc:
         print(f"\n[FAIL] pipeline 运行失败: {_sanitize_error(exc)}")
         import traceback

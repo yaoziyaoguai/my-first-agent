@@ -678,3 +678,267 @@ class TestParseCreatedAt:
 
     def test_garbage_returns_none(self):
         assert _parse_created_at("garbage-date-string") is None
+
+
+# ── 矛盾检测测试（RFC §D.3）──────────────────────────────────────────────────
+
+
+class TestDetectContradiction:
+    """_detect_contradiction_in_group() 的确定性测试。"""
+
+    def test_no_contradiction_for_uniform_positive(self):
+        """所有 evidence 都正面 → 无矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户喜欢使用 pytest 进行测试", scope="user"),
+            EpisodicEvidence("e2", "用户偏好 pytest 的 fixture 机制", scope="user"),
+            EpisodicEvidence("e3", "用户推荐 pytest 给团队", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is False
+
+    def test_no_contradiction_for_uniform_negative(self):
+        """所有 evidence 都负面 → 无矛盾（一致性偏好为负面）。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户不喜欢使用 unittest", scope="user"),
+            EpisodicEvidence("e2", "用户拒绝 unittest 的迁移方案", scope="user"),
+            EpisodicEvidence("e3", "用户讨厌 verbose 的测试写法", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is False
+
+    def test_contradiction_like_dislike_chinese(self):
+        """喜欢 vs 不喜欢 中文对立 → 矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", scope="user"),
+            EpisodicEvidence("e2", "用户喜欢 pytest 的 fixture", scope="user"),
+            EpisodicEvidence("e3", "用户不喜欢 pytest 的 parametrize 语法", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is True
+
+    def test_contradiction_recommend_avoid_chinese(self):
+        """推荐 vs 避免 中文对立 → 矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户推荐使用 Redis 做缓存", scope="user"),
+            EpisodicEvidence("e2", "用户建议避免使用 Redis", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is True
+
+    def test_contradiction_accept_reject(self):
+        """接受 vs 拒绝 同一事物 → 矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户接受了全局变量的提案", scope="user"),
+            EpisodicEvidence("e2", "用户拒绝了全局变量的使用方案", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is True
+
+    def test_marker_level_catches_any_pos_neg(self):
+        """标记级检测会捕获任何正负面组合（不区分主题）。
+
+        实际使用中，_group_by_topic 会按 shared keywords/tags 分组，
+        不同主题的 evidence 不会出现在同一 group 中，因此不会误报。
+        这是确定性方法的已知限制。
+        """
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", scope="user"),
+            EpisodicEvidence("e2", "用户不喜欢 Java", scope="user"),
+        ]
+        # 标记级：喜欢/不喜欢 正负面对立 → True
+        # 但实际 pipeline 中这两个不会被分到同一 topic group
+        assert _detect_contradiction_in_group(group) is True
+
+    def test_contradiction_prefer_avoid_english(self):
+        """prefer vs avoid 英文对立 → 矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [
+            EpisodicEvidence("e1", "user prefers pytest for testing", scope="user"),
+            EpisodicEvidence("e2", "user suggests to avoid pytest", scope="user"),
+        ]
+        assert _detect_contradiction_in_group(group) is True
+
+    def test_empty_group_no_contradiction(self):
+        """空 group → 无矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+
+        assert _detect_contradiction_in_group([]) is False
+
+    def test_single_evidence_no_contradiction(self):
+        """单条 evidence → 无矛盾。"""
+        from agent.memory_consolidation_engine import _detect_contradiction_in_group
+        from agent.memory_consolidation import EpisodicEvidence
+
+        group = [EpisodicEvidence("e1", "用户喜欢 pytest", scope="user")]
+        assert _detect_contradiction_in_group(group) is False
+
+
+class TestClarificationNeededCandidate:
+    """矛盾 evidence → clarification_needed candidate 的 integration 测试。"""
+
+    def test_contradictory_group_yields_clarification_needed(self):
+        """包含矛盾的 group → consolidation_type=clarification_needed。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import (
+            ConsolidationType,
+            EpisodicEvidence,
+        )
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", scope="user", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest 给团队", scope="user", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户不喜欢 pytest 的某些特性", scope="user", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.consolidation_type == ConsolidationType.CLARIFICATION_NEEDED
+
+    def test_clarification_needed_has_lower_confidence(self):
+        """矛盾 candidate 的 confidence 应打折（consistency=0.7）。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+
+        # 一致的 evidence（无矛盾）
+        uniform_ev = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",), confidence=0.85),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",), confidence=0.85),
+            EpisodicEvidence("e3", "用户偏好 pytest", tags=("pytest",), confidence=0.85),
+        ]
+        uniform_cands = detector.detect(uniform_ev, now=0.0)
+
+        # 矛盾的 evidence
+        conflict_ev = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",), confidence=0.85),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",), confidence=0.85),
+            EpisodicEvidence("e3", "用户不喜欢 pytest", tags=("pytest",), confidence=0.85),
+        ]
+        conflict_cands = detector.detect(conflict_ev, now=0.0)
+
+        assert len(uniform_cands) == 1
+        assert len(conflict_cands) == 1
+        # 矛盾的 confidence 应该更低（consistency 折扣 0.7）
+        assert conflict_cands[0].confidence < uniform_cands[0].confidence
+
+    def test_clarification_needed_still_t1(self):
+        """矛盾 candidate 仍必须是 T1 governance。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import (
+            EpisodicEvidence,
+        )
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户不喜欢 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.governance_route == "T1"
+
+    def test_clarification_needed_still_semantic(self):
+        """矛盾 candidate 仍必须是 semantic memory_type。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户不喜欢 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.memory_type == "semantic"
+
+    def test_clarification_needed_preserves_source_evidence(self):
+        """矛盾 candidate 保留所有 source_evidence。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户讨厌 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert len(c.source_evidence) == 3
+
+    def test_clarification_needed_never_auto_approve(self):
+        """矛盾 candidate 的 approval_status 不得为 approved。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户不喜欢 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        c = candidates[0]
+        # ConsolidationCandidate 本身没有 approval_status，由 dispatch 层设置
+        # 这里验证不会在 detector 层被 approve
+        assert c.governance_route == "T1"
+
+    def test_contradiction_does_not_break_n3_threshold(self):
+        """矛盾 detection 不影响 N≥3 门槛。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+        # 只有 2 条（即使有矛盾）→ 不应生成 candidate
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户不喜欢 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 0
+
+    def test_contradiction_content_includes_clarification_marker(self):
+        """矛盾 candidate 的 content 应提及需要澄清。"""
+        from agent.memory_consolidation_engine import DeterministicConsolidationDetector
+        from agent.memory_consolidation import EpisodicEvidence
+
+        detector = DeterministicConsolidationDetector()
+        evidence = [
+            EpisodicEvidence("e1", "用户喜欢 pytest", tags=("pytest",)),
+            EpisodicEvidence("e2", "用户推荐 pytest", tags=("pytest",)),
+            EpisodicEvidence("e3", "用户不喜欢 pytest", tags=("pytest",)),
+        ]
+
+        candidates = detector.detect(evidence, now=1000000.0)
+        assert len(candidates) == 1
+        assert "矛盾" in candidates[0].content
+        assert "澄清" in candidates[0].content

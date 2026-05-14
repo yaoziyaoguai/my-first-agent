@@ -46,6 +46,7 @@ _STOPWORDS: frozenset[str] = frozenset({
     "它", "们", "什么", "怎么", "为什么", "因为", "所以", "但是",
     "如果", "可以", "需要", "应该", "能够", "已经", "还是", "或者",
     "这个", "那个", "哪个", "一些", "一下", "一点", "一种", "知道",
+    "用户", "使用", "进行", "通过",
 })
 
 # procedural-like 关键词：如果 evidence 内容匹配这些模式，说明可能是行为约束
@@ -263,13 +264,83 @@ def _generate_content(
         keywords |= set(_extract_keywords(e.content))
     topic_str = "、".join(sorted(keywords)[:5]) if keywords else "未知主题"
 
-    if ctype == ConsolidationType.MERGE:
+    if ctype == ConsolidationType.CLARIFICATION_NEEDED:
+        return (
+            f"在主题 '{topic_str}' 上观察到矛盾信号：部分 evidence 持正面/采用态度，"
+            f"部分 evidence 持负面/拒绝态度。需要人工澄清实际偏好。"
+        )
+    elif ctype == ConsolidationType.MERGE:
         return f"多条事件记录反复涉及相同模式：{topic_str}。"
     elif ctype == ConsolidationType.ABSTRACTION:
         scope = group[0].scope or "未知范围"
         return f"在 {scope} 范围内，多个事件指向共同知识：{topic_str}。"
     else:
         return f"用户在多个事件中反复表现出对 {topic_str} 的稳定偏好。"
+
+
+# ── 矛盾检测（RFC §D.3）────────────────────────────────────────────────────
+
+
+# 对立标记对：出现在同一 group 的 evidence 中 → 矛盾
+# 格式：(positive, negative)
+# 注意：必须按 neg 长度降序检查，避免 "不喜欢" 中的 "喜欢" 被误判为正面
+_OPPOSING_MARKER_PAIRS: tuple[tuple[str, str], ...] = (
+    # 中文对立对
+    ("喜欢", "不喜欢"),
+    ("喜欢", "讨厌"),
+    ("推荐", "不推荐"),
+    ("推荐", "不建议"),
+    ("推荐", "避免"),
+    ("偏好", "避免"),
+    ("选择", "拒绝"),
+    ("采纳", "拒绝"),
+    ("接受", "拒绝"),
+    ("赞成", "反对"),
+    ("适合", "不适合"),
+    ("肯定", "否定"),
+    # 英文对立对
+    ("prefer", "dislike"),
+    ("prefer", "avoid"),
+    ("like", "dislike"),
+    ("like", "hate"),
+    ("favorite", "hate"),
+    ("recommend", "avoid"),
+    ("recommend", "not recommend"),
+    ("agree", "disagree"),
+)
+
+
+def _detect_contradiction_in_group(group: list[EpisodicEvidence]) -> bool:
+    """检测 group 内 evidence 之间是否存在对立标记。
+
+    算法：
+    1. 对每对对立标记 (pos, neg)，逐条 evidence 检查极性
+    2. 若 content 包含 neg → 该条记为负面
+    3. 否则若 content 包含 pos 且不包含任何已知否定标记 → 该条记为正面
+       （避免 "不喜欢" 中的 "喜欢" 被误判为正面）
+    4. 若 group 中既有正面又有负面 → 矛盾
+
+    限制：基于关键词匹配，无法检测含蓄/间接矛盾。由 T1 human review 兜底。
+
+    RFC §D.3：真实矛盾 → 降低 confidence，标记 needs clarification。
+    """
+    all_neg_markers = {neg for _, neg in _OPPOSING_MARKER_PAIRS}
+
+    for pos, neg in _OPPOSING_MARKER_PAIRS:
+        any_pos = False
+        any_neg = False
+        for e in group:
+            c = e.content
+            if neg in c:
+                any_neg = True
+            elif pos in c:
+                # 只有不包含任何否定标记时才算正面
+                # 避免 "不喜欢" 中的 "喜欢" 被误判
+                if not any(n in c for n in all_neg_markers):
+                    any_pos = True
+        if any_pos and any_neg:
+            return True
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -342,11 +413,19 @@ class DeterministicConsolidationDetector:
             confidence = _compute_confidence(group, consistency, now_epoch=now)
             content = _generate_content(group, ctype)
             record_ids = tuple(e.record_id for e in group)
-            evidence_summary = (
-                f"{len(group)} 条 episodic evidence 共享主题，"
-                f"consistency={consistency:.1f}，"
-                f"record_ids={list(record_ids)}"
-            )
+
+            if ctype == ConsolidationType.CLARIFICATION_NEEDED:
+                evidence_summary = (
+                    f"{len(group)} 条 episodic evidence 包含矛盾信号，"
+                    f"consistency={consistency:.1f}（已折扣），"
+                    f"record_ids={list(record_ids)}，需人工澄清"
+                )
+            else:
+                evidence_summary = (
+                    f"{len(group)} 条 episodic evidence 共享主题，"
+                    f"consistency={consistency:.1f}，"
+                    f"record_ids={list(record_ids)}"
+                )
 
             candidates.append(ConsolidationCandidate(
                 content=content,
@@ -370,13 +449,16 @@ class DeterministicConsolidationDetector:
         """判定 group 的 consolidation_type。
 
         规则优先级:
-        1. 所有成对 content 关键词 Jaccard > MERGE_JACCARD_THRESHOLD → merge
-           (使用 content 关键词而非 tags，避免 tags 分组导致过拟合)
-        2. 所有 evidence scope 相同 → abstraction
-        3. 默认 → pattern_detection
+        1. 存在矛盾 → clarification_needed（RFC §D.3）
+        2. 所有成对 content 关键词 Jaccard > MERGE_JACCARD_THRESHOLD → merge
+        3. 所有 evidence scope 相同 → abstraction
+        4. 默认 → pattern_detection
         """
+        # contradiction check: 最高优先级
+        if _detect_contradiction_in_group(group):
+            return ConsolidationType.CLARIFICATION_NEEDED
+
         # merge: 基于 content 关键词的成对相似度（不是 tags）
-        # tags 用于分组，content 关键词用于合并判定
         content_sigs = [_extract_keywords(e.content) for e in group]
 
         all_high_similarity = True
@@ -404,15 +486,34 @@ class DeterministicConsolidationDetector:
     ) -> float:
         """计算 group 内 evidence 的一致性。
 
-        当前简化实现：检查是否存在显著的 token overlap 差异。
-        如果 group 内所有 evidence 两两之间至少有一点 overlap，
+        分两层：
+        1. 主题层：检查是否存在显著的 token overlap 差异
+        2. 语义层：检查是否存在对立标记（likes/dislikes）
+
+        如果 group 内所有 evidence 两两之间至少有一点 overlap 且无对立标记，
         则认为一致（1.0）；否则有矛盾（0.7）。
 
-        不做完整 contradiction resolution（RFC §D.3）。
+        RFC §D.3：矛盾 → 降低 confidence。
         """
+        # 层 1: token overlap
         signatures = [_build_topic_signature(e) for e in group]
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 if not (signatures[i] & signatures[j]):
                     return self.CONSISTENCY_CONFLICT
+
+        # 层 2: 对立标记检测（RFC §D.3 矛盾处理）
+        if _detect_contradiction_in_group(group):
+            return self.CONSISTENCY_CONFLICT
+
         return self.CONSISTENCY_DEFAULT
+
+    def _check_contradiction(
+        self,
+        group: list[EpisodicEvidence],
+    ) -> bool:
+        """检查 group 内是否包含矛盾 evidence（供 classify 使用）。
+
+        委托给 _detect_contradiction_in_group()。
+        """
+        return _detect_contradiction_in_group(group)

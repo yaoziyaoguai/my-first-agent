@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,14 +40,17 @@ _REVIEW_PACKET_DIR = _DOGFOOD_ROOT / "review_packet"
 #   这样 dogfood 使用的 key 来源可控、可审计，且不会污染其他模块的全局配置。
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class DogfoodProviderConfig:
-    """从项目 .env 加载的 provider 配置，不写入 os.environ，不含 secret 打印路径。"""
+    """从项目 .env 加载的 provider 配置，不写入 os.environ。
+
+    api_key 字段标记 repr=False，调试输出不泄露 secret。
+    """
 
     model: str
     base_url: str
-    api_key: str
-    provider: str  # "anthropic" | "openai" | "unknown"
+    api_key: str = field(repr=False)
+    provider: str = "unknown"  # "anthropic" | "openai" | "unknown"
     source: str = "project .env"
 
     @property

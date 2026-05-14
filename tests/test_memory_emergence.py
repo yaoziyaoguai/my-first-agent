@@ -682,6 +682,30 @@ class TestProceduralDispatch:
             data = json.loads(result.proposal_filepaths[0].read_text(encoding="utf-8"))
             assert data["source_type"] == "emergence"
 
+    def test_confirmation_form_default_pending_review(self):
+        """pending JSON 默认 confirmation_form=pending_review（RFC §10.5）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "memory"
+            candidate = _make_candidate()
+            result = dispatch_procedural_candidates_to_pending_review(
+                [candidate], memory_root=root,
+            )
+            data = json.loads(result.proposal_filepaths[0].read_text(encoding="utf-8"))
+            assert data["confirmation_form"] == "pending_review"
+
+    def test_confirmation_form_not_silent(self):
+        """confirmation_form 不等于 silent——procedural 不可 auto-retain。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "memory"
+            candidate = _make_candidate()
+            result = dispatch_procedural_candidates_to_pending_review(
+                [candidate], memory_root=root,
+            )
+            data = json.loads(result.proposal_filepaths[0].read_text(encoding="utf-8"))
+            assert data["confirmation_form"] != "silent"
+            assert data["confirmation_form"] != "auto_retained"
+            assert data["approval_status"] == "pending"
+
     def test_duplicate_dispatch_not_written(self):
         """相同 candidate dispatch 两次不重复写 pending。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -809,12 +833,15 @@ class TestProceduralReviewCLI:
             assert len(procedural_records) == 0
 
     def test_edit_and_accept_procedural_proposal(self):
-        """edit-and-accept → 使用编辑后的内容写入 procedural record。"""
+        """edit-and-accept → 使用编辑后的内容写入 procedural record，保留 emergence metadata。"""
         from agent.memory_store import InMemoryMemoryStore
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "memory"
-            candidate = _make_candidate()
+            candidate = _make_candidate(
+                correction_pattern="先运行 lint 和 tests",
+                correction_type="process_order",
+            )
             dispatch_procedural_candidates_to_pending_review(
                 [candidate], memory_root=root,
             )
@@ -830,6 +857,11 @@ class TestProceduralReviewCLI:
             # 应包含编辑后的内容
             matching = [r for r in records if edited in r.content]
             assert len(matching) >= 1
+            # emergence metadata 应保留在 source_summary 中（P1-1 fix）
+            record = matching[0]
+            source_summary = record.source_summary
+            assert "correction_pattern=先运行 lint 和 tests" in source_summary
+            assert "correction_type=process_order" in source_summary
 
     def test_skip_procedural_proposal_keeps_pending(self):
         """skip procedural proposal → pending 保留，不写入 store。"""

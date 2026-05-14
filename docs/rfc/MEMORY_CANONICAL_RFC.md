@@ -37,13 +37,13 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real LLM consolidation dogfood verified (project .env provider config, 2/2 candidates enhanced, governance all_pass), RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only). Phase 7 (Emergence) foundation implemented — CorrectionEvidence, ProceduralCandidate, DeterministicEmergenceDetector, active_records >50 gate, procedural→pending-review dispatch. Preference_evolved engine deferred — must be revisited during Phase 7 kickoff. Next: Phase 7 independent audit, runtime hook design, or Phase 7 dogfood.
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real LLM consolidation dogfood verified (project .env provider config, 2/2 candidates enhanced, governance all_pass), RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only). Phase 7 (Emergence) foundation implemented — CorrectionEvidence, ProceduralCandidate, DeterministicEmergenceDetector, active_records >50 gate, procedural candidate → T1 confirmation via pending review form (§10.5). Procedural requires explicit human confirmation; silent retain is forbidden; inline confirmation is a planned future form. Preference_evolved engine deferred — must be revisited during Phase 7 kickoff. Next: Phase 7 governance reconciliation audit, runtime hook design, or Phase 7 dogfood.
 
 ### Core Constraints
 
 - **Extraction ≠ Persistence**: 提取器只产出 candidate，不写 store
 - **Write Interface ≠ Memory Type**: 入口决定如何进入，lifecycle 决定最终类型
-- **Procedural 永远 T1**: 不可 silent retain
+- **Procedural 永远 T1**: 必须 explicit human confirmation（inline 或 pending review），不可 silent retain（T2）
 - **Filesystem is source of truth**: index.json 是派生数据
 - **所有自动路径必须可逆**: T2 记录可删除/upgrade
 - **Metadata Continuity**: `memory_type`/`source_type`/`approval_status` 禁止在 pipeline 中被重新推断（§14.5）
@@ -57,7 +57,7 @@ Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) imp
 | Session-end extraction | §3 Lifecycle → §11.4 W3 → Appendix C Episodic Schema |
 | T2 auto-retain | §10.2 T2 锁定 → §5 Episodic Governance |
 | Consolidation | §6 Consolidation → Appendix D Consolidation Semantics |
-| Procedural emergence | §8 Emergence → §9 Procedural → Appendix E Mutation Boundary |
+| Procedural emergence | §8 Emergence → §9 Procedural → §10.5 Confirmation Forms → Appendix E Mutation Boundary |
 | Recall differentiation | §13 Recall → Appendix F Recall Semantics |
 | Any new memory feature | §1 Constitution（宪法兼容性检查）→ §3 Lifecycle（阶段归属） |
 | Architecture boundary verification | Appendix H（Automated Guardrails）→ §14.6（Runtime Growth） |
@@ -90,6 +90,7 @@ v2.2 在 v2.1 lifecycle-oriented 基础上增加了：
 ```
 RFC §3     → Memory Lifecycle
 RFC §10.2  → T2 宪法级锁定
+RFC §10.5  → T1 Confirmation Forms（inline vs pending review）
 RFC App C  → Episodic Record Semantics
 RFC App D  → Consolidation Semantics
 RFC App E  → Procedural Mutation Boundary
@@ -342,7 +343,7 @@ Session 结束
   → extractor.extract()（fake skeleton 或 LLM）
   → dedup 与已有 store
   → governance routing（T1/T2/T3）
-  → T2 auto-retain 写入 store / T1 pending 持久化到 _pending/
+  → T2 auto-retain 写入 store / T1 confirmation → inline（当前 turn）或 pending review（持久化到 _pending/）
   → 返回 extraction summary
 ```
 
@@ -520,7 +521,8 @@ Emergence 是 semantic + episodic + repeated correction → procedural candidate
 
 - Candidate generation: **silent**（后台检测 pattern）
 - Candidate adoption: **T1 human review 强制**
-- Procedural 永远不可 silent retain — 即使是 emergence 检测到的最高置信度 pattern
+- Procedural 永远不可 silent retain（T2 auto-retain） — 即使是 emergence 检测到的最高置信度 pattern
+- T1 confirmation 的交互形式（见 §10.5）：可以是 inline confirmation 或 pending review。当前 Phase 7 foundation 实现 pending review form；inline confirmation 是后续 alignment item
 - 用户拒绝的 procedural candidate：记录拒绝原因，降低同类 pattern 的 emergence 优先级
 
 ### 8.5 不做的（Phase 7 之前）
@@ -634,6 +636,26 @@ T2 是对 P8 的精炼，不是违反。以下约束是宪法级锁定，不可�
 | **W4 Consolidation** | — | T1 | — |
 | **W5 Emergence** | — | — | T1 |
 
+### 10.5 Confirmation Forms（T1 确认的两种交互形式）
+
+T1 Confirmation 要求用户显式确认，但**不限制确认的交互形式**。当前系统支持两种 T1 确认形式：
+
+| Form | 触发 | 时间点 | 存储路径 | 状态 |
+|------|------|--------|----------|:--:|
+| **Inline Confirmation** | Agent 主动询问，用户当场确认/编辑/拒绝 | 同步（当前 turn） | `build_memory_operation_intent()` → `store.apply_operation_intent()`，`approval_status="approved"` | ✅ W1/W2 L1 已实现 |
+| **Pending Review** | Candidate 写入 `_pending/t1_*.json`，用户稍后 `review memory` | 异步（跨 session） | `_pending/` → review CLI accept → `store.apply_operation_intent()`，`approval_status="approved"` | ✅ W3/W4/W5 已实现 |
+
+**关键区分**：
+- Inline confirmation 和 pending review 是**同一种 governance 语义（T1）的两种交互形式**，不是两种 governance tier。
+- 不要将 "T1" 等同于 "pending review CLI"。
+- 不要将 "human review" 等同于 "必须进入 _pending/"。
+- 具体走哪种 form 取决于 Write Interface 和实现阶段：
+  - W1 Explicit Retain、W2 L1 Inline Suggestion：当下走 inline confirmation
+  - W3 Session-End、W4 Consolidation、W5 Emergence：当前走 pending review
+- 未来可以支持同一 candidate 走不同 form（如 emergence 高置信度走 inline、低置信度走 pending），但当前实现不混用。
+
+**Silent / Auto-Retain 不是 confirmation form**：T2 auto-retain 是 governed auto-write，不经用户确认。它不是 confirmation form，是 T2 governance tier 的直接执行。
+
 ---
 
 ## Part IV: Extraction
@@ -680,10 +702,10 @@ Extraction 是 Lifecycle 中 Ingestion 阶段的**实现机制**，不是独立�
 - 检测到 task boundary（"OK", "done", "下一步" 等，≤20 字符短文本）
 - 用户显式触发（"记住这个", "记录一下", "remember this" 等）
 
-Governance 路由（RFC §10.4）：
-- episodic + confidence [0.6, 0.8) → T2 auto-retain
-- episodic + confidence ≥ 0.8 → T1 pending
-- semantic/procedural + confidence ≥ 0.6 → T1 pending（永不走 T2）
+Governance 路由（RFC §10.4, §10.5）：
+- episodic + confidence [0.6, 0.8) → T2 auto-retain（silent，不经用户确认）
+- episodic + confidence ≥ 0.8 → T1 confirmation（当前实现走 pending review form）
+- semantic/procedural + confidence ≥ 0.6 → T1 confirmation（当前实现走 pending review form；永不走 T2）
 - confidence < 0.6 → T3 ignore
 - T2 单 session 上限 3 条，HIGH/SECRET sensitivity 不进 T2
 
@@ -700,11 +722,11 @@ Session 结束时批量扫描全部 messages（user + assistant + tool 摘要）
 - 默认使用 `create_extractor("fake", ...)` factory seam（确定性关键词匹配，不调 LLM）
 - Runtime hook：`agent/session.py:finalize_session()` 在正常 quit 时自动触发
 - T2 auto-retain → `FilesystemMemoryStore.apply_operation_intent()`（需 `MEMORY_STORE_BACKEND=filesystem`）
-- T1 pending → `_pending/t1_*.json`（跨 session 可见）
+- T1 confirmation → 当前实现走 pending review form：`_pending/t1_*.json`（跨 session 可见）
 - Minimal review CLI implemented（`agent/memory_review.py`）：支持 list / accept / reject / edit-and-accept / skip
 - 真实 LLM extraction quality 尚未 dogfood 验证
 
-T1 pending confirmation（跨 session）：
+T1 pending review（跨 session，T1 确认的异步形式，见 §10.5）：
 - 写入 `_pending/` 目录（`_persist_t1_pending_proposals()`）
 - 下次 session 启动时显示 pending count，提示输入 'review memory' 进入 review
 - Review CLI 支持 accept / reject / edit-and-accept / skip，不自动 approve
@@ -1056,7 +1078,8 @@ Snapshot 层不得丢失 auto_retained 标记。
 - EmergenceDetectionResult — gate_passed, candidates, warnings
 - active_records >50 gate — fail closed（<50 不产生 candidate）
 - DeterministicEmergenceDetector — 按 (correction_type, scope) 分组，≥3 evidence 产生 candidate
-- dispatch_procedural_candidates_to_pending_review() — T1 pending dispatch, 去重, defense-in-depth
+- dispatch_procedural_candidates_to_pending_review() — T1 confirmation via pending review form (见 §10.5), 去重, defense-in-depth
+- confirmation_form="pending_review" — current foundation default; inline_confirmation is a planned future form
 - review CLI — 最小扩展支持 correction_pattern / correction_type metadata 展示
 - 67 个测试 — gating, detection, dispatch, review bridge
 - **未实现**: runtime hook, procedural adoption, real emergence quality dogfood, preference_evolved

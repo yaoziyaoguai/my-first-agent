@@ -1,20 +1,25 @@
 """Phase 7 — W5 Emergence Detection Foundation.
 
 RFC §8: semantic + episodic + repeated correction → procedural candidate。
-silent detection + T1 强制 human review。Procedural 永不可 silent retain。
+silent detection + T1 强制 human review。Procedural 永不可 silent retain（T2 auto-retain）。
+
+T1 human confirmation 有两种交互形式（RFC §10.5）：
+- pending_review：candidate 写入 _pending/，用户稍后 review（当前实现）
+- inline_confirmation：agent 当场询问，用户当场确认（计划中，未实现）
 
 本模块实现 Phase 7 foundation：
 - CorrectionEvidence: 用户纠正行为的纯输入视图
 - ProceduralCandidate: 永远 T1 的 procedural 候选
 - EmergenceDetectionResult: 结构化检测结果（含 gate 信息）
 - DeterministicEmergenceDetector: 确定性 correction pattern 检测器
-- dispatch_procedural_candidates_to_pending_review(): T1 pending 分发
+- dispatch_procedural_candidates_to_pending_review(): T1 pending review form 分发
 
-架构边界（RFC §15.5, §8.2, §8.5）：
+架构边界（RFC §15.5, §8.2, §8.5, §10.5）：
 - 确定性检测，不调 LLM
 - active_records <50 → fail closed，不产生 candidate
 - 同一 correction_pattern ≥3 条 evidence → 产生 ProceduralCandidate
-- 所有 candidate 必须走 T1 pending review，永不可 silent retain
+- 所有 candidate 必须经 explicit human confirmation（T1），不可 silent retain
+- 当前实现 confirmation_form="pending_review"；inline_confirmation 是后续 alignment item
 - 不接 runtime hook / scheduler
 - 不写正式 memory store —— 写入只在 human accept 后发生
 - 不自动 approve
@@ -83,7 +88,8 @@ class ProceduralCandidate:
     - content 不能为空
     - source_evidence 至少 3 条
     - confidence 必须在 0-1
-    - 不允许 approval_status=approved（永远 pending 直到 human review）
+    - 创建时不携带 approval_status（dispatch 时设为 pending；human confirmation 后变为 approved）
+    - 不允许 silent retain（T2 auto-retain），不允许 create 时预批准
     """
 
     content: str
@@ -451,13 +457,16 @@ def dispatch_procedural_candidates_to_pending_review(
     memory_root: Path | str | None = None,
     source: str = "phase7_emergence",
 ) -> ProceduralDispatchResult:
-    """将 ProceduralCandidate 列表分发到 T1 pending review。
+    """将 ProceduralCandidate 列表分发到 T1 pending review（RFC §10.5 pending_review form）。
+
+    这是 T1 confirmation 的异步形式——candidate 写入 _pending/ 等待人类 review。
+    另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认），当前未实现。
 
     对每个 candidate：
     1. 验证 dispatch 前置约束（procedural, T1, source_evidence≥3）
     2. 计算确定性 proposal identity（去重 key）
     3. 扫描 _pending/ 中已有 proposal_id，跳过重复
-    4. 写入 _pending/t1_{timestamp}_{hash4}_{index}.json
+    4. 写入 _pending/t1_{timestamp}_{hash4}_{index}.json（含 confirmation_form="pending_review"）
 
     不写正式 procedural store。不自动 approve。不调 LLM。不接 runtime。
 
@@ -538,6 +547,10 @@ def dispatch_procedural_candidates_to_pending_review(
             "correction_pattern": candidate.correction_pattern,
             "correction_type": candidate.correction_type,
             "evidence_summary": candidate.evidence_summary or "",
+            # T1 confirmation form（RFC §10.5）：当前默认为 pending_review。
+            # 后续 inline_confirmation 路径不会写入 _pending/，而是直接走
+            # memory_confirmation → store.apply_operation_intent。
+            "confirmation_form": "pending_review",
         }
 
         filepath.write_text(

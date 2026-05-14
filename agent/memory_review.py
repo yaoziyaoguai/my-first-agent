@@ -99,6 +99,8 @@ class PendingProposal:
     # Phase 7 Emergence 特有字段（RFC §15.5）
     correction_pattern: str = ""
     correction_type: str = ""
+    # T1 confirmation form（RFC §10.5）："pending_review"（默认）或 "inline_confirmation"（计划）
+    confirmation_form: str = "pending_review"
 
 
 def count_pending_proposals(memory_root: str | None = None) -> int:
@@ -160,6 +162,8 @@ def list_pending_proposals(
                 # Phase 7 Emergence 特有字段（RFC §15.5）
                 correction_pattern=data.get("correction_pattern", ""),
                 correction_type=data.get("correction_type", ""),
+                # T1 confirmation form（RFC §10.5）
+                confirmation_form=data.get("confirmation_form", "pending_review"),
             ))
         except (ValueError, TypeError) as exc:
             print(f"[review] 警告: 字段解析失败 {filepath.name}: {exc}")
@@ -279,7 +283,7 @@ def edit_and_accept_pending_proposal(
     if not edited_content.strip():
         raise ValueError("编辑后的 content 不能为空")
 
-    # Consolidation metadata 保留到 source_summary 中
+    # Consolidation + Emergence metadata 保留到 source_summary 中
     source_parts: list[str] = []
     if proposal.consolidation_type:
         source_parts.append(f"[consolidation:{proposal.consolidation_type}]")
@@ -287,6 +291,11 @@ def edit_and_accept_pending_proposal(
         source_parts.append(f"source_evidence={list(proposal.source_evidence)}")
     if proposal.evidence_summary:
         source_parts.append(f"evidence_summary={proposal.evidence_summary[:200]}")
+    # Phase 7 Emergence metadata 保留
+    if proposal.correction_pattern:
+        source_parts.append(f"correction_pattern={proposal.correction_pattern}")
+    if proposal.correction_type:
+        source_parts.append(f"correction_type={proposal.correction_type}")
     source_parts.append(f"pending_review(edited): {proposal.evidence[:100]}")
 
     intent = MemoryOperationIntent(
@@ -376,6 +385,9 @@ def _render_proposal(proposal: PendingProposal, index: int, total: int) -> str:
         lines.append(f" 纠正模式: {proposal.correction_pattern}")
     if proposal.correction_type:
         lines.append(f" 纠正类型: {proposal.correction_type}")
+    # 展示 confirmation form（RFC §10.5）
+    if proposal.confirmation_form and proposal.confirmation_form != "pending_review":
+        lines.append(f" 确认形式: {proposal.confirmation_form}")
     lines.append(f"{'─' * 50}")
     return "\n".join(lines)
 

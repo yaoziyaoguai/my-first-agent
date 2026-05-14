@@ -96,6 +96,9 @@ class PendingProposal:
     source_evidence: tuple[str, ...] = ()
     consolidation_type: str = ""
     evidence_summary: str = ""
+    # Phase 7 Emergence 特有字段（RFC §15.5）
+    correction_pattern: str = ""
+    correction_type: str = ""
 
 
 def count_pending_proposals(memory_root: str | None = None) -> int:
@@ -154,6 +157,9 @@ def list_pending_proposals(
                 source_evidence=tuple(data.get("source_evidence", [])),
                 consolidation_type=data.get("consolidation_type", ""),
                 evidence_summary=data.get("evidence_summary", ""),
+                # Phase 7 Emergence 特有字段（RFC §15.5）
+                correction_pattern=data.get("correction_pattern", ""),
+                correction_type=data.get("correction_type", ""),
             ))
         except (ValueError, TypeError) as exc:
             print(f"[review] 警告: 字段解析失败 {filepath.name}: {exc}")
@@ -219,6 +225,11 @@ def accept_pending_proposal(
         source_parts.append(f"source_evidence={list(proposal.source_evidence)}")
     if proposal.evidence_summary:
         source_parts.append(f"evidence_summary={proposal.evidence_summary[:200]}")
+    # Phase 7 Emergence metadata 保留
+    if proposal.correction_pattern:
+        source_parts.append(f"correction_pattern={proposal.correction_pattern}")
+    if proposal.correction_type:
+        source_parts.append(f"correction_type={proposal.correction_type}")
     source_parts.append(f"pending_review: {proposal.evidence[:100]}")
 
     intent = MemoryOperationIntent(
@@ -360,6 +371,11 @@ def _render_proposal(proposal: PendingProposal, index: int, total: int) -> str:
             lines.append(f"           ... 及其他 {len(evidence_list) - 5} 条")
     if proposal.evidence_summary:
         lines.append(f" 依据摘要: {proposal.evidence_summary[:200]}")
+    # Phase 7 Emergence 特有字段
+    if proposal.correction_pattern:
+        lines.append(f" 纠正模式: {proposal.correction_pattern}")
+    if proposal.correction_type:
+        lines.append(f" 纠正类型: {proposal.correction_type}")
     lines.append(f"{'─' * 50}")
     return "\n".join(lines)
 

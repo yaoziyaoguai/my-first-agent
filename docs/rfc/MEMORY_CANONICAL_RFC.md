@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real LLM consolidation dogfood verified (project .env provider config, 2/2 candidates enhanced, governance all_pass), RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only). Preference_evolved engine deferred — must be revisited during Phase 7 kickoff. Next: Phase 7 preflight stabilization or Phase 7 emergence.
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real LLM consolidation dogfood verified (project .env provider config, 2/2 candidates enhanced, governance all_pass), RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only). Phase 7 (Emergence) foundation implemented — CorrectionEvidence, ProceduralCandidate, DeterministicEmergenceDetector, active_records >50 gate, procedural→pending-review dispatch. Preference_evolved engine deferred — must be revisited during Phase 7 kickoff. Next: Phase 7 independent audit, runtime hook design, or Phase 7 dogfood.
 
 ### Core Constraints
 
@@ -1049,6 +1049,17 @@ Snapshot 层不得丢失 auto_retained 标记。
 ### 15.5 Phase 7 — Emergence（🔮）
 
 **Lifecycle 目标**：Emergence 阶段探索。
+
+**Phase 7 foundation implemented（🟡）**：
+- CorrectionEvidence model — correction pattern 纯输入视图
+- ProceduralCandidate schema — T1-only governance, source_evidence≥3, confidence 0-1
+- EmergenceDetectionResult — gate_passed, candidates, warnings
+- active_records >50 gate — fail closed（<50 不产生 candidate）
+- DeterministicEmergenceDetector — 按 (correction_type, scope) 分组，≥3 evidence 产生 candidate
+- dispatch_procedural_candidates_to_pending_review() — T1 pending dispatch, 去重, defense-in-depth
+- review CLI — 最小扩展支持 correction_pattern / correction_type metadata 展示
+- 67 个测试 — gating, detection, dispatch, review bridge
+- **未实现**: runtime hook, procedural adoption, real emergence quality dogfood, preference_evolved
 
 - Correction pattern 追踪
 - Procedural candidate 自动检测（W5）

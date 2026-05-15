@@ -182,7 +182,43 @@ for r in records[:5]:
 
 ---
 
-## 10. Runtime events / trace / logs test
+## 10. Optional complex real LLM memory dogfood
+
+`scripts/dogfood_complex_real_llm.py` 是 complex real LLM memory dogfood harness。它不属于普通测试默认路径，只在明确 opt-in、且项目配置机制已经能自动加载 provider config 时手动运行。
+
+它只使用 synthetic / non-sensitive scenarios，覆盖：
+
+- stable preference consolidation
+- contradiction / low-confidence behavior
+- procedural-like boundary
+- Chinese complex expression
+- secret-like synthetic content
+
+治理验证包括：
+
+- T1 pending
+- no direct store write
+- no auto approve
+- no silent procedural retain
+- no secret exposed
+
+安全运行方式：
+
+```bash
+MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_complex_real_llm.py
+```
+
+约束：
+
+- 真实 LLM provider 必须通过 project `.env` scoped config load 自动加载。
+- 不要 `cat` / `grep` `.env`。
+- 不要把 API key 放在命令行里。
+- 不要打印 API key、prefix、suffix、length、Authorization 或 Bearer header。
+- 不要在普通测试中自动调用真实 LLM；CI/pytest 默认应继续走 fake/local/opt-in skip。
+
+---
+
+## 11. Runtime events / trace / logs test
 
 ```bash
 .venv/bin/python main.py logs                         # tail 50
@@ -197,7 +233,7 @@ for r in records[:5]:
 
 ---
 
-## 11. Error handling test
+## 12. Error handling test
 
 ```bash
 # 不存在工具
@@ -212,7 +248,7 @@ for r in records[:5]:
 
 ---
 
-## 12. Dogfooding log template
+## 13. Dogfooding log template
 
 | Date | Area | Scenario | Prompt | Expected | Actual | Severity | Notes |
 |------|------|----------|--------|----------|--------|----------|-------|
@@ -225,15 +261,15 @@ Severity: `ok` / `minor` / `blocker`
 
 ---
 
-## 13. Stop conditions
+## 14. Stop conditions
 
 出现任一立即停止：敏感信息被记住；reject 后工具仍执行；`request_user_input` 没真实等待用户；checkpoint/resume 恢复错误 state；tool result 写错（路径逃逸）；memory 错写（错误 topic file）；测试失败无法定位。
 
 ---
 
-## 14. What not to test yet
+## 15. What not to test yet
 
-真实 LLM/provider、外部 MCP server、vector DB/embeddings/semantic retrieval、L2/L3 proactive memory、consolidation/decay/archival/proceduralization、Skill 系统（experimental）、Textual TUI（实验性）。
+默认不测真实 LLM/provider；如需 memory consolidation real provider dogfood，只按第 10 节 opt-in harness 执行。仍不测外部 MCP server、vector DB/embeddings/semantic retrieval、L2/L3 proactive memory、decay/archival/proceduralization、Skill 系统（experimental）、Textual TUI（实验性）。
 
 ---
 
@@ -241,6 +277,7 @@ Severity: `ok` / `minor` / `blocker`
 
 1. **fake demo**（第 5 节，5 秒，无需 provider）
 2. **全部 memory 测试**（第 9.1 节，~96 tests，无需 provider）
-3. **health + logs**（第 3、10 节，无需 provider）
-4. **error handling**（第 11 节，无需 provider）
+3. **health + logs**（第 3、11 节，无需 provider）
+4. **error handling**（第 12 节，无需 provider）
 5. **如果配了 provider**：交互式 shell 测试对话/确认/checkpoint/request_user_input（第 4、6、7、8 节）
+6. **如果明确 opt-in real LLM memory dogfood**：按第 10 节运行 complex harness

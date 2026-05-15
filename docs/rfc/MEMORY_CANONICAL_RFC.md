@@ -1102,6 +1102,18 @@ Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并�
   - no procedural silent retain；no procedural auto approve
 - **未实现**: inline Agent loop integration, procedural adoption, real emergence quality dogfood, preference_evolved, backend abstraction
 
+**Inline Agent loop integration design note**:
+
+- Implementation design note:
+  [`docs/design/MEMORY_INLINE_CONFIRMATION_AGENT_LOOP_DESIGN.md`](../design/MEMORY_INLINE_CONFIRMATION_AGENT_LOOP_DESIGN.md)
+- 该文档不是新的 canonical spec；它只细化本 RFC §10.5 / §15.5 的实现边界。
+- 设计结论：`inline_confirmation` 应通过 `memory_interaction.py` adapter 接入
+  现有 `pending_user_input_request` / `awaiting_user_input` 机制；Agent loop 只做
+  orchestration，不解析 `source_evidence` / `correction_pattern`，不直接写 store。
+- `pending_review` 继续作为 non-interactive 默认和 inline 失败 fallback；reject /
+  other / timeout 都必须 no-write，accept / edit_accept 只能在 explicit
+  confirmation 后进入 `apply_inline_confirmation_response()`。
+
 - Correction pattern 追踪
 - Procedural candidate 自动检测（W5）
 - 永远是 T1，永不可 silent

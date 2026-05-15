@@ -830,7 +830,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 
 ## 14. Current Implementation Mapping
 
-> **TLDR**: Phase 5a complete。Phase 5b foundation implemented + controlled dogfood verified（fake deterministic + real LLM opt-in 均通过）。W1/W2 L1 已实现且稳定。W3 session-end skeleton 已实现（fake extractor + governance routing + persistence pipeline + runtime hook）。L2 inline extraction 已实现（L2TriggerGuard + L2InlineExtractor + governance routing，默认 fake 模式）。G1-G6 结构性缺口已修复。T2 auto-retain 路径可用（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`）。Phase 6 consolidation domain model 已实现（ConsolidationCandidate + ConsolidationType + 转换函数 + 29 tests），consolidation engine 尚未开始。Phase 7 procedural emergence 尚未开始。
+> **TLDR**: Phase 5a/5b extraction + review foundation 已实现，W1/W2 L1 稳定，W3 session-end extraction 已接入 runtime，L2 inline extraction 已接入受控 fake/real provider 边界。Phase 6 semantic consolidation 已实现 domain model、deterministic detector、source evidence loader、pipeline、T1 pending review dispatch、runtime hook、recency_factor、LLM-assisted content generation、keyword-level contradiction handling，并完成 DashScope/kimi-k2.5 real provider dogfood（候选只进入 T1 pending，不直接写 semantic/procedural store）。Phase 7 procedural emergence 已实现 CorrectionEvidence、ProceduralCandidate、active_records >50 fail-closed gate、deterministic detector、pending_review confirmation form、inline_confirmation seam、`MEMORY_EMERGENCE_ENABLED` opt-in runtime hook；non-interactive 默认 pending_review，procedural 不 silent retain、不 auto approve、不在 explicit human confirmation 前写正式 store。Filesystem E2E dogfood、InMemory/Filesystem rejected behavior 对齐、provider config 脱敏加载均已收口。Remaining limitations 是 dogfood/quality/runtime integration maturity，不是当前 P0/P1 blocker。
 
 ### 14.1 状态标记
 
@@ -838,26 +838,31 @@ T2 auto-retained 记录在 snapshot 中必须：
 |:--:|------|
 | ✅ | 已实现，生产可用 |
 | 🟡 | 部分实现，有已知缺口 |
-| 🔲 | 计划中（Phase 5-6），设计已确定 |
-| 🔮 | 远期研究（Phase 7+），仅概念设计 |
+| 🔲 | 计划中，设计已确定 |
+| 🔮 | 远期研究，仅概念设计 |
 | ❌ | 明确不做 |
 
 ### 14.2 模块映射
 
 | 模块 | 文件 | 状态 | Lifecycle 阶段 | 缺口 |
 |------|------|:--:|:---:|------|
-| Memory Contracts | `agent/memory_contracts.py` | 🟡 | Foundation | `MemoryOperationIntent` 缺少 `memory_type`/`source_type` 字段 |
+| Memory Contracts | `agent/memory_contracts.py` | ✅ | Foundation | `MemoryOperationIntent` 已携带 memory_type/source_type/approval metadata，store 不再重新推断类型 |
 | Memory Policy | `agent/memory_policy.py` | ✅ | W1 Explicit Retain | — |
 | L1 Suggestion Engine | `agent/memory_suggestions.py` | ✅ | W2 Inline Suggestion | — |
-| LLM Extraction | `agent/memory_extraction.py` | 🟡 | W2/W3 | 模块存在，仅 CLI 手动调用，未接入 agent loop |
-| Extraction Bridge | `agent/memory_extraction_bridge.py` | ✅ | Governance | bridge RULE 全量 T1，无 T2 路由 |
+| LLM Extraction | `agent/memory_extraction.py` | 🟡 | W2/W3 | fake-first + opt-in real provider boundary 已实现；真实 extraction quality 仍需更多 dogfood |
+| Extraction Bridge | `agent/memory_extraction_bridge.py` | ✅ | Governance | extraction → T1/T2 routing 已接入；T2 仅限 episodic |
 | Confirmation Flow | `agent/memory_confirmation.py` | ✅ | Governance T1 | — |
-| InMemory Store | `agent/memory_store.py` | 🟡 | Store | `_record_from_intent` 硬编码 `memory_type="semantic"` |
-| Filesystem Store | `agent/memory_fs_store.py` | 🟡 | Store | `_meta_from_intent` 和 `_apply_retain` fallback `"semantic"` |
-| Memory Runtime | `agent/memory_runtime.py` | 🟡 | Governance | 无 T2 路径；`_pending_decision` 单 slot，重启丢失 |
-| Operation Intent/Audit | `agent/memory_operations.py` | 🟡 | Store | 不传递 suggestion metadata |
-| Snapshot Generator | `agent/memory_snapshot_generator.py` | 🟡 | Recall | 不标注 `auto_retained` 来源 |
-| Session Memory | `agent/memory.py` | 🟡 | W3 Session-End | `extract_memories_from_session()` skeleton 已实现，含 governance routing + persistence pipeline |
+| InMemory Store | `agent/memory_store.py` | ✅ | Store | rejected intent 不进入正式 record；approved/human_approved/auto_retained 正常写入 |
+| Filesystem Store | `agent/memory_fs_store.py` | ✅ | Store | frontmatter + index metadata 已覆盖 episodic/semantic/procedural dogfood；rejected 不写正式 record |
+| Memory Runtime | `agent/memory_runtime.py` | 🟡 | Governance | W1/W2 runtime 保持薄编排；更完整 snapshot/ranking 仍属后续工作 |
+| Operation Intent/Audit | `agent/memory_operations.py` | ✅ | Store | memory metadata 已随 intent 传递到 store |
+| Snapshot Generator | `agent/memory_snapshot_generator.py` | 🟡 | Recall | 基础 recall 可用；snapshot ranking / budget hardening 仍是 future work |
+| Session Memory | `agent/memory.py` | 🟡 | W3/W4/W5 Runtime | session-end extraction、Phase 6 consolidation hook、Phase 7 emergence hook 已接入；Phase 7 默认关闭且只 dispatch pending_review |
+| Consolidation Domain | `agent/memory_consolidation.py` | ✅ | Consolidation | preference_evolved 仍 deferred |
+| Consolidation Detector | `agent/memory_consolidation_engine.py` | 🟡 | Consolidation | deterministic / keyword-level；quality 需更多 dogfood |
+| Consolidation Loader/Pipeline | `agent/memory_consolidation_loader.py`, `agent/memory_consolidation_pipeline.py` | ✅ | Consolidation | — |
+| Consolidation Review/LLM | `agent/memory_consolidation_review.py`, `agent/memory_consolidation_llm.py` | 🟡 | Consolidation T1 | LLM opt-in；真实 provider dogfood 已成功且脱敏，更多质量 dogfood 仍需要 |
+| Emergence Detector/Review | `agent/memory_emergence.py`, `agent/memory_review.py` | 🟡 | Emergence → Procedural | foundation + pending_review + inline seam 已实现；inline Agent loop integration 未接入 |
 
 ### 14.3 Write Interface 实现状态
 
@@ -865,78 +870,71 @@ T2 auto-retained 记录在 snapshot 中必须：
 |-----------|:--:|------|
 | W1 Explicit Retain | ✅ | `memory_policy.py` + `memory_runtime.py` |
 | W2 Inline Suggestion (L1) | ✅ | `memory_suggestions.py` + `memory_runtime._try_suggestions()` |
-| W2 Inline Suggestion (L2) | 🔲 | 设计完成，未实现 |
-| W3 Session-End Extraction | 🟡 | `memory.py:290` — skeleton 已实现；默认 fake extractor，runtime hook 已接入 `session.py:finalize_session()` |
-| W4 Background Consolidation | 🔲 | 未实现 |
-| W5 Emergence Detection | 🔮 | 概念设计，未实现 |
+| W2 Inline Suggestion (L2) | 🟡 | `memory_extraction.py` + `core.py` runtime hook；默认 fake，真实 provider opt-in |
+| W3 Session-End Extraction | 🟡 | `memory.py` + `session.py:finalize_session()`；fake-first，T1/T2 routing + persistence pipeline 已实现 |
+| W4 Background Consolidation | 🟡 | `memory_consolidation_*` + session-end runtime hook；env-gated，只 dispatch T1 pending，不 auto approve |
+| W5 Emergence Detection | 🟡 | `memory_emergence.py` + `memory.py` opt-in runtime hook；active_records/correction evidence fail-closed，只 dispatch pending_review |
 
 ### 14.4 Lifecycle 阶段实现状态
 
 | 阶段 | 状态 | 说明 |
 |------|:--:|------|
-| Ingestion | 🟡 | W1/W2 done, W3 skeleton done, W4/W5 planned |
-| Episodic | 🟡 | T2 auto-retain skeleton 已实现（默认 InMemory；持久化需 `MEMORY_STORE_BACKEND=filesystem`） |
-| Consolidation | 🟡 | domain model + detector + loader + pipeline + pending review dispatch 已实现，无 runtime 集成 |
-| Semantic | 🟡 | W1 explicit retain 可产出，无 consolidation 来源 |
-| Emergence | 🔮 | 概念设计 |
-| Procedural | 🟡 | W1 explicit retain 可产出，无 emergence 来源 |
-| Recall | ✅ | Recall API + Snapshot governance |
+| Ingestion | 🟡 | W1/W2/W3 已接入；W4/W5 以 env-gated runtime hook 进入候选/确认路径 |
+| Episodic | 🟡 | T2 auto-retain 已实现，filesystem E2E dogfood 验证 frontmatter/index/confidence；T2 仍仅限 episodic |
+| Consolidation | 🟡 | domain model + detector + loader + pipeline + pending review dispatch + runtime hook + LLM content generation 已实现 |
+| Semantic | 🟡 | W1 explicit retain 与 Phase 6 consolidation pending review accept 均可产出；reject 不写 store |
+| Emergence | 🟡 | CorrectionEvidence + ProceduralCandidate + detector + active_records gate + runtime hook 已实现；quality 需更多 dogfood |
+| Procedural | 🟡 | 仅 explicit human confirmation 后写入；pending_review 已接入，inline_confirmation seam 已实现但 Agent loop integration 未接入 |
+| Recall | 🟡 | list_records/recall 基础可用；snapshot ranking / budget hardening 仍是 future work |
 
-### 14.5 结构性缺口（Phase 4 遗留，应优先修复）
+### 14.5 已收口的结构性缺口与剩余限制
 
-以下 G1-G6 是 **known implementation gap**，已在两轮独立架构审计中确认。核心问题：**metadata continuity** — `memory_type`、`source_type`、`approval_status` 在 pipeline 传递中丢失，导致各模块 fallback 硬编码，违背 governance 集中化设计（Appendix G.7）。
+**已收口的结构性缺口**：
 
-| # | Gap | 位置 | 改动量 | 阻断 Phase 5? |
-|---|-----|------|:--:|:--:|
-| G1 | `MemoryOperationIntent` 无 `memory_type`/`source_type` | `memory_contracts.py` | +5 行 | 是 |
-| G2 | `build_memory_operation_intent` 不传 metadata | `memory_operations.py` | +8 行 | 是 |
-| G3 | `_meta_from_intent` 硬编码 fallback `"semantic"` | `memory_fs_store.py` | ~5 行 | 是 |
-| G4 | `_apply_retain` topic route fallback | `memory_fs_store.py` | ~5 行 | 是 |
-| G5 | `_record_from_intent` 硬编码 fallback | `memory_store.py` | ~5 行 | 是 |
-| G6 | Snapshot 不标注 auto_retained | `memory_snapshot_generator.py` | +10 行 | 否 |
+- `memory_type` / `source_type` / `approval_status` 已作为 metadata continuity invariant 在 intent → store → recall 路径中传递，不再依赖 store 层重新推断。
+- Episodic T2 auto-retain 已保持为 episodic，不会被 fallback 成 semantic。
+- InMemory 和 Filesystem backend 对 rejected intent 行为已对齐：rejected 不进入正式 record，也不污染 `list_records()`。
+- Phase 6 consolidation candidate 只进入 T1 pending review；accept/edit-and-accept 后才写 semantic record，reject 不写。
+- Phase 7 procedural candidate 只进入 explicit human confirmation 路径；non-interactive runtime 默认 pending_review，不 silent retain，不 auto approve。
+- Real provider dogfood config loading 已通过项目配置机制自动加载并输出脱敏 diagnostics；不打印 secret，不写 secret 到 report/store。
 
-**Metadata Continuity 作为 Governance Invariant**：
+**当前剩余限制（非 P0/P1 blocker）**：
 
-```
-memory_type / source_type / approval_status 禁止在 pipeline 中被重新推断。
-
-Governance routing 决定的类型必须原样传递到 store 写入。
-Store 层不得 fallback 硬编码类型。
-Snapshot 层不得丢失 auto_retained 标记。
-
-违反此 invariant 的后果：
-  Runtime 判断 T2 episodic → intent 不携带 memory_type →
-  store fallback "semantic" → T2 episodic 被静默写成 semantic。
-  这直接违背 T2 宪法锁定（§10.2: T2 仅限 episodic）。
-```
-
-**总计：~38 行增量修复。**修复后需通过 Appendix H 的 metadata continuity assertions 验证。
+- true active records <50 仍是 dogfood maturity issue；Phase 7 runtime hook 会 fail closed。
+- real procedural emergence quality 需要更多 dogfood。
+- correction pattern 仍是 deterministic / marker-based。
+- `preference_evolved` 尚未完整实现。
+- `inline_confirmation` Agent loop integration 未接入；当前只完成 request payload + response adapter seam。
+- snapshot ranking / budget hardening 仍是 future work。
+- backend abstraction / vector DB / graph / embedding deferred。
+- tag deferred until more dogfood。
 
 ### 14.6 Runtime Growth Constraint
 
-`memory_runtime.py` 当前 551 行（Phase 4 baseline），承担 W1/W2 governance + confirmation + snapshot 协调。在当前阶段这是可接受的——集中 orchestration 比过早拆分更简单。
+Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并由 `agent/memory.py` 承担 session-end extraction / consolidation / emergence 的薄编排。在当前阶段这是可接受的——集中 orchestration 比过早拆分更简单。
 
-**允许的职责范围**（Phase 4-5a）：
+**允许的职责范围**：
 - W1 explicit retain routing
 - W2 L1 inline suggestion routing
 - T1 confirmation coordination
 - Snapshot generation triggering
+- Session-end extraction / consolidation / emergence hook 的薄编排
 
 **Growth Boundary**：当以下任一条件触发时，应自然拆分而非继续膨胀：
 
 | 触发条件 | 拆分动作 |
 |---------|---------|
 | 模块超过 800 行 | 拆分 governance routing 为 `memory_governance.py`（T1/T2/T3 决策逻辑） |
-| 新增 W3 session-end extraction 协调 | governance 已拆分，runtime 仅做编排 |
-| 新增 T2 auto-retain 路径 | 必须拆分——T2 逻辑集中在一处，不可混入 W1 路径 |
+| Session-end hook 中出现复杂业务判断 | 拆出专门 lifecycle service，runtime 仅做编排 |
+| T2 auto-retain 逻辑与 W1 mutation 状态耦合 | 必须拆分——T2 逻辑集中在一处，不可混入 W1 路径 |
 | 新增 cross-session pending confirmation 管理 | 创建独立 `memory_pending.py`，不放入 runtime |
 
 **拆分原则**：
 - 不提前抽象——在代码量/职责增长到触发条件时再拆，不在触发前做
 - 拆出的模块有单一职责：`memory_governance.py` 只做 T1/T2/T3 routing，不 import store；`memory_pending.py` 只管理 pending confirmation 生命周期
-- Runtime 拆分后保留为薄 orchestrator：编排 governance + store + snapshot，不持有决策逻辑
+- Runtime 拆分后保留为薄 orchestrator：编排 governance + store + snapshot + lifecycle hooks，不持有决策逻辑
 
-**Phase 5a 建议**：G1-G6 修复后，T2 路径实现时，如果 runtime 行数仍 <800 且 T2 逻辑 <50 行，可暂不拆分。但如果 T2 逻辑开始与 W1 路径共享 mutation 状态（如共享 pending queue），必须立即拆分。
+**当前建议**：Phase 6/7 runtime hooks 已接入，但仍保持 env-gated、fail-closed、dispatch-only。只有当 hook 需要长期状态、复杂调度、后台任务或多 backend 协调时，才引入新 service 或 backend abstraction；当前不主动实现 backend abstraction / vector DB / graph / embedding。
 
 ---
 

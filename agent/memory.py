@@ -575,6 +575,21 @@ def extract_memories_from_session(
         }
     summary["consolidation"] = consolidation_summary
 
+    # Phase 7 Emergence Runtime Hook
+    # 这个 hook 只做 opt-in orchestration：读取当前 store 的已生效 records，
+    # 派生 correction evidence，调用 W5 detector，并把 procedural candidate
+    # 发往 T1 pending_review。它不写正式 procedural store，不触发
+    # inline_confirmation，不调用 LLM；失败也不能破坏 session-end extraction。
+    try:
+        emergence_summary = _maybe_run_emergence(store, summary)
+    except Exception as exc:
+        emergence_summary = {
+            "enabled": True,
+            "error": f"emergence hook error: {type(exc).__name__}",
+            "direct_store_write": False,
+        }
+    summary["emergence"] = emergence_summary
+
     return summary
 
 
@@ -657,6 +672,211 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
         "llm_enhanced_count": pipeline_result.llm_enhanced_count,
         "llm_warnings": list(pipeline_result.llm_warnings),
     }
+
+
+def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
+    """Phase 7 emergence runtime hook — opt-in gate + thin orchestration。
+
+    架构边界（RFC §8 / §10.5 / §15.5）：
+    - 默认关闭，必须显式设置 MEMORY_EMERGENCE_ENABLED=true
+    - 只从当前 MemoryStore 的已生效 records 派生 correction evidence
+    - active_records_count <50 或 correction evidence <3 时 fail closed
+    - 只 dispatch 到 T1 pending_review，不写正式 procedural store
+    - 不触发 inline_confirmation；非交互 runtime 默认 pending_review
+    - 不读取真实 sessions/runs，不读取 agent_log.jsonl，不调用真实 LLM
+
+    Returns:
+        emergence summary dict；只包含 counts / warnings / route 信息，
+        不包含 raw memory content 或 secret。
+    """
+    import os as _os
+
+    enabled = _os.getenv("MEMORY_EMERGENCE_ENABLED", "").strip() in (
+        "1", "true", "yes", "True", "TRUE",
+    )
+    if not enabled:
+        return {"enabled": False}
+
+    from agent.memory_emergence import (
+        ACTIVE_RECORDS_THRESHOLD,
+        MIN_CORRECTION_EVIDENCE,
+        DeterministicEmergenceDetector,
+        dispatch_procedural_candidates_to_pending_review,
+    )
+
+    all_records = tuple(store.list_records())
+    active_records = _active_records_for_emergence(all_records)
+    active_records_count = len(active_records)
+
+    summary: dict = {
+        "enabled": True,
+        "gate_passed": active_records_count >= ACTIVE_RECORDS_THRESHOLD,
+        "active_records_count": active_records_count,
+        "evidence_count": 0,
+        "candidate_count": 0,
+        "dispatched_count": 0,
+        "duplicate_count": 0,
+        "skipped_invalid": 0,
+        "warnings": [],
+        "confirmation_form": "pending_review",
+        "inline_confirmation": "not_triggered",
+        "direct_store_write": False,
+    }
+
+    if active_records_count < ACTIVE_RECORDS_THRESHOLD:
+        summary["skipped"] = "active_records_below_threshold"
+        summary["min_active_records"] = ACTIVE_RECORDS_THRESHOLD
+        summary["warnings"].append(
+            f"active_records_count={active_records_count} < "
+            f"{ACTIVE_RECORDS_THRESHOLD}，emergence detection disabled"
+        )
+        return summary
+
+    evidence = _load_emergence_correction_evidence(active_records)
+    detector = DeterministicEmergenceDetector()
+    detection = detector.detect(
+        evidence,
+        active_records_count=active_records_count,
+    )
+    summary["gate_passed"] = detection.gate_passed
+    summary["evidence_count"] = detection.evidence_count
+    summary["candidate_count"] = len(detection.candidates)
+    summary["warnings"].extend(detection.warnings)
+
+    if detection.evidence_count < MIN_CORRECTION_EVIDENCE:
+        summary["skipped"] = "insufficient_correction_evidence"
+        summary["min_correction_evidence"] = MIN_CORRECTION_EVIDENCE
+        return summary
+
+    if not detection.candidates:
+        summary["skipped"] = "no_candidate"
+        summary["skipped_pattern_count"] = detection.skipped_count
+        return summary
+
+    store_root = extraction_summary.get("store_root")
+    if store_root is None and hasattr(store, "root_dir"):
+        store_root = str(store.root_dir)
+
+    dispatch = dispatch_procedural_candidates_to_pending_review(
+        list(detection.candidates),
+        memory_root=store_root,
+        source="phase7_runtime_emergence",
+    )
+    summary["dispatched_count"] = dispatch.dispatched
+    summary["duplicate_count"] = dispatch.skipped_duplicate
+    summary["skipped_invalid"] = dispatch.skipped_invalid
+    if dispatch.warnings:
+        summary["warnings"].extend(dispatch.warnings)
+    return summary
+
+
+def _active_records_for_emergence(records: tuple) -> tuple:
+    """筛选 Phase 7 runtime hook 可使用的 active records。
+
+    active records 只包括已经进入正式 store 的 approved / auto_retained
+    records。pending/rejected/session_only 都不是 procedural emergence 的
+    稳定输入，避免 runtime hook 从未确认材料中涌现行为约束。
+    """
+    active_statuses = {"approved", "auto_retained"}
+    return tuple(
+        record for record in records
+        if getattr(record, "approval_status", "") in active_statuses
+        and not getattr(record, "sensitive_redacted", False)
+    )
+
+
+def _load_emergence_correction_evidence(records: tuple) -> list:
+    """从 active memory records 派生 Phase 7 CorrectionEvidence。
+
+    这是 runtime hook 的最小安全 loader：只消费 MemoryStore.list_records()
+    返回的已生效 records，不解析 filesystem frontmatter，不读取真实
+    sessions/runs 或 agent_log.jsonl。当前采用 deterministic marker-based
+    识别，质量只够触发 Phase 7 foundation，不代表真实 emergence quality。
+    """
+    from agent.memory_emergence import CORRECTION_MARKERS, CorrectionEvidence
+
+    evidence: list[CorrectionEvidence] = []
+    for record in records:
+        if getattr(record, "memory_type", "") not in {"episodic", "semantic"}:
+            continue
+        content = getattr(record, "content", "").strip()
+        if not content:
+            continue
+        if not any(marker in content for marker in CORRECTION_MARKERS):
+            continue
+
+        evidence.append(CorrectionEvidence(
+            record_id=getattr(record, "id", ""),
+            content=_truncate_emergence_evidence_content(content),
+            correction_type=_infer_emergence_correction_type(content),
+            scope=_infer_emergence_scope(record, content),
+            created_at=_metadata_value_as_str(record, "created_at"),
+            confidence=_metadata_confidence(record),
+            source_memory_type=getattr(record, "memory_type", "episodic"),
+            metadata={"source_type": getattr(record, "source_type", "")},
+        ))
+    return evidence
+
+
+def _truncate_emergence_evidence_content(content: str, limit: int = 240) -> str:
+    """限制 evidence 文本长度，避免 runtime summary 或 pending evidence 过长。"""
+    text = " ".join(content.strip().split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _infer_emergence_correction_type(content: str) -> str:
+    """用确定性关键词推断 correction_type。
+
+    这里不是质量模型，只是把 runtime records 映射成 Phase 7 detector 的
+    输入结构；真实 procedural quality 仍需后续 dogfood/评审。
+    """
+    lowered = content.lower()
+    if any(token in content for token in ("先", "然后", "再")):
+        return "process_order"
+    if any(token in lowered for token in ("ruff", "lint", "test", "pytest")):
+        return "code_quality"
+    if any(token in content for token in ("不要", "禁止", "别")):
+        return "behavioral_rule"
+    return "behavioral_rule"
+
+
+def _infer_emergence_scope(record, content: str) -> str:
+    """用确定性关键词推断 emergence scope，避免引入新分类器或 LLM。"""
+    lowered = content.lower()
+    if any(token in lowered for token in ("git", "commit", "pr")) or any(
+        token in content for token in ("提交", "提交流程")
+    ):
+        return "git_operations"
+    if any(token in content for token in ("日志", "根因", "报错")):
+        return "debugging"
+    if any(token in lowered for token in ("ruff", "lint", "pytest", "test")):
+        return "code_review"
+    scope = getattr(record, "scope", None)
+    if scope is not None and hasattr(scope, "value"):
+        return scope.value
+    return str(scope or "general")
+
+
+def _metadata_value_as_str(record, key: str) -> str | None:
+    metadata = getattr(record, "metadata", {}) or {}
+    value = metadata.get(key)
+    if value is None:
+        return None
+    return str(value)
+
+
+def _metadata_confidence(record) -> float | None:
+    metadata = getattr(record, "metadata", {}) or {}
+    value = metadata.get("confidence")
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 0.0 <= confidence <= 1.0:
+        return confidence
+    return None
 
 
 def _msg_content_for_extraction(msg: dict) -> str:
@@ -881,6 +1101,27 @@ def _format_extraction_summary(summary: dict) -> str:
     note = summary.get("false_positives_note", "")
     if note:
         lines.append(f"  Note: {note}")
+
+    # ── Phase 7 Emergence 可见性（只显示计数和路由，不显示原文）────────────
+    emergence = summary.get("emergence")
+    if isinstance(emergence, dict):
+        if emergence.get("enabled") is False:
+            lines.append("  Emergence:       disabled")
+        elif "error" in emergence:
+            lines.append("  Emergence:       error")
+            lines.append(f"    - {emergence.get('error')}")
+        elif emergence.get("enabled") is True:
+            lines.append(
+                "  Emergence:       "
+                f"active={emergence.get('active_records_count', 0)}, "
+                f"evidence={emergence.get('evidence_count', 0)}, "
+                f"candidates={emergence.get('candidate_count', 0)}, "
+                f"pending={emergence.get('dispatched_count', 0)}, "
+                f"form={emergence.get('confirmation_form', 'pending_review')}"
+            )
+            warnings = emergence.get("warnings") or []
+            if warnings:
+                lines.append(f"    warnings: {len(warnings)}")
 
     lines.append("─" * 40)
     return "\n".join(lines)

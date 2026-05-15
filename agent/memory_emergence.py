@@ -25,7 +25,8 @@ T1 human confirmation 有两种交互形式（RFC §10.5）：
 - silent / auto_retained / none 是明确禁止的 confirmation form
 - inline_confirmation 不写 store（除非 explicit accept/edit_accept），不调 LLM，不触发真实用户交互
 - inline_confirmation runtime hook / Agent loop integration 尚未接入
-- 不接 runtime hook / scheduler
+- opt-in runtime hook 由 agent.memory._maybe_run_emergence() 编排，默认写 pending_review
+- 不接 scheduler，不接 inline Agent loop
 - 不自动 approve
 - 不实现 procedural adoption
 """
@@ -468,8 +469,9 @@ def dispatch_procedural_candidates_to_pending_review(
     """将 ProceduralCandidate 列表分发到 T1 pending review（RFC §10.5 pending_review form）。
 
     这是 T1 confirmation 的异步形式——candidate 写入 _pending/ 等待人类 review。
-    另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认）；
-    当前模块只提供 inline seam，不接 Agent loop/runtime hook。
+    另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认）。
+    Phase 7 runtime hook 可调用本函数作为 non-interactive 默认路径；
+    inline Agent loop integration 仍未接入。
 
     对每个 candidate：
     1. 验证 dispatch 前置约束（procedural, T1, source_evidence≥3）
@@ -477,7 +479,7 @@ def dispatch_procedural_candidates_to_pending_review(
     3. 扫描 _pending/ 中已有 proposal_id，跳过重复
     4. 写入 _pending/t1_{timestamp}_{hash4}_{index}.json（含 confirmation_form="pending_review"）
 
-    不写正式 procedural store。不自动 approve。不调 LLM。不接 runtime。
+    不写正式 procedural store。不自动 approve。不调 LLM。不接 inline runtime。
 
     Args:
         candidates: ProceduralCandidate 列表

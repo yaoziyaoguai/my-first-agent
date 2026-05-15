@@ -126,6 +126,40 @@ def test_format_summary_does_not_leak_raw_content():
         assert forbidden not in output, f"summary 不应包含 {forbidden}"
 
 
+def test_format_summary_shows_emergence_counts_without_raw_content():
+    """Phase 7 emergence summary 只展示计数和确认路由，不展示原文。"""
+    summary = {
+        "store_backend": "filesystem",
+        "store_root": "/tmp/synthetic-memory",
+        "total_messages": 3,
+        "total_proposals": 0,
+        "t2_auto_retained": 0,
+        "t1_pending": 0,
+        "t3_ignored": 0,
+        "dedup_hits": 0,
+        "errors": [],
+        "false_positives_note": "",
+        "emergence": {
+            "enabled": True,
+            "active_records_count": 50,
+            "evidence_count": 3,
+            "candidate_count": 1,
+            "dispatched_count": 1,
+            "confirmation_form": "pending_review",
+            "warnings": [],
+            "raw_memory_content": "以后请先检查 git status 再提交",
+        },
+    }
+
+    output = _format_extraction_summary(summary)
+
+    assert "Emergence:" in output
+    assert "active=50" in output
+    assert "pending=1" in output
+    assert "pending_review" in output
+    assert "以后请先检查 git status" not in output
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # finalize_session hook 测试
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1014,3 +1048,263 @@ class TestConsolidationRuntimeHookFailureIsolation:
         assert "consolidation" in summary, (
             "consolidation 字段应出现在 summary 中"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 7 Emergence Runtime Hook 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _apply_emergence_runtime_record(
+    store,
+    *,
+    index: int,
+    content: str,
+    memory_type: str = "episodic",
+    confidence: float = 0.72,
+):
+    """写入 synthetic active record，作为 runtime hook 的安全输入。
+
+    这些记录只进入测试 store，不读取真实 sessions/runs，也不代表真实
+    procedural emergence quality。
+    """
+    from agent.memory_contracts import MemoryScope
+    from agent.memory_operations import (
+        MemoryConfirmationChoice,
+        MemoryConfirmationStatus,
+        MemoryDecisionType,
+        MemoryOperationIntent,
+        MemoryOperationType,
+        build_memory_audit_summary,
+    )
+
+    intent = MemoryOperationIntent(
+        operation_type=MemoryOperationType.RETAIN,
+        decision_type=MemoryDecisionType.RETAIN,
+        confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+        user_choice=MemoryConfirmationChoice.ACCEPT,
+        content_summary=content,
+        source_summary=f"phase7 runtime synthetic source {index}",
+        scope=MemoryScope.USER,
+        safety_summary="synthetic non-sensitive emergence runtime evidence",
+        sensitive_redacted=False,
+        user_visible_summary=f"[synthetic] {content[:80]}",
+        memory_type=memory_type,
+        source_type="agent_suggested",
+        confidence=confidence,
+    )
+    return store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+
+def _seed_active_records_for_emergence(store, *, correction_count: int = 3) -> None:
+    """构造 50 条 active records，其中前 N 条带 correction marker。
+
+    runtime hook 的 active_records gate 只看 store 中已确认/自动保留的
+    memory records；这里用 synthetic data 固定门槛，不触碰真实私人资料。
+    """
+    correction_texts = [
+        "以后请先检查 git status 再提交",
+        "下次先检查 git status，再决定是否 commit",
+        "记得先检查 git status，然后再进入提交流程",
+    ]
+    for i in range(50):
+        if i < correction_count:
+            content = correction_texts[i]
+        else:
+            content = f"synthetic active episodic record without correction marker {i}"
+        _apply_emergence_runtime_record(store, index=i, content=content)
+
+
+class TestEmergenceRuntimeHookGate:
+    """这些测试验证 RFC Phase 7 runtime hook 的显式开关、active_records gate、
+    T1 confirmation 输出和失败隔离边界，不验证真实 procedural emergence quality。
+
+    所有测试使用 synthetic data + tmp_path，不读取 .env / agent_log.jsonl /
+    真实 sessions/runs，不调用真实 LLM。
+    """
+
+    def test_disabled_by_default(self, monkeypatch):
+        """MEMORY_EMERGENCE_ENABLED 未设置时，runtime hook 不运行。"""
+        monkeypatch.delenv("MEMORY_EMERGENCE_ENABLED", raising=False)
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_store import InMemoryMemoryStore
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=InMemoryMemoryStore(),
+        )
+
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is False
+
+    def test_disabled_when_false(self, monkeypatch):
+        """MEMORY_EMERGENCE_ENABLED=false 时，runtime hook 不运行。"""
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "false")
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_store import InMemoryMemoryStore
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=InMemoryMemoryStore(),
+        )
+
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is False
+
+    def test_enabled_but_active_records_below_gate_fails_closed(self, monkeypatch):
+        """env 开启但 active_records<50 时 fail closed，不产生 candidate。"""
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "true")
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_store import InMemoryMemoryStore
+
+        store = InMemoryMemoryStore()
+        for i in range(3):
+            _apply_emergence_runtime_record(
+                store,
+                index=i,
+                content=f"以后请先检查 git status synthetic correction {i}",
+            )
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is True
+        assert emergence.get("gate_passed") is False
+        assert emergence.get("active_records_count") == 3
+        assert emergence.get("candidate_count") == 0
+        assert emergence.get("dispatched_count") == 0
+
+    def test_enabled_but_correction_evidence_below_gate_fails_closed(
+        self, monkeypatch, tmp_path,
+    ):
+        """active_records>=50 但 correction evidence<3 时不写 pending。"""
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        store = FilesystemMemoryStore(root_dir=tmp_path)
+        _seed_active_records_for_emergence(store, correction_count=2)
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is True
+        assert emergence.get("gate_passed") is True
+        assert emergence.get("active_records_count") == 50
+        assert emergence.get("evidence_count") == 2
+        assert emergence.get("candidate_count") == 0
+        assert emergence.get("dispatched_count") == 0
+        pending_dir = tmp_path / "_pending"
+        pending_files = (
+            list(pending_dir.glob("t1_*.json")) if pending_dir.exists() else []
+        )
+        assert pending_files == []
+
+    def test_enabled_with_sufficient_evidence_dispatches_pending_review(
+        self, monkeypatch, tmp_path,
+    ):
+        """active_records>=50 且 correction evidence>=3 时只写 T1 pending_review。"""
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        store = FilesystemMemoryStore(root_dir=tmp_path)
+        _seed_active_records_for_emergence(store, correction_count=3)
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is True
+        assert emergence.get("gate_passed") is True
+        assert emergence.get("active_records_count") == 50
+        assert emergence.get("evidence_count") == 3
+        assert emergence.get("candidate_count") >= 1
+        assert emergence.get("dispatched_count") >= 1
+        assert emergence.get("confirmation_form") == "pending_review"
+        assert emergence.get("inline_confirmation") == "not_triggered"
+        assert emergence.get("direct_store_write") is False
+
+        import json
+
+        pending_files = sorted((tmp_path / "_pending").glob("t1_*.json"))
+        assert pending_files
+        pending = json.loads(pending_files[0].read_text(encoding="utf-8"))
+        assert pending["memory_type"] == "procedural"
+        assert pending["approval_status"] == "pending"
+        assert pending["confirmation_form"] == "pending_review"
+        assert pending["confirmation_form"] != "inline_confirmation"
+        assert pending["confirmation_form"] not in {"silent", "auto_retained"}
+
+        procedural_records = [
+            r for r in store.list_records() if r.memory_type == "procedural"
+        ]
+        assert procedural_records == []
+
+    def test_emergence_failure_does_not_break_extraction_summary(
+        self, monkeypatch,
+    ):
+        """emergence hook 抛错时，session-end extraction summary 仍返回。"""
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "true")
+
+        def raise_loader_error(records):
+            raise RuntimeError("synthetic emergence loader failure")
+
+        monkeypatch.setattr(
+            "agent.memory._load_emergence_correction_evidence",
+            raise_loader_error,
+        )
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_store import InMemoryMemoryStore
+
+        store = InMemoryMemoryStore()
+        _seed_active_records_for_emergence(store, correction_count=3)
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        assert "total_messages" in summary
+        assert "total_proposals" in summary
+        emergence = summary.get("emergence", {})
+        assert emergence.get("enabled") is True
+        assert "error" in emergence
+
+    def test_emergence_hook_does_not_import_real_llm_clients(self):
+        """runtime hook 不直接 import real LLM SDK。"""
+        import ast
+        import inspect
+
+        from agent.memory import _maybe_run_emergence
+
+        source = inspect.getsource(_maybe_run_emergence)
+        tree = ast.parse(source)
+        forbidden = {"anthropic", "openai"}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module_name = ""
+                if isinstance(node, ast.Import):
+                    module_name = node.names[0].name
+                elif node.module:
+                    module_name = node.module
+                for keyword in forbidden:
+                    assert keyword not in module_name.lower(), (
+                        f"_maybe_run_emergence 不应直接 import {keyword}: "
+                        f"{module_name}"
+                    )

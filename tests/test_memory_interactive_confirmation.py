@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agent.memory_confirmation import (
@@ -70,6 +72,61 @@ def _make_retain_decision(content: str = "用户偏好蓝色") -> MemoryDecision
         reason="用户显式请求记住",
         provenance="cand-test",
     )
+
+
+def _patch_memory_interaction_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试中拦截 checkpoint 写入，避免触碰真实用户环境。"""
+    from agent import checkpoint
+
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda *_args, **_kwargs: None)
+
+
+def _make_confirmation_context(
+    *,
+    pending: dict,
+    memory_runtime: MemoryRuntime,
+    messages: list[dict] | None = None,
+):
+    """构造最小 ConfirmationContext，用于直接测试 handler 分流。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    from agent.confirm_handlers import ConfirmationContext
+
+    state = SimpleNamespace(
+        task=SimpleNamespace(
+            status="awaiting_user_input",
+            pending_user_input_request=pending,
+            current_plan=None,
+            current_step_index=0,
+            confirm_each_step=False,
+        ),
+        conversation=SimpleNamespace(messages=messages if messages is not None else []),
+    )
+    turn_state = SimpleNamespace(on_runtime_event=lambda _event: None)
+    return ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test-model",
+        continue_fn=lambda _turn_state: "continued",
+        memory_runtime=memory_runtime,
+    )
+
+
+def _make_pending_from_runtime(runtime: MemoryRuntime) -> tuple[dict, str | None]:
+    """通过真实 MemoryRuntime 生成旧 memory_confirmation pending。"""
+    result = runtime.evaluate_user_text("remember that I like blue")
+    request = runtime.get_pending_confirmation(result.candidate_id)
+    assert request is not None
+    pending = build_memory_pending_request(
+        request,
+        candidate_id=result.candidate_id,
+        origin_status="running",
+    )
+    return pending, result.candidate_id
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +291,12 @@ def test_resolve_confirmation_other_free_text_handled():
 
 
 def test_build_memory_pending_request_structure():
-    """build_memory_pending_request 生成的 pending dict 包含所有必要字段。"""
+    """build_memory_pending_request 生成的 pending dict 包含所有必要字段。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
     from agent.memory_confirmation import build_memory_confirmation_request
 
     decision = _make_retain_decision()
@@ -267,6 +329,141 @@ def test_build_memory_pending_request_structure():
     assert pending["_choice_map"]["3"] == "session_only"
     assert pending["_choice_map"]["4"] == "reject"
     assert pending["_choice_map"]["5"] == "other"
+
+
+def test_memory_confirmation_accept_routes_through_handle_user_input_step(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """memory_confirmation accept 仍由 confirm_handlers 分流到 memory_interaction。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+
+    reply = handle_user_input_step("1", ctx)
+
+    assert "已记住" in reply
+    assert ctx.state.task.pending_user_input_request is None
+    assert ctx.state.task.status == "running"
+    records = runtime._store.list_records()
+    assert len(records) == 1
+    assert "I like blue" in records[0].content
+
+
+def test_memory_confirmation_reject_routes_through_handle_user_input_step(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """memory_confirmation reject 仍不写入 store。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+
+    reply = handle_user_input_step("4", ctx)
+
+    assert reply == "已拒绝，不记住这条信息。"
+    assert ctx.state.task.pending_user_input_request is None
+    assert ctx.state.task.status == "running"
+    assert len(runtime._store.list_records()) == 0
+
+
+def test_memory_confirmation_edit_routes_through_handle_user_input_step(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """memory_confirmation edit 仍写入编辑后的内容。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+
+    reply = handle_user_input_step("2 I prefer green actually", ctx)
+
+    assert "已记住" in reply
+    records = runtime._store.list_records()
+    assert len(records) == 1
+    assert "green" in records[0].content
+
+
+def test_unknown_awaiting_kind_is_not_memory_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """未知 awaiting_kind 不能被误处理成 memory confirmation 或 inline 分支。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    from agent import checkpoint
+    from agent.confirm_handlers import handle_user_input_step
+
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda *_args, **_kwargs: None)
+    runtime = _make_runtime()
+    pending = {
+        "awaiting_kind": "unknown_memory_kind",
+        "question": "测试问题",
+        "why_needed": "测试原因",
+        "options": [],
+        "context": "",
+        "tool_use_id": "",
+        "step_index": None,
+    }
+    messages: list[dict] = []
+    ctx = _make_confirmation_context(
+        pending=pending,
+        memory_runtime=runtime,
+        messages=messages,
+    )
+
+    reply = handle_user_input_step("用户回答", ctx)
+
+    assert reply == "continued"
+    assert ctx.state.task.pending_user_input_request is None
+    assert ctx.state.task.status == "running"
+    assert len(runtime._store.list_records()) == 0
+    assert messages[-1]["role"] == "user"
+    assert "用户已经回答" in messages[-1]["content"][0]["text"]
+
+
+def test_core_and_user_input_handler_do_not_directly_write_memory_store():
+    """core / handler 不直接写 memory store，写入仍归 memory_interaction/service。
+
+    这些 characterization tests 用于钉死现有 pending_user_input_request →
+    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
+    分支破坏既有 memory_confirmation 流程。
+    """
+    import inspect
+
+    import agent.confirm_handlers as confirm_handlers
+    import agent.core as core
+
+    handler_src = inspect.getsource(confirm_handlers.handle_user_input_step)
+    core_src = inspect.getsource(core.chat)
+
+    assert "apply_operation_intent" not in handler_src
+    assert "apply_inline_confirmation_response" not in handler_src
+    assert "apply_operation_intent" not in core_src
+    assert "apply_inline_confirmation_response" not in core_src
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,20 @@ Connect the existing Phase 7 `inline_confirmation` seam to the Agent Loop so a
 `ProceduralCandidate` can be confirmed in the moment without weakening memory
 governance.
 
+Status after implementation:
+
+- `awaiting_kind` is fixed as `memory_inline_confirmation`.
+- `memory_interaction` has an inline pending request adapter, reply parser, and
+  reply handler.
+- `confirm_handlers.handle_user_input_step()` routes
+  `memory_inline_confirmation` to `memory_interaction`.
+- Characterization tests protect the existing `memory_confirmation` branch.
+- `core.py` remains orchestration-only and was not changed for this adapter.
+- Timeout / no response fallback is `pending_review` at the adapter level; full
+  TUI/CLI timeout event integration remains deferred.
+- Procedural silent retain and auto approve remain prohibited.
+- Backend abstraction / vector DB / graph / embedding remain deferred.
+
 The target flow is:
 
 ```text
@@ -141,7 +155,15 @@ with `awaiting_kind="request_user_input"` and sets task status to
 
 Inline memory confirmation should reuse the same persisted pending-request
 shape, but not pretend to be the model meta tool. It should use its own
-`awaiting_kind`, for example `memory_inline_confirmation`.
+`awaiting_kind="memory_inline_confirmation"`.
+
+This is an explicit design decision:
+
+- Reuse `state.task.status="awaiting_user_input"`.
+- Do not add a new `TaskState.status`.
+- Route by `pending_user_input_request["awaiting_kind"]`.
+- Keep `memory_inline_confirmation` as a sibling of the existing
+  `memory_confirmation` branch, not a subtype hidden inside it.
 
 ## 4. Recommended architecture
 
@@ -239,7 +261,9 @@ Fallback cases:
 - current loop cannot be interrupted safely
 - active tool confirmation or tool-running state
 - user timeout
+- user does not respond
 - invalid adapter payload
+- invalid interactive context
 - handler exception before explicit accept/edit
 
 Fallback action:
@@ -247,8 +271,17 @@ Fallback action:
 1. Do not write procedural memory.
 2. Dispatch the candidate to `pending_review` if it has not already been
    preserved.
-3. Keep enough proposal identity for deduplication.
-4. Report the route as pending review, not as inline success.
+3. Keep the candidate intact.
+4. Keep enough proposal identity for deduplication.
+5. Preserve all emergence metadata:
+   - `source_evidence`
+   - `correction_pattern`
+   - `correction_type`
+   - `evidence_summary`
+   - `confidence`
+6. Do not auto approve.
+7. Do not silent retain.
+8. Report the route as pending review, not as inline success.
 
 Inline failure must not drop the candidate. The fallback can preserve it in
 `_pending/` because `dispatch_procedural_candidates_to_pending_review()` already
@@ -270,6 +303,72 @@ deduplicates by deterministic proposal identity.
 - Boundary: it should not run emergence detection and should not know UI/TUI
   rendering details.
 
+Pseudocode shape:
+
+```python
+def build_inline_confirmation_pending_request(
+    request: InlineConfirmationRequest,
+    *,
+    origin_status: str,
+) -> dict:
+    return {
+        "awaiting_kind": "memory_inline_confirmation",
+        "question": "...",
+        "why_needed": "...",
+        "options": [
+            "1. Accept ...",
+            "2. Reject ...",
+            "3. Edit ...",
+            "4. Other / free text ...",
+        ],
+        "context": "",
+        "tool_use_id": "",
+        "step_index": None,
+        "_origin_status": origin_status,
+        "_choice_map": {"1": "accept", "2": "reject", "3": "edit", "4": "other"},
+        "_inline_confirmation_request": {
+            "candidate_content": request.candidate_content,
+            "source_evidence": list(request.source_evidence),
+            "correction_pattern": request.correction_pattern,
+            "correction_type": request.correction_type,
+            "evidence_summary": request.evidence_summary,
+            "confidence": request.confidence,
+            "confirmation_form": "inline_confirmation",
+            "proposal_id": request.proposal_id,
+            "created_at": request.created_at,
+        },
+    }
+
+
+def parse_inline_confirmation_reply(
+    user_text: str,
+    pending: dict,
+) -> InlineConfirmationResponse:
+    # "1" -> accept
+    # "2" -> reject
+    # "3 edited content" -> edit_accept(edited_content=...)
+    # "4 note" or arbitrary free text -> other(note/free_text=...)
+    # empty/invalid -> other or retry; never store
+    ...
+
+
+def handle_inline_confirmation_reply(
+    user_text: str,
+    ctx,
+    store,
+    *,
+    on_runtime_event=None,
+    fallback_memory_root=None,
+) -> str:
+    # Parse the user response.
+    # Only accept/edit_accept calls apply_inline_confirmation_response().
+    # reject/other/timeout are no-write.
+    # timeout/no response/cannot interrupt/invalid context fall back to
+    # pending_review through the memory emergence dispatch service.
+    # Clear pending and save checkpoint after a terminal reply.
+    ...
+```
+
 ### agent/confirm_handlers.py
 
 - Needs change: yes.
@@ -283,14 +382,21 @@ deduplicates by deterministic proposal identity.
 
 ### agent/core.py
 
-- Needs change: maybe.
-- Minimal change if needed:
-  - Only receive a prepared pending request from memory interaction code and set
-    `state.task.pending_user_input_request`.
-  - Enter `awaiting_user_input` and emit the existing user-input request event.
+- Needs change: only if an interactive runtime path is added in this phase.
+- Minimal orchestration allowed if needed:
+  - Receive a prepared pending request from memory interaction code.
+  - Set `state.task.pending_user_input_request`.
+  - Set `state.task.status="awaiting_user_input"`.
+  - Save checkpoint.
+  - Emit the existing user-input request event.
 - Why: core may be the orchestration point that pauses the loop.
-- Boundary: no emergence rules, no review archive logic, no direct store write,
-  no evidence parsing.
+- Boundary:
+  - `core.py` must not parse memory-internal fields.
+  - `core.py` must not write memory store.
+  - `core.py` must not call `apply_inline_confirmation_response()`.
+  - `core.py` must not process `source_evidence`, `correction_pattern`,
+    `evidence_summary`, or pending archive details.
+  - `core.py` must not decide memory governance.
 
 ### agent/memory.py
 
@@ -320,6 +426,41 @@ deduplicates by deterministic proposal identity.
   - Test response parsing for accept, edit, reject, other, invalid input.
   - Test JSON round trip.
 - Why: this is the missing P1-2 coverage before implementation.
+
+## 8.1 Characterization test strategy
+
+Before adding the new inline branch, tests must characterize the existing
+interactive memory confirmation path:
+
+```text
+pending_user_input_request
+-> state.task.status="awaiting_user_input"
+-> awaiting_kind="memory_confirmation"
+-> confirm_handlers.handle_user_input_step()
+-> memory_interaction.handle_memory_confirmation_reply()
+```
+
+The goal is to protect the existing W1/W2 `memory_confirmation` flow before
+adding `memory_inline_confirmation`.
+
+Required characterization coverage:
+
+1. `build_memory_pending_request()` output shape remains stable.
+2. `awaiting_kind="memory_confirmation"` still routes through
+   `confirm_handlers.handle_user_input_step()`.
+3. Existing accept path still writes only through `memory_interaction` /
+   memory runtime.
+4. Existing reject path still does not write.
+5. Existing edit path still writes edited content.
+6. Unknown `awaiting_kind` is not accidentally treated as
+   `memory_inline_confirmation`.
+7. `core.py` remains orchestration-only for pending setup; handlers and memory
+   services own memory-specific effects.
+8. Tests must not read `.env`, `agent_log.jsonl`, real `sessions/runs`, or call
+   a real LLM.
+
+After those characterization tests are in place, add the sibling
+`memory_inline_confirmation` tests and confirm the old branch remains green.
 
 ### tests/test_memory_session_hook.py
 
@@ -358,21 +499,28 @@ deduplicates by deterministic proposal identity.
 17. Tests do not read real `sessions/runs`.
 18. Tests do not call real LLM.
 
-## 10. Open questions
+## 10. Decisions and deferred questions
 
-- Should inline confirmation reuse `awaiting_kind="memory_confirmation"` with a
-  subtype, or add `awaiting_kind="memory_inline_confirmation"`?
-  - Recommendation: add `memory_inline_confirmation` to keep procedural
-    emergence separate from explicit retain/update/forget confirmation.
-- Should timeout always fallback to `pending_review`, or can it drop/no-write?
-  - Recommendation: fallback to `pending_review` to avoid losing a candidate
-    that already passed the emergence gate.
+- Decision: inline confirmation uses
+  `awaiting_kind="memory_inline_confirmation"`.
+  - Rationale: it keeps procedural emergence separate from existing
+    explicit retain/update/forget confirmation while reusing
+    `status="awaiting_user_input"`.
+  - No new `TaskState.status` is introduced.
+  - `pending_user_input_request["awaiting_kind"]` is the dispatch key.
+  - This is a symmetric extension next to the existing
+    `awaiting_kind="memory_confirmation"` branch.
+- Decision: timeout / no response / cannot interrupt / invalid interactive
+  context falls back to `pending_review`.
+  - The fallback must preserve the candidate.
+  - The fallback must not write the formal procedural store.
+  - The fallback must not auto approve.
+  - The fallback must not silent retain.
+  - The fallback must preserve `source_evidence`, `correction_pattern`,
+    `correction_type`, `evidence_summary`, and `confidence`.
 - Should inline confirmation be available in both CLI and TUI?
   - Recommendation: yes, but only through the shared pending request contract;
     no UI-specific memory logic.
-- Does Agent Loop need a new `TaskState.status`?
-  - Recommendation: no. Reuse `awaiting_user_input` and route by
-    `awaiting_kind`.
 - Where should interactive emergence candidate generation happen?
   - Recommendation: use a thin memory service/helper that returns a request or
     fallback dispatch result. Do not put detection or store logic in core.

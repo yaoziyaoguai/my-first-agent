@@ -508,7 +508,7 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
 def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     """Handle input when task status is awaiting_user_input.
 
-    awaiting_user_input 现在有三种触发来源：
+    awaiting_user_input 现在有四种触发来源：
     1. **执行期求助**：模型在普通 step 里调用了 request_user_input 元工具。
        特征：state.task.pending_user_input_request 非 None。
        语义：当前 step 还没完成，用户只是为它补充信息。
@@ -522,6 +522,10 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
        特征：pending_user_input_request.awaiting_kind == "memory_confirmation"。
        语义：用户在确认是否记住某条信息。
        行为：委托给 memory_interaction.handle_memory_confirmation_reply。
+    4. **memory_inline_confirmation**：Phase 7 procedural inline confirmation。
+       特征：pending_user_input_request.awaiting_kind == "memory_inline_confirmation"。
+       语义：用户显式确认/拒绝 procedural candidate。
+       行为：委托给 memory_interaction.handle_inline_confirmation_reply。
     """
     state = ctx.state
     turn_state = ctx.turn_state
@@ -536,6 +540,22 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
             user_input,
             ctx,
             memory_runtime=ctx.memory_runtime,
+            on_runtime_event=getattr(turn_state, "on_runtime_event", None),
+        )
+
+    # Phase 7 inline confirmation：这里只按 awaiting_kind 分流，不解析 memory
+    # 内部 metadata，也不写 store；写入边界仍在 memory_interaction /
+    # memory_emergence。
+    if pending.get("awaiting_kind") == "memory_inline_confirmation":
+        from agent.memory_interaction import handle_inline_confirmation_reply
+
+        store = getattr(ctx.memory_runtime, "_store", None)
+        if store is None:
+            return "未写入：memory store 不可用。"
+        return handle_inline_confirmation_reply(
+            user_input,
+            ctx,
+            store=store,
             on_runtime_event=getattr(turn_state, "on_runtime_event", None),
         )
 

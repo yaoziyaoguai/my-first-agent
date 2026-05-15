@@ -5,7 +5,8 @@ silent detection + T1 强制 human review。Procedural 永不可 silent retain�
 
 T1 human confirmation 有两种交互形式（RFC §10.5）：
 - pending_review：candidate 写入 _pending/，用户稍后 review（已接 review CLI）
-- inline_confirmation：agent 当场询问，用户当场确认（当前实现 seam；未接 Agent loop）
+- inline_confirmation：agent 当场询问，用户当场确认（payload seam 已接
+  memory_interaction / confirm_handlers adapter；non-interactive hook 仍默认 pending_review）
 
 本模块实现 Phase 7 foundation：
 - CorrectionEvidence: 用户纠正行为的纯输入视图
@@ -24,7 +25,7 @@ T1 human confirmation 有两种交互形式（RFC §10.5）：
 - confirmation_form 支持 "pending_review" 和 "inline_confirmation"（RFC §10.5）
 - silent / auto_retained / none 是明确禁止的 confirmation form
 - inline_confirmation 不写 store（除非 explicit accept/edit_accept），不调 LLM，不触发真实用户交互
-- inline_confirmation runtime hook / Agent loop integration 尚未接入
+- inline_confirmation runtime hook 尚未接入；Agent loop adapter 已最小接入
 - opt-in runtime hook 由 agent.memory._maybe_run_emergence() 编排，默认写 pending_review
 - 不接 scheduler，不接 inline Agent loop
 - 不自动 approve
@@ -471,7 +472,8 @@ def dispatch_procedural_candidates_to_pending_review(
     这是 T1 confirmation 的异步形式——candidate 写入 _pending/ 等待人类 review。
     另一种 T1 形式是 inline_confirmation（agent 当场询问，用户当场确认）。
     Phase 7 runtime hook 可调用本函数作为 non-interactive 默认路径；
-    inline Agent loop integration 仍未接入。
+    non-interactive runtime hook 仍默认 pending_review；inline Agent loop adapter
+    由 memory_interaction / confirm_handlers 承接。
 
     对每个 candidate：
     1. 验证 dispatch 前置约束（procedural, T1, source_evidence≥3）

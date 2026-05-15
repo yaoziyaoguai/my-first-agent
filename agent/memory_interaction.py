@@ -28,6 +28,10 @@ from agent.memory_confirmation import (
     MemoryConfirmationChoice,
     MemoryConfirmationRequest,
 )
+from agent.memory_emergence import (
+    InlineConfirmationRequest,
+    InlineConfirmationResponse,
+)
 
 
 # MemoryRuntime 的 resolve_confirmation 接口（避免循环 import）
@@ -100,6 +104,93 @@ def parse_memory_confirmation_reply(
     return MemoryConfirmationChoice.OTHER, text
 
 
+def build_inline_confirmation_pending_request(
+    request: InlineConfirmationRequest,
+    *,
+    origin_status: str,
+) -> dict[str, Any]:
+    """把 InlineConfirmationRequest 投影为 Ask User 兼容 pending dict。
+
+    架构边界：memory emergence 只产出 request；本 adapter 只做 JSON-safe
+    pending_user_input_request 转换，不写 store、不调用 UI、不 print/input。
+    """
+    choice_map = {
+        "1": "accept",
+        "2": "reject",
+        "3": "edit",
+        "4": "other",
+    }
+    options = [
+        "1. Accept — 记住这条 procedural memory",
+        "2. Reject — 不记住这条 procedural memory",
+        "3. Edit — 输入 3 后接编辑后的内容并确认记住",
+        "4. Other / free text — 其他回复或补充说明（不会自动写入）",
+    ]
+
+    return {
+        "awaiting_kind": "memory_inline_confirmation",
+        "question": (
+            "是否将这条行为规则记为 procedural memory？\n"
+            f"{request.candidate_content}"
+        ),
+        "why_needed": (
+            "Procedural memory 会影响未来行为，必须经过 explicit human "
+            "confirmation；拒绝、其他文本或无响应都不会写入正式 store。"
+        ),
+        "options": options,
+        "actions": ["accept", "reject", "edit", "other"],
+        "context": "",
+        "tool_use_id": "",
+        "step_index": None,
+        "_origin_status": origin_status,
+        "_choice_map": choice_map,
+        "_inline_confirmation_request": _inline_request_to_pending_payload(request),
+    }
+
+
+def parse_inline_confirmation_reply(
+    user_text: str,
+    pending: dict[str, Any],
+) -> InlineConfirmationResponse:
+    """把用户回复解析为无副作用 InlineConfirmationResponse。
+
+    解析层只表达用户意图，不写 store。只有 handler 收到 accept/edit_accept 后，
+    才能把 response 交给 memory_emergence.apply_inline_confirmation_response()。
+    """
+    text = (user_text or "").strip()
+    if not text:
+        raise ValueError("未收到 inline confirmation 回复")
+
+    choice_map: dict[str, str] = pending.get("_choice_map", {})
+
+    if text in choice_map:
+        action = choice_map[text]
+        if action == "accept":
+            return InlineConfirmationResponse(action="accept")
+        if action == "reject":
+            return InlineConfirmationResponse(action="reject")
+        if action == "other":
+            return InlineConfirmationResponse(action="other", free_text="用户选择 other")
+        if action == "edit":
+            raise ValueError("edit 需要提供编辑后的内容")
+
+    for key, action in choice_map.items():
+        if text.startswith(key + " ") or text.startswith(key + "\t"):
+            free_text = text[len(key):].strip()
+            if action == "accept":
+                return InlineConfirmationResponse(action="accept")
+            if action == "reject":
+                return InlineConfirmationResponse(action="reject")
+            if action == "edit":
+                return InlineConfirmationResponse(
+                    action="edit_accept",
+                    edited_content=free_text,
+                )
+            return InlineConfirmationResponse(action="other", free_text=free_text)
+
+    return InlineConfirmationResponse(action="other", free_text=text)
+
+
 def handle_memory_confirmation_reply(
     user_text: str,
     ctx: Any,
@@ -162,6 +253,148 @@ def handle_memory_confirmation_reply(
 
     # SESSION_ONLY 或其他：返回确认信息
     return f"已处理：{result.reason}"
+
+
+def handle_inline_confirmation_reply(
+    user_text: str,
+    ctx: Any,
+    *,
+    store: Any,
+    on_runtime_event: RuntimeEventSink | None = None,
+    fallback_memory_root: Any | None = None,
+) -> str:
+    """处理 inline confirmation 的用户回复。
+
+    学习型边界说明：
+    - 本函数是 Ask User pending dict 与 memory_emergence write boundary 之间的
+      adapter，不做 emergence detection，也不驱动 UI。
+    - accept/edit_accept 是 explicit confirmation，才调用
+      apply_inline_confirmation_response()。
+    - reject/other/no response 都是 no-write；no response 通过 pending_review
+      兜底保存 candidate，避免 inline 失败导致候选丢失。
+    """
+    from agent.checkpoint import save_checkpoint
+    from agent.memory_emergence import apply_inline_confirmation_response
+
+    state = ctx.state
+    pending = state.task.pending_user_input_request or {}
+    origin_status = pending.get("_origin_status", "running")
+
+    try:
+        request = _inline_request_from_pending(pending)
+    except (KeyError, TypeError, ValueError) as exc:
+        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        return f"未写入：inline confirmation payload 无效（{exc}）。"
+
+    try:
+        response = parse_inline_confirmation_reply(user_text, pending)
+    except ValueError:
+        fallback = _fallback_inline_confirmation_to_pending_review(
+            request,
+            memory_root=fallback_memory_root,
+        )
+        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        return (
+            "未收到确认回复，已 fallback 到 pending_review；"
+            f"未写入正式 procedural store（dispatched={fallback.dispatched}）。"
+        )
+
+    if response.action in {"accept", "edit_accept"}:
+        result = apply_inline_confirmation_response(request, response, store)
+        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        if result.status == "applied":
+            return "已确认并写入 procedural memory。"
+        return f"未写入：{result.message}"
+
+    result = apply_inline_confirmation_response(request, response, store)
+    _clear_pending_and_save(state, origin_status, save_checkpoint)
+    if result.action == "reject":
+        return "已拒绝，未写入 procedural memory。"
+    return "已记录为其他回复，未写入 procedural memory。"
+
+
+def _inline_request_to_pending_payload(
+    request: InlineConfirmationRequest,
+) -> dict[str, Any]:
+    """把 dataclass request 转成 checkpoint-safe dict。"""
+    return {
+        "candidate_content": request.candidate_content,
+        "source_evidence": list(request.source_evidence),
+        "correction_pattern": request.correction_pattern,
+        "correction_type": request.correction_type,
+        "scope": request.scope,
+        "evidence_summary": request.evidence_summary,
+        "confidence": request.confidence,
+        "confirmation_form": request.confirmation_form,
+        "allowed_actions": list(request.allowed_actions),
+        "proposal_id": request.proposal_id,
+        "created_at": request.created_at,
+    }
+
+
+def _inline_request_from_pending(
+    pending: dict[str, Any],
+) -> InlineConfirmationRequest:
+    """从 pending dict 还原 InlineConfirmationRequest。
+
+    pending_user_input_request 会进入 checkpoint；handler 恢复时不能依赖内存中的
+    dataclass 对象，所以这里显式从 JSON-safe payload 还原。
+    """
+    payload = pending["_inline_confirmation_request"]
+    return InlineConfirmationRequest(
+        candidate_content=payload["candidate_content"],
+        source_evidence=tuple(payload["source_evidence"]),
+        correction_pattern=payload["correction_pattern"],
+        correction_type=payload["correction_type"],
+        scope=payload.get("scope"),
+        evidence_summary=payload.get("evidence_summary"),
+        confidence=payload["confidence"],
+        confirmation_form=payload["confirmation_form"],
+        allowed_actions=tuple(payload["allowed_actions"]),
+        proposal_id=payload["proposal_id"],
+        created_at=payload["created_at"],
+    )
+
+
+def _fallback_inline_confirmation_to_pending_review(
+    request: InlineConfirmationRequest,
+    *,
+    memory_root: Any | None,
+):
+    """将 inline 无响应候选保存到 pending_review，不写正式 store。"""
+    from agent.memory_emergence import (
+        ProceduralCandidate,
+        dispatch_procedural_candidates_to_pending_review,
+    )
+
+    candidate = ProceduralCandidate(
+        content=request.candidate_content,
+        memory_type="procedural",
+        source_evidence=request.source_evidence,
+        correction_pattern=request.correction_pattern,
+        correction_type=request.correction_type,
+        scope=request.scope,
+        confidence=request.confidence,
+        governance_route="T1",
+        evidence_summary=request.evidence_summary,
+        created_at=request.created_at,
+    )
+    return dispatch_procedural_candidates_to_pending_review(
+        [candidate],
+        memory_root=memory_root,
+        source="phase7_inline_confirmation_fallback",
+    )
+
+
+def _clear_pending_and_save(
+    state: Any,
+    origin_status: str,
+    save_checkpoint_fn: Any,
+) -> None:
+    """清理 terminal inline pending 并恢复原 status。"""
+    state.task.pending_user_input_request = None
+    state.task.status = origin_status
+    save_checkpoint_fn(state, source="memory_interaction.inline_confirmation")
 
 
 def _sink_runtime_event(

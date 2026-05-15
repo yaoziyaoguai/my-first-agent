@@ -488,6 +488,8 @@ def test_pending_user_input_persistence_writers_are_reviewed() -> None:
         # Memory Interactive Confirmation v1：chat() 设置 pending，handle_memory_confirmation_reply 清 pending
         ("agent.core", "chat", "state.task.pending_user_input_request", 1),
         ("agent.memory_interaction", "handle_memory_confirmation_reply", "state.task.pending_user_input_request", 1),
+        # Phase 7 inline confirmation：terminal reply / fallback 后统一清 pending
+        ("agent.memory_interaction", "_clear_pending_and_save", "state.task.pending_user_input_request", 1),
         ("agent.response_handlers", "handle_end_turn_response", "state.task.pending_user_input_request", 1),
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_user_input_request", 1),
         ("agent.transitions", "apply_user_replied_transition", "state.task.pending_user_input_request", 1),

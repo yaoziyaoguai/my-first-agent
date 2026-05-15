@@ -508,6 +508,18 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "handle_memory_confirmation_reply",
             "state.task.status",
         ),
+        # Phase 7 inline confirmation：terminal reply / fallback 后由
+        # memory_interaction helper 清 pending 并恢复 origin_status。
+        (
+            "agent.memory_interaction",
+            "_clear_pending_and_save",
+            "state.task.pending_user_input_request",
+        ),
+        (
+            "agent.memory_interaction",
+            "_clear_pending_and_save",
+            "state.task.status",
+        ),
         ("agent.core", "_run_main_loop", "state.reset_task()"),
         ("agent.core", "_run_main_loop", "state.task.loop_iterations"),
         ("agent.core", "_run_planning_phase", "state.task.confirm_each_step"),

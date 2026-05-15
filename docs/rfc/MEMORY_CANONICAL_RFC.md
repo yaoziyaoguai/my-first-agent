@@ -977,8 +977,9 @@ Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并�
 
 遗留：
 - 真实 LLM extraction quality 尚未 dogfood 验证
-- semantic consolidation（Phase 6）未开始
-- procedural emergence（Phase 7）未开始
+- semantic consolidation — Phase 5b 时延后，已在 Phase 6 实现（domain model + detector + loader + pipeline + T1 pending review dispatch + runtime hook + LLM content generation + real provider dogfood）
+- procedural emergence — Phase 5b 时延后，Phase 7 foundation + opt-in runtime hook（`MEMORY_EMERGENCE_ENABLED`）+ pending_review + inline_confirmation seam 已实现
+- 当前遗留工作聚焦：dogfood maturity、preference_evolved、inline_confirmation Agent loop integration；backend abstraction / vector DB / graph / embedding 保持 deferred
 
 ### 15.4 Phase 6 — Consolidation（🟡 domain model + detector + loader + pipeline implemented）
 

@@ -9,12 +9,28 @@
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from agent import cli_renderer
 from agent.skills.registry import SkillRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "skills"
+FORMAL_SKILL_SYSTEM_DIR = PROJECT_ROOT / "agent" / "skill_system"
+
+
+def _module_imports(path: Path) -> set[str]:
+    """静态读取 import 关系，避免 import lifecycle 工具时触发注册或网络路径。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
+    return imports
 
 
 # ---------- 启动文案诚实度 ----------
@@ -125,3 +141,129 @@ def test_status_doc_acknowledges_no_skill_unit_tests():
         encoding="utf-8"
     )
     assert "没有 skill 单元测试" in doc
+
+
+# ---------- Formal Skill Phase 0：冻结旧原型边界 ----------
+
+def test_legacy_agent_skills_package_exports_no_formal_api() -> None:
+    """Phase 0 边界：旧 `agent.skills` 只作为 frozen prototype 存在。
+
+    这里允许 import package `__init__`，但不导入 registry/installer/loader。
+    目标是确认旧包没有通过顶层 `__all__` 暴露正式 Skill API，避免后续实现
+    误把 prototype 当成 canonical contract。
+    """
+
+    import agent.skills as legacy_skills
+
+    assert legacy_skills.__all__ == []
+    doc = legacy_skills.__doc__ or ""
+    assert "Legacy / experimental" in doc
+    assert "不是正式 Skill System" in doc
+    assert "默认工具注册路径不应自动启用 Skill lifecycle tools" in doc
+
+
+def test_skill_docs_pin_phase0_namespace_and_checkpoint_boundaries() -> None:
+    """Phase 0 文档边界：正式实现命名空间与 checkpoint 红线必须一致。"""
+
+    rfc = (PROJECT_ROOT / "docs" / "rfc" / "SKILL_CANONICAL_RFC.md").read_text(
+        encoding="utf-8"
+    )
+    loop = (
+        PROJECT_ROOT / "docs" / "roadmap" / "SKILL_SYSTEM_IMPLEMENTATION_LOOP.md"
+    ).read_text(encoding="utf-8")
+    audit = (
+        PROJECT_ROOT / "docs" / "audit" / "SKILL_SYSTEM_AUDIT_CHECKLIST.md"
+    ).read_text(encoding="utf-8")
+
+    assert "formal implementation namespace is `agent/skill_system/`" in rfc
+    assert "`agent/skills/` remains frozen/reference-only" in rfc
+    assert "Checkpoint stores unredacted Skill body, resources, or secrets." in audit
+
+    for legacy_file in (
+        "__init__.py",
+        "registry.py",
+        "installer.py",
+        "loader.py",
+        "local.py",
+        "parser.py",
+        "safety.py",
+    ):
+        assert f"`agent/skills/{legacy_file}`" in loop
+
+    assert "Formal Skill implementation must not modify frozen legacy" in loop
+    assert "create or modify `agent/skill_system/*`" in loop
+
+
+def test_default_tools_keep_skill_lifecycle_tools_explicit_opt_in() -> None:
+    """Phase 0 边界：默认工具入口不注册 Skill lifecycle tools。
+
+    只做源码级检查，不 import `agent.tools.install_skill`，这样测试不会触发
+    installer 依赖，也不会接近真实网络、`git clone` 或 `pip install` 路径。
+    """
+
+    tools_init = PROJECT_ROOT / "agent" / "tools" / "__init__.py"
+    install_tool = PROJECT_ROOT / "agent" / "tools" / "install_skill.py"
+    update_tool = PROJECT_ROOT / "agent" / "tools" / "update_skill.py"
+    load_tool = PROJECT_ROOT / "agent" / "tools" / "skill.py"
+
+    default_imports = _module_imports(tools_init)
+    assert default_imports.isdisjoint(
+        {
+            "agent.tools.install_skill",
+            "agent.tools.update_skill",
+            "agent.tools.skill",
+            "agent.skills",
+            "agent.subagents",
+        }
+    )
+
+    install_source = install_tool.read_text(encoding="utf-8")
+    update_source = update_tool.read_text(encoding="utf-8")
+    load_source = load_tool.read_text(encoding="utf-8")
+
+    assert 'confirmation="always"' in install_source
+    assert 'risk_level="high"' in install_source
+    assert 'capability="skill_lifecycle"' in install_source
+    assert 'confirmation="always"' in update_source
+    assert "from agent.skills.loader import format_skill_for_model" in load_source
+
+
+def test_formal_skill_namespace_is_not_legacy_contaminated() -> None:
+    """Phase 0 边界：正式 `agent/skill_system` 不得反向复用旧 prototype。
+
+    Phase 0 允许正式命名空间尚不存在；一旦后续 phase 创建该目录，本测试会
+    继续用 AST 守住它不能 import `agent.skills.*`。
+    """
+
+    if not FORMAL_SKILL_SYSTEM_DIR.exists():
+        assert not FORMAL_SKILL_SYSTEM_DIR.exists()
+        return
+
+    leaked_imports: dict[str, list[str]] = {}
+    for path in FORMAL_SKILL_SYSTEM_DIR.rglob("*.py"):
+        imports = sorted(
+            name
+            for name in _module_imports(path)
+            if name == "agent.skills" or name.startswith("agent.skills.")
+        )
+        if imports:
+            leaked_imports[str(path.relative_to(PROJECT_ROOT))] = imports
+
+    assert leaked_imports == {}
+
+
+def test_install_from_github_remains_legacy_explicit_opt_in_boundary() -> None:
+    """Phase 0 边界：installer 风险只被记录，不在测试中执行。
+
+    这个测试读取 docstring 标记，不调用 `install_from_github`。它确认旧函数
+    仍被标成真实网络 / 外部安装风险，后续正式实现不能把它当默认路径。
+    """
+
+    installer_source = (LEGACY_SKILLS_DIR / "installer.py").read_text(encoding="utf-8")
+
+    assert "def install_from_github" in installer_source
+    assert "真实网络访问" in installer_source
+    assert "`git clone`" in installer_source
+    assert "`pip install`" in installer_source
+    assert "explicit opt-in" in installer_source
+    assert '`confirmation="always"`' in installer_source

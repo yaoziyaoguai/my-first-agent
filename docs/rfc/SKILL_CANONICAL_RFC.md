@@ -6,6 +6,9 @@ This RFC supersedes the frozen `agent/skills/` prototype as the source of truth
 for future Skill work. It is written for a Coding Agent implementation loop:
 tests and code should trace back to the contracts below.
 
+The formal implementation namespace is `agent/skill_system/`; legacy
+`agent/skills/` remains frozen/reference-only until an approved migration phase.
+
 ## 1. Goal
 
 A Skill is a filesystem-first capability package. It encapsulates reusable

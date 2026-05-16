@@ -30,9 +30,9 @@ include but are not limited to:
 - `agent/skills/registry.py`
 - `agent/skills/installer.py`
 - `agent/skills/loader.py`
+- `agent/skills/local.py`
+- `agent/skills/parser.py`
 - `agent/skills/safety.py`
-- `agent/skills/security.py`
-- `agent/skills/tools.py`
 
 The formal namespace is `agent/skill_system/`. Implementation phases should
 create or modify `agent/skill_system/*`, and tests should target

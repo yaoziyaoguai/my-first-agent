@@ -7,7 +7,7 @@ Every phase starts by reading:
 - this TDD document
 
 The implementation loop writes or extends tests first, verifies red where
-appropriate, then implements the smallest behavior slice.
+appropriate, then implements the smallest behavior change.
 
 ## Phase 0: Freeze Legacy Skill Prototype Tests
 

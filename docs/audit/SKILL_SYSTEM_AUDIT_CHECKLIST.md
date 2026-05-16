@@ -13,6 +13,7 @@ P0 means stop and fix before proceeding.
 - Skill exposes hidden or high-risk tools without ToolRegistry policy.
 - Skill reads `.env`, real `agent_log.jsonl`, real `sessions/`, or real `runs/`.
 - Skill logs secrets or unredacted private content.
+- Checkpoint stores unredacted Skill body, resources, or secrets.
 - Skill triggers real LLM/provider calls outside parent Runtime.
 - Skill introduces SubAgent behavior without explicit authorization.
 

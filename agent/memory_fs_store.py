@@ -21,6 +21,7 @@ import json
 import os
 import re
 import threading
+import warnings
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -196,6 +197,15 @@ def _locked_filesystem_rmw(target_path: Path):
         with lock_path.open("a+b") as lock_file:
             if fcntl is not None:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            else:
+                # fcntl 不可用时只能降级为 best-effort 写入；这是可观测性
+                # warning，不改变 memory governance，也不输出任何 memory 正文。
+                warnings.warn(
+                    "filesystem memory lock degraded: fcntl unavailable; "
+                    "using process-local best-effort lock only",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
             try:
                 yield
             finally:
@@ -288,33 +298,32 @@ def remove_memory_section(filepath: Path, record_id: str) -> bool:
 
 def update_memory_section(filepath: Path, record_id: str, new_meta: dict, new_content: str) -> bool:
     """Update a specific memory section in a grouped topic file."""
-    if not filepath.exists():
-        return False
-    sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
-    new_sections: list[str] = []
-    updated = False
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-        if not section.startswith("---"):
-            section = "---\n" + section
-        try:
-            meta, _ = parse_frontmatter(section)
-        except Exception:
-            new_sections.append(section)
-            continue
-        if meta.get("id") == record_id:
-            new_sections.append(_format_section(new_meta, new_content))
-            updated = True
-        else:
-            new_sections.append(section)
-    if not updated:
-        return False
-    tmp = filepath.with_suffix(".tmp")
-    tmp.write_text("\n\n---\n\n".join(new_sections), encoding="utf-8")
-    tmp.rename(filepath)
-    return True
+    with _locked_filesystem_rmw(filepath):
+        if not filepath.exists():
+            return False
+        sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
+        new_sections: list[str] = []
+        updated = False
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+            if not section.startswith("---"):
+                section = "---\n" + section
+            try:
+                meta, _ = parse_frontmatter(section)
+            except Exception:
+                new_sections.append(section)
+                continue
+            if meta.get("id") == record_id:
+                new_sections.append(_format_section(new_meta, new_content))
+                updated = True
+            else:
+                new_sections.append(section)
+        if not updated:
+            return False
+        _atomic_write_text(filepath, "\n\n---\n\n".join(new_sections))
+        return True
 
 
 # ── index ───────────────────────────────────────────────────────────────────

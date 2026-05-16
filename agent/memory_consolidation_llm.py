@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agent.memory_consolidation import ConsolidationCandidate, EpisodicEvidence
 
@@ -45,18 +45,106 @@ _CONSOLIDATION_CONTENT_SYSTEM_PROMPT = """\
 {"content": "...", "evidence_summary": "...", "confidence_adjustment": 0.0, "warnings": []}
 """
 
+@dataclass(frozen=True, slots=True)
+class EvidenceBudgetConfig:
+    """LLM evidence prompt 的轻量 char budget。
 
-def _build_evidence_context(evidence_list: list[EpisodicEvidence]) -> str:
+    这是 P3 hardening，不是 tokenizer accounting：用 deterministic char guard
+    限制 prompt 输入规模，避免 dogfood/真实 provider 路径构造过长上下文。
+    """
+
+    max_evidence_items: int = 12
+    max_chars_per_evidence: int = 300
+    max_total_chars: int = 3600
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceBudgetSummary:
+    """budget 结果摘要，只包含计数，不包含原始 evidence 正文。"""
+
+    evidence_input_count: int
+    evidence_used_count: int
+    truncated_count: int
+    total_chars_used: int
+    budget_applied: bool
+
+    def to_safe_dict(self) -> dict[str, int | bool]:
+        """返回可打印/写入 dogfood report 的脱敏摘要。"""
+
+        return {
+            "evidence_input_count": self.evidence_input_count,
+            "evidence_used_count": self.evidence_used_count,
+            "truncated_count": self.truncated_count,
+            "total_chars_used": self.total_chars_used,
+            "budget_applied": self.budget_applied,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceBudgetResult:
+    """budget 后实际进入 LLM prompt 的 evidence 与脱敏摘要。"""
+
+    evidence: tuple[EpisodicEvidence, ...]
+    summary: EvidenceBudgetSummary
+
+
+def apply_evidence_budget(
+    evidence_list: list[EpisodicEvidence],
+    budget: EvidenceBudgetConfig | None = None,
+) -> EvidenceBudgetResult:
+    """对 LLM evidence 输入应用轻量 budget guard。
+
+    只裁剪传给 LLM prompt 的 content，不改变原始 store/evidence 对象，也不改变
+    validator、source_evidence、T1 pending 语义。被省略或截断的 evidence 只在
+    summary 中以计数呈现，避免输出 raw memory text 或 secret-like 内容。
+    """
+
+    cfg = budget or EvidenceBudgetConfig()
+    used: list[EpisodicEvidence] = []
+    truncated_count = 0
+    total_chars = 0
+
+    for index, evidence in enumerate(evidence_list):
+        if index >= cfg.max_evidence_items:
+            truncated_count += 1
+            continue
+        remaining = cfg.max_total_chars - total_chars
+        if remaining <= 0:
+            truncated_count += 1
+            continue
+
+        limit = min(cfg.max_chars_per_evidence, remaining)
+        content = evidence.content[:limit]
+        if len(content) < len(evidence.content):
+            truncated_count += 1
+        total_chars += len(content)
+        used.append(replace(evidence, content=content))
+
+    summary = EvidenceBudgetSummary(
+        evidence_input_count=len(evidence_list),
+        evidence_used_count=len(used),
+        truncated_count=truncated_count,
+        total_chars_used=total_chars,
+        budget_applied=truncated_count > 0,
+    )
+    return EvidenceBudgetResult(evidence=tuple(used), summary=summary)
+
+
+def _build_evidence_context(
+    evidence_list: list[EpisodicEvidence],
+    *,
+    budget: EvidenceBudgetConfig | None = None,
+) -> str:
     """将 evidence group 格式化为 LLM prompt 可用的上下文文本。
 
-    每条 evidence 截断到 300 字，避免 prompt 过长。
+    通过 apply_evidence_budget() 统一做轻量 char budget，避免 prompt 过长。
     """
     parts: list[str] = []
-    for e in evidence_list:
-        content_snippet = e.content[:300]
+    budgeted = apply_evidence_budget(evidence_list, budget)
+    for e in budgeted.evidence:
         parts.append(
             f"[record_id={e.record_id}] scope={e.scope or '-'} "
-            f"content={content_snippet}"
+            f"content={e.content}"
         )
     return "\n".join(parts)
 

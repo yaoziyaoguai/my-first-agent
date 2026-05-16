@@ -257,6 +257,24 @@ def _compute_recency_factor(
     return max(_RECENCY_FLOOR, recency)
 
 
+def compute_recency_factor(
+    group: list[EpisodicEvidence],
+    *,
+    now_epoch: float | None = None,
+) -> float:
+    """公开的最小 aging signal helper。
+
+    recency_factor 只参与 consolidation candidate confidence scoring；
+    它不修改已持久化 memory、不触发 auto approve，也不是后台 decay engine。
+    暴露这个薄 helper 是为了 dogfood / audit 能直接验证 RFC §D.2 的 aging
+    边界，而不是复制私有公式。
+    """
+
+    if now_epoch is None:
+        now_epoch = datetime.now(timezone.utc).timestamp()
+    return _compute_recency_factor(group, now_epoch)
+
+
 def _compute_confidence(
     group: list[EpisodicEvidence],
     consistency: float,

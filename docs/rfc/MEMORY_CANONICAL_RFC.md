@@ -905,10 +905,11 @@ T2 auto-retained 记录在 snapshot 中必须：
 - true active records <50 仍是 dogfood maturity issue；Phase 7 runtime hook 会 fail closed。
 - real procedural emergence quality 需要更多 dogfood。
 - correction pattern 仍是 deterministic / marker-based。
-- index validation 已有基本 consistency regression；完整 repair / verify CLI 属 future hardening。
-- LLM consolidation 已有 per-evidence char clipping、`max_tokens` 响应上限和 validator；复杂 token budgeting / tokenizer integration deferred。
-- recency_factor confidence scoring 已实现；完整 memory decay / aging / auto-delete policy deferred。
-- export/import CLI deferred；filesystem-first 下人工备份可复制 memory root。
+- index verify/repair minimal hardening 已实现：`validate_memory_index()` / `repair_memory_index()` 与 `memory index verify|repair` CLI 只处理派生 `_meta/index.json`，不改 memory record 正文或 governance metadata；更复杂 migration/repair daemon deferred。
+- LLM consolidation 已有 lightweight evidence budget guard（max items / per-evidence chars / total chars）和 `max_tokens` 响应上限；tokenizer-level budgeting deferred。
+- recency_factor confidence scoring 已实现并作为当前最小 aging signal 暴露；完整 memory decay / aging / auto-delete policy deferred。
+- filesystem archive export/import minimal hardening 已实现：只打包 memory root，默认排除 `.env` / `agent_log.jsonl` / `sessions` / `runs`；cross-backend export/import deferred。
+- fcntl 不可用时会降级为 process-local best-effort lock，并输出不含 memory 正文/secret 的 warning；POSIX/macOS 正常 `flock` 行为不变。
 - `preference_evolved` deterministic foundation 已实现；复杂隐式偏好演进仍需 future dogfood hardening。
 - `inline_confirmation` 已通过 memory_interaction adapter 和 confirm_handlers 分流最小接入 Agent loop；完整 TUI/CLI timeout 事件仍 deferred。
 - snapshot / recall current minimum 已实现；更精细 ranking quality 仍是 dogfood hardening。
@@ -943,10 +944,10 @@ T2 auto-retained 记录在 snapshot 中必须：
 - correction pattern deterministic / marker-based quality
 - inline confirmation CLI/TUI real experience, especially timeout event path
 - more nuanced snapshot ranking quality beyond current hard budget minimum
-- index verify/repair CLI
-- complex LLM token budgeting beyond current char clipping + max_tokens
+- richer index repair/migration beyond minimal verify/rebuild
+- tokenizer-level LLM token budgeting beyond lightweight char guard + max_tokens
 - full memory decay / aging policy
-- export/import tooling
+- cross-backend export/import tooling
 
 **Future deferred**：
 

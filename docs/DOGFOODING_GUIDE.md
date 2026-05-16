@@ -207,12 +207,25 @@ Emergence runtime hook 的 dogfood summary 必须能解释 gate 状态：
 - `disabled_reason=insufficient_correction_evidence`
 - `gate_reason=passed`
 
-P3 future hardening 当前处理：
+P3 hardening 当前处理：
 
-- index validation：已有基本 consistency regression；完整 verify/repair CLI deferred。
-- LLM token budget：当前使用 per-evidence char clipping、`max_tokens` 响应上限和 validator；复杂 tokenizer budgeting deferred。
-- memory decay：consolidation 已有 `recency_factor` confidence scoring；完整 aging / auto-delete policy deferred。
-- export / import：不实现 CLI；filesystem-first 下可人工复制 memory root 做备份。
+- index verify/repair：已提供 minimal filesystem CLI，只验证/重建派生 `_meta/index.json`，不修改 memory record 正文。
+- LLM token budget：已提供 lightweight evidence budget guard（max evidence items / per-evidence chars / total chars）和 `max_tokens` 响应上限；复杂 tokenizer budgeting deferred。
+- memory decay：consolidation 已有 `recency_factor` confidence scoring；当前只作为 candidate scoring 的 aging signal，完整 aging / auto-delete policy deferred。
+- export / import：已提供 filesystem archive export/import 安全路径；cross-backend export/import deferred。
+- fcntl warning：POSIX/macOS 正常 `flock` 不变；fcntl 不可用时输出 non-sensitive warning，说明并发安全降级为 best-effort。
+
+安全命令示例：
+
+```bash
+python main.py memory index verify
+python main.py memory index repair --dry-run
+python main.py memory index repair --apply
+python main.py memory archive export /tmp/my-first-agent-memory-backup.tar.gz
+python main.py memory archive import /tmp/my-first-agent-memory-backup.tar.gz --dry-run
+```
+
+不要把 API key 放在命令行里；不要 `cat` / `grep` `.env`。archive export 默认排除 `.env`、`agent_log.jsonl`、`sessions/`、`runs/`。
 
 ---
 

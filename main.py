@@ -742,6 +742,11 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_extraction_review_cli()
 
+    if argv and argv[0] == "memory" and len(argv) >= 2 and argv[1] in {"index", "archive"}:
+        from agent.memory_maintenance_cli import run_memory_maintenance_cli
+
+        return run_memory_maintenance_cli(argv[1:])
+
     # MCP bridge：受控 readiness 层，默认 disabled。
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。

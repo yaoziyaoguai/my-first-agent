@@ -1020,8 +1020,8 @@ def test_classify_model_output_does_not_touch_state_or_messages() -> None:
     assert snapshot_before == snapshot_after
 
 
-def test_core_dispatch_uses_classifier_and_routes_handlers_correctly() -> None:
-    """core.py 必须通过 classify_model_output 分派，而不是再用 inline 字符串比较。
+def test_model_output_dispatch_uses_classifier_and_routes_handlers_correctly() -> None:
+    """model_output_dispatch 必须通过 classify_model_output 分派。
 
     模拟边界：
     - 这是 source-level 契约测试。``_run_main_loop`` 是定义在 ``chat()``
@@ -1034,14 +1034,14 @@ def test_core_dispatch_uses_classifier_and_routes_handlers_correctly() -> None:
       路径删掉让未知 stop_reason 静默被吸收到已知类别。
     """
 
-    import agent.core as core
+    import agent.model_output_dispatch as dispatch
     from agent.runtime_events import ModelOutputKind, classify_model_output
 
-    # 1. core 必须实际 import 分类符号（而不是只放在文档里）。
-    assert core.classify_model_output is classify_model_output
-    assert core.ModelOutputKind is ModelOutputKind
+    # 1. dispatch 模块必须实际 import 分类符号（而不是只放在文档里）。
+    assert dispatch.classify_model_output is classify_model_output
+    assert dispatch.ModelOutputKind is ModelOutputKind
 
-    source = Path(core.__file__).read_text(encoding="utf-8")
+    source = Path(dispatch.__file__).read_text(encoding="utf-8")
 
     # 2. 分类调用必须出现在源码中。
     assert "classify_model_output(response.stop_reason)" in source
@@ -1049,7 +1049,7 @@ def test_core_dispatch_uses_classifier_and_routes_handlers_correctly() -> None:
     # 3. 4 类标签必须各自在 dispatch 中显式比较一次。
     for kind_name in ("MAX_TOKENS", "END_TURN", "TOOL_USE"):
         assert f"ModelOutputKind.{kind_name}" in source, (
-            f"core dispatch 必须按 ModelOutputKind.{kind_name} 路由"
+            f"model_output_dispatch 必须按 ModelOutputKind.{kind_name} 路由"
         )
 
     # 4. UNKNOWN 必须有显式 fallback（保留 "[系统] 未知的 stop_reason" 文案）。
@@ -1058,17 +1058,16 @@ def test_core_dispatch_uses_classifier_and_routes_handlers_correctly() -> None:
 
     # 5. 旧的 inline 比较模式不能再出现在 _run_main_loop 范围内——
     #    以函数边界粗略截取做静态检查，避免误伤其它注释。
-    loop_marker = "def _run_main_loop"
-    loop_start = source.index(loop_marker)
-    # 取后续 200 行内的内容做断言；core.py 该函数当前 ~120 行。
-    loop_segment = source[loop_start: loop_start + 8000]
+    dispatch_marker = "def dispatch_model_output"
+    dispatch_start = source.index(dispatch_marker)
+    dispatch_segment = source[dispatch_start: dispatch_start + 8000]
     for forbidden in (
         'response.stop_reason == "max_tokens"',
         'response.stop_reason == "end_turn"',
         'response.stop_reason == "tool_use"',
     ):
-        assert forbidden not in loop_segment, (
-            f"_run_main_loop 已迁移到 ModelOutputKind 分派，不应再出现 {forbidden}"
+        assert forbidden not in dispatch_segment, (
+            f"dispatch_model_output 已迁移到 ModelOutputKind 分派，不应再出现 {forbidden}"
         )
 
 
@@ -1083,14 +1082,14 @@ def test_core_dispatch_unknown_stop_reason_handled_via_explicit_fallback() -> No
       上一条 source-level 测试共同保证。
     """
 
-    import agent.core as core
+    import agent.model_output_dispatch as dispatch
 
-    source = Path(core.__file__).read_text(encoding="utf-8")
+    source = Path(dispatch.__file__).read_text(encoding="utf-8")
     # 必须保留对 UNKNOWN 的语义承诺：要么显式枚举引用，要么注释里写明。
     assert (
         "ModelOutputKind.UNKNOWN" in source
         or "UNKNOWN：未知 stop_reason" in source
-    ), "core.py 必须显式承认 UNKNOWN 分支存在，不能让未知 stop_reason 静默"
+    ), "model_output_dispatch 必须显式承认 UNKNOWN 分支存在，不能让未知 stop_reason 静默"
 
 
 def test_classify_model_output_does_not_leak_into_durable_state(
@@ -2793,24 +2792,35 @@ def test_chat_constructs_loop_context_instance_at_module_level_anchor():
 
     import inspect
 
-    from agent import core
+    from agent import core, core_contexts
 
-    helper_src = inspect.getsource(core._build_loop_context)
+    helper_src = inspect.getsource(core_contexts.build_loop_context)
     assert "LoopContext(" in helper_src, (
-        "_build_loop_context 必须显式构造 LoopContext 作为 SSOT 锚点"
+        "build_loop_context 必须显式构造 LoopContext 作为 SSOT 锚点"
     )
     assert "client=client" in helper_src, (
         "helper 必须把入参 client_obj 透传到 LoopContext.client"
         "（实际写法：client=client_obj 也可，下行兼容判断）"
     ) or "client=client_obj" in helper_src
-    assert (
-        "model_name=MODEL_NAME" in helper_src
-        or "model_name: str = MODEL_NAME" in helper_src
-    ), "helper 默认 model_name 必须是模块常量 MODEL_NAME"
-    assert (
-        "max_loop_iterations=MAX_LOOP_ITERATIONS" in helper_src
-        or "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in helper_src
-    ), "helper 默认 max_loop_iterations 必须是模块常量 MAX_LOOP_ITERATIONS"
+    assert "model_name: str" in helper_src, (
+        "core_contexts.build_loop_context 必须显式接收 model_name；"
+        "core wrapper 负责注入 MODEL_NAME 默认值"
+    )
+    assert "max_loop_iterations: int" in helper_src, (
+        "core_contexts.build_loop_context 必须显式接收 max_loop_iterations；"
+        "core wrapper 负责注入 MAX_LOOP_ITERATIONS 默认值"
+    )
+
+    wrapper_src = inspect.getsource(core._build_loop_context)
+    assert "build_loop_context(" in wrapper_src, (
+        "core._build_loop_context 必须保持兼容 wrapper，并委托 core_contexts"
+    )
+    assert "model_name: str = MODEL_NAME" in wrapper_src, (
+        "core._build_loop_context wrapper 默认 model_name 必须取自模块常量 MODEL_NAME"
+    )
+    assert "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in wrapper_src, (
+        "core._build_loop_context wrapper 默认 max_loop_iterations 必须取自模块常量"
+    )
 
     # 同时检查 chat() 仍然显式调用 helper（不绕过 SSOT），并且
     # 显式传入 MODEL_NAME / MAX_LOOP_ITERATIONS（保证 monkeypatch 生效）
@@ -3158,9 +3168,9 @@ def test_run_main_loop_does_not_construct_loop_context():
 
     import inspect
 
-    from agent import core
+    from agent import loop
 
-    src = inspect.getsource(core._run_main_loop)
+    src = inspect.getsource(loop.run_main_loop)
     assert "LoopContext(" not in src, (
         "_run_main_loop 函数体禁止构造 LoopContext；"
         "必须由上层 chat() 单源构造并透传"
@@ -3168,7 +3178,7 @@ def test_run_main_loop_does_not_construct_loop_context():
 
 
 def test_chat_remains_unique_loop_context_construction_site_in_core():
-    """agent/core.py 全文只能有一个 LoopContext(...) 构造点（在 chat() 内）。
+    """agent/core.py 不再直接构造 LoopContext，构造点在 core_contexts。
 
     这条比上一条更广——上一条只防 _run_main_loop；本条防整个 core.py 的
     任何 helper 偷偷构造 LoopContext。Phase 2.2-c 之后任何新增 helper 想
@@ -3177,13 +3187,20 @@ def test_chat_remains_unique_loop_context_construction_site_in_core():
 
     import inspect
 
-    from agent import core
+    from agent import core, core_contexts
 
     src = inspect.getsource(core)
     construction_count = src.count("LoopContext(")
-    assert construction_count == 1, (
-        f"agent/core.py 中 LoopContext(...) 构造调用必须恰好 1 次（chat() 内），"
-        f"实际：{construction_count} 次。SSOT 单源是 Phase 2.2-b 修复的核心契约"
+    assert construction_count == 0, (
+        f"agent/core.py 中不应再直接构造 LoopContext，实际：{construction_count} 次。"
+        "SSOT 单源已迁移到 agent.core_contexts.build_loop_context"
+    )
+
+    context_src = inspect.getsource(core_contexts)
+    context_count = context_src.count("LoopContext(")
+    assert context_count == 1, (
+        f"agent.core_contexts 中 LoopContext(...) 构造调用必须恰好 1 次，"
+        f"实际：{context_count} 次。"
     )
 
 
@@ -3208,9 +3225,9 @@ def test_run_main_loop_consumes_only_max_loop_iterations_from_loop_ctx():
     import ast
     import inspect
 
-    from agent import core
+    from agent import loop
 
-    src = inspect.getsource(core._run_main_loop)
+    src = inspect.getsource(loop.run_main_loop)
     tree = ast.parse(src)
     func_def = tree.body[0]
     assert isinstance(func_def, ast.FunctionDef)
@@ -3241,11 +3258,11 @@ def test_run_main_loop_consumes_only_max_loop_iterations_from_loop_ctx():
                 if sub.attr not in allowed:
                     illegal.append(sub.attr)
     assert illegal == [], (
-        f"_run_main_loop 函数体只允许消费 {allowed}；非法消费：{illegal}。"
+        f"run_main_loop 函数体只允许消费 {allowed}；非法消费：{illegal}。"
         "client / model_name 必须在 _call_model 边界消费，主循环不得绕过"
     )
     assert "max_loop_iterations" in consumed, (
-        "Phase 2.2-c 后 _run_main_loop 必须真正消费 loop_ctx.max_loop_iterations，"
+        "Phase 2.2-c 后 run_main_loop 必须真正消费 loop_ctx.max_loop_iterations，"
         "否则等于形迁移神不迁移（继续读 module-level MAX_LOOP_ITERATIONS）"
     )
 
@@ -3331,9 +3348,9 @@ def test_run_main_loop_no_longer_reads_module_level_max_loop_iterations():
     import ast
     import inspect
 
-    from agent import core
+    from agent import loop
 
-    src = inspect.getsource(core._run_main_loop)
+    src = inspect.getsource(loop.run_main_loop)
     tree = ast.parse(src)
     func_def = tree.body[0]
     assert isinstance(func_def, ast.FunctionDef)
@@ -3394,16 +3411,22 @@ def test_chat_loop_context_max_loop_iterations_equals_module_default():
 
     import inspect
 
-    from agent import core
+    from agent import core, core_contexts
 
-    helper_src = inspect.getsource(core._build_loop_context)
+    helper_src = inspect.getsource(core_contexts.build_loop_context)
     assert (
         "max_loop_iterations=MAX_LOOP_ITERATIONS" in helper_src
         or "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in helper_src
+        or "max_loop_iterations: int" in helper_src
     ), (
-        "_build_loop_context 默认 max_loop_iterations 必须取自模块常量 "
-        "MAX_LOOP_ITERATIONS（保持视觉与运行时真值一致）"
+        "build_loop_context 必须显式接收 max_loop_iterations，"
+        "core._build_loop_context wrapper 负责从 MAX_LOOP_ITERATIONS 注入默认值"
     )
+    wrapper_src = inspect.getsource(core._build_loop_context)
+    assert (
+        "max_loop_iterations: int = MAX_LOOP_ITERATIONS" in wrapper_src
+        or "max_loop_iterations=MAX_LOOP_ITERATIONS" in wrapper_src
+    ), "core._build_loop_context wrapper 默认值必须取自模块常量 MAX_LOOP_ITERATIONS"
 
 
 # ============================================================================
@@ -3656,22 +3679,28 @@ def test_build_confirmation_context_returns_confirmation_context_with_expected_f
 
 
 def test_chat_remains_unique_confirmation_context_construction_site_in_core():
-    """agent/core.py 全文只能有一个 ConfirmationContext(...) 字面构造点
-    （在 _build_confirmation_context helper 内）。
+    """agent/core.py 不再直接构造 ConfirmationContext。
 
-    与 LoopContext SSOT 测试同模式：防止 chat() 之外的任何 helper 偷偷
-    重建 ConfirmationContext，绕过 helper 工厂。
+    与 LoopContext SSOT 测试同模式：构造点迁移到 core_contexts，
+    core.py 只保留兼容 wrapper，避免 runtime core 继续堆积上下文装配细节。
     """
     import inspect
 
-    from agent import core
+    from agent import core, core_contexts
 
     src = inspect.getsource(core)
     construction_count = src.count("ConfirmationContext(")
-    assert construction_count == 1, (
-        f"agent/core.py 中 ConfirmationContext(...) 字面构造调用必须恰好 1 次"
-        f"（在 _build_confirmation_context helper 内），实际：{construction_count} 次。"
-        "SSOT 单源是 v0.5 第二小步的核心契约"
+    assert construction_count == 0, (
+        f"agent/core.py 中不应再直接构造 ConfirmationContext，"
+        f"实际：{construction_count} 次。"
+        "SSOT 单源已迁移到 agent.core_contexts.build_confirmation_context"
+    )
+
+    context_src = inspect.getsource(core_contexts)
+    context_count = context_src.count("ConfirmationContext(")
+    assert context_count == 1, (
+        f"agent.core_contexts 中 ConfirmationContext(...) 字面构造调用必须恰好 1 次，"
+        f"实际：{context_count} 次。"
     )
 
     # 同时检查 chat() 通过 helper 调用（不绕过 SSOT）

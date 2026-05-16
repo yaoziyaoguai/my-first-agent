@@ -1,11 +1,24 @@
 """程序入口：输入循环 + 调用 session 模块。"""
 import contextlib
 import io
-import os
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 
+from agent.cli.commands import dispatch_maintenance_command
+from agent.cli.display import (
+    _forward_runtime_event_to_legacy_callbacks,
+    _merge_chat_outputs,
+    _render_runtime_event_for_simple_cli,
+    _textual_stdout_fallback_output,
+)
+from agent.cli.input_backends import (
+    INPUT_BACKEND_ENV,  # noqa: F401 - 保持 main.INPUT_BACKEND_ENV 兼容测试/旧入口
+    _selected_input_backend,
+    read_user_input,  # noqa: F401 - main.read_user_input 是既有 public seam
+    read_user_input_event,
+)
 from agent.core import chat, get_state
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
@@ -13,13 +26,7 @@ from agent.display_events import (
     RuntimeEvent,
     render_runtime_event_for_cli,
 )
-from agent.input_backends.simple import (
-    read_user_input_event as read_simple_user_input_event,
-    read_user_input_text,
-)
 from agent.input_intents import classify_user_input
-from agent.runtime_events import RuntimeEventKind, command_event_transition
-from agent.user_input import UserInputEvent
 from agent.memory_review import run_pending_review_cli
 from agent.session import (
     init_session,
@@ -37,127 +44,6 @@ from agent.checkpoint import load_checkpoint
 
 
 CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
-INPUT_BACKEND_ENV = "MY_FIRST_AGENT_INPUT_BACKEND"
-DEBUG_OUTPUT_PREFIXES = (
-    "[DEBUG]",
-    "[CHECKPOINT]",
-    "[RUNTIME_EVENT]",
-    "[INPUT_RESOLUTION]",
-    "[TRANSITION]",
-    "[ACTIONS]",
-    # 兼容早期/手写 observer 输出：即使没有 [RUNTIME_EVENT] 前缀，也不应把
-    # event_type=... 这类内部观测字段投进 TUI conversation view。
-    "event_type=",
-)
-
-
-def _selected_input_backend() -> str:
-    """读取输入后端配置；main 只据此做 I/O 适配，不解释 Runtime 状态。"""
-
-    return os.getenv(INPUT_BACKEND_ENV, "simple").strip().lower()
-
-
-def _user_visible_stdout(captured_stdout: str) -> str:
-    """从 chat 的 stdout 里提取可给 TUI 展示的轻量用户可见输出。
-
-    这是 textual backend 的过渡桥接：RuntimeEvent 已是主路径，这里只兜住还没
-    迁移的 print-era session/异常/旧调用方输出。这里只过滤明显的
-    debug/checkpoint/runtime 观测日志，不解析模型语义，也不保存 checkpoint。
-
-    这不是最终架构。长期应由 RuntimeEvent / DisplayEvent 把“用户可见输出”
-    和“内部调试日志”从源头分开，而不是靠 stdout prefix 做后处理。当前保留
-    这层，是为了在 print-era Runtime 尚未完全事件化前，保证 checkpoint/debug/
-    runtime observer 日志不会进入 TUI conversation view。不要扩大
-    DEBUG_OUTPUT_PREFIXES；新增用户可见输出应优先发 RuntimeEvent。
-    """
-
-    lines = []
-    for line in captured_stdout.splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        if text.startswith(DEBUG_OUTPUT_PREFIXES):
-            continue
-        lines.append(line)
-    return "\n".join(lines).strip()
-
-
-def _merge_chat_outputs(reply: str, captured_stdout: str) -> str:
-    """合并 chat 返回值和 textual 捕获到的用户可见 stdout。
-
-    这是兼容旧输出模型的 fallback：有些控制文案来自 return，有些正文仍来自
-    print。这里不能把同一段 assistant 文本双写进 TUI；长期应由事件流明确区分
-    assistant.delta / assistant.done / control.message。
-    """
-
-    visible_stdout = _user_visible_stdout(captured_stdout)
-    reply_text = reply.strip()
-    if reply_text and visible_stdout and reply_text not in visible_stdout:
-        return f"{visible_stdout}\n{reply_text}"
-    return reply_text or visible_stdout
-
-
-def _textual_stdout_fallback_output(reply: str, captured_stdout: str) -> str:
-    """把 Textual 旧 stdout capture 限定为无 RuntimeEvent 时的 fallback。
-
-    这是 Runtime -> UI 输出边界上的临时兼容层：Textual 和 simple CLI 的主路径已经
-    是 RuntimeEvent；这里只兜住还没事件化的 print-era 用户可见文案，例如旧测试
-    fake、历史调用方或少量 session/异常输出。它不能继续扩展成新的输出协议，不能
-    承载 checkpoint、runtime_observer、conversation.messages、Anthropic API messages、
-    TaskState 状态机本体、debug print 或 terminal observer log。删除条件是所有用户
-    可见 Runtime 输出都能从源头发 RuntimeEvent，且旧 print-era 调用方不再需要投影到
-    Textual conversation view。
-    """
-
-    return _merge_chat_outputs(reply, captured_stdout)
-
-
-def _forward_runtime_event_to_legacy_callbacks(
-    event: RuntimeEvent,
-    *,
-    on_output_chunk: Callable[[str], None] | None,
-    on_display_event: Callable[[DisplayEvent], None] | None,
-) -> bool:
-    """把 RuntimeEvent 转发给旧 callback，并返回是否产生 assistant streaming。
-
-    这是 main.py 的 deprecated compatibility bridge：Textual/simple CLI 主路径已经
-    消费 RuntimeEvent；旧 `on_output_chunk` / `on_display_event` 只服务未迁移调用方和
-    回归测试，不能作为新功能入口。这里只做 RuntimeEvent -> old callback 的集中转发，
-    不能继续扩展成新的输出协议，也不能把 checkpoint、runtime_observer、debug print、
-    terminal observer log、conversation.messages、Anthropic API messages、TaskState
-    状态机本体、用户输入边界或用户可见输出边界混在一起。
-    """
-
-    if event.event_type == EVENT_ASSISTANT_DELTA:
-        if on_output_chunk is not None:
-            on_output_chunk(event.text)
-        return True
-    if event.display_event is not None and on_display_event is not None:
-        on_display_event(event.display_event)
-    return False
-
-
-def _render_runtime_event_for_simple_cli(event: RuntimeEvent) -> bool:
-    """把 RuntimeEvent 投影到 simple CLI，并返回是否输出了 assistant delta。
-
-    这里是 simple CLI 的 RuntimeEvent sink：它只负责终端投影，不反向修改
-    Runtime state，不写 checkpoint，不追加 conversation.messages，也不构造
-    Anthropic API messages。这样做是为了让 simple CLI 和 Textual 共享同一条
-    Runtime -> UI 用户可见输出边界，而不是继续依赖 core.py 的无 sink print
-    fallback。debug print、terminal observer log、checkpoint 日志不能从这里混入；
-    那些仍走各自的结构化日志/显式 debug 通道。
-    """
-
-    rendered = render_runtime_event_for_cli(event)
-    if not rendered:
-        return False
-
-    if event.event_type == EVENT_ASSISTANT_DELTA:
-        print(rendered, end="", flush=True)
-        return True
-
-    print(f"\n{rendered}", flush=True)
-    return False
 
 
 def _run_textual_runtime_turn(
@@ -376,78 +262,6 @@ def run_textual_main_loop() -> None:
     finalize_session()
 
 
-def read_user_input(
-    prompt: str = "你: ",
-    *,
-    reader: Callable[[str], str] = input,
-    writer: Callable[[str], None] = print,
-) -> str | None:
-    """读取一次完整的用户输入。返回：
-    - str：要交给 chat 的原始内容（调用方自行 strip + 过滤空串）
-    - None：用户在 /multi 模式下 /cancel，调用方应跳过本轮、不调 chat
-
-    输入分支：
-    - `/multi` 起头 → 进入显式多行模式，单独一行 `/done` 提交、`/cancel` 取消
-    - ``` 起头 → 进入粘贴围栏模式，再次单独一行 ``` 结束（无 cancel 路径，
-      若需中断请用 Ctrl+C 让 main_loop 走 KeyboardInterrupt 分支）
-    - 其它 → 普通单行，原样返回（与历史行为一致）
-
-    reader / writer 通过参数注入，方便单元测试用 fake 替换 input / print。
-    """
-    return read_user_input_text(prompt=prompt, reader=reader, writer=writer)
-
-
-def read_user_input_event(
-    prompt_text: str = "你: ",
-    *,
-    latest_output: str = "",
-) -> UserInputEvent:
-    """按环境变量选择输入后端并读取一轮 UserInputEvent。
-
-    这是 main loop 和 User Input Layer 的薄适配：submitted 才会进入 chat；
-    cancelled/closed 不会被伪造成空字符串。这里不解释输入语义，也不直接
-    保存 checkpoint，保持 Runtime action 的职责边界。
-
-    latest_output 只给 textual backend 展示上一轮用户可见输出；simple backend
-    仍保持原来的终端 prompt 行为。
-    """
-
-    backend = _selected_input_backend()
-    if backend == "textual":
-        from agent.input_backends.textual import read_user_input_event_tui
-
-        return read_user_input_event_tui(
-            prompt_text=prompt_text,
-            latest_output=latest_output,
-        )
-
-    if backend not in ("", "simple"):
-        print(f"[系统] 未知输入后端 {backend!r}，已回退到 simple")
-
-    return read_simple_user_input_event(prompt=prompt_text)
-
-
-def _maintenance_command_transition(kind: RuntimeEventKind):
-    """声明 health/logs 子命令是 no-op Runtime transition。
-
-    v0.4 Phase 1 先落一个低风险切片：维护命令可以输出报告，但不拥有
-    TaskState 状态迁移、不写 checkpoint、不清 pending，也不推进 step。
-    这里返回 TransitionResult 给 main() 做显式边界检查；真正的报告渲染仍由
-    health_report / log_viewer 负责。
-    """
-
-    outcome = command_event_transition(kind)
-    if outcome.next_status is not None or outcome.should_checkpoint:
-        raise RuntimeError(f"maintenance command must be no-op: {kind.value}")
-    if (
-        outcome.clear_pending_tool
-        or outcome.clear_pending_user_input
-        or outcome.advance_step
-    ):
-        raise RuntimeError(f"maintenance command cannot mutate task state: {kind.value}")
-    return outcome
-
-
 def main_loop():
     last_interrupt_time = 0
     latest_output = ""
@@ -607,145 +421,12 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in {"--shell", "shell"}:
         argv = argv[1:]
 
-    if argv and argv[0] in {"process", "scan", "status", "preflight"}:
-        from llm.cli import main as process_main
-
-        return process_main(argv)
-
-    # MCP config management 是开发者工作流入口，不是 runtime brain；这里必须早于
-    # init_session/main_loop 转发，避免命令行校验时误进入交互式 stdin。
-    if len(argv) >= 2 and argv[0] == "mcp" and argv[1] == "config":
-        from agent.mcp_config_cli import run_mcp_config_cli
-
-        return run_mcp_config_cli(argv[1:])
-
-    # Local Agent Productization RFC 的 thin CLI seam：``python main.py demo`` 跑一次
-    # fake provider 闭环，不需要 API key、不联网、不读 secret，只往 ``workspace/demo/``
-    # 或显式 tmp 路径写一份 demo note。所有业务逻辑在 ``agent.local_demo`` 里。
-    if argv and argv[0] == "demo":
-        from agent.local_demo import run_demo_cli
-
-        return run_demo_cli(argv[1:])
-
-    # v0.2 release：health 子命令脱离主循环单独诊断 workspace_lint / log_size /
-    # session_accumulation 等非阻塞 warning。
-    # v0.3 M2 升级：默认输出结构化报告（含 risk + 建议命令），新增 --json 给脚本用。
-    if argv and argv[0] == "health":
-        from agent.health_check import collect_health_results
-        from agent.health_report import format_health_report, format_health_report_json
-
-        _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
-        results = collect_health_results()
-        if "--json" in argv[1:]:
-            print(format_health_report_json(results))
-        else:
-            print(format_health_report(results))
-        return 0
-
-    # v0.3 M4：可读 observer/logs viewer。最小入口：
-    #   python main.py logs                         默认 tail 50 + 隐藏 runtime_observer
-    #   python main.py logs --tail N                改变截尾条数（N>0；非整数报错回 0）
-    #   python main.py logs --session <id-prefix>   按 session 前缀过滤
-    #   python main.py logs --event tool_executed   按事件类型过滤
-    #   python main.py logs --tool calculate        按工具名过滤
-    #   python main.py logs --include-observer      显式打开 runtime_observer
-    if argv and argv[0] == "logs":
-        from agent.log_viewer import render_logs
-
-        _maintenance_command_transition(RuntimeEventKind.LOGS_COMMAND)
-        rest = argv[1:]
-
-        # v0.4 主线 A：`logs cleanup` 子命令。
-        # 第一切片：dry-run inventory（agent_log.jsonl / sessions/ / runs/）。
-        # 第二切片：`--apply` 仅对 agent_log.jsonl 做受确认的原子 rename
-        #   （仍不 gzip / 不删除 / 不读取内容；不处理 sessions/runs/.env）。
-        # 详见 agent/log_cleanup.py 顶部架构说明。
-        if rest and rest[0] == "cleanup":
-            from pathlib import Path
-            from agent.log_cleanup import (
-                archive_agent_log,
-                collect_cleanup_candidates,
-                format_cleanup_dry_run_report,
-            )
-
-            project_root = Path(__file__).resolve().parent
-            cleanup_args = rest[1:]
-            apply_flag = "--apply" in cleanup_args
-
-            # 始终先打印 inventory（让 --apply 用户也能看到上下文）
-            candidates = collect_cleanup_candidates(project_root)
-            print(format_cleanup_dry_run_report(candidates), end="")
-
-            # archive 仅作用于 agent_log.jsonl；--apply 才进入受确认路径
-            print()
-            result = archive_agent_log(project_root, apply=apply_flag)
-            print(result.message)
-            return 0
-
-        def _opt(name: str) -> str | None:
-            if name in rest:
-                idx = rest.index(name)
-                if idx + 1 < len(rest):
-                    return rest[idx + 1]
-            return None
-
-        try:
-            tail_str = _opt("--tail")
-            tail = int(tail_str) if tail_str is not None else 50
-        except ValueError:
-            print(f"--tail 需要整数，得到：{tail_str!r}")
-            return 2
-
-        print(
-            render_logs(
-                tail=tail,
-                session_id=_opt("--session"),
-                event=_opt("--event"),
-                tool=_opt("--tool"),
-                include_observer="--include-observer" in rest,
-            )
-        )
-        return 0
-
-    # v0.5 Phase 1 第三小步：``sessions inventory`` / ``runs inventory`` 子命令。
-    # 只读 metadata 盘点（DRY RUN），与 v0.4 ``logs cleanup`` 同模式但
-    # 范围更细——按文件 count / total_bytes / mtime range / by_extension /
-    # by_prefix / sample_paths 输出结构化报告。
-    # 严格不删除/不移动/不压缩/不读取文件正文（由 agent/local_artifacts.py
-    # 顶部 docstring + AST 守卫测试钉死）。详见 agent/local_artifacts.py。
-    if argv and argv[0] in {"sessions", "runs"}:
-        from pathlib import Path
-        from agent.local_artifacts import (
-            format_artifact_inventory_report,
-            inventory_known_artifact,
-        )
-
-        kind = argv[0]
-        sub = argv[1] if len(argv) > 1 else None
-        if sub != "inventory":
-            print(
-                f"用法：python main.py {kind} inventory\n"
-                f"当前 v0.5 第三小步**只**支持只读 inventory；不支持 cleanup/apply/rotation。"
-            )
-            return 2
-
-        project_root = Path(__file__).resolve().parent
-        inv = inventory_known_artifact(project_root, kind)
-        print(format_artifact_inventory_report(inv), end="")
-        return 0
-
-    # Memory extraction review：显式 CLI 子命令，从 checkpoint 中读取对话记录，
-    # 调用 LLM extraction → 逐条展示 proposal → 用户确认 → 写入 store。
-    # 不进入 agent loop，不修改 MemoryRuntime。
-    if argv and argv[0] == "memory" and len(argv) >= 2 and argv[1] == "extract":
-        from agent.memory_extraction_review import run_extraction_review_cli
-
-        return run_extraction_review_cli()
-
-    if argv and argv[0] == "memory" and len(argv) >= 2 and argv[1] in {"index", "archive"}:
-        from agent.memory_maintenance_cli import run_memory_maintenance_cli
-
-        return run_memory_maintenance_cli(argv[1:])
+    command_result = dispatch_maintenance_command(
+        argv,
+        project_root=Path(__file__).resolve().parent,
+    )
+    if command_result is not None:
+        return command_result
 
     # MCP bridge：受控 readiness 层，默认 disabled。
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。

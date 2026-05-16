@@ -1371,7 +1371,7 @@ class TestEmergenceRuntimeHookGate:
             raise RuntimeError("synthetic emergence loader failure")
 
         monkeypatch.setattr(
-            "agent.memory._load_emergence_correction_evidence",
+            "agent.memory_runtime_hooks._load_emergence_correction_evidence",
             raise_loader_error,
         )
 

@@ -306,7 +306,6 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.core", "_compress_history_and_sync_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
-        ("agent.core", "_run_main_loop", "clear_checkpoint", "_clear_checkpoint", 1),
         ("agent.core", "_run_planning_phase", "save_checkpoint", "_save_checkpoint", 1),
         # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支保存状态
         ("agent.core", "chat", "save_checkpoint", "_save_ckpt", 1),
@@ -369,7 +368,7 @@ def test_core_checkpoint_alias_calls_are_not_invisible_to_inventory() -> None:
         "_run_main_loop",
         "clear_checkpoint",
         "_clear_checkpoint",
-    ) in calls
+    ) not in calls
 
 
 def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() -> None:

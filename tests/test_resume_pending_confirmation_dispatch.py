@@ -82,6 +82,7 @@ from __future__ import annotations
 import pytest
 
 import agent.core as core
+import agent.pending_confirmation_dispatch as pending_dispatch
 from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
 from agent.state import create_agent_state
 
@@ -125,11 +126,15 @@ def dispatch_probe(monkeypatch):
 
         return _probe
 
-    monkeypatch.setattr(core, "handle_plan_confirmation", _make("plan"))
-    monkeypatch.setattr(core, "handle_step_confirmation", _make("step"))
-    monkeypatch.setattr(core, "handle_user_input_step", _make("user_input"))
-    monkeypatch.setattr(core, "handle_feedback_intent_choice", _make("feedback_intent"))
-    monkeypatch.setattr(core, "handle_tool_confirmation", _make("tool"))
+    monkeypatch.setattr(pending_dispatch, "handle_plan_confirmation", _make("plan"))
+    monkeypatch.setattr(pending_dispatch, "handle_step_confirmation", _make("step"))
+    monkeypatch.setattr(pending_dispatch, "handle_user_input_step", _make("user_input"))
+    monkeypatch.setattr(
+        pending_dispatch,
+        "handle_feedback_intent_choice",
+        _make("feedback_intent"),
+    )
+    monkeypatch.setattr(pending_dispatch, "handle_tool_confirmation", _make("tool"))
     return calls
 
 

@@ -104,10 +104,14 @@ def test_local_demo_module_has_no_forbidden_imports():
         )
 
 
-def test_main_demo_subcommand_is_thin_adapter():
-    """``main.py`` 中 demo 分支只允许做 argv 转发，不能塞业务逻辑。"""
+def test_demo_subcommand_is_thin_cli_command_adapter():
+    """demo 分支只允许在 CLI command adapter 中做 argv 转发。
 
-    text = Path("main.py").read_text(encoding="utf-8")
+    main.py 已经降为 thin entrypoint；维护命令路由迁到 agent.cli.commands。
+    这个测试保护的是同一个架构边界：demo 不得把业务逻辑塞回入口文件。
+    """
+
+    text = Path("agent/cli/commands.py").read_text(encoding="utf-8")
     assert "from agent.local_demo import run_demo_cli" in text
     assert 'if argv and argv[0] == "demo":' in text
 

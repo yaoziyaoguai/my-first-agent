@@ -92,6 +92,7 @@ def test_call_model_uses_non_streaming_provider_when_loop_context_has_provider(m
 def test_build_loop_context_builds_compatible_provider_from_env(monkeypatch):
     pytest.importorskip("anthropic")
     import agent.core as core
+    import agent.core_contexts as core_contexts
 
     class _Provider:
         provider_type = "anthropic_compatible"
@@ -104,7 +105,11 @@ def test_build_loop_context_builds_compatible_provider_from_env(monkeypatch):
         captured["called"] = True
         return _Provider()
 
-    monkeypatch.setattr(core, "build_model_provider_from_env", _fake_build_provider_from_env)
+    monkeypatch.setattr(
+        core_contexts,
+        "build_model_provider_from_env",
+        _fake_build_provider_from_env,
+    )
 
     loop_ctx = core._build_loop_context(
         SimpleNamespace(messages=SimpleNamespace()),

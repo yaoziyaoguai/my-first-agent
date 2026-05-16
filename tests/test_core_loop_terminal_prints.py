@@ -708,14 +708,14 @@ def test_l789_callback_raise_must_not_skip_loop_stop_observer(monkeypatch, capsy
 
         # spy log_runtime_event 调用
         observer_calls: list = []
-        from agent import core as _core_mod
-        original_log = _core_mod.log_runtime_event
+        from agent import model_output_dispatch as dispatch_mod
+        original_log = dispatch_mod.log_runtime_event
 
         def _spy_log(event_type, **kwargs):
             observer_calls.append((event_type, kwargs))
             return original_log(event_type, **kwargs)
 
-        monkeypatch.setattr(_core_mod, "log_runtime_event", _spy_log)
+        monkeypatch.setattr(dispatch_mod, "log_runtime_event", _spy_log)
 
         from agent.core import chat
 
@@ -753,14 +753,14 @@ def test_callback_raise_writes_runtime_event_sink_failed_observer(monkeypatch, c
     _build_state_with_inconsistent_plan_required(monkeypatch)
 
     observer_calls: list = []
-    from agent import core as _core_mod
-    original_log = _core_mod.log_runtime_event
+    from agent import runtime_event_safety as safety_mod
+    original_log = safety_mod.log_runtime_event
 
     def _spy_log(event_type, **kwargs):
         observer_calls.append((event_type, kwargs))
         return original_log(event_type, **kwargs)
 
-    monkeypatch.setattr(_core_mod, "log_runtime_event", _spy_log)
+    monkeypatch.setattr(safety_mod, "log_runtime_event", _spy_log)
 
     from agent.core import chat
 

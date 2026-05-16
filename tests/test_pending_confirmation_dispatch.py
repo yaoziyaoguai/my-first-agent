@@ -63,6 +63,7 @@ from __future__ import annotations
 import pytest
 
 import agent.core as core
+import agent.pending_confirmation_dispatch as pending_dispatch
 from agent.state import create_agent_state
 
 
@@ -99,11 +100,15 @@ def dispatch_probe(monkeypatch):
 
         return _probe
 
-    monkeypatch.setattr(core, "handle_plan_confirmation", _make("plan"))
-    monkeypatch.setattr(core, "handle_step_confirmation", _make("step"))
-    monkeypatch.setattr(core, "handle_user_input_step", _make("user_input"))
-    monkeypatch.setattr(core, "handle_feedback_intent_choice", _make("feedback_intent"))
-    monkeypatch.setattr(core, "handle_tool_confirmation", _make("tool"))
+    monkeypatch.setattr(pending_dispatch, "handle_plan_confirmation", _make("plan"))
+    monkeypatch.setattr(pending_dispatch, "handle_step_confirmation", _make("step"))
+    monkeypatch.setattr(pending_dispatch, "handle_user_input_step", _make("user_input"))
+    monkeypatch.setattr(
+        pending_dispatch,
+        "handle_feedback_intent_choice",
+        _make("feedback_intent"),
+    )
+    monkeypatch.setattr(pending_dispatch, "handle_tool_confirmation", _make("tool"))
     return calls
 
 
@@ -337,13 +342,17 @@ def test_dispatch_branch_priority_plan_before_step_before_user_input(monkeypatch
                 return f"<probe:{name}>"
             return _probe
 
-        monkeypatch.setattr(core, "handle_plan_confirmation", _make("plan"))
-        monkeypatch.setattr(core, "handle_step_confirmation", _make("step"))
-        monkeypatch.setattr(core, "handle_user_input_step", _make("user_input"))
+        monkeypatch.setattr(pending_dispatch, "handle_plan_confirmation", _make("plan"))
+        monkeypatch.setattr(pending_dispatch, "handle_step_confirmation", _make("step"))
         monkeypatch.setattr(
-            core, "handle_feedback_intent_choice", _make("feedback_intent")
+            pending_dispatch, "handle_user_input_step", _make("user_input")
         )
-        monkeypatch.setattr(core, "handle_tool_confirmation", _make("tool"))
+        monkeypatch.setattr(
+            pending_dispatch,
+            "handle_feedback_intent_choice",
+            _make("feedback_intent"),
+        )
+        monkeypatch.setattr(pending_dispatch, "handle_tool_confirmation", _make("tool"))
 
         state = _state_with_plan(status)
         if status == "awaiting_user_input":

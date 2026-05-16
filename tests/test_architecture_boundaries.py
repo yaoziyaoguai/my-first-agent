@@ -34,6 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 AGENT_DIR = PROJECT_ROOT / "agent"
 
 CORE_FILE = AGENT_DIR / "core.py"
+LOOP_FILE = AGENT_DIR / "loop.py"
 USER_INPUT_FILE = AGENT_DIR / "user_input.py"
 DISPLAY_EVENTS_FILE = AGENT_DIR / "display_events.py"
 INPUT_BACKEND_FILES = (
@@ -219,19 +220,22 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.checkpoint",
         "agent.confirm_handlers",
         "agent.context_builder",
+        "agent.core_contexts",
         "agent.display_events",
+        "agent.loop",
         "agent.loop_context",
         "agent.memory",
         "agent.memory_fs_store",
         "agent.memory_interaction",
         "agent.memory_l2",
         "agent.memory_runtime",
+        "agent.model_output_dispatch",
+        "agent.pending_confirmation_dispatch",
         "agent.planner",
         "agent.prompt_builder",
-        "agent.provider.factory",
+        "agent.protocol_debug",
         "agent.response_handlers",
-        "agent.runtime_events",
-        "agent.runtime_observer",
+        "agent.runtime_event_safety",
         "agent.state",
         "agent.tool_registry",
         "agent.tools",
@@ -260,22 +264,16 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_build_loop_context",
         "_call_model",
         "_compress_history_and_sync_checkpoint",
-        "_debug_print_request",
-        "_debug_print_response",
         "_dispatch_model_output",
         "_dispatch_pending_confirmation",
         "_extract_text",
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",
         "_maybe_run_l2_inline",
-        "_protocol_dump_enabled",
         "_run_main_loop",
         "_run_planning_phase",
         "_runtime_loop_fields",
-        "_safe_emit_runtime_event",
         "_start_planning_for_handler",
-        "_summarize_content",
-        "_truncate",
         "chat",
         "get_l2_trigger_guard",
         "get_state",
@@ -283,6 +281,30 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
     }
 
     assert actual == expected
+
+
+def test_loop_orchestration_boundary_has_no_ui_or_memory_internals() -> None:
+    """agent.loop 只承载主循环编排，不反向理解 UI 或 Memory 内部语义。
+
+    Global architecture debt remediation 把 loop orchestration 从 core.py 抽出，
+    但抽文件不是目标；目标是让 loop 成为可注入依赖的编排层。它可以驱动
+    checkpoint / model / response dispatch dependency，却不能直接 import UI、
+    memory_interaction、memory store 或 CLI/TUI adapter。
+    """
+
+    assert LOOP_FILE.exists()
+    forbidden = {
+        "agent.memory",
+        "agent.memory_fs_store",
+        "agent.memory_interaction",
+        "agent.memory_runtime",
+        "agent.cli",
+        "agent.input_backends.simple",
+        "agent.input_backends.textual",
+        "agent.user_input",
+    }
+
+    assert _collect_agent_imports(LOOP_FILE) & forbidden == set()
 
 
 def test_agent_import_graph_has_no_direct_module_cycles() -> None:
@@ -390,6 +412,9 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.confirm_handlers", "handle_step_confirmation", "save_checkpoint", 1),
     ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", 4),
     ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", 1),
+    # Global Architecture Debt Remediation：loop guard 的 checkpoint clear
+    # 已从 core.py 主循环实现迁到 agent.loop orchestration。
+    ("agent.loop", "run_main_loop", "clear_checkpoint", 1),
     # Memory Interactive Confirmation v1：handle_memory_confirmation_reply 内
     # lazy import save_checkpoint 以清 pending 并保存状态（v1 compromise）。
     ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", 1),
@@ -438,6 +463,7 @@ _RUNTIME_MUTATION_OWNER_BASELINE = {
     "agent.checkpoint",
     "agent.confirm_handlers",
     "agent.core",
+    "agent.loop",
     "agent.memory_interaction",
     "agent.response_handlers",
     "agent.session",
@@ -520,8 +546,8 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "_clear_pending_and_save",
             "state.task.status",
         ),
-        ("agent.core", "_run_main_loop", "state.reset_task()"),
-        ("agent.core", "_run_main_loop", "state.task.loop_iterations"),
+        ("agent.loop", "run_main_loop", "state.reset_task()"),
+        ("agent.loop", "run_main_loop", "state.task.loop_iterations"),
         ("agent.core", "_run_planning_phase", "state.task.confirm_each_step"),
         ("agent.core", "_run_planning_phase", "state.task.current_plan"),
         ("agent.core", "_run_planning_phase", "state.task.current_step_index"),

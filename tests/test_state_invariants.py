@@ -201,9 +201,10 @@ def test_core_does_not_reset_tool_confirmation_without_plan(monkeypatch):
     state.task.pending_tool = {"tool_use_id": "T1", "tool": "w", "input": {}}
 
     import agent.core as core
+    import agent.pending_confirmation_dispatch as pending_dispatch
 
     monkeypatch.setattr(
-        core,
+        pending_dispatch,
         "handle_tool_confirmation",
         lambda _user_input, _ctx: "tool handled",
     )
@@ -228,9 +229,10 @@ def test_core_does_not_reset_runtime_user_input_pending_without_plan(monkeypatch
     }
 
     import agent.core as core
+    import agent.pending_confirmation_dispatch as pending_dispatch
 
     monkeypatch.setattr(
-        core,
+        pending_dispatch,
         "handle_user_input_step",
         lambda _user_input, _ctx: "input handled",
     )

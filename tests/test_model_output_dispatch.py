@@ -64,6 +64,7 @@ from types import SimpleNamespace
 import pytest
 
 import agent.core as core
+import agent.model_output_dispatch as model_output_dispatch
 from agent.loop_context import LoopContext
 from agent.runtime_events import ModelOutputKind
 from agent.state import create_agent_state
@@ -322,7 +323,9 @@ def test_dispatch_uses_classify_model_output_as_only_kind_decider(monkeypatch):
 
     monkeypatch.setattr(core, "handle_end_turn_response", _end_turn_probe)
     monkeypatch.setattr(
-        core, "classify_model_output", lambda stop_reason: ModelOutputKind.END_TURN
+        model_output_dispatch,
+        "classify_model_output",
+        lambda stop_reason: ModelOutputKind.END_TURN,
     )
     # 故意用 "tool_use"——若 dispatch 直接比字符串就会去 tool_use 分支，
     # 本断言失败。

@@ -23,7 +23,7 @@ from agent.tool_registry import register_tool
             "description": "要加载的 skill 名字，必须是 system prompt 里列出的 name 字段",
         },
     },
-    confirmation="never",
+    confirmation="always",
     capability="skill_lifecycle",
     risk_level="medium",
     output_policy="bounded_text",

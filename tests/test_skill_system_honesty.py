@@ -177,6 +177,9 @@ def test_default_tools_keep_skill_lifecycle_tools_explicit_opt_in() -> None:
     assert 'risk_level="high"' in install_source
     assert 'capability="skill_lifecycle"' in install_source
     assert 'confirmation="always"' in update_source
+    # P3 纵深防御：load_skill wrapper 也应使用 confirmation="always"
+    assert 'confirmation="always"' in load_source
+    assert 'confirmation="never"' not in load_source
     assert _module_imports(install_tool).isdisjoint({"agent.legacy_skills"})
     assert _module_imports(update_tool).isdisjoint({"agent.legacy_skills"})
     assert _module_imports(load_tool).isdisjoint({"agent.legacy_skills"})
@@ -232,3 +235,62 @@ def test_install_from_github_remains_legacy_explicit_opt_in_boundary() -> None:
     assert sorted(path.name for path in LEGACY_SKILLS_DIR.glob("*.py")) == [
         "__init__.py"
     ]
+
+
+# ---------- P3: load_skill fail-closed 纵深防御 ----------
+
+def test_load_skill_wrapper_is_fail_closed_and_returns_disabled_message() -> None:
+    """load_skill 即使被显式调用也必须返回 disabled string，不能加载旧实现。
+
+    Runtime 测试验证 wrapper 的 fail-closed 行为：
+    - confirmation 必须是 "always"（纵深防御）
+    - 函数体必须返回 disabled message
+    - 不能触发 install_from_github / pip install / 网络操作
+    - 不能 import agent.skills / agent.legacy_skills 作为实现依赖
+    """
+
+    from agent.tools.skill import load_skill
+
+    result = load_skill("any-skill-name")
+    assert "已禁用" in result
+    assert "agent/skill_system/" in result
+    assert isinstance(result, str)
+    # 确认不泄露任何旧实现路径
+    assert "install_from_github" not in result
+    assert "git clone" not in result
+    assert "pip install" not in result
+
+
+def test_load_skill_does_not_import_legacy_modules_at_runtime() -> None:
+    """导入 load_skill 不能触发 agent.skills / agent.legacy_skills 的副作用导入。
+
+    这个测试用 sys.modules 快照验证：import agent.tools.skill 前后不会增加
+    agent.skills.* / agent.legacy_skills.* 模块。
+    """
+
+    import sys
+
+    before = {
+        name
+        for name in sys.modules
+        if name == "agent.skills"
+        or name.startswith("agent.skills.")
+        or name == "agent.legacy_skills"
+        or name.startswith("agent.legacy_skills.")
+    }
+
+    from agent.tools import skill as _skill_module  # noqa: F401,F811
+
+    after = {
+        name
+        for name in sys.modules
+        if name == "agent.skills"
+        or name.startswith("agent.skills.")
+        or name == "agent.legacy_skills"
+        or name.startswith("agent.legacy_skills.")
+    }
+
+    newly_loaded = after - before
+    assert not newly_loaded, (
+        f"import agent.tools.skill 不应触发 legacy 模块加载，但加载了: {newly_loaded}"
+    )

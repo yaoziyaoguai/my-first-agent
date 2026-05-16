@@ -31,6 +31,15 @@ GITHUB_TREE_URL = re.compile(
 
 def install_from_github(url: str, skills_dir: Path = DEFAULT_SKILLS_DIR) -> dict:
     """从 GitHub URL 安装一个 skill。
+
+    Legacy / experimental prototype warning：
+    本函数会执行真实网络访问、`git clone` 和本地文件写入；freeze 边界按
+    `pip install` 级别的外部代码安装风险处理。它只能在 explicit opt-in、
+    `confirmation="always"` 且非默认工具注册路径下使用。
+
+    正式 Skill RFC 前不要扩大本函数使用面；未来安全模型需要重新设计下载、
+    解包、依赖安装、隔离执行、审计和回滚边界。本轮 freeze 只记录风险，
+    不改变现有 installer 行为。
     
     Args:
         url: GitHub skill 子目录的 URL

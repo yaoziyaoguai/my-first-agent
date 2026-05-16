@@ -117,7 +117,11 @@ class SkillRegistry:
         return len(self._skills)
 
 
-# 模块级单例（整个 Agent 共用一份 Registry）
+# Legacy prototype limitation：
+# 当前模块级单例会在同一 Python 进程内跨 session 复用，这是现有 Skill MVP
+# 的已知限制，不应被视为正式稳定 API。正式 Skill RFC 应重新设计
+# session-scoped / runtime-scoped registry，并明确 reload、checkpoint、tool
+# exposure 的所有权。本轮 freeze 只记录边界，不改变行为。
 _registry: Optional[SkillRegistry] = None
 
 

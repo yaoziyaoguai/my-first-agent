@@ -184,7 +184,7 @@ for r in records[:5]:
 
 ## 10. Optional complex real LLM memory dogfood
 
-`scripts/dogfood_complex_real_llm.py` 是 complex real LLM memory dogfood harness。它不属于普通测试默认路径，只在明确 opt-in、且项目配置机制已经能自动加载 provider config 时手动运行。
+`scripts/dogfood_complex_real_llm.py` 是 complex real LLM memory dogfood harness，也是 Memory RFC completion 状态下保留的可复用 dogfood harness。它不属于普通测试默认路径，只在明确 opt-in、且项目配置机制已经能自动加载 provider config 时手动运行。
 
 它只使用 synthetic / non-sensitive scenarios，覆盖：
 

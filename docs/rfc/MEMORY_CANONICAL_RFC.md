@@ -37,7 +37,7 @@ Memory 不是平级功能列表。它是一个**方向性认知生命周期**。
 
 ### Current Phase
 
-Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real provider dogfood harness uses config auto-load without printing secrets; latest run succeeded with DashScope/kimi-k2.5 while keeping candidates in T1 pending and direct semantic/procedural store writes at 0, RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only), and preference_evolved deterministic foundation (explicit time-evolution markers + created_at order, semantic-only, T1 pending). Phase 7 (Emergence) foundation implemented — CorrectionEvidence, ProceduralCandidate, DeterministicEmergenceDetector, active_records >50 gate, procedural candidate → T1 pending_review form (§10.5) via review CLI. Phase 7 runtime hook is implemented as opt-in session-end hook behind MEMORY_EMERGENCE_ENABLED; it fail-closes on active_records<50 or correction evidence<3, dispatches only to pending_review, and never writes formal procedural store. InlineConfirmationRequest payload seam, response adapter, memory_interaction pending adapter, and confirm_handlers route are implemented for inline_confirmation; accept/edit_accept can write only after explicit human confirmation, while reject/other do not write and no response falls back to pending_review. Full TUI/CLI timeout event integration remains deferred. ConfirmationForm explicitly disallows silent/auto_retained/none. Synthetic regression coverage verifies fail-closed at <50, detect→dispatch→review CLI, runtime pending_review hook, inline confirmation seam and Agent loop adapter, no silent procedural retain, and no procedural auto approve. Phase 7 stabilization aligned InMemory/Filesystem rejected-intent backend behavior and added filesystem E2E dogfood coverage for episodic/semantic/procedural paths. Complex implicit preference evolution remains future dogfood hardening. Backend abstraction/vector DB/graph/embedding remain deferred. Next: independent audit of preference_evolved, Phase 7 runtime hook dogfood, or real emergence quality dogfood.
+Phase 5a (W3 skeleton + T2) implemented. Phase 5b (L2 LLM Inline Extraction) implemented — foundation + controlled dogfood verified. Phase 6 (Consolidation) domain model + deterministic pattern detector + source evidence loader + detector pipeline integration + T1 pending review dispatch + runtime hook + recency_factor confidence scoring + LLM content generation + real LLM dogfood + contradiction handling implemented — ConsolidationCandidate, ConsolidationType, EpisodicEvidence, DeterministicConsolidationDetector with N≥3 threshold per RFC §D.1, read-only FS store loader, consolidation pipeline (loader → detector → candidate → opt LLM enhancement), defense-in-depth validation with fail-closed semantics, consolidation→pending-review dispatch with dedup, reuse of existing T1 pending review CLI, runtime hook (env-gated, dispatch only, no auto-approve), RFC §D.2 recency_factor (deterministic decay), LLM content generation (opt-in via MEMORY_CONSOLIDATION_LLM_ENABLED, default deterministic, enhance content/evidence_summary, fail-closed validator), real provider dogfood harness uses config auto-load without printing secrets; latest run succeeded with DashScope/kimi-k2.5 while keeping candidates in T1 pending and direct semantic/procedural store writes at 0, RFC §D.3 contradiction handling (keyword-level opposing-marker detection, clarification_needed candidate, deterministic, T1-only), and preference_evolved deterministic foundation (explicit time-evolution markers + created_at order, semantic-only, T1 pending). Phase 7 (Emergence) foundation implemented — CorrectionEvidence, ProceduralCandidate, DeterministicEmergenceDetector, active_records >50 gate, procedural candidate → T1 pending_review form (§10.5) via review CLI. Phase 7 runtime hook is implemented as opt-in session-end hook behind MEMORY_EMERGENCE_ENABLED; it fail-closes on active_records<50 or correction evidence<3, dispatches only to pending_review, and never writes formal procedural store. InlineConfirmationRequest payload seam, response adapter, memory_interaction pending adapter, and confirm_handlers route are implemented for inline_confirmation; accept/edit_accept can write only after explicit human confirmation, while reject/other do not write and no response falls back to pending_review. Full TUI/CLI timeout event integration remains deferred. ConfirmationForm explicitly disallows silent/auto_retained/none. Synthetic regression coverage verifies fail-closed at <50, detect→dispatch→review CLI, runtime pending_review hook, inline confirmation seam and Agent loop adapter, no silent procedural retain, and no procedural auto approve. Phase 7 stabilization aligned InMemory/Filesystem rejected-intent backend behavior and added filesystem E2E dogfood coverage for episodic/semantic/procedural paths. Snapshot/recall current minimum is implemented. Complex implicit preference evolution remains future dogfood hardening. Backend abstraction/vector DB/graph/embedding remain deferred. Next: completion checklist audit, true active records observation, or real emergence quality dogfood.
 
 ### Core Constraints
 
@@ -854,9 +854,9 @@ T2 auto-retained 记录在 snapshot 中必须：
 | Confirmation Flow | `agent/memory_confirmation.py` | ✅ | Governance T1 | — |
 | InMemory Store | `agent/memory_store.py` | ✅ | Store | rejected intent 不进入正式 record；approved/human_approved/auto_retained 正常写入 |
 | Filesystem Store | `agent/memory_fs_store.py` | ✅ | Store | frontmatter + index metadata 已覆盖 episodic/semantic/procedural dogfood；rejected 不写正式 record |
-| Memory Runtime | `agent/memory_runtime.py` | 🟡 | Governance | W1/W2 runtime 保持薄编排；更完整 snapshot/ranking 仍属后续工作 |
+| Memory Runtime | `agent/memory_runtime.py` | 🟡 | Governance | W1/W2 runtime 保持薄编排；snapshot/recall current minimum 已满足，更精细 ranking 仍属 quality hardening |
 | Operation Intent/Audit | `agent/memory_operations.py` | ✅ | Store | memory metadata 已随 intent 传递到 store |
-| Snapshot Generator | `agent/memory_snapshot_generator.py` | 🟡 | Recall | 基础 recall 可用；snapshot ranking / budget hardening 仍是 future work |
+| Snapshot Generator | `agent/memory_snapshot_generator.py` | ✅ | Recall | current minimum 已实现：scope/sensitive 过滤、T2 标注与上限、per-item/total budget 硬截断；更精细 ranking quality 属 dogfood hardening |
 | Session Memory | `agent/memory.py` | 🟡 | W3/W4/W5 Runtime | session-end extraction、Phase 6 consolidation hook、Phase 7 emergence hook 已接入；Phase 7 默认关闭且只 dispatch pending_review |
 | Consolidation Domain | `agent/memory_consolidation.py` | ✅ | Consolidation | ConsolidationType 已包含 preference_evolved；deterministic foundation 在 detector 层实现 |
 | Consolidation Detector | `agent/memory_consolidation_engine.py` | 🟡 | Consolidation | deterministic / keyword-level；preference_evolved foundation 已实现；复杂隐式演进 quality 需更多 dogfood |
@@ -885,7 +885,7 @@ T2 auto-retained 记录在 snapshot 中必须：
 | Semantic | 🟡 | W1 explicit retain 与 Phase 6 consolidation pending review accept 均可产出；reject 不写 store |
 | Emergence | 🟡 | CorrectionEvidence + ProceduralCandidate + detector + active_records gate + runtime hook 已实现；quality 需更多 dogfood |
 | Procedural | 🟡 | 仅 explicit human confirmation 后写入；pending_review 已接入，inline_confirmation seam + Agent loop adapter 已实现；完整 TUI/CLI timeout 事件仍 deferred |
-| Recall | 🟡 | list_records/recall 基础可用；snapshot ranking / budget hardening 仍是 future work |
+| Recall | ✅ | list_records/recall by scope/type/max_items/recency 与 current minimum snapshot budget governance 已实现；更精细 ranking quality 属 dogfood hardening |
 
 ### 14.5 已收口的结构性缺口与剩余限制
 
@@ -905,11 +905,49 @@ T2 auto-retained 记录在 snapshot 中必须：
 - correction pattern 仍是 deterministic / marker-based。
 - `preference_evolved` deterministic foundation 已实现；复杂隐式偏好演进仍需 future dogfood hardening。
 - `inline_confirmation` 已通过 memory_interaction adapter 和 confirm_handlers 分流最小接入 Agent loop；完整 TUI/CLI timeout 事件仍 deferred。
-- snapshot ranking / budget hardening 仍是 future work。
+- snapshot / recall current minimum 已实现；更精细 ranking quality 仍是 dogfood hardening。
 - backend abstraction / vector DB / graph / embedding deferred。
 - tag deferred until more dogfood。
 
-### 14.6 Runtime Growth Constraint
+### 14.6 Memory RFC Completion Checklist
+
+**Current mainline completion state**：
+
+- explicit retain / forget / update / session_only governance ✅
+- filesystem store ✅ — filesystem-first 仍是当前 source-of-truth 和 reference implementation；index 是派生数据
+- episodic T2 auto-retain ✅ — 仅 episodic，snapshot 中标注 `[自动记录]`
+- review / pending_review ✅ — accept/edit-and-accept 后才写正式 store，reject 不写
+- inline_confirmation ✅ — Agent loop adapter 已接入，reject/other/no response 不写；完整 TUI/CLI timeout 事件仍属体验 dogfood
+- semantic consolidation ✅ — deterministic detector、loader、pipeline、T1 pending review、runtime hook 已实现
+- LLM-assisted consolidation dogfood ✅ — opt-in、脱敏、候选只进 T1 pending，不直接写 store
+- preference_evolved deterministic foundation ✅ — semantic-only，explicit time-evolution marker + created_at order，T1 pending
+- procedural emergence foundation ✅ — active_records >50 gate、pending_review、inline seam、runtime hook；不 silent retain，不 auto approve
+- Phase 7 runtime hook ✅ — env-gated、fail-closed、dispatch-only
+- fake / filesystem / real LLM dogfood harness ✅
+- snapshot / recall current minimum ✅ — `recall()` 支持 scope/type/max_items/recency；snapshot 强制 scope/sensitive/budget/T2 governance
+- secret handling ✅ — 不读取 `.env` 内容，不打印 secret；真实 sessions/runs 和 `agent_log.jsonl` 不作为 dogfood 输入
+
+**Dogfood / quality hardening**：
+
+- true active records >50 后的 emergence quality observation
+- real procedural emergence quality
+- complex implicit preference evolution
+- correction pattern deterministic / marker-based quality
+- inline confirmation CLI/TUI real experience, especially timeout event path
+- more nuanced snapshot ranking quality beyond current hard budget minimum
+
+**Future deferred**：
+
+- backend abstraction
+- DB
+- graph
+- embedding
+- vector store
+- plugin storage layer
+
+Filesystem-first is current source-of-truth and reference implementation. Backend-independent semantics means lifecycle/governance rules do not depend on a backend; it does **not** mean implementing backend abstraction now.
+
+### 14.7 Runtime Growth Constraint
 
 Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并由 `agent/memory.py` 承担 session-end extraction / consolidation / emergence 的薄编排。在当前阶段这是可接受的——集中 orchestration 比过早拆分更简单。
 
@@ -1100,7 +1138,7 @@ Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并�
   - Filesystem E2E dogfood 覆盖 episodic T2 auto-retain、semantic consolidation pending/review、procedural pending/inline seam、recall/snapshot smoke
   - runtime hook implemented / opt-in only；inline_confirmation Agent loop adapter implemented；完整 TUI/CLI timeout 事件仍 deferred
   - no procedural silent retain；no procedural auto approve
-- **未实现**: 完整 TUI/CLI timeout 事件接入, procedural adoption, real emergence quality dogfood, complex implicit preference evolution hardening, backend abstraction
+- **Remaining / deferred**: 完整 TUI/CLI timeout 事件接入、real emergence quality dogfood、complex implicit preference evolution hardening 属 dogfood/quality；backend abstraction 属 future deferred；不进入 DB / graph / embedding / vector store。
 
 **Inline Agent loop integration design note**:
 

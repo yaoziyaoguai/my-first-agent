@@ -490,6 +490,49 @@ class TestPipelineReadOnly:
         assert not pending_dir.exists()
 
 
+class TestPipelineDryRun:
+    """dry-run 是 dogfood / audit 预览路径，不执行任何持久化写入。
+
+    这些测试验证 dry-run 只产出 candidate 与治理摘要：不写 `_pending`、
+    不写 semantic/procedural store、不 auto approve，也不调用真实 LLM。
+    """
+
+    def test_dry_run_returns_candidates_and_would_dispatch_summary(
+        self, store_three_episodic,
+    ):
+        """dry_run=True 产生 candidates，但只报告 would_dispatch_count。"""
+
+        result = run_consolidation_pipeline(store_three_episodic, dry_run=True)
+
+        assert result.dry_run is True
+        assert result.candidate_count > 0
+        assert result.validator_pass_count == result.candidate_count
+        assert result.would_dispatch_count == result.candidate_count
+        assert result.direct_store_write is False
+        assert result.auto_approve is False
+        assert result.llm_enabled is False
+
+    def test_dry_run_does_not_write_pending_or_store(self, store_three_episodic):
+        """dry-run 预览路径不能创建 pending proposal 或正式 memory record。"""
+
+        files_before = {
+            str(p.relative_to(store_three_episodic.root_dir))
+            for p in store_three_episodic.root_dir.rglob("*")
+            if p.is_file()
+        }
+
+        result = run_consolidation_pipeline(store_three_episodic, dry_run=True)
+
+        files_after = {
+            str(p.relative_to(store_three_episodic.root_dir))
+            for p in store_three_episodic.root_dir.rglob("*")
+            if p.is_file()
+        }
+        assert result.candidate_count > 0
+        assert files_after == files_before
+        assert not (store_three_episodic.root_dir / "_pending").exists()
+
+
 # ── 无 LLM / 无 runtime import ──────────────────────────────────────────────
 
 

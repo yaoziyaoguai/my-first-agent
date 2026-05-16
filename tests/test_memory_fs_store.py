@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import tempfile
 from pathlib import Path
@@ -167,6 +168,41 @@ sensitive_redacted: false
         assert len(records) == 2
         assert records[0]["id"] == "mem:001"
         assert records[1]["id"] == "mem:002"
+
+    def test_concurrent_write_memory_section_preserves_sections_and_frontmatter(
+        self, tmp_store_dir,
+    ):
+        """并发写同一个 Markdown group file 时不能丢 section 或破坏 frontmatter。
+
+        这些测试保护 filesystem-first store 的 read-modify-write 临界区：锁只用于
+        防止多个 runtime 同时更新同一 Markdown 文件时发生 TOCTOU 覆盖，不参与
+        memory governance，也不改变 T1/T2/T3 决策。
+        """
+        from agent.memory_fs_store import parse_memory_file, write_memory_section
+
+        filepath = tmp_store_dir / "semantic" / "user_preferences.md"
+
+        def write_section(i: int) -> None:
+            write_memory_section(
+                filepath,
+                {
+                    "id": f"mem:concurrent:{i}",
+                    "memory_type": "semantic",
+                    "scope": "user",
+                    "approval_status": "approved",
+                },
+                f"并发写入 section {i}",
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write_section, range(24)))
+
+        records = parse_memory_file(filepath)
+        assert {r["id"] for r in records} == {
+            f"mem:concurrent:{i}" for i in range(24)
+        }
+        assert all(r["memory_type"] == "semantic" for r in records)
+        assert filepath.read_text(encoding="utf-8").count("---") >= 48
 
     def test_parse_chinese_content(self, FSParser):
         text = """---
@@ -426,6 +462,38 @@ class TestStoreOperations:
         index_data = json.loads(index_path.read_text(encoding="utf-8"))
         stored = index_data["records"][result.record.id]
         assert stored["memory_type"] == "procedural"
+
+    def test_concurrent_retain_preserves_index_and_group_file(self, tmp_store_dir):
+        """并发 retain 不应损坏 group file 或丢失 index entry。
+
+        这里模拟多个进程/agent 共享同一 filesystem memory root。最终校验
+        source-of-truth Markdown 与 derived `_meta/index.json` 的基本一致性；
+        不引入 repair daemon 或新 backend。
+        """
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        def retain(i: int) -> str:
+            store = FilesystemMemoryStore(root_dir=tmp_store_dir)
+            intent = _make_intent(
+                content=f"并发 retain 内容 {i}",
+                scope=MemoryScope.USER,
+                source_summary=f"concurrent source {i}",
+            )
+            result = store.apply_operation_intent(intent, _make_audit(intent))
+            assert result.record is not None
+            return result.record.id
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            record_ids = set(executor.map(retain, range(24)))
+
+        store = FilesystemMemoryStore(root_dir=tmp_store_dir)
+        records = store.list_records()
+        assert {record.id for record in records} >= record_ids
+
+        index_path = tmp_store_dir / "_meta" / "index.json"
+        index_data = json.loads(index_path.read_text(encoding="utf-8"))
+        assert set(index_data["records"]) >= record_ids
+        assert index_data["total"] == len(index_data["records"])
 
     def test_list_records_persists_across_instances(self, tmp_store_dir):
         """写完后创建新的 store 实例，应能通过 index rebuild 读到数据。"""

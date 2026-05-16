@@ -720,6 +720,65 @@ class TestConsolidationRuntimeHookGate:
         t1_files = list(pending_dir.glob("t1_*.json")) if pending_dir.exists() else []
         assert len(t1_files) > 0, "_pending/ 中应有 T1 proposal 文件"
 
+    def test_dry_run_preview_does_not_dispatch_pending(self, monkeypatch, tmp_path):
+        """dry-run runtime hook 只预览 would_dispatch，不写 `_pending`。
+
+        dry-run 是 dogfood / audit 预览路径：它验证 consolidation candidate 与
+        governance 摘要，但不能创建 pending proposal、不能 auto approve，也不能
+        直接写 semantic/procedural store。
+        """
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_DRY_RUN", "true")
+        monkeypatch.setenv("MEMORY_CONSOLIDATION_MIN_INTERVAL", "0")
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_operations import (
+            MemoryOperationIntent,
+            MemoryOperationType,
+            MemoryDecisionType,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            build_memory_audit_summary,
+        )
+        from agent.memory_contracts import MemoryScope
+
+        store = FilesystemMemoryStore(root_dir=str(tmp_path))
+        for i in range(3):
+            intent = MemoryOperationIntent(
+                operation_type=MemoryOperationType.RETAIN,
+                decision_type=MemoryDecisionType.RETAIN,
+                confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+                user_choice=MemoryConfirmationChoice.ACCEPT,
+                content_summary=f"代码修改偏好 结论优先展示 这是第{i+1}次确认偏好",
+                source_summary=f"dry_run_session_{i+1}",
+                scope=MemoryScope.USER,
+                safety_summary="T2 auto_retained",
+                sensitive_redacted=False,
+                user_visible_summary=f"dry_ep_{i+1}",
+                memory_type="episodic",
+                source_type="agent_suggested",
+                confidence=0.75,
+            )
+            store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+
+        from agent.memory import extract_memories_from_session
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+        c = summary.get("consolidation", {})
+        assert c.get("enabled") is True
+        assert c.get("dry_run") is True
+        assert c.get("candidate_count", 0) > 0
+        assert c.get("would_dispatch_count") == c.get("candidate_count")
+        assert c.get("dispatched_count") == 0
+        assert c.get("direct_store_write") is False
+        assert c.get("auto_approve") is False
+        assert not (tmp_path / "_pending").exists()
+
     def test_interval_env_respected(self, monkeypatch):
         """MEMORY_CONSOLIDATION_MIN_INTERVAL 环境变量被正确读取。
 
@@ -1137,6 +1196,7 @@ class TestEmergenceRuntimeHookGate:
 
         emergence = summary.get("emergence", {})
         assert emergence.get("enabled") is False
+        assert emergence.get("disabled_reason") == "disabled_by_env"
 
     def test_disabled_when_false(self, monkeypatch):
         """MEMORY_EMERGENCE_ENABLED=false 时，runtime hook 不运行。"""
@@ -1152,6 +1212,7 @@ class TestEmergenceRuntimeHookGate:
 
         emergence = summary.get("emergence", {})
         assert emergence.get("enabled") is False
+        assert emergence.get("disabled_reason") == "disabled_by_env"
 
     def test_enabled_but_active_records_below_gate_fails_closed(self, monkeypatch):
         """env 开启但 active_records<50 时 fail closed，不产生 candidate。"""
@@ -1176,7 +1237,10 @@ class TestEmergenceRuntimeHookGate:
         emergence = summary.get("emergence", {})
         assert emergence.get("enabled") is True
         assert emergence.get("gate_passed") is False
+        assert emergence.get("disabled_reason") == "insufficient_active_records"
+        assert emergence.get("gate_reason") == "active_records_below_threshold"
         assert emergence.get("active_records_count") == 3
+        assert emergence.get("min_active_records") == 50
         assert emergence.get("candidate_count") == 0
         assert emergence.get("dispatched_count") == 0
 
@@ -1201,7 +1265,10 @@ class TestEmergenceRuntimeHookGate:
         emergence = summary.get("emergence", {})
         assert emergence.get("enabled") is True
         assert emergence.get("gate_passed") is True
+        assert emergence.get("disabled_reason") == "insufficient_correction_evidence"
+        assert emergence.get("gate_reason") == "correction_evidence_below_threshold"
         assert emergence.get("active_records_count") == 50
+        assert emergence.get("min_active_records") == 50
         assert emergence.get("evidence_count") == 2
         assert emergence.get("candidate_count") == 0
         assert emergence.get("dispatched_count") == 0
@@ -1232,6 +1299,9 @@ class TestEmergenceRuntimeHookGate:
         emergence = summary.get("emergence", {})
         assert emergence.get("enabled") is True
         assert emergence.get("gate_passed") is True
+        assert emergence.get("disabled_reason") is None
+        assert emergence.get("gate_reason") == "passed"
+        assert emergence.get("min_active_records") == 50
         assert emergence.get("active_records_count") == 50
         assert emergence.get("evidence_count") == 3
         assert emergence.get("candidate_count") >= 1
@@ -1255,6 +1325,41 @@ class TestEmergenceRuntimeHookGate:
             r for r in store.list_records() if r.memory_type == "procedural"
         ]
         assert procedural_records == []
+
+    def test_emergence_summary_omits_raw_evidence_and_secret_like_text(
+        self, monkeypatch, tmp_path,
+    ):
+        """emergence summary 只能展示计数和 gate reason，不能泄漏原始 evidence。
+
+        使用 fake secret-looking synthetic text 验证 summary/reporting 边界；
+        这里不读取真实 `.env`，也不处理真实 sessions/runs。
+        """
+        monkeypatch.setenv("MEMORY_EMERGENCE_ENABLED", "true")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
+
+        from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        store = FilesystemMemoryStore(root_dir=tmp_path)
+        _seed_active_records_for_emergence(store, correction_count=3)
+        _apply_emergence_runtime_record(
+            store,
+            index=99,
+            content=(
+                "以后请先检查 git status；"
+                "FAKE_API_KEY_DO_NOT_USE_123 sk-test-not-real-xxxxx"
+            ),
+        )
+
+        summary = extract_memories_from_session(
+            [{"role": "user", "content": "hello"}], None, None,
+            store=store,
+        )
+
+        rendered = repr(summary.get("emergence", {}))
+        assert "FAKE_API_KEY_DO_NOT_USE_123" not in rendered
+        assert "sk-test-not-real" not in rendered
+        assert "以后请先检查 git status" not in rendered
 
     def test_emergence_failure_does_not_break_extraction_summary(
         self, monkeypatch,

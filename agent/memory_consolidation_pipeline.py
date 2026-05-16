@@ -80,6 +80,8 @@ class ConsolidationPipelineResult:
 
     串联 loader → detector → (optional) LLM enhancement 后的最终输出。
     不包含 store 引用，不包含 pending review state。
+    dry_run 字段用于 dogfood / audit 预览：它只描述“如果 dispatch 会发生什么”，
+    pipeline 本身仍然不写 `_pending` 或正式 memory store。
     """
 
     candidates: tuple[ConsolidationCandidate, ...]
@@ -87,6 +89,11 @@ class ConsolidationPipelineResult:
     skipped_count: int
     warnings: tuple[str, ...]
     detector_name: str | None = None
+    dry_run: bool = False
+    validator_pass_count: int = 0
+    would_dispatch_count: int = 0
+    direct_store_write: bool = False
+    auto_approve: bool = False
     # LLM content enhancement 相关字段（Phase 6b）
     llm_enabled: bool = False
     llm_enhanced_count: int = 0
@@ -111,6 +118,7 @@ def run_consolidation_pipeline(
     *,
     detector: DeterministicConsolidationDetector | None = None,
     llm_generator=None,  # LLMConsolidationContentGenerator | None
+    dry_run: bool = False,
 ) -> ConsolidationPipelineResult:
     """执行 Phase 6 consolidation pipeline：loader → detector → (opt) LLM enhancement。
 
@@ -121,13 +129,16 @@ def run_consolidation_pipeline(
     4. 若 opt-in 启用 LLM，对 valid candidates 做 content/evidence_summary 增强
        - 增强失败：保留 deterministic candidate + warning
        - 增强成功：替换 content/evidence_summary，其他字段不变
-    5. 返回结构化结果
+    5. 返回结构化结果；dry_run=True 时额外填充 would_dispatch_count，
+       但仍不写 `_pending`、不写 store、不 auto approve。
 
     Args:
         store: FilesystemMemoryStore 实例（需支持 list_records() API）。
         detector: DeterministicConsolidationDetector 实例，None 则使用默认实例。
         llm_generator: LLMConsolidationContentGenerator 实例，None 则跳过 LLM 增强。
                        调用者可选传入，pipeline 不负责 opt-in gate。
+        dry_run: dogfood / audit 预览路径，用于验证 candidate 与治理摘要，
+                 不执行任何持久化写入。
 
     Returns:
         ConsolidationPipelineResult:
@@ -139,6 +150,8 @@ def run_consolidation_pipeline(
         - llm_enabled: 是否尝试了 LLM 增强
         - llm_enhanced_count: 成功增强的 candidate 数
         - llm_warnings: LLM 增强过程中的警告
+        - dry_run / would_dispatch_count / direct_store_write / auto_approve:
+          dogfood 安全摘要字段
     """
     if detector is None:
         detector = DeterministicConsolidationDetector()
@@ -185,6 +198,11 @@ def run_consolidation_pipeline(
         skipped_count=load_result.skipped_count,
         warnings=tuple(all_warnings),
         detector_name=type(detector).__name__,
+        dry_run=dry_run,
+        validator_pass_count=len(valid_candidates),
+        would_dispatch_count=len(valid_candidates) if dry_run else 0,
+        direct_store_write=False,
+        auto_approve=False,
         llm_enabled=llm_enabled,
         llm_enhanced_count=llm_enhanced,
         llm_warnings=tuple(llm_warnings),

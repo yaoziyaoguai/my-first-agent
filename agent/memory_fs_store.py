@@ -16,11 +16,19 @@ Phase 4 minimal implementation — 只实现 spike 已验证过的部分：
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
+import os
 import re
+import threading
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - current target is POSIX/macOS, fallback is best-effort.
+    fcntl = None  # type: ignore[assignment]
 
 from agent.memory_contracts import MemoryScope
 from agent.memory_operations import (
@@ -157,6 +165,58 @@ def parse_memory_file(filepath: Path) -> list[dict]:
 
 # ── section write helpers ───────────────────────────────────────────────────
 
+_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+
+
+def _process_lock_for(lock_path: Path) -> threading.RLock:
+    """返回进程内同路径锁，补足 fcntl 对同进程多线程的保护边界。"""
+
+    key = str(lock_path.resolve())
+    with _PROCESS_LOCKS_GUARD:
+        if key not in _PROCESS_LOCKS:
+            _PROCESS_LOCKS[key] = threading.RLock()
+        return _PROCESS_LOCKS[key]
+
+
+@contextmanager
+def _locked_filesystem_rmw(target_path: Path):
+    """锁住 filesystem read-modify-write 临界区。
+
+    这里锁住的是 filesystem read-modify-write 临界区，不是 memory governance；
+    目的是避免多个 runtime 同时更新同一 Markdown memory 文件或 derived index
+    时发生 TOCTOU 覆盖。当前项目主要运行在 POSIX/macOS，使用 fcntl.flock 做
+    跨进程锁；进程内再用 threading.RLock 补齐多线程测试和同进程并发边界。
+    """
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target_path.with_name(f".{target_path.name}.lock")
+    process_lock = _process_lock_for(lock_path)
+    with process_lock:
+        with lock_path.open("a+b") as lock_file:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write_text(filepath: Path, text: str) -> None:
+    """以唯一 temp file + replace 写入，避免并发 writer 共享固定 `.tmp`。"""
+
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    tmp = filepath.with_name(
+        f".{filepath.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(filepath)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
 def _format_section(meta: dict, content: str) -> str:
     """Format a single memory as YAML frontmatter + content.
 
@@ -185,48 +245,45 @@ def _format_section(meta: dict, content: str) -> str:
 def write_memory_section(filepath: Path, meta: dict, content: str) -> None:
     """Append a memory section to a grouped topic file."""
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    section = _format_section(meta, content)
-    if filepath.exists():
-        existing = filepath.read_text(encoding="utf-8")
-        if existing.strip():
-            section = existing.rstrip() + "\n\n---\n\n" + section
-    # atomic write via temp file + rename
-    tmp = filepath.with_suffix(".tmp")
-    tmp.write_text(section, encoding="utf-8")
-    tmp.rename(filepath)
+    with _locked_filesystem_rmw(filepath):
+        section = _format_section(meta, content)
+        if filepath.exists():
+            existing = filepath.read_text(encoding="utf-8")
+            if existing.strip():
+                section = existing.rstrip() + "\n\n---\n\n" + section
+        _atomic_write_text(filepath, section)
 
 
 def remove_memory_section(filepath: Path, record_id: str) -> bool:
     """Remove a memory section from a grouped topic file. Returns True if removed."""
-    if not filepath.exists():
-        return False
-    sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
-    new_sections: list[str] = []
-    removed = False
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-        if not section.startswith("---"):
-            section = "---\n" + section
-        try:
-            meta, _ = parse_frontmatter(section)
-        except Exception:
+    with _locked_filesystem_rmw(filepath):
+        if not filepath.exists():
+            return False
+        sections = re.split(r"\n{2,}---\n{1,}", filepath.read_text(encoding="utf-8"))
+        new_sections: list[str] = []
+        removed = False
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+            if not section.startswith("---"):
+                section = "---\n" + section
+            try:
+                meta, _ = parse_frontmatter(section)
+            except Exception:
+                new_sections.append(section)
+                continue
+            if meta.get("id") == record_id:
+                removed = True
+                continue
             new_sections.append(section)
-            continue
-        if meta.get("id") == record_id:
-            removed = True
-            continue
-        new_sections.append(section)
-    if not removed:
-        return False
-    if not new_sections:
-        filepath.unlink()
+        if not removed:
+            return False
+        if not new_sections:
+            filepath.unlink()
+            return True
+        _atomic_write_text(filepath, "\n\n---\n\n".join(new_sections))
         return True
-    tmp = filepath.with_suffix(".tmp")
-    tmp.write_text("\n\n---\n\n".join(new_sections), encoding="utf-8")
-    tmp.rename(filepath)
-    return True
 
 
 def update_memory_section(filepath: Path, record_id: str, new_meta: dict, new_content: str) -> bool:
@@ -304,9 +361,11 @@ def build_fs_index(root_dir: Path) -> dict[str, dict]:
         "total": len(index),
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    tmp = meta_dir / "index.tmp"
-    tmp.write_text(json.dumps(index_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.rename(index_path)
+    with _locked_filesystem_rmw(index_path):
+        _atomic_write_text(
+            index_path,
+            json.dumps(index_payload, indent=2, ensure_ascii=False),
+        )
 
     return index
 
@@ -323,39 +382,57 @@ def _load_index(root_dir: Path) -> dict[str, dict]:
         return build_fs_index(root_dir)
 
 
+def _read_index_records_without_rebuild(root_dir: Path) -> dict[str, dict]:
+    """读取 index records，不在已持有 index lock 时递归 rebuild。"""
+
+    index_path = root_dir / "_meta" / "index.json"
+    if not index_path.exists():
+        return {}
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    records = payload.get("records", {})
+    return records if isinstance(records, dict) else {}
+
+
 def _write_index_entry(root_dir: Path, record_id: str, entry: dict) -> None:
     """Write-through: update a single entry in index.json."""
-    index = _load_index(root_dir)
-    index[record_id] = entry
     meta_dir = root_dir / "_meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
     index_path = meta_dir / "index.json"
-    payload = {
-        "records": index,
-        "total": len(index),
-        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    tmp = meta_dir / "index.tmp"
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.rename(index_path)
+    with _locked_filesystem_rmw(index_path):
+        index = _read_index_records_without_rebuild(root_dir)
+        index[record_id] = entry
+        payload = {
+            "records": index,
+            "total": len(index),
+            "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        _atomic_write_text(
+            index_path,
+            json.dumps(payload, indent=2, ensure_ascii=False),
+        )
 
 
 def _remove_index_entry(root_dir: Path, record_id: str) -> None:
     """Remove an entry from index.json."""
-    index = _load_index(root_dir)
-    if record_id in index:
-        del index[record_id]
     meta_dir = root_dir / "_meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
     index_path = meta_dir / "index.json"
-    payload = {
-        "records": index,
-        "total": len(index),
-        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    tmp = meta_dir / "index.tmp"
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.rename(index_path)
+    with _locked_filesystem_rmw(index_path):
+        index = _read_index_records_without_rebuild(root_dir)
+        if record_id in index:
+            del index[record_id]
+        payload = {
+            "records": index,
+            "total": len(index),
+            "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        _atomic_write_text(
+            index_path,
+            json.dumps(payload, indent=2, ensure_ascii=False),
+        )
 
 
 # ── audit ───────────────────────────────────────────────────────────────────

@@ -182,7 +182,41 @@ for r in records[:5]:
 
 ---
 
-## 10. Optional complex real LLM memory dogfood
+## 10. Consolidation dry-run / emergence observability
+
+本节是 Memory RFC completion 后的 lightweight dogfood guard，不实现新 backend，也不进入 DB / graph / embedding。
+
+Consolidation dry-run 只用于 preview / audit：
+
+- 完整执行 loader → detector → optional LLM enhancement → validator → candidate summary
+- 不写 `_pending`
+- 不写 semantic / procedural store
+- 不 auto approve
+- summary 包含 `evidence_count`、`candidate_count`、`validator_pass_count`、`would_dispatch_count`、`warnings`、`direct_store_write=false`
+
+安全运行方式：
+
+```bash
+MEMORY_CONSOLIDATION_ENABLED=true MEMORY_CONSOLIDATION_DRY_RUN=true MEMORY_CONSOLIDATION_MIN_INTERVAL=0 python -m pytest tests/test_memory_session_hook.py::TestConsolidationRuntimeHookGate::test_dry_run_preview_does_not_dispatch_pending -q
+```
+
+Emergence runtime hook 的 dogfood summary 必须能解释 gate 状态：
+
+- `disabled_reason=disabled_by_env`
+- `disabled_reason=insufficient_active_records`
+- `disabled_reason=insufficient_correction_evidence`
+- `gate_reason=passed`
+
+P3 future hardening 当前处理：
+
+- index validation：已有基本 consistency regression；完整 verify/repair CLI deferred。
+- LLM token budget：当前使用 per-evidence char clipping、`max_tokens` 响应上限和 validator；复杂 tokenizer budgeting deferred。
+- memory decay：consolidation 已有 `recency_factor` confidence scoring；完整 aging / auto-delete policy deferred。
+- export / import：不实现 CLI；filesystem-first 下可人工复制 memory root 做备份。
+
+---
+
+## 11. Optional complex real LLM memory dogfood
 
 `scripts/dogfood_complex_real_llm.py` 是 complex real LLM memory dogfood harness，也是 Memory RFC completion 状态下保留的可复用 dogfood harness。它不属于普通测试默认路径，只在明确 opt-in、且项目配置机制已经能自动加载 provider config 时手动运行。
 
@@ -218,7 +252,7 @@ MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_complex_real_llm.py
 
 ---
 
-## 11. Runtime events / trace / logs test
+## 12. Runtime events / trace / logs test
 
 ```bash
 .venv/bin/python main.py logs                         # tail 50
@@ -233,7 +267,7 @@ MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_complex_real_llm.py
 
 ---
 
-## 12. Error handling test
+## 13. Error handling test
 
 ```bash
 # 不存在工具
@@ -248,7 +282,7 @@ MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_complex_real_llm.py
 
 ---
 
-## 13. Dogfooding log template
+## 14. Dogfooding log template
 
 | Date | Area | Scenario | Prompt | Expected | Actual | Severity | Notes |
 |------|------|----------|--------|----------|--------|----------|-------|
@@ -261,15 +295,15 @@ Severity: `ok` / `minor` / `blocker`
 
 ---
 
-## 14. Stop conditions
+## 15. Stop conditions
 
 出现任一立即停止：敏感信息被记住；reject 后工具仍执行；`request_user_input` 没真实等待用户；checkpoint/resume 恢复错误 state；tool result 写错（路径逃逸）；memory 错写（错误 topic file）；测试失败无法定位。
 
 ---
 
-## 15. What not to test yet
+## 16. What not to test yet
 
-默认不测真实 LLM/provider；如需 memory consolidation real provider dogfood，只按第 10 节 opt-in harness 执行。仍不测外部 MCP server、vector DB/embeddings/semantic retrieval、L2/L3 proactive memory、decay/archival/proceduralization、Skill 系统（experimental）、Textual TUI（实验性）。
+默认不测真实 LLM/provider；如需 memory consolidation real provider dogfood，只按第 11 节 opt-in harness 执行。仍不测外部 MCP server、vector DB/embeddings/semantic retrieval、L2/L3 proactive memory、decay/archival/proceduralization、Skill 系统（experimental）、Textual TUI（实验性）。
 
 ---
 
@@ -277,7 +311,7 @@ Severity: `ok` / `minor` / `blocker`
 
 1. **fake demo**（第 5 节，5 秒，无需 provider）
 2. **全部 memory 测试**（第 9.1 节，~96 tests，无需 provider）
-3. **health + logs**（第 3、11 节，无需 provider）
-4. **error handling**（第 12 节，无需 provider）
+3. **health + logs**（第 3、12 节，无需 provider）
+4. **error handling**（第 13 节，无需 provider）
 5. **如果配了 provider**：交互式 shell 测试对话/确认/checkpoint/request_user_input（第 4、6、7、8 节）
-6. **如果明确 opt-in real LLM memory dogfood**：按第 10 节运行 complex harness
+6. **如果明确 opt-in real LLM memory dogfood**：按第 11 节运行 complex harness

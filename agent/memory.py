@@ -613,6 +613,9 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
     )
     if not enabled:
         return {"enabled": False}
+    dry_run = _os.getenv("MEMORY_CONSOLIDATION_DRY_RUN", "").strip() in (
+        "1", "true", "yes", "True", "TRUE",
+    )
 
     # Gate 2: minimum interval (env-only, no cross-session filesystem persistence)
     # MEMORY_CONSOLIDATION_MIN_INTERVAL=0 disables the interval gate for dogfood.
@@ -643,15 +646,37 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
 
     llm_generator = create_llm_content_generator()
     pipeline_result = run_consolidation_pipeline(
-        store, llm_generator=llm_generator,
+        store, llm_generator=llm_generator, dry_run=dry_run,
     )
     if not pipeline_result.has_candidates:
         return {
             "enabled": True,
+            "dry_run": dry_run,
             "evidence_count": evidence_count,
             "candidate_count": 0,
             "dispatched_count": 0,
+            "would_dispatch_count": 0,
+            "validator_pass_count": pipeline_result.validator_pass_count,
+            "direct_store_write": False,
+            "auto_approve": False,
             "llm_enabled": pipeline_result.llm_enabled,
+        }
+
+    if dry_run:
+        return {
+            "enabled": True,
+            "dry_run": True,
+            "evidence_count": evidence_count,
+            "candidate_count": pipeline_result.candidate_count,
+            "validator_pass_count": pipeline_result.validator_pass_count,
+            "would_dispatch_count": pipeline_result.would_dispatch_count,
+            "dispatched_count": 0,
+            "warnings": list(pipeline_result.warnings),
+            "direct_store_write": False,
+            "auto_approve": False,
+            "llm_enabled": pipeline_result.llm_enabled,
+            "llm_enhanced_count": pipeline_result.llm_enhanced_count,
+            "llm_warnings": list(pipeline_result.llm_warnings),
         }
 
     # Dispatch to T1 pending
@@ -663,11 +688,16 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
 
     return {
         "enabled": True,
+        "dry_run": False,
         "evidence_count": evidence_count,
         "candidate_count": pipeline_result.candidate_count,
+        "validator_pass_count": pipeline_result.validator_pass_count,
+        "would_dispatch_count": 0,
         "dispatched_count": dispatch_result.dispatched,
         "duplicate_count": dispatch_result.skipped_duplicate,
         "warnings": list(dispatch_result.warnings),
+        "direct_store_write": False,
+        "auto_approve": False,
         "llm_enabled": pipeline_result.llm_enabled,
         "llm_enhanced_count": pipeline_result.llm_enhanced_count,
         "llm_warnings": list(pipeline_result.llm_warnings),
@@ -695,7 +725,19 @@ def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
         "1", "true", "yes", "True", "TRUE",
     )
     if not enabled:
-        return {"enabled": False}
+        return {
+            "enabled": False,
+            "disabled_reason": "disabled_by_env",
+            "gate_reason": "disabled_by_env",
+            "active_records_count": 0,
+            "min_active_records": 0,
+            "gate_passed": False,
+            "evidence_count": 0,
+            "candidate_count": 0,
+            "dispatched_count": 0,
+            "warnings": [],
+            "direct_store_write": False,
+        }
 
     from agent.memory_emergence import (
         ACTIVE_RECORDS_THRESHOLD,
@@ -712,6 +754,9 @@ def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
         "enabled": True,
         "gate_passed": active_records_count >= ACTIVE_RECORDS_THRESHOLD,
         "active_records_count": active_records_count,
+        "min_active_records": ACTIVE_RECORDS_THRESHOLD,
+        "disabled_reason": None,
+        "gate_reason": "passed",
         "evidence_count": 0,
         "candidate_count": 0,
         "dispatched_count": 0,
@@ -725,7 +770,8 @@ def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
 
     if active_records_count < ACTIVE_RECORDS_THRESHOLD:
         summary["skipped"] = "active_records_below_threshold"
-        summary["min_active_records"] = ACTIVE_RECORDS_THRESHOLD
+        summary["disabled_reason"] = "insufficient_active_records"
+        summary["gate_reason"] = "active_records_below_threshold"
         summary["warnings"].append(
             f"active_records_count={active_records_count} < "
             f"{ACTIVE_RECORDS_THRESHOLD}，emergence detection disabled"
@@ -745,11 +791,15 @@ def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
 
     if detection.evidence_count < MIN_CORRECTION_EVIDENCE:
         summary["skipped"] = "insufficient_correction_evidence"
+        summary["disabled_reason"] = "insufficient_correction_evidence"
+        summary["gate_reason"] = "correction_evidence_below_threshold"
         summary["min_correction_evidence"] = MIN_CORRECTION_EVIDENCE
         return summary
 
     if not detection.candidates:
         summary["skipped"] = "no_candidate"
+        summary["disabled_reason"] = "no_candidate"
+        summary["gate_reason"] = "no_candidate"
         summary["skipped_pattern_count"] = detection.skipped_count
         return summary
 

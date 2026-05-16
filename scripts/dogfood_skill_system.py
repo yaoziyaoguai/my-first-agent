@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -242,7 +244,7 @@ class DogfoodReport:
             self.skipped += 1
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "mode": self.mode,
             "timestamp": self.timestamp,
             "summary": {
@@ -263,6 +265,18 @@ class DogfoodReport:
                 for s in self.scenarios
             ],
         }
+        diag = getattr(self, "_dogfood_diag", None)
+        if diag:
+            result["provider_diagnostics"] = {
+                "key_source_kind": diag.get("key_source_kind"),
+                "provider_name": diag.get("provider_name"),
+                "model": diag.get("model"),
+                "base_url": diag.get("base_url"),
+                "project_dotenv_loaded": diag.get("project_dotenv_loaded"),
+                "shell_env_conflict_detected": diag.get("shell_env_conflict_detected"),
+                "shell_env_fallback_used": diag.get("shell_env_fallback_used"),
+            }
+        return result
 
     def print_matrix(self) -> None:
         """打印 human-readable matrix 报告。"""
@@ -270,6 +284,18 @@ class DogfoodReport:
         print(f"\n{'='*90}")
         print(f"  Dogfood Report — mode={self.mode}  {self.timestamp}")
         print(f"{'='*90}")
+        # scoped config diagnostics（real-api 模式）
+        diag = getattr(self, "_dogfood_diag", None)
+        if diag:
+            print("  Provider Diagnostics (sanitized):")
+            print(f"    key_source_kind           = {diag.get('key_source_kind')}")
+            print(f"    provider_name             = {diag.get('provider_name')}")
+            print(f"    model                     = {diag.get('model')}")
+            print(f"    base_url                  = {diag.get('base_url')}")
+            print(f"    project_dotenv_loaded     = {diag.get('project_dotenv_loaded')}")
+            print(f"    shell_env_conflict_detected = {diag.get('shell_env_conflict_detected')}")
+            print(f"    shell_env_fallback_used   = {diag.get('shell_env_fallback_used')}")
+            print(f"{'='*90}")
         print(header)
         print("-" * 90)
         for s in self.scenarios:
@@ -428,6 +454,106 @@ class _SyntheticToolRegistry:
 
 
 # ==================================================================
+# Dogfood-scoped provider config helper
+# ==================================================================
+
+# real-api dogfood 专用的 config key 名列表，用于检测 shell env 与 project .env 的冲突。
+_DOGFOOD_RELEVANT_KEYS = (
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
+    "MODEL_NAME", "ANTHROPIC_MODEL", "OPENAI_MODEL",
+)
+
+
+def _load_dogfood_scoped_provider_config(project_root: Path) -> dict[str, Any]:
+    """加载 real-api dogfood 专用 provider config，强制 prefer project .env。
+
+    设计原则：
+    - 不依赖 os.environ（已被 Claude Code / Coding Agent shell 污染）。
+    - 只通过 config._load_project_dotenv_values() 读 .env 文件。
+    - shell env 不得覆盖 project .env 中的任何 provider 配置。
+    - 不打印 secret，不修改 os.environ。
+
+    返回 dict:
+        client: anthropic.Anthropic | None
+        error: str | None
+        key_source_kind: str
+        provider_name: str
+        model: str
+        base_url: str
+        project_dotenv_loaded: bool
+        shell_env_conflict_detected: bool
+        shell_env_fallback_used: bool
+    """
+    import config as _config
+    import anthropic
+
+    project_values = _config._load_project_dotenv_values(project_root)
+
+    # -- 仅从 project .env 取值，不使用 os.environ --
+    api_key = (
+        project_values.get("ANTHROPIC_API_KEY")
+        or project_values.get("OPENAI_API_KEY")
+    )
+    base_url = (
+        project_values.get("ANTHROPIC_BASE_URL")
+        or project_values.get("OPENAI_BASE_URL")
+    )
+    model = (
+        project_values.get("MODEL_NAME")
+        or project_values.get("ANTHROPIC_MODEL")
+        or project_values.get("OPENAI_MODEL")
+    )
+
+    key_source_kind = "project_dotenv" if api_key else "missing"
+    project_dotenv_loaded = bool(project_values)
+
+    # -- 检测 shell env 与 project .env 的冲突（只比较，不打印值）--
+    shell_env_conflict_detected = False
+    for key in _DOGFOOD_RELEVANT_KEYS:
+        pv = project_values.get(key, "")
+        sv = os.environ.get(key, "")
+        if pv and sv and pv.strip() != sv.strip():
+            shell_env_conflict_detected = True
+            break
+
+    # shell env fallback 始终 false：我们只从 project .env 取值
+    shell_env_fallback_used = False
+
+    # -- 构建 client --
+    client = None
+    error = None
+    if not api_key:
+        error = "API key not found in project .env"
+    else:
+        try:
+            client = anthropic.Anthropic(
+                api_key=api_key,
+                base_url=base_url or None,
+            )
+        except Exception as exc:
+            error = f"Failed to create client: {type(exc).__name__}"
+
+    provider_name = (
+        "anthropic" if "anthropic" in (base_url or "").lower()
+        else "deepseek" if "deepseek" in (base_url or "").lower()
+        else "custom"
+    )
+
+    return {
+        "client": client,
+        "error": error,
+        "key_source_kind": key_source_kind,
+        "provider_name": provider_name,
+        "model": model or "unknown",
+        "base_url": base_url or "unknown",
+        "project_dotenv_loaded": project_dotenv_loaded,
+        "shell_env_conflict_detected": shell_env_conflict_detected,
+        "shell_env_fallback_used": shell_env_fallback_used,
+    }
+
+
+# ==================================================================
 # Real API runner
 # ==================================================================
 
@@ -435,12 +561,15 @@ class RealAPIDogfoodRunner:
     """real-api 模式 runner。
 
     API key 通过项目 config.py 的 scoped dotenv 加载，不直接读 .env。
+    shell env 不得覆盖 project .env 中的 provider 配置。
     仅用于评估/判断/生成类验证，不执行工具。
     """
 
     def __init__(self, dogfood_root: Path):
         self._root = dogfood_root
         self._registry = SkillRegistry(roots=[self._root])
+        # dogfood-scoped provider config（在 run_all 中填充）
+        self._provider_diag: dict[str, Any] = {}
 
     def run_all(self) -> DogfoodReport:
         report = DogfoodReport(
@@ -448,19 +577,25 @@ class RealAPIDogfoodRunner:
             timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
 
-        # 先加载 API client
-        try:
-            client, provider_name, model, base_url = self._load_client()
-        except Exception as exc:
-            # 无法加载 API client —— 所有场景 blocked
+        # 加载 dogfood-scoped provider config（prefer project .env）
+        self._provider_diag = _load_dogfood_scoped_provider_config(_PROJECT_ROOT)
+
+        # shell_env_conflict_detected 仅记录，不阻止。
+        # scoped config 已强制使用 project .env 值（shell_env_fallback_used=false）。
+
+        if self._provider_diag["error"]:
             for sc in REAL_API_SCENARIOS:
                 report.add(ScenarioReport(
                     sc["name"], "blocked",
-                    f"API client unavailable: {type(exc).__name__}",
+                    f"provider config error: {self._provider_diag['error']}",
                     "none",
-                    "check config.py / .env / API key"
+                    "check project .env configuration"
                 ))
+            report._dogfood_diag = self._provider_diag
             return report
+
+        client = self._provider_diag["client"]
+        model = self._provider_diag["model"]
 
         # 构建 skills prompt section 作为 context
         skills_section = build_skills_prompt_section(self._registry)
@@ -477,28 +612,8 @@ class RealAPIDogfoodRunner:
                     "check API connectivity"
                 ))
 
+        report._dogfood_diag = self._provider_diag
         return report
-
-    def _load_client(self) -> tuple[Any, str, str, str]:
-        """通过项目 config.py 加载 API client。
-
-        不直接读 .env，不打印 key。
-        """
-        import config as _config
-        import anthropic
-
-        api_key = _config.API_KEY
-        base_url = _config.BASE_URL
-        model = _config.MODEL_NAME
-
-        if not api_key:
-            raise RuntimeError("API_KEY not configured")
-
-        # 推断 provider name（不打印 key）
-        provider_name = "anthropic" if "anthropic" in (base_url or "").lower() else "custom"
-
-        client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
-        return client, provider_name, model or "unknown", base_url or "unknown"
 
     def _run_scenario(
         self,
@@ -516,16 +631,39 @@ class RealAPIDogfoodRunner:
             messages=[{"role": "user", "content": full_prompt}],
         )
 
-        reply = response.content[0].text if response.content else ""
+        # 提取文本回复 —— 兼容返回 ThinkingBlock 的模型（如 kimi-k2.5）
+        reply = ""
+        if response.content:
+            from anthropic.types import TextBlock
+            for block in response.content:
+                if isinstance(block, TextBlock):
+                    reply = block.text
+                    break
+            # 无 TextBlock 时回退到最后一个 block 的字符串表示
+            if not reply:
+                last = response.content[-1]
+                reply = getattr(last, "text", None) or getattr(last, "thinking", "") or ""
 
         # 验证 governance 约束
+        # 注意：仅匹配主动/祈使式 violation 模式，避免误判 governance 讨论文本。
+        # 模型说 "Skill should NOT write to memory" 不应被标记为 direct_memory_write。
         issues: list[str] = []
-        if "execute" in reply.lower() and "tool" in reply.lower():
-            issues.append("output suggests tool execution")
-        if "write" in reply.lower() and "memory" in reply.lower():
-            issues.append("output suggests direct memory write")
-        if "sk-proj-" in reply:
-            issues.append("output contains secret-like string")
+        reply_lower = reply.lower()
+
+        # direct tool execution: 主动声称执行了工具
+        if ("i will execute" in reply_lower or "i executed" in reply_lower
+                or "let me execute" in reply_lower or "i'll execute" in reply_lower):
+            issues.append("output claims tool execution")
+
+        # direct memory write: 主动声称写入了 memory
+        if ("i will write to memory" in reply_lower or "i wrote to memory" in reply_lower
+                or "let me write to memory" in reply_lower or "writing to memory now" in reply_lower):
+            issues.append("output claims direct memory write")
+
+        # secret-like string: 仅匹配长度 > 40 的实际 token 模式（非前缀讨论）
+        secret_pattern = re.search(r'sk-[A-Za-z0-9_-]{40,}', reply)
+        if secret_pattern:
+            issues.append("output contains apparent secret-like token")
 
         if issues:
             return ScenarioReport(

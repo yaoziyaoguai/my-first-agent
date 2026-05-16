@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -587,3 +588,169 @@ def test_dogfood_invocation_generates_audit(dogfood_registry):
     assert result.audit_record.skill_name == "prompt-writing"
     assert result.audit_record.result_status == "ok"
     assert result.audit_record.loaded_levels > 0
+
+
+# ===================================================================
+# Shell Env Pollution Prevention Tests
+#
+# 保护 real API dogfood 的配置隔离：
+# Coding Agent / Claude Code 的 shell 环境不能污染项目 .env scoped
+# dogfood 配置；真实 key 只能通过项目 .env scoped loader 使用，且不泄露。
+# ===================================================================
+
+_DOGFOOD_SCOPED_HELPER_IMPORT_PATH = (
+    "scripts.dogfood_skill_system._load_dogfood_scoped_provider_config"
+)
+
+
+@pytest.fixture
+def fake_project_env(tmp_path):
+    """创建假的 project .env 文件，返回 project root 路径。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "ANTHROPIC_API_KEY=fake-test-key-12345\n"
+        "ANTHROPIC_BASE_URL=https://fake.example.com/anthropic\n"
+        "MODEL_NAME=fake-model\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def clean_os_environ():
+    """保存并恢复 os.environ，防止测试间污染。"""
+    saved = dict(os.environ)
+    yield
+    # 恢复原始环境
+    for key in list(os.environ):
+        if key not in saved:
+            del os.environ[key]
+    for key, value in saved.items():
+        os.environ[key] = value
+
+
+class TestDogfoodScopedProviderConfig:
+    """验证 real-api dogfood config 强制使用 project .env scoped values。"""
+
+    def test_key_source_is_project_dotenv(self, fake_project_env, clean_os_environ):
+        """project .env 中有 key 时，key_source_kind=project_dotenv。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        assert diag["key_source_kind"] == "project_dotenv"
+
+    def test_shell_env_fallback_is_never_used(self, fake_project_env, clean_os_environ):
+        """shell_env_fallback_used 始终为 false。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        assert diag["shell_env_fallback_used"] is False
+
+    def test_shell_env_conflict_detected_when_values_differ(
+        self, fake_project_env, clean_os_environ
+    ):
+        """shell env 值与 project .env 不同时，shell_env_conflict_detected=true。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        os.environ["ANTHROPIC_BASE_URL"] = "https://shell-env.example.com"
+        os.environ["MODEL_NAME"] = "shell-model"
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        assert diag["shell_env_conflict_detected"] is True
+
+    def test_project_dotenv_takes_precedence_over_shell(
+        self, fake_project_env, clean_os_environ
+    ):
+        """有冲突时，dogfood 使用 project .env 的值而非 shell env。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        os.environ["MODEL_NAME"] = "shell-model"
+        os.environ["ANTHROPIC_BASE_URL"] = "https://shell.example.com"
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        assert diag["model"] == "fake-model"
+        assert diag["base_url"] == "https://fake.example.com/anthropic"
+
+    def test_base_url_and_provider_prefer_project_dotenv(
+        self, fake_project_env, clean_os_environ
+    ):
+        """base_url 和 provider_name 来自 project .env。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        os.environ["ANTHROPIC_BASE_URL"] = "https://shell.example.com"
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        assert diag["base_url"] == "https://fake.example.com/anthropic"
+        assert diag["provider_name"] == "anthropic"
+
+    def test_missing_key_in_project_dotenv_fails_closed(
+        self, tmp_path, clean_os_environ
+    ):
+        """project .env 缺 API key 时 fail closed，不回退到 shell env。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        # 创建只有 base_url 的 .env，缺 key
+        env_file = tmp_path / ".env"
+        env_file.write_text("ANTHROPIC_BASE_URL=https://fake.example.com\n")
+
+        os.environ["ANTHROPIC_API_KEY"] = "shell-has-key"
+
+        diag = _load_dogfood_scoped_provider_config(tmp_path)
+        assert diag["key_source_kind"] == "missing"
+        assert diag["client"] is None
+        assert diag["error"] is not None
+        assert diag["shell_env_fallback_used"] is False
+
+    def test_shell_env_has_key_but_project_dotenv_missing_no_fallback(
+        self, tmp_path, clean_os_environ
+    ):
+        """即使 shell env 有可用 key，project .env 不存在时也不允许 fallback。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        # 无 .env 文件
+        os.environ["ANTHROPIC_API_KEY"] = "shell-has-key"
+        os.environ["MODEL_NAME"] = "shell-model"
+
+        diag = _load_dogfood_scoped_provider_config(tmp_path)
+        assert diag["project_dotenv_loaded"] is False
+        assert diag["key_source_kind"] == "missing"
+        # 即使 shell env 有 key，也必须失败
+        assert diag["client"] is None
+        assert diag["shell_env_fallback_used"] is False
+
+    def test_diagnostics_never_contain_key_value(
+        self, fake_project_env, clean_os_environ
+    ):
+        """diagnostics 不应包含 key 的实际值。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        diag_str = str(diag)
+        assert "fake-test-key-12345" not in diag_str
+
+    def test_diagnostics_never_contain_auth_header(
+        self, fake_project_env, clean_os_environ
+    ):
+        """diagnostics 不应包含 Authorization/Bearer。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        diag = _load_dogfood_scoped_provider_config(fake_project_env)
+        diag_str = str(diag)
+        assert "Authorization" not in diag_str
+        assert "Bearer" not in diag_str
+
+    def test_does_not_mutate_os_environ(self, fake_project_env, clean_os_environ):
+        """helper 不应修改 os.environ。"""
+        from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
+
+        before_keys = set(os.environ.keys())
+        before_model = os.environ.get("MODEL_NAME")
+
+        _load_dogfood_scoped_provider_config(fake_project_env)
+
+        after_keys = set(os.environ.keys())
+        after_model = os.environ.get("MODEL_NAME")
+
+        # key 集合不应变化
+        assert before_keys == after_keys
+        # 已有值不应被覆盖
+        assert before_model == after_model

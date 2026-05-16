@@ -59,6 +59,17 @@ _PROCEDURAL_LIKE_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"(never|always|must|must\s*not|don't|do\s*not)\s+\w+"),
 )
 
+# preference_evolved 是 RFC §D.3 的“时间演进型变化”，仍属于
+# semantic consolidation。这里故意只支持显式 marker，不做隐式 NLP 推断：
+# 没有时间演进 marker 的 A/B 冲突继续走 clarification_needed，由 T1 review 裁决。
+_PREFERENCE_EVOLUTION_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"(以前|之前|过去|原来|曾经).{0,40}(现在|如今|后来|改成|改为|变成|更喜欢|更倾向|转向)"),
+    re.compile(r"(偏好|喜好).{0,20}从.{1,40}(变成|改成|改为|转向).{1,40}"),
+    re.compile(r"(used to prefer|previously preferred).{0,80}(now prefer|now prefers|now use|now uses)", re.IGNORECASE),
+    re.compile(r"changed\s+(my\s+|the\s+)?preference\s+from\s+.{1,40}\s+to\s+.{1,40}", re.IGNORECASE),
+    re.compile(r"no longer\s+.{1,40},?\s+now\s+.{1,40}", re.IGNORECASE),
+)
+
 # ── 关键词提取 ─────────────────────────────────────────────────────────────
 
 
@@ -92,6 +103,40 @@ def _is_procedural_like(content: str) -> bool:
     如果匹配，不应生成 semantic candidate（RFC §D.4）。
     """
     return any(p.search(content) for p in _PROCEDURAL_LIKE_PATTERNS)
+
+
+def _has_preference_evolution_marker(content: str) -> bool:
+    """检测显式偏好演进 marker。
+
+    这是 semantic consolidation 的最小确定性 foundation：只有用户文本明确表达
+    “过去/现在”或 “from/to” 的时间演进，才进入 preference_evolved。
+    """
+    return any(p.search(content) for p in _PREFERENCE_EVOLUTION_PATTERNS)
+
+
+def _has_chronological_order(group: list[EpisodicEvidence]) -> bool:
+    """确认 evidence 至少有两个不同时间点。
+
+    preference_evolved 与普通 contradiction 的核心区别是时间顺序。没有可验证
+    created_at 时，detector fail-closed，不把冲突升级成演进结论。
+    """
+    timestamps = {
+        ts
+        for evidence in group
+        if (ts := _parse_created_at(evidence.created_at)) is not None
+    }
+    return len(timestamps) >= 2 and min(timestamps) < max(timestamps)
+
+
+def _detect_preference_evolution_in_group(group: list[EpisodicEvidence]) -> bool:
+    """检测 group 是否表达了明确的偏好演进。
+
+    只看显式 marker + created_at 顺序，不生成 procedural，不写 store。
+    """
+    return _has_chronological_order(group) and any(
+        _has_preference_evolution_marker(evidence.content)
+        for evidence in group
+    )
 
 
 # ── 分组逻辑 ───────────────────────────────────────────────────────────────
@@ -268,6 +313,11 @@ def _generate_content(
         return (
             f"在主题 '{topic_str}' 上观察到矛盾信号：部分 evidence 持正面/采用态度，"
             f"部分 evidence 持负面/拒绝态度。需要人工澄清实际偏好。"
+        )
+    elif ctype == ConsolidationType.PREFERENCE_EVOLVED:
+        return (
+            f"用户偏好在主题 '{topic_str}' 上呈现时间演进：旧 evidence 与新 evidence "
+            "显示偏好已发生变化，需要经 T1 review 确认最新语义记忆。"
         )
     elif ctype == ConsolidationType.MERGE:
         return f"多条事件记录反复涉及相同模式：{topic_str}。"
@@ -449,12 +499,18 @@ class DeterministicConsolidationDetector:
         """判定 group 的 consolidation_type。
 
         规则优先级:
-        1. 存在矛盾 → clarification_needed（RFC §D.3）
-        2. 所有成对 content 关键词 Jaccard > MERGE_JACCARD_THRESHOLD → merge
-        3. 所有 evidence scope 相同 → abstraction
-        4. 默认 → pattern_detection
+        1. 存在明确时间演进 marker → preference_evolved（RFC §D.3）
+        2. 存在矛盾 → clarification_needed（RFC §D.3）
+        3. 所有成对 content 关键词 Jaccard > MERGE_JACCARD_THRESHOLD → merge
+        4. 所有 evidence scope 相同 → abstraction
+        5. 默认 → pattern_detection
         """
-        # contradiction check: 最高优先级
+        # preference_evolved 必须先于 contradiction 检查。显式“过去 A，现在 B”
+        # 是时间演进，不是同时冲突；仍输出 semantic/T1 candidate。
+        if _detect_preference_evolution_in_group(group):
+            return ConsolidationType.PREFERENCE_EVOLVED
+
+        # contradiction check: 无时间演进 marker 的冲突走澄清路径
         if _detect_contradiction_in_group(group):
             return ConsolidationType.CLARIFICATION_NEEDED
 

@@ -340,6 +340,67 @@ class TestPipelineCandidateGeneration:
         assert result.detector_name == "DeterministicConsolidationDetector"
 
 
+class TestPipelinePreferenceEvolved:
+    """这些测试验证 RFC 中 preference_evolved 的最小 deterministic foundation：
+    它属于 semantic consolidation 的演化候选，不是 procedural memory，
+    不允许 silent retain，也不能绕过 T1 pending review。
+    """
+
+    def test_pipeline_routes_preference_evolved_as_semantic_t1(self, tmp_path: Path):
+        """filesystem evidence 经过 loader → detector 后保留 preference_evolved 类型。"""
+        store = _make_fs_store(tmp_path, {
+            "episodic/2026-05-13.md": [
+                {
+                    "id": "pref-old",
+                    "memory_type": "episodic",
+                    "scope": "user",
+                    "approval_status": "auto_retained",
+                    "confidence": 0.82,
+                    "stability": "stable",
+                    "created_at": "2026-05-01T10:00:00Z",
+                    "tags": "testing-preference",
+                    "_content": "用户以前喜欢 unittest 作为 Python 测试框架",
+                },
+                {
+                    "id": "pref-new-a",
+                    "memory_type": "episodic",
+                    "scope": "user",
+                    "approval_status": "auto_retained",
+                    "confidence": 0.86,
+                    "stability": "stable",
+                    "created_at": "2026-05-10T10:00:00Z",
+                    "tags": "testing-preference",
+                    "_content": "用户现在更喜欢 pytest 作为 Python 测试框架",
+                },
+                {
+                    "id": "pref-new-b",
+                    "memory_type": "episodic",
+                    "scope": "user",
+                    "approval_status": "auto_retained",
+                    "confidence": 0.88,
+                    "stability": "stable",
+                    "created_at": "2026-05-12T10:00:00Z",
+                    "tags": "testing-preference",
+                    "_content": "用户说测试偏好从 unittest 变成 pytest",
+                },
+            ],
+        })
+
+        result = run_consolidation_pipeline(store)
+
+        assert result.candidate_count == 1
+        candidate = result.candidates[0]
+        assert candidate.consolidation_type == ConsolidationType.PREFERENCE_EVOLVED
+        assert candidate.memory_type == "semantic"
+        assert candidate.governance_route == "T1"
+        assert set(candidate.source_evidence) == {
+            "pref-old", "pref-new-a", "pref-new-b",
+        }
+        assert 0.0 <= candidate.confidence <= 1.0
+        assert not (tmp_path / "memory_store" / "semantic").exists()
+        assert not (tmp_path / "memory_store" / "procedural").exists()
+
+
 # ── loader 过滤传播 ─────────────────────────────────────────────────────────
 
 

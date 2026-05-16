@@ -303,6 +303,78 @@ class TestProceduralFiltering:
         assert len(result) == 0
 
 
+# ── preference_evolved ──────────────────────────────────────────────────────
+
+
+class TestPreferenceEvolvedDetection:
+    """这些测试验证 RFC 中 preference_evolved 的最小 deterministic foundation：
+    它属于 semantic consolidation 的演化候选，不是 procedural memory，
+    不允许 silent retain，也不能绕过 T1 pending review。
+    """
+
+    def test_explicit_past_now_marker_generates_preference_evolved(self, detector):
+        """明确“过去 A，现在 B”的同主题 evidence 生成 preference_evolved。"""
+        items = [
+            _evidence(
+                "old-1",
+                "用户以前喜欢 unittest 作为 Python 测试框架",
+                tags=("testing-preference",),
+                created_at="2026-05-01T10:00:00Z",
+                confidence=0.82,
+            ),
+            _evidence(
+                "new-1",
+                "用户现在更喜欢 pytest 作为 Python 测试框架",
+                tags=("testing-preference",),
+                created_at="2026-05-10T10:00:00Z",
+                confidence=0.86,
+            ),
+            _evidence(
+                "new-2",
+                "用户说测试偏好从 unittest 变成 pytest",
+                tags=("testing-preference",),
+                created_at="2026-05-12T10:00:00Z",
+                confidence=0.88,
+            ),
+        ]
+
+        result = detector.detect(items, now=_parse_created_at("2026-05-13T10:00:00Z"))
+
+        assert len(result) == 1
+        candidate = result[0]
+        assert candidate.consolidation_type == ConsolidationType.PREFERENCE_EVOLVED
+        assert candidate.memory_type == "semantic"
+        assert candidate.governance_route == "T1"
+        assert set(candidate.source_evidence) == {"old-1", "new-1", "new-2"}
+        assert 0.0 <= candidate.confidence <= 1.0
+        assert "偏好" in candidate.content
+
+    def test_unordered_contradiction_does_not_become_preference_evolved(self, detector):
+        """没有时间演进 marker 的 A/B 冲突应保持 clarification_needed。"""
+        items = [
+            _e("pos-1", "用户喜欢 pytest 作为测试框架", tags=("testing-preference",)),
+            _e("neg-1", "用户不喜欢 pytest 作为测试框架", tags=("testing-preference",)),
+            _e("pos-2", "用户推荐 pytest 作为测试框架", tags=("testing-preference",)),
+        ]
+
+        result = detector.detect(items)
+
+        assert len(result) == 1
+        assert result[0].consolidation_type == ConsolidationType.CLARIFICATION_NEEDED
+        assert result[0].consolidation_type != ConsolidationType.PREFERENCE_EVOLVED
+
+    def test_procedural_like_evolution_instruction_is_filtered(self, detector):
+        """procedural-like “以后必须...” 不应被 preference_evolved 变成 procedural 写入。"""
+        items = [
+            _e("old-1", "用户以前喜欢 unittest", tags=("testing-preference",)),
+            _e("new-1", "用户现在更喜欢 pytest", tags=("testing-preference",)),
+            _e("proc-1", "以后你必须使用 pytest 写所有新测试", tags=("testing-preference",)),
+        ]
+
+        result = detector.detect(items)
+
+        assert result == []
+
 # ── deterministic / store-free / LLM-free ────────────────────────────────────
 
 

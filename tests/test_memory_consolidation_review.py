@@ -142,6 +142,32 @@ class TestDispatchSingle:
         data = _read_pending_json(result.proposal_filepaths[0])
         assert data["consolidation_type"] == "merge"
 
+    def test_dispatched_json_preserves_preference_evolved_type(self, tmp_path: Path):
+        """preference_evolved 仍只进入 T1 pending review，不直接写 store。
+
+        这些测试验证 RFC 中 preference_evolved 的最小 deterministic foundation：
+        它属于 semantic consolidation 的演化候选，不是 procedural memory，
+        不允许 silent retain，也不能绕过 T1 pending review。
+        """
+        candidate = _make_candidate(
+            consolidation_type=ConsolidationType.PREFERENCE_EVOLVED,
+            source_evidence=("pref_old", "pref_new_a", "pref_new_b"),
+            confidence=0.74,
+        )
+        result = dispatch_consolidation_candidates_to_pending_review(
+            [candidate], memory_root=tmp_path,
+        )
+
+        data = _read_pending_json(result.proposal_filepaths[0])
+        assert data["memory_type"] == "semantic"
+        assert data["governance_route"] == "T1"
+        assert data["approval_status"] == "pending"
+        assert data["consolidation_type"] == "preference_evolved"
+        assert data["source_evidence"] == ["pref_old", "pref_new_a", "pref_new_b"]
+        assert data["confidence"] == 0.74
+        assert not (tmp_path / "semantic").exists()
+        assert not (tmp_path / "procedural").exists()
+
     def test_dispatched_json_preserves_evidence_summary(self, tmp_path: Path):
         """pending JSON 必须保留 evidence_summary。"""
         candidate = _make_candidate(
@@ -537,6 +563,28 @@ class TestReviewCLIAccept:
         result = accept_pending_proposal(proposals[0], store)
 
         assert "[consolidation:merge]" in result.record.source_summary
+
+    def test_accept_preserves_preference_evolved_metadata(self, tmp_path: Path):
+        """accept 后 preference_evolved 作为 semantic record 写入并保留 metadata。"""
+        candidate = _make_candidate(
+            consolidation_type=ConsolidationType.PREFERENCE_EVOLVED,
+            source_evidence=("pref_old", "pref_new_a", "pref_new_b"),
+            content="用户测试框架偏好从 unittest 演进为 pytest",
+        )
+        dispatch_consolidation_candidates_to_pending_review(
+            [candidate], memory_root=tmp_path,
+        )
+
+        proposals = list_pending_proposals(memory_root=str(tmp_path))
+        store = _make_fs_store(tmp_path / "store")
+        result = accept_pending_proposal(proposals[0], store)
+
+        assert result.record is not None
+        assert result.record.memory_type == "semantic"
+        assert "[consolidation:preference_evolved]" in result.record.source_summary
+        assert "pref_old" in result.record.source_summary
+        assert "pref_new_a" in result.record.source_summary
+        assert "pref_new_b" in result.record.source_summary
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

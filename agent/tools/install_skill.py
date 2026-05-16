@@ -1,9 +1,13 @@
 # agent/tools/install_skill.py
-"""install_skill 工具：让模型/用户能触发 skill 安装。"""
+"""Disabled legacy install_skill wrapper.
+
+旧 Skill installer 已隔离到 `agent.legacy_skills`，这里不再 import 旧
+`install_from_github`，避免显式导入 tool wrapper 时触达真实网络 / git clone /
+pip install 风险路径。正式 Skill lifecycle tools 将由 `agent/skill_system/`
+后续阶段重新实现。
+"""
 
 from agent.tool_registry import register_tool
-from agent.skills.installer import install_from_github
-from agent.skills.registry import reload_registry
 
 
 @register_tool(
@@ -26,28 +30,10 @@ from agent.skills.registry import reload_registry
     output_policy="bounded_text",
 )
 def install_skill(url: str) -> str:
-    """安装 skill 并自动 reload registry。"""
-    result = install_from_github(url)
-    
-    if not result["success"]:
-        return f"[安装失败] {result.get('error', '未知错误')}"
-    
-    # 安装成功，reload registry 让新 skill 立即可用
-    reload_registry()
-    
-    lines = [
-        f"[安装成功] skill '{result['skill_name']}' 已安装到 {result['skill_path']}",
-        "",
-        (
-            "skill registry 已刷新；正式 Skill loading 工具将在后续 Skill System "
-            "阶段重新设计。"
-        ),
-    ]
-    
-    if result.get("safety_warnings"):
-        lines.append("")
-        lines.append("[安全警告]")
-        for w in result["safety_warnings"]:
-            lines.append(f"  - {w}")
-    
-    return "\n".join(lines)
+    """Fail closed: legacy 网络安装路径已禁用，不执行任何下载或写入。"""
+
+    return (
+        "install_skill 已禁用：旧 Skill installer 已隔离，正式 Skill lifecycle "
+        "工具将在 agent/skill_system/ 后续阶段重新实现。本次调用未执行网络、"
+        "git clone、pip install 或文件写入。"
+    )

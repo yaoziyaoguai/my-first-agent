@@ -5,7 +5,18 @@ from __future__ import annotations
 from config import SYSTEM_PROMPT
 from agent.memory import build_memory_section
 from agent.memory_contracts import MemorySnapshot
-from agent.skills.registry import build_skills_section
+
+
+def build_skills_section() -> str:
+    """返回正式 Skill System 接入前的空 Skill prompt 段。
+
+    旧 `agent.skills` prototype 已隔离到 `agent.legacy_skills`，prompt_builder
+    不能再扫描旧 registry 或把 legacy descriptor 注入模型上下文。正式
+    `agent/skill_system/` 后续实现时，应通过新的 progressive disclosure seam
+    显式接入。
+    """
+
+    return ""
 
 
 def build_system_prompt(memory_snapshot: MemorySnapshot | None = None) -> str:

@@ -11,7 +11,7 @@ after the canonical RFC. It is not an implementation patch.
 - ToolRegistry remains the only tool execution authority.
 - Memory writes always go through Memory governance.
 - High cohesion modules, low coupling boundaries, no new monolith.
-- Legacy `agent/skills/` prototype is evidence, not design authority.
+- Legacy `agent/skills/` has been cleaned/quarantined and is not design authority.
 - SubAgent remains deferred.
 
 ## 2. Proposed Module Design
@@ -20,16 +20,15 @@ Do not create these files until the implementation loop reaches their phase.
 
 ### Legacy/Formal Module Coexistence Strategy
 
-Existing `agent/skills/` is a frozen legacy / experimental prototype. The formal
-Skill System cannot silently reuse legacy `registry.py`, `loader.py`, or
-`installer.py` as stable API, because those files already carry prototype
-semantics such as module-level registry state and experimental installer
-behavior.
+Existing `agent/skills/` has been cleaned/quarantined. The formal Skill System
+cannot silently reuse legacy `registry.py`, `loader.py`, or `installer.py` as
+stable API, because those files already carried prototype semantics such as
+module-level registry state and experimental installer behavior.
 
 Before implementation, the formal module namespace must be chosen explicitly.
 Accepted options:
 
-- A. Rename legacy files to `_legacy_*` before formal implementation.
+- A. Move legacy files to a quarantined namespace before formal implementation.
 - B. Create formal modules under `agent/skill_system/`.
 - C. Keep `agent/skills/` as the formal namespace but first migrate legacy
   modules to a legacy subpackage.
@@ -38,16 +37,16 @@ Recommended option: B, create formal modules under `agent/skill_system/`.
 
 Rationale:
 
-- Avoids confusion with frozen legacy `agent/skills/`.
-- Does not require moving legacy files before the first implementation phase.
-- Allows a later migration phase to decide whether to replace, archive, or
-  remove the old prototype.
-- Makes it harder for implementation agents to accidentally import frozen
+- Avoids confusion with cleaned/quarantined legacy `agent/skills/`.
+- Keeps formal implementation away from `agent/legacy_skills/`.
+- Allows a later migration phase to decide whether any historical code is worth
+  porting.
+- Makes it harder for implementation agents to accidentally import quarantined
   prototype modules as formal design.
 
 This is a docs-only design decision. No production code changes are made by this
-document. `agent/skills/` remains frozen and reference-only until an explicitly
-approved migration phase.
+document. `agent/skills/` is not a formal or reference implementation path, and
+`agent/legacy_skills/` is historical migration material only.
 
 ```text
 agent/skill_system/descriptor.py
@@ -282,8 +281,9 @@ CLI/TUI must not:
 
 Migration should happen only after tests are written:
 
-1. Keep legacy package frozen.
+1. Keep legacy package quarantined.
 2. Add new schema tests.
 3. Replace module-level singleton design with runtime/session-scoped registry.
 4. Reuse safe parser ideas only when they pass new schema contracts.
 5. Keep installer outside default tools until a separate install RFC exists.
+6. Do not import `agent.legacy_skills` from `agent/skill_system/`.

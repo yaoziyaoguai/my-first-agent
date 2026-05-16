@@ -13,10 +13,10 @@ import ast
 from pathlib import Path
 
 from agent import cli_renderer
-from agent.skills.registry import SkillRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "skills"
+QUARANTINED_LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "legacy_skills"
 FORMAL_SKILL_SYSTEM_DIR = PROJECT_ROOT / "agent" / "skill_system"
 
 
@@ -85,51 +85,14 @@ def test_planning_marks_m3_as_status_clarification_not_runtime():
         assert forbidden not in m3_section.split("不做")[0] if "不做" in m3_section else True
 
 
-# ---------- Skill registry 优雅降级 ----------
-
-def test_registry_handles_missing_skills_dir(tmp_path):
-    """skills/ 目录不存在时 registry 不应抛异常，应返回空清单。"""
-    reg = SkillRegistry(skills_dir=tmp_path / "nonexistent")
-    reg.discover_skills()
-    assert reg.list_skills() == []
-    assert reg.count() == 0
-
-
-def test_registry_handles_empty_skills_dir(tmp_path):
-    """skills/ 目录存在但为空时也不应崩。"""
-    empty = tmp_path / "skills"
-    empty.mkdir()
-    reg = SkillRegistry(skills_dir=empty)
-    reg.discover_skills()
-    assert reg.list_skills() == []
-    assert reg.get_warnings() == []
-
-
-def test_registry_skips_non_directory_entries(tmp_path):
-    """skills/ 下的散文件 / 隐藏目录应被静默跳过，不计入 warnings。"""
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-    (skills_dir / "stray.txt").write_text("not a skill")
-    (skills_dir / ".hidden").mkdir()
-    reg = SkillRegistry(skills_dir=skills_dir)
-    reg.discover_skills()
-    assert reg.count() == 0
-    # 散文件 / 隐藏目录不应产生 warning，否则用户每次启动都被吓
-    assert reg.get_warnings() == []
-
-
 # ---------- Skill section 注入对主流程的影响 ----------
 
-def test_build_skills_section_returns_empty_when_no_skills(tmp_path, monkeypatch):
-    """没有 skill 时 prompt 段应该完全为空字符串，不能注入空标题。"""
-    from agent.skills import registry as reg_mod
+def test_prompt_builder_skills_section_is_empty_until_formal_system_exists() -> None:
+    """旧 registry 已隔离，prompt_builder 不能再从 legacy 生成 Skill prompt。"""
 
-    fake_reg = SkillRegistry(skills_dir=tmp_path / "none")
-    fake_reg.discover_skills()
-    monkeypatch.setattr(reg_mod, "_registry", fake_reg)
+    from agent.prompt_builder import build_skills_section
 
-    section = reg_mod.build_skills_section()
-    assert section == ""
+    assert build_skills_section() == ""
 
 
 # ---------- 没有 Skill 单测的事实登记 ----------
@@ -143,23 +106,22 @@ def test_status_doc_acknowledges_no_skill_unit_tests():
     assert "没有 skill 单元测试" in doc
 
 
-# ---------- Formal Skill Phase 0：冻结旧原型边界 ----------
+# ---------- Legacy cleanup：隔离旧原型边界 ----------
 
 def test_legacy_agent_skills_package_exports_no_formal_api() -> None:
-    """Phase 0 边界：旧 `agent.skills` 只作为 frozen prototype 存在。
+    """Cleanup 边界：`agent.skills` 只作为 tombstone 存在。
 
-    这里允许 import package `__init__`，但不导入 registry/installer/loader。
-    目标是确认旧包没有通过顶层 `__all__` 暴露正式 Skill API，避免后续实现
-    误把 prototype 当成 canonical contract。
+    这里允许 import package `__init__`，但 tombstone 不得导出 registry、
+    installer、loader 或 local helper，避免正式实现误用旧 path。
     """
 
     import agent.skills as legacy_skills
 
     assert legacy_skills.__all__ == []
     doc = legacy_skills.__doc__ or ""
-    assert "Legacy / experimental" in doc
-    assert "不是正式 Skill System" in doc
-    assert "默认工具注册路径不应自动启用 Skill lifecycle tools" in doc
+    assert "tombstone" in doc
+    assert "agent/skill_system/" in doc
+    assert "agent/legacy_skills/" in doc
 
 
 def test_skill_docs_pin_phase0_namespace_and_checkpoint_boundaries() -> None:
@@ -176,21 +138,10 @@ def test_skill_docs_pin_phase0_namespace_and_checkpoint_boundaries() -> None:
     ).read_text(encoding="utf-8")
 
     assert "formal implementation namespace is `agent/skill_system/`" in rfc
-    assert "`agent/skills/` remains frozen/reference-only" in rfc
+    assert "`agent/skills/` has been cleaned/quarantined" in rfc
     assert "Checkpoint stores unredacted Skill body, resources, or secrets." in audit
 
-    for legacy_file in (
-        "__init__.py",
-        "registry.py",
-        "installer.py",
-        "loader.py",
-        "local.py",
-        "parser.py",
-        "safety.py",
-    ):
-        assert f"`agent/skills/{legacy_file}`" in loop
-
-    assert "Formal Skill implementation must not modify frozen legacy" in loop
+    assert "must not import or modify quarantined legacy Skill" in loop
     assert "create or modify `agent/skill_system/*`" in loop
 
 
@@ -213,6 +164,7 @@ def test_default_tools_keep_skill_lifecycle_tools_explicit_opt_in() -> None:
             "agent.tools.update_skill",
             "agent.tools.skill",
             "agent.skills",
+            "agent.legacy_skills",
             "agent.subagents",
         }
     )
@@ -225,14 +177,19 @@ def test_default_tools_keep_skill_lifecycle_tools_explicit_opt_in() -> None:
     assert 'risk_level="high"' in install_source
     assert 'capability="skill_lifecycle"' in install_source
     assert 'confirmation="always"' in update_source
-    assert "from agent.skills.loader import format_skill_for_model" in load_source
+    assert _module_imports(install_tool).isdisjoint({"agent.legacy_skills"})
+    assert _module_imports(update_tool).isdisjoint({"agent.legacy_skills"})
+    assert _module_imports(load_tool).isdisjoint({"agent.legacy_skills"})
+    assert "已禁用" in install_source
+    assert "已禁用" in update_source
+    assert "已禁用" in load_source
 
 
 def test_formal_skill_namespace_is_not_legacy_contaminated() -> None:
-    """Phase 0 边界：正式 `agent/skill_system` 不得反向复用旧 prototype。
+    """Cleanup 边界：正式 `agent/skill_system` 不得反向复用旧 prototype。
 
     Phase 0 允许正式命名空间尚不存在；一旦后续 phase 创建该目录，本测试会
-    继续用 AST 守住它不能 import `agent.skills.*`。
+    继续用 AST 守住它不能 import `agent.skills.*` 或 `agent.legacy_skills.*`。
     """
 
     if not FORMAL_SKILL_SYSTEM_DIR.exists():
@@ -244,7 +201,10 @@ def test_formal_skill_namespace_is_not_legacy_contaminated() -> None:
         imports = sorted(
             name
             for name in _module_imports(path)
-            if name == "agent.skills" or name.startswith("agent.skills.")
+            if name == "agent.skills"
+            or name.startswith("agent.skills.")
+            or name == "agent.legacy_skills"
+            or name.startswith("agent.legacy_skills.")
         )
         if imports:
             leaked_imports[str(path.relative_to(PROJECT_ROOT))] = imports
@@ -253,13 +213,15 @@ def test_formal_skill_namespace_is_not_legacy_contaminated() -> None:
 
 
 def test_install_from_github_remains_legacy_explicit_opt_in_boundary() -> None:
-    """Phase 0 边界：installer 风险只被记录，不在测试中执行。
+    """Cleanup 边界：installer 风险只在隔离区保留，不在测试中执行。
 
     这个测试读取 docstring 标记，不调用 `install_from_github`。它确认旧函数
-    仍被标成真实网络 / 外部安装风险，后续正式实现不能把它当默认路径。
+    仍在 `agent.legacy_skills` 隔离区，正式实现不能把它当默认路径。
     """
 
-    installer_source = (LEGACY_SKILLS_DIR / "installer.py").read_text(encoding="utf-8")
+    installer_source = (QUARANTINED_LEGACY_SKILLS_DIR / "installer.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "def install_from_github" in installer_source
     assert "真实网络访问" in installer_source
@@ -267,3 +229,6 @@ def test_install_from_github_remains_legacy_explicit_opt_in_boundary() -> None:
     assert "`pip install`" in installer_source
     assert "explicit opt-in" in installer_source
     assert '`confirmation="always"`' in installer_source
+    assert sorted(path.name for path in LEGACY_SKILLS_DIR.glob("*.py")) == [
+        "__init__.py"
+    ]

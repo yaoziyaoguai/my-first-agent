@@ -2,12 +2,14 @@
 
 Status: Draft canonical design for the formal Skill System.
 
-This RFC supersedes the frozen `agent/skills/` prototype as the source of truth
-for future Skill work. It is written for a Coding Agent implementation loop:
-tests and code should trace back to the contracts below.
+This RFC supersedes the cleaned/quarantined `agent/skills/` prototype as the
+source of truth for future Skill work. It is written for a Coding Agent
+implementation loop: tests and code should trace back to the contracts below.
 
 The formal implementation namespace is `agent/skill_system/`; legacy
-`agent/skills/` remains frozen/reference-only until an approved migration phase.
+`agent/skills/` has been cleaned/quarantined and must not be used as a formal
+or reference implementation path. If `agent/legacy_skills/` exists, it is only
+historical migration material.
 
 ## 1. Goal
 
@@ -81,10 +83,11 @@ Runtime. Skill cannot spawn another loop or claim SubAgent semantics.
 
 ### Skill vs legacy `agent/skills` prototype
 
-The existing `agent/skills/` package is frozen legacy / experimental prototype
-code. It may be used as evidence for migration risks, but formal Skill System
-behavior is governed by this RFC. The legacy module-level registry singleton is
-not the formal design.
+The old `agent/skills/` implementation has been cleaned/quarantined. It is not
+the formal namespace, not a reference implementation, and not a default tool
+path. Any remaining `agent/legacy_skills/` package is historical migration
+material only. Formal Skill System behavior is governed by this RFC, and the
+legacy module-level registry singleton is not the formal design.
 
 ## 4. Filesystem-first Skill Structure
 
@@ -194,14 +197,15 @@ Formal lifecycle:
 - Secret-like content in manifests, body, resources, and output must be
   redacted from display/audit.
 
-## 8. Legacy Prototype Policy
+## 8. Legacy Quarantine Policy
 
-- Existing `agent/skills` is frozen legacy / experimental prototype code.
+- Existing `agent/skills` is a tombstone path, not a formal implementation.
+- Any `agent/legacy_skills` code is quarantined historical prototype material.
 - Formal Skill System is governed by this RFC.
-- Old prototype code may be migrated or replaced after RFC implementation
-  starts with tests.
-- The legacy registry module-level singleton is not the formal design.
-- Legacy installer network behavior remains out of the default tool path.
+- Formal implementation must use `agent/skill_system/`.
+- Formal implementation must not import `agent.legacy_skills`.
+- Future migration from legacy code, if needed, must be explicit and approved.
+- The old `install_from_github` path is not a formal lifecycle tool path.
 - New implementation must avoid broad monolith growth; modules should stay
   high cohesion and low coupling.
 

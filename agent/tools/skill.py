@@ -1,22 +1,12 @@
 # agent/tools/skill.py
-"""load_skill 工具：让模型能加载 skill。"""
+"""Disabled legacy load_skill wrapper.
+
+旧 `agent.skills` loader/registry 不再作为模型可用能力包路径。wrapper 保留
+显式 import path 但不加载 body、不读旧 registry、不注入 prompt；正式加载逻辑
+必须由 `agent/skill_system/` progressive disclosure 实现。
+"""
 
 from agent.tool_registry import register_tool
-from agent.skills.loader import format_skill_for_model
-from agent.skills.registry import get_registry
-
-
-def _check_skill_exists(tool_name, tool_input, context):
-    """pre_execute 钩子：确认 skill 存在。"""
-    skill_name = tool_input.get("name", "")
-    registry = get_registry()
-    if registry.get_skill(skill_name) is None:
-        available = [s["name"] for s in registry.list_skills()]
-        return (
-            f"拒绝执行：找不到 skill '{skill_name}'。"
-            f"可用的 skill: {', '.join(available) if available else '（无）'}"
-        )
-    return None
 
 
 @register_tool(
@@ -33,9 +23,15 @@ def _check_skill_exists(tool_name, tool_input, context):
             "description": "要加载的 skill 名字，必须是 system prompt 里列出的 name 字段",
         },
     },
-    confirmation="never",  # 加载 skill 是安全的读取操作，不需要用户确认
-    pre_execute=_check_skill_exists,
+    confirmation="never",
+    capability="skill_lifecycle",
+    risk_level="medium",
+    output_policy="bounded_text",
 )
 def load_skill(name: str) -> str:
-    """加载指定名字的 skill，返回完整指令内容。"""
-    return format_skill_for_model(name)
+    """Fail closed: legacy loader 已禁用，不读取或返回旧 Skill body。"""
+
+    return (
+        "load_skill 已禁用：旧 Skill loader 已隔离，正式 Skill body loading 将由 "
+        "agent/skill_system/ 后续阶段按 progressive disclosure 重新实现。"
+    )

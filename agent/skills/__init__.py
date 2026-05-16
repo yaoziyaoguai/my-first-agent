@@ -1,15 +1,11 @@
-"""Legacy / experimental Skill prototype package.
+"""Removed Skill prototype tombstone.
 
-本包不是正式 Skill System，也不代表未来稳定 API。正式 Skill System
-应以后续 `SKILL_CANONICAL_RFC.md` 为准，当前 `agent.skills` 代码只作为
-legacy prototype / 参考基线保留。
+本包只保留历史 import path 的空壳，避免旧 `agent.skills` prototype 继续被
+误认为正式 Skill System。正式实现必须使用 `agent/skill_system/`，不能从这里
+导入 registry、loader、installer 或 local MVP helper。
 
-冻结边界：
-- 默认工具注册路径不应自动启用 Skill lifecycle tools。
-- installer 包含真实网络 / git clone / pip install / 文件写入风险，只能在
-  explicit opt-in 和用户确认后使用。
-- 在正式 RFC / SDD / TDD 完成前，不从本包顶层导出 registry、loader 或
-  installer API，避免把 prototype 误当稳定契约。
+旧实现已经隔离到 `agent/legacy_skills/`，仅作历史参考和显式迁移材料；默认
+工具注册、prompt 构造和正式 Skill 实现都不得依赖它。
 """
 
 __all__: list[str] = []

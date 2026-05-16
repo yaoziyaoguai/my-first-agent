@@ -9,16 +9,18 @@ Every phase starts by reading:
 The implementation loop writes or extends tests first, verifies red where
 appropriate, then implements the smallest behavior change.
 
-## Phase 0: Freeze Legacy Skill Prototype Tests
+## Phase 0: Quarantine Legacy Skill Prototype Tests
 
-- Tests to add: package public API freeze, legacy/experimental markers,
-  default tool registration excludes Skill lifecycle tools.
-- Expected behavior: `agent.skills.__all__ == []`; existing prototype is visible
-  but inactive.
+- Tests to add: `agent.skills` tombstone public API, quarantined legacy package
+  marker, default tool registration excludes Skill lifecycle tools.
+- Expected behavior: `agent.skills.__all__ == []`; old implementation lives only
+  in `agent/legacy_skills` as historical material, and formal namespace remains
+  `agent/skill_system`.
 - Forbidden behavior: default import of `agent.tools` registers install/load/update
-  Skill lifecycle tools.
+  Skill lifecycle tools, or formal code imports `agent.legacy_skills`.
 - Selected command: `python -m pytest tests/test_skill_local_mvp_contract.py tests/test_skill_system_honesty.py -q`
-- Exit criteria: freeze tests pass and no runtime behavior changes.
+- Exit criteria: quarantine tests pass and no formal Skill behavior is
+  implemented.
 
 ## Phase 1: SKILL.md Parser / Schema Tests
 

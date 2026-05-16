@@ -22,34 +22,38 @@ Every phase must:
 Do not modify real `.env`, read real `agent_log.jsonl`, read real `sessions/` or
 `runs/`, call real LLMs, clone remote Skills, or install dependencies.
 
-Formal Skill implementation must not modify frozen legacy `agent/skills/` files
-unless a dedicated migration phase is explicitly approved. Frozen legacy files
-include but are not limited to:
+Formal Skill implementation must not import or modify quarantined legacy Skill
+code unless a dedicated migration phase is explicitly approved. Legacy Skill
+paths include but are not limited to:
 
-- `agent/skills/__init__.py`
-- `agent/skills/registry.py`
-- `agent/skills/installer.py`
-- `agent/skills/loader.py`
-- `agent/skills/local.py`
-- `agent/skills/parser.py`
-- `agent/skills/safety.py`
+- `agent/skills/__init__.py` tombstone
+- `agent/legacy_skills/__init__.py`
+- `agent/legacy_skills/registry.py`
+- `agent/legacy_skills/installer.py`
+- `agent/legacy_skills/loader.py`
+- `agent/legacy_skills/local.py`
+- `agent/legacy_skills/parser.py`
+- `agent/legacy_skills/safety.py`
 
 The formal namespace is `agent/skill_system/`. Implementation phases should
 create or modify `agent/skill_system/*`, and tests should target
-`agent/skill_system/*`. Legacy `agent/skills/*` remains reference-only until a
-migration phase.
+`agent/skill_system/*`. `agent/skills/*` is not a formal path; any
+`agent/legacy_skills/*` code is historical material only.
 
 ## 2. Phases
 
-### Phase 0: Legacy Prototype Freeze Verification
+### Phase 0: Legacy Prototype Quarantine Verification
 
-Goal: prove `agent/skills/` remains legacy/experimental and inactive by default.
+Goal: prove old Skill code is quarantined and inactive by default.
 
 Work:
 
-- Verify `agent.skills.__all__ == []`.
+- Verify `agent.skills.__all__ == []` and exposes only a tombstone.
+- Verify legacy implementation lives under `agent/legacy_skills/`.
+- Verify `agent/skill_system/` does not import legacy code.
 - Verify default `agent.tools` import excludes Skill lifecycle tools.
-- Verify install/update tools remain explicit opt-in.
+- Verify install/update/load wrappers fail closed and do not call legacy
+  installer/loader paths.
 
 Stop gate: audit confirms no legacy prototype contamination.
 
@@ -61,8 +65,8 @@ Allowed files: `agent/skill_system/schema.py`,
 `agent/skill_system/descriptor.py`, `agent/skill_system/errors.py`, and focused
 tests/docs for this phase.
 
-Forbidden files: frozen `agent/skills/*`, Runtime loop, ToolRegistry, Memory,
-CLI/TUI.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, Runtime loop,
+ToolRegistry, Memory, CLI/TUI.
 
 Work:
 
@@ -80,8 +84,8 @@ Allowed files: `agent/skill_system/registry.py`,
 `agent/skill_system/descriptor.py`, `agent/skill_system/errors.py`, fixtures,
 and focused tests/docs.
 
-Forbidden files: frozen `agent/skills/*`, Runtime loop, ToolRegistry execution,
-Memory governance.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, Runtime loop,
+ToolRegistry execution, Memory governance.
 
 Work:
 
@@ -100,8 +104,8 @@ Allowed files: `agent/skill_system/loader.py`,
 `agent/skill_system/prompt_section.py`, `agent/skill_system/errors.py`,
 fixtures, and focused tests/docs.
 
-Forbidden files: frozen `agent/skills/*`, ToolRegistry execution, Memory
-governance, checkpoint schema.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, ToolRegistry
+execution, Memory governance, checkpoint schema.
 
 Work:
 
@@ -119,8 +123,8 @@ Goal: deterministic Skill selection.
 Allowed files: `agent/skill_system/selector.py`,
 `agent/skill_system/descriptor.py`, and focused tests/docs.
 
-Forbidden files: frozen `agent/skills/*`, provider/LLM adapters, Runtime loop,
-SubAgent code.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, provider/LLM
+adapters, Runtime loop, SubAgent code.
 
 Work:
 
@@ -139,8 +143,8 @@ Allowed files: `agent/skill_system/context.py`,
 `agent/skill_system/invocation.py`, tool-binding tests/docs, and narrow adapter
 code if required by the phase plan.
 
-Forbidden files: frozen `agent/skills/*`, ToolRegistry risk bypasses, direct
-tool execution from Skill modules.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, ToolRegistry risk
+bypasses, direct tool execution from Skill modules.
 
 Work:
 
@@ -159,8 +163,8 @@ Allowed files: `agent/skill_system/context.py`,
 `agent/skill_system/invocation.py`, `agent/skill_system/result.py`, Runtime
 adapter seams approved by tests, and focused tests/docs.
 
-Forbidden files: frozen `agent/skills/*`, SubAgent modules, provider direct call
-paths, Memory governance changes.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, SubAgent modules,
+provider direct call paths, Memory governance changes.
 
 Work:
 
@@ -179,8 +183,8 @@ Allowed files: `agent/skill_system/context.py`,
 `agent/skill_system/invocation.py`, memory adapter seam tests/docs, and the
 minimum approved Runtime adapter wiring.
 
-Forbidden files: frozen `agent/skills/*`, Memory governance bypasses, direct
-Memory store writes from Skill modules.
+Forbidden files: `agent/skills/*`, `agent/legacy_skills/*`, Memory governance
+bypasses, direct Memory store writes from Skill modules.
 
 Work:
 
@@ -211,7 +215,8 @@ Allowed files:
 
 Forbidden files:
 
-- frozen `agent/skills/*`
+- `agent/skills/*`
+- `agent/legacy_skills/*`
 - SubAgent modules
 - ToolRegistry risk/confirmation policy
 - Memory governance

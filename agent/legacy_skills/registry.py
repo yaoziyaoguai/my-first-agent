@@ -8,8 +8,8 @@
 from pathlib import Path
 from typing import Optional
 
-from agent.skills.parser import parse_skill_file, SkillParseError
-from agent.skills.safety import check_skill_safety
+from agent.legacy_skills.parser import parse_skill_file, SkillParseError
+from agent.legacy_skills.safety import check_skill_safety
 
 
 # 默认 skill 根目录（相对项目根）
@@ -117,11 +117,11 @@ class SkillRegistry:
         return len(self._skills)
 
 
-# Legacy prototype limitation：
+# Quarantined legacy prototype limitation：
 # 当前模块级单例会在同一 Python 进程内跨 session 复用，这是现有 Skill MVP
-# 的已知限制，不应被视为正式稳定 API。正式 Skill RFC 应重新设计
-# session-scoped / runtime-scoped registry，并明确 reload、checkpoint、tool
-# exposure 的所有权。本轮 freeze 只记录边界，不改变行为。
+# 的已知限制，不应被视为正式稳定 API。正式 Skill System 必须在
+# agent/skill_system/ 重新设计 session-scoped / runtime-scoped registry，并
+# 明确 reload、checkpoint、tool exposure 的所有权。
 _registry: Optional[SkillRegistry] = None
 
 

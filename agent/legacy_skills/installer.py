@@ -13,9 +13,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from agent.skills.parser import parse_skill_file, SkillParseError
-from agent.skills.safety import check_skill_safety
-from agent.skills.registry import DEFAULT_SKILLS_DIR
+from agent.legacy_skills.parser import parse_skill_file, SkillParseError
+from agent.legacy_skills.safety import check_skill_safety
+from agent.legacy_skills.registry import DEFAULT_SKILLS_DIR
 
 
 class SkillInstallError(Exception):

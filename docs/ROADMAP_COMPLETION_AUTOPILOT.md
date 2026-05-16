@@ -10,7 +10,7 @@
 |---|---|---|---|
 | MCP CLI Config Management | complete | parser/validator/redaction、CLI list/inspect/validate、plan preview、safe apply、backup、redacted diff、safety manifest、`tests/fixtures/mcp_config/safe-mcp.json`、`docs/MCP_CONFIG_MANAGEMENT.md` | real MCP endpoint/resources/prompts/sampling/roots deferred |
 | Coding-Agent Execution Governance | complete | `AGENTS.md` + `tests/test_agent_guidance_contract.py` | keep guidance updated after repeated mistakes |
-| Skill System Safe Local MVP | complete | `agent.skills.local` + `docs/SKILL_LOCAL_MVP.md` fake dogfood example + tests | real install/execution/marketplace deferred |
+| Skill System Safe Local MVP | complete/quarantined | historical `agent.legacy_skills.local` + `docs/SKILL_LOCAL_MVP.md` cleanup contract | formal implementation must use `agent/skill_system/`; real install/execution/marketplace deferred |
 | Subagent System Safe Local MVP | complete | `agent.subagents.local` + `docs/SUBAGENT_LOCAL_MVP.md` fake dogfood example + tests | real LLM/provider/process/remote delegation deferred |
 | Skill/Subagent Integration Boundary | complete | `docs/CAPABILITY_BOUNDARIES.md` + tests | real activation deferred |
 | Known XFAIL closure | complete | topic-switch explicit chooser + Textual generation projection cancel | real provider stream abort deferred |
@@ -48,11 +48,12 @@
    - push/tag policy
 
 3. Skill System Safe Local MVP
-   - local fixture descriptor
+   - historical local fixture descriptor now quarantined under `agent/legacy_skills`
    - fake dogfood example
    - no network install
    - no arbitrary code execution
    - no real skill dirs
+   - formal implementation path is `agent/skill_system`
 
 4. Subagent System Safe Local MVP
    - fake/local profile

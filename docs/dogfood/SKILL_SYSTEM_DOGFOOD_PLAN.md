@@ -5,6 +5,10 @@ Default dogfood must not use real network, `.env`, real `agent_log.jsonl`, real
 `sessions/`, real `runs/`, secret logging, real LLM calls, or external package
 installation.
 
+Dogfood must use formal `agent/skill_system/` fixtures once implemented. It
+must not import quarantined `agent/legacy_skills/` or rely on the old
+`install_from_github` path.
+
 ## 1. Git Status Audit Skill
 
 - Input: "Summarize the local git status and identify risky untracked files."

@@ -1,8 +1,11 @@
 # agent/tools/update_skill.py
-"""update_skill 工具：重新下载并覆盖已安装的 skill。"""
+"""Disabled legacy update_skill wrapper.
+
+旧 Skill updater 依赖 quarantined `agent.legacy_skills` installer；wrapper 保留
+显式 import path 但 fail closed，避免旧网络/文件写入路径继续作为默认链路。
+"""
+
 from agent.tool_registry import register_tool
-from agent.skills.installer import update_skill as _update_skill
-from agent.skills.registry import reload_registry
 
 
 @register_tool(
@@ -19,21 +22,15 @@ from agent.skills.registry import reload_registry
         },
     },
     confirmation="always",
+    capability="skill_lifecycle",
+    risk_level="high",
+    output_policy="bounded_text",
 )
 def update_skill(name: str) -> str:
-    """更新 skill 并 reload registry。"""
-    result = _update_skill(name)
-    
-    if not result["success"]:
-        return f"[更新失败] {result.get('error', '未知错误')}"
-    
-    reload_registry()
-    
-    lines = [f"[更新成功] {result['message']}"]
-    if result.get("safety_warnings"):
-        lines.append("")
-        lines.append("[安全警告]")
-        for w in result["safety_warnings"]:
-            lines.append(f"  - {w}")
-    
-    return "\n".join(lines)
+    """Fail closed: legacy 更新路径已禁用，不执行任何下载或覆盖。"""
+
+    return (
+        "update_skill 已禁用：旧 Skill updater 已隔离，正式 Skill lifecycle "
+        "工具将在 agent/skill_system/ 后续阶段重新实现。本次调用未执行网络、"
+        "git clone、pip install 或文件写入。"
+    )

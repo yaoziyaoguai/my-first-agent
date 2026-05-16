@@ -226,12 +226,12 @@ def test_agent_tools_does_not_auto_import_skill_lifecycle_tool_modules() -> None
     assert "agent.tools.update_skill" not in imports
 
 
-def test_install_skill_remains_explicit_non_default_capability() -> None:
-    """install_skill 可以显式引用，但不能默认注册给模型。
+def test_legacy_skill_lifecycle_wrappers_are_explicit_disabled_capabilities() -> None:
+    """legacy Skill lifecycle wrapper 可以显式引用，但必须 fail closed。
 
-    当前架构的 optional seam 是 Python 显式 import 触发装饰器注册；这不是新的
-    Skill System，也不是 MCP。测试先锁住“base registry 不包含 install_skill”，
-    再证明实现模块仍存在，避免本轮把默认工具集收窄误做成删除能力。
+    当前架构的 optional seam 是 Python 显式 import 触发装饰器注册；cleanup 后
+    这些 wrapper 只能返回禁用消息，不能再 import `agent.legacy_skills` 或触达
+    真实网络安装路径。正式 lifecycle 会在 `agent/skill_system/` 后续阶段重做。
     """
 
     importlib.import_module("agent.tools")
@@ -240,14 +240,21 @@ def test_install_skill_remains_explicit_non_default_capability() -> None:
 
     assert "install_skill" not in TOOL_REGISTRY
 
-    module = importlib.import_module("agent.tools.install_skill")
-    module = importlib.reload(module)
+    modules = {
+        "install_skill": importlib.reload(importlib.import_module("agent.tools.install_skill")),
+        "update_skill": importlib.reload(importlib.import_module("agent.tools.update_skill")),
+        "load_skill": importlib.reload(importlib.import_module("agent.tools.skill")),
+    }
 
     try:
-        assert hasattr(module, "install_skill")
-        assert "install_skill" in TOOL_REGISTRY
+        for tool_name, module in modules.items():
+            assert hasattr(module, tool_name)
+            assert tool_name in TOOL_REGISTRY
+            assert "已禁用" in getattr(module, tool_name)("demo")
     finally:
         TOOL_REGISTRY.pop("install_skill", None)
+        TOOL_REGISTRY.pop("update_skill", None)
+        TOOL_REGISTRY.pop("load_skill", None)
 
 
 def test_registered_tools_have_current_schema_shape() -> None:

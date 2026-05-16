@@ -6,7 +6,7 @@
 
 from typing import Optional
 
-from agent.skills.registry import get_registry
+from agent.legacy_skills.registry import get_registry
 
 
 def load_skill_body(skill_name: str) -> Optional[str]:

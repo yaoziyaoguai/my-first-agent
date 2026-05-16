@@ -16,7 +16,11 @@ confirmation policy 管理。Skill/Subagent 不能直接调用或注册 tool。
 
 ## Skill
 
-Skill 在当前 MVP 中只是 **local capability descriptor**：
+历史 Skill MVP 已被 cleanup/quarantine；正式 Skill System 将在
+`agent/skill_system/` 重新实现。旧 `agent/legacy_skills/` 只作历史材料，不是
+正式 capability module。
+
+正式 Skill 仍必须满足：
 
 - fake-first
 - local-only
@@ -27,7 +31,7 @@ Skill 在当前 MVP 中只是 **local capability descriptor**：
 - parent runtime remains in control
 
 Skill 可以声明 `allowed-tools` 作为 metadata，但这不是执行授权。真正执行必须仍然经过
-parent runtime/tool policy。
+parent runtime/tool policy。正式实现不得 import `agent.legacy_skills`。
 
 ## Subagent
 

@@ -16,6 +16,7 @@ P0 means stop and fix before proceeding.
 - Checkpoint stores unredacted Skill body, resources, or secrets.
 - Skill triggers real LLM/provider calls outside parent Runtime.
 - Skill introduces SubAgent behavior without explicit authorization.
+- Formal `agent/skill_system` imports quarantined `agent.legacy_skills`.
 
 ## P1 Findings
 
@@ -27,6 +28,7 @@ P1 means block implementation until resolved.
 - Selector loads all Skill bodies.
 - Runtime invocation lacks checkpoint/resume boundary.
 - Legacy prototype contaminates formal design.
+- `agent/skills` grows beyond a tombstone without an approved migration phase.
 - `allowed_tools` is treated as authorization instead of upper-bound.
 - Memory proposals skip governance.
 - CLI/TUI owns Skill runtime logic.
@@ -60,7 +62,8 @@ P3 can be queued unless it creates confusion.
 - SubAgent is deferred.
 - Skill is filesystem-first.
 - Progressive disclosure is required.
-- Legacy `agent/skills` is frozen.
+- Legacy `agent/skills` is cleaned/quarantined.
+- Formal code does not import `agent.legacy_skills`.
 - No DB, graph, embedding, or vector store.
 - No default network install.
 - No direct Memory write.

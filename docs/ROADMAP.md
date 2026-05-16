@@ -130,9 +130,10 @@ core**。
   server command、不联网。
 - ✅ Coding-agent execution governance 已落地 AGENTS.md：沉淀 repo path、安全边界、
   quality gates、evidence packet、P0/P1/P2/P3 与 controlled push/tag rules。
-- ✅ Skill System Safe Local MVP 已完成：`agent.skills.local` 只读取 tmp_path /
-  `tests/fixtures/skills`，生成 capability descriptor，不下载、不安装、不执行代码、
-  不读真实 skill dirs、不绕过 parent runtime/tool policy。
+- ✅ Skill System Safe Local MVP 已完成并已 cleanup/quarantine：历史
+  `agent.skills.local` 实现已移至 `agent.legacy_skills.local`，仅作迁移材料；
+  正式 Skill System 必须在 `agent/skill_system/` 重新实现，不下载、不安装、
+  不执行代码、不读真实 skill dirs、不绕过 parent runtime/tool policy。
 - ✅ Subagent System Safe Local MVP 已完成：`agent.subagents.local` 只读取 tmp_path /
   `tests/fixtures/subagents`，生成 profile 与 parent-controlled delegation
   request/result，不做真实 LLM delegation、不 spawn process、不 remote delegation。
@@ -227,8 +228,8 @@ core**。
   planning、MCP external integration readiness、runtime trace / ToolResult migration
   planning，并明确所有真实 external / broad migration 动作仍 requires explicit user
   authorization。
-- ❌ 真实 Skill install / execution 仍 deferred；旧 `agent.skills.installer` 仍是历史原型，
-  不属于 Safe Local MVP 默认路径。
+- ❌ 真实 Skill install / execution 仍 deferred；旧
+  `agent.legacy_skills.installer` 是 quarantined 历史原型，不属于正式或默认路径。
 - ❌ 真实 LLM subagent delegation 仍 deferred；当前没有 provider 调用、外部进程或
   autonomous child tool execution。
 - ❌ 当前没有完整 MCP spec 支持：未接外部 MCP server、未做 resources/prompts/
@@ -789,7 +790,7 @@ push 或 tag，除非用户单独选择对应动作。
 **原型**；evil-skill 测试目录暴露 safety 仍在原型期 → Stage 5 主战场。
 
 **Safe Local MVP completion（Roadmap Completion Autopilot）**：
-- 已新增 `agent.skills.local`：只支持显式 tmp_path / `tests/fixtures/skills` 的
+- 历史 `agent.skills.local` 已隔离为 `agent.legacy_skills.local`：只支持显式 tmp_path / `tests/fixtures/skills` 的
   local capability descriptor。
 - 已新增 `tests/fixtures/skills/safe-writer/SKILL.md` 和
   `tests/test_skill_local_mvp_contract.py`。

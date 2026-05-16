@@ -14,7 +14,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SKILL_MODULE = PROJECT_ROOT / "agent" / "skills" / "local.py"
+SKILL_TOMBSTONE = PROJECT_ROOT / "agent" / "skills" / "__init__.py"
+LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "legacy_skills"
+FORMAL_SKILL_SYSTEM_DIR = PROJECT_ROOT / "agent" / "skill_system"
 SUBAGENT_MODULE = PROJECT_ROOT / "agent" / "subagents" / "local.py"
 DOC_PATH = PROJECT_ROOT / "docs" / "CAPABILITY_BOUNDARIES.md"
 
@@ -33,19 +35,52 @@ def _agent_imports(path: Path) -> set[str]:
     return imports
 
 
-def test_skill_and_subagent_local_modules_do_not_import_runtime_or_tools() -> None:
-    """local MVP 模块只能声明边界，不能直接接入 runtime/tool executor。"""
+def test_skill_tombstone_and_subagent_local_modules_do_not_import_runtime_or_tools() -> None:
+    """Skill tombstone 和 subagent local 模块不能直接接入 runtime/tool executor。
+
+    旧 Skill MVP 已隔离到 `agent.legacy_skills`，本测试不再把它当正式
+    capability module；这里只保护正式入口不能继续导入旧实现。
+    """
 
     forbidden = {
         "agent.core",
         "agent.tool_executor",
         "agent.tool_registry",
         "agent.tools",
-        "agent.skills.installer",
+        "agent.legacy_skills",
     }
 
-    assert _agent_imports(SKILL_MODULE).isdisjoint(forbidden)
+    assert _agent_imports(SKILL_TOMBSTONE).isdisjoint(forbidden)
     assert _agent_imports(SUBAGENT_MODULE).isdisjoint(forbidden)
+
+
+def test_formal_skill_namespace_does_not_import_legacy_skills() -> None:
+    """正式 Skill 命名空间不得反向依赖 quarantined legacy implementation。"""
+
+    if not FORMAL_SKILL_SYSTEM_DIR.exists():
+        assert not FORMAL_SKILL_SYSTEM_DIR.exists()
+        return
+
+    leaked: dict[str, list[str]] = {}
+    for path in FORMAL_SKILL_SYSTEM_DIR.rglob("*.py"):
+        imports = sorted(
+            name
+            for name in _agent_imports(path)
+            if name == "agent.legacy_skills" or name.startswith("agent.legacy_skills.")
+        )
+        if imports:
+            leaked[str(path.relative_to(PROJECT_ROOT))] = imports
+
+    assert leaked == {}
+
+
+def test_legacy_skill_package_is_quarantined_not_formal_boundary() -> None:
+    """旧 Skill 代码只作为历史参考，不能被测试继续当成正式 Skill MVP。"""
+
+    assert (LEGACY_SKILLS_DIR / "README.md").is_file()
+    assert "agent/skill_system/" in (LEGACY_SKILLS_DIR / "README.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_skill_subagent_tool_boundary_doc_exists() -> None:
@@ -70,15 +105,16 @@ def test_skill_subagent_tool_boundary_doc_exists() -> None:
 
 
 def test_skill_and_subagent_can_share_parent_policy_without_activation() -> None:
-    """二者可共享 parent policy 数据，但不会自动执行或调用工具。"""
+    """共享 parent policy 的正式测试等待 `agent/skill_system` 实现。
 
-    from agent.skills.local import load_local_skill_descriptor
+    本轮只清理旧 prototype，不实现正式 Skill descriptor；因此这里只确认
+    SubAgent local request 仍由 parent policy 裁剪，Skill 侧不再从 legacy MVP
+    提供运行时对象。
+    """
+
     from agent.subagents.local import build_delegation_request
     from agent.subagents.local import load_local_subagent_profile
 
-    skill = load_local_skill_descriptor(
-        PROJECT_ROOT / "tests" / "fixtures" / "skills" / "safe-writer"
-    ).descriptor
     subagent = load_local_subagent_profile(
         PROJECT_ROOT / "tests" / "fixtures" / "subagents" / "code-reviewer"
     ).profile
@@ -86,7 +122,7 @@ def test_skill_and_subagent_can_share_parent_policy_without_activation() -> None
     request = build_delegation_request(
         subagent,
         task="review skill usage",
-        parent_allowed_tools=skill.allowed_tools,
+        parent_allowed_tools=("read_file", "write_file"),
     )
 
     assert request.ok is True

@@ -14,10 +14,31 @@ Reduce the current global architecture debt without changing user-visible behavi
 
 - Do not implement Skill.
 - Do not implement SubAgent.
+- Do not repair existing `agent/skills/` or `agent/subagents/` prototypes in this
+  cleanup pass; treat them as future rewrite scope.
 - Do not implement new Memory features.
 - Do not change Memory governance, approval, pending review, or inline confirmation semantics.
 - Do not implement backend abstraction, DB, graph, embedding, or vector store.
 - Do not split files mechanically just to reduce line count.
+
+## 2.1 Non-Skill/SubAgent Cleanup Pass
+
+This pass is explicitly scoped to global runtime debt outside the current
+Skill/SubAgent prototypes.
+
+- `agent/skills/`, `agent/subagents/`, Skill/SubAgent RFC/design docs, and
+  Skill/SubAgent tests are out of scope unless they block the non-skill test
+  suite from running.
+- `pending_user_input_request` now has a named `PendingUserInputRequest`
+  TypedDict boundary while preserving the existing JSON-safe dict/checkpoint
+  shape.
+- checkpoint truncation and model-visible tool limit config getters now expose
+  typed public config shapes, with tests pinning invalid values as fail-closed.
+- architecture boundary tests intentionally exclude Skill/SubAgent prototype
+  code and add guards for confirmation, memory interaction, and default tool
+  registration boundaries.
+- No backend abstraction, DB, graph, embedding, vector store, Memory governance
+  change, silent procedural retention, or auto-approval behavior is introduced.
 
 ## 3. P1 Repair Plan
 

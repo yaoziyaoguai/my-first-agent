@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.pending_requests import PendingUserInputRequest
+
 
 def dispatch_memory_confirmation(
     *,
     user_input: str,
     ctx: Any,
-    pending: dict[str, Any],
+    pending: PendingUserInputRequest,
     on_runtime_event: Any,
 ) -> str | None:
     """尝试按 memory awaiting_kind 分流；非 memory pending 返回 None。

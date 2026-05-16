@@ -6,9 +6,9 @@
 
 ## 1. What this guide tests
 
-**覆盖**：启动 agent（fake demo + shell）、对话/多轮上下文、工具调用、`request_user_input`、confirmation flow、checkpoint/resume、memory（retain/reject/edit/session_only/filesystem store/recall）、runtime events/trace/logs、error handling。
+**覆盖**：启动 agent（fake demo + shell）、对话/多轮上下文、工具调用、`request_user_input`、confirmation flow、checkpoint/resume、memory（retain/reject/edit/session_only/filesystem store/recall）、runtime events/trace/logs、error handling、Non-Skill/SubAgent runtime boundary checks。
 
-**不覆盖**：真实 provider/LLM、真实 MCP、vector DB、embedding、semantic retrieval、L2/L3 proactive memory、consolidation/decay/archival/proceduralization。
+**不覆盖**：真实 provider/LLM、真实 MCP、Skill/SubAgent 原型修复、vector DB、embedding、semantic retrieval、L2/L3 proactive memory、consolidation/decay/archival/proceduralization。
 
 ---
 
@@ -25,6 +25,10 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -r requirement
 ```
 
 **安全边界**：不读 `.env`（除非你主动配了 key）；不读真实 `agent_log.jsonl`/`sessions/`/`runs/` 内容；demo 只写 `workspace/demo/` 或 tmp。
+
+Non-Skill/SubAgent cleanup dogfood 只验证 core/tool/memory/checkpoint/
+confirmation/CLI 边界。`agent/skills/` 和 `agent/subagents/` 的现有代码是
+future rewrite 范围，本指南不把这些原型问题作为当前修复目标。
 
 ---
 
@@ -96,7 +100,8 @@ cat workspace/demo/*/note.md
 **失败看**：
 - 没触发：`agent/response_handlers.py` 的 `request_user_input_called` 逻辑
 - 触发但没暂停：`agent/tool_executor.py` meta_tool 分支
-- 用户输入没注入：`agent/confirm_handlers.py` 的 `_handle_execution_help`
+- 用户输入没注入：`agent/confirmation/user_input.py` →
+  `agent/transitions.py` 的 `PendingUserInputRequest` 边界
 
 **离线验证**（无需 provider）：
 ```bash

@@ -17,6 +17,7 @@ from agent.model_output_resolution import (
     resolve_max_tokens_output,
     resolve_tool_use_block,
 )
+from agent.pending_requests import PendingUserInputRequest
 from agent.display_events import user_input_requested
 from agent.runtime_observer import log_event
 from agent.planner import Plan
@@ -617,7 +618,7 @@ def handle_end_turn_response(
                 if model_event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
                 else "no_progress"
             )
-            state.task.pending_user_input_request = {
+            pending_request: PendingUserInputRequest = {
                 "awaiting_kind": awaiting_kind,
                 "question": (
                     text_content[:500] if text_content
@@ -632,6 +633,7 @@ def handle_end_turn_response(
                 "tool_use_id": "",
                 "step_index": state.task.current_step_index,
             }
+            state.task.pending_user_input_request = pending_request
             state.task.status = "awaiting_user_input"
             save_checkpoint(state)
             return ""

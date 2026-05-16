@@ -131,6 +131,23 @@ def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
     )
 
 
+def test_checkpoint_truncation_config_rejects_invalid_values():
+    """非法 checkpoint budget 必须 fail closed，且不能污染当前配置。"""
+    from agent.checkpoint import (
+        get_checkpoint_truncation_config,
+        set_checkpoint_truncation_config,
+    )
+
+    before = get_checkpoint_truncation_config()
+
+    with pytest.raises(ValueError, match="max_result_length"):
+        set_checkpoint_truncation_config(max_result_length=-1)
+    with pytest.raises(ValueError, match="max_tool_results"):
+        set_checkpoint_truncation_config(max_tool_results=-1)
+
+    assert get_checkpoint_truncation_config() == before
+
+
 def test_save_checkpoint_does_not_print_loaded(tmp_checkpoint_path, capsys, monkeypatch):
     """保存 checkpoint 时为了继承旧 meta 读取旧文件，不应打印 loaded 误导为恢复。"""
     from agent.checkpoint import save_checkpoint

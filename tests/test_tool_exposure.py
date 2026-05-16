@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent.tool_registry import (
     TOOL_REGISTRY,
+    get_model_visible_tool_limits,
     get_tool_definitions,
     get_model_visible_tools,
+    set_model_visible_tool_limits,
 )
 
 
@@ -55,6 +59,19 @@ def test_model_visible_tools_max_total():
     _ensure_tools_loaded()
     tools = get_model_visible_tools(max_total=3)
     assert len(tools) <= 3
+
+
+def test_model_visible_tool_limits_reject_invalid_values():
+    """模型可见工具 budget 只能收紧数量，非法值不能改写全局配置。"""
+
+    before = get_model_visible_tool_limits()
+
+    with pytest.raises(ValueError, match="max_total"):
+        set_model_visible_tool_limits(max_total=0)
+    with pytest.raises(ValueError, match="max_mcp"):
+        set_model_visible_tool_limits(max_mcp=-1)
+
+    assert get_model_visible_tool_limits() == before
 
 
 def test_model_visible_tools_max_mcp_tools():

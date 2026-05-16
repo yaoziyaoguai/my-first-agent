@@ -1,6 +1,47 @@
-from typing import Any
+from __future__ import annotations
 
-TOOL_REGISTRY = {}
+from collections.abc import Callable
+from typing import Any, Literal, TypedDict
+
+
+ToolResultContent = str | list[Any]
+ToolFunction = Callable[..., Any]
+PreExecuteHook = Callable[[str, dict[str, Any], Any], ToolResultContent | None]
+PostExecuteHook = Callable[[str, dict[str, Any], Any], Any]
+ConfirmationPolicy = Literal["always", "never"] | Callable[[dict[str, Any]], bool]
+
+
+class ToolRegistryEntry(TypedDict):
+    """单个工具注册条目的内部契约。
+
+    registry 仍保存普通 dict，避免改变旧测试和 introspection 行为；TypedDict
+    只把 public registry/config 边界从匿名 dict 收敛到可审计字段。
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    confirmation: ConfirmationPolicy
+    func: ToolFunction
+    pre_execute: PreExecuteHook | None
+    post_execute: PostExecuteHook | None
+    meta_tool: bool
+    capability: str
+    risk_level: str
+    output_policy: str
+
+
+class ToolVisibilityConfig(TypedDict):
+    """模型可见工具数量配置的 public API 形状。
+
+    这些值只限制数量预算，不能放宽 capability/risk/hidden-tool 过滤。
+    """
+
+    max_total: int
+    max_mcp: int
+
+
+TOOL_REGISTRY: dict[str, ToolRegistryEntry] = {}
 
 # Tooling Foundation 内部治理词表。它们不会暴露给模型，只用于 runtime /
 # audit / future MCP adapter 判断工具能力、风险和输出预算。
@@ -59,7 +100,7 @@ def reset_model_visible_tool_limits() -> None:
     _max_mcp_tools = _DEFAULT_MAX_MCP_TOOLS
 
 
-def get_model_visible_tool_limits() -> dict:
+def get_model_visible_tool_limits() -> ToolVisibilityConfig:
     """返回当前生效的可见工具数量上限（只读视图）。"""
     return {
         "max_total": _max_total_tools,

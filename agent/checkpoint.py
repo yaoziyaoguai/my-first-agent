@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import json
 import os
 from datetime import datetime
+from typing import Any, TypedDict
+
 from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
@@ -16,6 +20,17 @@ _max_tool_results: int = _DEFAULT_MAX_TOOL_RESULTS
 
 # 向后兼容别名（Global P3 Hardening 前旧常量名）
 MAX_RESULT_LENGTH = _DEFAULT_MAX_RESULT_LENGTH
+
+
+class CheckpointTruncationConfig(TypedDict):
+    """checkpoint tool_result 截断配置的 public API 形状。
+
+    这是运行时持久化预算控制，不是安全过滤开关；非法值由 setter 拒绝，
+    reset 明确恢复默认，测试可在用例间隔离模块级配置。
+    """
+
+    max_result_length: int
+    max_tool_results: int
 
 
 def _debug_stdout_enabled() -> bool:
@@ -67,7 +82,7 @@ def reset_checkpoint_truncation_config() -> None:
     _max_tool_results = _DEFAULT_MAX_TOOL_RESULTS
 
 
-def get_checkpoint_truncation_config() -> dict:
+def get_checkpoint_truncation_config() -> CheckpointTruncationConfig:
     """返回当前生效的 checkpoint 截断配置（只读视图）。"""
     return {
         "max_result_length": _max_result_length,
@@ -75,7 +90,9 @@ def get_checkpoint_truncation_config() -> dict:
     }
 
 
-def _truncate_messages_for_checkpoint(messages):
+def _truncate_messages_for_checkpoint(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """截断 messages 中过大的 tool_result 内容，并保证整体可 JSON 序列化。
 
     中文学习边界：截断只在 checkpoint 持久化层发生，不影响 runtime
@@ -129,7 +146,7 @@ def _truncate_messages_for_checkpoint(messages):
     return truncated
 
 
-def _copy_state_dict(obj) -> dict:
+def _copy_state_dict(obj: Any) -> dict[str, Any]:
     """
     复制 dataclass / 普通对象的浅层状态字典。
 
@@ -140,12 +157,13 @@ def _copy_state_dict(obj) -> dict:
     return dict(getattr(obj, "__dict__", {}))
 
 
-def _load_checkpoint_silent():
+def _load_checkpoint_silent() -> dict[str, Any] | None:
     """静默读取 checkpoint，仅供保存时继承旧 meta 使用。"""
     if not CHECKPOINT_PATH.exists():
         return None
     try:
-        return json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
 

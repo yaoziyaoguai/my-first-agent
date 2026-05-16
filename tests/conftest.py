@@ -178,6 +178,23 @@ def fresh_state():
     return create_agent_state(system_prompt="test system prompt")
 
 
+@pytest.fixture(autouse=True)
+def reset_global_runtime_configs():
+    """隔离模块级 runtime 配置，避免一个测试的覆盖值泄漏到下一例。
+
+    这里只 reset 本地纯配置，不读真实 HOME、sessions/runs 或 provider env；
+    checkpoint/tool registry 的安全过滤仍由生产代码执行。
+    """
+    from agent.checkpoint import reset_checkpoint_truncation_config
+    from agent.tool_registry import reset_model_visible_tool_limits
+
+    reset_checkpoint_truncation_config()
+    reset_model_visible_tool_limits()
+    yield
+    reset_checkpoint_truncation_config()
+    reset_model_visible_tool_limits()
+
+
 @pytest.fixture
 def two_step_plan():
     """返回一个标准的两步 plan（dict 形态）。"""

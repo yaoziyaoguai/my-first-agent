@@ -21,6 +21,7 @@ from agent.display_events import (
 )
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent import tool_result_contract
+from agent.pending_requests import PendingUserInputRequest
 from agent.runtime_trace_emitter import emit_tool_result_trace_event
 from agent.tool_audit import emit_tool_audit_event
 from agent.tool_registry import execute_tool, is_meta_tool
@@ -241,7 +242,7 @@ def execute_single_tool(
             for tid in stale_mark_ids:
                 state.task.tool_execution_log.pop(tid, None)
 
-            state.task.pending_user_input_request = {
+            pending_request: PendingUserInputRequest = {
                 # awaiting_kind 是 pending 内部的等待来源标记，不是新的 status。
                 # 它随现有 task 快照进 checkpoint，但不改变 checkpoint 顶层结构。
                 "awaiting_kind": "request_user_input",
@@ -252,6 +253,7 @@ def execute_single_tool(
                 "tool_use_id": tool_use_id,
                 "step_index": current_idx,
             }
+            state.task.pending_user_input_request = pending_request
             state.task.status = "awaiting_user_input"
 
         save_checkpoint(state)

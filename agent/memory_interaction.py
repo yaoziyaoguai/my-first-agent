@@ -32,6 +32,7 @@ from agent.memory_emergence import (
     InlineConfirmationRequest,
     InlineConfirmationResponse,
 )
+from agent.pending_requests import PendingUserInputRequest
 
 
 # MemoryRuntime 的 resolve_confirmation 接口（避免循环 import）
@@ -41,7 +42,7 @@ class MemoryRuntimeProtocol(Protocol):
         candidate_id: str | None,
         choice: MemoryConfirmationChoice,
         free_text: str | None = None,
-    ) -> Any: ...
+) -> Any: ...
 
 
 def build_memory_pending_request(
@@ -49,7 +50,7 @@ def build_memory_pending_request(
     *,
     candidate_id: str | None,
     origin_status: str,
-) -> dict[str, Any]:
+) -> PendingUserInputRequest:
     """把 MemoryConfirmationRequest 投影为 JSON-safe pending_user_input_request dict。
 
     本函数只做数据转换，不写 state、不写 checkpoint、不调 LLM。
@@ -78,7 +79,7 @@ def build_memory_pending_request(
 
 def parse_memory_confirmation_reply(
     user_text: str,
-    pending: dict[str, Any],
+    pending: PendingUserInputRequest,
 ) -> tuple[MemoryConfirmationChoice, str | None]:
     """把用户回复解析为 (choice, free_text)，不执行任何副作用。
 
@@ -108,7 +109,7 @@ def build_inline_confirmation_pending_request(
     request: InlineConfirmationRequest,
     *,
     origin_status: str,
-) -> dict[str, Any]:
+) -> PendingUserInputRequest:
     """把 InlineConfirmationRequest 投影为 Ask User 兼容 pending dict。
 
     架构边界：memory emergence 只产出 request；本 adapter 只做 JSON-safe
@@ -150,7 +151,7 @@ def build_inline_confirmation_pending_request(
 
 def parse_inline_confirmation_reply(
     user_text: str,
-    pending: dict[str, Any],
+    pending: PendingUserInputRequest,
 ) -> InlineConfirmationResponse:
     """把用户回复解析为无副作用 InlineConfirmationResponse。
 

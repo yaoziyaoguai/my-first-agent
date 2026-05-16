@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.pending_requests import PendingUserInputRequest
 from agent.runtime_observer import log_resolution
 
 
@@ -63,7 +64,7 @@ class InputResolution:
 
     kind: str
     content: str
-    pending_user_input_request: dict[str, Any] | None = None
+    pending_user_input_request: PendingUserInputRequest | None = None
     should_advance_step: bool = False
 
 
@@ -100,7 +101,11 @@ def resolve_user_input(state: Any, user_input: str) -> InputResolution:
     if getattr(state.task, "status", None) != "awaiting_user_input":
         return InputResolution(kind=UNKNOWN_INPUT, content=content)
 
-    pending = getattr(state.task, "pending_user_input_request", None)
+    pending: PendingUserInputRequest | None = getattr(
+        state.task,
+        "pending_user_input_request",
+        None,
+    )
     awaiting_kind = None
     if pending is not None:
         awaiting_kind = pending.get("awaiting_kind")

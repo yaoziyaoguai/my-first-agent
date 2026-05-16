@@ -32,6 +32,7 @@ import re
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 AGENT_DIR = PROJECT_ROOT / "agent"
+OUT_OF_SCOPE_AGENT_PARTS = {"skills", "subagents"}
 
 CORE_FILE = AGENT_DIR / "core.py"
 LOOP_FILE = AGENT_DIR / "loop.py"
@@ -57,13 +58,18 @@ def _module_name(path: Path) -> str:
 
 
 def _agent_python_files() -> tuple[Path, ...]:
-    """列出 production `agent/` Python 源码，跳过 pycache 等生成物。"""
+    """列出本轮架构守卫覆盖的 production `agent/` Python 源码。
+
+    Skill/SubAgent 现有 prototype 是 future rewrite 范围；本测试包只守
+    Non-Skill/SubAgent runtime 边界，避免 out-of-scope 原型影响全局 cleanup。
+    """
 
     return tuple(
         sorted(
             path
             for path in AGENT_DIR.rglob("*.py")
             if "__pycache__" not in path.parts
+            and not (OUT_OF_SCOPE_AGENT_PARTS & set(path.relative_to(AGENT_DIR).parts))
         )
     )
 
@@ -305,6 +311,66 @@ def test_loop_orchestration_boundary_has_no_ui_or_memory_internals() -> None:
     }
 
     assert _collect_agent_imports(LOOP_FILE) & forbidden == set()
+
+
+def test_confirmation_package_does_not_import_ui_or_tui_adapters() -> None:
+    """confirmation handler 只处理 Runtime 决策，不依赖 CLI/TUI adapter。
+
+    DisplayEvent 是 runtime 到 UI 的数据投影，允许由 confirmation 发出；
+    但 confirmation 子包不能直接 import CLI、input backend 或 core 入口，
+    否则 handler 会重新变成跨层巨石。
+    """
+
+    forbidden = {
+        "agent.cli",
+        "agent.cli.display",
+        "agent.cli.input_backends",
+        "agent.core",
+        "agent.input_backends",
+        "agent.input_backends.simple",
+        "agent.input_backends.textual",
+        "agent.user_input",
+    }
+    confirmation_files = tuple((AGENT_DIR / "confirmation").glob("*.py"))
+
+    leaked = {
+        _module_name(path): sorted(_collect_agent_imports(path) & forbidden)
+        for path in confirmation_files
+        if _collect_agent_imports(path) & forbidden
+    }
+
+    assert leaked == {}
+
+
+def test_memory_interaction_does_not_import_core_or_ui_adapters() -> None:
+    """memory interaction adapter 不应反向依赖 core/CLI/TUI。
+
+    memory_interaction 可以解析 memory pending request，也可以 lazy 调
+    checkpoint 保存确认结果；但它不能 import core 或输入后端来驱动 loop。
+    """
+
+    imports = _collect_agent_imports(AGENT_DIR / "memory_interaction.py")
+    forbidden = {
+        "agent.core",
+        "agent.cli",
+        "agent.input_backends",
+        "agent.input_backends.simple",
+        "agent.input_backends.textual",
+    }
+
+    assert imports & forbidden == set()
+
+
+def test_default_tool_entrypoint_does_not_import_skill_or_subagent_prototypes() -> None:
+    """默认工具入口不能把 out-of-scope Skill/SubAgent 原型带进模型工具面。
+
+    Skill lifecycle 相关文件未来会重做，本轮不审计它们；这里只保护
+    import agent.tools 的默认注册路径仍不加载 agent.skills / agent.subagents。
+    """
+
+    imports = _collect_agent_imports(AGENT_DIR / "tools" / "__init__.py")
+
+    assert imports & {"agent.skills", "agent.subagents"} == set()
 
 
 def test_agent_import_graph_has_no_direct_module_cycles() -> None:

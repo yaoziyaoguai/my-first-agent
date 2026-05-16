@@ -14,6 +14,7 @@ from agent.display_events import (
     plan_confirmation_requested,
 )
 from agent.input_intents import classify_confirmation_response
+from agent.pending_requests import PendingUserInputRequest
 from agent.planner import format_plan_for_display
 from agent.runtime_observer import log_event as _log_runtime_event
 
@@ -137,7 +138,7 @@ def _request_feedback_intent_choice(
       顶层字段不变，旧 checkpoint 兼容自然成立。
     """
     state = ctx.state
-    pending = {
+    pending: PendingUserInputRequest = {
         "awaiting_kind": "feedback_intent",
         "question": FEEDBACK_INTENT_QUESTION,
         "why_needed": FEEDBACK_INTENT_WHY,

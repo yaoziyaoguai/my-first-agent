@@ -22,6 +22,23 @@ Every phase must:
 Do not modify real `.env`, read real `agent_log.jsonl`, read real `sessions/` or
 `runs/`, call real LLMs, clone remote Skills, or install dependencies.
 
+Formal Skill implementation must not modify frozen legacy `agent/skills/` files
+unless a dedicated migration phase is explicitly approved. Frozen legacy files
+include but are not limited to:
+
+- `agent/skills/__init__.py`
+- `agent/skills/registry.py`
+- `agent/skills/installer.py`
+- `agent/skills/loader.py`
+- `agent/skills/safety.py`
+- `agent/skills/security.py`
+- `agent/skills/tools.py`
+
+The formal namespace is `agent/skill_system/`. Implementation phases should
+create or modify `agent/skill_system/*`, and tests should target
+`agent/skill_system/*`. Legacy `agent/skills/*` remains reference-only until a
+migration phase.
+
 ## 2. Phases
 
 ### Phase 0: Legacy Prototype Freeze Verification
@@ -40,6 +57,13 @@ Stop gate: audit confirms no legacy prototype contamination.
 
 Goal: define parser/schema for `SKILL.md` frontmatter.
 
+Allowed files: `agent/skill_system/schema.py`,
+`agent/skill_system/descriptor.py`, `agent/skill_system/errors.py`, and focused
+tests/docs for this phase.
+
+Forbidden files: frozen `agent/skills/*`, Runtime loop, ToolRegistry, Memory,
+CLI/TUI.
+
 Work:
 
 - Add `SkillManifest`, `SkillDescriptor`, typed errors.
@@ -51,6 +75,13 @@ Stop gate: schema tests green.
 ### Phase 2: Filesystem Registry
 
 Goal: runtime/session-scoped deterministic registry.
+
+Allowed files: `agent/skill_system/registry.py`,
+`agent/skill_system/descriptor.py`, `agent/skill_system/errors.py`, fixtures,
+and focused tests/docs.
+
+Forbidden files: frozen `agent/skills/*`, Runtime loop, ToolRegistry execution,
+Memory governance.
 
 Work:
 
@@ -65,6 +96,13 @@ Stop gate: independent review of registry scope.
 
 Goal: Level 1/2/3 loading contracts.
 
+Allowed files: `agent/skill_system/loader.py`,
+`agent/skill_system/prompt_section.py`, `agent/skill_system/errors.py`,
+fixtures, and focused tests/docs.
+
+Forbidden files: frozen `agent/skills/*`, ToolRegistry execution, Memory
+governance, checkpoint schema.
+
 Work:
 
 - Metadata prompt section.
@@ -77,6 +115,12 @@ Stop gate: prompt inspection confirms no all-body injection.
 ### Phase 4: Selector
 
 Goal: deterministic Skill selection.
+
+Allowed files: `agent/skill_system/selector.py`,
+`agent/skill_system/descriptor.py`, and focused tests/docs.
+
+Forbidden files: frozen `agent/skills/*`, provider/LLM adapters, Runtime loop,
+SubAgent code.
 
 Work:
 
@@ -91,6 +135,13 @@ Stop gate: selector never reads bodies or calls LLM.
 
 Goal: connect Skill allowed tools to ToolRegistry without bypass.
 
+Allowed files: `agent/skill_system/context.py`,
+`agent/skill_system/invocation.py`, tool-binding tests/docs, and narrow adapter
+code if required by the phase plan.
+
+Forbidden files: frozen `agent/skills/*`, ToolRegistry risk bypasses, direct
+tool execution from Skill modules.
+
 Work:
 
 - Treat `allowed_tools` as upper-bound.
@@ -103,6 +154,13 @@ Stop gate: tool boundary audit.
 ### Phase 6: Runtime Invocation Adapter
 
 Goal: request/result invocation flow under parent Runtime.
+
+Allowed files: `agent/skill_system/context.py`,
+`agent/skill_system/invocation.py`, `agent/skill_system/result.py`, Runtime
+adapter seams approved by tests, and focused tests/docs.
+
+Forbidden files: frozen `agent/skills/*`, SubAgent modules, provider direct call
+paths, Memory governance changes.
 
 Work:
 
@@ -117,6 +175,13 @@ Stop gate: full pytest with temp HOME.
 
 Goal: approved memory read/proposal boundary.
 
+Allowed files: `agent/skill_system/context.py`,
+`agent/skill_system/invocation.py`, memory adapter seam tests/docs, and the
+minimum approved Runtime adapter wiring.
+
+Forbidden files: frozen `agent/skills/*`, Memory governance bypasses, direct
+Memory store writes from Skill modules.
+
 Work:
 
 - Implement `memory_scope` handling.
@@ -124,6 +189,67 @@ Work:
 - Route memory proposals through governance.
 
 Stop gate: Memory governance audit.
+
+### Phase 7b: Checkpoint/Resume Boundary
+
+Goal: make in-flight Skill invocation checkpoint-aware without letting Skill own
+the loop or replay high-risk effects.
+
+Entry criteria:
+
+- Phase 6 invocation request/result flow exists.
+- Phase 7 memory boundary tests pass.
+- Existing checkpoint ownership tests are green.
+
+Allowed files:
+
+- `agent/skill_system/checkpoint.py`
+- `agent/skill_system/invocation.py`
+- `agent/skill_system/result.py`
+- focused checkpoint/resume tests
+- narrowly scoped Runtime checkpoint adapter code only if tests require it
+
+Forbidden files:
+
+- frozen `agent/skills/*`
+- SubAgent modules
+- ToolRegistry risk/confirmation policy
+- Memory governance
+- broad checkpoint schema migration without user approval
+
+Tests first:
+
+- Add tests for checkpoint correlation between SkillInvocationRequest and
+  SkillInvocationResult.
+- Add tests for interrupted in-flight invocation restore/explain behavior.
+- Add tests that checkpoint does not store secrets or complete large resource
+  content.
+- Add tests that resume does not bypass confirmation or re-execute high-risk
+  tools.
+
+Implementation scope:
+
+- Store only bounded correlation metadata: selected Skill, version, loaded
+  levels, audit id, resource handles, and pending confirmation state.
+- Do not persist full Skill body or resource contents.
+- Do not replay tool execution from Skill state.
+- Runtime remains the only owner of loop and checkpoint save/load timing.
+
+Selected tests:
+
+```bash
+python -m pytest tests/test_skill_checkpoint_resume.py tests/test_checkpoint_ownership.py -q
+python -m pytest tests/test_architecture_boundaries.py -q
+```
+
+Exit criteria:
+
+- In-flight Skill invocation can be recovered or explained after resume.
+- Checkpoint contains no secret-like values and no full large resources.
+- Interrupted invocation cannot bypass confirmation.
+- Resume does not repeat high-risk tool execution.
+- Runtime owns the loop; Skill does not own a loop.
+- Full pytest passes with a temporary HOME.
 
 ### Phase 8: CLI/TUI Visibility
 
@@ -174,6 +300,9 @@ Stop and ask the user if any phase:
 - changes Memory governance
 - introduces SubAgent
 - introduces backend abstraction, DB, graph, embedding, or vector store
+- checkpoint/resume would require changing existing checkpoint schema
+- implementation would give Skill its own loop
+- implementation would write full Skill bodies or resources into checkpoint
 - has unclear tool risk boundary
 - needs to weaken/skip tests
 - full pytest fails

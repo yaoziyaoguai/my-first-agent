@@ -18,17 +18,49 @@ after the canonical RFC. It is not an implementation patch.
 
 Do not create these files until the implementation loop reaches their phase.
 
+### Legacy/Formal Module Coexistence Strategy
+
+Existing `agent/skills/` is a frozen legacy / experimental prototype. The formal
+Skill System cannot silently reuse legacy `registry.py`, `loader.py`, or
+`installer.py` as stable API, because those files already carry prototype
+semantics such as module-level registry state and experimental installer
+behavior.
+
+Before implementation, the formal module namespace must be chosen explicitly.
+Accepted options:
+
+- A. Rename legacy files to `_legacy_*` before formal implementation.
+- B. Create formal modules under `agent/skill_system/`.
+- C. Keep `agent/skills/` as the formal namespace but first migrate legacy
+  modules to a legacy subpackage.
+
+Recommended option: B, create formal modules under `agent/skill_system/`.
+
+Rationale:
+
+- Avoids confusion with frozen legacy `agent/skills/`.
+- Does not require moving legacy files before the first implementation phase.
+- Allows a later migration phase to decide whether to replace, archive, or
+  remove the old prototype.
+- Makes it harder for implementation agents to accidentally import frozen
+  prototype modules as formal design.
+
+This is a docs-only design decision. No production code changes are made by this
+document. `agent/skills/` remains frozen and reference-only until an explicitly
+approved migration phase.
+
 ```text
-agent/skills/descriptor.py
-agent/skills/schema.py
-agent/skills/registry.py
-agent/skills/loader.py
-agent/skills/selector.py
-agent/skills/context.py
-agent/skills/invocation.py
-agent/skills/result.py
-agent/skills/prompt_section.py
-agent/skills/errors.py
+agent/skill_system/descriptor.py
+agent/skill_system/schema.py
+agent/skill_system/registry.py
+agent/skill_system/loader.py
+agent/skill_system/selector.py
+agent/skill_system/context.py
+agent/skill_system/invocation.py
+agent/skill_system/result.py
+agent/skill_system/prompt_section.py
+agent/skill_system/checkpoint.py
+agent/skill_system/errors.py
 ```
 
 Responsibilities:
@@ -43,6 +75,8 @@ Responsibilities:
 - `invocation.py`: request/result adapter; no loop ownership.
 - `result.py`: structured Skill output and audit projection.
 - `prompt_section.py`: Level 1 prompt section from descriptors only.
+- `checkpoint.py`: Skill checkpoint correlation projection; it does not own
+  global checkpoint save/load timing.
 - `errors.py`: typed errors for parser, registry, loader, selector, and
   invocation boundaries.
 
@@ -203,6 +237,10 @@ The loader owns body/resource loading:
 - Skill does not own the loop.
 - Agent loop does orchestration only.
 - Skill invocation is adapter request/result flow.
+- `agent/skill_system/checkpoint.py` may project SkillInvocationRequest /
+  SkillInvocationResult correlation metadata for the existing checkpoint owner,
+  but it must not write checkpoints directly or store full Skill bodies /
+  resources.
 - Runtime records selected Skill, loaded level, and audit id in checkpoint when
   invocation is in-flight.
 - Resume should recover enough to explain the pending Skill action, not rerun

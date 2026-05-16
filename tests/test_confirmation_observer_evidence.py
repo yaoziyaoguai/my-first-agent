@@ -41,17 +41,22 @@ from types import SimpleNamespace
 import pytest
 
 import agent.confirm_handlers as ch
+import agent.confirmation.dispatcher as _conf_dispatcher
 from agent.state import create_agent_state
 
 
 # ----------------------------------------------------------------
 # Observer 捕获 fixture
 # ----------------------------------------------------------------
-# 模拟边界：把 confirm_handlers 模块级的 _log_runtime_event 替换为捕获器，
-# 等价于在 runtime_observer.log_event 入口拦截，但只影响 confirm_handlers
+# 模拟边界：把 dispatcher 模块级的 _log_runtime_event 替换为捕获器，
+# 等价于在 runtime_observer.log_event 入口拦截，但只影响 confirmation
 # 的调用面，不污染 response_handlers / planner / checkpoint / core 的
 # observer 调用。这是"只读 observer"测试模式：handler 不应该感知到 observer
 # 是否存在。
+#
+# Global P3 Hardening 后，_emit_confirmation_observer_event 已迁移到
+# agent.confirmation.dispatcher；monkeypatch 目标从 ch._log_runtime_event
+# 改为 _conf_dispatcher._log_runtime_event 以匹配新模块边界。
 @pytest.fixture
 def captured_events(monkeypatch):
     captured: list[tuple[str, dict, str | None, str | None]] = []
@@ -59,7 +64,7 @@ def captured_events(monkeypatch):
     def _fake_log(event_type, *, event_source=None, event_payload=None, event_channel=None):
         captured.append((event_type, dict(event_payload or {}), event_source, event_channel))
 
-    monkeypatch.setattr(ch, "_log_runtime_event", _fake_log)
+    monkeypatch.setattr(_conf_dispatcher, "_log_runtime_event", _fake_log)
     return captured
 
 
@@ -423,7 +428,7 @@ def test_observer_failure_does_not_break_handler(monkeypatch, tmp_path):
     def _always_raise(*a, **kw):
         raise RuntimeError("simulated observer failure")
 
-    monkeypatch.setattr(ch, "_log_runtime_event", _always_raise)
+    monkeypatch.setattr(_conf_dispatcher, "_log_runtime_event", _always_raise)
 
     state = _build_state_for_plan_confirmation()
     ctx = _make_ctx(state)
@@ -531,14 +536,29 @@ def test_observer_event_does_not_add_extra_messages(captured_events, tmp_path, m
 def test_helper_invoked_at_minimum_required_call_sites():
     """真实 bug 保护：未来如有人在 handler 里加新 outcome 分支但忘记调 helper。
 
-    AST 守卫：扫描 confirm_handlers 源码，统计 _emit_confirmation_observer_event
+    AST 守卫：扫描 confirmation 子包全部源码，统计 _emit_confirmation_observer_event
     调用站点数量。当前最小集合 = 1 (def) + 11 outcome (plan*2 + step*3 +
     feedback*4 + user_input*1 + tool*4 ?) — 实际为 15 (def + 14 sites，
     含 user_input.resolved 1 + user_input.empty 1 + 4 tool branches 部分
     在 try/except 内联两次)。本测试容差 ≥12，保证不会有人删除或忘记接入。
+
+    Global P3 Hardening 后，handler 已拆分到 agent.confirmation.* 子模块；
+    本测试改为扫描全部子模块源码。
     """
-    src = inspect.getsource(ch)
-    tree = ast.parse(src)
+    import agent.confirmation.dispatcher as _d
+    import agent.confirmation.plan as _p
+    import agent.confirmation.tool as _t
+    import agent.confirmation.user_input as _u
+
+    sources = [
+        inspect.getsource(_d),
+        inspect.getsource(_p),
+        inspect.getsource(_t),
+        inspect.getsource(_u),
+    ]
+    combined = "\n".join(sources)
+
+    tree = ast.parse(combined)
     call_count = 0
     def_count = 0
     for node in ast.walk(tree):
@@ -552,8 +572,6 @@ def test_helper_invoked_at_minimum_required_call_sites():
             if name == "_emit_confirmation_observer_event":
                 call_count += 1
     assert def_count == 1, "_emit_confirmation_observer_event 必须只定义 1 次（SSOT）"
-    # 最小阈值：5 个 handler × 至少 1 outcome each = 5；当前实现为 14 outcome
-    # 接入。允许未来微调，但不允许低于 11（5 handler 主路径 + 6 个子分支）。
     assert call_count >= 11, (
         f"_emit_confirmation_observer_event 接入面退化（仅 {call_count} 处），"
         f"必须保持 >= 11 处覆盖 5 条 confirmation 链路"
@@ -566,9 +584,10 @@ def test_helper_uses_runtime_observer_log_event_not_legacy_logger():
 
     对应 docs/V0_5_OBSERVER_AUDIT.md G5：两套 log_event 同名不同签名，
     新代码混用会导致 event_payload / event_channel 字段静默丢失。
+
+    Global P3 Hardening 后，_emit_confirmation_observer_event 已迁移到
+    agent.confirmation.dispatcher；本测试改为检查 dispatcher 源码。
     """
-    src = inspect.getsource(ch)
-    # 必须有 from agent.runtime_observer import log_event as _log_runtime_event
+    src = inspect.getsource(_conf_dispatcher)
     assert "from agent.runtime_observer import log_event as _log_runtime_event" in src
-    # 必须不直接 from agent.logger import log_event
     assert "from agent.logger import log_event" not in src

@@ -17,6 +17,55 @@ TOOL_CAPABILITIES = frozenset({
 TOOL_RISK_LEVELS = frozenset({"low", "medium", "high"})
 TOOL_OUTPUT_POLICIES = frozenset({"none", "bounded_text", "artifact_text"})
 
+# ---------------------------------------------------------------------------
+# 模型可见工具数量限制（可在测试 / 高级配置中覆盖）
+# ---------------------------------------------------------------------------
+# 默认值与 get_model_visible_tools() 参数默认值一致。
+# 通过 set_model_visible_tool_limits() 覆盖；reset 恢复到内置默认值。
+# 安全契约：这些值仅控制数量上限，不能绕过 risk / capability / hidden
+# tool 过滤。非法配置（负数等）fail-closed 回退到内置默认值。
+_DEFAULT_MAX_TOTAL_TOOLS = 30
+_DEFAULT_MAX_MCP_TOOLS = 5
+
+_max_total_tools: int = _DEFAULT_MAX_TOTAL_TOOLS
+_max_mcp_tools: int = _DEFAULT_MAX_MCP_TOOLS
+
+
+def set_model_visible_tool_limits(
+    *,
+    max_total: int | None = None,
+    max_mcp: int | None = None,
+) -> None:
+    """覆盖模型可见工具数量上限（供测试/高级配置使用）。
+
+    传递 None 的参数保持当前值不变；reset_model_visible_tool_limits()
+    恢复到内置默认值。
+    """
+    global _max_total_tools, _max_mcp_tools
+    if max_total is not None:
+        if max_total < 1:
+            raise ValueError("max_total must be >= 1")
+        _max_total_tools = max_total
+    if max_mcp is not None:
+        if max_mcp < 0:
+            raise ValueError("max_mcp must be >= 0")
+        _max_mcp_tools = max_mcp
+
+
+def reset_model_visible_tool_limits() -> None:
+    """恢复到内置默认可见工具数量上限。"""
+    global _max_total_tools, _max_mcp_tools
+    _max_total_tools = _DEFAULT_MAX_TOTAL_TOOLS
+    _max_mcp_tools = _DEFAULT_MAX_MCP_TOOLS
+
+
+def get_model_visible_tool_limits() -> dict:
+    """返回当前生效的可见工具数量上限（只读视图）。"""
+    return {
+        "max_total": _max_total_tools,
+        "max_mcp": _max_mcp_tools,
+    }
+
 
 def _validate_metadata(capability, risk_level, output_policy):
     """验证工具治理 metadata，避免每个工具发明自己的 policy 字符串。"""
@@ -114,8 +163,8 @@ def get_tool_definitions():
 
 def get_model_visible_tools(
     *,
-    max_total: int = 30,
-    max_mcp_tools: int = 5,
+    max_total: int | None = None,
+    max_mcp_tools: int | None = None,
     include_capabilities: frozenset[str] | None = None,
     exclude_capabilities: frozenset[str] | None = None,
     explicit_allowlist: frozenset[str] | None = None,
@@ -129,12 +178,25 @@ def get_model_visible_tools(
     不会出现在 model-visible tools 中。
 
     参数：
-        max_total: 模型可见工具的最大总数（硬限制）
-        max_mcp_tools: MCP tools 的最大数量（硬限制，防止上下文膨胀）
+        max_total: 模型可见工具的最大总数（None = 使用 config 默认值 30）
+        max_mcp_tools: MCP tools 最大数量（None = 使用 config 默认值 5）
         include_capabilities: 如果非 None，只包含这些 capability 的工具
         exclude_capabilities: 如果非 None，排除这些 capability 的工具
         explicit_allowlist: 如果非 None，只包含此集合中的工具名
+
+    安全契约：显式传入的值不能绕过 risk / capability / hidden tool 过滤，
+    因为这些过滤在 max_total 截断之前独立执行。
     """
+    # 使用配置默认值（允许 set_model_visible_tool_limits() 覆盖）
+    _limit_total = max_total if max_total is not None else _max_total_tools
+    _limit_mcp = max_mcp_tools if max_mcp_tools is not None else _max_mcp_tools
+
+    # 防御：非法值 fail-closed 回退到内置默认值
+    if _limit_total < 1:
+        _limit_total = _DEFAULT_MAX_TOTAL_TOOLS
+    if _limit_mcp < 0:
+        _limit_mcp = _DEFAULT_MAX_MCP_TOOLS
+
     tools: list[dict[str, Any]] = []
     mcp_count = 0
 
@@ -148,11 +210,11 @@ def get_model_visible_tools(
 
         # MCP tools 硬限制
         if is_mcp:
-            if mcp_count >= max_mcp_tools:
+            if mcp_count >= _limit_mcp:
                 continue
             mcp_count += 1
 
-        # capability filter
+        # capability filter（不受 max_total 配置影响——安全边界）
         if include_capabilities is not None and cap not in include_capabilities:
             continue
         if exclude_capabilities is not None and cap in exclude_capabilities:
@@ -165,7 +227,7 @@ def get_model_visible_tools(
         })
 
         # max_total 硬限制（在所有 filter 之后）
-        if len(tools) >= max_total:
+        if len(tools) >= _limit_total:
             break
 
     return tools

@@ -295,16 +295,16 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
 
     expected: tuple[tuple[str, str, str, str, int], ...] = (
         ("agent.checkpoint", "load_checkpoint_to_state", "load_checkpoint", "load_checkpoint", 1),
-        ("agent.confirm_handlers", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
-        ("agent.confirm_handlers", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
-        ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
+        ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
+        ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.core", "_compress_history_and_sync_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
         ("agent.core", "_run_planning_phase", "save_checkpoint", "_save_checkpoint", 1),
         # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支保存状态
@@ -380,7 +380,10 @@ def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() ->
 
     expected_owner_modules = {
         "agent.checkpoint",
-        "agent.confirm_handlers",
+        "agent.confirmation.dispatcher",
+        "agent.confirmation.plan",
+        "agent.confirmation.tool",
+        "agent.confirmation.user_input",
         "agent.core",
         "agent.memory_interaction",
         "agent.response_handlers",
@@ -407,27 +410,33 @@ def test_pending_confirmation_persistence_writers_are_reviewed() -> None:
     XFAIL-1 topic switch 与 XFAIL-2 Esc cancel/interruption 也不在本测试里实现。
     """
 
+    _confirmation_modules = {
+        "agent.confirmation.dispatcher",
+        "agent.confirmation.plan",
+        "agent.confirmation.tool",
+        "agent.confirmation.user_input",
+    }
     actual_checkpoint_calls = {
         (*key, count)
         for key, count in _checkpoint_operation_calls().items()
-        if key[0] == "agent.confirm_handlers"
+        if key[0] in _confirmation_modules
     }
     expected_checkpoint_calls = {
-        ("agent.confirm_handlers", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
-        ("agent.confirm_handlers", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirm_handlers", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
-        ("agent.confirm_handlers", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
+        ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
+        ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
     }
     actual_state_writes = {
         (*key, count)
         for key, count in _state_task_field_writes().items()
-        if key[0] == "agent.confirm_handlers"
+        if key[0] in _confirmation_modules
         and key[2]
         in {
             "state.task.current_step_index",
@@ -437,14 +446,14 @@ def test_pending_confirmation_persistence_writers_are_reviewed() -> None:
         }
     }
     expected_state_writes = {
-        ("agent.confirm_handlers", "_request_feedback_intent_choice", "state.task.pending_user_input_request", 1),
-        ("agent.confirm_handlers", "_request_feedback_intent_choice", "state.task.status", 1),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "state.task.current_step_index", 1),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "state.task.status", 3),
-        ("agent.confirm_handlers", "handle_plan_confirmation", "state.task.status", 1),
-        ("agent.confirm_handlers", "handle_tool_confirmation", "state.task.pending_tool", 2),
-        ("agent.confirm_handlers", "handle_tool_confirmation", "state.task.status", 4),
+        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "state.task.pending_user_input_request", 1),
+        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "state.task.status", 1),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.current_step_index", 1),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.status", 3),
+        ("agent.confirmation.plan", "handle_plan_confirmation", "state.task.status", 1),
+        ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool", 2),
+        ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.status", 4),
     }
 
     assert actual_checkpoint_calls == expected_checkpoint_calls
@@ -482,8 +491,8 @@ def test_pending_user_input_persistence_writers_are_reviewed() -> None:
         if key[2] == "state.task.pending_user_input_request"
     }
     expected = {
-        ("agent.confirm_handlers", "_request_feedback_intent_choice", "state.task.pending_user_input_request", 1),
-        ("agent.confirm_handlers", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
+        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "state.task.pending_user_input_request", 1),
+        ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
         # Memory Interactive Confirmation v1：chat() 设置 pending，handle_memory_confirmation_reply 清 pending
         ("agent.core", "chat", "state.task.pending_user_input_request", 1),
         ("agent.memory_interaction", "handle_memory_confirmation_reply", "state.task.pending_user_input_request", 1),
@@ -515,7 +524,7 @@ def test_pending_tool_and_execution_log_persistence_writers_are_reviewed() -> No
         }
     }
     expected = {
-        ("agent.confirm_handlers", "handle_tool_confirmation", "state.task.pending_tool", 2),
+        ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool", 2),
         ("agent.tool_executor", "execute_pending_tool", "state.task.tool_execution_log", 1),
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_tool", 3),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log", 3),

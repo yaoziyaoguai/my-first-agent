@@ -448,11 +448,11 @@ def test_user_rejection_emits_user_rejected_event_with_distinct_text(monkeypatch
     """用户输入 n 拒绝工具调用时必须 emit tool.user_rejected，
     与 tool.rejected（安全检查）/tool.failed（运行报错）区分语义，
     避免 CLI 用户「按了 n 之后什么都没看到」的体验。"""
-    import agent.confirm_handlers as ch
     from agent.confirm_handlers import handle_tool_confirmation, ConfirmationContext
     from agent.conversation_events import has_tool_result
 
-    monkeypatch.setattr(ch, "save_checkpoint", lambda s: None)
+    import agent.confirmation.tool as _conf_tool
+    monkeypatch.setattr(_conf_tool, "save_checkpoint", lambda s: None)
 
     class _TaskState:
         def __init__(self):

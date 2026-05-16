@@ -5,7 +5,17 @@ from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
 
-MAX_RESULT_LENGTH = 2000  # checkpoint 中 tool_result 的截断长度
+# checkpoint 中 tool_result 的截断长度（默认 2000 字符）。
+# 可通过 set_checkpoint_truncation_config() 覆盖；测试中可注入自定义值。
+_DEFAULT_MAX_RESULT_LENGTH = 2000
+_DEFAULT_MAX_TOOL_RESULTS = 50  # 单条消息中保留的 tool_result 块数量上限
+
+# 运行时配置（模块级可变，供测试/config 覆盖）
+_max_result_length: int = _DEFAULT_MAX_RESULT_LENGTH
+_max_tool_results: int = _DEFAULT_MAX_TOOL_RESULTS
+
+# 向后兼容别名（Global P3 Hardening 前旧常量名）
+MAX_RESULT_LENGTH = _DEFAULT_MAX_RESULT_LENGTH
 
 
 def _debug_stdout_enabled() -> bool:
@@ -29,9 +39,52 @@ def _now_iso() -> str:
     return datetime.now().isoformat()
 
 
+def set_checkpoint_truncation_config(
+    *,
+    max_result_length: int | None = None,
+    max_tool_results: int | None = None,
+) -> None:
+    """覆盖 checkpoint 截断阈值（供测试 / 高级配置使用）。
+
+    未传入的参数保持当前值不变；reset_checkpoint_truncation_config()
+    可将所有阈值恢复到内置默认值。
+    """
+    global _max_result_length, _max_tool_results
+    if max_result_length is not None:
+        if max_result_length < 0:
+            raise ValueError("max_result_length must be >= 0")
+        _max_result_length = max_result_length
+    if max_tool_results is not None:
+        if max_tool_results < 0:
+            raise ValueError("max_tool_results must be >= 0")
+        _max_tool_results = max_tool_results
+
+
+def reset_checkpoint_truncation_config() -> None:
+    """将 checkpoint 截断阈值恢复到内置默认值。"""
+    global _max_result_length, _max_tool_results
+    _max_result_length = _DEFAULT_MAX_RESULT_LENGTH
+    _max_tool_results = _DEFAULT_MAX_TOOL_RESULTS
+
+
+def get_checkpoint_truncation_config() -> dict:
+    """返回当前生效的 checkpoint 截断配置（只读视图）。"""
+    return {
+        "max_result_length": _max_result_length,
+        "max_tool_results": _max_tool_results,
+    }
+
+
 def _truncate_messages_for_checkpoint(messages):
-    """截断 messages 中过大的 tool_result 内容，并保证整体可 JSON 序列化"""
+    """截断 messages 中过大的 tool_result 内容，并保证整体可 JSON 序列化。
+
+    中文学习边界：截断只在 checkpoint 持久化层发生，不影响 runtime
+    state.conversation.messages。resume 时从截断后的 checkpoint 恢复是
+    有损的——这是 checkpoint 预算控制与完整历史之间的显式权衡。
+    """
     truncated = []
+    limit = _max_result_length
+    max_results = _max_tool_results
 
     def _safe(obj):
         """确保对象可序列化，不可序列化则转为字符串"""
@@ -48,13 +101,19 @@ def _truncate_messages_for_checkpoint(messages):
         # Anthropic content block（list 结构）
         if isinstance(content, list):
             new_content = []
+            tool_result_count = 0
             for block in content:
                 if isinstance(block, dict):
                     if block.get("type") == "tool_result":
+                        if tool_result_count >= max_results:
+                            # 超过 tool_result 块数量上限，跳过该块，
+                            # 用截断标记占位告知 resume 时历史不完整。
+                            continue
+                        tool_result_count += 1
                         block = dict(block)
                         c = block.get("content", "")
-                        if isinstance(c, str) and len(c) > MAX_RESULT_LENGTH:
-                            block["content"] = c[:MAX_RESULT_LENGTH]
+                        if isinstance(c, str) and len(c) > limit:
+                            block["content"] = c[:limit]
                         else:
                             block["content"] = _safe(c)
                         new_content.append(block)

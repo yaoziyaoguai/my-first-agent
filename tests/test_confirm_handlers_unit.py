@@ -92,13 +92,17 @@ def test_memory_inline_confirmation_delegates_with_store(monkeypatch):
 
 
 def test_unknown_awaiting_kind_uses_generic_transition(monkeypatch):
-    """未知 awaiting_kind 不能被误处理成 memory 分支，必须走 TransitionResult。"""
+    """未知 awaiting_kind 不能被误处理成 memory 分支，必须走 TransitionResult。
+
+    Global P3 Hardening 后，handle_user_input_step 已迁移到
+    agent.confirmation.user_input；mock 路径同步更新。
+    """
 
     resolution = SimpleNamespace(kind="collect_input_answer", content="answer")
     calls = []
 
     monkeypatch.setattr(
-        "agent.confirm_handlers.resolve_user_input",
+        "agent.confirmation.user_input.resolve_user_input",
         lambda state, user_input: resolution,
     )
 
@@ -107,7 +111,7 @@ def test_unknown_awaiting_kind_uses_generic_transition(monkeypatch):
         return TransitionResult(should_continue_loop=True)
 
     monkeypatch.setattr(
-        "agent.confirm_handlers.apply_user_replied_transition",
+        "agent.confirmation.user_input.apply_user_replied_transition",
         fake_transition,
     )
     ctx = _make_context(awaiting_kind="future_kind")

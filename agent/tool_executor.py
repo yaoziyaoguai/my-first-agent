@@ -461,10 +461,9 @@ def execute_pending_tool(
     这个函数只负责「确认已到达后的执行」。确认 UI 已在 pending_tool 生成时通过
     DisplayEvent 发出；这里补执行中/完成事件，仍不让 TUI 读取 Runtime state。
 
-    M7-A 文案修复：执行中提示从「用户已确认，正在执行」改为「已收到确认，
-    开始执行（执行前/中可能仍被工具内部安全检查拒绝）」——更准确，避免
-    用户先看到「正在执行」紧接着看到「拒绝执行：XXX」时困惑「到底是
-    我的拒绝还是系统的拒绝」。
+    M7-A 文案修复（已于 Global P3 Hardening 完成）：执行中提示明确告知
+    用户安全检查可能仍在执行前/中拒绝工具——避免用户先看到「正在执行」
+    紧接着看到「拒绝执行：XXX」时困惑「到底是我的拒绝还是系统的拒绝」。
     """
     tool_use_id = pending["tool_use_id"]
     tool_name = pending["tool"]
@@ -476,7 +475,7 @@ def execute_pending_tool(
             event_type="tool.executing",
             tool_name=tool_name,
             tool_input=tool_input,
-            status_text="已收到确认，开始执行。",
+            status_text="已收到确认，开始执行（执行前/中可能仍被工具内部安全检查拒绝）。",
         ),
     )
     result = execute_tool(tool_name, tool_input, context=turn_state.round_tool_traces)

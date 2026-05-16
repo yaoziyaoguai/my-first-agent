@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import agent.confirmation.tool as _conf_tool
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -1681,7 +1683,7 @@ def test_tool_accept_success_path_clears_pending_tool_via_handler(tmp_path, monk
         from agent.conversation_events import append_tool_result
         append_tool_result(messages, pending["tool_use_id"], "ok")
 
-    monkeypatch.setattr(ch, "execute_pending_tool", _fake_execute_pending_tool)
+    monkeypatch.setattr(_conf_tool, "execute_pending_tool", _fake_execute_pending_tool)
 
     state = create_agent_state(system_prompt="test")
     state.task.status = "awaiting_tool_confirmation"
@@ -1733,7 +1735,7 @@ def test_tool_accept_exception_path_keeps_pending_tool_for_inspection(tmp_path, 
     def _fake_raises(*, state, turn_state, messages, pending):
         raise RuntimeError("tool execution failed for testing")
 
-    monkeypatch.setattr(ch, "execute_pending_tool", _fake_raises)
+    monkeypatch.setattr(_conf_tool, "execute_pending_tool", _fake_raises)
 
     state = create_agent_state(system_prompt="test")
     state.task.status = "awaiting_tool_confirmation"
@@ -1970,7 +1972,7 @@ def test_tool_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatc
         from agent.conversation_events import append_tool_result
         append_tool_result(messages, pending["tool_use_id"], "ok")
 
-    monkeypatch.setattr(ch, "execute_pending_tool", _fake_ok)
+    monkeypatch.setattr(_conf_tool, "execute_pending_tool", _fake_ok)
 
     state_a = create_agent_state(system_prompt="test")
     state_a.task.status = "awaiting_tool_confirmation"
@@ -1998,7 +2000,7 @@ def test_tool_confirmation_transition_does_not_leak_durable(tmp_path, monkeypatc
     def _fake_raises(*, state, turn_state, messages, pending):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(ch, "execute_pending_tool", _fake_raises)
+    monkeypatch.setattr(_conf_tool, "execute_pending_tool", _fake_raises)
 
     state_b = create_agent_state(system_prompt="test")
     state_b.task.status = "awaiting_tool_confirmation"
@@ -2189,7 +2191,7 @@ def _make_feedback_intent_ctx(*, choice: str, monkeypatch, with_planning_fn=True
     """
     from agent import confirm_handlers as ch
     from agent.checkpoint import CHECKPOINT_PATH as _orig_path  # noqa: F401
-    from agent import confirm_handlers as _ch_mod
+    from agent.confirmation import plan as _ch_mod
     from agent.state import create_agent_state
     from types import SimpleNamespace
 

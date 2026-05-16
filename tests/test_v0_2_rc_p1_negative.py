@@ -367,14 +367,20 @@ def test_real_user_tool_rejection_path_is_separate_from_force_stop():
     """
     import inspect
     from agent import confirm_handlers
+    from agent.confirmation import tool as _conf_tool
 
-    src = inspect.getsource(confirm_handlers)
-    assert "用户拒绝执行该工具" in src, (
-        "confirm_handlers 中真实的用户拒绝文案缺失；"
+    src_facade = inspect.getsource(confirm_handlers)
+    src_tool = inspect.getsource(_conf_tool)
+    assert "用户拒绝执行该工具" in src_tool, (
+        "agent/confirmation/tool.py 中真实的用户拒绝文案缺失；"
         "若被合并进 policy denial，会再次混淆两种语义。"
     )
-    assert "FORCE_STOP" not in src, (
-        "confirm_handlers 不应直接引用 FORCE_STOP；"
+    assert "FORCE_STOP" not in src_facade, (
+        "confirm_handlers facade 不应直接引用 FORCE_STOP；"
+        "用户拒绝与 policy block 必须各走各的语义路径。"
+    )
+    assert "FORCE_STOP" not in src_tool, (
+        "agent/confirmation/tool.py 不应直接引用 FORCE_STOP；"
         "用户拒绝与 policy block 必须各走各的语义路径。"
     )
 

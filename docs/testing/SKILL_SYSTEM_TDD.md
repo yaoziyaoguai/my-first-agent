@@ -92,7 +92,7 @@ appropriate, then implements the smallest behavior change.
 - Expected behavior: checkpoint stores audit/correlation metadata, not huge body
   dumps or secrets.
 - Forbidden behavior: hidden rerun of Skill side effects on resume.
-- Selected command: `python -m pytest tests/test_skill_checkpoint_resume.py tests/test_checkpoint_ownership.py -q`
+- Selected command: `python -m pytest tests/test_skill_checkpoint_boundary.py tests/test_checkpoint_ownership.py -q`
 - Exit criteria: resume preserves user-visible state and safety.
 
 ## Phase 9: CLI/TUI Presentation Tests
@@ -119,7 +119,7 @@ appropriate, then implements the smallest behavior change.
   no CLI/TUI runtime logic, no SubAgent imports.
 - Expected behavior: high cohesion / low coupling module graph.
 - Forbidden behavior: new Skill monolith or cross-layer imports.
-- Selected command: `python -m pytest tests/test_architecture_boundaries.py tests/test_skill_architecture_boundaries.py -q`
+- Selected command: `python -m pytest tests/test_architecture_boundaries.py tests/test_tui_dependency_boundaries.py tests/test_v0_4_transition_boundaries.py -q`
 - Exit criteria: full suite passes and no P0/P1 audit findings remain.
 
 ## Full-suite Rule

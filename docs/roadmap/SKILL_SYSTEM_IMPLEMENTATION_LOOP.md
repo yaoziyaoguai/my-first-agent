@@ -243,8 +243,8 @@ Implementation scope:
 Selected tests:
 
 ```bash
-python -m pytest tests/test_skill_checkpoint_resume.py tests/test_checkpoint_ownership.py -q
-python -m pytest tests/test_architecture_boundaries.py -q
+python -m pytest tests/test_skill_checkpoint_boundary.py tests/test_checkpoint_ownership.py -q
+python -m pytest tests/test_architecture_boundaries.py tests/test_tui_dependency_boundaries.py -q
 ```
 
 Exit criteria:

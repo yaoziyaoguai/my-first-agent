@@ -12,7 +12,36 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from agent import cli_renderer
+
+
+# -- TOOL_REGISTRY 测试隔离 --
+# test_load_skill_does_not_import_legacy_modules_at_runtime 会触发
+# `from agent.tools import skill`，间接调用 @register_tool(name="load_skill")，
+# 把 load_skill 注入全局 TOOL_REGISTRY。
+# 若不清除，后续 test_tool_registry_contract.py 会因 load_skill 意外存在而失败。
+# 此 fixture 在每次 import agent.tools.skill 之后把 load_skill 弹出，
+# 保证测试间无顺序依赖。
+
+_TOOL_REGISTRY_SKILL_NAMES = {"load_skill", "install_skill", "update_skill", "load_skills"}
+
+
+@pytest.fixture(autouse=True)
+def _purge_load_skill_from_tool_registry():
+    """每次测试后从 TOOL_REGISTRY 清除 load_skill 等 Skill lifecycle 工具注册。
+
+    设计意图：test_skill_system_honesty.py 的某些测试会 import agent.tools.skill
+    来验证其 fail-closed 行为。import 副作用把 load_skill 注册进全局 TOOL_REGISTRY，
+    污染后续模块的工具合约测试。本 fixture 每次测试后清理，不依赖模块执行顺序。
+    """
+    yield
+    from agent.tool_registry import TOOL_REGISTRY
+
+    for name in list(TOOL_REGISTRY):
+        if name in _TOOL_REGISTRY_SKILL_NAMES:
+            del TOOL_REGISTRY[name]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "skills"

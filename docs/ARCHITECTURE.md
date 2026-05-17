@@ -1,5 +1,14 @@
 # my-first-agent 架构解读
 
+> Status: Historical deep-dive.
+>
+> Superseded as user entrypoint by:
+> - `docs/README.zh.md`
+> - `docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md`
+> - `docs/00-overview/ARCHITECTURE_MAP.zh.md`
+>
+> 本文仍保留为历史架构深潜和旧阶段上下文，不再作为新开发者的首读文档。
+
 > 目的：这篇文档不是 README，也不是 API reference。它是**帮你阅读现有代码**的路线图——告诉你每一块在整体里的位置、为什么这样设计、踩过哪些坑、哪里是难点、未来会扩展到哪里。读完之后你应该能自己翻代码不迷路。
 
 > ⚠️ **本轮变更通知（slash command 整体下线 + 启发式回退）**

@@ -1,520 +1,166 @@
 # my-first-agent
 
-`my-first-agent` is a learning-oriented Agent Runtime prototype. The current
-HEAD is **Controlled MCP Bridge Foundation Complete**:
-tool system governance (structured ToolResult, lifecycle audit, health checks),
-MCP safety foundation (policy-gated registration, descriptor sanitization,
-adversarial scanning, audit trail, boundary isolation), MCP bridge thin adapter
-(disabled/discovery/registration modes), tool exposure filter with hard limits,
-real filesystem MCP server controlled flight verified, and read-only MCP
-tools/call validated with no secret leakage.
+First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
+它的核心不是“更多工具”，而是把主代理运行时（Parent Agent Runtime）、工具注册中心（ToolRegistry）、记忆治理（Memory Governance）、技能系统（Skill System）、子代理系统（SubAgent System）、检查点（Checkpoint）和人工确认（Confirmation / Ask User）放在同一套可审计边界里运行。
 
-**Free-form autonomous MCP AgentLoop, arbitrary MCP server support, destructive
-tools/call, and high-permission MCP (GitHub/Slack/Notion/DB) remain
-authorization-gated.** The MCP bridge defaults to disabled; explicit opt-in
-is required via `MY_FIRST_AGENT_MCP_ENABLE=1`.
+当前项目已经完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线，并通过全量测试和 synthetic dogfood。
+它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
+新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
 
-It is not a mature agent framework, not a production safety sandbox, not a complete TUI or Textual IDE, not a full MCP implementation, and not a Skill or sub-agent platform.
+## 当前状态
 
-## Quickstart (local-first trial)
+- Runtime/Core/Loop：主循环仍由 Parent Agent Runtime 拥有，`agent.loop` 已抽出主循环编排，`core.py` 仍是兼容入口和 runtime hub。
+- ToolRegistry / ToolExecutor：ToolRegistry 仍是工具 authority；高风险工具保留 confirmation；Skill/SubAgent 不能直接执行工具。
+- Memory：已完成 filesystem-first governance、interactive confirmation、pending review、consolidation/emergence foundation；无 silent retain、无 auto approve。
+- Skill System：正式命名空间是 `agent/skill_system/`；支持 descriptor、registry、progressive disclosure、tool/memory/checkpoint 边界和 dogfood。
+- SubAgent System：正式命名空间是 `agent/subagent_system/`；L0 deterministic/local 基线完成；L1-L5 仍 gated/future。
+- Checkpoint / Resume：checkpoint 是安全边界，保存截断摘要和声明字段，避免持久化大 tool result 或未知字段。
+- CLI/TUI：CLI/Textual 只是 adapter/presentation，不拥有 Agent loop。
+- 当前验证基线：`ruff` passed；full pytest 曾通过 `2684 passed, 14 skipped`；SubAgent synthetic dogfood `16/16`。
 
-`my-first-agent` is **local-first only**: there is no SaaS, no hosted
-service, no remote agent runtime. To try it, clone the repo and run
-everything on your own machine.
+## 核心能力
 
-### Prerequisites
+| 能力 | 当前状态 | 默认行为 |
+|---|---|---|
+| Parent Agent Runtime | 已完成基础闭环 | 拥有主 loop、状态机、模型调用和分派 |
+| ToolRegistry | 已完成治理基础 | 工具注册、风险、confirmation、可见性过滤 |
+| Memory | 已完成主线 | 用户确认后写入；自动路径受 governance 限制 |
+| Skill System | 已完成 formal safe-local 系统 | metadata-first，按需加载，不直接执行工具 |
+| SubAgent System | L0 已完成 | local fake/deterministic，Parent adjudication |
+| Checkpoint | 已完成安全边界 | 截断 tool result，过滤未知字段 |
+| CLI/TUI | 已完成边界收口 | 输入/输出 adapter，不复制 runtime |
+| Real LLM / real API dogfood | gated | 需要显式授权和配置 |
+| Shell / external process / worktree | gated/future | 不默认开启 |
 
-- Python **3.10+** (developed on 3.12)
-- macOS / Linux shell (Windows users: WSL recommended)
-- Optional: an Anthropic API key if you want to drive the agent with a
-  real model. Without one you can still run the test suite and the
-  offline `fake` provider for the LLM Processing CLI.
+更完整的能力边界见 [CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)。
 
-### Setup
+## 架构图文字版
+
+```text
+User
+  -> CLI / TUI adapter
+  -> Parent Agent Runtime
+      -> ToolRegistry / ToolExecutor
+      -> Memory Governance
+      -> Skill System
+      -> SubAgent System
+      -> Checkpoint / Audit / Dogfood
+```
+
+关键边界：
+
+- Parent Agent owns orchestration。
+- ToolRegistry remains authority。
+- Memory governance remains authority。
+- Checkpoint remains safety boundary。
+- Confirmation / Ask User remains human-control boundary。
+- Skill/SubAgent 都不能拥有主 Agent loop。
+
+Mermaid 版见 [ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)。
+
+## 快速开始
+
+### 环境要求
+
+- Python 3.10+，推荐 Python 3.12。
+- macOS / Linux shell；Windows 建议 WSL。
+- 本地开发不需要真实 API key；真实 LLM 只在显式授权的 dogfood / smoke 中使用。
+
+### 安装
 
 ```bash
-git clone <this repo>
-cd my-first-agent
-
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# Optional: configure a real provider. Copy the template and edit values
-# locally. Never commit your real .env.
-cp .env.example .env
-# then open .env and set ANTHROPIC_API_KEY / ANTHROPIC_MODEL if you have them.
 ```
 
-`.env` is gitignored. `.env.example` only carries variable names and
-comments — no real keys.
+不要提交 `.env`。默认测试和 fake/local demo 不需要读取 `.env`。
 
-### Run the 5-minute fake demo (no API key, no network)
-
-The fastest way to see the local agent loop is the productized fake demo
-shipped in `agent/local_demo.py`. It uses a deterministic in-process fake
-provider, never reads `.env` / `agent_log.jsonl` / `sessions/` / `runs/` /
-real MCP config, never calls a real LLM, and only writes inside an explicit
-demo workspace under `workspace/demo/<UTC-timestamp>/` (or an explicit
-`--workspace` path under your system temp dir).
+### 运行 fake/local demo
 
 ```bash
 .venv/bin/python main.py demo "create a demo note about today's local run"
 ```
 
-Expected output (paths and timestamps will differ):
+这个 demo 使用 deterministic fake provider，不调用真实 LLM，不访问网络，不读取 `.env` / `agent_log.jsonl` / `sessions/` / `runs/`。
 
-```
-[Local Agent Demo] provider=fake workspace=workspace/demo/20250101T000000Z
-Task : create a demo note about today's local run
-Step 1 demo.write_demo_note -> ok
-  path  : workspace/demo/20250101T000000Z/note.md
-  bytes : 140
-Final: wrote demo note to workspace/demo/20250101T000000Z/note.md
-Trace summary (2 events):
-  span-1 tool_call tool_result:demo.write_demo_note ok
-  span-2 state_transition demo.complete ok task='create a demo note about today's local run'
-Inspect: open workspace/demo/20250101T000000Z for the generated artifact.
-```
-
-Demo non-goals (intentional): no real LLM, no real MCP, no network, no
-release/tag, no production automation. Real provider / real MCP opt-in are
-authorization-gated tracks, not part of this demo. See
-`docs/rfcs/local-agent-productization.md` for the design.
-
-### Run the basic CLI shell
-
-```bash
-.venv/bin/python main.py
-.venv/bin/python main.py --shell  # explicit alias for the same basic shell
-```
-
-You will see a structured startup banner with session id, cwd, a one-line
-health summary, an experimental-Skill notice, and a checkpoint resume
-status. The shell prints a compact status line around each turn so you can
-see whether the runtime is planning, awaiting confirmation, executing, waiting
-for your input, finished, failed, or blocked by policy. Type a task in Chinese
-or English; type `quit` to exit.
-
-The four-class tool outcome contract from v0.2
-(`completed` / `failed` / `rejected` / `user_rejected`) is preserved.
-"Rejected" means a safety policy blocked the call (e.g. project-outside
-write); "user_rejected" means **you** chose not to approve a tool call
-when prompted.
-
-### AgentLoop LLM provider adapters
-
-AgentLoop has a provider-neutral adapter foundation supporting three active
-provider types plus one planned:
-
-- `anthropic_native` — legacy streaming path in `core.py` and non-streaming
-  wrapper for normalization.
-- `anthropic_compatible` — HTTP adapter for custom Anthropic-compatible
-  endpoints (DashScope, enterprise proxies, self-hosted gateways).
-- `openai_compatible` — HTTP adapter for OpenAI Chat Completions-compatible
-  endpoints (DeepSeek, DashScope OpenAI-compatible, OpenRouter, vLLM,
-  LM Studio, Ollama-compatible, enterprise proxies).
-- `openai_native` — minimal Chat Completions HTTP adapter for the official
-  OpenAI API (default `https://api.openai.com`, bearer auth).
-
-Provider config is read from process environment only. Do not write keys into
-repo files, docs, logs, checkpoints, messages, or audit artifacts.
-
-```bash
-# Anthropic-compatible
-export MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible
-export ANTHROPIC_API_KEY=...
-export ANTHROPIC_BASE_URL=https://your-provider.example
-export ANTHROPIC_MODEL=your-compatible-model
-
-# Optional for Anthropic-compatible:
-export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/messages
-export MY_FIRST_AGENT_LLM_AUTH_SCHEME=auto   # auto | bearer | x-api-key
-
-# OpenAI-compatible
-export MY_FIRST_AGENT_LLM_PROVIDER=openai_compatible
-export OPENAI_API_KEY=sk-...
-export OPENAI_BASE_URL=https://api.openai.com
-export OPENAI_MODEL=gpt-4o
-
-# Optional for OpenAI-compatible (defaults shown):
-export MY_FIRST_AGENT_LLM_REQUEST_PATH=/v1/chat/completions
-export MY_FIRST_AGENT_LLM_AUTH_SCHEME=bearer
-
-# Streaming is not yet supported for compatible providers — core.py's
-# _call_model dispatches to the non-streaming create() path when
-# supports_streaming=False.
-```
-
-MCP and provider responsibilities stay separate: MCP discovers and registers
-tools through the existing policy gate and exposure filter; the provider adapter
-only sends the model request. `get_model_visible_tools(max_mcp_tools=5)` still
-controls what model-visible tools are included. Tool execution still goes
-through `tool_executor` and the confirmation gate regardless of provider type.
-
-See `docs/LLM_PROVIDER_ADAPTER.md` for provider status, error classification,
-tools schema conversion details, and the opt-in real smoke command.
-
-### Subcommands you should know
-
-```bash
-.venv/bin/python main.py health           # readable maintenance report
-.venv/bin/python main.py health --json    # machine-readable JSON
-.venv/bin/python main.py logs             # tail recent runtime events
-.venv/bin/python main.py logs --tail 100  # see further back
-```
-
-`health` warnings (large `agent_log.jsonl`, accumulated `sessions/`,
-workspace lint findings) are **non-fatal** maintenance signals, not crashes.
-The runtime **never** auto-archives or deletes `agent_log.jsonl` /
-`sessions/` / `workspace/`. Suggested cleanup commands are printed for
-you to run manually.
-
-### Run the test suite
-
-```bash
-.venv/bin/python -m ruff check agent/ tests/ llm run_logger.py main.py
-.venv/bin/python -m pytest -q
-```
-
-Historical v0.3-era baseline was ruff clean with ~691 passed, 3 permanent xfails;
-keep that in mind when reading older release docs.
-
-Current post-v0.8.0 development baseline: ruff clean and full pytest passing at
-HEAD. Older v0.7.x notes are historical; current readiness/design work remains
-fake-first and local unless a future pack explicitly authorizes real provider,
-real MCP, release, or broad runtime migration work. The dogfooding smoke
-coverage can be run directly with:
-
-```bash
-PYTHON_DOTENV_DISABLED=1 \
-ANTHROPIC_API_KEY=test-key \
-ANTHROPIC_BASE_URL=https://example.invalid \
-MODEL_NAME=test-model \
-.venv/bin/python -m pytest tests/test_second_round_dogfooding_smoke.py -q -rx
-```
-
-### Local runtime artifacts
-
-Running the agent creates these files under your clone. **All are
-gitignored** and will not be uploaded if you push your fork:
-
-| Path | What it is | Cleanup |
-|---|---|---|
-| `agent_log.jsonl` | runtime event log (jsonl) | `mv agent_log.jsonl agent_log.$(date +%s).jsonl.bak` |
-| `sessions/` | per-session checkpoint snapshots | manual delete after review |
-| `state.json` | active checkpoint pointer | deleted automatically when the runtime returns to idle |
-| `runs/`, `summary.md` | LLM Processing CLI artifacts (only if you use `process`) | manual delete |
-| `workspace/` | sandbox for tools that write files | manual delete |
-| `memory/` | learning notes (committed copy is the project baseline) | do not delete in a fork |
-
-If you ever wonder where something came from, run `python main.py logs`
-and filter by session, event type, or tool name.
-
-### Common questions
-
-- **"Missing ANTHROPIC_API_KEY" on startup** — the basic CLI shell needs a
-  real key to talk to a model. The test suite and the LLM Processing
-  `fake` provider do not.
-- **Anthropic-compatible endpoint returns 401/403** — check
-  `MY_FIRST_AGENT_LLM_AUTH_SCHEME`, `MY_FIRST_AGENT_LLM_REQUEST_PATH`, model
-  name, and base URL. Compatible endpoints do not always match the official
-  Anthropic SDK path/auth behavior.
-- **Resume banner says "未发现断点"** — there is no checkpoint to resume
-  from. Just type a new task.
-- **Health report shows `warn`** — these are maintenance warnings, not
-  errors. Each warning includes a `current_value` / `path` / `risk` and a
-  copy-paste command to address it.
-- **Skill commands** — Skills in this repo are an **experimental,
-  prompt-injection-level scaffold**. There is no Skill marketplace, no
-  per-Skill tool whitelist, and no slash-command handler. See
-  `docs/V0_3_SKILL_SYSTEM_STATUS.md`.
-- **Final-answer questions** — the model's final answer should not
-  contain "do you want me to ...?"-style waiting questions; if the agent
-  truly needs your input it will use the `request_user_input` tool and
-  pause. See `docs/CLI_OUTPUT_CONTRACT.md` §14.
-
-For a deeper local-trial walkthrough, see
-`docs/V0_3_LOCAL_TRIAL.md`; for a one-page trial checklist, see
-`docs/V0_3_LOCAL_TRIAL_CHECKLIST.md`. During the v0.3.2 local trial, record
-findings with `docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md`; v0.4 transition planning
-starts from `docs/V0_4_EVENT_TRANSITION_PREP.md`.
-
-## Tool System & MCP Safety Foundation (current)
-
-The tool system has been hardened with structured governance layers:
-
-- **ToolResultEnvelope** — structured result classification (executed / failed /
-  rejected_by_check) with stable error taxonomy, wired into the real executor
-  path. Legacy string contract remains compatible.
-- **ToolAuditEvent** — lifecycle audit events (executed / failed / blocked /
-  skipped / requires_confirmation) emitted on every real tool execution path,
-  with redacted safe_preview and content_length only (no raw input/output).
-- **Tool/MCP Health Checks** — registry integrity, risk distribution analysis,
-  MCP module readiness are checked by `python main.py health`.
-- **ToolSpec metadata** — capability / risk_level / output_policy / confirmation
-  governance labels on every registered tool, separated from model-visible schema.
-
-The MCP safety foundation supports policy-gated registration:
-
-- **MCP Sanitizer** (`agent/mcp_sanitizer.py`) — adversarial pattern scanning,
-  description truncation, `[MCP:server]` source labelling, unsafe URL filtering.
-- **MCP Policy Gate** (`agent/mcp_policy.py`) — server allowlist enforcement,
-  transport restriction (stdio-only in this stage), tool descriptor policy
-  evaluation before registration.
-- **MCP Audit** (`agent/mcp_audit.py`) — server discovered/blocked,
-  tools listed, tool registered/blocked events with no raw descriptor leakage.
-- **Policy-Gated Registration** (`agent/mcp.py::register_mcp_tools`) —
-  server-level and tool-level policy gates are mandatory before any MCP tool
-  enters the registry. Blocked tools never reach `TOOL_REGISTRY`.
-- **Module Boundary Isolation** — all MCP/tool modules are verified (AST tests)
-  to not import runtime internals (core.py, checkpoint, handlers).
-
-**What is NOT yet supported (authorization-gated):**
-real MCP server connection, real tools/call execution, real stdio dry-run,
-real external provider activation, MCP bridge to runtime main loop.
-
-To inspect the current state:
-```bash
-.venv/bin/python main.py health     # includes tool_registry_integrity,
-                                    # tool_risk_distribution, mcp_config_readiness
-.venv/bin/python -m pytest tests/test_mcp_policy_gate.py tests/test_mcp_registration_policy.py tests/test_mcp_boundary_isolation.py
-```
-
-Default pytest uses deterministic local MCP fixture servers for stdio,
-registration, tool exposure, read-only call, audit, and no-leak coverage. Real
-`npx @modelcontextprotocol/server-filesystem` flight is opt-in because it
-depends on npx/npm registry, proxy, server startup, and MCP handshake:
-
-```bash
-MY_FIRST_AGENT_RUN_REAL_MCP_FLIGHT=1 .venv/bin/python -m pytest tests/test_real_mcp_flight.py -v
-```
-
-An opt-in `tools/list` timeout is an external flight/environment signal, not a
-provider adapter failure and not evidence that MCP policy, sanitizer, or
-registry default coverage failed.
-
-## Runtime v0.1 Scope
-
-The v0.1 runtime is meant to prove this minimal loop:
-
-```text
-plan -> user confirms plan -> tools run as needed -> result is produced -> checkpoint is saved
-```
-
-The core graduation surface is:
-
-- basic Agent loop
-- basic task planning and step execution
-- basic tool registration and tool calls
-- model message construction
-- `tool_use` / `tool_result` pairing
-- minimal task status flow
-- minimal plan and tool confirmation flow
-- checkpoint write/load roundtrip
-- CLI output that is readable enough for a user to understand what the agent is doing
-
-## Current Graduation Status
-
-- **B1 complete**: Runtime v0.1 contract and xfail ownership are documented in
-  `docs/V0_1_CONTRACT.md`.
-- **B2 complete**: minimal CLI output contract is frozen in
-  `docs/CLI_OUTPUT_CONTRACT.md` and guarded by regression tests.
-- **B3 complete**: the real Anthropic API graduation smoke completed the
-  `README.md` -> `summary.md` task. The result is recorded in
-  `docs/V0_1_GRADUATION_REPORT.md`.
-
-## Run Tests
-
-From the repository root:
-
-```bash
-.venv/bin/python -m ruff check agent/ tests/
-.venv/bin/python -m pytest -q
-```
-
-Expected v0.1 baseline: no RED tests. Known xfails are documented in
-`docs/V0_1_CONTRACT.md` and belong to later versions.
-
-## LLM Processing MVP
-
-The v0.2 LLM processing surface is intentionally small and auditable:
-
-```bash
-.venv/bin/python main.py scan README.md
-.venv/bin/python main.py preflight
-.venv/bin/python main.py preflight --provider anthropic --live
-.venv/bin/python main.py process README.md
-.venv/bin/python main.py status
-.venv/bin/python main.py status --run-id <run_id>
-```
-
-`scan` only reports file metadata such as path, hash, size, and mtime.
-`preflight` checks provider configuration without sending a live request by
-default. `process` runs the minimal triager/distiller/linker pipeline and writes
-`state.json` plus `runs/*.jsonl`. `status` reads those metadata files and
-tolerates missing or partially corrupted audit logs. `status --run-id` reads a
-specific `runs/<run_id>.jsonl` file without modifying local state. Raw input
-text, prompts, completions, API keys, and provider request/response bodies must
-not be written to `state.json`, `runs/*.jsonl`, or status/preflight output.
-`state.json` and `runs/*.jsonl` are local run artifacts and are ignored by git.
-The status schema is documented in `docs/LLM_AUDIT_STATUS_SCHEMA.md`; provider
-configuration is documented in `docs/LLM_PROVIDER_CONFIG.md`; the live provider
-smoke playbook is documented in `docs/LLM_PROVIDER_LIVE_SMOKE.md`; the live
-smoke audit result is documented in `docs/LLM_PROVIDER_LIVE_SMOKE_REPORT.md`;
-the v0.2 LLM Processing capability matrix is documented in
-`docs/LLM_PROCESSING_CAPABILITY_MATRIX.md`. Provider failures are classified
-into stable safe codes such as `missing_config`, `auth_error`, `rate_limited`,
-`network_error`, `timeout`, `bad_response`, `unknown_provider`, and
-`provider_error`.
-
-## Run the v0.1 Smoke
-
-The B3 smoke task reads this root `README.md` and writes a Chinese summary to
-`summary.md`. `summary.md` is a local smoke artifact and is ignored by git.
-
-Preflight:
-
-```bash
-test -f README.md
-test -n "$ANTHROPIC_API_KEY"
-test ! -e summary.md
-```
-
-Start the simple CLI:
+### 运行 CLI
 
 ```bash
 .venv/bin/python main.py
 ```
 
-Then enter:
+如需真实模型，需要自行在本地环境配置 provider key；不要把 key 写入仓库文件、日志、checkpoint 或文档。
 
-```text
-请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。
+更详细的上手流程见 [GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)。
+
+## 测试命令
+
+常用质量门：
+
+```bash
+ruff check agent tests scripts
+python -m pytest tests/ -x -q
 ```
 
-During the smoke, approve only the minimal plan and tool calls needed to read
-`README.md`, write `summary.md`, and perform necessary checks. Do not use the
-smoke to add v0.2/v0.3 features.
+本项目有大量 opt-in real provider / real MCP 测试，默认会跳过真实外部集成。
+完整测试矩阵见 [TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)。
 
-## Explicit Non-Goals for v0.1
+## Dogfood 命令
 
-These areas are intentionally out of scope for v0.1 graduation:
+Skill synthetic dogfood：
 
-- full Textual backend or persistent shell
-- advanced TUI panels, paste handling, or generation cancellation
-- mature Skill lifecycle or sub-agent collaboration
-- complex topic switch handling, slash commands, or LLM intent classification
-- production-grade security sandbox, permission model, or recovery policy
-- observer/eval pipeline, cost tracking, or performance SLA
-
-## Runtime v0.2 Status
-
-v0.1 has graduated. **Runtime v0.2 is now released as `v0.2.0`**.
-v0.2 adds:
-
-- runtime state-machine + event boundary invariants with regression tests
-- checkpoint / resume semantics (idle residue is silently cleaned)
-- error recovery and loop guard invariants
-- four-class CLI tool outcome contract (`completed` / `failed` / `rejected` / `user_rejected`)
-- workspace-out-of-bounds write block, sensitive-file read block, shell blacklist
-- offline LLM Processing CLI: `process` / `scan` / `status` / `preflight`,
-  with provider error classification and secret/raw-text leak protection
-- `python main.py health` subcommand for non-blocking maintenance warnings
-
-v0.2 still **does not** include: full Textual TUI, Skill maturation, sub-agent
-collaboration, Reflect / Self-Correction, generation cancellation, or paste
-burst handling. Those are explicitly v0.3 or later.
-
-See `RELEASE_NOTES_v0.2.md`, `docs/V0_2_RC_DECISION.md`, and
-`docs/V0_2_MANUAL_SMOKE_RESULT.md` for details.
-
-## Runtime v0.3 Status (in progress · usability track)
-
-v0.3 is the **usability** track on top of v0.2. It is **not** a feature
-big-bang. See `docs/V0_3_PLANNING.md` for full scope.
-
-**v0.3 M1 — Basic CLI Shell MVP** is landed locally:
-
-```text
-────────────────────────────────────────────────────────────
-  Runtime v0.3 basic CLI shell
-────────────────────────────────────────────────────────────
-  session : d6066c90  (full: d6066c90-b6ed-...)
-  cwd     : /your/project
-  health  : 3 warn (workspace_lint, log_size, session_accumulation); 详情：python main.py health
-────────────────────────────────────────────────────────────
-  输入 'quit' 退出。
-  Health: python main.py health；Logs: python main.py logs --tail 50。
-  Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。
-
-  📭 resume : 未发现断点，可以直接开始新任务。
-你: 
+```bash
+python scripts/dogfood_skill_system.py --tmp-root /tmp/my-first-agent-skill-dogfood --mode synthetic
 ```
 
-Run `python main.py` or the explicit alias `python main.py --shell`. This is a
-basic CLI shell with TUI-like structured output, not a full Textual IDE. The
-four-class tool outcome contract from v0.2 (`completed` / `failed` /
-`rejected` / `user_rejected`) is preserved unchanged.
+SubAgent synthetic dogfood：
 
-**v0.3 M2 — Health Maintenance report** is landed locally:
-
-```
-$ python main.py health           # 结构化人类可读报告（每项含 risk + 建议命令）
-$ python main.py health --json    # 机器可读 JSON，schema 稳定
+```bash
+python scripts/dogfood_subagent_system.py --tmp-root /tmp/my-first-agent-subagent-dogfood --mode synthetic
 ```
 
-报告中每个 check 都展示 `current_value` / `path` / `risk` / `suggested action`；
-所有「建议」都是给你复制粘贴的命令，**Runtime 永不自动归档或删除**
-`agent_log.jsonl` / `sessions/` / `workspace/`。详细维护命令见
-`docs/V0_3_HEALTH_MAINTENANCE.md`。
+Real API dogfood 是 gated，不默认运行。只有在文档 phase 和用户明确允许时才可执行。
 
-**v0.3 M3 — Skill system honesty pass** is landed locally:
+## 安全边界
 
-- 启动屏不再印 `'/reload_skills' 重新加载 skill`（该 slash command 历史上
-  **没有 handler**，纯属误导）
-- 启动屏现在明示 「Skill 是实验性能力」并指向 `docs/V0_3_SKILL_SYSTEM_STATUS.md`
-- 当前 `agent/skills/` 子系统是 **prompt 注入级别的实验性脚手架**：
-  没有 sub-agent、没有 skill 级 tool 权限白名单、没有 activation policy、
-  没有 skill 单元测试。详细现状与后续真正 Skill 化路线见
-  `docs/V0_3_SKILL_SYSTEM_STATUS.md`。
+默认禁止：
 
-**v0.3 M4 — Readable observer/logs viewer** is landed locally:
+- 不读取 `.env`。
+- 不读取 `agent_log.jsonl` 正文。
+- 不读取真实 `sessions/` / `runs/`。
+- 不读取 `memory/episodes/*.jsonl` 内容。
+- 不打印 API key / token / secret。
+- 不默认调用真实 LLM。
+- 不默认执行 shell / 外部进程。
+- 不默认写 repo / 创建 worktree。
+- 不让 Skill/SubAgent 绕过 Parent Runtime、ToolRegistry、Memory governance、Checkpoint、Confirmation。
 
-```
-$ python main.py logs                          # 默认 tail 50 + 隐藏 runtime_observer
-$ python main.py logs --tail 100
-$ python main.py logs --session abc12345       # 按 session 前缀
-$ python main.py logs --event tool_executed    # 按事件类型
-$ python main.py logs --tool calculate         # 按工具名
-$ python main.py logs --include-observer       # 显式打开极噪的 runtime_observer
-```
+## 当前不支持什么
 
-输出是单行紧凑摘要（timestamp / 短 session id / event / 结构化元信息），
-**不会**展示 raw content / raw tool_result / system_prompt / 完整 checkpoint，
-含兜底脱敏（sk-ant- / BEGIN PRIVATE KEY / api_key=…）。完整设计与脱敏边界
-见 `docs/V0_3_OBSERVER_LOGS.md`。
+- 不支持默认真实 LLM SubAgent。
+- 不支持默认 SubAgent 工具执行、sandbox、worktree、parallel multi-subagent。
+- 不支持把 Skill 当作远程插件市场或自动安装系统。
+- 不支持 DB / graph / embedding / vector store 作为默认 memory backend。
+- 不支持多用户 SaaS / 云端 Agent Runtime。
+- 不支持绕过人工确认的高风险工具执行。
 
-v0.3 still **does not** include: full Textual multi-panel, keyboard shortcuts,
-Esc / generation cancellation, sub-agent, Reflect / Self-Correction,
-Skill marketplace, complex topic switch, slash commands, automatic
-log/session/workspace pruning. See `docs/V0_3_PLANNING.md` §2 for the
-explicit non-goal list.
+## 文档阅读路径
 
-**v0.3 patch — final answer / request_user_input protocol fix** (post-tag):
+1. 项目入口：[docs/README.zh.md](docs/README.zh.md)
+2. 系统概览：[FIRST_AGENT_OVERVIEW.zh.md](docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md)
+3. 架构图：[ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)
+4. 能力矩阵：[CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)
+5. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
+6. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
+7. 当前审计状态：[CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)
 
-A manual smoke surfaced a UX break: the model wrote a trailing open-ended
-question ("need me to adjust some days?") in its final answer in the same
-turn as a `mark_step_complete` tool call. Runtime correctly completed the
-task on the structured signal, but the user perceived "asked me a question
-then refused to wait". Fix is at the protocol boundary, not via keywords:
+Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`。
 
-- `config.SYSTEM_PROMPT` now declares `request_user_input` as the **only**
-  signal Runtime treats as "waiting", and forbids mixing waiting-style
-  questions with `mark_step_complete` in the same response.
-- `agent/model_output_resolution.py` keyword patterns are frozen as a
-  legacy fallback (size-capped by tests; new findings go to SYSTEM_PROMPT).
-- Guarded by `tests/test_final_answer_user_input_separation.py` (7 tests).
+## 下一步 Roadmap
 
-See `docs/V0_3_PLANNING.md` §3.5 and `docs/CLI_OUTPUT_CONTRACT.md` §14
-for the full protocol contract.
+1. 推送当前 main 前，建议再做一次独立文档审计。
+2. SubAgent 后续只可按文档 gate 推进 L1/L2；L3/L4/L5 仍是 future/contract。
+3. Memory 下一步聚焦真实质量 dogfood 和更清晰的 recall/provider 边界，不引入未授权 backend。
+4. Skill 下一步可继续强化真实 dogfood 证据和文档索引，不默认安装远程 skill。
+5. Runtime 下一步继续减少 `core.py` hub 压力，但不能破坏现有 checkpoint / confirmation / tool_result 语义。

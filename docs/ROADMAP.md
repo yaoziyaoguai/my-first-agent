@@ -1,5 +1,15 @@
 # my-first-agent Canonical Roadmap
 
+> Status: Historical roadmap with canonical stage context.
+>
+> Superseded as current user-facing roadmap by:
+> - `README.md`
+> - `docs/00-overview/CAPABILITY_MATRIX.zh.md`
+> - `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
+>
+> 本文保留历史阶段映射和长期边界说明；当前能力状态以新的中文入口文档和各系统
+> canonical RFC / audit packet 为准。
+
 > **本文件目的**：以 **Agent Loop / Runtime** 为长期主干，按 **8 阶段顺序**
 > 定义"该做什么、不该做什么、什么时候停"。
 >

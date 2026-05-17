@@ -81,16 +81,21 @@ class OpenAINativeProvider:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> ProviderResponse:
         if tools and not self.config.supports_tools:
             raise ProviderCapabilityError("tools_not_supported")
 
         openai_messages = convert_messages_to_openai(system, messages)
         body: dict[str, Any] = {
-            "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "model": model or self.config.model,
+            "max_tokens": max_tokens or self.config.max_tokens,
             "messages": openai_messages,
         }
+        if temperature is not None:
+            body["temperature"] = temperature
         if tools:
             body["tools"] = convert_tools_to_openai(tools)
 

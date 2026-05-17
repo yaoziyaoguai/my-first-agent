@@ -75,6 +75,36 @@ def test_anthropic_compatible_http_bearer_request_includes_tools_and_custom_path
     )
 
 
+def test_anthropic_compatible_http_honors_per_call_overrides():
+    """provider adapter 必须显式消费 legacy facade 转发的 per-call 参数。"""
+    from agent.provider.anthropic_http import AnthropicCompatibleProvider
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(200, json={"content": [], "stop_reason": "end_turn"})
+
+    provider = AnthropicCompatibleProvider(
+        config=_config(),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    provider.create(
+        system="sys",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        model="override-model",
+        max_tokens=123,
+        temperature=0.2,
+    )
+
+    body = seen["body"]
+    assert '"model":"override-model"' in body
+    assert '"max_tokens":123' in body
+    assert '"temperature":0.2' in body
+
+
 def test_anthropic_compatible_http_x_api_key_auth_header():
     from agent.provider.anthropic_http import AnthropicCompatibleProvider
 

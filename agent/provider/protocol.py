@@ -86,6 +86,9 @@ class ModelProvider(Protocol):
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> ProviderResponse:
         """Create a non-streaming model response."""
 

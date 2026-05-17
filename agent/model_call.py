@@ -12,6 +12,7 @@ from typing import Any
 
 from agent.provider.factory import build_model_provider_from_env
 from agent.provider.legacy_adapter import ProviderBackedClient
+from agent.provider.protocol import ProviderNotImplementedError
 from agent.provider.streaming import collect_stream_response
 
 
@@ -42,52 +43,41 @@ def call_model(
 ) -> Any:
     """通过 provider abstraction 调用模型，并兼容测试 fake client。
 
-    Provider path 是生产路径；legacy_client path 只用于已有 fake client 测试。
+    Provider path 是唯一生产路径。legacy_client 参数只为旧调用签名保留；
+    没有 ModelProvider 时 fail closed，避免真实 SDK client 绕过 provider factory。
     这里不写 checkpoint、不改 state，只把 provider stream 聚合为最终 response。
     """
 
     if provider is None and hasattr(legacy_client, "provider"):
         provider = legacy_client.provider
 
-    if provider is not None:
-        if hasattr(provider, "stream"):
-            stream_events = provider.stream(system=system_prompt, messages=messages, tools=tools)
-            observed_events = []
-            for event in stream_events:
-                observed_events.append(event)
-                if event.event_type == "tool_request":
-                    if emit_tool_request is not None:
-                        emit_tool_request()
-                elif event.text_delta and emit_text_delta is not None:
-                    emit_text_delta(event.text_delta)
-            response = collect_stream_response(observed_events)
-        else:
-            # 兼容旧测试 fake provider；正式 provider contract 已要求 stream()，
-            # 这里仍只走 provider interface，不回退任何 SDK client。
-            response = provider.create(system=system_prompt, messages=messages, tools=tools)
-            if emit_text_delta is not None:
-                for block in getattr(response, "content", []) or []:
-                    text = getattr(block, "text", None)
-                    if isinstance(text, str) and text:
-                        emit_text_delta(text)
+    if provider is None:
+        raise ProviderNotImplementedError("model_provider_required")
+
+    if getattr(provider, "supports_streaming", False):
+        stream_events = provider.stream(system=system_prompt, messages=messages, tools=tools)
+        observed_events = []
+        for event in stream_events:
+            observed_events.append(event)
+            if event.event_type == "tool_request":
+                if emit_tool_request is not None:
+                    emit_tool_request()
+            elif event.text_delta and emit_text_delta is not None:
+                emit_text_delta(event.text_delta)
+        response = collect_stream_response(observed_events)
     else:
-        with legacy_client.messages.stream(
-            model=model_name,
+        # 兼容旧测试 fake provider；正式 provider contract 已要求 stream()，
+        # 这里仍只走 provider interface，不回退任何 SDK client。
+        response = provider.create(
             system=system_prompt,
             messages=messages,
             tools=tools,
-        ) as stream:
-            for event in stream:
-                event_type = getattr(event, "type", "")
-                if event_type == "content_block_delta":
-                    delta_text = getattr(getattr(event, "delta", None), "text", "")
-                    if delta_text and emit_text_delta is not None:
-                        emit_text_delta(delta_text)
-                elif event_type == "content_block_start":
-                    block = getattr(event, "content_block", None)
-                    if getattr(block, "type", "") == "tool_use" and emit_tool_request is not None:
-                        emit_tool_request()
-            response = stream.get_final_message()
+        )
+        if emit_text_delta is not None:
+            for block in getattr(response, "content", []) or []:
+                text = getattr(block, "text", None)
+                if isinstance(text, str) and text:
+                    emit_text_delta(text)
 
     if print_assistant_newline:
         print()

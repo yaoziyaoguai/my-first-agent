@@ -155,6 +155,66 @@ def test_build_model_provider_from_env_returns_anthropic_native(monkeypatch):
     assert "secret-token-must-not-leak" not in repr(provider.config)
 
 
+def test_provider_backed_messages_forwards_supported_legacy_overrides():
+    """legacy messages facade 不得静默丢弃 Anthropic-style request overrides。
+
+    planner/context/memory 仍使用 ``client.messages.create`` 形状；这个 facade
+    只能把参数显式投影到 provider interface，不能假装接收后丢弃。
+    """
+
+    from agent.provider.legacy_adapter import ProviderBackedMessages
+    from agent.provider.protocol import ProviderResponse
+
+    class RecordingProvider:
+        def __init__(self) -> None:
+            self.request = None
+
+        def create(self, **kwargs):  # noqa: ANN001, ANN202
+            self.request = kwargs
+            return ProviderResponse(content=[], stop_reason="end_turn")
+
+    provider = RecordingProvider()
+    response = ProviderBackedMessages(provider).create(
+        model="override-model",
+        max_tokens=123,
+        temperature=0.2,
+        system="system",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+    )
+
+    assert response.stop_reason == "end_turn"
+    assert provider.request == {
+        "system": "system",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [],
+        "model": "override-model",
+        "max_tokens": 123,
+        "temperature": 0.2,
+    }
+
+
+def test_provider_backed_messages_rejects_unknown_legacy_overrides():
+    """不认识的 legacy SDK 参数必须 fail closed，避免抽象层继续失真。"""
+
+    import pytest
+
+    from agent.provider.legacy_adapter import ProviderBackedMessages
+    from agent.provider.protocol import ProviderCapabilityError
+
+    class RecordingProvider:
+        def create(self, **kwargs):  # noqa: ANN001, ANN202
+            raise AssertionError("unsupported legacy args must fail before provider call")
+
+    with pytest.raises(ProviderCapabilityError, match="unsupported_legacy_message_args"):
+        ProviderBackedMessages(RecordingProvider()).create(
+            model="override-model",
+            messages=[],
+            tools=[],
+            top_p=0.9,
+        )
+
+
 def test_dogfood_runners_do_not_import_provider_sdks_directly():
     """dogfood runner 只能依赖 provider factory，不能散落 SDK-specific client。"""
 

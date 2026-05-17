@@ -136,3 +136,34 @@ def test_core_call_model_uses_provider_stream_interface(monkeypatch) -> None:
 
     assert emitted == ["hi"]
     assert response.content[0].text == "hi"
+
+
+def test_model_call_without_provider_fails_closed_before_legacy_stream() -> None:
+    """没有 ModelProvider 时必须 fail closed，不能回退直连 SDK stream。
+
+    这是最终审计 P2 的回归护栏：legacy_client 只保留为旧签名兼容，不能再让
+    真实 Anthropic client 或 fake SDK shape 绕过 provider factory。
+    """
+
+    import pytest
+
+    from agent.model_call import call_model
+    from agent.provider.protocol import ProviderNotImplementedError
+
+    class ForbiddenLegacyClient:
+        @property
+        def messages(self):  # noqa: ANN201
+            raise AssertionError("legacy stream path must not be touched")
+
+    with pytest.raises(ProviderNotImplementedError, match="model_provider_required"):
+        call_model(
+            provider=None,
+            legacy_client=ForbiddenLegacyClient(),
+            model_name="fake-model",
+            system_prompt="system",
+            messages=[],
+            tools=[],
+            emit_text_delta=None,
+            emit_tool_request=None,
+            print_assistant_newline=False,
+        )

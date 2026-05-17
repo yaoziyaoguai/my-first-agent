@@ -43,13 +43,21 @@ class AnthropicNativeProvider:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> ProviderResponse:
+        request_kwargs: dict[str, Any] = {
+            "model": model or self.config.model,
+            "max_tokens": max_tokens or self.config.max_tokens,
+            "system": system,
+            "messages": messages,
+            "tools": tools,
+        }
+        if temperature is not None:
+            request_kwargs["temperature"] = temperature
         response = self._client_or_create().messages.create(
-            model=self.config.model,
-            max_tokens=self.config.max_tokens,
-            system=system,
-            messages=messages,
-            tools=tools,
+            **request_kwargs,
         )
         return normalize_anthropic_response(
             response,
@@ -62,16 +70,24 @@ class AnthropicNativeProvider:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ):
         """把 Anthropic SDK stream 事件转换为 provider-neutral events。"""
 
         sequence = 0
+        request_kwargs: dict[str, Any] = {
+            "model": model or self.config.model,
+            "max_tokens": max_tokens or self.config.max_tokens,
+            "system": system,
+            "messages": messages,
+            "tools": tools,
+        }
+        if temperature is not None:
+            request_kwargs["temperature"] = temperature
         with self._client_or_create().messages.stream(
-            model=self.config.model,
-            max_tokens=self.config.max_tokens,
-            system=system,
-            messages=messages,
-            tools=tools,
+            **request_kwargs,
         ) as stream:
             for event in stream:
                 event_type = getattr(event, "type", None)

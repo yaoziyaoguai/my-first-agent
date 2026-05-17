@@ -138,6 +138,41 @@ def test_convert_messages_assistant_with_tool_calls():
     assert json.loads(tc["function"]["arguments"]) == {"path": "README.md"}
 
 
+def test_openai_compatible_honors_per_call_overrides():
+    """OpenAI-compatible adapter 也必须消费 provider-neutral per-call 参数。"""
+    from agent.provider.openai_http import OpenAICompatibleProvider
+
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = json.loads(request.read().decode())
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": ""}, "finish_reason": "stop"}],
+                "usage": {},
+            },
+        )
+
+    provider = OpenAICompatibleProvider(
+        config=_config(),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    provider.create(
+        system="sys",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        model="override-model",
+        max_tokens=123,
+        temperature=0.2,
+    )
+
+    assert seen["json"]["model"] == "override-model"
+    assert seen["json"]["max_tokens"] == 123
+    assert seen["json"]["temperature"] == 0.2
+
+
 def test_convert_messages_user_with_tool_results_becomes_tool_messages():
     from agent.provider.openai_http import convert_messages_to_openai
 

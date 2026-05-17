@@ -350,6 +350,9 @@ class OpenAICompatibleProvider:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> ProviderResponse:
         """调用 OpenAI-compatible endpoint，返回归一化 ProviderResponse。"""
         if tools and not self.config.supports_tools:
@@ -357,10 +360,12 @@ class OpenAICompatibleProvider:
 
         openai_messages = convert_messages_to_openai(system, messages)
         body: dict[str, Any] = {
-            "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "model": model or self.config.model,
+            "max_tokens": max_tokens or self.config.max_tokens,
             "messages": openai_messages,
         }
+        if temperature is not None:
+            body["temperature"] = temperature
         if tools:
             body["tools"] = convert_tools_to_openai(tools)
 
@@ -403,10 +408,20 @@ class OpenAICompatibleProvider:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ):
         """兼容 provider streaming contract；HTTP adapter 先用 create() 聚合。"""
 
-        response = self.create(system=system, messages=messages, tools=tools)
+        response = self.create(
+            system=system,
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
         sequence = 0
         for block in response.content:
             text = getattr(block, "text", None)

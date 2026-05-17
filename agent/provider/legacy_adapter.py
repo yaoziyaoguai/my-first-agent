@@ -9,18 +9,39 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.provider.protocol import ProviderCapabilityError
+
+
+_BASE_CREATE_ARGS = {"system", "messages", "tools"}
+_SUPPORTED_CREATE_OVERRIDES = {"model", "max_tokens", "temperature"}
+
 
 class ProviderBackedMessages:
-    """把 legacy `messages.create()` 映射到 provider-neutral create()。"""
+    """把 legacy `messages.create()` 映射到 provider-neutral create()。
+
+    planner/context/memory 仍有历史 Anthropic-style 调用形状。这里必须把
+    支持的 per-call override 显式转发给 provider；未知 SDK 参数 fail closed，
+    避免调用方误以为参数生效但实际被静默丢弃。
+    """
 
     def __init__(self, provider: Any) -> None:
         self._provider = provider
 
     def create(self, **kwargs: Any) -> Any:
+        unsupported = set(kwargs) - _BASE_CREATE_ARGS - _SUPPORTED_CREATE_OVERRIDES
+        if unsupported:
+            raise ProviderCapabilityError("unsupported_legacy_message_args")
+
+        provider_kwargs = {
+            "system": kwargs.get("system", ""),
+            "messages": kwargs.get("messages", []),
+            "tools": kwargs.get("tools", []),
+        }
+        for name in _SUPPORTED_CREATE_OVERRIDES:
+            if name in kwargs:
+                provider_kwargs[name] = kwargs[name]
         return self._provider.create(
-            system=kwargs.get("system", ""),
-            messages=kwargs.get("messages", []),
-            tools=kwargs.get("tools", []),
+            **provider_kwargs,
         )
 
 

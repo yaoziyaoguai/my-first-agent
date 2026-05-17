@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 
 from tests.conftest import (
@@ -32,6 +31,8 @@ def _reset_core_module(monkeypatch, fake_client):
 
     注意：core 是模块级全局 state。测试之间必须互相隔离，否则 state.task 残留
     会让第二条测试看到上一条的 pending_tool / current_plan。
+    fake client 自身提供 test-only provider facade：生产代码已封死 legacy
+    SDK stream fallback，测试也必须通过 provider interface 驱动主循环。
     """
     from agent import core
     from agent.state import create_agent_state
@@ -162,38 +163,13 @@ def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
     不能变成新 UI 输出入口。
     """
 
-    final_response = text_response("你好")
-
-    class StreamingFakeStream:
-        """模拟 Anthropic stream：先产出两个 text delta，再返回最终消息。"""
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def __iter__(self):
-            return iter([
-                SimpleNamespace(
-                    type="content_block_delta",
-                    delta=SimpleNamespace(text="你"),
-                ),
-                SimpleNamespace(
-                    type="content_block_delta",
-                    delta=SimpleNamespace(text="好"),
-                ),
-            ])
-
-        def get_final_message(self):
-            return final_response
-
     class StreamingFakeClient:
-        """planner 走 create，executor 走带 delta 的 stream。"""
+        """planner 走 legacy create，executor 走 provider-neutral stream。"""
 
         def __init__(self):
             self.create_requests = []
             self.requests = []
+            self.provider = self._Provider(self)
 
             outer = self
 
@@ -202,11 +178,31 @@ def test_chat_forwards_model_deltas_to_output_callback(monkeypatch, capsys):
                     outer.create_requests.append(kwargs)
                     return _planner_no_plan_response()
 
-                def stream(self, **kwargs):
-                    outer.requests.append(kwargs)
-                    return StreamingFakeStream()
-
             self.messages = _Messages()
+
+        class _Provider:
+            provider_type = "test_streaming"
+            supports_tools = True
+            supports_streaming = True
+
+            def __init__(self, outer):
+                self._outer = outer
+
+            def stream(self, *, system, messages, tools):
+                # 学习型注释：这里刻意产出 provider-neutral events，证明旧
+                # on_output_chunk 兼容层不需要 Anthropic SDK stream 形状。
+                from agent.provider.streaming import ProviderStreamEvent
+
+                self._outer.requests.append({
+                    "system": system,
+                    "messages": messages,
+                    "tools": tools,
+                })
+                return iter([
+                    ProviderStreamEvent.delta(sequence=1, text_delta="你"),
+                    ProviderStreamEvent.delta(sequence=2, text_delta="好"),
+                    ProviderStreamEvent.final(sequence=3),
+                ])
 
     fake = StreamingFakeClient()
     _reset_core_module(monkeypatch, fake)
@@ -232,34 +228,11 @@ def test_chat_runtime_event_takes_precedence_over_output_callback(monkeypatch, c
     避免 RuntimeEvent 主路径和旧 callback 双写同一段用户可见输出。
     """
 
-    final_response = text_response("你好")
-
-    class StreamingFakeStream:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def __iter__(self):
-            return iter([
-                SimpleNamespace(
-                    type="content_block_delta",
-                    delta=SimpleNamespace(text="你"),
-                ),
-                SimpleNamespace(
-                    type="content_block_delta",
-                    delta=SimpleNamespace(text="好"),
-                ),
-            ])
-
-        def get_final_message(self):
-            return final_response
-
     class StreamingFakeClient:
         def __init__(self):
             self.create_requests = []
             self.requests = []
+            self.provider = self._Provider(self)
             outer = self
 
             class _Messages:
@@ -267,11 +240,29 @@ def test_chat_runtime_event_takes_precedence_over_output_callback(monkeypatch, c
                     outer.create_requests.append(kwargs)
                     return _planner_no_plan_response()
 
-                def stream(self, **kwargs):
-                    outer.requests.append(kwargs)
-                    return StreamingFakeStream()
-
             self.messages = _Messages()
+
+        class _Provider:
+            provider_type = "test_streaming"
+            supports_tools = True
+            supports_streaming = True
+
+            def __init__(self, outer):
+                self._outer = outer
+
+            def stream(self, *, system, messages, tools):
+                from agent.provider.streaming import ProviderStreamEvent
+
+                self._outer.requests.append({
+                    "system": system,
+                    "messages": messages,
+                    "tools": tools,
+                })
+                return iter([
+                    ProviderStreamEvent.delta(sequence=1, text_delta="你"),
+                    ProviderStreamEvent.delta(sequence=2, text_delta="好"),
+                    ProviderStreamEvent.final(sequence=3),
+                ])
 
     fake = StreamingFakeClient()
     _reset_core_module(monkeypatch, fake)

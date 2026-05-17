@@ -85,6 +85,10 @@ class FakeAnthropicClient:
     用法:
         fc = FakeAnthropicClient(responses=[resp1, resp2, ...])
         # 然后把它装进 core.client
+
+    生产代码已经封死 legacy SDK stream fallback。测试 fake client 仍保留
+    Anthropic-style ``messages`` 形状给 planner/context 使用，但执行主循环必须
+    通过 ``provider`` facade 进入 ModelProvider 边界，避免测试继续依赖旧绕路。
     """
 
     def __init__(self, responses: list[FakeResponse]):
@@ -114,6 +118,41 @@ class FakeAnthropicClient:
                 return client_self.responses.pop(0)
 
         self.messages = _Messages()
+
+        class _ProviderFacade:
+            provider_type = "test_fake"
+            supports_tools = True
+            supports_streaming = False
+
+            def create(
+                self,
+                *,
+                system,
+                messages,
+                tools,
+                model=None,
+                max_tokens=None,
+                temperature=None,
+            ):
+                request = {
+                    "model": model or "test-model",
+                    "system": system,
+                    "messages": messages,
+                    "tools": tools,
+                }
+                if max_tokens is not None:
+                    request["max_tokens"] = max_tokens
+                if temperature is not None:
+                    request["temperature"] = temperature
+                client_self.requests.append(request)
+                if not client_self.responses:
+                    raise AssertionError(
+                        "FakeAnthropicClient provider: create called but no canned "
+                        "responses left. 说明测试用例的 responses 列表给短了。"
+                    )
+                return client_self.responses.pop(0)
+
+        self.provider = _ProviderFacade()
 
 
 # ---------- 便捷构造器 ----------

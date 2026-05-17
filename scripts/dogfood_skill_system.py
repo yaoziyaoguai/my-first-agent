@@ -40,6 +40,14 @@ from agent.skill_system.registry import SkillRegistry  # noqa: E402
 from agent.skill_system.schema import load_skill_manifest  # noqa: E402
 from agent.skill_system.selector import SkillSelector  # noqa: E402
 from agent.skill_system.tool_binding import SkillToolBinding  # noqa: E402
+from agent.provider.config import (  # noqa: E402
+    PROVIDER_ENV,
+    PROVIDER_NAME_ENV,
+    AgentProviderConfig,
+    load_agent_provider_config,
+)
+from agent.provider.factory import build_model_provider  # noqa: E402
+from agent.provider.protocol import ProviderConfigurationError  # noqa: E402
 
 # ---- scenario definitions ----
 # 每个 scenario 有唯一 id、input hint、期望 skill name、验证逻辑
@@ -208,6 +216,8 @@ REAL_API_SCENARIOS: tuple[dict[str, Any], ...] = (
     },
 )
 
+_REAL_API_MAX_ATTEMPTS = 3
+
 
 @dataclass
 class ScenarioReport:
@@ -270,6 +280,7 @@ class DogfoodReport:
             result["provider_diagnostics"] = {
                 "key_source_kind": diag.get("key_source_kind"),
                 "provider_name": diag.get("provider_name"),
+                "provider_type": diag.get("provider_type"),
                 "model": diag.get("model"),
                 "base_url": diag.get("base_url"),
                 "project_dotenv_loaded": diag.get("project_dotenv_loaded"),
@@ -290,6 +301,7 @@ class DogfoodReport:
             print("  Provider Diagnostics (sanitized):")
             print(f"    key_source_kind           = {diag.get('key_source_kind')}")
             print(f"    provider_name             = {diag.get('provider_name')}")
+            print(f"    provider_type             = {diag.get('provider_type')}")
             print(f"    model                     = {diag.get('model')}")
             print(f"    base_url                  = {diag.get('base_url')}")
             print(f"    project_dotenv_loaded     = {diag.get('project_dotenv_loaded')}")
@@ -459,9 +471,14 @@ class _SyntheticToolRegistry:
 
 # real-api dogfood 专用的 config key 名列表，用于检测 shell env 与 project .env 的冲突。
 _DOGFOOD_RELEVANT_KEYS = (
+    PROVIDER_ENV, PROVIDER_NAME_ENV,
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
     "MODEL_NAME", "ANTHROPIC_MODEL", "OPENAI_MODEL",
+    "MY_FIRST_AGENT_LLM_MODEL", "MY_FIRST_AGENT_LLM_BASE_URL",
+    "MY_FIRST_AGENT_LLM_AUTH_SCHEME", "MY_FIRST_AGENT_LLM_REQUEST_PATH",
+    "MY_FIRST_AGENT_LLM_COMPATIBILITY_MODE",
+    "MY_FIRST_AGENT_LLM_MAX_TOKENS", "MY_FIRST_AGENT_LLM_TIMEOUT",
 )
 
 
@@ -475,10 +492,11 @@ def _load_dogfood_scoped_provider_config(project_root: Path) -> dict[str, Any]:
     - 不打印 secret，不修改 os.environ。
 
     返回 dict:
-        client: anthropic.Anthropic | None
+        provider: ModelProvider | None
         error: str | None
         key_source_kind: str
         provider_name: str
+        provider_type: str
         model: str
         base_url: str
         project_dotenv_loaded: bool
@@ -486,25 +504,11 @@ def _load_dogfood_scoped_provider_config(project_root: Path) -> dict[str, Any]:
         shell_env_fallback_used: bool
     """
     import config as _config
-    import anthropic
 
     project_values = _config._load_project_dotenv_values(project_root)
 
-    # -- 仅从 project .env 取值，不使用 os.environ --
-    api_key = (
-        project_values.get("ANTHROPIC_API_KEY")
-        or project_values.get("OPENAI_API_KEY")
-    )
-    base_url = (
-        project_values.get("ANTHROPIC_BASE_URL")
-        or project_values.get("OPENAI_BASE_URL")
-    )
-    model = (
-        project_values.get("MODEL_NAME")
-        or project_values.get("ANTHROPIC_MODEL")
-        or project_values.get("OPENAI_MODEL")
-    )
-
+    # -- 仅从 project .env 取值，不使用 os.environ 构造 provider --
+    api_key = project_values.get("ANTHROPIC_API_KEY") or project_values.get("OPENAI_API_KEY")
     key_source_kind = "project_dotenv" if api_key else "missing"
     project_dotenv_loaded = bool(project_values)
 
@@ -517,36 +521,45 @@ def _load_dogfood_scoped_provider_config(project_root: Path) -> dict[str, Any]:
             shell_env_conflict_detected = True
             break
 
-    # shell env fallback 始终 false：我们只从 project .env 取值
+    # shell env fallback 始终 false：真实 provider 只从 project dotenv 映射到
+    # AgentProviderConfig。shell env 只能用于检测污染，不参与构造。
     shell_env_fallback_used = False
 
-    # -- 构建 client --
-    client = None
+    provider = None
+    provider_config: AgentProviderConfig | None = None
     error = None
-    if not api_key:
-        error = "API key not found in project .env"
-    else:
+    if project_values:
         try:
-            client = anthropic.Anthropic(
-                api_key=api_key,
-                base_url=base_url or None,
-            )
+            provider_config = load_agent_provider_config(env=project_values)
+            provider = build_model_provider(provider_config)
+        except ProviderConfigurationError as exc:
+            error = f"provider config error: {exc}"
         except Exception as exc:
-            error = f"Failed to create client: {type(exc).__name__}"
+            error = f"Failed to create provider: {type(exc).__name__}"
+    else:
+        error = "API key not found in project .env"
 
     provider_name = (
-        "anthropic" if "anthropic" in (base_url or "").lower()
-        else "deepseek" if "deepseek" in (base_url or "").lower()
-        else "custom"
+        provider_config.provider_name
+        if provider_config is not None
+        else project_values.get(PROVIDER_NAME_ENV) or project_values.get(PROVIDER_ENV) or "unknown"
     )
+    provider_type = (
+        provider_config.provider_type
+        if provider_config is not None
+        else project_values.get(PROVIDER_ENV) or "unknown"
+    )
+    model = provider_config.model if provider_config is not None else "unknown"
+    base_url = provider_config.base_url if provider_config is not None else None
 
     return {
-        "client": client,
+        "provider": provider,
         "error": error,
         "key_source_kind": key_source_kind,
         "provider_name": provider_name,
+        "provider_type": provider_type,
         "model": model or "unknown",
-        "base_url": base_url or "unknown",
+        "base_url": base_url or "native_default",
         "project_dotenv_loaded": project_dotenv_loaded,
         "shell_env_conflict_detected": shell_env_conflict_detected,
         "shell_env_fallback_used": shell_env_fallback_used,
@@ -594,15 +607,14 @@ class RealAPIDogfoodRunner:
             report._dogfood_diag = self._provider_diag
             return report
 
-        client = self._provider_diag["client"]
-        model = self._provider_diag["model"]
+        provider = self._provider_diag["provider"]
 
         # 构建 skills prompt section 作为 context
         skills_section = build_skills_prompt_section(self._registry)
 
         for sc in REAL_API_SCENARIOS:
             try:
-                result = self._run_scenario(client, model, skills_section, sc)
+                result = self._run_scenario(provider, skills_section, sc)
                 report.add(result)
             except Exception as exc:
                 report.add(ScenarioReport(
@@ -617,32 +629,23 @@ class RealAPIDogfoodRunner:
 
     def _run_scenario(
         self,
-        client: Any,
-        model: str,
+        provider: Any,
         skills_section: str,
         sc: dict[str, Any],
     ) -> ScenarioReport:
         prompt_text = sc["prompt_template"].replace("{input}", sc.get("input", ""))
         full_prompt = f"{skills_section}\n\n---\n\n{prompt_text}"
 
-        response = client.messages.create(
-            model=model,
-            max_tokens=512,
-            messages=[{"role": "user", "content": full_prompt}],
-        )
+        response = self._create_with_retry(provider, full_prompt)
 
-        # 提取文本回复 —— 兼容返回 ThinkingBlock 的模型（如 kimi-k2.5）
+        # 提取 provider-neutral 文本回复；runner 不再依赖 Anthropic/OpenAI SDK
+        # 的 block 类型，避免 dogfood 绕过正式 provider adapter。
         reply = ""
-        if response.content:
-            from anthropic.types import TextBlock
-            for block in response.content:
-                if isinstance(block, TextBlock):
-                    reply = block.text
-                    break
-            # 无 TextBlock 时回退到最后一个 block 的字符串表示
-            if not reply:
-                last = response.content[-1]
-                reply = getattr(last, "text", None) or getattr(last, "thinking", "") or ""
+        for block in getattr(response, "content", []) or []:
+            text = getattr(block, "text", None)
+            if isinstance(text, str) and text:
+                reply = text
+                break
 
         # 验证 governance 约束
         # 注意：仅匹配主动/祈使式 violation 模式，避免误判 governance 讨论文本。
@@ -679,6 +682,29 @@ class RealAPIDogfoodRunner:
             "low",
             "no action"
         )
+
+    def _create_with_retry(self, provider: Any, full_prompt: str) -> Any:
+        """对真实 provider 的瞬态连接错误做有限重试。
+
+        重试边界只包裹 provider-neutral create()，不扩大 Skill 权限、
+        不执行工具、不写 Memory，也不打印异常正文，避免把网络波动误判为
+        Skill governance 失败。
+        """
+
+        last_exc: Exception | None = None
+        for attempt in range(_REAL_API_MAX_ATTEMPTS):
+            try:
+                return provider.create(
+                    system="你是 Skill System dogfood 安全评估器，只做推理，不执行工具。",
+                    messages=[{"role": "user", "content": full_prompt}],
+                    tools=[],
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 == _REAL_API_MAX_ATTEMPTS:
+                    raise
+                time.sleep(1.0)
+        raise last_exc or RuntimeError("provider_create_failed")
 
 
 # ==================================================================

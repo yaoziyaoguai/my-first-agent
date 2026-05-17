@@ -10,6 +10,7 @@ from agent.provider.protocol import ProviderConfigurationError
 
 
 PROVIDER_ENV = "MY_FIRST_AGENT_LLM_PROVIDER"
+PROVIDER_NAME_ENV = "MY_FIRST_AGENT_LLM_PROVIDER_NAME"
 GENERIC_MODEL_ENV = "MY_FIRST_AGENT_LLM_MODEL"
 GENERIC_BASE_URL_ENV = "MY_FIRST_AGENT_LLM_BASE_URL"
 AUTH_SCHEME_ENV = "MY_FIRST_AGENT_LLM_AUTH_SCHEME"
@@ -30,6 +31,7 @@ SUPPORTED_PROVIDER_TYPES = {
 @dataclass(frozen=True)
 class AgentProviderConfig:
     provider_type: str
+    provider_name: str | None = None
     api_key: str | None = field(default=None, repr=False, compare=False)
     api_key_env: str | None = None
     base_url: str | None = None
@@ -47,6 +49,10 @@ class AgentProviderConfig:
         if provider_type not in SUPPORTED_PROVIDER_TYPES:
             raise ProviderConfigurationError("unknown_provider")
         object.__setattr__(self, "provider_type", provider_type)
+        provider_name = (self.provider_name or provider_type).strip()
+        if not provider_name:
+            provider_name = provider_type
+        object.__setattr__(self, "provider_name", provider_name)
         if self.auth_scheme not in {"auto", "x-api-key", "bearer"}:
             raise ProviderConfigurationError("unsupported_auth_scheme")
         if self.max_tokens <= 0:
@@ -59,6 +65,7 @@ class AgentProviderConfig:
 
         return {
             "provider_type": self.provider_type,
+            "provider_name": self.provider_name,
             "api_key": "SET" if self.api_key else "empty",
             "api_key_env": self.api_key_env,
             "base_url": "SET" if self.base_url else "empty",
@@ -168,6 +175,7 @@ def load_agent_provider_config(
 
     return AgentProviderConfig(
         provider_type=selected,
+        provider_name=_env_get(env, PROVIDER_NAME_ENV) or selected,
         api_key=key,
         api_key_env=key_env,
         base_url=base_url,

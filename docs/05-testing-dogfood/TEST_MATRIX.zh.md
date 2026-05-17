@@ -82,6 +82,8 @@ Real API dogfood 不是默认检查项。只有同时满足以下条件才允许
 - 用户明确允许。
 - 使用临时 HOME / tmp root。
 - 使用 project `.env` scoped loader 加载 provider config。
+- real-api provider 必须通过 `AgentProviderConfig` + `build_model_provider(config)`，不得在 dogfood runner 中直接构造 Anthropic/OpenAI SDK client。
+- `provider_name` / `provider_type` 必须来自显式配置，不得根据 `base_url` 或 `model` 字符串推断。
 - `shell_env_fallback_used` 必须为 `false`；如果只能从 shell env 取 key，必须 blocked。
 - 不打印 key / token / secret。
 - 结果写入审计摘要，不泄露 provider payload。
@@ -92,9 +94,25 @@ Real API dogfood 不是默认检查项。只有同时满足以下条件才允许
 python scripts/dogfood_global_real_api.py --tmp-root /tmp/my-first-agent-global-real-dogfood --mode real-api --report-json /tmp/my-first-agent-global-real-dogfood-report.json
 ```
 
+Skill Real API dogfood:
+
+```bash
+python scripts/dogfood_skill_system.py --tmp-root /tmp/my-first-agent-skill-real-dogfood --mode real-api
+```
+
+Provider/factory 回归：
+
+```bash
+python -m pytest tests/test_provider*.py tests/test_*provider*.py -q
+python -m pytest tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.py tests/test_subagent_dogfood.py -q
+```
+
 ## 最近审计基线
 
 - `ruff`: passed。
-- full pytest: `2684 passed, 14 skipped`。
+- full pytest: `2696 passed, 14 skipped` with temp HOME after provider/dogfood fix。
 - SubAgent synthetic dogfood: `16/16 passed`。
+- Global synthetic dogfood: `12/12 passed`，evidence 来自 actual checks。
+- Global real-api dogfood: `12/12 passed`，通过 provider factory。
+- Skill real-api dogfood: `7/7 passed`，通过 provider factory；受 sandbox 网络限制时可能 blocked，需要按用户授权提升执行真实 provider 调用。
 - memory/episodes runtime jsonl 不再被 git tracked。

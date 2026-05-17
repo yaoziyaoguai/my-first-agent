@@ -673,14 +673,15 @@ class TestDogfoodScopedProviderConfig:
     def test_base_url_and_provider_prefer_project_dotenv(
         self, fake_project_env, clean_os_environ
     ):
-        """base_url 和 provider_name 来自 project .env。"""
+        """base_url 与 provider identity 来自正式 ProviderConfig，不从 URL 猜。"""
         from scripts.dogfood_skill_system import _load_dogfood_scoped_provider_config
 
         os.environ["ANTHROPIC_BASE_URL"] = "https://shell.example.com"
 
         diag = _load_dogfood_scoped_provider_config(fake_project_env)
         assert diag["base_url"] == "https://fake.example.com/anthropic"
-        assert diag["provider_name"] == "anthropic"
+        assert diag["provider_type"] == "anthropic_native"
+        assert diag["provider_name"] == "anthropic_native"
 
     def test_missing_key_in_project_dotenv_fails_closed(
         self, tmp_path, clean_os_environ
@@ -696,7 +697,7 @@ class TestDogfoodScopedProviderConfig:
 
         diag = _load_dogfood_scoped_provider_config(tmp_path)
         assert diag["key_source_kind"] == "missing"
-        assert diag["client"] is None
+        assert diag["provider"] is None
         assert diag["error"] is not None
         assert diag["shell_env_fallback_used"] is False
 
@@ -714,7 +715,7 @@ class TestDogfoodScopedProviderConfig:
         assert diag["project_dotenv_loaded"] is False
         assert diag["key_source_kind"] == "missing"
         # 即使 shell env 有 key，也必须失败
-        assert diag["client"] is None
+        assert diag["provider"] is None
         assert diag["shell_env_fallback_used"] is False
 
     def test_diagnostics_never_contain_key_value(

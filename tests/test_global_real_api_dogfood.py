@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -62,8 +63,9 @@ def test_real_api_preflight_prefers_project_dotenv_without_secret_output(
         global_dogfood._config,
         "_load_project_dotenv_values",
         lambda _root: {
+            "MY_FIRST_AGENT_LLM_PROVIDER_NAME": "anthropic",
+            "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
             "ANTHROPIC_API_KEY": "synthetic-project-secret-not-printed",
-            "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
             "ANTHROPIC_MODEL": "claude-test",
         },
     )
@@ -74,6 +76,7 @@ def test_real_api_preflight_prefers_project_dotenv_without_secret_output(
     assert preflight["preflight_status"] == "ready"
     assert preflight["key_source_kind"] == "project_dotenv"
     assert preflight["provider_name"] == "anthropic"
+    assert preflight["provider_type"] == "anthropic_native"
     assert preflight["model"] == "claude-test"
     assert preflight["project_dotenv_loaded"] is True
     assert preflight["shell_env_conflict_detected"] is True
@@ -115,12 +118,164 @@ def test_governance_violation_detector_allows_blocked_env_discussion() -> None:
     assert _has_governance_violation("我已读取 .env 并继续执行。") == "我已读取 .env"
 
 
-def test_provider_name_prefers_dashscope_compatible_endpoint() -> None:
-    """DashScope Anthropic-compatible endpoint 应报告真实 provider family。"""
+def test_scoped_provider_config_uses_config_identity_not_url_inference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """provider identity 必须来自配置字段，不能从 URL/model 字符串推断。"""
 
-    from scripts.dogfood_global_real_api import _infer_provider_name
+    from scripts import dogfood_global_real_api as global_dogfood
 
-    assert _infer_provider_name(
-        "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-        "kimi-k2.5",
-    ) == "dashscope"
+    cases = [
+        (
+            "anthropic_native",
+            "anthropic",
+            {
+                "ANTHROPIC_API_KEY": "synthetic-secret-not-printed",
+                "ANTHROPIC_MODEL": "claude-test",
+            },
+        ),
+        (
+            "anthropic_compatible",
+            "dashscope-kimi",
+            {
+                "ANTHROPIC_API_KEY": "synthetic-secret-not-printed",
+                "ANTHROPIC_MODEL": "kimi-test",
+                "ANTHROPIC_BASE_URL": "https://example.invalid/anthropic-compatible",
+            },
+        ),
+        (
+            "anthropic_compatible",
+            "deepseek-anthropic",
+            {
+                "ANTHROPIC_API_KEY": "synthetic-secret-not-printed",
+                "ANTHROPIC_MODEL": "deepseek-test",
+                "ANTHROPIC_BASE_URL": "https://example.invalid/messages",
+            },
+        ),
+        (
+            "openai_native",
+            "openai",
+            {
+                "OPENAI_API_KEY": "synthetic-secret-not-printed",
+                "OPENAI_MODEL": "gpt-test",
+            },
+        ),
+        (
+            "openai_compatible",
+            "custom-openai-compatible",
+            {
+                "OPENAI_API_KEY": "synthetic-secret-not-printed",
+                "OPENAI_MODEL": "custom-test",
+                "OPENAI_BASE_URL": "https://example.invalid/v1",
+            },
+        ),
+    ]
+
+    for provider_type, provider_name, values in cases:
+        project_values = {
+            "MY_FIRST_AGENT_LLM_PROVIDER": provider_type,
+            "MY_FIRST_AGENT_LLM_PROVIDER_NAME": provider_name,
+            **values,
+        }
+        monkeypatch.setattr(
+            global_dogfood._config,
+            "_load_project_dotenv_values",
+            lambda _root, pv=project_values: pv,
+        )
+        loaded = global_dogfood.load_global_dogfood_provider_config(Path("/tmp/project"))
+
+        assert loaded["provider_type"] == provider_type
+        assert loaded["provider_name"] == provider_name
+        assert loaded["preflight_status"] == "ready"
+        assert "synthetic-secret" not in json.dumps(loaded, ensure_ascii=False)
+
+
+def test_global_real_api_uses_provider_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """real-api runner 必须通过 provider factory，不直接 import SDK client。"""
+
+    from agent.provider.protocol import ProviderResponse, ProviderTextBlock
+    from scripts import dogfood_global_real_api as global_dogfood
+
+    calls: list[str] = []
+
+    class FakeProvider:
+        provider_type = "anthropic_compatible"
+        supports_tools = True
+        supports_streaming = False
+
+        def create(self, *, system, messages, tools):  # noqa: ANN001
+            calls.append(messages[-1]["content"])
+            return ProviderResponse(
+                content=[ProviderTextBlock(text='{"status":"pass","evidence":"factory path"}')],
+                stop_reason="end_turn",
+            )
+
+    monkeypatch.setattr(
+        global_dogfood._config,
+        "_load_project_dotenv_values",
+        lambda _root: {
+            "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_compatible",
+            "MY_FIRST_AGENT_LLM_PROVIDER_NAME": "test-compatible",
+            "ANTHROPIC_API_KEY": "synthetic-project-secret-not-printed",
+            "ANTHROPIC_MODEL": "factory-test",
+            "ANTHROPIC_BASE_URL": "https://example.invalid/messages",
+        },
+    )
+    monkeypatch.setattr(global_dogfood, "build_model_provider", lambda _config: FakeProvider())
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+
+    report = global_dogfood.run_global_dogfood(
+        tmp_root=tmp_path,
+        mode="real-api",
+        scenario="all",
+        report_json=None,
+    )
+
+    assert len(calls) == 12
+    assert report["summary"]["pass_count"] == 12
+    assert report["config_preflight"]["provider_name"] == "test-compatible"
+    assert "synthetic-project-secret" not in json.dumps(report, ensure_ascii=False)
+
+
+def test_governance_matrix_is_generated_from_actual_results() -> None:
+    """governance matrix 必须从实际检查字段汇总，不能静态写 pass。"""
+
+    from scripts.dogfood_global_real_api import _governance_matrix
+
+    results = [
+        {
+            "status": "pass",
+            "checks": {
+                "parent_orchestration_preserved": True,
+                "tool_registry_authority_preserved": False,
+            },
+        }
+    ]
+
+    matrix = {item["boundary"]: item for item in _governance_matrix(results)}
+
+    assert matrix["Parent orchestration"]["status"] == "pass"
+    assert matrix["ToolRegistry authority"]["status"] == "fail"
+    assert matrix["Memory governance"]["status"] == "not_covered"
+
+
+def test_synthetic_evidence_must_come_from_actual_checks(tmp_path: Path) -> None:
+    """synthetic pass 不能把 scenario expected_evidence 直接伪装成执行证据。"""
+
+    from scripts.dogfood_global_real_api import run_global_dogfood
+
+    report = run_global_dogfood(
+        tmp_root=tmp_path,
+        mode="synthetic",
+        scenario="all",
+        report_json=None,
+    )
+
+    for item in report["scenarios"]:
+        assert item["status"] == "pass"
+        assert item["evidence_source"] == "actual_checks"
+        assert item["actual_checks"]
+        assert item["evidence"] != item.get("expected_evidence")

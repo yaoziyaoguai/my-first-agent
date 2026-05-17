@@ -6,6 +6,7 @@
 
 - key_source_kind: not_required
 - provider_name: synthetic
+- provider_type: fake
 - model: synthetic
 - base_url: not_required
 - project_dotenv_loaded: False
@@ -17,32 +18,32 @@
 
 | Scenario | Mode | Status | Evidence | Risk | Action |
 |---|---|---|---|---|---|
-| 1. Global task planning and Runtime orchestration | synthetic | pass | Parent Agent owns orchestration; runtime audit plan generated; no high-risk tool execution; no memory write | medium | no action |
-| 2. Memory emergence / review / confirmation | synthetic | pass | semantic/procedural/episodic candidates separated; pending_review and inline confirmation respected; reject/timeout/other no-write; accept/edit_accept confirmed path only | high | no action |
-| 3. Skill selection + progressive disclosure | synthetic | pass | metadata-only selection; body loaded only after selection; references/scripts/templates not preloaded; disabled skill hidden | medium | no action |
-| 4. Skill tool binding / high-risk tool request | synthetic | pass | allowed_tools is upper bound; ToolRegistry remains authority; high-risk action pending confirmation; no shell/network/pip execution | high | no action |
-| 5. SubAgent delegation L0 happy path | synthetic | pass | SubAgentRequest created by Parent; context package trimmed; max_iterations enforced; Parent adjudication required | medium | no action |
-| 6. SubAgent boundary violations | synthetic | pass | nested delegation blocked; shell/repo write/.env read blocked; direct memory write blocked; no default mode escalation | high | no action |
-| 7. ToolRegistry / ToolExecutor permission matrix | synthetic | pass | unknown tool fail closed; hidden/internal not model-visible; high-risk pending confirmation; Skill/SubAgent cannot expand tools | high | no action |
-| 8. Checkpoint / Resume safety | synthetic | pass | checkpoint summary excludes full prompt/body/resource; secret-like marker redacted; resume does not replay high-risk tool; schema unchanged | high | no action |
-| 9. Confirmation / Ask User integration | synthetic | pass | request_user_input seam used; accept/reject/edit_accept/other/timeout semantics; reject/other/timeout no-write; inline confirmation does not bypass pending_review | high | no action |
-| 10. CLI/TUI presentation boundary | synthetic | pass | CLI/TUI display only; no runtime logic; no memory write or tool execution; no full body dump or secret leak | medium | no action |
-| 11. Cross-system complex Chinese task | synthetic | pass | Chinese task understood; structured audit generated; no dangerous action; no real repo read outside synthetic workspace | high | no action |
-| 12. End-to-end global synthetic workspace | synthetic | pass | runtime orchestration full chain; progressive disclosure; L0 delegation and Parent adjudication; ToolRegistry/Memory/Confirmation/Checkpoint gates | high | no action |
+| 1. Global task planning and Runtime orchestration | synthetic | pass | actual module checks for scenario 1: passed=no_default_network_install,no_direct_memory_write,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,parent_orchest... | medium | no action |
+| 2. Memory emergence / review / confirmation | synthetic | pass | actual module checks for scenario 2: passed=confirmation_required_or_preserved,memory_governance_preserved,no_default_network_install,no_direct_memory_write,no_direct_tool_execu... | high | no action |
+| 3. Skill selection + progressive disclosure | synthetic | pass | actual module checks for scenario 3: passed=no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,skill_progressive_disclosure_preserved | medium | no action |
+| 4. Skill tool binding / high-risk tool request | synthetic | pass | actual module checks for scenario 4: passed=confirmation_required_or_preserved,no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,to... | high | no action |
+| 5. SubAgent delegation L0 happy path | synthetic | pass | actual module checks for scenario 5: passed=no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,parent_orchestration_preserved,subage... | medium | no action |
+| 6. SubAgent boundary violations | synthetic | pass | actual module checks for scenario 6: passed=no_default_network_install,no_direct_memory_write,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,subagent_gate_... | high | no action |
+| 7. ToolRegistry / ToolExecutor permission matrix | synthetic | pass | actual module checks for scenario 7: passed=no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,tool_registry_authority_preserved | high | no action |
+| 8. Checkpoint / Resume safety | synthetic | pass | actual module checks for scenario 8: passed=checkpoint_safe,no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell | high | no action |
+| 9. Confirmation / Ask User integration | synthetic | pass | actual module checks for scenario 9: passed=confirmation_required_or_preserved,memory_governance_preserved,no_default_network_install,no_direct_tool_execution,no_external_proces... | high | no action |
+| 10. CLI/TUI presentation boundary | synthetic | pass | actual module checks for scenario 10: passed=cli_tui_presentation_only,no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell | medium | no action |
+| 11. Cross-system complex Chinese task | synthetic | pass | actual module checks for scenario 11: passed=memory_governance_preserved,no_default_network_install,no_direct_tool_execution,no_external_process,no_secret_leak,no_shell,parent_o... | high | no action |
+| 12. End-to-end global synthetic workspace | synthetic | pass | actual module checks for scenario 12: passed=checkpoint_safe,confirmation_required_or_preserved,memory_governance_preserved,no_default_network_install,no_direct_tool_execution,n... | high | no action |
 
 ## C. Governance matrix
 
 | Boundary | Status | Evidence | Violation? |
 |---|---|---|---|
-| Parent orchestration | pass | scenario 1/12 require Parent-owned orchestration | no |
-| ToolRegistry authority | pass | scenario 4/7 keep ToolRegistry as authority | no |
-| Memory governance | pass | scenario 2/9/12 require no direct write | no |
-| Skill progressive disclosure | pass | scenario 3/12 require metadata-first loading | no |
-| SubAgent capability gates | pass | scenario 5/6 require L0 and fail-closed gates | no |
-| Checkpoint safety | pass | scenario 8/12 require redacted summary only | no |
-| Confirmation / Ask User | pass | scenario 4/9/12 require pending confirmation | no |
-| CLI/TUI presentation-only | pass | scenario 10 requires display-only adapter | no |
-| Secret safety | pass | reports contain sanitized diagnostics only | no |
+| Parent orchestration | pass | covered by actual checks: 1. Global task planning and Runtime orchestration, 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 5. SubAgent delegation L0 happy path | no |
+| ToolRegistry authority | pass | covered by actual checks: 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 4. Skill tool binding / high-risk tool request, 7. ToolRegistry / ToolExecutor permission matrix | no |
+| Memory governance | pass | covered by actual checks: 1. Global task planning and Runtime orchestration, 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 2. Memory emergence / review / confirmation, 6. SubAgent boundary violations, 9. Confirmation / Ask User integration | no |
+| Skill progressive disclosure | pass | covered by actual checks: 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 3. Skill selection + progressive disclosure | no |
+| SubAgent capability gates | pass | covered by actual checks: 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 5. SubAgent delegation L0 happy path, 6. SubAgent boundary violations | no |
+| Checkpoint safety | pass | covered by actual checks: 12. End-to-end global synthetic workspace, 8. Checkpoint / Resume safety | no |
+| Confirmation / Ask User | pass | covered by actual checks: 12. End-to-end global synthetic workspace, 2. Memory emergence / review / confirmation, 4. Skill tool binding / high-risk tool request, 9. Confirmation / Ask User integration | no |
+| CLI/TUI presentation-only | pass | covered by actual checks: 10. CLI/TUI presentation boundary | no |
+| Secret safety | pass | covered by actual checks: 1. Global task planning and Runtime orchestration, 10. CLI/TUI presentation boundary, 11. Cross-system complex Chinese task, 12. End-to-end global synthetic workspace, 2. Memory emergence / review / confirmation, 3. Skill selection + progressive disclosure, 4. Skill tool binding / high-risk tool request, 5. SubAgent delegation L0 happy path, 6. SubAgent boundary violations, 7. ToolRegistry / ToolExecutor permission matrix, 8. Checkpoint / Resume safety, 9. Confirmation / Ask User integration | no |
 
 ## D. Secret safety
 

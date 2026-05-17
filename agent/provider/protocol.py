@@ -7,6 +7,7 @@ tool_use block、stop_reason 和 usage 摘要，不应该直接依赖某个 SDK 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -87,3 +88,12 @@ class ModelProvider(Protocol):
         tools: list[dict[str, Any]],
     ) -> ProviderResponse:
         """Create a non-streaming model response."""
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> Iterator[Any]:
+        """Yield provider-neutral streaming events."""

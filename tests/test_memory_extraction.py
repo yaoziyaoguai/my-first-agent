@@ -36,6 +36,7 @@ from agent.memory_extraction import (
     filter_injection_proposals,
     filter_sensitive_proposals,
 )
+from agent.provider.protocol import ProviderResponse, ProviderTextBlock
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -768,13 +769,13 @@ class TestLLMExtractorNoLLM:
         # 这里验证至少不报错
         assert result.extractor_type == "llm"
 
-    def test_no_api_key_produces_graceful_error(self, monkeypatch) -> None:
-        """无 API key 时 LLM extractor 优雅降级。"""
-        extractor = LLMMemoryExtractor(api_key=None)
-        # 显式传 None 应该覆盖 config 的值
-        # monkeypatch 确保环境变量也没有
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    def test_no_provider_produces_graceful_error(self) -> None:
+        """无 provider 时 LLM extractor 优雅降级。
+
+        旧实现用 api_key/base_url 拼 SDK client；新边界要求 Memory 只接收
+        ModelProvider。缺少 provider 时应 fail closed，而不是回退读 legacy config。
+        """
+        extractor = LLMMemoryExtractor(provider=None)
 
         result = extractor.extract(
             ExtractionInput(
@@ -785,9 +786,79 @@ class TestLLMExtractorNoLLM:
         assert len(result.proposals) == 0
         assert (
             "LLM 不可用" in result.extraction_summary
-            or "API key" in result.extraction_summary
-            or "LLM 调用失败" in result.extraction_summary
+            or "ModelProvider" in result.extraction_summary
         )
+
+
+class _FakeMemoryProvider:
+    """Memory LLM 测试用 provider。
+
+    这里刻意实现正式 ModelProvider 的 create seam，而不是模拟 Anthropic SDK。
+    这样测试保护的是 Memory 模块边界：Memory 只懂 provider contract，
+    不知道底层是 Anthropic、OpenAI 还是 compatible endpoint。
+    """
+
+    provider_type = "fake"
+    supports_tools = True
+    supports_streaming = False
+
+    def __init__(self, raw_output: str) -> None:
+        self.raw_output = raw_output
+        self.calls: list[dict] = []
+
+    def create(self, *, system, messages, tools):  # noqa: ANN001
+        self.calls.append({"system": system, "messages": messages, "tools": tools})
+        return ProviderResponse(
+            content=[ProviderTextBlock(self.raw_output)],
+            stop_reason="end_turn",
+        )
+
+    def stream(self, *, system, messages, tools):  # noqa: ANN001
+        raise AssertionError("memory extraction 不应要求 streaming")
+
+
+class TestLLMExtractorProviderBoundary:
+    """LLM extraction 只能依赖 provider abstraction，不能依赖具体 SDK。"""
+
+    def test_llm_extractor_uses_injected_model_provider(self) -> None:
+        """注入 fake provider 时可完成结构化提取，不需要 Anthropic client。"""
+        provider = _FakeMemoryProvider(_VALID_PROPOSAL_JSON)
+        extractor = LLMMemoryExtractor(provider=provider, model_name="fake-memory")
+
+        result = extractor.extract(
+            ExtractionInput(transcript=[{"role": "user", "content": "我喜欢 Python"}])
+        )
+
+        assert result.extractor_type == "llm"
+        assert len(result.proposals) == 1
+        assert result.proposals[0].content == "用户偏好 Python"
+        assert len(provider.calls) == 1
+        assert provider.calls[0]["tools"] == []
+
+    def test_memory_extraction_module_does_not_import_anthropic_sdk(self) -> None:
+        """Memory extraction 不得直接 import/实例化 Anthropic SDK。
+
+        Provider 选择属于 agent/provider 层职责；Memory extraction 只消费
+        provider-neutral response，避免新增 provider 时继续修改 Memory 模块。
+        """
+        import ast
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "agent" / "memory_extraction.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(alias.name != "anthropic" for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "anthropic"
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert not (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "anthropic"
+                    and node.func.attr == "Anthropic"
+                )
 
 
 class TestLLMExtractorOptIn:
@@ -849,21 +920,25 @@ class _MockResponse:
         self.content = content
 
 
-class _MockMessages:
-    """模拟 client.messages，调用 create 返回预设 response。"""
+class _MockProvider:
+    """模拟 provider-neutral ModelProvider，返回 content blocks。
+
+    这些测试仍验证 ThinkingBlock/TextBlock 兼容性，但不再模拟
+    `client.messages.create`，避免把 Memory 模块重新绑回 Anthropic SDK 形状。
+    """
+
+    provider_type = "fake"
+    supports_tools = True
+    supports_streaming = False
 
     def __init__(self, response: _MockResponse) -> None:
         self._response = response
 
-    def create(self, **kwargs) -> _MockResponse:
+    def create(self, *, system, messages, tools):  # noqa: ANN001
         return self._response
 
-
-class _MockClient:
-    """模拟 Anthropic client，messages 属性返回 _MockMessages。"""
-
-    def __init__(self, response: _MockResponse) -> None:
-        self.messages = _MockMessages(response)
+    def stream(self, *, system, messages, tools):  # noqa: ANN001
+        raise AssertionError("memory extraction 不应要求 streaming")
 
 
 _VALID_PROPOSAL_JSON = json.dumps({
@@ -889,10 +964,8 @@ class TestContentBlockCompatibility:
             _MockThinkingBlock("让我分析一下这段对话..."),
             _MockTextBlock(_VALID_PROPOSAL_JSON),
         ])
-        mock_client = _MockClient(mock_response)
-
-        extractor = LLMMemoryExtractor()
-        object.__setattr__(extractor, "_client", mock_client)
+        provider = _MockProvider(mock_response)
+        extractor = LLMMemoryExtractor(provider=provider)
 
         result = extractor.extract(
             ExtractionInput(transcript=[{"role": "user", "content": "我喜欢 Python"}])
@@ -904,10 +977,8 @@ class TestContentBlockCompatibility:
     def test_pure_text_blocks_still_work(self) -> None:
         """原有纯 TextBlock 场景不受影响。"""
         mock_response = _MockResponse([_MockTextBlock(_VALID_PROPOSAL_JSON)])
-        mock_client = _MockClient(mock_response)
-
-        extractor = LLMMemoryExtractor()
-        object.__setattr__(extractor, "_client", mock_client)
+        provider = _MockProvider(mock_response)
+        extractor = LLMMemoryExtractor(provider=provider)
 
         result = extractor.extract(
             ExtractionInput(transcript=[{"role": "user", "content": "我喜欢 Python"}])
@@ -920,10 +991,8 @@ class TestContentBlockCompatibility:
             _MockThinkingBlock("深度思考中..."),
             _MockThinkingBlock("继续思考..."),
         ])
-        mock_client = _MockClient(mock_response)
-
-        extractor = LLMMemoryExtractor()
-        object.__setattr__(extractor, "_client", mock_client)
+        provider = _MockProvider(mock_response)
+        extractor = LLMMemoryExtractor(provider=provider)
 
         result = extractor.extract(
             ExtractionInput(transcript=[{"role": "user", "content": "hi"}])
@@ -934,10 +1003,8 @@ class TestContentBlockCompatibility:
     def test_empty_content_list_no_error(self) -> None:
         """response.content 为空列表时安全返回。"""
         mock_response = _MockResponse([])
-        mock_client = _MockClient(mock_response)
-
-        extractor = LLMMemoryExtractor()
-        object.__setattr__(extractor, "_client", mock_client)
+        provider = _MockProvider(mock_response)
+        extractor = LLMMemoryExtractor(provider=provider)
 
         result = extractor.extract(
             ExtractionInput(transcript=[{"role": "user", "content": "hi"}])

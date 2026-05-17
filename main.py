@@ -41,6 +41,7 @@ from agent.session import (
 )
 from agent.cli_renderer import render_status_line
 from agent.checkpoint import load_checkpoint
+from config import load_legacy_dotenv_config
 
 
 CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
@@ -417,6 +418,10 @@ def _init_mcp_bridge_if_enabled() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # legacy CLI 入口显式 opt-in 读取项目 .env；普通 import config 不再产生
+    # os.environ 副作用，provider/dogfood 路径继续走 scoped loader。
+    load_legacy_dotenv_config(project_root=Path(__file__).resolve().parent)
+
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in {"--shell", "shell"}:
         argv = argv[1:]

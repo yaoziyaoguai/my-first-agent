@@ -21,6 +21,7 @@ from agent.provider.openai_http import (
     convert_tools_to_openai,
     normalize_openai_response,
 )
+from agent.provider.streaming import ProviderStreamEvent
 from agent.provider.protocol import (
     ProviderAuthError,
     ProviderCapabilityError,
@@ -125,3 +126,25 @@ class OpenAINativeProvider:
             payload,
             raw_provider_name=self.provider_type,
         )
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ):
+        """兼容 provider streaming contract；native OpenAI 先用 create() 聚合。"""
+
+        response = self.create(system=system, messages=messages, tools=tools)
+        sequence = 0
+        for block in response.content:
+            text = getattr(block, "text", None)
+            if isinstance(text, str) and text:
+                sequence += 1
+                yield ProviderStreamEvent.delta(sequence=sequence, text_delta=text)
+            if getattr(block, "type", None) == "tool_use":
+                sequence += 1
+                yield ProviderStreamEvent.tool_request(sequence=sequence)
+        sequence += 1
+        yield ProviderStreamEvent.final(sequence=sequence)

@@ -1,9 +1,17 @@
 import os
 from pathlib import Path
 from dotenv import dotenv_values, load_dotenv
-# load_dotenv 默认 override=False，不会覆盖 shell 中已显式设置的变量。
-# 这意味着 export MODEL_NAME=foo 优先于 .env 中的同名 key。
-load_dotenv()
+
+
+def load_legacy_dotenv_config(project_root: Path | None = None) -> bool:
+    """显式加载 legacy `.env` 配置，import config 时不会自动调用。
+
+    新 provider/dogfood 路径使用 agent/provider/config.py 与 scoped dotenv loader，
+    不依赖这里的 os.environ mutation。这个函数只保留给旧 CLI/手工入口在确实
+    需要兼容 `.env` 时显式 opt-in；默认 override=False，shell 显式设置仍优先。
+    """
+    root = Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
+    return bool(load_dotenv(root / ".env", override=False))
 
 
 def _resolve_model_name() -> str | None:

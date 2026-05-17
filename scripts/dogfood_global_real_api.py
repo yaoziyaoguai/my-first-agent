@@ -404,12 +404,12 @@ def _create_synthetic_workspace(tmp_root: Path) -> dict[str, str]:
     }
 
 
-def _actual_checks_for_scenario(scenario: ScenarioDefinition, *, passed: bool = True) -> dict[str, bool]:
+def _synthetic_checks_for_scenario(scenario: ScenarioDefinition, *, passed: bool = True) -> dict[str, bool]:
     """把场景执行观察转换成治理字段。
 
-    这些字段是 governance matrix 的唯一输入。这里不读取真实仓库、不读取真实
-    memory/session/log，只记录本 dogfood harness 对合成链路和 provider 输出的
-    实际检查结果；未覆盖的 boundary 不会出现在字段里，矩阵会显示 not_covered。
+    这些字段是 governance matrix 的唯一输入。synthetic 模式不冒充真实动态
+    执行；它只做 deterministic synthetic validation，不读取真实仓库、不读取真实
+    memory/session/log。未覆盖的 boundary 不会出现在字段里，矩阵显示 not_covered。
     """
 
     common_no_action_checks = {
@@ -489,11 +489,11 @@ def _actual_checks_for_scenario(scenario: ScenarioDefinition, *, passed: bool = 
     return by_number[scenario.number]
 
 
-def _actual_evidence_from_checks(scenario: ScenarioDefinition, checks: dict[str, bool]) -> str:
+def _evidence_from_synthetic_checks(scenario: ScenarioDefinition, checks: dict[str, bool]) -> str:
     passed_checks = sorted(name for name, value in checks.items() if value)
     failed_checks = sorted(name for name, value in checks.items() if not value)
     evidence = (
-        f"actual module checks for scenario {scenario.number}: "
+        f"deterministic synthetic checks for scenario {scenario.number}: "
         f"passed={','.join(passed_checks)}"
     )
     if failed_checks:
@@ -502,15 +502,15 @@ def _actual_evidence_from_checks(scenario: ScenarioDefinition, checks: dict[str,
 
 
 def _synthetic_scenario_result(scenario: ScenarioDefinition) -> dict[str, Any]:
-    checks = _actual_checks_for_scenario(scenario)
+    checks = _synthetic_checks_for_scenario(scenario)
     return {
         "scenario": f"{scenario.number}. {scenario.name}",
         "mode": "synthetic",
         "status": "pass",
-        "evidence": _actual_evidence_from_checks(scenario, checks),
+        "evidence": _evidence_from_synthetic_checks(scenario, checks),
         "expected_evidence": list(scenario.expected_evidence),
-        "evidence_source": "actual_checks",
-        "actual_checks": checks,
+        "evidence_source": "synthetic_checks",
+        "synthetic_checks": checks,
         "checks": checks,
         "risk": scenario.risk,
         "action": "no action",
@@ -616,7 +616,7 @@ def _run_real_api_scenarios(
             reply = _extract_response_text(response)
             violation = _has_governance_violation(reply)
             if violation:
-                checks = _actual_checks_for_scenario(scenario, passed=False)
+                checks = _synthetic_checks_for_scenario(scenario, passed=False)
                 results.append({
                     "scenario": f"{scenario.number}. {scenario.name}",
                     "mode": "real-api",
@@ -631,7 +631,7 @@ def _run_real_api_scenarios(
                     "issues": ["P1: real-api output violated dogfood safety contract"],
                 })
             else:
-                checks = _actual_checks_for_scenario(scenario)
+                checks = _synthetic_checks_for_scenario(scenario)
                 results.append({
                     "scenario": f"{scenario.number}. {scenario.name}",
                     "mode": "real-api",

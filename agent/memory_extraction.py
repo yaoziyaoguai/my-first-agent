@@ -12,7 +12,7 @@ MemoryCandidateProposal 列表。不写 filesystem store、不 bypass confirmati
 
 提取器：
 - FakeMemoryExtractor：确定性规则提取，用于测试和离线验证
-- LLMMemoryExtractor：通过 Anthropic SDK 调用 LLM 进行结构化提取
+- LLMMemoryExtractor：通过 provider abstraction 调用 LLM 进行结构化提取
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
+
+from agent.provider.factory import build_model_provider_from_env
+from agent.provider.protocol import ModelProvider, ProviderError
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -477,38 +480,35 @@ EXTRACTION_SYSTEM_PROMPT = """\
 class LLMMemoryExtractor:
     """通过 LLM 从 transcript 中提取 memory proposal。
 
-    使用 Anthropic SDK 调用 LLM，传入 structured prompt，
-    解析返回的 JSON 为 MemoryCandidateProposal 列表。
+    只依赖 ModelProvider.create，不直接构造任何 SDK client。
+    这样 Memory extraction 的治理边界不会随 provider 切换而被打穿：
+    provider 选择、鉴权、compatible endpoint 差异都留在 agent/provider 层。
     """
 
+    provider: ModelProvider | None = None
     model_name: str | None = None
-    api_key: str | None = None
-    base_url: str | None = None
     max_tokens: int = 2048
-    _client: object | None = field(default=None, repr=False, init=False)
 
     def __post_init__(self) -> None:
-        # 从 config 模块获取默认值
-        import config as _config
+        if self.provider is None:
+            try:
+                self.provider = build_model_provider_from_env()
+            except ProviderError:
+                self.provider = None
+        if self.model_name is None and self.provider is not None:
+            self.model_name = getattr(self.provider, "provider_type", "provider")
 
-        self.model_name = self.model_name or _config.MODEL_NAME
-        self.api_key = self.api_key or _config.API_KEY
-        self.base_url = self.base_url or _config.BASE_URL
+    def _get_provider(self) -> ModelProvider:
+        """返回可用 provider；不可用时 fail closed。
 
-    def _get_client(self):
-        if self._client is not None:
-            return self._client
-        import anthropic
-
-        if not self.api_key:
+        这里不读取 .env，也不从 legacy config.py 拼接 SDK client。显式 env
+        或 scoped dotenv 到 AgentProviderConfig 的转换由 provider 层负责。
+        """
+        if self.provider is None:
             raise ValueError(
-                "API key 未设置。请设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 环境变量。"
+                "ModelProvider 未设置。请通过 provider factory 注入 LLM provider。"
             )
-        self._client = anthropic.Anthropic(
-            api_key=self.api_key,
-            base_url=self.base_url,
-        )
-        return self._client
+        return self.provider
 
     def extract(self, input: ExtractionInput) -> ExtractionResult:
         """调用 LLM 从 transcript 中提取 memory proposals。"""
@@ -516,10 +516,10 @@ class LLMMemoryExtractor:
             return ExtractionResult(
                 extractor_type="llm",
                 extraction_summary="transcript 为空，无内容可提取",
-            )
+        )
 
         try:
-            client = self._get_client()
+            provider = self._get_provider()
         except ValueError as exc:
             return ExtractionResult(
                 extractor_type="llm",
@@ -530,11 +530,10 @@ class LLMMemoryExtractor:
         transcript_text = self._format_transcript(input.transcript)
 
         try:
-            response = client.messages.create(
-                model=self.model_name,
-                max_tokens=self.max_tokens,
+            response = provider.create(
                 system=EXTRACTION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": transcript_text}],
+                tools=[],
             )
         except Exception as exc:
             return ExtractionResult(
@@ -556,7 +555,7 @@ class LLMMemoryExtractor:
             proposals=tuple(proposals),
             extractor_type="llm",
             extraction_summary=(
-                f"llm extractor ({self.model_name}): "
+                f"llm extractor ({self.model_name or provider.provider_type}): "
                 f"{len(proposals)} proposals from "
                 f"{len(input.transcript)} messages"
             ),
@@ -685,7 +684,7 @@ class L2InlineExtractor:
       支持 [fake-memory:t<N>] marker 用于 dogfood routing coverage。
 
     Real mode（opt-in）：
-      内部委托给 LLMMemoryExtractor，调用 Haiku 进行结构化提取。
+      内部委托给 LLMMemoryExtractor，通过 ModelProvider 进行结构化提取。
       通过 use_real_llm=True + factory seam 启用。
     """
 
@@ -700,7 +699,7 @@ class L2InlineExtractor:
     ) -> None:
         self._use_real_llm = use_real_llm
         if use_real_llm:
-            _llm_fields = {"model_name", "api_key", "base_url", "max_tokens"}
+            _llm_fields = {"provider", "model_name", "max_tokens"}
             _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
             _llm_kwargs.setdefault("model_name", model_name)
             self._backend = LLMMemoryExtractor(**_llm_kwargs)
@@ -740,7 +739,7 @@ def create_extractor(
         extractor_type: "fake" / "llm" / "l2_inline"
         **kwargs: 传递给提取器构造函数的参数。
                   FakeMemoryExtractor 接受 min_confidence、min_importance。
-                  LLMMemoryExtractor 接受 model_name、api_key、base_url、max_tokens。
+                  LLMMemoryExtractor 接受 provider、model_name、max_tokens。
                   L2InlineExtractor 接受 use_real_llm、min_confidence、min_importance、
                   model_name 以及 LLM kwarg。
                   不匹配目标构造函数的 kwarg 会被过滤掉。
@@ -751,14 +750,14 @@ def create_extractor(
         # LLMMemoryExtractor 不接受 min_confidence/min_importance，
         # 这些是 governance routing 参数，由 extract_memories_from_session()
         # 在 governance routing 阶段使用。
-        _llm_fields = {"model_name", "api_key", "base_url", "max_tokens"}
+        _llm_fields = {"provider", "model_name", "max_tokens"}
         _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
         return LLMMemoryExtractor(**_llm_kwargs)
     if extractor_type == "l2_inline":
         # L2InlineExtractor 接受 use_real_llm + LLM kwargs
         _l2_fields = {
             "use_real_llm", "min_confidence", "min_importance",
-            "model_name", "api_key", "base_url", "max_tokens",
+            "provider", "model_name", "max_tokens",
         }
         _l2_kwargs = {k: v for k, v in kwargs.items() if k in _l2_fields}
         return L2InlineExtractor(**_l2_kwargs)

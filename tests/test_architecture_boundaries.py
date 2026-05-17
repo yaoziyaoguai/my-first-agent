@@ -149,6 +149,24 @@ def _collect_imports(path: Path) -> set[str]:
     return imports
 
 
+def test_core_does_not_import_or_construct_anthropic_sdk() -> None:
+    """core.py 只能依赖 provider abstraction，不能直接持有 SDK client。
+
+    这条守 P1 provider 边界：新增 native/compatible provider 时，runtime 主循环
+    不应再改 core.py，也不能在 core.py 根据 SDK 或 provider URL 分支。
+    """
+
+    tree = _read_tree(CORE_FILE)
+    imports = _collect_imports(CORE_FILE)
+    assert "anthropic" not in imports
+
+    bad_calls: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _qualified_name(node.func) == "anthropic.Anthropic":
+            bad_calls.append(f"line {node.lineno}")
+    assert bad_calls == []
+
+
 def _checkpoint_call_inventory() -> Counter[tuple[str, str, str]]:
     """收集 checkpoint API 调用点。
 
@@ -247,6 +265,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.memory_interaction",
         "agent.memory_l2",
         "agent.memory_runtime",
+        "agent.model_call",
         "agent.model_output_dispatch",
         "agent.pending_confirmation_dispatch",
         "agent.planner",

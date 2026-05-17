@@ -262,8 +262,8 @@ def test_governance_matrix_is_generated_from_actual_results() -> None:
     assert matrix["Memory governance"]["status"] == "not_covered"
 
 
-def test_synthetic_evidence_must_come_from_actual_checks(tmp_path: Path) -> None:
-    """synthetic pass 不能把 scenario expected_evidence 直接伪装成执行证据。"""
+def test_synthetic_evidence_must_come_from_synthetic_checks(tmp_path: Path) -> None:
+    """synthetic pass 不能把 scenario expected_evidence 直接伪装成真实执行证据。"""
 
     from scripts.dogfood_global_real_api import run_global_dogfood
 
@@ -276,6 +276,6 @@ def test_synthetic_evidence_must_come_from_actual_checks(tmp_path: Path) -> None
 
     for item in report["scenarios"]:
         assert item["status"] == "pass"
-        assert item["evidence_source"] == "actual_checks"
-        assert item["actual_checks"]
+        assert item["evidence_source"] == "synthetic_checks"
+        assert item["synthetic_checks"]
         assert item["evidence"] != item.get("expected_evidence")

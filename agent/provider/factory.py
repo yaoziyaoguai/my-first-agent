@@ -35,7 +35,4 @@ def build_model_provider_from_env() -> ModelProvider | None:
     if not os.environ.get(PROVIDER_ENV):
         return None
     config = load_agent_provider_config()
-    if config.provider_type == "anthropic_native":
-        # Native AgentLoop 默认继续使用 core.py 的 legacy streaming path。
-        return None
     return build_model_provider(config)

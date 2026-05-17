@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 
 class TestResolveModelName:
     """MODEL_NAME > ANTHROPIC_MODEL > OPENAI_MODEL 优先级。"""
@@ -107,6 +109,42 @@ class TestModuleLevelConstants:
     这里不通过 importlib.reload 验证，改为直接调用解析函数验证优先
     级逻辑。模块级常量绑定已在 TestResolveModelName 等测试中间接覆盖。
     """
+
+    def test_import_config_does_not_call_load_dotenv(self, monkeypatch):
+        """import config 不得触发 load_dotenv 修改 os.environ。
+
+        provider/dogfood 已有 scoped dotenv loader；legacy config 的 .env 读取必须
+        显式调用，避免普通 import 在测试或 runtime 中悄悄污染 provider 优先级。
+        """
+        import config
+
+        called = False
+
+        def fake_load_dotenv(*args, **kwargs):  # noqa: ANN001
+            nonlocal called
+            called = True
+            return True
+
+        monkeypatch.setattr(config, "load_dotenv", fake_load_dotenv)
+        importlib.reload(config)
+
+        assert called is False
+
+    def test_explicit_legacy_dotenv_loader_is_opt_in(self, monkeypatch):
+        """legacy dotenv loader 只有显式调用才会读取项目 dotenv。"""
+        import config
+
+        calls: list[dict] = []
+
+        def fake_load_dotenv(*args, **kwargs):  # noqa: ANN001
+            calls.append({"args": args, "kwargs": kwargs})
+            return True
+
+        monkeypatch.setattr(config, "load_dotenv", fake_load_dotenv)
+
+        assert config.load_legacy_dotenv_config() is True
+        assert len(calls) == 1
+        assert calls[0]["kwargs"].get("override") is False
 
 
 class TestRequireConfig:

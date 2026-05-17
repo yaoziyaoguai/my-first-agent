@@ -3133,6 +3133,9 @@ def test_call_model_no_longer_reads_module_level_client_or_model_name():
     """_call_model 函数体必须从 loop_ctx 读 client / model_name。
 
     Phase 2.2-b 的实质成果：源码层防"形迁移神不迁移"。
+    provider streaming 抽离后，core._call_model 不再直接调用
+    loop_ctx.client.messages.stream；它必须把 loop_ctx 中的 provider/client/model
+    显式传给 agent.model_call.call_model，继续保持依赖注入边界。
     """
 
     import inspect
@@ -3140,16 +3143,22 @@ def test_call_model_no_longer_reads_module_level_client_or_model_name():
     from agent import core
 
     src = inspect.getsource(core._call_model)
-    assert "loop_ctx.client.messages.stream" in src, (
-        "_call_model 必须用 loop_ctx.client 调 stream，"
+    assert "call_model(" in src, "_call_model 必须委托 provider-aware call_model seam"
+    assert "provider=getattr(loop_ctx, \"model_provider\", None)" in src, (
+        "_call_model 必须从 loop_ctx 读取 model_provider，"
+        "不允许在 core.py 构造 provider SDK client"
+    )
+    assert "legacy_client=loop_ctx.client" in src, (
+        "_call_model 必须把 loop_ctx.client 作为 legacy fallback 注入，"
         "不允许继续用 module-level client"
     )
-    assert "model=loop_ctx.model_name" in src, (
-        "_call_model stream 调用必须用 loop_ctx.model_name，"
+    assert "model_name=loop_ctx.model_name" in src, (
+        "_call_model 必须把 loop_ctx.model_name 注入 call_model，"
         "不允许继续用 module-level MODEL_NAME"
     )
     # 反向：函数体不应再出现裸 client.messages.stream 或 model=MODEL_NAME
     forbidden_patterns = (
+        "loop_ctx.client.messages.stream",
         "with client.messages.stream(",
         "model=MODEL_NAME,",
     )

@@ -3,7 +3,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
-import anthropic
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
     DisplayEvent,
@@ -32,6 +31,7 @@ from agent.model_output_dispatch import (
     dispatch_model_output,
 )
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
+from agent.model_call import build_default_model_client, call_model
 from agent import protocol_debug as _protocol_debug
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
 from agent.prompt_builder import build_system_prompt
@@ -41,10 +41,7 @@ from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
 
 
 
-from config import (
-    API_KEY, BASE_URL, MODEL_NAME, MAX_TOKENS,
-    MAX_CONTINUE_ATTEMPTS,
-)
+from config import MODEL_NAME, MAX_CONTINUE_ATTEMPTS
 from agent.memory import compress_history
 from agent.planner import generate_plan, format_plan_for_display
 from agent.tool_registry import get_model_visible_tools
@@ -89,10 +86,7 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）�
 
 # ========== 全局 ==========
 
-# client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
-# messages = []  # session 级消息历史
-
-client = anthropic.Anthropic(api_key=API_KEY, base_url=BASE_URL)
+_model_provider, client = build_default_model_client()
 
 # Memory Kernel v1 — 模块级 MemoryRuntime 实例。
 # 默认使用 InMemoryMemoryStore + 两阶段确认流程。
@@ -713,43 +707,25 @@ def _call_model(
     request_messages = build_execution_messages_from_state(state)
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
-    provider = getattr(loop_ctx, "model_provider", None)
-    if provider is not None and not getattr(provider, "supports_streaming", False):
-        response = provider.create(
-            system=turn_state.system_prompt,
-            messages=request_messages,
-            tools=get_model_visible_tools(max_mcp_tools=5),
-        )
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text = getattr(block, "text", "")
-                if text and turn_state.on_runtime_event is not None:
-                    turn_state.on_runtime_event(assistant_delta(text))
-        return response
-
-    with loop_ctx.client.messages.stream(
-        model=loop_ctx.model_name,
-        max_tokens=MAX_TOKENS,
-        system=turn_state.system_prompt,
+    response = call_model(
+        provider=getattr(loop_ctx, "model_provider", None),
+        legacy_client=loop_ctx.client,
+        model_name=loop_ctx.model_name,
+        system_prompt=turn_state.system_prompt,
         messages=request_messages,
         tools=get_model_visible_tools(max_mcp_tools=5),
-    ) as stream:
-        for event in stream:
-            event_type = getattr(event, "type", None)
-
-            if event_type == "content_block_start":
-                block_type = getattr(event.content_block, "type", None)
-                if block_type == "tool_use" and turn_state.on_runtime_event is not None:
-                    turn_state.on_runtime_event(tool_requested())
-
-            elif event_type == "content_block_delta":
-                delta_text = getattr(event.delta, "text", None)
-                if delta_text and turn_state.on_runtime_event is not None:
-                    turn_state.on_runtime_event(assistant_delta(delta_text))
-
-        response = stream.get_final_message()
-        if turn_state.print_assistant_newline:
-            print()
+        emit_text_delta=(
+            (lambda text: turn_state.on_runtime_event(assistant_delta(text)))
+            if turn_state.on_runtime_event is not None
+            else None
+        ),
+        emit_tool_request=(
+            (lambda: turn_state.on_runtime_event(tool_requested()))
+            if turn_state.on_runtime_event is not None
+            else None
+        ),
+        print_assistant_newline=turn_state.print_assistant_newline,
+    )
 
     # ===== 协议观察：打印返回结构 =====
     # _debug_print_response(response)

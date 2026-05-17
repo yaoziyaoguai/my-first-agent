@@ -112,7 +112,7 @@ python -m pytest tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.
 - `ruff`: passed。
 - full pytest: `2696 passed, 14 skipped` with temp HOME after provider/dogfood fix。
 - SubAgent synthetic dogfood: `16/16 passed`。
-- Global synthetic dogfood: `12/12 passed`，evidence 来自 actual checks。
+- Global synthetic dogfood: `12/12 passed`，evidence 来自 deterministic `synthetic_checks`，不冒充真实动态执行。
 - Global real-api dogfood: `12/12 passed`，通过 provider factory。
 - Skill real-api dogfood: `7/7 passed`，通过 provider factory；受 sandbox 网络限制时可能 blocked，需要按用户授权提升执行真实 provider 调用。
 - memory/episodes runtime jsonl 不再被 git tracked。

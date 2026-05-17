@@ -137,6 +137,24 @@ def test_provider_factory_covers_four_configured_api_styles():
         assert "secret-token-must-not-leak" not in repr(config.redacted_summary())
 
 
+def test_build_model_provider_from_env_returns_anthropic_native(monkeypatch):
+    """Anthropic native 也必须是一等 provider，不能回退到 core.py SDK path。"""
+
+    from agent.provider.factory import build_model_provider_from_env
+
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic_native")
+    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER_NAME", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret-token-must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-native")
+
+    provider = build_model_provider_from_env()
+
+    assert provider is not None
+    assert provider.provider_type == "anthropic_native"
+    assert provider.config.provider_name == "anthropic"
+    assert "secret-token-must-not-leak" not in repr(provider.config)
+
+
 def test_dogfood_runners_do_not_import_provider_sdks_directly():
     """dogfood runner 只能依赖 provider factory，不能散落 SDK-specific client。"""
 

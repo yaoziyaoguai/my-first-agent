@@ -29,6 +29,7 @@ from agent.memory_consolidation import (
     EpisodicEvidence,
 )
 from agent.memory_consolidation_llm import (
+    LLMConsolidationContentGenerator,
     FakeLLMConsolidationContentGenerator,
     _build_evidence_context,
     _is_llm_consolidation_enabled,
@@ -39,6 +40,7 @@ from agent.memory_consolidation_llm import (
 from agent.memory_consolidation_pipeline import (
     ConsolidationPipelineResult,
 )
+from agent.provider.protocol import ProviderResponse, ProviderTextBlock
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -417,6 +419,81 @@ class TestFakeLLMGeneratorSafety:
         result, warnings = fake.enhance(c, _valid_evidence_group())
         assert result is None
         assert any("record_id" in w for w in warnings)
+
+
+class _FakeConsolidationProvider:
+    """Consolidation LLM 测试用 provider。
+
+    测试只依赖 ModelProvider.create 返回 provider-neutral text block，
+    保护 Memory consolidation 不回退到 Anthropic SDK 直连路径。
+    """
+
+    provider_type = "fake"
+    supports_tools = True
+    supports_streaming = False
+
+    def __init__(self, raw_output: str) -> None:
+        self.raw_output = raw_output
+        self.calls: list[dict] = []
+
+    def create(self, *, system, messages, tools):  # noqa: ANN001
+        self.calls.append({"system": system, "messages": messages, "tools": tools})
+        return ProviderResponse(
+            content=[ProviderTextBlock(self.raw_output)],
+            stop_reason="end_turn",
+        )
+
+    def stream(self, *, system, messages, tools):  # noqa: ANN001
+        raise AssertionError("memory consolidation 不应要求 streaming")
+
+
+class TestLLMGeneratorProviderBoundary:
+    """LLM consolidation 只能消费 provider abstraction。"""
+
+    def test_content_generator_uses_injected_model_provider(self):
+        """注入 fake provider 时可增强 content，不需要 Anthropic client。"""
+        raw_output = (
+            '{"content":"用户稳定偏好 pytest 测试框架。",'
+            '"evidence_summary":"3 条 evidence 支撑 pytest 偏好，'
+            'record_ids=ep1,ep2,ep3",'
+            '"confidence_adjustment":0.0,"warnings":[]}'
+        )
+        provider = _FakeConsolidationProvider(raw_output)
+        generator = LLMConsolidationContentGenerator(
+            provider=provider,
+            model_name="fake-memory",
+        )
+
+        enhanced, warnings = generator.enhance(_candidate(), _valid_evidence_group())
+
+        assert enhanced is not None
+        assert enhanced.content == "用户稳定偏好 pytest 测试框架。"
+        assert warnings == ()
+        assert len(provider.calls) == 1
+        assert provider.calls[0]["tools"] == []
+
+    def test_memory_consolidation_module_does_not_import_anthropic_sdk(self):
+        """Memory consolidation LLM 不得直接 import/实例化 Anthropic SDK。"""
+        import ast
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "agent"
+            / "memory_consolidation_llm.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(alias.name != "anthropic" for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "anthropic"
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert not (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "anthropic"
+                    and node.func.attr == "Anthropic"
+                )
 
 
 # ── pipeline integration tests ─────────────────────────────────────────────

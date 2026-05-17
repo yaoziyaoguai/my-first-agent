@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass, replace
 
 from agent.memory_consolidation import ConsolidationCandidate, EpisodicEvidence
+from agent.provider.factory import build_model_provider_from_env
+from agent.provider.protocol import ModelProvider, ProviderError
 
 # ── LLM prompt ──────────────────────────────────────────────────────────────
 
@@ -287,44 +289,39 @@ class LLMConsolidationContentGenerator:
     def __init__(
         self,
         *,
+        provider: ModelProvider | None = None,
         model_name: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
         max_tokens: int = 1024,
     ):
         """初始化 LLM content generator。
 
         Args:
-            model_name: LLM 模型名，None 时从 config 获取。
-            api_key: API key，None 时从 config 获取。
-            base_url: API base URL，None 时从 config 获取。
+            provider: 注入的 ModelProvider；None 时尝试 provider factory。
+            model_name: 仅用于 summary 标识，不参与 SDK 构造。
             max_tokens: LLM 响应的最大 token 数。
         """
-        import config as _config
-
-        self._model_name = model_name or _config.MODEL_NAME
-        self._api_key = api_key or _config.API_KEY
-        self._base_url = base_url or _config.BASE_URL
-        self._max_tokens = max_tokens
-        self._client: object | None = None
-
-    def _get_client(self):
-        """懒加载 Anthropic client。"""
-        if self._client is not None:
-            return self._client
-
-        if not self._api_key:
-            raise ValueError(
-                "API key 未设置。请设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 环境变量。"
-            )
-
-        import anthropic
-
-        self._client = anthropic.Anthropic(
-            api_key=self._api_key,
-            base_url=self._base_url,
+        if provider is None:
+            try:
+                provider = build_model_provider_from_env()
+            except ProviderError:
+                provider = None
+        self._provider = provider
+        self._model_name = model_name or (
+            getattr(provider, "provider_type", "provider") if provider else None
         )
-        return self._client
+        self._max_tokens = max_tokens
+
+    def _get_provider(self) -> ModelProvider:
+        """返回可用 provider；不可用时 fail closed。
+
+        Memory consolidation 只增强 content/evidence_summary，不拥有 provider
+        选择权，也不直接读取 legacy config.py 或实例化具体 SDK。
+        """
+        if self._provider is None:
+            raise ValueError(
+                "ModelProvider 未设置。请通过 provider factory 注入 LLM provider。"
+            )
+        return self._provider
 
     # ── 公开 API ──────────────────────────────────────────────────────────
 
@@ -390,7 +387,7 @@ class LLMConsolidationContentGenerator:
             解析后的 JSON dict，或 None（LLM 不可用或解析失败）。
         """
         try:
-            client = self._get_client()
+            provider = self._get_provider()
         except ValueError as exc:
             raise RuntimeError(f"LLM client 不可用: {exc}") from exc
 
@@ -404,11 +401,10 @@ class LLMConsolidationContentGenerator:
             f"只输出 JSON，不要包含 markdown 代码块标记。"
         )
 
-        response = client.messages.create(
-            model=self._model_name,
-            max_tokens=self._max_tokens,
+        response = provider.create(
             system=_CONSOLIDATION_CONTENT_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
+            tools=[],
         )
 
         raw_output = "".join(
@@ -469,8 +465,8 @@ class FakeLLMConsolidationContentGenerator(LLMConsolidationContentGenerator):
         self._enhanced_summary = enhanced_summary
         self._call_count = 0
 
-    def _get_client(self):
-        raise RuntimeError("Fake generator 不应尝试获取真实 client")
+    def _get_provider(self):
+        raise RuntimeError("Fake generator 不应尝试获取真实 provider")
 
     def enhance(
         self,
@@ -528,13 +524,17 @@ def create_llm_content_generator() -> LLMConsolidationContentGenerator | None:
 
     API key 不可用时返回 None（不抛出异常），调用者 fallback 到 deterministic。
 
-    不读取 .env 内容——API key 通过 config.py 的 load_dotenv() 加载，
-    本函数只使用 config 模块的公开常量。
+    不读取 .env 内容，也不依赖 config.py import 副作用。真实 provider 的
+    构造统一委托给 agent/provider/factory.py；若没有显式 provider config，
+    返回 None 并保持 deterministic fallback。
     """
     if not _is_llm_consolidation_enabled():
         return None
 
     try:
-        return LLMConsolidationContentGenerator()
+        provider = build_model_provider_from_env()
+        if provider is None:
+            return None
+        return LLMConsolidationContentGenerator(provider=provider)
     except Exception:
         return None

@@ -68,6 +68,27 @@ def test_build_context_package_summarizes_files_and_enforces_budget(tmp_path: Pa
     assert "line 79" not in summary.summary
 
 
+def test_build_context_package_overflow_truncates_without_leaking_full_content(tmp_path: Path) -> None:
+    """超预算 synthetic input 必须被截断，不能把完整上下文泄漏给 L0 executor。"""
+
+    target = tmp_path / "large_context.py"
+    hidden_tail = "TAIL-SHOULD-NOT-LEAK"
+    target.write_text("A" * 240 + hidden_tail, encoding="utf-8")
+
+    package = build_context_package(
+        request=_request(target),
+        descriptor=_descriptor(),
+        tool_snapshots=(),
+        max_context_chars=64,
+    )
+
+    summary = package.relevant_summaries[0]
+    assert len(summary.summary) <= 64
+    assert summary.summary.endswith("<truncated>")
+    assert hidden_tail not in summary.summary
+    assert "A" * 120 not in summary.summary
+
+
 def test_context_package_respects_memory_and_skill_scope(tmp_path: Path) -> None:
     """request 未授权时，即使外部传入 memory/skill，也不能进入 package。"""
 
@@ -95,4 +116,3 @@ def test_context_package_respects_memory_and_skill_scope(tmp_path: Path) -> None
     assert package.selected_skill_metadata == ()
     assert "no real LLM" in package.forbidden_actions
     assert "task_completed" in package.stop_conditions
-

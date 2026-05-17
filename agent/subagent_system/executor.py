@@ -102,6 +102,19 @@ def _deterministic_outcome(
             ("shell/external process is forbidden in L0",),
             None,
         )
+    if (
+        "nested delegation" in lowered
+        or "spawn another subagent" in lowered
+        or "delegate to another subagent" in lowered
+    ):
+        return (
+            "policy_blocked",
+            "policy_blocked",
+            "Blocked by L0 policy: nested SubAgent delegation is disabled.",
+            0.9,
+            ("nested delegation is forbidden in L0",),
+            None,
+        )
     return (
         "ok",
         "task_completed",
@@ -110,4 +123,3 @@ def _deterministic_outcome(
         (),
         None,
     )
-

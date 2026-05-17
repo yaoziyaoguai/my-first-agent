@@ -33,29 +33,29 @@ def run_synthetic_dogfood(*, tmp_root: Path, mode: str = "synthetic") -> dict[st
     registry = SubAgentRegistry([subagent_root])
 
     scenarios = [
-        ("Safe Local Code Review", "Review code"),
-        ("Test Repair Delegation", "Review failing test"),
-        ("RFC Alignment Check", "Review RFC alignment"),
-        ("Memory Boundary read_context", "Review memory boundary"),
-        ("Memory Boundary propose", "Review memory proposal"),
-        ("Skill Boundary L1 Metadata", "Review skill selection"),
-        ("Tool Boundary Upper Bound", "Review allowed tools"),
-        ("High-Risk Tool Rejection", "request shell_exec"),
-        ("Hidden Tool Never Exposed", "Review hidden tools"),
-        ("max_iterations Hard Stop", "loop until max"),
-        ("Descriptor Not Found", "Review missing descriptor"),
-        ("Policy Violation Nested Delegation", "Review nested delegation"),
-        ("Checkpoint Interruption Resume", "Review checkpoint"),
-        ("Low Confidence Delegation", "needs clarification"),
-        ("Audit Record Completeness", "Review audit"),
-        ("Context Budget Overflow", "Review context budget"),
+        ("Safe Local Code Review", "Review code", "reviewer"),
+        ("Test Repair Delegation", "Review failing test", "reviewer"),
+        ("RFC Alignment Check", "Review RFC alignment", "reviewer"),
+        ("Memory Boundary read_context", "Review memory boundary", "reviewer"),
+        ("Memory Boundary propose", "Review memory proposal", "reviewer"),
+        ("Skill Boundary L1 Metadata", "Review skill selection", "reviewer"),
+        ("Tool Boundary Upper Bound", "Review allowed tools", "reviewer"),
+        ("High-Risk Tool Rejection", "request shell_exec", "reviewer"),
+        ("Hidden Tool Never Exposed", "Review hidden tools", "reviewer"),
+        ("max_iterations Hard Stop", "loop until max", "reviewer"),
+        ("Descriptor Not Found", "Review missing descriptor", "missing-descriptor"),
+        ("Policy Violation Nested Delegation", "spawn another subagent via nested delegation", "reviewer"),
+        ("Checkpoint Interruption Resume", "Review checkpoint", "reviewer"),
+        ("Low Confidence Delegation", "needs clarification", "reviewer"),
+        ("Audit Record Completeness", "Review audit", "reviewer"),
+        ("Context Budget Overflow", "Review context budget", "reviewer"),
     ]
     passed = 0
     audit_packets: list[dict[str, Any]] = []
-    for index, (name, task) in enumerate(scenarios, start=1):
+    for index, (name, task, role) in enumerate(scenarios, start=1):
         request = SubAgentRequest(
             task=task,
-            role="reviewer",
+            role=role,
             allowed_tools=("read_file",),
             max_iterations=1,
             parent_trace_id=f"dogfood-{index}",
@@ -66,8 +66,12 @@ def run_synthetic_dogfood(*, tmp_root: Path, mode: str = "synthetic") -> dict[st
             passed += 1
             audit_packets.append({
                 "scenario": name,
+                "role": role,
                 "status": run.result.status,
                 "stop_reason": run.result.stop_reason,
+                "warnings": list(run.result.warnings),
+                "tools_executed": list(run.result.audit.tools_executed),
+                "external_process_used": False,
                 "adjudication": run.adjudication.action,
             })
 

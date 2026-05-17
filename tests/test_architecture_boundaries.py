@@ -784,3 +784,31 @@ def test_subagent_system_does_not_create_future_modules_by_default() -> None:
 
     assert not (SUBAGENT_SYSTEM_DIR / "context_window.py").exists()
     assert not (SUBAGENT_SYSTEM_DIR / "sandbox.py").exists()
+
+
+def test_subagent_system_public_api_is_explicit_and_side_effect_free() -> None:
+    """package import 只能暴露稳定 contract，不触发 real LLM/shell 等 gated side effect。"""
+
+    import agent.subagent_system as subagent_system
+
+    public = set(subagent_system.__all__)
+
+    assert public == {
+        "SubAgentAuditRecord",
+        "SubAgentContextPackage",
+        "SubAgentDescriptor",
+        "SubAgentError",
+        "SubAgentExecutionMode",
+        "SubAgentPolicy",
+        "SubAgentRequest",
+        "SubAgentResult",
+        "SubAgentStopReason",
+    }
+    assert "sandbox" not in public
+    assert "worktree" not in public
+    assert "parallel" not in public
+
+    namespace: dict[str, object] = {}
+    exec("from agent.subagent_system import *", namespace)
+    assert public.issubset(namespace)
+    assert "delegate_once" not in namespace

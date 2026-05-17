@@ -55,3 +55,14 @@ def test_local_executor_can_emit_clarification_and_policy_stops() -> None:
     assert blocked.stop_reason == "policy_blocked"
     assert "shell" in blocked.warnings[0]
 
+
+def test_local_executor_blocks_nested_delegation_without_spawning_children() -> None:
+    """max_nested_depth=0 的 L0 基线必须阻断 nested delegation 意图。"""
+
+    result = execute_local(_package(task="spawn another subagent via nested delegation"))
+
+    assert result.status == "policy_blocked"
+    assert result.stop_reason == "policy_blocked"
+    assert result.audit.tools_executed == ()
+    assert result.audit.tools_requested == ()
+    assert "nested" in result.warnings[0]

@@ -33,6 +33,7 @@ import re
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 AGENT_DIR = PROJECT_ROOT / "agent"
 OUT_OF_SCOPE_AGENT_PARTS = {"skills", "subagents"}
+SUBAGENT_SYSTEM_DIR = AGENT_DIR / "subagent_system"
 
 CORE_FILE = AGENT_DIR / "core.py"
 LOOP_FILE = AGENT_DIR / "loop.py"
@@ -134,6 +135,17 @@ def _collect_agent_imports(path: Path) -> set[str]:
                 imports.update(f"agent.{alias.name}" for alias in node.names)
             elif node.module and node.module.startswith("agent."):
                 imports.add(node.module)
+    return imports
+
+
+def _collect_imports(path: Path) -> set[str]:
+    tree = _read_tree(path)
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
     return imports
 
 
@@ -736,3 +748,39 @@ def test_input_display_boundary_source_does_not_reference_sensitive_paths() -> N
             hits[_module_name(path)] = labels
 
     assert hits == {}
+
+
+def test_subagent_system_preserves_parent_governance_boundaries() -> None:
+    """formal SubAgent modules 不能导入会绕过 parent/runtime/governance 的层。
+
+    这是 Phase 19 audit-readiness safety net：SubAgent System 可以定义
+    contracts/boundaries/adapter，但不能直接接管 ToolExecutor、MemoryStore、
+    provider、shell 或 legacy Safe Local MVP。
+    """
+
+    forbidden_imports = {
+        "agent.core",
+        "agent.loop",
+        "agent.tool_executor",
+        "agent.memory_store",
+        "agent.memory_fs_store",
+        "agent.provider.factory",
+        "agent.subagents.local",
+        "subprocess",
+        "socket",
+        "requests",
+    }
+    hits: dict[str, set[str]] = {}
+    for path in sorted(SUBAGENT_SYSTEM_DIR.glob("*.py")):
+        imports = _collect_imports(path) & forbidden_imports
+        if imports:
+            hits[_module_name(path)] = imports
+
+    assert hits == {}
+
+
+def test_subagent_system_does_not_create_future_modules_by_default() -> None:
+    """L1+ context_window / L3 sandbox future modules 不应在 L0 loop 预创建。"""
+
+    assert not (SUBAGENT_SYSTEM_DIR / "context_window.py").exists()
+    assert not (SUBAGENT_SYSTEM_DIR / "sandbox.py").exists()

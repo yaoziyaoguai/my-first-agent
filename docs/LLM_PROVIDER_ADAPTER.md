@@ -7,7 +7,7 @@ from the older `llm/` processing MVP provider layer.
 
 | Provider type | Status | Notes |
 |---|---|---|
-| `anthropic_native` | Implemented as legacy streaming path + wrapper | AgentLoop default keeps `core.py` streaming via official Anthropic SDK. The wrapper normalizes non-streaming `messages.create()` responses for future migration. |
+| `anthropic_native` | Implemented provider adapter | Official Anthropic SDK usage is contained inside `agent/provider/anthropic_native.py`; AgentLoop calls it through `ModelProvider.stream()` / provider factory, not through `core.py` SDK code. |
 | `anthropic_compatible` | Implemented vertical slice | Uses HTTP, custom `base_url`, configurable `request_path`, and `auto` / `bearer` / `x-api-key` auth. |
 | `openai_compatible` | Implemented vertical slice | Uses HTTP, OpenAI Chat Completions format, Anthropic→OpenAI message/tools conversion, `tool_calls` normalization. |
 | `openai_native` | Implemented minimal Chat Completions adapter | Uses HTTP, default `https://api.openai.com`, `Bearer` auth, `tool_calls` normalization. No streaming, no Responses API. |
@@ -110,7 +110,7 @@ MCP remains the tool source. The provider adapter only calls the model.
 
 | Provider | Streaming | Notes |
 |---|---|---|
-| `anthropic_native` | Yes (legacy path) | `core.py` uses `client.messages.stream()` via Anthropic SDK |
+| `anthropic_native` | Yes | Provider adapter converts Anthropic SDK stream events into provider-neutral `ProviderStreamEvent` values. |
 | `anthropic_compatible` | No | Non-streaming `create()` via HTTP adapter |
 | `openai_compatible` | No | Non-streaming `create()` via HTTP adapter |
 | `openai_native` | No | Non-streaming `create()` via HTTP adapter |

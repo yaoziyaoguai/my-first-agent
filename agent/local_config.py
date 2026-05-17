@@ -3,6 +3,10 @@
 本模块只解析显式 safe path 的 fake/local 配置文件，帮助后续本地产品化拥有清晰
 数据模型。它不读取真实 home config、不读取 `.env`、不展开环境变量、不连接
 provider/MCP/network，也不修改 `config.py` 或 runtime core。
+
+职责边界：这里的 ``model_provider`` 是本地配置 metadata，用于展示、fixture 和
+future customization；它不是 provider/API 调用配置权威。真实 provider 调用仍必须
+通过 ``agent/provider/config.py`` + provider factory。
 """
 
 from __future__ import annotations

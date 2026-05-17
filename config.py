@@ -1,3 +1,13 @@
+"""Legacy runtime config compatibility layer.
+
+职责边界：
+- 本模块服务旧 CLI/runtime 入口和少量历史 helper，保留 MODEL_NAME /
+  REVIEW_MODEL_NAME / MAX_* 等兼容常量。
+- 新 provider/API 配置的权威入口是 ``agent/provider/config.py``。
+- 本地 agent customization 配置的权威入口是 ``agent/local_config.py``。
+- provider dogfood / real-api path 不应依赖本模块的 os.environ mutation。
+"""
+
 import os
 from pathlib import Path
 from dotenv import dotenv_values, load_dotenv

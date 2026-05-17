@@ -1,4 +1,11 @@
-"""AgentLoop provider configuration loaded from process environment only."""
+"""AgentLoop provider/API configuration authority.
+
+本模块只描述真实/兼容 provider 的 API 配置：provider_type、provider_name、
+api key env、base_url、model、auth scheme、request path 和 streaming 能力。
+dogfood real-api path 与 AgentLoop provider factory 以这里为权威；不要回退到
+legacy ``config.py`` 的 import-time 常量，也不要读取 ``agent/local_config.py``
+里的本地 customization metadata。
+"""
 
 from __future__ import annotations
 

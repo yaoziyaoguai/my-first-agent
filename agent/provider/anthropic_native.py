@@ -1,7 +1,8 @@
 """Anthropic official SDK provider wrapper.
 
-本轮默认 AgentLoop 仍保留 core.py 的 legacy streaming path；这个 wrapper 只为
-provider-neutral contract 和后续迁移提供 non-streaming create() 边界。
+这是唯一允许 lazy import Anthropic SDK 的 provider boundary 之一。core.py、
+Memory、Skill、SubAgent、dogfood runner 只能依赖 ModelProvider / provider
+factory；不得在这些层直接构造 Anthropic client。
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ class AnthropicNativeProvider:
     def _client_or_create(self) -> Any:
         if self._client is not None:
             return self._client
+        # Provider adapter 内部实现细节：SDK 只在这里 lazy import，避免 import
+        # agent/core.py 或测试时把全局架构重新绑回 Anthropic/Python SDK。
         from anthropic import Anthropic
 
         kwargs: dict[str, Any] = {"api_key": self.config.api_key}

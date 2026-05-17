@@ -175,6 +175,10 @@ Each revision counts as a new delegation (new delegation_id, new iterations).
 
 ## 3. Industry References and Design Adaptation
 
+This section is prior-art analysis only. Claude Code is not a runtime
+dependency of `my-first-agent`, and SubAgent implementation must stay inside the
+parent-controlled runtime/provider/tool boundaries defined above.
+
 ### 3.1 Claude Code Subagents
 
 **What we studied**:

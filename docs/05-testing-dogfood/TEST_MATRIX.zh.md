@@ -50,6 +50,7 @@ python -m pytest tests/test_subagent_dogfood.py tests/test_architecture_boundari
 ## Regression tests
 
 ```bash
+python -m pytest tests/test_provider_contract.py tests/test_streaming_protocol.py tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.py tests/test_subagent_dogfood.py -q
 python -m pytest tests/test_tool_exposure.py tests/test_tool_registry_contract.py tests/test_checkpoint_ownership.py -q
 python -m pytest tests/test_memory_interaction.py tests/test_memory_interactive_confirmation.py -q
 ```

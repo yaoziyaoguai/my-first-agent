@@ -992,6 +992,36 @@ class TestProviderConfigAutoLoad:
         assert cfg.source == "config auto-load"
         assert cfg.key_source_kind == "shell_env"
 
+    def test_explicit_provider_env_controls_phase6_dogfood_provider_identity(
+        self, tmp_path,
+    ):
+        """Phase 6 dogfood provider identity 优先来自显式配置，而不是 model/base_url 猜测。
+
+        这是 Claude/Anthropic P3 防回归：model 名含 ``claude`` 只能说明模型命名，
+        不能让 dogfood runner 绕过 provider config 权威自行推断运行依赖。
+        """
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MY_FIRST_AGENT_LLM_PROVIDER=openai_compatible",
+                "MY_FIRST_AGENT_LLM_PROVIDER_NAME=custom-openai-compatible",
+                "OPENAI_MODEL=claude-shaped-but-config-driven",
+                "OPENAI_BASE_URL=https://openai-compatible.example.test/v1",
+                "OPENAI_API_KEY=sk-fake-openai-compatible-key",
+            ]),
+            encoding="utf-8",
+        )
+
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+
+        assert cfg.provider == "custom-openai-compatible"
+        assert cfg.provider_type == "openai_compatible"
+        assert cfg.model == "claude-shaped-but-config-driven"
+        assert cfg.key_source_kind == "project_dotenv"
+
     def test_project_dotenv_preferred_over_shell_env_pollution(self, tmp_path, monkeypatch):
         """fake project .env 优先于 shell env，且 diagnostics 不泄露 key 值。"""
         from scripts.dogfood_phase6_llm_consolidation import (
@@ -1188,3 +1218,87 @@ class TestProviderConfigAutoLoad:
         assert cfg.key_configured is False
         assert prov["key_configured"] is False
         assert "API key" in reason
+
+    def test_run_pipeline_injects_explicit_provider_config_into_llm_generator(
+        self, tmp_path, monkeypatch,
+    ):
+        """Phase 6 runner 的 LLM 路径必须走 provider factory，而不是 direct SDK config。
+
+        这里不跑真实 consolidation，只钉住构造边界：runner 可以持有脱敏
+        DogfoodProviderConfig，但创建 generator 时必须注入 ModelProvider。
+        """
+        from agent.provider.config import AgentProviderConfig
+        from scripts import dogfood_phase6_llm_consolidation as dogfood
+        from scripts.dogfood_phase6_llm_consolidation import DogfoodProviderConfig
+
+        built_configs: list[str] = []
+        generator_providers: list[object] = []
+
+        class FakeProvider:
+            provider_type = "openai_compatible"
+
+        class FakeGenerator:
+            def __init__(self, *, provider=None, model_name=None, **kwargs):  # noqa: ANN001
+                generator_providers.append(provider)
+                assert kwargs == {}
+                assert model_name == "openai-compatible-model"
+
+        class FakePipelineResult:
+            llm_warnings: list[str] = []
+            warnings: list[str] = []
+            llm_enhanced_count = 0
+            llm_enabled = True
+            evidence_count = 0
+            candidate_count = 0
+            skipped_count = 0
+            detector_name = "fake"
+            candidates: list = []
+            has_candidates = False
+
+        def fake_build_model_provider(config):  # noqa: ANN001
+            built_configs.append(config.provider_type)
+            return FakeProvider()
+
+        def fake_run_consolidation_pipeline(store, llm_generator=None):  # noqa: ANN001
+            assert llm_generator is not None
+            return FakePipelineResult()
+
+        monkeypatch.setattr(dogfood, "build_model_provider", fake_build_model_provider)
+        monkeypatch.setattr(
+            "agent.memory_consolidation_llm.LLMConsolidationContentGenerator",
+            FakeGenerator,
+        )
+        monkeypatch.setattr(
+            "agent.memory_consolidation_llm._is_llm_consolidation_enabled",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "agent.memory_consolidation_pipeline.run_consolidation_pipeline",
+            fake_run_consolidation_pipeline,
+        )
+        monkeypatch.setattr(
+            "agent.memory_consolidation_review.dispatch_consolidation_candidates_to_pending_review",
+            lambda *args, **kwargs: None,
+        )
+
+        provider_config = DogfoodProviderConfig(
+            model="openai-compatible-model",
+            base_url="https://openai-compatible.example.test/v1",
+            api_key="sk-test",
+            provider="custom-openai-compatible",
+            provider_type="openai_compatible",
+            agent_config=AgentProviderConfig(
+                provider_type="openai_compatible",
+                provider_name="custom-openai-compatible",
+                api_key="sk-test",
+                api_key_env="OPENAI_API_KEY",
+                base_url="https://openai-compatible.example.test/v1",
+                model="openai-compatible-model",
+            ),
+        )
+
+        dogfood.run_dogfood_pipeline(tmp_path, {}, provider_config)
+
+        assert built_configs == ["openai_compatible"]
+        assert len(generator_providers) == 1
+        assert isinstance(generator_providers[0], FakeProvider)

@@ -167,6 +167,33 @@ def test_core_does_not_import_or_construct_anthropic_sdk() -> None:
     assert bad_calls == []
 
 
+def test_non_provider_runtime_modules_do_not_import_provider_sdks() -> None:
+    """非 provider 边界不得直接依赖 Anthropic/OpenAI Python SDK。
+
+    这条 P3 审计护栏回答用户担心的 "Claude Code / Claude / Python SDK"
+    是否扩散到全局架构：core、Memory、Skill、SubAgent 只能依赖 provider
+    interface/factory 或 legacy facade，SDK lazy import 只能留在 agent/provider/。
+    """
+
+    checked_paths = [
+        Path("agent/core.py"),
+        Path("agent/model_call.py"),
+        *Path("agent").glob("memory*.py"),
+        *Path("agent/skill_system").glob("*.py"),
+        *Path("agent/subagent_system").glob("*.py"),
+    ]
+    forbidden_imports = {"anthropic", "openai"}
+
+    offenders: list[str] = []
+    for path in checked_paths:
+        imports = _collect_imports(path)
+        leaked = sorted(imports & forbidden_imports)
+        if leaked:
+            offenders.append(f"{path}: {', '.join(leaked)}")
+
+    assert offenders == []
+
+
 def _checkpoint_call_inventory() -> Counter[tuple[str, str, str]]:
     """收集 checkpoint API 调用点。
 

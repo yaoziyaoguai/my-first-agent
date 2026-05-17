@@ -26,6 +26,14 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from agent.provider.config import (  # noqa: E402
+    PROVIDER_ENV,
+    AgentProviderConfig,
+    load_agent_provider_config,
+)
+from agent.provider.factory import build_model_provider  # noqa: E402
+from agent.provider.protocol import ProviderConfigurationError  # noqa: E402
+
 # ── Dogfood 输出目录 ────────────────────────────────────────────────────────────
 _DOGFOOD_ROOT = Path("/tmp/dogfood_phase6_e2e")
 _STORE_ROOT = _DOGFOOD_ROOT / "memory"
@@ -49,6 +57,8 @@ class DogfoodProviderConfig:
     base_url: str
     api_key: str = field(repr=False)
     provider: str = "unknown"
+    provider_type: str = "unknown"
+    agent_config: AgentProviderConfig | None = field(default=None, repr=False, compare=False)
     source: str = "config auto-load"
     key_source_kind: str = "missing"
     diagnostics_warnings: tuple[str, ...] = ()
@@ -73,6 +83,7 @@ class DogfoodProviderConfig:
             "provider_configured": self.key_configured,
             "provider_name": self.provider,
             "provider": self.provider,
+            "provider_type": self.provider_type,
             "model": self.model,
             "base_url": self.base_url,
             "key_source_kind": self.key_source_kind,
@@ -101,10 +112,16 @@ _BASE_URL_ENV_NAMES = (
     "OPENAI_BASE_URL",
     "MY_FIRST_AGENT_LLM_BASE_URL",
 )
+_PROVIDER_KEY_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "DASHSCOPE_API_KEY",
+)
 
 
 def _infer_provider_name(*, model: str, base_url: str) -> str:
-    """从非 secret 配置推断 provider 名称，不查看 API key 内容。"""
+    """兼容旧缺省配置的诊断 fallback，不作为 real provider 权威来源。"""
     text = f"{model} {base_url}".lower()
     if "deepseek" in text and "anthropic" in base_url.lower():
         return "deepseek_anthropic"
@@ -136,6 +153,24 @@ def _key_env_names_for_provider(provider: str) -> tuple[str, ...]:
     return ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY")
 
 
+def _provider_config_from_explicit_env(
+    project_values: dict[str, str],
+) -> AgentProviderConfig | None:
+    """显式 provider 配置优先走正式 AgentProviderConfig。
+
+    这是 Phase 6 dogfood 的 provider boundary：runner 不根据 model/base_url
+    猜测运行依赖；只有旧 `.env` 缺少 ``MY_FIRST_AGENT_LLM_PROVIDER`` 时才回到
+    兼容诊断 fallback。
+    """
+
+    if PROVIDER_ENV not in project_values:
+        return None
+    try:
+        return load_agent_provider_config(env=project_values)
+    except ProviderConfigurationError:
+        return None
+
+
 def _provider_config_warnings(*, model: str, base_url: str, provider: str) -> tuple[str, ...]:
     """生成非敏感 provider/model/base_url mismatch warning。"""
     warnings: list[str] = []
@@ -160,6 +195,21 @@ def load_provider_config_for_dogfood(
     import config as _config
 
     root = project_root or _PROJECT_ROOT
+    project_values = _config._load_project_dotenv_values(root)
+    explicit_config = _provider_config_from_explicit_env(project_values)
+    if explicit_config is not None:
+        return DogfoodProviderConfig(
+            model=explicit_config.model or "unknown",
+            base_url=explicit_config.base_url or "native_default",
+            api_key=explicit_config.api_key or "",
+            provider=explicit_config.provider_name or explicit_config.provider_type,
+            provider_type=explicit_config.provider_type,
+            agent_config=explicit_config,
+            source="agent.provider.config",
+            key_source_kind="project_dotenv",
+            diagnostics_warnings=(),
+        )
+
     model, _model_source = _config._resolve_scoped_config_value(
         _MODEL_ENV_NAMES,
         project_root=root,
@@ -189,6 +239,7 @@ def load_provider_config_for_dogfood(
         base_url=base_url,
         api_key=api_key or "",
         provider=provider,
+        provider_type="legacy_inferred",
         source="config auto-load",
         key_source_kind=key_source_kind,
         diagnostics_warnings=warnings,
@@ -503,11 +554,15 @@ def run_dogfood_pipeline(
     if _is_llm_consolidation_enabled():
         if provider_config is not None and provider_config.key_configured:
             # 显式传入已解析配置，避免 generator 再做不透明配置选择
-            llm_generator = LLMConsolidationContentGenerator(
-                model_name=provider_config.model,
-                api_key=provider_config.api_key,
-                base_url=provider_config.base_url,
-            )
+            if provider_config.agent_config is not None:
+                llm_generator = LLMConsolidationContentGenerator(
+                    provider=build_model_provider(provider_config.agent_config),
+                    model_name=provider_config.model,
+                )
+            else:
+                llm_generator = LLMConsolidationContentGenerator(
+                    model_name=provider_config.model,
+                )
         else:
             # 回退：使用全局 config（可能受 shell env 污染）
             from agent.memory_consolidation_llm import create_llm_content_generator

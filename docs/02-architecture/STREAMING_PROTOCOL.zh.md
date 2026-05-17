@@ -15,7 +15,7 @@ Provider streaming event 使用 `ProviderStreamEvent`：
 
 | Field | Meaning |
 |---|---|
-| `event_type` | `delta` / `final` / `error` |
+| `event_type` | `text_delta` / `tool_request` / `final` / `error` |
 | `sequence` | 单调递增序号 |
 | `source` | provider 标识，不含 secret |
 | `text_delta` | 已脱敏文本增量 |
@@ -23,7 +23,7 @@ Provider streaming event 使用 `ProviderStreamEvent`：
 | `is_final` | 是否 final event |
 | `error` | fail-closed 错误摘要 |
 
-`collect_stream_response()` 聚合 delta，并要求 sequence 单调、error fail closed、final event 存在。secret-like 文本会在进入 runtime 前脱敏。
+`collect_stream_response()` 聚合 `text_delta`，并要求 sequence 单调、error fail closed、final event 存在。`tool_request` 是 provider-neutral 控制事件，用于提示 runtime/UI 模型正在请求工具；它不携带 provider SDK 原始 payload。secret-like 文本会在进入 runtime 前脱敏。
 
 ## Provider boundary
 
@@ -35,7 +35,7 @@ Provider streaming event 使用 `ProviderStreamEvent`：
 
 ## Safety
 
-- stream delta 中疑似 API key / token / Authorization header 会被 redacted。
+- stream `text_delta` 中疑似 API key / token / Authorization header 会被 redacted。
 - error event 转换为 `ProviderResponseError`，不会继续执行工具。
 - raw stream token 不写入 checkpoint。
 - provider 选择和鉴权仍属于 `agent/provider/`，不属于 runtime loop。

@@ -51,3 +51,17 @@
 | 子代理系统 | SubAgent System | parent-controlled bounded delegation |
 | 检查点 | Checkpoint | 安全恢复边界 |
 | 人工确认 | Confirmation / Ask User | 高风险动作和不确定决策的人类控制边界 |
+
+## Provider 与配置边界
+
+Claude Code / Claude / Anthropic 可以出现在历史文档、业界参考和 provider adapter
+说明里，但不是项目主运行时依赖。生产代码中的 SDK lazy import 只能位于
+`agent/provider/` adapter 内；`core.py`、Memory、Skill、SubAgent 和 dogfood runner
+必须通过 provider interface / factory。
+
+配置入口分三层：
+
+- `config.py`：legacy runtime/CLI 兼容常量，不作为 provider dogfood 权威配置。
+- `agent/provider/config.py`：provider/API 配置权威。
+- `agent/local_config.py`：本地 agent customization metadata，默认不读真实 home、
+  不读 `.env`、不展开 env secret。

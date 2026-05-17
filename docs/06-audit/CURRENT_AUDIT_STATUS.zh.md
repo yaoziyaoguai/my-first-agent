@@ -6,9 +6,12 @@
 
 ## 总体结论
 
-Status: P1/P2 fixed locally, pending independent re-audit.
+Status: P0/P1/P2 clear locally; final P3 cleanup recorded; do not tag from this document alone.
 
-最新全面独立审计曾给出 PARTIAL，指出 provider abstraction 仍未覆盖 `core.py` streaming 路径和 Memory LLM 路径，并指出 `config.py` import-time `load_dotenv()` 副作用、synthetic dogfood `actual_checks` 命名误导、`core.py` 巨型文件风险。本轮修复这些 P1/P2，但不 push、不 tag；建议先做独立复审。
+最新独立审计结论为 P0/P1/P2 = 0，`main` 可准备 push。本轮只处理 P3 cleanup：
+修复 Streaming Protocol 文档 schema、澄清 Claude/Anthropic 只存在于 provider
+adapter 或 prior-art/docs reference、明确三套 config 职责，并把 core/Memory/test/
+dogfood runner 的剩余体量问题保留为不阻塞 push 的后续切片。
 
 ## Fixed P1/P2
 
@@ -20,11 +23,24 @@ Status: P1/P2 fixed locally, pending independent re-audit.
 | P2: synthetic actual_checks 命名误导 | fixed locally | synthetic evidence source 改为 `synthetic_checks`，语义为 deterministic synthetic validation |
 | P2/P3: core.py provider routing 职责过重 | partially fixed | model call / streaming adapter 已抽离；主 loop 未大拆 |
 
+## Final P3 cleanup
+
+| P3 | Status | Evidence / reason |
+|---|---|---|
+| Streaming Protocol 文档 event_type 不精确 | fixed | `docs/02-architecture/STREAMING_PROTOCOL.zh.md` 已对齐 `text_delta` / `tool_request` / `final` / `error`；`tests/test_streaming_protocol.py` 增加文档一致性测试 |
+| Claude Code / Claude / Python SDK 影响全局架构 | fixed / not global | SDK lazy import 限定在 `agent/provider/anthropic_native.py`；非 provider runtime/memory/skill/subagent 增加边界测试；Claude Code 文档段落标为 prior-art reference；Phase 6 dogfood provider identity 改为显式 `AgentProviderConfig` 优先，不再用 `claude`/`base_url` 猜运行依赖 |
+| `core.py` 仍偏大 | deferred | 已抽出 model call / pending confirmation / model output dispatch；剩余主 loop 与 runtime event bridge 受 characterization tests 保护，大拆会触碰状态机和 UI projection，后续先补切片测试 |
+| 三套 config 概念重叠 | fixed governance, not unified | 代码注释和 README/docs 明确：`config.py` 是 legacy runtime/CLI 兼容，`agent/provider/config.py` 是 provider/API 权威，`agent/local_config.py` 是本地 customization metadata |
+| Memory module 仍偏大 | deferred | Memory governance 不变；后续必须按 Slice M1-M5 先补 characterization tests，再拆 extraction/proposal/review/store/confirmation/consolidation 边界 |
+| Large test files | deferred | 大测试文件承载历史 characterization coverage；为了 P3 机械拆分风险高，不阻塞 push |
+| Large dogfood runners | partially fixed / deferred | Phase 6 provider preflight 的 Claude/Anthropic 推断风险已修；runner 体量仍大，后续只按 scenario/report/preflight helper 小切片拆 |
+| CURRENT_AUDIT_STATUS / docs 状态同步 | fixed | 本节记录 fixed/deferred 状态；`TEST_MATRIX` 同步 provider/streaming/dogfood selected tests |
+
 ## Area status
 
 | Area | Status | Evidence | Risk |
 |---|---|---|---|
-| Runtime/Core/Loop | Healthy with P3 cleanup | provider streaming 通过 `ModelProvider.stream` / `agent.model_call`；architecture tests 固定边界 | P3: `core.py` 仍偏大 |
+| Runtime/Core/Loop | Healthy with P3 backlog | provider streaming 通过 `ModelProvider.stream` / `agent.model_call`；architecture tests 固定边界 | P3: `core.py` 仍偏大，需 characterization-first |
 | ToolRegistry/ToolExecutor | Healthy | ToolRegistry metadata、confirmation、visibility tests | P3: 全局 registry 仍需谨慎测试隔离 |
 | Memory | Healthy with P3 cleanup | no silent retain / no auto approve；LLM path 走 provider injection | P3: Memory 模块仍大，后续需 characterization tests first |
 | Skill | Healthy | formal `agent/skill_system/`；legacy 隔离；synthetic + real API dogfood 证据 | P3: docs 多，入口需靠新索引 |
@@ -33,20 +49,32 @@ Status: P1/P2 fixed locally, pending independent re-audit.
 | Confirmation / Ask User | Healthy | request_user_input / memory confirmation / tool confirmation 复用 runtime 边界 | none blocking |
 | CLI/TUI | Healthy | adapter/presentation only；Textual lazy optional | P3: `main.py` 仍承担较多 adapter 兼容 |
 | Dogfood | Healthy with naming fix | synthetic checks 是 deterministic validation；real-api 是 provider-backed reasoning/evaluation | real dogfood not default |
-| Provider config | Healthy with P3 cleanup | `AgentProviderConfig` + factory 覆盖 Anthropic/OpenAI native + compatible 四种 style | P3: `config.py` / `agent/provider/config.py` / `agent/local_config.py` 尚未完全统一 |
+| Provider config | Healthy with clarified ownership | `AgentProviderConfig` + factory 覆盖 Anthropic/OpenAI native + compatible 四种 style；三层 config 职责已写入代码注释/README | P3: 物理统一仍是 future，不阻塞 push |
 | Security/Secrets | Healthy | `.env` / `agent_log.jsonl` / sessions/runs/memory episodes not tracked | do not read real artifacts in audit |
 
 ## Ready to push?
 
-Not yet. Run full verification and independent re-audit first. Do not tag yet.
+Yes, if the current branch finishes the quality gates listed in `docs/05-testing-dogfood/TEST_MATRIX.zh.md`.
+Do not tag yet; tag decision should wait until push/review evidence is accepted.
 
 ## Known limitations / P3 backlog
 
-- `tests/test_v0_4_transition_boundaries.py` remains a large historical test file and should be split in a future cleanup.
+- `core.py` remains a runtime hub. Next safe slice: characterize runtime event bridge and loop dependency assembly before moving any code.
+- `tests/test_v0_4_transition_boundaries.py` remains a large historical test file and should be split by transition theme only after preserving discovery and coverage.
 - Large Memory tests remain future cleanup: `tests/test_memory_emergence.py`, `tests/test_memory_session_hook.py`, `tests/test_memory_consolidation_real_llm_dogfood.py`, `tests/test_memory_extraction.py`, `tests/test_memory_fs_store.py`.
 - Large dogfood runners remain future cleanup: `scripts/dogfood_phase6_llm_consolidation.py`, `scripts/dogfood_global_real_api.py`, `scripts/dogfood_skill_system.py`.
-- Memory module refactor backlog: split emergence / proposal / review / store / confirmation / snapshot / consolidation with characterization tests first. Current behavior and governance are unchanged.
-- Config unification remains P3: `config.py`, `agent/provider/config.py`, and `agent/local_config.py` still overlap conceptually. This round only removed import-time dotenv side effects and kept provider/dogfood on scoped provider config.
+- Memory refactor slices:
+  - Slice M1: characterization tests for current memory behavior.
+  - Slice M2: extraction / proposal / review / store boundary split.
+  - Slice M3: confirmation semantics centralization.
+  - Slice M4: consolidation / snapshot boundary split.
+  - Slice M5: dogfood / docs update.
+- Dogfood runner refactor slices:
+  - Slice D1: provider preflight helper with existing real/synthetic tests.
+  - Slice D2: scenario definitions separated from execution.
+  - Slice D3: governance matrix aggregation helper.
+  - Slice D4: report rendering helper.
+- Config physical unification remains P3 backlog; current governance docs prevent misusing legacy `config.py` as provider dogfood authority.
 - Real LLM SubAgent L1/L2 remain gated.
 - Sandbox/worktree/parallel SubAgent remain future/contract.
 - Real MCP server activation remains opt-in.

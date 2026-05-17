@@ -18,6 +18,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 - Checkpoint / Resume：checkpoint 是安全边界，保存截断摘要和声明字段，避免持久化大 tool result 或未知字段。
 - CLI/TUI：CLI/Textual 只是 adapter/presentation，不拥有 Agent loop。
 - 当前验证基线：`ruff` passed；full pytest 曾通过 `2684 passed, 14 skipped`；SubAgent synthetic dogfood `16/16`。
+- Provider boundary：Claude/Anthropic 只作为 provider adapter 或文档参考出现；官方 SDK lazy import 限定在 `agent/provider/`，不是 `core.py`、Memory、Skill、SubAgent 或 dogfood runner 的运行依赖。
 
 ## 核心能力
 
@@ -150,6 +151,12 @@ python scripts/dogfood_global_real_api.py --tmp-root /tmp/my-first-agent-global-
 ```
 
 Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和用户明确允许时才可执行，并且必须通过 project `.env` scoped loader 加载 provider config，禁止 shell env fallback。
+
+## 配置职责边界
+
+- `config.py`：legacy runtime/CLI 兼容常量，不是 provider dogfood path 的权威配置。
+- `agent/provider/config.py`：provider/API 配置权威，供 provider factory 和 real-api dogfood 使用。
+- `agent/local_config.py`：本地 agent customization metadata，只读显式 safe path，不展开 env secret，不连接 provider。
 
 ## 安全边界
 

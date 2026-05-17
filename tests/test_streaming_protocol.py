@@ -6,6 +6,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import re
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_streaming_event_schema_sequence_and_final_response() -> None:
     """delta 事件必须可聚合成最终 ProviderResponse，且 sequence 单调。"""
@@ -25,6 +31,35 @@ def test_streaming_event_schema_sequence_and_final_response() -> None:
     assert events[-1].is_final is True
     assert response.content == [ProviderTextBlock(text="hello")]
     assert response.stop_reason == "end_turn"
+
+
+def test_streaming_protocol_doc_event_types_match_runtime_schema() -> None:
+    """文档列出的 event_type 必须与 provider-neutral runtime schema 对齐。
+
+    这是 P3 文档一致性护栏：只读 canonical streaming 文档，不改变 streaming
+    runtime 行为，避免后续把旧 ``delta`` 名称误认为真实协议字段。
+    """
+
+    from agent.provider.streaming import ProviderStreamEvent
+
+    doc = (PROJECT_ROOT / "docs/02-architecture/STREAMING_PROTOCOL.zh.md").read_text(
+        encoding="utf-8"
+    )
+    event_type_row = re.search(r"\| `event_type` \| (?P<types>[^|]+) \|", doc)
+    assert event_type_row is not None
+
+    documented_event_types = {
+        item.strip().strip("`")
+        for item in event_type_row.group("types").split("/")
+    }
+    runtime_event_types = {
+        ProviderStreamEvent.delta(sequence=1, text_delta="x").event_type,
+        ProviderStreamEvent.tool_request(sequence=2).event_type,
+        ProviderStreamEvent.final(sequence=3).event_type,
+        ProviderStreamEvent.error_event(sequence=4, error="e").event_type,
+    }
+
+    assert documented_event_types == runtime_event_types
 
 
 def test_streaming_error_event_fails_closed() -> None:

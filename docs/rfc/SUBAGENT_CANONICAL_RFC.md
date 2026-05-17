@@ -12,6 +12,13 @@ to the contracts below. The formal implementation namespace will be
 `agent/subagent_system/`; the existing `agent/subagents/local.py` is the Safe
 Local MVP and remains a test baseline.
 
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 ## 1. Goal
 
 A **SubAgent** is a parent-controlled bounded delegation unit. The Parent Agent
@@ -41,6 +48,10 @@ wrapper" — it is a complete parent-controlled delegation runtime.
 
 ### 2.1 Capability Levels
 
+> Production-grade target architecture from day one; implementation starts at
+> the L0 safe-local baseline. L1-L5 are designed as gated/future capabilities,
+> not default runtime behavior.
+
 | Level | Name | LLM | Tools | Description |
 |-------|------|-----|-------|-------------|
 | L0 | Safe Local SubAgent | fake/deterministic | read_file only | Baseline; test-only or non-critical review |
@@ -53,14 +64,19 @@ wrapper" — it is a complete parent-controlled delegation runtime.
 These levels are the target architecture. Implementation:
 
 - **L0**: required for v1, implemented first as safety baseline.
-- **L1**: designed now, implemented as gated dogfood phase. Requires explicit
+- **L1**: designed now, implemented as gated dogfood tier T2. Requires explicit
   config (`subagent.real_llm_readonly.enabled=true`), dogfood pass, and audit.
-- **L2**: designed now, implemented after L1 dogfood. Requires
+- **L2**: designed now, implemented after T2 dogfood. Requires
   `subagent.tool_requesting.enabled=true` and parent-mediated execution path.
 - **L3**: designed now, sandbox contract and tests written early; real sandbox
   execution requires `subagent.sandbox.enabled=true` and sandbox infrastructure.
 - **L4**: deferred to explicit future phase after L3 production use.
 - **L5**: deferred to explicit future phase; designed for reference only.
+
+Production-grade means the contracts are complete enough for higher levels to
+fit without redesign. It does not mean every level is enabled by default. L0 is
+the implementation entry point, L1/L2 are gated capabilities, and L3/L4/L5 are
+contract/future capabilities unless explicitly approved.
 
 ### 2.2 Execution Modes
 
@@ -144,6 +160,16 @@ When Parent Agent receives a `SubAgentResult`, it must adjudicate:
 | `convert_to_memory_proposal` | Route SubAgent memory proposal through governance |
 | `continue_parent_loop` | Parent resumes main loop with new information |
 
+Level scope:
+
+- **L0 minimum**: `accept_result`, `reject_result`, `ask_user`,
+  `request_revision`.
+- **L1+ / later phases**: `merge_summary`, `convert_to_tool_request`,
+  `convert_to_memory_proposal`, `continue_parent_loop`.
+
+The complete 8-action model is the production target, not the L0 implementation
+burden.
+
 Revision loop: Parent may request revision up to `max_revisions` times (default 1).
 Each revision counts as a new delegation (new delegation_id, new iterations).
 
@@ -167,6 +193,13 @@ Each revision counts as a new delegation (new delegation_id, new iterations).
   must return current findings to parent. Parent decides whether to spawn new
   subagent or handle remaining work.
 - **`isolation: worktree`**: optional filesystem isolation via git worktree.
+- **Subagent-scoped memory**: some platforms support subagent-level scoped
+  memory or private working memory.
+- **Background/async subagents**: some platforms can run delegation in the
+  background and later reconcile results.
+- **Effort/model selection**: parent may choose different models or reasoning
+  effort per subagent.
+- **Hooks/MCP scoping**: some systems scope hooks or MCP servers per subagent.
 - **No nested subagents**: subagents cannot spawn other subagents.
 - **Result flow**: structured result returned — summary of actions, findings,
   files modified/created, completion status.
@@ -182,6 +215,8 @@ Each revision counts as a new delegation (new delegation_id, new iterations).
 - Parent adjudicates results (accept/reject/revise/merge).
 - No nested SubAgent spawning in v1.
 - Worktree isolation as L4 (future phase, explicit approval).
+- Ephemeral context memory and memory proposals, while persistent memory remains
+  under Memory governance.
 
 **What we reject**:
 
@@ -191,6 +226,15 @@ Each revision counts as a new delegation (new delegation_id, new iterations).
   delegation model).
 - Built-in subagent types hardcoded in system prompt (First Agent uses
   filesystem-registered descriptors).
+- Private persistent SubAgent memory that bypasses First Agent Memory
+  governance.
+
+**Conscious omissions for First Agent**:
+
+- Background subagents are future L5 / async orchestration work.
+- Effort/model selection is future execution-mode policy.
+- Hooks are represented by First Agent confirmation, policy, and trace gates.
+- MCP scoping is a future ToolRegistry boundary extension.
 
 ### 3.2 OpenAI Agents SDK — Handoffs and Agents-as-Tools
 
@@ -247,6 +291,10 @@ Each revision counts as a new delegation (new delegation_id, new iterations).
 - Parent Adjudication as the human-approval integration point: `ask_user` action
   routes decisions through parent.
 - Input/output guardrails as future phase (designed now, implemented later).
+- OpenAI-style guardrails can run as tripwires around agent execution; First
+  Agent currently uses synchronous parent policy checks for predictability.
+- Future phases may add parallel pre/post guard checks, but they cannot bypass
+  Parent orchestration, ToolRegistry authority, or Confirmation.
 
 **What we reject**:
 
@@ -423,7 +471,7 @@ Parent's decision on a SubAgent result:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `action` | str | `accept` / `reject` / `revise` / `ask_user` |
+| `action` | str | One of the parent adjudication actions from §2.6 |
 | `reason` | str | Why this adjudication |
 | `merged_summary` | str \| None | Integrated summary (if accepted) |
 | `tool_calls_to_execute` | tuple[str, ...] | Tools parent will execute on SubAgent's behalf |
@@ -561,6 +609,20 @@ Every SubAgent delegation produces trace events for audit and debugging:
 | `delegation_failed` | Delegation errored |
 | `resumed_from_checkpoint` | Delegation resumed after interruption |
 | `delegation_completed` | Full delegation lifecycle complete |
+| `sandbox_entered` | L3 sandbox execution boundary entered |
+| `worktree_created` | L4 worktree isolation boundary created |
+| `mode_escalation_requested` | Parent considered a gated mode escalation |
+
+Level scope:
+
+- **L0 minimum trace events**: `delegation_started`, `context_packaged`,
+  `result_returned`, `result_adjudicated`, `delegation_failed`.
+- **Gated / later trace events**: `iteration_started`, `tool_requested`,
+  `confirmation_required`, `resumed_from_checkpoint`, `sandbox_entered`,
+  `worktree_created`, `mode_escalation_requested`.
+
+The full trace model is the production target. L0 only needs the minimum event
+subset required to debug safe-local delegation and parent adjudication.
 
 Trace events are included in `SubAgentResult.trace_events` and `SubAgentAuditRecord`.
 
@@ -568,27 +630,40 @@ Trace events are included in `SubAgentResult.trace_events` and `SubAgentAuditRec
 
 What can a user do with the SubAgent System when v1 implementation is complete?
 
-### v1 Required (L0 + L1 gated dogfood)
+### v1 Required (Capability L0 required + Capability L1 gated dogfood T2)
 
-- Delegate a code review planning task to a reviewer SubAgent
-- Delegate test repair analysis to a tester SubAgent
-- Delegate RFC alignment audit to an auditor SubAgent
-- Delegate memory boundary review (read-only context)
-- Delegate skill selection review (L1 metadata only)
-- Delegate tool permission review (boundary check)
-- Under config gate: real LLM read-only code review reasoning
-- Under config gate: real LLM RFC alignment reasoning
-- All delegations produce audit records and trace events
-- Interrupted delegations are checkpoint-safe and resumable
-- Parent can accept, reject, or request revision of any result
+L0 execution mode is `local_fake` / `local_deterministic` only: no real LLM, no
+external process, no shell, and no repo write. Higher levels remain
+designed/gated/future capabilities.
 
-### Gated (L2, requires config + dogfood + audit)
+- Delegate a code review planning task to a reviewer SubAgent — **L0,
+  `local_fake` / `local_deterministic` only**.
+- Delegate test repair analysis to a tester SubAgent — **L0,
+  `local_fake` / `local_deterministic` only**.
+- Delegate RFC alignment audit to an auditor SubAgent — **L0,
+  `local_fake` / `local_deterministic` only**.
+- Delegate memory boundary review (read-only context) — **L0, no persistent
+  memory write**.
+- Delegate skill selection review (Skill L1 metadata only) — **L0, metadata
+  snapshot only**.
+- Delegate tool permission review (boundary check) — **L0, pure check, no tool
+  execution**.
+- Under config gate: real LLM read-only code review reasoning — **Capability
+  L1 gated, not default**.
+- Under config gate: real LLM RFC alignment reasoning — **Capability L1 gated,
+  not default**.
+- All delegations produce audit records and L0 minimum trace events.
+- Interrupted delegations are checkpoint-safe and resumable without replaying
+  high-risk effects.
+- Parent can accept, reject, ask user, or request revision of any result.
+
+### Gated (Capability L2, requires config + dogfood T3 + audit)
 
 - Real LLM tool-requesting: SubAgent proposes tool calls, parent executes
 - Test repair planning with parent-mediated tool execution
 - Multi-file analysis with parent-mediated file reads
 
-### Future (L3-L5, requires explicit phases)
+### Future (Capability L3-L5, requires explicit phases and T4-T6 placeholders)
 
 - Sandboxed local code generation and file operations
 - Worktree-isolated branch work

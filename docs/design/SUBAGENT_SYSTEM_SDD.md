@@ -6,6 +6,17 @@ safety gates. The formal namespace is `agent/subagent_system/`. The existing
 `agent/subagents/local.py` Safe Local MVP is a test baseline, not the formal
 implementation.
 
+Production-grade target architecture is preserved from day one, while
+implementation starts at Capability L0 safe-local baseline. L1/L2 are gated,
+and L3/L4/L5 are contract/future capabilities unless explicitly approved.
+
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 ## 1. Module Design
 
 ```
@@ -36,6 +47,44 @@ agent/subagent_system/
 Each module is focused on a single responsibility. No module holds more than
 one governance boundary. Files are not created until their respective
 implementation phases.
+
+Target phase map:
+
+| Module | Target Phase | Capability Level | Status |
+|--------|--------------|------------------|--------|
+| `__init__.py` | Phase 1 | L0 | Required |
+| `descriptor.py` | Phase 1 | L0 | Required |
+| `errors.py` | Phase 1 | L0 | Required |
+| `registry.py` | Phase 2 | L0 | Required |
+| `request.py` | Phase 3 | L0 | Required |
+| `context.py` | Phase 3-4 | L0 | Required |
+| `result.py` | Phase 3, Phase 9, Phase 11, Phase 13 | L0 | Required, extended by phase |
+| `execution_mode.py` | Phase 3, Phase 5 | L0 contracts; L1/L2/L3 gates | Required contract, gated execution |
+| `policy.py` | Phase 5 | L0 contracts; L1/L2/L3 gates | Required contract, gated execution |
+| `tool_boundary.py` | Phase 6 | L0 boundary; L2 parent-mediated requests | Required, gated behavior later |
+| `skill_boundary.py` | Phase 7 | L0 | Required |
+| `memory_boundary.py` | Phase 8 | L0 | Required |
+| `checkpoint.py` | Phase 9 | L0 | Required |
+| `executor.py` | Phase 10 | L0 | Required, fake/local only |
+| `adjudication.py` | Phase 11 | L0 minimum; L1+ full target | Required, extended later |
+| `delegation.py` | Phase 12 | L0 | Required |
+| `runtime.py` | Phase 12 | L0 | Required |
+| `trace.py` | Phase 13 | L0 minimum; L1+ full target | Required, extended later |
+| `presentation.py` | Phase 17 | L0 | Required |
+| `context_window.py` | Phase 14 | L1+ | Gated real delegation concept |
+| `sandbox.py` | Phase 16 | L3 | Contract / Future |
+
+Creation rules:
+
+- Context packaging is an L0 required concept and starts in `context.py`.
+- Context window isolation for real delegation is an L1+ concept; do not create
+  `context_window.py` during Phase 0/1 or as speculative scaffolding.
+- Sandbox is L3 contract/future; worktree isolation is L4 future; parallel
+  orchestration is L5 future.
+- L0 required modules are created only in their target phases. L1/L2 gated
+  modules are created only in gate phases. L3/L4/L5 future modules are not
+  created by default in the current loop.
+- Coding Agents must not pre-create all modules in Phase 0/1.
 
 ## 2. Data Structures
 
@@ -139,7 +188,9 @@ class SubAgentResult:
 
 @dataclass(frozen=True)
 class ParentAdjudicationResult:
-    action: str          # accept / reject / revise / ask_user
+    action: str          # accept_result / reject_result / request_revision /
+                         # ask_user / merge_summary / convert_to_tool_request /
+                         # convert_to_memory_proposal / continue_parent_loop
     reason: str
     merged_summary: str | None
     tool_calls_to_execute: tuple[str, ...]
@@ -325,12 +376,17 @@ class SubAgentTraceEvent:
                      # confirmation_required / confirmation_resolved /
                      # result_returned / result_adjudicated / revision_requested /
                      # delegation_failed / resumed_from_checkpoint /
-                     # delegation_completed
+                     # delegation_completed / sandbox_entered /
+                     # worktree_created / mode_escalation_requested
     delegation_id: str
     timestamp: float
     data: dict[str, Any]  # Event-specific payload (sanitized, no secrets)
     parent_trace_id: str
 ```
+
+L0 minimum trace events are `delegation_started`, `context_packaged`,
+`result_returned`, `result_adjudicated`, and `delegation_failed`. The full trace
+event set is the production target and is extended by gated/future phases.
 
 ### 2.12 SubAgentCheckpointSummary
 
@@ -459,7 +515,7 @@ Instructions for the code reviewer subagent...
 
 ## 4. Context Packaging
 
-The `context_window.py` module assembles a `SubAgentContextPackage` from:
+The L0 context packaging path assembles a `SubAgentContextPackage` from:
 
 1. `SubAgentRequest` (parent-provided constraints)
 2. `SubAgentDescriptor` (registered capabilities)
@@ -472,6 +528,10 @@ Context budget (`max_context_chars`) is enforced during packaging. If the
 package exceeds the budget, summaries are trimmed and a warning is emitted.
 SubAgent never receives full repository context — only what fits in the budget
 and is relevant to the task.
+
+`context_window.py` is reserved for the L1+ real delegation context-window
+concept. L0 implementation must not create it early just to satisfy packaging
+tests.
 
 ## 5. Tool Execution Design
 
@@ -521,6 +581,16 @@ SubAgentResult
 - Low-confidence results carry a warning in the merged summary.
 - Conflicting results from multiple SubAgents (L5, future) require explicit
   parent resolution.
+
+Level scope:
+
+- **L0 minimum**: `accept_result`, `reject_result`, `ask_user`,
+  `request_revision`.
+- **L1+ / later phases**: `merge_summary`, `convert_to_tool_request`,
+  `convert_to_memory_proposal`, `continue_parent_loop`.
+
+The complete 8-action adjudication model is the production target, not an L0
+implementation burden.
 
 ### 6.3 Revision Loop
 

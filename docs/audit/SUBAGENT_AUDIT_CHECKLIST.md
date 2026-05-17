@@ -4,6 +4,18 @@ Status: Security and governance audit checklist for the production-grade formal
 SubAgent System. Run before any SubAgent code enters the production path. All
 items must be verified by an independent reviewer.
 
+Production-grade target architecture is preserved, but implementation readiness
+starts at Capability L0 safe-local baseline. L1/L2 are gated. L3/L4/L5 are
+contract/future unless explicitly approved. Gated/future capability must never
+be treated as default runtime behavior.
+
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 ## P0 — Governance Bypass (Blockers)
 
 ### Tool & Execution Governance
@@ -124,9 +136,12 @@ items must be verified by an independent reviewer.
 - [ ] **P1.13 No execution mode policy**: Confirm `SubAgentExecutionMode` enum
   and mode policy are defined. Mode gating is enforceable.
 - [ ] **P1.14 No trace event model**: Confirm `SubAgentTraceEvent` covers full
-  delegation lifecycle. All 15 event types defined and testable.
-- [ ] **P1.15 No real LLM readonly dogfood when configured**: Confirm L2
-  dogfood exists and passes when config gate is open.
+  production lifecycle as a target. L0 must define/test the minimum subset
+  (`delegation_started`, `context_packaged`, `result_returned`,
+  `result_adjudicated`, `delegation_failed`); gated/future events are
+  explicitly marked.
+- [ ] **P1.15 No real LLM readonly dogfood when configured**: Confirm T2
+  dogfood exists and passes when Capability L1 config gate is open.
 - [ ] **P1.16 No context budget enforcement**: Confirm `max_context_chars` is
   enforced at packaging time. Budget overflow triggers trimming and warning.
 
@@ -175,8 +190,8 @@ items must be verified by an independent reviewer.
 
 ### Usability & Coverage
 
-- [ ] **P2.12 Only synthetic dogfood**: Confirm L1 dogfood covers required
-  scenarios, but L2+ dogfood tiers exist (gated). Production readiness is not
+- [ ] **P2.12 Only synthetic dogfood**: Confirm T1 dogfood covers required
+  scenarios, but T2+ dogfood tiers exist (gated/future). Production readiness is not
   claimed on synthetic-only testing.
 - [ ] **P2.13 Insufficient usability scenarios**: Confirm dogfood covers the
   usability contract: code review, test repair, RFC alignment, memory review,
@@ -187,6 +202,8 @@ items must be verified by an independent reviewer.
   results trigger revision or warning. Revision loop is bounded.
 - [ ] **P2.16 No sandbox contract**: Confirm sandbox contract is defined in
   design, even though execution is deferred. Sandbox tests exist (contract only).
+- [ ] **P2.17 Dogfood tier naming conflict**: Confirm dogfood uses T1-T6 only
+  and Capability uses L0-L5 only. No document uses L1-L5 to mean dogfood tiers.
 
 ---
 
@@ -204,11 +221,14 @@ items must be verified by an independent reviewer.
 - [ ] **P3.8 Memory boundary tests**: All Phase 8 tests pass.
 - [ ] **P3.9 Checkpoint tests**: All Phase 9 tests pass.
 - [ ] **P3.10 Execution tests**: All Phase 10 tests pass.
-- [ ] **P3.11 Adjudication tests**: All Phase 11 tests pass.
+- [ ] **P3.11 Adjudication tests**: All Phase 11 tests pass for the L0 minimum
+  action subset (`accept_result`, `reject_result`, `ask_user`,
+  `request_revision`). Full 8-action coverage is L1+ / later phase target.
 - [ ] **P3.12 Adapter tests**: All Phase 12 tests pass.
-- [ ] **P3.13 Trace tests**: All Phase 13 tests pass.
+- [ ] **P3.13 Trace tests**: All Phase 13 tests pass for the L0 minimum trace
+  subset. Full production event coverage is gated/future where applicable.
 - [ ] **P3.14 CLI/TUI tests**: All Phase 17 tests pass.
-- [ ] **P3.15 Dogfood L1 tests**: All Phase 18 L1 tests pass.
+- [ ] **P3.15 Dogfood T1 tests**: All Phase 18 T1 tests pass.
 - [ ] **P3.16 Architecture boundary tests**: All Phase 19 tests pass.
 
 ### Gated but Tested
@@ -242,11 +262,12 @@ items must be verified by an independent reviewer.
 
 | Capability | P0 Items | P1 Items | P2 Items | P3 Items | Audit Gate |
 |------------|----------|----------|----------|----------|------------|
-| L0: Safe Local | P0.1-3,7-15,18-20 | P1.1-9,17-19 | P2.1-3,5-11 | P3.1-16,20 | v1 release |
-| L1: Real LLM Read-Only | +P0.4,13 | +P1.10-16,20 | +P2.4,6,12-13 | +P3.17 | Gated dogfood |
-| L2: Real LLM Tool-Requesting | +P0.5 | (same) | +P2.14-15 | +P3.18 | Gated dogfood |
-| L3: Sandboxed Tool-Capable | +P0.6 | (same) | +P2.16 | +P3.19 | Future phase |
-| L4-L5: Worktree/Multi | (TBD) | (TBD) | (TBD) | (TBD) | Future phase |
+| L0: Safe Local | P0.1-3,7-15,18-20 | P1.1-9,17-19 | P2.1-3,5-11,17 | P3.1-16,20 | v1 release + T1 |
+| L1: Real LLM Read-Only | +P0.4,13 | +P1.10-16,20 | +P2.4,6,12-13 | +P3.17 | Gated dogfood T2 |
+| L2: Real LLM Tool-Requesting | +P0.5 | (same) | +P2.14-15 | +P3.18 | Gated dogfood T3 |
+| L3: Sandboxed Tool-Capable | +P0.6 | (same) | +P2.16 | +P3.19 | Future phase / T4 |
+| L4: Worktree-Capable | (TBD) | (TBD) | (TBD) | (TBD) | Future phase / T5 |
+| L5: Parallel Multi-SubAgent | (TBD) | (TBD) | (TBD) | (TBD) | Future placeholder / T6 |
 
 ## Exit Criteria
 

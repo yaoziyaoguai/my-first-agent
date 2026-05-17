@@ -4,21 +4,36 @@ Status: Tiered dogfood scenarios for the production-grade formal SubAgent System
 
 Every scenario must produce redacted audit packets with no private data.
 
+Production-grade target architecture is preserved, while implementation starts
+at Capability L0 through T1 deterministic dogfood. T2/T3 are gated, and
+T4/T5/T6 are contract/future unless explicitly approved.
+
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 ## Dogfood Tiers
 
-| Tier | Name | Execution | Config Gate | Status |
-|------|------|-----------|-------------|--------|
-| L1 | Synthetic Deterministic | local_fake / local_deterministic | none | Required for v1 |
-| L2 | Real LLM Read-Only | real_llm_readonly | `subagent.real_llm_readonly.enabled=true` | Gated |
-| L3 | Real LLM Tool-Requesting | real_llm_tool_requesting | `subagent.tool_requesting.enabled=true` | Gated |
-| L4 | Sandboxed Tool-Capable | sandboxed_tool_capable | `subagent.sandbox.enabled=true` | Future |
-| L5 | Worktree Coding | worktree-capable | explicit phase approval | Future |
+| Dogfood Tier | Name | Capability Level | Execution | Config Gate | Status |
+|--------------|------|------------------|-----------|-------------|--------|
+| T1 | Synthetic Deterministic | L0 | local_fake / local_deterministic | none | Required for v1 |
+| T2 | Real LLM Read-Only | L1 | real_llm_readonly | `subagent.real_llm_readonly.enabled=true` | Gated |
+| T3 | Real LLM Tool-Requesting | L2 | real_llm_tool_requesting | `subagent.tool_requesting.enabled=true` | Gated |
+| T4 | Sandboxed Tool-Capable | L3 | sandboxed_tool_capable | `subagent.sandbox.enabled=true` | Future / contract |
+| T5 | Worktree Coding | L4 | worktree-capable | explicit phase approval | Future |
+| T6 | Parallel Multi-SubAgent | L5 | parallel orchestration | explicit phase approval | Future placeholder |
 
 Higher tiers inherit all scenarios from lower tiers for regression coverage.
+T6 is a placeholder only: no implementation in the current loop unless
+explicitly approved. Its scenarios cover multiple subagents, conflict
+resolution, parent arbitration, and prevention of nested uncontrolled recursion.
 
 ---
 
-## L1: Synthetic Deterministic (Required for v1)
+## T1: Synthetic Deterministic (Required for v1, Capability L0)
 
 ### Scenario 1.1: Safe Local Code Review
 
@@ -162,7 +177,7 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 
 ---
 
-## L2: Real LLM Read-Only (Gated)
+## T2: Real LLM Read-Only (Gated, Capability L1)
 
 ### Scenario 2.1: Real LLM Code Review Reasoning
 
@@ -202,7 +217,7 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 
 ---
 
-## L3: Real LLM Tool-Requesting (Gated)
+## T3: Real LLM Tool-Requesting (Gated, Capability L2)
 
 ### Scenario 3.1: Real LLM Test Repair with Tool Requests
 
@@ -236,7 +251,7 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 
 ---
 
-## L4: Sandboxed Tool-Capable (Future)
+## T4: Sandboxed Tool-Capable (Future / Contract, Capability L3)
 
 ### Scenario 4.1: Sandbox File Read/Write in Tmp Root
 
@@ -271,7 +286,7 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 
 ---
 
-## L5: Worktree Coding (Future, Deferred)
+## T5: Worktree Coding (Future, Deferred, Capability L4)
 
 ### Scenario 5.1: Worktree Request Deferred
 
@@ -279,10 +294,29 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 - **Expected**: `SubAgentPolicy.worktree_isolation_allowed=false`. Request
   rejected with clear message about future phase.
 
-### Scenario 5.2: Multi-SubAgent Parallel Review (Future)
+---
+
+## T6: Parallel Multi-SubAgent (Future Placeholder, Capability L5)
+
+Status: Future only. Do not implement in the current loop without explicit
+approval.
+
+### Scenario 6.1: Multi-SubAgent Parallel Review (Future)
 
 - **Goal**: Multiple SubAgents run concurrently for multi-perspective review.
 - **Expected**: Defined as L5 capability. Requires orchestration phase.
+
+### Scenario 6.2: Conflict Resolution and Parent Arbitration (Future)
+
+- **Goal**: Parallel SubAgents return conflicting findings.
+- **Expected**: Parent Agent arbitrates. No peer-to-peer merge or silent
+  winner selection.
+
+### Scenario 6.3: No Nested Uncontrolled Recursion (Future)
+
+- **Goal**: Parallel orchestration cannot create unbounded nested delegation.
+- **Expected**: `max_nested_depth` and parent arbitration prevent recursive
+  SubAgent spawning without explicit approval.
 
 ---
 
@@ -291,7 +325,7 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 ### Scenario X.1: Parent Rejects and Revises
 
 - **Goal**: Parent rejects initial result, requests revision, SubAgent improves.
-- **Tiers**: L1-L3.
+- **Tiers**: T1-T3.
 - **Steps**: Initial delegation → SubAgent returns result → Parent rejects with
   reason → Parent creates revised request with clarified task → SubAgent runs
   revision → returns improved result → Parent accepts.
@@ -300,59 +334,62 @@ Higher tiers inherit all scenarios from lower tiers for regression coverage.
 ### Scenario X.2: Low Confidence with Revision
 
 - **Goal**: Low-confidence result triggers revision request.
-- **Tiers**: L1-L3.
+- **Tiers**: T1-T3.
 - **Expected**: First result `confidence < 0.5`. Parent requests revision.
   Revised result has higher confidence or explicit explanation.
 
 ### Scenario X.3: Conflicting Findings
 
 - **Goal**: SubAgent finds internal contradictions in analyzed code.
-- **Tiers**: L2-L3.
+- **Tiers**: T2-T3.
 - **Expected**: `warnings` include `conflicting_findings`. Confidence reduced.
   Parent adjudicates with awareness of conflict.
 
 ### Scenario X.4: SubAgent Asks for Clarification
 
 - **Goal**: SubAgent determines task is underspecified.
-- **Tiers**: L1-L3.
+- **Tiers**: T1-T3.
 - **Expected**: `stop_reason=needs_clarification`, `clarification_question`
   populated. Parent answers and revises.
 
 ### Scenario X.5: Partial Tool Failure
 
 - **Goal**: One tool succeeds, another fails.
-- **Tiers**: L2-L3.
+- **Tiers**: T2-T3.
 - **Expected**: `status=ok` with `warnings` describing failed tool.
   `tools_executed` and `tools_denied` both populated.
 
 ### Scenario X.6: Full Trace Completeness
 
-- **Goal**: Verify trace covers all 15 event types.
-- **Tiers**: L1 (event types) + L2-L3 (real events).
-- **Expected**: Every required event type emitted. Events ordered by timestamp.
+- **Goal**: Verify trace coverage by capability level.
+- **Tiers**: T1 (L0 minimum events) + T2-T3 (gated/later events).
+- **Expected**: T1 emits `delegation_started`, `context_packaged`,
+  `result_returned`, `result_adjudicated`, and `delegation_failed`. Gated
+  tiers cover additional production target events. Events ordered by timestamp.
 
 ## Dogfood Execution Rules
 
-- L1: no real LLM, no network, no `.env`, no real sessions/runs.
-- L2: real LLM via Runtime-mediated provider call; config gate must be open.
+- T1: no real LLM, no network, no `.env`, no real sessions/runs.
+- T2: real LLM via Runtime-mediated provider call; config gate must be open.
   No tool execution.
-- L3: real LLM + parent-mediated tool execution; config gate must be open.
-- L4: sandbox execution; config gate must be open; sandbox root scoped.
-- L5: requires explicit phase approval.
+- T3: real LLM + parent-mediated tool execution; config gate must be open.
+- T4: sandbox execution; config gate must be open; sandbox root scoped.
+- T5: requires explicit phase approval.
+- T6: Future placeholder only; requires explicit phase approval.
 - All tiers: audit packets redacted; no secrets, full prompts, or raw file
   contents in output.
 
 ## Selected Test Commands
 
 ```bash
-# L1: v1 required
-python -m pytest tests/test_subagent_dogfood.py -q -k "L1"
+# T1: v1 required
+python -m pytest tests/test_subagent_dogfood.py -q -k "T1"
 
-# L2: gated
-python -m pytest tests/test_subagent_dogfood.py -q -k "L2"
+# T2: gated
+python -m pytest tests/test_subagent_dogfood.py -q -k "T2"
 
-# L3: gated
-python -m pytest tests/test_subagent_dogfood.py -q -k "L3"
+# T3: gated
+python -m pytest tests/test_subagent_dogfood.py -q -k "T3"
 
 # All available tiers
 python -m pytest tests/test_subagent_dogfood.py -q
@@ -360,8 +397,9 @@ python -m pytest tests/test_subagent_dogfood.py -q
 
 ## Exit Criteria
 
-- L1: all scenarios deterministic; audit packets pass redaction; no private data.
-- L2: real LLM scenarios pass under config gate; gate closed blocks execution.
-- L3: tool-requesting scenarios pass; no direct tool execution.
-- L4: sandbox contract valid; sandbox cleanup confirmed.
-- L5: deferred contract defined.
+- T1: all scenarios deterministic; audit packets pass redaction; no private data.
+- T2: real LLM scenarios pass under config gate; gate closed blocks execution.
+- T3: tool-requesting scenarios pass; no direct tool execution.
+- T4: sandbox contract valid; sandbox cleanup confirmed.
+- T5: deferred worktree contract defined.
+- T6: deferred parallel orchestration placeholder defined.

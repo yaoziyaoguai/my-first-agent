@@ -32,15 +32,26 @@ The formal namespace is `agent/subagent_system/`. Implementation phases should
 create or modify `agent/subagent_system/*`, and tests should target
 `agent/subagent_system/*`.
 
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 ## 2. Target Architecture
 
 The SubAgent System is designed as a production-grade architecture. Phases build
 toward this target, not toward a minimal local-only wrapper.
 
+Production-grade target architecture starts from day one; implementation starts
+at the L0 safe-local baseline. L1/L2 are gated capabilities. L3/L4/L5 are
+contract/future capabilities unless explicit approval opens a later phase.
+
 ```
 Capability pyramid (implementation order):
 
-L0: Safe Local SubAgent           ← Phase 0-10 (v1 required)
+L0: Safe Local SubAgent           ← Phase 0-13, 17-19(T1/audit) (v1 required)
 L1: Real LLM Read-Only            ← Phase 14 (gated dogfood)
 L2: Real LLM Tool-Requesting      ← Phase 15 (gated)
 L3: Sandboxed Tool-Capable        ← Phase 16 (contract, then gated)
@@ -48,11 +59,73 @@ L4: Worktree-Capable              ← Future (explicit phase)
 L5: Parallel Multi-SubAgent       ← Future (explicit phase)
 ```
 
+### 2.1 Phase Mapping
+
+| Phase | Canonical Name | Capability / Tier | Status |
+|-------|----------------|-------------------|--------|
+| 0 | Safe Local MVP Characterization | L0 | Required |
+| 1 | Descriptor Schema | L0 | Required |
+| 2 | Filesystem Registry | L0 | Required |
+| 3 | Delegation Contract Types | L0 | Required |
+| 4 | Context Packaging | L0 | Required |
+| 5 | Execution Mode Policy | L0 contract; L1/L2/L3 gates | Required/gated |
+| 6 | Tool Permission Boundary | L0; L2 parent-mediated requests | Required/gated |
+| 7 | Skill Boundary | L0 | Required |
+| 8 | Memory Boundary | L0 | Required |
+| 9 | Checkpoint / Resume Boundary | L0 | Required |
+| 10 | Bounded Local Execution | L0 | Required |
+| 11 | Parent Adjudication / Result Merge | L0 minimum; L1+ full target | Required/extended |
+| 12 | Runtime / Parent Adapter | L0 | Required |
+| 13 | Trace / Observability | L0 minimum; L1+ full target | Required/extended |
+| 14 | Real LLM Read-Only Gated Dogfood | L1 / T2 | Gated |
+| 15 | Real LLM Tool-Requesting Gated Dogfood | L2 / T3 | Gated |
+| 16 | Sandbox Contract and Gated Execution | L3 / T4 | Contract/gated |
+| 17 | CLI/TUI Visibility | L0 | Required |
+| 18 | Dogfood Harness | T1-T6 | Required/gated/future |
+| 19 | Audit Readiness Packet | Target capability | Required gate |
+
+Dogfood tiers map to capability levels as follows:
+
+| Dogfood Tier | Scenario Set | Capability Level | Status |
+|--------------|--------------|------------------|--------|
+| T1 | Synthetic Deterministic | L0 | Required |
+| T2 | Real LLM Read-Only | L1 | Gated |
+| T3 | Real LLM Tool-Requesting | L2 | Gated |
+| T4 | Sandboxed Tool-Capable | L3 | Future / gated contract |
+| T5 | Worktree Coding | L4 | Future |
+| T6 | Parallel Multi-SubAgent | L5 | Future placeholder |
+
+### 2.2 Entry Criteria Model
+
+Every phase must evaluate concrete entry criteria before writing tests or code:
+
+- Previous phase exit criteria are satisfied, or Phase 0 characterization is
+  complete for Phase 1.
+- Required docs for the phase have been read: RFC, SDD, TDD, and dogfood/audit
+  docs where the phase references them.
+- Tests for the previous phase passed, or a documented blocker stops the loop.
+- Working tree is clean, or the current phase explicitly owns every dirty file.
+- No stop condition from §5 has triggered.
+- Allowed and forbidden files for the phase are understood before edits.
+
+Gated phases additionally require the config gate, audit gate, and applicable
+dogfood gate to exist and remain closed by default. Future/contract phases must
+not implement execution by default; they may define contracts, docs, and tests
+only unless the user gives explicit approval.
+
 ## 3. Phases
 
 ### Phase 0: Safe Local MVP Characterization
 
 Goal: confirm Safe Local MVP boundaries and establish test baseline.
+
+Entry criteria:
+
+- Required SubAgent docs are read for context.
+- Working tree is clean.
+- No stop condition is active.
+- Allowed work is characterization only; formal SubAgent modules are not
+  created in this phase.
 
 Work:
 
@@ -66,6 +139,15 @@ Stop gate: MVP characterization complete; tests green.
 ### Phase 1: Descriptor Schema
 
 Goal: define parser/schema for `SUBAGENT.md` frontmatter.
+
+Entry criteria:
+
+- Phase 0 exit gate is satisfied.
+- `tests/test_subagent_local_mvp_contract.py` is green.
+- RFC/SDD/TDD descriptor sections are read.
+- Working tree is clean or owns only Phase 1 descriptor docs/tests/files.
+- Allowed/forbidden files below are understood; do not create non-descriptor
+  modules.
 
 Allowed files: `agent/subagent_system/descriptor.py`,
 `agent/subagent_system/errors.py`, and focused tests/docs.
@@ -87,6 +169,14 @@ Stop gate: descriptor tests green.
 ### Phase 2: Filesystem Registry
 
 Goal: runtime/session-scoped deterministic registry.
+
+Entry criteria:
+
+- Phase 1 descriptor tests are green.
+- Registry section in SDD and TDD Phase 2 are read.
+- Working tree is clean or owns only Phase 2 registry files.
+- No stop condition is active.
+- Registry scope is runtime/session scoped before implementation starts.
 
 Allowed files: `agent/subagent_system/registry.py`,
 `agent/subagent_system/descriptor.py`, fixtures, and focused tests/docs.
@@ -110,6 +200,15 @@ Goal: define all contract dataclasses — `SubAgentRequest`, `SubAgentContextPac
 `ParentAdjudicationResult`, `ToolRequest`, `SubAgentTraceEvent`,
 `SubAgentCheckpointSummary`, `SubAgentExecutionMode`, `SubAgentStopReason`.
 
+Entry criteria:
+
+- Phase 2 registry exit gate is satisfied.
+- Descriptor/registry tests pass.
+- RFC delegation contract and SDD data-structure sections are read.
+- Working tree is clean or owns only Phase 3 contract files.
+- Contract files may define types only; no executor, provider, ToolRegistry, or
+  Memory governance implementation begins here.
+
 Allowed files: `agent/subagent_system/request.py`,
 `agent/subagent_system/context.py`, `agent/subagent_system/result.py`,
 `agent/subagent_system/execution_mode.py`,
@@ -131,8 +230,15 @@ Stop gate: contract types are frozen, validated, auditable.
 
 Goal: assemble `SubAgentContextPackage` from request + descriptor + boundaries.
 
-Allowed files: `agent/subagent_system/context.py`,
-`agent/subagent_system/context_window.py`, and focused tests/docs.
+Entry criteria:
+
+- Phase 3 contract tests are green.
+- RFC §2.4 / §5.2 and SDD §4 are read.
+- Working tree is clean or owns only Phase 4 context packaging files.
+- Allowed/forbidden files below are understood.
+- L0 context packaging is in scope; L1+ real context-window isolation is not.
+
+Allowed files: `agent/subagent_system/context.py`, and focused tests/docs.
 
 Forbidden files: executor, ToolRegistry execution, real LLM path.
 
@@ -150,6 +256,15 @@ Stop gate: context package assembled deterministically; budget enforced.
 ### Phase 5: Execution Mode Policy
 
 Goal: define mode policy, gating, and escalation prevention.
+
+Entry criteria:
+
+- Phase 4 context packaging tests are green.
+- RFC §2.2 and SDD §2.5 / §2.7 are read.
+- Working tree is clean or owns only Phase 5 mode/policy files.
+- Config gate names are defined and closed by default.
+- L1/L2/L3 execution remains gated/contract only; no real LLM or sandbox
+  execution is implemented in Phase 5.
 
 Allowed files: `agent/subagent_system/execution_mode.py`,
 `agent/subagent_system/policy.py`, and focused tests/docs.
@@ -171,6 +286,15 @@ Stop gate: mode policy enforceable; config gates testable.
 
 Goal: connect SubAgent `allowed_tools` to ToolRegistry without bypass.
 
+Entry criteria:
+
+- Phase 5 execution mode policy tests are green.
+- RFC governance/tool sections and SDD §5 are read.
+- Working tree is clean or owns only Phase 6 tool-boundary files.
+- ToolRegistry remains the authority before coding starts.
+- This phase implements pure permission checks only; no SubAgent tool execution
+  path is allowed.
+
 Allowed files: `agent/subagent_system/tool_boundary.py`, narrow adapter code
 if required, and focused tests/docs.
 
@@ -191,6 +315,14 @@ Stop gate: tool boundary audit.
 
 Goal: connect SubAgent `allowed_skills` to Skill System without bypass.
 
+Entry criteria:
+
+- Phase 6 tool-boundary tests are green.
+- RFC Skill boundary adaptation and SDD Skill boundary sections are read.
+- Working tree is clean or owns only Phase 7 skill-boundary files.
+- Skill System remains the loading/progressive-disclosure authority.
+- Only Skill L1 metadata exposure is in scope.
+
 Allowed files: `agent/subagent_system/skill_boundary.py`, and focused
 tests/docs.
 
@@ -208,6 +340,14 @@ Stop gate: Skill boundary delegates to Skill System.
 
 Goal: read-only context and proposal-only Memory access.
 
+Entry criteria:
+
+- Phase 7 skill-boundary tests are green.
+- RFC §8 and SDD memory-boundary sections are read.
+- Working tree is clean or owns only Phase 8 memory-boundary files.
+- Memory governance remains the authority before coding starts.
+- Direct MemoryStore writes, silent retain, and auto-approve are out of scope.
+
 Allowed files: `agent/subagent_system/memory_boundary.py`, memory adapter
 seam tests/docs, and minimum approved Runtime adapter wiring.
 
@@ -220,16 +360,21 @@ Work:
 
 Stop gate: Memory governance audit.
 
-### Phase 9: Checkpoint/Resume Boundary
+### Phase 9: Checkpoint / Resume Boundary
 
 Goal: make in-flight SubAgent delegation checkpoint-aware without letting
 SubAgent own the loop or replay high-risk effects.
 
 Entry criteria:
 
+- Previous phase exit criteria are satisfied.
 - Phase 3 contract types exist.
 - Phase 8 memory boundary tests pass.
 - Existing checkpoint ownership tests are green.
+- RFC §9 and SDD checkpoint section are read.
+- Working tree is clean or owns only Phase 9 checkpoint files.
+- Allowed/forbidden files below are understood; checkpoint schema migration is
+  a stop condition unless explicitly approved.
 
 Allowed files:
 
@@ -280,6 +425,15 @@ Exit criteria:
 
 Goal: fake/local execution within `max_iterations` bound.
 
+Entry criteria:
+
+- Phase 9 checkpoint/resume tests are green.
+- RFC loop model and TDD Phase 10 are read.
+- Working tree is clean or owns only Phase 10 executor files.
+- `SubAgentExecutionMode` policy exists and defaults to `local_fake`.
+- No real LLM, external process, shell, repo write, or real tool execution is
+  permitted in this phase.
+
 Allowed files: `agent/subagent_system/executor.py`, and focused tests/docs.
 
 Forbidden files: real LLM invocation, external process spawn, real tool
@@ -299,6 +453,16 @@ Stop gate: bounded execution proven in tests.
 
 Goal: Parent can accept, reject, revise, or escalate any SubAgent result.
 
+Entry criteria:
+
+- Phase 10 bounded local execution tests are green.
+- RFC §2.6 / §6 and SDD §6 are read.
+- Working tree is clean or owns only Phase 11 adjudication files.
+- L0 action subset is understood: `accept_result`, `reject_result`, `ask_user`,
+  `request_revision`.
+- L1+ actions are designed but do not force L0 implementation of tool/memory
+  routing execution.
+
 Allowed files: `agent/subagent_system/adjudication.py`,
 `agent/subagent_system/result.py`, and focused tests/docs.
 
@@ -306,21 +470,31 @@ Forbidden files: SubAgent owning loop, auto-merge without parent decision.
 
 Work:
 
-- `ParentAdjudicationResult` for each action.
+- `ParentAdjudicationResult` for each L0 action.
 - `accept_result` with summary merge.
 - `reject_result` with reason.
 - `request_revision` with revised `SubAgentRequest`.
 - `ask_user` with user question.
-- `convert_to_tool_request` routing.
-- `convert_to_memory_proposal` routing.
+- `convert_to_tool_request` routing (L1+ / later phase target).
+- `convert_to_memory_proposal` routing (L1+ / later phase target).
 - Revision loop with `max_revisions` bound.
 - Low-confidence handling.
 
-Stop gate: adjudication flow complete for all actions.
+Stop gate: adjudication flow complete for the L0 action subset; full 8-action
+model remains the production target for later phases.
 
 ### Phase 12: Runtime / Parent Adapter
 
 Goal: `SubAgentRun` lifecycle and delegation adapter under Parent Runtime.
+
+Entry criteria:
+
+- Phase 11 L0 adjudication tests are green.
+- Runtime ownership sections in RFC/SDD/TDD are read.
+- Working tree is clean or owns only Phase 12 runtime/delegation files.
+- Parent remains orchestrator; SubAgent cannot own the main loop.
+- Provider direct calls, Memory governance changes, and ToolRegistry bypass are
+  forbidden before implementation starts.
 
 Allowed files: `agent/subagent_system/runtime.py`,
 `agent/subagent_system/delegation.py`, Runtime adapter seams
@@ -347,6 +521,16 @@ Stop gate: architecture tests confirm Parent owns loop.
 
 Goal: every delegation produces a complete, sanitized trace.
 
+Entry criteria:
+
+- Phase 12 runtime/adapter tests are green.
+- RFC §10 and SDD trace sections are read.
+- Working tree is clean or owns only Phase 13 trace/result files.
+- L0 trace subset is understood:
+  `delegation_started`, `context_packaged`, `result_returned`,
+  `result_adjudicated`, `delegation_failed`.
+- Gated/future trace events are documented targets, not L0 burden.
+
 Allowed files: `agent/subagent_system/trace.py`,
 `agent/subagent_system/result.py`, and focused tests/docs.
 
@@ -354,13 +538,14 @@ Forbidden files: secrets in trace data, trace data as side channel.
 
 Work:
 
-- `SubAgentTraceEvent` for all 15 event types.
+- `SubAgentTraceEvent` for the L0 minimum event subset.
+- Full production trace event model remains designed for gated/future phases.
 - Event ordering preservation.
 - Event data sanitization (no secrets, no full prompts).
 - Trace event count in `SubAgentAuditRecord`.
 - Trace events included in `SubAgentResult`.
 
-Stop gate: trace covers full delegation lifecycle; no secrets in trace.
+Stop gate: L0 trace covers safe-local delegation lifecycle; no secrets in trace.
 
 ### Phase 14: Real LLM Read-Only Gated Dogfood
 
@@ -370,7 +555,10 @@ Entry criteria:
 
 - L0 (Phases 0-13) complete and tested.
 - Config system supports `subagent.real_llm_readonly.enabled`.
+- Audit gate for L1 has no open P0/P1/P2 blockers.
+- T2 dogfood scenarios are defined.
 - Real LLM dogfood runner exists (analogue to Skill System dogfood runner).
+- Explicit user approval is required before any real LLM invocation.
 
 Allowed files: real LLM path additions to executor/runtime (gated),
 dogfood fixtures, and focused tests.
@@ -399,6 +587,10 @@ Entry criteria:
 
 - Phase 14 complete and dogfood pass.
 - Config system supports `subagent.tool_requesting.enabled`.
+- Audit gate for L2 has no open P0/P1/P2 blockers.
+- T3 dogfood scenarios are defined.
+- Explicit user approval is required before gated execution.
+- ToolRegistry and Confirmation boundaries have passing tests.
 
 Work:
 
@@ -420,6 +612,12 @@ Entry criteria:
 
 - Phase 15 complete.
 - Config system supports `subagent.sandbox.enabled`.
+- Audit gate for L3 has no open P0/P1/P2 blockers.
+- T4 dogfood scenarios are defined.
+- Contract/docs/tests may be written by default; real sandbox execution needs
+  explicit approval and a closed-by-default config gate.
+- Sandbox must not spawn external processes or mutate repo state outside its
+  scoped root.
 
 Work:
 
@@ -436,6 +634,14 @@ Stop gate: sandbox contract tests pass; sandbox execution gated.
 
 Goal: presentation only.
 
+Entry criteria:
+
+- Phase 13 L0 trace tests are green, or the current implementation loop has a
+  documented reason to add visibility earlier.
+- Presentation boundary docs in SDD/TDD are read.
+- Working tree is clean or owns only presentation docs/tests/files.
+- CLI/TUI allowed files and forbidden runtime imports are understood.
+
 Work:
 
 - Show available SubAgent descriptors with supported modes.
@@ -446,26 +652,45 @@ Work:
 
 Stop gate: TUI dependency boundary tests.
 
-### Phase 18: Tiered Dogfood Harness
+### Phase 18: Dogfood Harness
 
-Goal: L1-L5 tiered dogfood harness.
+Goal: T1-T6 tiered dogfood harness without conflicting with Capability L0-L5.
+
+Entry criteria:
+
+- Phase 13 L0 trace and Phase 17 visibility checks are green for T1.
+- Dogfood plan and audit checklist are read.
+- Working tree is clean or owns only Phase 18 dogfood harness files.
+- No real LLM, network, external process, `.env`, sessions/runs, or repo write
+  is allowed for T1.
+- T2/T3 require config gate + audit gate + explicit user approval before
+  execution. T4/T5/T6 are future placeholders unless explicitly approved.
 
 Work:
 
-- **L1 (v1 required)**: 15+ synthetic deterministic scenarios.
-- **L2 (gated)**: real LLM read-only dogfood.
-- **L3 (gated)**: real LLM tool-requesting dogfood.
-- **L4 (future)**: sandboxed tool-capable dogfood.
-- **L5 (future)**: worktree coding dogfood.
+- **T1 (v1 required, Capability L0)**: 15+ synthetic deterministic scenarios.
+- **T2 (gated, Capability L1)**: real LLM read-only dogfood.
+- **T3 (gated, Capability L2)**: real LLM tool-requesting dogfood.
+- **T4 (future, Capability L3)**: sandboxed tool-capable dogfood.
+- **T5 (future, Capability L4)**: worktree coding dogfood.
+- **T6 (future, Capability L5)**: parallel multi-SubAgent scenarios.
 - All tiers produce redacted audit packets.
 - No network, real LLM (except gated tiers), `.env`, sessions/runs.
 
-Stop gate: L1 dogfood produces sanitized audit packets; L2+ tiers ready for
-gated execution.
+Stop gate: T1 dogfood produces sanitized audit packets; T2+ tiers are ready for
+gated or future execution without being enabled by default.
 
-### Phase 19: Independent Audit And Hardening
+### Phase 19: Audit Readiness Packet
 
 Goal: close P0/P1/P2/P3 and decide readiness.
+
+Entry criteria:
+
+- Target capability phases have satisfied their exit criteria.
+- Audit checklist and dogfood evidence for the target capability/tier are read.
+- Working tree is clean or owns only audit-readiness files.
+- Required tests for the target phase passed.
+- No stop condition is active; any P0/P1/P2 finding blocks readiness.
 
 Work:
 
@@ -482,12 +707,12 @@ Stop gate: user decides next action.
 
 | Capability Level | Phases | Status |
 |-----------------|--------|--------|
-| L0: Safe Local SubAgent | 0-13, 17, 18(L1), 19 | Required for v1 |
-| L1: Real LLM Read-Only | 14, 18(L2) | Gated, designed |
-| L2: Real LLM Tool-Requesting | 15, 18(L3) | Gated, designed |
-| L3: Sandboxed Tool-Capable | 16, 18(L4) | Contract designed, execution gated |
-| L4: Worktree-Capable | Future phase | Deferred |
-| L5: Parallel Multi-SubAgent | Future phase | Deferred |
+| L0: Safe Local SubAgent | 0-13, 17, 18(T1), 19 | Required for v1 |
+| L1: Real LLM Read-Only | 14, 18(T2) | Gated, designed |
+| L2: Real LLM Tool-Requesting | 15, 18(T3) | Gated, designed |
+| L3: Sandboxed Tool-Capable | 16, 18(T4) | Contract designed, execution gated |
+| L4: Worktree-Capable | Future phase, 18(T5) placeholder | Deferred |
+| L5: Parallel Multi-SubAgent | Future phase, 18(T6) placeholder | Deferred |
 
 ## 5. Stop Conditions
 

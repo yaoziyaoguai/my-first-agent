@@ -7,12 +7,48 @@ System. Every phase starts by reading `docs/rfc/SUBAGENT_CANONICAL_RFC.md`,
 The implementation loop writes or extends tests first, verifies red where
 appropriate, then implements the smallest behavior change.
 
+Production-grade target architecture is preserved, while implementation starts
+at Capability L0 safe-local baseline. L1/L2 tests are gated, and L3/L4/L5 tests
+are contract/future unless explicitly approved.
+
+Naming convention:
+
+- **Capability Level = L0-L5**.
+- **Dogfood Tier = T1-T6**.
+- **Implementation Phase = Phase 0-N**.
+- **Audit Priority = P0-P3**.
+
 Tests are categorized:
 - **Required for v1**: must pass before v1 is considered complete.
 - **Gated but designed**: tests exist but execution requires config gate.
 - **Future but documented**: test stubs / contracts defined for future phases.
 
-## Phase 0: Existing Safe Local MVP Characterization
+## Phase Mapping
+
+| Phase | Canonical Name | Test Focus | Capability / Tier |
+|-------|----------------|------------|-------------------|
+| 0 | Safe Local MVP Characterization | Existing MVP boundary | L0 |
+| 1 | Descriptor Schema | `SUBAGENT.md` schema | L0 |
+| 2 | Filesystem Registry | Session-scoped registry | L0 |
+| 3 | Delegation Contract Types | Frozen contracts | L0 |
+| 4 | Context Packaging | L0 context package | L0 |
+| 5 | Execution Mode Policy | Mode enum, gates, escalation prevention | L0 contract; L1/L2/L3 gates |
+| 6 | Tool Permission Boundary | ToolRegistry authority check | L0; L2 parent-mediated requests |
+| 7 | Skill Boundary | Skill metadata boundary | L0 |
+| 8 | Memory Boundary | Read/propose governance | L0 |
+| 9 | Checkpoint / Resume Boundary | Safe checkpoint summary | L0 |
+| 10 | Bounded Local Execution | Fake/local `max_iterations` | L0 |
+| 11 | Parent Adjudication / Result Merge | L0 action subset; full target later | L0, L1+ |
+| 12 | Runtime / Parent Adapter | Parent-owned lifecycle | L0 |
+| 13 | Trace / Observability | L0 minimum events; full target later | L0, L1+ |
+| 14 | Real LLM Read-Only Gated Dogfood | Mocked/provider-gated path | L1 / T2 |
+| 15 | Real LLM Tool-Requesting Gated Dogfood | Parent-mediated tool requests | L2 / T3 |
+| 16 | Sandbox Contract and Gated Execution | Contract only unless approved | L3 / T4 |
+| 17 | CLI/TUI Visibility | Presentation boundary | L0 |
+| 18 | Dogfood Harness | T1-T6 fixtures | L0-L5 |
+| 19 | Audit Readiness Packet | Audit and architecture gates | Target capability |
+
+## Phase 0: Safe Local MVP Characterization
 
 - **Category**: Required for v1.
 - **Tests to add**: characterize existing `agent/subagents/local.py` contracts:
@@ -26,7 +62,7 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_local_mvp_contract.py -q`
 - **Exit criteria**: all existing MVP tests green; MVP boundaries confirmed.
 
-## Phase 1: Descriptor / SUBAGENT.md Schema
+## Phase 1: Descriptor Schema
 
 - **Category**: Required for v1.
 - **Tests to add**: valid descriptor parse, missing name, invalid name format,
@@ -57,7 +93,7 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_registry.py -q`
 - **Exit criteria**: registry isolates per test/session.
 
-## Phase 3: Delegation Request/Result Contract
+## Phase 3: Delegation Contract Types
 
 - **Category**: Required for v1.
 - **Tests to add**: `SubAgentRequest` creation and validation (including
@@ -90,7 +126,7 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_context_packaging.py -q`
 - **Exit criteria**: context package is complete, budgeted, and sanitized.
 
-## Phase 5: Execution Modes
+## Phase 5: Execution Mode Policy
 
 - **Category**: Required for v1 (mode enum + policy); Gated (real LLM execution).
 - **Tests to add**: `SubAgentExecutionMode` enum values; mode policy for each
@@ -156,7 +192,7 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_memory_boundary.py tests/test_memory_interaction.py -q`
 - **Exit criteria**: existing Memory governance tests still pass unchanged.
 
-## Phase 9: Checkpoint/Resume Boundary
+## Phase 9: Checkpoint / Resume Boundary
 
 - **Category**: Required for v1.
 - **Tests to add**: `SubAgentCheckpointSummary` contains only correlation
@@ -170,7 +206,7 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_checkpoint_boundary.py tests/test_checkpoint_ownership.py -q`
 - **Exit criteria**: existing checkpoint ownership tests still pass.
 
-## Phase 10: Bounded Local Execution / max_iterations
+## Phase 10: Bounded Local Execution
 
 - **Category**: Required for v1.
 - **Tests to add**: execution stops at `max_iterations`; status
@@ -188,20 +224,26 @@ Tests are categorized:
 ## Phase 11: Parent Adjudication / Result Merge
 
 - **Category**: Required for v1.
-- **Tests to add**: `ParentAdjudicationResult` for each action (`accept`,
-  `reject`, `revise`, `ask_user`); `accept_result` with merge; `reject_result`
-  with reason; `request_revision` produces new `SubAgentRequest`;
+- **Tests to add**: `ParentAdjudicationResult` for each L0 action
+  (`accept_result`, `reject_result`, `request_revision`, `ask_user`);
+  `accept_result` with merge; `reject_result` with reason;
+  `request_revision` produces new `SubAgentRequest`;
   `convert_to_tool_request` routing; `convert_to_memory_proposal` routing;
   low-confidence handling; revision loop with `max_revisions` enforcement;
   revision history preservation; conflicting result handling (future stub).
-- **Expected behavior**: Parent can adjudicate all result statuses.
-  Revision loop is bounded. Merge preserves traceability.
+- **L0 minimum**: `accept_result`, `reject_result`, `ask_user`,
+  `request_revision`.
+- **L1+ / later phases**: `merge_summary`, `convert_to_tool_request`,
+  `convert_to_memory_proposal`, `continue_parent_loop`.
+- **Expected behavior**: Parent can adjudicate all result statuses through the
+  L0 minimum subset. Revision loop is bounded. Merge preserves traceability.
 - **Forbidden behavior**: auto-merge without parent decision; revision loop
   exceeding `max_revisions`; tool execution from adjudication (routing only).
 - **Selected command**: `python -m pytest tests/test_subagent_adjudication.py -q`
-- **Exit criteria**: adjudication flow complete for all parent actions.
+- **Exit criteria**: adjudication flow complete for the L0 action subset; full
+  8-action model remains the production target.
 
-## Phase 12: Parent Agent Adapter
+## Phase 12: Runtime / Parent Adapter
 
 - **Category**: Required for v1.
 - **Tests to add**: Parent creates `SubAgentRequest` → adapter assembles
@@ -218,21 +260,23 @@ Tests are categorized:
 ## Phase 13: Trace / Observability
 
 - **Category**: Required for v1.
-- **Tests to add**: `SubAgentTraceEvent` for each event type:
-  `delegation_started`, `context_packaged`, `iteration_started`,
-  `tool_requested`, `tool_denied`, `tool_executed`, `confirmation_required`,
-  `confirmation_resolved`, `result_returned`, `result_adjudicated`,
-  `revision_requested`, `delegation_failed`, `resumed_from_checkpoint`,
-  `delegation_completed`; event ordering preserved; event data sanitized
-  (no secrets); trace event count in audit record.
-- **Expected behavior**: every delegation produces complete trace; events
-  are ordered and sanitized.
+- **Tests to add**: L0 minimum `SubAgentTraceEvent` coverage:
+  `delegation_started`, `context_packaged`, `result_returned`,
+  `result_adjudicated`, `delegation_failed`; event ordering preserved; event
+  data sanitized (no secrets); trace event count in audit record.
+- **Gated / later event coverage**: `iteration_started`, `tool_requested`,
+  `tool_denied`, `tool_executed`, `confirmation_required`,
+  `confirmation_resolved`, `revision_requested`, `resumed_from_checkpoint`,
+  `delegation_completed`, `sandbox_entered`, `worktree_created`,
+  `mode_escalation_requested`.
+- **Expected behavior**: every L0 delegation produces the minimum trace; events
+  are ordered and sanitized. Full trace model remains the production target.
 - **Forbidden behavior**: secrets in trace events; missing events for key
   state transitions; events out of order.
 - **Selected command**: `python -m pytest tests/test_subagent_trace.py -q`
-- **Exit criteria**: trace events cover full delegation lifecycle.
+- **Exit criteria**: L0 trace events cover safe-local delegation lifecycle.
 
-## Phase 14: Real LLM Read-Only Gated Tests
+## Phase 14: Real LLM Read-Only Gated Dogfood
 
 - **Category**: Gated but designed (requires config + dogfood + audit).
 - **Tests to add**: `real_llm_readonly` mode contract; config gate enforcement
@@ -249,9 +293,10 @@ Tests are categorized:
 - **Exit criteria**: real LLM readonly path is testable with mock provider.
   Config gate prevents execution when closed.
 
-## Phase 15: Real LLM Tool-Requesting Gated Tests
+## Phase 15: Real LLM Tool-Requesting Gated Dogfood
 
-- **Category**: Gated but designed (requires L1 pass + config + audit).
+- **Category**: Gated but designed (requires Capability L1 pass + config +
+  audit).
 - **Tests to add**: `real_llm_tool_requesting` mode contract; config gate
   enforcement; tool request parsing from LLM output; parent-mediated tool
   execution flow (mocked); tool denial flow; confirmation gating for
@@ -264,7 +309,7 @@ Tests are categorized:
 - **Exit criteria**: tool-requesting path testable with mock provider and mock
   tool registry.
 
-## Phase 16: Sandbox Mode Contract Tests
+## Phase 16: Sandbox Contract and Gated Execution
 
 - **Category**: Future but documented (contract tests written; execution
   requires sandbox phase).
@@ -291,25 +336,28 @@ Tests are categorized:
 - **Selected command**: `python -m pytest tests/test_subagent_cli_tui.py tests/test_tui_dependency_boundaries.py -q`
 - **Exit criteria**: presentation boundaries remain thin.
 
-## Phase 18: Dogfood
+## Phase 18: Dogfood Harness
 
-- **Category**: Required for v1 (L1); Gated (L2-L5).
+- **Category**: Required for v1 (T1); Gated (T2-T3); Future (T4-T6).
 - **Tests to add**: tiered dogfood fixtures for each scenario in
   `docs/dogfood/SUBAGENT_DOGFOOD_PLAN.md`.
-- **L1 (Required)**: 15 synthetic deterministic scenarios.
-- **L2 (Gated)**: real LLM read-only dogfood scenarios.
-- **L3 (Gated)**: real LLM tool-requesting dogfood scenarios.
-- **L4 (Future)**: sandboxed tool-capable dogfood scenarios.
-- **L5 (Future)**: worktree coding dogfood scenarios.
-- **Expected behavior**: local-only deterministic runs for L1; gated real LLM
-  runs for L2+.
+- **T1 (Required, Capability L0)**: 15 synthetic deterministic scenarios.
+- **T2 (Gated, Capability L1)**: real LLM read-only dogfood scenarios.
+- **T3 (Gated, Capability L2)**: real LLM tool-requesting dogfood scenarios.
+- **T4 (Future, Capability L3)**: sandboxed tool-capable dogfood scenarios.
+- **T5 (Future, Capability L4)**: worktree coding dogfood scenarios.
+- **T6 (Future, Capability L5)**: parallel multi-SubAgent scenarios covering
+  conflict resolution, parent arbitration, and no nested uncontrolled recursion.
+- **Expected behavior**: local-only deterministic runs for T1; gated real LLM
+  runs for T2/T3 only when config and audit gates are open.
 - **Forbidden behavior**: network access without config; real LLM without gate;
   external process spawn; secret logging.
 - **Selected command**: `python -m pytest tests/test_subagent_dogfood.py -q`
-- **Exit criteria**: L1 produces audit packets with no private data. L2+
-  produce sanitized results under config gate.
+- **Exit criteria**: T1 produces audit packets with no private data. T2/T3
+  produce sanitized results under config gate. T4/T5/T6 remain contract/future
+  unless explicitly approved.
 
-## Phase 19: Architecture Boundary Tests
+## Phase 19: Audit Readiness Packet
 
 - **Category**: Required for v1.
 - **Tests to add**: no ToolRegistry bypass, no Memory direct write, no second
@@ -327,9 +375,9 @@ Tests are categorized:
 
 | Category | Phases | Description |
 |----------|--------|-------------|
-| Required for v1 | 0-13, 17, 18(L1), 19 | Must pass before v1 complete |
-| Gated but designed | 14, 15, 18(L2-L3) | Tests written; execution needs config gate |
-| Future but documented | 16, 18(L4-L5) | Contracts defined; execution deferred |
+| Required for v1 | 0-13, 17, 18(T1), 19 | Must pass before v1 complete |
+| Gated but designed | 14, 15, 18(T2-T3) | Tests written; execution needs config gate |
+| Future but documented | 16, 18(T4-T6) | Contracts defined; execution deferred |
 
 ## Full-suite Rule
 

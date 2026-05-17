@@ -68,6 +68,12 @@ SubAgent System:
 python scripts/dogfood_subagent_system.py --tmp-root /tmp/my-first-agent-subagent-dogfood --mode synthetic
 ```
 
+Global governance:
+
+```bash
+python scripts/dogfood_global_real_api.py --tmp-root /tmp/my-first-agent-global-dogfood --mode synthetic --report-json /tmp/my-first-agent-global-synthetic-dogfood-report.json
+```
+
 ## Gated real dogfood
 
 Real API dogfood 不是默认检查项。只有同时满足以下条件才允许：
@@ -75,8 +81,16 @@ Real API dogfood 不是默认检查项。只有同时满足以下条件才允许
 - 文档 phase 明确要求。
 - 用户明确允许。
 - 使用临时 HOME / tmp root。
+- 使用 project `.env` scoped loader 加载 provider config。
+- `shell_env_fallback_used` 必须为 `false`；如果只能从 shell env 取 key，必须 blocked。
 - 不打印 key / token / secret。
 - 结果写入审计摘要，不泄露 provider payload。
+
+全局 Real API dogfood:
+
+```bash
+python scripts/dogfood_global_real_api.py --tmp-root /tmp/my-first-agent-global-real-dogfood --mode real-api --report-json /tmp/my-first-agent-global-real-dogfood-report.json
+```
 
 ## 最近审计基线
 

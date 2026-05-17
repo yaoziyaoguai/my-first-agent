@@ -25,7 +25,7 @@ Status: PASS for current main before push.
 | Confirmation / Ask User | Healthy | request_user_input / memory confirmation / tool confirmation 复用 runtime 边界 | none blocking |
 | CLI/TUI | Healthy | adapter/presentation only；Textual lazy optional | P3: `main.py` 仍承担较多 adapter 兼容 |
 | Tests | Healthy | full pytest baseline passed | skipped real external tests are expected |
-| Dogfood | Healthy | Skill synthetic, SubAgent synthetic, gated real API evidence | real dogfood not default |
+| Dogfood | Healthy | Skill synthetic, SubAgent synthetic, global governance dogfood runner, gated real API evidence | real dogfood not default |
 | Security/Secrets | Healthy | `.env` / `agent_log.jsonl` / sessions/runs/memory episodes not tracked | do not read real artifacts in audit |
 
 ## Ready to push?
@@ -39,3 +39,4 @@ Yes, after this docs rewrite commit passes checks. Do not tag yet.
 - Real MCP server activation remains opt-in.
 - DB/graph/embedding/vector store are not default memory backends.
 - Documentation history is intentionally preserved; use `docs/README.zh.md` as entrypoint.
+- Global Real API dogfood must use project `.env` scoped config loading and must block shell env fallback.

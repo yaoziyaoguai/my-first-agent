@@ -40,6 +40,32 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from agent.memory_confirmation_forms import (
+    DISALLOWED_MEMORY_CONFIRMATION_FORMS as _DISALLOWED_CONFIRMATION_FORMS,
+    MemoryConfirmationForm as ConfirmationForm,
+    validate_memory_confirmation_form as _validate_confirmation_form,
+)
+
+__all__ = (
+    "ACTIVE_RECORDS_THRESHOLD",
+    "MIN_CORRECTION_EVIDENCE",
+    "CorrectionEvidence",
+    "ProceduralCandidate",
+    "EmergenceDetectionResult",
+    "DeterministicEmergenceDetector",
+    "ProceduralDispatchResult",
+    "dispatch_procedural_candidates_to_pending_review",
+    "ConfirmationForm",
+    "_DISALLOWED_CONFIRMATION_FORMS",
+    "_validate_confirmation_form",
+    "InlineConfirmationRequest",
+    "InlineConfirmationResponse",
+    "InlineConfirmationApplyResult",
+    "prepare_procedural_inline_confirmation_request",
+    "accept_inline_confirmation",
+    "apply_inline_confirmation_response",
+)
+
 if TYPE_CHECKING:
     from agent.memory_store import MemoryStoreApplyResult, MemoryStoreProtocol
 
@@ -614,20 +640,8 @@ def _importance_from_confidence(confidence: float) -> int:
 # ConfirmationForm — T1 confirmation 的两种交互形式（RFC §10.5）
 # ═══════════════════════════════════════════════════════════════════════════════
 
-ConfirmationForm = Literal["pending_review", "inline_confirmation"]
-
-# 明确禁止的 confirmation form — procedural 永不可 silent/auto
-_DISALLOWED_CONFIRMATION_FORMS: frozenset[str] = frozenset({"silent", "auto_retained", "none"})
-
-
-def _validate_confirmation_form(form: str) -> None:
-    """防御性校验：confirmation_form 不得为禁止值。"""
-    if form in _DISALLOWED_CONFIRMATION_FORMS:
-        raise ValueError(
-            f"confirmation_form='{form}' 不被允许。"
-            f"Procedural memory 永不可 silent retain / auto retain。"
-            f"允许的 form: pending_review, inline_confirmation"
-        )
+# 兼容既有测试和调用方的私有导出；真实语义已集中到
+# agent.memory_confirmation_forms，避免 emergence 模块继续承担 form 词表职责。
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

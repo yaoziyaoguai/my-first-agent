@@ -8,7 +8,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
 新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
 
-下一阶段路线：`v0.9.x Stabilization` 只做行为中性的稳定化和 P3 重构准备，入口见 [V0_9_X_STABILIZATION_RFC.zh.md](docs/refactor/V0_9_X_STABILIZATION_RFC.zh.md)。该阶段不扩张功能，也不建设完整 Observability Platform；trace / runtime events 仅作为调试和审计证据。
+当前路线：`v0.9.x Stabilization` 只做行为中性的稳定化和 P3 重构，入口见 [V0_9_X_STABILIZATION_RFC.zh.md](docs/refactor/V0_9_X_STABILIZATION_RFC.zh.md)。该阶段不扩张功能，也不建设完整 Observability Platform；trace / runtime events 仅作为调试和审计证据。
 
 ## 当前状态
 

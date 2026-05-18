@@ -34,6 +34,7 @@ from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
 from agent.model_call import build_default_model_client, call_model
 from agent import protocol_debug as _protocol_debug
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
+from agent.runtime_loop_fields import build_runtime_loop_fields
 from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
@@ -650,21 +651,7 @@ def _start_planning_for_handler(
 def _runtime_loop_fields() -> dict:
     """提取主循环观测字段，只用于日志，不参与业务判断。"""
 
-    fields = {
-        "task_status": state.task.status,
-        "current_step_index": state.task.current_step_index,
-        "loop_iterations": state.task.loop_iterations,
-        "has_pending_tool": bool(state.task.pending_tool),
-        "has_pending_user_input": bool(state.task.pending_user_input_request),
-    }
-    plan = state.task.current_plan or {}
-    steps = plan.get("steps") or []
-    idx = state.task.current_step_index
-    if 0 <= idx < len(steps):
-        step = steps[idx]
-        fields["current_step_title"] = step.get("title")
-        fields["current_step_type"] = step.get("step_type")
-    return fields
+    return build_runtime_loop_fields(state)
 
 def _run_main_loop(
     turn_state: TurnState,

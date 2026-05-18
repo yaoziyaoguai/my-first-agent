@@ -63,7 +63,7 @@ Status: Test plan for v0.9.x stabilization / P3 refactor track.
 ### Selected test command
 
 ```bash
-python -m pytest tests/test_v0_4_transition_boundaries.py tests/test_checkpoint_ownership.py tests/test_streaming_protocol.py -q
+python -m pytest tests/test_v0_4_transition_boundaries.py tests/test_checkpoint_ownership.py tests/test_streaming_protocol.py tests/test_runtime_loop_fields.py -q
 ```
 
 ### Full pytest trigger
@@ -120,7 +120,7 @@ HOME=/private/tmp/my-first-agent-v0.9.x-core-home python -m pytest tests/ -x -q
 ### Selected test command
 
 ```bash
-python -m pytest tests/test_memory_guardrails.py tests/test_memory_emergence.py tests/test_memory_extraction.py tests/test_memory_fs_store.py -q
+python -m pytest tests/test_memory_guardrails.py tests/test_memory_emergence.py tests/test_memory_extraction.py tests/test_memory_fs_store.py tests/test_memory_confirmation_forms.py tests/test_memory_stabilization_m1.py -q
 ```
 
 ### Full pytest trigger
@@ -176,7 +176,7 @@ HOME=/private/tmp/my-first-agent-v0.9.x-memory-home python -m pytest tests/ -x -
 ### Selected test command
 
 ```bash
-python -m pytest tests/test_global_real_api_dogfood.py tests/test_provider_real_smoke.py tests/test_architecture_boundaries.py -q
+python -m pytest tests/test_global_real_api_dogfood.py tests/test_global_dogfood_boundaries.py tests/test_provider_real_smoke.py tests/test_architecture_boundaries.py -q
 ```
 
 ### Full pytest trigger
@@ -227,7 +227,7 @@ HOME=/private/tmp/my-first-agent-v0.9.x-dogfood-home python -m pytest tests/ -x 
 ### Selected test command
 
 ```bash
-python -m pytest tests/test_provider_config.py tests/test_local_config.py tests/test_global_real_api_dogfood.py -q
+python -m pytest tests/test_config_env_resolution.py tests/test_local_config_contract.py tests/test_global_real_api_dogfood.py tests/test_config_authority_boundaries.py -q
 ```
 
 ### Full pytest trigger
@@ -330,12 +330,6 @@ HOME=/private/tmp/my-first-agent-v0.9.x-test-split-home python -m pytest tests/ 
 - synthetic quality 不能标记 real-api。
 
 ### Selected test command
-
-```bash
-python -m pytest tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.py tests/test_subagent_dogfood.py -q
-```
-
-如果新增 benchmark 测试文件，命令应改为：
 
 ```bash
 python -m pytest tests/test_stabilization_benchmark_baseline.py -q

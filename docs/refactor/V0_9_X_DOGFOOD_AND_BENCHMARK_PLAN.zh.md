@@ -1,6 +1,6 @@
 # v0.9.x Dogfood and Benchmark Plan
 
-Status: Dogfood / benchmark design for v0.9.x stabilization.
+Status: Dogfood / benchmark design plus local implementation evidence for v0.9.x stabilization.
 
 本文定义 v0.9.x Stabilization / P3 Refactor Track 的 dogfood 和 benchmark baseline。目标是证明重构没有破坏现有治理边界，不是建设完整 Observability Platform，也不是默认运行 real API。
 
@@ -200,7 +200,19 @@ Real-api dogfood 是 gated：
 
 默认 stabilization loop 必跑的是 synthetic dogfood、selected tests、benchmark baseline 和 full pytest。Real-api dogfood 只在用户明确授权的独立阶段运行。
 
-## 6. Observability future track
+## 6. Local implementation evidence
+
+v0.9.x Stabilization implementation loop 已按本文最小范围落地以下 evidence：
+
+| Area | Implementation evidence | Scope note |
+|---|---|---|
+| Global synthetic dogfood | `scripts/dogfood_global_scenarios.py` 固定 12 个 definition-only scenarios；`scripts/dogfood_global_real_api.py --mode synthetic` 12/12 passed | 不默认 real API，不读取 `.env` |
+| Provider preflight | `scripts/dogfood_provider_preflight.py` 输出 sanitized public packet；shell env fallback 仍 blocked | 只报告来源和 provider metadata，不输出 secret |
+| Memory synthetic review | `tests/test_memory_stabilization_m1.py` 覆盖 reject/session-only/approved/pending_review/inline no-write/Skill/SubAgent proposal | Phase 9 final dogfood 将此结果计入 M5 audit readiness |
+| Benchmark baseline | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic JSON；`tests/test_stabilization_benchmark_baseline.py` 覆盖 reproducibility | 不是 metrics system，不做 trace viewer |
+| Large test split evidence | `tests/test_global_dogfood_boundaries.py` 承载 D1/D2 边界测试 | 不机械拆历史大测试，不降低覆盖 |
+
+## 7. Observability future track
 
 本计划不引入 OpenTelemetry、dashboard、trace viewer、metrics system、span hierarchy 或复杂 event pipeline。
 

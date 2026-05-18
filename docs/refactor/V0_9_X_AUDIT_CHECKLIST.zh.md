@@ -1,6 +1,6 @@
 # v0.9.x Stabilization Audit Checklist
 
-Status: Audit checklist for v0.9.x stabilization / P3 refactor track.
+Status: Audit checklist plus local implementation evidence for v0.9.x stabilization / P3 refactor track.
 
 本文供独立审计使用。审计目标是判断 v0.9.x Stabilization 是否保持行为中性、治理边界不变、dogfood 可信、benchmark 可复现，并且没有把 P3 重构扩张成新功能主线。
 
@@ -186,7 +186,20 @@ P3 处理：
 - uncovered 不等于 pass。
 - benchmark 不依赖真实 LLM / `.env`。
 
-## 9. Go / No-Go
+## 9. Local implementation evidence to audit
+
+独立实现审计应重点核对以下本地 evidence，而不是只看文件数量：
+
+| Track | Evidence | Audit focus |
+|---|---|---|
+| C | `agent/runtime_loop_fields.py` + `tests/test_runtime_loop_fields.py` + architecture import baseline | helper 是否仍只是 projection，是否未拥有主 loop / ToolRegistry / Memory / Checkpoint / Provider |
+| D | `scripts/dogfood_global_scenarios.py` + `scripts/dogfood_provider_preflight.py` + `tests/test_global_dogfood_boundaries.py` | scenario definition 是否 definition-only；preflight public packet 是否 sanitized；real-api 是否仍 gated |
+| G | `tests/test_config_authority_boundaries.py` | provider config authority 是否仍在 `agent/provider/config.py`；legacy/local config 是否未成为 API key 权威 |
+| M | `tests/test_memory_stabilization_m1.py` + `agent/memory_confirmation_forms.py` + `tests/test_memory_confirmation_forms.py` | no silent retain / no auto approve / pending_review / inline confirmation / Skill/SubAgent proposal 边界是否保持 |
+| B | `scripts/stabilization_benchmark_baseline.py` + `tests/test_stabilization_benchmark_baseline.py` | benchmark 是否 deterministic、可复现、无真实 LLM / `.env` 依赖 |
+| T | `tests/test_global_dogfood_boundaries.py` | 拆分是否保留覆盖、pytest discover 是否稳定、selected commands 是否同步 |
+
+## 10. Go / No-Go
 
 Go 条件：
 

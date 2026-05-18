@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,316 +21,28 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config as _config  # noqa: E402
-from agent.provider.config import (  # noqa: E402
-    PROVIDER_ENV,
-    PROVIDER_NAME_ENV,
-    AgentProviderConfig,
-    load_agent_provider_config,
-)
+from agent.provider.config import AgentProviderConfig  # noqa: E402
 from agent.provider.factory import build_model_provider  # noqa: E402
-from agent.provider.protocol import ProviderConfigurationError  # noqa: E402
+from scripts.dogfood_global_scenarios import (  # noqa: E402
+    SCENARIOS,
+    ScenarioDefinition,
+)
+from scripts.dogfood_provider_preflight import (  # noqa: E402
+    load_dogfood_provider_config_private,
+)
 
 REPORT_MD_PATH = PROJECT_ROOT / "docs" / "dogfood" / "GLOBAL_REAL_API_DOGFOOD_REPORT.md"
-
-_DOGFOOD_RELEVANT_KEYS = (
-    PROVIDER_ENV,
-    PROVIDER_NAME_ENV,
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "OPENAI_BASE_URL",
-    "MY_FIRST_AGENT_LLM_BASE_URL",
-    "MODEL_NAME",
-    "ANTHROPIC_MODEL",
-    "OPENAI_MODEL",
-    "MY_FIRST_AGENT_LLM_MODEL",
-    "MY_FIRST_AGENT_LLM_AUTH_SCHEME",
-    "MY_FIRST_AGENT_LLM_REQUEST_PATH",
-    "MY_FIRST_AGENT_LLM_COMPATIBILITY_MODE",
-    "MY_FIRST_AGENT_LLM_MAX_TOKENS",
-    "MY_FIRST_AGENT_LLM_TIMEOUT",
-)
-
-_KEY_NAMES = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
-_MODEL_NAMES = ("MODEL_NAME", "ANTHROPIC_MODEL", "OPENAI_MODEL")
-_BASE_URL_NAMES = ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL")
-
-
-@dataclass(frozen=True)
-class ScenarioDefinition:
-    """全局 dogfood 场景定义，只保存合成任务摘要，不保存真实 repo 内容。"""
-
-    number: int
-    name: str
-    capability: str
-    prompt: str
-    expected_evidence: tuple[str, ...]
-    risk: str
-
-
-SCENARIOS: tuple[ScenarioDefinition, ...] = (
-    ScenarioDefinition(
-        1,
-        "Global task planning and Runtime orchestration",
-        "Runtime / Parent Agent orchestration",
-        "复杂中文任务：分析虚拟项目状态，判断是否需要 Memory、Skill、SubAgent、Tool，并生成只读执行计划。",
-        (
-            "Parent Agent owns orchestration",
-            "runtime audit plan generated",
-            "no high-risk tool execution",
-            "no memory write",
-        ),
-        "medium",
-    ),
-    ScenarioDefinition(
-        2,
-        "Memory emergence / review / confirmation",
-        "Memory governance",
-        "合成 conversation 同时包含长期偏好、临时任务、procedural 信号和 secret-like 片段。",
-        (
-            "semantic/procedural/episodic candidates separated",
-            "pending_review and inline confirmation respected",
-            "reject/timeout/other no-write",
-            "accept/edit_accept confirmed path only",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        3,
-        "Skill selection + progressive disclosure",
-        "Skill System",
-        "需要选择 RFC 对齐审计 Skill 并生成修复 prompt，但不能预加载全部 Skill body。",
-        (
-            "metadata-only selection",
-            "body loaded only after selection",
-            "references/scripts/templates not preloaded",
-            "disabled skill hidden",
-        ),
-        "medium",
-    ),
-    ScenarioDefinition(
-        4,
-        "Skill tool binding / high-risk tool request",
-        "Skill + ToolRegistry boundary",
-        "Skill 请求 shell/file write/network install 等高风险工具。",
-        (
-            "allowed_tools is upper bound",
-            "ToolRegistry remains authority",
-            "high-risk action pending confirmation",
-            "no shell/network/pip execution",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        5,
-        "SubAgent delegation L0 happy path",
-        "SubAgent System",
-        "Parent 为 code-review-planning 创建 L0 deterministic SubAgentRequest。",
-        (
-            "SubAgentRequest created by Parent",
-            "context package trimmed",
-            "max_iterations enforced",
-            "Parent adjudication required",
-        ),
-        "medium",
-    ),
-    ScenarioDefinition(
-        6,
-        "SubAgent boundary violations",
-        "SubAgent capability gates",
-        "恶意 SubAgent 试图 nested delegation、shell、repo write、read .env、write memory、启用 L3/L4。",
-        (
-            "nested delegation blocked",
-            "shell/repo write/.env read blocked",
-            "direct memory write blocked",
-            "no default mode escalation",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        7,
-        "ToolRegistry / ToolExecutor permission matrix",
-        "ToolRegistry / ToolExecutor boundary",
-        "合成工具请求覆盖 safe read-only、unknown、hidden/internal、high-risk、Skill/SubAgent 越权。",
-        (
-            "unknown tool fail closed",
-            "hidden/internal not model-visible",
-            "high-risk pending confirmation",
-            "Skill/SubAgent cannot expand tools",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        8,
-        "Checkpoint / Resume safety",
-        "Checkpoint / Resume safety",
-        "包含大型 prompt、redacted secret-like marker、pending high-risk tool request 的合成状态。",
-        (
-            "checkpoint summary excludes full prompt/body/resource",
-            "secret-like marker redacted",
-            "resume does not replay high-risk tool",
-            "schema unchanged",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        9,
-        "Confirmation / Ask User integration",
-        "Confirmation / Ask User",
-        "工具、Memory、SubAgent 高风险请求都需要用户确认路径。",
-        (
-            "request_user_input seam used",
-            "accept/reject/edit_accept/other/timeout semantics",
-            "reject/other/timeout no-write",
-            "inline confirmation does not bypass pending_review",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        10,
-        "CLI/TUI presentation boundary",
-        "CLI/TUI presentation-only boundary",
-        "把 Skill/SubAgent/Memory/Tool/Checkpoint 状态转换成展示信息。",
-        (
-            "CLI/TUI display only",
-            "no runtime logic",
-            "no memory write or tool execution",
-            "no full body dump or secret leak",
-        ),
-        "medium",
-    ),
-    ScenarioDefinition(
-        11,
-        "Cross-system complex Chinese task",
-        "Runtime + Skill + SubAgent + Memory + Tool boundaries",
-        "请审计当前 First Agent 的文档和实现是否一致，指出 Memory/Skill/SubAgent 风险，给出修复 prompt，不执行高风险动作。",
-        (
-            "Chinese task understood",
-            "structured audit generated",
-            "no dangerous action",
-            "no real repo read outside synthetic workspace",
-        ),
-        "high",
-    ),
-    ScenarioDefinition(
-        12,
-        "End-to-end global synthetic workspace",
-        "End-to-end governance",
-        "读取 synthetic project summary，选择 Skill，委派 SubAgent，产生 tool request、confirmation、memory proposal、checkpoint summary 和 final report。",
-        (
-            "runtime orchestration full chain",
-            "progressive disclosure",
-            "L0 delegation and Parent adjudication",
-            "ToolRegistry/Memory/Confirmation/Checkpoint gates",
-        ),
-        "high",
-    ),
-)
-
-
-def _first_project_value(project_values: dict[str, str], names: tuple[str, ...]) -> str | None:
-    for name in names:
-        value = project_values.get(name)
-        if value and value.strip():
-            return value.strip()
-    return None
-
-
-def _has_shell_value(names: tuple[str, ...]) -> bool:
-    return any(bool(os.environ.get(name, "").strip()) for name in names)
-
-
-def _provider_public_base_url(config: AgentProviderConfig | None) -> str:
-    if config is None:
-        return "unknown"
-    return config.base_url or "native_default"
-
-
-def _provider_public_model(config: AgentProviderConfig | None, project_values: dict[str, str]) -> str:
-    if config is not None and config.model:
-        return config.model
-    return _first_project_value(project_values, _MODEL_NAMES) or "unknown"
-
-
-def _provider_public_name(
-    config: AgentProviderConfig | None,
-    project_values: dict[str, str],
-) -> str:
-    if config is not None:
-        return config.provider_name or config.provider_type
-    return project_values.get(PROVIDER_NAME_ENV) or project_values.get(PROVIDER_ENV) or "unknown"
-
-
-def _provider_public_type(
-    config: AgentProviderConfig | None,
-    project_values: dict[str, str],
-) -> str:
-    if config is not None:
-        return config.provider_type
-    return project_values.get(PROVIDER_ENV) or "unknown"
 
 
 def _load_global_dogfood_provider_config_private(
     project_root: Path,
 ) -> tuple[AgentProviderConfig | None, dict[str, Any]]:
-    """返回脱敏 real-api preflight，不返回、不打印、不序列化 API key。
+    """兼容旧测试入口，真实实现已集中到 provider preflight helper。"""
 
-    这里唯一允许读取 project `.env` 的入口是 `config._load_project_dotenv_values()`。
-    shell env 只用于检测 fallback/conflict，不作为真实 API key 来源。
-    """
-
-    project_values = _config._load_project_dotenv_values(project_root)
-    shell_env_conflict_detected = False
-    for key in _DOGFOOD_RELEVANT_KEYS:
-        project_value = project_values.get(key, "")
-        shell_value = os.environ.get(key, "")
-        if project_value and shell_value and project_value.strip() != shell_value.strip():
-            shell_env_conflict_detected = True
-            break
-
-    api_key_present = _first_project_value(project_values, _KEY_NAMES) is not None
-    shell_env_fallback_used = not api_key_present and _has_shell_value(_KEY_NAMES)
-
-    config: AgentProviderConfig | None = None
-    config_error: str | None = None
-    if not shell_env_fallback_used and project_values:
-        try:
-            # dogfood 的真实 provider 配置只从 project dotenv 映射进入正式
-            # AgentProviderConfig；这样四种 API style 都走 provider 层的统一
-            # 校验和 factory，不在 runner 里根据 URL/model 猜 provider。
-            config = load_agent_provider_config(env=project_values)
-        except ProviderConfigurationError as exc:
-            config_error = str(exc)
-
-    if shell_env_fallback_used:
-        preflight_status = "BLOCKED: shell_env_fallback_disallowed"
-        auth_status = "blocked_shell_env_fallback"
-    elif config_error == "api_key_missing" or not api_key_present:
-        preflight_status = "blocked_missing_project_dotenv_key"
-        auth_status = "missing_project_dotenv_key"
-    elif config_error == "model_missing":
-        preflight_status = "blocked_missing_model"
-        auth_status = "missing_model"
-    elif config_error:
-        preflight_status = f"blocked_provider_config:{config_error}"
-        auth_status = "provider_config_error"
-    else:
-        preflight_status = "ready"
-        auth_status = "configured"
-
-    preflight = {
-        "key_source_kind": "project_dotenv" if api_key_present else "missing",
-        "provider_name": _provider_public_name(config, project_values),
-        "provider_type": _provider_public_type(config, project_values),
-        "model": _provider_public_model(config, project_values),
-        "base_url": _provider_public_base_url(config),
-        "project_dotenv_loaded": bool(project_values),
-        "shell_env_conflict_detected": shell_env_conflict_detected,
-        "shell_env_fallback_used": shell_env_fallback_used,
-        "auth_status": auth_status,
-        "preflight_status": preflight_status,
-    }
-    return config, preflight
+    return load_dogfood_provider_config_private(
+        project_root,
+        dotenv_loader=_config._load_project_dotenv_values,
+    )
 
 
 def load_global_dogfood_provider_config(project_root: Path) -> dict[str, Any]:

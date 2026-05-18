@@ -300,6 +300,11 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.protocol_debug",
         "agent.response_handlers",
         "agent.runtime_event_safety",
+        # v0.9.x Stabilization Phase 1：core slimming 允许这个行为中性 helper。
+        # 它只能承载 runtime loop 字段/快照辅助逻辑，用于最小 debug/audit
+        # evidence；不得拥有主 loop、ToolRegistry、Memory、Skill、SubAgent、
+        # Checkpoint schema 或 provider 调用。
+        "agent.runtime_loop_fields",
         "agent.state",
         "agent.tool_registry",
         "agent.tools",

@@ -6,12 +6,23 @@
 
 ## 总体结论
 
-Status: final P2 provider adapter gaps fixed locally; do not tag from this document alone.
+Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor docs are ready for independent audit.
 
-最新对抗性审计摘要曾写 P0/P1/P2 阻塞为 0，但问题清单仍列出两个 P2。本轮按
+`v0.9.0` 已作为阶段性里程碑发布并推送 tag。最新对抗性审计摘要曾写 P0/P1/P2 阻塞为 0，但问题清单仍列出两个 P2。本轮按
 实际问题清单修复：封死 `agent/model_call.py` 的 legacy SDK stream bypass，并让
 `ProviderBackedMessages` 不再静默丢弃 `model` / `max_tokens` / `temperature`。
 剩余大文件和 Memory/dogfood 深拆仍记录为 P3 backlog，不阻塞 push。
+
+## v0.9.x Stabilization 计划入口
+
+下一阶段是 Harness Engineering stabilization track：先文档、再独立审计、再按实现 loop 做行为中性 P3 重构。该阶段不做功能扩张，不建设完整 Observability Platform；trace / runtime events / streaming events 只作为 minimal debug/audit support。
+
+- RFC: [V0_9_X_STABILIZATION_RFC.zh.md](../refactor/V0_9_X_STABILIZATION_RFC.zh.md)
+- SDD: [V0_9_X_STABILIZATION_SDD.zh.md](../refactor/V0_9_X_STABILIZATION_SDD.zh.md)
+- TDD: [V0_9_X_STABILIZATION_TDD.zh.md](../refactor/V0_9_X_STABILIZATION_TDD.zh.md)
+- Implementation Loop: [V0_9_X_IMPLEMENTATION_LOOP.zh.md](../refactor/V0_9_X_IMPLEMENTATION_LOOP.zh.md)
+- Dogfood / Benchmark Plan: [V0_9_X_DOGFOOD_AND_BENCHMARK_PLAN.zh.md](../refactor/V0_9_X_DOGFOOD_AND_BENCHMARK_PLAN.zh.md)
+- Audit Checklist: [V0_9_X_AUDIT_CHECKLIST.zh.md](../refactor/V0_9_X_AUDIT_CHECKLIST.zh.md)
 
 ## Fixed P1/P2
 

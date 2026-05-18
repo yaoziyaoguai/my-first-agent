@@ -86,10 +86,10 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
   - Slice M4: consolidation / snapshot boundary split.
   - Slice M5: dogfood / docs update.
 - Dogfood runner refactor slices:
-  - Slice D1: provider preflight helper with existing real/synthetic tests.
-  - Slice D2: scenario definitions separated from execution.
-  - Slice D3: governance matrix aggregation helper.
-  - Slice D4: report rendering helper.
+  - Slice D1: scenario definition vs execution separation.
+  - Slice D2: provider preflight helper consolidation.
+  - Slice D3: governance matrix aggregation extraction.
+  - Slice D4: report rendering extraction.
 - Config physical unification remains P3 backlog; current governance docs prevent misusing legacy `config.py` as provider dogfood authority.
 - Real LLM SubAgent L1/L2 remain gated.
 - Sandbox/worktree/parallel SubAgent remain future/contract.

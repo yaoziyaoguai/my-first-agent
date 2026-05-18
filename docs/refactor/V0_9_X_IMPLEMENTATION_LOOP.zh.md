@@ -107,6 +107,7 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 ### Exit criteria
 
 - Baseline evidence 清楚。
+- Memory characterization baseline 已捕获，后续 Phase 1-3 若影响 Memory，Phase 4 能用该 baseline 对比发现。
 - 需要补的 characterization tests 已列出或已补。
 - 没有 P0/P1/P2。
 
@@ -371,6 +372,10 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 - memory synthetic review dogfood 通过。
 - docs/audit status 更新。
 
+### M5 归属声明
+
+Phase 5 只完成 M2-M3 的代码边界重构授权，并明确 defer M4 consolidation / snapshot。M5 memory dogfood + docs update 不在 Phase 5 判定为完成：Phase 8 承接 M5 docs update，Phase 9 承接 M5 memory dogfood / final verification。Phase 5 完成不等于 Track M 完整完成。
+
 ### Stop conditions
 
 适用全局停止条件；如果出现 silent retain、auto approve、pending_review 语义变化或 checkpoint schema 需求，立即停。
@@ -468,6 +473,7 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 - selected tests 通过。
 - full pytest with temp HOME 通过。
 - 没有测试覆盖丢失。
+- 如果拆分 `tests/test_v0_4_transition_boundaries.py`，必须同步更新 `docs/refactor/V0_9_X_STABILIZATION_TDD.zh.md` 中 Track C selected test command；不允许拆分后保留失效测试命令。
 
 ### Stop conditions
 
@@ -506,12 +512,18 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 ### Implementation scope
 
 - 同步完成/延期状态。
+- 承接 M5 docs update：更新 Memory refactor 文档状态。
+- 更新 `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`。
+- 更新 Dogfood/Benchmark 文档中 Memory refactor 状态。
 - 更新 P0/P1/P2/P3 结论。
 - 明确 Observability future track 不在 v0.9.x scope。
 
 ### Exit criteria
 
 - docs 与代码和测试 evidence 一致。
+- Memory M5 docs update 已完成或明确延期并记录原因。
+- CURRENT_AUDIT_STATUS 与实际实现状态一致。
+- Dogfood/Benchmark 文档中的 Memory refactor 状态与 Phase 9 验证计划一致。
 - audit checklist 可供独立审计。
 - `git diff --check` 通过。
 
@@ -554,8 +566,12 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 ### Implementation scope
 
 - 运行 full pytest。
-- 运行 global / skill / subagent / memory synthetic dogfood。
+- 运行 memory synthetic review scenario。
+- 运行 global synthetic dogfood。
+- 运行 skill / subagent synthetic dogfood。
+- 验证 Memory governance unchanged。
 - 运行 benchmark baseline comparison。
+- 将 M5 dogfood result 计入 audit readiness。
 - 准备 independent audit readiness packet。
 
 ### Exit criteria
@@ -563,6 +579,9 @@ v0.9.x stabilization 不建设完整 Observability Platform。Trace、runtime ev
 - `ruff check agent tests scripts` 通过。
 - full pytest with temp HOME 通过。
 - synthetic dogfood 通过。
+- memory synthetic review scenario 通过，且 Memory governance unchanged。
+- global synthetic dogfood 通过。
+- M5 dogfood result 已计入 audit readiness。
 - benchmark baseline 可复现。
 - P0/P1/P2 为 0。
 - independent stabilization implementation audit readiness 为 yes。

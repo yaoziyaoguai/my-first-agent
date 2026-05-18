@@ -18,12 +18,12 @@ Status: Draft plan for v0.9.x stabilization / P3 refactor track.
 - 中文文档体系：中文优先入口、架构、测试、审计状态。
 - final legacy adapter audit gaps fixed：provider / streaming / legacy SDK bypass 已收口。
 
-因此 v0.9.x 不应继续叠加大功能。下一阶段目标是稳定性、架构优雅度、可维护性和评估基线。这是 Harness Engineering 的 stabilization track：先把现有行为纳入可验证 harness，再做行为中性的结构优化，最后用 dogfood、benchmark、full pytest 和独立审计证明没有破坏边界。
+因此 v0.9.x 不应继续叠加大功能。下一阶段目标是稳定性、架构优雅度、可维护性和评估基线。这是 Harness Engineering（工程化约束 / 运行时治理方法）的 stabilization track：先把现有行为纳入可验证 harness，再做 behavior-neutral refactor（行为中性重构），最后用 dogfood（自测 / 自举验证）、benchmark baseline（回归评估基线）、full pytest 和独立审计证明没有破坏边界。
 
 Harness Engineering 在本项目里的含义是：
 
 - 先写清目标、边界、测试、dogfood、benchmark 和审计规则。
-- 先建立 characterization tests（特征化测试）和 golden traces（金丝雀轨迹），再移动代码。
+- 先建立 characterization tests（行为刻画测试 / 现状锁定测试）和 golden traces（金丝雀轨迹），再移动代码。
 - 每个小切片都被 harness 包住：测试证明、dogfood 证明、文档证明、审计证明。
 - 重构不是“把文件拆小”，而是让高内聚（high cohesion）、低耦合（low coupling）、架构优美（architectural elegance）和编程的艺术（the art of programming）在证据中成立。
 

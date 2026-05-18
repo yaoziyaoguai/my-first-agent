@@ -133,10 +133,11 @@ HOME=/private/tmp/my-first-agent-v0.9.x-memory-home python -m pytest tests/ -x -
 
 ### Exit criteria
 
-- memory governance unchanged。
-- no secret tracking。
-- memory dogfood 通过。
-- docs updated。
+- Phase 4-5 exit criteria：memory governance unchanged、no secret tracking、M1 characterization 和 M2-M3 selected tests 通过。
+- Phase 5 完成不等于 Track M 完整完成；M4 consolidation / snapshot 仍按 Loop 明确 defer。
+- M5 dogfood/docs exit criteria 由 Phase 8/9 完成：Phase 8 负责 Memory refactor docs update，Phase 9 负责 memory synthetic review scenario 和 final verification。
+- Track M complete 需要 Phase 5 + Phase 8 + Phase 9 都完成。
+- 不降低 Memory governance 测试要求：memory dogfood 通过、docs updated 仍是 Track M 完整完成条件。
 
 ## 4. Track D: Dogfood runner refactor
 
@@ -296,6 +297,7 @@ HOME=/private/tmp/my-first-agent-v0.9.x-test-split-home python -m pytest tests/ 
 - pytest discover 稳定。
 - no secret tracking。
 - full pytest 通过。
+- Large tests split 后必须更新所有引用旧测试文件的 selected commands；不允许保留指向已拆分失效文件的命令。
 
 ## 7. Track B: Benchmark baseline
 

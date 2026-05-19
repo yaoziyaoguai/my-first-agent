@@ -47,17 +47,32 @@ Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor implementation loop 
 | B: Benchmark baseline | completed locally | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic report；`tests/test_stabilization_benchmark_baseline.py` 覆盖 reproducibility / input hash / report fields |
 | T: Large tests split | completed locally | `tests/test_global_dogfood_boundaries.py` 从 global dogfood 大测试拆出 D1/D2 边界测试；TDD selected commands 已同步，未拆 `tests/test_v0_4_transition_boundaries.py` |
 
+## Final audit environment fix
+
+第二轮独立审计发现 `tests/test_memory_consolidation_real_llm_dogfood.py::TestProviderConfigAutoLoad::test_check_env_provider_config_no_key`
+在存在 ambient shell provider env 的宿主环境中可能失败。根因是
+`scripts/dogfood_phase6_llm_consolidation.py` 的 provider config auto-load 在 fake project
+无 `.env` 时仍默认回退 shell env，导致 no-key 测试会被外部环境污染。
+
+本轮修复状态：
+
+- fixed locally: `check_env()` / `load_provider_config_for_dogfood()` 默认只使用 project-scoped dotenv values，不再默认 shell env fallback。
+- explicit opt-in retained: legacy/manual shell env fallback 需要显式 `allow_shell_env_fallback=True`。
+- provider/.env safety preserved: 不读取真实 sessions/runs，不打印 API key / token / prefix / suffix / length，diagnostics 只记录 source kind 和 provider metadata。
+- tests updated: no-key context、ambient shell env pollution、project dotenv scoped config、sanitized diagnostics 均有覆盖。
+
 ## Final P3 cleanup
 
 | P3 | Status | Evidence / reason |
 |---|---|---|
 | Streaming Protocol 文档 event_type 不精确 | fixed | `docs/02-architecture/STREAMING_PROTOCOL.zh.md` 已对齐 `text_delta` / `tool_request` / `final` / `error`；`tests/test_streaming_protocol.py` 增加文档一致性测试 |
 | Claude Code / Claude / Python SDK 影响全局架构 | fixed / not global | SDK lazy import 限定在 `agent/provider/anthropic_native.py`；非 provider runtime/memory/skill/subagent 增加边界测试；Claude Code 文档段落标为 prior-art reference；Phase 6 dogfood provider identity 改为显式 `AgentProviderConfig` 优先，不再用 `claude`/`base_url` 猜运行依赖 |
-| `core.py` 仍偏大 | partially fixed / deferred | 已抽出 model call / pending confirmation / model output dispatch / runtime loop fields projection；剩余主 loop 与 runtime event bridge 受 characterization tests 保护，大拆会触碰状态机和 UI projection，后续先补切片测试 |
+| `core.py` 仍偏大 | P3 / deferred | 已抽出 model call / pending confirmation / model output dispatch / runtime loop fields projection；剩余主 loop 与 runtime event bridge 受 characterization tests 保护，不建议本轮机械拆分，不阻塞 push |
 | 三套 config 概念重叠 | fixed governance, not unified | 代码注释和 README/docs 明确：`config.py` 是 legacy runtime/CLI 兼容，`agent/provider/config.py` 是 provider/API 权威，`agent/local_config.py` 是本地 customization metadata |
-| Memory module 仍偏大 | partially fixed / deferred | M1 characterization 已补；M3 confirmation form 语义已集中；Memory governance 不变；M4 consolidation / snapshot 边界仍 deferred |
-| Large test files | partially fixed / deferred | 已拆出 `tests/test_global_dogfood_boundaries.py`；历史大测试仍承载 characterization coverage，不做机械拆分 |
-| Large dogfood runners | partially fixed / deferred | D1 scenario definition 与 D2 provider preflight 已拆出；runner report / governance matrix 仍可按 D3-D4 后续小切片拆 |
+| Memory module 仍偏大 | P3 / deferred | M1 characterization 已补；M3 confirmation form 语义已集中；Memory governance 不变；M4 consolidation / snapshot 边界仍 deferred，不建议本轮机械拆分 |
+| Large test files | P3 / deferred | 已拆出 `tests/test_global_dogfood_boundaries.py`；`tests/test_v0_4_transition_boundaries.py` 和多个 Memory tests 仍承载 characterization coverage，需要 future test split，不阻塞 push |
+| Large dogfood runners | P3 / deferred | D1 scenario definition 与 D2 provider preflight 已拆出；runner report / governance matrix 仍可按 D3-D4 后续小切片拆，不建议本轮机械拆分 |
+| Benchmark baseline scenarios | P3 / deferred | 当前 deterministic baseline 为 7 scenarios；future B2 可扩展到 10-12 个 governance scenarios，仍保持 no real LLM、deterministic only，并覆盖更多 Memory/Skill/SubAgent/ToolRegistry/Checkpoint cases |
 | `review_agent_output` dead code | fixed | 无调用点且非 documented public API，已删除，避免继续保留 direct `client.messages.create` 形状 |
 | CURRENT_AUDIT_STATUS / docs 状态同步 | fixed | 本节记录 fixed/deferred 状态；`TEST_MATRIX` 同步 provider/streaming/dogfood selected tests |
 
@@ -110,6 +125,7 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Dogfood provider identity comes from explicit config fields (`provider_type` / `provider_name`), not URL/model inference.
 - Global governance matrix is generated from scenario result check fields; uncovered boundaries must not be marked pass.
 - Synthetic dogfood evidence comes from deterministic synthetic checks; `expected_evidence` is only scenario definition.
+- Benchmark B2 future expansion: expand from 7 to 10-12 deterministic governance scenarios; keep no real LLM; cover more Memory / Skill / SubAgent / ToolRegistry / Checkpoint cases.
 
 ## Latest verification baseline
 
@@ -117,7 +133,7 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Phase 2 full pytest with temp HOME: `2721 passed, 14 skipped`.
 - Phase 3 full pytest with temp HOME: `2723 passed, 14 skipped`.
 - Phase 5 full pytest with temp HOME: `2732 passed, 14 skipped`.
-- Phase 9 final full pytest with temp HOME: `2736 passed, 14 skipped`.
+- Final audit-fix full pytest with temp HOME after provider env stabilization: `2737 passed, 14 skipped`.
 - synthetic global dogfood: `12/12 passed`.
 - synthetic skill dogfood: `12/12 passed`.
 - synthetic subagent dogfood: `16/16 passed`.

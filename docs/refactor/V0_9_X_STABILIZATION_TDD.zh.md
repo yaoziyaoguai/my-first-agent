@@ -283,6 +283,16 @@ python -m pytest tests/test_v0_4_transition_boundaries.py -q
 python -m pytest tests/test_memory_emergence.py tests/test_memory_fs_store.py -q
 ```
 
+v0.9.x stabilization 的当前 split evidence 是 dogfood boundary 拆分：
+
+```bash
+python -m pytest tests/test_global_dogfood_boundaries.py tests/test_global_real_api_dogfood.py -q
+```
+
+Phase 7 完成后，selected test command 必须显式包含新拆出的 split test file。
+如果后续拆分 `tests/test_v0_4_transition_boundaries.py`，Track C selected commands
+也必须同步更新；不允许继续保留只指向旧文件、遗漏新文件的命令。
+
 ### Full pytest trigger
 
 任何测试拆分完成后都必须运行：

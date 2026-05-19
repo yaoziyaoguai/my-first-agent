@@ -971,10 +971,15 @@ class TestProviderConfigAutoLoad:
     不验证真实 API key 本身是否有效。
     """
 
-    def test_load_provider_config_uses_shell_env_when_project_dotenv_absent(
+    def test_load_provider_config_blocks_shell_env_by_default(
         self, tmp_path, monkeypatch,
     ):
-        """fake project 无 .env 时回退 shell env，不读取真实项目 .env。"""
+        """fake project 无 .env 时默认不回退 shell env，避免宿主环境污染测试。
+
+        v0.9.x stabilization 的安全边界是 project dotenv scoped loader；
+        shell env fallback 只能显式 opt-in，不能让 ambient API key 改变 no-key
+        测试结果。
+        """
         from scripts.dogfood_phase6_llm_consolidation import (
             load_provider_config_for_dogfood,
         )
@@ -985,12 +990,35 @@ class TestProviderConfigAutoLoad:
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
         cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+        assert cfg.model == "unknown"
+        assert cfg.base_url == "unknown"
+        assert cfg.key_configured is False
+        assert cfg.key_source_kind == "missing"
+
+    def test_load_provider_config_allows_shell_env_only_when_explicit(
+        self, tmp_path, monkeypatch,
+    ):
+        """显式 opt-in 时才允许 shell env fallback，且 diagnostics 仍不泄露 key。"""
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-auto-load")
+        monkeypatch.setenv("MODEL_NAME", "claude-test-model")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-fallback-model")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+
+        cfg = load_provider_config_for_dogfood(
+            project_root=tmp_path,
+            allow_shell_env_fallback=True,
+        )
         assert cfg.model == "claude-test-model"
         assert cfg.base_url == "https://api.anthropic.com"
         assert cfg.key_configured is True
         assert cfg.provider == "anthropic"
         assert cfg.source == "config auto-load"
         assert cfg.key_source_kind == "shell_env"
+        assert "sk-" not in json.dumps(cfg.safe_diagnostics(), ensure_ascii=False)
 
     def test_explicit_provider_env_controls_phase6_dogfood_provider_identity(
         self, tmp_path,
@@ -1168,7 +1196,7 @@ class TestProviderConfigAutoLoad:
         assert _classify_llm_error(["API key 未设置"]) == "missing_config"
 
     def test_check_env_with_explicit_project_root(self, tmp_path):
-        """check_env 接受显式 project_root，但不会读取该路径下的 .env。"""
+        """check_env 接受显式 project_root，env gate 未开时不加载 provider config。"""
         from scripts.dogfood_phase6_llm_consolidation import check_env
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
@@ -1186,29 +1214,53 @@ class TestProviderConfigAutoLoad:
         )
 
         monkeypatch.setenv("MEMORY_CONSOLIDATION_LLM_ENABLED", "true")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-auto-load")
-        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-test")
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_native",
+                "MY_FIRST_AGENT_LLM_PROVIDER_NAME=anthropic",
+                "ANTHROPIC_API_KEY=sk-test-auto-load",
+                "ANTHROPIC_MODEL=claude-test",
+            ]),
+            encoding="utf-8",
+        )
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
         assert can_run
         assert isinstance(cfg, DogfoodProviderConfig)
         assert cfg.key_configured is True
-        assert cfg.source == "config auto-load"
+        assert cfg.source == "agent.provider.config"
+        assert cfg.key_source_kind == "project_dotenv"
         assert prov["key_configured"] is True
 
         # 清理
         monkeypatch.delenv("MEMORY_CONSOLIDATION_LLM_ENABLED")
 
     def test_check_env_provider_config_no_key(self, tmp_path, monkeypatch):
-        """无 API key 时 check_env 返回 4 元组，cfg 存在但 key_configured=False。"""
+        """无 API key 时 check_env 稳定返回 can_run=False，不受 shell env 污染。"""
         from scripts.dogfood_phase6_llm_consolidation import (
             DogfoodProviderConfig,
             check_env,
         )
 
         monkeypatch.setenv("MEMORY_CONSOLIDATION_LLM_ENABLED", "true")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        for name in (
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "MODEL_NAME",
+            "DEEPSEEK_MODEL",
+            "DASHSCOPE_MODEL",
+            "ANTHROPIC_MODEL",
+            "OPENAI_MODEL",
+            "MY_FIRST_AGENT_LLM_MODEL",
+            "ANTHROPIC_BASE_URL",
+            "DEEPSEEK_BASE_URL",
+            "DASHSCOPE_BASE_URL",
+            "OPENAI_BASE_URL",
+            "MY_FIRST_AGENT_LLM_BASE_URL",
+        ):
+            monkeypatch.setenv(name, "ambient-shell-value-that-must-be-ignored")
 
         can_run, reason, prov, cfg = check_env(project_root=tmp_path)
         # cfg 总是返回 DogfoodProviderConfig 或 None
@@ -1217,6 +1269,7 @@ class TestProviderConfigAutoLoad:
         assert not can_run
         assert cfg.key_configured is False
         assert prov["key_configured"] is False
+        assert prov["key_source_kind"] == "missing"
         assert "API key" in reason
 
     def test_run_pipeline_injects_explicit_provider_config_into_llm_generator(

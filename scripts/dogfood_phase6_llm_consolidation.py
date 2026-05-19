@@ -7,7 +7,7 @@
 - 只写 T1 pending review（不 auto-approve）
 - 所有文件写入 /tmp/dogfood_phase6_e2e/
 - 默认 skip：MEMORY_CONSOLIDATION_LLM_ENABLED 未设置或无 API key 时输出 skip reason
-- API key 只通过 config.py 的既有 load_dotenv/env 机制自动加载；本脚本不手工读取 .env 内容
+- API key 默认只通过 project-scoped dotenv values 自动加载；本脚本不手工打印 .env 内容
 
 用法：
   MEMORY_CONSOLIDATION_LLM_ENABLED=true python scripts/dogfood_phase6_llm_consolidation.py
@@ -41,9 +41,9 @@ _REVIEW_PACKET_DIR = _DOGFOOD_ROOT / "review_packet"
 
 
 # ── Provider config（用于 real LLM dogfood）──────────────────────────────────
-# 本脚本只消费 config.py 暴露的配置解析能力；config.py 负责通过
-# python-dotenv / 环境变量自动加载。这里不打印 key value / prefix / suffix /
-# length，也不把 secret 写入 report。
+# 本脚本只消费 config.py 暴露的 scoped dotenv 解析能力。默认不使用 shell
+# env fallback，避免 CI / coding-agent 宿主环境污染 no-key dogfood 判断。
+# 这里不打印 key value / prefix / suffix / length，也不把 secret 写入 report。
 
 
 @dataclass(frozen=True)
@@ -183,13 +183,60 @@ def _provider_config_warnings(*, model: str, base_url: str, provider: str) -> tu
     return tuple(dict.fromkeys(warnings))
 
 
+def _first_project_value(
+    project_values: dict[str, str],
+    names: tuple[str, ...],
+) -> tuple[str | None, str]:
+    """只从 project-scoped dotenv values 取值，不回退 shell env。"""
+
+    for name in names:
+        value = project_values.get(name)
+        if value and value.strip():
+            return value.strip(), "project_dotenv"
+    return None, "missing"
+
+
+def _first_shell_value(names: tuple[str, ...]) -> tuple[str | None, str]:
+    """显式 opt-in 的 shell fallback；调用方不得打印返回值。"""
+
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip(), "shell_env"
+    return None, "missing"
+
+
+def _resolve_dogfood_config_value(
+    project_values: dict[str, str],
+    names: tuple[str, ...],
+    *,
+    allow_shell_env_fallback: bool,
+) -> tuple[str | None, str]:
+    """解析 dogfood config value，默认禁止 ambient shell env 污染。
+
+    project `.env` scoped loader 是 real dogfood 的默认安全路径。shell env
+    fallback 只在调用方显式 opt-in 时启用，用于少量 legacy/manual dogfood 场景。
+    """
+
+    value, source = _first_project_value(project_values, names)
+    if value is not None:
+        return value, source
+    if allow_shell_env_fallback:
+        return _first_shell_value(names)
+    return None, "missing"
+
+
 def load_provider_config_for_dogfood(
     project_root: Path | None = None,
+    *,
+    allow_shell_env_fallback: bool = False,
 ) -> DogfoodProviderConfig:
-    """通过项目既有 config.py 自动加载 provider config。
+    """通过 project-scoped config 自动加载 provider config。
 
     project_root 用于 project-scoped config 解析。config.py 使用 python-dotenv
     读取项目配置，但本函数不把 dotenv 值写入 os.environ，也不序列化 secret。
+    默认不回退 shell env；如需 legacy/manual dogfood fallback，必须显式传入
+    allow_shell_env_fallback=True。
     """
 
     import config as _config
@@ -210,23 +257,23 @@ def load_provider_config_for_dogfood(
             diagnostics_warnings=(),
         )
 
-    model, _model_source = _config._resolve_scoped_config_value(
+    model, _model_source = _resolve_dogfood_config_value(
+        project_values,
         _MODEL_ENV_NAMES,
-        project_root=root,
-        prefer_project_dotenv=True,
+        allow_shell_env_fallback=allow_shell_env_fallback,
     )
-    base_url, _base_source = _config._resolve_scoped_config_value(
+    base_url, _base_source = _resolve_dogfood_config_value(
+        project_values,
         _BASE_URL_ENV_NAMES,
-        project_root=root,
-        prefer_project_dotenv=True,
+        allow_shell_env_fallback=allow_shell_env_fallback,
     )
     model = model or "unknown"
     base_url = base_url or "unknown"
     provider = _infer_provider_name(model=model, base_url=base_url)
-    api_key, key_source_kind = _config._resolve_scoped_config_value(
+    api_key, key_source_kind = _resolve_dogfood_config_value(
+        project_values,
         _key_env_names_for_provider(provider),
-        project_root=root,
-        prefer_project_dotenv=True,
+        allow_shell_env_fallback=allow_shell_env_fallback,
     )
     warnings = _provider_config_warnings(
         model=model,
@@ -442,7 +489,11 @@ def _safe_warning_for_report(warning: str) -> str:
 
 # ── 步骤 0：环境检查 ───────────────────────────────────────────────────────────
 
-def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, DogfoodProviderConfig | None]:
+def check_env(
+    project_root: Path | None = None,
+    *,
+    allow_shell_env_fallback: bool = False,
+) -> tuple[bool, str, dict, DogfoodProviderConfig | None]:
     """检查 dogfood 运行前提条件。
 
     Returns:
@@ -456,7 +507,10 @@ def check_env(project_root: Path | None = None) -> tuple[bool, str, dict, Dogfoo
     if not llm_enabled:
         return False, "MEMORY_CONSOLIDATION_LLM_ENABLED 未设置为 true", {}, None
 
-    provider_config = load_provider_config_for_dogfood(project_root or _PROJECT_ROOT)
+    provider_config = load_provider_config_for_dogfood(
+        project_root or _PROJECT_ROOT,
+        allow_shell_env_fallback=allow_shell_env_fallback,
+    )
 
     provider_info: dict = provider_config.safe_diagnostics()
 

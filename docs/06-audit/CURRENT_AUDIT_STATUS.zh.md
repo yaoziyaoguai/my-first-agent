@@ -153,6 +153,52 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Skill/SubAgent real user dogfood and true multi-process/session productization remain future tracks.
 - `openai_compatible` streaming remains unsupported by design and must fail closed until a dedicated provider streaming enhancement lands.
 
+## E2E Runtime Dogfood 诚实重评估（2026-05-19，8aa11a4 基线）
+
+本轮重新运行 E2E Runtime Real API Dogfood 后确认：
+
+- API injection 已验证：`chat(provider=provider)` 直传路径在 3/9 scenario（E01/E08/E09）中通过真实 LLM（kimi-k2.5 via DashScope Anthropic-compatible）。
+- `key_source_kind = project_dotenv`，`auth_status = configured`，`shell_env_fallback_used = false`。
+- Secret 未打印，`.env` 内容未读取。
+
+**硬结论**：
+
+| 指标 | 状态 |
+|------|------|
+| 3/9 场景走真正的 chat() 全链路 | 已通过 |
+| 6/9 场景只验证子系统 API 正确性，未验证 runtime 集成后的行为 | P3 测试方法学限制 |
+| Skill/SubAgent/Memory/Checkpoint 的 runtime-integrated 行为 | 仍无 E2E 覆盖 |
+| Capability matrix 命名 mismatch（`_capability_evidence_matrix`） | P3 展示层 bug，待修复 |
+| SubAgent L1 | 不能开始，需要 Runtime Integration 完成后再设计 |
+
+**First Agent v0.9.x 能做什么**：
+- 通过 project .env scoped loader 安全加载 API key
+- 通过 provider injection 运行 `chat()` + 真实 LLM
+- 子系统模块 API 在 unit/integration 级别验证通过
+
+**不能做什么（不应声称）**：
+- Skill selection 在 Runtime LLM tool calling 触发时能正常工作
+- SubAgent delegation 在 Runtime LLM reasoning 触发时能正常工作
+- Memory proposal 在对话上下文中被正确触发
+- 任何跨模块 runtime-integrated 行为
+
+**根源**：缺少统一的 Runtime Action 抽象——Runtime LLM 没有可审计的 action path 来触发子系统能力。这是架构现实，不是 bug。
+
+**下一步**：Runtime Integration / Runtime Action Harness（`docs/runtime-integration/` 文档包）。
+
+## Runtime Integration 文档入口
+
+Runtime Integration / Runtime Action Harness 设计文档包已就绪（Phase 3: docs-only）：
+
+- RFC: [RUNTIME_INTEGRATION_RFC.zh.md](../runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md)
+- SDD: [RUNTIME_INTEGRATION_SDD.zh.md](../runtime-integration/RUNTIME_INTEGRATION_SDD.zh.md)
+- TDD: [RUNTIME_INTEGRATION_TDD.zh.md](../runtime-integration/RUNTIME_INTEGRATION_TDD.zh.md)
+- Implementation Loop: [RUNTIME_INTEGRATION_IMPLEMENTATION_LOOP.zh.md](../runtime-integration/RUNTIME_INTEGRATION_IMPLEMENTATION_LOOP.zh.md)
+- E2E Dogfood Plan: [RUNTIME_INTEGRATION_E2E_DOGFOOD_PLAN.zh.md](../runtime-integration/RUNTIME_INTEGRATION_E2E_DOGFOOD_PLAN.zh.md)
+- Audit Checklist: [RUNTIME_INTEGRATION_AUDIT_CHECKLIST.zh.md](../runtime-integration/RUNTIME_INTEGRATION_AUDIT_CHECKLIST.zh.md)
+
+该文档包为后续 coding agent 提供实现蓝图，本阶段不做代码实现。
+
 ## Latest verification baseline
 
 - Phase 1 full pytest with temp HOME: `2723 passed, 14 skipped`.

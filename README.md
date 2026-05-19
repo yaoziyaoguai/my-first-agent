@@ -224,6 +224,7 @@ Explicit Non-Goals for v0.1:
 9. 手工试用反馈模板：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
 10. Event transition 准备：[V0_4_EVENT_TRANSITION_PREP.md](docs/V0_4_EVENT_TRANSITION_PREP.md)
 11. Skill 实验性状态记录：[V0_3_SKILL_SYSTEM_STATUS.md](docs/V0_3_SKILL_SYSTEM_STATUS.md)
+12. **Runtime Integration 设计文档包**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
 
 Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`。
 

@@ -39,14 +39,24 @@
 | D11 | RuntimeActionEvent 是否不可变？ | P1 | R | 代码审查 + unit test: R-TEST-1 #3 |
 | D12 | evidence 字段是否不含 secret？ | P0 | R | unit test: R-TEST-1 #6 + E2E dogfood E09 |
 | D13 | CAPABILITY_MODULE_MAPPING 是否覆盖所有 capability？ | P1 | E | unit test: E-TEST-1 #1 |
+| D14 | Skill action payload 是否包含 selected_skill_id, selection_confidence, body_load_decision, allowed_tools_after_selection, available_skill_metadata？ | P1 | S | 代码审查 + unit test: S-TEST-1 |
+| D15 | SubAgent action payload 是否包含 subagent_name, delegate_once_called, subagent_request_built, parent_adjudicated, no_nested_delegation, no_shell_or_external_process？ | P1 | A | 代码审查 + unit test: A-TEST-1 |
+| D16 | selected_skill_id 和 subagent_name 是否来自 RuntimeAction / model action decision，不允许外部传入？ | P1 | S/A | 代码审查：handler 不从外部 payload 取这些字段 |
+| D17 | RuntimeActionResult 是否包含 action_id 字段？ | P1 | R | 代码审查 + unit test: R-TEST-1 #9 |
+| D18 | RuntimeActionResult.evidence 是否包含 action_id, handler_name, target_module, module_invoked, invocation_proof, evidence_level？ | P0 | R | 代码审查 + unit test: R-TEST-3 |
 
 ### 1.3 不变式覆盖
 
 | # | 检查项 | 优先级 | Track | 验证方式 |
 |---|--------|--------|-------|----------|
-| D14 | 每项 SDD 不变式是否有对应测试？ | P0 | 全部 | TDD 文档对照：检查每个 Track 的不变式是否有测试 |
-| D15 | action event 是否在每次 route() 后产生？ | P0 | R | unit test: R-TEST-2 #7 |
-| D16 | "模型文本提到 X" 是否不再作为 pass 条件？ | P0 | E | E2E dogfood plan 检查：所有 pass 条件基于 RuntimeActionEvent |
+| D19 | 每项 SDD 不变式是否有对应测试？ | P0 | 全部 | TDD 文档对照：检查每个 Track 的不变式是否有测试 |
+| D20 | action event 是否在每次 route() 后产生？ | P0 | R | unit test: R-TEST-2 #7 |
+| D21 | "模型文本提到 X" 是否不再作为 pass 条件？ | P0 | E | E2E dogfood plan 检查 |
+| D22 | module_invoked=false 时 capability 不得标 runtime_e2e？ | P0 | R/E | unit test: R-TEST-3 #7, E-TEST-2 #2 |
+| D23 | E2E dogfood plan 中是否不存在 bash/shell/run_shell 作为 allowed tool？ | P1 | 全部 | 文档审查：grep bash/shell/run_shell in dogfood plan |
+| D24 | Memory hook 是否为 turn-end hook（而非仅 tool 后触发）？ | P1 | M | 代码审查 + unit test: M-TEST-1 #2 |
+| D25 | Streaming 是否处理了 unsupported provider 的 fail-closed 分支？ | P1 | P | 代码审查 + unit test: P-TEST-3 #4-7 |
+| D26 | Tool Alias Policy 是否在文档中定义且 E2E plan 遵循？ | P1 | T/E | 文档审查：检查 fake. 前缀使用 + ToolRegistry 真实 tool name
 
 ---
 
@@ -115,6 +125,9 @@
 | T12 | "模型文本提到 X" 不再作为任何 scenario 的 pass 条件？ | P0 | 全部 | 审查 dogfood runner 中所有 scenario 的 pass 条件 |
 | T13 | Direct subsystem invocation 场景已降级为 tests/ 下的 integration test？ | P2 | S/A/M/T/C/P | `git diff --stat` 确认新测试文件存在 |
 | T14 | Test 文件命名遵循 `test_<module>.py` 约定？ | P3 | 全部 | `ls tests/runtime_integration/` |
+| T15 | tool alias mismatch 检测测试是否存在？ | P1 | T | T-TEST-2 #7, #9 |
+| T16 | streaming unsupported provider 的 negative tests 是否存在？ | P1 | P | P-TEST-3 #4-7 |
+| T17 | E08 scenario 是否验证 module invocation proof（非仅 event）？ | P0 | E | E-TEST-4 #1, #4 |
 
 ---
 
@@ -141,6 +154,9 @@
 | S10 | disabled skill 是否不可见？ | P1 | S | S-TEST-2 #4 |
 | S11 | Memory 操作是否不绕过 governance？ | P0 | M | M-TEST-4 #1,3 |
 | S12 | RuntimeAction 是否不新增 tool 注册方式？ | P1 | T | T-TEST-4 #4 |
+| S13 | E2E plan / allowed_tools 中是否无真实 bash/shell/run_shell？ | P1 | 全部 | 文档审查 + grep：违反为 P1 |
+| S14 | fake tool（fake. 前缀）是否不会真实执行？ | P1 | T | unit test: T-TEST-2 #8 |
+| S15 | 禁止的 tool name（bash, shell, run_shell）是否在 gate 层被拒绝？ | P1 | T | unit test: T-TEST-2 #9 |
 
 ---
 
@@ -225,22 +241,28 @@
 3. evidence 字段不得包含 secret / raw key / raw prompt 内容
 4. RuntimeActionDispatcher 不得推进 Runtime state
 5. RuntimeActionDispatcher 不得持有 module-level global mutable state
+6. 每个 RuntimeActionResult 必须有唯一的 action_id（审计 P1-2 新增）
+7. runtime_e2e 必须同时满足 Action Evidence Contract 的 6 项条件（审计 P1-2 新增）
+8. module_invoked=false → 不得标 runtime_e2e（审计 P1-2 新增）
 
 ### Track S
-1. available_skills 中的每个 skill 必须是 active 状态且有合法 descriptor
+1. available_skill_metadata 中的每个 skill 必须是 active 状态且有合法 descriptor
 2. body 在 metadata 列表阶段不能被加载
 3. selected skill 的 allowed_tools 必须 ∩ ToolRegistry visible tools 非空
+4. selected_skill_id 的来源必须是 handler 内部的 LLM decision 记录，不得由外部传入（审计 P1-1 新增）
 
 ### Track A
 1. SubAgent delegation 必须经过 parent adjudication
 2. 被委派的 SubAgent status 必须是 active
 3. delegation 的 tool list 必须是 SubAgent descriptor allowed_tools 的子集
+4. subagent_name 必须来自 LLM tool call decision，不得由外部传入或后验补（审计 P1-1 新增）
 
 ### Track M
 1. Memory proposal 不得自动 confirmed
 2. secret-like 内容不得进入 proposal body
 3. Memory governance 不得被 Runtime Hook 绕过
 4. Runtime Hook 不得读取真实 sessions/runs/memory episodes
+5. Turn-end hook 在 tool-executed 和 no-tool turns 中都必须触发（审计 P1-4 新增）
 
 ### Track T
 1. hidden/unknown tool 必须被拒绝
@@ -252,9 +274,12 @@
 2. pending_high_risk_tool 不得在 checkpoint 中可重放
 
 ### Track P
-（无显式不变式，evidence 收集不影响行为）
+1. provider.supports_streaming=false 时：status="not_supported"，不得生成 fake final event（审计 P2-1 新增）
+2. unsupported provider streaming 不得标 runtime_e2e（审计 P2-1 新增）
 
 ### Track E
-1. capability 不得被标记为 runtime_e2e 除非存在对应的 RuntimeActionEvent
+1. capability 不得被标记为 runtime_e2e 除非存在对应的 RuntimeActionEvent **且** module_invoked=true（审计 P1-2 加强）
 2. subsystem_integration 不得被报告为 runtime_e2e
 3. mapping table 是 capability name 的单一事实来源
+4. RuntimeActionEvent 存在但 module_invoked=false → 最高只能 subsystem_integration（审计 P1-2 新增）
+5. 模型文本提到能力 → 不算任何级别的 evidence（审计 P1-2 新增）

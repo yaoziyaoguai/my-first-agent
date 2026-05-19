@@ -498,6 +498,62 @@ tests/runtime_integration/
 
 ---
 
+---
+
+## 全局 Stop Conditions（审计 P2-2 新增）
+
+只要出现以下任一情况，必须立即停止 Implementation Loop：
+
+1. 需要 SubAgent L1/L2
+2. 需要 shell / external process / worktree
+3. 需要 checkpoint schema change
+4. 需要 Memory governance change
+5. 需要 ToolRegistry authority change
+6. 需要读取 .env 内容
+7. 需要真实 sessions / runs / memory episodes
+8. E2E dogfood 只能靠 direct subsystem invocation（无法通过 chat() 验证）
+9. capability matrix 无法提供真实 module invocation evidence（module_invoked 始终为 false）
+10. RuntimeActionEvent 不能绑定真实 handler / module invocation
+11. full pytest 失败
+12. 出现 P0 / P1 / P2 阻塞项未解决
+13. 需要扩大 Observability（metrics / dashboard / trace viewer）
+14. 需要 DB / graph / embedding 作为依赖
+15. 需要真实 shell-like tool 执行
+
+## Implementation Notes 要求（审计 P2-2 新增）
+
+实现时必须维护以下文件：
+
+**路径**：`docs/implementation-notes/RUNTIME_INTEGRATION_IMPLEMENTATION_NOTES.md`
+
+要求：
+1. 必须边做边记，不要最后补
+2. 每个 Phase 完成后追加记录
+3. 记录内容至少包括：
+   - spec gaps（规格与实际实现之间的差距）
+   - assumptions（做出的假设）
+   - tradeoffs（关键的取舍和理由）
+   - deviations（与 SDD/TDD 的偏差及原因）
+   - stop condition near misses（差一点触发的 stop condition）
+   - action evidence design decisions（关于 evidence 收集的设计决策）
+   - runtime_e2e 判定争议（任何关于 runtime_e2e vs subsystem_integration 的判定争议）
+   - deferred risks（推迟处理的风险）
+4. 后续独立审计必须读取 implementation notes
+
+## 实现完成后的独立审计 Gate（审计 P2-2 新增）
+
+- Implementation Loop 完成后**不得直接 push**
+- 必须先做 **independent runtime integration implementation audit**
+- Audit 必须验证：
+  - action evidence 完整性（每个 runtime_e2e capability 满足 Action Evidence Contract 全部 6 项）
+  - module invocation 真实性（module_invoked=true 的证据链）
+  - E2E dogfood 可信度（pass 条件是否被诚实满足，有无自欺）
+  - tool alias 正确性（resolved_tool_name 来自 ToolRegistry）
+  - 全局 stop conditions 未被触发
+- Audit 通过后，才可进入 push/pre-release 流程
+
+---
+
 ## 设计约束重申
 
 以下约束在所有 Phase 中适用：

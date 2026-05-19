@@ -117,9 +117,8 @@ SubAgent L1 需要 Runtime LLM 在 tool calling 循环中**自主判断**委托�
 | Non-goal | 原因 |
 |----------|------|
 | SubAgent L1/L2 | 需要 Runtime Integration 完成后再设计 |
-| 真实 shell/external process/worktree | 安全边界，由 ToolRegistry gate 保护 |
-| DB / graph / embedding | 不在此阶段范围 |
-| Observability platform (OpenTelemetry / dashboard / trace viewer / metrics) | 不扩大 Observability 范围 |
+| 真实 shell / external process / worktree / bash | 安全边界，由 ToolRegistry gate 保护。E2E dogfood 中禁止使用 bash/shell/run_shell 作为 allowed tool，高风险诱导场景使用 fake. 前缀的测试 tool |
+| 扩大 Observability（OpenTelemetry / dashboard / trace viewer / metrics） | 不扩大范围，streaming 仅收集 E2E dogfood 验证所需最小字段 |
 | Checkpoint schema change | 保持现有 schema 稳定 |
 | Memory governance change | 现有 proposal→pending_review 链路不改变 |
 | ToolRegistry authority change | 现有 policy 层级不改变 |

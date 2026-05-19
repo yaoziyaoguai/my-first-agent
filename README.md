@@ -8,7 +8,9 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
 新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
 
-当前路线：`v0.9.x Stabilization` 只做行为中性的稳定化和 P3 重构，入口见 [V0_9_X_STABILIZATION_RFC.zh.md](docs/refactor/V0_9_X_STABILIZATION_RFC.zh.md)。该阶段不扩张功能，也不建设完整 Observability Platform；trace / runtime events 仅作为调试和审计证据。
+当前路线：`v0.9.x Stabilization` 只做行为中性的稳定化和 P3 重构，入口见 [V0_9_X_STABILIZATION_RFC.zh.md](docs/refactor/V0_9_X_STABILIZATION_RFC.zh.md)。
+
+**下一阶段：Runtime Integration / Runtime Action Harness** — E2E dogfood 诚实状态是 3 pass / 6 partial（6/9 场景未经过 Runtime 主循环）。Runtime Integration 提供统一的、可审计的 RuntimeAction 入口，使 Runtime LLM 可以通过 tool calling 触发子系统能力。SubAgent L1 deferred 至此阶段完成后。设计文档包：[docs/runtime-integration/](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md)（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）。
 
 ## 当前状态
 

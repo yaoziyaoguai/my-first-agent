@@ -199,6 +199,23 @@ Runtime Integration / Runtime Action Harness 设计文档包已就绪（Phase 3:
 
 该文档包为后续 coding agent 提供实现蓝图，本阶段不做代码实现。
 
+## Runtime Integration 文档独立审计修复（2026-05-19）
+
+Runtime Integration 文档包（96d8173）经独立红队审计，结论 PARTIAL。本轮（docs-only）修复了全部 P1/P2/P3：
+
+| Issue | Priority | Status | 修复摘要 |
+|-------|----------|--------|----------|
+| P1-1: Skill/SubAgent schema 不足以表达 LLM 真实选择 | P1 | fixed | SDD Track S/A 增加 selected_skill_id、selection_confidence、subagent_name、delegate_once_called 等字段；明确 selected_skill_id/subagent_name 来自 LLM tool call decision |
+| P1-2: RuntimeActionEvent 可能变自欺层 | P1 | fixed | SDD Track R 新增 R.6 Action Evidence Contract；runtime_e2e 必须同时满足 6 项条件（含 module_invoked=true）；evidence 字段增加 action_id/handler_name/target_module/module_invoked/invocation_proof |
+| P1-3: E2E plan 引入 shell scope creep | P1 | fixed | E2E Dogfood Plan 移除 bash；高风险诱导使用 fake. 前缀 test tool；non-goals 明确禁止 shell/bash/run_shell |
+| P1-4: Memory hook 与 E04 场景冲突 | P1 | fixed | SDD Track M 改为 turn-end hook（不依赖 tool execution）；M.7 增加不变式（no-tool turns 也触发） |
+| P2-1: Streaming unsupported provider 未入规格 | P2 | fixed | SDD Track P 增加 P.5 Unsupported Provider Branch；TDD 增加 P-TEST-3 #4-7 negative tests；E07 增加分支 B |
+| P2-2: Implementation Loop stop conditions 不完整 | P2 | fixed | Implementation Loop 增加全局 Stop Conditions（15 项）、Implementation Notes 要求、独立审计 Gate |
+| P2-3: Tool name mismatch | P2 | fixed | SDD Track T 增加 T.6 Tool Alias Policy；E2E Dogfood Plan 增加 Tool Alias Policy 章节；TDD 增加 tool alias resolution 测试 |
+| P3-1: README 入口太靠后 | P3 | fixed | README 前部增加 Runtime Integration 入口，说明当前 E2E 状态和下一阶段 |
+
+修复后状态：ready for second independent docs audit（不是 ready for implementation loop，除非独立审计通过）。
+
 ## Latest verification baseline
 
 - Phase 1 full pytest with temp HOME: `2723 passed, 14 skipped`.

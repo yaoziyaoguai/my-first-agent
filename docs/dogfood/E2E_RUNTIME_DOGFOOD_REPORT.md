@@ -67,13 +67,17 @@
 - E07_streaming: P3: direct subsystem call bypasses chat(), does not verify runtime-integrated behavior
 - direct_subsystem_invocation only (no chat() runtime path): ['E02_skill_selection', 'E03_subagent_l0', 'E04_memory_proposal', 'E05_tool_registry', 'E06_checkpoint', 'E07_streaming']
 
-## E. Hard Truth
+## E. Important Caveat
+
+**RuntimeActionEvent 不等于 runtime_e2e evidence**。RuntimeActionEvent 只是"收据"——记录了 route() 被调用。module invocation proof（handler_name + target_module + module_invoked=true）才是"证据"——证明了目标模块被实际执行。后续 Runtime Integration 实现必须同时满足 SDD R.6 Action Evidence Contract 的全部 6 项条件，不能仅凭 RuntimeActionEvent 判定 runtime_e2e。
+
+## F. Hard Truth
 
 - 场景结果: 3 pass, 6 partial, 0 blocked, 0 fail
 - 真实 API 调用场景: 3/9
 - 能力覆盖: 2 E2E verified, 0 partial, 12 not verified
 
-## F. Known Issues
+## G. Known Issues
 
 ### Capability matrix naming mismatch (P3)
 
@@ -95,7 +99,7 @@
 
 此问题将在 Runtime Integration / Runtime Action Harness（Track E）中修复。
 
-## G. Recommendation
+## H. Recommendation
 
 1. 当前 v0.9.x 不能声称 "9/9 E2E pass"，诚实状态是 3 pass / 6 partial。
 2. 下一步：完成 Runtime Integration / Runtime Action Harness 设计与实现，使 Runtime LLM 可以通过受控的 RuntimeAction path 触发子系统能力。

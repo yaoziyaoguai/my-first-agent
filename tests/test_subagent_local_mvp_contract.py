@@ -73,6 +73,27 @@ def test_invalid_profile_and_unsafe_paths_are_rejected(tmp_path) -> None:
         assert result.errors[0].code == "unsafe_path"
 
 
+def test_unsafe_subagent_path_preserves_policy_reason_before_read(monkeypatch) -> None:
+    """unsafe profile path 不能被泛化成 invalid_profile。
+
+    中文学习边界：SubAgent profile loader 的外层语义是“profile 无效”，但安全
+    拒绝必须保留底层 unsafe_path reason，并且不能尝试读取 SUBAGENT.md。
+    """
+
+    from agent.subagents.local import load_local_subagent_profile
+
+    def fail_if_read(_path: Path, *args, **kwargs) -> str:
+        raise AssertionError("unsafe subagent path must be rejected before read_text")
+
+    monkeypatch.setattr(Path, "read_text", fail_if_read)
+
+    result = load_local_subagent_profile(Path.home() / ".claude" / "agents" / "private-agent")
+
+    assert result.ok is False
+    assert result.errors[0].code == "unsafe_path"
+    assert result.errors[0].field == "path"
+
+
 def test_real_llm_process_and_tool_bypass_profiles_are_rejected(tmp_path) -> None:
     """local MVP 不能悄悄变成真实 LLM delegation 或 child process。"""
 

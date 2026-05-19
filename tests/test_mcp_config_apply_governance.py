@@ -170,6 +170,33 @@ def test_apply_blocks_home_sensitive_and_secret_like_paths_without_writing(tmp_p
         assert not blocked_path.exists()
 
 
+def test_apply_unsafe_path_fails_before_config_read(tmp_path, monkeypatch) -> None:
+    """apply 对 unsafe target 也必须先走 path policy，再读 config。
+
+    这是写入边界的安全契约：即使调用方提供了有效 plan，unsafe path 也不能
+    落到 read_failed 或后续 JSON 解析分支。
+    """
+
+    from agent.mcp_config_service import apply_mcp_config_plan, plan_add_mcp_server
+
+    safe_path = _write_config(tmp_path)
+    plan_result = plan_add_mcp_server(safe_path, name="gamma", command="gamma-server")
+
+    def fail_if_read(_path: Path, *args, **kwargs) -> str:
+        raise AssertionError("unsafe MCP apply path must be rejected before read_text")
+
+    monkeypatch.setattr(Path, "read_text", fail_if_read)
+
+    result = apply_mcp_config_plan(
+        Path.home() / ".config" / "mcp" / "config.json",
+        plan=plan_result.plan,
+        yes=True,
+    )
+
+    assert result.ok is False
+    assert result.errors[0].code == "unsafe_path"
+
+
 def test_apply_remove_does_not_execute_configured_server_command(tmp_path) -> None:
     """配置里的 command 只是文本；apply remove 不能启动 server 或 shell command。"""
 

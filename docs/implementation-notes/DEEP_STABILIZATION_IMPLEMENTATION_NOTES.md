@@ -52,11 +52,25 @@
 - Track B 执行：先将 benchmark tests 提升为 `>=12` scenarios 且要求 12 个 deep stabilization governance ids，测试按预期从 7 scenarios 失败；随后扩展 deterministic baseline 到 19 scenarios。`tests/test_stabilization_benchmark_baseline.py` 通过 `5 passed`，benchmark CLI 报告 `19 passed, 0 regressions`。
 - Track C/D/F 执行：先写红测试证明 provider heuristic、config import side effects、openai-compatible streaming fallback 仍存在；随后移除 provider URL/model guessing（缺失 provider_name 为 `unknown`）、将 `config.API_KEY` / `BASE_URL` 改成 lazy compatibility、移除 import-time `sessions/` mkdir，并让 `openai_compatible.stream()` 直接 `ProviderCapabilityError("streaming_not_supported")`。对应 targeted tests 已通过。
 - Track E 执行：新增 `tests/test_memory_session_isolation.py`，覆盖 session A pending cache 不污染 session B、独立 in-memory store 不串、filesystem store 只在 explicit accept 后可由新 store 实例重建、reject 跨 runtime 仍 no-write。测试通过 `4 passed`。剩余真实 LLM recall/injection quality 仍 deferred。
-- Verification：targeted tests、synthetic global dogfood、benchmark smoke、`git diff --check`、`ruff check agent tests scripts` 均通过；full pytest with temp HOME 通过 `2750 passed, 14 skipped`。
+- Verification：targeted tests、synthetic global dogfood、benchmark smoke、`git diff --check`、`ruff check agent tests scripts` 均通过；该轮 full pytest 数字已被 post-audit P2/P3 fix round 的当前基线取代。
+
+## Post-audit P2/P3 fix round
+
+- 初始状态：本轮从 `d17f887 refactor(project): close deep stabilization audit gaps` 继续，工作区 clean，`main...origin/main [ahead 1]`，`origin/main...HEAD` 为 `0 1`，HEAD 无 tag。本轮不 push、不 tag。
+- MCP path policy root cause：独立审计记录的 5 个失败不是 `d17f887` 引入，而是 pre-existing path validation 顺序/错误码风险：unsafe home-sensitive / secret-like path 如果落到文件读取分支，会表现成 `read_failed`；SubAgent unsafe profile 如果被外层 profile 语义吞掉，会表现成 `invalid_profile`。当前代码已先走 policy，指定 5 测试在本轮初始复现为 `5 passed`；仍补充 fail-before-read 测试固定契约。
+- MCP path policy final semantics：MCP config / plan / apply / external readiness / SubAgent local profile 的 unsafe path 必须在 IO 前由 policy 层拒绝，稳定错误码为 `unsafe_path`。`read_failed` 只表示 safe path 已通过 policy 但文件无法读取；`invalid_profile` 只表示 safe profile dir 里的 `SUBAGENT.md` 结构无效，不能覆盖 `unsafe_path`。
+- `d17f887` 归因：MCP path policy 失败风险、Memory real LLM quality gap、benchmark comparator 自证、文档数字过期、transition split fixture debt、CLI/TUI adapter debt 均为 pre-existing 或独立审计后暴露的问题；本轮仍修复/记录，因为它们影响 post-audit readiness 的真实性。
+- Memory recall/injection：新增 `tests/test_memory_recall_injection_baseline.py`，覆盖 confirmed memory 可经 `MemoryRuntime/Store -> MemorySnapshot -> prompt_builder` 注入、pending/rejected 不注入、scope 边界不串、secret-like value 默认不进 prompt、deterministic selector/order/budget 可复现。这补的是 deterministic governance baseline，不证明真实 LLM semantic recall quality。
+- Memory deferred quality：real LLM semantic quality、embedding/vector retrieval、真实用户语义召回/注入评估仍是 future gated evaluation；不得把 Memory 标成 semantic quality completed。该 gap 阻塞 v1.0 quality claim，不阻塞 v0.9.x safety/stabilization。
+- Benchmark comparator root cause：`scripts/stabilization_benchmark_baseline.py` 曾把 `actual_boundary = expected_boundary`，导致 19/19 by-construction pass。新增 `collect_deterministic_observations()` 和 `evaluate_benchmark_scenario()`，actual boundary 只能来自独立 observation；缺 observation 为 `not_covered`，不一致为 `regression`，空 expected 为 `invalid_definition`。
+- Transition split P3：当前 split tests 保留局部 import，避免在 characterization tests 之间引入新共享 coupling。未来等模式稳定后可抽 shared helper/fixture，但本轮不为 P3 debt 强行重构测试结构。
+- CLI/TUI adapter P3：README / audit 状态只能写 acceptable with adapter debt，不能写 fully healthy。本轮不做 CLI/TUI 重构，避免扩大架构改动。
+- Verification update：post-audit fix full pytest with temp HOME 通过 `2761 passed, 14 skipped`；旧 `2750 passed` 数字已从 audit/test matrix 的当前基线中移除。
+- Deferred risks：真实 MCP server activation、真实 LLM semantic memory evaluation、Skill/SubAgent 真实用户 dogfood、CLI/TUI adapter cleanup、Memory M4 consolidation/snapshot split、DB/graph/embedding/vector store 均保持 gated/future。
 
 ## Remaining risks after this round
 
-- Memory real LLM recall/injection quality 仍未被证明；本轮只证明 deterministic governance / isolation，不证明真实语义召回质量。
+- Memory real LLM recall/injection quality 仍未被证明；本轮只证明 deterministic governance / isolation / recall-injection baseline，不证明真实语义召回质量。
 - Skill/SubAgent 仍主要靠 deterministic synthetic dogfood；真实用户 dogfood 需要独立授权和 fixture 设计。
 - CLI/TUI 仍有 adapter debt，`main.py` 未在本轮大拆。
 - `openai_compatible` streaming 未实现；当前正确状态是 fail-closed，future enhancement 需要单独设计。

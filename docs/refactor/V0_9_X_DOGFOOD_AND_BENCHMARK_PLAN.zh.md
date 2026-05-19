@@ -177,8 +177,9 @@ Safety baseline 至少覆盖：
 | `input_hash` | fixed synthetic input 的 hash |
 | `expected_boundary` | 预期保护的架构边界 |
 | `actual_boundary` | 实际观察到的边界行为 |
+| `actual_boundary_source` | actual boundary 的来源；post-audit fix 后应为独立 deterministic observation，而不是 expected copy |
 | `result` | `pass` / `fail` / `skipped` / `gated` / `uncovered` |
-| `regression_status` | `none` / `regression` / `unknown` / `not_comparable` |
+| `regression_status` | `stable` / `regression` / `not_covered` / `invalid_definition` / `unknown` |
 
 推荐扩展字段：
 
@@ -212,7 +213,7 @@ v0.9.x Stabilization implementation loop 已按本文最小范围落地以下 ev
 | Global synthetic dogfood | `scripts/dogfood_global_scenarios.py` 固定 12 个 definition-only scenarios；`scripts/dogfood_global_real_api.py --mode synthetic` 12/12 passed | 不默认 real API，不读取 `.env` |
 | Provider preflight | `scripts/dogfood_provider_preflight.py` 输出 sanitized public packet；shell env fallback 仍 blocked | 只报告来源和 provider metadata，不输出 secret |
 | Memory synthetic review | `tests/test_memory_stabilization_m1.py` 覆盖 reject/session-only/approved/pending_review/inline no-write/Skill/SubAgent proposal | Phase 9 final dogfood 将此结果计入 M5 audit readiness |
-| Benchmark baseline | `scripts/stabilization_benchmark_baseline.py` 生成 19 个 deterministic synthetic governance scenarios；`tests/test_stabilization_benchmark_baseline.py` 覆盖 reproducibility 和 deep stabilization scenario ids | 不是 metrics system，不做 trace viewer，不调用真实 LLM |
+| Benchmark baseline | `scripts/stabilization_benchmark_baseline.py` 生成 19 个 deterministic synthetic governance scenarios；`tests/test_stabilization_benchmark_baseline.py` 覆盖 reproducibility、deep stabilization scenario ids、independent comparator negative cases | 不是 metrics system，不做 trace viewer，不调用真实 LLM；actual boundary 不能由 expected boundary 直接赋值 |
 | Large test split evidence | `tests/test_transition_*.py` 承载 v0.4 transition characterization；`tests/test_v0_4_transition_boundaries.py` 降为索引；`tests/test_global_dogfood_boundaries.py` 承载 D1/D2 边界测试 | 不降低覆盖，不把新测试塞回巨型历史文件 |
 
 ## 7. Observability future track

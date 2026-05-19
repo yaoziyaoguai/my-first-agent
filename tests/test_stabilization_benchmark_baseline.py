@@ -10,6 +10,7 @@ import json
 
 from scripts.stabilization_benchmark_baseline import (
     build_benchmark_report,
+    evaluate_benchmark_scenario,
     compute_input_hash,
     write_benchmark_report,
 )
@@ -59,11 +60,13 @@ def test_benchmark_entries_have_required_audit_fields() -> None:
         "input_hash",
         "expected_boundary",
         "actual_boundary",
+        "actual_boundary_source",
         "result",
         "regression_status",
     }
     assert entry["result"] == "pass"
     assert entry["regression_status"] == "stable"
+    assert entry["actual_boundary_source"] == "deterministic_observation"
 
 
 def test_benchmark_hash_changes_when_input_changes() -> None:
@@ -72,6 +75,58 @@ def test_benchmark_hash_changes_when_input_changes() -> None:
     assert compute_input_hash("remember concise answers") != compute_input_hash(
         "delegate safe local task",
     )
+
+
+def test_benchmark_comparator_fails_when_observed_boundary_is_missing() -> None:
+    """只有 scenario definition、没有 observation 时不得 pass。"""
+
+    report = build_benchmark_report(observations={})
+    entry = report["scenarios"][0]
+
+    assert entry["actual_boundary"] == ""
+    assert entry["result"] == "fail"
+    assert entry["regression_status"] == "not_covered"
+    assert report["summary"]["passed"] == 0
+    assert report["summary"]["failed"] == report["summary"]["total"]
+
+
+def test_benchmark_comparator_detects_boundary_regression() -> None:
+    """actual_boundary 必须来自独立 observation，不得直接复制 expected。"""
+
+    baseline = build_benchmark_report()
+    first = baseline["scenarios"][0]
+    scenario_id = first["scenario_id"]
+
+    report = build_benchmark_report(observations={
+        scenario_id: "runtime:wrong_boundary",
+    })
+    entry = next(
+        scenario for scenario in report["scenarios"]
+        if scenario["scenario_id"] == scenario_id
+    )
+
+    assert entry["expected_boundary"] != entry["actual_boundary"]
+    assert entry["result"] == "fail"
+    assert entry["regression_status"] == "regression"
+    assert report["summary"]["regressions"] == 1
+
+
+def test_evaluate_benchmark_scenario_rejects_empty_expected_boundary() -> None:
+    """expected_boundary 为空也不能被默认标成 stable。"""
+
+    from scripts.stabilization_benchmark_baseline import BenchmarkScenario
+
+    entry = evaluate_benchmark_scenario(
+        BenchmarkScenario(
+            scenario_id="bad-definition",
+            synthetic_input="definition missing boundary",
+            expected_boundary="",
+        ),
+        observed_boundary="runtime:observed",
+    )
+
+    assert entry["result"] == "fail"
+    assert entry["regression_status"] == "invalid_definition"
 
 
 def test_write_benchmark_report_round_trips_json(tmp_path) -> None:

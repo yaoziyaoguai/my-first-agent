@@ -55,6 +55,7 @@ python -m pytest tests/test_tool_exposure.py tests/test_tool_registry_contract.p
 python -m pytest tests/test_memory_interaction.py tests/test_memory_interactive_confirmation.py -q
 python -m pytest tests/test_transition_*.py tests/test_v0_4_transition_boundaries.py -q
 python -m pytest tests/test_memory_session_isolation.py tests/test_stabilization_benchmark_baseline.py -q
+python -m pytest tests/test_memory_recall_injection_baseline.py tests/test_memory_session_isolation.py -q
 ```
 
 ## Stabilization benchmark
@@ -65,7 +66,10 @@ python scripts/benchmark_stabilization_baseline.py --report-json /tmp/my-first-a
 
 当前 baseline 是 deterministic synthetic evidence：19 scenarios，覆盖 Memory /
 Skill / SubAgent / ToolRegistry / Checkpoint / Confirmation / Provider / CLI/TUI /
-Dogfood 边界。不读取 `.env`，不调用真实 LLM。
+Dogfood 边界。不读取 `.env`，不调用真实 LLM。post-audit fix 后
+`actual_boundary` 来自独立 deterministic observation/comparator；缺失 observation
+必须标为 `not_covered`，不一致必须标为 `regression`，不能由
+`expected_boundary` 直接赋值 pass。
 
 ## Synthetic dogfood
 
@@ -123,10 +127,11 @@ python -m pytest tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.
 ## 最近审计基线
 
 - `ruff`: passed。
-- full pytest: `2750 passed, 14 skipped` with temp HOME after deep stabilization hardening。
+- full pytest: `2761 passed, 14 skipped` with temp HOME after post-audit P2/P3 fixes。
 - SubAgent synthetic dogfood: `16/16 passed`。
 - Global synthetic dogfood: `12/12 passed`，evidence 来自 deterministic `synthetic_checks`，不冒充真实动态执行。
-- Stabilization benchmark: `19/19 passed`，deterministic/no real LLM。
+- Memory recall/injection baseline: deterministic store-to-snapshot-to-prompt governance only；real LLM semantic quality 仍是 future gated evaluation。
+- Stabilization benchmark: `19/19 passed`，deterministic/no real LLM，actual boundary 来自独立 comparator。
 - Global real-api dogfood: `12/12 passed`，通过 provider factory。
 - Skill real-api dogfood: `7/7 passed`，通过 provider factory；受 sandbox 网络限制时可能 blocked，需要按用户授权提升执行真实 provider 调用。
 - memory/episodes runtime jsonl 不再被 git tracked。

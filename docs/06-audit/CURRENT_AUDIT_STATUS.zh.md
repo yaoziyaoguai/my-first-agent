@@ -44,7 +44,7 @@ Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening i
 | D: Dogfood runner D1-D2 | completed locally | `scripts/dogfood_global_scenarios.py` 承载 definition-only scenarios；`scripts/dogfood_provider_preflight.py` 集中 provider preflight；synthetic global dogfood 12/12 passed |
 | G: Config unification G1 | completed locally | `tests/test_config_authority_boundaries.py` 固定 provider config authority 与 local/legacy config 边界；project dotenv scoped loader 继续显式 opt-in |
 | M: Memory M1-M3 + M5 docs | completed locally / pending final dogfood | `tests/test_memory_stabilization_m1.py` 锁定 no silent retain、pending_review、inline confirmation、Skill/SubAgent 不直写；`agent/memory_confirmation_forms.py` 集中 confirmation form 语义；M5 dogfood 由 Phase 9 final verification 计入 audit readiness |
-| B: Benchmark baseline | completed locally | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic report；deep stabilization 已从 7 扩展到 19 scenarios，覆盖 Memory/Skill/SubAgent/Checkpoint/Confirmation/Provider/Dogfood 组合边界 |
+| B: Benchmark baseline | completed locally | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic report；deep stabilization 已从 7 扩展到 19 scenarios，覆盖 Memory/Skill/SubAgent/Checkpoint/Confirmation/Provider/Dogfood 组合边界；post-audit fix 已增加独立 comparator，actual boundary 不再由 expected boundary 赋值 |
 | T: Large tests split | completed locally | `tests/test_transition_*.py` 从 `tests/test_v0_4_transition_boundaries.py` 拆出 transition characterization；旧文件降为轻量索引；`tests/test_global_dogfood_boundaries.py` 承载 D1/D2 边界测试 |
 
 ## Deep Stabilization hardening
@@ -57,6 +57,17 @@ Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening i
 - `config.py` 不再在 import 时创建 `sessions/`；`API_KEY` / `BASE_URL` 改为 lazy compatibility attrs，新增显式 legacy getter。
 - `openai_compatible` 明确 `supports_streaming=False`，直接调用 `stream()` 时 fail closed，不静默 fallback 到 non-streaming。
 - Memory 增加 deterministic session isolation characterization，区分 runtime pending cache 与 filesystem store 持久层。
+
+## Post-audit P2/P3 fixes
+
+独立审计确认 `d17f887` scope 干净且无 P0/P1，但暴露两个 P2 和若干 P3。本节记录 post-audit fix round 的真实处理状态：
+
+- MCP config path policy：pre-existing 风险，非 `d17f887` 引入。最终契约是 home-sensitive、secret-like、sessions/runs、agent_log 等 unsafe path 必须在读取前由 policy 层拒绝，稳定错误码为 `unsafe_path`。`read_failed` 只允许出现在 safe path 通过 policy 后的真实读取失败；SubAgent unsafe profile path 也必须保留 `unsafe_path`，不能被外层 `invalid_profile` 吞掉。
+- Memory recall/injection quality：新增 deterministic baseline，覆盖 confirmed memory 可经 `MemoryRuntime/Store -> MemorySnapshot -> prompt_builder` 注入、pending/rejected 不注入、scope 边界不串、secret-like value 不进 prompt、selector/order/budget 可复现。该 baseline 只证明 deterministic retrieval/injection governance，不证明 real LLM semantic quality。
+- Memory semantic-quality gate：real LLM recall/injection semantic quality 仍是 future gated evaluation；不得把 Memory 标成 semantic quality completed。该 gap 是 v1.0 quality 风险，不是 v0.9.x safety blocker。
+- Benchmark comparator：pre-existing P3，已修。`actual_boundary` 现在来自 deterministic observation/comparator；缺 observation 标为 `not_covered`，不一致标为 `regression`，空 expected 标为 `invalid_definition`，避免 by-construction pass。
+- Transition split fixture debt：保留为 future P3。当前 split files 使用局部 import 是为了避免 characterization tests 之间新增 coupling；等模式稳定后再抽 shared helper/fixture。
+- CLI/TUI adapter debt：保留为 future P3。当前状态只能写 acceptable with adapter debt，不能写 fully healthy；本轮不做 CLI/TUI 重构。
 
 ## Final audit environment fix
 
@@ -83,7 +94,7 @@ Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening i
 | Memory module 仍偏大 | P3 / deferred | M1 characterization 与 session isolation tests 已补；M3 confirmation form 语义已集中；Memory governance 不变；M4 consolidation / snapshot 边界仍 deferred，不建议本轮机械拆分 |
 | Large test files | partially fixed / P3 remains | `tests/test_v0_4_transition_boundaries.py` 已拆分；多个 Memory tests 仍承载 characterization coverage，需要 future test split，不阻塞 push |
 | Large dogfood runners | P3 / deferred | D1 scenario definition 与 D2 provider preflight 已拆出；runner report / governance matrix 仍可按 D3-D4 后续小切片拆，不建议本轮机械拆分 |
-| Benchmark baseline scenarios | fixed for v0.9.x | 当前 deterministic baseline 为 19 scenarios；future B2 可继续增加真实回归比较器，但仍保持 no real LLM、deterministic only，不能变成 metrics platform |
+| Benchmark baseline scenarios | fixed for v0.9.x | 当前 deterministic baseline 为 19 scenarios；post-audit fix 已增加独立 comparator，actual boundary 来自 deterministic observation，缺失或不一致不得 pass；future B2 可继续增加报告深度，但仍保持 no real LLM、deterministic only，不能变成 metrics platform |
 | `review_agent_output` dead code | fixed | 无调用点且非 documented public API，已删除，避免继续保留 direct `client.messages.create` 形状 |
 | CURRENT_AUDIT_STATUS / docs 状态同步 | fixed | 本节记录 fixed/deferred 状态；`TEST_MATRIX` 同步 provider/streaming/dogfood selected tests |
 
@@ -93,7 +104,7 @@ Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening i
 |---|---|---|---|
 | Runtime/Core/Loop | Healthy with P3 backlog | provider streaming 通过 `ModelProvider.stream` / `agent.model_call`；runtime loop fields projection 已抽出；architecture tests 固定边界 | P3: `core.py` 仍偏大，需 characterization-first |
 | ToolRegistry/ToolExecutor | Healthy | ToolRegistry metadata、confirmation、visibility tests | P3: 全局 registry 仍需谨慎测试隔离 |
-| Memory | Healthy with P3 cleanup, real-quality gap explicit | no silent retain / no auto approve；M1 characterization 覆盖 pending_review / inline confirmation / Skill/SubAgent proposal；session isolation tests 覆盖 runtime cache vs filesystem store；LLM path 走 provider injection | P3/future: real LLM recall/injection quality 仍需 gated 验证；M4 consolidation / snapshot boundary deferred |
+| Memory | Healthy with P3 cleanup, semantic-quality gap explicit | no silent retain / no auto approve；M1 characterization 覆盖 pending_review / inline confirmation / Skill/SubAgent proposal；session isolation tests 覆盖 runtime cache vs filesystem store；deterministic recall/injection baseline 覆盖 store->snapshot->prompt；LLM path 走 provider injection | P2/future: real LLM semantic recall/injection quality 仍需 gated 验证；M4 consolidation / snapshot boundary deferred |
 | Skill | Healthy | formal `agent/skill_system/`；legacy 隔离；synthetic + real API dogfood 证据 | P3: docs 多，入口需靠新索引 |
 | SubAgent | Healthy | L0 complete；T1 synthetic dogfood 16/16；L1-L5 gated/future | none blocking |
 | Checkpoint | Healthy | 截断 tool_result；过滤未知字段；Skill/SubAgent summary safe | none blocking |
@@ -137,7 +148,8 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Global governance matrix is generated from scenario result check fields; uncovered boundaries must not be marked pass.
 - Synthetic dogfood evidence comes from deterministic synthetic checks; `expected_evidence` is only scenario definition.
 - Benchmark baseline now has 19 deterministic governance scenarios; future B2 should add comparison/reporting depth only if it stays no real LLM and does not become a metrics platform.
-- Memory real LLM recall/injection quality remains a future gated track; deterministic tests cover governance and session isolation, not true semantic quality.
+- Benchmark comparator now uses deterministic observations for actual boundary; uncovered or mismatched observations are fail/not_covered/regression, not pass.
+- Memory real LLM recall/injection quality remains a future gated track; deterministic tests cover governance, session isolation, and store-to-snapshot-to-prompt injection, not true semantic quality.
 - Skill/SubAgent real user dogfood and true multi-process/session productization remain future tracks.
 - `openai_compatible` streaming remains unsupported by design and must fail closed until a dedicated provider streaming enhancement lands.
 
@@ -147,7 +159,7 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Phase 2 full pytest with temp HOME: `2721 passed, 14 skipped`.
 - Phase 3 full pytest with temp HOME: `2723 passed, 14 skipped`.
 - Phase 5 full pytest with temp HOME: `2732 passed, 14 skipped`.
-- Deep stabilization full pytest with temp HOME: `2750 passed, 14 skipped`.
+- Post-audit P2/P3 fix full pytest with temp HOME: `2761 passed, 14 skipped`.
 - synthetic global dogfood: `12/12 passed`.
 - synthetic skill dogfood: `12/12 passed`.
 - synthetic subagent dogfood: `16/16 passed`.

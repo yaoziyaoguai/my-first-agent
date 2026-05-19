@@ -188,6 +188,27 @@ def test_safe_path_policy_rejects_sensitive_and_home_paths(tmp_path) -> None:
         assert result.errors[0].code == "unsafe_path"
 
 
+def test_unsafe_path_fails_before_file_read(monkeypatch) -> None:
+    """unsafe_path 是 policy 层错误，必须在任何 read_text 之前返回。
+
+    中文学习边界：这里不创建真实敏感文件，也不读取 home。测试通过替换
+    Path.read_text 证明 safe path policy 位于 IO 前面，避免错误码退化成
+    read_failed 或泄漏成文件系统探测。
+    """
+
+    from agent.mcp_config import load_mcp_config
+
+    def fail_if_read(_path: Path, *args, **kwargs) -> str:
+        raise AssertionError("unsafe MCP path must be rejected before read_text")
+
+    monkeypatch.setattr(Path, "read_text", fail_if_read)
+
+    result = load_mcp_config(Path.home() / ".config" / "mcp" / "config.json")
+
+    assert result.ok is False
+    assert result.errors[0].code == "unsafe_path"
+
+
 def test_safe_summary_and_model_repr_do_not_leak_secret_values() -> None:
     """Slice 2 presenter 之前，Slice 1 model/summary 已不能泄漏 secret。"""
 

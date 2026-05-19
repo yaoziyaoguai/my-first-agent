@@ -13,6 +13,8 @@
 | ToolExecutor | 已完成主路径 | selected tests | on | 负责 tool_result、pending confirmation、checkpoint |
 | Memory explicit retain | 已完成 | tests + dogfood evidence | on | 必须经 confirmation |
 | Memory pending review | 已完成 | tests | on | no silent retain |
+| Memory deterministic recall/injection | 已完成 deterministic governance baseline | tests | on when store injected | 只证明 store-to-snapshot-to-prompt、scope/budget/secret filtering；不证明 semantic quality |
+| Memory semantic recall/injection quality | future gated | no real LLM eval yet | off | 需要真实 LLM/语义质量评估授权；不得标成 completed |
 | Memory consolidation/emergence | foundation 已完成 | synthetic + real gated evidence | gated/opt-in | direct store write 仍受 governance |
 | Skill System | 已完成 formal safe-local | synthetic + real API dogfood | on for formal local contracts | 不默认安装远程 skill |
 | SubAgent L0 | 已完成 | T1 synthetic 16/16 | on for local deterministic contracts | no real LLM / no shell / no external process |
@@ -23,7 +25,7 @@
 | SubAgent L5 Parallel Multi-SubAgent | future | no | off | 不默认 nested delegation |
 | Checkpoint / Resume | 已完成安全边界 | selected tests | on | 截断大 tool_result，过滤未知字段 |
 | Confirmation / Ask User | 已完成主路径 | selected tests | on | 人类控制边界 |
-| CLI/TUI | 已完成 adapter boundary | selected tests | on | TUI 可选；simple CLI fallback |
+| CLI/TUI | acceptable adapter boundary with P3 debt | selected tests | on | TUI 可选；simple CLI fallback；不能写成 fully healthy/productized |
 | Real LLM provider | gated | opt-in smoke | off unless configured | 默认测试不调用真实 provider |
 | External process | gated/high risk | no default dogfood | off by default | 需 ToolRegistry + confirmation |
 | Shell | high risk | no default SubAgent | off by default | `run_shell` 需 confirmation |

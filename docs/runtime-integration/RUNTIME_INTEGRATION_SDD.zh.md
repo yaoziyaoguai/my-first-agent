@@ -166,9 +166,15 @@ evidence = {
     "action_id": str,                    # 本次 action 的唯一 ID
     "action_type": str,                  # RuntimeActionType 值
     "handler_name": str,                 # 实际处理此 action 的 handler 类名/函数名
-    "target_module": str,                # 目标子系统模块名（如 "SkillRegistry", "SubAgentExecutor"）
+    "target_module": str,                # 目标子系统模块名（如 "SkillLoader", "SubAgentExecutor"）
     "module_invoked": bool,              # 目标模块是否被实际调用（true/false）
-    "invocation_proof": str | None,      # 调用证据说明（如 "SkillLoader.load_body('code-review') returned body"）
+    "invocation_proof": {                # 结构化调用证据（审计第二轮：不再接受 free-text str）
+        "call_id": str,                  # 本次 module 调用的唯一 ID（UUID，可追溯到 spy/mock 观察点）
+        "function_called": str,          # 实际被调用的函数/方法全限定名（如 "SkillLoader.load_body"）
+        "call_signature": str,           # 观察到的调用签名（参数类型，不含参数值——避免泄露敏感数据）
+        "observed_at": str,              # ISO timestamp，调用被观察到的时间
+        "observation_method": str,       # 观察方式："module_spy" | "return_value_check" | "side_effect_trace"
+    } | None,                            # module_invoked=false 时为 None
     "evidence_level": str,               # "runtime_e2e" | "subsystem_integration" | "deterministic_baseline" | "simulated" | "not_covered"
     "parent_adjudicated": bool | None,   # 仅 SubAgent action：是否经过 parent adjudication
 }
@@ -180,7 +186,7 @@ evidence = {
 - `module_invoked` 缺失 → 同 false，不得标 runtime_e2e。
 - `subsystem direct invocation`（未经过 Dispatcher）→ 最高只能 `subsystem_integration`。
 - `模型文本提到 X` → **不算任何级别的 evidence**。
-- `RuntimeActionEvent 存在但无 handler_name/target_module/invocation_proof` → 最高只能 `subsystem_integration`。
+- `RuntimeActionEvent 存在但 invocation_proof 为 None 或缺少 function_called/call_id` → 最高只能 `subsystem_integration`（无法证明模块被调用）。
 
 ---
 
@@ -199,8 +205,9 @@ evidence = {
 ```python
 # 中文学习型注释：skill.select 的输入 payload。
 # available_skill_metadata 只含 name/description/tags/risk_level，不含 body。
-# selected_skill_id 必须在 handler 内部由 LLM decision 填充（不是 payload 传入），
-# 确保 selected_skill_id 来自 RuntimeAction / model action decision，不允许报告里后验补。
+# selected_skill_id 来自 model tool-call arguments（RuntimeActionRequest.payload），
+# 即 LLM 在 tool call 中显式指定要选择哪个 skill。
+# handler 的职责是验证（该 skill 存在且可被选择），不是"决定"选哪个。
 {
     "task_summary": str,                          # 当前任务描述
     "constraints": list[str],                     # 约束条件，如 ["read_only", "no_shell"]
@@ -213,6 +220,7 @@ evidence = {
             "status": str,                        # active | disabled | hidden
         }
     ],
+    "selected_skill_id": str,                    # LLM 在 tool call arguments 中指定的 skill name（来自 model decision）
     "selection_context": str | None,              # 额外的选择上下文（可选）
 }
 ```
@@ -232,7 +240,7 @@ evidence = {
     "allowed_tools_after_selection": list[str],   # 选中 skill 的 allowed_tools（从 descriptor 提取）
     "no_suitable_skill": bool,                    # 无可选 skill
     "available_skills_count": int,                # metadata 阶段可用的 skill 数量
-    "hidden_or_disabled_excluded": list[str],     # 被排除的 hidden/disabled skill name 列表
+    "hidden_or_disabled_excluded_count": int,     # 被排除的 hidden/disabled skill 数量（仅计数，不暴露名称——hidden skill 名称不得出现在任何 evidence 中）
 }
 ```
 
@@ -244,7 +252,7 @@ evidence = {
 4. Handler 记录 selected_skill_id（来自 LLM decision），调用 SkillSelector
 5. **此时才加载选中 skill 的 body**（调用 SkillLoader.load_body()）
 6. 返回的 RuntimeActionResult 包含 body 内容（但不在 evidence 中暴露 body 全文）
-7. Handler 必须在 invocation_proof 中记录 SkillLoader.load_body() 的调用结果
+7. Handler 必须在 structured invocation_proof 中记录 SkillLoader.load_body() 的调用结果（call_id + function_called + call_signature + observed_at）
 
 ### S.6 Skill runtime_e2e 必须证明（强制）
 
@@ -252,23 +260,23 @@ evidence = {
 2. SkillSelector 被调用（handler invocation 证据）
 3. selected_skill_id 有值且来自 LLM tool call decision（不是后验补的）
 4. selected skill body 在选择后才加载（body_load_decision=true，progressive disclosure）
-5. hidden/disabled skill 未出现在 available_skill_metadata 中
+5. hidden/disabled skill 未出现在 available_skill_metadata 中，其名称也不在任何 evidence 字段中暴露（仅通过 hidden_or_disabled_excluded_count 记录数量）
 6. RuntimeActionResult.evidence.module_invoked=true, handler_name="SkillRuntimeActionHandler", target_module="SkillLoader"
 
 ### S.7 约束
 
-- hidden/disabled skill 不得出现在 available_skill_metadata 中
+- hidden/disabled skill 不得出现在 available_skill_metadata 中（其名称不得在任何 evidence 中暴露，仅可通过计数推断排除量）
 - selected skill 的 allowed_tools 不得超出 skill descriptor 声明的范围
 - 不直接执行 tools——tool execution 走 Track T（ToolRegistry Action Gate）
 - missing `version` / `description` 等字段的 skill 不应出现在 available_skill_metadata 中（已在 8aa11a4 的 `get_load_errors()` 中解决）
-- selected_skill_id 必须来自 RuntimeAction / model action decision，不允许报告里后验补
+- selected_skill_id 必须来自 model tool-call arguments（即 RuntimeActionRequest.payload.selected_skill_id），handler 只做验证不做选择，不允许报告里后验补
 
 ### S.8 不变式
 
 1. available_skill_metadata 中的每个 skill 必须是 active 状态且有合法 descriptor。
 2. body 在 metadata 列表阶段不能被加载（progressive disclosure）。
 3. selected skill 的 allowed_tools 必须 ∩ ToolRegistry visible tools 非空（否则 skill 选了也无法执行任何 tool）。
-4. selected_skill_id 的来源必须是 handler 内部的 LLM decision 记录，不得由外部传入。
+4. selected_skill_id 必须来自 model tool-call arguments（RuntimeActionRequest.payload.selected_skill_id），handler 只做验证（skill 存在且 active），不得由 handler 自行决定选哪个 skill，不得后验补。
 
 ---
 
@@ -286,7 +294,8 @@ evidence = {
 
 ```python
 # 中文学习型注释：subagent.delegate_l0 的输入 payload。
-# subagent_name 是 LLM 的显式选择，在 tool call arguments 中指定。
+# subagent_name 来自 model tool-call arguments（LLM 在 tool call 中显式指定）。
+# handler 的职责是验证（该 SubAgent 存在且 active），不是"决定"委派给谁。
 # available_subagent_metadata 提供可选 SubAgent 的 metadata，供 LLM 做选择。
 {
     "delegation_goal": str,                       # 委托目标（来自 LLM）
@@ -335,7 +344,7 @@ evidence = {
    - delegation 上下文中是否已有 in_delegation_context=True（防嵌套）
 4. Handler 构建 SubAgentRequest，调用 `delegate_once(request, registry)`（现有 L0 executor）
 5. Parent adjudication（现有 `SubAgentAdjudication` 逻辑）
-6. Handler 在 invocation_proof 中记录 delegate_once 调用结果和 adjudication 结论
+6. Handler 在 structured invocation_proof 中记录 delegate_once 调用结果和 adjudication 结论（call_id + function_called + call_signature + observed_at）
 7. 返回 RuntimeActionResult
 
 ### A.6 SubAgent runtime_e2e 必须证明（强制）
@@ -361,7 +370,7 @@ evidence = {
 1. SubAgent delegation 必须经过 parent adjudication。
 2. 被委派的 SubAgent status 必须是 active。
 3. delegation 的 tool list 必须是 SubAgent descriptor allowed_tools 的子集。
-4. subagent_name 必须来自 LLM tool call decision，不得由外部传入或后验补。
+4. subagent_name 必须来自 model tool-call arguments（RuntimeActionRequest.payload.subagent_name），handler 只做验证（SubAgent 存在且 active），不得后验补。
 
 ---
 
@@ -472,6 +481,10 @@ chat() loop:
     "risk_level": str,                   # "low" | "medium" | "high"
     "policy_path": str,                  # 经过的 policy 路径（如 "tool_registry→risk_check→confirmation"）
     "rejection_reason": str | None,      # 拒绝理由（如有）
+    # 以下三个字段拆分 module_invoked 语义（审计第二轮：消除歧义）：
+    "registry_handler_invoked": bool,    # ToolGateHandler.handle() 是否被调用（gate 检查本身）
+    "target_module_invoked": bool,       # 目标 tool 函数是否被实际调用（disposition="allowed" 且执行成功）
+    "dangerous_tool_function_invoked": bool,  # 高风险 tool（或 fake. 前缀 tool）的真实函数是否被执行（必须为 false）
 }
 ```
 
@@ -481,7 +494,10 @@ chat() loop:
 2. Dispatcher 查询 ToolRegistry：tool 是否存在、是否 visible、risk level
 3. 高风险 tool → 触发 confirmation（现有 ConfirmationContext 逻辑）
 4. 允许的 tool → 执行（现有 `execute_tool_call`）
-5. 返回 RuntimeActionResult（包含 disposition、risk_level、module_invoked=true/false）
+5. 返回 RuntimeActionResult（包含 disposition、risk_level、registry_handler_invoked、target_module_invoked、dangerous_tool_function_invoked）
+   - registry_handler_invoked：gate 检查是否发生（始终为 true，除非 dispatcher 路由失败）
+   - target_module_invoked：实际 tool 函数是否被调用（仅 disposition="allowed" 时为 true）
+   - dangerous_tool_function_invoked：高风险 tool 的真实函数是否被执行（对 fake. 前缀 tool 必须为 false；对真实高风险 tool，仅在 confirmation 通过后才为 true）
 
 ### T.6 Tool Alias Policy（审计 P2-3 新增）
 
@@ -496,6 +512,7 @@ chat() loop:
 
 **规则**：
 - E2E dogfood plan 中的 allowed_tools 必须使用 ToolRegistry 中的真实 tool name，或明确标记为 `fake.` 前缀的测试 tool。
+- **`fake.` 前缀 tool（如 `fake.write_file`、`fake.modify_config`）仅在 dogfood runner 本地注册，绝不污染真实 ToolRegistry**。真实 ToolRegistry 中不得出现 `fake.` 前缀的 tool。
 - capability matrix 必须记录：`requested_capability` → `requested_tool_name` → `resolved_tool_name` → `registry_found` → `decision`。
 - 如果 tool 在 registry 中不存在，scenario 不能 pass。
 - 禁止使用 `bash`、`shell`、`run_shell` 作为 allowed tool（违反 non-goal）。
@@ -505,12 +522,17 @@ chat() loop:
 - 不绕过现有 ToolRegistry 注册/可见性/风险分级逻辑
 - 不改变 confirmation 流程
 - 不新增 tool 类别/注册方式
+- `fake.` 前缀 test tool 仅在 dogfood runner 本地注册，不得进入真实 ToolRegistry
+- 真实 ToolRegistry 中不得存在 `fake.` 前缀的 tool name
 
 ### T.8 不变式
 
 1. hidden/unknown tool 必须被拒绝。
 2. 高风险 tool 必须经过 confirmation。
 3. tool execution 结果不得包含 secret。
+4. registry_handler_invoked 为 true 不代表 target_module_invoked 为 true（gate 检查 ≠ tool 执行）。
+5. dangerous_tool_function_invoked 对 fake. 前缀 tool 必须为 false。
+6. fake. 前缀 tool 不得存在于真实 ToolRegistry 中。
 
 ---
 
@@ -699,7 +721,7 @@ tool_evidence = {
 | S | skill.select | LLM tool call | Skill System | selected_skill_id, selection_confidence, body_load_decision, SkillLoader invocation |
 | A | subagent.delegate_l0 | LLM tool call | SubAgent System | subagent_name, delegate_once_called, parent_adjudicated, subagent_request_built |
 | M | memory.propose | Runtime turn-end hook | Memory System | proposal_id, disposition, pending_review, not_confirmed |
-| T | tool.request | LLM tool call / Runtime policy | ToolRegistry | disposition, risk_level, registry_found, resolved_tool_name |
+| T | tool.request | LLM tool call / Runtime policy | ToolRegistry | disposition, risk_level, registry_handler_invoked, target_module_invoked, dangerous_tool_function_invoked |
 | C | checkpoint.safe_summary | Runtime hook | Checkpoint | safe_summary, secret_content_detected, pending_high_risk_tool |
 | P | streaming.event | Runtime(被动) | Streaming Protocol | provider_supports_streaming, not_supported branch |
 | E | (mapping) | N/A | 所有 | capability→module mapping, tool alias resolution chain |

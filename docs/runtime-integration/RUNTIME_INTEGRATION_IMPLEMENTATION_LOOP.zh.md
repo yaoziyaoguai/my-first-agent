@@ -67,8 +67,8 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 2. **重写 `_capability_evidence_matrix`**：使用 mapping table 做 capability→module 匹配，替代当前硬编码 capability name 直接与 module name 比较的逻辑。
 
 3. **引入 evidence level 分级**：
-   - `runtime_e2e`：有 RuntimeActionEvent（Phase 1 无，暂为空）
-   - `subsystem_integration`：有 systems_actually_invoked
+   - `runtime_e2e`：同时满足 RuntimeActionEvent + module_invoked=true + structured invocation_proof（Phase 1 无，暂为空）
+   - `subsystem_integration`：有 systems_actually_invoked（但未经过 Runtime LLM）
    - `deterministic_baseline`：纯函数测试
    - `simulated`：systems_simulated
    - `not_covered`：无任何 evidence
@@ -371,7 +371,7 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 ### 步骤
 
 1. **实现 `MemoryHookHandler`**：
-   - 在 `chat()` 的 tool 执行完成后、下一轮 LLM 调用前触发
+   - 在 `chat()` 的 turn 结束后触发（turn-end hook），无论是否发生 tool execution
    - 接收 conversation_turn + model_output_summary
    - 运行 secret-like filtering
    - 判断是否 memory-worthy
@@ -379,9 +379,9 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
    - 返回 proposal_id + disposition
 
 2. **Hook point 实现**：
-   - 在 `chat()` 主循环中，tool 执行完成后插入：
+   - 在 `chat()` 主循环中，turn 结束后插入（turn-end hook，不依赖 tool execution）：
    ```python
-   # AFTER tool execution, BEFORE next LLM call
+   # AFTER user turn + model response (turn-end hook), regardless of tool execution
    memory_hook_result = dispatcher.route(
        RuntimeActionRequest(
            action_type=RuntimeActionType.MEMORY_PROPOSE,
@@ -438,7 +438,8 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
    - 不能仅凭 "模型文本提到" 通过
 
 3. **验证 capability matrix**：
-   - 所有有 RuntimeActionEvent 的 capability 标记为 `runtime_e2e`
+   - 所有同时满足 RuntimeActionEvent + module_invoked=true + structured invocation_proof（含 call_id + function_called）的 capability 标记为 `runtime_e2e`
+   - 有 RuntimeActionEvent 但 module_invoked=false 或 invocation_proof 为 None 的 capability → 最高 `subsystem_integration`
    - 无 RuntimeActionEvent 但有 subsystem integration 的标记为 `subsystem_integration`
    - 运行 E-TEST-4
 

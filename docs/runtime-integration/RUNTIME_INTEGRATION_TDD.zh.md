@@ -131,7 +131,7 @@ python -m pytest tests/runtime_integration/test_runtime_action_dispatcher.py -v
 | 3 | `test_evidence_target_module_not_empty` | handler 调用了目标模块 | evidence["target_module"] 非空 str |
 | 4 | `test_evidence_module_invoked_true_when_handler_calls_module` | handler 实际调用模块 | evidence["module_invoked"] == true |
 | 5 | `test_evidence_module_invoked_false_when_handler_does_not_call_module` | handler 未调用模块（如 rejection） | evidence["module_invoked"] == false |
-| 6 | `test_evidence_invocation_proof_not_empty_when_invoked` | module_invoked=true | evidence["invocation_proof"] 非空 str |
+| 6 | `test_evidence_invocation_proof_structured_when_invoked` | module_invoked=true | evidence["invocation_proof"] 为 dict，含 call_id, function_called, call_signature, observed_at, observation_method |
 | 7 | `test_evidence_level_runtime_e2e_requires_module_invoked_true` | module_invoked=false 但 evidence_level="runtime_e2e" | 断言失败 |
 | 8 | `test_event_emitted_but_no_module_invoked_max_subsystem_integration` | module_invoked=false 但有 event | evidence_level 最高为 "subsystem_integration" |
 | 9 | `test_event_parent_trace_id_matches_request` | request.parent_trace_id="tr-001" | event.parent_trace_id == "tr-001" |
@@ -198,8 +198,8 @@ python scripts/dogfood_e2e_runtime.py --scenario E01
 | 4 | `test_skill_select_output_must_have_body_load_decision` | 正常路由 | payload.body_load_decision 为 bool |
 | 5 | `test_skill_select_output_must_have_allowed_tools_after_selection` | 选中 skill 有 tools | payload.allowed_tools_after_selection 为 list |
 | 6 | `test_skill_select_output_must_have_available_skills_count` | 正常路由 | payload.available_skills_count > 0 |
-| 7 | `test_skill_select_output_must_have_hidden_disabled_excluded` | 有 hidden/disabled skill | payload.hidden_or_disabled_excluded 包含被排除的 skill name |
-| 8 | `test_selected_skill_id_from_handler_not_external` | selected_skill_id 从 payload 外部传入（而非 handler 内部 LLM decision） | 测试验证 handler 不从外部 payload 取 selected_skill_id |
+| 7 | `test_skill_select_output_must_have_hidden_disabled_excluded_count` | 有 hidden/disabled skill | payload.hidden_or_disabled_excluded_count > 0（仅计数，不暴露名称） |
+| 8 | `test_selected_skill_id_from_model_tool_call_args` | selected_skill_id 来自 RuntimeActionRequest.payload（model tool-call args） | handler 从 request.payload.selected_skill_id 提取并验证，非 handler 自行决定 |
 
 ### S-TEST-2：Progressive disclosure preserved（integration）
 
@@ -241,7 +241,7 @@ python scripts/dogfood_e2e_runtime.py --scenario E01
 | 1 | `test_skill_select_empty_available_list` | available_skill_metadata=[] | status="success", selected_skill_id=None, no_suitable_skill=True |
 | 2 | `test_skill_select_task_summary_too_long` | task_summary 超 10KB | status="rejected" |
 | 3 | `test_skill_select_constraint_read_only_blocks_write_skills` | constraints={"read_only"} | 选中的 skill 的 allowed_tools 不含 write 类 tool |
-| 4 | `test_selected_skill_id_not_post_hoc` | handler 从外部 payload 接收 selected_skill_id | 测试暴露此路径并断言为错误（selected_skill_id 必须来自 LLM decision） |
+| 4 | `test_selected_skill_id_must_come_from_model_args` | selected_skill_id 不在 request.payload 中（model 未指定） | handler 不能自行决定选哪个，返回 status="failed" |
 
 **pytest 命令**：
 ```bash
@@ -260,7 +260,7 @@ pass 条件（SDD S.6 强制）：
   4. evidence["module_invoked"] == true
   5. evidence["handler_name"] == "SkillRuntimeActionHandler"
   6. evidence["target_module"] 含 "SkillLoader"
-  7. evidence["hidden_or_disabled_excluded"] 中 disabled skill 不存在
+  7. evidence["hidden_or_disabled_excluded_count"] > 0 且无 disabled skill 名称出现在任何 evidence 字段中
   8. evidence["no_suitable_skill"] == false
 
 注意：此场景替代原始 E02（直接调用 SkillRegistry API）。
@@ -292,7 +292,7 @@ python scripts/dogfood_e2e_runtime.py --scenario E02
 | 5 | `test_delegate_output_must_have_subagent_request_built` | 正常路由 | payload.subagent_request_built == true |
 | 6 | `test_delegate_output_must_have_no_nested_delegation` | 正常路由 | payload.no_nested_delegation == true |
 | 7 | `test_delegate_output_must_have_no_shell_or_external_process` | 正常路由 | payload.no_shell_or_external_process == true |
-| 8 | `test_subagent_name_from_handler_not_external` | subagent_name 从 payload 外部传入 | handler 不取外部 subagent_name |
+| 8 | `test_subagent_name_from_model_tool_call_args` | subagent_name 来自 RuntimeActionRequest.payload（model tool-call args） | handler 从 request.payload.subagent_name 提取并验证，非 handler 自行决定 |
 
 ### A-TEST-2：Parent adjudication preserved（integration）
 
@@ -501,8 +501,11 @@ python scripts/dogfood_e2e_runtime.py --scenario E04
 | 5 | `test_risk_level_in_output` | 任意 tool | payload.risk_level ∈ {"low", "medium", "high"} |
 | 6 | `test_policy_path_in_output` | 任意 tool | payload.policy_path 非空 str |
 | 7 | `test_tool_alias_resolved_from_registry` | generic capability name → ToolRegistry lookup | evidence 含 resolved_tool_name, registry_found=true |
-| 8 | `test_fake_tool_prefix_not_executed_real` | tool_name="fake.write_file" | tool 被识别为 fake test tool，不真实执行 |
+| 8 | `test_fake_tool_prefix_not_executed_real_and_not_in_registry` | tool_name="fake.write_file"（仅在 dogfood 本地注册） | tool 被识别为 fake test tool，不真实执行；真实 ToolRegistry 中不存在 fake. 前缀 tool |
 | 9 | `test_shell_tool_name_blocked` | tool_name="bash" 或 "shell" 或 "run_shell" | disposition="rejected"（non-goal 保护） |
+| 10 | `test_registry_handler_invoked_independent_of_target_module` | disposition="rejected"（unknown tool） | registry_handler_invoked=true, target_module_invoked=false, dangerous_tool_function_invoked=false |
+| 11 | `test_fake_tool_dangerous_function_not_invoked` | tool_name="fake.write_file" | dangerous_tool_function_invoked=false（fake tool 不触发真实 IO） |
+| 12 | `test_real_tool_target_module_invoked_on_allowed` | low-risk real tool, disposition="allowed" | target_module_invoked=true, dangerous_tool_function_invoked=false |
 
 ### T-TEST-3：Confirmation flow preserved（integration）
 
@@ -546,6 +549,9 @@ pass 条件：
   - 高风险 tool 对应的 event 显示 disposition="confirmation_required"
   - evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
   - evidence["registry_found"] == true
+  - evidence["registry_handler_invoked"] == true（gate 检查发生）
+  - evidence["target_module_invoked"] 与 disposition 一致（allowed→true, rejected→false）
+  - fake tool 的 evidence["dangerous_tool_function_invoked"] == false
 ```
 
 **pytest 命令**（由 E2E dogfood runner 驱动）：

@@ -201,20 +201,35 @@ Runtime Integration / Runtime Action Harness 设计文档包已就绪（Phase 3:
 
 ## Runtime Integration 文档独立审计修复（2026-05-19）
 
-Runtime Integration 文档包（96d8173）经独立红队审计，结论 PARTIAL。本轮（docs-only）修复了全部 P1/P2/P3：
+Runtime Integration 文档包经两轮独立红队审计。第一轮（96d8173→d6ac4ea）修复了 8 项 P1/P2/P3；第二轮发现残留 P1/P2，当前处于 **under follow-up remediation**：
+
+### 第一轮修复（d6ac4ea，已闭合）
 
 | Issue | Priority | Status | 修复摘要 |
 |-------|----------|--------|----------|
-| P1-1: Skill/SubAgent schema 不足以表达 LLM 真实选择 | P1 | fixed | SDD Track S/A 增加 selected_skill_id、selection_confidence、subagent_name、delegate_once_called 等字段；明确 selected_skill_id/subagent_name 来自 LLM tool call decision |
-| P1-2: RuntimeActionEvent 可能变自欺层 | P1 | fixed | SDD Track R 新增 R.6 Action Evidence Contract；runtime_e2e 必须同时满足 6 项条件（含 module_invoked=true）；evidence 字段增加 action_id/handler_name/target_module/module_invoked/invocation_proof |
-| P1-3: E2E plan 引入 shell scope creep | P1 | fixed | E2E Dogfood Plan 移除 bash；高风险诱导使用 fake. 前缀 test tool；non-goals 明确禁止 shell/bash/run_shell |
-| P1-4: Memory hook 与 E04 场景冲突 | P1 | fixed | SDD Track M 改为 turn-end hook（不依赖 tool execution）；M.7 增加不变式（no-tool turns 也触发） |
-| P2-1: Streaming unsupported provider 未入规格 | P2 | fixed | SDD Track P 增加 P.5 Unsupported Provider Branch；TDD 增加 P-TEST-3 #4-7 negative tests；E07 增加分支 B |
-| P2-2: Implementation Loop stop conditions 不完整 | P2 | fixed | Implementation Loop 增加全局 Stop Conditions（15 项）、Implementation Notes 要求、独立审计 Gate |
-| P2-3: Tool name mismatch | P2 | fixed | SDD Track T 增加 T.6 Tool Alias Policy；E2E Dogfood Plan 增加 Tool Alias Policy 章节；TDD 增加 tool alias resolution 测试 |
-| P3-1: README 入口太靠后 | P3 | fixed | README 前部增加 Runtime Integration 入口，说明当前 E2E 状态和下一阶段 |
+| P1-1: Skill/SubAgent schema 不足以表达 LLM 真实选择 | P1 | fixed | SDD Track S/A 增加 selected_skill_id、selection_confidence、subagent_name、delegate_once_called 等字段 |
+| P1-2: RuntimeActionEvent 可能变自欺层 | P1 | fixed | SDD Track R 新增 R.6 Action Evidence Contract；runtime_e2e 必须同时满足 6 项条件 |
+| P1-3: E2E plan 引入 shell scope creep | P1 | fixed | E2E Dogfood Plan 移除 bash；高风险诱导使用 fake. 前缀 test tool |
+| P1-4: Memory hook 与 E04 场景冲突 | P1 | fixed | SDD Track M 改为 turn-end hook |
+| P2-1: Streaming unsupported provider 未入规格 | P2 | fixed | SDD Track P 增加 P.5 Unsupported Provider Branch |
+| P2-2: Implementation Loop stop conditions 不完整 | P2 | fixed | 增加全局 Stop Conditions（15 项）+ Implementation Notes + 独立审计 Gate |
+| P2-3: Tool name mismatch | P2 | fixed | SDD Track T 增加 T.6 Tool Alias Policy |
+| P3-1: README 入口太靠后 | P3 | fixed | README 前部增加 Runtime Integration 入口 |
 
-修复后状态：ready for second independent docs audit（不是 ready for implementation loop，除非独立审计通过）。
+### 第二轮修复（本轮，under follow-up remediation）
+
+| Issue | Priority | Status | 修复摘要 |
+|-------|----------|--------|----------|
+| P1: Skill selection schema 自相矛盾（selected_skill_id 来源表述不一致） | P1 | fixing | SDD S.3 明确 selected_skill_id 来自 model tool-call args（payload）；S.8/S.7 约束重写 |
+| P1: SubAgent selection 表述未对齐 | P1 | fixing | SDD A.8 invariant 4 改为"来自 model tool-call arguments" |
+| P1: Runtime proof 仍可伪造（free-text invocation_proof） | P1 | fixing | SDD R.6 evidence 改为 structured invocation_proof dict（含 call_id/function_called/call_signature/observed_at/observation_method） |
+| P1: Implementation Loop Phase 8 残留旧 Memory hook 表述 | P1 | fixing | Phase 8 步骤1/2 从"tool 执行完成后"改为"turn 结束后（turn-end hook）" |
+| P1: Implementation Loop Phase 9/1 残留 event-only runtime_e2e | P1 | fixing | Phase 9 步骤3 增加 module_invoked=true 要求；Phase 1 步骤3 更新 evidence level 定义 |
+| P2: Hidden/disabled skill evidence 矛盾（hidden_or_disabled_excluded 泄露名称） | P2 | fixing | SDD S.4 从 list[str] 改为 int（hidden_or_disabled_excluded_count） |
+| P2: Fake tool 边界不完整 | P2 | fixing | SDD T.6/T.7 明确 fake. 前缀 tool 仅在 dogfood 本地注册，不污染真实 ToolRegistry |
+| P2: ToolGate module_invoked 语义混淆 | P2 | fixing | SDD T.4 拆分为 registry_handler_invoked / target_module_invoked / dangerous_tool_function_invoked |
+
+修复后状态：under follow-up remediation（第二轮修复完成后仍需独立审计确认，不是 ready for implementation loop）。
 
 ## Latest verification baseline
 

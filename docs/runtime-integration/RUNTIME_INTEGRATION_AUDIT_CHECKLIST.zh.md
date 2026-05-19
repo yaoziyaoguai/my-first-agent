@@ -41,9 +41,10 @@
 | D13 | CAPABILITY_MODULE_MAPPING 是否覆盖所有 capability？ | P1 | E | unit test: E-TEST-1 #1 |
 | D14 | Skill action payload 是否包含 selected_skill_id, selection_confidence, body_load_decision, allowed_tools_after_selection, available_skill_metadata？ | P1 | S | 代码审查 + unit test: S-TEST-1 |
 | D15 | SubAgent action payload 是否包含 subagent_name, delegate_once_called, subagent_request_built, parent_adjudicated, no_nested_delegation, no_shell_or_external_process？ | P1 | A | 代码审查 + unit test: A-TEST-1 |
-| D16 | selected_skill_id 和 subagent_name 是否来自 RuntimeAction / model action decision，不允许外部传入？ | P1 | S/A | 代码审查：handler 不从外部 payload 取这些字段 |
+| D16 | selected_skill_id 和 subagent_name 是否来自 model tool-call arguments（RuntimeActionRequest.payload），handler 只做验证不做选择？ | P1 | S/A | 代码审查：handler 从 request.payload 提取并验证，不自行决定 |
 | D17 | RuntimeActionResult 是否包含 action_id 字段？ | P1 | R | 代码审查 + unit test: R-TEST-1 #9 |
-| D18 | RuntimeActionResult.evidence 是否包含 action_id, handler_name, target_module, module_invoked, invocation_proof, evidence_level？ | P0 | R | 代码审查 + unit test: R-TEST-3 |
+| D18 | RuntimeActionResult.evidence 是否包含 action_id, handler_name, target_module, module_invoked, structured invocation_proof（含 call_id/function_called/call_signature/observed_at/observation_method）, evidence_level？ | P0 | R | 代码审查 + unit test: R-TEST-3 |
+| D19 | Tool evidence 是否拆分 registry_handler_invoked / target_module_invoked / dangerous_tool_function_invoked？ | P1 | T | 代码审查：三个字段语义不重叠 |
 
 ### 1.3 不变式覆盖
 
@@ -155,7 +156,8 @@
 | S11 | Memory 操作是否不绕过 governance？ | P0 | M | M-TEST-4 #1,3 |
 | S12 | RuntimeAction 是否不新增 tool 注册方式？ | P1 | T | T-TEST-4 #4 |
 | S13 | E2E plan / allowed_tools 中是否无真实 bash/shell/run_shell？ | P1 | 全部 | 文档审查 + grep：违反为 P1 |
-| S14 | fake tool（fake. 前缀）是否不会真实执行？ | P1 | T | unit test: T-TEST-2 #8 |
+| S14 | fake tool（fake. 前缀）是否不会真实执行且不污染真实 ToolRegistry？ | P1 | T | unit test: T-TEST-2 #8, #11, #12 |
+| S16 | 真实 ToolRegistry 中是否不存在 fake. 前缀 tool？ | P1 | T | 代码审查 + grep |
 | S15 | 禁止的 tool name（bash, shell, run_shell）是否在 gate 层被拒绝？ | P1 | T | unit test: T-TEST-2 #9 |
 
 ---
@@ -249,13 +251,13 @@
 1. available_skill_metadata 中的每个 skill 必须是 active 状态且有合法 descriptor
 2. body 在 metadata 列表阶段不能被加载
 3. selected skill 的 allowed_tools 必须 ∩ ToolRegistry visible tools 非空
-4. selected_skill_id 的来源必须是 handler 内部的 LLM decision 记录，不得由外部传入（审计 P1-1 新增）
+4. selected_skill_id 必须来自 model tool-call arguments（RuntimeActionRequest.payload），handler 只做验证不做选择（审计第二轮修复）
 
 ### Track A
 1. SubAgent delegation 必须经过 parent adjudication
 2. 被委派的 SubAgent status 必须是 active
 3. delegation 的 tool list 必须是 SubAgent descriptor allowed_tools 的子集
-4. subagent_name 必须来自 LLM tool call decision，不得由外部传入或后验补（审计 P1-1 新增）
+4. subagent_name 必须来自 model tool-call arguments（RuntimeActionRequest.payload），handler 只做验证不做选择（审计第二轮修复）
 
 ### Track M
 1. Memory proposal 不得自动 confirmed
@@ -268,6 +270,9 @@
 1. hidden/unknown tool 必须被拒绝
 2. 高风险 tool 必须经过 confirmation
 3. tool execution 结果不得包含 secret
+4. registry_handler_invoked 为 true 不代表 target_module_invoked 为 true（gate 检查 ≠ tool 执行）（审计第二轮新增）
+5. dangerous_tool_function_invoked 对 fake. 前缀 tool 必须为 false（审计第二轮新增）
+6. fake. 前缀 tool 不得存在于真实 ToolRegistry 中（审计第二轮新增）
 
 ### Track C
 1. safe_summary 中不得出现 raw key / secret pattern

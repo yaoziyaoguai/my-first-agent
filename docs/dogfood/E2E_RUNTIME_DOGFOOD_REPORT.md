@@ -11,7 +11,7 @@
 - shell_env_conflict_detected: True
 - shell_env_fallback_used: False
 - auth_status: configured
-- provider_available: False
+- provider_available: True
 - secret_printed: no
 - env_content_read: no
 

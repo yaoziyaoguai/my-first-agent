@@ -23,6 +23,7 @@ class SubAgentRegistry:
     def __init__(self, roots: list[Path] | tuple[Path, ...] | None = None) -> None:
         self._roots = tuple(Path(root) for root in (roots or ()))
         self._descriptors: dict[str, SubAgentDescriptor] = {}
+        self._load_errors: list[SubAgentLoadError] = []
         self.reload()
 
     def list_visible(self) -> tuple[SubAgentDescriptor, ...]:
@@ -37,10 +38,18 @@ class SubAgentRegistry:
     def is_registered(self, name: str) -> bool:
         return name in self._descriptors
 
+    def get_load_errors(self) -> list[SubAgentLoadError]:
+        """返回扫描过程中收集的所有 SubAgentLoadError。
+
+        每次 reload() 会清空并重新收集。
+        """
+        return list(self._load_errors)
+
     def reload(self) -> None:
         """Re-scan explicit roots, preserving deterministic path order."""
 
         self._descriptors = {}
+        self._load_errors.clear()
         for root in self._roots:
             self._scan_root(root)
 
@@ -57,7 +66,8 @@ class SubAgentRegistry:
                 continue
             try:
                 descriptor = load_subagent_descriptor(manifest_path)
-            except SubAgentLoadError:
+            except SubAgentLoadError as exc:
+                self._load_errors.append(exc)
                 continue
             if descriptor.name in self._descriptors:
                 raise SubAgentLoadError(

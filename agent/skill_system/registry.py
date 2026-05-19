@@ -40,6 +40,8 @@ class SkillRegistry:
         self._roots: list[Path] = list(roots) if roots else []
         # _descriptors: name → SkillDescriptor（含 visible 和 hidden）
         self._descriptors: dict[str, SkillDescriptor] = {}
+        # _load_errors: 扫描过程中收集的 SkillLoadError（不会静默丢弃）
+        self._load_errors: list[SkillLoadError] = []
         self._discover()
 
     # ---- public API ----
@@ -70,15 +72,25 @@ class SkillRegistry:
         self._roots.append(root)
         self._scan_root(root)
 
+    def get_load_errors(self) -> list[SkillLoadError]:
+        """返回扫描过程中收集的所有 SkillLoadError。
+
+        每次 _discover() / reset() 会清空并重新收集。
+        调用方可通过此方法诊断哪些 SKILL.md 因何原因被跳过。
+        """
+        return list(self._load_errors)
+
     def reset(self) -> None:
         """清空并重新扫描所有 root——用于测试和配置变更。"""
         self._descriptors.clear()
+        self._load_errors.clear()
         self._discover()
 
     # ---- internal ----
 
     def _discover(self) -> None:
         """扫描所有 root，收集 Skill 元数据。"""
+        self._load_errors.clear()
         for root in self._roots:
             self._scan_root(root)
 
@@ -103,7 +115,8 @@ class SkillRegistry:
 
             try:
                 manifest = load_skill_manifest(manifest_path)
-            except SkillLoadError:
+            except SkillLoadError as exc:
+                self._load_errors.append(exc)
                 continue
             descriptor = manifest.to_descriptor()
 

@@ -131,3 +131,86 @@ def test_find_by_role_filters_visible_descriptors(tmp_path: Path) -> None:
     assert [item.name for item in registry.find_by_role("reviewer")] == ["code-reviewer"]
     assert registry.find_by_role("missing") == ()
 
+
+# ==================================================================
+# 诊断：无效 SubAgent 不再静默跳过
+# ==================================================================
+
+def test_get_load_errors_surfaces_missing_description(tmp_path: Path) -> None:
+    """缺 description 时 get_load_errors() 必须包含错误信息，不再静默丢弃。"""
+    root = tmp_path / "subagents"
+    _write_subagent(root, "valid-agent")
+
+    # 写入缺少 description 的 SUBAGENT.md
+    bad_dir = root / "bad-agent"
+    bad_dir.mkdir(parents=True, exist_ok=True)
+    (bad_dir / "SUBAGENT.md").write_text(
+        "---\nname: bad-agent\nrole: reviewer\nmodel: fake\nstatus: active\n---\n# bad\n",
+        encoding="utf-8",
+    )
+
+    registry = SubAgentRegistry(roots=[root])
+    errors = registry.get_load_errors()
+    assert len(errors) == 1, (
+        f"缺 description 应产生 1 个错误，实际: {len(errors)}"
+    )
+    assert errors[0].code == "MISSING_DESCRIPTION"
+    assert "description" in errors[0].safe_preview.lower()
+
+
+def test_get_load_errors_cleared_on_reload(tmp_path: Path) -> None:
+    """reload() 后重新扫描，load_errors 应该反映最新状态。"""
+    root = tmp_path / "subagents"
+
+    bad_dir = root / "bad-agent"
+    bad_dir.mkdir(parents=True, exist_ok=True)
+    bad_md = bad_dir / "SUBAGENT.md"
+    bad_md.write_text(
+        "---\nname: bad-agent\nrole: reviewer\nmodel: fake\nstatus: active\n---\n# bad\n",
+        encoding="utf-8",
+    )
+
+    registry = SubAgentRegistry(roots=[root])
+    assert len(registry.get_load_errors()) == 1
+
+    # 修复 SUBAGENT.md 后 reload——错误应清空
+    bad_md.write_text(
+        dedent(
+            """\
+            ---
+            name: bad-agent
+            description: now has description.
+            role: reviewer
+            model: fake
+            status: active
+            risk_level: low
+            version: 0.1.0
+            allowed_tools:
+              - read_file
+            allowed_skills: []
+            memory_scope: none
+            max_iterations_default: 1
+            confirmation_policy: inherit_tool_policy
+            supported_modes:
+              - local_fake
+            ---
+            # bad-agent
+            """
+        ),
+        encoding="utf-8",
+    )
+    registry.reload()
+    assert len(registry.get_load_errors()) == 0
+    assert registry.get_descriptor("bad-agent") is not None
+
+
+def test_get_load_errors_empty_when_all_valid(tmp_path: Path) -> None:
+    """所有 SUBAGENT.md 合法时 get_load_errors() 返回空列表。"""
+    root = tmp_path / "subagents"
+    _write_subagent(root, "agent-a")
+    _write_subagent(root, "agent-b")
+
+    registry = SubAgentRegistry(roots=[root])
+    assert registry.get_load_errors() == []
+    assert len(registry.list_visible()) == 2
+

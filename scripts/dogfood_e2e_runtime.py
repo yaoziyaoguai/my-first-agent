@@ -1381,26 +1381,22 @@ def _invoke_chat_e2e(
 ) -> tuple[str, str]:
     """调用 core.chat() 并捕获输出。
 
-    这是一个高风险操作——chat() 会调用 provider、执行工具、操作 memory。
-    我们 monkeypatch 掉危险路径。
+    通过 chat() 的新 provider 参数直接注入 ModelProvider，
+    不再需要 monkeypatch agent.core_contexts.build_model_provider_from_env。
+    只 monkeypatch tool executor 保护高风险工具。
     """
     import agent.core as core
-    import agent.core_contexts as core_ctxs
     import agent.tool_executor as te
 
     # 保存原始状态
     _orig_model_provider = getattr(core, "_model_provider", None)
     _orig_client = getattr(core, "client", None)
     _orig_tool_exec = getattr(te, "execute_tool_call", None)
-    _orig_build_model = getattr(core_ctxs, "build_model_provider_from_env", None)
 
     try:
-        # 替换 provider/client
+        # 设置模块级 provider/client 供 Memory/State 等模块使用
         core._model_provider = provider
         core.client = provider
-        # build_loop_context 内部调用 build_model_provider_from_env()，
-        # 必须也 monkeypatch 否则 chat() 会走 env 加载而非用我们传入的 provider
-        core_ctxs.build_model_provider_from_env = lambda: provider
 
         # 创建一个安全的 tool executor mock
         def _safe_execute_tool_call(tool_name, tool_input, **kwargs):
@@ -1420,13 +1416,14 @@ def _invoke_chat_e2e(
 
         te.execute_tool_call = _safe_execute_tool_call
 
-        # 调用 chat()
+        # 调用 chat()，通过 provider 参数注入（无需 monkeypatch build_model_provider_from_env）
         output_chunks: list[str] = []
         result = core.chat(
             user_input,
             on_output_chunk=lambda c: output_chunks.append(c),
             on_display_event=None,
             on_runtime_event=None,
+            provider=provider,
         )
 
         combined = "".join(output_chunks)
@@ -1447,8 +1444,6 @@ def _invoke_chat_e2e(
             core.client = _orig_client
         if _orig_tool_exec is not None:
             te.execute_tool_call = _orig_tool_exec
-        if _orig_build_model is not None:
-            core_ctxs.build_model_provider_from_env = _orig_build_model
 
 
 # ── Main runner ───────────────────────────────────────────────────────────────
@@ -1465,6 +1460,61 @@ SCENARIO_RUNNERS = {
     "E08_full_combined": _run_e08_full_combined,
     "E09_adversarial": _run_e09_adversarial,
 }
+
+
+def _compute_invocation_mode(result: dict[str, Any]) -> str:
+    """从结果字段推导 invocation mode。
+
+    - actual_runtime_invoked: 通过 chat() 真实调用了 runtime
+    - direct_subsystem_invocation: 直接调用子系统模块，未经过 chat()
+    - simulated: 仅 mock/simulated 数据
+    """
+    if result.get("real_api_used"):
+        return "actual_runtime_invoked"
+    actually = result.get("systems_actually_invoked", [])
+    if actually:
+        return "direct_subsystem_invocation"
+    return "simulated"
+
+
+def _apply_honest_grading(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """诚实地重新分级：非 runtime 路径不能 pass，标记 P2/P3。"""
+    for r in results:
+        mode = _compute_invocation_mode(r)
+        r["invocation_mode"] = mode
+
+        if r["status"] == "blocked":
+            continue
+
+        if mode == "direct_subsystem_invocation":
+            if r["status"] == "pass":
+                r["status"] = "partial"
+                r["honesty_note"] = (
+                    "status downgraded from pass to partial: "
+                    "direct subsystem invocation without chat() runtime path"
+                )
+            existing_issues = list(r.get("issues_found", []))
+            if not any("P3" in str(i) for i in existing_issues):
+                existing_issues.append(
+                    "P3: direct subsystem call bypasses chat(), "
+                    "does not verify runtime-integrated behavior"
+                )
+            r["issues_found"] = existing_issues
+            if r.get("severity", "none") == "none":
+                r["severity"] = "P3"
+
+        elif mode == "simulated":
+            if r["status"] == "pass":
+                r["status"] = "partial"
+                r["honesty_note"] = "status downgraded: fully simulated, no real invocation"
+            existing_issues = list(r.get("issues_found", []))
+            if not any("P2" in str(i) or "P3" in str(i) for i in existing_issues):
+                existing_issues.append("P2: fully simulated, no system module exercised")
+            r["issues_found"] = existing_issues
+            if r.get("severity", "none") == "none":
+                r["severity"] = "P2"
+
+    return results
 
 
 def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1487,40 +1537,42 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
 
     matrix: list[dict[str, str]] = []
     for cap_name, systems, scenario_ids in capabilities:
-        # 检查是否有场景实际调用了相关系统
-        invoked = False
-        simulated = True
+        # 基于 invocation_mode 判断 E2E 验证程度
+        best_mode = "simulated"
         for r in results:
             actually = set(r.get("systems_actually_invoked", []))
-            simmed = set(r.get("systems_simulated", []))
             targets = set(systems)
             if targets & actually:
-                invoked = True
-                simulated = targets.issubset(simmed) or not targets.issubset(actually)
-                break
-            elif targets & simmed:
-                simulated = True
+                mode = r.get("invocation_mode", "simulated")
+                if mode == "actual_runtime_invoked":
+                    best_mode = "actual_runtime_invoked"
+                elif mode == "direct_subsystem_invocation" and best_mode != "actual_runtime_invoked":
+                    best_mode = "direct_subsystem_invocation"
 
-        if invoked and not simulated:
-            evidence = f"E2E verified in {scenario_ids}"
+        if best_mode == "actual_runtime_invoked":
+            e2e_verified = "yes"
+            evidence = f"Full E2E runtime path verified in {scenario_ids}"
             gap = "none"
             severity = "none"
-        elif invoked:
-            evidence = f"Partially verified in {scenario_ids}, some paths simulated"
-            gap = "partial E2E coverage"
+        elif best_mode == "direct_subsystem_invocation":
+            e2e_verified = "partial"
+            evidence = f"Direct subsystem verified in {scenario_ids}, no chat() runtime path"
+            gap = "verified at module level only, not through runtime integration"
             severity = "P3"
         elif scenario_ids == "not_tested":
+            e2e_verified = "no"
             evidence = "Not covered by any E2E scenario"
             gap = "missing E2E coverage"
             severity = "P3"
         else:
+            e2e_verified = "no"
             evidence = f"Simulated only in {scenario_ids}"
             gap = "no real module invocation"
             severity = "P2"
 
         matrix.append({
             "capability": cap_name,
-            "e2e_verified": "yes" if (invoked and not simulated) else ("partial" if invoked else "no"),
+            "e2e_verified": e2e_verified,
             "evidence": evidence,
             "gap": gap,
             "severity": severity,
@@ -1539,10 +1591,15 @@ def _redteam_findings(results: list[dict[str, Any]]) -> dict[str, list[str]]:
     for r in results:
         if r["status"] == "blocked":
             findings["P2"].append(f"{r['scenario_id']}: blocked — {r['evidence'][:100]}")
-    # 统计 chat() 未被调用的场景
-    chat_not_invoked = [r["scenario_id"] for r in results if not r.get("real_api_used")]
-    if chat_not_invoked:
-        findings["P3"].append(f"chat() not exercised in: {chat_not_invoked}")
+    # 统计非 runtime 路径的场景
+    direct_only = [r["scenario_id"] for r in results if r.get("invocation_mode") == "direct_subsystem_invocation"]
+    simulated_only = [r["scenario_id"] for r in results if r.get("invocation_mode") == "simulated"]
+    if direct_only:
+        findings["P3"].append(
+            f"direct_subsystem_invocation only (no chat() runtime path): {direct_only}"
+        )
+    if simulated_only:
+        findings["P2"].append(f"fully simulated: {simulated_only}")
     return findings
 
 
@@ -1589,6 +1646,7 @@ def run_e2e_runtime_dogfood(
                 "scenario_id": s.scenario_id,
                 "status": "blocked",
                 "real_api_used": False,
+                "invocation_mode": "simulated",
                 "runtime_path_used": "none",
                 "systems_actually_invoked": [],
                 "systems_simulated": [],
@@ -1609,6 +1667,7 @@ def run_e2e_runtime_dogfood(
                 "scenario_id": s.scenario_id,
                 "status": "blocked",
                 "real_api_used": False,
+                "invocation_mode": "simulated",
                 "runtime_path_used": "ERROR",
                 "systems_actually_invoked": [],
                 "systems_simulated": s.target_systems,
@@ -1622,6 +1681,7 @@ def run_e2e_runtime_dogfood(
 
         time.sleep(0.3)
 
+    results = _apply_honest_grading(results)
     capabilities = _capability_evidence_matrix(results)
     redteam = _redteam_findings(results)
 
@@ -1672,16 +1732,16 @@ def _write_markdown_report(report: dict[str, Any], path: Path) -> None:
         "",
         "## B. Scenario Matrix",
         "",
-        "| Scenario | Status | Runtime Path Used | Actual Systems | Simulated | Quality | Issues |",
+        "| Scenario | Status | Invocation Mode | Runtime Path Used | Actual Systems | Quality | Issues |",
         "|---|---|---|---|---|---|---|",
     ]
 
     for r in report["scenarios"]:
+        inv_mode = r.get("invocation_mode", r.get("runtime_path_used", "unknown"))
         lines.append(
-            f"| {r['scenario_id']} | {r['status']} | "
-            f"{_sanitize_short(r.get('runtime_path_used', ''), limit=80)} | "
-            f"{', '.join(r.get('systems_actually_invoked', [])[:5])} | "
-            f"{', '.join(r.get('systems_simulated', [])[:3]) or 'none'} | "
+            f"| {r['scenario_id']} | {r['status']} | {inv_mode} | "
+            f"{_sanitize_short(r.get('runtime_path_used', ''), limit=60)} | "
+            f"{', '.join(r.get('systems_actually_invoked', [])[:4])} | "
             f"{r.get('quality_score', 'N/A')} | "
             f"{len(r.get('issues_found', []))} |"
         )

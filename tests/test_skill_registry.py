@@ -161,6 +161,64 @@ def test_invalid_skill_in_root_skipped():
 
 
 # ==================================================================
+# 诊断：无效 Skill 不再静默跳过
+# ==================================================================
+
+def test_get_load_errors_surfaces_missing_version():
+    """缺 version 时 get_load_errors() 必须包含错误信息，不再静默丢弃。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "skills"
+        _write_skill_md(root / "valid-skill", name="valid-skill")
+        bad_dir = root / "bad-skill"
+        bad_dir.mkdir(parents=True)
+        (bad_dir / "SKILL.md").write_text(
+            "---\nname: bad-skill\ndescription: desc\nstatus: draft\n---\nbody"
+        )
+
+        registry = SkillRegistry(roots=[root])
+        errors = registry.get_load_errors()
+        assert len(errors) == 1, (
+            f"缺 version 应产生 1 个错误，实际: {len(errors)}"
+        )
+        assert errors[0].code == "MISSING_VERSION"
+        assert "version" in errors[0].safe_preview.lower()
+
+
+def test_get_load_errors_cleared_on_reset():
+    """reset() 后重新扫描，load_errors 应该反映最新状态。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "skills"
+        bad_dir = root / "bad-skill"
+        bad_dir.mkdir(parents=True)
+        (bad_dir / "SKILL.md").write_text(
+            "---\nname: bad-skill\ndescription: desc\nstatus: draft\n---\nbody"
+        )
+
+        registry = SkillRegistry(roots=[root])
+        assert len(registry.get_load_errors()) == 1
+
+        # 修复 SKILL.md 后 reset——错误应清空
+        (bad_dir / "SKILL.md").write_text(
+            "---\nname: bad-skill\ndescription: desc\nversion: 0.1.0\nstatus: active\n---\nbody"
+        )
+        registry.reset()
+        assert len(registry.get_load_errors()) == 0
+        assert registry.get_descriptor("bad-skill") is not None
+
+
+def test_get_load_errors_empty_when_all_valid():
+    """所有 SKILL.md 合法时 get_load_errors() 返回空列表。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "skills"
+        _write_skill_md(root / "skill-a", name="skill-a")
+        _write_skill_md(root / "skill-b", name="skill-b")
+
+        registry = SkillRegistry(roots=[root])
+        assert registry.get_load_errors() == []
+        assert len(registry.list_visible()) == 2
+
+
+# ==================================================================
 # disabled / hidden Skill 不可见
 # ==================================================================
 

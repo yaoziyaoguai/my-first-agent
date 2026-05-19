@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, TypedDict
 
 from config import PROJECT_DIR
@@ -157,18 +158,19 @@ def _copy_state_dict(obj: Any) -> dict[str, Any]:
     return dict(getattr(obj, "__dict__", {}))
 
 
-def _load_checkpoint_silent() -> dict[str, Any] | None:
+def _load_checkpoint_silent(path: Path | None = None) -> dict[str, Any] | None:
     """静默读取 checkpoint，仅供保存时继承旧 meta 使用。"""
-    if not CHECKPOINT_PATH.exists():
+    target = path if path is not None else CHECKPOINT_PATH
+    if not target.exists():
         return None
     try:
-        data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        data = json.loads(target.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
     except Exception:
         return None
 
 
-def _build_checkpoint_from_state(state):
+def _build_checkpoint_from_state(state, *, path: Path | None = None):
     """
     按当前 state 构造 checkpoint 数据。
 
@@ -177,7 +179,7 @@ def _build_checkpoint_from_state(state):
     - memory：保存 memory 快照，但 conversation 仍单独处理
     - conversation：只保存 messages，并对过大的 tool_result 做截断
     """
-    existing = _load_checkpoint_silent() or {}
+    existing = _load_checkpoint_silent(path) or {}
     existing_meta = existing.get("meta", {})
 
     task_data = _copy_state_dict(state.task)
@@ -199,21 +201,25 @@ def _build_checkpoint_from_state(state):
     }
 
 
-def save_checkpoint(state, source: str | None = None):
+def save_checkpoint(state, source: str | None = None, *, path: Path | None = None):
     """按当前 state 结构保存断点。
 
-    source 是 Runtime 观测字段，用来标记“是谁触发了这次保存”，帮助后续梳理
+    source 是 Runtime 观测字段，用来标记"是谁触发了这次保存"，帮助后续梳理
     checkpoint save ownership。它不是状态字段，不写入 checkpoint JSON，也不改变
     保存时机；第一阶段只让保存来源可见，后续再决定是否迁移保存责任。
+
+    path 是可选的显式保存路径；不传则使用模块级 CHECKPOINT_PATH。
+    测试中可通过 path= 注入临时路径，无需依赖 os.getcwd() 副作用。
 
     注意：checkpoint/debug 与用户可见输出是不同通道。默认只写 checkpoint 文件
     和 `checkpoint_saved` 结构化日志；只有设置 MY_FIRST_AGENT_DEBUG=1 时才把
     [CHECKPOINT] 短日志打印到 terminal。
     """
-    checkpoint = _build_checkpoint_from_state(state)
+    target = path if path is not None else CHECKPOINT_PATH
+    checkpoint = _build_checkpoint_from_state(state, path=path)
     try:
-        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CHECKPOINT_PATH.write_text(
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
             json.dumps(checkpoint, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -255,14 +261,18 @@ def save_checkpoint(state, source: str | None = None):
         print(f"[CHECKPOINT] save failed: {e}")
 
 
-def load_checkpoint():
-    """加载未完成的断点"""
-    if not CHECKPOINT_PATH.exists():
+def load_checkpoint(path: Path | None = None):
+    """加载未完成的断点。
+
+    path 是可选的显式路径；不传则使用模块级 CHECKPOINT_PATH。
+    """
+    target = path if path is not None else CHECKPOINT_PATH
+    if not target.exists():
         if _debug_stdout_enabled():
             print("[CHECKPOINT] no file")
         return None
     try:
-        data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        data = json.loads(target.read_text(encoding="utf-8"))
         if _debug_stdout_enabled():
             print("[CHECKPOINT] loaded")
         return data
@@ -289,7 +299,7 @@ def _filter_to_declared_fields(cls, data: dict) -> dict:
 
 
 # 从 checkpoint 恢复到当前 state
-def load_checkpoint_to_state(state):
+def load_checkpoint_to_state(state, *, path: Path | None = None):
     """
     从 checkpoint 恢复到当前 state。
 
@@ -297,10 +307,12 @@ def load_checkpoint_to_state(state):
     临时字段（RuntimeEvent / InputIntent / DisplayEvent / TransitionResult /
     InputResolution / tool_traces / runtime config 等）不属于恢复语义；
     任何在 JSON 里出现的非声明字段会在 `_filter_to_declared_fields` 被丢弃。
+
+    path 是可选的显式路径；不传则使用模块级 CHECKPOINT_PATH。
     """
     from agent.state import TaskState, MemoryState
 
-    checkpoint = load_checkpoint()
+    checkpoint = load_checkpoint(path)
     if not checkpoint:
         return False
 
@@ -329,9 +341,13 @@ def load_checkpoint_to_state(state):
         return False
 
 
-def clear_checkpoint():
-    """任务完成后清除断点"""
-    if CHECKPOINT_PATH.exists():
-        CHECKPOINT_PATH.unlink()
+def clear_checkpoint(path: Path | None = None):
+    """任务完成后清除断点。
+
+    path 是可选的显式路径；不传则使用模块级 CHECKPOINT_PATH。
+    """
+    target = path if path is not None else CHECKPOINT_PATH
+    if target.exists():
+        target.unlink()
         if _debug_stdout_enabled():
             print("[CHECKPOINT] cleared")

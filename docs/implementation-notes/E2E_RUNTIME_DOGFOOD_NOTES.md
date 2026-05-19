@@ -107,3 +107,52 @@
 3. **单一 provider 测试**: 仅用 kimi-k2.5 via DashScope Anthropic-compatible endpoint。Anthropic native/OpenAI 兼容性未知。
 4. **SubAgent 真实 LLM reasoning**: L0 executor 是确定性执行，SubAgent 的 LLM-based 推理能力（L1+）完全未测试。
 5. **非确定性回归基线缺失**: 每次运行 LLM 响应不同，无法做精确回归对比。
+
+## Section 6: Post-dogfood stabilization (2026-05-19)
+
+### 6.1 API 加载审计 (Part 1)
+
+- `.env` scoped loader 验证通过：`dotenv_values()` → `AgentProviderConfig(frozen, repr=False)` → `build_model_provider()` 链路正确。
+- `key_source_kind = "project_dotenv"`, `auth_status = "configured"` 均正确。
+- 上一轮 "真实 API 偶尔调不通" 的根因是 harness 中 `build_loop_context` 硬编码调用了 `build_model_provider_from_env()`，而 harness 未 monkeypatch 该函数。**不是 loader 的 bug**。
+- preflight 现在正确区分 `shell_env_conflict_detected` 和实际使用的 key source。
+
+### 6.2 core.chat() provider 注入可测试性 (Part 2)
+
+修复了 "P3 methodology issue #1"：
+- `build_loop_context()` 和 `chat()` 新增可选 `provider` 参数。
+- 传入则直接作为 `model_provider`；不传回退到 `build_model_provider_from_env()`（生产默认安全路径）。
+- E2E / dogfood 可显式注入 provider，无需 monkeypatch `agent.core_contexts.build_model_provider_from_env`。
+- `tests/test_chat_provider_injection.py`: 6 个测试钉死 invariants。
+- `_invoke_chat_e2e` 已更新为使用 `chat(provider=provider)` 直传。
+
+### 6.3 Descriptor 诊断——不再静默跳过 (Part 3A/B)
+
+修复了 "P3 methodology issues #2 and #3"：
+- `SkillRegistry._scan_root` 中的 `except SkillLoadError: continue` 现在将错误追加到 `_load_errors` 列表。
+- `SubAgentRegistry._scan_root` 同样追加 `SubAgentLoadError`。
+- 两者都提供 `get_load_errors()` 公开方法供调用方诊断。
+- 6 个新测试（3 skill + 3 subagent）验证缺字段时错误被正确收集。
+
+### 6.4 Checkpoint 路径隔离 (Part 3D)
+
+- `save_checkpoint()` / `load_checkpoint()` / `clear_checkpoint()` / `load_checkpoint_to_state()` 新增可选 `path` 参数。
+- 不传则使用模块级 `CHECKPOINT_PATH`（向后兼容）。
+- `get_checkpoint_truncation_config()` 返回 TypedDict（非 dataclass），已有文档说明 `["key"]` 访问方式。
+
+### 6.5 E2E dogfood 诚实分级 (Part 4)
+
+Round 2 原始结果：6 pass / 3 partial / 0 blocked / 0 fail。
+诚实分级后：**3 pass / 6 partial / 0 blocked / 0 fail**。
+
+关键变化：
+- 每个场景增加 `invocation_mode` 字段：`actual_runtime_invoked` | `direct_subsystem_invocation` | `simulated`。
+- 只有通过 `chat()` 的 E01/E08/E09 可以 pass。
+- E02-E07（直接调用子系统 API）降级为 partial，并标注 P3 测试方法学限制。
+- `_apply_honest_grading()` 在 report 构建前执行统一后处理。
+
+**诚实结论**：First Agent 当前所谓 "E2E" 能力被高估了。实际上：
+- 3/9 场景走真正的 chat() 全链路（已通过）
+- 6/9 场景只验证子系统 API 正确性，未验证 runtime 集成后的行为
+- Skill/SubAgent/Memory/Checkpoint 的 runtime-integrated 行为仍无 E2E 覆盖
+- 这是 v0.9.x 的已知架构现实，不是紧急 bug；但不应再声称 "9/9 E2E pass"

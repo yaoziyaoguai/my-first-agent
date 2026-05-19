@@ -224,13 +224,19 @@ def _build_loop_context(
     *,
     model_name: str = MODEL_NAME,
     max_loop_iterations: int = MAX_LOOP_ITERATIONS,
+    provider=None,
 ) -> LoopContext:
-    """兼容入口：实际 LoopContext 组装在 `agent.core_contexts`。"""
+    """兼容入口：实际 LoopContext 组装在 `agent.core_contexts`。
+
+    provider: 可选的 ModelProvider 实例。传入则注入到 loop context，
+              不传则回退到 build_model_provider_from_env()。
+    """
 
     return build_loop_context(
         client_obj,
         model_name=model_name,
         max_loop_iterations=max_loop_iterations,
+        provider=provider,
     )
 
 
@@ -295,6 +301,7 @@ def chat(
     on_display_event: Callable[[DisplayEvent], None] | None = None,
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
     on_trace_event: Callable[[Any], None] | None = None,
+    provider=None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -307,6 +314,10 @@ def chat(
     `on_trace_event` 是 RFC 0002 的显式 opt-in observability seam：调用方如果需要
     本地 TraceEvent，可以传 sink；默认不创建 recorder，也不把 trace 写入 durable
     Runtime/checkpoint state。
+
+    provider: 可选的 ModelProvider 实例。传入则注入到 loop context 用于 LLM 调用；
+              不传则回退到 build_model_provider_from_env()（生产默认路径）。
+              这是 E2E / dogfood 测试的显式注入点。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -484,6 +495,7 @@ def chat(
         client,
         model_name=MODEL_NAME,
         max_loop_iterations=MAX_LOOP_ITERATIONS,
+        provider=provider,
     )
 
     # v0.5 Phase 3 第二小步：ConfirmationContext 构造走 _build_confirmation_context()

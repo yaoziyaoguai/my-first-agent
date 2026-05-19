@@ -1,6 +1,6 @@
 import json
 import datetime
-from config import LOG_FILE, SNAPSHOT_DIR
+from config import LOG_FILE, SNAPSHOT_DIR, ensure_snapshot_dir
 import uuid
 SESSION_ID = str(uuid.uuid4())
 
@@ -86,6 +86,9 @@ def save_session_snapshot(messages):
         "message_count": len(messages),
         "messages": make_serializable(messages),
     }
+    # config import 不再创建 sessions/；snapshot 写入前显式初始化目录，
+    # 让 runtime IO 副作用留在 logger 边界，而不是配置导入边界。
+    ensure_snapshot_dir()
     snapshot_file = SNAPSHOT_DIR / f"session_{SESSION_ID}.json"
     with open(snapshot_file, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, ensure_ascii=False, indent=2)

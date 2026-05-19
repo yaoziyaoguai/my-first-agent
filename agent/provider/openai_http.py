@@ -44,7 +44,6 @@ from agent.provider.protocol import (
     ProviderTimeoutError,
     ToolUseBlock,
 )
-from agent.provider.streaming import ProviderStreamEvent
 
 
 # ============================================================
@@ -412,24 +411,11 @@ class OpenAICompatibleProvider:
         max_tokens: int | None = None,
         temperature: float | None = None,
     ):
-        """兼容 provider streaming contract；HTTP adapter 先用 create() 聚合。"""
+        """openai_compatible streaming 尚未实现，必须 fail closed。
 
-        response = self.create(
-            system=system,
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        sequence = 0
-        for block in response.content:
-            text = getattr(block, "text", None)
-            if isinstance(text, str) and text:
-                sequence += 1
-                yield ProviderStreamEvent.delta(sequence=sequence, text_delta=text)
-            if getattr(block, "type", None) == "tool_use":
-                sequence += 1
-                yield ProviderStreamEvent.tool_request(sequence=sequence)
-        sequence += 1
-        yield ProviderStreamEvent.final(sequence=sequence)
+        不能把 stream 悄悄降级成 non-streaming create()：SubAgent L1 之后的
+        调用方可能依赖逐步反馈语义，静默 fallback 会把 capability 边界变成假象。
+        """
+
+        _ = (system, messages, tools, model, max_tokens, temperature)
+        raise ProviderCapabilityError("streaming_not_supported")

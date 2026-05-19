@@ -121,18 +121,13 @@ _PROVIDER_KEY_NAMES = (
 
 
 def _infer_provider_name(*, model: str, base_url: str) -> str:
-    """兼容旧缺省配置的诊断 fallback，不作为 real provider 权威来源。"""
-    text = f"{model} {base_url}".lower()
-    if "deepseek" in text and "anthropic" in base_url.lower():
-        return "deepseek_anthropic"
-    if "deepseek" in text:
-        return "deepseek"
-    if "dashscope" in text:
-        return "dashscope"
-    if "anthropic" in text or "claude" in text:
-        return "anthropic"
-    if "openai" in text or "gpt" in text:
-        return "openai"
+    """缺失显式 provider identity 时 fail closed 为 unknown。
+
+    历史版本会根据 model/base_url 猜 anthropic/deepseek/openai。红队指出这会在
+    diagnostics 中制造错误权威感：URL/model 只能说明形状，不能证明 provider
+    身份。参数保留仅为旧测试/调用签名兼容，不再参与推断。
+    """
+    _ = (model, base_url)
     return "unknown"
 
 
@@ -159,8 +154,8 @@ def _provider_config_from_explicit_env(
     """显式 provider 配置优先走正式 AgentProviderConfig。
 
     这是 Phase 6 dogfood 的 provider boundary：runner 不根据 model/base_url
-    猜测运行依赖；只有旧 `.env` 缺少 ``MY_FIRST_AGENT_LLM_PROVIDER`` 时才回到
-    兼容诊断 fallback。
+    猜测运行依赖；旧 `.env` 缺少 ``MY_FIRST_AGENT_LLM_PROVIDER`` 时 provider
+    identity 只能是 ``unknown``。
     """
 
     if PROVIDER_ENV not in project_values:

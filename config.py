@@ -43,6 +43,35 @@ def _resolve_base_url() -> str | None:
     return os.getenv("ANTHROPIC_BASE_URL") or os.getenv("OPENAI_BASE_URL")
 
 
+def get_legacy_api_key() -> str | None:
+    """显式读取 legacy API key。
+
+    v0.9.x deep stabilization 后，`API_KEY` 不再在 import config 时绑定。
+    旧调用方仍可通过 lazy compatibility attribute 读取，但新代码应调用这个
+    getter，避免把 provider config 权威路径和 legacy runtime 兼容层混在一起。
+    """
+
+    return _resolve_api_key()
+
+
+def get_legacy_base_url() -> str | None:
+    """显式读取 legacy base URL；不在模块 import 时触发 env read。"""
+
+    return _resolve_base_url()
+
+
+def get_legacy_model_name() -> str | None:
+    """显式读取 legacy model name；新 provider 路径不要依赖此 getter。"""
+
+    return _resolve_model_name()
+
+
+def get_legacy_review_model_name() -> str | None:
+    """显式读取 legacy review model name；只服务旧 review 兼容入口。"""
+
+    return os.getenv("REVIEW_MODEL_NAME")
+
+
 def _load_project_dotenv_values(project_root: Path | None = None) -> dict[str, str]:
     """通过项目配置层读取 dotenv 值，但不污染 ``os.environ``。
 
@@ -116,17 +145,43 @@ def require_config() -> None:
         raise ValueError("\n".join(errors))
 
 
-# API 配置 — 兼容 Anthropic / OpenAI 双 provider 环境变量
-API_KEY = _resolve_api_key()
-BASE_URL = _resolve_base_url()
-MODEL_NAME = _resolve_model_name()
-REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL_NAME")
+# API 配置 — 兼容 Anthropic / OpenAI 双 provider 环境变量。
+#
+# 关键边界：这些 legacy 值不再在 import config 时绑定，避免普通 import 触发
+# env read。`from config import API_KEY` 等旧写法通过 __getattr__ lazy 兼容；
+# 新代码应使用显式 getter 或 agent/provider/config.py。
+for _legacy_bound_name in ("API_KEY", "BASE_URL", "MODEL_NAME", "REVIEW_MODEL_NAME"):
+    globals().pop(_legacy_bound_name, None)
 
 # 路径配置
 PROJECT_DIR = Path.cwd().resolve()
 SNAPSHOT_DIR = Path("sessions")
-SNAPSHOT_DIR.mkdir(exist_ok=True)
 LOG_FILE = "agent_log.jsonl"
+
+
+def ensure_snapshot_dir() -> Path:
+    """显式创建 legacy checkpoint snapshot 目录。
+
+    import config 不应创建 runtime 目录；真正写 snapshot 的路径在写入前调用
+    本函数，保持副作用发生在 runtime IO 边界，而不是配置模块导入边界。
+    """
+
+    SNAPSHOT_DIR.mkdir(exist_ok=True)
+    return SNAPSHOT_DIR.resolve()
+
+
+def __getattr__(name: str):
+    """为旧常量提供 lazy compatibility，不让 import config 直接读 env。"""
+
+    if name == "API_KEY":
+        return get_legacy_api_key()
+    if name == "BASE_URL":
+        return get_legacy_base_url()
+    if name == "MODEL_NAME":
+        return get_legacy_model_name()
+    if name == "REVIEW_MODEL_NAME":
+        return get_legacy_review_model_name()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Agent 配置
 MAX_TOKENS = 128000

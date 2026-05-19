@@ -1015,7 +1015,7 @@ class TestProviderConfigAutoLoad:
         assert cfg.model == "claude-test-model"
         assert cfg.base_url == "https://api.anthropic.com"
         assert cfg.key_configured is True
-        assert cfg.provider == "anthropic"
+        assert cfg.provider == "unknown"
         assert cfg.source == "config auto-load"
         assert cfg.key_source_kind == "shell_env"
         assert "sk-" not in json.dumps(cfg.safe_diagnostics(), ensure_ascii=False)
@@ -1076,15 +1076,17 @@ class TestProviderConfigAutoLoad:
 
         assert cfg.model == "deepseek-v4-pro"
         assert cfg.base_url == "https://api.deepseek.com/anthropic"
-        assert cfg.provider == "deepseek_anthropic"
+        assert cfg.provider == "unknown"
         assert cfg.key_source_kind == "project_dotenv"
         assert cfg.key_configured is True
         assert project_key not in diagnostics_text
         assert shell_key not in diagnostics_text
         assert "sk-" not in diagnostics_text
 
-    def test_deepseek_anthropic_config_matches_official_endpoint(self, tmp_path):
-        """DeepSeek Anthropic-compatible 配置应识别为 Anthropic protocol provider。"""
+    def test_legacy_provider_identity_is_unknown_without_explicit_provider_name(
+        self, tmp_path,
+    ):
+        """缺失 provider_name 时 diagnostics 不再根据 URL/model 猜 provider 身份。"""
         from scripts.dogfood_phase6_llm_consolidation import (
             load_provider_config_for_dogfood,
         )
@@ -1101,13 +1103,35 @@ class TestProviderConfigAutoLoad:
         cfg = load_provider_config_for_dogfood(project_root=tmp_path)
         diagnostics = cfg.safe_diagnostics()
 
-        assert cfg.provider == "deepseek_anthropic"
-        assert diagnostics["provider_name"] == "deepseek_anthropic"
+        assert cfg.provider == "unknown"
+        assert diagnostics["provider_name"] == "unknown"
         assert diagnostics["key_source_kind"] == "project_dotenv"
         assert diagnostics["auth_status"] == "not_run"
         assert diagnostics["provider_configured"] is True
         assert diagnostics["base_url"] == "https://api.deepseek.com/anthropic"
         assert diagnostics["model"] == "deepseek-v4-pro"
+
+    def test_custom_compatible_provider_url_is_not_guessed_as_known_provider(
+        self, tmp_path,
+    ):
+        """自定义 compatible URL 不能被 URL/model heuristic 猜成 Anthropic/OpenAI。"""
+        from scripts.dogfood_phase6_llm_consolidation import (
+            load_provider_config_for_dogfood,
+        )
+
+        (tmp_path / ".env").write_text(
+            "\n".join([
+                "MODEL_NAME=gpt-compatible-custom",
+                "OPENAI_BASE_URL=https://anthropic-looking.example.test/openai/v1",
+                "OPENAI_API_KEY=sk-fake-custom-key",
+            ]),
+            encoding="utf-8",
+        )
+
+        cfg = load_provider_config_for_dogfood(project_root=tmp_path)
+
+        assert cfg.provider == "unknown"
+        assert cfg.safe_diagnostics()["provider_name"] == "unknown"
 
     def test_provider_model_base_url_mismatch_reports_sanitized_warning(
         self, tmp_path,
@@ -1164,8 +1188,8 @@ class TestProviderConfigAutoLoad:
         assert str(len(secret)) not in diagnostics_text
         assert "Bearer" not in diagnostics_text
 
-    def test_provider_name_does_not_inspect_key_prefix(self):
-        """provider 推断只看 model/base_url，不查看 API key prefix/suffix/length。"""
+    def test_missing_provider_name_returns_unknown_without_url_or_model_guessing(self):
+        """provider identity 缺失时返回 unknown；不再根据 URL/model 做启发式猜测。"""
         from scripts.dogfood_phase6_llm_consolidation import (
             _infer_provider_name,
         )
@@ -1173,15 +1197,15 @@ class TestProviderConfigAutoLoad:
         assert _infer_provider_name(
             model="claude-test",
             base_url="unknown",
-        ) == "anthropic"
+        ) == "unknown"
         assert _infer_provider_name(
             model="gpt-test",
             base_url="unknown",
-        ) == "openai"
+        ) == "unknown"
         assert _infer_provider_name(
             model="deepseek-v4-pro",
             base_url="https://api.deepseek.com/anthropic",
-        ) == "deepseek_anthropic"
+        ) == "unknown"
         assert _infer_provider_name(model="unknown", base_url="unknown") == "unknown"
 
     def test_error_classifier_returns_safe_categories(self):

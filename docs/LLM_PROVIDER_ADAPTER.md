@@ -112,11 +112,13 @@ MCP remains the tool source. The provider adapter only calls the model.
 |---|---|---|
 | `anthropic_native` | Yes | Provider adapter converts Anthropic SDK stream events into provider-neutral `ProviderStreamEvent` values. |
 | `anthropic_compatible` | No | Non-streaming `create()` via HTTP adapter |
-| `openai_compatible` | No | Non-streaming `create()` via HTTP adapter |
+| `openai_compatible` | No | Non-streaming `create()` via HTTP adapter; direct `stream()` calls fail closed with `ProviderCapabilityError("streaming_not_supported")` |
 | `openai_native` | No | Non-streaming `create()` via HTTP adapter |
 
 `core.py._call_model` checks `supports_streaming` on the provider. If false,
 it calls `provider.create()` and emits text blocks as RuntimeEvents.
+Callers that require true streaming must inspect `supports_streaming`; they must
+not assume `openai_compatible` can stream or silently fall back.
 
 ## Opt-in Real Smoke
 

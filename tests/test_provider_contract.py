@@ -276,3 +276,70 @@ def test_openai_compatible_is_implemented_and_returns_provider():
     assert provider.provider_type == "openai_compatible"
     assert provider.supports_tools is True
     assert provider.supports_streaming is False
+
+
+def test_provider_capability_matrix_exposes_streaming_limitations():
+    """四路 provider 的 streaming 能力必须显式可查，不能靠调用方猜。"""
+    from agent.provider.config import AgentProviderConfig
+    from agent.provider.factory import build_model_provider
+
+    cases = {
+        "anthropic_native": True,
+        "anthropic_compatible": False,
+        "openai_native": False,
+        "openai_compatible": False,
+    }
+
+    for provider_type, supports_streaming in cases.items():
+        config = AgentProviderConfig(
+            provider_type=provider_type,
+            provider_name=provider_type,
+            api_key="secret-token-must-not-leak",
+            api_key_env="OPENAI_API_KEY" if provider_type.startswith("openai") else "ANTHROPIC_API_KEY",
+            base_url="https://example.invalid/v1" if "compatible" in provider_type else None,
+            model="fake-model",
+            max_tokens=64,
+            timeout=3.0,
+            supports_tools=True,
+            supports_streaming=supports_streaming,
+            auth_scheme="bearer",
+            request_path="/v1/chat/completions" if provider_type.startswith("openai") else "/v1/messages",
+            compatibility_mode="openai" if provider_type.startswith("openai") else "anthropic_messages",
+        )
+
+        provider = build_model_provider(config)
+
+        assert provider is not None
+        assert provider.supports_streaming is supports_streaming
+
+
+def test_openai_compatible_streaming_fails_closed_without_http_fallback():
+    """openai_compatible 不支持 streaming 时必须 fail closed，不能悄悄转 non-streaming。"""
+    from agent.provider.config import AgentProviderConfig
+    from agent.provider.factory import build_model_provider
+    from agent.provider.protocol import ProviderCapabilityError
+
+    class ForbiddenHTTPClient:
+        def post(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+            raise AssertionError("streaming unsupported path must not call HTTP")
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        provider_name="custom-openai-compatible",
+        api_key="secret-token-must-not-leak",
+        api_key_env="OPENAI_API_KEY",
+        base_url="https://example.invalid/v1",
+        model="gpt-compatible",
+        max_tokens=64,
+        timeout=3.0,
+        supports_tools=True,
+        supports_streaming=False,
+        auth_scheme="bearer",
+        request_path="/v1/chat/completions",
+        compatibility_mode="openai",
+    )
+    provider = build_model_provider(config)
+    provider._http = ForbiddenHTTPClient()  # type: ignore[attr-defined]
+
+    with pytest.raises(ProviderCapabilityError, match="streaming_not_supported"):
+        list(provider.stream(system="system", messages=[], tools=[]))

@@ -6,7 +6,7 @@
 
 ## 总体结论
 
-Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor implementation loop is in local audit-readiness verification.
+Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening is in local audit-readiness verification.
 
 `v0.9.0` 已作为阶段性里程碑发布并推送 tag。最新对抗性审计摘要曾写 P0/P1/P2 阻塞为 0，但问题清单仍列出两个 P2。本轮按
 实际问题清单修复：封死 `agent/model_call.py` 的 legacy SDK stream bypass，并让
@@ -44,8 +44,19 @@ Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor implementation loop 
 | D: Dogfood runner D1-D2 | completed locally | `scripts/dogfood_global_scenarios.py` 承载 definition-only scenarios；`scripts/dogfood_provider_preflight.py` 集中 provider preflight；synthetic global dogfood 12/12 passed |
 | G: Config unification G1 | completed locally | `tests/test_config_authority_boundaries.py` 固定 provider config authority 与 local/legacy config 边界；project dotenv scoped loader 继续显式 opt-in |
 | M: Memory M1-M3 + M5 docs | completed locally / pending final dogfood | `tests/test_memory_stabilization_m1.py` 锁定 no silent retain、pending_review、inline confirmation、Skill/SubAgent 不直写；`agent/memory_confirmation_forms.py` 集中 confirmation form 语义；M5 dogfood 由 Phase 9 final verification 计入 audit readiness |
-| B: Benchmark baseline | completed locally | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic report；`tests/test_stabilization_benchmark_baseline.py` 覆盖 reproducibility / input hash / report fields |
-| T: Large tests split | completed locally | `tests/test_global_dogfood_boundaries.py` 从 global dogfood 大测试拆出 D1/D2 边界测试；TDD selected commands 已同步，未拆 `tests/test_v0_4_transition_boundaries.py` |
+| B: Benchmark baseline | completed locally | `scripts/stabilization_benchmark_baseline.py` 生成 deterministic synthetic report；deep stabilization 已从 7 扩展到 19 scenarios，覆盖 Memory/Skill/SubAgent/Checkpoint/Confirmation/Provider/Dogfood 组合边界 |
+| T: Large tests split | completed locally | `tests/test_transition_*.py` 从 `tests/test_v0_4_transition_boundaries.py` 拆出 transition characterization；旧文件降为轻量索引；`tests/test_global_dogfood_boundaries.py` 承载 D1/D2 边界测试 |
+
+## Deep Stabilization hardening
+
+严格红队审计后，本轮修复的深层问题：
+
+- `tests/test_v0_4_transition_boundaries.py` 从 3758 行巨型历史文件降为索引，实际 coverage 拆入 `tests/test_transition_tool_failure_boundaries.py`、`tests/test_transition_tool_success_boundaries.py`、`tests/test_transition_model_output_boundaries.py`、`tests/test_transition_pending_confirmation_boundaries.py`、`tests/test_transition_checkpoint_boundaries.py`。
+- benchmark baseline 从 7 个 deterministic scenarios 扩到 19 个，新增 Memory session isolation、Confirmation no-write、Provider factory no bypass、unsupported streaming fail-closed、CLI/TUI presentation-only、dogfood synthetic-not-real-execution 等组合边界。
+- Phase 6 LLM consolidation dogfood diagnostics 不再根据 URL/model 猜 provider name；缺失显式 `provider_name` 时为 `unknown`。
+- `config.py` 不再在 import 时创建 `sessions/`；`API_KEY` / `BASE_URL` 改为 lazy compatibility attrs，新增显式 legacy getter。
+- `openai_compatible` 明确 `supports_streaming=False`，直接调用 `stream()` 时 fail closed，不静默 fallback 到 non-streaming。
+- Memory 增加 deterministic session isolation characterization，区分 runtime pending cache 与 filesystem store 持久层。
 
 ## Final audit environment fix
 
@@ -66,13 +77,13 @@ Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor implementation loop 
 | P3 | Status | Evidence / reason |
 |---|---|---|
 | Streaming Protocol 文档 event_type 不精确 | fixed | `docs/02-architecture/STREAMING_PROTOCOL.zh.md` 已对齐 `text_delta` / `tool_request` / `final` / `error`；`tests/test_streaming_protocol.py` 增加文档一致性测试 |
-| Claude Code / Claude / Python SDK 影响全局架构 | fixed / not global | SDK lazy import 限定在 `agent/provider/anthropic_native.py`；非 provider runtime/memory/skill/subagent 增加边界测试；Claude Code 文档段落标为 prior-art reference；Phase 6 dogfood provider identity 改为显式 `AgentProviderConfig` 优先，不再用 `claude`/`base_url` 猜运行依赖 |
+| Claude Code / Claude / Python SDK 影响全局架构 | fixed / not global | SDK lazy import 限定在 `agent/provider/anthropic_native.py`；非 provider runtime/memory/skill/subagent 增加边界测试；Claude Code 文档段落标为 prior-art reference；Phase 6 dogfood provider identity 改为显式 `AgentProviderConfig` 优先，缺失显式 provider name 时返回 `unknown`，不再用 `claude`/`base_url` 猜运行依赖 |
 | `core.py` 仍偏大 | P3 / deferred | 已抽出 model call / pending confirmation / model output dispatch / runtime loop fields projection；剩余主 loop 与 runtime event bridge 受 characterization tests 保护，不建议本轮机械拆分，不阻塞 push |
 | 三套 config 概念重叠 | fixed governance, not unified | 代码注释和 README/docs 明确：`config.py` 是 legacy runtime/CLI 兼容，`agent/provider/config.py` 是 provider/API 权威，`agent/local_config.py` 是本地 customization metadata |
-| Memory module 仍偏大 | P3 / deferred | M1 characterization 已补；M3 confirmation form 语义已集中；Memory governance 不变；M4 consolidation / snapshot 边界仍 deferred，不建议本轮机械拆分 |
-| Large test files | P3 / deferred | 已拆出 `tests/test_global_dogfood_boundaries.py`；`tests/test_v0_4_transition_boundaries.py` 和多个 Memory tests 仍承载 characterization coverage，需要 future test split，不阻塞 push |
+| Memory module 仍偏大 | P3 / deferred | M1 characterization 与 session isolation tests 已补；M3 confirmation form 语义已集中；Memory governance 不变；M4 consolidation / snapshot 边界仍 deferred，不建议本轮机械拆分 |
+| Large test files | partially fixed / P3 remains | `tests/test_v0_4_transition_boundaries.py` 已拆分；多个 Memory tests 仍承载 characterization coverage，需要 future test split，不阻塞 push |
 | Large dogfood runners | P3 / deferred | D1 scenario definition 与 D2 provider preflight 已拆出；runner report / governance matrix 仍可按 D3-D4 后续小切片拆，不建议本轮机械拆分 |
-| Benchmark baseline scenarios | P3 / deferred | 当前 deterministic baseline 为 7 scenarios；future B2 可扩展到 10-12 个 governance scenarios，仍保持 no real LLM、deterministic only，并覆盖更多 Memory/Skill/SubAgent/ToolRegistry/Checkpoint cases |
+| Benchmark baseline scenarios | fixed for v0.9.x | 当前 deterministic baseline 为 19 scenarios；future B2 可继续增加真实回归比较器，但仍保持 no real LLM、deterministic only，不能变成 metrics platform |
 | `review_agent_output` dead code | fixed | 无调用点且非 documented public API，已删除，避免继续保留 direct `client.messages.create` 形状 |
 | CURRENT_AUDIT_STATUS / docs 状态同步 | fixed | 本节记录 fixed/deferred 状态；`TEST_MATRIX` 同步 provider/streaming/dogfood selected tests |
 
@@ -82,14 +93,14 @@ Status: v0.9.0 released; v0.9.x Stabilization / P3 Refactor implementation loop 
 |---|---|---|---|
 | Runtime/Core/Loop | Healthy with P3 backlog | provider streaming 通过 `ModelProvider.stream` / `agent.model_call`；runtime loop fields projection 已抽出；architecture tests 固定边界 | P3: `core.py` 仍偏大，需 characterization-first |
 | ToolRegistry/ToolExecutor | Healthy | ToolRegistry metadata、confirmation、visibility tests | P3: 全局 registry 仍需谨慎测试隔离 |
-| Memory | Healthy with P3 cleanup | no silent retain / no auto approve；M1 characterization 覆盖 pending_review / inline confirmation / Skill/SubAgent proposal；LLM path 走 provider injection | P3: M4 consolidation / snapshot boundary deferred |
+| Memory | Healthy with P3 cleanup, real-quality gap explicit | no silent retain / no auto approve；M1 characterization 覆盖 pending_review / inline confirmation / Skill/SubAgent proposal；session isolation tests 覆盖 runtime cache vs filesystem store；LLM path 走 provider injection | P3/future: real LLM recall/injection quality 仍需 gated 验证；M4 consolidation / snapshot boundary deferred |
 | Skill | Healthy | formal `agent/skill_system/`；legacy 隔离；synthetic + real API dogfood 证据 | P3: docs 多，入口需靠新索引 |
 | SubAgent | Healthy | L0 complete；T1 synthetic dogfood 16/16；L1-L5 gated/future | none blocking |
 | Checkpoint | Healthy | 截断 tool_result；过滤未知字段；Skill/SubAgent summary safe | none blocking |
 | Confirmation / Ask User | Healthy | request_user_input / memory confirmation / tool confirmation 复用 runtime 边界 | none blocking |
-| CLI/TUI | Healthy | adapter/presentation only；Textual lazy optional | P3: `main.py` 仍承担较多 adapter 兼容 |
+| CLI/TUI | Acceptable with P3 adapter debt | adapter/presentation only；Textual lazy optional；benchmark 覆盖 presentation-only boundary | P3: `main.py` 仍承担较多 adapter 兼容，不能写成完全健康 |
 | Dogfood | Healthy with D1/D2 split | synthetic checks 是 deterministic validation；scenario definition-only；provider preflight helper sanitized；real-api 是 provider-backed reasoning/evaluation | real dogfood not default |
-| Provider config | Healthy with clarified ownership | `AgentProviderConfig` + factory 覆盖 Anthropic/OpenAI native + compatible 四种 style；三层 config 职责已写入代码注释/README | P3: 物理统一仍是 future，不阻塞 push |
+| Provider config | Healthy with clarified ownership | `AgentProviderConfig` + factory 覆盖 Anthropic/OpenAI native + compatible 四种 style；`config.py` import-time mkdir 已移除；legacy API_KEY/BASE_URL lazy compatibility | P3: 物理统一仍是 future，不阻塞 push |
 | Security/Secrets | Healthy | `.env` / `agent_log.jsonl` / sessions/runs/memory episodes not tracked | do not read real artifacts in audit |
 
 ## Ready to push?
@@ -101,7 +112,7 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 
 - `core.py` remains a runtime hub. Next safe slice: characterize runtime event bridge and loop dependency assembly before moving any code.
 - `memory.py`, `memory_emergence.py`, `memory_fs_store.py`, and `memory_extraction.py` remain large; M1/M3 is done, M4 consolidation / snapshot split remains deferred.
-- `tests/test_v0_4_transition_boundaries.py` remains a large historical test file and should be split by transition theme only after preserving discovery and coverage.
+- `tests/test_v0_4_transition_boundaries.py` has been split by transition theme; keep the old file as a lightweight index and put future transition coverage in the appropriate `tests/test_transition_*.py` file.
 - Large Memory tests remain future cleanup: `tests/test_memory_emergence.py`, `tests/test_memory_session_hook.py`, `tests/test_memory_consolidation_real_llm_dogfood.py`, `tests/test_memory_extraction.py`, `tests/test_memory_fs_store.py`.
 - Large dogfood runners remain future cleanup: `scripts/dogfood_phase6_llm_consolidation.py`, `scripts/dogfood_skill_system.py`; `scripts/dogfood_global_real_api.py` D1/D2 split is complete while D3/D4 remains future cleanup.
 - Fake memory extractor remains keyword-based skeleton; deeper quality improvements belong to LLM extractor / Memory refactor slices, not this P2 cleanup.
@@ -122,10 +133,13 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Real MCP server activation remains opt-in.
 - DB/graph/embedding/vector store are not default memory backends.
 - Global Real API dogfood must use project `.env` scoped config loading and must block shell env fallback.
-- Dogfood provider identity comes from explicit config fields (`provider_type` / `provider_name`), not URL/model inference.
+- Dogfood provider identity comes from explicit config fields (`provider_type` / `provider_name`), not URL/model inference; missing provider name is reported as `unknown`.
 - Global governance matrix is generated from scenario result check fields; uncovered boundaries must not be marked pass.
 - Synthetic dogfood evidence comes from deterministic synthetic checks; `expected_evidence` is only scenario definition.
-- Benchmark B2 future expansion: expand from 7 to 10-12 deterministic governance scenarios; keep no real LLM; cover more Memory / Skill / SubAgent / ToolRegistry / Checkpoint cases.
+- Benchmark baseline now has 19 deterministic governance scenarios; future B2 should add comparison/reporting depth only if it stays no real LLM and does not become a metrics platform.
+- Memory real LLM recall/injection quality remains a future gated track; deterministic tests cover governance and session isolation, not true semantic quality.
+- Skill/SubAgent real user dogfood and true multi-process/session productization remain future tracks.
+- `openai_compatible` streaming remains unsupported by design and must fail closed until a dedicated provider streaming enhancement lands.
 
 ## Latest verification baseline
 
@@ -133,9 +147,9 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 - Phase 2 full pytest with temp HOME: `2721 passed, 14 skipped`.
 - Phase 3 full pytest with temp HOME: `2723 passed, 14 skipped`.
 - Phase 5 full pytest with temp HOME: `2732 passed, 14 skipped`.
-- Final audit-fix full pytest with temp HOME after provider env stabilization: `2737 passed, 14 skipped`.
+- Deep stabilization full pytest with temp HOME: `2750 passed, 14 skipped`.
 - synthetic global dogfood: `12/12 passed`.
 - synthetic skill dogfood: `12/12 passed`.
 - synthetic subagent dogfood: `16/16 passed`.
 - memory synthetic review scenario: `13 passed`.
-- benchmark baseline: `7 scenarios, 7 passed, 0 regressions`.
+- benchmark baseline: `19 scenarios, 19 passed, 0 regressions` in local deep stabilization smoke.

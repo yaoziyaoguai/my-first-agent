@@ -22,8 +22,30 @@ def test_benchmark_report_is_reproducible() -> None:
     second = build_benchmark_report()
 
     assert first == second
-    assert first["summary"]["total"] >= 6
+    assert first["summary"]["total"] >= 12
     assert first["summary"]["regressions"] == 0
+
+
+def test_benchmark_covers_deep_stabilization_governance_paths() -> None:
+    """v1.0 前 baseline 不能只测单点，必须覆盖组合治理边界。"""
+
+    report = build_benchmark_report()
+    scenario_ids = {entry["scenario_id"] for entry in report["scenarios"]}
+
+    assert {
+        "memory-no-silent-retain-boundary",
+        "memory-no-auto-approve-boundary",
+        "memory-session-isolation-boundary",
+        "skill-progressive-disclosure-boundary",
+        "subagent-l0-no-nested-delegation-boundary",
+        "toolregistry-hidden-high-risk-boundary",
+        "checkpoint-secret-and-size-boundary",
+        "confirmation-reject-timeout-no-write-boundary",
+        "provider-factory-no-sdk-bypass-boundary",
+        "streaming-unsupported-provider-fail-closed-boundary",
+        "cli-tui-presentation-only-boundary",
+        "dogfood-synthetic-not-real-execution-boundary",
+    } <= scenario_ids
 
 
 def test_benchmark_entries_have_required_audit_fields() -> None:

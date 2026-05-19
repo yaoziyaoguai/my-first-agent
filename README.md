@@ -3,7 +3,7 @@
 First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
 它的核心不是“更多工具”，而是把主代理运行时（Parent Agent Runtime）、工具注册中心（ToolRegistry）、记忆治理（Memory Governance）、技能系统（Skill System）、子代理系统（SubAgent System）、检查点（Checkpoint）和人工确认（Confirmation / Ask User）放在同一套可审计边界里运行。
 
-当前项目已经完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线，并通过全量测试和 synthetic dogfood。
+当前项目已经完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线，并通过全量测试和 synthetic dogfood；v0.9.x deep stabilization 正在把进入 SubAgent L1 前的深层测试、provider、config 和 Memory 隔离风险收口。
 本轮新增全局 dogfood 入口，用于同时验证 Runtime、ToolRegistry、Memory、Skill、SubAgent、Checkpoint、Confirmation、CLI/TUI 和 secret safety。
 它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
 新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
@@ -18,8 +18,8 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 - Skill System：正式命名空间是 `agent/skill_system/`；支持 descriptor、registry、progressive disclosure、tool/memory/checkpoint 边界和 dogfood。
 - SubAgent System：正式命名空间是 `agent/subagent_system/`；L0 deterministic/local 基线完成；L1-L5 仍 gated/future。
 - Checkpoint / Resume：checkpoint 是安全边界，保存截断摘要和声明字段，避免持久化大 tool result 或未知字段。
-- CLI/TUI：CLI/Textual 只是 adapter/presentation，不拥有 Agent loop。
-- 当前验证基线：`ruff` passed；full pytest 曾通过 `2684 passed, 14 skipped`；SubAgent synthetic dogfood `16/16`。
+- CLI/TUI：CLI/Textual 只是 adapter/presentation，不拥有 Agent loop；`main.py` 仍有 P3 adapter debt，不能视为已 productization。
+- 当前验证基线：`ruff` passed；最近 full pytest 基线见 [CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)；SubAgent synthetic dogfood `16/16`。
 - Provider boundary：Claude/Anthropic 只作为 provider adapter 或文档参考出现；官方 SDK lazy import 限定在 `agent/provider/`，不是 `core.py`、Memory、Skill、SubAgent 或 dogfood runner 的运行依赖。
 
 ## 核心能力
@@ -32,7 +32,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 | Skill System | 已完成 formal safe-local 系统 | metadata-first，按需加载，不直接执行工具 |
 | SubAgent System | L0 已完成 | local fake/deterministic，Parent adjudication |
 | Checkpoint | 已完成安全边界 | 截断 tool result，过滤未知字段 |
-| CLI/TUI | 已完成边界收口 | 输入/输出 adapter，不复制 runtime |
+| CLI/TUI | 边界收口，仍有 P3 adapter debt | 输入/输出 adapter，不复制 runtime |
 | Real LLM / real API dogfood | gated | 需要显式授权和配置 |
 | Shell / external process / worktree | gated/future | 不默认开启 |
 

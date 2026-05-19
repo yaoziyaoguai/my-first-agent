@@ -146,6 +146,62 @@ class TestModuleLevelConstants:
         assert len(calls) == 1
         assert calls[0]["kwargs"].get("override") is False
 
+    def test_import_config_does_not_create_sessions_directory(self, tmp_path, monkeypatch):
+        """import config 不能创建 runtime 目录，目录创建必须由显式 runtime 写入触发。"""
+        monkeypatch.chdir(tmp_path)
+        import config
+
+        importlib.reload(config)
+
+        assert not (tmp_path / "sessions").exists()
+
+    def test_explicit_snapshot_dir_init_creates_sessions_directory(self, tmp_path, monkeypatch):
+        """legacy snapshot 目录创建是显式 init 行为，不再藏在 import side effect。"""
+        monkeypatch.chdir(tmp_path)
+        import config
+
+        importlib.reload(config)
+
+        assert not (tmp_path / "sessions").exists()
+        assert config.ensure_snapshot_dir() == tmp_path / "sessions"
+        assert (tmp_path / "sessions").is_dir()
+
+    def test_legacy_api_key_and_base_url_are_lazy_compatibility_attrs(
+        self, monkeypatch,
+    ):
+        """API_KEY / BASE_URL 不应在 import 时绑定；legacy 调用改走 lazy getter。"""
+        import config
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "lazy-key")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://lazy.example")
+        importlib.reload(config)
+
+        assert "API_KEY" not in config.__dict__
+        assert "BASE_URL" not in config.__dict__
+        assert config.get_legacy_api_key() == "lazy-key"
+        assert config.get_legacy_base_url() == "https://lazy.example"
+
+    def test_provider_config_path_does_not_depend_on_legacy_module_level_env(
+        self, monkeypatch,
+    ):
+        """provider config 权威路径只读显式 env mapping，不依赖 config.API_KEY。"""
+        import config
+        from agent.provider.config import load_agent_provider_config
+
+        def fail_if_legacy_api_key_used() -> str | None:
+            raise AssertionError("provider config must not read legacy config API_KEY")
+
+        monkeypatch.setattr(config, "get_legacy_api_key", fail_if_legacy_api_key_used)
+
+        provider_config = load_agent_provider_config(env={
+            "MY_FIRST_AGENT_LLM_PROVIDER": "openai_compatible",
+            "OPENAI_API_KEY": "secret-token-must-not-leak",
+            "OPENAI_BASE_URL": "https://provider.example/v1",
+            "OPENAI_MODEL": "gpt-compatible",
+        })
+
+        assert provider_config.provider_type == "openai_compatible"
+
 
 class TestRequireConfig:
     """require_config() / get_config_errors() 启动校验。"""

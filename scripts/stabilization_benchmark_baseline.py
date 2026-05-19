@@ -63,6 +63,66 @@ STABILIZATION_BENCHMARK_SCENARIOS: tuple[BenchmarkScenario, ...] = (
         synthetic_input="synthetic secret marker must be redacted not tracked",
         expected_boundary="safety:no_secret_access_or_output",
     ),
+    BenchmarkScenario(
+        scenario_id="memory-no-silent-retain-boundary",
+        synthetic_input="memory proposal appears but user has not approved retention",
+        expected_boundary="memory:no_silent_retain_requires_explicit_confirmation",
+    ),
+    BenchmarkScenario(
+        scenario_id="memory-no-auto-approve-boundary",
+        synthetic_input="high confidence memory candidate still requires governance review",
+        expected_boundary="memory:no_auto_approve_pending_review_or_inline_confirmation",
+    ),
+    BenchmarkScenario(
+        scenario_id="memory-session-isolation-boundary",
+        synthetic_input="session A memory proposal must not enter session B runtime cache",
+        expected_boundary="memory:session_cache_isolation_filesystem_store_explicit",
+    ),
+    BenchmarkScenario(
+        scenario_id="skill-progressive-disclosure-boundary",
+        synthetic_input="skill descriptor is visible but skill body loads only after selection",
+        expected_boundary="skill:progressive_disclosure_no_runtime_loop_ownership",
+    ),
+    BenchmarkScenario(
+        scenario_id="subagent-l0-no-nested-delegation-boundary",
+        synthetic_input="subagent L0 request attempts nested delegation",
+        expected_boundary="subagent:L0_parent_control_no_nested_delegation",
+    ),
+    BenchmarkScenario(
+        scenario_id="toolregistry-hidden-high-risk-boundary",
+        synthetic_input="hidden high-risk tool appears in registry but not in model-visible tools",
+        expected_boundary="toolregistry:hidden_high_risk_filtered_by_single_authority",
+    ),
+    BenchmarkScenario(
+        scenario_id="checkpoint-secret-and-size-boundary",
+        synthetic_input="checkpoint candidate contains secret-like marker and huge raw context",
+        expected_boundary="checkpoint:redact_secret_and_truncate_raw_context",
+    ),
+    BenchmarkScenario(
+        scenario_id="confirmation-reject-timeout-no-write-boundary",
+        synthetic_input="memory confirmation is rejected or times out",
+        expected_boundary="confirmation:reject_or_timeout_no_write",
+    ),
+    BenchmarkScenario(
+        scenario_id="provider-factory-no-sdk-bypass-boundary",
+        synthetic_input="provider-backed call must use factory adapter not direct SDK client",
+        expected_boundary="provider:factory_only_no_direct_sdk_bypass",
+    ),
+    BenchmarkScenario(
+        scenario_id="streaming-unsupported-provider-fail-closed-boundary",
+        synthetic_input="openai compatible provider is asked for streaming feedback",
+        expected_boundary="provider:unsupported_streaming_fails_closed",
+    ),
+    BenchmarkScenario(
+        scenario_id="cli-tui-presentation-only-boundary",
+        synthetic_input="CLI/TUI renders status without mutating runtime governance state",
+        expected_boundary="cli_tui:presentation_only_no_policy_authority",
+    ),
+    BenchmarkScenario(
+        scenario_id="dogfood-synthetic-not-real-execution-boundary",
+        synthetic_input="synthetic dogfood scenario declares expected evidence",
+        expected_boundary="dogfood:synthetic_checks_are_not_real_execution",
+    ),
 )
 
 

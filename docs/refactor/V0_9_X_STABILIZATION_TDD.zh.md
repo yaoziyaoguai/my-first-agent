@@ -63,7 +63,7 @@ Status: Test plan for v0.9.x stabilization / P3 refactor track.
 ### Selected test command
 
 ```bash
-python -m pytest tests/test_v0_4_transition_boundaries.py tests/test_checkpoint_ownership.py tests/test_streaming_protocol.py tests/test_runtime_loop_fields.py -q
+python -m pytest tests/test_transition_*.py tests/test_v0_4_transition_boundaries.py tests/test_checkpoint_ownership.py tests/test_streaming_protocol.py tests/test_runtime_loop_fields.py -q
 ```
 
 ### Full pytest trigger
@@ -279,19 +279,21 @@ Large tests split 本身以现有测试为 characterization coverage。拆分前
 根据拆分主题选择原文件和新文件，例如：
 
 ```bash
-python -m pytest tests/test_v0_4_transition_boundaries.py -q
+python -m pytest tests/test_transition_*.py tests/test_v0_4_transition_boundaries.py -q
 python -m pytest tests/test_memory_emergence.py tests/test_memory_fs_store.py -q
 ```
 
-v0.9.x stabilization 的当前 split evidence 是 dogfood boundary 拆分：
+v0.9.x deep stabilization 的当前 split evidence 包含 transition boundary 与
+dogfood boundary 拆分：
 
 ```bash
+python -m pytest tests/test_transition_*.py tests/test_v0_4_transition_boundaries.py -q
 python -m pytest tests/test_global_dogfood_boundaries.py tests/test_global_real_api_dogfood.py -q
 ```
 
 Phase 7 完成后，selected test command 必须显式包含新拆出的 split test file。
-如果后续拆分 `tests/test_v0_4_transition_boundaries.py`，Track C selected commands
-也必须同步更新；不允许继续保留只指向旧文件、遗漏新文件的命令。
+`tests/test_v0_4_transition_boundaries.py` 已降为轻量索引；Track C selected
+commands 必须继续包含 `tests/test_transition_*.py`，不允许只跑旧索引文件。
 
 ### Full pytest trigger
 

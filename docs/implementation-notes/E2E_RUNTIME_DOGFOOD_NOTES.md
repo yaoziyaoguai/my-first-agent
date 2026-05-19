@@ -156,3 +156,76 @@ Round 2 原始结果：6 pass / 3 partial / 0 blocked / 0 fail。
 - 6/9 场景只验证子系统 API 正确性，未验证 runtime 集成后的行为
 - Skill/SubAgent/Memory/Checkpoint 的 runtime-integrated 行为仍无 E2E 覆盖
 - 这是 v0.9.x 的已知架构现实，不是紧急 bug；但不应再声称 "9/9 E2E pass"
+
+## Section 7: Re-verification after 8aa11a4 (2026-05-19)
+
+### 7.1 API injection confirmed
+
+Rerun of E2E Runtime Real API Dogfood after provider injection hardening:
+
+- **project .env scoped loader**: working correctly.
+- **key_source_kind**: `project_dotenv`.
+- **auth_status**: `configured`.
+- **shell_env_fallback_used**: `false`.
+- **chat(provider=provider) injection**: verified working — E01, E08, E09 all
+  successfully called real LLM (kimi-k2.5 via DashScope Anthropic-compatible)
+  through the injected provider. No monkeypatching needed.
+
+### 7.2 Rerun results (real-api mode)
+
+| Metric | Count |
+|--------|-------|
+| Total | 9 |
+| pass | 3 (E01, E08, E09) |
+| partial | 6 (E02-E07) |
+| blocked | 0 |
+| fail | 0 |
+| actual_runtime_invoked | 3 |
+| direct_subsystem_invocation | 6 |
+| simulated | 0 |
+
+### 7.3 Root cause confirmed
+
+The "API occasionally unavailable" symptom from Round 1 was NOT a loader bug.
+It was the harness failing to inject the provider into `build_loop_context`,
+which hardcoded `build_model_provider_from_env()`. 8aa11a4 fixed this by
+adding an optional `provider` parameter to `chat()` and `build_loop_context()`.
+
+### 7.4 Capability matrix regression identified
+
+The `_capability_evidence_matrix()` rewritten in 8aa11a4 has a naming mismatch:
+capability names (e.g. "SubAgent", "Skill", "Memory") don't match the concrete
+module names in `systems_actually_invoked` (e.g. "SubAgentRegistry",
+"SkillRegistry", "FilesystemMemoryStore"). This causes most capabilities to
+be incorrectly classified as `e2e_verified=no` with P2 severity.
+
+The honest classification should be:
+- **Provider call**: yes (E01/E08 via chat() → real LLM)
+- **ToolRegistry gate**: yes (E05/E08/E09 actually invoked ToolRegistry API)
+- **Skill selection**: partial (E02 subsystem verified, E08 registry scanned but
+  not proven that LLM selected/used skills)
+- **SubAgent L0**: partial (E03 full subsystem chain verified, no runtime LLM
+  reasoning about delegation)
+- **Memory proposal/review**: partial (E04 full consolidation chain verified,
+  no runtime LLM-triggered proposal)
+- **Checkpoint save/load**: partial (E06 direct API verified)
+- **Streaming protocol**: partial (E07 pure function, correct)
+- **Memory recall/injection**: no (not covered by any scenario)
+- **Confirmation**: partial (E05/E09 exercised risk classification)
+
+### 7.5 Hard conclusion (unchanged)
+
+First Agent v0.9.x can:
+- Load API keys safely through project .env scoped loader
+- Run chat() with real LLM through provider injection
+- Verify subsystem module APIs at the unit/integration level
+
+It CANNOT (and should not claim to):
+- Verify that Skill selection works when triggered by Runtime LLM tool calling
+- Verify that SubAgent delegation works when triggered by Runtime LLM reasoning
+- Verify that Memory proposal works when triggered by conversational context
+- Verify any cross-module runtime-integrated behavior
+
+This is architecture reality, not a bug. SubAgent L1 cannot begin until:
+1. SubAgent delegation is registered as a Runtime tool
+2. An E2E scenario verifies LLM-initiated delegation through chat()

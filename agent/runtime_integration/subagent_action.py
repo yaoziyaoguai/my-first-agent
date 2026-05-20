@@ -90,7 +90,11 @@ class SubAgentDelegateL0Handler:
             payload=result_payload,
             observed_call=observed,
             parent_adjudicated=True,
-            evidence_extra=result_payload,
+            evidence_extra={
+                key: value
+                for key, value in result_payload.items()
+                if key != "parent_adjudicated"
+            },
         )
 
     def _reject(
@@ -120,7 +124,7 @@ class SubAgentDelegateL0Handler:
             observed_call=None,
             parent_adjudicated=False,
             evidence_extra={
-                **payload,
+                **{key: value for key, value in payload.items() if key != "parent_adjudicated"},
                 "runtime_e2e_disqualified_reason": reason,
             },
             error_safe_preview=reason,

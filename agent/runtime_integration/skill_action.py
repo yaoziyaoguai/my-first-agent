@@ -177,6 +177,15 @@ class SkillRuntimeActionHandler:
         for item in available_metadata:
             if "body" in item or "status" in item:
                 return "available_skill_metadata contains forbidden field"
+        registry_visible_ids = {descriptor.name for descriptor in self._registry.list_visible()}
+        metadata_visible_ids = {str(item.get("skill_id") or "") for item in available_metadata}
+        if "" in metadata_visible_ids:
+            return "available_skill_metadata contains invalid skill_id"
+        if metadata_visible_ids != registry_visible_ids:
+            # 中文学习注释：model-visible metadata 必须来自 registry 的 visible
+            # list。只禁止 body/status 不够，因为 hidden/disabled id 本身也会泄露
+            # capability surface，并可能让模型选择一个本不该看见的 Skill。
+            return "available_skill_metadata does not match registry visible skills"
         selected_skill_id = metadata.get("selected_skill_id")
         selection_reason = metadata.get("selection_reason")
         selection_confidence = metadata.get("selection_confidence")

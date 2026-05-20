@@ -16,6 +16,7 @@ from agent.runtime_integration import (
     RuntimeActionDispatcher,
     RuntimeActionRequest,
     RuntimeActionType,
+    classify_evidence_level,
 )
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
@@ -107,6 +108,7 @@ def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selectio
     assert result.evidence["target_module"] == "SkillLoader"
     assert result.evidence["target_module_proof"]["observer_identity"] != "SkillRuntimeActionHandler"
     assert result.evidence["audit_only_skill_exclusion_evidence"]["excluded_count"] == 1
+    assert "audit_only_skill_exclusion_evidence" not in result.payload
     assert "docs" not in str(result.payload)
     assert "docs" not in str(result.evidence["audit_only_skill_exclusion_evidence"])
     assert "status" not in result.payload["available_skill_metadata"][0]
@@ -138,6 +140,114 @@ def test_skill_missing_selection_metadata_is_not_runtime_e2e(tmp_path: Path, mis
     assert result.status == "failed"
     assert result.evidence["evidence_level"] != "runtime_e2e"
     assert result.payload["body_load_decision"] is False
+
+
+def test_hidden_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> None:
+    """hidden skill id 即使没有 body/status，也不能进入 model-visible metadata。"""
+
+    skill_root = tmp_path / "skills"
+    _write_skill(skill_root, "code-review", status="active")
+    _write_skill(skill_root, "private-audit", status="legacy")
+    handler = SkillRuntimeActionHandler.from_roots([skill_root], visible_tool_names={"read_file"})
+
+    result, _ = _dispatch(handler, _skill_request({
+        "task_summary": "review core.py",
+        "available_skill_metadata": [
+            {"skill_id": "code-review", "description": "x", "tags": [], "risk_level": "low"},
+            {"skill_id": "private-audit", "description": "hidden", "tags": [], "risk_level": "low"},
+        ],
+        "model_decision_metadata": {
+            "selected_skill_id": "code-review",
+            "selection_reason": "visible review skill",
+            "selection_confidence": "high",
+        },
+    }))
+
+    assert result.status == "failed"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert result.evidence["runtime_e2e_disqualified_reason"] == (
+        "available_skill_metadata does not match registry visible skills"
+    )
+    assert "audit_only_skill_exclusion_evidence" not in result.payload
+
+
+def test_disabled_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> None:
+    """disabled skill id 不得泄露到 available_skill_metadata。"""
+
+    skill_root = tmp_path / "skills"
+    _write_skill(skill_root, "code-review", status="active")
+    _write_skill(skill_root, "disabled-docs", status="disabled")
+    handler = SkillRuntimeActionHandler.from_roots([skill_root], visible_tool_names={"read_file"})
+
+    result, _ = _dispatch(handler, _skill_request({
+        "task_summary": "review core.py",
+        "available_skill_metadata": [
+            {"skill_id": "code-review", "description": "x", "tags": [], "risk_level": "low"},
+            {"skill_id": "disabled-docs", "description": "disabled", "tags": [], "risk_level": "low"},
+        ],
+        "model_decision_metadata": {
+            "selected_skill_id": "code-review",
+            "selection_reason": "visible review skill",
+            "selection_confidence": "high",
+        },
+    }))
+
+    assert result.status == "failed"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert "disabled-docs" not in str(result.evidence["audit_only_skill_exclusion_evidence"])
+
+
+def test_available_skill_metadata_must_match_registry_visible_ids(tmp_path: Path) -> None:
+    """metadata 不能是 registry visible list 的随意子集，否则模型看到的能力面不可信。"""
+
+    skill_root = tmp_path / "skills"
+    _write_skill(skill_root, "code-review", status="active")
+    _write_skill(skill_root, "docs", status="active")
+    handler = SkillRuntimeActionHandler.from_roots([skill_root], visible_tool_names={"read_file"})
+
+    result, _ = _dispatch(handler, _skill_request({
+        "task_summary": "review core.py",
+        "available_skill_metadata": [
+            {"skill_id": "code-review", "description": "x", "tags": [], "risk_level": "low"},
+        ],
+        "model_decision_metadata": {
+            "selected_skill_id": "code-review",
+            "selection_reason": "visible review skill",
+            "selection_confidence": "high",
+        },
+    }))
+
+    assert result.status == "failed"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert result.evidence["runtime_e2e_disqualified_reason"] == (
+        "available_skill_metadata does not match registry visible skills"
+    )
+
+
+def test_audit_only_exclusion_evidence_not_in_payload(tmp_path: Path) -> None:
+    """hidden/disabled 统计只进 audit evidence，不进入 model-visible payload。"""
+
+    skill_root = tmp_path / "skills"
+    _write_skill(skill_root, "code-review", status="active")
+    _write_skill(skill_root, "private-audit", status="legacy")
+    handler = SkillRuntimeActionHandler.from_roots([skill_root], visible_tool_names={"read_file"})
+
+    result, _ = _dispatch(handler, _skill_request({
+        "task_summary": "review core.py",
+        "available_skill_metadata": [
+            {"skill_id": "code-review", "description": "x", "tags": [], "risk_level": "low"},
+        ],
+        "model_decision_metadata": {
+            "selected_skill_id": "code-review",
+            "selection_reason": "visible review skill",
+            "selection_confidence": "high",
+        },
+    }))
+
+    assert result.status == "success"
+    assert "audit_only_skill_exclusion_evidence" not in result.payload
+    assert result.evidence["audit_only_skill_exclusion_evidence"]["excluded_count"] == 1
+    assert "private-audit" not in str(result.evidence["audit_only_skill_exclusion_evidence"])
 
 
 def test_tool_fake_high_risk_blocked_overlay_does_not_pollute_production_registry() -> None:
@@ -183,6 +293,7 @@ def test_tool_fake_high_risk_blocked_overlay_does_not_pollute_production_registr
     assert result.evidence["target_module_invoked"] is True
     assert result.evidence["dangerous_tool_function_invoked"] is False
     assert result.evidence["decision"] != "confirmation_required"
+    assert result.evidence["evidence_level"] == "runtime_e2e"
     assert "fake.write_file" not in TOOL_REGISTRY
 
 
@@ -225,6 +336,67 @@ def test_tool_fake_prefix_in_production_registry_fails(monkeypatch: pytest.Monke
     assert result.evidence["production_registry_found"] is True
     assert result.evidence["decision"] == "failed"
     assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_fake_tool_production_registry_found_true_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """fake.* 一旦存在于 production registry，不能被当成 dogfood overlay 正常路径。"""
+
+    from agent.tool_registry import TOOL_REGISTRY
+
+    monkeypatch.setitem(TOOL_REGISTRY, "fake.shell", {
+        "name": "fake.shell",
+        "description": "bad",
+        "parameters": {},
+        "confirmation": "always",
+        "func": lambda **kwargs: "bad",
+        "pre_execute": None,
+        "post_execute": None,
+        "meta_tool": False,
+        "capability": "shell_execution",
+        "risk_level": "high",
+        "output_policy": "bounded_text",
+    })
+    handler = ToolGateHandler(
+        dogfood_overlay={
+            "fake.shell": DogfoodOverlayTool(name="fake.shell", requested_capability="shell_execution")
+        }
+    )
+
+    result, _ = _dispatch(handler, RuntimeActionRequest(
+        action_type=RuntimeActionType.TOOL_REQUEST,
+        source="llm_tool_call",
+        parent_trace_id="trace-tool",
+        payload={"tool_name": "fake.shell", "tool_args": {}, "risk_reason": "test"},
+        constraints={"no_shell"},
+    ))
+
+    assert result.status == "failed"
+    assert result.evidence["production_registry_found"] is True
+    assert result.evidence["dogfood_overlay_found"] is True
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_fake_blocked_path_confirmation_required_is_not_allowed() -> None:
+    """fake overlay blocked path 不能报告 confirmation_required 或 allowed。"""
+
+    handler = ToolGateHandler(
+        dogfood_overlay={
+            "fake.shell": DogfoodOverlayTool(name="fake.shell", requested_capability="shell_execution")
+        }
+    )
+
+    result, _ = _dispatch(handler, RuntimeActionRequest(
+        action_type=RuntimeActionType.TOOL_REQUEST,
+        source="llm_tool_call",
+        parent_trace_id="trace-tool",
+        payload={"tool_name": "fake.shell", "tool_args": {}, "requested_capability": "shell_execution"},
+        constraints={"no_shell"},
+    ))
+
+    assert result.status == "rejected"
+    assert result.payload["gate_disposition"] is None
+    assert result.evidence["decision"] == "blocked"
+    assert result.evidence["dangerous_tool_function_invoked"] is False
 
 
 def test_memory_turn_end_proposal_creates_pending_review_without_auto_approve() -> None:
@@ -312,6 +484,95 @@ def test_checkpoint_no_tool_turn_reaches_safe_summary_boundary() -> None:
     assert result.evidence["evidence_level"] == "runtime_e2e"
 
 
+def test_checkpoint_tool_after_only_is_not_runtime_e2e() -> None:
+    """tool-after-only 触发不能证明 no-tool turn-end checkpoint boundary。"""
+
+    handler = CheckpointSafeSummaryHandler()
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        source="runtime_policy",
+        parent_trace_id="trace-checkpoint",
+        payload={
+            "runtime_state_summary": "summary after tool",
+            "last_tool_call": {"name": "read_file"},
+            "last_tool_status": "success",
+            "trigger": "tool_after",
+        },
+        constraints={"no_schema_change"},
+    )
+
+    result, _ = _dispatch(handler, request)
+
+    assert result.status == "success"
+    assert result.payload["no_tool_boundary_reached"] is False
+    assert result.evidence["tool_after_only_trigger"] is True
+    assert result.evidence["target_module_proof"] is not None
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_checkpoint_no_tool_boundary_missing_is_not_runtime_e2e() -> None:
+    """缺少 turn_end positive evidence 时，即使调用了 summary，也不能升级。"""
+
+    handler = CheckpointSafeSummaryHandler()
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        source="runtime_policy",
+        parent_trace_id="trace-checkpoint",
+        payload={
+            "runtime_state_summary": "summary",
+            "last_tool_call": None,
+            "last_tool_status": None,
+            "trigger": "manual",
+        },
+        constraints={"no_schema_change"},
+    )
+
+    result, _ = _dispatch(handler, request)
+
+    assert result.status == "success"
+    assert result.payload["no_tool_boundary_reached"] is False
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_checkpoint_direct_subsystem_only_is_partial() -> None:
+    """直接子系统证据没有 dispatcher/observer proof，只能是 subsystem integration。"""
+
+    evidence = {
+        "target_module": "CheckpointSafeSummary",
+        "module_invoked": True,
+        "checkpoint_boundary": "turn_end_before_save_checkpoint",
+        "no_tool_boundary_reached": True,
+    }
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_checkpoint_without_target_module_proof_is_not_runtime_e2e() -> None:
+    """缺 target_module_proof 的 checkpoint evidence 不能算 runtime_e2e。"""
+
+    evidence = {
+        "action_id": "act-checkpoint",
+        "action_type": "checkpoint.safe_summary",
+        "dispatcher_routed": True,
+        "target_handler_invoked": True,
+        "handler_name": "CheckpointSafeSummaryHandler",
+        "target_module": "CheckpointSafeSummary",
+        "module_invoked": True,
+        "invocation_proof": {
+            "call_id": "call-1",
+            "function_called": "CheckpointSafeSummary.redact",
+            "call_signature": "redact(str)",
+            "observed_at": "2026-05-20T00:00:00+00:00",
+            "observation_method": "module_spy",
+        },
+        "target_module_proof": None,
+        "result_returned_to_parent_runtime": True,
+        "no_tool_boundary_reached": True,
+    }
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
 def test_streaming_unsupported_provider_fails_closed_without_fake_final() -> None:
     """unsupported provider 只能 not_supported，不能 fallback 后伪造 streaming pass。"""
 
@@ -356,6 +617,29 @@ def test_streaming_supported_final_only_is_not_runtime_e2e() -> None:
     assert result.payload["text_delta_event_received"] is False
     assert result.evidence["module_invoked"] is True
     assert result.evidence["target_module_proof"] is not None
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_streaming_text_delta_only_without_final_event_is_not_runtime_e2e() -> None:
+    """text_delta-only 缺 final event，不能作为完整 streaming runtime_e2e。"""
+
+    handler = StreamingProviderCallHandler()
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+        source="runtime_policy",
+        parent_trace_id="trace-stream",
+        payload={
+            "provider_supports_streaming": True,
+            "events": [{"event_type": "text_delta", "sequence": 1, "text_delta": "hello"}],
+        },
+        constraints=set(),
+    )
+
+    result, _ = _dispatch(handler, request)
+
+    assert result.status == "failed"
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["target_module_proof"] is None
     assert result.evidence["evidence_level"] != "runtime_e2e"
 
 

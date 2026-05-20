@@ -36,17 +36,25 @@ class CheckpointSafeSummaryHandler:
             "checkpoint_boundary": "turn_end_before_save_checkpoint",
             "no_tool_boundary_reached": no_tool_boundary_reached,
         }
+        evidence_extra = {
+            **result_payload,
+            "checkpoint_schema_changed": False,
+            "tool_after_only_trigger": not no_tool_boundary_reached,
+            "memory_hook_substituted": False,
+        }
+        if not no_tool_boundary_reached:
+            # 中文学习注释：checkpoint runtime_e2e 证明的是 no-tool turn-end
+            # 到 before save_checkpoint 的边界；tool-after-only 只能说明子系统可用，
+            # 不能证明父 runtime 在无工具回合结束时会触达保存前安全摘要。
+            evidence_extra["runtime_e2e_disqualified_reason"] = (
+                "checkpoint boundary was not reached from no-tool turn end"
+            )
         return context.success(
             handler_name=type(self).__name__,
             target_module="CheckpointSafeSummary",
             payload=result_payload,
             observed_call=observed,
-            evidence_extra={
-                **result_payload,
-                "checkpoint_schema_changed": False,
-                "tool_after_only_trigger": False,
-                "memory_hook_substituted": False,
-            },
+            evidence_extra=evidence_extra,
         )
 
 

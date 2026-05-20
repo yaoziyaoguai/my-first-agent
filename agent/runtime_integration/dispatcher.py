@@ -23,6 +23,23 @@ from agent.runtime_integration.schema import (
 )
 
 
+HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
+    "action_id",
+    "action_type",
+    "handler_name",
+    "target_module",
+    "module_invoked",
+    "invocation_proof",
+    "target_module_proof",
+    "evidence_level",
+    "parent_adjudicated",
+    "dispatcher_routed",
+    "handler_invoked",
+    "target_handler_invoked",
+    "result_returned_to_parent_runtime",
+})
+
+
 class ActionHandler(Protocol):
     """RuntimeAction handler protocol.
 
@@ -106,6 +123,13 @@ class RuntimeActionContext:
             "parent_adjudicated": parent_adjudicated,
         }
         if evidence_extra:
+            overlap = HANDLER_EVIDENCE_RESERVED_FIELDS & set(evidence_extra)
+            if overlap:
+                # 中文学习注释：handler evidence_extra 只允许写业务证据。route、
+                # observer proof 与 classifier 字段属于父 runtime 边界，触碰即
+                # fail closed，防止 handler 自证自签 runtime_e2e。
+                names = ", ".join(sorted(overlap))
+                raise ValueError(f"handler evidence_update contains reserved field: {names}")
             evidence.update(evidence_extra)
         evidence["evidence_level"] = classify_evidence_level(evidence)
         return RuntimeActionResult(
@@ -177,7 +201,7 @@ class RuntimeActionDispatcher:
                 )
 
         latency_ms = max(0, int((monotonic() - started) * 1000))
-        final_result = self._mark_returned_to_parent(request, result, latency_ms=latency_ms)
+        final_result = self._mark_returned_to_parent(request, context, result, latency_ms=latency_ms)
         self._action_log.append(RuntimeActionEvent(
             event_id=new_event_id(),
             action_id=final_result.action_id,
@@ -220,19 +244,32 @@ class RuntimeActionDispatcher:
     def _mark_returned_to_parent(
         self,
         request: RuntimeActionRequest,
+        context: RuntimeActionContext,
         result: RuntimeActionResult,
         *,
         latency_ms: int,
     ) -> RuntimeActionResult:
+        if result.action_id != context.action_id or result.evidence.get("action_id") != context.action_id:
+            result = context.failed(
+                handler_name=str(result.evidence.get("handler_name") or "unknown"),
+                target_module=str(result.evidence.get("target_module") or "unknown"),
+                payload={"error": "handler returned mismatched action_id"},
+                observed_call=None,
+                evidence_extra={
+                    "error_type": "RuntimeActionEvidenceMismatch",
+                    "runtime_e2e_disqualified_reason": "handler returned mismatched action_id",
+                },
+                error_safe_preview="handler returned mismatched action_id",
+            )
         evidence = dict(result.evidence)
-        evidence["action_id"] = result.action_id
+        evidence["action_id"] = context.action_id
         evidence["action_type"] = action_type_value(request.action_type)
         evidence["dispatcher_routed"] = True
         evidence["result_returned_to_parent_runtime"] = True
         evidence["evidence_level"] = classify_evidence_level(evidence)
         return RuntimeActionResult(
             action_type=result.action_type,
-            action_id=result.action_id,
+            action_id=context.action_id,
             status=result.status,
             payload=dict(result.payload),
             evidence=evidence,

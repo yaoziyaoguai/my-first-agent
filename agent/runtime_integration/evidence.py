@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, ClassVar, Mapping
 from uuid import uuid4
 
 
@@ -39,6 +39,7 @@ class RuntimeActionModuleObserver:
     """
 
     observer_identity = "RuntimeActionModuleObserver"
+    _proof_registry: ClassVar[dict[str, dict[str, Any]]] = {}
 
     def observe(
         self,
@@ -59,18 +60,54 @@ class RuntimeActionModuleObserver:
             "observed_at": observed_at,
             "observation_method": "module_spy",
         }
+        proof_id = f"proof:{uuid4().hex}"
         target_module_proof = {
-            "proof_id": f"proof:{uuid4().hex}",
+            "proof_id": proof_id,
             "observation_source": "module_spy",
             "observer_identity": self.observer_identity,
             "observation_independent": True,
             "linked_action_id": action_id,
             "linked_target_module": target_module,
+            "linked_call_id": call_id,
+        }
+        # 中文学习注释：字段形状正确不等于证据可信。proof_id 必须由 observer 在
+        # 执行目标 callable 后登记，classifier 只接受登记表中 action/module/call
+        # 都一致的 proof，避免 handler 用普通 dict 自造 runtime_e2e。
+        self._proof_registry[proof_id] = {
+            "action_id": action_id,
+            "target_module": target_module,
+            "call_id": call_id,
+            "observer_identity": self.observer_identity,
+            "observation_source": "module_spy",
+            "observation_independent": True,
         }
         return ObservedModuleCall(
             value=value,
             invocation_proof=invocation_proof,
             target_module_proof=target_module_proof,
+        )
+
+    @classmethod
+    def is_registered_proof(
+        cls,
+        *,
+        proof: Mapping[str, Any],
+        invocation_proof: Mapping[str, Any],
+        action_id: str,
+        target_module: str,
+    ) -> bool:
+        proof_id = str(proof.get("proof_id") or "")
+        registered = cls._proof_registry.get(proof_id)
+        if not registered:
+            return False
+        call_id = invocation_proof.get("call_id")
+        return (
+            registered.get("action_id") == action_id
+            and registered.get("target_module") == target_module
+            and registered.get("call_id") == call_id
+            and registered.get("observer_identity") == proof.get("observer_identity")
+            and registered.get("observation_source") == proof.get("observation_source")
+            and registered.get("observation_independent") is True
         )
 
 
@@ -96,6 +133,15 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     if any(evidence.get(key) is not True for key in required_true):
         return False
 
+    invocation_proof = evidence.get("invocation_proof")
+    if not isinstance(invocation_proof, Mapping):
+        return False
+    for key in ("call_id", "function_called", "call_signature", "observed_at", "observation_method"):
+        if not invocation_proof.get(key):
+            return False
+    if invocation_proof.get("observation_method") == "handler_self_report":
+        return False
+
     proof = evidence.get("target_module_proof")
     if not isinstance(proof, Mapping):
         return False
@@ -107,21 +153,28 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
         return False
     if proof.get("linked_target_module") != target_module:
         return False
+    if proof.get("linked_call_id") != invocation_proof.get("call_id"):
+        return False
     if proof.get("observer_identity") == evidence.get("handler_name"):
         return False
     if proof.get("observation_source") == "handler_self_report":
         return False
-
-    invocation_proof = evidence.get("invocation_proof")
-    if not isinstance(invocation_proof, Mapping):
-        return False
-    for key in ("call_id", "function_called", "call_signature", "observed_at", "observation_method"):
-        if not invocation_proof.get(key):
-            return False
-    if invocation_proof.get("observation_method") == "handler_self_report":
+    if not RuntimeActionModuleObserver.is_registered_proof(
+        proof=proof,
+        invocation_proof=invocation_proof,
+        action_id=str(action_id),
+        target_module=str(target_module),
+    ):
         return False
 
     action_type = str(evidence.get("action_type") or "")
+    if action_type == "checkpoint.safe_summary" or target_module == "CheckpointSafeSummary":
+        if evidence.get("checkpoint_boundary") != "turn_end_before_save_checkpoint":
+            return False
+        if evidence.get("no_tool_boundary_reached") is not True:
+            return False
+        if evidence.get("tool_after_only_trigger") is True:
+            return False
     if action_type == "subagent.delegate_l0" or target_module == "SubAgentExecutor":
         return evidence.get("parent_adjudicated") is True
     return True

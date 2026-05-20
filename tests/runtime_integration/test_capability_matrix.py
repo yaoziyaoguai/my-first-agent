@@ -7,13 +7,23 @@
 from __future__ import annotations
 
 from scripts.dogfood_e2e_runtime import (
+    CAPABILITY_MODULE_MAPPING,
     _capability_evidence_matrix,
     _compute_invocation_mode,
     run_e2e_runtime_dogfood,
 )
+from agent.runtime_integration import RuntimeActionModuleObserver
 
 
 def _runtime_e2e_event(action_id: str = "act-1", target_module: str = "SkillLoader") -> dict:
+    observer = RuntimeActionModuleObserver()
+    observed = observer.observe(
+        action_id=action_id,
+        target_module=target_module,
+        function_called=f"{target_module}.run",
+        call_signature="run()",
+        call=lambda: {"ok": True},
+    )
     return {
         "action_id": action_id,
         "action_type": "skill.select",
@@ -22,21 +32,8 @@ def _runtime_e2e_event(action_id: str = "act-1", target_module: str = "SkillLoad
         "handler_name": "SkillRuntimeActionHandler",
         "target_module": target_module,
         "module_invoked": True,
-        "invocation_proof": {
-            "call_id": "call-1",
-            "function_called": "SkillLoader.load_body",
-            "call_signature": "load_body(str)",
-            "observed_at": "2026-05-20T00:00:00+00:00",
-            "observation_method": "module_spy",
-        },
-        "target_module_proof": {
-            "proof_id": "proof-1",
-            "observation_source": "module_spy",
-            "observer_identity": "RuntimeActionModuleObserver",
-            "observation_independent": True,
-            "linked_action_id": action_id,
-            "linked_target_module": target_module,
-        },
+        "invocation_proof": observed.invocation_proof,
+        "target_module_proof": observed.target_module_proof,
         "result_returned_to_parent_runtime": True,
         "parent_adjudicated": None,
         "evidence_level": "runtime_e2e",
@@ -71,7 +68,7 @@ def test_capability_matrix_requires_full_action_evidence_contract() -> None:
     skill = next(row for row in matrix if row["capability"] == "Skill selection")
     assert skill["evidence_level"] == "runtime_e2e"
     assert skill["action_id"] == "act-1"
-    assert skill["target_module_proof"]["proof_id"] == "proof-1"
+    assert skill["target_module_proof"]["proof_id"].startswith("proof:")
 
 
 def test_capability_matrix_denies_event_only_runtime_e2e() -> None:
@@ -134,6 +131,41 @@ def test_capability_matrix_rejects_handler_self_asserted_proof() -> None:
 
     skill = next(row for row in matrix if row["capability"] == "Skill selection")
     assert skill["evidence_level"] != "runtime_e2e"
+
+
+def test_fake_overlay_does_not_satisfy_production_tool_registry_capability() -> None:
+    """DogfoodFakeToolOverlay 有自己的 row，不能满足 production ToolRegistry row。"""
+
+    event = _runtime_e2e_event(target_module="DogfoodFakeToolOverlay")
+    event["action_type"] = "tool.request"
+    event["handler_name"] = "ToolGateHandler"
+    event["decision"] = "blocked"
+    event["requested_tool_name"] = "fake.write_file"
+    event["production_registry_found"] = False
+    event["dogfood_overlay_found"] = True
+    matrix = _capability_evidence_matrix([
+        {
+            "scenario_id": "E05_tool_registry",
+            "status": "pass",
+            "invocation_mode": "runtime_action_invoked",
+            "systems_actually_invoked": ["DogfoodFakeToolOverlay"],
+            "runtime_action_events": [event],
+        }
+    ])
+
+    production = next(row for row in matrix if row["capability"] == "ToolRegistry gate")
+    fake_overlay = next(row for row in matrix if row["capability"] == "Dogfood fake overlay blocked path")
+    assert production["evidence_level"] != "runtime_e2e"
+    assert production["e2e_verified"] != "yes"
+    assert fake_overlay["evidence_level"] == "runtime_e2e"
+    assert fake_overlay["decision"] == "blocked"
+
+
+def test_fake_overlay_not_in_production_capability_matrix() -> None:
+    """production ToolRegistry aliases 不应包含 dogfood overlay target module。"""
+
+    assert "DogfoodFakeToolOverlay" not in CAPABILITY_MODULE_MAPPING["tool_registry"]
+    assert "DogfoodFakeToolOverlay" in CAPABILITY_MODULE_MAPPING["dogfood_fake_overlay"]
 
 
 def test_synthetic_dogfood_uses_runtime_actions_without_provider_preflight(tmp_path, monkeypatch) -> None:

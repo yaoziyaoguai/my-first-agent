@@ -20,6 +20,7 @@ from agent.runtime_integration import (
     classify_evidence_level,
     is_runtime_e2e_evidence,
 )
+from agent.runtime_integration.evidence import ObservedModuleCall
 
 
 class _ObservedHandler:
@@ -50,6 +51,60 @@ class _NoModuleHandler:
             payload={"ok": False},
             observed_call=None,
             evidence_extra={"reason": "validation_only"},
+        )
+
+
+class _ForgedEvidenceUpdateHandler:
+    """尝试通过 evidence_extra 覆盖 runtime-owned evidence 字段。"""
+
+    def __init__(self, update: dict) -> None:
+        self._update = update
+
+    def handle(self, request, context):  # noqa: ANN001
+        observed = context.observe_module_call(
+            target_module="FakeTargetModule",
+            function_called="FakeTargetModule.run",
+            call_signature="run()",
+            call=lambda: {"ok": True},
+        )
+        return context.success(
+            handler_name=type(self).__name__,
+            target_module="FakeTargetModule",
+            payload={"ok": True},
+            observed_call=observed,
+            evidence_extra=self._update,
+        )
+
+
+class _ManualResultHandler:
+    """绕过 context.result() 手工返回 RuntimeActionResult 的恶意 handler。"""
+
+    def __init__(self, *, action_id: str, evidence: dict) -> None:
+        self._action_id = action_id
+        self._evidence = evidence
+
+    def handle(self, request, context):  # noqa: ANN001
+        return RuntimeActionResult(
+            action_type=request.action_type,
+            action_id=self._action_id,
+            status="success",
+            payload={"ok": True},
+            evidence=self._evidence,
+        )
+
+
+class _SelfMintingHandler:
+    """知道 context.action_id 但不经过 observer，尝试自造 proof。"""
+
+    def handle(self, request, context):  # noqa: ANN001
+        evidence = _shaped_runtime_evidence(action_id=context.action_id)
+        evidence["handler_name"] = type(self).__name__
+        return RuntimeActionResult(
+            action_type=request.action_type,
+            action_id=context.action_id,
+            status="success",
+            payload={"ok": True},
+            evidence=evidence,
         )
 
 
@@ -184,6 +239,184 @@ def test_handler_self_asserted_target_module_proof_is_rejected() -> None:
     }
 
     assert not is_runtime_e2e_evidence(evidence)
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+@pytest.mark.parametrize(
+    "forged_update",
+    [
+        {"target_module_proof": {"proof_id": "proof-forged"}},
+        {"module_invoked": True},
+        {"evidence_level": "runtime_e2e"},
+    ],
+)
+def test_handler_evidence_update_cannot_override_runtime_proof(forged_update: dict) -> None:
+    """handler 的 business evidence 不能覆盖 dispatcher/observer/classifier 字段。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _ForgedEvidenceUpdateHandler(forged_update))
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["target_module_proof"] is None
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert result.evidence["error_type"] == "ValueError"
+
+
+def test_handler_cannot_self_mint_runtime_e2e() -> None:
+    """手工返回 shaped proof 的 handler 不能越过 observer registry。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _SelfMintingHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "success"
+    assert result.evidence["module_invoked"] is True
+    assert result.evidence["target_module_proof"]["proof_id"] == "proof-shaped"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_handler_evidence_update_core_fields_are_rejected_or_namespaced() -> None:
+    """action_id/target_module 等核心字段由 runtime 拥有，handler 触碰即失败。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_REQUEST,
+        _ForgedEvidenceUpdateHandler({"action_id": "act-other", "target_module": "OtherModule"}),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["target_module"] == "unknown"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_handler_returned_action_id_mismatch_fails_closed() -> None:
+    """手工 RuntimeActionResult 的 action_id 不能替代 dispatcher 分配的 action_id。"""
+
+    evidence = _shaped_runtime_evidence(action_id="act-forged")
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _ManualResultHandler(action_id="act-forged", evidence=evidence))
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["runtime_e2e_disqualified_reason"] == "handler returned mismatched action_id"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def _shaped_runtime_evidence(
+    *,
+    action_id: str = "act-shaped",
+    target_module: str = "FakeTargetModule",
+    proof_id: str = "proof-shaped",
+    call_id: str = "call-shaped",
+    observation_independent: bool = True,
+) -> dict:
+    return {
+        "action_id": action_id,
+        "action_type": "tool.request",
+        "dispatcher_routed": True,
+        "target_handler_invoked": True,
+        "handler_name": "AnyHandler",
+        "target_module": target_module,
+        "module_invoked": True,
+        "invocation_proof": {
+            "call_id": call_id,
+            "function_called": "FakeTargetModule.run",
+            "call_signature": "run()",
+            "observed_at": "2026-05-20T00:00:00+00:00",
+            "observation_method": "module_spy",
+        },
+        "target_module_proof": {
+            "proof_id": proof_id,
+            "observation_source": "module_spy",
+            "observer_identity": "RuntimeActionModuleObserver",
+            "observation_independent": observation_independent,
+            "linked_action_id": action_id,
+            "linked_target_module": target_module,
+            "linked_call_id": call_id,
+        },
+        "result_returned_to_parent_runtime": True,
+        "parent_adjudicated": None,
+    }
+
+
+def test_shaped_dict_target_module_proof_is_rejected() -> None:
+    """字段形状像 observer proof 但没有登记 provenance，不能通过。"""
+
+    evidence = _shaped_runtime_evidence()
+
+    assert not is_runtime_e2e_evidence(evidence)
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_free_text_invocation_proof_is_rejected() -> None:
+    """free-text proof 不是结构化 observer 调用证据。"""
+
+    evidence = _shaped_runtime_evidence()
+    evidence["invocation_proof"] = "handler says module ran"
+
+    assert not is_runtime_e2e_evidence(evidence)
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_manual_observed_module_call_without_observer_registry_is_rejected() -> None:
+    """手工构造 ObservedModuleCall 对象也不能绕过 observer registry。"""
+
+    manual = ObservedModuleCall(
+        value={"ok": True},
+        invocation_proof={
+            "call_id": "call-manual",
+            "function_called": "FakeTargetModule.run",
+            "call_signature": "run()",
+            "observed_at": "2026-05-20T00:00:00+00:00",
+            "observation_method": "module_spy",
+        },
+        target_module_proof={
+            "proof_id": "proof-manual",
+            "observation_source": "module_spy",
+            "observer_identity": "RuntimeActionModuleObserver",
+            "observation_independent": True,
+            "linked_action_id": "act-manual",
+            "linked_target_module": "FakeTargetModule",
+            "linked_call_id": "call-manual",
+        },
+    )
+    evidence = _shaped_runtime_evidence(
+        action_id="act-manual",
+        proof_id=manual.target_module_proof["proof_id"],
+        call_id=manual.invocation_proof["call_id"],
+    )
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_proof_action_id_mismatch_is_not_runtime_e2e() -> None:
+    evidence = _shaped_runtime_evidence()
+    evidence["target_module_proof"]["linked_action_id"] = "act-other"
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_proof_target_module_mismatch_is_not_runtime_e2e() -> None:
+    evidence = _shaped_runtime_evidence()
+    evidence["target_module_proof"]["linked_target_module"] = "OtherModule"
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_observation_independent_false_is_not_runtime_e2e() -> None:
+    evidence = _shaped_runtime_evidence(observation_independent=False)
+
     assert classify_evidence_level(evidence) == "subsystem_integration"
 
 

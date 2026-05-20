@@ -154,3 +154,117 @@
 - 使用临时 HOME 重跑完整 pytest：
   `HOME=/private/tmp/my-first-agent-pytest-home .venv/bin/python -m pytest -q`
   结果：`2799 passed, 14 skipped`。
+
+## Phase 7 - implementation audit P1/P2 hardening
+
+### 本轮起始状态
+
+- 起始 HEAD：`7253d4f feat(runtime): implement runtime action evidence harness`
+- 分支：`main`
+- 工作区：clean
+- tag：`HEAD` 无 tag
+- push 状态：`origin/main...HEAD = 0 10`，本地 ahead 10，未 push
+
+### P1 handler proof forgery 修复
+
+- `RuntimeActionContext.result()` 新增 handler evidence boundary：`evidence_extra`
+  只能写 handler-produced business evidence，不能覆盖 `action_id`、`action_type`、
+  `handler_name`、`target_module`、`module_invoked`、`invocation_proof`、
+  `target_module_proof`、`evidence_level`、`parent_adjudicated`、
+  `dispatcher_routed`、`target_handler_invoked`、`result_returned_to_parent_runtime`
+  等 dispatcher / observer / classifier owned 字段。
+- handler 触碰上述字段时 fail closed，由 dispatcher exception boundary 返回
+  failed `RuntimeActionResult`，不会保留伪造 proof。
+- dispatcher 收口阶段新增 action_id 复核：handler 手工返回的
+  `RuntimeActionResult.action_id` 或 `evidence.action_id` 必须等于 dispatcher 分配的
+  `context.action_id`，否则降级为 failed，并记录
+  `runtime_e2e_disqualified_reason=handler returned mismatched action_id`。
+
+### P1 shaped dict proof 修复
+
+- `RuntimeActionModuleObserver` 新增 observer-owned proof registry。
+- observer 只有在实际包裹调用目标 callable 后才登记 `proof_id`，registry 绑定
+  `action_id`、`target_module`、`call_id`、`observer_identity`、
+  `observation_source`、`observation_independent`。
+- `target_module_proof` 仍以 JSON-safe dict 进入 evidence/report，但 classifier 不再只看字段形状；
+  `is_runtime_e2e_evidence()` 必须验证 proof 在 observer registry 中存在，且与
+  `invocation_proof.call_id`、action、target module 全部一致。
+- free-text proof、shaped dict proof、手工构造 `ObservedModuleCall`、action/module mismatch、
+  `observation_independent=false`、handler self-asserted proof 均不能升级为 runtime_e2e。
+
+### P2 checkpoint tool-after-only 修复
+
+- `CheckpointSafeSummaryHandler` 现在把 `tool_after_only_trigger` 设为
+  `not no_tool_boundary_reached`。
+- 当 payload 不是 `last_tool_call is None and trigger == "turn_end"` 时，即使 summary
+  子系统被 observer 调用，也写入 `runtime_e2e_disqualified_reason`。
+- classifier 对 `checkpoint.safe_summary` / `CheckpointSafeSummary` 增加正向 contract：
+  必须 `checkpoint_boundary=turn_end_before_save_checkpoint`、
+  `no_tool_boundary_reached=true` 且 `tool_after_only_trigger` 不是 true。
+- 本轮没有改 checkpoint schema，也没有把 checkpoint hook 和 Memory hook 混用。
+
+### P2 fake overlay capability row 修复
+
+- capability matrix 从 production `tool_registry` aliases 中移除
+  `DogfoodFakeToolOverlay`。
+- 新增独立 capability row：`Dogfood fake overlay blocked path`，只用于 dogfood-local
+  fake high-risk blocked evidence。
+- fake overlay evidence 必须保持 `requested_tool_name=fake.*`、
+  `production_registry_found=false`、`dogfood_overlay_found=true`、
+  `overlay_tool_name`、`resolved_test_tool_name`、
+  `dangerous_tool_function_invoked=false`、`decision=blocked`。
+- 若 `fake.*` 出现在 production `TOOL_REGISTRY`，handler fail closed，不能被 overlay
+  路径美化成 production ToolRegistry E2E。
+
+### P2 Skill visible metadata registry validation 修复
+
+- `SkillRuntimeActionHandler` 不再只禁止 `body/status` 字段。
+- `available_skill_metadata` 的 skill_id 集合必须与 `SkillRegistry.list_visible()` 的
+  visible ids 完全一致；hidden/disabled/legacy id 出现在 metadata，或 visible id 被遗漏，
+  都 fail closed 且不能 runtime_e2e。
+- audit-only exclusion evidence 仍只记录 `excluded_count` 与 redacted reason categories，
+  不把 hidden/disabled skill id 放入 model-visible payload。
+
+### 新增 red-team negative tests
+
+- Evidence contract：覆盖 forged `evidence_update`、handler self-mint proof、核心字段覆盖、
+  shaped dict proof、free-text proof、手工 `ObservedModuleCall`、proof/action mismatch、
+  proof/target mismatch、`observation_independent=false`。
+- Checkpoint：覆盖 tool-after-only、missing no-tool boundary、direct subsystem only、
+  missing target_module_proof。
+- ToolRegistry：覆盖 fake overlay 不满足 production ToolRegistry row、fake.* 出现在
+  production registry fail closed、fake blocked path 不是 confirmation_required/allowed、
+  production aliases 不包含 dogfood overlay。
+- Skill：覆盖 hidden/legacy metadata id、disabled metadata id、metadata 必须匹配 registry
+  visible ids、audit-only exclusion evidence 不进 payload。
+- Streaming/SubAgent：保留 final-only negative 与 nested/L1 rejected，并新增 text_delta-only
+  without final negative。
+
+### runtime_integration island status
+
+- 本轮先修 P1/P2 proof contract，没有把 `runtime_integration` 硬接入 `core.chat()` /
+  `loop.py`。
+- 原因：当前 stop boundaries 仍禁止真实 LLM、真实外部 API、真实 shell-like tool、checkpoint schema
+  改动、Memory governance 改动、ToolRegistry authority 改动。`core.chat()` / loop 接入会触达
+  provider/tool/checkpoint/memory 的真实运行边界，需要独立设计和 real-runtime evidence，强行接入会
+  扩大 blast radius 并诱发 overclaim。
+- 当前状态仍是 harness foundation，不是 full core.chat integration。
+- 建议 hook point proposal：后续在独立 pack 中只读确认 `agent/loop.py` 的 turn-end boundary、
+  `agent/tool_executor.py` 的 tool gate boundary、`agent/response_handlers.py` 的 checkpoint-before-save
+  boundary、`agent/model_call.py` streaming wrapper boundary；每个 hook 必须有 no-real-LLM/local fake
+  测试，再由独立审计确认是否可升级。
+
+### Stop conditions
+
+- 本轮未触发需要停止的 P0/P1 blocker。
+- 未读取 `.env`、`agent_log.jsonl`、真实 sessions/runs、`memory/episodes/*.jsonl`。
+- 未调用真实 LLM、真实外部 API、真实 shell-like tool。
+- 未 push，未 tag。
+
+### Phase 7 verification
+
+- `git diff --check`：通过。
+- `.venv/bin/ruff check agent tests scripts`：通过。
+- `.venv/bin/python -m pytest tests/runtime_integration -q`：`51 passed`。
+- `HOME=/private/tmp/my-first-agent-audit-home .venv/bin/python -m pytest -q`：
+  `2824 passed, 14 skipped`。

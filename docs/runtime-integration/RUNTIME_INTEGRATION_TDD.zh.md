@@ -18,7 +18,7 @@ characterization 用于 E 类（现有模块重构）。
 pass 条件：
   - 所有必选测试通过
   - 覆盖率 ≥ 80%（新代码）
-  - E2E dogfood 至少 6 个 Track 有 module_invoked=true 的 RuntimeActionEvent 证据
+  - E2E dogfood 至少 6 个 Track 有满足 SDD R.6 Runtime E2E 11 项证据链的 RuntimeActionEvent 证据
 ```
 
 ---
@@ -87,7 +87,7 @@ def fake_tool_registry_with_tools():
 | 6 | `test_result_evidence_no_secret` | evidence 含 key="sk-xxx" | 构造时抛出 SecretPatternError |
 | 7 | `test_action_type_enum_values` | 枚举所有成员 | 6 个值 |
 | 8 | `test_result_action_id_unique` | 两次构造 RuntimeActionResult | action_id 不同（UUID） |
-| 9 | `test_result_evidence_has_required_fields` | 合法 result | evidence 含 action_id, handler_name, target_module, module_invoked, invocation_proof, evidence_level |
+| 9 | `test_result_evidence_has_required_fields` | 合法 result | evidence 含 action_id, dispatcher_routed, target_handler_invoked, handler_name, target_module, module_invoked, invocation_proof, target_module_proof(proof_id, observation_independent, linked_action_id, linked_target_module), result_returned_to_parent_runtime, evidence_level |
 
 **pytest 命令**：
 ```bash
@@ -106,7 +106,7 @@ python -m pytest tests/runtime_integration/test_runtime_action_schema.py -v
 | 1 | `test_route_skill_select_to_skill_handler` | action_type=skill.select | handler 被调用，evidence.module_invoked=true |
 | 2 | `test_route_subagent_delegate_to_subagent_handler` | action_type=subagent.delegate_l0 | handler 被调用，evidence.parent_adjudicated=true |
 | 3 | `test_route_memory_propose_to_memory_handler` | action_type=memory.propose | handler 被调用，evidence.pending_review=true |
-| 4 | `test_route_tool_request_to_tool_handler` | action_type=tool.request | handler 被调用，evidence 含 disposition |
+| 4 | `test_route_tool_request_to_tool_handler` | action_type=tool.request | handler 被调用，evidence 含 gate_disposition 或 evidence.decision（按 T.4/E.3 分层） |
 | 5 | `test_route_checkpoint_summary_to_checkpoint_handler` | action_type=checkpoint.safe_summary | handler 被调用，evidence 含 safe_summary |
 | 6 | `test_route_unknown_action_type_returns_not_supported` | action_type="nonexistent.action" | status="not_supported", module_invoked=false |
 | 7 | `test_dispatcher_produces_action_event` | 合法 request | RuntimeActionEvent 写入 action log |
@@ -120,7 +120,7 @@ python -m pytest tests/runtime_integration/test_runtime_action_dispatcher.py -v
 ### R-TEST-3：Action Evidence Contract（unit）— 审计 P1-2 新增
 
 ```
-测试目标：验证 Action Evidence Contract 的全部 6 项条件可被测试验证
+测试目标：验证 Action Evidence Contract 的 Runtime E2E 11 项证据链可被测试验证
 测试文件：tests/runtime_integration/test_runtime_action_evidence_contract.py
 ```
 
@@ -136,6 +136,15 @@ python -m pytest tests/runtime_integration/test_runtime_action_dispatcher.py -v
 | 8 | `test_event_emitted_but_no_module_invoked_max_subsystem_integration` | module_invoked=false 但有 event | evidence_level 最高为 "subsystem_integration" |
 | 9 | `test_event_parent_trace_id_matches_request` | request.parent_trace_id="tr-001" | event.parent_trace_id == "tr-001" |
 | 10 | `test_event_timestamp_monotonic` | 2 次 route() | event2.timestamp >= event1.timestamp |
+| 11 | `test_fake_handler_self_filled_module_invoked_rejected` | fake handler 自我填充 module_invoked=true 但 target_module_proof.observation_independent=false（观测源 == handler 自身） | evidence_level 不为 runtime_e2e，最高 subsystem_integration |
+| 12 | `test_handler_self_filled_invocation_proof_rejected` | handler 自我填充 invocation_proof（所有 observation 字段由 handler 自身提供） | evidence_level 最高 subsystem_integration，不得标 runtime_e2e |
+| 13 | `test_target_module_proof_requires_independent_observer` | evidence.target_module_proof 存在但 observation_independent=false | evidence_level 不为 runtime_e2e |
+| 14 | `test_target_module_proof_requires_proof_id` | target_module_proof 缺 proof_id | evidence_level 不为 runtime_e2e |
+| 15 | `test_target_module_proof_linked_action_id_matches_action_id` | linked_action_id != action_id | evidence_level 不为 runtime_e2e |
+| 16 | `test_target_module_proof_linked_target_module_matches_target_module` | linked_target_module != target_module | evidence_level 不为 runtime_e2e |
+| 17 | `test_runtime_e2e_requires_result_returned_to_parent_runtime` | handler 调用模块但 result 未返回 Parent Runtime | evidence_level 不为 runtime_e2e |
+| 18 | `test_runtime_e2e_requires_dispatcher_routed` | dispatcher_routed=false 但其他字段完整 | evidence_level 不为 runtime_e2e |
+| 19 | `test_runtime_e2e_requires_target_handler_invoked` | target_handler_invoked=false 但其他字段完整 | evidence_level 不为 runtime_e2e |
 
 **pytest 命令**：
 ```bash
@@ -153,7 +162,7 @@ python -m pytest tests/runtime_integration/test_runtime_action_evidence_contract
 |---|--------|------|------|
 | 1 | `test_dispatcher_no_durable_state` | 2 个独立 Dispatcher 实例 | 各自的 action log 不共享 |
 | 2 | `test_dispatcher_no_runtime_state_mutation` | route() 前后 RuntimeState 快照 | RuntimeState 不变 |
-| 3 | `test_dispatcher_no_direct_tool_execution` | tool.request 类型 | handler 返回 disposition，不实际执行 tool |
+| 3 | `test_dispatcher_no_direct_tool_execution` | tool.request 类型 | handler 返回 gate_disposition / evidence.decision，不由 dispatcher 直接执行 tool |
 | 4 | `test_dispatcher_no_network_access` | 任意 request | 不发起网络请求（通过 mock socket 断言） |
 | 5 | `test_dispatcher_no_dotenv_access` | 任意 request | 不访问 .env（通过 mock os.environ 断言） |
 
@@ -186,20 +195,20 @@ python scripts/dogfood_e2e_runtime.py --scenario E01
 ### S-TEST-1：Skill action schema（unit）
 
 ```
-测试目标：skill.select 的 payload 格式正确，selected_skill_id 来自 LLM decision
+测试目标：skill.select 的 payload 格式正确，selected_skill_id / selection_reason / selection_confidence 来自 RuntimeActionRequest.payload.model_decision_metadata
 测试文件：tests/runtime_integration/test_skill_runtime_action.py
 ```
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
 | 1 | `test_skill_select_payload_must_have_task_summary` | payload 缺 task_summary | 构造时抛出 ValidationError |
-| 2 | `test_skill_select_output_must_have_selection_reason` | 正常路由 | payload 含 selection_reason（非空 str） |
-| 3 | `test_skill_select_output_must_have_selection_confidence` | 正常路由 | payload.selection_confidence ∈ {"high", "medium", "low"} |
+| 2 | `test_skill_select_output_must_have_selection_reason` | 正常路由，RuntimeActionRequest.payload.model_decision_metadata 含 selection_reason | payload 含 selection_reason（非空 str），且来源链接到 model_decision_metadata |
+| 3 | `test_skill_select_output_must_have_selection_confidence` | 正常路由，RuntimeActionRequest.payload.model_decision_metadata 含 selection_confidence | payload.selection_confidence ∈ {"high", "medium", "low"}，且来源链接到 model_decision_metadata |
 | 4 | `test_skill_select_output_must_have_body_load_decision` | 正常路由 | payload.body_load_decision 为 bool |
 | 5 | `test_skill_select_output_must_have_allowed_tools_after_selection` | 选中 skill 有 tools | payload.allowed_tools_after_selection 为 list |
 | 6 | `test_skill_select_output_must_have_available_skills_count` | 正常路由 | payload.available_skills_count > 0 |
-| 7 | `test_skill_select_output_must_have_hidden_disabled_excluded_count` | 有 hidden/disabled skill | payload.hidden_or_disabled_excluded_count > 0（仅计数，不暴露名称） |
-| 8 | `test_selected_skill_id_from_model_tool_call_args` | selected_skill_id 来自 RuntimeActionRequest.payload（model tool-call args） | handler 从 request.payload.selected_skill_id 提取并验证，非 handler 自行决定 |
+| 7 | `test_audit_only_skill_exclusion_evidence_present` | 有 hidden/disabled skill | evidence.audit_only_skill_exclusion_evidence 含 excluded_count > 0、hidden_or_disabled_exclusion_verified=true；不进入 payload（仅计数，不暴露名称） |
+| 8 | `test_selection_metadata_from_model_decision_metadata` | selected_skill_id / selection_reason / selection_confidence 来自 RuntimeActionRequest.payload.model_decision_metadata | handler 只读取并验证 model_decision_metadata，非 handler 自行决定、补写或推断 |
 
 ### S-TEST-2：Progressive disclosure preserved（integration）
 
@@ -210,12 +219,12 @@ python scripts/dogfood_e2e_runtime.py --scenario E01
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
-| 1 | `test_available_skill_metadata_no_body` | skill.select 请求 | payload.available_skill_metadata 中每个 skill 只有 skill_id/description/tags/risk_level/status，无 body |
+| 1 | `test_available_skill_metadata_no_body` | skill.select 请求 | payload.available_skill_metadata 中每个 skill 只有 skill_id/description/tags/risk_level，无 body，无 status（hidden/disabled skill 不出现） |
 | 2 | `test_body_loaded_only_after_selection` | skill.select → 选中后 | 选中 skill 的 body 在返回 payload 中存在，未选中的不存在 |
 | 3 | `test_hidden_skill_not_in_available` | registry 中有 hidden skill | available_skill_metadata 不包含该 skill |
 | 4 | `test_disabled_skill_not_in_available` | registry 中有 disabled skill | available_skill_metadata 不包含该 skill |
 | 5 | `test_skill_missing_version_not_in_available` | registry 中有缺 version 的 skill | available_skill_metadata 不包含该 skill |
-| 6 | `test_skill_selector_called_in_handler` | 正常 skill.select | evidence.invocation_proof 含 "SkillSelector" 调用记录 |
+| 6 | `test_skill_registry_validation_path_invoked` | 正常 skill.select | evidence.invocation_proof 含 SkillRegistry 验证路径调用记录（非 SkillSelector selection decision） |
 
 ### S-TEST-3：Skill tool binding boundary（integration）
 
@@ -242,6 +251,13 @@ python scripts/dogfood_e2e_runtime.py --scenario E01
 | 2 | `test_skill_select_task_summary_too_long` | task_summary 超 10KB | status="rejected" |
 | 3 | `test_skill_select_constraint_read_only_blocks_write_skills` | constraints={"read_only"} | 选中的 skill 的 allowed_tools 不含 write 类 tool |
 | 4 | `test_selected_skill_id_must_come_from_model_args` | selected_skill_id 不在 request.payload 中（model 未指定） | handler 不能自行决定选哪个，返回 status="failed" |
+| 5 | `test_missing_selection_reason_not_runtime_e2e` | model_decision_metadata 缺 selection_reason | not runtime_e2e，handler 不得补写 |
+| 6 | `test_missing_selection_confidence_not_runtime_e2e` | model_decision_metadata 缺 selection_confidence | not runtime_e2e，handler 不得补写 |
+| 7 | `test_handler_filled_selection_reason_fails` | handler 在 model decision 后后验填 selection_reason | fail，不得 runtime_e2e pass |
+| 8 | `test_handler_filled_selection_confidence_fails` | handler 在 model decision 后后验填 selection_confidence | fail，不得 runtime_e2e pass |
+| 9 | `test_second_llm_call_cannot_fill_selection_metadata` | handler 二次调用 LLM 获取 selection_reason/selection_confidence | fail |
+| 10 | `test_harness_or_report_filled_selection_metadata_fails` | test harness / dogfood report 后验补 selection_reason/selection_confidence | fail |
+| 11 | `test_selection_metadata_missing_from_request_payload_not_runtime_e2e` | selection_reason/confidence 不存在于 RuntimeActionRequest.payload.model_decision_metadata | not runtime_e2e |
 
 **pytest 命令**：
 ```bash
@@ -255,13 +271,31 @@ python -m pytest tests/runtime_integration/test_skill_runtime_action.py tests/ru
 场景编号：E02（skill runtime）
 pass 条件（SDD S.6 强制）：
   1. RuntimeActionEvent(action_type="skill.select") 存在于 action log
-  2. evidence["selected_skill_id"] 非空且来自 LLM tool call decision
-  3. evidence["body_load_decision"] == true
-  4. evidence["module_invoked"] == true
-  5. evidence["handler_name"] == "SkillRuntimeActionHandler"
-  6. evidence["target_module"] 含 "SkillLoader"
-  7. evidence["hidden_or_disabled_excluded_count"] > 0 且无 disabled skill 名称出现在任何 evidence 字段中
-  8. evidence["no_suitable_skill"] == false
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["selected_skill_id"] 非空且来自 RuntimeActionRequest.payload.model_decision_metadata
+  5. evidence["selection_reason"] 存在且非空，来自 RuntimeActionRequest.payload / model action decision metadata（handler 不得后验补，不得二次调用 LLM 补）
+  6. evidence["selection_confidence"] 存在，且 evidence["selection_confidence"] ∈ {"high", "medium", "low"}，来自 RuntimeActionRequest.payload / model action decision metadata（handler 不得后验补，不得二次调用 LLM 补）
+  7. evidence["body_load_decision"] == true
+  8. evidence["module_invoked"] == true
+  9. evidence["target_module_proof"] 存在
+  10. evidence["target_module_proof"]["proof_id"] 非空
+  11. evidence["target_module_proof"]["observation_independent"] == true（独立观测源，handler 不得自我填充）
+  12. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  13. evidence["handler_name"] == "SkillRuntimeActionHandler"
+  14. evidence["target_module"] 含 "SkillLoader"
+  15. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  16. evidence["result_returned_to_parent_runtime"] == true
+  17. evidence["audit_only_skill_exclusion_evidence"]["excluded_count"] > 0 且 evidence["audit_only_skill_exclusion_evidence"]["hidden_or_disabled_exclusion_verified"] == true；无 disabled skill 名称出现在任何 evidence 或 payload 字段中
+  18. evidence["no_suitable_skill"] == false
+
+not pass 条件：
+  - 缺失 selection_reason → 不得 runtime_e2e pass
+  - 缺失 selection_confidence → 不得 runtime_e2e pass
+  - selection_reason / selection_confidence 由 handler 后验补 → 不得 runtime_e2e pass
+  - selection_reason / selection_confidence 不存在于 RuntimeActionRequest.payload.model_decision_metadata → 不得 runtime_e2e pass
+  - handler 二次调用 LLM、根据自然语言推断，或由 test harness / dogfood report 后验补 selection_reason / selection_confidence → fail
+  - 缺失 target_module_proof、proof_id、linked_action_id 或 linked_target_module → 不得 runtime_e2e pass
 
 注意：此场景替代原始 E02（直接调用 SkillRegistry API）。
       原始 E02 降级为 subsystem integration test。
@@ -357,15 +391,22 @@ python -m pytest tests/runtime_integration/test_subagent_runtime_action.py tests
 场景编号：E03（subagent runtime）
 pass 条件（SDD A.6 强制）：
   1. RuntimeActionEvent(action_type="subagent.delegate_l0") 存在于 action log
-  2. evidence["subagent_name"] 非空且来自 LLM tool call decision
-  3. evidence["subagent_request_built"] == true
-  4. evidence["delegate_once_called"] == true
-  5. evidence["parent_adjudicated"] == true
-  6. evidence["adjudication"] == "accept"
-  7. evidence["no_nested_delegation"] == true
-  8. evidence["no_shell_or_external_process"] == true
-  9. evidence["module_invoked"] == true
-  10. evidence["target_module"] 含 "SubAgentExecutor"
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["subagent_name"] 非空且来自 LLM tool call decision
+  5. evidence["subagent_request_built"] == true
+  6. evidence["delegate_once_called"] == true
+  7. evidence["parent_adjudicated"] == true
+  8. evidence["adjudication"] == "accept"
+  9. evidence["no_nested_delegation"] == true
+  10. evidence["no_shell_or_external_process"] == true
+  11. evidence["module_invoked"] == true
+  12. evidence["target_module"] 含 "SubAgentExecutor"
+  13. evidence["target_module_proof"] 存在且 proof_id 非空
+  14. evidence["target_module_proof"]["observation_independent"] == true
+  15. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  16. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  17. evidence["result_returned_to_parent_runtime"] == true
 
 注意：此场景替代原始 E03（直接调用 delegate_once）。
       原始 E03 降级为 subsystem integration test。
@@ -449,11 +490,18 @@ python -m pytest tests/runtime_integration/test_memory_runtime_hook.py tests/run
 场景编号：E04（memory runtime）
 pass 条件：
   1. RuntimeActionEvent(action_type="memory.propose") 存在于 action log
-  2. evidence["disposition"] ∈ {"proposed", "no_action", "should_not_remember"}
-  3. 如有 proposal：evidence["pending_review"]==true, evidence["not_confirmed"]==true
-  4. evidence["secret_like_detected"] == false
-  5. evidence["module_invoked"] == true
-  6. turn-end hook 被调用（无论本 turn 是否有 tool call）
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["disposition"] ∈ {"proposed", "no_action", "should_not_remember"}
+  5. 如有 proposal：evidence["pending_review"]==true, evidence["not_confirmed"]==true
+  6. evidence["secret_like_detected"] == false
+  7. evidence["module_invoked"] == true
+  8. turn-end hook 被调用（无论本 turn 是否有 tool call）
+  9. evidence["target_module_proof"] 存在且 proof_id 非空
+  10. evidence["target_module_proof"]["observation_independent"] == true
+  11. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  12. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  13. evidence["result_returned_to_parent_runtime"] == true
 
 E04 不通过条件：
   - hook 未被调用（E04 只能 partial/fail，不能 pass）
@@ -483,29 +531,38 @@ python scripts/dogfood_e2e_runtime.py --scenario E04
 |---|--------|------|------|
 | 1 | `test_tool_request_must_have_tool_name` | payload 缺 tool_name | 构造时抛出 ValidationError |
 | 2 | `test_tool_request_must_have_risk_reason` | payload 缺 risk_reason | 构造时抛出 ValidationError |
-| 3 | `test_tool_request_disposition_valid_values` | 正常路由 | disposition ∈ {"allowed", "rejected", "confirmation_required"} |
+| 3 | `test_tool_request_gate_disposition_valid_values` | 正常真实工具 gate 路由 | gate_disposition ∈ {"allowed", "rejected", "confirmation_required"}；not_found / blocked 不允许出现在 gate_disposition |
 
 ### T-TEST-2：Tool visibility and risk + tool alias resolution（integration）— 审计 P2-3 新增
 
 ```
 测试目标：ToolRegistry gate 正确执行 visibility filtering、risk classification、tool name 解析
 测试文件：tests/runtime_integration/test_tool_registry_action_gate.py
+注意：gate_disposition 是 ToolGate handler-level immediate output，合法值仅为 {"allowed", "rejected", "confirmation_required"}；evidence.decision 是 RuntimeActionResult / capability matrix 的 final evidence-level classification，合法值为 {"allowed", "rejected", "confirmation_required", "not_found", "blocked"}。二者不同层：not_found / blocked 只存在于 evidence.decision，不得写入 gate_disposition。
 ```
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
-| 1 | `test_unknown_tool_rejected` | tool_name="nonexistent_tool" | disposition="rejected", registry_found=false |
-| 2 | `test_hidden_tool_rejected` | tool_name 对应 hidden tool | disposition="rejected" |
-| 3 | `test_low_risk_tool_allowed` | tool_name 对应 low-risk tool | disposition="allowed" |
-| 4 | `test_high_risk_tool_requires_confirmation` | tool_name 对应 high-risk tool | disposition="confirmation_required" |
+| 1 | `test_unknown_tool_maps_to_evidence_not_found` | tool_name="nonexistent_tool" | production_registry_found=false, dogfood_overlay_found=false, evidence.decision="not_found"；不得伪造 gate_disposition |
+| 2 | `test_hidden_tool_rejected` | tool_name 对应 hidden production tool | gate_disposition="rejected", evidence.decision="rejected" |
+| 3 | `test_low_risk_tool_allowed` | tool_name 对应 low-risk production tool | gate_disposition="allowed", evidence.decision="allowed" |
+| 4 | `test_high_risk_tool_requires_confirmation` | tool_name 对应 high-risk production tool | gate_disposition="confirmation_required", evidence.decision="confirmation_required" |
 | 5 | `test_risk_level_in_output` | 任意 tool | payload.risk_level ∈ {"low", "medium", "high"} |
 | 6 | `test_policy_path_in_output` | 任意 tool | payload.policy_path 非空 str |
-| 7 | `test_tool_alias_resolved_from_registry` | generic capability name → ToolRegistry lookup | evidence 含 resolved_tool_name, registry_found=true |
-| 8 | `test_fake_tool_prefix_not_executed_real_and_not_in_registry` | tool_name="fake.write_file"（仅在 dogfood 本地注册） | tool 被识别为 fake test tool，不真实执行；真实 ToolRegistry 中不存在 fake. 前缀 tool |
-| 9 | `test_shell_tool_name_blocked` | tool_name="bash" 或 "shell" 或 "run_shell" | disposition="rejected"（non-goal 保护） |
-| 10 | `test_registry_handler_invoked_independent_of_target_module` | disposition="rejected"（unknown tool） | registry_handler_invoked=true, target_module_invoked=false, dangerous_tool_function_invoked=false |
-| 11 | `test_fake_tool_dangerous_function_not_invoked` | tool_name="fake.write_file" | dangerous_tool_function_invoked=false（fake tool 不触发真实 IO） |
-| 12 | `test_real_tool_target_module_invoked_on_allowed` | low-risk real tool, disposition="allowed" | target_module_invoked=true, dangerous_tool_function_invoked=false |
+| 7 | `test_tool_alias_resolved_from_registry` | generic capability name → ToolRegistry lookup | evidence 含 resolved_tool_name, production_registry_found=true |
+| 8 | `test_fake_tool_prefix_not_executed_real_and_not_in_registry` | tool_name="fake.write_file"（仅在 dogfood 本地 overlay） | requested_tool_name, requested_capability, production_registry_found=false, dogfood_overlay_found=true, overlay_tool_name, resolved_test_tool_name, evidence.decision="blocked" |
+| 9 | `test_shell_tool_name_blocked` | tool_name="bash" 或 "shell" 或 "run_shell" | gate_disposition="rejected"（non-goal 保护）, evidence.decision="rejected" |
+| 10 | `test_registry_handler_invoked_independent_of_target_module` | gate_disposition="rejected"（hidden/blocked production tool） | registry_handler_invoked=true, target_module_invoked=false, dangerous_tool_function_invoked=false |
+| 11 | `test_fake_tool_dangerous_function_not_invoked` | tool_name="fake.write_file" | dangerous_tool_function_invoked=false, production_registry_found=false, dogfood_overlay_found=true, evidence.decision="blocked" |
+| 12 | `test_real_tool_target_module_invoked_on_allowed` | low-risk real tool, gate_disposition="allowed" | target_module_invoked=true, dangerous_tool_function_invoked=false, production_registry_found=true |
+| 13 | `test_fake_tool_overlay_not_in_production_registry` | tool_name="fake.write_file" | production_registry_found=false, dogfood_overlay_found=true（不污染 production ToolRegistry）, evidence.decision="blocked" |
+| 14 | `test_fake_tool_production_registry_found_true_fails` | fake.* evidence production_registry_found=true | fail |
+| 15 | `test_fake_tool_overlay_missing_fails` | fake.* evidence dogfood_overlay_found=false | fail |
+| 16 | `test_fake_tool_confirmation_required_fails` | fake high-risk blocked path evidence.decision="confirmation_required" | fail；fake blocked path 必须 evidence.decision="blocked" |
+| 17 | `test_fake_tool_persisted_to_production_registry_fails` | fake.* 出现在 production ToolRegistry | fail |
+| 18 | `test_fake_tool_exposed_to_normal_runtime_fails` | fake.* 暴露给 normal runtime | fail |
+| 19 | `test_fake_tool_in_production_capability_matrix_fails` | fake.* 作为真实 capability 进入 production capability matrix | fail |
+| 20 | `test_fake_tool_target_and_dangerous_execution_contract` | fake.* blocked path | registry_handler_invoked=true, target_module_invoked=true, dangerous_tool_function_invoked=false, evidence.decision="blocked" |
 
 ### T-TEST-3：Confirmation flow preserved（integration）
 
@@ -516,9 +573,9 @@ python scripts/dogfood_e2e_runtime.py --scenario E04
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
-| 1 | `test_confirmation_required_triggers_user_prompt` | high-risk tool request | ConfirmationContext 被激活 |
-| 2 | `test_confirmation_approved_tool_executes` | 用户确认 | disposition="allowed", tool 执行 |
-| 3 | `test_confirmation_denied_tool_not_executed` | 用户拒绝 | disposition="rejected", tool 不执行 |
+| 1 | `test_confirmation_required_triggers_user_prompt` | high-risk production tool request | gate_disposition="confirmation_required", evidence.decision="confirmation_required"，ConfirmationContext 被激活 |
+| 2 | `test_confirmation_approved_tool_executes` | 用户确认 | gate_disposition="allowed", tool 执行 |
+| 3 | `test_confirmation_denied_tool_not_executed` | 用户拒绝 | gate_disposition="rejected", tool 不执行 |
 
 ### T-TEST-4：Tool gate boundary enforcement（negative）
 
@@ -546,12 +603,15 @@ python -m pytest tests/runtime_integration/test_tool_registry_action_gate.py tes
 pass 条件：
   - RuntimeActionEvent(action_type="tool.request") 存在于 action log
   - 每个 tool call 对应至少一个 tool.request event
-  - 高风险 tool 对应的 event 显示 disposition="confirmation_required"
-  - evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
-  - evidence["registry_found"] == true
+  - 每个 runtime_e2e tool.request event 满足 SDD R.6 Runtime E2E 11 项证据链（含 proof_id、linked_action_id、linked_target_module）
+  - 真实高风险 production tool 对应的 event 显示 gate_disposition="confirmation_required" 且 evidence.decision="confirmation_required"
+  - 对于真实 tool（非 fake. 前缀）：evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
+  - 对于真实 tool：evidence["production_registry_found"] == true
+  - 对于 fake. 前缀 tool：requested_tool_name、requested_capability、overlay_tool_name、resolved_test_tool_name 均存在；evidence["production_registry_found"] == false, evidence["dogfood_overlay_found"] == true, evidence["decision"] == "blocked"
   - evidence["registry_handler_invoked"] == true（gate 检查发生）
-  - evidence["target_module_invoked"] 与 disposition 一致（allowed→true, rejected→false）
+  - evidence["target_module_invoked"] 与 gate_disposition 一致（allowed→true, rejected/confirmation_required→false）；fake blocked path target_module_invoked=true 仅表示 dogfood-local overlay handler 被调用
   - fake tool 的 evidence["dangerous_tool_function_invoked"] == false
+  - fake high-risk blocked path 不得使用 evidence.decision="confirmation_required"
 ```
 
 **pytest 命令**（由 E2E dogfood runner 驱动）：
@@ -563,9 +623,32 @@ python scripts/dogfood_e2e_runtime.py --scenario E05
 
 ## Track C：Checkpoint-safe Runtime Summary 测试
 
-（无重大变更——原有测试保留，仅调整 hook 顺序对齐 M 的 turn-end 定义。）
+（checkpoint boundary 是 turn-end / before save_checkpoint，不依赖 Track T tool events。tool execution 是可选前置步骤，不是 checkpoint safe summary 的必要触发条件。无 tool 的 user turn 也必须能到达 checkpoint safe summary / save_checkpoint boundary。Checkpoint boundary 与 Memory turn-end proposal hook 是不同边界，不可混淆。原有 C-TEST-1 至 C-TEST-5 保留，hook 顺序已对齐 M 的 turn-end 定义。）
 
 ### C-TEST-1 至 C-TEST-5：保持原设计（见前版 TDD）。
+
+### C-TEST-6：Checkpoint R.6 proof + no-tool boundary tests（审计 P1-3 / P2 tool-event residue 新增）
+
+```
+测试目标：确保 checkpoint safe summary 不会以假 runtime_e2e 通过；
+         确保 no-tool user turn 能到达 checkpoint boundary；
+         确保 tool-after-only checkpoint trigger 不得 runtime_e2e pass
+测试文件：tests/runtime_integration/test_checkpoint_safe_summary_negative.py
+```
+
+| # | 测试名 | 输入 | 期望 |
+|---|--------|------|------|
+| 1 | `test_runtime_action_event_only_not_runtime_e2e` | RuntimeActionEvent + module_invoked=true, 无 target_module_proof | evidence_level ≠ "runtime_e2e" |
+| 2 | `test_direct_subsystem_invocation_not_runtime_e2e` | direct checkpoint subsystem invocation, 未经 RuntimeActionDispatcher | evidence_level ≤ "subsystem_integration" |
+| 3 | `test_safe_summary_without_dispatcher_not_runtime_e2e` | checkpoint safe summary 生成但无 RuntimeActionDispatcher routing + target_module_proof | evidence_level ≠ "runtime_e2e" |
+| 4 | `test_missing_target_module_proof_not_runtime_e2e` | target_module_proof 缺失 | evidence_level ≠ "runtime_e2e" |
+| 5 | `test_target_module_proof_no_action_id_binding` | target_module_proof.linked_action_id 不匹配 | evidence_level ≠ "runtime_e2e" |
+| 6 | `test_no_tool_turn_reaches_checkpoint_boundary` | user turn 无 tool execution，turn-end / before save_checkpoint 触发 | checkpoint safe summary / save_checkpoint boundary 被调用（positive） |
+| 7 | `test_no_tool_turn_checkpoint_target_module_proof` | no-tool turn 经 RuntimeActionDispatcher + checkpoint handler + target_module_proof | evidence_level = "runtime_e2e"（满足 R.6 时） |
+| 8 | `test_tool_after_only_checkpoint_trigger_fails` | checkpoint safe summary 仅在 tool execution 后触发，no-tool turn 无法到达 checkpoint boundary | evidence_level ≠ "runtime_e2e", fail / partial / subsystem_integration |
+| 9 | `test_no_tool_checkpoint_boundary_missing_fails` | no-tool user turn 完成但未经过 turn-end / before save_checkpoint boundary | E06 / checkpoint path 不得 pass runtime_e2e |
+| 10 | `test_direct_checkpoint_subsystem_still_not_runtime_e2e` | direct checkpoint subsystem invocation（未经 RuntimeActionDispatcher） | evidence_level ≤ "subsystem_integration" / partial |
+| 11 | `test_checkpoint_boundary_not_memory_hook` | checkpoint boundary 被 Memory turn-end proposal hook 替代 | fail——checkpoint 与 Memory 是不同边界 |
 
 **pytest 命令**：
 ```bash
@@ -619,6 +702,13 @@ python -m pytest tests/runtime_integration/test_checkpoint_safe_summary.py tests
 | 5 | `test_unsupported_provider_no_fake_final_event` | provider.supports_streaming=false | evidence.final_event_received=false, evidence.events_received=0 |
 | 6 | `test_unsupported_provider_no_silent_fallback` | provider.supports_streaming=false | 不 fallback 到 non-streaming 后算 streaming pass |
 | 7 | `test_unsupported_provider_cannot_be_streaming_runtime_pass` | evidence_level="runtime_e2e" with provider_supports_streaming=false | 断言失败 |
+| 8 | `test_supported_but_no_target_module_proof_not_runtime_e2e` | provider.supports_streaming=true, streaming.event 产生但无 target_module_proof | evidence_level ≠ "runtime_e2e" |
+| 9 | `test_final_event_only_not_runtime_e2e` | 仅 streaming final event, 无 target_module_proof | evidence_level ≠ "runtime_e2e" |
+| 10 | `test_fake_final_event_not_runtime_e2e` | 伪造 final event, 无真实 streaming handler 调用 | evidence_level ≠ "runtime_e2e" |
+| 11 | `test_unsupported_provider_fallback_still_not_streaming_pass` | provider.supports_streaming=false, fallback 到 non-streaming 但标 streaming pass | 断言失败 |
+| 12 | `test_module_invoked_true_without_proof_not_runtime_e2e` | module_invoked=true 但无 target_module_proof | evidence_level ≠ "runtime_e2e" |
+| 13 | `test_provider_module_proof_missing_not_runtime_e2e` | provider module proof 缺失 | evidence_level ≠ "runtime_e2e" |
+| 14 | `test_persistence_module_proof_missing_not_runtime_e2e` | persistence module proof 缺失 | evidence_level ≠ "runtime_e2e" |
 
 **pytest 命令**：
 ```bash
@@ -631,11 +721,25 @@ python -m pytest tests/runtime_integration/test_streaming_evidence.py tests/runt
 测试目标：真实 core.chat() 中 streaming 分支正确
 场景编号：E07（streaming runtime）
 pass 条件（分支）：
-  A. provider.supports_streaming=true:
+  A. provider.supports_streaming=true —— 标 runtime_e2e 必须满足完整 R.6 proof:
+     一、基础 streaming behavior evidence:
      1. RuntimeActionEvent(action_type="streaming.event") 存在于 action log
      2. evidence["events_received"] > 0
      3. evidence["final_event_received"] == true
      4. evidence["provider_supports_streaming"] == true
+
+     二、R.6 Runtime Module Invocation Proof（以下全部满足才可标 runtime_e2e）:
+     5. RuntimeActionDispatcher 已 route 此 streaming.event action
+     6. streaming handler 被调用
+     7. evidence["target_module_proof"] 存在且非空
+     8. evidence["target_module_proof.observation_independent"] == true
+     9. evidence["target_module_proof.linked_action_id"] 与本次 action_id 匹配
+     10. evidence["target_module_proof.linked_target_module"] 与 target_module 匹配
+     11. text_delta / final / error 事件均绑定同一 action_id
+     12. final result 返回至 Parent Runtime
+
+     以下不得标 runtime_e2e: 仅 text_delta/final event 无 target_module_proof; module_invoked=true 无 target_module_proof; final event 无 target_module_proof; fake final event
+
   B. provider.supports_streaming=false:
      1. evidence["provider_supports_streaming"] == false
      2. status == "not_supported"
@@ -659,14 +763,15 @@ python scripts/dogfood_e2e_runtime.py --scenario E07
 ### E-TEST-2：Evidence level classification（unit）— 审计 P1-2 加强
 
 ```
-测试目标：evidence level 分级正确，runtime_e2e 强制要求 module_invoked=true
+测试目标：evidence level 分级正确，runtime_e2e 强制要求 SDD R.6 Runtime E2E 11 项证据链
 测试文件：tests/runtime_integration/test_capability_matrix.py
 ```
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
-| 1 | `test_runtime_e2e_requires_action_event_and_module_invoked` | capability 有 RuntimeActionEvent 且 module_invoked=true | level="runtime_e2e" |
+| 1 | `test_runtime_e2e_requires_full_action_evidence_contract` | capability 有 RuntimeActionEvent 且满足 R.6 11 项证据链 | level="runtime_e2e" |
 | 2 | `test_runtime_e2e_denied_without_module_invoked` | capability 有 RuntimeActionEvent 但 module_invoked=false | level 最高为 "subsystem_integration" |
+| 2a | `test_runtime_e2e_denied_without_target_module_proof` | capability 有 RuntimeActionEvent + module_invoked=true 但 target_module_proof 缺失、proof_id 缺失、observation_independent=false、linked_action_id 不匹配或 linked_target_module 不匹配 | level 最高为 "subsystem_integration" |
 | 3 | `test_runtime_e2e_denied_without_event` | capability 无 RuntimeActionEvent 但有 module invocation | level 最高为 "subsystem_integration" |
 | 4 | `test_subsystem_integration_without_event` | capability 有 systems_actually_invoked 但无 action event | level="subsystem_integration" |
 | 5 | `test_deterministic_baseline_pure_function` | capability 无 runtime 也无 subsystem 调用，有纯函数测试 | level="deterministic_baseline" |
@@ -689,6 +794,8 @@ python scripts/dogfood_e2e_runtime.py --scenario E07
 | 4 | `test_no_runtime_e2e_without_module_invoked` | level="runtime_e2e" 但 module_invoked=false | 断言失败 |
 | 5 | `test_event_without_module_invoked_max_subsystem_integration` | RuntimeActionEvent 存在但 module_invoked=false | level 不能为 "runtime_e2e" |
 | 6 | `test_tool_alias_mismatch_causes_p2` | capability 的 resolved_tool_name != registry actual name | 至少 P2，capability evidence 标记为不匹配 |
+| 7 | `test_handler_name_and_target_module_without_target_proof_not_runtime_e2e` | RuntimeActionEvent + handler_name + target_module + module_invoked=true 但无 target_module_proof | level 最高为 "subsystem_integration" |
+| 8 | `test_shaped_invocation_proof_without_independent_observation_not_runtime_e2e` | invocation_proof 是 shaped dict 但 target_module_proof.observation_independent=false | level 最高为 "subsystem_integration" |
 
 ### E-TEST-4：E08 full combined verification（integration）
 
@@ -699,10 +806,11 @@ python scripts/dogfood_e2e_runtime.py --scenario E07
 
 | # | 测试名 | 输入 | 期望 |
 |---|--------|------|------|
-| 1 | `test_e08_has_action_events_with_module_invoked` | E08 scenario result | 至少 3 个不同 action_type 的 RuntimeActionEvent，每个 event 的 evidence.module_invoked=true |
+| 1 | `test_e08_has_action_events_with_full_target_module_proof` | E08 scenario result | 至少 3 个不同 action_type 的 RuntimeActionEvent，每个 runtime_e2e event 满足 R.6 11 项证据链 |
 | 2 | `test_e08_text_mention_not_sufficient_for_pass` | E08 scenario 只有 "模型文本提到 X" 证据 | 不满足 runtime_e2e pass 条件 |
 | 3 | `test_e08_covers_skill_subagent_memory_tool` | E08 action log | action_type 集合包含 skill.select, subagent.delegate_l0, memory.propose, tool.request |
-| 4 | `test_e08_each_event_has_handler_name_and_target_module` | E08 action log | 每个 event evidence 含 handler_name 和 target_module |
+| 4 | `test_e08_each_event_has_handler_name_and_target_module` | E08 action log | 每个 event evidence 含 handler_name 和 target_module，但这两项单独不足以 pass |
+| 5 | `test_e08_result_returned_to_parent_runtime` | E08 action log + parent runtime result | 每个 runtime_e2e event 的 result returned to Parent Runtime |
 
 **pytest 命令**：
 ```bash
@@ -751,7 +859,7 @@ Phase 1: Track E（现有 regression 修复，不新增代码）
 Phase 2: Track R（RuntimeAction 抽象 + Evidence Contract，所有 Track 的基石）
 Phase 3: Track T（ToolRegistry gate + tool alias 解析，影响面最小）
 Phase 4: Track P（Streaming evidence + unsupported provider branch）
-Phase 5: Track C（Checkpoint summary，取决于 Track T 的 tool event）
+Phase 5: Track C（Checkpoint summary，turn-end / before save_checkpoint boundary，不依赖 tool event；tool execution 是可选前置步骤）
 Phase 6: Track S（Skill action，LLM decision + selected_skill_id）
 Phase 7: Track A（SubAgent action，LLM decision + parent adjudication）
 Phase 8: Track M（Memory turn-end hook，需完整 chat() 循环）

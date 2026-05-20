@@ -138,9 +138,12 @@ SubAgent L1 需要 Runtime LLM 在 tool calling 循环中**自主判断**委托�
    - 子系统不得自行推进 Runtime state
 
 2. **Runtime Action 必须可审计**（auditable）
-   - 每个 RuntimeAction 产生不可变的 action event
+   - 每个 RuntimeAction 产生不可变的 action event；action event 只是 receipt，不是 runtime_e2e evidence
    - action event 包含：source、type、input、output、status、timestamp
-   - E2E dogfood 通过 action events 验证能力覆盖
+   - RFC-level invariant: runtime_e2e = RuntimeActionEvent + RuntimeActionDispatcher route + handler invoked + independently observed target_module_proof + parent result/adjudication where applicable
+   - Event-only RuntimeAction audit 不得标 runtime_e2e；RuntimeActionEvent + module_invoked=true、RuntimeActionEvent + handler_name + target_module 也不得标 runtime_e2e
+   - runtime_e2e 必须有 target_module_proof，且 target_module_proof 必须 independently observed；handler self-asserted proof、free-text invocation_proof、shaped dict without independent observation 均不得 pass
+   - E2E dogfood 通过 action events 记录 receipt，通过 target_module_proof 验证能力覆盖
 
 3. **ToolRegistry remains authority**（工具注册表保持权威）
    - 所有 tool execution 必须经过 ToolRegistry policy 检查

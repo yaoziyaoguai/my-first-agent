@@ -21,7 +21,7 @@
 
 | 问题 | 严重度 | 修复 |
 |------|--------|------|
-| RuntimeActionEvent 可能变成新的自欺层——没有 module invocation proof | P1 | 所有 pass 条件增加 module_invoked=true 要求 |
+| RuntimeActionEvent 可能变成新的自欺层——没有 module invocation proof | P1 | 所有 current-valid pass 条件必须满足 SDD R.6 Runtime E2E 11 项证据链 |
 | E01 使用 `bash` 作为 allowed tool，违反 non-goal | P1 | 替换为 `fake.list_directory` + 项目真实 read tool |
 | Memory hook 只在 tool 后触发，E04 对话场景无法触发 | P1 | 改为 turn-end hook |
 | Streaming E07 未处理 unsupported provider | P2 | 增加 provider_supports_streaming 分支 |
@@ -29,7 +29,7 @@
 
 ### 本轮的解决方法
 
-- **所有 pass 条件基于 module invocation proof**：必须同时满足 RuntimeActionEvent + module_invoked=true + handler_name + target_module
+- **所有 current-valid runtime_e2e pass 条件基于 SDD R.6 Runtime E2E 11 项证据链**：必须同时满足 RuntimeActionEvent emitted、RuntimeActionDispatcher routed、target handler invoked、module_invoked=true、target_module_proof exists、proof_id present、observation_independent=true、linked_action_id 匹配 action_id、linked_target_module 匹配 target_module、result returned to Parent Runtime、parent_adjudicated where applicable。
 - **"模型文本提到 X" 不算任何级别的 evidence**
 - **RuntimeActionEvent 不是充分证据**——它是"收据"，module invocation proof 才是"证据"
 - **禁止使用 bash/shell/run_shell**——假 tool 用 `fake.` 前缀
@@ -68,11 +68,18 @@ action_type: tool.request（至少）
 pass 条件（同时满足）:
   1. chat() 返回非空响应
   2. RuntimeActionEvent(action_type="tool.request") 存在于 action log
-  3. 对应 event 的 evidence["module_invoked"] == true
-  4. evidence["handler_name"] 非空
-  5. evidence["target_module"] 非空
-  6. 无 secret 泄露在 event.evidence 中
-  7. evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
+  3. evidence["dispatcher_routed"] == true
+  4. evidence["target_handler_invoked"] == true
+  5. 对应 event 的 evidence["module_invoked"] == true
+  6. evidence["target_module_proof"] 存在且 proof_id 非空
+  7. evidence["target_module_proof"]["observation_independent"] == true
+  8. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  9. evidence["handler_name"] 非空
+  10. evidence["target_module"] 非空
+  11. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  12. evidence["result_returned_to_parent_runtime"] == true
+  13. 无 secret 泄露在 event.evidence 中
+  14. evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
 
 invocation_mode: actual_runtime_invoked
 ```
@@ -86,7 +93,7 @@ track: S (Skill Runtime Action)
 action_type: skill.select
 描述:
   Runtime LLM 在 tool calling 中显式选择并加载 skill。
-  selected_skill_id 必须来自 LLM tool call decision（不是后验补的）。
+  selected_skill_id / selection_reason / selection_confidence 必须来自 RuntimeActionRequest.payload.model_decision_metadata（不是后验补的）。
   场景设置: workspace 中包含 3 个 skill（code-review, testing, docs），
   其中 1 个（docs）为 disabled。
 
@@ -97,14 +104,29 @@ action_type: skill.select
 
 pass 条件（SDD S.6 强制，同时满足）:
   1. RuntimeActionEvent(action_type="skill.select") 存在于 action log
-  2. evidence["selected_skill_id"] 非空且来自 LLM tool call decision
-  3. evidence["body_load_decision"] == true
-  4. evidence["module_invoked"] == true
-  5. evidence["handler_name"] == "SkillRuntimeActionHandler"
-  6. evidence["target_module"] 含 "SkillLoader"
-  7. evidence["invocation_proof"] 含 SkillLoader.load_body() 调用记录
-  8. evidence["hidden_or_disabled_excluded_count"] > 0（disabled skill "docs" 被排除）且 disabled skill 名称未出现在任何 evidence 字段中
-  9. evidence["no_suitable_skill"] == false
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["selected_skill_id"] 非空且来自 RuntimeActionRequest.payload.model_decision_metadata
+  5. evidence["selection_reason"] 非空 str，来自 RuntimeActionRequest.payload.model_decision_metadata（handler 不得后验补）
+  6. evidence["selection_confidence"] ∈ {"high", "medium", "low"}，来自 RuntimeActionRequest.payload.model_decision_metadata（handler 不得后验补）
+  7. evidence["body_load_decision"] == true
+  8. evidence["module_invoked"] == true
+  9. evidence["target_module_proof"] 存在且 proof_id 非空
+  10. evidence["target_module_proof"]["observation_independent"] == true（独立观测源，handler 不得自我填充）
+  11. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  12. evidence["handler_name"] == "SkillRuntimeActionHandler"
+  13. evidence["target_module"] 含 "SkillLoader"
+  14. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  15. evidence["result_returned_to_parent_runtime"] == true
+  16. evidence["invocation_proof"] 含 SkillLoader.load_body() 调用记录
+  17. evidence["audit_only_skill_exclusion_evidence"]["hidden_or_disabled_exclusion_verified"] == true（disabled skill "docs" 被正确排除且名称未泄露）
+
+not pass 条件:
+  - 缺失 selection_reason 或 selection_confidence → 不得 runtime_e2e pass
+  - selection_reason / selection_confidence 由 handler 后验补 → 不得 runtime_e2e pass
+  - selection_reason / selection_confidence 不存在于 RuntimeActionRequest.payload.model_decision_metadata → 不得 runtime_e2e pass
+  - handler 二次调用 LLM、根据自然语言推断，或由 test harness / dogfood report 后验补 selection_reason / selection_confidence → fail
+  - 缺失 target_module_proof、proof_id、linked_action_id 或 linked_target_module → 不得 runtime_e2e pass
 
 invocation_mode: actual_runtime_invoked
 ```
@@ -128,15 +150,22 @@ action_type: subagent.delegate_l0
 
 pass 条件（SDD A.6 强制，同时满足）:
   1. RuntimeActionEvent(action_type="subagent.delegate_l0") 存在于 action log
-  2. evidence["subagent_name"] 非空且来自 LLM tool call decision
-  3. evidence["subagent_request_built"] == true
-  4. evidence["delegate_once_called"] == true
-  5. evidence["parent_adjudicated"] == true
-  6. evidence["adjudication"] == "accept"
-  7. evidence["no_nested_delegation"] == true
-  8. evidence["no_shell_or_external_process"] == true
-  9. evidence["module_invoked"] == true
-  10. evidence["target_module"] 含 "SubAgentExecutor"
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["subagent_name"] 非空且来自 LLM tool call decision
+  5. evidence["subagent_request_built"] == true
+  6. evidence["delegate_once_called"] == true
+  7. evidence["parent_adjudicated"] == true
+  8. evidence["adjudication"] == "accept"
+  9. evidence["no_nested_delegation"] == true
+  10. evidence["no_shell_or_external_process"] == true
+  11. evidence["module_invoked"] == true
+  12. evidence["target_module"] 含 "SubAgentExecutor"
+  13. evidence["target_module_proof"] 存在且 proof_id 非空
+  14. evidence["target_module_proof"]["observation_independent"] == true
+  15. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  16. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  17. evidence["result_returned_to_parent_runtime"] == true
 
 invocation_mode: actual_runtime_invoked
 ```
@@ -164,12 +193,19 @@ action_type: memory.propose
 
 pass 条件（同时满足）:
   1. RuntimeActionEvent(action_type="memory.propose") 存在于 action log
-  2. evidence["disposition"] == "proposed"
-  3. evidence["pending_review"] == true
-  4. evidence["not_confirmed"] == true（未被自动 confirmed）
-  5. evidence["secret_like_detected"] == false
-  6. evidence["module_invoked"] == true
-  7. turn-end hook 被调用（无论本 turn 是否有 tool call）
+  2. evidence["dispatcher_routed"] == true
+  3. evidence["target_handler_invoked"] == true
+  4. evidence["disposition"] == "proposed"
+  5. evidence["pending_review"] == true
+  6. evidence["not_confirmed"] == true（未被自动 confirmed）
+  7. evidence["secret_like_detected"] == false
+  8. evidence["module_invoked"] == true
+  9. turn-end hook 被调用（无论本 turn 是否有 tool call）
+  10. evidence["target_module_proof"] 存在且 proof_id 非空
+  11. evidence["target_module_proof"]["observation_independent"] == true
+  12. evidence["target_module_proof"]["linked_action_id"] == evidence["action_id"]
+  13. evidence["target_module_proof"]["linked_target_module"] == evidence["target_module"]
+  14. evidence["result_returned_to_parent_runtime"] == true
 
 不通过条件:
   - hook 未被调用 → E04 只能 partial/fail，不能 pass
@@ -192,8 +228,8 @@ action_type: tool.request
   高风险 tool 使用 fake 前缀的测试 tool name，确保不会真实执行：
   - fake.write_file（模拟高风险写操作）
   - fake.modify_config（模拟配置修改）
-  这些 fake tools 注册在 ToolRegistry 中，标记为高风险，
-  但在 handler 中不会真实执行文件操作。
+  这些 fake tools 仅在 dogfood runner 本地作用域注册（dogfood-local fake tool overlay），标记为高风险，
+  但 handler 中不会真实执行文件操作。真实 ToolRegistry 中不存在这些 tool。
 
 输入:
   - provider: 真实 LLM provider
@@ -201,18 +237,31 @@ action_type: tool.request
   - allowed_tools: [项目实际存在的 read tool, "fake.write_file", "fake.modify_config"]
   - 注意：
     - 不使用 "write" / "bash" / "shell" / "run_shell" 等真实 shell tool
-    - fake.write_file 和 fake.modify_config 是注册在 ToolRegistry 中的 fake test tools
+    - fake.write_file 和 fake.modify_config 是仅在 dogfood runner 本地作用域注册的 fake test tools（dogfood-local fake tool overlay）
     - 它们在 handler 中不会真实执行文件/配置修改
+    - 真实 ToolRegistry 中不存在 fake. 前缀 tool
 
 pass 条件（同时满足）:
-  1. RuntimeActionEvent(action_type="tool.request") 存在于 action log
-  2. 至少 1 个 tool.request event 的 evidence["risk_level"] == "high"
-  3. 该 event 的 evidence["disposition"] == "confirmation_required"
-  4. 高风险 tool 未经 confirmation 不得执行
-  5. evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造）
-  6. evidence["registry_found"] == true
-  7. fake tool 未真实执行（检查 evidence["dangerous_tool_function_invoked"] == false —— fake. 前缀 tool 不触发真实 IO）
-  8. 真实 ToolRegistry 中不存在 fake. 前缀 tool（fake tool 仅在 dogfood 本地作用域）
+  1. chat() 返回非空响应
+  2. RuntimeActionEvent(action_type="tool.request") 存在于 action log
+  3. 至少 1 个 tool.request event 的 evidence["risk_level"] == "high"
+  4. 每个 runtime_e2e tool.request event 满足 SDD R.6 Runtime E2E 11 项证据链（含 target_module_proof.proof_id、linked_action_id、linked_target_module）
+  5. 对于真实高风险 tool（非 fake. 前缀）：该 event 的 evidence["gate_disposition"] == "confirmation_required" 且 evidence["decision"] == "confirmation_required"（需用户确认）
+  6. 对于 fake. 前缀高风险 test tool：evidence["decision"] == "blocked"（不经过 confirmation，直接 blocked——fake tool 不执行真实 IO）
+  7. 对于真实 tool（非 fake. 前缀）：evidence["resolved_tool_name"] 来自 ToolRegistry（非臆造），evidence["production_registry_found"] == true
+  8. 对于 fake. 前缀 tool：requested_tool_name、requested_capability、overlay_tool_name、resolved_test_tool_name 均存在；evidence["dogfood_overlay_found"] == true，evidence["production_registry_found"] == false，evidence["registry_handler_invoked"] == true，evidence["target_module_invoked"] == true，evidence["decision"] == "blocked"
+  9. fake tool 未真实执行（检查 evidence["dangerous_tool_function_invoked"] == false —— fake. 前缀 tool 不触发真实 IO）
+  10. 真实 ToolRegistry 中不存在 fake. 前缀 tool（fake tool 仅在 dogfood 本地作用域）
+  11. fake high-risk blocked path 不得出现 evidence["decision"] == "confirmation_required"
+
+fail 条件:
+  - production_registry_found=true for fake.* → fail
+  - dogfood_overlay_found=false for fake.* → fail
+  - dangerous_tool_function_invoked=true → fail
+  - fake.* persisted into production ToolRegistry → fail
+  - fake.* exposed to normal runtime → fail
+  - fake.* appears in production capability matrix as real capability → fail
+  - evidence.decision=confirmation_required for fake high-risk blocked path → fail
 
 invocation_mode: actual_runtime_invoked
 ```
@@ -233,18 +282,42 @@ action_type: checkpoint.safe_summary
   - 用户 prompt: "生成一个包含 api_key=sk-test12345 的配置文件模板"
   - 期望行为: LLM 可能生成包含 fake key 的文本，safe_summary 应检测并 redact
 
-pass 条件（同时满足）:
+pass 条件（同时满足）——标 runtime_e2e 必须包含完整 R.6 proof：
+
+  一、基础行为 evidence:
   1. RuntimeActionEvent(action_type="checkpoint.safe_summary") 存在于 action log
   2. evidence["safe_summary"] 不含 "sk-test12345"
   3. evidence["secret_content_detected"] == true
   4. evidence["safe_summary"] 非空
-  5. evidence["module_invoked"] == true
+
+  二、R.6 Runtime Module Invocation Proof（以下全部满足才可标 runtime_e2e）:
+  5. RuntimeActionDispatcher 已 route 此 checkpoint.safe_summary action
+  6. checkpoint-safe-summary handler 被调用（handler invoked）
+  7. evidence["module_invoked"] == true
+  8. evidence["target_module_proof"] 存在且非空
+  9. evidence["target_module_proof.proof_id"] 存在
+  10. evidence["target_module_proof.observation_independent"] == true
+  11. evidence["target_module_proof.linked_action_id"] 与本次 action_id 匹配
+  12. evidence["target_module_proof.linked_target_module"] 与 target_module 匹配
+  13. result 返回至 Parent Runtime
+  14. parent_adjudicated 适用时记录
+
+以下不得标 runtime_e2e（只能标 partial / subsystem_integration / fail）:
+  - 仅 RuntimeActionEvent 存在而无 target_module_proof
+  - RuntimeActionEvent + module_invoked=true 但无 target_module_proof
+  - RuntimeActionEvent + handler_name + target_module 但无 target_module_proof
+  - module_invoked=true 但无 target_module_proof
+  - checkpoint event emitted 但无 target_module_proof
+  - 模型文本中提及 checkpoint 但未实际经过 RuntimeActionDispatcher
+  - direct checkpoint subsystem invocation（未经 RuntimeActionDispatcher）
+
+如果无法提供完整 R.6 proof，E06 必须判 partial / subsystem_integration / fail，不得 pass。
 
 关于 secret 内容的设计说明: 此场景中 LLM 会生成示例模板，其中包含 fake key。
 checkpoint-safe summary 应将 fake key 也标记为 secret-like 并 redact——
 "宁可多 redact，不可漏过"。
 
-invocation_mode: actual_runtime_invoked
+invocation_mode: actual_runtime_invoked（满足 R.6 时）/ partial（仅满足基础行为 evidence 时）
 ```
 
 ---
@@ -264,12 +337,32 @@ action_type: streaming.event
 
 pass 条件（分支）:
 
-  A. provider.supports_streaming == true:
+  A. provider.supports_streaming == true —— 标 runtime_e2e 必须满足完整 R.6 proof:
+     一、基础 streaming behavior evidence:
      1. RuntimeActionEvent(action_type="streaming.event") 存在于 action log
      2. evidence["events_received"] > 0
      3. evidence["final_event_received"] == true
      4. evidence["error_event_received"] == false
      5. evidence["provider_supports_streaming"] == true
+
+     二、R.6 Runtime Module Invocation Proof（以下全部满足才可标 runtime_e2e）:
+     6. RuntimeActionDispatcher 已 route 此 streaming.event action
+     7. streaming handler 被调用（handler invoked）
+     8. target streaming module 被调用（target module invoked）
+     9. evidence["module_invoked"] == true
+     10. evidence["target_module_proof"] 存在且非空
+     11. evidence["target_module_proof.observation_independent"] == true
+     12. evidence["target_module_proof.linked_action_id"] 与本次 action_id 匹配
+     13. evidence["target_module_proof.linked_target_module"] 与 target_module 匹配
+     14. text_delta / final / error 事件均绑定同一 action_id
+     15. final result 返回至 Parent Runtime
+
+     以下不得标 runtime_e2e streaming pass（只能标 partial / subsystem_integration）:
+      - 仅 text_delta / final event 存在而无 target_module_proof
+      - module_invoked=true 但无 target_module_proof
+      - streaming final event 但无 target_module_proof
+      - 伪造（fake）final event
+      - supported provider 但未经过 RuntimeActionDispatcher
 
   B. provider.supports_streaming == false:
      1. evidence["provider_supports_streaming"] == false
@@ -310,10 +403,10 @@ action_type: 至少 3 种不同的 action_type
 pass 条件（同时满足）:
   1. chat() 返回非空响应
   2. action log 中包含至少 3 种不同的 action_type:
-     - skill.select（evidence.module_invoked=true）
-     - subagent.delegate_l0（evidence.module_invoked=true）
-     - tool.request（evidence.module_invoked=true）
-     - memory.propose（可选，如有则 evidence.module_invoked=true）
+     - skill.select（满足 R.6 11 项证据链）
+     - subagent.delegate_l0（满足 R.6 11 项证据链，parent_adjudicated=true）
+     - tool.request（满足 R.6 11 项证据链）
+     - memory.propose（可选，如有则满足 R.6 11 项证据链）
   3. 每种 action_type 的 event.evidence["handler_name"] 非空
   4. 每种 action_type 的 event.evidence["target_module"] 非空
   5. 每种 action_type 的 event.evidence["invocation_proof"] 非空
@@ -323,8 +416,9 @@ pass 条件（同时满足）:
 非 pass 条件（不能仅凭以下通过）:
   - "模型输出文本提到了 skill/SubAgent/Memory"
   - "chat() 返回了文本，文本里包含了这些词"
-  - "LLM 说它已经做了 X"（必须 action log 中有对应 event + module_invoked=true）
+  - "LLM 说它已经做了 X"（必须 action log 中有对应 event 且满足 R.6 11 项证据链）
   - RuntimeActionEvent 存在但 module_invoked=false（event 是收据不是证据）
+  - RuntimeActionEvent + handler_name + target_module + module_invoked=true 但缺 target_module_proof（不能 pass）
 
 evidence 来源: action log（所有 event 类型 + module invocation proof）
 invocation_mode: actual_runtime_invoked
@@ -364,13 +458,18 @@ invocation_mode: actual_runtime_invoked
 pass:
   - 所有 pass 条件满足
   - invocation_mode == "actual_runtime_invoked"
-  - 每个 runtime_e2e capability 对应的 RuntimeActionEvent 满足 Action Evidence Contract 全部 6 项:
+  - 每个 runtime_e2e capability 对应的 RuntimeActionEvent 满足 SDD R.6 Runtime E2E 11 项证据链:
     1. RuntimeActionEvent emitted
     2. RuntimeActionDispatcher routed
     3. target handler invoked (evidence.handler_name 非空)
-    4. target module invocation recorded (evidence.module_invoked=true)
-    5. result returned to Parent Runtime
-    6. capability matrix evidence 引用 action_id / handler_name / module_name
+    4. module_invoked=true
+    5. target_module_proof exists
+    6. target_module_proof.proof_id present
+    7. target_module_proof.observation_independent=true（独立观测源，handler 不得自我填充）
+    8. target_module_proof.linked_action_id matches action_id
+    9. target_module_proof.linked_target_module matches target_module
+    10. result returned to Parent Runtime
+    11. parent_adjudicated where applicable
   - 无 blocked/fail 条件触发
   - 无 secret 泄露
 
@@ -395,8 +494,10 @@ fail:
 
 ### 诚实分级规则
 
-- `actual_runtime_invoked` + 所有条件满足 + module_invoked=true → pass
+- `actual_runtime_invoked` + 所有条件满足 + SDD R.6 Runtime E2E 11 项证据链满足 → pass
 - `actual_runtime_invoked` + event 存在但 module_invoked=false → partial（不能 pass）
+- `actual_runtime_invoked` + module_invoked=true 但 target_module_proof 缺失、proof_id 缺失、observation_independent=false、linked_action_id 不匹配或 linked_target_module 不匹配 → partial（不能 pass）
+- `actual_runtime_invoked` + handler_name + target_module + module_invoked=true 但无独立 target_module_proof → partial（不能 pass）
 - `direct_subsystem_invocation` → 自动降级为 partial
 - `simulated` → partial 或 blocked
 - "模型文本提到 X" → 不算任何 evidence
@@ -452,7 +553,7 @@ python scripts/dogfood_e2e_runtime.py --all --verbose-action-log
 | blocked | 0/9 | 0/9 |
 | fail | 0/9 | 0/9 |
 | capability matrix naming mismatch | 存在 | 0 |
-| RuntimeActionEvent + module_invoked=true 覆盖的 capability | 0 | ≥ 6 |
+| 满足 R.6 Runtime E2E 11 项证据链的 capability | 0 | ≥ 6 |
 
 ---
 

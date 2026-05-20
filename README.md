@@ -12,6 +12,8 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 
 **下一阶段：Runtime Integration / Runtime Action Harness** — E2E dogfood 诚实状态是 3 pass / 6 partial（6/9 场景未经过 Runtime 主循环）。Runtime Integration 提供统一的、可审计的 RuntimeAction 入口，使 Runtime LLM 可以通过 tool calling 触发子系统能力。SubAgent L1 deferred 至此阶段完成后。设计文档包：[docs/runtime-integration/](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md)（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）。
 
+> ⚠️ **Runtime Integration 文档（pending independent audit）**：当前 Runtime Integration 设计文档仍处于独立审计修正中，尚未通过 committed-state audit。文档不可作为实现蓝图（not an implementation blueprint），不可 commit/push。在 committed-state audit 通过之前，不要启动 implementation-loop planning。
+
 ## 当前状态
 
 - Runtime/Core/Loop：主循环仍由 Parent Agent Runtime 拥有，`agent.loop` 已抽出主循环编排，`core.py` 仍是兼容入口和 runtime hub。

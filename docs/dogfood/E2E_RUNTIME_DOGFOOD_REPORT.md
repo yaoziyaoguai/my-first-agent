@@ -20,7 +20,7 @@
 | Scenario | Status | Invocation Mode | Runtime Path Used | Actual Systems | Quality | Issues |
 |---|---|---|---|---|---|---|
 | E01_runtime_planning | pass | actual_runtime_invoked | SkillRegistry→SubAgentRegistry→ToolRegistry→core.chat()→P... | SkillRegistry, SubAgentRegistry, ToolRegistry, Runtime.chat | 0.8 | 0 |
-| E02_skill_selection | partial | direct_subsystem_invocation | SkillRegistry→SkillSelector→SkillLoader→SkillToolBinding | SkillRegistry, SkillSelector, SkillLoader, SkillToolBinding | 0.5 | 1 |
+| E02_skill_selection | partial | direct_subsystem_invocation | SkillRegistry→SkillRegistryValidation→SkillLoader→SkillToolBinding | SkillRegistry, SkillRegistryValidation, SkillLoader, SkillToolBinding | 0.5 | 1 |
 | E03_subagent_l0 | partial | direct_subsystem_invocation | SubAgentRegistry→SubAgentDescriptor→SubAgentRequest→SubAg... | SubAgentRegistry, SubAgentDescriptor, SubAgentRequest, SubAgentDelegation | 0.9 | 1 |
 | E04_memory_proposal | partial | direct_subsystem_invocation | FilesystemMemoryStore→ConsolidationLoader→ConsolidationEn... | FilesystemMemoryStore, MemoryEpisodicWrite(synthetic), MemoryConsolidationLoader, MemoryConsolidationEngine | 0.9 | 1 |
 | E05_tool_registry | partial | direct_subsystem_invocation | ToolRegistry→VisibilityFilter→RiskClassification→RuntimeR... | ToolRegistry, ToolRegistration, ToolVisibilityFilter, ToolRiskClassification | 0.5 | 1 |
@@ -34,14 +34,14 @@
 | Capability | E2E Verified | Evidence | Gap | Severity |
 |---|---|---|---|---|
 | Runtime planning | no | Simulated only in E01,E08 | no real module invocation | P2 |
-| Provider call | yes | Full E2E runtime path verified in E01,E08 | none | none |
+| Provider call | yes | actual runtime provider call verified in E01,E08 | none | none |
 | Skill selection | no | Simulated only in E02,E08 | no real module invocation | P2 |
 | Skill progressive disclosure | no | Simulated only in E02 | no real module invocation | P2 |
 | SubAgent L0 delegation | no | Simulated only in E03,E08 | no real module invocation | P2 |
 | Parent adjudication | no | Simulated only in E03 | no real module invocation | P2 |
 | Memory proposal/review | no | Simulated only in E04,E08 | no real module invocation | P2 |
 | Memory recall/injection | no | Not covered by any E2E scenario | missing E2E coverage | P3 |
-| ToolRegistry gate | yes | Full E2E runtime path verified in E05,E08,E09 | none | none |
+| ToolRegistry gate | no | E05 is partial/direct subsystem invocation；E08/E09 只触达 ToolRegistry API，未形成 RuntimeActionDispatcher + ToolGate handler + target_module_proof 证据链 | requires RuntimeActionDispatcher + ToolGate handler + target_module_proof + dogfood-local fake overlay blocked path evidence | P2 |
 | Confirmation | no | Simulated only in E05,E09 | no real module invocation | P2 |
 | Checkpoint save/load | no | Simulated only in E06 | no real module invocation | P2 |
 | Checkpoint resume safety | no | Simulated only in E06 | no real module invocation | P2 |
@@ -69,13 +69,15 @@
 
 ## E. Important Caveat
 
-**RuntimeActionEvent 不等于 runtime_e2e evidence**。RuntimeActionEvent 只是"收据"——记录了 route() 被调用。module invocation proof（handler_name + target_module + module_invoked=true）才是"证据"——证明了目标模块被实际执行。后续 Runtime Integration 实现必须同时满足 SDD R.6 Action Evidence Contract 的全部 6 项条件，不能仅凭 RuntimeActionEvent 判定 runtime_e2e。
+**RuntimeActionEvent 不等于 runtime_e2e evidence**。RuntimeActionEvent 只是"收据"——记录了 route() 被调用。target_module_proof（独立观测证据：proof_id + handler_name + target_module + module_invoked=true + observation_independent=true + linked_action_id + linked_target_module）才是"证据"——证明了目标模块被实际执行且观测独立于 handler。仅 handler 自报的 module_invoked=true、handler_name + target_module、free-text invocation_proof 或 handler self-minted target_module_call_id 均不构成 target_module_proof。后续 Runtime Integration 实现必须同时满足 SDD R.6 Runtime E2E 11 项证据链，不能仅凭 RuntimeActionEvent、module_invoked=true 或 handler 自我声明判定 runtime_e2e。
+
+**E05 ToolRegistry 当前不是 runtime_e2e pass**。它只证明 direct subsystem invocation / subsystem_integration。E05 只有在 RuntimeActionEvent、RuntimeActionDispatcher route、ToolGate handler、target_module_proof、dogfood-local fake overlay blocked path evidence 同时存在时，才可升级为 runtime_e2e。fake.* 不得进入 production ToolRegistry 或 production capability matrix；fake high-risk blocked path 的最终 evidence.decision=blocked，不是 confirmation_required，且 dangerous_tool_function_invoked=false。
 
 ## F. Hard Truth
 
 - 场景结果: 3 pass, 6 partial, 0 blocked, 0 fail
 - 真实 API 调用场景: 3/9
-- 能力覆盖: 2 E2E verified, 0 partial, 12 not verified
+- 能力覆盖: 1 E2E verified, ToolRegistry gate remains partial/subsystem_integration, 12 not verified
 
 ## G. Known Issues
 
@@ -88,7 +90,7 @@
 | Capability | 实际状态 | Evidence |
 |---|---|---|
 | Provider call | yes (E01/E08 via chat() → real LLM) | 3/9 scenario |
-| ToolRegistry gate | yes (E05/E08/E09 实际调用了 ToolRegistry API) | subsystem integration |
+| ToolRegistry gate | partial (E05 direct subsystem invocation；E08/E09 触达 ToolRegistry API，但未证明 RuntimeActionDispatcher + target_module_proof runtime_e2e 链路) | subsystem integration / not runtime_e2e |
 | Skill selection | partial (E02 subsystem verified, E08 registry scanned 但未证明 LLM 选择/使用 skill) | direct invocation |
 | SubAgent L0 | partial (E03 full subsystem chain verified, 无 runtime LLM reasoning) | direct invocation |
 | Memory proposal/review | partial (E04 full consolidation chain verified, 无 runtime LLM-triggered proposal) | direct invocation |

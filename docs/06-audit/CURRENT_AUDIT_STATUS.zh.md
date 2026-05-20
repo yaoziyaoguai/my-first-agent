@@ -116,8 +116,15 @@ Status: v0.9.0 released; v0.9.x Deep Stabilization / Pre-SubAgent-L1 hardening i
 
 ## Ready to push?
 
-Yes, if the current branch finishes the quality gates listed in `docs/05-testing-dogfood/TEST_MATRIX.zh.md`.
-Do not tag yet; tag decision should wait until push/review evidence is accepted.
+**No.** Runtime Integration 文档包（`docs/runtime-integration/`）经第三轮独立红队审计发现 FAIL——文档仍存在 unsafe/misleading 问题，尚在修复中。
+
+当前状态：
+- 第三轮审计正在进行中，修复未完成。
+- 不得基于当前 Runtime Integration 文档进行实现（implementation-loop planning）。
+- 不得声称 Runtime Integration 文档就绪。
+- 待本轮修复完成后重新审计，通过后方可考虑 push。
+
+Do not tag yet; tag decision should wait until third-round audit passes and push/review evidence is accepted.
 
 ## Known limitations / P3 backlog
 
@@ -188,7 +195,7 @@ Do not tag yet; tag decision should wait until push/review evidence is accepted.
 
 ## Runtime Integration 文档入口
 
-Runtime Integration / Runtime Action Harness 设计文档包已就绪（Phase 3: docs-only）：
+Runtime Integration / Runtime Action Harness 设计文档包 **under follow-up remediation**（第三轮独立红队审计发现 FAIL，pending diff 尚在修复中）：
 
 - RFC: [RUNTIME_INTEGRATION_RFC.zh.md](../runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md)
 - SDD: [RUNTIME_INTEGRATION_SDD.zh.md](../runtime-integration/RUNTIME_INTEGRATION_SDD.zh.md)
@@ -197,7 +204,7 @@ Runtime Integration / Runtime Action Harness 设计文档包已就绪（Phase 3:
 - E2E Dogfood Plan: [RUNTIME_INTEGRATION_E2E_DOGFOOD_PLAN.zh.md](../runtime-integration/RUNTIME_INTEGRATION_E2E_DOGFOOD_PLAN.zh.md)
 - Audit Checklist: [RUNTIME_INTEGRATION_AUDIT_CHECKLIST.zh.md](../runtime-integration/RUNTIME_INTEGRATION_AUDIT_CHECKLIST.zh.md)
 
-该文档包为后续 coding agent 提供实现蓝图，本阶段不做代码实现。
+该文档包为后续 coding agent 提供设计方向参考——**当前不可直接作为实现蓝图**（第三轮审计未通过）。本阶段不做代码实现。
 
 ## Runtime Integration 文档独立审计修复（2026-05-19）
 
@@ -208,7 +215,7 @@ Runtime Integration 文档包经两轮独立红队审计。第一轮（96d8173�
 | Issue | Priority | Status | 修复摘要 |
 |-------|----------|--------|----------|
 | P1-1: Skill/SubAgent schema 不足以表达 LLM 真实选择 | P1 | fixed | SDD Track S/A 增加 selected_skill_id、selection_confidence、subagent_name、delegate_once_called 等字段 |
-| P1-2: RuntimeActionEvent 可能变自欺层 | P1 | fixed | SDD Track R 新增 R.6 Action Evidence Contract；runtime_e2e 必须同时满足 6 项条件 |
+| P1-2: RuntimeActionEvent 可能变自欺层 | P1 | historical invalidated（当前 pending diff 已改为 R.6 Runtime E2E 11 项证据链，仍需独立审计确认） | 早期 runtime_e2e 6 项/7 项规则已废弃；current-valid 规则必须包含 target_module_proof.proof_id、observation_independent、linked_action_id、linked_target_module 等完整证据 |
 | P1-3: E2E plan 引入 shell scope creep | P1 | fixed | E2E Dogfood Plan 移除 bash；高风险诱导使用 fake. 前缀 test tool |
 | P1-4: Memory hook 与 E04 场景冲突 | P1 | fixed | SDD Track M 改为 turn-end hook |
 | P2-1: Streaming unsupported provider 未入规格 | P2 | fixed | SDD Track P 增加 P.5 Unsupported Provider Branch |
@@ -216,20 +223,20 @@ Runtime Integration 文档包经两轮独立红队审计。第一轮（96d8173�
 | P2-3: Tool name mismatch | P2 | fixed | SDD Track T 增加 T.6 Tool Alias Policy |
 | P3-1: README 入口太靠后 | P3 | fixed | README 前部增加 Runtime Integration 入口 |
 
-### 第二轮修复（本轮，under follow-up remediation）
+### 第二轮修复（pending diff claimed fixed, awaiting independent audit confirmation）
 
 | Issue | Priority | Status | 修复摘要 |
 |-------|----------|--------|----------|
-| P1: Skill selection schema 自相矛盾（selected_skill_id 来源表述不一致） | P1 | fixing | SDD S.3 明确 selected_skill_id 来自 model tool-call args（payload）；S.8/S.7 约束重写 |
-| P1: SubAgent selection 表述未对齐 | P1 | fixing | SDD A.8 invariant 4 改为"来自 model tool-call arguments" |
-| P1: Runtime proof 仍可伪造（free-text invocation_proof） | P1 | fixing | SDD R.6 evidence 改为 structured invocation_proof dict（含 call_id/function_called/call_signature/observed_at/observation_method） |
-| P1: Implementation Loop Phase 8 残留旧 Memory hook 表述 | P1 | fixing | Phase 8 步骤1/2 从"tool 执行完成后"改为"turn 结束后（turn-end hook）" |
-| P1: Implementation Loop Phase 9/1 残留 event-only runtime_e2e | P1 | fixing | Phase 9 步骤3 增加 module_invoked=true 要求；Phase 1 步骤3 更新 evidence level 定义 |
-| P2: Hidden/disabled skill evidence 矛盾（hidden_or_disabled_excluded 泄露名称） | P2 | fixing | SDD S.4 从 list[str] 改为 int（hidden_or_disabled_excluded_count） |
-| P2: Fake tool 边界不完整 | P2 | fixing | SDD T.6/T.7 明确 fake. 前缀 tool 仅在 dogfood 本地注册，不污染真实 ToolRegistry |
-| P2: ToolGate module_invoked 语义混淆 | P2 | fixing | SDD T.4 拆分为 registry_handler_invoked / target_module_invoked / dangerous_tool_function_invoked |
+| P1: Skill selection schema 自相矛盾（selected_skill_id 来源表述不一致） | P1 | pending diff claimed fixed | SDD S.3 明确 selected_skill_id 来自 model tool-call args（payload）；S.8/S.7 约束重写 |
+| P1: SubAgent selection 表述未对齐 | P1 | pending diff claimed fixed | SDD A.8 invariant 4 改为"来自 model tool-call arguments" |
+| P1: Runtime proof 仍可伪造（free-text invocation_proof） | P1 | pending diff claimed fixed | SDD R.6 evidence 改为 structured invocation_proof dict（含 call_id/function_called/call_signature/observed_at/observation_method） |
+| P1: Implementation Loop Phase 8 残留旧 Memory hook 表述 | P1 | pending diff claimed fixed | Phase 8 步骤1/2 从"tool 执行完成后"改为"turn 结束后（turn-end hook）" |
+| P1: Implementation Loop Phase 9/1 残留 event-only runtime_e2e | P1 | pending diff claimed fixed（当前规则为 R.6 Runtime E2E 11 项证据链，仍需独立审计确认） | Phase 9/1 已从 event-only / module_invoked-only 改为完整 target_module_proof：proof_id、observation_independent、linked_action_id、linked_target_module、result returned to Parent Runtime |
+| P2: Hidden/disabled skill evidence 矛盾（hidden_or_disabled_excluded 泄露名称） | P2 | pending diff claimed fixed | SDD S.4 从 list[str] 改为 int（hidden_or_disabled_excluded_count） |
+| P2: Fake tool 边界不完整 | P2 | pending diff claimed fixed | SDD T.6/T.7 明确 fake. 前缀 tool 仅在 dogfood 本地注册，不污染真实 ToolRegistry |
+| P2: ToolGate module_invoked 语义混淆 | P2 | pending diff claimed fixed | SDD T.4 拆分为 registry_handler_invoked / target_module_invoked / dangerous_tool_function_invoked |
 
-修复后状态：under follow-up remediation（第二轮修复完成后仍需独立审计确认，不是 ready for implementation loop）。
+修复后状态：pending diff 已声称修复，等待独立审计确认（不是 ready for commit/push/implementation-loop planning）。
 
 ## Latest verification baseline
 

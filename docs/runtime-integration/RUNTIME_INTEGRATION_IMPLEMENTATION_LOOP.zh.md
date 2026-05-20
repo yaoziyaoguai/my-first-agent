@@ -13,7 +13,7 @@ Phase 1 (E):  修复 capability matrix naming mismatch — regression，不改�
 Phase 2 (R):  RuntimeAction 抽象（schema + dispatcher）— 所有 Track 的基石
 Phase 3 (T):  ToolRegistry Action Gate — 影响面最小，验证 gate 模式
 Phase 4 (P):  Streaming E2E Evidence — 纯 evidence 收集，无行为变更
-Phase 5 (C):  Checkpoint-safe Summary — 依赖 T 的 tool event
+Phase 5 (C):  Checkpoint-safe Summary — turn-end / before save_checkpoint boundary，不依赖 tool event（tool execution 是可选前置步骤，非必要触发条件）
 Phase 6 (S):  Skill Runtime Action — 引入 LLM tool calling
 Phase 7 (A):  SubAgent L0 Runtime Action — 依赖 L0 executor + adjudication
 Phase 8 (M):  Memory Runtime Hook — 依赖完整 chat() 循环
@@ -49,7 +49,7 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 1. **定义 `CAPABILITY_MODULE_MAPPING`**（在 `scripts/dogfood_e2e_runtime.py` 中）：
    ```python
    CAPABILITY_MODULE_MAPPING = {
-       "skill": ("SkillRegistry", "SkillSelector", "SkillLoader", "SkillToolBinding"),
+       "skill": ("SkillRegistry", "SkillRegistryValidation", "SkillLoader", "SkillToolBinding"),
        "subagent": ("SubAgentRegistry", "SubAgentDescriptor", "SubAgentRequest",
                     "SubAgentDelegation", "SubAgentExecutor", "SubAgentAdjudication"),
        "memory": ("FilesystemMemoryStore", "MemoryEpisodicWrite(synthetic)",
@@ -67,7 +67,7 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 2. **重写 `_capability_evidence_matrix`**：使用 mapping table 做 capability→module 匹配，替代当前硬编码 capability name 直接与 module name 比较的逻辑。
 
 3. **引入 evidence level 分级**：
-   - `runtime_e2e`：同时满足 RuntimeActionEvent + module_invoked=true + structured invocation_proof（Phase 1 无，暂为空）
+   - `runtime_e2e`：必须满足 SDD R.6 Runtime E2E 11 项证据链：RuntimeActionEvent emitted、RuntimeActionDispatcher routed、target handler invoked、module_invoked=true、target_module_proof exists、proof_id present、observation_independent=true、linked_action_id 匹配 action_id、linked_target_module 匹配 target_module、result returned to Parent Runtime、parent_adjudicated where applicable（Phase 1 无，暂为空）
    - `subsystem_integration`：有 systems_actually_invoked（但未经过 Runtime LLM）
    - `deterministic_baseline`：纯函数测试
    - `simulated`：systems_simulated
@@ -166,15 +166,22 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 
 ### 步骤
 
-1. **实现 `ToolGateHandler`**：接收 `tool.request`，查询 ToolRegistry，返回 disposition + risk_level。
+1. **实现 `ToolGateHandler`**：接收 `tool.request`，查询 ToolRegistry，返回 gate_disposition + risk_level。
+   - gate_disposition 是 handler-level immediate output，合法值只包括 `allowed` / `rejected` / `confirmation_required`。
+   - evidence.decision 是 RuntimeActionResult / capability matrix 的 final evidence-level classification，合法值包括 `allowed` / `rejected` / `confirmation_required` / `not_found` / `blocked`。
+   - 映射关系固定：gate_disposition=allowed → evidence.decision=allowed；gate_disposition=rejected → evidence.decision=rejected；gate_disposition=confirmation_required → evidence.decision=confirmation_required；production registry missing → evidence.decision=not_found；fake high-risk dogfood blocked path → evidence.decision=blocked。
+   - `not_found` / `blocked` 不得作为真实工具 gate_disposition。
 
 2. **在 `chat()` 中集成**：
    - 创建 RuntimeActionDispatcher 实例
    - 在 tool calling 执行前，将 tool call 包装为 `tool.request` RuntimeAction
-   - 根据返回的 disposition 决定是否执行：
+   - 根据返回的 gate_disposition 决定真实 production tool 是否执行：
      - `allowed` → 执行 tool
      - `rejected` → 返回错误给 LLM
      - `confirmation_required` → 触发 ConfirmationContext
+   - fake. 前缀高风险 dogfood tool 不进入 production ToolRegistry，不进入 production capability matrix，不走 confirmation_required；它只在 dogfood-local fake tool overlay 中解析，最终 evidence.decision 必须是 `blocked`。
+   - fake high-risk blocked path evidence 必须包含 requested_tool_name、requested_capability、production_registry_found=false、dogfood_overlay_found=true、overlay_tool_name、resolved_test_tool_name、registry_handler_invoked=true、target_module_invoked=true、dangerous_tool_function_invoked=false、evidence.decision=blocked。
+   - 以下均为 fail：production_registry_found=true for fake.*；dogfood_overlay_found=false for fake.*；dangerous_tool_function_invoked=true；fake.* persisted into production ToolRegistry；fake.* exposed to normal runtime；fake.* appears in production capability matrix as real capability；fake high-risk blocked path evidence.decision=confirmation_required。
 
 3. **不改变**：
    - ToolRegistry 内部逻辑
@@ -224,6 +231,16 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 - 现有 E07 scenario（Streaming subsystem integration）仍然通过
 - 全量回归通过
 
+**R.6 proof 强制停止条件（审计 P1-3 新增）**:
+- 如果 implementation 只能提供 RuntimeActionEvent，不得继续标 runtime_e2e，必须 stop / downgrade
+- 如果只能提供 module_invoked=true 而无 target_module_proof，不得继续标 runtime_e2e，必须 stop / downgrade
+- 如果 target_module_proof 无法绑定 action_id 和 target_module，必须 stop
+- 如果 streaming path 只能 direct subsystem invocation，必须 stop 或标 subsystem_integration
+- 如果 full proof 无法在 capability matrix 中引用，必须 stop
+- 如果 scenario-level pass condition 没有内联 R.6 proof，必须 stop
+- **不得**先做 event-only pass 再后补 proof——没有 proof 就不能 runtime_e2e
+- **不得**把"后续审计补证据"写成可接受路径
+
 ### 产物
 - `agent/runtime_integration/streaming_evidence.py`
 - `tests/runtime_integration/test_streaming_evidence.py`
@@ -249,7 +266,7 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 
 1. **实现 `CheckpointSafeSummaryHandler`**：接收 runtime state summary，redact secret-like content，标记 huge prompt，标记 pending high-risk tool。
 
-2. **在 `chat()` 中集成**：在 tool 执行完成 → save_checkpoint 之前，插入 checkpoint.safe_summary 的 generation。
+2. **在 `chat()` 中集成**：在 turn-end / before save_checkpoint（checkpoint boundary）触发 checkpoint.safe_summary 的 generation。tool execution 是可选的前置步骤，不是 checkpoint hook 的必要触发条件——无 tool 的 user turn 也必须能触发 checkpoint safe summary / save_checkpoint boundary。
 
 3. **不改变**：`save_checkpoint` 的调用时机/逻辑、Checkpoint schema。
 
@@ -258,6 +275,13 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 - `python -m pytest tests/runtime_integration/ -v` 全部通过
 - 现有 E06 scenario（Checkpoint subsystem integration）仍然通过
 - 全量回归通过
+
+**R.6 proof 强制停止条件（审计 P1-3 新增）**:
+- 如果 checkpoint safe summary 只能在 tool 执行后触发，E06 不得标 runtime_e2e pass，必须 stop
+- 如果 checkpoint save path 缺少 target_module_proof，必须 stop / downgrade
+- 如果 implementation 只能提供 RuntimeActionEvent + module_invoked=true 而无 target_module_proof，不得标 runtime_e2e，必须 stop
+- 如果 checkpoint path 只能 direct subsystem invocation，必须 stop 或标 subsystem_integration
+- **不得**混淆 Memory turn-end proposal hook 与 Checkpoint hook——两者是不同边界
 
 ### 产物
 - `agent/runtime_integration/checkpoint_summary.py`
@@ -283,20 +307,26 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 
 ### 步骤
 
-1. **实现 `SkillSelectHandler`**：
+1. **实现 `SkillRuntimeActionHandler`**：
    - 接收 skill.select action
-   - 从 SkillRegistry 获取 available skills 的 metadata（不含 body）
-   - 通过 LLM tool calling 让 Runtime LLM 选择 skill
-   - 选中后加载 body
-   - 返回 selected_skill_id、allowed_tools、body_loaded
+   - 从 SkillRegistry 获取 available skills 的 metadata（不含 body，不含 status 字段——hidden/disabled skill 不出现）
+   - **handler 只做验证不做选择**：从 `RuntimeActionRequest.payload.model_decision_metadata` 提取 selected_skill_id、selection_reason、selection_confidence，验证 skill 存在且 status=active，不自行决定选哪个
+   - selection metadata 缺失、未链接到 model_decision_metadata、或与兼容字段不一致时，必须 fail / downgrade，不得 runtime_e2e pass
+   - handler 不得后验补 selection_reason / selection_confidence，不得二次调用 LLM 创建 metadata，不得从 assistant 自然语言文本中推断 metadata
+   - 验证通过后才加载 body（调用 SkillLoader.load_body()）
+   - 在 structured invocation_proof 中记录 SkillLoader.load_body() 调用（call_id + function_called + call_signature + observed_at）
+   - 返回 payload：selected_skill_id、selection_reason、selection_confidence（均来自 model_decision_metadata）、body_load_decision、allowed_tools_after_selection、no_suitable_skill、available_skills_count
+   - hidden/disabled 排除信息不进入 payload——仅通过 evidence.audit_only_skill_exclusion_evidence 提供（excluded_count、hidden_or_disabled_exclusion_verified、redacted_exclusion_reason_categories）
 
 2. **渐进式披露实现**：
-   - `available_skills` 列表中的 skill 只有 name/description/tags/risk_level
-   - body 在 LLM 通过 tool calling 选择后才由 `SkillLoader` 加载
+   - `available_skill_metadata` 列表中的每个 skill 只有 skill_id/description/tags/risk_level（**无 body，无 status**）
+   - body 在 handler 验证 selected_skill_id 后才由 `SkillLoader.load_body()` 加载
 
 3. **约束检查**：
-   - hidden/disabled skill 不在 available_skills 中
-   - 缺 version/description 的 skill 不在 available_skills 中（已有 `get_load_errors()` 支持）
+   - hidden/disabled skill 不在 available_skill_metadata 中（其名称不在任何 evidence 中暴露，仅通过 audit_only_skill_exclusion_evidence.excluded_count 计数，不进入 payload）
+   - 缺 version/description 的 skill 不在 available_skill_metadata 中（已有 `get_load_errors()` 支持）
+   - selected skill 的 allowed_tools 不得超出 skill descriptor 声明的范围
+   - selected_skill_id / selection_reason / selection_confidence 必须来自 RuntimeActionRequest.payload.model_decision_metadata，handler 只做验证和记录，不得自行决定、后验补、二次调用 LLM 或从文本推断
 
 ### 停止条件
 - S-TEST-1,2,3,4 全部通过
@@ -328,15 +358,19 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 
 ### 步骤
 
-1. **实现 `SubAgentDelegateHandler`**：
+1. **实现 `SubAgentRuntimeActionHandler`**：
    - 接收 subagent.delegate_l0 action
-   - 验证 SubAgent name 在 registry 中存在且 active
+   - **handler 只做验证不做选择**：从 `request.payload.subagent_name`（model tool-call arguments）提取 LLM 指定的 SubAgent name，验证该 SubAgent 存在且 status=active
+   - 检查 SubAgent L0 边界（见下方 allowed/prohibited 列表）
    - 验证 allowed_tools ⊆ SubAgent descriptor allowed_tools
    - 调用 `delegate_once(request, registry)`
    - 执行 parent adjudication
+   - 在 structured invocation_proof 中记录 delegate_once 调用结果和 adjudication 结论（call_id + function_called + call_signature + observed_at）
    - 返回 execution_result + adjudication
 
-2. **嵌套委派防护**：
+2. **SubAgent L0 边界硬性检查**：
+   - **明确允许**：单个 SubAgent L0 确定性执行、descriptor allowed_tools 子集内执行、parent adjudication、仅限 `subagent.delegate_l0` RuntimeAction
+   - **明确禁止**：L1/L2 层级委派、嵌套 delegation、自主规划（autonomous planning）、多智能体协作（multi-agent）、并行委派（parallel delegation）、workspace automation、memory handoff、shell/external process、SubAgent 内使用真实 LLM、绕过 parent adjudication
    - 在 SubAgent 执行上下文中标记 `in_delegation_context=True`
    - 如果已经在 delegation 上下文中，拒绝新的 delegate_l0 请求
 
@@ -426,7 +460,7 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
 1. **重写 E02-E07 scenarios**：
    - 原 `direct_subsystem_invocation` 场景降级为 subsystem integration test（移入 `tests/` 下独立测试文件）
    - 新场景必须通过 `core.chat()` + real LLM 触发
-   - pass 条件基于 RuntimeActionEvent 证据
+   - pass 条件基于 SDD R.6 Runtime E2E 11 项证据链，不得只基于 RuntimeActionEvent
 
 2. **重写 E08 场景**（full combined）：
    - 要求 LLM 在一个对话中触发至少 4 种 RuntimeAction：
@@ -434,12 +468,13 @@ Phase 9 (综合): E08 full combined + E2E dogfood 全量重跑
      - `subagent.delegate_l0`
      - `memory.propose`
      - `tool.request`
-   - pass 条件：至少 3 个 different action_type 的 RuntimeActionEvent 在 action log 中
+   - pass 条件：至少 3 个 different action_type 的 RuntimeActionEvent 在 action log 中，且每个 runtime_e2e event 满足 R.6 11 项证据链（含 target_module_proof.proof_id、linked_action_id、linked_target_module）
    - 不能仅凭 "模型文本提到" 通过
 
 3. **验证 capability matrix**：
-   - 所有同时满足 RuntimeActionEvent + module_invoked=true + structured invocation_proof（含 call_id + function_called）的 capability 标记为 `runtime_e2e`
-   - 有 RuntimeActionEvent 但 module_invoked=false 或 invocation_proof 为 None 的 capability → 最高 `subsystem_integration`
+   - 只有满足 SDD R.6 Runtime E2E 11 项证据链的 capability 才能标记为 `runtime_e2e`
+   - 有 RuntimeActionEvent 但 module_invoked=false、invocation_proof 为 None、target_module_proof 缺失、proof_id 缺失、observation_independent=false、linked_action_id 不匹配或 linked_target_module 不匹配的 capability → 最高 `subsystem_integration`
+   - RuntimeActionEvent + handler_name + target_module + module_invoked=true 但无独立 target_module_proof → 最高 `subsystem_integration`
    - 无 RuntimeActionEvent 但有 subsystem integration 的标记为 `subsystem_integration`
    - 运行 E-TEST-4
 
@@ -472,7 +507,7 @@ agent/runtime_integration/
 ├── tool_gate.py                      # Track T: ToolGateHandler
 ├── streaming_evidence.py             # Track P: StreamingEvidenceCollector
 ├── checkpoint_summary.py             # Track C: CheckpointSafeSummaryHandler
-├── skill_action.py                   # Track S: SkillSelectHandler
+├── skill_action.py                   # Track S: SkillRuntimeActionHandler（handler 只验证 model_decision_metadata）
 ├── subagent_action.py                # Track A: SubAgentDelegateHandler
 └── memory_hook.py                    # Track M: MemoryHookHandler
 
@@ -546,8 +581,9 @@ tests/runtime_integration/
 - Implementation Loop 完成后**不得直接 push**
 - 必须先做 **independent runtime integration implementation audit**
 - Audit 必须验证：
-  - action evidence 完整性（每个 runtime_e2e capability 满足 Action Evidence Contract 全部 6 项）
-  - module invocation 真实性（module_invoked=true 的证据链）
+  - action evidence 完整性（每个 runtime_e2e capability 满足 Action Evidence Contract 全部条件）
+  - module invocation 真实性（R.6 Runtime E2E 11 项证据链：proof_id、observation_independent、linked_action_id、linked_target_module 均完整）
+  - target_module_proof 独立观测（观测源 ≠ handler，非自我填充）
   - E2E dogfood 可信度（pass 条件是否被诚实满足，有无自欺）
   - tool alias 正确性（resolved_tool_name 来自 ToolRegistry）
   - 全局 stop conditions 未被触发

@@ -20,7 +20,7 @@ from agent.runtime_integration import (
     classify_evidence_level,
     is_runtime_e2e_evidence,
 )
-from agent.runtime_integration.evidence import ObservedModuleCall
+from agent.runtime_integration.evidence import ObservedModuleCall, RuntimeActionModuleObserver
 
 
 class _ObservedHandler:
@@ -108,6 +108,41 @@ class _SelfMintingHandler:
         )
 
 
+class _ManualObservedResultHandler:
+    """先通过 observer 拿到真实 proof，再手工拼 RuntimeActionResult。"""
+
+    def handle(self, request, context):  # noqa: ANN001
+        observed = context.observe_module_call(
+            target_module="FakeTargetModule",
+            function_called="FakeTargetModule.run",
+            call_signature="run()",
+            call=lambda: {"ok": True},
+        )
+        evidence = {
+            "action_id": context.action_id,
+            "action_type": "tool.request",
+            "dispatcher_route_id": context.route_id,
+            "dispatcher_result_id": "result:manual",
+            "dispatcher_result_issued": True,
+            "dispatcher_routed": True,
+            "target_handler_invoked": True,
+            "handler_name": type(self).__name__,
+            "target_module": "FakeTargetModule",
+            "module_invoked": True,
+            "invocation_proof": observed.invocation_proof,
+            "target_module_proof": observed.target_module_proof,
+            "result_returned_to_parent_runtime": True,
+            "parent_adjudicated": None,
+        }
+        return RuntimeActionResult(
+            action_type=request.action_type,
+            action_id=context.action_id,
+            status="success",
+            payload={"ok": True},
+            evidence=evidence,
+        )
+
+
 def _request(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUEST) -> RuntimeActionRequest:
     return RuntimeActionRequest(
         action_type=action_type,
@@ -116,6 +151,15 @@ def _request(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUE
         payload={"tool_name": "read_file", "tool_args": {}, "risk_reason": "test"},
         constraints={"no_network"},
     )
+
+
+def _valid_runtime_e2e_evidence(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUEST) -> dict:
+    registry = ActionHandlerRegistry()
+    registry.register(action_type, _ObservedHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+    result = dispatcher.route(_request(action_type))
+    assert result.evidence["evidence_level"] == "runtime_e2e"
+    return dict(result.evidence)
 
 
 def test_request_result_and_event_are_frozen() -> None:
@@ -182,9 +226,14 @@ def test_dispatcher_routes_and_emits_receipt_event_with_independent_proof() -> N
     proof = result.evidence["target_module_proof"]
     assert proof["proof_id"]
     assert proof["observation_independent"] is True
+    assert proof["linked_route_id"] == result.evidence["dispatcher_route_id"]
     assert proof["linked_action_id"] == result.action_id
+    assert proof["linked_action_type"] == result.evidence["action_type"]
+    assert proof["linked_handler_name"] == result.evidence["handler_name"]
     assert proof["linked_target_module"] == result.evidence["target_module"]
     assert proof["observer_identity"] != result.evidence["handler_name"]
+    assert result.evidence["dispatcher_result_issued"] is True
+    assert result.evidence["dispatcher_result_id"].startswith("result:")
 
     assert len(dispatcher.action_log) == 1
     event = dispatcher.action_log[0]
@@ -205,6 +254,108 @@ def test_runtime_action_event_only_is_not_runtime_e2e() -> None:
     assert result.evidence["module_invoked"] is False
     assert result.evidence["target_module_proof"] is None
     assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_manual_result_with_registered_proof_is_not_runtime_e2e() -> None:
+    """真实 observer proof 也不能让手工 RuntimeActionResult 变成 runtime_e2e。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _ManualObservedResultHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["target_module_proof"] is None
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert result.evidence["runtime_e2e_disqualified_reason"] == "handler returned unissued RuntimeActionResult"
+
+
+def test_observer_registered_proof_without_dispatcher_route_is_rejected() -> None:
+    """observer 直接登记 proof 但没有 dispatcher route registry，仍不能通过。"""
+
+    observer = RuntimeActionModuleObserver()
+    observed = observer.observe(
+        route_id="route-outside-dispatcher",
+        action_id="act-outside-dispatcher",
+        action_type="tool.request",
+        handler_name="OutsideHandler",
+        target_module="FakeTargetModule",
+        function_called="FakeTargetModule.run",
+        call_signature="run()",
+        call=lambda: {"ok": True},
+    )
+    evidence = _shaped_runtime_evidence(
+        action_id="act-outside-dispatcher",
+        proof_id=observed.target_module_proof["proof_id"],
+        call_id=observed.invocation_proof["call_id"],
+    )
+    evidence.update({
+        "dispatcher_route_id": "route-outside-dispatcher",
+        "dispatcher_result_id": "result-outside-dispatcher",
+        "dispatcher_result_issued": True,
+        "handler_name": "OutsideHandler",
+        "invocation_proof": observed.invocation_proof,
+        "target_module_proof": observed.target_module_proof,
+    })
+
+    assert not is_runtime_e2e_evidence(evidence)
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_registered_proof_reused_with_different_route_is_rejected() -> None:
+    evidence = _valid_runtime_e2e_evidence()
+    other = _valid_runtime_e2e_evidence()
+    evidence["dispatcher_route_id"] = other["dispatcher_route_id"]
+    evidence["dispatcher_result_id"] = other["dispatcher_result_id"]
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_registered_proof_reused_with_different_action_type_is_rejected() -> None:
+    evidence = _valid_runtime_e2e_evidence()
+    evidence["action_type"] = "tool.gate"
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_registered_proof_reused_with_different_handler_is_rejected() -> None:
+    evidence = _valid_runtime_e2e_evidence()
+    evidence["handler_name"] = "OtherHandler"
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_registered_proof_reused_with_different_target_module_is_rejected() -> None:
+    evidence = _valid_runtime_e2e_evidence()
+    evidence["target_module"] = "OtherTargetModule"
+
+    assert classify_evidence_level(evidence) == "subsystem_integration"
+
+
+def test_handler_cannot_supply_or_override_route_id() -> None:
+    """route_id 是 dispatcher-owned provenance，handler 不能通过 evidence_extra 注入。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_REQUEST,
+        _ForgedEvidenceUpdateHandler({"dispatcher_route_id": "route-forged"}),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_runtime_e2e_requires_dispatcher_owned_route_provenance() -> None:
+    evidence = _valid_runtime_e2e_evidence()
+    evidence.pop("dispatcher_route_id")
+
+    assert not is_runtime_e2e_evidence(evidence)
+    assert classify_evidence_level(evidence) == "subsystem_integration"
 
 
 def test_handler_self_asserted_target_module_proof_is_rejected() -> None:
@@ -275,9 +426,9 @@ def test_handler_cannot_self_mint_runtime_e2e() -> None:
 
     result = dispatcher.route(_request())
 
-    assert result.status == "success"
-    assert result.evidence["module_invoked"] is True
-    assert result.evidence["target_module_proof"]["proof_id"] == "proof-shaped"
+    assert result.status == "failed"
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["target_module_proof"] is None
     assert result.evidence["evidence_level"] != "runtime_e2e"
 
 

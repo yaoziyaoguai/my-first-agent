@@ -2144,14 +2144,18 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
         for r in results:
             for event in r.get("runtime_action_events", []) or []:
                 target_module = event.get("target_module")
-                if target_module in aliases and is_runtime_e2e_evidence(event):
+                if (
+                    target_module in aliases
+                    and is_runtime_e2e_evidence(event)
+                    and _event_satisfies_capability_contract(capability_key, event)
+                ):
                     best_mode = "runtime_action_invoked"
                     best_event = event
                     best_level = "runtime_e2e"
                     break
                 if target_module in aliases and best_event is None:
                     best_event = event
-                    best_level = classify_evidence_level(event)
+                    best_level = _capability_scoped_evidence_level(capability_key, event)
                     best_mode = "runtime_action_invoked"
             if best_level == "runtime_e2e":
                 break
@@ -2210,12 +2214,57 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
             "parent_adjudicated": (best_event or {}).get("parent_adjudicated"),
             "decision": (best_event or {}).get("decision", ""),
             "status": (best_event or {}).get("status", ""),
+            "capability_type": (best_event or {}).get("capability_type", ""),
+            "production_capability": (best_event or {}).get("production_capability", ""),
             "evidence": evidence,
             "gap": gap,
             "severity": severity,
         })
 
     return matrix
+
+
+def _event_satisfies_capability_contract(capability_key: str, event: dict[str, Any]) -> bool:
+    """按 capability row 复核 evidence contract。
+
+    中文学习边界：registered target_module_proof 只证明某个 target module 在
+    RuntimeAction route 内被观测；它不能替代 row-specific 语义。fake overlay 的
+    blocked path 是 dogfood-only，不能因为有 proof 就升级 production ToolRegistry。
+    """
+
+    if capability_key == "tool_registry":
+        requested_tool = str(event.get("requested_tool_name") or "")
+        return (
+            event.get("capability_type") == "production_tool_registry"
+            and event.get("production_capability") is True
+            and event.get("target_module") == "ToolRegistry"
+            and event.get("production_registry_found") is True
+            and event.get("dogfood_overlay_found") in (False, None)
+            and not requested_tool.startswith("fake.")
+            and event.get("decision") != "blocked"
+        )
+    if capability_key == "dogfood_fake_overlay":
+        requested_tool = str(event.get("requested_tool_name") or "")
+        return (
+            event.get("capability_type") == "dogfood_fake_overlay_blocked_path"
+            and event.get("production_capability") is False
+            and event.get("target_module") == "DogfoodFakeToolOverlay"
+            and requested_tool.startswith("fake.")
+            and event.get("production_registry_found") is False
+            and event.get("dogfood_overlay_found") is True
+            and bool(event.get("overlay_tool_name"))
+            and bool(event.get("resolved_test_tool_name"))
+            and event.get("dangerous_tool_function_invoked") is False
+            and event.get("decision") == "blocked"
+        )
+    return True
+
+
+def _capability_scoped_evidence_level(capability_key: str, event: dict[str, Any]) -> str:
+    level = classify_evidence_level(event)
+    if level == "runtime_e2e" and not _event_satisfies_capability_contract(capability_key, event):
+        return "subsystem_integration"
+    return level
 
 
 def _redteam_findings(results: list[dict[str, Any]]) -> dict[str, list[str]]:

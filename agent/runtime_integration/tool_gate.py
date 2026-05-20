@@ -131,6 +131,8 @@ class ToolGateHandler:
                 **result_payload,
                 "requested_tool_name": tool_name,
                 "requested_capability": requested_capability,
+                "capability_type": "production_tool_registry",
+                "production_capability": True,
                 "resolved_tool_name": tool_name if entry is not None else None,
                 "production_registry_found": production_registry_found,
                 "dogfood_overlay_found": False,
@@ -162,6 +164,8 @@ class ToolGateHandler:
                 evidence_extra={
                     "requested_tool_name": tool_name,
                     "requested_capability": requested_capability,
+                    "capability_type": "dogfood_fake_overlay_blocked_path",
+                    "production_capability": False,
                     "production_registry_found": True,
                     "dogfood_overlay_found": overlay_tool is not None,
                     "decision": "failed",
@@ -184,6 +188,8 @@ class ToolGateHandler:
                 evidence_extra={
                     "requested_tool_name": tool_name,
                     "requested_capability": requested_capability,
+                    "capability_type": "dogfood_fake_overlay_blocked_path",
+                    "production_capability": False,
                     "production_registry_found": False,
                     "dogfood_overlay_found": False,
                     "decision": "failed",
@@ -202,6 +208,8 @@ class ToolGateHandler:
         evidence_extra = {
             "requested_tool_name": tool_name,
             "requested_capability": requested_capability or overlay_tool.requested_capability,
+            "capability_type": "dogfood_fake_overlay_blocked_path",
+            "production_capability": False,
             "production_registry_found": False,
             "dogfood_overlay_found": True,
             "overlay_tool_name": overlay_result["overlay_tool_name"],

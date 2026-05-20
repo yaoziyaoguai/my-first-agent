@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Protocol
+from uuid import uuid4
 
 from agent.runtime_integration.evidence import (
     ObservedModuleCall,
@@ -37,6 +38,9 @@ HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
     "handler_invoked",
     "target_handler_invoked",
     "result_returned_to_parent_runtime",
+    "dispatcher_route_id",
+    "dispatcher_result_id",
+    "dispatcher_result_issued",
 })
 
 
@@ -71,14 +75,17 @@ class ActionHandlerRegistry:
 class RuntimeActionContext:
     """单次 RuntimeAction 的执行上下文。
 
-    context 只活在 dispatcher.route() 调用内，负责 action_id、observer 和标准
-    result/evidence 构造；它不持久化 Runtime state。
+    context 只活在 dispatcher.route() 调用内，负责 action_id、route provenance、
+    observer 和标准 result/evidence 构造；它不持久化 Runtime state。
     """
 
     action_id: str
     action_type: RuntimeActionType | str
+    route_id: str
+    handler_name: str
     parent_trace_id: str
     observer: RuntimeActionModuleObserver
+    _issued_result_ids: set[int] = field(default_factory=set, init=False, repr=False)
 
     def observe_module_call(
         self,
@@ -89,7 +96,10 @@ class RuntimeActionContext:
         call,
     ) -> ObservedModuleCall:
         return self.observer.observe(
+            route_id=self.route_id,
             action_id=self.action_id,
+            action_type=action_type_value(self.action_type),
+            handler_name=self.handler_name,
             target_module=target_module,
             function_called=function_called,
             call_signature=call_signature,
@@ -109,9 +119,20 @@ class RuntimeActionContext:
         parent_adjudicated: bool | None = None,
     ) -> RuntimeActionResult:
         module_invoked = observed_call is not None
+        result_id = f"result:{uuid4().hex}"
+        RuntimeActionModuleObserver.register_dispatch_result(
+            route_id=self.route_id,
+            result_id=result_id,
+            action_id=self.action_id,
+            action_type=action_type_value(self.action_type),
+            handler_name=self.handler_name,
+        )
         evidence: dict[str, Any] = {
             "action_id": self.action_id,
             "action_type": action_type_value(self.action_type),
+            "dispatcher_route_id": self.route_id,
+            "dispatcher_result_id": result_id,
+            "dispatcher_result_issued": True,
             "dispatcher_routed": True,
             "target_handler_invoked": True,
             "handler_name": handler_name,
@@ -122,6 +143,8 @@ class RuntimeActionContext:
             "result_returned_to_parent_runtime": False,
             "parent_adjudicated": parent_adjudicated,
         }
+        if handler_name != self.handler_name:
+            raise ValueError("handler_name does not match dispatcher route provenance")
         if evidence_extra:
             overlap = HANDLER_EVIDENCE_RESERVED_FIELDS & set(evidence_extra)
             if overlap:
@@ -132,7 +155,7 @@ class RuntimeActionContext:
                 raise ValueError(f"handler evidence_update contains reserved field: {names}")
             evidence.update(evidence_extra)
         evidence["evidence_level"] = classify_evidence_level(evidence)
-        return RuntimeActionResult(
+        result = RuntimeActionResult(
             action_type=self.action_type,
             action_id=self.action_id,
             status=status,
@@ -140,6 +163,11 @@ class RuntimeActionContext:
             evidence=evidence,
             error_safe_preview=error_safe_preview,
         )
+        self._issued_result_ids.add(id(result))
+        return result
+
+    def issued_result(self, result: RuntimeActionResult) -> bool:
+        return id(result) in self._issued_result_ids
 
     def success(self, **kwargs: Any) -> RuntimeActionResult:
         return self.result(status="success", **kwargs)
@@ -178,13 +206,23 @@ class RuntimeActionDispatcher:
     def route(self, request: RuntimeActionRequest) -> RuntimeActionResult:
         started = monotonic()
         action_id = new_action_id()
+        route_id = f"route:{uuid4().hex}"
+        handler = self._registry.get(request.action_type)
+        handler_name = type(handler).__name__ if handler is not None else ""
+        RuntimeActionModuleObserver.register_dispatch_route(
+            route_id=route_id,
+            action_id=action_id,
+            action_type=action_type_value(request.action_type),
+            handler_name=handler_name,
+        )
         context = RuntimeActionContext(
             action_id=action_id,
             action_type=request.action_type,
+            route_id=route_id,
+            handler_name=handler_name,
             parent_trace_id=request.parent_trace_id,
             observer=self._observer,
         )
-        handler = self._registry.get(request.action_type)
         if handler is None:
             result = self._unsupported_result(request, context)
         else:
@@ -221,6 +259,9 @@ class RuntimeActionDispatcher:
         evidence = {
             "action_id": context.action_id,
             "action_type": action_type_value(request.action_type),
+            "dispatcher_route_id": context.route_id,
+            "dispatcher_result_id": "",
+            "dispatcher_result_issued": False,
             "dispatcher_routed": True,
             "target_handler_invoked": False,
             "handler_name": "",
@@ -251,7 +292,7 @@ class RuntimeActionDispatcher:
     ) -> RuntimeActionResult:
         if result.action_id != context.action_id or result.evidence.get("action_id") != context.action_id:
             result = context.failed(
-                handler_name=str(result.evidence.get("handler_name") or "unknown"),
+                handler_name=context.handler_name or "unknown",
                 target_module=str(result.evidence.get("target_module") or "unknown"),
                 payload={"error": "handler returned mismatched action_id"},
                 observed_call=None,
@@ -261,9 +302,25 @@ class RuntimeActionDispatcher:
                 },
                 error_safe_preview="handler returned mismatched action_id",
             )
+        elif result.status != "not_supported" and not context.issued_result(result):
+            # 中文学习注释：manual RuntimeActionResult 可能携带一个真实 observer
+            # proof，但它没有经过 context.result() 发行；没有 dispatcher-owned
+            # result provenance 就不能成为 runtime_e2e。
+            result = context.failed(
+                handler_name=context.handler_name or "unknown",
+                target_module=str(result.evidence.get("target_module") or "unknown"),
+                payload={"error": "handler returned unissued RuntimeActionResult"},
+                observed_call=None,
+                evidence_extra={
+                    "error_type": "RuntimeActionUnissuedResult",
+                    "runtime_e2e_disqualified_reason": "handler returned unissued RuntimeActionResult",
+                },
+                error_safe_preview="handler returned unissued RuntimeActionResult",
+            )
         evidence = dict(result.evidence)
         evidence["action_id"] = context.action_id
         evidence["action_type"] = action_type_value(request.action_type)
+        evidence["dispatcher_route_id"] = context.route_id
         evidence["dispatcher_routed"] = True
         evidence["result_returned_to_parent_runtime"] = True
         evidence["evidence_level"] = classify_evidence_level(evidence)

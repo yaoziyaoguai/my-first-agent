@@ -39,12 +39,49 @@ class RuntimeActionModuleObserver:
     """
 
     observer_identity = "RuntimeActionModuleObserver"
+    _route_registry: ClassVar[dict[str, dict[str, Any]]] = {}
+    _result_registry: ClassVar[dict[str, dict[str, Any]]] = {}
     _proof_registry: ClassVar[dict[str, dict[str, Any]]] = {}
+
+    @classmethod
+    def register_dispatch_route(
+        cls,
+        *,
+        route_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+    ) -> None:
+        cls._route_registry[route_id] = {
+            "action_id": action_id,
+            "action_type": action_type,
+            "handler_name": handler_name,
+        }
+
+    @classmethod
+    def register_dispatch_result(
+        cls,
+        *,
+        route_id: str,
+        result_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+    ) -> None:
+        cls._result_registry[result_id] = {
+            "route_id": route_id,
+            "action_id": action_id,
+            "action_type": action_type,
+            "handler_name": handler_name,
+        }
 
     def observe(
         self,
         *,
+        route_id: str,
         action_id: str,
+        action_type: str,
+        handler_name: str,
         target_module: str,
         function_called: str,
         call_signature: str,
@@ -66,15 +103,22 @@ class RuntimeActionModuleObserver:
             "observation_source": "module_spy",
             "observer_identity": self.observer_identity,
             "observation_independent": True,
+            "linked_route_id": route_id,
             "linked_action_id": action_id,
+            "linked_action_type": action_type,
+            "linked_handler_name": handler_name,
             "linked_target_module": target_module,
             "linked_call_id": call_id,
         }
-        # 中文学习注释：字段形状正确不等于证据可信。proof_id 必须由 observer 在
-        # 执行目标 callable 后登记，classifier 只接受登记表中 action/module/call
-        # 都一致的 proof，避免 handler 用普通 dict 自造 runtime_e2e。
+        # 中文学习注释：observer-owned proof 只能证明“目标 callable 被看见”。
+        # runtime_e2e 还必须证明这次调用属于 dispatcher 管理的同一条 route；
+        # 因此 proof 同时绑定 route/action_type/handler/target/call，禁止跨 route
+        # 或跨 handler 复用一个真实 proof 来伪造端到端。
         self._proof_registry[proof_id] = {
+            "route_id": route_id,
             "action_id": action_id,
+            "action_type": action_type,
+            "handler_name": handler_name,
             "target_module": target_module,
             "call_id": call_id,
             "observer_identity": self.observer_identity,
@@ -93,16 +137,36 @@ class RuntimeActionModuleObserver:
         *,
         proof: Mapping[str, Any],
         invocation_proof: Mapping[str, Any],
+        route_id: str,
         action_id: str,
+        action_type: str,
+        handler_name: str,
         target_module: str,
+        result_id: str,
     ) -> bool:
         proof_id = str(proof.get("proof_id") or "")
         registered = cls._proof_registry.get(proof_id)
         if not registered:
             return False
+        route = cls._route_registry.get(route_id)
+        if not route:
+            return False
+        result = cls._result_registry.get(result_id)
+        if not result:
+            return False
         call_id = invocation_proof.get("call_id")
         return (
-            registered.get("action_id") == action_id
+            route.get("action_id") == action_id
+            and route.get("action_type") == action_type
+            and route.get("handler_name") == handler_name
+            and result.get("route_id") == route_id
+            and result.get("action_id") == action_id
+            and result.get("action_type") == action_type
+            and result.get("handler_name") == handler_name
+            and registered.get("route_id") == route_id
+            and registered.get("action_id") == action_id
+            and registered.get("action_type") == action_type
+            and registered.get("handler_name") == handler_name
             and registered.get("target_module") == target_module
             and registered.get("call_id") == call_id
             and registered.get("observer_identity") == proof.get("observer_identity")
@@ -121,8 +185,14 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     if evidence.get("runtime_e2e_disqualified_reason"):
         return False
     action_id = evidence.get("action_id")
+    action_type = str(evidence.get("action_type") or "")
+    handler_name = str(evidence.get("handler_name") or "")
+    route_id = str(evidence.get("dispatcher_route_id") or "")
+    result_id = str(evidence.get("dispatcher_result_id") or "")
     target_module = evidence.get("target_module")
-    if not action_id or not target_module:
+    if not action_id or not action_type or not handler_name or not route_id or not result_id or not target_module:
+        return False
+    if evidence.get("dispatcher_result_issued") is not True:
         return False
     required_true = (
         "dispatcher_routed",
@@ -149,7 +219,13 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
         return False
     if proof.get("observation_independent") is not True:
         return False
+    if proof.get("linked_route_id") != route_id:
+        return False
     if proof.get("linked_action_id") != action_id:
+        return False
+    if proof.get("linked_action_type") != action_type:
+        return False
+    if proof.get("linked_handler_name") != handler_name:
         return False
     if proof.get("linked_target_module") != target_module:
         return False
@@ -162,12 +238,15 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     if not RuntimeActionModuleObserver.is_registered_proof(
         proof=proof,
         invocation_proof=invocation_proof,
+        route_id=route_id,
         action_id=str(action_id),
+        action_type=action_type,
+        handler_name=handler_name,
         target_module=str(target_module),
+        result_id=result_id,
     ):
         return False
 
-    action_type = str(evidence.get("action_type") or "")
     if action_type == "checkpoint.safe_summary" or target_module == "CheckpointSafeSummary":
         if evidence.get("checkpoint_boundary") != "turn_end_before_save_checkpoint":
             return False

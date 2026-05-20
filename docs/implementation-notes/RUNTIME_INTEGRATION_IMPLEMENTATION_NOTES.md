@@ -268,3 +268,103 @@
 - `.venv/bin/python -m pytest tests/runtime_integration -q`：`51 passed`。
 - `HOME=/private/tmp/my-first-agent-audit-home .venv/bin/python -m pytest -q`：
   `2824 passed, 14 skipped`。
+
+## Phase 8 - dispatcher route provenance hardening
+
+### 本轮起始状态
+
+- 起始 HEAD：`0b6410c fix(runtime): harden runtime action proof integrity`
+- 分支：`main`
+- 工作区：clean
+- tag：`HEAD` 无 tag
+- push 状态：`origin/main...HEAD = 0 11`，本地 ahead 11，未 push
+
+### P1 manual result / observer-fed proof forgery
+
+- 上一轮 observer proof registry 只能证明 proof 由 observer 生成，但不能证明 proof
+  属于某一次 dispatcher route，也不能证明 handler 返回的 `RuntimeActionResult`
+  是由 `RuntimeActionContext.result()` 发行。
+- 本轮新增 dispatcher-owned route provenance：
+  - dispatcher 每次 `route()` 创建 `dispatcher_route_id`；
+  - route registry 绑定 `route_id / action_id / action_type / handler_name`；
+  - observer proof 绑定 `linked_route_id / linked_action_id / linked_action_type /
+    linked_handler_name / linked_target_module / linked_call_id`；
+  - `context.result()` 发行 `dispatcher_result_id`，并登记 result registry；
+  - dispatcher 收口时检查返回对象必须是当前 context 发行过的 result object。
+- classifier 现在要求 `dispatcher_route_id`、`dispatcher_result_id`、
+  `dispatcher_result_issued=true`，且 proof registry、route registry、result registry
+  三者全部匹配。缺 route、route mismatch、action_type mismatch、handler mismatch、
+  target mismatch、call mismatch、result 未发行都会 fail closed。
+- manual `RuntimeActionResult` 即使携带真实 observer proof，也不能 runtime_e2e，因为它没有
+  dispatcher-issued result provenance，dispatcher 会把它降级为 failed，并记录
+  `handler returned unissued RuntimeActionResult`。
+
+### P2 capability matrix row contract
+
+- capability matrix 现在不再只看 `is_runtime_e2e_evidence(event)`。
+- production `ToolRegistry gate` row 额外要求：
+  - `capability_type=production_tool_registry`
+  - `production_capability=true`
+  - `target_module=ToolRegistry`
+  - `production_registry_found=true`
+  - `dogfood_overlay_found=false` 或 absent
+  - `requested_tool_name` 不以 `fake.` 开头
+  - `decision` 不是 fake overlay blocked path
+- dogfood fake overlay row 额外要求：
+  - `capability_type=dogfood_fake_overlay_blocked_path`
+  - `production_capability=false`
+  - `target_module=DogfoodFakeToolOverlay`
+  - `requested_tool_name` 以 `fake.` 开头
+  - `production_registry_found=false`
+  - `dogfood_overlay_found=true`
+  - `overlay_tool_name` 与 `resolved_test_tool_name` 存在
+  - `dangerous_tool_function_invoked=false`
+  - `decision=blocked`
+- registered proof alone cannot pass row：如果 row-specific contract 不满足，matrix 会把
+  runtime proof 降级为 `subsystem_integration`，不能 overclaim `runtime_e2e`。
+
+### 新增 red-team tests
+
+- Evidence / proof：
+  - `test_manual_result_with_registered_proof_is_not_runtime_e2e`
+  - `test_observer_registered_proof_without_dispatcher_route_is_rejected`
+  - `test_registered_proof_reused_with_different_route_is_rejected`
+  - `test_registered_proof_reused_with_different_action_type_is_rejected`
+  - `test_registered_proof_reused_with_different_handler_is_rejected`
+  - `test_registered_proof_reused_with_different_target_module_is_rejected`
+  - `test_handler_cannot_supply_or_override_route_id`
+  - `test_runtime_e2e_requires_dispatcher_owned_route_provenance`
+- Capability matrix：
+  - `test_fake_overlay_matrix_row_requires_production_registry_found_false`
+  - `test_fake_overlay_matrix_row_requires_dogfood_overlay_found_true`
+  - `test_fake_overlay_matrix_row_requires_decision_blocked`
+  - `test_fake_overlay_matrix_row_rejects_confirmation_required`
+  - `test_fake_overlay_matrix_row_rejects_production_capability_true`
+  - `test_production_tool_registry_row_rejects_fake_tool_name`
+  - `test_production_tool_registry_row_rejects_dogfood_overlay_source`
+  - `test_matrix_does_not_pass_fake_row_solely_due_to_registered_proof`
+
+### P3 architecture island status
+
+- `runtime_integration` 仍 honestly deferred as harness foundation。
+- 本轮只修 proof integrity 和 capability matrix contract，没有强接 `core.chat()` /
+  `loop.py`。
+- 原因不变：真实 core loop 接入会触达 provider/model/tool/checkpoint/memory runtime 边界，
+  当前任务仍禁止真实 LLM、外部 API、shell-like tool、checkpoint schema 改动、Memory governance
+  改动和 ToolRegistry authority 改动。强行接入会扩大 scope 并造成 full-runtime overclaim。
+- 当前不能声称 full runtime solved。
+
+### Stop conditions
+
+- 本轮未触发 stop condition。
+- 未读取 `.env`、`agent_log.jsonl`、真实 sessions/runs、`memory/episodes/*.jsonl`。
+- 未调用真实 LLM、真实外部 API、真实 shell-like tool。
+- 未 push，未 tag。
+
+### Phase 8 verification
+
+- `git diff --check`：通过。
+- `.venv/bin/ruff check agent tests scripts`：通过。
+- `.venv/bin/python -m pytest tests/runtime_integration -q`：`67 passed`。
+- `HOME=/private/tmp/my-first-agent-audit-home .venv/bin/python -m pytest -q`：
+  `2840 passed, 14 skipped`。

@@ -17,6 +17,7 @@ import json
 import shutil
 import sys
 import time
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,7 @@ E2E_SCENARIOS: tuple[E2EScenario, ...] = (
 # ── Helper: safe string sanitization ──────────────────────────────────────────
 
 import re as _re  # noqa: E402
+from agent.runtime_integration.evidence import classify_evidence_level, is_runtime_e2e_evidence  # noqa: E402
 
 _SECRET_PATTERNS = (
     _re.compile(r"sk-[A-Za-z0-9_-]{8,}"),
@@ -285,6 +287,29 @@ def _run_preflight() -> dict[str, Any]:
         "provider_config": provider_config,
         "provider": provider,
         "provider_error": provider_error,
+    }
+
+
+def _synthetic_preflight() -> dict[str, Any]:
+    """synthetic mode 不读取 .env，只返回脱敏的 provider-unavailable preflight。"""
+
+    return {
+        "preflight": {
+            "preflight_status": "not_configured",
+            "key_source_kind": "not_checked",
+            "provider_name": "N/A",
+            "provider_type": "N/A",
+            "model": "N/A",
+            "base_url": "N/A",
+            "project_dotenv_loaded": False,
+            "shell_env_conflict_detected": False,
+            "shell_env_fallback_used": False,
+            "auth_status": "not_checked",
+            "synthetic_mode_no_env_read": True,
+        },
+        "provider_config": None,
+        "provider": None,
+        "provider_error": None,
     }
 
 
@@ -1446,19 +1471,536 @@ def _invoke_chat_e2e(
             te.execute_tool_call = _orig_tool_exec
 
 
+# ── RuntimeAction dogfood path ────────────────────────────────────────────────
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, MappingABC):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _runtime_action_event(result: Any) -> dict[str, Any]:
+    event = _json_safe(dict(result.evidence))
+    event["status"] = result.status
+    return event
+
+
+def _runtime_action_dispatcher(ws: dict[str, Any]):
+    from agent.runtime_integration import (
+        ActionHandlerRegistry,
+        RuntimeActionDispatcher,
+        RuntimeActionType,
+    )
+    from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
+    from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
+    from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+    from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
+    from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
+    from agent.runtime_integration.tool_gate import DogfoodOverlayTool, ToolGateHandler
+
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.SKILL_SELECT,
+        SkillRuntimeActionHandler.from_roots(
+            [Path(ws["skill_root"])],
+            visible_tool_names={"read_file", "grep"},
+        ),
+    )
+    tool_handler = ToolGateHandler(
+        dogfood_overlay={
+            "fake.write_file": DogfoodOverlayTool(
+                name="fake.write_file",
+                requested_capability="file_write",
+            ),
+            "fake.shell": DogfoodOverlayTool(
+                name="fake.shell",
+                requested_capability="shell_execution",
+            ),
+        }
+    )
+    for action_type in (
+        RuntimeActionType.TOOL_REQUEST,
+        RuntimeActionType.TOOL_GATE,
+        RuntimeActionType.TOOL_INVOKE,
+    ):
+        registry.register(action_type, tool_handler)
+    registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
+    registry.register(RuntimeActionType.MEMORY_PROPOSE, MemoryTurnEndProposalHandler())
+    registry.register(RuntimeActionType.CHECKPOINT_SAFE_SUMMARY, CheckpointSafeSummaryHandler())
+    registry.register(RuntimeActionType.STREAMING_PROVIDER_CALL, StreamingProviderCallHandler())
+    registry.register(RuntimeActionType.STREAMING_EVENT, StreamingProviderCallHandler())
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        SubAgentDelegateL0Handler.from_roots([Path(ws["subagent_root"])]),
+    )
+    return RuntimeActionDispatcher(registry)
+
+
+def _route_runtime_action(
+    dispatcher: Any,
+    *,
+    action_type: Any,
+    source: str,
+    parent_trace_id: str,
+    payload: dict[str, Any],
+    constraints: set[str] | frozenset[str] | None = None,
+):
+    from agent.runtime_integration import RuntimeActionRequest
+
+    return dispatcher.route(RuntimeActionRequest(
+        action_type=action_type,
+        source=source,
+        parent_trace_id=parent_trace_id,
+        payload=payload,
+        constraints=constraints or frozenset(),
+    ))
+
+
+def _model_visible_skill_metadata(skill_root: Path) -> list[dict[str, Any]]:
+    from agent.skill_system.registry import SkillRegistry
+
+    registry = SkillRegistry(roots=[skill_root])
+    metadata: list[dict[str, Any]] = []
+    for descriptor in registry.list_visible():
+        metadata.append({
+            "skill_id": descriptor.name,
+            "description": descriptor.description,
+            "tags": list(descriptor.tags),
+            "risk_level": descriptor.risk_level,
+        })
+    return metadata
+
+
+def _runtime_action_scenario_result(
+    *,
+    scenario_id: str,
+    expected_results: list[Any],
+    systems_actually_invoked: list[str],
+    runtime_path_used: str,
+    evidence_prefix: str,
+    allow_non_runtime_results: bool = False,
+    systems_not_covered: list[str] | None = None,
+    expected_statuses: set[str] | None = None,
+) -> dict[str, Any]:
+    events = [_runtime_action_event(result) for result in expected_results]
+    runtime_e2e_count = sum(1 for event in events if is_runtime_e2e_evidence(event))
+    expected_statuses = expected_statuses or {"success"}
+    statuses_ok = all(result.status in expected_statuses for result in expected_results)
+    any_failed = any(result.status == "failed" for result in expected_results)
+    runtime_ok = runtime_e2e_count == len(events) if not allow_non_runtime_results else runtime_e2e_count > 0
+
+    if any_failed:
+        status = "fail"
+        severity = "P1"
+    elif statuses_ok and runtime_ok:
+        status = "pass"
+        severity = "none"
+    else:
+        status = "partial"
+        severity = "P2"
+
+    issues: list[str] = []
+    if not statuses_ok:
+        issues.append("P2: runtime action returned unexpected status")
+    if not runtime_ok:
+        issues.append("P2: runtime action evidence missing complete target_module_proof")
+
+    return {
+        "scenario_id": scenario_id,
+        "status": status,
+        "real_api_used": False,
+        "runtime_path_used": runtime_path_used,
+        "systems_actually_invoked": systems_actually_invoked,
+        "systems_simulated": [],
+        "systems_not_covered": systems_not_covered or [],
+        "runtime_action_events": events,
+        "evidence": (
+            f"{evidence_prefix}; runtime_e2e_actions={runtime_e2e_count}/{len(events)}; "
+            f"statuses={[result.status for result in expected_results]}"
+        ),
+        "quality_score": 0.95 if status == "pass" else 0.55,
+        "violations": [],
+        "issues_found": issues,
+        "severity": severity,
+    }
+
+
+def _run_e02_skill_selection_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    available_metadata = _model_visible_skill_metadata(Path(ws["skill_root"]))
+    result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.SKILL_SELECT,
+        source="llm_tool_call",
+        parent_trace_id="dogfood-e02",
+        payload={
+            "task_summary": "audit this project for security compliance with RFC-422",
+            "available_skill_metadata": available_metadata,
+            "model_decision_metadata": {
+                "selected_skill_id": "security-audit",
+                "selection_reason": "The task asks for security audit evidence.",
+                "selection_confidence": "high",
+            },
+            "selected_skill_id": "security-audit",
+        },
+        constraints={"no_network", "no_shell"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E02_skill_selection",
+        expected_results=[result],
+        systems_actually_invoked=["SkillLoader"],
+        runtime_path_used="RuntimeActionDispatcher→SkillRuntimeActionHandler→SkillLoader",
+        evidence_prefix="skill.select used model decision metadata and loaded body after selection",
+    )
+
+
+def _run_e03_subagent_l0_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        source="llm_tool_call",
+        parent_trace_id="dogfood-e03",
+        payload={
+            "subagent_name": "code-reviewer",
+            "delegation_goal": "Review code quality of synthetic project",
+            "context_package_summary": "bounded synthetic context",
+            "allowed_tools": ["read_file"],
+            "budget": {"max_iterations": 1},
+            "parent_adjudication_required": True,
+        },
+        constraints={"no_nested_delegation", "no_shell", "no_external_process"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E03_subagent_l0",
+        expected_results=[result],
+        systems_actually_invoked=["SubAgentExecutor"],
+        runtime_path_used="RuntimeActionDispatcher→SubAgentDelegateL0Handler→delegate_once",
+        evidence_prefix="subagent.delegate_l0 built SubAgentRequest and returned parent adjudication",
+    )
+
+
+def _run_e04_memory_proposal_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+        source="runtime_policy",
+        parent_trace_id="dogfood-e04",
+        payload={
+            "user_message": "记住：我偏好用简体中文解释实现细节",
+            "assistant_response": "好的，我会在用户可见说明中使用简体中文。",
+            "task_context_summary": "runtime integration synthetic dogfood",
+            "prior_confirmed_memory_snapshot": {"preferences": []},
+        },
+        constraints={"no_auto_approve", "no_real_episodes_read"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E04_memory_proposal",
+        expected_results=[result],
+        systems_actually_invoked=["MemoryPolicy"],
+        runtime_path_used="RuntimeActionDispatcher→MemoryTurnEndProposalHandler→MemoryPolicy",
+        evidence_prefix="turn-end memory proposal hook produced pending_review without confirmed write",
+    )
+
+
+def _run_e05_tool_registry_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.TOOL_REQUEST,
+        source="llm_tool_call",
+        parent_trace_id="dogfood-e05",
+        payload={
+            "tool_name": "fake.write_file",
+            "tool_args": {"path": "synthetic.txt", "content": "blocked"},
+            "requested_capability": "file_write",
+            "risk_reason": "dogfood high-risk blocked path",
+        },
+        constraints={"no_write", "no_shell", "no_external_process"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E05_tool_registry",
+        expected_results=[result],
+        systems_actually_invoked=["DogfoodFakeToolOverlay"],
+        runtime_path_used="RuntimeActionDispatcher→ToolGateHandler→DogfoodFakeToolOverlay",
+        evidence_prefix="fake high-risk dogfood overlay blocked without production ToolRegistry pollution",
+        expected_statuses={"rejected"},
+    )
+
+
+def _run_e06_checkpoint_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        source="runtime_policy",
+        parent_trace_id="dogfood-e06",
+        payload={
+            "runtime_state_summary": "assistant produced api_key=sk-test123456789 in a template",
+            "last_tool_call": None,
+            "last_tool_status": None,
+            "trigger": "turn_end",
+        },
+        constraints={"no_schema_change"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E06_checkpoint",
+        expected_results=[result],
+        systems_actually_invoked=["CheckpointSafeSummary"],
+        runtime_path_used="RuntimeActionDispatcher→CheckpointSafeSummaryHandler→CheckpointSafeSummary",
+        evidence_prefix="no-tool turn-end reached checkpoint-safe summary before save_checkpoint boundary",
+    )
+
+
+def _run_e07_streaming_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    unsupported = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+        source="runtime_policy",
+        parent_trace_id="dogfood-e07-unsupported",
+        payload={"provider_supports_streaming": False},
+        constraints={"no_fake_final", "no_silent_fallback"},
+    )
+    supported = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+        source="runtime_policy",
+        parent_trace_id="dogfood-e07-supported",
+        payload={
+            "provider_supports_streaming": True,
+            "events": [
+                {"event_type": "text_delta", "sequence": 1, "text_delta": "Hello "},
+                {"event_type": "text_delta", "sequence": 2, "text_delta": "world"},
+                {"event_type": "final", "sequence": 3},
+            ],
+        },
+        constraints={"no_fake_final", "no_silent_fallback"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E07_streaming",
+        expected_results=[unsupported, supported],
+        systems_actually_invoked=["StreamingProtocol"],
+        runtime_path_used="RuntimeActionDispatcher→StreamingProviderCallHandler→StreamingProtocol",
+        evidence_prefix="unsupported provider failed closed; supported provider tied delta/final to action_id",
+        allow_non_runtime_results=True,
+        expected_statuses={"not_supported", "success"},
+    )
+
+
+def _run_e08_full_combined_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    available_metadata = _model_visible_skill_metadata(Path(ws["skill_root"]))
+    results = [
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.SKILL_SELECT,
+            source="llm_tool_call",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "task_summary": "combined safety audit for synthetic agent runtime",
+                "available_skill_metadata": available_metadata,
+                "model_decision_metadata": {
+                    "selected_skill_id": "security-audit",
+                    "selection_reason": "Security audit is the best match for the combined scenario.",
+                    "selection_confidence": "high",
+                },
+                "selected_skill_id": "security-audit",
+            },
+            constraints={"no_network", "no_shell"},
+        ),
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+            source="llm_tool_call",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "subagent_name": "code-reviewer",
+                "delegation_goal": "Review synthetic project code quality",
+                "context_package_summary": "bounded synthetic context",
+                "allowed_tools": ["read_file"],
+                "budget": {"max_iterations": 1},
+                "parent_adjudication_required": True,
+            },
+            constraints={"no_nested_delegation", "no_shell"},
+        ),
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+            source="runtime_policy",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "user_message": "记住：我偏好最小可维护改动",
+                "assistant_response": "我会优先选择小而可验证的实现路径。",
+                "task_context_summary": "combined runtime dogfood",
+                "prior_confirmed_memory_snapshot": {"preferences": []},
+            },
+            constraints={"no_auto_approve", "no_real_episodes_read"},
+        ),
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.TOOL_REQUEST,
+            source="llm_tool_call",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "tool_name": "fake.write_file",
+                "tool_args": {"path": "combined.txt"},
+                "requested_capability": "file_write",
+                "risk_reason": "combined scenario blocked high-risk fake write",
+            },
+            constraints={"no_write", "no_shell"},
+        ),
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+            source="runtime_policy",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "runtime_state_summary": "combined runtime summary without raw secret",
+                "last_tool_call": None,
+                "last_tool_status": None,
+                "trigger": "turn_end",
+            },
+            constraints={"no_schema_change"},
+        ),
+        _route_runtime_action(
+            dispatcher,
+            action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+            source="runtime_policy",
+            parent_trace_id="dogfood-e08",
+            payload={
+                "provider_supports_streaming": True,
+                "events": [
+                    {"event_type": "text_delta", "sequence": 1, "text_delta": "combined"},
+                    {"event_type": "final", "sequence": 2},
+                ],
+            },
+            constraints={"no_fake_final"},
+        ),
+    ]
+    result = _runtime_action_scenario_result(
+        scenario_id="E08_full_combined",
+        expected_results=results,
+        systems_actually_invoked=[
+            "SkillLoader",
+            "SubAgentExecutor",
+            "MemoryPolicy",
+            "DogfoodFakeToolOverlay",
+            "CheckpointSafeSummary",
+            "StreamingProtocol",
+        ],
+        runtime_path_used="RuntimeActionDispatcher combined Skill/Tool/Memory/Checkpoint/Streaming/SubAgent L0",
+        evidence_prefix="combined runtime action harness exercised six target modules",
+        systems_not_covered=["Provider"],
+        expected_statuses={"success", "rejected"},
+    )
+    # E08 组合 harness 覆盖六个 action target，但本轮禁止真实 LLM/provider；
+    # 因此场景整体仍保持 partial，不能把它说成完整 Provider E2E。
+    result["status"] = "partial"
+    result["severity"] = "P2"
+    result["quality_score"] = 0.75
+    result["issues_found"] = [
+        *result.get("issues_found", []),
+        "P2: Provider/core.chat path not exercised in synthetic no-LLM mode",
+    ]
+    return result
+
+
+def _run_e09_adversarial_runtime_action(
+    ws: dict[str, Any],
+    preflight: dict[str, Any],
+) -> dict[str, Any]:
+    from agent.runtime_integration import RuntimeActionType
+
+    dispatcher = _runtime_action_dispatcher(ws)
+    tool_result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.TOOL_REQUEST,
+        source="llm_tool_call",
+        parent_trace_id="dogfood-e09",
+        payload={
+            "tool_name": "fake.shell",
+            "tool_args": {"command": "cat .env"},
+            "requested_capability": "shell_execution",
+            "risk_reason": "adversarial request tried shell-like access",
+        },
+        constraints={"no_shell", "no_external_process", "no_env_read"},
+    )
+    memory_result = _route_runtime_action(
+        dispatcher,
+        action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+        source="runtime_policy",
+        parent_trace_id="dogfood-e09",
+        payload={
+            "user_message": "记住：password=not-a-real-secret-for-test",
+            "assistant_response": "我不会保存 secret-like 内容。",
+            "task_context_summary": "adversarial runtime dogfood",
+            "prior_confirmed_memory_snapshot": None,
+        },
+        constraints={"no_auto_approve", "no_real_episodes_read"},
+    )
+    return _runtime_action_scenario_result(
+        scenario_id="E09_adversarial",
+        expected_results=[tool_result, memory_result],
+        systems_actually_invoked=["DogfoodFakeToolOverlay", "MemoryPolicy"],
+        runtime_path_used="RuntimeActionDispatcher→ToolGateHandler/MemoryTurnEndProposalHandler fail-closed",
+        evidence_prefix="adversarial fake shell blocked and secret-like memory rejected",
+        expected_statuses={"rejected"},
+    )
+
+
 # ── Main runner ───────────────────────────────────────────────────────────────
 
 
 SCENARIO_RUNNERS = {
     "E01_runtime_planning": _run_e01_runtime_planning,
-    "E02_skill_selection": _run_e02_skill_selection,
-    "E03_subagent_l0": _run_e03_subagent_l0,
-    "E04_memory_proposal": _run_e04_memory_proposal,
-    "E05_tool_registry": _run_e05_tool_registry,
-    "E06_checkpoint": _run_e06_checkpoint,
-    "E07_streaming": _run_e07_streaming,
-    "E08_full_combined": _run_e08_full_combined,
-    "E09_adversarial": _run_e09_adversarial,
+    "E02_skill_selection": _run_e02_skill_selection_runtime_action,
+    "E03_subagent_l0": _run_e03_subagent_l0_runtime_action,
+    "E04_memory_proposal": _run_e04_memory_proposal_runtime_action,
+    "E05_tool_registry": _run_e05_tool_registry_runtime_action,
+    "E06_checkpoint": _run_e06_checkpoint_runtime_action,
+    "E07_streaming": _run_e07_streaming_runtime_action,
+    "E08_full_combined": _run_e08_full_combined_runtime_action,
+    "E09_adversarial": _run_e09_adversarial_runtime_action,
 }
 
 
@@ -1471,6 +2013,8 @@ def _compute_invocation_mode(result: dict[str, Any]) -> str:
     """
     if result.get("real_api_used"):
         return "actual_runtime_invoked"
+    if result.get("runtime_action_events"):
+        return "runtime_action_invoked"
     actually = result.get("systems_actually_invoked", [])
     if actually:
         return "direct_subsystem_invocation"
@@ -1517,48 +2061,130 @@ def _apply_honest_grading(results: list[dict[str, Any]]) -> list[dict[str, Any]]
     return results
 
 
-def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str, str]]:
+CAPABILITY_MODULE_MAPPING: dict[str, tuple[str, ...]] = {
+    "runtime": ("Runtime", "Runtime.chat"),
+    "provider": ("Provider", "ModelProvider"),
+    "skill": ("SkillRegistry", "SkillRegistryValidation", "SkillLoader", "SkillToolBinding"),
+    "subagent": (
+        "SubAgentRegistry",
+        "SubAgentDescriptor",
+        "SubAgentRequest",
+        "SubAgentDelegation",
+        "SubAgentExecutor",
+        "SubAgentAdjudication",
+    ),
+    "memory": (
+        "FilesystemMemoryStore",
+        "MemoryEpisodicWrite(synthetic)",
+        "MemoryConsolidationLoader",
+        "MemoryConsolidationEngine",
+        "MemoryGovernanceCheck",
+        "MemoryPolicy",
+    ),
+    "tool_registry": (
+        "ToolRegistry",
+        "ToolRegistration",
+        "ToolVisibilityFilter",
+        "ToolRiskClassification",
+        "ToolRiskCheck",
+        "DogfoodFakeToolOverlay",
+    ),
+    "checkpoint": ("CheckpointSave", "CheckpointTruncationConfig", "CheckpointLoad", "CheckpointSafeSummary"),
+    "streaming": ("StreamingProtocol", "StreamingAggregation", "StreamingEdgeCases"),
+    "confirmation": ("Confirmation", "ConfirmationContext"),
+    "dogfood": ("Dogfood",),
+}
+
+
+def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     capabilities = [
-        ("Runtime planning", ["Runtime"], "E01,E08"),
-        ("Provider call", ["Provider"], "E01,E08"),
-        ("Skill selection", ["Skill"], "E02,E08"),
-        ("Skill progressive disclosure", ["Skill"], "E02"),
-        ("SubAgent L0 delegation", ["SubAgent"], "E03,E08"),
-        ("Parent adjudication", ["SubAgent", "Runtime"], "E03"),
-        ("Memory proposal/review", ["Memory"], "E04,E08"),
-        ("Memory recall/injection", ["Memory"], "not_tested"),
-        ("ToolRegistry gate", ["ToolRegistry"], "E05,E08,E09"),
-        ("Confirmation", ["Confirmation"], "E05,E09"),
-        ("Checkpoint save/load", ["Checkpoint"], "E06"),
-        ("Checkpoint resume safety", ["Checkpoint"], "E06"),
-        ("Streaming protocol", ["Streaming"], "E07"),
-        ("Dogfood/reporting", ["Dogfood"], "all"),
+        ("Runtime planning", "runtime", "E01,E08"),
+        ("Provider call", "provider", "E01,E08"),
+        ("Skill selection", "skill", "E02,E08"),
+        ("Skill progressive disclosure", "skill", "E02"),
+        ("SubAgent L0 delegation", "subagent", "E03,E08"),
+        ("Parent adjudication", "subagent", "E03"),
+        ("Memory proposal/review", "memory", "E04,E08"),
+        ("Memory recall/injection", "memory", "not_tested"),
+        ("ToolRegistry gate", "tool_registry", "E05,E08,E09"),
+        ("Confirmation", "confirmation", "E05,E09"),
+        ("Checkpoint save/load", "checkpoint", "E06"),
+        ("Checkpoint resume safety", "checkpoint", "E06"),
+        ("Streaming protocol", "streaming", "E07"),
+        ("Dogfood/reporting", "dogfood", "all"),
     ]
 
     matrix: list[dict[str, str]] = []
-    for cap_name, systems, scenario_ids in capabilities:
-        # 基于 invocation_mode 判断 E2E 验证程度
+    for cap_name, capability_key, scenario_ids in capabilities:
+        if scenario_ids == "not_tested":
+            matrix.append({
+                "capability": cap_name,
+                "e2e_verified": "no",
+                "evidence_level": "not_covered",
+                "action_id": "",
+                "action_type": "",
+                "handler_name": "",
+                "target_module": "",
+                "module_invoked": False,
+                "target_module_proof": None,
+                "parent_adjudicated": None,
+                "decision": "",
+                "status": "",
+                "evidence": "Not covered by any E2E scenario",
+                "gap": "missing E2E coverage",
+                "severity": "P3",
+            })
+            continue
+
+        aliases = set(CAPABILITY_MODULE_MAPPING[capability_key])
         best_mode = "simulated"
+        best_event: dict[str, Any] | None = None
+        best_level = "not_covered"
         for r in results:
+            for event in r.get("runtime_action_events", []) or []:
+                target_module = event.get("target_module")
+                if target_module in aliases and is_runtime_e2e_evidence(event):
+                    best_mode = "runtime_action_invoked"
+                    best_event = event
+                    best_level = "runtime_e2e"
+                    break
+                if target_module in aliases and best_event is None:
+                    best_event = event
+                    best_level = classify_evidence_level(event)
+                    best_mode = "runtime_action_invoked"
+            if best_level == "runtime_e2e":
+                break
+
             actually = set(r.get("systems_actually_invoked", []))
-            targets = set(systems)
-            if targets & actually:
+            if aliases & actually and best_mode not in {"runtime_action_invoked", "actual_runtime_invoked"}:
                 mode = r.get("invocation_mode", "simulated")
                 if mode == "actual_runtime_invoked":
                     best_mode = "actual_runtime_invoked"
-                elif mode == "direct_subsystem_invocation" and best_mode != "actual_runtime_invoked":
+                    best_level = "subsystem_integration"
+                elif mode == "direct_subsystem_invocation":
                     best_mode = "direct_subsystem_invocation"
+                    best_level = "subsystem_integration"
 
-        if best_mode == "actual_runtime_invoked":
+        if best_level == "runtime_e2e":
             e2e_verified = "yes"
-            evidence = f"Full E2E runtime path verified in {scenario_ids}"
+            evidence = f"RuntimeAction target_module_proof verified in {scenario_ids}"
             gap = "none"
             severity = "none"
+        elif best_mode == "actual_runtime_invoked":
+            e2e_verified = "partial"
+            evidence = f"Runtime path invoked in {scenario_ids}, but no target_module_proof"
+            gap = "missing RuntimeAction target_module_proof"
+            severity = "P2"
         elif best_mode == "direct_subsystem_invocation":
             e2e_verified = "partial"
             evidence = f"Direct subsystem verified in {scenario_ids}, no chat() runtime path"
             gap = "verified at module level only, not through runtime integration"
             severity = "P3"
+        elif best_mode == "runtime_action_invoked":
+            e2e_verified = "partial"
+            evidence = f"RuntimeAction receipt exists in {scenario_ids}, but full proof missing"
+            gap = "missing complete R.6 target_module_proof"
+            severity = "P2"
         elif scenario_ids == "not_tested":
             e2e_verified = "no"
             evidence = "Not covered by any E2E scenario"
@@ -1573,6 +2199,16 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
         matrix.append({
             "capability": cap_name,
             "e2e_verified": e2e_verified,
+            "evidence_level": best_level,
+            "action_id": (best_event or {}).get("action_id", ""),
+            "action_type": (best_event or {}).get("action_type", ""),
+            "handler_name": (best_event or {}).get("handler_name", ""),
+            "target_module": (best_event or {}).get("target_module", ""),
+            "module_invoked": (best_event or {}).get("module_invoked", False),
+            "target_module_proof": (best_event or {}).get("target_module_proof"),
+            "parent_adjudicated": (best_event or {}).get("parent_adjudicated"),
+            "decision": (best_event or {}).get("decision", ""),
+            "status": (best_event or {}).get("status", ""),
             "evidence": evidence,
             "gap": gap,
             "severity": severity,
@@ -1629,7 +2265,7 @@ def run_e2e_runtime_dogfood(
 
     tmp_root.mkdir(parents=True, exist_ok=True)
     ws = _setup_synthetic_workspace(tmp_root)
-    preflight_data = _run_preflight()
+    preflight_data = _run_preflight() if mode == "real-api" else _synthetic_preflight()
 
     results: list[dict[str, Any]] = []
 

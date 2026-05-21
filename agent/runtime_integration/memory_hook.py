@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from agent.display_events import mask_user_visible_secrets
 from agent.memory_contracts import MemoryDecisionType
 from agent.memory_policy import DeterministicMemoryPolicy
@@ -30,7 +32,7 @@ class MemoryTurnEndProposalHandler:
             target_module="MemoryPolicy",
             function_called="DeterministicMemoryPolicy.decide",
             call_signature="decide(text: str)",
-            call=lambda: self._policy.decide(user_message),
+            call=partial(self._policy.decide, user_message),
         )
         decision = observed.value
         secret_like = contains_secret_like(user_message) or contains_secret_like(assistant_response)

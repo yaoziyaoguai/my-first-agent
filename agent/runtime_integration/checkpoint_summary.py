@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from agent.display_events import mask_user_visible_secrets
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest, contains_secret_like
@@ -24,7 +26,7 @@ class CheckpointSafeSummaryHandler:
             target_module="CheckpointSafeSummary",
             function_called="CheckpointSafeSummary.redact",
             call_signature="redact(runtime_state_summary: str)",
-            call=lambda: _safe_summary(runtime_state_summary),
+            call=partial(_safe_summary, runtime_state_summary),
         )
         safe_summary = observed.value
         no_tool_boundary_reached = last_tool_call is None and trigger == "turn_end"

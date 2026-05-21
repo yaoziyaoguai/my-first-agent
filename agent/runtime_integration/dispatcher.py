@@ -10,6 +10,7 @@ from uuid import uuid4
 from agent.runtime_integration.evidence import (
     ObservedModuleCall,
     RuntimeActionModuleObserver,
+    RuntimeActionTargetCatalog,
     classify_evidence_level,
 )
 from agent.runtime_integration.schema import (
@@ -41,6 +42,14 @@ HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
     "dispatcher_route_id",
     "dispatcher_result_id",
     "dispatcher_result_issued",
+    "target_catalog_id",
+    "target_handle",
+    "target_descriptor_id",
+    "invocation_adapter_id",
+    "implementation_id",
+    "callable_identity",
+    "target_catalog_allowed",
+    "target_identity_valid",
 })
 
 
@@ -83,6 +92,7 @@ class RuntimeActionContext:
     action_type: RuntimeActionType | str
     route_id: str
     handler_name: str
+    handler_identity: str
     parent_trace_id: str
     observer: RuntimeActionModuleObserver
     _issued_result_ids: set[int] = field(default_factory=set, init=False, repr=False)
@@ -95,12 +105,24 @@ class RuntimeActionContext:
         call_signature: str,
         call,
     ) -> ObservedModuleCall:
-        return self.observer.observe(
+        descriptor = RuntimeActionTargetCatalog.resolve(
+            action_type=action_type_value(self.action_type),
+            handler_name=self.handler_name,
+            handler_identity=self.handler_identity,
+            target_module=target_module,
+        )
+        # 中文学习注释：target_module 是 handler 传入的字符串，不能直接代表
+        # 可信 target identity。只有 dispatcher context 能把它解析成 catalog
+        # descriptor；observer 还会验证实际 callable identity，缺 descriptor
+        # 或 callable 不匹配的 proof 只能证明调用发生，不能升级 runtime_e2e。
+        return self.observer._observe_trusted(
             route_id=self.route_id,
             action_id=self.action_id,
             action_type=action_type_value(self.action_type),
             handler_name=self.handler_name,
+            handler_identity=self.handler_identity,
             target_module=target_module,
+            target_descriptor=descriptor,
             function_called=function_called,
             call_signature=call_signature,
             call=call,
@@ -120,12 +142,68 @@ class RuntimeActionContext:
     ) -> RuntimeActionResult:
         module_invoked = observed_call is not None
         result_id = f"result:{uuid4().hex}"
-        RuntimeActionModuleObserver.register_dispatch_result(
+        invocation_proof = dict(observed_call.invocation_proof) if observed_call else None
+        target_module_proof = dict(observed_call.target_module_proof) if observed_call else None
+        target_catalog_allowed = (
+            bool(target_module_proof)
+            and target_module_proof.get("target_catalog_allowed") is True
+        )
+        target_identity_valid = (
+            bool(target_module_proof)
+            and target_module_proof.get("target_identity_valid") is True
+        )
+        target_catalog_id = (
+            str(target_module_proof.get("target_catalog_id") or "")
+            if target_catalog_allowed and target_module_proof
+            else ""
+        )
+        target_handle = (
+            str(target_module_proof.get("linked_target_handle") or "")
+            if target_catalog_allowed and target_module_proof
+            else ""
+        )
+        target_descriptor_id = (
+            str(target_module_proof.get("target_descriptor_id") or "")
+            if target_catalog_allowed and target_module_proof
+            else ""
+        )
+        invocation_adapter_id = (
+            str(target_module_proof.get("invocation_adapter_id") or "")
+            if target_catalog_allowed and target_module_proof
+            else ""
+        )
+        implementation_id = (
+            str(target_module_proof.get("implementation_id") or "")
+            if target_catalog_allowed and target_module_proof
+            else ""
+        )
+        callable_identity = (
+            str(target_module_proof.get("callable_identity") or "")
+            if target_module_proof
+            else ""
+        )
+        if target_module_proof is not None:
+            # 中文学习注释：proof 在 observer 调用时还不知道 result_id；只有
+            # context.result() 能把“本次 result”与 proof/call/target 绑定起来。
+            # classifier 会验证这个反向绑定，阻止 same-route 不同 result 交叉复用。
+            target_module_proof["linked_dispatcher_result_id"] = result_id
+        RuntimeActionModuleObserver._issue_dispatch_result(
             route_id=self.route_id,
             result_id=result_id,
             action_id=self.action_id,
             action_type=action_type_value(self.action_type),
             handler_name=self.handler_name,
+            target_module=target_module,
+            proof_id=str(target_module_proof.get("proof_id")) if target_module_proof else None,
+            call_id=str(invocation_proof.get("call_id")) if invocation_proof else None,
+            target_catalog_id=target_catalog_id or None,
+            target_handle=target_handle or None,
+            target_descriptor_id=target_descriptor_id or None,
+            invocation_adapter_id=invocation_adapter_id or None,
+            implementation_id=implementation_id or None,
+            callable_identity=callable_identity or None,
+            target_catalog_allowed=target_catalog_allowed,
+            target_identity_valid=target_identity_valid,
         )
         evidence: dict[str, Any] = {
             "action_id": self.action_id,
@@ -137,9 +215,17 @@ class RuntimeActionContext:
             "target_handler_invoked": True,
             "handler_name": handler_name,
             "target_module": target_module,
+            "target_catalog_id": target_catalog_id,
+            "target_handle": target_handle,
+            "target_descriptor_id": target_descriptor_id,
+            "invocation_adapter_id": invocation_adapter_id,
+            "implementation_id": implementation_id,
+            "callable_identity": callable_identity,
+            "target_catalog_allowed": target_catalog_allowed,
+            "target_identity_valid": target_identity_valid,
             "module_invoked": module_invoked,
-            "invocation_proof": observed_call.invocation_proof if observed_call else None,
-            "target_module_proof": observed_call.target_module_proof if observed_call else None,
+            "invocation_proof": invocation_proof,
+            "target_module_proof": target_module_proof,
             "result_returned_to_parent_runtime": False,
             "parent_adjudicated": parent_adjudicated,
         }
@@ -209,17 +295,20 @@ class RuntimeActionDispatcher:
         route_id = f"route:{uuid4().hex}"
         handler = self._registry.get(request.action_type)
         handler_name = type(handler).__name__ if handler is not None else ""
-        RuntimeActionModuleObserver.register_dispatch_route(
+        handler_identity = _handler_identity(handler) if handler is not None else ""
+        RuntimeActionModuleObserver._issue_dispatch_route(
             route_id=route_id,
             action_id=action_id,
             action_type=action_type_value(request.action_type),
             handler_name=handler_name,
+            handler_identity=handler_identity,
         )
         context = RuntimeActionContext(
             action_id=action_id,
             action_type=request.action_type,
             route_id=route_id,
             handler_name=handler_name,
+            handler_identity=handler_identity,
             parent_trace_id=request.parent_trace_id,
             observer=self._observer,
         )
@@ -266,6 +355,14 @@ class RuntimeActionDispatcher:
             "target_handler_invoked": False,
             "handler_name": "",
             "target_module": "",
+            "target_catalog_id": "",
+            "target_handle": "",
+            "target_descriptor_id": "",
+            "invocation_adapter_id": "",
+            "implementation_id": "",
+            "callable_identity": "",
+            "target_catalog_allowed": False,
+            "target_identity_valid": False,
             "module_invoked": False,
             "invocation_proof": None,
             "target_module_proof": None,
@@ -334,3 +431,8 @@ class RuntimeActionDispatcher:
             latency_ms=latency_ms,
             timestamp=result.timestamp,
         )
+
+
+def _handler_identity(handler: ActionHandler) -> str:
+    handler_type = type(handler)
+    return f"{handler_type.__module__}.{handler_type.__qualname__}"

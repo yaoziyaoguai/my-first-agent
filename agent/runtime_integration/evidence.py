@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Callable, ClassVar, Mapping
 from uuid import uuid4
 
@@ -19,6 +20,464 @@ SUBSYSTEM_INTEGRATION = "subsystem_integration"
 DETERMINISTIC_BASELINE = "deterministic_baseline"
 SIMULATED = "simulated"
 NOT_COVERED = "not_covered"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeActionTargetDescriptor:
+    """dispatcher/catalog-owned target implementation descriptor.
+
+    中文学习边界：`target_module` 只是报告标签，不能证明真实 target identity。
+    descriptor 同时绑定 handler、action、目标标签和可调用实现指纹；只有实际
+    callable 与 descriptor 匹配时，observer 才能发行 trusted target proof。
+    """
+
+    action_type: str
+    handler_name: str
+    handler_identity: str
+    target_module: str
+    target_catalog_id: str
+    target_handle: str
+    target_descriptor_id: str
+    invocation_adapter_id: str
+    implementation_id: str
+    callable_identity: str
+
+
+def _function_identity(module_name: str, qualname: str) -> str:
+    return f"function:{module_name}.{qualname}"
+
+
+def _bound_method_identity(class_path: str, method_name: str) -> str:
+    return f"bound_method:{class_path}.{method_name}"
+
+
+def _partial_identity(base_identity: str) -> str:
+    return f"partial:{base_identity}"
+
+
+def _callable_identity(call: Callable[[], Any]) -> str:
+    """为 observer 看到的 callable 生成稳定、无参数值的实现身份。
+
+    这里只记录函数/方法的 module + qualname，不记录闭包内容、参数值或对象
+    repr，避免把 payload 或隐私数据写进 evidence。`functools.partial` 会追溯
+    到它包装的真实函数/方法，用来验证 catalog-owned invocation adapter。
+    """
+
+    if isinstance(call, partial):
+        return _partial_identity(_callable_identity(call.func))
+    bound_function = getattr(call, "__func__", None)
+    bound_owner = getattr(call, "__self__", None)
+    if bound_function is not None and bound_owner is not None:
+        owner_cls = bound_owner if isinstance(bound_owner, type) else type(bound_owner)
+        return _bound_method_identity(
+            f"{owner_cls.__module__}.{owner_cls.__qualname__}",
+            str(getattr(bound_function, "__name__", "<unknown>")),
+        )
+    module_name = str(getattr(call, "__module__", type(call).__module__))
+    qualname = str(getattr(call, "__qualname__", type(call).__qualname__))
+    return _function_identity(module_name, qualname)
+
+
+def _descriptor(
+    action_type: str,
+    handler_identity: str,
+    target_module: str,
+    *,
+    invocation_adapter_id: str,
+    callable_identity: str,
+    implementation_id: str | None = None,
+) -> RuntimeActionTargetDescriptor:
+    handler_name = handler_identity.rsplit(".", 1)[-1]
+    catalog_id = f"{action_type}:{handler_identity}:{target_module}"
+    return RuntimeActionTargetDescriptor(
+        action_type=action_type,
+        handler_name=handler_name,
+        handler_identity=handler_identity,
+        target_module=target_module,
+        target_catalog_id=catalog_id,
+        target_handle=f"target:{catalog_id}",
+        target_descriptor_id=f"descriptor:{catalog_id}:{invocation_adapter_id}",
+        invocation_adapter_id=invocation_adapter_id,
+        implementation_id=implementation_id or invocation_adapter_id,
+        callable_identity=callable_identity,
+    )
+
+
+def _test_descriptors(
+    module_name: str,
+    handler_name: str,
+    action_type: str,
+    targets: tuple[str, ...],
+    *,
+    callable_qualname: str,
+    invocation_adapter_id: str,
+) -> tuple[RuntimeActionTargetDescriptor, ...]:
+    """为 runtime_integration harness 测试声明静态 target 身份。
+
+    中文学习边界：这些 test-only descriptor 仍是代码内置 catalog，不是 public
+    API。它们允许 harness 生成合法 synthetic target proof，但任意 handler
+    传入 lambda 时 callable_identity 不匹配，仍不能伪造成可信 target。
+    """
+
+    callable_identity = _partial_identity(_function_identity(module_name, callable_qualname))
+    return tuple(
+        _descriptor(
+            action_type,
+            f"{module_name}.{handler_name}",
+            target,
+            invocation_adapter_id=invocation_adapter_id,
+            callable_identity=callable_identity,
+        )
+        for target in targets
+    )
+
+
+class RuntimeActionTargetCatalog:
+    """RuntimeAction target identity allowlist.
+
+    route/result/proof/call 绑定只能证明“一次调用被观测”；它不能证明 handler
+    声称的 `target_module` 就是真实生产 target。target catalog 是 dispatcher
+    可查询、classifier 可复核的受控 trust boundary：只有这里声明的
+    action_type + handler identity + target_module + callable identity 组合才能
+    获得 target_handle。
+    """
+
+    _bindings: ClassVar[tuple[RuntimeActionTargetDescriptor, ...]] = (
+        _descriptor(
+            "skill.select",
+            "agent.runtime_integration.skill_action.SkillRuntimeActionHandler",
+            "SkillLoader",
+            invocation_adapter_id="SkillLoader.load_body",
+            callable_identity=_partial_identity(
+                _bound_method_identity("agent.skill_system.loader.SkillLoader", "load_body")
+            ),
+        ),
+        _descriptor(
+            "tool.request",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "ToolRegistry",
+            invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
+            callable_identity=_partial_identity(
+                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
+            ),
+        ),
+        _descriptor(
+            "tool.gate",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "ToolRegistry",
+            invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
+            callable_identity=_partial_identity(
+                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
+            ),
+        ),
+        _descriptor(
+            "tool.invoke",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "ToolRegistry",
+            invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
+            callable_identity=_partial_identity(
+                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
+            ),
+        ),
+        _descriptor(
+            "tool.request",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "DogfoodFakeToolOverlay",
+            invocation_adapter_id="DogfoodFakeToolOverlay.block",
+            callable_identity=_bound_method_identity(
+                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
+                "block",
+            ),
+        ),
+        _descriptor(
+            "tool.gate",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "DogfoodFakeToolOverlay",
+            invocation_adapter_id="DogfoodFakeToolOverlay.block",
+            callable_identity=_bound_method_identity(
+                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
+                "block",
+            ),
+        ),
+        _descriptor(
+            "tool.invoke",
+            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "DogfoodFakeToolOverlay",
+            invocation_adapter_id="DogfoodFakeToolOverlay.block",
+            callable_identity=_bound_method_identity(
+                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
+                "block",
+            ),
+        ),
+        _descriptor(
+            "memory.turn_end_proposal",
+            "agent.runtime_integration.memory_hook.MemoryTurnEndProposalHandler",
+            "MemoryPolicy",
+            invocation_adapter_id="MemoryPolicy.decide",
+            callable_identity=_partial_identity(
+                _bound_method_identity("agent.memory_policy.DeterministicMemoryPolicy", "decide")
+            ),
+        ),
+        _descriptor(
+            "memory.propose",
+            "agent.runtime_integration.memory_hook.MemoryTurnEndProposalHandler",
+            "MemoryPolicy",
+            invocation_adapter_id="MemoryPolicy.decide",
+            callable_identity=_partial_identity(
+                _bound_method_identity("agent.memory_policy.DeterministicMemoryPolicy", "decide")
+            ),
+        ),
+        _descriptor(
+            "checkpoint.safe_summary",
+            "agent.runtime_integration.checkpoint_summary.CheckpointSafeSummaryHandler",
+            "CheckpointSafeSummary",
+            invocation_adapter_id="CheckpointSafeSummary.redact",
+            callable_identity=_partial_identity(
+                _function_identity("agent.runtime_integration.checkpoint_summary", "_safe_summary")
+            ),
+        ),
+        _descriptor(
+            "streaming.provider_call",
+            "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
+            "StreamingProtocol",
+            invocation_adapter_id="StreamingProtocol.collect_stream_response",
+            callable_identity=_partial_identity(
+                _function_identity("agent.provider.streaming", "collect_stream_response")
+            ),
+        ),
+        _descriptor(
+            "streaming.event",
+            "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
+            "StreamingProtocol",
+            invocation_adapter_id="StreamingProtocol.collect_stream_response",
+            callable_identity=_partial_identity(
+                _function_identity("agent.provider.streaming", "collect_stream_response")
+            ),
+        ),
+        _descriptor(
+            "subagent.delegate_l0",
+            "agent.runtime_integration.subagent_action.SubAgentDelegateL0Handler",
+            "SubAgentExecutor",
+            invocation_adapter_id="SubAgentExecutor.delegate_once",
+            callable_identity=_partial_identity(
+                _function_identity("agent.subagent_system.delegation", "delegate_once")
+            ),
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_ObservedHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_ObservedHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_ObservedHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_TwoIssuedResultsSameRouteHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_TwoIssuedResultsSameRouteHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_TwoIssuedResultsSameRouteHandler",
+            "tool.request",
+            ("FakeTargetModule",),
+            callable_qualname="_fake_target_module_value",
+            invocation_adapter_id="FakeTargetModule.test_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "tool.request",
+            ("ToolRegistry",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="ToolRegistry.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "tool.request",
+            ("ToolRegistry",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="ToolRegistry.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "tool.request",
+            ("ToolRegistry",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="ToolRegistry.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "skill.select",
+            ("SkillLoader", "SkillRegistry"),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="SkillRuntime.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "skill.select",
+            ("SkillLoader", "SkillRegistry"),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="SkillRuntime.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "skill.select",
+            ("SkillLoader", "SkillRegistry"),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="SkillRuntime.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.safe_summary",
+            ("CheckpointSafeSummary",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.safe_summary",
+            ("CheckpointSafeSummary",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.safe_summary",
+            ("CheckpointSafeSummary",),
+            callable_qualname="_catalog_owned_test_adapter",
+            invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_capability_matrix",
+            "_MatrixObservedHandler",
+            "skill.select",
+            ("SkillLoader",),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_capability_matrix",
+            "_MatrixObservedHandler",
+            "skill.select",
+            ("SkillLoader",),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+        *_test_descriptors(
+            "test_capability_matrix",
+            "_MatrixObservedHandler",
+            "skill.select",
+            ("SkillLoader",),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_capability_matrix",
+            "_MatrixObservedHandler",
+            "tool.request",
+            ("ToolRegistry", "DogfoodFakeToolOverlay"),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_capability_matrix",
+            "_MatrixObservedHandler",
+            "tool.request",
+            ("ToolRegistry", "DogfoodFakeToolOverlay"),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+        *_test_descriptors(
+            "test_capability_matrix",
+            "_MatrixObservedHandler",
+            "tool.request",
+            ("ToolRegistry", "DogfoodFakeToolOverlay"),
+            callable_qualname="_matrix_target_value",
+            invocation_adapter_id="MatrixHarness.test_adapter",
+        ),
+    )
+    _by_key: ClassVar[dict[tuple[str, str, str, str], RuntimeActionTargetDescriptor]] = {
+        (binding.action_type, binding.handler_name, binding.handler_identity, binding.target_module): binding
+        for binding in _bindings
+    }
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+        target_module: str,
+    ) -> RuntimeActionTargetDescriptor | None:
+        return cls._by_key.get((action_type, handler_name, handler_identity, target_module))
+
+    @classmethod
+    def is_allowed_descriptor(
+        cls,
+        *,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+        target_module: str,
+        target_catalog_id: str,
+        target_handle: str,
+        target_descriptor_id: str,
+        invocation_adapter_id: str,
+        implementation_id: str,
+        callable_identity: str,
+    ) -> bool:
+        binding = cls.resolve(
+            action_type=action_type,
+            handler_name=handler_name,
+            handler_identity=handler_identity,
+            target_module=target_module,
+        )
+        return (
+            binding is not None
+            and binding.target_catalog_id == target_catalog_id
+            and binding.target_handle == target_handle
+            and binding.target_descriptor_id == target_descriptor_id
+            and binding.invocation_adapter_id == invocation_adapter_id
+            and binding.implementation_id == implementation_id
+            and binding.callable_identity == callable_identity
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +495,12 @@ class RuntimeActionModuleObserver:
     Handler 不能直接 mint target_module_proof；它只能把目标 callable 交给这个
     observer 包裹执行。observer_identity 与 handler_name 分离，是为了让
     capability matrix 能识别 handler self-asserted proof。
+
+    中文学习边界：public registry method 只保留给旧测试和降级路径使用，不能
+    成为 runtime_e2e 信任根。真正可信的 provenance 必须由 dispatcher 调用
+    `_issue_*` 内部入口发行，并且 result registry 要绑定 proof/call/target。
+    target identity 同理：public observe() 只能生成非可信 target proof；只有
+    dispatcher context 通过 target catalog 解析出的 handle 才能进入 runtime_e2e。
     """
 
     observer_identity = "RuntimeActionModuleObserver"
@@ -52,10 +517,38 @@ class RuntimeActionModuleObserver:
         action_type: str,
         handler_name: str,
     ) -> None:
+        """登记非可信 route。
+
+        这个 public API 不能 mint dispatcher-owned provenance；它存在是为了让
+        手工/历史测试能表达“有 registry 形状但不是 dispatcher 发行”的负例。
+        """
+
         cls._route_registry[route_id] = {
             "action_id": action_id,
             "action_type": action_type,
             "handler_name": handler_name,
+            "handler_identity": "",
+            "dispatcher_owned": False,
+        }
+
+    @classmethod
+    def _issue_dispatch_route(
+        cls,
+        *,
+        route_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+    ) -> None:
+        """由 RuntimeActionDispatcher 内部发行可信 route provenance。"""
+
+        cls._route_registry[route_id] = {
+            "action_id": action_id,
+            "action_type": action_type,
+            "handler_name": handler_name,
+            "handler_identity": handler_identity,
+            "dispatcher_owned": True,
         }
 
     @classmethod
@@ -68,11 +561,77 @@ class RuntimeActionModuleObserver:
         action_type: str,
         handler_name: str,
     ) -> None:
+        """登记非可信 result。
+
+        Public caller 不能提供 dispatcher-owned receipt；classifier 会拒绝这类
+        result，即便字段与 proof 看起来完全匹配。
+        """
+
         cls._result_registry[result_id] = {
             "route_id": route_id,
             "action_id": action_id,
             "action_type": action_type,
             "handler_name": handler_name,
+            "handler_identity": "",
+            "target_module": None,
+            "proof_id": None,
+            "call_id": None,
+            "target_catalog_id": None,
+            "target_handle": None,
+            "target_descriptor_id": None,
+            "invocation_adapter_id": None,
+            "implementation_id": None,
+            "callable_identity": None,
+            "target_catalog_allowed": False,
+            "target_identity_valid": False,
+            "dispatcher_owned": False,
+        }
+
+    @classmethod
+    def _issue_dispatch_result(
+        cls,
+        *,
+        route_id: str,
+        result_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+        target_module: str,
+        proof_id: str | None,
+        call_id: str | None,
+        target_catalog_id: str | None,
+        target_handle: str | None,
+        target_descriptor_id: str | None,
+        invocation_adapter_id: str | None,
+        implementation_id: str | None,
+        callable_identity: str | None,
+        target_catalog_allowed: bool,
+        target_identity_valid: bool,
+    ) -> None:
+        """由 context.result() 发行可信 result provenance。
+
+        result_id 不是单独可信的票据；它必须绑定本次 result 使用的 proof/call/target。
+        这样同 route 内 result A 的 proof 不能移植到 result B。
+        """
+
+        cls._result_registry[result_id] = {
+            "route_id": route_id,
+            "action_id": action_id,
+            "action_type": action_type,
+            "handler_name": handler_name,
+            "handler_identity": cls._route_registry.get(route_id, {}).get("handler_identity", ""),
+            "target_module": target_module,
+            "proof_id": proof_id,
+            "call_id": call_id,
+            "target_catalog_id": target_catalog_id,
+            "target_handle": target_handle,
+            "target_descriptor_id": target_descriptor_id,
+            "invocation_adapter_id": invocation_adapter_id,
+            "implementation_id": implementation_id,
+            "callable_identity": callable_identity,
+            "target_catalog_allowed": target_catalog_allowed,
+            "target_identity_valid": target_identity_valid,
+            "dispatcher_owned": True,
         }
 
     def observe(
@@ -87,7 +646,80 @@ class RuntimeActionModuleObserver:
         call_signature: str,
         call: Callable[[], Any],
     ) -> ObservedModuleCall:
+        """Public observer compatibility surface.
+
+        直接调用 observe() 可以获得“调用被观测”的 proof，但不能获得 trusted
+        target handle；classifier 会把它降级为非 runtime_e2e。
+        """
+
+        return self._observe(
+            route_id=route_id,
+            action_id=action_id,
+            action_type=action_type,
+            handler_name=handler_name,
+            handler_identity="",
+            target_module=target_module,
+            target_descriptor=None,
+            function_called=function_called,
+            call_signature=call_signature,
+            call=call,
+        )
+
+    def _observe_trusted(
+        self,
+        *,
+        route_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+        target_module: str,
+        target_descriptor: RuntimeActionTargetDescriptor | None,
+        function_called: str,
+        call_signature: str,
+        call: Callable[[], Any],
+    ) -> ObservedModuleCall:
+        """dispatcher context 专用 observer path，附加 target descriptor provenance。"""
+
+        return self._observe(
+            route_id=route_id,
+            action_id=action_id,
+            action_type=action_type,
+            handler_name=handler_name,
+            handler_identity=handler_identity,
+            target_module=target_module,
+            target_descriptor=target_descriptor,
+            function_called=function_called,
+            call_signature=call_signature,
+            call=call,
+        )
+
+    def _observe(
+        self,
+        *,
+        route_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+        target_module: str,
+        target_descriptor: RuntimeActionTargetDescriptor | None,
+        function_called: str,
+        call_signature: str,
+        call: Callable[[], Any],
+    ) -> ObservedModuleCall:
         call_id = f"call:{uuid4().hex}"
+        callable_identity = _callable_identity(call)
+        target_identity_valid = (
+            target_descriptor is not None
+            and target_descriptor.callable_identity == callable_identity
+        )
+        trusted_target_catalog_id = target_descriptor.target_catalog_id if target_identity_valid else None
+        trusted_target_handle = target_descriptor.target_handle if target_identity_valid else None
+        trusted_target_descriptor_id = target_descriptor.target_descriptor_id if target_identity_valid else None
+        trusted_invocation_adapter_id = target_descriptor.invocation_adapter_id if target_identity_valid else None
+        trusted_implementation_id = target_descriptor.implementation_id if target_identity_valid else None
+        target_catalog_allowed = target_identity_valid
         value = call()
         observed_at = _now_iso()
         invocation_proof = {
@@ -109,21 +741,42 @@ class RuntimeActionModuleObserver:
             "linked_handler_name": handler_name,
             "linked_target_module": target_module,
             "linked_call_id": call_id,
+            "target_catalog_id": trusted_target_catalog_id,
+            "linked_target_handle": trusted_target_handle,
+            "target_descriptor_id": trusted_target_descriptor_id,
+            "invocation_adapter_id": trusted_invocation_adapter_id,
+            "implementation_id": trusted_implementation_id,
+            "callable_identity": callable_identity,
+            "target_catalog_allowed": target_catalog_allowed,
+            "target_identity_valid": target_identity_valid,
         }
         # 中文学习注释：observer-owned proof 只能证明“目标 callable 被看见”。
         # runtime_e2e 还必须证明这次调用属于 dispatcher 管理的同一条 route；
         # 因此 proof 同时绑定 route/action_type/handler/target/call，禁止跨 route
-        # 或跨 handler 复用一个真实 proof 来伪造端到端。
+        # 或跨 handler 复用一个真实 proof 来伪造端到端。target_module 仍只是
+        # 字符串标签；只有 callable_identity 与 catalog descriptor 同时匹配，
+        # target_catalog_allowed 才能为 true。
+        route = self._route_registry.get(route_id) or {}
         self._proof_registry[proof_id] = {
             "route_id": route_id,
             "action_id": action_id,
             "action_type": action_type,
             "handler_name": handler_name,
+            "handler_identity": handler_identity,
             "target_module": target_module,
             "call_id": call_id,
             "observer_identity": self.observer_identity,
             "observation_source": "module_spy",
             "observation_independent": True,
+            "target_catalog_id": trusted_target_catalog_id,
+            "target_handle": trusted_target_handle,
+            "target_descriptor_id": trusted_target_descriptor_id,
+            "invocation_adapter_id": trusted_invocation_adapter_id,
+            "implementation_id": trusted_implementation_id,
+            "callable_identity": callable_identity,
+            "target_catalog_allowed": target_catalog_allowed,
+            "target_identity_valid": target_identity_valid,
+            "dispatcher_owned": route.get("dispatcher_owned") is True,
         }
         return ObservedModuleCall(
             value=value,
@@ -143,6 +796,12 @@ class RuntimeActionModuleObserver:
         handler_name: str,
         target_module: str,
         result_id: str,
+        target_catalog_id: str,
+        target_handle: str,
+        target_descriptor_id: str,
+        invocation_adapter_id: str,
+        implementation_id: str,
+        callable_identity: str,
     ) -> bool:
         proof_id = str(proof.get("proof_id") or "")
         registered = cls._proof_registry.get(proof_id)
@@ -155,20 +814,58 @@ class RuntimeActionModuleObserver:
         if not result:
             return False
         call_id = invocation_proof.get("call_id")
+        proof_id = proof.get("proof_id")
+        handler_identity = str(route.get("handler_identity") or "")
         return (
-            route.get("action_id") == action_id
+            route.get("dispatcher_owned") is True
+            and result.get("dispatcher_owned") is True
+            and registered.get("dispatcher_owned") is True
+            and result.get("target_catalog_allowed") is True
+            and registered.get("target_catalog_allowed") is True
+            and result.get("target_identity_valid") is True
+            and registered.get("target_identity_valid") is True
+            and RuntimeActionTargetCatalog.is_allowed_descriptor(
+                action_type=action_type,
+                handler_name=handler_name,
+                handler_identity=handler_identity,
+                target_module=target_module,
+                target_catalog_id=target_catalog_id,
+                target_handle=target_handle,
+                target_descriptor_id=target_descriptor_id,
+                invocation_adapter_id=invocation_adapter_id,
+                implementation_id=implementation_id,
+                callable_identity=callable_identity,
+            )
+            and route.get("action_id") == action_id
             and route.get("action_type") == action_type
             and route.get("handler_name") == handler_name
             and result.get("route_id") == route_id
             and result.get("action_id") == action_id
             and result.get("action_type") == action_type
             and result.get("handler_name") == handler_name
+            and result.get("handler_identity") == handler_identity
+            and result.get("target_module") == target_module
+            and result.get("proof_id") == proof_id
+            and result.get("call_id") == call_id
+            and result.get("target_catalog_id") == target_catalog_id
+            and result.get("target_handle") == target_handle
+            and result.get("target_descriptor_id") == target_descriptor_id
+            and result.get("invocation_adapter_id") == invocation_adapter_id
+            and result.get("implementation_id") == implementation_id
+            and result.get("callable_identity") == callable_identity
             and registered.get("route_id") == route_id
             and registered.get("action_id") == action_id
             and registered.get("action_type") == action_type
             and registered.get("handler_name") == handler_name
+            and registered.get("handler_identity") == handler_identity
             and registered.get("target_module") == target_module
             and registered.get("call_id") == call_id
+            and registered.get("target_catalog_id") == target_catalog_id
+            and registered.get("target_handle") == target_handle
+            and registered.get("target_descriptor_id") == target_descriptor_id
+            and registered.get("invocation_adapter_id") == invocation_adapter_id
+            and registered.get("implementation_id") == implementation_id
+            and registered.get("callable_identity") == callable_identity
             and registered.get("observer_identity") == proof.get("observer_identity")
             and registered.get("observation_source") == proof.get("observation_source")
             and registered.get("observation_independent") is True
@@ -190,9 +887,21 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     route_id = str(evidence.get("dispatcher_route_id") or "")
     result_id = str(evidence.get("dispatcher_result_id") or "")
     target_module = evidence.get("target_module")
+    target_catalog_id = str(evidence.get("target_catalog_id") or "")
+    target_handle = str(evidence.get("target_handle") or "")
+    target_descriptor_id = str(evidence.get("target_descriptor_id") or "")
+    invocation_adapter_id = str(evidence.get("invocation_adapter_id") or "")
+    implementation_id = str(evidence.get("implementation_id") or "")
+    callable_identity = str(evidence.get("callable_identity") or "")
     if not action_id or not action_type or not handler_name or not route_id or not result_id or not target_module:
         return False
     if evidence.get("dispatcher_result_issued") is not True:
+        return False
+    if evidence.get("target_catalog_allowed") is not True or not target_catalog_id or not target_handle:
+        return False
+    if evidence.get("target_identity_valid") is not True:
+        return False
+    if not target_descriptor_id or not invocation_adapter_id or not implementation_id or not callable_identity:
         return False
     required_true = (
         "dispatcher_routed",
@@ -231,6 +940,24 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
         return False
     if proof.get("linked_call_id") != invocation_proof.get("call_id"):
         return False
+    if proof.get("linked_dispatcher_result_id") != result_id:
+        return False
+    if proof.get("target_catalog_allowed") is not True:
+        return False
+    if proof.get("target_identity_valid") is not True:
+        return False
+    if proof.get("target_catalog_id") != target_catalog_id:
+        return False
+    if proof.get("linked_target_handle") != target_handle:
+        return False
+    if proof.get("target_descriptor_id") != target_descriptor_id:
+        return False
+    if proof.get("invocation_adapter_id") != invocation_adapter_id:
+        return False
+    if proof.get("implementation_id") != implementation_id:
+        return False
+    if proof.get("callable_identity") != callable_identity:
+        return False
     if proof.get("observer_identity") == evidence.get("handler_name"):
         return False
     if proof.get("observation_source") == "handler_self_report":
@@ -244,6 +971,12 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
         handler_name=handler_name,
         target_module=str(target_module),
         result_id=result_id,
+        target_catalog_id=target_catalog_id,
+        target_handle=target_handle,
+        target_descriptor_id=target_descriptor_id,
+        invocation_adapter_id=invocation_adapter_id,
+        implementation_id=implementation_id,
+        callable_identity=callable_identity,
     ):
         return False
 

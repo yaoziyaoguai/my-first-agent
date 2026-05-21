@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Iterable
 
@@ -67,7 +68,7 @@ class SubAgentDelegateL0Handler:
             target_module="SubAgentExecutor",
             function_called="delegate_once",
             call_signature="delegate_once(SubAgentRequest, SubAgentRegistry)",
-            call=lambda: delegate_once(subagent_request, self._registry),
+            call=partial(delegate_once, subagent_request, self._registry),
         )
         run = observed.value
         adjudication = run.adjudication

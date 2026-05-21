@@ -368,3 +368,191 @@
 - `.venv/bin/python -m pytest tests/runtime_integration -q`：`67 passed`。
 - `HOME=/private/tmp/my-first-agent-audit-home .venv/bin/python -m pytest -q`：
   `2840 passed, 14 skipped`。
+
+## Phase 9 - dispatcher result/proof provenance hardening
+
+### 本轮修复目标
+
+- 起始 HEAD：`603bbda fix(runtime): bind runtime proof to dispatcher route provenance`
+- 独立复审指出上一轮仍不够：route/result registry 是 public writable，而且
+  `dispatcher_result_id` 没有绑定 `proof_id/call_id/target_module`。
+- 本轮只修 runtime provenance 与 fake capability row contract；不接 `core.chat()` /
+  `loop.py`，不修 P3 harness island。
+
+### 为什么上一轮不够
+
+- 上一轮要求 classifier 同时看到 route registry、result registry 与 observer proof registry。
+  但 `register_dispatch_route()` / `register_dispatch_result()` 仍是 public classmethod，
+  外部代码可以写入形状正确的 route/result mapping，再调用 observer 生成 proof。
+- result registry 只绑定 route/action/action_type/handler，未绑定本次 result 使用的
+  `proof_id`、`invocation_proof.call_id`、`target_module`。因此同一 route 内两个
+  dispatcher-issued result 之间可能发生 proof/result 交叉复用。
+
+### 修复设计
+
+- public `register_dispatch_route()` / `register_dispatch_result()` 保留为非可信登记入口，
+  只用于表达手工/历史路径；它们写入的 registry entry 标记为 `dispatcher_owned=false`，
+  classifier 不会把它们作为 runtime_e2e 信任根。
+- `RuntimeActionDispatcher` 改用内部发行入口 `_issue_dispatch_route()`。
+- `RuntimeActionContext.result()` 改用 `_issue_dispatch_result()`，并把
+  `dispatcher_result_id` 与 `target_module`、`proof_id`、`call_id` 绑定。
+- `context.result()` 在 proof dict 中写入 `linked_dispatcher_result_id`。classifier 现在要求：
+  evidence result id、proof linked result id、result registry 绑定的 proof/call/target
+  三者一致。
+- observer proof 本身仍只证明模块调用被观测；runtime_e2e 需要 dispatcher-owned route
+  和 dispatcher-owned result 同时成立，防止普通 dict 字段组合或 public registry 写入伪造。
+
+### 新增红队负例
+
+- `test_public_registry_forged_route_and_result_are_not_runtime_e2e`
+  - 修复前失败：public registry + observer proof 可以被 classifier 判为 runtime_e2e。
+  - 修复后通过：public registry entry 不是 dispatcher-owned provenance。
+- `test_same_route_different_result_transplant_is_not_runtime_e2e`
+  - 修复前失败：同 route 内 result A 的 proof 可移植到 result B 的 result id。
+  - 修复后通过：result registry 必须匹配 proof_id/call_id/target_module。
+- `test_fake_overlay_matrix_row_rejects_dangerous_tool_function_invoked_true`
+  - 保护 dogfood fake row 只能证明 blocked path，危险函数被调用不能通过。
+- `test_crafted_tool_registry_shaped_event_does_not_satisfy_fake_overlay_row`
+  - ToolRegistry-shaped crafted event 不能污染 fake overlay row 或 production row。
+
+### Deferred risks
+
+- `runtime_integration` 仍是 harness foundation，不是 full core.chat integration。
+- core loop / provider / tool executor / checkpoint / memory 的真实 hook 接入仍需独立 scoped
+  pack 和独立审计；本轮没有扩大到这些边界。
+- Python 语言层无法阻止同进程恶意代码访问 private method；本轮的 contract 是 classifier 不再信任
+  public writable registry，不把 public mapping 当作 runtime_e2e 信任根。
+
+### Stop conditions
+
+- 未读取 `.env`、`agent_log.jsonl`、真实 sessions/runs、`memory/episodes/*.jsonl`。
+- 未调用真实 LLM、真实外部 API、真实 shell-like tool。
+- 未 push，未 tag，未改 remote。
+
+## Phase 10 - label-level target catalog hardening
+
+### Previous gap
+
+- Phase 9 已关闭 route/result/proof/call/result_id 的主要伪造路径：
+  public route/result registry 不再是信任根，same-route different-result transplant
+  会因为 result 绑定的 `proof_id/call_id/target_module` 不一致而失败。
+- 但这仍没有证明 `target_module` 的身份可信。handler 仍可调用任意 callable，
+  然后把 `target_module` 字符串写成 `ToolRegistry`、`SkillLoader`、
+  `SkillRegistry` 或 `CheckpointSafeSummary`。如果 classifier 只看字符串自洽，
+  就会把 handler-chosen label 误当成生产 target identity。
+
+### New fix
+
+- 新增 `RuntimeActionTargetCatalog`，用代码内置的 dispatcher/registry-owned catalog
+  约束 `action_type + handler identity/name + target_module`。
+- `RuntimeActionContext.observe_module_call()` 会通过 catalog 解析 target binding；
+  只有命中的 binding 才能获得 `target_handle` / `target_catalog_id`。
+- public `RuntimeActionModuleObserver.observe()` 保持兼容，但它只能生成
+  `target_catalog_allowed=false` 的非可信 proof，不能 mint trusted target identity。
+- `context.result()` 把 `dispatcher_result_id` 与 `proof_id`、`call_id`、
+  `target_module`、`target_handle` 绑定到 result registry。
+- classifier 现在要求 evidence、target proof、proof registry、result registry、
+  target catalog 全部一致；缺少 target handle/catalog 或 catalog 不允许时 fail closed。
+- 事后审计结论：这一阶段只解决了 label-level catalog，仍不能证明实际被执行的
+  callable / target object provenance。`target_handle` 当时仍来源于
+  `handler identity + target_module`，而不是 catalog-owned implementation descriptor。
+
+### Red-team negatives added
+
+- `test_forged_target_label_as_tool_registry_is_not_runtime_e2e`
+- `test_forged_target_label_as_skill_target_is_not_runtime_e2e`
+- `test_forged_target_label_as_checkpoint_is_not_runtime_e2e`
+- `test_handler_chosen_arbitrary_target_module_cannot_become_trusted_by_matching_strings`
+- `test_missing_allowed_target_catalog_fails_closed`
+- `test_public_registry_cannot_register_trusted_target_identity`
+- `test_handler_evidence_update_cannot_override_dispatcher_result_id`
+
+### Capability and fake overlay boundary
+
+- `ToolGateHandler` 的 production `ToolRegistry` target 和 dogfood
+  `DogfoodFakeToolOverlay` target 是不同 catalog entries。
+- target catalog 只证明 target identity；capability matrix 仍必须执行 row-level
+  contract，不能因为 fake overlay 有 valid proof 就满足 production ToolRegistry row。
+- fake overlay `dangerous_tool_function_invoked=true` 与 crafted ToolRegistry-shaped
+  fake row 仍由 matrix negative tests 锁住。
+
+### Remaining deferred P3
+
+- `runtime_integration` 仍是 harness foundation，不是 full `core.chat()` integration。
+- 本轮没有接入 core loop、真实 provider、真实 tool executor、checkpoint schema 或
+  Memory governance。
+- 不能把本轮 target provenance 修复表述为 full production runtime integration complete。
+
+## Phase 11 - target descriptor and callable provenance hardening
+
+### 本轮 P1/P2
+
+- P1: Target catalog proves allowed label, not actual target callable provenance.
+  允许的 handler 仍可以传入 `lambda`，再把 `target_module` 写成 `ToolRegistry`、
+  `SkillLoader` 或 `CheckpointSafeSummary`。
+- P2: 缺少 catalog-allowed handler forging arbitrary callable 的红队测试。
+- P2: Phase 10 notes 过度声称 target identity 已修复；真实情况只是 label-level
+  catalog 和 handle。
+
+### 为什么 label-level catalog 不够
+
+- `action_type + handler identity + target_module` 只能说明“这个 handler 被允许报告这个
+  target label”。
+- 它不能说明 observer 这次包裹执行的 callable 就是 catalog 绑定的真实 target
+  implementation。
+- 因此合法 handler 仍可能调用 arbitrary lambda，但把 proof label 写成生产 target。
+  只要 route/result/proof 字段自洽，旧 classifier 就可能把假 target 当成 runtime_e2e。
+
+### Callable / descriptor provenance 设计
+
+- `RuntimeActionTargetDescriptor` 现在绑定：
+  - `target_catalog_id`
+  - `target_handle`
+  - `target_descriptor_id`
+  - `invocation_adapter_id`
+  - `implementation_id`
+  - `callable_identity`
+  - allowed `action_type`
+  - allowed handler name / handler identity
+  - allowed `target_module`
+- `RuntimeActionContext.observe_module_call()` 仍保留兼容入口，但 trusted path 不再只看
+  target label。context 会解析 descriptor，observer 会计算实际 `call` 的
+  `callable_identity`。
+- 只有实际 callable identity 与 descriptor 绑定值一致时，observer 才会发行：
+  - `target_catalog_allowed=true`
+  - `target_identity_valid=true`
+  - `target_handle`
+  - `target_descriptor_id`
+  - `invocation_adapter_id`
+  - `implementation_id`
+- callable 不匹配时，调用仍会被 observer 记录为 subsystem evidence，但 proof
+  `target_catalog_allowed=false`、`target_identity_valid=false`，不能升级 runtime_e2e。
+- public `RuntimeActionModuleObserver.observe()` 不接收 descriptor，只能生成 untrusted
+  proof；即使 target label 写成 `ToolRegistry`，也没有 trusted handle/descriptor。
+- classifier 现在要求 evidence、target proof、proof registry、result registry 与
+  catalog descriptor 中的 target descriptor/callable/adapter provenance 全部一致。
+
+### 新增红队测试
+
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_tool_registry`
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_skill_loader`
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`
+- `test_correct_target_label_wrong_callable_identity_is_not_runtime_e2e`
+- `test_correct_target_label_without_target_descriptor_is_not_runtime_e2e`
+- `test_public_observer_correct_label_arbitrary_callable_is_not_runtime_e2e`
+- `test_descriptor_handle_without_descriptor_approved_call_is_not_runtime_e2e`
+- `test_target_descriptor_mismatch_across_route_result_proof_is_not_runtime_e2e`
+
+### Architecture island status
+
+- `runtime_integration` 仍是 harness foundation。
+- 本轮没有声称 full `core.chat()` integration。
+- catalog-owned synthetic adapters 是 test/dogfood harness target，不是生产核心 loop
+  接入完成的证明。
+- core.chat / real loop integration 仍 deferred，需要独立 scoped pack 和独立审计。
+
+### Stop conditions
+
+- 未读取 `.env`、`agent_log.jsonl`、真实 sessions/runs、`memory/episodes/*.jsonl`。
+- 未调用真实 LLM、真实外部 API 或真实 shell-like tool。
+- 未 push，未 tag。

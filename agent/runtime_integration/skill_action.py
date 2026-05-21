@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -129,7 +130,7 @@ class SkillRuntimeActionHandler:
             target_module="SkillLoader",
             function_called="SkillLoader.load_body",
             call_signature="load_body(skill_id: str)",
-            call=lambda: self._loader.load_body(str(selected_skill_id)),
+            call=partial(self._loader.load_body, str(selected_skill_id)),
         )
         body = str(observed.value)
         result_payload = {

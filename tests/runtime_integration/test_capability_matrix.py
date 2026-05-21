@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 
 from scripts.dogfood_e2e_runtime import (
     CAPABILITY_MODULE_MAPPING,
@@ -20,6 +21,12 @@ from agent.runtime_integration import (
     RuntimeActionRequest,
     RuntimeActionType,
 )
+
+
+def _matrix_target_value(value: dict) -> dict:
+    """catalog-owned synthetic adapter for capability matrix harness rows."""
+
+    return dict(value)
 
 
 def _plain(value):
@@ -42,7 +49,7 @@ class _MatrixObservedHandler:
             target_module=self._target_module,
             function_called=f"{self._target_module}.run",
             call_signature="run()",
-            call=lambda: {"ok": True},
+            call=partial(_matrix_target_value, {"ok": True}),
         )
         return context.success(
             handler_name=type(self).__name__,
@@ -247,6 +254,16 @@ def test_fake_overlay_matrix_row_rejects_production_capability_true() -> None:
     assert fake_overlay["evidence_level"] != "runtime_e2e"
 
 
+def test_fake_overlay_matrix_row_rejects_dangerous_tool_function_invoked_true() -> None:
+    """dogfood fake row 只能证明 blocked path，绝不能证明危险函数被调用后仍通过。"""
+
+    matrix = _matrix_for_event(_fake_overlay_event(dangerous_tool_function_invoked=True))
+    fake_overlay = next(row for row in matrix if row["capability"] == "Dogfood fake overlay blocked path")
+
+    assert fake_overlay["evidence_level"] != "runtime_e2e"
+    assert fake_overlay["e2e_verified"] != "yes"
+
+
 def test_production_tool_registry_row_rejects_fake_tool_name() -> None:
     event = _runtime_e2e_event(
         target_module="ToolRegistry",
@@ -282,6 +299,32 @@ def test_matrix_does_not_pass_fake_row_solely_due_to_registered_proof() -> None:
     )
 
     assert event["target_module_proof"]["proof_id"].startswith("proof:")
+    assert fake_overlay["evidence_level"] != "runtime_e2e"
+
+
+def test_crafted_tool_registry_shaped_event_does_not_satisfy_fake_overlay_row() -> None:
+    """ToolRegistry-shaped event 不能把 fake overlay row 伪造成 production capability。"""
+
+    event = _runtime_e2e_event(
+        target_module="ToolRegistry",
+        action_type=RuntimeActionType.TOOL_REQUEST,
+        evidence_extra={
+            "capability_type": "production_tool_registry",
+            "production_capability": True,
+            "requested_tool_name": "fake.write_file",
+            "production_registry_found": True,
+            "dogfood_overlay_found": True,
+            "overlay_tool_name": "fake.write_file",
+            "resolved_test_tool_name": "fake.write_file",
+            "dangerous_tool_function_invoked": False,
+            "decision": "blocked",
+        },
+    )
+    matrix = _matrix_for_event(event)
+    production = next(row for row in matrix if row["capability"] == "ToolRegistry gate")
+    fake_overlay = next(row for row in matrix if row["capability"] == "Dogfood fake overlay blocked path")
+
+    assert production["evidence_level"] != "runtime_e2e"
     assert fake_overlay["evidence_level"] != "runtime_e2e"
 
 

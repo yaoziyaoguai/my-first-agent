@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from agent.runtime_integration.dispatcher import RuntimeActionContext
@@ -10,6 +11,19 @@ from agent.runtime_integration.schema import RuntimeActionRequest
 
 
 _FORBIDDEN_TOOL_NAMES = frozenset({"bash", "shell", "run_shell"})
+
+
+def _lookup_tool_registry_entry(tool_name: str) -> dict[str, Any] | None:
+    """catalog descriptor 绑定的 ToolRegistry lookup adapter。
+
+    中文学习边界：RuntimeAction proof 需要证明实际 callable provenance，不能让
+    handler 用 lambda 把任意逻辑贴上 `ToolRegistry` 标签。这个小 adapter 是
+    catalog-owned implementation identity，不执行目标工具函数。
+    """
+
+    from agent.tool_registry import TOOL_REGISTRY
+
+    return TOOL_REGISTRY.get(tool_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +88,7 @@ class ToolGateHandler:
             target_module="ToolRegistry",
             function_called="ToolRegistry.lookup_and_risk_check",
             call_signature="lookup_and_risk_check(tool_name: str)",
-            call=lambda: TOOL_REGISTRY.get(tool_name),
+            call=partial(_lookup_tool_registry_entry, tool_name),
         )
         entry = observed.value
         visible_names = {item.get("name") for item in get_model_visible_tools()}

@@ -52,6 +52,8 @@ HOME=/private/tmp/my-first-agent-phase1-home \
 12. event evidence 的 `external_side_effects == false`
 13. report `errors` 列表为空
 
+**注意**：PASS 标准 #8-12（`target_module`、`auto_approved`、`not_confirmed`、`provider_kind`、`external_side_effects`）引用的是 event payload/evidence 的内部字段，当前顶层 report JSON（`/private/tmp/phase1_memory_anchor_dogfood_report.json`）可能不直接包含这些字段。人工判定 PASS/FAIL 时需要检查 `action_log` 中每个 event 的详细内容，而非仅检查顶层 report JSON。Dogfood 脚本应确保 report 展开这些字段以便自动化判定。
+
 ### 2.5 如何判断 FAIL
 
 任一条件不满足即为 FAIL。
@@ -75,6 +77,15 @@ HOME=/private/tmp/my-first-agent-phase1-home \
   PHASE1_REPORT_PATH=/private/tmp/phase1_memory_anchor_real_smoke_report.txt \
   .venv/bin/python scripts/dogfood_memory_anchor_real_smoke.py
 ```
+
+### 3.1.1 前置条件：hook 参数化
+
+**当前实现状态**：`agent/loop.py` 中 `_try_phase1_turn_end_runtime_action` 将 `provider_kind` 和 `external_side_effects` 硬编码为 `"fake"` / `False`（`loop.py:78-79`）。Real smoke dogfood 要在 `core.chat()` 路径中产生 `provider_kind != "fake"` 的 evidence，需要以下任一方式：
+
+- **(A) hook 参数化**：`LoopDependencies` 新增 provider 信息字段，`_try_phase1_turn_end_runtime_action` 据此设置正确的 `provider_kind` 和 `external_side_effects`（推荐）
+- **(B) dogfood 自行构造**：real smoke 脚本自行构造 `RuntimeActionRequest` 并注入正确的 evidence 字段（但需额外验证仍走了 `core.chat()` 路径，否则降级到 `harness_runtime_e2e`）
+
+推荐方式 (A)。此依赖必须在 real smoke dogfood 脚本实现前解决。
 
 ### 3.2 需要用户授权
 

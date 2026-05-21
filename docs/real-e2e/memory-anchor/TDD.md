@@ -9,6 +9,22 @@
 - `tests/runtime_integration/test_memory_anchor_fake.py` — fake provider path
 - `tests/runtime_integration/test_memory_anchor_real.py` — real provider smoke (gated)
 
+### 0.1 与现有测试文件的关系
+
+已有 `tests/runtime_integration/test_phase1_real_core_loop.py`（15 个测试），其中：
+
+- `TestCoreChatWiring`（2 个测试）真正调用 `core.chat()` + `SpyDispatcher` 验证 core loop → dispatcher 接线，与本 TDD §1.1（`test_memory_anchor_fake_provider_core_chat_triggers_pending_review`）和 §1.2（`test_memory_anchor_uses_same_core_path_not_fake_loop`）功能重叠
+- `TestRealCoreLoopClassification` 验证 `classify_evidence_level()` 的 harness vs real core loop 区分，与本 TDD §1.6（`test_memory_anchor_direct_dispatch_is_harness_not_real_core_loop`）功能重叠
+- 其余 11 个测试验证 dispatcher evidence chain（route/result/proof 绑定）、catalog identity、handler 行为等，属于 RuntimeAction 基础设施测试，不在本 TDD 的 Memory Anchor 范围内
+
+**本 TDD 新建的测试文件与现有文件的关系**：
+
+- `test_memory_anchor_fake.py` 是 **补充**，不是替代。它新增 Memory Anchor 特有的边界测试（§1.3 auto_approved 约束、§1.4 不读 episodes、§1.5 secret-like 过滤），这些在现有 `test_phase1_real_core_loop.py` 中不存在
+- §1.1 和 §1.6 与现有测试功能重叠 —— 实现时有三个选项：(A) 在 `test_memory_anchor_fake.py` 中重新实现（更清晰的测试文件边界，推荐）；(B) 复用现有测试，不在新文件中重复；(C) 将现有测试从 `test_phase1_real_core_loop.py` 迁移到新文件
+- `test_memory_anchor_real.py` 是全新文件，现有测试中没有 real provider smoke 覆盖
+
+**实现时推荐选项 A**：在 `test_memory_anchor_fake.py` 中重新实现所有 6 个测试，保持 Memory Anchor 测试的完整性和自包含性。`test_phase1_real_core_loop.py` 保持不变，作为 Phase 1 基础设施的独立验证。
+
 ## 1. Fake provider path tests
 
 这些测试**必须默认运行**，不依赖 `.env` 或真实 API。
@@ -73,7 +89,7 @@
 
 **架构保护**：无论 provider 是什么，memory 绝不自动批准。
 
----
+**关注点区分**：本测试验证的是 `MemoryTurnEndProposalHandler` 的 `auto_approved` 硬编码约束（`memory_hook.py:77`），不是 `chat()` 的 `_memory_runtime.evaluate_user_text` 行为。如果 fallback 到直接 `dispatcher.route()`，仍能有效测试 handler 约束 —— 此时丢失的只是 `core_loop_invoked` evidence（不影响 `auto_approved` 断言）。
 
 ### 1.4 `test_memory_anchor_does_not_read_memory_episodes`
 
@@ -110,6 +126,8 @@
 
 **架构保护**：secret-like filter 在 memory proposal 路径中仍然有效。
 
+**关注点区分**：本测试验证的是 `MemoryTurnEndProposalHandler` 中 `contains_secret_like()` 的调用和 `should_not_remember` 处置（`memory_hook.py:35-50`），不是 `chat()` 的 `_memory_runtime.evaluate_user_text` 行为。如果 fallback 到直接 `dispatcher.route()`，仍能有效测试 handler 的 secret-like 过滤逻辑 —— 此时丢失的只是 `core_loop_invoked` evidence（不影响 secret-like 断言）。测试注释中必须说明 fallback 原因（`_memory_runtime` 拦截早于 loop），避免未来读者认为"走 direct route 也能算 core loop test"。
+
 ---
 
 ### 1.6 `test_memory_anchor_direct_dispatch_is_harness_not_real_core_loop`
@@ -125,6 +143,14 @@
 5. 断言 `result.evidence.get("core_loop_invoked") is not True`
 
 **架构保护**：防止 memory proposal 测试退化为 pure harness test。
+
+---
+
+### 1.7 测试输入与 DeterministicMemoryPolicy 的耦合
+
+**注意**：§1.1、§1.2、§1.3 的测试输入（"以后叫我小王"等）依赖 `DeterministicMemoryPolicy` 的当前 trigger rules（"记住"/"忘记"/"remember" 等 pattern）命中 `RETAIN` 或 `UPDATE` 决策。如果 policy 规则变更（如新增/移除 trigger pattern），这些输入可能从"触发 proposal"变为 `no_action`，导致 `pending_review` 相关断言失败。
+
+这不是设计缺陷 —— fake provider 测试必须依赖 deterministic policy —— 但测试维护者应知晓这个耦合关系。如果 policy 变更导致 fake 测试失败，优先检查测试输入是否仍命中 policy 的 trigger rules，而非假设 handler 行为退化。
 
 ---
 

@@ -94,6 +94,8 @@ Fake mode 是**默认安全模式**，可以在任何环境运行，不需要用
 
 Real mode 需要**用户明确授权**才能运行。默认 skip/gated。
 
+**实现依赖**：当前 `_try_phase1_turn_end_runtime_action`（`agent/loop.py`）中 `provider_kind` 和 `external_side_effects` 被硬编码为 `"fake"` / `False`。Real smoke 要在 `core.chat()` 路径中产生 `provider_kind != "fake"` 的 evidence，需要先将 hook 参数化（从 `LoopDependencies` 传入 provider 信息），或在 real smoke dogfood 脚本中走不同的 evidence 注入路径。此依赖必须在 real smoke 实现前解决。详见 DOGFOOD_PLAN.md §3。
+
 ## 4. Memory semantics
 
 ### 4.1 Phase 1 已建立的约束（不得退步）
@@ -150,7 +152,7 @@ should_not_remember  ≠  forget
 
 | 级别 | 条件 | 含义 |
 |------|------|------|
-| `real_core_loop_runtime_e2e` | `core_loop_invoked=true` + valid `target_module_proof` | fake provider, real loop |
+| `real_core_loop_runtime_e2e` | `core_loop_invoked=true` + valid `target_module_proof` | real loop 路径（当前仅 fake provider 可达，real provider 需 hook 参数化） |
 | `harness_runtime_e2e` | `target_module_proof` 完整但无 `core_loop_invoked` | dogfood 直接 dispatcher |
 | `subsystem_integration` | `dispatcher_routed` 但缺 target_module_proof | 部分接线 |
 | `deterministic_baseline` | deterministic 基线 | 单元测试级 |
@@ -299,6 +301,10 @@ turn-end hook 触发
 DeterministicMemoryPolicy.decide()
       │
       ├── no_action ──────────────► 无 proposal（本轮无可记忆内容）
+      │                                disposition: no_action
+      │                                pending_review: false
+      │                                仍产生 RuntimeActionEvent（进入 action_log）
+      │                                不进入 pending_review
       │
       ├── should_not_remember ────► 被拒绝（secret-like / policy reject）
       │                                disposition: should_not_remember

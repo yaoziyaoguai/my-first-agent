@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -126,11 +125,10 @@ class SkillRuntimeActionHandler:
                 error_safe_preview="selected skill has no visible allowed tools",
             )
 
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="SkillLoader",
-            function_called="SkillLoader.load_body",
-            call_signature="load_body(skill_id: str)",
-            call=partial(self._loader.load_body, str(selected_skill_id)),
+            operation="load_body",
+            payload={"loader": self._loader, "skill_id": str(selected_skill_id)},
         )
         body = str(observed.value)
         result_payload = {

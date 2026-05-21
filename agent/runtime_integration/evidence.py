@@ -8,7 +8,7 @@ handler、dogfood report 或 capability matrix 各自发明通过条件。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any, Callable, ClassVar, Mapping
@@ -27,20 +27,29 @@ class RuntimeActionTargetDescriptor:
     """dispatcher/catalog-owned target implementation descriptor.
 
     中文学习边界：`target_module` 只是报告标签，不能证明真实 target identity。
-    descriptor 同时绑定 handler、action、目标标签和可调用实现指纹；只有实际
-    callable 与 descriptor 匹配时，observer 才能发行 trusted target proof。
+    descriptor 同时绑定 handler、action、目标标签和 catalog-owned invocation
+    adapter；只有通过 descriptor adapter 执行的调用才能发行 trusted proof。
     """
 
     action_type: str
     handler_name: str
     handler_identity: str
     target_module: str
+    operation: str
     target_catalog_id: str
     target_handle: str
     target_descriptor_id: str
     invocation_adapter_id: str
     implementation_id: str
     callable_identity: str
+    function_called: str
+    call_signature: str
+    adapter: Callable[[Mapping[str, Any]], Any] = field(repr=False, compare=False)
+
+    def invoke(self, payload: Mapping[str, Any]) -> Any:
+        """执行 catalog-owned invocation adapter，而不是 handler 提供的 callable。"""
+
+        return self.adapter(payload)
 
 
 def _function_identity(module_name: str, qualname: str) -> str:
@@ -78,28 +87,110 @@ def _callable_identity(call: Callable[[], Any]) -> str:
     return _function_identity(module_name, qualname)
 
 
+def _payload_value_adapter(payload: Mapping[str, Any]) -> Any:
+    """test/dogfood harness 用的 catalog-owned synthetic adapter。"""
+
+    value = payload.get("value")
+    return dict(value) if isinstance(value, Mapping) else value
+
+
+def _lookup_tool_registry_entry_adapter(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """ToolRegistry lookup adapter，不执行目标工具函数。"""
+
+    from agent.tool_registry import TOOL_REGISTRY
+
+    return TOOL_REGISTRY.get(str(payload.get("tool_name") or ""))
+
+
+def _dogfood_overlay_block_adapter(payload: Mapping[str, Any]) -> dict[str, Any]:
+    overlay_tool = payload.get("overlay_tool")
+    if type(overlay_tool).__module__ != "agent.runtime_integration.tool_gate":
+        raise TypeError("overlay_tool must be DogfoodOverlayTool")
+    if type(overlay_tool).__qualname__ != "DogfoodOverlayTool":
+        raise TypeError("overlay_tool must be DogfoodOverlayTool")
+    return overlay_tool.block()
+
+
+def _skill_loader_load_body_adapter(payload: Mapping[str, Any]) -> str:
+    from agent.skill_system.loader import SkillLoader
+
+    loader = payload.get("loader")
+    if not isinstance(loader, SkillLoader):
+        raise TypeError("loader must be SkillLoader")
+    return str(loader.load_body(str(payload.get("skill_id") or "")))
+
+
+def _memory_policy_decide_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.memory_policy import DeterministicMemoryPolicy
+
+    policy = payload.get("policy")
+    if not isinstance(policy, DeterministicMemoryPolicy):
+        raise TypeError("policy must be DeterministicMemoryPolicy")
+    return policy.decide(str(payload.get("user_message") or ""))
+
+
+def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
+    from agent.display_events import mask_user_visible_secrets
+
+    masked = mask_user_visible_secrets(str(payload.get("runtime_state_summary") or ""))
+    if len(masked) > 2000:
+        return masked[:2000]
+    return masked
+
+
+def _streaming_collect_response_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.provider.streaming import ProviderStreamEvent, collect_stream_response
+
+    events = payload.get("events") or ()
+    if not all(isinstance(event, ProviderStreamEvent) for event in events):
+        raise TypeError("events must be ProviderStreamEvent instances")
+    return collect_stream_response(list(events))
+
+
+def _subagent_delegate_once_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.subagent_system.delegation import delegate_once
+    from agent.subagent_system.registry import SubAgentRegistry
+    from agent.subagent_system.request import SubAgentRequest
+
+    subagent_request = payload.get("subagent_request")
+    registry = payload.get("registry")
+    if not isinstance(subagent_request, SubAgentRequest):
+        raise TypeError("subagent_request must be SubAgentRequest")
+    if not isinstance(registry, SubAgentRegistry):
+        raise TypeError("registry must be SubAgentRegistry")
+    return delegate_once(subagent_request, registry)
+
+
 def _descriptor(
     action_type: str,
     handler_identity: str,
     target_module: str,
     *,
+    operation: str,
     invocation_adapter_id: str,
-    callable_identity: str,
+    adapter: Callable[[Mapping[str, Any]], Any],
+    function_called: str,
+    call_signature: str,
     implementation_id: str | None = None,
 ) -> RuntimeActionTargetDescriptor:
     handler_name = handler_identity.rsplit(".", 1)[-1]
-    catalog_id = f"{action_type}:{handler_identity}:{target_module}"
+    catalog_id = f"{action_type}:{handler_identity}:{target_module}:{operation}"
+    callable_identity = _callable_identity(adapter)
     return RuntimeActionTargetDescriptor(
         action_type=action_type,
         handler_name=handler_name,
         handler_identity=handler_identity,
         target_module=target_module,
+        operation=operation,
         target_catalog_id=catalog_id,
         target_handle=f"target:{catalog_id}",
         target_descriptor_id=f"descriptor:{catalog_id}:{invocation_adapter_id}",
         invocation_adapter_id=invocation_adapter_id,
         implementation_id=implementation_id or invocation_adapter_id,
         callable_identity=callable_identity,
+        function_called=function_called,
+        call_signature=call_signature,
+        adapter=adapter,
     )
 
 
@@ -109,24 +200,29 @@ def _test_descriptors(
     action_type: str,
     targets: tuple[str, ...],
     *,
-    callable_qualname: str,
+    operation: str,
     invocation_adapter_id: str,
+    function_called: str | None = None,
+    call_signature: str = "run()",
 ) -> tuple[RuntimeActionTargetDescriptor, ...]:
     """为 runtime_integration harness 测试声明静态 target 身份。
 
     中文学习边界：这些 test-only descriptor 仍是代码内置 catalog，不是 public
     API。它们允许 harness 生成合法 synthetic target proof，但任意 handler
-    传入 lambda 时 callable_identity 不匹配，仍不能伪造成可信 target。
+    通过 `invoke_registered_target()` 才能使用 `_payload_value_adapter`。handler
+    传入 lambda 的兼容路径不会解析 descriptor，仍不能伪造成可信 target。
     """
 
-    callable_identity = _partial_identity(_function_identity(module_name, callable_qualname))
     return tuple(
         _descriptor(
             action_type,
             f"{module_name}.{handler_name}",
             target,
+            operation=operation,
             invocation_adapter_id=invocation_adapter_id,
-            callable_identity=callable_identity,
+            adapter=_payload_value_adapter,
+            function_called=function_called or f"{target}.run",
+            call_signature=call_signature,
         )
         for target in targets
     )
@@ -138,8 +234,8 @@ class RuntimeActionTargetCatalog:
     route/result/proof/call 绑定只能证明“一次调用被观测”；它不能证明 handler
     声称的 `target_module` 就是真实生产 target。target catalog 是 dispatcher
     可查询、classifier 可复核的受控 trust boundary：只有这里声明的
-    action_type + handler identity + target_module + callable identity 组合才能
-    获得 target_handle。
+    action_type + handler identity + target_module + operation + descriptor adapter
+    组合才能获得 target_handle。
     """
 
     _bindings: ClassVar[tuple[RuntimeActionTargetDescriptor, ...]] = (
@@ -147,128 +243,151 @@ class RuntimeActionTargetCatalog:
             "skill.select",
             "agent.runtime_integration.skill_action.SkillRuntimeActionHandler",
             "SkillLoader",
+            operation="load_body",
             invocation_adapter_id="SkillLoader.load_body",
-            callable_identity=_partial_identity(
-                _bound_method_identity("agent.skill_system.loader.SkillLoader", "load_body")
-            ),
+            implementation_id="agent.skill_system.loader.SkillLoader.load_body",
+            adapter=_skill_loader_load_body_adapter,
+            function_called="SkillLoader.load_body",
+            call_signature="load_body(skill_id: str)",
         ),
         _descriptor(
             "tool.request",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "ToolRegistry",
+            operation="lookup_and_risk_check",
             invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
-            callable_identity=_partial_identity(
-                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
-            ),
+            implementation_id="agent.tool_registry.TOOL_REGISTRY.lookup",
+            adapter=_lookup_tool_registry_entry_adapter,
+            function_called="ToolRegistry.lookup_and_risk_check",
+            call_signature="lookup_and_risk_check(tool_name: str)",
         ),
         _descriptor(
             "tool.gate",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "ToolRegistry",
+            operation="lookup_and_risk_check",
             invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
-            callable_identity=_partial_identity(
-                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
-            ),
+            implementation_id="agent.tool_registry.TOOL_REGISTRY.lookup",
+            adapter=_lookup_tool_registry_entry_adapter,
+            function_called="ToolRegistry.lookup_and_risk_check",
+            call_signature="lookup_and_risk_check(tool_name: str)",
         ),
         _descriptor(
             "tool.invoke",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "ToolRegistry",
+            operation="lookup_and_risk_check",
             invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
-            callable_identity=_partial_identity(
-                _function_identity("agent.runtime_integration.tool_gate", "_lookup_tool_registry_entry")
-            ),
+            implementation_id="agent.tool_registry.TOOL_REGISTRY.lookup",
+            adapter=_lookup_tool_registry_entry_adapter,
+            function_called="ToolRegistry.lookup_and_risk_check",
+            call_signature="lookup_and_risk_check(tool_name: str)",
         ),
         _descriptor(
             "tool.request",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "DogfoodFakeToolOverlay",
+            operation="block",
             invocation_adapter_id="DogfoodFakeToolOverlay.block",
-            callable_identity=_bound_method_identity(
-                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
-                "block",
-            ),
+            implementation_id="agent.runtime_integration.tool_gate.DogfoodOverlayTool.block",
+            adapter=_dogfood_overlay_block_adapter,
+            function_called="DogfoodOverlayTool.block",
+            call_signature="block()",
         ),
         _descriptor(
             "tool.gate",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "DogfoodFakeToolOverlay",
+            operation="block",
             invocation_adapter_id="DogfoodFakeToolOverlay.block",
-            callable_identity=_bound_method_identity(
-                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
-                "block",
-            ),
+            implementation_id="agent.runtime_integration.tool_gate.DogfoodOverlayTool.block",
+            adapter=_dogfood_overlay_block_adapter,
+            function_called="DogfoodOverlayTool.block",
+            call_signature="block()",
         ),
         _descriptor(
             "tool.invoke",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "DogfoodFakeToolOverlay",
+            operation="block",
             invocation_adapter_id="DogfoodFakeToolOverlay.block",
-            callable_identity=_bound_method_identity(
-                "agent.runtime_integration.tool_gate.DogfoodOverlayTool",
-                "block",
-            ),
+            implementation_id="agent.runtime_integration.tool_gate.DogfoodOverlayTool.block",
+            adapter=_dogfood_overlay_block_adapter,
+            function_called="DogfoodOverlayTool.block",
+            call_signature="block()",
         ),
         _descriptor(
             "memory.turn_end_proposal",
             "agent.runtime_integration.memory_hook.MemoryTurnEndProposalHandler",
             "MemoryPolicy",
+            operation="decide",
             invocation_adapter_id="MemoryPolicy.decide",
-            callable_identity=_partial_identity(
-                _bound_method_identity("agent.memory_policy.DeterministicMemoryPolicy", "decide")
-            ),
+            implementation_id="agent.memory_policy.DeterministicMemoryPolicy.decide",
+            adapter=_memory_policy_decide_adapter,
+            function_called="DeterministicMemoryPolicy.decide",
+            call_signature="decide(text: str)",
         ),
         _descriptor(
             "memory.propose",
             "agent.runtime_integration.memory_hook.MemoryTurnEndProposalHandler",
             "MemoryPolicy",
+            operation="decide",
             invocation_adapter_id="MemoryPolicy.decide",
-            callable_identity=_partial_identity(
-                _bound_method_identity("agent.memory_policy.DeterministicMemoryPolicy", "decide")
-            ),
+            implementation_id="agent.memory_policy.DeterministicMemoryPolicy.decide",
+            adapter=_memory_policy_decide_adapter,
+            function_called="DeterministicMemoryPolicy.decide",
+            call_signature="decide(text: str)",
         ),
         _descriptor(
             "checkpoint.safe_summary",
             "agent.runtime_integration.checkpoint_summary.CheckpointSafeSummaryHandler",
             "CheckpointSafeSummary",
+            operation="redact",
             invocation_adapter_id="CheckpointSafeSummary.redact",
-            callable_identity=_partial_identity(
-                _function_identity("agent.runtime_integration.checkpoint_summary", "_safe_summary")
-            ),
+            implementation_id="agent.display_events.mask_user_visible_secrets",
+            adapter=_checkpoint_safe_summary_adapter,
+            function_called="CheckpointSafeSummary.redact",
+            call_signature="redact(runtime_state_summary: str)",
         ),
         _descriptor(
             "streaming.provider_call",
             "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
             "StreamingProtocol",
+            operation="collect_stream_response",
             invocation_adapter_id="StreamingProtocol.collect_stream_response",
-            callable_identity=_partial_identity(
-                _function_identity("agent.provider.streaming", "collect_stream_response")
-            ),
+            implementation_id="agent.provider.streaming.collect_stream_response",
+            adapter=_streaming_collect_response_adapter,
+            function_called="collect_stream_response",
+            call_signature="collect_stream_response(events)",
         ),
         _descriptor(
             "streaming.event",
             "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
             "StreamingProtocol",
+            operation="collect_stream_response",
             invocation_adapter_id="StreamingProtocol.collect_stream_response",
-            callable_identity=_partial_identity(
-                _function_identity("agent.provider.streaming", "collect_stream_response")
-            ),
+            implementation_id="agent.provider.streaming.collect_stream_response",
+            adapter=_streaming_collect_response_adapter,
+            function_called="collect_stream_response",
+            call_signature="collect_stream_response(events)",
         ),
         _descriptor(
             "subagent.delegate_l0",
             "agent.runtime_integration.subagent_action.SubAgentDelegateL0Handler",
             "SubAgentExecutor",
+            operation="delegate_once",
             invocation_adapter_id="SubAgentExecutor.delegate_once",
-            callable_identity=_partial_identity(
-                _function_identity("agent.subagent_system.delegation", "delegate_once")
-            ),
+            implementation_id="agent.subagent_system.delegation.delegate_once",
+            adapter=_subagent_delegate_once_adapter,
+            function_called="delegate_once",
+            call_signature="delegate_once(SubAgentRequest, SubAgentRegistry)",
         ),
         *_test_descriptors(
             "tests.runtime_integration.test_runtime_action_contract",
             "_ObservedHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -276,7 +395,7 @@ class RuntimeActionTargetCatalog:
             "_ObservedHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -284,7 +403,7 @@ class RuntimeActionTargetCatalog:
             "_ObservedHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -292,7 +411,7 @@ class RuntimeActionTargetCatalog:
             "_TwoIssuedResultsSameRouteHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -300,7 +419,7 @@ class RuntimeActionTargetCatalog:
             "_TwoIssuedResultsSameRouteHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -308,7 +427,7 @@ class RuntimeActionTargetCatalog:
             "_TwoIssuedResultsSameRouteHandler",
             "tool.request",
             ("FakeTargetModule",),
-            callable_qualname="_fake_target_module_value",
+            operation="run",
             invocation_adapter_id="FakeTargetModule.test_adapter",
         ),
         *_test_descriptors(
@@ -316,7 +435,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "tool.request",
             ("ToolRegistry",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="ToolRegistry.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -324,7 +443,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "tool.request",
             ("ToolRegistry",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="ToolRegistry.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -332,7 +451,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "tool.request",
             ("ToolRegistry",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="ToolRegistry.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -340,7 +459,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "skill.select",
             ("SkillLoader", "SkillRegistry"),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="SkillRuntime.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -348,7 +467,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "skill.select",
             ("SkillLoader", "SkillRegistry"),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="SkillRuntime.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -356,7 +475,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "skill.select",
             ("SkillLoader", "SkillRegistry"),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="SkillRuntime.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -364,7 +483,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "checkpoint.safe_summary",
             ("CheckpointSafeSummary",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -372,7 +491,7 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "checkpoint.safe_summary",
             ("CheckpointSafeSummary",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
         ),
         *_test_descriptors(
@@ -380,15 +499,39 @@ class RuntimeActionTargetCatalog:
             "_CatalogAllowedForgedCallableHandler",
             "checkpoint.safe_summary",
             ("CheckpointSafeSummary",),
-            callable_qualname="_catalog_owned_test_adapter",
+            operation="test_catalog_adapter",
             invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "streaming.provider_call",
+            ("StreamingProtocol",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="StreamingProtocol.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "streaming.provider_call",
+            ("StreamingProtocol",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="StreamingProtocol.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "streaming.provider_call",
+            ("StreamingProtocol",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="StreamingProtocol.test_catalog_adapter",
         ),
         *_test_descriptors(
             "tests.runtime_integration.test_capability_matrix",
             "_MatrixObservedHandler",
             "skill.select",
             ("SkillLoader",),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
         *_test_descriptors(
@@ -396,7 +539,7 @@ class RuntimeActionTargetCatalog:
             "_MatrixObservedHandler",
             "skill.select",
             ("SkillLoader",),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
         *_test_descriptors(
@@ -404,7 +547,7 @@ class RuntimeActionTargetCatalog:
             "_MatrixObservedHandler",
             "skill.select",
             ("SkillLoader",),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
         *_test_descriptors(
@@ -412,7 +555,7 @@ class RuntimeActionTargetCatalog:
             "_MatrixObservedHandler",
             "tool.request",
             ("ToolRegistry", "DogfoodFakeToolOverlay"),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
         *_test_descriptors(
@@ -420,7 +563,7 @@ class RuntimeActionTargetCatalog:
             "_MatrixObservedHandler",
             "tool.request",
             ("ToolRegistry", "DogfoodFakeToolOverlay"),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
         *_test_descriptors(
@@ -428,12 +571,22 @@ class RuntimeActionTargetCatalog:
             "_MatrixObservedHandler",
             "tool.request",
             ("ToolRegistry", "DogfoodFakeToolOverlay"),
-            callable_qualname="_matrix_target_value",
+            operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
     )
-    _by_key: ClassVar[dict[tuple[str, str, str, str], RuntimeActionTargetDescriptor]] = {
-        (binding.action_type, binding.handler_name, binding.handler_identity, binding.target_module): binding
+    _by_key: ClassVar[dict[tuple[str, str, str, str, str], RuntimeActionTargetDescriptor]] = {
+        (
+            binding.action_type,
+            binding.handler_name,
+            binding.handler_identity,
+            binding.target_module,
+            binding.operation,
+        ): binding
+        for binding in _bindings
+    }
+    _by_descriptor_id: ClassVar[dict[str, RuntimeActionTargetDescriptor]] = {
+        binding.target_descriptor_id: binding
         for binding in _bindings
     }
 
@@ -445,8 +598,9 @@ class RuntimeActionTargetCatalog:
         handler_name: str,
         handler_identity: str,
         target_module: str,
+        operation: str,
     ) -> RuntimeActionTargetDescriptor | None:
-        return cls._by_key.get((action_type, handler_name, handler_identity, target_module))
+        return cls._by_key.get((action_type, handler_name, handler_identity, target_module, operation))
 
     @classmethod
     def is_allowed_descriptor(
@@ -463,14 +617,13 @@ class RuntimeActionTargetCatalog:
         implementation_id: str,
         callable_identity: str,
     ) -> bool:
-        binding = cls.resolve(
-            action_type=action_type,
-            handler_name=handler_name,
-            handler_identity=handler_identity,
-            target_module=target_module,
-        )
+        binding = cls._by_descriptor_id.get(target_descriptor_id)
         return (
             binding is not None
+            and binding.action_type == action_type
+            and binding.handler_name == handler_name
+            and binding.handler_identity == handler_identity
+            and binding.target_module == target_module
             and binding.target_catalog_id == target_catalog_id
             and binding.target_handle == target_handle
             and binding.target_descriptor_id == target_descriptor_id
@@ -492,15 +645,17 @@ class ObservedModuleCall:
 class RuntimeActionModuleObserver:
     """独立观测目标模块调用的最小 observer。
 
-    Handler 不能直接 mint target_module_proof；它只能把目标 callable 交给这个
-    observer 包裹执行。observer_identity 与 handler_name 分离，是为了让
-    capability matrix 能识别 handler self-asserted proof。
+    Handler 不能直接 mint trusted target_module_proof；handler-supplied callable
+    兼容路径只能生成非可信 proof。runtime_e2e 的 trusted target proof 必须来自
+    catalog-owned descriptor adapter invocation。observer_identity 与 handler_name
+    分离，是为了让 capability matrix 能识别 handler self-asserted proof。
 
     中文学习边界：public registry method 只保留给旧测试和降级路径使用，不能
     成为 runtime_e2e 信任根。真正可信的 provenance 必须由 dispatcher 调用
     `_issue_*` 内部入口发行，并且 result registry 要绑定 proof/call/target。
     target identity 同理：public observe() 只能生成非可信 target proof；只有
-    dispatcher context 通过 target catalog 解析出的 handle 才能进入 runtime_e2e。
+    dispatcher context 通过 target catalog 执行 descriptor adapter 才能进入
+    runtime_e2e。
     """
 
     observer_identity = "RuntimeActionModuleObserver"
@@ -660,12 +815,14 @@ class RuntimeActionModuleObserver:
             handler_identity="",
             target_module=target_module,
             target_descriptor=None,
+            descriptor_invocation_approved=False,
             function_called=function_called,
             call_signature=call_signature,
             call=call,
+            callable_identity=None,
         )
 
-    def _observe_trusted(
+    def _observe_handler_supplied_call(
         self,
         *,
         route_id: str,
@@ -674,12 +831,11 @@ class RuntimeActionModuleObserver:
         handler_name: str,
         handler_identity: str,
         target_module: str,
-        target_descriptor: RuntimeActionTargetDescriptor | None,
         function_called: str,
         call_signature: str,
         call: Callable[[], Any],
     ) -> ObservedModuleCall:
-        """dispatcher context 专用 observer path，附加 target descriptor provenance。"""
+        """兼容 handler-supplied callable path，永远不发行 trusted target proof。"""
 
         return self._observe(
             route_id=route_id,
@@ -688,10 +844,50 @@ class RuntimeActionModuleObserver:
             handler_name=handler_name,
             handler_identity=handler_identity,
             target_module=target_module,
-            target_descriptor=target_descriptor,
+            target_descriptor=None,
+            descriptor_invocation_approved=False,
             function_called=function_called,
             call_signature=call_signature,
             call=call,
+            callable_identity=None,
+        )
+
+    def _observe_registered_invocation(
+        self,
+        *,
+        route_id: str,
+        action_id: str,
+        action_type: str,
+        handler_name: str,
+        handler_identity: str,
+        target_descriptor: RuntimeActionTargetDescriptor,
+        payload: Mapping[str, Any],
+    ) -> ObservedModuleCall:
+        """dispatcher/catalog 专用 trusted invocation path。
+
+        中文学习边界：这里执行的是 descriptor.adapter，而不是 handler 传入的
+        callable。proof 中的 callable/implementation/adapter provenance 来自
+        catalog descriptor；handler 只能给 adapter 传业务 payload。
+        """
+
+        adapter_identity = _callable_identity(target_descriptor.adapter)
+
+        def call() -> Any:
+            return target_descriptor.invoke(payload)
+
+        return self._observe(
+            route_id=route_id,
+            action_id=action_id,
+            action_type=action_type,
+            handler_name=handler_name,
+            handler_identity=handler_identity,
+            target_module=target_descriptor.target_module,
+            target_descriptor=target_descriptor,
+            descriptor_invocation_approved=adapter_identity == target_descriptor.callable_identity,
+            function_called=target_descriptor.function_called,
+            call_signature=target_descriptor.call_signature,
+            call=call,
+            callable_identity=adapter_identity,
         )
 
     def _observe(
@@ -704,15 +900,18 @@ class RuntimeActionModuleObserver:
         handler_identity: str,
         target_module: str,
         target_descriptor: RuntimeActionTargetDescriptor | None,
+        descriptor_invocation_approved: bool,
         function_called: str,
         call_signature: str,
         call: Callable[[], Any],
+        callable_identity: str | None,
     ) -> ObservedModuleCall:
         call_id = f"call:{uuid4().hex}"
-        callable_identity = _callable_identity(call)
+        proof_callable_identity = callable_identity if descriptor_invocation_approved else None
         target_identity_valid = (
             target_descriptor is not None
-            and target_descriptor.callable_identity == callable_identity
+            and descriptor_invocation_approved
+            and target_descriptor.callable_identity == proof_callable_identity
         )
         trusted_target_catalog_id = target_descriptor.target_catalog_id if target_identity_valid else None
         trusted_target_handle = target_descriptor.target_handle if target_identity_valid else None
@@ -746,15 +945,16 @@ class RuntimeActionModuleObserver:
             "target_descriptor_id": trusted_target_descriptor_id,
             "invocation_adapter_id": trusted_invocation_adapter_id,
             "implementation_id": trusted_implementation_id,
-            "callable_identity": callable_identity,
+            "callable_identity": proof_callable_identity,
             "target_catalog_allowed": target_catalog_allowed,
             "target_identity_valid": target_identity_valid,
+            "descriptor_invocation_approved": target_identity_valid,
         }
         # 中文学习注释：observer-owned proof 只能证明“目标 callable 被看见”。
         # runtime_e2e 还必须证明这次调用属于 dispatcher 管理的同一条 route；
         # 因此 proof 同时绑定 route/action_type/handler/target/call，禁止跨 route
         # 或跨 handler 复用一个真实 proof 来伪造端到端。target_module 仍只是
-        # 字符串标签；只有 callable_identity 与 catalog descriptor 同时匹配，
+        # 字符串标签；只有 catalog descriptor 自己执行 adapter 时，
         # target_catalog_allowed 才能为 true。
         route = self._route_registry.get(route_id) or {}
         self._proof_registry[proof_id] = {
@@ -773,9 +973,10 @@ class RuntimeActionModuleObserver:
             "target_descriptor_id": trusted_target_descriptor_id,
             "invocation_adapter_id": trusted_invocation_adapter_id,
             "implementation_id": trusted_implementation_id,
-            "callable_identity": callable_identity,
+            "callable_identity": proof_callable_identity,
             "target_catalog_allowed": target_catalog_allowed,
             "target_identity_valid": target_identity_valid,
+            "descriptor_invocation_approved": target_identity_valid,
             "dispatcher_owned": route.get("dispatcher_owned") is True,
         }
         return ObservedModuleCall(
@@ -824,6 +1025,7 @@ class RuntimeActionModuleObserver:
             and registered.get("target_catalog_allowed") is True
             and result.get("target_identity_valid") is True
             and registered.get("target_identity_valid") is True
+            and registered.get("descriptor_invocation_approved") is True
             and RuntimeActionTargetCatalog.is_allowed_descriptor(
                 action_type=action_type,
                 handler_name=handler_name,
@@ -945,6 +1147,8 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     if proof.get("target_catalog_allowed") is not True:
         return False
     if proof.get("target_identity_valid") is not True:
+        return False
+    if proof.get("descriptor_invocation_approved") is not True:
         return False
     if proof.get("target_catalog_id") != target_catalog_id:
         return False

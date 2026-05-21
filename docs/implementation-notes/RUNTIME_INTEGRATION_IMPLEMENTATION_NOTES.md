@@ -71,7 +71,9 @@
   `agent/runtime_integration/schema.py`，只表达 action 边界，不推进业务 state。
 - `RuntimeActionDispatcher` 每次 route 创建 `action_id` 与 `RuntimeActionContext`；
   context 持有 `RuntimeActionModuleObserver`。handler 不能自行生成
-  `target_module_proof`，只能通过 `context.observe_module_call()` 包裹目标模块调用。
+  `target_module_proof`。当前 trusted path 必须通过
+  `context.invoke_registered_target()`，由 catalog-owned descriptor adapter 执行；
+  `context.observe_module_call()` 只保留为 handler-supplied callable 的非可信兼容路径。
 - `RuntimeActionEvent` 只复制最终 evidence 作为 receipt；`runtime_e2e` 判定集中在
   `agent/runtime_integration/evidence.py`，必须看到 dispatcher routed、handler invoked、
   target module invoked、independent proof、linked action/module、result returned to parent runtime。
@@ -483,7 +485,7 @@
   Memory governance。
 - 不能把本轮 target provenance 修复表述为 full production runtime integration complete。
 
-## Phase 11 - target descriptor and callable provenance hardening
+## Phase 11 - descriptor fields without owned invocation (fd82e64 audit gap)
 
 ### 本轮 P1/P2
 
@@ -503,7 +505,7 @@
 - 因此合法 handler 仍可能调用 arbitrary lambda，但把 proof label 写成生产 target。
   只要 route/result/proof 字段自洽，旧 classifier 就可能把假 target 当成 runtime_e2e。
 
-### Callable / descriptor provenance 设计
+### What fd82e64 added
 
 - `RuntimeActionTargetDescriptor` 现在绑定：
   - `target_catalog_id`
@@ -515,9 +517,8 @@
   - allowed `action_type`
   - allowed handler name / handler identity
   - allowed `target_module`
-- `RuntimeActionContext.observe_module_call()` 仍保留兼容入口，但 trusted path 不再只看
-  target label。context 会解析 descriptor，observer 会计算实际 `call` 的
-  `callable_identity`。
+- `RuntimeActionContext.observe_module_call()` 当时仍会接收 handler-supplied `call`。
+  context 会解析 descriptor，observer 会计算实际 `call` 的 `callable_identity`。
 - 只有实际 callable identity 与 descriptor 绑定值一致时，observer 才会发行：
   - `target_catalog_allowed=true`
   - `target_identity_valid=true`
@@ -525,8 +526,10 @@
   - `target_descriptor_id`
   - `invocation_adapter_id`
   - `implementation_id`
-- callable 不匹配时，调用仍会被 observer 记录为 subsystem evidence，但 proof
-  `target_catalog_allowed=false`、`target_identity_valid=false`，不能升级 runtime_e2e。
+- 事后红队结论：这仍是字段级 provenance，不是 owned invocation boundary。
+  trusted path 仍允许 handler 把 callable 交给 observer；如果 classifier 或 proof
+  registry 只看 label/descriptor 字段自洽，catalog-allowed handler 仍可能把 arbitrary
+  callable 伪装成生产 target。
 - public `RuntimeActionModuleObserver.observe()` 不接收 descriptor，只能生成 untrusted
   proof；即使 target label 写成 `ToolRegistry`，也没有 trusted handle/descriptor。
 - classifier 现在要求 evidence、target proof、proof registry、result registry 与
@@ -550,6 +553,85 @@
 - catalog-owned synthetic adapters 是 test/dogfood harness target，不是生产核心 loop
   接入完成的证明。
 - core.chat / real loop integration 仍 deferred，需要独立 scoped pack 和独立审计。
+
+### Stop conditions
+
+- 未读取 `.env`、`agent_log.jsonl`、真实 sessions/runs、`memory/episodes/*.jsonl`。
+- 未调用真实 LLM、真实外部 API 或真实 shell-like tool。
+- 未 push，未 tag。
+
+## Phase 12 - catalog-owned invocation boundary
+
+### 本轮 P1/P2
+
+- P1: fd82e64 仍让 trusted path 从 `context.observe_module_call(..., call=...)`
+  接收 handler-supplied callable。allowed label 和 descriptor 字段不足以表达
+  “这次 invocation 由 catalog/dispatcher 拥有”。
+- P2: 需要覆盖 catalog-allowed handler 通过旧 callable path 撒谎，包括
+  ToolRegistry、SkillLoader/SkillRegistry、CheckpointSafeSummary、StreamingProtocol。
+- P2: implementation notes 不能把 descriptor 字段补丁说成 full target identity
+  或 full core integration。
+
+### 为什么 handler-supplied callable 不可信
+
+- 即便 callable identity 字段可被计算，callable 入口仍由 handler 选择。
+- handler 是被测路径的一部分，不能同时作为 target implementation provenance 的信任根。
+- runtime_e2e 要证明的是 parent runtime 通过受控 catalog target 执行，而不是 handler
+  把任意 callable 包一层 observer 后自证。
+
+### Catalog-owned target descriptor / invocation adapter
+
+- `RuntimeActionTargetDescriptor` 现在不仅保存 provenance 字段，还保存 catalog-owned
+  adapter callable entry。
+- 新 trusted API 是 `RuntimeActionContext.invoke_registered_target(target_module, operation, payload)`。
+- handler 不再传 callable；它只能传业务 payload。
+- context 通过 `action_type + handler identity/name + target_module + operation`
+  解析 descriptor。
+- observer 执行的是 `descriptor.adapter(payload)`，proof 中的：
+  - `callable_identity`
+  - `implementation_id`
+  - `invocation_adapter_id`
+  - `target_descriptor_id`
+  均来自 descriptor-owned invocation，而不是 handler。
+- proof registry 记录 `descriptor_invocation_approved=true`，classifier 必须看到该标记，
+  并复核 route/result/proof registry 中的 descriptor fields 一致。
+
+### Public / compatibility path
+
+- `context.observe_module_call(..., call=...)` 保留，但现在永远是 untrusted handler-supplied
+  callable path。
+- 该路径会执行 callable 并记录 subsystem evidence，但：
+  - `target_catalog_allowed=false`
+  - `target_identity_valid=false`
+  - 无 trusted `target_handle`
+  - 无 trusted `target_descriptor_id`
+  - 无 trusted `callable_identity`
+  - `descriptor_invocation_approved=false`
+- public `RuntimeActionModuleObserver.observe()` 同样不能 mint trusted target proof。
+
+### 新增 / 补强红队测试
+
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_tool_registry`
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_skill_loader`
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`
+- `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider`
+- `test_correct_target_label_wrong_callable_identity_is_not_runtime_e2e`
+- `test_correct_target_label_wrong_invocation_adapter_is_not_runtime_e2e`
+- `test_correct_target_label_wrong_implementation_id_is_not_runtime_e2e`
+- `test_correct_target_label_without_target_descriptor_is_not_runtime_e2e`
+- `test_public_observer_correct_label_arbitrary_callable_is_not_runtime_e2e`
+- `test_descriptor_handle_without_descriptor_approved_call_is_not_runtime_e2e`
+- `test_target_descriptor_missing_fails_closed_is_not_runtime_e2e`
+- `test_target_descriptor_mismatch_across_route_result_proof_is_not_runtime_e2e`
+- `test_catalog_owned_invocation_descriptor_path_can_be_runtime_e2e`
+
+### Architecture island status
+
+- `runtime_integration` remains harness foundation。
+- 本轮没有接入 full `core.chat()` runtime loop。
+- catalog-owned synthetic adapters 是 test/dogfood harness target，不是 production
+  ToolRegistry / core loop E2E 完成证明。
+- core.chat / real loop integration remains future scoped。
 
 ### Stop conditions
 

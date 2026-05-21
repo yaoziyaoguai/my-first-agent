@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-
 from agent.display_events import mask_user_visible_secrets
 from agent.memory_contracts import MemoryDecisionType
 from agent.memory_policy import DeterministicMemoryPolicy
@@ -28,11 +26,10 @@ class MemoryTurnEndProposalHandler:
         task_context_summary = str(payload.get("task_context_summary") or "")
         prior_snapshot = payload.get("prior_confirmed_memory_snapshot")
 
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="MemoryPolicy",
-            function_called="DeterministicMemoryPolicy.decide",
-            call_signature="decide(text: str)",
-            call=partial(self._policy.decide, user_message),
+            operation="decide",
+            payload={"policy": self._policy, "user_message": user_message},
         )
         decision = observed.value
         secret_like = contains_secret_like(user_message) or contains_secret_like(assistant_response)

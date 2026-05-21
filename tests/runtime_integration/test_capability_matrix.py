@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import partial
 
 from scripts.dogfood_e2e_runtime import (
     CAPABILITY_MODULE_MAPPING,
@@ -21,12 +20,6 @@ from agent.runtime_integration import (
     RuntimeActionRequest,
     RuntimeActionType,
 )
-
-
-def _matrix_target_value(value: dict) -> dict:
-    """catalog-owned synthetic adapter for capability matrix harness rows."""
-
-    return dict(value)
 
 
 def _plain(value):
@@ -45,11 +38,10 @@ class _MatrixObservedHandler:
         self._evidence_extra = dict(evidence_extra or {})
 
     def handle(self, request, context):  # noqa: ANN001
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module=self._target_module,
-            function_called=f"{self._target_module}.run",
-            call_signature="run()",
-            call=partial(_matrix_target_value, {"ok": True}),
+            operation="run",
+            payload={"value": {"ok": True}},
         )
         return context.success(
             handler_name=type(self).__name__,

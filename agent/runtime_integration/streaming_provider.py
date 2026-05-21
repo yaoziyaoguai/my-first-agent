@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
-from agent.provider.streaming import ProviderStreamEvent, collect_stream_response, sanitize_stream_text
+from agent.provider.streaming import ProviderStreamEvent, sanitize_stream_text
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
 
@@ -41,11 +40,10 @@ class StreamingProviderCallHandler:
             )
 
         events = [_event_from_payload(item) for item in payload.get("events", ())]
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="StreamingProtocol",
-            function_called="collect_stream_response",
-            call_signature="collect_stream_response(events)",
-            call=partial(collect_stream_response, events),
+            operation="collect_stream_response",
+            payload={"events": events},
         )
         text_delta_received = any(event.event_type == "text_delta" for event in events)
         final_received = any(event.event_type == "final" for event in events)

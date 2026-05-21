@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 
 from agent.runtime_integration.dispatcher import RuntimeActionContext
@@ -11,19 +10,6 @@ from agent.runtime_integration.schema import RuntimeActionRequest
 
 
 _FORBIDDEN_TOOL_NAMES = frozenset({"bash", "shell", "run_shell"})
-
-
-def _lookup_tool_registry_entry(tool_name: str) -> dict[str, Any] | None:
-    """catalog descriptor 绑定的 ToolRegistry lookup adapter。
-
-    中文学习边界：RuntimeAction proof 需要证明实际 callable provenance，不能让
-    handler 用 lambda 把任意逻辑贴上 `ToolRegistry` 标签。这个小 adapter 是
-    catalog-owned implementation identity，不执行目标工具函数。
-    """
-
-    from agent.tool_registry import TOOL_REGISTRY
-
-    return TOOL_REGISTRY.get(tool_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +70,10 @@ class ToolGateHandler:
                 production_registry_found=production_registry_found,
             )
 
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="ToolRegistry",
-            function_called="ToolRegistry.lookup_and_risk_check",
-            call_signature="lookup_and_risk_check(tool_name: str)",
-            call=partial(_lookup_tool_registry_entry, tool_name),
+            operation="lookup_and_risk_check",
+            payload={"tool_name": tool_name},
         )
         entry = observed.value
         visible_names = {item.get("name") for item in get_model_visible_tools()}
@@ -212,11 +197,10 @@ class ToolGateHandler:
                 error_safe_preview="fake tool missing from dogfood overlay",
             )
 
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="DogfoodFakeToolOverlay",
-            function_called="DogfoodOverlayTool.block",
-            call_signature="block()",
-            call=overlay_tool.block,
+            operation="block",
+            payload={"overlay_tool": overlay_tool},
         )
         overlay_result = dict(observed.value)
         evidence_extra = {

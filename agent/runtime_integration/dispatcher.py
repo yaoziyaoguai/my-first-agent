@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from agent.runtime_integration.evidence import (
@@ -50,6 +50,7 @@ HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
     "callable_identity",
     "target_catalog_allowed",
     "target_identity_valid",
+    "descriptor_invocation_approved",
 })
 
 
@@ -105,27 +106,49 @@ class RuntimeActionContext:
         call_signature: str,
         call,
     ) -> ObservedModuleCall:
-        descriptor = RuntimeActionTargetCatalog.resolve(
-            action_type=action_type_value(self.action_type),
-            handler_name=self.handler_name,
-            handler_identity=self.handler_identity,
-            target_module=target_module,
-        )
-        # 中文学习注释：target_module 是 handler 传入的字符串，不能直接代表
-        # 可信 target identity。只有 dispatcher context 能把它解析成 catalog
-        # descriptor；observer 还会验证实际 callable identity，缺 descriptor
-        # 或 callable 不匹配的 proof 只能证明调用发生，不能升级 runtime_e2e。
-        return self.observer._observe_trusted(
+        # 中文学习注释：这是 handler-supplied callable 兼容路径，只能证明
+        # “有 callable 被 observer 包裹执行”。handler 选择的 callable 不属于
+        # catalog-owned target invocation，因此不能 mint trusted target proof。
+        return self.observer._observe_handler_supplied_call(
             route_id=self.route_id,
             action_id=self.action_id,
             action_type=action_type_value(self.action_type),
             handler_name=self.handler_name,
             handler_identity=self.handler_identity,
             target_module=target_module,
-            target_descriptor=descriptor,
             function_called=function_called,
             call_signature=call_signature,
             call=call,
+        )
+
+    def invoke_registered_target(
+        self,
+        *,
+        target_module: str,
+        operation: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> ObservedModuleCall:
+        descriptor = RuntimeActionTargetCatalog.resolve(
+            action_type=action_type_value(self.action_type),
+            handler_name=self.handler_name,
+            handler_identity=self.handler_identity,
+            target_module=target_module,
+            operation=operation,
+        )
+        if descriptor is None:
+            raise ValueError("target descriptor is not registered for this action handler")
+        # 中文学习注释：trusted target invocation 的唯一入口。handler 不再把
+        # callable 交给 observer；它只能给 catalog-owned adapter 提供业务 payload。
+        # callable_identity / implementation_id / invocation_adapter_id 均来自
+        # descriptor，classifier 会复核 route/result/proof registry 的一致性。
+        return self.observer._observe_registered_invocation(
+            route_id=self.route_id,
+            action_id=self.action_id,
+            action_type=action_type_value(self.action_type),
+            handler_name=self.handler_name,
+            handler_identity=self.handler_identity,
+            target_descriptor=descriptor,
+            payload=dict(payload or {}),
         )
 
     def result(

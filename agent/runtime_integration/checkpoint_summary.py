@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-
-from agent.display_events import mask_user_visible_secrets
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest, contains_secret_like
 
@@ -22,11 +19,10 @@ class CheckpointSafeSummaryHandler:
         last_tool_call = payload.get("last_tool_call")
         trigger = str(payload.get("trigger") or "turn_end")
 
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="CheckpointSafeSummary",
-            function_called="CheckpointSafeSummary.redact",
-            call_signature="redact(runtime_state_summary: str)",
-            call=partial(_safe_summary, runtime_state_summary),
+            operation="redact",
+            payload={"runtime_state_summary": runtime_state_summary},
         )
         safe_summary = observed.value
         no_tool_boundary_reached = last_tool_call is None and trigger == "turn_end"
@@ -58,10 +54,3 @@ class CheckpointSafeSummaryHandler:
             observed_call=observed,
             evidence_extra=evidence_extra,
         )
-
-
-def _safe_summary(text: str) -> str:
-    masked = mask_user_visible_secrets(text)
-    if len(masked) > 2000:
-        return masked[:2000]
-    return masked

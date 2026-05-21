@@ -8,7 +8,6 @@ target_module_proof，避免 handler 自报 module_invoked=true 就伪装成端�
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from functools import partial
 
 import pytest
 
@@ -24,32 +23,14 @@ from agent.runtime_integration import (
 from agent.runtime_integration.evidence import ObservedModuleCall, RuntimeActionModuleObserver
 
 
-def _fake_target_module_value(value: dict) -> dict:
-    """catalog-owned synthetic adapter for FakeTargetModule tests.
-
-    中文学习边界：正例必须通过 catalog 绑定的 adapter identity；红队负例会用
-    同样的 target label 传入 lambda，证明 label allowed 不能替代 callable
-    provenance。
-    """
-
-    return dict(value)
-
-
-def _catalog_owned_test_adapter(value: dict) -> dict:
-    """catalog-allowed red-team handler 的期望 adapter，测试中故意不调用。"""
-
-    return dict(value)
-
-
 class _ObservedHandler:
-    """通过 dispatcher context 的 observer 调用目标模块，不能自己 mint proof。"""
+    """通过 catalog-owned invocation 调用目标模块，不能自己 mint proof。"""
 
     def handle(self, request, context):  # noqa: ANN001
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="FakeTargetModule",
-            function_called="FakeTargetModule.run",
-            call_signature="run()",
-            call=partial(_fake_target_module_value, {"ok": True}),
+            operation="run",
+            payload={"value": {"ok": True}},
         )
         return context.success(
             handler_name=type(self).__name__,
@@ -173,11 +154,10 @@ class _TwoIssuedResultsSameRouteHandler:
         self.issued_evidence: list[dict] = []
 
     def handle(self, request, context):  # noqa: ANN001
-        first_observed = context.observe_module_call(
+        first_observed = context.invoke_registered_target(
             target_module="FakeTargetModule",
-            function_called="FakeTargetModule.run_first",
-            call_signature="run_first()",
-            call=partial(_fake_target_module_value, {"ok": "first"}),
+            operation="run",
+            payload={"value": {"ok": "first"}},
         )
         first = context.success(
             handler_name=type(self).__name__,
@@ -185,11 +165,10 @@ class _TwoIssuedResultsSameRouteHandler:
             payload={"ok": first_observed.value["ok"]},
             observed_call=first_observed,
         )
-        second_observed = context.observe_module_call(
+        second_observed = context.invoke_registered_target(
             target_module="FakeTargetModule",
-            function_called="FakeTargetModule.run_second",
-            call_signature="run_second()",
-            call=partial(_fake_target_module_value, {"ok": "second"}),
+            operation="run",
+            payload={"value": {"ok": "second"}},
         )
         second = context.success(
             handler_name=type(self).__name__,
@@ -256,6 +235,23 @@ class _CatalogAllowedForgedCallableHandler:
         )
 
 
+class _MissingDescriptorInvocationHandler:
+    """使用 trusted API 但请求未注册 operation，应 fail closed。"""
+
+    def handle(self, request, context):  # noqa: ANN001
+        observed = context.invoke_registered_target(
+            target_module="ToolRegistry",
+            operation="missing_operation",
+            payload={"value": {"ok": True}},
+        )
+        return context.success(
+            handler_name=type(self).__name__,
+            target_module="ToolRegistry",
+            payload={"ok": True},
+            observed_call=observed,
+        )
+
+
 def _request(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUEST) -> RuntimeActionRequest:
     return RuntimeActionRequest(
         action_type=action_type,
@@ -278,6 +274,8 @@ def _valid_runtime_e2e_evidence(action_type: str | RuntimeActionType = RuntimeAc
 def _assert_not_runtime_e2e(evidence: dict) -> None:
     assert not is_runtime_e2e_evidence(evidence)
     assert classify_evidence_level(evidence) != "runtime_e2e"
+    if "evidence_level" in evidence:
+        assert evidence["evidence_level"] != "runtime_e2e"
 
 
 def test_request_result_and_event_are_frozen() -> None:
@@ -359,11 +357,29 @@ def test_dispatcher_routes_and_emits_receipt_event_with_independent_proof() -> N
     assert result.evidence["implementation_id"]
     assert result.evidence["callable_identity"]
     assert result.evidence["target_identity_valid"] is True
+    assert proof["descriptor_invocation_approved"] is True
 
     assert len(dispatcher.action_log) == 1
     event = dispatcher.action_log[0]
     assert event.action_id == result.action_id
     assert event.evidence["action_id"] == result.action_id
+
+
+def test_catalog_owned_invocation_descriptor_path_can_be_runtime_e2e() -> None:
+    """正例只能通过 catalog-owned adapter path 升级 runtime_e2e。"""
+
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _ObservedHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+    proof = result.evidence["target_module_proof"]
+
+    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["target_catalog_allowed"] is True
+    assert result.evidence["target_identity_valid"] is True
+    assert proof["descriptor_invocation_approved"] is True
+    assert proof["callable_identity"] == result.evidence["callable_identity"]
 
 
 def test_runtime_action_event_only_is_not_runtime_e2e() -> None:
@@ -527,21 +543,53 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint()
     _assert_not_runtime_e2e(result.evidence)
 
 
-@pytest.mark.parametrize(
-    ("field_name", "wrong_value"),
-    [
-        ("callable_identity", "function:tests.runtime_integration.wrong_callable"),
-        ("invocation_adapter_id", "WrongTarget.wrong_adapter"),
-    ],
-)
-def test_correct_target_label_wrong_callable_identity_is_not_runtime_e2e(
-    field_name: str,
-    wrong_value: str,
-) -> None:
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider() -> None:
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.STREAMING_PROVIDER_CALL,
+        _CatalogAllowedForgedCallableHandler("StreamingProtocol"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.STREAMING_PROVIDER_CALL))
+
+    assert result.evidence["target_module"] == "StreamingProtocol"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["descriptor_invocation_approved"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def _mutated_valid_evidence(field_name: str, wrong_value: str) -> dict:
     evidence = _valid_runtime_e2e_evidence()
     evidence["target_module_proof"] = dict(evidence["target_module_proof"])
     evidence[field_name] = wrong_value
     evidence["target_module_proof"][field_name] = wrong_value
+    evidence["evidence_level"] = classify_evidence_level(evidence)
+    return evidence
+
+
+def test_correct_target_label_wrong_callable_identity_is_not_runtime_e2e() -> None:
+    evidence = _mutated_valid_evidence(
+        "callable_identity",
+        "function:tests.runtime_integration.wrong_callable",
+    )
+
+    assert evidence["target_catalog_allowed"] is True
+    assert evidence["target_identity_valid"] is True
+    _assert_not_runtime_e2e(evidence)
+
+
+def test_correct_target_label_wrong_invocation_adapter_is_not_runtime_e2e() -> None:
+    evidence = _mutated_valid_evidence("invocation_adapter_id", "WrongTarget.wrong_adapter")
+
+    assert evidence["target_catalog_allowed"] is True
+    assert evidence["target_identity_valid"] is True
+    _assert_not_runtime_e2e(evidence)
+
+
+def test_correct_target_label_wrong_implementation_id_is_not_runtime_e2e() -> None:
+    evidence = _mutated_valid_evidence("implementation_id", "WrongTarget.wrong_implementation")
 
     assert evidence["target_catalog_allowed"] is True
     assert evidence["target_identity_valid"] is True
@@ -559,6 +607,7 @@ def test_correct_target_label_without_target_descriptor_is_not_runtime_e2e() -> 
     ):
         evidence[field_name] = ""
         evidence["target_module_proof"][field_name] = None
+    evidence["evidence_level"] = classify_evidence_level(evidence)
 
     assert evidence["target_catalog_allowed"] is True
     _assert_not_runtime_e2e(evidence)
@@ -591,7 +640,7 @@ def test_public_observer_correct_label_arbitrary_callable_is_not_runtime_e2e() -
         "target_descriptor_id": "",
         "invocation_adapter_id": "",
         "implementation_id": "",
-        "callable_identity": observed.target_module_proof["callable_identity"],
+        "callable_identity": "",
         "target_catalog_allowed": False,
         "target_identity_valid": False,
         "invocation_proof": observed.invocation_proof,
@@ -600,6 +649,9 @@ def test_public_observer_correct_label_arbitrary_callable_is_not_runtime_e2e() -
 
     assert observed.target_module_proof["target_catalog_allowed"] is False
     assert observed.target_module_proof["target_identity_valid"] is False
+    assert observed.target_module_proof["linked_target_handle"] is None
+    assert observed.target_module_proof["target_descriptor_id"] is None
+    assert observed.target_module_proof["callable_identity"] is None
     _assert_not_runtime_e2e(evidence)
 
 
@@ -609,6 +661,7 @@ def test_descriptor_handle_without_descriptor_approved_call_is_not_runtime_e2e()
     evidence["target_module_proof"] = dict(evidence["target_module_proof"])
     evidence["invocation_proof"]["call_id"] = "call:not-produced-by-descriptor"
     evidence["target_module_proof"]["linked_call_id"] = "call:not-produced-by-descriptor"
+    evidence["evidence_level"] = classify_evidence_level(evidence)
 
     assert evidence["target_handle"]
     assert evidence["target_descriptor_id"]
@@ -619,10 +672,27 @@ def test_target_descriptor_mismatch_across_route_result_proof_is_not_runtime_e2e
     evidence = _valid_runtime_e2e_evidence()
     evidence["target_module_proof"] = dict(evidence["target_module_proof"])
     evidence["target_module_proof"]["target_descriptor_id"] = "descriptor:other-target"
+    evidence["evidence_level"] = classify_evidence_level(evidence)
 
     assert evidence["target_descriptor_id"]
     assert evidence["target_module_proof"]["target_descriptor_id"] != evidence["target_descriptor_id"]
     _assert_not_runtime_e2e(evidence)
+
+
+def test_target_descriptor_missing_fails_closed_is_not_runtime_e2e() -> None:
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _MissingDescriptorInvocationHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "failed"
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["target_module_proof"] is None
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["error_type"] == "ValueError"
+    _assert_not_runtime_e2e(result.evidence)
 
 
 def test_handler_chosen_arbitrary_target_module_cannot_become_trusted_by_matching_strings() -> None:

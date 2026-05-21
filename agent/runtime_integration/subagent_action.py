@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 from typing import Iterable
 
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
-from agent.subagent_system.delegation import delegate_once
 from agent.subagent_system.registry import SubAgentRegistry
 from agent.subagent_system.request import SubAgentRequest
 
@@ -64,11 +62,10 @@ class SubAgentDelegateL0Handler:
             risk_level=descriptor.risk_level,
             context={"summary": str(payload.get("context_package_summary") or "")},
         )
-        observed = context.observe_module_call(
+        observed = context.invoke_registered_target(
             target_module="SubAgentExecutor",
-            function_called="delegate_once",
-            call_signature="delegate_once(SubAgentRequest, SubAgentRegistry)",
-            call=partial(delegate_once, subagent_request, self._registry),
+            operation="delegate_once",
+            payload={"subagent_request": subagent_request, "registry": self._registry},
         )
         run = observed.value
         adjudication = run.adjudication

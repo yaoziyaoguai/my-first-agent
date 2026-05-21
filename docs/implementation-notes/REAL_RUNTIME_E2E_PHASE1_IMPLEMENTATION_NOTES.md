@@ -11,7 +11,7 @@
 - **`agent/provider/fake_provider.py`** — Phase 1 专用确定性 provider，实现 `ModelProvider` 协议（`create()` + `stream()`），永不读 `.env`、不调外部 API
 - **`agent/runtime_integration/phase1_hook.py`** — `build_phase1_dispatcher()` 工厂函数，仅注册 `MemoryTurnEndProposalHandler`
 - **`scripts/dogfood_phase1_real_core_loop.py`** — Phase 1 real core loop dogfood runner，通过 `core.chat()` 完整路径验证 real core loop evidence chain
-- **`tests/runtime_integration/test_phase1_real_core_loop.py`** — 13 个 Phase 1 架构边界测试
+- **`tests/runtime_integration/test_phase1_real_core_loop.py`** — 15 个 Phase 1 架构边界测试（含 2 个真实 core.chat() 接线测试）
 
 ### 修改文件
 
@@ -66,9 +66,51 @@
 - [x] 无 nested delegation / SubAgent 扩展
 - [x] 无新依赖
 
+## Phase 1 独立审计发现（2026-05-21）
+
+### 审计结论
+
+Phase 1 机制代码正确：`core.chat → run_main_loop → turn-end hook → RuntimeActionDispatcher` 链路存在且工作正常。
+
+### 发现的测试缺口
+
+`tests/runtime_integration/test_phase1_real_core_loop.py` 中原有 13 个测试全部通过**手工构造 `RuntimeActionRequest` 并直接 `dispatcher.route()`** 来验证 classification 逻辑。没有测试真正调用 `core.chat()`。
+
+这意味着原有测试只能证明：
+- classification 逻辑正确（harness vs real core loop）
+- evidence chain 完整（target_module_proof 存在）
+
+**不能证明**：
+- `core.chat()` 真的触发了 `RuntimeActionDispatcher`
+- turn-end hook 在真实 loop 路径中正确接线
+
+### 本轮修复
+
+新增 `TestCoreChatWiring` 测试类（2 个测试），真正调用 `agent.core.chat()`：
+
+1. **`test_core_chat_actually_invokes_runtime_action_dispatcher_from_turn_end_hook`**（正例）
+   - 使用 `SpyDispatcher` 包裹真实 dispatcher，捕获 `route()` 调用
+   - 真正调用 `core.chat("以后叫我小王", provider=FakeProvider(), runtime_action_dispatcher=spy)`
+   - 断言 spy 在 `chat()` 执行期间捕获到 `route()` 调用
+   - 断言 `request.payload` 包含 `core_loop_invoked=true`、`core_entrypoint='core.chat'`、`runtime_hook_name='loop.turn_end'`
+   - 断言 `evidence_level == real_core_loop_runtime_e2e`
+   - 断言 `target_module_proof` 存在
+
+2. **`test_runtime_action_dispatcher_none_skips_hook_safely`**（负例）
+   - 使用 `_NonFakeProvider`（不标记 `provider_type='fake'`）+ `runtime_action_dispatcher=None`
+   - 断言 `chat()` 正常完成不崩溃——无 dispatcher 路径的基本安全保障
+
+### 仍 deferred
+
+- 真实 LLM provider
+- 真实 ToolRegistry
+- Checkpoint schema 变更
+- SubAgent L1/L2
+- full combined E08
+
 ## 检查结果
 
 - `git diff --check`: 通过
 - `ruff check agent tests scripts`: 通过
-- `pytest tests/runtime_integration/`: 112 passed
-- `pytest` (full, temp HOME): 2885 passed, 14 skipped
+- `pytest tests/runtime_integration/`: 114 passed
+- `pytest` (full, temp HOME): 2887 passed, 14 skipped

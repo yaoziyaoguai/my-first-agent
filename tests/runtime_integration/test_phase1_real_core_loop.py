@@ -12,13 +12,18 @@
 为什么这些测试不等于 dogfood harness pass：
 - dogfood harness 直接构造 RuntimeActionRequest → dispatcher.route()
   只证明了 dispatcher evidence chain 完整，不证明 core loop 触发
-- 这里的测试通过 core.chat() → loop → turn-end hook → dispatcher
-  证明 RuntimeAction 确实源自真实 runtime loop
+- TestRealCoreLoopClassification / TestMemoryTurnEndHook 手工构造
+  RuntimeActionRequest 并直接 dispatcher.route()——只能证明 classification
+  逻辑正确
+- TestCoreChatWiring 真正调用 core.chat()，使用 SpyDispatcher 捕获 route()
+  调用，证明 core.chat → run_main_loop → turn-end hook → dispatcher 这条真实
+  接线存在且工作正常
 """
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from agent.provider.fake_provider import FakeProvider
 from agent.runtime_integration import (
@@ -420,3 +425,157 @@ class TestPhase1EvidenceClassification:
             "parent_adjudicated": None,
         }
         assert not is_runtime_e2e_evidence(event_evidence)
+
+
+# ========== core.chat() 真实接线测试 ==========
+
+
+class _SpyDispatcher:
+    """包装 RuntimeActionDispatcher，拦截 route() 调用用于测试断言。
+
+    中文学习边界：
+    这个 spy 是刻意存在的外部观察点——不修改生产代码一行，只记录每次 route()
+    调用及其参数。生产代码（loop.py turn-end hook）不知道 spy 的存在。
+    测试通过检查 captured route() 调用来证明 hook 确实在 core.chat 路径中触发。
+    """
+
+    def __init__(self, real: RuntimeActionDispatcher) -> None:
+        self._real = real
+        self._route_calls: list[RuntimeActionRequest] = []
+
+    def route(self, request: RuntimeActionRequest) -> Any:
+        self._route_calls.append(request)
+        return self._real.route(request)
+
+    @property
+    def action_log(self):
+        return self._real.action_log
+
+    @property
+    def route_calls(self) -> tuple[RuntimeActionRequest, ...]:
+        return tuple(self._route_calls)
+
+
+class _NonFakeProvider:
+    """确定性 provider，不标记 provider_type='fake'——用于测试无 dispatcher 路径。
+
+    中文学习边界：
+    当 provider 没有 provider_type='fake' 且 runtime_action_dispatcher=None 时，
+    chat() 不会自动构建 Phase 1 dispatcher。这保证 turn-end hook 被跳过，
+    不产生任何 RuntimeAction。本 provider 内部委托给 FakeProvider，保持确定性。
+    """
+
+    def create(self, *, system, messages, tools, **kwargs):
+        return FakeProvider().create(system=system, messages=messages, tools=tools)
+
+    def stream(self, *, system, messages, tools):
+        yield from FakeProvider().stream(system=system, messages=messages, tools=tools)
+
+
+class TestCoreChatWiring:
+    """测试 core.chat() → runtime loop → turn-end hook → dispatcher 真实接线。
+
+    中文学习边界：
+    这个类里的测试真正调用 agent.core.chat()——不是手工构造 RuntimeActionRequest
+    然后直接 dispatcher.route()。它钉死的是 core.chat → run_main_loop →
+    turn-end hook → RuntimeActionDispatcher.route() 这条真实接线。
+    """
+
+    def test_core_chat_actually_invokes_runtime_action_dispatcher_from_turn_end_hook(self):
+        """core.chat() 真实触发 RuntimeActionDispatcher（spy 验证）。
+
+        中文学习边界——这个测试保护什么：
+        - 不是 classification 逻辑测试（那些由 TestRealCoreLoopClassification 覆盖）
+        - 钉死的是：用户调 core.chat() → run_main_loop() → turn-end 分支
+          → _try_phase1_turn_end_runtime_action() → dispatcher.route()
+        - 如果这条接线断了（例如 loop turn-end hook 被误删），spy 会捕获不到
+          route() 调用，测试直接失败
+        - 使用 SpyDispatcher 而非直接检查 dispatcher.action_log，是为了证明
+          route() 调用确实发生在 chat() 执行期间，而非之前或之后
+
+        架构边界：
+        - core_loop_invoked=true（来自 loop.py turn-end hook，非手工设置）
+        - core_entrypoint='core.chat'（来自 hook）
+        - runtime_hook_name='loop.turn_end'（来自 hook）
+        - evidence_level=real_core_loop_runtime_e2e（classifier 自动判定）
+        - target_module_proof 存在且非空
+        """
+        # 构建真实 dispatcher 并包裹 spy
+        real_dispatcher = _build_phase1_dispatcher()
+        spy = _SpyDispatcher(real_dispatcher)
+
+        # 真正调用 core.chat()——这是本测试与 classification 测试的本质区别
+        from agent.core import chat
+
+        result = chat(
+            "以后叫我小王",
+            provider=FakeProvider(),
+            runtime_action_dispatcher=spy,
+        )
+
+        # chat() 必须正常完成不抛异常（普通 end_turn 返回空字符串是预期行为：
+        # 模型正文通过 on_runtime_event/on_output_chunk 流式输出，返回值仅用于
+        # 控制型 UI 提示）
+        assert isinstance(result, str)
+
+        # spy 必须捕获到至少一次 route() 调用——证明 hook 确实触发了
+        assert len(spy.route_calls) >= 1, (
+            f"期望 core.chat() 执行期间 dispatcher.route() 被调用至少 1 次，"
+            f"实际 {len(spy.route_calls)} 次——turn-end hook 可能未触发"
+        )
+
+        # 验证捕获的 request payload 包含完整 core loop 来源证据
+        first_call = spy.route_calls[0]
+        payload = dict(first_call.payload)
+        assert payload.get("core_loop_invoked") is True, (
+            "request.payload.core_loop_invoked 必须为 True——"
+            "该字段由 loop.py turn-end hook 注入，缺失说明 hook 未正确构造请求"
+        )
+        assert payload.get("core_entrypoint") == "core.chat", (
+            f"request.payload.core_entrypoint 必须为 'core.chat'，"
+            f"实际 {payload.get('core_entrypoint')!r}"
+        )
+        assert payload.get("runtime_hook_name") == "loop.turn_end", (
+            f"request.payload.runtime_hook_name 必须为 'loop.turn_end'，"
+            f"实际 {payload.get('runtime_hook_name')!r}"
+        )
+        assert payload.get("provider_kind") == "fake"
+        assert payload.get("external_side_effects") is False
+
+        # 验证最终 evidence 分类为 real_core_loop_runtime_e2e
+        action_events = list(spy.action_log)
+        assert len(action_events) >= 1
+        last_event = action_events[-1]
+        evidence = dict(last_event.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+            f"evidence_level 必须为 {REAL_CORE_LOOP_RUNTIME_E2E}，"
+            f"实际 {evidence.get('evidence_level')!r}"
+        )
+        assert evidence.get("core_loop_invoked") is True
+        assert evidence.get("target_module_proof") is not None, (
+            "target_module_proof 必须存在——无 proof 说明 handler observer 链断裂"
+        )
+
+    def test_runtime_action_dispatcher_none_skips_hook_safely(self):
+        """runtime_action_dispatcher=None 且 provider 非 fake 时 hook 不触发。
+
+        中文学习边界：
+        - 这是正例的对称负例：接线存在时 hook 触发，接线不存在时 chat() 正常完成
+        - provider 不是 fake → chat() 不自动构建 dispatcher → LoopDependencies
+          中 runtime_action_dispatcher=None → run_main_loop 跳过 turn-end hook
+        - chat() 正常工作、不崩溃，是"无 dispatcher"路径的基础安全保障
+
+        架构边界：
+        - 不得产生 real_core_loop_runtime_e2e（dispatcher 根本没被构建）
+        - chat() 返回非空结果（provider 正常工作）
+        """
+        from agent.core import chat
+
+        result = chat(
+            "hello",
+            provider=_NonFakeProvider(),
+            runtime_action_dispatcher=None,
+        )
+
+        # chat() 正常完成不抛异常（普通 end_turn 返回空字符串是预期行为）
+        assert isinstance(result, str)

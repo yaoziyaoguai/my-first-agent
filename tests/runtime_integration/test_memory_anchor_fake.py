@@ -277,6 +277,50 @@ class TestMemoryAnchorFakeProviderCoreChat:
             )
 
 
+    def test_provider_kind_still_fake_after_parameterization(self):
+        """回归测试：hook 参数化后 fake mode evidence 不退化。
+
+        中文学习边界——这个测试保护什么：
+        - 参数化后 provider_kind 仍为 "fake"（不会因解析逻辑变更而漂移）
+        - provider_external_call 新增字段为 False（fake provider 无外部调用）
+        - external_side_effects 仍为 False（fake mode 无副作用）
+        - 如果参数化错误地让 FakeProvider 被识别为 real，此测试直接红
+
+        这是 ce-plan v2 §U2 scenario 10 的精确对应实现。
+        """
+        from agent.core import chat
+
+        real_dispatcher = _build_phase1_dispatcher()
+        spy = _SpyDispatcher(real_dispatcher)
+
+        result = chat(
+            "以后叫我小王",
+            provider=FakeProvider(),
+            runtime_action_dispatcher=spy,
+        )
+
+        assert isinstance(result, str)
+        assert len(spy.route_calls) >= 1
+
+        first_call = spy.route_calls[0]
+        payload = dict(first_call.payload)
+
+        # 回归守卫：provider_kind 必须仍为 "fake"
+        assert payload.get("provider_kind") == "fake", (
+            f"参数化后 provider_kind 必须仍为 'fake'，实际 {payload.get('provider_kind')!r}"
+        )
+
+        # 新增字段：provider_external_call 必须为 False
+        assert payload.get("provider_external_call") is False, (
+            f"参数化后 provider_external_call 必须为 False，实际 {payload.get('provider_external_call')!r}"
+        )
+
+        # 回归守卫：external_side_effects 必须仍为 False
+        assert payload.get("external_side_effects") is False, (
+            f"参数化后 external_side_effects 必须仍为 False，实际 {payload.get('external_side_effects')!r}"
+        )
+
+
 class TestMemoryAnchorHandlerConstraints:
     """测试 MemoryTurnEndProposalHandler 的硬编码约束。
 

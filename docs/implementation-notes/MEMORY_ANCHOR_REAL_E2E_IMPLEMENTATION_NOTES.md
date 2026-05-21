@@ -98,12 +98,90 @@ Real provider smoke dogfood 需要 `agent/loop.py:78-79` 的 hook 参数化。�
 "external_side_effects": False,
 ```
 
-要支持 real provider smoke，需要：
-1. `LoopDependencies` 新增 provider 信息字段（`provider_kind`, `external_side_effects`）
-2. `_try_phase1_turn_end_runtime_action()` 从 `LoopDependencies` 读取而非硬编码
-3. `core.chat()` 根据实际 provider 类型设置正确的值
+此硬编码阻塞原因：loop hook 无法根据实际注入的 provider 类型动态设置 evidence metadata。`LoopDependencies` 构造时未传入任何 provider 信息。
 
-这是独立的变更，涉及 `agent/loop.py`、`agent/loop_context.py`、`agent/core.py` 三个文件的协调修改。按 SPEC.md §3.B 的决策，此项 deferred 到单独 PR。
+## Hook Parameterization (2026-05-21)
+
+### 设计：预解析元数据方案
+
+**核心决策**：在 `core.py` 构造点预解析 provider evidence metadata，而非在 `loop.py` 消费点派生。
+
+**改造文件**：
+- `agent/core.py` — 新增 `_resolve_provider_evidence_metadata(provider)` 纯函数；`_run_main_loop` 中 `LoopDependencies(...)` 构造处 +2 kwargs
+- `agent/loop.py` — `LoopDependencies` +2 fields (`provider_kind: str = "unknown"`, `provider_external_call: bool = False`)；`_try_phase1_turn_end_runtime_action` 动态读取替代硬编码
+
+**`_resolve_provider_evidence_metadata` 规范**：
+
+只返回 coarse-grained 二元组 `(provider_kind, provider_external_call)`：
+
+| provider | `provider_type` | `provider_kind` | `provider_external_call` |
+|----------|-----------------|-----------------|--------------------------|
+| `FakeProvider()` | `"fake"` | `"fake"` | `False` |
+| `AnthropicNativeProvider()` | `"anthropic_native"` | `"real"` | `True` |
+| `AnthropicCompatibleProvider()` | `"anthropic_compatible"` | `"real"` | `True` |
+| `OpenAINativeProvider()` | `"openai_native"` | `"real"` | `True` |
+| `OpenAIHTTPProvider()` | `"openai_compatible"` | `"real"` | `True` |
+| `None` | N/A | `"unknown"` | `False` |
+| 未知/缺失 `provider_type` | N/A | `"unknown"` | `False` |
+
+### provider_kind 只允许 coarse-grained 三态
+
+- `"fake"` / `"real"` / `"unknown"` — 粗粒度证据分类标签
+- 不回退到 `type(provider).__name__` — class name 是实现细节
+- 不写入 raw `provider_type` 到 `provider_kind` 字段（raw 值通过 `evidence_extra.provider_type` 保留）
+- 未知/缺失 → `"unknown"` (fail-closed)
+
+### provider_external_call vs external_side_effects 语义拆分
+
+| 字段 | 含义 | 本轮值 |
+|------|------|--------|
+| `provider_external_call` | provider 本身是否调用了真实外部 API（由 provider 类型决定） | fake→False, real→True |
+| `external_side_effects` | 整个 turn 是否有工具/文件/MCP/memory retain/human_approved write 等副作用 | 本轮保持 False |
+
+这两个概念正交：real provider smoke 有外部 API 调用但没有副作用；fake mode 两者均无。
+
+### 为什么不是 fake/real 两套核心路径
+
+参数化后仍是同一条 `core.chat()` → `run_main_loop()` → `_try_phase1_turn_end_runtime_action()` 路径：
+
+```python
+# core.py 构造点预解析 — 不创建任何分叉
+resolved_kind, resolved_call = _resolve_provider_evidence_metadata(loop_ctx.model_provider)
+
+dependencies = LoopDependencies(
+    ...,
+    provider_kind=resolved_kind,       # "fake" | "real" | "unknown"
+    provider_external_call=resolved_call,  # True | False
+)
+```
+
+`loop.py` 不接触 provider 对象、不读 provider_type、不做 white-list 判断。它只消费已解析的 string/bool。
+
+### 为什么 LoopDependencies 不接收完整 provider 对象
+
+1. **职责边界**：loop 层不应知道 provider 的结构、类型体系、白名单
+2. **信息最小化**：hook 只需要 `provider_kind` 字符串和 `provider_external_call` 布尔值，不需要 provider 的 API key、config、model name 等
+3. **向后兼容**：预解析字段有默认值 `("unknown", False)`，现有调用方不受影响
+
+### 为什么在构造点（core.py）预解析而非消费点（loop.py）
+
+1. `core.py` 已有 `provider.provider_type` 读取先例（line 508 dispatcher auto-build）
+2. 解析逻辑放在「信息最完整的地方」——`loop_ctx.model_provider` 在 `core.py` 可见
+3. 如果未来新增 provider 类型，只需更新 core.py 白名单，loop.py 零改动
+4. loop.py 保持 provider-agnostic —— 纯 orchestration 层
+
+### Stop-Condition Near Misses (参数化)
+
+以下 stop condition 确认未触发：
+
+1. **读 .env** — 未触发。`_resolve_provider_evidence_metadata` 只读 `provider.provider_type` 类属性
+2. **打印 secret** — 未触发。不访问 API key
+3. **完整 provider 对象传入 LoopDependencies** — 未触发。只传 string/bool
+4. **在 loop.py 放 provider 解析逻辑** — 未触发。解析在 core.py
+5. **provider_kind fallback 到 class name** — 未触发。只输出 coarse-grained 三态
+6. **从 provider 推导 external_side_effects** — 未触发。保持 False
+7. **新增 real-only/fake-only loop** — 未触发。同一条路径
+8. **修改 Memory governance** — 未触发。DeterministicMemoryPolicy 不变
 
 ## 为什么 fake provider 不等于第二套核心路径
 
@@ -137,6 +215,8 @@ gstack plan-eng-review 发现 TDD.md 缺少 `no_action` 处置的专项测试（
 
 ## 验证结果
 
+### Fake-provider phase (a0bc720)
+
 ```bash
 # 7 个 TDD 测试全部通过
 HOME=/private/tmp/my-first-agent-memory-anchor-home .venv/bin/python -m pytest tests/runtime_integration/test_memory_anchor_fake.py -q
@@ -145,4 +225,24 @@ HOME=/private/tmp/my-first-agent-memory-anchor-home .venv/bin/python -m pytest t
 # Dogfood PASS（全部 13 项检查）
 HOME=/private/tmp/my-first-agent-memory-anchor-home .venv/bin/python scripts/dogfood_memory_anchor_fake.py
 # Status: PASS
+```
+
+### Hook parameterization (2026-05-21)
+
+```bash
+# 11 个 unit tests for _resolve_provider_evidence_metadata
+.venv/bin/python -m pytest tests/unit/test_provider_evidence_metadata.py -q
+# 11 passed
+
+# 8 个 fake-provider 测试 (7 original + 1 regression)
+.venv/bin/python -m pytest tests/runtime_integration/test_memory_anchor_fake.py -q
+# 8 passed
+
+# 122 个 runtime_integration tests (全量)
+.venv/bin/python -m pytest tests/runtime_integration/ -q
+# 122 passed
+
+# Ruff lint 无错误
+.venv/bin/ruff check agent tests scripts
+# All checks passed!
 ```

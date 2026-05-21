@@ -30,6 +30,7 @@ def _try_phase1_turn_end_runtime_action(
     state: Any,
     result_text: str,
     dispatcher: Any,
+    dependencies: Any = None,
 ) -> None:
     """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal。
 
@@ -39,6 +40,12 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher.route() 获得完整的 evidence chain（route/result/proof）。
     因为调用发生在真实 core loop 路径中，evidence 中的 core_loop_invoked=true
     字段允许 classifier 把这次 action 标为 real_core_loop_runtime_e2e。
+
+    Hook 参数化（Phase 1 hook param）：
+    - provider_kind / provider_external_call 从 dependencies 读取（core.py 预解析）
+    - external_side_effects 保持 False——工具/文件/MCP/memory retain 不在本轮范围
+    - loop 层不接触 provider 对象、不读 provider_type、不做 white-list 判断
+    - 这不是 fake/real 两套路径——是同一条 hook，只是 metadata 值不同
 
     为什么选择 memory turn-end proposal：
     - 语义最干净：turn-end 是自然边界，不需要额外条件判断
@@ -54,6 +61,11 @@ def _try_phase1_turn_end_runtime_action(
     """
     try:
         from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+        # hook 参数化：从 dependencies 读取 core.py 预解析的 provider metadata
+        # 不回退到硬编码——dependencies 为 None 时使用 fail-closed 默认值
+        provider_kind = getattr(dependencies, "provider_kind", "unknown") if dependencies is not None else "unknown"
+        provider_external_call = getattr(dependencies, "provider_external_call", False) if dependencies is not None else False
 
         messages = getattr(getattr(state, "conversation", None), "messages", [])
         last_user = ""
@@ -75,7 +87,8 @@ def _try_phase1_turn_end_runtime_action(
                 "core_loop_invoked": True,
                 "core_entrypoint": "core.chat",
                 "runtime_hook_name": "loop.turn_end",
-                "provider_kind": "fake",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
                 "external_side_effects": False,
             },
         )
@@ -89,13 +102,17 @@ def _try_phase1_turn_end_runtime_action(
 class LoopDependencies:
     """主循环依赖集合。
 
-    这里注入的是”怎么做”的函数，而不是 durable state schema。主循环可以
+    这里注入的是"怎么做"的函数，而不是 durable state schema。主循环可以
     编排 call_model / dispatch_model_output / checkpoint clear，但不能因此
     理解 Memory 内部字段、UI adapter 或 provider 实现。
 
     Phase 1: runtime_action_dispatcher 是可选注入，允许 loop turn-end 触发
     RuntimeAction（如 memory turn-end proposal）而不污染 loop 核心逻辑。
     不传则 loop 行为与 Phase 1 之前完全一致。
+
+    Phase 1 hook 参数化：provider_kind / provider_external_call 在 core.py
+    构造点预解析后传入——loop 层不接触 provider 对象，不读取 provider_type，
+    不做 white-list 判断。provider_kind 只允许 coarse-grained 三态。
     """
 
     state: Any
@@ -105,6 +122,11 @@ class LoopDependencies:
     safe_emit_runtime_event: Callable[[Callable[[RuntimeEvent], None] | None, RuntimeEvent], None]
     clear_checkpoint: Callable[[], None]
     runtime_action_dispatcher: Any | None = None
+    # hook 参数化：预解析的 coarse-grained provider evidence metadata
+    # 这两个字段在 core.py _run_main_loop 中由 _resolve_provider_evidence_metadata 填充
+    # 不在 loop.py 中解析——loop 层保持 provider-agnostic
+    provider_kind: str = "unknown"
+    provider_external_call: bool = False
 
 
 def run_main_loop(
@@ -112,15 +134,15 @@ def run_main_loop(
     loop_ctx: LoopContext,
     dependencies: LoopDependencies,
 ) -> str:
-    """执行模型调用主循环，保持行为中性的 orchestration 层。
+    """执行模型调用主循环,保持行为中性的 orchestration 层。
 
-    本函数只做：
-    - 增加 loop iteration；
-    - 调模型；
-    - 把模型输出交给 dispatcher；
+    本函数只做:
+    - 增加 loop iteration;
+    - 调模型;
+    - 把模型输出交给 dispatcher;
     - 处理最大循环次数兜底。
 
-    它不解析 Memory、Tool、CLI/TUI 或 confirmation 内部语义；这些语义仍由
+    它不解析 Memory, Tool, CLI/TUI 或 confirmation 内部语义;这些语义仍由
     注入的 owner 函数和原有 handler 负责。
     """
 
@@ -165,5 +187,6 @@ def run_main_loop(
             if dependencies.runtime_action_dispatcher is not None:
                 _try_phase1_turn_end_runtime_action(
                     dependencies.state, result, dependencies.runtime_action_dispatcher,
+                    dependencies=dependencies,
                 )
             return result

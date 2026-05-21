@@ -128,7 +128,7 @@ def test_capability_matrix_requires_full_action_evidence_contract() -> None:
     ])
 
     skill = next(row for row in matrix if row["capability"] == "Skill selection")
-    assert skill["evidence_level"] == "runtime_e2e"
+    assert skill["evidence_level"] == "harness_runtime_e2e"
     assert skill["action_id"].startswith("act:")
     assert skill["target_module_proof"]["proof_id"].startswith("proof:")
 
@@ -205,7 +205,7 @@ def test_fake_overlay_does_not_satisfy_production_tool_registry_capability() -> 
     fake_overlay = next(row for row in matrix if row["capability"] == "Dogfood fake overlay blocked path")
     assert production["evidence_level"] != "runtime_e2e"
     assert production["e2e_verified"] != "yes"
-    assert fake_overlay["evidence_level"] == "runtime_e2e"
+    assert fake_overlay["evidence_level"] == "harness_runtime_e2e"
     assert fake_overlay["decision"] == "blocked"
 
 

@@ -28,6 +28,7 @@ def build_loop_context(
     model_name: str,
     max_loop_iterations: int,
     provider: Any = None,
+    runtime_action_dispatcher: Any = None,
 ) -> LoopContext:
     """构造 runtime-only LoopContext；不包含 checkpoint/durable state。
 
@@ -37,6 +38,8 @@ def build_loop_context(
         max_loop_iterations: 最大循环迭代次数。
         provider: 可选的 ModelProvider 实例。传入则直接作为 model_provider；
                   不传则回退到 build_model_provider_from_env()（生产默认路径）。
+        runtime_action_dispatcher: Phase 1 RuntimeActionDispatcher 注入点。
+                                   不传则 loop 行为不变（向后兼容）。
     """
 
     return LoopContext(
@@ -44,6 +47,7 @@ def build_loop_context(
         model_name=model_name,
         max_loop_iterations=max_loop_iterations,
         model_provider=provider if provider is not None else build_model_provider_from_env(),
+        runtime_action_dispatcher=runtime_action_dispatcher,
     )
 
 

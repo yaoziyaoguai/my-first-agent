@@ -443,6 +443,18 @@ class RuntimeActionDispatcher:
         evidence["dispatcher_route_id"] = context.route_id
         evidence["dispatcher_routed"] = True
         evidence["result_returned_to_parent_runtime"] = True
+        # Phase 1: 从 request payload 提取 core loop 来源证据字段。
+        # 这些字段由 loop.py turn-end hook 注入，分类器据此区分
+        # real_core_loop_runtime_e2e 与 harness_runtime_e2e。
+        for _source_key in (
+            "core_loop_invoked",
+            "core_entrypoint",
+            "runtime_hook_name",
+            "provider_kind",
+            "external_side_effects",
+        ):
+            if _source_key in request.payload:
+                evidence[_source_key] = request.payload[_source_key]
         evidence["evidence_level"] = classify_evidence_level(evidence)
         return RuntimeActionResult(
             action_type=result.action_type,

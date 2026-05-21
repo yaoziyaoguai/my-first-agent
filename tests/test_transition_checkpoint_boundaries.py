@@ -84,6 +84,7 @@ def test_loop_context_module_defines_frozen_dataclass_with_expected_fields():
         "model_name",
         "max_loop_iterations",
         "model_provider",
+        "runtime_action_dispatcher",
     }, (
         f"LoopContext 字段集合漂移：{field_names}；"
         "新增字段必须先评估是否属于 runtime dependency"

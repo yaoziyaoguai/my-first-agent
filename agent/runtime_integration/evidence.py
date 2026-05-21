@@ -16,6 +16,8 @@ from uuid import uuid4
 
 
 RUNTIME_E2E = "runtime_e2e"
+REAL_CORE_LOOP_RUNTIME_E2E = "real_core_loop_runtime_e2e"
+HARNESS_RUNTIME_E2E = "harness_runtime_e2e"
 SUBSYSTEM_INTEGRATION = "subsystem_integration"
 DETERMINISTIC_BASELINE = "deterministic_baseline"
 SIMULATED = "simulated"
@@ -1201,11 +1203,18 @@ def classify_evidence_level(evidence: Mapping[str, Any]) -> str:
 
     direct subsystem invocation 没有 dispatcher_routed；event-only 没有 module proof。
     两者都不能升级到 runtime_e2e。
+
+    Phase 1 分类升级：
+    - real_core_loop_runtime_e2e：core.chat → loop → dispatcher 全链路，有 core_loop_invoked 证据
+    - harness_runtime_e2e：dogfood/harness 直接调用 dispatcher，无 core_loop_invoked 证据
+    - 两者都有完整 target_module_proof 和 route provenance
     """
 
     explicit = evidence.get("evidence_level")
     if is_runtime_e2e_evidence(evidence):
-        return RUNTIME_E2E
+        if evidence.get("core_loop_invoked") is True:
+            return REAL_CORE_LOOP_RUNTIME_E2E
+        return HARNESS_RUNTIME_E2E
     if evidence.get("dispatcher_routed") or evidence.get("target_handler_invoked") or evidence.get("module_invoked"):
         return SUBSYSTEM_INTEGRATION
     if explicit in {DETERMINISTIC_BASELINE, SIMULATED, NOT_COVERED}:

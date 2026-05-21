@@ -97,6 +97,9 @@ class LoopContext:
     model_name: str
     max_loop_iterations: int
     model_provider: Any | None = field(default=None, repr=False, compare=False, hash=False)
+    # Phase 1: RuntimeActionDispatcher 注入点，允许 loop turn-end 触发
+    # RuntimeAction 而不污染 loop 核心逻辑。None 时 loop 行为不变。
+    runtime_action_dispatcher: Any | None = field(default=None, repr=False, compare=False, hash=False)
 
     def __post_init__(self) -> None:
         """构造期最小契约校验。

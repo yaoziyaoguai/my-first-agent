@@ -2151,13 +2151,13 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
                 ):
                     best_mode = "runtime_action_invoked"
                     best_event = event
-                    best_level = "runtime_e2e"
+                    best_level = "harness_runtime_e2e"
                     break
                 if target_module in aliases and best_event is None:
                     best_event = event
                     best_level = _capability_scoped_evidence_level(capability_key, event)
                     best_mode = "runtime_action_invoked"
-            if best_level == "runtime_e2e":
+            if best_level in ("real_core_loop_runtime_e2e", "harness_runtime_e2e"):
                 break
 
             actually = set(r.get("systems_actually_invoked", []))
@@ -2170,7 +2170,7 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
                     best_mode = "direct_subsystem_invocation"
                     best_level = "subsystem_integration"
 
-        if best_level == "runtime_e2e":
+        if best_level in ("real_core_loop_runtime_e2e", "harness_runtime_e2e"):
             e2e_verified = "yes"
             evidence = f"RuntimeAction target_module_proof verified in {scenario_ids}"
             gap = "none"
@@ -2262,7 +2262,7 @@ def _event_satisfies_capability_contract(capability_key: str, event: dict[str, A
 
 def _capability_scoped_evidence_level(capability_key: str, event: dict[str, Any]) -> str:
     level = classify_evidence_level(event)
-    if level == "runtime_e2e" and not _event_satisfies_capability_contract(capability_key, event):
+    if level in ("real_core_loop_runtime_e2e", "harness_runtime_e2e") and not _event_satisfies_capability_contract(capability_key, event):
         return "subsystem_integration"
     return level
 

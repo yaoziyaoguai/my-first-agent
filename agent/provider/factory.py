@@ -25,7 +25,9 @@ def build_model_provider(config: AgentProviderConfig) -> ModelProvider | None:
     if config.provider_type == "openai_native":
         return OpenAINativeProvider(config=config)
     if config.provider_type == "fake":
-        raise ProviderNotImplementedError("fake provider is a test-only protocol target")
+        from agent.provider.fake_provider import FakeProvider
+
+        return FakeProvider()
     raise ProviderNotImplementedError(
         f"{config.provider_type} provider is registered but not implemented"
     )

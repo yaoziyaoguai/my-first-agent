@@ -104,7 +104,7 @@ def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selectio
     assert result.payload["selection_confidence"] == "high"
     assert result.payload["body_load_decision"] is True
     assert "Skill body for code-review" in result.payload["loaded_body_preview"]
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     assert result.evidence["target_module"] == "SkillLoader"
     assert result.evidence["target_module_proof"]["observer_identity"] != "SkillRuntimeActionHandler"
     assert result.evidence["audit_only_skill_exclusion_evidence"]["excluded_count"] == 1
@@ -293,7 +293,7 @@ def test_tool_fake_high_risk_blocked_overlay_does_not_pollute_production_registr
     assert result.evidence["target_module_invoked"] is True
     assert result.evidence["dangerous_tool_function_invoked"] is False
     assert result.evidence["decision"] != "confirmation_required"
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     assert "fake.write_file" not in TOOL_REGISTRY
 
 
@@ -426,7 +426,7 @@ def test_memory_turn_end_proposal_creates_pending_review_without_auto_approve() 
     assert result.payload["auto_approved"] is False
     assert result.payload["real_episodes_read"] is False
     assert result.evidence["turn_end_hook_invoked"] is True
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
 
 
 def test_memory_secret_like_turn_is_redacted_and_not_proposed() -> None:
@@ -481,7 +481,7 @@ def test_checkpoint_no_tool_turn_reaches_safe_summary_boundary() -> None:
     assert "sk-test123456789" not in result.payload["safe_summary"]
     assert result.evidence["checkpoint_schema_changed"] is False
     assert result.evidence["memory_hook_substituted"] is False
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
 
 
 def test_checkpoint_tool_after_only_is_not_runtime_e2e() -> None:
@@ -704,7 +704,7 @@ def test_subagent_l0_delegate_uses_payload_name_and_parent_adjudicates(tmp_path:
     assert result.payload["no_shell_or_external_process"] is True
     assert result.evidence["parent_adjudicated"] is True
     assert result.evidence["target_module"] == "SubAgentExecutor"
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
 
 
 def test_subagent_nested_delegation_is_rejected(tmp_path: Path) -> None:

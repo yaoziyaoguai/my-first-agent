@@ -263,19 +263,25 @@ def _request(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUE
 
 
 def _valid_runtime_e2e_evidence(action_type: str | RuntimeActionType = RuntimeActionType.TOOL_REQUEST) -> dict:
+    """生成有效 E2E evidence（harness 路径：直接 dispatcher 调用，无 core_loop_invoked）。"""
     registry = ActionHandlerRegistry()
     registry.register(action_type, _ObservedHandler())
     dispatcher = RuntimeActionDispatcher(registry)
     result = dispatcher.route(_request(action_type))
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    # Phase 1: 直接 dispatcher 调用无 core_loop_invoked，分类为 harness_runtime_e2e
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     return dict(result.evidence)
 
 
 def _assert_not_runtime_e2e(evidence: dict) -> None:
+    """断言 evidence 不被分类为任何 runtime_e2e 级别。"""
     assert not is_runtime_e2e_evidence(evidence)
-    assert classify_evidence_level(evidence) != "runtime_e2e"
+    level = classify_evidence_level(evidence)
+    assert level != "real_core_loop_runtime_e2e", f"unexpected real_core_loop_runtime_e2e: {level}"
+    assert level != "harness_runtime_e2e", f"unexpected harness_runtime_e2e: {level}"
     if "evidence_level" in evidence:
-        assert evidence["evidence_level"] != "runtime_e2e"
+        assert evidence["evidence_level"] != "real_core_loop_runtime_e2e"
+        assert evidence["evidence_level"] != "harness_runtime_e2e"
 
 
 def test_request_result_and_event_are_frozen() -> None:
@@ -337,7 +343,7 @@ def test_dispatcher_routes_and_emits_receipt_event_with_independent_proof() -> N
     assert result.evidence["target_handler_invoked"] is True
     assert result.evidence["module_invoked"] is True
     assert result.evidence["result_returned_to_parent_runtime"] is True
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
 
     proof = result.evidence["target_module_proof"]
     assert proof["proof_id"]
@@ -375,7 +381,7 @@ def test_catalog_owned_invocation_descriptor_path_can_be_runtime_e2e() -> None:
     result = dispatcher.route(_request())
     proof = result.evidence["target_module_proof"]
 
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     assert result.evidence["target_catalog_allowed"] is True
     assert result.evidence["target_identity_valid"] is True
     assert proof["descriptor_invocation_approved"] is True
@@ -841,7 +847,7 @@ def test_same_route_different_result_transplant_is_not_runtime_e2e() -> None:
 
     result = dispatcher.route(_request())
 
-    assert result.evidence["evidence_level"] == "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     first, second = handler.issued_evidence
     assert first["dispatcher_route_id"] == second["dispatcher_route_id"]
     assert first["dispatcher_result_id"] != second["dispatcher_result_id"]

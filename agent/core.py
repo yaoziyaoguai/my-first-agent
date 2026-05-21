@@ -225,11 +225,13 @@ def _build_loop_context(
     model_name: str = MODEL_NAME,
     max_loop_iterations: int = MAX_LOOP_ITERATIONS,
     provider=None,
+    runtime_action_dispatcher=None,
 ) -> LoopContext:
     """兼容入口：实际 LoopContext 组装在 `agent.core_contexts`。
 
     provider: 可选的 ModelProvider 实例。传入则注入到 loop context，
               不传则回退到 build_model_provider_from_env()。
+    runtime_action_dispatcher: Phase 1 RuntimeActionDispatcher 注入点。
     """
 
     return build_loop_context(
@@ -237,6 +239,7 @@ def _build_loop_context(
         model_name=model_name,
         max_loop_iterations=max_loop_iterations,
         provider=provider,
+        runtime_action_dispatcher=runtime_action_dispatcher,
     )
 
 
@@ -302,6 +305,7 @@ def chat(
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
     on_trace_event: Callable[[Any], None] | None = None,
     provider=None,
+    runtime_action_dispatcher=None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -318,6 +322,11 @@ def chat(
     provider: 可选的 ModelProvider 实例。传入则注入到 loop context 用于 LLM 调用；
               不传则回退到 build_model_provider_from_env()（生产默认路径）。
               这是 E2E / dogfood 测试的显式注入点。
+
+    runtime_action_dispatcher: Phase 1 可选的 RuntimeActionDispatcher 实例。
+              传入则直接注入到 loop turn-end hook；不传则在 provider 为 fake 时
+              自动构建。dogfood 脚本可传入自建 dispatcher 来在 chat() 返回后
+              访问 action_log。
     """
 
     # 空输入守卫：strip 后为空串的输入直接过滤掉。
@@ -491,11 +500,24 @@ def chat(
     # monkeypatch.setattr(core, "MAX_LOOP_ITERATIONS", N) 这类测试场景
     # 拿不到运行时被 patch 的值（Python 函数默认参数在 def 时求值，仅一次）。
     # 这一行写法保证 chat() 调用时**重新**读取模块级常量。
+    # Phase 1: 构建 RuntimeActionDispatcher 并通过 LoopContext 注入到 loop turn-end hook。
+    # 优先使用调用方传入的 dispatcher（dogfood/测试注入点）；其次在 provider 为 fake 时自动构建。
+    # 构建本身无副作用：只有 loop turn-end 时 dispatcher.route() 才被调用。
+    if runtime_action_dispatcher is not None:
+        _phase1_dispatcher = runtime_action_dispatcher
+    elif getattr(provider, "provider_type", None) == "fake":
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+
+        _phase1_dispatcher = build_phase1_dispatcher()
+    else:
+        _phase1_dispatcher = None
+
     _loop_ctx = _build_loop_context(
         client,
         model_name=MODEL_NAME,
         max_loop_iterations=MAX_LOOP_ITERATIONS,
         provider=provider,
+        runtime_action_dispatcher=_phase1_dispatcher,
     )
 
     # v0.5 Phase 3 第二小步：ConfirmationContext 构造走 _build_confirmation_context()
@@ -692,6 +714,7 @@ def _run_main_loop(
             fallback_prefix="\n",
         ),
         clear_checkpoint=_clear_checkpoint,
+        runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
     )
     return run_main_loop(turn_state, loop_ctx, dependencies)
 

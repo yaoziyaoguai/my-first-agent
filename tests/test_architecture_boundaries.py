@@ -305,6 +305,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # evidence；不得拥有主 loop、ToolRegistry、Memory、Skill、SubAgent、
         # Checkpoint schema 或 provider 调用。
         "agent.runtime_loop_fields",
+        # Phase 1 real core loop E2E：core.chat() 内部 local import，仅用于
+        # 构建 RuntimeActionDispatcher 并注入到 LoopContext。不改变 core 的
+        # 模块级 import surface，不引入新的模块级耦合。
+        "agent.runtime_integration.phase1_hook",
         "agent.state",
         "agent.tool_registry",
         "agent.tools",

@@ -224,3 +224,106 @@ HOME=/private/tmp/my-first-agent-phase1-home \
 HOME=/private/tmp/my-first-agent-phase1-home \
   .venv/bin/python -m pytest tests/runtime_integration/ -q
 ```
+
+---
+
+## 4. Memory E2E 完整分层测试路线
+
+Memory Proposal Anchor 只是 Layer 1。以下明确后续阶段的测试策略，确保分层边界不被侵蚀。
+
+### 4.1 Layer 1: Proposal（当前）
+
+**测试文件**：`tests/runtime_integration/test_memory_anchor_fake.py` + `test_memory_anchor_real.py`
+
+**关键边界守卫**（已在本 TDD §1-§2 详述）：
+
+| 边界 | 正向断言 | 负向断言 |
+|------|----------|----------|
+| proposal ≠ approved | `pending_review: true` | payload 不含 `human_approved` |
+| 不写 store | `real_episodes_read: false` | 不检查 store 文件 |
+| 不 auto approve | `auto_approved: false` | `not_confirmed: true` |
+| core.chat 路径 | `core_loop_invoked: true` | direct dispatch → `harness_runtime_e2e` |
+| secret-like 过滤 | `should_not_remember` | `pending_review: false` |
+
+### 4.2 Layer 2: Approval / Retain（未来，NOT STARTED）
+
+**测试文件**（建议）：`tests/runtime_integration/test_memory_anchor_approve.py`
+
+**关键测试用例**：
+
+1. **`test_human_approve_writes_to_memory_store`**
+   - 模拟用户确认 → 写入 memory store → episode 持久化
+   - fake store adapter（不写真实文件系统边界外）
+
+2. **`test_approve_requires_explicit_user_action`**
+   - 系统不能自动批准
+   - `auto_approved` 路径必须不存在或始终返回 `false`
+
+3. **`test_approve_checks_secret_like_again`**
+   - 用户在 proposal 之后修改输入使其含 secret → approval 被拒绝
+   - 二次检查不可省略
+
+4. **`test_approved_episode_enters_recallable_set`**
+   - 批准后的 episode 出现在下次 `snapshot_for_prompt()` 结果中
+
+5. **`test_pending_review_item_not_in_recallable_set`**
+   - 未被批准的 pending_review proposal 不出现在 recall snapshot 中
+
+6. **`test_rejected_proposal_not_in_recallable_set`**
+   - `should_not_remember` 的 proposal 不出现在 recall snapshot 中
+
+7. **`test_layer2_still_uses_same_core_path`**
+   - approval 路径仍通过 `core.chat` → `RuntimeActionDispatcher` 统一路径
+
+**关键约束**：
+- Layer 2 必须复用 Layer 1 的 proposal 基础设施
+- approval handler 作为新的 `RuntimeActionType` 注册
+- 不创建独立的 approval-only 路径
+
+### 4.3 Layer 3: Recall / Use（未来，NOT STARTED）
+
+**测试文件**（建议）：`tests/runtime_integration/test_memory_anchor_recall.py`
+
+**关键测试用例**：
+
+1. **`test_recall_loads_approved_episodes_at_conversation_start`**
+   - `refresh_runtime_system_prompt()` 或等价入口加载已批准 episodes
+   - 注入到 system prompt 的 `<memory>` 块
+
+2. **`test_recall_snapshot_excludes_pending_review`**
+   - `snapshot_for_prompt()` 不包含 `pending_review: true` 的 items
+   - 不含 `not_confirmed: true` 的 items
+
+3. **`test_recall_snapshot_excludes_should_not_remember`**
+   - `disposition: should_not_remember` 的 items 不出现在 recall 中
+
+4. **`test_recall_handles_empty_store_gracefully`**
+   - 无已批准 episodes 时 system prompt 正常、不崩溃
+
+5. **`test_recall_injects_into_system_prompt`**
+   - model 在 response 中可能引用 recalled memory
+   - （此测试对 fake provider 只能验证注入格式，对 real provider 可验证引用行为）
+
+6. **`test_recall_failure_does_not_block_conversation`**
+   - store 读取失败 → 降级为空 memory → 对话继续
+
+7. **`test_layer3_still_uses_same_core_path`**
+   - recall 路径仍通过统一 `core.chat` 入口
+
+**关键约束**：
+- recall 发生在 conversation 启动阶段，早于 loop
+- recall 不触及 RuntimeActionDispatcher（不是 action，是 startup hook）
+- recall snapshot 与 proposal 的数据源完全隔离
+
+### 4.4 跨层边界测试矩阵
+
+| 测试 | Layer 1 | Layer 2 | Layer 3 |
+|------|---------|---------|---------|
+| proposal 产出 | ✅ 测试 | 复用 | 不适用 |
+| approve 写入 | 不实现 | ✅ 测试 | 不适用 |
+| recall 加载 | 不实现 | 不实现 | ✅ 测试 |
+| pending 不泄露到 recall | 不适用 | ✅ guard | ✅ 验证 |
+| secret-like 过滤 | ✅ 测试 | ✅ 二次检查 | 不适用（已过滤） |
+| 统一 core.chat 路径 | ✅ 测试 | ✅ 验证 | ✅ 验证 |
+| fake provider | ✅ | ✅ | ✅ |
+| real provider smoke | ✅ gated | ✅ gated | ✅ gated |

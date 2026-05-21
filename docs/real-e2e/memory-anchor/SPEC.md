@@ -196,7 +196,170 @@ should_not_remember  ≠  forget
 - 多 turn 对话 memory 累积
 - 跨 session memory 读写
 
-## 8. 与 Phase 1 的关系
+## 8. Memory E2E 完整分层路线
+
+Memory Proposal Anchor 只是 Memory E2E 的第一层。以下明确后续阶段及边界。
+
+### 8.1 三层架构
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ Layer 3: Recall / Use E2E                            │
+│ ───────────────────────────────────────              │
+│ conversation start → load episodes → inject into     │
+│ system prompt → model uses memory in response        │
+│                                                      │
+│ 边界：已 human_approved 的 episodes 必须可被召回     │
+│       recall 不触及 proposal/pending_review 流程     │
+│       recall snapshot 不包含 pending_review items    │
+│       本层依赖：Layer 2 完成                         │
+│       状态：NOT STARTED                              │
+└──────────────────────────────────────────────────────┘
+          ▲
+          │ 依赖
+          │
+┌──────────────────────────────────────────────────────┐
+│ Layer 2: Approval / Retain E2E                       │
+│ ───────────────────────────────────────              │
+│ user confirms proposal → policy check → write to     │
+│ memory store → mark human_approved → persistence     │
+│                                                      │
+│ 边界：proposal 不等于 approved memory                │
+│       human_approved 是显式用户动作，不可自动        │
+│       approval 前必须再次检查 secret-like            │
+│       approval 后 episode 进入 recallable 集合       │
+│       本层依赖：Layer 1 完成（proposal 能产出）      │
+│       状态：NOT STARTED                              │
+└──────────────────────────────────────────────────────┘
+          ▲
+          │ 依赖
+          │
+┌──────────────────────────────────────────────────────┐
+│ Layer 1: Proposal Anchor ← 当前锚点                  │
+│ ───────────────────────────────────────              │
+│ turn-end → policy evaluation → pending_review        │
+│ proposal → target_module_proof → classification      │
+│                                                      │
+│ 边界：proposal ≠ approved memory                    │
+│       pending_review ≠ human_approved                │
+│       not_confirmed ≠ confirmed                       │
+│       不写 memory store                              │
+│       不读 memory episodes                           │
+│       状态：IN PROGRESS（本 SPEC）                   │
+└──────────────────────────────────────────────────────┘
+```
+
+### 8.2 各层关键边界定义
+
+#### proposal（Layer 1）
+
+- **定义**：系统在 turn-end 时对用户输入/模型输出的"这一段可能值得长期记住"的候选判断
+- **触发者**：`_try_phase1_turn_end_runtime_action` → `MemoryTurnEndProposalHandler`
+- **产出**：`pending_review=True` + `proposal_id`（candidate id）+ `disposition: proposed`
+- **不产出**：写入 memory store、改变 recallable set、改变 checkpoint 语义
+- **证据**：`target_module_proof` (target_module=MemoryPolicy)
+- **classification**：`real_core_loop_runtime_e2e`
+
+#### pending_review（Layer 1 → Layer 2 的桥接状态）
+
+- **定义**：proposal 已生成但尚未经用户确认的中间态
+- **存储位置**：仅在 RuntimeActionEvent evidence 中，不入 durable store
+- **生命周期**：诞生于 turn-end → 等待用户确认 → 确认后转为 human_approved 或 被拒绝后转为 should_not_remember
+- **关键约束**：pending_review 的 proposal 不能被 recall（Layer 3 不能看到它）
+- **证据字段**：`pending_review: true`, `not_confirmed: true`, `auto_approved: false`
+
+#### human_approved（Layer 2 产出）
+
+- **定义**：用户显式确认后的 memory episode
+- **触发者**：用户交互（确认"记住"/编辑后记住），不能由 provider 或 agent 自动触发
+- **产出**：写 memory store → episode 进入 recallable 集合
+- **关键约束**：
+  - 绝不由 `auto_approved` 路径产生
+  - approval 前再次执行 secret-like check
+  - 记录 approval 来源（用户输入、时间戳、确认方式）
+- **证据字段**：`human_approved: true`, `approved_by: "user"`, `approval_timestamp`
+
+#### recall（Layer 3 产出）
+
+- **定义**：conversation 启动时从 memory store 加载已批准的 episodes 并注入 system prompt
+- **触发者**：`refresh_runtime_system_prompt` 或等价入口
+- **数据来源**：仅 `human_approved` episodes（不含 `pending_review`、不含 `should_not_remember`）
+- **注入形式**：`<memory>` 块注入 system prompt，模型可见
+- **关键约束**：
+  - 不触及 proposal 路径
+  - snapshot 不含未批准内容
+  - recall 失败不阻塞对话（降级为空 memory）
+
+### 8.3 状态流转
+
+```text
+turn-end hook 触发
+      │
+      ▼
+DeterministicMemoryPolicy.decide()
+      │
+      ├── no_action ──────────────► 无 proposal（本轮无可记忆内容）
+      │
+      ├── should_not_remember ────► 被拒绝（secret-like / policy reject）
+      │                                disposition: should_not_remember
+      │                                secret_like_detected: true (如适用)
+      │                                不进入 pending_review
+      │
+      └── proposed ──────────────► pending_review（Layer 1 终点）
+                                       │
+                                       │  ← 等待用户确认（Layer 2 起点）
+                                       │
+                              ┌────────┼────────┐
+                              ▼        ▼        ▼
+                          记住      编辑      不要记住
+                              │        │        │
+                              ▼        ▼        ▼
+                       human_approved  │  should_not_remember
+                              │        │
+                              └────────┘
+                                 │
+                                 ▼
+                          写入 memory store
+                                 │
+                                 ▼
+                          recallable set
+                                 │
+                                 ▼
+                    下次对话 system prompt 注入（Layer 3）
+```
+
+### 8.4 各层测试策略
+
+| 层 | 测试范围 | provider | 关键测试 |
+|-----|---------|----------|---------|
+| Layer 1 (Proposal) | TDD.md §1 §2 | fake + real smoke | pending_review, no auto approve, no real episodes |
+| Layer 2 (Approval) | 未来 | fake + real | human_approved 路径, confirmation 交互, store 写入, boundary 守卫 |
+| Layer 3 (Recall) | 未来 | fake + real | snapshot 加载, prompt 注入, 不含 pending items, 降级安全 |
+
+### 8.5 不得混淆的边界
+
+以下等价关系**不成立**，文档和代码中不得暗示成立：
+
+```text
+proposal        ≠  approved memory        ← 核心边界
+pending_review  ≠  human_approved         ← approval gate
+not_confirmed   ≠  confirmed              ← 确认状态
+auto_approved   ≠  human_approved         ← auto-approve 是 bug，不是 feature
+disposition:proposed  ≠  episode written  ← proposal 只是候选
+no_action       ≠  rejected (secret-like) ← reason 不同
+should_not_remember ≠ forget              ← 主动拒绝 ≠ 主动忘记
+recall snapshot ≠  proposal               ← 不同数据源
+```
+
+以下操作**不得**在 Layer 1 实现阶段发生：
+
+- 写 memory episodes 到 store
+- 标记 `human_approved`
+- 修改 checkpoint schema 以包含 memory state
+- 在 system prompt 中注入 memory
+- 从 memory store 加载 episodes 做 recall
+
+## 9. 与 Phase 1 的关系
 
 Memory Proposal Anchor 是 Phase 1 的自然延伸：
 

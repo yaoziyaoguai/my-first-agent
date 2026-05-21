@@ -171,11 +171,14 @@ Memory Proposal Anchor 验证结果：PASS / FAIL / PARTIAL
 - [x] provider_kind 正确标记
 
 未验证（不在本锚点范围）：
-- [ ] memory approve/confirm/retain 流程
+- [ ] Layer 2: memory approve/confirm/retain 流程（见 SPEC §8.2）
+- [ ] Layer 3: memory recall/use（见 SPEC §8.2）
 - [ ] ToolRegistry 集成
 - [ ] Checkpoint 集成
 - [ ] SubAgent 集成
 - [ ] 多 turn 对话 memory 累积
 - [ ] 跨 session memory 持久化
 - [ ] Full real E2E（含工具执行）
+
+Memory E2E 完整分层路线见 SPEC §8 和 TDD §4。
 ```

@@ -39,7 +39,9 @@ confirmation policy 要求在执行前征得用户确认。
 
 1. 工具在 `TOOL_REGISTRY` 中存在
 2. 工具名不在 `_FORBIDDEN_TOOL_NAMES` 中
-3. 工具名不以 `_` 开头（或为 `_safe_noop` 通过 allowlist）
+3. 工具名不以 `_` 开头（或为 `_safe_noop` 通过 allowlist）。
+   `_safe_noop` 的特殊性仅在 internal tool allowlist；allowlist 通过后仍走
+   同一 `needs_tool_confirmation` policy / gate logic，不存在专用 gate path。
 4. 工具在 `get_model_visible_tools()` 返回列表中
 5. `needs_tool_confirmation(tool_name, tool_args)` 返回 `True`
 
@@ -129,6 +131,14 @@ dogfood script → core.chat → runtime loop → route_from_runtime_loop()
 dogfood 脚本配置 scenario（包括注册一个 `confirmation="always"` 的工具），
 调用 `core.chat`，然后收集 runtime-produced evidence 验证 gate_disposition。
 
+**当前可达性说明：** 上述路径依赖 Open Question #1 的解决。当前 runtime loop
+（`loop.py:113`）硬编码 `tool_name="_safe_noop"`（`confirmation="never"`），
+因此 `confirmation_required` 路径当前不可达。如何让 TOOL_GATE 选取
+confirmable tool（例如通过 `requested_tool_name` / scenario config 的最小配置化）
+是 TDD / Implementation Plan 阶段必须首先决策的问题。这不是新 branch point，
+也不是新 Anchor。不得通过新增 fake loop、fake dispatcher 或 dogfood-only
+path 来解决。
+
 ### 5.2 禁止的做法
 
 - dogfood 调用 `dispatcher.route()` 直接构造 TOOL_GATE request
@@ -138,11 +148,16 @@ dogfood 脚本配置 scenario（包括注册一个 `confirmation="always"` 的�
 
 ### 5.3 分类预期
 
-| 路径 | 最高分类 |
-|------|---------|
-| `core.chat` → runtime loop → `route_from_runtime_loop()` | `real_core_loop_runtime_e2e` |
-| dogfood `dispatcher.route()` 直接调用 | `harness_runtime_e2e`（需 target proof 完整）|
-| dogfood 直接调用 `ToolGateHandler.handle()` | `subsystem_integration` |
+| 路径 | 最高分类 | 备注 |
+|------|---------|------|
+| `core.chat` → runtime loop → `route_from_runtime_loop()` | `real_core_loop_runtime_e2e` | 需 OQ#1 解决后可达；当前 `_safe_noop` 仅覆盖 `allowed` |
+| dogfood `dispatcher.route()` 直接调用 | `harness_runtime_e2e` | 需 target proof 完整 |
+| dogfood 直接调用 `ToolGateHandler.handle()` | `subsystem_integration` | — |
+
+`confirmation_required` 是目标 branch behavior。当前 hard-coded `_safe_noop`
+只能覆盖 `allowed` safe path。`confirmation_required` 的
+`real_core_loop_runtime_e2e` 路径需要后续 TDD / Implementation Plan 提供
+`requested_tool_name` / scenario config 的最小配置化设计。
 
 ## 6. SPEC 不做什么
 
@@ -173,10 +188,19 @@ dogfood 脚本配置 scenario（包括注册一个 `confirmation="always"` 的�
 
 ### 7.2 负例（非 confirmation_required 路径——仅覆盖，不展开 SPEC）
 
+`blocked` 和 `not_found` 是 `tool.gate` branch point 的负例 branch behavior。
+本轮仅作为边界语义说明，实际测试在 TDD 阶段作为 negative test coverage 覆盖。
+
+规则：
+- 不单独开新 Anchor
+- 不单独开新 capability milestone
+- 不扩大到 Tool Args / Tool Result / Retry / Error / Multi Tool / MCP Tool
+- 本 SPEC 当前只定义 `confirmation_required` behavior
+
 | 测试 | 条件 | 预期 gate_disposition |
 |------|------|----------------------|
 | `never` → allowed | `confirmation="never"` | `allowed` |
-| `blocked` | `confirmation="block"` 回调 | `rejected` |
+| `blocked` | callable 返回 `"block"` 或工具在 `_FORBIDDEN_TOOL_NAMES` | `rejected` |
 | `not_found` | 工具名不在 registry | `None` (decision: `not_found`) |
 
 ### 7.3 分类边界测试
@@ -212,4 +236,5 @@ dogfood 脚本配置 scenario（包括注册一个 `confirmation="always"` 的�
 - [ ] fake/real 边界清晰（共享业务流，仅配置层不同）
 - [ ] dogfood 边界清晰（必须走 `core.chat`，不可 direct dispatch）
 - [ ] 与 Unified Runtime Flow Contract 一致
+- [ ] 无副作用：no shell / no file write / no external process / no MCP / no real API
 - [ ] open questions 未假装已解决

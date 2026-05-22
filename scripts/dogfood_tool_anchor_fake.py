@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Tool Anchor fake-mode dogfood runner.
+"""Tool gate branch behavior fake-mode dogfood runner.
 
 中文学习边界：
-这个脚本是 Tool Anchor fake-provider 的端到端狗粮验证——通过 core.chat()
+这个脚本是 Tool gate allowed branch behavior 的狗粮验证——通过 core.chat()
 完整路径证明 ToolRegistry gate 全链路正常，而非 harness 直接调用
 dispatcher.route()。
 
@@ -52,7 +52,7 @@ def _build_phase1_dispatcher() -> Any:
 
 
 def _run_tool_anchor_fake_dogfood() -> dict[str, Any]:
-    """执行一次 Tool Anchor fake-provider dogfood 并收集所有 evidence。
+    """执行一次 Tool gate branch behavior dogfood 并收集所有 evidence。
 
     走 core.chat() → run_main_loop → turn-end hook → dispatcher.route() 全链路。
     TOOL_GATE action 由 loop.py turn-end hook 自动触发——dogfood runner 不直接
@@ -98,6 +98,8 @@ def _run_tool_anchor_fake_dogfood() -> dict[str, Any]:
             "status": event.status,
             # evidence 分类字段（共享）
             "evidence_level": evidence.get("evidence_level", ""),
+            "dispatcher_origin": evidence.get("dispatcher_origin"),
+            "runtime_loop_invoked": evidence.get("runtime_loop_invoked"),
             "core_loop_invoked": evidence.get("core_loop_invoked"),
             "core_entrypoint": evidence.get("core_entrypoint"),
             "runtime_hook_name": evidence.get("runtime_hook_name"),
@@ -160,7 +162,7 @@ def _build_report(report: dict[str, Any]) -> str:
     """
     lines = [
         "=" * 60,
-        "Tool Anchor Fake-Mode Dogfood Report",
+        "Tool Gate Branch Behavior Fake-Mode Dogfood Report",
         "=" * 60,
         "",
         f"Status: {report['status']}",
@@ -201,13 +203,13 @@ def _build_report(report: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    """运行 Tool Anchor fake-mode dogfood 并输出报告。"""
+    """运行 Tool gate branch behavior fake-mode dogfood 并输出报告。"""
     report_path = os.environ.get(
         "TOOL_ANCHOR_REPORT_PATH",
         "/private/tmp/tool_anchor_dogfood_report.txt",
     )
 
-    print("Tool Anchor Fake-Mode Dogfood", flush=True)
+    print("Tool Gate Branch Behavior Fake-Mode Dogfood", flush=True)
     print(f"Report: {report_path}", flush=True)
     print(f"Temp HOME: {os.environ.get('HOME', 'default')}", flush=True)
     print(flush=True)

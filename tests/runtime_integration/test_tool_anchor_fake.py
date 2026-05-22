@@ -72,6 +72,11 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
+    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+        """测试 spy 透传 runtime-loop route，保留 core.chat 正路径分类。"""
+        self._route_calls.append(request)
+        return self._real.route_from_runtime_loop(request)
+
     @property
     def action_log(self):
         return self._real.action_log
@@ -316,6 +321,51 @@ class TestToolAnchorSafeToolRegistryGate:
             f"shell-like tool risk_level 必须为 'high'，"
             f"实际 {payload.get('risk_level')!r}"
         )
+
+    def test_other_internal_underscore_tool_is_blocked_unless_allowlisted(self):
+        """验证非 allowlist 的 `_` 内部工具仍被 ToolGateHandler 拒绝。
+
+        中文学习边界：
+        `_safe_noop` 是唯一用于 branch behavior validation 的内部安全工具。
+        remediation 不能把它扩展成“所有下划线工具都允许”的治理漏洞。
+        """
+        import agent.tools  # noqa: F401 - 触发工具注册
+        from agent.tool_registry import TOOL_REGISTRY
+
+        TOOL_REGISTRY["_unsafe_internal_test"] = {
+            "name": "_unsafe_internal_test",
+            "description": "test-only internal tool",
+            "parameters": {},
+            "confirmation": "never",
+            "func": lambda: "should not run",
+            "pre_execute": None,
+            "post_execute": None,
+            "meta_tool": False,
+            "capability": "local_action",
+            "risk_level": "low",
+            "output_policy": "none",
+        }
+        try:
+            dispatcher = _build_phase1_dispatcher_with_tool_gate()
+            request = RuntimeActionRequest(
+                action_type=RuntimeActionType.TOOL_GATE,
+                source="test",
+                parent_trace_id="",
+                payload={
+                    "tool_name": "_unsafe_internal_test",
+                    "tool_args": {},
+                    "requested_capability": "local_action",
+                },
+            )
+
+            result = dispatcher.route(request)
+        finally:
+            TOOL_REGISTRY.pop("_unsafe_internal_test", None)
+
+        assert result.status == "rejected"
+        evidence = dict(result.evidence)
+        assert evidence.get("gate_disposition") == "rejected"
+        assert evidence.get("rejection_reason") == "internal tool is not in tool gate allowlist"
 
 
 # ========== Phase B: core.chat() 全链路测试 ==========
@@ -713,6 +763,39 @@ class TestToolAnchorDirectDispatchAndBoundaries:
         level = classify_evidence_level(evidence)
         assert level == HARNESS_RUNTIME_E2E
         assert level != REAL_CORE_LOOP_RUNTIME_E2E
+
+    def test_direct_dispatch_spoofed_core_payload_is_harness_not_real_core_loop(self):
+        """direct dispatcher 伪造 core loop payload 也必须降级。
+
+        中文学习边界：
+        只有 runtime loop 专用 route 能写入可信 provenance；payload 字段来自
+        action 输入，不能作为 real_core_loop_runtime_e2e 的证据。
+        """
+        dispatcher = _build_phase1_dispatcher_with_tool_gate()
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "tool_name": "_safe_noop",
+                "tool_args": {},
+                "requested_capability": "local_action",
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": "fake",
+                "provider_external_call": False,
+                "external_side_effects": False,
+            },
+        )
+
+        result = dispatcher.route(request)
+        evidence = dict(result.evidence)
+
+        assert evidence.get("evidence_level") == HARNESS_RUNTIME_E2E
+        assert evidence.get("evidence_level") != REAL_CORE_LOOP_RUNTIME_E2E
+        assert evidence.get("dispatcher_origin") == "direct_dispatcher"
+        assert evidence.get("runtime_loop_invoked") is not True
 
 
 class TestToolAnchorMemoryAndToolGateIsolation:

@@ -54,6 +54,26 @@ def test_model_visible_tools_includes_builtins():
     assert "write_file" in names
 
 
+def test_model_visible_tools_exclude_internal_underscore_tools_even_when_allowlisted():
+    """内部 `_` 工具不得进入模型可见清单。
+
+    中文学习边界：
+    `_safe_noop` 是 Tool branch behavior validation 的内部工具。显式 allowlist
+    可以收窄工具集合，但不能绕过 hidden/internal 过滤，否则测试工具会暴露给模型。
+    """
+    _ensure_tools_loaded()
+
+    default_names = {t["name"] for t in get_model_visible_tools()}
+    allowlisted_names = {
+        t["name"]
+        for t in get_model_visible_tools(explicit_allowlist=frozenset({"_safe_noop"}))
+    }
+
+    assert "_safe_noop" in TOOL_REGISTRY
+    assert "_safe_noop" not in default_names
+    assert allowlisted_names == set()
+
+
 def test_model_visible_tools_max_total():
     """max_total 硬限制生效。"""
     _ensure_tools_loaded()

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Memory Proposal Anchor fake-mode dogfood runner.
+"""Memory Proposal branch behavior fake-mode dogfood runner.
 
 中文学习边界：
-这个脚本是 Memory Anchor fake-provider 的端到端狗粮验证——通过 core.chat()
-完整路径证明 Memory Proposal Anchor 全链路正常，而非 harness 直接调用
+这个脚本是 Memory proposal branch behavior 的狗粮验证——通过 core.chat()
+完整路径证明 Memory proposal branch 全链路正常，而非 harness 直接调用
 dispatcher.route()。
 
 DOGFOOD_PLAN.md §2.4 定义了 13 条 PASS 标准；本脚本使用共享检查模块
@@ -56,7 +56,7 @@ def _build_phase1_dispatcher() -> Any:
 
 
 def _run_memory_anchor_fake_dogfood() -> dict[str, Any]:
-    """执行一次 Memory Anchor fake-provider dogfood 并收集所有 evidence。
+    """执行一次 Memory proposal branch dogfood 并收集所有 evidence。
 
     走 core.chat() → run_main_loop → turn-end hook → dispatcher.route() 全链路。
     与 dogfood_e2e_runtime.py 的本质区别：不直接构造 RuntimeActionRequest，
@@ -102,6 +102,8 @@ def _run_memory_anchor_fake_dogfood() -> dict[str, Any]:
             "status": event.status,
             # evidence 分类字段
             "evidence_level": evidence.get("evidence_level", ""),
+            "dispatcher_origin": evidence.get("dispatcher_origin"),
+            "runtime_loop_invoked": evidence.get("runtime_loop_invoked"),
             "core_loop_invoked": evidence.get("core_loop_invoked"),
             "core_entrypoint": evidence.get("core_entrypoint"),
             "runtime_hook_name": evidence.get("runtime_hook_name"),
@@ -161,7 +163,7 @@ def _build_report(report: dict[str, Any]) -> str:
     """
     lines = [
         "=" * 60,
-        "Memory Proposal Anchor Fake-Mode Dogfood Report",
+        "Memory Proposal Branch Behavior Fake-Mode Dogfood Report",
         "=" * 60,
         "",
         f"Status: {report['status']}",
@@ -203,13 +205,13 @@ def _build_report(report: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    """运行 Memory Anchor fake-mode dogfood 并输出报告。"""
+    """运行 Memory proposal branch fake-mode dogfood 并输出报告。"""
     report_path = os.environ.get(
         "PHASE1_REPORT_PATH",
         "/private/tmp/phase1_memory_anchor_dogfood_report.txt",
     )
 
-    print("Memory Proposal Anchor Fake-Mode Dogfood", flush=True)
+    print("Memory Proposal Branch Behavior Fake-Mode Dogfood", flush=True)
     print(f"Report: {report_path}", flush=True)
     print(f"Temp HOME: {os.environ.get('HOME', 'default')}", flush=True)
     print(flush=True)

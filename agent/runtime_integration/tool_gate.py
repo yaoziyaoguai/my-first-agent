@@ -89,7 +89,7 @@ class ToolGateHandler:
             risk_level = "unknown"
             rejection_reason = "tool not found in production ToolRegistry"
         elif tool_name.startswith("_"):
-            # 最小 allowlist：只放行 _safe_noop（内部 safe no-op anchor 工具）。
+            # 最小 allowlist：只放行 _safe_noop（内部 branch behavior 验证工具）。
             # 其他 `_` 前缀工具仍 blocked——不是无条件放行所有下划线工具。
             # _safe_noop 通过 allowlist 后走正常 confirmation policy 检查
             # （needs_tool_confirmation 返回 False → gate_disposition="allowed"）。

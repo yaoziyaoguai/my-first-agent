@@ -115,6 +115,11 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
+    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+        """测试 spy 透传 runtime-loop route，保持 real smoke provenance 语义。"""
+        self._route_calls.append(request)
+        return self._real.route_from_runtime_loop(request)
+
     @property
     def action_log(self):
         return self._real.action_log

@@ -82,6 +82,11 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
+    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+        """测试 spy 透传 runtime-loop route，避免把 core.chat 正路径降级成 harness。"""
+        self._route_calls.append(request)
+        return self._real.route_from_runtime_loop(request)
+
     @property
     def action_log(self):
         return self._real.action_log
@@ -514,6 +519,39 @@ class TestMemoryAnchorEvidenceClassification:
         assert level == HARNESS_RUNTIME_E2E
         assert level != REAL_CORE_LOOP_RUNTIME_E2E
 
+    def test_direct_dispatch_payload_spoof_is_harness_not_real_core_loop(self):
+        """direct dispatcher 伪造 core_loop_invoked 也不能冒充真实 core loop。
+
+        中文学习边界：
+        `RuntimeActionRequest.payload` 是子系统输入，不是 runtime provenance。
+        remediation 后，只有 dispatcher 从 runtime loop 专用入口写入的字段才能
+        把 evidence 升级为 real_core_loop_runtime_e2e。
+        """
+        dispatcher = _build_phase1_dispatcher()
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "user_message": "以后叫我小王",
+                "assistant_response": "好的，以后叫你小王。",
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": "fake",
+                "provider_external_call": False,
+                "external_side_effects": False,
+            },
+        )
+
+        result = dispatcher.route(request)
+        evidence = dict(result.evidence)
+
+        assert evidence.get("evidence_level") == HARNESS_RUNTIME_E2E
+        assert evidence.get("evidence_level") != REAL_CORE_LOOP_RUNTIME_E2E
+        assert evidence.get("dispatcher_origin") == "direct_dispatcher"
+        assert evidence.get("runtime_loop_invoked") is not True
+
 
 class TestMemoryAnchorNoAction:
     """测试 no_action 处置：仍产生 RuntimeActionEvent，但不进入 pending_review。
@@ -599,3 +637,56 @@ class TestMemoryAnchorNoAction:
         ev = dict(event.evidence)
         assert ev.get("disposition") == "no_action"
         assert ev.get("pending_review") is False
+
+
+class TestMemoryAnchorDogfoodActionSelection:
+    """测试 Memory dogfood checker 必须按 action_type 定位 action。"""
+
+    def test_memory_checker_finds_memory_action_by_type_not_first_index(self):
+        """memory checker 不得依赖 actions[0]。
+
+        中文学习边界：
+        turn-end hook 当前先发 Memory 后发 Tool，但 checker 不能把顺序当契约。
+        这个测试故意把 tool.gate 放在第一位，确保 checker 按 action_type 找到
+        memory.turn_end_proposal，避免 fake/real dogfood 报告因顺序变化误判。
+        """
+        from scripts._dogfood_memory_anchor_checks import check_memory_anchor_evidence
+
+        tool_action = {
+            "action_type": "tool.gate",
+            "evidence_level": "real_core_loop_runtime_e2e",
+            "core_loop_invoked": True,
+            "core_entrypoint": "core.chat",
+            "runtime_hook_name": "loop.turn_end",
+            "target_module_proof_exists": True,
+            "target_module": "ToolRegistry",
+            "provider_kind": "fake",
+            "provider_external_call": False,
+            "external_side_effects": False,
+        }
+        memory_action = {
+            "action_type": "memory.turn_end_proposal",
+            "evidence_level": "real_core_loop_runtime_e2e",
+            "core_loop_invoked": True,
+            "core_entrypoint": "core.chat",
+            "runtime_hook_name": "loop.turn_end",
+            "target_module_proof_exists": True,
+            "target_module": "MemoryPolicy",
+            "auto_approved": False,
+            "not_confirmed": True,
+            "provider_kind": "fake",
+            "provider_external_call": False,
+            "external_side_effects": False,
+            "no_silent_retain": True,
+            "real_episodes_read": False,
+        }
+
+        result = check_memory_anchor_evidence(
+            [tool_action, memory_action],
+            expected_provider_kind="fake",
+            expected_provider_external_call=False,
+            expected_external_side_effects=False,
+        )
+
+        assert result["fail_checks"] == []
+        assert result["errors"] == []

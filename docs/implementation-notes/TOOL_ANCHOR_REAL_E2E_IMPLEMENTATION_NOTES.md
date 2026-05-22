@@ -1,18 +1,23 @@
-# Tool Anchor Real E2E Implementation Notes
+# ToolRegistry Gate Branch Behavior Implementation Notes — historical Anchor phase
+
+> Historical note: this document records the former "Tool Anchor" validation
+> work. New work must use Unified Runtime Flow + Branch Behavior terminology and
+> reference `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md`. Do not create new
+> Tool Anchor milestones from this document.
 
 **Date:** 2026-05-22
 **Status:** complete — fake/real shared core path verified
 
 ## Implementation Summary
 
-ToolRegistry Safe Tool Anchor 是 my-first-agent 的第二个真实能力锚点，证明 ToolRegistry gate 路径通过统一的 `core.chat() → run_main_loop → turn-end hook → RuntimeActionDispatcher → ToolGateHandler → target_module_proof` 核心路径可正确触发。
+ToolRegistry safe gate validation 是 Tool branch `allowed` behavior 的历史验证记录，证明 ToolRegistry gate 路径通过统一的 `core.chat() → run_main_loop → turn-end hook → RuntimeActionDispatcher → ToolGateHandler → target_module_proof` 核心路径可正确触发。
 
 ## Key Decisions
 
 ### _safe_noop 作为最小 safe tool
 
 选择 `_safe_noop` 而非 `safe.echo` / `safe.inspect_request`：
-- 零参数、零副作用、零输入面 —— 最安全的 gate check anchor
+- 零参数、零副作用、零输入面 —— 最安全的 gate branch behavior test tool
 - `_` 前缀保证模型不可见（`get_model_visible_tools()` 自动过滤）
 - `confirmation="never"` 保证 gate disposition 为 `allowed`
 - 注册在 production `TOOL_REGISTRY` 中，非 dogfood overlay

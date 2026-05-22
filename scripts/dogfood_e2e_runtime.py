@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""End-to-End Runtime Dogfood —— First Agent v0.9.x 真实验证。
+"""Harness Runtime Dogfood —— First Agent v0.9.x 结构化验证。
 
 本轮 dogfood 区别于上一轮的 provider.create(prompt) 模式：
 - 尽量调用 First Agent 正式 Runtime / Skill / SubAgent / Memory / ToolRegistry /
   Checkpoint / Confirmation 模块
 - 不能只靠 prompt engineering 验证
 - 每个场景标记 systems_actually_invoked / systems_simulated
+
+中文学习边界：
+本脚本的大多数 RuntimeAction 场景直接构造 RuntimeActionRequest 并调用
+dispatcher.route()。这只能证明 harness_runtime_e2e 或 subsystem_integration，
+不能声明 real_core_loop_runtime_e2e。只有明确调用 core.chat() 并由 runtime loop
+写入 dispatcher-owned provenance 的场景，才可能证明真实 core loop E2E。
 
 安全约束：同上一轮。
 """
@@ -1586,11 +1592,15 @@ def _runtime_action_scenario_result(
     expected_statuses: set[str] | None = None,
 ) -> dict[str, Any]:
     events = [_runtime_action_event(result) for result in expected_results]
-    runtime_e2e_count = sum(1 for event in events if is_runtime_e2e_evidence(event))
+    runtime_action_proof_count = sum(1 for event in events if is_runtime_e2e_evidence(event))
     expected_statuses = expected_statuses or {"success"}
     statuses_ok = all(result.status in expected_statuses for result in expected_results)
     any_failed = any(result.status == "failed" for result in expected_results)
-    runtime_ok = runtime_e2e_count == len(events) if not allow_non_runtime_results else runtime_e2e_count > 0
+    runtime_ok = (
+        runtime_action_proof_count == len(events)
+        if not allow_non_runtime_results
+        else runtime_action_proof_count > 0
+    )
 
     if any_failed:
         status = "fail"
@@ -1618,7 +1628,7 @@ def _runtime_action_scenario_result(
         "systems_not_covered": systems_not_covered or [],
         "runtime_action_events": events,
         "evidence": (
-            f"{evidence_prefix}; runtime_e2e_actions={runtime_e2e_count}/{len(events)}; "
+            f"{evidence_prefix}; harness_runtime_action_proofs={runtime_action_proof_count}/{len(events)}; "
             f"statuses={[result.status for result in expected_results]}"
         ),
         "quality_score": 0.95 if status == "pass" else 0.55,
@@ -2170,11 +2180,16 @@ def _capability_evidence_matrix(results: list[dict[str, Any]]) -> list[dict[str,
                     best_mode = "direct_subsystem_invocation"
                     best_level = "subsystem_integration"
 
-        if best_level in ("real_core_loop_runtime_e2e", "harness_runtime_e2e"):
+        if best_level == "real_core_loop_runtime_e2e":
             e2e_verified = "yes"
-            evidence = f"RuntimeAction target_module_proof verified in {scenario_ids}"
+            evidence = f"core.chat runtime-loop target_module_proof verified in {scenario_ids}"
             gap = "none"
             severity = "none"
+        elif best_level == "harness_runtime_e2e":
+            e2e_verified = "partial"
+            evidence = f"Harness RuntimeAction target_module_proof verified in {scenario_ids}"
+            gap = "no core.chat runtime-loop provenance"
+            severity = "P2"
         elif best_mode == "actual_runtime_invoked":
             e2e_verified = "partial"
             evidence = f"Runtime path invoked in {scenario_ids}, but no target_module_proof"

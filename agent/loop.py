@@ -10,9 +10,10 @@ CLI/TUI adapter 或 provider 细节。
 execution、request_user_input、memory hook 的行为仍由原 owner 负责。
 
 Phase 1 hook：``_try_phase1_turn_end_runtime_action`` 在 loop turn-end 时
-调用 RuntimeActionDispatcher，证明 RuntimeAction 确实由真实 core loop 触发，
-而非 dogfood harness 直接 dispatcher.route()。这是 classification 从
-harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的必要条件。
+调用 RuntimeActionDispatcher 的 runtime-loop route，证明 RuntimeAction 确实
+由真实 core loop 触发，而非 dogfood harness 直接 dispatcher.route()。这是
+classification 从 harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的
+必要条件。
 """
 
 from __future__ import annotations
@@ -96,7 +97,8 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        dispatcher.route(request)
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(request)
     except Exception:
         # MEMORY action 失败不阻塞 loop 也不阻塞 TOOL_GATE
         pass
@@ -122,7 +124,8 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        dispatcher.route(tool_gate_request)
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(tool_gate_request)
     except Exception:
         # TOOL_GATE action 失败不阻塞 loop 也不阻塞 MEMORY
         pass

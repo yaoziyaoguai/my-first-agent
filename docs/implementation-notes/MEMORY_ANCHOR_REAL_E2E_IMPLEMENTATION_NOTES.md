@@ -1,4 +1,9 @@
-# Memory Anchor Real E2E 实现笔记 — fake-provider Phase
+# Memory Proposal Branch Behavior 实现笔记 — historical Anchor phase
+
+> Historical note: this document records the former "Memory Anchor" validation
+> work. New work must use Unified Runtime Flow + Branch Behavior terminology and
+> reference `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md`. Do not create new
+> Memory Anchor milestones from this document.
 
 ## 目标
 

@@ -242,6 +242,11 @@ def get_model_visible_tools(
     mcp_count = 0
 
     for name, info in TOOL_REGISTRY.items():
+        # 中文学习边界：`_` 前缀工具是 runtime/internal 工具，不能暴露给模型。
+        # explicit_allowlist 只能收窄模型可见集合，不能绕过 hidden/internal 过滤。
+        if name.startswith("_"):
+            continue
+
         # explicit allowlist 优先
         if explicit_allowlist is not None and name not in explicit_allowlist:
             continue

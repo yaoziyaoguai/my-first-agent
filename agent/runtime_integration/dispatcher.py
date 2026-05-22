@@ -51,6 +51,12 @@ HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
     "target_catalog_allowed",
     "target_identity_valid",
     "descriptor_invocation_approved",
+    "runtime_action_source",
+    "dispatcher_origin",
+    "runtime_loop_invoked",
+    "core_loop_invoked",
+    "core_entrypoint",
+    "runtime_hook_name",
 })
 
 
@@ -96,6 +102,9 @@ class RuntimeActionContext:
     handler_identity: str
     parent_trace_id: str
     observer: RuntimeActionModuleObserver
+    dispatcher_origin: str = "direct_dispatcher"
+    core_entrypoint: str = ""
+    runtime_hook_name: str = ""
     _issued_result_ids: set[int] = field(default_factory=set, init=False, repr=False)
 
     def observe_module_call(
@@ -313,6 +322,49 @@ class RuntimeActionDispatcher:
         return tuple(self._action_log)
 
     def route(self, request: RuntimeActionRequest) -> RuntimeActionResult:
+        """Harness/direct dispatcher route.
+
+        中文学习边界：
+        普通 route() 是 direct dispatcher 入口。即使调用方在 payload 里伪造
+        core_loop_invoked/core_entrypoint，也不能获得 runtime-loop provenance。
+        真实 core loop 必须走 route_from_runtime_loop()。
+        """
+        return self._route(
+            request,
+            dispatcher_origin="direct_dispatcher",
+            core_entrypoint="",
+            runtime_hook_name="",
+        )
+
+    def route_from_runtime_loop(
+        self,
+        request: RuntimeActionRequest,
+        *,
+        core_entrypoint: str = "core.chat",
+        runtime_hook_name: str = "loop.turn_end",
+    ) -> RuntimeActionResult:
+        """Runtime loop 专用 route，写入 dispatcher-owned provenance。
+
+        中文学习边界：
+        real_core_loop_runtime_e2e 只能由这个入口产生。provenance 由 dispatcher
+        参数写入 evidence，不从 request.payload 读取，避免 dogfood/harness 通过
+        payload 字段伪造真实 core loop 证据。
+        """
+        return self._route(
+            request,
+            dispatcher_origin="runtime_loop",
+            core_entrypoint=core_entrypoint,
+            runtime_hook_name=runtime_hook_name,
+        )
+
+    def _route(
+        self,
+        request: RuntimeActionRequest,
+        *,
+        dispatcher_origin: str,
+        core_entrypoint: str,
+        runtime_hook_name: str,
+    ) -> RuntimeActionResult:
         started = monotonic()
         action_id = new_action_id()
         route_id = f"route:{uuid4().hex}"
@@ -334,6 +386,9 @@ class RuntimeActionDispatcher:
             handler_identity=handler_identity,
             parent_trace_id=request.parent_trace_id,
             observer=self._observer,
+            dispatcher_origin=dispatcher_origin,
+            core_entrypoint=core_entrypoint,
+            runtime_hook_name=runtime_hook_name,
         )
         if handler is None:
             result = self._unsupported_result(request, context)
@@ -391,7 +446,14 @@ class RuntimeActionDispatcher:
             "target_module_proof": None,
             "result_returned_to_parent_runtime": False,
             "parent_adjudicated": None,
+            "runtime_action_source": request.source,
+            "dispatcher_origin": context.dispatcher_origin,
+            "runtime_loop_invoked": context.dispatcher_origin == "runtime_loop",
         }
+        if context.dispatcher_origin == "runtime_loop":
+            evidence["core_loop_invoked"] = True
+            evidence["core_entrypoint"] = context.core_entrypoint
+            evidence["runtime_hook_name"] = context.runtime_hook_name
         evidence["evidence_level"] = classify_evidence_level(evidence)
         return RuntimeActionResult(
             action_type=request.action_type,
@@ -443,13 +505,22 @@ class RuntimeActionDispatcher:
         evidence["dispatcher_route_id"] = context.route_id
         evidence["dispatcher_routed"] = True
         evidence["result_returned_to_parent_runtime"] = True
-        # Phase 1: 从 request payload 提取 core loop 来源证据字段。
-        # 这些字段由 loop.py turn-end hook 注入，分类器据此区分
-        # real_core_loop_runtime_e2e 与 harness_runtime_e2e。
+        evidence["runtime_action_source"] = request.source
+        evidence["dispatcher_origin"] = context.dispatcher_origin
+        evidence["runtime_loop_invoked"] = context.dispatcher_origin == "runtime_loop"
+        if context.dispatcher_origin == "runtime_loop":
+            # 中文学习注释：core loop provenance 只能由 runtime-loop route 写入。
+            # payload 是子系统输入，不能作为 real_core_loop_runtime_e2e 的证明。
+            evidence["core_loop_invoked"] = True
+            evidence["core_entrypoint"] = context.core_entrypoint
+            evidence["runtime_hook_name"] = context.runtime_hook_name
+        else:
+            evidence.pop("core_loop_invoked", None)
+            evidence.pop("core_entrypoint", None)
+            evidence.pop("runtime_hook_name", None)
+        # provider/external metadata 仍来自 runtime hook payload；它只描述 adapter
+        # 与副作用语义，不参与 direct dispatcher 升级为 real core loop 的判定。
         for _source_key in (
-            "core_loop_invoked",
-            "core_entrypoint",
-            "runtime_hook_name",
             "provider_kind",
             "provider_external_call",
             "external_side_effects",

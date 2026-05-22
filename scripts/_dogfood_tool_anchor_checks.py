@@ -1,8 +1,8 @@
-"""Tool Anchor dogfood 共享检查模块。
+"""Tool branch behavior dogfood 共享检查模块。
 
 中文学习边界：
-Tool Anchor fake/real dogfood 共享同一套核心 PASS 标准检查逻辑。
-与 memory anchor 对称但独立——Tool Anchor 检查 tool.gate 特有字段
+Tool branch behavior fake/real dogfood 共享同一套核心 PASS 标准检查逻辑。
+与 memory branch behavior 对称但独立——Tool checks 检查 tool.gate 特有字段
 （gate_disposition, decision, production_registry_found 等），不读
 memory-specific 字段。
 
@@ -44,7 +44,7 @@ def check_tool_anchor_evidence(
     expected_external_side_effects: bool = False,
     pre_existing_errors: list[str] | None = None,
 ) -> dict[str, Any]:
-    """对 action_log 执行 Tool Anchor PASS 标准检查。
+    """对 action_log 执行 Tool branch behavior PASS 标准检查。
 
     参数化 expected 值使得同一套检查逻辑可用于 fake/real 两种模式：
     - fake: provider_kind="fake", provider_external_call=False, external_side_effects=False
@@ -80,7 +80,7 @@ def check_tool_anchor_evidence(
             "errors": errors,
         }
 
-    # ── 共享 core loop evidence 字段（与 Memory Anchor 同源验证） ──
+    # ── 共享 core loop evidence 字段（与 Memory branch behavior 同源验证） ──
 
     # T2: evidence_level == real_core_loop_runtime_e2e
     if ta.get("evidence_level") == "real_core_loop_runtime_e2e":
@@ -249,19 +249,19 @@ def check_tool_anchor_evidence(
 
 
 def build_tool_anchor_overclaim_prevention_section() -> str:
-    """生成 Tool Anchor 验证范围声明（overclaim prevention）。
+    """生成 Tool branch behavior 验证范围声明（overclaim prevention）。
 
     中文学习边界——为什么需要这个声明：
-    - Tool Anchor 只验证 ToolRegistry gate 路径
+    - Tool branch behavior 只验证 ToolRegistry gate allowed 路径
     - 不覆盖真实工具执行、MCP、Skill、Checkpoint 等
-    - 报告必须明确标注已验证和未验证项
+    - 报告必须明确标注已验证和未验证项，避免继续扩展 Anchor 叙事
     """
     lines = [
         "=" * 60,
-        "Tool Anchor 验证范围",
+        "Tool Branch Behavior 验证范围",
         "=" * 60,
         "",
-        "已验证（本锚点范围内）：",
+        "已验证（本 branch behavior 范围内）：",
         "  [x] core.chat 统一入口",
         "  [x] run_main_loop turn-end hook 触发 TOOL_GATE",
         "  [x] RuntimeActionDispatcher.route() 调用",
@@ -273,7 +273,7 @@ def build_tool_anchor_overclaim_prevention_section() -> str:
         "  [x] gate_disposition=allowed",
         "  [x] provider_kind 正确标记",
         "",
-        "未验证（不在本锚点范围）：",
+        "未验证（不在本 branch behavior 范围）：",
         "  [ ] 真实工具执行（只做了 gate check）",
         "  [ ] file_write / shell / external process 工具",
         "  [ ] MCP 工具 gate check",
@@ -299,7 +299,8 @@ def build_tool_action_detail_lines(actions: list[dict[str, Any]]) -> list[str]:
     lines.append("--- tool.gate Action ---")
     for key in [
         "action_id", "action_type", "source", "status",
-        "evidence_level", "core_loop_invoked", "core_entrypoint",
+        "evidence_level", "dispatcher_origin", "runtime_loop_invoked",
+        "core_loop_invoked", "core_entrypoint",
         "runtime_hook_name", "provider_kind", "provider_external_call",
         "external_side_effects", "target_module", "target_module_proof_exists",
         # tool.gate 特有字段

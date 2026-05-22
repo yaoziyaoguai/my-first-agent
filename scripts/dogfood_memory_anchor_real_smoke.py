@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Memory Proposal Anchor real provider smoke dogfood runner.
+"""Memory proposal branch behavior real provider smoke dogfood runner.
 
 中文学习边界：
-这个脚本是 Memory Anchor real provider smoke 的端到端狗粮验证——通过 core.chat()
+这个脚本是 Memory proposal branch real provider smoke 的狗粮验证——通过 core.chat()
 + 真实 LLM provider 验证全链路，证明 fake/real 共享同一条 core.chat() →
 run_main_loop() → turn-end hook 路径。
 
@@ -87,7 +87,7 @@ _UNAUTHORIZED_MESSAGE = """\
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     """解析命令行参数——在授权门控前处理 --help。"""
     parser = argparse.ArgumentParser(
-        description="Memory Anchor Real Provider Smoke Dogfood",
+        description="Memory Proposal Branch Real Provider Smoke Dogfood",
         add_help=False,
     )
     parser.add_argument(
@@ -296,7 +296,7 @@ def _build_phase1_dispatcher() -> Any:
 def _run_memory_anchor_real_smoke_dogfood(
     safe_auth: dict[str, Any],
 ) -> dict[str, Any]:
-    """执行一次 Memory Anchor real provider smoke dogfood。
+    """执行一次 Memory proposal branch real provider smoke dogfood。
 
     走 core.chat() + real provider + build_phase1_dispatcher() 路径。
     与 fake dogfood 使用同一套共享检查逻辑。
@@ -374,6 +374,8 @@ def _run_memory_anchor_real_smoke_dogfood(
             "source": event.source,
             "status": event.status,
             "evidence_level": evidence.get("evidence_level", ""),
+            "dispatcher_origin": evidence.get("dispatcher_origin"),
+            "runtime_loop_invoked": evidence.get("runtime_loop_invoked"),
             "core_loop_invoked": evidence.get("core_loop_invoked"),
             "core_entrypoint": evidence.get("core_entrypoint"),
             "runtime_hook_name": evidence.get("runtime_hook_name"),
@@ -448,7 +450,7 @@ def _build_report(report: dict[str, Any]) -> str:
 
     lines = [
         "=" * 60,
-        "Memory Proposal Anchor Real Provider Smoke Dogfood Report",
+        "Memory Proposal Branch Behavior Real Provider Smoke Dogfood Report",
         "=" * 60,
         "",
         f"Status: {report['status']}",
@@ -499,7 +501,7 @@ def _build_report(report: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """运行 Memory Anchor real provider smoke dogfood。
+    """运行 Memory proposal branch real provider smoke dogfood。
 
     Exit codes: 0=PASS, 1=FAIL, 2=BLOCKED
     """
@@ -551,7 +553,7 @@ def main(argv: list[str] | None = None) -> int:
     #    安全前提：project-dotenv-only 检查（步骤 2a）已确认 key 来自 project .env
     _inject_project_dotenv_into_os_environ()
 
-    print("Memory Proposal Anchor Real Provider Smoke Dogfood", flush=True)
+    print("Memory Proposal Branch Behavior Real Provider Smoke Dogfood", flush=True)
     print(f"Report dir: {output_dir}", flush=True)
     if project_dotenv_only:
         print("Mode: project-dotenv-only (shell env fallback disabled)", flush=True)

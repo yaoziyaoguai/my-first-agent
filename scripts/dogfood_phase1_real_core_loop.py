@@ -86,6 +86,8 @@ def _run_phase1_real_core_loop() -> dict[str, Any]:
             "action_type": str(event.action_type),
             "status": event.status,
             "evidence_level": evidence.get("evidence_level", ""),
+            "dispatcher_origin": evidence.get("dispatcher_origin"),
+            "runtime_loop_invoked": evidence.get("runtime_loop_invoked"),
             "core_loop_invoked": evidence.get("core_loop_invoked"),
             "core_entrypoint": evidence.get("core_entrypoint"),
             "runtime_hook_name": evidence.get("runtime_hook_name"),
@@ -100,6 +102,16 @@ def _run_phase1_real_core_loop() -> dict[str, Any]:
         errors.append("no RuntimeAction triggered from core loop — loop turn-end hook did not fire")
 
     for action in actions:
+        if action["dispatcher_origin"] != "runtime_loop":
+            errors.append(
+                f"action {action['action_id']}: dispatcher_origin={action['dispatcher_origin']} "
+                f"(expected runtime_loop)"
+            )
+        if action["runtime_loop_invoked"] is not True:
+            errors.append(
+                f"action {action['action_id']}: runtime_loop_invoked is not True "
+                f"(got {action['runtime_loop_invoked']})"
+            )
         if action["core_loop_invoked"] is not True:
             errors.append(
                 f"action {action['action_id']}: core_loop_invoked is not True "

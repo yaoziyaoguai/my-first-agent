@@ -21,7 +21,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
-    "_safe_noop",
     "edit_file",
     "fetch_url",
     "mark_step_complete",
@@ -158,23 +157,26 @@ def _assert_spec_contains(spec: dict, expected: dict) -> None:
 
 
 def test_model_visible_tools_match_runtime_allowed_tools() -> None:
-    """模型可见工具清单必须与 runtime allowed tools 同源一致。
+    """模型可见工具清单必须来自 registry，但不包含内部 `_` 工具。
 
     这是 Tooling Foundation 的第一道防火墙：ToolSpec 暂时还没有独立类型，
-    但 `get_tool_definitions()` 和 `get_allowed_tools()` 都必须来自同一 registry。
-    未来 MCP adapter 也只能先注册成本地工具，再同时进入这两个投影。
+    但 model-visible projection 必须和完整 registry 分层。`_safe_noop` 是内部
+    branch behavior validation tool，应存在于 production registry，却不能进入
+    模型可见工具清单。
     """
 
     _load_builtin_tools()
 
-    from agent.tool_registry import get_allowed_tools, get_tool_definitions
+    from agent.tool_registry import TOOL_REGISTRY, get_allowed_tools, get_model_visible_tools
 
     allowed_tools = get_allowed_tools()
-    visible_tools = {definition["name"] for definition in get_tool_definitions()}
+    visible_tools = {definition["name"] for definition in get_model_visible_tools()}
 
-    assert allowed_tools == EXPECTED_MODEL_VISIBLE_TOOLS
     assert visible_tools == EXPECTED_MODEL_VISIBLE_TOOLS
-    assert visible_tools == allowed_tools
+    assert EXPECTED_MODEL_VISIBLE_TOOLS.issubset(allowed_tools)
+    assert "_safe_noop" in TOOL_REGISTRY
+    assert "_safe_noop" in allowed_tools
+    assert "_safe_noop" not in visible_tools
 
 
 def test_skill_lifecycle_tools_do_not_pollute_tooling_foundation_registry() -> None:
@@ -309,7 +311,9 @@ def test_internal_tool_specs_expose_capability_risk_and_output_policy() -> None:
 
     specs = {spec["name"]: spec for spec in get_tool_specs()}
 
-    assert set(specs) == EXPECTED_MODEL_VISIBLE_TOOLS
+    # ToolSpec 是 runtime/internal 投影，必须包含 `_safe_noop` 这类内部工具；
+    # model-visible 清单则由 get_model_visible_tools() 单独过滤。
+    assert set(specs) == set(EXPECTED_INTERNAL_TOOL_SPECS)
     for name, expected in EXPECTED_INTERNAL_TOOL_SPECS.items():
         _assert_spec_contains(specs[name], expected)
 

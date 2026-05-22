@@ -1,4 +1,4 @@
-"""Memory Anchor dogfood 共享检查模块。
+"""Memory branch behavior dogfood 共享检查模块。
 
 中文学习边界：
 fake dogfood 和 real smoke dogfood 共享同一套核心 PASS 标准检查逻辑。
@@ -19,6 +19,20 @@ from __future__ import annotations
 from typing import Any
 
 
+def find_memory_turn_end_action(actions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """按 action_type 查找 memory.turn_end_proposal event。
+
+    中文学习边界：
+    dogfood report 只能检查 runtime 已产生的 evidence，不能把 action_log 顺序当
+    架构契约。Memory 与 Tool gate 同属 turn-end lifecycle，未来顺序可能变化；
+    checker 必须按 action_type 定位，避免 fake/real 报告逻辑分裂或误判。
+    """
+    for action in actions:
+        if action.get("action_type") == "memory.turn_end_proposal":
+            return action
+    return None
+
+
 def check_memory_anchor_evidence(
     actions: list[dict[str, Any]],
     *,
@@ -27,7 +41,7 @@ def check_memory_anchor_evidence(
     expected_external_side_effects: bool,
     pre_existing_errors: list[str] | None = None,
 ) -> dict[str, Any]:
-    """对 action_log 执行 Memory Anchor PASS 标准检查。
+    """对 action_log 执行 Memory branch behavior PASS 标准检查。
 
     参数化 expected 值使得同一套检查逻辑可用于 fake/real 两种模式：
     - fake: provider_kind="fake", provider_external_call=False, external_side_effects=False
@@ -58,7 +72,20 @@ def check_memory_anchor_evidence(
             "errors": errors,
         }
 
-    a = actions[0]
+    a = find_memory_turn_end_action(actions)
+    if a is not None:
+        pass_checks.append("memory_action_found")
+    else:
+        fail_checks.append("memory_action_found")
+        errors.append(
+            "memory.turn_end_proposal event not found in action_log — "
+            "MEMORY action 可能未被 turn-end hook 发送或被 handler 拒绝"
+        )
+        return {
+            "pass_checks": pass_checks,
+            "fail_checks": fail_checks,
+            "errors": errors,
+        }
 
     # C3: evidence_level == real_core_loop_runtime_e2e
     # 这证明 event 确实来自 core loop 路径，不是 direct dispatcher
@@ -210,22 +237,22 @@ def check_memory_anchor_evidence(
 
 
 def build_overclaim_prevention_section() -> str:
-    """生成 Memory Proposal Anchor 验证范围声明（overclaim prevention）。
+    """生成 Memory branch behavior 验证范围声明（overclaim prevention）。
 
     中文学习边界——为什么需要这个声明：
-    - Memory Proposal Anchor 只是 Layer 1（proposal），不是 full Memory E2E
+    - Memory proposal branch behavior 只是 Layer 1（proposal），不是 full Memory E2E
     - 报告必须明确标注已验证和未验证项，避免读者误以为 Memory 系统已可生产使用
-    - DOGFOOD_PLAN.md §6 和 SPEC.md §8 定义了分层边界
+    - 后续工作应引用 Unified Runtime Flow Contract，而不是新增 Anchor family
 
     Returns:
         overclaim prevention 文本块（用于 dogfood 报告末尾）
     """
     lines = [
         "=" * 60,
-        "Memory Proposal Anchor 验证范围",
+        "Memory Proposal Branch Behavior 验证范围",
         "=" * 60,
         "",
-        "已验证（本锚点范围内）：",
+        "已验证（本 branch behavior 范围内）：",
         "  [x] core.chat 统一入口",
         "  [x] run_main_loop turn-end hook 触发",
         "  [x] RuntimeActionDispatcher.route() 调用",
@@ -235,7 +262,7 @@ def build_overclaim_prevention_section() -> str:
         "  [x] pending_review only / no auto approve",
         "  [x] provider_kind 正确标记",
         "",
-        "未验证（不在本锚点范围）：",
+        "未验证（不在本 branch behavior 范围）：",
         "  [ ] Layer 2: memory approve/confirm/retain 流程",
         "  [ ] Layer 3: memory recall/use",
         "  [ ] ToolRegistry 集成",
@@ -259,7 +286,8 @@ def build_action_detail_lines(actions: list[dict[str, Any]]) -> list[str]:
         lines.append(f"--- Action {i} ---")
         for key in [
             "action_id", "action_type", "source", "status",
-            "evidence_level", "core_loop_invoked", "core_entrypoint",
+            "evidence_level", "dispatcher_origin", "runtime_loop_invoked",
+            "core_loop_invoked", "core_entrypoint",
             "runtime_hook_name", "provider_kind", "provider_external_call",
             "external_side_effects", "target_module", "target_module_proof_exists",
             "disposition", "pending_review", "auto_approved", "not_confirmed",

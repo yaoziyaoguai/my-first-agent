@@ -1,4 +1,9 @@
-# Memory Proposal Anchor E2E — SPEC
+# Memory Proposal Branch Behavior — historical Anchor SPEC
+
+> Historical note: this spec records the former Memory Proposal Anchor. It is not
+> a template for new Anchor work. Future work must follow
+> `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` and describe validations as
+> Unified Runtime Flow + Branch Behavior.
 
 ## 1. 目标
 

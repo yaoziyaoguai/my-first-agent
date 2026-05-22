@@ -3,7 +3,7 @@
 中文学习边界：
 这些测试钉死 Phase 1 核心架构边界：
 1. core.chat() 路径确实触发 RuntimeActionDispatcher（不是 dogfood harness 直接调用）
-2. real_core_loop_runtime_e2e 必须有 core_loop_invoked=true 的 runtime hook evidence
+2. real_core_loop_runtime_e2e 必须有 dispatcher-owned runtime loop provenance
 3. dogfood harness 直接调用 dispatcher 只能是 harness_runtime_e2e
 4. 缺 runtime hook evidence 自动降级
 5. FakeProvider 不读 .env
@@ -124,31 +124,37 @@ class TestRealCoreLoopClassification:
         event_evidence = events[0].evidence
         assert event_evidence.get("evidence_level") == HARNESS_RUNTIME_E2E
 
-    def test_missing_core_loop_hook_evidence_downgrades_classification(self):
-        """缺少 runtime hook evidence 自动降级到 harness_runtime_e2e。
+    def test_direct_dispatcher_payload_spoof_downgrades_classification(self):
+        """direct dispatcher 即使伪造 core payload 也只能是 harness_runtime_e2e。
 
         架构边界：
-        - 即使 handler 正确处理了请求并生成了 target_module_proof
-        - 只要 core_loop_invoked 不是 True，就不能标 real_core_loop_runtime_e2e
-        - 这是 dispatcher 层的自动降级，不需要 handler 参与判断
+        - payload 是 action 输入，不是 runtime provenance
+        - direct dispatcher 可以伪造 core_loop_invoked/core_entrypoint 字段
+        - classifier 必须只信 dispatcher/runtime loop 自己写入的 provenance
         """
         dispatcher = _build_phase1_dispatcher()
-
-        # 构造一个 evidence-rich 但缺 core_loop_invoked 的请求
         request = RuntimeActionRequest(
             action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
-            source="dogfood",
+            source="core_loop",
             parent_trace_id="",
             payload={
                 "user_message": "hello",
                 "assistant_response": "hi",
-                # 故意不放 core_loop_invoked
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": "fake",
+                "provider_external_call": False,
+                "external_side_effects": False,
             },
         )
         result = dispatcher.route(request)
 
         _assert_valid_runtime_action_evidence(result.evidence)
         assert result.evidence["evidence_level"] == HARNESS_RUNTIME_E2E
+        assert result.evidence["evidence_level"] != REAL_CORE_LOOP_RUNTIME_E2E
+        assert result.evidence.get("dispatcher_origin") == "direct_dispatcher"
+        assert result.evidence.get("runtime_loop_invoked") is not True
 
 
 class TestFakeProviderSafety:
@@ -298,12 +304,13 @@ class TestMemoryTurnEndHook:
         assert payload.get("pending_review") is False
         assert payload.get("disposition") == "should_not_remember"
 
-    def test_phase1_memory_hook_with_core_loop_invoked_gets_real_core_loop_classification(self):
-        """有 core_loop_invoked=true 的 memory proposal 获得 real_core_loop_runtime_e2e。
+    def test_direct_route_with_core_loop_payload_is_still_harness(self):
+        """direct route 不能靠 payload 中的 core_loop_invoked 升级分类。
 
         架构边界：
-        - 这是从 harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的关键测试
-        - core_loop_invoked=true + valid target_module_proof = real_core_loop_runtime_e2e
+        - 这是 remediation 的防伪回归测试
+        - direct dispatcher 有完整 target proof，但没有 runtime loop owned provenance
+        - 因此只能是 harness_runtime_e2e
         """
         dispatcher = _build_phase1_dispatcher()
         request = RuntimeActionRequest(
@@ -323,10 +330,9 @@ class TestMemoryTurnEndHook:
         result = dispatcher.route(request)
 
         _assert_valid_runtime_action_evidence(result.evidence)
-        assert result.evidence["evidence_level"] == REAL_CORE_LOOP_RUNTIME_E2E
-        assert result.evidence.get("core_loop_invoked") is True
-        assert result.evidence.get("core_entrypoint") == "core.chat"
-        assert result.evidence.get("runtime_hook_name") == "loop.turn_end"
+        assert result.evidence["evidence_level"] == HARNESS_RUNTIME_E2E
+        assert result.evidence["evidence_level"] != REAL_CORE_LOOP_RUNTIME_E2E
+        assert result.evidence.get("runtime_loop_invoked") is not True
         assert result.evidence.get("provider_kind") == "fake"
         assert result.evidence.get("external_side_effects") is False
 
@@ -343,8 +349,8 @@ class TestPhase1EvidenceClassification:
         assert level == HARNESS_RUNTIME_E2E
         assert level != REAL_CORE_LOOP_RUNTIME_E2E
 
-    def test_classify_evidence_level_returns_real_core_loop_when_invoked_from_core_loop(self):
-        """有 core_loop_invoked=true 的证据升级到 real_core_loop_runtime_e2e。"""
+    def test_classify_evidence_level_rejects_payload_only_core_loop_claim(self):
+        """只有 payload core_loop_invoked 不能升级到 real_core_loop_runtime_e2e。"""
         dispatcher = _build_phase1_dispatcher()
         request = RuntimeActionRequest(
             action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
@@ -363,7 +369,8 @@ class TestPhase1EvidenceClassification:
         result = dispatcher.route(request)
 
         level = classify_evidence_level(result.evidence)
-        assert level == REAL_CORE_LOOP_RUNTIME_E2E
+        assert level == HARNESS_RUNTIME_E2E
+        assert level != REAL_CORE_LOOP_RUNTIME_E2E
 
     def test_direct_subsystem_invocation_is_not_runtime_e2e(self):
         """直接子系统调用不能成为任何 runtime_e2e 级别。
@@ -454,6 +461,11 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
+    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+        """测试 spy 透传 runtime-loop route，保留 hook 调用观察能力。"""
+        self._route_calls.append(request)
+        return self._real.route_from_runtime_loop(request)
+
     @property
     def action_log(self):
         return self._real.action_log
@@ -501,9 +513,9 @@ class TestCoreChatWiring:
           route() 调用确实发生在 chat() 执行期间，而非之前或之后
 
         架构边界：
-        - core_loop_invoked=true（来自 loop.py turn-end hook，非手工设置）
-        - core_entrypoint='core.chat'（来自 hook）
-        - runtime_hook_name='loop.turn_end'（来自 hook）
+        - runtime_loop_invoked=true（dispatcher-owned provenance）
+        - core_entrypoint='core.chat'（来自 runtime-loop route）
+        - runtime_hook_name='loop.turn_end'（来自 runtime-loop route）
         - evidence_level=real_core_loop_runtime_e2e（classifier 自动判定）
         - target_module_proof 存在且非空
         """
@@ -558,6 +570,8 @@ class TestCoreChatWiring:
             f"evidence_level 必须为 {REAL_CORE_LOOP_RUNTIME_E2E}，"
             f"实际 {evidence.get('evidence_level')!r}"
         )
+        assert evidence.get("runtime_loop_invoked") is True
+        assert evidence.get("dispatcher_origin") == "runtime_loop"
         assert evidence.get("core_loop_invoked") is True
         assert evidence.get("target_module_proof") is not None, (
             "target_module_proof 必须存在——无 proof 说明 handler observer 链断裂"

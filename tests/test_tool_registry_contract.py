@@ -21,6 +21,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
+    "_safe_noop",
     "edit_file",
     "fetch_url",
     "mark_step_complete",
@@ -40,6 +41,13 @@ PREMATURE_SKILL_TOOL_NAMES = {
 LOW_VALUE_NARROW_TOOL_NAMES = {"calculate"}
 EXPECTED_META_TOOLS = {"mark_step_complete", "request_user_input"}
 EXPECTED_INTERNAL_TOOL_SPECS = {
+    "_safe_noop": {
+        "capability": "local_action",
+        "risk_level": "low",
+        "output_policy": "none",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
     "edit_file": {
         "capability": "file_write",
         "risk_level": "high",

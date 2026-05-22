@@ -66,6 +66,20 @@ MEMORY_CANONICAL_RFC §2.4 明确：ToolRegistry / Safety Config 不属于 Memor
 Tool Anchor 验证的是独立的 tool gate 路径，不修改 `memory_policy` / `memory_runtime` / `memory_fs_store`。
 Tool confirmation (`needs_tool_confirmation()`) 和 Memory T1 Confirmation 是不同子系统的不同概念（RFC §10.5）。
 
+## Audit Findings
+
+### P1-01 (2026-05-22 Independent Audit) — tool_registry_contract EXPECTED_MODEL_VISIBLE_TOOLS
+
+**Finding:** `tests/test_tool_registry_contract.py` 的 `EXPECTED_MODEL_VISIBLE_TOOLS` 和 `EXPECTED_INTERNAL_TOOL_SPECS` 未包含新注册的 `_safe_noop`，导致 `test_model_visible_tools_match_runtime_allowed_tools` 和 `test_internal_tool_specs_expose_capability_risk_and_output_policy` 失败。
+
+**Root cause:** `get_tool_definitions()`、`get_tool_specs()`、`get_allowed_tools()` 都迭代全部 `TOOL_REGISTRY` 条目，不按 `_` 前缀过滤。`_safe_noop` 注册进 production registry 后，这些 introspection API 返回的集合自动包含它，但 contract tests 的 expected set 落后于 registry 实际状态。
+
+**Fix:** 将 `"_safe_noop"` 加入 `EXPECTED_MODEL_VISIBLE_TOOLS`，并在 `EXPECTED_INTERNAL_TOOL_SPECS` 中加入其治理 metadata（`capability="local_action"`, `risk_level="low"`, `output_policy="none"`, `confirmation="never"`, `meta_tool=False`）。不改 ToolRegistry governance，不放宽其他 `_` 前缀工具。
+
+**Files changed:** `tests/test_tool_registry_contract.py` (+8 lines)
+
+**Verification:** `pytest -q` → 2924 passed, 18 skipped, 0 failed
+
 ## Deferred Risks
 
 - `ToolGateHandler` 的 `_handle_fake_tool` 路径未在 E2E 中触发——需要 dogfood overlay tool 的专门测试

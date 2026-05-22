@@ -19,6 +19,11 @@ from agent.tools.edit import edit_file as edit_file  # noqa: F401
 # 元工具（meta_tool=True，不污染对话上下文）
 from agent.tools.meta import mark_step_complete as mark_step_complete  # noqa: F401
 from agent.tools.meta import request_user_input as request_user_input  # noqa: F401
+# _safe_noop: 内部 safe no-op anchor 工具——仅用于 ToolRegistry gate E2E 验证。
+# 以下划线开头，模型不可见（get_model_visible_tools 的 `_` prefix filter 排除），
+# 但 ToolGateHandler 通过最小 allowlist 可在 TOOL_REGISTRY 中查到它。
+# 它不代表放开所有 `_` 前缀工具——其他 `_` 前缀工具仍被 gate blocked。
+from agent.tools.safe_noop import _safe_noop as _safe_noop  # noqa: F401
 
 __all__ = [
     "edit_file",

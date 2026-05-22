@@ -40,15 +40,22 @@ from agent.runtime_integration.evidence import (
 )
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.schema import RuntimeActionRequest
+from agent.runtime_integration.tool_gate import ToolGateHandler
 
 
 # ========== 测试辅助 ==========
 
 
 def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
-    """构建 Phase 1 最小 dispatcher（仅 memory turn-end handler）。"""
+    """构建 Phase 1 dispatcher（memory turn-end handler + tool gate handler）。
+
+    Phase 2 更新：同时注册 ToolGateHandler，因为 loop turn-end hook 现在同时发送
+    MEMORY_TURN_END_PROPOSAL 和 TOOL_GATE 两个 action。不注册会导致 TOOL_GATE action
+    得到 not_supported 状态并污染 action_log。
+    """
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
+    registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 
 

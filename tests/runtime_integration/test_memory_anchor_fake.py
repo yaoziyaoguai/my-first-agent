@@ -42,16 +42,22 @@ from agent.runtime_integration.schema import RuntimeActionRequest
 
 
 def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
-    """构建 Phase 1 最小 dispatcher（仅 memory turn-end handler）。
+    """构建 Phase 1 dispatcher（memory turn-end + tool gate handler）。
 
     中文学习边界：
     与 agent.runtime_integration.phase1_hook.build_phase1_dispatcher() 行为等价。
     在测试文件中重新定义以保持自包含，避免跨测试文件 import 耦合。
     """
+    from agent.runtime_integration.tool_gate import ToolGateHandler
+
     registry = ActionHandlerRegistry()
     registry.register(
         RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
         MemoryTurnEndProposalHandler(),
+    )
+    registry.register(
+        RuntimeActionType.TOOL_GATE,
+        ToolGateHandler(),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 
@@ -155,10 +161,19 @@ class TestMemoryAnchorFakeProviderCoreChat:
         assert payload.get("external_side_effects") is False
 
         # 验证 action_log 中 event 的 evidence 分类
+        # 注意：action_log 现在包含 MEMORY + TOOL_GATE 两个 event，
+        # 必须按 action_type 查找 MEMORY event，不能使用 actions[-1]
         action_events = list(spy.action_log)
         assert len(action_events) >= 1
-        last_event = action_events[-1]
-        evidence = dict(last_event.evidence)
+        memory_event = next(
+            (a for a in action_events
+             if a.evidence.get("action_type") == "memory.turn_end_proposal"),
+            None,
+        )
+        assert memory_event is not None, (
+            "action_log 中必须存在 MEMORY_TURN_END_PROPOSAL event"
+        )
+        evidence = dict(memory_event.evidence)
 
         assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
             f"evidence_level 必须为 {REAL_CORE_LOOP_RUNTIME_E2E}，"
@@ -269,7 +284,10 @@ class TestMemoryAnchorFakeProviderCoreChat:
 
         action_events = list(spy.action_log)
         assert len(action_events) >= 1
+        # 只检查 MEMORY event——TOOL_GATE event 没有 real_episodes_read 字段
         for event in action_events:
+            if event.evidence.get("action_type") != "memory.turn_end_proposal":
+                continue
             ev = dict(event.evidence)
             assert ev.get("real_episodes_read") is False, (
                 f"real_episodes_read 必须为 False，"

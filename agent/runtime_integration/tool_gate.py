@@ -88,7 +88,32 @@ class ToolGateHandler:
             decision = "not_found"
             risk_level = "unknown"
             rejection_reason = "tool not found in production ToolRegistry"
-        elif tool_name not in visible_names or tool_name.startswith("_"):
+        elif tool_name.startswith("_"):
+            # 最小 allowlist：只放行 _safe_noop（内部 safe no-op anchor 工具）。
+            # 其他 `_` 前缀工具仍 blocked——不是无条件放行所有下划线工具。
+            # _safe_noop 通过 allowlist 后走正常 confirmation policy 检查
+            # （needs_tool_confirmation 返回 False → gate_disposition="allowed"）。
+            if tool_name == "_safe_noop":
+                risk_level = str(entry.get("risk_level", "low"))
+                confirmation = needs_tool_confirmation(tool_name, dict(payload.get("tool_args") or {}))
+                if confirmation == "block":
+                    gate_disposition = "rejected"
+                    decision = "rejected"
+                    rejection_reason = "tool policy blocked request"
+                elif confirmation is True:
+                    gate_disposition = "confirmation_required"
+                    decision = "confirmation_required"
+                    rejection_reason = None
+                else:
+                    gate_disposition = "allowed"
+                    decision = "allowed"
+                    rejection_reason = None
+            else:
+                gate_disposition = "rejected"
+                decision = "rejected"
+                risk_level = str(entry.get("risk_level", "medium"))
+                rejection_reason = "internal tool is not in tool gate allowlist"
+        elif tool_name not in visible_names:
             gate_disposition = "rejected"
             decision = "rejected"
             risk_level = str(entry.get("risk_level", "medium"))

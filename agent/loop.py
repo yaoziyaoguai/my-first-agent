@@ -32,14 +32,23 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher: Any,
     dependencies: Any = None,
 ) -> None:
-    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal。
+    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool gate。
 
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
-    决策。它构造一个 memory.turn_end_proposal RuntimeActionRequest，通过
-    dispatcher.route() 获得完整的 evidence chain（route/result/proof）。
-    因为调用发生在真实 core loop 路径中，evidence 中的 core_loop_invoked=true
-    字段允许 classifier 把这次 action 标为 real_core_loop_runtime_e2e。
+    决策。它构造两个独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL 和
+    TOOL_GATE），各自通过 dispatcher.route() 获得完整的 evidence chain。
+
+    为什么 MEMORY 和 TOOL_GATE 必须独立 try/except：
+    - 两个 action 在同一 lifecycle 触发，但各自独立
+    - MEMORY 失败不得阻断 TOOL_GATE evidence（反之亦然）
+    - 不允许把两个 action 包在同一个大 try/except 中——一个 action 的异常
+      不能导致另一个 action 消失
+
+    为什么 TOOL_GATE 必须显式传 tool_args：
+    - _safe_noop 是 zero-arg safe tool，但 tool_args 字段必须显式存在
+    - 避免 needs_tool_confirmation() 中的隐式 fallback 链
+    - 未来任何带参数工具都必须传真实 tool_args，不得省略
 
     Hook 参数化（Phase 1 hook param）：
     - provider_kind / provider_external_call 从 dependencies 读取（core.py 预解析）
@@ -47,36 +56,31 @@ def _try_phase1_turn_end_runtime_action(
     - loop 层不接触 provider 对象、不读 provider_type、不做 white-list 判断
     - 这不是 fake/real 两套路径——是同一条 hook，只是 metadata 值不同
 
-    为什么选择 memory turn-end proposal：
-    - 语义最干净：turn-end 是自然边界，不需要额外条件判断
-    - pending_review only：不自动批准，不写真实 memory episodes
-    - handler 已存在（MemoryTurnEndProposalHandler），不需新建
-    - deterministic policy 确保无副作用
-
     不负责什么：
     - 不推进 checkpoint state
     - 不影响 loop 返回值和 turn 语义
     - 不读/写真实 memory episodes
-    - dispatcher 失败时 silent fail，不阻塞 loop
+    - dispatcher 失败时各自 silent fail，不阻塞 loop 也不阻塞对方
     """
+    from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    # hook 参数化：从 dependencies 读取 core.py 预解析的 provider metadata
+    # 不回退到硬编码——dependencies 为 None 时使用 fail-closed 默认值
+    provider_kind = getattr(dependencies, "provider_kind", "unknown") if dependencies is not None else "unknown"
+    provider_external_call = getattr(dependencies, "provider_external_call", False) if dependencies is not None else False
+
+    messages = getattr(getattr(state, "conversation", None), "messages", [])
+    last_user = ""
+    for msg in reversed(messages):
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        if role == "user":
+            content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+            if isinstance(content, str):
+                last_user = content
+                break
+
+    # MEMORY action（独立 try/except——失败不阻断 TOOL_GATE）
     try:
-        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-
-        # hook 参数化：从 dependencies 读取 core.py 预解析的 provider metadata
-        # 不回退到硬编码——dependencies 为 None 时使用 fail-closed 默认值
-        provider_kind = getattr(dependencies, "provider_kind", "unknown") if dependencies is not None else "unknown"
-        provider_external_call = getattr(dependencies, "provider_external_call", False) if dependencies is not None else False
-
-        messages = getattr(getattr(state, "conversation", None), "messages", [])
-        last_user = ""
-        for msg in reversed(messages):
-            role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
-            if role == "user":
-                content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
-                if isinstance(content, str):
-                    last_user = content
-                    break
-
         request = RuntimeActionRequest(
             action_type=RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
             source="core_loop",
@@ -94,7 +98,33 @@ def _try_phase1_turn_end_runtime_action(
         )
         dispatcher.route(request)
     except Exception:
-        # Phase 1 hook 必须 silent fail：不阻塞 loop、不改变 turn 语义
+        # MEMORY action 失败不阻塞 loop 也不阻塞 TOOL_GATE
+        pass
+
+    # TOOL_GATE action（独立 try/except——失败不阻断 MEMORY）
+    try:
+        tool_gate_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "tool_name": "_safe_noop",
+                # 显式传 tool_args——_safe_noop 是 zero-arg safe tool，
+                # 但避免 needs_tool_confirmation() 中的隐式 fallback 链。
+                # 未来任何带参数工具都必须传真实 tool_args，不得省略。
+                "tool_args": {},
+                "requested_capability": "local_action",
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        dispatcher.route(tool_gate_request)
+    except Exception:
+        # TOOL_GATE action 失败不阻塞 loop 也不阻塞 MEMORY
         pass
 
 

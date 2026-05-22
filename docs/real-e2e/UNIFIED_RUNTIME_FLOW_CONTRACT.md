@@ -1,6 +1,6 @@
 # Unified Runtime Flow Contract
 
-Status: active remediation contract  
+Status: active remediation contract
 Date: 2026-05-22
 
 This document replaces new Anchor framing. Historical Anchor documents may remain

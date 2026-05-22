@@ -246,3 +246,73 @@ HOME=/private/tmp/my-first-agent-memory-anchor-home .venv/bin/python scripts/dog
 .venv/bin/ruff check agent tests scripts
 # All checks passed!
 ```
+
+## Real Provider Smoke Phase (2026-05-22)
+
+### 目标
+
+在 hook parameterization 已就位的基础上，新增 real provider smoke dogfood 脚本和 gated 测试，验证真实 LLM provider 走同一 `core.chat()` → `run_main_loop()` → turn-end hook 路径。不改任何生产代码——基础设施已通过 fake provider phase + hook parameterization 完全就位。
+
+### 变更摘要
+
+#### 新增文件
+
+- **`scripts/dogfood_memory_anchor_real_smoke.py`** — real provider smoke 专用 dogfood 脚本，含授权门控、安全 auth field 派生、real provider 构造
+- **`tests/runtime_integration/test_memory_anchor_real.py`** — 9 个 gated/non-gated 测试，覆盖授权门控、real provider evidence、分类边界、脱敏逻辑
+- **`scripts/_dogfood_memory_anchor_checks.py`** — fake/real 共享 PASS 标准检查模块，参数化 expected metadata 值
+
+#### 修改文件
+
+- **`scripts/dogfood_memory_anchor_fake.py`** — 重构使用共享检查模块，消除与 real smoke 的 PASS 标准漂移
+- **`agent/runtime_integration/dispatcher.py`** — 在 evidence extraction whitelist 中新增 `provider_external_call`（hook parameterization 的遗漏修复）
+- **`docs/real-e2e/memory-anchor/SPEC.md`** — 修正 §3.B `external_side_effects`: `true` → `false`
+- **`docs/real-e2e/memory-anchor/TDD.md`** — 修正 §2.3 `external_side_effects == True` → `False`
+- **`docs/real-e2e/memory-anchor/DOGFOOD_PLAN.md`** — 修正 §3.4 `external_side_effects == true` → `false`
+
+### 关键设计决策
+
+#### 授权门控
+
+- `MY_FIRST_AGENT_RUN_REAL_MEMORY_ANCHOR_SMOKE=1` 作为显式 opt-in
+- 双门控设计：
+  1. 第一道门：env var 检查（CI 安全——即使 env var 在 shell profile 中，pytest 不调用真实 API 的测试不受影响）
+  2. 第二道门：API key 是否配置（优雅降级——未配置时 skip 而非 crash）
+- Exit codes: 0=PASS, 1=FAIL, 2=BLOCKED/not authorized
+
+#### 安全 auth field 派生（Constraint A）
+
+不使用 `AgentProviderConfig.redacted_summary()` 派生 auth 字段，原因：
+- `redacted_summary()` 包含 `api_key_env`（实际环境变量名如 "ANTHROPIC_API_KEY"）——不应出现在报告中
+- `key_source_kind` 必须是固定枚举（`project_dotenv` / `shell_env` / `missing`），而非实际 env var name
+
+改为使用 `config.py` 的 scoped loader：
+- `_load_project_dotenv_values()` — 读 .env 内容到内存，不污染 os.environ
+- `_resolve_scoped_config_value()` — 返回 (value, source_kind)，source_kind 为固定枚举
+
+#### provider_external_call vs external_side_effects 语义修正
+
+本轮修正了 SPEC.md/TDD.md/DOGFOOD_PLAN.md 中的语义矛盾：
+- `provider_external_call=true`：真实 API 调用确实发生（real smoke 为 true）
+- `external_side_effects=false`：无工具/文件/MCP/memory retain/human_approved write 等副作用（fake 和 real smoke 均为 false）
+- 这两个概念正交——provider_external_call 描述 provider 行为，external_side_effects 描述系统副作用
+
+#### 共享 PASS 标准检查模块
+
+fake 和 real dogfood 共享 `scripts/_dogfood_memory_anchor_checks.py`，差异仅在于：
+- provider 构造方式（FakeProvider vs build_model_provider_from_env）
+- 授权门控（fake 默认安全，real 需 opt-in）
+- expected metadata 值（provider_kind, provider_external_call, external_side_effects）
+
+### 已知限制
+
+- `provider_external_call` 字段在 evidence extraction whitelist 中缺失——本轮补充到 `dispatcher.py` 的 `_source_key` 元组中
+- `evidence_level` 分类器不区分 fake/real provider——`real_core_loop_runtime_e2e` 对两种 provider 通用。`provider_kind` 字段提供区分。新的 `real_provider_core_loop_e2e` level 留待后续
+- Real smoke dogfood 需要有效的 API key——未配置时优雅降级为 BLOCKED
+
+### Deferred
+
+- `real_provider_core_loop_e2e` evidence_level 扩展（SPEC.md §5.2 已规划）
+- Layer 2 Approval/Retain E2E
+- Layer 3 Recall/Use E2E
+- 完整 real provider E2E（含 tool execution / checkpoint / streaming）
+- ToolRegistry / Skill / Checkpoint / Streaming / SubAgent 扩展

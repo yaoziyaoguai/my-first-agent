@@ -6,8 +6,8 @@
 完整路径证明 Memory Proposal Anchor 全链路正常，而非 harness 直接调用
 dispatcher.route()。
 
-DOGFOOD_PLAN.md §2.4 定义了 13 条 PASS 标准；本脚本逐一验证并输出
-人类可读报告和机器可读 JSON 报告。
+DOGFOOD_PLAN.md §2.4 定义了 13 条 PASS 标准；本脚本使用共享检查模块
+``_dogfood_memory_anchor_checks.py`` 执行 evidence 字段验证。
 
 约束：
 - 使用 FakeProvider（确定性、无外部调用）
@@ -33,6 +33,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# 共享检查模块（与 real smoke dogfood 复用同一套 PASS 标准）
+from scripts._dogfood_memory_anchor_checks import (  # noqa: E402
+    build_action_detail_lines,
+    build_overclaim_prevention_section,
+    check_memory_anchor_evidence,
+)
+
 
 def _build_fake_provider() -> Any:
     """构建确定性 FakeProvider——不读 .env，不调真实 API。"""
@@ -56,7 +63,7 @@ def _run_memory_anchor_fake_dogfood() -> dict[str, Any]:
     不冒充 real_core_loop_runtime_e2e。
 
     Returns:
-        dict with: status, chat_result, action_count, actions, errors, pass_checks
+        dict with: status, chat_result, action_count, actions, errors, pass_checks, fail_checks
     """
     from agent.core import chat
 
@@ -99,6 +106,7 @@ def _run_memory_anchor_fake_dogfood() -> dict[str, Any]:
             "core_entrypoint": evidence.get("core_entrypoint"),
             "runtime_hook_name": evidence.get("runtime_hook_name"),
             "provider_kind": evidence.get("provider_kind"),
+            "provider_external_call": evidence.get("provider_external_call"),
             "external_side_effects": evidence.get("external_side_effects"),
             # target module proof
             "target_module": evidence.get("target_module"),
@@ -113,101 +121,21 @@ def _run_memory_anchor_fake_dogfood() -> dict[str, Any]:
             "no_silent_retain": evidence.get("no_silent_retain"),
         })
 
-    # ── PASS 标准检查（DOGFOOD_PLAN.md §2.4） ──
-    pass_checks: list[str] = []
-    fail_checks: list[str] = []
+    # ── PASS 标准检查（使用共享检查模块） ──
+    check_result = check_memory_anchor_evidence(
+        actions,
+        expected_provider_kind="fake",
+        expected_provider_external_call=False,
+        expected_external_side_effects=False,
+        pre_existing_errors=errors,
+    )
 
-    # C1: chat() 正常完成
-    pass_checks.append("chat_completed")
+    pass_checks = check_result["pass_checks"]
+    fail_checks = check_result["fail_checks"]
+    errors = check_result["errors"]
 
-    # C2: action_log 至少包含 1 个 event
-    if len(actions) >= 1:
-        pass_checks.append("action_log_non_empty")
-    else:
-        fail_checks.append("action_log_non_empty")
-        errors.append("action_log is empty — turn-end hook did not fire")
-
-    if actions:
-        a = actions[0]
-
-        # C3: evidence_level == real_core_loop_runtime_e2e
-        if a["evidence_level"] == "real_core_loop_runtime_e2e":
-            pass_checks.append("evidence_level_correct")
-        else:
-            fail_checks.append("evidence_level_correct")
-            errors.append(
-                f"evidence_level={a['evidence_level']} "
-                f"(expected real_core_loop_runtime_e2e)"
-            )
-
-        # C4: core_loop_invoked == True
-        if a["core_loop_invoked"] is True:
-            pass_checks.append("core_loop_invoked_true")
-        else:
-            fail_checks.append("core_loop_invoked_true")
-            errors.append("core_loop_invoked is not True")
-
-        # C5: core_entrypoint == "core.chat"
-        if a["core_entrypoint"] == "core.chat":
-            pass_checks.append("core_entrypoint_correct")
-        else:
-            fail_checks.append("core_entrypoint_correct")
-            errors.append(f"core_entrypoint={a['core_entrypoint']} (expected core.chat)")
-
-        # C6: runtime_hook_name == "loop.turn_end"
-        if a["runtime_hook_name"] == "loop.turn_end":
-            pass_checks.append("runtime_hook_name_correct")
-        else:
-            fail_checks.append("runtime_hook_name_correct")
-            errors.append(
-                f"runtime_hook_name={a['runtime_hook_name']} (expected loop.turn_end)"
-            )
-
-        # C7: target_module_proof 非 None
-        if a["target_module_proof_exists"]:
-            pass_checks.append("target_module_proof_exists")
-        else:
-            fail_checks.append("target_module_proof_exists")
-            errors.append("target_module_proof is None — observer chain broken")
-
-        # C8: target_module == "MemoryPolicy"
-        if a["target_module"] == "MemoryPolicy":
-            pass_checks.append("target_module_correct")
-        else:
-            fail_checks.append("target_module_correct")
-            errors.append(
-                f"target_module={a['target_module']} (expected MemoryPolicy)"
-            )
-
-        # C9: auto_approved == False
-        if a["auto_approved"] is False:
-            pass_checks.append("auto_approved_false")
-        else:
-            fail_checks.append("auto_approved_false")
-            errors.append(f"auto_approved={a['auto_approved']} (expected False)")
-
-        # C10: not_confirmed == True
-        if a["not_confirmed"] is True:
-            pass_checks.append("not_confirmed_true")
-        else:
-            fail_checks.append("not_confirmed_true")
-            errors.append(f"not_confirmed={a['not_confirmed']} (expected True)")
-
-        # C11: provider_kind == "fake"
-        if a["provider_kind"] == "fake":
-            pass_checks.append("provider_kind_fake")
-        else:
-            fail_checks.append("provider_kind_fake")
-            errors.append(f"provider_kind={a['provider_kind']} (expected 'fake')")
-
-        # C12: external_side_effects == False
-        if a["external_side_effects"] is False:
-            pass_checks.append("external_side_effects_false")
-        else:
-            fail_checks.append("external_side_effects_false")
-            errors.append(
-                f"external_side_effects={a['external_side_effects']} (expected False)"
-            )
+    # C1: chat() 正常完成（本函数已在外层检查，非共享模块范围）
+    pass_checks.insert(0, "chat_completed")
 
     # C13: errors 列表为空
     if not errors:
@@ -229,6 +157,7 @@ def _build_report(report: dict[str, Any]) -> str:
     """生成人类可读 dogfood 报告。
 
     报告明确标注已验证和未验证项，避免 overclaim（DOGFOOD_PLAN.md §6）。
+    使用共享检查模块的 build_action_detail_lines 和 build_overclaim_prevention_section。
     """
     lines = [
         "=" * 60,
@@ -260,54 +189,11 @@ def _build_report(report: dict[str, Any]) -> str:
             lines.append(f"  - {err}")
         lines.append("")
 
-    # Per-event details (含 payload 级字段)
-    for i, action in enumerate(report["actions"], 1):
-        lines.append(f"--- Action {i} ---")
-        lines.append(f"  action_id: {action['action_id']}")
-        lines.append(f"  action_type: {action['action_type']}")
-        lines.append(f"  source: {action['source']}")
-        lines.append(f"  status: {action['status']}")
-        lines.append(f"  evidence_level: {action['evidence_level']}")
-        lines.append(f"  core_loop_invoked: {action['core_loop_invoked']}")
-        lines.append(f"  core_entrypoint: {action['core_entrypoint']}")
-        lines.append(f"  runtime_hook_name: {action['runtime_hook_name']}")
-        lines.append(f"  provider_kind: {action['provider_kind']}")
-        lines.append(f"  external_side_effects: {action['external_side_effects']}")
-        lines.append(f"  target_module: {action['target_module']}")
-        lines.append(f"  target_module_proof_exists: {action['target_module_proof_exists']}")
-        lines.append(f"  disposition: {action['disposition']}")
-        lines.append(f"  pending_review: {action['pending_review']}")
-        lines.append(f"  auto_approved: {action['auto_approved']}")
-        lines.append(f"  not_confirmed: {action['not_confirmed']}")
-        lines.append(f"  real_episodes_read: {action['real_episodes_read']}")
-        lines.append(f"  secret_like_detected: {action['secret_like_detected']}")
-        lines.append(f"  no_silent_retain: {action['no_silent_retain']}")
-        lines.append("")
+    # Per-event details（共享格式化逻辑）
+    lines.extend(build_action_detail_lines(report["actions"]))
 
-    # Overclaim prevention (DOGFOOD_PLAN.md §6)
-    lines.append("=" * 60)
-    lines.append("Memory Proposal Anchor 验证范围")
-    lines.append("=" * 60)
-    lines.append("")
-    lines.append("已验证（本锚点范围内）：")
-    lines.append("  [x] core.chat 统一入口")
-    lines.append("  [x] run_main_loop turn-end hook 触发")
-    lines.append("  [x] RuntimeActionDispatcher.route() 调用")
-    lines.append("  [x] MemoryTurnEndProposalHandler 处理")
-    lines.append("  [x] target_module_proof 存在")
-    lines.append("  [x] evidence_level 正确分类")
-    lines.append("  [x] pending_review only / no auto approve")
-    lines.append("  [x] provider_kind 正确标记")
-    lines.append("")
-    lines.append("未验证（不在本锚点范围）：")
-    lines.append("  [ ] Layer 2: memory approve/confirm/retain 流程")
-    lines.append("  [ ] Layer 3: memory recall/use")
-    lines.append("  [ ] ToolRegistry 集成")
-    lines.append("  [ ] Checkpoint 集成")
-    lines.append("  [ ] SubAgent 集成")
-    lines.append("  [ ] 多 turn 对话 memory 累积")
-    lines.append("  [ ] 跨 session memory 持久化")
-    lines.append("  [ ] Full real E2E（含工具执行）")
+    # Overclaim prevention（共享声明）
+    lines.append(build_overclaim_prevention_section())
     lines.append("")
     lines.append("=" * 60)
     lines.append(f"Result: {report['status']}")

@@ -451,6 +451,7 @@ class RuntimeActionDispatcher:
             "core_entrypoint",
             "runtime_hook_name",
             "provider_kind",
+            "provider_external_call",
             "external_side_effects",
         ):
             if _source_key in request.payload:

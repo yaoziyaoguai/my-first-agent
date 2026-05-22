@@ -85,7 +85,7 @@ Fake mode 是**默认安全模式**，可以在任何环境运行，不需要用
 | 调用真实 API | **是**，但需用户明确授权 |
 | 打印 secret | **否** |
 | 读取 `.env` 内容到日志/stdout | **否** |
-| `external_side_effects` | `true` |
+| `external_side_effects` | `false` |
 | memory proposal | `pending_review` only |
 | auto approve | **否** |
 | 写 `human_approved` | **否** |
@@ -145,7 +145,7 @@ should_not_remember  ≠  forget
 | `target_catalog_allowed` | observer → proof | `true` |
 | `target_identity_valid` | observer → proof | `true` |
 | `provider_kind` | hook 注入 | `"fake"` 或 `"real"` |
-| `external_side_effects` | hook 注入 | `false`(fake) / `true`(real) |
+| `external_side_effects` | hook 注入 | `false`（fake/real smoke 均为 false） |
 | `module_invoked` | observer | `true` |
 
 ### 5.2 evidence_level 分类

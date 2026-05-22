@@ -203,7 +203,7 @@
 6. 断言 `payload.not_confirmed == True`
 7. 断言 evidence 中 `no_silent_retain == True`
 8. 断言 evidence 中 `provider_kind == "real"`（或等价标记）
-9. 断言 evidence 中 `external_side_effects == True`
+9. 断言 evidence 中 `external_side_effects == False`
 10. 断言 `evidence_level == "real_core_loop_runtime_e2e"`
 
 **架构保护**：真实 LLM 不会绕过 memory governance。

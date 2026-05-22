@@ -127,7 +127,7 @@ HOME=/private/tmp/my-first-agent-phase1-home \
 在 fake mode PASS 条件基础上，额外要求：
 
 1. event evidence 的 `provider_kind` 非 `"fake"`（是真实 provider 标记）
-2. event evidence 的 `external_side_effects == true`
+2. event evidence 的 `external_side_effects == false`
 3. `chat()` 返回了真实 provider 的响应（非 FakeProvider 确定性输出）
 4. stdout/stderr 不含 API key（`sk-ant-` 等 pattern）
 5. `payload.auto_approved == false`（真实 LLM 也不能绕过 governance）

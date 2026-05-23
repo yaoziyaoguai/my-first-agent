@@ -65,7 +65,8 @@ SPEC → SPEC Review → TDD → TDD Review → Implementation Plan → Plan Rev
 ### Phase 5: 全局 Stop
 
 触发 AUTO_RUN_WORKFLOW.md Section E 的全局 stop condition 时停止。
-最多连续完成并 push **3 个 capability loops**。
+
+**注意：完成 3 个 loops 不是 stop condition。** 完成一批 loops 后必须继续 discovery 找下一个 safe-to-auto-run candidate。只有真正全局 stop condition（not main / behind origin / HEAD has tag / queue 中没有任何 safe candidate / 所有剩余候选都需要用户决策）才停。
 
 ### Phase 6: 输出报告
 

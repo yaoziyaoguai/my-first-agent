@@ -69,7 +69,7 @@ deferred 后检查 queue 中是否还有其他 safe-to-auto-run capability，有
 | behind origin/main | 本地落后远程 |
 | working tree dirty 且不属于当前 loop | 有未提交改动且不是当前 capability 产生的 |
 | HEAD has tag | HEAD 已有 tag |
-| 连续完成并 push 3 个 capability loops | 达到单次 auto-run 上限 |
+| 连续完成并 push 3 个 capability loops | ~~达到单次 auto-run 上限~~ **不再是 stop condition** — 完成一批后必须继续 discovery 找下一个 safe candidate |
 | focused fix 超过 retry limit 且无其他安全任务 | 当前能力卡住且无可替代任务 |
 | 所有剩余任务都需要用户决策 | 无人可做的 task |
 

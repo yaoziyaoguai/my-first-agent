@@ -17,6 +17,7 @@ from __future__ import annotations
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
+from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.tool_gate import ToolGateHandler
@@ -44,6 +45,10 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.MEMORY_PROPOSE,
         MemoryRetainHandler(),
+    )
+    registry.register(
+        RuntimeActionType.MEMORY_RECALL,
+        MemoryRecallHandler(),
     )
     registry.register(
         RuntimeActionType.TOOL_GATE,

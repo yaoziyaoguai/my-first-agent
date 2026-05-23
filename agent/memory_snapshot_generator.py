@@ -66,9 +66,14 @@ def build_memory_snapshot_from_store(
     scope_omitted = 0
     sensitive_omitted = 0
     budget_omitted = 0
+    status_omitted = 0  # 排除 rejected/session_only 等非持久状态
     t2_count = 0  # T2 auto_retained 计数器，上限 2
 
     for record in records:
+        # 排除非持久状态：只召回 approved 和 auto_retained records
+        if getattr(record, "approval_status", "approved") not in ("approved", "auto_retained"):
+            status_omitted += 1
+            continue
         if not _matches_scope(record, options):
             scope_omitted += 1
             continue
@@ -83,6 +88,10 @@ def build_memory_snapshot_from_store(
             t2_count += 1
         # 总条数限制：最多 5 条 non-procedural (Appendix H.4 SB1)
         if len(items) >= options.max_items and getattr(record, "memory_type", "") != "procedural":
+            budget_omitted += 1
+            continue
+        # 防御：空 content record 不进 snapshot（MemorySnapshotItem 拒绝空 content）
+        if not getattr(record, "content", "").strip():
             budget_omitted += 1
             continue
         items.append(_snapshot_item_from_record(record, options))
@@ -118,13 +127,14 @@ def build_memory_snapshot_from_store(
         budget_omitted += 1
         char_truncated += 1
 
-    omitted_count = scope_omitted + sensitive_omitted + budget_omitted
+    omitted_count = status_omitted + scope_omitted + sensitive_omitted + budget_omitted
     return MemorySnapshot(
         items=tuple(items),
         selection_reason=options.selection_reason if items else "",
         omitted_count=omitted_count,
         safety_filter_summary=_safety_filter_summary(
             options,
+            status_omitted=status_omitted,
             scope_omitted=scope_omitted,
             sensitive_omitted=sensitive_omitted,
             budget_omitted=budget_omitted,
@@ -187,6 +197,7 @@ def _snapshot_item_from_record(
 def _safety_filter_summary(
     options: MemorySnapshotBuildOptions,
     *,
+    status_omitted: int = 0,
     scope_omitted: int,
     sensitive_omitted: int,
     budget_omitted: int,
@@ -197,6 +208,7 @@ def _safety_filter_summary(
         f"max_items={options.max_items}; "
         f"scopes={scopes}; "
         f"include_sensitive={options.include_sensitive}; "
+        f"status_omitted={status_omitted}; "
         f"scope_omitted={scope_omitted}; "
         f"sensitive_omitted={sensitive_omitted}; "
         f"budget_omitted={budget_omitted}"

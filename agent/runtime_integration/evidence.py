@@ -147,6 +147,33 @@ def _memory_store_apply_intent_adapter(payload: Mapping[str, Any]) -> Any:
     return store.apply_operation_intent(intent, audit_summary)
 
 
+def _memory_recall_snapshot_adapter(payload: Mapping[str, Any]) -> Any:
+    """Catalog-owned adapter for memory recall snapshot generation。
+
+    中文学习边界：这个 adapter 是 build_memory_snapshot_from_store() 的
+    catalog-owned wrapper。handler 不直接调用 snapshot generator，而是通过
+    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    """
+    from agent.memory_snapshot_generator import (
+        MemorySnapshotBuildOptions,
+        build_memory_snapshot_from_store,
+    )
+    from agent.memory_store import InMemoryMemoryStore
+
+    store = payload.get("store")
+    options_dict = payload.get("options") or {}
+
+    if not isinstance(store, InMemoryMemoryStore):
+        raise TypeError("store must be InMemoryMemoryStore or its subclass")
+
+    options = MemorySnapshotBuildOptions(
+        selection_reason=str(options_dict.get("selection_reason") or "Memory Kernel v1 recall"),
+        max_items=int(options_dict.get("max_items") or 5),
+        rendered_char_budget=int(options_dict.get("rendered_char_budget") or 500),
+    )
+    return build_memory_snapshot_from_store(store, options)
+
+
 def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     from agent.display_events import mask_user_visible_secrets
 
@@ -366,6 +393,17 @@ class RuntimeActionTargetCatalog:
             adapter=_memory_store_apply_intent_adapter,
             function_called="InMemoryMemoryStore.apply_operation_intent",
             call_signature="apply_operation_intent(intent, audit_summary)",
+        ),
+        _descriptor(
+            "memory.recall",
+            "agent.runtime_integration.memory_recall.MemoryRecallHandler",
+            "MemoryRuntime",
+            operation="build_memory_snapshot",
+            invocation_adapter_id="MemoryRuntime.build_memory_snapshot",
+            implementation_id="agent.memory_snapshot_generator.build_memory_snapshot_from_store",
+            adapter=_memory_recall_snapshot_adapter,
+            function_called="build_memory_snapshot_from_store",
+            call_signature="build_memory_snapshot_from_store(store, options)",
         ),
         _descriptor(
             "checkpoint.safe_summary",

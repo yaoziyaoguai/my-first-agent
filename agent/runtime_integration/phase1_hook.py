@@ -28,7 +28,8 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only）
-    - ToolGateHandler（_safe_noop allowlist only）
+    - ToolGateHandler（_safe_noop / _confirmable_noop explicit internal allowlist only；
+      其他 "_" 前缀工具仍被 blocked，不走 allowlist 路径）
     - 不在 core loop 中自动 approved
     - dispatcher.route() 在 loop.turn_end 时由 loop.py 触发
     """

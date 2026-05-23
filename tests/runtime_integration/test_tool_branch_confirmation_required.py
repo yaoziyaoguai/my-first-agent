@@ -501,6 +501,170 @@ class TestConfirmationRequiredClassificationBoundaries:
         level = classify_evidence_level(evidence)
         assert level == REAL_CORE_LOOP_RUNTIME_E2E
 
+    def test_loop_dependencies_drives_tool_gate_payload(self):
+        """B5: LoopDependencies.tool_gate_tool_name 被 loop/turn-end path 消费。
+
+        通过 _try_phase1_turn_end_runtime_action 注入
+        LoopDependencies(tool_gate_tool_name="_confirmable_noop")，
+        验证：
+        - TOOL_GATE payload/requested_tool_name 是 _confirmable_noop
+        - 走的是 route_from_runtime_loop（非 direct dispatcher.route）
+        - result 为 confirmation_required
+        - tool_invoked=false
+        - dangerous_tool_function_invoked=false
+        - external_side_effects=false
+        - evidence_level=real_core_loop_runtime_e2e
+        - 不新增 fake loop / fake dispatcher / dogfood-only path
+
+        中文学习边界——这个测试保护什么：
+        B2 测试证明 route_from_runtime_loop() 可以产生 real_core_loop_runtime_e2e，
+        但它直接构造 RuntimeActionRequest 并手动调用 spy.route_from_runtime_loop()。
+        本测试补上缺失的一环：证明 _confirmable_noop 不只是能在 harness 层手动构造
+        request 触发——它确实能通过 LoopDependencies.tool_gate_tool_name 配置字段
+        被真实的 loop/turn-end path（_try_phase1_turn_end_runtime_action）消费。
+
+        为什么不是 fake loop：
+        - 调用的是 production _try_phase1_turn_end_runtime_action（与 core loop 同一函数）
+        - 使用 production LoopDependencies dataclass 实例
+        - 走 production ToolGateHandler → tool.gate branch point
+        - spy 只观察不改变行为——与 Phase 1 dogfood 的 SpyDispatcher 模式一致
+
+        为什么不是 dogfood-only path：
+        - production loop.py 在 turn-end 时调用同一函数
+        - 唯一的"配置切换"是 LoopDependencies.tool_gate_tool_name 字段值
+        - fake/real 共享同一 gate 逻辑——这条路径对 real provider 同样有效
+        """
+        import agent.tools  # noqa: F401 - 触发工具注册，确保 _confirmable_noop 在 registry
+        from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
+
+        # 构造 result-capturing spy——记录每次 route 的 method + request + result
+        captured: list[tuple[str, RuntimeActionRequest, Any]] = []
+
+        class _LoopPathSpy:
+            """捕获 method + request + result 的 spy。
+
+            与 _SpyDispatcher 不同：_SpyDispatcher 只捕获 request，
+            本 spy 同时捕获 result 以便验证 gate 判定结果。
+            """
+            def __init__(self, real: RuntimeActionDispatcher) -> None:
+                self._real = real
+
+            def route(self, request: RuntimeActionRequest) -> Any:
+                result = self._real.route(request)
+                captured.append(("route", request, result))
+                return result
+
+            def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+                result = self._real.route_from_runtime_loop(request)
+                captured.append(("route_from_runtime_loop", request, result))
+                return result
+
+        dispatcher = _build_phase1_dispatcher_with_tool_gate()
+        spy = _LoopPathSpy(dispatcher)
+
+        # 构造最小 mock state——只需 conversation.messages 中有 user 消息
+        # 即可让 _try_phase1_turn_end_runtime_action 提取 last_user
+        class _MockConversation:
+            messages: list[dict] = [{"role": "user", "content": "hello"}]
+
+        class _MockState:
+            conversation = _MockConversation()
+
+        mock_state = _MockState()
+
+        # 构造 LoopDependencies，注入 _confirmable_noop
+        deps = LoopDependencies(
+            state=mock_state,
+            call_model=lambda s, ctx: None,
+            dispatch_model_output=lambda resp: "test response",
+            runtime_loop_fields=lambda: {},
+            safe_emit_runtime_event=lambda cb, ev: None,
+            clear_checkpoint=lambda: None,
+            tool_gate_tool_name="_confirmable_noop",
+        )
+
+        # 调用 turn-end hook——这是 loop.py 在每次 turn end 时的真实入口
+        _try_phase1_turn_end_runtime_action(
+            state=mock_state,
+            result_text="test response",
+            dispatcher=spy,
+            dependencies=deps,
+        )
+
+        # 验证 spy 捕获了至少两个 action（MEMORY + TOOL_GATE）
+        assert len(captured) >= 2, (
+            f"应至少有 MEMORY 和 TOOL_GATE 两个 action，实际 {len(captured)}"
+        )
+
+        # 找出 TOOL_GATE action
+        tg_method: str | None = None
+        tg_request: RuntimeActionRequest | None = None
+        tg_result: Any = None
+        for method, request, result in captured:
+            if request.action_type == RuntimeActionType.TOOL_GATE:
+                tg_method = method
+                tg_request = request
+                tg_result = result
+                break
+
+        assert tg_request is not None, (
+            f"应存在 TOOL_GATE action，实际 captured types: "
+            f"{[r.action_type.value for _, r, _ in captured]}"
+        )
+
+        # === 断言组 1：loop path 正确消费了 LoopDependencies 配置 ===
+
+        # TOOL_GATE payload 中的 tool_name 来自 LoopDependencies.tool_gate_tool_name
+        assert tg_request.payload["tool_name"] == "_confirmable_noop", (
+            f"TOOL_GATE tool_name 应来自 LoopDependencies.tool_gate_tool_name，"
+            f"实际 {tg_request.payload['tool_name']!r}"
+        )
+        assert tg_request.payload.get("tool_args") == {}
+        assert tg_request.payload.get("requested_capability") == "local_action"
+
+        # 走的是 route_from_runtime_loop（real core loop 路径），非 direct dispatcher.route
+        assert tg_method == "route_from_runtime_loop", (
+            f"loop turn-end path 应使用 route_from_runtime_loop，实际 {tg_method!r}"
+        )
+
+        # === 断言组 2：gate 判定结果（confirmation_required） ===
+
+        assert tg_result is not None, "TOOL_GATE result 不应为 None"
+        assert tg_result.status == "confirmation_required", (
+            f"status 必须为 'confirmation_required'，实际 {tg_result.status!r}"
+        )
+
+        evidence = dict(tg_result.evidence)
+        assert evidence.get("gate_disposition") == "confirmation_required"
+        assert evidence.get("decision") == "confirmation_required"
+
+        # === 断言组 3：安全保证（无副作用） ===
+
+        payload = dict(tg_result.payload)
+        assert payload.get("tool_invoked") is not True, (
+            "confirmation_required 时 tool 不得被调用"
+        )
+        assert payload.get("dangerous_tool_function_invoked") is False
+        assert evidence.get("external_side_effects") is False
+
+        # === 断言组 4：分类不 overclaim ===
+
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+            f"real core loop path 分类必须为 {REAL_CORE_LOOP_RUNTIME_E2E}，"
+            f"实际 {evidence.get('evidence_level')!r}"
+        )
+        assert evidence.get("dispatcher_origin") == "runtime_loop"
+        assert evidence.get("runtime_loop_invoked") is True
+
+        # 二次确认：classify_evidence_level
+        level = classify_evidence_level(evidence)
+        assert level == REAL_CORE_LOOP_RUNTIME_E2E
+
+        # === 断言组 5：不是 dogfood-only path ===
+        # payload 不含 dogfood 特有标记
+        assert "dogfood_harness" not in evidence
+        assert evidence.get("capability_type") == "production_tool_registry"
+
 
 # ========== Phase C: Negative Coverage — blocked / not_found (L2) ==========
 

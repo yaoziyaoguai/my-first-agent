@@ -92,7 +92,7 @@ Per Plan §2.2 and §2.3:
 
 No backtrack events occurred during implementation. Each unit completed cleanly with only minor test fix-ups (RuntimeActionContext construction, monkeypatch target module, contract test expected set update).
 
-## 7. Modified Files
+## 7. Modified Files (Initial Implementation)
 
 - `agent/loop.py` — LoopDependencies +1 field, _try_phase1_turn_end_runtime_action +3 lines
 - `agent/runtime_integration/tool_gate.py` — allowlist expansion (1 line)
@@ -100,3 +100,49 @@ No backtrack events occurred during implementation. Each unit completed cleanly 
 - `agent/tools/confirmable_noop.py` — new file
 - `tests/runtime_integration/test_tool_branch_confirmation_required.py` — new file (21 tests)
 - `tests/test_tool_registry_contract.py` — EXPECTED_INTERNAL_TOOL_SPECS updated
+
+## 8. Focused Audit Remediation (2026-05-23)
+
+**Trigger:** Implementation Audit returned PARTIAL with two findings.
+
+### P2: B5 Test — LoopDependencies.tool_gate_tool_name 被 loop path 消费的证明
+
+**问题：** 原 B2 测试直接构造 `RuntimeActionRequest` 并手动调用 `spy.route_from_runtime_loop()`，只能证明 dispatcher runtime-loop route 能产生正确分类，不足以证明 `LoopDependencies.tool_gate_tool_name="_confirmable_noop"` 真的被 loop/turn-end path（`_try_phase1_turn_end_runtime_action`）消费并生成了正确的 TOOL_GATE payload。
+
+**修复：** 新增 B5 测试 `test_loop_dependencies_drives_tool_gate_payload`，通过以下方式闭合 gap：
+
+1. 构造 `LoopDependencies(tool_gate_tool_name="_confirmable_noop")` 实例
+2. 调用 production `_try_phase1_turn_end_runtime_action`（与 core loop 同一函数）
+3. 使用 result-capturing spy（`_LoopPathSpy`）同时记录 method + request + result
+4. 断言 TOOL_GATE payload 中的 `tool_name` 来自 `LoopDependencies.tool_gate_tool_name`
+5. 断言走的是 `route_from_runtime_loop`（非 direct `dispatcher.route`）
+6. 断言 result 为 `confirmation_required`、`tool_invoked=false`、`dangerous_tool_function_invoked=false`、`external_side_effects=false`
+7. 断言 `evidence_level=real_core_loop_runtime_e2e`
+8. 断言非 dogfood-only path（`capability_type=production_tool_registry`）
+
+**不变量保护：**
+- 不新增 fake loop / fake dispatcher / dogfood-only path
+- `_LoopPathSpy` 只观察不改变行为，与 Phase 1 dogfood 的 `_SpyDispatcher` 模式一致
+- 使用 production `LoopDependencies` dataclass 和 `_try_phase1_turn_end_runtime_action` 函数
+
+### P3: phase1_hook.py Docstring 更新
+
+**问题：** `build_phase1_dispatcher()` docstring 中 `ToolGateHandler（_safe_noop allowlist only）` 已过期——U2 将 allowlist 扩展为 `_safe_noop` 和 `_confirmable_noop`。
+
+**修复：** 更新 docstring 为 `ToolGateHandler（_safe_noop / _confirmable_noop explicit internal allowlist only；其他 "_" 前缀工具仍被 blocked，不走 allowlist 路径）`。
+
+### Modified Files (Remediation)
+
+- `tests/runtime_integration/test_tool_branch_confirmation_required.py` — +1 test (B5), 22 tests total
+- `agent/runtime_integration/phase1_hook.py` — docstring update (2 lines)
+- `docs/implementation-notes/tool-branch-confirmation-required.md` — this section
+
+### Verification Results (Post-Remediation)
+
+- `ruff check agent/ tests/ scripts/` — All checks passed
+- `pytest tests/runtime_integration/test_tool_branch_confirmation_required.py` — 22/22 pass
+- `pytest tests/runtime_integration/test_tool_anchor_fake.py` — 14/14 pass
+- `pytest tests/test_tool_registry_contract.py` — 14/14 pass
+- `pytest tests/runtime_integration/` — 180 passed, 4 skipped
+- `pytest` (full suite) — 2951 passed, 18 skipped
+- `git diff --check` — exit code 0

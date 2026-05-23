@@ -21,6 +21,7 @@ from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.tool_gate import ToolGateHandler
+from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
 
 
@@ -54,6 +55,10 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.TOOL_GATE,
         ToolGateHandler(),
+    )
+    registry.register(
+        RuntimeActionType.TOOL_INVOKE,
+        ToolInvokeHandler(),
     )
     registry.register(
         RuntimeActionType.TOOL_RESULT,

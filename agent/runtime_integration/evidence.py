@@ -196,6 +196,39 @@ def _tool_result_format_adapter(payload: Mapping[str, Any]) -> Any:
     )
 
 
+def _tool_invoke_adapter(payload: Mapping[str, Any]) -> Any:
+    """Catalog-owned adapter for tool execution。
+
+    中文学习边界：这个 adapter 是 execute_tool() 的 catalog-owned wrapper。
+    handler 不直接调用 tool_registry.execute_tool()，而是通过
+    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    """
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool
+
+    tool_name = str(payload.get("tool_name") or "")
+    tool_input = dict(payload.get("tool_input") or {})
+
+    if tool_name not in TOOL_REGISTRY:
+        return {
+            "found": False,
+            "tool_output": None,
+            "execution_status": "not_found",
+            "risk_level": "unknown",
+            "capability": "",
+        }
+
+    info = TOOL_REGISTRY[tool_name]
+    result = execute_tool(tool_name, tool_input)
+    is_error = isinstance(result, str) and "[工具" in result
+    return {
+        "found": True,
+        "tool_output": result,
+        "execution_status": "error" if is_error else "success",
+        "risk_level": info.get("risk_level", "medium"),
+        "capability": info.get("capability", ""),
+    }
+
+
 def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     from agent.display_events import mask_user_visible_secrets
 
@@ -341,14 +374,14 @@ class RuntimeActionTargetCatalog:
         ),
         _descriptor(
             "tool.invoke",
-            "agent.runtime_integration.tool_gate.ToolGateHandler",
+            "agent.runtime_integration.tool_invoke.ToolInvokeHandler",
             "ToolRegistry",
-            operation="lookup_and_risk_check",
-            invocation_adapter_id="ToolRegistry.lookup_and_risk_check",
-            implementation_id="agent.tool_registry.TOOL_REGISTRY.lookup",
-            adapter=_lookup_tool_registry_entry_adapter,
-            function_called="ToolRegistry.lookup_and_risk_check",
-            call_signature="lookup_and_risk_check(tool_name: str)",
+            operation="execute_tool",
+            invocation_adapter_id="ToolRegistry.execute_tool",
+            implementation_id="agent.tool_registry.execute_tool",
+            adapter=_tool_invoke_adapter,
+            function_called="execute_tool",
+            call_signature="execute_tool(tool_name, tool_input)",
         ),
         _descriptor(
             "tool.request",
@@ -363,17 +396,6 @@ class RuntimeActionTargetCatalog:
         ),
         _descriptor(
             "tool.gate",
-            "agent.runtime_integration.tool_gate.ToolGateHandler",
-            "DogfoodFakeToolOverlay",
-            operation="block",
-            invocation_adapter_id="DogfoodFakeToolOverlay.block",
-            implementation_id="agent.runtime_integration.tool_gate.DogfoodOverlayTool.block",
-            adapter=_dogfood_overlay_block_adapter,
-            function_called="DogfoodOverlayTool.block",
-            call_signature="block()",
-        ),
-        _descriptor(
-            "tool.invoke",
             "agent.runtime_integration.tool_gate.ToolGateHandler",
             "DogfoodFakeToolOverlay",
             operation="block",

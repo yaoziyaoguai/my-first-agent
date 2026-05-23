@@ -113,6 +113,7 @@ Contract: [Unified Runtime Flow Contract](../../real-e2e/UNIFIED_RUNTIME_FLOW_CO
 - `agent/tool_registry.py` — 不修改
 - `agent/tools/` — 不修改
 - 所有已有测试文件 — 不修改（只新增测试文件）
+- `tests/runtime_integration/test_phase1_real_core_loop.py` — 注册 TOOL_INVOKE + TOOL_RESULT handler（+6 行），确保 core.chat() 路径中完整管线可用（approved focused fix: handler 注册不是测试逻辑变更，是与 production 行为一致的接线修正）
 
 ---
 

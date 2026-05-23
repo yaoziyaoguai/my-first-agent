@@ -301,6 +301,99 @@ class TestPhaseAFullPipelineL3HappyPath:
             )
 
 
+    def test_a4_full_core_chat_path_ordered_pipeline_l3(self):
+        """A4: core.chat() 完整路径产生有序 GATE → INVOKE → RESULT 管线。
+
+        P1 focused remediation 核心测试——证明完整 core.chat → run_main_loop
+        → _try_phase1_turn_end_runtime_action → dispatcher 路径能产生有序的
+        GATE→INVOKE→RESULT 序列，且全部达到 real_core_loop_runtime_e2e。
+
+        与 A1-A3 的区别：A1-A3 直接调用 _try_phase1_turn_end_runtime_action()
+        （hook 级），验证 dispatcher provenance。A4 通过 core.chat() 验证完整
+        core loop 接线——从用户输入到 RuntimeAction 的完整链路。
+
+        中文学习边界：
+        - hook 级测试（A1-A3）证明 dispatcher provenance 完整
+        - core.chat() 级测试（A4）证明真实 core loop 接线存在且工作正常
+        - 两者互补，都不应删除
+        """
+        from agent.core import chat
+        from agent.provider.fake_provider import FakeProvider
+
+        real_dispatcher = _build_pipeline_dispatcher()
+        spy = _PipelineSpy(real_dispatcher)
+
+        result = chat(
+            "hello",
+            provider=FakeProvider(),
+            runtime_action_dispatcher=spy,
+        )
+
+        assert isinstance(result, str)
+
+        # 提取 Tool pipeline actions（按捕获顺序）
+        pipeline_actions = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type in (
+                RuntimeActionType.TOOL_GATE,
+                RuntimeActionType.TOOL_INVOKE,
+                RuntimeActionType.TOOL_RESULT,
+            )
+        ]
+
+        action_types_in_order = [r.action_type.value for _, r, _ in pipeline_actions]
+
+        # 必须有 TOOL_GATE（_safe_noop 通过 gate allowed）
+        assert "tool.gate" in action_types_in_order, (
+            f"core.chat() 路径应产生 TOOL_GATE，实际: {action_types_in_order}"
+        )
+
+        # gate allowed → 必须有 TOOL_INVOKE
+        assert "tool.invoke" in action_types_in_order, (
+            f"core.chat() 路径应产生 TOOL_INVOKE（_safe_noop gate allowed），"
+            f"实际: {action_types_in_order}"
+        )
+
+        # invoke 完成 → 必须有 TOOL_RESULT
+        assert "tool.result" in action_types_in_order, (
+            f"core.chat() 路径应产生 TOOL_RESULT，实际: {action_types_in_order}"
+        )
+
+        # 验证有序：gate 在 invoke 之前，invoke 在 result 之前
+        gate_idx = action_types_in_order.index("tool.gate")
+        invoke_idx = action_types_in_order.index("tool.invoke")
+        result_idx = action_types_in_order.index("tool.result")
+        assert gate_idx < invoke_idx < result_idx, (
+            f"pipeline 顺序应为 GATE({gate_idx}) < INVOKE({invoke_idx})"
+            f" < RESULT({result_idx})，实际: {action_types_in_order}"
+        )
+
+        # 验证所有三个 stage 都通过 route_from_runtime_loop 达到 L3
+        for method, request, action_result in pipeline_actions:
+            assert method == "route_from_runtime_loop", (
+                f"{request.action_type.value} 应通过 route_from_runtime_loop 路由，"
+                f"实际 {method!r}"
+            )
+            evidence = dict(action_result.evidence)
+            assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+                f"{request.action_type.value} 应达到 {REAL_CORE_LOOP_RUNTIME_E2E}，"
+                f"实际 {evidence.get('evidence_level')!r}"
+            )
+            assert evidence.get("runtime_loop_invoked") is True
+            assert evidence.get("dispatcher_origin") == "runtime_loop"
+            assert evidence.get("core_entrypoint") == "core.chat"
+            assert evidence.get("runtime_hook_name") == "loop.turn_end"
+
+        # 二次确认：classify_evidence_level
+        for method, request, action_result in pipeline_actions:
+            evidence = dict(action_result.evidence)
+            level = classify_evidence_level(evidence)
+            assert level == REAL_CORE_LOOP_RUNTIME_E2E, (
+                f"{request.action_type.value} classify_evidence_level"
+                f" 应为 {REAL_CORE_LOOP_RUNTIME_E2E}，实际 {level!r}"
+            )
+
+
 # ========== Phase B: Classification Boundaries ==========
 
 
@@ -646,6 +739,122 @@ class TestPhaseDPipelineErrorIsolation:
         action_types = {r.action_type.value for _, r, _ in spy.captured}
         assert "tool.gate" in action_types, (
             f"MEMORY/TOOL_GATE 应至少成功执行，实际 types: {action_types}"
+        )
+
+
+    def test_d3_failed_invoke_produces_error_execution_status(self):
+        """D3: invoke_result.status != "success" → TOOL_RESULT execution_status="error"。
+
+        P2 focused remediation 核心测试——验证当 TOOL_INVOKE handler 抛异常
+        导致 invoke_result.status != "success" 时，TOOL_RESULT 的 execution_status
+        必须为 "error"，不得默认为 "success"。
+
+        使用抛异常的注册工具模拟 invoke 失败场景。
+        """
+        import agent.tools  # noqa: F401
+        from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
+        from agent.tool_registry import TOOL_REGISTRY, register_tool
+
+        # 注册一个抛异常的工具（不用 _ 前缀——_ 前缀受 gate allowlist 限制，
+        # 仅 _safe_noop / _confirmable_noop 可通过）
+        throwing_name = "throwing_noop_d3"
+
+        @register_tool(
+            name=throwing_name,
+            description="Throwing tool for D3 error path test",
+            parameters={},
+            confirmation="never",
+            capability="local_action",
+            risk_level="low",
+            output_policy="none",
+            meta_tool=False,
+        )
+        def throwing_noop_d3() -> str:
+            raise RuntimeError("simulated tool failure for D3")
+
+        dispatcher = _build_pipeline_dispatcher()
+        spy = _PipelineSpy(dispatcher)
+        mock_state = _make_mock_state()
+
+        deps = LoopDependencies(
+            state=mock_state,
+            call_model=lambda s, ctx: None,
+            dispatch_model_output=lambda resp: "test response",
+            runtime_loop_fields=lambda: {},
+            safe_emit_runtime_event=lambda cb, ev: None,
+            clear_checkpoint=lambda: None,
+            tool_gate_tool_name=throwing_name,
+        )
+
+        try:
+            _try_phase1_turn_end_runtime_action(
+                state=mock_state,
+                result_text="test response",
+                dispatcher=spy,
+                dependencies=deps,
+            )
+
+            # 验证 TOOL_RESULT 存在且 execution_status="error"
+            result_entries = [
+                (m, r, res) for m, r, res in spy.captured
+                if r.action_type == RuntimeActionType.TOOL_RESULT
+            ]
+            assert len(result_entries) >= 1, (
+                f"D3: 即使 invoke 失败，仍应构造 TOOL_RESULT，"
+                f"实际 types: {[r.action_type.value for _, r, _ in spy.captured]}"
+            )
+
+            result_request = result_entries[0][1]
+            exec_status = result_request.payload.get("execution_status")
+            assert exec_status == "error", (
+                f"invoke 失败时 TOOL_RESULT execution_status 应为 'error'，"
+                f"实际 {exec_status!r}"
+            )
+        finally:
+            TOOL_REGISTRY.pop(throwing_name, None)
+
+    def test_d4_successful_invoke_preserves_execution_status(self):
+        """D4: invoke_result.status == "success" → TOOL_RESULT 保留 payload execution_status。
+
+        P2 focused remediation 正向验证——当 TOOL_INVOKE 成功时，TOOL_RESULT
+        的 execution_status 应保留 invoke payload 中的值（默认为 "success"）。
+        """
+        import agent.tools  # noqa: F401
+        from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
+
+        dispatcher = _build_pipeline_dispatcher()
+        spy = _PipelineSpy(dispatcher)
+        mock_state = _make_mock_state()
+
+        deps = LoopDependencies(
+            state=mock_state,
+            call_model=lambda s, ctx: None,
+            dispatch_model_output=lambda resp: "test response",
+            runtime_loop_fields=lambda: {},
+            safe_emit_runtime_event=lambda cb, ev: None,
+            clear_checkpoint=lambda: None,
+            tool_gate_tool_name="_safe_noop",
+        )
+
+        _try_phase1_turn_end_runtime_action(
+            state=mock_state,
+            result_text="test response",
+            dispatcher=spy,
+            dependencies=deps,
+        )
+
+        # _safe_noop 成功 → TOOL_RESULT execution_status 应为 "success"
+        result_entries = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.TOOL_RESULT
+        ]
+        assert len(result_entries) >= 1
+
+        result_request = result_entries[0][1]
+        exec_status = result_request.payload.get("execution_status")
+        assert exec_status == "success", (
+            f"_safe_noop 成功时 execution_status 应为 'success'，"
+            f"实际 {exec_status!r}"
         )
 
 

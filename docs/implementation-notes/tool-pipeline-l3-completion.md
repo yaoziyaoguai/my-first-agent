@@ -22,6 +22,7 @@ Plan: [IMPLEMENTATION_PLAN.md](../specs/tool-pipeline-l3-completion/IMPLEMENTATI
 - 未新增 handler、dispatcher、branch point
 - 未新增 MCP 专用 pipeline（MCP 工具通过同一管线验证，见 E2 测试）
 - 未做 Policy re-eval、Retry/Error Recovery、Multi Tool、UI confirmation
+- `test_phase1_real_core_loop.py` 仅做 handler 注册补充（+6 行）——不是测试逻辑变更，是与 production 行为一致的接线修正
 
 ## 复用的原 Tool 代码
 
@@ -83,3 +84,43 @@ TOOL_GATE 的 `route()` 调用原本丢弃返回值，改为捕获 `gate_result`
 ## MCP 后续影响
 
 MCP 工具通过同一 pipeline 验证（E2 测试：`test_e2_mcp_tool_rides_pipeline_l3`）。MCP L3 自然跟随 Tool pipeline L3，不需要修改 MCP 代码。
+
+## Focused Remediation (2026-05-23)
+
+Independent audit of commit `ab66b9d` found three issues, all remediated:
+
+### P1: Overclaim fix — A4 core.chat() test
+
+**Finding:** 原 17 个测试主要直接调用 `_try_phase1_turn_end_runtime_action()`（hook 级），缺少通过 `core.chat()` 路径的有序管线验证。
+
+**Fix:** 新增 `test_a4_full_core_chat_path_ordered_pipeline_l3`，使用 `core.chat()` + `FakeProvider` + `SpyDispatcher` 验证完整 `core.chat → run_main_loop → hook → TOOL_GATE → TOOL_INVOKE → TOOL_RESULT` 有序序列，全部达到 L3。
+
+**为什么不是 overclaim 了:**
+- hook 级测试（A1-A3）证明 dispatcher provenance 完整
+- core.chat() 级测试（A4）证明真实 core loop 接线存在
+- 两者互补，文档和注释诚实标明各自证明范围
+
+### P2: Safety fix — execution_status 不再无条件默认 "success"
+
+**Finding:** `agent/loop.py` TOOL_RESULT 构造中 `execution_status` 无条件默认为 `"success"`，即使 `invoke_result.status != "success"`。
+
+**Fix:** 检查 `invoke_result.status`：若为 `"success"` 则使用 payload 中的 execution_status，否则强制 `"error"`。
+
+**新增测试:**
+- D3: 抛异常工具 → invoke_result.status="failed" → TOOL_RESULT execution_status="error"
+- D4: 成功工具 → invoke_result.status="success" → TOOL_RESULT execution_status="success"
+
+### P3: Docs fix — test_phase1 handler registration
+
+**Finding:** IMPLEMENTATION_PLAN.md 声称"所有已有测试文件不修改"，但 `test_phase1_real_core_loop.py` 做了 handler 注册补充。
+
+**Fix:** 更新 IMPLEMENTATION_PLAN.md 和本文件，标注这是 approved focused fix（handler 注册是接线修正，非测试逻辑变更）。
+
+### Remediation 修改文件
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `agent/loop.py` | Modify | P2: execution_status 逻辑修正（~5 行） |
+| `tests/runtime_integration/test_tool_pipeline_l3_completion.py` | Modify | P1: A4 测试（~80 行），P2: D3/D4 测试（~90 行） |
+| `docs/specs/tool-pipeline-l3-completion/IMPLEMENTATION_PLAN.md` | Modify | P3: 标注 test_phase1 handler 注册修正 |
+| `docs/implementation-notes/tool-pipeline-l3-completion.md` | Modify | 本文件，新增 remediation 记录 |

@@ -174,9 +174,12 @@ def _try_phase1_turn_end_runtime_action(
                 pass
 
     # TOOL_RESULT action（独立 try/except——即使 TOOL_INVOKE 抛异常也尝试构造）
-    # 当前实现：仅当 invoke_result 非 None 时构造（invoke 异常时有 invoke_result=None，
+    # 仅当 invoke_result 非 None 时构造（invoke 异常时有 invoke_result=None，
     # 无法提取 tool_output/execution_status，跳过 TOOL_RESULT）。
-    # 未来可扩展：invoke 异常时仍构造 TOOL_RESULT 以报告错误信息（带 execution_status="error"）。
+    # execution_status 现在根据 invoke_result.status 判定：
+    #   - invoke_result.status == "success" → 使用 payload 中的 execution_status
+    #   - invoke_result.status != "success" → execution_status = "error"
+    # 此前版本无条件默认 "success"，现已修复（P2 focused remediation）。
     if invoke_result is not None:
         try:
             invoke_payload = getattr(invoke_result, "payload", {}) or {}
@@ -187,7 +190,11 @@ def _try_phase1_turn_end_runtime_action(
                 payload={
                     "tool_name": tool_gate_tool_name,
                     "tool_output": invoke_payload.get("tool_output", ""),
-                    "execution_status": invoke_payload.get("execution_status", "success"),
+                    "execution_status": (
+                    invoke_payload.get("execution_status", "success")
+                    if getattr(invoke_result, "status", "") == "success"
+                    else "error"
+                ),
                     "core_loop_invoked": True,
                     "core_entrypoint": "core.chat",
                     "runtime_hook_name": "loop.turn_end",

@@ -10,7 +10,8 @@ First Agent auto-run workflow 的目标是：
 - 从 roadmap queue 自动选择 safe-to-auto-run capability
 - 对每个 capability 执行完整工程 loop（SPEC → TDD → Implementation → Review → Commit → Push）
 - 单个 capability blocked 时不停止整个 workflow，记录为 deferred 后继续下一个
-- 只有整个 queue 没有安全任务或触发真正全局 stop condition 才停
+- 即使需要新增 branch point / RuntimeActionType / handler / catalog entry / 架构决策，也进入 Architecture Extension Loop 自行裁决
+- 只有真正的全局 stop condition（repo 不安全、需要真实 secret/API/private data、P0、资源耗尽）才停
 
 ## B. 事实源
 
@@ -20,9 +21,11 @@ First Agent auto-run workflow 的目标是：
 2. [Unified Runtime Flow Contract](../real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) — 项目宪法：runtime architecture、branch points、classification rules、capability milestones
 3. [First Agent Subsystem Integration Roadmap](../plans/first-agent-subsystem-integration-roadmap.md) — 子系统/介入点清单、evidence matrix、backlog 分类、自动执行队列
 
-## C. 自动执行 Loop
+## C. 两种自动执行 Loop
 
-每个 safe-to-auto-run capability 必须按以下流程执行，不可跳过任何 gate：
+### C1. Normal Capability Loop
+
+用于已有 branch point / existing intervention point 下的 branch behavior：
 
 ```text
 SPEC
@@ -36,27 +39,73 @@ SPEC
                 → Verification Gates (test pass, diff clean, build pass)
                   → Commit
                     → Independent Audit (gate)
-                      → PASS → push
+                      → PASS → push → Continue discovery
+```
+
+### C2. Architecture Extension Loop
+
+用于现有 branch point 不足以承载，但仍符合统一主流程的大方向时：
+
+```text
+Discovery
+  → Architecture Decision / SPEC
+    → Architecture Review (gate)
+      → TDD / Test Plan
+        → TDD Review (gate)
+          → Implementation Plan
+            → Plan Review (gate)
+              → Implementation
+                → Self-review / Debug
+                  → Verification Gates
+                    → Commit
+                      → Independent Audit (gate)
+                        → PASS → push → Continue discovery
 ```
 
 低风险改动（docs-only、typo、单文件小修）可跳过前半段，从 Implementation 或 Gate 直接进入。跳过不是绕过工程纪律——仍须满足对应 gate（git diff --check、test pass、exit code = 0）。
 
-## D. 单个 Capability Stop Condition
+### C3. Architecture Extension Loop 约束
+
+Architecture Extension Loop 必须遵守以下规则：
+
+- 新 branch point 必须有限稳定、明确可测试、可审计
+- 必须说明为什么现有 branch point 不能承载
+- 必须说明它挂在统一主流程的哪个阶段
+- 必须说明它是写入子系统、读取/召回子系统，还是外部 adapter boundary
+- 必须有 L1/L2/L3 evidence plan
+- 必须有 stop condition
+- 必须有 rollback/deferred plan
+- 必须有中文学习型注释/docstring
+- 必须不读取真实 secret/API/private data
+- 不改变项目根本方向（仍然只有一条统一主流程）
+- 不新增 Anchor
+- 不新增无界 branch point
+- 不新增第二条主流程
+
+## D. 单个 Capability Deferred 条件（不停止 workflow）
 
 如果当前 capability 触发以下任一条件，该 capability **deferred**，不停止整个 workflow：
 
-- 需要新增 branch point（不在 Unified Runtime Flow Contract 中已定义的 branch point）
-- 需要新增 runtime flow
 - 需要真实 API / .env / secret
 - 需要连接真实外部服务
 - 需要处理真实私人资料
-- 需要用户产品/架构/安全决策
-- FAIL / BLOCKED / P0 / P1 级别问题
+- 需要真实 sessions/runs
+- 需要真实 memory/episodes
+- P0 级别问题
+- P1 且无法通过回退修复
 - 同一问题在同一阶段已修 2 次仍未通过 gate（触发升级条件）
-- 发现架构分歧
-- 需要新增 capability milestone（而非已有 branch point 下的 branch behavior）
+- 架构决策会改变项目根本方向
 
-deferred 后检查 queue 中是否还有其他 safe-to-auto-run capability，有则继续下一个。
+**不再是 deferred 条件（进入 Architecture Extension Loop）：**
+
+- 需要新增 branch point
+- 需要新增 RuntimeActionType
+- 需要新增 handler
+- 需要新增 evidence catalog entry
+- 需要架构设计/决策
+- 需要新增 runtime flow（有限、可测试、挂载在统一主流程上）
+
+deferred 后检查 queue 中是否还有其他 candidate，有则继续。
 
 ## E. 全局 Stop Condition
 
@@ -64,30 +113,44 @@ deferred 后检查 queue 中是否还有其他 safe-to-auto-run capability，有
 
 | Stop condition | 说明 |
 |---------------|------|
-| queue 中没有 safe-to-auto-run capability | 所有候选或已完成、或 blocked、或 deferred |
 | not main | 不在 main 分支 |
 | behind origin/main | 本地落后远程 |
 | working tree dirty 且不属于当前 loop | 有未提交改动且不是当前 capability 产生的 |
 | HEAD has tag | HEAD 已有 tag |
-| 连续完成并 push 3 个 capability loops | ~~达到单次 auto-run 上限~~ **不再是 stop condition** — 完成一批后必须继续 discovery 找下一个 safe candidate |
-| focused fix 超过 retry limit 且无其他安全任务 | 当前能力卡住且无可替代任务 |
-| 所有剩余任务都需要用户决策 | 无人可做的 task |
+| 需要真实 API / .env / secret | 无法在 fake-first 下继续 |
+| 需要真实外部服务 | 无法在本地验证 |
+| 需要真实私人资料 | 安全边界 |
+| 需要真实 sessions/runs | 安全边界 |
+| 需要真实 memory/episodes | 安全边界 |
+| P0 级别问题 | 不可自动裁决的高风险 |
+| P1 且无法通过回退修复 | 回退后仍然 FAIL |
+| 架构决策会改变项目根本方向 | 超越 auto-run 授权范围 |
+| context 接近耗尽 | 无法安全继续，必须输出 resume instruction |
+| tool/environment failure 阻止继续 | 外部依赖不可用 |
+
+**不再是全局 stop condition：**
+
+- queue empty（继续 discovery 直到真正无 safe candidate）
+- 单个 candidate blocked / deferred
+- 需要新增 branch point（触发 Architecture Extension Loop）
+- 需要新增 RuntimeActionType / handler / catalog entry（触发 Architecture Extension Loop）
+- 需要架构设计（触发 Architecture Extension Loop）
+- 完成 3 个 loops（继续 discovery 找下一个）
+- 所有剩余候选都需要架构扩展（逐个评估，逐个进入 Architecture Extension Loop）
 
 ## F. 选择下一个 Capability 的规则
 
 优先选择顺序（从高到低）：
 
-1. 仓库证据明确 — 已有 handler、spec、test 文件可引用
-2. 已有 branch point 下的 branch behavior — 不新增架构元素
-3. L1/L2/L3 evidence 缺口 — 优先补齐 correctness/safety 缺口
-4. correctness / safety focused fix — 修复已知缺陷
+1. correctness / safety bug — 修复已知缺陷
+2. evidence overclaim prevention — 补齐 target overclaim 防护
+3. 已有 branch point 下的 branch behavior — 不新增架构元素
+4. existing handler / RuntimeActionType L1/L2/L3 gap — evidence 缺口补齐
 5. error-path hardening — 加固已有错误处理路径
-6. 不需要 secret / API / 外部服务 / 私人资料
-7. 不新增 runtime flow
+6. architecture extension that enables existing deferred subsystem
+7. model/provider/skill/checkpoint/mcp/memory existing assets with safe implementation path
 
 选择来源：[First Agent Subsystem Integration Roadmap](../plans/first-agent-subsystem-integration-roadmap.md) Section F（自动执行队列）和 Section D（Backlog 分类）。
-
-roadmap 中标记为 `✅ 是` 的为 safe-to-auto-run。标记为 `⚠️` 的需先评估当前状态再决定。
 
 ## G. 禁止事项
 
@@ -95,7 +158,7 @@ roadmap 中标记为 `✅ 是` 的为 safe-to-auto-run。标记为 `⚠️` 的�
 
 - 不新增 Anchor
 - 不新增无界 branch point
-- 不新增 runtime flow
+- 不新增第二条主流程
 - 不新增 fake loop / fake dispatcher / dogfood-only path
 - 不让 direct handler / dispatcher / adapter call 冒充 L3
 - 不让 fake/real 变两套主流程
@@ -113,40 +176,32 @@ roadmap 中标记为 `✅ 是` 的为 safe-to-auto-run。标记为 `⚠️` 的�
 
 ## H. 输出格式
 
-每次 auto-run 结束（无论正常停止还是触发 stop condition），必须输出：
+每次 auto-run 结束（仅当真正全局 stop condition 触发），必须输出：
 
 ```text
 ## Auto-Run Report — YYYY-MM-DD
 
-### Completed Loops
-- [capability name]: [commit hash] — [one-line summary]
+### A. Architecture Extension Loop 是否升级
 
-### Deferred Items
-- [capability name]: [reason] — [下一步建议]
+### B. 修改文件
 
-### Commits
-- [hash]: [message]
+### C. Commits / Pushes
 
-### Pushes
-- [branch]: [commits pushed]
+### D. Discovery Candidates
 
-### Gates
-- SPEC Review: [PASS/FAIL/SKIPPED]
-- TDD Review: [PASS/FAIL/SKIPPED]
-- Plan Review: [PASS/FAIL/SKIPPED]
-- Implementation Audit: [PASS/FAIL/SKIPPED]
-- Verification: [test results]
-- Independent Audit: [PASS/FAIL]
+### E. Chosen Candidate + Loop Type (Normal / Architecture Extension)
 
-### Final Repo Status
-- branch: [current]
-- ahead/behind: [count]
-- working tree: [clean/dirty]
-- HEAD: [hash]
+### F. SPEC/TDD/Plan/Notes
 
-### Tomorrow Morning Review List
-- [ ] [item 1]
-- [ ] [item 2]
+### G. Tests/Gates
+
+### H. Deferred Items and Reasons
+
+### I. Final Repo Status
+
+### J. Exact Global Stop Condition
+
+### K. Resume Instruction
 ```
 
 ## 参考

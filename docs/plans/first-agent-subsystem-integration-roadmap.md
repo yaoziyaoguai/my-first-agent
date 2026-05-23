@@ -125,22 +125,21 @@ query/event
 ## E. 优先级规则
 
 优先选择：
-1. 已有 branch point 下的 branch behavior（Tool gate blocked）
-2. 不需要真实 API / .env / 外部系统
-3. 不处理真实私人资料
-4. 能强化统一主流程
-5. 能补齐当前 evidence 缺口
-6. 不需要新增 RuntimeActionType / handler / flow
-7. 能在今晚自动跑完并通过 gates
+1. correctness / safety bug — 修复已知缺陷
+2. evidence overclaim prevention — 补齐 target overclaim 防护
+3. 已有 branch point 下的 branch behavior — 不新增架构元素
+4. existing handler / RuntimeActionType L1/L2/L3 gap — evidence 缺口补齐
+5. error-path hardening — 加固已有错误处理路径
+6. architecture extension that enables existing deferred subsystem
+7. model/provider/skill/checkpoint/mcp/memory existing assets with safe implementation path
 
-暂缓：
-- 需要真实 secret/API（MCP Policy Re-Eval 需要确认交互设计）
-- 需要新增 branch point
-- 需要真实外部服务
-- 跨多个子系统的大重构
-- UI / product 语义不清的问题（Skill/SubAgent L3）
-- 会诱发 fake/real 两套主流程的问题
-- Memory consolidation L3（consolidation runtime trigger 语义待用户澄清）
+**重要：需要新增 branch point / RuntimeActionType / handler / catalog entry / 架构决策不再是 stop condition。**
+这些触发 Architecture Extension Loop（见 AUTO_RUN_WORKFLOW.md Section C2）。
+
+仍然暂缓的只有：
+- 需要真实 secret/API/外部服务/私人资料
+- P0 级别问题
+- 改变项目根本方向（新增第二条主流程、Anchor 等）
 
 ## F. 自动执行队列（2026-05-24 持续扩展版）
 
@@ -162,14 +161,23 @@ query/event
 | **#7** | **Evidence overclaim: StreamingProvider ForgedTargetLabel** | `test_runtime_action_contract.py` 有 `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider` 但缺 plain `_ForgedTargetLabelHandler` 测试 | 纯测试添加，零生产代码改动 | 补齐 StreamingProtocol overclaim 防护对称性 | `docs/specs/evidence-overclaim-streaming/` | `test_runtime_action_contract.py` 新增 1 测试 | 无 | ✅ 是 |
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | `test_runtime_action_handlers.py` 验证各 handler direct dispatcher 分类 | 纯测试审计+补充 | 确保 direct dispatcher 不能伪装 L3 | TBD after #6/#7 | 补充缺失 L2 downgrade 断言 | 需先完成 #6/#7 | ⚠️ 待评估 |
 
-## G. Stop Conditions
+## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 
-以下任一条件触发时停止并 Ask User：
-- 需要新增 branch point
-- 需要真实 API / .env / 外部服务
-- 需要真实 secret
-- 需要用户安全/产品决策
-- 同一问题在同一阶段已修 2 次仍未通过 gate
-- 发现架构分歧
-- 安全/隐私问题
-- ahead > 0 且不是当前 capability 的 commit
+**真正全局 stop condition:**
+
+以下任一条件触发时停止：
+- not main / behind origin/main / HEAD has tag / working tree dirty（非当前 loop）
+- 需要真实 API / .env / secret / 外部服务 / 私人资料 / sessions / runs / episodes
+- P0 级别问题
+- P1 且无法通过回退修复
+- 架构决策会改变项目根本方向
+- context 接近耗尽 / tool failure
+
+**不再是 stop condition（已迁移到 Architecture Extension Loop）:**
+
+- 需要新增 branch point → Architecture Extension Loop
+- 需要新增 RuntimeActionType / handler / catalog entry → Architecture Extension Loop
+- 需要架构设计/决策 → Architecture Extension Loop
+- 所有剩余候选都需要架构扩展 → 逐一进入 Architecture Extension Loop
+- queue empty → 继续 discovery
+- 完成 3 个 loops → 继续 discovery

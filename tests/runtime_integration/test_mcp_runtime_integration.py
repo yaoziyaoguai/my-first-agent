@@ -80,11 +80,17 @@ def _register_fake_mcp_tool(
     tool_name: str = "hello",
     tool_description: str = "Say hello",
     result_content: str = "hello from MCP",
+    *,
+    is_error: bool = False,
+    error_message: str | None = None,
 ) -> str:
     """注册单个 fake MCP 工具到 TOOL_REGISTRY，返回 registry 名称。
 
     使用 FakeMCPClient —— 不启动 server、不联网、不读 .env。
     如果已注册（同名 server + tool），直接返回已有 registry name。
+
+    is_error=True 时构造 MCPCallResult(is_error=True)，模拟 MCP server 返回错误，
+    用于验证 _tool_invoke_adapter 的 error detection 能正确识别 MCP 格式错误消息。
     """
     from agent.mcp import FakeMCPClient, MCPCallResult, register_mcp_tools
     from agent.mcp_models import MCPServerConfig, MCPToolDescriptor, mcp_registry_tool_name
@@ -106,9 +112,14 @@ def _register_fake_mcp_tool(
         description=tool_description,
         input_schema={},
     )
+    call_result = MCPCallResult(
+        content=result_content,
+        is_error=is_error,
+        error_message=error_message if is_error else None,
+    )
     client = FakeMCPClient(
         tools_by_server={server_name: [descriptor]},
-        results_by_call={(server_name, tool_name): MCPCallResult(content=result_content)},
+        results_by_call={(server_name, tool_name): call_result},
     )
     register_mcp_tools(
         [server], client,
@@ -430,6 +441,37 @@ class TestMCPEdgeCases:
 
         # 不崩溃
         assert result.status in ("success", "confirmation_required", "rejected")
+
+
+    def test_e5_mcp_tool_error_classified_as_error(self):
+        """E5: MCP 工具错误结果被正确分类为 error status。
+
+        P2 bug 修复验证：_tool_invoke_adapter 的 error detection 不能只靠
+        "[工具" 字符串匹配。MCP 错误消息格式为：
+          "错误：MCP 工具 {server}/{tool} 执行失败：{detail}"
+        其中不包含 "[工具"，修复前会被 silently classified as success。
+        修复后应正确识别为 execution_status="error"。
+        """
+        # 注册返回 is_error=True 的 MCP 工具，模拟 MCP server 错误
+        registry_name = _register_fake_mcp_tool(
+            "demo_e5", "hello",
+            result_content="MCP server error",
+            is_error=True,
+            error_message="Connection refused",
+        )
+        dispatcher = _build_mcp_dispatcher()
+
+        result = _dispatch_tool_invoke(dispatcher, registry_name, {})
+
+        # 修复前：execution_status="success"（"[工具" 不匹配 MCP 错误格式）
+        # 修复后：execution_status="error"
+        payload = dict(result.payload)
+        assert payload["disposition"] == "invoked"
+        assert payload["tool_invoked"] is True
+        assert payload["execution_status"] == "error", (
+            f"P2 bug: MCP error 未被识别，execution_status={payload['execution_status']}，"
+            f"tool_output={payload['tool_output'][:100]!r}"
+        )
 
 
 # ========== Phase F: Regression Isolation (L2) ==========

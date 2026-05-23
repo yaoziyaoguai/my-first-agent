@@ -219,7 +219,11 @@ def _tool_invoke_adapter(payload: Mapping[str, Any]) -> Any:
 
     info = TOOL_REGISTRY[tool_name]
     result = execute_tool(tool_name, tool_input)
-    is_error = isinstance(result, str) and "[工具" in result
+    # "[工具" 匹配本地工具错误格式（如 "[工具执行出错]"）。
+    # "错误：MCP 工具" 匹配 MCPCallResult.to_legacy_tool_result() 的
+    # MCP 错误消息格式："错误：MCP 工具 {server}/{tool} 执行失败：{detail}"。
+    # 两种格式都必须被识别为 error，否则对应工具错误会被 silently classified as success。
+    is_error = isinstance(result, str) and ("[工具" in result or "错误：MCP 工具" in result)
     return {
         "found": True,
         "tool_output": result,

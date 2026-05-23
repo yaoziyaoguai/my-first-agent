@@ -80,10 +80,42 @@ IMPLEMENTATION_PLAN.md 中使用了 `parameters_schema`，但实际 `MCPToolDesc
 - Real provider E2E (L3)
 - UI confirmation for MCP tools
 
+### 4. P2: MCP 工具错误被 silently classified as success（follow-up 修复）
+
+`_tool_invoke_adapter`（evidence.py:222）中的 error detection 只检查 `"[工具" in result`。
+本地工具的错误消息格式如 `"[工具执行出错]..."` 会命中这个 check，但 MCP 工具错误来自
+`MCPCallResult.to_legacy_tool_result()`，消息格式为：
+`"错误：MCP 工具 {server}/{tool} 执行失败：{detail}"`——不包含 `"[工具"`。
+
+结果：MCP 工具执行错误时 `is_error=False`，`execution_status="success"`，
+错误被 silently classified as success。
+
+**修复**: 拓宽 error detection pattern，同时匹配 `"错误：MCP 工具"`（MCP 错误格式）和
+`"[工具"`（本地工具错误格式）。这只是 classification 修复——不新增 branch point、
+不改变 runtime flow、不修改任何 handler 的调用路径。
+
+修复文件：
+- `agent/runtime_integration/evidence.py:222-226` — 增加 MCP 错误格式匹配
+- `tests/runtime_integration/test_mcp_runtime_integration.py` — 新增 E5 测试验证修复
+
+E5 测试 TDD 验证：
+- RED: 修复前 `execution_status="success"`，错误消息 `'错误：MCP 工具 demo_e5/hello 执行失败：Connection refused'`
+- GREEN: 修复后 `execution_status="error"`，正确识别 MCP 错误
+
+## Follow-up Triage (2026-05-23)
+
+| Item | 本轮处理 | 说明 |
+|------|---------|------|
+| P2 MCP error classification | **FIXED** | evidence.py error detection 增加 `"错误：MCP 工具"` 匹配 |
+| MCP tool error path test (E5) | **ADDED** | 新增 `test_e5_mcp_tool_error_classified_as_error` |
+| TOOL_INVOKE not_found mid-pipeline (D4) | **DEFERRED** | B2 已覆盖 handler 级别 not_found。mid-pipeline not_found（gate 通过后 invoke 前 registry 变更）需要 race-condition 模拟 infrastructure，超出本轮 focused fix 范围 |
+| L3 real_core_loop_runtime_e2e | **DEFERRED** | 需要修改 core.py/loop.py，新增 runtime flow——属于大 loop SPEC/TDD/Plan |
+| Policy re-eval per-call | **DEFERRED** | 需要修改 TOOL_GATE adapter 的 lookup_and_risk_check 逻辑——属于大 loop SPEC/TDD/Plan |
+
 ## Tests/Gates
 
-- 新测试文件: 18/18 passed
-- MCP 相关测试: 142/142 passed (5 skipped, all opt-in real e2e)
-- Tool pipeline 回归: 76/76 passed (含 tool_gate, tool_invoke, tool_result)
-- 完整 test suite: 3054/3054 passed (19 skipped)
-- ruff: All checks passed
+- 新测试文件: 19/19 passed (含新增 E5)
+- MCP 相关测试: 143/143 passed (5 skipped, all opt-in real e2e)
+- Tool pipeline 回归: (见 verification gates)
+- 完整 test suite: (见 verification gates)
+- ruff: (见 verification gates)

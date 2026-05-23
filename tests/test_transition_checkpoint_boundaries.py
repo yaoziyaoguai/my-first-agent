@@ -363,14 +363,14 @@ def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
         " _start_planning_for_handler"
     )
     assert (
-        "return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx)"
+        "return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name)"
         in chat_src
     ), "chat() 的 planning result 必须交给共享 helper，禁止复制三分支"
     assert (
         "return _handle_planning_phase_result(plan_result, turn_state, loop_ctx)"
         in handler_src
     ), "_start_planning_for_handler 必须复用共享 helper，禁止复制三分支"
-    assert "return _run_main_loop(turn_state, loop_ctx)" in result_src, (
+    assert "return _run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name)" in result_src, (
         "_handle_planning_phase_result 的 ok 分支必须透传同一个 loop_ctx 到主循环"
     )
 
@@ -468,8 +468,11 @@ def test_main_loop_signature_phase_2_2_b_handoff_only():
 
     sig = inspect.signature(core._run_main_loop)
     params = list(sig.parameters.keys())
-    assert params == ["turn_state", "loop_ctx"], (
-        f"_run_main_loop 签名必须严格是 (turn_state, loop_ctx)；当前：{params}。"
+    # tool_gate_tool_name 是 keyword-only 透传参数——不参与 pipeline 决策，
+    # 只决定 loop.py 中 TOOL_GATE action 使用哪个 tool_name。
+    # 它不属于 state / loop_ctx / confirmation_ctx 越界添加。
+    assert params == ["turn_state", "loop_ctx", "tool_gate_tool_name"], (
+        f"_run_main_loop 签名必须严格是 (turn_state, loop_ctx, *, tool_gate_tool_name)；当前：{params}。"
         "增加任何额外参数都属于范围爬升（durable state 应通过模块级 state "
         "单例访问，runtime dep 应通过 loop_ctx 访问，per-turn 应通过 turn_state 访问）"
     )
@@ -746,7 +749,7 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
     )
 
     # planning result helper 应有 1 处调用并传 loop_ctx。
-    assert "_run_main_loop(turn_state, loop_ctx)" in result_src, (
+    assert "_run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name)" in result_src, (
         "_handle_planning_phase_result 调用 _run_main_loop 必须传上层 loop_ctx"
     )
 

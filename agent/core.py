@@ -306,6 +306,7 @@ def chat(
     on_trace_event: Callable[[Any], None] | None = None,
     provider=None,
     runtime_action_dispatcher=None,
+    tool_gate_tool_name: str | None = None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -548,7 +549,7 @@ def chat(
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(turn_state, _loop_ctx)
+        return _run_main_loop(turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name)
 
     # 到这里意味着要开启一轮全新的任务。
     # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
@@ -558,7 +559,7 @@ def chat(
     state.reset_task()
 
     plan_result = _run_planning_phase(user_input, turn_state, _loop_ctx)
-    return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx)
+    return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name)
 
 
 # ========== 规划阶段 ==========
@@ -659,6 +660,8 @@ def _handle_planning_phase_result(
     plan_result: str,
     turn_state: TurnState,
     loop_ctx: LoopContext,
+    *,
+    tool_gate_tool_name: str | None = None,
 ) -> str:
     """统一处理 planning 的 cancelled / awaiting / ok 三种结果。"""
 
@@ -666,7 +669,7 @@ def _handle_planning_phase_result(
         return "好的，已取消。"
     if plan_result == "awaiting_plan_confirmation":
         return ""
-    return _run_main_loop(turn_state, loop_ctx)
+    return _run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name)
 
 
 def _start_planning_for_handler(
@@ -747,6 +750,8 @@ def _runtime_loop_fields() -> dict:
 def _run_main_loop(
     turn_state: TurnState,
     loop_ctx: LoopContext,
+    *,
+    tool_gate_tool_name: str | None = None,
 ) -> str:
     """兼容旧测试/调用方的 core-level 主循环入口。
 
@@ -766,7 +771,9 @@ def _run_main_loop(
         loop_ctx.model_provider
     )
 
-    dependencies = LoopDependencies(
+    # 按位参数构造 LoopDependencies。tool_gate_tool_name 仅在显式传入时覆盖默认值
+    # "_safe_noop"，避免 None 覆盖 dataclass 默认值。
+    _deps_fields: dict[str, Any] = dict(
         state=state,
         call_model=_call_model,
         dispatch_model_output=lambda response: _dispatch_model_output(
@@ -784,6 +791,9 @@ def _run_main_loop(
         provider_kind=resolved_kind,
         provider_external_call=resolved_call,
     )
+    if tool_gate_tool_name is not None:
+        _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name
+    dependencies = LoopDependencies(**_deps_fields)
     return run_main_loop(turn_state, loop_ctx, dependencies)
 
 

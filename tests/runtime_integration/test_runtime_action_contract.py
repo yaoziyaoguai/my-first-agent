@@ -607,6 +607,47 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_subagent_exe
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== ToolRuntime overclaim prevention =====
+
+
+def test_forged_target_label_as_tool_runtime_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 ToolRuntime 不能获得 runtime_e2e。
+
+    TOOL_RESULT → ToolRuntime 是 phase1_hook 注册的生产 handler，
+    其 catalog descriptor 已存在但无 overclaim 测试。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_RESULT,
+        _ForgedTargetLabelHandler("ToolRuntime"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.TOOL_RESULT))
+
+    assert result.evidence["target_module"] == "ToolRuntime"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_tool_runtime() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能伪造成 ToolRuntime。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_RESULT,
+        _CatalogAllowedForgedCallableHandler("ToolRuntime"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.TOOL_RESULT))
+
+    assert result.evidence["target_module"] == "ToolRuntime"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 # ===== StreamingProvider overclaim prevention =====
 
 

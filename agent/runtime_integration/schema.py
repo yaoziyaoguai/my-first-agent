@@ -23,6 +23,7 @@ class RuntimeActionType(StrEnum):
     TOOL_REQUEST = "tool.request"
     TOOL_GATE = "tool.gate"
     TOOL_INVOKE = "tool.invoke"
+    TOOL_RESULT = "tool.result"
     MEMORY_TURN_END_PROPOSAL = "memory.turn_end_proposal"
     MEMORY_PROPOSE = "memory.propose"
     MEMORY_RECALL = "memory.recall"

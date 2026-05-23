@@ -174,6 +174,28 @@ def _memory_recall_snapshot_adapter(payload: Mapping[str, Any]) -> Any:
     return build_memory_snapshot_from_store(store, options)
 
 
+def _tool_result_format_adapter(payload: Mapping[str, Any]) -> Any:
+    """Catalog-owned adapter for tool result formatting。
+
+    中文学习边界：这个 adapter 是 format_tool_result() 的
+    catalog-owned wrapper。handler 不直接调用格式化函数，而是通过
+    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    """
+    from agent.runtime_integration.tool_result_feedback import format_tool_result
+
+    tool_name = str(payload.get("tool_name") or "")
+    tool_output = payload.get("tool_output")  # str | None
+    execution_status = str(payload.get("execution_status") or "success")
+    rendered_char_budget = int(payload.get("rendered_char_budget") or 500)
+
+    return format_tool_result(
+        tool_name=tool_name,
+        tool_output=tool_output,
+        execution_status=execution_status,
+        rendered_char_budget=rendered_char_budget,
+    )
+
+
 def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     from agent.display_events import mask_user_visible_secrets
 
@@ -404,6 +426,17 @@ class RuntimeActionTargetCatalog:
             adapter=_memory_recall_snapshot_adapter,
             function_called="build_memory_snapshot_from_store",
             call_signature="build_memory_snapshot_from_store(store, options)",
+        ),
+        _descriptor(
+            "tool.result",
+            "agent.runtime_integration.tool_result_feedback.ToolResultFeedbackHandler",
+            "ToolRuntime",
+            operation="format_tool_result",
+            invocation_adapter_id="ToolRuntime.format_tool_result",
+            implementation_id="agent.runtime_integration.tool_result_feedback.format_tool_result",
+            adapter=_tool_result_format_adapter,
+            function_called="format_tool_result",
+            call_signature="format_tool_result(tool_name, tool_output, execution_status, rendered_char_budget)",
         ),
         _descriptor(
             "checkpoint.safe_summary",

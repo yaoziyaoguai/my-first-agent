@@ -89,11 +89,13 @@ class ToolGateHandler:
             risk_level = "unknown"
             rejection_reason = "tool not found in production ToolRegistry"
         elif tool_name.startswith("_"):
-            # 最小 allowlist：只放行 _safe_noop（内部 branch behavior 验证工具）。
+            # 最小 allowlist：只放行 _safe_noop / _confirmable_noop（内部 branch behavior 验证工具）。
             # 其他 `_` 前缀工具仍 blocked——不是无条件放行所有下划线工具。
             # _safe_noop 通过 allowlist 后走正常 confirmation policy 检查
             # （needs_tool_confirmation 返回 False → gate_disposition="allowed"）。
-            if tool_name == "_safe_noop":
+            # _confirmable_noop 通过 allowlist 后走同一 needs_tool_confirmation 检查
+            # （confirmation="always" → gate_disposition="confirmation_required"）。
+            if tool_name in ("_safe_noop", "_confirmable_noop"):
                 risk_level = str(entry.get("risk_level", "low"))
                 confirmation = needs_tool_confirmation(tool_name, dict(payload.get("tool_args") or {}))
                 if confirmation == "block":

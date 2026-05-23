@@ -69,6 +69,9 @@ def _try_phase1_turn_end_runtime_action(
     # 不回退到硬编码——dependencies 为 None 时使用 fail-closed 默认值
     provider_kind = getattr(dependencies, "provider_kind", "unknown") if dependencies is not None else "unknown"
     provider_external_call = getattr(dependencies, "provider_external_call", False) if dependencies is not None else False
+    # tool_gate_tool_name 与 provider_kind 同模式：从 dependencies 读取，
+    # 默认 _safe_noop 保持向后兼容；传 _confirmable_noop 时覆盖 confirmation_required 路径
+    tool_gate_tool_name = getattr(dependencies, "tool_gate_tool_name", "_safe_noop") if dependencies is not None else "_safe_noop"
 
     messages = getattr(getattr(state, "conversation", None), "messages", [])
     last_user = ""
@@ -110,8 +113,8 @@ def _try_phase1_turn_end_runtime_action(
             source="core_loop",
             parent_trace_id="",
             payload={
-                "tool_name": "_safe_noop",
-                # 显式传 tool_args——_safe_noop 是 zero-arg safe tool，
+                "tool_name": tool_gate_tool_name,
+                # 显式传 tool_args——_safe_noop/_confirmable_noop 是 zero-arg safe tool，
                 # 但避免 needs_tool_confirmation() 中的隐式 fallback 链。
                 # 未来任何带参数工具都必须传真实 tool_args，不得省略。
                 "tool_args": {},
@@ -160,6 +163,11 @@ class LoopDependencies:
     # 不在 loop.py 中解析——loop 层保持 provider-agnostic
     provider_kind: str = "unknown"
     provider_external_call: bool = False
+    # tool_gate_tool_name 控制 TOOL_GATE action 传递的 tool_name。
+    # 默认 "_safe_noop"（confirmation="never" → allowed），
+    # 传入 "_confirmable_noop" 时覆盖 confirmation_required branch behavior。
+    # 不传则行为与现有完全一致——向后兼容。
+    tool_gate_tool_name: str = "_safe_noop"
 
 
 def run_main_loop(

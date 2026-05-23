@@ -47,6 +47,13 @@ EXPECTED_INTERNAL_TOOL_SPECS = {
         "confirmation": "never",
         "meta_tool": False,
     },
+    "_confirmable_noop": {
+        "capability": "local_action",
+        "risk_level": "low",
+        "output_policy": "none",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
     "edit_file": {
         "capability": "file_write",
         "risk_level": "high",

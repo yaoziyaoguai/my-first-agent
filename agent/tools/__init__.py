@@ -24,6 +24,13 @@ from agent.tools.meta import request_user_input as request_user_input  # noqa: F
 # 但 ToolGateHandler 通过最小 allowlist 可在 TOOL_REGISTRY 中查到它。
 # 它不代表放开所有 `_` 前缀工具——其他 `_` 前缀工具仍被 gate blocked。
 from agent.tools.safe_noop import _safe_noop as _safe_noop  # noqa: F401
+# _confirmable_noop: 内部 confirmable no-op 工具——仅用于 ToolRegistry gate
+# confirmation_required branch behavior 验证。
+# 与 _safe_noop 同等安全（zero-arg, no shell, no file write, no external process,
+# no network），唯一区别是 confirmation="always"。
+# 以下划线开头，模型不可见；ToolGateHandler 通过 allowlist 放行后走
+# 正常 needs_tool_confirmation → gate_disposition="confirmation_required"。
+from agent.tools.confirmable_noop import _confirmable_noop as _confirmable_noop  # noqa: F401
 
 __all__ = [
     "edit_file",

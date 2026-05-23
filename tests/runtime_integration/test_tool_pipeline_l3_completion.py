@@ -1096,6 +1096,7 @@ class TestPhaseFPipelineStructureConstraints:
         expected_types = {
             "tool.gate", "tool.invoke", "tool.result",
             "memory.turn_end_proposal", "memory.propose", "memory.recall",
+            "checkpoint.safe_summary",
         }
         actual_types = set(snapshot.keys())
         extra = actual_types - expected_types

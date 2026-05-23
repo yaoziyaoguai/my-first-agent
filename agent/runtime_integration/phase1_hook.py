@@ -14,6 +14,7 @@ dispatcher/memory_hook/memory_retain/tool_gate。
 
 from __future__ import annotations
 
+from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
@@ -63,5 +64,9 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.TOOL_RESULT,
         ToolResultFeedbackHandler(),
+    )
+    registry.register(
+        RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        CheckpointSafeSummaryHandler(),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

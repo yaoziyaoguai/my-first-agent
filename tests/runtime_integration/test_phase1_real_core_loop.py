@@ -56,11 +56,14 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     → TOOL_RESULT）。不注册这些 handler 会导致后续 stage 得到 not_supported 状态
     并降级为 subsystem_integration，污染 action_log。
     """
+    from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
+
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
     registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
     registry.register(RuntimeActionType.TOOL_INVOKE, ToolInvokeHandler())
     registry.register(RuntimeActionType.TOOL_RESULT, ToolResultFeedbackHandler())
+    registry.register(RuntimeActionType.CHECKPOINT_SAFE_SUMMARY, CheckpointSafeSummaryHandler())
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 
 

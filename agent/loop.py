@@ -209,6 +209,33 @@ def _try_phase1_turn_end_runtime_action(
             # TOOL_RESULT 失败不阻塞 loop
             pass
 
+    # CHECKPOINT_SAFE_SUMMARY action（独立 try/except——失败不阻断 MEMORY 和 TOOL_GATE）
+    # 中文学习边界：Checkpoint safe summary 是 turn-end hook 上的 branch behavior，
+    # 不新增 Anchor、不新增 branch point、不新增 runtime flow。
+    # 它只产生 checkpoint boundary evidence（safe_summary / secret_content_detected 等），
+    # 不实际调用 save_checkpoint——save 仍由 core.py 在正确时机执行。
+    try:
+        checkpoint_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "runtime_state_summary": result_text,
+                "trigger": "turn_end",
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(checkpoint_request)
+    except Exception:
+        # CHECKPOINT_SAFE_SUMMARY 失败不阻塞 loop 也不阻塞其他 dispatch
+        pass
+
 
 @dataclass(frozen=True, slots=True)
 class LoopDependencies:

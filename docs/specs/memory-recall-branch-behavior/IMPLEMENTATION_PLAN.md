@@ -93,7 +93,7 @@ handler 拿到 MemorySnapshot 后调用 `build_memory_section(snapshot)` 渲染�
 - Modify: `agent/runtime_integration/evidence.py`（新增 catalog descriptor + adapter）
 - Modify: `agent/runtime_integration/phase1_hook.py`（注册 MEMORY_RECALL handler）
 
-**Goal:** 
+**Goal:**
 - 编写 `_memory_recall_snapshot_adapter` 函数
 - 在 `RuntimeActionTargetCatalog._bindings` 中新增 descriptor
 - 在 `build_phase1_dispatcher()` 中注册 MEMORY_RECALL → MemoryRecallHandler

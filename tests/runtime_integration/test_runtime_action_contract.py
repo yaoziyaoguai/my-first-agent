@@ -607,6 +607,30 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_subagent_exe
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== StreamingProvider overclaim prevention =====
+
+
+def test_forged_target_label_as_streaming_provider_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 StreamingProtocol 不能获得 runtime_e2e。
+
+    streaming.provider_call 已有 CatalogAllowedForgedCallable 测试，
+    但缺少 plain ForgedTargetLabel 测试（其他 target 如 ToolRegistry、
+    SkillLoader、CheckpointSafeSummary、SubAgentExecutor 两者都有）。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.STREAMING_PROVIDER_CALL,
+        _ForgedTargetLabelHandler("StreamingProtocol"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.STREAMING_PROVIDER_CALL))
+
+    assert result.evidence["target_module"] == "StreamingProtocol"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
 def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider() -> None:
     registry = ActionHandlerRegistry()
     registry.register(

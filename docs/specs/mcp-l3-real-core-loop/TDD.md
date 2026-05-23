@@ -195,10 +195,10 @@ _try_phase1_turn_end_runtime_action(
 
 **test name**: `test_t5_mcp_tool_confirmation_always_blocked_at_gate`
 
-**purpose**: 验证生产注册的 MCP 工具（`confirmation="always"`）通过 `register_mcp_tools()` 注册时，在 hook 级 TOOL_GATE 被正确拦截（confirmation_required），TOOL_INVOKE 不触发。确认为 `confirmation="never"` 的测试配置不改变生产安全策略。
+**purpose**: 验证 MCP 工具以 `confirmation="always"` 注册时，在 hook 级 TOOL_GATE 被正确拦截（confirmation_required），TOOL_INVOKE 不触发。确认为 `confirmation="never"` 的测试配置不改变生产安全策略。
 
 **setup**:
-1. 通过 `register_mcp_tools()` 注册 MCP 工具（hardcodes `confirmation="always"`）
+1. 通过 `register_tool()` 直接注册 MCP 工具并设 `confirmation="always"`——与 `register_mcp_tools()` 的 hardcoded `confirmation="always"` 在 gate 行为上等价（SPEC §E.2），避免引入对 `register_mcp_tools()` 内部实现细节的硬依赖
 2. 使用 `FakeMCPClient`
 3. 构造 `_PipelineSpy` 包裹 dispatcher
 4. 构造 `LoopDependencies(tool_gate_tool_name="mcp__demo__hello", ...)`

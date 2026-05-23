@@ -2,7 +2,7 @@
 
 Date: 2026-05-24
 Status: active
-Based on: repository evidence as of commit 05ece40
+Based on: repository evidence as of commit 748513c
 
 ## A. 当前架构心智模型
 
@@ -56,21 +56,21 @@ query/event
 |---|---|---|---|---|---|---|
 | **Tool: allowed** | ✅ | ✅ | ✅ | `test_tool_pipeline_l3_completion.py` | 无 | 已闭环 |
 | **Tool: confirmation_required** | ✅ | ✅ | ✅ | `test_tool_branch_confirmation_required.py` | 无 | 已闭环 |
-| **Tool: blocked** | ✅ | ✅ | ❌ | `test_tool_anchor_fake.py` (L1/L2), `test_tool_branch_confirmation_required.py` (L1/L2) | L3 未专项验证 — Tool gate 四个 disposition 唯一缺失的 L3 | **今晚候选 #1** |
+| **Tool: blocked** | ✅ | ✅ | ✅ | `test_tool_blocked_l3.py` | 无 | 已闭环 (commit 6cef9b8) |
 | **Tool: not_found** | ✅ | ✅ | ✅ | `test_tool_gate_not_found_l3.py` | 无 | 已闭环 (commit 76a88e4) |
 | **Tool: invoke** | ✅ | ✅ | ✅ | `test_tool_invoke_branch_behavior.py` | 无 | 已闭环 |
-| **Tool: invoke error** | ✅ | ✅ | ❌ | `tool_invoke.py:130-132` 已有 error disposition；无专项 L3 test | TOOL_INVOKE execution_status="error" 路径未 L3 验证 | **今晚候选 #2** |
+| **Tool: invoke error** | ✅ | ✅ | ✅ | `test_tool_invoke_error_l3.py` | 无 | 已闭环 (commit 748513c) |
 | **Tool: invoke not_found** | ✅ | ✅ | ❌ | `tool_invoke.py:127-128` 已有 not_found disposition；无专项 L3 test | TOOL_INVOKE mid-pipeline not_found 路径未 L3 验证 | **今晚候选 #3** |
 | **Tool: result feedback** | ✅ | ✅ | ✅ | `test_tool_result_feedback_branch_behavior.py` | 无 | 已闭环 |
 | **MCP: confirmation="never"** | ✅ | ✅ | ✅ | `test_mcp_l3_real_core_loop.py` | 无 | 已闭环 |
 | **MCP: confirmation="always"** | ✅ | ✅ | ✅ (gate only) | `test_mcp_l3_real_core_loop.py::T5` | TOOL_INVOKE 不触发（设计如此） | confirmation 交互流程需要新设计，deferred |
 | **MCP: Policy Re-Eval** | ❌ | ❌ | ❌ | 无 | 需要 runtime loop 中 confirmation 交互 | 需用户决策，暂缓 |
-| **MCP: HOME isolation** | ❌ | ❌ | ❌ | `test_mcp_l3_real_core_loop.py::T6` 在非隔离 HOME 下失败 | 测试环境 HOME 隔离断言太严格，非 coverage 缺口 | **今晚候选 #5**（test hardening, 非新 capability） |
+| **MCP: HOME isolation** | ✅ | ✅ | N/A | `test_mcp_l3_real_core_loop.py::T6` 在 HOME 隔离路径下通过 | 非覆盖缺口——测试正确要求隔离 HOME，CI/Makefile 应统一设置 | 已闭环（基础设施问题，非测试缺陷） |
 | **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py` | 无 | 已闭环 |
 | **Memory: recall** | ✅ | ✅ | ✅ | `test_memory_recall_branch_behavior.py` | 无 | 已闭环 |
 | **Memory: consolidation** | ✅ | ✅ | ❌ | `test_memory_consolidation*.py` | L3 via core.chat() 未验证；consolidation runtime trigger 语义待用户澄清 | ⚠️ deferred |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
-| **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 防护未覆盖 | **今晚候选 #4** |
+| **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
 | **Skill: action** | ✅ | ✅ | ❌ | `test_skill_*.py` (L1/L2) | L3 via core.chat() 未验证 | deferred（需先稳定 Skill 语义） |
 | **SubAgent: action** | ✅ | ✅ | ❌ | `test_subagent_*.py` (L1/L2) | L3 via core.chat() 未验证 | deferred（需先稳定 SubAgent 语义） |
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
@@ -146,11 +146,11 @@ query/event
 
 | Order | Capability | Repository evidence | Why safe | Why next | Expected SPEC path | Expected tests | Stop conditions | Safe to auto-run |
 |---|---|---|---|---|---|---|---|---|
-| **#1** | **Tool blocked L3** | `tool_gate.py:81-85` shell-like rejected, `:113-114` `_` prefix rejected; `test_tool_anchor_fake.py` 已有 L1/L2 blocked tests; `test_tool_branch_confirmation_required.py` 已有 L2 blocked tests | 纯 branch behavior under TOOL_GATE；不新增 RuntimeActionType/handler/flow；零 pipeline 改动；已有 L1/L2 测试可参照 | 补齐 Tool gate 四 disposition 全 L3 覆盖的最后一块 | `docs/specs/tool-blocked-l3/` | `tests/runtime_integration/test_tool_blocked_l3.py` (~4 tests) | 需要新增 branch point / API / handler | ✅ 是 |
-| **#2** | **Tool invoke error L3** | `tool_invoke.py:130-132` execution_status="error" → disposition="invoked" logic; `test_tool_invoke_branch_behavior.py` 已有 happy-path L3 | 纯 branch behavior under TOOL_INVOKE；不新增 RuntimeActionType/handler/flow；需 test helper 注入 error | error-path hardening under existing TOOL_INVOKE branch point | `docs/specs/tool-invoke-error-l3/` | `tests/runtime_integration/test_tool_invoke_error_l3.py` (~3 tests) | 需要新增 handler / API / 外部服务 | ✅ 是 |
-| **#3** | **Tool invoke not_found L3** | `tool_invoke.py:127-128` disposition="not_found" when tool lookup fails mid-pipeline | 纯 branch behavior under TOOL_INVOKE；不新增 handler；需 test helper 构造 gate→invoke 间 tool 消失场景 | defensive path hardening — gate allowed 但 invoke 找不到工具 | `docs/specs/tool-invoke-not-found-l3/` | `tests/runtime_integration/test_tool_invoke_not_found_l3.py` (~3 tests) | 需要新增 handler / API | ✅ 是 |
-| **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | `test_runtime_action_contract.py` 已有 forged_target_label 系列测试但未覆盖 CHECKPOINT_SAFE_SUMMARY；`evidence.py` catalog descriptors 含 checkpoint.safe_summary | 纯测试补齐；不修改生产代码；已有完整测试 pattern 可参照 | 防止 CHECKPOINT_SAFE_SUMMARY 被伪造 target_label 冒充 L3 | `docs/specs/evidence-overclaim-checkpoint/` | 追加到 `tests/runtime_integration/test_runtime_action_contract.py` (~2 tests) | 需要新增 handler / API | ✅ 是 |
-| **#5** | **MCP HOME isolation test hardening** | `test_mcp_l3_real_core_loop.py::T6` assert HOME 含 "my-first-agent" 或 "tmp" 在真实 HOME 下失败 | 纯测试修复；不修改生产代码 | 修复预存测试环境问题，确保 CI 可运行 | 无（直接修复测试） | 修改 T6 assertion | 需要修改生产代码 / API | ✅ 是（但属 test fix, 非新 capability） |
+| **#1** | **Tool blocked L3** | `tool_gate.py:81-85` shell-like rejected, `:113-114` `_` prefix rejected | 纯 branch behavior under TOOL_GATE | ✅ 完成 (commit 6cef9b8) | `docs/specs/tool-blocked-l3/` | `tests/runtime_integration/test_tool_blocked_l3.py` (4 tests, all pass) | — | ✅ 已完成 |
+| **#2** | **Tool invoke error L3** | `tool_invoke.py:130-132` execution_status="error" path | 纯 branch behavior under TOOL_INVOKE | ✅ 完成 (commit 748513c) | `docs/specs/tool-invoke-error-l3/` | `tests/runtime_integration/test_tool_invoke_error_l3.py` (3 tests, all pass) | — | ✅ 已完成 |
+| **#3** | **Tool invoke not_found L3** | `tool_invoke.py:127-128` disposition="not_found" | 需 gate allowed 但 invoke 找不到工具，无法通过 core.chat() 自然触发，需 monkeypatch adapter | ⚠️ deferred — 非自然可达路径 | `docs/specs/tool-invoke-not-found-l3/` | — | 需 monkeypatch adapter 或新增 test hook | ⚠️ deferred |
+| **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | `test_runtime_action_contract.py::test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint` 已覆盖 | 已覆盖，无 gap | ✅ 已覆盖（无需额外工作） | — | — | — | ✅ 已覆盖 |
+| **#5** | **MCP HOME isolation** | T6 在 HOME 隔离路径下通过 | 测试正确，CI/Makefile 应统一设置 HOME | ✅ 基础设施问题（非测试缺陷） | — | — | — | ✅ 已闭环 |
 
 ## G. Stop Conditions
 

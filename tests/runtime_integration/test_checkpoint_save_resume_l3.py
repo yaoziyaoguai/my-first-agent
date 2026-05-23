@@ -371,6 +371,6 @@ class TestNoRealAPIOrEnv:
         _, _, checkpoint_result = checkpoint_actions[0]
         assert checkpoint_result.status == "success"
 
-        # 验证 FakeProvider 特征：不应有真实 API 调用的痕迹
-        # FakeProvider 是确定性输出，不发起网络请求
-        assert "FakeProvider" in str(type(FakeProvider()).__class__) or True
+        # T4 验证隔离环境中所有操作完成无异常。
+        # FakeProvider 是确定性 provider，不发起网络请求，不读 .env。
+        # HOME 指向隔离目录保证即使误读也不会触及真实数据。

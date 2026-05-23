@@ -689,6 +689,121 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_pr
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== Memory overclaim prevention =====
+
+
+def test_forged_target_label_as_memory_policy_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 MemoryPolicy 不能获得 runtime_e2e。
+
+    MemoryPolicy 是 turn_end_proposal/propose handler 调用的决策模块，
+    handler 传入的 evidence_extra 不能绕过 target identity 验证。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+        _ForgedTargetLabelHandler("MemoryPolicy"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_TURN_END_PROPOSAL))
+
+    assert result.evidence["target_module"] == "MemoryPolicy"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_policy() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted MemoryPolicy proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+        _CatalogAllowedForgedCallableHandler("MemoryPolicy"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_TURN_END_PROPOSAL))
+
+    assert result.evidence["target_module"] == "MemoryPolicy"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_forged_target_label_as_memory_store_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 MemoryStore 不能获得 runtime_e2e。
+
+    MemoryStore 是 memory.propose handler 执行 retain 的存储模块。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_PROPOSE,
+        _ForgedTargetLabelHandler("MemoryStore"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_PROPOSE))
+
+    assert result.evidence["target_module"] == "MemoryStore"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_store() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted MemoryStore proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_PROPOSE,
+        _CatalogAllowedForgedCallableHandler("MemoryStore"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_PROPOSE))
+
+    assert result.evidence["target_module"] == "MemoryStore"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_forged_target_label_as_memory_runtime_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 MemoryRuntime 不能获得 runtime_e2e。
+
+    MemoryRuntime 是 memory.recall handler 生成 snapshot 的运行时模块。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_RECALL,
+        _ForgedTargetLabelHandler("MemoryRuntime"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_RECALL))
+
+    assert result.evidence["target_module"] == "MemoryRuntime"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_runtime() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted MemoryRuntime proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_RECALL,
+        _CatalogAllowedForgedCallableHandler("MemoryRuntime"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_RECALL))
+
+    assert result.evidence["target_module"] == "MemoryRuntime"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 def _mutated_valid_evidence(field_name: str, wrong_value: str) -> dict:
     evidence = _valid_runtime_e2e_evidence()
     evidence["target_module_proof"] = dict(evidence["target_module_proof"])

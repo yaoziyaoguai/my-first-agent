@@ -20,7 +20,11 @@ from agent.runtime_integration import (
     classify_evidence_level,
     is_runtime_e2e_evidence,
 )
-from agent.runtime_integration.evidence import ObservedModuleCall, RuntimeActionModuleObserver
+from agent.runtime_integration.evidence import (
+    ObservedModuleCall,
+    RuntimeActionModuleObserver,
+    RuntimeActionTargetCatalog,
+)
 
 
 class _ObservedHandler:
@@ -843,6 +847,64 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_runti
     assert result.evidence["target_identity_valid"] is False
     assert result.evidence["target_module_proof"]["target_identity_valid"] is False
     _assert_not_runtime_e2e(result.evidence)
+
+
+# ===== 证据目录完整性审计 =====
+
+# 每个 production target_module 必须有对应的 overclaim 测试（ForgedTargetLabel + CatalogAllowedForgedCallable）。
+# 这个映射记录已被覆盖的 target；新增 catalog entry 时必须同步新增 overclaim 测试并更新此集合。
+_OVERCLAIM_COVERED_TARGETS: frozenset[str] = frozenset({
+    "ToolRegistry",
+    "SkillLoader",
+    "SkillRegistry",
+    "DogfoodFakeToolOverlay",
+    "CheckpointSafeSummary",
+    "SubAgentExecutor",
+    "ToolRuntime",
+    "StreamingProtocol",
+    "MemoryPolicy",
+    "MemoryStore",
+    "MemoryRuntime",
+})
+
+# test harness 专用的 target_module，不需要 overclaim 测试
+_TEST_ONLY_TARGETS: frozenset[str] = frozenset({
+    "FakeTargetModule",
+})
+
+
+def test_all_runtime_action_types_have_catalog_entries() -> None:
+    """每个 RuntimeActionType 在 catalog 中至少有一个 descriptor。
+
+    新增 RuntimeActionType 必须同步在 RuntimeActionTargetCatalog 中注册。
+    """
+    catalog_action_types = {b.action_type for b in RuntimeActionTargetCatalog._bindings}
+    all_action_types = {str(a) for a in RuntimeActionType}
+    missing = all_action_types - catalog_action_types
+    assert not missing, (
+        f"Catalog 缺少以下 RuntimeActionType 的 descriptor：{missing}。"
+        f" 请在 agent/runtime_integration/evidence.py 的 RuntimeActionTargetCatalog._bindings 中注册。"
+    )
+
+
+def test_all_production_catalog_targets_have_overclaim_coverage() -> None:
+    """每个 production catalog target 都有 overclaim 测试覆盖。
+
+    新增 target_module 到 catalog 时，必须同步：
+    1. 在此文件新增 test_forged_target_label_as_<target>_is_not_runtime_e2e
+    2. 在此文件新增 test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_<target>
+    3. 将 target_module 加入 _OVERCLAIM_COVERED_TARGETS
+    """
+    catalog_targets = {
+        b.target_module
+        for b in RuntimeActionTargetCatalog._bindings
+        if b.target_module not in _TEST_ONLY_TARGETS
+    }
+    missing = catalog_targets - _OVERCLAIM_COVERED_TARGETS
+    assert not missing, (
+        f"以下 catalog target 缺少 overclaim 测试：{missing}。"
+        f" 请在此文件新增 ForgedTargetLabel + CatalogAllowedForgedCallable 测试后更新 _OVERCLAIM_COVERED_TARGETS。"
+    )
 
 
 def _mutated_valid_evidence(field_name: str, wrong_value: str) -> dict:

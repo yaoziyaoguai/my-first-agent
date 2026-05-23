@@ -131,6 +131,22 @@ def _memory_policy_decide_adapter(payload: Mapping[str, Any]) -> Any:
     return policy.decide(str(payload.get("user_message") or ""))
 
 
+def _memory_store_apply_intent_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.memory_operations import MemoryAuditSummary, MemoryOperationIntent
+    from agent.memory_store import InMemoryMemoryStore
+
+    store = payload.get("store")
+    intent = payload.get("intent")
+    audit_summary = payload.get("audit_summary")
+    if not isinstance(store, InMemoryMemoryStore):
+        raise TypeError("store must be InMemoryMemoryStore or its subclass")
+    if not isinstance(intent, MemoryOperationIntent):
+        raise TypeError("intent must be MemoryOperationIntent")
+    if not isinstance(audit_summary, MemoryAuditSummary):
+        raise TypeError("audit_summary must be MemoryAuditSummary")
+    return store.apply_operation_intent(intent, audit_summary)
+
+
 def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     from agent.display_events import mask_user_visible_secrets
 
@@ -339,6 +355,17 @@ class RuntimeActionTargetCatalog:
             adapter=_memory_policy_decide_adapter,
             function_called="DeterministicMemoryPolicy.decide",
             call_signature="decide(text: str)",
+        ),
+        _descriptor(
+            "memory.propose",
+            "agent.runtime_integration.memory_retain.MemoryRetainHandler",
+            "MemoryStore",
+            operation="apply_operation_intent",
+            invocation_adapter_id="MemoryStore.apply_operation_intent",
+            implementation_id="agent.memory_store.InMemoryMemoryStore.apply_operation_intent",
+            adapter=_memory_store_apply_intent_adapter,
+            function_called="InMemoryMemoryStore.apply_operation_intent",
+            call_signature="apply_operation_intent(intent, audit_summary)",
         ),
         _descriptor(
             "checkpoint.safe_summary",

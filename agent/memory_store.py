@@ -449,3 +449,15 @@ def _derive_audit_id(audit_summary: MemoryAuditSummary) -> str:
     ))
     digest = sha256(payload.encode("utf-8")).hexdigest()
     return f"audit:fake:{digest[:16]}"
+
+
+class FilesystemMemoryStore(InMemoryMemoryStore):
+    """基于文件系统的 memory store 骨架。
+
+    D2 测试需要的外部副作用 store backend。与 InMemoryMemoryStore 共享
+    同一 apply_operation_intent 逻辑（继承），仅标记为 filesystem backend。
+    """
+
+    def __init__(self, base_dir: str) -> None:
+        super().__init__()
+        self.base_dir = base_dir

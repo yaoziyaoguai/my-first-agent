@@ -549,6 +549,64 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint()
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== SubAgent overclaim prevention =====
+
+
+def test_forged_target_label_as_subagent_executor_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 SubAgentExecutor 不能获得 runtime_e2e。
+
+    SubAgent 在 is_runtime_e2e_evidence() 中有特殊 parent_adjudicated 规则，
+    handler 传入的 evidence_extra 不能绕过 target identity 验证。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        _ForgedTargetLabelHandler(
+            "SubAgentExecutor",
+            evidence_extra={
+                "no_nested_delegation": True,
+                "no_shell_or_external_process": True,
+            },
+        ),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.SUBAGENT_DELEGATE_L0))
+
+    assert result.evidence["target_module"] == "SubAgentExecutor"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_subagent_executor() -> None:
+    """catalog 允许 handler/label 但传入 arbitrary lambda 不能获得 trusted target proof。
+
+    SubAgentExecutor 在 catalog 中有 descriptor（_subagent_delegate_once_adapter），
+    但 handler 通过 observe_module_call（非 invoke_registered_target）传入的
+    arbitrary lambda 不匹配 catalog adapter identity。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        _CatalogAllowedForgedCallableHandler(
+            "SubAgentExecutor",
+            evidence_extra={
+                "no_nested_delegation": True,
+                "no_shell_or_external_process": True,
+            },
+        ),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.SUBAGENT_DELEGATE_L0))
+
+    assert result.evidence["target_module"] == "SubAgentExecutor"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider() -> None:
     registry = ActionHandlerRegistry()
     registry.register(

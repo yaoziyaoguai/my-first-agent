@@ -142,15 +142,25 @@ query/event
 - 会诱发 fake/real 两套主流程的问题
 - Memory consolidation L3（consolidation runtime trigger 语义待用户澄清）
 
-## F. 今晚自动执行队列（2026-05-24 扩展版）
+## F. 自动执行队列（2026-05-24 持续扩展版）
+
+### 已完成 / 已闭环
+
+| Order | Capability | Status |
+|---|---|---|
+| **#1** | **Tool blocked L3** | ✅ 完成 (commit 6cef9b8) |
+| **#2** | **Tool invoke error L3** | ✅ 完成 (commit 748513c) |
+| **#3** | **Tool invoke not_found L3** | ⚠️ deferred — 非自然可达路径 |
+| **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | ✅ 已覆盖 |
+| **#5** | **MCP HOME isolation** | ✅ 已闭环 |
+
+### 新发现候选（2026-05-24 discovery 扩展）
 
 | Order | Capability | Repository evidence | Why safe | Why next | Expected SPEC path | Expected tests | Stop conditions | Safe to auto-run |
 |---|---|---|---|---|---|---|---|---|
-| **#1** | **Tool blocked L3** | `tool_gate.py:81-85` shell-like rejected, `:113-114` `_` prefix rejected | 纯 branch behavior under TOOL_GATE | ✅ 完成 (commit 6cef9b8) | `docs/specs/tool-blocked-l3/` | `tests/runtime_integration/test_tool_blocked_l3.py` (4 tests, all pass) | — | ✅ 已完成 |
-| **#2** | **Tool invoke error L3** | `tool_invoke.py:130-132` execution_status="error" path | 纯 branch behavior under TOOL_INVOKE | ✅ 完成 (commit 748513c) | `docs/specs/tool-invoke-error-l3/` | `tests/runtime_integration/test_tool_invoke_error_l3.py` (3 tests, all pass) | — | ✅ 已完成 |
-| **#3** | **Tool invoke not_found L3** | `tool_invoke.py:127-128` disposition="not_found" | 需 gate allowed 但 invoke 找不到工具，无法通过 core.chat() 自然触发，需 monkeypatch adapter | ⚠️ deferred — 非自然可达路径 | `docs/specs/tool-invoke-not-found-l3/` | — | 需 monkeypatch adapter 或新增 test hook | ⚠️ deferred |
-| **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | `test_runtime_action_contract.py::test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint` 已覆盖 | 已覆盖，无 gap | ✅ 已覆盖（无需额外工作） | — | — | — | ✅ 已覆盖 |
-| **#5** | **MCP HOME isolation** | T6 在 HOME 隔离路径下通过 | 测试正确，CI/Makefile 应统一设置 HOME | ✅ 基础设施问题（非测试缺陷） | — | — | — | ✅ 已闭环 |
+| **#6** | **Evidence overclaim: SubAgent (ForgedTargetLabel + CatalogAllowedForgedCallable)** | `evidence.py` catalog 已注册 `subagent.delegate_l0→SubAgentExecutor` descriptor；`is_runtime_e2e_evidence()` 有特殊 `parent_adjudicated is True` 规则；但 `test_runtime_action_contract.py` 中零覆盖 | 纯测试添加，零生产代码改动，严格复用现有 `_ForgedTargetLabelHandler` / `_CatalogAllowedForgedCallableHandler` 模式 | SubAgent 是安全边界（delegated execution），缺 overclaim 防护是 correctness/safety gap | `docs/specs/evidence-overclaim-subagent/` | `test_runtime_action_contract.py` 新增 2 测试 | 无 | ✅ 是 |
+| **#7** | **Evidence overclaim: StreamingProvider ForgedTargetLabel** | `test_runtime_action_contract.py` 有 `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider` 但缺 plain `_ForgedTargetLabelHandler` 测试 | 纯测试添加，零生产代码改动 | 补齐 StreamingProtocol overclaim 防护对称性 | `docs/specs/evidence-overclaim-streaming/` | `test_runtime_action_contract.py` 新增 1 测试 | 无 | ✅ 是 |
+| **#8** | **Direct call downgrade: handler L2 分类一致性审计** | `test_runtime_action_handlers.py` 验证各 handler direct dispatcher 分类 | 纯测试审计+补充 | 确保 direct dispatcher 不能伪装 L3 | TBD after #6/#7 | 补充缺失 L2 downgrade 断言 | 需先完成 #6/#7 | ⚠️ 待评估 |
 
 ## G. Stop Conditions
 

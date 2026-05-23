@@ -689,6 +689,47 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_pr
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== DogfoodFakeToolOverlay overclaim prevention =====
+
+
+def test_forged_target_label_as_dogfood_fake_tool_overlay_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 DogfoodFakeToolOverlay 不能获得 runtime_e2e。
+
+    DogfoodFakeToolOverlay 是 tool.request/tool.gate handler 在 dogfood 模式下
+    使用的 fake tool overlay，handler 不能自报 target_module 伪造 runtime_e2e。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_GATE,
+        _ForgedTargetLabelHandler("DogfoodFakeToolOverlay"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.TOOL_GATE))
+
+    assert result.evidence["target_module"] == "DogfoodFakeToolOverlay"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_dogfood_fake_tool_overlay() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted DogfoodFakeToolOverlay proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.TOOL_GATE,
+        _CatalogAllowedForgedCallableHandler("DogfoodFakeToolOverlay"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.TOOL_GATE))
+
+    assert result.evidence["target_module"] == "DogfoodFakeToolOverlay"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 # ===== Memory overclaim prevention =====
 
 

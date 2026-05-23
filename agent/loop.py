@@ -33,18 +33,25 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher: Any,
     dependencies: Any = None,
 ) -> None:
-    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool gate。
+    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline。
 
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
-    决策。它构造两个独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL 和
-    TOOL_GATE），各自通过 dispatcher.route() 获得完整的 evidence chain。
+    决策。它构造独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL 和
+    TOOL_GATE → TOOL_INVOKE → TOOL_RESULT），各自通过
+    dispatcher.route_from_runtime_loop() 获得完整的 evidence chain。
 
-    为什么 MEMORY 和 TOOL_GATE 必须独立 try/except：
-    - 两个 action 在同一 lifecycle 触发，但各自独立
-    - MEMORY 失败不得阻断 TOOL_GATE evidence（反之亦然）
-    - 不允许把两个 action 包在同一个大 try/except 中——一个 action 的异常
-      不能导致另一个 action 消失
+    Tool 是已有介入点，ToolGate / ToolInvoke / ToolResult 不是三个独立子系统，
+    而是 Tool lifecycle 的三个 pipeline stages：
+      TOOL_GATE (pre-execution gating)
+        → TOOL_INVOKE (execution) — 仅当 gate_disposition="allowed"
+          → TOOL_RESULT (post-execution feedback)
+
+    为什么各 stage 必须独立 try/except：
+    - 每个 stage 在同一 lifecycle 触发，但各自独立
+    - 一个 stage 失败不得阻断其他 stage 的 evidence
+    - 不允许把多个 stage 包在同一个大 try/except 中
+    - TOOL_INVOKE 异常不阻断 TOOL_RESULT（即使 invoke 失败也尝试报告错误）
 
     为什么 TOOL_GATE 必须显式传 tool_args：
     - _safe_noop 是 zero-arg safe tool，但 tool_args 字段必须显式存在
@@ -107,6 +114,8 @@ def _try_phase1_turn_end_runtime_action(
         pass
 
     # TOOL_GATE action（独立 try/except——失败不阻断 MEMORY）
+    # 捕获 gate_result 以判断是否允许调用工具（gate_disposition）
+    gate_result = None
     try:
         tool_gate_request = RuntimeActionRequest(
             action_type=RuntimeActionType.TOOL_GATE,
@@ -128,10 +137,70 @@ def _try_phase1_turn_end_runtime_action(
             },
         )
         route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-        route(tool_gate_request)
+        gate_result = route(tool_gate_request)
     except Exception:
         # TOOL_GATE action 失败不阻塞 loop 也不阻塞 MEMORY
         pass
+
+    # TOOL_INVOKE action（独立 try/except——gate allowed 后调用工具）
+    # ToolGate / ToolInvoke / ToolResult 是 Tool lifecycle 的三个 pipeline stages，
+    # 不是三个独立子系统。它们共享同一个 ToolRegistry、同一个 dispatcher、
+    # 同一个 unified runtime flow 入口。
+    invoke_result = None
+    if gate_result is not None:
+        gate_payload = getattr(gate_result, "payload", {}) or {}
+        gate_status = getattr(gate_result, "status", "")
+        if gate_status == "success" and gate_payload.get("gate_disposition") == "allowed":
+            try:
+                invoke_request = RuntimeActionRequest(
+                    action_type=RuntimeActionType.TOOL_INVOKE,
+                    source="core_loop",
+                    parent_trace_id="",
+                    payload={
+                        "tool_name": tool_gate_tool_name,
+                        "tool_input": {},
+                        "core_loop_invoked": True,
+                        "core_entrypoint": "core.chat",
+                        "runtime_hook_name": "loop.turn_end",
+                        "provider_kind": provider_kind,
+                        "provider_external_call": provider_external_call,
+                        "external_side_effects": False,
+                    },
+                )
+                route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+                invoke_result = route(invoke_request)
+            except Exception:
+                # TOOL_INVOKE 失败不阻塞 loop 也不阻断 TOOL_RESULT
+                pass
+
+    # TOOL_RESULT action（独立 try/except——即使 TOOL_INVOKE 抛异常也尝试构造）
+    # 当前实现：仅当 invoke_result 非 None 时构造（invoke 异常时有 invoke_result=None，
+    # 无法提取 tool_output/execution_status，跳过 TOOL_RESULT）。
+    # 未来可扩展：invoke 异常时仍构造 TOOL_RESULT 以报告错误信息（带 execution_status="error"）。
+    if invoke_result is not None:
+        try:
+            invoke_payload = getattr(invoke_result, "payload", {}) or {}
+            result_request = RuntimeActionRequest(
+                action_type=RuntimeActionType.TOOL_RESULT,
+                source="core_loop",
+                parent_trace_id="",
+                payload={
+                    "tool_name": tool_gate_tool_name,
+                    "tool_output": invoke_payload.get("tool_output", ""),
+                    "execution_status": invoke_payload.get("execution_status", "success"),
+                    "core_loop_invoked": True,
+                    "core_entrypoint": "core.chat",
+                    "runtime_hook_name": "loop.turn_end",
+                    "provider_kind": provider_kind,
+                    "provider_external_call": provider_external_call,
+                    "external_side_effects": False,
+                },
+            )
+            route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+            route(result_request)
+        except Exception:
+            # TOOL_RESULT 失败不阻塞 loop
+            pass
 
 
 @dataclass(frozen=True, slots=True)

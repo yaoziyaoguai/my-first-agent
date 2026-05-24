@@ -16,6 +16,9 @@ from agent.tools.edit import edit_file as edit_file  # noqa: F401
 # 重新设计，避免旧 prototype 污染本地 ToolSpec contract。
 # calculate 这类低价值窄工具也不进入基础工具集；未来若需要计算能力，
 # 应通过单独设计的 execution/sandbox seam，而不是在这里新增替代工具。
+# Demo 工具（安全、确定性、fake-only——First Usable Task MVP）
+from agent.tools.demo import demo_echo_task_summary as demo_echo_task_summary  # noqa: F401
+from agent.tools.demo import demo_write_demo_note as demo_write_demo_note  # noqa: F401
 # 元工具（meta_tool=True，不污染对话上下文）
 from agent.tools.meta import mark_step_complete as mark_step_complete  # noqa: F401
 from agent.tools.meta import request_user_input as request_user_input  # noqa: F401
@@ -33,6 +36,8 @@ from agent.tools.safe_noop import _safe_noop as _safe_noop  # noqa: F401
 from agent.tools.confirmable_noop import _confirmable_noop as _confirmable_noop  # noqa: F401
 
 __all__ = [
+    "demo_echo_task_summary",
+    "demo_write_demo_note",
     "edit_file",
     "fetch_url",
     "mark_step_complete",

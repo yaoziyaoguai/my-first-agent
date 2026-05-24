@@ -21,6 +21,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
+    "demo.echo_task_summary",
+    "demo.write_demo_note",
     "edit_file",
     "fetch_url",
     "mark_step_complete",
@@ -51,6 +53,20 @@ EXPECTED_INTERNAL_TOOL_SPECS = {
         "capability": "local_action",
         "risk_level": "low",
         "output_policy": "none",
+        "confirmation": "always",
+        "meta_tool": False,
+    },
+    "demo.echo_task_summary": {
+        "capability": "local_action",
+        "risk_level": "low",
+        "output_policy": "bounded_text",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
+    "demo.write_demo_note": {
+        "capability": "file_write",
+        "risk_level": "medium",
+        "output_policy": "bounded_text",
         "confirmation": "always",
         "meta_tool": False,
     },

@@ -539,39 +539,42 @@ def _try_phase1_turn_end_runtime_action(
     # STREAMING_PROVIDER_CALL action（独立 try/except——失败不阻断 trace）
     # 中文学习边界：call_model() 已支持 streaming（model_call.py），事件在 model call
     # 阶段收集并存入 dependencies.streaming_events。turn-end hook 读取并 dispatch。
-    try:
-        streaming_supported = bool(getattr(dependencies, "provider_supports_streaming", False))
-        streaming_events_raw = list(getattr(dependencies, "streaming_events", []) or [])
-        # 将 ProviderStreamEvent 序列化为 JSON-safe dict
-        serialized_events = []
-        for evt in streaming_events_raw:
-            serialized_events.append({
-                "event_type": getattr(evt, "event_type", ""),
-                "sequence": getattr(evt, "sequence", 0),
-                "source": getattr(evt, "source", "provider"),
-                "text_delta": getattr(evt, "text_delta", ""),
-                "is_final": getattr(evt, "is_final", False),
-                "error": getattr(evt, "error", None),
-            })
-        streaming_request = RuntimeActionRequest(
-            action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
-            source="core_loop",
-            parent_trace_id="",
-            payload={
-                "provider_supports_streaming": streaming_supported,
-                "events": serialized_events,
-                "core_loop_invoked": True,
-                "core_entrypoint": "core.chat",
-                "runtime_hook_name": "loop.turn_end",
-                "provider_kind": provider_kind,
-                "provider_external_call": provider_external_call,
-                "external_side_effects": False,
-            },
-        )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-        route(streaming_request)
-    except Exception:
-        pass
+    # 当 provider 不支持 streaming 时（如 FakeProvider supports_streaming=False），
+    # 不 dispatch STREAMING_PROVIDER_CALL——无论 handler 返回什么，not_supported 状态
+    # 会污染 action_log 尾事件 evidence 链。
+    streaming_supported = bool(getattr(dependencies, "provider_supports_streaming", False))
+    if streaming_supported:
+        try:
+            streaming_events_raw = list(getattr(dependencies, "streaming_events", []) or [])
+            serialized_events = []
+            for evt in streaming_events_raw:
+                serialized_events.append({
+                    "event_type": getattr(evt, "event_type", ""),
+                    "sequence": getattr(evt, "sequence", 0),
+                    "source": getattr(evt, "source", "provider"),
+                    "text_delta": getattr(evt, "text_delta", ""),
+                    "is_final": getattr(evt, "is_final", False),
+                    "error": getattr(evt, "error", None),
+                })
+            streaming_request = RuntimeActionRequest(
+                action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+                source="core_loop",
+                parent_trace_id="",
+                payload={
+                    "provider_supports_streaming": streaming_supported,
+                    "events": serialized_events,
+                    "core_loop_invoked": True,
+                    "core_entrypoint": "core.chat",
+                    "runtime_hook_name": "loop.turn_end",
+                    "provider_kind": provider_kind,
+                    "provider_external_call": provider_external_call,
+                    "external_side_effects": False,
+                },
+            )
+            route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+            route(streaming_request)
+        except Exception:
+            pass
 
     # Trace event emission（独立 try/except——失败不阻断任何 dispatch）
     # 中文学习边界：Trace 是纯观测基础设施，不参与 runtime 决策。

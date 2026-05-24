@@ -76,6 +76,28 @@ class _SpyDispatcher:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# T1-T4: 需要 supports_streaming=True 的 provider。
+# FakeProvider 默认 supports_streaming=False（tool_use 走 create() 路径），
+# streaming L3 测试显式使用 subclass 开启 streaming。
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class _StreamingFakeProvider:
+    """开启 streaming 的 FakeProvider 子类，用于 streaming L3 测试。
+
+    FakeProvider 默认 supports_streaming=False 以支持 tool_use (create() 路径)。
+    streaming L3 测试需要 supports_streaming=True 以触发 STREAMING_PROVIDER_CALL dispatch。
+    """
+
+    def __new__(cls):
+        from agent.provider.fake_provider import FakeProvider
+
+        instance = FakeProvider()
+        instance.supports_streaming = True
+        return instance
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # T1: core.chat() → STREAMING_PROVIDER_CALL dispatch → L3 evidence
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -84,19 +106,18 @@ class TestStreamingL3:
     def test_t1_streaming_provider_call_dispatched_from_turn_end(self):
         """T1: turn-end hook dispatch STREAMING_PROVIDER_CALL with L3 evidence。
 
-        call_model() 对 FakeProvider 自动使用 streaming，事件通过 dependencies
-        传入 turn-end hook。handler 调用 StreamingProtocol.collect_stream_response()
+        call_model() 对支持 streaming 的 provider 自动使用 streaming，事件通过
+        dependencies 传入 turn-end hook。handler 调用 StreamingProtocol.collect_stream_response()
         产生完整 target_module_proof，达到 L3。
         """
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
 
         real_dispatcher = _build_streaming_dispatcher()
         spy = _SpyDispatcher(real_dispatcher)
 
         result = chat(
             "hello",
-            provider=FakeProvider(),
+            provider=_StreamingFakeProvider(),
             runtime_action_dispatcher=spy,
         )
 
@@ -142,15 +163,14 @@ class TestStreamingL3:
     def test_t2_provider_supports_streaming_in_payload(self):
         """T2: payload 正确传递 provider streaming capability。
 
-        FakeProvider 声明 supports_streaming=True，turn-end hook 应读取并传递。
+        _StreamingFakeProvider 声明 supports_streaming=True，turn-end hook 应读取并传递。
         """
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
 
         real_dispatcher = _build_streaming_dispatcher()
         spy = _SpyDispatcher(real_dispatcher)
 
-        chat("hello", provider=FakeProvider(), runtime_action_dispatcher=spy)
+        chat("hello", provider=_StreamingFakeProvider(), runtime_action_dispatcher=spy)
 
         streaming_entries = [
             (m, r, res) for m, r, res in spy.captured
@@ -161,7 +181,7 @@ class TestStreamingL3:
         _, request, _ = streaming_entries[0]
         payload = dict(request.payload)
         assert payload.get("provider_supports_streaming") is True, (
-            f"FakeProvider.supports_streaming=True 应传递到 payload，"
+            f"_StreamingFakeProvider.supports_streaming=True 应传递到 payload，"
             f"实际 {payload.get('provider_supports_streaming')!r}"
         )
 
@@ -172,12 +192,11 @@ class TestStreamingL3:
         JSON-safe dict 后传入 handler。
         """
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
 
         real_dispatcher = _build_streaming_dispatcher()
         spy = _SpyDispatcher(real_dispatcher)
 
-        chat("hello", provider=FakeProvider(), runtime_action_dispatcher=spy)
+        chat("hello", provider=_StreamingFakeProvider(), runtime_action_dispatcher=spy)
 
         streaming_entries = [
             (m, r, res) for m, r, res in spy.captured
@@ -187,7 +206,6 @@ class TestStreamingL3:
 
         _, request, _ = streaming_entries[0]
         events = list(request.payload.get("events", []))
-        assert len(events) > 0, "FakeProvider stream() 应产出至少 1 个事件"
         # 最后一个事件应为 final
         assert events[-1].get("is_final") is True or events[-1].get("event_type") == "final", (
             f"最后一个事件应为 final，实际 {events[-1]}"
@@ -206,12 +224,11 @@ class TestNoRealAPIOrEnv:
     def test_t4_no_real_api_or_env_access(self):
         """T4: Streaming L3 测试不读取真实 API / secret / env。"""
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
 
         real_dispatcher = _build_streaming_dispatcher()
         spy = _SpyDispatcher(real_dispatcher)
 
-        chat("hello", provider=FakeProvider(), runtime_action_dispatcher=spy)
+        chat("hello", provider=_StreamingFakeProvider(), runtime_action_dispatcher=spy)
 
         streaming_entries = [
             (m, r, res) for m, r, res in spy.captured

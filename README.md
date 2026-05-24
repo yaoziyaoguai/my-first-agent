@@ -100,6 +100,7 @@ pip install -r requirements.txt
 
 ```bash
 .venv/bin/python main.py
+python main.py --shell       # Textual TUI shell（实验性）
 python main.py --help        # 查看完整能力与限制说明
 ```
 
@@ -109,7 +110,7 @@ python main.py --help        # 查看完整能力与限制说明
 
 当前默认使用 Fake Provider（安全路径，无 API key，不联网）。启动屏和 `--help` 会诚实说明当前可用能力与尚未产品化的部分。
 
-当前 CLI shell is not a full Textual IDE.
+启动屏参考：Health: python main.py health；Logs: python main.py logs --tail 50。Skill 是实验性能力，具体状态见 help 或 V0_3_SKILL_SYSTEM_STATUS.md。当前 CLI shell is not a full Textual IDE.
 
 ### 本地健康检查和日志摘要
 

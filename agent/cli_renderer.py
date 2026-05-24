@@ -77,6 +77,7 @@ def render_session_header(
             "  输入 'quit' 退出，输入 'help' 查看可用能力与限制。",
             "  python main.py health / python main.py logs --tail 50。",
             "  Fake provider 安全路径（默认，无 API key，不联网）。",
+            "  [实验性] Skill 系统仍是实验性能力，具体状态见 help 或 docs/V0_3_SKILL_SYSTEM_STATUS.md。",
             "",
         ]
     )

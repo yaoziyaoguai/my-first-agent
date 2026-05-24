@@ -91,9 +91,9 @@ query/event
 
 | Item | Evidence | Priority |
 |---|---|---|
-| Tool blocked L3 | 同上 | **高 — 今晚 #1** |
-| Tool invoke error L3 | `tool_invoke.py:130-132` execution_status="error" 路径 | 中 — error-path hardening |
-| Tool invoke not_found L3 | `tool_invoke.py:127-128` disposition="not_found" 路径 | 中 — defensive path hardening |
+| Tool blocked L3 | ✅ 完成 (commit 6cef9b8) |
+| Tool invoke error L3 | ✅ 完成 (commit 748513c) |
+| Tool invoke not_found L3 | ✅ 完成 (commit f6d92f7) |
 
 ### 3. Policy / approval / governance
 
@@ -106,8 +106,8 @@ query/event
 
 | Item | Evidence | Priority |
 |---|---|---|
-| Tool invoke error/failure L3 | tool_invoke handler 已有 error 分支 | 中 |
-| Tool invoke not_found L3 | tool_invoke handler 已有 not_found 分支 | 中 |
+| Tool invoke error/failure L3 | ✅ 完成 (commit 748513c) |
+| Tool invoke not_found L3 | ✅ 完成 (commit f6d92f7) |
 | MCP HOME isolation test fix | T6 在非隔离 HOME 下失败 | 低 — test env fix |
 
 ### 5. Deferred advanced capability
@@ -158,7 +158,7 @@ query/event
 |---|---|---|---|---|---|---|---|---|
 | **#6** | **Evidence overclaim: SubAgent** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
 | **#7** | **Evidence overclaim: StreamingProvider** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
-| **#8** | **Direct call downgrade: handler L2 分类一致性审计** | `test_runtime_action_handlers.py` 验证各 handler direct dispatcher 分类 | 纯测试审计+补充 | 确保 direct dispatcher 不能伪装 L3 | TBD after #6/#7 | 补充缺失 L2 downgrade 断言 | 需先完成 #6/#7 | ⚠️ 待评估 |
+| **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

@@ -127,6 +127,11 @@ def _skill_no_suitable_skill_adapter(payload: Mapping[str, Any]) -> str:
     return str(payload.get("reason") or "no suitable skill available")
 
 
+def _subagent_no_suitable_subagent_adapter(payload: Mapping[str, Any]) -> str:
+    """no_suitable_subagent 操作适配器：返回拒绝原因字符串，不启动任何 subagent。"""
+    return str(payload.get("reason") or "no suitable subagent available")
+
+
 def _memory_policy_decide_adapter(payload: Mapping[str, Any]) -> Any:
     from agent.memory_policy import DeterministicMemoryPolicy
 
@@ -539,6 +544,17 @@ class RuntimeActionTargetCatalog:
             adapter=_subagent_delegate_once_adapter,
             function_called="delegate_once",
             call_signature="delegate_once(SubAgentRequest, SubAgentRegistry)",
+        ),
+        _descriptor(
+            "subagent.delegate_l0",
+            "agent.runtime_integration.subagent_action.SubAgentDelegateL0Handler",
+            "SubAgentExecutor",
+            operation="no_suitable_subagent",
+            invocation_adapter_id="SubAgentExecutor.no_suitable_subagent",
+            implementation_id="agent.subagent_system.delegation.SubAgentExecutor.no_suitable_subagent",
+            adapter=_subagent_no_suitable_subagent_adapter,
+            function_called="SubAgentExecutor.no_suitable_subagent",
+            call_signature="no_suitable_subagent(reason: str)",
         ),
         _descriptor(
             "memory.consolidate",

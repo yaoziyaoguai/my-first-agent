@@ -27,6 +27,35 @@ class SubAgentDelegateL0Handler:
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
         payload = dict(request.payload)
         subagent_name = str(payload.get("subagent_name") or "")
+
+        # 中文学习注释：当 subagent_name 为空且不在 delegation context 中时，
+        # 这是 turn-end hook 的 L3 evidence dispatch（非模型驱动 dispatch）。handler
+        # 仍通过 invoke_registered_target 获得完整 target_module_proof 证据链，
+        # 但返回 failed disposition。不影响现有模型输出驱动的 subagent delegation。
+        if not subagent_name and payload.get("in_delegation_context") is not True:
+            observed = context.invoke_registered_target(
+                target_module="SubAgentExecutor",
+                operation="no_suitable_subagent",
+                payload={"reason": "no subagent available for delegation"},
+            )
+            return context.failed(
+                handler_name=type(self).__name__,
+                target_module="SubAgentExecutor",
+                payload={
+                    "subagent_name": "",
+                    "delegate_once_called": False,
+                    "subagent_request_built": False,
+                    "failure_reason": "no subagent available for delegation",
+                },
+                observed_call=observed,
+                parent_adjudicated=True,
+                evidence_extra={
+                    "delegate_once_called": False,
+                    "subagent_request_built": False,
+                },
+                error_safe_preview="no subagent available for delegation",
+            )
+
         if payload.get("in_delegation_context") is True:
             return self._reject(context, "nested delegation is forbidden", no_nested=False, subagent_name=subagent_name)
         if not subagent_name:

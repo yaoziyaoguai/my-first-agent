@@ -64,13 +64,18 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
 
     Phase 6 更新：注册 SkillRuntimeActionHandler——SKILL_SELECT 已接入
     loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
+
+    Phase 7 更新：注册 SubAgentDelegateL0Handler——SUBAGENT_DELEGATE_L0 已接入
+    loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
     """
     from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
     from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
     from agent.runtime_integration.memory_recall import MemoryRecallHandler
     from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+    from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
     from agent.skill_system.loader import SkillLoader
     from agent.skill_system.registry import SkillRegistry
+    from agent.subagent_system.registry import SubAgentRegistry
 
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
@@ -86,6 +91,12 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.SKILL_SELECT,
         SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
+    )
+    # SUBAGENT_DELEGATE_L0：空 registry → handler 总是 rejected
+    _subagent_registry = SubAgentRegistry(roots=())
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        SubAgentDelegateL0Handler(registry=_subagent_registry),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 

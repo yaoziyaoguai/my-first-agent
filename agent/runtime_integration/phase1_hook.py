@@ -23,8 +23,10 @@ from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
+from agent.subagent_system.registry import SubAgentRegistry
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
@@ -85,5 +87,11 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.SKILL_SELECT,
         SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
+    )
+    # SUBAGENT_DELEGATE_L0：空 registry → handler 总是 rejected（no subagent available）
+    _subagent_registry = SubAgentRegistry(roots=())
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        SubAgentDelegateL0Handler(registry=_subagent_registry),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

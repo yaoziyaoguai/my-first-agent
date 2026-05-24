@@ -40,7 +40,7 @@ query/event
 | **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L1/L2 基础 | consolidation pipeline L1/L2 完成；L3 wiring to loop.py 本 loop 执行 |
 | **Checkpoint** | `agent/checkpoint.py`, `agent/runtime_integration/checkpoint_summary.py` | `docs/specs/checkpoint-save-resume-l3/`, `docs/CHECKPOINT_RESUME_SEMANTICS.md` | L3 完整闭环 | CHECKPOINT_SAFE_SUMMARY 经 turn-end hook → dispatcher → handler L3 verified |
 | **Skill System** | `agent/skill_system/` (15 files), `agent/legacy_skills/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L1/L2 Safe Local MVP | runtime_integration/skill_action.py 已有 dispatcher handler；L3 未验证；RuntimeActionType SKILL_SELECT 存在但未在 phase1_hook 注册 |
-| **SubAgent System** | `agent/subagent_system/` (20 files), `agent/runtime_integration/subagent_action.py` | `docs/design/SUBAGENT_SYSTEM_SDD.md`, `docs/SUBAGENT_LOCAL_MVP.md` | L1/L2 Safe Local MVP | runtime_integration/subagent_action.py 已有 dispatcher handler；L3 未验证；RuntimeActionType SUBAGENT_DELEGATE_L0 存在但未在 phase1_hook 注册 |
+| **SubAgent System** | `agent/subagent_system/` (20 files), `agent/runtime_integration/subagent_action.py` | `docs/design/SUBAGENT_SYSTEM_SDD.md`, `docs/SUBAGENT_LOCAL_MVP.md`, `docs/specs/subagent-l3/SPEC.md` | L3 完整闭环 | runtime_integration/subagent_action.py 已有 dispatcher handler；L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter（本 commit） |
 | **Provider/Model** | `agent/provider/` (12 files), `agent/model_call.py`, `agent/model_output_dispatch.py` | `docs/LLM_PROVIDER_ADAPTER.md` | 集成在主流程中 | Anthropic/OpenAI/Fake provider 均通过 core.chat() 调用；FakeProvider 支撑所有 L3 测试 |
 | **Confirmation** | `agent/confirmation/` (5 files), `agent/confirm_handlers.py`, `agent/pending_confirmation_dispatch.py` | `docs/specs/tool-branch-confirmation-required/` | L3 已验证 | tool confirmation_required 分支行为已验证 |
 | **Context Build** | `agent/context_builder.py`, `agent/prompt_builder.py`, `agent/context.py` | 散见于各 spec | 集成在主流程中 | context injection（含 memory snapshot）经 core.chat() 验证 |
@@ -72,7 +72,7 @@ query/event
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
 | **Skill: action** | ✅ | ✅ | ✅ | `test_skill_l3.py` (L3), `test_skill_*.py` (L1/L2) | 无 | 已闭环 (本 commit) |
-| **SubAgent: action** | ✅ | ✅ | ❌ | `test_subagent_*.py` (L1/L2) | L3 via core.chat() 未验证 | deferred（需先稳定 SubAgent 语义） |
+| **SubAgent: action** | ✅ | ✅ | ✅ | `test_subagent_l3.py` (L3), `test_subagent_*.py` (L1/L2) | 无 | 已闭环 (本 commit) |
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
 | **Context injection** | N/A | N/A | ✅ | 集成在主流程中 | 无 | memory snapshot injection 已验证 |

@@ -396,7 +396,12 @@ class FakeProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> Iterator[ProviderStreamEvent]:
-        """流式响应：文本按 3 字一组分片，tool_use 时产出 tool_request 事件。
+        """流式响应（debug/fake deterministic chunking）。
+
+        这不是真实 provider streaming——FakeProvider 已持有完整响应文本，
+        只是按 chunk_size 分片递送，模拟 streaming UX 的逐字输出感。
+        用户主体验应是 progress/event UX（工具/子代理/记忆进度事件），
+        而非这里的 fake token chunking。
 
         call_model() 在检测到 tool_request 事件后自动回退 create() 获取完整
         ToolUseBlock。这样 streaming 路径负责用户可见的逐字输出体验，
@@ -411,7 +416,8 @@ class FakeProvider:
         tool_block = self._resolve_tool_use(messages, tools)
 
         seq = 0
-        chunk_size = 3
+        # fake/demo chunking：12 字一组，比旧 3 字更可读，但仍只是模拟 streaming
+        chunk_size = 12
         for i in range(0, len(text), chunk_size):
             chunk = text[i : i + chunk_size]
             seq += 1

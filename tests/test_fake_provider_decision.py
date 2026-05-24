@@ -464,7 +464,7 @@ class TestFakeProviderStreaming:
         assert "你好世界" in full_text
 
     def test_stream_chunk_size(self):
-        """每个 text_delta chunk 大小 <= 3（确定性分片）。"""
+        """每个 text_delta chunk 大小 <= 12（fake/demo deterministic 分片，issue 3）。"""
         p = FakeProvider()
         events = list(
             p.stream(
@@ -475,7 +475,7 @@ class TestFakeProviderStreaming:
         )
         deltas = [e for e in events if e.event_type == "text_delta"]
         for delta in deltas:
-            assert len(delta.text_delta) <= 3
+            assert len(delta.text_delta) <= 12
 
     def test_stream_sequence_monotonic(self):
         """stream() 事件的 sequence 严格递增。"""

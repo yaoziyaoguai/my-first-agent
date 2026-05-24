@@ -2,6 +2,7 @@
 name: code-reviewer
 description: Local fixture subagent profile for bounded code review summaries.
 role: reviewer
+status: active
 model: fake
 allowed-tools:
   - read_file

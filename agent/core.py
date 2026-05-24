@@ -463,9 +463,20 @@ def chat(
     # 直接匹配 store 中 record content 并移除，不经过 policy → confirmation 管线。
     forget_keyword = _looks_like_forget_memory(user_input)
     if forget_keyword:
-        # 支持按 ID 精确删除：forget id:<record_id>
+        # 支持按 ID 删除：forget id:<record_id>（精确匹配 + 短 ID 前缀匹配）
+        #
+        # 为什么显示短 ID 就必须支持短 ID 前缀匹配：
+        # - show memories 输出只显示前8位短 ID，用户会自然复制使用
+        # - 如果 forget 只支持完整 ID（UUID），用户永远无法用显示出来的 ID 删除
+        # - 前缀匹配解决了这个距离问题
+        #
+        # 为什么前缀冲突必须 ambiguity 而不能误删：
+        # - 8 位前缀在理论上可能碰撞（虽然实际中极少见）
+        # - 误删是静默数据丢失——这对 memory governance 不可接受
+        # - ambiguity 提示要求用户明确指定更多前缀位，保持用户意图为最终仲裁者
         if forget_keyword.lower().startswith("id:"):
             record_id = forget_keyword[3:].strip()
+            # Step 1: 尝试精确匹配（完整 ID）
             if _memory_runtime.remove_record(record_id):
                 _safe_emit_runtime_event(
                     on_runtime_event,
@@ -479,6 +490,38 @@ def chat(
                     fallback_prefix="\n",
                 )
                 return f"已移除记忆（ID: {record_id}）。"
+
+            # Step 2: 精确匹配失败 → 尝试前缀匹配（支持短 ID）
+            records = _memory_runtime.list_records()
+            prefix_matches = [
+                r for r in records
+                if str(getattr(r, "id", "")).startswith(record_id)
+            ]
+            if len(prefix_matches) == 1:
+                matched_id = prefix_matches[0].id
+                if _memory_runtime.remove_record(matched_id):
+                    _safe_emit_runtime_event(
+                        on_runtime_event,
+                        memory_forgotten_event(1, keyword=f"id:{record_id}"),
+                        fallback_prefix="\n",
+                    )
+                    remaining = _memory_runtime.list_records()
+                    _safe_emit_runtime_event(
+                        on_runtime_event,
+                        memory_list_event(remaining),
+                        fallback_prefix="\n",
+                    )
+                    return f"已移除记忆（ID: {record_id} → {matched_id}）。"
+                return f"移除记忆失败（ID: {matched_id}）。"
+            elif len(prefix_matches) > 1:
+                # 前缀匹配到多条记录 → ambiguity，不误删
+                matched_ids = [str(getattr(r, "id", "?"))[:12] for r in prefix_matches]
+                return (
+                    f"前缀「{record_id}」匹配到 {len(prefix_matches)} 条记忆，"
+                    f"无法确定要删除哪一条。请使用更长的 ID 前缀重试。\n"
+                    f"匹配到的 ID：{', '.join(matched_ids)}"
+                )
+            # Step 3: 前缀也没有匹配 → not found
             return f"未找到 ID 为「{record_id}」的记忆。"
         # 否则按 content 关键词匹配
         records = _memory_runtime.list_records()

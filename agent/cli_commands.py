@@ -178,8 +178,25 @@ def detect_nl_delegation(text: str) -> tuple[str, str] | None:
 def render_memory_list(records) -> str:
     """格式化记忆列表为 CLI 可读文本。
 
-    每条记忆显示 ID、来源、时间和内容摘要。
-    records 是 memory record 列表，每条 record 应有 id/content/source/created_at 等属性。
+    每条记忆显示短 ID（前8位，供 forget 命令复制使用）、来源类型、
+    时间和内容摘要。
+
+    字段映射基于 MemoryRecord 真实字段：
+    - id → 显示前8位短 ID（用户可复制用于 forget id:<short_id>）
+    - source_type → 记忆来源类型（explicit_user_request / agent_suggested 等）
+    - metadata.created_at → 创建时间（如存在）；不存在时诚实显示 unavailable
+    - content → 记忆内容（截断到120字符）
+
+    为什么显示短 ID 就必须支持短 ID 删除：
+    - 用户看到短 ID 会自然复制使用；如果不支持短 ID 前缀匹配，
+      forget id:<displayed_id> 永远失败，dogfood checklist step 8 阻塞。
+    - 因此 forget 逻辑必须支持前缀匹配。
+
+    为什么 created_at 缺失时诚实显示 unavailable：
+    - MemoryRecord 没有顶层 created_at 字段，时间信息在 metadata dict 中
+    - metadata 可能为空或没有 created_at（取决于 memory source）
+    - 伪造时间会误导用户以为系统记录了精确时间戳
+    - 诚实标注 unavailable 是 fake/local-safe memory 的透明性要求
     """
     if not records:
         return "暂无已保存的记忆。"
@@ -188,18 +205,19 @@ def render_memory_list(records) -> str:
     for i, r in enumerate(records, 1):
         rid = getattr(r, "id", "?")
         content = getattr(r, "content", str(r))[:120]
-        source = getattr(r, "source", "")
-        created = getattr(r, "created_at", "")
+        source_type = getattr(r, "source_type", "")
+        # created_at 在 metadata dict 中，不在 MemoryRecord 顶层字段
+        metadata = getattr(r, "metadata", None)
+        created = ""
+        if isinstance(metadata, dict):
+            created = str(metadata.get("created_at", ""))
+        if not created:
+            created = "unavailable"
 
-        meta_parts = []
-        if source:
-            meta_parts.append(f"来源:{source}")
-        if created:
-            meta_parts.append(f"{created}")
-
-        meta = f" [{', '.join(meta_parts)}]" if meta_parts else ""
+        meta_str = f"来源:{source_type}" if source_type else "来源:unknown"
+        meta_str += f", 时间:{created}"
         short_id = str(rid)[:8] if rid else "?"
-        lines.append(f"  {i}. [{short_id}]{meta} {content}")
+        lines.append(f"  {i}. [{short_id}] [{meta_str}] {content}")
     return "\n".join(lines)
 
 

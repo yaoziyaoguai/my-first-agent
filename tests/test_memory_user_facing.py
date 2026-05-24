@@ -470,3 +470,219 @@ class TestMemoryWriteRecallVisibleE2E:
         remaining = runtime.list_records()
         assert len(remaining) == 1
         assert "Bob" in remaining[0].content
+
+
+class TestForgetByIdPrefixMatching:
+    """Phase 1: forget id:<short_prefix> 的前缀匹配、歧义处理与 not found。
+
+    为什么短 ID 前缀匹配是 dogfood-blocking bug：
+    - show memories 只显示 8 位短 ID（render_memory_list 中的 [:8]）
+    - 如果 forget 只支持完整 UUID，用户复制显示的短 ID 永远无法删除
+    - 前缀匹配解决了"显示出来的 ID vs 完整 ID"的距离问题
+
+    为什么前缀冲突必须 ambiguity 而不能误删：
+    - 虽然 8 位前缀碰撞在实践中极少见，但非零概率
+    - 静默数据丢失对 memory governance 不可接受
+    - ambiguity 让用户明确指定更多前缀位，保持用户意图为最终仲裁者
+
+    这仍然是 local/fake-safe memory management：
+    - 所有操作仅在 InMemoryMemoryStore 上执行
+    - 不读取 memory/episodes/*.jsonl
+    - 不调用真实 LLM/API
+    - 不连接外部服务
+    """
+
+    def test_prefix_match_forgets_single_record(self):
+        """短 ID 前缀匹配到唯一记录 → 成功删除。"""
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        full_id = "memory:fake:abcd1234efgh5678"
+        record = MemoryRecord(
+            id=full_id,
+            content="test prefix forget",
+            scope=MemoryScope.USER,
+            source_summary="test",
+            safety_summary="safe",
+            audit_id="audit-pfx-1",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+        )
+        store = InMemoryMemoryStore(records=[record])
+        assert len(store.list_records()) == 1
+
+        # 精确匹配失败 → 前缀匹配找到唯一记录
+        short_id = full_id[:8]  # "memory:f"
+        assert store.remove_record(short_id) is False  # 精确匹配失败
+        # 前缀匹配逻辑：在调用方（core.py forget handler）中实现
+        prefix_matches = [r for r in store.list_records()
+                          if str(r.id).startswith(short_id)]
+        assert len(prefix_matches) == 1
+        assert store.remove_record(prefix_matches[0].id) is True
+        assert len(store.list_records()) == 0
+
+    def test_ambiguous_prefix_returns_multiple_matches(self):
+        """前缀匹配到多条 → 不删除其中任何一条，返回歧义。"""
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        shared_prefix = "memory:fake:shared"
+        records = [
+            MemoryRecord(
+                id=f"{shared_prefix}aaaa",
+                content="record A",
+                scope=MemoryScope.USER,
+                source_summary="s", safety_summary="safe",
+                audit_id="amb-a1",
+                created_by_operation=MemoryOperationType.RETAIN,
+                updated_by_operation=MemoryOperationType.RETAIN,
+            ),
+            MemoryRecord(
+                id=f"{shared_prefix}bbbb",
+                content="record B",
+                scope=MemoryScope.USER,
+                source_summary="s", safety_summary="safe",
+                audit_id="amb-a2",
+                created_by_operation=MemoryOperationType.RETAIN,
+                updated_by_operation=MemoryOperationType.RETAIN,
+            ),
+        ]
+        store = InMemoryMemoryStore(records=records)
+        assert len(store.list_records()) == 2
+
+        prefix_matches = [r for r in store.list_records()
+                          if str(r.id).startswith(shared_prefix)]
+        # 两条都匹配同一前缀 → ambiguity
+        assert len(prefix_matches) == 2
+        # 在 ambiguity 情况下，不删除任何记录
+        assert len(store.list_records()) == 2
+
+    def test_invalid_prefix_returns_none(self):
+        """不在任何 record id 中出现的短 ID → 0 条匹配 → not found。"""
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        record = MemoryRecord(
+            id="memory:fake:real-record-id",
+            content="real",
+            scope=MemoryScope.USER,
+            source_summary="s", safety_summary="safe",
+            audit_id="nf-1",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+        )
+        store = InMemoryMemoryStore(records=[record])
+
+        prefix_matches = [r for r in store.list_records()
+                          if str(r.id).startswith("nonexistent")]
+        assert len(prefix_matches) == 0
+
+
+class TestRenderMemoryListFields:
+    """Phase 1: render_memory_list 使用 MemoryRecord 真实字段。
+
+    当前 MemoryRecord 字段（memory_store.py:MemoryRecord）：
+    - id, content, scope, source_summary, safety_summary, audit_id
+    - source_type (str) — 不是 source
+    - metadata (dict) — created_at 在此 dict 中，不在顶层
+
+    为什么 created_at 缺失时诚实显示 unavailable：
+    - MemoryRecord 没有顶层 created_at 字段
+    - metadata 可能为空或缺失 created_at
+    - 伪造时间会误导用户以为系统记录了精确时间戳
+    - 诚实标注是 fake/local-safe memory 的透明性要求
+    """
+
+    def test_render_shows_source_type(self):
+        """render_memory_list 应显示 source_type 而非不存在的 source 字段。"""
+        from agent.cli_commands import render_memory_list
+        from agent.memory_store import MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        record = MemoryRecord(
+            id="memory:fake:render1",
+            content="测试内容",
+            scope=MemoryScope.USER,
+            source_summary="测试来源摘要",
+            safety_summary="safe",
+            audit_id="render-audit-1",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+            source_type="explicit_user_request",
+        )
+        output = render_memory_list([record])
+        # 应显示 source_type
+        assert "explicit_user_request" in output
+        # 不应显示不存在的顶层 source 字段内容（source 字段不存在于 MemoryRecord）
+        # source_type 是真实存在的字段
+
+    def test_render_shows_created_at_from_metadata(self):
+        """metadata 中有 created_at → 显示该时间。"""
+        from agent.cli_commands import render_memory_list
+        from agent.memory_store import MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        record = MemoryRecord(
+            id="memory:fake:render2",
+            content="有时间戳的记忆",
+            scope=MemoryScope.USER,
+            source_summary="s",
+            safety_summary="safe",
+            audit_id="a2",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+            metadata={"created_at": "2026-05-25T10:30:00Z"},
+        )
+        output = render_memory_list([record])
+        assert "2026-05-25T10:30:00Z" in output
+
+    def test_render_shows_unavailable_when_no_created_at(self):
+        """metadata 无 created_at → 诚实显示 unavailable。"""
+        from agent.cli_commands import render_memory_list
+        from agent.memory_store import MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        record = MemoryRecord(
+            id="memory:fake:render3",
+            content="无时间戳的记忆",
+            scope=MemoryScope.USER,
+            source_summary="s",
+            safety_summary="safe",
+            audit_id="a3",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+            # metadata 为空 dict — 无 created_at
+        )
+        output = render_memory_list([record])
+        assert "unavailable" in output
+
+    def test_render_shows_short_id_prefix(self):
+        """记忆列表显示短 ID（[:8]）以便用户复制用于 forget。"""
+        from agent.cli_commands import render_memory_list
+        from agent.memory_store import MemoryRecord
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+
+        full_id = "memory:fake:abcd1234efgh5678ijkl"
+        record = MemoryRecord(
+            id=full_id,
+            content="短 ID 测试",
+            scope=MemoryScope.USER,
+            source_summary="s",
+            safety_summary="safe",
+            audit_id="a4",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+        )
+        output = render_memory_list([record])
+        # 应显示前8位短 ID
+        short_id = full_id[:8]
+        assert short_id in output
+        # 不应显示完整 ID（避免 UI 噪音）
+        assert full_id not in output

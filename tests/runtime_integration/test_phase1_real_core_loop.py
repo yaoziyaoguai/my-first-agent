@@ -55,8 +55,12 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     turn-end hook 现在构造完整的 Tool lifecycle pipeline（TOOL_GATE → TOOL_INVOKE
     → TOOL_RESULT）。不注册这些 handler 会导致后续 stage 得到 not_supported 状态
     并降级为 subsystem_integration，污染 action_log。
+
+    Phase 4 更新：注册 MemoryConsolidateHandler——MEMORY_CONSOLIDATE 已接入
+    loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
     """
     from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
+    from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
 
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
@@ -64,6 +68,7 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(RuntimeActionType.TOOL_INVOKE, ToolInvokeHandler())
     registry.register(RuntimeActionType.TOOL_RESULT, ToolResultFeedbackHandler())
     registry.register(RuntimeActionType.CHECKPOINT_SAFE_SUMMARY, CheckpointSafeSummaryHandler())
+    registry.register(RuntimeActionType.MEMORY_CONSOLIDATE, MemoryConsolidateHandler())
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 
 

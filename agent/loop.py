@@ -236,6 +236,36 @@ def _try_phase1_turn_end_runtime_action(
         # CHECKPOINT_SAFE_SUMMARY 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
+    # MEMORY_CONSOLIDATE action（独立 try/except——失败不阻断其他 dispatch）
+    # 中文学习边界：Memory Consolidation 是跨回合 episodic → semantic candidate
+    # 的只读 batch 分析，挂在 turn-end hook 的最末阶段执行——此时 MEMORY_RECALL
+    # 已完成 context injection，store 状态最完整。不写 store（readonly）、不做
+    # LLM 增强（除非 opt-in），不自动 adopt candidates（T1 review 是必经路径）。
+    #
+    # 为什么挂在 turn-end hook 上：
+    # - consolidate 分析的是累积 episodic 记录，不是单 turn 内容
+    # - 不需要模型实时决策介入——它是后台 batch 分析
+    # - 错误时静默降级为 insufficient_evidence / no_candidates，不阻塞主流程
+    try:
+        consolidate_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_CONSOLIDATE,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(consolidate_request)
+    except Exception:
+        # MEMORY_CONSOLIDATE 失败不阻塞 loop 也不阻塞其他 dispatch
+        pass
+
 
 @dataclass(frozen=True, slots=True)
 class LoopDependencies:

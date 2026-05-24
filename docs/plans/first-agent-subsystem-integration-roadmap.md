@@ -35,7 +35,7 @@ query/event
 |---|---|---|---|---|
 | **Tool Pipeline** | `agent/runtime_integration/tool_gate.py`, `tool_invoke.py`, `tool_result_feedback.py`, `agent/tool_registry.py`, `agent/tool_executor.py` | `docs/specs/tool-pipeline-l3-completion/`, `docs/specs/tool-branch-confirmation-required/`, `docs/specs/tool-invoke-branch-behavior/`, `docs/specs/tool-result-feedback-branch-behavior/`, `docs/specs/tool-gate-not-found-l3/`, `docs/specs/tool-request-l3/` | L3 完整闭环 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段全部 L3 verified；four dispositions: allowed✅, confirmation_required✅, not_found✅, blocked ❌(L3 gap) |
 | **MCP** | `agent/mcp.py`, `agent/mcp_models.py`, `agent/mcp_policy.py`, `agent/mcp_bridge.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` | `docs/specs/mcp-runtime-integration/`, `docs/specs/mcp-l3-real-core-loop/` | L3 基础闭环 | confirmation="never" 工具走通完整管线；confirmation="always" 工具在 gate 被正确拦截 |
-| **Memory (retain)** | `agent/runtime_integration/memory_retain.py`, `agent/memory.py`, `agent/memory_runtime.py`, `agent/memory_policy.py`, `agent/memory_store.py` | `docs/specs/memory-retain-branch-behavior/` | L3 部分闭环 | MEMORY_TURN_END_PROPOSAL L3 verified via phase1_hook → dispatcher → handler；MEMORY_PROPOSE（retain 执行写入）L3 DEFERRED（loop 需在 confirmation 后触发二次 turn-end action） |
+| **Memory (retain)** | `agent/runtime_integration/memory_retain.py`, `agent/memory.py`, `agent/memory_runtime.py`, `agent/memory_policy.py`, `agent/memory_store.py` | `docs/specs/memory-retain-branch-behavior/`, `docs/specs/memory-propose-l3/` | L3 完整闭环 | MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE 双 action L3 verified；confirmation → queue → turn-end dispatch → store.write() 完整 evidence chain |
 | **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 完整闭环 | snapshot→prompt injection 经 context_builder 验证；MEMORY_RECALL RuntimeActionType L3 verified via loop.py turn-end hook（commit e18595b） |
 | **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L1/L2 基础 | consolidation pipeline L1/L2 完成；L3 wiring to loop.py 本 loop 执行 |
 | **Checkpoint** | `agent/checkpoint.py`, `agent/runtime_integration/checkpoint_summary.py` | `docs/specs/checkpoint-save-resume-l3/`, `docs/CHECKPOINT_RESUME_SEMANTICS.md` | L3 完整闭环 | CHECKPOINT_SAFE_SUMMARY 经 turn-end hook → dispatcher → handler L3 verified |
@@ -67,7 +67,7 @@ query/event
 | **MCP: confirmation="always"** | ✅ | ✅ | ✅ (gate only) | `test_mcp_l3_real_core_loop.py::T5` | TOOL_INVOKE 不触发（设计如此） | confirmation 交互流程需要新设计，deferred |
 | **MCP: Policy Re-Eval** | ❌ | ❌ | ❌ | 无 | 需要 runtime loop 中 confirmation 交互 | 需用户决策，暂缓 |
 | **MCP: HOME isolation** | ✅ | ✅ | N/A | `test_mcp_l3_real_core_loop.py::T6` 在 HOME 隔离路径下通过 | 非覆盖缺口——测试正确要求隔离 HOME，CI/Makefile 应统一设置 | 已闭环（基础设施问题，非测试缺陷） |
-| **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py` | 无 | 已闭环 |
+| **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py`, `test_memory_propose_l3.py` | 无 | MEMORY_PROPOSE L3 已闭环 (本 commit) |
 | **Memory: recall** | ✅ | ✅ | ✅ | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (commit e18595b) |
 | **Memory: consolidation** | ✅ | ✅ | ✅ | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (本 commit) |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
@@ -162,7 +162,8 @@ query/event
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
 | **#9** | **Memory Recall L3** | ✅ 完成 (commit e18595b) — MEMORY_RECALL 接入 loop.py turn-end hook，3 个 L3 tests |
 | **#10** | **Skill L3 Activation** | ✅ 完成 (本 commit) — SKILL_SELECT 接入 loop.py turn-end hook，3 个 L3 tests，no_suitable_skill catalog entry |
-| **#11** | **Local Trace Runtime Wiring** | ✅ 完成 (本 commit) — TraceEvent emission via loop.py turn-end hook，4 个 L3 tests |
+| **#11** | **Local Trace Runtime Wiring** | ✅ 完成 (commit 9f2024a) — TraceEvent emission via loop.py turn-end hook，4 个 L3 tests |
+| **#12** | **MEMORY_PROPOSE L3** | ✅ 完成 (本 commit) — confirmation → queue → turn-end dispatch → store.write()，4 个 L3 tests |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

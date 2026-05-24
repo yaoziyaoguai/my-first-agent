@@ -18,6 +18,8 @@ v1 已知妥协：
 
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from agent.display_events import (
@@ -33,6 +35,10 @@ from agent.memory_emergence import (
     InlineConfirmationResponse,
 )
 from agent.pending_requests import PendingUserInputRequest
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 # MemoryRuntime 的 resolve_confirmation 接口（避免循环 import）
@@ -301,11 +307,23 @@ def handle_inline_confirmation_reply(
         )
 
     if response.action in {"accept", "edit_accept"}:
-        result = apply_inline_confirmation_response(request, response, store)
+        # 将已确认的 proposal 入队，由 turn-end hook 中 MEMORY_PROPOSE dispatch 执行写入。
+        # 不在 confirmation handler 中直接写 store——MEMORY_PROPOSE 通过 dispatcher 提供
+        # RuntimeActionEvent evidence chain，是 retain execution 的正式路径。
+        content = response.edited_content if response.action == "edit_accept" else request.candidate_content
+        content_hash_val = hashlib.sha256(content.encode()).hexdigest()
+        state.task.pending_retain_proposals.append({
+            "proposal_id": request.proposal_id,
+            "content": content,
+            "content_hash": content_hash_val,
+            "scope": request.scope or "user",
+            "sensitivity": "low",
+            "source": "turn_end_proposal",
+            "confirmation_result": "accepted",
+            "queued_at": _now_iso(),
+        })
         _clear_pending_and_save(state, origin_status, save_checkpoint)
-        if result.status == "applied":
-            return "已确认并写入 procedural memory。"
-        return f"未写入：{result.message}"
+        return "已确认，将在下一轮通过 runtime dispatcher 写入 procedural memory。"
 
     result = apply_inline_confirmation_response(request, response, store)
     _clear_pending_and_save(state, origin_status, save_checkpoint)

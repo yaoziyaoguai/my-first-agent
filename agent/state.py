@@ -253,6 +253,11 @@ class TaskState:
     # value: {"tool": str, "input": dict, "result": Any}
     tool_execution_log: dict[str, Any] = field(default_factory=dict)
 
+    # 已确认待 retain 的 memory proposals
+    # 用户在 inline confirmation 中确认后入队，turn-end hook 中 dispatch MEMORY_PROPOSE
+    # 每个 entry: {proposal_id, content, content_hash, scope, sensitivity, source, confirmation_result, queued_at}
+    pending_retain_proposals: list[dict[str, Any]] = field(default_factory=list)
+
 
 @dataclass
 class AgentState:
@@ -386,6 +391,8 @@ class AgentState:
         self.task.pending_user_input_request = None
         self.task.confirm_each_step = False
         self.task.tool_execution_log = {}
+        # pending_retain_proposals 不清空——它是跨 turn 的确认 memory proposal 队列，
+        # 由 turn-end hook 中 MEMORY_PROPOSE dispatch 消费后清空。
 
 
 def create_agent_state(

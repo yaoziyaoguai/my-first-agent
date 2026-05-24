@@ -182,7 +182,57 @@ def _try_phase1_turn_end_runtime_action(
         route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
         route(request)
     except Exception:
-        # MEMORY action 失败不阻塞 loop 也不阻塞 TOOL_GATE
+        # MEMORY proposal 失败不阻塞 loop 也不阻塞 MEMORY_PROPOSE / TOOL_GATE
+        pass
+
+    # MEMORY_PROPOSE action（独立 try/except——失败不阻断 TOOL_GATE）
+    # 中文学习边界：MEMORY_PROPOSE 是 retain execution 的正式路径，处理用户在 inline
+    # confirmation 中确认的 proposal。与 MEMORY_TURN_END_PROPOSAL（proposal generation）
+    # 各司其职：
+    # - MEMORY_TURN_END_PROPOSAL → stateless proposal generator（evaluation）
+    # - MEMORY_PROPOSE → confirmed proposal executor（retain execution）
+    #
+    # 为什么挂在 turn-end hook 上：
+    # - Retain execution 需要 dispatcher evidence chain（RuntimeActionEvent）
+    # - 已确认的 proposal 在 state.task.pending_retain_proposals 中跨 turn 排队
+    # - turn-end 时 dispatch 确保 store 写入与 proposal generation / recall 在同一生命周期
+    try:
+        pending = getattr(getattr(state, "task", None), "pending_retain_proposals", None)
+        if pending:
+            for entry in list(pending):
+                try:
+                    propose_request = RuntimeActionRequest(
+                        action_type=RuntimeActionType.MEMORY_PROPOSE,
+                        source="core_loop",
+                        parent_trace_id="",
+                        payload={
+                            "confirmation_result": entry.get("confirmation_result", ""),
+                            "proposal_id": entry.get("proposal_id", ""),
+                            "candidate": {
+                                "proposal_id": entry.get("proposal_id", ""),
+                                "content": entry.get("content", ""),
+                                "content_hash": entry.get("content_hash", ""),
+                                "scope": entry.get("scope", "user"),
+                                "sensitivity": entry.get("sensitivity", "low"),
+                                "source": entry.get("source", "turn_end_proposal"),
+                            },
+                            "core_loop_invoked": True,
+                            "core_entrypoint": "core.chat",
+                            "runtime_hook_name": "loop.turn_end",
+                            "provider_kind": provider_kind,
+                            "provider_external_call": provider_external_call,
+                            "external_side_effects": False,
+                        },
+                    )
+                    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+                    route(propose_request)
+                except Exception:
+                    # 单个 proposal dispatch 失败不阻塞其他 proposal
+                    pass
+            # dispatch 后清空队列（即使部分失败也清空——不重复 dispatch）
+            pending.clear()
+    except Exception:
+        # MEMORY_PROPOSE 整体失败不阻塞 loop 也不阻塞 TOOL_GATE
         pass
 
     # TOOL_GATE action（独立 try/except——失败不阻断 MEMORY）

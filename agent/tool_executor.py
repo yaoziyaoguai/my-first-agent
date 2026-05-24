@@ -18,6 +18,7 @@ from agent.display_events import (
     control_message,
     emit_display_event,
     mask_user_visible_secrets,
+    tool_result_visible,
 )
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent import tool_result_contract
@@ -447,6 +448,15 @@ def execute_single_tool(
         safe_preview=envelope.safe_preview,
         content_length=envelope.content_length,
     )
+    # WP-F：工具执行完成后发射 RuntimeEvent，让 on_runtime_event 监听者
+    # （TUI / CLI / observer）能展示用户可见的工具结果摘要。不影响 messages 中的
+    # tool_result 协议、checkpoint 或 dispatch——只是展示层的投影。
+    if on_runtime_event := getattr(turn_state, "on_runtime_event", None):
+        on_runtime_event(tool_result_visible(
+            text=display_text,
+            tool_name=tool_name,
+            metadata={"status": envelope.status, "step_index": state.task.current_step_index},
+        ))
     if transition is None or transition.should_checkpoint:
         save_checkpoint(state)
     return None
@@ -546,4 +556,12 @@ def execute_pending_tool(
             status_text=display_text,
         ),
     )
+    # WP-F：pending tool 确认执行完成后也发射 RuntimeEvent，与 execute_single_tool
+    # 路径保持一致，让 on_runtime_event 监听者能展示用户可见的工具结果摘要。
+    if on_runtime_event := getattr(turn_state, "on_runtime_event", None):
+        on_runtime_event(tool_result_visible(
+            text=display_text,
+            tool_name=tool_name,
+            metadata={"status": envelope.status, "step_index": state.task.current_step_index},
+        ))
     return result

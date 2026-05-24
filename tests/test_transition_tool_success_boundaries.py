@@ -314,3 +314,111 @@ def test_rejected_by_check_real_path_still_uses_fallback_display_event(
     assert not any(
         getattr(ev, "event_type", "") == "tool.completed" for ev in captured
     )
+
+
+# ===================== WP-F · tool_result_visible RuntimeEvent 发射契约 =====================
+
+
+def test_execute_single_tool_emits_tool_result_visible_runtime_event(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """execute_single_tool 成功后必须通过 on_runtime_event 发射 tool_result_visible。
+
+    设计意图：tool_result_visible 是展示层 RuntimeEvent——它不改变 messages 中的
+    tool_result 协议、不写 checkpoint、不影响 dispatch。它只是工具执行完成后向
+    on_runtime_event 监听者（TUI / CLI / observer）投射一条用户可见摘要。
+    这条路径与已有 DisplayEvent（on_display_event）并存，互不替代。
+    """
+    from agent import checkpoint
+    import agent.tool_executor as te
+    from agent.display_events import EVENT_TOOL_RESULT_VISIBLE
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(te, "needs_tool_confirmation", lambda name, inp: False)
+    monkeypatch.setattr(
+        te,
+        "execute_tool",
+        lambda name, inp, context=None: "成功执行",
+    )
+
+    state = create_agent_state(system_prompt="test")
+    state.task.current_step_index = 0
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_001",
+                    "name": "read_file",
+                    "input": {"path": "README.md"},
+                }
+            ],
+        }
+    ]
+    display_captured: list[object] = []
+    runtime_captured: list[object] = []
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=runtime_captured.append,
+        on_display_event=display_captured.append,
+    )
+    block = SimpleNamespace(
+        id="toolu_001",
+        name="read_file",
+        input={"path": "README.md"},
+    )
+
+    te.execute_single_tool(
+        block,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=state.conversation.messages,
+    )
+
+    visible_events = [e for e in runtime_captured if e.event_type == EVENT_TOOL_RESULT_VISIBLE]
+    assert len(visible_events) == 1, (
+        f"execute_single_tool 成功后必须发射恰好 1 条 {EVENT_TOOL_RESULT_VISIBLE}，"
+        f" 实际 runtime_captured={[(e.event_type, getattr(e,'text','')[:40]) for e in runtime_captured]}"
+    )
+    ev = visible_events[0]
+    assert ev.event_type == EVENT_TOOL_RESULT_VISIBLE
+    assert "read_file" in str(ev.metadata.get("tool", ""))
+    assert ev.metadata.get("status") == "executed"
+
+
+def test_execute_single_tool_omits_runtime_event_when_no_sink(tmp_path, monkeypatch) -> None:
+    """on_runtime_event 为 None 时不应崩溃——向后兼容无 RuntimeEvent sink 的调用方。"""
+    from agent import checkpoint
+    import agent.tool_executor as te
+    from agent.state import create_agent_state
+
+    checkpoint_path = tmp_path / "checkpoint.json"
+    monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)
+    monkeypatch.setattr(te, "needs_tool_confirmation", lambda name, inp: False)
+    monkeypatch.setattr(te, "execute_tool", lambda name, inp, context=None: "OK")
+
+    state = create_agent_state(system_prompt="test")
+    state.conversation.messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}
+            ],
+        }
+    ]
+    turn_state = SimpleNamespace(
+        round_tool_traces=[],
+        on_runtime_event=None,
+        on_display_event=lambda e: None,
+    )
+    block = SimpleNamespace(id="t1", name="read_file", input={})
+    # 不应抛异常
+    result = te.execute_single_tool(
+        block, state=state, turn_state=turn_state, turn_context={}, messages=state.conversation.messages,
+    )
+    assert result is None

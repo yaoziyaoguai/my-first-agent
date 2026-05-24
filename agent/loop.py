@@ -33,12 +33,13 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher: Any,
     dependencies: Any = None,
 ) -> None:
-    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline。
+    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline + checkpoint + consolidation + recall。
 
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
-    决策。它构造独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL 和
-    TOOL_GATE → TOOL_INVOKE → TOOL_RESULT），各自通过
+    决策。它构造独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL、
+    TOOL_GATE → TOOL_INVOKE → TOOL_RESULT、CHECKPOINT_SAFE_SUMMARY、
+    MEMORY_CONSOLIDATE、MEMORY_RECALL），各自通过
     dispatcher.route_from_runtime_loop() 获得完整的 evidence chain。
 
     Tool 是已有介入点，ToolGate / ToolInvoke / ToolResult 不是三个独立子系统，
@@ -264,6 +265,35 @@ def _try_phase1_turn_end_runtime_action(
         route(consolidate_request)
     except Exception:
         # MEMORY_CONSOLIDATE 失败不阻塞 loop 也不阻塞其他 dispatch
+        pass
+
+    # MEMORY_RECALL action（独立 try/except——失败不阻断其他 dispatch）
+    # 中文学习边界：Memory Recall 是跨回合只读 snapshot 生成，挂在 turn-end hook
+    # 的最末阶段执行——此时 MEMORY_CONSOLIDATE 已完成，store 状态最完整。
+    # 只读操作（不写 store），生成 governed MemorySnapshot 用于下一轮 context injection。
+    #
+    # 为什么挂在 turn-end hook 上：
+    # - recall 读取的是累积 store 状态，不依赖当前 turn 的模型输出
+    # - turn-end 时 store 状态最完整（retain + consolidate 均已完成）
+    # - 错误时静默降级为 no_memory，不影响主流程
+    try:
+        recall_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_RECALL,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(recall_request)
+    except Exception:
+        # MEMORY_RECALL 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
 

@@ -77,6 +77,44 @@ Fake 和 real 的差异仅限：
 
 本轮实现目标：`harness_runtime_e2e`。`real_core_loop_runtime_e2e` 是 deferred。
 
+## L3 Wiring Architecture Decision (2026-05-24)
+
+### 决策：MEMORY_RECALL 接入 loop.py turn-end hook 以获取 L3 evidence
+
+**为什么现有 branch point 能承载：**
+
+loop.py 的 `_try_phase1_turn_end_runtime_action()` 是统一的 turn-end hook，已经 dispatch 6 个 RuntimeActionType（MEMORY_TURN_END_PROPOSAL、TOOL_GATE、TOOL_INVOKE、TOOL_RESULT、CHECKPOINT_SAFE_SUMMARY、MEMORY_CONSOLIDATE）。MEMORY_RECALL 复用同一 hook——不新增 branch point。
+
+**为什么 turn-end 而非 pre-loop 对 L3 evidence 是合理的：**
+
+1. MEMORY_RECALL handler 是纯读取操作（readonly），不写 store
+2. turn-end 时所有 retain/consolidation 已完成，store 状态最完整
+3. L3 evidence 关注的是「handler 是否从真实 runtime loop dispatch」而非「prompt section 是否被注入」
+4. 实际 prompt injection 仍由 `refresh_runtime_system_prompt()` 在 chat() 入口执行——L3 wiring 不改变此行为
+5. 与 MEMORY_CONSOLIDATE 同模式：dispatch at turn-end → read from store → produce evidence
+
+**为什么不新增 pre-loop branch point：**
+
+pre-loop dispatch 需要新增 branch point（在 model call 之前 dispatch RuntimeAction），这会引入新的架构元素。而 L3 evidence 只需要证明 MEMORY_RECALL handler 可以从 runtime loop dispatch——turn-end hook 已足够。pre-loop context injection 是已有行为，不需要 L3 证据链。
+
+**L3 evidence plan：**
+
+- dispatcher_origin="runtime_loop"
+- runtime_loop_invoked=True
+- core_entrypoint="core.chat"
+- runtime_hook_name="loop.turn_end"
+- target_module="MemoryRuntime"
+- 通过 `context.invoke_registered_target()` 获取 trusted target_module_proof
+
+**Fake/Real boundary：**
+- store adapter 差异：InMemoryMemoryStore vs FilesystemMemoryStore
+- 不新增 fake-only/real-only path
+
+**Stop conditions：**
+- 不读 .env / 真实 sessions / memory episodes
+- 不连外部服务 / API
+- 测试失败 → 回退到 TDD 或实现
+
 ## Open Questions
 
 1. recall 触发时机：`chat()` 入口（当前 refresh_runtime_system_prompt 位置）还是 loop 每轮迭代前？→ **决定：chat() 入口**，与当前行为一致

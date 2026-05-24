@@ -58,9 +58,13 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
 
     Phase 4 更新：注册 MemoryConsolidateHandler——MEMORY_CONSOLIDATE 已接入
     loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
+
+    Phase 5 更新：注册 MemoryRecallHandler——MEMORY_RECALL 已接入
+    loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
     """
     from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
     from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
+    from agent.runtime_integration.memory_recall import MemoryRecallHandler
 
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
@@ -69,6 +73,7 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(RuntimeActionType.TOOL_RESULT, ToolResultFeedbackHandler())
     registry.register(RuntimeActionType.CHECKPOINT_SAFE_SUMMARY, CheckpointSafeSummaryHandler())
     registry.register(RuntimeActionType.MEMORY_CONSOLIDATE, MemoryConsolidateHandler())
+    registry.register(RuntimeActionType.MEMORY_RECALL, MemoryRecallHandler())
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 
 

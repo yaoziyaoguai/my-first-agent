@@ -447,11 +447,23 @@ def chat(
     if not user_input or not user_input.strip():
         return ""
 
+    # ── CLI meta-command 边界说明（临时用户入口，后续迁移）─────────────────
+    # 中文学习边界：当前 show memories / forget memory / show subagents /
+    # delegate to 等 CLI meta-command 是临时 demo/user-entry affordance。
+    #
+    # 它们留在 core.chat 入口处的理由：
+    # - 验证统一主流程（core.chat → loop.py → Tool Pipeline）下用户可见能力
+    # - 提供 deterministic local/fake 路径下的用户交互入口
+    # - 避免新增第二条 runtime flow
+    #
+    # 已知债务（不在本轮解决）：
+    # - core.py 职责持续膨胀：CLI meta-command 解析不应属于 runtime hub
+    # - 后续应提取到独立 command router / presenter 边界（如 agent/cli_commands.py），
+    #   让 core.chat 回归 pure runtime orchestrator
+    # - 提取后 CLI meta-command 仍必须走 core.chat 统一入口，不能成为独立 runtime 路径
+    # - 不要在本轮实现 command router 抽象——当前 meta-command 数量和复杂度仍可控
+    #
     # ── Memory management CLI commands ──────────────────────────────────────
-    # 中文学习边界：show memories / 显示记忆 是 CLI meta-command，不是 memory
-    # 操作。它不经过 policy → confirmation → store pipeline，只是读取当前 store
-    # 中的 records 并展示给用户。这是 core.chat 中的 "外层读"，不改变 unified
-    # runtime flow。
     if _looks_like_show_memories(user_input):
         records = _memory_runtime.list_records()
         _safe_emit_runtime_event(

@@ -241,7 +241,7 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 | API key | 不需要 | 必须配置 |
 | 响应质量 | deterministic，模板化 | 真实 LLM 语义理解 |
 | Tool use | deterministic tool decision 匹配 | 真实 tool_use 推理 |
-| Streaming | deterministic 3-char chunking | 真实 SSE streaming |
+| Streaming | deterministic 3-char chunking（fake/demo only，非真实 provider streaming UX） | 真实 SSE streaming |
 | 成本 | 零 | 按 token 计费 |
 | 延迟 | ~0ms | 数百 ms 到数秒 |
 
@@ -255,6 +255,8 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 ## 当前不支持什么
 
 - 不支持默认真实 LLM SubAgent。
+- SubAgent delegation 当前仅 **CLI meta-command demo**（`delegate to X: task` / `委托 X: task`），不经过自然语言 tool_use delegation，不是 broadly user-ready 产品体验。
+- Streaming 当前仅 **FakeProvider deterministic 3-char chunking demo**，不经过真实 provider SSE/streaming，不是真实 streaming UX。
 - 不支持默认 SubAgent 工具执行、sandbox、worktree、parallel multi-subagent。
 - 不支持把 Skill 当作远程插件市场或自动安装系统。
 - 不支持 DB / graph / embedding / vector store 作为默认 memory backend。

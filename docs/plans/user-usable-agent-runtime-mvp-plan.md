@@ -202,18 +202,21 @@ Based on: repository evidence as of commit 3948a05
 
 ### WP-B: Pre-loop MEMORY_RECALL Architecture Decision
 
+**状态：AD complete — implementation deferred.**
+AD 文档 `docs/design/MEMORY_RECALL_DUAL_PATH_AD.md`（commit `aeb4b67`）已做出决定：不统一双路径。pre-loop prompt injection 路径（`refresh_runtime_system_prompt()` → `snapshot_for_prompt()` → `build_system_prompt()`）已正常工作，turn-end MEMORY_RECALL dispatch 提供互补证据。不需要额外实现。Memory recall 用户可见闭环不在当前 scope。
+
 | Aspect | Detail |
 |---|---|
 | **User outcome** | Memory recall 在每次对话开始时自动、透明地注入 context，开发者/审计者能看到 evidence chain |
-| **Scope** | Architecture Decision：双路径（prompt injection vs MEMORY_RECALL dispatch）是否统一、如何统一；如果 decision 允许 → 实现 evidence 统一 |
+| **Scope** | Architecture Decision：双路径（prompt injection vs MEMORY_RECALL dispatch）是否统一、如何统一（**done**）；implementation（**deferred**） |
 | **Out of scope** | 新增 RuntimeActionType（除非 decision 明确要求）、新增第二条流程 |
-| **SPEC/TDD** | Architecture Decision doc；focused test 覆盖 unified evidence chain |
+| **SPEC/TDD** | Architecture Decision doc（**done**, `docs/design/MEMORY_RECALL_DUAL_PATH_AD.md`）；focused test 覆盖 unified evidence chain（**deferred**） |
 | **Safety constraints** | 不新增第二条 runtime；不改变 system prompt injection 核心路径（除非 decision 明确要求） |
 | **Gates** | ruff, focused tests, full pytest |
 | **Stop conditions** | 需要一个显著不同的 runtime entry point（违反 unified runtime flow） |
 | **Expected demo** | 每轮对话开始时的 system prompt 包含 memory context，且 evidence chain 可追溯 |
 | **safe-to-auto-run** | **yes** — Architecture Decision + 本地实现 |
-| **Priority** | **高** — Memory MVP 的前置条件 |
+| **Priority** | **高** — Memory MVP 的前置条件（AD 已完成，implementation deferred） |
 
 ### WP-C: SubAgent Meaningful Local Demo Delegation
 

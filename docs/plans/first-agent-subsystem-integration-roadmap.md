@@ -60,7 +60,7 @@ query/event
 | **Tool: not_found** | ✅ | ✅ | ✅ | `test_tool_gate_not_found_l3.py` | 无 | 已闭环 (commit 76a88e4) |
 | **Tool: invoke** | ✅ | ✅ | ✅ | `test_tool_invoke_branch_behavior.py` | 无 | 已闭环 |
 | **Tool: invoke error** | ✅ | ✅ | ✅ | `test_tool_invoke_error_l3.py` | 无 | 已闭环 (commit 748513c) |
-| **Tool: invoke not_found** | ✅ | ✅ | ❌ | `tool_invoke.py:127-128` 已有 not_found disposition；无专项 L3 test | TOOL_INVOKE mid-pipeline not_found 路径未 L3 验证 | **今晚候选 #3** |
+| **Tool: invoke not_found** | ✅ | ✅ | ✅ | `test_tool_invoke_not_found_l3.py` | 无 | 已闭环 (commit f6d92f7) |
 | **Tool: result feedback** | ✅ | ✅ | ✅ | `test_tool_result_feedback_branch_behavior.py` | 无 | 已闭环 |
 | **MCP: confirmation="never"** | ✅ | ✅ | ✅ | `test_mcp_l3_real_core_loop.py` | 无 | 已闭环 |
 | **MCP: confirmation="always"** | ✅ | ✅ | ✅ (gate only) | `test_mcp_l3_real_core_loop.py::T5` | TOOL_INVOKE 不触发（设计如此） | confirmation 交互流程需要新设计，deferred |
@@ -148,7 +148,7 @@ query/event
 |---|---|---|
 | **#1** | **Tool blocked L3** | ✅ 完成 (commit 6cef9b8) |
 | **#2** | **Tool invoke error L3** | ✅ 完成 (commit 748513c) |
-| **#3** | **Tool invoke not_found L3** | ⚠️ deferred — 非自然可达路径 |
+| **#3** | **Tool invoke not_found L3** | ✅ 完成 (commit f6d92f7) — spy 拦截 gate→invoke pipeline 模拟竞态触发 not_found |
 | **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | ✅ 已覆盖 |
 | **#5** | **MCP HOME isolation** | ✅ 已闭环 |
 

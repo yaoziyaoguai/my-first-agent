@@ -1,7 +1,7 @@
 # Local Manual Dogfood Report
 
 Date: 2026-05-25
-Commit tested: dbd5d59 (fix(dogfood): fix code-reviewer status and Step 3 path detection)
+Commits tested: dbd5d59 → 1fa665c
 Executors:
 - Fake: `scripts/dogfood_checklist_executor.py` (via `core.chat()` + FakeProvider)
 - Real: `scripts/dogfood_real_provider.py` (via `core.chat()` + DashScope/kimi-k2.5)
@@ -48,28 +48,42 @@ FakeProvider 和 real provider (DashScope/kimi-k2.5) 共享同一 `core.chat()` 
 ### SubAgent Delegation Works with Real Provider
 `delegate to demo-stat:` 在 real provider 路径下正常触发 subagent.delegating → subagent.delegated 事件，返回 deterministic L0 summary。
 
-### Real LLM Tool Selection
-kimi-k2.5 在 dogfood 中未主动触发 `demo.write_demo_note` 工具——这反映了真实 LLM 的工具选择行为不同于 FakeProvider 的确定性关键词匹配。工具已正确注册在 provider request 中，是否调用取决于模型推理。
+### Real LLM Tool Selection (CONCERN)
+kimi-k2.5 在 dogfood 中未主动触发 `demo.write_demo_note` 工具——这反映了真实 LLM 的工具选择行为不同于 FakeProvider 的确定性关键词匹配。工具已正确注册在 provider request 中，是否调用取决于模型推理。这是当前 fake→real 可用性提升的最大单一差距。
+
+### Memory E2E Cycle Verified
+记忆完整周期（记住 → 确认 → 展示 → 遗忘）已通过手动 E2E 验证：
+- `记住：用户的名字是张三` → `memory.confirmation_requested` 事件触发，inline confirmation form 显示
+- `show memories` → 确认前显示空列表（正确行为）
+- 确认后（需用户显式回复）→ memory 写入 store → `show memories` 展示已存储记忆
+- `forget id:<short_id>` → 精确删除
+- `snapshot_for_prompt()` → 在下次 chat() 时将已批准记忆注入 system prompt
+
+记忆系统架构完整，但在自动化 dogfood 中未覆盖完整周期（因需要两步确认交互）。
 
 ## Fixes Applied
 
 1. **code-reviewer SUBAGENT.md**: 补充 `status: active` 字段
 2. **dogfood Step 3 path detection**: 适配 `_default_demo_note_path()` 的时间戳目录行为
-3. **Real provider config**: 需要显式设置 `MY_FIRST_AGENT_LLM_PROVIDER` 环境变量才能激活 real provider 路径
+3. **Real provider config**: 需显式设置 `MY_FIRST_AGENT_LLM_PROVIDER` 环境变量激活 real provider
+
+## Remaining Gaps
+
+1. **Real LLM tool use**: kimi-k2.5 未主动使用工具——可能是模型行为特性或 system prompt 可优化
+2. **Automated memory E2E**: 自动化 dogfood 未覆盖完整记忆周期（需两步确认交互）
+3. **System prompt tool guidance**: 当前 system prompt 未显式引导工具使用
 
 ## Readiness Assessment
 
 - **Local manual dogfood (fake)**: READY — 9/9 PASS
 - **Real provider dogfood**: READY with caveat — 5/6 PASS, tool selection depends on LLM
 - **Fake/real shared path**: CONFIRMED — 同一 `core.chat()` 统一入口
-- **Safe to start Next Big Loop**: YES
+- **Memory architecture**: VERIFIED — 完整 E2E 周期可用
 
-## Next Big Loop Selection
+## Next Big Loop Candidates
 
-Real provider dogfood 已完成。基于当前证据，下一批候选按优先级排列：
+基于 dogfood 实际发现排序：
 
-1. **MEMORY_RECALL implementation revisit** — AD 已完成，可在 fake path 实现 pre-loop recall，提升记忆系统的实际用户价值
-2. **More natural tool/subagent planning** — real LLM 未自然触发工具，可通过 system prompt 优化或增加 NL tool routing
-3. **Full Hook system exploration** — 需先写 Architecture Decision
-
-选择 MEMORY_RECALL 作为下一步：AD 现成、fake-safe、能直接提升用户可感知的记忆价值。
+1. **Real LLM tool-use improvement** (最高价值) — system prompt 增强或 tool description 优化，让 real LLM 更自然地使用工具
+2. **Automated memory E2E in dogfood** — 将记忆确认流程加入自动化 dogfood 脚本
+3. **Full Hook system exploration** — 需 Architecture Decision 先行

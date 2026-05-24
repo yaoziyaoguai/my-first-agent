@@ -55,6 +55,7 @@ def _make_context(*, pending: dict, runtime: MemoryRuntime):
         task=SimpleNamespace(
             status="awaiting_user_input",
             pending_user_input_request=pending,
+            pending_retain_proposals=[],  # Phase 5b Memory pipeline 合法字段
             current_plan=None,
             current_step_index=0,
             confirm_each_step=False,
@@ -149,7 +150,19 @@ def test_parse_inline_confirmation_reply(user_text: str, expected: InlineConfirm
 def test_inline_confirmation_accept_routes_through_confirm_handler(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """memory_inline_confirmation accept 通过 confirm_handlers 委托后才写入。"""
+    """memory_inline_confirmation accept 通过 confirm_handlers 委托后入队 pending_retain_proposals。
+
+    中文学习边界：
+    confirmation handler 不直接写 memory store——它只把已确认的 proposal 排队到
+    state.task.pending_retain_proposals，真正的 retain/write 由 turn-end hook 中的
+    MEMORY_PROPOSE RuntimeAction dispatch 统一执行。
+
+    为什么不让 confirmation handler 直接写 store：
+    - MEMORY_PROPOSE 通过 dispatcher 提供 RuntimeActionEvent evidence chain
+    - retain execution 需要与 proposal generation / recall 在同一生命周期
+    - 如果 confirmation handler 直接写 store，绕过 dispatcher evidence，后续 audit
+      无法区分"用户确认后写入"和"静默写入"
+    """
     from agent.confirm_handlers import handle_user_input_step
     from agent.memory_interaction import build_inline_confirmation_pending_request
 
@@ -166,16 +179,23 @@ def test_inline_confirmation_accept_routes_through_confirm_handler(
     assert "已确认" in reply
     assert ctx.state.task.pending_user_input_request is None
     assert ctx.state.task.status == "running"
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert records[0].memory_type == "procedural"
-    assert records[0].approval_status == "approved"
+    # 确认后的 proposal 排队到 pending_retain_proposals，不直接写 store
+    proposals = ctx.state.task.pending_retain_proposals
+    assert len(proposals) == 1
+    assert proposals[0]["proposal_id"] == _make_inline_request().proposal_id
+    assert proposals[0]["confirmation_result"] == "accepted"
+    assert proposals[0]["source"] == "turn_end_proposal"
+    # store 未被直接写入——真正写入由 turn-end hook MEMORY_PROPOSE dispatch 完成
+    assert len(runtime._store.list_records()) == 0
 
 
 def test_inline_confirmation_edit_accept_writes_edited_content(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """edit_accept 只能写用户编辑后的 procedural 内容。"""
+    """edit_accept 将用户编辑后的 procedural 内容排队到 pending_retain_proposals。
+
+    不直接写 store——真正 retain/write 由 turn-end hook MEMORY_PROPOSE dispatch 完成。
+    """
     from agent.memory_interaction import (
         build_inline_confirmation_pending_request,
         handle_inline_confirmation_reply,
@@ -196,9 +216,12 @@ def test_inline_confirmation_edit_accept_writes_edited_content(
     )
 
     assert "已确认" in reply
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert "先查日志，再查 checkpoint" in records[0].content
+    # 确认后的 proposal 排队到 pending_retain_proposals，不直接写 store
+    proposals = ctx.state.task.pending_retain_proposals
+    assert len(proposals) == 1
+    assert "先查日志，再查 checkpoint" in proposals[0]["content"]
+    # store 未被直接写入
+    assert len(runtime._store.list_records()) == 0
 
 
 @pytest.mark.parametrize("user_text", ["2", "4 还不够准确", "这不是我的意思"])

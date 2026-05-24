@@ -46,6 +46,12 @@ RESETTABLE_FIELDS = {
     "tool_execution_log",
 }
 
+# 跨任务保留字段：这些 TaskState 字段在 reset_task() 中不清空。
+# 它们承载跨 turn 的持久状态（如 memory proposal 队列），不属于单任务生命周期。
+CROSS_TASK_KEEP_FIELDS = {
+    "pending_retain_proposals",
+}
+
 
 def _set_dirty(state) -> None:
     """把 task 所有字段都改成"脏"的值，方便验证 reset 是否确实清掉了。"""
@@ -102,12 +108,13 @@ def test_resettable_fields_covers_all_task_fields():
     这个测试会红，提醒他考虑"任务结束时这个字段应不应该清"。
     """
     actual = {f.name for f in fields(TaskState)}
-    missing = actual - RESETTABLE_FIELDS
+    missing = actual - RESETTABLE_FIELDS - CROSS_TASK_KEEP_FIELDS
     assert not missing, (
         f"TaskState 有新字段 {missing} 没被纳入 RESETTABLE_FIELDS。\n"
         "请判断：\n"
         "  1) 这个字段应该在 reset_task 里清 → 加进 RESETTABLE_FIELDS 和 reset_task\n"
-        "  2) 这个字段应该跨任务保留 → 在 RESETTABLE_FIELDS 之外再维护一个 allowlist"
+        f"  2) 这个字段应该跨任务保留 → 加进 CROSS_TASK_KEEP_FIELDS\n"
+        f"    当前 allowlist: {sorted(CROSS_TASK_KEEP_FIELDS)}"
     )
 
 

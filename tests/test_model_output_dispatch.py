@@ -143,7 +143,9 @@ def _build_runtime(monkeypatch, fake_response: _FakeResponse):
     - ``TurnState.on_runtime_event=None`` 让 UNKNOWN 分支走 stdout 兜底，
       不依赖 capsys 之外的 sink。
     """
-    monkeypatch.setattr(core, "_call_model", lambda turn_state, loop_ctx: fake_response)
+    # _call_model 签名含 _streaming_events_out 关键字参数（streaming L3 注入），
+    # monkeypatch 必须接受 **kwargs 以保持兼容。
+    monkeypatch.setattr(core, "_call_model", lambda turn_state, loop_ctx, **_kw: fake_response)
     turn_state = core.TurnState(system_prompt="test")
     fake_client = SimpleNamespace()
     loop_ctx = LoopContext(

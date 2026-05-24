@@ -512,6 +512,16 @@ class MemoryRuntime:
             return ()
         return self._store.list_records()
 
+    def remove_record(self, record_id: str) -> bool:
+        """按 record_id 移除一条 memory record（直接操作，不经过 policy 管线）。
+
+        WP-A：供 CLI forget 命令使用——用户已明确表达移除意图，无需
+        再走 policy → confirmation 流程。返回 True 表示成功移除。
+        """
+        if self._store is None:
+            return False
+        return self._store.remove_record(record_id)
+
 
 # ---------------------------------------------------------------------------
 # 便捷工厂：创建默认 MemoryRuntime

@@ -346,6 +346,7 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_extract_text",
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",
+        "_looks_like_forget_memory",
         "_looks_like_show_memories",
         "_looks_like_show_subagents",
         "_maybe_run_l2_inline",

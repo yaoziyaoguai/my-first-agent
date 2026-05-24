@@ -125,6 +125,13 @@ class MemoryStoreProtocol(Protocol):
     def list_records(self) -> tuple[MemoryRecord, ...]:
         """返回 deterministic fake records 视图。"""
 
+    def remove_record(self, record_id: str) -> bool:
+        """按 record_id 移除一条记录；返回 True 表示成功移除。
+
+        这是 store 层的直接操作接口，不经过 policy/confirmation 管线。
+        调用方（如 CLI forget 命令）已自行确认用户意图。
+        """
+
 
 def derive_memory_record_id(source_summary: str) -> str:
     """从 operation provenance 派生 fake record id。
@@ -326,6 +333,13 @@ class InMemoryMemoryStore:
 
     def list_records(self) -> tuple[MemoryRecord, ...]:
         return tuple(self._records[key] for key in sorted(self._records))
+
+    def remove_record(self, record_id: str) -> bool:
+        """按 record_id 移除一条记录（直接操作，不经过 policy 管线）。"""
+        if record_id in self._records:
+            del self._records[record_id]
+            return True
+        return False
 
     def _apply_update(
         self,

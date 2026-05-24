@@ -145,6 +145,39 @@ def _looks_like_show_memories(text: str) -> bool:
     return any(trigger in text_lower for trigger in show_triggers)
 
 
+def _looks_like_forget_memory(text: str) -> str | None:
+    """检测用户输入是否为"忘记记忆"CLI 命令，返回待匹配的内容关键词。
+
+    WP-A：deteministic CLI meta-command——不经过 policy → confirmation 管线，
+    直接操作 store 移除匹配 record。返回 None 表示不是 forget 命令。
+
+    支持的触发模式（中英文）：
+    - forget <content keyword>
+    - 忘记 <content keyword>
+    - remove memory <content keyword>
+    - 删除记忆 <content keyword>
+    """
+    import re
+
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+    forget_prefixes = (
+        "forget ", "忘记", "remove memory ", "remove memories ",
+        "删除记忆", "删掉记忆", "清除记忆",
+    )
+    for prefix in forget_prefixes:
+        if text_lower.startswith(prefix):
+            remainder = text_stripped[len(prefix):].strip()
+            if remainder:
+                return remainder
+            return None
+    # 也支持 "请忘记 X" 等中间形式
+    m = re.match(r".*?(?:forget|忘记|删除记忆|删掉记忆)\s+(.+)", text_lower)
+    if m:
+        return text_stripped[m.start(1):].strip() or None
+    return None
+
+
 def _looks_like_show_subagents(text: str) -> bool:
     """检测用户输入是否为"查看子代理"CLI 命令。
 
@@ -393,6 +426,27 @@ def chat(
         return "\n".join(
             [getattr(r, "content", str(r))[:120] for r in records]
         ) if records else "暂无已保存的记忆。"
+
+    # WP-A：forget / 忘记记忆 CLI meta-command。
+    # 直接匹配 store 中 record content 并移除，不经过 policy → confirmation 管线。
+    forget_keyword = _looks_like_forget_memory(user_input)
+    if forget_keyword:
+        records = _memory_runtime.list_records()
+        matched = [r for r in records if forget_keyword.lower() in getattr(r, "content", "").lower()]
+        if not matched:
+            return f"未找到匹配「{forget_keyword}」的记忆。"
+        removed_count = 0
+        for r in matched:
+            if _memory_runtime.remove_record(r.id):
+                removed_count += 1
+        # 通知 RuntimeEvent 监听者 memory 已变更
+        remaining = _memory_runtime.list_records()
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_list_event(remaining),
+            fallback_prefix="\n",
+        )
+        return f"已移除 {removed_count} 条记忆（匹配「{forget_keyword}」）。"
 
     # 中文学习边界：show subagents / 显示子代理 是 CLI meta-command，
     # 不触发 delegation、不执行 subagent、不写 store。

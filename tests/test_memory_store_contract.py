@@ -355,4 +355,5 @@ def test_store_protocol_is_minimal_and_not_a_runtime_gateway() -> None:
         "apply_operation_intent",
         "get_record",
         "list_records",
+        "remove_record",  # WP-A：CLI forget 命令的直接 store 操作接口
     }

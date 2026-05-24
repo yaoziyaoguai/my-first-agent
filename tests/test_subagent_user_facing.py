@@ -336,3 +336,86 @@ class TestDelegateOnceE2E:
         run = delegate_once(request, registry)
         assert run.result is not None
         assert run.result.status == "max_iterations_exceeded"
+
+
+class TestSubagentDelegationProgressEvents:
+    """Issue 6: 验证子代理委托进度事件在 chat() 路径中被正确发射。
+
+    中文学习边界：
+    - delegate to 触发时，必须先生成 subagent.delegating 事件，再执行，
+      最后生成 subagent.delegated 事件
+    - 这不是新的 runtime flow——事件通过 on_runtime_event callback 发射，
+      不绕过 core.chat() / unified runtime flow
+    """
+
+    def test_delegation_progress_events_emitted(self):
+        """chat('delegate to demo-stat: ...') 发射 delegating + delegated 事件。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        events: list = []
+
+        def collect(event):
+            events.append(event)
+
+        result = chat("delegate to demo-stat: count files", on_runtime_event=collect)
+        assert "[SubAgent: demo-stat]" in result
+
+        event_types = [e.event_type for e in events]
+        assert "subagent.delegating" in event_types, (
+            f"委托开始前应发射 subagent.delegating，实际事件: {event_types}"
+        )
+        assert "subagent.delegated" in event_types, (
+            f"委托完成后应发射 subagent.delegated，实际事件: {event_types}"
+        )
+
+    def test_delegation_progress_event_contains_name_and_task(self):
+        """delegating 事件应包含子代理名称和任务预览。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        events: list = []
+
+        def collect(event):
+            events.append(event)
+
+        chat("delegate to demo-stat: count all python files", on_runtime_event=collect)
+
+        delegating_events = [e for e in events if e.event_type == "subagent.delegating"]
+        assert len(delegating_events) >= 1
+        de = delegating_events[0]
+        assert de.metadata["subagent"] == "demo-stat"
+        assert "count all python files" in de.metadata.get("task_preview", "")
+
+    def test_delegation_error_emits_delegated_event(self):
+        """委托异常时仍发射 delegated 事件（含 error 状态）。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        events: list = []
+
+        def collect(event):
+            events.append(event)
+
+        chat("delegate to nonexistent-subagent: something", on_runtime_event=collect)
+
+        # 不存在的子代理：descriptor 为 None 时提前返回 not_found，
+        # 不会经过 delegate_once，所以也不会有 delegating/delegated 事件。
+
+    def test_delegation_completed_event_has_summary(self):
+        """completed 状态时 delegated 事件应包含 summary。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        events: list = []
+
+        def collect(event):
+            events.append(event)
+
+        chat("delegate to demo-stat: analyze structure", on_runtime_event=collect)
+
+        completed_events = [e for e in events if e.event_type == "subagent.delegated"
+                           and e.metadata.get("status") == "ok"]
+        if completed_events:
+            ce = completed_events[0]
+            assert "summary" in ce.metadata

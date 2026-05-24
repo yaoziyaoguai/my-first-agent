@@ -13,9 +13,12 @@ from agent.display_events import (
     control_message,
     memory_blocked_event,
     memory_confirmation_requested_event,
+    memory_forgotten_event,
     memory_injected_event,
     memory_list_event,
     memory_stored_event,
+    subagent_delegated_event,
+    subagent_delegating_event,
     subagent_list_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
@@ -392,6 +395,11 @@ def chat(
         if forget_keyword.lower().startswith("id:"):
             record_id = forget_keyword[3:].strip()
             if _memory_runtime.remove_record(record_id):
+                _safe_emit_runtime_event(
+                    on_runtime_event,
+                    memory_forgotten_event(1, keyword=f"id:{record_id}"),
+                    fallback_prefix="\n",
+                )
                 remaining = _memory_runtime.list_records()
                 _safe_emit_runtime_event(
                     on_runtime_event,
@@ -409,6 +417,11 @@ def chat(
         for r in matched:
             if _memory_runtime.remove_record(r.id):
                 removed_count += 1
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_forgotten_event(removed_count, keyword=forget_keyword),
+            fallback_prefix="\n",
+        )
         remaining = _memory_runtime.list_records()
         _safe_emit_runtime_event(
             on_runtime_event,
@@ -468,15 +481,31 @@ def chat(
             )
         except ValueError as exc:
             return f"委托请求无效：{exc}"
+        # Issue 6: 委托开始前发射进度事件，让用户知道系统在做什么
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            subagent_delegating_event(subagent_name, task),
+            fallback_prefix="\n",
+        )
         try:
             run = delegate_once(subagent_request, registry)
         except Exception as exc:
+            _safe_emit_runtime_event(
+                on_runtime_event,
+                subagent_delegated_event(subagent_name, "error", str(exc)),
+                fallback_prefix="\n",
+            )
             return render_delegate_error(subagent_name, str(exc))
         result = run.result
         status = getattr(result, "status", "unknown") if result else "unknown"
         summary = getattr(result, "summary", "") if result else ""
         stop_reason = getattr(result, "stop_reason", "") if result else ""
         confidence = getattr(result, "confidence", 0.0) if result else 0.0
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            subagent_delegated_event(subagent_name, status, summary),
+            fallback_prefix="\n",
+        )
         return render_delegate_result(subagent_name, status, summary, stop_reason, confidence)
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。

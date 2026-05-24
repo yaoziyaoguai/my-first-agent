@@ -52,7 +52,10 @@ EVENT_MEMORY_STORED = "memory.stored"
 EVENT_MEMORY_BLOCKED = "memory.blocked"
 EVENT_MEMORY_INJECTED = "memory.injected"
 EVENT_MEMORY_LISTED = "memory.listed"
+EVENT_MEMORY_FORGOTTEN = "memory.forgotten"
 EVENT_SUBAGENT_LISTED = "subagent.listed"
+EVENT_SUBAGENT_DELEGATING = "subagent.delegating"
+EVENT_SUBAGENT_DELEGATED = "subagent.delegated"
 EVENT_RUN_SUMMARY = "run.summary"
 # Memory Interactive Confirmation v1 — 用户确认请求事件
 EVENT_MEMORY_CONFIRMATION_REQUESTED = "memory.confirmation_requested"
@@ -262,6 +265,24 @@ def memory_blocked_event(reason: str) -> RuntimeEvent:
     )
 
 
+def memory_forgotten_event(removed_count: int, keyword: str = "") -> RuntimeEvent:
+    """构造记忆移除完成事件。
+
+    告知用户 forget 操作的结果——移除了多少条记忆。
+    """
+    if keyword:
+        return RuntimeEvent(
+            event_type=EVENT_MEMORY_FORGOTTEN,
+            text=f"已移除 {removed_count} 条记忆（匹配「{keyword}」）",
+            metadata={"removed_count": removed_count, "keyword": keyword},
+        )
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_FORGOTTEN,
+        text=f"已移除 {removed_count} 条记忆",
+        metadata={"removed_count": removed_count},
+    )
+
+
 def memory_injected_event(count: int) -> RuntimeEvent:
     """构造 memory 已加载事件。
 
@@ -339,6 +360,47 @@ def subagent_list_event(descriptors: tuple, *, registry_label: str = "subagent")
         event_type=EVENT_SUBAGENT_LISTED,
         text=text,
         metadata={"item_count": len(descriptors), "registry_label": registry_label},
+    )
+
+
+def subagent_delegating_event(
+    subagent_name: str,
+    task: str,
+) -> RuntimeEvent:
+    """构造子代理委托开始事件，让用户在委托执行前看到进度提示。
+
+    这是 Issue 6 Progress/event UX 的一部分——委托路径此前没有任何进度反馈，
+    用户输入 delegate to 后只能等最终结果，不知道系统在做什么。
+    """
+    task_preview = task[:80] + ("..." if len(task) > 80 else "")
+    return RuntimeEvent(
+        event_type=EVENT_SUBAGENT_DELEGATING,
+        text=f"正在委托子代理 {subagent_name} 执行: {task_preview}",
+        metadata={"subagent": subagent_name, "task_preview": task_preview},
+    )
+
+
+def subagent_delegated_event(
+    subagent_name: str,
+    status: str,
+    summary: str = "",
+) -> RuntimeEvent:
+    """构造子代理委托完成/失败事件，告知用户执行结果。
+
+    与 subagent_delegating_event 配对，形成完整的委托生命周期进度反馈。
+    """
+    status_text = "完成" if status in ("completed", "stopped") else f"异常（{status}）"
+    parts = [f"子代理 {subagent_name} {status_text}"]
+    if summary:
+        parts.append(f"摘要: {summary[:120]}")
+    return RuntimeEvent(
+        event_type=EVENT_SUBAGENT_DELEGATED,
+        text="，".join(parts),
+        metadata={
+            "subagent": subagent_name,
+            "status": status,
+            "summary": summary[:200] if summary else "",
+        },
     )
 
 

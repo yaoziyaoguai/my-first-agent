@@ -72,9 +72,12 @@ from agent.display_events import (
     EVENT_LOOP_MAX_ITERATIONS,
     EVENT_MEMORY_BLOCKED,
     EVENT_MEMORY_CONFIRMATION_REQUESTED,
+    EVENT_MEMORY_FORGOTTEN,
     EVENT_MEMORY_INJECTED,
     EVENT_MEMORY_LISTED,
     EVENT_MEMORY_STORED,
+    EVENT_SUBAGENT_DELEGATED,
+    EVENT_SUBAGENT_DELEGATING,
     EVENT_SUBAGENT_LISTED,
     EVENT_RUN_SUMMARY,
     EVENT_PLAN_CONFIRMATION_REQUESTED,
@@ -202,8 +205,11 @@ _EVENT_BASELINE: frozenset[str] = frozenset(
         # 三者都是 display/observation event，不含 decision 语义。
         EVENT_MEMORY_STORED,
         EVENT_MEMORY_BLOCKED,
+        EVENT_MEMORY_FORGOTTEN,
         EVENT_MEMORY_INJECTED,
         EVENT_MEMORY_LISTED,
+        EVENT_SUBAGENT_DELEGATED,
+        EVENT_SUBAGENT_DELEGATING,
         EVENT_SUBAGENT_LISTED,
         # Memory Interactive Confirmation v1：用户确认请求事件
         EVENT_MEMORY_CONFIRMATION_REQUESTED,
@@ -319,3 +325,71 @@ def test_run_summary_event_subagent_zero_not_shown() -> None:
         stop_reason="正常结束",
     )
     assert "SubAgent 委托" not in evt.text
+
+
+# ===================== D7 · Issue 6 新增 progress event 工厂合约 =====================
+
+
+def test_subagent_delegating_event_contract() -> None:
+    """subagent_delegating_event 产出 display-only event，含 subagent name 和 task。"""
+    from agent.display_events import subagent_delegating_event
+
+    evt = subagent_delegating_event("demo-stat", "count all files in project")
+    assert evt.event_type == "subagent.delegating"
+    assert "demo-stat" in evt.text
+    assert "count all files" in evt.text
+    assert evt.metadata["subagent"] == "demo-stat"
+    assert "count all files" in evt.metadata["task_preview"]
+
+
+def test_subagent_delegating_event_long_task_truncated() -> None:
+    """超过 80 字符的 task 预览截断。"""
+    from agent.display_events import subagent_delegating_event
+
+    long_task = "x" * 100
+    evt = subagent_delegating_event("agent", long_task)
+    assert len(evt.metadata["task_preview"]) <= 83  # 80 + "..."
+    assert evt.metadata["task_preview"].endswith("...")
+
+
+def test_subagent_delegated_event_completed() -> None:
+    """subagent_delegated_event completed/stopped 状态显示'完成'。"""
+    from agent.display_events import subagent_delegated_event
+
+    for status in ("completed", "stopped"):
+        evt = subagent_delegated_event("demo-stat", status, "all done")
+        assert evt.event_type == "subagent.delegated"
+        assert "完成" in evt.text
+        assert evt.metadata["status"] == status
+        assert "all done" in evt.metadata["summary"]
+
+
+def test_subagent_delegated_event_error() -> None:
+    """subagent_delegated_event error 状态显示'异常'。"""
+    from agent.display_events import subagent_delegated_event
+
+    evt = subagent_delegated_event("demo-stat", "error", "connection timeout")
+    assert "异常" in evt.text
+    assert evt.metadata["status"] == "error"
+
+
+def test_memory_forgotten_event_contract() -> None:
+    """memory_forgotten_event 产出 display-only event，含 removed_count。"""
+    from agent.display_events import memory_forgotten_event
+
+    evt = memory_forgotten_event(3, keyword="test")
+    assert evt.event_type == "memory.forgotten"
+    assert "3" in evt.text
+    assert "test" in evt.text
+    assert evt.metadata["removed_count"] == 3
+    assert evt.metadata["keyword"] == "test"
+
+
+def test_memory_forgotten_event_no_keyword() -> None:
+    """memory_forgotten_event 无 keyword 时仍正常产出。"""
+    from agent.display_events import memory_forgotten_event
+
+    evt = memory_forgotten_event(1)
+    assert evt.event_type == "memory.forgotten"
+    assert "1" in evt.text
+    assert evt.metadata.get("keyword", "") == ""

@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from agent.runtime_integration import (
     ActionHandlerRegistry,
     RuntimeActionDispatcher,
@@ -47,6 +49,15 @@ _SHELL_LIKE_TOOL_NAME = "bash"
 
 # _ 前缀非 allowlist 工具名——不在 frozenset({"_safe_noop", "_confirmable_noop"}) 中
 _UNDERSCORE_TOOL_NAME = "_blocked_tool"
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_blocked_tool():
+    """清理 _blocked_tool，防止污染其他测试的全局 TOOL_REGISTRY。"""
+    yield
+    from agent.tool_registry import TOOL_REGISTRY
+
+    TOOL_REGISTRY.pop(_UNDERSCORE_TOOL_NAME, None)
 
 
 # ========== 测试辅助工厂 ==========

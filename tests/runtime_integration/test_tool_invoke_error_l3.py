@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from agent.runtime_integration import (
     ActionHandlerRegistry,
     RuntimeActionDispatcher,
@@ -32,6 +34,15 @@ from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
 
 _ERROR_TOOL_NAME = "error_tool"
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_error_tool():
+    """清理 error_tool，防止污染其他测试的全局 TOOL_REGISTRY。"""
+    yield
+    from agent.tool_registry import TOOL_REGISTRY
+
+    TOOL_REGISTRY.pop(_ERROR_TOOL_NAME, None)
 
 
 # ========== 测试辅助 ==========

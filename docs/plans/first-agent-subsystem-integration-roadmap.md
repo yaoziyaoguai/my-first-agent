@@ -39,7 +39,7 @@ query/event
 | **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 dispatch path verified（双路径，未统一） | 实际 recall 路径：`refresh_runtime_system_prompt()` → `_memory_runtime.snapshot_for_prompt()` → `build_system_prompt()`（不经 dispatcher）；evidence dispatch 路径：turn-end hook → MEMORY_RECALL RuntimeAction → dispatcher → handler（L3 verified）；两条路径未共享 evidence；Pre-loop MEMORY_RECALL wiring 为 Architecture Extension candidate |
 | **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L3 dispatch path verified | MEMORY_CONSOLIDATE RuntimeActionType L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；real LLM consolidation（consolidation_llm.py）需要真实 LLM/private data，仍 deferred |
 | **Checkpoint** | `agent/checkpoint.py`, `agent/runtime_integration/checkpoint_summary.py` | `docs/specs/checkpoint-save-resume-l3/`, `docs/CHECKPOINT_RESUME_SEMANTICS.md` | L3 完整闭环 | CHECKPOINT_SAFE_SUMMARY 经 turn-end hook → dispatcher → handler L3 verified |
-| **Skill System** | `agent/skill_system/` (15 files), `agent/legacy_skills/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L3 dispatch path verified (empty registry) | SKILL_SELECT RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；handler 仅验证 `no_suitable_skill`（SkillRegistry(roots=[]) 为空）；non-empty registry business operation L3 仍为 partial/future work |
+| **Skill System** | `agent/skill_system/` (15 files), `skills/demo-note-maker/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L3 dispatch path verified (empty + non-empty registry) | SKILL_SELECT RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；empty registry 路径（`no_suitable_skill`）✅；non-empty registry business operation（demo-note-maker body load）✅ (WP2)；多 skill marketplace 为 future work |
 | **SubAgent System** | `agent/subagent_system/` (20 files), `agent/runtime_integration/subagent_action.py` | `docs/design/SUBAGENT_SYSTEM_SDD.md`, `docs/SUBAGENT_LOCAL_MVP.md`, `docs/specs/subagent-l3/SPEC.md` | L3 dispatch path verified (empty registry) | SUBAGENT_DELEGATE_L0 RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；handler 仅验证 `no_suitable_subagent`（SubAgentRegistry(roots=()) 为空）；non-empty registry business delegation L3 仍为 partial/future work |
 | **Provider/Model** | `agent/provider/` (12 files), `agent/model_call.py`, `agent/model_output_dispatch.py` | `docs/LLM_PROVIDER_ADAPTER.md` | 集成在主流程中 | Anthropic/OpenAI/Fake provider 均通过 core.chat() 调用；FakeProvider 支撑所有 L3 测试 |
 | **Confirmation** | `agent/confirmation/` (5 files), `agent/confirm_handlers.py`, `agent/pending_confirmation_dispatch.py` | `docs/specs/tool-branch-confirmation-required/` | L3 已验证 | tool confirmation_required 分支行为已验证 |
@@ -72,7 +72,7 @@ query/event
 | **Memory: consolidation** | ✅ | ✅ | ✅ (dispatch path) | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | MEMORY_CONSOLIDATE RuntimeAction dispatch path L3 verified via loop.py turn-end hook；real LLM consolidation（consolidation_llm.py）需真实 LLM/private data，仍 deferred | 已闭环 (本 commit)；real LLM consolidation deferred |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
-| **Skill: action** | ✅ | ✅ | ✅ (dispatch path, empty registry) | `test_skill_l3.py` (L3), `test_skill_*.py` (L1/L2) | SKILL_SELECT RuntimeActionType dispatch path L3 verified；handler 仅验证 `no_suitable_skill`（空 registry）；non-empty registry business operation L3 partial/future work | 已闭环 (本 commit)；business operation L3 补齐为 Architecture Extension candidate |
+| **Skill: action** | ✅ | ✅ | ✅ (dispatch path, empty + non-empty registry) | `test_skill_l3.py` (L3), `test_skill_select_pipeline_l3.py` (L3 non-empty registry), `test_skill_*.py` (L1/L2) | SKILL_SELECT RuntimeActionType dispatch path L3 verified（empty + non-empty registry）；demo-note-maker business operation（body_load_decision=True）✅ (WP2)；多 skill marketplace 为 future work | 已闭环 (commit 35009ed)；non-empty registry business operation L3 已验证 |
 | **SubAgent: action** | ✅ | ✅ | ✅ (dispatch path, empty registry) | `test_subagent_l3.py` (L3), `test_subagent_*.py` (L1/L2) | SUBAGENT_DELEGATE_L0 RuntimeActionType dispatch path L3 verified；handler 仅验证 `no_suitable_subagent`（空 registry）；non-empty registry business delegation L3 partial/future work | 已闭环 (本 commit)；business operation L3 补齐为 Architecture Extension candidate |
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
@@ -90,6 +90,8 @@ query/event
 |---|---|---|
 | (当前无已知 correctness/safety bug) | N/A | N/A |
 | STREAMING_EVENT descriptor cleanup or inactive marker | `agent/runtime_integration/schema.py` — STREAMING_EVENT 为 reserved catalog entry / unused descriptor | P3 — 标记 inactive 或后续清理 |
+| WP3: User Onboarding + First-Run Experience | `agent/cli_renderer.py` render_onboarding(), `main.py` --help/help | ✅ 完成 (commit b41193e) |
+| WP4: First Usable Task E2E Smoke Test | `tests/smoke/test_first_usable_task_e2e.py` 6 tests | ✅ 完成 (commit bdbc806) |
 
 ### 2. Architecture Extension Loop candidate
 
@@ -98,8 +100,9 @@ query/event
 | Item | Evidence | Why Architecture Extension | Priority |
 |---|---|---|---|
 | Pre-loop MEMORY_RECALL wiring | 当前 MEMORY_RECALL 在 turn-end hook 调度；实际 prompt injection 走 `snapshot_for_prompt()` → `build_system_prompt()`（不经 dispatcher）；两条路径未统一 | 需要新 branch point（pre-loop context build phase）或双路径统一设计 | 高 — 核心主线能力 |
-| Skill non-empty registry business operation L3 | SKILL_SELECT dispatch path L3 verified（空 registry）；`no_suitable_skill` handler 已验证；non-empty registry 业务操作 L3 未验证 | 需要 non-empty SkillRegistry 和对应 SPEC/TDD；现有 branch point 可承载（SKILL_SELECT 已在 turn-end hook），是 branch behavior 补齐 | 中 — safe to auto-run after SPEC |
+| Skill non-empty registry business operation L3 | SKILL_SELECT dispatch path L3 verified（空 registry → non-empty registry）；demo-note-maker body_load_decision=True ✅；`test_skill_select_pipeline_l3.py` 6 tests (S1-S6) | ✅ 完成 (WP2, commit 35009ed) — 现有 SKILL_SELECT branch point 承载，branch behavior 补齐 | 完成 |
 | SubAgent non-empty registry business delegation L3 | SUBAGENT_DELEGATE_L0 dispatch path L3 verified（空 registry）；`no_suitable_subagent` handler 已验证；non-empty registry 业务委托 L3 未验证 | 需要 non-empty SubAgentRegistry 和对应 SPEC/TDD；现有 branch point 可承载（SUBAGENT_DELEGATE_L0 已在 turn-end hook），是 branch behavior 补齐 | 中 — safe to auto-run after SPEC |
+| WP1: Non-empty ToolRegistry + fake local tools | `agent/tool_registry.py` 注册 demo.echo_task_summary / demo.write_demo_note；走 Tool Pipeline 完整闭环 | ✅ 完成 (WP1, commit 6880482) — 现有 Tool Pipeline branch point 承载 | 完成 |
 | MEMORY_PROPOSE confirmation flow wiring | confirmation 二次 turn-end action wiring | 现有 branch point（turn-end hook）可承载；可能需新增 RuntimeActionType 或复用现有 confirmation branch | 中 — safe to auto-run after Architecture Decision |
 | Full user-visible streaming UX | STREAMING_PROVIDER_CALL dispatch path L3 verified；full UX（SSE/WebSocket/chunked response）未实现 | 需要 streaming protocol adapter / UX SPEC；现有 STREAMING_PROVIDER_CALL branch point 可承载 | 中低 — safe to auto-run after SPEC |
 
@@ -160,6 +163,10 @@ query/event
 | **#3** | **Tool invoke not_found L3** | ✅ 完成 (commit f6d92f7) — spy 拦截 gate→invoke pipeline 模拟竞态触发 not_found |
 | **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | ✅ 已覆盖 |
 | **#5** | **MCP HOME isolation** | ✅ 已闭环 |
+| **#6** | **WP1: Non-empty ToolRegistry + demo tools** | ✅ 完成 (commit 6880482) |
+| **#7** | **WP2: Non-empty SkillRegistry + demo-note-maker** | ✅ 完成 (commit 35009ed) |
+| **#8** | **WP3: User Onboarding + --help/help** | ✅ 完成 (commit b41193e) |
+| **#9** | **WP4: First Usable Task E2E Smoke Test** | ✅ 完成 (commit bdbc806) |
 
 ### 新发现候选（2026-05-24 discovery 扩展，已全部完成并移至上方"已完成/已闭环"）
 
@@ -170,7 +177,7 @@ query/event
 | Priority | Capability | Category | Why Architecture Extension | Dependencies |
 |---|---|---|---|---|
 | **高** | Pre-loop MEMORY_RECALL wiring | Architecture Extension | 需要新 branch point（pre-loop context build phase）或双路径统一设计；现有 turn-end MEMORY_RECALL 与 `snapshot_for_prompt()` 路径未共享 evidence | 需 Architecture Decision / SPEC 先行 |
-| **中** | Skill non-empty registry business operation L3 | Branch behavior 补齐（现有 SKILL_SELECT branch point） | 需要 non-empty SkillRegistry + SPEC/TDD；现有 branch point 可承载 | SPEC → TDD → Plan → Implementation |
+| **中** | ~~Skill non-empty registry business operation L3~~ | ✅ 完成 (WP2, commit 35009ed) — Branch behavior 补齐（现有 SKILL_SELECT branch point） | 已验证 demo-note-maker body_load_decision=True L3 完整闭环 | N/A |
 | **中** | SubAgent non-empty registry business delegation L3 | Branch behavior 补齐（现有 SUBAGENT_DELEGATE_L0 branch point） | 需要 non-empty SubAgentRegistry + SPEC/TDD；现有 branch point 可承载 | SPEC → TDD → Plan → Implementation |
 | **中** | MEMORY_PROPOSE confirmation flow wiring | Architecture Extension / Branch behavior | confirmation 二次 turn-end action wiring；现有 turn-end hook 可承载 | 需 Architecture Decision 判定是否需要新 RuntimeActionType |
 | **中低** | Full user-visible streaming UX | Architecture Extension | STREAMING_PROVIDER_CALL dispatch path 已有；需 streaming protocol adapter / UX SPEC | SPEC → TDD → Plan → Implementation |

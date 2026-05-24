@@ -3,7 +3,7 @@
 First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
 它的核心不是“更多工具”，而是把主代理运行时（Parent Agent Runtime）、工具注册中心（ToolRegistry）、记忆治理（Memory Governance）、技能系统（Skill System）、子代理系统（SubAgent System）、检查点（Checkpoint）和人工确认（Confirmation / Ask User）放在同一套可审计边界里运行。
 
-当前项目已经完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线，并通过全量测试和 synthetic dogfood；v0.9.x deep stabilization 正在把进入 SubAgent L1 前的深层测试、provider、config 和 Memory 隔离风险收口。
+当前项目已经完成 Memory 主线、Skill System（含 demo-note-maker 示例 skill）、SubAgent L0 safe-local 基线、Tool Pipeline（含 demo.echo_task_summary / demo.write_demo_note 示例工具）、User Onboarding（`--help` / `help` 命令）、E2E Smoke Test，并通过全量测试和 synthetic dogfood；v0.9.x deep stabilization 正在把进入 SubAgent L1 前的深层测试、provider、config 和 Memory 隔离风险收口。
 本轮新增全局 dogfood 入口，用于同时验证 Runtime、ToolRegistry、Memory、Skill、SubAgent、Checkpoint、Confirmation、CLI/TUI 和 secret safety。
 它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
 新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
@@ -33,7 +33,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 | Parent Agent Runtime | 已完成基础闭环 | 拥有主 loop、状态机、模型调用和分派 |
 | ToolRegistry | 已完成治理基础 | 工具注册、风险、confirmation、可见性过滤 |
 | Memory | 已完成主线 | 用户确认后写入；自动路径受 governance 限制 |
-| Skill System | 已完成 formal safe-local 系统 | metadata-first，按需加载，不直接执行工具 |
+| Skill System | 已完成 formal safe-local 系统，demo-note-maker 可用 | metadata-first，按需加载，不直接执行工具 |
 | SubAgent System | L0 已完成 | local fake/deterministic，Parent adjudication |
 | Checkpoint | 已完成安全边界 | 截断 tool result，过滤未知字段 |
 | CLI/TUI | 边界收口，仍有 P3 adapter debt | 输入/输出 adapter，不复制 runtime |
@@ -98,18 +98,14 @@ pip install -r requirements.txt
 
 ```bash
 .venv/bin/python main.py
-python main.py --shell
+python main.py --help        # 查看完整能力与限制说明
 ```
+
+交互模式中输入 `help` 查看 onboarding；输入 `quit` 退出。
 
 如需真实模型，需要自行在本地环境配置 provider key；不要把 key 写入仓库文件、日志、checkpoint 或文档。
 
-启动屏固定提示仍保留 health/logs 入口和 Skill 降预期声明：
-
-```text
-Health: python main.py health；Logs: python main.py logs --tail 50。
-Skill 是实验性能力。
-~691 passed, 3 permanent xfails
-```
+当前默认使用 Fake Provider（安全路径，无 API key，不联网）。启动屏和 `--help` 会诚实说明当前可用能力与尚未产品化的部分。
 
 当前 CLI shell is not a full Textual IDE.
 
@@ -234,8 +230,15 @@ Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`d
 
 ## 下一步 Roadmap
 
+近期已完成（First Usable Task MVP）：
+- WP1: Non-empty ToolRegistry + demo.echo_task_summary / demo.write_demo_note
+- WP2: Non-empty SkillRegistry + demo-note-maker skill
+- WP3: User Onboarding（`--help` / `help` 命令）
+- WP4: First Usable Task E2E Smoke Test（`tests/smoke/`）
+
+下一步候选：
 1. 推送当前 main 前，建议再做一次独立文档审计。
 2. SubAgent 后续只可按文档 gate 推进 L1/L2；L3/L4/L5 仍是 future/contract。
-3. Memory 下一步聚焦真实质量 dogfood 和更清晰的 recall/provider 边界，不引入未授权 backend。
+3. Memory 下一步聚焦 Pre-loop MEMORY_RECALL wiring（Architecture Extension candidate）或真实质量 dogfood。
 4. Skill 下一步可继续强化真实 dogfood 证据和文档索引，不默认安装远程 skill。
 5. Runtime 下一步继续减少 `core.py` hub 压力，但不能破坏现有 checkpoint / confirmation / tool_result 语义。

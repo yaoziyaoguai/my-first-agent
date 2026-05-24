@@ -33,13 +33,13 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher: Any,
     dependencies: Any = None,
 ) -> None:
-    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline + checkpoint + consolidation + recall。
+    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline + checkpoint + consolidation + recall + skill select。
 
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
     决策。它构造独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL、
     TOOL_GATE → TOOL_INVOKE → TOOL_RESULT、CHECKPOINT_SAFE_SUMMARY、
-    MEMORY_CONSOLIDATE、MEMORY_RECALL），各自通过
+    MEMORY_CONSOLIDATE、MEMORY_RECALL、SKILL_SELECT），各自通过
     dispatcher.route_from_runtime_loop() 获得完整的 evidence chain。
 
     Tool 是已有介入点，ToolGate / ToolInvoke / ToolResult 不是三个独立子系统，
@@ -294,6 +294,37 @@ def _try_phase1_turn_end_runtime_action(
         route(recall_request)
     except Exception:
         # MEMORY_RECALL 失败不阻塞 loop 也不阻塞其他 dispatch
+        pass
+
+    # SKILL_SELECT action（独立 try/except——失败不阻断其他 dispatch）
+    # 中文学习边界：Skill Selection 通过 turn-end hook dispatch 验证 L3 evidence
+    # chain 完整——handler 使用空 SkillRegistry（roots=[]），因此总是 rejected
+    # （no skills available）。不影响现有 skill selection 行为（模型输出驱动的
+    # mid-loop dispatch）。
+    #
+    # 为什么挂在 turn-end hook 上：
+    # - 复用已有 branch point，不新增架构元素
+    # - L3 evidence 关注「handler 是否从真实 runtime loop dispatch」而非
+    #   「handler 是否成功 load 了一个 skill」
+    # - rejected/failed disposition 不影响 evidence level
+    try:
+        skill_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SKILL_SELECT,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(skill_request)
+    except Exception:
+        # SKILL_SELECT 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
 

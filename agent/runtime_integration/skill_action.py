@@ -54,6 +54,35 @@ class SkillRuntimeActionHandler:
         selection_confidence = metadata.get("selection_confidence")
         available_metadata = [_plain_mapping(item) for item in payload.get("available_skill_metadata", ())]
 
+        # 中文学习注释：当 available_skill_metadata 为空且没有 selected_skill_id 时，
+        # 这是 turn-end hook 的 L3 evidence dispatch（非模型驱动 dispatch）。handler
+        # 仍通过 invoke_registered_target 获得完整 target_module_proof 证据链，
+        # 但返回 failed disposition。不影响现有模型输出驱动的 skill selection 行为。
+        if not available_metadata and not selected_skill_id:
+            observed = context.invoke_registered_target(
+                target_module="SkillLoader",
+                operation="no_suitable_skill",
+                payload={"reason": "no skills available for selection"},
+            )
+            return context.failed(
+                handler_name=type(self).__name__,
+                target_module="SkillLoader",
+                payload={
+                    "body_load_decision": False,
+                    "no_suitable_skill": True,
+                    "failure_reason": "no skills available for selection",
+                },
+                observed_call=observed,
+                evidence_extra={
+                    "body_load_decision": False,
+                    "no_suitable_skill": True,
+                    "audit_only_skill_exclusion_evidence": (
+                        self._audit_exclusion_evidence()
+                    ),
+                },
+                error_safe_preview="no skills available for selection",
+            )
+
         failure = self._validate_payload(
             payload=payload,
             metadata=metadata,

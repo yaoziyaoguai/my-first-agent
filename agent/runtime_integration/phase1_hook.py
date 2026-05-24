@@ -22,6 +22,9 @@ from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
+from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+from agent.skill_system.loader import SkillLoader
+from agent.skill_system.registry import SkillRegistry
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
@@ -30,8 +33,9 @@ from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHan
 def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     """构建 Phase 1 RuntimeActionDispatcher。
 
-    注册 memory.turn_end_proposal + memory.propose + tool.gate handler。
-    其他 handler（skill、checkpoint、streaming、subagent）不在 Phase 1 范围，不注册。
+    注册 memory turn-end proposal + retain + recall + consolidate + tool pipeline +
+    checkpoint + skill select handler（共 9 个 handler）。
+    Streaming、SubAgent 不在当前范围，不注册。
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only，proposal generation）
@@ -73,5 +77,13 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.MEMORY_CONSOLIDATE,
         MemoryConsolidateHandler(),
+    )
+    # SKILL_SELECT：空 registry → handler 总是 rejected（no skills available）
+    # 但 evidence chain 仍然完整——L3 关注 dispatch 路径，不关注 disposition
+    _skill_registry = SkillRegistry(roots=[])
+    _skill_loader = SkillLoader(_skill_registry)
+    registry.register(
+        RuntimeActionType.SKILL_SELECT,
+        SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

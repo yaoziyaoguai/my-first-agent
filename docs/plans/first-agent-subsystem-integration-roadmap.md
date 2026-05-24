@@ -71,7 +71,7 @@ query/event
 | **Memory: consolidation** | ✅ | ✅ | ✅ | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (本 commit) |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
-| **Skill: action** | ✅ | ✅ | ❌ | `test_skill_*.py` (L1/L2) | L3 via core.chat() 未验证 | deferred（需先稳定 Skill 语义） |
+| **Skill: action** | ✅ | ✅ | ✅ | `test_skill_l3.py` (L3), `test_skill_*.py` (L1/L2) | 无 | 已闭环 (本 commit) |
 | **SubAgent: action** | ✅ | ✅ | ❌ | `test_subagent_*.py` (L1/L2) | L3 via core.chat() 未验证 | deferred（需先稳定 SubAgent 语义） |
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
@@ -160,6 +160,7 @@ query/event
 | **#7** | **Evidence overclaim: StreamingProvider** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
 | **#9** | **Memory Recall L3** | ✅ 完成 (commit e18595b) — MEMORY_RECALL 接入 loop.py turn-end hook，3 个 L3 tests |
+| **#10** | **Skill L3 Activation** | ✅ 完成 (本 commit) — SKILL_SELECT 接入 loop.py turn-end hook，3 个 L3 tests，no_suitable_skill catalog entry |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

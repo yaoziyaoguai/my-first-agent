@@ -122,6 +122,11 @@ def _skill_loader_load_body_adapter(payload: Mapping[str, Any]) -> str:
     return str(loader.load_body(str(payload.get("skill_id") or "")))
 
 
+def _skill_no_suitable_skill_adapter(payload: Mapping[str, Any]) -> str:
+    """no_suitable_skill 操作适配器：返回拒绝原因字符串，不加载任何 skill body。"""
+    return str(payload.get("reason") or "no suitable skill available")
+
+
 def _memory_policy_decide_adapter(payload: Mapping[str, Any]) -> Any:
     from agent.memory_policy import DeterministicMemoryPolicy
 
@@ -369,6 +374,17 @@ class RuntimeActionTargetCatalog:
             adapter=_skill_loader_load_body_adapter,
             function_called="SkillLoader.load_body",
             call_signature="load_body(skill_id: str)",
+        ),
+        _descriptor(
+            "skill.select",
+            "agent.runtime_integration.skill_action.SkillRuntimeActionHandler",
+            "SkillLoader",
+            operation="no_suitable_skill",
+            invocation_adapter_id="SkillLoader.no_suitable_skill",
+            implementation_id="agent.skill_system.loader.SkillLoader.no_suitable_skill",
+            adapter=_skill_no_suitable_skill_adapter,
+            function_called="SkillLoader.no_suitable_skill",
+            call_signature="no_suitable_skill(reason: str)",
         ),
         _descriptor(
             "tool.request",

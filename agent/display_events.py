@@ -52,6 +52,7 @@ EVENT_MEMORY_STORED = "memory.stored"
 EVENT_MEMORY_BLOCKED = "memory.blocked"
 EVENT_MEMORY_INJECTED = "memory.injected"
 EVENT_MEMORY_LISTED = "memory.listed"
+EVENT_SUBAGENT_LISTED = "subagent.listed"
 # Memory Interactive Confirmation v1 — 用户确认请求事件
 EVENT_MEMORY_CONFIRMATION_REQUESTED = "memory.confirmation_requested"
 
@@ -310,6 +311,34 @@ def _scope_label(scope) -> str:
     if "project" in raw.lower():
         return "项目"
     return raw
+
+
+def subagent_list_event(descriptors: tuple, *, registry_label: str = "subagent") -> RuntimeEvent:
+    """构造 subagent 列表展示事件。
+
+    descriptors 是从 registry 读取的可见 subagent descriptor tuple。
+    无注册 subagent 时返回空列表提示。
+    """
+    if not descriptors:
+        return RuntimeEvent(
+            event_type=EVENT_SUBAGENT_LISTED,
+            text="暂无已注册的子代理。",
+            metadata={"item_count": 0},
+        )
+
+    lines = [f"已注册的子代理（共 {len(descriptors)} 个）："]
+    for i, d in enumerate(descriptors, 1):
+        role = getattr(d, "role", "")
+        desc = getattr(d, "description", "")
+        risk = getattr(d, "risk_level", "low")
+        lines.append(f"  {i}. {getattr(d, 'name', str(d))} [{role}] — {desc[:80]}（风险:{risk}）")
+
+    text = "\n".join(lines)
+    return RuntimeEvent(
+        event_type=EVENT_SUBAGENT_LISTED,
+        text=text,
+        metadata={"item_count": len(descriptors), "registry_label": registry_label},
+    )
 
 
 def memory_confirmation_requested_event(

@@ -16,6 +16,7 @@ from agent.display_events import (
     memory_injected_event,
     memory_list_event,
     memory_stored_event,
+    subagent_list_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
@@ -140,6 +141,24 @@ def _looks_like_show_memories(text: str) -> bool:
         "show memories", "list memories", "show my memories",
         "显示记忆", "列出记忆", "查看记忆", "我的记忆", "已保存的记忆",
         "记忆列表", "查看已保存",
+    )
+    return any(trigger in text_lower for trigger in show_triggers)
+
+
+def _looks_like_show_subagents(text: str) -> bool:
+    """检测用户输入是否为"查看子代理"CLI 命令。
+
+    中文学习边界：这是 deterministic CLI meta-command 检测，
+    不触发 delegation、不执行 subagent、不写 store。
+
+    支持的触发词（中英文）：
+    - show subagents / list subagents / show agents
+    - 显示子代理 / 列出子代理 / 查看子代理 / 子代理列表
+    """
+    text_lower = text.strip().lower()
+    show_triggers = (
+        "show subagents", "list subagents", "show agents",
+        "显示子代理", "列出子代理", "查看子代理", "子代理列表",
     )
     return any(trigger in text_lower for trigger in show_triggers)
 
@@ -374,6 +393,33 @@ def chat(
         return "\n".join(
             [getattr(r, "content", str(r))[:120] for r in records]
         ) if records else "暂无已保存的记忆。"
+
+    # 中文学习边界：show subagents / 显示子代理 是 CLI meta-command，
+    # 不触发 delegation、不执行 subagent、不写 store。
+    if _looks_like_show_subagents(user_input):
+        from pathlib import Path
+        from agent.subagent_system.registry import SubAgentRegistry
+
+        try:
+            registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+            descriptors = registry.list_visible()
+        except Exception:
+            descriptors = ()
+
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            subagent_list_event(descriptors),
+            fallback_prefix="\n",
+        )
+        if descriptors:
+            lines = [f"已注册的子代理（共 {len(descriptors)} 个）："]
+            for i, d in enumerate(descriptors, 1):
+                name = getattr(d, "name", str(d))
+                role = getattr(d, "role", "")
+                desc = getattr(d, "description", "")[:80]
+                lines.append(f"  {i}. {name} [{role}] — {desc}")
+            return "\n".join(lines)
+        return "暂无已注册的子代理。"
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

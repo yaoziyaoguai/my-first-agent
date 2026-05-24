@@ -310,6 +310,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 模块级 import surface，不引入新的模块级耦合。
         "agent.runtime_integration.phase1_hook",
         "agent.state",
+        # Phase 2 SubAgent demo：chat() 内 local import，仅用于
+        # "show subagents" CLI meta-command 构建 SubAgentRegistry。
+        # 不改变 core 的模块级 import surface，不引入新的模块级耦合。
+        "agent.subagent_system.registry",
         "agent.tool_registry",
         "agent.tools",
     }
@@ -343,6 +347,7 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",
         "_looks_like_show_memories",
+        "_looks_like_show_subagents",
         "_maybe_run_l2_inline",
         "_resolve_provider_evidence_metadata",
         "_run_main_loop",

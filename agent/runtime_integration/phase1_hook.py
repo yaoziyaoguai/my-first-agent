@@ -110,8 +110,8 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         RuntimeActionType.SKILL_SELECT,
         SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
     )
-    # SUBAGENT_DELEGATE_L0：空 registry → handler 总是 rejected（no subagent available）
-    _subagent_registry = SubAgentRegistry(roots=())
+    # SUBAGENT_DELEGATE_L0：demo subagent registry 非空，handler 可定位已注册 subagent
+    _subagent_registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),

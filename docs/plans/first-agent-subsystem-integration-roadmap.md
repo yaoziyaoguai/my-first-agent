@@ -44,8 +44,8 @@ query/event
 | **Provider/Model** | `agent/provider/` (12 files), `agent/model_call.py`, `agent/model_output_dispatch.py` | `docs/LLM_PROVIDER_ADAPTER.md` | 集成在主流程中 | Anthropic/OpenAI/Fake provider 均通过 core.chat() 调用；FakeProvider 支撑所有 L3 测试 |
 | **Confirmation** | `agent/confirmation/` (5 files), `agent/confirm_handlers.py`, `agent/pending_confirmation_dispatch.py` | `docs/specs/tool-branch-confirmation-required/` | L3 已验证 | tool confirmation_required 分支行为已验证 |
 | **Context Build** | `agent/context_builder.py`, `agent/prompt_builder.py`, `agent/context.py` | 散见于各 spec | 集成在主流程中 | context injection（含 memory snapshot）经 core.chat() 验证 |
-| **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | L1/L2 已验证 | evidence.py 提供 catalog-owned adapters；local trace 未接入 runtime；test_runtime_action_contract.py 已有 overclaim 防护但未覆盖 CHECKPOINT_SAFE_SUMMARY |
-| **Dispatcher** | `agent/runtime_integration/dispatcher.py`, `agent/runtime_integration/schema.py`, `agent/runtime_integration/phase1_hook.py` | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 基础设施 | route() 和 route_from_runtime_loop() 双入口；phase1_hook 连接 loop 与 dispatcher；7 个 handler 已注册 |
+| **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | L1/L2 已验证 | evidence.py 提供 catalog-owned adapters；overclaim 防护已覆盖全部 12 个 catalog targets；local trace 未接入 runtime |
+| **Dispatcher** | `agent/runtime_integration/dispatcher.py`, `agent/runtime_integration/schema.py`, `agent/runtime_integration/phase1_hook.py` | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 基础设施 | route() 和 route_from_runtime_loop() 双入口；phase1_hook 连接 loop 与 dispatcher；8 个 handler 已注册（含 MEMORY_CONSOLIDATE） |
 | **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py` | `docs/02-architecture/STREAMING_PROTOCOL.zh.md` | L1 基础 | streaming provider adapter 存在；L3 via core.chat() 未专项验证；RuntimeActionType STREAMING_PROVIDER_CALL / STREAMING_EVENT 存在但未在 phase1_hook 注册 |
 | **CLI/TUI** | `agent/cli/`, `agent/cli_renderer.py`, `agent/display_events.py`, `agent/input_backends/` | `docs/V0_2_BASIC_TUI_PLAN.md` | adapter boundary | 不参与 runtime decision；已阶段性收口 |
 | **Planner** | `agent/planner.py`, `agent/plan_schema.py` | 散见于 core.py | 集成在主流程中 | planning phase 内嵌于 core.chat() |
@@ -85,8 +85,7 @@ query/event
 
 | Item | Evidence | Priority |
 |---|---|---|
-| Tool blocked L3 | `tool_gate.py` 已有 blocked/rejected disposition；`test_tool_anchor_fake.py` + `test_tool_branch_confirmation_required.py` 有 L1/L2 | **P0 — 补齐 Tool gate 四 disposition 全 L3 覆盖的最后一块** |
-| Evidence overclaim: CHECKPOINT_SAFE_SUMMARY | `test_runtime_action_contract.py` 未覆盖 CHECKPOINT_SAFE_SUMMARY 的 forged target_label 防护 | P1 |
+| (无已知 correctness/safety bug) | N/A | N/A |
 
 ### 2. L3 主路径接入
 
@@ -115,7 +114,7 @@ query/event
 
 | Item | Evidence | Priority |
 |---|---|---|
-| Memory consolidation L3 | consolidation pipeline L1/L2 完成，runtime trigger 语义待澄清 | ⚠️ deferred |
+| Memory consolidation L3 | ✅ 完成 (commit e1ab736) — loop.py wiring + L3 test |
 | Skill L3 activation | skill_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
 | SubAgent L3 delegation | subagent_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
 | Streaming L3 | streaming_provider.py adapter 存在 | deferred |
@@ -157,8 +156,8 @@ query/event
 
 | Order | Capability | Repository evidence | Why safe | Why next | Expected SPEC path | Expected tests | Stop conditions | Safe to auto-run |
 |---|---|---|---|---|---|---|---|---|
-| **#6** | **Evidence overclaim: SubAgent (ForgedTargetLabel + CatalogAllowedForgedCallable)** | `evidence.py` catalog 已注册 `subagent.delegate_l0→SubAgentExecutor` descriptor；`is_runtime_e2e_evidence()` 有特殊 `parent_adjudicated is True` 规则；但 `test_runtime_action_contract.py` 中零覆盖 | 纯测试添加，零生产代码改动，严格复用现有 `_ForgedTargetLabelHandler` / `_CatalogAllowedForgedCallableHandler` 模式 | SubAgent 是安全边界（delegated execution），缺 overclaim 防护是 correctness/safety gap | `docs/specs/evidence-overclaim-subagent/` | `test_runtime_action_contract.py` 新增 2 测试 | 无 | ✅ 是 |
-| **#7** | **Evidence overclaim: StreamingProvider ForgedTargetLabel** | `test_runtime_action_contract.py` 有 `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_streaming_provider` 但缺 plain `_ForgedTargetLabelHandler` 测试 | 纯测试添加，零生产代码改动 | 补齐 StreamingProtocol overclaim 防护对称性 | `docs/specs/evidence-overclaim-streaming/` | `test_runtime_action_contract.py` 新增 1 测试 | 无 | ✅ 是 |
+| **#6** | **Evidence overclaim: SubAgent** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
+| **#7** | **Evidence overclaim: StreamingProvider** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | `test_runtime_action_handlers.py` 验证各 handler direct dispatcher 分类 | 纯测试审计+补充 | 确保 direct dispatcher 不能伪装 L3 | TBD after #6/#7 | 补充缺失 L2 downgrade 断言 | 需先完成 #6/#7 | ⚠️ 待评估 |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）

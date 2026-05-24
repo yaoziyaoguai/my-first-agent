@@ -80,6 +80,7 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry = ActionHandlerRegistry()
     registry.register(RuntimeActionType.MEMORY_TURN_END_PROPOSAL, MemoryTurnEndProposalHandler())
     registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+    registry.register(RuntimeActionType.TOOL_REQUEST, ToolGateHandler())
     registry.register(RuntimeActionType.TOOL_INVOKE, ToolInvokeHandler())
     registry.register(RuntimeActionType.TOOL_RESULT, ToolResultFeedbackHandler())
     registry.register(RuntimeActionType.CHECKPOINT_SAFE_SUMMARY, CheckpointSafeSummaryHandler())

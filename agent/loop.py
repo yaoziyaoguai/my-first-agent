@@ -38,7 +38,7 @@ def _try_phase1_turn_end_runtime_action(
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
     决策。它构造独立的 RuntimeActionRequest（MEMORY_TURN_END_PROPOSAL、
-    TOOL_GATE → TOOL_INVOKE → TOOL_RESULT、CHECKPOINT_SAFE_SUMMARY、
+    TOOL_GATE → TOOL_REQUEST → TOOL_INVOKE → TOOL_RESULT、CHECKPOINT_SAFE_SUMMARY、
     MEMORY_CONSOLIDATE、MEMORY_RECALL、SKILL_SELECT、SUBAGENT_DELEGATE_L0），
     各自通过 dispatcher.route_from_runtime_loop() 获得完整的 evidence chain。
 
@@ -141,6 +141,26 @@ def _try_phase1_turn_end_runtime_action(
         gate_result = route(tool_gate_request)
     except Exception:
         # TOOL_GATE action 失败不阻塞 loop 也不阻塞 MEMORY
+        pass
+
+    # TOOL_REQUEST action（独立 try/except——失败不阻断 TOOL_INVOKE）
+    try:
+        tool_request_dispatch = RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_REQUEST,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(tool_request_dispatch)
+    except Exception:
         pass
 
     # TOOL_INVOKE action（独立 try/except——gate allowed 后调用工具）

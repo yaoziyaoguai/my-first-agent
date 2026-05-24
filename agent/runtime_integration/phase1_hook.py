@@ -65,6 +65,10 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         ToolGateHandler(),
     )
     registry.register(
+        RuntimeActionType.TOOL_REQUEST,
+        ToolGateHandler(),
+    )
+    registry.register(
         RuntimeActionType.TOOL_INVOKE,
         ToolInvokeHandler(),
     )

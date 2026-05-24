@@ -49,6 +49,27 @@ class ToolGateHandler:
         requested_capability = str(payload.get("requested_capability") or "")
 
         if not tool_name:
+            # 中文学习注释：当 action_type 为 tool.request 且 tool_name 为空时，
+            # 这是 turn-end hook 的 L3 evidence dispatch（非模型驱动的 tool request）。
+            # handler 通过 invoke_registered_target 获得完整 target_module_proof
+            # 证据链，返回 failed disposition 但不影响现有模型输出驱动的 tool gating。
+            if str(request.action_type) == "tool.request":
+                observed = context.invoke_registered_target(
+                    target_module="ToolRegistry",
+                    operation="lookup_and_risk_check",
+                    payload={"tool_name": ""},
+                )
+                return context.failed(
+                    handler_name=type(self).__name__,
+                    target_module="ToolRegistry",
+                    payload={"gate_disposition": None, "rejection_reason": "no tool requested at turn-end"},
+                    observed_call=observed,
+                    evidence_extra={
+                        "decision": "failed",
+                        "no_tool_requested": True,
+                    },
+                    error_safe_preview="no tool requested at turn-end",
+                )
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="ToolRegistry",

@@ -33,7 +33,7 @@ query/event
 
 | Area | Repository evidence | Existing docs/specs/tests | Current maturity | Notes |
 |---|---|---|---|---|
-| **Tool Pipeline** | `agent/runtime_integration/tool_gate.py`, `tool_invoke.py`, `tool_result_feedback.py`, `agent/tool_registry.py`, `agent/tool_executor.py` | `docs/specs/tool-pipeline-l3-completion/`, `docs/specs/tool-branch-confirmation-required/`, `docs/specs/tool-invoke-branch-behavior/`, `docs/specs/tool-result-feedback-branch-behavior/`, `docs/specs/tool-gate-not-found-l3/` | L3 完整闭环 | TOOL_GATE→TOOL_INVOKE→TOOL_RESULT 三阶段全部 L3 verified；four dispositions: allowed✅, confirmation_required✅, not_found✅, blocked ❌(L3 gap) |
+| **Tool Pipeline** | `agent/runtime_integration/tool_gate.py`, `tool_invoke.py`, `tool_result_feedback.py`, `agent/tool_registry.py`, `agent/tool_executor.py` | `docs/specs/tool-pipeline-l3-completion/`, `docs/specs/tool-branch-confirmation-required/`, `docs/specs/tool-invoke-branch-behavior/`, `docs/specs/tool-result-feedback-branch-behavior/`, `docs/specs/tool-gate-not-found-l3/`, `docs/specs/tool-request-l3/` | L3 完整闭环 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段全部 L3 verified；four dispositions: allowed✅, confirmation_required✅, not_found✅, blocked ❌(L3 gap) |
 | **MCP** | `agent/mcp.py`, `agent/mcp_models.py`, `agent/mcp_policy.py`, `agent/mcp_bridge.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` | `docs/specs/mcp-runtime-integration/`, `docs/specs/mcp-l3-real-core-loop/` | L3 基础闭环 | confirmation="never" 工具走通完整管线；confirmation="always" 工具在 gate 被正确拦截 |
 | **Memory (retain)** | `agent/runtime_integration/memory_retain.py`, `agent/memory.py`, `agent/memory_runtime.py`, `agent/memory_policy.py`, `agent/memory_store.py` | `docs/specs/memory-retain-branch-behavior/` | L3 部分闭环 | MEMORY_TURN_END_PROPOSAL L3 verified via phase1_hook → dispatcher → handler；MEMORY_PROPOSE（retain 执行写入）L3 DEFERRED（loop 需在 confirmation 后触发二次 turn-end action） |
 | **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L1/L2 基础 + L3 DEFERRED | snapshot→prompt injection 经 context_builder 验证；MEMORY_RECALL RuntimeActionType dispatch from loop.py DEFERRED |
@@ -58,6 +58,7 @@ query/event
 | **Tool: confirmation_required** | ✅ | ✅ | ✅ | `test_tool_branch_confirmation_required.py` | 无 | 已闭环 |
 | **Tool: blocked** | ✅ | ✅ | ✅ | `test_tool_blocked_l3.py` | 无 | 已闭环 (commit 6cef9b8) |
 | **Tool: not_found** | ✅ | ✅ | ✅ | `test_tool_gate_not_found_l3.py` | 无 | 已闭环 (commit 76a88e4) |
+| **Tool: request** | ✅ | ✅ | ✅ | `test_tool_request_l3.py` (L3) | 无 | 已闭环 (本 commit) |
 | **Tool: invoke** | ✅ | ✅ | ✅ | `test_tool_invoke_branch_behavior.py` | 无 | 已闭环 |
 | **Tool: invoke error** | ✅ | ✅ | ✅ | `test_tool_invoke_error_l3.py` | 无 | 已闭环 (commit 748513c) |
 | **Tool: invoke not_found** | ✅ | ✅ | ✅ | `test_tool_invoke_not_found_l3.py` | 无 | 已闭环 (commit f6d92f7) |

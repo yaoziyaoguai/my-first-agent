@@ -76,6 +76,7 @@ from agent.display_events import (
     EVENT_MEMORY_LISTED,
     EVENT_MEMORY_STORED,
     EVENT_SUBAGENT_LISTED,
+    EVENT_RUN_SUMMARY,
     EVENT_PLAN_CONFIRMATION_REQUESTED,
     EVENT_STATE_INCONSISTENCY_RESET,
     EVENT_TOOL_CONFIRMATION_REQUESTED,
@@ -206,6 +207,9 @@ _EVENT_BASELINE: frozenset[str] = frozenset(
         EVENT_SUBAGENT_LISTED,
         # Memory Interactive Confirmation v1：用户确认请求事件
         EVENT_MEMORY_CONFIRMATION_REQUESTED,
+        # WP-E Trace / Debug：run summary 是 display/observation event，
+        # 不含 decision 语义，用于每轮结束后展示结构化运行摘要
+        EVENT_RUN_SUMMARY,
     }
 )
 
@@ -263,3 +267,55 @@ def test_render_functions_return_str() -> None:
             f" 当前为 {return_type!r}。"
             " display 渲染出口禁止承担 mutation 或 decision 类型。"
         )
+
+
+# ===================== D6 · run_summary_event 展示契约 =====================
+
+
+def test_run_summary_event_is_display_only() -> None:
+    """`run_summary_event()` 产 display/observation event，不含 decision 语义。
+
+    WP-E 在每轮 chat() 结束后产出结构化 run summary，基于
+    RuntimeActionDispatcher evidence + TurnState 计数。它是 display-only
+    projection，不改变 runtime state / checkpoint / tool / memory 决策。
+    """
+    from agent.display_events import run_summary_event
+
+    evt = run_summary_event(
+        loop_iterations=3,
+        tool_calls=2,
+        memory_operations=1,
+        subagent_delegations=0,
+        stop_reason="正常结束",
+    )
+    assert evt.event_type == "run.summary"
+    assert "循环次数：3" in evt.text
+    assert "工具调用：2" in evt.text
+    assert "Memory 操作：1" in evt.text
+    assert "正常结束" in evt.text
+
+def test_run_summary_event_subagent_delegation_visible() -> None:
+    """SubAgent 委托 > 0 时在 summary 中可见。"""
+    from agent.display_events import run_summary_event
+
+    evt = run_summary_event(
+        loop_iterations=1,
+        tool_calls=1,
+        memory_operations=0,
+        subagent_delegations=2,
+        stop_reason="正常结束",
+    )
+    assert "SubAgent 委托：2 次" in evt.text
+
+def test_run_summary_event_subagent_zero_not_shown() -> None:
+    """SubAgent 委托为 0 时不显示该行（保持摘要简洁）。"""
+    from agent.display_events import run_summary_event
+
+    evt = run_summary_event(
+        loop_iterations=1,
+        tool_calls=0,
+        memory_operations=0,
+        subagent_delegations=0,
+        stop_reason="正常结束",
+    )
+    assert "SubAgent 委托" not in evt.text

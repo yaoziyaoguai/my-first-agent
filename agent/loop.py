@@ -637,6 +637,62 @@ class LoopDependencies:
     trace_id: str | None = None
 
 
+def _emit_run_summary(
+    turn_state: Any,
+    loop_ctx: LoopContext,
+    dependencies: LoopDependencies,
+    *,
+    cached_loop_iterations: int | None = None,
+    cached_tool_calls: int | None = None,
+) -> None:
+    """在每次 return 前产出 run.summary RuntimeEvent。
+
+    中文学习边界：
+    - 从 RuntimeActionDispatcher.action_log 统计各类 evidence 事件
+    - 从 TurnState.task 读取循环计数和工具调用计数
+    - 产出结构化摘要文本，经 safe_emit_runtime_event 送达用户
+    - 这是 display/observation event，不含 decision 语义
+    """
+    from agent.display_events import run_summary_event
+
+    dispatcher = getattr(dependencies, "runtime_action_dispatcher", None)
+    action_log = getattr(dispatcher, "action_log", ()) if dispatcher is not None else ()
+
+    memory_ops = 0
+    subagent_delegations = 0
+    for event in action_log:
+        at = str(getattr(event, "action_type", ""))
+        if at.startswith("memory."):
+            memory_ops += 1
+        elif at.startswith("subagent."):
+            subagent_delegations += 1
+
+    state = dependencies.state
+    loop_iterations = (
+        cached_loop_iterations
+        if cached_loop_iterations is not None
+        else getattr(state.task, "loop_iterations", 0)
+    )
+    tool_calls = (
+        cached_tool_calls
+        if cached_tool_calls is not None
+        else getattr(state.task, "tool_call_count", 0)
+    )
+
+    stop_reason = "正常结束"
+    if loop_iterations > loop_ctx.max_loop_iterations:
+        stop_reason = f"达到最大循环次数 ({loop_ctx.max_loop_iterations})"
+
+    summary_event = run_summary_event(
+        loop_iterations=loop_iterations,
+        tool_calls=tool_calls,
+        memory_operations=memory_ops,
+        subagent_delegations=subagent_delegations,
+        stop_reason=stop_reason,
+    )
+    dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
+
+
 def run_main_loop(
     turn_state: Any,
     loop_ctx: LoopContext,
@@ -672,6 +728,8 @@ def run_main_loop(
             event_channel="loop",
         )
         if state.task.loop_iterations > loop_ctx.max_loop_iterations:
+            _guard_loop_iterations = state.task.loop_iterations
+            _guard_tool_calls = state.task.tool_call_count
             log_runtime_event(
                 "loop.guard_triggered",
                 event_source="runtime",
@@ -685,9 +743,18 @@ def run_main_loop(
             dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, event)
             dependencies.clear_checkpoint()
             state.reset_task()
+            _emit_run_summary(
+                turn_state,
+                loop_ctx,
+                dependencies,
+                cached_loop_iterations=_guard_loop_iterations,
+                cached_tool_calls=_guard_tool_calls,
+            )
             return "对话循环次数过多，请简化任务或分步执行。"
 
         response = dependencies.call_model(turn_state, loop_ctx)
+        _cached_loop_iterations = state.task.loop_iterations
+        _cached_tool_calls = state.task.tool_call_count
         result = dependencies.dispatch_model_output(response)
         if result is not None:
             # Phase 1 turn-end hook: 在真实 core loop 路径中触发 RuntimeAction，
@@ -697,4 +764,11 @@ def run_main_loop(
                     dependencies.state, result, dependencies.runtime_action_dispatcher,
                     dependencies=dependencies,
                 )
+            _emit_run_summary(
+                turn_state,
+                loop_ctx,
+                dependencies,
+                cached_loop_iterations=_cached_loop_iterations,
+                cached_tool_calls=_cached_tool_calls,
+            )
             return result

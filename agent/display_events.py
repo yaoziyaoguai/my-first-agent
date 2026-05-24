@@ -53,6 +53,7 @@ EVENT_MEMORY_BLOCKED = "memory.blocked"
 EVENT_MEMORY_INJECTED = "memory.injected"
 EVENT_MEMORY_LISTED = "memory.listed"
 EVENT_SUBAGENT_LISTED = "subagent.listed"
+EVENT_RUN_SUMMARY = "run.summary"
 # Memory Interactive Confirmation v1 — 用户确认请求事件
 EVENT_MEMORY_CONFIRMATION_REQUESTED = "memory.confirmation_requested"
 
@@ -338,6 +339,39 @@ def subagent_list_event(descriptors: tuple, *, registry_label: str = "subagent")
         event_type=EVENT_SUBAGENT_LISTED,
         text=text,
         metadata={"item_count": len(descriptors), "registry_label": registry_label},
+    )
+
+
+def run_summary_event(
+    *,
+    loop_iterations: int,
+    tool_calls: int,
+    memory_operations: int,
+    subagent_delegations: int,
+    stop_reason: str,
+) -> RuntimeEvent:
+    """构造 run summary 展示事件。
+
+    每轮 chat() 结束后产出结构化运行摘要，让用户/开发者能看懂
+    本轮发生了什么。数据来源：TurnState 计数 + RuntimeActionDispatcher evidence。
+    """
+    parts = ["本轮运行摘要"]
+    parts.append(f"  循环次数：{loop_iterations}")
+    parts.append(f"  工具调用：{tool_calls} 次")
+    parts.append(f"  Memory 操作：{memory_operations} 次")
+    if subagent_delegations:
+        parts.append(f"  SubAgent 委托：{subagent_delegations} 次")
+    parts.append(f"  结果：{stop_reason}")
+    return RuntimeEvent(
+        event_type=EVENT_RUN_SUMMARY,
+        text="\n".join(parts),
+        metadata={
+            "loop_iterations": loop_iterations,
+            "tool_calls": tool_calls,
+            "memory_operations": memory_operations,
+            "subagent_delegations": subagent_delegations,
+            "stop_reason": stop_reason,
+        },
     )
 
 

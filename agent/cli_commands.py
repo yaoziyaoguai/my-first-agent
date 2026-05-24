@@ -119,6 +119,60 @@ def detect_delegate_to_subagent(text: str) -> tuple[str, str] | None:
     return None
 
 
+def detect_nl_delegation(text: str) -> tuple[str, str] | None:
+    """检测用户输入是否为自然语言子代理委托，返回 (subagent_name, task)。
+
+    Issue 2: safe deterministic NL delegation fixtures。
+    用户无需记忆 CLI 语法即可委托子代理——说"帮我统计 demo workspace"
+    就能触发 demo-stat。这是 deterministic 关键词匹配，不调用 LLM、
+    不经过 tool pipeline、不成为第二条 runtime。
+
+    支持的 NL 触发模式（确定性匹配，默认委托给 demo-stat）：
+    - 帮我统计/分析 <task>
+    - 统计一下/分析一下 <task>
+    - 帮我看看/查看 <task>
+    - summarize/analyze demo workspace files
+    - count files in project
+    - 文件统计/项目统计
+
+    返回 (subagent_name, task) 或 None。
+    """
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+
+    # 中文 NL 触发词 → demo-stat
+    cn_patterns: list[tuple[str, str | None]] = [
+        ("帮我统计", None),   # → task = remainder
+        ("帮我分析", None),
+        ("统计一下", None),
+        ("分析一下", None),
+        ("帮我看看", None),
+        ("帮我查看", None),
+        ("文件统计", "统计项目文件"),
+        ("项目统计", "统计项目文件"),
+    ]
+    for prefix, fixed_task in cn_patterns:
+        if text_stripped.startswith(prefix):
+            task = fixed_task if fixed_task else text_stripped[len(prefix):].strip()
+            if task:
+                return ("demo-stat", task)
+
+    # 英文 NL 触发词 → demo-stat
+    en_patterns: list[tuple[str, str | None]] = [
+        ("summarize", None),
+        ("analyze demo", None),
+        ("count files", None),
+    ]
+    for prefix, fixed_task in en_patterns:
+        if text_lower.startswith(prefix):
+            remaining = text_stripped[len(prefix):].strip()
+            task = fixed_task if fixed_task else (remaining or text_stripped)
+            if task:
+                return ("demo-stat", task)
+
+    return None
+
+
 # ========== Rendering functions（纯格式化，无副作用） ==========
 
 def render_memory_list(records) -> str:

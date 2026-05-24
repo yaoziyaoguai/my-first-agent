@@ -349,6 +349,7 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_compress_history_and_sync_checkpoint",
         "_dispatch_model_output",
         "_dispatch_pending_confirmation",
+        "_execute_subagent_delegation",
         "_extract_text",
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",

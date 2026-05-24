@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import pytest
 
-from agent.core import _looks_like_delegate_to_subagent, _looks_like_show_subagents
+from agent.core import (
+    _looks_like_delegate_to_subagent,
+    _looks_like_nl_delegation,
+    _looks_like_show_subagents,
+)
 
 
 class TestShowSubagentsDetection:
@@ -336,6 +340,137 @@ class TestDelegateOnceE2E:
         run = delegate_once(request, registry)
         assert run.result is not None
         assert run.result.status == "max_iterations_exceeded"
+
+
+class TestNlDelegationDetection:
+    """_looks_like_nl_delegation() 单元测试：验证自然语言委托触发检测。
+
+    中文学习边界：NL delegation 是 deterministic 关键词匹配——不调 LLM、
+    不经过 tool pipeline、不成为第二条 runtime。触发后走与 CLI delegate
+    相同的 _execute_subagent_delegation() 路径。
+    """
+
+    def test_cn_help_me_stat(self):
+        """'帮我统计' → demo-stat。"""
+        result = _looks_like_nl_delegation("帮我统计 demo workspace 文件")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+        assert "demo workspace" in task
+
+    def test_cn_help_me_analyze(self):
+        """'帮我分析' → demo-stat。"""
+        result = _looks_like_nl_delegation("帮我分析项目结构")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+        assert "项目结构" in task
+
+    def test_cn_stat_a_bit(self):
+        """'统计一下' → demo-stat。"""
+        result = _looks_like_nl_delegation("统计一下所有 py 文件")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+        assert "py 文件" in task
+
+    def test_cn_help_me_look(self):
+        """'帮我看看' → demo-stat。"""
+        result = _looks_like_nl_delegation("帮我看看项目有多少文件")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+        assert "项目" in task
+
+    def test_cn_file_stat(self):
+        """'文件统计' → demo-stat with fixed task。"""
+        result = _looks_like_nl_delegation("文件统计")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+        assert "统计项目文件" in task
+
+    def test_en_summarize(self):
+        """'summarize ...' → demo-stat。"""
+        result = _looks_like_nl_delegation("summarize demo workspace files")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+
+    def test_en_count_files(self):
+        """'count files ...' → demo-stat。"""
+        result = _looks_like_nl_delegation("count files in the project")
+        assert result is not None
+        name, task = result
+        assert name == "demo-stat"
+
+    def test_normal_text_not_detected(self):
+        """普通文本不应被误判为 NL delegation。"""
+        assert _looks_like_nl_delegation("hello world") is None
+        assert _looks_like_nl_delegation("今天天气不错") is None
+        assert _looks_like_nl_delegation("remember my name is John") is None
+        assert _looks_like_nl_delegation("show subagents") is None
+        assert _looks_like_nl_delegation("forget test memory") is None
+
+    def test_empty_or_whitespace_does_not_trigger(self):
+        """空输入不触发 NL delegation。"""
+        assert _looks_like_nl_delegation("") is None
+        assert _looks_like_nl_delegation("   ") is None
+
+
+class TestChatNlDelegationIntegration:
+    """chat() + NL delegation 集成测试。
+
+    NL delegation 走与 CLI delegate 相同的委托路径，通过
+    _execute_subagent_delegation() → delegate_once()。
+    """
+
+    def test_nl_delegate_help_me_stat(self):
+        """'帮我统计 demo workspace 文件' 触发 demo-stat 并返回 ok。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        result = chat("帮我统计 demo workspace 文件")
+        assert isinstance(result, str)
+        assert "[SubAgent: demo-stat]" in result
+        assert "ok" in result
+
+    def test_nl_delegate_file_stat(self):
+        """'文件统计' 触发 demo-stat。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        result = chat("文件统计")
+        assert "[SubAgent: demo-stat]" in result
+
+    def test_nl_delegate_does_not_block_normal_chat(self):
+        """非 NL 委托的普通对话不被 detect_nl_delegation 拦截。
+
+        NL delegation 是 chat() 入口处的确定性检测——正常对话文本必须 fall through
+        到后续的 memory evaluation / conversation 流程，不能被 NL detection 截获。
+        这里直接验证 detection 层不误判，避免引入真实 LLM provider 依赖。
+        """
+        # 这些正常语句都不应触发 NL delegation
+        assert _looks_like_nl_delegation("hello, how are you?") is None
+        assert _looks_like_nl_delegation("what tools do you have?") is None
+        assert _looks_like_nl_delegation("今天天气怎么样") is None
+        assert _looks_like_nl_delegation("你能做什么") is None
+
+    def test_nl_delegate_emits_progress_events(self):
+        """NL 委托也发射 delegating + delegated 进度事件。"""
+        import agent.tools  # noqa: F401
+        from agent.core import chat
+
+        events: list = []
+
+        def collect(event):
+            events.append(event)
+
+        chat("帮我统计项目", on_runtime_event=collect)
+
+        event_types = [e.event_type for e in events]
+        assert "subagent.delegating" in event_types
+        assert "subagent.delegated" in event_types
 
 
 class TestSubagentDelegationProgressEvents:

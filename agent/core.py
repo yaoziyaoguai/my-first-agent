@@ -49,6 +49,7 @@ from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
 from agent.cli_commands import (  # noqa: F401  — re-export for backward compatibility
     detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
     detect_forget_memory as _looks_like_forget_memory,
+    detect_nl_delegation as _looks_like_nl_delegation,
     detect_show_memories as _looks_like_show_memories,
     detect_show_subagents as _looks_like_show_subagents,
     render_memory_list,
@@ -321,6 +322,77 @@ def _dispatch_model_output(
     )
 
 
+def _execute_subagent_delegation(
+    subagent_name: str,
+    task: str,
+    *,
+    delegation_reason: str = "CLI meta-command delegation",
+    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
+) -> str:
+    """执行一次子代理委托并返回渲染后的用户可见结果。
+
+    这是 CLI delegate 和 NL delegation 的共享委托执行路径。
+    不做检测/解析——只做 registry lookup → SubAgentRequest 构造 →
+    delegate_once() 执行 → 结果渲染。
+
+    中文学习边界：
+    - 这不是第二条 runtime——所有委托仍通过 delegate_once() + SubAgentRegistry
+      执行，不绕过 core.chat() 统一入口
+    - 进度事件仍通过 on_runtime_event 发射
+    """
+    from pathlib import Path
+    from agent.subagent_system.delegation import delegate_once
+    from agent.subagent_system.registry import SubAgentRegistry
+    from agent.subagent_system.request import SubAgentRequest
+
+    try:
+        registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+    except Exception:
+        return render_delegate_error(subagent_name, "无法加载子代理注册表")
+    descriptor = registry.get_descriptor(subagent_name)
+    if descriptor is None:
+        visible_names = [d.name for d in registry.list_visible()]
+        return render_delegate_not_found(subagent_name, visible_names)
+    try:
+        subagent_request = SubAgentRequest(
+            task=task,
+            role=descriptor.role,
+            allowed_tools=descriptor.allowed_tools,
+            parent_trace_id=f"delegation-{uuid4().hex[:8]}",
+            delegation_reason=delegation_reason,
+            max_iterations=descriptor.max_iterations_default,
+            execution_mode="local_fake",
+            risk_level=descriptor.risk_level,
+        )
+    except ValueError as exc:
+        return f"委托请求无效：{exc}"
+    _safe_emit_runtime_event(
+        on_runtime_event,
+        subagent_delegating_event(subagent_name, task),
+        fallback_prefix="\n",
+    )
+    try:
+        run = delegate_once(subagent_request, registry)
+    except Exception as exc:
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            subagent_delegated_event(subagent_name, "error", str(exc)),
+            fallback_prefix="\n",
+        )
+        return render_delegate_error(subagent_name, str(exc))
+    result = run.result
+    status = getattr(result, "status", "unknown") if result else "unknown"
+    summary = getattr(result, "summary", "") if result else ""
+    stop_reason = getattr(result, "stop_reason", "") if result else ""
+    confidence = getattr(result, "confidence", 0.0) if result else 0.0
+    _safe_emit_runtime_event(
+        on_runtime_event,
+        subagent_delegated_event(subagent_name, status, summary),
+        fallback_prefix="\n",
+    )
+    return render_delegate_result(subagent_name, status, summary, stop_reason, confidence)
+
+
 def chat(
     user_input: str,
     *,
@@ -449,64 +521,28 @@ def chat(
         )
         return render_subagent_list(descriptors)
 
-    # delegate to subagent CLI meta-command：检测 → registry lookup → 委托执行 → 渲染。
-    # 检测由 cli_commands 完成；delegate_once() 执行由 SubAgent system 完成；
-    # 渲染由 cli_commands.render_delegate_* 完成。
+    # delegate to subagent CLI meta-command：检测 → 委托执行 → 渲染。
+    # 检测由 cli_commands 完成；_execute_subagent_delegation() 执行委托。
     delegate_match = _looks_like_delegate_to_subagent(user_input)
     if delegate_match:
-        from pathlib import Path
-        from agent.subagent_system.delegation import delegate_once
-        from agent.subagent_system.registry import SubAgentRegistry
-        from agent.subagent_system.request import SubAgentRequest
-
         subagent_name, task = delegate_match
-        try:
-            registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
-        except Exception:
-            return render_delegate_error(subagent_name, "无法加载子代理注册表")
-        descriptor = registry.get_descriptor(subagent_name)
-        if descriptor is None:
-            visible_names = [d.name for d in registry.list_visible()]
-            return render_delegate_not_found(subagent_name, visible_names)
-        try:
-            subagent_request = SubAgentRequest(
-                task=task,
-                role=descriptor.role,
-                allowed_tools=descriptor.allowed_tools,
-                parent_trace_id=f"cli-delegation-{uuid4().hex[:8]}",
-                delegation_reason="CLI meta-command delegation",
-                max_iterations=descriptor.max_iterations_default,
-                execution_mode="local_fake",
-                risk_level=descriptor.risk_level,
-            )
-        except ValueError as exc:
-            return f"委托请求无效：{exc}"
-        # Issue 6: 委托开始前发射进度事件，让用户知道系统在做什么
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            subagent_delegating_event(subagent_name, task),
-            fallback_prefix="\n",
+        return _execute_subagent_delegation(
+            subagent_name, task,
+            delegation_reason="CLI meta-command delegation",
+            on_runtime_event=on_runtime_event,
         )
-        try:
-            run = delegate_once(subagent_request, registry)
-        except Exception as exc:
-            _safe_emit_runtime_event(
-                on_runtime_event,
-                subagent_delegated_event(subagent_name, "error", str(exc)),
-                fallback_prefix="\n",
-            )
-            return render_delegate_error(subagent_name, str(exc))
-        result = run.result
-        status = getattr(result, "status", "unknown") if result else "unknown"
-        summary = getattr(result, "summary", "") if result else ""
-        stop_reason = getattr(result, "stop_reason", "") if result else ""
-        confidence = getattr(result, "confidence", 0.0) if result else 0.0
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            subagent_delegated_event(subagent_name, status, summary),
-            fallback_prefix="\n",
+
+    # Issue 2: Natural-language SubAgent delegation fixture。
+    # 用户无需记忆 CLI 语法即可委托子代理——"帮我统计 demo workspace"
+    # 等自然语言触发 demo-stat。这是 deterministic 关键词匹配，不调 LLM。
+    nl_delegation = _looks_like_nl_delegation(user_input)
+    if nl_delegation:
+        subagent_name, task = nl_delegation
+        return _execute_subagent_delegation(
+            subagent_name, task,
+            delegation_reason="NL delegation fixture",
+            on_runtime_event=on_runtime_event,
         )
-        return render_delegate_result(subagent_name, status, summary, stop_reason, confidence)
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

@@ -8,7 +8,7 @@ retain = 已确认的 proposal → store.write() → disposition="retain"。
 测试分层：
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): MEMORY_TURN_END_PROPOSAL verified via phase1_hook; MEMORY_PROPOSE (retain 执行写入) DEFERRED（loop 需在 confirmation 后触发二次 turn-end action）
+- L3 (real_core_loop_runtime_e2e): MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE L3 verified via phase1_hook；C3 unskipped（MEMORY_PROPOSE 已接入 turn-end hook）
 
 架构依据：
 - docs/specs/memory-retain-branch-behavior/SPEC.md
@@ -22,8 +22,6 @@ from __future__ import annotations
 import hashlib
 import uuid
 from typing import Any
-
-import pytest
 
 from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
 from agent.memory_contracts import (
@@ -563,15 +561,39 @@ class TestRetainClassificationBoundaries:
         assert result.evidence.get("evidence_level") != REAL_CORE_LOOP_RUNTIME_E2E
         assert result.evidence.get("dispatcher_origin") == "direct_dispatcher"
 
-    @pytest.mark.skip(reason="DEFERRED: C3 依赖 loop 集成——loop 需在 confirmation 后触发二次 turn-end action")
     def test_route_from_runtime_loop_is_real_core_loop(self):
-        """C3: route_from_runtime_loop() → real_core_loop_runtime_e2e — DEFERRED。
+        """C3: route_from_runtime_loop() → real_core_loop_runtime_e2e。
 
-        中文学习边界：这是 L3 测试，需要在 loop 中构造 MEMORY_PROPOSE action
-        并通过 route_from_runtime_loop() 路由。当前 loop 只构造
-        MEMORY_TURN_END_PROPOSAL 和 TOOL_GATE 两个 action。
-        DEFERRED 到后续 Implementation Plan（LoopDependencies memory 字段 + loop 集成）。
+        MEMORY_PROPOSE 现已接入 loop.py turn-end hook。route_from_runtime_loop()
+        是 dispatcher 的 runtime-loop 专用入口，provenance 由 dispatcher 参数决定，
+        不由 payload 字段决定。本测试验证 dispatcher 分类契约——不依赖 core.chat()。
         """
+        store = InMemoryMemoryStore()
+        dispatcher = _build_phase1_dispatcher_with_retain_handler(store=store)
+        candidate = _make_test_candidate()
+        # classify_evidence_level 要求 runtime_action_source == "core_loop"
+        # 生产路径中由 loop.py turn-end hook 构造 request 时设置
+        request = _make_retain_request(candidate=candidate)
+        request = RuntimeActionRequest(
+            action_type=request.action_type,
+            source="core_loop",
+            parent_trace_id=request.parent_trace_id,
+            payload=request.payload,
+            constraints=request.constraints,
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+            f"route_from_runtime_loop() 应产生 L3 evidence，"
+            f"实际 {result.evidence.get('evidence_level')!r}"
+        )
+        assert result.evidence.get("dispatcher_origin") == "runtime_loop"
+        assert result.evidence.get("runtime_loop_invoked") is True
+        assert result.evidence.get("core_entrypoint") == "core.chat"
+        assert result.evidence.get("runtime_hook_name") == "loop.turn_end"
+        assert result.payload.get("stored") is True
+        assert result.payload.get("disposition") == "retain"
 
     def test_payload_cannot_upgrade_classification(self):
         """C4: payload 自述字段不能升级分类。

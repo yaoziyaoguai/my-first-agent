@@ -124,6 +124,26 @@ Classification downgrade rules:
 - event-only receipt without target proof: not runtime E2E
 - handler self-reported proof: not runtime E2E
 
+### 5.1 Evidence Label Precision
+
+`real_core_loop_runtime_e2e` ("L3") is not a single boolean state. Labels must
+distinguish what was actually verified:
+
+| Label | Meaning | When to use |
+|---|---|---|
+| `L3 dispatch path verified` | RuntimeAction dispatcher + handler + catalog adapter chain exercised through `route_from_runtime_loop()` | Turn-end hook → dispatcher → handler path verified; handler may only exercise error/empty-registry/noop branch |
+| `L3 business operation verified` | Full business semantics exercised: non-empty data, meaningful side-effect, complete input→output chain | When the handler's primary business path (not just error/degraded branch) is verified through the dispatcher |
+| `L3 complete / full闭环` | Dispatch path + business operation + all branch behaviors verified | Reserved for capabilities where the full production behavior is exercised (e.g., Tool Pipeline allowed/blocked/not_found) |
+| `runtime trace path verified` | Event emission through a non-dispatcher sink (e.g., `on_trace_event`) | Trace/event systems that don't use RuntimeActionDispatcher — do NOT use "L3" label |
+
+A capability may have `L3 dispatch path verified` while business operation
+remains partial (example: SKILL_SELECT with empty SkillRegistry — handler
+exercised but only `no_suitable_skill` path). This is honest labeling, not a
+defect. The gap is documented as future work, not hidden.
+
+Evidence labels must never claim "L3 complete" when only dispatch path is
+verified. Overclaim prevention is itself a contract requirement.
+
 ## 6. Capability Milestones
 
 A new capability milestone is allowed only when the system gains a new externally

@@ -152,6 +152,27 @@ deferred 后检查 queue 中是否还有其他 candidate，有则继续。
 
 选择来源：[First Agent Subsystem Integration Roadmap](../plans/first-agent-subsystem-integration-roadmap.md) Section F（自动执行队列）和 Section D（Backlog 分类）。
 
+### F1. Evidence Label 解释
+
+AutoRun 在选择 capability 时必须正确解释 evidence label，不得将低精度标签误解为高精度：
+
+| Roadmap 标签 | 实际含义 | AutoRun 应如何理解 |
+|---|---|---|
+| `L3 complete / full闭环` | 完整 L3：dispatch path + business operation + branch behaviors | 该 capability 已完全闭环，不需要继续工作 |
+| `L3 dispatch path verified` | RuntimeAction 经 `route_from_runtime_loop()` → handler → catalog adapter 验证，但 handler 可能只走 error/degraded 分支 | dispatch 通路已验证，business operation 可能需要补齐（如 non-empty registry） |
+| `L3 business operation verified` | 主业务路径（含非空数据/有意义 side-effect）经 dispatcher 验证 | 核心业务已验证，可能有 branch behavior gap |
+| `runtime trace path verified` | 事件通过非 dispatcher sink（如 `on_trace_event`）发出 | **不是 L3**——不使用 "L3" 标签；是独立的 trace infrastructure evidence |
+| `L3 evidence path verified` | 类似 dispatch path verified，强调 evidence chain 完整 | dispatch 链已验证，但 full UX / business semantics 可能未覆盖 |
+
+**关键区分：**
+
+- `dispatch path verified` ≠ `business operation complete`
+- `empty registry dispatch` ≠ `non-empty registry operation`
+- `trace event emission via on_trace_event` ≠ `RuntimeActionDispatcher L3`
+- `MCP L3` ⊂ `Tool Pipeline L3`（MCP 是 Tool Pipeline adapter boundary，不独立）
+
+AutoRun 不得将 `dispatch path verified` 当作 `L3 complete` 跳过 discovery——dispatch path verified 的 capability 通常是 branch behavior 补齐的候选。
+
 ## G. 禁止事项
 
 以下行为在 auto-run 中严格禁止：

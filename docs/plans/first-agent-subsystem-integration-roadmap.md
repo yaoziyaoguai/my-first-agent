@@ -34,19 +34,19 @@ query/event
 | Area | Repository evidence | Existing docs/specs/tests | Current maturity | Notes |
 |---|---|---|---|---|
 | **Tool Pipeline** | `agent/runtime_integration/tool_gate.py`, `tool_invoke.py`, `tool_result_feedback.py`, `agent/tool_registry.py`, `agent/tool_executor.py` | `docs/specs/tool-pipeline-l3-completion/`, `docs/specs/tool-branch-confirmation-required/`, `docs/specs/tool-invoke-branch-behavior/`, `docs/specs/tool-result-feedback-branch-behavior/`, `docs/specs/tool-gate-not-found-l3/`, `docs/specs/tool-request-l3/` | L3 完整闭环 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段全部 L3 verified；four dispositions: allowed✅, confirmation_required✅, not_found✅, blocked ❌(L3 gap) |
-| **MCP** | `agent/mcp.py`, `agent/mcp_models.py`, `agent/mcp_policy.py`, `agent/mcp_bridge.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` | `docs/specs/mcp-runtime-integration/`, `docs/specs/mcp-l3-real-core-loop/` | L3 基础闭环 | confirmation="never" 工具走通完整管线；confirmation="always" 工具在 gate 被正确拦截 |
+| **MCP** | `agent/mcp.py`, `agent/mcp_models.py`, `agent/mcp_policy.py`, `agent/mcp_bridge.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` | `docs/specs/mcp-runtime-integration/`, `docs/specs/mcp-l3-real-core-loop/` | L3 Tool Pipeline adapter boundary | MCP 是 Tool Pipeline 的 adapter boundary，不是独立 runtime；confirmation="never" 工具经 Tool Pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT）走通完整管线；confirmation="always" 工具在 gate 被正确拦截；MCP L3 证据归入 Tool lifecycle integration |
 | **Memory (retain)** | `agent/runtime_integration/memory_retain.py`, `agent/memory.py`, `agent/memory_runtime.py`, `agent/memory_policy.py`, `agent/memory_store.py` | `docs/specs/memory-retain-branch-behavior/`, `docs/specs/memory-propose-l3/` | L3 完整闭环 | MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE 双 action L3 verified；confirmation → queue → turn-end dispatch → store.write() 完整 evidence chain |
-| **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 完整闭环 | snapshot→prompt injection 经 context_builder 验证；MEMORY_RECALL RuntimeActionType L3 verified via loop.py turn-end hook（commit e18595b） |
-| **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L1/L2 基础 | consolidation pipeline L1/L2 完成；L3 wiring to loop.py 本 loop 执行 |
+| **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 dispatch path verified（双路径，未统一） | 实际 recall 路径：`refresh_runtime_system_prompt()` → `_memory_runtime.snapshot_for_prompt()` → `build_system_prompt()`（不经 dispatcher）；evidence dispatch 路径：turn-end hook → MEMORY_RECALL RuntimeAction → dispatcher → handler（L3 verified）；两条路径未共享 evidence；Pre-loop MEMORY_RECALL wiring 为 Architecture Extension candidate |
+| **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L3 dispatch path verified | MEMORY_CONSOLIDATE RuntimeActionType L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；real LLM consolidation（consolidation_llm.py）需要真实 LLM/private data，仍 deferred |
 | **Checkpoint** | `agent/checkpoint.py`, `agent/runtime_integration/checkpoint_summary.py` | `docs/specs/checkpoint-save-resume-l3/`, `docs/CHECKPOINT_RESUME_SEMANTICS.md` | L3 完整闭环 | CHECKPOINT_SAFE_SUMMARY 经 turn-end hook → dispatcher → handler L3 verified |
-| **Skill System** | `agent/skill_system/` (15 files), `agent/legacy_skills/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L1/L2 Safe Local MVP | runtime_integration/skill_action.py 已有 dispatcher handler；L3 未验证；RuntimeActionType SKILL_SELECT 存在但未在 phase1_hook 注册 |
-| **SubAgent System** | `agent/subagent_system/` (20 files), `agent/runtime_integration/subagent_action.py` | `docs/design/SUBAGENT_SYSTEM_SDD.md`, `docs/SUBAGENT_LOCAL_MVP.md`, `docs/specs/subagent-l3/SPEC.md` | L3 完整闭环 | runtime_integration/subagent_action.py 已有 dispatcher handler；L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter（本 commit） |
+| **Skill System** | `agent/skill_system/` (15 files), `agent/legacy_skills/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L3 dispatch path verified (empty registry) | SKILL_SELECT RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；handler 仅验证 `no_suitable_skill`（SkillRegistry(roots=[]) 为空）；non-empty registry business operation L3 仍为 partial/future work |
+| **SubAgent System** | `agent/subagent_system/` (20 files), `agent/runtime_integration/subagent_action.py` | `docs/design/SUBAGENT_SYSTEM_SDD.md`, `docs/SUBAGENT_LOCAL_MVP.md`, `docs/specs/subagent-l3/SPEC.md` | L3 dispatch path verified (empty registry) | SUBAGENT_DELEGATE_L0 RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；handler 仅验证 `no_suitable_subagent`（SubAgentRegistry(roots=()) 为空）；non-empty registry business delegation L3 仍为 partial/future work |
 | **Provider/Model** | `agent/provider/` (12 files), `agent/model_call.py`, `agent/model_output_dispatch.py` | `docs/LLM_PROVIDER_ADAPTER.md` | 集成在主流程中 | Anthropic/OpenAI/Fake provider 均通过 core.chat() 调用；FakeProvider 支撑所有 L3 测试 |
 | **Confirmation** | `agent/confirmation/` (5 files), `agent/confirm_handlers.py`, `agent/pending_confirmation_dispatch.py` | `docs/specs/tool-branch-confirmation-required/` | L3 已验证 | tool confirmation_required 分支行为已验证 |
 | **Context Build** | `agent/context_builder.py`, `agent/prompt_builder.py`, `agent/context.py` | 散见于各 spec | 集成在主流程中 | context injection（含 memory snapshot）经 core.chat() 验证 |
-| **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | L1/L2 已验证 | evidence.py 提供 catalog-owned adapters；overclaim 防护已覆盖全部 12 个 catalog targets；local trace 未接入 runtime |
+| **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | runtime trace path verified（非 RuntimeActionDispatcher evidence 模型） | evidence.py 提供 catalog-owned adapters（RuntimeActionDispatcher evidence 模型）；overclaim 防护已覆盖全部 12 个 catalog targets；local trace 通过 `on_trace_event` sink 接入 runtime loop，emit TraceEvent，不经过 RuntimeActionDispatcher evidence 模型——不使用 "L3" 标签，应使用 "runtime trace path verified" |
 | **Dispatcher** | `agent/runtime_integration/dispatcher.py`, `agent/runtime_integration/schema.py`, `agent/runtime_integration/phase1_hook.py` | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 基础设施 | route() 和 route_from_runtime_loop() 双入口；phase1_hook 连接 loop 与 dispatcher；8 个 handler 已注册（含 MEMORY_CONSOLIDATE） |
-| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py`, `agent/model_call.py` | `docs/specs/streaming-l3/`, `docs/implementation-notes/streaming-l3.md` | L3 完整闭环 | STREAMING_PROVIDER_CALL 接入 loop.py turn-end hook；4 个 L3 tests；no real API（FakeProvider） |
+| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py`, `agent/model_call.py` | `docs/specs/streaming-l3/`, `docs/implementation-notes/streaming-l3.md` | L3 evidence path verified | STREAMING_PROVIDER_CALL RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → model call / streaming events bridge；STREAMING_EVENT RuntimeActionType 为 reserved catalog entry / inactive（无 handler、无 dispatch wiring、unused descriptor）；full user-visible streaming UX 仍需 SPEC/TDD 补齐 |
 | **CLI/TUI** | `agent/cli/`, `agent/cli_renderer.py`, `agent/display_events.py`, `agent/input_backends/` | `docs/V0_2_BASIC_TUI_PLAN.md` | adapter boundary | 不参与 runtime decision；已阶段性收口 |
 | **Planner** | `agent/planner.py`, `agent/plan_schema.py` | 散见于 core.py | 集成在主流程中 | planning phase 内嵌于 core.chat() |
 
@@ -63,64 +63,72 @@ query/event
 | **Tool: invoke error** | ✅ | ✅ | ✅ | `test_tool_invoke_error_l3.py` | 无 | 已闭环 (commit 748513c) |
 | **Tool: invoke not_found** | ✅ | ✅ | ✅ | `test_tool_invoke_not_found_l3.py` | 无 | 已闭环 (commit f6d92f7) |
 | **Tool: result feedback** | ✅ | ✅ | ✅ | `test_tool_result_feedback_branch_behavior.py` | 无 | 已闭环 |
-| **MCP: confirmation="never"** | ✅ | ✅ | ✅ | `test_mcp_l3_real_core_loop.py` | 无 | 已闭环 |
-| **MCP: confirmation="always"** | ✅ | ✅ | ✅ (gate only) | `test_mcp_l3_real_core_loop.py::T5` | TOOL_INVOKE 不触发（设计如此） | confirmation 交互流程需要新设计，deferred |
+| **MCP: confirmation="never"** | ✅ | ✅ | ✅ (Tool Pipeline L3) | `test_mcp_l3_real_core_loop.py` | 无 | 已闭环；MCP 是 Tool Pipeline adapter boundary，L3 证据归入 Tool lifecycle integration |
+| **MCP: confirmation="always"** | ✅ | ✅ | ✅ (gate only) | `test_mcp_l3_real_core_loop.py::T5` | TOOL_INVOKE 不触发（设计如此） | confirmation 交互流程需产品决策；MCP 不独立于 Tool Pipeline |
 | **MCP: Policy Re-Eval** | ❌ | ❌ | ❌ | 无 | 需要 runtime loop 中 confirmation 交互 | 需用户决策，暂缓 |
 | **MCP: HOME isolation** | ✅ | ✅ | N/A | `test_mcp_l3_real_core_loop.py::T6` 在 HOME 隔离路径下通过 | 非覆盖缺口——测试正确要求隔离 HOME，CI/Makefile 应统一设置 | 已闭环（基础设施问题，非测试缺陷） |
 | **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py`, `test_memory_propose_l3.py` | 无 | MEMORY_PROPOSE L3 已闭环 (本 commit) |
-| **Memory: recall** | ✅ | ✅ | ✅ | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (commit e18595b) |
-| **Memory: consolidation** | ✅ | ✅ | ✅ | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (本 commit) |
+| **Memory: recall** | ✅ | ✅ | ✅ (dispatch path) | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | MEMORY_RECALL RuntimeAction dispatch path L3 verified；实际 prompt injection 路径（`snapshot_for_prompt()` → `build_system_prompt()`）不与 RuntimeAction evidence 统一；Pre-loop MEMORY_RECALL wiring 为 Architecture Extension candidate | 已闭环 (commit e18595b)；双路径统一为 future work |
+| **Memory: consolidation** | ✅ | ✅ | ✅ (dispatch path) | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | MEMORY_CONSOLIDATE RuntimeAction dispatch path L3 verified via loop.py turn-end hook；real LLM consolidation（consolidation_llm.py）需真实 LLM/private data，仍 deferred | 已闭环 (本 commit)；real LLM consolidation deferred |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
-| **Skill: action** | ✅ | ✅ | ✅ | `test_skill_l3.py` (L3), `test_skill_*.py` (L1/L2) | 无 | 已闭环 (本 commit) |
-| **SubAgent: action** | ✅ | ✅ | ✅ | `test_subagent_l3.py` (L3), `test_subagent_*.py` (L1/L2) | 无 | 已闭环 (本 commit) |
+| **Skill: action** | ✅ | ✅ | ✅ (dispatch path, empty registry) | `test_skill_l3.py` (L3), `test_skill_*.py` (L1/L2) | SKILL_SELECT RuntimeActionType dispatch path L3 verified；handler 仅验证 `no_suitable_skill`（空 registry）；non-empty registry business operation L3 partial/future work | 已闭环 (本 commit)；business operation L3 补齐为 Architecture Extension candidate |
+| **SubAgent: action** | ✅ | ✅ | ✅ (dispatch path, empty registry) | `test_subagent_l3.py` (L3), `test_subagent_*.py` (L1/L2) | SUBAGENT_DELEGATE_L0 RuntimeActionType dispatch path L3 verified；handler 仅验证 `no_suitable_subagent`（空 registry）；non-empty registry business delegation L3 partial/future work | 已闭环 (本 commit)；business operation L3 补齐为 Architecture Extension candidate |
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
 | **Context injection** | N/A | N/A | ✅ | 集成在主流程中 | 无 | memory snapshot injection 已验证 |
-| **Streaming** | ✅ | ✅ | ✅ | `test_streaming_l3.py` | 无 | L3 verified via loop.py turn-end hook → route_from_runtime_loop → handler（本 commit） |
-| **Evidence/Trace** | ✅ | ✅ | ✅ | `test_local_trace_runtime_wiring_l3.py` | 无 | L3 verified via loop.py turn-end hook（本 commit） |
+| **Streaming** | ✅ | ✅ | ✅ (evidence path) | `test_streaming_l3.py` | STREAMING_PROVIDER_CALL RuntimeActionType L3 dispatch path verified；STREAMING_EVENT 为 reserved catalog entry / inactive（无 handler、无 dispatch wiring、unused descriptor）；full user-visible streaming UX 仍需 SPEC/TDD | L3 evidence path verified；STREAMING_EVENT reserved/inactive；full UX future work |
+| **Evidence/Trace** | ✅ | ✅ | runtime trace path verified | `test_local_trace_runtime_wiring_l3.py` | trace event emission 通过 `on_trace_event` sink，不经过 RuntimeActionDispatcher evidence 模型——不使用 "L3" 标签；使用 "runtime trace path verified" | runtime trace path verified（本 commit）；与 RuntimeActionDispatcher evidence 模型独立 |
 
-## D. Backlog 分类
+## D. Backlog 分类（2026-05-24 E2E 审计后重组）
 
-### 1. Must-fix correctness / safety
+### 1. Safe focused fix
 
-| Item | Evidence | Priority |
-|---|---|---|
-| (无已知 correctness/safety bug) | N/A | N/A |
-
-### 2. L3 主路径接入
+可安全继续的 P2/P3 修正或 hardening：
 
 | Item | Evidence | Priority |
 |---|---|---|
-| Tool blocked L3 | ✅ 完成 (commit 6cef9b8) |
-| Tool invoke error L3 | ✅ 完成 (commit 748513c) |
-| Tool invoke not_found L3 | ✅ 完成 (commit f6d92f7) |
+| (当前无已知 correctness/safety bug) | N/A | N/A |
+| STREAMING_EVENT descriptor cleanup or inactive marker | `agent/runtime_integration/schema.py` — STREAMING_EVENT 为 reserved catalog entry / unused descriptor | P3 — 标记 inactive 或后续清理 |
 
-### 3. Policy / approval / governance
+### 2. Architecture Extension Loop candidate
 
-| Item | Evidence | Priority |
-|---|---|---|
-| MCP confirmation="always" 完整管线 | 当前 gate 正确拦截，需 runtime loop confirmation 交互 | 需用户决策设计 |
-| MCP Policy Re-Eval per-call | 无现有实现 | 需用户决策设计 |
+需新增 RuntimeActionType / handler / catalog entry 或架构扩展，但方向清晰、可 fake-first、不需真实 secret/API：
 
-### 4. Error path hardening
+| Item | Evidence | Why Architecture Extension | Priority |
+|---|---|---|---|
+| Pre-loop MEMORY_RECALL wiring | 当前 MEMORY_RECALL 在 turn-end hook 调度；实际 prompt injection 走 `snapshot_for_prompt()` → `build_system_prompt()`（不经 dispatcher）；两条路径未统一 | 需要新 branch point（pre-loop context build phase）或双路径统一设计 | 高 — 核心主线能力 |
+| Skill non-empty registry business operation L3 | SKILL_SELECT dispatch path L3 verified（空 registry）；`no_suitable_skill` handler 已验证；non-empty registry 业务操作 L3 未验证 | 需要 non-empty SkillRegistry 和对应 SPEC/TDD；现有 branch point 可承载（SKILL_SELECT 已在 turn-end hook），是 branch behavior 补齐 | 中 — safe to auto-run after SPEC |
+| SubAgent non-empty registry business delegation L3 | SUBAGENT_DELEGATE_L0 dispatch path L3 verified（空 registry）；`no_suitable_subagent` handler 已验证；non-empty registry 业务委托 L3 未验证 | 需要 non-empty SubAgentRegistry 和对应 SPEC/TDD；现有 branch point 可承载（SUBAGENT_DELEGATE_L0 已在 turn-end hook），是 branch behavior 补齐 | 中 — safe to auto-run after SPEC |
+| MEMORY_PROPOSE confirmation flow wiring | confirmation 二次 turn-end action wiring | 现有 branch point（turn-end hook）可承载；可能需新增 RuntimeActionType 或复用现有 confirmation branch | 中 — safe to auto-run after Architecture Decision |
+| Full user-visible streaming UX | STREAMING_PROVIDER_CALL dispatch path L3 verified；full UX（SSE/WebSocket/chunked response）未实现 | 需要 streaming protocol adapter / UX SPEC；现有 STREAMING_PROVIDER_CALL branch point 可承载 | 中低 — safe to auto-run after SPEC |
 
-| Item | Evidence | Priority |
-|---|---|---|
-| Tool invoke error/failure L3 | ✅ 完成 (commit 748513c) |
-| Tool invoke not_found L3 | ✅ 完成 (commit f6d92f7) |
-| MCP HOME isolation test fix | T6 在非隔离 HOME 下失败 | 低 — test env fix |
+### 3. Product decision required
 
-### 5. Deferred advanced capability
+实现方向涉及产品/交互语义判断，需用户决策：
 
-| Item | Evidence | Priority |
-|---|---|---|
-| Memory consolidation L3 | ✅ 完成 (commit e1ab736) — loop.py wiring + L3 test |
-| Skill L3 activation | skill_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
-| SubAgent L3 delegation | subagent_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
-| Streaming L3 | streaming_provider.py adapter 存在 | deferred |
-| Local trace runtime wiring | ✅ 完成 (本 commit) — loop.py wiring + L3 test | 已闭环 |
-| Memory real LLM consolidation | consolidation_llm.py 存在但 gated | deferred |
+| Item | Evidence | Decision needed | Priority |
+|---|---|---|---|
+| MCP confirmation="always" full pipeline | 当前 gate 正确拦截 confirmation="always" 工具；TOOL_INVOKE 不触发（设计如此） | confirmation 二次交互的 UX 语义（阻塞等待？内联确认？pending queue？） | 中 — 不阻塞其他 work |
+| MCP Policy Re-Eval per-call | 无现有实现 | 是否需要在 runtime loop 中做 MCP policy re-evaluation | 低 — 可长期 deferred |
+
+### 4. Secret / API / private data blocked
+
+需要真实外部资源才能继续，fake-first 下无法推进：
+
+| Item | Evidence | What's blocked by | Priority |
+|---|---|---|---|
+| Memory real LLM consolidation | `consolidation_llm.py` 存在但 gated；MEMORY_CONSOLIDATE RuntimeAction dispatch path L3 verified | 需要真实 LLM / provider / private data | deferred — fake consolidation path 已完成 |
+
+### 5. Do not do yet
+
+当前不应开始的工作：
+
+| Item | Reason |
+|---|---|
+| MCP as independent subsystem | MCP 是 Tool Pipeline adapter boundary，不独立；MCP L3 已在 Tool Pipeline L3 中覆盖 |
+| 第二条主流程 | 违反 Contract Section 1：fake/real 共享同一 business flow |
+| new Anchor | 违反 Contract Section 6：capability milestone 纪律 |
 
 ## E. 优先级规则
 
@@ -153,18 +161,38 @@ query/event
 | **#4** | **Evidence overclaim: CHECKPOINT_SAFE_SUMMARY** | ✅ 已覆盖 |
 | **#5** | **MCP HOME isolation** | ✅ 已闭环 |
 
-### 新发现候选（2026-05-24 discovery 扩展）
+### 新发现候选（2026-05-24 discovery 扩展，已全部完成并移至上方"已完成/已闭环"）
 
-| Order | Capability | Repository evidence | Why safe | Why next | Expected SPEC path | Expected tests | Stop conditions | Safe to auto-run |
-|---|---|---|---|---|---|---|---|---|
-| **#6** | **Evidence overclaim: SubAgent** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
-| **#7** | **Evidence overclaim: StreamingProvider** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
-| **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
-| **#9** | **Memory Recall L3** | ✅ 完成 (commit e18595b) — MEMORY_RECALL 接入 loop.py turn-end hook，3 个 L3 tests |
-| **#10** | **Skill L3 Activation** | ✅ 完成 (本 commit) — SKILL_SELECT 接入 loop.py turn-end hook，3 个 L3 tests，no_suitable_skill catalog entry |
-| **#11** | **Local Trace Runtime Wiring** | ✅ 完成 (commit 9f2024a) — TraceEvent emission via loop.py turn-end hook，4 个 L3 tests |
-| **#12** | **MEMORY_PROPOSE L3** | ✅ 完成 (本 commit) — confirmation → queue → turn-end dispatch → store.write()，4 个 L3 tests |
-| **#13** | **Streaming L3** | ✅ 完成 (本 commit) — STREAMING_PROVIDER_CALL 接入 loop.py turn-end hook，4 个 L3 tests，FakeProvider stream events |
+### 下一批候选（E2E 审计后按新分类体系）
+
+#### Group A: Architecture Extension Loop candidate（safe to auto-run）
+
+| Priority | Capability | Category | Why Architecture Extension | Dependencies |
+|---|---|---|---|---|
+| **高** | Pre-loop MEMORY_RECALL wiring | Architecture Extension | 需要新 branch point（pre-loop context build phase）或双路径统一设计；现有 turn-end MEMORY_RECALL 与 `snapshot_for_prompt()` 路径未共享 evidence | 需 Architecture Decision / SPEC 先行 |
+| **中** | Skill non-empty registry business operation L3 | Branch behavior 补齐（现有 SKILL_SELECT branch point） | 需要 non-empty SkillRegistry + SPEC/TDD；现有 branch point 可承载 | SPEC → TDD → Plan → Implementation |
+| **中** | SubAgent non-empty registry business delegation L3 | Branch behavior 补齐（现有 SUBAGENT_DELEGATE_L0 branch point） | 需要 non-empty SubAgentRegistry + SPEC/TDD；现有 branch point 可承载 | SPEC → TDD → Plan → Implementation |
+| **中** | MEMORY_PROPOSE confirmation flow wiring | Architecture Extension / Branch behavior | confirmation 二次 turn-end action wiring；现有 turn-end hook 可承载 | 需 Architecture Decision 判定是否需要新 RuntimeActionType |
+| **中低** | Full user-visible streaming UX | Architecture Extension | STREAMING_PROVIDER_CALL dispatch path 已有；需 streaming protocol adapter / UX SPEC | SPEC → TDD → Plan → Implementation |
+
+#### Group B: Product decision required
+
+| Priority | Capability | Decision needed |
+|---|---|---|
+| **中** | MCP confirmation="always" full pipeline | confirmation 交互 UX 语义（阻塞等待/内联确认/pending queue） |
+| **低** | MCP Policy Re-Eval per-call | 是否需要在 runtime loop 中做 MCP policy re-evaluation |
+
+#### Group C: Secret / API / private data blocked
+
+| Priority | Capability | What's blocked by |
+|---|---|---|
+| **deferred** | Memory real LLM consolidation | 需要真实 LLM / provider / potential private data |
+
+#### Group D: Safe focused fix（P3）
+
+| Priority | Capability | Action |
+|---|---|---|
+| **P3** | STREAMING_EVENT descriptor 标记 inactive | 标记为 reserved/inactive/future work 或后续清理（本轮不改代码） |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

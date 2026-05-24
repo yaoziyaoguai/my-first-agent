@@ -768,8 +768,10 @@ def test_p1_does_not_change_checkpoint_top_level_task_fields():
     import dataclasses
 
     actual = {f.name for f in dataclasses.fields(TaskState)}
-    # 当前基线（HEAD 54a39e3 / 205c4cf）。如未来要扩展必须先更新此基线断言并
+    # 当前基线（HEAD 3b481f0）。如未来要扩展必须先更新此基线断言并
     # 在 docs/P1_TOPIC_SWITCH_PLAN.md / docs/ARCHITECTURE.md 顶部说明原因。
+    # pending_retain_proposals 是 Memory pipeline 的合法新增字段（已确认待 retain
+    # 的 memory proposal 跨 turn 队列），添加于 Phase 5b memory retain 流程。
     expected = {
         "user_goal",
         "current_plan",
@@ -786,6 +788,7 @@ def test_p1_does_not_change_checkpoint_top_level_task_fields():
         "pending_user_input_request",
         "confirm_each_step",
         "tool_execution_log",
+        "pending_retain_proposals",
     }
     assert actual == expected, (
         f"P1 红线 #4：不允许新增/删除 TaskState 顶层字段。"

@@ -1,88 +1,75 @@
 # Local Manual Dogfood Report
 
 Date: 2026-05-25
-Commit tested: 2c80113 (docs: sync checklist and issue sweep with Phase 1-3 stabilization results)
-Executor: `scripts/dogfood_checklist_executor.py` (automated, via `core.chat()` + FakeProvider)
+Commit tested: dbd5d59 (fix(dogfood): fix code-reviewer status and Step 3 path detection)
+Executors:
+- Fake: `scripts/dogfood_checklist_executor.py` (via `core.chat()` + FakeProvider)
+- Real: `scripts/dogfood_real_provider.py` (via `core.chat()` + DashScope/kimi-k2.5)
 
-## Result Matrix
+## Fake Provider Result Matrix
 
 | Step | Name | Status | Note |
 |------|------|--------|------|
-| 1 | Onboarding / Help | PASS | `main.py --help` 显示能力说明、FakeProvider、SubAgent、Memory、Tool 状态 |
+| 1 | Onboarding / Help | PASS | `main.py --help` 显示能力说明 |
 | 2 | 普通对话 | PASS | assistant.delta 回显用户消息，run.summary 正确 |
-| 3 | 触发 Demo Tool | PASS | 完整 Tool Pipeline: TOOL_REQUEST→CONFIRM→TOOL_RESULT，文件创建在时间戳目录下 |
-| 4 | 查看记忆列表 | PASS | 显示"暂无已保存的记忆"（空列表格式正确） |
-| 5 | 查看子代理列表 | PASS | 展示 2 个子代理: code-reviewer + demo-stat |
-| 6 | CLI 委托子代理 | PASS | delegating/delegated/run_summary 事件完整，返回 demo-stat 统计结果 |
-| 7 | 自然语言委托子代理 | PASS | NL 关键词匹配正确路由到 demo-stat，delegating/delegated/run_summary 事件完整 |
-| 8 | 忘记记忆 | PASS | 列表格式正确，无效 ID 返回 not found，关键词匹配返回 not found |
+| 3 | 触发 Demo Tool | PASS | 完整 Tool Pipeline: TOOL_REQUEST→CONFIRM→TOOL_RESULT |
+| 4 | 查看记忆列表 | PASS | 空列表格式正确 |
+| 5 | 查看子代理列表 | PASS | 2 个子代理: code-reviewer + demo-stat |
+| 6 | CLI 委托子代理 | PASS | delegating/delegated/run_summary 事件完整 |
+| 7 | 自然语言委托子代理 | PASS | NL 关键词匹配正确路由到 demo-stat |
+| 8 | 忘记记忆 | PASS | 列表/无效ID/关键词匹配 均正确 |
 | 9 | 退出 | PASS | `quit`/`exit` 正常退出 |
 
-**PASS: 9 / 9, CONCERN: 0, FAIL: 0**
+**Fake: PASS: 9 / 9, CONCERN: 0, FAIL: 0**
 
-## Execution Details
+## Real Provider Result Matrix
 
-### Step 1: Onboarding / Help
-- Command: `python main.py --help`
-- Exit code: 0
-- Output contains: FakeProvider, SubAgent, Memory, Tool 状态说明
+Provider: `anthropic_compatible` | model=kimi-k2.5 | base_url=DashScope
 
-### Step 2: 普通对话
-- Input: `你好，今天怎么样？`
-- Events: control.message → assistant.delta → run.summary
-- Echo confirmed: "已收到你的消息：「你好，今天怎么样？」"
+| Step | Name | Status | Note |
+|------|------|--------|------|
+| 1 | Onboarding / Help | PASS | help 输出正常 |
+| 2 | 普通对话 (real LLM) | PASS | kimi-k2.5 返回自然中文回复，非 FakeProvider echo 模板 |
+| 3 | Real LLM 工具调用 | CONCERN | LLM 未主动触发 demo.write_demo_note（取决于模型 tool_use 决策） |
+| 4 | CLI show memories | PASS | CLI 命令在 real provider 路径下正常工作 |
+| 5 | CLI show subagents | PASS | 展示 2 个子代理 |
+| 6 | CLI delegate subagent | PASS | delegating/delegated 事件正常，demo-stat 返回结果 |
 
-### Step 3: 触发 Demo Tool
-- Input: `make a demo note` → `y` (confirm)
-- Pipeline stages: TOOL_REQUEST → TOOL_CONFIRMATION_REQUESTED → TOOL_RESULT
-- File created: `workspace/demo/20260524T175708Z/note.md`
-- Note: `demo_write_demo_note` uses `_default_demo_note_path()` which creates timestamped subdirectories
+**Real: PASS: 5 / 6, CONCERN: 1, FAIL: 0**
 
-### Step 4: 查看记忆列表
-- Input: `show memories`
-- Output: "暂无已保存的记忆。" (empty store, correct format)
+## Key Findings
 
-### Step 5: 查看子代理列表
-- Input: `show subagents`
-- Output: 2 subagents listed (code-reviewer [reviewer], demo-stat [analyzer])
+### Unified Runtime Confirmed
+FakeProvider 和 real provider (DashScope/kimi-k2.5) 共享同一 `core.chat()` → `loop.py` → Tool Pipeline 路径。provider 仅作为 adapter 替换，不改变运行时架构。
 
-### Step 6: CLI 委托子代理
-- Input: `delegate to demo-stat: count files in workspace`
-- Events: subagent.delegating → subagent.delegated → run.summary
-- Result: deterministic L0 summary returned
+### CLI Commands Are Provider-Agnostic
+`show memories`、`show subagents`、`delegate to` 等 CLI 命令由 `core.chat()` 的 `detect_*` 函数处理，不经过 LLM provider，因此 fake/real 路径下行为完全一致。
 
-### Step 7: 自然语言委托子代理
-- Input: `帮我统计 demo workspace`
-- Events: subagent.delegating → subagent.delegated → run.summary
-- Result: same as CLI delegation path
+### SubAgent Delegation Works with Real Provider
+`delegate to demo-stat:` 在 real provider 路径下正常触发 subagent.delegating → subagent.delegated 事件，返回 deterministic L0 summary。
 
-### Step 8: 忘记记忆
-- Sub-steps:
-  - `show memories`: 空列表，格式正确
-  - `forget id:nonexistent`: "未找到 ID 为「nonexistent」的记忆。"
-  - `忘记 test`: "未找到匹配「test」的记忆。"
+### Real LLM Tool Selection
+kimi-k2.5 在 dogfood 中未主动触发 `demo.write_demo_note` 工具——这反映了真实 LLM 的工具选择行为不同于 FakeProvider 的确定性关键词匹配。工具已正确注册在 provider request 中，是否调用取决于模型推理。
 
 ## Fixes Applied
 
-1. **code-reviewer SUBAGENT.md**: Added `status: active` field (was missing, causing registry load failure)
-2. **dogfood script Step 3**: Fixed path detection — `demo_write_demo_note` creates files in timestamped subdirectories (`workspace/demo/YYYYMMDDTHHMMSSZ/note.md`), not flat `workspace/demo/note.md`. Script now scans for new files via `rglob`.
-
-## Remaining Issues
-
-None. All 9 checklist steps pass.
+1. **code-reviewer SUBAGENT.md**: 补充 `status: active` 字段
+2. **dogfood Step 3 path detection**: 适配 `_default_demo_note_path()` 的时间戳目录行为
+3. **Real provider config**: 需要显式设置 `MY_FIRST_AGENT_LLM_PROVIDER` 环境变量才能激活 real provider 路径
 
 ## Readiness Assessment
 
-- **Local manual dogfood**: READY — all steps pass on fake/local/no-secret path
-- **Safe to start Next Big Loop**: YES — no blocking issues remain
-- **Fake/real shared path**: Confirmed — all steps go through `core.chat()` unified runtime
+- **Local manual dogfood (fake)**: READY — 9/9 PASS
+- **Real provider dogfood**: READY with caveat — 5/6 PASS, tool selection depends on LLM
+- **Fake/real shared path**: CONFIRMED — 同一 `core.chat()` 统一入口
+- **Safe to start Next Big Loop**: YES
 
-## Next Big Loop Selection Rationale
+## Next Big Loop Selection
 
-With dogfood fully passing, the highest-value Next Big Loop candidates from Section H are:
+Real provider dogfood 已完成。基于当前证据，下一批候选按优先级排列：
 
-1. **Real Provider Dogfood Readiness** — `.env` is configured; can do controlled real-LLM verification of the same checklist steps
-2. **MEMORY_RECALL implementation revisit** — AD complete, could add real recall value
-3. **More natural tool/subagent planning** — current deterministic matching works but could be richer
+1. **MEMORY_RECALL implementation revisit** — AD 已完成，可在 fake path 实现 pre-loop recall，提升记忆系统的实际用户价值
+2. **More natural tool/subagent planning** — real LLM 未自然触发工具，可通过 system prompt 优化或增加 NL tool routing
+3. **Full Hook system exploration** — 需先写 Architecture Decision
 
-Selection will be made based on safety preflight for real provider path.
+选择 MEMORY_RECALL 作为下一步：AD 现成、fake-safe、能直接提升用户可感知的记忆价值。

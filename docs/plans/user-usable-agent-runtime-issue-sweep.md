@@ -22,6 +22,9 @@ Based on: Post User-Usable Agent Runtime MVP Independent Audit (score 5/10)
 | Real provider opt-in docs 已存在 | README.md Real Provider Opt-in 章节 |
 | CLI command router 已提取 | `agent/cli_commands.py` 独立模块 |
 | Progress/event UX | subagent.delegating/delegated, memory.forgotten 事件 |
+| Overclaim sweep 完成 | README/ROADMAP/plan 诚实标签已修正 |
+| Manual dogfood checklist 已创建 | `docs/dogfood/local-manual-dogfood-checklist.md` |
+| SubAgent fixtures ≥2 | demo-stat + code-reviewer（Issue 7 skip：已有 2 个 fixture，用户价值已满足） |
 | 当前评分 ~6+/10 | post-issue-sweep 评估 |
 
 当前目标：developer-usable / manual-dogfood-ready / local-user-usable agent。
@@ -137,6 +140,7 @@ Based on: Post User-Usable Agent Runtime MVP Independent Audit (score 5/10)
 - commit：`feat(subagent): add second safe demo subagent fixture`
 - safe-to-auto-run：yes；如果 Issue 2/6 已提供足够用户价值，可 skip
 - stop conditions：只有 hard stop；可 skip
+- **状态：skip** — 已有 2 个 subagent fixture（demo-stat + code-reviewer），Issue 2/6 提供了充分的 NL delegation + progress event 用户价值
 
 **Issue 8: Overclaim sweep**
 

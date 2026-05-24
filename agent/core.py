@@ -196,6 +196,42 @@ def _looks_like_show_subagents(text: str) -> bool:
     return any(trigger in text_lower for trigger in show_triggers)
 
 
+def _looks_like_delegate_to_subagent(text: str) -> tuple[str, str] | None:
+    """检测用户输入是否为"委托子代理"CLI 命令，返回 (subagent_name, task)。
+
+    中文学习边界：这是 deterministic CLI meta-command 检测，
+    不调用 LLM、不经过 tool pipeline、不写 store。
+    实际 delegation 执行走 agent.subagent_system.delegation.delegate_once()，
+    复用 SubAgentRegistry + SubAgentRequest + execute_local 的已有基础设施。
+
+    支持的触发模式：
+    - delegate to <name>: <task>
+    - 委托 <name>: <task> / 委托 <name>：<task>
+    - delegate <task> to <name>
+    """
+    import re
+
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+
+    # Pattern 1: "delegate to <name>: <task>"
+    m = re.match(r"delegate\s+to\s+(\S+)\s*:\s*(.+)", text_lower)
+    if m:
+        return (m.group(1), text_stripped[m.start(2):].strip())
+
+    # Pattern 2: "委托 <name>: <task>" (支持中英文冒号)
+    m = re.match(r"委托\s+(\S+)\s*[:：]\s*(.+)", text_stripped)
+    if m:
+        return (m.group(1), m.group(2).strip())
+
+    # Pattern 3: "delegate <task> to <name>"
+    m = re.match(r"delegate\s+(.+)\s+to\s+(\S+)", text_lower)
+    if m:
+        return (m.group(2), text_stripped[m.start(1):m.end(1)].strip())
+
+    return None
+
+
 def _maybe_run_l2_inline(state) -> None:
     """Phase 5b L2 inline extraction thin hook。
 
@@ -474,6 +510,62 @@ def chat(
                 lines.append(f"  {i}. {name} [{role}] — {desc}")
             return "\n".join(lines)
         return "暂无已注册的子代理。"
+
+    # 中文学习边界：delegate to <name>: <task> / 委托 <name>: <task> 是 CLI
+    # meta-command。不经过 tool pipeline、不调用 LLM、不修改 state。
+    # 实际 delegation 执行走 agent.subagent_system.delegation.delegate_once()，
+    # 复用已有 SubAgentRegistry + SubAgentRequest + execute_local 基础设施，
+    # 不与 unified runtime flow 形成第二条路径。
+    delegate_match = _looks_like_delegate_to_subagent(user_input)
+    if delegate_match:
+        from pathlib import Path
+        from agent.subagent_system.delegation import delegate_once
+        from agent.subagent_system.registry import SubAgentRegistry
+        from agent.subagent_system.request import SubAgentRequest
+
+        subagent_name, task = delegate_match
+        try:
+            registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+        except Exception:
+            return f"无法加载子代理注册表。「{subagent_name}」不可用。"
+        descriptor = registry.get_descriptor(subagent_name)
+        if descriptor is None:
+            visible_names = [d.name for d in registry.list_visible()]
+            hint = f"可用子代理：{', '.join(visible_names)}" if visible_names else "暂无已注册的子代理"
+            return f"未找到子代理「{subagent_name}」。{hint}。"
+        try:
+            subagent_request = SubAgentRequest(
+                task=task,
+                role=descriptor.role,
+                allowed_tools=descriptor.allowed_tools,
+                parent_trace_id=f"cli-delegation-{uuid4().hex[:8]}",
+                delegation_reason="CLI meta-command delegation",
+                max_iterations=descriptor.max_iterations_default,
+                execution_mode="local_fake",
+                risk_level=descriptor.risk_level,
+            )
+        except ValueError as exc:
+            return f"委托请求无效：{exc}"
+        try:
+            run = delegate_once(subagent_request, registry)
+        except Exception as exc:
+            return f"子代理执行失败：{exc}"
+        result = run.result
+        status = getattr(result, "status", "unknown") if result else "unknown"
+        summary = getattr(result, "summary", "") if result else ""
+        stop_reason = getattr(result, "stop_reason", "") if result else ""
+        confidence = getattr(result, "confidence", 0.0) if result else 0.0
+        parts = [
+            f"[SubAgent: {subagent_name}]",
+            f"状态: {status}",
+        ]
+        if stop_reason:
+            parts.append(f"停止原因: {stop_reason}")
+        if summary:
+            parts.append(f"摘要: {summary}")
+        if confidence > 0:
+            parts.append(f"置信度: {confidence:.0%}")
+        return "\n".join(parts)
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

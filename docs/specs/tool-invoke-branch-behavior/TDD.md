@@ -7,7 +7,7 @@ SPEC: [SPEC.md](SPEC.md)
 
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route() with target_module_proof
-- L3 (real_core_loop_runtime_e2e): DEFERRED
+- L3 (real_core_loop_runtime_e2e): verified in test_tool_invoke_error_l3.py / test_tool_invoke_not_found_l3.py
 
 ## Phase A: Happy Path — 工具成功调用
 

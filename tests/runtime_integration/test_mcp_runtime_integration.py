@@ -11,7 +11,7 @@ MCP tool-like execution 是已有 Tool branch point 下的一个 variant。
 测试分层：
 - L1 (subsystem_integration): FakeMCPClient 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): DEFERRED
+- L3 (real_core_loop_runtime_e2e): verified in test_mcp_l3_real_core_loop.py
 
 架构依据：
 - docs/specs/mcp-runtime-integration/SPEC.md

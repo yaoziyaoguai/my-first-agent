@@ -9,7 +9,7 @@ Contract: [Unified Runtime Flow Contract](../../real-e2e/UNIFIED_RUNTIME_FLOW_CO
 分层策略（复用 tool-invoke-branch-behavior 的分层模式）：
 - L1 (subsystem_integration): MCP FakeMCPClient direct call — 仅验证 MCP adapter 自身
 - L2 (harness_runtime_e2e): orchestrator → dispatcher.route(TOOL_GATE/TOOL_INVOKE/TOOL_RESULT)
-- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop — DEFERRED
+- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop — verified in test_mcp_l3_real_core_loop.py
 
 ---
 

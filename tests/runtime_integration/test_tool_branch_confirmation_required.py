@@ -13,7 +13,7 @@
 测试分层：
 - L1 (subsystem_integration): ToolGateHandler.handle() 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route() 通过 harness 路径
-- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — B2 test DEFERRED 到 U4
+- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — B2 test verified (L468)
 """
 
 from __future__ import annotations
@@ -345,7 +345,7 @@ class TestConfirmationRequiredClassificationBoundaries:
 
     中文学习边界：
     - B1: direct dispatcher.route() → harness_runtime_e2e（不可冒充 real）
-    - B2: route_from_runtime_loop() → real_core_loop_runtime_e2e（DEFERRED 到 U4）
+    - B2: route_from_runtime_loop() → real_core_loop_runtime_e2e（verified below）
     - B3: 直接 ToolGateHandler.handle() → subsystem_integration
     - B4: payload 中的 core_loop_invoked 不可升级分类
     """

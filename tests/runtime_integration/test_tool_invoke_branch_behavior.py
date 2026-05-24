@@ -9,7 +9,7 @@ tool.invoke = 接收 tool_name + tool_input → 查找 TOOL_REGISTRY → 执行�
 测试分层：
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — DEFERRED
+- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — verified in test_tool_pipeline_l3_completion.py
 
 架构依据：
 - docs/specs/tool-invoke-branch-behavior/SPEC.md

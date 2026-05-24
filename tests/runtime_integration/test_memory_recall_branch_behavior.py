@@ -9,7 +9,7 @@ recall = 从 store 读取已批准 records → 生成 governed MemorySnapshot �
 测试分层：
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — DEFERRED
+- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — verified in test_memory_recall_l3.py
 
 架构依据：
 - docs/specs/memory-recall-branch-behavior/SPEC.md

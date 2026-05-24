@@ -151,7 +151,7 @@ MCP 工具名格式 `mcp__server__tool` 在 ToolGateHandler 中的路径：
 | `FakeMCPClient.call_tool()` 直接调用 | `subsystem_integration` |
 | `dispatcher.route(TOOL_GATE)` 直接调用 | `harness_runtime_e2e` (target_module_proof 完整) |
 | `run_mcp_tool_pipeline(dispatcher, ...)` | `harness_runtime_e2e`（orchestrator 内部走 dispatcher） |
-| `dispatcher.route_from_runtime_loop(...)` | `real_core_loop_runtime_e2e` — DEFERRED |
+| `dispatcher.route_from_runtime_loop(...)` | `real_core_loop_runtime_e2e` — verified in test_mcp_l3_real_core_loop.py |
 
 orchestrator 只组合已有 handler，不自产 evidence。evidence 来自 dispatcher context，classifier 正确判定为 harness_runtime_e2e。
 

@@ -58,16 +58,28 @@ def call_model(
     if getattr(provider, "supports_streaming", False):
         stream_events = provider.stream(system=system_prompt, messages=messages, tools=tools)
         observed_events = []
+        has_tool_request = False
         for event in stream_events:
             observed_events.append(event)
             if event.event_type == "tool_request":
+                has_tool_request = True
                 if emit_tool_request is not None:
                     emit_tool_request()
             elif event.text_delta and emit_text_delta is not None:
                 emit_text_delta(event.text_delta)
         if _streaming_events_out is not None:
             _streaming_events_out.extend(observed_events)
-        response = collect_stream_response(observed_events)
+        if has_tool_request:
+            # stream() 无法产出 ToolUseBlock——回退 create() 获取含完整
+            # ToolUseBlock 的 ProviderResponse。文本 deltas 已在上方 emit，
+            # 不再重复 emit text（避免用户看到双重输出）。
+            response = provider.create(
+                system=system_prompt,
+                messages=messages,
+                tools=tools,
+            )
+        else:
+            response = collect_stream_response(observed_events)
     else:
         # 兼容旧测试 fake provider；正式 provider contract 已要求 stream()，
         # 这里仍只走 provider interface，不回退任何 SDK client。

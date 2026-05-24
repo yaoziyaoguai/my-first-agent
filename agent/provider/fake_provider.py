@@ -313,8 +313,9 @@ class FakeProvider:
 
     provider_type = "fake"
     supports_tools = False
-    # create() 走全路径（text + tool_use），streaming 协议不支持 tool_use blocks
-    supports_streaming = False
+    # Phase 2 WP-D：stream() 已支持 text deltas + tool_request 事件，
+    # call_model() 在检测到 tool_request 时自动回退 create() 获取 ToolUseBlock。
+    supports_streaming = True
 
     def __init__(
         self,
@@ -395,17 +396,30 @@ class FakeProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> Iterator[ProviderStreamEvent]:
-        """流式响应：把文本拆成 delta 事件，以 final 事件结束。
+        """流式响应：文本按 3 字一组分片，tool_use 时产出 tool_request 事件。
 
-        注意：tool_use 响应通过 create() 路径返回（supports_streaming 动态
-        覆写），stream() 路径不处理 tool_use。
+        call_model() 在检测到 tool_request 事件后自动回退 create() 获取完整
+        ToolUseBlock。这样 streaming 路径负责用户可见的逐字输出体验，
+        create() 路径负责 Tool Pipeline 所需的完整 ToolUseBlock。
+
+        为什么不能只靠 stream() 产出 ToolUseBlock：
+        - ProviderStreamEvent 不携带 tool_name/tool_input
+        - collect_stream_response() 只聚合 text_delta，不构造 ToolUseBlock
+        - tool_request 事件是信号：告诉 call_model()「需要切回 create()」
         """
         text = self._response_fn(messages)
+        tool_block = self._resolve_tool_use(messages, tools)
+
         seq = 0
         chunk_size = 3
         for i in range(0, len(text), chunk_size):
             chunk = text[i : i + chunk_size]
             seq += 1
             yield ProviderStreamEvent.delta(sequence=seq, text_delta=chunk)
+
+        if tool_block is not None:
+            seq += 1
+            yield ProviderStreamEvent.tool_request(sequence=seq)
+
         seq += 1
         yield ProviderStreamEvent.final(sequence=seq)

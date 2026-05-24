@@ -421,3 +421,122 @@ class TestArchitectureBoundaries:
         # 工具描述通过 create() 的 tools 参数传入，而非硬编码
         assert not hasattr(fp, "demo_echo_task_summary")
         assert not hasattr(fp, "demo_write_demo_note")
+
+
+# ═══════════════════════════════════════════════════════════
+# WP-D: Streaming / Progress User-Visible Experience
+# ═══════════════════════════════════════════════════════════
+
+
+class TestFakeProviderStreaming:
+    """FakeProvider stream() 确定性分片输出测试。
+
+    中文学习边界：
+    - FakeProvider.supports_streaming = True 将 text-only 响应走 stream() 路径
+    - stream() 按 3 字一组产出 text_delta 事件，以 final 结束
+    - tool_use 响应在 stream() 中产 tool_request 事件，call_model() 回退 create()
+    - 这**不是**第二条 runtime——stream/create 共享同一 FakeProvider 实例，
+      call_model() 是唯一入口，Tool Pipeline 对两条路径完全透明
+    """
+
+    def test_supports_streaming_is_true(self):
+        """FakeProvider 默认启用 streaming（WP-D 确定性流式输出）。"""
+        p = FakeProvider()
+        assert p.supports_streaming is True
+
+    def test_stream_text_only_produces_delta_events(self):
+        """stream() text-only 响应产出连续 text_delta + final 事件。"""
+        p = FakeProvider()
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "你好世界"}],
+                tools=[],
+            )
+        )
+        assert len(events) >= 2  # 至少 1 delta + final
+        deltas = [e for e in events if e.event_type == "text_delta"]
+        finals = [e for e in events if e.event_type == "final"]
+        assert len(deltas) >= 1
+        assert len(finals) == 1
+        # 拼接所有 delta 文本 = 完整响应
+        full_text = "".join(e.text_delta for e in deltas)
+        assert "你好世界" in full_text
+
+    def test_stream_chunk_size(self):
+        """每个 text_delta chunk 大小 <= 3（确定性分片）。"""
+        p = FakeProvider()
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "这是一条比较长的测试消息"}],
+                tools=[],
+            )
+        )
+        deltas = [e for e in events if e.event_type == "text_delta"]
+        for delta in deltas:
+            assert len(delta.text_delta) <= 3
+
+    def test_stream_sequence_monotonic(self):
+        """stream() 事件的 sequence 严格递增。"""
+        p = FakeProvider()
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "测试"}],
+                tools=[],
+            )
+        )
+        for i in range(1, len(events)):
+            assert events[i].sequence > events[i - 1].sequence
+
+    def test_stream_ends_with_final(self):
+        """stream() 必须以 final 事件结束。"""
+        p = FakeProvider()
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "测试"}],
+                tools=[],
+            )
+        )
+        assert events[-1].is_final is True
+        assert events[-1].event_type == "final"
+
+    def test_stream_tool_use_produces_tool_request_event(self):
+        """tool_use 匹配时，stream() 产 tool_request 事件。
+
+        stream() 不产 ToolUseBlock（ProviderStreamEvent 不携带 tool_name/tool_input），
+        tool_request 是信号告知 call_model() 回退 create() 获取完整 ToolUseBlock。
+        call_model() 检测到 tool_request 时调用 provider.create() 获取含
+        ToolUseBlock 的 ProviderResponse，text deltas 不重复 emit。
+        """
+        p = FakeProvider()
+        tools = [{"name": "demo.write_demo_note", "description": "写一个演示笔记到文件"}]
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "写一个演示笔记"}],
+                tools=tools,
+            )
+        )
+        tool_events = [e for e in events if e.event_type == "tool_request"]
+        assert len(tool_events) == 1
+        # tool_request 后仍有 final
+        assert events[-1].event_type == "final"
+
+    def test_stream_tool_use_still_produces_text_deltas(self):
+        """tool_use 匹配时，文本 delta 仍正常流出（用户可见"思考"文本）。"""
+        p = FakeProvider()
+        tools = [{"name": "demo.write_demo_note", "description": "写一个演示笔记"}]
+        events = list(
+            p.stream(
+                system="test",
+                messages=[{"role": "user", "content": "写一个演示笔记"}],
+                tools=tools,
+            )
+        )
+        deltas = [e for e in events if e.event_type == "text_delta"]
+        assert len(deltas) >= 1
+        full = "".join(e.text_delta for e in deltas)
+        assert len(full) > 0

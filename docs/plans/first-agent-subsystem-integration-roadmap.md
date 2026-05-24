@@ -67,7 +67,7 @@ query/event
 | **MCP: Policy Re-Eval** | ❌ | ❌ | ❌ | 无 | 需要 runtime loop 中 confirmation 交互 | 需用户决策，暂缓 |
 | **MCP: HOME isolation** | ✅ | ✅ | N/A | `test_mcp_l3_real_core_loop.py::T6` 在 HOME 隔离路径下通过 | 非覆盖缺口——测试正确要求隔离 HOME，CI/Makefile 应统一设置 | 已闭环（基础设施问题，非测试缺陷） |
 | **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py` | 无 | 已闭环 |
-| **Memory: recall** | ✅ | ✅ | ✅ | `test_memory_recall_branch_behavior.py` | 无 | 已闭环 |
+| **Memory: recall** | ✅ | ✅ | ✅ | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (commit e18595b) |
 | **Memory: consolidation** | ✅ | ✅ | ✅ | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter | 已闭环 (本 commit) |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
@@ -159,6 +159,7 @@ query/event
 | **#6** | **Evidence overclaim: SubAgent** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
 | **#7** | **Evidence overclaim: StreamingProvider** | ✅ 完成（ForgedTargetLabel + CatalogAllowedForgedCallable 均已覆盖） |
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
+| **#9** | **Memory Recall L3** | ✅ 完成 (commit e18595b) — MEMORY_RECALL 接入 loop.py turn-end hook，3 个 L3 tests |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

@@ -1,0 +1,205 @@
+"""CLI meta-command 检测与渲染模块。
+
+中文学习边界：
+- 本模块只负责 CLI meta-command 的**检测**（deterministic string matching）和
+  **渲染**（纯文本格式化），不执行任何核心副作用。
+- 核心副作用（Memory retain/write、Tool Pipeline、SubAgent runtime）仍由
+  core.chat() 内的服务调用执行。
+- 这不是第二条 runtime——所有命令仍必须通过 core.chat() 统一入口进入。
+- 后续新增 CLI 命令只需在本模块新增 detect/render 函数，不污染 core.py。
+
+为什么从 core.py 提取：
+- core.py 的 chat() 是 runtime orchestrator，不应堆砌命令解析和文本渲染逻辑
+- 提取后 chat() 仍然是唯一用户入口，但命令解析职责分离到独立模块
+- 避免 core.py 持续膨胀，也为后续 manual dogfood 提供清晰的扩展点
+
+架构约束：
+- detect 函数：纯字符串匹配，无 IO、无副作用
+- render 函数：纯格式化，输入数据 → 输出文本
+- 不得调用 ToolRegistry、Memory store write、SubAgent delegation、LLM
+- 不得导入 core.py（避免循环依赖）
+"""
+
+from __future__ import annotations
+
+
+# ========== Detection functions（纯字符串匹配，无副作用） ==========
+
+def detect_show_memories(text: str) -> bool:
+    """检测用户输入是否为"查看记忆"CLI 命令。
+
+    支持的触发词（中英文）：
+    - show memories / list memories / show my memories
+    - 显示记忆 / 列出记忆 / 查看记忆 / 我的记忆 / 已保存的记忆
+    - 记忆列表 / 查看已保存
+    """
+    text_lower = text.strip().lower()
+    triggers = (
+        "show memories", "list memories", "show my memories",
+        "显示记忆", "列出记忆", "查看记忆", "我的记忆", "已保存的记忆",
+        "记忆列表", "查看已保存",
+    )
+    return any(trigger in text_lower for trigger in triggers)
+
+
+def detect_forget_memory(text: str) -> str | None:
+    """检测用户输入是否为"忘记记忆"CLI 命令，返回待匹配的关键词或 ID。
+
+    支持的触发模式（中英文）：
+    - forget <keyword> / forget id:<id>
+    - 忘记 <keyword> / 忘记 id:<id>
+    - remove memory <keyword>
+    - 删除记忆 <keyword> / 删掉记忆 <keyword> / 清除记忆 <keyword>
+
+    返回 None 表示不是 forget 命令。
+    """
+    import re
+
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+    prefixes = (
+        "forget ", "忘记", "remove memory ", "remove memories ",
+        "删除记忆", "删掉记忆", "清除记忆",
+    )
+    for prefix in prefixes:
+        if text_lower.startswith(prefix):
+            remainder = text_stripped[len(prefix):].strip()
+            if remainder:
+                return remainder
+            return None
+    m = re.match(r".*?(?:forget|忘记|删除记忆|删掉记忆)\s+(.+)", text_lower)
+    if m:
+        return text_stripped[m.start(1):].strip() or None
+    return None
+
+
+def detect_show_subagents(text: str) -> bool:
+    """检测用户输入是否为"查看子代理"CLI 命令。
+
+    支持的触发词（中英文）：
+    - show subagents / list subagents / show agents
+    - 显示子代理 / 列出子代理 / 查看子代理 / 子代理列表
+    """
+    text_lower = text.strip().lower()
+    triggers = (
+        "show subagents", "list subagents", "show agents",
+        "显示子代理", "列出子代理", "查看子代理", "子代理列表",
+    )
+    return any(trigger in text_lower for trigger in triggers)
+
+
+def detect_delegate_to_subagent(text: str) -> tuple[str, str] | None:
+    """检测用户输入是否为"委托子代理"CLI 命令，返回 (subagent_name, task)。
+
+    支持的触发模式：
+    - delegate to <name>: <task>
+    - 委托 <name>: <task> / 委托 <name>：<task>
+    - delegate <task> to <name>
+    """
+    import re
+
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+
+    # Pattern 1: "delegate to <name>: <task>"
+    m = re.match(r"delegate\s+to\s+(\S+)\s*:\s*(.+)", text_lower)
+    if m:
+        return (m.group(1), text_stripped[m.start(2):].strip())
+
+    # Pattern 2: "委托 <name>: <task>" (支持中英文冒号)
+    m = re.match(r"委托\s+(\S+)\s*[:：]\s*(.+)", text_stripped)
+    if m:
+        return (m.group(1), m.group(2).strip())
+
+    # Pattern 3: "delegate <task> to <name>"
+    m = re.match(r"delegate\s+(.+)\s+to\s+(\S+)", text_lower)
+    if m:
+        return (m.group(2), text_stripped[m.start(1):m.end(1)].strip())
+
+    return None
+
+
+# ========== Rendering functions（纯格式化，无副作用） ==========
+
+def render_memory_list(records) -> str:
+    """格式化记忆列表为 CLI 可读文本。
+
+    每条记忆显示 ID、来源、时间和内容摘要。
+    records 是 memory record 列表，每条 record 应有 id/content/source/created_at 等属性。
+    """
+    if not records:
+        return "暂无已保存的记忆。"
+
+    lines = [f"已保存的记忆（共 {len(records)} 条）："]
+    for i, r in enumerate(records, 1):
+        rid = getattr(r, "id", "?")
+        content = getattr(r, "content", str(r))[:120]
+        source = getattr(r, "source", "")
+        created = getattr(r, "created_at", "")
+
+        meta_parts = []
+        if source:
+            meta_parts.append(f"来源:{source}")
+        if created:
+            meta_parts.append(f"{created}")
+
+        meta = f" [{', '.join(meta_parts)}]" if meta_parts else ""
+        short_id = str(rid)[:8] if rid else "?"
+        lines.append(f"  {i}. [{short_id}]{meta} {content}")
+    return "\n".join(lines)
+
+
+def render_memory_forget_result(keyword: str, removed_count: int) -> str:
+    """格式化 forget memory 成功结果。"""
+    return f"已移除 {removed_count} 条记忆（匹配「{keyword}」）。"
+
+
+def render_memory_forget_not_found(keyword: str) -> str:
+    """格式化 forget memory 未找到结果。"""
+    return f"未找到匹配「{keyword}」的记忆。"
+
+
+def render_subagent_list(descriptors) -> str:
+    """格式化子代理列表为 CLI 可读文本。"""
+    if not descriptors:
+        return "暂无已注册的子代理。"
+
+    lines = [f"已注册的子代理（共 {len(descriptors)} 个）："]
+    for i, d in enumerate(descriptors, 1):
+        name = getattr(d, "name", str(d))
+        role = getattr(d, "role", "")
+        desc = getattr(d, "description", "")[:80]
+        lines.append(f"  {i}. {name} [{role}] — {desc}")
+    return "\n".join(lines)
+
+
+def render_delegate_result(
+    subagent_name: str,
+    status: str,
+    summary: str = "",
+    stop_reason: str = "",
+    confidence: float = 0.0,
+) -> str:
+    """格式化子代理委托结果为 CLI 可读文本。"""
+    parts = [
+        f"[SubAgent: {subagent_name}]",
+        f"状态: {status}",
+    ]
+    if stop_reason:
+        parts.append(f"停止原因: {stop_reason}")
+    if summary:
+        parts.append(f"摘要: {summary}")
+    if confidence > 0:
+        parts.append(f"置信度: {confidence:.0%}")
+    return "\n".join(parts)
+
+
+def render_delegate_not_found(subagent_name: str, visible_names: list[str]) -> str:
+    """格式化子代理未找到的结果。"""
+    hint = f"可用子代理：{', '.join(visible_names)}" if visible_names else "暂无已注册的子代理"
+    return f"未找到子代理「{subagent_name}」。{hint}。"
+
+
+def render_delegate_error(subagent_name: str, error: str) -> str:
+    """格式化子代理执行错误。"""
+    return f"子代理执行失败「{subagent_name}」：{error}"

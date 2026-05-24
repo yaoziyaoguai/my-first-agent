@@ -316,6 +316,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.subagent_system.delegation",
         "agent.subagent_system.registry",
         "agent.subagent_system.request",
+        # Issue 1 Command Router extraction：CLI meta-command detect/render
+        # 提取到独立模块。core.py 模块级 import cli_commands 以获取检测
+        # 函数（_looks_like_*）和渲染函数。不引入新的 runtime 路径。
+        "agent.cli_commands",
         "agent.tool_registry",
         "agent.tools",
     }
@@ -348,10 +352,9 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_extract_text",
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",
-        "_looks_like_delegate_to_subagent",
-        "_looks_like_forget_memory",
-        "_looks_like_show_memories",
-        "_looks_like_show_subagents",
+        # _looks_like_* 检测函数已提取到 agent/cli_commands.py。
+        # core.py 通过模块级 import alias 保留向后兼容，
+        # 但它们不再是 FunctionDef 节点（只是 import 别名）。
         "_maybe_run_l2_inline",
         "_resolve_provider_evidence_metadata",
         "_run_main_loop",

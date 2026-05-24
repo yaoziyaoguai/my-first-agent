@@ -41,7 +41,21 @@ from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
 from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
-
+# CLI meta-command 检测/渲染已提取到 agent.cli_commands。
+# 这里保留兼容别名，使现有测试（test_subagent_user_facing 等）无需修改 import。
+from agent.cli_commands import (  # noqa: F401  — re-export for backward compatibility
+    detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
+    detect_forget_memory as _looks_like_forget_memory,
+    detect_show_memories as _looks_like_show_memories,
+    detect_show_subagents as _looks_like_show_subagents,
+    render_memory_list,
+    render_memory_forget_result,
+    render_memory_forget_not_found,
+    render_subagent_list,
+    render_delegate_result,
+    render_delegate_not_found,
+    render_delegate_error,
+)
 
 
 from config import MODEL_NAME, MAX_CONTINUE_ATTEMPTS
@@ -125,111 +139,9 @@ def _is_explicit_l2_trigger(text: str) -> bool:
     return any(trigger in text_lower for trigger in _EXPLICIT_L2_TRIGGERS)
 
 
-def _looks_like_show_memories(text: str) -> bool:
-    """检测用户输入是否为"查看记忆"CLI 命令。
-
-    中文学习边界：这是 deterministic CLI meta-command 检测，
-    不是 memory operation。它不进入 policy → confirmation → store pipeline，
-    只读取当前 store 中的 records 并展示给用户。
-
-    支持的触发词（中英文）：
-    - show memories / list memories / show my memories
-    - 显示记忆 / 列出记忆 / 查看记忆 / 我的记忆 / 已保存的记忆
-    """
-    text_lower = text.strip().lower()
-    show_triggers = (
-        "show memories", "list memories", "show my memories",
-        "显示记忆", "列出记忆", "查看记忆", "我的记忆", "已保存的记忆",
-        "记忆列表", "查看已保存",
-    )
-    return any(trigger in text_lower for trigger in show_triggers)
-
-
-def _looks_like_forget_memory(text: str) -> str | None:
-    """检测用户输入是否为"忘记记忆"CLI 命令，返回待匹配的内容关键词。
-
-    WP-A：deteministic CLI meta-command——不经过 policy → confirmation 管线，
-    直接操作 store 移除匹配 record。返回 None 表示不是 forget 命令。
-
-    支持的触发模式（中英文）：
-    - forget <content keyword>
-    - 忘记 <content keyword>
-    - remove memory <content keyword>
-    - 删除记忆 <content keyword>
-    """
-    import re
-
-    text_stripped = text.strip()
-    text_lower = text_stripped.lower()
-    forget_prefixes = (
-        "forget ", "忘记", "remove memory ", "remove memories ",
-        "删除记忆", "删掉记忆", "清除记忆",
-    )
-    for prefix in forget_prefixes:
-        if text_lower.startswith(prefix):
-            remainder = text_stripped[len(prefix):].strip()
-            if remainder:
-                return remainder
-            return None
-    # 也支持 "请忘记 X" 等中间形式
-    m = re.match(r".*?(?:forget|忘记|删除记忆|删掉记忆)\s+(.+)", text_lower)
-    if m:
-        return text_stripped[m.start(1):].strip() or None
-    return None
-
-
-def _looks_like_show_subagents(text: str) -> bool:
-    """检测用户输入是否为"查看子代理"CLI 命令。
-
-    中文学习边界：这是 deterministic CLI meta-command 检测，
-    不触发 delegation、不执行 subagent、不写 store。
-
-    支持的触发词（中英文）：
-    - show subagents / list subagents / show agents
-    - 显示子代理 / 列出子代理 / 查看子代理 / 子代理列表
-    """
-    text_lower = text.strip().lower()
-    show_triggers = (
-        "show subagents", "list subagents", "show agents",
-        "显示子代理", "列出子代理", "查看子代理", "子代理列表",
-    )
-    return any(trigger in text_lower for trigger in show_triggers)
-
-
-def _looks_like_delegate_to_subagent(text: str) -> tuple[str, str] | None:
-    """检测用户输入是否为"委托子代理"CLI 命令，返回 (subagent_name, task)。
-
-    中文学习边界：这是 deterministic CLI meta-command 检测，
-    不调用 LLM、不经过 tool pipeline、不写 store。
-    实际 delegation 执行走 agent.subagent_system.delegation.delegate_once()，
-    复用 SubAgentRegistry + SubAgentRequest + execute_local 的已有基础设施。
-
-    支持的触发模式：
-    - delegate to <name>: <task>
-    - 委托 <name>: <task> / 委托 <name>：<task>
-    - delegate <task> to <name>
-    """
-    import re
-
-    text_stripped = text.strip()
-    text_lower = text_stripped.lower()
-
-    # Pattern 1: "delegate to <name>: <task>"
-    m = re.match(r"delegate\s+to\s+(\S+)\s*:\s*(.+)", text_lower)
-    if m:
-        return (m.group(1), text_stripped[m.start(2):].strip())
-
-    # Pattern 2: "委托 <name>: <task>" (支持中英文冒号)
-    m = re.match(r"委托\s+(\S+)\s*[:：]\s*(.+)", text_stripped)
-    if m:
-        return (m.group(1), m.group(2).strip())
-
-    # Pattern 3: "delegate <task> to <name>"
-    m = re.match(r"delegate\s+(.+)\s+to\s+(\S+)", text_lower)
-    if m:
-        return (m.group(2), text_stripped[m.start(1):m.end(1)].strip())
-
-    return None
+# CLI meta-command detection functions (_looks_like_*) 已提取到 agent.cli_commands。
+# 这里通过模块顶部的 import 保留向后兼容的模块级别名。
+# 新增 CLI 命令的 detect/render 逻辑应直接写入 agent/cli_commands.py。
 
 
 def _maybe_run_l2_inline(state) -> None:
@@ -447,23 +359,22 @@ def chat(
     if not user_input or not user_input.strip():
         return ""
 
-    # ── CLI meta-command 边界说明（临时用户入口，后续迁移）─────────────────
-    # 中文学习边界：当前 show memories / forget memory / show subagents /
-    # delegate to 等 CLI meta-command 是临时 demo/user-entry affordance。
+    # ── CLI meta-command 边界说明 ──────────────────────────────────────────
+    # 中文学习边界：CLI meta-command 的检测（detect）和渲染（render）已提取到
+    # agent/cli_commands.py。core.chat() 仍然是唯一统一入口，但命令解析和渲染
+    # 不再散落在这里。
     #
-    # 它们留在 core.chat 入口处的理由：
-    # - 验证统一主流程（core.chat → loop.py → Tool Pipeline）下用户可见能力
-    # - 提供 deterministic local/fake 路径下的用户交互入口
-    # - 避免新增第二条 runtime flow
+    # 提取后的职责分工：
+    # - agent/cli_commands.py：detect 函数（纯字符串匹配）+ render 函数（纯格式化）
+    # - agent/core.py：服务调用（memory_runtime、SubAgentRegistry）+ 渲染委托
     #
-    # 已知债务（不在本轮解决）：
-    # - core.py 职责持续膨胀：CLI meta-command 解析不应属于 runtime hub
-    # - 后续应提取到独立 command router / presenter 边界（如 agent/cli_commands.py），
-    #   让 core.chat 回归 pure runtime orchestrator
-    # - 提取后 CLI meta-command 仍必须走 core.chat 统一入口，不能成为独立 runtime 路径
-    # - 不要在本轮实现 command router 抽象——当前 meta-command 数量和复杂度仍可控
+    # 这不是第二条 runtime——所有命令仍通过 core.chat() 进入。
+    # 后续新增 CLI 命令应在 cli_commands.py 新增 detect/render 函数，
+    # 并在 core.chat() 入口处新增薄调用块。
     #
     # ── Memory management CLI commands ──────────────────────────────────────
+    # 检测由 agent/cli_commands 完成（纯字符串匹配）；服务调用（memory_runtime）
+    # 留在 core.chat 内，不经过 command router。渲染由 cli_commands 的 render 函数完成。
     if _looks_like_show_memories(user_input):
         records = _memory_runtime.list_records()
         _safe_emit_runtime_event(
@@ -471,33 +382,43 @@ def chat(
             memory_list_event(records),
             fallback_prefix="\n",
         )
-        return "\n".join(
-            [getattr(r, "content", str(r))[:120] for r in records]
-        ) if records else "暂无已保存的记忆。"
+        return render_memory_list(records)
 
     # WP-A：forget / 忘记记忆 CLI meta-command。
     # 直接匹配 store 中 record content 并移除，不经过 policy → confirmation 管线。
     forget_keyword = _looks_like_forget_memory(user_input)
     if forget_keyword:
+        # 支持按 ID 精确删除：forget id:<record_id>
+        if forget_keyword.lower().startswith("id:"):
+            record_id = forget_keyword[3:].strip()
+            if _memory_runtime.remove_record(record_id):
+                remaining = _memory_runtime.list_records()
+                _safe_emit_runtime_event(
+                    on_runtime_event,
+                    memory_list_event(remaining),
+                    fallback_prefix="\n",
+                )
+                return f"已移除记忆（ID: {record_id}）。"
+            return f"未找到 ID 为「{record_id}」的记忆。"
+        # 否则按 content 关键词匹配
         records = _memory_runtime.list_records()
         matched = [r for r in records if forget_keyword.lower() in getattr(r, "content", "").lower()]
         if not matched:
-            return f"未找到匹配「{forget_keyword}」的记忆。"
+            return render_memory_forget_not_found(forget_keyword)
         removed_count = 0
         for r in matched:
             if _memory_runtime.remove_record(r.id):
                 removed_count += 1
-        # 通知 RuntimeEvent 监听者 memory 已变更
         remaining = _memory_runtime.list_records()
         _safe_emit_runtime_event(
             on_runtime_event,
             memory_list_event(remaining),
             fallback_prefix="\n",
         )
-        return f"已移除 {removed_count} 条记忆（匹配「{forget_keyword}」）。"
+        return render_memory_forget_result(forget_keyword, removed_count)
 
-    # 中文学习边界：show subagents / 显示子代理 是 CLI meta-command，
-    # 不触发 delegation、不执行 subagent、不写 store。
+    # show subagents CLI meta-command：检测 → registry lookup → 渲染。
+    # 渲染由 cli_commands.render_subagent_list 完成。
     if _looks_like_show_subagents(user_input):
         from pathlib import Path
         from agent.subagent_system.registry import SubAgentRegistry
@@ -513,21 +434,11 @@ def chat(
             subagent_list_event(descriptors),
             fallback_prefix="\n",
         )
-        if descriptors:
-            lines = [f"已注册的子代理（共 {len(descriptors)} 个）："]
-            for i, d in enumerate(descriptors, 1):
-                name = getattr(d, "name", str(d))
-                role = getattr(d, "role", "")
-                desc = getattr(d, "description", "")[:80]
-                lines.append(f"  {i}. {name} [{role}] — {desc}")
-            return "\n".join(lines)
-        return "暂无已注册的子代理。"
+        return render_subagent_list(descriptors)
 
-    # 中文学习边界：delegate to <name>: <task> / 委托 <name>: <task> 是 CLI
-    # meta-command。不经过 tool pipeline、不调用 LLM、不修改 state。
-    # 实际 delegation 执行走 agent.subagent_system.delegation.delegate_once()，
-    # 复用已有 SubAgentRegistry + SubAgentRequest + execute_local 基础设施，
-    # 不与 unified runtime flow 形成第二条路径。
+    # delegate to subagent CLI meta-command：检测 → registry lookup → 委托执行 → 渲染。
+    # 检测由 cli_commands 完成；delegate_once() 执行由 SubAgent system 完成；
+    # 渲染由 cli_commands.render_delegate_* 完成。
     delegate_match = _looks_like_delegate_to_subagent(user_input)
     if delegate_match:
         from pathlib import Path
@@ -539,12 +450,11 @@ def chat(
         try:
             registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
         except Exception:
-            return f"无法加载子代理注册表。「{subagent_name}」不可用。"
+            return render_delegate_error(subagent_name, "无法加载子代理注册表")
         descriptor = registry.get_descriptor(subagent_name)
         if descriptor is None:
             visible_names = [d.name for d in registry.list_visible()]
-            hint = f"可用子代理：{', '.join(visible_names)}" if visible_names else "暂无已注册的子代理"
-            return f"未找到子代理「{subagent_name}」。{hint}。"
+            return render_delegate_not_found(subagent_name, visible_names)
         try:
             subagent_request = SubAgentRequest(
                 task=task,
@@ -561,23 +471,13 @@ def chat(
         try:
             run = delegate_once(subagent_request, registry)
         except Exception as exc:
-            return f"子代理执行失败：{exc}"
+            return render_delegate_error(subagent_name, str(exc))
         result = run.result
         status = getattr(result, "status", "unknown") if result else "unknown"
         summary = getattr(result, "summary", "") if result else ""
         stop_reason = getattr(result, "stop_reason", "") if result else ""
         confidence = getattr(result, "confidence", 0.0) if result else 0.0
-        parts = [
-            f"[SubAgent: {subagent_name}]",
-            f"状态: {status}",
-        ]
-        if stop_reason:
-            parts.append(f"停止原因: {stop_reason}")
-        if summary:
-            parts.append(f"摘要: {summary}")
-        if confidence > 0:
-            parts.append(f"置信度: {confidence:.0%}")
-        return "\n".join(parts)
+        return render_delegate_result(subagent_name, status, summary, stop_reason, confidence)
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

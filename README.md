@@ -92,7 +92,9 @@ pip install -r requirements.txt
 .venv/bin/python main.py demo "create a demo note about today's local run"
 ```
 
-这个 demo 使用 deterministic fake provider，不调用真实 LLM，不访问网络，不读取 `.env` / `agent_log.jsonl` / `sessions/` / `runs/`。
+这个 demo 使用 deterministic fake provider，不调用真实 LLM，不访问网络，不依赖 `.env` 中的 key。
+
+> **注意**：`main.py demo` 是独立 demo adapter 路径（`agent/local_demo.py`），用于快速验证本地环境，**不经过完整的 ToolRegistry / Tool Pipeline / unified runtime flow**。它写入 `workspace/demo/` 受控目录。完整的 Runtime Action / Tool Pipeline 路径通过 `python main.py` 交互模式下的 `core.chat()` 统一入口触发。
 
 ### 运行 CLI
 
@@ -162,9 +164,9 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 
 ## 安全边界
 
-默认禁止：
+默认行为：
 
-- 不读取 `.env`。
+- FakeProvider 安全路径不依赖 `.env`，不调用真实 API；`main()` 会尝试加载 `.env` 以支持 opt-in real provider 配置，但默认 fake 路径不使用其中任何 key。
 - 不读取 `agent_log.jsonl` 正文。
 - 不读取真实 `sessions/` / `runs/`。
 - 不读取 `memory/episodes/*.jsonl` 内容。
@@ -230,14 +232,16 @@ Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`d
 
 ## 下一步 Roadmap
 
-近期已完成（First Usable Task MVP）：
-- WP1: Non-empty ToolRegistry + demo.echo_task_summary / demo.write_demo_note
-- WP2: Non-empty SkillRegistry + demo-note-maker skill
-- WP3: User Onboarding（`--help` / `help` 命令）
-- WP4: First Usable Task E2E Smoke Test（`tests/smoke/`）
+近期已完成（First Usable Task MVP — 用户可感知能力补齐第一轮）：
+- WP1: ToolRegistry 注册 demo.echo_task_summary / demo.write_demo_note（Tool Pipeline 可用，demo 工具已就绪）
+- WP2: SkillRegistry 加载 demo-note-maker skill（SKILL_SELECT dispatch path L3 verified，non-empty registry）
+- WP3: User Onboarding（`--help` / `help` 命令）+ 诚实能力/限制说明
+- WP4: E2E Smoke Test（`tests/smoke/`，6 tests，覆盖 onboarding / demo / chat / skill registry）
+
+> 注意：`main.py demo` 是独立 demo adapter 路径，不经过完整 Tool Pipeline / unified runtime flow。完整 Runtime Action 路径通过 `python main.py` 交互模式下的 `core.chat()` 统一入口触发。
 
 下一步候选：
-1. 推送当前 main 前，建议再做一次独立文档审计。
+1. 用户可感知 Tool Result：让 `core.chat()` + FakeProvider 路径也能向用户展示 tool 被调用和结果返回的完整闭环。
 2. SubAgent 后续只可按文档 gate 推进 L1/L2；L3/L4/L5 仍是 future/contract。
 3. Memory 下一步聚焦 Pre-loop MEMORY_RECALL wiring（Architecture Extension candidate）或真实质量 dogfood。
 4. Skill 下一步可继续强化真实 dogfood 证据和文档索引，不默认安装远程 skill。

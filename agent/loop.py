@@ -660,13 +660,31 @@ def _emit_run_summary(
 
     memory_ops = 0
     subagent_delegations = 0
+    tool_names: list[str] = []
+    memory_actions: list[str] = []
+    subagent_names: list[str] = []
+    error_reasons: list[str] = []
+
     for event in action_log:
         at = str(getattr(event, "action_type", ""))
         if at.startswith("memory."):
             memory_ops += 1
+            # 从 action_log 中提取 memory action 的具体操作名称
+            action_name = at.removeprefix("memory.") if at.startswith("memory.") else at
+            memory_actions.append(action_name)
         elif at.startswith("subagent."):
             subagent_delegations += 1
+            # 提取 subagent 名称（如果 action metadata 中有）
+            target = str(getattr(event, "target_identity", ""))
+            if target:
+                subagent_names.append(target)
+        elif at.startswith("tool."):
+            # 提取工具名称
+            target = str(getattr(event, "target_identity", ""))
+            if target:
+                tool_names.append(target)
 
+    # 也从 state 中提取本轮工具调用信息（如果 action_log 没有 tool 事件）
     state = dependencies.state
     loop_iterations = (
         cached_loop_iterations
@@ -689,6 +707,10 @@ def _emit_run_summary(
         memory_operations=memory_ops,
         subagent_delegations=subagent_delegations,
         stop_reason=stop_reason,
+        tool_names=tool_names,
+        memory_actions=memory_actions,
+        subagent_names=subagent_names,
+        error_reasons=error_reasons,
     )
     dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
 

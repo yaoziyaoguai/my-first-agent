@@ -349,18 +349,43 @@ def run_summary_event(
     memory_operations: int,
     subagent_delegations: int,
     stop_reason: str,
+    tool_names: list[str] | None = None,
+    memory_actions: list[str] | None = None,
+    subagent_names: list[str] | None = None,
+    error_reasons: list[str] | None = None,
 ) -> RuntimeEvent:
     """构造 run summary 展示事件。
 
     每轮 chat() 结束后产出结构化运行摘要，让用户/开发者能看懂
     本轮发生了什么。数据来源：TurnState 计数 + RuntimeActionDispatcher evidence。
+
+    新增字段（Issue 5: Run summary enrichment）：
+    - tool_names: 本轮实际调用的工具名列表（脱敏后）
+    - memory_actions: Memory 操作类型列表（如 proposed/retained/forgotten）
+    - subagent_names: 被委托的 SubAgent 名称列表
+    - error_reasons: 错误/阻塞原因列表（脱敏后，不包含 secret/API key）
     """
+    tool_names = tool_names or []
+    memory_actions = memory_actions or []
+    subagent_names = subagent_names or []
+    error_reasons = error_reasons or []
+
     parts = ["本轮运行摘要"]
     parts.append(f"  循环次数：{loop_iterations}")
-    parts.append(f"  工具调用：{tool_calls} 次")
-    parts.append(f"  Memory 操作：{memory_operations} 次")
+    if tool_calls > 0:
+        parts.append(f"  工具调用：{tool_calls} 次")
+        if tool_names:
+            parts.append(f"    工具：{', '.join(tool_names)}")
+    if memory_operations > 0:
+        parts.append(f"  Memory 操作：{memory_operations} 次")
+        if memory_actions:
+            parts.append(f"    操作：{', '.join(memory_actions)}")
     if subagent_delegations:
         parts.append(f"  SubAgent 委托：{subagent_delegations} 次")
+        if subagent_names:
+            parts.append(f"    子代理：{', '.join(subagent_names)}")
+    if error_reasons:
+        parts.append(f"  错误：{'; '.join(error_reasons)}")
     parts.append(f"  结果：{stop_reason}")
     return RuntimeEvent(
         event_type=EVENT_RUN_SUMMARY,
@@ -371,6 +396,10 @@ def run_summary_event(
             "memory_operations": memory_operations,
             "subagent_delegations": subagent_delegations,
             "stop_reason": stop_reason,
+            "tool_names": tool_names,
+            "memory_actions": memory_actions,
+            "subagent_names": subagent_names,
+            "error_reasons": error_reasons,
         },
     )
 

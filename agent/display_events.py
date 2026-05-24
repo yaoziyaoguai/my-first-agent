@@ -51,6 +51,7 @@ EVENT_UNKNOWN_STOP_REASON = "loop.unknown_stop_reason"
 EVENT_MEMORY_STORED = "memory.stored"
 EVENT_MEMORY_BLOCKED = "memory.blocked"
 EVENT_MEMORY_INJECTED = "memory.injected"
+EVENT_MEMORY_LISTED = "memory.listed"
 # Memory Interactive Confirmation v1 — 用户确认请求事件
 EVENT_MEMORY_CONFIRMATION_REQUESTED = "memory.confirmation_requested"
 
@@ -269,6 +270,46 @@ def memory_injected_event(count: int) -> RuntimeEvent:
         text=f"已加载记忆：{count} 条",
         metadata={"item_count": count},
     )
+
+
+def memory_list_event(records: tuple, *, store_label: str = "memory") -> RuntimeEvent:
+    """构造 memory 列表展示事件。
+
+    records 是从 store 读取的已批准 memory records tuple。
+    无记录时返回空列表提示。
+    """
+    if not records:
+        return RuntimeEvent(
+            event_type=EVENT_MEMORY_LISTED,
+            text="暂无已保存的记忆。",
+            metadata={"item_count": 0},
+        )
+
+    lines = [f"已保存的记忆（共 {len(records)} 条）："]
+    for i, record in enumerate(records, 1):
+        content = getattr(record, "content", str(record))[:120]
+        scope = getattr(record, "scope", None)
+        scope_tag = f" [{_scope_label(scope)}]" if scope else ""
+        lines.append(f"  {i}.{scope_tag} {content}")
+
+    text = "\n".join(lines)
+    return RuntimeEvent(
+        event_type=EVENT_MEMORY_LISTED,
+        text=text,
+        metadata={"item_count": len(records), "store_label": store_label},
+    )
+
+
+def _scope_label(scope) -> str:
+    """将 MemoryScope 映射为简短中文标签。"""
+    raw = str(scope)
+    if "session" in raw.lower():
+        return "本次会话"
+    if "user" in raw.lower():
+        return "用户"
+    if "project" in raw.lower():
+        return "项目"
+    return raw
 
 
 def memory_confirmation_requested_event(

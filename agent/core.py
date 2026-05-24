@@ -14,6 +14,7 @@ from agent.display_events import (
     memory_blocked_event,
     memory_confirmation_requested_event,
     memory_injected_event,
+    memory_list_event,
     memory_stored_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
@@ -121,6 +122,26 @@ def _is_explicit_l2_trigger(text: str) -> bool:
     """
     text_lower = text.strip().lower()
     return any(trigger in text_lower for trigger in _EXPLICIT_L2_TRIGGERS)
+
+
+def _looks_like_show_memories(text: str) -> bool:
+    """检测用户输入是否为"查看记忆"CLI 命令。
+
+    中文学习边界：这是 deterministic CLI meta-command 检测，
+    不是 memory operation。它不进入 policy → confirmation → store pipeline，
+    只读取当前 store 中的 records 并展示给用户。
+
+    支持的触发词（中英文）：
+    - show memories / list memories / show my memories
+    - 显示记忆 / 列出记忆 / 查看记忆 / 我的记忆 / 已保存的记忆
+    """
+    text_lower = text.strip().lower()
+    show_triggers = (
+        "show memories", "list memories", "show my memories",
+        "显示记忆", "列出记忆", "查看记忆", "我的记忆", "已保存的记忆",
+        "记忆列表", "查看已保存",
+    )
+    return any(trigger in text_lower for trigger in show_triggers)
 
 
 def _maybe_run_l2_inline(state) -> None:
@@ -337,6 +358,22 @@ def chat(
     #   - awaiting 分支把空串当 feedback 触发重规划
     if not user_input or not user_input.strip():
         return ""
+
+    # ── Memory management CLI commands ──────────────────────────────────────
+    # 中文学习边界：show memories / 显示记忆 是 CLI meta-command，不是 memory
+    # 操作。它不经过 policy → confirmation → store pipeline，只是读取当前 store
+    # 中的 records 并展示给用户。这是 core.chat 中的 "外层读"，不改变 unified
+    # runtime flow。
+    if _looks_like_show_memories(user_input):
+        records = _memory_runtime.list_records()
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            memory_list_event(records),
+            fallback_prefix="\n",
+        )
+        return "\n".join(
+            [getattr(r, "content", str(r))[:120] for r in records]
+        ) if records else "暂无已保存的记忆。"
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

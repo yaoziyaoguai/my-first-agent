@@ -500,6 +500,18 @@ class MemoryRuntime:
 
         return snapshot
 
+    # -- user-facing memory management ---------------------------------------
+
+    def list_records(self) -> tuple[Any, ...]:
+        """返回当前 store 中所有已批准 memory records，供用户查看。
+
+        这是纯读取操作，不写 store、不触发 confirmation、不产生 side effect。
+        返回空 tuple 表示无已存储记忆。
+        """
+        if self._store is None:
+            return ()
+        return self._store.list_records()
+
 
 # ---------------------------------------------------------------------------
 # 便捷工厂：创建默认 MemoryRuntime

@@ -67,7 +67,7 @@ show memories
 查看记忆
 ```
 
-**期望结果**: 显示记忆列表（可能为空），每条记忆显示 ID、来源、时间。
+**期望结果**: 显示记忆列表（可能为空），每条记忆显示短 ID（前8位，可直接复制用于 forget）、来源类型（source_type）、时间（created_at，缺失时显示 unavailable）。
 
 ### 5. 查看子代理列表
 
@@ -112,14 +112,14 @@ delegate to demo-stat: count files in workspace
 summarize demo workspace files
 ```
 
-**期望结果**: 与 CLI 委托相同——自动识别意图，路由到 demo-stat 执行。
+**期望结果**: 与 CLI 委托相同——自动识别意图，路由到 demo-stat 执行。CLI 和 NL 委托均会在 run summary 中显示 subagent name。
 
 ### 8. 忘记记忆
 
-先确认有哪些记忆（`show memories`），然后：
+先确认有哪些记忆（`show memories`），复制输出中显示的短 ID（前8位），然后：
 
 ```
-forget <记忆 ID>
+forget id:<短ID>
 ```
 
 或按关键词：
@@ -128,7 +128,11 @@ forget <记忆 ID>
 忘记 <关键词>
 ```
 
-**期望结果**: 看到 `已移除 N 条记忆（匹配「关键词」）`。
+**期望结果**:
+- 按短 ID 删除：看到 `已移除记忆（ID: <短ID> → <完整ID>）`（前缀匹配成功）
+- 如果短 ID 前缀匹配到多条：看到 ambiguity 提示及匹配到的 ID 列表，不会误删
+- 如果 ID 不存在：看到 `未找到 ID 为「xxx」的记忆`
+- 按关键词删除：看到 `已移除 N 条记忆（匹配「关键词」）`
 
 ### 9. 退出
 

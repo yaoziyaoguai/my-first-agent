@@ -14,18 +14,18 @@ Based on: Post User-Usable Agent Runtime MVP Independent Audit (score 5/10)
 | fake/real 未分裂 | FakeProvider/RealProvider 共享同一 `chat()` 路径，仅 provider adapter 不同 |
 | Tool pipeline 可用 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段 L3 verified |
 | FakeProvider deterministic tool decision 可用 | 基于关键词匹配的 `_decide_tool_calls()` |
-| Memory forget CLI 可用 + forget by ID | `detect_forget_memory()` → `remove_record()` by ID or content match |
+| Memory forget CLI 可用 + forget by ID（含短 ID 前缀匹配） | `detect_forget_memory()` → `remove_record()` by ID (exact/prefix) or content match |
 | SubAgent delegate CLI + NL delegation | `detect_delegate_to_subagent()` + `detect_nl_delegation()` → `delegate_once()` |
 | Streaming 是 fake/demo deterministic chunking | `FakeProvider` chunk_size=12（debug/fake only） |
-| Trace run summary 含详情 | tool_names, memory_actions, subagent_names, error_reasons |
+| Trace run summary 含详情（CLI/NL delegation 已补） | tool_names, memory_actions, subagent_names, error_reasons；CLI/NL 委托路径现在也 emit run_summary_event |
 | MEMORY_RECALL AD complete — implementation deferred | `docs/design/MEMORY_RECALL_DUAL_PATH_AD.md` |
 | Real provider opt-in docs 已存在 | README.md Real Provider Opt-in 章节 |
-| CLI command router 已提取 | `agent/cli_commands.py` 独立模块 |
+| CLI command router 已提取（评估完成，不再继续薄化） | `agent/cli_commands.py` 独立模块；detect/render 已提取，剩余编排胶水在 chat() 中正确定位 |
 | Progress/event UX | subagent.delegating/delegated, memory.forgotten 事件 |
 | Overclaim sweep 完成 | README/ROADMAP/plan 诚实标签已修正 |
 | Manual dogfood checklist 已创建 | `docs/dogfood/local-manual-dogfood-checklist.md` |
 | SubAgent fixtures ≥2 | demo-stat + code-reviewer（Issue 7 skip：已有 2 个 fixture，用户价值已满足） |
-| 当前评分 ~6+/10 | post-issue-sweep 评估 |
+| 当前评分 ~6.5+/10 | post-stabilization 评估（Issue 4 阻塞修复 + Issue 5 补全 + Phase 3 评估完成） |
 
 当前目标：developer-usable / manual-dogfood-ready / local-user-usable agent。
 不追求 broadly product-ready。
@@ -219,3 +219,55 @@ Based on: Post User-Usable Agent Runtime MVP Independent Audit (score 5/10)
 - context <15%：不开始大型新 issue
 - context <10%：完成当前 issue、minimal gate、commit/push、写 handoff
 - context <5%：立即写 handoff、commit/push、HARD_STOP_CONTEXT_LOW_HANDOFF_WRITTEN
+
+## G. Post-Stabilization Status (2026-05-25)
+
+### Issue 4: Memory management IDs + forget by ID — **FIXED**
+
+Blocking defect 已修复：
+- `render_memory_list()` 现在基于 MemoryRecord 真实字段映射（`source_type`、`metadata.created_at`），不再读取不存在的 `source`/`created_at` 字段
+- `created_at` 缺失时诚实显示 "unavailable"，不伪造时间
+- `forget id:<short_id>` 支持三层匹配：精确匹配 → 前缀唯一匹配 → ambiguity（不误删）→ not found
+- 新增 7 个 focused tests（`tests/test_memory_user_facing.py`）
+- dogfood checklist step 8 现在可通过
+
+### Issue 5: Run summary enrichment — **FIXED for CLI/NL delegation**
+
+- CLI delegate 和 NL delegation 路径现在在 `_execute_subagent_delegation()` 返回后 emit `run_summary_event`，包含 `subagent_names`
+- 主循环路径的 `_emit_run_summary()` 不变（已正确捕获 tool/memory/subagent 详情）
+- 42 个 subagent 测试全部通过
+
+### Issue 1: Command router thinning — **EVALUATED, NO FURTHER ACTION**
+
+- `agent/cli_commands.py`：detect（纯字符串匹配）+ render（纯格式化），无副作用 — 已完整
+- `core.chat()`：保留服务调用 + 事件发射 + 编排胶水 — 这些是副作用操作，正确定位在 runtime orchestrator 中
+- 进一步提取会违反 cli_commands.py 的架构契约，或需要过度抽象
+- 当前分工是架构上的最优状态
+
+## H. Next Big Loop Candidates（不执行，仅供下一轮规划参考）
+
+以下候选按优先级排列，均需要在下一轮中经过独立的 Architecture Decision / SPEC 才能进入实现：
+
+1. **Real Provider Dogfood Readiness / explicit user-auth flow**
+   - 只做 readiness/dry-run/docs，真实调用必须用户显式授权
+   - 当前 fake/local 路径已稳定，real provider opt-in docs 已存在
+
+2. **MEMORY_RECALL implementation revisit**
+   - AD complete (`docs/design/MEMORY_RECALL_DUAL_PATH_AD.md`) — implementation deferred
+   - 是否进入实现需先重开 Architecture Decision
+
+3. **Full Hook system exploration**
+   - deferred；只调研/记录，不实现
+   - 当前 turn-end hook 已承载 Phase 1 dispatcher，可作为 hook 系统的参考实现
+
+4. **MCP confirmation="always" full pipeline**
+   - product decision required
+   - 当前 MCP 工具注册和调用路径已存在，confirmation 是增量
+
+5. **More natural tool/subagent planning**
+   - 必须避免 FakeProvider 变成复杂 planner
+   - 当前 deterministic 关键词匹配已覆盖 demo 场景
+
+6. **Manual dogfood feedback loop**
+   - 用户实际跑 checklist 后，根据反馈进入下一轮 issue sweep
+   - checklist 已就绪：`docs/dogfood/local-manual-dogfood-checklist.md`

@@ -74,9 +74,9 @@ def render_session_header(
     lines.extend(
         [
             _BAR,
-            "  输入 'quit' 退出。",
-            "  Health: python main.py health；Logs: python main.py logs --tail 50。",
-            "  Skill 是实验性能力（v0.3 M3 状态澄清，详见 docs/V0_3_SKILL_SYSTEM_STATUS.md）。",
+            "  输入 'quit' 退出，输入 'help' 查看可用能力与限制。",
+            "  python main.py health / python main.py logs --tail 50。",
+            "  Fake provider 安全路径（默认，无 API key，不联网）。",
             "",
         ]
     )
@@ -197,6 +197,51 @@ def _interaction_state_label(status: str) -> str:
         "cancelled": "failed",
     }
     return mapping.get(status, status or "unknown")
+
+
+def render_onboarding() -> str:
+    """用户首次接触或 help 命令时的简洁 onboarding。
+
+    诚实说明当前阶段：runtime pipeline 完整，但用户可感知能力仍在补齐中。
+    不夸大 fake demo 为产品能力，不把 dispatch path 写成 user-visible complete。
+    """
+    lines = [
+        _BAR,
+        "  First Agent — Runtime v0.3 用户能力补齐阶段",
+        _BAR,
+        "",
+        "  定位：个人 AI 助手 runtime。工程地基（Tool/Skill/SubAgent/Memory pipeline）",
+        "  已通过 L3 evidence 验证，当前阶段在已有地基上补齐用户可感知能力。",
+        "",
+        "  ✅ 当前可用：",
+        "    • Fake Provider（默认安全路径，无 API key，不联网，不读 .env）",
+        "    • Demo Tool：demo.echo_task_summary / demo.write_demo_note",
+        "    • Demo Skill：demo-note-maker（写本地任务笔记）",
+        "    • 本地 demo：python main.py demo \"你的任务描述\"",
+        "    • python main.py health          查看健康检查",
+        "    • python main.py logs --tail 50   查看最近日志",
+        "    • Ctrl+C 保存 checkpoint，下次启动可 resume",
+        "",
+        "  ⚠️ 尚未产品化（dispatch path 已验证，但业务侧仍为空或 partial）：",
+        "    • 真实 LLM provider — 已实现但需自行配置 API key（opt-in）",
+        "    • SubAgent — L3 dispatch path verified，registry 为空",
+        "    • Skill — demo-note-maker 可用，多 skill marketplace 未实现",
+        "    • Memory consolidation — L3 evidence path 存在，真实 LLM consolidation 未实现",
+        "    • MCP confirmation=\"always\" — product decision required",
+        "    • RAG / embedding / plugin marketplace — 未开始",
+        "",
+        "  🔒 安全边界：",
+        "    • 默认不读取 .env，不读取真实 sessions / runs / 私人资料",
+        "    • 不调用真实 API，不访问外部网络",
+        "    • Demo 文件只写入 workspace/demo/ 受控目录",
+        "",
+        "  快速体验 First Usable Task：",
+        "    python main.py demo \"create a demo note about today's run\"",
+        "    python main.py                    进入交互模式",
+        "    python main.py --help             显示此信息",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _one_line(value: Any, limit: int) -> str:

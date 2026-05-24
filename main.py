@@ -39,7 +39,7 @@ from agent.session import (
     handle_interrupt_choice,
     summarize_session_status,
 )
-from agent.cli_renderer import render_status_line
+from agent.cli_renderer import render_status_line, render_onboarding
 from agent.checkpoint import load_checkpoint
 from config import load_legacy_dotenv_config
 
@@ -345,6 +345,12 @@ def main_loop():
                 run_pending_review_cli()
                 continue
 
+            # WP3 onboarding：用户输入 help/帮助/onboarding 时展示能力与限制。
+            if user_input.strip().lower() in ("help", "帮助", "onboarding", "?"):
+                print()
+                print(render_onboarding())
+                continue
+
             reply, new_latest_output = _run_chat_for_backend(
                 user_input,
                 backend=backend,
@@ -425,6 +431,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in {"--shell", "shell"}:
         argv = argv[1:]
+
+    if argv and argv[0] in {"--help", "-h", "help"}:
+        print(render_onboarding())
+        return 0
 
     command_result = dispatch_maintenance_command(
         argv,

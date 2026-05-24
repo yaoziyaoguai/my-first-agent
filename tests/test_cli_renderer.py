@@ -26,8 +26,9 @@ def test_session_header_includes_session_id_cwd_and_stage():
     assert "python main.py health" in out
     assert "python main.py logs" in out
     assert "/reload_skills" not in out
-    # M3 必须明确告诉用户 Skill 仍是实验性能力
-    assert "实验性" in out
+    # WP3: session header 引导用户输入 help 查看完整能力与限制
+    assert "help" in out
+    assert "Fake provider" in out
 
 
 def test_session_header_omits_health_line_when_none():

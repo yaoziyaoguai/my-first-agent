@@ -790,6 +790,10 @@ def _run_main_loop(
         runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
         provider_kind=resolved_kind,
         provider_external_call=resolved_call,
+        # trace infrastructure: 从 TurnState 线程化注入 trace sink 到 LoopDependencies
+        on_trace_event=getattr(turn_state, "on_trace_event", None),
+        trace_run_id=getattr(turn_state, "trace_run_id", None),
+        trace_id=getattr(turn_state, "trace_id", None),
     )
     if tool_gate_tool_name is not None:
         _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name

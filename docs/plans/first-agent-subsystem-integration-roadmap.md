@@ -78,7 +78,7 @@ query/event
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
 | **Context injection** | N/A | N/A | ✅ | 集成在主流程中 | 无 | memory snapshot injection 已验证 |
 | **Streaming** | ✅ | ❌ | ❌ | `test_streaming_protocol.py` | L2/L3 未验证 | deferred |
-| **Evidence/Trace** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | local_trace 未接入 runtime | deferred |
+| **Evidence/Trace** | ✅ | ✅ | ✅ | `test_local_trace_runtime_wiring_l3.py` | 无 | L3 verified via loop.py turn-end hook（本 commit） |
 
 ## D. Backlog 分类
 
@@ -119,7 +119,7 @@ query/event
 | Skill L3 activation | skill_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
 | SubAgent L3 delegation | subagent_action.py handler 存在，L3 需 core.chat() 路径 | deferred |
 | Streaming L3 | streaming_provider.py adapter 存在 | deferred |
-| Local trace runtime wiring | local_trace.py 存在但未接入 runtime | deferred |
+| Local trace runtime wiring | ✅ 完成 (本 commit) — loop.py wiring + L3 test | 已闭环 |
 | Memory real LLM consolidation | consolidation_llm.py 存在但 gated | deferred |
 
 ## E. 优先级规则
@@ -162,6 +162,7 @@ query/event
 | **#8** | **Direct call downgrade: handler L2 分类一致性审计** | ✅ 已审计 — 全部 8 个 handler 的 branch behavior 测试均已覆盖 direct dispatcher → harness_runtime_e2e 断言 |
 | **#9** | **Memory Recall L3** | ✅ 完成 (commit e18595b) — MEMORY_RECALL 接入 loop.py turn-end hook，3 个 L3 tests |
 | **#10** | **Skill L3 Activation** | ✅ 完成 (本 commit) — SKILL_SELECT 接入 loop.py turn-end hook，3 个 L3 tests，no_suitable_skill catalog entry |
+| **#11** | **Local Trace Runtime Wiring** | ✅ 完成 (本 commit) — TraceEvent emission via loop.py turn-end hook，4 个 L3 tests |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

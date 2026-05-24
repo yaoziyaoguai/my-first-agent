@@ -27,6 +27,77 @@ from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
 
 
+def _try_trace_event_emission(
+    dependencies: Any,
+    result_text: str,
+    tool_name: str,
+    invoke_result: Any = None,
+) -> None:
+    """在 turn-end hook 末尾发射 TraceEvent（纯观测 side-effect）。
+
+    Trace 是 infrastructure hardening，不参与 tool/memory/checkpoint 决策：
+    - 只在 dependencies.on_trace_event sink 存在时发射→默认路径零开销
+    - tool_call event：TOOL_INVOKE 完成后发射（包含 tool_output/execution_status）
+    - state_transition event：turn-end 标记
+    - 任何异常静默吞掉——trace 失败不阻塞 loop
+    """
+    sink = getattr(dependencies, "on_trace_event", None)
+    if sink is None:
+        return
+
+    run_id = getattr(dependencies, "trace_run_id", None)
+    trace_id = getattr(dependencies, "trace_id", None)
+
+    try:
+        # state_transition: 标记 turn-end
+        from agent.local_trace import TraceEvent
+
+        transition_event = TraceEvent(
+            run_id=run_id or "run:unknown",
+            trace_id=trace_id or "trace:unknown",
+            span_id=f"turn_end:{hash(result_text) & 0x7FFFFFFF:08x}",
+            parent_span_id=None,
+            span_type="state_transition",
+            name="loop.turn_end",
+            status="ok",
+            metadata={
+                "tool_name": tool_name,
+                "result_text_preview": result_text[:200] if result_text else "",
+            },
+        )
+        sink(transition_event)
+    except Exception:
+        pass
+
+    try:
+        # tool_call: TOOL_INVOKE 完成后发射
+        if invoke_result is not None:
+            invoke_payload = getattr(invoke_result, "payload", {}) or {}
+            tool_output = invoke_payload.get("tool_output", "")
+            execution_status = invoke_payload.get("execution_status", "unknown")
+
+            # 直接在依赖上构造一个最小 state-like 对象供 emit_tool_result_trace_event 使用
+            from agent.local_trace import TraceEvent
+
+            tool_event = TraceEvent(
+                run_id=run_id or "run:unknown",
+                trace_id=trace_id or "trace:unknown",
+                span_id=f"tool_call:{tool_name}:turn_end",
+                parent_span_id=f"turn_end:{hash(result_text) & 0x7FFFFFFF:08x}",
+                span_type="tool_call",
+                name=tool_name,
+                status="ok" if execution_status == "success" else "failed",
+                metadata={
+                    "execution_status": execution_status,
+                    "tool_output": tool_output[:500] if tool_output else "",
+                },
+            )
+            sink(tool_event)
+    except Exception:
+        # Trace 发射异常不阻塞 loop——纯观测 side-effect
+        pass
+
+
 def _try_phase1_turn_end_runtime_action(
     state: Any,
     result_text: str,
@@ -378,6 +449,17 @@ def _try_phase1_turn_end_runtime_action(
         # SUBAGENT_DELEGATE_L0 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
+    # Trace event emission（独立 try/except——失败不阻断任何 dispatch）
+    # 中文学习边界：Trace 是纯观测基础设施，不参与 runtime 决策。
+    # 只在调用方显式传入 on_trace_event sink 时触发——默认路径不创建 recorder、
+    # 不写 trace、不改变 checkpoint/messages。
+    #
+    # 为什么不用 dispatcher：
+    # - TraceEvent 是事实记录（"工具 X 被调用了，结果是 Y"），不是决策点
+    # - dispatcher pattern 用于 decision routing（gate/invoke/result/recall）
+    # - trace 不需要证据链 provenance——它自己就是证据
+    _try_trace_event_emission(dependencies, result_text, tool_gate_tool_name, invoke_result)
+
 
 @dataclass(frozen=True, slots=True)
 class LoopDependencies:
@@ -413,6 +495,11 @@ class LoopDependencies:
     # 传入 "_confirmable_noop" 时覆盖 confirmation_required branch behavior。
     # 不传则行为与现有完全一致——向后兼容。
     tool_gate_tool_name: str = "_safe_noop"
+    # Trace event sink（opt-in observability infrastructure）
+    # 默认 None——不创建 recorder、不写 trace、零开销。
+    on_trace_event: Any = None
+    trace_run_id: str | None = None
+    trace_id: str | None = None
 
 
 def run_main_loop(

@@ -569,11 +569,23 @@ def chat(
     delegate_match = _looks_like_delegate_to_subagent(user_input)
     if delegate_match:
         subagent_name, task = delegate_match
-        return _execute_subagent_delegation(
+        delegation_result = _execute_subagent_delegation(
             subagent_name, task,
             delegation_reason="CLI meta-command delegation",
             on_runtime_event=on_runtime_event,
         )
+        # 为 CLI delegation 路径 emit run summary（不经过 run_main_loop）
+        from agent.display_events import run_summary_event as _run_summary_event
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            _run_summary_event(
+                loop_iterations=1, tool_calls=0, memory_operations=0,
+                subagent_delegations=1, stop_reason="CLI delegation",
+                subagent_names=[subagent_name],
+            ),
+            fallback_prefix="\n",
+        )
+        return delegation_result
 
     # Issue 2: Natural-language SubAgent delegation fixture。
     # 用户无需记忆 CLI 语法即可委托子代理——"帮我统计 demo workspace"
@@ -581,11 +593,23 @@ def chat(
     nl_delegation = _looks_like_nl_delegation(user_input)
     if nl_delegation:
         subagent_name, task = nl_delegation
-        return _execute_subagent_delegation(
+        delegation_result = _execute_subagent_delegation(
             subagent_name, task,
             delegation_reason="NL delegation fixture",
             on_runtime_event=on_runtime_event,
         )
+        # 为 NL delegation 路径 emit run summary（不经过 run_main_loop）
+        from agent.display_events import run_summary_event as _run_summary_event
+        _safe_emit_runtime_event(
+            on_runtime_event,
+            _run_summary_event(
+                loop_iterations=1, tool_calls=0, memory_operations=0,
+                subagent_delegations=1, stop_reason="NL delegation",
+                subagent_names=[subagent_name],
+            ),
+            fallback_prefix="\n",
+        )
+        return delegation_result
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、

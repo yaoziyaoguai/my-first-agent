@@ -439,9 +439,14 @@ def _try_phase1_turn_end_runtime_action(
 
     # SKILL_SELECT action（独立 try/except——失败不阻断其他 dispatch）
     # 中文学习边界：Skill Selection 通过 turn-end hook dispatch 验证 L3 evidence
-    # chain 完整——handler 使用空 SkillRegistry（roots=[]），因此总是 rejected
-    # （no skills available）。不影响现有 skill selection 行为（模型输出驱动的
-    # mid-loop dispatch）。
+    # chain 完整。
+    #
+    # skill_registry 为 None 时（向后兼容）：payload 不含 skill metadata，
+    # handler 返回 "no skills available"，L3 evidence 路径保持完整。
+    #
+    # skill_registry 可用时：从 registry 填充 available_skill_metadata；
+    # fake provider 路径额外填充 model_decision_metadata（自动选择第一个可见 skill），
+    # 使 handler 能走通 body_load_decision=True 成功路径。
     #
     # 为什么挂在 turn-end hook 上：
     # - 复用已有 branch point，不新增架构元素
@@ -449,18 +454,50 @@ def _try_phase1_turn_end_runtime_action(
     #   「handler 是否成功 load 了一个 skill」
     # - rejected/failed disposition 不影响 evidence level
     try:
+        # 中文学习注释：build skill metadata from registry（如果可用）
+        _skill_registry = getattr(dependencies, "skill_registry", None)
+        _skill_payload: dict[str, Any] = {
+            "core_loop_invoked": True,
+            "core_entrypoint": "core.chat",
+            "runtime_hook_name": "loop.turn_end",
+            "provider_kind": provider_kind,
+            "provider_external_call": provider_external_call,
+            "external_side_effects": False,
+        }
+        if _skill_registry is not None:
+            _visible = _skill_registry.list_visible()
+            # available_skill_metadata：不含 body/status 字段（handler 校验要求）
+            _available_meta: list[dict[str, Any]] = []
+            for _desc in _visible:
+                _available_meta.append({
+                    "skill_id": _desc.name,
+                    "description": _desc.description,
+                    "risk_level": _desc.risk_level,
+                    "tags": list(_desc.tags),
+                    "allowed_tools": list(_desc.allowed_tools),
+                    "memory_scope": _desc.memory_scope,
+                })
+            _skill_payload["available_skill_metadata"] = _available_meta
+            _skill_payload["task_summary"] = (result_text or "")[:500]
+
+            # fake provider 路径：自动生成 model_decision_metadata，
+            # 使 handler 走通 body_load_decision=True 成功路径
+            if provider_kind == "fake" and _visible:
+                _selected = _visible[0]
+                _skill_payload["model_decision_metadata"] = {
+                    "selected_skill_id": _selected.name,
+                    "selection_reason": (
+                        f"fake provider auto-selection: demo skill '{_selected.name}' "
+                        f"matched for First Usable Task E2E verification"
+                    ),
+                    "selection_confidence": "high",
+                }
+
         skill_request = RuntimeActionRequest(
             action_type=RuntimeActionType.SKILL_SELECT,
             source="core_loop",
             parent_trace_id="",
-            payload={
-                "core_loop_invoked": True,
-                "core_entrypoint": "core.chat",
-                "runtime_hook_name": "loop.turn_end",
-                "provider_kind": provider_kind,
-                "provider_external_call": provider_external_call,
-                "external_side_effects": False,
-            },
+            payload=_skill_payload,
         )
         route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
         route(skill_request)
@@ -585,6 +622,11 @@ class LoopDependencies:
     # 传入 "_confirmable_noop" 时覆盖 confirmation_required branch behavior。
     # 不传则行为与现有完全一致——向后兼容。
     tool_gate_tool_name: str = "_safe_noop"
+    # skill_registry: 用于 SKILL_SELECT action 填充 available_skill_metadata。
+    # 由 core.py 构造点注入，loop 层不接触 skill 系统实现细节。
+    # 默认 None——兼容旧行为（payload 不含 skill metadata，handler 返回
+    # "no skills available" 但 L3 evidence 路径保持完整）。
+    skill_registry: Any = None
     # Trace event sink（opt-in observability infrastructure）
     # 默认 None——不创建 recorder、不写 trace、零开销。
     on_trace_event: Any = None

@@ -14,6 +14,8 @@ dispatcher/memory_hook/memory_retain/tool_gate。
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
@@ -31,6 +33,19 @@ from agent.subagent_system.registry import SubAgentRegistry
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
+
+
+def build_skill_registry() -> SkillRegistry:
+    """构建 SkillRegistry，扫描 skills/ 目录。
+
+    返回的 registry 用于两处：
+    1. SkillRuntimeActionHandler——校验 available_skill_metadata 一致性
+    2. LoopDependencies——填充 SKILL_SELECT payload 的 available_skill_metadata
+
+    旧格式 skill（缺少 version/status 必填字段）进入 _load_errors，
+    不会出现在 list_visible() 中，不污染模型可见 skill 列表。
+    """
+    return SkillRegistry(roots=[Path("skills")])
 
 
 def build_phase1_dispatcher() -> RuntimeActionDispatcher:
@@ -86,9 +101,10 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         RuntimeActionType.MEMORY_CONSOLIDATE,
         MemoryConsolidateHandler(),
     )
-    # SKILL_SELECT：空 registry → handler 总是 rejected（no skills available）
-    # 但 evidence chain 仍然完整——L3 关注 dispatch 路径，不关注 disposition
-    _skill_registry = SkillRegistry(roots=[])
+    # SKILL_SELECT：通过 build_skill_registry() 扫描 skills/ 目录。
+    # 旧格式 skill（缺少 version/status 必填字段）进入 _load_errors，
+    # 不会出现在 list_visible() 中。
+    _skill_registry = build_skill_registry()
     _skill_loader = SkillLoader(_skill_registry)
     registry.register(
         RuntimeActionType.SKILL_SELECT,

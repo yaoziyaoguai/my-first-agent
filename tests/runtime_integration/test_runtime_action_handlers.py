@@ -23,6 +23,7 @@ from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
 from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
 from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
+from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
 from agent.runtime_integration.tool_gate import DogfoodOverlayTool, ToolGateHandler
 
 
@@ -735,3 +736,55 @@ def test_subagent_nested_delegation_is_rejected(tmp_path: Path) -> None:
     assert result.payload["no_nested_delegation"] is False
     assert result.payload["delegate_once_called"] is False
     assert result.evidence["evidence_level"] != "runtime_e2e"
+
+
+def test_memory_consolidate_direct_dispatcher_is_not_runtime_e2e() -> None:
+    """MEMORY_CONSOLIDATE 直接 dispatcher.route() 不能伪装 L3 evidence。
+
+    MemoryConsolidateHandler 通过 context.invoke_registered_target() 获取
+    trusted target_module_proof。直接 dispatcher.route() 走 direct_dispatcher
+    路径，即使 handler 内部 produce 了 correct payload，evidence 也应降级
+    到 harness_runtime_e2e。
+    """
+    from agent.memory_store import (
+        InMemoryMemoryStore,
+        MemoryOperationType,
+        MemoryRecord,
+    )
+
+    records = tuple(
+        MemoryRecord(
+            id=f"e{i}",
+            content="用户偏好 Python 类型注解和 dataclass 模式",
+            scope="user",
+            source_summary="test-harness",
+            safety_summary="safe",
+            audit_id=f"audit:e{i}",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+            memory_type="episodic",
+            approval_status="approved",
+            metadata={"created_at": "2026-05-24T00:00:00Z"},
+        )
+        for i in range(5)
+    )
+    store = InMemoryMemoryStore(records=records)
+
+    handler = MemoryConsolidateHandler(store=store)
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.MEMORY_CONSOLIDATE,
+        source="test_harness",
+        parent_trace_id="trace-downgrade",
+        payload={},
+        constraints=frozenset({"readonly", "no_store_write"}),
+    )
+
+    result, _ = _dispatch(handler, request)
+
+    assert result.status == "success"
+    assert result.evidence["target_module"] == "MemoryConsolidation"
+    assert result.evidence["target_module_proof"] is not None
+    assert result.evidence["target_identity_valid"] is True
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    assert result.evidence["evidence_level"] == "harness_runtime_e2e"
+    assert result.evidence["dispatcher_origin"] == "direct_dispatcher"

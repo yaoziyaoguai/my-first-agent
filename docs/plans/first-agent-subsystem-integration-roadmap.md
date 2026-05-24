@@ -46,7 +46,7 @@ query/event
 | **Context Build** | `agent/context_builder.py`, `agent/prompt_builder.py`, `agent/context.py` | 散见于各 spec | 集成在主流程中 | context injection（含 memory snapshot）经 core.chat() 验证 |
 | **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | L1/L2 已验证 | evidence.py 提供 catalog-owned adapters；overclaim 防护已覆盖全部 12 个 catalog targets；local trace 未接入 runtime |
 | **Dispatcher** | `agent/runtime_integration/dispatcher.py`, `agent/runtime_integration/schema.py`, `agent/runtime_integration/phase1_hook.py` | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 基础设施 | route() 和 route_from_runtime_loop() 双入口；phase1_hook 连接 loop 与 dispatcher；8 个 handler 已注册（含 MEMORY_CONSOLIDATE） |
-| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py` | `docs/02-architecture/STREAMING_PROTOCOL.zh.md` | L1 基础 | streaming provider adapter 存在；L3 via core.chat() 未专项验证；RuntimeActionType STREAMING_PROVIDER_CALL / STREAMING_EVENT 存在但未在 phase1_hook 注册 |
+| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py`, `agent/model_call.py` | `docs/specs/streaming-l3/`, `docs/implementation-notes/streaming-l3.md` | L3 完整闭环 | STREAMING_PROVIDER_CALL 接入 loop.py turn-end hook；4 个 L3 tests；no real API（FakeProvider） |
 | **CLI/TUI** | `agent/cli/`, `agent/cli_renderer.py`, `agent/display_events.py`, `agent/input_backends/` | `docs/V0_2_BASIC_TUI_PLAN.md` | adapter boundary | 不参与 runtime decision；已阶段性收口 |
 | **Planner** | `agent/planner.py`, `agent/plan_schema.py` | 散见于 core.py | 集成在主流程中 | planning phase 内嵌于 core.chat() |
 
@@ -77,7 +77,7 @@ query/event
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
 | **Context injection** | N/A | N/A | ✅ | 集成在主流程中 | 无 | memory snapshot injection 已验证 |
-| **Streaming** | ✅ | ❌ | ❌ | `test_streaming_protocol.py` | L2/L3 未验证 | deferred |
+| **Streaming** | ✅ | ✅ | ✅ | `test_streaming_l3.py` | 无 | L3 verified via loop.py turn-end hook → route_from_runtime_loop → handler（本 commit） |
 | **Evidence/Trace** | ✅ | ✅ | ✅ | `test_local_trace_runtime_wiring_l3.py` | 无 | L3 verified via loop.py turn-end hook（本 commit） |
 
 ## D. Backlog 分类
@@ -164,6 +164,7 @@ query/event
 | **#10** | **Skill L3 Activation** | ✅ 完成 (本 commit) — SKILL_SELECT 接入 loop.py turn-end hook，3 个 L3 tests，no_suitable_skill catalog entry |
 | **#11** | **Local Trace Runtime Wiring** | ✅ 完成 (commit 9f2024a) — TraceEvent emission via loop.py turn-end hook，4 个 L3 tests |
 | **#12** | **MEMORY_PROPOSE L3** | ✅ 完成 (本 commit) — confirmation → queue → turn-end dispatch → store.write()，4 个 L3 tests |
+| **#13** | **Streaming L3** | ✅ 完成 (本 commit) — STREAMING_PROVIDER_CALL 接入 loop.py turn-end hook，4 个 L3 tests，FakeProvider stream events |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

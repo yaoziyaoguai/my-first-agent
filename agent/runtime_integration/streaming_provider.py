@@ -40,6 +40,24 @@ class StreamingProviderCallHandler:
             )
 
         events = [_event_from_payload(item) for item in payload.get("events", ())]
+        if not events:
+            # 无流式事件——call_model() 走非流式路径，或 provider 未产出事件
+            return context.not_supported(
+                handler_name=type(self).__name__,
+                target_module="StreamingProtocol",
+                payload={
+                    "provider_supports_streaming": True,
+                    "events_received": 0,
+                    "final_event_received": False,
+                    "error_event_received": False,
+                    "text_delta_event_received": False,
+                },
+                observed_call=None,
+                evidence_extra={
+                    "runtime_e2e_disqualified_reason": "no streaming events collected",
+                },
+                error_safe_preview="streaming not used in this turn",
+            )
         observed = context.invoke_registered_target(
             target_module="StreamingProtocol",
             operation="collect_stream_response",

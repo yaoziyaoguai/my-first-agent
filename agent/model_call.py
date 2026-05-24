@@ -40,6 +40,7 @@ def call_model(
     emit_text_delta: Callable[[str], None] | None,
     emit_tool_request: Callable[[], None] | None,
     print_assistant_newline: bool,
+    _streaming_events_out: list | None = None,
 ) -> Any:
     """通过 provider abstraction 调用模型，并兼容测试 fake client。
 
@@ -64,6 +65,8 @@ def call_model(
                     emit_tool_request()
             elif event.text_delta and emit_text_delta is not None:
                 emit_text_delta(event.text_delta)
+        if _streaming_events_out is not None:
+            _streaming_events_out.extend(observed_events)
         response = collect_stream_response(observed_events)
     else:
         # 兼容旧测试 fake provider；正式 provider contract 已要求 stream()，

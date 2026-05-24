@@ -19,7 +19,7 @@ classification 从 harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from agent.display_events import RuntimeEvent, loop_max_iterations_event
@@ -499,6 +499,43 @@ def _try_phase1_turn_end_runtime_action(
         # SUBAGENT_DELEGATE_L0 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
+    # STREAMING_PROVIDER_CALL action（独立 try/except——失败不阻断 trace）
+    # 中文学习边界：call_model() 已支持 streaming（model_call.py），事件在 model call
+    # 阶段收集并存入 dependencies.streaming_events。turn-end hook 读取并 dispatch。
+    try:
+        streaming_supported = bool(getattr(dependencies, "provider_supports_streaming", False))
+        streaming_events_raw = list(getattr(dependencies, "streaming_events", []) or [])
+        # 将 ProviderStreamEvent 序列化为 JSON-safe dict
+        serialized_events = []
+        for evt in streaming_events_raw:
+            serialized_events.append({
+                "event_type": getattr(evt, "event_type", ""),
+                "sequence": getattr(evt, "sequence", 0),
+                "source": getattr(evt, "source", "provider"),
+                "text_delta": getattr(evt, "text_delta", ""),
+                "is_final": getattr(evt, "is_final", False),
+                "error": getattr(evt, "error", None),
+            })
+        streaming_request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_PROVIDER_CALL,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "provider_supports_streaming": streaming_supported,
+                "events": serialized_events,
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(streaming_request)
+    except Exception:
+        pass
+
     # Trace event emission（独立 try/except——失败不阻断任何 dispatch）
     # 中文学习边界：Trace 是纯观测基础设施，不参与 runtime 决策。
     # 只在调用方显式传入 on_trace_event sink 时触发——默认路径不创建 recorder、
@@ -536,10 +573,13 @@ class LoopDependencies:
     clear_checkpoint: Callable[[], None]
     runtime_action_dispatcher: Any | None = None
     # hook 参数化：预解析的 coarse-grained provider evidence metadata
-    # 这两个字段在 core.py _run_main_loop 中由 _resolve_provider_evidence_metadata 填充
+    # 这些字段在 core.py _run_main_loop 中由 _resolve_provider_evidence_metadata 填充
     # 不在 loop.py 中解析——loop 层保持 provider-agnostic
     provider_kind: str = "unknown"
     provider_external_call: bool = False
+    provider_supports_streaming: bool = False
+    # streaming_events: call_model() 中收集的流式事件，供 turn-end hook 读取
+    streaming_events: list = field(default_factory=list)
     # tool_gate_tool_name 控制 TOOL_GATE action 传递的 tool_name。
     # 默认 "_safe_noop"（confirmation="never" → allowed），
     # 传入 "_confirmable_noop" 时覆盖 confirmation_required branch behavior。

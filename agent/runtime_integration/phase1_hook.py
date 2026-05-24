@@ -23,6 +23,7 @@ from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
 from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
@@ -36,8 +37,9 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     """构建 Phase 1 RuntimeActionDispatcher。
 
     注册 memory turn-end proposal + retain + recall + consolidate + tool pipeline +
-    checkpoint + skill select handler（共 9 个 handler）。
-    Streaming、SubAgent 不在当前范围，不注册。
+    checkpoint + skill select + subagent delegate + streaming provider call handler
+    （共 10 个 handler）。
+    Streaming 已接入（STREAMING_PROVIDER_CALL），SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only，proposal generation）
@@ -97,5 +99,10 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
+    )
+    # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence
+    registry.register(
+        RuntimeActionType.STREAMING_PROVIDER_CALL,
+        StreamingProviderCallHandler(),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

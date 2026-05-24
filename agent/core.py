@@ -771,11 +771,17 @@ def _run_main_loop(
         loop_ctx.model_provider
     )
 
+    # 共享可变列表：call_model() 通过 _streaming_events_out 填充，
+    # turn-end hook 从 dependencies.streaming_events 读取
+    _streaming_events: list = []
+
     # 按位参数构造 LoopDependencies。tool_gate_tool_name 仅在显式传入时覆盖默认值
     # "_safe_noop"，避免 None 覆盖 dataclass 默认值。
     _deps_fields: dict[str, Any] = dict(
         state=state,
-        call_model=_call_model,
+        call_model=lambda ts, lc, _out=_streaming_events: _call_model(
+            ts, lc, _streaming_events_out=_out
+        ),
         dispatch_model_output=lambda response: _dispatch_model_output(
             response,
             turn_state=turn_state,
@@ -790,6 +796,8 @@ def _run_main_loop(
         runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
         provider_kind=resolved_kind,
         provider_external_call=resolved_call,
+        provider_supports_streaming=bool(getattr(loop_ctx.model_provider, "supports_streaming", False)),
+        streaming_events=_streaming_events,
         # trace infrastructure: 从 TurnState 线程化注入 trace sink 到 LoopDependencies
         on_trace_event=getattr(turn_state, "on_trace_event", None),
         trace_run_id=getattr(turn_state, "trace_run_id", None),
@@ -805,6 +813,8 @@ def _run_main_loop(
 def _call_model(
     turn_state: TurnState,
     loop_ctx: LoopContext,
+    *,
+    _streaming_events_out: list | None = None,
 ):
     """调用模型并返回 response；provider 依赖只从 LoopContext 读取。"""
     # ===== 协议观察：构造 request payload 并打印 =====
@@ -829,6 +839,7 @@ def _call_model(
             else None
         ),
         print_assistant_newline=turn_state.print_assistant_newline,
+        _streaming_events_out=_streaming_events_out,
     )
 
     # ===== 协议观察：打印返回结构 =====

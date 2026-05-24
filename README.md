@@ -255,7 +255,7 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 ## 当前不支持什么
 
 - 不支持默认真实 LLM SubAgent。
-- SubAgent delegation 当前仅 **CLI meta-command demo**（`delegate to X: task` / `委托 X: task`），不经过自然语言 tool_use delegation，不是 broadly user-ready 产品体验。
+- SubAgent delegation 当前支持 **CLI meta-command**（`delegate to X: task` / `委托 X: task`）和 **safe deterministic NL fixtures**（`帮我统计 demo workspace` / `summarize files`）——都是 local/fake deterministic 关键词匹配，不经过 LLM 自然语言理解，不是 broadly user-ready 产品体验。
 - Streaming 当前仅 **FakeProvider deterministic 12-char chunking demo**（debug/fake only），不经过真实 provider SSE/streaming，不是真实 streaming UX。用户主体验是 progress/event UX（工具/子代理/记忆进度事件）。
 - 不支持默认 SubAgent 工具执行、sandbox、worktree、parallel multi-subagent。
 - 不支持把 Skill 当作远程插件市场或自动安装系统。

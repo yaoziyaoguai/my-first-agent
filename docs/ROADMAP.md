@@ -974,7 +974,7 @@ Bridge Discovery；之后才进入 Memory System Discovery。
 | 7 | **MCP 前 final review** | Stage 2.5 | done | 审计本地 ToolSpec / ToolResult / safety / confirmation / executor / MCP seam 是否可阶段性收口 | 不联网；不接外部 MCP server；不新增依赖 | closed |
 | 8 | **MCP Client / Tool Bridge Discovery** | Stage 2.5 | archived discovery | 研究外部/reference MCP server 如何映射到本地 tool registry/schema/result/error/approval contract | 不接真实私有数据源；不新增依赖；真实 server 需单独授权 | deferred boundary doc |
 | 9 | **Memory System Discovery inventory** | Stage 3 | done | 工具体系边界清楚后，再只读梳理 memory problem space / provider seam / checkpoint/session 边界 | 不改文件；不联网；不实现 Memory | closed |
-| 10 | **Skill System Discovery** | Stage 5 | superseded by Safe Local MVP | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现真实 Skill activation | safe local MVP complete |
+| 10 | **Skill System Discovery** | Stage 5 | superseded by Safe Local MVP | 在 Tool + Memory 边界稳定后，定义 Skill = Prompt + 工具 + 参考资料 + 操作流程的组合边界 | 不实现真实 Skill activation | safe local MVP foundation done; real activation deferred |
 | 11 | **Hook / Lifecycle Event Discovery** | later | deferred | 研究 lifecycle event seam，避免 hooks 绕过 runtime/permission/checkpoint | 不实现 Hook | deferred boundary doc |
 | 12 | **Z / Advanced Knowledge Access** | later | deferred | 最后再讨论高级知识访问；RAG/retrieval/vector DB 只能作为 provider/backend 候选 | 不做 RAG/embedding/vector DB | deferred boundary doc |
 

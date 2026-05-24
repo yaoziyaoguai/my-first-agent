@@ -14,13 +14,15 @@ Based on: Post User-Usable Agent Runtime MVP Independent Audit (score 5/10)
 | fake/real 未分裂 | FakeProvider/RealProvider 共享同一 `chat()` 路径，仅 provider adapter 不同 |
 | Tool pipeline 可用 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段 L3 verified |
 | FakeProvider deterministic tool decision 可用 | 基于关键词匹配的 `_decide_tool_calls()` |
-| Memory forget CLI 可用 | `_looks_like_forget_memory()` → `remove_record()` by content match |
-| SubAgent delegate CLI demo 可用 | `_looks_like_delegate_to_subagent()` → `delegate_once()` |
-| Streaming 是 fake/demo deterministic chunking | `FakeProvider` chunk_size=3 |
-| Trace run summary 初步可用 | `run.summary` event at end of chat() turn |
+| Memory forget CLI 可用 + forget by ID | `detect_forget_memory()` → `remove_record()` by ID or content match |
+| SubAgent delegate CLI + NL delegation | `detect_delegate_to_subagent()` + `detect_nl_delegation()` → `delegate_once()` |
+| Streaming 是 fake/demo deterministic chunking | `FakeProvider` chunk_size=12（debug/fake only） |
+| Trace run summary 含详情 | tool_names, memory_actions, subagent_names, error_reasons |
 | MEMORY_RECALL AD complete — implementation deferred | `docs/design/MEMORY_RECALL_DUAL_PATH_AD.md` |
 | Real provider opt-in docs 已存在 | README.md Real Provider Opt-in 章节 |
-| 当前评分 ~5/10 | 独立审计结论 |
+| CLI command router 已提取 | `agent/cli_commands.py` 独立模块 |
+| Progress/event UX | subagent.delegating/delegated, memory.forgotten 事件 |
+| 当前评分 ~6+/10 | post-issue-sweep 评估 |
 
 当前目标：developer-usable / manual-dogfood-ready / local-user-usable agent。
 不追求 broadly product-ready。

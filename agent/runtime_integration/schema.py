@@ -27,6 +27,7 @@ class RuntimeActionType(StrEnum):
     MEMORY_TURN_END_PROPOSAL = "memory.turn_end_proposal"
     MEMORY_PROPOSE = "memory.propose"
     MEMORY_RECALL = "memory.recall"
+    MEMORY_CONSOLIDATE = "memory.consolidate"
     CHECKPOINT_SAFE_SUMMARY = "checkpoint.safe_summary"
     STREAMING_PROVIDER_CALL = "streaming.provider_call"
     STREAMING_EVENT = "streaming.event"

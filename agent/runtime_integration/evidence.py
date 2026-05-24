@@ -242,6 +242,22 @@ def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     return masked
 
 
+def _memory_consolidation_adapter(payload: Mapping[str, Any]) -> Any:
+    """Catalog-owned adapter for consolidation pipeline invocation。
+
+    中文学习边界：这个 adapter 是 run_consolidation_pipeline() 的
+    catalog-owned wrapper。handler 不直接调用 pipeline，而是通过
+    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    """
+    from agent.memory_consolidation_pipeline import run_consolidation_pipeline
+    from agent.memory_store import InMemoryMemoryStore
+
+    store = payload.get("store")
+    if not isinstance(store, InMemoryMemoryStore):
+        raise TypeError("store must be InMemoryMemoryStore or its subclass")
+    return run_consolidation_pipeline(store, llm_generator=None)
+
+
 def _streaming_collect_response_adapter(payload: Mapping[str, Any]) -> Any:
     from agent.provider.streaming import ProviderStreamEvent, collect_stream_response
 
@@ -507,6 +523,17 @@ class RuntimeActionTargetCatalog:
             adapter=_subagent_delegate_once_adapter,
             function_called="delegate_once",
             call_signature="delegate_once(SubAgentRequest, SubAgentRegistry)",
+        ),
+        _descriptor(
+            "memory.consolidate",
+            "agent.runtime_integration.memory_consolidate.MemoryConsolidateHandler",
+            "MemoryConsolidation",
+            operation="run_pipeline",
+            invocation_adapter_id="MemoryConsolidation.run_pipeline",
+            implementation_id="agent.memory_consolidation_pipeline.run_consolidation_pipeline",
+            adapter=_memory_consolidation_adapter,
+            function_called="run_consolidation_pipeline",
+            call_signature="run_consolidation_pipeline(store, llm_generator=None)",
         ),
         *_test_descriptors(
             "tests.runtime_integration.test_runtime_action_contract",

@@ -849,6 +849,46 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_runti
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== MemoryConsolidation overclaim prevention =====
+
+
+def test_forged_target_label_as_memory_consolidation_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 MemoryConsolidation 不能获得 runtime_e2e。
+
+    MemoryConsolidation 是 memory.consolidate handler 调用的 consolidation pipeline 模块。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_CONSOLIDATE,
+        _ForgedTargetLabelHandler("MemoryConsolidation"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_CONSOLIDATE))
+
+    assert result.evidence["target_module"] == "MemoryConsolidation"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_consolidation() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted MemoryConsolidation proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_CONSOLIDATE,
+        _CatalogAllowedForgedCallableHandler("MemoryConsolidation"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.MEMORY_CONSOLIDATE))
+
+    assert result.evidence["target_module"] == "MemoryConsolidation"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 # ===== 证据目录完整性审计 =====
 
 # 每个 production target_module 必须有对应的 overclaim 测试（ForgedTargetLabel + CatalogAllowedForgedCallable）。
@@ -865,6 +905,7 @@ _OVERCLAIM_COVERED_TARGETS: frozenset[str] = frozenset({
     "MemoryPolicy",
     "MemoryStore",
     "MemoryRuntime",
+    "MemoryConsolidation",
 })
 
 # test harness 专用的 target_module，不需要 overclaim 测试

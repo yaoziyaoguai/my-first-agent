@@ -6,6 +6,9 @@
 > - `README.md`
 > - `docs/00-overview/CAPABILITY_MATRIX.zh.md`
 > - `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
+> - **`docs/audit/global-agent-capability-architecture-audit-2026-05-25.md`** — 当前权威源
+>
+> **当前阶段 (2026-05-25)：Global Audit Remediation** — 文档瘦身、归档、冻结、诚实标注。不再继续能力建设。详见审计文档 Section L。
 >
 > 本文保留历史阶段映射和长期边界说明；当前能力状态以新的中文入口文档和各系统
 > canonical RFC / audit packet 为准。

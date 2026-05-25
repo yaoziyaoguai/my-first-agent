@@ -3,16 +3,24 @@
 First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
 它的核心不是“更多工具”，而是把主代理运行时（Parent Agent Runtime）、工具注册中心（ToolRegistry）、记忆治理（Memory Governance）、技能系统（Skill System）、子代理系统（SubAgent System）、检查点（Checkpoint）和人工确认（Confirmation / Ask User）放在同一套可审计边界里运行。
 
-当前项目已经完成 Memory 主线、Skill System（含 demo-note-maker 示例 skill）、SubAgent L0 safe-local 基线、Tool Pipeline（含 demo.echo_task_summary / demo.write_demo_note 示例工具）、User Onboarding（`--help` / `help` 命令）、E2E Smoke Test，并通过全量测试和 synthetic dogfood；v0.9.x deep stabilization 正在把进入 SubAgent L1 前的深层测试、provider、config 和 Memory 隔离风险收口。
-本轮新增全局 dogfood 入口，用于同时验证 Runtime、ToolRegistry、Memory、Skill、SubAgent、Checkpoint、Confirmation、CLI/TUI 和 secret safety。
+当前项目已完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线、Tool Pipeline L3、User Onboarding、E2E Smoke Test，并通过全量测试 (3331 passed) 和 dogfood 验证。
+
+**当前阶段（诚实标签，2026-05-25）：**
+- ✅ **manual-dogfood-ready local agent** — FakeProvider baseline 9/9 PASS
+- ✅ **real-provider-dogfood-tested** — Real provider 5/6 PASS (kimi-k2.5 tool_use confirmed)
+- 🟡 **limited user-usable agent** — 核心功能可用，但 UX polish 不足
+- ❌ **broadly user-usable agent** — 不在当前 scope
+
 它仍不是 SaaS、不是通用 Agent 框架、不是生产沙箱，也不会默认调用真实 LLM、shell、外部进程或远程 MCP。
 新开发者先读本 README，再读 [docs/README.zh.md](docs/README.zh.md)。
 
-当前路线：`v0.9.x Stabilization` 只做行为中性的稳定化和 P3 重构，入口见 [V0_9_X_STABILIZATION_RFC.zh.md](docs/refactor/V0_9_X_STABILIZATION_RFC.zh.md)。
+> ⚠️ **Memory Consolidation pipeline 已冻结**：6 个 consolidation 文件的 dispatch path / handler path 已验证，但 business operation / real LLM consolidation deferred。参见 [全局审计文档](docs/audit/global-agent-capability-architecture-audit-2026-05-25.md) Section F (F4)。
+>
+> ⚠️ **FakeProvider 增长已冻结**：FakeProvider 是 deterministic test fixture / debug provider，不继续增强为 fake planner / fake reasoning engine。真实智能通过 real provider dogfood 验证。参见审计文档 Section B.3 (F19)。
 
-**下一阶段：Runtime Integration / Runtime Action Harness** — E2E dogfood 诚实状态是 3 pass / 6 partial（6/9 场景未经过 Runtime 主循环）。Runtime Integration 提供统一的、可审计的 RuntimeAction 入口，使 Runtime LLM 可以通过 tool calling 触发子系统能力。SubAgent L1 deferred 至此阶段完成后。设计文档包：[docs/runtime-integration/](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md)（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）。
+**下一阶段：Global Audit Remediation** — 文档瘦身、归档、冻结、诚实标注、provider contract。不再继续能力建设。入口：[全局审计文档](docs/audit/global-agent-capability-architecture-audit-2026-05-25.md) Section L。
 
-> ⚠️ **Runtime Integration 文档（pending independent audit）**：当前 Runtime Integration 设计文档仍处于独立审计修正中，尚未通过 committed-state audit。文档不可作为实现蓝图（not an implementation blueprint），不可 commit/push。在 committed-state audit 通过之前，不要启动 implementation-loop planning。
+> ⚠️ **v0.9.x 历史文档已归档至 `docs/archive/v0.x/`** — 不再作为当前入口。当前路线以全局审计文档为权威源。
 
 ## 当前状态
 

@@ -277,6 +277,16 @@ def _streaming_collect_response_adapter(payload: Mapping[str, Any]) -> Any:
     return collect_stream_response(list(events))
 
 
+def _streaming_validate_event_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.runtime_integration.streaming_provider import validate_stream_event
+    from agent.provider.streaming import ProviderStreamEvent
+
+    event = payload.get("event")
+    if not isinstance(event, ProviderStreamEvent):
+        raise TypeError("event must be a ProviderStreamEvent instance")
+    return validate_stream_event(event)
+
+
 def _subagent_delegate_once_adapter(payload: Mapping[str, Any]) -> Any:
     from agent.subagent_system.delegation import delegate_once
     from agent.subagent_system.registry import SubAgentRegistry
@@ -525,14 +535,14 @@ class RuntimeActionTargetCatalog:
         ),
         _descriptor(
             "streaming.event",
-            "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
+            "agent.runtime_integration.streaming_provider.StreamingEventHandler",
             "StreamingProtocol",
-            operation="collect_stream_response",
-            invocation_adapter_id="StreamingProtocol.collect_stream_response",
-            implementation_id="agent.provider.streaming.collect_stream_response",
-            adapter=_streaming_collect_response_adapter,
-            function_called="collect_stream_response",
-            call_signature="collect_stream_response(events)",
+            operation="validate_stream_event",
+            invocation_adapter_id="StreamingProtocol.validate_stream_event",
+            implementation_id="agent.runtime_integration.streaming_provider.validate_stream_event",
+            adapter=_streaming_validate_event_adapter,
+            function_called="validate_stream_event",
+            call_signature="validate_stream_event(event)",
         ),
         _descriptor(
             "subagent.delegate_l0",

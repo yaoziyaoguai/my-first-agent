@@ -573,6 +573,25 @@ def _try_phase1_turn_end_runtime_action(
             )
             route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
             route(streaming_request)
+            # STREAMING_EVENT：per-event dispatch，为每个 streaming event 收集
+            # 独立的 per-event evidence。不与 STREAMING_PROVIDER_CALL 聚合冲突——
+            # 前者验证单 event 合法性，后者聚合整轮 streaming response。
+            for serialized in serialized_events:
+                try:
+                    event_request = RuntimeActionRequest(
+                        action_type=RuntimeActionType.STREAMING_EVENT,
+                        source="core_loop",
+                        parent_trace_id="",
+                        payload={
+                            "event": serialized,
+                            "core_loop_invoked": True,
+                            "core_entrypoint": "core.chat",
+                            "runtime_hook_name": "loop.turn_end",
+                        },
+                    )
+                    route(event_request)
+                except Exception:
+                    pass
         except Exception:
             pass
 

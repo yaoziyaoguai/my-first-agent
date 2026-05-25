@@ -70,12 +70,19 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
 
     Phase 8 更新：注册 StreamingProviderCallHandler——STREAMING_PROVIDER_CALL 已接入
     loop.py turn-end hook，不注册会导致最后一个事件降级为 subsystem_integration。
+
+    Phase 9 更新：注册 StreamingEventHandler——STREAMING_EVENT 已接入
+    loop.py turn-end hook（per-event dispatch），不注册会导致最后一个事件
+    降级为 subsystem_integration。
     """
     from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
     from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
     from agent.runtime_integration.memory_recall import MemoryRecallHandler
     from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
-    from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
+    from agent.runtime_integration.streaming_provider import (
+        StreamingEventHandler,
+        StreamingProviderCallHandler,
+    )
     from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
     from agent.skill_system.loader import SkillLoader
     from agent.skill_system.registry import SkillRegistry
@@ -106,6 +113,10 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
     registry.register(
         RuntimeActionType.STREAMING_PROVIDER_CALL,
         StreamingProviderCallHandler(),
+    )
+    registry.register(
+        RuntimeActionType.STREAMING_EVENT,
+        StreamingEventHandler(),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
 

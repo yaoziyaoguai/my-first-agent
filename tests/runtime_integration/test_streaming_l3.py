@@ -1,15 +1,18 @@
 """Streaming L3 测试。
 
 验证 core.chat() → model_call (streaming via call_model()) → turn-end hook →
-STREAMING_PROVIDER_CALL dispatch 的完整 evidence chain。
+STREAMING_PROVIDER_CALL + STREAMING_EVENT dispatch 的完整 evidence chain。
 
 call_model() 已支持 streaming（model_call.py）：当 provider.supports_streaming=True 时，
 自动调用 provider.stream() 并收集事件。事件通过 LoopDependencies.streaming_events
-共享列表传入 turn-end hook，由 STREAMING_PROVIDER_CALL dispatch 处理。
+共享列表传入 turn-end hook，由 STREAMING_PROVIDER_CALL（整轮聚合）和 STREAMING_EVENT
+（per-event 验证）两个 dispatch 处理。
 
 测试分层：
 - L1/L2: 已有 test_runtime_action_handlers.py / test_runtime_action_contract.py 覆盖
-- L3 (real_core_loop_runtime_e2e): core.chat() → STREAMING_PROVIDER_CALL dispatch via turn-end hook
+- L3 (real_core_loop_runtime_e2e): core.chat() → streaming dispatch via turn-end hook
+  - STREAMING_PROVIDER_CALL：整轮 event 聚合 + collect_stream_response L3 evidence
+  - STREAMING_EVENT：单 event 验证 + validate_stream_event L3 evidence
 
 架构依据：
 - docs/specs/streaming-l3/SPEC.md
@@ -32,7 +35,10 @@ from agent.runtime_integration.evidence import (
     RuntimeActionModuleObserver,
 )
 from agent.runtime_integration.schema import RuntimeActionRequest
-from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
+from agent.runtime_integration.streaming_provider import (
+    StreamingEventHandler,
+    StreamingProviderCallHandler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -242,3 +248,266 @@ class TestNoRealAPIOrEnv:
         assert evidence.get("external_side_effects") is False
         # FakeProvider 不调用真实 API
         assert evidence.get("provider_external_call") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# T5-T9: STREAMING_EVENT per-event dispatch + L3 evidence
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _build_streaming_event_dispatcher():
+    """构建注册 STREAMING_EVENT handler 的 dispatcher。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.STREAMING_EVENT,
+        StreamingEventHandler(),
+    )
+    return RuntimeActionDispatcher(
+        registry=registry, observer=RuntimeActionModuleObserver()
+    )
+
+
+class TestStreamingEventL3:
+    """STREAMING_EVENT per-event dispatch → L3 evidence。
+
+    STREAMING_EVENT 与 STREAMING_PROVIDER_CALL 的区别：
+    - STREAMING_PROVIDER_CALL：整轮 event 列表 → collect_stream_response 聚合
+    - STREAMING_EVENT：单 event → validate_stream_event 验证
+
+    两者共享 runtime_loop provenance（route_from_runtime_loop），但 target 操作不同。
+    """
+
+    def test_t5_streaming_event_handler_dispatchable(self):
+        """T5: STREAMING_EVENT handler 可接收单 event 并返回 success。
+
+        直接通过 dispatcher.route_from_runtime_loop() 分发单 text_delta event，
+        验证 handler 正确处理并返回 L3 evidence。
+        """
+        dispatcher = _build_streaming_event_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_EVENT,
+            source="core_loop",
+            parent_trace_id="test-t5",
+            payload={
+                "event": {
+                    "event_type": "text_delta",
+                    "sequence": 1,
+                    "source": "provider",
+                    "text_delta": "你好",
+                    "is_final": False,
+                    "error": None,
+                },
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "success", (
+            f"单 text_delta event → status 应为 'success'，"
+            f"实际 {result.status!r}，error_safe_preview={result.error_safe_preview!r}"
+        )
+
+        evidence = dict(result.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+            f"STREAMING_EVENT dispatch 应达到 L3，实际 {evidence.get('evidence_level')!r}"
+        )
+        assert evidence.get("dispatcher_origin") == "runtime_loop"
+        assert evidence.get("runtime_loop_invoked") is True
+        assert evidence.get("target_module") == "StreamingProtocol"
+        assert evidence.get("module_invoked") is True
+
+        # per-event evidence
+        assert evidence.get("streaming_event_validated") is True
+        assert evidence.get("event_type") == "text_delta"
+
+        payload = dict(result.payload)
+        assert payload.get("event_type") == "text_delta"
+        assert payload.get("sequence") == 1
+        assert payload.get("has_text_delta") is True
+
+    def test_t6_streaming_event_final_validation(self):
+        """T6: final event 也产生 L3 evidence。"""
+        dispatcher = _build_streaming_event_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_EVENT,
+            source="core_loop",
+            parent_trace_id="test-t6",
+            payload={
+                "event": {
+                    "event_type": "final",
+                    "sequence": 3,
+                    "source": "provider",
+                    "text_delta": "",
+                    "is_final": True,
+                    "error": None,
+                },
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "success"
+        evidence = dict(result.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
+        assert evidence.get("event_type") == "final"
+
+    def test_t7_missing_event_payload_not_supported(self):
+        """T7: 缺少 event payload → not_supported disposition。"""
+        dispatcher = _build_streaming_event_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_EVENT,
+            source="core_loop",
+            parent_trace_id="test-t7",
+            payload={},
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "not_supported", (
+            f"缺少 event payload → status 应为 'not_supported'，"
+            f"实际 {result.status!r}"
+        )
+
+    def test_t8_event_sanitization_check(self):
+        """T8: text_delta 脱敏检查在 validate_stream_event 中正确执行。"""
+        dispatcher = _build_streaming_event_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_EVENT,
+            source="core_loop",
+            parent_trace_id="test-t8",
+            payload={
+                "event": {
+                    "event_type": "text_delta",
+                    "sequence": 1,
+                    "source": "provider",
+                    "text_delta": "普通文本，不含 secret",
+                    "is_final": False,
+                    "error": None,
+                },
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "success"
+        evidence = dict(result.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
+
+    def test_t9_streaming_event_error_event(self):
+        """T9: error event 也通过 STREAMING_EVENT handler 正确验证。"""
+        dispatcher = _build_streaming_event_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.STREAMING_EVENT,
+            source="core_loop",
+            parent_trace_id="test-t9",
+            payload={
+                "event": {
+                    "event_type": "error",
+                    "sequence": 1,
+                    "source": "provider",
+                    "text_delta": "",
+                    "is_final": False,
+                    "error": "provider timeout",
+                },
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "success"
+        evidence = dict(result.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
+        assert evidence.get("event_type") == "error"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# T10: STREAMING_EVENT via core.chat() full pipeline
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestStreamingEventFullPipeline:
+    """验证 core.chat() → turn-end hook → STREAMING_EVENT dispatch 完整链路。
+
+    turn-end hook 现在同时 dispatch STREAMING_PROVIDER_CALL（聚合）和
+    STREAMING_EVENT（per-event），两部分都使用 route_from_runtime_loop()。
+    """
+
+    def test_t10_streaming_event_dispatched_from_core_chat(self):
+        """T10: core.chat() 触发 turn-end hook，dispatch STREAMING_EVENT per event。
+
+        _StreamingFakeProvider 产出 text_delta + final 事件，turn-end hook 为
+        每个事件 dispatch 一个独立的 STREAMING_EVENT action。
+        """
+        from agent.core import chat
+
+        # 构建含 STREAMING_EVENT handler 的 dispatcher
+        real_dispatcher = _build_streaming_event_dispatcher()
+        # 同时注册 STREAMING_PROVIDER_CALL 以通过 turn-end 门
+        real_dispatcher._registry.register(
+            RuntimeActionType.STREAMING_PROVIDER_CALL,
+            StreamingProviderCallHandler(),
+        )
+        spy = _SpyDispatcher(real_dispatcher)
+
+        result = chat(
+            "hello",
+            provider=_StreamingFakeProvider(),
+            runtime_action_dispatcher=spy,
+        )
+
+        assert isinstance(result, str)
+
+        # STREAMING_PROVIDER_CALL 应至少 1 次
+        provider_call_entries = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.STREAMING_PROVIDER_CALL
+        ]
+        assert len(provider_call_entries) >= 1
+
+        # STREAMING_EVENT 应至少 1 次（每个 streaming event 一次 dispatch）
+        event_entries = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.STREAMING_EVENT
+        ]
+        assert len(event_entries) >= 1, (
+            f"core.chat() turn-end 应 dispatch 至少 1 次 STREAMING_EVENT，"
+            f"实际 {len(event_entries)} 次"
+        )
+
+        # 所有 STREAMING_EVENT 应走 route_from_runtime_loop
+        for method, _, result in event_entries:
+            assert method == "route_from_runtime_loop", (
+                f"STREAMING_EVENT 必须走 route_from_runtime_loop()，实际 {method!r}"
+            )
+            evidence = dict(result.evidence)
+            assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
+
+    def test_t11_no_real_api_or_env_access_for_streaming_event(self):
+        """T11: STREAMING_EVENT 全链路不读 .env，不调真实 API。"""
+        from agent.core import chat
+
+        real_dispatcher = _build_streaming_event_dispatcher()
+        real_dispatcher._registry.register(
+            RuntimeActionType.STREAMING_PROVIDER_CALL,
+            StreamingProviderCallHandler(),
+        )
+        spy = _SpyDispatcher(real_dispatcher)
+
+        chat("hello", provider=_StreamingFakeProvider(), runtime_action_dispatcher=spy)
+
+        event_entries = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.STREAMING_EVENT
+        ]
+        assert len(event_entries) >= 1
+
+        for _, _, result in event_entries:
+            evidence = dict(result.evidence)
+            assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
+            # STREAMING_EVENT 是 per-event dispatch，不携带 provider-level
+            # external_side_effects——那是 STREAMING_PROVIDER_CALL 聚合层的关注点

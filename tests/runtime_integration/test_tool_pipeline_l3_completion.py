@@ -1096,12 +1096,13 @@ class TestPhaseFPipelineStructureConstraints:
         # Phase 6 更新：SKILL_SELECT 已接入 loop.py turn-end hook
         # Phase 7 更新：SUBAGENT_DELEGATE_L0 已接入 loop.py turn-end hook
         # Phase 8 更新：STREAMING_PROVIDER_CALL 已接入 loop.py turn-end hook
+        # Phase 9 更新：STREAMING_EVENT 已接入 loop.py turn-end hook（per-event dispatch）
         expected_types = {
             "tool.gate", "tool.request", "tool.invoke", "tool.result",
             "memory.turn_end_proposal", "memory.propose", "memory.recall",
             "checkpoint.safe_summary", "memory.consolidate",
             "skill.select", "subagent.delegate_l0",
-            "streaming.provider_call",
+            "streaming.provider_call", "streaming.event",
         }
         actual_types = set(snapshot.keys())
         extra = actual_types - expected_types

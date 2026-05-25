@@ -25,7 +25,10 @@ from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
-from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
+from agent.runtime_integration.streaming_provider import (
+    StreamingEventHandler,
+    StreamingProviderCallHandler,
+)
 from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
@@ -52,9 +55,9 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
     """构建 Phase 1 RuntimeActionDispatcher。
 
     注册 memory turn-end proposal + retain + recall + consolidate + tool pipeline +
-    checkpoint + skill select + subagent delegate + streaming provider call handler
-    （共 10 个 handler）。
-    Streaming 已接入（STREAMING_PROVIDER_CALL），SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
+    checkpoint + skill select + subagent delegate + streaming provider call +
+    streaming event handler（共 11 个 handler）。
+    Streaming 已接入（STREAMING_PROVIDER_CALL + STREAMING_EVENT），SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only，proposal generation）
@@ -116,9 +119,14 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
     )
-    # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence
+    # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(
         RuntimeActionType.STREAMING_PROVIDER_CALL,
         StreamingProviderCallHandler(),
+    )
+    # STREAMING_EVENT：单 event 验证和 per-event evidence 收集
+    registry.register(
+        RuntimeActionType.STREAMING_EVENT,
+        StreamingEventHandler(),
     )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

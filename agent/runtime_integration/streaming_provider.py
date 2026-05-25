@@ -1,4 +1,11 @@
-"""Streaming provider RuntimeAction handler."""
+"""Streaming provider RuntimeAction handlers.
+
+中文学习边界：
+- StreamingProviderCallHandler：处理 STREAMING_PROVIDER_CALL，收集整轮 streaming
+  evidence（所有 event 的聚合）
+- StreamingEventHandler：处理 STREAMING_EVENT，验证单个 streaming event 的
+  event_type / sanitization / sequence，提供 per-event evidence 粒度
+"""
 
 from __future__ import annotations
 
@@ -7,6 +14,90 @@ from typing import Any
 from agent.provider.streaming import ProviderStreamEvent, sanitize_stream_text
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
+
+
+def validate_stream_event(event: ProviderStreamEvent) -> dict[str, Any]:
+    """验证单个 ProviderStreamEvent 的合法性。
+
+    不聚合为 ProviderResponse——那是 collect_stream_response 的职责。
+    本函数只做单 event 的字段校验和脱敏检查，供 StreamingEventHandler 作为
+    catalog-owned target function。
+
+    返回验证结果字典，包含 event_type、sequence、sanitization 状态等。
+    """
+    result: dict[str, Any] = {
+        "event_type": event.event_type,
+        "sequence": event.sequence,
+        "source": event.source,
+        "sequence_positive": event.sequence >= 0,
+        "event_type_valid": event.event_type in {
+            "text_delta", "final", "error", "tool_request",
+        },
+    }
+    if event.text_delta:
+        sanitized = sanitize_stream_text(event.text_delta)
+        result["has_text_delta"] = True
+        result["text_sanitized"] = sanitized != event.text_delta
+        result["text_length"] = len(event.text_delta)
+    else:
+        result["has_text_delta"] = False
+    if event.is_final:
+        result["is_final"] = True
+    if event.error:
+        result["has_error"] = True
+        result["error_sanitized"] = sanitize_stream_text(event.error) != event.error
+    return result
+
+
+class StreamingEventHandler:
+    """处理单个 STREAMING_EVENT——per-event 验证和 evidence 收集。
+
+    与 StreamingProviderCallHandler 的区别：
+    - StreamingProviderCallHandler：整轮 event 列表 → collect_stream_response 聚合 → 单次 L3 evidence
+    - StreamingEventHandler：单 event → validate_stream_event 验证 → per-event evidence
+
+    两者共享同一 RuntimeAction 类型族（streaming.*），但 handler/target 不同。
+    """
+
+    def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
+        payload = dict(request.payload)
+        event_payload = payload.get("event")
+        if not event_payload:
+            return context.not_supported(
+                handler_name=type(self).__name__,
+                target_module="StreamingProtocol",
+                payload={"event_received": False},
+                observed_call=None,
+                evidence_extra={
+                    "runtime_e2e_disqualified_reason": "no event in payload",
+                },
+                error_safe_preview="streaming event payload missing",
+            )
+
+        event = _event_from_payload(event_payload)
+        observed = context.invoke_registered_target(
+            target_module="StreamingProtocol",
+            operation="validate_stream_event",
+            payload={"event": event},
+        )
+        validation = observed.value if observed else {}
+        return context.success(
+            handler_name=type(self).__name__,
+            target_module="StreamingProtocol",
+            payload={
+                "event_type": event.event_type,
+                "sequence": event.sequence,
+                "has_text_delta": bool(event.text_delta),
+                "is_final": event.is_final,
+                "validation": dict(validation) if isinstance(validation, dict) else {},
+            },
+            observed_call=observed,
+            evidence_extra={
+                "event_type": event.event_type,
+                "sequence": event.sequence,
+                "streaming_event_validated": True,
+            },
+        )
 
 
 class StreamingProviderCallHandler:

@@ -11,7 +11,7 @@
 | provider_name | `anthropic_compatible` |
 | model | `kimi-k2.5` |
 | base_url | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
-| api_key | `sk-sp-4***7a7d` |
+| api_key | `CONFIGURED` |
 | auth_scheme | `auto` |
 | request_path | `/v1/messages` |
 | supports_tools | `True` |

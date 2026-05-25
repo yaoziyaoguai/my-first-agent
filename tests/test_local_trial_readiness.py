@@ -632,3 +632,51 @@ def test_release_notes_v0_3_published() -> None:
     text = path.read_text(encoding="utf-8")
     for landmark in ["M1", "M2", "M3", "M4", "request_user_input", "676 passed"]:
         assert landmark in text, f"RELEASE_NOTES_v0.3.md 缺少关键内容：{landmark}"
+
+
+def test_dogfood_reports_contain_no_secret_fragments() -> None:
+    """RT-06: dogfood report 中不得包含可逆的 secret 片段。
+
+    任何 api_key 相关的值只能用非可逆标记表示：CONFIGURED / SET / REDACTED / PRESENT。
+    不允许保留 sk- 前缀或尾部字符等可关联片段。
+    """
+    dogfood_dir = REPO_ROOT / "docs" / "dogfood"
+    if not dogfood_dir.exists():
+        return
+
+    secret_pattern = re.compile(
+        r"sk-[A-Za-z0-9_-]{3,}"
+        r"|api_key.*`[^`]*[A-Za-z0-9]{3,}[^`]*`"
+        r"|api_key.*:\s*'[^']+'"
+    )
+
+    violations: list[str] = []
+    for ext in ("*.md", "*.json"):
+        for path in sorted(dogfood_dir.glob(ext)):
+            text = path.read_text(encoding="utf-8")
+            for i, line in enumerate(text.splitlines(), 1):
+                if any(
+                    marker in line
+                    for marker in (
+                        "CONFIGURED",
+                        "REDACTED",
+                        "SET",
+                        "PRESENT",
+                        "redact",
+                        "脱敏",
+                        "secret_printed",
+                        "no_secret",
+                        "不打印",
+                        "不泄露",
+                    )
+                ):
+                    continue
+                if secret_pattern.search(line):
+                    violations.append(
+                        f"{path.relative_to(REPO_ROOT)}:{i}: {line.strip()[:120]}"
+                    )
+
+    assert not violations, (
+        "dogfood report 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
+        + "\n".join(violations)
+    )

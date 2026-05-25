@@ -242,7 +242,6 @@ def _default_tool_input(tool_name: str, parameters: dict[str, Any]) -> dict[str,
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         workspace = _project_root() / Path(*DEMO_WORKSPACE_SUBDIR) / stamp
-        workspace.mkdir(parents=True, exist_ok=True)
         note_path = workspace / "note.md"
         demo_id = uuid.uuid4().hex[:12]
         return {
@@ -272,7 +271,6 @@ def _legacy_demo_note_block() -> ToolUseBlock:
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     workspace = _project_root() / Path(*DEMO_WORKSPACE_SUBDIR) / stamp
-    workspace.mkdir(parents=True, exist_ok=True)
     note_path = workspace / "note.md"
     demo_id = f"demo-{uuid.uuid4().hex[:12]}"
     return ToolUseBlock(

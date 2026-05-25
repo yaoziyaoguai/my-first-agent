@@ -348,7 +348,9 @@ def _execute_subagent_delegation(
     from agent.subagent_system.request import SubAgentRequest
 
     try:
-        registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+        # RT-07: 使用 agent/subagent_system/descriptors/ 而非 tests/fixtures/subagents
+        # 产品级默认不应依赖测试 fixtures。demo descriptors 显式标注 DEMO-ONLY。
+        registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
     except Exception:
         return render_delegate_error(subagent_name, "无法加载子代理注册表")
     descriptor = registry.get_descriptor(subagent_name)
@@ -565,14 +567,14 @@ def chat(
     # 渲染由 cli_commands.render_subagent_list 完成。
     #
     # CLI-ONLY (CommandCategory.READ_ONLY): show subagents
-    # 注意：当前使用 tests/fixtures/subagents 作为默认 registry root——
-    # 这是 demo-only 行为（RT-07），产品路径不应依赖 test fixtures。
+    # 注意：descriptors 来自 agent/subagent_system/descriptors/——显式 DEMO-ONLY。
+    # 产品路径不应依赖 test fixtures（RT-07）。
     if _looks_like_show_subagents(user_input):
         from pathlib import Path
         from agent.subagent_system.registry import SubAgentRegistry
 
         try:
-            registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+            registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
             descriptors = registry.list_visible()
         except Exception:
             descriptors = ()

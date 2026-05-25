@@ -540,3 +540,41 @@ class TestFakeProviderStreaming:
         assert len(deltas) >= 1
         full = "".join(e.text_delta for e in deltas)
         assert len(full) > 0
+
+
+class TestFakeProviderNoFilesystemSideEffect:
+    """RT-12: FakeProvider 构造 tool args 时不应产生文件系统副作用。
+
+    Provider 的职责是返回 tool_use intent（ToolUseBlock），不是执行工具。
+    目录创建应推迟到 ToolExecutor 实际执行工具时（post-confirmation）。
+    """
+
+    def test_default_tool_input_does_not_create_directory(self, tmp_path, monkeypatch):
+        """_default_tool_input 只计算路径，不创建 workspace 目录。"""
+        from agent.provider.fake_provider import _default_tool_input
+        from agent import local_demo
+
+        fake_root = tmp_path / "fake_project"
+        fake_root.mkdir()
+        monkeypatch.setattr(local_demo, "_project_root", lambda: fake_root)
+
+        workspace_root = fake_root / "workspace" / "demo"
+        # 确保初始状态：workspace 不存在
+        assert not workspace_root.exists()
+
+        result = _default_tool_input("demo.write_demo_note", {})
+        # 返回了合法的路径和内容
+        assert "path" in result
+        assert result["path"].startswith(str(workspace_root))
+        # RT-12 关键断言：workspace 目录没有被创建
+        assert not workspace_root.exists(), (
+            "FakeProvider 不应在构造 tool args 时创建目录——"
+            "目录创建应在 ToolExecutor 实际执行工具时发生"
+        )
+
+    def test_default_tool_input_echo_task_summary_no_side_effect(self, tmp_path, monkeypatch):
+        """demo.echo_task_summary 无参数，不产生任何副作用。"""
+        from agent.provider.fake_provider import _default_tool_input
+
+        result = _default_tool_input("demo.echo_task_summary", {})
+        assert result == {}

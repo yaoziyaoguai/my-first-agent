@@ -1,7 +1,5 @@
 # tests/
 
-> 本周（2026-04）从 3.5/2.5 开始爬 Tier 4 的第一块砖：集成测试 + 单元测试。
-
 ## 怎么跑
 
 ```bash
@@ -12,51 +10,45 @@
 .venv/bin/pytest -v
 
 # 只跑某一个文件
-.venv/bin/pytest tests/test_main_loop.py -v
+.venv/bin/pytest tests/test_provider_contract.py -v
 
 # 跑到第一个失败就停
 .venv/bin/pytest -x
 ```
 
-## 文件组织
+## 测试分类与证据标签 (RT-16)
 
-| 文件 | 覆盖什么 |
-|---|---|
-| `conftest.py` | `FakeAnthropicClient`、`fresh_state` fixture、构造 `FakeResponse` 的 helper |
-| `test_context_builder.py` | `build_execution_messages` / `build_planning_messages` 的 messages 结构不变量 |
-| `test_tool_pairing.py` | `tool_use ↔ tool_result` 配对契约（序列化 / 占位 / 压缩切点） |
-| `test_state_invariants.py` | `reset_task` 清字段的完整性 + "新增字段必须加进 allowlist" 的护栏 |
-| `test_main_loop.py` | `chat()` 主循环：单步 / 工具循环 / 限流兜底 / 多 tool_use 占位 |
-| `test_confirmation_flow.py` | 计划确认 / 工具确认的 y/n/feedback 三分支 + 幂等 |
-| `test_checkpoint_roundtrip.py` | checkpoint 保存/恢复的 roundtrip + 旧 checkpoint 兼容 + 大 tool_result 截断 |
-| `test_memory_and_tools.py` | `compress_history` 触发条件 + tool_registry 三种确认模式 + 异常兜底 |
-| `test_semantics.py` | `is_current_step_completed` / `advance_current_step_if_needed` / `append_control_event` 的语义规则 |
+**标签规则：文件名和 docstring 必须诚实反映测试层级，不把 handler test 写成 E2E。**
 
-## 本周这组测试能捕获到的 bug（做防御的**真实**损失）
+| 层级 | 标签 | 覆盖范围 | 例子 |
+|------|------|---------|------|
+| Unit | 无特殊标签 | 单个函数/模块，mock 外部依赖 | `test_fake_provider_decision.py` |
+| Integration | `integration` | 多个模块协作，无需真实 API | `test_provider_contract.py` |
+| Handler | `handler` / `direct` | 单个 handler/dispatcher 行为 | `test_confirm_handlers.py` |
+| E2E | `e2e`（仅在文件名中） | 全链路：入口 → core.chat → loop → 输出 | `test_first_usable_task_e2e.py` |
+| Dogfood | `dogfood` | 手动/脚本验证，非自动化 CI | `scripts/dogfood_*.py` |
+| Characterization | `characterization` | 保护当前行为不变，非验证正确性 | `test_command_boundary_characterization.py` |
 
-- assistant 消息丢 tool_use 块 → 下轮 API 400
-- 多 tool_use 阻断时其余块没补占位 → 下轮 API 400
-- 压缩切点切断 tool_use/tool_result 配对 → 下轮 API 400
-- `reset_task` 漏清某个字段（比如 `pending_tool`）→ 跨任务状态残留
-- 工具抛异常没兜底 → 悬空 tool_use → 下轮 API 400
-- 语义事件（"用户接受当前计划"）退化成裸 y/n → 模型困惑
-- checkpoint 恢复时漏字段 → 限流计数被重置，mutex 失效
-- 模型连续返回相同 tool_use → 限流兜底是否触发（对应上周 Kimi 死循环现场）
+**关键区分：**
+- **Handler test** = 测试单个 handler 函数的输入/输出（如 `handle_tool_gate`），不经过 `core.chat()`
+- **E2E test** = 测试完整 unified runtime flow（`core.chat()` → `loop.py` → `response_handlers` → `tool_executor`），经过统一入口
+- Handler test 文件不应命名为 `*_e2e.py` 或在 docstring 中声称自己是 E2E
 
 ## 添加测试的原则
 
 1. **被生产翻车过的每一类 bug，都值得一条回归用例**——否则同样的 bug 会再回来。
 2. **测试的 docstring 要写清"这是在防什么"**——半年后别人（或你自己）读到能立刻明白。
-3. **fake client 的 canned response 顺序要和真实调用顺序一致**——`FakeAnthropicClient` 会在响应用完时抛明确的 `AssertionError`，不会让你误以为"测试通过"。
+3. **fake client 的 canned response 顺序要和真实调用顺序一致**——`FakeProvider` 会在响应用完时抛明确的错误。
 4. **测试命名用现在时动词**："do X"、"return Y when Z"——不要用"test_feature_1"。
+5. **不要给 handler test 起 E2E 名字**——handler test 是 handler test，E2E 是 E2E（RT-16）。
 
-## 已知 xfail 的用例
+## 当前测试规模
 
-- `test_step_block_skipped_when_status_done`——`build_execution_messages` 当前代码不检查 `status=='done'`。已用 `pytest.xfail` 显式标记为"已知缺口"。后续要么加回防御，要么保证进 done 的瞬间 reset_task。
-
-## 未来要加的测试（按 ROADMAP）
-
-- Property-based testing（hypothesis）——给 `_find_safe_split_index` 喂随机 messages，断言"永远不产生悬空配对"。
-- 状态机全路径覆盖——枚举 `task.status` 所有转换，每条边一个用例。
-- Prompt caching 生效验证——测 cache_read_input_tokens 是否随预期增长。
-- Cost 追踪准确性——测 state.task.cost_usd 累加逻辑。
+全量 pytest（不含需要真实 API 的 opt-in tests）约 3300+ passed。核心覆盖：
+- `tests/test_provider_contract.py` — provider adapter contract + dispatcher evidence parity
+- `tests/test_command_boundary_characterization.py` — CLI meta-command 边界回归
+- `tests/test_fake_provider_decision.py` — FakeProvider deterministic tool matching
+- `tests/test_subagent_user_facing.py` — SubAgent delegation/registry/presentation
+- `tests/test_memory_interaction.py` — memory inline confirmation + pending retain queue
+- `tests/runtime_integration/` — Phase 1 dispatcher/handler/evidence 单元测试
+- `tests/smoke/` — 端到端冒烟测试

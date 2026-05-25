@@ -8,7 +8,8 @@
 
 | 文档 | 日期 | 范围 | 用途 |
 |------|------|------|------|
-| [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md) | 2026-05-25 | RT-01 到 RT-18 全量修复 | **当前唯一执行中的计划** — Global Audit Remediation Big Loop |
+| [post-red-team-cleanup-remediation-plan-2026-05-25.md](post-red-team-cleanup-remediation-plan-2026-05-25.md) | 2026-05-25 | PF-01 到 PF-15 cleanup 修复 | **当前执行中** — Cleanup-Only Remediation Big Loop |
+| [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md) | 2026-05-25 | RT-01 到 RT-18 全量修复 | **已完成** — 第一轮 6 phases committed，RT-01/RT-12/RT-16 resolved |
 | [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md) | — | 子系统集成 roadmap | AutoRun queue 定义（当前仅 cleanup/slimming 模式） |
 
 ## Historical Plans (已完成或已冻结)
@@ -25,6 +26,7 @@
 
 ## 读者路径
 
-- **当前该做什么**：读 [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md)
+- **当前该做什么**：读 [post-red-team-cleanup-remediation-plan-2026-05-25.md](post-red-team-cleanup-remediation-plan-2026-05-25.md) — cleanup-only remediation 进行中
+- **第一轮 remediation 历史**：读 [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md) — 已完成，作为证据保留
 - **AutoRun queue 定义**：读 [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md)
 - **历史实现证据**：Historical 部分保留为实现证据链，不需要作为行动源

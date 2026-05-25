@@ -2,11 +2,14 @@
 
 本目录包含 my-first-agent 的 dogfood（手动验证）报告和相关文档。
 
+**当前最高价值下一步：Manual Human Dogfood** — 从头按 README 走一遍 fake/local 模式，记录所有困惑、错误、审批 UX、memory recall、tool result visibility 和 debug flow。自动化 dogfood reports 是 evidence，不是人工 dogfood 的替代品。
+
 ## 读者路径
 
 - **想手动验证本地功能** → [local-manual-dogfood-checklist.md](local-manual-dogfood-checklist.md)
 - **想看最近的完整 dogfood 结果** → [local-manual-dogfood-report.md](local-manual-dogfood-report.md)（本地 FakeProvider）和 [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md)（真实 API）
 - **想看 JSON 证据** → JSON evidence reports
+- **想做 Manual Human Dogfood** → 先读本 README，再走 [local-manual-dogfood-checklist.md](local-manual-dogfood-checklist.md)，记录所有发现
 
 ## Active Dogfood Documents
 

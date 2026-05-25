@@ -24,7 +24,8 @@
 
 ## 读者路径
 
-- **下一步行动（当前）**：直接读 [global-red-team-product-architecture-audit-2026-05-25.md](global-red-team-product-architecture-audit-2026-05-25.md)，特别是 Section J (Top Findings) 和 Section K (Recommended Next Big Loops)
-- **Red-Team Remediation Plan**：[global-red-team-remediation-plan-2026-05-25.md](../plans/global-red-team-remediation-plan-2026-05-25.md) — RT-01 到 RT-18 的完整修复执行计划
+- **下一步行动（当前）**：读 [post-red-team-cleanup-remediation-plan-2026-05-25.md](../plans/post-red-team-cleanup-remediation-plan-2026-05-25.md) — cleanup-only remediation 执行中
+- **Red-Team 审计原文**：读 [global-red-team-product-architecture-audit-2026-05-25.md](global-red-team-product-architecture-audit-2026-05-25.md)，特别是 Section M (Top Findings) 和 Section N (Recommended Next Big Loops)
+- **第一轮 Remediation Plan**：[global-red-team-remediation-plan-2026-05-25.md](../plans/global-red-team-remediation-plan-2026-05-25.md) — RT-01 到 RT-18，已完成
 - **最近 Big Loop 成果**：读 [big-loop-independent-audit-2026-05-25.md](big-loop-independent-audit-2026-05-25.md)，了解最近完成的 issue sweep
 - **历史审计证据**：Historical 部分保留为实现证据链，不需要作为行动源

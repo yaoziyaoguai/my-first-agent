@@ -18,7 +18,9 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 >
 > ⚠️ **FakeProvider 增长已冻结**：FakeProvider 是 deterministic test fixture / debug provider，不继续增强为 fake planner / fake reasoning engine。真实智能通过 real provider dogfood 验证。参见审计文档 Section B.3 (F19)。
 
-**下一阶段：Global Audit Remediation** — 文档瘦身、归档、冻结、诚实标注、provider contract。不再继续能力建设。入口：[全局审计文档](docs/audit/global-agent-capability-architecture-audit-2026-05-25.md) Section L。
+**当前阶段：Cleanup-Only Remediation 进行中** — 第二轮 post-red-team cleanup remediation（PF-01 到 PF-15），修复 P1/P2 问题，准备 manual human dogfood。不再继续能力建设。入口：[Post Red-Team Cleanup Remediation Plan](docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md)。
+
+**下一阶段最高价值行动：Manual Human Dogfood** — 从头按 README 走一遍 fake/local 模式，记录所有困惑、错误和 UX 摩擦。入口：[Dogfood README](docs/dogfood/README.md) → [Dogfood Checklist](docs/dogfood/local-manual-dogfood-checklist.md)。
 
 > ⚠️ **v0.9.x 历史文档已归档至 `docs/archive/v0.x/`** — 不再作为当前入口。当前路线以全局审计文档为权威源。
 
@@ -302,33 +304,37 @@ Explicit Non-Goals for v0.1:
 ## 文档阅读路径
 
 1. 项目入口：[docs/README.zh.md](docs/README.zh.md)
-2. 系统概览：[FIRST_AGENT_OVERVIEW.zh.md](docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md)
-3. 架构图：[ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)
-4. 能力矩阵：[CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)
-5. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
-6. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
-7. 当前审计状态：[CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)
-8. 本地试用清单（已归档）：[V0_3_LOCAL_TRIAL_CHECKLIST.md](docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md)
-9. 手工试用反馈模板（已归档）：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
-10. Event transition 准备（已归档）：[V0_4_EVENT_TRANSITION_PREP.md](docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md)
-11. Skill 实验性状态记录（已归档）：[V0_3_SKILL_SYSTEM_STATUS.md](docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md)
-12. **Runtime Integration 设计文档包**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
+2. 了解当前阶段和下一步：[docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md](docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md)
+3. Manual Human Dogfood Checklist：[docs/dogfood/local-manual-dogfood-checklist.md](docs/dogfood/local-manual-dogfood-checklist.md)
+4. 当前审计：[docs/audit/global-red-team-product-architecture-audit-2026-05-25.md](docs/audit/global-red-team-product-architecture-audit-2026-05-25.md)
+5. 系统概览：[FIRST_AGENT_OVERVIEW.zh.md](docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md)
+6. 架构图：[ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)
+7. 能力矩阵：[CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)
+8. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
+9. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
+10. 当前审计状态：[CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)
+11. 本地试用清单（已归档）：[V0_3_LOCAL_TRIAL_CHECKLIST.md](docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md)
+12. 手工试用反馈模板（已归档）：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
+13. Event transition 准备（已归档）：[V0_4_EVENT_TRANSITION_PREP.md](docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md)
+14. Skill 实验性状态记录（已归档）：[V0_3_SKILL_SYSTEM_STATUS.md](docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md)
+15. **Runtime Integration 设计文档包**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
 
 Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`。
 
 ## 下一步 Roadmap
 
-近期已完成（First Usable Task MVP — 用户可感知能力补齐第一轮）：
-- WP1: ToolRegistry 注册 demo.echo_task_summary / demo.write_demo_note（Tool Pipeline 可用，demo 工具已就绪）
-- WP2: SkillRegistry 加载 demo-note-maker skill（SKILL_SELECT dispatch path L3 verified，non-empty registry）
-- WP3: User Onboarding（`--help` / `help` 命令）+ 诚实能力/限制说明
-- WP4: E2E Smoke Test（`tests/smoke/`，6 tests，覆盖 onboarding / demo / chat / skill registry）
+当前阶段（2026-05-25）：
+- **Cleanup-Only Remediation** — PF-01 到 PF-15，修复 P1/P2 cleanup 问题（provider mode contract, command shortcut freeze, secret redaction, source-of-truth, SubAgent fixture boundary, E2E label, legacy sunset）
+- **Manual Human Dogfood** — cleanup 完成后最高优先级，从头走 fake/local 模式，记录 UX 摩擦
+- **能力建设暂停** — 不新增 feature，不扩 Agent 能力，不继续 AutoRun capability loop
 
-> 注意：`main.py demo` 是独立 demo adapter 路径，不经过完整 Tool Pipeline / unified runtime flow。完整 Runtime Action 路径通过 `python main.py` 交互模式下的 `core.chat()` 统一入口触发。
+近期已完成：
+- 第一轮 Global Red-Team Remediation（RT-01 到 RT-18，6 phases）
+- RT-01 dispatcher/evidence parity、RT-12 FakeProvider side effect fix
+- RT-02 command shortcut boundary、RT-06 secret redaction、RT-07 SubAgent fixture isolation
+- RT-05 docs source-of-truth、RT-16 test evidence labeling
 
-下一步候选：
-1. 用户可感知 Tool Result：让 `core.chat()` + FakeProvider 路径也能向用户展示 tool 被调用和结果返回的完整闭环。
-2. SubAgent 后续只可按文档 gate 推进 L1/L2；L3/L4/L5 仍是 future/contract。
-3. Memory 下一步聚焦 Pre-loop MEMORY_RECALL wiring（Architecture Extension candidate）或真实质量 dogfood。
-4. Skill 下一步可继续强化真实 dogfood 证据和文档索引，不默认安装远程 skill。
-5. Runtime 下一步继续减少 `core.py` hub 压力，但不能破坏现有 checkpoint / confirmation / tool_result 语义。
+能力建设历史记录（已完成，不再作为当前行动指令）：
+- WP1-WP4: First Usable Task MVP — ToolRegistry demo tools、SkillRegistry、User Onboarding、E2E Smoke Test
+- Memory 主线、Skill System safe-local 基线、SubAgent L0 deterministic/local 基线
+- Tool Pipeline L3、real-provider dogfood (Kimi/DashScope)

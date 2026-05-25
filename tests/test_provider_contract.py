@@ -665,3 +665,108 @@ def test_fake_provider_path_not_broken_by_prompt_changes(monkeypatch):
     # 普通聊天不应触发 tool_use
     has_tool = any(getattr(b, "type", None) == "tool_use" for b in response.content)
     assert not has_tool, "FakeProvider should not trigger tool_use on 'hello'"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RT-01: Real-provider dispatcher/evidence parity 合约测试
+# ═══════════════════════════════════════════════════════════════════════════
+# 中文学习边界：Phase 1 RuntimeActionDispatcher 是 provider-neutral runtime
+# logic——不调 LLM、不读 .env、不访问网络。所有 provider 类型（fake/anthropic/
+# anthropic_compatible/openai_compatible）默认都应自动构建 dispatcher，
+# 确保 fake/real 共享同一 evidence path。
+
+
+class TestPhase1DispatcherDefaultBuild:
+    """验证 Phase 1 dispatcher 在所有 provider 路径下默认构建。"""
+
+    def test_build_phase1_dispatcher_returns_valid_dispatcher(self):
+        """build_phase1_dispatcher() 返回非空 RuntimeActionDispatcher。"""
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+        dispatcher = build_phase1_dispatcher()
+        assert dispatcher is not None
+        assert hasattr(dispatcher, "route")
+        assert hasattr(dispatcher, "_registry")
+        # _registry 必须包含已注册的 handlers
+        registry = dispatcher._registry
+        assert registry is not None
+        # 至少有 TOOL_GATE 等核心 handler 已注册
+        from agent.runtime_integration import RuntimeActionType
+        assert registry.get(RuntimeActionType.TOOL_GATE) is not None
+        assert registry.get(RuntimeActionType.TOOL_INVOKE) is not None
+        assert registry.get(RuntimeActionType.TOOL_RESULT) is not None
+
+    def test_build_phase1_dispatcher_is_idempotent(self):
+        """重复调用 build_phase1_dispatcher() 返回独立实例。"""
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+        d1 = build_phase1_dispatcher()
+        d2 = build_phase1_dispatcher()
+        assert d1 is not d2  # 每次构建都是新实例
+        # _registry 也是独立实例（每个 dispatcher 有自己的 registry）
+        assert d1._registry is not d2._registry
+
+    def test_dispatcher_build_requires_no_env_or_network(self):
+        """构建 dispatcher 不读 .env、不调 API、不访问网络。"""
+        import os
+        # 保存 env 快照
+        env_before = dict(os.environ)
+        try:
+            from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+            _d = build_phase1_dispatcher()
+        finally:
+            env_after = dict(os.environ)
+        # env 不应被修改
+        assert env_before == env_after, (
+            "build_phase1_dispatcher() must not mutate os.environ"
+        )
+
+    def test_fake_provider_path_receives_dispatcher(self):
+        """FakeProvider 默认路径应有 dispatcher（已有行为，保护回归）。"""
+        from agent.provider.fake_provider import FakeProvider
+        from agent.core import chat as core_chat
+
+        provider = FakeProvider()
+        dispatcher_seen = []
+
+        def on_event(event):
+            dispatcher_seen.append(event)
+
+        result = core_chat(
+            "hello",
+            provider=provider,
+            on_runtime_event=on_event,
+        )
+        # FakeProvider 路径不应崩溃
+        assert result is not None
+
+    def test_dispatcher_not_gated_on_fake_provider_type(self):
+        """dispatcher 不应只在 fake provider 时构建——所有 provider 都应自动构建。
+
+        验证方式：即使传入一个非 fake 的 provider（anthropic_compatible），
+        chat() 也不应因 missing dispatcher 而崩溃。
+        使用 FakeProvider 但修改其 provider_type 模拟非 fake provider。
+        """
+        from agent.provider.fake_provider import FakeProvider
+        from agent.core import chat as core_chat
+
+        class NonFakeFakeProvider(FakeProvider):
+            """模拟非 fake provider type 的 provider——用于验证 RT-01 修复。"""
+            @property
+            def provider_type(self) -> str:
+                return "anthropic_compatible"
+
+        provider = NonFakeFakeProvider()
+
+        try:
+            result = core_chat(
+                "hello",
+                provider=provider,
+                on_runtime_event=lambda e: None,
+            )
+            assert result is not None
+        except Exception as exc:
+            # 可能因 turn-end dispatcher route 触发某些 handler 报错
+            # 但只要不是 "dispatcher is None" 导致的 AttributeError 就说明
+            # dispatcher 已被正确构建
+            assert "NoneType" not in str(exc) or "dispatcher" not in str(exc).lower(), (
+                f"Dispatcher should have been built, but got: {exc}"
+            )

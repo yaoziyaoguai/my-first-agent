@@ -777,18 +777,20 @@ def chat(
     # 拿不到运行时被 patch 的值（Python 函数默认参数在 def 时求值，仅一次）。
     # 这一行写法保证 chat() 调用时**重新**读取模块级常量。
     # Phase 1: 构建 RuntimeActionDispatcher 并通过 LoopContext 注入到 loop turn-end hook。
-    # 优先使用调用方传入的 dispatcher（dogfood/测试注入点）；其次在 provider 为 fake 时自动构建。
+    # 优先使用调用方传入的 dispatcher（dogfood/测试注入点）；否则自动构建默认 dispatcher。
+    #
+    # 中文学习边界：dispatcher 是 provider-neutral runtime logic——不调用 LLM、
+    # 不读 .env、不访问网络。RT-01 修复：所有 provider 类型统一自动构建 dispatcher，
+    # 确保 fake/real 共享同一 evidence path，不因 provider type 产生证据路径分歧。
+    #
     # 构建本身无副作用：只有 loop turn-end 时 dispatcher.route() 才被调用。
     if runtime_action_dispatcher is not None:
         _phase1_dispatcher = runtime_action_dispatcher
         _skill_registry = None
-    elif getattr(provider, "provider_type", None) == "fake":
-        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher, build_skill_registry
+    else:
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
 
         _phase1_dispatcher = build_phase1_dispatcher()
-        _skill_registry = build_skill_registry()
-    else:
-        _phase1_dispatcher = None
         _skill_registry = None
 
     _loop_ctx = _build_loop_context(

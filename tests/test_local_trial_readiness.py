@@ -650,7 +650,7 @@ def _check_secret_fragments_in_dir(
         return []
 
     secret_pattern = re.compile(
-        r"sk-[A-Za-z0-9_-]{3,}"
+        r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{3,}"
         r"|api_key.*`[^`]*[A-Za-z0-9]{3,}[^`]*`"
         r"|api_key.*:\s*'[^']+'"
     )
@@ -694,6 +694,18 @@ def _check_secret_fragments_in_dir(
     return violations
 
 
+def test_secret_fragment_lint_does_not_flag_ask_user_terms(tmp_path: Path) -> None:
+    """redaction lint 不应把普通 `ask-user` 架构术语误判成 sk-* secret。"""
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "overview.md").write_text(
+        "confirmation / ask-user boundary is a UI decision boundary\n",
+        encoding="utf-8",
+    )
+
+    assert _check_secret_fragments_in_dir(docs_dir, label="test") == []
+
+
 def test_dogfood_reports_contain_no_secret_fragments() -> None:
     """RT-06 / PF-03: dogfood report 中不得包含可逆的 secret 片段。"""
     violations = _check_secret_fragments_in_dir(
@@ -733,13 +745,35 @@ def test_audit_docs_contain_no_secret_fragments() -> None:
     )
 
 
+def test_overview_docs_contain_no_secret_fragments() -> None:
+    """PF-03: docs/00-overview/ 当前状态入口不得包含可逆 secret 片段。"""
+    violations = _check_secret_fragments_in_dir(
+        REPO_ROOT / "docs" / "00-overview", label="overview"
+    )
+    assert not violations, (
+        "docs/00-overview/ 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
+        + "\n".join(violations)
+    )
+
+
+def test_current_audit_status_is_marked_historical() -> None:
+    """旧 Current Audit Status 必须显式指向新的当前能力状态入口。"""
+    current_audit_status = REPO_ROOT / "docs" / "06-audit" / "CURRENT_AUDIT_STATUS.zh.md"
+    text = current_audit_status.read_text(encoding="utf-8")
+    opening = "\n".join(text.splitlines()[:8])
+
+    assert "Historical status notice" in opening
+    assert "../00-overview/CURRENT_CAPABILITY_STATUS.zh.md" in opening
+    assert "../audit/capability-gap-audit-low-complexity-2026-05-25.md" in opening
+
+
 def test_docs_readme_contain_no_secret_fragments() -> None:
     """PF-03: docs/README*.md 中不得包含可逆的 secret 片段。
 
     redaction lint 扩展：README 文件也被纳入扫描范围。
     """
     secret_pattern = re.compile(
-        r"sk-[A-Za-z0-9_-]{3,}"
+        r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{3,}"
         r"|api_key.*`[^`]*[A-Za-z0-9]{3,}[^`]*`"
     )
     safe_markers = (

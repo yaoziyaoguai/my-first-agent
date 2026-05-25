@@ -443,7 +443,15 @@ def chat(
     #
     # 提取后的职责分工：
     # - agent/cli_commands.py：detect 函数（纯字符串匹配）+ render 函数（纯格式化）
+    #   + CommandIntent typed classification（RT-02）
     # - agent/core.py：服务调用（memory_runtime、SubAgentRegistry）+ 渲染委托
+    #
+    # RT-02 architecture boundary（2026-05-25）:
+    # 以下所有 CLI meta-command 快捷路径都是 CLI-ONLY / DEMO-ONLY。
+    # 它们通过提前 return 绕过 loop.py/dispatcher/evidence path——
+    # 这不是第二条 runtime，但明确不是产品主路径。
+    # 当产品需要这些能力时，应通过 typed command/use-case layer 迁入
+    # 统一 runtime flow，而不是继续扩展这里的 if/return 块。
     #
     # 这不是第二条 runtime——所有命令仍通过 core.chat() 进入。
     # 后续新增 CLI 命令应在 cli_commands.py 新增 detect/render 函数，
@@ -452,6 +460,8 @@ def chat(
     # ── Memory management CLI commands ──────────────────────────────────────
     # 检测由 agent/cli_commands 完成（纯字符串匹配）；服务调用（memory_runtime）
     # 留在 core.chat 内，不经过 command router。渲染由 cli_commands 的 render 函数完成。
+    #
+    # CLI-ONLY (CommandCategory.READ_ONLY): show memories
     if _looks_like_show_memories(user_input):
         records = _memory_runtime.list_records()
         _safe_emit_runtime_event(
@@ -463,6 +473,10 @@ def chat(
 
     # WP-A：forget / 忘记记忆 CLI meta-command。
     # 直接匹配 store 中 record content 并移除，不经过 policy → confirmation 管线。
+    #
+    # CLI-ONLY (CommandCategory.MUTATING): forget memory — 注意此命令直接操作
+    # memory store，绕过 confirmation policy。产品路径下应通过 MEMORY_PROPOSE
+    # → confirmation → retain 管线执行，而非此快捷方式。
     forget_keyword = _looks_like_forget_memory(user_input)
     if forget_keyword:
         # 支持按 ID 删除：forget id:<record_id>（精确匹配 + 短 ID 前缀匹配）
@@ -549,6 +563,10 @@ def chat(
 
     # show subagents CLI meta-command：检测 → registry lookup → 渲染。
     # 渲染由 cli_commands.render_subagent_list 完成。
+    #
+    # CLI-ONLY (CommandCategory.READ_ONLY): show subagents
+    # 注意：当前使用 tests/fixtures/subagents 作为默认 registry root——
+    # 这是 demo-only 行为（RT-07），产品路径不应依赖 test fixtures。
     if _looks_like_show_subagents(user_input):
         from pathlib import Path
         from agent.subagent_system.registry import SubAgentRegistry
@@ -568,6 +586,8 @@ def chat(
 
     # delegate to subagent CLI meta-command：检测 → 委托执行 → 渲染。
     # 检测由 cli_commands 完成；_execute_subagent_delegation() 执行委托。
+    #
+    # CLI-ONLY (CommandCategory.DELEGATING): delegate to subagent
     delegate_match = _looks_like_delegate_to_subagent(user_input)
     if delegate_match:
         subagent_name, task = delegate_match
@@ -592,6 +612,10 @@ def chat(
     # Issue 2: Natural-language SubAgent delegation fixture。
     # 用户无需记忆 CLI 语法即可委托子代理——"帮我统计 demo workspace"
     # 等自然语言触发 demo-stat。这是 deterministic 关键词匹配，不调 LLM。
+    #
+    # DEMO-ONLY (CommandCategory.DELEGATING): NL delegation fixture
+    # 这是 demo fixture，不是产品级 NL 理解。产品路径下 SubAgent delegation
+    # 应通过 agent-level planner/confirmation 管线，而非关键词匹配。
     nl_delegation = _looks_like_nl_delegation(user_input)
     if nl_delegation:
         subagent_name, task = nl_delegation

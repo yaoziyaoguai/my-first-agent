@@ -22,6 +22,40 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CommandIntent: typed command classification（RT-02 remediation）
+# ═══════════════════════════════════════════════════════════════════════════
+# 中文学习边界：CommandIntent 是纯数据结构——它只描述命令的**意图**，不执行任何
+# 副作用。core.chat() 读取 intent 后决定如何分派，但分派逻辑仍然在 core.chat()
+# 内通过现有服务调用完成。这不是新 runtime，只是让原本散落的 if/return 块有
+# 了可测试、可审计的类型标签。
+#
+# architecture boundary:
+# - READ_ONLY: 只读命令，不产生 IO 副作用（show memories/list/help）
+# - MUTATING: 有副作用但仅限 memory store（forget memory）
+# - DELEGATING: 委托子代理执行（可能产生 filesystem/IO 副作用）
+
+
+class CommandCategory:
+    """CLI 命令分类——描述副作用级别，不描述实现。"""
+    READ_ONLY = "read_only"
+    MUTATING = "mutating"
+    DELEGATING = "delegating"
+
+
+@dataclass(frozen=True)
+class CommandIntent:
+    """typed command intent——core.chat() 消费此结构决定分派路径。
+
+    这不是 runtime action，不经过 dispatcher。它是 CLI meta-command 层的
+    分类标签，帮助 core.chat() 在统一入口处明确每个快捷命令的副作用级别。
+    """
+    category: str
+    label: str  # 人类可读的命令名，用于 logging/debug
+
 
 # ========== Detection functions（纯字符串匹配，无副作用） ==========
 

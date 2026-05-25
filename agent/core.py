@@ -44,9 +44,11 @@ from agent.prompt_builder import build_system_prompt
 from agent.state import create_agent_state, task_status_requires_plan
 import agent.tools  # noqa: F401  触发所有工具注册
 from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
+# ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
-# 这里保留兼容别名，使现有测试（test_subagent_user_facing 等）无需修改 import。
-from agent.cli_commands import (  # noqa: F401  — re-export for backward compatibility
+# 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
+# 保留 1 个版本周期（至 v0.4+）后可移除这些 re-export。
+from agent.cli_commands import (  # noqa: F401  — deprecated backward-compat re-exports
     detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
     detect_forget_memory as _looks_like_forget_memory,
     detect_nl_delegation as _looks_like_nl_delegation,

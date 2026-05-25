@@ -1,8 +1,12 @@
-"""Compatibility adapters around ModelProvider.
+"""⛔ DEPRECATED — Compatibility adapters around ModelProvider.
 
 core/planner/memory compression 仍有少量历史代码期待 `client.messages.create`
-形状。本模块提供薄 adapter，把这些调用转发到 provider.create()，避免 core.py
+形状。本模块提供薄 facade，把这些调用转发到 provider.create()，避免 core.py
 继续直接创建 Anthropic SDK client。它不读取配置、不持有 secret 明文。
+
+**Deprecation plan**：ProviderBackedClient / ProviderBackedMessages 的价值随
+planner/compress 迁移到 provider-neutral create() 而递减。保留 1 个版本周期
+（至 v0.4+）作为 facade；新代码直接使用 provider.create()，不要再通过本模块。
 """
 
 from __future__ import annotations

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Phase 6 — Real LLM Consolidation Dogfood 脚本。
+"""⛔ DEFERRED/EXPERIMENTAL — Phase 6 Real LLM Consolidation Dogfood 脚本。
+
+Memory Consolidation pipeline 的 business operation / real LLM consolidation 已
+deferred（参见全局审计文档 F4/F17）。本脚本依赖真实 LLM，当前仅作为实验性参考
+保留，不是 active dogfood path。执行需要显式 opt-in env var。
 
 安全约束：
 - 只使用 synthetic episodic evidence（不读真实 sessions/runs/agent_log）

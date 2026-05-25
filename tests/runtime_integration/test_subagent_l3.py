@@ -17,6 +17,7 @@ SubAgentDelegateL0Handler 在 empty registry 下必然 rejected（没有 subagen
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agent.runtime_integration import (
@@ -195,3 +196,187 @@ class TestNoRealAPIOrEnv:
         assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
         # SubAgentRegistry 空 roots → 不扫描任何目录
         assert evidence.get("runtime_loop_invoked") is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# T3: Non-empty registry → business delegation success (L3)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _build_nonempty_subagent_dispatcher():
+    """构建真实生产级 dispatcher——SubAgentRegistry 非空，与 phase1_hook.py 一致。
+
+    phase1_hook.py:114 使用 SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])，
+    本 helper 复现同一配置。handler 的非空 registry 分支（subagent_action.py:59-125）
+    可走通完整业务委托路径。
+    """
+    registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+    handler = SubAgentDelegateL0Handler(registry=registry)
+
+    action_registry = ActionHandlerRegistry()
+    action_registry.register(RuntimeActionType.SUBAGENT_DELEGATE_L0, handler)
+    return RuntimeActionDispatcher(
+        registry=action_registry, observer=RuntimeActionModuleObserver()
+    )
+
+
+class TestSubAgentDelegateL0NonEmptyRegistryBusinessL3:
+    """Non-empty SubAgentRegistry → 完整业务委托 L3 验证。
+
+    现有 T1/T2 仅覆盖空 registry 的 rejected 路径（dispatch path verified）。
+    本测试补齐 non-empty registry 的 business operation verified 路径——
+    验证 descriptor lookup → validation → SubAgentRequest 构建 → delegate_once
+    → success 的完整业务链。
+    """
+
+    def test_t3_nonempty_registry_delegation_success_l3(self):
+        """T3: Non-empty registry + 合规 payload → delegate_once 成功执行。
+
+        构造 RuntimeActionRequest 携带 subagent_name="demo-stat"、
+        delegation_goal="count files in workspace"、allowed_tools=["read_file"]、
+        parent_adjudication_required=True，经 route_from_runtime_loop() dispatch 后：
+
+        - status="success"
+        - evidence_level=L3
+        - delegate_once_called=True
+        - subagent_request_built=True
+        - execution_result 非空
+        """
+        dispatcher = _build_nonempty_subagent_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+            source="core_loop",
+            parent_trace_id="test-t3",
+            payload={
+                "subagent_name": "demo-stat",
+                "delegation_goal": "count files in workspace",
+                "allowed_tools": ["read_file"],
+                "parent_adjudication_required": True,
+                "budget": {"max_iterations": 1},
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        # 业务委托成功
+        assert result.status == "success", (
+            f"non-empty registry + 合规 payload → status 应为 'success'，"
+            f"实际 {result.status!r}，error_safe_preview={result.error_safe_preview!r}"
+        )
+
+        # L3 evidence
+        evidence = dict(result.evidence)
+        assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E, (
+            f"non-empty registry 业务委托应达到 {REAL_CORE_LOOP_RUNTIME_E2E}，"
+            f"实际 {evidence.get('evidence_level')!r}"
+        )
+        assert evidence.get("dispatcher_origin") == "runtime_loop"
+        assert evidence.get("runtime_loop_invoked") is True
+
+        # 业务操作证据
+        payload = dict(result.payload)
+        assert payload.get("delegate_once_called") is True, (
+            "non-empty registry 业务委托应实际调用 delegate_once"
+        )
+        assert payload.get("subagent_request_built") is True
+        assert payload.get("subagent_name") == "demo-stat"
+        assert payload.get("no_nested_delegation") is True
+        assert payload.get("no_shell_or_external_process") is True
+        assert payload.get("parent_adjudicated") is True
+
+        execution_result = str(payload.get("execution_result") or "")
+        assert len(execution_result) > 0, (
+            "delegate_once 成功后 execution_result 应非空"
+        )
+
+    def test_t4_nonempty_registry_rejects_unregistered_subagent(self):
+        """T4: Non-empty registry + 未注册 subagent → rejected disposition。
+
+        验证 handler 对未注册 subagent 返回 rejected（而非 crash），
+        evidence chain 仍然完整。
+        """
+        dispatcher = _build_nonempty_subagent_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+            source="core_loop",
+            parent_trace_id="test-t4",
+            payload={
+                "subagent_name": "nonexistent-subagent",
+                "delegation_goal": "do something",
+                "allowed_tools": ["read_file"],
+                "parent_adjudication_required": True,
+                "budget": {"max_iterations": 1},
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        # _reject() 不经过 invoke_registered_target（observed_call=None），
+        # evidence 不声称 L3——这是正确的：unregistered subagent 不触发
+        # target module invocation，不应声称 full闭环。
+        assert result.status == "rejected", (
+            f"未注册 subagent → status 应为 'rejected'，实际 {result.status!r}"
+        )
+
+        payload = dict(result.payload)
+        assert payload.get("delegate_once_called") is False
+        assert "not registered" in str(payload.get("adjudication_reason") or "")
+
+    def test_t5_nonempty_registry_rejects_shell_tool(self):
+        """T5: Non-empty registry + shell tool 请求 → rejected（安全门）。
+
+        demo-stat 的 allowed_tools 不含 shell，且 handler 有显式 shell 阻断。
+        """
+        dispatcher = _build_nonempty_subagent_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+            source="core_loop",
+            parent_trace_id="test-t5",
+            payload={
+                "subagent_name": "demo-stat",
+                "delegation_goal": "list files via shell",
+                "allowed_tools": ["shell"],
+                "parent_adjudication_required": True,
+                "budget": {"max_iterations": 1},
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        # shell tool 被阻断
+        assert result.status == "rejected", (
+            f"shell tool 请求应被 rejected，实际 {result.status!r}"
+        )
+        payload = dict(result.payload)
+        assert payload.get("delegate_once_called") is False
+
+    def test_t6_nonempty_registry_requires_parent_adjudication(self):
+        """T6: parent_adjudication_required=False → rejected。
+
+        handler 强制要求 parent_adjudication_required=True（subagent_action.py:74-75）。
+        """
+        dispatcher = _build_nonempty_subagent_dispatcher()
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+            source="core_loop",
+            parent_trace_id="test-t6",
+            payload={
+                "subagent_name": "demo-stat",
+                "delegation_goal": "count files",
+                "allowed_tools": ["read_file"],
+                "parent_adjudication_required": False,
+                "budget": {"max_iterations": 1},
+            },
+        )
+
+        result = dispatcher.route_from_runtime_loop(request)
+
+        assert result.status == "rejected", (
+            f"parent_adjudication_required=False 应被 rejected，实际 {result.status!r}"
+        )
+        payload = dict(result.payload)
+        assert "adjudication" in str(payload.get("adjudication_reason") or "").lower()

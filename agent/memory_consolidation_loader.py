@@ -3,6 +3,9 @@
 只读地从 filesystem memory store 装载 episodic records，转换为 detector 需要
 的 EpisodicEvidence 列表。不运行 detector、不写 store、不接 runtime、不调 LLM。
 
+⛔ FROZEN (2026-05-25): 该模块属于 frozen consolidation pipeline。
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
+
 RFC 参考：
 - §15.4 Phase 6 — Consolidation
 - §6.1 consolidation lifecycle — 输入是 episodic records

@@ -3,6 +3,10 @@
 将 ConsolidationCandidate 转换为 T1 pending proposal JSON 并写入 _pending/ 目录，
 复用现有 Phase 5a pending review CLI 的 accept/reject/edit/skip 流程。
 
+⛔ FROZEN (2026-05-25): 该模块属于 frozen consolidation pipeline。
+   不允许新增 reviewer 逻辑或自动 approve 路径。
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
+
 架构边界（RFC §15.4, §6.4, §D.1）：
 - 只做 ConsolidationCandidate → _pending/ JSON 的 thin dispatch
 - 不写正式 memory store — 写入只在 human accept 后发生（memory_review.py）

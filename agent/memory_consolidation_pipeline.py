@@ -4,6 +4,10 @@
 返回结构化的 ConsolidationPipelineResult。不写 store、不接 runtime、
 不接 T1 pending review CLI（dispatch 在 memory_consolidation_review.py）。
 
+⛔ FROZEN (2026-05-25): 该模块属于 frozen consolidation pipeline。
+   业务操作 deferred；dispatch path only；不允许继续增强。
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
+
 RFC 参考：
 - §15.4 Phase 6 — Consolidation
 - §6.1 consolidation lifecycle — episodic → semantic

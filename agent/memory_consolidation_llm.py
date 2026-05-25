@@ -3,6 +3,11 @@
 只做 content / evidence_summary 增强，不决定 governance、不写 store、
 不 auto-approve、不改变 consolidation_type 或 confidence。
 
+⛔ FROZEN (2026-05-25): 该模块属于 frozen consolidation pipeline。
+   LLM 增强默认关闭 (MEMORY_CONSOLIDATION_LLM_ENABLED=true 才启用)。
+   不允许继续增强 LLM 路径或新增 consolidation 逻辑。
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
+
 架构边界（RFC §15.4, §6.4, §D.1）：
 - 输入: ConsolidationCandidate draft（来自 deterministic detector）+ 对应 evidence group
 - 输出: ConsolidationCandidate（content/evidence_summary 增强）

@@ -9,6 +9,13 @@ ConsolidationCandidate 是 consolidation engine 的输出候选，
 - runtime integration / session hook
 - store 写入
 - 真实 LLM 调用
+
+⛔ FROZEN (2026-05-25): Memory Consolidation pipeline 整体冻结。
+   - dispatch path / handler path 已验证（通过 L3 tests）
+   - business operation / real LLM consolidation DEFERRED
+   - 不允许继续增强，除非另开 Architecture Decision
+   - 该冻结标签覆盖全部 6 个 consolidation 模块
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
 """
 
 from __future__ import annotations

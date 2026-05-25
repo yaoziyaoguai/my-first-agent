@@ -3,6 +3,10 @@
 实现 episodic → semantic 沉淀的确定性模式检测器。
 基于简单关键词分组 + token overlap 相似度，不调 LLM、不做 embedding。
 
+⛔ FROZEN (2026-05-25): 该模块属于 frozen consolidation pipeline。
+   不允许新增 detection pattern、合并策略或业务操作逻辑。
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F4
+
 RFC 参考：
 - §6.3: consolidation operation types (pattern_detection, merge, abstraction)
 - §D.1: 沉淀必要条件 (repetition N≥3, stability, evidence chain, confidence accumulation)

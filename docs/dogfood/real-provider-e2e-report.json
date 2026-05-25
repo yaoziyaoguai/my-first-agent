@@ -10,7 +10,7 @@
       "real_response": true,
       "run_summary": true,
       "tool_triggered": false,
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 你好！我是一名智能助手，能够帮你完成写作、编程、文件处理、数据分析等任务，有什么可以帮你的吗？ 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
+      "output_preview": "[系统] 未生成多步计划，按单步处理。 你好！我是一名通用AI助手，能够理解你的真实需求，通过分析和推理，帮助你高效、可靠地完成任务。 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
       "note": "普通对话应返回真实回复，不触发工具"
     },
     {
@@ -29,7 +29,7 @@
         "assistant.delta",
         "run.summary"
       ],
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 🔧 正在规划工具调用... 执行完成。 根据工具返回的结果，这是一个 **First Agent 本地 demo 任务**：\n\n- **Provider**: fake\n- **无外部 API 调用**\n- **无网络访问**\n- **无私人数据读取**\n- 本工具通过完整的 `TOOL_GATE → TOOL_INVOKE → TOOL_RESULT` 管",
+      "output_preview": "[系统] 未生成多步计划，按单步处理。 🔧 正在规划工具调用... 执行完成。 已调用工具完成。工具返回结果如下：\n\n**任务摘要**：这是一个 First Agent 本地 demo 任务。provider=fake，无外部 API 调用，无网络访问，无私人数据读取。本工具通过完整的 TOOL_GATE → TOOL_INVOKE → TOOL_RESULT 管线执行。 本轮运行摘要\n  循环次",
       "note": "tool_req=True, result=True, confirm=False"
     },
     {
@@ -49,7 +49,7 @@
       "status": "PASS",
       "tool_triggered": false,
       "run_summary": true,
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 是啊，天气好的时候出门走走确实很舒服！无论是去公园散步、骑自行车，还是找个咖啡馆坐一会儿，都是不错的选择。祝你今天有个愉快的心情！😊 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
+      "output_preview": "[系统] 未生成多步计划，按单步处理。 是啊，好天气确实让人心情愉悦！适合户外走走，晒晒太阳，放松身心。你打算去哪里逛逛呢？ 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
       "note": "闲聊不应触发工具"
     }
   ],

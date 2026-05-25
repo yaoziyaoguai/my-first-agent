@@ -21,6 +21,14 @@
 2. [Test Matrix](05-testing-dogfood/TEST_MATRIX.zh.md)
 3. [Current Audit Status](06-audit/CURRENT_AUDIT_STATUS.zh.md)
 
+### 了解当前阶段和下一步行动
+
+1. [全局 Red-Team 审计（权威源）](audit/global-red-team-product-architecture-audit-2026-05-25.md) — 当前所有行动的唯一定义源
+2. [Red-Team Remediation Plan](plans/global-red-team-remediation-plan-2026-05-25.md) — RT-01 到 RT-18 修复执行计划
+3. [审计文档索引](audit/README.md) — active vs historical 审计分类
+4. [计划文档索引](plans/README.md) — active vs historical 计划分类
+5. [Dogfood 报告索引](dogfood/README.md) — active vs historical dogfood 分类
+
 ### 做架构或实现审计
 
 - Memory canonical spec: [docs/rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md)

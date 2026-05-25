@@ -57,6 +57,40 @@ class CommandIntent:
     label: str  # 人类可读的命令名，用于 logging/debug
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Known Command Shortcuts Allowlist（PF-02 freeze boundary）
+# ═══════════════════════════════════════════════════════════════════════════
+# 中文学习边界：这是 CLI meta-command 的 freeze/allowlist。
+# 当前所有 CLI 快捷命令都必须在此注册。新增 command shortcut 必须先走
+# Architecture Decision——这不是 runtime enforcement，而是工程纪律约束。
+# 新增 detect 函数但不更新此 allowlist 会导致 focused test 失败，
+# 从而在 code review 阶段拦截。
+#
+# architecture boundary:
+# - 这些是 CLI-only / DEMO-ONLY transitional affordances
+# - 不经过 dispatcher / evidence path / Tool Pipeline
+# - future: 迁入 typed command/use-case layer → dispatcher → runtime flow
+# - removal criteria: 当对应的 unified runtime path 完全替代此 shortcut 后移除
+# - sunset: v0.4+ 开始逐步将 MUTATING/DELEGATING shortcuts 迁入 dispatcher
+
+KNOWN_COMMAND_SHORTCUTS: frozenset[str] = frozenset({
+    "detect_show_memories",
+    "detect_forget_memory",
+    "detect_show_subagents",
+    "detect_delegate_to_subagent",
+    "detect_nl_delegation",
+})
+
+
+def get_known_command_shortcuts() -> frozenset[str]:
+    """返回当前已注册的 CLI command shortcut 名称集合。
+
+    供 characterization tests 验证 allowlist 完整性。
+    新增 shortcut 必须先更新 KNOWN_COMMAND_SHORTCUTS，否则测试失败。
+    """
+    return KNOWN_COMMAND_SHORTCUTS
+
+
 # ========== Detection functions（纯字符串匹配，无副作用） ==========
 
 def detect_show_memories(text: str) -> bool:

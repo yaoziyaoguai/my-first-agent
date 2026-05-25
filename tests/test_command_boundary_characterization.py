@@ -183,3 +183,75 @@ class TestCommandShortcutsPreserved:
         result = detect_nl_delegation("帮我统计 demo workspace")
         assert result is not None
         assert result[0] == "demo-stat"
+
+
+class TestCommandShortcutAllowlist:
+    """PF-02: command shortcut freeze/allowlist 的 characterization tests。
+
+    新增 shortcut 必须先走 Architecture Decision 并更新 KNOWN_COMMAND_SHORTCUTS，
+    否则这些测试会失败。这是工程纪律约束，不是 runtime enforcement。
+    """
+
+    def test_allowlist_covers_all_detect_functions(self):
+        """KNOWN_COMMAND_SHORTCUTS 必须覆盖 cli_commands.py 中所有 detect_* 函数。"""
+        import agent.cli_commands as cli_mod
+
+        known = cli_mod.get_known_command_shortcuts()
+        # 反射获取所有 detect_ 前缀的函数
+        actual_detect_fns = {
+            name for name in dir(cli_mod)
+            if name.startswith("detect_") and callable(getattr(cli_mod, name))
+        }
+
+        # allowlist 中不应有已删除的函数
+        extra_in_allowlist = known - actual_detect_fns
+        assert not extra_in_allowlist, (
+            f"KNOWN_COMMAND_SHORTCUTS 包含不存在的 detect 函数: {extra_in_allowlist}"
+        )
+
+        # 所有 detect 函数都必须在 allowlist 中
+        missing_from_allowlist = actual_detect_fns - known
+        assert not missing_from_allowlist, (
+            f"新增 detect 函数未注册到 KNOWN_COMMAND_SHORTCUTS: {missing_from_allowlist}\n"
+            f"新增 command shortcut 必须先走 Architecture Decision。"
+        )
+
+    def test_allowlist_size_matches_expected(self):
+        """allowlist 大小应与预期一致——防止意外增删。"""
+        from agent.cli_commands import get_known_command_shortcuts
+
+        known = get_known_command_shortcuts()
+        # 当前恰好 5 个 detect 函数
+        assert len(known) == 5, (
+            f"Expected 5 known shortcuts, got {len(known)}: {sorted(known)}"
+        )
+
+    def test_each_allowlist_entry_is_detect_function(self):
+        """allowlist 中每项都应对应一个可调用的 detect_* 函数。"""
+        import agent.cli_commands as cli_mod
+
+        known = cli_mod.get_known_command_shortcuts()
+        for name in known:
+            fn = getattr(cli_mod, name, None)
+            assert fn is not None, f"{name} not found in cli_commands"
+            assert callable(fn), f"{name} is not callable"
+
+    def test_allowlist_prevents_accidental_new_shortcuts(self):
+        """如果有人新增 detect_* 函数但不更新 allowlist，此测试失败。
+
+        这是 freeze boundary 的核心防护：新增 shortcut 必须显式更新 allowlist，
+        从而在 code review 阶段被拦截。
+        """
+        import agent.cli_commands as cli_mod
+
+        known = cli_mod.get_known_command_shortcuts()
+        all_names = set(dir(cli_mod))
+        detect_fns = {n for n in all_names if n.startswith("detect_") and callable(getattr(cli_mod, n))}
+
+        unregistered = detect_fns - known
+        assert not unregistered, (
+            f"UNREGISTERED COMMAND SHORTCUT DETECTED: {unregistered}\n"
+            f"新增 command shortcut 必须先走 Architecture Decision，\n"
+            f"然后在 agent/cli_commands.py 的 KNOWN_COMMAND_SHORTCUTS 中注册。\n"
+            f"这防止 command shortcuts 在无审查的情况下膨胀为第二 capability runtime。"
+        )

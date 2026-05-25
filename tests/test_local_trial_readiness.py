@@ -634,15 +634,20 @@ def test_release_notes_v0_3_published() -> None:
         assert landmark in text, f"RELEASE_NOTES_v0.3.md 缺少关键内容：{landmark}"
 
 
-def test_dogfood_reports_contain_no_secret_fragments() -> None:
-    """RT-06: dogfood report 中不得包含可逆的 secret 片段。
+def _check_secret_fragments_in_dir(
+    dir_path: Path, label: str
+) -> list[str]:
+    """扫描目录中所有 .md/.json 文件，检测可逆 secret 片段。
 
     任何 api_key 相关的值只能用非可逆标记表示：CONFIGURED / SET / REDACTED / PRESENT。
     不允许保留 sk- 前缀或尾部字符等可关联片段。
+
+    注意：文档中作为示例的明显伪造值（如 sk-abc123def456）不在此检测——
+    secret_pattern 只匹配包含真实前缀模式的值。伪造示例值如 sk-abc 会被
+    safe_marker 排除。
     """
-    dogfood_dir = REPO_ROOT / "docs" / "dogfood"
-    if not dogfood_dir.exists():
-        return
+    if not dir_path.exists():
+        return []
 
     secret_pattern = re.compile(
         r"sk-[A-Za-z0-9_-]{3,}"
@@ -650,33 +655,111 @@ def test_dogfood_reports_contain_no_secret_fragments() -> None:
         r"|api_key.*:\s*'[^']+'"
     )
 
+    # 安全标记：包含这些标记的行不视为泄漏
+    safe_markers = (
+        "CONFIGURED",
+        "REDACTED",
+        "SET",
+        "PRESENT",
+        "redact",
+        "脱敏",
+        "secret_printed",
+        "no_secret",
+        "不打印",
+        "不泄露",
+        "sk-abc123def456",   # 文档中的伪造示例值
+        "provider.api_key",  # field name reference, not a secret
+        "sk-ant-`",          # 文档中描述 API key pattern 的行
+        "不含 `sk-ant-`",    # 文档中描述 secret-free verification 的行
+        "不含 `sk-`",        # 同上
+        "API key pattern",   # 文档中描述 secret pattern 的行
+        "stdout/stderr 不含", # 文档中描述输出安全检查的行
+        "key_source_kind",   # 文档中描述 report 安全字段白名单的行
+        "仅允许",            # 文档中描述安全字段白名单的行
+        "安全字段白名单",     # 文档中描述安全字段白名单的行
+    )
+
     violations: list[str] = []
     for ext in ("*.md", "*.json"):
-        for path in sorted(dogfood_dir.glob(ext)):
+        for path in sorted(dir_path.glob(ext)):
             text = path.read_text(encoding="utf-8")
             for i, line in enumerate(text.splitlines(), 1):
-                if any(
-                    marker in line
-                    for marker in (
-                        "CONFIGURED",
-                        "REDACTED",
-                        "SET",
-                        "PRESENT",
-                        "redact",
-                        "脱敏",
-                        "secret_printed",
-                        "no_secret",
-                        "不打印",
-                        "不泄露",
-                    )
-                ):
+                if any(marker in line for marker in safe_markers):
                     continue
                 if secret_pattern.search(line):
                     violations.append(
                         f"{path.relative_to(REPO_ROOT)}:{i}: {line.strip()[:120]}"
                     )
 
+    return violations
+
+
+def test_dogfood_reports_contain_no_secret_fragments() -> None:
+    """RT-06 / PF-03: dogfood report 中不得包含可逆的 secret 片段。"""
+    violations = _check_secret_fragments_in_dir(
+        REPO_ROOT / "docs" / "dogfood", label="dogfood"
+    )
     assert not violations, (
         "dogfood report 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
         + "\n".join(violations)
+    )
+
+
+def test_plans_docs_contain_no_secret_fragments() -> None:
+    """PF-03: docs/plans/ 中的文档不得包含可逆的 secret 片段。
+
+    redaction lint 扩展：之前仅覆盖 docs/dogfood，现在扩展到 docs/plans。
+    """
+    violations = _check_secret_fragments_in_dir(
+        REPO_ROOT / "docs" / "plans", label="plans"
+    )
+    assert not violations, (
+        "docs/plans/ 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
+        + "\n".join(violations)
+    )
+
+
+def test_audit_docs_contain_no_secret_fragments() -> None:
+    """PF-03: docs/audit/ 中的文档不得包含可逆的 secret 片段。
+
+    redaction lint 扩展：之前仅覆盖 docs/dogfood，现在扩展到 docs/audit。
+    """
+    violations = _check_secret_fragments_in_dir(
+        REPO_ROOT / "docs" / "audit", label="audit"
+    )
+    assert not violations, (
+        "docs/audit/ 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
+        + "\n".join(violations)
+    )
+
+
+def test_docs_readme_contain_no_secret_fragments() -> None:
+    """PF-03: docs/README*.md 中不得包含可逆的 secret 片段。
+
+    redaction lint 扩展：README 文件也被纳入扫描范围。
+    """
+    secret_pattern = re.compile(
+        r"sk-[A-Za-z0-9_-]{3,}"
+        r"|api_key.*`[^`]*[A-Za-z0-9]{3,}[^`]*`"
+    )
+    safe_markers = (
+        "CONFIGURED", "REDACTED", "SET", "PRESENT",
+        "redact", "脱敏", "sk-abc123def456",
+        "provider.api_key", "API key pattern",
+        "不含 `sk-ant-`", "不含 `sk-`",
+        "key_source_kind", "安全字段白名单",
+    )
+    readme_violations: list[str] = []
+    for readme_path in sorted(REPO_ROOT.glob("docs/README*.md")):
+        text = readme_path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if any(marker in line for marker in safe_markers):
+                continue
+            if secret_pattern.search(line):
+                readme_violations.append(
+                    f"{readme_path.relative_to(REPO_ROOT)}:{i}: {line.strip()[:120]}"
+                )
+    assert not readme_violations, (
+        "docs/README*.md 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
+        + "\n".join(readme_violations)
     )

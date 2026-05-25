@@ -186,6 +186,83 @@ class TestMemoryRecallInjection:
         snapshot = runtime.snapshot_for_prompt()
         assert len(snapshot.items) >= 1
 
+    def test_memory_injected_event_reaches_user_through_chat_sink(self):
+        """core.chat() → memory.injected event → sink 完整链路验证。
+
+        当 _memory_runtime 中有已批准记录时，chat() 在 pre-loop 阶段
+        (refresh_runtime_system_prompt 之后) 发射 memory.injected 事件，
+        包含"已加载记忆：N 条"用户可见文案。
+
+        架构依据：core.py L693-702 的 Memory Kernel v1 通知逻辑。
+        此前 audit Issue 4 报告"Memory recall 无用户可见性"，实际代码已
+        实现该通知——本测试钉死这一行为，防止回归。
+        """
+        import agent.tools  # noqa: F401
+        from unittest.mock import MagicMock, patch
+        from agent.core import chat
+        from agent.display_events import RuntimeEvent
+        from agent.memory_contracts import (
+            MemoryScope,
+            MemorySnapshot,
+            MemorySnapshotItem,
+        )
+        from agent.memory_runtime import MemoryEvaluationAction, MemoryEvaluationResult
+        from agent.provider.fake_provider import FakeProvider
+
+        # 构造包含两条记忆的 MemorySnapshot
+        snapshot = MemorySnapshot(
+            items=(
+                MemorySnapshotItem(
+                    content="用户偏好简洁回答",
+                    scope=MemoryScope.USER,
+                    provenance="test:fixture",
+                    selection_reason="deterministic baseline",
+                ),
+                MemorySnapshotItem(
+                    content="用户是数据工程师",
+                    scope=MemoryScope.USER,
+                    provenance="test:fixture",
+                    selection_reason="deterministic baseline",
+                ),
+            ),
+            selection_reason="deterministic baseline",
+        )
+
+        mock_runtime = MagicMock()
+        mock_runtime.evaluate_user_text.return_value = MemoryEvaluationResult(
+            action=MemoryEvaluationAction.NO_OP,
+        )
+        mock_runtime.snapshot_for_prompt.return_value = snapshot
+
+        events: list[RuntimeEvent] = []
+
+        def sink(e: RuntimeEvent) -> None:
+            events.append(e)
+
+        with patch("agent.core._memory_runtime", mock_runtime):
+            chat("hello", provider=FakeProvider(), on_runtime_event=sink)
+
+        event_types = [getattr(e, "event_type", None) for e in events]
+        memory_injected = [
+            e for e in events
+            if getattr(e, "event_type", None) == "memory.injected"
+        ]
+        assert len(memory_injected) >= 1, (
+            f"chat() 应在 pre-loop 阶段发射 memory.injected 事件，"
+            f"实际 event_types={event_types}"
+        )
+
+        injected = memory_injected[0]
+        assert "已加载记忆" in injected.text, (
+            f"memory.injected 事件文本应包含'已加载记忆'，实际 text={injected.text!r}"
+        )
+        assert "2 条" in injected.text, (
+            f"memory.injected 事件文本应包含记忆条数 2，实际 text={injected.text!r}"
+        )
+        assert injected.metadata.get("item_count") == 2, (
+            f"metadata.item_count 应为 2，实际 {injected.metadata}"
+        )
+
 
 class TestMemoryForgetFlow:
     """验证 'forget X' / '忘记 X' 的 policy 检测正确。

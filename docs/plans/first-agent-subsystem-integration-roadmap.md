@@ -46,7 +46,7 @@ query/event
 | **Context Build** | `agent/context_builder.py`, `agent/prompt_builder.py`, `agent/context.py` | 散见于各 spec | 集成在主流程中 | context injection（含 memory snapshot）经 core.chat() 验证 |
 | **Session/Trace/Evidence** | `agent/session.py`, `agent/local_trace.py`, `agent/runtime_events.py`, `agent/runtime_observer.py`, `agent/runtime_integration/evidence.py` | `docs/LOCAL_TRACE_FOUNDATION.md`, `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | runtime trace path verified（非 RuntimeActionDispatcher evidence 模型） | evidence.py 提供 catalog-owned adapters（RuntimeActionDispatcher evidence 模型）；overclaim 防护已覆盖全部 12 个 catalog targets；local trace 通过 `on_trace_event` sink 接入 runtime loop，emit TraceEvent，不经过 RuntimeActionDispatcher evidence 模型——不使用 "L3" 标签，应使用 "runtime trace path verified" |
 | **Dispatcher** | `agent/runtime_integration/dispatcher.py`, `agent/runtime_integration/schema.py`, `agent/runtime_integration/phase1_hook.py` | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 基础设施 | route() 和 route_from_runtime_loop() 双入口；phase1_hook 连接 loop 与 dispatcher；8 个 handler 已注册（含 MEMORY_CONSOLIDATE） |
-| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py`, `agent/model_call.py` | `docs/specs/streaming-l3/`, `docs/implementation-notes/streaming-l3.md` | L3 evidence path verified | STREAMING_PROVIDER_CALL RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → model call / streaming events bridge；STREAMING_EVENT RuntimeActionType 为 reserved catalog entry / inactive（无 handler、无 dispatch wiring、unused descriptor）；full user-visible streaming UX 仍需 SPEC/TDD 补齐 |
+| **Streaming** | `agent/provider/streaming.py`, `agent/runtime_integration/streaming_provider.py`, `agent/model_call.py` | `docs/specs/streaming-l3/`, `docs/implementation-notes/streaming-l3.md` | L3 evidence path verified | STREAMING_PROVIDER_CALL + STREAMING_EVENT 均已激活；per-event evidence（validate_stream_event）+ 整轮聚合 evidence（collect_stream_response）双路径；用户可见逐字输出通过 emit_text_delta → print() 已实现 |
 | **CLI/TUI** | `agent/cli/`, `agent/cli_renderer.py`, `agent/display_events.py`, `agent/input_backends/` | `docs/V0_2_BASIC_TUI_PLAN.md` | adapter boundary | 不参与 runtime decision；已阶段性收口 |
 | **Planner** | `agent/planner.py`, `agent/plan_schema.py` | 散见于 core.py | 集成在主流程中 | planning phase 内嵌于 core.chat() |
 
@@ -77,7 +77,7 @@ query/event
 | **Provider/Model** | N/A | N/A | ✅ | 集成在主流程中 | 无 | FakeProvider 已支撑所有 L3 测试 |
 | **Confirmation flow** | N/A | N/A | ✅ | `test_confirmation_flow.py` | 无 | 已集成在主流程中 |
 | **Context injection** | N/A | N/A | ✅ | 集成在主流程中 | 无 | memory snapshot injection 已验证 |
-| **Streaming** | ✅ | ✅ | ✅ (evidence path) | `test_streaming_l3.py` | STREAMING_PROVIDER_CALL RuntimeActionType L3 dispatch path verified；STREAMING_EVENT 为 reserved catalog entry / inactive（无 handler、无 dispatch wiring、unused descriptor）；full user-visible streaming UX 仍需 SPEC/TDD | L3 evidence path verified；STREAMING_EVENT reserved/inactive；full UX future work |
+| **Streaming** | ✅ | ✅ | ✅ (L3) | `test_streaming_l3.py` | STREAMING_PROVIDER_CALL + STREAMING_EVENT 均已激活（aggregate + per-event）；逐字输出已通过 emit_text_delta → print() 实现 | L3 evidence path verified；双路径（聚合+单event） |
 | **Evidence/Trace** | ✅ | ✅ | runtime trace path verified | `test_local_trace_runtime_wiring_l3.py` | trace event emission 通过 `on_trace_event` sink，不经过 RuntimeActionDispatcher evidence 模型——不使用 "L3" 标签；使用 "runtime trace path verified" | runtime trace path verified（本 commit）；与 RuntimeActionDispatcher evidence 模型独立 |
 
 ## D. Backlog 分类（2026-05-24 E2E 审计后重组）
@@ -89,7 +89,7 @@ query/event
 | Item | Evidence | Priority |
 |---|---|---|
 | (当前无已知 correctness/safety bug) | N/A | N/A |
-| STREAMING_EVENT descriptor cleanup or inactive marker | `agent/runtime_integration/schema.py` — STREAMING_EVENT 为 reserved catalog entry / unused descriptor | P3 — 标记 inactive 或后续清理 |
+| STREAMING_EVENT per-event evidence activation | `agent/runtime_integration/streaming_provider.py` — StreamingEventHandler + validate_stream_event | P2 — 已完成：handler 已注册，per-event dispatch 已接入 turn-end hook，catalog entry 已更新 |
 | WP3: User Onboarding + First-Run Experience | `agent/cli_renderer.py` render_onboarding(), `main.py` --help/help | ✅ 完成 (commit b41193e) |
 | WP4: First Usable Task E2E Smoke Test | `tests/smoke/test_first_usable_task_e2e.py` 6 tests | ✅ 完成 (commit bdbc806) |
 
@@ -199,7 +199,7 @@ query/event
 
 | Priority | Capability | Action |
 |---|---|---|
-| **P3** | ~~STREAMING_EVENT descriptor 标记 inactive~~ | ✅ 完成 — `schema.py` 已添加 reserved/inactive 注释，说明无 handler、无 dispatch wiring、catalog entry 仅为 future work |
+| **P3** | ~~STREAMING_EVENT activation~~ | ✅ 完成 — `StreamingEventHandler` + `validate_stream_event` 已注册；per-event L3 evidence dispatch 已接入 turn-end hook |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

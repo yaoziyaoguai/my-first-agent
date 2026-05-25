@@ -35,6 +35,13 @@ WP3 扩展：Demo tool_use 响应 → 本轮 WP1-WP2 泛化
 - 不做真实工具调用
 - 不做多工具 chaining
 - 不模拟 provider error/latency/retry（那是 Phase 2+ 的职责）
+
+⛔ FROZEN (2026-05-25): FakeProvider 增强冻结。
+   - 当前定位：deterministic test fixture / debug provider / contract coverage
+   - 允许：固定响应、deterministic tool_use fixture、provider swap contract 验证
+   - 禁止：继续增强为 fake planner / fake reasoning engine / fake user context model
+   - 真实智能必须通过 real provider dogfood 验证，不可通过 fake provider 模拟
+   参见: docs/audit/global-agent-capability-architecture-audit-2026-05-25.md F19
 """
 
 from __future__ import annotations

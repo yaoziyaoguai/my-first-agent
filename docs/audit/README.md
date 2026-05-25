@@ -24,7 +24,9 @@
 
 ## 读者路径
 
-- **下一步行动（当前）**：读 [post-red-team-cleanup-remediation-plan-2026-05-25.md](../plans/post-red-team-cleanup-remediation-plan-2026-05-25.md) — cleanup-only remediation 执行中
+- **下一步行动（当前）**：读 [final-cleanup-readiness-summary-2026-05-25.md](../plans/final-cleanup-readiness-summary-2026-05-25.md) — cleanup 已完成，manual human dogfood 是下一步
+- **Capability Gap Audit**：读 [capability-gap-audit-low-complexity-2026-05-25.md](capability-gap-audit-low-complexity-2026-05-25.md)
+- **Low-Complexity Remediation 结果**：读 [low-complexity-capability-remediation-summary-2026-05-25.md](../plans/low-complexity-capability-remediation-summary-2026-05-25.md)
 - **Red-Team 审计原文**：读 [global-red-team-product-architecture-audit-2026-05-25.md](global-red-team-product-architecture-audit-2026-05-25.md)，特别是 Section M (Top Findings) 和 Section N (Recommended Next Big Loops)
 - **第一轮 Remediation Plan**：[global-red-team-remediation-plan-2026-05-25.md](../plans/global-red-team-remediation-plan-2026-05-25.md) — RT-01 到 RT-18，已完成
 - **最近 Big Loop 成果**：读 [big-loop-independent-audit-2026-05-25.md](big-loop-independent-audit-2026-05-25.md)，了解最近完成的 issue sweep

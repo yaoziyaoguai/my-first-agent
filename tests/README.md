@@ -44,7 +44,7 @@
 
 ## 当前测试规模
 
-全量 pytest（不含需要真实 API 的 opt-in tests）约 3300+ passed。核心覆盖：
+全量 pytest（不含需要真实 API 的 opt-in tests）约 3380+ passed。核心覆盖：
 - `tests/test_provider_contract.py` — provider adapter contract + dispatcher evidence parity
 - `tests/test_command_boundary_characterization.py` — CLI meta-command 边界回归
 - `tests/test_fake_provider_decision.py` — FakeProvider deterministic tool matching

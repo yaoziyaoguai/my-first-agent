@@ -3,11 +3,11 @@
 First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
 它的核心不是“更多工具”，而是把主代理运行时（Parent Agent Runtime）、工具注册中心（ToolRegistry）、记忆治理（Memory Governance）、技能系统（Skill System）、子代理系统（SubAgent System）、检查点（Checkpoint）和人工确认（Confirmation / Ask User）放在同一套可审计边界里运行。
 
-当前项目已完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线、Tool Pipeline L3、User Onboarding、E2E Smoke Test，并通过全量测试 (3331 passed) 和 dogfood 验证。
+当前项目已完成 Memory 主线、Skill System、SubAgent L0 safe-local 基线、Tool Pipeline L3、User Onboarding、Smoke Test，并通过全量测试 (~3380 passed, 18 skipped) 和 dogfood 验证。
 
 **当前阶段（诚实标签，2026-05-25）：**
 - ✅ **manual-dogfood-ready local agent** — FakeProvider baseline 9/9 PASS
-- ✅ **real-provider-dogfood-tested** — Real provider 5/6 PASS (kimi-k2.5 tool_use confirmed)
+- 🟡 **real-provider-dogfood-tested** — 历史 Kimi/DashScope 5/6 PASS；当前 deepseek-v4-pro 受 401 config/auth concern 阻塞
 - 🟡 **limited user-usable agent** — 核心功能可用，但 UX polish 不足
 - ❌ **broadly user-usable agent** — 不在当前 scope
 
@@ -18,7 +18,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 >
 > ⚠️ **FakeProvider 增长已冻结**：FakeProvider 是 deterministic test fixture / debug provider，不继续增强为 fake planner / fake reasoning engine。真实智能通过 real provider dogfood 验证。参见审计文档 Section B.3 (F19)。
 
-**当前阶段：Capability Gap Audit + Low-Complexity Remediation** — 只补 docs / onboarding / debug summary / redaction guard 等低复杂度、safe-to-auto-run 项；不继续大能力建设。当前一页状态入口：[Current Capability Status](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md)。
+**当前阶段：Cleanup-Only / Awaiting Manual Human Dogfood** — Capability Gap Audit + Low-Complexity Remediation 已完成（6 项 safe-to-auto-run 补齐），能力建设暂停。当前一页状态入口：[Current Capability Status](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md)。见 [remediation summary](docs/plans/low-complexity-capability-remediation-summary-2026-05-25.md)。
 
 **仍需人类完成：Manual Human Dogfood** — 自动 rehearsal 不是人工 dogfood 的替代品；等用户准备好后，从头按 fake/local 模式记录困惑、错误和 UX 摩擦。入口：[Dogfood README](docs/dogfood/README.md) → [Dogfood Checklist](docs/dogfood/local-manual-dogfood-checklist.md)。
 
@@ -33,7 +33,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 - SubAgent System：正式命名空间是 `agent/subagent_system/`；L0 deterministic/local 基线完成；L1-L5 仍 gated/future。
 - Checkpoint / Resume：checkpoint 是安全边界，保存截断摘要和声明字段，避免持久化大 tool result 或未知字段。
 - CLI/TUI：CLI/Textual 只是 adapter/presentation，不拥有 Agent loop；`main.py` 仍有 P3 adapter debt，不能视为已 productization。
-- 当前验证基线：`ruff` passed；最近 full pytest 基线见 [CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)；SubAgent synthetic dogfood `16/16`。
+- 当前验证基线：`ruff` passed；最近 full pytest 基线见 [Current Capability Status](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md)；SubAgent synthetic dogfood `16/16`。
 - Provider boundary：Claude/Anthropic 只作为 provider adapter 或文档参考出现；官方 SDK lazy import 限定在 `agent/provider/`，不是 `core.py`、Memory、Skill、SubAgent 或 dogfood runner 的运行依赖。
 
 ## 核心能力
@@ -324,9 +324,10 @@ Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`d
 ## 下一步 Roadmap
 
 当前阶段（2026-05-25）：
-- **Cleanup-Only Remediation** — PF-01 到 PF-15，修复 P1/P2 cleanup 问题（provider mode contract, command shortcut freeze, secret redaction, source-of-truth, SubAgent fixture boundary, E2E label, legacy sunset）
-- **Manual Human Dogfood** — cleanup 完成后最高优先级，从头走 fake/local 模式，记录 UX 摩擦
-- **能力建设暂停** — 不新增 feature，不扩 Agent 能力，不继续 AutoRun capability loop
+- **Cleanup-Only Remediation 已完成** — PF-01 到 PF-15，修复了 P1/P2 cleanup 问题（provider mode contract, command shortcut freeze, secret redaction, source-of-truth, SubAgent fixture boundary, E2E label, legacy sunset），全量 gate 通过
+- **Low-Complexity Remediation 已完成** — 6 项 safe-to-auto-run 补齐（capability gap audit, status guide, CLI help polish, run summary polish, dogfood prep, redaction lint）
+- **Manual Human Dogfood** — 当前最高优先级下一步；cleanup 完成后唯一有意义的非自动步骤
+- **能力建设暂停** — 不新增 feature，不扩 Agent 能力，AutoRun 保持 cleanup-only
 
 近期已完成：
 - 第一轮 Global Red-Team Remediation（RT-01 到 RT-18，6 phases）

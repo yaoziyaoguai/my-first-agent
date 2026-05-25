@@ -427,13 +427,15 @@ def run_summary_event(
     - subagent_names: 被委托的 SubAgent 名称列表
     - error_reasons: 错误/阻塞原因列表（脱敏后，不包含 secret/API key）
     """
-    tool_names = tool_names or []
-    memory_actions = memory_actions or []
-    subagent_names = subagent_names or []
-    error_reasons = error_reasons or []
+    tool_names = [_mask_preview_secrets(str(name)) for name in tool_names or []]
+    memory_actions = [_mask_preview_secrets(str(action)) for action in memory_actions or []]
+    subagent_names = [_mask_preview_secrets(str(name)) for name in subagent_names or []]
+    error_reasons = [_mask_preview_secrets(str(reason)) for reason in error_reasons or []]
 
     parts = ["本轮运行摘要"]
     parts.append(f"  循环次数：{loop_iterations}")
+    if tool_calls == 0 and memory_operations == 0 and not subagent_delegations:
+        parts.append("  本轮活动：未调用工具 / 未写入 Memory / 未委托 SubAgent")
     if tool_calls > 0:
         parts.append(f"  工具调用：{tool_calls} 次")
         if tool_names:
@@ -448,6 +450,7 @@ def run_summary_event(
             parts.append(f"    子代理：{', '.join(subagent_names)}")
     if error_reasons:
         parts.append(f"  错误：{'; '.join(error_reasons)}")
+        parts.append("  调试提示：先看 provider mode、health/logs 和 current status 文档")
     parts.append(f"  结果：{stop_reason}")
     return RuntimeEvent(
         event_type=EVENT_RUN_SUMMARY,

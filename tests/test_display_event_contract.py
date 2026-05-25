@@ -327,6 +327,40 @@ def test_run_summary_event_subagent_zero_not_shown() -> None:
     assert "SubAgent 委托" not in evt.text
 
 
+def test_run_summary_event_zero_activity_is_explicit_for_debuggability() -> None:
+    """零工具/零 memory/零 subagent 的轮次也要有清楚的活动摘要。"""
+    from agent.display_events import run_summary_event
+
+    evt = run_summary_event(
+        loop_iterations=1,
+        tool_calls=0,
+        memory_operations=0,
+        subagent_delegations=0,
+        stop_reason="正常结束",
+    )
+
+    assert "本轮活动：未调用工具 / 未写入 Memory / 未委托 SubAgent" in evt.text
+
+
+def test_run_summary_event_error_reasons_are_redacted_with_debug_hint() -> None:
+    """错误摘要必须脱敏，并给用户本地排查入口。"""
+    from agent.display_events import run_summary_event
+
+    evt = run_summary_event(
+        loop_iterations=1,
+        tool_calls=0,
+        memory_operations=0,
+        subagent_delegations=0,
+        stop_reason="异常结束",
+        error_reasons=["provider failed with api_key=sk-test-secret-token"],
+    )
+
+    assert "api_key=[REDACTED]" in evt.text
+    assert "sk-test-secret-token" not in evt.text
+    assert "调试提示：先看 provider mode、health/logs 和 current status 文档" in evt.text
+    assert evt.metadata["error_reasons"] == ["provider failed with api_key=[REDACTED]"]
+
+
 # ===================== D7 · Issue 6 新增 progress event 工厂合约 =====================
 
 

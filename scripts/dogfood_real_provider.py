@@ -1,18 +1,30 @@
 """Real Provider Dogfood 自动执行脚本。
 
-通过 core.chat() 统一入口 + 真实 LLM (DashScope/kimi-k2.5) 执行
-dogfood checklist 中的关键步骤，验证 real provider 与 FakeProvider
-共享同一 core.chat() → loop.py → Tool Pipeline。
+通过 core.chat() 统一入口 + 真实 LLM 执行 dogfood checklist 中的关键步骤，
+验证 real provider 与 FakeProvider 共享同一 core.chat() → loop.py → Tool Pipeline。
 
-安全边界：
+**关键边界 —— First Agent provider ≠ coding agent 外层模型：**
+- 本脚本的 real provider 配置**仅来自项目 .env**，通过 agent/provider/factory.py 加载
+- 外层 Claude Code / coding agent 自己的运行模型（如 deepseek-v4-pro、claude-opus-4-7 等）
+  不代表 First Agent 项目里的 real provider 配置
+- 不要把 coding agent 外层模型当成 First Agent 的真实 API dogfood provider
+
+**安全边界：**
 - 只使用安全 demo prompts（你好、show memories、show subagents 等）
 - 不读取私人资料、不执行危险工具、不写用户真实目录
 - 工具调用限制在 workspace/demo/ 下
 - 所有输出记录到 dogfood report，不暴露 secret value
 
-与 fake dogfood 的区别：
+**与 fake dogfood 的区别：**
 - fake: 使用 FakeProvider，确定性 echo + 关键词匹配 tool decision
-- real: 使用真实 LLM，真实模型推理和工具选择
+- real: 使用真实 LLM，真实模型推理和工具选择；使用项目 .env 配置，
+  仅验证现有 core.chat/loop.py/Tool Pipeline/Memory/SubAgent 主流程
+
+**Provider 配置来源（重要）：**
+- 本脚本从项目 .env 读取配置后设置 os.environ，覆盖 shell 环境中的任何值
+- 这样确保 First Agent 的 provider 只来自项目配置，不与 coding agent 环境混淆
+- build_model_provider_from_env() 检查 MY_FIRST_AGENT_LLM_PROVIDER env var，
+  然后调用 load_agent_provider_config() 读取 ANTHROPIC_* 环境变量
 """
 
 from __future__ import annotations
@@ -29,17 +41,22 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 def _load_project_env() -> dict[str, str]:
-    """加载项目 .env 但不污染 os.environ，返回内存中的值。"""
-    from dotenv import dotenv_values
-    raw = dotenv_values(_PROJECT_ROOT / ".env")
-    return {k: v.strip() for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    """从项目 .env 加载配置值，不依赖 shell 环境，不污染 os.environ。
+
+    使用 config.py 的 _load_project_dotenv_values()——与项目配置层一致的加载方式。
+    返回值只包含 key→value 映射，调用方不得打印、记录或序列化 secret value。
+    """
+    from config import _load_project_dotenv_values
+    return _load_project_dotenv_values(_PROJECT_ROOT)
 
 
 def main():
     results: list[dict[str, Any]] = []
     project_env = _load_project_env()
 
-    # 从项目 .env 读取配置（不读取 shell env 以免混入 Claude Code 自身配置）
+    # 从项目 .env 读取配置——不使用 shell env 以免混入 Claude Code 自身配置。
+    # 项目 .env 中可能配置的 provider 与 coding agent 外层模型（如 deepseek-v4-pro）
+    # 是完全不同的东西：coding agent 模型 ≠ First Agent provider。
     api_key = project_env.get("ANTHROPIC_API_KEY", "")
     base_url = project_env.get("ANTHROPIC_BASE_URL", "")
     model = project_env.get("ANTHROPIC_MODEL", "")
@@ -48,22 +65,24 @@ def main():
         print("REAL_PROVIDER_BLOCKED: .env 缺少 ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL")
         return 1
 
-    # 设置 os.environ 以便 in-process chat() 能读取 provider 配置
-    # （不依赖 shell env，避免混入 Claude Code 自身配置）
+    # 将项目 .env 的值写入 os.environ，覆盖 shell 环境中可能存在的任何同名变量。
+    # 这是为了防止 shell 环境中的 coding agent 配置（如 deepseek 的 URL/key）
+    # 被误当成 First Agent 的 provider 配置。
     os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = "anthropic_compatible"
     os.environ["ANTHROPIC_API_KEY"] = api_key
     os.environ["ANTHROPIC_BASE_URL"] = base_url
     os.environ["ANTHROPIC_MODEL"] = model
 
-    # provider 识别（不打印 secret）
+    # provider 识别信息（不打印 secret）
     provider_label = f"anthropic_compatible | model={model} | base_url={base_url}"
 
     print("=" * 60)
-    print("Real Provider Dogfood")
+    print("Real Provider Dogfood — 使用项目 .env 配置的 First Agent provider")
     print(f"Provider: {provider_label}")
+    print("（注意：外层 coding agent 模型 ≠ First Agent provider；provider 来自项目 .env）")
     print("=" * 60)
 
-    # 构建 env：确保 MY_FIRST_AGENT_LLM_PROVIDER 被设置，且使用项目 .env 的值（不依赖 shell env）
+    # 构建 subprocess env：使用已覆盖的 os.environ（项目 .env 值），加上安全的 HOME
     run_env = {
         **os.environ,
         "HOME": "/private/tmp",

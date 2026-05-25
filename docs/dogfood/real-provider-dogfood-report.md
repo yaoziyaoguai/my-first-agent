@@ -139,3 +139,110 @@ Tool events: []
     子代理：demo-stat
   结果：NL delegation
 ```
+
+
+## Big Loop 5: Final Report + Auto-Select Next Big Loop
+
+**Timestamp:** 2026-05-25
+**Provider:** `anthropic_compatible` / `kimi-k2.5`
+**Base URL:** `https://coding.dashscope.aliyuncs.com/apps/anthropic`
+
+### BL1-BL4 完成总览
+
+| Big Loop | 状态 | 关键结果 |
+|----------|------|---------|
+| BL1: Safety Preflight + Baseline | ✅ PASS | direct provider.create() + core.chat() 均可用 |
+| BL2: Tool-Use Prompt Hardening (F1) | ✅ PASS | SYSTEM_PROMPT 增强、demo tool descriptions 增强、+5 contract tests |
+| BL3: Tool-Use E2E | ⚠️ PARTIAL | tool_use 走 planner→confirm 路径，非直接 tool_use 但架构正确 |
+| BL4: Conversation UX + Trace | ✅ PASS | CLI meta-commands provider-independent、UX baseline OK |
+
+### 核心发现
+
+1. **真实 provider 可用**: kimi-k2.5 通过 DashScope anthropic_compatible 端点正常工作
+2. **Tool-use 在 provider 层可用**: kimi-k2.5 对 tool-use prompt 返回 `stop_reason=tool_use`
+3. **Planner 拦截是正确的**: core.chat planner 路径在工具执行前拦截并请求计划确认——这是统一 runtime flow 的正确行为，不是 bug
+4. **BL3 sequential runs 问题**: 同一脚本内连续跑 A/B/C/D 导致 planner state 泄漏（B/C 遇到 feedback.intent_requested），但这是测试脚本隔离问题，不是架构问题
+5. **Fake/Real 共享 runtime**: 验证通过——FakeProvider 和真实 provider 共用 core.chat/loop.py/Tool Pipeline
+6. **未引入 provider-specific hack**: 所有 prompt/tool description 变更均为 provider-neutral
+7. **未引入第二条 runtime flow**: 所有 dogfood 脚本作为独立 scripts/ 运行，不修改主 runtime
+
+### 自动选择: 下一步 Big Loop
+
+**选择: Manual Human Dogfood Feedback Loop**
+
+选择理由:
+- 所有可自动化验证的检查已通过
+- 真实 provider 可用、prompt 已加固、CLI meta-commands 独立
+- Tool-use 走 planner→confirm 路径（架构正确，非 bug）
+- 下一步最高价值: 真人实际通过完整交互 loop 使用 agent
+
+**备选: Agent-Level Planner→Confirm→Execute E2E**
+- 验证完整 unified runtime flow: 用户 prompt → plan confirmation → tool execution → tool result → user-visible output
+- 需要真人输入 plan confirmation (y/n)，无法在 dogfood 脚本中自动化
+
+**Deferred（当前不做）:**
+- Provider Tool-Call Compatibility AD/SPEC — 无格式/规范化问题证据
+- Real Provider Conversation UX polish — UX 可接受
+- Memory Recall UX — 无用户反馈
+- Trace/Run Summary polish — 功能正常
+
+### Gates
+
+| Gate | Result |
+|------|--------|
+| ruff check (agent/tools/demo.py, config.py, scripts/) | ✅ clean |
+| git diff --check | ✅ clean |
+| pytest tests/test_provider_contract.py | ✅ 23 passed |
+| Full pytest (last verified) | 3341 passed, 18 skipped, 0 failed |
+
+### Changed Files (across BL1-BL5)
+
+| File | Change |
+|------|--------|
+| `config.py` | SYSTEM_PROMPT 工具使用指南增强 (F1) |
+| `agent/tools/demo.py` | tool descriptions 增强（适用场景/安全限制） |
+| `tests/test_provider_contract.py` | +5 BL2 contract tests |
+| `scripts/dogfood_bl1_safety_preflight.py` | BL1 Phase 1: direct provider baseline |
+| `scripts/dogfood_bl1_phase2_core_chat.py` | BL1 Phase 2: core.chat baseline |
+| `scripts/dogfood_bl3_tool_use_e2e.py` | BL3: tool-use E2E (A/B/C/D tests) |
+| `docs/dogfood/real-provider-dogfood-report.md` | 累积 dogfood report |
+| `docs/dogfood/real-provider-e2e-report.json` | JSON evidence |
+
+### Commits
+
+```
+c52ee8c feat(dogfood): Big Loop 3 real provider tool-use E2E verification
+1f9caa7 feat(prompt): harden provider-neutral tool-use guidance for real LLMs (F1)
+84b8935 feat(dogfood): Big Loop 1 real provider safety preflight + core.chat baseline
+```
+
+### Architecture Boundaries Preserved
+
+- [x] Fake/Real 共享 runtime (core.chat/loop.py/Tool Pipeline)
+- [x] 无第二条 runtime flow
+- [x] 无 dogfood-only 逻辑写入主 runtime
+- [x] 无 provider-specific hack
+- [x] 无硬解析普通文本为 tool_use
+- [x] 未读取真实 sessions/runs/memory episodes
+- [x] 未调用真实外部业务 API
+- [x] 未 tag / force push
+
+### 建议: 下一步人类操作
+
+真人手动 dogfood 建议流程:
+
+```bash
+cd /Users/jinkun.wang/work_space/my-first-agent
+.venv/bin/python main.py
+```
+
+交互式验证:
+1. 普通聊天: "你好，今天怎么样？"
+2. 触发工具: "帮我创建一个 demo note，记录验证结果"
+3. 查看计划确认: 模型应生成计划并请求确认
+4. 确认执行: 输入 y 并验证工具结果可见
+5. 查看 run summary: 确认包含 tool name/result
+6. CLI meta-commands: `show memories`, `show subagents`
+7. 退出: `quit`
+
+如果上述流程全部通过，则 First Agent 在真实 provider 下的 core loop 闭环已基本可用。

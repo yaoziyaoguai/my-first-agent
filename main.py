@@ -39,7 +39,7 @@ from agent.session import (
     handle_interrupt_choice,
     summarize_session_status,
 )
-from agent.cli_renderer import render_status_line, render_onboarding
+from agent.cli_renderer import render_provider_mode_banner, render_status_line, render_onboarding
 from agent.checkpoint import load_checkpoint
 from config import load_legacy_dotenv_config
 
@@ -427,6 +427,10 @@ def main(argv: list[str] | None = None) -> int:
     # legacy CLI 入口显式 opt-in 读取项目 .env；普通 import config 不再产生
     # os.environ 副作用，provider/dogfood 路径继续走 scoped loader。
     load_legacy_dotenv_config(project_root=Path(__file__).resolve().parent)
+
+    # PF-01: 启动时输出 provider mode 横幅，让用户明确当前是 fake/local 还是 real provider。
+    # manual human dogfood 第一 blocker——用户必须知道当前模式。
+    print(render_provider_mode_banner(), file=sys.stderr)
 
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in {"--shell", "shell"}:

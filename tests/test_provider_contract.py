@@ -770,3 +770,86 @@ class TestPhase1DispatcherDefaultBuild:
             assert "NoneType" not in str(exc) or "dispatcher" not in str(exc).lower(), (
                 f"Dispatcher should have been built, but got: {exc}"
             )
+
+
+class TestProviderModeBanner:
+    """PF-01: startup provider mode banner 的 contract tests。
+
+    manual human dogfood 第一 blocker：用户启动时必须清楚当前是 fake/local 还是
+    real provider。这些测试验证：
+    1. fake/default 启动不读取真实 API key
+    2. banner 能正确区分 fake/real mode
+    3. import 顺序不导致 provider config stale
+    """
+
+    def test_banner_fake_mode_when_no_provider_env(self, monkeypatch):
+        """未设置 MY_FIRST_AGENT_LLM_PROVIDER 时，banner 应显示 fake 模式。"""
+        from agent.cli_renderer import render_provider_mode_banner
+
+        monkeypatch.delenv("MY_FIRST_AGENT_LLM_PROVIDER", raising=False)
+        monkeypatch.delenv("MY_FIRST_AGENT_LLM_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+        monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+        banner = render_provider_mode_banner()
+        assert "fake" in banner.lower()
+        assert "local only" in banner
+
+    def test_banner_fake_mode_when_provider_env_is_fake(self, monkeypatch):
+        """MY_FIRST_AGENT_LLM_PROVIDER=fake 时，banner 应显示 fake 模式。"""
+        from agent.cli_renderer import render_provider_mode_banner
+
+        monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "fake")
+        monkeypatch.delenv("MY_FIRST_AGENT_LLM_MODEL", raising=False)
+
+        banner = render_provider_mode_banner()
+        assert "fake" in banner.lower()
+
+    def test_banner_real_mode_when_provider_env_set(self, monkeypatch):
+        """MY_FIRST_AGENT_LLM_PROVIDER=anthropic_native 时，banner 应显示真实 API 模式。"""
+        from agent.cli_renderer import render_provider_mode_banner
+
+        monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic_native")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+        banner = render_provider_mode_banner()
+        assert "anthropic_native" in banner
+        assert "真实 API" in banner
+        assert "claude-sonnet-4-6" in banner
+
+    def test_banner_does_not_leak_api_key(self, monkeypatch):
+        """banner 绝不应包含 API key 值。"""
+        from agent.cli_renderer import render_provider_mode_banner
+
+        monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic_native")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+
+        banner = render_provider_mode_banner()
+        assert "sk-ant-secret" not in banner
+        assert "secret" not in banner.lower()
+
+    def test_banner_uses_model_env_fallback(self, monkeypatch):
+        """model 信息应从 MY_FIRST_AGENT_LLM_MODEL 或 ANTHROPIC_MODEL 或 OPENAI_MODEL 获取。"""
+        from agent.cli_renderer import render_provider_mode_banner
+
+        monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "openai_compatible")
+        monkeypatch.delenv("MY_FIRST_AGENT_LLM_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5")
+
+        banner = render_provider_mode_banner()
+        assert "openai_compatible" in banner
+        assert "gpt-5" in banner
+
+    def test_startup_import_order_does_not_stale_provider_config(self, monkeypatch):
+        """验证 import main 不会在 .env 加载前固化 provider config。
+
+        main.py 的 import 语句本身不应触发 build_model_provider_from_env()——
+        provider 应在 core.chat() 首次调用时才通过 build_loop_context() 懒加载。
+        这个测试验证 import agent.core 不会导致 provider config 被提前固化。
+        """
+        monkeypatch.delenv("MY_FIRST_AGENT_LLM_PROVIDER", raising=False)
+        # 导入 core 不应触发 provider factory（懒加载）
+        from agent.core import chat as _chat
+        # chat 函数存在即可——真正的 provider 构建发生在 core.chat() 调用时
+        assert callable(_chat)

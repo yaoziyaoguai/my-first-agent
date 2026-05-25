@@ -389,7 +389,7 @@ def subagent_delegated_event(
 
     与 subagent_delegating_event 配对，形成完整的委托生命周期进度反馈。
     """
-    status_text = "完成" if status in ("completed", "stopped") else f"异常（{status}）"
+    status_text = "完成" if status in ("completed", "stopped", "ok") else f"异常（{status}）"
     parts = [f"子代理 {subagent_name} {status_text}"]
     if summary:
         parts.append(f"摘要: {summary[:120]}")

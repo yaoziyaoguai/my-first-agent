@@ -2,22 +2,32 @@
 
 本目录包含 my-first-agent 的 dogfood（手动验证）报告和相关文档。
 
-**当前最高价值下一步：Manual Human Dogfood** — 从头按 README 走一遍 fake/local 模式，记录所有困惑、错误、审批 UX、memory recall、tool result visibility 和 debug flow。自动化 dogfood reports 是 evidence，不是人工 dogfood 的替代品。
+**当前状态（2026-05-25）**：
+
+- Manual human dogfood **未完成**；用户暂时不需要今晚执行。
+- Agent-driven rehearsal 已完成 fake/local 11/11 PASS，但它是自动预演，不是人工 dogfood 的替代品。
+- Real provider 路径仍受 401 config/auth concern 阻塞；不要在 AutoRun 中重试真实 API。
+- 用户准备好时，按 [manual-human-dogfood-next-steps.md](manual-human-dogfood-next-steps.md) 走最短 fake/local 路径即可。
 
 ## 读者路径
 
+- **只想知道人工 dogfood 最短下一步** → [manual-human-dogfood-next-steps.md](manual-human-dogfood-next-steps.md)
 - **想手动验证本地功能** → [local-manual-dogfood-checklist.md](local-manual-dogfood-checklist.md)
-- **想看最近的完整 dogfood 结果** → [local-manual-dogfood-report.md](local-manual-dogfood-report.md)（本地 FakeProvider）和 [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md)（真实 API）
+- **想看最近的自动预演结果** → [agent-driven-human-dogfood-rehearsal-report.md](agent-driven-human-dogfood-rehearsal-report.md)
+- **想看历史 dogfood 结果** → [local-manual-dogfood-report.md](local-manual-dogfood-report.md)（本地 FakeProvider）和 [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md)（历史真实 API）
 - **想看 JSON 证据** → JSON evidence reports
-- **想做 Manual Human Dogfood** → 先读本 README，再走 [local-manual-dogfood-checklist.md](local-manual-dogfood-checklist.md)，记录所有发现
+- **想正式记录 Manual Human Dogfood** → 复制 [manual-human-dogfood-record-template.md](manual-human-dogfood-record-template.md) 的结构，记录所有发现；不要填写 secret
 
 ## Active Dogfood Documents
 
 | 文档 | 类型 | 说明 |
 |------|------|------|
+| [manual-human-dogfood-next-steps.md](manual-human-dogfood-next-steps.md) | **Manual Prep** | 用户准备好时的最短 fake/local 人工 dogfood 路径 |
 | [local-manual-dogfood-checklist.md](local-manual-dogfood-checklist.md) | **Manual Checklist** | 本地手动 dogfood 检查清单 — Fake 9/9 PASS |
+| [manual-human-dogfood-record-template.md](manual-human-dogfood-record-template.md) | **Record Template** | 人工 dogfood 记录模板；禁止粘贴 secret |
+| [agent-driven-human-dogfood-rehearsal-report.md](agent-driven-human-dogfood-rehearsal-report.md) | **Auto Rehearsal** | Coding Agent 自动预演报告 — fake/local 11/11 PASS，real provider 401 concern |
 | [local-manual-dogfood-report.md](local-manual-dogfood-report.md) | **MD Report** | 本地手动 dogfood 报告 — FakeProvider baseline |
-| [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md) | **MD Report** | 全局真实 API dogfood 报告 — Real provider 5/6 PASS |
+| [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md) | **Historical MD Report** | 历史真实 API dogfood 报告；当前 real provider 以最新 401 concern 为准 |
 
 ## Dogfood Plans (设计阶段文档)
 

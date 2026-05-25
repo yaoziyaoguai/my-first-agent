@@ -397,17 +397,35 @@ def _invoke_registered_tool(name, info, tool_input, context=None):
 
 
 def execute_tool(name, tool_input, context=None):
-    if name not in TOOL_REGISTRY:
+    resolved = _normalize_tool_name(name)
+    if resolved is None:
         return f"工具 '{name}' 不在允许列表中"
 
-    info = TOOL_REGISTRY[name]
-    return _invoke_registered_tool(name, info, tool_input, context)
+    info = TOOL_REGISTRY[resolved]
+    return _invoke_registered_tool(resolved, info, tool_input, context)
+
+
+def _normalize_tool_name(name: str) -> str | None:
+    """将模型返回的短工具名归一化到注册表中的完整名。
+
+    部分 provider/model 会去掉 namespace 前缀（如 kimi-k2.5 将
+    ``demo.echo_task_summary`` 返回为 ``echo_task_summary``）。
+    本函数通过后缀匹配找回完整名；不匹配或歧义时返回 None。
+    这是通用归一化，不是 provider-specific hack。
+    """
+    if name in TOOL_REGISTRY:
+        return name
+    candidates = [reg_name for reg_name in TOOL_REGISTRY if reg_name.endswith(f".{name}")]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def needs_tool_confirmation(name, tool_input):
-    if name not in TOOL_REGISTRY:
+    resolved = _normalize_tool_name(name)
+    if resolved is None:
         return True
-    confirmation = TOOL_REGISTRY[name]["confirmation"]
+    confirmation = TOOL_REGISTRY[resolved]["confirmation"]
     if confirmation == "always":
         return True
     elif confirmation == "never":

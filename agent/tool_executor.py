@@ -26,7 +26,7 @@ from agent.pending_requests import PendingUserInputRequest
 from agent.runtime_trace_emitter import emit_tool_result_trace_event
 from agent.tool_audit import emit_tool_audit_event
 from agent.tool_registry import execute_tool, is_meta_tool
-from agent.tool_registry import needs_tool_confirmation
+from agent.tool_registry import needs_tool_confirmation, _normalize_tool_name
 
 
 AWAITING_USER = "__awaiting_user__"
@@ -195,6 +195,13 @@ def execute_single_tool(
     tool_use_id = block.id
     tool_name = block.name
     tool_input = block.input
+
+    # 模型可能返回不带 namespace 前缀的短工具名（如 echo_task_summary 而非
+    # demo.echo_task_summary）；归一化为注册表中的完整名，避免后续 needs_tool_confirmation /
+    # execute_tool 因名称不匹配而走错分支。
+    resolved_name = _normalize_tool_name(tool_name)
+    if resolved_name is not None:
+        tool_name = resolved_name
 
     # 元工具分支：走独立路径，既不需要确认，也不需要在 messages 里配对。
     if is_meta_tool(tool_name):

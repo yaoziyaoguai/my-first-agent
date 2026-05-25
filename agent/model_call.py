@@ -81,13 +81,21 @@ def call_model(
         else:
             response = collect_stream_response(observed_events)
     else:
-        # 兼容旧测试 fake provider；正式 provider contract 已要求 stream()，
-        # 这里仍只走 provider interface，不回退任何 SDK client。
+        # 非 streaming provider：走 create() 获取完整响应。
         response = provider.create(
             system=system_prompt,
             messages=messages,
             tools=tools,
         )
+        # 检查响应中是否包含 tool_use block，若有则发射 tool_requested 事件。
+        # 非 streaming provider 没有 stream event 可消费，必须在这里补发，
+        # 否则 tool.requested RuntimeEvent 永远不会触发。
+        has_tool_use = any(
+            getattr(b, "type", None) == "tool_use"
+            for b in (getattr(response, "content", []) or [])
+        )
+        if has_tool_use and emit_tool_request is not None:
+            emit_tool_request()
         if emit_text_delta is not None:
             for block in getattr(response, "content", []) or []:
                 text = getattr(block, "text", None)

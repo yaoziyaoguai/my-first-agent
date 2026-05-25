@@ -1,61 +1,39 @@
 {
-  "phase": "Phase 2: Real Provider Tool-Use E2E Hardening",
-  "provider": "anthropic_compatible | model=kimi-k2.5",
-  "env_used": true,
-  "results": [
-    {
-      "test": "A_basic_chat",
-      "prompt": "你好，请用一句话介绍你自己",
-      "status": "PASS",
-      "real_response": true,
-      "run_summary": true,
-      "tool_triggered": false,
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 你好！我是一名通用AI助手，能够理解你的真实需求，通过分析和推理，帮助你高效、可靠地完成任务。 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
-      "note": "普通对话应返回真实回复，不触发工具"
-    },
-    {
-      "test": "B_explicit_tool_use",
-      "prompt": "请使用已注册的 demo.echo_task_summary 工具...",
-      "status": "PASS",
-      "tool_requested": true,
-      "tool_result_visible": true,
-      "confirmation_requested": false,
-      "event_types": [
-        "control.message",
-        "tool.requested",
-        "display.event",
-        "tool.result_visible",
-        "tool.result_visible",
-        "assistant.delta",
-        "run.summary"
-      ],
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 🔧 正在规划工具调用... 执行完成。 已调用工具完成。工具返回结果如下：\n\n**任务摘要**：这是一个 First Agent 本地 demo 任务。provider=fake，无外部 API 调用，无网络访问，无私人数据读取。本工具通过完整的 TOOL_GATE → TOOL_INVOKE → TOOL_RESULT 管线执行。 本轮运行摘要\n  循环次",
-      "note": "tool_req=True, result=True, confirm=False"
-    },
-    {
-      "test": "C_natural_tool_use",
-      "prompt": "帮我创建一个 demo note...",
-      "status": "PASS",
-      "tool_requested": true,
-      "confirmation_requested": true,
-      "tool_result_visible": true,
-      "file_created": false,
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 🔧 正在规划工具调用... 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
-      "note": "tool_req=True, confirm=True, result=True, file=False"
-    },
-    {
-      "test": "D_tool_non_use_control",
-      "prompt": "今天天气真不错，适合出去走走",
-      "status": "PASS",
-      "tool_triggered": false,
-      "run_summary": true,
-      "output_preview": "[系统] 未生成多步计划，按单步处理。 是啊，好天气确实让人心情愉悦！适合户外走走，晒晒太阳，放松身心。你打算去哪里逛逛呢？ 本轮运行摘要\n  循环次数：1\n  结果：正常结束",
-      "note": "闲聊不应触发工具"
-    }
+  "timestamp": "2026-05-25T08:05:16.022597+00:00",
+  "big_loop": "BL1",
+  "phase": "safety_preflight",
+  "provider_type": "anthropic_compatible",
+  "provider_name": "anthropic_compatible",
+  "model": "kimi-k2.5",
+  "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+  "auth_scheme": "auto",
+  "success": true,
+  "basic_chat": {
+    "success": true,
+    "response_preview": "你好！我是一个AI助手，可以回答问题、协助写作、编程、翻译等各种任务。",
+    "stop_reason": "end_turn",
+    "raw_provider_name": "anthropic_compatible",
+    "usage": "{'input_tokens': 34, 'output_tokens': 19, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}",
+    "error": null
+  },
+  "env_loaded": true,
+  "safe_demo_prompts_only": true,
+  "private_data_read": false,
+  "real_user_directory_write": false,
+  "external_business_api": false,
+  "outer_env_overrides": [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL"
   ],
-  "summary": {
-    "pass": 4,
-    "concern": 0,
-    "fail": 0
+  "bl1_phase2": {
+    "timestamp": "2026-05-25T08:08:37.489711+00:00",
+    "success": true,
+    "core_chat": {
+      "success": true,
+      "text_fragments_count": 3,
+      "output_preview": "[系统] 未生成多步计划，按单步处理。你好！我是一个通用智能助手，可以帮助你完成各种任务，包括文件操作、代码编辑、信息查询和任务规划等。很高兴为你服务！本轮运行摘要\n  循环次数：1\n  结果：正常结束",
+      "runtime_events_count": 3,
+      "error": null
+    }
   }
 }

@@ -1,4 +1,4 @@
-"""Phase 7 deterministic emergence E2E regression。
+"""Phase 7 deterministic emergence 子系统集成测试。
 
 这些测试验证 RFC §10.5 / §15.5 中 procedural inline_confirmation seam。
 inline_confirmation 是 explicit human confirmation，不是 silent retain，
@@ -12,6 +12,7 @@ inline_confirmation 是 explicit human confirmation，不是 silent retain，
 5. Inline confirmation seam 的 payload 生成和 response adapter
 6. 不 silent retain、不 auto approve、不直接写 store
 
+这些是 emergence 子系统的直调测试（不经 core.chat()），不声称 E2E。
 使用临时 memory root，不接触真实 sessions/runs，不调用真实 LLM。
 """
 
@@ -95,8 +96,8 @@ def _make_candidate(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestEmergenceFailClosedE2E:
-    """active_records <50 → fail closed — 不产生 candidate, 不写 pending, 不写 store。"""
+class TestEmergenceFailClosed:
+    """active_records <50 → fail closed — 不产生 candidate, 不写 pending, 不写 store。（直调测试）"""
 
     def test_fail_closed_no_candidates(self):
         """active_records=17, 3 条证据 — gate 关闭，无 candidate。"""
@@ -156,8 +157,8 @@ class TestEmergenceFailClosedE2E:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestEmergenceFullChainE2E:
-    """active_records≥50 的全链路：detect → dispatch → review CLI。"""
+class TestEmergenceFullChain:
+    """active_records≥50 的全链路：detect → dispatch → review CLI。（直调测试）"""
 
     def test_detect_generates_candidate(self):
         """active_records=50, 3 条同 pattern evidence → 产生 ProceduralCandidate。"""
@@ -399,8 +400,8 @@ class TestEmergenceFullChainE2E:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestEmergenceInlineConfirmationE2E:
-    """RFC §10.5 / §15.5 inline_confirmation seam 的全链路验证。
+class TestEmergenceInlineConfirmation:
+    """RFC §10.5 / §15.5 inline_confirmation seam 的全链路验证（直调测试）。
 
     inline_confirmation 是 explicit human confirmation，不是 silent retain，
     也不是 auto approve；response adapter 只允许 accept/edit_accept 写 store。

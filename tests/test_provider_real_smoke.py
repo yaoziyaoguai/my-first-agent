@@ -110,17 +110,17 @@ def test_real_anthropic_compatible_accepts_model_visible_tools_param(monkeypatch
     assert response.stop_reason in {"end_turn", "tool_use", "max_tokens"}
 
 
-def test_real_anthropic_compatible_mcp_readonly_e2e(monkeypatch):
+def test_real_anthropic_compatible_mcp_readonly_integration(monkeypatch):
     """anthropic_compatible provider + MCP tool_executor manual round-trip。
 
-    验证范围：anthropic_compatible provider adapter + tool_executor 的手动闭环，
+    验证范围：anthropic_compatible provider adapter + tool_executor 的手动集成，
     不是完整 AgentLoop（core.py/chat/response_handlers）自动闭环。
 
     具体验证链路：
     MCP registration → tool exposure → model selection → execute_tool →
     manual tool_result append → second provider.create → final response。
 
-    使用本地 deterministic MCP fixture（echo tool）。
+    使用本地 deterministic MCP fixture（echo tool）。直调测试，不声称 E2E。
     """
     from agent.mcp import MCPServerConfig
     from agent.mcp_stdio import StdioMCPClient

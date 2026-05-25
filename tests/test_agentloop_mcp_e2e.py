@@ -1,24 +1,26 @@
-"""Controlled AgentLoop MCP readiness tests plus opt-in real LLM E2E.
+"""Controlled AgentLoop MCP readiness tests plus opt-in real LLM integration.
 
 中文学习边界：
 - 默认 readiness tests 使用本地 stdio fixture，不需要真实 API key，也不启动
   真实 npx MCP server。
-- 真实 LLM + npx MCP E2E 仍是 opt-in，需要显式环境变量和真实
+- 真实 LLM + npx MCP 测试仍是 opt-in，需要显式环境变量和真实
   ANTHROPIC_API_KEY。
 
 测试分为两层：
 
 1. readiness tests（默认运行，使用本地 stdio fixture 验证注册和暴露链路）：
-   - test_e2e_model_tools_param_includes_mcp_tool
+   - test_mcp_model_tools_param_includes_mcp_tool
      MCP registration → get_model_visible_tools → model-visible tools 包含 MCP tool
-   - test_e2e_mcp_tool_in_registry_after_registration
+   - test_mcp_tool_in_registry_after_registration
      MCP registration → TOOL_REGISTRY → capability= mcp_tool, confirmation=always
-   - test_e2e_no_key_leak_in_registry_or_tools
+   - test_mcp_no_key_leak_in_registry_or_tools
      TOOL_REGISTRY 和 model-visible tools 不含 API key pattern
 
-2. opt-in real LLM E2E（需要显式 env + ANTHROPIC_API_KEY=sk-ant-*）：
-   - test_e2e_real_llm_receives_mcp_tool_in_tools_param
+2. opt-in real LLM 测试（需要显式 env + ANTHROPIC_API_KEY=sk-ant-*）：
+   - test_real_llm_receives_mcp_tool_in_tools_param
      验证真实 LLM 的 tools 参数包含 MCP tool，并观察模型是否选择 MCP tool
+
+以上均为直调测试（不经 core.chat()），不声称 E2E。
 - 只暴露 1-2 个 read-only MCP tools（list_allowed_directories / read_text_file）。
 - 使用真实 filesystem MCP server + sandbox 目录。
 - 验证 key 不泄漏到 messages / audit / checkpoint / display。
@@ -90,12 +92,12 @@ def _temp_sandbox() -> pathlib.Path:
 
 
 # ============================================================================
-# E2E: MCP read-only tool 进入 AgentLoop
+# MCP read-only tool 进入 AgentLoop（直调测试，不经 core.chat）
 # ============================================================================
 
 
-def test_e2e_model_tools_param_includes_mcp_tool():
-    """验证 get_model_visible_tools 包含注册后的 MCP tool。"""
+def test_mcp_model_tools_param_includes_mcp_tool():
+    """验证 get_model_visible_tools 包含注册后的 MCP tool。（直调测试）"""
     from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
     from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
@@ -126,8 +128,8 @@ def test_e2e_model_tools_param_includes_mcp_tool():
                 TOOL_REGISTRY.pop(name, None)
 
 
-def test_e2e_mcp_tool_in_registry_after_registration():
-    """注册后的 MCP tool 在 TOOL_REGISTRY 中。"""
+def test_mcp_tool_in_registry_after_registration():
+    """注册后的 MCP tool 在 TOOL_REGISTRY 中。（直调测试）"""
     from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
     from agent.tool_registry import TOOL_REGISTRY
@@ -154,8 +156,8 @@ def test_e2e_mcp_tool_in_registry_after_registration():
                 TOOL_REGISTRY.pop(name, None)
 
 
-def test_e2e_no_key_leak_in_registry_or_tools():
-    """TOOL_REGISTRY 和 model-visible tools 不含 API key。"""
+def test_mcp_no_key_leak_in_registry_or_tools():
+    """TOOL_REGISTRY 和 model-visible tools 不含 API key。（直调测试）"""
     from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
     from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
@@ -189,15 +191,15 @@ def test_e2e_no_key_leak_in_registry_or_tools():
 
 
 # ============================================================================
-# E2E: real LLM + MCP tool（opt-in，需要真实 API key）
+# 真实 LLM + MCP tool（opt-in，需要真实 API key，直调不经 core.chat）
 # ============================================================================
 
 
 @pytestmark_llm
-def test_e2e_real_llm_receives_mcp_tool_in_tools_param():
-    """真实 LLM + MCP read-only tool 的受控 E2E。
+def test_real_llm_receives_mcp_tool_in_tools_param():
+    """真实 LLM + MCP read-only tool 的受控集成测试。
 
-    验证：MCP registration → tool exposure → model select MCP tool。
+    验证：MCP registration → tool exposure → model select MCP tool。（直调，不经 core.chat()）
     """
     from agent.mcp import MCPServerConfig
     from agent.mcp_stdio import StdioMCPClient

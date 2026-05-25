@@ -253,12 +253,12 @@ class TestChatDelegateToSubagentIntegration:
         assert "policy_blocked" in result.lower() or "Blocked" in result
 
 
-class TestDelegateOnceE2E:
-    """端到端：delegate_once() 通过 demo-stat subagent 执行确定性任务。
-
-    中文学习边界：这些测试走完整的 SubAgentRegistry → SubAgentRequest →
+class TestDelegateOnceHandler:
+    """delegate_once() handler 直调测试：验证 SubAgentRegistry → SubAgentRequest →
     delegate_once → execute_local → SubAgentResult 链路。
-    不调 LLM、不调 API、不执行真实外部进程、不修改 store。
+
+    中文学习边界：这些是 handler 直调测试，不经 core.chat() / loop.py 统一入口，
+    不声称 E2E。不调 LLM、不调 API、不执行真实外部进程、不修改 store。
     """
 
     def test_delegate_once_ok(self):
@@ -280,7 +280,7 @@ class TestDelegateOnceE2E:
             role=d.role,
             allowed_tools=("read_file",),
             parent_trace_id="test-delegate-once-1",
-            delegation_reason="test e2e",
+            delegation_reason="test delegate_once handler",
             max_iterations=1,
         )
         run = delegate_once(request, registry)
@@ -308,7 +308,7 @@ class TestDelegateOnceE2E:
             role=d.role,
             allowed_tools=("read_file",),
             parent_trace_id="test-delegate-once-2",
-            delegation_reason="test e2e blocked",
+            delegation_reason="test delegate_once handler blocked",
             max_iterations=1,
         )
         run = delegate_once(request, registry)
@@ -334,7 +334,7 @@ class TestDelegateOnceE2E:
             role=d.role,
             allowed_tools=("read_file",),
             parent_trace_id="test-delegate-once-3",
-            delegation_reason="test e2e max iterations",
+            delegation_reason="test delegate_once handler max iterations",
             max_iterations=3,
         )
         run = delegate_once(request, registry)

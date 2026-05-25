@@ -426,11 +426,11 @@ class TestMemoryRemoveRecord:
         assert runtime.remove_record("any_id") is False
 
 
-class TestMemoryWriteRecallVisibleE2E:
-    """WP-A：memory write → recall → visible E2E 闭环。
+class TestMemoryWriteRecallVisible:
+    """Memory write → recall → visible 集成测试：验证 MemoryRuntime 直调路径。
 
-    用户写入 memory → 在下一轮对话的 system prompt 中可见 →
-    show memories 可以展示已存储的 memory。全部走 local/fake deterministic path。
+    用户写入 memory → list_records 可见 → snapshot_for_prompt 可展示。
+    全部走 InMemoryMemoryStore local/fake deterministic path，不经 core.chat()。
     """
 
     def test_memory_persists_across_runtime_calls(self):

@@ -83,11 +83,18 @@ def build_memory_pending_request(
     }
 
 
-# 常见肯定简写：用户输入 "y"/"yes"/"好" 等价于选择第一个选项
-_AFFIRMATIVE_SHORTHANDS: frozenset[str] = frozenset({
+AFFIRMATIVE_SHORTHANDS: frozenset[str] = frozenset({
     "y", "yes", "ok", "okay", "yeah", "sure",
     "好", "是", "可以", "确认", "记住", "行", "对",
 })
+"""确认交互中的肯定简写词表（中英双语）。
+
+用户在这些确认流程中输入任意一个简写即视为肯定回复：
+- ``parse_memory_confirmation_reply()``：视为选择第一个选项
+- ``parse_inline_confirmation_reply()``：视为 accept
+
+如需增加更多语言变体，直接扩展此 frozenset 即可，无需修改解析逻辑。
+"""
 
 
 def parse_memory_confirmation_reply(
@@ -117,7 +124,7 @@ def parse_memory_confirmation_reply(
             return MemoryConfirmationChoice(choice_str), free_text
 
     # 常见肯定简写 → 第一个选项（通用确认 UX，不是 provider-specific hack）
-    if text.lower() in _AFFIRMATIVE_SHORTHANDS:
+    if text.lower() in AFFIRMATIVE_SHORTHANDS:
         first_choice_str = next(iter(choice_map.values()))
         return MemoryConfirmationChoice(first_choice_str), None
 
@@ -209,7 +216,7 @@ def parse_inline_confirmation_reply(
             return InlineConfirmationResponse(action="other", free_text=free_text)
 
     # 常见肯定简写 → accept（与 parse_memory_confirmation_reply 共享同一词表）
-    if text.lower() in _AFFIRMATIVE_SHORTHANDS:
+    if text.lower() in AFFIRMATIVE_SHORTHANDS:
         return InlineConfirmationResponse(action="accept")
 
     return InlineConfirmationResponse(action="other", free_text=text)

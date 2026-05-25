@@ -555,3 +555,113 @@ def test_openai_compatible_streaming_fails_closed_without_http_fallback():
 
     with pytest.raises(ProviderCapabilityError, match="streaming_not_supported"):
         list(provider.stream(system="system", messages=[], tools=[]))
+
+
+# ===== BL2: System Prompt Tool-Use Guidance Hardening (F1) =====
+
+
+def test_system_prompt_contains_provider_neutral_tool_use_guidance():
+    """system prompt 必须包含 provider-neutral tool-use guidance，不包含特定 provider hack。"""
+    from config import SYSTEM_PROMPT
+
+    # 必须包含 provider-neutral tool-use guidance 关键短语
+    assert "provider-neutral" in SYSTEM_PROMPT
+    assert "工具使用指南" in SYSTEM_PROMPT
+    assert "主动匹配工具与请求" in SYSTEM_PROMPT
+    assert "不要伪造工具结果" in SYSTEM_PROMPT
+    assert "普通对话不需要工具" in SYSTEM_PROMPT
+    assert "只使用已注册工具" in SYSTEM_PROMPT
+    # 新增的强化条款
+    assert "工具判决流程" in SYSTEM_PROMPT
+    assert "检查工具参数要求" in SYSTEM_PROMPT
+    # 不得包含 provider-specific hack
+    assert "kimi" not in SYSTEM_PROMPT.lower()
+    assert "dashscope" not in SYSTEM_PROMPT.lower()
+    assert "anthropic api" not in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_tool_guidance_is_provider_agnostic():
+    """tool-use guidance 不得写入特定 provider/model 名称或 API 细节。"""
+    from config import SYSTEM_PROMPT
+
+    # 提取"工具使用指南"部分
+    guidance_start = SYSTEM_PROMPT.find("## 工具使用指南")
+    assert guidance_start > 0
+    guidance = SYSTEM_PROMPT[guidance_start:]
+
+    # 禁止出现的 provider-specific 词汇
+    forbidden = [
+        "DeepSeek", "deepseek",
+        "OpenAI", "openai.com",
+        "Anthropic API", "anthropic api",
+        "DashScope", "dashscope",
+        "kimi", "Kimi",
+        "Claude API", "claude api",
+        "x-api-key", "bearer token",
+    ]
+    for word in forbidden:
+        assert word not in guidance, f"tool-use guidance 包含 provider-specific 词: {word}"
+
+
+def test_demo_tool_descriptions_include_scenarios_and_safety():
+    """demo 工具描述必须包含适用场景和安全限制。"""
+    from agent.tool_registry import TOOL_REGISTRY
+
+    # 强制 import 以触发 @register_tool
+    import agent.tools  # noqa: F401
+
+    echo_info = TOOL_REGISTRY.get("demo.echo_task_summary")
+    assert echo_info is not None, "demo.echo_task_summary must be registered"
+    echo_desc = echo_info["description"]
+    assert "适用场景" in echo_desc or "何时调用" in echo_desc or "When to" in echo_desc
+    assert "安全" in echo_desc or "safe" in echo_desc.lower()
+    assert "副作用" in echo_desc or "side" in echo_desc.lower()
+
+    note_info = TOOL_REGISTRY.get("demo.write_demo_note")
+    assert note_info is not None, "demo.write_demo_note must be registered"
+    note_desc = note_info["description"]
+    assert "适用场景" in note_desc or "何时调用" in note_desc
+    assert "安全" in note_desc or "safe" in note_desc.lower()
+    assert "确认" in note_desc or "confirm" in note_desc.lower()
+
+
+def test_demo_tool_descriptions_not_force_tool_use_in_normal_chat():
+    """demo 工具描述应包含「何时不该调用」，防止普通聊天被强制 tool_use。"""
+    import agent.tools  # noqa: F401
+    from agent.tool_registry import TOOL_REGISTRY
+
+    for name in ("demo.echo_task_summary", "demo.write_demo_note"):
+        info = TOOL_REGISTRY.get(name)
+        assert info is not None
+        desc = info["description"]
+        # 必须说明何时不该调用（防止模型在普通对话中滥用工具）
+        has_nonuse_guidance = (
+            "何时不该" in desc
+            or "不应调用" in desc
+            or "should not" in desc.lower()
+            or "do not" in desc.lower()
+            or "don't" in desc.lower()
+        )
+        assert has_nonuse_guidance, f"{name} 描述缺少「何时不该调用」指引: {desc[:100]}"
+
+
+def test_fake_provider_path_not_broken_by_prompt_changes(monkeypatch):
+    """FakeProvider 路径不受 system prompt / tool description 修改影响。"""
+    import agent.tools  # noqa: F401
+    from agent.provider.fake_provider import FakeProvider
+    from agent.tool_registry import get_model_visible_tools
+
+    provider = FakeProvider()
+    tools = get_model_visible_tools()
+
+    # FakeProvider 应按 system prompt/tools 正常返回
+    response = provider.create(
+        system="You are a helpful assistant.",
+        messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+    )
+    assert response is not None
+    assert len(response.content) > 0
+    # 普通聊天不应触发 tool_use
+    has_tool = any(getattr(b, "type", None) == "tool_use" for b in response.content)
+    assert not has_tool, "FakeProvider should not trigger tool_use on 'hello'"

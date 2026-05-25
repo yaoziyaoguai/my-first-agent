@@ -38,7 +38,10 @@ from agent.tool_registry import register_tool
 @register_tool(
     name="demo.echo_task_summary",
     description=(
-        "返回当前 demo 任务的确定性摘要。零副作用、零网络调用、不读私人资料。"
+        "【demo 工具】返回当前 demo 任务的确定性摘要。"
+        "适用场景：用户要求「总结任务」「查看任务摘要」「汇总当前进度」等。"
+        "何时不该调用：用户只是闲聊或问不相关的问题时不应调用。"
+        "安全说明：零副作用、零网络调用、不读私人资料、无需用户确认。"
     ),
     parameters={},
     confirmation="never",
@@ -107,9 +110,11 @@ def _validate_demo_note_path(target: Path) -> Path:
 @register_tool(
     name="demo.write_demo_note",
     description=(
-        "写入一个 demo note 到受控的 workspace/demo/ 目录。"
-        "不写用户真实目录、不读私人资料、不访问网络。"
-        "path 和 content 可选——不传时使用安全默认值。"
+        "【demo 工具】写入一个 demo note 到受控的 workspace/demo/ 目录。"
+        "适用场景：用户要求「创建笔记」「写 demo note」「记录验证结果」等写入操作。"
+        "何时不该调用：用户只是查看/阅读/查询时不应调用，用文字直接回答即可。"
+        "安全说明：不写用户真实目录、不读私人资料、不访问网络。需用户确认后才执行。"
+        "参数：path 和 content 均为可选——不传时使用安全的默认路径和内容。"
     ),
     parameters={
         "path": {

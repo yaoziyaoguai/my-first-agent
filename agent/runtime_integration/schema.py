@@ -30,6 +30,9 @@ class RuntimeActionType(StrEnum):
     MEMORY_CONSOLIDATE = "memory.consolidate"
     CHECKPOINT_SAFE_SUMMARY = "checkpoint.safe_summary"
     STREAMING_PROVIDER_CALL = "streaming.provider_call"
+    # reserved/inactive: 无 handler、无 dispatch wiring、无 phase1_hook 注册。
+    # catalog entry 存在（evidence.py:526-536）但仅用于未来的 streaming event
+    # evidence collection。当前 streaming 证据通过 STREAMING_PROVIDER_CALL 收集。
     STREAMING_EVENT = "streaming.event"
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
 

@@ -36,7 +36,7 @@ query/event
 | **Tool Pipeline** | `agent/runtime_integration/tool_gate.py`, `tool_invoke.py`, `tool_result_feedback.py`, `agent/tool_registry.py`, `agent/tool_executor.py` | `docs/specs/tool-pipeline-l3-completion/`, `docs/specs/tool-branch-confirmation-required/`, `docs/specs/tool-invoke-branch-behavior/`, `docs/specs/tool-result-feedback-branch-behavior/`, `docs/specs/tool-gate-not-found-l3/`, `docs/specs/tool-request-l3/` | L3 完整闭环 | TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT 四阶段全部 L3 verified；four dispositions: allowed✅, confirmation_required✅, not_found✅, blocked ❌(L3 gap) |
 | **MCP** | `agent/mcp.py`, `agent/mcp_models.py`, `agent/mcp_policy.py`, `agent/mcp_bridge.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` | `docs/specs/mcp-runtime-integration/`, `docs/specs/mcp-l3-real-core-loop/` | L3 Tool Pipeline adapter boundary | MCP 是 Tool Pipeline 的 adapter boundary，不是独立 runtime；confirmation="never" 工具经 Tool Pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT）走通完整管线；confirmation="always" 工具在 gate 被正确拦截；MCP L3 证据归入 Tool lifecycle integration |
 | **Memory (retain)** | `agent/runtime_integration/memory_retain.py`, `agent/memory.py`, `agent/memory_runtime.py`, `agent/memory_policy.py`, `agent/memory_store.py` | `docs/specs/memory-retain-branch-behavior/`, `docs/specs/memory-propose-l3/` | L3 完整闭环 | MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE 双 action L3 verified；confirmation → queue → turn-end dispatch → store.write() 完整 evidence chain |
-| **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 dispatch path verified（双路径，未统一） | 实际 recall 路径：`refresh_runtime_system_prompt()` → `_memory_runtime.snapshot_for_prompt()` → `build_system_prompt()`（不经 dispatcher）；evidence dispatch 路径：turn-end hook → MEMORY_RECALL RuntimeAction → dispatcher → handler（L3 verified）；两条路径未共享 evidence；Pre-loop MEMORY_RECALL wiring 为 Architecture Extension candidate |
+| **Memory (recall)** | `agent/runtime_integration/memory_recall.py`, `agent/memory.py`, `agent/memory_suggestions.py` | `docs/specs/memory-recall-branch-behavior/` | L3 完整闭环（双路径，AD 裁决不统一） | MEMORY_RECALL AD (`docs/design/MEMORY_RECALL_DUAL_PATH_AD.md`) 裁决：Path A（pre-loop prompt injection via `snapshot_for_prompt()` → `build_system_prompt()`）与 Path B（turn-end dispatcher evidence）服务于不同目的、不同生命周期点，不统一。Path A 直接注入 system prompt 影响模型行为（用户可见"已加载 X 条相关记忆"）；Path B 通过 dispatcher 收集 L3 evidence。两者互补，不竞争。 | 已闭环 (commit e18595b + AD)；双路径统一为 unnecessary——AD 裁决当前架构正确 |
 | **Memory (consolidation)** | `agent/memory_consolidation.py`, `agent/memory_consolidation_engine.py`, `agent/memory_consolidation_llm.py`, `agent/memory_extraction.py` | `docs/specs/memory-consolidation-l3/`, `docs/rfc/MEMORY_CANONICAL_RFC.md` | L3 dispatch path verified | MEMORY_CONSOLIDATE RuntimeActionType L3 verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；real LLM consolidation（consolidation_llm.py）需要真实 LLM/private data，仍 deferred |
 | **Checkpoint** | `agent/checkpoint.py`, `agent/runtime_integration/checkpoint_summary.py` | `docs/specs/checkpoint-save-resume-l3/`, `docs/CHECKPOINT_RESUME_SEMANTICS.md` | L3 完整闭环 | CHECKPOINT_SAFE_SUMMARY 经 turn-end hook → dispatcher → handler L3 verified |
 | **Skill System** | `agent/skill_system/` (15 files), `skills/demo-note-maker/`, `agent/runtime_integration/skill_action.py` | `docs/design/SKILL_SYSTEM_SDD.md`, `docs/SKILL_LOCAL_MVP.md` | L3 dispatch path verified (empty + non-empty registry) | SKILL_SELECT RuntimeActionType L3 dispatch path verified via loop.py turn-end hook → route_from_runtime_loop → catalog adapter；empty registry 路径（`no_suitable_skill`）✅；non-empty registry business operation（demo-note-maker body load）✅ (WP2)；多 skill marketplace 为 future work |
@@ -68,7 +68,7 @@ query/event
 | **MCP: Policy Re-Eval** | ❌ | ❌ | ❌ | 无 | 需要 runtime loop 中 confirmation 交互 | 需用户决策，暂缓 |
 | **MCP: HOME isolation** | ✅ | ✅ | N/A | `test_mcp_l3_real_core_loop.py::T6` 在 HOME 隔离路径下通过 | 非覆盖缺口——测试正确要求隔离 HOME，CI/Makefile 应统一设置 | 已闭环（基础设施问题，非测试缺陷） |
 | **Memory: retain** | ✅ | ✅ | ✅ | `test_memory_retain_branch_behavior.py`, `test_memory_propose_l3.py` | 无 | MEMORY_PROPOSE L3 已闭环 (本 commit) |
-| **Memory: recall** | ✅ | ✅ | ✅ (dispatch path) | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | MEMORY_RECALL RuntimeAction dispatch path L3 verified；实际 prompt injection 路径（`snapshot_for_prompt()` → `build_system_prompt()`）不与 RuntimeAction evidence 统一；Pre-loop MEMORY_RECALL wiring 为 Architecture Extension candidate | 已闭环 (commit e18595b)；双路径统一为 future work |
+| **Memory: recall** | ✅ | ✅ | ✅ (L3 完整闭环，AD 裁决双路径互补) | `test_memory_recall_branch_behavior.py`, `test_memory_recall_l3.py` | MEMORY_RECALL AD 裁决：Path A（pre-loop prompt injection）与 Path B（turn-end dispatcher evidence）服务于不同目的，不统一。Path A 注入 system prompt（用户可见）；Path B 收集 L3 evidence。架构正确，互补不竞争。 | 已闭环 (commit e18595b + AD) |
 | **Memory: consolidation** | ✅ | ✅ | ✅ (dispatch path) | `test_memory_consolidation*.py`, `test_memory_consolidate_l3.py` | MEMORY_CONSOLIDATE RuntimeAction dispatch path L3 verified via loop.py turn-end hook；real LLM consolidation（consolidation_llm.py）需真实 LLM/private data，仍 deferred | 已闭环 (本 commit)；real LLM consolidation deferred |
 | **Checkpoint: save/resume** | ✅ | ✅ | ✅ | `test_checkpoint_save_resume_l3.py` | 无 | 已闭环 (commit cd6aaf6) |
 | **Evidence: overclaim protection** | ✅ | ✅ | N/A | `test_runtime_action_contract.py` | CHECKPOINT_SAFE_SUMMARY overclaim 已覆盖（`test_forged_target_label_as_checkpoint` + `test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_checkpoint`） | 已闭环 |
@@ -176,10 +176,10 @@ query/event
 
 | Priority | Capability | Category | Why Architecture Extension | Dependencies |
 |---|---|---|---|---|
-| **高** | Pre-loop MEMORY_RECALL wiring | Architecture Extension | 需要新 branch point（pre-loop context build phase）或双路径统一设计；现有 turn-end MEMORY_RECALL 与 `snapshot_for_prompt()` 路径未共享 evidence | 需 Architecture Decision / SPEC 先行 |
+| **高** | ~~Pre-loop MEMORY_RECALL wiring~~ | ✅ AD 裁决不统一 (commit e18595b + AD) | MEMORY_RECALL AD (`docs/design/MEMORY_RECALL_DUAL_PATH_AD.md`) 裁决：Path A（pre-loop injection）与 Path B（turn-end dispatcher evidence）服务于不同目的，不统一。当前架构正确。 | N/A |
 | **中** | ~~Skill non-empty registry business operation L3~~ | ✅ 完成 (WP2, commit 35009ed) — Branch behavior 补齐（现有 SKILL_SELECT branch point） | 已验证 demo-note-maker body_load_decision=True L3 完整闭环 | N/A |
 | **中** | ~~SubAgent non-empty registry business delegation L3~~ | ✅ 完成 (本 commit) — Branch behavior 补齐（现有 SUBAGENT_DELEGATE_L0 branch point） | Non-empty registry business delegation L3 verified: T3 (success), T4 (reject unregistered), T5 (shell gate), T6 (adjudication gate) | N/A |
-| **中** | MEMORY_PROPOSE confirmation flow wiring | Architecture Extension / Branch behavior | confirmation 二次 turn-end action wiring；现有 turn-end hook 可承载 | 需 Architecture Decision 判定是否需要新 RuntimeActionType |
+| **中** | ~~MEMORY_PROPOSE confirmation flow wiring~~ | ✅ 已完成 — turn-end hook MEMORY_PROPOSE dispatch 已完整闭环 | MEMORY_PROPOSE 在 loop.py:188-235 通过 turn-end hook dispatch；confirmation → pending_retain_proposals → MEMORY_PROPOSE → retain execution → store.write() 完整 evidence chain，91 tests pass | N/A |
 | **中低** | Full user-visible streaming UX | Architecture Extension | STREAMING_PROVIDER_CALL dispatch path 已有；需 streaming protocol adapter / UX SPEC | SPEC → TDD → Plan → Implementation |
 
 #### Group B: Product decision required
@@ -199,7 +199,7 @@ query/event
 
 | Priority | Capability | Action |
 |---|---|---|
-| **P3** | STREAMING_EVENT descriptor 标记 inactive | 标记为 reserved/inactive/future work 或后续清理（本轮不改代码） |
+| **P3** | ~~STREAMING_EVENT descriptor 标记 inactive~~ | ✅ 完成 — `schema.py` 已添加 reserved/inactive 注释，说明无 handler、无 dispatch wiring、catalog entry 仅为 future work |
 
 ## G. Stop Conditions（2026-05-24 更新：Architecture Extension Loop 已启用）
 

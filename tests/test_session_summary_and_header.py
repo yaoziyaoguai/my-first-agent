@@ -144,7 +144,7 @@ def test_init_session_outputs_structured_header_without_health_dump(monkeypatch)
         session_mod.init_session()
     out = buf.getvalue()
 
-    assert "Runtime v0.3 basic CLI shell" in out
+    assert "First Agent — local-first agent runtime" in out
     assert "session" in out
     assert "cwd" in out
     assert "python main.py health" in out

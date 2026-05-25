@@ -304,7 +304,7 @@ def memory_list_event(records: tuple, *, store_label: str = "memory") -> Runtime
     if not records:
         return RuntimeEvent(
             event_type=EVENT_MEMORY_LISTED,
-            text="暂无已保存的记忆。",
+            text="暂无已保存的记忆。（使用 'remember ...' 来保存新记忆）",
             metadata={"item_count": 0},
         )
 

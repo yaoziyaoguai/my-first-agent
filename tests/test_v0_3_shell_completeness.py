@@ -73,8 +73,9 @@ def test_shell_flag_enters_normal_cli_shell(monkeypatch):
 def test_startup_header_marks_skill_experimental_and_drops_dead_command():
     out = cli_renderer.render_session_header(session_id="abc12345-x", cwd=".")
     assert "/reload_skills" not in out
-    assert "实验性" in out
-    assert "V0_3_SKILL_SYSTEM_STATUS" in out
+    assert "safe-local" in out
+    assert "demo-note-maker" in out
+    assert "marketplace" in out
     assert "python main.py health" in out
     assert "python main.py logs" in out
 
@@ -154,8 +155,9 @@ def test_readme_startup_example_matches_current_header_shape():
     """
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "Health: python main.py health；Logs: python main.py logs --tail 50。" in text
-    assert "Skill 是实验性能力" in text
-    assert "CURRENT_AUDIT_STATUS.zh.md" in text
+    assert "safe-local" in text
+    assert "demo-note-maker" in text
+    assert "CURRENT_CAPABILITY_STATUS.zh.md" in text
     assert "not a full Textual IDE" in text
 
 

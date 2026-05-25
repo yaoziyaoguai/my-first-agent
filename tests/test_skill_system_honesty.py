@@ -72,12 +72,12 @@ def test_session_header_does_not_advertise_dead_slash_command():
     assert "/reload" not in out
 
 
-def test_session_header_marks_skill_as_experimental():
-    """启动屏必须明确告诉用户 Skill 仍是实验性能力。"""
+def test_session_header_honestly_describes_skill_status():
+    """启动屏必须诚实描述 Skill 当前状态：safe-local 基线完成，marketplace 未实现。"""
     out = cli_renderer.render_session_header(session_id="x", cwd=".")
-    assert "实验性" in out
-    # 指向 status doc，让用户知道去哪看现状
-    assert "V0_3_SKILL_SYSTEM_STATUS" in out or "skill" in out.lower()
+    assert "safe-local" in out
+    assert "demo-note-maker" in out
+    assert "marketplace" in out
 
 
 # ---------- README / 计划文档诚实度 ----------

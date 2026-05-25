@@ -21,7 +21,7 @@
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements.txt
 ```
 
 ### Step 2: 启动方式

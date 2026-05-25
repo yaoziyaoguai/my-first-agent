@@ -25,7 +25,7 @@ from typing import Any
 
 # 当前阶段标签。后续 v0.3 M2/M3/M4 推进时同步改这里即可，
 # 不要在 main.py 多处分散 hardcode。
-STAGE_LABEL = "Runtime v0.3 basic CLI shell"
+STAGE_LABEL = "First Agent — local-first agent runtime"
 
 # 渲染分隔线宽度。固定 60，避免按终端宽度自适应引入 curses 依赖。
 _BAR = "─" * 60
@@ -77,7 +77,7 @@ def render_session_header(
             "  输入 'quit' 退出，输入 'help' 查看可用能力与限制。",
             "  python main.py health / python main.py logs --tail 50。",
             "  Fake provider 安全路径（默认，无 API key，不联网）。",
-            "  [实验性] Skill 系统仍是实验性能力，具体状态见 help 或 docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md。",
+            "  Skill System safe-local 基线已完成，demo-note-maker 可用。多 skill marketplace 未实现。",
             "",
         ]
     )
@@ -230,7 +230,7 @@ def render_onboarding() -> str:
     """
     lines = [
         _BAR,
-        "  First Agent — Runtime v0.3 用户能力补齐阶段",
+        "  First Agent — local-first agent runtime (cleanup-only, awaiting human dogfood)",
         _BAR,
         "",
         "  定位：个人 AI 助手 runtime。工程地基（Tool/Skill/SubAgent/Memory pipeline）",

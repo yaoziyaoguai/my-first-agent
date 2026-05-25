@@ -11,9 +11,10 @@
 ### 10 分钟理解项目
 
 1. [根 README](../README.md)
-2. [First Agent Overview](00-overview/FIRST_AGENT_OVERVIEW.zh.md)
-3. [Architecture Map](00-overview/ARCHITECTURE_MAP.zh.md)
-4. [Capability Matrix](00-overview/CAPABILITY_MATRIX.zh.md)
+2. [Current Capability Status](00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
+3. [First Agent Overview](00-overview/FIRST_AGENT_OVERVIEW.zh.md)
+4. [Architecture Map](00-overview/ARCHITECTURE_MAP.zh.md)
+5. [Capability Matrix](00-overview/CAPABILITY_MATRIX.zh.md)
 
 ### 准备本地运行
 
@@ -23,11 +24,12 @@
 
 ### 了解当前阶段和下一步行动
 
-1. [全局 Red-Team 审计（权威源）](audit/global-red-team-product-architecture-audit-2026-05-25.md) — 当前所有行动的唯一定义源
-2. [Red-Team Remediation Plan](plans/global-red-team-remediation-plan-2026-05-25.md) — RT-01 到 RT-18 修复执行计划
-3. [审计文档索引](audit/README.md) — active vs historical 审计分类
-4. [计划文档索引](plans/README.md) — active vs historical 计划分类
-5. [Dogfood 报告索引](dogfood/README.md) — active vs historical dogfood 分类
+1. [Current Capability Status](00-overview/CURRENT_CAPABILITY_STATUS.zh.md) — 当前能力、边界和下一步
+2. [Capability Gap Audit](audit/capability-gap-audit-low-complexity-2026-05-25.md) — 本轮 low-complexity remediation 选择依据
+3. [全局 Red-Team 审计](audit/global-red-team-product-architecture-audit-2026-05-25.md) — 架构/代码/UX/安全基础审计
+4. [审计文档索引](audit/README.md) — active vs historical 审计分类
+5. [计划文档索引](plans/README.md) — active vs historical 计划分类
+6. [Dogfood 报告索引](dogfood/README.md) — active vs historical dogfood 分类
 
 ### 做架构或实现审计
 

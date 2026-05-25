@@ -18,9 +18,9 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 >
 > ⚠️ **FakeProvider 增长已冻结**：FakeProvider 是 deterministic test fixture / debug provider，不继续增强为 fake planner / fake reasoning engine。真实智能通过 real provider dogfood 验证。参见审计文档 Section B.3 (F19)。
 
-**当前阶段：Cleanup-Only Remediation 进行中** — 第二轮 post-red-team cleanup remediation（PF-01 到 PF-15），修复 P1/P2 问题，准备 manual human dogfood。不再继续能力建设。入口：[Post Red-Team Cleanup Remediation Plan](docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md)。
+**当前阶段：Capability Gap Audit + Low-Complexity Remediation** — 只补 docs / onboarding / debug summary / redaction guard 等低复杂度、safe-to-auto-run 项；不继续大能力建设。当前一页状态入口：[Current Capability Status](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md)。
 
-**下一阶段最高价值行动：Manual Human Dogfood** — 从头按 README 走一遍 fake/local 模式，记录所有困惑、错误和 UX 摩擦。入口：[Dogfood README](docs/dogfood/README.md) → [Dogfood Checklist](docs/dogfood/local-manual-dogfood-checklist.md)。
+**仍需人类完成：Manual Human Dogfood** — 自动 rehearsal 不是人工 dogfood 的替代品；等用户准备好后，从头按 fake/local 模式记录困惑、错误和 UX 摩擦。入口：[Dogfood README](docs/dogfood/README.md) → [Dogfood Checklist](docs/dogfood/local-manual-dogfood-checklist.md)。
 
 > ⚠️ **v0.9.x 历史文档已归档至 `docs/archive/v0.x/`** — 不再作为当前入口。当前路线以全局审计文档为权威源。
 
@@ -304,15 +304,15 @@ Explicit Non-Goals for v0.1:
 ## 文档阅读路径
 
 1. 项目入口：[docs/README.zh.md](docs/README.zh.md)
-2. 了解当前阶段和下一步：[docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md](docs/plans/post-red-team-cleanup-remediation-plan-2026-05-25.md)
-3. Manual Human Dogfood Checklist：[docs/dogfood/local-manual-dogfood-checklist.md](docs/dogfood/local-manual-dogfood-checklist.md)
-4. 当前审计：[docs/audit/global-red-team-product-architecture-audit-2026-05-25.md](docs/audit/global-red-team-product-architecture-audit-2026-05-25.md)
-5. 系统概览：[FIRST_AGENT_OVERVIEW.zh.md](docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md)
-6. 架构图：[ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)
-7. 能力矩阵：[CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)
-8. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
-9. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
-10. 当前审计状态：[CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)
+2. 当前一页状态：[CURRENT_CAPABILITY_STATUS.zh.md](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
+3. 了解当前自动化边界：[capability-gap-audit-low-complexity-2026-05-25.md](docs/audit/capability-gap-audit-low-complexity-2026-05-25.md)
+4. Manual Human Dogfood Checklist：[docs/dogfood/local-manual-dogfood-checklist.md](docs/dogfood/local-manual-dogfood-checklist.md)
+5. 当前审计：[docs/audit/global-red-team-product-architecture-audit-2026-05-25.md](docs/audit/global-red-team-product-architecture-audit-2026-05-25.md)
+6. 系统概览：[FIRST_AGENT_OVERVIEW.zh.md](docs/00-overview/FIRST_AGENT_OVERVIEW.zh.md)
+7. 架构图：[ARCHITECTURE_MAP.zh.md](docs/00-overview/ARCHITECTURE_MAP.zh.md)
+8. 能力矩阵：[CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)
+9. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
+10. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
 11. 本地试用清单（已归档）：[V0_3_LOCAL_TRIAL_CHECKLIST.md](docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md)
 12. 手工试用反馈模板（已归档）：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
 13. Event transition 准备（已归档）：[V0_4_EVENT_TRANSITION_PREP.md](docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md)

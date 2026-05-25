@@ -1,5 +1,7 @@
 # Current Audit Status
 
+> **Historical status notice (2026-05-25):** 这篇文档保留 v0.9.x stabilization 审计历史，不再作为当前能力/下一步的首要入口。当前状态请读 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md) 和 [Capability Gap Audit](../audit/capability-gap-audit-low-complexity-2026-05-25.md)。
+
 这篇文档记录当前代码、测试、dogfood、文档入口的审计状态，方便 push 前快速判断项目是否健康。
 
 不替代独立审计报告，也不作为 tag/release 授权。

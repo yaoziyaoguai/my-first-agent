@@ -257,15 +257,18 @@ def test_memory_snapshot_contract_has_no_runtime_checkpoint_tui_or_io_dependency
 # that is NOT provider-specific (no kimi/DashScope references).
 
 def test_system_prompt_contains_tool_use_guidance() -> None:
-    """验证 SYSTEM_PROMPT 包含通用工具使用引导。"""
+    """验证 SYSTEM_PROMPT 包含通用工具使用引导（含主动匹配指引）。"""
     from config import SYSTEM_PROMPT
 
     assert "工具使用指南" in SYSTEM_PROMPT
-    assert "优先使用工具完成明确可工具化的任务" in SYSTEM_PROMPT
+    assert "主动匹配工具与请求" in SYSTEM_PROMPT
     assert "不要伪造工具结果" in SYSTEM_PROMPT
     assert "工具返回后才能引用结果" in SYSTEM_PROMPT
     assert "普通对话不需要工具" in SYSTEM_PROMPT
     assert "只使用已注册工具" in SYSTEM_PROMPT
+    # 新增：确认包含具体触发模式指引（帮助模型在自然语言中识别工具场景）
+    assert "创建" in SYSTEM_PROMPT
+    assert "总结" in SYSTEM_PROMPT
 
 
 def test_system_prompt_tool_use_guidance_is_not_provider_specific() -> None:

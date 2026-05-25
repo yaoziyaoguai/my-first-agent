@@ -250,3 +250,72 @@ def test_memory_snapshot_contract_has_no_runtime_checkpoint_tui_or_io_dependency
 
     assert imports.isdisjoint(forbidden_imports), imports & forbidden_imports
     assert calls.isdisjoint(forbidden_calls), calls & forbidden_calls
+
+
+# ── System Prompt Tool-Use Guidance tests ───────────────────────────────
+# Phase 1: verify SYSTEM_PROMPT contains generic tool-use guidance
+# that is NOT provider-specific (no kimi/DashScope references).
+
+def test_system_prompt_contains_tool_use_guidance() -> None:
+    """验证 SYSTEM_PROMPT 包含通用工具使用引导。"""
+    from config import SYSTEM_PROMPT
+
+    assert "工具使用指南" in SYSTEM_PROMPT
+    assert "优先使用工具完成明确可工具化的任务" in SYSTEM_PROMPT
+    assert "不要伪造工具结果" in SYSTEM_PROMPT
+    assert "工具返回后才能引用结果" in SYSTEM_PROMPT
+    assert "普通对话不需要工具" in SYSTEM_PROMPT
+    assert "只使用已注册工具" in SYSTEM_PROMPT
+
+
+def test_system_prompt_tool_use_guidance_is_not_provider_specific() -> None:
+    """验证工具使用引导不包含 provider-specific hack。"""
+    from config import SYSTEM_PROMPT
+
+    guidance_start = SYSTEM_PROMPT.find("工具使用指南")
+    assert guidance_start > 0
+    guidance_section = SYSTEM_PROMPT[guidance_start:]
+
+    # 不得包含 provider-specific 引用
+    forbidden = ("kimi", "DashScope", "deepseek", "anthropic_compatible", "openai_compatible")
+    for term in forbidden:
+        assert term not in guidance_section, f"guidance contains provider-specific term: {term}"
+
+
+def test_system_prompt_does_not_force_tools_on_all_tasks() -> None:
+    """验证工具使用引导不强迫所有任务使用工具。"""
+    from config import SYSTEM_PROMPT
+
+    assert "普通对话不需要工具" in SYSTEM_PROMPT
+    assert "闲聊、知识问答、解释概念、讨论方案" in SYSTEM_PROMPT
+    # 不应包含类似 "always use tools" 的硬性要求
+    assert "always use tools" not in SYSTEM_PROMPT.lower()
+    assert "必须使用工具" not in SYSTEM_PROMPT
+
+
+def test_build_system_prompt_includes_tool_use_guidance() -> None:
+    """验证 build_system_prompt() 输出包含工具使用引导。"""
+    from agent.prompt_builder import build_system_prompt
+
+    prompt = build_system_prompt(memory_snapshot=None)
+    assert "工具使用指南" in prompt
+    assert "不要伪造工具结果" in prompt
+
+
+def test_fake_provider_chat_still_works_after_prompt_change() -> None:
+    """验证 fake provider 路径不受 system prompt 修改影响。"""
+    from agent.core import chat
+    from agent.provider.fake_provider import FakeProvider
+    from agent.display_events import RuntimeEvent
+
+    events: list[RuntimeEvent] = []
+
+    def sink(e: RuntimeEvent) -> None:
+        events.append(e)
+
+    chat("你好，今天怎么样？", provider=FakeProvider(), on_runtime_event=sink)
+    et = [e.event_type for e in events]
+    assert "assistant.delta" in et
+    assert "run.summary" in et
+    text = " ".join(e.text for e in events if e.text)
+    assert len(text) > 10

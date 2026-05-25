@@ -113,8 +113,11 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         RuntimeActionType.SKILL_SELECT,
         SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
     )
-    # SUBAGENT_DELEGATE_L0：demo subagent registry 非空，handler 可定位已注册 subagent
-    _subagent_registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])
+    # SUBAGENT_DELEGATE_L0：demo subagent registry 非空，handler 可定位已注册 subagent。
+    # PF-05: 使用 agent/subagent_system/descriptors/ 而非 tests/fixtures/subagents。
+    # demo descriptors（demo-stat, code-reviewer）标记为 DEMO-ONLY，不是产品能力。
+    # tests/fixtures/subagents 只能被 tests 读取，不能出现在 runtime product path。
+    _subagent_registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),

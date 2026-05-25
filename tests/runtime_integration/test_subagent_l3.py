@@ -204,10 +204,11 @@ class TestNoRealAPIOrEnv:
 
 
 def _build_nonempty_subagent_dispatcher():
-    """构建真实生产级 dispatcher——SubAgentRegistry 非空，与 phase1_hook.py 一致。
+    """构建非空 SubAgentRegistry dispatcher 用于 L3 业务委托测试。
 
-    phase1_hook.py:114 使用 SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])，
-    本 helper 复现同一配置。handler 的非空 registry 分支（subagent_action.py:59-125）
+    PF-05: phase1_hook.py 现已使用 agent/subagent_system/descriptors/（product demo
+    descriptors），不再读取 tests/fixtures/subagents。本 helper 使用 test fixtures
+    构建 registry 以验证 handler 的非空 registry 分支（subagent_action.py:59-125），
     可走通完整业务委托路径。
     """
     registry = SubAgentRegistry(roots=[Path("tests/fixtures/subagents")])

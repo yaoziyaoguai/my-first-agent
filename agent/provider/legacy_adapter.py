@@ -4,9 +4,15 @@ core/planner/memory compression 仍有少量历史代码期待 `client.messages.
 形状。本模块提供薄 facade，把这些调用转发到 provider.create()，避免 core.py
 继续直接创建 Anthropic SDK client。它不读取配置、不持有 secret 明文。
 
-**Deprecation plan**：ProviderBackedClient / ProviderBackedMessages 的价值随
-planner/compress 迁移到 provider-neutral create() 而递减。保留 1 个版本周期
-（至 v0.4+）作为 facade；新代码直接使用 provider.create()，不要再通过本模块。
+Deprecation plan: ProviderBackedClient / ProviderBackedMessages 的价值随
+planner/compress 迁移到 provider-neutral create() 而递减。
+
+Removal criteria: planner.py + memory.py compress_history 全部改为直接使用
+provider.create() 后，本模块连同 ProviderBackedClient、ProviderBackedMessages
+一并删除。
+Sunset: v0.4+。
+Why kept: planner/compress 尚未完全迁移到 provider-neutral 接口。
+Not default path: 新代码直接使用 provider.create()，不要通过本模块。
 """
 
 from __future__ import annotations

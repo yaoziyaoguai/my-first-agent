@@ -47,7 +47,10 @@ from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
 # ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
 # 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
-# 保留 1 个版本周期（至 v0.4+）后可移除这些 re-export。
+#
+# Why kept: 旧测试和 dogfood scripts 仍通过 core._looks_like_* 引用。
+# Removal criteria: 所有外部引用迁移到 agent.cli_commands 直 import 后移除。
+# Sunset: v0.4+。不新增引用到此别名。
 from agent.cli_commands import (  # noqa: F401  — deprecated backward-compat re-exports
     detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
     detect_forget_memory as _looks_like_forget_memory,
@@ -412,9 +415,12 @@ def chat(
 
     `on_runtime_event` 是 Runtime -> UI 用户可见输出的主路径。`on_output_chunk` 和
     `on_display_event` 只作为 deprecated compatibility bridge 保留，分别兼容旧调用方
-    接收 assistant delta 和 DisplayEvent；新调用方不应继续把它们当入口。这个函数
-    只迁移 UI projection，不改变 checkpoint、runtime_observer、conversation.messages、
-    Anthropic API messages 或 TaskState 状态机本体。
+    接收 assistant delta 和 DisplayEvent；新调用方不应继续把它们当入口。
+
+    Sunset: on_output_chunk/on_display_event 在 v0.4+ 移除，届时所有调用方必须迁移到
+    on_runtime_event。Not default path — 新代码禁止新增 on_output_chunk/on_display_event
+    依赖。这个函数只迁移 UI projection，不改变 checkpoint、runtime_observer、
+    conversation.messages、Anthropic API messages 或 TaskState 状态机本体。
 
     `on_trace_event` 是 RFC 0002 的显式 opt-in observability seam：调用方如果需要
     本地 TraceEvent，可以传 sink；默认不创建 recorder，也不把 trace 写入 durable

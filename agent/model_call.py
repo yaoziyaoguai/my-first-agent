@@ -21,6 +21,9 @@ def build_default_model_client() -> tuple[Any | None, Any]:
 
     provider 存在时，client 只是给 legacy planner/compress 使用的 facade；
     provider 缺失时返回显式 object，让测试可以 monkeypatch core.client。
+
+    ⛔ Sunset: ProviderBackedClient + legacy client facade 在 v0.4+ 移除，
+    届时 planner/compress 直接使用 provider.create()。Not default path。
     """
 
     provider = build_model_provider_from_env()
@@ -44,8 +47,9 @@ def call_model(
 ) -> Any:
     """通过 provider abstraction 调用模型，并兼容测试 fake client。
 
-    Provider path 是唯一生产路径。legacy_client 参数只为旧调用签名保留；
-    没有 ModelProvider 时 fail closed，避免真实 SDK client 绕过 provider factory。
+    Provider path 是唯一生产路径。legacy_client 参数只为旧调用签名保留
+    （⛔ DEPRECATED, sunset v0.4+）；没有 ModelProvider 时 fail closed，
+    避免真实 SDK client 绕过 provider factory。
     这里不写 checkpoint、不改 state，只把 provider stream 聚合为最终 response。
     """
 

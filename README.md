@@ -49,7 +49,7 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 | Shell / external process / worktree | gated/future | 不默认开启 |
 
 更完整的能力边界见 [CAPABILITY_MATRIX.zh.md](docs/00-overview/CAPABILITY_MATRIX.zh.md)。
-历史 v0.3 Skill 状态和实验性声明见 [V0_3_SKILL_SYSTEM_STATUS.md](docs/V0_3_SKILL_SYSTEM_STATUS.md)；当前 formal Skill System 已完成 safe-local 主线，但仍不代表远程安装、自动执行工具或 sub-agent 接管 runtime。
+历史 v0.3 Skill 状态和实验性声明见 [V0_3_SKILL_SYSTEM_STATUS.md](docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md)；当前 formal Skill System 已完成 safe-local 主线，但仍不代表远程安装、自动执行工具或 sub-agent 接管 runtime。
 
 ## 架构图文字版
 
@@ -118,7 +118,7 @@ python main.py --help        # 查看完整能力与限制说明
 
 当前默认使用 Fake Provider（安全路径，无 API key，不联网）。启动屏和 `--help` 会诚实说明当前可用能力与尚未产品化的部分。
 
-启动屏参考：Health: python main.py health；Logs: python main.py logs --tail 50。Skill 是实验性能力，具体状态见 help 或 V0_3_SKILL_SYSTEM_STATUS.md。当前 CLI shell is not a full Textual IDE.
+启动屏参考：Health: python main.py health；Logs: python main.py logs --tail 50。Skill 是实验性能力，具体状态见 help 或 docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md。当前 CLI shell is not a full Textual IDE.
 
 ### 本地健康检查和日志摘要
 
@@ -275,7 +275,7 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 ## 历史 Smoke Preflight
 
 Runtime v0.1 graduation 仍保留为 canonical smoke 历史基线：B1 complete、B2 complete、B3 complete。
-详细证据见 `docs/V0_1_GRADUATION_REPORT.md`。
+详细证据见 `docs/archive/v0.x/V0_1_GRADUATION_REPORT.md`。
 
 固定 preflight 命令：
 
@@ -308,10 +308,10 @@ Explicit Non-Goals for v0.1:
 5. 上手指南：[GETTING_STARTED.zh.md](docs/01-getting-started/GETTING_STARTED.zh.md)
 6. 测试与 dogfood：[TEST_MATRIX.zh.md](docs/05-testing-dogfood/TEST_MATRIX.zh.md)
 7. 当前审计状态：[CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md)
-8. 本地试用清单：[V0_3_LOCAL_TRIAL_CHECKLIST.md](docs/V0_3_LOCAL_TRIAL_CHECKLIST.md)
-9. 手工试用反馈模板：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
-10. Event transition 准备：[V0_4_EVENT_TRANSITION_PREP.md](docs/V0_4_EVENT_TRANSITION_PREP.md)
-11. Skill 实验性状态记录：[V0_3_SKILL_SYSTEM_STATUS.md](docs/V0_3_SKILL_SYSTEM_STATUS.md)
+8. 本地试用清单（已归档）：[V0_3_LOCAL_TRIAL_CHECKLIST.md](docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md)
+9. 手工试用反馈模板（已归档）：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
+10. Event transition 准备（已归档）：[V0_4_EVENT_TRANSITION_PREP.md](docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md)
+11. Skill 实验性状态记录（已归档）：[V0_3_SKILL_SYSTEM_STATUS.md](docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md)
 12. **Runtime Integration 设计文档包**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
 
 Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`。

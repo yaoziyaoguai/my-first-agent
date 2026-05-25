@@ -95,8 +95,8 @@ def test_local_trial_doc_exists_with_outsider_sections() -> None:
 
     断言：文件存在 + 含外部读者必读的关键 section 关键字（不绑定全文）。
     """
-    path = REPO_ROOT / "docs" / "V0_3_LOCAL_TRIAL.md"
-    assert path.exists(), "docs/V0_3_LOCAL_TRIAL.md 必须存在作为本地试用指南"
+    path = REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_3_LOCAL_TRIAL.md"
+    assert path.exists(), "docs/archive/v0.x/V0_3_LOCAL_TRIAL.md 必须存在作为本地试用指南"
     text = path.read_text(encoding="utf-8")
     landmarks = [
         "local-first",
@@ -111,7 +111,7 @@ def test_local_trial_doc_exists_with_outsider_sections() -> None:
     lower = text.lower()
     missing = [s for s in landmarks if s.lower() not in lower]
     assert not missing, (
-        f"docs/V0_3_LOCAL_TRIAL.md 缺少外部读者必读关键字：{missing}"
+        f"docs/archive/v0.x/V0_3_LOCAL_TRIAL.md 缺少外部读者必读关键字：{missing}"
     )
 
 
@@ -121,7 +121,7 @@ def test_local_trial_checklist_exists_and_stays_roadmap_bounded() -> None:
     这条测试守护 Roadmap 防漂移：清单必须覆盖 trial 关键路径，同时继续明确
     Skill 只是 experimental/demo-level，且不会把 v0.4+ 能力写成当前已实现能力。
     """
-    path = REPO_ROOT / "docs" / "V0_3_LOCAL_TRIAL_CHECKLIST.md"
+    path = REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_3_LOCAL_TRIAL_CHECKLIST.md"
     assert path.exists(), "v0.3.2 本地试用清单必须存在"
     text = path.read_text(encoding="utf-8")
     lower = text.lower()
@@ -169,7 +169,7 @@ def test_local_trial_checklist_referenced_from_readme() -> None:
     这里不绑定 README 章节，只守护入口链接，防止清单落地后无人能发现。
     """
     text = _read("README.md")
-    assert "docs/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
+    assert "docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
 
 
 def test_readme_keeps_local_trial_entry_short() -> None:
@@ -180,9 +180,9 @@ def test_readme_keeps_local_trial_entry_short() -> None:
     多份事实源。
     """
     text = _read("README.md")
-    assert "docs/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
-    assert "docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md" in text
-    assert "docs/V0_4_EVENT_TRANSITION_PREP.md" in text
+    assert "docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md" in text
+    assert "docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md" in text
+    assert "docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md" in text
     copied_markers = [
         "| 1 | 启动 shell |",
         "| 2 | 普通 final answer |",
@@ -200,7 +200,7 @@ def test_local_trial_checklist_feedback_format_is_stable() -> None:
     这不是为了绑定文案，而是守护 Roadmap 边界：v0.3.2 只需要能把失败现象
     稳定归类为 blocking / patch / planning，不引入复杂 issue tracker 或平台能力。
     """
-    text = _read("docs/V0_3_LOCAL_TRIAL_CHECKLIST.md")
+    text = _read("docs/archive/v0.x/V0_3_LOCAL_TRIAL_CHECKLIST.md")
     required = [
         "现象：",
         "命令/输入：",
@@ -219,7 +219,7 @@ def test_v0_3_2_trial_run_report_exists_and_separates_coverage() -> None:
     这是 Roadmap 防漂移测试：不能为了显得 release-ready，把需要真实 LLM 或
     人眼判断的路径伪装成自动化通过。报告只记录状态，不替代人工试用。
     """
-    path = REPO_ROOT / "docs" / "V0_3_2_TRIAL_RUN_REPORT.md"
+    path = REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_3_2_TRIAL_RUN_REPORT.md"
     assert path.exists(), "v0.3.2 trial run report 必须存在"
     text = path.read_text(encoding="utf-8")
     lower = text.lower()
@@ -257,7 +257,7 @@ def test_v0_3_2_trial_report_keeps_future_work_as_planning_only() -> None:
     这条测试守护 v0.3.2 release honesty：Reflect、sub-agent、slash command、
     full Textual 等词可以作为非目标出现，但必须带否定或 planning 语境。
     """
-    text = _read("docs/V0_3_2_TRIAL_RUN_REPORT.md")
+    text = _read("docs/archive/v0.x/V0_3_2_TRIAL_RUN_REPORT.md")
     lower = text.lower()
     assert "local-first learning runtime prototype" in lower
     assert "not a full textual ide" in lower
@@ -336,7 +336,7 @@ def test_v0_3_2_manual_trial_feedback_doc_exists_and_is_actionable() -> None:
     试用时能把问题稳定记录成 command/input/expected/actual/evidence，而不是
     只留下无法复现的自然语言抱怨。
     """
-    path = REPO_ROOT / "docs" / "V0_3_2_MANUAL_TRIAL_FEEDBACK.md"
+    path = REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_3_2_MANUAL_TRIAL_FEEDBACK.md"
     assert path.exists(), "v0.3.2 manual trial feedback 文档必须存在"
     text = path.read_text(encoding="utf-8")
     lower = text.lower()
@@ -377,7 +377,7 @@ def test_manual_trial_feedback_doc_routes_scope_without_overclaiming() -> None:
     Roadmap 边界在这里很具体：v0.3.x 可以修文案和轻量 bug，v0.4 才讨论
     transition/schema/logs 结构，Reflect/sub-agent/full Textual 等不能被写成当前能力。
     """
-    text = _read("docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
+    text = _read("docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
     lower = text.lower()
 
     for term in ["v0.3.x patch", "v0.4 candidate", "out of scope"]:
@@ -418,7 +418,7 @@ def test_manual_trial_feedback_doc_keeps_secret_and_artifact_boundary() -> None:
     这是本地试用安全边界：反馈材料可以记录 status/log/checkpoint 摘要，但不能把
     `.env`、sessions、agent_log.jsonl、workspace 或 checkpoint 变成可提交材料。
     """
-    text = _read("docs/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
+    text = _read("docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md")
     lower = text.lower()
     required = [
         "do not enter real secrets",
@@ -444,7 +444,7 @@ def test_v0_4_event_transition_prep_doc_exists_and_stays_preparatory() -> None:
     这个测试守护 v0.4 第一阶段入口：先做事件/状态/transition 命名和测试边界，
     不要求当前代码已经完全 event-driven，也不允许一上来重写 Runtime。
     """
-    path = REPO_ROOT / "docs" / "V0_4_EVENT_TRANSITION_PREP.md"
+    path = REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_4_EVENT_TRANSITION_PREP.md"
     assert path.exists(), "v0.4 event transition prep 文档必须存在"
     text = path.read_text(encoding="utf-8")
     lower = text.lower()
@@ -481,7 +481,7 @@ def test_v0_4_event_transition_prep_lists_candidates_without_requiring_event_dri
     这是防漂移：候选名用于未来测试和类型边界，当前 runtime 仍是 v0.3 local-first
     原型，不能因为文档写了 Event candidates 就被误读为架构已经迁移完成。
     """
-    text = _read("docs/V0_4_EVENT_TRANSITION_PREP.md")
+    text = _read("docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md")
     lower = text.lower()
 
     for event_name in [
@@ -512,7 +512,7 @@ def test_v0_4_event_transition_prep_keeps_forbidden_items_out() -> None:
     Event/Transition 梳理，不能顺手引入重框架、sub-agent、Reflect、full Textual
     或旧 slash command 体系。
     """
-    text = _read("docs/V0_4_EVENT_TRANSITION_PREP.md")
+    text = _read("docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md")
     lower = text.lower()
     for term in [
         "langgraph",

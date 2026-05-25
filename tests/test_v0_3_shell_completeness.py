@@ -96,7 +96,7 @@ def test_health_log_size_action_links_to_logs_viewer(tmp_path, monkeypatch):
 # ---------- 文档与代码一致性 ----------
 
 def test_basic_shell_usage_doc_exists_and_lists_all_subcommands():
-    doc = PROJECT_ROOT / "docs" / "V0_3_BASIC_SHELL_USAGE.md"
+    doc = PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_BASIC_SHELL_USAGE.md"
     assert doc.exists()
     text = doc.read_text(encoding="utf-8")
     # 文档承诺的每个命令都应该在 doc 里出现
@@ -116,7 +116,7 @@ def test_basic_shell_usage_doc_exists_and_lists_all_subcommands():
 
 
 def test_v0_3_health_maintenance_doc_exists_and_matches_entrypoints():
-    doc = PROJECT_ROOT / "docs" / "V0_3_HEALTH_MAINTENANCE.md"
+    doc = PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_HEALTH_MAINTENANCE.md"
     assert doc.exists()
     text = doc.read_text(encoding="utf-8")
     assert "python main.py health" in text
@@ -177,7 +177,7 @@ def test_health_report_renders_without_error():
 # ---------- M1-M4 不做的清单仍在文档中显式登记 ----------
 
 def test_planning_doc_keeps_non_goals_visible():
-    text = (PROJECT_ROOT / "docs" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
     # v0.3 显式不做的能力清单必须保留，不能被「完成态」误读为已实现
     for forbidden in (
         "Reflect",
@@ -330,8 +330,8 @@ def test_log_viewer_can_recover_four_tool_outcomes_from_real_jsonl(tmp_path, mon
 def test_reflect_self_correction_marked_out_of_scope_in_all_user_docs():
     docs_to_check = [
         PROJECT_ROOT / "README.md",
-        PROJECT_ROOT / "docs" / "V0_3_PLANNING.md",
-        PROJECT_ROOT / "docs" / "V0_3_BASIC_SHELL_USAGE.md",
+        PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md",
+        PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_BASIC_SHELL_USAGE.md",
     ]
     for path in docs_to_check:
         text = path.read_text(encoding="utf-8")

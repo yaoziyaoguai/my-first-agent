@@ -10,9 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLAYBOOK = ROOT / "docs" / "V0_1_SMOKE_PLAYBOOK.md"
+PLAYBOOK = ROOT / "docs" / "archive" / "v0.x" / "V0_1_SMOKE_PLAYBOOK.md"
 ROOT_README = ROOT / "README.md"
-GRADUATION_REPORT = ROOT / "docs" / "V0_1_GRADUATION_REPORT.md"
+GRADUATION_REPORT = ROOT / "docs" / "archive" / "v0.x" / "V0_1_GRADUATION_REPORT.md"
 
 SMOKE_TASK = "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。"
 
@@ -51,7 +51,7 @@ def test_b3_root_readme_exists_for_canonical_smoke_preflight():
         "B1 complete",
         "B2 complete",
         "B3 complete",
-        "docs/V0_1_GRADUATION_REPORT.md",
+        "docs/archive/v0.x/V0_1_GRADUATION_REPORT.md",
         ".venv/bin/python -m ruff check agent/ tests/",
         ".venv/bin/python -m pytest -q",
         "请读取仓库根目录 README.md，并把一段中文总结写入 summary.md。",

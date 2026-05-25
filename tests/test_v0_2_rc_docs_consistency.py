@@ -11,11 +11,21 @@
 - 只检查 RC 收口期容易出问题的几个稳定字符串。
 """
 
+import re
 from pathlib import Path
 
 import pytest
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
+
+
+def _resolve(name: str) -> Path:
+    """V0_* 文件已归档到 docs/archive/v0.x/，非 V0_* 文件仍在 docs/。"""
+    m = re.match(r"(V0_.+)$", name)
+    if m:
+        return DOCS / "archive" / "v0.x" / m.group(1)
+    return DOCS / name
+
 
 REQUIRED_DOCS = [
     "V0_2_PLANNING.md",
@@ -35,14 +45,14 @@ REQUIRED_DOCS = [
 @pytest.mark.parametrize("name", REQUIRED_DOCS)
 def test_required_v0_2_doc_exists(name):
     """RC 收口涉及的关键文档不能丢。"""
-    path = DOCS / name
+    path = _resolve(name)
     assert path.exists() and path.stat().st_size > 100, (
         f"必备文档缺失或为空：{name}"
     )
 
 
 def _read(name: str) -> str:
-    return (DOCS / name).read_text(encoding="utf-8")
+    return _resolve(name).read_text(encoding="utf-8")
 
 
 def test_rc_status_records_real_baseline():

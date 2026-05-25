@@ -583,7 +583,7 @@ def test_v0_4_prep_doc_records_started_boundary_work_without_claiming_runtime_re
     这条测试守护 Roadmap 边界：当前只开始 transition boundary tests 与命名草案，
     不允许文档漂移成“已经 full event-driven / LangGraph / full Textual”。
     """
-    text = (REPO_ROOT / "docs" / "V0_4_EVENT_TRANSITION_PREP.md").read_text(
+    text = (REPO_ROOT / "docs" / "archive" / "v0.x" / "V0_4_EVENT_TRANSITION_PREP.md").read_text(
         encoding="utf-8"
     )
     lower = text.lower()

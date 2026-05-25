@@ -12,10 +12,16 @@
 （删了文件 / 改了路径 / 重命名命令）。任何漂移都会让本测试立刻失败。
 
 边界：本测试**不**验证文档内容正确性，只验证「引用的东西存在」。
+
+2026-05-25 归档说明：v0.x 文档已归档至 docs/archive/v0.x/。
+_source_to_archive() 负责将旧 docs/V0_* 路径映射到 docs/archive/v0.x/V0_*，
+非 V0_* 路径保持不变。DOC_CROSS_REFERENCES 的 ref 值保留旧路径
+（与归档文档的内部文本内容匹配），source_doc key 使用归档路径。
 """
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 
 import pytest
@@ -24,14 +30,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # v0.2 RC 主线引用的核心文档；任何一个缺失都意味着 RC 文档链断裂。
 RC_REQUIRED_DOCS = [
-    "docs/V0_2_PLANNING.md",
+    "docs/archive/v0.x/V0_2_PLANNING.md",
     "docs/RUNTIME_STATE_MACHINE.md",
     "docs/RUNTIME_EVENT_BOUNDARIES.md",
     "docs/CHECKPOINT_RESUME_SEMANTICS.md",
     "docs/RUNTIME_ERROR_RECOVERY.md",
-    "docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md",
-    "docs/V0_2_MANUAL_SMOKE_PLAYBOOK.md",
-    "docs/V0_2_RC_STATUS.md",
+    "docs/archive/v0.x/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md",
+    "docs/archive/v0.x/V0_2_MANUAL_SMOKE_PLAYBOOK.md",
+    "docs/archive/v0.x/V0_2_RC_STATUS.md",
     "docs/CLI_OUTPUT_CONTRACT.md",
     "docs/LLM_PROVIDER_LIVE_SMOKE.md",
     "docs/LLM_AUDIT_STATUS_SCHEMA.md",
@@ -63,10 +69,19 @@ def test_manual_smoke_path_exists(rel_path: str) -> None:
     assert p.exists(), f"manual smoke 引用的路径缺失：{rel_path}"
 
 
-# RC 主线 4 份 spec + preflight + manual smoke + RC status 的 cross-link
-# 任何一个缺失都意味着文档链断裂。
+def _source_to_archive(path: str) -> str:
+    """将旧 docs/V0_* 路径映射到归档路径，非 V0_* 路径保持不变。"""
+    m = re.match(r"docs/(V0_.+)$", path)
+    if m:
+        return f"docs/archive/v0.x/{m.group(1)}"
+    return path
+
+
+# RC 主线 4 份 spec + preflight + manual smoke + RC status 的 cross-link。
+# source_doc key 使用归档路径（文件实际位置）。
+# ref 值使用旧路径（匹配归档文档的原始文本内容）。
 DOC_CROSS_REFERENCES = {
-    "docs/V0_2_RC_STATUS.md": [
+    "docs/archive/v0.x/V0_2_RC_STATUS.md": [
         "docs/RUNTIME_STATE_MACHINE.md",
         "docs/RUNTIME_EVENT_BOUNDARIES.md",
         "docs/CHECKPOINT_RESUME_SEMANTICS.md",
@@ -74,7 +89,7 @@ DOC_CROSS_REFERENCES = {
         "docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md",
         "docs/V0_2_MANUAL_SMOKE_PLAYBOOK.md",
     ],
-    "docs/V0_2_MANUAL_SMOKE_PLAYBOOK.md": [
+    "docs/archive/v0.x/V0_2_MANUAL_SMOKE_PLAYBOOK.md": [
         "docs/RUNTIME_EVENT_BOUNDARIES.md",
         "docs/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md",
         "docs/V0_2_RC_STATUS.md",
@@ -87,10 +102,17 @@ DOC_CROSS_REFERENCES = {
     [(s, r) for s, refs in DOC_CROSS_REFERENCES.items() for r in refs],
 )
 def test_rc_doc_cross_reference_resolves(source_doc: str, ref: str) -> None:
-    """RC 文档中 cross-reference 的目标必须真实存在。"""
+    """RC 文档中 cross-reference 的目标必须真实存在。
+
+    归档后 source_doc 使用归档路径读取，ref 保留旧路径（与文档内容匹配），
+    文件存在性检查通过 _source_to_archive() 映射到实际位置。
+    """
     src = (REPO_ROOT / source_doc).read_text(encoding="utf-8")
     assert ref in src, f"{source_doc} 没有引用预期的 {ref}"
-    assert (REPO_ROOT / ref).is_file(), f"{source_doc} 引用了不存在的文件 {ref}"
+    ref_actual = _source_to_archive(ref)
+    assert (REPO_ROOT / ref_actual).is_file(), (
+        f"{source_doc} 引用了不存在的文件 {ref}（实际路径 {ref_actual}）"
+    )
 
 
 # LLM Processing CLI 入口模块在 RC 里被 manual smoke 引用，必须仍可 import
@@ -129,11 +151,11 @@ def test_security_baseline_pins_known_gaps() -> None:
 def test_rc_status_lists_historical_xfail_origins_and_closure_status() -> None:
     """RC status 既要保留历史 xfail 归属，也要记录后续闭合状态。
 
-    Roadmap Completion Autopilot 关闭历史 xfail 后，测试不能继续要求“仍有
-    3 个 xfailed”。正确的不变量是：历史归属不丢，闭合方式可审计，避免下次
+    Roadmap Completion Autopilot 关闭历史 xfail 后，测试不能继续要求"仍有
+    3 个 xfailed"。正确的不变量是：历史归属不丢，闭合方式可审计，避免下次
     又把这些缺口当成未知 backlog。
     """
-    rc_status = (REPO_ROOT / "docs/V0_2_RC_STATUS.md").read_text(encoding="utf-8")
+    rc_status = (REPO_ROOT / "docs/archive/v0.x/V0_2_RC_STATUS.md").read_text(encoding="utf-8")
     required_markers = [
         "test_user_switches_topic_mid_task",
         "test_textual_shell_escape_can_cancel_running_generation",
@@ -145,6 +167,6 @@ def test_rc_status_lists_historical_xfail_origins_and_closure_status() -> None:
     ]
     for needle in required_markers:
         assert needle in rc_status, (
-            f"docs/V0_2_RC_STATUS.md 必须显式记录历史 xfail/闭合证据 {needle}，"
+            f"docs/archive/v0.x/V0_2_RC_STATUS.md 必须显式记录历史 xfail/闭合证据 {needle}，"
             "防止已关闭缺口或剩余 provider-abort 边界再次漂移。"
         )

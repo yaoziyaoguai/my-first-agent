@@ -93,8 +93,8 @@ def test_readme_marks_skill_as_experimental():
 
 
 def test_skill_status_doc_exists_and_covers_key_sections():
-    doc = PROJECT_ROOT / "docs" / "V0_3_SKILL_SYSTEM_STATUS.md"
-    assert doc.exists(), "M3 必须落地 docs/V0_3_SKILL_SYSTEM_STATUS.md"
+    doc = PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_SKILL_SYSTEM_STATUS.md"
+    assert doc.exists(), "M3 必须落地 docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md"
     text = doc.read_text(encoding="utf-8")
     # 必须明确登记 /reload_skills 是死代码
     assert "/reload_skills" in text
@@ -105,7 +105,7 @@ def test_skill_status_doc_exists_and_covers_key_sections():
 
 
 def test_planning_marks_m3_as_status_clarification_not_runtime():
-    text = (PROJECT_ROOT / "docs" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
     # M3 段必须出现「状态澄清」类语义，且不应承诺实现 Skill runtime
     assert "M3" in text
     # 不能宣称 M3 实现了 sub-agent / 权限白名单 / activation policy
@@ -129,7 +129,7 @@ def test_prompt_builder_skills_section_is_empty_until_formal_system_exists() -> 
 def test_status_doc_acknowledges_no_skill_unit_tests():
     """status doc 必须诚实声明当前没有 skill 单元测试，避免后续读者误以为
     Skill 子系统是受测过的。"""
-    doc = (PROJECT_ROOT / "docs" / "V0_3_SKILL_SYSTEM_STATUS.md").read_text(
+    doc = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_SKILL_SYSTEM_STATUS.md").read_text(
         encoding="utf-8"
     )
     assert "没有 skill 单元测试" in doc

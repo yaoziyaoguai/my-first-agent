@@ -130,6 +130,10 @@ def test_build_inline_confirmation_pending_request_shape():
             "这条不够准确",
             InlineConfirmationResponse(action="other", free_text="这条不够准确"),
         ),
+        # 常见肯定简写 → accept
+        ("y", InlineConfirmationResponse(action="accept")),
+        ("yes", InlineConfirmationResponse(action="accept")),
+        ("好", InlineConfirmationResponse(action="accept")),
     ],
 )
 def test_parse_inline_confirmation_reply(user_text: str, expected: InlineConfirmationResponse):

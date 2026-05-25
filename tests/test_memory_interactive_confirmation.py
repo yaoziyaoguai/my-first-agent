@@ -587,6 +587,29 @@ def test_parse_memory_confirmation_reply_empty_input_raises():
 
 
 # ---------------------------------------------------------------------------
+# 11b. parse_memory_confirmation_reply 肯定简写 → 第一选项
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shorthand", ["y", "yes", "ok", "好", "是", "确认"])
+def test_parse_memory_confirmation_reply_affirmative_shorthand(shorthand: str):
+    """常见肯定简写（y/yes/好/是等）→ 映射到 choice_map 的第一个选项（ACCEPT）。"""
+    from agent.memory_confirmation import build_memory_confirmation_request
+
+    decision = _make_retain_decision()
+    request = build_memory_confirmation_request(decision)
+    pending = build_memory_pending_request(
+        request,
+        candidate_id="cand-test",
+        origin_status="running",
+    )
+
+    choice, free_text = parse_memory_confirmation_reply(shorthand, pending)
+    assert choice is MemoryConfirmationChoice.ACCEPT
+    assert free_text is None
+
+
+# ---------------------------------------------------------------------------
 # 12. resolve_confirmation 缓存不匹配时安全降级
 # ---------------------------------------------------------------------------
 

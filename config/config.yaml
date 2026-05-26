@@ -1,10 +1,12 @@
-# First Agent 统一项目配置
-# 当前实际生效配置。如需切换到真实 LLM，复制 config/examples/ 下对应示例文件：
-#   cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
-# 或
-#   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml
+# Kimi K2.5 via Anthropic-compatible (DashScope)
+# 使用方式：cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
+# 然后将 api_key 替换为真实 key
 
 provider:
-  enabled: false
-  type: fake
-  model: fake-llm
+  enabled: true
+  type: anthropic_compatible
+  model: kimi-k2.5
+  base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+  request_path: /v1/chat/completions
+  auth_scheme: auto
+  api_key: sk-REPLACE_ME

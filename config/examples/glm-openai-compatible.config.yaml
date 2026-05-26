@@ -1,7 +1,6 @@
 # Example 3: GLM-5 via OpenAI-compatible (DashScope)
-# api_key_env 指向环境变量名，实际 key 值在 .env 中设置（不放在这里）。
 # 使用方式：cp config/examples/glm-openai-compatible.config.yaml config/config.yaml
-# 然后在 .env 中设置：OPENAI_API_KEY=<your-dashscope-key>
+# 然后将 api_key 替换为真实 key
 
 provider:
   enabled: true
@@ -10,4 +9,4 @@ provider:
   base_url: https://coding.dashscope.aliyuncs.com/v1
   request_path: /v1/chat/completions
   auth_scheme: bearer
-  api_key_env: OPENAI_API_KEY
+  api_key: sk-REPLACE_ME

@@ -5,51 +5,19 @@
 #   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml        # GLM-5
 #   cp config/examples/fake.config.yaml config/config.yaml                         # 默认安全路径
 #
-# 本文件列出所有可用字段及其说明，不直接使用。
+# 本文件列出所有可用字段及其说明。
 
 # =============================================================================
-# Provider 配置（必填 section）
+# Provider 配置
 # =============================================================================
 # enabled:    true=启用真实 LLM / false=本地 fake 安全路径
 # type:       fake | anthropic_native | anthropic_compatible | openai_native | openai_compatible
-# model:      模型名（如 kimi-k2.5, glm-5, claude-sonnet-4-6）
+# model:      模型名
 # base_url:   兼容模式端点地址（native 模式不需要）
-# request_path: 兼容模式请求路径（默认 /v1/chat/completions）
-# auth_scheme: 认证方式 — auto | bearer | x-api-key
-# api_key_env: 环境变量名，实际 key 值在 .env 中设置（不放在这里）
+# request_path: 兼容模式请求路径
+# auth_scheme: auto | bearer | x-api-key
+# api_key:    真实 API key（个人本地项目可写在此处，不可提交 git）
 provider:
   enabled: false
   type: fake
   model: fake-llm
-
-# =============================================================================
-# Runtime 配置（可选）
-# =============================================================================
-# runtime:
-#   max_tokens: 128000
-#   max_messages: 100
-#   timeout: 30.0
-
-# =============================================================================
-# Memory 配置（可选）
-# =============================================================================
-# memory:
-#   max_episodes: 50
-
-# =============================================================================
-# Logging 配置（可选）
-# =============================================================================
-# logging:
-#   level: info
-
-# =============================================================================
-# Workspace 配置（可选）
-# =============================================================================
-# workspace:
-#   root: .
-
-# =============================================================================
-# Tools 配置（可选）
-# =============================================================================
-# tools:
-#   confirm_before_write: true

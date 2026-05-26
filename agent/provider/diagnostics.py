@@ -43,9 +43,8 @@ DIAGNOSTIC_ERROR_MAP: dict[str, str] = {
         "openai_native, openai_compatible, fake"
     ),
     "api_key_missing": (
-        "API key 未配置。当前 provider 需要真实 API key，但环境变量中未找到。"
-        "请在 .env 中设置 config/config.yaml 里 api_key_env 对应的环境变量；"
-        "如仅需本地体验，设置 config/config.yaml 中 provider.enabled=false 启动安全路径"
+        "API key 未配置。请在 config/config.yaml 的 provider section "
+        "中设置 api_key 字段；如仅需本地体验，设置 provider.enabled=false"
     ),
     "model_missing": (
         "模型名未配置。请在 config/config.yaml 的 provider.model 字段指定要使用的模型"
@@ -86,7 +85,7 @@ DIAGNOSTIC_ERROR_MAP: dict[str, str] = {
 HTTP_STATUS_DIAGNOSTIC_MAP: dict[int, str] = {
     401: (
         "401 Unauthorized — API key 无效或已过期。"
-        "请检查 .env 中 config/config.yaml 里 api_key_env 对应的 key 是否正确。"
+        "请检查 config/config.yaml 中 provider.api_key 是否正确。"
         "确认 key 未被截断、未包含多余空格、未在 provider 控制台被撤销。"
         "不要将 key 写入仓库文件、日志、checkpoint 或文档。"
     ),
@@ -573,20 +572,14 @@ def _build_diagnostic_from_config(
         issues.append(config_error)
 
     if config.provider_type != "fake" and not api_key_present:
-        if config_source in ("config_yaml",):
-            issues.append(
-                f"真实 provider 缺少 API key：环境变量 {config.api_key_env} 为空或不存在"
-            )
-            suggestions.append(
-                f"在 .env 中设置 {config.api_key_env}=<your-key>，"
-                "然后运行 python main.py status 验证"
-            )
-        else:
-            issues.append("真实 provider 缺少 API key")
-            suggestions.append(
-                "设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 环境变量；"
-                "或设置 provider.enabled=false 使用安全路径"
-            )
+        issues.append(
+            "provider.api_key 缺失。请在 config/config.yaml 的 "
+            "provider section 中设置 api_key 字段"
+        )
+        suggestions.append(
+            "编辑 config/config.yaml，在 provider section 添加 api_key 字段；"
+            "或设置 provider.enabled=false 使用安全路径"
+        )
 
     status: str = "ok"
     if issues:
@@ -691,6 +684,15 @@ def diagnose_provider_config_isolated(
     return diagnostic
 
 
+def _render_api_key(diagnostic: ProviderDiagnostic) -> str:
+    """脱敏显示 API key 状态，区分 inline / env / missing。"""
+    if not diagnostic.api_key_present:
+        return "not set"
+    if diagnostic.api_key_env:
+        return f"SET (env, redacted — {diagnostic.api_key_env})"
+    return "SET (inline, redacted)"
+
+
 def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
     """将 ProviderDiagnostic 渲染为人类可读的诊断报告（不包含 secret）。"""
     lines = [
@@ -751,7 +753,7 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         f"  Provider type : {diagnostic.provider_type}",
         f"  Model         : {diagnostic.model}",
         f"  Base URL      : {diagnostic.base_url}",
-        f"  API key       : {'SET (redacted)' if diagnostic.api_key_present else 'not set'}",
+        f"  API key       : {_render_api_key(diagnostic)}",
         f"  Key env       : {diagnostic.api_key_env or 'N/A'}",
         f"  Auth scheme   : {diagnostic.auth_scheme}",
         f"  Request path  : {diagnostic.request_path}",
@@ -780,18 +782,18 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
                 "legacy_profile", "legacy_provider_env",
             ):
                 lines.append(
-                    "  如需切换到真实 LLM，复制对应示例文件：\n"
+                    "  如需切换到真实 LLM，复制对应示例文件并填入 api_key：\n"
                     "    cp config/examples/kimi-anthropic-compatible.config.yaml"
                     " config/config.yaml   # Kimi K2.5\n"
                     "    cp config/examples/glm-openai-compatible.config.yaml"
                     " config/config.yaml        # GLM-5\n"
-                    "  然后在 .env 中设置对应的 API key\n"
+                    "  然后编辑 config/config.yaml，将 api_key 替换为真实 key\n"
                     "  最后 python main.py status 验证"
                 )
             else:
                 lines.append(
                     "  如需切换到真实 LLM，请编辑 config/config.yaml 设置 "
-                    "enabled: true 并在 .env 中配置 API key。"
+                    "enabled: true 并填入 api_key。"
                 )
         else:
             if diagnostic.api_key_present:

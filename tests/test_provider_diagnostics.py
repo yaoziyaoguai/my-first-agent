@@ -470,68 +470,78 @@ def test_main_fake_interactive_chat_no_crash():
     - 程序抛出 ValueError: LoopContext.model_name 必须是非空字符串
 
     修复后 fake 模式 model_name 兜底为 "fake-llm"，不再崩溃。
+
+    注意：config.yaml 优先于 env vars，所以测试期间临时移走 config.yaml。
     """
+    import shutil
     import signal
     import subprocess as _sp
     import tempfile
 
-    with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
-        test_env = {
-            **os.environ,
-            "HOME": tmp_home,
-            "MY_FIRST_AGENT_LLM_PROVIDER": "fake",
-        }
-        # 移除可能存在的真实 API key，确保走 fake 路径
-        for key_var in (
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "MY_FIRST_AGENT_LLM_MODEL",
-            "MODEL_NAME",
-            "ANTHROPIC_MODEL",
-            "OPENAI_MODEL",
-        ):
-            test_env.pop(key_var, None)
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
 
-        proc = _sp.Popen(
-            [sys.executable, str(PROJECT_ROOT / "main.py")],
-            stdin=_sp.PIPE,
-            stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            env=test_env,
-        )
+    # 临时移走 config.yaml 以模拟 "无配置" 的 fake 默认路径
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        try:
-            # 发送用户输入 + quit
-            stdout, stderr = proc.communicate(
-                input="帮我规划下去武汉 玩5天的旅游计划\nquit\n",
-                timeout=15,
+    try:
+        with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
+            test_env = {
+                **os.environ,
+                "HOME": tmp_home,
+            }
+            for key_var in (
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "MY_FIRST_AGENT_LLM_PROVIDER",
+                "MY_FIRST_AGENT_LLM_MODEL",
+                "MODEL_NAME",
+                "ANTHROPIC_MODEL",
+                "OPENAI_MODEL",
+            ):
+                test_env.pop(key_var, None)
+
+            proc = _sp.Popen(
+                [sys.executable, str(PROJECT_ROOT / "main.py")],
+                stdin=_sp.PIPE,
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+                env=test_env,
             )
-        except _sp.TimeoutExpired as exc:
-            proc.send_signal(signal.SIGTERM)
-            stdout, stderr = proc.communicate(timeout=5)
-            raise AssertionError(
-                "main.py subprocess 超时未退出——可能卡在交互循环中"
-            ) from exc
 
-        output = stdout + stderr
+            try:
+                stdout, stderr = proc.communicate(
+                    input="帮我规划下去武汉 玩5天的旅游计划\nquit\n",
+                    timeout=15,
+                )
+            except _sp.TimeoutExpired as exc:
+                proc.send_signal(signal.SIGTERM)
+                stdout, stderr = proc.communicate(timeout=5)
+                raise AssertionError(
+                    "main.py subprocess 超时未退出——可能卡在交互循环中"
+                ) from exc
 
-        # 不应包含 ValueError crash
-        assert "ValueError" not in output, (
-            f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
-        )
-        assert "LoopContext" not in output or "fake" in output.lower(), (
-            f"输出可能包含 LoopContext 异常:\n{output[-2000:]}"
-        )
-        # 不应包含 traceback
-        assert "Traceback (most recent call last)" not in output, (
-            f"main.py 产生了 traceback:\n{output[-2000:]}"
-        )
-        # 应该正常退出（exit 0 或正常终止）
-        assert proc.returncode in {0, -15}, (
-            f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
-        )
+            output = stdout + stderr
+
+            assert "ValueError" not in output, (
+                f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
+            )
+            assert "LoopContext" not in output or "fake" in output.lower(), (
+                f"输出可能包含 LoopContext 异常:\n{output[-2000:]}"
+            )
+            assert "Traceback (most recent call last)" not in output, (
+                f"main.py 产生了 traceback:\n{output[-2000:]}"
+            )
+            assert proc.returncode in {0, -15}, (
+                f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
+            )
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 # =========================================================================
@@ -540,28 +550,27 @@ def test_main_fake_interactive_chat_no_crash():
 
 
 def test_build_model_provider_from_env_defaults_to_fake():
-    """build_model_provider_from_env() 在未设置 MY_FIRST_AGENT_LLM_PROVIDER 时必须
-    返回非 None 的 provider。
+    """build_model_provider_from_env() 在无 config.yaml 时必须返回 FakeProvider。
 
     这是 P0 回归测试——a2dfd89 修了 model_name fallback，但没有修 provider 注入。
-    当用户不设置任何 provider 环境变量运行 `python main.py` 时，默认路径应该是
-    FakeProvider（safe local path），而不是 None。
+    当 config.yaml 不存在时，默认路径应该是 FakeProvider（safe local path）。
 
-    build_model_provider_from_env() 返回 None → build_loop_context() 给
-    LoopContext.model_provider 赋 None → _call_model() 传 None 给 call_model()
-    → ProviderNotImplementedError("model_provider_required")。
+    测试通过临时重定向 DEFAULT_CONFIG_PATH 到不存在文件来模拟无配置场景。
     """
     import os as _os
 
+    import agent.provider.simple_config as sc
     from agent.provider.factory import build_model_provider_from_env
 
     saved = _os.environ.pop("MY_FIRST_AGENT_LLM_PROVIDER", None)
+    _orig_default = sc.DEFAULT_CONFIG_PATH
+    # 重定向到不存在的路径，模拟无 config.yaml
+    sc.DEFAULT_CONFIG_PATH = "_nonexistent_test_config_.yaml"
 
     try:
         provider = build_model_provider_from_env()
         assert provider is not None, (
-            "build_model_provider_from_env() 在无 MY_FIRST_AGENT_LLM_PROVIDER 时"
-            "返回了 None——默认 fake/local 安全路径 provider 注入缺失"
+            "build_model_provider_from_env() 在无 config.yaml 时返回了 None"
         )
         assert hasattr(provider, "provider_type"), (
             "返回的 provider 必须有 provider_type 属性"
@@ -570,6 +579,7 @@ def test_build_model_provider_from_env_defaults_to_fake():
             f"默认 provider 应为 'fake'，实际: {provider.provider_type!r}"
         )
     finally:
+        sc.DEFAULT_CONFIG_PATH = _orig_default
         if saved is not None:
             _os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = saved
 
@@ -585,79 +595,87 @@ def test_main_fake_interactive_no_provider_env_var():
     根因：build_model_provider_from_env() 在无 MY_FIRST_AGENT_LLM_PROVIDER 时
     返回 None，而 build_loop_context() 的 fallback 路径没有兜底 FakeProvider。
 
-    修复后，build_model_provider_from_env() 在无 env var 时默认返回 FakeProvider，
-    整个注入链畅通：core.chat → loop.py → model_call → FakeProvider。
+    修复后，build_model_provider_from_env() 在无 config.yaml 时默认返回 FakeProvider。
+
+    注意：config.yaml 优先于所有 env vars，所以测试期间临时移走 config.yaml。
     """
+    import shutil
     import signal
     import subprocess as _sp
     import tempfile
 
-    with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
-        test_env = {
-            **os.environ,
-            "HOME": tmp_home,
-        }
-        # 关键：不设置 MY_FIRST_AGENT_LLM_PROVIDER，模拟真实默认路径
-        for key_var in (
-            "MY_FIRST_AGENT_LLM_PROVIDER",
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "MY_FIRST_AGENT_LLM_MODEL",
-            "MODEL_NAME",
-            "ANTHROPIC_MODEL",
-            "OPENAI_MODEL",
-        ):
-            test_env.pop(key_var, None)
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
 
-        proc = _sp.Popen(
-            [sys.executable, str(PROJECT_ROOT / "main.py")],
-            stdin=_sp.PIPE,
-            stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            env=test_env,
-        )
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        try:
-            stdout, stderr = proc.communicate(
-                input="你好，帮我规划一下武汉5天旅游\nquit\n",
-                timeout=20,
+    try:
+        with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
+            test_env = {
+                **os.environ,
+                "HOME": tmp_home,
+            }
+            # 关键：不设置 MY_FIRST_AGENT_LLM_PROVIDER，模拟真实默认路径
+            for key_var in (
+                "MY_FIRST_AGENT_LLM_PROVIDER",
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "MY_FIRST_AGENT_LLM_MODEL",
+                "MODEL_NAME",
+                "ANTHROPIC_MODEL",
+                "OPENAI_MODEL",
+            ):
+                test_env.pop(key_var, None)
+
+            proc = _sp.Popen(
+                [sys.executable, str(PROJECT_ROOT / "main.py")],
+                stdin=_sp.PIPE,
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+                env=test_env,
             )
-        except _sp.TimeoutExpired as exc:
-            proc.send_signal(signal.SIGTERM)
-            stdout, stderr = proc.communicate(timeout=5)
-            raise AssertionError(
-                "main.py subprocess 超时——可能卡在交互循环中"
-            ) from exc
 
-        output = stdout + stderr
+            try:
+                stdout, stderr = proc.communicate(
+                    input="你好，帮我规划一下武汉5天旅游\nquit\n",
+                    timeout=20,
+                )
+            except _sp.TimeoutExpired as exc:
+                proc.send_signal(signal.SIGTERM)
+                stdout, stderr = proc.communicate(timeout=5)
+                raise AssertionError(
+                    "main.py subprocess 超时——可能卡在交互循环中"
+                ) from exc
 
-        # 不应出现 ProviderNotImplementedError
-        assert "ProviderNotImplementedError" not in output, (
-            "main.py 抛出 ProviderNotImplementedError——provider 注入链断裂:\n"
-            f"{output[-2000:]}"
-        )
-        assert "model_provider_required" not in output, (
-            "main.py 报 model_provider_required——provider 未注入:\n"
-            f"{output[-2000:]}"
-        )
-        # 不应出现 traceback
-        assert "Traceback (most recent call last)" not in output, (
-            f"main.py 产生了 traceback:\n{output[-2000:]}"
-        )
-        # 不应出现 ValueError（model_name 空值）
-        assert "ValueError" not in output, (
-            f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
-        )
-        # 应显示 provider mode=fake
-        assert "fake" in output.lower(), (
-            f"输出应包含 provider mode=fake:\n{output[-2000:]}"
-        )
-        # 应正常退出
-        assert proc.returncode in {0, -15}, (
-            f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
-        )
+            output = stdout + stderr
+
+            assert "ProviderNotImplementedError" not in output, (
+                "main.py 抛出 ProviderNotImplementedError——provider 注入链断裂:\n"
+                f"{output[-2000:]}"
+            )
+            assert "model_provider_required" not in output, (
+                "main.py 报 model_provider_required——provider 未注入:\n"
+                f"{output[-2000:]}"
+            )
+            assert "Traceback (most recent call last)" not in output, (
+                f"main.py 产生了 traceback:\n{output[-2000:]}"
+            )
+            assert "ValueError" not in output, (
+                f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
+            )
+            assert "fake" in output.lower(), (
+                f"输出应包含 provider mode=fake:\n{output[-2000:]}"
+            )
+            assert proc.returncode in {0, -15}, (
+                f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
+            )
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 # =========================================================================
@@ -755,68 +773,84 @@ def test_diagnose_config_source_project_dotenv():
 
 
 def test_isolated_diagnostic_uses_only_dotenv_values():
-    """isolated 模式应清除外层 env，config.yaml 优先于 legacy .env 值。
+    """isolated 模式应清除外层 env，无 config.yaml 时走 legacy .env 路径。
 
     模拟：外层 ANTHROPIC_MODEL=deepseek-v4-pro，.env 中 ANTHROPIC_MODEL=kimi-k2.5。
-    config/config.yaml 存在且 enabled=false，legacy env 被忽略，
-    诊断应以 config.yaml 的 fake/local 为准。
+    无 config.yaml 时，legacy env 诊断通过 dotenv 值工作。
     """
     import os as _os
+    import shutil
     import tempfile
     from pathlib import Path
 
     from agent.provider.diagnostics import diagnose_provider_config_isolated
 
-    # 创建一个临时 .env（含 legacy env vars）
-    with tempfile.TemporaryDirectory() as tmp:
-        dotenv_path = Path(tmp) / ".env"
-        dotenv_path.write_text(
-            "ANTHROPIC_MODEL=kimi-k2.5\n"
-            "ANTHROPIC_API_KEY=sk-dotenv-key-12345\n"
-            "ANTHROPIC_BASE_URL=https://example.com/api\n"
-            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
-        )
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        # 注入外层 env
-        _os.environ["ANTHROPIC_MODEL"] = "deepseek-v4-pro"
-        _os.environ["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dotenv_path = Path(tmp) / ".env"
+            dotenv_path.write_text(
+                "ANTHROPIC_MODEL=kimi-k2.5\n"
+                "ANTHROPIC_API_KEY=sk-dotenv-key-12345\n"
+                "ANTHROPIC_BASE_URL=https://example.com/api\n"
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+            )
 
-        try:
-            diag = diagnose_provider_config_isolated(str(dotenv_path))
-            # config/config.yaml 存在 → 优先于 legacy env，使用 config.yaml 的 fake
-            assert diag.provider_type == "fake", (
-                f"expected fake from config.yaml, got {diag.provider_type}"
-            )
-            assert diag.config_source in ("config_yaml_disabled", "default_fake"), (
-                f"expected config_yaml source, got {diag.config_source}"
-            )
-            # .env 中的 legacy env 被 config.yaml 忽略，api key 不影响诊断
-            assert diag.api_key_present is False
-        finally:
-            # 清理
-            _os.environ.pop("ANTHROPIC_MODEL", None)
-            _os.environ.pop("ANTHROPIC_BASE_URL", None)
+            _os.environ["ANTHROPIC_MODEL"] = "deepseek-v4-pro"
+            _os.environ["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com"
+
+            try:
+                diag = diagnose_provider_config_isolated(str(dotenv_path))
+                # 无 config.yaml → 走 legacy .env 路径
+                assert diag.provider_type == "anthropic_compatible", (
+                    f"expected anthropic_compatible from dotenv, got {diag.provider_type}"
+                )
+                assert diag.config_source in ("project_dotenv", "legacy_provider_env"), (
+                    f"expected dotenv/legacy source, got {diag.config_source}"
+                )
+            finally:
+                _os.environ.pop("ANTHROPIC_MODEL", None)
+                _os.environ.pop("ANTHROPIC_BASE_URL", None)
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 def test_isolated_diagnostic_empty_dotenv_falls_back_to_fake():
-    """isolated 模式 .env 为空或无 provider 配置时仍返回 fake 兜底。"""
+    """isolated 模式 .env 为空且无 config.yaml 时返回 fake 兜底。"""
+    import shutil
     import tempfile
     from pathlib import Path
 
     from agent.provider.diagnostics import diagnose_provider_config_isolated
 
-    with tempfile.TemporaryDirectory() as tmp:
-        dotenv_path = Path(tmp) / ".env"
-        dotenv_path.write_text("# 空文件\n")
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        diag = diagnose_provider_config_isolated(str(dotenv_path))
-        assert diag.provider_type == "fake"
-        # .env 只有注释没有 key=value 时 dotenv_loaded=false（无有效配置值）
-        assert diag.dotenv_loaded is False
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dotenv_path = Path(tmp) / ".env"
+            dotenv_path.write_text("# 空文件\n")
+
+            diag = diagnose_provider_config_isolated(str(dotenv_path))
+            assert diag.provider_type == "fake"
+            assert diag.dotenv_loaded is False
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 def test_isolated_diagnostic_no_secret_in_output():
     """isolated 诊断输出不得包含 .env 中的 API key 值。"""
+    import shutil
     import tempfile
     from pathlib import Path
 
@@ -825,27 +859,39 @@ def test_isolated_diagnostic_no_secret_in_output():
         render_diagnostic_report,
     )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        dotenv_path = Path(tmp) / ".env"
-        dotenv_path.write_text(
-            "ANTHROPIC_API_KEY=sk-secret-key-that-must-not-leak-12345\n"
-            "ANTHROPIC_MODEL=kimi-k2.5\n"
-            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
-        )
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        diag = diagnose_provider_config_isolated(str(dotenv_path))
-        report = render_diagnostic_report(diag)
-        assert "sk-secret" not in report
-        assert "sk-secret-key-that-must-not-leak" not in report
-        # config.yaml 优先于 legacy env，fake 模式无 API key
-        assert "API key       : not set" in report
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dotenv_path = Path(tmp) / ".env"
+            dotenv_path.write_text(
+                "ANTHROPIC_API_KEY=sk-secret-key-that-must-not-leak-12345\n"
+                "ANTHROPIC_MODEL=kimi-k2.5\n"
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+            )
+
+            diag = diagnose_provider_config_isolated(str(dotenv_path))
+            report = render_diagnostic_report(diag)
+            assert "sk-secret" not in report
+            assert "sk-secret-key-that-must-not-leak" not in report
+            # key 应显示为 SET + redacted
+            assert "SET" in report
+            assert "redacted" in report
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 def test_isolated_diagnostic_shows_model_and_base_url_redacted():
-    """isolated 诊断应显示 config.yaml 的 model 名和脱敏 base_url。
+    """isolated 诊断应显示模型名和脱敏 base_url（无 config.yaml 时走 legacy .env）。
 
-    config.yaml 优先于 legacy .env 值，model 来自 config.yaml 而非 .env。
+    无 config.yaml 时，model 来自 .env 的 ANTHROPIC_MODEL。
     """
+    import shutil
     import tempfile
     from pathlib import Path
 
@@ -854,21 +900,29 @@ def test_isolated_diagnostic_shows_model_and_base_url_redacted():
         render_diagnostic_report,
     )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        dotenv_path = Path(tmp) / ".env"
-        dotenv_path.write_text(
-            "ANTHROPIC_API_KEY=sk-test12345678901234567890\n"
-            "ANTHROPIC_MODEL=kimi-k2.5\n"
-            "ANTHROPIC_BASE_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic\n"
-            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
-        )
+    config_yaml = PROJECT_ROOT / "config" / "config.yaml"
+    config_backup = PROJECT_ROOT / "config" / ".config.yaml.test_backup"
+    _restore = config_yaml.exists()
+    if _restore:
+        shutil.move(str(config_yaml), str(config_backup))
 
-        diag = diagnose_provider_config_isolated(str(dotenv_path))
-        report = render_diagnostic_report(diag)
-        # config.yaml 存在，model 来自 config.yaml (fake-llm)，而非 .env (kimi-k2.5)
-        assert "fake-llm" in report
-        # config source 为 config_yaml_disabled（config.yaml 优先）
-        assert "config_yaml" in report
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dotenv_path = Path(tmp) / ".env"
+            dotenv_path.write_text(
+                "ANTHROPIC_API_KEY=sk-test12345678901234567890\n"
+                "ANTHROPIC_MODEL=kimi-k2.5\n"
+                "ANTHROPIC_BASE_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic\n"
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+            )
+
+            diag = diagnose_provider_config_isolated(str(dotenv_path))
+            report = render_diagnostic_report(diag)
+            # model 来自 .env
+            assert "kimi-k2.5" in report
+    finally:
+        if _restore:
+            shutil.move(str(config_backup), str(config_yaml))
 
 
 # =========================================================================
@@ -1415,7 +1469,8 @@ class TestProfileNoSecretLeaked:
         )
         report = render_diagnostic_report(diag)
         assert "sk-" not in report
-        assert "SET (redacted)" in report
+        assert "SET" in report
+        assert "redacted" in report
         assert "ANTHROPIC_API_KEY" in report  # 变量名可以出现
 
 
@@ -1429,7 +1484,11 @@ class TestProfileFactoryIntegration:
         config/config.yaml 存在时，legacy profile env 被完全忽略，
         build_model_provider_from_env() 返回 config.yaml 的配置。
         profile 路径仅在 config.yaml 不存在时作为 fallback 生效。
+
+        测试期间重定向 DEFAULT_CONFIG_PATH 模拟无 config.yaml 场景，
+        验证 profile 路径作为 fallback 能正常工作。
         """
+        import agent.provider.simple_config as sc
         from agent.provider.factory import build_model_provider_from_env
 
         yaml_path = _write_temp_profiles_yaml("""
@@ -1445,8 +1504,8 @@ class TestProfileFactoryIntegration:
                 api_key_env: ANTHROPIC_API_KEY
         """)
         saved_env = {}
+        _orig_config = sc.DEFAULT_CONFIG_PATH
         try:
-            # 保存并清理外层 env
             for var in [
                 "MY_FIRST_AGENT_LLM_PROVIDER",
                 "FIRST_AGENT_PROVIDER_PROFILE",
@@ -1461,23 +1520,25 @@ class TestProfileFactoryIntegration:
             os.environ["FIRST_AGENT_PROVIDER_PROFILE"] = "kimi_anthropic"
             os.environ["ANTHROPIC_API_KEY"] = "sk-test"
 
-            # 临时替换 DEFAULT_PROFILES_YAML 走 temp YAML
+            # 重定向 config.yaml 到不存在路径，让 profile 路径生效
+            sc.DEFAULT_CONFIG_PATH = "_nonexistent_test_config_.yaml"
+
             import agent.provider.profiles as pmod
 
-            _orig_default = pmod.DEFAULT_PROFILES_YAML
+            _orig_profiles = pmod.DEFAULT_PROFILES_YAML
             pmod.DEFAULT_PROFILES_YAML = yaml_path
             try:
                 provider = build_model_provider_from_env()
-                # config.yaml 存在 → 优先，返回 FakeProvider（config.yaml 的默认配置）
-                # legacy profile env 被忽略
+                # config.yaml 不存在 → profile env 被使用
                 assert provider is not None
-                assert getattr(provider, "provider_type", "") == "fake", (
-                    f"config.yaml 应优先于 profile env，"
-                    f"expected fake, got {getattr(provider, 'provider_type', '')}"
+                assert getattr(provider, "provider_type", "") == "anthropic_compatible", (
+                    f"profile env 应生效，expected anthropic_compatible, "
+                    f"got {getattr(provider, 'provider_type', '')}"
                 )
             finally:
-                pmod.DEFAULT_PROFILES_YAML = _orig_default
+                pmod.DEFAULT_PROFILES_YAML = _orig_profiles
         finally:
+            sc.DEFAULT_CONFIG_PATH = _orig_config
             os.unlink(yaml_path)
             for var, val in saved_env.items():
                 if val is not None:
@@ -1486,13 +1547,15 @@ class TestProfileFactoryIntegration:
                     os.environ.pop(var, None)
 
     def test_build_model_provider_from_env_no_profile_defaults_fake(self):
-        """无 profile → build_model_provider_from_env 返回 FakeProvider。"""
+        """无 profile 且无 config.yaml → build_model_provider_from_env 返回 FakeProvider。"""
         import agent.provider.profiles as pmod
+        import agent.provider.simple_config as sc
         from agent.provider.factory import build_model_provider_from_env
 
-        # 用一个不存在的 YAML 路径
-        _orig_default = pmod.DEFAULT_PROFILES_YAML
+        _orig_profiles = pmod.DEFAULT_PROFILES_YAML
+        _orig_config = sc.DEFAULT_CONFIG_PATH
         pmod.DEFAULT_PROFILES_YAML = "/nonexistent/path/profiles.yaml"
+        sc.DEFAULT_CONFIG_PATH = "_nonexistent_test_config_.yaml"
         saved = os.environ.pop("MY_FIRST_AGENT_LLM_PROVIDER", None)
         saved_profile = os.environ.pop("FIRST_AGENT_PROVIDER_PROFILE", None)
         try:
@@ -1500,7 +1563,8 @@ class TestProfileFactoryIntegration:
             assert provider is not None
             assert getattr(provider, "provider_type", "") == "fake"
         finally:
-            pmod.DEFAULT_PROFILES_YAML = _orig_default
+            pmod.DEFAULT_PROFILES_YAML = _orig_profiles
+            sc.DEFAULT_CONFIG_PATH = _orig_config
             if saved is not None:
                 os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = saved
             if saved_profile is not None:
@@ -1516,15 +1580,30 @@ class TestConfigExamplesParseable:
     """三个 config/examples/*.config.yaml 都能被 load_unified_provider_config 解析。
     中文注释/docstring：config/examples 是推荐用户复制入口，非注释嵌套方式。"""
 
-    def test_default_config_yaml_is_minimal_and_parseable(self):
-        """config/config.yaml 默认 fake 最小可解析，不包含注释掉的示例。"""
+    def test_default_config_yaml_is_parseable(self):
+        """config/config.yaml 可解析，无 YAML 语法错误。
+
+        config.yaml 是用户本地文件，内容可变（fake 或 real provider），
+        不应对具体 provider type 做断言，只验证解析不崩溃。
+        """
         from agent.provider.simple_config import load_unified_provider_config
 
         config_path = PROJECT_ROOT / "config" / "config.yaml"
+        if not config_path.is_file():
+            pytest.skip("config/config.yaml 不存在")
         result = load_unified_provider_config(config_path)
-        assert result.source in ("config_yaml_disabled", "default_fake")
-        assert result.config.provider_type == "fake"
-        assert result.config.model == "fake-llm"
+        # 必须返回合法的 UnifiedProviderConfig
+        assert result.source in (
+            "config_yaml", "config_yaml_disabled", "default_fake",
+        ), f"unexpected source: {result.source}"
+        assert result.config.provider_type in (
+            "fake", "anthropic_native", "anthropic_compatible",
+            "openai_native", "openai_compatible",
+        ), f"unexpected provider_type: {result.config.provider_type}"
+        assert result.config.model
+        # 如果 api_key 存在，不应泄露到 config_error
+        if result.config.api_key:
+            assert "api_key" not in (result.config_error or "").lower()
 
     def test_fake_example_parseable(self):
         """config/examples/fake.config.yaml 可解析为 fake provider。"""
@@ -1536,55 +1615,71 @@ class TestConfigExamplesParseable:
 
     def test_kimi_example_parseable(self):
         """config/examples/kimi-anthropic-compatible.config.yaml 可解析。
-        由于 api_key_env 指向环境变量名而非实际 key 值，
-        测试中传入 mock env 以验证 YAML 结构可解析。"""
+
+        api_key 使用 sk-REPLACE_ME 占位符（inline），无需 env 注入即可解析。"""
         from agent.provider.simple_config import load_unified_provider_config
 
         config_path = (
             PROJECT_ROOT / "config" / "examples"
             / "kimi-anthropic-compatible.config.yaml"
         )
-        result = load_unified_provider_config(
-            config_path,
-            env={"ANTHROPIC_API_KEY": "sk-test-mock-key"},
-        )
+        result = load_unified_provider_config(config_path)
         assert result.source == "config_yaml"
         assert result.config.provider_type == "anthropic_compatible"
         assert result.config.model == "kimi-k2.5"
+        assert result.config.api_key == "sk-REPLACE_ME"
 
     def test_glm_example_parseable(self):
         """config/examples/glm-openai-compatible.config.yaml 可解析。
-        传入 mock env 验证 YAML 结构可解析，不依赖真实 key。"""
+
+        api_key 使用 sk-REPLACE_ME 占位符（inline），无需 env 注入即可解析。"""
         from agent.provider.simple_config import load_unified_provider_config
 
         config_path = (
             PROJECT_ROOT / "config" / "examples"
             / "glm-openai-compatible.config.yaml"
         )
-        result = load_unified_provider_config(
-            config_path,
-            env={"OPENAI_API_KEY": "sk-test-mock-key"},
-        )
+        result = load_unified_provider_config(config_path)
         assert result.source == "config_yaml"
         assert result.config.provider_type == "openai_compatible"
         assert result.config.model == "glm-5"
+        assert result.config.api_key == "sk-REPLACE_ME"
 
-    def test_examples_contain_no_api_key(self):
-        """三个示例文件不包含 API key 值，只包含 api_key_env 变量名。"""
+    def test_examples_contain_no_real_api_key(self):
+        """示例文件只包含 sk-REPLACE_ME 占位符，不含真实 API key。
+
+        sk-REPLACE_ME 是明确的人类可读占位符，不会与真实 key 混淆。
+        真实 key 通常是长随机字符串（如 sk-ant-... 或 sk-... 后跟 20+ 字符）。
+        fake.config.yaml 除外——fake 模式不需要 api_key。
+        """
+        import re
+
         examples_dir = PROJECT_ROOT / "config" / "examples"
         for example_file in sorted(examples_dir.glob("*.yaml")):
             content = example_file.read_text()
-            # 不应包含看起来像 API key 的值
-            assert "sk-" not in content, (
-                f"{example_file.name} 包含疑似 API key 的明文"
-            )
+            # 不应包含真实 API key 格式（长随机字符串，排除 sk-REPLACE_ME）
+            real_key_pattern = re.compile(r'sk-(?:ant-)?[A-Za-z0-9_-]{20,}')
+            matches = real_key_pattern.findall(content)
+            for m in matches:
+                if m != "sk-REPLACE_ME":
+                    raise AssertionError(
+                        f"{example_file.name} 包含疑似真实 API key: {m[:8]}..."
+                    )
+            # 不应包含 secret 等敏感词
             assert "secret" not in content.lower(), (
                 f"{example_file.name} 包含 'secret' 字符串"
             )
-            # api_key_env 字段指向变量名而非值
-            assert "api_key_env:" in content or "fake" in example_file.name, (
-                f"{example_file.name} 中真实 provider 应使用 api_key_env"
-            )
+            # 非 fake 示例应使用 api_key: 字段（inline），不是 api_key_env:
+            if "fake" not in example_file.name:
+                assert "api_key:" in content, (
+                    f"{example_file.name} 应使用 api_key: 字段（inline），非 api_key_env:"
+                )
+                assert "sk-REPLACE_ME" in content, (
+                    f"{example_file.name} 应包含 api_key: sk-REPLACE_ME 占位符"
+                )
+                assert "api_key_env:" not in content, (
+                    f"{example_file.name} 不应使用 api_key_env:（已废弃）"
+                )
 
     def test_default_yaml_has_no_commented_provider_examples(self):
         """config/config.yaml 不应包含注释掉的真实 provider 示例。"""
@@ -1616,3 +1711,320 @@ class TestConfigExamplesParseable:
         assert "取消注释" not in content, (
             "README 不应建议用户取消注释，应使用 config/examples/ 复制方式"
         )
+
+
+# =============================================================================
+# 14. inline api_key 配置加载测试（v0.12+）
+# =============================================================================
+
+
+class TestInlineApiKeyConfig:
+    """测试 config/config.yaml 中 provider.api_key inline 明文的行为。"""
+
+    def test_enabled_true_with_inline_api_key_resolves_real_config(self):
+        """enabled=true + api_key inline → real config resolved, key present。"""
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+                  base_url: https://example.com/api
+                  api_key: sk-test-inline-key-12345
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(tmp_path)
+            assert result.source == "config_yaml"
+            assert result.config_error is None
+            assert result.config.provider_type == "anthropic_compatible"
+            assert result.config.model == "kimi-k2.5"
+            assert result.config.api_key == "sk-test-inline-key-12345"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_enabled_true_missing_api_key_is_config_error(self):
+        """enabled=true 但 api_key 缺失 → config_error，不回退 fake。
+
+        学习型注释：
+        config.yaml provider.enabled=true 但未提供 api_key 时，
+        load_unified_provider_config 返回 config_error 而非静默回退 fake。
+        这样用户能明确知道配置不完整。
+        """
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+                  base_url: https://example.com/api
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(tmp_path)
+            assert result.source == "config_yaml"
+            assert result.config_error is not None
+            assert "api_key" in result.config_error.lower()
+            # 不回退 fake — config 虽为 fake 兜底但 source 标记为 config_yaml
+            assert result.config.provider_type == "fake"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_enabled_false_is_fake(self):
+        """enabled=false → fake provider, no config error。"""
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: false
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(tmp_path)
+            assert result.source == "config_yaml_disabled"
+            assert result.config_error is None
+            assert result.config.provider_type == "fake"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_no_config_yaml_defaults_to_fake(self):
+        """config.yaml 不存在 → default_fake。"""
+        from agent.provider.simple_config import load_unified_provider_config
+
+        result = load_unified_provider_config("/nonexistent/path/config.yaml")
+        assert result.source == "default_fake"
+        assert result.config_error is None
+        assert result.config.provider_type == "fake"
+        assert result.config.model == "fake-llm"
+
+    def test_diagnostics_redacts_inline_key(self):
+        """诊断报告显示 SET (inline, redacted)，不泄露 key 值。"""
+        import tempfile
+
+        from agent.provider.diagnostics import (
+            diagnose_provider_config_from_unified,
+            render_diagnostic_report,
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+                  base_url: https://example.com/api
+                  api_key: sk-secret-key-should-not-appear-anywhere
+            """))
+            tmp_path = tmp.name
+
+        # 临时替换 DEFAULT_CONFIG_PATH
+        import agent.provider.simple_config as sc
+
+        _orig_default = sc.DEFAULT_CONFIG_PATH
+        sc.DEFAULT_CONFIG_PATH = tmp_path
+        try:
+            diag = diagnose_provider_config_from_unified(env={})
+            report = render_diagnostic_report(diag)
+            # key 值不得出现
+            assert "sk-secret-key-should-not-appear-anywhere" not in report
+            # 应显示 inline redacted
+            assert "SET (inline, redacted)" in report
+            # 不应显示 env redacted（因为不是从 env 来的）
+            assert "SET (env, redacted" not in report
+        finally:
+            sc.DEFAULT_CONFIG_PATH = _orig_default
+            os.unlink(tmp_path)
+
+    def test_diagnostics_does_not_mention_legacy_env_vars(self):
+        """config.yaml 路径下诊断不推荐 MY_FIRST_AGENT_LLM_PROVIDER 等 legacy env。
+
+        用户不应看到 "请设置 ANTHROPIC_API_KEY" 或 "请设置 MY_FIRST_AGENT_LLM_PROVIDER"
+        这类建议——config.yaml 是唯一推荐入口。
+
+        MY_FIRST_AGENT_LLM_PROVIDER 可能出现在 "Legacy env: ignored" 行中
+        （告知用户该变量被忽略），但不应出现在 Suggestions 推荐中。
+        ANTHROPIC_API_KEY 不应出现（inline api_key 不使用 env 变量名）。
+        """
+        import tempfile
+
+        from agent.provider.diagnostics import (
+            diagnose_provider_config_from_unified,
+            render_diagnostic_report,
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+                  base_url: https://example.com/api
+                  api_key: sk-test-key
+            """))
+            tmp_path = tmp.name
+
+        import agent.provider.simple_config as sc
+
+        _orig_default = sc.DEFAULT_CONFIG_PATH
+        sc.DEFAULT_CONFIG_PATH = tmp_path
+        try:
+            diag = diagnose_provider_config_from_unified(
+                env={
+                    # 模拟外层 env 中有 legacy 变量
+                    "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
+                    "ANTHROPIC_API_KEY": "sk-outer-legacy-key",
+                },
+            )
+            report = render_diagnostic_report(diag)
+            # ANTHROPIC_API_KEY 不应出现（inline api_key 不暴露 env 变量名）
+            assert "ANTHROPIC_API_KEY" not in report
+            # Suggestions 中不应推荐 legacy env
+            _suffix = report.split("Suggestions:")[1] if "Suggestions:" in report else ""
+            suggestions_section = _suffix
+            assert "MY_FIRST_AGENT_LLM_PROVIDER" not in suggestions_section, (
+                "Suggestions 不应推荐 MY_FIRST_AGENT_LLM_PROVIDER"
+            )
+            assert "ANTHROPIC_API_KEY" not in suggestions_section, (
+                "Suggestions 不应推荐 ANTHROPIC_API_KEY"
+            )
+            # 应推荐 config/config.yaml
+            assert "config/config.yaml" in report
+        finally:
+            sc.DEFAULT_CONFIG_PATH = _orig_default
+            os.unlink(tmp_path)
+
+    def test_config_error_shows_config_yaml_guidance_not_env(self):
+        """api_key 缺失时错误信息指向 config.yaml，不指向环境变量。"""
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: kimi-k2.5
+                  base_url: https://example.com/api
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(tmp_path)
+            assert result.config_error is not None
+            # 错误信息指向 config.yaml
+            assert "config/config.yaml" in result.config_error
+            # 不指向环境变量
+            assert "ANTHROPIC_API_KEY" not in result.config_error
+            assert "MY_FIRST_AGENT_LLM" not in result.config_error
+        finally:
+            os.unlink(tmp_path)
+
+
+# =============================================================================
+# 15. Secret commit guard — 防止真实 API key 进入 git 历史
+# =============================================================================
+
+
+def test_config_yaml_does_not_contain_real_api_key():
+    """config/config.yaml 中 api_key 字段不得包含真实 API key。
+
+    唯一合法占位符: sk-REPLACE_ME。
+    任何其他 sk- 前缀的值都是疑似真实 key，必须阻止提交。
+
+    这个测试是最小可行的 secret guard：gate 失败 = 不能 commit/push。
+    """
+    import re
+
+    config_path = PROJECT_ROOT / "config" / "config.yaml"
+    if not config_path.is_file():
+        return  # 无 config.yaml 则无需检查
+
+    content = config_path.read_text(encoding="utf-8")
+
+    # 匹配 api_key: <value> 行
+    api_key_match = re.search(r'^\s*api_key:\s*(.+)$', content, re.MULTILINE)
+    if not api_key_match:
+        return  # 无 api_key 字段则无需检查
+
+    key_value = api_key_match.group(1).strip()
+
+    # sk-REPLACE_ME 是唯一合法占位符
+    if key_value == "sk-REPLACE_ME":
+        return
+
+    # 检查是否包含真实 API key 特征
+    if key_value.startswith("sk-") and len(key_value) > 15:
+        raise AssertionError(
+            f"config/config.yaml 中 api_key 疑似真实 key: {key_value[:8]}...\n"
+            "真实 API key 不应提交到 git。请将 api_key 替换为 sk-REPLACE_ME 占位符，\n"
+            "在本地运行时再替换为真实 key。\n"
+            "如果此值确实是占位符而非真实 key，请联系维护者更新此 guard。"
+        )
+
+
+def test_no_real_api_key_in_git_diff_staged():
+    """git diff --cached 中不得包含真实 API key。
+
+    拦截场景：用户将真实 key 写入 config.yaml 后 git add，但尚未 commit。
+    此时 config.yaml working tree 已包含真实 key，git diff --cached 会显示它。
+    """
+    import re
+    import subprocess as _sp
+
+    try:
+        staged = _sp.run(
+            ["git", "diff", "--cached", "--", "config/config.yaml"],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(PROJECT_ROOT),
+        )
+    except (FileNotFoundError, _sp.TimeoutExpired):
+        return  # git 不可用则跳过
+
+    if staged.returncode != 0 or not staged.stdout.strip():
+        return  # 无 staged 变更
+
+    # 查找 diff 中新增的 api_key 行（以 + 开头）
+    for line in staged.stdout.split("\n"):
+        if line.startswith("+") and "api_key:" in line:
+            # 提取 key 值
+            key_match = re.search(r'api_key:\s*(.+)$', line)
+            if key_match:
+                key_val = key_match.group(1).strip()
+                if key_val == "sk-REPLACE_ME":
+                    continue
+                if key_val.startswith("sk-") and len(key_val) > 15:
+                    raise AssertionError(
+                        f"git diff --cached 中包含疑似真实 API key: {key_val[:8]}...\n"
+                        "真实 API key 即将被 commit——已拦截。\n"
+                        "请 git reset HEAD config/config.yaml 取消暂存，"
+                        "将 api_key 替换为 sk-REPLACE_ME 占位符后重新 commit。"
+                    )

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 
-
 from tests.conftest import (
     FakeAnthropicClient,
     FakeResponse,
@@ -22,7 +21,6 @@ from tests.conftest import (
     text_response,
     tool_use_response,
 )
-
 
 # ---------- helpers ----------
 
@@ -45,13 +43,21 @@ def _reset_core_module(monkeypatch, fake_client):
     )
     monkeypatch.setattr(core, "state", fresh)
     monkeypatch.setattr(core, "client", fake_client)
-    # core.confirm_handlers 里 save_checkpoint 会写盘——用 stub 替掉避免污染真实磁盘
+    # v0.12 config-first：config.yaml 现在是用户真实 provider 配置入口。
+    # _reset_core_module 不走生产 provider 解析路径，让 build_model_provider_from_env()
+    # 返回 None —— call_model() 检测到 provider=None 后会回退到 legacy_client.provider
+    # （即 FakeAnthropicClient._ProviderFacade），由测试的预编排 responses 驱动循环，
+    # 不被 config.yaml 返回的真实 provider 抢走控制权。
+    monkeypatch.setattr(
+        "agent.core_contexts.build_model_provider_from_env",
+        lambda: None,
+    )
     from agent import checkpoint
     monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
     monkeypatch.setattr(checkpoint, "clear_checkpoint", lambda: None)
     # response_handlers / tool_executor / task_runtime 也各自 import 了 save_checkpoint
     # 以模块名 from checkpoint import save_checkpoint 的拷贝形式引入——要挨个 patch
-    from agent import response_handlers, tool_executor, task_runtime, confirm_handlers, session
+    from agent import confirm_handlers, response_handlers, session, task_runtime, tool_executor
     for mod in (response_handlers, tool_executor, task_runtime, confirm_handlers, session):
         if hasattr(mod, "save_checkpoint"):
             monkeypatch.setattr(mod, "save_checkpoint", lambda s, source=None: None)

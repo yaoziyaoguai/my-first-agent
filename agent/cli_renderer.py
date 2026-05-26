@@ -185,12 +185,22 @@ def render_status_line(summary: Mapping[str, Any] | None) -> str:
 def render_provider_mode_banner() -> str:
     """启动时输出当前 provider mode 一行横幅。
 
-    manual human dogfood 第一 blocker：用户启动时必须清楚当前是 fake/local 还是
-    real provider。这个横幅在 main() 的 load_legacy_dotenv_config() 之后、
-    main_loop 之前输出，确保 .env 已加载到 os.environ。
+    优先读 config/config.yaml，再 fallback 到 legacy env。
     """
     import os
 
+    # 优先从 config/config.yaml 读取
+    try:
+        from agent.provider.simple_config import load_unified_provider_config
+        unified = load_unified_provider_config()
+        provider_type = unified.config.provider_type
+        model = unified.config.model or "unspecified"
+        if provider_type != "fake" and unified.source == "config_yaml":
+            return f"[provider] mode={provider_type} (真实 API — model={model})"
+    except Exception:
+        pass
+
+    # fallback: legacy env
     provider_env = os.getenv("MY_FIRST_AGENT_LLM_PROVIDER")
     model_env = (
         os.getenv("MY_FIRST_AGENT_LLM_MODEL")

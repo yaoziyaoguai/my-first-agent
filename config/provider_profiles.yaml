@@ -1,0 +1,33 @@
+# First Agent Provider Profiles
+# 此文件不包含 secret — api_key 只存环境变量名，实际 key 在 .env 中
+#
+# 使用方式：
+#   1. 在 .env 中设置 FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic
+#   2. 或在下方修改 active_profile 默认值
+#   3. 不设置任何 profile → 默认 fake（安全本地路径）
+#
+# 兼容：MY_FIRST_AGENT_LLM_PROVIDER 等旧环境变量仍然可用，
+# 但推荐使用 profile 方式。
+
+active_profile: fake
+
+profiles:
+  fake:
+    type: fake
+    model: fake-llm
+
+  kimi_anthropic:
+    type: anthropic_compatible
+    model: kimi-k2.5
+    base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    request_path: /v1/messages
+    auth_scheme: auto
+
+  glm_openai:
+    type: openai_compatible
+    model: glm-5
+    base_url: https://coding.dashscope.aliyuncs.com/v1
+    api_key_env: OPENAI_API_KEY
+    request_path: /v1/chat/completions
+    auth_scheme: bearer

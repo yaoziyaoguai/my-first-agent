@@ -38,32 +38,31 @@ ConfigSourceKind = Literal[
 # key 是 ProviderError code / status_code 字符串，value 是诊断信息
 DIAGNOSTIC_ERROR_MAP: dict[str, str] = {
     "unknown_provider": (
-        "未知的 provider 类型。请检查 MY_FIRST_AGENT_LLM_PROVIDER 环境变量，"
+        "未知的 provider 类型。请检查 config/config.yaml 中 provider.type 字段，"
         "支持的类型：anthropic_native, anthropic_compatible, "
         "openai_native, openai_compatible, fake"
     ),
     "api_key_missing": (
         "API key 未配置。当前 provider 需要真实 API key，但环境变量中未找到。"
-        "如需使用真实 provider，请设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY；"
-        "如仅需本地体验，设置 MY_FIRST_AGENT_LLM_PROVIDER=fake 启动安全路径"
+        "请在 .env 中设置 config/config.yaml 里 api_key_env 对应的环境变量；"
+        "如仅需本地体验，设置 config/config.yaml 中 provider.enabled=false 启动安全路径"
     ),
     "model_missing": (
-        "模型名未配置。请设置 ANTHROPIC_MODEL 或 OPENAI_MODEL 或 "
-        "MY_FIRST_AGENT_LLM_MODEL 环境变量指定要使用的模型"
+        "模型名未配置。请在 config/config.yaml 的 provider.model 字段指定要使用的模型"
     ),
     "base_url_missing": (
-        "兼容模式 provider 需要 base_url。请设置 ANTHROPIC_BASE_URL 或 "
-        "OPENAI_BASE_URL 或 MY_FIRST_AGENT_LLM_BASE_URL"
+        "兼容模式 provider 需要 base_url。"
+        "请在 config/config.yaml 的 provider.base_url 字段设置"
     ),
     "unsupported_auth_scheme": (
-        "不支持的认证方案。MY_FIRST_AGENT_LLM_AUTH_SCHEME 只能是 "
-        "auto, x-api-key 或 bearer"
+        "不支持的认证方案。请在 config/config.yaml 的 provider.auth_scheme 字段设置，"
+        "支持的值：auto, x-api-key, bearer"
     ),
     "invalid_max_tokens": (
-        "max_tokens 值无效。MY_FIRST_AGENT_LLM_MAX_TOKENS 必须是正整数"
+        "max_tokens 值无效。请在 config/config.yaml 的 runtime.max_tokens 字段设置为正整数"
     ),
     "invalid_timeout": (
-        "timeout 值无效。MY_FIRST_AGENT_LLM_TIMEOUT 必须是正数（秒）"
+        "timeout 值无效。请在 config/config.yaml 的 runtime.timeout 字段设置为正数（秒）"
     ),
     "unknown_model": (
         "未知的模型名。请确认模型名拼写正确。当前 fake/local 模式下"
@@ -74,8 +73,8 @@ DIAGNOSTIC_ERROR_MAP: dict[str, str] = {
         "请检查 agent/provider/ 下的 provider adapter 是否已正确注册"
     ),
     "provider_timeout_error": (
-        "provider 请求超时。请检查网络连接，或通过 "
-        "MY_FIRST_AGENT_LLM_TIMEOUT 增加超时时间（默认 30 秒）"
+        "provider 请求超时。请检查网络连接，或在 config/config.yaml 的 "
+        "runtime.timeout 字段增加超时时间（默认 30 秒）"
     ),
     "provider_capability_error": (
         "当前 provider 不支持所需的能力（如 tool_use / streaming）。"
@@ -87,7 +86,7 @@ DIAGNOSTIC_ERROR_MAP: dict[str, str] = {
 HTTP_STATUS_DIAGNOSTIC_MAP: dict[int, str] = {
     401: (
         "401 Unauthorized — API key 无效或已过期。"
-        "请检查以下环境变量是否正确：ANTHROPIC_API_KEY 或 OPENAI_API_KEY。"
+        "请检查 .env 中 config/config.yaml 里 api_key_env 对应的 key 是否正确。"
         "确认 key 未被截断、未包含多余空格、未在 provider 控制台被撤销。"
         "不要将 key 写入仓库文件、日志、checkpoint 或文档。"
     ),
@@ -98,7 +97,7 @@ HTTP_STATUS_DIAGNOSTIC_MAP: dict[int, str] = {
     ),
     408: (
         "408 Request Timeout — 请求超时。请检查网络连接是否稳定，"
-        "或通过 MY_FIRST_AGENT_LLM_TIMEOUT 增加超时时间（默认 30 秒）"
+        "或在 config/config.yaml 的 runtime.timeout 字段增加超时时间（默认 30 秒）"
     ),
     429: (
         "429 Too Many Requests — 已触发 API 速率限制。"
@@ -110,8 +109,8 @@ HTTP_STATUS_DIAGNOSTIC_MAP: dict[int, str] = {
     ),
     502: (
         "502 Bad Gateway — provider 网关错误。"
-        "这可能与代理/兼容端点配置有关。检查 ANTHROPIC_BASE_URL 或 "
-        "OPENAI_BASE_URL 是否正确"
+        "这可能与代理/兼容端点配置有关。检查 config/config.yaml 中 "
+        "provider.base_url 是否正确"
     ),
     503: (
         "503 Service Unavailable — provider 服务暂时不可用。"
@@ -148,6 +147,8 @@ class ProviderDiagnostic:
     profile_source: str | None = None  # "profile_env" | "profile_yaml" | "default_fake" | "legacy"
     config_yaml_path: str | None = None  # config/config.yaml 路径（config_yaml 来源时）
     config_error: str | None = None  # YAML 解析失败等错误信息
+    legacy_ignored: list[str] = field(default_factory=list)
+    # config.yaml 存在时被忽略的 legacy env/profile
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
 
@@ -351,7 +352,7 @@ def diagnose_provider_config(
     if provider not in valid_types:
         issues.append(f"未知 provider 类型: {provider}")
         suggestions.append(
-            "设置 MY_FIRST_AGENT_LLM_PROVIDER 为以下之一: "
+            "在 config/config.yaml 中设置 provider.type 为以下之一: "
             "fake, anthropic_native, anthropic_compatible, "
             "openai_native, openai_compatible"
         )
@@ -360,27 +361,29 @@ def diagnose_provider_config(
     if provider != "fake" and not api_key:
         issues.append("真实 provider 缺少 API key")
         suggestions.append(
-            "设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 环境变量；"
-            "或设置 MY_FIRST_AGENT_LLM_PROVIDER=fake 使用安全路径"
+            "在 .env 中设置 config/config.yaml 里 api_key_env 对应的环境变量；"
+            "或设置 config/config.yaml 中 provider.enabled=false 使用安全路径"
         )
 
     # 真实 provider 需要 model
     if provider != "fake" and not model:
         issues.append("真实 provider 缺少模型名")
-        suggestions.append("设置 ANTHROPIC_MODEL 或 MY_FIRST_AGENT_LLM_MODEL")
+        suggestions.append("在 config/config.yaml 的 provider.model 字段指定模型名")
 
     # 兼容模式需要 base_url
     if provider.endswith("_compatible") and not base_url:
         issues.append("兼容模式 provider 缺少 base_url")
         suggestions.append(
-            "设置 ANTHROPIC_BASE_URL 或 OPENAI_BASE_URL 或 "
-            "MY_FIRST_AGENT_LLM_BASE_URL"
+            "在 config/config.yaml 的 provider.base_url 字段设置端点地址"
         )
 
     # auth_scheme 检查
     if auth_scheme not in {"auto", "x-api-key", "bearer"}:
         issues.append(f"不支持的 auth_scheme: {auth_scheme}")
-        suggestions.append("MY_FIRST_AGENT_LLM_AUTH_SCHEME 只能为 auto, x-api-key 或 bearer")
+        suggestions.append(
+            "请在 config/config.yaml 的 provider.auth_scheme 字段设置"
+            "为 auto, x-api-key 或 bearer"
+        )
 
     # config source 相关建议
     if config_source == "mixed" and outer_env_overrides:
@@ -500,12 +503,22 @@ def diagnose_provider_config_from_unified(
         "config_yaml" if unified.source == "config_yaml"
         else "config_yaml_disabled"
     )
+
+    # 检测 config.yaml 存在时是否有 legacy env/profile 被忽略
+    legacy_ignored: list[str] = []
+    from agent.provider.config import PROVIDER_ENV
+    if env.get(PROVIDER_ENV):
+        legacy_ignored.append(f"{PROVIDER_ENV}={env[PROVIDER_ENV]}")
+    if env.get("FIRST_AGENT_PROVIDER_PROFILE"):
+        legacy_ignored.append(f"FIRST_AGENT_PROVIDER_PROFILE={env['FIRST_AGENT_PROVIDER_PROFILE']}")
+
     return _build_diagnostic_from_config(
         unified_config,
         config_source=config_source,
         dotenv_path=dotenv_path,
         config_yaml_path=unified.yaml_path,
         config_error=unified.config_error,
+        legacy_ignored=legacy_ignored,
     )
 
 
@@ -535,6 +548,7 @@ def _build_diagnostic_from_config(
     config_error: str | None = None,
     active_profile: str | None = None,
     profile_source: str | None = None,
+    legacy_ignored: list[str] | None = None,
 ) -> ProviderDiagnostic:
     """从 AgentProviderConfig 构建 ProviderDiagnostic（共享 helper）。
 
@@ -602,6 +616,7 @@ def _build_diagnostic_from_config(
         config_error=config_error,
         active_profile=active_profile,
         profile_source=profile_source,
+        legacy_ignored=legacy_ignored or [],
         issues=issues,
         suggestions=suggestions,
     )
@@ -688,31 +703,44 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
     # Config source 行（最优先显示，让用户知道配置来自哪里）
     _cs = diagnostic.config_source
     _yaml_path = diagnostic.config_yaml_path
-    if _cs == "config_yaml" and _yaml_path:
-        source_label = f"config_yaml ({_yaml_path})"
-    elif _cs == "config_yaml_disabled" and _yaml_path:
-        source_label = f"config_yaml_disabled ({_yaml_path})"
+    if _cs in ("config_yaml", "config_yaml_disabled") and _yaml_path:
+        source_label = f"{_cs} ({_yaml_path})"
+        lines.append(f"  Config source : {source_label}")
+        lines.append("  Recommended   : config/config.yaml")
+    elif _cs in ("legacy_profile", "legacy_provider_env"):
+        _legacy_name = {
+            "legacy_profile": "FIRST_AGENT_PROVIDER_PROFILE",
+            "legacy_provider_env": "MY_FIRST_AGENT_LLM_PROVIDER",
+        }.get(_cs, _cs)
+        lines.append(f"  Config source : {_cs} ({_legacy_name})")
+        lines.append("                  ⚠️  legacy fallback — not recommended")
+        lines.append(
+            "                  → create config/config.yaml for current setup:\n"
+            "                    cp config/config.example.yaml config/config.yaml"
+        )
     else:
         source_label = {
-            "config_yaml": "config_yaml",
-            "config_yaml_disabled": "config_yaml_disabled",
-            "legacy_profile": "legacy_profile (FIRST_AGENT_PROVIDER_PROFILE)",
-            "legacy_provider_env": "legacy_provider_env (MY_FIRST_AGENT_LLM_PROVIDER)",
             "default_fake": "default_fake",
             "project_dotenv": "project_dotenv",
             "shell_env": "shell_env",
             "mixed": "mixed",
             "unknown": "unknown",
         }.get(_cs, _cs)
+        lines.append(f"  Config source : {source_label}")
 
-    lines.append(f"  Config source : {source_label}")
+    # config.yaml 存在但检测到 legacy env/profile 被忽略
+    if diagnostic.legacy_ignored:
+        lines.append(
+            f"  Legacy env    : ignored ({', '.join(diagnostic.legacy_ignored)} detected"
+            f" but config.yaml takes precedence)"
+        )
 
     if diagnostic.config_error:
         lines.append(f"  Config error  : {diagnostic.config_error}")
 
     if diagnostic.active_profile:
         profile_source_label = {
-            "profile_env": "from FIRST_AGENT_PROVIDER_PROFILE",
+            "profile_env": "from FIRST_AGENT_PROVIDER_PROFILE (legacy)",
             "profile_yaml": "from YAML default",
             "default_fake": "default",
             "legacy": "legacy (MY_FIRST_AGENT_LLM_PROVIDER)",
@@ -747,7 +775,10 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
                 )
             else:
                 lines.append("  当前为 fake (local only) 安全路径，无需 API key。")
-            if diagnostic.config_source in ("config_yaml_disabled", "default_fake"):
+            if diagnostic.config_source in (
+                "config_yaml_disabled", "default_fake",
+                "legacy_profile", "legacy_provider_env",
+            ):
                 lines.append(
                     "  如需切换到真实 LLM：\n"
                     "    1. cp config/config.example.yaml config/config.yaml\n"

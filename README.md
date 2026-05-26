@@ -193,47 +193,48 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 
 ### 前置条件
 
-- 拥有有效的 Anthropic API key（`sk-ant-*`）或兼容端点
+- 拥有有效的 API key（Anthropic `sk-ant-*`、OpenAI `sk-*` 或兼容端点）
 - 理解真实 API 调用的**计费风险**——每次 `chat()` 调用都会消耗 token 配额
 - 理解数据会**离开本机**发送到 API 端点
 
 ### Opt-in 步骤
 
-1. 从模板复制 `.env`（不提交到 git）：
+1. 复制配置模板：
 
    ```bash
-   cp .env.example .env
+   cp config/config.example.yaml config/config.yaml
    ```
 
-2. 编辑 `.env`，设置 provider 和 key：
+2. 编辑 `config/config.yaml` 的 `provider` section：
+
+   ```yaml
+   provider:
+     enabled: true
+     type: anthropic_native
+     model: claude-sonnet-4-6
+     api_key_env: ANTHROPIC_API_KEY
+   ```
+
+3. 在 `.env` 中设置 API key（**不**写入 config.yaml）：
 
    ```bash
-   # 必填：provider 类型（设置为 anthropic 启用真实路径）
-   MY_FIRST_AGENT_LLM_PROVIDER=anthropic_native
-
-   # 必填：Anthropic API key
+   # .env（不提交到 git）
    ANTHROPIC_API_KEY=sk-ant-...
-
-   # 可选：模型名（默认 claude-sonnet-4-6）
-   ANTHROPIC_MODEL=claude-sonnet-4-6
    ```
 
-3. 验证 opt-in 是否生效：
+4. 验证 opt-in 是否生效：
 
    ```bash
-   .venv/bin/python -c "
-   import os; os.environ['MY_FIRST_AGENT_LLM_PROVIDER']='anthropic_native'
-   from agent.provider.factory import build_model_provider_from_env
-   p = build_model_provider_from_env()
-   print(f'Provider: {type(p).__name__}')
-   "
+   python main.py status
    ```
 
-   应输出 `Provider: AnthropicNativeProvider`（而非 `FakeProvider`）。
+   应显示 `Config source: config_yaml`，`Provider type: anthropic_native`。
 
 ### 支持的 Provider 类型
 
-| `MY_FIRST_AGENT_LLM_PROVIDER` | 说明 |
+编辑 `config/config.yaml` 中 `provider.type` 为以下值之一：
+
+| `provider.type` | 说明 |
 |---|---|
 | `fake`（默认） | Deterministic fake provider，不联网，不需要 key |
 | `anthropic_native` | Anthropic Messages API（原生 SDK） |
@@ -241,7 +242,8 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 | `openai_native` | OpenAI Chat Completions API（原生 SDK） |
 | `openai_compatible` | OpenAI 兼容端点 |
 
-完整配置变量见 `.env.example` 和 `agent/provider/config.py`。
+兼容模式（`*_compatible`）还需要配置 `base_url` 和相关 `auth_scheme`/`request_path`。
+完整配置参考 `config/config.example.yaml`。
 
 ### Fake vs Real 行为差异
 
@@ -258,8 +260,8 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 ### 重要约束
 
 - **fake/real 共享同一 runtime**：`core.chat()` → `loop.py` → `Tool Pipeline` → `Checkpoint` 路径对 fake 和 real 完全一致，只是 provider adapter 层替换
-- `.env` 中的 key **绝不**自动读取——只有在显式设置 `MY_FIRST_AGENT_LLM_PROVIDER` 环境变量后，`build_model_provider_from_env()` 才会加载配置
-- 真实 provider 调用**不会被任何自动流程触发**（包括 auto-run workflow、CI、pre-commit hook）——只有用户显式设置环境变量 + 手动运行才会启用
+- **`config/config.yaml` 是唯一推荐配置入口**：`.env` 只放 secret（API key），不放 provider 类型/模型名
+- 真实 provider 调用**不会被任何自动流程触发**（包括 auto-run workflow、CI、pre-commit hook）——只有用户显式设置 `enabled: true` + 手动运行才会启用
 - 所有真实 API 测试默认跳过（需要额外 opt-in env var），详见 `tests/` 中的 `skipIf` 标记
 
 ## 当前不支持什么

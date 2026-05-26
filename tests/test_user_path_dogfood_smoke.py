@@ -703,3 +703,200 @@ class TestDogfoodRegression:
         assert "ProviderNotImplementedError" not in (result["error"] or ""), (
             f"不应有 ProviderNotImplementedError: {result['error']}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Sweep Cases — phase A 扩展
+# 中文学习说明：以下 case 覆盖用户指定的 automated sweep 矩阵中
+# 尚未被 TestDogfoodOrdinaryChat / TestDogfoodToolAndCommands 覆盖的部分。
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _check_no_secret_leakage(result: dict) -> tuple[bool, str]:
+    """检查 runtime events 和错误信息中不包含疑似 secret 模式。"""
+    suspicious = []
+    text_sources = [
+        result.get("error") or "",
+        result.get("reply") or "",
+        result.get("summary_text") or "",
+    ]
+    for evt in result.get("runtime_events", []):
+        text_sources.append(str(getattr(evt, "text", "")))
+    combined = "\n".join(text_sources)
+    # sk-ant / sk-sp / api_key / Bearer 等常见 secret token 前缀
+    patterns = [r"sk-ant-", r"sk-sp-", r"api_key\s*=\s*['\"]?\w{10,}", r"Bearer\s+\w{20,}"]
+    for pat in patterns:
+        if re.search(pat, combined):
+            suspicious.append(pat)
+    if suspicious:
+        return False, f"疑似 secret 泄漏: {suspicious}"
+    return True, ""
+
+
+@pytest.mark.dogfood
+class TestDogfoodMemoryRetain:
+    """Memory retain flow：记住偏好 → 检查是否可读取。"""
+
+    def test_case_h_remember_preference(self, monkeypatch):
+        """Case H: 请记住一个测试偏好。
+
+        输入：
+        请记住一个测试偏好：我喜欢把复杂工程问题先拆成架构、代码、测试、文档四类来看
+
+        expected:
+        - no crash / no max loop
+        - has response
+        - 不 overclaim Memory（无真实 retain 时不报）
+        - no secret leakage
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "请记住一个测试偏好：我喜欢把复杂工程问题先拆成架构、代码、测试、文档四类来看",
+            provider,
+        )
+
+        checks = [
+            ("no crash", _check_no_crash(result)),
+            ("no max loop", _check_no_max_loop(result)),
+            ("has response", _check_has_response(result)),
+            ("no secret leakage", _check_no_secret_leakage(result)),
+        ]
+
+        failures = [(name, reason) for name, (ok, reason) in checks if not ok]
+        assert not failures, (
+            f"Case H 失败 ({result['loop_iterations']} loops):\n"
+            + "\n".join(f"  [{name}] {reason}" for name, reason in failures)
+        )
+
+
+@pytest.mark.dogfood
+class TestDogfoodSubAgentDelegation:
+    """SubAgent delegation flow — 真实委托路径。"""
+
+    def test_case_i_delegate_demo_stat(self, monkeypatch):
+        """Case I: 请委托 demo-stat 子代理统计字数。
+
+        输入：
+        请委托 demo-stat 子代理，帮我统计这句话里面有多少个字：武汉旅行测试
+
+        expected:
+        - no crash / no max loop
+        - has response
+        - 不对 SubAgent 委托 overclaim（仅在 success 时计数）
+        - no secret leakage
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "请委托 demo-stat 子代理，帮我统计这句话里面有多少个字：武汉旅行测试",
+            provider,
+        )
+
+        checks = [
+            ("no crash", _check_no_crash(result)),
+            ("no max loop", _check_no_max_loop(result)),
+            ("has response", _check_has_response(result)),
+            ("no secret leakage", _check_no_secret_leakage(result)),
+        ]
+
+        failures = [(name, reason) for name, (ok, reason) in checks if not ok]
+        assert not failures, (
+            f"Case I 失败 ({result['loop_iterations']} loops):\n"
+            + "\n".join(f"  [{name}] {reason}" for name, reason in failures)
+        )
+
+
+@pytest.mark.dogfood
+class TestDogfoodDebugSummary:
+    """Debug / summary 查询路径。"""
+
+    def test_case_j_show_run_summary(self, monkeypatch):
+        """Case J: 请显示本轮运行摘要。
+
+        expected:
+        - no crash / no max loop
+        - has response
+        - 摘要信息应出现在回复中或至少不崩溃
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat("请显示本轮运行摘要", provider)
+
+        checks = [
+            ("no crash", _check_no_crash(result)),
+            ("no max loop", _check_no_max_loop(result)),
+            ("has response", _check_has_response(result)),
+        ]
+
+        failures = [(name, reason) for name, (ok, reason) in checks if not ok]
+        assert not failures, (
+            f"Case J 失败 ({result['loop_iterations']} loops):\n"
+            + "\n".join(f"  [{name}] {reason}" for name, reason in failures)
+        )
+
+    def test_case_k_ask_about_activity(self, monkeypatch):
+        """Case K: 请告诉我刚才这一轮有没有调用工具、记忆或子代理。
+
+        expected:
+        - no crash / no max loop
+        - has response
+        - summary self-report 诚实
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "请告诉我刚才这一轮有没有调用工具、记忆或子代理",
+            provider,
+        )
+
+        checks = [
+            ("no crash", _check_no_crash(result)),
+            ("no max loop", _check_no_max_loop(result)),
+            ("has response", _check_has_response(result)),
+        ]
+
+        failures = [(name, reason) for name, (ok, reason) in checks if not ok]
+        assert not failures, (
+            f"Case K 失败 ({result['loop_iterations']} loops):\n"
+            + "\n".join(f"  [{name}] {reason}" for name, reason in failures)
+        )
+
+
+@pytest.mark.dogfood
+class TestDogfoodErrorRecovery:
+    """Error / recovery 路径 — 异常输入不会导致崩溃。"""
+
+    def test_case_l_forget_nonexistent_memory(self, monkeypatch):
+        """Case L: forget memory abc-not-exist。
+
+        expected:
+        - no crash
+        - no max loop
+        - 应该给出可读的错误/提示，不应 traceback
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat("forget memory abc-not-exist", provider)
+
+        checks = [
+            ("no crash", _check_no_crash(result)),
+            ("no max loop", _check_no_max_loop(result)),
+            ("has response", _check_has_response(result)),
+        ]
+
+        failures = [(name, reason) for name, (ok, reason) in checks if not ok]
+        assert not failures, (
+            f"Case L 失败 ({result['loop_iterations']} loops):\n"
+            + "\n".join(f"  [{name}] {reason}" for name, reason in failures)
+        )

@@ -19,14 +19,14 @@ from __future__ import annotations
 import pytest
 
 from agent.provider.fake_provider import (
+    FakeProvider,
+    _default_tool_input,
     _normalize,
     _resolve_tool_use,
     _tool_desc_keywords,
     _tool_name_tokens,
-    _default_tool_input,
 )
 from agent.provider.protocol import ToolUseBlock
-from agent.provider.fake_provider import FakeProvider
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,9 @@ class TestResolveToolUse:
     SAFE_DEMO_TOOLS = [
         _make_tool(
             "demo.echo_task_summary",
-            "返回当前 demo 任务的确定性摘要。零副作用、零网络调用、不读私人资料。",
+            "【demo 工具】返回当前 demo 任务的确定性摘要。"
+            "适用场景：用户要求「总结任务」「查看任务摘要」「汇总当前进度」等。"
+            "零副作用、零网络调用、不读私人资料。",
         ),
         _make_tool(
             "demo.write_demo_note",
@@ -551,8 +553,8 @@ class TestFakeProviderNoFilesystemSideEffect:
 
     def test_default_tool_input_does_not_create_directory(self, tmp_path, monkeypatch):
         """_default_tool_input 只计算路径，不创建 workspace 目录。"""
-        from agent.provider.fake_provider import _default_tool_input
         from agent import local_demo
+        from agent.provider.fake_provider import _default_tool_input
 
         fake_root = tmp_path / "fake_project"
         fake_root.mkdir()

@@ -167,7 +167,8 @@ def test_map_401_error_to_useful_message():
     msg = map_provider_error(err)
     assert "401" in msg
     assert "API key" in msg or "key" in msg.lower()
-    assert "ANTHROPIC_API_KEY" in msg or "OPENAI_API_KEY" in msg
+    # config.yaml 是唯一推荐入口，不应直接引用 ANTHROPIC_API_KEY/OPENAI_API_KEY
+    assert "config/config.yaml" in msg or ".env" in msg
 
 
 def test_map_403_error_to_useful_message():
@@ -754,10 +755,11 @@ def test_diagnose_config_source_project_dotenv():
 
 
 def test_isolated_diagnostic_uses_only_dotenv_values():
-    """isolated 模式应清除外层 env，只使用 .env 中的配置值。
+    """isolated 模式应清除外层 env，config.yaml 优先于 legacy .env 值。
 
     模拟：外层 ANTHROPIC_MODEL=deepseek-v4-pro，.env 中 ANTHROPIC_MODEL=kimi-k2.5。
-    isolated 诊断应以 kimi-k2.5 为准。
+    config/config.yaml 存在且 enabled=false，legacy env 被忽略，
+    诊断应以 config.yaml 的 fake/local 为准。
     """
     import os as _os
     import tempfile
@@ -765,7 +767,7 @@ def test_isolated_diagnostic_uses_only_dotenv_values():
 
     from agent.provider.diagnostics import diagnose_provider_config_isolated
 
-    # 创建一个临时 .env
+    # 创建一个临时 .env（含 legacy env vars）
     with tempfile.TemporaryDirectory() as tmp:
         dotenv_path = Path(tmp) / ".env"
         dotenv_path.write_text(
@@ -781,13 +783,15 @@ def test_isolated_diagnostic_uses_only_dotenv_values():
 
         try:
             diag = diagnose_provider_config_isolated(str(dotenv_path))
-            # 应使用 .env 的 kimi-k2.5，而非外层的 deepseek-v4-pro
-            assert diag.model == "kimi-k2.5", (
-                f"expected kimi-k2.5 from .env, got {diag.model}"
+            # config/config.yaml 存在 → 优先于 legacy env，使用 config.yaml 的 fake
+            assert diag.provider_type == "fake", (
+                f"expected fake from config.yaml, got {diag.provider_type}"
             )
-            assert diag.provider_type == "anthropic_compatible"
-            assert diag.config_source == "project_dotenv"
-            assert diag.api_key_present is True
+            assert diag.config_source in ("config_yaml_disabled", "default_fake"), (
+                f"expected config_yaml source, got {diag.config_source}"
+            )
+            # .env 中的 legacy env 被 config.yaml 忽略，api key 不影响诊断
+            assert diag.api_key_present is False
         finally:
             # 清理
             _os.environ.pop("ANTHROPIC_MODEL", None)
@@ -833,11 +837,15 @@ def test_isolated_diagnostic_no_secret_in_output():
         report = render_diagnostic_report(diag)
         assert "sk-secret" not in report
         assert "sk-secret-key-that-must-not-leak" not in report
-        assert "SET (redacted)" in report
+        # config.yaml 优先于 legacy env，fake 模式无 API key
+        assert "API key       : not set" in report
 
 
 def test_isolated_diagnostic_shows_model_and_base_url_redacted():
-    """isolated 诊断应显示 model 名和脱敏 base_url。"""
+    """isolated 诊断应显示 config.yaml 的 model 名和脱敏 base_url。
+
+    config.yaml 优先于 legacy .env 值，model 来自 config.yaml 而非 .env。
+    """
     import tempfile
     from pathlib import Path
 
@@ -857,10 +865,10 @@ def test_isolated_diagnostic_shows_model_and_base_url_redacted():
 
         diag = diagnose_provider_config_isolated(str(dotenv_path))
         report = render_diagnostic_report(diag)
-        assert "kimi-k2.5" in report
-        # hostname 应可见（不是 secret），但完整路径不显示
-        assert "coding.dashscope.aliyuncs.com" in report
-        assert "project_dotenv" in report
+        # config.yaml 存在，model 来自 config.yaml (fake-llm)，而非 .env (kimi-k2.5)
+        assert "fake-llm" in report
+        # config source 为 config_yaml_disabled（config.yaml 优先）
+        assert "config_yaml" in report
 
 
 # =========================================================================
@@ -1320,7 +1328,8 @@ class TestProfileDiagnostics:
             profile_source="profile_env",
         )
         report = render_diagnostic_report(diag)
-        assert "Active profile: kimi_anthropic (from FIRST_AGENT_PROVIDER_PROFILE)" in report
+        legacy_label = "Active profile: kimi_anthropic (from FIRST_AGENT_PROVIDER_PROFILE (legacy))"
+        assert legacy_label in report
 
     def test_render_suggests_config_yaml_not_legacy(self):
         """fake 模式诊断建议使用 config/config.yaml 而非 legacy profile env var。"""
@@ -1414,12 +1423,12 @@ class TestProfileFactoryIntegration:
     """测试 profile → factory 集成路径。"""
 
     def test_build_model_provider_from_env_with_profile_env(self):
-        """FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic 时复现 fake→real 流程。
+        """config.yaml 优先于 FIRST_AGENT_PROVIDER_PROFILE（legacy）。
 
         学习型注释：
-        profile 解析发生在 build_model_provider_from_env() 内部，
-        不走 runtime 分叉。factory 拿到的是普通的 AgentProviderConfig，
-        后续所有代码（core.chat / loop.py / call_model）行为不变。
+        config/config.yaml 存在时，legacy profile env 被完全忽略，
+        build_model_provider_from_env() 返回 config.yaml 的配置。
+        profile 路径仅在 config.yaml 不存在时作为 fallback 生效。
         """
         from agent.provider.factory import build_model_provider_from_env
 
@@ -1459,9 +1468,13 @@ class TestProfileFactoryIntegration:
             pmod.DEFAULT_PROFILES_YAML = yaml_path
             try:
                 provider = build_model_provider_from_env()
-                # 应该返回 AnthropicCompatibleProvider（或至少不是 FakeProvider）
+                # config.yaml 存在 → 优先，返回 FakeProvider（config.yaml 的默认配置）
+                # legacy profile env 被忽略
                 assert provider is not None
-                assert getattr(provider, "provider_type", "") == "anthropic_compatible"
+                assert getattr(provider, "provider_type", "") == "fake", (
+                    f"config.yaml 应优先于 profile env，"
+                    f"expected fake, got {getattr(provider, 'provider_type', '')}"
+                )
             finally:
                 pmod.DEFAULT_PROFILES_YAML = _orig_default
         finally:

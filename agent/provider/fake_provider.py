@@ -87,8 +87,14 @@ def _tool_desc_keywords(description: str) -> set[str]:
 
     规则：
     - 英文：提取 3+ 字母的单词，排除停用词
-    - 中文：提取 2-4 字的连续汉字片段
+    - 中文：提取 2-4 字的连续汉字片段，排除高频泛化停用词
     - 返回用于匹配的关键词集合
+
+    中文停用词策略：
+    "调用" 在几乎所有工具描述中作为 boilerplate 出现（"调用此工具…"），
+    不应作为意图信号；用户在 ordinary chat 中说 "不要调用" 与工具描述中
+    的 "调用" 语义相反。过滤后，strategy 1（全名精确命中）和 strategy 2
+    （名称 token 命中）仍是主要的工具匹配路径。
     """
     import re
 
@@ -104,12 +110,19 @@ def _tool_desc_keywords(description: str) -> set[str]:
     eng_words = re.findall(r"[a-z]{3,}", normalized)
     keywords.update(w for w in eng_words if w not in eng_stop)
 
-    # 中文片段：取 2-4 字连续汉字
+    # 中文片段：取 2-4 字连续汉字，排除高频泛化停用词
     cn_chars = re.findall(r"[一-鿿]+", normalized)
+    cn_stop_substrings = {
+        "不要",  # 否定 — 用户说"不要调用"与工具描述中"调用"语义相反
+        "调用",  # boilerplate — 几乎所有中文工具描述都含"调用此工具"
+    }
     for seg in cn_chars:
         for size in (4, 3, 2):
             for i in range(len(seg) - size + 1):
-                keywords.add(seg[i : i + size])
+                ngram = seg[i : i + size]
+                if any(sw in ngram for sw in cn_stop_substrings):
+                    continue
+                keywords.add(ngram)
 
     return keywords
 
@@ -208,11 +221,12 @@ def _resolve_tool_use(
 
     if candidates:
         score, name, tool = candidates[0]
-        # 最低门槛 40：防止常见中文短 n-gram（如"什么""一下"）误匹配工具描述。
-        # 策略 3 单关键词重叠得分 35（30+5），不满足 40；至少需 2 个关键词重叠（30+10=40）。
-        # 策略 2 名称 token 命中得分 60+（≥70），单 token 即可通过。
+        # 最低门槛 60：防止常见中文短 n-gram（如"调用""工具""路径"）误匹配工具描述。
+        # 策略 3 单关键词重叠得分 35（30+5），不满足 60；5 个重叠=55，不满足。
+        # 需 6+ 关键词重叠（30+30=60）才通过。策略 2 名称 token 命中得分 70+，不受影响。
         # 策略 1 全名精确命中得分 100，直接通过。
-        if score >= 40:
+        # 历史：30→40 (6e5f287)，40→60 (本轮 automated dogfood sweep 发现 Case K)。
+        if score >= 60:
             tool_id = f"toolu_fake_{uuid.uuid4().hex[:12]}"
             return ToolUseBlock(
                 id=tool_id,

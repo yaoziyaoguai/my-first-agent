@@ -35,21 +35,16 @@ def dispatch_maintenance_command(
 ) -> int | None:
     """处理非交互维护命令；未命中时返回 None 让 main 进入 agent loop。"""
 
-    # status 命令：provider 配置静态诊断（不调用真实 API）
+    # status 命令：provider 配置静态诊断（v0.12+ 使用统一 config.yaml 入口）
     if argv and argv[0] == "status":
-        from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
-        from agent.provider.profiles import (
-            load_provider_profiles,
-            resolve_active_profile,
+        from agent.provider.diagnostics import (
+            diagnose_provider_config_from_unified,
+            render_diagnostic_report,
         )
 
         _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
-        profiles = load_provider_profiles(project_root=project_root)
-        resolved, method = resolve_active_profile(profiles)
-        diagnostic = diagnose_provider_config(
+        diagnostic = diagnose_provider_config_from_unified(
             dotenv_path=project_root / ".env",
-            active_profile=resolved.name if resolved else None,
-            profile_source=method,
         )
         print(render_diagnostic_report(diagnostic))
         if diagnostic.status == "error":
@@ -61,13 +56,9 @@ def dispatch_maintenance_command(
     # provider-diagnostics 命令：增强的 provider 配置诊断（支持 isolated dotenv）
     if argv and argv[0] == "provider-diagnostics":
         from agent.provider.diagnostics import (
-            diagnose_provider_config,
+            diagnose_provider_config_from_unified,
             diagnose_provider_config_isolated,
             render_diagnostic_report,
-        )
-        from agent.provider.profiles import (
-            load_provider_profiles,
-            resolve_active_profile,
         )
 
         _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
@@ -83,12 +74,8 @@ def dispatch_maintenance_command(
             print(f"只从 {dotenv_path} 加载配置。\n")
             diagnostic = diagnose_provider_config_isolated(dotenv_path)
         else:
-            profiles = load_provider_profiles(project_root=project_root)
-            resolved, method = resolve_active_profile(profiles)
-            diagnostic = diagnose_provider_config(
+            diagnostic = diagnose_provider_config_from_unified(
                 dotenv_path=project_root / ".env",
-                active_profile=resolved.name if resolved else None,
-                profile_source=method,
             )
 
         print(render_diagnostic_report(diagnostic))

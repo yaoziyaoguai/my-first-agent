@@ -44,37 +44,47 @@ def build_model_provider_from_env() -> ModelProvider | None:
     4. FakeProvider 和 RealProvider 共享同一条 core.chat/loop.py 路径，
        这不是 fake/real 双 runtime。
 
-    v0.11+ profile 支持：
-    优先检查 FIRST_AGENT_PROVIDER_PROFILE → 从 YAML 加载 profile → 转 AgentProviderConfig。
-    其次检查 MY_FIRST_AGENT_LLM_PROVIDER (legacy 兼容)。
-    都没有则返回 FakeProvider。
+    Config resolution precedence (v0.12+):
+    1. config/config.yaml (推荐入口)
+    2. FIRST_AGENT_PROVIDER_PROFILE + provider_profiles.yaml (legacy)
+    3. MY_FIRST_AGENT_LLM_PROVIDER + 分散 env vars (legacy)
+    4. default fake
     """
+    from agent.provider.fake_provider import FakeProvider
+
+    # 1. config/config.yaml (推荐入口)
+    from agent.provider.simple_config import load_unified_provider_config
+
+    unified = load_unified_provider_config()
+    if unified.source in ("config_yaml", "config_yaml_disabled"):
+        if unified.config_error:
+            # YAML 有错误 → safe fallback fake（不静默，错误会通过 diagnostics 报告）
+            return FakeProvider()
+        if unified.config.provider_type == "fake":
+            return FakeProvider()
+        return build_model_provider(unified.config)
+
+    # 2. FIRST_AGENT_PROVIDER_PROFILE (legacy)
     from agent.provider.profiles import (
         load_provider_profiles,
         profile_to_agent_config,
         resolve_active_profile,
     )
 
-    # 尝试 profile 路径
     profiles = load_provider_profiles()
     if profiles:
         resolved, method = resolve_active_profile(profiles)
 
-        if resolved is not None and method != "legacy":
-            # 通过 profile 解析得到 AgentProviderConfig
+        if resolved is not None and method not in ("legacy", "default_fake"):
             if resolved.provider_type == "fake":
-                from agent.provider.fake_provider import FakeProvider
-
                 return FakeProvider()
             config = profile_to_agent_config(resolved)
             return build_model_provider(config)
 
-    # legacy 路径：MY_FIRST_AGENT_LLM_PROVIDER 直接设置
+    # 3. MY_FIRST_AGENT_LLM_PROVIDER (legacy)
     if os.environ.get(PROVIDER_ENV):
         config = load_agent_provider_config()
         return build_model_provider(config)
 
-    # 默认：fake
-    from agent.provider.fake_provider import FakeProvider
-
+    # 4. default fake
     return FakeProvider()

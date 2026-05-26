@@ -20,12 +20,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from agent.provider.config import AgentProviderConfig
+
 ConfigSourceKind = Literal[
-    "project_dotenv",  # 仅从项目 .env 加载
-    "shell_env",       # 仅从外层进程环境变量
-    "default_fake",    # 无任何配置，使用 fake 兜底
-    "mixed",           # .env 与外层 env 混合（override=False 导致外层优先）
-    "unknown",         # 无法判断来源
+    "project_dotenv",          # 仅从项目 .env 加载
+    "shell_env",               # 仅从外层进程环境变量
+    "default_fake",            # 无任何配置，使用 fake 兜底
+    "mixed",                   # .env 与外层 env 混合（override=False 导致外层优先）
+    "unknown",                 # 无法判断来源
+    "config_yaml",             # 来自 config/config.yaml（provider.enabled=true）
+    "config_yaml_disabled",    # config.yaml 存在但 provider.enabled=false
+    "legacy_profile",          # 来自 FIRST_AGENT_PROVIDER_PROFILE（legacy fallback）
+    "legacy_provider_env",     # 来自 MY_FIRST_AGENT_LLM_PROVIDER（legacy fallback）
 ]
 
 # 已知 provider 错误码 → 用户可执行修复建议（中文）
@@ -140,6 +146,8 @@ class ProviderDiagnostic:
     outer_env_overrides: list[str] = field(default_factory=list)
     active_profile: str | None = None
     profile_source: str | None = None  # "profile_env" | "profile_yaml" | "default_fake" | "legacy"
+    config_yaml_path: str | None = None  # config/config.yaml 路径（config_yaml 来源时）
+    config_error: str | None = None  # YAML 解析失败等错误信息
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
 
@@ -413,6 +421,192 @@ def diagnose_provider_config(
     )
 
 
+def diagnose_provider_config_from_unified(
+    dotenv_path: str | Path | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> ProviderDiagnostic:
+    """从 config/config.yaml 统一配置入口诊断 provider 配置。
+
+    这是 v0.12+ 推荐入口，完整 resolution chain：
+    1. config/config.yaml（推荐入口）
+    2. FIRST_AGENT_PROVIDER_PROFILE（legacy fallback）
+    3. MY_FIRST_AGENT_LLM_PROVIDER + 分散 env vars（legacy fallback）
+    4. default fake
+
+    不调用真实 API，不泄露 secret。
+    """
+    import os as _os
+
+    if env is None:
+        env = dict(_os.environ)
+
+    # 1. config/config.yaml（推荐入口）
+    from agent.provider.simple_config import load_unified_provider_config
+
+    unified = load_unified_provider_config(env=env)
+
+    # 如果 config.yaml 不存在，尝试 legacy fallback
+    if unified.source == "default_fake":
+        # 2. FIRST_AGENT_PROVIDER_PROFILE（legacy）
+        from agent.provider.profiles import (
+            load_provider_profiles,
+            profile_to_agent_config,
+            resolve_active_profile,
+        )
+
+        profiles = load_provider_profiles()
+        if profiles:
+            resolved, method = resolve_active_profile(profiles, env=env)
+            if resolved is not None and method not in ("legacy", "default_fake"):
+                if resolved.provider_type == "fake":
+                    unified_config = _make_fake_config()
+                else:
+                    unified_config = profile_to_agent_config(resolved)
+                return _build_diagnostic_from_config(
+                    unified_config,
+                    config_source="legacy_profile",
+                    dotenv_path=dotenv_path,
+                    active_profile=resolved.name,
+                    profile_source=method,
+                )
+
+        # 3. MY_FIRST_AGENT_LLM_PROVIDER（legacy）
+        # 使用 lenient diagnose_provider_config 直接读 env vars，
+        # 避免 load_agent_provider_config 的严格校验（如 base_url 缺失）
+        # 阻碍诊断输出。
+        from agent.provider.config import PROVIDER_ENV
+
+        if env.get(PROVIDER_ENV):
+            legacy_diag = diagnose_provider_config(env=env)
+            object.__setattr__(legacy_diag, "config_source", "legacy_provider_env")
+            if dotenv_path is not None:
+                _dp = Path(dotenv_path) if not isinstance(dotenv_path, Path) else dotenv_path
+                _dv = _load_dotenv_values_safe(_dp)
+                object.__setattr__(legacy_diag, "dotenv_loaded", bool(_dv))
+                object.__setattr__(legacy_diag, "dotenv_path", str(_dp.resolve()))
+            return legacy_diag
+
+        # 4. default fake
+        return _build_diagnostic_from_config(
+            _make_fake_config(),
+            config_source="default_fake",
+            dotenv_path=dotenv_path,
+        )
+
+    # config.yaml 命中（config_yaml / config_yaml_disabled）
+    unified_config = unified.config
+    config_source: ConfigSourceKind = (
+        "config_yaml" if unified.source == "config_yaml"
+        else "config_yaml_disabled"
+    )
+    return _build_diagnostic_from_config(
+        unified_config,
+        config_source=config_source,
+        dotenv_path=dotenv_path,
+        config_yaml_path=unified.yaml_path,
+        config_error=unified.config_error,
+    )
+
+
+def _make_fake_config() -> AgentProviderConfig:
+    """创建默认 fake provider 配置（与 simple_config._make_fake_config 一致）。"""
+    return AgentProviderConfig(
+        provider_type="fake",
+        provider_name="fake",
+        api_key=None,
+        api_key_env=None,
+        base_url=None,
+        model="fake-llm",
+        auth_scheme="auto",
+        request_path="",
+        supports_tools=False,
+        supports_streaming=False,
+        compatibility_mode="fake",
+    )
+
+
+def _build_diagnostic_from_config(
+    config: AgentProviderConfig,
+    *,
+    config_source: ConfigSourceKind,
+    dotenv_path: str | Path | None = None,
+    config_yaml_path: str | None = None,
+    config_error: str | None = None,
+    active_profile: str | None = None,
+    profile_source: str | None = None,
+) -> ProviderDiagnostic:
+    """从 AgentProviderConfig 构建 ProviderDiagnostic（共享 helper）。
+
+    避免在 diagnose_provider_config_from_unified 的多个分支中重复构建逻辑。
+    """
+    # 加载 dotenv
+    _dotenv_loaded = False
+    _dotenv_path_str: str | None = None
+    if dotenv_path is not None:
+        _dotenv_path = Path(dotenv_path)
+        _dotenv_path_str = str(_dotenv_path.resolve())
+        _dotenv_vals = _load_dotenv_values_safe(_dotenv_path)
+        _dotenv_loaded = bool(_dotenv_vals)
+
+    api_key_present = bool(config.api_key)
+    base_url_display = _redact_base_url(config.base_url)
+
+    issues: list[str] = []
+    suggestions: list[str] = []
+
+    if config_error:
+        issues.append(config_error)
+
+    if config.provider_type != "fake" and not api_key_present:
+        if config_source in ("config_yaml",):
+            issues.append(
+                f"真实 provider 缺少 API key：环境变量 {config.api_key_env} 为空或不存在"
+            )
+            suggestions.append(
+                f"在 .env 中设置 {config.api_key_env}=<your-key>，"
+                "然后运行 python main.py status 验证"
+            )
+        else:
+            issues.append("真实 provider 缺少 API key")
+            suggestions.append(
+                "设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 环境变量；"
+                "或设置 provider.enabled=false 使用安全路径"
+            )
+
+    status: str = "ok"
+    if issues:
+        if config.provider_type == "fake" and all("API key" in i for i in issues):
+            status = "ok"
+            issues.clear()
+        elif any("不支持的 provider type" in i for i in issues):
+            status = "error"
+        elif any("API key" in i for i in issues):
+            status = "warn"
+        else:
+            status = "error"
+
+    return ProviderDiagnostic(
+        provider_type=config.provider_type,
+        model=config.model or "unspecified",
+        base_url=base_url_display,
+        api_key_present=api_key_present,
+        api_key_env=config.api_key_env,
+        auth_scheme=config.auth_scheme,
+        request_path=config.request_path,
+        status=status,
+        config_source=config_source,
+        dotenv_loaded=_dotenv_loaded,
+        dotenv_path=_dotenv_path_str,
+        config_yaml_path=config_yaml_path,
+        config_error=config_error,
+        active_profile=active_profile,
+        profile_source=profile_source,
+        issues=issues,
+        suggestions=suggestions,
+    )
+
+
 def diagnose_provider_config_isolated(
     dotenv_path: str | Path,
     *,
@@ -420,12 +614,13 @@ def diagnose_provider_config_isolated(
 ) -> ProviderDiagnostic:
     """在隔离环境中诊断 provider 配置：只加载项目 .env，排除外层 env 干扰。
 
+    v0.12+ 使用 load_unified_provider_config() 作为统一入口，
+    优先检查 config/config.yaml。
+
     实现方式：
     1. 从当前 os.environ 复制，但移除所有已知 provider 相关 env var
     2. 然后从 dotenv_path 加载值（override=True，确保 .env 优先）
-    3. 在清理后的 env 上运行诊断
-
-    这样得到的诊断结果代表「项目 .env 声明了什么」，而不是「外层 env 覆盖了什么」。
+    3. 使用 diagnose_provider_config_from_unified() 在清理后的 env 上诊断
     """
     import os as _os
 
@@ -447,6 +642,7 @@ def diagnose_provider_config_isolated(
         "MY_FIRST_AGENT_LLM_MAX_TOKENS",
         "MY_FIRST_AGENT_LLM_TIMEOUT",
         "MODEL_NAME",
+        "FIRST_AGENT_PROVIDER_PROFILE",
     ]
 
     # 复制当前 env，移除所有 provider 相关变量
@@ -466,34 +662,15 @@ def diagnose_provider_config_isolated(
     if provider_type:
         clean_env["MY_FIRST_AGENT_LLM_PROVIDER"] = provider_type
 
-    # 解析 active profile（在 cleaned env 上下文中）
-    from agent.provider.profiles import (
-        load_provider_profiles,
-        resolve_active_profile,
-    )
-
-    _profiles_path = _dotenv_path.parent / "config" / "provider_profiles.yaml"
-    profiles = load_provider_profiles(path=_profiles_path)
-    resolved, resolution_method = resolve_active_profile(profiles, env=clean_env)
-    _active_profile = resolved.name if resolved else None
-    _profile_source = resolution_method
-
-    # 在清理后的 env 上运行诊断
-    diagnostic = diagnose_provider_config(
-        provider_type=provider_type,
-        env=clean_env,
+    # 使用统一配置入口诊断
+    diagnostic = diagnose_provider_config_from_unified(
         dotenv_path=_dotenv_path,
-        active_profile=_active_profile,
-        profile_source=_profile_source,
+        env=clean_env,
     )
 
-    # 强制 config_source 为 project_dotenv（因为我们已经在 isolated 上下文中）
-    # 但如果 .env 为空，则保持 default_fake
-    if diagnostic.config_source == "default_fake":
-        pass  # .env 没有任何相关配置
-    elif diagnostic.config_source == "shell_env":
-        # 在 isolated 模式下不应该出现 shell_env，除非 .env 中也设了值
-        # 此时应视为 project_dotenv
+    # 在 isolated 模式下，如果 .env 提供了配置值，标记为 project_dotenv
+    # 而非 legacy_provider_env，因为值确实来自项目的 .env 文件
+    if diagnostic.config_source in ("legacy_provider_env", "legacy_profile") and dotenv_vals:
         object.__setattr__(diagnostic, "config_source", "project_dotenv")
 
     return diagnostic
@@ -507,23 +684,49 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         "=" * 60,
         "",
     ]
-    if diagnostic.active_profile:
+
+    # Config source 行（最优先显示，让用户知道配置来自哪里）
+    _cs = diagnostic.config_source
+    _yaml_path = diagnostic.config_yaml_path
+    if _cs == "config_yaml" and _yaml_path:
+        source_label = f"config_yaml ({_yaml_path})"
+    elif _cs == "config_yaml_disabled" and _yaml_path:
+        source_label = f"config_yaml_disabled ({_yaml_path})"
+    else:
         source_label = {
+            "config_yaml": "config_yaml",
+            "config_yaml_disabled": "config_yaml_disabled",
+            "legacy_profile": "legacy_profile (FIRST_AGENT_PROVIDER_PROFILE)",
+            "legacy_provider_env": "legacy_provider_env (MY_FIRST_AGENT_LLM_PROVIDER)",
+            "default_fake": "default_fake",
+            "project_dotenv": "project_dotenv",
+            "shell_env": "shell_env",
+            "mixed": "mixed",
+            "unknown": "unknown",
+        }.get(_cs, _cs)
+
+    lines.append(f"  Config source : {source_label}")
+
+    if diagnostic.config_error:
+        lines.append(f"  Config error  : {diagnostic.config_error}")
+
+    if diagnostic.active_profile:
+        profile_source_label = {
             "profile_env": "from FIRST_AGENT_PROVIDER_PROFILE",
             "profile_yaml": "from YAML default",
             "default_fake": "default",
             "legacy": "legacy (MY_FIRST_AGENT_LLM_PROVIDER)",
         }.get(diagnostic.profile_source or "", "")
-        lines.append(f"  Active profile: {diagnostic.active_profile} ({source_label})")
+        lines.append(f"  Active profile: {diagnostic.active_profile} ({profile_source_label})")
+
     lines.extend([
         f"  Provider type : {diagnostic.provider_type}",
         f"  Model         : {diagnostic.model}",
         f"  Base URL      : {diagnostic.base_url}",
         f"  API key       : {'SET (redacted)' if diagnostic.api_key_present else 'not set'}",
-        f"  Key source    : {diagnostic.api_key_env or 'N/A'}",
+        f"  Key env       : {diagnostic.api_key_env or 'N/A'}",
         f"  Auth scheme   : {diagnostic.auth_scheme}",
         f"  Request path  : {diagnostic.request_path}",
-        f"  Config source : {diagnostic.config_source}",
         f"  .env loaded   : {'yes' if diagnostic.dotenv_loaded else 'no'}",
     ])
     if diagnostic.dotenv_path:
@@ -540,18 +743,23 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
             lines.append("  provider mode = fake (local only) — 不调用真实 API。")
             if diagnostic.api_key_present:
                 lines.append(
-                    "  检测到 API key 已配置（环境变量中存在），"
-                    "但当前 fake 模式不会使用该 key。"
+                    "  检测到 API key 已配置，但当前 fake 模式不会使用该 key。"
                 )
             else:
                 lines.append("  当前为 fake (local only) 安全路径，无需 API key。")
-            lines.append(
-                "  如需切换到真实 LLM，请设置 "
-                "FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic "
-                "（或 glm_openai）并确保对应 API key 已配置。"
-                "\n  或使用 legacy 方式："
-                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible。"
-            )
+            if diagnostic.config_source in ("config_yaml_disabled", "default_fake"):
+                lines.append(
+                    "  如需切换到真实 LLM：\n"
+                    "    1. cp config/config.example.yaml config/config.yaml\n"
+                    "    2. 编辑 config/config.yaml，设置 enabled: true 并选择 provider type\n"
+                    "    3. 在 .env 中设置对应的 API key\n"
+                    "    4. python main.py status 验证"
+                )
+            else:
+                lines.append(
+                    "  如需切换到真实 LLM，请编辑 config/config.yaml 设置 "
+                    "enabled: true 并在 .env 中配置 API key。"
+                )
         else:
             if diagnostic.api_key_present:
                 lines.append("  配置看起来完整，但连接性需 manual human dogfood 验证。")

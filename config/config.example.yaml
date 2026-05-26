@@ -1,0 +1,57 @@
+# First Agent 统一项目配置
+# 复制此文件为 config/config.yaml 并按需修改
+#
+# 快速开始：
+#   1. cp config/config.example.yaml config/config.yaml
+#   2. 编辑 provider section
+#   3. 在 .env 中设置对应 API key
+#   4. python main.py status 验证
+
+# --- Provider 配置 ---
+# enabled: true=启用真实 LLM, false=本地 fake 安全路径
+# type: anthropic_compatible | openai_compatible | anthropic_native | openai_native | fake
+# api_key_env: 环境变量名，实际 key 值放在 .env 中（不放在这里）
+provider:
+  enabled: false
+  type: fake
+  model: fake-llm
+  # --- 真实 provider 示例（取消注释并修改 enabled: true）---
+
+  # # Anthropic-compatible: kimi via DashScope
+  # enabled: true
+  # type: anthropic_compatible
+  # model: kimi-k2.5
+  # base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+  # request_path: /v1/chat/completions
+  # auth_scheme: auto
+  # api_key_env: ANTHROPIC_API_KEY
+
+  # # OpenAI-compatible: glm via DashScope
+  # enabled: true
+  # type: openai_compatible
+  # model: glm-5
+  # base_url: https://coding.dashscope.aliyuncs.com/v1
+  # request_path: /v1/chat/completions
+  # auth_scheme: bearer
+  # api_key_env: OPENAI_API_KEY
+
+# --- Runtime 配置（后续实现）---
+# runtime:
+#   max_tokens: 128000
+#   max_messages: 100
+
+# --- Memory 配置（后续实现）---
+# memory:
+#   max_episodes: 50
+
+# --- Logging 配置（后续实现）---
+# logging:
+#   level: info
+
+# --- Workspace 配置（后续实现）---
+# workspace:
+#   root: .
+
+# --- Tools 配置（后续实现）---
+# tools:
+#   confirm_before_write: true

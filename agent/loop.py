@@ -18,7 +18,7 @@ classification 从 harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -707,7 +707,7 @@ def _emit_run_summary(
         status = str(getattr(event, "status", ""))
         evidence = getattr(event, "evidence", None)
         disposition = ""
-        if isinstance(evidence, dict):
+        if isinstance(evidence, Mapping):
             disposition = str(evidence.get("disposition", ""))
         if at.startswith("memory."):
             # 只统计有效操作：status=success 且 disposition 在有效集合中

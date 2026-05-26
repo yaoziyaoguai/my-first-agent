@@ -40,7 +40,41 @@ def dispatch_maintenance_command(
         from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
 
         _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
-        diagnostic = diagnose_provider_config()
+        diagnostic = diagnose_provider_config(
+            dotenv_path=project_root / ".env",
+        )
+        print(render_diagnostic_report(diagnostic))
+        if diagnostic.status == "error":
+            return 2
+        if diagnostic.status == "warn":
+            return 1
+        return 0
+
+    # provider-diagnostics 命令：增强的 provider 配置诊断（支持 isolated dotenv）
+    if argv and argv[0] == "provider-diagnostics":
+        from agent.provider.diagnostics import (
+            diagnose_provider_config,
+            diagnose_provider_config_isolated,
+            render_diagnostic_report,
+        )
+
+        _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
+
+        isolated = "--isolated-dotenv" in argv[1:]
+        if isolated:
+            dotenv_path = project_root / ".env"
+            if not dotenv_path.is_file():
+                print(f"错误：项目 .env 文件不存在: {dotenv_path}")
+                return 2
+            print("=== Isolated Project .env Diagnostic ===\n")
+            print("说明：此诊断清除了所有外层环境变量中的 provider 配置，")
+            print(f"只从 {dotenv_path} 加载配置。\n")
+            diagnostic = diagnose_provider_config_isolated(dotenv_path)
+        else:
+            diagnostic = diagnose_provider_config(
+                dotenv_path=project_root / ".env",
+            )
+
         print(render_diagnostic_report(diagnostic))
         if diagnostic.status == "error":
             return 2

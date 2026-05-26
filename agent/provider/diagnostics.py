@@ -3,19 +3,30 @@
 本模块负责将 provider 配置状态、已知错误码（401/403/timeout 等）映射为
 用户可执行的中文修复建议。不调用真实 API——所有诊断都是静态推断。
 
-为什么需要这个模块：
-- 真实 provider dogfood 曾出现 401 config/auth concern
-- 用户需要比 "ProviderAuthError" 更具体的诊断信息
-- manual dogfood checklist 包含 provider setup 步骤，诊断信息帮助用户快速定位问题
+Config Source 追踪（v0.11+）:
+- 区分 project_dotenv / shell_env / default_fake / mixed 四种配置来源
+- 支持 isolated dotenv 模式：清理外层 env 后只加载项目 .env
+- 不打印 secret，只输出 key present / source kind / variable name
 
-为什么不做真实 API 连接验证：
-- 真实连接验证需要 .env 中的 secret，而 AutoRun 不读取 .env
-- 静态诊断覆盖了大部分配置错误场景（缺 key、缺 model、无效 provider 类型）
-- 连接性验证留待 manual human dogfood 阶段人工完成
+为什么需要 config source 追踪：
+- 外层 Coding Agent 环境变量（如 DeepSeek）会通过 override=False 抢占项目 .env
+- 用户需要明确知道 provider 配置来自哪个源头
+- isolated 模式让 dogfood 可以只用项目 .env 配置，不受外层污染
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+ConfigSourceKind = Literal[
+    "project_dotenv",  # 仅从项目 .env 加载
+    "shell_env",       # 仅从外层进程环境变量
+    "default_fake",    # 无任何配置，使用 fake 兜底
+    "mixed",           # .env 与外层 env 混合（override=False 导致外层优先）
+    "unknown",         # 无法判断来源
+]
 
 # 已知 provider 错误码 → 用户可执行修复建议（中文）
 # key 是 ProviderError code / status_code 字符串，value 是诊断信息
@@ -105,7 +116,15 @@ HTTP_STATUS_DIAGNOSTIC_MAP: dict[int, str] = {
 
 @dataclass(frozen=True)
 class ProviderDiagnostic:
-    """provider 配置诊断结果（只含脱敏信息）。"""
+    """provider 配置诊断结果（只含脱敏信息）。
+
+    config_source 描述配置值的来源类别，不包含配置值本身：
+    - project_dotenv: 仅从项目 .env 加载（isolated 模式）
+    - shell_env: 仅从 os.environ 读取（未加载 .env）
+    - default_fake: 无任何配置，返回 fake 兜底
+    - mixed: .env 与外层 env 混合，部分值可能被外层覆盖
+    - unknown: 无法精确判断来源
+    """
 
     provider_type: str
     model: str
@@ -115,6 +134,10 @@ class ProviderDiagnostic:
     auth_scheme: str
     request_path: str
     status: str  # "ok" | "warn" | "error"
+    config_source: ConfigSourceKind = "unknown"
+    dotenv_loaded: bool = False
+    dotenv_path: str | None = None
+    outer_env_overrides: list[str] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
 
@@ -157,22 +180,122 @@ def map_provider_error(error: Exception) -> str:
     return f"未知错误类型: {type(error).__name__}: {error}"
 
 
+def _load_dotenv_values_safe(dotenv_path: Path) -> dict[str, str]:
+    """安全读取 .env 文件，返回 key-value 映射（不写入 os.environ）。"""
+    from dotenv import dotenv_values
+
+    if not dotenv_path.is_file():
+        return {}
+    raw = dotenv_values(dotenv_path)
+    result: dict[str, str] = {}
+    for k, v in raw.items():
+        if isinstance(k, str) and isinstance(v, str) and v.strip():
+            result[k] = v.strip()
+    return result
+
+
+def _redact_base_url(url: str | None) -> str:
+    """脱敏 base_url：只保留 scheme + host，不打印完整路径。"""
+    if not url:
+        return "not_set"
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        if parsed.hostname:
+            return f"{parsed.scheme}://{parsed.hostname}"
+        return "SET"
+    except Exception:
+        return "SET"
+
+
+def _detect_config_source(
+    env: Mapping[str, str],
+    dotenv_values: dict[str, str] | None,
+    provider_type: str,
+) -> tuple[ConfigSourceKind, list[str]]:
+    """检测 provider 配置的实际来源。
+
+    返回 (source_kind, outer_env_overrides)。
+
+    判断逻辑：
+    - 如果 provider_type == "fake" 且无任何 key/model/base_url 配置 → default_fake
+    - 提供了 dotenv_values 且外层 env 无覆盖 → project_dotenv
+    - 提供了 dotenv_values 且外层 env 有覆盖 → mixed + 列出被覆盖的 key
+    - 未提供 dotenv_values → shell_env（直接读 os.environ）
+    """
+    # 所有可能来自不同源的 provider 相关 env var
+    provider_vars = [
+        "MY_FIRST_AGENT_LLM_PROVIDER",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "OPENAI_BASE_URL",
+        "MY_FIRST_AGENT_LLM_MODEL",
+        "MY_FIRST_AGENT_LLM_BASE_URL",
+        "MY_FIRST_AGENT_LLM_AUTH_SCHEME",
+        "MY_FIRST_AGENT_LLM_REQUEST_PATH",
+        "MODEL_NAME",
+    ]
+
+    has_any_config = any(
+        env.get(v) for v in provider_vars
+    ) or provider_type != "fake"
+
+    if not has_any_config and provider_type == "fake":
+        return "default_fake", []
+
+    if dotenv_values is None:
+        return "shell_env", []
+
+    # 检查哪些 .env 中的 key 被外层 env 覆盖
+    overrides: list[str] = []
+    for var in provider_vars:
+        dotenv_val = dotenv_values.get(var, "")
+        env_val = env.get(var, "")
+        if dotenv_val and env_val and dotenv_val != env_val:
+            overrides.append(var)
+
+    if overrides:
+        return "mixed", overrides
+
+    return "project_dotenv", []
+
+
 def diagnose_provider_config(
     provider_type: str | None = None,
     *,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
+    dotenv_path: str | Path | None = None,
 ) -> ProviderDiagnostic:
     """静态诊断 provider 配置状态（不调用真实 API，不泄露 secret）。
 
-    返回 ProviderDiagnostic，包含脱敏配置摘要和问题/建议列表。
+    当提供 dotenv_path 时，会加载该 .env 文件的值并与当前 os.environ 比较，
+    以此判断配置来源（project_dotenv / shell_env / mixed / default_fake）。
+
+    返回 ProviderDiagnostic，包含脱敏配置摘要、config_source、问题和建议列表。
     """
-    import os
+    import os as _os
 
     if env is None:
-        env = dict(os.environ)
+        env = dict(_os.environ)
+
+    # 加载 dotenv 用于 source 检测（如有）
+    _dotenv_values: dict[str, str] | None = None
+    _dotenv_loaded = False
+    _dotenv_path_str: str | None = None
+    if dotenv_path is not None:
+        _dotenv_path = Path(dotenv_path)
+        _dotenv_path_str = str(_dotenv_path.resolve())
+        _dotenv_values = _load_dotenv_values_safe(_dotenv_path)
+        _dotenv_loaded = bool(_dotenv_values)
 
     # 从环境变量推断配置
-    provider = (provider_type or env.get("MY_FIRST_AGENT_LLM_PROVIDER") or "fake").lower().strip()
+    provider = (
+        provider_type or env.get("MY_FIRST_AGENT_LLM_PROVIDER") or "fake"
+    ).lower().strip()
     model = (
         env.get("MY_FIRST_AGENT_LLM_MODEL")
         or env.get("ANTHROPIC_MODEL")
@@ -185,13 +308,20 @@ def diagnose_provider_config(
         or env.get("OPENAI_BASE_URL")
     )
     api_key = env.get("ANTHROPIC_API_KEY") or env.get("OPENAI_API_KEY")
-    api_key_env = "ANTHROPIC_API_KEY" if env.get("ANTHROPIC_API_KEY") else (
-        "OPENAI_API_KEY" if env.get("OPENAI_API_KEY") else None
+    api_key_env = (
+        "ANTHROPIC_API_KEY" if env.get("ANTHROPIC_API_KEY")
+        else "OPENAI_API_KEY" if env.get("OPENAI_API_KEY")
+        else None
     )
     auth_scheme = env.get("MY_FIRST_AGENT_LLM_AUTH_SCHEME") or "auto"
     request_path = (
         env.get("MY_FIRST_AGENT_LLM_REQUEST_PATH")
         or ("/v1/messages" if provider.startswith("anthropic") else "/v1/chat/completions")
+    )
+
+    # 检测 config source
+    config_source, outer_env_overrides = _detect_config_source(
+        env, _dotenv_values, provider,
     )
 
     issues: list[str] = []
@@ -236,13 +366,18 @@ def diagnose_provider_config(
         issues.append(f"不支持的 auth_scheme: {auth_scheme}")
         suggestions.append("MY_FIRST_AGENT_LLM_AUTH_SCHEME 只能为 auto, x-api-key 或 bearer")
 
+    # config source 相关建议
+    if config_source == "mixed" and outer_env_overrides:
+        suggestions.append(
+            f"外层 shell 环境变量覆盖了 .env 中的: {', '.join(sorted(outer_env_overrides))}。"
+            "如需使用项目 .env 配置，请 unset 外层同名变量或使用 isolated 模式"
+        )
+
     status = "ok"
     if issues:
-        # fake 模式无 key 是正常状态
         if provider == "fake" and all("API key" in i for i in issues):
             status = "ok"
             issues.clear()
-        # 未知 provider 类型是阻塞性 error（不是 warn）
         elif any("未知" in i or "unknown" in i.lower() for i in issues):
             status = "error"
         elif any("API key" in i or "模型名" in i for i in issues):
@@ -253,19 +388,95 @@ def diagnose_provider_config(
     return ProviderDiagnostic(
         provider_type=provider,
         model=model or "unspecified",
-        base_url="SET" if base_url else "not_set",
+        base_url=_redact_base_url(base_url),
         api_key_present=bool(api_key),
         api_key_env=api_key_env,
         auth_scheme=auth_scheme,
         request_path=request_path,
         status=status,
+        config_source=config_source,
+        dotenv_loaded=_dotenv_loaded,
+        dotenv_path=_dotenv_path_str,
+        outer_env_overrides=outer_env_overrides,
         issues=issues,
         suggestions=suggestions,
     )
 
 
+def diagnose_provider_config_isolated(
+    dotenv_path: str | Path,
+    *,
+    provider_type: str | None = None,
+) -> ProviderDiagnostic:
+    """在隔离环境中诊断 provider 配置：只加载项目 .env，排除外层 env 干扰。
+
+    实现方式：
+    1. 从当前 os.environ 复制，但移除所有已知 provider 相关 env var
+    2. 然后从 dotenv_path 加载值（override=True，确保 .env 优先）
+    3. 在清理后的 env 上运行诊断
+
+    这样得到的诊断结果代表「项目 .env 声明了什么」，而不是「外层 env 覆盖了什么」。
+    """
+    import os as _os
+
+    # 所有已知 provider 相关 env var（需从外层 env 中清除）
+    _provider_env_vars = [
+        "MY_FIRST_AGENT_LLM_PROVIDER",
+        "MY_FIRST_AGENT_LLM_PROVIDER_NAME",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "OPENAI_BASE_URL",
+        "MY_FIRST_AGENT_LLM_MODEL",
+        "MY_FIRST_AGENT_LLM_BASE_URL",
+        "MY_FIRST_AGENT_LLM_AUTH_SCHEME",
+        "MY_FIRST_AGENT_LLM_REQUEST_PATH",
+        "MY_FIRST_AGENT_LLM_COMPATIBILITY_MODE",
+        "MY_FIRST_AGENT_LLM_MAX_TOKENS",
+        "MY_FIRST_AGENT_LLM_TIMEOUT",
+        "MODEL_NAME",
+    ]
+
+    # 复制当前 env，移除所有 provider 相关变量
+    clean_env = dict(_os.environ)
+    for var in _provider_env_vars:
+        clean_env.pop(var, None)
+
+    # 从 .env 加载配置值
+    _dotenv_path = Path(dotenv_path)
+    dotenv_vals = _load_dotenv_values_safe(_dotenv_path)
+
+    # 将 .env 值注入 clean_env（.env 值优先于 clean_env 中的残留）
+    for k, v in dotenv_vals.items():
+        clean_env[k] = v
+
+    # 如果调用方显式指定了 provider_type，也注入
+    if provider_type:
+        clean_env["MY_FIRST_AGENT_LLM_PROVIDER"] = provider_type
+
+    # 在清理后的 env 上运行诊断
+    diagnostic = diagnose_provider_config(
+        provider_type=provider_type,
+        env=clean_env,
+        dotenv_path=_dotenv_path,
+    )
+
+    # 强制 config_source 为 project_dotenv（因为我们已经在 isolated 上下文中）
+    # 但如果 .env 为空，则保持 default_fake
+    if diagnostic.config_source == "default_fake":
+        pass  # .env 没有任何相关配置
+    elif diagnostic.config_source == "shell_env":
+        # 在 isolated 模式下不应该出现 shell_env，除非 .env 中也设了值
+        # 此时应视为 project_dotenv
+        object.__setattr__(diagnostic, "config_source", "project_dotenv")
+
+    return diagnostic
+
+
 def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
-    """将 ProviderDiagnostic 渲染为人类可读的诊断报告。"""
+    """将 ProviderDiagnostic 渲染为人类可读的诊断报告（不包含 secret）。"""
     lines = [
         "=" * 60,
         "  Provider Config Diagnostic",
@@ -278,9 +489,16 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         f"  Key source    : {diagnostic.api_key_env or 'N/A'}",
         f"  Auth scheme   : {diagnostic.auth_scheme}",
         f"  Request path  : {diagnostic.request_path}",
-        f"  Status        : {diagnostic.status.upper()}",
-        "",
+        f"  Config source : {diagnostic.config_source}",
+        f"  .env loaded   : {'yes' if diagnostic.dotenv_loaded else 'no'}",
     ]
+    if diagnostic.dotenv_path:
+        lines.append(f"  .env path     : {diagnostic.dotenv_path}")
+    if diagnostic.outer_env_overrides:
+        lines.append(
+            f"  Outer overrides: {', '.join(sorted(diagnostic.outer_env_overrides))}"
+        )
+    lines.extend(["", f"  Status        : {diagnostic.status.upper()}", ""])
 
     if diagnostic.status == "ok":
         lines.append("  结论：provider 配置无问题。")

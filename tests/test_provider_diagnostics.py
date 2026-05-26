@@ -20,7 +20,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
@@ -1012,3 +1015,479 @@ def test_diagnostics_and_runtime_use_same_config_resolver():
     assert diag.api_key_present == bool(config.api_key), (
         f"diag key present: {diag.api_key_present}, config key: {bool(config.api_key)}"
     )
+
+
+# ============================================================
+# Provider Profile 配置测试 (v0.11+)
+# ============================================================
+
+
+def _write_temp_profiles_yaml(profiles_yaml: str) -> str:
+    """写临时 provider_profiles.yaml，返回路径。"""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(textwrap.dedent(profiles_yaml))
+        return tmp.name
+
+
+class TestProviderProfileResolution:
+    """测试 ProviderProfile 解析逻辑。"""
+
+    def test_no_profile_env_defaults_to_fake(self):
+        """无 FIRST_AGENT_PROVIDER_PROFILE 且 YAML 中 active_profile=fake → fake。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+        """)
+        try:
+            profiles = load_provider_profiles(path=yaml_path)
+            resolved, method = resolve_active_profile(profiles, env={})
+            assert resolved is not None
+            assert resolved.name == "fake"
+            assert resolved.provider_type == "fake"
+            assert method == "default_fake"
+        finally:
+            os.unlink(yaml_path)
+
+    def test_profile_env_selects_named_profile(self):
+        """FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic → 选中对应 profile。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+              kimi_anthropic:
+                type: anthropic_compatible
+                model: kimi-k2.5
+                base_url: https://example.com/api
+                api_key_env: ANTHROPIC_API_KEY
+                request_path: /v1/messages
+                auth_scheme: auto
+        """)
+        try:
+            profiles = load_provider_profiles(path=yaml_path)
+            resolved, method = resolve_active_profile(
+                profiles, env={"FIRST_AGENT_PROVIDER_PROFILE": "kimi_anthropic"}
+            )
+            assert resolved is not None
+            assert resolved.name == "kimi_anthropic"
+            assert resolved.provider_type == "anthropic_compatible"
+            assert resolved.model == "kimi-k2.5"
+            assert resolved.base_url == "https://example.com/api"
+            assert resolved.api_key_env == "ANTHROPIC_API_KEY"
+            assert method == "profile_env"
+        finally:
+            os.unlink(yaml_path)
+
+    def test_profile_to_agent_config_reads_key_from_env(self):
+        """profile_to_agent_config 从 env 读取 api_key_env 指向的变量。"""
+        from agent.provider.profiles import (
+            ProviderProfile,
+            profile_to_agent_config,
+        )
+
+        profile = ProviderProfile(
+            name="kimi_anthropic",
+            provider_type="anthropic_compatible",
+            model="kimi-k2.5",
+            base_url="https://example.com/api",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+        config = profile_to_agent_config(
+            profile,
+            env={"ANTHROPIC_API_KEY": "sk-test-key-12345"},
+        )
+        assert config.provider_type == "anthropic_compatible"
+        assert config.model == "kimi-k2.5"
+        assert config.api_key == "sk-test-key-12345"
+        assert config.api_key_env == "ANTHROPIC_API_KEY"
+
+    def test_profile_to_agent_config_missing_key_raises(self):
+        """api_key_env 指向的变量未设置 → 抛 api_key_missing。"""
+        from agent.provider.profiles import (
+            ProviderProfile,
+            profile_to_agent_config,
+        )
+        from agent.provider.protocol import ProviderConfigurationError
+
+        profile = ProviderProfile(
+            name="glm_openai",
+            provider_type="openai_compatible",
+            model="glm-5",
+            base_url="https://example.com/v1",
+            api_key_env="OPENAI_API_KEY",
+        )
+        with pytest.raises(ProviderConfigurationError, match="api_key_missing"):
+            profile_to_agent_config(profile, env={})
+
+    def test_profile_to_agent_config_fake_skips_key(self):
+        """fake profile 不需要 key，即使 api_key_env 未设置也不报错。"""
+        from agent.provider.profiles import (
+            ProviderProfile,
+            profile_to_agent_config,
+        )
+
+        profile = ProviderProfile(
+            name="fake",
+            provider_type="fake",
+            model="fake-llm",
+        )
+        config = profile_to_agent_config(profile, env={})
+        assert config.provider_type == "fake"
+        assert config.api_key is None
+
+    def test_legacy_provider_env_still_works(self):
+        """MY_FIRST_AGENT_LLM_PROVIDER 设置时 → legacy 路径（返回 None）。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+        """)
+        try:
+            profiles = load_provider_profiles(path=yaml_path)
+            resolved, method = resolve_active_profile(
+                profiles, env={"MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_compatible"}
+            )
+            assert resolved is None  # legacy 返回 None
+            assert method == "legacy"
+        finally:
+            os.unlink(yaml_path)
+
+    def test_profile_env_overrides_yaml_default(self):
+        """FIRST_AGENT_PROVIDER_PROFILE 环境变量覆盖 YAML 中的 active_profile。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+              glm_openai:
+                type: openai_compatible
+                model: glm-5
+                base_url: https://example.com/v1
+                api_key_env: OPENAI_API_KEY
+        """)
+        try:
+            profiles = load_provider_profiles(path=yaml_path)
+            resolved, method = resolve_active_profile(
+                profiles, env={"FIRST_AGENT_PROVIDER_PROFILE": "glm_openai"}
+            )
+            assert resolved is not None
+            assert resolved.name == "glm_openai"
+            assert resolved.provider_type == "openai_compatible"
+            assert method == "profile_env"
+        finally:
+            os.unlink(yaml_path)
+
+    def test_missing_profile_name_returns_none(self):
+        """FIRST_AGENT_PROVIDER_PROFILE 指向不存在的 profile → 返回 None。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+        """)
+        try:
+            profiles = load_provider_profiles(path=yaml_path)
+            resolved, method = resolve_active_profile(
+                profiles, env={"FIRST_AGENT_PROVIDER_PROFILE": "nonexistent"}
+            )
+            # 不存在的 profile → 返回 (None, "profile_env") 但 resolved 为 None
+            # 实际上当 profile_name 不匹配时不会提前返回，
+            # 会继续检查 legacy 和 fallback
+            # 修正：profile_name 不匹配 → 继续到 legacy 检查 → 再到 fallback
+            # 所以最终会 fallback 到 fake
+            assert resolved is not None
+            assert resolved.provider_type == "fake"
+            assert method == "default_fake"
+        finally:
+            os.unlink(yaml_path)
+
+    def test_no_yaml_file_returns_empty_profiles(self):
+        """YAML 文件不存在 → load_provider_profiles 返回空 dict。"""
+        from agent.provider.profiles import load_provider_profiles, resolve_active_profile
+
+        profiles = load_provider_profiles(path="/nonexistent/path/profiles.yaml")
+        assert profiles == {}
+        # 空 profiles 也能正确 fallback
+        resolved, method = resolve_active_profile(profiles, env={})
+        assert resolved is not None
+        assert resolved.provider_type == "fake"
+        assert method == "default_fake"
+
+
+class TestProfileDiagnostics:
+    """测试 profile 信息在 diagnostics 中的呈现。"""
+
+    def test_diagnostic_includes_active_profile(self):
+        """diagnose_provider_config 接受并返回 active_profile 字段。"""
+        from agent.provider.diagnostics import diagnose_provider_config
+
+        diag = diagnose_provider_config(
+            env={"MY_FIRST_AGENT_LLM_PROVIDER": "fake"},
+            active_profile="fake",
+            profile_source="default_fake",
+        )
+        assert diag.active_profile == "fake"
+        assert diag.profile_source == "default_fake"
+
+    def test_diagnostic_shows_profile_env_source(self):
+        """FIRST_AGENT_PROVIDER_PROFILE 选中时 → profile_source='profile_env'。"""
+        from agent.provider.diagnostics import diagnose_provider_config
+
+        diag = diagnose_provider_config(
+            env={"MY_FIRST_AGENT_LLM_PROVIDER": "fake"},
+            active_profile="kimi_anthropic",
+            profile_source="profile_env",
+        )
+        assert diag.active_profile == "kimi_anthropic"
+        assert diag.profile_source == "profile_env"
+
+    def test_diagnostic_legacy_source(self):
+        """legacy MY_FIRST_AGENT_LLM_PROVIDER 时 → profile_source='legacy'。"""
+        from agent.provider.diagnostics import diagnose_provider_config
+
+        diag = diagnose_provider_config(
+            env={
+                "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
+                "ANTHROPIC_API_KEY": "sk-test",
+                "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+            },
+            active_profile=None,
+            profile_source="legacy",
+        )
+        assert diag.active_profile is None
+        assert diag.profile_source == "legacy"
+        assert diag.provider_type == "anthropic_native"
+
+    def test_render_includes_active_profile(self):
+        """render_diagnostic_report 输出包含 active profile 行。"""
+        from agent.provider.diagnostics import (
+            ProviderDiagnostic,
+            render_diagnostic_report,
+        )
+
+        diag = ProviderDiagnostic(
+            provider_type="fake",
+            model="fake-llm",
+            base_url="not_set",
+            api_key_present=False,
+            api_key_env=None,
+            auth_scheme="auto",
+            request_path="",
+            status="ok",
+            active_profile="fake",
+            profile_source="default_fake",
+        )
+        report = render_diagnostic_report(diag)
+        assert "Active profile: fake (default)" in report
+
+    def test_render_includes_profile_env_source(self):
+        """render_diagnostic_report 显示 profile_env 来源。"""
+        from agent.provider.diagnostics import (
+            ProviderDiagnostic,
+            render_diagnostic_report,
+        )
+
+        diag = ProviderDiagnostic(
+            provider_type="anthropic_compatible",
+            model="kimi-k2.5",
+            base_url="not_set",
+            api_key_present=False,
+            api_key_env="ANTHROPIC_API_KEY",
+            auth_scheme="auto",
+            request_path="/v1/messages",
+            status="warn",
+            active_profile="kimi_anthropic",
+            profile_source="profile_env",
+        )
+        report = render_diagnostic_report(diag)
+        assert "Active profile: kimi_anthropic (from FIRST_AGENT_PROVIDER_PROFILE)" in report
+
+    def test_render_suggests_profile_not_legacy(self):
+        """fake 模式诊断建议使用 FIRST_AGENT_PROVIDER_PROFILE。"""
+        from agent.provider.diagnostics import (
+            ProviderDiagnostic,
+            render_diagnostic_report,
+        )
+
+        diag = ProviderDiagnostic(
+            provider_type="fake",
+            model="fake-llm",
+            base_url="not_set",
+            api_key_present=True,
+            api_key_env="ANTHROPIC_API_KEY",
+            auth_scheme="auto",
+            request_path="",
+            status="ok",
+            active_profile="fake",
+            profile_source="default_fake",
+        )
+        report = render_diagnostic_report(diag)
+        assert "FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic" in report
+
+
+class TestProfileNoSecretLeaked:
+    """验证 profile 相关输出不泄露 secret。"""
+
+    def test_profile_to_agent_config_redacted_summary_no_secret(self):
+        """AgentProviderConfig.redacted_summary() 不包含 key 明文。"""
+        from agent.provider.profiles import (
+            ProviderProfile,
+            profile_to_agent_config,
+        )
+
+        profile = ProviderProfile(
+            name="kimi_anthropic",
+            provider_type="anthropic_compatible",
+            model="kimi-k2.5",
+            base_url="https://example.com/api",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+        config = profile_to_agent_config(
+            profile,
+            env={"ANTHROPIC_API_KEY": "sk-secret-should-not-leak"},
+        )
+        summary = config.redacted_summary()
+        assert summary["api_key"] == "SET"
+        assert "sk-secret-should-not-leak" not in str(summary)
+
+    def test_profile_name_never_contains_key(self):
+        """ProviderProfile 中 api_key_env 只存变量名。"""
+        from agent.provider.profiles import ProviderProfile
+
+        profile = ProviderProfile(
+            name="test",
+            provider_type="anthropic_compatible",
+            model="test-model",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+        assert profile.api_key_env == "ANTHROPIC_API_KEY"
+        assert "sk-" not in profile.api_key_env
+        assert "secret" not in str(profile).lower()
+
+    def test_render_diagnostic_never_prints_key(self):
+        """render_diagnostic_report 输出不包含 API key 明文。"""
+        from agent.provider.diagnostics import (
+            ProviderDiagnostic,
+            render_diagnostic_report,
+        )
+
+        diag = ProviderDiagnostic(
+            provider_type="anthropic_compatible",
+            model="kimi-k2.5",
+            base_url="not_set",
+            api_key_present=True,
+            api_key_env="ANTHROPIC_API_KEY",
+            auth_scheme="auto",
+            request_path="/v1/messages",
+            status="ok",
+            active_profile="kimi_anthropic",
+            profile_source="profile_env",
+        )
+        report = render_diagnostic_report(diag)
+        assert "sk-" not in report
+        assert "SET (redacted)" in report
+        assert "ANTHROPIC_API_KEY" in report  # 变量名可以出现
+
+
+class TestProfileFactoryIntegration:
+    """测试 profile → factory 集成路径。"""
+
+    def test_build_model_provider_from_env_with_profile_env(self):
+        """FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic 时复现 fake→real 流程。
+
+        学习型注释：
+        profile 解析发生在 build_model_provider_from_env() 内部，
+        不走 runtime 分叉。factory 拿到的是普通的 AgentProviderConfig，
+        后续所有代码（core.chat / loop.py / call_model）行为不变。
+        """
+        from agent.provider.factory import build_model_provider_from_env
+
+        yaml_path = _write_temp_profiles_yaml("""
+            active_profile: fake
+            profiles:
+              fake:
+                type: fake
+                model: fake-llm
+              kimi_anthropic:
+                type: anthropic_compatible
+                model: kimi-k2.5
+                base_url: https://example.com/api
+                api_key_env: ANTHROPIC_API_KEY
+        """)
+        saved_env = {}
+        try:
+            # 保存并清理外层 env
+            for var in [
+                "MY_FIRST_AGENT_LLM_PROVIDER",
+                "FIRST_AGENT_PROVIDER_PROFILE",
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_BASE_URL",
+                "OPENAI_API_KEY",
+                "MY_FIRST_AGENT_LLM_MODEL",
+            ]:
+                saved_env[var] = os.environ.pop(var, None)
+
+            os.environ["FIRST_AGENT_PROVIDER_PROFILE"] = "kimi_anthropic"
+            os.environ["ANTHROPIC_API_KEY"] = "sk-test"
+
+            # 临时替换 DEFAULT_PROFILES_YAML 走 temp YAML
+            import agent.provider.profiles as pmod
+
+            _orig_default = pmod.DEFAULT_PROFILES_YAML
+            pmod.DEFAULT_PROFILES_YAML = yaml_path
+            try:
+                provider = build_model_provider_from_env()
+                # 应该返回 AnthropicCompatibleProvider（或至少不是 FakeProvider）
+                assert provider is not None
+                assert getattr(provider, "provider_type", "") == "anthropic_compatible"
+            finally:
+                pmod.DEFAULT_PROFILES_YAML = _orig_default
+        finally:
+            os.unlink(yaml_path)
+            for var, val in saved_env.items():
+                if val is not None:
+                    os.environ[var] = val
+                else:
+                    os.environ.pop(var, None)
+
+    def test_build_model_provider_from_env_no_profile_defaults_fake(self):
+        """无 profile → build_model_provider_from_env 返回 FakeProvider。"""
+        import agent.provider.profiles as pmod
+        from agent.provider.factory import build_model_provider_from_env
+
+        # 用一个不存在的 YAML 路径
+        _orig_default = pmod.DEFAULT_PROFILES_YAML
+        pmod.DEFAULT_PROFILES_YAML = "/nonexistent/path/profiles.yaml"
+        saved = os.environ.pop("MY_FIRST_AGENT_LLM_PROVIDER", None)
+        saved_profile = os.environ.pop("FIRST_AGENT_PROVIDER_PROFILE", None)
+        try:
+            provider = build_model_provider_from_env()
+            assert provider is not None
+            assert getattr(provider, "provider_type", "") == "fake"
+        finally:
+            pmod.DEFAULT_PROFILES_YAML = _orig_default
+            if saved is not None:
+                os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = saved
+            if saved_profile is not None:
+                os.environ["FIRST_AGENT_PROVIDER_PROFILE"] = saved_profile

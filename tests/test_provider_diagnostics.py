@@ -654,3 +654,361 @@ def test_main_fake_interactive_no_provider_env_var():
         assert proc.returncode in {0, -15}, (
             f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
         )
+
+
+# =========================================================================
+# 10. Config Source 追踪（v0.11+）
+# =========================================================================
+
+
+def test_diagnose_config_source_shell_env_when_no_dotenv():
+    """未提供 dotenv_path 时 config_source 应为 shell_env。"""
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    diag = diagnose_provider_config(env={
+        "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
+        "ANTHROPIC_API_KEY": "sk-ant-test12345678901234567890",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    })
+    assert diag.config_source == "shell_env"
+
+
+def test_diagnose_config_source_default_fake():
+    """无任何配置时 config_source 应为 default_fake。"""
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    diag = diagnose_provider_config(env={})
+    assert diag.config_source == "default_fake"
+    assert diag.provider_type == "fake"
+
+
+def test_diagnose_config_source_mixed_detects_outer_override():
+    """外层 env 覆盖 .env 值时 config_source 应为 mixed，并列出被覆盖的 key。
+
+    模拟真实场景：外层 Coding Agent 设置了 ANTHROPIC_MODEL 和 ANTHROPIC_BASE_URL，
+    项目 .env 也设置了这些变量但值不同。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    # 创建临时 .env 文件
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text(
+            "ANTHROPIC_MODEL=kimi-k2.5\n"
+            "ANTHROPIC_BASE_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic\n"
+            "ANTHROPIC_API_KEY=sk-dotenv-key-12345\n"
+        )
+
+        # 外层 env 有不同的 ANTHROPIC_MODEL 和 ANTHROPIC_BASE_URL
+        diag = diagnose_provider_config(
+            env={
+                "ANTHROPIC_MODEL": "deepseek-v4-pro",
+                "ANTHROPIC_BASE_URL": "https://api.deepseek.com",
+            },
+            dotenv_path=str(dotenv_path),
+        )
+        assert diag.config_source == "mixed", (
+            f"expected mixed, got {diag.config_source}"
+        )
+        assert diag.dotenv_loaded is True
+        assert "ANTHROPIC_MODEL" in diag.outer_env_overrides
+        assert "ANTHROPIC_BASE_URL" in diag.outer_env_overrides
+
+
+def test_diagnose_config_source_project_dotenv():
+    """.env 值未被外层覆盖时 config_source 应为 project_dotenv。"""
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text(
+            "ANTHROPIC_MODEL=kimi-k2.5\n"
+            "ANTHROPIC_API_KEY=sk-dotenv-key-12345\n"
+        )
+
+        diag = diagnose_provider_config(
+            env={
+                "ANTHROPIC_MODEL": "kimi-k2.5",
+                "ANTHROPIC_API_KEY": "sk-dotenv-key-12345",
+            },
+            dotenv_path=str(dotenv_path),
+        )
+        assert diag.config_source == "project_dotenv", (
+            f"expected project_dotenv, got {diag.config_source}"
+        )
+        assert diag.outer_env_overrides == []
+
+
+# =========================================================================
+# 11. Isolated Dotenv Diagnostic
+# =========================================================================
+
+
+def test_isolated_diagnostic_uses_only_dotenv_values():
+    """isolated 模式应清除外层 env，只使用 .env 中的配置值。
+
+    模拟：外层 ANTHROPIC_MODEL=deepseek-v4-pro，.env 中 ANTHROPIC_MODEL=kimi-k2.5。
+    isolated 诊断应以 kimi-k2.5 为准。
+    """
+    import os as _os
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import diagnose_provider_config_isolated
+
+    # 创建一个临时 .env
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text(
+            "ANTHROPIC_MODEL=kimi-k2.5\n"
+            "ANTHROPIC_API_KEY=sk-dotenv-key-12345\n"
+            "ANTHROPIC_BASE_URL=https://example.com/api\n"
+            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+        )
+
+        # 注入外层 env
+        _os.environ["ANTHROPIC_MODEL"] = "deepseek-v4-pro"
+        _os.environ["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com"
+
+        try:
+            diag = diagnose_provider_config_isolated(str(dotenv_path))
+            # 应使用 .env 的 kimi-k2.5，而非外层的 deepseek-v4-pro
+            assert diag.model == "kimi-k2.5", (
+                f"expected kimi-k2.5 from .env, got {diag.model}"
+            )
+            assert diag.provider_type == "anthropic_compatible"
+            assert diag.config_source == "project_dotenv"
+            assert diag.api_key_present is True
+        finally:
+            # 清理
+            _os.environ.pop("ANTHROPIC_MODEL", None)
+            _os.environ.pop("ANTHROPIC_BASE_URL", None)
+
+
+def test_isolated_diagnostic_empty_dotenv_falls_back_to_fake():
+    """isolated 模式 .env 为空或无 provider 配置时仍返回 fake 兜底。"""
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import diagnose_provider_config_isolated
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text("# 空文件\n")
+
+        diag = diagnose_provider_config_isolated(str(dotenv_path))
+        assert diag.provider_type == "fake"
+        # .env 只有注释没有 key=value 时 dotenv_loaded=false（无有效配置值）
+        assert diag.dotenv_loaded is False
+
+
+def test_isolated_diagnostic_no_secret_in_output():
+    """isolated 诊断输出不得包含 .env 中的 API key 值。"""
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import (
+        diagnose_provider_config_isolated,
+        render_diagnostic_report,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text(
+            "ANTHROPIC_API_KEY=sk-secret-key-that-must-not-leak-12345\n"
+            "ANTHROPIC_MODEL=kimi-k2.5\n"
+            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+        )
+
+        diag = diagnose_provider_config_isolated(str(dotenv_path))
+        report = render_diagnostic_report(diag)
+        assert "sk-secret" not in report
+        assert "sk-secret-key-that-must-not-leak" not in report
+        assert "SET (redacted)" in report
+
+
+def test_isolated_diagnostic_shows_model_and_base_url_redacted():
+    """isolated 诊断应显示 model 名和脱敏 base_url。"""
+    import tempfile
+    from pathlib import Path
+
+    from agent.provider.diagnostics import (
+        diagnose_provider_config_isolated,
+        render_diagnostic_report,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dotenv_path = Path(tmp) / ".env"
+        dotenv_path.write_text(
+            "ANTHROPIC_API_KEY=sk-test12345678901234567890\n"
+            "ANTHROPIC_MODEL=kimi-k2.5\n"
+            "ANTHROPIC_BASE_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic\n"
+            "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible\n"
+        )
+
+        diag = diagnose_provider_config_isolated(str(dotenv_path))
+        report = render_diagnostic_report(diag)
+        assert "kimi-k2.5" in report
+        # hostname 应可见（不是 secret），但完整路径不显示
+        assert "coding.dashscope.aliyuncs.com" in report
+        assert "project_dotenv" in report
+
+
+# =========================================================================
+# 12. provider-diagnostics CLI 命令
+# =========================================================================
+
+
+def test_main_provider_diagnostics_command():
+    """python main.py provider-diagnostics 应可运行。"""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="first_agent_pd_") as tmp_home:
+        test_env = {**os.environ, "HOME": tmp_home}
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "main.py"),
+             "provider-diagnostics"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            cwd=str(PROJECT_ROOT),
+            env=test_env,
+        )
+        output = result.stdout + result.stderr
+        assert "Config source" in output, (
+            f"应包含 Config source 字段:\n{output[:500]}"
+        )
+        assert result.returncode in {0, 1, 2}
+
+
+def test_main_provider_diagnostics_isolated_flag():
+    """python main.py provider-diagnostics --isolated-dotenv 应使用 isolated 模式。"""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="first_agent_pdi_") as tmp_home:
+        test_env = {**os.environ, "HOME": tmp_home}
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "main.py"),
+             "provider-diagnostics", "--isolated-dotenv"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            cwd=str(PROJECT_ROOT),
+            env=test_env,
+        )
+        output = result.stdout + result.stderr
+        assert "Isolated" in output or "isolated" in output.lower(), (
+            f"应提到 isolated:\n{output[:500]}"
+        )
+        assert result.returncode in {0, 1, 2}
+
+
+def test_provider_diagnostics_no_secret_leakage():
+    """provider-diagnostics 命令不得泄露 API key 值。"""
+    import re
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="first_agent_pd_") as tmp_home:
+        test_env = {
+            **os.environ,
+            "HOME": tmp_home,
+            "ANTHROPIC_API_KEY": "sk-ant-secret-test-key-12345678901234567",
+            "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+            "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
+        }
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "main.py"),
+             "provider-diagnostics"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            cwd=str(PROJECT_ROOT),
+            env=test_env,
+        )
+        output = result.stdout + result.stderr
+        assert "sk-ant-secret" not in output
+        secret_patterns = [
+            r"sk-ant-[A-Za-z0-9_-]{20,}",
+            r"sk-[A-Za-z0-9_-]{20,}",
+        ]
+        for pattern in secret_patterns:
+            assert not re.search(pattern, output), "provider-diagnostics leaks key"
+
+
+# =========================================================================
+# 13. fake 模式与 key 共存的行为验证
+# =========================================================================
+
+
+def test_fake_mode_ignores_key_when_key_present_in_env():
+    """fake 模式下即使 env 中有 key，diagnostic 也应为 ok 且说明 key 不被使用。"""
+    from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
+
+    diag = diagnose_provider_config(env={
+        "ANTHROPIC_API_KEY": "sk-ant-test12345678901234567890",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    })
+    # fake 模式（无 MY_FIRST_AGENT_LLM_PROVIDER），但 key 存在
+    assert diag.provider_type == "fake"
+    assert diag.api_key_present is True
+    assert diag.status == "ok"
+
+    report = render_diagnostic_report(diag)
+    assert "fake" in report.lower()
+    assert "不会使用" in report or "无需" in report or "安全路径" in report
+
+
+def test_real_mode_requires_explicit_provider_env():
+    """真实 provider 需要显式设置 MY_FIRST_AGENT_LLM_PROVIDER，仅有 key 不够。"""
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    diag = diagnose_provider_config(env={
+        "ANTHROPIC_API_KEY": "sk-ant-test12345678901234567890",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+        # 注意：没有 MY_FIRST_AGENT_LLM_PROVIDER
+    })
+    # 仍是 fake 模式
+    assert diag.provider_type == "fake"
+    # fake 模式下 key present 但 status 仍为 ok（只是不会用）
+    assert diag.status == "ok"
+
+
+def test_diagnostics_and_runtime_use_same_config_resolver():
+    """diagnose_provider_config 和 load_agent_provider_config 对同一 env 应得出一致结论。
+
+    root cause guard：之前 diag 和 runtime 用了不同的解析逻辑，导致
+    `python main.py status` 显示 fake，但实际 runtime 走了 real 路径。
+    """
+    from agent.provider.config import load_agent_provider_config
+    from agent.provider.diagnostics import diagnose_provider_config
+
+    env = {
+        "MY_FIRST_AGENT_LLM_PROVIDER": "anthropic_native",
+        "ANTHROPIC_API_KEY": "sk-ant-test12345678901234567890",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    }
+
+    diag = diagnose_provider_config(env=env)
+    config = load_agent_provider_config(env=env)
+
+    # provider type 一致
+    assert diag.provider_type == config.provider_type, (
+        f"diag: {diag.provider_type}, config: {config.provider_type}"
+    )
+    # model 一致
+    assert diag.model == config.model, (
+        f"diag: {diag.model}, config: {config.model}"
+    )
+    # key 存在性一致
+    assert diag.api_key_present == bool(config.api_key), (
+        f"diag key present: {diag.api_key_present}, config key: {bool(config.api_key)}"
+    )

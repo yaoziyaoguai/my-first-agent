@@ -129,10 +129,11 @@ def test_diagnostic_does_not_leak_api_key_value():
     assert "SET (redacted)" in report or "SET" in report
 
 
-def test_diagnostic_reports_key_env_name():
-    """诊断报告应指出 key 来自哪个环境变量（ANTHROPIC_API_KEY / OPENAI_API_KEY）。
+def test_diagnostic_reports_key_set_without_env_var_name():
+    """诊断报告确认 key 已设置但不应泄露环境变量名。
 
-    这帮助用户知道自己配对了哪个变量。
+    v1.1 config contract：不暴露 Key env / Auth scheme / Request path——
+    这些是 adapter 内部实现细节，不应出现在用户可见的诊断输出中。
     """
     from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
 
@@ -140,7 +141,8 @@ def test_diagnostic_reports_key_env_name():
         "ANTHROPIC_API_KEY": "sk-ant-test12345678901234567890",
     })
     report = render_diagnostic_report(diag)
-    assert "ANTHROPIC_API_KEY" in report
+    assert "SET (inline, redacted)" in report
+    assert "ANTHROPIC_API_KEY" not in report
 
 
 def test_diagnostic_fake_mode_reports_no_key_needed():
@@ -1471,7 +1473,8 @@ class TestProfileNoSecretLeaked:
         assert "sk-" not in report
         assert "SET" in report
         assert "redacted" in report
-        assert "ANTHROPIC_API_KEY" in report  # 变量名可以出现
+        # v1.1: 不暴露 Key env 变量名，统一显示 "SET (inline, redacted)"
+        assert "ANTHROPIC_API_KEY" not in report
 
 
 class TestProfileFactoryIntegration:

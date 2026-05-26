@@ -14,9 +14,9 @@
 # type:       fake | anthropic_native | anthropic_compatible | openai_native | openai_compatible
 # model:      模型名
 # base_url:   兼容模式端点地址（native 模式不需要）
-# request_path: 兼容模式请求路径
-# auth_scheme: auto | bearer | x-api-key
 # api_key:    真实 API key（个人本地项目可写在此处，不可提交 git）
+#
+# 用户只需配置以上字段。request_path 和 auth_scheme 由 provider adapter 内部决定。
 provider:
   enabled: false
   type: fake

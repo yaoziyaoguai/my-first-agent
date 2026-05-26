@@ -685,11 +685,9 @@ def diagnose_provider_config_isolated(
 
 
 def _render_api_key(diagnostic: ProviderDiagnostic) -> str:
-    """脱敏显示 API key 状态，区分 inline / env / missing。"""
+    """脱敏显示 API key 状态。"""
     if not diagnostic.api_key_present:
         return "not set"
-    if diagnostic.api_key_env:
-        return f"SET (env, redacted — {diagnostic.api_key_env})"
     return "SET (inline, redacted)"
 
 
@@ -754,9 +752,6 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         f"  Model         : {diagnostic.model}",
         f"  Base URL      : {diagnostic.base_url}",
         f"  API key       : {_render_api_key(diagnostic)}",
-        f"  Key env       : {diagnostic.api_key_env or 'N/A'}",
-        f"  Auth scheme   : {diagnostic.auth_scheme}",
-        f"  Request path  : {diagnostic.request_path}",
         f"  .env loaded   : {'yes' if diagnostic.dotenv_loaded else 'no'}",
     ])
     if diagnostic.dotenv_path:

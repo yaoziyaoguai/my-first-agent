@@ -111,12 +111,12 @@ def load_unified_provider_config(
             yaml_path=yaml_path_str,
         )
 
-    # enabled=true → 从 config.yaml 读取所有字段
+    # enabled=true → 从 config.yaml 读取用户字段
+    # 用户只配置 enabled/type/model/base_url/api_key
+    # request_path 和 auth_scheme 由 provider adapter 内部决定，不在用户配置中暴露
     provider_type = str(provider_section.get("type", "fake")).strip().lower()
     model = str(provider_section.get("model", "fake-llm")).strip()
     base_url = _opt_str(provider_section, "base_url")
-    request_path = _opt_str(provider_section, "request_path") or ""
-    auth_scheme = _opt_str(provider_section, "auth_scheme") or "auto"
 
     # 只从 config.yaml 的 provider.api_key 读取 key，不走 env
     api_key: str | None = _opt_str(provider_section, "api_key")
@@ -149,19 +149,21 @@ def load_unified_provider_config(
             yaml_path=yaml_path_str,
         )
 
-    # 推导默认值
-    if not request_path:
-        if provider_type.startswith("anthropic"):
-            request_path = "/v1/messages"
-        elif provider_type.startswith("openai"):
-            request_path = "/v1/chat/completions"
+    # adapter 内部默认值：用户不配置，由 loader 根据 provider type 推导
+    if provider_type.startswith("anthropic"):
+        request_path = "/v1/messages"
+        auth_scheme = "auto"  # adapter 内部解析为 x-api-key
+        compatibility_mode = "anthropic_messages"
+    elif provider_type.startswith("openai"):
+        request_path = "/v1/chat/completions"
+        auth_scheme = "bearer"
+        compatibility_mode = "openai"
+    else:
+        request_path = ""
+        auth_scheme = "auto"
+        compatibility_mode = "fake"
 
     supports_streaming = provider_type == "anthropic_native"
-    compatibility_mode = (
-        "anthropic_messages" if provider_type.startswith("anthropic") else
-        "openai" if provider_type.startswith("openai") else
-        "fake"
-    )
 
     config = AgentProviderConfig(
         provider_type=provider_type,

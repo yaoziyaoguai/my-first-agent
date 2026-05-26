@@ -1,12 +1,10 @@
 # Kimi K2.5 via Anthropic-compatible (DashScope)
-# 使用方式：cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
-# 然后将 api_key 替换为真实 key
+# 用户只需配置 enabled/type/model/base_url/api_key
+# request_path 和 auth_scheme 由 adapter 内部决定
 
 provider:
   enabled: true
   type: anthropic_compatible
   model: kimi-k2.5
   base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
-  request_path: /v1/chat/completions
-  auth_scheme: auto
   api_key: sk-REPLACE_ME

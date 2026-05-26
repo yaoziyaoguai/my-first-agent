@@ -1,0 +1,17 @@
+[provider] mode=anthropic_compatible (真实 API — model=kimi-k2.5)
+────────────────────────────────────────────────────────────
+  First Agent — local-first agent runtime
+────────────────────────────────────────────────────────────
+  session : cfd96bbe  (full: cfd96bbe-eb7e-45d1-88a0-7653b4e82dc5)
+  cwd     : /Users/jinkun.wang/work_space/my-first-agent
+  health  : 3 warn (workspace_lint, log_size, session_accumulation); 1 error (tool_registry_integrity); 详情：python main.py health
+────────────────────────────────────────────────────────────
+  输入 'quit' 退出，输入 'help' 查看可用能力与限制。
+  python main.py health / python main.py logs --tail 50。
+  Fake provider 安全路径（默认，无 API key，不联网）。
+  Skill System safe-local 基线已完成，demo-note-maker 可用。多 skill marketplace 未实现。
+
+  📭 resume : 未发现断点，可以直接开始新任务。
+
+[status] state=waiting user input · status=idle · msgs=0
+你: 

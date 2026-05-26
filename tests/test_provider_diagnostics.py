@@ -1505,3 +1505,114 @@ class TestProfileFactoryIntegration:
                 os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = saved
             if saved_profile is not None:
                 os.environ["FIRST_AGENT_PROVIDER_PROFILE"] = saved_profile
+
+
+# =============================================================================
+# Config YAML 可读性测试（config/examples/ 拆分后可解析、无 secret）
+# =============================================================================
+
+
+class TestConfigExamplesParseable:
+    """三个 config/examples/*.config.yaml 都能被 load_unified_provider_config 解析。
+    中文注释/docstring：config/examples 是推荐用户复制入口，非注释嵌套方式。"""
+
+    def test_default_config_yaml_is_minimal_and_parseable(self):
+        """config/config.yaml 默认 fake 最小可解析，不包含注释掉的示例。"""
+        from agent.provider.simple_config import load_unified_provider_config
+
+        config_path = PROJECT_ROOT / "config" / "config.yaml"
+        result = load_unified_provider_config(config_path)
+        assert result.source in ("config_yaml_disabled", "default_fake")
+        assert result.config.provider_type == "fake"
+        assert result.config.model == "fake-llm"
+
+    def test_fake_example_parseable(self):
+        """config/examples/fake.config.yaml 可解析为 fake provider。"""
+        from agent.provider.simple_config import load_unified_provider_config
+
+        config_path = PROJECT_ROOT / "config" / "examples" / "fake.config.yaml"
+        result = load_unified_provider_config(config_path)
+        assert result.config.provider_type == "fake"
+
+    def test_kimi_example_parseable(self):
+        """config/examples/kimi-anthropic-compatible.config.yaml 可解析。
+        由于 api_key_env 指向环境变量名而非实际 key 值，
+        测试中传入 mock env 以验证 YAML 结构可解析。"""
+        from agent.provider.simple_config import load_unified_provider_config
+
+        config_path = (
+            PROJECT_ROOT / "config" / "examples"
+            / "kimi-anthropic-compatible.config.yaml"
+        )
+        result = load_unified_provider_config(
+            config_path,
+            env={"ANTHROPIC_API_KEY": "sk-test-mock-key"},
+        )
+        assert result.source == "config_yaml"
+        assert result.config.provider_type == "anthropic_compatible"
+        assert result.config.model == "kimi-k2.5"
+
+    def test_glm_example_parseable(self):
+        """config/examples/glm-openai-compatible.config.yaml 可解析。
+        传入 mock env 验证 YAML 结构可解析，不依赖真实 key。"""
+        from agent.provider.simple_config import load_unified_provider_config
+
+        config_path = (
+            PROJECT_ROOT / "config" / "examples"
+            / "glm-openai-compatible.config.yaml"
+        )
+        result = load_unified_provider_config(
+            config_path,
+            env={"OPENAI_API_KEY": "sk-test-mock-key"},
+        )
+        assert result.source == "config_yaml"
+        assert result.config.provider_type == "openai_compatible"
+        assert result.config.model == "glm-5"
+
+    def test_examples_contain_no_api_key(self):
+        """三个示例文件不包含 API key 值，只包含 api_key_env 变量名。"""
+        examples_dir = PROJECT_ROOT / "config" / "examples"
+        for example_file in sorted(examples_dir.glob("*.yaml")):
+            content = example_file.read_text()
+            # 不应包含看起来像 API key 的值
+            assert "sk-" not in content, (
+                f"{example_file.name} 包含疑似 API key 的明文"
+            )
+            assert "secret" not in content.lower(), (
+                f"{example_file.name} 包含 'secret' 字符串"
+            )
+            # api_key_env 字段指向变量名而非值
+            assert "api_key_env:" in content or "fake" in example_file.name, (
+                f"{example_file.name} 中真实 provider 应使用 api_key_env"
+            )
+
+    def test_default_yaml_has_no_commented_provider_examples(self):
+        """config/config.yaml 不应包含注释掉的真实 provider 示例。"""
+        config_path = PROJECT_ROOT / "config" / "config.yaml"
+        content = config_path.read_text()
+        # 不应有被注释的 enabled/type/model 真实 provider 示例行
+        lines = content.split("\n")
+        commented_real = [
+            line for line in lines
+            if line.strip().startswith("#") and any(
+                kw in line for kw in ["enabled: true", "type: anthropic",
+                                      "type: openai", "base_url: http"]
+            )
+        ]
+        assert not commented_real, (
+            "config/config.yaml 不应包含注释掉的真实 provider 示例，"
+            "真实配置示例在 config/examples/ 目录中"
+        )
+
+    def test_readme_points_to_examples_not_inline_uncomment(self):
+        """README 不应建议用户在同一 provider block 中取消注释。"""
+        readme_path = PROJECT_ROOT / "README.md"
+        content = readme_path.read_text()
+        # 应指向 config/examples/
+        assert "config/examples/" in content, (
+            "README 应引用 config/examples/ 目录"
+        )
+        # 不应建议取消注释
+        assert "取消注释" not in content, (
+            "README 不应建议用户取消注释，应使用 config/examples/ 复制方式"
+        )

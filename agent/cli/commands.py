@@ -35,7 +35,20 @@ def dispatch_maintenance_command(
 ) -> int | None:
     """处理非交互维护命令；未命中时返回 None 让 main 进入 agent loop。"""
 
-    if argv and argv[0] in {"process", "scan", "status", "preflight"}:
+    # status 命令：provider 配置静态诊断（不调用真实 API）
+    if argv and argv[0] == "status":
+        from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
+
+        _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
+        diagnostic = diagnose_provider_config()
+        print(render_diagnostic_report(diagnostic))
+        if diagnostic.status == "error":
+            return 2
+        if diagnostic.status == "warn":
+            return 1
+        return 0
+
+    if argv and argv[0] in {"process", "scan", "preflight"}:
         from llm.cli import main as process_main
 
         return process_main(argv)

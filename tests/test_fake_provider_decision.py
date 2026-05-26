@@ -1,17 +1,25 @@
 """FakeProvider tool decision layer 测试。
 
+按 FakeProvider Scripted Scenario Contract
+（docs/design/fake-provider-scripted-scenario-contract.md）
+三类 taxonomy：
+
+Category A — Deterministic Fake Runtime Scenarios:
+  仅使用 exact match / literal tool name（策略 1、策略 4），不依赖 NLU。
+  验证 runtime branch points 可达且正确。
+
+Category B — Fake/Local UX Smoke:
+  验证 no crash、no max-loop、no overclaim。
+
+Category C — Real-Provider Semantic Eval (NL-dependent):
+  依赖策略 2（名称 token）或策略 3（描述 keyword n-gram）的测试。
+  这些策略已按 §3.5 废弃。对应测试暂时保留作为兼容性覆盖，
+  标记为 NL_DEPENDENT，待 scripted scenario 迁移完成后移除。
+
 中文学习边界：
-- 本文件测试 FakeProvider 的 deterministic tool decision 层（_resolve_tool_use）
 - FakeProvider 只输出 ToolUseBlock（tool_use intent），不直接执行工具
 - 真正工具执行路径：core.chat → loop.py → handle_tool_use_response → ToolExecutor
 - 不新增 fake path / fake runtime / fake loop
-
-测试目标：
-1. 基于工具名称/描述/用户消息做 rule-based 匹配
-2. 未匹配时返回普通 fake 文本响应
-3. tool_use 经由 core.chat / Tool Pipeline 返回用户可见 tool result
-4. FakeProvider 不直接执行工具
-5. real provider path 未被改变（opt-in gate 保持）
 """
 
 from __future__ import annotations
@@ -87,7 +95,11 @@ class TestResolveToolUse:
         assert isinstance(result, ToolUseBlock)
 
     def test_name_token_match_returns_tool_use(self):
-        """用户消息命中工具名称关键词（非完整名）→ token 匹配。"""
+        """[NL_DEPENDENT] 用户消息命中工具名称关键词（非完整名）→ token 匹配。
+
+        DEPRECATED per Scripted Scenario Contract §3.5 strategy 2.
+        保留作为兼容性覆盖，待迁移至 scripted scenario 后移除。Sunset v0.5+。
+        """
         result = _resolve_tool_use(
             "write a demo note please", self.SAFE_DEMO_TOOLS
         )
@@ -95,7 +107,11 @@ class TestResolveToolUse:
         assert result.name == "demo.write_demo_note"
 
     def test_description_keyword_match_returns_tool_use(self):
-        """用户消息与工具描述有关键词重叠 → 描述匹配，score≥30。"""
+        """[NL_DEPENDENT] 用户消息与工具描述有关键词重叠 → 描述匹配。
+
+        DEPRECATED per Scripted Scenario Contract §3.5 strategy 3。
+        保留作为兼容性覆盖，待迁移至 scripted scenario 后移除。Sunset v0.5+。
+        """
         result = _resolve_tool_use(
             "帮我写入一个 note", self.SAFE_DEMO_TOOLS
         )
@@ -103,7 +119,12 @@ class TestResolveToolUse:
         assert result.name == "demo.write_demo_note"
 
     def test_chinese_description_keyword_match(self):
-        """中文描述关键词匹配：'任务摘要' 命中 echo_task_summary。"""
+        """[NL_DEPENDENT] 中文描述关键词匹配：'任务摘要' 命中 echo_task_summary。
+
+        DEPRECATED per Scripted Scenario Contract §3.5 strategy 3 + _tool_desc_keywords().
+        这构成伪中文 NLU——通过 Chinese n-gram 提取猜测用户意图。
+        保留作为兼容性覆盖，待迁移至 scripted scenario 后移除。Sunset v0.5+。
+        """
         result = _resolve_tool_use(
             "查看当前任务摘要", self.SAFE_DEMO_TOOLS
         )
@@ -318,7 +339,13 @@ class TestFakeProviderToolPipelineIntegration:
     """
 
     def test_chat_with_tool_match_goes_through_pipeline(self):
-        """用户消息匹配工具 → core.chat 走完整 Tool Pipeline → 可观测结果。"""
+        """[NL_DEPENDENT] 用户消息通过中文关键词匹配工具 → core.chat 走完整 Tool Pipeline。
+
+        DEPRECATED per Scripted Scenario Contract §3.5：使用 "查看任务摘要" 依赖
+        strategy 3 Chinese n-gram 匹配。Category A 替代方案应使用精确工具名
+        "demo.echo_task_summary" 或 exact trigger phrase。
+        保留作为兼容性覆盖，Sunset v0.5+。
+        """
         import agent.tools  # noqa: F401 - 触发工具注册
         from agent.core import chat
         from agent.provider.fake_provider import FakeProvider
@@ -340,15 +367,13 @@ class TestFakeProviderToolPipelineIntegration:
             registry=registry, observer=RuntimeActionModuleObserver()
         )
 
-        # 使用能匹配 demo.echo_task_summary 的消息
+        # NL-dependent: 使用中文自然语言 "查看任务摘要"
         result = chat(
             "查看任务摘要",
             provider=FakeProvider(),
             runtime_action_dispatcher=dispatcher,
         )
         assert isinstance(result, str)
-        # 如果匹配了 tool_use，结果中应包含可观测的 tool 相关输出
-        # 如果不匹配（描述关键词可能变化），至少不应崩溃
         assert len(result) > 0
 
     def test_chat_hello_no_tool_produces_text(self):

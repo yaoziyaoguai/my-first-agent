@@ -362,7 +362,13 @@ class TestDogfoodToolAndCommands:
     """D/E/F/G: tool-intent, memory, subagent, unknown tool。"""
 
     def test_case_d_tool_intent_demo_note(self, monkeypatch):
-        """Case D: 帮我创建一条 demo note，标题是「武汉旅行测试」，内容是「fake/local dogfood」。
+        """Case D: 使用精确触发短语 "create a demo note" (scripted scenario, Category A)。
+
+        中文学习说明：
+        - 按 FakeProvider Scripted Scenario Contract (§3.3)，只允许 exact match 和
+          literal tool name 匹配
+        - 本 case 使用 _DEMO_TOOL_TRIGGERS 中的精确触发短语，不依赖中文 NLU
+        - 任意中文自然语言 tool intent 测试属于 Category C，需要 real provider
 
         expected:
         - may enter tool confirmation / tool gate
@@ -374,10 +380,9 @@ class TestDogfoodToolAndCommands:
         _fresh_state(monkeypatch, home)
         provider = _build_fake_provider()
 
-        user_msg = (
-            "帮我创建一条 demo note，标题是「武汉旅行测试」，"
-            "内容是「这是 fake/local dogfood 的工具调用测试」。"
-        )
+        # 精确触发短语，命中 _DEMO_TOOL_TRIGGERS → strategy 4 (legacy exact match)
+        # 非任意中文 NLU，不依赖 strategy 2/3 的 n-gram 关键词匹配
+        user_msg = "create a demo note"
         result = _run_chat(user_msg, provider)
 
         # tool-intent chat 需要更多循环（planning → tool pipeline），所以不检查 loop_reasonable

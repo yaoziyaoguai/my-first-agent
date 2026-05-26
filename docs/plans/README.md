@@ -1,20 +1,36 @@
 # 计划文档索引 (Plans Index)
 
-本目录包含 my-first-agent 的计划文档。计划类型分两种：
-- **Active（当前执行中）**：最新计划，覆盖当前阶段行动
+本目录包含 my-first-agent 的计划文档。
+
+**分类规则**：
+- **Active（当前）**：当前阶段唯一行动入口
+- **Completed（已完成）**：已执行完毕的计划，保留为证据
 - **Historical（历史）**：过去特定能力的实现计划，保留为历史证据
 
-## Active Plans
+> **AutoRun 规则**：只以 Active 计划为当前行动入口。Completed/Historical plans 是实现证据，不驱动新能力建设。Archived plans（`docs/archive/`）不参与 AutoRun discovery。当前 AutoRun 模式为 cleanup/source-of-truth only，不新增 capability。
+
+## Active Plan (当前唯一行动入口)
 
 | 文档 | 日期 | 范围 | 用途 |
 |------|------|------|------|
-| [final-cleanup-readiness-summary-2026-05-25.md](final-cleanup-readiness-summary-2026-05-25.md) | 2026-05-25 | 最终收口 readiness 总结 | **当前权威行动入口** — manual human dogfood 是最优先下一步 |
+| [final-cleanup-readiness-summary-2026-05-25.md](final-cleanup-readiness-summary-2026-05-25.md) | 2026-05-25 | 最终收口 readiness 总结 | **当前权威行动入口** — manual human dogfood 是最优先下一步；能力建设暂停 |
+
+## Completed Plans (已执行完毕)
+
+| 文档 | 日期 | 范围 | 状态 |
+|------|------|------|------|
 | [low-complexity-capability-remediation-summary-2026-05-25.md](low-complexity-capability-remediation-summary-2026-05-25.md) | 2026-05-25 | Capability Gap Audit 后的 low-complexity 补齐总结 | **已完成** — 6 项 safe-to-auto-run 补齐 |
 | [post-red-team-cleanup-remediation-plan-2026-05-25.md](post-red-team-cleanup-remediation-plan-2026-05-25.md) | 2026-05-25 | PF-01 到 PF-15 cleanup 修复 | **已完成** — cleanup-only remediation |
 | [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md) | 2026-05-25 | RT-01 到 RT-18 全量修复 | **已完成** — 第一轮 6 phases committed |
-| [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md) | — | 子系统集成 roadmap | AutoRun queue 定义（当前仅 cleanup/slimming 模式） |
 
-## Historical Plans (已完成或已冻结)
+## Reference (参考文档，非执行计划)
+
+| 文档 | 日期 | 范围 | 用途 |
+|------|------|------|------|
+| [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md) | — | 子系统集成 roadmap | AutoRun queue 定义（当前仅 cleanup/slimming 模式） |
+| [documentation-source-of-truth-reset-2026-05-26.md](documentation-source-of-truth-reset-2026-05-26.md) | 2026-05-26 | 文档 source-of-truth reset 盘点 | 归档操作参考（已完成） |
+
+## Historical Plans (已完成或已冻结，保留为证据)
 
 | 文档 | 日期 | 范围 | 状态 |
 |------|------|------|------|
@@ -28,8 +44,10 @@
 
 ## 读者路径
 
-- **当前该做什么**：读 [final-cleanup-readiness-summary-2026-05-25.md](final-cleanup-readiness-summary-2026-05-25.md) — cleanup 已完成，manual human dogfood 是下一步
-- **低复杂度补齐结果**：读 [low-complexity-capability-remediation-summary-2026-05-25.md](low-complexity-capability-remediation-summary-2026-05-25.md)
-- **第一轮 remediation 历史**：读 [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md) — 已完成，作为证据保留
-- **AutoRun queue 定义**：读 [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md)
-- **历史实现证据**：Historical 部分保留为实现证据链，不需要作为行动源
+- **当前该做什么** → [final-cleanup-readiness-summary-2026-05-25.md](final-cleanup-readiness-summary-2026-05-25.md) — manual human dogfood 是最优先下一步
+- **当前能力状态** → [CURRENT_CAPABILITY_STATUS.zh.md](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
+- **当前审计状态** → [CURRENT_AUDIT_STATUS.zh.md](../06-audit/CURRENT_AUDIT_STATUS.zh.md)
+- **低复杂度补齐结果** → [low-complexity-capability-remediation-summary-2026-05-25.md](low-complexity-capability-remediation-summary-2026-05-25.md)（已完成）
+- **第一轮 remediation 历史** → [global-red-team-remediation-plan-2026-05-25.md](global-red-team-remediation-plan-2026-05-25.md)（已完成，证据保留）
+- **AutoRun queue 定义** → [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md)
+- **历史实现证据** → Historical 部分，保留为实现证据链，不作为行动源

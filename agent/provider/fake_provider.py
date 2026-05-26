@@ -1,40 +1,43 @@
-"""Fake/deterministic ModelProvider for Phase 1 E2E testing.
+"""Fake/deterministic ModelProvider — Scripted Scenario Test Double.
 
-中文学习边界：
-FakeProvider 是 Phase 1 专用确定性 provider，实现 ModelProvider 协议。
-它不读 .env、不调用外部 API、不执行工具副作用。目的是让 core.chat() →
-run_main_loop() → call_model() 全链路可走通，从而证明 RuntimeAction 确实
-由真实 core loop 触发，而非 dogfood harness 直接调用 dispatcher。
+契约文档：docs/design/fake-provider-scripted-scenario-contract.md
 
-为什么需要 FakeProvider：
-- core.chat() 依赖 provider 调用模型，没有 provider 则 call_model() fail closed
-- 真实 LLM 在 Phase 1 被禁止（不读 .env、不调外部 API）
-- FakeProvider 让 runtime loop 全链路可运行，同时保持 100% 确定性
+FakeProvider 是 deterministic ModelProvider test double。它实现 ModelProvider
+协议（create()/stream()），输出预编排的固定响应，唯一目的是证明 unified runtime
+flow（core.chat → loop.py → call_model → Tool Pipeline / Memory / SubAgent
+branch points）在模型返回结构化输出时功能正确。
 
-WP3 扩展：Demo tool_use 响应 → 本轮 WP1-WP2 泛化
-- 原来使用硬编码 _DEMO_TOOL_TRIGGERS 精确字符串匹配，只支持一个工具
-- 改用 FakeToolDecisionPolicy：基于工具名称、描述与用户意图的 rule-based 匹配
-- 支持所有已注册的 safe demo tools（demo.write_demo_note, demo.echo_task_summary）
-- tool_use intent 经 Tool Pipeline 走完整 unified runtime flow，FakeProvider 不执行工具
+FakeProvider 和 RealProvider 共享：
+- 同一 ModelProvider 协议（create()/stream()）
+- 同一 unified runtime path（core.chat → run_main_loop → call_model）
+- 同一 Tool Pipeline、Memory hooks、SubAgent routing、summary/evidence 路径
 
-架构边界（为什么 fake provider 不执行工具）：
-- FakeProvider 只输出 ToolUseBlock（tool_use intent），不直接调用 tool func
-- 真正工具执行路径：core.chat → loop.py → handle_tool_use_response → ToolExecutor → tool func
-- 如果 FakeProvider 直接调用 tool func，会绕过 confirmation、audit、trace、checkpoint
-- 这就是"fake 可以有，fake path 不能有"的核心含义
+区别仅在如何生成 ProviderResponse：FakeProvider 使用确定性编排输出；
+RealProvider 调用外部 LLM API。
 
-为什么不是 fake/real 双 runtime：
-- FakeProvider 和 RealProvider 都实现 ModelProvider Protocol
-- 两者都通过 call_model() → create()/stream() 进入同一个 core.chat/loop.py
-- 区别只在 provider adapter 内部：fake 是 deterministic rules，real 是 LLM API
-- 从 runtime loop 的视角看，两者都是"模型返回了 stop_reason + content blocks"
-- 调度、确认、审计、trace、checkpoint 全部共享
+FakeProvider 不是：
+- 中文 NLU 系统
+- Planner
+- 意图识别器
+- 产品能力 demo
+- 真实语义 eval 的替代品
+
+Scripted Scenario 匹配规则（仅以下合法）：
+1. Exact match — 用户消息与已知触发短语精确匹配
+2. Tool name literal — 工具名原文出现在用户消息中
+3. Structured prefix match — "/tool:" 或 "/scenario:" 前缀（Phase 2 预留）
+
+已废弃策略：
+- Strategy 2 (name token match) — DEPRECATED
+- Strategy 3 (description keyword n-gram) — DEPRECATED
+- _tool_desc_keywords() Chinese n-gram 提取 — DEPRECATED
+- Chinese stop-word filtering — DEPRECATED
 
 不对什么负责：
 - 不做真实 LLM 推理
 - 不做真实工具调用
 - 不做多工具 chaining
-- 不模拟 provider error/latency/retry（那是 Phase 2+ 的职责）
+- 不模拟 provider error/latency/retry
 
 ⛔ FROZEN (2026-05-25): FakeProvider 增强冻结。
    - 当前定位：deterministic test fixture / debug provider / contract coverage
@@ -83,18 +86,18 @@ def _tool_name_tokens(tool_name: str) -> set[str]:
 
 
 def _tool_desc_keywords(description: str) -> set[str]:
-    """提取工具描述中可作为意图关键词的中文/英文短语。
+    """[DEPRECATED] 提取工具描述中的中文/英文关键词用于 n-gram 模糊匹配。
 
-    规则：
+    此函数是 strategy 3（描述关键词匹配）的核心引擎。按 FakeProvider Scripted
+    Scenario Contract §3.5，strategy 3 已废弃——FakeProvider 不得通过中文 n-gram
+    提取和重叠评分来猜测用户自然语言意图。
+
+    保留原因：旧测试兼容性。移除条件：所有 dogfood 和集成测试迁移至 scripted scenarios。
+    预计 Sunset: v0.5+
+
+    规则（历史记录）：
     - 英文：提取 3+ 字母的单词，排除停用词
     - 中文：提取 2-4 字的连续汉字片段，排除高频泛化停用词
-    - 返回用于匹配的关键词集合
-
-    中文停用词策略：
-    "调用" 在几乎所有工具描述中作为 boilerplate 出现（"调用此工具…"），
-    不应作为意图信号；用户在 ordinary chat 中说 "不要调用" 与工具描述中
-    的 "调用" 语义相反。过滤后，strategy 1（全名精确命中）和 strategy 2
-    （名称 token 命中）仍是主要的工具匹配路径。
     """
     import re
 
@@ -147,34 +150,20 @@ def _resolve_tool_use(
     user_message: str,
     tools: list[dict[str, Any]],
 ) -> ToolUseBlock | None:
-    """基于用户消息和可用工具描述做 deterministic tool 匹配。
+    """基于用户消息和可用工具做 deterministic tool 匹配。
 
-    输入：
-    - user_message: 归一化前的用户纯文本消息（由 FakeProvider.create() 提取）
-    - tools: create() 收到的工具描述列表，每条含 name/description/parameters
+    按 FakeProvider Scripted Scenario Contract §3.3，仅以下策略合法：
+    - 策略 1（全名精确命中）：tool name 原文出现在用户消息中 → score=100
+    - 策略 4（legacy exact trigger）：消息精确命中 _DEMO_TOOL_TRIGGERS
 
-    输出：
-    - ToolUseBlock 如果匹配到一个工具
-    - None 如果用户意图不匹配任何可用工具
+    以下策略已废弃（§3.5）：
+    - 策略 2（名称 token 匹配）— DEPRECATED，依赖 str.split() tokenization
+    - 策略 3（描述关键词 n-gram 重叠）— DEPRECATED，构成伪中文 NLU
 
-    匹配策略（优先级从高到低）：
-    1. 工具全名精确出现在用户消息中 → 直接命中
-    2. 工具名称的 token 精确命中用户消息 → 高置信度
-    3. 工具描述的关键词与用户消息重叠 → 中等置信度
-    4. 旧版 _DEMO_TOOL_TRIGGERS 精确匹配 → 兼容性回退
-    5. 无匹配 → 返回 None
+    废弃策略暂时保留作为兼容性回退，待所有测试迁移至 scripted scenarios 后移除。
+    Sunset: v0.5+
 
     全部 deterministic，不涉及随机性、模型推理或外部调用。
-
-    为什么只返回一个 tool_use 而不是多个：
-    - FakeProvider 是单步 deterministic adapter，不模拟多步 planner
-    - 多工具 chaining 需要真实 LLM planning，不在 fake provider 能力范围
-    - 本函数目标：验证 unified runtime flow 可以在确定性 fake 场景下承载 tool_use
-
-    为什么参数值使用安全默认值：
-    - 真正的参数解析需要 LLM 理解用户意图，fake provider 不做这个
-    - 对于 zero-arg 工具，传入 {} 即可
-    - 对于有参数的工具，使用安全默认值，真正解析由 future real provider 负责
     """
     import uuid
 
@@ -196,17 +185,19 @@ def _resolve_tool_use(
 
         score = 0
         name_lower = name.lower()
-        # 策略 1：全名精确出现（最高优先级）
+        # 策略 1：全名精确出现（最高优先级，合法 scripted scenario）
         if name_lower in msg:
             score = 100
-        # 策略 2：名称 token 命中
+        # 策略 2：名称 token 命中 — DEPRECATED (§3.5)，依赖 str.split() tokenization
+        # 保留仅作兼容性回退，Sunset v0.5+
         else:
             tokens = _tool_name_tokens(name_lower)
             hit_tokens = tokens & set(msg.split())
             if hit_tokens:
                 score = max(score, 60 + len(hit_tokens) * 10)
 
-        # 策略 3：描述关键词命中
+        # 策略 3：描述关键词命中 — DEPRECATED (§3.5)，构成伪中文 NLU
+        # 保留仅作兼容性回退，Sunset v0.5+
         desc_kw = _tool_desc_keywords(desc)
         msg_kw = set(_tool_desc_keywords(msg))
         kw_overlap = desc_kw & msg_kw
@@ -221,11 +212,11 @@ def _resolve_tool_use(
 
     if candidates:
         score, name, tool = candidates[0]
-        # 最低门槛 60：防止常见中文短 n-gram（如"调用""工具""路径"）误匹配工具描述。
-        # 策略 3 单关键词重叠得分 35（30+5），不满足 60；5 个重叠=55，不满足。
-        # 需 6+ 关键词重叠（30+30=60）才通过。策略 2 名称 token 命中得分 70+，不受影响。
-        # 策略 1 全名精确命中得分 100，直接通过。
-        # 历史：30→40 (6e5f287)，40→60 (本轮 automated dogfood sweep 发现 Case K)。
+        # 最低门槛 60：策略 1（score=100）和策略 4（legacy exact match）直接通过。
+        # 策略 2（name token）最低 70+（60+10），策略 3（n-gram）需 6+ 关键词重叠（30+30）。
+        # 历史：30→40 (6e5f287)，40→60 (255c341)。
+        # 按 Scripted Scenario Contract §3.5，策略 2/3 已废弃，threshold 在它们
+        # 移除后将不再需要防御性调高。
         if score >= 60:
             tool_id = f"toolu_fake_{uuid.uuid4().hex[:12]}"
             return ToolUseBlock(
@@ -313,7 +304,7 @@ def _legacy_demo_note_block() -> ToolUseBlock:
 
 
 class FakeProvider:
-    """确定性 fake provider，实现 ModelProvider 协议。
+    """Deterministic ModelProvider test double — Scripted Scenario Contract.
 
     用法：
         provider = FakeProvider()
@@ -325,14 +316,13 @@ class FakeProvider:
         provider = FakeProvider(response_fn=lambda msgs: "自定义回复")
 
     tool_use 决策：
-    - 使用 FakeToolDecisionPolicy 基于工具名称、描述与用户消息做 rule-based 匹配
-    - 匹配时返回 ToolUseBlock（tool_use intent），经 Tool Pipeline 走完整 unified runtime flow
+    - 仅合法策略：全名精确命中（strategy 1）+ 旧版精确触发短语（strategy 4）
+    - Strategy 2（名称 token）和 strategy 3（描述 n-gram）已废弃（§3.5）
+    - 匹配时返回 ToolUseBlock，经 Tool Pipeline 走完整 unified runtime flow
     - 未匹配时返回普通文本响应（end_turn）
-    - FakeProvider 只输出 ToolUseBlock，不执行工具——真正执行在 ToolExecutor 中
+    - FakeProvider 只输出 ToolUseBlock，不执行工具
 
-    FakeProvider 是 deterministic test/debug provider adapter，不是产品智能本身。
-    它的 tool_use decision 是本地可复现的 provider adapter 行为，用于验证 unified
-    runtime flow、tool pipeline 和用户可见结果，不代表真实 LLM tool-calling 能力。
+    详见 docs/design/fake-provider-scripted-scenario-contract.md
     """
 
     provider_type = "fake"
@@ -353,22 +343,12 @@ class FakeProvider:
     def _resolve_tool_use(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> ToolUseBlock | None:
-        """根据消息和可用工具做 deterministic tool_use 决策。
+        """按 Scripted Scenario Contract §3.3 匹配 tool_use。
 
-        调用 _resolve_tool_use() 模块级函数完成匹配。FakeProvider 不直接执行
-        工具——返回的 ToolUseBlock 由 core.chat/loop.py 的 handle_tool_use_response
-        消费，经 ToolExecutor 真正执行。
+        仅使用合法策略（exact match / legacy exact trigger）。
+        废弃策略（name token / n-gram）暂保留兼容，Sunset v0.5+。
 
-        为什么不是"直接调 tool func"：
-        - 如果 FakeProvider._resolve_tool_use 直接 import demo_echo_task_summary
-          然后调用它，tool 执行会绕过：
-          - Tool gate（confirmation 检查）
-          - Tool audit log
-          - Tool trace event
-          - Tool result checkpoint
-        - 这就是"fake path"——看起来像 unified runtime，实际绕开了所有 governance
-        - 正确做法：FakeProvider 只输出 ToolUseBlock，loop.py 的现有 handler
-          负责后续所有 governance 步骤
+        FakeProvider 只输出 ToolUseBlock，真正执行在 ToolExecutor 中。
         """
         for msg in reversed(messages):
             if msg.get("role") == "user":

@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RFC_PATH = PROJECT_ROOT / "docs" / "rfcs" / "0001-runtime-trace-toolresult-boundary.md"
+RFC_PATH = PROJECT_ROOT / "docs" / "archive" / "rfcs" / "0001-runtime-trace-toolresult-boundary.md"
 ADAPTER_PATH = PROJECT_ROOT / "agent" / "runtime_trace_projection.py"
 
 
@@ -134,14 +134,14 @@ def test_runtime_trace_projection_does_not_import_runtime_executor_or_registry()
 def test_rfc_execution_evidence_is_linked_from_final_docs() -> None:
     """RFC gate 完成后，final evidence 要能找到 RFC 和 first slice。"""
 
-    final = (PROJECT_ROOT / "docs" / "FINAL_ROADMAP_COMPLETION_EVIDENCE.md").read_text(
+    final = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "FINAL_ROADMAP_COMPLETION_EVIDENCE.md").read_text(
         encoding="utf-8"
     )
     design = (
-        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md"
     ).read_text(encoding="utf-8")
     closure = (
-        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md"
     ).read_text(encoding="utf-8")
 
     for text in (final, design, closure):

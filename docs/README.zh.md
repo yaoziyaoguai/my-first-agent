@@ -36,8 +36,8 @@
 - Memory canonical spec: [docs/rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md)
 - Skill canonical spec: [docs/rfc/SKILL_CANONICAL_RFC.md](rfc/SKILL_CANONICAL_RFC.md)
 - SubAgent canonical spec: [docs/rfc/SUBAGENT_CANONICAL_RFC.md](rfc/SUBAGENT_CANONICAL_RFC.md)
-- Skill SDD/TDD/Loop/Audit: `docs/design/`, `docs/testing/`, `docs/roadmap/`, `docs/audit/`
-- SubAgent SDD/TDD/Loop/Audit: `docs/design/`, `docs/testing/`, `docs/roadmap/`, `docs/audit/`
+- Skill SDD/TDD/Loop/Audit: `docs/design/`, `docs/archive/testing/`, `docs/archive/roadmap/`, `docs/audit/`
+- SubAgent SDD/TDD/Loop/Audit: `docs/design/`, `docs/archive/testing/`, `docs/archive/roadmap/`, `docs/audit/`
 
 ## 文档状态规则
 
@@ -45,8 +45,9 @@
 - `docs/01-getting-started/`：本地运行、测试、dogfood。
 - `docs/05-testing-dogfood/`：测试矩阵和 dogfood 命令。
 - `docs/06-audit/`：当前审计状态和发布前证据。
-- `docs/rfc/`：canonical spec，不能随意归档。
-- `docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`：系统级设计和实现循环证据，保留为实现依据。
+- `docs/rfc/`：canonical spec（MEMORY/SKILL/SUBAGENT），不能随意归档。
+- `docs/design/`、`docs/dogfood/`、`docs/audit/`：系统级设计和实现循环证据，保留为实现依据。
+- `docs/archive/`：历史 design/testing/roadmap/runtime-integration/specs/implementation-notes 等已归档。
 - 根层 `docs/V0_*`、旧 release、旧 roadmap、旧 smoke 记录：历史证据，不作为当前入口。
 
 ## 术语约定

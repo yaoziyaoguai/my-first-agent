@@ -127,7 +127,7 @@ def test_v0_3_health_maintenance_doc_exists_and_matches_entrypoints():
 
 
 def test_cli_output_contract_section_13_present():
-    text = (PROJECT_ROOT / "docs" / "CLI_OUTPUT_CONTRACT.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "CLI_OUTPUT_CONTRACT.md").read_text(encoding="utf-8")
     assert "## 13" in text
     assert "python main.py logs" in text
     assert "python main.py health" in text

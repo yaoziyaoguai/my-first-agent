@@ -317,9 +317,9 @@ Explicit Non-Goals for v0.1:
 12. 手工试用反馈模板（已归档）：[V0_3_2_MANUAL_TRIAL_FEEDBACK.md](docs/archive/v0.x/V0_3_2_MANUAL_TRIAL_FEEDBACK.md)
 13. Event transition 准备（已归档）：[V0_4_EVENT_TRANSITION_PREP.md](docs/archive/v0.x/V0_4_EVENT_TRANSITION_PREP.md)
 14. Skill 实验性状态记录（已归档）：[V0_3_SKILL_SYSTEM_STATUS.md](docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md)
-15. **Runtime Integration 设计文档包**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
+15. **Runtime Integration 设计文档包（已归档）**：[RUNTIME_INTEGRATION_RFC.zh.md](docs/archive/runtime-integration/RUNTIME_INTEGRATION_RFC.zh.md) — Runtime Action Harness 蓝图（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
 
-Canonical specs 仍保留在 `docs/rfc/`、`docs/design/`、`docs/testing/`、`docs/roadmap/`、`docs/dogfood/`、`docs/audit/`。
+Canonical specs 仍保留在 `docs/rfc/`（Memory/Skill/SubAgent canonical RFC）、`docs/design/`（Skill/SubAgent SDD）、`docs/dogfood/`、`docs/audit/`。历史 `docs/roadmap/`、`docs/testing/`、`docs/runtime-integration/` 已归档至 `docs/archive/`。
 
 ## 下一步 Roadmap
 

@@ -160,7 +160,7 @@ def test_skill_docs_pin_phase0_namespace_and_checkpoint_boundaries() -> None:
         encoding="utf-8"
     )
     loop = (
-        PROJECT_ROOT / "docs" / "roadmap" / "SKILL_SYSTEM_IMPLEMENTATION_LOOP.md"
+        PROJECT_ROOT / "docs" / "archive" / "roadmap" / "SKILL_SYSTEM_IMPLEMENTATION_LOOP.md"
     ).read_text(encoding="utf-8")
     audit = (
         PROJECT_ROOT / "docs" / "audit" / "SKILL_SYSTEM_AUDIT_CHECKLIST.md"

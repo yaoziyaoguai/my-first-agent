@@ -533,7 +533,7 @@ def test_cli_output_contract_keeps_final_answer_request_user_input_boundary() ->
     自动测试已经覆盖 Runtime 行为；这里守护对外契约文本，避免文档后来又暗示
     Runtime 可以靠自然语言问号或关键词进入等待状态。
     """
-    text = _read("docs/CLI_OUTPUT_CONTRACT.md")
+    text = _read("docs/archive/root-stale/CLI_OUTPUT_CONTRACT.md")
     section = text.split("## 14", 1)[1]
     required = [
         "request_user_input",

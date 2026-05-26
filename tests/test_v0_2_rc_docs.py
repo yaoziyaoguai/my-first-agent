@@ -29,19 +29,20 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # v0.2 RC 主线引用的核心文档；任何一个缺失都意味着 RC 文档链断裂。
+# 2026-05-26 文档归档后更新路径。
 RC_REQUIRED_DOCS = [
     "docs/archive/v0.x/V0_2_PLANNING.md",
-    "docs/RUNTIME_STATE_MACHINE.md",
-    "docs/RUNTIME_EVENT_BOUNDARIES.md",
-    "docs/CHECKPOINT_RESUME_SEMANTICS.md",
-    "docs/RUNTIME_ERROR_RECOVERY.md",
+    "docs/archive/root-stale/RUNTIME_STATE_MACHINE.md",
+    "docs/archive/root-stale/RUNTIME_EVENT_BOUNDARIES.md",
+    "docs/archive/root-stale/CHECKPOINT_RESUME_SEMANTICS.md",
+    "docs/archive/root-stale/RUNTIME_ERROR_RECOVERY.md",
     "docs/archive/v0.x/V0_2_TOOLING_AND_SECURITY_PREFLIGHT.md",
     "docs/archive/v0.x/V0_2_MANUAL_SMOKE_PLAYBOOK.md",
     "docs/archive/v0.x/V0_2_RC_STATUS.md",
-    "docs/CLI_OUTPUT_CONTRACT.md",
-    "docs/LLM_PROVIDER_LIVE_SMOKE.md",
-    "docs/LLM_AUDIT_STATUS_SCHEMA.md",
-    "docs/LLM_PROVIDER_CONFIG.md",
+    "docs/archive/root-stale/CLI_OUTPUT_CONTRACT.md",
+    "docs/archive/llm-provider/LLM_PROVIDER_LIVE_SMOKE.md",
+    "docs/archive/llm-provider/LLM_AUDIT_STATUS_SCHEMA.md",
+    "docs/archive/llm-provider/LLM_PROVIDER_CONFIG.md",
     "README.md",
 ]
 
@@ -70,10 +71,41 @@ def test_manual_smoke_path_exists(rel_path: str) -> None:
 
 
 def _source_to_archive(path: str) -> str:
-    """将旧 docs/V0_* 路径映射到归档路径，非 V0_* 路径保持不变。"""
+    """将旧文档路径映射到归档路径。
+
+    2026-05-26 文档归档后，多个根级 doc 移至 docs/archive/root-stale/、
+    docs/archive/llm-provider/ 等子目录。
+    """
     m = re.match(r"docs/(V0_.+)$", path)
     if m:
         return f"docs/archive/v0.x/{m.group(1)}"
+    # 2026-05-26: 根级 docs 已归档到 archive 子目录
+    _ROOT_ARCHIVED = {
+        "docs/RUNTIME_STATE_MACHINE.md",
+        "docs/RUNTIME_EVENT_BOUNDARIES.md",
+        "docs/CHECKPOINT_RESUME_SEMANTICS.md",
+        "docs/RUNTIME_ERROR_RECOVERY.md",
+        "docs/CLI_OUTPUT_CONTRACT.md",
+        "docs/RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md",
+        "docs/RUNTIME_TRACE_TOOLRESULT_MIGRATION.md",
+        "docs/ROADMAP_COMPLETION_AUTOPILOT.md",
+        "docs/ROADMAP.md",
+        "docs/ARCHITECTURE.md",
+        "docs/TUI_HITL_INTERACTION_AUDIT.md",
+        "docs/P1_TOPIC_SWITCH_PLAN.md",
+    }
+    _LLM_ARCHIVED = {
+        "docs/LLM_PROVIDER_LIVE_SMOKE.md",
+        "docs/LLM_AUDIT_STATUS_SCHEMA.md",
+        "docs/LLM_PROVIDER_CONFIG.md",
+        "docs/LLM_PROVIDER_ADAPTER.md",
+        "docs/LLM_PROCESSING_CAPABILITY_MATRIX.md",
+        "docs/LLM_PROVIDER_LIVE_SMOKE_REPORT.md",
+    }
+    if path in _ROOT_ARCHIVED:
+        return f"docs/archive/root-stale/{path.removeprefix('docs/')}"
+    if path in _LLM_ARCHIVED:
+        return f"docs/archive/llm-provider/{path.removeprefix('docs/')}"
     return path
 
 

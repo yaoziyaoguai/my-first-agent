@@ -1322,8 +1322,8 @@ class TestProfileDiagnostics:
         report = render_diagnostic_report(diag)
         assert "Active profile: kimi_anthropic (from FIRST_AGENT_PROVIDER_PROFILE)" in report
 
-    def test_render_suggests_profile_not_legacy(self):
-        """fake 模式诊断建议使用 FIRST_AGENT_PROVIDER_PROFILE。"""
+    def test_render_suggests_config_yaml_not_legacy(self):
+        """fake 模式诊断建议使用 config/config.yaml 而非 legacy profile env var。"""
         from agent.provider.diagnostics import (
             ProviderDiagnostic,
             render_diagnostic_report,
@@ -1340,9 +1340,10 @@ class TestProfileDiagnostics:
             status="ok",
             active_profile="fake",
             profile_source="default_fake",
+            config_source="default_fake",
         )
         report = render_diagnostic_report(diag)
-        assert "FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic" in report
+        assert "config/config.yaml" in report
 
 
 class TestProfileNoSecretLeaked:

@@ -1,8 +1,10 @@
 # Provider Profile Config Remediation Plan
 
 **日期**: 2026-05-26
-**状态**: in-progress
+**状态**: superseded（profile 路径已被 config/config.yaml 统一入口取代）
 **依赖**: docs/design/provider-profile-config-contract.md
+
+> ⚠️ 2026-05-26 更新：本计划提出的 profile 方案已由 `config/config.yaml` 统一配置入口落地。`FIRST_AGENT_PROVIDER_PROFILE` 和 `MY_FIRST_AGENT_LLM_PROVIDER` 保留为 legacy fallback（仅 config.yaml 不存在时生效），标记 deprecated，不作为推荐用户路径。后续里程碑将移除所有 legacy 路径。详见 docs/design/config-legacy-sunset-contract.md。
 
 ## 背景
 

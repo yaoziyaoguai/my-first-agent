@@ -2,7 +2,9 @@
 
 **版本**: v1.0
 **日期**: 2026-05-26
-**状态**: design
+**状态**: superseded（由 docs/design/unified-project-config-contract.md 取代）
+
+> ⚠️ 本文档描述的 `FIRST_AGENT_PROVIDER_PROFILE` + `provider_profiles.yaml` 方案已被 `config/config.yaml` 统一配置入口取代。profile 路径保留为 legacy fallback（仅 config.yaml 不存在时生效），不作为推荐用户路径。详见 docs/design/config-legacy-sunset-contract.md。
 
 ## 问题陈述
 

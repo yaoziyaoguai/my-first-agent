@@ -780,11 +780,13 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
                 "legacy_profile", "legacy_provider_env",
             ):
                 lines.append(
-                    "  如需切换到真实 LLM：\n"
-                    "    1. cp config/config.example.yaml config/config.yaml\n"
-                    "    2. 编辑 config/config.yaml，设置 enabled: true 并选择 provider type\n"
-                    "    3. 在 .env 中设置对应的 API key\n"
-                    "    4. python main.py status 验证"
+                    "  如需切换到真实 LLM，复制对应示例文件：\n"
+                    "    cp config/examples/kimi-anthropic-compatible.config.yaml"
+                    " config/config.yaml   # Kimi K2.5\n"
+                    "    cp config/examples/glm-openai-compatible.config.yaml"
+                    " config/config.yaml        # GLM-5\n"
+                    "  然后在 .env 中设置对应的 API key\n"
+                    "  最后 python main.py status 验证"
                 )
             else:
                 lines.append(

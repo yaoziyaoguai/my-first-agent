@@ -1,0 +1,13 @@
+# Example 2: Kimi K2.5 via Anthropic-compatible (DashScope)
+# api_key_env 指向环境变量名，实际 key 值在 .env 中设置（不放在这里）。
+# 使用方式：cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
+# 然后在 .env 中设置：ANTHROPIC_API_KEY=<your-dashscope-key>
+
+provider:
+  enabled: true
+  type: anthropic_compatible
+  model: kimi-k2.5
+  base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+  request_path: /v1/chat/completions
+  auth_scheme: auto
+  api_key_env: ANTHROPIC_API_KEY

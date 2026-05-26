@@ -199,21 +199,20 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 
 ### Opt-in 步骤
 
-1. 复制配置模板：
+1. 复制对应示例文件：
 
    ```bash
-   cp config/config.example.yaml config/config.yaml
+   # Kimi K2.5 (Anthropic 兼容)
+   cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
+
+   # 或 GLM-5 (OpenAI 兼容)
+   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml
+
+   # 或恢复默认 fake 安全路径
+   cp config/examples/fake.config.yaml config/config.yaml
    ```
 
-2. 编辑 `config/config.yaml` 的 `provider` section：
-
-   ```yaml
-   provider:
-     enabled: true
-     type: anthropic_native
-     model: claude-sonnet-4-6
-     api_key_env: ANTHROPIC_API_KEY
-   ```
+2. 如需自定义，编辑 `config/config.yaml` 的 `provider` section。
 
 3. 在 `.env` 中设置 API key（**不**写入 config.yaml）：
 
@@ -243,7 +242,7 @@ Global Real API dogfood 是 gated，不默认运行。只有在文档 phase 和�
 | `openai_compatible` | OpenAI 兼容端点 |
 
 兼容模式（`*_compatible`）还需要配置 `base_url` 和相关 `auth_scheme`/`request_path`。
-完整配置参考 `config/config.example.yaml`。
+完整示例见 `config/examples/`，字段说明见 `config/config.example.yaml`。
 
 ### Fake vs Real 行为差异
 

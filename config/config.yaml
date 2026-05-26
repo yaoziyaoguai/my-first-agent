@@ -1,37 +1,10 @@
 # First Agent 统一项目配置
-# 复制 config/config.example.yaml 查看所有可用选项
-#
-# 快速开始：
-#   1. 编辑此文件的 provider section
-#   2. 在 .env 中设置对应 API key
-#   3. python main.py status 验证
+# 当前实际生效配置。如需切换到真实 LLM，复制 config/examples/ 下对应示例文件：
+#   cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml
+# 或
+#   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml
 
-# --- Provider 配置 ---
-# enabled: true=启用真实 LLM, false=本地 fake 安全路径
-# type: anthropic_compatible | openai_compatible | anthropic_native | openai_native | fake
-# api_key_env: 环境变量名，实际 key 值放在 .env 中（不放在这里）
 provider:
   enabled: false
   type: fake
   model: fake-llm
-
-# --- Runtime 配置（后续实现）---
-# runtime:
-#   max_tokens: 128000
-#   max_messages: 100
-
-# --- Memory 配置（后续实现）---
-# memory:
-#   max_episodes: 50
-
-# --- Logging 配置（后续实现）---
-# logging:
-#   level: info
-
-# --- Workspace 配置（后续实现）---
-# workspace:
-#   root: .
-
-# --- Tools 配置（后续实现）---
-# tools:
-#   confirm_before_write: true

@@ -38,10 +38,18 @@ def dispatch_maintenance_command(
     # status 命令：provider 配置静态诊断（不调用真实 API）
     if argv and argv[0] == "status":
         from agent.provider.diagnostics import diagnose_provider_config, render_diagnostic_report
+        from agent.provider.profiles import (
+            load_provider_profiles,
+            resolve_active_profile,
+        )
 
         _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
+        profiles = load_provider_profiles(project_root=project_root)
+        resolved, method = resolve_active_profile(profiles)
         diagnostic = diagnose_provider_config(
             dotenv_path=project_root / ".env",
+            active_profile=resolved.name if resolved else None,
+            profile_source=method,
         )
         print(render_diagnostic_report(diagnostic))
         if diagnostic.status == "error":
@@ -57,6 +65,10 @@ def dispatch_maintenance_command(
             diagnose_provider_config_isolated,
             render_diagnostic_report,
         )
+        from agent.provider.profiles import (
+            load_provider_profiles,
+            resolve_active_profile,
+        )
 
         _maintenance_command_transition(RuntimeEventKind.HEALTH_COMMAND)
 
@@ -71,8 +83,12 @@ def dispatch_maintenance_command(
             print(f"只从 {dotenv_path} 加载配置。\n")
             diagnostic = diagnose_provider_config_isolated(dotenv_path)
         else:
+            profiles = load_provider_profiles(project_root=project_root)
+            resolved, method = resolve_active_profile(profiles)
             diagnostic = diagnose_provider_config(
                 dotenv_path=project_root / ".env",
+                active_profile=resolved.name if resolved else None,
+                profile_source=method,
             )
 
         print(render_diagnostic_report(diagnostic))

@@ -138,6 +138,8 @@ class ProviderDiagnostic:
     dotenv_loaded: bool = False
     dotenv_path: str | None = None
     outer_env_overrides: list[str] = field(default_factory=list)
+    active_profile: str | None = None
+    profile_source: str | None = None  # "profile_env" | "profile_yaml" | "default_fake" | "legacy"
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
 
@@ -269,11 +271,17 @@ def diagnose_provider_config(
     *,
     env: Mapping[str, str] | None = None,
     dotenv_path: str | Path | None = None,
+    active_profile: str | None = None,
+    profile_source: str | None = None,
 ) -> ProviderDiagnostic:
     """静态诊断 provider 配置状态（不调用真实 API，不泄露 secret）。
 
     当提供 dotenv_path 时，会加载该 .env 文件的值并与当前 os.environ 比较，
     以此判断配置来源（project_dotenv / shell_env / mixed / default_fake）。
+
+    active_profile 和 profile_source 描述当前使用的 provider profile：
+    - active_profile: profile 名称（如 "kimi_anthropic"）
+    - profile_source: 决议方式（profile_env / profile_yaml / default_fake / legacy）
 
     返回 ProviderDiagnostic，包含脱敏配置摘要、config_source、问题和建议列表。
     """
@@ -398,6 +406,8 @@ def diagnose_provider_config(
         dotenv_loaded=_dotenv_loaded,
         dotenv_path=_dotenv_path_str,
         outer_env_overrides=outer_env_overrides,
+        active_profile=active_profile,
+        profile_source=profile_source,
         issues=issues,
         suggestions=suggestions,
     )
@@ -456,11 +466,25 @@ def diagnose_provider_config_isolated(
     if provider_type:
         clean_env["MY_FIRST_AGENT_LLM_PROVIDER"] = provider_type
 
+    # 解析 active profile（在 cleaned env 上下文中）
+    from agent.provider.profiles import (
+        load_provider_profiles,
+        resolve_active_profile,
+    )
+
+    _profiles_path = _dotenv_path.parent / "config" / "provider_profiles.yaml"
+    profiles = load_provider_profiles(path=_profiles_path)
+    resolved, resolution_method = resolve_active_profile(profiles, env=clean_env)
+    _active_profile = resolved.name if resolved else None
+    _profile_source = resolution_method
+
     # 在清理后的 env 上运行诊断
     diagnostic = diagnose_provider_config(
         provider_type=provider_type,
         env=clean_env,
         dotenv_path=_dotenv_path,
+        active_profile=_active_profile,
+        profile_source=_profile_source,
     )
 
     # 强制 config_source 为 project_dotenv（因为我们已经在 isolated 上下文中）
@@ -482,6 +506,16 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         "  Provider Config Diagnostic",
         "=" * 60,
         "",
+    ]
+    if diagnostic.active_profile:
+        source_label = {
+            "profile_env": "from FIRST_AGENT_PROVIDER_PROFILE",
+            "profile_yaml": "from YAML default",
+            "default_fake": "default",
+            "legacy": "legacy (MY_FIRST_AGENT_LLM_PROVIDER)",
+        }.get(diagnostic.profile_source or "", "")
+        lines.append(f"  Active profile: {diagnostic.active_profile} ({source_label})")
+    lines.extend([
         f"  Provider type : {diagnostic.provider_type}",
         f"  Model         : {diagnostic.model}",
         f"  Base URL      : {diagnostic.base_url}",
@@ -491,7 +525,7 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
         f"  Request path  : {diagnostic.request_path}",
         f"  Config source : {diagnostic.config_source}",
         f"  .env loaded   : {'yes' if diagnostic.dotenv_loaded else 'no'}",
-    ]
+    ])
     if diagnostic.dotenv_path:
         lines.append(f"  .env path     : {diagnostic.dotenv_path}")
     if diagnostic.outer_env_overrides:
@@ -513,8 +547,10 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
                 lines.append("  当前为 fake (local only) 安全路径，无需 API key。")
             lines.append(
                 "  如需切换到真实 LLM，请设置 "
-                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_native "
-                "（或 openai_native）并确保对应 API key 已配置。"
+                "FIRST_AGENT_PROVIDER_PROFILE=kimi_anthropic "
+                "（或 glm_openai）并确保对应 API key 已配置。"
+                "\n  或使用 legacy 方式："
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_compatible。"
             )
         else:
             if diagnostic.api_key_present:

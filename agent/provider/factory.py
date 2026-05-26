@@ -43,10 +43,38 @@ def build_model_provider_from_env() -> ModelProvider | None:
        使整个 unified runtime flow 在无 env var 的默认场景下崩溃。
     4. FakeProvider 和 RealProvider 共享同一条 core.chat/loop.py 路径，
        这不是 fake/real 双 runtime。
-    """
-    if not os.environ.get(PROVIDER_ENV):
-        from agent.provider.fake_provider import FakeProvider
 
-        return FakeProvider()
-    config = load_agent_provider_config()
-    return build_model_provider(config)
+    v0.11+ profile 支持：
+    优先检查 FIRST_AGENT_PROVIDER_PROFILE → 从 YAML 加载 profile → 转 AgentProviderConfig。
+    其次检查 MY_FIRST_AGENT_LLM_PROVIDER (legacy 兼容)。
+    都没有则返回 FakeProvider。
+    """
+    from agent.provider.profiles import (
+        load_provider_profiles,
+        profile_to_agent_config,
+        resolve_active_profile,
+    )
+
+    # 尝试 profile 路径
+    profiles = load_provider_profiles()
+    if profiles:
+        resolved, method = resolve_active_profile(profiles)
+
+        if resolved is not None and method != "legacy":
+            # 通过 profile 解析得到 AgentProviderConfig
+            if resolved.provider_type == "fake":
+                from agent.provider.fake_provider import FakeProvider
+
+                return FakeProvider()
+            config = profile_to_agent_config(resolved)
+            return build_model_provider(config)
+
+    # legacy 路径：MY_FIRST_AGENT_LLM_PROVIDER 直接设置
+    if os.environ.get(PROVIDER_ENV):
+        config = load_agent_provider_config()
+        return build_model_provider(config)
+
+    # 默认：fake
+    from agent.provider.fake_provider import FakeProvider
+
+    return FakeProvider()

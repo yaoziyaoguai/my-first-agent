@@ -285,10 +285,24 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
     if diagnostic.status == "ok":
         lines.append("  结论：provider 配置无问题。")
         if diagnostic.provider_type == "fake":
-            lines.append("  当前为 fake (local only) 安全路径，无需 API key。")
-            lines.append("  如需真实 LLM，设置 MY_FIRST_AGENT_LLM_PROVIDER 和对应 API key。")
+            lines.append("  provider mode = fake (local only) — 不调用真实 API。")
+            if diagnostic.api_key_present:
+                lines.append(
+                    "  检测到 API key 已配置（环境变量中存在），"
+                    "但当前 fake 模式不会使用该 key。"
+                )
+            else:
+                lines.append("  当前为 fake (local only) 安全路径，无需 API key。")
+            lines.append(
+                "  如需切换到真实 LLM，请设置 "
+                "MY_FIRST_AGENT_LLM_PROVIDER=anthropic_native "
+                "（或 openai_native）并确保对应 API key 已配置。"
+            )
         else:
-            lines.append("  配置看起来完整，但连接性需 manual human dogfood 验证。")
+            if diagnostic.api_key_present:
+                lines.append("  配置看起来完整，但连接性需 manual human dogfood 验证。")
+            else:
+                lines.append("  provider mode = real，但缺少 API key——连接性未验证。")
 
     if diagnostic.issues:
         lines.append("  Issues:")

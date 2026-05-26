@@ -320,3 +320,211 @@ def test_main_status_command_no_secret_leakage():
         ]
         for pattern in secret_patterns:
             assert not re.search(pattern, output), "status output leaks key"
+
+
+# =========================================================================
+# 8. P0 回归：fake/local 模式 model_name 不为空
+# =========================================================================
+
+
+def test_legacy_model_name_fallback_in_clean_env():
+    """get_legacy_model_name() 在无任何环境变量时必须返回 "fake-llm"。
+
+    这是 P0 回归测试：用户 `python main.py` 启动 fake/local 交互模式
+    输入正常对话后，LoopContext.__post_init__ 曾因 model_name 为空而崩溃。
+
+    根因：get_legacy_model_name() → _resolve_model_name() 在 fake 模式下返回 None，
+    config.MODEL_NAME (via __getattr__) 缓存了 None，core.chat() 将其传给
+    LoopContext，触发 frozen dataclass 的 __post_init__ 校验。
+
+    修复后 get_legacy_model_name() 在所有 env vars 都未设置时返回 "fake-llm"，
+    确保 fake/local 路径始终有合法非空 model_name。
+    """
+    import os as _os
+
+    from config import get_legacy_model_name
+
+    saved = {}
+    for var in (
+        "MY_FIRST_AGENT_LLM_MODEL",
+        "MODEL_NAME",
+        "ANTHROPIC_MODEL",
+        "OPENAI_MODEL",
+    ):
+        saved[var] = _os.environ.pop(var, None)
+
+    try:
+        result = get_legacy_model_name()
+        assert result == "fake-llm", (
+            f"无 env var 时 get_legacy_model_name() 应为 'fake-llm'，实际: {result!r}"
+        )
+        assert isinstance(result, str)
+        assert result.strip()
+    finally:
+        for var, val in saved.items():
+            if val is not None:
+                _os.environ[var] = val
+            elif var in _os.environ:
+                del _os.environ[var]
+
+
+def test_config_module_attr_never_none_in_fake_mode():
+    """config.MODEL_NAME (via __getattr__) 在 fake 模式下不应为 None。
+
+    config.py 的 __getattr__ 懒加载兼容层让 `from config import MODEL_NAME`
+    在 import 时触发 get_legacy_model_name()。修复后即使没有任何环境变量，
+    也应返回 "fake-llm" 而非 None。
+    """
+    import os as _os
+
+    saved = {}
+    for var in (
+        "MY_FIRST_AGENT_LLM_MODEL",
+        "MODEL_NAME",
+        "ANTHROPIC_MODEL",
+        "OPENAI_MODEL",
+    ):
+        saved[var] = _os.environ.pop(var, None)
+
+    try:
+        # 模拟 core.py 的 import 路径：通过 config.MODEL_NAME 获取模型名
+        import config as _cfg
+
+        model = _cfg.MODEL_NAME
+        assert model is not None, "config.MODEL_NAME 不应为 None（fake 模式兜底值缺失）"
+        assert isinstance(model, str), f"config.MODEL_NAME 应为 str，实际: {type(model)}"
+        assert model.strip(), f"config.MODEL_NAME 不应为空串，实际: {model!r}"
+        assert model == "fake-llm", (
+            f"无 env var 时 config.MODEL_NAME 应为 'fake-llm'，实际: {model!r}"
+        )
+    finally:
+        for var, val in saved.items():
+            if val is not None:
+                _os.environ[var] = val
+            elif var in _os.environ:
+                del _os.environ[var]
+
+
+def test_core_chat_fake_mode_does_not_crash_on_model_name():
+    """core._build_loop_context() 在 fake 模式下不因 model_name 为空而崩溃。
+
+    端到端回归：模拟用户 `python main.py` 交互模式输入对话文本的路径。
+    验证 _build_loop_context() → build_loop_context() → LoopContext.__post_init__
+    不会抛出 ValueError。
+
+    更多端到端验证见 test_main_fake_interactive_chat_no_crash。
+    """
+    import os as _os
+
+    from agent.core import _build_loop_context
+    from agent.provider.fake_provider import FakeProvider
+
+    saved = {}
+    for var in (
+        "MY_FIRST_AGENT_LLM_MODEL",
+        "MODEL_NAME",
+        "ANTHROPIC_MODEL",
+        "OPENAI_MODEL",
+    ):
+        saved[var] = _os.environ.pop(var, None)
+
+    try:
+        fake = FakeProvider()
+
+        from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
+
+        # 验证 MODEL_NAME 非空（修复后此处不会为 None）
+        assert MODEL_NAME is not None, "config.MODEL_NAME 不应为 None"
+        assert isinstance(MODEL_NAME, str)
+        assert MODEL_NAME.strip()
+        assert MODEL_NAME == "fake-llm", (
+            f"无 env var 时 MODEL_NAME 应为 'fake-llm'，实际: {MODEL_NAME!r}"
+        )
+
+        # 构造 LoopContext——之前这里会因为 model_name=None 崩溃
+        ctx = _build_loop_context(
+            fake,
+            model_name=MODEL_NAME,
+            max_loop_iterations=MAX_CONTINUE_ATTEMPTS,
+            provider=fake,
+        )
+        assert ctx.model_name == "fake-llm"
+    finally:
+        for var, val in saved.items():
+            if val is not None:
+                _os.environ[var] = val
+            elif var in _os.environ:
+                del _os.environ[var]
+
+
+def test_main_fake_interactive_chat_no_crash():
+    """`python main.py` fake 交互模式输入正常对话不崩溃（P0 端到端回归）。
+
+    这是对用户报告的 bug 的精确复现：
+    - 用户运行 `python main.py`
+    - 输入 "帮我规划下去武汉 玩5天的旅游计划"
+    - 程序抛出 ValueError: LoopContext.model_name 必须是非空字符串
+
+    修复后 fake 模式 model_name 兜底为 "fake-llm"，不再崩溃。
+    """
+    import signal
+    import subprocess as _sp
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
+        test_env = {
+            **os.environ,
+            "HOME": tmp_home,
+            "MY_FIRST_AGENT_LLM_PROVIDER": "fake",
+        }
+        # 移除可能存在的真实 API key，确保走 fake 路径
+        for key_var in (
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "MY_FIRST_AGENT_LLM_MODEL",
+            "MODEL_NAME",
+            "ANTHROPIC_MODEL",
+            "OPENAI_MODEL",
+        ):
+            test_env.pop(key_var, None)
+
+        proc = _sp.Popen(
+            [sys.executable, str(PROJECT_ROOT / "main.py")],
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            env=test_env,
+        )
+
+        try:
+            # 发送用户输入 + quit
+            stdout, stderr = proc.communicate(
+                input="帮我规划下去武汉 玩5天的旅游计划\nquit\n",
+                timeout=15,
+            )
+        except _sp.TimeoutExpired as exc:
+            proc.send_signal(signal.SIGTERM)
+            stdout, stderr = proc.communicate(timeout=5)
+            raise AssertionError(
+                "main.py subprocess 超时未退出——可能卡在交互循环中"
+            ) from exc
+
+        output = stdout + stderr
+
+        # 不应包含 ValueError crash
+        assert "ValueError" not in output, (
+            f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
+        )
+        assert "LoopContext" not in output or "fake" in output.lower(), (
+            f"输出可能包含 LoopContext 异常:\n{output[-2000:]}"
+        )
+        # 不应包含 traceback
+        assert "Traceback (most recent call last)" not in output, (
+            f"main.py 产生了 traceback:\n{output[-2000:]}"
+        )
+        # 应该正常退出（exit 0 或正常终止）
+        assert proc.returncode in {0, -15}, (
+            f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
+        )

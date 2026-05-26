@@ -90,10 +90,9 @@ class MemoryConsolidateHandler:
             )
 
         if not result.has_candidates:
-            if result.evidence_count < 3:
-                disposition = "insufficient_evidence"
-            else:
-                disposition = "no_candidates"
+            disposition = (
+                "insufficient_evidence" if result.evidence_count < 3 else "no_candidates"
+            )
         else:
             disposition = "consolidated"
 
@@ -115,5 +114,8 @@ class MemoryConsolidateHandler:
                 "store_backend": store_backend,
             },
             observed_call=observed,
-            evidence_extra=base_evidence,
+            evidence_extra={
+                **base_evidence,
+                "disposition": disposition,
+            },
         )

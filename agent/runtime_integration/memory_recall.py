@@ -103,10 +103,7 @@ class MemoryRecallHandler:
         # ── 渲染 prompt section ────────────────────────────────────────────
         prompt_section = build_memory_section(snapshot)
 
-        if snapshot.items:
-            disposition = "recalled"
-        else:
-            disposition = "no_memory"
+        disposition = "recalled" if snapshot.items else "no_memory"
 
         return context.success(
             handler_name=type(self).__name__,
@@ -120,6 +117,7 @@ class MemoryRecallHandler:
             },
             observed_call=observed,
             evidence_extra={
+                "disposition": disposition,
                 "snapshot_item_count": len(snapshot.items),
                 "omitted_count": snapshot.omitted_count,
                 "selection_reason": selection_reason,

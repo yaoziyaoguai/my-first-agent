@@ -21,6 +21,7 @@ fake/local 与 real provider 共享同一条 unified runtime flow，
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 import traceback
@@ -114,10 +115,11 @@ def _run_chat(user_input: str, provider) -> dict:
     # state.task 上的计数器在正常终止时被 reset_task() 归零，不可依赖。
     loop_iterations = 0
     tool_call_count = 0
+    summary_text = ""
     for evt in events:
         if getattr(evt, "event_type", "") == "run.summary":
             text = getattr(evt, "text", "")
-            import re
+            summary_text = text
             loop_match = re.search(r"循环次数：(\d+)", text)
             if loop_match:
                 loop_iterations = int(loop_match.group(1))
@@ -138,6 +140,7 @@ def _run_chat(user_input: str, provider) -> dict:
         "loop_iterations": loop_iterations,
         "tool_call_count": tool_call_count,
         "has_assistant_text": has_assistant_text,
+        "summary_text": summary_text,
         "error": error,
         "traceback": tb,
     }
@@ -543,6 +546,127 @@ class TestDogfoodInvariants:
         assert response.stop_reason == "end_turn", (
             f"collect_stream_response 必须返回 end_turn，实际: {response.stop_reason}"
         )
+
+
+def _check_summary_memory_honesty(result: dict, allow_effective: bool = False) -> tuple[bool, str]:
+    """检查 run summary 不对 Memory 操作 overclaim。
+
+    中文学习说明：
+    internal lifecycle event（turn_end_proposal/consolidate/recall）
+    不等于 user-visible effect。如果这些 hook 运行但无有效结果
+    （如 no_action / insufficient_evidence / no_memory），
+    summary 不应统计为"Memory 操作"。
+
+    参数：
+    - allow_effective: 如果允许 summary 显示有效 memory 操作，设为 True。
+    """
+    st = result.get("summary_text", "")
+    mem_match = re.search(r"Memory 操作：(\d+) 次", st)
+    if mem_match is None:
+        return True, ""
+    count = int(mem_match.group(1))
+    if count > 0 and not allow_effective:
+        return False, f"summary overclaims Memory 操作 {count} 次（无有效 memory effect）"
+    return True, ""
+
+
+def _check_summary_subagent_honesty(
+    result: dict, allow_delegation: bool = False
+) -> tuple[bool, str]:
+    """检查 run summary 不对 SubAgent 委托 overclaim。
+
+    routing check / descriptor check / availability check 不是真实委托。
+    只有真实 delegation/handoff 才应统计为"SubAgent 委托"。
+    """
+    st = result.get("summary_text", "")
+    sub_match = re.search(r"SubAgent 委托：(\d+) 次", st)
+    if sub_match is None:
+        return True, ""
+    count = int(sub_match.group(1))
+    if count > 0 and not allow_delegation:
+        return False, f"summary overclaims SubAgent 委托 {count} 次（无真实 delegation）"
+    return True, ""
+
+
+@pytest.mark.dogfood
+class TestDogfoodSummaryHonesty:
+    """run summary 诚实性：不把 internal lifecycle check 冒充 user-visible effect。
+
+    中文学习说明：
+    turn_end hook 每轮都会运行 MEMORY_TURN_END_PROPOSAL、MEMORY_CONSOLIDATE、
+    MEMORY_RECALL、SUBAGENT_DELEGATE_L0 四个 lifecycle action。它们大多数时候
+    是 checked/skipped/no-op（policy 返回 no_action、store 为空返回 no_memory、
+    subagent 不可用返回 rejected）。run summary 给用户看，不能把这些内部检查
+    统计为"Memory 操作 3 次"或"SubAgent 委托 1 次"。
+
+    只有真实 effective action（proposed/retained/recalled/consolidated/delegated）
+    才应出现在 summary 的操作计数中。
+    """
+
+    def test_ordinary_chat_no_memory_overclaim(self, monkeypatch):
+        """普通聊天不应在 summary 中声称有 Memory 操作。
+
+        输入 "你好，简单介绍一下你现在能做什么" 时：
+        - turn_end_proposal → no_action（无内容可 proposal）
+        - consolidate → insufficient_evidence（store 为空）
+        - recall → no_memory（无可用 memory）
+        这三个 lifecycle check 都不是 user-visible effect。
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "你好，简单介绍一下你现在能做什么",
+            provider,
+        )
+
+        assert not result["error"], f"不应有异常: {result['error']}"
+        assert result["loop_iterations"] <= 3, (
+            f"ordinary chat 循环次数应 ≤3，实际: {result['loop_iterations']}"
+        )
+        ok, reason = _check_summary_memory_honesty(result, allow_effective=False)
+        assert ok, reason
+
+    def test_ordinary_chat_no_subagent_overclaim(self, monkeypatch):
+        """普通聊天不应在 summary 中声称有 SubAgent 委托。
+
+        SUBAGENT_DELEGATE_L0 在 fake provider 路径下总是 rejected
+        （no subagent available for delegation）。
+        这个 routing check 不是真实 delegation。
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "你好，简单介绍一下你现在能做什么",
+            provider,
+        )
+
+        assert not result["error"], f"不应有异常: {result['error']}"
+        ok, reason = _check_summary_subagent_honesty(result, allow_delegation=False)
+        assert ok, reason
+
+    def test_travel_planning_no_memory_overclaim(self, monkeypatch):
+        """旅行规划普通聊天也不应 overclaim Memory。
+
+        验证修复不是特判"你好"——任何 ordinary chat 都适用。
+        """
+        home = _fresh_home()
+        _fresh_state(monkeypatch, home)
+        provider = _build_fake_provider()
+
+        result = _run_chat(
+            "帮我规划下去武汉玩5天的旅游计划",
+            provider,
+        )
+
+        assert not result["error"], f"不应有异常: {result['error']}"
+        ok_mem, reason = _check_summary_memory_honesty(result, allow_effective=False)
+        assert ok_mem, reason
+        ok_sub, reason = _check_summary_subagent_honesty(result, allow_delegation=False)
+        assert ok_sub, reason
 
 
 @pytest.mark.dogfood

@@ -104,7 +104,9 @@ def _try_phase1_turn_end_runtime_action(
     dispatcher: Any,
     dependencies: Any = None,
 ) -> None:
-    """Phase 1 turn-end RuntimeAction hook：memory turn-end proposal + tool pipeline + checkpoint + consolidation + recall + skill select + subagent delegate。
+    """Phase 1 turn-end RuntimeAction hook。
+    memory turn-end proposal + tool pipeline + checkpoint +
+    consolidation + recall + skill select + subagent delegate。
 
     中文学习边界：
     这个函数只在 loop turn-end (result is not None) 时被调用，不参与循环内部
@@ -146,11 +148,16 @@ def _try_phase1_turn_end_runtime_action(
 
     # hook 参数化：从 dependencies 读取 core.py 预解析的 provider metadata
     # 不回退到硬编码——dependencies 为 None 时使用 fail-closed 默认值
-    provider_kind = getattr(dependencies, "provider_kind", "unknown") if dependencies is not None else "unknown"
-    provider_external_call = getattr(dependencies, "provider_external_call", False) if dependencies is not None else False
+    _deps = dependencies
+    provider_kind = getattr(_deps, "provider_kind", "unknown") if _deps is not None else "unknown"
+    provider_external_call = (
+        getattr(_deps, "provider_external_call", False) if _deps is not None else False
+    )
     # tool_gate_tool_name 与 provider_kind 同模式：从 dependencies 读取，
     # 默认 _safe_noop 保持向后兼容；传 _confirmable_noop 时覆盖 confirmation_required 路径
-    tool_gate_tool_name = getattr(dependencies, "tool_gate_tool_name", "_safe_noop") if dependencies is not None else "_safe_noop"
+    tool_gate_tool_name = (
+        getattr(_deps, "tool_gate_tool_name", "_safe_noop") if _deps is not None else "_safe_noop"
+    )
 
     messages = getattr(getattr(state, "conversation", None), "messages", [])
     last_user = ""
@@ -684,21 +691,38 @@ def _emit_run_summary(
     subagent_names: list[str] = []
     error_reasons: list[str] = []
 
+    # 中文学习说明：turn_end hook 每轮无条件运行 MEMORY_TURN_END_PROPOSAL、
+    # MEMORY_CONSOLIDATE、MEMORY_RECALL、SUBAGENT_DELEGATE_L0。它们是 lifecycle
+    # check，大多数时候无有效结果（no_action / insufficient_evidence / no_memory /
+    # rejected）。run summary 给用户看，必须区分 effective action 和 internal check。
+    # 有效 memory disposition：proposed / retain / not_retained / recalled / consolidated
+    # 无效 disposition：no_action / should_not_remember / insufficient_evidence /
+    #   no_candidates / no_memory / rejected / failed / not_supported
+    _effective_memory_dispositions = frozenset({
+        "proposed", "retain", "not_retained", "recalled", "consolidated",
+    })
+
     for event in action_log:
         at = str(getattr(event, "action_type", ""))
+        status = str(getattr(event, "status", ""))
+        evidence = getattr(event, "evidence", None)
+        disposition = ""
+        if isinstance(evidence, dict):
+            disposition = str(evidence.get("disposition", ""))
         if at.startswith("memory."):
-            memory_ops += 1
-            # 从 action_log 中提取 memory action 的具体操作名称
-            action_name = at.removeprefix("memory.") if at.startswith("memory.") else at
-            memory_actions.append(action_name)
+            # 只统计有效操作：status=success 且 disposition 在有效集合中
+            if status == "success" and disposition in _effective_memory_dispositions:
+                memory_ops += 1
+                action_name = at.removeprefix("memory.")
+                memory_actions.append(action_name)
         elif at.startswith("subagent."):
-            subagent_delegations += 1
-            # 提取 subagent 名称（如果 action metadata 中有）
-            target = str(getattr(event, "target_identity", ""))
-            if target:
-                subagent_names.append(target)
+            # 只统计真实 delegation（status=success），routing check（rejected）不计入
+            if status == "success":
+                subagent_delegations += 1
+                target = str(getattr(event, "target_identity", ""))
+                if target:
+                    subagent_names.append(target)
         elif at.startswith("tool."):
-            # 提取工具名称
             target = str(getattr(event, "target_identity", ""))
             if target:
                 tool_names.append(target)

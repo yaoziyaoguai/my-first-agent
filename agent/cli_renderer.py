@@ -35,7 +35,7 @@ def _safe(value: Any, fallback: str = "—") -> str:
     """把可能为 None / 空字符串的字段转成可读占位符。"""
     if value is None:
         return fallback
-    if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+    if isinstance(value, (Mapping, list, tuple, set)):
         return fallback
     if is_dataclass(value) and not isinstance(value, type):
         return fallback
@@ -77,7 +77,8 @@ def render_session_header(
             "  输入 'quit' 退出，输入 'help' 查看可用能力与限制。",
             "  python main.py health / python main.py logs --tail 50。",
             "  Fake provider 安全路径（默认，无 API key，不联网）。",
-            "  Skill System safe-local 基线已完成，demo-note-maker 可用。多 skill marketplace 未实现。",
+            "  Skill System safe-local 基线已完成，demo-note-maker 可用。"
+            "多 skill marketplace 未实现。",
             "",
         ]
     )
@@ -191,7 +192,11 @@ def render_provider_mode_banner() -> str:
     import os
 
     provider_env = os.getenv("MY_FIRST_AGENT_LLM_PROVIDER")
-    model_env = os.getenv("MY_FIRST_AGENT_LLM_MODEL") or os.getenv("ANTHROPIC_MODEL") or os.getenv("OPENAI_MODEL")
+    model_env = (
+        os.getenv("MY_FIRST_AGENT_LLM_MODEL")
+        or os.getenv("ANTHROPIC_MODEL")
+        or os.getenv("OPENAI_MODEL")
+    )
 
     if not provider_env or provider_env.strip().lower() == "fake":
         mode_label = "fake (local only — 不调用真实 API)"
@@ -291,3 +296,56 @@ def _one_line(value: Any, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "..."
+
+
+def render_compact_run_summary(metadata: dict[str, Any]) -> str:
+    """将 run.summary RuntimeEvent 的 metadata 渲染为 compact 单行格式。
+
+    格式：
+      [run] iter=N tools=N(t1,t2) mem=N(a1) sub=N(s1) redacted=yes|no stop=<reason>
+
+    各 section 仅在对应计数器 >0 时展示。全零活动（普通对话）显示简短说明。
+
+    中文学习边界：
+    - 这是 display-only projection，不改变 runtime state
+    - redacted 字段只表明是否发生过脱敏，不泄露被脱敏内容
+    - 不新增 subcommand——调用方自行决定何时使用 compact 格式
+    """
+    loop_iterations = metadata.get("loop_iterations", 0)
+    tool_calls = metadata.get("tool_calls", 0)
+    memory_operations = metadata.get("memory_operations", 0)
+    subagent_delegations = metadata.get("subagent_delegations", 0)
+    stop_reason = metadata.get("stop_reason", "未知")
+
+    tool_names: list[str] = metadata.get("tool_names", []) or []
+    memory_actions: list[str] = metadata.get("memory_actions", []) or []
+    subagent_names: list[str] = metadata.get("subagent_names", []) or []
+    error_reasons: list[str] = metadata.get("error_reasons", []) or []
+
+    # 检测是否有字段被脱敏
+    all_display_strings = tool_names + memory_actions + subagent_names + error_reasons
+    redacted = any("[REDACTED]" in s for s in all_display_strings)
+
+    parts = [f"[run] iter={loop_iterations}"]
+
+    has_activity = tool_calls > 0 or memory_operations > 0 or subagent_delegations > 0
+    if not has_activity:
+        parts.append("— 普通对话，无工具/Memory/SubAgent 活动")
+    else:
+        if tool_calls > 0:
+            names_str = ",".join(tool_names) if tool_names else "?"
+            parts.append(f"tools={tool_calls}({names_str})")
+        if memory_operations > 0:
+            actions_str = ",".join(memory_actions) if memory_actions else "?"
+            parts.append(f"mem={memory_operations}({actions_str})")
+        if subagent_delegations > 0:
+            names_str = ",".join(subagent_names) if subagent_names else "?"
+            parts.append(f"sub={subagent_delegations}({names_str})")
+
+    parts.append(f"redacted={'yes' if redacted else 'no'}")
+    parts.append(f"stop={stop_reason}")
+
+    if error_reasons:
+        parts.append(f"errors={';'.join(error_reasons)}")
+
+    return " ".join(parts)

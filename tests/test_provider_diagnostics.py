@@ -528,3 +528,129 @@ def test_main_fake_interactive_chat_no_crash():
         assert proc.returncode in {0, -15}, (
             f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
         )
+
+
+# =========================================================================
+# 9. P0 回归：默认 fake/local 路径 provider 注入不为空
+# =========================================================================
+
+
+def test_build_model_provider_from_env_defaults_to_fake():
+    """build_model_provider_from_env() 在未设置 MY_FIRST_AGENT_LLM_PROVIDER 时必须
+    返回非 None 的 provider。
+
+    这是 P0 回归测试——a2dfd89 修了 model_name fallback，但没有修 provider 注入。
+    当用户不设置任何 provider 环境变量运行 `python main.py` 时，默认路径应该是
+    FakeProvider（safe local path），而不是 None。
+
+    build_model_provider_from_env() 返回 None → build_loop_context() 给
+    LoopContext.model_provider 赋 None → _call_model() 传 None 给 call_model()
+    → ProviderNotImplementedError("model_provider_required")。
+    """
+    import os as _os
+
+    from agent.provider.factory import build_model_provider_from_env
+
+    saved = _os.environ.pop("MY_FIRST_AGENT_LLM_PROVIDER", None)
+
+    try:
+        provider = build_model_provider_from_env()
+        assert provider is not None, (
+            "build_model_provider_from_env() 在无 MY_FIRST_AGENT_LLM_PROVIDER 时"
+            "返回了 None——默认 fake/local 安全路径 provider 注入缺失"
+        )
+        assert hasattr(provider, "provider_type"), (
+            "返回的 provider 必须有 provider_type 属性"
+        )
+        assert provider.provider_type == "fake", (
+            f"默认 provider 应为 'fake'，实际: {provider.provider_type!r}"
+        )
+    finally:
+        if saved is not None:
+            _os.environ["MY_FIRST_AGENT_LLM_PROVIDER"] = saved
+
+
+def test_main_fake_interactive_no_provider_env_var():
+    """`python main.py` 不设置任何 provider 环境变量时普通聊天不崩溃。
+
+    这是人工 dogfood 发现的精确回归：
+    - 用户不设置任何 provider 环境变量
+    - `python main.py status` 显示 provider mode=fake（diagnose_provider_config 默认）
+    - 但 `python main.py` 交互模式崩溃：ProviderNotImplementedError("model_provider_required")
+
+    根因：build_model_provider_from_env() 在无 MY_FIRST_AGENT_LLM_PROVIDER 时
+    返回 None，而 build_loop_context() 的 fallback 路径没有兜底 FakeProvider。
+
+    修复后，build_model_provider_from_env() 在无 env var 时默认返回 FakeProvider，
+    整个注入链畅通：core.chat → loop.py → model_call → FakeProvider。
+    """
+    import signal
+    import subprocess as _sp
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="first_agent_chat_") as tmp_home:
+        test_env = {
+            **os.environ,
+            "HOME": tmp_home,
+        }
+        # 关键：不设置 MY_FIRST_AGENT_LLM_PROVIDER，模拟真实默认路径
+        for key_var in (
+            "MY_FIRST_AGENT_LLM_PROVIDER",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "MY_FIRST_AGENT_LLM_MODEL",
+            "MODEL_NAME",
+            "ANTHROPIC_MODEL",
+            "OPENAI_MODEL",
+        ):
+            test_env.pop(key_var, None)
+
+        proc = _sp.Popen(
+            [sys.executable, str(PROJECT_ROOT / "main.py")],
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            env=test_env,
+        )
+
+        try:
+            stdout, stderr = proc.communicate(
+                input="你好，帮我规划一下武汉5天旅游\nquit\n",
+                timeout=20,
+            )
+        except _sp.TimeoutExpired as exc:
+            proc.send_signal(signal.SIGTERM)
+            stdout, stderr = proc.communicate(timeout=5)
+            raise AssertionError(
+                "main.py subprocess 超时——可能卡在交互循环中"
+            ) from exc
+
+        output = stdout + stderr
+
+        # 不应出现 ProviderNotImplementedError
+        assert "ProviderNotImplementedError" not in output, (
+            "main.py 抛出 ProviderNotImplementedError——provider 注入链断裂:\n"
+            f"{output[-2000:]}"
+        )
+        assert "model_provider_required" not in output, (
+            "main.py 报 model_provider_required——provider 未注入:\n"
+            f"{output[-2000:]}"
+        )
+        # 不应出现 traceback
+        assert "Traceback (most recent call last)" not in output, (
+            f"main.py 产生了 traceback:\n{output[-2000:]}"
+        )
+        # 不应出现 ValueError（model_name 空值）
+        assert "ValueError" not in output, (
+            f"main.py 崩溃（ValueError）:\n{output[-2000:]}"
+        )
+        # 应显示 provider mode=fake
+        assert "fake" in output.lower(), (
+            f"输出应包含 provider mode=fake:\n{output[-2000:]}"
+        )
+        # 应正常退出
+        assert proc.returncode in {0, -15}, (
+            f"main.py exit code={proc.returncode}，预期 0:\n{output[-2000:]}"
+        )

@@ -756,15 +756,28 @@ def test_overview_docs_contain_no_secret_fragments() -> None:
     )
 
 
-def test_current_audit_status_is_marked_historical() -> None:
-    """旧 Current Audit Status 必须显式指向新的当前能力状态入口。"""
+def test_current_audit_status_is_current_entry_not_historical() -> None:
+    """CURRENT_AUDIT_STATUS.zh.md 必须是当前审计状态入口，不能以 v0.9.x 为当前状态。
+
+    Source-of-truth reset 后，该文件已从 v0.9.x historical notice 改写为
+    当前 Cleanup-Only / Awaiting Manual Human Dogfood 状态。验证：
+    1. 不再是旧的历史提示（无 "v0.9.0 released"）
+    2. 指向当前权威源
+    3. 声明 archive docs 不是当前入口
+    """
     current_audit_status = REPO_ROOT / "docs" / "06-audit" / "CURRENT_AUDIT_STATUS.zh.md"
     text = current_audit_status.read_text(encoding="utf-8")
-    opening = "\n".join(text.splitlines()[:8])
+    opening = "\n".join(text.splitlines()[:12])
 
-    assert "Historical status notice" in opening
+    # 不能再以 v0.9.x 为当前状态
+    assert "v0.9.0 released" not in text
+    assert "v0.9.x Deep Stabilization" not in text
+    # 必须指向当前权威源
     assert "../00-overview/CURRENT_CAPABILITY_STATUS.zh.md" in opening
-    assert "../audit/capability-gap-audit-low-complexity-2026-05-25.md" in opening
+    assert "../audit/capability-gap-audit-low-complexity-2026-05-25.md" in text
+    # 必须以当前阶段为标题
+    assert "Cleanup-Only" in text or "cleanup" in text.lower()
+    assert "Manual Human Dogfood" in text or "manual human dogfood" in text.lower()
 
 
 def test_docs_readme_contain_no_secret_fragments() -> None:

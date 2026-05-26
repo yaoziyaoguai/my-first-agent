@@ -208,7 +208,11 @@ def _resolve_tool_use(
 
     if candidates:
         score, name, tool = candidates[0]
-        if score >= 30:  # 最低门槛：至少描述关键词有重叠
+        # 最低门槛 40：防止常见中文短 n-gram（如"什么""一下"）误匹配工具描述。
+        # 策略 3 单关键词重叠得分 35（30+5），不满足 40；至少需 2 个关键词重叠（30+10=40）。
+        # 策略 2 名称 token 命中得分 60+（≥70），单 token 即可通过。
+        # 策略 1 全名精确命中得分 100，直接通过。
+        if score >= 40:
             tool_id = f"toolu_fake_{uuid.uuid4().hex[:12]}"
             return ToolUseBlock(
                 id=tool_id,
@@ -238,7 +242,7 @@ def _default_tool_input(tool_name: str, parameters: dict[str, Any]) -> dict[str,
 
     # demo.write_demo_note: 全部可选参数，使用安全默认值
     if tool_name == "demo.write_demo_note":
-        from agent.local_demo import _project_root, DEMO_WORKSPACE_SUBDIR
+        from agent.local_demo import DEMO_WORKSPACE_SUBDIR, _project_root
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         workspace = _project_root() / Path(*DEMO_WORKSPACE_SUBDIR) / stamp
@@ -267,7 +271,8 @@ def _legacy_demo_note_block() -> ToolUseBlock:
     """旧版 _DEMO_TOOL_TRIGGERS 兼容性回退：构造 demo.write_demo_note block。"""
     import uuid
     from datetime import datetime, timezone
-    from agent.local_demo import _project_root, DEMO_WORKSPACE_SUBDIR
+
+    from agent.local_demo import DEMO_WORKSPACE_SUBDIR, _project_root
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     workspace = _project_root() / Path(*DEMO_WORKSPACE_SUBDIR) / stamp
@@ -381,7 +386,9 @@ class FakeProvider:
             text = self._response_fn(messages)
             return ProviderResponse(
                 content=[
-                    ProviderTextBlock(text=f"{text}\n(触发 {tool_block.name}，将通过 Tool Pipeline 执行)"),
+                    ProviderTextBlock(
+                    text=f"{text}\n(触发 {tool_block.name}，将通过 Tool Pipeline 执行)"
+                ),
                     tool_block,
                 ],
                 stop_reason="tool_use",

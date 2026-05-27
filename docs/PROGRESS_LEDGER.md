@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-27 (Memory Write Dispatcher Migration Design)
+**最后更新**: 2026-05-27 (Loop 18 — CLI Shortcut Honesty Marking)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,9 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Loop 18: CLI Shortcut Honesty Marking | 6000a00 | **COMPLETED** — PROJECT_STATUS 中 Loop 4 CLI shortcut 条目扩展：明确标记 MUTATING/DELEGATING shortcuts（forget/delegate/nl_delegation）为 CLI-only/demo-only 直接调用，不走 dispatcher/evidence path；A4 run_summary business/probe 计数已验证正确（37 现有 tests） |
+| Loop 17: Dogfood Report Reclassification | a6e0980 | **COMPLETED** — 旧 dogfood reports 重分类：2026-05-27/2026-05-26 两个 direct provider sweep report 添加 REAL_DOGFOOD_SMOKE evidence level 声明、READY→SMOKE_READY、PASS→"Direct provider smoke (non-failing)" |
+| Loop 16: Evidence Taxonomy & Overclaim Guard Tests | 76db3db | **COMPLETED** — 创建 `docs/audits/2026-05-27-current-capability-recovery-map.md`（24 能力评估 + overclaim inventory + safe-to-auto-run vs architecture-decision 分类）；修复 5 个 stale claims（"limited user-usable"、"12/12 passed"、"15/15 PASS" 等）；新增 11 个 evidence taxonomy/overclaim guard tests；source-of-truth tests 68→79 |
 | Memory Write Dispatcher Migration Design | — | **DESIGN COMPLETE** — `docs/design/memory-write-dispatcher-migration-design.md`（13 sections, 14 audit questions 逐条回答）；方案：复用已有 MEMORY_PROPOSE + MemoryRetainHandler，resolve_confirmation 不再直接写 store 改为返回 _dispatcher_payload 供 core.py dispatch；~50 行生产代码变更，4-5 个新测试；等待用户审批后进入 Loop 15 implementation |
 | Loop 14: Evidence Pipeline Foundation | 7172d2c | **COMPLETED** — dogfood harness 证据门禁修复：expected_events 从死字段升级为 PASS 判定条件、新增 SMOKE_PASS 状态、新增 expected_business_actions 字段；memory recall 路径确认（dispatcher ✓）；PROJECT_STATUS honesty 修复（developer prototype）；8 harness evidence gate guard tests；37 harness tests PASS + 68 source-of-truth tests PASS |
 | AutoRun Skill Orchestration Fix | de21474, b3f3ae3 | **COMPLETED** — `/auto-run` 从"任务调度器"升级为完整的"流程+技能+证据+回退"工程总控：新增 Workflow Stage → Skill Table（10 stage × 6 列含 failure route）、Status Promotion Gate（6 门禁）、Recursive Backtrack Policy、Claim-to-Evidence Gate、Review Failure Routing Table；Forbidden Patterns 扩展 6 项（partial fix→resolved、no-crash→PASS、admin→capability 等）；source-of-truth guard tests 60→68。根因：旧 auto-run 有 task routing 但无 stage-based skill switching、无 status promotion gate、review 失败无强制回退路由 |

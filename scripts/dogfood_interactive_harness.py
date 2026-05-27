@@ -633,6 +633,54 @@ def _build_case_matrix() -> list[CaseSpec]:
         tags=["resume", "decline"],
     ))
 
+    # ═══ I-COMPLEX: 复杂多步交互 (Loop 5) ═══
+
+    cases.append(CaseSpec(
+        case_id="I17",
+        category="I-COMPLEX",
+        description="complex chain: tool confirmation + memory retain in one session",
+        input_sequence=["write a demo note", "y", "记住刚才的测试结果", "y"],
+        expected_events=["TOOL_ACTIVITY", "MEMORY_ACTIVITY", "CONFIRMATION_PROMPT"],
+        timeout_s=30.0,
+        tags=["complex", "tool", "memory", "confirmation"],
+    ))
+
+    # ═══ I-STREAM (extended): 流式输出验证 (Loop 5) ═══
+
+    cases.append(CaseSpec(
+        case_id="I18",
+        category="I-STREAM",
+        description="streaming content: tool 确认后应有实质性输出",
+        input_sequence=["write a demo note", "y"],
+        expected_events=["TOOL_ACTIVITY"],
+        timeout_s=20.0,
+        tags=["streaming", "content", "tool"],
+    ))
+
+    # ═══ I-INTERRUPT: 中断行为 (Loop 5) ═══
+
+    cases.append(CaseSpec(
+        case_id="I19",
+        category="I-INTERRUPT",
+        description="graceful exit: quit 后 checkpoint 正常保存，事件完整",
+        input_sequence=["write a demo note", "y", "quit"],
+        expected_events=["TOOL_ACTIVITY", "RUN_SUMMARY"],
+        timeout_s=25.0,
+        tags=["interrupt", "quit", "checkpoint"],
+    ))
+
+    # ═══ I-RESUME (extended): 断点恢复 (Loop 5) ═══
+
+    cases.append(CaseSpec(
+        case_id="I20",
+        category="I-RESUME",
+        description="resume accept: 接受 resume 后正常继续 session",
+        input_sequence=["y"],
+        expected_events=["RESUME_PROMPT"],
+        timeout_s=20.0,
+        tags=["resume", "accept"],
+    ))
+
     return cases
 
 

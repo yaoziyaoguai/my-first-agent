@@ -139,7 +139,7 @@ def make_serializable(messages):
 def save_session_snapshot(messages):
     snapshot = {
         "session_id": SESSION_ID,
-        "saved_at": datetime.datetime.now().isoformat(),
+        "saved_at": datetime.now().isoformat(),
         "message_count": len(messages),
         "messages": make_serializable(messages),
     }

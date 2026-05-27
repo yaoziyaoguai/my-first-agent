@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1-8 (P0+P1) 完成，Loop 9 (SubAgent Boundary Hardening) 进行中
+**状态**: remediation — Loop 1-9 (P0/P1/P2) 完成，Loop 10 (MCP Minimal Real Connection) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -161,8 +161,8 @@
 6. ~~**Loop 6: Checkpoint/Resume 能力补全 (P1)**~~ — **COMPLETED** — schema 版本治理、v0→v1 迁移、future version 拒绝 (b759e62)
 7. ~~**Loop 7: Test Taxonomy Reclassification (P1)**~~ — **COMPLETED** — 0844ed8
 8. ~~**Loop 8: Surgical Hub Slimming (P1)**~~ — **COMPLETED** — 50bbd80, core.py: 1237 → 1112 lines
-9. **Loop 9: SubAgent Boundary Hardening (P2)** — shortcut→dispatcher 迁移，L0 documentation（**进行中**）
-10. **Loop 10: MCP minimal real connection (P2)**
+9. ~~**Loop 9: SubAgent Boundary Hardening (P2)**~~ — **COMPLETED** — b58b27b, L0 文档化 + guard test
+10. **Loop 10: MCP minimal real connection (P2)**（**进行中**）
 11. **Loop 11: Skill system hardening (P2)**
 12. **Loop 12: UX hardening (P2)**
 
@@ -223,6 +223,8 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 最新审计（全局） | `docs/audit/global-readonly-audit-2026-05-27.md` |
 | Remediation loop plan | `docs/plans/2026-05-27-capability-remediation-loop-plan.md` |
 | 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
+| 能力边界定义 | `docs/CAPABILITY_BOUNDARIES.md` |
+| SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
 | 配置示例 | `config/config.example.yaml` |
 | 运行时宪法 | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` |
 | 历史文档 | `docs/archive/` |

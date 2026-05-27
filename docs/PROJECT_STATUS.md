@@ -156,7 +156,7 @@
 | Config safety (Loop 1) | skip-worktree + pre-commit hook + 8 guard tests |
 | Log hygiene (Loop 2) | 50MB rotation + sanitization + 21 log hygiene tests |
 | Memory recall → prompt context (Loop 3) | 统一走 dispatcher path（`refresh_runtime_system_prompt(dispatcher=...)`） |
-| CLI shortcut (Loop 4) | CLI READ_ONLY 命令走统一 dispatcher |
+| CLI shortcut (Loop 4) | CLI READ_ONLY 命令（show memories/show subagents）走统一 dispatcher；**MUTATING/DELEGATING shortcuts（forget/delegate/nl_delegation）仍为 CLI-only/demo-only 直接调用，不走 dispatcher/evidence path** — 待 confirmation pipeline 就绪后迁入 |
 | Turn-end hook (Loop 4) | 提取 _dispatch_tool_pipeline() helper |
 | Checkpoint schema version (Loop 6) | SCHEMA_VERSION + _MIGRATION_REGISTRY |
 | Test taxonomy (Loop 7) | evidence taxonomy guard tests + file rename |

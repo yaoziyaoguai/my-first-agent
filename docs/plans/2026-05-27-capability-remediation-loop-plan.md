@@ -346,7 +346,7 @@
 以下 loop 在 P0/P1 完成后按顺序执行：
 
 **Loop 7**: Test taxonomy reclassification — 审计所有标记为 L3 的测试，降级不合规的（P1）— **COMPLETED (0844ed8)**
-**Loop 8**: Surgical hub slimming — core.py/loop.py 行为保持型抽取（P1）
+**Loop 8**: Surgical hub slimming — core.py/loop.py 行为保持型抽取（P1）— **COMPLETED (50bbd80)**
 **Loop 9**: SubAgent boundary hardening — shortcut→dispatcher 迁移，L0 documentation（P2）
 **Loop 10**: MCP minimal real connection — 需用户显式授权（P2）
 **Loop 11**: Skill system hardening — real API 验证，legacy cleanup（P2）

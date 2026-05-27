@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1-7 (P0+P1) 完成，Loop 8 (Surgical Hub Slimming) 进行中
+**状态**: remediation — Loop 1-8 (P0+P1) 完成，Loop 9 (SubAgent Boundary Hardening) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -137,7 +137,7 @@
 | ~~无 checkpoint schema 版本治理~~ | ~~P1~~ | **RESOLVED** — Loop 6 SCHEMA_VERSION + _MIGRATION_REGISTRY (b759e62) |
 | 大量 L3 标签测试实际是 L2 | ~~P1~~ | **RESOLVED** — Loop 7 taxonomy guard tests + file rename (0844ed8) |
 | Evidence overclaim (probe 计为能力) | P1 | Loop 2 |
-| core.py 是 god object (1172 行) | P1 | Loop 8 |
+| core.py 是 god object (1172 行) | ~~P1~~ | **RESOLVED** — Loop 8 抽取 provider_evidence + subagent_inline, 1237 → 1112 lines |
 | Memory extractor zero proposals | P2 | 内联路径已部分修复 |
 | RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为 |
 | Provider identity | P3 | 不修 |
@@ -159,8 +159,12 @@
 4. ~~**Loop 4: Runtime Entry Consolidation (P1)**~~ — **COMPLETED** — CLI READ_ONLY 命令走统一 dispatcher，turn-end hook 精简 (c94fc18)
 5. ~~**Loop 5: Interactive Harness 扩展 (P1)**~~ — **COMPLETED** — 4 个新 case（I-COMPLEX/I-INTERRUPT/I-STREAM/I-RESUME），20 cases 覆盖 8 类别，datetime 修复 (b850605)
 6. ~~**Loop 6: Checkpoint/Resume 能力补全 (P1)**~~ — **COMPLETED** — schema 版本治理、v0→v1 迁移、future version 拒绝 (b759e62)
-7. **Loop 7: Test Taxonomy Reclassification (P1)** — L3→L2 降级不合规测试标签（**COMPLETED** — 0844ed8）
-8. **Loop 8: Surgical Hub Slimming (P1)** — core.py/loop.py 行为保持型抽取（**进行中**）
+7. ~~**Loop 7: Test Taxonomy Reclassification (P1)**~~ — **COMPLETED** — 0844ed8
+8. ~~**Loop 8: Surgical Hub Slimming (P1)**~~ — **COMPLETED** — 50bbd80, core.py: 1237 → 1112 lines
+9. **Loop 9: SubAgent Boundary Hardening (P2)** — shortcut→dispatcher 迁移，L0 documentation（**进行中**）
+10. **Loop 10: MCP minimal real connection (P2)**
+11. **Loop 11: Skill system hardening (P2)**
+12. **Loop 12: UX hardening (P2)**
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

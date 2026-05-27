@@ -1,6 +1,6 @@
 # Tool Path Unification — SDD (Loop 1.3)
 
-Status: draft — 方案 2 修正版
+Status: implemented — 方案 2, Loop 1.3b COMPLETED
 Date: 2026-05-28
 
 ## 0. 方案 3 已被否定（Mid-Loop Architecture Checkpoint）
@@ -239,8 +239,54 @@ def mediate(self, block):
 | ToolRuntimeMediator 已引入且 handle_tool_use_response 通过它调用 | PARTIAL（还需验证 TOOL_GATE 门控完整性） |
 | TOOL_GATE → execute_single_tool → TOOL_RESULT 完整 lifecycle 通过测试验证 | READY |
 
+## 7b. Loop 1.3b 实施记录（2026-05-28）
+
+### 7b.1 gate_disposition 驱动执行流
+
+Loop 1.3b 在 Loop 1.3 基础设施之上实现了 gate_disposition 对执行流的完整控制：
+
+```
+mediate(block):
+  gate_disposition = _route_gate(...)     # TOOL_GATE → 获取 gate_disposition
+  if rejected / None:                     # 安全失败
+    _handle_blocked(...)                  #   写 tool_execution_log + tool_result
+    _route_result(..., FORCE_STOP)        #   记录 TOOL_RESULT
+    return FORCE_STOP                     #   不执行 execute_single_tool
+  if confirmation_required:               # 等待用户确认
+    _handle_confirmation_required(...)    #   设置 pending_tool + save_checkpoint
+    _route_result(..., AWAITING_USER)     #   记录 TOOL_RESULT
+    return AWAITING_USER                  #   不执行 execute_single_tool
+  # allowed: 正常路径
+  _route_invoke(...)                      # TOOL_INVOKE
+  result = execute_single_tool(...)       # 真实执行
+  _route_result(..., result)              # TOOL_RESULT
+  return result
+```
+
+### 7b.2 关键行为变更
+
+| 场景 | 旧行为 (Loop 1.3) | 新行为 (Loop 1.3b) |
+|------|-------------------|---------------------|
+| gate_disposition="allowed" | 直接执行（不检查 gate 返回值） | 走完整 TOOL_INVOKE → execute_single_tool → TOOL_RESULT |
+| gate_disposition="rejected" | 直接执行（gate 结果被忽略） | **短路** → FORCE_STOP，写 blocked tool_result |
+| gate_disposition=None (malformed) | 直接执行（gate 结果被忽略） | **安全失败** → FORCE_STOP，不执行工具 |
+| gate_disposition="confirmation_required" | 直接执行（execute_single_tool 自行判断） | **短路** → AWAITING_USER，由 mediator 设置 pending_tool |
+
+### 7b.3 测试覆盖
+
+16 tests（t1-t16）覆盖：
+- t1-t6: 方案 2 contract（GATE/INVOKE/RESULT dispatch、顺序、fallback、conversation context）
+- t7-t8: 方案 3 防呆（源码级验证 gate 在 execute 之前）
+- t9-t10: _safe_noop probe vs business 区分
+- **t11**: allowed → execute_single_tool 真实执行
+- **t12**: rejected → FORCE_STOP，不执行工具
+- **t13**: confirmation_required → AWAITING_USER，pending_tool 已设置
+- **t14**: malformed (None) → FORCE_STOP，安全失败
+- **t15**: rejected 后 tool_result 仍写入 messages
+- **t16**: rejected/confirmation_required/None 不 dispatch TOOL_INVOKE
+
 ## 8. 风险与回退
 
 - **风险**：dispatcher.route_from_runtime_loop 抛出异常 → 工具执行受影响
-- **缓解**：mediator 中 dispatcher 调用失败不阻塞 execute_single_tool；try/except 包裹
+- **缓解**：_route_gate 中 try/except 返回 None → 触发安全失败（FORCE_STOP），不执行工具
 - **回退**：移除 mediator，恢复 handle_tool_use_response 裸调 execute_single_tool

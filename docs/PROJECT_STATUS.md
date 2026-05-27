@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 1.3 push)
-**状态**: Loop 1.3 — Tool Path Unification **PARTIAL**；Loop 1.3b pending
+**最后更新**: 2026-05-28 (Loop 1.3b push)
+**状态**: Loop 1.3 — Tool Path Unification **READY**；gate_disposition 驱动执行流已实现
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -230,7 +230,7 @@
 |------|------|------|
 | Loop 1.1 | Unified Runtime Decision Spine | **COMPLETED** — 已实现 |
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
-| Loop 1.3 | Tool Path Unification | **PARTIAL** — ToolRuntimeMediator 就绪，TOOL_GATE gate_disposition 尚未驱动执行流 |
+| Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | pending — recall/propose/retain E2E 走 dispatcher |
 | Loop 2.2 | Skill Activation MVP | pending — skill_registry 注入 main path |
 | Loop 2.3 | Storage/Checkpoint True Resume | pending |

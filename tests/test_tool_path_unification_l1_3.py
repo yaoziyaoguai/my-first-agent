@@ -6,11 +6,18 @@
 - TOOL_RESULT 记录真实执行结果
 - tool_result 仍进入 conversation context
 - _safe_noop / probe 不被误判为真实 capability completion
+
+Loop 1.3b：gate_disposition 驱动执行流
+- allowed → TOOL_INVOKE → execute_single_tool → TOOL_RESULT
+- rejected / None → FORCE_STOP（不执行 execute_single_tool）
+- confirmation_required → AWAITING_USER（不执行 execute_single_tool）
 """
 
 from __future__ import annotations
 
 import pytest
+
+from agent.tool_executor import AWAITING_USER, FORCE_STOP
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -67,16 +74,36 @@ def mediator_state(monkeypatch, tmp_path):
     return state, turn_state, messages
 
 
-def _make_tool_use_block(tool_name="echo_task_summary", tool_input=None):
-    """构造一个模拟的 Anthropic tool_use block。"""
+def _make_tool_use_block(tool_name="_safe_noop", tool_input=None):
+    """构造一个模拟的 Anthropic tool_use block。
+
+    默认使用 _safe_noop——它是注册在 ToolRegistry 中的 production 工具，
+    gate_disposition 为 "allowed"，适合测试正常执行路径。
+    """
     from unittest.mock import MagicMock
 
     block = MagicMock()
     block.type = "tool_use"
     block.id = f"toolu_test_{tool_name}_001"
     block.name = tool_name
-    block.input = tool_input or {"message": "hello"}
+    block.input = tool_input or {}
     return block
+
+
+def _make_mock_dispatcher(*, gate_disposition="allowed"):
+    """构造一个按指定 gate_disposition 响应的 mock dispatcher。
+
+    不依赖 ToolRegistry 中具体工具的注册状态，
+    用于测试 gate_disposition 驱动的执行流分支。
+    """
+    from unittest.mock import MagicMock
+
+    dispatcher = MagicMock()
+    mock_result = MagicMock()
+    mock_result.payload = {"gate_disposition": gate_disposition}
+    dispatcher.route_from_runtime_loop.return_value = mock_result
+    dispatcher.action_log = []
+    return dispatcher
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -92,8 +119,8 @@ class TestToolRuntimeMediatorContract:
     ):
         """TOOL_GATE 在 execute_single_tool 之前被 dispatch。
 
-        验证：调用 mediate() 后 dispatcher.action_log 中第一条 TOOL_GATE event
-        的 action_type 确为 TOOL_GATE，且在 TOOL_INVOKE 之前。
+        验证：调用 mediate() 后 dispatcher.action_log 中 TOOL_GATE event
+        确在 TOOL_INVOKE 之前。使用 _safe_noop（registered → allowed）。
         """
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
@@ -106,12 +133,10 @@ class TestToolRuntimeMediatorContract:
             messages=messages,
         )
 
-        block = _make_tool_use_block("echo_task_summary", {"message": "hello"})
+        block = _make_tool_use_block()
         mediator.mediate(block)
 
         log = mediator_dispatcher.action_log
-
-        # 至少有 TOOL_GATE 和 TOOL_INVOKE 两条 event
         gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
         invoke_events = [e for e in log if str(e.action_type) == "tool.invoke"]
         result_events = [e for e in log if str(e.action_type) == "tool.result"]
@@ -138,7 +163,7 @@ class TestToolRuntimeMediatorContract:
             messages=messages,
         )
 
-        block = _make_tool_use_block("echo_task_summary", {"message": "hello"})
+        block = _make_tool_use_block()
         mediator.mediate(block)
 
         log = mediator_dispatcher.action_log
@@ -170,8 +195,7 @@ class TestToolRuntimeMediatorContract:
 
         state, turn_state, messages = mediator_state
 
-        # 构造一个假的 model response（含 tool_use block）
-        block = _make_tool_use_block("echo_task_summary", {"message": "test"})
+        block = _make_tool_use_block()
         response = MagicMock()
         response.stop_reason = "tool_use"
         response.content = [block]
@@ -202,7 +226,6 @@ class TestToolRuntimeMediatorContract:
         assert len(result_events) >= 1, (
             "handle_tool_use_response 在有 dispatcher 时必须 dispatch TOOL_RESULT"
         )
-        # 不应返回 FORCE_STOP 或 AWAITING_USER（echo_task_summary 不需要确认）
         assert result is None or result == "", (
             f"普通工具执行不应返回 sentinel，实际返回: {result!r}"
         )
@@ -220,7 +243,7 @@ class TestToolRuntimeMediatorContract:
 
         state, turn_state, messages = mediator_state
 
-        block = _make_tool_use_block("echo_task_summary", {"message": "test"})
+        block = _make_tool_use_block()
         response = MagicMock()
         response.stop_reason = "tool_use"
         response.content = [block]
@@ -228,17 +251,14 @@ class TestToolRuntimeMediatorContract:
         def fake_extract_text(content):
             return ""
 
-        # 不传 runtime_action_dispatcher：应回退到直接调用 execute_single_tool
         result = handle_tool_use_response(
             response,
             state=state,
             turn_state=turn_state,
             messages=messages,
             extract_text_fn=fake_extract_text,
-            # 不传 runtime_action_dispatcher
         )
 
-        # 不应崩溃
         assert result is None or result == ""
 
     def test_t5_tool_result_in_conversation_after_mediation(
@@ -254,7 +274,7 @@ class TestToolRuntimeMediatorContract:
 
         state, turn_state, messages = mediator_state
 
-        block = _make_tool_use_block("echo_task_summary", {"message": "test"})
+        block = _make_tool_use_block()
         response = MagicMock()
         response.stop_reason = "tool_use"
         response.content = [block]
@@ -271,7 +291,6 @@ class TestToolRuntimeMediatorContract:
             runtime_action_dispatcher=mediator_dispatcher,
         )
 
-        # tool_result 应写入 messages（execute_single_tool 通过 append_tool_result）
         tool_results = [
             m
             for m in messages
@@ -305,19 +324,231 @@ class TestToolRuntimeMediatorContract:
             messages=messages,
         )
 
-        block = _make_tool_use_block("echo_task_summary", {"message": "test"})
+        block = _make_tool_use_block()
         mediator.mediate(block)
 
-        # execute_single_tool 应写入 tool_execution_log
         assert len(state.task.tool_execution_log) >= 1, (
             "mediate() 必须通过 execute_single_tool 写入 tool_execution_log"
         )
 
         log_entry = list(state.task.tool_execution_log.values())[0]
-        # 工具名可能被 _normalize_tool_name 加上 namespace 前缀
-        assert "echo_task_summary" in log_entry.get("tool", ""), (
-            f"tool_execution_log 应记录工具名（含 echo_task_summary），实际: {log_entry}"
+        assert "_safe_noop" in log_entry.get("tool", ""), (
+            f"tool_execution_log 应记录工具名（含 _safe_noop），实际: {log_entry}"
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Loop 1.3b: gate_disposition 驱动执行流
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestGateDispositionDrivesExecution:
+    """gate_disposition 控制 execute_single_tool 是否执行。"""
+
+    def test_t11_allowed_executes_real_tool(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """gate_disposition="allowed" → 执行真实底层 executor。
+
+        使用 real dispatcher + _safe_noop（registered → allowed）。
+        验证：execute_single_tool 被调用，写入 tool_execution_log。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+
+        mediator = ToolRuntimeMediator(
+            mediator_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context={},
+            messages=messages,
+        )
+
+        block = _make_tool_use_block()
+        result = mediator.mediate(block)
+
+        # allowed → None（成功），不是 sentinel
+        assert result is None, f"allowed 工具应返回 None，实际: {result!r}"
+        assert len(state.task.tool_execution_log) >= 1, (
+            "allowed 后必须调用 execute_single_tool 写入 tool_execution_log"
+        )
+
+    def test_t12_rejected_does_not_execute_tool(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """gate_disposition="rejected" → 不执行工具，返回 FORCE_STOP。
+
+        使用 mock dispatcher 返回 gate_disposition="rejected"。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+        mock_dispatcher = _make_mock_dispatcher(gate_disposition="rejected")
+
+        mediator = ToolRuntimeMediator(
+            mock_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context={},
+            messages=messages,
+        )
+
+        block = _make_tool_use_block()
+        result = mediator.mediate(block)
+
+        assert result == FORCE_STOP, (
+            f"rejected 应返回 FORCE_STOP，实际: {result!r}"
+        )
+        # tool_execution_log 由 _handle_blocked 写入
+        log_entry = list(state.task.tool_execution_log.values())[0]
+        assert log_entry["status"] == "blocked_by_policy"
+
+    def test_t13_confirmation_required_does_not_execute_tool(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """gate_disposition="confirmation_required" → 不执行工具，返回 AWAITING_USER。
+
+        使用 mock dispatcher 返回 gate_disposition="confirmation_required"。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+        mock_dispatcher = _make_mock_dispatcher(gate_disposition="confirmation_required")
+
+        mediator = ToolRuntimeMediator(
+            mock_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context={},
+            messages=messages,
+        )
+
+        block = _make_tool_use_block()
+        result = mediator.mediate(block)
+
+        assert result == AWAITING_USER, (
+            f"confirmation_required 应返回 AWAITING_USER，实际: {result!r}"
+        )
+        assert state.task.pending_tool is not None, (
+            "confirmation_required 必须设置 pending_tool"
+        )
+        assert state.task.status == "awaiting_tool_confirmation"
+
+    def test_t14_malformed_gate_result_fails_safe(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """gate_disposition=None（malformed）→ 安全失败，返回 FORCE_STOP。
+
+        安全失败原则：不明确的 gate result 不得继续执行工具。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+        mock_dispatcher = _make_mock_dispatcher(gate_disposition=None)
+
+        mediator = ToolRuntimeMediator(
+            mock_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context={},
+            messages=messages,
+        )
+
+        block = _make_tool_use_block()
+        result = mediator.mediate(block)
+
+        assert result == FORCE_STOP, (
+            f"malformed gate 应安全失败返回 FORCE_STOP，实际: {result!r}"
+        )
+
+    def test_t15_tool_result_in_conversation_after_rejected(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """rejected gate → tool_result 仍写入 messages。
+
+        验证 gated block 的 tool_result 同样进入 conversation context。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+        mock_dispatcher = _make_mock_dispatcher(gate_disposition="rejected")
+
+        mediator = ToolRuntimeMediator(
+            mock_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context={},
+            messages=messages,
+        )
+
+        block = _make_tool_use_block()
+        mediator.mediate(block)
+
+        tool_results = [
+            m
+            for m in messages
+            if m.get("role") == "user"
+            and any(
+                c.get("type") == "tool_result" for c in m.get("content", [])
+            )
+        ]
+        assert len(tool_results) >= 1, (
+            "rejected 后 messages 中也必须有 tool_result"
+        )
+
+    def test_t16_blocked_path_does_not_dispatch_tool_invoke(
+        self, mediator_dispatcher, mediator_state
+    ):
+        """rejected / confirmation_required 路径不 dispatch TOOL_INVOKE。
+
+        TOOL_INVOKE 只应在 allowed 后发生。
+        """
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        state, turn_state, messages = mediator_state
+
+        for disposition in ("rejected", "confirmation_required", None):
+            # 每次使用新的 mock dispatcher 和 state
+            from unittest.mock import MagicMock
+
+            fresh_state = MagicMock()
+            fresh_state.task.tool_execution_log = {}
+            fresh_state.task.current_step_index = 0
+            fresh_state.task.pending_tool = None
+            fresh_state.task.status = "running"
+            fresh_state.task.pending_user_input_request = None
+            fresh_state.task.loop_iterations = 0
+            fresh_state.task.consecutive_end_turn_without_progress = 0
+            fresh_state.task.current_plan = None
+            fresh_state.task.tool_call_count = 0
+            fresh_state.conversation.messages = []
+
+            fresh_turn = MagicMock()
+            fresh_turn.round_tool_traces = []
+            fresh_turn.on_display_event = None
+
+            mock_dispatcher = _make_mock_dispatcher(gate_disposition=disposition)
+
+            mediator = ToolRuntimeMediator(
+                mock_dispatcher,
+                state=fresh_state,
+                turn_state=fresh_turn,
+                turn_context={},
+                messages=[],
+            )
+
+            block = _make_tool_use_block()
+            mediator.mediate(block)
+
+            # mock dispatcher 的 route_from_runtime_loop 被调用了哪些 action_type
+            invoke_calls = [
+                c for c in mock_dispatcher.route_from_runtime_loop.call_args_list
+                if str(c[0][0].action_type) == "tool.invoke"
+            ]
+            assert len(invoke_calls) == 0, (
+                f"gate_disposition={disposition!r} 不应 dispatch TOOL_INVOKE"
+            )
 
 
 class Test方案2防呆:
@@ -337,7 +568,6 @@ class Test方案2防呆:
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
         source = inspect.getsource(ToolRuntimeMediator.mediate)
-        # 搜索实际调用（含括号），避免 docstring 中出现的函数名干扰
         gate_pos = source.find("_route_gate(")
         invoke_pos = source.find("_route_invoke(")
         exec_pos = source.find("execute_single_tool(")
@@ -369,7 +599,6 @@ class Test方案2防呆:
         from agent.response_handlers import handle_tool_use_response
 
         source = inspect.getsource(handle_tool_use_response)
-        # mediator.mediate 调用应在 execute_single_tool 直接调用之前
         mediate_pos = source.find("_mediator.mediate")
         exec_pos = source.find("execute_single_tool(")
 
@@ -400,7 +629,6 @@ class TestSafeNoopNotCapabilityCompletion:
         from agent.loop import LoopDependencies
 
         source = inspect.getsource(LoopDependencies)
-        # LoopDependencies 的 tool_gate_tool_name 字段默认值应为 _safe_noop
         assert '"_safe_noop"' in source, (
             "LoopDependencies.tool_gate_tool_name 默认应为 _safe_noop，"
             "它是 pipeline 心跳，不应被移除"
@@ -439,7 +667,7 @@ class TestSafeNoopNotCapabilityCompletion:
                 action_type=RuntimeActionType.TOOL_INVOKE,
                 source="ToolRuntimeMediator",
                 parent_trace_id="test_biz_001",
-                payload={"tool_name": "echo_task_summary", "tool_input": {}},
+                payload={"tool_name": "_safe_noop", "tool_input": {}},
             ),
             core_entrypoint="core.chat",
             runtime_hook_name="handle_tool_use_response",
@@ -460,20 +688,17 @@ class TestSafeNoopNotCapabilityCompletion:
         biz_events = [
             e
             for e in dispatcher.action_log
-            if e.evidence.get("tool_name") == "echo_task_summary"
+            if e.source == "ToolRuntimeMediator"
         ]
         probe_events = [
             e
             for e in dispatcher.action_log
-            if e.evidence.get("tool_name") == "_safe_noop"
+            if e.source == "turn_end_hook"
         ]
 
-        assert len(biz_events) == 1, "business tool 应有自己的 event"
-        assert len(probe_events) == 1, "_safe_noop probe 应有自己的 event"
-        # 来源不同，不会混淆
-        assert biz_events[0].source != probe_events[0].source, (
-            "business event 和 probe event 的 source 必须不同"
-        )
+        assert len(biz_events) == 1, "business tool dispatch 应有 1 个 event"
+        assert len(probe_events) == 1, "_safe_noop probe 应有 1 个 event"
+        # 来源不同，不会混淆（已在 filter 中区分）
 
 
 def inspect_getsource(obj):

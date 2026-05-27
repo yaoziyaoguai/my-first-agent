@@ -190,3 +190,163 @@ def test_lifecycle_checks_are_probe_not_business():
         "以下 lifecycle check action 被错误分类为 business，"
         "造成 evidence overclaim：\n" + "\n".join(overclaim)
     )
+
+
+# ── Loop 1.2: Business Capability Evidence Guard ──────────────────────────────
+
+
+def test_business_capability_evidence_function_exists():
+    """is_business_capability_evidence() 可导入且可调用。"""
+    from agent.runtime_integration.evidence import is_business_capability_evidence
+
+    # bare evidence 不是 business capability
+    assert not is_business_capability_evidence({}), (
+        "空 evidence 不应算作 business capability evidence"
+    )
+
+
+def test_business_dispositions_exclude_noop_rejected():
+    """_BUSINESS_DISPOSITIONS 不包含 noop/rejected/no_action 等非业务 disposition。
+
+    红队补审规则：disposition=noop/rejected/no_action 的 action 不应被算作
+    business capability，即使它通过了主路径 routing。
+    """
+    from agent.runtime_integration.evidence import _BUSINESS_DISPOSITIONS
+
+    excluded = [
+        "noop",
+        "no_action",
+        "rejected",
+        "insufficient_evidence",
+        "no_candidates",
+        "no_memory",
+        "not_supported",
+    ]
+    for d in excluded:
+        assert d not in _BUSINESS_DISPOSITIONS, (
+            f"disposition={d} 不应在 _BUSINESS_DISPOSITIONS 中——"
+            f"这些 disposition 代表不产生业务效果的路由探测"
+        )
+
+
+def test_business_dispositions_includes_effective_outcomes():
+    """_BUSINESS_DISPOSITIONS 包含代表业务效果的 disposition。"""
+    from agent.runtime_integration.evidence import _BUSINESS_DISPOSITIONS
+
+    must_include = [
+        "allowed",
+        "recalled",
+        "retain",
+        "proposed",
+        "consolidated",
+        "injected",
+        "delegated",
+        "executed",
+    ]
+    for d in must_include:
+        assert d in _BUSINESS_DISPOSITIONS, (
+            f"disposition={d} 应在 _BUSINESS_DISPOSITIONS 中"
+        )
+
+
+def test_evidence_without_routing_fields_not_business_capability():
+    """缺少所有 routing 字段的 evidence 不应通过 is_business_capability_evidence()。
+
+    即使 disposition 有效，如果 evidence 没有 REAL_CORE_LOOP_RUNTIME_E2E 等级
+    （classify_evidence_level 返回 NOT_COVERED），也不构成业务能力证据。
+    """
+    from agent.runtime_integration.evidence import is_business_capability_evidence
+
+    # 只有 disposition 但没有 routing provenance 的 evidence
+    evidence = {
+        "disposition": "executed",
+        "status": "success",
+    }
+    assert not is_business_capability_evidence(evidence), (
+        "只有 disposition 但无 routing provenance 的 evidence"
+        " 不应被算作 business capability evidence"
+    )
+
+
+def test_direct_dispatcher_call_not_business_capability():
+    """直接 dispatcher.route() 调用产生的 evidence 不是 business capability。
+
+    通过 RuntimeActionModuleObserver.register_dispatch_route 注册的 route
+    缺少 dispatcher_owned provenance，classify_evidence_level 返回
+    HARNESS_RUNTIME_E2E 或 SUBSYSTEM_INTEGRATION，非 REAL_CORE_LOOP_RUNTIME_E2E。
+    """
+    from agent.runtime_integration.evidence import (
+        RuntimeActionModuleObserver,
+        is_business_capability_evidence,
+    )
+
+    # 模拟 direct dispatcher call 注册的非可信 route
+    observer = RuntimeActionModuleObserver()
+    observer.register_dispatch_route(
+        route_id="route:test_direct",
+        action_id="act:test_direct",
+        action_type="tool.invoke",
+        handler_name="test_handler",
+    )
+    observer.register_dispatch_result(
+        route_id="route:test_direct",
+        result_id="result:test_direct",
+        action_id="act:test_direct",
+        action_type="tool.invoke",
+        handler_name="test_handler",
+    )
+
+    evidence = {
+        "disposition": "executed",
+        "status": "success",
+        "action_id": "act:test_direct",
+        "action_type": "tool.invoke",
+        "handler_name": "test_handler",
+        "dispatcher_route_id": "route:test_direct",
+        "dispatcher_result_id": "result:test_direct",
+        "target_module": "ToolRegistry",
+        "dispatcher_routed": True,
+        "dispatcher_result_issued": True,
+        "target_handler_invoked": True,
+        "module_invoked": True,
+        "result_returned_to_parent_runtime": True,
+    }
+
+    # direct dispatcher route → dispatcher_owned=False → 不是 REAL_CORE_LOOP
+    assert not is_business_capability_evidence(evidence), (
+        "直接 dispatcher.route() 调用即使 disposition=executed"
+        " 也不应算作 business capability evidence——"
+        "缺少 dispatcher-owned runtime-loop provenance"
+    )
+
+
+def test_decision_frame_branch_points_consistent_with_evidence_standard():
+    """RuntimeDecisionFrame 的 BranchPoint 状态与证据等级标准一致。
+
+    红队补审规则：NOT_READY/STUB/DEFERRED/FAKE_DEMO/PARTIAL 不应声称
+    capability complete。GUARD_TEST/DOCS_DESIGN 证据不应支撑 COMPLETE 声称。
+    """
+    from agent.runtime_decision_frame import (
+        BranchPointStatus,
+        EvidenceLevel,
+        list_branch_points,
+    )
+
+    for bp in list_branch_points():
+        # NOT_READY/STUB/DEFERRED/FAKE_DEMO/DIRECT_CALL_ONLY 不应声称 complete
+        if bp.status in (
+            BranchPointStatus.NOT_READY,
+            BranchPointStatus.STUB,
+            BranchPointStatus.DEFERRED,
+            BranchPointStatus.FAKE_DEMO,
+            BranchPointStatus.DIRECT_CALL_ONLY,
+        ):
+            assert not bp.is_capability_complete(), (
+                f"{bp.branch_id} 状态={bp.status}，不应声称 capability complete"
+            )
+        # GUARD_TEST/DOCS_DESIGN 证据不应支撑 complete
+        if bp.evidence_level in (EvidenceLevel.GUARD_TEST, EvidenceLevel.DOCS_DESIGN):
+            assert not bp.is_capability_complete(), (
+                f"{bp.branch_id} evidence_level={bp.evidence_level}，"
+                f"不应声称 capability complete"
+            )

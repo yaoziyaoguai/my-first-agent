@@ -10,7 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| Loop 1.1: Unified Runtime Decision Spine | — | **IN PROGRESS** — 新建 `agent/runtime_decision_frame.py`（609 lines）：14 个 BranchPoint 诚实标记（0 READY / 8 PARTIAL / 1 NOT_READY / 2 DEFERRED / 1 FAKE_DEMO / 1 STUB）；RuntimeDecisionFrame 作为 core.chat() 入口 per-turn subsystem 状态描述；`docs/design/runtime-decision-spine.md` 设计文档（9 sections）；35 个 guard tests 全部通过；集成到 core.py/loop.py/display_events.py 主路径（不影响现有行为）；ruff 全部通过 |
+| Loop 1.2: Evidence Classification Repair | — | **COMPLETED** — 新增 `is_business_capability_evidence()` in `agent/runtime_integration/evidence.py`（_BUSINESS_DISPOSITIONS + 规则：real_core_loop_runtime_e2e + business disposition = business capability evidence）；6 个新 guard tests + 1 个增强 test（24 total in test_evidence_taxonomy_guard.py）；78 evidence-related tests pass |
+| Loop 1.1: Unified Runtime Decision Spine | 0ea8313, bd0a6af, e6cb970 | **COMPLETED** — 新建 `agent/runtime_decision_frame.py`（609 lines）：14 个 BranchPoint 诚实标记（0 READY / 8 PARTIAL / 1 NOT_READY / 2 DEFERRED / 1 FAKE_DEMO / 1 STUB）；RuntimeDecisionFrame 作为 core.chat() 入口 per-turn subsystem 状态描述；`docs/design/runtime-decision-spine.md` 设计文档（9 sections）；35 个 guard tests 全部通过；集成到 core.py/loop.py/display_events.py 主路径（不影响现有行为）；ruff 全部通过 |
 | Loop 15: Memory Write Dispatcher Migration | ca0a03c | **COMPLETED (Phase 1-5)** — memory confirm→retain write path 从 direct `_memory_runtime` 调用迁入 dispatcher；5 个 Phase 完成：(1) handler 接受 `candidate:` 前缀 proposal_id，(2) `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store，(3) `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`，(4) 5 个 new E2E integration tests，(5) docs finalization + commit/push。100/100 memory tests pass；11 个文件变更 |
 
 ## 2026-05-27

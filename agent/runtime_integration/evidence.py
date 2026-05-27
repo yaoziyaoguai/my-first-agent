@@ -528,7 +528,8 @@ class RuntimeActionTargetCatalog:
             implementation_id="agent.runtime_integration.tool_result_feedback.format_tool_result",
             adapter=_tool_result_format_adapter,
             function_called="format_tool_result",
-            call_signature="format_tool_result(tool_name, tool_output, execution_status, rendered_char_budget)",
+            call_signature="format_tool_result(tool_name, tool_output,"
+            " execution_status, rendered_char_budget)",
         ),
         _descriptor(
             "checkpoint.safe_summary",
@@ -836,7 +837,8 @@ class RuntimeActionTargetCatalog:
         target_module: str,
         operation: str,
     ) -> RuntimeActionTargetDescriptor | None:
-        return cls._by_key.get((action_type, handler_name, handler_identity, target_module, operation))
+        key = (action_type, handler_name, handler_identity, target_module, operation)
+        return cls._by_key.get(key)
 
     @classmethod
     def is_allowed_descriptor(
@@ -1149,11 +1151,14 @@ class RuntimeActionModuleObserver:
             and descriptor_invocation_approved
             and target_descriptor.callable_identity == proof_callable_identity
         )
-        trusted_target_catalog_id = target_descriptor.target_catalog_id if target_identity_valid else None
-        trusted_target_handle = target_descriptor.target_handle if target_identity_valid else None
-        trusted_target_descriptor_id = target_descriptor.target_descriptor_id if target_identity_valid else None
-        trusted_invocation_adapter_id = target_descriptor.invocation_adapter_id if target_identity_valid else None
-        trusted_implementation_id = target_descriptor.implementation_id if target_identity_valid else None
+        def _trusted(attr: str) -> str | None:
+            return getattr(target_descriptor, attr) if target_identity_valid else None
+
+        trusted_target_catalog_id = _trusted("target_catalog_id")
+        trusted_target_handle = _trusted("target_handle")
+        trusted_target_descriptor_id = _trusted("target_descriptor_id")
+        trusted_invocation_adapter_id = _trusted("invocation_adapter_id")
+        trusted_implementation_id = _trusted("implementation_id")
         target_catalog_allowed = target_identity_valid
         value = call()
         observed_at = _now_iso()
@@ -1331,15 +1336,24 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     invocation_adapter_id = str(evidence.get("invocation_adapter_id") or "")
     implementation_id = str(evidence.get("implementation_id") or "")
     callable_identity = str(evidence.get("callable_identity") or "")
-    if not action_id or not action_type or not handler_name or not route_id or not result_id or not target_module:
+    if (
+        not action_id or not action_type or not handler_name
+        or not route_id or not result_id or not target_module
+    ):
         return False
     if evidence.get("dispatcher_result_issued") is not True:
         return False
-    if evidence.get("target_catalog_allowed") is not True or not target_catalog_id or not target_handle:
+    if (
+        evidence.get("target_catalog_allowed") is not True
+        or not target_catalog_id or not target_handle
+    ):
         return False
     if evidence.get("target_identity_valid") is not True:
         return False
-    if not target_descriptor_id or not invocation_adapter_id or not implementation_id or not callable_identity:
+    if (
+        not target_descriptor_id or not invocation_adapter_id
+        or not implementation_id or not callable_identity
+    ):
         return False
     required_true = (
         "dispatcher_routed",
@@ -1353,7 +1367,10 @@ def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
     invocation_proof = evidence.get("invocation_proof")
     if not isinstance(invocation_proof, Mapping):
         return False
-    for key in ("call_id", "function_called", "call_signature", "observed_at", "observation_method"):
+    _proof_keys = (
+        "call_id", "function_called", "call_signature", "observed_at", "observation_method"
+    )
+    for key in _proof_keys:
         if not invocation_proof.get(key):
             return False
     if invocation_proof.get("observation_method") == "handler_self_report":
@@ -1456,8 +1473,53 @@ def classify_evidence_level(evidence: Mapping[str, Any]) -> str:
         ):
             return REAL_CORE_LOOP_RUNTIME_E2E
         return HARNESS_RUNTIME_E2E
-    if evidence.get("dispatcher_routed") or evidence.get("target_handler_invoked") or evidence.get("module_invoked"):
+    if (
+        evidence.get("dispatcher_routed")
+        or evidence.get("target_handler_invoked")
+        or evidence.get("module_invoked")
+    ):
         return SUBSYSTEM_INTEGRATION
     if explicit in {DETERMINISTIC_BASELINE, SIMULATED, NOT_COVERED}:
         return str(explicit)
     return NOT_COVERED
+
+
+# business disposition: 证明此次 action 确实产生了用户可见的业务效果
+_BUSINESS_DISPOSITIONS = frozenset({
+    "allowed",            # tool.gate: gate 通过
+    "recalled",           # memory.recall: 召回成功
+    "retain",             # memory.propose: 写入成功
+    "proposed",           # memory.turn_end_proposal: proposal 已生成
+    "not_retained",       # memory.propose: 用户拒绝 (有业务语义)
+    "consolidated",       # memory.consolidate: 已整合
+    "injected",           # tool.result: 结果注入到模型上下文
+    "truncated",          # tool.result: 截断但仍注入
+    "delegated",          # subagent.delegate_l0: 真实委托
+    "executed",           # tool.invoke: 执行成功
+})
+"""业务 disposition: handler 明确报告产生了用户可见的业务效果。
+
+不含 noop/no_action/rejected/insufficient_evidence/no_candidates/no_memory/
+not_supported/failed 等无效或仅路由探测的 disposition。
+"""
+
+
+def is_business_capability_evidence(evidence: Mapping[str, Any]) -> bool:
+    """判断 evidence 是否代表"业务能力完成"（不只是 routing evidence）。
+
+    红队补审规则：``real_core_loop_runtime_e2e`` 只证明 action 通过了
+    route_from_runtime_loop() 主路径，不证明 action 达成了业务效果。
+    probe 返回 noop 时仍然有 routing evidence，但不构成业务能力证明。
+
+    返回 True 需要同时满足：
+    1. 证据等级为 ``REAL_CORE_LOOP_RUNTIME_E2E``（主路径 routing）
+    2. disposition 在 _BUSINESS_DISPOSITIONS 中（有业务效果）
+
+    Args:
+        evidence: 来自 RuntimeActionEvent.evidence 的证据字典
+    """
+    level = classify_evidence_level(evidence)
+    if level != REAL_CORE_LOOP_RUNTIME_E2E:
+        return False
+    disposition = str(evidence.get("disposition", ""))
+    return disposition in _BUSINESS_DISPOSITIONS

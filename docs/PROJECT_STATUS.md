@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-28
-**状态**: Loop 1.1 — Unified Runtime Decision Spine **已实现**，35/35 guard tests pass，3701 total tests pass（85 个已有文档完整性失败非 Loop 1.1 引入）
+**状态**: Loop 1.2 — Evidence Classification Repair **已实现**，78 evidence-related tests pass
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -129,7 +129,20 @@
 | Evidence taxonomy guard tests | 17→18（新增 lifecycle check honesty guard） |
 | 影响 | `_emit_run_summary` 中 SUBAGENT_DELEGATE_L0 的 rejected routing check 不再计入 business_events |
 
-### Runtime Decision Spine (Loop 1.1 — IN PROGRESS)
+### Evidence Classification Repair (Loop 1.2 — COMPLETED)
+
+| 项目 | 值 |
+|------|---|
+| 核心函数 | `is_business_capability_evidence()` in `agent/runtime_integration/evidence.py` |
+| 新增常量 | `_BUSINESS_DISPOSITIONS` — 10 个有效业务 disposition |
+| Guard tests | `test_evidence_taxonomy_guard.py` — 24 tests（3 原有 + 6 新增 + 1 增强） |
+
+**编码规则**：
+- `real_core_loop_runtime_e2e` ≠ business capability complete — routing evidence 不等于业务能力证明
+- 必须同时满足：主路径 routing provenance（REAL_CORE_LOOP_RUNTIME_E2E）+ 有效业务 disposition（allowed/recalled/retain/executed/...）
+- disposition=noop/no_action/rejected/insufficient_evidence 等即使通过主路径也不构成业务能力证据
+
+### Runtime Decision Spine (Loop 1.1 — COMPLETED)
 
 | 项目 | 值 |
 |------|---|
@@ -215,8 +228,8 @@
 
 | Loop | 描述 | 状态 |
 |------|------|------|
-| Loop 1.1 | Unified Runtime Decision Spine | **IN PROGRESS** — 已实现，待 commit/push |
-| Loop 1.2 | Evidence Classification Repair | pending — 修正 evidence_level 与 status 不匹配 |
+| Loop 1.1 | Unified Runtime Decision Spine | **COMPLETED** — 已实现 |
+| Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | pending — tool real path + RuntimeAction 路径统一 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | pending — recall/propose/retain E2E 走 dispatcher |
 | Loop 2.2 | Skill Activation MVP | pending — skill_registry 注入 main path |

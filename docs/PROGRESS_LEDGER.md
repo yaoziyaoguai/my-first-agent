@@ -10,7 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| Loop 15: Memory Write Dispatcher Migration | — | **COMPLETED (Phase 1-4)** — memory confirm→retain write path 从 direct `_memory_runtime` 调用迁入 dispatcher；4 个 Phase 完成：(1) handler 接受 `candidate:` 前缀 proposal_id，(2) `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store，(3) `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`，(4) 5 个 new E2E integration tests。100/100 memory tests pass；6 个文件变更（含 3 个新 Phase 4 tests） |
+| Loop 15: Memory Write Dispatcher Migration | ca0a03c | **COMPLETED (Phase 1-5)** — memory confirm→retain write path 从 direct `_memory_runtime` 调用迁入 dispatcher；5 个 Phase 完成：(1) handler 接受 `candidate:` 前缀 proposal_id，(2) `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store，(3) `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`，(4) 5 个 new E2E integration tests，(5) docs finalization + commit/push。100/100 memory tests pass；11 个文件变更 |
 
 ## 2026-05-27
 

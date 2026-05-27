@@ -175,29 +175,32 @@
 
 ## 2. 推荐下一步
 
-**Loop 15 已完成 Phase 1-4（commit pending）。**
+**Loop 15 Phase 1-5 COMPLETE（ca0a03c）。**
 
-**Memory Write Dispatcher Migration 已实现。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
+**Memory Write Dispatcher Migration 已实现并推送。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
 
-**已完成的 Phase**：
-- Phase 1: Handler compatibility — `MemoryRetainHandler` accepts `candidate:` prefixed proposal_ids
-- Phase 2: `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store
-- Phase 3: `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`
-- Phase 4: E2E integration tests — 5 new tests verify complete dispatcher chain
-- 100/100 memory tests pass, 3666 total tests pass
+**安全可自动修（Safe-to-Auto-Run）全部完成**：
+- Loop 14: Evidence Pipeline Foundation（harness 证据门禁）
+- Loop 16: Evidence Taxonomy & Overclaim Guard Tests（24 能力地图 + 11 guard tests）
+- Loop 17: Dogfood Report Reclassification（旧 PASS → SMOKE_PASS）
+- Loop 18: CLI Shortcut Honesty Marking（CLI-only/demo-only 边界）
+- Loop 15: Memory Write Dispatcher Migration（write path → dispatcher）
 
-**下一步**：
-- **Phase 5: Docs finalization** — 更新 PROGRESS_LEDGER、design doc 状态
-- **Loop 16: Evidence Pipeline Foundation** — 统一 evidence taxonomy + harness evaluator 修复
+**需要架构决策的项目（B2-B8）**：
+| Item | 描述 | 状态 |
+|------|------|------|
+| B2 | CLI forget/delegate shortcut → dispatcher | 待 confirmation pipeline 就绪 |
+| B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
+| B4 | MCP real connection | 需要外部 MCP server |
+| B5 | Skill runtime 深化 | 需要真实 API + skill marketplace |
+| B6 | Checkpoint true state restoration | 需要 schema 大改 |
+| B7 | Multi-instance readiness | 需要消除模块级单例 |
+| B8 | TUI architecture | 需要 TUI framework decision |
 
-**禁止现在开工的项目**：
-- Provider identity "我是 Claude"
-- 恢复 FakeProvider NLU
-- 恢复 config/provider_profiles.yaml
-- Hook/MCP/SubAgent L1/RAG/sandbox 新能力
-- Broad runtime refactor
-- 第二条 runtime flow
-- 新 capability milestone
+**剩余 PARTIAL**：
+- Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
+
+**当前阶段**：developer prototype / developer-dogfood。所有 safe-to-auto-run items 完成，剩余均需架构决策或新能力设计。
 
 ---
 

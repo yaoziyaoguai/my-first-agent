@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-28
-**状态**: Loop 15 Phase 1-4 COMPLETE → Memory Write Dispatcher Migration **已实现**，95/95 memory tests pass，3666 total tests pass
+**状态**: Loop 1.1 — Unified Runtime Decision Spine **已实现**，35/35 guard tests pass，3701 total tests pass（85 个已有文档完整性失败非 Loop 1.1 引入）
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -129,6 +129,37 @@
 | Evidence taxonomy guard tests | 17→18（新增 lifecycle check honesty guard） |
 | 影响 | `_emit_run_summary` 中 SUBAGENT_DELEGATE_L0 的 rejected routing check 不再计入 business_events |
 
+### Runtime Decision Spine (Loop 1.1 — IN PROGRESS)
+
+| 项目 | 值 |
+|------|---|
+| 模块 | `agent/runtime_decision_frame.py`（609 lines） |
+| 设计文档 | `docs/design/runtime-decision-spine.md`（9 sections） |
+| Branch points | 14 个预定义，注册表冻结（MappingProxyType） |
+| 诚实标记 | 0 READY / 8 PARTIAL / 1 NOT_READY / 2 DEFERRED / 1 FAKE_DEMO / 1 STUB |
+| Guard tests | `tests/unit/test_runtime_decision_frame.py` — 35 PASS |
+| 主路径集成 | core.py（+13 行）、loop.py（+9 行）、display_events.py（+3 行） |
+| 设计原则 | 描述不执行、诚实标记、有限 branch point、证据等级绑定、frozen dataclass |
+
+**各子系统 Branch Point 状态**：
+
+| Branch Point | 状态 | 证据等级 | 说明 |
+|-------------|------|---------|------|
+| skill.select | NOT_READY | GUARD_TEST | 默认 skill_registry=None |
+| skill.apply | STUB | DOCS_DESIGN | body 未注入 model prompt |
+| mcp.discover | DEFERRED | DOCS_DESIGN | bridge 默认 disabled |
+| mcp.invoke | DEFERRED | DOCS_DESIGN | 需先完成 discover |
+| subagent.delegate | FAKE_DEMO | FAKE_LOCAL_USER_PATH | 仅 L0 deterministic executor |
+| memory.recall/propose/retain | PARTIAL | FAKE_LOCAL_USER_PATH | 有 dispatcher 路径但非完整 E2E |
+| tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
+| checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | true resume 不恢复 running state |
+| trace.summary | PARTIAL | FAKE_LOCAL_USER_PATH | in-memory action_log，无 durable store |
+
+**Overclaim 防护规则**：
+- `is_capability_complete()` = status==READY AND evidence_level >= FAKE_LOCAL_USER_PATH
+- `should_not_silent_pass()` = status in (NOT_READY, DEFERRED, STUB)
+- 禁止：status=PARTIAL + "capability complete"、status=FAKE_DEMO + "E2E verified"、evidence_level=GUARD_TEST + "COMPLETE"、no-crash → PASS
+
 ### 已知剩余 Issues（Loop 14 审计更新）
 
 **项目当前阶段：developer prototype / developer-dogfood。** 不可标 user-usable。
@@ -175,16 +206,26 @@
 
 ## 2. 推荐下一步
 
-**Loop 15 Phase 1-5 COMPLETE（ca0a03c）。**
+**Loop 1.1 — Unified Runtime Decision Spine IN PROGRESS。**
 
-**Memory Write Dispatcher Migration 已实现并推送。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
+基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
+真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
 
-**安全可自动修（Safe-to-Auto-Run）全部完成**：
-- Loop 14: Evidence Pipeline Foundation（harness 证据门禁）
-- Loop 16: Evidence Taxonomy & Overclaim Guard Tests（24 能力地图 + 11 guard tests）
-- Loop 17: Dogfood Report Reclassification（旧 PASS → SMOKE_PASS）
-- Loop 18: CLI Shortcut Honesty Marking（CLI-only/demo-only 边界）
-- Loop 15: Memory Write Dispatcher Migration（write path → dispatcher）
+**新 Roadmap（按红队补审推荐的 loop 顺序）**：
+
+| Loop | 描述 | 状态 |
+|------|------|------|
+| Loop 1.1 | Unified Runtime Decision Spine | **IN PROGRESS** — 已实现，待 commit/push |
+| Loop 1.2 | Evidence Classification Repair | pending — 修正 evidence_level 与 status 不匹配 |
+| Loop 1.3 | Tool Path Unification | pending — tool real path + RuntimeAction 路径统一 |
+| Loop 2.1 | Explicit Memory Main-Path Completion | pending — recall/propose/retain E2E 走 dispatcher |
+| Loop 2.2 | Skill Activation MVP | pending — skill_registry 注入 main path |
+| Loop 2.3 | Storage/Checkpoint True Resume | pending |
+| Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |
+| Loop 3.2 | Real SubAgent L1/L2 | pending |
+
+**已完成的历史 loops（安全可自动修）**：
+- Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER
 
 **需要架构决策的项目（B2-B8）**：
 | Item | 描述 | 状态 |
@@ -254,6 +295,7 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
 | Skill 系统架构 | `docs/design/skill-system-architecture.md` |
 | MCP 系统架构 | `docs/design/mcp-architecture.md` |
+| Runtime Decision Spine 设计 | `docs/design/runtime-decision-spine.md` |
 | Memory Write Dispatcher 迁移设计 | `docs/design/memory-write-dispatcher-migration-design.md` |
 | 首次运行 & 真实 API | `docs/onboarding/first-run-real-api-opt-in.md` |
 | 配置示例 | `config/config.example.yaml` |

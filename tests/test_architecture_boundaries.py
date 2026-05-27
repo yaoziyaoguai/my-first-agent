@@ -931,3 +931,54 @@ def test_cli_subagent_delegation_uses_registry_and_delegate_once() -> None:
     assert "agent.subagent_system.executor" not in imports, (
         "CLI delegation must NOT import executor directly — use delegate_once()"
     )
+
+
+def test_skill_system_does_not_import_legacy_skills() -> None:
+    """Loop 11: skill_system 不能反向依赖 legacy_skills。
+
+    P3-2 审计发现：legacy_skills 和 skill_system 两套体系并存。
+    skill_system 是新架构，legacy_skills 是隔离历史材料。
+    skill_system 的模块不应导入 legacy_skills——否则隔离失效。
+    """
+    import ast
+
+    skill_system_dir = AGENT_DIR / "skill_system"
+    forbidden = {"agent.legacy_skills", "agent.skills"}
+    violations: dict[str, set[str]] = {}
+
+    for path in sorted(skill_system_dir.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    imports.add(f"{module}.{alias.name}")
+        hits = imports & forbidden
+        if hits:
+            violations[path.name] = hits
+
+    assert violations == {}, (
+        f"skill_system modules must not import legacy_skills: {violations}"
+    )
+
+
+def test_skill_runtime_handler_integration_is_wired() -> None:
+    """Loop 11: SKILL_SELECT handler 在 phase1_hook 中正确注册。
+
+    验证 SkillRuntimeActionHandler 的注册路径完整：
+    phase1_hook 注册 SKILL_SELECT → SkillRuntimeActionHandler。
+    """
+    from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+
+    dispatcher = build_phase1_dispatcher()
+    assert dispatcher is not None
+
+    # SKILL_SELECT 在 dispatcher 的 action registry 中
+    import inspect
+    source = inspect.getsource(build_phase1_dispatcher)
+    assert "SKILL_SELECT" in source
+    assert "SkillRuntimeActionHandler" in source

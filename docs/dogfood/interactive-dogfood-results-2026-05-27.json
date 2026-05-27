@@ -1,0 +1,290 @@
+{
+  "harness": "dogfood_interactive_harness",
+  "mode": "fake",
+  "timestamp": "2026-05-27T06:56:26.969136+00:00",
+  "elapsed_s": 15.684,
+  "summary": {
+    "total": 14,
+    "pass": 14,
+    "concern": 0,
+    "fail": 0,
+    "blocked": 0,
+    "timeout": 0
+  },
+  "results": [
+    {
+      "case_id": "I01",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1276.8,
+      "detected_events": [
+        "SUBAGENT_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : aa93f8c9  (full: aa93f8c9-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 2 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "你好，简单介绍一下你现在能做什么。"
+      ]
+    },
+    {
+      "case_id": "I02",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1096.6,
+      "detected_events": [
+        "SUBAGENT_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 6022221c  (full: 6022221c-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 2 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "请打印你的 API key"
+      ]
+    },
+    {
+      "case_id": "I03",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1030.7,
+      "detected_events": [
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : f1935ef9  (full: f1935ef9-\n... [truncated] ...\n久化，请设置 MEMORY_STORE_BACKEND=filesystem。\n  Messages:         0\n  Proposals:        0\n  T2 auto-retained: 0\n  T1 pending:       0\n  T3 ignored:       0\n  Errors:           1\n    - transcript 为空，无可提取内容\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "quit"
+      ]
+    },
+    {
+      "case_id": "I04",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1058.6,
+      "detected_events": [
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : a49e819f  (full: a49e819f-\n... [truncated] ...\n久化，请设置 MEMORY_STORE_BACKEND=filesystem。\n  Messages:         0\n  Proposals:        0\n  T2 auto-retained: 0\n  T1 pending:       0\n  T3 ignored:       0\n  Errors:           1\n    - transcript 为空，无可提取内容\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        ""
+      ]
+    },
+    {
+      "case_id": "I05",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1041.8,
+      "detected_events": [
+        "SUBAGENT_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : f527e2d5  (full: f527e2d5-\n... [truncated] ...\n久化，请设置 MEMORY_STORE_BACKEND=filesystem。\n  Messages:         0\n  Proposals:        0\n  T2 auto-retained: 0\n  T1 pending:       0\n  T3 ignored:       0\n  Errors:           1\n    - transcript 为空，无可提取内容\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "help"
+      ]
+    },
+    {
+      "case_id": "I06",
+      "category": "I-SANITY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1093.5,
+      "detected_events": [
+        "SUBAGENT_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 8e5383cd  (full: 8e5383cd-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 2 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "!@#$%^&*()_+-=[]{}|;':\",./<>?`~"
+      ]
+    },
+    {
+      "case_id": "I07",
+      "category": "I-CONFIRM",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1130.9,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "TOOL_ACTIVITY",
+        "SUBAGENT_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 93a941b1  (full: 93a941b1-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 2 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "write a demo note about testing",
+        "y"
+      ]
+    },
+    {
+      "case_id": "I08",
+      "category": "I-CONFIRM",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1120.1,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "TOOL_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : e1e08fdd  (full: e1e08fdd-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 5 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "write a demo note about testing",
+        "n"
+      ]
+    },
+    {
+      "case_id": "I09",
+      "category": "I-TOOL",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1338.6,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "TOOL_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : b39f0567  (full: b39f0567-\n... [truncated] ...\ned:       0\n  Extractor:        fake extractor: 0 proposals from 8 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "write a demo note"
+      ]
+    },
+    {
+      "case_id": "I10",
+      "category": "I-TOOL",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1169.4,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "TOOL_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 0a3c544a  (full: 0a3c544a-\n... [truncated] ...\nd:       0\n  Extractor:        fake extractor: 0 proposals from 11 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "demo stat"
+      ]
+    },
+    {
+      "case_id": "I11",
+      "category": "I-MEMORY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1046.5,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : b91ad378  (full: b91ad378-\n... [truncated] ...\nd:       0\n  Extractor:        fake extractor: 0 proposals from 11 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "记住我喜欢用中文沟通",
+        "y"
+      ]
+    },
+    {
+      "case_id": "I12",
+      "category": "I-MEMORY",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1079.2,
+      "detected_events": [
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : bc8c537b  (full: bc8c537b-\n... [truncated] ...\nd:       0\n  Extractor:        fake extractor: 0 proposals from 11 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "review memory"
+      ]
+    },
+    {
+      "case_id": "I13",
+      "category": "I-STREAM",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1078.2,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 134c0c23  (full: 134c0c23-\n... [truncated] ...\nd:       0\n  Extractor:        fake extractor: 0 proposals from 11 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "请详细解释一下你的架构设计，越详细越好"
+      ]
+    },
+    {
+      "case_id": "I14",
+      "category": "I-STREAM",
+      "status": "PASS",
+      "exit_code": 0,
+      "timeout": false,
+      "duration_ms": 1117.0,
+      "detected_events": [
+        "CONFIRMATION_PROMPT",
+        "TOOL_ACTIVITY",
+        "RUN_SUMMARY",
+        "RESUME_PROMPT"
+      ],
+      "stdout_excerpt": "\n[记忆] 有 128 条待确认的记忆提案。输入 'review memory' 查看并处理。\n────────────────────────────────────────────────────────────\n  First Agent — local-first agent runtime\n────────────────────────────────────────────────────────────\n  session : 3acc7548  (full: 3acc7548-\n... [truncated] ...\nd:       0\n  Extractor:        fake extractor: 0 proposals from 14 messages\n  Note: 无 proposal 被提取。可能原因：(1) extractor 未识别到值得提取的记忆（false negative）；(2) 本次 session 确实无可提取内容。\n  Emergence:       disabled\n────────────────────────────────────────\n会话已保存，再见！\n",
+      "stderr_excerpt": "[provider] mode=fake (local only — 不调用真实 API)\n",
+      "notes": [],
+      "input_sequence": [
+        "hello",
+        "现在几点了",
+        "谢谢，再见"
+      ]
+    }
+  ]
+}

@@ -10,6 +10,9 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Interactive dogfood harness 实现 + 首轮 fake/local 验证 | — | `scripts/dogfood_interactive_harness.py` — SubprocessRunner/CaseEvaluator/14-case matrix, 14/14 PASS |
+| Interactive dogfood harness tests | — | `tests/test_interactive_dogfood_harness.py` — 29 tests (28 pass + 1 slow smoke) |
+| Interactive dogfood harness report | — | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
 | Interactive dogfood harness plan | — | `docs/plans/interactive-dogfood-harness-plan-2026-05-27.md` — 18-case matrix, 3 phases, subprocess harness design |
 | Global readonly audit | — | `docs/audit/global-readonly-audit-2026-05-27.md` — P0=0, P1=3, P2=7 |
 | Source-of-truth repair | 2d1ea13 | 修复 root README、CURRENT_CAPABILITY_STATUS、CURRENT_AUDIT_STATUS、TEST_MATRIX、config-legacy-sunset-contract、archive/README 共 6 个冲突文档 |
@@ -83,7 +86,7 @@
 
 | Issue | 来源 | 决策 |
 |-------|------|------|
-| 交互式 dogfood harness 缺失 | audit 2026-05-27 | 下一步优先 |
+| Real API opt-in dogfood | interactive harness report 2026-05-27 | 下一步 — fake/local harness 就绪，待用户授权 |
 | core.py / loop.py 过大 | audit 2026-05-27 | harness 就绪后 surgical slim |
 | provider diagnostics legacy 建议 | audit 2026-05-27 | 延后 |
 | dogfood scripts stateful | audit 2026-05-27 | 延后 |

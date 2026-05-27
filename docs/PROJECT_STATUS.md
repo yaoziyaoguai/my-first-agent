@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — real API dogfood 验证通过，进入维护/清理阶段
+**状态**: active — 交互式 dogfood harness 就绪，fake/local 14/14 PASS
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -26,6 +26,17 @@
 - 报告 commit (`ffa5677`) 与当前 HEAD 有断层（后续 commit 修复了 empty response bug）
 
 **下一步**: 建立交互式 dogfood harness（subprocess stdin/stdout），覆盖上述缺失路径。
+
+### Interactive Dogfood Harness
+
+| 指标 | 值 |
+|------|---|
+| Harness | `scripts/dogfood_interactive_harness.py` — 完成 |
+| 测试 | `tests/test_interactive_dogfood_harness.py` — 28 pass + 1 slow smoke |
+| Fake/local cases | 14/14 PASS（5 类别：I-SANITY/I-CONFIRM/I-TOOL/I-MEMORY/I-STREAM） |
+| 报告 | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
+| 结果 JSON | `docs/dogfood/interactive-dogfood-results-2026-05-27.json` |
+| Evidence level | **FAKE_LOCAL_SMOKE** — FakeProvider 下验证交互路径正确性 |
 
 ### Fake/Local Gate
 
@@ -55,27 +66,26 @@
 | summary overclaim | step_complete_event 对未执行步骤宣称完成 | 已修复 |
 | model_provider_required | 缺少 model_name 时 crash | 已修复 |
 
-### 已知剩余 Issues（均 P3）
+### 已知剩余 Issues
 
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
+| Real API opt-in dogfood | P2 | 下一步 — fake/local harness 已就绪，待用户授权真实 API |
+| Fake extractor zero proposals | P3 | fake-only limitation，不影响真实路径 |
+| 128 pending proposals 残留 | P3 | fake-only state pollution，不影响真实路径 |
 | Provider identity（模型自称"Claude"） | P3 | **不修** — 当前 provider 语境下不优先 |
 | Product context（I1/I7） | P3 | 延后 |
 | C1 event counting harness bug | P3 | 延后 |
-| 交互式 dogfood harness（subprocess） | P3 | 延后 |
 
 ---
 
 ## 2. 推荐下一步
 
-基于 [全局只读审计](audit/global-readonly-audit-2026-05-27.md)（2026-05-27，P0=0, P1=3, P2=7）：
+基于交互式 dogfood harness 完成状态（14/14 PASS, fake/local）：
 
-1. **Config safety boundary**（本轮进行中）— `config/config.yaml` tracked dirty 的安全边界文档化
-2. **Source-of-truth repair**（本轮进行中）— 修复 active docs 与 PROJECT_STATUS 的冲突
-3. **Dogfood evidence 口径硬化**（本轮进行中）— 降低过度乐观表述
-4. **交互式 dogfood harness**（当前 loop）— subprocess harness 覆盖 y/n、resume、tool/memory confirmation，计划已就绪
-5. **Runtime evidence diet** — 区分 business action 与 probe/noop evidence
-6. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取（仅当 harness 就绪后）
+1. **Real API opt-in dogfood**（下一步，需用户授权）— 用户显式授权后，跑完整 14-case + interrupt/resume matrix
+2. **Runtime evidence diet** — 区分 business action 与 probe/noop evidence
+3. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -126,6 +136,8 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 进度账本 | `docs/PROGRESS_LEDGER.md` |
 | 工程流程 | `docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/dev/ENGINEERING_WORKFLOW.md` |
 | 最新 dogfood | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
+| 交互式 harness 报告 | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
+| 交互式 harness plan | `docs/plans/interactive-dogfood-harness-plan-2026-05-27.md` |
 | 最新审计 | `docs/audit/global-readonly-audit-2026-05-27.md` |
 | 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
 | 配置示例 | `config/config.example.yaml` |

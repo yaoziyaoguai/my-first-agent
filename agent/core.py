@@ -3,6 +3,54 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
+
+import agent.tools  # noqa: F401  触发所有工具注册
+from agent import protocol_debug as _protocol_debug
+
+# ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
+# CLI meta-command 检测/渲染已提取到 agent.cli_commands。
+# 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
+#
+# Why kept: 旧测试和 dogfood scripts 仍通过 core._looks_like_* 引用。
+# Removal criteria: 所有外部引用迁移到 agent.cli_commands 直 import 后移除。
+# Sunset: v0.4+。不新增引用到此别名。
+from agent.cli_commands import (  # noqa: F401  — deprecated backward-compat re-exports
+    detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
+)
+from agent.cli_commands import (
+    detect_forget_memory as _looks_like_forget_memory,
+)
+from agent.cli_commands import (
+    detect_nl_delegation as _looks_like_nl_delegation,
+)
+from agent.cli_commands import (
+    detect_show_memories as _looks_like_show_memories,
+)
+from agent.cli_commands import (
+    detect_show_subagents as _looks_like_show_subagents,
+)
+from agent.cli_commands import (
+    render_delegate_error,
+    render_delegate_not_found,
+    render_delegate_result,
+    render_memory_forget_not_found,
+    render_memory_forget_result,
+    render_memory_list,
+    render_subagent_list,
+)
+from agent.confirm_handlers import (
+    ConfirmationContext,
+)
+from agent.context_builder import (
+    build_execution_messages as build_execution_messages_from_state,
+)
+from agent.context_builder import (
+    build_planning_messages as build_planning_messages_from_state,
+)
+from agent.core_contexts import (
+    build_confirmation_context,
+    build_loop_context,
+)
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
     DisplayEvent,
@@ -17,77 +65,38 @@ from agent.display_events import (
     memory_injected_event,
     memory_list_event,
     memory_stored_event,
-    subagent_delegated_event,
-    subagent_delegating_event,
-    subagent_list_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
     state_inconsistency_reset_event,
+    subagent_delegated_event,
+    subagent_delegating_event,
+    subagent_list_event,
     tool_requested,
 )
-from agent.core_contexts import (
-    build_confirmation_context,
-    build_loop_context,
-)
 from agent.loop import LoopDependencies, run_main_loop
+from agent.loop_context import LoopContext
+from agent.memory import compress_history
+from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
+from agent.memory_runtime import MemoryEvaluationAction, create_memory_runtime
+from agent.model_call import build_default_model_client, call_model
 from agent.model_output_dispatch import (
     ModelOutputDispatchDependencies,
     dispatch_model_output,
 )
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
-from agent.model_call import build_default_model_client, call_model
-from agent import protocol_debug as _protocol_debug
-from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
-from agent.runtime_loop_fields import build_runtime_loop_fields
+from agent.planner import format_plan_for_display, generate_plan
 from agent.prompt_builder import build_system_prompt
-from agent.state import create_agent_state, task_status_requires_plan
-import agent.tools  # noqa: F401  触发所有工具注册
-from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
-# ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
-# CLI meta-command 检测/渲染已提取到 agent.cli_commands。
-# 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
-#
-# Why kept: 旧测试和 dogfood scripts 仍通过 core._looks_like_* 引用。
-# Removal criteria: 所有外部引用迁移到 agent.cli_commands 直 import 后移除。
-# Sunset: v0.4+。不新增引用到此别名。
-from agent.cli_commands import (  # noqa: F401  — deprecated backward-compat re-exports
-    detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
-    detect_forget_memory as _looks_like_forget_memory,
-    detect_nl_delegation as _looks_like_nl_delegation,
-    detect_show_memories as _looks_like_show_memories,
-    detect_show_subagents as _looks_like_show_subagents,
-    render_memory_list,
-    render_memory_forget_result,
-    render_memory_forget_not_found,
-    render_subagent_list,
-    render_delegate_result,
-    render_delegate_not_found,
-    render_delegate_error,
-)
-
-
-from config import MODEL_NAME, MAX_CONTINUE_ATTEMPTS
-from agent.memory import compress_history
-from agent.planner import generate_plan, format_plan_for_display
-from agent.tool_registry import get_model_visible_tools
-from agent.context_builder import (
-    build_planning_messages as build_planning_messages_from_state,
-    build_execution_messages as build_execution_messages_from_state,
-)
-
-
-from agent.confirm_handlers import (
-    ConfirmationContext,
-)
-
 from agent.response_handlers import (
     handle_end_turn_response,
     handle_max_tokens_response,
     handle_tool_use_response,
 )
-from agent.loop_context import LoopContext
-from agent.memory_runtime import MemoryEvaluationAction, create_memory_runtime
+from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
+from agent.runtime_loop_fields import build_runtime_loop_fields
+from agent.state import create_agent_state, task_status_requires_plan
+from agent.tool_registry import get_model_visible_tools
+from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
 
 DEBUG_PROTOCOL = False
 # MY_FIRST_AGENT_PROTOCOL_DUMP 的实际 guard 在 agent.protocol_debug 中；
@@ -166,8 +175,8 @@ def _maybe_run_l2_inline(state) -> None:
     这是 Phase 5b foundation，recall/injection 留待后续。
     """
     try:
-        from agent.memory_l2 import run_l2_inline_extraction
         from agent.memory_fs_store import FilesystemMemoryStore
+        from agent.memory_l2 import run_l2_inline_extraction
 
         messages = state.conversation.messages
         # 取最近 20 条消息作为 L2 inline extraction 的 segment
@@ -226,18 +235,35 @@ class TurnState:
     print_assistant_newline: bool = False
 
 
-def refresh_runtime_system_prompt() -> str:
-    """
-    重新生成当前运行态实际生效的 system prompt，并写回 state。
+def refresh_runtime_system_prompt(dispatcher=None) -> str:
+    """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
-    注意：
-    - 当前阶段仍然沿用 build_system_prompt() 作为 system prompt 的生成器
-    - 但最终真正生效的结果，以 state.runtime.system_prompt 为准
-    - Memory Kernel v1：从 _memory_runtime 获取 MemorySnapshot 并传入
-      build_system_prompt；无已批准 memory 时 snapshot 为空，不影响 prompt。
+    Loop 3 (Memory E2E) 收敛：当 dispatcher 可用时，MEMORY_RECALL 通过
+    RuntimeActionDispatcher 统一 dispatch，确保 fake/real 共享核心 recall 路径。
+    模块初始化时 dispatcher 为 None，回退到直接路径。
     """
-    memory_snapshot = _memory_runtime.snapshot_for_prompt()
-    system_prompt = build_system_prompt(memory_snapshot=memory_snapshot)
+    if dispatcher is not None:
+        # 统一路径：通过 dispatcher dispatch MEMORY_RECALL
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_RECALL,
+            source="core_loop",
+            parent_trace_id="",
+            payload={},
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        result = route(request)
+        memory_section = result.payload.get("prompt_section", "")
+        system_prompt = build_system_prompt(memory_section=memory_section)
+    else:
+        # 回退：模块初始化时 dispatcher 尚不可用
+        memory_snapshot = _memory_runtime.snapshot_for_prompt()
+        system_prompt = build_system_prompt(memory_snapshot=memory_snapshot)
+
     state.set_system_prompt(system_prompt)
     return state.get_system_prompt()
 
@@ -346,6 +372,7 @@ def _execute_subagent_delegation(
     - 进度事件仍通过 on_runtime_event 发射
     """
     from pathlib import Path
+
     from agent.subagent_system.delegation import delegate_once
     from agent.subagent_system.registry import SubAgentRegistry
     from agent.subagent_system.request import SubAgentRequest
@@ -549,7 +576,10 @@ def chat(
             return f"未找到 ID 为「{record_id}」的记忆。"
         # 否则按 content 关键词匹配
         records = _memory_runtime.list_records()
-        matched = [r for r in records if forget_keyword.lower() in getattr(r, "content", "").lower()]
+        matched = [
+            r for r in records
+            if forget_keyword.lower() in getattr(r, "content", "").lower()
+        ]
         if not matched:
             return render_memory_forget_not_found(forget_keyword)
         removed_count = 0
@@ -577,6 +607,7 @@ def chat(
     # 产品路径不应依赖 test fixtures（RT-07）。
     if _looks_like_show_subagents(user_input):
         from pathlib import Path
+
         from agent.subagent_system.registry import SubAgentRegistry
 
         try:
@@ -668,8 +699,8 @@ def chat(
         # 复用 awaiting_user_input 机制等待用户确认。
         confirmation_request = _memory_runtime.get_pending_confirmation(result.candidate_id)
         if confirmation_request is not None:
-            from agent.memory_interaction import build_memory_pending_request
             from agent.checkpoint import save_checkpoint as _save_ckpt
+            from agent.memory_interaction import build_memory_pending_request
 
             pending = build_memory_pending_request(
                 confirmation_request,
@@ -722,11 +753,12 @@ def chat(
     # tool_use 块，它必须与稍后的 tool_result 配对。若此刻压缩，可能把该
     # tool_use 丢进摘要，留下悬空 tool_result，下次调用 API 会直接报错。
 
-    runtime_system_prompt = refresh_runtime_system_prompt()
+    # Loop 3 (Memory E2E): 传入 dispatcher 统一 recall 路径
+    runtime_system_prompt = refresh_runtime_system_prompt(
+        dispatcher=runtime_action_dispatcher
+    )
 
     # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。
-    # 这里再次调用 snapshot_for_prompt() 以获取条数——与 refresh_runtime_system_prompt
-    # 内部的调用是重复的，但 _noop_event_logger 下不产生副作用，且避免改函数签名。
     _memory_snapshot = _memory_runtime.snapshot_for_prompt()
     if _memory_snapshot.items:
         _safe_emit_runtime_event(
@@ -861,7 +893,10 @@ def chat(
     # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
     if state.task.current_plan and state.task.status == "running":
         state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry)
+        return _run_main_loop(
+            turn_state, _loop_ctx,
+            tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
+        )
 
     # 到这里意味着要开启一轮全新的任务。
     # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
@@ -871,7 +906,10 @@ def chat(
     state.reset_task()
 
     plan_result = _run_planning_phase(user_input, turn_state, _loop_ctx)
-    return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry)
+    return _handle_planning_phase_result(
+        plan_result, turn_state, _loop_ctx,
+        tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
+    )
 
 
 # ========== 规划阶段 ==========
@@ -982,7 +1020,10 @@ def _handle_planning_phase_result(
         return "好的，已取消。"
     if plan_result == "awaiting_plan_confirmation":
         return ""
-    return _run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry)
+    return _run_main_loop(
+        turn_state, loop_ctx,
+        tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry,
+    )
 
 
 def _start_planning_for_handler(
@@ -1110,7 +1151,9 @@ def _run_main_loop(
         runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
         provider_kind=resolved_kind,
         provider_external_call=resolved_call,
-        provider_supports_streaming=bool(getattr(loop_ctx.model_provider, "supports_streaming", False)),
+        provider_supports_streaming=bool(
+            getattr(loop_ctx.model_provider, "supports_streaming", False)
+        ),
         streaming_events=_streaming_events,
         # trace infrastructure: 从 TurnState 线程化注入 trace sink 到 LoopDependencies
         on_trace_event=getattr(turn_state, "on_trace_event", None),

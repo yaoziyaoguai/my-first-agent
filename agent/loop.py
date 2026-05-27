@@ -415,34 +415,10 @@ def _try_phase1_turn_end_runtime_action(
         # MEMORY_CONSOLIDATE 失败不阻塞 loop 也不阻塞其他 dispatch
         pass
 
-    # MEMORY_RECALL action（独立 try/except——失败不阻断其他 dispatch）
-    # 中文学习边界：Memory Recall 是跨回合只读 snapshot 生成，挂在 turn-end hook
-    # 的最末阶段执行——此时 MEMORY_CONSOLIDATE 已完成，store 状态最完整。
-    # 只读操作（不写 store），生成 governed MemorySnapshot 用于下一轮 context injection。
-    #
-    # 为什么挂在 turn-end hook 上：
-    # - recall 读取的是累积 store 状态，不依赖当前 turn 的模型输出
-    # - turn-end 时 store 状态最完整（retain + consolidate 均已完成）
-    # - 错误时静默降级为 no_memory，不影响主流程
-    try:
-        recall_request = RuntimeActionRequest(
-            action_type=RuntimeActionType.MEMORY_RECALL,
-            source="core_loop",
-            parent_trace_id="",
-            payload={
-                "core_loop_invoked": True,
-                "core_entrypoint": "core.chat",
-                "runtime_hook_name": "loop.turn_end",
-                "provider_kind": provider_kind,
-                "provider_external_call": provider_external_call,
-                "external_side_effects": False,
-            },
-        )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-        route(recall_request)
-    except Exception:
-        # MEMORY_RECALL 失败不阻塞 loop 也不阻塞其他 dispatch
-        pass
+    # Loop 3 (Memory E2E): MEMORY_RECALL 已收敛到 refresh_runtime_system_prompt()
+    # 中统一 dispatch，不再在 turn-end hook 中重复调用。recall 发生在每轮开始时
+    # （chat() → refresh_runtime_system_prompt(dispatcher=...)），确保 system prompt
+    # 通过 dispatcher 生成，fake/real 共享核心路径。
 
     # SKILL_SELECT action（独立 try/except——失败不阻断其他 dispatch）
     # 中文学习边界：Skill Selection 通过 turn-end hook dispatch 验证 L3 evidence

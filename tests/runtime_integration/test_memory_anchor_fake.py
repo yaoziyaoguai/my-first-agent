@@ -37,7 +37,6 @@ from agent.runtime_integration.evidence import (
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.schema import RuntimeActionRequest
 
-
 # ========== 测试辅助 ==========
 
 
@@ -154,8 +153,13 @@ class TestMemoryAnchorFakeProviderCoreChat:
         )
 
         # 验证 payload 包含完整 core loop 来源证据
-        first_call = spy.route_calls[0]
-        payload = dict(first_call.payload)
+        # Loop 3 (Memory E2E)：MEMORY_RECALL 现在从 refresh_runtime_system_prompt()
+        # 先于 turn-end hook 触发，因此 spy.route_calls[0] 可能不是 MEMORY_TURN_END_PROPOSAL。
+        # 必须按 action_type 过滤。
+        _action = RuntimeActionType.MEMORY_TURN_END_PROPOSAL
+        mem_call = next((c for c in spy.route_calls if c.action_type == _action), None)
+        assert mem_call is not None, "spy 必须捕获到 MEMORY_TURN_END_PROPOSAL"
+        payload = dict(mem_call.payload)
         assert payload.get("core_loop_invoked") is True, (
             "payload.core_loop_invoked 必须为 True——"
             "该字段由 loop.py turn-end hook 注入"
@@ -235,11 +239,14 @@ class TestMemoryAnchorFakeProviderCoreChat:
         assert isinstance(result, str)
         assert len(spy.route_calls) >= 1
 
-        first_call = spy.route_calls[0]
-        assert first_call.source == "core_loop", (
-            f"source 必须为 'core_loop'，实际 {first_call.source!r}"
+        # Loop 3 (Memory E2E)：按 action_type 过滤，不取 [0]
+        _action = RuntimeActionType.MEMORY_TURN_END_PROPOSAL
+        mem_call = next((c for c in spy.route_calls if c.action_type == _action), None)
+        assert mem_call is not None, "spy 必须捕获到 MEMORY_TURN_END_PROPOSAL"
+        assert mem_call.source == "core_loop", (
+            f"source 必须为 'core_loop'，实际 {mem_call.source!r}"
         )
-        payload = dict(first_call.payload)
+        payload = dict(mem_call.payload)
         assert payload.get("core_entrypoint") == "core.chat"
         assert payload.get("runtime_hook_name") == "loop.turn_end"
 
@@ -325,8 +332,11 @@ class TestMemoryAnchorFakeProviderCoreChat:
         assert isinstance(result, str)
         assert len(spy.route_calls) >= 1
 
-        first_call = spy.route_calls[0]
-        payload = dict(first_call.payload)
+        # Loop 3 (Memory E2E)：按 action_type 过滤
+        _action = RuntimeActionType.MEMORY_TURN_END_PROPOSAL
+        mem_call = next((c for c in spy.route_calls if c.action_type == _action), None)
+        assert mem_call is not None, "spy 必须捕获到 MEMORY_TURN_END_PROPOSAL"
+        payload = dict(mem_call.payload)
 
         # 回归守卫：provider_kind 必须仍为 "fake"
         assert payload.get("provider_kind") == "fake", (
@@ -335,12 +345,14 @@ class TestMemoryAnchorFakeProviderCoreChat:
 
         # 新增字段：provider_external_call 必须为 False
         assert payload.get("provider_external_call") is False, (
-            f"参数化后 provider_external_call 必须为 False，实际 {payload.get('provider_external_call')!r}"
+            f"provider_external_call 必须为 False，"
+            f"实际 {payload.get('provider_external_call')!r}"
         )
 
         # 回归守卫：external_side_effects 必须仍为 False
         assert payload.get("external_side_effects") is False, (
-            f"参数化后 external_side_effects 必须仍为 False，实际 {payload.get('external_side_effects')!r}"
+            f"external_side_effects 必须仍为 False，"
+            f"实际 {payload.get('external_side_effects')!r}"
         )
 
 

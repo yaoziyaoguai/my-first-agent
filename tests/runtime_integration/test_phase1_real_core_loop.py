@@ -44,7 +44,6 @@ from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
 
-
 # ========== 测试辅助 ==========
 
 
@@ -288,7 +287,7 @@ class TestFakeProviderSafety:
         stream2 = list(provider.stream(system="", messages=messages, tools=[]))
 
         assert len(stream1) == len(stream2)
-        for e1, e2 in zip(stream1, stream2):
+        for e1, e2 in zip(stream1, stream2, strict=True):
             assert e1.text_delta == e2.text_delta
             assert e1.is_final == e2.is_final
 
@@ -606,7 +605,12 @@ class TestCoreChatWiring:
         )
 
         # 验证捕获的 request payload 包含完整 core loop 来源证据
-        first_call = spy.route_calls[0]
+        # Loop 3 (Memory E2E)：MEMORY_RECALL 现在从 refresh_runtime_system_prompt()
+        # 先于 turn-end hook 触发，因此 spy.route_calls[0] 可能不是 MEMORY_TURN_END_PROPOSAL。
+        # 必须按 action_type 过滤。
+        _action = RuntimeActionType.MEMORY_TURN_END_PROPOSAL
+        first_call = next((c for c in spy.route_calls if c.action_type == _action), None)
+        assert first_call is not None, "spy 必须捕获到 MEMORY_TURN_END_PROPOSAL"
         payload = dict(first_call.payload)
         assert payload.get("core_loop_invoked") is True, (
             "request.payload.core_loop_invoked 必须为 True——"

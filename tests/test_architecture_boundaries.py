@@ -25,10 +25,9 @@ mutate state 来绕过 runtime/handler 边界。
 from __future__ import annotations
 
 import ast
+import re
 from collections import Counter
 from pathlib import Path
-import re
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 AGENT_DIR = PROJECT_ROOT / "agent"
@@ -309,6 +308,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 构建 RuntimeActionDispatcher 并注入到 LoopContext。不改变 core 的
         # 模块级 import surface，不引入新的模块级耦合。
         "agent.runtime_integration.phase1_hook",
+        # Loop 3 (Memory E2E)：refresh_runtime_system_prompt() 内部 local import，
+        # 仅用于构造 RuntimeActionRequest 并 dispatch MEMORY_RECALL。
+        # 不改变 core 的模块级 import surface，不引入新的模块级耦合。
+        "agent.runtime_integration.schema",
         "agent.state",
         # Phase 2 SubAgent demo：chat() 内 local import，仅用于
         # "show subagents" / "delegate to" CLI meta-command。

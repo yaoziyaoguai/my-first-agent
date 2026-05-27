@@ -26,13 +26,16 @@ from agent.memory_contracts import (
     MemorySource,
 )
 
-
 RETAIN_PREFIXES = (
     "remember that ",
     "remember:",
     "remember ",
     "save this:",
     "save that ",
+    "请记住：",
+    "请记住:",
+    "请记住 ",
+    "请记住",
     "记住：",
     "记住:",
     "记住",
@@ -353,5 +356,5 @@ def _build_candidate(
 def _candidate_id(*, source: MemorySource, scope: MemoryScope, content: str) -> str:
     """生成稳定候选 id；不代表持久化记录 id。"""
 
-    digest = sha256(f"{source.value}:{scope.value}:{content}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{source.value}:{scope.value}:{content}".encode()).hexdigest()
     return f"candidate:{digest[:16]}"

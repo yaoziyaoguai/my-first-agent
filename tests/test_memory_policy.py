@@ -15,7 +15,6 @@ import pytest
 
 from agent.memory_contracts import MemoryDecisionType, MemorySensitivity
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 POLICY_MODULE = PROJECT_ROOT / "agent" / "memory_policy.py"
 
@@ -77,6 +76,12 @@ def test_policy_defaults_to_no_op_for_ordinary_message() -> None:
     [
         ("remember that I prefer concise answers", "I prefer concise answers"),
         ("记住：我喜欢简洁回答", "我喜欢简洁回答"),
+        # 中文礼貌形式 "请记住" — 最自然的"请帮我记住"表达
+        ("请记住：我用中文讨论复杂工程问题", "我用中文讨论复杂工程问题"),
+        (
+            "请记住一个测试偏好：我喜欢用中文讨论复杂工程问题",
+            "一个测试偏好：我喜欢用中文讨论复杂工程问题",
+        ),
     ],
 )
 def test_policy_explicit_retain_requires_confirmation(

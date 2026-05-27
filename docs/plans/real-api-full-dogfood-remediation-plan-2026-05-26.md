@@ -1,32 +1,60 @@
 # Real API Full Dogfood Remediation Plan
 
 **日期**: 2026-05-26
-**状态**: draft
+**状态**: active (2026-05-27 更新: ISSUE-002 fixed, ISSUE-001 harness enhanced)
 **来源**: real-api-full-dogfood-sweep-report-2026-05-26
+
+## 修复记录 (2026-05-27)
+
+### ISSUE-002: FIXED ✓
+
+**根因**: `agent/response_handlers.py::handle_end_turn_response()` 第 661 行对普通
+end_turn 返回 `""`（空字符串）。设计假设模型正文已在 `_call_model()` 流式阶段
+逐字打印到 stdout，返回空串避免交互式 CLI 重复打印。但非交互式调用方（dogfood
+harness / 程序化 API）依赖 `chat()` 返回值获取输出，收到空响应。
+
+**修复**: 将 `return ""` 改为 `return extract_text_fn(response.content) or ""`。
+交互式 CLI 的 dedup 逻辑在 `main.py:174` 处理，不依赖 response_handlers 层返回空串。
+
+**变更文件**:
+- `agent/response_handlers.py:660-661` — 返回模型正文而非空串
+- `tests/test_api_projection.py` — 更新 `test_end_turn_reply_does_not_duplicate_streamed_text` 断言
+- `tests/test_api_projection.py` — 新增 `test_safety_refusal_returns_non_empty_response`
+
+**验证**: rerun G2 case → PASS ("Correctly refused to print key")。20 case sweep → 19 PASS / 1 CONCERN / 0 FAIL。
+
+### ISSUE-001: HARNESS ENHANCED (partial)
+
+**根因**: Memory confirmation 是两阶段交互设计——`chat()` 返回 `""` 并保存 checkpoint
+等待 y/n 输入。非交互式 harness 的单轮调用无法完成确认。
+
+**修复**: 在 `scripts/real_api_dogfood_sweep.py::call_agent_chat()` 新增
+`confirmation_reply` 参数——首次调用后检测 `confirmation_requested` 事件，
+自动发起第二轮 `chat(confirmation_reply)` 跟进确认。
+
+**已知限制**: 两轮 events 合并后 event counting 偶有漏计（本轮 C1 中 model
+已确认存储但 memory_actions 计为 0），需进一步调试 harness event pipeline。
+
+**变更文件**:
+- `scripts/real_api_dogfood_sweep.py` — `call_agent_chat()` 支持 `confirmation_reply`
 
 ## 问题分组
 
-### 1. Runtime 文本返回值 (P3 — ISSUE-002)
+### 1. Runtime 文本返回值 (P3 — ISSUE-002) ✅ FIXED
 
 **问题**: G2 (Safety: 拒绝打印 API key) 通过 core.chat() 调用后返回空字符串。
 模型确实被调用了 (4.2s elapsed)，3 个 RuntimeEvent 被触发，但最终文本为空。
 
 **影响**: 用户看不到模型的拒绝回复。在真实 CLI 使用中这可能意味着某些模型响应被静默丢弃。
 
-**排查方向**:
-1. 跟踪 `agent/loop.py::run_main_loop()` 的返回值构建逻辑
-2. 检查 turn-end summary 是否在特定条件下覆盖了模型文本输出
-3. 检查 streaming event 是否被 runtime_event callback 正确转换为文本
-4. 验证 `_call_model()` → response → text extraction 链路
+**根因**: `handle_end_turn_response()` 返回 `""`——设计假设正文已流式打印。
+非交互式调用方依赖 `chat()` 返回值获取文本。
 
-**建议修复**: 在 loop.py 中添加 focused test，覆盖 "模型返回纯文本拒绝" 场景，确保文本经过完整链路到达 chat() 返回值。
+**修复**: 返回 `extract_text_fn(response.content) or ""`；dedup 责任上移至 `main.py`。
 
 **优先级**: 低 (P3)。不影响真实 API 基本使用，但可能影响用户体验。
 
-### 2. Interactive Confirmation Harness (P3 — ISSUE-001)
-
-**问题**: C1 (Memory: 记住偏好) 返回空字符串——memory confirmation 等待 y/n 交互。
-当前 harness 不支持多轮对话，无法完成 confirmation → retain → store 的完整链路。
+### 2. Interactive Confirmation Harness (P3 — ISSUE-001) 🔧 PARTIAL
 
 **影响**: Memory 写入功能无法通过自动化 dogfood 验证。
 

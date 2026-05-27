@@ -8,7 +8,10 @@ execution to lower-level modules.
 from __future__ import annotations
 
 from typing import Any
+
 from agent.checkpoint import clear_checkpoint, save_checkpoint
+from agent.conversation_events import append_tool_result, has_tool_result
+from agent.display_events import user_input_requested
 from agent.model_output_resolution import (
     EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
     EVENT_RUNTIME_NO_PROGRESS,
@@ -18,19 +21,15 @@ from agent.model_output_resolution import (
     resolve_tool_use_block,
 )
 from agent.pending_requests import PendingUserInputRequest
-from agent.display_events import user_input_requested
-from agent.runtime_observer import log_event
 from agent.planner import Plan
+from agent.runtime_observer import log_event
 from agent.task_runtime import (
     USER_INPUT_STEP_TYPES,
     advance_current_step_if_needed,
     is_current_step_completed,
 )
-
 from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
-from agent.conversation_events import append_tool_result, has_tool_result
 from agent.tool_registry import is_meta_tool
-
 
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
@@ -395,7 +394,7 @@ def _maybe_advance_step(state: Any) -> str | None:
     if state.task.current_plan:
         plan = Plan.model_validate(state.task.current_plan)
         idx = state.task.current_step_index
-        
+
         if idx < len(plan.steps) - 1:
             if state.task.confirm_each_step:
                 state.task.status = "awaiting_step_confirmation"
@@ -657,5 +656,7 @@ def handle_end_turn_response(
         clear_checkpoint()
         state.reset_task()
 
-    # 普通 end_turn：返回空串。正文已流式打过，main_loop 不会重复打印。
-    return ""
+    # 普通 end_turn：返回模型正文。
+    # 交互式 CLI 通过 main.py:174 的 dedup 逻辑避免重复打印；
+    # 非交互式调用方（dogfood harness / 程序化 API）依赖此返回值获取文本。
+    return extract_text_fn(response.content) or ""

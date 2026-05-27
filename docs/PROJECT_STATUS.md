@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1-6 (P0+P1) 完成，Loop 7 (Test Taxonomy) 进行中
+**状态**: remediation — Loop 1-7 (P0+P1) 完成，Loop 8 (Surgical Hub Slimming) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -135,7 +135,7 @@
 | Memory confirm→retain→recall E2E 未验证 | ~~P1~~ | **RESOLVED** — Loop 3 完成 MEMORY_RECALL→prompt 闭环 |
 | ~~Resume 本质是 prompt 拼接~~ | ~~P1~~ | **RESOLVED** — Loop 6 schema versioning + backward compat (b759e62) |
 | ~~无 checkpoint schema 版本治理~~ | ~~P1~~ | **RESOLVED** — Loop 6 SCHEMA_VERSION + _MIGRATION_REGISTRY (b759e62) |
-| 大量 L3 标签测试实际是 L2 | P1 | Loop 7 |
+| 大量 L3 标签测试实际是 L2 | ~~P1~~ | **RESOLVED** — Loop 7 taxonomy guard tests + file rename (0844ed8) |
 | Evidence overclaim (probe 计为能力) | P1 | Loop 2 |
 | core.py 是 god object (1172 行) | P1 | Loop 8 |
 | Memory extractor zero proposals | P2 | 内联路径已部分修复 |
@@ -159,7 +159,8 @@
 4. ~~**Loop 4: Runtime Entry Consolidation (P1)**~~ — **COMPLETED** — CLI READ_ONLY 命令走统一 dispatcher，turn-end hook 精简 (c94fc18)
 5. ~~**Loop 5: Interactive Harness 扩展 (P1)**~~ — **COMPLETED** — 4 个新 case（I-COMPLEX/I-INTERRUPT/I-STREAM/I-RESUME），20 cases 覆盖 8 类别，datetime 修复 (b850605)
 6. ~~**Loop 6: Checkpoint/Resume 能力补全 (P1)**~~ — **COMPLETED** — schema 版本治理、v0→v1 迁移、future version 拒绝 (b759e62)
-7. **Loop 7: Test Taxonomy Reclassification (P1)** — L3→L2 降级不合规测试标签（**进行中**）
+7. **Loop 7: Test Taxonomy Reclassification (P1)** — L3→L2 降级不合规测试标签（**COMPLETED** — 0844ed8）
+8. **Loop 8: Surgical Hub Slimming (P1)** — core.py/loop.py 行为保持型抽取（**进行中**）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

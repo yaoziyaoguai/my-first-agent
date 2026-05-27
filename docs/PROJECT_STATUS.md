@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS fake + 15/15 PASS real），memory policy "请记住" 前缀修复已完成
+**状态**: remediation — 全能力红队审计完成（总分 4.2/10），进入 capability remediation loop 阶段
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -91,24 +91,43 @@
 
 ### 已知剩余 Issues
 
+基于 2026-05-27 全能力红队审计，当前 P0/P1/P2 问题：
+
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
-| Memory extractor zero proposals | P2→P1 部分修复 | 内联路径："请记住" 前缀缺失已修复 (3089316)；session-end extractor 仍只处理 episodic proposals，语义型偏好会被过滤 |
-| RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为，不影响功能 |
-| Fake extractor zero proposals (fake mode) | P3 | fake-only limitation |
-| Provider identity | P3 | **不修** |
+| config/config.yaml tracked dirty（安全风险） | P0 | Loop 1 — 需用户确认处理方案 |
+| agent_log.jsonl 773MB 无治理/可能含敏感信息 | P0 | Loop 2 — 建立轮转/脱敏/上限 |
+| Memory recall 未真正进入 prompt context | P0 | Loop 3 — recall 路径 split 修复 |
+| CLI shortcut 构成第二能力平面 | P1 | Loop 4 — 收敛到统一 dispatcher |
+| Turn-end hook 过重（11 种 action） | P1 | Loop 4 — 精简 |
+| Fake/real memory 不共享核心路径 | P1 | Loop 3 |
+| Memory confirm→retain→recall E2E 未验证 | P1 | Loop 3 |
+| Resume 本质是 prompt 拼接 | P1 | Loop 6 |
+| 无 checkpoint schema 版本治理 | P1 | Loop 6 |
+| 大量 L3 标签测试实际是 L2 | P1 | Loop 7 |
+| Evidence overclaim (probe 计为能力) | P1 | Loop 2 |
+| core.py 是 god object (1172 行) | P1 | Loop 8 |
+| Memory extractor zero proposals | P2 | 内联路径已部分修复 |
+| RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为 |
+| Provider identity | P3 | 不修 |
 | Product context（I1/I7） | P3 | 延后 |
-| C1 event counting harness bug | P3 | 延后 |
 
 ---
 
 ## 2. 推荐下一步
 
-基于交互式 dogfood harness 完成状态（14/14 PASS, fake/local）：
+基于全能力红队审计结果（总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL）：
 
-1. **Memory E2E 验证闭环** — 内联路径已修复，需验证 confirm→retain→recall 完整流程在 fake+real API 下正确
-2. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
-3. **Interrupt (Ctrl+C) dogfood** — 交叉平台信号发送
+**当前阶段：capability remediation loop**
+
+按优先级顺序执行 `docs/plans/2026-05-27-capability-remediation-loop-plan.md` 中的 loop：
+
+1. **Loop 1: Config Safety & Security Harden (P0)** — 处理 config/config.yaml tracked dirty 风险
+2. **Loop 2: Log Hygiene & Evidence Governance (P0)** — agent_log.jsonl 773MB 治理、脱敏验证
+3. **Loop 3: Memory E2E 验证闭环 (P0)** — recall 路径 split 修复、confirm→retain→recall E2E
+4. **Loop 4: Runtime Entry Consolidation (P1)** — CLI shortcuts 收敛、turn-end hook 精简
+5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖
+6. **Loop 6: Checkpoint/Resume 能力补全 (P1)** — schema 版本治理、interrupt→resume E2E
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -117,6 +136,7 @@
 - Hook/MCP/SubAgent L1/RAG/sandbox 新能力
 - Broad runtime refactor
 - 第二条 runtime flow
+- 新 capability milestone（在所有 P0/P1 完成前）
 
 ---
 
@@ -162,7 +182,9 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 最新 dogfood (interactive) | `docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md` |
 | 交互式 harness 报告 | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
 | 交互式 harness plan | `docs/plans/interactive-dogfood-harness-plan-2026-05-27.md` |
-| 最新审计 | `docs/audit/global-readonly-audit-2026-05-27.md` |
+| 全能力红队审计 | `docs/audits/2026-05-27-full-capability-red-team-audit.md` |
+| 最新审计（全局） | `docs/audit/global-readonly-audit-2026-05-27.md` |
+| Remediation loop plan | `docs/plans/2026-05-27-capability-remediation-loop-plan.md` |
 | 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
 | 配置示例 | `config/config.example.yaml` |
 | 运行时宪法 | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` |

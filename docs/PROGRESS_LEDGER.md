@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| 全能力红队审计 | — | 15 域 (A-O) 达标审计：总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL，P0=3 / P1=10 / P2=14 / P3=5。产出审计报告 + remediation loop plan（12 loops）。进入 capability remediation 阶段 |
 | Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
 | Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |
@@ -77,32 +78,37 @@
 
 ---
 
-## 当前 P1/P2/P3
+## 当前 P0/P1/P2/P3
 
-### P1（本轮修复中）
+基于 2026-05-27 全能力红队审计。详见 `docs/audits/2026-05-27-full-capability-red-team-audit.md`。
+
+### P0（必须立即处理）
 
 | Issue | 来源 | 状态 |
 |-------|------|------|
-| config/config.yaml tracked dirty 安全边界 | audit 2026-05-27 | 文档化边界，不修改文件 |
-| active docs 与 PROJECT_STATUS 冲突 | audit 2026-05-27 | 6 个文件已修复 |
-| dogfood evidence 口径过乐观 | audit 2026-05-27 | 已降为 REAL_DOGFOOD_SMOKE |
+| config/config.yaml tracked dirty（安全风险） | red-team audit | → Loop 1 |
+| agent_log.jsonl 773MB 无治理/可能含敏感信息 | red-team audit | → Loop 2 |
+| Memory recall 未真正进入 prompt context | red-team audit | → Loop 3 |
 
-### P2（下一步）
+### P1（本阶段必须修）
 
-| Issue | 来源 | 决策 |
+| Issue | 来源 | 状态 |
 |-------|------|------|
-| Memory extractor zero proposals | real API dogfood 2026-05-27 | P2→P1 部分修复 — 内联路径 "请记住" 前缀已修；session-end extractor 仍只处理 episodic |
-| core.py / loop.py 过大 | audit 2026-05-27 | P2 — surgical slim |
-| provider diagnostics legacy 建议 | audit 2026-05-27 | 延后 |
-| dogfood scripts stateful | audit 2026-05-27 | 延后 |
+| CLI shortcut 构成第二能力平面 | red-team audit | → Loop 4 |
+| Turn-end hook 过重（11 种 action） | red-team audit | → Loop 4 |
+| Fake/real memory 不共享核心路径 | red-team audit | → Loop 3 |
+| Memory confirm→retain→recall E2E 未验证 | red-team audit | → Loop 3 |
+| Session-end extractor 过滤语义型偏好 | red-team audit | → Loop 3 |
+| Resume 本质是 prompt 拼接 | red-team audit | → Loop 6 |
+| 无 checkpoint schema 版本治理 | red-team audit | → Loop 6 |
+| 大量 L3 标签测试实际是 L2 | red-team audit | → Loop 7 |
+| Evidence overclaim (probe 计为能力) | red-team audit | → Loop 2 |
+| core.py 是 god object (1172 行) | red-team audit | → Loop 8 |
 
-### P3（延后/不修）
+### P2（近期）
 
-| Issue | 来源 | 决策 |
-|-------|------|------|
-| Provider identity（"我是 Claude"） | A1 dogfood | 不修 |
-| Product context（I1/I7） | dogfood | 延后 |
-| C1 event counting bug | harness | 延后 |
-| OpenAI-compatible streaming fail-closed | design | 延后 |
-| Memory consolidation deferred | design | 不修 |
-| SubAgent L1-L5 | design | 不修 |
+详见审计报告 P2 issue list（14 项），主要集中在 Tool/SubAgent/Skill/MCP real API 覆盖不足、log/session 管理、文档偏乐观、模块级可变单例等。
+
+### P3（排队/不修）
+
+详见审计报告 P3 issue list（5 项）：Provider identity、Legacy skills 并存、Skill/Tool 边界模糊、文档数量过多、跨平台兼容性。

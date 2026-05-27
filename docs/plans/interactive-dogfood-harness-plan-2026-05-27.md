@@ -1,7 +1,7 @@
 # Interactive Dogfood Harness Plan
 
 **日期**: 2026-05-27
-**状态**: planned
+**状态**: completed — Phase 1-3 done, 14/14 PASS fake/local, 见 `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md`
 **基于**: 全局审计 Loop 3 推荐、PROJECT_STATUS next recommended loop
 
 ## 1. 为什么现在做

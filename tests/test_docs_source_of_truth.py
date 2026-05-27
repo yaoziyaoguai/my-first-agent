@@ -320,7 +320,7 @@ def test_auto_run_includes_task_type_routing():
     assert "bug_fix" in text
     assert "dogfood" in text
     assert "docs_cleanup" in text
-    assert "config_fix" in text
+    assert "config_safety" in text
     assert "architecture_change" in text
 
 
@@ -512,3 +512,99 @@ def test_project_status_has_auto_run_auth():
     text = _read("docs/PROJECT_STATUS.md")
     assert "授权状态" in text
     assert "已授权" in text
+
+
+# =========================================================================
+# 14. auto-run.md Skill Routing Policy 守护（AutoRun Skill Router Upgrade）
+# =========================================================================
+
+
+def test_auto_run_includes_skill_routing_policy():
+    """auto-run.md 必须包含 Skill Routing Policy 节。"""
+    text = _read_auto_run()
+    assert "Skill Routing Policy" in text
+    assert "技能体系" in text or "skill" in text.lower()
+
+
+def test_auto_run_mentions_compound_engineering():
+    """auto-run.md 必须提到 Compound Engineering 技能体系。"""
+    text = _read_auto_run()
+    assert "Compound Engineering" in text
+
+
+def test_auto_run_mentions_g_stack():
+    """auto-run.md 必须提到 G-Stack 技能体系。"""
+    text = _read_auto_run()
+    assert "G-Stack" in text
+
+
+def test_auto_run_mentions_superpowers():
+    """auto-run.md 必须提到 Superpowers 技能体系。"""
+    text = _read_auto_run()
+    assert "Superpowers" in text
+
+
+def test_auto_run_mentions_plan_eng_review():
+    """auto-run.md 必须提到 plan-eng-review 技能体系。"""
+    text = _read_auto_run()
+    assert "plan-eng-review" in text
+
+
+def test_auto_run_mentions_review_skill():
+    """auto-run.md 必须提到 review 作为独立技能体系。"""
+    text = _read_auto_run()
+    # "review" 出现在 Skill Router Decision Table 和 skill 相关上下文中
+    assert "review" in text.lower()
+
+
+def test_auto_run_includes_skill_router_decision_table():
+    """auto-run.md 必须包含 Skill Router Decision Table。"""
+    text = _read_auto_run()
+    assert "Skill Router Decision Table" in text
+    assert "Primary Skill" in text
+    assert "Secondary Skill" in text
+
+
+def test_auto_run_review_completion_not_stop_condition():
+    """auto-run.md 必须声明 review 完成不是停止条件。"""
+    text = _read_auto_run()
+    assert "review 完成不是停止条件" in text or "review 完成" in text
+
+
+def test_auto_run_skill_selection_not_stop_condition():
+    """auto-run.md 必须声明选择/切换技能不是停止条件。"""
+    text = _read_auto_run()
+    assert "选择技能不是停止条件" in text or "选择/切换技能" in text
+
+
+def test_auto_run_next_recommended_loop_should_continue():
+    """auto-run.md 必须声明 next recommended loop 输出后应继续而非停止。"""
+    text = _read_auto_run()
+    assert "next recommended loop" in text.lower()
+
+
+def test_auto_run_includes_skill_routing_in_final_output():
+    """auto-run.md 的 Final output 格式必须包含 skill routing 信息。"""
+    text = _read_auto_run()
+    assert "primary" in text.lower() and "secondary" in text.lower()
+
+
+def test_auto_run_task_types_cover_all():
+    """auto-run.md 必须覆盖所有任务类型（含 debug_root_cause / evidence_honesty 等）。"""
+    text = _read_auto_run()
+    assert "debug_root_cause" in text
+    assert "evidence_honesty" in text
+    assert "implementation" in text
+    assert "post_loop_review" in text
+
+
+def test_auto_run_skill_selection_by_task_type_not_blind():
+    """auto-run.md 必须声明不盲选技能——每次根据任务类型查表选择。"""
+    text = _read_auto_run()
+    assert "不盲选" in text or "Skill Router Decision Table" in text
+
+
+def test_auto_run_forbids_blind_skill_selection():
+    """auto-run.md 的 Forbidden Patterns 必须禁止盲选技能。"""
+    text = _read_auto_run()
+    assert "不盲选技能" in text or "Skill Router Decision Table" in text

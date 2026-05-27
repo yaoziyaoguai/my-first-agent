@@ -101,7 +101,7 @@
 ---
 
 ### Loop 2: Log Hygiene & Evidence Governance
-**状态**：pending
+**状态**：completed
 **优先级**：P0
 **依赖**：无（可与 Loop 1 并行）
 
@@ -136,6 +136,14 @@
 - 轮转机制可用
 - 脱敏覆盖所有日志写入路径
 - PROJECT_STATUS/PROGRESS_LEDGER 更新
+
+**完成记录（2026-05-27）**：
+- `agent/logger.py`：新增 `_redact_secrets()` / `_sanitize_log_data()` / `_rotate_log_if_needed()`；`log_event()` 写入前自动轮转+脱敏
+- `config.py`：新增 `MAX_LOG_SIZE_BYTES = 50 * 1024 * 1024`
+- Regex：`sk-[a-z]+(?:-[a-zA-Z0-9]+)*-[a-zA-Z0-9]{8,}` 匹配 sk-sp-/sk-ant-api03-/sk-or-v1- 等多段 key 格式
+- 新增 `tests/test_log_hygiene.py` — 21 tests (Sanitization 11 + Rotation 4 + E2E 3 + Boundary 3)
+- `.git/hooks/pre-commit`：同步更新 regex 为多段格式
+- 旧 773MB agent_log.jsonl 已删除
 
 **风险**：中 — 涉及日志写入路径变更
 **预估工作量**：中

@@ -170,6 +170,7 @@ for _legacy_bound_name in ("API_KEY", "BASE_URL", "MODEL_NAME", "REVIEW_MODEL_NA
 PROJECT_DIR = Path.cwd().resolve()
 SNAPSHOT_DIR = Path("sessions")
 LOG_FILE = "agent_log.jsonl"
+MAX_LOG_SIZE_BYTES = 50 * 1024 * 1024  # 50MB — log_event 写入前自动轮转
 
 
 def ensure_snapshot_dir() -> Path:

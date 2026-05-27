@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1 (Config Safety) 完成，Loop 2 (Log Hygiene) 进行中
+**状态**: remediation — Loop 1 (Config Safety) 完成，Loop 2 (Log Hygiene) 完成，Loop 3 (Memory E2E) 准备中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -59,6 +59,19 @@
 | 用户路径 dogfood | `tests/test_user_path_dogfood.py` — PASS |
 | Runtime 集成测试 | `tests/runtime_integration/` — PASS |
 
+### Log Hygiene (Loop 2 — COMPLETED)
+
+| 项目 | 值 |
+|------|---|
+| 大小上限 | 50MB（`MAX_LOG_SIZE_BYTES` in config.py） |
+| 轮转策略 | rename 为 `agent_log.archived-YYYYMMDD-HHMMSS.jsonl`（原子 rename） |
+| 脱敏规则 | `sk-[a-z]+(?:-[a-zA-Z0-9]+)*-[a-zA-Z0-9]{8,}` → `sk-***REDACTED***`；`Bearer *{20,}` → `Bearer ***REDACTED***` |
+| 字符串截断 | >2000 字符自动截断 |
+| 递归深度 | 最大 5 层，超出返回 `<nested-too-deep>` |
+| 写入路径覆盖 | Path A (logger.log_event, 7 modules) + Path B (runtime_observer.log_event, 5 modules) |
+| 旧 773MB 日志 | 已删除（用户授权） |
+| 测试 | `tests/test_log_hygiene.py` — 21 tests (4 classes: Sanitization/Rotation/E2E/Boundary) |
+
 ### Config Safety (Loop 1 — COMPLETED)
 
 | 项目 | 值 |
@@ -100,7 +113,7 @@
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
 | ~~config/config.yaml tracked dirty~~ | ~~P0~~ | **RESOLVED** — skip-worktree + guard tests + pre-commit hook (Loop 1 完成) |
-| agent_log.jsonl 773MB 无治理/可能含敏感信息 | P0 | Loop 2 — 建立轮转/脱敏/上限 |
+| agent_log.jsonl 773MB 无治理/可能含敏感信息 | ~~P0~~ | **RESOLVED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 21 个 log hygiene tests (Loop 2 完成) |
 | Memory recall 未真正进入 prompt context | P0 | Loop 3 — recall 路径 split 修复 |
 | CLI shortcut 构成第二能力平面 | P1 | Loop 4 — 收敛到统一 dispatcher |
 | Turn-end hook 过重（11 种 action） | P1 | Loop 4 — 精简 |
@@ -127,7 +140,7 @@
 按优先级顺序执行 `docs/plans/2026-05-27-capability-remediation-loop-plan.md` 中的 loop：
 
 1. ~~**Loop 1: Config Safety & Security Harden (P0)**~~ — **COMPLETED** — skip-worktree + guard tests + pre-commit secret scan
-2. **Loop 2: Log Hygiene & Evidence Governance (P0)** — agent_log.jsonl 773MB 治理、脱敏验证
+2. ~~**Loop 2: Log Hygiene & Evidence Governance (P0)**~~ — **COMPLETED** — 50MB 轮转 + 脱敏 + 21 tests
 3. **Loop 3: Memory E2E 验证闭环 (P0)** — recall 路径 split 修复、confirm→retain→recall E2E
 4. **Loop 4: Runtime Entry Consolidation (P1)** — CLI shortcuts 收敛、turn-end hook 精简
 5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖

@@ -12,6 +12,7 @@
 |-----------|--------|------|
 | 全能力红队审计 | — | 15 域 (A-O) 达标审计：总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL，P0=3 / P1=10 / P2=14 / P3=5。产出审计报告 + remediation loop plan（12 loops） |
 | Loop 1: Config Safety & Security Harden | — | **COMPLETED** — skip-worktree 本地保护 + pre-commit secret scan + 8 guard tests；config/config.yaml tracked 版本始终为 sk-REPLACE_ME 占位符 |
+| Loop 2: Log Hygiene & Evidence Governance | — | **COMPLETED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 字符串截断；21 个 log hygiene tests；773MB agent_log.jsonl 已删除；新增 tests/test_log_hygiene.py |
 | Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
 | Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |
@@ -88,7 +89,7 @@
 | Issue | 来源 | 状态 |
 |-------|------|------|
 | config/config.yaml tracked dirty（安全风险） | red-team audit | → Loop 1 |
-| agent_log.jsonl 773MB 无治理/可能含敏感信息 | red-team audit | → Loop 2 |
+| ~~agent_log.jsonl 773MB 无治理/可能含敏感信息~~ | red-team audit | **RESOLVED** — Loop 2 完成 |
 | Memory recall 未真正进入 prompt context | red-team audit | → Loop 3 |
 
 ### P1（本阶段必须修）

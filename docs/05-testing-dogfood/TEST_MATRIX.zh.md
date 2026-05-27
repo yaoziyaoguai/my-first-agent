@@ -127,11 +127,10 @@ python -m pytest tests/test_global_real_api_dogfood.py tests/test_skill_dogfood.
 ## 最近审计基线
 
 - `ruff`: passed。
-- full pytest: `2761 passed, 14 skipped` with temp HOME after post-audit P2/P3 fixes。
+- full pytest: `~3380 passed, 18 skipped`（2026-05-27 基线）。
 - SubAgent synthetic dogfood: `16/16 passed`。
 - Global synthetic dogfood: `12/12 passed`，evidence 来自 deterministic `synthetic_checks`，不冒充真实动态执行。
 - Memory recall/injection baseline: deterministic store-to-snapshot-to-prompt governance only；real LLM semantic quality 仍是 future gated evaluation。
 - Stabilization benchmark: `19/19 passed`，deterministic/no real LLM，actual boundary 来自独立 comparator。
-- Global real-api dogfood: `12/12 passed`，通过 provider factory。
-- Skill real-api dogfood: `7/7 passed`，通过 provider factory；受 sandbox 网络限制时可能 blocked，需要按用户授权提升执行真实 provider 调用。
+- Real API dogfood: `20 cases, 19 non-failing / 1 CONCERN / 0 FAIL`（kimi-k2.5, 2026-05-27），见 [dogfood report](../dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md)。注意：多数 case 是 direct provider smoke，不是完整 runtime E2E。
 - memory/episodes runtime jsonl 不再被 git tracked。

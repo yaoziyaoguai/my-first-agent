@@ -365,3 +365,82 @@ def test_auto_run_forbids_committing_config_yaml():
     text = _read_auto_run()
     assert "config/config.yaml" in text
     assert "commit" in text.lower()
+
+
+# =========================================================================
+# 11. root README.md 守护
+# =========================================================================
+
+def test_root_readme_references_project_status():
+    """root README.md 必须指向 PROJECT_STATUS.md 作为当前状态入口。"""
+    text = _read("README.md")
+    assert "PROJECT_STATUS.md" in text
+
+
+def test_root_readme_no_env_as_primary_config():
+    """root README.md 不得推荐 .env 作为主配置路径。"""
+    text = _read("README.md")
+    # 可以提到 .env 但必须标记为 legacy/deprecated
+    if ".env" in text:
+        assert "legacy" in text.lower() or "deprecated" in text.lower() or "已" in text
+
+
+def test_root_readme_no_broken_audit_links():
+    """root README.md 不得包含指向不存在审计文档的链接。"""
+    text = _read("README.md")
+    # 不得指向已归档的旧审计文档
+    broken_audit_refs = [
+        "capability-gap-audit-low-complexity-2026-05-25.md",
+        "global-red-team-product-architecture-audit-2026-05-25.md",
+    ]
+    for ref in broken_audit_refs:
+        assert ref not in text, f"root README.md 包含已归档审计文档引用: {ref}"
+
+
+# =========================================================================
+# 12. Active docs 状态口径守护
+# =========================================================================
+
+def test_active_docs_no_strong_claim():
+    """Active docs 不得将项目标记为 STRONG / fully USER_USABLE。"""
+    for fpath in [
+        "docs/README.zh.md",
+        "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
+        "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
+    ]:
+        text = _read(fpath)
+        # 不得有无条件的 STRONG / fully user-usable 声称
+        if "broadly user-usable" in text.lower():
+            ok = "不在当前" in text or "不是" in text or "❌" in text
+            assert ok, f"{fpath}: 包含无条件的 broadly user-usable 声称"
+
+
+def test_active_docs_mention_config_key_boundary():
+    """Active docs 必须说明 config/config.yaml 含真实 key 时不得 commit。"""
+    text = _read("docs/PROJECT_STATUS.md")
+    assert "不得 commit" in text or "不得提交" in text
+    assert "config/config.yaml" in text
+
+
+def test_active_docs_reference_latest_audit():
+    """Active PROJECT_STATUS 必须引用最新审计报告。"""
+    text = _read("docs/PROJECT_STATUS.md")
+    assert "global-readonly-audit-2026-05-27.md" in text
+
+
+def test_current_capability_status_no_401_as_current():
+    """CURRENT_CAPABILITY_STATUS 不得将 401 写成当前阻塞。"""
+    text = _read("docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md")
+    assert "401" not in text
+
+
+def test_current_audit_status_no_manual_dogfood_as_top_priority():
+    """CURRENT_AUDIT_STATUS 不得将 Manual Human Dogfood 写成最高优先级下一步。"""
+    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
+    assert "Manual Human Dogfood" not in text
+
+
+def test_config_legacy_sunset_no_env_as_primary():
+    """config-legacy-sunset-contract 不得推荐 .env 作为唯一 secret 入口。"""
+    text = _read("docs/design/config-legacy-sunset-contract.md")
+    assert "api_key 可直接写入" in text or "直接写入" in text

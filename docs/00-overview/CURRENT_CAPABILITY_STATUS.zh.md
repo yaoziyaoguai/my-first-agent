@@ -8,29 +8,31 @@
 
 ## 当前标签
 
-- ✅ **manual-dogfood-ready local agent**：fake/local 路径可按 checklist 走通。
-- ✅ **shared runtime baseline**：fake/real provider 共享 `core.chat()` → `loop.py` → Tool Pipeline / RuntimeAction dispatcher 主路径。
-- 🟡 **limited user-usable agent**：功能可用，但 onboarding、approval、debug、memory recall 仍需人类体验反馈。
+- ✅ **real API dogfood smoke 通过**：20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5 via DashScope，2026-05-27）。
+- ✅ **fake/local gate 通过**：FakeProvider baseline 可完成本地闭环。
+- 🟡 **limited user-usable agent**：核心功能可用，但 interactive confirmation、resume、tool/memory confirmation 覆盖不足。
+- 🟡 **evidence 口径仍需硬化**：当前 dogfood 多数是 direct provider smoke，不是完整 runtime E2E。
 - ❌ **broadly user-ready agent**：不是当前状态。
 
 ## 现在可用
 
 | Area | What works now | Boundary |
 |---|---|---|
-| Startup / provider banner | 启动时显示 `[provider] mode=...` | 默认 fake/local；真实 provider 需要显式配置 |
+| Startup / provider banner | 启动时显示 `[provider] mode=...` | 默认 fake/local；真实 provider 需要显式配置 `enabled: true` |
 | Fake/local chat | deterministic FakeProvider 可完成本地对话和工具触发 | 不代表真实 LLM 智能 |
+| Real API dogfood | 20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5, 2026-05-27） | 多数是 direct provider smoke；interactive path 覆盖不足 |
 | Tool Pipeline | `demo.write_demo_note` / `demo.echo_task_summary` 经 ToolRegistry / ToolExecutor 执行 | 高风险工具仍需要 confirmation；不是 sandbox |
 | Memory | explicit retain、confirmation、list、forget、snapshot injection baseline | semantic recall 质量未做人类/真实 LLM 评估 |
 | SubAgent | L0 deterministic `demo-stat` / `code-reviewer` demo-only descriptor | 不是 real child LLM，不是 multi-agent orchestration |
 | Checkpoint / Resume | 本地 checkpoint/resume 安全边界存在 | 不是生产级 durable execution |
 | Runtime events / run summary | CLI/TUI 可消费 RuntimeEvent，turn 结束有 run summary | debug UX 仍偏开发者 |
-| Dogfood evidence | fake/local rehearsal `11/11 PASS`，full gate 上一轮 `3376 passed, 18 skipped, 0 failed` | 不能替代 manual human dogfood |
+| Dogfood evidence | real API smoke 19/20 non-failing；fake/local baseline；full gate `~3380 passed, 18 skipped` | interactive y/n、resume、tool/memory confirmation 尚未真实覆盖 |
 
 ## 当前不能声称
 
 - 不能声称 manual human dogfood 已完成。
-- 不能声称 fake/local dogfood 等同真实用户可用。
-- 不能声称 real provider 当前可用；最近项目配置返回 `401`，归类为 config/auth concern。
+- 不能声称 real API dogfood smoke (19/20) 等于完整用户级产品验证。
+- 不能声称 interactive confirmation、resume、tool/memory confirmation 已覆盖。
 - 不能声称 Memory recall 有可靠语义价值；目前只证明 deterministic governance baseline。
 - 不能声称 SubAgent 是真实多代理系统；当前是 L0 deterministic local demo。
 - 不能声称有 sandbox-grade shell/network/file execution。
@@ -38,10 +40,10 @@
 
 ## 当前推荐路径
 
-1. 自动化继续时：只做 cleanup-only / low-complexity remediation。
+1. 自动化继续时：只做 cleanup-only / source-of-truth repair。
 2. 人类准备验证时：走 [Dogfood README](../dogfood/README.md) → 最新 dogfood 报告。
-3. 真实 provider：先修复本机 credentials / endpoint compatibility；AutoRun 不重试真实 API。
-4. 后续大设计：只在 manual dogfood 反馈明确后考虑 Memory UX、Tool approval UX、SubAgent L1、sandbox、MCP、hook lifecycle。
+3. 真实 provider：通过 `config/config.yaml`（`enabled: true`）启用；api_key 可写入本地但不 commit。
+4. 后续：优先 interactive dogfood harness（y/n、resume、tool/memory confirmation），再做 evidence 口径硬化。
 
 ## 事实源
 

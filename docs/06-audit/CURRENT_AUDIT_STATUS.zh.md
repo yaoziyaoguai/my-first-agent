@@ -8,16 +8,18 @@
 
 ## 总体结论
 
-Status: **Cleanup-Only / Awaiting Manual Human Dogfood** — 能力建设暂停。
+Status: **Active — Source-of-Truth Repair** — 基于 2026-05-27 全局只读审计修复文档冲突和 config 安全边界。
 
-- ✅ `manual-dogfood-ready local agent`：FakeProvider baseline 9/9 PASS。
-- 🟡 `limited user-usable agent`：核心功能可用，UX polish 不足。
-- 🟡 `real-provider-dogfood-tested`：历史 Kimi/DashScope 5/6 PASS；当前 deepseek-v4-pro 受 401 config/auth concern 阻塞。
+- ✅ `real-api-dogfood-smoke`：20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5, 2026-05-27）。
+- 🟡 `limited user-usable agent`：核心功能可用，interactive path 覆盖不足。
+- 🟡 `evidence hardening needed`：dogfood 多数是 direct provider smoke，不是完整 runtime E2E。
 - ❌ `broadly user-usable agent`：不在当前 scope。
 
-**当前最高优先级下一步**：Manual Human Dogfood（需人类完成，非自动步骤）。
+**当前最高优先级下一步**：Interactive Dogfood Harness（y/n、resume、tool/memory confirmation），在证据口径硬化后做小规模授权 real API rerun。
 
 **AutoRun 模式**：cleanup/source-of-truth only。不做新能力建设、不做 industry comparison、不新增 feature。除非用户显式改变目标。
+
+**最新全局审计**：[global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md) — 2026-05-27 只读审计，P0=0, P1=3, P2=7。
 
 ## 当前阶段入口
 
@@ -26,7 +28,8 @@ Status: **Cleanup-Only / Awaiting Manual Human Dogfood** — 能力建设暂停�
 当前行动依据：
 - [PROJECT_STATUS.md](../PROJECT_STATUS.md) — 当前项目状态入口（第一优先读取）
 - [PROGRESS_LEDGER.md](../PROGRESS_LEDGER.md) — 进度账本
-- [real-api-full-dogfood-remediation-plan-2026-05-26.md](../plans/real-api-full-dogfood-remediation-plan-2026-05-26.md) — 最新 real API dogfood 修复记录
+- [global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md) — 最新全局审计
+- [source-of-truth-repair-plan-2026-05-27.md](../plans/source-of-truth-repair-plan-2026-05-27.md) — 基于审计的修复计划
 
 已完成的能力建设（历史证据，非当前行动指令）：
 - WP1-WP4: First Usable Task MVP
@@ -48,8 +51,8 @@ Status: **Cleanup-Only / Awaiting Manual Human Dogfood** — 能力建设暂停�
 | Checkpoint | Healthy | 截断 tool_result；过滤未知字段；safe summary 边界 | none blocking |
 | Confirmation / Ask User | Healthy | request_user_input / memory confirmation / tool confirmation 复用 runtime 边界 | none blocking |
 | CLI/TUI | Acceptable with P3 adapter debt | adapter/presentation only | P3: `main.py` 仍承担 adapter 兼容 |
-| Dogfood | Healthy | fake/local rehearsal 11/11 PASS；agent-driven rehearsal ≠ manual human dogfood | real dogfood 受 401 concern 阻塞 |
-| Provider config | Healthy | `AgentProviderConfig` + factory；provider boundary 清晰 | FakeProvider 增长已冻结 |
+| Dogfood | Healthy with evidence gaps | real API smoke 19/20 non-failing；fake/local baseline | interactive path 覆盖不足（y/n, resume, tool/memory confirmation）；多数 case 是 direct provider smoke |
+| Provider config | Acceptable with P1 safety concern | `AgentProviderConfig` + factory；`config/config.yaml` 是唯一推荐入口 | `config/config.yaml` 当前 dirty 且含本地真实 key；安全边界需文档化 |
 | Security/Secrets | Healthy | `.env` / `agent_log.jsonl` / sessions/runs/memory episodes 不进仓库 | do not read real artifacts in audit |
 | Documentation | Healthy — source-of-truth reset 完成 | active ~30 docs；~150+ historical/expired docs archived | archive docs 不能被 AutoRun 当作当前入口 |
 

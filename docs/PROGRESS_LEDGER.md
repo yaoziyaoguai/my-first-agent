@@ -10,9 +10,16 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Global readonly audit | — | `docs/audit/global-readonly-audit-2026-05-27.md` — P0=0, P1=3, P2=7 |
+| Source-of-truth repair | — | 修复 root README、CURRENT_CAPABILITY_STATUS、CURRENT_AUDIT_STATUS、TEST_MATRIX、config-legacy-sunset-contract、archive/README 共 6 个冲突文档 |
+| Config safety boundary clarified | — | PROJECT_STATUS 明确定义 config/config.yaml 安全边界；guard tests 扩展 |
+| Dogfood evidence wording hardened | — | Evidence level 降为 REAL_DOGFOOD_SMOKE；标注 interactive path 覆盖不足 |
+| Guard tests expanded | — | 新增 root README、active docs 状态口径、config 安全边界、审计引用 共 9 个测试 |
+| Auto-run command hardened | f06ceb4 | `/auto-run` 命令重写为可执行规范：Startup、Task routing、Loop start、Progress rule、Hard stops、Forbidden patterns |
+| Source-of-truth established | fb3712a | PROJECT_STATUS.md + PROGRESS_LEDGER.md 作为事实源；39+ 文档归档；13 个守护测试 |
 | ISSUE-002 fix | e789c11 | handle_end_turn_response 返回模型正文而非空串；非交互式调用方（dogfood harness）不再收到空响应 |
 | ISSUE-001 harness enhanced | e789c11 | call_agent_chat 支持 confirmation_reply 参数，自动跟进交互式确认 |
-| Real API dogfood rerun | — | 20 cases → 19 PASS / 1 CONCERN / 0 FAIL |
+| Real API dogfood rerun | — | 20 cases → 19 non-failing / 1 CONCERN / 0 FAIL（evidence: REAL_DOGFOOD_SMOKE） |
 | Ruff pre-commit fix | e789c11 | 修复 9 个 ruff 错误（I001, W293, SIM102, E501） |
 
 ## 2026-05-26
@@ -61,12 +68,32 @@
 
 ---
 
-## 当前 P3 积压
+## 当前 P1/P2/P3
+
+### P1（本轮修复中）
+
+| Issue | 来源 | 状态 |
+|-------|------|------|
+| config/config.yaml tracked dirty 安全边界 | audit 2026-05-27 | 文档化边界，不修改文件 |
+| active docs 与 PROJECT_STATUS 冲突 | audit 2026-05-27 | 6 个文件已修复 |
+| dogfood evidence 口径过乐观 | audit 2026-05-27 | 已降为 REAL_DOGFOOD_SMOKE |
+
+### P2（下一步）
+
+| Issue | 来源 | 决策 |
+|-------|------|------|
+| 交互式 dogfood harness 缺失 | audit 2026-05-27 | 下一步优先 |
+| core.py / loop.py 过大 | audit 2026-05-27 | harness 就绪后 surgical slim |
+| provider diagnostics legacy 建议 | audit 2026-05-27 | 延后 |
+| dogfood scripts stateful | audit 2026-05-27 | 延后 |
+
+### P3（延后/不修）
 
 | Issue | 来源 | 决策 |
 |-------|------|------|
 | Provider identity（"我是 Claude"） | A1 dogfood | 不修 |
 | Product context（I1/I7） | dogfood | 延后 |
 | C1 event counting bug | harness | 延后 |
-| 交互式 dogfood harness | remediation plan | 延后 |
-| Provider profile docs cleanup | config sunset | 本轮处理 |
+| OpenAI-compatible streaming fail-closed | design | 延后 |
+| Memory consolidation deferred | design | 不修 |
+| SubAgent L1-L5 | design | 不修 |

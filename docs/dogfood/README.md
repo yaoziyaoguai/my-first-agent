@@ -6,8 +6,10 @@
 
 | 文档 | 日期 | 说明 |
 |------|------|------|
-| [real-api-full-dogfood-sweep-report-2026-05-27.md](real-api-full-dogfood-sweep-report-2026-05-27.md) | 2026-05-27 | **最新** real API 全能力 dogfood：19 PASS / 1 CONCERN / 0 FAIL |
+| [real-api-full-dogfood-sweep-report-2026-05-27.md](real-api-full-dogfood-sweep-report-2026-05-27.md) | 2026-05-27 | **最新** real API dogfood smoke：20 cases, 19 non-failing / 1 CONCERN |
 | [real-api-full-dogfood-sweep-report-2026-05-26.md](real-api-full-dogfood-sweep-report-2026-05-26.md) | 2026-05-26 | 首次 real API 全能力 dogfood：18 PASS / 2 CONCERN / 0 FAIL |
+
+**Evidence 限制**：当前 dogfood 多数是 direct provider smoke，不是完整 agent runtime E2E。交互式 confirmation、resume、interrupt、tool/memory confirmation、streaming/progress 尚未真实覆盖。Evidence level: REAL_DOGFOOD_SMOKE。
 
 ## 结果数据 (Active)
 

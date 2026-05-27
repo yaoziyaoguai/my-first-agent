@@ -1,40 +1,25 @@
-# Archive Policy
+# Archive
 
-这篇文档解决什么问题：说明哪些文档属于历史记录，以及为什么本轮没有机械搬运所有旧文档。
+历史文档归档目录。以下文档不作为当前状态参考，仅保留为实现证据链。
 
-不解决什么问题：不列出每个历史 commit，也不删除旧文档。
+## 当前归档结构
 
-推荐读者：维护者、文档审计者、准备清理历史文档的 Coding Agent。
+| 目录 | 内容 |
+|------|------|
+| `2026-05-27-cleanup/` | 2026-05-27 docs cleanup 中归档的 dogfood/plans/audit 文档 |
+| `design/` | 历史架构设计文档 |
+| `implementation-notes/` | 历史实现笔记 |
+| `specs/` | 历史 SPEC/TDD 文档 |
+| `root-stale/` | 根目录移动过来的过期文档 |
+| `v0.x/` | V0.x 版本记录 |
+| `refactor/` | 重构历史文档 |
+| `llm-provider/` | LLM provider legacy 文档 |
+| `mcp/` | MCP 历史文档 |
+| `runtime-integration/` | Runtime integration 历史文档 |
+| `user-issues/` | 历史 user issues 记录 |
 
 ## Policy
 
-本轮不大规模移动旧文档，原因是很多旧报告仍被 release notes、审计证据或代码注释引用。为避免破坏引用，采用两层策略：
-
-1. 新入口统一放在 `docs/README.zh.md`、`docs/00-overview/`、`docs/01-getting-started/`、`docs/05-testing-dogfood/`、`docs/06-audit/`。
-2. 历史长文保留原路径，但不再作为用户入口；必要时在文档顶部标注 superseded 状态。
-
-## Historical by default
-
-以下类别默认视为历史证据，不作为当前入口：
-
-- `docs/V0_*`
-- `docs/*_SMOKE_*`
-- `docs/*_TRIAL_*`
-- `docs/*_RELEASE_*`
-- `docs/ROADMAP_LEGACY.md`
-- `docs/review/*`
-- 根目录 `RELEASE_NOTES_*.md`
-
-## Canonical, do not archive casually
-
-- `docs/rfc/MEMORY_CANONICAL_RFC.md`
-- `docs/rfc/SKILL_CANONICAL_RFC.md`
-- `docs/rfc/SUBAGENT_CANONICAL_RFC.md`
-- `docs/design/SKILL_SYSTEM_SDD.md`
-- `docs/design/SUBAGENT_SYSTEM_SDD.md`
-- `docs/testing/SKILL_SYSTEM_TDD.md`
-- `docs/testing/SUBAGENT_SYSTEM_TDD.md`
-- `docs/roadmap/SKILL_SYSTEM_IMPLEMENTATION_LOOP.md`
-- `docs/roadmap/SUBAGENT_IMPLEMENTATION_LOOP.md`
-- `docs/audit/SKILL_SYSTEM_AUDIT_CHECKLIST.md`
-- `docs/audit/SUBAGENT_AUDIT_CHECKLIST.md`
+- Archive 中的文档**不作为当前状态参考**。
+- 当前项目状态以 `docs/PROJECT_STATUS.md` 为准。
+- Archive 文档可能包含过期配置路径（`.env`、`provider_profiles.yaml`、`FIRST_AGENT_PROVIDER_PROFILE` 等），不得作为当前行动依据。

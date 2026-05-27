@@ -14,11 +14,18 @@
 | 指标 | 值 |
 |------|---|
 | 最新报告 | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
-| 结果 | **19 PASS / 1 CONCERN / 0 FAIL / 0 BLOCKED** |
+| 结果 | **19 non-failing / 1 CONCERN / 0 FAIL**（共 20 cases） |
 | Provider | kimi-k2.5 via anthropic_compatible (DashScope) |
 | 执行日期 | 2026-05-27 |
+| Evidence level | **REAL_DOGFOOD_SMOKE** — 非完整产品可用证明 |
 
-唯一 CONCERN：C1（memory preference）—— event counting 偶有漏计，确认流程本身正常工作。根因在 harness event pipeline，非产品 bug。
+**重要限制**：
+- 多数 A/H/I case 是 direct provider call，不经完整 agent runtime
+- 部分 PASS 只验证非空输出，缺语义断言
+- 未覆盖：交互式 y/n confirmation、resume、interrupt、tool confirmation、memory confirmation、streaming/progress
+- 报告 commit (`ffa5677`) 与当前 HEAD 有断层（后续 commit 修复了 empty response bug）
+
+**下一步**: 建立交互式 dogfood harness（subprocess stdin/stdout），覆盖上述缺失路径。
 
 ### Fake/Local Gate
 
@@ -61,12 +68,14 @@
 
 ## 2. 推荐下一步
 
-当前建议按以下顺序推进：
+基于 [全局只读审计](audit/global-readonly-audit-2026-05-27.md)（2026-05-27，P0=0, P1=3, P2=7）：
 
-1. **Docs cleanup**（本轮）— 归档过期文档，建立 source-of-truth 中枢
-2. **Config sunset** — 清理 legacy env var 路径的文档引用
-3. **交互式 dogfood harness** — subprocess stdin/stdout 覆盖 checkpoint/resume、tool confirmation、memory confirmation
-4. **Provider identity / product context** — 仅当交互式 harness 就绪后再考虑
+1. **Config safety boundary**（本轮进行中）— `config/config.yaml` tracked dirty 的安全边界文档化
+2. **Source-of-truth repair**（本轮进行中）— 修复 active docs 与 PROJECT_STATUS 的冲突
+3. **Dogfood evidence 口径硬化**（本轮进行中）— 降低过度乐观表述
+4. **交互式 dogfood harness**（下一步）— subprocess harness 覆盖 y/n、resume、tool/memory confirmation
+5. **Runtime evidence diet** — 区分 business action 与 probe/noop evidence
+6. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取（仅当 harness 就绪后）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -101,6 +110,12 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 
 `request_path`、`auth_scheme` 由 provider adapter 内部决定，不出现在用户配置面。
 
+**配置安全边界**：
+- `config/config.yaml` 当前可能是用户本地真实配置（含 api_key），**auto-run 和 Coding Agent 不得 commit 此文件**
+- 只能通过 `git diff --stat` / `git status` 检查其状态，不得读取内容
+- 如果 staged diff 包含 key-shaped fragment，立即 hard stop
+- `.gitignore` 已覆盖 `.env`、`agent_log.jsonl`、`sessions/`、`runs/`、`memory/`、`workspace/`
+
 ---
 
 ## 5. 文档导航
@@ -111,6 +126,8 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 进度账本 | `docs/PROGRESS_LEDGER.md` |
 | 工程流程 | `docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/dev/ENGINEERING_WORKFLOW.md` |
 | 最新 dogfood | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
+| 最新审计 | `docs/audit/global-readonly-audit-2026-05-27.md` |
+| 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
 | 配置示例 | `config/config.example.yaml` |
 | 运行时宪法 | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` |
 | 历史文档 | `docs/archive/` |

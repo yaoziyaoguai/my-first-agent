@@ -13,16 +13,18 @@ Unified Project Config (`config/config.yaml`) 已落地作为唯一推荐配置�
 ## Recommended Path（唯一推荐入口）
 
 ```
-config/config.yaml  provider section  +  .env  secrets
+config/config.yaml  provider section（api_key 直接写入或通过 .env）
 ```
 
 用户流程：
 
 1. 编辑 `config/config.yaml` 的 `provider` section
-2. 设置 `enabled: true`，选择 `type`/`model`/`base_url`/`api_key_env`
-3. 在 `.env` 中设置 `api_key_env` 对应的 key 值
+2. 设置 `enabled: true`，选择 `type`/`model`/`base_url`
+3. `api_key` 可直接写入 `config/config.yaml`（个人本地项目），也可选择通过 `.env` 引用
 4. 运行 `python main.py status` 验证
 5. 运行 real dogfood
+
+**注意**: `config/config.yaml` 若含真实 api_key，不得 commit。个人本地项目直接写入 key 是推荐的简洁做法。`.env` 作为兼容层保留，但不是当前推荐主路径。
 
 ## Legacy Paths（标记 deprecated）
 
@@ -74,7 +76,7 @@ Config source : default_fake
 | 当前状态 | 旧文案（禁止） | 新文案（必须） |
 |---|---|---|
 | fake 模式 | "设置 MY_FIRST_AGENT_LLM_PROVIDER=..." | "编辑 config/config.yaml，设置 enabled: true..." |
-| 缺少 API key | "设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY" | "在 .env 中设置 {api_key_env}=<your-key>" |
+| 缺少 API key | "设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY" | "在 config/config.yaml 中设置 api_key 字段" |
 | 缺少 model | "设置 ANTHROPIC_MODEL 或 MY_FIRST_AGENT_LLM_MODEL" | "在 config/config.yaml 中填写 model 字段" |
 | 无效 provider | "设置 MY_FIRST_AGENT_LLM_PROVIDER 为以下之一" | "在 config/config.yaml 中设置 type 为支持的类型" |
 

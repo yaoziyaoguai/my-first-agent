@@ -3,6 +3,9 @@
 **日期**: 2026-05-27
 **Commit**: ffa5677
 **总耗时**: 239s
+**Evidence level**: **REAL_DOGFOOD_SMOKE**（direct provider calls，非 interactive runtime E2E）
+**注意**: 本报告中的 PASS 代表 direct provider smoke 无 crash。不代表 runtime E2E capability PASS。
+这些 case 通过 `call_provider()` 直接调用模型 API，未经过完整的 agent runtime (core.chat() → loop.py → dispatcher → tool pipeline → confirmation → checkout)。interactive path (y/n confirmation, resume, tool/memory confirmation) 在 2026-05-27 interactive dogfood 中单独验证。
 
 ## Executive Summary
 
@@ -11,7 +14,8 @@
 SubAgent、Provider Compatibility、Safety 和 Product UX。
 
 - 真实 API 调用: **20** 次
-- PASS: 19 / CONCERN: 1 / FAIL: 0 / BLOCKED: 0 / SKIPPED: 0
+- Direct provider smoke: 19 non-failing / 1 CONCERN / 0 FAIL
+- **证据等级**: REAL_DOGFOOD_SMOKE — direct provider calls，不是 runtime E2E
 
 ## Provider Config
 
@@ -88,13 +92,16 @@ SubAgent、Provider Compatibility、Safety 和 Product UX。
 
 ## Capability Readiness Map
 
-- **A. Basic Chat / Reasoning**: READY (8/8)
-- **B. Tool Pipeline**: READY (1/1)
-- **C. Memory**: PARTIAL (1/2)
-- **D. SubAgent**: READY (1/1)
-- **G. Error Recovery / Safety**: READY (1/1)
-- **H. Provider / Model Compatibility**: READY (4/4)
-- **I. Product UX / Onboarding**: READY (3/3)
+**注意**: 以下全部基于 direct provider smoke（非 runtime E2E）。READY 在此上下文中
+代表 "model can respond without crash via direct provider call"，不是能力验证完成。
+
+- **A. Basic Chat / Reasoning**: SMOKE_READY (8/8 direct provider calls)
+- **B. Tool Pipeline**: SMOKE_READY (1/1 direct provider, tool_use text only)
+- **C. Memory**: PARTIAL (1/2 direct provider)
+- **D. SubAgent**: SMOKE_READY (1/1 direct provider)
+- **G. Error Recovery / Safety**: SMOKE_READY (1/1 direct provider)
+- **H. Provider / Model Compatibility**: SMOKE_READY (4/4 direct provider)
+- **I. Product UX / Onboarding**: SMOKE_READY (3/3 direct provider)
 
 ## What Works
 

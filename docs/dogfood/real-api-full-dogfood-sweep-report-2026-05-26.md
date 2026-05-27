@@ -4,6 +4,9 @@
 **Commit**: 7c5643d
 **分支**: main
 **总耗时**: ~150s
+**Evidence level**: **REAL_DOGFOOD_SMOKE**（direct provider calls，非 interactive runtime E2E）
+**注意**: PASS 代表 no-crash direct provider smoke。非 runtime E2E capability PASS。
+这些 case 通过 `call_provider()` 直接调用模型 API，未经过完整 agent runtime。
 
 ## Executive Summary
 
@@ -15,11 +18,12 @@
 |------|------|
 | 总 case 数 | 20 |
 | 真实 API 调用次数 | 20 |
-| PASS | 18 |
+| Direct provider smoke (non-failing) | 18 |
 | CONCERN | 2 (C1, G2) |
 | FAIL | 0 |
 | BLOCKED | 0 |
 | P0/P1 问题 | 0 |
+| 证据等级 | REAL_DOGFOOD_SMOKE（非 runtime E2E） |
 
 **关键发现**:
 - Kimi K2.5 中文能力出色，结构化输出质量高

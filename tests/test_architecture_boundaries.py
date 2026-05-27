@@ -891,3 +891,43 @@ def test_subagent_system_public_api_is_explicit_and_side_effect_free() -> None:
     exec("from agent.subagent_system import *", namespace)
     assert public.issubset(namespace)
     assert "delegate_once" not in namespace
+
+
+def test_cli_subagent_delegation_uses_registry_and_delegate_once() -> None:
+    """Loop 9: CLI delegation shortcut 必须通过 SubAgentRegistry + delegate_once 执行。
+
+    P2-5 审计发现：CLI delegation shortcuts（detect_delegate_to_subagent、
+    detect_nl_delegation）在 core.py 的 main loop 前直接执行委托，绕过
+    RuntimeActionDispatcher。但这不代表它们绕过 SubAgent 系统本身——
+    _execute_subagent_delegation() 仍然通过 SubAgentRegistry 查找 descriptor、
+    通过 delegate_once() 执行委托。
+
+    本测试验证：agent/subagent_inline.py 不导入 executor/直接执行路径
+    （如 execute_local），所有委托必须经过 registry + delegate_once 边界。
+    """
+    import ast
+    from pathlib import Path
+
+    inline_path = Path("agent/subagent_inline.py")
+    source = inline_path.read_text()
+    tree = ast.parse(source)
+
+    imports = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                imports.add(f"{module}.{alias.name}")
+
+    assert "agent.subagent_system.registry" in imports or any(
+        "SubAgentRegistry" in i for i in imports
+    ), "CLI delegation must import SubAgentRegistry"
+    assert "agent.subagent_system.delegation" in imports or any(
+        "delegate_once" in i for i in imports
+    ), "CLI delegation must import delegate_once"
+    assert "agent.subagent_system.executor" not in imports, (
+        "CLI delegation must NOT import executor directly — use delegate_once()"
+    )

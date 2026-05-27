@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-28 (Loop 15 — Memory Write Dispatcher Migration COMPLETED)
+**最后更新**: 2026-05-28 (Loop 1.3 — Tool Path Unification PARTIAL)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Loop 1.3: Tool Path Unification | b025e0d | **PARTIAL** — 方案 2（dispatcher 中介）基础设施就绪：新建 `agent/tool_runtime_mediator.py`（ToolRuntimeMediator 桥接 dispatcher lifecycle 与 execute_single_tool）；`agent/response_handlers.py` 中 `handle_tool_use_response` 不再裸调 execute_single_tool，改为通过 mediator.mediate()；SDD 明确定义方案 2 contract（`docs/design/tool-path-unification-l1.3.md`）；10 个 contract tests 验证 GATE→INVOKE→execute_single_tool→RESULT 生命周期顺序 + 防呆 + probe vs business 区分。**剩余**：TOOL_GATE 的 gate_disposition 尚未驱动执行流（blocked→FORCE_STOP 快捷路径），留待 Loop 1.3b |
 | Loop 1.2: Evidence Classification Repair | — | **COMPLETED** — 新增 `is_business_capability_evidence()` in `agent/runtime_integration/evidence.py`（_BUSINESS_DISPOSITIONS + 规则：real_core_loop_runtime_e2e + business disposition = business capability evidence）；6 个新 guard tests + 1 个增强 test（24 total in test_evidence_taxonomy_guard.py）；78 evidence-related tests pass |
 | Loop 1.1: Unified Runtime Decision Spine | 0ea8313, bd0a6af, e6cb970 | **COMPLETED** — 新建 `agent/runtime_decision_frame.py`（609 lines）：14 个 BranchPoint 诚实标记（0 READY / 8 PARTIAL / 1 NOT_READY / 2 DEFERRED / 1 FAKE_DEMO / 1 STUB）；RuntimeDecisionFrame 作为 core.chat() 入口 per-turn subsystem 状态描述；`docs/design/runtime-decision-spine.md` 设计文档（9 sections）；35 个 guard tests 全部通过；集成到 core.py/loop.py/display_events.py 主路径（不影响现有行为）；ruff 全部通过 |
 | Loop 15: Memory Write Dispatcher Migration | ca0a03c | **COMPLETED (Phase 1-5)** — memory confirm→retain write path 从 direct `_memory_runtime` 调用迁入 dispatcher；5 个 Phase 完成：(1) handler 接受 `candidate:` 前缀 proposal_id，(2) `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store，(3) `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`，(4) 5 个 new E2E integration tests，(5) docs finalization + commit/push。100/100 memory tests pass；11 个文件变更 |

@@ -21,6 +21,7 @@ from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHa
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
 from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
+from agent.runtime_integration.memory_forget import MemoryForgetHandler
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
@@ -139,7 +140,12 @@ def build_phase1_dispatcher(
         StreamingEventHandler(),
     )
     # Loop 4: CLI meta-command handlers（READ_ONLY — show memories / show subagents）
-    # MUTATING/DELEGATING commands (forget/delegate) 待 confirmation pipeline 就绪后迁入。
+    # Loop 2.1: MEMORY_FORGET — MUTATING forget command 迁入 dispatcher 统一证据链
+    if memory_runtime is not None:
+        registry.register(
+            RuntimeActionType.MEMORY_FORGET,
+            MemoryForgetHandler(memory_runtime=memory_runtime),
+        )
     if memory_runtime is not None:
         from agent.runtime_integration.cli_handlers import CliShowMemoriesHandler
         registry.register(

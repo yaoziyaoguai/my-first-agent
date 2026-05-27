@@ -311,6 +311,18 @@ def _cli_show_memories_list_records_adapter(payload: Mapping[str, Any]) -> Any:
     return ()
 
 
+def _memory_store_remove_record_adapter(payload: Mapping[str, Any]) -> Any:
+    """Catalog-owned adapter for memory store remove_record。
+
+    Loop 2.1: MEMORY_FORGET handler 通过此 adapter 获得 trusted target_module_proof。
+    """
+    store = payload.get("store")
+    record_id = str(payload.get("record_id") or "")
+    if store is not None and record_id:
+        return store.remove_record(record_id)
+    return False
+
+
 def _cli_show_subagents_list_visible_adapter(payload: Mapping[str, Any]) -> Any:
     from pathlib import Path as _Path
 
@@ -607,6 +619,17 @@ class RuntimeActionTargetCatalog:
             adapter=_cli_show_memories_list_records_adapter,
             function_called="MemoryRuntime.list_records",
             call_signature="list_records()",
+        ),
+        _descriptor(
+            "memory.forget",
+            "agent.runtime_integration.memory_forget.MemoryForgetHandler",
+            "MemoryStore",
+            operation="remove_record",
+            invocation_adapter_id="MemoryStore.remove_record",
+            implementation_id="agent.memory_store.InMemoryMemoryStore.remove_record",
+            adapter=_memory_store_remove_record_adapter,
+            function_called="InMemoryMemoryStore.remove_record",
+            call_signature="remove_record(record_id)",
         ),
         _descriptor(
             "cli.show_subagents",
@@ -1492,6 +1515,8 @@ _BUSINESS_DISPOSITIONS = frozenset({
     "proposed",           # memory.turn_end_proposal: proposal 已生成
     "not_retained",       # memory.propose: 用户拒绝 (有业务语义)
     "consolidated",       # memory.consolidate: 已整合
+    "forgotten",          # memory.forget: 已删除
+    "not_found",          # memory.forget: 未找到记录（有业务语义）
     "injected",           # tool.result: 结果注入到模型上下文
     "truncated",          # tool.result: 截断但仍注入
     "delegated",          # subagent.delegate_l0: 真实委托

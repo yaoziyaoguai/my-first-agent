@@ -139,7 +139,7 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         not_ready_behavior="dispatcher=None 时回退到直接 _memory_runtime.snapshot_for_prompt()",
         decision_meta={
             "why_partial": "默认路径需要 injected dispatcher；"
-                           "dispatcher=None 时走 direct snapshot fallback",
+                           "dispatcher=None 时走 direct snapshot fallback（模块初始化期）",
         },
     ),
     "memory.propose": BranchPointState(
@@ -164,8 +164,22 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         result_feedback_path="store write confirmation → action_log",
         not_ready_behavior="retain 失败时 handler 返回 failed 状态",
         decision_meta={
-            "why_partial": "forget/list 走 CLI shortcut，未统一 dispatcher；"
-                           "recall 仍有 direct fallback 路径",
+            "why_partial": "用户主动 retain 路径已通过 dispatcher；"
+                           "model-suggested/implicit 未实现",
+        },
+    ),
+    "memory.forget": BranchPointState(
+        branch_id="memory.forget",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="用户输入 forget/删除记忆 等命令时",
+        execution_path="core.chat → _forget_via_dispatcher → dispatcher "
+                       "→ MemoryForgetHandler → memory_runtime.remove_record()",
+        result_feedback_path="dispatcher result → core.py 检查 forgotten 状态 → 用户通知",
+        not_ready_behavior="dispatcher 不可用时 handler 返回 rejected",
+        decision_meta={
+            "why_partial": "dispatcher-mediated forget 主路径已实现（L2 contract tests pass）；"
+                           "缺少 L3 real core loop E2E 验证",
         },
     ),
     "tool.gate": BranchPointState(
@@ -370,7 +384,7 @@ class RuntimeDecisionFrame:
     """记忆类型推断：semantic / contextual / procedural / unknown。"""
 
     memory_branch_points: tuple[str, ...] = (
-        "memory.recall", "memory.propose", "memory.retain",
+        "memory.recall", "memory.propose", "memory.retain", "memory.forget",
     )
 
     # ── Tool 层 ──

@@ -28,6 +28,7 @@ class RuntimeActionType(StrEnum):
     MEMORY_PROPOSE = "memory.propose"
     MEMORY_RECALL = "memory.recall"
     MEMORY_CONSOLIDATE = "memory.consolidate"
+    MEMORY_FORGET = "memory.forget"
     CHECKPOINT_SAFE_SUMMARY = "checkpoint.safe_summary"
     STREAMING_PROVIDER_CALL = "streaming.provider_call"
     # STREAMING_EVENT：单 event 验证和 per-event evidence 收集。
@@ -64,6 +65,7 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.MEMORY_PROPOSE: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.MEMORY_RECALL: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.MEMORY_CONSOLIDATE: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.MEMORY_FORGET: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CHECKPOINT_SAFE_SUMMARY: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.STREAMING_PROVIDER_CALL: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.STREAMING_EVENT: _EVIDENCE_KIND_BUSINESS,

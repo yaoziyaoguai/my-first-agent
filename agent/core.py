@@ -240,15 +240,17 @@ class TurnState:
     print_assistant_newline: bool = False
 
 
-def refresh_runtime_system_prompt(dispatcher=None) -> str:
+def refresh_runtime_system_prompt(dispatcher=None):
     """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
     Loop 3 (Memory E2E) 收敛：当 dispatcher 可用时，MEMORY_RECALL 通过
     RuntimeActionDispatcher 统一 dispatch，确保 fake/real 共享核心 recall 路径。
     模块初始化时 dispatcher 为 None，回退到直接路径。
+
+    返回 (system_prompt, snapshot_item_count)，调用方由此获得 memory 条数，
+    无需再直接调用 _memory_runtime.snapshot_for_prompt()。
     """
     if dispatcher is not None:
-        # 统一路径：通过 dispatcher dispatch MEMORY_RECALL
         from agent.runtime_integration.schema import (
             RuntimeActionRequest,
             RuntimeActionType,
@@ -263,14 +265,15 @@ def refresh_runtime_system_prompt(dispatcher=None) -> str:
         route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
         result = route(request)
         memory_section = result.payload.get("prompt_section", "")
+        snapshot_item_count = int(result.payload.get("snapshot_item_count") or 0)
         system_prompt = build_system_prompt(memory_section=memory_section)
     else:
-        # 回退：模块初始化时 dispatcher 尚不可用
         memory_snapshot = _memory_runtime.snapshot_for_prompt()
+        snapshot_item_count = len(memory_snapshot.items)
         system_prompt = build_system_prompt(memory_snapshot=memory_snapshot)
 
     state.set_system_prompt(system_prompt)
-    return state.get_system_prompt()
+    return state.get_system_prompt(), snapshot_item_count
 
 refresh_runtime_system_prompt()
 
@@ -462,13 +465,26 @@ def chat(
         return render_memory_list(records)
 
     # WP-A：forget / 忘记记忆 CLI meta-command。
-    # 直接匹配 store 中 record content 并移除，不经过 policy → confirmation 管线。
+    # Loop 2.1: forget 操作通过 dispatcher (MEMORY_FORGET) 统一证据链，
+    # 不再直接调用 _memory_runtime.remove_record()。
     #
-    # CLI-ONLY (CommandCategory.MUTATING): forget memory — 注意此命令直接操作
-    # memory store，绕过 confirmation policy。产品路径下应通过 MEMORY_PROPOSE
-    # → confirmation → retain 管线执行，而非此快捷方式。
+    # CLI-ONLY (CommandCategory.MUTATING): forget memory — 绕过 confirmation policy
+    # 直接执行移除（用户已明确表达 forget 意图，无需二次确认）。
     forget_keyword = _looks_like_forget_memory(user_input)
     if forget_keyword:
+
+        def _forget_via_dispatcher(record_id: str) -> bool:
+            """通过 dispatcher 执行 memory forget，返回是否成功移除。"""
+            from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+            _req = RuntimeActionRequest(
+                action_type=RuntimeActionType.MEMORY_FORGET,
+                source="core.chat",
+                parent_trace_id="",
+                payload={"record_id": record_id},
+            )
+            _result = _p1_dispatcher.route(_req)
+            return bool(_result.payload.get("forgotten")) if _result else False
+
         # 支持按 ID 删除：forget id:<record_id>（精确匹配 + 短 ID 前缀匹配）
         #
         # 为什么显示短 ID 就必须支持短 ID 前缀匹配：
@@ -482,8 +498,8 @@ def chat(
         # - ambiguity 提示要求用户明确指定更多前缀位，保持用户意图为最终仲裁者
         if forget_keyword.lower().startswith("id:"):
             record_id = forget_keyword[3:].strip()
-            # Step 1: 尝试精确匹配（完整 ID）
-            if _memory_runtime.remove_record(record_id):
+            # Step 1: 尝试精确匹配（完整 ID） — 通过 dispatcher
+            if _forget_via_dispatcher(record_id):
                 _safe_emit_runtime_event(
                     on_runtime_event,
                     memory_forgotten_event(1, keyword=f"id:{record_id}"),
@@ -505,7 +521,7 @@ def chat(
             ]
             if len(prefix_matches) == 1:
                 matched_id = prefix_matches[0].id
-                if _memory_runtime.remove_record(matched_id):
+                if _forget_via_dispatcher(matched_id):
                     _safe_emit_runtime_event(
                         on_runtime_event,
                         memory_forgotten_event(1, keyword=f"id:{record_id}"),
@@ -539,7 +555,7 @@ def chat(
             return render_memory_forget_not_found(forget_keyword)
         removed_count = 0
         for r in matched:
-            if _memory_runtime.remove_record(r.id):
+            if _forget_via_dispatcher(r.id):
                 removed_count += 1
         _safe_emit_runtime_event(
             on_runtime_event,
@@ -709,16 +725,15 @@ def chat(
     # tool_use 丢进摘要，留下悬空 tool_result，下次调用 API 会直接报错。
 
     # Loop 3 (Memory E2E): 传入 dispatcher 统一 recall 路径
-    runtime_system_prompt = refresh_runtime_system_prompt(
+    runtime_system_prompt, snapshot_item_count = refresh_runtime_system_prompt(
         dispatcher=runtime_action_dispatcher
     )
 
     # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。
-    _memory_snapshot = _memory_runtime.snapshot_for_prompt()
-    if _memory_snapshot.items:
+    if snapshot_item_count > 0:
         _safe_emit_runtime_event(
             on_runtime_event,
-            memory_injected_event(len(_memory_snapshot.items)),
+            memory_injected_event(snapshot_item_count),
             fallback_prefix="\n",
         )
 

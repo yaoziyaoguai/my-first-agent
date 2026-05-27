@@ -163,7 +163,7 @@
 | mcp.discover | DEFERRED | DOCS_DESIGN | bridge 默认 disabled |
 | mcp.invoke | DEFERRED | DOCS_DESIGN | 需先完成 discover |
 | subagent.delegate | FAKE_DEMO | FAKE_LOCAL_USER_PATH | 仅 L0 deterministic executor |
-| memory.recall/propose/retain | PARTIAL | FAKE_LOCAL_USER_PATH | 有 dispatcher 路径但非完整 E2E |
+| memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
 | checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | true resume 不恢复 running state |
 | trace.summary | PARTIAL | FAKE_LOCAL_USER_PATH | in-memory action_log，无 durable store |
@@ -231,7 +231,7 @@
 | Loop 1.1 | Unified Runtime Decision Spine | **COMPLETED** — 已实现 |
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
-| Loop 2.1 | Explicit Memory Main-Path Completion | pending — recall/propose/retain E2E 走 dispatcher |
+| Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — forget→dispatcher done；recall secondary fallback fixed；show memories 已走 dispatcher |
 | Loop 2.2 | Skill Activation MVP | pending — skill_registry 注入 main path |
 | Loop 2.3 | Storage/Checkpoint True Resume | pending |
 | Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |
@@ -243,7 +243,7 @@
 **需要架构决策的项目（B2-B8）**：
 | Item | 描述 | 状态 |
 |------|------|------|
-| B2 | CLI forget/delegate shortcut → dispatcher | 待 confirmation pipeline 就绪 |
+| B2 | CLI forget shortcut → dispatcher | **DONE** — forget 已迁入 MEMORY_FORGET dispatcher path；delegate 仍待 SubAgent L1/L2 |
 | B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
 | B4 | MCP real connection | 需要外部 MCP server |
 | B5 | Skill runtime 深化 | 需要真实 API + skill marketplace |

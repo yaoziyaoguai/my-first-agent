@@ -416,6 +416,7 @@ def run_summary_event(
     error_reasons: list[str] | None = None,
     business_events: int = 0,
     probe_events: int = 0,
+    decision_frame_summary: dict[str, Any] | None = None,
 ) -> RuntimeEvent:
     """构造 run summary 展示事件。
 
@@ -468,6 +469,8 @@ def run_summary_event(
             "error_reasons": error_reasons,
             "business_events": business_events,
             "probe_events": probe_events,
+            **({"decision_frame_summary": decision_frame_summary}
+               if decision_frame_summary is not None else {}),
         },
     )
 

@@ -90,6 +90,12 @@ from agent.response_handlers import (
     handle_max_tokens_response,
     handle_tool_use_response,
 )
+from agent.runtime_decision_frame import (
+    build_decision_frame_from_chat_params as _build_decision_frame,
+)
+from agent.runtime_decision_frame import (
+    set_last_decision_frame as _set_last_decision_frame,
+)
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
 from agent.runtime_loop_fields import build_runtime_loop_fields
 from agent.state import create_agent_state, task_status_requires_plan
@@ -804,6 +810,19 @@ def chat(
     else:
         _phase1_dispatcher = _p1_dispatcher
         _skill_registry = None
+
+    # ── Loop 1.1: Runtime Decision Spine ──────────────────────────────────────
+    # 在入口处构建统一 decision frame，描述当前 turn 所有子系统分支点状态。
+    # 这不是新 runtime，不改变任何执行路径——只是诚实地标记各子系统是 READY/
+    # PARTIAL/DEFERRED/FAKE_DEMO/STUB，防止 silent pass 和 overclaim。
+    _turn_decision_frame = _build_decision_frame(
+        user_input=user_input,
+        provider=provider,
+        skill_registry=_skill_registry,
+        runtime_action_dispatcher=_phase1_dispatcher,
+        tool_gate_tool_name=tool_gate_tool_name,
+    )
+    _set_last_decision_frame(_turn_decision_frame)
 
     _loop_ctx = _build_loop_context(
         client,

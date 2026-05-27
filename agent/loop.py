@@ -653,7 +653,16 @@ def _emit_run_summary(
     - 这是 display/observation event，不含 decision 语义
     """
     from agent.display_events import run_summary_event
+    from agent.runtime_decision_frame import get_last_decision_frame
     from agent.runtime_integration.schema import classify_action_evidence_kind
+
+    # Loop 1.1: 拉取当前 turn 的 decision frame 摘要，供 evidence 引用
+    d_frame = get_last_decision_frame()
+    decision_summary: dict[str, Any] | None = None
+    if d_frame is not None:
+        decision_summary = d_frame.capability_summary()
+        decision_summary["provider_mode"] = d_frame.provider_mode
+        decision_summary["evidence_level"] = d_frame.evidence_level.value
 
     dispatcher = getattr(dependencies, "runtime_action_dispatcher", None)
     action_log = getattr(dispatcher, "action_log", ()) if dispatcher is not None else ()
@@ -740,6 +749,7 @@ def _emit_run_summary(
         error_reasons=error_reasons,
         business_events=business_events,
         probe_events=probe_events,
+        decision_frame_summary=decision_summary,
     )
     dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
 

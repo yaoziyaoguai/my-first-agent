@@ -338,6 +338,7 @@ def _dispatch_model_output(
     response,
     *,
     turn_state: "TurnState",
+    runtime_action_dispatcher=None,
 ) -> str | None:
     """兼容入口：实际分派逻辑在 `agent.model_output_dispatch`。"""
 
@@ -350,6 +351,7 @@ def _dispatch_model_output(
         runtime_loop_fields=_runtime_loop_fields,
         safe_emit_runtime_event=_safe_emit_runtime_event,
         max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
+        runtime_action_dispatcher=runtime_action_dispatcher,
     )
     return dispatch_model_output(
         response,
@@ -1053,6 +1055,7 @@ def _run_main_loop(
         dispatch_model_output=lambda response: _dispatch_model_output(
             response,
             turn_state=turn_state,
+            runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
         ),
         runtime_loop_fields=_runtime_loop_fields,
         safe_emit_runtime_event=lambda sink, event: _safe_emit_runtime_event(

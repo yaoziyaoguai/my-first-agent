@@ -166,6 +166,7 @@ def handle_tool_use_response(
     turn_state: Any,
     messages: list[dict[str, Any]],
     extract_text_fn,
+    runtime_action_dispatcher: Any | None = None,
 ) -> str | None:
     """Handle a model response whose stop_reason is tool_use.
 
@@ -173,7 +174,8 @@ def handle_tool_use_response(
     - append assistant content blocks (含 tool_use) into conversation messages
     - extract tool_use blocks
     - enforce per-turn tool call limit
-    - delegate single-tool execution to tool_executor
+    - delegate single-tool execution to ToolRuntimeMediator (方案 2) 或
+      回退到 tool_executor（兼容旧路径）
     - translate tool executor sentinel values into loop-level results
     - 遇到 AWAITING_USER / FORCE_STOP 时，为剩余未处理的 tool_use 写占位
       tool_result，保证下一次调用 API 时 tool_use/tool_result 配对完整。
@@ -219,6 +221,21 @@ def handle_tool_use_response(
         return "工具调用次数过多，请简化任务或分步执行。"
 
     turn_context: dict[str, Any] = {}
+
+    # Loop 1.3 方案 2：构造 ToolRuntimeMediator 作为 dispatcher 中介层。
+    # mediator 共享 turn_context（execute_single_tool 通过它传递执行结果）。
+    if runtime_action_dispatcher is not None:
+        from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        _mediator = ToolRuntimeMediator(
+            runtime_action_dispatcher,
+            state=state,
+            turn_state=turn_state,
+            turn_context=turn_context,
+            messages=messages,
+        )
+    else:
+        _mediator = None
 
     for idx, block in enumerate(tool_use_blocks):
         # 先把模型输出归类成事件并记录下来；后续仍沿用原来的
@@ -266,13 +283,18 @@ def handle_tool_use_response(
                 state.reset_task()
                 return "检测到重复工具调用过多，任务已停止。请调整目标或换一种信息来源。"
 
-        result = execute_single_tool(
-            block,
-            state=state,
-            turn_state=turn_state,
-            turn_context=turn_context,
-            messages=messages,
-        )
+        # Loop 1.3 方案 2：通过 ToolRuntimeMediator 走 dispatcher 中介路径；
+        # mediator 为 None 时回退到直接调用 execute_single_tool（向后兼容）。
+        if _mediator is not None and not is_meta_tool(block.name):
+            result = _mediator.mediate(block)
+        else:
+            result = execute_single_tool(
+                block,
+                state=state,
+                turn_state=turn_state,
+                turn_context=turn_context,
+                messages=messages,
+            )
         if result == FORCE_STOP:
             remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
             _fill_placeholder_results(

@@ -31,6 +31,7 @@ class ModelOutputDispatchDependencies:
     runtime_loop_fields: Callable[[], dict[str, Any]]
     safe_emit_runtime_event: Callable[[RuntimeEventSink, RuntimeEvent], None]
     max_consecutive_max_tokens: int
+    runtime_action_dispatcher: Any | None = None
 
 
 def dispatch_model_output(
@@ -90,6 +91,7 @@ def dispatch_model_output(
             turn_state=turn_state,
             messages=state.conversation.messages,
             extract_text_fn=dependencies.extract_text,
+            runtime_action_dispatcher=dependencies.runtime_action_dispatcher,
         )
         return _handler_result_or_continue(
             result,

@@ -283,3 +283,85 @@ def test_memory_consolidation_freeze_declared():
     text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
     assert "Consolidation" in text
     assert "冻结" in text or "freeze" in text.lower() or "deferred" in text.lower()
+
+
+# =========================================================================
+# 10. .claude/commands/auto-run.md 命令文件守护
+# =========================================================================
+
+AUTO_RUN_CMD = ".claude/commands/auto-run.md"
+
+
+def _read_auto_run() -> str:
+    return _read(AUTO_RUN_CMD)
+
+
+def test_auto_run_references_project_status():
+    """auto-run.md 必须在 Startup 引用 PROJECT_STATUS.md。"""
+    text = _read_auto_run()
+    assert "PROJECT_STATUS.md" in text
+
+
+def test_auto_run_references_progress_ledger():
+    """auto-run.md 必须在 Startup 引用 PROGRESS_LEDGER.md。"""
+    text = _read_auto_run()
+    assert "PROGRESS_LEDGER.md" in text
+
+
+def test_auto_run_references_auto_run_workflow():
+    """auto-run.md 必须引用 AUTO_RUN_WORKFLOW.md。"""
+    text = _read_auto_run()
+    assert "AUTO_RUN_WORKFLOW.md" in text
+
+
+def test_auto_run_includes_task_type_routing():
+    """auto-run.md 必须包含任务类型路由（bug_fix / dogfood / docs_cleanup 等）。"""
+    text = _read_auto_run()
+    assert "bug_fix" in text
+    assert "dogfood" in text
+    assert "docs_cleanup" in text
+    assert "config_fix" in text
+    assert "architecture_change" in text
+
+
+def test_auto_run_includes_loop_start_selection():
+    """auto-run.md 必须包含 loop 起点选择规则，不得每次从头开始。"""
+    text = _read_auto_run()
+    assert "不要每次从头开始" in text or "Choose loop start" in text
+    assert "loop" in text.lower()
+
+
+def test_auto_run_includes_progress_update_rule():
+    """auto-run.md 必须包含进度更新规则：每轮至少更新一个 doc/report。"""
+    text = _read_auto_run()
+    assert "每轮" in text
+    assert "PROGRESS_LEDGER.md" in text or "PROJECT_STATUS.md" in text
+
+
+def test_auto_run_includes_hard_stops():
+    """auto-run.md 必须定义 Hard stops 条件。"""
+    text = _read_auto_run()
+    assert "Hard stop" in text or "Hard stops" in text or "hard stop" in text.lower()
+    assert "secret" in text.lower()
+
+
+def test_auto_run_forbids_archived_docs_as_current():
+    """auto-run.md 必须禁止以 archive docs 作为当前指令。"""
+    text = _read_auto_run()
+    assert "archive" in text.lower()
+    # archive 只能作为历史参考
+    assert "历史参考" in text or "不能作为当前" in text or "current" in text.lower()
+
+
+def test_auto_run_forbids_legacy_provider_paths():
+    """auto-run.md 必须禁止恢复 provider profiles / request_path 等 legacy 路径。"""
+    text = _read_auto_run()
+    assert "provider" in text.lower() and "profile" in text.lower()
+    assert "request_path" in text or "auth_scheme" in text or "api_key_env" in text
+
+
+def test_auto_run_forbids_committing_config_yaml():
+    """auto-run.md 必须禁止 commit config/config.yaml（含真实 key）。"""
+    text = _read_auto_run()
+    assert "config/config.yaml" in text
+    assert "commit" in text.lower()

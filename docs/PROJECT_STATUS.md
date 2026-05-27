@@ -73,7 +73,7 @@
 1. **Config safety boundary**（本轮进行中）— `config/config.yaml` tracked dirty 的安全边界文档化
 2. **Source-of-truth repair**（本轮进行中）— 修复 active docs 与 PROJECT_STATUS 的冲突
 3. **Dogfood evidence 口径硬化**（本轮进行中）— 降低过度乐观表述
-4. **交互式 dogfood harness**（下一步）— subprocess harness 覆盖 y/n、resume、tool/memory confirmation
+4. **交互式 dogfood harness**（当前 loop）— subprocess harness 覆盖 y/n、resume、tool/memory confirmation，计划已就绪
 5. **Runtime evidence diet** — 区分 business action 与 probe/noop evidence
 6. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取（仅当 harness 就绪后）
 

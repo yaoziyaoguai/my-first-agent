@@ -10,8 +10,9 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Interactive dogfood harness plan | — | `docs/plans/interactive-dogfood-harness-plan-2026-05-27.md` — 18-case matrix, 3 phases, subprocess harness design |
 | Global readonly audit | — | `docs/audit/global-readonly-audit-2026-05-27.md` — P0=0, P1=3, P2=7 |
-| Source-of-truth repair | — | 修复 root README、CURRENT_CAPABILITY_STATUS、CURRENT_AUDIT_STATUS、TEST_MATRIX、config-legacy-sunset-contract、archive/README 共 6 个冲突文档 |
+| Source-of-truth repair | 2d1ea13 | 修复 root README、CURRENT_CAPABILITY_STATUS、CURRENT_AUDIT_STATUS、TEST_MATRIX、config-legacy-sunset-contract、archive/README 共 6 个冲突文档 |
 | Config safety boundary clarified | — | PROJECT_STATUS 明确定义 config/config.yaml 安全边界；guard tests 扩展 |
 | Dogfood evidence wording hardened | — | Evidence level 降为 REAL_DOGFOOD_SMOKE；标注 interactive path 覆盖不足 |
 | Guard tests expanded | — | 新增 root README、active docs 状态口径、config 安全边界、审计引用 共 9 个测试 |

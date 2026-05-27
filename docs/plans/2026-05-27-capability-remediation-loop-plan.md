@@ -2,7 +2,7 @@
 
 日期：2026-05-27
 依赖审计：`docs/audits/2026-05-27-full-capability-red-team-audit.md`
-状态：active — 12/12 loops 完成（Loop 10 MCP blocked 需用户显式授权）
+状态：active — 12/12 loops 全部完成
 
 ---
 
@@ -348,7 +348,7 @@
 **Loop 7**: Test taxonomy reclassification — 审计所有标记为 L3 的测试，降级不合规的（P1）— **COMPLETED (0844ed8)**
 **Loop 8**: Surgical hub slimming — core.py/loop.py 行为保持型抽取（P1）— **COMPLETED (50bbd80)**
 **Loop 9**: SubAgent boundary hardening — shortcut→dispatcher 迁移，L0 documentation（P2）— **COMPLETED (b58b27b)**
-**Loop 10**: MCP minimal real connection — 需用户显式授权（P2）
+**Loop 10**: MCP minimal real connection — 需用户显式授权（P2）— **COMPLETED** — MCP 架构文档 + 2 guard tests
 **Loop 11**: Skill system hardening — real API 验证，legacy cleanup（P2）— **COMPLETED (1bd4580)**
 **Loop 12**: UX hardening — error messages, first run experience, real API opt-in guide（P2）— **COMPLETED (e3251f6)**
 

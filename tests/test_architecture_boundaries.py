@@ -982,3 +982,104 @@ def test_skill_runtime_handler_integration_is_wired() -> None:
     source = inspect.getsource(build_phase1_dispatcher)
     assert "SKILL_SELECT" in source
     assert "SkillRuntimeActionHandler" in source
+
+
+# ============================================================================
+# Loop 10: MCP boundary hardening (P2)
+# ============================================================================
+
+
+def test_mcp_modules_do_not_import_runtime_core() -> None:
+    """Loop 10: MCP 模块不能导入 runtime 核心模块。
+
+    MCP 系统是独立的架构 seam：policy/sanitizer/audit/bridge/stdio
+    都不能导入 core.py / loop.py / tool_executor.py / checkpoint.py。
+    这确保 MCP tool 注册流程不会绕过 runtime governance。
+    """
+    import ast
+
+    mcp_modules = [
+        "agent/mcp.py",
+        "agent/mcp_models.py",
+        "agent/mcp_policy.py",
+        "agent/mcp_sanitizer.py",
+        "agent/mcp_audit.py",
+        "agent/mcp_bridge.py",
+        "agent/mcp_stdio.py",
+    ]
+    forbidden = {
+        "agent.core",
+        "agent.loop",
+        "agent.tool_executor",
+        "agent.checkpoint",
+    }
+    violations: dict[str, set[str]] = {}
+
+    for mod_path in mcp_modules:
+        path = PROJECT_ROOT / mod_path
+        if not path.exists():
+            continue
+        tree = ast.parse(path.read_text())
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                imports.add(module)
+                for alias in node.names:
+                    if module:
+                        imports.add(f"{module}.{alias.name}")
+        hits = imports & forbidden
+        if hits:
+            violations[mod_path] = hits
+
+    assert violations == {}, (
+        f"MCP modules must not import runtime core: {violations}"
+    )
+
+
+def test_register_mcp_tools_is_only_registry_mutation_point() -> None:
+    """Loop 10: register_mcp_tools 是 MCP 连接 tool_registry 的唯一入口。
+
+    验证：只有 agent/mcp.py 的 register_mcp_tools() 函数调用
+    TOOL_REGISTRY 的修改操作（register_tool）。
+    其他 MCP 模块（policy/sanitizer/audit/bridge/stdio）不应直接
+    注册工具到 TOOL_REGISTRY。
+
+    mcp_policy.py 可以只读引用 TOOL_REGISTRY（用于名称冲突检测），
+    但不应调用 register_tool / TOOL_REGISTRY.register / TOOL_REGISTRY.update。
+    """
+    registry_mutators = {
+        "register_tool",
+        "TOOL_REGISTRY.register",
+        "TOOL_REGISTRY.update",
+        "TOOL_REGISTRY.__setitem__",
+    }
+
+    mcp_modules = {
+        "agent/mcp_policy.py",
+        "agent/mcp_sanitizer.py",
+        "agent/mcp_audit.py",
+        "agent/mcp_bridge.py",
+        "agent/mcp_stdio.py",
+        "agent/mcp_models.py",
+    }
+    violations: dict[str, set[str]] = {}
+
+    for mod_path in mcp_modules:
+        path = PROJECT_ROOT / mod_path
+        if not path.exists():
+            continue
+        source = path.read_text()
+        hits = set()
+        for mutator in registry_mutators:
+            if mutator in source:
+                hits.add(mutator)
+        if hits:
+            violations[mod_path] = hits
+
+    assert violations == {}, (
+        f"Only agent/mcp.py may mutate TOOL_REGISTRY. Violations: {violations}"
+    )

@@ -22,6 +22,7 @@
 | Loop 9: SubAgent Boundary Hardening | b58b27b | **COMPLETED** — L0 文档化：`docs/design/subagent-boundary-architecture.md`（两条委托路径/已知限制/迁移路线图）+ `docs/CAPABILITY_BOUNDARIES.md`（skill/subagent/tool 边界不变式）；新增 CLI delegation guard test 验证 SubAgentRegistry+delegate_once 路径；修复 pre-existing capability_boundary_contract 测试失败 |
 | Loop 11: Skill System Hardening | 1bd4580 | **COMPLETED** — L0 文档化：`docs/design/skill-system-architecture.md`（skill 系统架构/SKILL_SELECT dispatch/legacy 隔离）；新增 2 个 guard tests（skill_system 不 import legacy_skills、SKILL_SELECT handler 注册路径完整） |
 | Loop 12: UX Hardening | e3251f6 | **COMPLETED** — 新增 `docs/onboarding/first-run-real-api-opt-in.md`（首次运行/fake mode/真实 API opt-in/provider 类型/安全警告/fake→real 迁移指南） |
+| Loop 10: MCP Minimal Real Connection | — | **COMPLETED** — 新增 `docs/design/mcp-architecture.md`（7 模块架构/4 层安全隔离/3 种 bridge 模式/审计覆盖/已知限制）+ 2 个 guard tests（MCP 不 import runtime core；register_mcp_tools 是唯一 registry 连接点）；架构 boundaries 22→24 tests |
 | Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
 | Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |

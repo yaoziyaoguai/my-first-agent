@@ -231,6 +231,7 @@ def _build_real_case_matrix() -> list[CaseSpec]:
 def _generate_real_console_report(results: list[CaseResult], elapsed_s: float) -> str:
     """生成 real API console 报告。"""
     passed = sum(1 for r in results if r.status == "PASS")
+    smoke = sum(1 for r in results if r.status == "SMOKE_PASS")
     concern = sum(1 for r in results if r.status == "CONCERN")
     failed = sum(1 for r in results if r.status == "FAIL")
     blocked = sum(1 for r in results if r.status == "BLOCKED")
@@ -243,7 +244,7 @@ def _generate_real_console_report(results: list[CaseResult], elapsed_s: float) -
         f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "=" * 60,
         "",
-        f"  Total: {total}  |  PASS: {passed}  |  CONCERN: {concern}"
+        f"  Total: {total}  |  PASS: {passed}  |  SMOKE: {smoke}  |  CONCERN: {concern}"
         f"  |  FAIL: {failed}  |  BLOCKED: {blocked}  |  TIMEOUT: {timeout}",
         f"  Elapsed: {elapsed_s:.1f}s",
         f"  API calls: ~{total} (one per case, approximate)",
@@ -252,7 +253,10 @@ def _generate_real_console_report(results: list[CaseResult], elapsed_s: float) -
     ]
 
     for r in results:
-        icon_map = {"PASS": "✓", "CONCERN": "?", "FAIL": "✗", "BLOCKED": "⊘", "TIMEOUT": "⏱"}
+        icon_map = {
+            "PASS": "✓", "SMOKE_PASS": "~", "CONCERN": "?", "FAIL": "✗",
+            "BLOCKED": "⊘", "TIMEOUT": "⏱",
+        }
         status_icon = icon_map.get(r.status, "?")
         lines.append(
             f"  [{status_icon}] {r.case_id} ({r.category})"
@@ -272,6 +276,7 @@ def _generate_real_console_report(results: list[CaseResult], elapsed_s: float) -
     lines.append("  Evidence level: REAL_API_INTERACTIVE_SMOKE")
     lines.append("  API key: SET (redacted in all outputs)")
     lines.append("  Note: CONCERN cases may indicate runtime limitation, not provider issue.")
+    lines.append("  SMOKE_PASS: no crash but no capability assertions — NOT capability evidence.")
     lines.append("=" * 60)
     return "\n".join(lines)
 
@@ -294,6 +299,7 @@ def _generate_real_json_results(results: list[CaseResult], elapsed_s: float) -> 
         "summary": {
             "total": len(results),
             "pass": sum(1 for r in results if r.status == "PASS"),
+            "smoke_pass": sum(1 for r in results if r.status == "SMOKE_PASS"),
             "concern": sum(1 for r in results if r.status == "CONCERN"),
             "fail": sum(1 for r in results if r.status == "FAIL"),
             "blocked": sum(1 for r in results if r.status == "BLOCKED"),
@@ -362,22 +368,10 @@ def main(argv: list[str] | None = None) -> int:
 
         result = evaluator.evaluate(case, stdout, stderr, exit_code, timed_out, duration_ms)
 
-        # 无 expected_fragments 时，无 crash 即 PASS
-        no_expected = not case.expected_fragments
-        no_crash = (
-            exit_code == 0
-            and not timed_out
-            and "TRACEBACK_DETECTED" not in result.detected_events
-        )
-        if no_expected and result.status == "CONCERN" and no_crash:
-            result.status = "PASS"
-            if not result.notes:
-                result.notes.append("no crash, no traceback, exit 0")
-
         results.append(result)
         print(f"{result.status} ({duration_ms:.0f}ms)")
 
-        if result.notes and result.status != "PASS":
+        if result.notes and result.status not in ("PASS", "SMOKE_PASS"):
             for note in result.notes[:2]:
                 print(f"         {note}")
 

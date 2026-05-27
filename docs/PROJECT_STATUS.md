@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: AutoRun Skill Orchestration Fix 完成 — `/auto-run` 已升级为"流程机制 + 技能调度 + 证据门禁 + review 回退 + 自动继续"的工程总控
+**状态**: Loop 14 Evidence Pipeline Foundation 进行中 — 修复 dogfood harness 证据门禁、honest 化 PROJECT_STATUS
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -129,45 +129,61 @@
 | Evidence taxonomy guard tests | 17→18（新增 lifecycle check honesty guard） |
 | 影响 | `_emit_run_summary` 中 SUBAGENT_DELEGATE_L0 的 rejected routing check 不再计入 business_events |
 
-### 已知剩余 Issues
+### 已知剩余 Issues（Loop 14 审计更新）
 
-基于 2026-05-27 全能力红队审计，当前 P0/P1/P2 问题：
+**项目当前阶段：developer prototype / developer-dogfood。** 不可标 user-usable。
 
-| Issue | 优先级 | 决策 |
-|-------|--------|------|
-| ~~config/config.yaml tracked dirty~~ | ~~P0~~ | **RESOLVED** — skip-worktree + guard tests + pre-commit hook (Loop 1 完成) |
-| agent_log.jsonl 773MB 无治理/可能含敏感信息 | ~~P0~~ | **RESOLVED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 21 个 log hygiene tests (Loop 2 完成) |
-| Memory recall 未真正进入 prompt context | ~~P0~~ | **RESOLVED** — Loop 3 统一 dispatcher 路径完成 (38d757a) |
-| ~~CLI shortcut 构成第二能力平面~~ | ~~P1~~ | **RESOLVED** — Loop 4 CLI READ_ONLY 命令走统一 dispatcher (c94fc18) |
-| ~~Turn-end hook 过重（11 种 action）~~ | ~~P1~~ | **RESOLVED** — Loop 4 提取 _dispatch_tool_pipeline() helper (c94fc18) |
-| Fake/real memory 不共享核心路径 | ~~P1~~ | **RESOLVED** — Loop 3 统一到 dispatcher route_from_runtime_loop |
-| Memory confirm→retain→recall E2E 未验证 | ~~P1~~ | **RESOLVED** — Loop 3 完成 MEMORY_RECALL→prompt 闭环 |
-| ~~Resume 本质是 prompt 拼接~~ | ~~P1~~ | **RESOLVED** — Loop 6 schema versioning + backward compat (b759e62) |
-| ~~无 checkpoint schema 版本治理~~ | ~~P1~~ | **RESOLVED** — Loop 6 SCHEMA_VERSION + _MIGRATION_REGISTRY (b759e62) |
-| 大量 L3 标签测试实际是 L2 | ~~P1~~ | **RESOLVED** — Loop 7 taxonomy guard tests + file rename (0844ed8) |
-| Evidence overclaim (probe 计为能力) | ~~P1~~ | **RESOLVED** — Loop 13: SUBAGENT_DELEGATE_L0 从 business→probe 重分类 + lifecycle guard test |
-| core.py 是 god object (1172 行) | ~~P1~~ | **RESOLVED** — Loop 8 抽取 provider_evidence + subagent_inline, 1237 → 1112 lines |
-| Memory extractor zero proposals | P2 | 内联路径已部分修复 |
-| RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为 |
-| Provider identity | P3 | 不修 |
-| Product context（I1/I7） | P3 | 延后 |
+#### P1（本阶段必须修）
+
+| Issue | 来源 | 状态 |
+|-------|------|------|
+| Dogfood harness expected_events 死字段（不参与 PASS 判定） | Loop 14 G-Stack audit | **FIXING** — CaseEvaluator 已修，guard tests pending |
+| Dogfood harness no-crash → PASS（空断言 case 不应标 capability PASS） | Loop 14 G-Stack audit | **FIXING** — 新增 SMOKE_PASS 状态 |
+| Dogfood harness expected_business_actions 缺失 | Loop 14 G-Stack audit | **FIXING** — CaseSpec 已添加字段 + evaluator gate |
+
+#### P2（近期）
+
+| Issue | 来源 | 状态 |
+|-------|------|------|
+| Memory confirm→retain write path 仍直调 _memory_runtime，不走 dispatcher | Loop 14 analysis | **PARTIAL** — recall (read) path 已通过 dispatcher；write path 是独立架构变更 |
+| Memory extractor zero proposals | red-team audit | **PARTIAL** — 内联路径已部分修复 |
+| PROJECT_STATUS 历史 overclaim 清理 | Loop 13 review | **PARTIAL** — Loop 13 overclaim 已在 AutoRun fix 中回退；PROJECT_STATUS 不再包含 false RESOLVED |
+
+#### 已确认修复（证据充分）
+
+| Issue | 证据 |
+|-------|------|
+| Config safety (Loop 1) | skip-worktree + pre-commit hook + 8 guard tests |
+| Log hygiene (Loop 2) | 50MB rotation + sanitization + 21 log hygiene tests |
+| Memory recall → prompt context (Loop 3) | 统一走 dispatcher path（`refresh_runtime_system_prompt(dispatcher=...)`） |
+| CLI shortcut (Loop 4) | CLI READ_ONLY 命令走统一 dispatcher |
+| Turn-end hook (Loop 4) | 提取 _dispatch_tool_pipeline() helper |
+| Checkpoint schema version (Loop 6) | SCHEMA_VERSION + _MIGRATION_REGISTRY |
+| Test taxonomy (Loop 7) | evidence taxonomy guard tests + file rename |
+| Evidence overclaim: SUBAGENT_DELEGATE_L0 (Loop 13) | business→probe 重分类 + lifecycle guard test |
+| core.py god object (Loop 8) | 抽取 provider_evidence + subagent_inline (1237→1112 lines) |
+
+#### P3（排队/不修）
+
+| Issue | 状态 |
+|-------|------|
+| RESUME_PROMPT 全量检测 | 不修 — checkpoint 设计行为 |
+| Provider identity "我是 Claude" | 不修 |
+| Product context (I1/I7) | 延后 |
 
 ---
 
 ## 2. 推荐下一步
 
-**AutoRun Skill Orchestration Fix 完成。** 下一 loop：
+**Loop 14: Evidence Pipeline Foundation 进行中。** 已完成：
 
-- **Loop 14: Evidence Pipeline Foundation** — 修复 expected_events 死字段、no-crash PASS 问题、memory production path split
+- Harness CaseEvaluator 证据门禁（expected_events / expected_business_actions / SMOKE_PASS）
+- Memory recall 路径确认（通过 dispatcher）✓
 
-Loop 14 技能路由：
-- G-Stack: evidence honesty 分析（区分真实证据/假证据）
-- Compound Engineering: 多文件工程修复
-- Superpowers: verification-before-completion
-
-剩余 P2/P3：
-- P2: Memory extractor zero proposals（内联路径已部分修复）
-- P3: RESUME_PROMPT 全量检测、Provider identity、Product context
+待完成：
+- guard tests for harness evidence gates
+- gates / commit / push
+- 可选：memory write path (confirm→retain) dispatcher 迁移（架构变更，需独立 loop）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

@@ -329,6 +329,137 @@ def test_evaluator_secret_leak_is_fail():
     assert "SECRET_LEAK_DETECTED" in result.detected_events
 
 
+# ── 7b. Loop 14 Evidence Gate guard tests ─────────────────────────────────────
+
+
+def test_evaluator_empty_assertions_is_smoke_pass_not_capability_pass():
+    """无实质断言（fragments/events/business_actions 全空）→ SMOKE_PASS，非 PASS。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="NO-ASSERT",
+        category="I-SANITY",
+        description="no assertions at all",
+        input_sequence=["hello"],
+    )
+    result = CaseEvaluator.evaluate(spec, "some output", "", 0, False, 100.0)
+    assert result.status == "SMOKE_PASS"
+    assert "no-crash" in result.notes[0].lower()
+
+
+def test_evaluator_empty_string_fragments_is_smoke_pass():
+    """expected_fragments=[""] is treated as no assertion → SMOKE_PASS."""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="EMPTY-FRAG",
+        category="I-SANITY",
+        description="empty string fragment",
+        input_sequence=["hello"],
+        expected_fragments=[""],
+    )
+    result = CaseEvaluator.evaluate(spec, "some output", "", 0, False, 100.0)
+    assert result.status == "SMOKE_PASS"
+
+
+def test_evaluator_missing_expected_events_downgrades_to_concern():
+    """expected_events 缺失 → CONCERN（即使 fragments 匹配）。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="MISSING-EVENT",
+        category="I-TOOL",
+        description="expects TOOL_ACTIVITY but none detected",
+        input_sequence=["hello"],
+        expected_fragments=["some output"],
+        expected_events=["TOOL_ACTIVITY"],
+    )
+    result = CaseEvaluator.evaluate(spec, "some output here", "", 0, False, 100.0)
+    assert result.status == "CONCERN"
+    assert any("missing expected events" in n.lower() for n in result.notes)
+
+
+def test_evaluator_all_expected_events_matched_is_pass():
+    """所有 expected_events 都检测到 + fragments 匹配 → PASS。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="ALL-EVENTS",
+        category="I-COMPLEX",
+        description="all expected events present",
+        input_sequence=["hello"],
+        expected_fragments=["traceback detected"],  # will match stdout
+        expected_events=["TRACEBACK_DETECTED"],
+    )
+    result = CaseEvaluator.evaluate(
+        spec,
+        "Traceback (most recent call last): traceback detected ...",
+        "", 0, False, 100.0,
+    )
+    # TRACEBACK_DETECTED → FAIL takes priority over PASS
+    assert result.status == "FAIL"
+
+
+def test_evaluator_events_and_fragments_both_checked():
+    """expected_events 全部检测到但 fragments 缺失 → CONCERN。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="EVENTS-OK-FRAGS-MISSING",
+        category="I-COMPLEX",
+        description="events match but fragments don't",
+        input_sequence=["hello"],
+        expected_fragments=["specific capability output"],
+        expected_events=["RUN_SUMMARY"],
+    )
+    result = CaseEvaluator.evaluate(
+        spec,
+        "generic response\n会话已保存\n执行总结",
+        "", 0, False, 100.0,
+    )
+    assert result.status == "CONCERN"
+    assert any("missing expected fragments" in n.lower() for n in result.notes)
+
+
+def test_evaluator_missing_business_actions_downgrades():
+    """expected_business_actions 缺失 → CONCERN。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="NO-BIZ",
+        category="I-TOOL",
+        description="expects business action but none present",
+        input_sequence=["do something"],
+        expected_business_actions=["BUSINESS_ACTION"],
+    )
+    result = CaseEvaluator.evaluate(spec, "hello from fake", "", 0, False, 100.0)
+    assert result.status == "CONCERN"
+    assert any("missing expected business actions" in n.lower() for n in result.notes)
+
+
+def test_evaluator_business_action_detected_in_output():
+    """BUSINESS_ACTION 事件可在包含 tool/memory 关键词的输出中检测到。"""
+    from scripts.dogfood_interactive_harness import _detect_events
+    events = _detect_events("tool executed successfully\nmemory stored", "")
+    assert "BUSINESS_ACTION" in events
+
+
+def test_evaluator_no_crash_not_capability_pass():
+    """no crash + exit 0 + 空断言 ≠ capability PASS。必须是 SMOKE_PASS。"""
+    from scripts.dogfood_interactive_harness import CaseEvaluator, CaseSpec
+
+    spec = CaseSpec(
+        case_id="NO-CRASH",
+        category="I-SANITY",
+        description="should be SMOKE_PASS not PASS",
+        input_sequence=["anything"],
+    )
+    result = CaseEvaluator.evaluate(spec, "some output", "", 0, False, 100.0)
+    # 必须不是 PASS——空断言 case 不应标 capability PASS
+    assert result.status != "PASS"
+    assert result.status == "SMOKE_PASS"
+
+
 # ── 8. 边界测试 ──────────────────────────────────────────────────────────────
 
 

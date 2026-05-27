@@ -83,6 +83,13 @@ SECRET_PATTERNS = [
     re.compile(r"api_key\s*[:=]\s*['\"]?[A-Za-z0-9_-]{10,}"),
 ]
 MAX_LOOP_PATTERN = re.compile(r"max.*iter|loop.*limit|达到.*上限|迭代.*上限", re.IGNORECASE)
+BUSINESS_ACTION_PATTERNS = [
+    # 用户可见的业务动作（非 infrastructure probe）
+    re.compile(r"tool.*result|工具.*结果|executed|已执行", re.IGNORECASE),
+    re.compile(r"memory.*stored|memory.*retained|记忆.*已[保存留]", re.IGNORECASE),
+    re.compile(r"note.*written|note.*created|已写入|已创建", re.IGNORECASE),
+    re.compile(r"subagent.*completed|子代理.*完成|delegation.*result", re.IGNORECASE),
+]
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -95,6 +102,11 @@ class CaseSpec:
     中文学习说明：
       CaseSpec 是声明式 case 定义——它描述输入序列和期望证据，
       不包含执行逻辑。执行和评估由 SubprocessRunner + CaseEvaluator 负责。
+
+    证据门禁说明（Loop 14）：
+      - expected_fragments 为空或 [""] 的 case 不能标 capability PASS——只能标 SMOKE_PASS
+      - expected_events 必须在 detected_events 中出现，缺失则不能标 PASS
+      - expected_business_actions 用于区分"用户可见业务动作"与"基础设施事件"
     """
 
     case_id: str
@@ -103,7 +115,10 @@ class CaseSpec:
     input_sequence: list[str]  # 按顺序发送的 stdin 输入
     expected_fragments: list[str] = field(default_factory=list)  # stdout 中应包含的片段
     unexpected_fragments: list[str] = field(default_factory=list)  # stdout 中不应包含的片段
-    expected_events: list[str] = field(default_factory=list)  # 应检测到的事件类型
+    # 应检测到的事件类型（必须全部出现才能 PASS）
+    expected_events: list[str] = field(default_factory=list)
+    # 应出现的用户可见业务动作
+    expected_business_actions: list[str] = field(default_factory=list)
     timeout_s: float = DEFAULT_TIMEOUT_S
     tags: list[str] = field(default_factory=list)
 
@@ -327,6 +342,12 @@ def _detect_events(stdout: str, stderr: str) -> list[str]:
             events.append("SECRET_LEAK_DETECTED")
             break
 
+    # Business action 检测——用户可见业务动作，非 infrastructure probe
+    for pat in BUSINESS_ACTION_PATTERNS:
+        if pat.search(combined):
+            events.append("BUSINESS_ACTION")
+            break
+
     return events
 
 
@@ -343,16 +364,19 @@ def _excerpt(text: str, max_len: int = 500) -> str:
 class CaseEvaluator:
     """根据 expected 条件评估 case 结果。
 
-    判定规则：
-      - PASS：所有 expected_fragments 在 stdout 中找到，无 crash
-      - CONCERN：部分 fragments 缺失但无 crash（可能是 runtime 不支持此能力）
-      - FAIL：crash、traceback、timeout、exit_code != 0
+    判定规则（Loop 14 证据门禁）：
+      - PASS：所有 expected_events 检测到 + 所有 expected_business_actions 满足 +
+        所有 expected_fragments 匹配，无 crash
+      - SMOKE_PASS：无 crash / exit 0，但 case 无实质断言（expected_fragments / events /
+        business_actions 全为空或仅含 [""]）——仅证明"不 crash"，非能力证据
+      - CONCERN：expected_events 缺失或 fragments 部分缺失但无 crash
+      - FAIL：crash、traceback、timeout、exit_code != 0、secret leak
       - BLOCKED：subprocess 无法启动
       - TIMEOUT：超时
 
     中文学习说明：
+      SMOKE_PASS ≠ capability PASS——它只证明 runtime 没崩，不能作为功能完成的证据。
       CONCERN 不等于 FAIL——fake provider 下的交互能力有限是预期行为。
-      CONCERN 表示「当前 runtime 可能不支持此交互模式」，需要后续 real API 验证。
     """
 
     @staticmethod
@@ -376,6 +400,8 @@ class CaseEvaluator:
         result.detected_events = _detect_events(stdout, stderr)
         result.stdout_excerpt = _excerpt(stdout)
         result.stderr_excerpt = _excerpt(stderr)
+
+        # ── 硬失败检查 ──────────────────────────────────────────────────
 
         # BLOCKED: subprocess 无法启动
         if exit_code is None and not timed_out:
@@ -407,36 +433,70 @@ class CaseEvaluator:
             result.notes.append("SECRET LEAK: API key pattern found in output")
             return result
 
-        # 检查 expected fragments
-        missing = []
+        # ── 判断是否有实质断言 ──────────────────────────────────────────
+        has_meaningful_fragments = any(
+            f and f != "" for f in spec.expected_fragments
+        )
+        has_expected_events = any(
+            e and e != "" for e in spec.expected_events
+        )
+        has_business_actions = any(
+            a and a != "" for a in spec.expected_business_actions
+        )
+        has_any_assertions = (
+            has_meaningful_fragments or has_expected_events or has_business_actions
+        )
+
+        # ── 检查 expected_fragments ─────────────────────────────────────
+        missing_fragments = []
         for frag in spec.expected_fragments:
-            if frag.lower() not in stdout.lower():
-                missing.append(frag)
+            if frag and frag != "" and frag.lower() not in stdout.lower():
+                missing_fragments.append(frag)
 
         # 检查 unexpected fragments
         unexpected_found = []
         for frag in spec.unexpected_fragments:
-            if frag.lower() in stdout.lower():
+            if frag and frag != "" and frag.lower() in stdout.lower():
                 unexpected_found.append(frag)
-
         if unexpected_found:
             result.notes.append(f"unexpected fragments found: {unexpected_found}")
 
-        if not spec.expected_fragments and not missing:
-            # 无 expected fragments 的 case（sanity check），只要不 crash 就 PASS
-            result.status = "PASS"
-            if exit_code == 0 and not timed_out:
-                return result
+        # ── 检查 expected_events (Loop 14: 不再是死字段) ────────────────
+        missing_events = []
+        for evt in spec.expected_events:
+            if evt and evt != "" and evt not in result.detected_events:
+                missing_events.append(evt)
 
-        if not missing:
+        # ── 检查 expected_business_actions ──────────────────────────────
+        missing_business = []
+        for ba in spec.expected_business_actions:
+            if ba and ba != "" and ba not in result.detected_events:
+                missing_business.append(ba)
+
+        # ── 无实质断言 → SMOKE_PASS ────────────────────────────────────
+        if not has_any_assertions:
+            result.status = "SMOKE_PASS"
+            result.notes.append(
+                "no meaningful assertions (fragments/events/business_actions all empty); "
+                "no-crash is NOT capability evidence"
+            )
+            return result
+
+        # ── 判定等级 ───────────────────────────────────────────────────
+        # 收集所有问题
+        issues: list[str] = []
+        if missing_fragments:
+            issues.append(f"missing expected fragments: {missing_fragments}")
+        if missing_events:
+            issues.append(f"missing expected events: {missing_events}")
+        if missing_business:
+            issues.append(f"missing expected business actions: {missing_business}")
+
+        if not issues:
             result.status = "PASS"
-        elif len(missing) <= len(spec.expected_fragments) * 0.5:
-            # 少于一半的 fragments 缺失 → CONCERN（部分能力不支持）
-            result.status = "CONCERN"
-            result.notes.append(f"missing expected fragments: {missing}")
         else:
             result.status = "CONCERN"
-            result.notes.append(f"most expected fragments missing: {missing}")
+            result.notes.extend(issues)
 
         return result
 
@@ -690,6 +750,7 @@ def _build_case_matrix() -> list[CaseSpec]:
 def _generate_console_report(results: list[CaseResult], elapsed_s: float) -> str:
     """生成控制台可读报告。"""
     passed = sum(1 for r in results if r.status == "PASS")
+    smoke = sum(1 for r in results if r.status == "SMOKE_PASS")
     concern = sum(1 for r in results if r.status == "CONCERN")
     failed = sum(1 for r in results if r.status == "FAIL")
     blocked = sum(1 for r in results if r.status == "BLOCKED")
@@ -702,7 +763,7 @@ def _generate_console_report(results: list[CaseResult], elapsed_s: float) -> str
         f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "=" * 60,
         "",
-        f"  Total: {total}  |  PASS: {passed}  |  CONCERN: {concern}"
+        f"  Total: {total}  |  PASS: {passed}  |  SMOKE: {smoke}  |  CONCERN: {concern}"
         f"  |  FAIL: {failed}  |  BLOCKED: {blocked}  |  TIMEOUT: {timeout}",
         f"  Elapsed: {elapsed_s:.1f}s",
         "",
@@ -710,7 +771,10 @@ def _generate_console_report(results: list[CaseResult], elapsed_s: float) -> str
     ]
 
     for r in results:
-        icon_map = {"PASS": "✓", "CONCERN": "?", "FAIL": "✗", "BLOCKED": "⊘", "TIMEOUT": "⏱"}
+        icon_map = {
+            "PASS": "✓", "SMOKE_PASS": "~", "CONCERN": "?", "FAIL": "✗",
+            "BLOCKED": "⊘", "TIMEOUT": "⏱",
+        }
         status_icon = icon_map.get(r.status, "?")
         lines.append(
             f"  [{status_icon}] {r.case_id} ({r.category})"
@@ -727,6 +791,7 @@ def _generate_console_report(results: list[CaseResult], elapsed_s: float) -> str
     lines.append("")
     lines.append("-" * 60)
     lines.append("  Evidence level: FAKE_INTERACTIVE_SMOKE")
+    lines.append("  SMOKE_PASS: no crash but no capability assertions — NOT capability evidence.")
     lines.append("  Note: CONCERN cases may need real API to resolve; not a fake-path bug.")
     lines.append("=" * 60)
     return "\n".join(lines)
@@ -742,6 +807,7 @@ def _generate_json_results(results: list[CaseResult], elapsed_s: float) -> dict:
         "summary": {
             "total": len(results),
             "pass": sum(1 for r in results if r.status == "PASS"),
+            "smoke_pass": sum(1 for r in results if r.status == "SMOKE_PASS"),
             "concern": sum(1 for r in results if r.status == "CONCERN"),
             "fail": sum(1 for r in results if r.status == "FAIL"),
             "blocked": sum(1 for r in results if r.status == "BLOCKED"),
@@ -818,24 +884,10 @@ def main(argv: list[str] | None = None) -> int:
 
             result = evaluator.evaluate(case, stdout, stderr, exit_code, timed_out, duration_ms)
 
-            # 对无 expected_fragments 的空检查 case 做特殊处理（验证不 crash 即可）
-            no_expected = not case.expected_fragments
-            no_crash = (
-                exit_code == 0
-                and not timed_out
-                and "TRACEBACK_DETECTED" not in result.detected_events
-            )
-            if no_expected and result.status == "CONCERN" and no_crash:
-                result.status = "PASS"
-                if not result.notes:
-                    result.notes.append(
-                        "no crash, no traceback, exit 0 — basic sanity pass"
-                    )
-
             results.append(result)
             print(f"{result.status} ({duration_ms:.0f}ms)")
 
-            if result.notes and result.status != "PASS":
+            if result.notes and result.status not in ("PASS", "SMOKE_PASS"):
                 for note in result.notes[:2]:
                     print(f"         {note}")
 

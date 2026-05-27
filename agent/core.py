@@ -30,9 +30,6 @@ from agent.cli_commands import (
     detect_show_subagents as _looks_like_show_subagents,
 )
 from agent.cli_commands import (
-    render_delegate_error,
-    render_delegate_not_found,
-    render_delegate_result,
     render_memory_forget_not_found,
     render_memory_forget_result,
     render_memory_list,
@@ -69,8 +66,6 @@ from agent.display_events import (
     render_runtime_event_for_cli,
     runtime_display_event,
     state_inconsistency_reset_event,
-    subagent_delegated_event,
-    subagent_delegating_event,
     subagent_list_event,
     tool_requested,
 )
@@ -87,6 +82,9 @@ from agent.model_output_dispatch import (
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
 from agent.planner import format_plan_for_display, generate_plan
 from agent.prompt_builder import build_system_prompt
+from agent.provider_evidence import (
+    resolve_provider_evidence_metadata as _resolve_provider_evidence_metadata,
+)
 from agent.response_handlers import (
     handle_end_turn_response,
     handle_max_tokens_response,
@@ -95,6 +93,7 @@ from agent.response_handlers import (
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
 from agent.runtime_loop_fields import build_runtime_loop_fields
 from agent.state import create_agent_state, task_status_requires_plan
+from agent.subagent_inline import execute_subagent_delegation as _execute_subagent_delegation
 from agent.tool_registry import get_model_visible_tools
 from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
 
@@ -352,79 +351,6 @@ def _dispatch_model_output(
         dependencies=dependencies,
     )
 
-
-def _execute_subagent_delegation(
-    subagent_name: str,
-    task: str,
-    *,
-    delegation_reason: str = "CLI meta-command delegation",
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-) -> str:
-    """执行一次子代理委托并返回渲染后的用户可见结果。
-
-    这是 CLI delegate 和 NL delegation 的共享委托执行路径。
-    不做检测/解析——只做 registry lookup → SubAgentRequest 构造 →
-    delegate_once() 执行 → 结果渲染。
-
-    中文学习边界：
-    - 这不是第二条 runtime——所有委托仍通过 delegate_once() + SubAgentRegistry
-      执行，不绕过 core.chat() 统一入口
-    - 进度事件仍通过 on_runtime_event 发射
-    """
-    from pathlib import Path
-
-    from agent.subagent_system.delegation import delegate_once
-    from agent.subagent_system.registry import SubAgentRegistry
-    from agent.subagent_system.request import SubAgentRequest
-
-    try:
-        # RT-07: 使用 agent/subagent_system/descriptors/ 而非 tests/fixtures/subagents
-        # 产品级默认不应依赖测试 fixtures。demo descriptors 显式标注 DEMO-ONLY。
-        registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
-    except Exception:
-        return render_delegate_error(subagent_name, "无法加载子代理注册表")
-    descriptor = registry.get_descriptor(subagent_name)
-    if descriptor is None:
-        visible_names = [d.name for d in registry.list_visible()]
-        return render_delegate_not_found(subagent_name, visible_names)
-    try:
-        subagent_request = SubAgentRequest(
-            task=task,
-            role=descriptor.role,
-            allowed_tools=descriptor.allowed_tools,
-            parent_trace_id=f"delegation-{uuid4().hex[:8]}",
-            delegation_reason=delegation_reason,
-            max_iterations=descriptor.max_iterations_default,
-            execution_mode="local_fake",
-            risk_level=descriptor.risk_level,
-        )
-    except ValueError as exc:
-        return f"委托请求无效：{exc}"
-    _safe_emit_runtime_event(
-        on_runtime_event,
-        subagent_delegating_event(subagent_name, task),
-        fallback_prefix="\n",
-    )
-    try:
-        run = delegate_once(subagent_request, registry)
-    except Exception as exc:
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            subagent_delegated_event(subagent_name, "error", str(exc)),
-            fallback_prefix="\n",
-        )
-        return render_delegate_error(subagent_name, str(exc))
-    result = run.result
-    status = getattr(result, "status", "unknown") if result else "unknown"
-    summary = getattr(result, "summary", "") if result else ""
-    stop_reason = getattr(result, "stop_reason", "") if result else ""
-    confidence = getattr(result, "confidence", 0.0) if result else 0.0
-    _safe_emit_runtime_event(
-        on_runtime_event,
-        subagent_delegated_event(subagent_name, status, summary),
-        fallback_prefix="\n",
-    )
-    return render_delegate_result(subagent_name, status, summary, stop_reason, confidence)
 
 
 def chat(
@@ -1062,60 +988,6 @@ def _start_planning_for_handler(
 # ========== 主循环 ==========
 
 
-def _resolve_provider_evidence_metadata(provider: Any) -> tuple[str, bool]:
-    """预解析 provider 的 coarse-grained runtime evidence metadata。
-
-    中文学习边界——为什么在构造点预解析而非在消费点（loop.py）派生：
-    1. core.py 是 provider 信息的「构造点」——LoopDependencies 在这里组装，
-       在这里解析 provider metadata 是信息在「最完整的地方」被处理。
-    2. loop.py 是「消费点」——它不应知道 provider 的结构、类型体系、白名单。
-       LoopDependencies 只接收已解析的 string/bool，保持 loop 的 provider-agnostic。
-    3. 如果未来新增 provider 类型，只需更新此处的白名单，loop.py 零改动。
-
-    为什么 provider_kind 只允许 coarse-grained 三态（fake/real/unknown）：
-    - raw provider_type（如 "anthropic_native"）是 provider 实现细节，
-      不应泄漏到 evidence 的 provider_kind 字段
-    - evidence 消费者只需要知道「是否真实 API」这种粗粒度分类
-    - 精确的 provider_type 通过 evidence_extra 的 provider_type 字段保留
-    - 不回退到 type(provider).__name__：class name 是实现细节
-
-    为什么 provider_external_call 和 external_side_effects 拆开：
-    - provider_external_call: provider 本身是否调用了真实外部 API（由 provider 类型决定）
-    - external_side_effects: 整个 turn 是否有工具/文件/MCP/memory retain 等副作用
-    - 一个 real Anthropic provider 在 real smoke 场景下 provider_external_call=True
-      （确实调了 API），但 external_side_effects=False（没有工具/文件/memory retain）
-    - 这两个概念正交，不应从 provider 类型推导 external_side_effects
-
-    返回值：
-        (provider_kind, provider_external_call)
-        - provider_kind: "fake" | "real" | "unknown"
-        - provider_external_call: bool
-
-    安全边界：
-    - 只读 provider.provider_type 类属性（字符串常量），不读 .env / os.environ
-    - 不访问 API key 或任何 secret
-    - 未知/缺失 provider_type → fail-closed ("unknown", False)
-    """
-    if provider is None:
-        return ("unknown", False)
-
-    pt = getattr(provider, "provider_type", None)
-    if not isinstance(pt, str) or not pt:
-        # 空字符串或非字符串 → fail-closed
-        return ("unknown", False)
-
-    if pt == "fake":
-        return ("fake", False)
-
-    # 白名单归一化：所有已知真实 provider 类型归一化为 "real"
-    if pt in (
-        "anthropic_native", "anthropic_compatible",
-        "openai_native", "openai_compatible",
-    ):
-        return ("real", True)
-
-    # 未知 provider_type → fail-closed：不 overclaim real
-    return ("unknown", False)
 
 
 def _runtime_loop_fields() -> dict:

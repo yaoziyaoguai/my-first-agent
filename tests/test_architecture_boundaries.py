@@ -314,17 +314,22 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.runtime_integration.schema",
         "agent.state",
         # Phase 2 SubAgent demo：chat() 内 local import，仅用于
-        # "show subagents" / "delegate to" CLI meta-command。
+        # "show subagents" CLI meta-command。
         # 不改变 core 的模块级 import surface，不引入新的模块级耦合。
-        "agent.subagent_system.delegation",
         "agent.subagent_system.registry",
-        "agent.subagent_system.request",
         # Issue 1 Command Router extraction：CLI meta-command detect/render
         # 提取到独立模块。core.py 模块级 import cli_commands 以获取检测
         # 函数（_looks_like_*）和渲染函数。不引入新的 runtime 路径。
         "agent.cli_commands",
         "agent.tool_registry",
         "agent.tools",
+        # Loop 8 (Surgical Hub Slimming)：_resolve_provider_evidence_metadata
+        # 提取到 agent/provider_evidence.py。纯函数，零 intra-core 依赖。
+        "agent.provider_evidence",
+        # Loop 8 (Surgical Hub Slimming)：_execute_subagent_delegation
+        # 提取到 agent/subagent_inline.py。行为保持型提取，所有委托执行
+        # 仍通过 delegate_once() + SubAgentRegistry，不绕过统一入口。
+        "agent.subagent_inline",
     }
 
     assert _collect_agent_imports(CORE_FILE) == expected
@@ -352,7 +357,6 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_compress_history_and_sync_checkpoint",
         "_dispatch_model_output",
         "_dispatch_pending_confirmation",
-        "_execute_subagent_delegation",
         "_extract_text",
         "_handle_planning_phase_result",
         "_is_explicit_l2_trigger",
@@ -360,7 +364,9 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         # core.py 通过模块级 import alias 保留向后兼容，
         # 但它们不再是 FunctionDef 节点（只是 import 别名）。
         "_maybe_run_l2_inline",
-        "_resolve_provider_evidence_metadata",
+        # Loop 8: _resolve_provider_evidence_metadata 提取到 agent/provider_evidence.py
+        # Loop 8: _execute_subagent_delegation 提取到 agent/subagent_inline.py
+        # 两者均通过模块级 import 别名（import ... as _*）保持向后兼容。
         "_run_main_loop",
         "_run_planning_phase",
         "_runtime_loop_fields",

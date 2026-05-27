@@ -2,7 +2,7 @@
 
 日期：2026-05-27
 依赖审计：`docs/audits/2026-05-27-full-capability-red-team-audit.md`
-状态：active — 12/12 loops 全部完成
+状态：active — 12/12 loops 已执行。其中 7 个能力修复 loops（1-8）有实质代码/测试变更；Loop 9-12 为文档/设计层（admin/docs）；Loop 13 被标记为 OVERCLAIMED（仅修 1 个分类却标 all P0/P1 resolved）；Loop 14 已完成 evidence gates 修复。详细评估见 `docs/audits/2026-05-27-current-capability-recovery-map.md`。
 
 ---
 

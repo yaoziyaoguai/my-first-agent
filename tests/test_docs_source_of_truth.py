@@ -778,3 +778,184 @@ def test_auto_run_stage_switching_rules_exist():
     text = _read_auto_run()
     assert "阶段切换" in text
     assert "强制回退" in text
+
+
+# =========================================================================
+# 19. Evidence Taxonomy & Overclaim Guard Tests (Loop 16)
+# =========================================================================
+
+# 需要扫描的 active docs
+OVERCLAIM_SCAN_FILES = [
+    "docs/PROJECT_STATUS.md",
+    "docs/PROGRESS_LEDGER.md",
+    "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
+    "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
+    "docs/plans/2026-05-27-capability-remediation-loop-plan.md",
+    "docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md",
+    "docs/audits/2026-05-27-current-capability-recovery-map.md",
+    "docs/README.zh.md",
+]
+
+
+def _read_overclaim_files() -> dict[str, str]:
+    result: dict[str, str] = {}
+    for rel in OVERCLAIM_SCAN_FILES:
+        fpath = PROJECT_ROOT / rel
+        if fpath.exists():
+            result[rel] = fpath.read_text(encoding="utf-8")
+    return result
+
+
+def test_no_doc_claims_all_p0_p1_resolved():
+    """Active docs 不得无条件声称 'all P0/P1 resolved'。
+
+    Loop 13 只修了 SUBAGENT_DELEGATE_L0 一个 evidence 分类，不能把 P0/P1 全标 resolved。
+    """
+    for rel, text in _read_overclaim_files().items():
+        if "all P0/P1 resolved" in text or "所有 P0/P1 已解决" in text:
+            # 只有在显式说明这是 overclaim 或标记为禁止声称时才可以
+            if "禁止" in text or "overclaim" in text.lower() or "OVERCLAIMED" in text:
+                continue
+            pytest.fail(f"{rel}: 包含 'all P0/P1 resolved' 声称（未标记为 overclaim/禁止）")
+
+
+def test_no_doc_claims_user_usable_unqualified():
+    """Active docs 不得无条件声称 'user-usable'。
+
+    PROJECT_STATUS 明确：当前阶段是 developer prototype / developer-dogfood。
+    'limited user-usable' 也是 overclaim——developer prototype 不面向用户。
+    """
+    for rel, text in _read_overclaim_files().items():
+        if "limited user-usable" in text:
+            # 必须同时包含否定或 developer prototype 标记
+            ok = ("不可标" in text or "developer prototype" in text
+                  or "developer-dogfood" in text or "不在当前" in text
+                  or "不是" in text or "❌" in text)
+            if not ok:
+                pytest.fail(
+                    f"{rel}: 包含 'limited user-usable' 声称"
+                    "（缺少 developer prototype 降级）"
+                )
+
+
+def test_no_doc_claims_12_12_completed_unqualified():
+    """Active docs 不得无条件声称 '12/12 loops 全部完成'。
+
+    多个 loops 是 admin/docs 完成，不是 capability 完成。Loop 13 被标记 OVERCLAIMED。
+    """
+    for rel, text in _read_overclaim_files().items():
+        if "12/12" in text and "全部完成" in text:
+            # 只有在显式说明 breakdown 或标记为 overclaim 时才可以
+            ok = ("OVERCLAIMED" in text or "overclaim" in text.lower()
+                  or "admin/docs" in text or "实质代码" in text
+                  or "诚实" in text or "honest" in text.lower()
+                  or "实际" in text)
+            if not ok:
+                pytest.fail(f"{rel}: 包含 '12/12 全部完成' 声称（缺少 honest breakdown）")
+
+
+def test_project_status_explicitly_developer_prototype():
+    """PROJECT_STATUS.md 必须明确声明当前阶段为 developer prototype。
+
+    禁止 'user-usable'、'production-ready'、'real-dogfood-ready' 等过度声称。
+    """
+    text = _read("docs/PROJECT_STATUS.md")
+    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+    # 不得包含被禁止的全局声称
+    assert "broadly user-usable" not in text
+    assert "production-ready" not in text
+
+
+def test_dogfood_report_smoke_pass_not_capability_pass():
+    """Interactive dogfood report 必须区分 SMOKE_PASS 和 capability PASS。
+
+    15/15 无 crash 不能标为 capability PASS——当前 report 必须标注 SMOKE_PASS 级别。
+    """
+    text = _read("docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md")
+    # 必须包含 evidence level 说明
+    assert "SMOKE_PASS" in text
+    # 必须包含 SMOKE_PASS 不是 capability PASS 的说明
+    ok_non_capability = (
+        "不是 capability PASS" in text.lower()
+        or "非 capability" in text.lower()
+        or "不 crash" in text.lower()
+    )
+    assert ok_non_capability
+
+
+def test_remediation_plan_honest_breakdown():
+    """Remediation plan line 5 必须包含 honest breakdown（不能只写 '12/12 全部完成'）。"""
+    text = _read("docs/plans/2026-05-27-capability-remediation-loop-plan.md")
+    # 必须明确指出哪些是实质代码变更，哪些是 admin/docs
+    assert "实质代码" in text or "admin/docs" in text or "OVERCLAIMED" in text
+    # 不得只写 "12/12 全部完成" 而没有任何 honest breakdown
+    if "12/12" in text:
+        assert "OVERCLAIMED" in text or "行政" in text or "docs" in text.lower()
+
+
+def test_progress_ledger_smoke_pass_honest():
+    """PROGRESS_LEDGER 中 dogfood 条目不得标为无条件的 'PASS'。
+
+    必须标注 SMOKE_PASS 并附加说明（如 '无 crash，非 capability PASS'）。
+    """
+    text = _read("docs/PROGRESS_LEDGER.md")
+    # 如果有 "15/15" 条目，必须包含 SMOKE_PASS
+    if "15/15" in text:
+        assert "SMOKE_PASS" in text
+
+
+def test_capability_status_no_user_usable():
+    """CURRENT_CAPABILITY_STATUS.zh.md 不得使用 'user-usable' 描述项目状态。"""
+    text = _read("docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md")
+    if "limited user-usable" in text:
+        pytest.fail(
+            "CURRENT_CAPABILITY_STATUS 包含"
+            " 'limited user-usable'（应为 'developer prototype'）"
+        )
+    # 确认正确标签
+    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+
+
+def test_current_audit_status_no_user_usable():
+    """CURRENT_AUDIT_STATUS.zh.md 不得使用 'user-usable' 描述项目状态。"""
+    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
+    if "limited user-usable" in text:
+        pytest.fail("CURRENT_AUDIT_STATUS 包含 'limited user-usable'（应为 'developer prototype'）")
+    # 确认正确标签
+    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+
+
+def test_no_admin_completed_as_capability():
+    """PROJECT_STATUS 中 admin/docs loops 不得被无条件标为 capability 完成。
+
+    Loop 9 (SubAgent L0 docs)、Loop 10 (MCP docs)、Loop 11 (Skill docs)、
+    Loop 12 (UX docs) 是 admin/docs 层完成，描述中必须包含 'L0' 或 '文档化' 标记。
+    """
+    text = _read("docs/PROJECT_STATUS.md")
+    # 确认 "已修复" section 对 admin/docs loops 有适当标记
+    admin_patterns = [
+        ("Loop 9", "L0"),
+        ("Loop 10", "L0"),
+        ("Loop 11", "L0"),
+        ("Loop 12", "L0"),
+    ]
+    for loop_id, caveat in admin_patterns:
+        if loop_id in text:
+            # 必须包含文档层标记或 guard tests 标记
+            assert (
+                caveat in text
+                or "文档化" in text
+                or "guard tests" in text.lower()
+                or "admin/docs" in text.lower()
+            ), f"PROJECT_STATUS 中 {loop_id} 缺少 L0/文档化标记"
+
+
+def test_capability_recovery_map_has_overclaim_inventory():
+    """Capability recovery map 必须包含 Overclaim Inventory 表。
+
+    该表记录所有已发现的 overclaim 及其 honest status。
+    """
+    text = _read("docs/audits/2026-05-27-current-capability-recovery-map.md")
+    assert "Overclaim Inventory" in text or "Overclaim" in text
+    assert "Loop 13" in text
+    assert "15/15 PASS" in text or "SMOKE_PASS" in text

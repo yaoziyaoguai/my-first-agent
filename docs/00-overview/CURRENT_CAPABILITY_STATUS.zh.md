@@ -10,7 +10,7 @@
 
 - ✅ **real API dogfood smoke 通过**：20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5 via DashScope，2026-05-27）。
 - ✅ **fake/local gate 通过**：FakeProvider baseline 可完成本地闭环。
-- 🟡 **limited user-usable agent**：核心功能可用，但 interactive confirmation、resume、tool/memory confirmation 覆盖不足。
+- 🟡 **developer prototype / developer-dogfood**：核心功能可用，但 interactive confirmation、resume、tool/memory confirmation 覆盖不足。不可标 user-usable。
 - 🟡 **evidence 口径仍需硬化**：当前 dogfood 多数是 direct provider smoke，不是完整 runtime E2E。
 - ❌ **broadly user-ready agent**：不是当前状态。
 

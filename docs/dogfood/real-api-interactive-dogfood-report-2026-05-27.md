@@ -1,16 +1,18 @@
 # Real API Interactive Dogfood Report
 
 **日期**: 2026-05-27
-**状态**: 完成 — 15/15 PASS，0 CONCERN，0 FAIL
-**Evidence level**: REAL_API_INTERACTIVE_SMOKE
+**状态**: 完成 — 15/15 无 crash（SMOKE_PASS 级别），0 CONCERN，0 FAIL
+**Evidence level**: REAL_API_INTERACTIVE_SMOKE（非 capability PASS——cases 无 expected_events/expected_business_actions 断言）
 **执行时间**: 2026-05-27T08:20 UTC, 118.5s
 
 ## 1. Executive Summary
 
-真实 API 交互式 dogfood sweep 完成。15 个 cases 覆盖 5 个交互类别（R-SANITY、R-TOOL、R-MEMORY、R-SUBAGENT、R-EDGE），全部 PASS（15/15）。这是首次通过 subprocess 驱动 `python main.py` 端到端验证 CLI 交互路径在真实 API（kimi-k2.5 via DashScope anthropic_compatible）下的行为。
+真实 API 交互式 dogfood sweep 完成。15 个 cases 覆盖 5 个交互类别（R-SANITY、R-TOOL、R-MEMORY、R-SUBAGENT、R-EDGE），全部无 crash 完成。这是首次通过 subprocess 驱动 `python main.py` 端到端验证 CLI 交互路径在真实 API（kimi-k2.5 via DashScope anthropic_compatible）下的行为。
+
+**证据等级说明**：本轮 cases 没有 expected_events/expected_business_actions 断言——SMOKE_PASS 只证明"不 crash"，不是 capability PASS。Loop 14 之后 harness CaseEvaluator 会正确区分这两者。
 
 **关键发现**：
-- 真实 API 下所有交互路径正常：基础对话、工具确认、记忆确认、子代理委托、边界错误恢复
+- 真实 API 下所有交互路径不 crash：基础对话、工具确认、记忆确认、子代理委托、边界错误恢复
 - 无 crash、无 traceback、无 secret 泄露、无空响应
 - Tool confirmation 流程在真实 API 下正确触发 y/n 确认
 - 不存在的工具请求安全恢复，不 crash

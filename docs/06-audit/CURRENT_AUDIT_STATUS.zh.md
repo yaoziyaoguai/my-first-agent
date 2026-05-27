@@ -11,7 +11,7 @@
 Status: **Active — Source-of-Truth Repair** — 基于 2026-05-27 全局只读审计修复文档冲突和 config 安全边界。
 
 - ✅ `real-api-dogfood-smoke`：20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5, 2026-05-27）。
-- 🟡 `limited user-usable agent`：核心功能可用，interactive path 覆盖不足。
+- 🟡 `developer prototype / developer-dogfood`：核心功能可用，interactive path 覆盖不足。不可标 user-usable。
 - 🟡 `evidence hardening needed`：dogfood 多数是 direct provider smoke，不是完整 runtime E2E。
 - ❌ `broadly user-usable agent`：不在当前 scope。
 
@@ -81,7 +81,7 @@ Status: **Active — Source-of-Truth Repair** — 基于 2026-05-27 全局只读
 - full pytest: `~3380 passed, 18 skipped`（最近全量基线，见 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md)）
 - synthetic subagent dogfood: `16/16 passed`
 - synthetic skill dogfood: `12/12 passed`
-- synthetic global dogfood: `12/12 passed`
+- synthetic global dogfood: `12/12 无 crash（SMOKE_PASS 级别，非 capability PASS）`
 
 ## 历史审计证据
 

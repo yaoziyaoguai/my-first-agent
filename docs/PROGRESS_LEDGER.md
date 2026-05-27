@@ -29,7 +29,7 @@
 | Loop 12: UX Hardening | e3251f6 | **COMPLETED** — 新增 `docs/onboarding/first-run-real-api-opt-in.md`（首次运行/fake mode/真实 API opt-in/provider 类型/安全警告/fake→real 迁移指南） |
 | Loop 10: MCP Minimal Real Connection | — | **COMPLETED** — 新增 `docs/design/mcp-architecture.md`（7 模块架构/4 层安全隔离/3 种 bridge 模式/审计覆盖/已知限制）+ 2 个 guard tests（MCP 不 import runtime core；register_mcp_tools 是唯一 registry 连接点）；架构 boundaries 22→24 tests |
 | Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
-| Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
+| Real API interactive dogfood sweep | — | 15/15 SMOKE_PASS（无 crash，非 capability PASS）— 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |
 | Real API interactive dogfood authorized | — | 用户已明确授权真实 API dogfood；config/config.yaml 含真实 provider 配置，可读取用于 API 调用，不得 commit |
 | Interactive dogfood harness v2 (16 cases) | — | 扩展到 16 cases (6 categories incl. I-RESUME)，补齐 I15 memory deny + I16 resume decline |

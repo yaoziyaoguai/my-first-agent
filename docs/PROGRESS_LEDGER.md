@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Interactive dogfood harness v2 (16 cases) | — | 扩展到 16 cases (6 categories incl. I-RESUME)，补齐 I15 memory deny + I16 resume decline |
 | Interactive dogfood harness 实现 + 首轮 fake/local 验证 | — | `scripts/dogfood_interactive_harness.py` — SubprocessRunner/CaseEvaluator/14-case matrix, 14/14 PASS |
 | Interactive dogfood harness tests | — | `tests/test_interactive_dogfood_harness.py` — 29 tests (28 pass + 1 slow smoke) |
 | Interactive dogfood harness report | — | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |

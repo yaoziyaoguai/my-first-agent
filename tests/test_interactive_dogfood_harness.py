@@ -356,15 +356,15 @@ def test_case_matrix_has_all_categories():
     from scripts.dogfood_interactive_harness import _build_case_matrix
     cases = _build_case_matrix()
     categories = {c.category for c in cases}
-    expected = {"I-SANITY", "I-CONFIRM", "I-TOOL", "I-MEMORY", "I-STREAM"}
+    expected = {"I-SANITY", "I-CONFIRM", "I-TOOL", "I-MEMORY", "I-STREAM", "I-RESUME"}
     assert categories == expected, f"Missing categories: {expected - categories}"
 
 
 def test_case_matrix_minimum_count():
-    """case matrix 至少应有 10 个 cases。"""
+    """case matrix 至少应有 16 个 cases。"""
     from scripts.dogfood_interactive_harness import _build_case_matrix
     cases = _build_case_matrix()
-    assert len(cases) >= 10
+    assert len(cases) >= 16
 
 
 # ── 9. config safety ─────────────────────────────────────────────────────────

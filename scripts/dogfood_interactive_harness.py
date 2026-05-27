@@ -609,6 +609,30 @@ def _build_case_matrix() -> list[CaseSpec]:
         tags=["streaming", "multi-turn"],
     ))
 
+    # ═══ I-MEMORY (extended): memory confirmation deny ═══
+
+    cases.append(CaseSpec(
+        case_id="I15",
+        category="I-MEMORY",
+        description="memory retain deny: 拒绝记忆保留",
+        input_sequence=["记住我喜欢用中文沟通", "n"],
+        expected_fragments=[""],
+        expected_events=["CONFIRMATION_PROMPT"],
+        tags=["memory", "confirmation", "deny"],
+    ))
+
+    # ═══ I-RESUME: checkpoint resume ═══
+
+    cases.append(CaseSpec(
+        case_id="I16",
+        category="I-RESUME",
+        description="resume decline: 拒绝 resume，开始新 session",
+        input_sequence=["n"],
+        expected_fragments=[""],
+        expected_events=["RESUME_PROMPT"],
+        tags=["resume", "decline"],
+    ))
+
     return cases
 
 

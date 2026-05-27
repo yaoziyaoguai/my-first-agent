@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — 交互式 dogfood harness 就绪，fake/local 14/14 PASS
+**状态**: active — 交互式 dogfood harness 就绪，fake/local 16/16 PASS（6 categories）
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -31,10 +31,11 @@
 
 | 指标 | 值 |
 |------|---|
-| Harness | `scripts/dogfood_interactive_harness.py` — 完成 |
+| Harness | `scripts/dogfood_interactive_harness.py` — 完成（870+ lines, 16 cases） |
 | 测试 | `tests/test_interactive_dogfood_harness.py` — 28 pass + 1 slow smoke |
-| Fake/local cases | 14/14 PASS（5 类别：I-SANITY/I-CONFIRM/I-TOOL/I-MEMORY/I-STREAM） |
+| Fake/local cases | 16/16 PASS（6 类别：I-SANITY/I-CONFIRM/I-TOOL/I-MEMORY/I-STREAM/I-RESUME） |
 | 报告 | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
+| Case matrix | `docs/dogfood/interactive-dogfood-case-matrix-2026-05-27.md` |
 | 结果 JSON | `docs/dogfood/interactive-dogfood-results-2026-05-27.json` |
 | Evidence level | **FAKE_LOCAL_SMOKE** — FakeProvider 下验证交互路径正确性 |
 

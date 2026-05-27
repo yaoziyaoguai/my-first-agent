@@ -18,6 +18,7 @@ v1 已知妥协：
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -228,14 +229,16 @@ def handle_memory_confirmation_reply(
     *,
     memory_runtime: MemoryRuntimeProtocol,
     on_runtime_event: RuntimeEventSink | None = None,
+    dispatcher: Any = None,
 ) -> str:
     """处理 memory confirmation 的用户回复，委托 confirm_handlers 调用。
 
     本函数负责：
     1. 解析用户输入 → (choice, free_text)
     2. 调 memory_runtime.resolve_confirmation 执行实际写入/拒绝
-    3. 清 pending、恢复 status、save checkpoint
-    4. emit 结果 RuntimeEvent
+    3. 若 _dispatcher_payload 存在，通过 dispatcher 走 MEMORY_PROPOSE → MemoryRetainHandler
+    4. 清 pending、恢复 status、save checkpoint
+    5. emit 结果 RuntimeEvent
 
     不负责：
     - 不直接操作 store
@@ -243,6 +246,7 @@ def handle_memory_confirmation_reply(
     - 不 import checkpoint（通过 ctx.state + save_checkpoint 间接操作）
     """
     from agent.checkpoint import save_checkpoint
+    from agent.memory_runtime import MemoryEvaluationAction
 
     state = ctx.state
     pending = state.task.pending_user_input_request or {}
@@ -261,13 +265,28 @@ def handle_memory_confirmation_reply(
     result = memory_runtime.resolve_confirmation(candidate_id, choice, free_text)
     # result is MemoryEvaluationResult
 
-    # 3. 清 pending，恢复状态
+    # 3. 若 _dispatcher_payload 存在，通过 dispatcher 走统一写入路径
+    if (
+        result.action is MemoryEvaluationAction.STORED
+        and result._dispatcher_payload is not None
+        and dispatcher is not None
+    ):
+        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+        _req = RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_PROPOSE,
+            source="memory_interaction.resolve_confirmation",
+            parent_trace_id="",
+            payload=result._dispatcher_payload,
+        )
+        dispatcher.route(_req)
+
+    # 4. 清 pending，恢复状态
     state.task.pending_user_input_request = None
     state.task.status = origin_status
     save_checkpoint(state, source="memory_interaction.resolve")
 
-    # 4. emit 结果事件
-    from agent.memory_runtime import MemoryEvaluationAction
+    # 5. emit 结果事件
 
     if result.action is MemoryEvaluationAction.STORED:
         from agent.display_events import memory_stored_event as _stored_evt
@@ -334,7 +353,10 @@ def handle_inline_confirmation_reply(
         # 将已确认的 proposal 入队，由 turn-end hook 中 MEMORY_PROPOSE dispatch 执行写入。
         # 不在 confirmation handler 中直接写 store——MEMORY_PROPOSE 通过 dispatcher 提供
         # RuntimeActionEvent evidence chain，是 retain execution 的正式路径。
-        content = response.edited_content if response.action == "edit_accept" else request.candidate_content
+        if response.action == "edit_accept":
+            content = response.edited_content
+        else:
+            content = request.candidate_content
         content_hash_val = hashlib.sha256(content.encode()).hexdigest()
         state.task.pending_retain_proposals.append({
             "proposal_id": request.proposal_id,
@@ -447,7 +469,5 @@ def _sink_runtime_event(
     """安全投递 RuntimeEvent，sink 为 None 或抛异常时静默吞掉。"""
     if sink is None:
         return
-    try:
+    with contextlib.suppress(Exception):
         sink(event)
-    except Exception:
-        pass

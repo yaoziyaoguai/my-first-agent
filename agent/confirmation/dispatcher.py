@@ -4,6 +4,7 @@ feedback intent 常量、通用 helper——不拥有任何具体的 handler 逻
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -17,7 +18,6 @@ from agent.input_intents import classify_confirmation_response
 from agent.pending_requests import PendingUserInputRequest
 from agent.planner import format_plan_for_display
 from agent.runtime_observer import log_event as _log_runtime_event
-
 
 ContinueFn = Callable[[Any], str]
 StartPlanningFn = Callable[[str, Any], str]
@@ -48,15 +48,13 @@ def _emit_confirmation_observer_event(
     payload: dict[str, Any] | None = None,
 ) -> None:
     """confirmation observer evidence 写入入口（详见模块顶部 H slice 注释）。"""
-    try:
+    with contextlib.suppress(Exception):
         _log_runtime_event(
             event_type,
             event_source="confirm_handlers",
             event_payload=payload or {},
             event_channel="confirmation",
         )
-    except Exception:
-        pass
 
 
 # =============================================================================
@@ -105,6 +103,7 @@ class ConfirmationContext:
     continue_fn: ContinueFn
     start_planning_fn: StartPlanningFn | None = None
     memory_runtime: Any | None = None
+    dispatcher: Any | None = None
 
 
 # =============================================================================

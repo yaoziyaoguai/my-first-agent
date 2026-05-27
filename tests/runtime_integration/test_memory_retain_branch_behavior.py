@@ -8,7 +8,8 @@ retain = 已确认的 proposal → store.write() → disposition="retain"。
 测试分层：
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE L3 verified via phase1_hook；C3 unskipped（MEMORY_PROPOSE 已接入 turn-end hook）
+- L3 (real_core_loop_runtime_e2e): MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE L3
+  verified via phase1_hook；C3 unskipped（MEMORY_PROPOSE 已接入 turn-end hook）
 
 架构依据：
 - docs/specs/memory-retain-branch-behavior/SPEC.md
@@ -47,7 +48,6 @@ from agent.runtime_integration.evidence import (
 )
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.schema import RuntimeActionRequest
-
 
 # ========== 测试辅助工厂 ==========
 
@@ -313,7 +313,10 @@ class TestRetainPositivePath:
         result = dispatcher.route(request)
 
         evidence = result.evidence
-        assert "consolidation_triggered" not in evidence or not evidence.get("consolidation_triggered")
+        assert (
+            "consolidation_triggered" not in evidence
+            or not evidence.get("consolidation_triggered")
+        )
         assert "background_job" not in evidence or not evidence.get("background_job")
 
     def test_retain_does_not_generate_new_memory(self):
@@ -331,6 +334,42 @@ class TestRetainPositivePath:
         dispatcher.route(request)
 
         # store 中只有一条记录，content 与 candidate 完全一致
+        records = store.list_records()
+        assert len(records) >= 1
+        assert records[0].content == content
+
+    def test_retain_accepts_candidate_prefix_proposal_id(self):
+        """A8: handler 接受 candidate: 前缀的 proposal_id（用户显式 retain 路径）。
+
+        中文学习边界：用户显式 retain（"请记住：..."）的 candidate_id 格式为
+        candidate:<sha256[:16]>。MemoryRetainHandler 必须接受此格式的 proposal_id，
+        不得因前缀不匹配 prop: 而拒绝。这是 Loop 15 Phase 1 的核心兼容性修复。
+        """
+        store = InMemoryMemoryStore()
+        dispatcher = _build_phase1_dispatcher_with_retain_handler(store=store)
+        candidate_id = f"candidate:{uuid.uuid4().hex[:16]}"
+        content = "用户通过 candidate: 前缀显式 retain 的内容"
+        candidate = _make_test_candidate(
+            content=content,
+            proposal_id=candidate_id,
+            source="user_explicit_retain",
+        )
+        request = _make_retain_request(
+            candidate=candidate,
+            proposal_id=candidate_id,
+        )
+
+        result = dispatcher.route(request)
+
+        assert result.status == "success", (
+            f"handler 应接受 candidate: 前缀的 proposal_id，"
+            f"实际 status={result.status!r}, "
+            f"rejection_reason={result.payload.get('rejection_reason')!r}"
+        )
+        assert result.payload["disposition"] == "retain"
+        assert result.payload["stored"] is True
+        assert result.payload["proposal_id"] == candidate_id
+        # store 中可查回
         records = store.list_records()
         assert len(records) >= 1
         assert records[0].content == content
@@ -406,7 +445,11 @@ class TestRetainNegativePaths:
         assert result.status == "rejected"
         assert result.payload["disposition"] == "rejected"
         rejection_reason = str(result.payload.get("rejection_reason", "")).lower()
-        assert "tamper" in rejection_reason or "hash" in rejection_reason or "integrity" in rejection_reason
+        assert (
+            "tamper" in rejection_reason
+            or "hash" in rejection_reason
+            or "integrity" in rejection_reason
+        )
         # 篡改后的内容不写入 store
         for record in store.list_records():
             assert record.content != "已被篡改的内容"
@@ -951,7 +994,10 @@ class TestRetainScopeBoundary:
         result = dispatcher.route(request)
 
         evidence = result.evidence
-        assert "consolidation_triggered" not in evidence or not evidence.get("consolidation_triggered")
+        assert (
+            "consolidation_triggered" not in evidence
+            or not evidence.get("consolidation_triggered")
+        )
 
     def test_retain_no_proactive_reminder(self):
         """F3: retain 不生成 proactive reminder。

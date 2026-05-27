@@ -70,4 +70,5 @@ def build_confirmation_context(
         continue_fn=continue_fn,
         start_planning_fn=start_planning_fn,
         memory_runtime=memory_runtime,
+        dispatcher=loop_ctx.runtime_action_dispatcher,
     )

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-27
-**状态**: Loop 14 COMPLETED (commit 7172d2c) → Memory Write Dispatcher Migration **设计审计完成**，等待用户审批后进入 Loop 15 implementation
+**最后更新**: 2026-05-28
+**状态**: Loop 15 Phase 1-4 COMPLETE → Memory Write Dispatcher Migration **已实现**，95/95 memory tests pass，3666 total tests pass
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -145,7 +145,7 @@
 
 | Issue | 来源 | 状态 |
 |-------|------|------|
-| Memory confirm→retain write path 仍直调 _memory_runtime，不走 dispatcher | Loop 14 analysis | **DESIGN COMPLETE** — `docs/design/memory-write-dispatcher-migration-design.md`；等待用户审批后进入 Loop 15 implementation |
+| Memory confirm→retain write path 仍直调 _memory_runtime，不走 dispatcher | Loop 14 analysis | **RESOLVED** — Loop 15 Phase 1-4 completed；`resolve_confirmation()` 返回 `_dispatcher_payload`；`handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`；100/100 memory tests pass |
 | Memory extractor zero proposals | red-team audit | **PARTIAL** — 内联路径已部分修复 |
 | PROJECT_STATUS 历史 overclaim 清理 | Loop 13 review | **PARTIAL** — Loop 13 overclaim 已在 AutoRun fix 中回退；PROJECT_STATUS 不再包含 false RESOLVED |
 
@@ -175,14 +175,20 @@
 
 ## 2. 推荐下一步
 
-**Loop 14 已完成（commit 7172d2c）。**
+**Loop 15 已完成 Phase 1-4（commit pending）。**
 
-**Memory Write Dispatcher Migration 设计审计已完成。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
+**Memory Write Dispatcher Migration 已实现。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
 
-**下一步（待用户审批设计后执行）**：
-- **Loop 15: Memory Write Dispatcher Migration** — 将 user-initiated memory retain 的 store write 从 direct call 迁入 dispatcher（MEMORY_PROPOSE → MemoryRetainHandler）
-- 设计关键决策：复用已有 MEMORY_PROPOSE action type + MemoryRetainHandler，不新增架构元素；~50 行生产代码变更
-- 审批后按 TDD 顺序进入 Phase 1（handler 兼容性修复）
+**已完成的 Phase**：
+- Phase 1: Handler compatibility — `MemoryRetainHandler` accepts `candidate:` prefixed proposal_ids
+- Phase 2: `resolve_confirmation()` 返回 `_dispatcher_payload` 而非直接写 store
+- Phase 3: `handle_memory_confirmation_reply()` 通过 dispatcher 走 `MEMORY_PROPOSE → MemoryRetainHandler`
+- Phase 4: E2E integration tests — 5 new tests verify complete dispatcher chain
+- 100/100 memory tests pass, 3666 total tests pass
+
+**下一步**：
+- **Phase 5: Docs finalization** — 更新 PROGRESS_LEDGER、design doc 状态
+- **Loop 16: Evidence Pipeline Foundation** — 统一 evidence taxonomy + harness evaluator 修复
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

@@ -39,7 +39,6 @@ from agent.memory_runtime import (
 )
 from agent.memory_store import InMemoryMemoryStore
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -178,8 +177,8 @@ def test_get_pending_confirmation_returns_cached_request():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_confirmation_accept_writes_to_store():
-    """用户选择 ACCEPT → store 中有 approved record。"""
+def test_resolve_confirmation_accept_returns_dispatcher_payload():
+    """Loop 15: resolve_confirmation 不再直接写 store——返回 _dispatcher_payload。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -189,10 +188,18 @@ def test_resolve_confirmation_accept_writes_to_store():
     )
 
     assert resolved.action is MemoryEvaluationAction.STORED
+    payload = resolved._dispatcher_payload
+    assert payload is not None, "APPROVED 应返回 _dispatcher_payload"
+    assert payload["confirmation_result"] == "accept"
+    assert payload["proposal_id"] == result.candidate_id
+    assert isinstance(payload["candidate"], dict)
+    assert "content" in payload["candidate"]
+    assert "I like blue" in payload["candidate"]["content"]
+    assert "content_hash" in payload["candidate"]
+    assert "scope" in payload["candidate"]
+    # store 未被直接写入——由 dispatcher 负责
     records = runtime._store.list_records()
-    assert len(records) == 1
-    assert records[0].approval_status == "approved"
-    assert "I like blue" in records[0].content
+    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +228,8 @@ def test_resolve_confirmation_reject_does_not_write():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_confirmation_session_only_writes():
-    """用户选择 SESSION_ONLY → store 写入但标记 session scope。"""
+def test_resolve_confirmation_session_only_returns_dispatcher_payload():
+    """Loop 15: SESSION_ONLY 也返回 _dispatcher_payload，不直接写 store。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -233,10 +240,14 @@ def test_resolve_confirmation_session_only_writes():
 
     assert resolved.action is MemoryEvaluationAction.STORED
     assert "仅本次会话" in resolved.reason
+    payload = resolved._dispatcher_payload
+    assert payload is not None, "SESSION_ONLY 应返回 _dispatcher_payload"
+    assert payload["confirmation_result"] == "session_only"
+    assert payload["proposal_id"] == result.candidate_id
+    assert isinstance(payload["candidate"], dict)
+    # store 未被直接写入
     records = runtime._store.list_records()
-    assert len(records) == 1
-    assert records[0].approval_status == "session_only"
-    assert records[0].created_by_operation.value == "use_once_intent"
+    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +255,8 @@ def test_resolve_confirmation_session_only_writes():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_confirmation_edit_and_accept_writes_edited_content():
-    """用户选择 EDIT_AND_ACCEPT → store 中为编辑后内容。"""
+def test_resolve_confirmation_edit_and_accept_returns_dispatcher_payload():
+    """Loop 15: EDIT_AND_ACCEPT 返回 _dispatcher_payload，内容为编辑后版本。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -256,10 +267,12 @@ def test_resolve_confirmation_edit_and_accept_writes_edited_content():
     )
 
     assert resolved.action is MemoryEvaluationAction.STORED
+    payload = resolved._dispatcher_payload
+    assert payload is not None, "EDIT_AND_ACCEPT 应返回 _dispatcher_payload"
+    assert "green" in payload["candidate"]["content"]
+    # store 未被直接写入
     records = runtime._store.list_records()
-    assert len(records) == 1
-    # 编辑后内容应在 record 中
-    assert "green" in records[0].content
+    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +347,7 @@ def test_build_memory_pending_request_structure():
 def test_memory_confirmation_accept_routes_through_handle_user_input_step(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """memory_confirmation accept 仍由 confirm_handlers 分流到 memory_interaction。
+    """Loop 15: accept 返回正确文本，store 写入由 dispatcher 负责。
 
     这些 characterization tests 用于钉死现有 pending_user_input_request →
     awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
@@ -352,9 +365,7 @@ def test_memory_confirmation_accept_routes_through_handle_user_input_step(
     assert "已记住" in reply
     assert ctx.state.task.pending_user_input_request is None
     assert ctx.state.task.status == "running"
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert "I like blue" in records[0].content
+    # store 写入不再由 resolve_confirmation 直接执行——由 dispatcher 负责
 
 
 def test_memory_confirmation_reject_routes_through_handle_user_input_step(
@@ -384,12 +395,7 @@ def test_memory_confirmation_reject_routes_through_handle_user_input_step(
 def test_memory_confirmation_edit_routes_through_handle_user_input_step(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """memory_confirmation edit 仍写入编辑后的内容。
-
-    这些 characterization tests 用于钉死现有 pending_user_input_request →
-    awaiting_user_input → confirm_handlers 的行为，避免新增 inline confirmation
-    分支破坏既有 memory_confirmation 流程。
-    """
+    """Loop 15: edit 返回正确文本，store 写入由 dispatcher 负责。"""
     from agent.confirm_handlers import handle_user_input_step
 
     _patch_memory_interaction_checkpoint(monkeypatch)
@@ -400,9 +406,7 @@ def test_memory_confirmation_edit_routes_through_handle_user_input_step(
     reply = handle_user_input_step("2 I prefer green actually", ctx)
 
     assert "已记住" in reply
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert "green" in records[0].content
+    # store 写入不再由 resolve_confirmation 直接执行——由 dispatcher 负责
 
 
 def test_unknown_awaiting_kind_is_not_memory_confirmation(
@@ -718,19 +722,7 @@ def test_pending_payload_is_json_serializable_with_default_encoder():
 
 
 def test_pending_recovery_resolve_after_checkpoint_round_trip():
-    """模拟 checkpoint save/load 恢复后 resolve_confirmation 仍能写入 store。
-
-    完整流程：
-    1. evaluate_user_text → CONFIRMATION_REQUIRED + candidate_id
-    2. build_memory_pending_request → pending dict（模拟 core.py 行为）
-    3. json.dumps/loads 往返（模拟 checkpoint save/load）
-    4. 从恢复的 pending dict 提取 candidate_id + parse user reply
-    5. resolve_confirmation → STORED → store 中有 approved record
-
-    这覆盖了 checkpoint 崩溃恢复的关键路径，不依赖真实文件系统 checkpoint。
-    true file-system checkpoint + process restart E2E 是 future work，
-    见 docs/MEMORY_ARCHITECTURE.md §Known Limitations。
-    """
+    """Loop 15: checkpoint 恢复后 resolve_confirmation 返回 _dispatcher_payload。"""
     import json
 
     from agent.memory_confirmation import build_memory_confirmation_request
@@ -764,11 +756,9 @@ def test_pending_recovery_resolve_after_checkpoint_round_trip():
     # Phase 2: resolve with recovered data
     resolved = runtime.resolve_confirmation(recovered_id, choice, free_text)
     assert resolved.action is MemoryEvaluationAction.STORED
-
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert "I like blue" in records[0].content
-    assert records[0].approval_status == "approved"
+    payload = resolved._dispatcher_payload
+    assert payload is not None, "checkpoint 恢复后应返回 _dispatcher_payload"
+    assert "I like blue" in payload["candidate"]["content"]
 
 
 def test_pending_recovery_resolve_reject_after_checkpoint_round_trip():
@@ -806,11 +796,7 @@ def test_pending_recovery_resolve_reject_after_checkpoint_round_trip():
 
 
 def test_default_runtime_returns_confirmation_required_not_auto_accept():
-    """默认 MemoryRuntime 不 auto-accept。
-
-    v1 两阶段流程：evaluate_user_text 应返回 CONFIRMATION_REQUIRED 而非 STORED。
-    不做 auto-accept——确认环节不可绕过。
-    """
+    """Loop 15: 默认 MemoryRuntime 不 auto-accept，返回 _dispatcher_payload。"""
     runtime = MemoryRuntime(store=InMemoryMemoryStore())
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -821,13 +807,15 @@ def test_default_runtime_returns_confirmation_required_not_auto_accept():
     # store 尚未写入
     assert len(runtime._store.list_records()) == 0
 
-    # 第二阶段：resolve_confirmation 后才写入
+    # 第二阶段：resolve_confirmation 返回 _dispatcher_payload
     resolved = runtime.resolve_confirmation(
         result.candidate_id,
         MemoryConfirmationChoice.ACCEPT,
     )
     assert resolved.action is MemoryEvaluationAction.STORED
-    assert len(runtime._store.list_records()) == 1
+    payload = resolved._dispatcher_payload
+    assert payload is not None, "应返回 _dispatcher_payload 供 dispatcher 写入"
+    assert "I like blue" in payload["candidate"]["content"]
 
 
 def test_evaluate_on_event_callback_does_not_interfere_with_two_phase_flow():
@@ -863,4 +851,138 @@ def test_default_runtime_rejects_non_memory_text():
     runtime = MemoryRuntime(store=InMemoryMemoryStore())
     result = runtime.evaluate_user_text("hello, how are you?")
     assert result.action is MemoryEvaluationAction.NO_OP
-    assert len(runtime._store.list_records()) == 0
+
+
+# ---------------------------------------------------------------------------
+# 16. Loop 15 Phase 4: E2E dispatcher integration
+# ---------------------------------------------------------------------------
+
+
+class SpyDispatcher:
+    """测试用 dispatcher spy：记录最后一次 route 调用。"""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def route(self, request):
+        self.calls.append(request)
+        from agent.runtime_integration.schema import RuntimeActionResult, RuntimeActionType
+        return RuntimeActionResult(action_type=RuntimeActionType.MEMORY_PROPOSE)
+
+
+def test_handle_memory_confirmation_reply_dispatches_memory_propose(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Loop 15 Phase 4: handle_memory_confirmation_reply 通过 dispatcher 走 MEMORY_PROPOSE。"""
+    from agent.confirm_handlers import handle_user_input_step
+    from agent.runtime_integration.schema import RuntimeActionType
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+
+    spy = SpyDispatcher()
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    ctx.dispatcher = spy
+
+    reply = handle_user_input_step("1", ctx)
+
+    assert "已记住" in reply
+    assert len(spy.calls) == 1
+    assert spy.calls[0].action_type is RuntimeActionType.MEMORY_PROPOSE
+    assert spy.calls[0].source == "memory_interaction.resolve_confirmation"
+    payload = spy.calls[0].payload
+    assert payload["confirmation_result"] == "accept"
+    assert payload["proposal_id"] is not None
+    assert "I like blue" in payload["candidate"]["content"]
+    assert "content_hash" in payload["candidate"]
+
+
+def test_handle_memory_confirmation_reply_reject_does_not_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Loop 15 Phase 4: reject 时不触发 dispatcher。"""
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+
+    spy = SpyDispatcher()
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    ctx.dispatcher = spy
+
+    reply = handle_user_input_step("4", ctx)
+
+    assert "已拒绝" in reply
+    assert len(spy.calls) == 0, "reject 不应触发 dispatcher"
+
+
+def test_handle_memory_confirmation_reply_no_dispatcher_is_safe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Loop 15 Phase 4: dispatcher 为 None 时向后兼容，不崩溃。"""
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    ctx.dispatcher = None
+
+    reply = handle_user_input_step("1", ctx)
+    assert "已记住" in reply
+
+
+def test_handle_memory_confirmation_reply_dispatcher_writes_to_store(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Loop 15 Phase 4: dispatcher → MemoryRetainHandler → store 写入完整链路。"""
+    from agent.confirm_handlers import handle_user_input_step
+    from agent.runtime_integration.dispatcher import (
+        ActionHandlerRegistry,
+        RuntimeActionDispatcher,
+    )
+    from agent.runtime_integration.memory_retain import MemoryRetainHandler
+    from agent.runtime_integration.schema import RuntimeActionType
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.MEMORY_PROPOSE,
+        MemoryRetainHandler(store=runtime._store),
+    )
+    dispatcher = RuntimeActionDispatcher(registry=registry)
+
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    ctx.dispatcher = dispatcher
+
+    reply = handle_user_input_step("1", ctx)
+
+    assert "已记住" in reply
+    records = runtime._store.list_records()
+    assert len(records) == 1, "dispatcher → MemoryRetainHandler 应写入 store"
+    assert "I like blue" in records[0].content
+
+
+def test_memory_interaction_does_not_directly_write_store():
+    """Loop 15 Phase 4: memory_interaction 模块不直接 import store 写入方法。"""
+    import ast
+    from pathlib import Path
+
+    interaction_path = (
+        Path(__file__).resolve().parents[1] / "agent" / "memory_interaction.py"
+    )
+    tree = ast.parse(interaction_path.read_text(encoding="utf-8"))
+
+    store_methods = {"apply_operation_intent", "write_record", "put_record"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in store_methods:
+            pytest.fail(
+                f"memory_interaction.py 不应直接调用 store.{node.attr}——"
+                f"应通过 dispatcher 走 MEMORY_PROPOSE → MemoryRetainHandler"
+            )

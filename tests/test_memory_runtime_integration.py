@@ -35,7 +35,6 @@ from agent.memory_runtime import (
 )
 from agent.memory_store import InMemoryMemoryStore
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -72,32 +71,33 @@ def _evaluate_and_confirm(
 # ---------------------------------------------------------------------------
 
 
-def test_explicit_retain_flows_to_store():
-    """用户说 "remember that X" → store 中有 approved record。"""
+def test_explicit_retain_flows_to_dispatcher_payload():
+    """Loop 15: resolve_confirmation 返回 _dispatcher_payload，不再直接写 store。"""
     runtime = _make_runtime()
 
     result = _evaluate_and_confirm(runtime, "remember that my favorite color is blue")
 
     assert result.action is MemoryEvaluationAction.STORED
+    payload = result._dispatcher_payload
+    assert payload is not None, "APPROVED 应返回 _dispatcher_payload"
+    assert payload["confirmation_result"] == "accept"
+    assert "my favorite color is blue" in payload["candidate"]["content"]
+    assert "content_hash" in payload["candidate"]
+    # store 未被直接写入——由 dispatcher 负责
     records = runtime._store.list_records()  # type: ignore[union-attr]
-    assert len(records) == 1
-    record = records[0]
-    assert "my favorite color is blue" in record.content
-    assert record.approval_status == "approved"
-    assert record.memory_type == "semantic"
-    assert record.source_type == "explicit_user_request"
+    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
 
 
-def test_chinese_retain_flows_to_store():
-    """中文 "记住 X" 同样触发 retain → store。"""
+def test_chinese_retain_returns_dispatcher_payload():
+    """Loop 15: 中文 retain 返回 _dispatcher_payload，不再直接写 store。"""
     runtime = _make_runtime()
 
     result = _evaluate_and_confirm(runtime, "记住：我喜欢简洁回答")
 
     assert result.action is MemoryEvaluationAction.STORED
-    records = runtime._store.list_records()  # type: ignore[union-attr]
-    assert len(records) == 1
-    assert "我喜欢简洁回答" in records[0].content
+    payload = result._dispatcher_payload
+    assert payload is not None, "中文 retain 应返回 _dispatcher_payload"
+    assert "我喜欢简洁回答" in payload["candidate"]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -106,11 +106,32 @@ def test_chinese_retain_flows_to_store():
 
 
 def test_memory_snapshot_enters_prompt():
-    """store 中有 accepted record → snapshot 非空 → prompt section 包含 memory。"""
+    """store 中有 record → snapshot 非空 → prompt section 包含 memory。"""
     from agent.memory import build_memory_section
+    from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
+    from agent.memory_contracts import MemoryDecisionType
+    from agent.memory_operations import (
+        MemoryOperationIntent,
+        MemoryOperationType,
+        build_memory_audit_summary,
+    )
 
     runtime = _make_runtime()
-    _evaluate_and_confirm(runtime, "remember that I prefer concise answers")
+    # 直接写 store 作为 snapshot 测试的前置条件（resolve_confirmation 不再直接写 store）
+    intent = MemoryOperationIntent(
+        operation_type=MemoryOperationType.RETAIN,
+        decision_type=MemoryDecisionType.RETAIN,
+        confirmation_status=MemoryConfirmationStatus.APPROVED,
+        user_choice=MemoryConfirmationChoice.ACCEPT,
+        content_summary="I prefer concise answers",
+        source_summary="test",
+        scope=MemoryScope.USER,
+        safety_summary="无额外安全标记",
+        sensitive_redacted=False,
+        user_visible_summary="I prefer concise answers",
+    )
+    audit = build_memory_audit_summary(intent)
+    runtime._store.apply_operation_intent(intent, audit)
 
     snapshot = runtime.snapshot_for_prompt()
     assert len(snapshot.items) == 1
@@ -188,7 +209,7 @@ def test_normal_message_no_memory_trigger(text: str):
 
 
 def test_memory_audit_events_logged():
-    """candidate / confirmation / stored 事件被记录。"""
+    """Loop 15: candidate / confirmation / approved 事件被记录（stored 移至 handler）。"""
     events: list = []
 
     def capture_log(event_type: str, payload: dict | None = None):
@@ -204,7 +225,8 @@ def test_memory_audit_events_logged():
     assert "memory.candidate_detected" in event_types
     assert "memory.confirmation_requested" in event_types
     assert "memory.confirmation_accepted" in event_types
-    assert "memory.stored" in event_types
+    # stored 事件不再由 resolve_confirmation 发出——已迁移至 MemoryRetainHandler
+    assert "memory.confirmation_approved" in event_types
 
 
 def test_blocked_memory_logs_blocked_event():
@@ -226,6 +248,14 @@ def test_blocked_memory_logs_blocked_event():
 
 def test_snapshot_generation_logs_injected_event():
     """snapshot 生成时记录 memory.injected 事件。"""
+    from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
+    from agent.memory_contracts import MemoryDecisionType
+    from agent.memory_operations import (
+        MemoryOperationIntent,
+        MemoryOperationType,
+        build_memory_audit_summary,
+    )
+
     events: list = []
 
     def capture_log(event_type: str, payload: dict | None = None):
@@ -235,7 +265,21 @@ def test_snapshot_generation_logs_injected_event():
         store=InMemoryMemoryStore(),
         event_logger=capture_log,
     )
-    _evaluate_and_confirm(runtime, "remember that I prefer concise answers")
+    # 直接写 store 作为前置条件（resolve_confirmation 不再直接写 store）
+    intent = MemoryOperationIntent(
+        operation_type=MemoryOperationType.RETAIN,
+        decision_type=MemoryDecisionType.RETAIN,
+        confirmation_status=MemoryConfirmationStatus.APPROVED,
+        user_choice=MemoryConfirmationChoice.ACCEPT,
+        content_summary="I prefer concise answers",
+        source_summary="test",
+        scope=MemoryScope.USER,
+        safety_summary="无额外安全标记",
+        sensitive_redacted=False,
+        user_visible_summary="I prefer concise answers",
+    )
+    audit = build_memory_audit_summary(intent)
+    runtime._store.apply_operation_intent(intent, audit)
 
     events.clear()
     runtime.snapshot_for_prompt()
@@ -396,9 +440,8 @@ def test_memory_runtime_does_not_use_input():
 
     calls: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name):
-                calls.add(node.func.id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.add(node.func.id)
 
     assert "input" not in calls, "memory_runtime.py must not call input()"
 
@@ -408,13 +451,8 @@ def test_memory_runtime_does_not_use_input():
 # ---------------------------------------------------------------------------
 
 
-def test_two_phase_confirm_flow_writes_store():
-    """v1 两阶段交互：evaluate → resolve_confirmation 完成 store 写入。
-
-    v1 开始 evaluate_user_text 不再内部 auto-accept，而是返回
-    CONFIRMATION_REQUIRED。调用方通过 resolve_confirmation 应用用户选择。
-    本测试验证两阶段完整闭环。
-    """
+def test_two_phase_confirm_flow_returns_dispatcher_payload():
+    """Loop 15: v1 两阶段交互返回 _dispatcher_payload，store 由 dispatcher 写入。"""
     from agent.memory_runtime import MemoryEvaluationAction
     from agent.memory_store import InMemoryMemoryStore
 
@@ -431,20 +469,21 @@ def test_two_phase_confirm_flow_writes_store():
     result = _evaluate_and_confirm(runtime, "remember that I prefer concise answers")
     assert result.action is MemoryEvaluationAction.STORED
 
-    # store 中应有 approved record
-    records = runtime._store.list_records()
-    assert len(records) == 1
-    assert "I prefer concise answers" in records[0].content
-    assert records[0].approval_status == "approved"
+    # _dispatcher_payload 包含 store 写入所需全部数据
+    payload = result._dispatcher_payload
+    assert payload is not None, "两阶段确认应返回 _dispatcher_payload"
+    assert payload["confirmation_result"] == "accept"
+    assert "I prefer concise answers" in payload["candidate"]["content"]
+    assert "content_hash" in payload["candidate"]
 
-    # audit events 包含 confirmation_accepted 和 stored
+    # store 未被直接写入
+    records = runtime._store.list_records()
+    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+
+    # audit events 包含 confirmation_accepted 和 confirmation_approved
     event_types = [e[0] for e in events]
     assert "memory.confirmation_accepted" in event_types
-    assert "memory.stored" in event_types
-
-    # snapshot 可看到 memory
-    snapshot = runtime.snapshot_for_prompt()
-    assert len(snapshot.items) == 1
+    assert "memory.confirmation_approved" in event_types
 
 
 def test_evaluate_user_text_emits_on_event():
@@ -469,11 +508,8 @@ def test_evaluate_user_text_emits_on_event():
 
 
 def test_create_memory_runtime_default_behavior():
-    """create_memory_runtime() 两阶段交互后 store 写入成功。
-
-    explicit retain → CONFIRMATION_REQUIRED → resolve → store 写入。
-    """
-    from agent.memory_runtime import create_memory_runtime, MemoryEvaluationAction
+    """Loop 15: create_memory_runtime() 两阶段交互返回 _dispatcher_payload。"""
+    from agent.memory_runtime import MemoryEvaluationAction, create_memory_runtime
     from agent.memory_store import InMemoryMemoryStore
 
     runtime = create_memory_runtime(store=InMemoryMemoryStore())
@@ -481,5 +517,6 @@ def test_create_memory_runtime_default_behavior():
     result = _evaluate_and_confirm(runtime, "remember that I prefer concise answers")
     assert result.action is MemoryEvaluationAction.STORED
 
-    records = runtime._store.list_records()
-    assert len(records) == 1
+    payload = result._dispatcher_payload
+    assert payload is not None, "create_memory_runtime 路径应返回 _dispatcher_payload"
+    assert "I prefer concise answers" in payload["candidate"]["content"]

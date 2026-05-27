@@ -33,6 +33,7 @@ def dispatch_memory_confirmation(
             ctx,
             memory_runtime=ctx.memory_runtime,
             on_runtime_event=on_runtime_event,
+            dispatcher=getattr(ctx, "dispatcher", None),
         )
 
     # memory_inline_confirmation：Phase 7 procedural inline confirmation

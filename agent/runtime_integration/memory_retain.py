@@ -121,7 +121,8 @@ class MemoryRetainHandler:
             )
 
         # --- proposal_id 格式验证 ---
-        if not proposal_id.startswith("prop:"):
+        # 接受 prop: (turn-end 自动提案) 和 candidate: (用户显式 retain) 两种前缀
+        if not (proposal_id.startswith("prop:") or proposal_id.startswith("candidate:")):
             return context.rejected(
                 handler_name=type(self).__name__,
                 target_module="MemoryStore",

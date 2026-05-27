@@ -25,9 +25,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any
 
 from agent.memory_confirmation import (
     MemoryConfirmationChoice,
@@ -38,16 +41,12 @@ from agent.memory_confirmation import (
     resolve_memory_confirmation_choice,
 )
 from agent.memory_contracts import MemoryDecision, MemoryDecisionType, MemorySnapshot
-from agent.memory_operations import (
-    build_memory_audit_summary,
-    build_memory_operation_intent,
-)
 from agent.memory_policy import DeterministicMemoryPolicy
 from agent.memory_snapshot_generator import (
     MemorySnapshotBuildOptions,
     build_memory_snapshot_from_store,
 )
-from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus, MemoryStoreProtocol
+from agent.memory_store import InMemoryMemoryStore, MemoryStoreProtocol
 from agent.memory_suggestions import DeterministicSuggestionEngine
 
 
@@ -75,6 +74,9 @@ class MemoryEvaluationResult:
     content_summary: str = ""
     reason: str = ""
     safety_flags: tuple[str, ...] = ()
+    # Loop 15: 供 core.py 通过 dispatcher 执行 store write 的 payload。
+    # None 表示无需 dispatch（REJECTED / 无匹配 decision / store=None 回退）。
+    _dispatcher_payload: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -211,15 +213,13 @@ class MemoryRuntime:
 
         # 发出确认请求事件（供 UI 层展示）
         if on_event is not None:
-            try:
+            with contextlib.suppress(Exception):
                 on_event({
                     "type": "memory_confirmation_requested",
                     "question": confirmation_request.question,
                     "preview": confirmation_request.preview,
                     "decision_type": decision.decision_type.value,
                 })
-            except Exception:
-                pass
 
         self._log("memory.confirmation_requested", {
             "decision_type": decision.decision_type.value,
@@ -291,7 +291,7 @@ class MemoryRuntime:
         confirmation_request = build_memory_confirmation_request(memory_decision)
 
         if on_event is not None:
-            try:
+            with contextlib.suppress(Exception):
                 on_event({
                     "type": "memory_confirmation_requested",
                     "question": confirmation_request.question,
@@ -299,8 +299,6 @@ class MemoryRuntime:
                     "decision_type": decision.value,
                     "source_type": "agent_suggested",
                 })
-            except Exception:
-                pass
 
         self._log("memory.confirmation_requested", {
             "decision_type": decision.value,
@@ -338,13 +336,61 @@ class MemoryRuntime:
             return None
         return pending["confirmation_request"]
 
+    def _build_candidate_payload(
+        self, decision: MemoryDecision, *, content_override: str | None = None
+    ) -> dict:
+        """从 MemoryDecision.target_candidate 构造 handler 所需的 candidate dict。
+
+        MemoryRetainHandler 期望 candidate 为 Mapping，包含 proposal_id, content,
+        content_hash, scope, sensitivity, source 等字段。本方法从 MemoryCandidate
+        dataclass 提取并构造兼容 dict。
+
+        content_override 用于 EDIT_AND_ACCEPT 场景——用户编辑后的内容替代原始
+        candidate.content。
+        """
+        candidate = decision.target_candidate
+        if candidate is None:
+            content = content_override or ""
+            return {
+                "proposal_id": "",
+                "content": content,
+                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+                "scope": "user",
+                "sensitivity": "low",
+                "source": "unknown",
+            }
+        content = content_override if content_override is not None else candidate.content
+        return {
+            "proposal_id": candidate.id,
+            "content": content,
+            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            "scope": (
+                candidate.scope.value
+                if hasattr(candidate.scope, "value")
+                else str(candidate.scope)
+            ),
+            "sensitivity": (
+                candidate.sensitivity.value
+                if hasattr(candidate.sensitivity, "value")
+                else str(candidate.sensitivity)
+            ),
+            "source": (
+                candidate.source.value
+                if hasattr(candidate.source, "value")
+                else str(candidate.source)
+            ),
+        }
+
     def resolve_confirmation(
         self,
         candidate_id: str | None,
         choice: MemoryConfirmationChoice,
         free_text: str | None = None,
     ) -> MemoryEvaluationResult:
-        """应用用户确认结果：生成 confirmation result → 写入 store。
+        """应用用户确认结果：生成 confirmation result → 构造 _dispatcher_payload。
+
+        不再直接写 store——改为返回 _dispatcher_payload 供 core.py 通过
+        dispatcher (MEMORY_PROPOSE → MemoryRetainHandler) 统一写入。
 
         这是 evaluate_user_text 的第二阶段：
         1. 从 _pending_decision 缓存中取出 decision + confirmation_request
@@ -408,57 +454,45 @@ class MemoryRuntime:
                 "decision_type": decision.decision_type.value,
                 "candidate_id": candidate_id,
             })
-            # SESSION_ONLY：写入 store 但标记为 session scope
-            if self._store is not None:
-                intent = build_memory_operation_intent(confirmation_result)
-                audit = build_memory_audit_summary(intent)
-                self._store.apply_operation_intent(intent, audit)
+            # SESSION_ONLY：构造 _dispatcher_payload，由 core.py 通过 dispatcher 写入 store
+            candidate_payload = self._build_candidate_payload(decision)
             self._pending_decision = None
             return MemoryEvaluationResult(
                 action=MemoryEvaluationAction.STORED,
                 decision_type=decision.decision_type,
                 candidate_id=candidate_id,
                 content_summary=content_summary,
-                reason="仅本次会话使用，已写入",
+                reason="仅本次会话使用，等待 dispatcher 写入",
+                _dispatcher_payload={
+                    "confirmation_result": confirmation_result.choice.value,
+                    "proposal_id": candidate_id,
+                    "candidate": candidate_payload,
+                },
             )
 
-        # -- approved：operation intent → audit → store --------------------
+        # -- approved：构造 _dispatcher_payload 供 core.py dispatch ----------
         self._pending_decision = None
 
-        if self._store is None:
-            return MemoryEvaluationResult(
-                action=MemoryEvaluationAction.STORED,
-                decision_type=decision.decision_type,
-                candidate_id=candidate_id,
-                content_summary=content_summary,
-                reason="store 未注入，确认结果未持久化",
-            )
+        candidate_payload = self._build_candidate_payload(
+            decision, content_override=confirmation_result.approved_content
+        )
 
-        intent = build_memory_operation_intent(confirmation_result)
-        audit = build_memory_audit_summary(intent)
-
-        result = self._store.apply_operation_intent(intent, audit)
-
-        if result.status is MemoryStoreApplyStatus.APPLIED:
-            self._log("memory.stored", {
-                "operation_type": result.operation_type.value,
-                "record_id": result.record.id if result.record is not None else None,
-                "audit_id": result.audit_id,
-            })
-            return MemoryEvaluationResult(
-                action=MemoryEvaluationAction.STORED,
-                decision_type=decision.decision_type,
-                candidate_id=candidate_id,
-                content_summary=content_summary,
-                reason="已写入 in-memory store",
-            )
+        self._log("memory.confirmation_approved", {
+            "decision_type": decision.decision_type.value,
+            "candidate_id": candidate_id,
+        })
 
         return MemoryEvaluationResult(
             action=MemoryEvaluationAction.STORED,
             decision_type=decision.decision_type,
             candidate_id=candidate_id,
             content_summary=content_summary,
-            reason=result.message,
+            reason="已确认，等待 dispatcher 写入 store",
+            _dispatcher_payload={
+                "confirmation_result": confirmation_result.choice.value,
+                "proposal_id": candidate_id,
+                "candidate": candidate_payload,
+            },
         )
 
     # -- snapshot generation -----------------------------------------------

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — 全能力红队审计完成（总分 4.2/10），进入 capability remediation loop 阶段
+**状态**: remediation — Loop 1 (Config Safety) 完成，Loop 2 (Log Hygiene) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -59,13 +59,17 @@
 | 用户路径 dogfood | `tests/test_user_path_dogfood.py` — PASS |
 | Runtime 集成测试 | `tests/runtime_integration/` — PASS |
 
-### Provider Config
+### Config Safety (Loop 1 — COMPLETED)
 
 | 项目 | 值 |
 |------|---|
 | 推荐入口 | `config/config.yaml`（provider section） |
 | 安全默认 | `enabled: false, type: fake` — 零 API key 可运行 |
 | API key | 个人本地项目直接写在 `config/config.yaml` 的 `api_key` 字段，不可 commit |
+| tracked 版本 | `api_key: sk-REPLACE_ME`（占位符），安全 |
+| 本地保护 | `git update-index --skip-worktree config/config.yaml` — 防止误 stage |
+| 预防层 1 | pre-commit hook 扫描 staged diff 中的真实 key 特征 (sk-sp-/sk-ant-/sk-or-) |
+| 预防层 2 | `tests/test_config_secret_safety.py` — 8 个 guard tests 验证 config examples/tracked/staged |
 | Legacy 路径 | `FIRST_AGENT_PROVIDER_PROFILE`、`MY_FIRST_AGENT_LLM_PROVIDER` 已 deprecated |
 | .env | **不作为当前推荐主路径**；仅作为兼容层保留 code path |
 
@@ -95,7 +99,7 @@
 
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
-| config/config.yaml tracked dirty（安全风险） | P0 | Loop 1 — 需用户确认处理方案 |
+| ~~config/config.yaml tracked dirty~~ | ~~P0~~ | **RESOLVED** — skip-worktree + guard tests + pre-commit hook (Loop 1 完成) |
 | agent_log.jsonl 773MB 无治理/可能含敏感信息 | P0 | Loop 2 — 建立轮转/脱敏/上限 |
 | Memory recall 未真正进入 prompt context | P0 | Loop 3 — recall 路径 split 修复 |
 | CLI shortcut 构成第二能力平面 | P1 | Loop 4 — 收敛到统一 dispatcher |
@@ -122,7 +126,7 @@
 
 按优先级顺序执行 `docs/plans/2026-05-27-capability-remediation-loop-plan.md` 中的 loop：
 
-1. **Loop 1: Config Safety & Security Harden (P0)** — 处理 config/config.yaml tracked dirty 风险
+1. ~~**Loop 1: Config Safety & Security Harden (P0)**~~ — **COMPLETED** — skip-worktree + guard tests + pre-commit secret scan
 2. **Loop 2: Log Hygiene & Evidence Governance (P0)** — agent_log.jsonl 773MB 治理、脱敏验证
 3. **Loop 3: Memory E2E 验证闭环 (P0)** — recall 路径 split 修复、confirm→retain→recall E2E
 4. **Loop 4: Runtime Entry Consolidation (P1)** — CLI shortcuts 收敛、turn-end hook 精简

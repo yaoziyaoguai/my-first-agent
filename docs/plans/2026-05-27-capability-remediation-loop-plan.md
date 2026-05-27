@@ -48,7 +48,7 @@
 ## Ordered Remediation Queue
 
 ### Loop 1: Config Safety & Security Harden
-**状态**：pending
+**状态**：completed
 **优先级**：P0
 **依赖**：无
 
@@ -86,6 +86,14 @@
 - config 安全风险被解除或明确文档化
 - config/config.yaml 不会意外提交
 - PROJECT_STATUS 和 PROGRESS_LEDGER 已更新
+
+**完成记录（2026-05-27）**：
+- 采用方案：skip-worktree（本地保护）+ guard tests（提交前保护）+ pre-commit secret scan（最后防线）
+- `git update-index --skip-worktree config/config.yaml` 已应用 — git status 不再显示此文件为 dirty
+- 新增 `tests/test_config_secret_safety.py` — 8 个 guard tests 全部 PASS
+- 增强 `.git/hooks/pre-commit` — 新增真实 key 特征扫描 + config.yaml 误 stage 拦截
+- 提交版本 `config/config.yaml` 始终为 `sk-REPLACE_ME` 占位符
+- 用户本地真实配置完整保留，未读取、未修改
 
 **风险**：中 — 涉及用户本地配置
 **预估工作量**：小

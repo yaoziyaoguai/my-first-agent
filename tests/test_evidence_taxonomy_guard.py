@@ -156,3 +156,37 @@ def test_no_l3_assertion_via_direct_dispatcher_route():
             "应改为使用 SpyDispatcher 的 route_from_runtime_loop()。",
         ])
         pytest.fail("\n".join(msg_lines))
+
+
+def test_lifecycle_checks_are_probe_not_business():
+    """每 turn 无条件运行的 lifecycle check action 必须分类为 probe。
+
+    这些 action 是 turn-end hook 中无差别 dispatch 的内部检查（routing check /
+    lifecycle probe），大多数时候返回 noop/rejected/no_action。将它们误标为 business
+    会导致 evidence overclaim——把每 turn 的例行检查算成用户可见业务能力。
+
+    当前 lifecycle check action 列表来自 loop.py _dispatch_tool_pipeline 和
+    _try_phase1_turn_end_runtime_action 中每 turn 无条件执行的 dispatch。
+    """
+    from agent.runtime_integration.schema import RuntimeActionType, classify_action_evidence_kind
+
+    lifecycle_checks = [
+        RuntimeActionType.SKILL_SELECT,
+        RuntimeActionType.TOOL_GATE,
+        RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
+        RuntimeActionType.MEMORY_RECALL,
+        RuntimeActionType.MEMORY_CONSOLIDATE,
+        RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+    ]
+
+    overclaim = []
+    for at in lifecycle_checks:
+        kind = classify_action_evidence_kind(at)
+        if kind != "probe":
+            overclaim.append(f"  {at.value} → {kind}（应为 probe）")
+
+    assert not overclaim, (
+        "以下 lifecycle check action 被错误分类为 business，"
+        "造成 evidence overclaim：\n" + "\n".join(overclaim)
+    )

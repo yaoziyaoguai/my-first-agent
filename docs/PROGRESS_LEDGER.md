@@ -10,7 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| AutoRun Skill Router Upgrade | — | **COMPLETED** — `/auto-run` 从"单一自动执行命令"升级为"工程技能调度器"：新增 Skill Routing Policy + Skill Router Decision Table（12 任务类型 × 5 技能体系）；Continuation Policy 明确技能选择/loop 完成/review 完成不是停止条件；新增 14 个 skill routing guard tests；source-of-truth tests 41→55 |
+| Loop 13: Evidence Honesty & Production Path Repair | — | **COMPLETED** — SUBAGENT_DELEGATE_L0 从 business→probe 重分类（每 turn routing check 不应用户可见业务动作）；新增 lifecycle check honesty guard test；evidence taxonomy guard tests 17→18；PROJECT_STATUS 剩余 P1 全部解决 |
+| AutoRun Skill Router Upgrade | 855de5b | **COMPLETED** — `/auto-run` 从"单一自动执行命令"升级为"工程技能调度器"：新增 Skill Routing Policy + Skill Router Decision Table（12 任务类型 × 5 技能体系）；Continuation Policy 明确技能选择/loop 完成/review 完成不是停止条件；新增 14 个 skill routing guard tests；source-of-truth tests 41→55 |
 | 全能力红队审计 | — | 15 域 (A-O) 达标审计：总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL，P0=3 / P1=10 / P2=14 / P3=5。产出审计报告 + remediation loop plan（12 loops） |
 | Loop 1: Config Safety & Security Harden | — | **COMPLETED** — skip-worktree 本地保护 + pre-commit secret scan + 8 guard tests；config/config.yaml tracked 版本始终为 sk-REPLACE_ME 占位符 |
 | Loop 2: Log Hygiene & Evidence Governance | — | **COMPLETED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 字符串截断；21 个 log hygiene tests；773MB agent_log.jsonl 已删除；新增 tests/test_log_hygiene.py |

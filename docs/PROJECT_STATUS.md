@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation complete — AutoRun Skill Router 升级完成，下一步 Loop 13 Evidence Honesty & Production Path Repair
+**状态**: Loop 13 完成 — Evidence Honesty 修复完成，所有 P0/P1 已解决，下一步按需选择 P2/P3
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -117,8 +117,17 @@
 | 实现 | `classify_action_evidence_kind()` in `agent/runtime_integration/schema.py` |
 | 测试 | `tests/unit/test_evidence_kind_classification.py` — 17 PASS |
 | Run summary 集成 | `agent/loop.py` — `_emit_run_summary` 统计 business/probe 计数 |
-| 分类 | business: 7 类型（TOOL_REQUEST/INVOKE/RESULT, MEMORY_PROPOSE, STREAMING_PROVIDER_CALL/EVENT, SUBAGENT_DELEGATE_L0） |
-| | probe: 6 类型（SKILL_SELECT, TOOL_GATE, MEMORY_TURN_END_PROPOSAL/RECALL/CONSOLIDATE, CHECKPOINT_SAFE_SUMMARY） |
+| 分类 | business: 6 类型（TOOL_REQUEST/INVOKE/RESULT, MEMORY_PROPOSE, STREAMING_PROVIDER_CALL/EVENT）+ CLI_SHOW_MEMORIES/CLI_SHOW_SUBAGENTS |
+| | probe: 7 类型（SKILL_SELECT, TOOL_GATE, MEMORY_TURN_END_PROPOSAL/RECALL/CONSOLIDATE, CHECKPOINT_SAFE_SUMMARY, SUBAGENT_DELEGATE_L0） |
+
+### Evidence Honesty (Loop 13 — COMPLETED)
+
+| 项目 | 值 |
+|------|---|
+| 核心变更 | `SUBAGENT_DELEGATE_L0` 从 `business` 重分类为 `probe` — 它是每 turn routing check，非用户可见业务动作 |
+| 测试更新 | `test_evidence_kind_classification.py` 更新分类断言；新增 `test_lifecycle_checks_are_probe_not_business` guard test |
+| Evidence taxonomy guard tests | 17→18（新增 lifecycle check honesty guard） |
+| 影响 | `_emit_run_summary` 中 SUBAGENT_DELEGATE_L0 的 rejected routing check 不再计入 business_events |
 
 ### 已知剩余 Issues
 
@@ -136,7 +145,7 @@
 | ~~Resume 本质是 prompt 拼接~~ | ~~P1~~ | **RESOLVED** — Loop 6 schema versioning + backward compat (b759e62) |
 | ~~无 checkpoint schema 版本治理~~ | ~~P1~~ | **RESOLVED** — Loop 6 SCHEMA_VERSION + _MIGRATION_REGISTRY (b759e62) |
 | 大量 L3 标签测试实际是 L2 | ~~P1~~ | **RESOLVED** — Loop 7 taxonomy guard tests + file rename (0844ed8) |
-| Evidence overclaim (probe 计为能力) | P1 | Loop 2 |
+| Evidence overclaim (probe 计为能力) | ~~P1~~ | **RESOLVED** — Loop 13: SUBAGENT_DELEGATE_L0 从 business→probe 重分类 + lifecycle guard test |
 | core.py 是 god object (1172 行) | ~~P1~~ | **RESOLVED** — Loop 8 抽取 provider_evidence + subagent_inline, 1237 → 1112 lines |
 | Memory extractor zero proposals | P2 | 内联路径已部分修复 |
 | RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为 |
@@ -147,24 +156,10 @@
 
 ## 2. 推荐下一步
 
-基于全能力红队审计结果（总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL）：
+**所有 P0/P1 已解决（Loops 1-13）。** 剩余 P2/P3 按需选择：
 
-**当前阶段：capability remediation loop**
-
-按优先级顺序执行 `docs/plans/2026-05-27-capability-remediation-loop-plan.md` 中的 loop：
-
-1. ~~**Loop 1: Config Safety & Security Harden (P0)**~~ — **COMPLETED** — skip-worktree + guard tests + pre-commit secret scan
-2. ~~**Loop 2: Log Hygiene & Evidence Governance (P0)**~~ — **COMPLETED** — 50MB 轮转 + 脱敏 + 21 tests
-3. ~~**Loop 3: Memory E2E 验证闭环 (P0)**~~ — **COMPLETED** — unified dispatcher path + tests (38d757a)
-4. ~~**Loop 4: Runtime Entry Consolidation (P1)**~~ — **COMPLETED** — CLI READ_ONLY 命令走统一 dispatcher，turn-end hook 精简 (c94fc18)
-5. ~~**Loop 5: Interactive Harness 扩展 (P1)**~~ — **COMPLETED** — 4 个新 case（I-COMPLEX/I-INTERRUPT/I-STREAM/I-RESUME），20 cases 覆盖 8 类别，datetime 修复 (b850605)
-6. ~~**Loop 6: Checkpoint/Resume 能力补全 (P1)**~~ — **COMPLETED** — schema 版本治理、v0→v1 迁移、future version 拒绝 (b759e62)
-7. ~~**Loop 7: Test Taxonomy Reclassification (P1)**~~ — **COMPLETED** — 0844ed8
-8. ~~**Loop 8: Surgical Hub Slimming (P1)**~~ — **COMPLETED** — 50bbd80, core.py: 1237 → 1112 lines
-9. ~~**Loop 9: SubAgent Boundary Hardening (P2)**~~ — **COMPLETED** — b58b27b, L0 文档化 + guard test
-10. ~~**Loop 10: MCP minimal real connection (P2)**~~ — **COMPLETED** — MCP 架构文档 + 2 guard tests，架构 boundaries 22→24
-11. ~~**Loop 11: Skill system hardening (P2)**~~ — **COMPLETED** — 1bd4580
-12. ~~**Loop 12: UX hardening (P2)**~~ — **COMPLETED** — e3251f6
+- P2: Memory extractor zero proposals（内联路径已部分修复）
+- P3: RESUME_PROMPT 全量检测、Provider identity、Product context
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -173,7 +168,7 @@
 - Hook/MCP/SubAgent L1/RAG/sandbox 新能力
 - Broad runtime refactor
 - 第二条 runtime flow
-- 新 capability milestone（在所有 P0/P1 完成前）
+- 新 capability milestone
 
 ---
 

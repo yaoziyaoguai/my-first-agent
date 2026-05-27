@@ -67,7 +67,9 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.CHECKPOINT_SAFE_SUMMARY: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.STREAMING_PROVIDER_CALL: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.STREAMING_EVENT: _EVIDENCE_KIND_BUSINESS,
-    RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_BUSINESS,
+    # SUBAGENT_DELEGATE_L0 每 turn 无差别运行，绝大多数返回 rejected（pure routing
+    # check）。当且仅当 handler disposition=delegated 时才升为 business，默认 probe。
+    RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
 }

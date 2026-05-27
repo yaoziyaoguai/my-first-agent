@@ -24,7 +24,8 @@ from agent.runtime_integration.schema import (
     RuntimeActionType.MEMORY_PROPOSE,
     RuntimeActionType.STREAMING_PROVIDER_CALL,
     RuntimeActionType.STREAMING_EVENT,
-    RuntimeActionType.SUBAGENT_DELEGATE_L0,
+    RuntimeActionType.CLI_SHOW_MEMORIES,
+    RuntimeActionType.CLI_SHOW_SUBAGENTS,
 ])
 def test_business_action_types(action_type: RuntimeActionType):
     """用户可见业务动作应分类为 business。"""
@@ -41,6 +42,7 @@ def test_business_action_types(action_type: RuntimeActionType):
     RuntimeActionType.MEMORY_RECALL,
     RuntimeActionType.MEMORY_CONSOLIDATE,
     RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+    RuntimeActionType.SUBAGENT_DELEGATE_L0,  # 每 turn routing check，默认 probe
 ])
 def test_probe_action_types(action_type: RuntimeActionType):
     """生命周期检查应分类为 probe。"""
@@ -80,7 +82,8 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.MEMORY_PROPOSE,
         RuntimeActionType.STREAMING_PROVIDER_CALL,
         RuntimeActionType.STREAMING_EVENT,
-        RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        RuntimeActionType.CLI_SHOW_MEMORIES,
+        RuntimeActionType.CLI_SHOW_SUBAGENTS,
     }
     probe_types = {
         RuntimeActionType.SKILL_SELECT,
@@ -89,6 +92,7 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.MEMORY_RECALL,
         RuntimeActionType.MEMORY_CONSOLIDATE,
         RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        RuntimeActionType.SUBAGENT_DELEGATE_L0,  # 每 turn routing check, 默认 probe
     }
     assert business_types.isdisjoint(probe_types), \
         f"Overlap between business and probe: {business_types & probe_types}"

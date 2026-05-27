@@ -288,7 +288,7 @@
 ---
 
 ### Loop 6: Checkpoint/Resume 能力补全
-**状态**：pending
+**状态**：completed
 **优先级**：P1
 **依赖**：Loop 4 完成（runtime entry 收敛后，checkpoint 行为更可预测）
 
@@ -324,6 +324,12 @@
 
 **风险**：中-高 — 涉及持久化格式变更
 **预估工作量**：中
+
+**完成记录（2026-05-27）**：
+- `agent/checkpoint.py`：新增 SCHEMA_VERSION / _KNOWN_VERSIONS / _MIGRATION_REGISTRY / `_resolve_checkpoint_version()`；`_build_checkpoint_from_state()` 写入 schema_version；`load_checkpoint_to_state()` 版本感知加载（v0 迁移、未知版本拒绝）
+- `tests/test_checkpoint_roundtrip.py`：新增 4 个 schema version 测试（version write、v0 migration、future rejection、v0→v1 roundtrip）
+- 所有 13 个 checkpoint roundtrip tests PASS
+- Commit: b759e62
 
 ---
 

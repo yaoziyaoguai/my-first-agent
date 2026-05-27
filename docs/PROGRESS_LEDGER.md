@@ -15,6 +15,7 @@
 | Loop 2: Log Hygiene & Evidence Governance | — | **COMPLETED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 字符串截断；21 个 log hygiene tests；773MB agent_log.jsonl 已删除；新增 tests/test_log_hygiene.py |
 | Loop 3: Memory E2E 验证闭环 | 38d757a | **COMPLETED** — MEMORY_RECALL 统一走 dispatcher path；prompt_builder 支持 memory_section 参数；移除 turn-end hook 重复 dispatch；测试按 action_type 过滤非 [0] 索引；6 个文件变更；所有 P0 已解决 |
 | Loop 4: Runtime Entry Consolidation | c94fc18 | **COMPLETED** — CLI READ_ONLY 命令（show memories/show subagents）走统一 dispatcher；新增 CLI_SHOW_MEMORIES/CLI_SHOW_SUBAGENTS RuntimeActionType + cli_handlers.py；loop.py 提取 _dispatch_tool_pipeline() helper 精简 turn-end hook；evidence.py 注册 catalog descriptors + adapters；新增 SubAgentRegistry overclaim 测试；7 个文件变更 |
+| Loop 6: Checkpoint/Resume 能力补全 | b759e62 | **COMPLETED** — schema 版本治理（SCHEMA_VERSION="checkpoint.v1"）；v0→v1 迁移注册表；`_resolve_checkpoint_version()` 拒绝未知 future version；`_build_checkpoint_from_state()` 写入版本号；4 个 schema version 测试；2 个文件变更 |
 | Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
 | Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |

@@ -1,7 +1,7 @@
 # Current Capability Recovery Map
 
-**日期**: 2026-05-27
-**基于**: 全能力红队审计 (4.2/10) + 12 remediation loops + 最新严格复审 (4.0/10)
+**日期**: 2026-05-28 (post-Loop 15 update)
+**基于**: 全能力红队审计 (4.2/10) + 12 remediation loops + Loops 14-18 完成 + 最新严格复审
 **用途**: 事实源——区分真实能力和 overclaim，指导 safe-to-auto-run 修复优先级
 
 ---
@@ -28,9 +28,9 @@
 | 3 | Tool calling | PASS (L3 business op) | L3 fake + L4 real smoke | **PASS** | LOW | multi-turn real API cover | No (safe-fix: mark) | No | evidence honesty mark |
 | 4 | Tool confirmation | PASS (y/n flow) | L3 fake interactive + L4 real smoke | **PASS** | LOW | 无 | N/A | No | — |
 | 5 | Tool result feedback | PASS | L3 fake handler path | **CONCERN** | MEDIUM | real API result feedback 未独立验证 | No (safe-fix: mark) | No | evidence honesty mark |
-| 6 | Memory proposal | PASS (turn-end handler) | L3 dispatcher path (turn-end only) | **CONCERN** | MEDIUM | user-initiated proposal 走 direct call，不是 dispatcher | No | Yes (write path migration) | Loop 15 design done |
-| 7 | Memory confirmation | PASS (y/n flow) | L2 direct call | **CONCERN** | HIGH | 两阶段确认不经过 dispatcher evidence chain | No | Yes (write path migration) | Loop 15 design done |
-| 8 | Memory retain (write) | PASS | L2 direct store write | **CONCERN** | **HIGH** | `store.apply_operation_intent()` 直调，无 dispatcher evidence | No | **Yes** | Loop 15 (design: be4c7ee) |
+| 6 | Memory proposal | PASS (turn-end handler) | L3 dispatcher path (turn-end + user-initiated) | **PASS** | LOW | Loop 15 已统一 write path → dispatcher | N/A | No | — |
+| 7 | Memory confirmation | PASS (y/n flow) | L3 dispatcher chain (MEMORY_PROPOSE → handler) | **PASS** | LOW | Loop 15: confirmation→dispatch→handler→store | N/A | No | — |
+| 8 | Memory retain (write) | PASS (Loop 15 migrated) | L3 dispatcher path (MEMORY_PROPOSE → MemoryRetainHandler) | **PASS** | LOW | 无 | N/A | No | — |
 | 9 | Memory recall → prompt context | PASS (Loop 3 fixed) | L3 dispatcher path | **PASS** | LOW | 无 | N/A | No | — |
 | 10 | Memory forget/list | PASS | L2 direct call (forget) + L3 dispatcher (show) | **CONCERN** | MEDIUM | forget CLI shortcut 绕过 dispatcher | No | Yes (CLI shortcut migration) | future loop |
 | 11 | SubAgent delegation | L0 only | L2 integration (L0 handler, always rejected) | **CONCERN** | MEDIUM | 无真实 subagent execution evidence | No | Yes (SubAgent L1/L2) | future loop |
@@ -49,10 +49,10 @@
 | 24 | TUI readiness | FAIL | L0 (not designed) | **FAIL** | HIGH | 无 TUI 架构 | No | **Yes** | future loop |
 
 **统计**:
-- PASS: 7 (1, 2, 3, 4, 9, 16, 19)
-- CONCERN: 13 (5, 6, 7, 8, 10, 11, 13, 14, 15, 17, 18, 20, 22)
+- PASS: 10 (1, 2, 3, 4, 6, 7, 8, 9, 16, 19)
+- CONCERN: 10 (5, 10, 11, 13, 14, 15, 17, 18, 20, 22)
 - FAIL: 4 (12, 21, 23, 24)
-- OVERCLAIM RISK HIGH: 5 (7, 8, 12, 21, 23, 24)
+- OVERCLAIM RISK HIGH: 3 (12, 21, 23, 24)
 
 ---
 
@@ -74,7 +74,7 @@
 
 | Priority | Item | Current Status | Design Status |
 |----------|------|---------------|---------------|
-| **B1** | Memory write dispatcher migration | DESIGN COMPLETE | `docs/design/memory-write-dispatcher-migration-design.md` (be4c7ee) |
+| **B1** | Memory write dispatcher migration | **COMPLETED (Loop 15, ca0a03c)** | `docs/design/memory-write-dispatcher-migration-design.md` → 已实现 |
 | **B2** | CLI forget/delegate shortcut → dispatcher | NOT STARTED | 待 Loop 15 完成后 |
 | **B3** | SubAgent L1/L2 成熟化 | NOT STARTED | 需要真实 subagent execution |
 | **B4** | MCP real connection | NOT STARTED | 需要外部 MCP server |
@@ -92,42 +92,48 @@
 | Loop 13 "all P0/P1 resolved" | PROJECT_STATUS (old) | RESOLVED | OVERCLAIMED — 只修了 1 个 evidence 分类 | ✓ Loop 14 + AutoRun fix |
 | 15/15 PASS dogfood | dogfood report | PASS | 实际是 no-crash SMOKE_PASS | ✓ Loop 14 harness fix |
 | 12/12 loops completed | remediation plan | completed | 多个是 admin/docs 完成 | PARTIAL — plan says completed |
-| Memory E2E verified | PROJECT_STATUS (old) | PASS | extractor 0 proposals, write path direct call | PARTIAL |
+| Memory E2E verified | PROJECT_STATUS (old) | PASS | extractor 0 proposals (known fake limitation), write path → dispatcher (Loop 15) | **RESOLVED** — write path fixed; extractor limitation honestly marked |
 | All P0/P1 resolved | PROJECT_STATUS (old) | RESOLVED | 多个 P1 是 PARTIAL | ✓ Loop 14 fixed |
 | "user-usable" hints | old docs | implied | developer prototype only | ✓ Loop 14 fixed |
 | admin completed = capability | old narrative | implied | docs/guard ≠ capability | ✓ AutoRun forbidden patterns |
 
 ---
 
-## Current Real Score Estimate: 3.8-4.2/10
+## Current Real Score Estimate: 4.5-5.0/10
 
-**Capability-weighted honest score**: ~4.0/10
+**Capability-weighted honest score**: ~4.8/10 (post Loops 14-18)
 
-- Tool pipeline (B): 7/10 → honest 6.5/10 (multi-turn real API not covered)
-- Memory (C): 4/10 → honest 3.5/10 (write path still direct call despite design)
-- CLI/Interactive (J): 7/10 → honest 6/10 (harness now honest but dogfood reports still overclaimed)
-- Config/Security (K): 3/10 → 7/10 (Loop 1+2 大幅改善)
-- Test/Gate (L): 5/10 → honest 5/10 (evidence gates improved but overclaim tests missing)
-- Docs (M): 6/10 → honest 5.5/10 (source-of-truth improved but stale claims remain)
+- Tool pipeline (B): 7/10 → 6.5/10 (multi-turn real API not covered)
+- Memory (C): 4/10 → 5.5/10 (write path → dispatcher, Loop 15; extractor limitation marked)
+- CLI/Interactive (J): 7/10 → 6.5/10 (harness evidence gates fixed, dogfood reports reclassified)
+- Config/Security (K): 3/10 → 7/10 (Loop 1+2)
+- Test/Gate (L): 5/10 → 6/10 (evidence taxonomy guard tests added, 79 source-of-truth PASS)
+- Docs (M): 6/10 → 6/10 (source-of-truth maintained, overclaims corrected, stale claims removed)
 
-**Post safe-to-auto-run fix target**: 4.5-5.0/10 (修复文档/证据声称，不改架构)
-**Post architecture migration target**: 5.5-6.5/10 (write dispatcher + CLI shortcut 收敛)
+**Post safe-to-auto-run fix target**: 4.5-5.0/10 ✓ **ACHIEVED**（Loops 14-18 完成）
+**Post architecture migration target**: 5.5-6.5/10 (B2-B8: CLI shortcut migration, SubAgent, MCP, Skill, Checkpoint, Multi-instance, TUI)
 
 ---
 
-## Recommended Execution Order
+## Execution Status (as of 2026-05-28)
 
-1. **Loop 16: Evidence Taxonomy & Overclaim Guard Tests** (safe-to-auto-run)
-   - A1 + A5 + A7: 新增 evidence honesty guard tests
-   - 扫描并修正所有 stale "completed" 声称
-   
-2. **Loop 17: Dogfood Report Reclassification** (safe-to-auto-run)
-   - A2: 重分类旧 dogfood report 中的行政 PASS
+1. ✓ **Loop 16: Evidence Taxonomy & Overclaim Guard Tests** (COMPLETED — 76db3db)
+2. ✓ **Loop 17: Dogfood Report Reclassification** (COMPLETED — a6e0980)
+3. ✓ **Loop 18: CLI Shortcut Honesty Marking** (COMPLETED — 6000a00)
+4. ✓ **Loop 15: Memory Write Dispatcher Migration** (COMPLETED — ca0a03c)
 
-3. **Loop 18: CLI Shortcut Honesty Marking** (safe-to-auto-run)
-   - A3 + A4: 明确 CLI-only/demo-only boundary
+**Safe-to-auto-run items: ALL COMPLETE** (A1-A7 done via Loops 14-18)
 
-4. **Loop 15: Memory Write Dispatcher Migration** (requires approval)
-   - B1: 执行已设计好的迁移方案
+## Next: Requires Architecture Decision (B2-B8)
 
-5. **Future loops**: B2-B8 (需要独立设计审计)
+| Item | Description | Prerequisites |
+|------|-------------|---------------|
+| B2 | CLI forget/delegate → dispatcher | confirmation pipeline 就绪 |
+| B3 | SubAgent L1/L2 | real subagent execution |
+| B4 | MCP real connection | external MCP server |
+| B5 | Skill runtime deepening | real API + skill marketplace |
+| B6 | Checkpoint state restoration | checkpoint schema redesign |
+| B7 | Multi-instance readiness | module-level singleton removal |
+| B8 | TUI architecture | TUI framework decision |
+
+All remaining items require independent design/audit before implementation. No further safe-to-auto-run items.

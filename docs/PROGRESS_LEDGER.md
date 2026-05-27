@@ -10,7 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| Loop 13: Evidence Honesty & Production Path Repair | — | **COMPLETED** — SUBAGENT_DELEGATE_L0 从 business→probe 重分类（每 turn routing check 不应用户可见业务动作）；新增 lifecycle check honesty guard test；evidence taxonomy guard tests 17→18；PROJECT_STATUS 剩余 P1 全部解决 |
+| AutoRun Skill Orchestration Fix | de21474, (pending) | **COMPLETED** — `/auto-run` 从"任务调度器"升级为完整的"流程+技能+证据+回退"工程总控：新增 Workflow Stage → Skill Table（10 stage × 6 列含 failure route）、Status Promotion Gate（6 门禁）、Recursive Backtrack Policy、Claim-to-Evidence Gate、Review Failure Routing Table；Forbidden Patterns 扩展 6 项（partial fix→resolved、no-crash→PASS、admin→capability 等）；source-of-truth guard tests 60→68。根因：旧 auto-run 有 task routing 但无 stage-based skill switching、无 status promotion gate、review 失败无强制回退路由 |
+| Loop 13: Evidence Honesty & Production Path Repair | — | **COMPLETED** — SUBAGENT_DELEGATE_L0 从 business→probe 重分类（每 turn routing check 不应用户可见业务动作）；新增 lifecycle check honesty guard test；evidence taxonomy guard tests 17→18；PROJECT_STATUS 剩余 P1 全部解决（**注：事后 audit 发现此条 overclaim——参见 AutoRun Skill Orchestration Fix**） |
 | AutoRun Skill Router Upgrade | 855de5b | **COMPLETED** — `/auto-run` 从"单一自动执行命令"升级为"工程技能调度器"：新增 Skill Routing Policy + Skill Router Decision Table（12 任务类型 × 5 技能体系）；Continuation Policy 明确技能选择/loop 完成/review 完成不是停止条件；新增 14 个 skill routing guard tests；source-of-truth tests 41→55 |
 | 全能力红队审计 | — | 15 域 (A-O) 达标审计：总分 4.2/10，2 PASS / 9 CONCERN / 4 FAIL，P0=3 / P1=10 / P2=14 / P3=5。产出审计报告 + remediation loop plan（12 loops） |
 | Loop 1: Config Safety & Security Harden | — | **COMPLETED** — skip-worktree 本地保护 + pre-commit secret scan + 8 guard tests；config/config.yaml tracked 版本始终为 sk-REPLACE_ME 占位符 |

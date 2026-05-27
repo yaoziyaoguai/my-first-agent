@@ -154,6 +154,31 @@ First Agent 工程技能调度器。基于当前项目状态和任务类型，�
 
 ---
 
+## Workflow Stage → Skill Table
+
+AutoRun 每轮根据当前所处的**工程阶段**（而非仅任务类型）选择技能。同一任务类型在不同阶段可能使用不同技能。
+
+| Stage | Trigger | Primary Skill | Secondary Skill | Expected Action | Failure Route |
+|-------|---------|--------------|----------------|-----------------|---------------|
+| **Audit / Red-team** | 全局能力评分、架构审计 | G-Stack | plan-eng-review | 系统分析 → severity table → recommended loops | 证据分类不准确 → evidence classification / remediation plan |
+| **Bug / P0 remediation** | 已知 bug、P0 issue、traceback | Compound Engineering | Superpowers | evidence → failing test → root cause → fix → gate → docs | gate 失败 → failing test / root cause；overclaim → evidence gate |
+| **Evidence honesty** | 证据等级审计、overclaim 检测 | G-Stack | Superpowers | 区分 L1/L2/L3/L4 → 修正 overclaim → guard tests | 分类错误 → harness evaluator / evidence taxonomy |
+| **Production path repair** | runtime/dispatcher/memory 路径拆分 | Compound Engineering | Superpowers | 统一路径 → failing test → fix → integration test → gate | 路径仍 split → runtime integration / dispatcher / memory path |
+| **Dogfood execution** | case matrix 执行 | Compound Engineering | G-Stack | 执行 cases → 分类结果 → issue table → 可选 fix | no-crash PASS → case classification；expected_events 死字段 → harness evaluator |
+| **Implementation** | SPEC/plan 明确的代码变更 | Compound Engineering | Superpowers | evidence → test → fix → gate → docs → commit | gate 失败 → failing test；review 失败 → 对应上游阶段 |
+| **Post-loop review** | loop 完成后独立复审 | G-Stack | review | 检查 target/scope creep/overclaim → 判定 pass/fail | review 失败 → 回退到正确上游阶段，**不是 next loop** |
+| **Docs/status update** | 文档、PROJECT_STATUS、ledger 更新 | Superpowers | G-Stack | 核验 claim vs evidence → 更新 → guard tests | false resolved → status correction；overclaim → evidence gate |
+| **Architecture change** | 新 branch point、架构决策 | plan-eng-review | Compound Engineering | design doc → review → 用户确认 → 实现 | 设计未通过 review → design doc 修正 |
+| **Config safety** | 配置安全、secret 治理 | Compound Engineering | Superpowers | config contract → guard test → fix → smoke | secret 风险 → hard stop |
+
+### 阶段切换规则
+
+1. 同一任务在不同阶段自动切换 primary skill（如 remediation 前期用 G-Stack 分析，中期用 Compound Engineering 执行，后期用 Superpowers 验证）。
+2. Failure route 是**强制回退目标**——不是建议，不是"下次注意"。
+3. 如果 failure route 指向的阶段需要不同技能，自动切换到该阶段的 primary skill。
+
+---
+
 ## Choose Loop Start Point
 
 **不要每次从头开始。** 根据已有证据选择最近入口：
@@ -393,6 +418,47 @@ Post-Loop Self-Review 中以下任一情况触发回退，**不得标记为 COMP
 
 ---
 
+## Status Promotion Gate
+
+PROJECT_STATUS 中 P0/P1 降级或标记 RESOLVED 必须通过以下 6 道门禁，**缺一不可**：
+
+1. **原始 finding 被重新定位** — 审计中的具体 issue ID 被重新检查，确认问题仍然存在且理解正确
+2. **修复覆盖原始失败路径** — 代码改动直接对应原始 finding 描述的失败场景
+3. **regression test 覆盖** — 有 focused test 覆盖修复路径（不能只靠已有测试偶然覆盖）
+4. **dogfood/harness 证明 user path 或明确降级** — 有 user-path evidence，或明确声明降级原因（如"仅 L2 guard，L3 需真实 API"）
+5. **independent review 通过** — 非实现者本人 review，确认无 overclaim
+6. **Claim-to-Evidence Gate 通过** — 原始 finding 绑定 + 具体证据 + gate exit code + review 确认
+
+### 状态标记规则
+
+不满足全部 6 道门禁时，只能使用以下状态：
+
+| 状态 | 含义 | 触发条件 |
+|------|------|---------|
+| `PARTIAL` | 部分修复 | 修了部分子问题但核心未解决 |
+| `OVERCLAIMED` | 声称过度 | 之前标记 RESOLVED 但证据不足 |
+| `NOT_FIXED` | 未修复 | 原始 finding 仍然存在 |
+| `EVIDENCE_PENDING` | 等待证据 | 修复逻辑就绪但缺 dogfood/real API 验证 |
+
+### 禁止的全局声称
+
+以下声称在 Status Promotion Gate 通过前**严格禁止**写入 PROJECT_STATUS：
+
+- `all P0/P1 resolved`
+- `completed`
+- `user-usable`
+- `real-dogfood-ready`
+- `production-ready`
+- `broadly user-usable`
+
+如果必须写全局状态，只能写：
+
+- `P0/P1: N items PARTIAL, M items EVIDENCE_PENDING`
+- `当前阶段：[audit / remediation / evidence honesty / production path repair]`
+- `下一步：[具体 next loop]`
+
+---
+
 ## Review Failure Routing Table
 
 当 review gate 发现以下具体 failure pattern 时，按表回溯到对应阶段：
@@ -433,6 +499,12 @@ Post-Loop Self-Review 中以下任一情况触发回退，**不得标记为 COMP
 - 不 tag / release / force push / rebase / amend
 - **不盲选技能** — 每次必须根据任务类型查 Skill Router Decision Table
 - **不把技能完成当停止条件** — 技能是工具，不是 stop signal
+- **不把 partial fix 标 full resolved** — 修了部分子问题 ≠ 整类 P0/P1 解决
+- **不把 guard test pass 冒充 loop pass** — gate 通过 ≠ capability 完成
+- **不把 no-crash 标为 capability PASS** — 不 crash 是最低标准，不是能力证据
+- **不把 admin completed 冒充 capability completed** — docs/guard 是管理层证据，不是用户能力
+- **不把 commit/push 当停止条件** — commit/push 后必须自动继续 next loop
+- **不把"给下一步方向"当完成** — 输出 next recommended loop 后必须判断并继续执行
 
 ---
 

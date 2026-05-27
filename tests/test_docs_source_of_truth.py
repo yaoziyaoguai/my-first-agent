@@ -671,3 +671,110 @@ def test_auto_run_forbids_review_failure_as_completed():
     assert "review 失败仍标记 COMPLETED" in text or "review 失败" in text
     assert "partial fix" in text.lower() or "PARTIAL" in text
     assert "guard test pass" in text.lower() or "冒充 loop pass" in text
+
+
+# =========================================================================
+# 16. auto-run.md Workflow Stage → Skill Table 守护
+# =========================================================================
+
+
+def test_auto_run_includes_workflow_stage_skill_table():
+    """auto-run.md 必须包含 Workflow Stage → Skill Table。
+
+    该表按工程阶段（而非仅任务类型）映射：Stage / Trigger / Primary Skill /
+    Secondary Skill / Expected Action / Failure Route。
+    """
+    text = _read_auto_run()
+    assert "Workflow Stage" in text
+    assert "Failure Route" in text
+    # 至少包含 6 个核心 stage
+    assert "Audit" in text and "Red-team" in text
+    assert "Evidence honesty" in text
+    assert "Production path repair" in text
+    assert "Post-loop review" in text
+
+
+def test_auto_run_workflow_stage_table_has_failure_routes():
+    """Workflow Stage → Skill Table 中每个 stage 必须有 Failure Route。
+
+    Failure route 不是建议，是强制回退目标。
+    """
+    text = _read_auto_run()
+    assert "Failure Route" in text
+    # 验证关键 failure route 存在
+    assert "evidence classification" in text or "remediation plan" in text
+    assert "harness evaluator" in text or "evidence taxonomy" in text
+    assert "runtime integration" in text or "dispatcher" in text
+    assert "status correction" in text
+
+
+# =========================================================================
+# 17. auto-run.md Status Promotion Gate 守护
+# =========================================================================
+
+
+def test_auto_run_includes_status_promotion_gate():
+    """auto-run.md 必须包含 Status Promotion Gate 节。
+
+    PROJECT_STATUS 中 P0/P1 降级或 RESOLVED 必须通过 6 道门禁。
+    """
+    text = _read_auto_run()
+    assert "Status Promotion Gate" in text
+    assert "原始 finding" in text
+    assert "independent review" in text.lower()
+
+
+def test_auto_run_status_promotion_forbids_unverified_claims():
+    """Status Promotion Gate 必须禁止无证据的全局声称。
+
+    'all P0/P1 resolved'、'completed'、'user-usable' 等声称在门禁通过前禁止。
+    """
+    text = _read_auto_run()
+    assert "all P0/P1 resolved" in text
+    assert "user-usable" in text
+
+
+def test_auto_run_status_promotion_requires_all_gates():
+    """Status Promotion Gate 必须要求全部 6 道门禁，缺一不可。
+
+    不满足全部门禁时只能写 PARTIAL / OVERCLAIMED / NOT_FIXED / EVIDENCE_PENDING。
+    """
+    text = _read_auto_run()
+    assert "PARTIAL" in text
+    assert "OVERCLAIMED" in text
+    assert "EVIDENCE_PENDING" in text
+
+
+# =========================================================================
+# 18. auto-run.md Forbidden Patterns 扩展守护
+# =========================================================================
+
+
+def test_auto_run_forbids_no_crash_as_capability_pass():
+    """auto-run.md 必须禁止 no-crash 标为 capability PASS。
+
+    no-crash 是最低标准（smoke），不是用户能力证据。
+    """
+    text = _read_auto_run()
+    assert "no-crash" in text.lower()
+    assert "capability" in text.lower()
+
+
+def test_auto_run_forbids_admin_completed_as_capability():
+    """auto-run.md 必须禁止 admin completed 冒充 capability completed。
+
+    docs/guard 是管理层证据，不是用户能力。
+    """
+    text = _read_auto_run()
+    assert "admin completed" in text
+
+
+def test_auto_run_stage_switching_rules_exist():
+    """auto-run.md 必须包含阶段切换规则。
+
+    同一任务在不同阶段自动切换 primary skill。
+    Failure route 是强制回退目标，不是建议。
+    """
+    text = _read_auto_run()
+    assert "阶段切换" in text
+    assert "强制回退" in text

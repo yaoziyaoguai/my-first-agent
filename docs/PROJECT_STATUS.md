@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: Loop 13 完成 — Evidence Honesty 修复完成，所有 P0/P1 已解决，下一步按需选择 P2/P3
+**状态**: AutoRun Skill Orchestration Fix 完成 — `/auto-run` 已升级为"流程机制 + 技能调度 + 证据门禁 + review 回退 + 自动继续"的工程总控
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -156,8 +156,16 @@
 
 ## 2. 推荐下一步
 
-**所有 P0/P1 已解决（Loops 1-13）。** 剩余 P2/P3 按需选择：
+**AutoRun Skill Orchestration Fix 完成。** 下一 loop：
 
+- **Loop 14: Evidence Pipeline Foundation** — 修复 expected_events 死字段、no-crash PASS 问题、memory production path split
+
+Loop 14 技能路由：
+- G-Stack: evidence honesty 分析（区分真实证据/假证据）
+- Compound Engineering: 多文件工程修复
+- Superpowers: verification-before-completion
+
+剩余 P2/P3：
 - P2: Memory extractor zero proposals（内联路径已部分修复）
 - P3: RESUME_PROMPT 全量检测、Provider identity、Product context
 

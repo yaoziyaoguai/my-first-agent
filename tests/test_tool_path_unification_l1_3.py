@@ -433,6 +433,10 @@ class TestGateDispositionDrivesExecution:
         assert state.task.pending_tool is not None, (
             "confirmation_required 必须设置 pending_tool"
         )
+        assert state.task.pending_tool["tool"] == "_safe_noop"
+        assert state.task.pending_tool["tool_use_id"] != "", (
+            "pending_tool.tool_use_id 不应为空"
+        )
         assert state.task.status == "awaiting_tool_confirmation"
 
     def test_t14_malformed_gate_result_fails_safe(

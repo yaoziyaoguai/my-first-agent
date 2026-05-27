@@ -89,7 +89,7 @@ class ToolRuntimeMediator:
 
         if gate_disposition == "confirmation_required":
             # 需要用户确认 → 不执行工具，设置 pending_tool
-            self._handle_confirmation_required(tool_name, tool_input)
+            self._handle_confirmation_required(tool_name, tool_input, tool_use_id)
             self._route_result(tool_name, tool_input, tool_use_id, AWAITING_USER)
             return AWAITING_USER
 
@@ -140,12 +140,13 @@ class ToolRuntimeMediator:
         self,
         tool_name: str,
         tool_input: Any,
+        tool_use_id: str,
     ) -> None:
         """处理 confirmation_required gate result：设置 pending_tool。"""
         from agent.checkpoint import save_checkpoint
 
         self._state.task.pending_tool = {
-            "tool_use_id": "",
+            "tool_use_id": tool_use_id,
             "tool": tool_name,
             "input": dict(tool_input) if tool_input else {},
         }

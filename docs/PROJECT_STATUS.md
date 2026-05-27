@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: Loop 14 Evidence Pipeline Foundation 进行中 — 修复 dogfood harness 证据门禁、honest 化 PROJECT_STATUS
+**状态**: Loop 14 COMPLETED (commit 7172d2c) → Memory Write Dispatcher Migration **设计审计完成**，等待用户审批后进入 Loop 15 implementation
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -133,19 +133,19 @@
 
 **项目当前阶段：developer prototype / developer-dogfood。** 不可标 user-usable。
 
-#### P1（本阶段必须修）
+#### P1（已解决 — Loop 14）
 
 | Issue | 来源 | 状态 |
 |-------|------|------|
-| Dogfood harness expected_events 死字段（不参与 PASS 判定） | Loop 14 G-Stack audit | **FIXING** — CaseEvaluator 已修，guard tests pending |
-| Dogfood harness no-crash → PASS（空断言 case 不应标 capability PASS） | Loop 14 G-Stack audit | **FIXING** — 新增 SMOKE_PASS 状态 |
-| Dogfood harness expected_business_actions 缺失 | Loop 14 G-Stack audit | **FIXING** — CaseSpec 已添加字段 + evaluator gate |
+| Dogfood harness expected_events 死字段（不参与 PASS 判定） | Loop 14 G-Stack audit | **RESOLVED** — CaseEvaluator 检查 expected_events，缺失降为 CONCERN |
+| Dogfood harness no-crash → PASS（空断言 case 不应标 capability PASS） | Loop 14 G-Stack audit | **RESOLVED** — 新增 SMOKE_PASS 状态，8 个 guard tests |
+| Dogfood harness expected_business_actions 缺失 | Loop 14 G-Stack audit | **RESOLVED** — CaseSpec 新字段 + BUSINESS_ACTION_PATTERNS 检测 |
 
 #### P2（近期）
 
 | Issue | 来源 | 状态 |
 |-------|------|------|
-| Memory confirm→retain write path 仍直调 _memory_runtime，不走 dispatcher | Loop 14 analysis | **PARTIAL** — recall (read) path 已通过 dispatcher；write path 是独立架构变更 |
+| Memory confirm→retain write path 仍直调 _memory_runtime，不走 dispatcher | Loop 14 analysis | **DESIGN COMPLETE** — `docs/design/memory-write-dispatcher-migration-design.md`；等待用户审批后进入 Loop 15 implementation |
 | Memory extractor zero proposals | red-team audit | **PARTIAL** — 内联路径已部分修复 |
 | PROJECT_STATUS 历史 overclaim 清理 | Loop 13 review | **PARTIAL** — Loop 13 overclaim 已在 AutoRun fix 中回退；PROJECT_STATUS 不再包含 false RESOLVED |
 
@@ -175,15 +175,14 @@
 
 ## 2. 推荐下一步
 
-**Loop 14: Evidence Pipeline Foundation 进行中。** 已完成：
+**Loop 14 已完成（commit 7172d2c）。**
 
-- Harness CaseEvaluator 证据门禁（expected_events / expected_business_actions / SMOKE_PASS）
-- Memory recall 路径确认（通过 dispatcher）✓
+**Memory Write Dispatcher Migration 设计审计已完成。** 详见 `docs/design/memory-write-dispatcher-migration-design.md`。
 
-待完成：
-- guard tests for harness evidence gates
-- gates / commit / push
-- 可选：memory write path (confirm→retain) dispatcher 迁移（架构变更，需独立 loop）
+**下一步（待用户审批设计后执行）**：
+- **Loop 15: Memory Write Dispatcher Migration** — 将 user-initiated memory retain 的 store write 从 direct call 迁入 dispatcher（MEMORY_PROPOSE → MemoryRetainHandler）
+- 设计关键决策：复用已有 MEMORY_PROPOSE action type + MemoryRetainHandler，不新增架构元素；~50 行生产代码变更
+- 审批后按 TDD 顺序进入 Phase 1（handler 兼容性修复）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -246,6 +245,7 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
 | Skill 系统架构 | `docs/design/skill-system-architecture.md` |
 | MCP 系统架构 | `docs/design/mcp-architecture.md` |
+| Memory Write Dispatcher 迁移设计 | `docs/design/memory-write-dispatcher-migration-design.md` |
 | 首次运行 & 真实 API | `docs/onboarding/first-run-real-api-opt-in.md` |
 | 配置示例 | `config/config.example.yaml` |
 | 运行时宪法 | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` |

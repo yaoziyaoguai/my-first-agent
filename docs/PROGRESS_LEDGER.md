@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-27 (Loop 14)
+**最后更新**: 2026-05-27 (Memory Write Dispatcher Migration Design)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,11 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| Loop 14: Evidence Pipeline Foundation | (pending) | **IN PROGRESS** — dogfood harness 证据门禁修复：expected_events 从死字段升级为 PASS 判定条件、新增 SMOKE_PASS 状态、新增 expected_business_actions 字段；memory recall 路径确认（dispatcher ✓）；PROJECT_STATUS honesty 修复（developer prototype）；8 harness evidence gate guard tests；37+68 tests PASS |
-
-| Milestone | Commit | 简述 |
-|-----------|--------|------|
-| Loop 14: Evidence Pipeline Foundation | — | **IN PROGRESS** — dogfood harness 证据门禁修复：expected_events 从死字段升级为 PASS 判定条件、新增 SMOKE_PASS 状态（no-crash ≠ capability PASS）、新增 expected_business_actions 字段；memory recall 路径确认（通过 dispatcher）✓；PROJECT_STATUS honesty 修复（不再包含 false RESOLVED，明确定位为 developer prototype）；8 个 harness evidence gate guard tests；37 harness tests PASS + 68 source-of-truth tests PASS |
+| Memory Write Dispatcher Migration Design | — | **DESIGN COMPLETE** — `docs/design/memory-write-dispatcher-migration-design.md`（13 sections, 14 audit questions 逐条回答）；方案：复用已有 MEMORY_PROPOSE + MemoryRetainHandler，resolve_confirmation 不再直接写 store 改为返回 _dispatcher_payload 供 core.py dispatch；~50 行生产代码变更，4-5 个新测试；等待用户审批后进入 Loop 15 implementation |
+| Loop 14: Evidence Pipeline Foundation | 7172d2c | **COMPLETED** — dogfood harness 证据门禁修复：expected_events 从死字段升级为 PASS 判定条件、新增 SMOKE_PASS 状态、新增 expected_business_actions 字段；memory recall 路径确认（dispatcher ✓）；PROJECT_STATUS honesty 修复（developer prototype）；8 harness evidence gate guard tests；37 harness tests PASS + 68 source-of-truth tests PASS |
 | AutoRun Skill Orchestration Fix | de21474, b3f3ae3 | **COMPLETED** — `/auto-run` 从"任务调度器"升级为完整的"流程+技能+证据+回退"工程总控：新增 Workflow Stage → Skill Table（10 stage × 6 列含 failure route）、Status Promotion Gate（6 门禁）、Recursive Backtrack Policy、Claim-to-Evidence Gate、Review Failure Routing Table；Forbidden Patterns 扩展 6 项（partial fix→resolved、no-crash→PASS、admin→capability 等）；source-of-truth guard tests 60→68。根因：旧 auto-run 有 task routing 但无 stage-based skill switching、无 status promotion gate、review 失败无强制回退路由 |
 | Loop 13: Evidence Honesty & Production Path Repair | — | **COMPLETED** — SUBAGENT_DELEGATE_L0 从 business→probe 重分类（每 turn routing check 不应用户可见业务动作）；新增 lifecycle check honesty guard test；evidence taxonomy guard tests 17→18；PROJECT_STATUS 剩余 P1 全部解决（**注：事后 audit 发现此条 overclaim——参见 AutoRun Skill Orchestration Fix**） |
 | AutoRun Skill Router Upgrade | 855de5b | **COMPLETED** — `/auto-run` 从"单一自动执行命令"升级为"工程技能调度器"：新增 Skill Routing Policy + Skill Router Decision Table（12 任务类型 × 5 技能体系）；Continuation Policy 明确技能选择/loop 完成/review 完成不是停止条件；新增 14 个 skill routing guard tests；source-of-truth tests 41→55 |

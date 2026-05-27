@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — 交互式 dogfood harness 就绪，fake/local 16/16 PASS（6 categories）
+**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS），evidence kind 分类已完成
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -67,6 +67,16 @@
 | summary overclaim | step_complete_event 对未执行步骤宣称完成 | 已修复 |
 | model_provider_required | 缺少 model_name 时 crash | 已修复 |
 
+### Evidence Kind 分类
+
+| 指标 | 值 |
+|------|---|
+| 实现 | `classify_action_evidence_kind()` in `agent/runtime_integration/schema.py` |
+| 测试 | `tests/unit/test_evidence_kind_classification.py` — 17 PASS |
+| Run summary 集成 | `agent/loop.py` — `_emit_run_summary` 统计 business/probe 计数 |
+| 分类 | business: 7 类型（TOOL_REQUEST/INVOKE/RESULT, MEMORY_PROPOSE, STREAMING_PROVIDER_CALL/EVENT, SUBAGENT_DELEGATE_L0） |
+| | probe: 6 类型（SKILL_SELECT, TOOL_GATE, MEMORY_TURN_END_PROPOSAL/RECALL/CONSOLIDATE, CHECKPOINT_SAFE_SUMMARY） |
+
 ### 已知剩余 Issues
 
 | Issue | 优先级 | 决策 |
@@ -84,9 +94,8 @@
 
 基于交互式 dogfood harness 完成状态（14/14 PASS, fake/local）：
 
-1. **Real API opt-in dogfood**（下一步，需用户授权）— 用户显式授权后，跑完整 14-case + interrupt/resume matrix
-2. **Runtime evidence diet** — 区分 business action 与 probe/noop evidence
-3. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
+1. **Real API opt-in dogfood**（下一步，需用户授权）— 用户显式授权后，跑完整 16-case + interrupt/resume matrix
+2. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

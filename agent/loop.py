@@ -680,6 +680,7 @@ def _emit_run_summary(
     - 这是 display/observation event，不含 decision 语义
     """
     from agent.display_events import run_summary_event
+    from agent.runtime_integration.schema import classify_action_evidence_kind
 
     dispatcher = getattr(dependencies, "runtime_action_dispatcher", None)
     action_log = getattr(dispatcher, "action_log", ()) if dispatcher is not None else ()
@@ -690,6 +691,8 @@ def _emit_run_summary(
     memory_actions: list[str] = []
     subagent_names: list[str] = []
     error_reasons: list[str] = []
+    business_events = 0
+    probe_events = 0
 
     # 中文学习说明：turn_end hook 每轮无条件运行 MEMORY_TURN_END_PROPOSAL、
     # MEMORY_CONSOLIDATE、MEMORY_RECALL、SUBAGENT_DELEGATE_L0。它们是 lifecycle
@@ -709,6 +712,14 @@ def _emit_run_summary(
         disposition = ""
         if isinstance(evidence, Mapping):
             disposition = str(evidence.get("disposition", ""))
+
+        # 统计 evidence kind（business vs probe）
+        ev_kind = classify_action_evidence_kind(at)
+        if ev_kind == "business":
+            business_events += 1
+        else:
+            probe_events += 1
+
         if at.startswith("memory."):
             # 只统计有效操作：status=success 且 disposition 在有效集合中
             if status == "success" and disposition in _effective_memory_dispositions:
@@ -754,6 +765,8 @@ def _emit_run_summary(
         memory_actions=memory_actions,
         subagent_names=subagent_names,
         error_reasons=error_reasons,
+        business_events=business_events,
+        probe_events=probe_events,
     )
     dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
 

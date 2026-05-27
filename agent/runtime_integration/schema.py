@@ -8,6 +8,7 @@ Runtime state，也不代表 target module 已经执行。真正能否算 runtim
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,7 +16,6 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
-import re
 
 
 class RuntimeActionType(StrEnum):
@@ -34,6 +34,56 @@ class RuntimeActionType(StrEnum):
     # handler 已注册（phase1_hook.py），catalog entry 指向 validate_stream_event。
     STREAMING_EVENT = "streaming.event"
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
+
+
+# ── Evidence Kind Classification ──────────────────────────────────────────────
+
+# 中文学习说明：
+#   每个 RuntimeActionType 有一个「默认 evidence kind」：business（用户可见业务动作）
+#   或 probe（每 turn 无条件运行的内部生命周期检查，大部分时候返回 noop/no_action）。
+#   具体 action 结果的 evidence_kind 可以由 handler 的 disposition 进一步细化
+#   （例如 TOOL_GATE with _safe_noop → probe, with allowed → business gate）。
+
+# business: 产生用户可见效果的动作（工具调用、记忆写入、subagent 委托、provider 调用）
+# probe: 生命周期检查——每 turn 运行但大多数时候无有效结果（gate noop、recall noop 等）
+_EVIDENCE_KIND_BUSINESS = "business"
+_EVIDENCE_KIND_PROBE = "probe"
+
+_ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
+    RuntimeActionType.SKILL_SELECT: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.TOOL_REQUEST: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.TOOL_GATE: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.TOOL_INVOKE: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.TOOL_RESULT: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.MEMORY_TURN_END_PROPOSAL: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.MEMORY_PROPOSE: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.MEMORY_RECALL: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.MEMORY_CONSOLIDATE: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.CHECKPOINT_SAFE_SUMMARY: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.STREAMING_PROVIDER_CALL: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.STREAMING_EVENT: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_BUSINESS,
+}
+
+
+def classify_action_evidence_kind(
+    action_type: RuntimeActionType | str,
+) -> str:
+    """返回 RuntimeActionType 的默认 evidence kind: ``"business"`` 或 ``"probe"``。
+
+    中文学习说明：
+      - business: 用户可见业务动作（工具调用/记忆写入/subagent 委托/provider 调用）
+      - probe:  每 turn 无条件运行的生命周期检查（gate noop / recall check / consolidate check）
+      - 未知类型默认视为 probe（fail-closed），避免过度宣称
+      - 具体 action 的 evidence_kind 由 handler disposition 进一步细化
+    """
+    if isinstance(action_type, RuntimeActionType):
+        return _ACTION_TYPE_EVIDENCE_KIND.get(action_type, _EVIDENCE_KIND_PROBE)
+    # 字符串类型：尝试匹配已知 action type
+    for known, kind in _ACTION_TYPE_EVIDENCE_KIND.items():
+        if known.value == action_type or known.name == action_type:
+            return kind
+    return _EVIDENCE_KIND_PROBE
 
 
 VALID_RESULT_STATUSES = frozenset({

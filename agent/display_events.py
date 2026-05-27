@@ -8,11 +8,10 @@ DisplayEvent 是 Runtime 向 UI adapter 投递“可展示控制信息”的最�
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-import re
 from typing import Any
-
 
 TOOL_INPUT_PREVIEW_LIMIT = 500
 EVENT_ASSISTANT_DELTA = "assistant.delta"
@@ -415,6 +414,8 @@ def run_summary_event(
     memory_actions: list[str] | None = None,
     subagent_names: list[str] | None = None,
     error_reasons: list[str] | None = None,
+    business_events: int = 0,
+    probe_events: int = 0,
 ) -> RuntimeEvent:
     """构造 run summary 展示事件。
 
@@ -465,6 +466,8 @@ def run_summary_event(
             "memory_actions": memory_actions,
             "subagent_names": subagent_names,
             "error_reasons": error_reasons,
+            "business_events": business_events,
+            "probe_events": probe_events,
         },
     )
 

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1-6 (P0+P1) 完成，Loop 5 (Interactive Harness) 进行中
+**状态**: remediation — Loop 1-6 (P0+P1) 完成，Loop 7 (Test Taxonomy) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -157,8 +157,9 @@
 2. ~~**Loop 2: Log Hygiene & Evidence Governance (P0)**~~ — **COMPLETED** — 50MB 轮转 + 脱敏 + 21 tests
 3. ~~**Loop 3: Memory E2E 验证闭环 (P0)**~~ — **COMPLETED** — unified dispatcher path + tests (38d757a)
 4. ~~**Loop 4: Runtime Entry Consolidation (P1)**~~ — **COMPLETED** — CLI READ_ONLY 命令走统一 dispatcher，turn-end hook 精简 (c94fc18)
-5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖（**进行中**）
+5. ~~**Loop 5: Interactive Harness 扩展 (P1)**~~ — **COMPLETED** — 4 个新 case（I-COMPLEX/I-INTERRUPT/I-STREAM/I-RESUME），20 cases 覆盖 8 类别，datetime 修复 (b850605)
 6. ~~**Loop 6: Checkpoint/Resume 能力补全 (P1)**~~ — **COMPLETED** — schema 版本治理、v0→v1 迁移、future version 拒绝 (b759e62)
+7. **Loop 7: Test Taxonomy Reclassification (P1)** — L3→L2 降级不合规测试标签（**进行中**）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

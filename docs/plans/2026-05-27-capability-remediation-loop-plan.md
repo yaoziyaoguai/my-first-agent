@@ -248,7 +248,7 @@
 ---
 
 ### Loop 5: Interactive Harness 扩展
-**状态**：pending
+**状态**：completed
 **优先级**：P1
 **依赖**：Loop 3 完成（memory recall 修复后，memory case 才有意义）
 
@@ -284,6 +284,14 @@
 
 **风险**：低-中 — harness 框架已稳定
 **预估工作量**：中
+
+**完成记录（2026-05-27）**：
+- `scripts/dogfood_interactive_harness.py`：新增 4 个 cases（I17 I-COMPLEX 多步链式、I18 I-STREAM 流式输出、I19 I-INTERRUPT 优雅退出、I20 I-RESUME 断点恢复）；新类别 I-COMPLEX / I-INTERRUPT
+- `tests/test_interactive_dogfood_harness.py`：更新类别断言（8 类）、最小数量断言（≥20）
+- `agent/logger.py`：修复 `datetime.datetime.now()` → `datetime.now()` AttributeError
+- 28 harness tests PASS（1 pre-existing slow smoke 因 real config 未 swap 失败）
+- Full suite: 443 pass + 5 skip + 1 pre-existing fail
+- Commit: b850605
 
 ---
 

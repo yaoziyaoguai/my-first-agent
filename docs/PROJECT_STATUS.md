@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS fake + 15/15 PASS real），evidence kind 分类已完成
+**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS fake + 15/15 PASS real），memory policy "请记住" 前缀修复已完成
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -93,7 +93,7 @@
 
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
-| Memory extractor zero proposals | P2 | fake extractor 不工作，影响 memory e2e 验证 |
+| Memory extractor zero proposals | P2→P1 部分修复 | 内联路径："请记住" 前缀缺失已修复 (3089316)；session-end extractor 仍只处理 episodic proposals，语义型偏好会被过滤 |
 | RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为，不影响功能 |
 | Fake extractor zero proposals (fake mode) | P3 | fake-only limitation |
 | Provider identity | P3 | **不修** |
@@ -106,8 +106,8 @@
 
 基于交互式 dogfood harness 完成状态（14/14 PASS, fake/local）：
 
-1. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
-2. **Memory extractor 修复/替换** — 当前 fake extractor 始终返回 0 proposals，阻碍 memory e2e 验证
+1. **Memory E2E 验证闭环** — 内联路径已修复，需验证 confirm→retain→recall 完整流程在 fake+real API 下正确
+2. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
 3. **Interrupt (Ctrl+C) dogfood** — 交叉平台信号发送
 
 **禁止现在开工的项目**：

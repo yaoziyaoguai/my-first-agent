@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Memory policy "请记住" 前缀修复 | 3089316 | 根因：RETAIN_PREFIXES 缺少中文礼貌形式 "请记住"，导致 policy CLARIFY→NO_OP。新增 4 个前缀 + 2 个 policy 测试 |
 | Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |
 | Real API interactive dogfood authorized | — | 用户已明确授权真实 API dogfood；config/config.yaml 含真实 provider 配置，可读取用于 API 调用，不得 commit |
@@ -90,7 +91,7 @@
 
 | Issue | 来源 | 决策 |
 |-------|------|------|
-| Memory extractor zero proposals | real API dogfood 2026-05-27 | P2 — fake extractor 不工作，阻碍 memory e2e |
+| Memory extractor zero proposals | real API dogfood 2026-05-27 | P2→P1 部分修复 — 内联路径 "请记住" 前缀已修；session-end extractor 仍只处理 episodic |
 | core.py / loop.py 过大 | audit 2026-05-27 | P2 — surgical slim |
 | provider diagnostics legacy 建议 | audit 2026-05-27 | 延后 |
 | dogfood scripts stateful | audit 2026-05-27 | 延后 |

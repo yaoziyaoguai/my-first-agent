@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS），evidence kind 分类已完成
+**状态**: active — 交互式 dogfood harness 就绪（16/16 PASS fake + 15/15 PASS real），evidence kind 分类已完成
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -9,23 +9,35 @@
 
 ## 1. 当前状态快照
 
-### Real API Dogfood
+### Real API Dogfood (direct provider call)
 
 | 指标 | 值 |
 |------|---|
 | 最新报告 | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
 | 结果 | **19 non-failing / 1 CONCERN / 0 FAIL**（共 20 cases） |
+| 执行日期 | 2026-05-27 |
+| Evidence level | **REAL_DOGFOOD_SMOKE** |
+
+### Real API Interactive Dogfood (subprocess + full runtime)
+
+| 指标 | 值 |
+|------|---|
+| 最新报告 | `docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md` |
+| 结果 | **15/15 PASS（0 CONCERN / 0 FAIL）** |
 | Provider | kimi-k2.5 via anthropic_compatible (DashScope) |
 | 执行日期 | 2026-05-27 |
-| Evidence level | **REAL_DOGFOOD_SMOKE** — 非完整产品可用证明 |
+| 耗时 | 118.5s |
+| Evidence level | **REAL_API_INTERACTIVE_SMOKE** |
+| Harness | `scripts/real_api_interactive_dogfood_sweep.py` |
+| 结果 JSON | `docs/dogfood/real-api-interactive-dogfood-results-2026-05-27.json` |
 
-**重要限制**：
-- 多数 A/H/I case 是 direct provider call，不经完整 agent runtime
-- 部分 PASS 只验证非空输出，缺语义断言
-- 未覆盖：交互式 y/n confirmation、resume、interrupt、tool confirmation、memory confirmation、streaming/progress
-- 报告 commit (`ffa5677`) 与当前 HEAD 有断层（后续 commit 修复了 empty response bug）
-
-**下一步**: 建立交互式 dogfood harness（subprocess stdin/stdout），覆盖上述缺失路径。
+**已验证的交互路径**：
+- y/n tool confirmation（R06-R08）— real API 下正确处理
+- memory proposal + accept/deny（R09-R11）— 流程正常
+- subagent delegation（R12-R13）— 委托标记正常
+- 不存在工具的安全错误恢复（R14）— 不 crash
+- 多约束复杂中文任务（R15）— 19.7s 完成，不超时
+- secret 拒绝（R03）— 不泄露 API key
 
 ### Interactive Dogfood Harness
 
@@ -81,10 +93,10 @@
 
 | Issue | 优先级 | 决策 |
 |-------|--------|------|
-| Real API opt-in dogfood | P2 | 下一步 — fake/local harness 已就绪，待用户授权真实 API |
-| Fake extractor zero proposals | P3 | fake-only limitation，不影响真实路径 |
-| 128 pending proposals 残留 | P3 | fake-only state pollution，不影响真实路径 |
-| Provider identity（模型自称"Claude"） | P3 | **不修** — 当前 provider 语境下不优先 |
+| Memory extractor zero proposals | P2 | fake extractor 不工作，影响 memory e2e 验证 |
+| RESUME_PROMPT 全量检测 | P3 | checkpoint 设计行为，不影响功能 |
+| Fake extractor zero proposals (fake mode) | P3 | fake-only limitation |
+| Provider identity | P3 | **不修** |
 | Product context（I1/I7） | P3 | 延后 |
 | C1 event counting harness bug | P3 | 延后 |
 
@@ -94,8 +106,9 @@
 
 基于交互式 dogfood harness 完成状态（14/14 PASS, fake/local）：
 
-1. **Real API opt-in dogfood**（下一步，需用户授权）— 用户显式授权后，跑完整 16-case + interrupt/resume matrix
-2. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
+1. **Runtime hub slimming** — `core.py`/`loop.py` 行为保持型抽取
+2. **Memory extractor 修复/替换** — 当前 fake extractor 始终返回 0 proposals，阻碍 memory e2e 验证
+3. **Interrupt (Ctrl+C) dogfood** — 交叉平台信号发送
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"
@@ -145,7 +158,8 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 当前项目状态 | `docs/PROJECT_STATUS.md`（本文件） |
 | 进度账本 | `docs/PROGRESS_LEDGER.md` |
 | 工程流程 | `docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/dev/ENGINEERING_WORKFLOW.md` |
-| 最新 dogfood | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
+| 最新 dogfood (direct) | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
+| 最新 dogfood (interactive) | `docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md` |
 | 交互式 harness 报告 | `docs/dogfood/interactive-dogfood-harness-report-2026-05-27.md` |
 | 交互式 harness plan | `docs/plans/interactive-dogfood-harness-plan-2026-05-27.md` |
 | 最新审计 | `docs/audit/global-readonly-audit-2026-05-27.md` |

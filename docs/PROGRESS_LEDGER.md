@@ -10,7 +10,9 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Real API interactive dogfood sweep | — | 15/15 PASS — 真实 API（kimi-k2.5）交互式 dogfood，覆盖 tool/memory/subagent/edge 5 类别 |
 | Runtime evidence diet | — | `classify_action_evidence_kind()` — business(7)+probe(6) 分类；run summary 集成；17 个单元测试 |
+| Real API interactive dogfood authorized | — | 用户已明确授权真实 API dogfood；config/config.yaml 含真实 provider 配置，可读取用于 API 调用，不得 commit |
 | Interactive dogfood harness v2 (16 cases) | — | 扩展到 16 cases (6 categories incl. I-RESUME)，补齐 I15 memory deny + I16 resume decline |
 | Interactive dogfood harness 实现 + 首轮 fake/local 验证 | — | `scripts/dogfood_interactive_harness.py` — SubprocessRunner/CaseEvaluator/14-case matrix, 14/14 PASS |
 | Interactive dogfood harness tests | — | `tests/test_interactive_dogfood_harness.py` — 29 tests (28 pass + 1 slow smoke) |
@@ -88,8 +90,8 @@
 
 | Issue | 来源 | 决策 |
 |-------|------|------|
-| Real API opt-in dogfood | interactive harness report 2026-05-27 | 下一步 — fake/local harness 就绪，待用户授权 |
-| core.py / loop.py 过大 | audit 2026-05-27 | harness 就绪后 surgical slim |
+| Memory extractor zero proposals | real API dogfood 2026-05-27 | P2 — fake extractor 不工作，阻碍 memory e2e |
+| core.py / loop.py 过大 | audit 2026-05-27 | P2 — surgical slim |
 | provider diagnostics legacy 建议 | audit 2026-05-27 | 延后 |
 | dogfood scripts stateful | audit 2026-05-27 | 延后 |
 

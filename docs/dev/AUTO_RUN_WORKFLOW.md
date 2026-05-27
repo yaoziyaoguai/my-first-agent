@@ -142,22 +142,16 @@ deferred 后检查 queue 中是否还有其他 candidate，有则继续。
 
 只有以下情况才能停止整个 auto-run：
 
-| Stop condition | 说明 |
-|---------------|------|
-| not main | 不在 main 分支 |
-| behind origin/main | 本地落后远程 |
-| working tree dirty 且不属于当前 loop | 有未提交改动且不是当前 capability 产生的 |
-| HEAD has tag | HEAD 已有 tag |
-| 需要真实 API / .env / secret | 无法在 fake-first 下继续 |
-| 需要真实外部服务 | 无法在本地验证 |
-| 需要真实私人资料 | 安全边界 |
-| 需要真实 sessions/runs | 安全边界 |
-| 需要真实 memory/episodes | 安全边界 |
-| P0 级别问题 | 不可自动裁决的高风险 |
-| P1 且无法通过回退修复 | 回退后仍然 FAIL |
-| 架构决策会改变项目根本方向 | 超越 auto-run 授权范围 |
-| context 接近耗尽 | 无法安全继续，必须输出 resume instruction |
-| tool/environment failure 阻止继续 | 外部依赖不可用 |
+- secret 泄漏风险（real API key 即将被 commit）
+- staged real API key（git diff --cached 包含真实 key）
+- 需要读取/覆盖/删除用户真实 config/config.yaml
+- 需要读取/使用真实 .env / sessions / runs / episodes / 私人资料
+- 危险的 tool execution（rm -rf / force push main / 删库）
+- 引入第二条 runtime flow / fake-real split
+- 恢复 legacy provider/profile/env/request_path 为主路径
+- context 接近耗尽且已写 handoff resume instruction
+- P0/P1 连续修复失败 ≥2 次（同一 loop 中同一问题）
+- 需要用户重大产品决策（非技术选择，非已知授权范围内的决定）
 
 **不再是全局 stop condition：**
 
@@ -168,6 +162,10 @@ deferred 后检查 queue 中是否还有其他 candidate，有则继续。
 - 需要架构设计（触发 Architecture Extension Loop）
 - 完成 3 个 loops（继续 discovery 找下一个）
 - 所有剩余候选都需要架构扩展（逐个评估，逐个进入 Architecture Extension Loop）
+- **loop 成功完成**（这不是停止条件，自动继续下一 loop）
+- **commit/push 完成**（这不是停止条件，自动继续下一 loop）
+
+**用户已授权真实 API dogfood 范围内的操作，不得在此范围内反复请求授权。**
 
 ## F. 选择下一个 Capability 的规则
 
@@ -228,7 +226,9 @@ AutoRun 不得将 `dispatch path verified` 当作 `L3 complete` 跳过 discovery
 
 ## H. 输出格式
 
-每次 auto-run 结束（仅当真正全局 stop condition 触发），必须输出：
+**非 hard stop 时只输出简短进度行**（如 `Loop N COMPLETED — [hash] pushed → 自动继续 Loop N+1`），不输出完整报告。
+
+仅当真正全局 stop condition 触发时，必须输出完整报告：
 
 ```text
 ## Auto-Run Report — YYYY-MM-DD

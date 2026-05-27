@@ -234,6 +234,16 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 
 auto_run 不要求从头开始全 loop；根据任务类型选择合适的 loop 起点。
 
+### Auto-Run 授权状态
+
+用户已明确授权的操作范围：
+- **真实 API dogfood** — 已授权，可读取 config/config.yaml 中的真实 provider 配置用于 API 调用，不得 commit
+- **agent_log.jsonl 删除** — 已授权
+- **按审计文档修复 P0/P1** — 已授权，安全范围内的自动修复
+- **自动继续 loop** — 已完成一个 loop 后，如无 hard stop，自动继续下一 loop，不需要每轮都问用户
+
+不得在已授权范围内反复请求授权。
+
 ---
 
 ## 7. Owner Notes

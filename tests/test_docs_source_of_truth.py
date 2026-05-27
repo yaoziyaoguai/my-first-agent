@@ -444,3 +444,71 @@ def test_config_legacy_sunset_no_env_as_primary():
     """config-legacy-sunset-contract 不得推荐 .env 作为唯一 secret 入口。"""
     text = _read("docs/design/config-legacy-sunset-contract.md")
     assert "api_key 可直接写入" in text or "直接写入" in text
+
+
+# =========================================================================
+# 13. auto-run.md Continuation Policy 守护
+# =========================================================================
+
+def test_auto_run_continuation_policy_exists():
+    """auto-run.md 必须包含 Continuation Policy 节。"""
+    text = _read_auto_run()
+    assert "Continuation Policy" in text
+    assert "自动继续" in text or "auto" in text.lower()
+
+
+def test_auto_run_loop_completion_not_stop_condition():
+    """auto-run.md 必须声明 loop 完成不是停止条件。"""
+    text = _read_auto_run()
+    assert "loop 成功完成" in text or "loop completion" in text.lower()
+
+
+def test_auto_run_commit_push_not_stop_condition():
+    """auto-run.md 必须声明 commit/push 完成不是停止条件。"""
+    text = _read_auto_run()
+    assert "commit/push 完成" in text or "commit/push" in text.lower()
+
+
+def test_auto_run_post_loop_self_review_exists():
+    """auto-run.md 必须包含 Post-Loop Self-Review checklist。"""
+    text = _read_auto_run()
+    assert "Post-Loop Self-Review" in text
+    assert "本轮 target" in text or "target" in text.lower()
+
+
+def test_auto_run_next_loop_selection_exists():
+    """auto-run.md 必须包含 Next-Loop Selection 规则。"""
+    text = _read_auto_run()
+    assert "Next-Loop Selection" in text
+    assert "P0" in text and "P1" in text
+
+
+def test_auto_run_hard_stops_narrowed():
+    """auto-run.md 的 hard stop 必须收窄且包含关键条件。"""
+    text = _read_auto_run()
+    # 必须包含核心 hard stop（不应移除的）
+    assert "secret" in text.lower()
+    assert "第二条 runtime flow" in text or "fake-real split" in text
+    # 必须排除旧的过宽条件（dirty repo 不再作为无条件 hard stop）
+    # 新增：不得在已授权范围内反复请求授权
+    assert "已授权" in text or "授权" in text
+
+
+def test_auto_run_final_output_not_stop_signal():
+    """auto-run.md 的 Final output 必须标注为进度日志而非停止信号。"""
+    text = _read_auto_run()
+    assert "进度日志" in text or "不是停止信号" in text or "not stop signal" in text.lower()
+
+
+def test_remediation_plan_no_stop_instruction():
+    """remediation plan 不得包含 '停止，等下一轮 /auto-run' 指令。"""
+    text = _read("docs/plans/2026-05-27-capability-remediation-loop-plan.md")
+    assert "停止，等下一轮 /auto-run" not in text
+    assert "自动继续" in text or "继续下一个 loop" in text
+
+
+def test_project_status_has_auto_run_auth():
+    """PROJECT_STATUS.md 必须包含 Auto-Run 授权状态节。"""
+    text = _read("docs/PROJECT_STATUS.md")
+    assert "授权状态" in text
+    assert "已授权" in text

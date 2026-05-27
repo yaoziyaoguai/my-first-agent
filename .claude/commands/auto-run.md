@@ -110,16 +110,51 @@ First Agent 自动执行命令。基于当前项目状态选择推进方式，�
 
 - secret 泄漏风险（real API key 即将被 commit）
 - staged real API key（git diff --cached 包含真实 key）
-- dirty repo 且改动不属于当前 loop
-- 需要真实 private data / .env / sessions / runs / episodes
-- 危险的 tool execution 风险（rm -rf / force push main / 删库）
+- 需要读取/覆盖/删除用户真实 config/config.yaml
+- 需要读取/使用真实 .env / sessions / runs / episodes / 私人资料
+- 危险的 tool execution（rm -rf / force push main / 删库）
 - 引入第二条 runtime flow / fake-real split
 - 恢复 legacy provider/profile/env/request_path 为主路径
-- context 接近耗尽且无 handoff
-- P0/P1 重复修复失败（≥2 次）
-- 需要用户产品决策（非技术选择）
+- context 接近耗尽且已写 handoff resume instruction
+- P0/P1 连续修复失败 ≥2 次（同一 loop 中同一问题）
+- 需要用户重大产品决策（非技术选择，非已知授权范围内的决定）
 
-以下**不是**停止条件：queue empty、单个 candidate blocked/deferred、需要架构设计、完成 3 个 loops。
+以下**不是**停止条件：queue empty、单个 candidate blocked/deferred、需要架构设计、完成 3 个 loops、loop 成功完成、commit/push 完成。
+
+**用户已授权真实 API dogfood 范围内的操作，不得在此范围内反复请求授权。**
+
+## Continuation Policy
+
+每个 loop 完成后必须执行以下 self-review，**自动继续下一 loop**，而不是停下来：
+
+1. 确认所有 gates 通过（或已知 failure 为 pre-existing 非本轮引入）
+2. 确认 PROJECT_STATUS / PROGRESS_LEDGER / remediation plan 已更新
+3. commit / push 已完成
+4. 从 PROJECT_STATUS 找到下一个未完成的 loop
+5. 检查 hard stop — 如果没有命中任何一条，**自动继续**下一个 loop
+
+**给出下一步方向不等于停止**。Final report 是进度日志，不是停止信号。
+只有 hard stop 才真正停止。hard stop 时才输出完整 final report。
+
+### Post-Loop Self-Review
+
+每完成一个 loop：
+- [ ] 本轮 target 是否达成？具体达成的证据是什么？
+- [ ] 本次 changes 是否在 scope 内？有没有 scope creep？
+- [ ] Gates 通过情况：具体哪些 pass/fail，哪些是已有的？
+- [ ] 是否有新引入的 regression？（与基线对比）
+- [ ] PROJECT_STATUS / PROGRESS_LEDGER / remediation plan 是否需要更新？
+- [ ] 下一个 loop 是什么？是否被前置条件阻塞？
+- [ ] 是否需要用户决策？（非技术选择、scope 外、超越已有授权）
+
+### Next-Loop Selection
+
+完成 self-review 后自动选择下一 loop：
+1. 读 PROJECT_STATUS.md 的推荐下一步
+2. 读 remediation plan 找到下一个 pending loop
+3. 优先 P0 → P1 → P2（不跳级）
+4. 如果当前 loop 的前置依赖未满足，选择其他不依赖的 loop
+5. 如果所有剩余 loop 都 blocked，报告 blocked 原因并停止
 
 ## Forbidden patterns
 
@@ -137,7 +172,17 @@ First Agent 自动执行命令。基于当前项目状态选择推进方式，�
 
 ## Final output
 
-每轮结束必须输出：
+**Final report 是进度日志，不是停止信号。** 非 hard stop 时输出简短进度行即可，hard stop 时才输出完整报告。
+
+### 非 hard stop（loop 完成，自动继续）
+
+简短一行：
+
+```text
+## Loop N COMPLETED — [hash] pushed → 自动继续 Loop N+1
+```
+
+### Hard stop（遇到真正停止条件）
 
 ```text
 ## /auto-run Report — YYYY-MM-DD
@@ -150,5 +195,6 @@ First Agent 自动执行命令。基于当前项目状态选择推进方式，�
 - Remaining: [未解决的问题]
 - Next: [推荐下一个 loop]
 - Commit: [hash] / Push: [yes/no]
+- Stop reason: [具体命中哪条 hard stop]
 - User action needed: [yes/no — 具体说明]
 ```

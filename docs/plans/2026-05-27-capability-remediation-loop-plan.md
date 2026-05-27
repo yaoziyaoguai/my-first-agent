@@ -28,10 +28,11 @@
   → 检查前置条件
   → 执行该 loop
   → 完成后更新 PROJECT_STATUS/PROGRESS_LEDGER/本 plan
-  → 停止，等下一轮 /auto-run
+  → 执行 post-loop self-review（见 auto-run.md Continuation Policy）
+  → 如果没有 hard stop，自动继续下一个 loop
 ```
 
-`/auto-run` 不一次执行多个 loop。每个 loop 是独立的工作单元。
+`/auto-run` 不一次执行多个 loop。每个 loop 是独立的工作单元。但 loop 之间不停止——除非命中 hard stop。
 
 ### Loop 状态
 
@@ -151,7 +152,7 @@
 ---
 
 ### Loop 3: Memory E2E 验证闭环
-**状态**：pending
+**状态**：completed
 **优先级**：P0
 **依赖**：无（可与 Loop 1/2 并行）
 

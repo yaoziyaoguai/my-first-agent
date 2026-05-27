@@ -1,0 +1,72 @@
+# Progress Ledger — First Agent
+
+**最后更新**: 2026-05-27
+
+记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+---
+
+## 2026-05-27
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| ISSUE-002 fix | e789c11 | handle_end_turn_response 返回模型正文而非空串；非交互式调用方（dogfood harness）不再收到空响应 |
+| ISSUE-001 harness enhanced | e789c11 | call_agent_chat 支持 confirmation_reply 参数，自动跟进交互式确认 |
+| Real API dogfood rerun | — | 20 cases → 19 PASS / 1 CONCERN / 0 FAIL |
+| Ruff pre-commit fix | e789c11 | 修复 9 个 ruff 错误（I001, W293, SIM102, E501） |
+
+## 2026-05-26
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| Real API full dogfood sweep | ffa5677 | 首次全量 20-case real API dogfood：18 PASS / 2 CONCERN / 0 FAIL |
+| Dogfood remediation plan | ffa5677 | ISSUE-001/002 根因分析和修复计划 |
+| Provider config simplification | 7c5643d | 移除 request_path/auth_scheme 用户配置面 |
+| Unified project config | 7dc2abb | config/config.yaml 成为唯一推荐配置入口 |
+| Legacy provider guidance guard | 1146cce | 测试防止 legacy 配置路径复活 |
+| Config legacy sunset contract | — | `docs/design/config-legacy-sunset-contract.md` |
+
+## 2026-05-25
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| FakeProvider scripted scenario contract | — | `docs/design/fake-provider-scripted-scenario-contract.md` |
+| User-path dogfood smoke tests | — | `tests/test_user_path_dogfood.py` |
+| Multiple audit reports | — | global red-team, industry gap, low-complexity, capability gap audits |
+| User-usable agent runtime MVP plan | — | `docs/plans/user-usable-agent-runtime-mvp-plan.md` |
+
+## 2026-05-22 ~ 2026-05-24
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| Unified runtime flow remediation | — | global runtime flow alignment across all branch points |
+| Memory anchor real smoke | — | `docs/plans/2026-05-22-001-feat-memory-anchor-real-smoke-plan.md` |
+| Tool confirmation anchor | — | `docs/plans/2026-05-22-002-feat-tool-confirmation-anchor-plan.md` |
+| ENGINEERING_WORKFLOW.md | — | SDD→TDD→Implementation→Review→Debug loop 纪律 |
+| AUTO_RUN_WORKFLOW.md | — | auto-run 命令 workflow 定义 |
+
+## Earlier (2026-04 ~ 2026-05-21)
+
+| Milestone | 简述 |
+|-----------|------|
+| Summary overclaim fix | step_complete_event 不再对未执行步骤 claim 完成 |
+| Infinite loop fix | plan mode 确认后正确退出循环 |
+| model_provider_required fix | 缺少 model_name 时不再 crash |
+| Fake/local crash fix | FakeProvider 路径稳定性修复 |
+| Memory inline confirmation | `docs/archive/design/MEMORY_INLINE_CONFIRMATION_AGENT_LOOP_DESIGN.md` |
+| Checkpoint save/resume L3 | `docs/archive/implementation-notes/checkpoint-save-resume-l3.md` |
+| Tool pipeline L3 completion | `docs/archive/implementation-notes/tool-pipeline-l3-completion.md` |
+| Runtime integration | `docs/archive/runtime-integration/` |
+| V0.1 ~ V0.5 | CLI output contract, basic TUI, manual smoke, observer audit 等 |
+
+---
+
+## 当前 P3 积压
+
+| Issue | 来源 | 决策 |
+|-------|------|------|
+| Provider identity（"我是 Claude"） | A1 dogfood | 不修 |
+| Product context（I1/I7） | dogfood | 延后 |
+| C1 event counting bug | harness | 延后 |
+| 交互式 dogfood harness | remediation plan | 延后 |
+| Provider profile docs cleanup | config sunset | 本轮处理 |

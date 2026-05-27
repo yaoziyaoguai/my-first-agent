@@ -24,9 +24,9 @@ Status: **Cleanup-Only / Awaiting Manual Human Dogfood** — 能力建设暂停�
 当前一页状态：[Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
 
 当前行动依据：
-- [global-red-team-product-architecture-audit-2026-05-25.md](../audit/global-red-team-product-architecture-audit-2026-05-25.md) — 全仓库 Red-Team 审计，当前权威源
-- [capability-gap-audit-low-complexity-2026-05-25.md](../audit/capability-gap-audit-low-complexity-2026-05-25.md) — low-complexity remediation 选择依据
-- [final-cleanup-readiness-summary-2026-05-25.md](../plans/final-cleanup-readiness-summary-2026-05-25.md) — cleanup 完成，manual human dogfood 下一步
+- [PROJECT_STATUS.md](../PROJECT_STATUS.md) — 当前项目状态入口（第一优先读取）
+- [PROGRESS_LEDGER.md](../PROGRESS_LEDGER.md) — 进度账本
+- [real-api-full-dogfood-remediation-plan-2026-05-26.md](../plans/real-api-full-dogfood-remediation-plan-2026-05-26.md) — 最新 real API dogfood 修复记录
 
 已完成的能力建设（历史证据，非当前行动指令）：
 - WP1-WP4: First Usable Task MVP
@@ -86,7 +86,7 @@ Status: **Cleanup-Only / Awaiting Manual Human Dogfood** — 能力建设暂停�
 
 - v0.9.x Stabilization 文档包：`docs/archive/refactor/V0_9_X_*`（RFC/SDD/TDD/Implementation Loop/Dogfood/Audit Checklist）
 - Runtime Integration 文档包：`docs/archive/runtime-integration/RUNTIME_INTEGRATION_*`（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
-- 历史审计：见 [docs/audit/README.md](../audit/README.md) Historical 部分
-- 历史计划：见 [docs/plans/README.md](../plans/README.md) Historical 部分
+- 历史审计：`docs/archive/2026-05-27-cleanup/audit/`
+- 历史计划：`docs/archive/2026-05-27-cleanup/plans/`
 
 **AutoRun 不得将以上 historical/archived 文档当作当前 backlog 或执行依据。**

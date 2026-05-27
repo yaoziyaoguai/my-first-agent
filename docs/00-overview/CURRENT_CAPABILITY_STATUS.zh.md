@@ -39,13 +39,14 @@
 ## 当前推荐路径
 
 1. 自动化继续时：只做 cleanup-only / low-complexity remediation。
-2. 人类准备验证时：走 [Dogfood README](../dogfood/README.md) → [Local Manual Dogfood Checklist](../dogfood/local-manual-dogfood-checklist.md)。
+2. 人类准备验证时：走 [Dogfood README](../dogfood/README.md) → 最新 dogfood 报告。
 3. 真实 provider：先修复本机 credentials / endpoint compatibility；AutoRun 不重试真实 API。
 4. 后续大设计：只在 manual dogfood 反馈明确后考虑 Memory UX、Tool approval UX、SubAgent L1、sandbox、MCP、hook lifecycle。
 
 ## 事实源
 
-- Capability gap audit: [capability-gap-audit-low-complexity-2026-05-25.md](../audit/capability-gap-audit-low-complexity-2026-05-25.md)
-- Red-team audit: [global-red-team-product-architecture-audit-2026-05-25.md](../audit/global-red-team-product-architecture-audit-2026-05-25.md)
-- Dogfood rehearsal: [agent-driven-human-dogfood-rehearsal-report.md](../dogfood/agent-driven-human-dogfood-rehearsal-report.md)
+- Capability gap audit (archived): [archive/2026-05-27-cleanup/audit/](../archive/2026-05-27-cleanup/audit/)
+- Red-team audit (archived): [archive/2026-05-27-cleanup/audit/](../archive/2026-05-27-cleanup/audit/)
+- Dogfood rehearsal (archived): [archive/2026-05-27-cleanup/dogfood/](../archive/2026-05-27-cleanup/dogfood/)
+- Current status: [PROJECT_STATUS.md](../PROJECT_STATUS.md)
 - Unified runtime contract: [UNIFIED_RUNTIME_FLOW_CONTRACT.md](../real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md)

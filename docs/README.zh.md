@@ -1,54 +1,104 @@
 # First Agent 文档入口
 
-这篇文档解决什么问题：给新开发者、架构审计者和 Coding Agent 一个稳定阅读入口，说明哪些文档是入口、哪些是 canonical spec、哪些只是历史记录。
+本文档为新开发者、架构审计者和 Coding Agent 提供稳定的阅读入口。
 
-不解决什么问题：不替代 Memory / Skill / SubAgent 的 RFC，也不记录每个历史版本的细节。
+---
 
-推荐读者：新开发者、维护者、Coding Agent、准备做审计的人。
+## 从这里开始（必读）
 
-## 读者路径
+1. **[PROJECT_STATUS.md](PROJECT_STATUS.md)** — 当前项目状态：capability 状态、已知 issues、活跃约束、config 规则、推荐下一步
+2. **[PROGRESS_LEDGER.md](PROGRESS_LEDGER.md)** — 进度账本：关键 milestones、已修复 bugs、P3 积压
+3. **[dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md)** — 工程流程、loop 入口点、deferred/stop 条件
 
-### 10 分钟理解项目
+Coding Agent 每次启动必须先读上述三个文件。
 
-1. [根 README](../README.md)
-2. [Current Capability Status](00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
-3. [First Agent Overview](00-overview/FIRST_AGENT_OVERVIEW.zh.md)
-4. [Architecture Map](00-overview/ARCHITECTURE_MAP.zh.md)
-5. [Capability Matrix](00-overview/CAPABILITY_MATRIX.zh.md)
+---
 
-### 准备本地运行
+## 当前 Dogfood
 
-1. [Getting Started](01-getting-started/GETTING_STARTED.zh.md)
-2. [Test Matrix](05-testing-dogfood/TEST_MATRIX.zh.md)
-3. [Current Audit Status](06-audit/CURRENT_AUDIT_STATUS.zh.md)
+| 文档 | 说明 |
+|------|------|
+| [dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md](dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md) | 最新 real API dogfood 报告（19 PASS / 1 CONCERN / 0 FAIL） |
+| [plans/real-api-full-dogfood-remediation-plan-2026-05-26.md](plans/real-api-full-dogfood-remediation-plan-2026-05-26.md) | ISSUE-001/002 修复记录 |
 
-### 了解当前阶段和下一步行动
+---
 
-1. [Current Capability Status](00-overview/CURRENT_CAPABILITY_STATUS.zh.md) — 当前能力、边界和下一步
-2. [Capability Gap Audit](audit/capability-gap-audit-low-complexity-2026-05-25.md) — 本轮 low-complexity remediation 选择依据
-3. [全局 Red-Team 审计](audit/global-red-team-product-architecture-audit-2026-05-25.md) — 架构/代码/UX/安全基础审计
-4. [审计文档索引](audit/README.md) — active vs historical 审计分类
-5. [计划文档索引](plans/README.md) — active vs historical 计划分类
-6. [Dogfood 报告索引](dogfood/README.md) — active vs historical dogfood 分类
+## 运行时宪法
 
-### 做架构或实现审计
+| 文档 | 说明 |
+|------|------|
+| [real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md](real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) | 统一 runtime flow 契约、branch points、classification rules |
 
-- Memory canonical spec: [docs/rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md)
-- Skill canonical spec: [docs/rfc/SKILL_CANONICAL_RFC.md](rfc/SKILL_CANONICAL_RFC.md)
-- SubAgent canonical spec: [docs/rfc/SUBAGENT_CANONICAL_RFC.md](rfc/SUBAGENT_CANONICAL_RFC.md)
-- Skill SDD/TDD/Loop/Audit: `docs/design/`, `docs/archive/testing/`, `docs/archive/roadmap/`, `docs/audit/`
-- SubAgent SDD/TDD/Loop/Audit: `docs/design/`, `docs/archive/testing/`, `docs/archive/roadmap/`, `docs/audit/`
+---
 
-## 文档状态规则
+## Config
 
-- `docs/00-overview/`：当前中文入口，面向人类和 Coding Agent。
-- `docs/01-getting-started/`：本地运行、测试、dogfood。
-- `docs/05-testing-dogfood/`：测试矩阵和 dogfood 命令。
-- `docs/06-audit/`：当前审计状态和发布前证据。
-- `docs/rfc/`：canonical spec（MEMORY/SKILL/SUBAGENT），不能随意归档。
-- `docs/design/`、`docs/dogfood/`、`docs/audit/`：系统级设计和实现循环证据，保留为实现依据。
-- `docs/archive/`：历史 design/testing/roadmap/runtime-integration/specs/implementation-notes 等已归档。
-- 根层 `docs/V0_*`、旧 release、旧 roadmap、旧 smoke 记录：历史证据，不作为当前入口。
+| 文件 | 说明 |
+|------|------|
+| `config/config.yaml` | 当前推荐配置入口（本地可含 API key，不可 commit） |
+| `config/config.example.yaml` | 配置参考（fake 安全默认） |
+| `config/examples/` | Kimi/GLM/fake 等 provider 示例 |
+
+**Legacy 路径（不推荐）**：`FIRST_AGENT_PROVIDER_PROFILE`、`MY_FIRST_AGENT_LLM_PROVIDER`、`config/provider_profiles.yaml`。
+
+---
+
+## Canonical Specs
+
+| 文档 | 领域 |
+|------|------|
+| [rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md) | Memory 系统 |
+| [rfc/SKILL_CANONICAL_RFC.md](rfc/SKILL_CANONICAL_RFC.md) | Skill 系统 |
+| [rfc/SUBAGENT_CANONICAL_RFC.md](rfc/SUBAGENT_CANONICAL_RFC.md) | SubAgent 系统 |
+
+---
+
+## 设计契约
+
+| 文档 | 说明 |
+|------|------|
+| [design/fake-provider-scripted-scenario-contract.md](design/fake-provider-scripted-scenario-contract.md) | FakeProvider 脚本化场景契约 |
+| [design/config-legacy-sunset-contract.md](design/config-legacy-sunset-contract.md) | Legacy 配置路径 sunset 时间线 |
+| [design/dogfood-harness-contract.md](design/dogfood-harness-contract.md) | Dogfood harness 契约 |
+| [design/run-summary-compact-report.md](design/run-summary-compact-report.md) | Run summary 报告 |
+
+---
+
+## 工程文档
+
+| 文档 | 说明 |
+|------|------|
+| [dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md) | Auto-run workflow 定义 |
+| [dev/ENGINEERING_WORKFLOW.md](dev/ENGINEERING_WORKFLOW.md) | 工程流程纪律（SDD→TDD→Impl→Review→Debug） |
+
+---
+
+## 审计和计划
+
+审计和计划文档数量较多，状态各异。以以下索引为准：
+
+- [audit/README.md](audit/README.md) — 审计文档 active vs historical 分类
+- [plans/README.md](plans/README.md) — 计划文档 active vs historical 分类
+- [dogfood/README.md](dogfood/README.md) — Dogfood 报告 active vs historical 分类
+
+---
+
+## Archive
+
+历史文档统一放在 [archive/](archive/) 下，包括：
+
+- `archive/design/` — 历史架构设计
+- `archive/implementation-notes/` — 历史实现笔记
+- `archive/specs/` — 历史 SPEC/TDD
+- `archive/root-stale/` — 根目录移动过来的过期文档
+- `archive/v0.x/` — V0.x 版本记录
+- `archive/refactor/` — 重构历史
+- `archive/llm-provider/` — LLM provider legacy 文档
+- `archive/mcp/` — MCP 历史
+
+**Archive 中的文档不作为当前状态参考。**
+
+---
 
 ## 术语约定
 
@@ -56,23 +106,5 @@
 |---|---|---|
 | 主代理运行时 | Parent Agent Runtime | 拥有主 loop、状态、模型调用和分派 |
 | 工具注册中心 | ToolRegistry | 工具 authority，决定工具定义、风险、confirmation |
-| 工具执行器 | ToolExecutor | 执行单次工具调用并处理 tool_result / checkpoint |
-| 记忆治理 | Memory Governance | 决定 memory candidate 是否进入 store |
-| 技能系统 | Skill System | filesystem-first 指令/资源包系统 |
-| 子代理系统 | SubAgent System | parent-controlled bounded delegation |
 | 检查点 | Checkpoint | 安全恢复边界 |
-| 人工确认 | Confirmation / Ask User | 高风险动作和不确定决策的人类控制边界 |
-
-## Provider 与配置边界
-
-Claude Code / Claude / Anthropic 可以出现在历史文档、业界参考和 provider adapter
-说明里，但不是项目主运行时依赖。生产代码中的 SDK lazy import 只能位于
-`agent/provider/` adapter 内；`core.py`、Memory、Skill、SubAgent 和 dogfood runner
-必须通过 provider interface / factory。
-
-配置入口分三层：
-
-- `config.py`：legacy runtime/CLI 兼容常量，不作为 provider dogfood 权威配置。
-- `agent/provider/config.py`：provider/API 配置权威。
-- `agent/local_config.py`：本地 agent customization metadata，默认不读真实 home、
-  不读 `.env`、不展开 env secret。
+| 人工确认 | Confirmation | 高风险动作的人类控制边界 |

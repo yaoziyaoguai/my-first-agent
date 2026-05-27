@@ -1,7 +1,7 @@
 # First Agent Auto-Run Workflow
 
 Status: active
-Date: 2026-05-24
+Date: 2026-05-27
 
 ## A. 目标
 
@@ -17,9 +17,11 @@ First Agent auto-run workflow 的目标是：
 
 本 workflow 必须读取并遵守以下文档：
 
-1. [ENGINEERING_WORKFLOW.md](ENGINEERING_WORKFLOW.md) — 工程流程纪律：SDD → TDD → Implementation → Review → Debug 的迭代 loop、review gate、回退规则、重试上限、升级条件、禁止模式
-2. [Unified Runtime Flow Contract](../real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) — 项目宪法：runtime architecture、branch points、classification rules、capability milestones
-3. [First Agent Subsystem Integration Roadmap](../plans/first-agent-subsystem-integration-roadmap.md) — 子系统/介入点清单、evidence matrix、backlog 分类、自动执行队列
+1. **[PROJECT_STATUS.md](../PROJECT_STATUS.md)** — 当前状态入口：capability 状态、已知 issues、活跃约束、config 规则、推荐下一步。**如果其他文档与 PROJECT_STATUS 冲突，以 PROJECT_STATUS 为准。**
+2. **[PROGRESS_LEDGER.md](../PROGRESS_LEDGER.md)** — 进度账本：按时间倒序的关键 milestones、已修复 bugs、当前 P3 积压
+3. [ENGINEERING_WORKFLOW.md](ENGINEERING_WORKFLOW.md) — 工程流程纪律：SDD → TDD → Implementation → Review → Debug 的迭代 loop、review gate、回退规则、重试上限、升级条件、禁止模式
+4. [Unified Runtime Flow Contract](../real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) — 项目宪法：runtime architecture、branch points、classification rules、capability milestones
+5. [First Agent Subsystem Integration Roadmap](../plans/first-agent-subsystem-integration-roadmap.md) — 子系统/介入点清单、evidence matrix、backlog 分类、自动执行队列
 
 ## C. 两种自动执行 Loop
 
@@ -81,6 +83,35 @@ Architecture Extension Loop 必须遵守以下规则：
 - 不新增 Anchor
 - 不新增无界 branch point
 - 不新增第二条主流程
+
+### C4. Loop 入口点（按任务类型选择起点）
+
+auto_run 不要求每次都从 SPEC 开始走完整 loop。根据任务类型选择合适入口：
+
+| 任务类型 | 起点 | 路径 |
+|---------|------|------|
+| **Bug fix** | evidence/report → failing test | 读 report → 写回归测试(red) → 定位根因 → fix → rerun affected gates → 更新 PROGRESS_LEDGER |
+| **Dogfood** | plan/report → run cases | 读 plan → 执行 cases → 记录 issues → 可选 safe fix → 更新 report/ledger |
+| **Docs cleanup** | inventory → delete/archive/rewrite | 全量扫描 → 分类 → 删除/归档/重写 → source-of-truth tests → commit |
+| **Config fix** | config contract → diagnostics test | 读 contract → 写测试 → fix → smoke → 更新相关 docs |
+| **Architecture change** | design doc → review → tests → impl | 严格走 Normal/Architecture Extension Loop 全路径 |
+| **Test only** | write tests → verify | 补 regression/edge case → 验证 pass → commit |
+
+### C5. 每轮必须落文档
+
+每轮 auto_run 结束后无论成功还是 blocked，必须更新对应文档：
+
+- 发现 bug → 写入 PROGRESS_LEDGER issue table
+- 修复完成 → 更新 PROGRESS_LEDGER milestones
+- blocked/deferred → 写 blocked reason 和下一步建议
+- 状态变化 → 更新 PROJECT_STATUS.md
+- 新 report/plan → 在 PROJECT_STATUS.md 中更新指针
+
+每轮结束必须说明：current status / what changed / what remains / next recommended loop。
+
+### C6. 旧文档冲突处理
+
+如果旧文档与 PROJECT_STATUS.md 冲突，**以 PROJECT_STATUS.md 为准**。如果发现 PROJECT_STATUS.md 已过期，**先更新 PROJECT_STATUS.md**。
 
 ## D. 单个 Capability Deferred 条件（不停止 workflow）
 

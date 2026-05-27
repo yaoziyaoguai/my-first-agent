@@ -10,6 +10,19 @@ from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
 
+# checkpoint schema 版本常量——每次 schema 不兼容变更时递增。
+# v0: 无 schema_version 字段（Loop 6 之前的所有 checkpoint）
+# v1: 新增 meta.schema_version = "checkpoint.v1"，与 v0 结构兼容
+SCHEMA_VERSION = "checkpoint.v1"
+
+# 可安全迁移的已知版本（运行时不拒绝这些版本）
+_KNOWN_VERSIONS: frozenset[str] = frozenset({"checkpoint.v1"})
+
+# v0（缺少 schema_version）在此注册表中映射到 v1 identity migration
+_MIGRATION_REGISTRY: dict[str | None, str] = {
+    None: "checkpoint.v1",  # 缺少版本号的 checkpoint → v1
+}
+
 # checkpoint 中 tool_result 的截断长度（默认 2000 字符）。
 # 可通过 set_checkpoint_truncation_config() 覆盖；测试中可注入自定义值。
 _DEFAULT_MAX_RESULT_LENGTH = 2000
@@ -187,6 +200,7 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None):
 
     return {
         "meta": {
+            "schema_version": SCHEMA_VERSION,
             "session_id": state.memory.session_id,
             "created_at": existing_meta.get("created_at", _now_iso()),
             "interrupted_at": _now_iso(),
@@ -298,6 +312,25 @@ def _filter_to_declared_fields(cls, data: dict) -> dict:
     return {k: v for k, v in data.items() if k in declared}
 
 
+def _resolve_checkpoint_version(checkpoint: dict[str, Any]) -> str | None:
+    """解析 checkpoint 的 schema 版本并应用迁移。
+
+    返回迁移后的目标版本；如果版本未知且无法迁移则返回 None。
+    v0 checkpoint（无 schema_version）通过 registration 迁移到 v1。
+    """
+    meta = checkpoint.get("meta", {}) or {}
+    raw_version = meta.get("schema_version")
+    # 规范化：空字符串视为缺失
+    effective = raw_version if isinstance(raw_version, str) and raw_version.strip() else None
+    if effective in _KNOWN_VERSIONS:
+        return effective
+    # 检查是否可通过迁移到达已知版本
+    migrated = _MIGRATION_REGISTRY.get(effective)
+    if migrated is not None and migrated in _KNOWN_VERSIONS:
+        return migrated
+    return None
+
+
 # 从 checkpoint 恢复到当前 state
 def load_checkpoint_to_state(state, *, path: Path | None = None):
     """
@@ -308,12 +341,22 @@ def load_checkpoint_to_state(state, *, path: Path | None = None):
     InputResolution / tool_traces / runtime config 等）不属于恢复语义；
     任何在 JSON 里出现的非声明字段会在 `_filter_to_declared_fields` 被丢弃。
 
+    Loop 6：新增 schema 版本感知——缺少 version 的旧 checkpoint（v0）可安全
+    迁移到 v1（结构兼容）；未知的 future version 会被拒绝以避免静默数据损坏。
+
     path 是可选的显式路径；不传则使用模块级 CHECKPOINT_PATH。
     """
-    from agent.state import TaskState, MemoryState
+    from agent.state import MemoryState, TaskState
 
     checkpoint = load_checkpoint(path)
     if not checkpoint:
+        return False
+
+    # 版本检查：拒绝未知 future version，允许 v0 → v1 迁移
+    resolved = _resolve_checkpoint_version(checkpoint)
+    if resolved is None:
+        raw = (checkpoint.get("meta", {}) or {}).get("schema_version", "<missing>")
+        print(f"[CHECKPOINT] unknown schema version: {raw} — refusing to load")
         return False
 
     try:

@@ -24,7 +24,7 @@ def tmp_checkpoint_path(tmp_path, monkeypatch):
 
 def test_save_load_roundtrip_preserves_task_fields(tmp_checkpoint_path):
     """改完 task 各字段后 save → load，所有字段应当完整回来。"""
-    from agent.checkpoint import save_checkpoint, load_checkpoint_to_state
+    from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
     from agent.state import create_agent_state
 
     src = create_agent_state(system_prompt="test")
@@ -104,7 +104,7 @@ def test_load_old_checkpoint_without_new_fields_does_not_crash(tmp_checkpoint_pa
 
 def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
     """单条 tool_result 内容超过 MAX_RESULT_LENGTH 应当被截断。"""
-    from agent.checkpoint import save_checkpoint, MAX_RESULT_LENGTH
+    from agent.checkpoint import MAX_RESULT_LENGTH, save_checkpoint
     from agent.state import create_agent_state
 
     huge_result = "x" * (MAX_RESULT_LENGTH * 3)
@@ -239,3 +239,134 @@ def test_load_returns_false_when_no_file(tmp_checkpoint_path):
     ok = load_checkpoint_to_state(dst)
 
     assert ok is False
+
+
+# ===== Loop 6: schema version 测试 =====
+
+
+def test_schema_version_written_to_checkpoint(tmp_checkpoint_path):
+    """保存的 checkpoint meta 中包含 schema_version = "checkpoint.v1"。
+
+    Loop 6 之后所有新保存的 checkpoint 自动携带版本号。
+    """
+    from agent.checkpoint import SCHEMA_VERSION, load_checkpoint, save_checkpoint
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="test")
+    save_checkpoint(state, path=tmp_checkpoint_path)
+
+    data = load_checkpoint(path=tmp_checkpoint_path)
+    assert data is not None
+    assert data["meta"]["schema_version"] == SCHEMA_VERSION
+    assert SCHEMA_VERSION == "checkpoint.v1"
+
+
+def test_v0_checkpoint_without_version_loads_via_migration(tmp_checkpoint_path):
+    """v0 checkpoint（无 schema_version）可通过迁移安全加载。
+
+    这是向后兼容保证：Loop 6 之前保存的 checkpoint 不能被拒绝。
+    """
+    from agent.checkpoint import load_checkpoint_to_state
+    from agent.state import create_agent_state
+
+    # 手工构造一个 v0 checkpoint（无 schema_version）
+    v0_checkpoint = {
+        "meta": {
+            "session_id": "test-session",
+            "created_at": "2026-01-01T00:00:00",
+            "interrupted_at": "2026-01-01T00:00:00",
+        },
+        "task": {"status": "awaiting_user_input", "loop_iterations": 3},
+        "memory": {"working_summary": "test"},
+        "conversation": {"messages": []},
+    }
+    import json
+    tmp_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_checkpoint_path.write_text(json.dumps(v0_checkpoint), encoding="utf-8")
+
+    state = create_agent_state(system_prompt="test")
+    ok = load_checkpoint_to_state(state, path=tmp_checkpoint_path)
+    assert ok is True
+    # 迁移后数据正确恢复
+    assert state.task.status == "awaiting_user_input"
+    assert state.task.loop_iterations == 3
+
+
+def test_unknown_future_version_rejected(tmp_checkpoint_path):
+    """未知的 future schema version 拒绝加载，避免静默数据损坏。
+
+    如果一个 checkpoint 的 schema_version 不在 _KNOWN_VERSIONS 且
+    不在 _MIGRATION_REGISTRY 中，加载应返回 False。
+    """
+    from agent.checkpoint import load_checkpoint_to_state
+    from agent.state import create_agent_state
+
+    future_checkpoint = {
+        "meta": {
+            "schema_version": "checkpoint.v99-unknown",
+            "session_id": "test-session",
+            "created_at": "2026-01-01T00:00:00",
+            "interrupted_at": "2026-01-01T00:00:00",
+        },
+        "task": {"status": "running"},
+        "memory": {},
+        "conversation": {"messages": []},
+    }
+    import json
+    tmp_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_checkpoint_path.write_text(json.dumps(future_checkpoint), encoding="utf-8")
+
+    state = create_agent_state(system_prompt="test")
+    ok = load_checkpoint_to_state(state, path=tmp_checkpoint_path)
+    assert ok is False
+
+
+def test_v0_roundtrip_preserves_all_data(tmp_checkpoint_path):
+    """v0 checkpoint 加载后保存为 v1，数据完整不丢失。
+
+    验证 v0 → v1 迁移后重新保存的 checkpoint 包含 schema_version
+    且原始数据（task/memory/conversation）完全保留。
+    """
+    from agent.checkpoint import (
+        SCHEMA_VERSION,
+        load_checkpoint,
+        load_checkpoint_to_state,
+        save_checkpoint,
+    )
+    from agent.state import create_agent_state
+
+    v0_checkpoint = {
+        "meta": {
+            "session_id": "test-session",
+            "created_at": "2026-01-01T00:00:00",
+            "interrupted_at": "2026-01-01T00:00:00",
+        },
+        "task": {
+            "status": "awaiting_tool_confirmation",
+            "loop_iterations": 5,
+            "tool_call_count": 2,
+            "pending_tool": {"tool": "test_tool", "args": {"x": 1}},
+        },
+        "memory": {"working_summary": "summary text", "long_term_notes": ["note 1"]},
+        "conversation": {"messages": [{"role": "user", "content": "hello"}]},
+    }
+    import json
+    tmp_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_checkpoint_path.write_text(json.dumps(v0_checkpoint), encoding="utf-8")
+
+    # 第一次加载 v0
+    state = create_agent_state(system_prompt="test")
+    ok = load_checkpoint_to_state(state, path=tmp_checkpoint_path)
+    assert ok is True
+    assert state.task.tool_call_count == 2
+    assert state.memory.long_term_notes == ["note 1"]
+
+    # 重新保存（应变为 v1）
+    save_checkpoint(state, path=tmp_checkpoint_path)
+    data = load_checkpoint(path=tmp_checkpoint_path)
+    assert data is not None
+    assert data["meta"]["schema_version"] == SCHEMA_VERSION
+    # 原始数据保留
+    assert data["task"]["status"] == "awaiting_tool_confirmation"
+    assert data["task"]["loop_iterations"] == 5
+    assert data["memory"]["working_summary"] == "summary text"

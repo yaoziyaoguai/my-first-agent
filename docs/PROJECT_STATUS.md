@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1 (Config Safety) 完成，Loop 2 (Log Hygiene) 完成，Loop 3 (Memory E2E) 准备中
+**状态**: remediation — Loop 1-3 (P0) 完成，Loop 4 (Runtime Entry Consolidation) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -96,6 +96,20 @@
 | summary overclaim | step_complete_event 对未执行步骤宣称完成 | 已修复 |
 | model_provider_required | 缺少 model_name 时 crash | 已修复 |
 
+### Memory E2E (Loop 3 — COMPLETED)
+
+| 项目 | 值 |
+|------|---|
+| Commit | `38d757a` |
+| 核心变更 | `refresh_runtime_system_prompt()` 将 MEMORY_RECALL 统一走 dispatcher path，不再直接调 `_memory_runtime.snapshot_for_prompt()` |
+| Memory recall 路径 | 统一 → `route_from_runtime_loop(request)` → dispatcher → handler → `build_system_prompt(memory_section=...)` |
+| fallback | dispatcher 为 None 时保留直接 `snapshot_for_prompt()` 路径（测试/dogfood 兼容） |
+| prompt_builder | `build_system_prompt(memory_section=...)` 支持可选预渲染 memory 段 |
+| turn-end hook | 移除重复 MEMORY_RECALL dispatch，只保留 MEMORY_TURN_END_PROPOSAL + MEMORY_PROPOSE |
+| 测试更新 | `spy.route_calls[0]` → 按 `RuntimeActionType.MEMORY_TURN_END_PROPOSAL` 过滤（MEMORY_RECALL 先于 turn-end hook 触发） |
+| import baseline | `test_architecture_boundaries.py` 添加 `agent.runtime_integration.schema`（local import in `refresh_runtime_system_prompt()`） |
+| 回归基线 | 80 失败全部为已有（缺失过期文档、README 内容不匹配等），非 Loop 3 引入 |
+
 ### Evidence Kind 分类
 
 | 指标 | 值 |
@@ -114,11 +128,11 @@
 |-------|--------|------|
 | ~~config/config.yaml tracked dirty~~ | ~~P0~~ | **RESOLVED** — skip-worktree + guard tests + pre-commit hook (Loop 1 完成) |
 | agent_log.jsonl 773MB 无治理/可能含敏感信息 | ~~P0~~ | **RESOLVED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 21 个 log hygiene tests (Loop 2 完成) |
-| Memory recall 未真正进入 prompt context | P0 | Loop 3 — recall 路径 split 修复 |
+| Memory recall 未真正进入 prompt context | ~~P0~~ | **RESOLVED** — Loop 3 统一 dispatcher 路径完成 (38d757a) |
 | CLI shortcut 构成第二能力平面 | P1 | Loop 4 — 收敛到统一 dispatcher |
 | Turn-end hook 过重（11 种 action） | P1 | Loop 4 — 精简 |
-| Fake/real memory 不共享核心路径 | P1 | Loop 3 |
-| Memory confirm→retain→recall E2E 未验证 | P1 | Loop 3 |
+| Fake/real memory 不共享核心路径 | ~~P1~~ | **RESOLVED** — Loop 3 统一到 dispatcher route_from_runtime_loop |
+| Memory confirm→retain→recall E2E 未验证 | ~~P1~~ | **RESOLVED** — Loop 3 完成 MEMORY_RECALL→prompt 闭环 |
 | Resume 本质是 prompt 拼接 | P1 | Loop 6 |
 | 无 checkpoint schema 版本治理 | P1 | Loop 6 |
 | 大量 L3 标签测试实际是 L2 | P1 | Loop 7 |
@@ -141,7 +155,7 @@
 
 1. ~~**Loop 1: Config Safety & Security Harden (P0)**~~ — **COMPLETED** — skip-worktree + guard tests + pre-commit secret scan
 2. ~~**Loop 2: Log Hygiene & Evidence Governance (P0)**~~ — **COMPLETED** — 50MB 轮转 + 脱敏 + 21 tests
-3. **Loop 3: Memory E2E 验证闭环 (P0)** — recall 路径 split 修复、confirm→retain→recall E2E
+3. ~~**Loop 3: Memory E2E 验证闭环 (P0)**~~ — **COMPLETED** — unified dispatcher path + tests (38d757a)
 4. **Loop 4: Runtime Entry Consolidation (P1)** — CLI shortcuts 收敛、turn-end hook 精简
 5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖
 6. **Loop 6: Checkpoint/Resume 能力补全 (P1)** — schema 版本治理、interrupt→resume E2E

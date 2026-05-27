@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-05-27
-**状态**: remediation — Loop 1-3 (P0) 完成，Loop 4 (Runtime Entry Consolidation) 进行中
+**状态**: remediation — Loop 1-4 (P0+P1) 完成，Loop 6 (Checkpoint/Resume) 进行中
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -129,8 +129,8 @@
 | ~~config/config.yaml tracked dirty~~ | ~~P0~~ | **RESOLVED** — skip-worktree + guard tests + pre-commit hook (Loop 1 完成) |
 | agent_log.jsonl 773MB 无治理/可能含敏感信息 | ~~P0~~ | **RESOLVED** — 50MB 自动轮转 + API key/Bearer 脱敏 + 21 个 log hygiene tests (Loop 2 完成) |
 | Memory recall 未真正进入 prompt context | ~~P0~~ | **RESOLVED** — Loop 3 统一 dispatcher 路径完成 (38d757a) |
-| CLI shortcut 构成第二能力平面 | P1 | Loop 4 — 收敛到统一 dispatcher |
-| Turn-end hook 过重（11 种 action） | P1 | Loop 4 — 精简 |
+| ~~CLI shortcut 构成第二能力平面~~ | ~~P1~~ | **RESOLVED** — Loop 4 CLI READ_ONLY 命令走统一 dispatcher (c94fc18) |
+| ~~Turn-end hook 过重（11 种 action）~~ | ~~P1~~ | **RESOLVED** — Loop 4 提取 _dispatch_tool_pipeline() helper (c94fc18) |
 | Fake/real memory 不共享核心路径 | ~~P1~~ | **RESOLVED** — Loop 3 统一到 dispatcher route_from_runtime_loop |
 | Memory confirm→retain→recall E2E 未验证 | ~~P1~~ | **RESOLVED** — Loop 3 完成 MEMORY_RECALL→prompt 闭环 |
 | Resume 本质是 prompt 拼接 | P1 | Loop 6 |
@@ -156,9 +156,9 @@
 1. ~~**Loop 1: Config Safety & Security Harden (P0)**~~ — **COMPLETED** — skip-worktree + guard tests + pre-commit secret scan
 2. ~~**Loop 2: Log Hygiene & Evidence Governance (P0)**~~ — **COMPLETED** — 50MB 轮转 + 脱敏 + 21 tests
 3. ~~**Loop 3: Memory E2E 验证闭环 (P0)**~~ — **COMPLETED** — unified dispatcher path + tests (38d757a)
-4. **Loop 4: Runtime Entry Consolidation (P1)** — CLI shortcuts 收敛、turn-end hook 精简
-5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖
-6. **Loop 6: Checkpoint/Resume 能力补全 (P1)** — schema 版本治理、interrupt→resume E2E
+4. ~~**Loop 4: Runtime Entry Consolidation (P1)**~~ — **COMPLETED** — CLI READ_ONLY 命令走统一 dispatcher，turn-end hook 精简 (c94fc18)
+5. **Loop 5: Interactive Harness 扩展 (P1)** — streaming/interrupt/complex case 覆盖（pending）
+6. **Loop 6: Checkpoint/Resume 能力补全 (P1)** — schema 版本治理、interrupt→resume E2E（**进行中**）
 
 **禁止现在开工的项目**：
 - Provider identity "我是 Claude"

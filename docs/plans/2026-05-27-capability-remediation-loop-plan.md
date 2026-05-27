@@ -196,7 +196,7 @@
 ---
 
 ### Loop 4: Runtime Entry Consolidation
-**状态**：pending
+**状态**：completed
 **优先级**：P1
 **依赖**：Loop 3 完成后再做（依赖 recall 路径修复）
 
@@ -233,6 +233,17 @@
 
 **风险**：高 — 涉及 core.py 核心路径
 **预估工作量**：大
+
+**完成记录（2026-05-27）**：
+- `agent/runtime_integration/schema.py`：新增 CLI_SHOW_MEMORIES / CLI_SHOW_SUBAGENTS RuntimeActionType + evidence kind 映射
+- `agent/runtime_integration/cli_handlers.py`（新建）：CliShowMemoriesHandler / CliShowSubagentsHandler（constructor injection）
+- `agent/runtime_integration/phase1_hook.py`：build_phase1_dispatcher() 接受 memory_runtime/subagent_registry 参数并注册 CLI handler
+- `agent/core.py`：提前构建 dispatcher，show memories / show subagents CLI 命令走 dispatcher.route() 统一路径
+- `agent/loop.py`：提取 `_dispatch_tool_pipeline()` helper（TOOL_GATE→TOOL_REQUEST→TOOL_INVOKE→TOOL_RESULT），精简 turn-end hook
+- `agent/runtime_integration/evidence.py`：注册 cli.show_memories/MemoryRuntime 和 cli.show_subagents/SubAgentRegistry catalog descriptors + adapters
+- `tests/runtime_integration/test_runtime_action_contract.py`：新增 SubAgentRegistry overclaim 测试 + 加入 _OVERCLAIM_COVERED_TARGETS
+- MUTATING/DELEGATING CLI commands（forget memory, delegate to subagent, NL delegation）延后到 confirmation pipeline 就绪
+- Commit: c94fc18
 
 ---
 

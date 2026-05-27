@@ -608,3 +608,66 @@ def test_auto_run_forbids_blind_skill_selection():
     """auto-run.md 的 Forbidden Patterns 必须禁止盲选技能。"""
     text = _read_auto_run()
     assert "不盲选技能" in text or "Skill Router Decision Table" in text
+
+
+# =========================================================================
+# 15. auto-run.md Recursive Backtrack Policy 守护（/plan-eng-review audit）
+# =========================================================================
+
+
+def test_auto_run_recursive_backtrack_policy_exists():
+    """auto-run.md 必须包含 Recursive Backtrack Policy 节。
+
+    review gate 失败不是停止条件——必须按证据回退到正确的上游阶段重新 loop。
+    ENGINEERING_WORKFLOW.md Section 4 已定义回退规则，auto-run.md 必须引用并执行。
+    """
+    text = _read_auto_run()
+    assert "Recursive Backtrack Policy" in text
+    assert "回退" in text
+    assert "ENGINEERING_WORKFLOW.md" in text
+
+
+def test_auto_run_review_failure_routing_table_exists():
+    """auto-run.md 必须包含 Review Failure Routing Table。
+
+    当 review gate 发现具体 failure pattern（expected_events 未检查、no-crash PASS、
+    memory path split、PROJECT_STATUS false resolved 等）时，必须按表回溯到对应阶段。
+    """
+    text = _read_auto_run()
+    assert "Review Failure Routing Table" in text
+    assert "expected_events" in text or "no-crash" in text
+    assert "回退目标" in text
+
+
+def test_auto_run_partial_fix_marking_rule_exists():
+    """auto-run.md 必须包含 Claim-to-Evidence Gate 且定义 partial fix 标记规则。
+
+    partial fix 只能标记 PARTIAL，不得标记 RESOLVED。证据不足时不得 claim 完成。
+    """
+    text = _read_auto_run()
+    assert "Claim-to-Evidence Gate" in text
+    assert "PARTIAL" in text
+    assert "RESOLVED" in text
+
+
+def test_auto_run_status_overclaim_correction_rule_exists():
+    """auto-run.md 必须禁止 PROJECT_STATUS false resolved（证据不足仍标 RESOLVED）。
+
+    Post-Loop Self-Review 发现 PROJECT_STATUS 更新包含 false resolved 时，
+    必须回退到 status correction。
+    """
+    text = _read_auto_run()
+    assert "false resolved" in text
+    assert "status correction" in text
+
+
+def test_auto_run_forbids_review_failure_as_completed():
+    """auto-run.md 必须禁止 review 失败仍标记 COMPLETED。
+
+    禁止的 completion 模式必须包含：review 失败仍标记 COMPLETED、
+    partial fix 升级为 global resolved、guard test pass 冒充 loop pass。
+    """
+    text = _read_auto_run()
+    assert "review 失败仍标记 COMPLETED" in text or "review 失败" in text
+    assert "partial fix" in text.lower() or "PARTIAL" in text
+    assert "guard test pass" in text.lower() or "冒充 loop pass" in text

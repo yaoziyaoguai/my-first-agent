@@ -325,6 +325,99 @@ First Agent 工程技能调度器。基于当前项目状态和任务类型，�
 
 ---
 
+## Recursive Backtrack Policy
+
+**核心原则：review gate 失败不是停止条件，必须按证据回退到正确的上游阶段重新 loop。**
+
+回退不是惩罚，是正常的工程纠偏行为。不回退才是异常。详细回退规则见 `docs/dev/ENGINEERING_WORKFLOW.md` Section 4（按证据回退规则）。
+
+### 回退触发条件
+
+Post-Loop Self-Review 中以下任一情况触发回退，**不得标记为 COMPLETED**：
+
+- [ ] 本轮 target 未达成 → 回退到 Implementation 或 Debug/Remediation
+- [ ] review 发现 overclaim（证据等级不匹配声称）→ 回退到 evidence taxonomy / guard tests
+- [ ] review 发现 scope creep → 回退到 SPEC/Plan 或 Implementation（移除越界改动）
+- [ ] review 发现 test 的断言与架构契约矛盾 → 回退到 TDD/Test Plan 或更新 stale test
+- [ ] review 发现 PROJECT_STATUS 更新包含 false resolved → 回退到 status correction
+- [ ] gate 失败且根因在上游 → 回退到根因所在阶段
+
+### 回退路由
+
+回退目标按 `docs/dev/ENGINEERING_WORKFLOW.md` Section 4（按证据回退规则）：
+- 根因在代码逻辑 → 回 Implementation
+- 根因在测试设计 → 回 TDD / Test Plan
+- 根因在规格/plan → 回 SDD / SPEC
+- 根因在 evidence/narrative → 回文档和分类契约
+- 根因在 branch point 定义 → 回 Unified Runtime Flow Contract
+
+### 回退上限与升级
+
+同一问题在同一阶段来回修最多 2 次。第 3 次尝试前必须停止并升级（详见 ENGINEERING_WORKFLOW.md Section 5）。升级时必须说明已尝试路径、失败证据、当前判断、需要用户决策的问题。
+
+### 禁止的 completion 模式
+
+以下模式严格禁止——出现即视为 review gate FAIL，必须回退：
+
+- **review 失败仍标记 COMPLETED** — review 发现问题但 Post-Loop Self-Review 仍写 COMPLETED
+- **partial fix 升级为 global resolved** — 只修了部分子问题却宣称整类 P0/P1 已解决
+- **guard test pass 冒充 loop pass** — 只有 guard tests 通过但 review gate 发现 overclaim 仍标完成
+- **status 更新包含 false resolved** — PROJECT_STATUS 中标记 RESOLVED 但实际证据不足
+- **证据链不闭合就 claim 完成** — 声称修复但无法展示 test pass / gate exit code / diff 证据
+
+---
+
+## Claim-to-Evidence Gate
+
+每个 "RESOLVED" 声称必须绑定原始审计 finding + 具体证据。证据不足时只能标记 PARTIAL，不得标记 RESOLVED。
+
+### 判定规则
+
+| 情况 | 标记 | 说明 |
+|------|------|------|
+| 所有子问题已修 + 所有 gate pass + review 通过 | RESOLVED | 完整修复 |
+| 修了部分子问题但核心问题未解决 | PARTIAL | 注明哪些已修、哪些未修 |
+| 只修了分类/标签但架构问题仍在 | PARTIAL | 注明"分类修正，架构问题未解决" |
+| guard test 通过但无业务路径验证 | PARTIAL | 注明"L2 守护通过，L3 业务路径未验证" |
+| 无证据仅声称 | 不得标记 | 必须先补齐证据 |
+
+### PROJECT_STATUS 更新契约
+
+更新 PROJECT_STATUS 的 RESOLVED 状态前必须确认：
+1. 原始 audit finding ID 绑定（如 `red-team audit → Evidence overclaim`）
+2. 具体修改的文件和行数
+3. focused gate 的 exact command 和 exit code
+4. review 确认无 overclaim
+
+缺少以上任一项 → 只能写 `PARTIAL`，不得写 `RESOLVED`。
+
+---
+
+## Review Failure Routing Table
+
+当 review gate 发现以下具体 failure pattern 时，按表回溯到对应阶段：
+
+| Failure Pattern | 示例 | 回退目标 | 说明 |
+|----------------|------|---------|------|
+| expected_events 未检查 | dogfood evaluator 不检查 expected_events 字段 | dogfood harness evaluator | 补 evaluator 断言逻辑 |
+| no-crash 即可 PASS | 测试只断言不 crash，不验证业务语义 | case classification / test design | 补正向断言和负例 |
+| memory path split | fake/real memory 走不同写入路径 | memory integration tests | 统一到 dispatcher path |
+| PROJECT_STATUS false resolved | 标记 RESOLVED 但证据链不闭合 | status correction + evidence补齐 | 回退到对应修复阶段 |
+| direct handler 冒充 E2E | direct dispatcher.route() 调用标为 L3 | evidence taxonomy guard tests | 降级标签或补 dispatcher path |
+| fake/local 冒充 real | FakeProvider smoke 标为生产能力 | report reclassification | 降级 evidence level |
+| 测试断言与架构契约矛盾 | test 断言 direct store write 但架构要求 pending queue → dispatch | TDD / Test Plan → 更新 stale test | 查架构文档确认契约 |
+| gate 通过但 scope 外问题被忽略 | ruff pass 但未跑 affected test | 回退到遗漏的 gate | 补跑遗漏 gate |
+| status 声称覆盖实际未覆盖 | 声称 P0/P1 全部解决但仅修了分类 | status correction | 重写 status 为准确状态 |
+| claim 无原始 finding 绑定 | RESOLVED 但不引用审计 issue ID | claim-to-evidence gate | 补齐 finding 引用 |
+
+每次 review 发现以上 pattern 时，必须：
+1. 查表确定回退目标阶段
+2. 按 ENGINEERING_WORKFLOW.md Section 4 执行回退
+3. 记录回退（commit message 或 PROGRESS_LEDGER）
+4. 修正后重新过 review gate
+
+---
+
 ## Forbidden Patterns
 
 - 不恢复 provider profiles 为推荐路径

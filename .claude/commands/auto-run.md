@@ -158,6 +158,12 @@ First Agent 工程技能调度器。基于当前项目状态和任务类型，�
 
 AutoRun 每轮根据当前所处的**工程阶段**（而非仅任务类型）选择技能。同一任务类型在不同阶段可能使用不同技能。
 
+> **AutoRun 与 Engineering Workflow 的边界**：
+> - `docs/dev/ENGINEERING_WORKFLOW.md` 是项目总工程流程 / 工程宪法（SDD → TDD → Implementation → Review 纪律），定义每个阶段该做什么。
+> - `docs/dev/AUTO_RUN_WORKFLOW.md` 是 AutoRun 如何执行该工程流程的自动化操作说明（loop 类型、入口点、deferred 条件、stop condition）。
+> - 本文件（`.claude/commands/auto-run.md`）是命令入口和执行提醒，不是第三套工程流程。
+> - 执行 loop 时以 ENGINEERING_WORKFLOW 为纪律依据，以 AUTO_RUN_WORKFLOW 为操作手册。
+
 | Stage | Trigger | Primary Skill | Secondary Skill | Expected Action | Failure Route |
 |-------|---------|--------------|----------------|-----------------|---------------|
 | **Audit / Red-team** | 全局能力评分、架构审计 | G-Stack | plan-eng-review | 系统分析 → severity table → recommended loops | 证据分类不准确 → evidence classification / remediation plan |
@@ -278,6 +284,17 @@ AutoRun 每轮根据当前所处的**工程阶段**（而非仅任务类型）�
 
 如果确实无需更新，final output 必须解释原因。
 
+### Persistent Engineering Evidence（强制）
+
+每个 capability loop 必须在仓库内留下可持久化工程记录，至少覆盖：
+- SDD / design intent
+- TDD / test intent
+- implementation notes / decision notes
+- post-loop review
+
+记录形式灵活（`docs/design/`、PROJECT_STATUS、PROGRESS_LEDGER、commit message body、已有 spec/plan/notes），**终端 final output 不能替代**。
+小 loop 可将以上四项合并记录。如果某项不需要，必须在记录中说明原因。
+
 ---
 
 ## Hard Stops
@@ -337,6 +354,7 @@ AutoRun 每轮根据当前所处的**工程阶段**（而非仅任务类型）�
 - [ ] PROJECT_STATUS / PROGRESS_LEDGER / remediation plan 是否需要更新？
 - [ ] 下一个 loop 是什么？是否被前置条件阻塞？
 - [ ] 是否需要用户决策？（非技术选择、scope 外、超越已有授权）
+- [ ] 是否在仓库内留下了 persistent engineering evidence？如果没有，原因是什么？terminal final output 是否被错误地当成了 review artifact？
 
 ### Next-Loop Selection
 
@@ -505,12 +523,15 @@ PROJECT_STATUS 中 P0/P1 降级或标记 RESOLVED 必须通过以下 6 道门禁
 - **不把 admin completed 冒充 capability completed** — docs/guard 是管理层证据，不是用户能力
 - **不把 commit/push 当停止条件** — commit/push 后必须自动继续 next loop
 - **不把"给下一步方向"当完成** — 输出 next recommended loop 后必须判断并继续执行
+- **不把终端 final output 当仓库内 review artifact** — 必须在仓库内留下持久工程记录
 
 ---
 
 ## Final Output
 
 **Final report 是进度日志，不是停止信号。** 非 hard stop 时输出简短进度行即可，hard stop 时才输出完整报告。
+
+**终端 final output 不能替代仓库内 persistent engineering evidence。** 终端输出是瞬时通知，持久记录是工程资产。
 
 ### 非 hard stop（loop 完成，自动继续）
 

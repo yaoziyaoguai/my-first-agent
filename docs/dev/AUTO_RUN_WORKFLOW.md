@@ -109,6 +109,19 @@ auto_run 不要求每次都从 SPEC 开始走完整 loop。根据任务类型选
 
 每轮结束必须说明：current status / what changed / what remains / next recommended loop。
 
+#### C5.1 每轮 persistent engineering evidence（强制）
+
+每个 capability loop 必须在仓库内留下可持久化的工程记录，覆盖以下至少一项（根据 loop 大小可合并，不要求四份独立文档）：
+
+- **SDD / design intent** — 设计意图和架构决策
+- **TDD / test intent** — 测试计划和覆盖范围
+- **implementation notes / decision notes** — 实际改动和决策记录
+- **post-loop review** — 自检结论
+
+记录落点灵活（`docs/design/`、PROJECT_STATUS、PROGRESS_LEDGER、commit message body、已有 spec/plan/notes 均可），但**终端 final output 不能替代仓库内持久记录**。
+
+如果某类文档确实不需要（如小型 evidence classification 修复无独立 SDD），必须在持久记录中写明原因。沉默跳过视为未完成。
+
 ### C6. 旧文档冲突处理
 
 如果旧文档与 PROJECT_STATUS.md 冲突，**以 PROJECT_STATUS.md 为准**。如果发现 PROJECT_STATUS.md 已过期，**先更新 PROJECT_STATUS.md**。

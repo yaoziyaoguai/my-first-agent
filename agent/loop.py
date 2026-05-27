@@ -18,6 +18,7 @@ classification 从 harness_runtime_e2e 升级到 real_core_loop_runtime_e2e 的
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -96,6 +97,109 @@ def _try_trace_event_emission(
     except Exception:
         # Trace 发射异常不阻塞 loop——纯观测 side-effect
         pass
+
+
+def _dispatch_tool_pipeline(
+    dispatcher: Any,
+    tool_gate_tool_name: str,
+    provider_kind: str,
+    provider_external_call: bool,
+) -> Any:
+    """Tool Pipeline 四阶段 dispatch（Loop 4 提取自 turn-end hook 以精简结构）。
+
+    TOOL_GATE → TOOL_REQUEST → TOOL_INVOKE → TOOL_RESULT。
+    各阶段独立 try/except，一个阶段失败不阻断其他阶段。
+    返回 invoke_result（供 trace event emission 使用），可能为 None。
+    """
+    from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+
+    # TOOL_GATE
+    gate_result = None
+    with contextlib.suppress(Exception):
+        gate_result = route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "tool_name": tool_gate_tool_name,
+                "tool_args": {},
+                "requested_capability": "local_action",
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        ))
+
+    # TOOL_REQUEST
+    with contextlib.suppress(Exception):
+        route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_REQUEST,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "core_loop_invoked": True,
+                "core_entrypoint": "core.chat",
+                "runtime_hook_name": "loop.turn_end",
+                "provider_kind": provider_kind,
+                "provider_external_call": provider_external_call,
+                "external_side_effects": False,
+            },
+        ))
+
+    # TOOL_INVOKE（仅在 gate allowed 时）
+    invoke_result = None
+    if gate_result is not None:
+        gate_payload = getattr(gate_result, "payload", {}) or {}
+        gate_status = getattr(gate_result, "status", "")
+        if gate_status == "success" and gate_payload.get("gate_disposition") == "allowed":
+            with contextlib.suppress(Exception):
+                invoke_result = route(RuntimeActionRequest(
+                    action_type=RuntimeActionType.TOOL_INVOKE,
+                    source="core_loop",
+                    parent_trace_id="",
+                    payload={
+                        "tool_name": tool_gate_tool_name,
+                        "tool_input": {},
+                        "core_loop_invoked": True,
+                        "core_entrypoint": "core.chat",
+                        "runtime_hook_name": "loop.turn_end",
+                        "provider_kind": provider_kind,
+                        "provider_external_call": provider_external_call,
+                        "external_side_effects": False,
+                    },
+                ))
+
+    # TOOL_RESULT
+    if invoke_result is not None:
+        with contextlib.suppress(Exception):
+            invoke_payload = getattr(invoke_result, "payload", {}) or {}
+            route(RuntimeActionRequest(
+                action_type=RuntimeActionType.TOOL_RESULT,
+                source="core_loop",
+                parent_trace_id="",
+                payload={
+                    "tool_name": tool_gate_tool_name,
+                    "tool_output": invoke_payload.get("tool_output", ""),
+                    "execution_status": (
+                        invoke_payload.get("execution_status", "success")
+                        if getattr(invoke_result, "status", "") == "success"
+                        else "error"
+                    ),
+                    "core_loop_invoked": True,
+                    "core_entrypoint": "core.chat",
+                    "runtime_hook_name": "loop.turn_end",
+                    "provider_kind": provider_kind,
+                    "provider_external_call": provider_external_call,
+                    "external_side_effects": False,
+                },
+            ))
+
+    return invoke_result
 
 
 def _try_phase1_turn_end_runtime_action(
@@ -242,121 +346,14 @@ def _try_phase1_turn_end_runtime_action(
         # MEMORY_PROPOSE 整体失败不阻塞 loop 也不阻塞 TOOL_GATE
         pass
 
-    # TOOL_GATE action（独立 try/except——失败不阻断 MEMORY）
-    # 捕获 gate_result 以判断是否允许调用工具（gate_disposition）
-    gate_result = None
-    try:
-        tool_gate_request = RuntimeActionRequest(
-            action_type=RuntimeActionType.TOOL_GATE,
-            source="core_loop",
-            parent_trace_id="",
-            payload={
-                "tool_name": tool_gate_tool_name,
-                # 显式传 tool_args——_safe_noop/_confirmable_noop 是 zero-arg safe tool，
-                # 但避免 needs_tool_confirmation() 中的隐式 fallback 链。
-                # 未来任何带参数工具都必须传真实 tool_args，不得省略。
-                "tool_args": {},
-                "requested_capability": "local_action",
-                "core_loop_invoked": True,
-                "core_entrypoint": "core.chat",
-                "runtime_hook_name": "loop.turn_end",
-                "provider_kind": provider_kind,
-                "provider_external_call": provider_external_call,
-                "external_side_effects": False,
-            },
-        )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-        gate_result = route(tool_gate_request)
-    except Exception:
-        # TOOL_GATE action 失败不阻塞 loop 也不阻塞 MEMORY
-        pass
-
-    # TOOL_REQUEST action（独立 try/except——失败不阻断 TOOL_INVOKE）
-    try:
-        tool_request_dispatch = RuntimeActionRequest(
-            action_type=RuntimeActionType.TOOL_REQUEST,
-            source="core_loop",
-            parent_trace_id="",
-            payload={
-                "core_loop_invoked": True,
-                "core_entrypoint": "core.chat",
-                "runtime_hook_name": "loop.turn_end",
-                "provider_kind": provider_kind,
-                "provider_external_call": provider_external_call,
-                "external_side_effects": False,
-            },
-        )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-        route(tool_request_dispatch)
-    except Exception:
-        pass
-
-    # TOOL_INVOKE action（独立 try/except——gate allowed 后调用工具）
-    # ToolGate / ToolInvoke / ToolResult 是 Tool lifecycle 的三个 pipeline stages，
-    # 不是三个独立子系统。它们共享同一个 ToolRegistry、同一个 dispatcher、
-    # 同一个 unified runtime flow 入口。
-    invoke_result = None
-    if gate_result is not None:
-        gate_payload = getattr(gate_result, "payload", {}) or {}
-        gate_status = getattr(gate_result, "status", "")
-        if gate_status == "success" and gate_payload.get("gate_disposition") == "allowed":
-            try:
-                invoke_request = RuntimeActionRequest(
-                    action_type=RuntimeActionType.TOOL_INVOKE,
-                    source="core_loop",
-                    parent_trace_id="",
-                    payload={
-                        "tool_name": tool_gate_tool_name,
-                        "tool_input": {},
-                        "core_loop_invoked": True,
-                        "core_entrypoint": "core.chat",
-                        "runtime_hook_name": "loop.turn_end",
-                        "provider_kind": provider_kind,
-                        "provider_external_call": provider_external_call,
-                        "external_side_effects": False,
-                    },
-                )
-                route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-                invoke_result = route(invoke_request)
-            except Exception:
-                # TOOL_INVOKE 失败不阻塞 loop 也不阻断 TOOL_RESULT
-                pass
-
-    # TOOL_RESULT action（独立 try/except——即使 TOOL_INVOKE 抛异常也尝试构造）
-    # 仅当 invoke_result 非 None 时构造（invoke 异常时有 invoke_result=None，
-    # 无法提取 tool_output/execution_status，跳过 TOOL_RESULT）。
-    # execution_status 现在根据 invoke_result.status 判定：
-    #   - invoke_result.status == "success" → 使用 payload 中的 execution_status
-    #   - invoke_result.status != "success" → execution_status = "error"
-    # 此前版本无条件默认 "success"，现已修复（P2 focused remediation）。
-    if invoke_result is not None:
-        try:
-            invoke_payload = getattr(invoke_result, "payload", {}) or {}
-            result_request = RuntimeActionRequest(
-                action_type=RuntimeActionType.TOOL_RESULT,
-                source="core_loop",
-                parent_trace_id="",
-                payload={
-                    "tool_name": tool_gate_tool_name,
-                    "tool_output": invoke_payload.get("tool_output", ""),
-                    "execution_status": (
-                    invoke_payload.get("execution_status", "success")
-                    if getattr(invoke_result, "status", "") == "success"
-                    else "error"
-                ),
-                    "core_loop_invoked": True,
-                    "core_entrypoint": "core.chat",
-                    "runtime_hook_name": "loop.turn_end",
-                    "provider_kind": provider_kind,
-                    "provider_external_call": provider_external_call,
-                    "external_side_effects": False,
-                },
-            )
-            route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
-            route(result_request)
-        except Exception:
-            # TOOL_RESULT 失败不阻塞 loop
-            pass
+    # TOOL_GATE → TOOL_REQUEST → TOOL_INVOKE → TOOL_RESULT pipeline
+    # Loop 4: 提取为独立 helper _dispatch_tool_pipeline，与 MEMORY/CONSOLE/SKILL 同级
+    invoke_result = _dispatch_tool_pipeline(
+        dispatcher=dispatcher,
+        tool_gate_tool_name=tool_gate_tool_name,
+        provider_kind=provider_kind,
+        provider_external_call=provider_external_call,
+    )
 
     # CHECKPOINT_SAFE_SUMMARY action（独立 try/except——失败不阻断 MEMORY 和 TOOL_GATE）
     # 中文学习边界：Checkpoint safe summary 是 turn-end hook 上的 branch behavior，

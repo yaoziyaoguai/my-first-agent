@@ -15,6 +15,7 @@ dispatcher/memory_hook/memory_retain/tool_gate。
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
@@ -30,12 +31,12 @@ from agent.runtime_integration.streaming_provider import (
     StreamingProviderCallHandler,
 )
 from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
-from agent.skill_system.loader import SkillLoader
-from agent.skill_system.registry import SkillRegistry
-from agent.subagent_system.registry import SubAgentRegistry
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
+from agent.skill_system.loader import SkillLoader
+from agent.skill_system.registry import SkillRegistry
+from agent.subagent_system.registry import SubAgentRegistry
 
 
 def build_skill_registry() -> SkillRegistry:
@@ -51,13 +52,18 @@ def build_skill_registry() -> SkillRegistry:
     return SkillRegistry(roots=[Path("skills")])
 
 
-def build_phase1_dispatcher() -> RuntimeActionDispatcher:
+def build_phase1_dispatcher(
+    *,
+    memory_runtime: Any = None,
+    subagent_registry: Any = None,
+) -> RuntimeActionDispatcher:
     """构建 Phase 1 RuntimeActionDispatcher。
 
     注册 memory turn-end proposal + retain + recall + consolidate + tool pipeline +
     checkpoint + skill select + subagent delegate + streaming provider call +
     streaming event handler（共 11 个 handler）。
-    Streaming 已接入（STREAMING_PROVIDER_CALL + STREAMING_EVENT），SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
+    Streaming 已接入（STREAMING_PROVIDER_CALL + STREAMING_EVENT），
+    SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only，proposal generation）
@@ -132,4 +138,18 @@ def build_phase1_dispatcher() -> RuntimeActionDispatcher:
         RuntimeActionType.STREAMING_EVENT,
         StreamingEventHandler(),
     )
+    # Loop 4: CLI meta-command handlers（READ_ONLY — show memories / show subagents）
+    # MUTATING/DELEGATING commands (forget/delegate) 待 confirmation pipeline 就绪后迁入。
+    if memory_runtime is not None:
+        from agent.runtime_integration.cli_handlers import CliShowMemoriesHandler
+        registry.register(
+            RuntimeActionType.CLI_SHOW_MEMORIES,
+            CliShowMemoriesHandler(memory_runtime=memory_runtime),
+        )
+    if subagent_registry is not None:
+        from agent.runtime_integration.cli_handlers import CliShowSubagentsHandler
+        registry.register(
+            RuntimeActionType.CLI_SHOW_SUBAGENTS,
+            CliShowSubagentsHandler(subagent_registry=subagent_registry),
+        )
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

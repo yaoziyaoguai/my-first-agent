@@ -849,6 +849,46 @@ def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_memory_runti
     _assert_not_runtime_e2e(result.evidence)
 
 
+# ===== SubAgentRegistry overclaim prevention =====
+
+
+def test_forged_target_label_as_subagent_registry_is_not_runtime_e2e() -> None:
+    """任意 callable 标为 SubAgentRegistry 不能获得 runtime_e2e。
+
+    SubAgentRegistry 是 cli.show_subagents handler 查询可见 subagent 列表的注册表。
+    """
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.CLI_SHOW_SUBAGENTS,
+        _ForgedTargetLabelHandler("SubAgentRegistry"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.CLI_SHOW_SUBAGENTS))
+
+    assert result.evidence["target_module"] == "SubAgentRegistry"
+    assert result.evidence["evidence_level"] != "runtime_e2e"
+    _assert_not_runtime_e2e(result.evidence)
+
+
+def test_catalog_allowed_handler_cannot_label_arbitrary_callable_as_subagent_registry() -> None:
+    """catalog 允许 handler/label 但 arbitrary lambda 不能获得 trusted SubAgentRegistry proof。"""
+    registry = ActionHandlerRegistry()
+    registry.register(
+        RuntimeActionType.CLI_SHOW_SUBAGENTS,
+        _CatalogAllowedForgedCallableHandler("SubAgentRegistry"),
+    )
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request(RuntimeActionType.CLI_SHOW_SUBAGENTS))
+
+    assert result.evidence["target_module"] == "SubAgentRegistry"
+    assert result.evidence["target_catalog_allowed"] is False
+    assert result.evidence["target_identity_valid"] is False
+    assert result.evidence["target_module_proof"]["target_identity_valid"] is False
+    _assert_not_runtime_e2e(result.evidence)
+
+
 # ===== MemoryConsolidation overclaim prevention =====
 
 
@@ -900,6 +940,7 @@ _OVERCLAIM_COVERED_TARGETS: frozenset[str] = frozenset({
     "DogfoodFakeToolOverlay",
     "CheckpointSafeSummary",
     "SubAgentExecutor",
+    "SubAgentRegistry",
     "ToolRuntime",
     "StreamingProtocol",
     "MemoryPolicy",

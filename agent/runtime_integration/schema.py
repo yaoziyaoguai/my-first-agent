@@ -34,6 +34,11 @@ class RuntimeActionType(StrEnum):
     # handler 已注册（phase1_hook.py），catalog entry 指向 validate_stream_event。
     STREAMING_EVENT = "streaming.event"
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
+    # CLI meta-command action types（Loop 4: Runtime Entry Consolidation）
+    # READ_ONLY CLI commands 走 dispatcher 获得 evidence chain，不再绕过统一入口。
+    # MUTATING/DELEGATING commands (forget/delegate) 需要 confirmation pipeline 就绪后再迁入。
+    CLI_SHOW_MEMORIES = "cli.show_memories"
+    CLI_SHOW_SUBAGENTS = "cli.show_subagents"
 
 
 # ── Evidence Kind Classification ──────────────────────────────────────────────
@@ -63,6 +68,8 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.STREAMING_PROVIDER_CALL: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.STREAMING_EVENT: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
 }
 
 

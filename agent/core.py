@@ -471,6 +471,18 @@ def chat(
     if not user_input or not user_input.strip():
         return ""
 
+    # Loop 4: 提前构建 dispatcher，使 CLI READ_ONLY 命令可走统一 dispatcher 路径。
+    # 需要 SubAgentRegistry（show subagents）和 _memory_runtime（show memories）。
+    from pathlib import Path as _Path
+
+    from agent.runtime_integration.phase1_hook import build_phase1_dispatcher as _build_p1
+    from agent.subagent_system.registry import SubAgentRegistry as _SubAgentRegistry
+
+    _p1_dispatcher = _build_p1(
+        memory_runtime=_memory_runtime,
+        subagent_registry=_SubAgentRegistry(roots=[_Path("agent/subagent_system/descriptors")]),
+    )
+
     # ── CLI meta-command 边界说明 ──────────────────────────────────────────
     # 中文学习边界：CLI meta-command 的检测（detect）和渲染（render）已提取到
     # agent/cli_commands.py。core.chat() 仍然是唯一统一入口，但命令解析和渲染
@@ -497,8 +509,17 @@ def chat(
     # 留在 core.chat 内，不经过 command router。渲染由 cli_commands 的 render 函数完成。
     #
     # CLI-ONLY (CommandCategory.READ_ONLY): show memories
+    # Loop 4: 走统一 dispatcher 路径获取 records（替代直接调用 _memory_runtime）
     if _looks_like_show_memories(user_input):
-        records = _memory_runtime.list_records()
+        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+        _req = RuntimeActionRequest(
+            action_type=RuntimeActionType.CLI_SHOW_MEMORIES,
+            source="core.chat",
+            parent_trace_id="",
+            payload={"user_input": user_input},
+        )
+        _result = _p1_dispatcher.route(_req)
+        records = _result.payload.get("records", ()) if _result else ()
         _safe_emit_runtime_event(
             on_runtime_event,
             memory_list_event(records),
@@ -605,17 +626,17 @@ def chat(
     # CLI-ONLY (CommandCategory.READ_ONLY): show subagents
     # 注意：descriptors 来自 agent/subagent_system/descriptors/——显式 DEMO-ONLY。
     # 产品路径不应依赖 test fixtures（RT-07）。
+    # Loop 4: 走统一 dispatcher 路径获取 descriptors（替代直接调用 SubAgentRegistry）
     if _looks_like_show_subagents(user_input):
-        from pathlib import Path
-
-        from agent.subagent_system.registry import SubAgentRegistry
-
-        try:
-            registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
-            descriptors = registry.list_visible()
-        except Exception:
-            descriptors = ()
-
+        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+        _req = RuntimeActionRequest(
+            action_type=RuntimeActionType.CLI_SHOW_SUBAGENTS,
+            source="core.chat",
+            parent_trace_id="",
+            payload={"user_input": user_input},
+        )
+        _result = _p1_dispatcher.route(_req)
+        descriptors = _result.payload.get("descriptors", ()) if _result else ()
         _safe_emit_runtime_event(
             on_runtime_event,
             subagent_list_event(descriptors),
@@ -848,13 +869,14 @@ def chat(
     # 确保 fake/real 共享同一 evidence path，不因 provider type 产生证据路径分歧。
     #
     # 构建本身无副作用：只有 loop turn-end 时 dispatcher.route() 才被调用。
+    # Loop 4: _p1_dispatcher 已在函数开头构建（用于 CLI READ_ONLY 命令走统一 dispatcher）。
+    # 调用方注入的 runtime_action_dispatcher 优先（dogfood/测试注入点），
+    # 否则复用 _p1_dispatcher。
     if runtime_action_dispatcher is not None:
         _phase1_dispatcher = runtime_action_dispatcher
         _skill_registry = None
     else:
-        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
-
-        _phase1_dispatcher = build_phase1_dispatcher()
+        _phase1_dispatcher = _p1_dispatcher
         _skill_registry = None
 
     _loop_ctx = _build_loop_context(

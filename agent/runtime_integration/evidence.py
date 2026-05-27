@@ -8,12 +8,12 @@ handler、dogfood report 或 capability matrix 各自发明通过条件。
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
-from typing import Any, Callable, ClassVar, Mapping
+from typing import Any, ClassVar
 from uuid import uuid4
-
 
 RUNTIME_E2E = "runtime_e2e"
 REAL_CORE_LOOP_RUNTIME_E2E = "real_core_loop_runtime_e2e"
@@ -278,8 +278,8 @@ def _streaming_collect_response_adapter(payload: Mapping[str, Any]) -> Any:
 
 
 def _streaming_validate_event_adapter(payload: Mapping[str, Any]) -> Any:
-    from agent.runtime_integration.streaming_provider import validate_stream_event
     from agent.provider.streaming import ProviderStreamEvent
+    from agent.runtime_integration.streaming_provider import validate_stream_event
 
     event = payload.get("event")
     if not isinstance(event, ProviderStreamEvent):
@@ -299,6 +299,25 @@ def _subagent_delegate_once_adapter(payload: Mapping[str, Any]) -> Any:
     if not isinstance(registry, SubAgentRegistry):
         raise TypeError("registry must be SubAgentRegistry")
     return delegate_once(subagent_request, registry)
+
+
+def _cli_show_memories_list_records_adapter(payload: Mapping[str, Any]) -> Any:
+    from agent.memory_runtime import MemoryRuntime
+
+    store = payload.get("store")
+    if store is not None:
+        runtime = MemoryRuntime(store=store)
+        return runtime.list_records()
+    return ()
+
+
+def _cli_show_subagents_list_visible_adapter(payload: Mapping[str, Any]) -> Any:
+    from pathlib import Path as _Path
+
+    from agent.subagent_system.registry import SubAgentRegistry
+
+    registry = SubAgentRegistry(roots=[_Path("agent/subagent_system/descriptors")])
+    return registry.list_visible()
 
 
 def _descriptor(
@@ -576,6 +595,28 @@ class RuntimeActionTargetCatalog:
             adapter=_memory_consolidation_adapter,
             function_called="run_consolidation_pipeline",
             call_signature="run_consolidation_pipeline(store, llm_generator=None)",
+        ),
+        _descriptor(
+            "cli.show_memories",
+            "agent.runtime_integration.cli_handlers.CliShowMemoriesHandler",
+            "MemoryRuntime",
+            operation="list_records",
+            invocation_adapter_id="MemoryRuntime.list_records",
+            implementation_id="agent.memory_runtime.MemoryRuntime.list_records",
+            adapter=_cli_show_memories_list_records_adapter,
+            function_called="MemoryRuntime.list_records",
+            call_signature="list_records()",
+        ),
+        _descriptor(
+            "cli.show_subagents",
+            "agent.runtime_integration.cli_handlers.CliShowSubagentsHandler",
+            "SubAgentRegistry",
+            operation="list_visible",
+            invocation_adapter_id="SubAgentRegistry.list_visible",
+            implementation_id="agent.subagent_system.registry.SubAgentRegistry.list_visible",
+            adapter=_cli_show_subagents_list_visible_adapter,
+            function_called="SubAgentRegistry.list_visible",
+            call_signature="list_visible()",
         ),
         *_test_descriptors(
             "tests.runtime_integration.test_runtime_action_contract",

@@ -109,7 +109,9 @@ def _try_dispatch_checkpoint_resume(state, resume_mode="interactive"):
         )
 
         dispatcher = build_phase1_dispatcher()
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(
             RuntimeActionRequest(
                 action_type=RuntimeActionType.CHECKPOINT_RESUME,

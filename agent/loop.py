@@ -113,7 +113,9 @@ def _dispatch_tool_pipeline(
     """
     from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
 
-    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+    route = getattr(dispatcher, "route_from_runtime_loop", None)
+    if route is None:
+        route = dispatcher.route
 
     # TOOL_GATE
     gate_result = None
@@ -290,7 +292,9 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(request)
     except Exception:
         # MEMORY proposal 失败不阻塞 loop 也不阻塞 MEMORY_PROPOSE / TOOL_GATE
@@ -335,7 +339,9 @@ def _try_phase1_turn_end_runtime_action(
                             "external_side_effects": False,
                         },
                     )
-                    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+                    route = getattr(dispatcher, "route_from_runtime_loop", None)
+                    if route is None:
+                        route = dispatcher.route
                     route(propose_request)
                 except Exception:
                     # 单个 proposal dispatch 失败不阻塞其他 proposal
@@ -376,7 +382,9 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(checkpoint_request)
     except Exception:
         # CHECKPOINT_SAFE_SUMMARY 失败不阻塞 loop 也不阻塞其他 dispatch
@@ -406,7 +414,9 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(consolidate_request)
     except Exception:
         # MEMORY_CONSOLIDATE 失败不阻塞 loop 也不阻塞其他 dispatch
@@ -479,7 +489,9 @@ def _try_phase1_turn_end_runtime_action(
             parent_trace_id="",
             payload=_skill_payload,
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(skill_request)
     except Exception:
         # SKILL_SELECT 失败不阻塞 loop 也不阻塞其他 dispatch
@@ -510,7 +522,9 @@ def _try_phase1_turn_end_runtime_action(
                 "external_side_effects": False,
             },
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         route(subagent_request)
     except Exception:
         # SUBAGENT_DELEGATE_L0 失败不阻塞 loop 也不阻塞其他 dispatch
@@ -551,7 +565,9 @@ def _try_phase1_turn_end_runtime_action(
                     "external_side_effects": False,
                 },
             )
-            route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+            route = getattr(dispatcher, "route_from_runtime_loop", None)
+            if route is None:
+                route = dispatcher.route
             route(streaming_request)
             # STREAMING_EVENT：per-event dispatch，为每个 streaming event 收集
             # 独立的 per-event evidence。不与 STREAMING_PROVIDER_CALL 聚合冲突——

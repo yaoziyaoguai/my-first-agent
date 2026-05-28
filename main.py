@@ -422,6 +422,8 @@ def _init_mcp_bridge_if_enabled() -> None:
     bridge 在 init_session 之前运行，将 MCP tools 注册到 TOOL_REGISTRY。
     Loop 2.4: bridge report 生成后通过 disposable dispatcher 记录
     MCP_BRIDGE_LIFECYCLE evidence。
+    Loop 3.3: 支持 server_allowlist / config_path 显式传入；
+    bridge 成功后通过 set_mcp_bridge_result() 更新决策脊柱 mcp_available。
     """
     import os
 
@@ -434,13 +436,29 @@ def _init_mcp_bridge_if_enabled() -> None:
         "1", "true", "yes",
     )
 
+    # Loop 3.3: server_allowlist 从 env var 显式传入
+    raw_allowlist = os.getenv("MY_FIRST_AGENT_MCP_SERVER_ALLOWLIST", "").strip()
+    server_allowlist: frozenset[str] | None = None
+    if raw_allowlist:
+        server_allowlist = frozenset(
+            name.strip() for name in raw_allowlist.split(",") if name.strip()
+        )
+
+    # Loop 3.3: config_path 从 env var 显式传入（而非仅在 _load_mcp_config 内部读取）
+    config_path = os.getenv("MY_FIRST_AGENT_MCP_CONFIG", "") or None
+
     try:
-        from agent.mcp_bridge import run_mcp_bridge
+        from agent.mcp_bridge import run_mcp_bridge, set_mcp_bridge_result
 
         report = run_mcp_bridge(
             mode=mode,  # type: ignore[arg-type]
+            config_path=config_path,
+            server_allowlist=server_allowlist,
             dry_run=dry_run,
         )
+        # Loop 3.3: 更新决策脊柱 mcp_available 状态
+        set_mcp_bridge_result(report.tools_registered)
+
         # Loop 2.4: 通过 disposable dispatcher 记录 MCP_BRIDGE_LIFECYCLE evidence
         _try_dispatch_mcp_bridge_lifecycle(report, mode, dry_run)
         # bridge report 只打印短摘要，不打印 raw descriptor / raw result

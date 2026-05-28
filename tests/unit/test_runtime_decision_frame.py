@@ -107,8 +107,8 @@ def test_mcp_discover_is_partial():
         f"mcp.discover 应标 PARTIAL 而非 {bp.status}"
     )
     assert not bp.is_capability_complete()
-    assert "REAL-EVIDENCE-005" in str(bp.decision_meta.get("why_partial", "")), (
-        "mcp.discover 的 why_partial 必须引用 REAL-EVIDENCE-005"
+    assert "REAL-EVIDENCE-007" in str(bp.decision_meta.get("why_partial", "")), (
+        "mcp.discover 的 why_partial 必须引用 REAL-EVIDENCE-007"
     )
 
 
@@ -120,8 +120,8 @@ def test_mcp_invoke_is_partial():
         f"mcp.invoke 应标 PARTIAL 而非 {bp.status}"
     )
     assert not bp.is_capability_complete()
-    assert "REAL-EVIDENCE-005" in str(bp.decision_meta.get("why_partial", "")), (
-        "mcp.invoke 的 why_partial 必须引用 REAL-EVIDENCE-005"
+    assert "REAL-EVIDENCE-007" in str(bp.decision_meta.get("why_partial", "")), (
+        "mcp.invoke 的 why_partial 必须引用 REAL-EVIDENCE-007"
     )
 
 

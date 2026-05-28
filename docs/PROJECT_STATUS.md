@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 3.3 SDD)
-**状态**: Loop 3.3 — Real MCP External Flight architecture decision / SDD 完成；`docs/design/mcp-real-external-flight-contract.md` 定义 15-section real external flight contract（opt-in mechanism/sandbox/tool pipeline reuse/test intents/implementation slices）；7 项架构决策记录；不宣称 MCP READY — 标 architecture decision complete / implementation pending
+**最后更新**: 2026-05-28 (Loop 3.3 code-path completion)
+**状态**: Loop 3.3 — Real MCP External Flight code path complete, real validation pending；30 个新 contract tests（9 classes）全部通过，覆盖 bridge module state / decision frame mcp_available 动态化 / MCP registration path / server allowlist / destructive tool block / invocation main path / not-fakeable / branch point status / opt-in activation；66/67 回归 tests pass（1 个预先存在的 HOME 隔离失败）；修复 11 处 `getattr` eager evaluation bug（core.py 2, loop.py 8, session.py 1）；剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007）
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -160,8 +160,8 @@
 |-------------|------|---------|------|
 | skill.select | PARTIAL | FAKE_LOCAL_USER_PATH | registry 已注入，fake provider 路径 auto-select；缺真实模型 SKILL_SELECT tool call |
 | skill.apply | PARTIAL | FAKE_LOCAL_USER_PATH | body 已注入 [Active Skill Instructions]；allowed_tools enforcement 已实现（ToolGateHandler→rejected→FORCE_STOP），缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
-| mcp.discover | PARTIAL | FAKE_LOCAL_USER_PATH | bridge lifecycle 通过 disposable dispatcher 产生 evidence；main.py → run_mcp_bridge() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
-| mcp.invoke | PARTIAL | FAKE_LOCAL_USER_PATH | MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT），L3 evidence 已有；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
+| mcp.discover | PARTIAL | FAKE_LOCAL_USER_PATH | bridge lifecycle 通过 disposable dispatcher 产生 evidence；main.py → run_mcp_bridge() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)；mcp_available 由 is_mcp_active() 动态驱动；缺真实 MCP server 连接（REAL-EVIDENCE-005/007） |
+| mcp.invoke | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT）；L3 evidence 通过 core.chat() 验证（test_mcp_l3_real_core_loop.py）；30 个 Loop 3.3 contract tests 验证完整 registration→gate→invoke→result 路径；缺真实 MCP server 连接（REAL-EVIDENCE-005/007） |
 | subagent.delegate | PARTIAL | FAKE_LOCAL_USER_PATH | L1 code path complete: execute_l1() → provider.create() → child tool_use → mediate_child_tool_request() → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；child memory → mediate_child_memory_request() → SUBAGENT_CHILD_MEMORY_REQUEST → store.apply_operation_intent()（namespaced）；CLI shortcut 走 dispatcher path；24 个 L1 contract tests 通过；缺真实 provider child loop dogfood（REAL-EVIDENCE-006） |
 | memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
@@ -236,7 +236,7 @@
 | Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
 | Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a+3.2b 完成: L1 code path complete (child loop + tool mediation + memory scope + CLI shortcut dispatcher migration)；child memory 通过 parent ToolRuntimeMediator → namespaced store write；24 个 L1 contract tests 全部通过。剩余: 真实 provider child loop dogfood（REAL-EVIDENCE-006）、L2 session-scoped subagent |
-| Loop 3.3 | Real MCP External Flight | **architecture decision complete / implementation pending** — SDD 完成：`docs/design/mcp-real-external-flight-contract.md`（15 sections）；7 项架构决策（无需新 RuntimeActionType/handler/ToolRuntimeMediator 变更，现有 infrastructure 已足够）；17 test intents (T1-T17)；implementation 分 Phase A（local fixture contract tests, safe to auto-run）和 Phase B（real external server, opt-in only）；REAL-EVIDENCE-007 已登记；不宣称 MCP READY |
+| Loop 3.3 | Real MCP External Flight | **code path complete, real validation pending** — (1) Module-level bridge state: `set_mcp_bridge_result()` / `is_mcp_active()` / `get_mcp_bridge_tools_registered()` 在 `agent/mcp_bridge.py`，main.py 中 bridge run 后设置，per-turn 由 decision frame 动态读取；(2) `RuntimeDecisionFrame.mcp_available` 不再硬编码，改为 `is_mcp_active()` 动态驱动；(3) server allowlist 和 config_path 在 main.py 中通过参数传入 `run_mcp_bridge()`；(4) 30 个新 contract tests（9 classes: BridgeModuleState 4 / DecisionFrameMCPAvailable 4 / MCPRegistrationPath 4 / MCPServerAllowlist 3 / MCPDestructiveToolBlock 2 / MCPInvocationMainPath 2 / MCPNotFakeable 6 / MCPBranchPointStatus 2 / MCPOptInActivation 3）全部通过；(5) 修复 11 处 `getattr` eager evaluation bug（core.py 2, loop.py 8, session.py 1 — `getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)` → `getattr(dispatcher, "route_from_runtime_loop", None)` + fallback）；(6) 66/67 回归 tests pass。剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007） |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER

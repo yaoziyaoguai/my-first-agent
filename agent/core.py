@@ -285,7 +285,9 @@ def _dispatch_checkpoint_save(dispatcher, state, source="core.chat"):
 
     pending_tool = getattr(state.task, "pending_tool", None)
     pending_ui = getattr(state.task, "pending_user_input_request", None)
-    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+    route = getattr(dispatcher, "route_from_runtime_loop", None)
+    if route is None:
+        route = dispatcher.route
     route(
         RuntimeActionRequest(
             action_type=RuntimeActionType.CHECKPOINT_SAVE,
@@ -330,7 +332,9 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
             parent_trace_id="",
             payload={},
         )
-        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
         result = route(request)
         memory_section = result.payload.get("prompt_section", "")
         snapshot_item_count = int(result.payload.get("snapshot_item_count") or 0)

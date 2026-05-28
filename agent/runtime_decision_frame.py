@@ -241,14 +241,17 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
         trigger_condition="session 启动时 MY_FIRST_AGENT_MCP_ENABLE=1",
         execution_path="main.py → _init_mcp_bridge_if_enabled → run_mcp_bridge()"
-                       " → dispatcher.route(MCP_BRIDGE_LIFECYCLE) → evidence recording",
-        result_feedback_path="MCPBridgeReport + dispatcher evidence (MCP_BRIDGE_LIFECYCLE)",
+                       " (server_allowlist + config_path 显式传入)"
+                       " → set_mcp_bridge_result() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)"
+                       " → evidence recording",
+        result_feedback_path="MCPBridgeReport + dispatcher evidence (MCP_BRIDGE_LIFECYCLE)"
+                            " + is_mcp_active() → RuntimeDecisionFrame.mcp_available",
         not_ready_behavior="MCP bridge 默认 disabled；需显式 opt-in",
         decision_meta={
             "why_partial": (
-                "code path complete: bridge lifecycle 通过 disposable dispatcher"
-                " 产生 MCP_BRIDGE_LIFECYCLE evidence；仅 FakeMCPClient 验证；"
-                "真实 MCP server 连接 pending (REAL-EVIDENCE-005)"
+                "code path complete: bridge lifecycle + server_allowlist + config_path"
+                " 已通过 main.py 显式传入；mcp_available 由 set_mcp_bridge_result() 动态设置；"
+                "仅 FakeMCPClient 验证；真实 MCP server 连接 pending (REAL-EVIDENCE-007)"
             ),
         },
     ),
@@ -259,17 +262,18 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         trigger_condition="模型发起 mcp__* tool call（需 MCP_ENABLE + bridge registration 成功）",
         execution_path="get_model_visible_tools(max_mcp_tools=5) → model tool_use →"
                        " handle_tool_use_response → ToolRuntimeMediator →"
-                       " TOOL_GATE→TOOL_INVOKE→TOOL_RESULT → execute_single_tool",
+                       " TOOL_GATE（含 server_allowlist 校验）→ TOOL_INVOKE"
+                       " → TOOL_RESULT → execute_single_tool",
         result_feedback_path="append_tool_result → conversation context（复用 Tool pipeline）",
         not_ready_behavior="production 中 confirmation='always' 默认拦截；"
                            "MCP tools 需用户逐次确认",
         decision_meta={
             "why_partial": (
-                "code path complete: MCP 工具复用统一 Tool pipeline；"
-                "L3 evidence 已通过 core.chat() 验证"
-                " (test_mcp_l3_real_core_loop.py)；"
-                "production 中 confirmation='always' 默认拦截；"
-                "真实 MCP server 连接 pending (REAL-EVIDENCE-005)"
+                "code path complete: MCP 工具复用统一 Tool pipeline（ToolRuntimeMediator"
+                " → TOOL_GATE/INVOKE/RESULT → execute_single_tool）；"
+                "L3 evidence 已通过 core.chat() 验证（test_mcp_l3_real_core_loop.py）；"
+                "mcp_available 动态化（is_mcp_active()）；"
+                "真实 MCP server 连接 pending (REAL-EVIDENCE-007)"
             ),
         },
     ),
@@ -644,6 +648,11 @@ def build_decision_frame_from_chat_params(
     else:
         ev_level = EvidenceLevel.GUARD_TEST
 
+    # MCP 默认 disabled（需显式 opt-in）。
+    # Loop 3.3: mcp_available 不再硬编码——由 main.py bridge 成功后
+    # set_mcp_bridge_result() 设置，is_mcp_active() 动态读取。
+    from agent.mcp_bridge import is_mcp_active as _is_mcp_active
+
     return build_decision_frame(
         user_input=user_input,
         provider_mode=provider_mode,
@@ -652,7 +661,7 @@ def build_decision_frame_from_chat_params(
         active_skill_candidates=active_candidates,
         memory_explicit_request=False,  # 由 evaluate_user_text 后置判定
         tool_gate_tool_name=gate_name,
-        mcp_available=False,  # MCP 默认 disabled（需显式 opt-in）
+        mcp_available=_is_mcp_active(),
         subagent_available=False,  # 仅 L0 fake/demo
         subagent_level="L0",
         evidence_level=ev_level,

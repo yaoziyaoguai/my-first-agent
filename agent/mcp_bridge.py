@@ -22,10 +22,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal
 
 from agent.mcp import (
     FakeMCPClient,
@@ -34,13 +35,34 @@ from agent.mcp import (
 )
 from agent.mcp_models import MCPClient
 from agent.mcp_policy import (
-    evaluate_server_policy,
     MCPPolicyDecision,
+    evaluate_server_policy,
 )
 from agent.mcp_stdio import StdioMCPClient
 
-
 MCPBridgeMode = Literal["disabled", "discovery", "registration"]
+
+# ── Module-level bridge status（Loop 3.3）────────────────────────────────────────
+# 在 main.py 中 bridge 成功后设置，供 runtime_decision_frame 读取 mcp_available 状态。
+# 仅记录已注册工具数——不缓存 raw descriptor / config / secret。
+
+_mcp_bridge_tools_registered: int = 0
+
+
+def set_mcp_bridge_result(tools_registered: int) -> None:
+    """main.py 在 bridge 成功后调用，记录已注册 MCP 工具数。"""
+    global _mcp_bridge_tools_registered
+    _mcp_bridge_tools_registered = tools_registered
+
+
+def get_mcp_bridge_tools_registered() -> int:
+    """返回最近一次 bridge 注册的 MCP 工具数（0 = 未运行或无工具）。"""
+    return _mcp_bridge_tools_registered
+
+
+def is_mcp_active() -> bool:
+    """MCP 是否已通过 bridge 成功注册至少一个工具。"""
+    return _mcp_bridge_tools_registered > 0
 
 
 @dataclass(frozen=True, slots=True)

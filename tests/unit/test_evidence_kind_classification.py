@@ -90,6 +90,7 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST,
         RuntimeActionType.SUBAGENT_CHILD_RESULT,
         RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION,
+        RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST,
     }
     probe_types = {
         RuntimeActionType.SKILL_SELECT,

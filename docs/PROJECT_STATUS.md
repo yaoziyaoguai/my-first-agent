@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 3.2a push)
-**状态**: Loop 3.2a — SubAgent L1 Code Path 最小可验证切片完成；L1 parent-mediated child loop 已实现（execute_l1 → provider.create() → child tool_use → parent ToolRuntimeMediator → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT → child result）；CLI delegate shortcut 已迁入 dispatcher-mediated path（_dispatch_or_fallback_delegation）；4 个新 RuntimeActionType（SUBAGENT_DELEGATE_L1/CHILD_TOOL_REQUEST/CHILD_RESULT/PARENT_ADJUDICATION）全部 business；subagent.delegate FAKE_DEMO→PARTIAL；12 个 L1 contract tests 通过；REAL-EVIDENCE-006 已登记
+**最后更新**: 2026-05-28 (Loop 3.2b push)
+**状态**: Loop 3.2b — Parent-Mediated Memory Scope for SubAgent L1 完成；child memory proposal 通过 ToolRuntimeMediator.mediate_child_memory_request() → SUBAGENT_CHILD_MEMORY_REQUEST evidence → store.apply_operation_intent()（namespaced subagent:<name>: 前缀）；memory_scope=none/propose 已区分；ToolRuntimeMediator 新增 store 参数 + mediate_child_memory_request() 方法；execute_l1() 集成 memory_scope 自动触发 memory mediation；11 个新 child memory contract tests 通过（总计 24 个 L1 tests）；REAL-EVIDENCE-006 已更新（code path complete, real provider dogfood pending）
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -162,7 +162,7 @@
 | skill.apply | PARTIAL | FAKE_LOCAL_USER_PATH | body 已注入 [Active Skill Instructions]；allowed_tools enforcement 已实现（ToolGateHandler→rejected→FORCE_STOP），缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | mcp.discover | PARTIAL | FAKE_LOCAL_USER_PATH | bridge lifecycle 通过 disposable dispatcher 产生 evidence；main.py → run_mcp_bridge() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
 | mcp.invoke | PARTIAL | FAKE_LOCAL_USER_PATH | MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT），L3 evidence 已有；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
-| subagent.delegate | PARTIAL | FAKE_LOCAL_USER_PATH | L1 code path complete: execute_l1() → provider.create() → child tool/memory → parent ToolRuntimeMediator → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT → child result；CLI delegate shortcut 通过 _dispatch_or_fallback_delegation() 走 dispatcher path；12 个 L1 contract tests 通过；缺真实 provider child loop + parent-mediated tool roundtrip（REAL-EVIDENCE-006） |
+| subagent.delegate | PARTIAL | FAKE_LOCAL_USER_PATH | L1 code path complete: execute_l1() → provider.create() → child tool_use → mediate_child_tool_request() → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；child memory → mediate_child_memory_request() → SUBAGENT_CHILD_MEMORY_REQUEST → store.apply_operation_intent()（namespaced）；CLI shortcut 走 dispatcher path；24 个 L1 contract tests 通过；缺真实 provider child loop dogfood（REAL-EVIDENCE-006） |
 | memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
 | checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | code path complete: save/load 走 dispatcher + evidence chain 闭合；real validation pending (REAL-EVIDENCE-004) |
@@ -219,7 +219,7 @@
 
 ## 2. 推荐下一步
 
-**Loop 3.2a 完成。** SubAgent L1 parent-mediated child loop 最小可验证切片已实现并合并入主路径。下一步可选：Loop 3.2b — parent-mediated memory scope（child 写 memory 通过 parent dispatcher），或继续推进其他 pending real evidence debts。
+**Loop 3.2b 完成。** Child memory scope 已通过 parent ToolRuntimeMediator 中介：memory_scope=none/propose 区分、namespaced store write、SUBAGENT_CHILD_MEMORY_REQUEST evidence、24 个 contract tests 全部通过。code path complete, real provider dogfood pending (REAL-EVIDENCE-006)。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -235,7 +235,7 @@
 | Loop 2.2 | Skill Activation Main-Path Completion | **code path complete, real validation pending** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler 拦截非允许工具→rejected→FORCE_STOP→不进 execute_single_tool，ToolRuntimeMediator 传递 skill_allowed_tools；(3) 13 L2 contract + 6 L3 pipeline + 15 skill tool enforcement tests 全部通过。剩余：真实模型 SKILL_SELECT tool call（REAL-EVIDENCE-002）、real dogfood E2E（REAL-EVIDENCE-003）已登记为 validation debt |
 | Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
 | Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
-| Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a 完成: L1 code path complete (execute_l1 + delegate_l1 + CLI shortcut dispatcher migration)；12 个 L1 contract tests 全部通过；subagent.delegate FAKE_DEMO→PARTIAL。剩余: 真实 provider child loop（REAL-EVIDENCE-006）、parent-mediated memory scope、L2 session-scoped subagent |
+| Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a+3.2b 完成: L1 code path complete (child loop + tool mediation + memory scope + CLI shortcut dispatcher migration)；child memory 通过 parent ToolRuntimeMediator → namespaced store write；24 个 L1 contract tests 全部通过。剩余: 真实 provider child loop dogfood（REAL-EVIDENCE-006）、L2 session-scoped subagent |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER

@@ -153,6 +153,7 @@ def execute_l1(
     parent_trace_id = getattr(getattr(context_package, "request", None), "parent_trace_id", "")
     subagent_name = getattr(getattr(context_package, "descriptor", None), "name", "unknown")
     execution_mode = getattr(context_package, "execution_mode", "local_fake")
+    memory_scope = getattr(getattr(context_package, "request", None), "memory_scope", "none")
     role_prompt = getattr(context_package, "role_prompt", "")
     goal = getattr(context_package, "goal", task)
     constraints = getattr(context_package, "constraints", ())
@@ -300,6 +301,19 @@ def execute_l1(
         warnings.append("max_iterations reached")
         if not summary:
             summary = f"L1 child loop reached max_iterations ({max_iterations})."
+
+    # ── Child memory proposal (Loop 3.2b) ─────────────────────────────────
+    # child loop 结束后，如果 memory_scope=propose 且有实质产出，通过 parent
+    # tool_mediator 写入 namespaced store（不直接写 store）。
+    if memory_scope == "propose" and summary and tool_mediator is not None:
+        tool_mediator.mediate_child_memory_request(
+            key="child_summary",
+            value=summary,
+            delegation_id=delegation_id,
+            parent_trace_id=parent_trace_id,
+            subagent_name=subagent_name,
+            memory_scope=memory_scope,
+        )
 
     trace_events = (
         make_trace_event(

@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 3.2 SDD — REAL-EVIDENCE-006 registered)
+**最后更新**: 2026-05-28 (Loop 3.2b — child memory scope code path complete)
 
 ---
 
@@ -115,10 +115,10 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 |------|-----|
 | **Source** | Loop 3.2 SDD / architecture decision phase |
 | **Capability** | SubAgent L1 — real provider child loop + parent-mediated tool execution + memory scope roundtrip |
-| **Missing evidence** | 真实 LLM provider child loop 完整执行；child tool_use → parent TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline；child memory proposal → parent confirm→retain pipeline；skill scope enforcement |
-| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 SubAgent delegation（非 deterministic keyword-match）；(3) child loop 调真实 provider 并返回非 deterministic summary；(4) child tool_use 通过 parent ToolRuntimeMediator pipeline 执行（TOOL_GATE→TOOL_INVOKE→execute_single_tool→TOOL_RESULT）；(5) blocked tool 不进 execute_single_tool；(6) child memory proposal（scope=propose）通过 parent MEMORY_PROPOSE→confirm→retain pipeline；(7) child skill scope enforcement（active_skill allowed_tools 对 child tool request 生效）；(8) 所有 child action 在 parent dispatcher action_log 中有对应证据条目；(9) CLI delegate shortcut 统一走 dispatcher path，不绕过；(10) 不是 deterministic keyword-match summary 冒充真实 child execution |
-| **Current evidence** | L0 deterministic executor（不调 provider/不执行工具/不写 memory）；ToolBoundary/MemoryBoundary/SkillBoundary 对象已定义但未被真实 child loop 使用；SUBAGENT_DELEGATE_L0 probe only（turn-end hook 返回 failed）；CLI shortcuts 绕过 dispatcher；Loop 3.2 SDD 已完成架构设计 |
-| **Status** | pending L1 implementation + real provider dogfood |
+| **Missing evidence** | 真实 LLM provider child loop 完整执行（含 tool + memory scope roundtrip） |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 SubAgent delegation（非 deterministic keyword-match）；(3) child loop 调真实 provider 并返回非 deterministic summary；(4) child tool_use 通过 parent ToolRuntimeMediator pipeline 执行；(5) child memory proposal (scope=propose) 通过 mediate_child_memory_request() → parent store；(6) 所有 child action 有 dispatcher evidence；(7) 不是 deterministic keyword-match summary 冒充真实 child execution |
+| **Current evidence** | L1 code path complete: execute_l1() + delegate_l1() + mediate_child_tool_request() + mediate_child_memory_request()；child memory scope (none/propose) with namespaced store write；SUBAGENT_CHILD_MEMORY_REQUEST dispatcher evidence；CLI shortcuts 迁入 dispatcher path；Loop 3.2b TDD tests (24 pass, 11 new for memory scope) |
+| **Status** | code path complete, real provider dogfood pending |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 

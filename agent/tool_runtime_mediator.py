@@ -52,6 +52,7 @@ class ToolRuntimeMediator:
         turn_context: dict[str, Any],
         messages: list[dict[str, Any]],
         skill_allowed_tools: frozenset[str] | None = None,
+        store: Any = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._state = state
@@ -59,6 +60,7 @@ class ToolRuntimeMediator:
         self._turn_context = turn_context
         self._messages = messages
         self._skill_allowed_tools = skill_allowed_tools
+        self._store = store
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -172,6 +174,120 @@ class ToolRuntimeMediator:
         self._route_result(tool_name, arguments, tool_use_id, result)
 
         return result
+
+    # ── child memory mediation (Loop 3.2b) ──────────────────────────────────
+
+    def mediate_child_memory_request(
+        self,
+        key: str,
+        value: str,
+        *,
+        delegation_id: str = "",
+        parent_trace_id: str = "",
+        subagent_name: str = "",
+        memory_scope: str = "none",
+    ) -> str | None:
+        """Child memory proposal → parent-mediated store write (Loop 3.2b).
+
+        child 不直接写 store — 所有 memory 操作通过 parent ToolRuntimeMediator。
+        memory_scope=none → 不写入；propose → 通过 store.apply_operation_intent() 写入。
+
+        Namespace 隔离：child memory 使用 subagent:<name>: 前缀，防止与 parent
+        memory 混淆。
+
+        Returns:
+            None: stored successfully
+            "rejected": memory_scope disabled the write
+            "error": store unavailable or write failed
+        """
+        # Step 1: Check memory_scope
+        if memory_scope == "none":
+            self._dispatch_child_memory_evidence(
+                key, value, delegation_id, parent_trace_id,
+                subagent_name, memory_scope, status="rejected",
+            )
+            return "rejected"
+
+        if self._store is None:
+            self._dispatch_child_memory_evidence(
+                key, value, delegation_id, parent_trace_id,
+                subagent_name, memory_scope, status="error",
+            )
+            return "error"
+
+        # Step 2: Build namespaced MemoryOperationIntent
+        from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
+        from agent.memory_contracts import MemoryDecisionType, MemoryScope
+        from agent.memory_operations import (
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
+        )
+
+        source = f"subagent:{subagent_name}:{delegation_id}"
+        intent = MemoryOperationIntent(
+            operation_type=MemoryOperationType.RETAIN,
+            decision_type=MemoryDecisionType.RETAIN,
+            confirmation_status=MemoryConfirmationStatus.AUTO_RETAINED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            content_summary=value,
+            source_summary=source,
+            scope=MemoryScope.USER,
+            safety_summary="child subagent memory proposal, parent-mediated",
+            sensitive_redacted=False,
+            user_visible_summary=f"SubAgent {subagent_name} 记忆: {value[:80]}",
+            memory_type="semantic",
+            source_type="agent_suggested",
+        )
+        audit = build_memory_audit_summary(intent)
+
+        # Step 3: Write to store via parent memory path
+        try:
+            self._store.apply_operation_intent(intent, audit)
+        except Exception:
+            self._dispatch_child_memory_evidence(
+                key, value, delegation_id, parent_trace_id,
+                subagent_name, memory_scope, status="error",
+            )
+            return "error"
+
+        # Step 4: Dispatch evidence after successful write
+        self._dispatch_child_memory_evidence(
+            key, value, delegation_id, parent_trace_id,
+            subagent_name, memory_scope, status="retained",
+        )
+        return None
+
+    def _dispatch_child_memory_evidence(
+        self,
+        key: str,
+        value: str,
+        delegation_id: str,
+        parent_trace_id: str,
+        subagent_name: str,
+        memory_scope: str,
+        *,
+        status: str,
+    ) -> None:
+        """Dispatch SUBAGENT_CHILD_MEMORY_REQUEST evidence (best-effort)."""
+        with contextlib.suppress(Exception):
+            self._dispatcher.route_from_runtime_loop(
+                RuntimeActionRequest(
+                    action_type=RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST,
+                    source="ToolRuntimeMediator",
+                    parent_trace_id=parent_trace_id or delegation_id,
+                    payload={
+                        "key": key,
+                        "value_preview": value[:200],
+                        "subagent_name": subagent_name,
+                        "delegation_id": delegation_id,
+                        "memory_scope": memory_scope,
+                        "status": status,
+                    },
+                ),
+                core_entrypoint="core.chat",
+                runtime_hook_name="execute_l1",
+            )
 
     # ── gate disposition handlers ─────────────────────────────────────────
 

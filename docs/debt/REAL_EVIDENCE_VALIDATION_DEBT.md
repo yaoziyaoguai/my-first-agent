@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 3.2b — child memory scope code path complete)
+**最后更新**: 2026-05-28 (Loop 3.3 SDD — REAL-EVIDENCE-007 登记)
 
 ---
 
@@ -120,6 +120,21 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Current evidence** | L1 code path complete: execute_l1() + delegate_l1() + mediate_child_tool_request() + mediate_child_memory_request()；child memory scope (none/propose) with namespaced store write；SUBAGENT_CHILD_MEMORY_REQUEST dispatcher evidence；CLI shortcuts 迁入 dispatcher path；Loop 3.2b TDD tests (24 pass, 11 new for memory scope) |
 | **Status** | code path complete, real provider dogfood pending |
 | **Blocking current code loop** | no |
+| **Blocking READY claim** | yes |
+
+---
+
+### REAL-EVIDENCE-007
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Loop 3.3 SDD / architecture decision phase |
+| **Capability** | MCP Real External Flight — 真实 stdio MCP server 连接 + external tool execution + external tool policy |
+| **Missing evidence** | 真实外部 MCP server 的完整连接→discovery→registration→tool_use→execution→result 路径 |
+| **Required validation** | (1) 搭建本地 real MCP server fixture（如 filesystem 或 echo server）；(2) 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + `MY_FIRST_AGENT_MCP_DRY_RUN=0` + MCP config 文件含真实 server entry；(3) 启动 real chat loop；(4) 验证 `run_mcp_bridge(mode="registration", dry_run=False)` → StdioMCPClient 真实连接 → list_tools → 通过 policy gate → TOOL_REGISTRY 注册（FakeMCPClient 无真实 server 进程）；(5) 验证注册的 MCP tools 出现在 `get_model_visible_tools(max_mcp_tools=5)` 中；(6) 验证模型 tool_use MCP tool → TOOL_GATE（含 server_allowlist 校验）→ TOOL_INVOKE → StdioMCPClient.call_tool（非 FakeMCPClient）→ real server response → TOOL_RESULT → dispatcher evidence；(7) 验证 destructive tool name block（含 server_allowlist 边界）；(8) 验证 confirmation="always" 在 real core loop 中正确拦截（非 test hack `confirmation="never"`） |
+| **Current evidence** | bridge lifecycle dispatcher evidence（MCP_BRIDGE_LIFECYCLE + disposable dispatcher）；L3 core.chat() tests 验证 MCP tool pipeline（但使用 FakeMCPClient + confirmation='never' test hack）；mcp.discover/mcp.invoke branch points 标 PARTIAL（code path complete, real server pending）；Loop 3.3 SDD 完成（`docs/design/mcp-real-external-flight-contract.md`）定义 opt-in contract + 17 test intents |
+| **Status** | pending real MCP server connection + real external tool execution |
+| **Blocking current code loop** | no — SDD/architecture decision 阶段不要求 real server |
 | **Blocking READY claim** | yes |
 
 ---

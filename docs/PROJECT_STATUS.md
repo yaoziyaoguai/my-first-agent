@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 3.2b push)
-**状态**: Loop 3.2b — Parent-Mediated Memory Scope for SubAgent L1 完成；child memory proposal 通过 ToolRuntimeMediator.mediate_child_memory_request() → SUBAGENT_CHILD_MEMORY_REQUEST evidence → store.apply_operation_intent()（namespaced subagent:<name>: 前缀）；memory_scope=none/propose 已区分；ToolRuntimeMediator 新增 store 参数 + mediate_child_memory_request() 方法；execute_l1() 集成 memory_scope 自动触发 memory mediation；11 个新 child memory contract tests 通过（总计 24 个 L1 tests）；REAL-EVIDENCE-006 已更新（code path complete, real provider dogfood pending）
+**最后更新**: 2026-05-28 (Loop 3.3 SDD)
+**状态**: Loop 3.3 — Real MCP External Flight architecture decision / SDD 完成；`docs/design/mcp-real-external-flight-contract.md` 定义 15-section real external flight contract（opt-in mechanism/sandbox/tool pipeline reuse/test intents/implementation slices）；7 项架构决策记录；不宣称 MCP READY — 标 architecture decision complete / implementation pending
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -236,6 +236,7 @@
 | Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
 | Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a+3.2b 完成: L1 code path complete (child loop + tool mediation + memory scope + CLI shortcut dispatcher migration)；child memory 通过 parent ToolRuntimeMediator → namespaced store write；24 个 L1 contract tests 全部通过。剩余: 真实 provider child loop dogfood（REAL-EVIDENCE-006）、L2 session-scoped subagent |
+| Loop 3.3 | Real MCP External Flight | **architecture decision complete / implementation pending** — SDD 完成：`docs/design/mcp-real-external-flight-contract.md`（15 sections）；7 项架构决策（无需新 RuntimeActionType/handler/ToolRuntimeMediator 变更，现有 infrastructure 已足够）；17 test intents (T1-T17)；implementation 分 Phase A（local fixture contract tests, safe to auto-run）和 Phase B（real external server, opt-in only）；REAL-EVIDENCE-007 已登记；不宣称 MCP READY |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER
@@ -245,7 +246,7 @@
 |------|------|------|
 | B2 | CLI delegate shortcut → dispatcher | **DONE** — delegate shortcut 已迁入 dispatcher-mediated path（_dispatch_or_fallback_delegation → SUBAGENT_DELEGATE_L1），L1 handler/provider 可用时走 L1，不可用时 fallback 到 L0 inline |
 | B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
-| B4 | MCP real connection | 需要外部 MCP server |
+| B4 | MCP real connection | **SDD complete** — `docs/design/mcp-real-external-flight-contract.md`；implementation pending（Phase A local fixture → Phase B real server） |
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | code path complete — save/load 走 dispatcher evidence chain；session.py resume 有 dispatcher evidence recording；real API roundtrip validation pending（REAL-EVIDENCE-004） |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
@@ -308,6 +309,7 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
 | Skill 系统架构 | `docs/design/skill-system-architecture.md` |
 | MCP 系统架构 | `docs/design/mcp-architecture.md` |
+| MCP Real External Flight 契约 | `docs/design/mcp-real-external-flight-contract.md` |
 | Runtime Decision Spine 设计 | `docs/design/runtime-decision-spine.md` |
 | Memory Write Dispatcher 迁移设计 | `docs/design/memory-write-dispatcher-migration-design.md` |
 | 首次运行 & 真实 API | `docs/onboarding/first-run-real-api-opt-in.md` |

@@ -245,22 +245,43 @@ _active_skill: dict[str, str] = {}
 
 
 def _update_active_skill_from_dispatcher(dispatcher) -> None:
-    """从 dispatcher action_log 提取最近一次 SKILL_SELECT 成功结果。"""
+    """从 dispatcher action_log 提取最近一次 SKILL_SELECT 成功结果。
+
+    RuntimeActionEvent 扁平化存储 status/evidence/action_type——不使用嵌套的
+    result.payload 格式。evidence 中包含了 handler 返回的证据字段（含
+    body_load_decision、selected_skill_id 等），而 loaded_body_preview 和
+    allowed_tools_after_selection 仅存在于 RuntimeActionResult.payload 中，
+    不会进入 event。因此需要从 SkillRegistry 重新加载 body 和 allowed_tools。
+    """
     global _active_skill
     for event in reversed(getattr(dispatcher, "action_log", [])):
         if getattr(event, "action_type", None) is None:
             continue
         if getattr(event.action_type, "value", "") == "skill.select":
-            result = getattr(event, "result", None)
-            if result is None:
-                continue
-            payload = dict(getattr(result, "payload", {}) or {})
-            if payload.get("body_load_decision"):
-                skill_id = str(payload.get("selected_skill_id") or "")
-                body = str(payload.get("loaded_body_preview") or "")
-                allowed_tools = frozenset(
-                    payload.get("allowed_tools_after_selection") or ()
-                )
+            evidence = dict(getattr(event, "evidence", {}) or {})
+            if evidence.get("body_load_decision"):
+                skill_id = str(evidence.get("selected_skill_id") or "")
+                if not skill_id:
+                    continue
+                # 从 SkillRegistry 加载 body 和 allowed_tools（这些不在
+                # evidence 中，只在 RuntimeActionResult.payload 中）
+                body = ""
+                allowed_tools: frozenset[str] = frozenset()
+                try:
+                    from agent.skill_system.loader import SkillLoader  # noqa: I001
+                    from agent.skill_system.registry import SkillRegistry  # noqa: I001
+                    from pathlib import Path  # noqa: I001
+
+                    _registry = SkillRegistry(roots=[Path("skills")])
+                    _descriptor = _registry.get_descriptor(skill_id)
+                    if _descriptor is not None:
+                        allowed_tools = frozenset(_descriptor.allowed_tools)
+                        _loader = SkillLoader(_registry)
+                        _body = _loader.load_body(skill_id)
+                        body = str(_body)[:2000] if _body else ""
+                except Exception:
+                    body = ""
+                    allowed_tools = frozenset()
                 if skill_id and body:
                     _active_skill = {
                         "skill_id": skill_id,

@@ -50,6 +50,12 @@ class RuntimeActionType(StrEnum):
     CLI_SHOW_MEMORIES = "cli.show_memories"
     CLI_SHOW_SUBAGENTS = "cli.show_subagents"
     MCP_BRIDGE_LIFECYCLE = "mcp.bridge_lifecycle"
+    # Loop 3.4: Advanced Scheduler — runtime-owned action graph executor evidence
+    ACTION_PLAN_START = "scheduler.action_plan_start"
+    NODE_ENTER = "scheduler.node_enter"
+    NODE_EXIT = "scheduler.node_exit"
+    NODE_FAILURE = "scheduler.node_failure"
+    ACTION_PLAN_COMPLETE = "scheduler.action_plan_complete"
 
 
 # ── Evidence Kind Classification ──────────────────────────────────────────────
@@ -93,6 +99,12 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.MCP_BRIDGE_LIFECYCLE: _EVIDENCE_KIND_PROBE,
+    # Loop 3.4: Scheduler evidence — 全部 business（runtime-owned action graph 决策）
+    RuntimeActionType.ACTION_PLAN_START: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.NODE_ENTER: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.NODE_EXIT: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.NODE_FAILURE: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.ACTION_PLAN_COMPLETE: _EVIDENCE_KIND_BUSINESS,
 }
 
 

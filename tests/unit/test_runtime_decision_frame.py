@@ -33,10 +33,10 @@ def test_branch_point_registry_is_frozen():
     assert bp.status == BranchPointStatus.PARTIAL
 
 
-def test_branch_point_registry_has_14_points():
-    """应有 15 个预定义 branch point——禁止无限发散。"""
+def test_branch_point_registry_has_20_points():
+    """应有 20 个预定义 branch point（含 Loop 3.4 scheduler 5 个）——禁止无限发散。"""
     all_bps = list_branch_points()
-    assert len(all_bps) == 15, f"expected 15 branch points, got {len(all_bps)}"
+    assert len(all_bps) == 20, f"expected 20 branch points, got {len(all_bps)}"
 
 
 def test_no_branch_point_is_ready():
@@ -249,10 +249,10 @@ def test_capability_summary_never_claims_complete():
 
 
 def test_all_branch_point_ids_returns_all():
-    """all_branch_point_ids 应返回所有 15 个 branch point。"""
+    """all_branch_point_ids 应返回所有 20 个 branch point（含 Loop 3.4 scheduler）。"""
     frame = build_decision_frame("test")
     ids = frame.all_branch_point_ids()
-    assert len(ids) == 15, f"应有 15 个 branch point IDs: {len(ids)}"
+    assert len(ids) == 20, f"应有 20 个 branch point IDs: {len(ids)}"
 
 
 def test_ready_count_is_zero():
@@ -304,11 +304,11 @@ def test_last_decision_frame_survives_multiple_sets():
 # ── count_by_status 合约 ──────────────────────────────────────────────────────
 
 
-def test_count_by_status_sum_is_14():
-    """各状态计数应总和为 15。"""
+def test_count_by_status_sum_is_20():
+    """各状态计数应总和为 20（含 Loop 3.4 scheduler 5 个 branch points）。"""
     counts = count_by_status()
     total = sum(counts.values())
-    assert total == 15, f"状态计数总和应为 15: {counts}"
+    assert total == 20, f"状态计数总和应为 20: {counts}"
 
 
 def test_count_by_status_has_no_ready():

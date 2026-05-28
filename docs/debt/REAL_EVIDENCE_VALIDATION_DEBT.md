@@ -147,9 +147,9 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Capability** | Advanced Scheduler — real provider plan → scheduler execution E2E |
 | **Missing evidence** | 真实 LLM 生成的 plan 通过 scheduler 推进执行（fake plan → scheduler execution 不证明 real provider plan parsing 正确） |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) planner.generate_plan() 返回真实 JSON plan；(3) scheduler 从真实 JSON plan 构造 ActionPlan；(4) scheduler 按序推进 node（TOOL_CALL/MEMORY_RETAIN/SKILL_SELECT 等）；(5) 每个 node 产生 dispatcher evidence（NODE_ENTER/NODE_EXIT）；(6) plan 完成后产生 ACTION_PLAN_COMPLETE evidence；(7) 验证 scheduler decision 影响 model context 和 user response |
-| **Current evidence** | Loop 3.4 SDD 完成（`docs/design/advanced-scheduler-contract.md`）；7 项架构决策；20 test intents 已定义；implementation pending |
-| **Status** | pending real provider plan → scheduler execution E2E |
-| **Blocking current code loop** | no — SDD/architecture decision 阶段不要求 real provider |
+| **Current evidence** | Loop 3.4 SDD 完成（`docs/design/advanced-scheduler-contract.md`）；7 项架构决策；implementation 完成：`agent/action_scheduler.py`（554 lines）+ `agent/runtime_integration/action_scheduler_handler.py` + `agent/loop.py` scheduler integration + RuntimeDecisionFrame 5 新 branch points；46 个 contract tests 全部通过（7 classes, 20 test intents covered）；scheduler 通过 dispatcher 产生 5 种 business evidence；137/137 regression tests pass |
+| **Status** | code path complete, real provider plan → scheduler execution E2E pending |
+| **Blocking current code loop** | no — implementation 阶段完成，real provider dogfood 不阻塞后续 loop |
 | **Blocking READY claim** | yes |
 
 ---

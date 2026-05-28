@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent.runtime_integration.action_scheduler_handler import ActionSchedulerHandler
 from agent.runtime_integration.checkpoint_resume import CheckpointResumeHandler
 from agent.runtime_integration.checkpoint_save import CheckpointSaveHandler
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
@@ -194,4 +195,14 @@ def build_phase1_dispatcher(
             RuntimeActionType.CLI_SHOW_SUBAGENTS,
             CliShowSubagentsHandler(subagent_registry=subagent_registry),
         )
+    # Loop 3.4: Advanced Scheduler — 5 个 scheduler action type 共享同一个 handler
+    _scheduler_handler = ActionSchedulerHandler()
+    for _scheduler_at in (
+        RuntimeActionType.ACTION_PLAN_START,
+        RuntimeActionType.NODE_ENTER,
+        RuntimeActionType.NODE_EXIT,
+        RuntimeActionType.NODE_FAILURE,
+        RuntimeActionType.ACTION_PLAN_COMPLETE,
+    ):
+        registry.register(_scheduler_at, _scheduler_handler)
     return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())

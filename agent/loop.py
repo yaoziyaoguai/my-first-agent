@@ -662,6 +662,10 @@ class LoopDependencies:
     on_trace_event: Any = None
     trace_run_id: str | None = None
     trace_id: str | None = None
+    # Loop 3.4: Advanced Scheduler — runtime-owned action graph executor。
+    # 默认 None——兼容旧行为。注入后 run_main_loop() 在 call_model() 之前
+    # 预处理 active action plan，按 depends_on 拓扑顺序推进 action node。
+    action_scheduler: Any = None
 
 
 def _emit_run_summary(
@@ -840,6 +844,19 @@ def run_main_loop(
                 cached_tool_calls=_guard_tool_calls,
             )
             return "对话循环次数过多，请简化任务或分步执行。"
+
+        # Loop 3.4: Advanced Scheduler — runtime-owned action graph preprocessing。
+        # 有 active action plan 时，按 depends_on 拓扑顺序推进 action node，
+        # 跳过 model 调用。无 pending node 时 complete plan 并 fall through 到 model。
+        _scheduler = getattr(dependencies, "action_scheduler", None)
+        if _scheduler is not None and _scheduler.has_active_plan():
+            _next_node = _scheduler.next_node()
+            if _next_node is not None:
+                _scheduler.execute_node(_next_node)
+                continue  # 不调模型，直接推进下一个 action node
+            else:
+                _scheduler.complete_plan()
+                # fall through to model call
 
         response = dependencies.call_model(turn_state, loop_ctx)
         _cached_loop_iterations = state.task.loop_iterations

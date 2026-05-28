@@ -349,6 +349,75 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
                            "模型 tool 路径和 CLI shortcut 未统一捕获",
         },
     ),
+    # Loop 3.4: Advanced Scheduler branch points
+    "scheduler.action_plan_start": BranchPointState(
+        branch_id="scheduler.action_plan_start",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.GUARD_TEST,
+        trigger_condition="scheduler.load_plan() 时触发",
+        execution_path="scheduler.load_plan → _dispatch_plan_start "
+                       "→ dispatcher.route_from_runtime_loop → ActionSchedulerHandler",
+        result_feedback_path="handler → evidence catalog → action_log",
+        not_ready_behavior="dispatcher=None 时 evidence 收集静默跳过，不影响 plan 执行",
+        decision_meta={
+            "why_partial": "handler + evidence catalog 已注册；"
+                           "缺少 contract test 和 real core loop dogfood 验证",
+        },
+    ),
+    "scheduler.node_enter": BranchPointState(
+        branch_id="scheduler.node_enter",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.GUARD_TEST,
+        trigger_condition="scheduler.execute_node() 开始时触发",
+        execution_path="scheduler.execute_node → _dispatch_node_enter "
+                       "→ dispatcher.route_from_runtime_loop → ActionSchedulerHandler",
+        result_feedback_path="handler → evidence catalog → action_log",
+        not_ready_behavior="dispatcher=None 时 evidence 收集静默跳过",
+        decision_meta={
+            "why_partial": "handler + evidence catalog 已注册；缺少 contract test",
+        },
+    ),
+    "scheduler.node_exit": BranchPointState(
+        branch_id="scheduler.node_exit",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.GUARD_TEST,
+        trigger_condition="scheduler.execute_node() 完成/跳过时触发",
+        execution_path="scheduler.execute_node → _dispatch_node_exit / "
+                       "_dispatch_skip_evidence → dispatcher.route_from_runtime_loop "
+                       "→ ActionSchedulerHandler",
+        result_feedback_path="handler → evidence catalog → action_log",
+        not_ready_behavior="dispatcher=None 时 evidence 收集静默跳过",
+        decision_meta={
+            "why_partial": "handler + evidence catalog 已注册；缺少 contract test",
+        },
+    ),
+    "scheduler.node_failure": BranchPointState(
+        branch_id="scheduler.node_failure",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.GUARD_TEST,
+        trigger_condition="scheduler.execute_node() 失败时触发",
+        execution_path="scheduler._handle_failure → _dispatch_node_failure "
+                       "→ dispatcher.route_from_runtime_loop → ActionSchedulerHandler",
+        result_feedback_path="handler → evidence catalog → action_log",
+        not_ready_behavior="dispatcher=None 时 evidence 收集静默跳过",
+        decision_meta={
+            "why_partial": "handler + evidence catalog 已注册；缺少 contract test",
+        },
+    ),
+    "scheduler.action_plan_complete": BranchPointState(
+        branch_id="scheduler.action_plan_complete",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.GUARD_TEST,
+        trigger_condition="scheduler.complete_plan() / halt_plan() 时触发",
+        execution_path="scheduler.complete_plan/halt_plan → _dispatch_plan_complete "
+                       "→ dispatcher.route_from_runtime_loop → ActionSchedulerHandler",
+        result_feedback_path="handler → evidence catalog → action_log",
+        not_ready_behavior="dispatcher=None 时 evidence 收集静默跳过",
+        decision_meta={
+            "why_partial": "handler + evidence catalog 已注册；缺少 contract test "
+                           "和 real core loop dogfood 验证",
+        },
+    ),
 }
 
 
@@ -468,6 +537,30 @@ class RuntimeDecisionFrame:
     result_feedback_expected: bool = True
     """是否预期有结果反馈。"""
 
+    # ── Scheduler 层（Loop 3.4）──
+    scheduler_active: bool = False
+    """是否有 active action plan（scheduler 正在推进 action node）。"""
+
+    current_plan_id: str = ""
+    """当前 active action plan 的 plan_id。"""
+
+    current_node_id: str = ""
+    """当前正在执行的 action node_id。"""
+
+    completed_nodes: int = 0
+    """已完成的 action node 数。"""
+
+    total_nodes: int = 0
+    """当前 plan 的总 action node 数。"""
+
+    scheduler_branch_points: tuple[str, ...] = (
+        "scheduler.action_plan_start",
+        "scheduler.node_enter",
+        "scheduler.node_exit",
+        "scheduler.node_failure",
+        "scheduler.action_plan_complete",
+    )
+
     # ── Trace / Evidence 层 ──
     evidence_level: EvidenceLevel = EvidenceLevel.DOCS_DESIGN
     """当前 turn 预期证据等级。"""
@@ -490,6 +583,7 @@ class RuntimeDecisionFrame:
             + self.mcp_branch_points
             + self.subagent_branch_points
             + self.checkpoint_branch_points
+            + self.scheduler_branch_points
             + self.trace_branch_points
         )
 
@@ -561,6 +655,12 @@ def build_decision_frame(
     confirmation_required: bool = False,
     evidence_level: EvidenceLevel = EvidenceLevel.DOCS_DESIGN,
     decision_meta: Mapping[str, Any] | None = None,
+    # Loop 3.4: Scheduler 字段
+    scheduler_active: bool = False,
+    current_plan_id: str = "",
+    current_node_id: str = "",
+    completed_nodes: int = 0,
+    total_nodes: int = 0,
 ) -> RuntimeDecisionFrame:
     """构造 RuntimeDecisionFrame。
 
@@ -588,6 +688,11 @@ def build_decision_frame(
         confirmation_required=confirmation_required,
         evidence_level=evidence_level,
         decision_meta=decision_meta or {},
+        scheduler_active=scheduler_active,
+        current_plan_id=current_plan_id,
+        current_node_id=current_node_id,
+        completed_nodes=completed_nodes,
+        total_nodes=total_nodes,
     )
 
 
@@ -615,6 +720,7 @@ def build_decision_frame_from_chat_params(
     skill_registry=None,
     runtime_action_dispatcher=None,
     tool_gate_tool_name: str | None = None,
+    action_scheduler=None,
 ) -> RuntimeDecisionFrame:
     """从 core.chat() 的参数构造 RuntimeDecisionFrame。
 
@@ -653,6 +759,23 @@ def build_decision_frame_from_chat_params(
     # set_mcp_bridge_result() 设置，is_mcp_active() 动态读取。
     from agent.mcp_bridge import is_mcp_active as _is_mcp_active
 
+    # Loop 3.4: Scheduler 状态——从注入的 ActionScheduler 实例读取
+    _scheduler_active = False
+    _plan_id = ""
+    _node_id = ""
+    _completed = 0
+    _total = 0
+    if action_scheduler is not None:
+        _sched_state = getattr(action_scheduler, "state", None)
+        if _sched_state is not None:
+            _scheduler_active = _sched_state.has_active_plan
+            if _sched_state.current_plan is not None:
+                _plan = _sched_state.current_plan
+                _plan_id = _plan.plan_id
+                _total = len(_plan.nodes)
+            _node_id = _sched_state.current_node_id or ""
+            _completed = len(_sched_state.completed_nodes)
+
     return build_decision_frame(
         user_input=user_input,
         provider_mode=provider_mode,
@@ -669,4 +792,9 @@ def build_decision_frame_from_chat_params(
             "has_dispatcher": runtime_action_dispatcher is not None,
             "has_skill_registry": skill_registry_active,
         },
+        scheduler_active=_scheduler_active,
+        current_plan_id=_plan_id,
+        current_node_id=_node_id,
+        completed_nodes=_completed,
+        total_nodes=_total,
     )

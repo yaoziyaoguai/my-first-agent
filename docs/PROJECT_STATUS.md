@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 3.4 SDD)
-**状态**: Loop 3.4 — Advanced Scheduler architecture decision / SDD 完成；`docs/design/advanced-scheduler-contract.md` 定义 runtime-owned action graph executor、7 项架构决策、20 test intents；scheduler 作为 run_main_loop() 内层扩展（不引入第二 runtime）；不宣称 scheduler READY — 标 architecture decision complete / implementation pending
+**最后更新**: 2026-05-28 (Loop 3.4 implementation)
+**状态**: Loop 3.4 — Advanced Scheduler code path complete, real validation pending；`agent/action_scheduler.py`（554 lines）实现 ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；`agent/runtime_integration/action_scheduler_handler.py` 注册 5 个 RuntimeActionType handler；scheduler 挂在 run_main_loop() 内层 model loop 前；46 个 contract tests 全部通过；RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；不宣称 scheduler READY — 标 code path complete, real validation pending [REAL-EVIDENCE-008]
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -237,7 +237,7 @@
 | Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a+3.2b 完成；**real provider dogfood (2026-05-28)**: L0 delegation (demo-stat) 确认正确运行，L1 需 real-model subagent descriptor（REAL-EVIDENCE-006 pending）；L2 session-scoped subagent deferred |
 | Loop 3.3 | Real MCP External Flight | **code path complete, real validation pending** — (1) module-level bridge state；(2) dynamic mcp_available；(3) main.py wiring；(4) 30 new contract tests PASS；(5) 11 getattr bug fixes；(6) 66/67 regression PASS。剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007） |
-| Loop 3.4 | Advanced Scheduler | **architecture decision complete / implementation pending** — SDD: `docs/design/advanced-scheduler-contract.md`（9 sections）；7 ADs（AD-1: model loop 前插入不替换 / AD-2: 不解析 NL / AD-3: 复用 ToolRegistry / AD-4: halt/skip 最小恢复 / AD-5: 5 business evidence types / AD-6: condition_flags / AD-7: 复用 planner）；5 新 RuntimeActionType；20 test intents；implementation scope: 5 new + 5 modified files。不宣称 READY |
+| Loop 3.4 | Advanced Scheduler | **PARTIAL** — code path complete, real validation pending: (1) `agent/action_scheduler.py` — ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；(2) `agent/runtime_integration/action_scheduler_handler.py` — 5 个 RuntimeActionType handler 在 dispatcher 注册（共 16 handlers）；(3) `agent/loop.py` — scheduler 挂在 run_main_loop() 内层 model loop 前；(4) RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；(5) 46 个 contract tests 全部通过；(6) 不宣称 READY — 剩真实 provider plan→scheduler E2E [REAL-EVIDENCE-008] |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER

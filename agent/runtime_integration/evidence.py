@@ -427,6 +427,45 @@ def _test_descriptors(
     )
 
 
+def _scheduler_descriptors() -> tuple[RuntimeActionTargetDescriptor, ...]:
+    """Loop 3.4: Advanced Scheduler 的 5 个 action type 的 catalog descriptors。
+
+    中文学习边界：
+    Scheduler handler 不执行真实业务逻辑——它只是验证 payload 结构完整性。
+    这些 descriptor 使用 _payload_value_adapter（identity pass-through），
+    因为 scheduler evidence 的 value 已经在 payload 中，不需要 adapter 转换。
+    """
+    _scheduler_action_types = (
+        "scheduler.action_plan_start",
+        "scheduler.node_enter",
+        "scheduler.node_exit",
+        "scheduler.node_failure",
+        "scheduler.action_plan_complete",
+    )
+    _handler = "agent.runtime_integration.action_scheduler_handler.ActionSchedulerHandler"
+    _operations = (
+        "action_plan_start",
+        "node_enter",
+        "node_exit",
+        "node_failure",
+        "action_plan_complete",
+    )
+    return tuple(
+        _descriptor(
+            at,
+            _handler,
+            "ActionScheduler",
+            operation=op,
+            invocation_adapter_id=f"ActionScheduler.{op}",
+            implementation_id=f"agent.action_scheduler.ActionScheduler.{op}",
+            adapter=_payload_value_adapter,
+            function_called=f"ActionScheduler.{op}",
+            call_signature=f"{op}(payload: dict)",
+        )
+        for at, op in zip(_scheduler_action_types, _operations, strict=True)
+    )
+
+
 class RuntimeActionTargetCatalog:
     """RuntimeAction target identity allowlist.
 
@@ -943,6 +982,8 @@ class RuntimeActionTargetCatalog:
             operation="run",
             invocation_adapter_id="MatrixHarness.test_adapter",
         ),
+        # Loop 3.4: Advanced Scheduler — 5 action types, 共用一个 identity adapter
+        *_scheduler_descriptors(),
     )
     _by_key: ClassVar[dict[tuple[str, str, str, str, str], RuntimeActionTargetDescriptor]] = {
         (

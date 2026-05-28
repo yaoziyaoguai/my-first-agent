@@ -36,6 +36,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.evaluation_honesty import EvidenceClassification  # noqa: E402
+
 OUTPUT_DIR = PROJECT_ROOT / "docs" / "dogfood"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +131,8 @@ class CaseResult:
 
     case_id: str
     category: str
-    status: str = "SKIPPED"  # PASS | CONCERN | FAIL | BLOCKED | TIMEOUT
+    status: str = "SKIPPED"  # PASS | CONCERN | FAIL | BLOCKED | TIMEOUT | SMOKE_PASS
+    evidence_classification: str = "smoke_pass"  # Loop 4.1: 显式证据等级
     exit_code: int | None = None
     timeout: bool = False
     duration_ms: float = 0.0
@@ -406,30 +409,35 @@ class CaseEvaluator:
         # BLOCKED: subprocess 无法启动
         if exit_code is None and not timed_out:
             result.status = "BLOCKED"
+            result.evidence_classification = EvidenceClassification.CAPABILITY_FAIL.value
             result.notes.append("subprocess failed to start")
             return result
 
         # TIMEOUT
         if timed_out:
             result.status = "TIMEOUT"
+            result.evidence_classification = EvidenceClassification.CAPABILITY_FAIL.value
             result.notes.append(f"case timed out after {spec.timeout_s}s")
             return result
 
         # FAIL: crash / traceback
         if "TRACEBACK_DETECTED" in result.detected_events:
             result.status = "FAIL"
+            result.evidence_classification = EvidenceClassification.CAPABILITY_FAIL.value
             result.notes.append("traceback detected in output")
             return result
 
         # FAIL: non-zero exit
         if exit_code is not None and exit_code != 0:
             result.status = "FAIL"
+            result.evidence_classification = EvidenceClassification.CAPABILITY_FAIL.value
             result.notes.append(f"non-zero exit code: {exit_code}")
             return result
 
         # FAIL: secret leak - 这是 hard failure
         if "SECRET_LEAK_DETECTED" in result.detected_events:
             result.status = "FAIL"
+            result.evidence_classification = EvidenceClassification.CAPABILITY_FAIL.value
             result.notes.append("SECRET LEAK: API key pattern found in output")
             return result
 
@@ -476,6 +484,7 @@ class CaseEvaluator:
         # ── 无实质断言 → SMOKE_PASS ────────────────────────────────────
         if not has_any_assertions:
             result.status = "SMOKE_PASS"
+            result.evidence_classification = EvidenceClassification.SMOKE_PASS.value
             result.notes.append(
                 "no meaningful assertions (fragments/events/business_actions all empty); "
                 "no-crash is NOT capability evidence"
@@ -483,7 +492,8 @@ class CaseEvaluator:
             return result
 
         # ── 判定等级 ───────────────────────────────────────────────────
-        # 收集所有问题
+        # Loop 4.1: 显式区分 SMOKE / CAPABILITY——fake harness 下的
+        # PASS 只能证明 code path complete，不是 real capability
         issues: list[str] = []
         if missing_fragments:
             issues.append(f"missing expected fragments: {missing_fragments}")
@@ -494,8 +504,23 @@ class CaseEvaluator:
 
         if not issues:
             result.status = "PASS"
+            # fake-first harness — 即使 PASS 也只能标 code path complete
+            has_cap_assertions = any(
+                ba and ba != "" for ba in spec.expected_business_actions
+            )
+            if has_cap_assertions:
+                result.evidence_classification = (
+                    EvidenceClassification.REAL_VALIDATION_PENDING.value
+                )
+            else:
+                result.evidence_classification = (
+                    EvidenceClassification.SMOKE_PASS.value
+                )
         else:
             result.status = "CONCERN"
+            result.evidence_classification = (
+                EvidenceClassification.REAL_VALIDATION_PENDING.value
+            )
             result.notes.extend(issues)
 
         return result

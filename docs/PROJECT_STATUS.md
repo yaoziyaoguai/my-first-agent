@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 3.4 implementation)
-**状态**: Loop 3.4 — Advanced Scheduler code path complete, real validation pending；`agent/action_scheduler.py`（554 lines）实现 ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；`agent/runtime_integration/action_scheduler_handler.py` 注册 5 个 RuntimeActionType handler；scheduler 挂在 run_main_loop() 内层 model loop 前；46 个 contract tests 全部通过；RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；不宣称 scheduler READY — 标 code path complete, real validation pending [REAL-EVIDENCE-008]
+**最后更新**: 2026-05-28 (Loop 4.1 implementation)
+**状态**: Loop 4.1 — Dogfood / Evaluation Harness Honesty code path complete；新建 `agent/evaluation_honesty.py`（EvidenceClassification 4 级枚举 + EvaluationReport schema + classify_evaluation/classify_smoke_vs_capability 分类引擎）；SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt；41 个 evaluation honesty guard tests 全部通过；`scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -219,7 +219,7 @@
 
 ## 2. 推荐下一步
 
-**Loop 3.2b 完成。** Child memory scope 通过 parent ToolRuntimeMediator 中介。**Loop 2.2/3.2 真实 provider dogfood 验证 (2026-05-28)**: Skill Selection (REAL-EVIDENCE-002) validated — SKILL_SELECT 成功选择 demo-note-maker，_active_skill 正确设置；Skill allowed_tools (REAL-EVIDENCE-003) evidence chain verified — TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline 完整；SubAgent L1 (REAL-EVIDENCE-006) L0 delegation 在真实 provider 下确认正确运行，L1 real-provider child loop 需 real-model subagent descriptor（deferred）。修复了 `_update_active_skill_from_dispatcher` 中 RuntimeActionEvent 字段访问 bug。
+**Loop 4.1 完成。** 红队补审发现 Dogfood/Evaluation Harness 14/14 降级——根因是把 fake/direct-call/expected_events/no-crash/smoke 当 capability completion。新建 `agent/evaluation_honesty.py`（EvidenceClassification 4 级枚举 + classify_evaluation 分类引擎 + EvaluationReport schema），41 个 guard tests 确保 overclaim 模式不再出现。`scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段。**Loop 2.2/3.2 真实 provider dogfood 验证 (2026-05-28)**: Skill Selection validated, Skill allowed_tools evidence chain verified, SubAgent L0 delegation confirmed。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -238,6 +238,7 @@
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — Loop 3.2a+3.2b 完成；**real provider dogfood (2026-05-28)**: L0 delegation (demo-stat) 确认正确运行，L1 需 real-model subagent descriptor（REAL-EVIDENCE-006 pending）；L2 session-scoped subagent deferred |
 | Loop 3.3 | Real MCP External Flight | **code path complete, real validation pending** — (1) module-level bridge state；(2) dynamic mcp_available；(3) main.py wiring；(4) 30 new contract tests PASS；(5) 11 getattr bug fixes；(6) 66/67 regression PASS。剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007） |
 | Loop 3.4 | Advanced Scheduler | **PARTIAL** — code path complete, real validation pending: (1) `agent/action_scheduler.py` — ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；(2) `agent/runtime_integration/action_scheduler_handler.py` — 5 个 RuntimeActionType handler 在 dispatcher 注册（共 16 handlers）；(3) `agent/loop.py` — scheduler 挂在 run_main_loop() 内层 model loop 前；(4) RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；(5) 46 个 contract tests 全部通过；(6) 不宣称 READY — 剩真实 provider plan→scheduler E2E [REAL-EVIDENCE-008] |
+| Loop 4.1 | Evaluation/Dogfood Harness Honesty | **code path complete** — (1) `agent/evaluation_honesty.py`（~220 lines）：EvidenceClassification 4 级枚举 + EvaluationEvidence/EvaluationReport dataclass + classify_evaluation/classify_smoke_vs_capability 分类引擎；(2) NON_CAPABILITY_PROVIDERS/ASSERTIONS + CAPABILITY_ASSERTIONS frozenset 定义；(3) `scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段；(4) 41 个 guard tests（`tests/unit/test_evaluation_honesty.py`，10 classes）全部通过；(5) SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER

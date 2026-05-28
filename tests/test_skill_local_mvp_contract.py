@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = PROJECT_ROOT / "agent"
 TOMBSTONE_SKILLS_DIR = AGENT_DIR / "skills"
@@ -94,7 +93,7 @@ def test_formal_skill_namespace_is_empty_or_independent() -> None:
 
 
 def test_prompt_builder_no_longer_imports_legacy_skill_registry() -> None:
-    """prompt_builder 不能再扫描旧 registry 或注入旧 Skill section。"""
+    """prompt_builder 使用 agent.skill_system.prompt_section（新路径），不导入旧 legacy。"""
 
     prompt_builder = AGENT_DIR / "prompt_builder.py"
     imports = _module_imports(prompt_builder)
@@ -102,8 +101,12 @@ def test_prompt_builder_no_longer_imports_legacy_skill_registry() -> None:
 
     assert "agent.skills.registry" not in imports
     assert "agent.legacy_skills.registry" not in imports
-    assert "return \"\"" in source
-    assert "progressive disclosure" in source
+    # Loop 2.2: prompt_builder 从 agent.skill_system.prompt_section 导入
+    # build_skills_prompt_section / build_skill_body_section（新路径）
+    assert "agent.skill_system.prompt_section" in imports, (
+        "prompt_builder 应从 agent.skill_system.prompt_section 导入 skill section builder"
+    )
+    assert "build_skills_prompt_section" in source or "build_skill_body_section" in source
 
 
 def test_disabled_skill_lifecycle_wrappers_do_not_import_legacy_code() -> None:

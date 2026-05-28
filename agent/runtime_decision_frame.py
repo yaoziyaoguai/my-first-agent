@@ -104,28 +104,34 @@ class BranchPointState:
 BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
     "skill.select": BranchPointState(
         branch_id="skill.select",
-        status=BranchPointStatus.NOT_READY,
-        evidence_level=EvidenceLevel.GUARD_TEST,
-        trigger_condition="每 turn turn-end hook，但默认 skill_registry=None",
-        execution_path="dispatcher → SkillSelectHandler → no_skill_available",
-        result_feedback_path="handler → dispatcher result → action_log (rejected)",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="每 turn turn-end hook，skill_registry 已注入 LoopDependencies",
+        execution_path="loop.turn_end → dispatcher → SkillSelectHandler "
+                       "→ model_decision_metadata 校验 → result (success/rejected)",
+        result_feedback_path="handler → dispatcher result → action_log → "
+                             "_update_active_skill_from_dispatcher",
         not_ready_behavior="skill_registry=None 时 handler 返回 no_suitable_skill，引擎不 crash",
         decision_meta={
-            "why_not_ready": "LoopDependencies.skill_registry 默认 None，"
-                             "main path 不注入 skill registry",
+            "why_partial": "fake provider 路径通过 turn-end hook 自动选择第一个可见 skill；"
+                           "真实模型路径尚未验证 SKILL_SELECT dispatch 是否被模型 tool call 触发；"
+                           "auto-select 是 demo 机制，不是 production skill selection",
         },
     ),
     "skill.apply": BranchPointState(
         branch_id="skill.apply",
-        status=BranchPointStatus.STUB,
-        evidence_level=EvidenceLevel.DOCS_DESIGN,
-        trigger_condition="skill.select 成功后才会触发",
-        execution_path="(未实现)",
-        result_feedback_path="(未实现)",
-        not_ready_behavior="build_skills_section() 返回空字符串，不影响主路径",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="skill.select 成功后，下一轮 refresh_runtime_system_prompt()",
+        execution_path="core.chat → _update_active_skill_from_dispatcher → "
+                       "refresh_runtime_system_prompt → build_system_prompt → "
+                       "[Active Skill Instructions] section",
+        result_feedback_path="system_prompt → model context（body 可见）",
+        not_ready_behavior="无 active skill 时 skip，不影响主路径",
         decision_meta={
-            "why_not_ready": "skill body 未注入 model prompt，"
-                             "allowed_tools 未约束模型可用工具",
+            "why_partial": "skill body 已注入 model prompt（[Active Skill Instructions]），"
+                           "但 allowed_tools 约束尚未实现——模型仍可使用 skill 声明之外的任意工具；"
+                           "tool constraint enforcement 是 skill.apply 的核心语义缺口",
         },
     ),
     "memory.recall": BranchPointState(

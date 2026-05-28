@@ -29,9 +29,9 @@ from agent.runtime_integration.evidence import (
     RuntimeActionModuleObserver,
 )
 from agent.runtime_integration.schema import RuntimeActionRequest
+from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
-from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
 
 
 def _build_skill_dispatcher():
@@ -121,10 +121,14 @@ class TestSkillSelectL3:
         assert evidence.get("core_entrypoint") == "core.chat"
         assert evidence.get("runtime_hook_name") == "loop.turn_end"
 
-        # payload: empty registry → handler rejected
+        # payload: handler registry 为空，但 Loop 2.2 bridge 注入的 metadata
+        # 来自真实 registry（非空），所以 no_suitable_skill 为 False；
+        # handler 因 registry 不匹配返回 failed，L3 evidence 链仍完整
         payload = dict(skill_result.payload)
         assert payload.get("body_load_decision") is False
-        assert payload.get("no_suitable_skill") is True
+        assert "failure_reason" in payload, (
+            f"应包含 failure_reason，实际 payload keys: {list(payload.keys())}"
+        )
 
     def test_skill_select_l3_status_is_failed_with_empty_registry(self):
         """空 registry → SKILL_SELECT 返回 status='failed'，但 L3 evidence 完整。

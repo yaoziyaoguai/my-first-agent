@@ -57,6 +57,7 @@ def build_phase1_dispatcher(
     *,
     memory_runtime: Any = None,
     subagent_registry: Any = None,
+    skill_registry: Any = None,
 ) -> RuntimeActionDispatcher:
     """构建 Phase 1 RuntimeActionDispatcher。
 
@@ -65,6 +66,8 @@ def build_phase1_dispatcher(
     streaming event handler（共 11 个 handler）。
     Streaming 已接入（STREAMING_PROVIDER_CALL + STREAMING_EVENT），
     SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
+
+    skill_registry: 可选，由调用方注入（避免重复扫描 filesystem）。不传则内部构建。
 
     Phase 1 dispatcher 特征：
     - MemoryTurnEndProposalHandler（pending_review only，proposal generation）
@@ -119,7 +122,9 @@ def build_phase1_dispatcher(
     # SKILL_SELECT：通过 build_skill_registry() 扫描 skills/ 目录。
     # 旧格式 skill（缺少 version/status 必填字段）进入 _load_errors，
     # 不会出现在 list_visible() 中。
-    _skill_registry = build_skill_registry()
+    # Loop 2.2: 调用方可通过 skill_registry 参数注入已构建的 registry，
+    # 避免重复扫描 filesystem。
+    _skill_registry = skill_registry if skill_registry is not None else build_skill_registry()
     _skill_loader = SkillLoader(_skill_registry)
     registry.register(
         RuntimeActionType.SKILL_SELECT,

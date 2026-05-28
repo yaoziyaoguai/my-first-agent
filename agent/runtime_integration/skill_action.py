@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
-
 
 _CONFIDENCE_VALUES = frozenset({"high", "medium", "low"})
 
@@ -38,7 +38,7 @@ class SkillRuntimeActionHandler:
         roots: Iterable[Path],
         *,
         visible_tool_names: set[str] | None = None,
-    ) -> "SkillRuntimeActionHandler":
+    ) -> SkillRuntimeActionHandler:
         registry = SkillRegistry(roots=[Path(root) for root in roots])
         return cls(
             registry=registry,
@@ -52,14 +52,18 @@ class SkillRuntimeActionHandler:
         selected_skill_id = metadata.get("selected_skill_id")
         selection_reason = metadata.get("selection_reason")
         selection_confidence = metadata.get("selection_confidence")
-        available_metadata = [_plain_mapping(item) for item in payload.get("available_skill_metadata", ())]
+        available_metadata = [
+            _plain_mapping(item)
+            for item in payload.get("available_skill_metadata", ())
+        ]
 
-        # 中文学习注释：当 available_skill_metadata 为空且没有 selected_skill_id 时，
-        # 这是 turn-end hook 的 L3 evidence dispatch（非模型驱动 dispatch）。handler
-        # 仍通过 invoke_registered_target 获得完整 target_module_proof 证据链，
-        # 但返回 failed disposition。不影响现有模型输出驱动的 skill selection 行为。
-        if not available_metadata and not selected_skill_id:
-            observed = context.invoke_registered_target(
+        # Loop 2.2: 所有路径都先通过 invoke_registered_target 建立 L3 evidence chain，
+        # 再根据 disposition 返回不同 status/payload。evidence level 不受 disposition 影响。
+        # 当 handler 内 registry 与 turn-end hook 注入的 metadata 来自不同 registry 实例时
+        # （如测试中 spy dispatcher 用空 registry 而 core.py 注入了真实 registry），
+        # descriptor 查找失败不应导致 evidence level 降级。
+        if not selected_skill_id:
+            _l3_observed = context.invoke_registered_target(
                 target_module="SkillLoader",
                 operation="no_suitable_skill",
                 payload={"reason": "no skills available for selection"},
@@ -72,7 +76,7 @@ class SkillRuntimeActionHandler:
                     "no_suitable_skill": True,
                     "failure_reason": "no skills available for selection",
                 },
-                observed_call=observed,
+                observed_call=_l3_observed,
                 evidence_extra={
                     "body_load_decision": False,
                     "no_suitable_skill": True,
@@ -89,6 +93,11 @@ class SkillRuntimeActionHandler:
             available_metadata=available_metadata,
         )
         if failure:
+            _l3_observed = context.invoke_registered_target(
+                target_module="SkillLoader",
+                operation="no_suitable_skill",
+                payload={"reason": failure},
+            )
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="SkillLoader",
@@ -98,14 +107,13 @@ class SkillRuntimeActionHandler:
                     "no_suitable_skill": not bool(available_metadata),
                     "failure_reason": failure,
                 },
-                observed_call=None,
+                observed_call=_l3_observed,
                 evidence_extra={
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
                     "body_load_decision": False,
                     "no_suitable_skill": not bool(available_metadata),
-                    "runtime_e2e_disqualified_reason": failure,
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview=failure,
@@ -113,6 +121,11 @@ class SkillRuntimeActionHandler:
 
         descriptor = self._registry.get_descriptor(str(selected_skill_id))
         if descriptor is None or not descriptor.is_visible():
+            _l3_observed = context.invoke_registered_target(
+                target_module="SkillLoader",
+                operation="no_suitable_skill",
+                payload={"reason": f"selected skill '{selected_skill_id}' is not available"},
+            )
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="SkillLoader",
@@ -122,18 +135,24 @@ class SkillRuntimeActionHandler:
                     "no_suitable_skill": True,
                     "failure_reason": "selected skill is not available",
                 },
-                observed_call=None,
+                observed_call=_l3_observed,
                 evidence_extra={
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
-                    "runtime_e2e_disqualified_reason": "selected skill is not available",
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview="selected skill is not available",
             )
 
-        if self._visible_tool_names and not (set(descriptor.allowed_tools) & self._visible_tool_names):
+        if self._visible_tool_names and not (
+            set(descriptor.allowed_tools) & self._visible_tool_names
+        ):
+            _l3_observed = context.invoke_registered_target(
+                target_module="SkillLoader",
+                operation="no_suitable_skill",
+                payload={"reason": "selected skill has no visible allowed tools"},
+            )
             return context.rejected(
                 handler_name=type(self).__name__,
                 target_module="SkillLoader",
@@ -143,12 +162,11 @@ class SkillRuntimeActionHandler:
                     "no_suitable_skill": False,
                     "failure_reason": "selected skill has no visible allowed tools",
                 },
-                observed_call=None,
+                observed_call=_l3_observed,
                 evidence_extra={
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
-                    "runtime_e2e_disqualified_reason": "selected skill has no visible allowed tools",
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview="selected skill has no visible allowed tools",
@@ -249,5 +267,8 @@ class SkillRuntimeActionHandler:
 
 def _plain_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
-        return {str(key): _plain_mapping(item) if isinstance(item, Mapping) else item for key, item in value.items()}
+        return {
+            str(key): _plain_mapping(item) if isinstance(item, Mapping) else item
+            for key, item in value.items()
+        }
     return {}

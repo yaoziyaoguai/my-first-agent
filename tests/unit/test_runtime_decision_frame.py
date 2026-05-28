@@ -30,7 +30,7 @@ def test_branch_point_registry_is_frozen():
     # 但公开查询接口走 _FROZEN_REGISTRY (MappingProxyType)
     bp = get_branch_point("skill.select")
     assert bp is not None
-    assert bp.status == BranchPointStatus.NOT_READY
+    assert bp.status == BranchPointStatus.PARTIAL
 
 
 def test_branch_point_registry_has_14_points():
@@ -68,26 +68,35 @@ def test_all_branch_points_have_not_ready_behavior():
 # ── 诚实标记合约 ──────────────────────────────────────────────────────────────
 
 
-def test_skill_select_is_not_ready_not_complete():
-    """skill.select 必须标 NOT_READY——默认 registry=None。"""
+def test_skill_select_is_partial():
+    """skill.select 标 PARTIAL——registry 已注入 main path，但 auto-select 是 demo 机制。"""
     bp = get_branch_point("skill.select")
     assert bp is not None
-    assert bp.status == BranchPointStatus.NOT_READY, (
-        f"skill.select 应标 NOT_READY 而非 {bp.status}——默认 main path 不注入 skill_registry"
+    assert bp.status == BranchPointStatus.PARTIAL, (
+        f"skill.select 应标 PARTIAL 而非 {bp.status}"
+        f"——registry 已注入但 auto-select 非 production 路径"
     )
     assert not bp.is_capability_complete(), "skill.select 不应声称 capability complete"
-    assert bp.should_not_silent_pass(), "skill.select 不应 silent pass"
+    # PARTIAL 可以有部分功能，should_not_silent_pass 仅对 NOT_READY/DEFERRED/STUB 为 True
+    assert "why_partial" in bp.decision_meta, (
+        "skill.select PARTIAL 必须通过 decision_meta.why_partial 声明不完整的真实原因"
+    )
 
 
-def test_skill_apply_is_stub():
-    """skill.apply 必须标 STUB——body 未注入 model prompt。"""
+def test_skill_apply_is_partial():
+    """skill.apply 标 PARTIAL——body 已注入 prompt，但 allowed_tools 约束尚未实现。"""
     bp = get_branch_point("skill.apply")
     assert bp is not None
-    assert bp.status == BranchPointStatus.STUB, (
-        f"skill.apply 应标 STUB 而非 {bp.status}"
+    assert bp.status == BranchPointStatus.PARTIAL, (
+        f"skill.apply 应标 PARTIAL 而非 {bp.status}——body 已注入但 tool constraint 未实现"
     )
-    assert not bp.is_capability_complete()
-    assert bp.should_not_silent_pass()
+    assert not bp.is_capability_complete(), "skill.apply 不应声称 capability complete"
+    assert "why_partial" in bp.decision_meta, (
+        "skill.apply PARTIAL 必须声明 why_partial"
+    )
+    assert "allowed_tools" in str(bp.decision_meta.get("why_partial", "")), (
+        "skill.apply 的 why_partial 必须提及 allowed_tools 约束缺口"
+    )
 
 
 def test_mcp_discover_is_deferred():
@@ -374,8 +383,8 @@ def test_chat_builds_decision_frame():
     assert "hello from test" in frame.user_input
 
 
-def test_chat_decision_frame_skill_not_active():
-    """默认 chat 路径 skill_registry 不应激活。"""
+def test_chat_decision_frame_skill_registry_active():
+    """Loop 2.2: 默认 chat 路径 skill_registry 已激活——bridge 已注入 main path。"""
     import agent.core as core
 
     core.state.reset_task()
@@ -383,9 +392,8 @@ def test_chat_decision_frame_skill_not_active():
 
     frame = get_last_decision_frame()
     assert frame is not None
-    assert not frame.skill_registry_active, (
-        "默认 chat 路径不应激活 skill_registry——"
-        "不能把 registry=None 当 capability complete"
+    assert frame.skill_registry_active, (
+        "Loop 2.2 bridge 已连接：skill_registry 应注入 main path 并反映在 decision frame 中"
     )
 
 

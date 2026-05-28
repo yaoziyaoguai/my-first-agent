@@ -240,12 +240,38 @@ class TurnState:
     print_assistant_newline: bool = False
 
 
-def refresh_runtime_system_prompt(dispatcher=None):
+# Loop 2.2: 跨 turn 追踪当前激活的 Skill（通过 dispatcher action_log 更新）。
+_active_skill: dict[str, str] = {}
+
+
+def _update_active_skill_from_dispatcher(dispatcher) -> None:
+    """从 dispatcher action_log 提取最近一次 SKILL_SELECT 成功结果。"""
+    global _active_skill
+    for event in reversed(getattr(dispatcher, "action_log", [])):
+        if getattr(event, "action_type", None) is None:
+            continue
+        if getattr(event.action_type, "value", "") == "skill.select":
+            result = getattr(event, "result", None)
+            if result is None:
+                continue
+            payload = dict(getattr(result, "payload", {}) or {})
+            if payload.get("body_load_decision"):
+                skill_id = str(payload.get("selected_skill_id") or "")
+                body = str(payload.get("loaded_body_preview") or "")
+                if skill_id and body:
+                    _active_skill = {"skill_id": skill_id, "body": body}
+                return
+
+
+def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
     """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
     Loop 3 (Memory E2E) 收敛：当 dispatcher 可用时，MEMORY_RECALL 通过
     RuntimeActionDispatcher 统一 dispatch，确保 fake/real 共享核心 recall 路径。
     模块初始化时 dispatcher 为 None，回退到直接路径。
+
+    Loop 2.2: skill_registry 用于生成可用技能列表 prompt section；
+    注入激活 Skill body（上一轮 SKILL_SELECT 成功加载的 body）。
 
     返回 (system_prompt, snapshot_item_count)，调用方由此获得 memory 条数，
     无需再直接调用 _memory_runtime.snapshot_for_prompt()。
@@ -266,11 +292,19 @@ def refresh_runtime_system_prompt(dispatcher=None):
         result = route(request)
         memory_section = result.payload.get("prompt_section", "")
         snapshot_item_count = int(result.payload.get("snapshot_item_count") or 0)
-        system_prompt = build_system_prompt(memory_section=memory_section)
+        system_prompt = build_system_prompt(
+            memory_section=memory_section,
+            skill_registry=skill_registry,
+            active_skill_section=_active_skill.get("body", ""),
+        )
     else:
         memory_snapshot = _memory_runtime.snapshot_for_prompt()
         snapshot_item_count = len(memory_snapshot.items)
-        system_prompt = build_system_prompt(memory_snapshot=memory_snapshot)
+        system_prompt = build_system_prompt(
+            memory_snapshot=memory_snapshot,
+            skill_registry=skill_registry,
+            active_skill_section=_active_skill.get("body", ""),
+        )
 
     state.set_system_prompt(system_prompt)
     return state.get_system_prompt(), snapshot_item_count
@@ -413,11 +447,15 @@ def chat(
     from pathlib import Path as _Path
 
     from agent.runtime_integration.phase1_hook import build_phase1_dispatcher as _build_p1
+    from agent.runtime_integration.phase1_hook import build_skill_registry as _build_skill_registry
     from agent.subagent_system.registry import SubAgentRegistry as _SubAgentRegistry
 
+    # Loop 2.2: 构建 skill_registry 一次，同时传给 dispatcher builder 和主路径。
+    _skill_registry = _build_skill_registry()
     _p1_dispatcher = _build_p1(
         memory_runtime=_memory_runtime,
         subagent_registry=_SubAgentRegistry(roots=[_Path("agent/subagent_system/descriptors")]),
+        skill_registry=_skill_registry,
     )
 
     # ── CLI meta-command 边界说明 ──────────────────────────────────────────
@@ -725,8 +763,10 @@ def chat(
     # tool_use 丢进摘要，留下悬空 tool_result，下次调用 API 会直接报错。
 
     # Loop 3 (Memory E2E): 传入 dispatcher 统一 recall 路径
+    # Loop 2.2: 传入 skill_registry 生成 Skill 可用列表 prompt section
     runtime_system_prompt, snapshot_item_count = refresh_runtime_system_prompt(
-        dispatcher=runtime_action_dispatcher
+        dispatcher=runtime_action_dispatcher,
+        skill_registry=_skill_registry,
     )
 
     # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。
@@ -823,10 +863,8 @@ def chat(
     # 否则复用 _p1_dispatcher。
     if runtime_action_dispatcher is not None:
         _phase1_dispatcher = runtime_action_dispatcher
-        _skill_registry = None
     else:
         _phase1_dispatcher = _p1_dispatcher
-        _skill_registry = None
 
     # ── Loop 1.1: Runtime Decision Spine ──────────────────────────────────────
     # 在入口处构建统一 decision frame，描述当前 turn 所有子系统分支点状态。
@@ -1095,7 +1133,11 @@ def _run_main_loop(
     if tool_gate_tool_name is not None:
         _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name
     dependencies = LoopDependencies(**_deps_fields)
-    return run_main_loop(turn_state, loop_ctx, dependencies)
+    result = run_main_loop(turn_state, loop_ctx, dependencies)
+    # Loop 2.2: 主循环完成后，从 dispatcher action_log 提取 SKILL_SELECT 结果，
+    # 更新跨 turn active skill 状态。
+    _update_active_skill_from_dispatcher(dependencies.runtime_action_dispatcher)
+    return result
 
 
 

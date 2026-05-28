@@ -22,6 +22,7 @@ from agent.runtime_integration.checkpoint_save import CheckpointSaveHandler
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+from agent.runtime_integration.mcp_bridge_lifecycle import MCPBridgeLifecycleHandler
 from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
 from agent.runtime_integration.memory_forget import MemoryForgetHandler
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
@@ -64,8 +65,8 @@ def build_phase1_dispatcher(
     """构建 Phase 1 RuntimeActionDispatcher。
 
     注册 memory turn-end proposal + retain + recall + consolidate + tool pipeline +
-    checkpoint + skill select + subagent delegate + streaming provider call +
-    streaming event handler（共 11 个 handler）。
+    checkpoint + mcp bridge lifecycle + skill select + subagent delegate + streaming
+    provider call + streaming event handler（共 12 个 handler）。
     Streaming 已接入（STREAMING_PROVIDER_CALL + STREAMING_EVENT），
     SubAgent 已接入（SUBAGENT_DELEGATE_L0）。
 
@@ -124,6 +125,10 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.CHECKPOINT_RESUME,
         CheckpointResumeHandler(),
+    )
+    registry.register(
+        RuntimeActionType.MCP_BRIDGE_LIFECYCLE,
+        MCPBridgeLifecycleHandler(),
     )
     registry.register(
         RuntimeActionType.MEMORY_CONSOLIDATE,

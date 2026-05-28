@@ -237,28 +237,40 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
     ),
     "mcp.discover": BranchPointState(
         branch_id="mcp.discover",
-        status=BranchPointStatus.DEFERRED,
-        evidence_level=EvidenceLevel.DOCS_DESIGN,
-        trigger_condition="(未启用 — 默认 bridge disabled)",
-        execution_path="(未接入主路径 — mcp_bridge 未在 core.chat 中调用)",
-        result_feedback_path="(未接入)",
-        not_ready_behavior="MCP bridge 默认 disabled，不影响主路径",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="session 启动时 MY_FIRST_AGENT_MCP_ENABLE=1",
+        execution_path="main.py → _init_mcp_bridge_if_enabled → run_mcp_bridge()"
+                       " → dispatcher.route(MCP_BRIDGE_LIFECYCLE) → evidence recording",
+        result_feedback_path="MCPBridgeReport + dispatcher evidence (MCP_BRIDGE_LIFECYCLE)",
+        not_ready_behavior="MCP bridge 默认 disabled；需显式 opt-in",
         decision_meta={
-            "why_deferred": "MCP bridge 默认 disabled；core.chat 不调用 run_mcp_bridge()；"
-                            "未来需复用 Tool pipeline",
+            "why_partial": (
+                "code path complete: bridge lifecycle 通过 disposable dispatcher"
+                " 产生 MCP_BRIDGE_LIFECYCLE evidence；仅 FakeMCPClient 验证；"
+                "真实 MCP server 连接 pending (REAL-EVIDENCE-005)"
+            ),
         },
     ),
     "mcp.invoke": BranchPointState(
         branch_id="mcp.invoke",
-        status=BranchPointStatus.DEFERRED,
-        evidence_level=EvidenceLevel.DOCS_DESIGN,
-        trigger_condition="(未启用 — 需 mcp.discover 先完成注册)",
-        execution_path="(未接入 — 需先注册 MCP tool 到 ToolRegistry)",
-        result_feedback_path="(未接入)",
-        not_ready_behavior="MCP tools 不在 model-visible tools 中",
+        status=BranchPointStatus.PARTIAL,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="模型发起 mcp__* tool call（需 MCP_ENABLE + bridge registration 成功）",
+        execution_path="get_model_visible_tools(max_mcp_tools=5) → model tool_use →"
+                       " handle_tool_use_response → ToolRuntimeMediator →"
+                       " TOOL_GATE→TOOL_INVOKE→TOOL_RESULT → execute_single_tool",
+        result_feedback_path="append_tool_result → conversation context（复用 Tool pipeline）",
+        not_ready_behavior="production 中 confirmation='always' 默认拦截；"
+                           "MCP tools 需用户逐次确认",
         decision_meta={
-            "why_deferred": "需先完成 mcp.discover → register → ToolRegistry；"
-                            "MCP 必须复用 Tool confirmation/executor/result feedback",
+            "why_partial": (
+                "code path complete: MCP 工具复用统一 Tool pipeline；"
+                "L3 evidence 已通过 core.chat() 验证"
+                " (test_mcp_l3_real_core_loop.py)；"
+                "production 中 confirmation='always' 默认拦截；"
+                "真实 MCP server 连接 pending (REAL-EVIDENCE-005)"
+            ),
         },
     ),
     "subagent.delegate": BranchPointState(
@@ -629,7 +641,7 @@ def build_decision_frame_from_chat_params(
         active_skill_candidates=active_candidates,
         memory_explicit_request=False,  # 由 evaluate_user_text 后置判定
         tool_gate_tool_name=gate_name,
-        mcp_available=False,  # MCP 默认 DEFERRED
+        mcp_available=False,  # MCP 默认 disabled（需显式 opt-in）
         subagent_available=False,  # 仅 L0 fake/demo
         subagent_level="L0",
         evidence_level=ev_level,

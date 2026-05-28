@@ -42,6 +42,7 @@ class RuntimeActionType(StrEnum):
     # MUTATING/DELEGATING commands (forget/delegate) 需要 confirmation pipeline 就绪后再迁入。
     CLI_SHOW_MEMORIES = "cli.show_memories"
     CLI_SHOW_SUBAGENTS = "cli.show_subagents"
+    MCP_BRIDGE_LIFECYCLE = "mcp.bridge_lifecycle"
 
 
 # ── Evidence Kind Classification ──────────────────────────────────────────────
@@ -78,6 +79,7 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.MCP_BRIDGE_LIFECYCLE: _EVIDENCE_KIND_PROBE,
 }
 
 

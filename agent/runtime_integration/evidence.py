@@ -268,6 +268,18 @@ def _checkpoint_resume_restore_adapter(payload: Mapping[str, Any]) -> dict[str, 
     }
 
 
+def _mcp_bridge_lifecycle_initialize_adapter(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Catalog-owned adapter for MCPBridgeLifecycle.initialize invocation。"""
+    return {
+        "mode": str(payload.get("mode") or "disabled"),
+        "dry_run": bool(payload.get("dry_run", True)),
+        "servers_configured": int(payload.get("servers_configured") or 0),
+        "servers_evaluated": int(payload.get("servers_evaluated") or 0),
+        "tools_discovered": int(payload.get("tools_discovered") or 0),
+        "tools_registered": int(payload.get("tools_registered") or 0),
+    }
+
+
 def _memory_consolidation_adapter(payload: Mapping[str, Any]) -> Any:
     """Catalog-owned adapter for consolidation pipeline invocation。
 
@@ -591,6 +603,17 @@ class RuntimeActionTargetCatalog:
             adapter=_checkpoint_resume_restore_adapter,
             function_called="CheckpointResume.restore",
             call_signature="restore(resume_mode: str)",
+        ),
+        _descriptor(
+            "mcp.bridge_lifecycle",
+            "agent.runtime_integration.mcp_bridge_lifecycle.MCPBridgeLifecycleHandler",
+            "MCPBridgeLifecycle",
+            operation="initialize",
+            invocation_adapter_id="MCPBridgeLifecycle.initialize",
+            implementation_id="agent.mcp_bridge.run_mcp_bridge",
+            adapter=_mcp_bridge_lifecycle_initialize_adapter,
+            function_called="MCPBridgeLifecycle.initialize",
+            call_signature="initialize(mode: str, dry_run: bool, tools_registered: int)",
         ),
         _descriptor(
             "streaming.provider_call",

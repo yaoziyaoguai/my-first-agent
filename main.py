@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from agent.checkpoint import load_checkpoint
 from agent.cli.commands import dispatch_maintenance_command
 from agent.cli.display import (
     _forward_runtime_event_to_legacy_callbacks,
@@ -19,6 +20,7 @@ from agent.cli.input_backends import (
     read_user_input,  # noqa: F401 - main.read_user_input 是既有 public seam
     read_user_input_event,
 )
+from agent.cli_renderer import render_onboarding, render_provider_mode_banner, render_status_line
 from agent.core import chat, get_state
 from agent.display_events import (
     EVENT_ASSISTANT_DELTA,
@@ -29,20 +31,17 @@ from agent.display_events import (
 from agent.input_intents import classify_user_input
 from agent.memory_review import run_pending_review_cli
 from agent.session import (
-    init_session,
-    try_resume_from_checkpoint,
     finalize_session,
+    handle_double_interrupt,
+    handle_interrupt_choice,
     handle_interrupt_with_checkpoint,
     handle_interrupt_without_checkpoint,
-    handle_double_interrupt,
     handle_resume_choice,
-    handle_interrupt_choice,
+    init_session,
     summarize_session_status,
+    try_resume_from_checkpoint,
 )
-from agent.cli_renderer import render_provider_mode_banner, render_status_line, render_onboarding
-from agent.checkpoint import load_checkpoint
 from config import load_legacy_dotenv_config
-
 
 CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
 
@@ -383,11 +382,46 @@ def main_loop():
                 break
 
 
+def _try_dispatch_mcp_bridge_lifecycle(report, mode: str, dry_run: bool) -> None:
+    """通过 disposable dispatcher 记录 MCP bridge lifecycle evidence。
+
+    模式与 session.py _try_dispatch_checkpoint_resume() 一致：
+    dispatcher 按需构建，仅用于 evidence recording。构建失败时静默跳过。
+    """
+    try:
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        dispatcher = build_phase1_dispatcher()
+        dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.MCP_BRIDGE_LIFECYCLE,
+            source="main.mcp_bridge",
+            parent_trace_id="",
+            payload={
+                "mode": mode,
+                "dry_run": dry_run,
+                "servers_configured": report.servers_configured,
+                "servers_evaluated": report.servers_evaluated,
+                "tools_discovered": report.tools_discovered,
+                "tools_registered": report.tools_registered,
+                "overall_decision": report.overall_decision,
+                "errors": report.errors,
+            },
+        ))
+    except Exception:
+        pass
+
+
 def _init_mcp_bridge_if_enabled() -> None:
     """MCP bridge thin wrapper：只在 MY_FIRST_AGENT_MCP_ENABLE=1 时运行。
 
     不修改 core.py、不绕过 policy gate、默认 disabled。
     bridge 在 init_session 之前运行，将 MCP tools 注册到 TOOL_REGISTRY。
+    Loop 2.4: bridge report 生成后通过 disposable dispatcher 记录
+    MCP_BRIDGE_LIFECYCLE evidence。
     """
     import os
 
@@ -407,6 +441,8 @@ def _init_mcp_bridge_if_enabled() -> None:
             mode=mode,  # type: ignore[arg-type]
             dry_run=dry_run,
         )
+        # Loop 2.4: 通过 disposable dispatcher 记录 MCP_BRIDGE_LIFECYCLE evidence
+        _try_dispatch_mcp_bridge_lifecycle(report, mode, dry_run)
         # bridge report 只打印短摘要，不打印 raw descriptor / raw result
         print(
             f"\n[MCP Bridge] mode={report.mode} "

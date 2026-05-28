@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 2.2b push)
-**状态**: Loop 2.2b — Skill allowed_tools enforcement **code path complete**；ToolGateHandler 拦截非允许工具，real model SKILL_SELECT + real dogfood E2E 登记为 validation debt
+**最后更新**: 2026-05-28 (Loop 2.4 push)
+**状态**: Loop 2.4 — MCP Main-Path Readiness **code path complete**；bridge lifecycle 已接入 dispatcher evidence chain，mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；真实 MCP server 连接登记为 REAL-EVIDENCE-005
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -160,8 +160,8 @@
 |-------------|------|---------|------|
 | skill.select | PARTIAL | FAKE_LOCAL_USER_PATH | registry 已注入，fake provider 路径 auto-select；缺真实模型 SKILL_SELECT tool call |
 | skill.apply | PARTIAL | FAKE_LOCAL_USER_PATH | body 已注入 [Active Skill Instructions]；allowed_tools enforcement 已实现（ToolGateHandler→rejected→FORCE_STOP），缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
-| mcp.discover | DEFERRED | DOCS_DESIGN | bridge 默认 disabled |
-| mcp.invoke | DEFERRED | DOCS_DESIGN | 需先完成 discover |
+| mcp.discover | PARTIAL | FAKE_LOCAL_USER_PATH | bridge lifecycle 通过 disposable dispatcher 产生 evidence；main.py → run_mcp_bridge() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
+| mcp.invoke | PARTIAL | FAKE_LOCAL_USER_PATH | MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT），L3 evidence 已有；缺真实 MCP server 连接（REAL-EVIDENCE-005） |
 | subagent.delegate | FAKE_DEMO | FAKE_LOCAL_USER_PATH | 仅 L0 deterministic executor |
 | memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
@@ -219,7 +219,7 @@
 
 ## 2. 推荐下一步
 
-**Loop 1.1 — Unified Runtime Decision Spine IN PROGRESS。**
+**Loop 2.4 已完成。** MCP bridge lifecycle 已接入 dispatcher evidence chain，discover/invoke branch points 已从 DEFERRED 迁入 PARTIAL。下一 code loop 推荐 Loop 3.2（Real SubAgent L1/L2），但需架构决策。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -234,7 +234,7 @@
 | Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — code path complete：forget→dispatcher done；recall fallback fixed；store mismatch 已修复；15 L2+L3 contract tests pass。real dogfood E2E 已登记为 validation debt [REAL-EVIDENCE-001](docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md)，不阻塞后续代码 loop |
 | Loop 2.2 | Skill Activation Main-Path Completion | **code path complete, real validation pending** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler 拦截非允许工具→rejected→FORCE_STOP→不进 execute_single_tool，ToolRuntimeMediator 传递 skill_allowed_tools；(3) 13 L2 contract + 6 L3 pipeline + 15 skill tool enforcement tests 全部通过。剩余：真实模型 SKILL_SELECT tool call（REAL-EVIDENCE-002）、real dogfood E2E（REAL-EVIDENCE-003）已登记为 validation debt |
 | Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
-| Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |
+| Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
 | Loop 3.2 | Real SubAgent L1/L2 | pending |
 
 **已完成的历史 loops（安全可自动修）**：

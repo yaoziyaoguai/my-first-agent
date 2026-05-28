@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 2.3 — REAL-EVIDENCE-004 registered)
+**最后更新**: 2026-05-28 (Loop 2.4 — REAL-EVIDENCE-005 registered)
 
 ---
 
@@ -89,6 +89,21 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 checkpoint save（plan 生成、memory confirmation、或压缩同步）；(3) 验证 CHECKPOINT_SAVE dispatcher evidence 产生且 save_succeeded=True；(4) 模拟中断（Ctrl+C）并在下次启动时 resume；(5) 验证 CHECKPOINT_RESUME dispatcher evidence 产生且 restore_succeeded=True；(6) 验证 resume 后 conversation context、task state、pending action 一致继续；(7) 验证 save→resume dispatcher evidence chain 可追溯（action_log 中两种 action type 都存在）；(8) 验证 RuntimeDecisionFrame 正确反映 checkpoint 状态；(9) 验证不是 save/load file smoke 或 no-crash 冒充 true resume |
 | **Current evidence** | 16 contract tests pass（4 save mediation + 5 resume mediation + 4 roundtrip + 2 not fakeable + 1 L3 hook-level）；core.py 3 处 direct save_checkpoint 已迁入 dispatcher-mediated CHECKPOINT_SAVE；session.py resume 路径通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；CheckpointSaveHandler/CheckpointResumeHandler 在 phase1_hook.py 注册；RuntimeDecisionFrame checkpoint branch points 更新为 code path complete；但**未运行真实 API / real dogfood** |
 | **Status** | pending real API / real dogfood roundtrip validation |
+| **Blocking current code loop** | no |
+| **Blocking READY claim** | yes |
+
+---
+
+### REAL-EVIDENCE-005
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Loop 2.4 / commit pending |
+| **Capability** | MCP Bridge — real MCP server connection |
+| **Missing evidence** | 真实 stdio MCP server 连接、真实 tool discovery、真实 tool execution 跨进程验证 |
+| **Required validation** | (1) 搭建本地 MCP server fixture（如 filesystem server）；(2) 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + `MY_FIRST_AGENT_MCP_DRY_RUN=0` + MCP config 文件；(3) 启动真实 chat loop；(4) 验证 `run_mcp_bridge()` 真实连接 server 并注册 tools；(5) 验证 MCP tools 出现在 model-visible tools 中；(6) 验证模型可调用 MCP tool 并通过 TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline 执行；(7) 验证 TOOL_INVOKE 调用了真实 StdioMCPClient（非 FakeMCPClient）；(8) 验证 dispatcher evidence chain 完整（bridge lifecycle + tool pipeline）|
+| **Current evidence** | bridge lifecycle dispatcher evidence（MCP_BRIDGE_LIFECYCLE RuntimeActionType）；L3 core.chat() tests 验证 MCP tool pipeline（但使用 FakeMCPClient + confirmation='never'）；mcp.discover/mcp.invoke branch points 标 PARTIAL（code path complete, real server pending）|
+| **Status** | pending real MCP server connection |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 

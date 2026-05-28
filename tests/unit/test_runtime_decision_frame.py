@@ -99,24 +99,30 @@ def test_skill_apply_is_partial():
     )
 
 
-def test_mcp_discover_is_deferred():
-    """mcp.discover 必须标 DEFERRED——bridge 默认 disabled。"""
+def test_mcp_discover_is_partial():
+    """mcp.discover 应标 PARTIAL——bridge lifecycle code path complete, real server pending。"""
     bp = get_branch_point("mcp.discover")
     assert bp is not None
-    assert bp.status == BranchPointStatus.DEFERRED, (
-        f"mcp.discover 应标 DEFERRED 而非 {bp.status}"
+    assert bp.status == BranchPointStatus.PARTIAL, (
+        f"mcp.discover 应标 PARTIAL 而非 {bp.status}"
     )
     assert not bp.is_capability_complete()
+    assert "REAL-EVIDENCE-005" in str(bp.decision_meta.get("why_partial", "")), (
+        "mcp.discover 的 why_partial 必须引用 REAL-EVIDENCE-005"
+    )
 
 
-def test_mcp_invoke_is_deferred():
-    """mcp.invoke 必须标 DEFERRED——需先完成 discover + registration。"""
+def test_mcp_invoke_is_partial():
+    """mcp.invoke 应标 PARTIAL——MCP tools 复用 unified Tool pipeline, real server pending。"""
     bp = get_branch_point("mcp.invoke")
     assert bp is not None
-    assert bp.status == BranchPointStatus.DEFERRED, (
-        f"mcp.invoke 应标 DEFERRED 而非 {bp.status}"
+    assert bp.status == BranchPointStatus.PARTIAL, (
+        f"mcp.invoke 应标 PARTIAL 而非 {bp.status}"
     )
     assert not bp.is_capability_complete()
+    assert "REAL-EVIDENCE-005" in str(bp.decision_meta.get("why_partial", "")), (
+        "mcp.invoke 的 why_partial 必须引用 REAL-EVIDENCE-005"
+    )
 
 
 def test_subagent_delegate_is_fake_demo():
@@ -231,7 +237,12 @@ def test_capability_summary_never_claims_complete():
         "当前没有任何子系统达到生产级完成度，不应声称 capability complete"
     )
     assert summary["ready"] == 0
-    assert summary["not_ready"] > 0
+    # Loop 2.4: MCP branch points 从 DEFERRED 迁入 PARTIAL 后，
+    # not_ready 可能为 0，但 partial 应 > 0（有 PARTIAL/FAKE_DEMO 子系统）
+    assert summary["partial"] > 0 or summary["fake_demo"] > 0, (
+        f"应有 PARTIAL 或 FAKE_DEMO 子系统: partial={summary['partial']}, "
+        f"fake_demo={summary['fake_demo']}"
+    )
 
 
 def test_all_branch_point_ids_returns_all():
@@ -247,16 +258,12 @@ def test_ready_count_is_zero():
     assert frame.ready_count() == 0
 
 
-def test_not_ready_count_positive():
-    """not_ready_count 应 > 0——有未就绪子系统。"""
-    frame = build_decision_frame("test")
-    assert frame.not_ready_count() > 0
-
-
 def test_partial_count_positive():
-    """partial_count 应 > 0——有部分完成子系统。"""
+    """partial_count 应 > 0——所有 code path complete 子系统均为 PARTIAL。"""
     frame = build_decision_frame("test")
-    assert frame.partial_count() > 0
+    assert frame.partial_count() > 0, (
+        "至少有 PARTIAL 子系统（checkpoint/MCP/skill/tool/memory）"
+    )
 
 
 # ── 模块级 inspection seam 合约 ────────────────────────────────────────────────
@@ -397,8 +404,8 @@ def test_chat_decision_frame_skill_registry_active():
     )
 
 
-def test_chat_decision_frame_mcp_deferred():
-    """默认 chat 路径 MCP 应标不可用。"""
+def test_chat_decision_frame_mcp_not_available_by_default():
+    """默认 chat 路径 MCP 应标不可用——需显式 opt-in。"""
     import agent.core as core
 
     core.state.reset_task()
@@ -407,8 +414,7 @@ def test_chat_decision_frame_mcp_deferred():
     frame = get_last_decision_frame()
     assert frame is not None
     assert not frame.mcp_available, (
-        "默认 chat 路径 MCP 不应可用——"
-        "不能把 bridge disabled 当 capability complete"
+        "默认 chat 路径 MCP 不应可用——需显式 opt-in (MY_FIRST_AGENT_MCP_ENABLE=1)"
     )
 
 

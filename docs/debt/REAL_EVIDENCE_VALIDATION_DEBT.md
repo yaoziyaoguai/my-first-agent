@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 3.3 code-path completion — REAL-EVIDENCE-005/007 evidence 更新)
+**最后更新**: 2026-05-28 (Loop 3.4 SDD — REAL-EVIDENCE-008 登记)
 
 ---
 
@@ -135,6 +135,21 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Current evidence** | bridge lifecycle dispatcher evidence（MCP_BRIDGE_LIFECYCLE + disposable dispatcher）；L3 core.chat() tests 验证 MCP tool pipeline（但使用 FakeMCPClient + confirmation='never' test hack）；mcp.discover/mcp.invoke branch points 标 PARTIAL（code path complete, real server pending）；Loop 3.3 SDD 完成（`docs/design/mcp-real-external-flight-contract.md`）定义 opt-in contract + 17 test intents；Loop 3.3 code-path completion: 30 个 contract tests 全部通过 — module-level bridge state / dynamic mcp_available / server allowlist main.py wiring / registration→gate→invoke→result 路径验证 / getattr eager evaluation bug 修复（11 处）|
 | **Status** | code path complete, real external server connection pending |
 | **Blocking current code loop** | no |
+| **Blocking READY claim** | yes |
+
+---
+
+### REAL-EVIDENCE-008
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Loop 3.4 SDD / architecture decision phase |
+| **Capability** | Advanced Scheduler — real provider plan → scheduler execution E2E |
+| **Missing evidence** | 真实 LLM 生成的 plan 通过 scheduler 推进执行（fake plan → scheduler execution 不证明 real provider plan parsing 正确） |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) planner.generate_plan() 返回真实 JSON plan；(3) scheduler 从真实 JSON plan 构造 ActionPlan；(4) scheduler 按序推进 node（TOOL_CALL/MEMORY_RETAIN/SKILL_SELECT 等）；(5) 每个 node 产生 dispatcher evidence（NODE_ENTER/NODE_EXIT）；(6) plan 完成后产生 ACTION_PLAN_COMPLETE evidence；(7) 验证 scheduler decision 影响 model context 和 user response |
+| **Current evidence** | Loop 3.4 SDD 完成（`docs/design/advanced-scheduler-contract.md`）；7 项架构决策；20 test intents 已定义；implementation pending |
+| **Status** | pending real provider plan → scheduler execution E2E |
+| **Blocking current code loop** | no — SDD/architecture decision 阶段不要求 real provider |
 | **Blocking READY claim** | yes |
 
 ---

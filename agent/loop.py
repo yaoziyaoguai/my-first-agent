@@ -482,6 +482,18 @@ def _try_phase1_turn_end_runtime_action(
                     ),
                     "selection_confidence": "high",
                 }
+            # 真实 provider 路径：确定性 keyword matching fallback。
+            # 中文学习注释 —— 与 fake auto-select 的关键区别：
+            # - fake: 无条件选择第一个可见 skill → 仅用于测试 L3 evidence chain
+            # - real: 基于 last_user（用户输入）与 skill name/description/tags
+            #   的 keyword matching → 没有匹配时不选择，保持 no_suitable_skill
+            # - 匹配结果可解释（matched_terms, match_score），方便调试
+            # - 确定性：相同输入总是相同输出，不依赖模型行为
+            elif _visible and last_user:
+                from agent.skill_selection import select_skill_for_real_provider
+                _decision = select_skill_for_real_provider(last_user, _visible)
+                if _decision is not None:
+                    _skill_payload["model_decision_metadata"] = _decision
 
         skill_request = RuntimeActionRequest(
             action_type=RuntimeActionType.SKILL_SELECT,

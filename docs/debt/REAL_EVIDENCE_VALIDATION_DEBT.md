@@ -57,7 +57,7 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Capability** | Skill Activation — real model SKILL_SELECT tool call |
 | **Missing evidence** | 真实模型（非 FakeProvider）在真实 chat loop 中是否触发 SKILL_SELECT tool call |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 输入能触发 Skill selection 的用户请求；(3) 验证模型是否真实调用 SKILL_SELECT tool；(4) 验证 SkillRegistry / dispatcher / RuntimeDecisionFrame 有对应 evidence；(5) 验证 `_active_skill` 被设置并进入后续 runtime path（system prompt 包含 [Active Skill Instructions]） |
-| **Current evidence** | registry bridge 已连接、prompt injection 已实现、13 L2 skill bridge tests pass + 6 L3 pipeline tests pass；allowed_tools enforcement code path 已完成（15 contract tests pass）；但**未运行真实模型 SKILL_SELECT** |
+| **Current evidence** | registry bridge 已连接、prompt injection 已实现、13 L2 skill bridge + 6 L3 pipeline + 15 skill tool enforcement tests pass；**Loop 2.2 remediation (2026-05-28)**: 新增 `agent/skill_selection.py` 确定性 keyword matching fallback + 15 real provider selection tests pass——real provider 路径不再无条件 no_suitable_skill，但 keyword matching 不是真实模型 tool call；仍需真实模型自主 SKILL_SELECT tool call 验证 |
 | **Status** | pending real API / real model validation |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
@@ -72,7 +72,7 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Capability** | Skill allowed_tools enforcement — real dogfood E2E |
 | **Missing evidence** | 真实 core loop 中 skill allowed_tools 约束工具执行的端到端验证 |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发一个带 allowed_tools 的 active Skill；(3) 让模型尝试调用允许工具，验证可正常执行；(4) 让模型尝试调用不允许工具，验证在执行前被 ToolGateHandler block（gate_disposition="rejected"）；(5) 验证 blocked tool 不进入 execute_single_tool（tool_execution_log status="blocked_by_policy"）；(6) 验证 dispatcher / RuntimeDecisionFrame / trace evidence 与用户可见结果一致；(7) 验证 skill 取消激活后工具恢复正常 |
-| **Current evidence** | 15 skill tool enforcement contract tests pass（6 ToolGate + 6 Mediator + 3 NotFakeable）；ToolGateHandler 在生产路径中检查 skill_allowed_tools → rejected；ToolRuntimeMediator 传递 skill_allowed_tools；blocked 工具返回 FORCE_STOP 不进 execute_single_tool；但**未运行真实 API / real dogfood** |
+| **Current evidence** | 15 skill tool enforcement contract tests pass（6 ToolGate + 6 Mediator + 3 NotFakeable）；ToolGateHandler 在生产路径中检查 skill_allowed_tools → rejected；ToolRuntimeMediator 传递 skill_allowed_tools；blocked 工具返回 FORCE_STOP 不进 execute_single_tool；**Loop 2.2 remediation (2026-05-28)**: real provider 路径已可通过 keyword matching 填充 model_decision_metadata 并触发 skill activation（含 allowed_tools enforcement），operator-observed SKILL_SELECT 不再总是 no_suitable_skill；但仍缺真实 dogfood 端到端验证 |
 | **Status** | pending real API / real dogfood validation |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |

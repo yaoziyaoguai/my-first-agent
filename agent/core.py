@@ -258,8 +258,15 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
             if payload.get("body_load_decision"):
                 skill_id = str(payload.get("selected_skill_id") or "")
                 body = str(payload.get("loaded_body_preview") or "")
+                allowed_tools = frozenset(
+                    payload.get("allowed_tools_after_selection") or ()
+                )
                 if skill_id and body:
-                    _active_skill = {"skill_id": skill_id, "body": body}
+                    _active_skill = {
+                        "skill_id": skill_id,
+                        "body": body,
+                        "allowed_tools": allowed_tools,
+                    }
                 return
 
 

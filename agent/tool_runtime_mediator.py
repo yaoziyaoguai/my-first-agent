@@ -51,12 +51,14 @@ class ToolRuntimeMediator:
         turn_state: Any,
         turn_context: dict[str, Any],
         messages: list[dict[str, Any]],
+        skill_allowed_tools: frozenset[str] | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._state = state
         self._turn_state = turn_state
         self._turn_context = turn_context
         self._messages = messages
+        self._skill_allowed_tools = skill_allowed_tools
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -160,19 +162,25 @@ class ToolRuntimeMediator:
     ) -> str | None:
         """TOOL_GATE：dispatcher 门控 evidence（execute_single_tool 之前调用）。
 
+        Loop 2.2b: skill_allowed_tools 传入 payload，由 ToolGateHandler 执行
+        skill 工具约束检查，非允许工具返回 rejected。
+
         Returns:
             gate_disposition: "allowed" / "rejected" / "confirmation_required" / None
         """
         try:
+            gate_payload: dict[str, Any] = {
+                "tool_name": tool_name,
+                "tool_input": dict(tool_input) if tool_input else {},
+            }
+            if self._skill_allowed_tools is not None:
+                gate_payload["skill_allowed_tools"] = sorted(self._skill_allowed_tools)
             result = self._dispatcher.route_from_runtime_loop(
                 RuntimeActionRequest(
                     action_type=RuntimeActionType.TOOL_GATE,
                     source="ToolRuntimeMediator",
                     parent_trace_id=tool_use_id,
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_input": dict(tool_input) if tool_input else {},
-                    },
+                    payload=gate_payload,
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="handle_tool_use_response",

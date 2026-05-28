@@ -224,8 +224,17 @@ def handle_tool_use_response(
 
     # Loop 1.3 方案 2：构造 ToolRuntimeMediator 作为 dispatcher 中介层。
     # mediator 共享 turn_context（execute_single_tool 通过它传递执行结果）。
+    # Loop 2.2b: skill_allowed_tools 从 _active_skill 传入 mediator，
+    # 由 ToolGateHandler 在 execute_single_tool 之前执行工具约束检查。
     if runtime_action_dispatcher is not None:
         from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+        _skill_at: frozenset[str] | None = None
+        try:
+            from agent.core import _active_skill as _ask
+            _skill_at = _ask.get("allowed_tools") if _ask else None
+        except ImportError:
+            _skill_at = None
 
         _mediator = ToolRuntimeMediator(
             runtime_action_dispatcher,
@@ -233,6 +242,7 @@ def handle_tool_use_response(
             turn_state=turn_state,
             turn_context=turn_context,
             messages=messages,
+            skill_allowed_tools=_skill_at,
         )
     else:
         _mediator = None

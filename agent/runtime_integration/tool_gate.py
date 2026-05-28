@@ -8,7 +8,6 @@ from typing import Any
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
 
-
 _FORBIDDEN_TOOL_NAMES = frozenset({"bash", "shell", "run_shell"})
 
 
@@ -42,11 +41,16 @@ class ToolGateHandler:
 
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
         import agent.tools  # noqa: F401 - ensure production tools are registered
-        from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools, needs_tool_confirmation
+        from agent.tool_registry import (
+            TOOL_REGISTRY,
+            get_model_visible_tools,
+            needs_tool_confirmation,
+        )
 
         payload = dict(request.payload)
         tool_name = str(payload.get("tool_name") or "")
         requested_capability = str(payload.get("requested_capability") or "")
+        skill_allowed_tools = payload.get("skill_allowed_tools")
 
         if not tool_name:
             # 中文学习注释：当 action_type 为 tool.request 且 tool_name 为空时，
@@ -62,7 +66,10 @@ class ToolGateHandler:
                 return context.failed(
                     handler_name=type(self).__name__,
                     target_module="ToolRegistry",
-                    payload={"gate_disposition": None, "rejection_reason": "no tool requested at turn-end"},
+                    payload={
+                        "gate_disposition": None,
+                        "rejection_reason": "no tool requested at turn-end",
+                    },
                     observed_call=observed,
                     evidence_extra={
                         "decision": "failed",
@@ -80,6 +87,37 @@ class ToolGateHandler:
                     "runtime_e2e_disqualified_reason": "tool_name is required",
                 },
                 error_safe_preview="tool_name is required",
+            )
+
+        # Loop 2.2b: active skill allowed_tools enforcement — 在 tool registry
+        # lookup 之前检查，非允许工具直接 rejected，不进入 execute_single_tool。
+        # 安全策略检查，不走 invoke_registered_target（无对应 catalog entry），
+        # evidence 由 TOOL_GATE dispatch 自身提供。
+        if skill_allowed_tools and tool_name not in skill_allowed_tools:
+            return context.rejected(
+                handler_name=type(self).__name__,
+                target_module="ToolRegistry",
+                payload={
+                    "gate_disposition": "rejected",
+                    "risk_level": "low",
+                    "policy_path": "skill_allowed_tools→rejected",
+                    "rejection_reason": "tool not in active skill allowed_tools",
+                    "registry_handler_invoked": True,
+                    "target_module_invoked": False,
+                    "dangerous_tool_function_invoked": False,
+                },
+                observed_call=None,
+                evidence_extra={
+                    "requested_tool_name": tool_name,
+                    "requested_capability": requested_capability,
+                    "capability_type": "skill_tool_constraint",
+                    "production_capability": True,
+                    "production_registry_found": False,
+                    "dogfood_overlay_found": False,
+                    "decision": "rejected",
+                    "skill_allowed_tools": list(skill_allowed_tools),
+                },
+                error_safe_preview="tool not in active skill allowed_tools",
             )
 
         production_registry_found = tool_name in TOOL_REGISTRY
@@ -110,15 +148,16 @@ class ToolGateHandler:
             risk_level = "unknown"
             rejection_reason = "tool not found in production ToolRegistry"
         elif tool_name.startswith("_"):
-            # 最小 allowlist：只放行 _safe_noop / _confirmable_noop（内部 branch behavior 验证工具）。
-            # 其他 `_` 前缀工具仍 blocked——不是无条件放行所有下划线工具。
+            # 最小 allowlist：只放行 _safe_noop / _confirmable_noop
+            # （内部 branch behavior 验证工具），其他 `_` 前缀工具仍 blocked
             # _safe_noop 通过 allowlist 后走正常 confirmation policy 检查
             # （needs_tool_confirmation 返回 False → gate_disposition="allowed"）。
             # _confirmable_noop 通过 allowlist 后走同一 needs_tool_confirmation 检查
             # （confirmation="always" → gate_disposition="confirmation_required"）。
             if tool_name in ("_safe_noop", "_confirmable_noop"):
                 risk_level = str(entry.get("risk_level", "low"))
-                confirmation = needs_tool_confirmation(tool_name, dict(payload.get("tool_args") or {}))
+                tool_args = dict(payload.get("tool_args") or {})
+                confirmation = needs_tool_confirmation(tool_name, tool_args)
                 if confirmation == "block":
                     gate_disposition = "rejected"
                     decision = "rejected"
@@ -216,7 +255,9 @@ class ToolGateHandler:
                     "production_registry_found": True,
                     "dogfood_overlay_found": overlay_tool is not None,
                     "decision": "failed",
-                    "runtime_e2e_disqualified_reason": "fake tool exists in production ToolRegistry",
+                    "runtime_e2e_disqualified_reason": (
+                        "fake tool exists in production ToolRegistry"
+                    ),
                 },
                 error_safe_preview="fake tool exists in production ToolRegistry",
             )

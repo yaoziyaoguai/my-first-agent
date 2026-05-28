@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-28 (Loop 2.2 push)
-**状态**: Loop 2.2 — Skill Activation Main-Path Completion **PARTIAL**；bridge 已连接，body 注入已实现
+**最后更新**: 2026-05-28 (Loop 2.2b push)
+**状态**: Loop 2.2b — Skill allowed_tools enforcement **code path complete**；ToolGateHandler 拦截非允许工具，real model SKILL_SELECT + real dogfood E2E 登记为 validation debt
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -159,7 +159,7 @@
 | Branch Point | 状态 | 证据等级 | 说明 |
 |-------------|------|---------|------|
 | skill.select | PARTIAL | FAKE_LOCAL_USER_PATH | registry 已注入，fake provider 路径 auto-select；缺真实模型 SKILL_SELECT tool call |
-| skill.apply | PARTIAL | FAKE_LOCAL_USER_PATH | body 已注入 [Active Skill Instructions]；allowed_tools 约束尚未实现 |
+| skill.apply | PARTIAL | FAKE_LOCAL_USER_PATH | body 已注入 [Active Skill Instructions]；allowed_tools enforcement 已实现（ToolGateHandler→rejected→FORCE_STOP），缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | mcp.discover | DEFERRED | DOCS_DESIGN | bridge 默认 disabled |
 | mcp.invoke | DEFERRED | DOCS_DESIGN | 需先完成 discover |
 | subagent.delegate | FAKE_DEMO | FAKE_LOCAL_USER_PATH | 仅 L0 deterministic executor |
@@ -232,7 +232,7 @@
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — code path complete：forget→dispatcher done；recall fallback fixed；store mismatch 已修复；15 L2+L3 contract tests pass。real dogfood E2E 已登记为 validation debt [REAL-EVIDENCE-001](docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md)，不阻塞后续代码 loop |
-| Loop 2.2 | Skill Activation Main-Path Completion | **PARTIAL** — bridge 已连接：skill_registry→LoopDependencies→turn-end hook→dispatcher→SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt。13 L2 contract tests pass + 6 L3 pipeline tests pass。剩余缺口：allowed_tools 约束、真实模型 SKILL_SELECT tool call、real dogfood E2E |
+| Loop 2.2 | Skill Activation Main-Path Completion | **code path complete, real validation pending** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler 拦截非允许工具→rejected→FORCE_STOP→不进 execute_single_tool，ToolRuntimeMediator 传递 skill_allowed_tools；(3) 13 L2 contract + 6 L3 pipeline + 15 skill tool enforcement tests 全部通过。剩余：真实模型 SKILL_SELECT tool call（REAL-EVIDENCE-002）、real dogfood E2E（REAL-EVIDENCE-003）已登记为 validation debt |
 | Loop 2.3 | Storage/Checkpoint True Resume | pending |
 | Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |
 | Loop 3.2 | Real SubAgent L1/L2 | pending |
@@ -246,7 +246,7 @@
 | B2 | CLI forget shortcut → dispatcher | **DONE** — forget 已迁入 MEMORY_FORGET dispatcher path；delegate 仍待 SubAgent L1/L2 |
 | B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
 | B4 | MCP real connection | 需要外部 MCP server |
-| B5 | Skill runtime 深化 | PARTIAL — body 注入已实现；缺 allowed_tools 约束 + 真实 API skill marketplace |
+| B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | 需要 schema 大改 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
 | B8 | TUI architecture | 需要 TUI framework decision |

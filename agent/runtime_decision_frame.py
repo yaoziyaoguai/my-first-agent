@@ -178,8 +178,10 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         result_feedback_path="dispatcher result → core.py 检查 forgotten 状态 → 用户通知",
         not_ready_behavior="dispatcher 不可用时 handler 返回 rejected",
         decision_meta={
-            "why_partial": "dispatcher-mediated forget 主路径已实现（L2 contract tests pass）；"
-                           "缺少 L3 real core loop E2E 验证",
+            "why_partial": "dispatcher-mediated forget 主路径已实现；"
+                           "L2+L3 contract tests pass（5 L2 + 5 L3 shared-store）；"
+                           "store mismatch 已修复（retain/recall/forget 共享同一 store 实例）；"
+                           "缺少 real core loop dogfood E2E 验证（实际 /forget 命令交互）",
         },
     ),
     "tool.gate": BranchPointState(

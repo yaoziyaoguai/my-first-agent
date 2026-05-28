@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-28 (Loop 1.3b — Tool Path Unification COMPLETED)
+**最后更新**: 2026-05-28 (Loop 2.1b — Memory shared-store + L3 E2E contract tests)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| Loop 2.1b: Memory shared-store L3 + store mismatch fix | (pending commit) | **PARTIAL→PARTIAL** — 修复 3 个 blocker：(1) `phase1_hook.py` 提取 `_shared_store` 并传给 `MemoryRetainHandler(store=_shared_store)` 和 `MemoryRecallHandler(store=_shared_store)`，确保 retain/recall/forget 共享同一 store 实例；(2) 新增 5 个 L3 shared-store contract tests（`route_from_runtime_loop()` provenance），验证 retain→recall、retain→forget→recall、forget only shared store、handler same instance、recall sees direct add 全部通过；(3) confirmation-to-store evidence 链闭合：retain writes→shared store, recall reads→shared store, forget removes→shared store，不再有独立 store 数据分裂。ruff 通过。更新 evidence_kind_classification 和 branch_point count tests（14→15） |
 | Loop 2.1: Memory forget → dispatcher | (pending commit) | **PARTIAL** — MEMORY_FORGET 从 direct call 迁入 dispatcher：新增 `MemoryForgetHandler`（通过 context.success/rejected/failed 返回）、`RuntimeActionType.MEMORY_FORGET` enum、evidence catalog descriptor + adapter；`core.py` 中 3 处 `_memory_runtime.remove_record()` 替换为 `_forget_via_dispatcher()`。5 个 L2 contract tests（existing/nonexistent/empty_id/evidence/side_effect）全部通过。修复 `cli_handlers.py` 同类 latent bug（`disposition=` kwarg 不存在 → context.success）。RuntimeDecisionFrame 新增 `memory.forget` branch point（PARTIAL — 缺 L3 E2E） |
 | Loop 2.1: Recall direct fallback 消除 | (pending commit) | `refresh_runtime_system_prompt` 现在返回 `(system_prompt, snapshot_item_count)`，消除第 2 次 `_memory_runtime.snapshot_for_prompt()` 直接调用（仅保留 dispatcher=None 的模块初始化期 fallback）。`memory.retain` why_partial 更新（移除 forget/list/recall direct fallback 原因） |
 | Loop 1.3b: Tool Path Unification — gate_disposition | 55ea045, 895123d | **COMPLETED** — gate_disposition 驱动执行流：allowed → TOOL_INVOKE → execute_single_tool → TOOL_RESULT；rejected/None → FORCE_STOP（安全失败，不执行工具）；confirmation_required → AWAITING_USER（设置 pending_tool，不执行工具）。新增 `_handle_blocked()`（写 tool_execution_log + tool_result）和 `_handle_confirmation_required()`（设置 pending_tool + save_checkpoint）。6 个新 tests（t11-t16）验证 blocked/rejected/confirmation_required/malformed 短路行为 + tool_result 保持 + TOOL_INVOKE 仅在 allowed 后 dispatch。SDD 更新至 7b 节。3705 regression tests pass |

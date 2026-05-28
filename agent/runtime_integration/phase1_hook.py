@@ -75,17 +75,22 @@ def build_phase1_dispatcher(
     - dispatcher.route() 在 loop.turn_end 时由 loop.py 触发
     """
     registry = ActionHandlerRegistry()
+    # 从 memory_runtime 提取共享 store，避免 handler 创建独立的 InMemoryMemoryStore()。
+    # retain/recall handler 必须使用与 _memory_runtime 相同的 store 实例，确保
+    # 写入（retain → dispatcher）、读取（recall → dispatcher）和删除（forget → memory_runtime）
+    # 共享同一数据源。
+    _shared_store = getattr(memory_runtime, '_store', None) if memory_runtime is not None else None
     registry.register(
         RuntimeActionType.MEMORY_TURN_END_PROPOSAL,
         MemoryTurnEndProposalHandler(),
     )
     registry.register(
         RuntimeActionType.MEMORY_PROPOSE,
-        MemoryRetainHandler(),
+        MemoryRetainHandler(store=_shared_store),
     )
     registry.register(
         RuntimeActionType.MEMORY_RECALL,
-        MemoryRecallHandler(),
+        MemoryRecallHandler(store=_shared_store),
     )
     registry.register(
         RuntimeActionType.TOOL_GATE,

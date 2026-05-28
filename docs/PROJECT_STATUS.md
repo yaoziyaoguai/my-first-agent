@@ -231,7 +231,7 @@
 | Loop 1.1 | Unified Runtime Decision Spine | **COMPLETED** — 已实现 |
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
-| Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — forget→dispatcher done；recall secondary fallback fixed；show memories 已走 dispatcher |
+| Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — forget→dispatcher done；recall fallback fixed；show memories 已走 dispatcher；store mismatch 已修复（retain/recall/forget 共享同一 store 实例）；15 L2+L3 contract tests pass（5 forget L2 + 5 shared-store L3 + 5 回归覆盖）；缺 real core loop dogfood E2E（实际 /forget 命令交互） |
 | Loop 2.2 | Skill Activation MVP | pending — skill_registry 注入 main path |
 | Loop 2.3 | Storage/Checkpoint True Resume | pending |
 | Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |

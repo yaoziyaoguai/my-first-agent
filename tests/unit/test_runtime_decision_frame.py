@@ -34,9 +34,9 @@ def test_branch_point_registry_is_frozen():
 
 
 def test_branch_point_registry_has_14_points():
-    """应有 14 个预定义 branch point——禁止无限发散。"""
+    """应有 15 个预定义 branch point——禁止无限发散。"""
     all_bps = list_branch_points()
-    assert len(all_bps) == 14, f"expected 14 branch points, got {len(all_bps)}"
+    assert len(all_bps) == 15, f"expected 15 branch points, got {len(all_bps)}"
 
 
 def test_no_branch_point_is_ready():
@@ -226,10 +226,10 @@ def test_capability_summary_never_claims_complete():
 
 
 def test_all_branch_point_ids_returns_all():
-    """all_branch_point_ids 应返回所有 14 个 branch point。"""
+    """all_branch_point_ids 应返回所有 15 个 branch point。"""
     frame = build_decision_frame("test")
     ids = frame.all_branch_point_ids()
-    assert len(ids) == 14, f"应有 14 个 branch point IDs: {len(ids)}"
+    assert len(ids) == 15, f"应有 15 个 branch point IDs: {len(ids)}"
 
 
 def test_ready_count_is_zero():
@@ -286,10 +286,10 @@ def test_last_decision_frame_survives_multiple_sets():
 
 
 def test_count_by_status_sum_is_14():
-    """各状态计数应总和为 14。"""
+    """各状态计数应总和为 15。"""
     counts = count_by_status()
     total = sum(counts.values())
-    assert total == 14, f"状态计数总和应为 14: {counts}"
+    assert total == 15, f"状态计数总和应为 15: {counts}"
 
 
 def test_count_by_status_has_no_ready():

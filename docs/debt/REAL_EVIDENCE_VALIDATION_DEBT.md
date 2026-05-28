@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 2.4 — REAL-EVIDENCE-005 registered)
+**最后更新**: 2026-05-28 (Loop 3.2 SDD — REAL-EVIDENCE-006 registered)
 
 ---
 
@@ -104,6 +104,21 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Required validation** | (1) 搭建本地 MCP server fixture（如 filesystem server）；(2) 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + `MY_FIRST_AGENT_MCP_DRY_RUN=0` + MCP config 文件；(3) 启动真实 chat loop；(4) 验证 `run_mcp_bridge()` 真实连接 server 并注册 tools；(5) 验证 MCP tools 出现在 model-visible tools 中；(6) 验证模型可调用 MCP tool 并通过 TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline 执行；(7) 验证 TOOL_INVOKE 调用了真实 StdioMCPClient（非 FakeMCPClient）；(8) 验证 dispatcher evidence chain 完整（bridge lifecycle + tool pipeline）|
 | **Current evidence** | bridge lifecycle dispatcher evidence（MCP_BRIDGE_LIFECYCLE RuntimeActionType）；L3 core.chat() tests 验证 MCP tool pipeline（但使用 FakeMCPClient + confirmation='never'）；mcp.discover/mcp.invoke branch points 标 PARTIAL（code path complete, real server pending）|
 | **Status** | pending real MCP server connection |
+| **Blocking current code loop** | no |
+| **Blocking READY claim** | yes |
+
+---
+
+### REAL-EVIDENCE-006
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Loop 3.2 SDD / architecture decision phase |
+| **Capability** | SubAgent L1 — real provider child loop + parent-mediated tool execution + memory scope roundtrip |
+| **Missing evidence** | 真实 LLM provider child loop 完整执行；child tool_use → parent TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline；child memory proposal → parent confirm→retain pipeline；skill scope enforcement |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 SubAgent delegation（非 deterministic keyword-match）；(3) child loop 调真实 provider 并返回非 deterministic summary；(4) child tool_use 通过 parent ToolRuntimeMediator pipeline 执行（TOOL_GATE→TOOL_INVOKE→execute_single_tool→TOOL_RESULT）；(5) blocked tool 不进 execute_single_tool；(6) child memory proposal（scope=propose）通过 parent MEMORY_PROPOSE→confirm→retain pipeline；(7) child skill scope enforcement（active_skill allowed_tools 对 child tool request 生效）；(8) 所有 child action 在 parent dispatcher action_log 中有对应证据条目；(9) CLI delegate shortcut 统一走 dispatcher path，不绕过；(10) 不是 deterministic keyword-match summary 冒充真实 child execution |
+| **Current evidence** | L0 deterministic executor（不调 provider/不执行工具/不写 memory）；ToolBoundary/MemoryBoundary/SkillBoundary 对象已定义但未被真实 child loop 使用；SUBAGENT_DELEGATE_L0 probe only（turn-end hook 返回 failed）；CLI shortcuts 绕过 dispatcher；Loop 3.2 SDD 已完成架构设计 |
+| **Status** | pending L1 implementation + real provider dogfood |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 

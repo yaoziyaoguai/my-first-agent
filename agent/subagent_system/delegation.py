@@ -1,10 +1,12 @@
-"""Parent adapter for one L0 SubAgent delegation."""
+"""Parent adapter for L0/L1 SubAgent delegation."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from agent.subagent_system.adjudication import adjudicate_result
 from agent.subagent_system.context import build_context_package
-from agent.subagent_system.executor import execute_local
+from agent.subagent_system.executor import execute_l1, execute_local
 from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult, SubAgentRun
 from agent.subagent_system.trace import make_trace_event
 
@@ -158,5 +160,87 @@ def _replace_trace(result: SubAgentResult, trace_events: tuple[object, ...]) -> 
         clarification_question=result.clarification_question,
         trace_events=trace_events,
         stop_reason=result.stop_reason,
+    )
+
+
+def delegate_l1(
+    request: object,
+    registry: object,
+    *,
+    provider: Any = None,
+    tool_mediator: Any = None,
+    parent_dispatcher: Any = None,
+) -> SubAgentRun:
+    """Run one parent-controlled L1 delegation with real provider + parent-mediated tools.
+
+    L1 特征：
+    - child 调用真实 provider（继承 parent provider config）
+    - child 不直接执行工具 — 所有工具执行通过 parent tool_mediator
+    - child 可以做多轮迭代（受 max_iterations 限制）
+    - 所有 child action 有 dispatcher evidence
+
+    Args:
+        request: SubAgentRequest
+        registry: SubAgentRegistry
+        provider: parent provider instance (child inherits this)
+        tool_mediator: parent ToolRuntimeMediator for child tool requests
+        parent_dispatcher: parent RuntimeActionDispatcher for evidence
+    """
+    delegation_id = f"{getattr(request, 'parent_trace_id', 'trace')}:subagent-l1"
+    descriptor = _find_descriptor(request, registry)
+
+    if descriptor is None:
+        result = _missing_descriptor_result(request, delegation_id)
+        adjudication = adjudicate_result(result, request, revision_count=0)
+        return SubAgentRun(
+            delegation_id=delegation_id,
+            state="failed",
+            request=request,
+            descriptor=None,
+            context_package=None,
+            result=result,
+            adjudication=adjudication,
+            revision_count=0,
+        )
+
+    started = make_trace_event(
+        "delegation_started",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={"role": getattr(request, "role", ""), "level": "L1"},
+    )
+    context_package = build_context_package(request=request, descriptor=descriptor, tool_snapshots=())
+    packaged = make_trace_event(
+        "context_packaged",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={"subagent": getattr(descriptor, "name", ""), "level": "L1"},
+    )
+
+    # L1: 调用 execute_l1 而非 execute_local
+    result = execute_l1(
+        context_package,
+        delegation_id=delegation_id,
+        provider=provider,
+        tool_mediator=tool_mediator,
+    )
+    result = _with_trace_prefix(result, (started, packaged))
+    adjudication = adjudicate_result(result, request, revision_count=0)
+    adjudicated = make_trace_event(
+        "result_adjudicated",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={"action": adjudication.action, "level": "L1"},
+    )
+    result = _with_trace_suffix(result, (adjudicated,))
+    return SubAgentRun(
+        delegation_id=delegation_id,
+        state="completed",
+        request=request,
+        descriptor=descriptor,
+        context_package=context_package,
+        result=result,
+        adjudication=adjudication,
+        revision_count=0,
     )
 

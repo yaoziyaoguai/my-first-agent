@@ -37,6 +37,11 @@ class RuntimeActionType(StrEnum):
     # handler 已注册（phase1_hook.py），catalog entry 指向 validate_stream_event。
     STREAMING_EVENT = "streaming.event"
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
+    # Loop 3.2a: SubAgent L1 parent-mediated child loop action types
+    SUBAGENT_DELEGATE_L1 = "subagent.delegate_l1"
+    SUBAGENT_CHILD_TOOL_REQUEST = "subagent.child_tool_request"
+    SUBAGENT_CHILD_RESULT = "subagent.child_result"
+    SUBAGENT_PARENT_ADJUDICATION = "subagent.parent_adjudication"
     # CLI meta-command action types（Loop 4: Runtime Entry Consolidation）
     # READ_ONLY CLI commands 走 dispatcher 获得 evidence chain，不再绕过统一入口。
     # MUTATING/DELEGATING commands (forget/delegate) 需要 confirmation pipeline 就绪后再迁入。
@@ -77,6 +82,11 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     # SUBAGENT_DELEGATE_L0 每 turn 无差别运行，绝大多数返回 rejected（pure routing
     # check）。当且仅当 handler disposition=delegated 时才升为 business，默认 probe。
     RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_PROBE,
+    # Loop 3.2a: SubAgent L1 类型均为 business（用户可见委托/工具/结果/裁决）
+    RuntimeActionType.SUBAGENT_DELEGATE_L1: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_CHILD_RESULT: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.MCP_BRIDGE_LIFECYCLE: _EVIDENCE_KIND_PROBE,

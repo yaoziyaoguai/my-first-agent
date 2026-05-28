@@ -113,6 +113,66 @@ class ToolRuntimeMediator:
 
         return result
 
+    # ── child tool mediation (Loop 3.2a) ──────────────────────────────────
+
+    def mediate_child_tool_request(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        delegation_id: str = "",
+        parent_trace_id: str = "",
+    ) -> str | None:
+        """Child tool_use → parent TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline.
+
+        child 不直接执行工具 — 所有工具执行通过 parent ToolRuntimeMediator。
+        blocked tool 在 TOOL_GATE 被拦截 → 返回 FORCE_STOP。
+        Skill allowed_tools enforcement 对 child tool request 同样生效。
+
+        Returns:
+            None: 工具已执行
+            FORCE_STOP: 被 gate 阻断
+            AWAITING_USER: 需要用户确认
+        """
+        # Step 1: 构建合成 tool_use_id
+        tool_use_id = f"child:{delegation_id}:{tool_name}"
+
+        # Step 2: TOOL_GATE — 复用 parent gate pipeline
+        gate_disposition = self._route_gate(tool_name, arguments, tool_use_id)
+
+        if gate_disposition == "rejected" or gate_disposition is None:
+            self._handle_blocked(tool_name, arguments, tool_use_id, gate_disposition)
+            self._route_result(tool_name, arguments, tool_use_id, FORCE_STOP)
+            return FORCE_STOP
+
+        if gate_disposition == "confirmation_required":
+            self._handle_confirmation_required(tool_name, arguments, tool_use_id)
+            self._route_result(tool_name, arguments, tool_use_id, AWAITING_USER)
+            return AWAITING_USER
+
+        # Step 3: TOOL_INVOKE — 记录 child tool invocation
+        self._route_invoke(tool_name, arguments, tool_use_id)
+
+        # Step 4: 执行工具（通过 execute_single_tool）
+        # 为 child tool request 构造合成 ToolUseBlock
+        synthetic_block = _SyntheticToolUseBlock(
+            id=tool_use_id,
+            name=tool_name,
+            input=arguments,
+        )
+        result = execute_single_tool(
+            synthetic_block,
+            state=self._state,
+            turn_state=self._turn_state,
+            turn_context=self._turn_context,
+            messages=self._messages,
+        )
+
+        # Step 5: TOOL_RESULT
+        self._route_result(tool_name, arguments, tool_use_id, result)
+
+        return result
+
     # ── gate disposition handlers ─────────────────────────────────────────
 
     def _handle_blocked(
@@ -245,3 +305,22 @@ class ToolRuntimeMediator:
                 core_entrypoint="core.chat",
                 runtime_hook_name="handle_tool_use_response",
             )
+
+
+class _SyntheticToolUseBlock:
+    """为 child tool request 构造的合成 ToolUseBlock。
+
+    execute_single_tool 需要 .id / .name / .input / .type 属性，
+    这个类提供最小实现，使 child tool request 能走 parent 现有 pipeline。
+    """
+
+    __slots__ = ("id", "name", "input")
+
+    def __init__(self, *, id: str, name: str, input: dict[str, Any]) -> None:
+        self.id = id
+        self.name = name
+        self.input = input
+
+    @property
+    def type(self) -> str:
+        return "tool_use"

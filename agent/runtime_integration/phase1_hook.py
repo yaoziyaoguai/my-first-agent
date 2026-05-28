@@ -34,7 +34,10 @@ from agent.runtime_integration.streaming_provider import (
     StreamingEventHandler,
     StreamingProviderCallHandler,
 )
-from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
+from agent.runtime_integration.subagent_action import (
+    SubAgentDelegateL0Handler,
+    SubAgentDelegateL1Handler,
+)
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
@@ -153,6 +156,14 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
+    )
+    # Loop 3.2a: SUBAGENT_DELEGATE_L1 — parent-mediated child loop with real provider。
+    # L1 handler 共享 _subagent_registry。provider/tool_mediator 由 core.chat()
+    # 在 delegation 前通过 set_provider() 注入。
+    _l1_handler = SubAgentDelegateL1Handler(registry=_subagent_registry)
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L1,
+        _l1_handler,
     )
     # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(

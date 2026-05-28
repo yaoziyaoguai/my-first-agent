@@ -674,17 +674,22 @@ def chat(
         )
         return render_subagent_list(descriptors)
 
-    # delegate to subagent CLI meta-command：检测 → 委托执行 → 渲染。
-    # 检测由 cli_commands 完成；_execute_subagent_delegation() 执行委托。
+    # delegate to subagent CLI meta-command：检测 → dispatcher-mediated 委托 → 渲染。
+    # Loop 3.2a: delegation 走统一 dispatcher 路径（SUBAGENT_DELEGATE_L1），
+    # 不再绕过 dispatcher 直接调 _execute_subagent_delegation()。
+    # 如果 dispatcher L1 handler 没有 provider（默认 CLI 路径），回退 L0 inline。
     #
     # CLI-ONLY (CommandCategory.DELEGATING): delegate to subagent
     delegate_match = _looks_like_delegate_to_subagent(user_input)
     if delegate_match:
         subagent_name, task = delegate_match
-        delegation_result = _execute_subagent_delegation(
+        delegation_result = _dispatch_or_fallback_delegation(
             subagent_name, task,
             delegation_reason="CLI meta-command delegation",
             on_runtime_event=on_runtime_event,
+            dispatcher=_p1_dispatcher,
+            provider=provider,
+            user_input=user_input,
         )
         # 为 CLI delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -709,10 +714,13 @@ def chat(
     nl_delegation = _looks_like_nl_delegation(user_input)
     if nl_delegation:
         subagent_name, task = nl_delegation
-        delegation_result = _execute_subagent_delegation(
+        delegation_result = _dispatch_or_fallback_delegation(
             subagent_name, task,
             delegation_reason="NL delegation fixture",
             on_runtime_event=on_runtime_event,
+            dispatcher=_p1_dispatcher,
+            provider=provider,
+            user_input=user_input,
         )
         # 为 NL delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -1224,3 +1232,61 @@ def _call_model(
 def _extract_text(content_blocks) -> str:
     parts = [block.text for block in content_blocks if block.type == "text"]
     return "\n".join(p for p in parts if p).strip()
+
+
+def _dispatch_or_fallback_delegation(
+    subagent_name: str,
+    task: str,
+    *,
+    delegation_reason: str,
+    on_runtime_event,
+    dispatcher,
+    provider,
+    user_input: str,
+) -> str:
+    """Loop 3.2a: dispatcher-mediated L1 delegation，不存在则回退 L0 inline。
+
+    优先走 dispatcher (SUBAGENT_DELEGATE_L1)：
+    1. 从 dispatcher 获取 L1 handler
+    2. 注入 provider（如果有）
+    3. 构建 RuntimeActionRequest → route
+    4. 成功则返回 delegation result
+
+    如果 dispatcher 中没有 L1 handler 或 provider 未设置 → 回退 L0 inline path
+    （_execute_subagent_delegation）。
+    """
+    from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    l1_handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1)
+    if l1_handler is not None and provider is not None:
+        # 注入 provider 到 L1 handler
+        l1_handler.set_provider(provider, None)
+        # 通过 dispatcher 路由 delegation
+        req = RuntimeActionRequest(
+            action_type=RuntimeActionType.SUBAGENT_DELEGATE_L1,
+            source="core.chat",
+            parent_trace_id="",
+            payload={
+                "subagent_name": subagent_name,
+                "delegation_goal": task,
+                "delegation_reason": delegation_reason,
+            },
+        )
+        result = dispatcher.route(req)
+        payload = dict(result.payload)
+        if payload.get("delegate_l1_called"):
+            # L1 delegation 成功 → 渲染结果
+            from agent.cli_commands import render_delegate_result
+            return render_delegate_result(
+                subagent_name,
+                payload.get("status", "unknown"),
+                payload.get("execution_result", ""),
+                payload.get("stop_reason", ""),
+            )
+
+    # 回退 L0 inline path
+    return _execute_subagent_delegation(
+        subagent_name, task,
+        delegation_reason=delegation_reason,
+        on_runtime_event=on_runtime_event,
+    )

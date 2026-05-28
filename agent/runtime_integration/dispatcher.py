@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from agent.runtime_integration.evidence import (
@@ -23,7 +24,6 @@ from agent.runtime_integration.schema import (
     new_event_id,
     normalize_action_type,
 )
-
 
 HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
     "action_id",
@@ -67,7 +67,7 @@ class ActionHandler(Protocol):
     observer 不会进入 model-visible payload，也不会由 handler 自己生成 proof。
     """
 
-    def handle(self, request: RuntimeActionRequest, context: "RuntimeActionContext") -> RuntimeActionResult:
+    def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext) -> RuntimeActionResult:
         ...
 
 
@@ -320,6 +320,10 @@ class RuntimeActionDispatcher:
     @property
     def action_log(self) -> tuple[RuntimeActionEvent, ...]:
         return tuple(self._action_log)
+
+    def get_handler(self, action_type: RuntimeActionType | str) -> ActionHandler | None:
+        """获取已注册的 handler（供调用方在 dispatch 前注入运行时依赖）。"""
+        return self._registry.get(action_type)
 
     def route(self, request: RuntimeActionRequest) -> RuntimeActionResult:
         """Harness/direct dispatcher route.

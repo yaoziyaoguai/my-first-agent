@@ -275,19 +275,22 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
     ),
     "subagent.delegate": BranchPointState(
         branch_id="subagent.delegate",
-        status=BranchPointStatus.FAKE_DEMO,
+        status=BranchPointStatus.PARTIAL,
         evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
         trigger_condition="每 turn turn-end hook (SUBAGENT_DELEGATE_L0 probe) + "
-                          "CLI delegate/NL delegation shortcut",
-        execution_path="turn-end: dispatcher → SubAgentDelegateHandler → "
-                       "rejected (L0 probe); CLI: core.chat shortcut → "
-                       "execute_subagent_delegation() → L0 deterministic executor",
-        result_feedback_path="L0 executor 返回 deterministic summary",
-        not_ready_behavior="L0 executor 不调用 provider/不执行工具/不写 memory",
+                          "CLI delegate/NL delegation shortcut (SUBAGENT_DELEGATE_L1 business)",
+        execution_path="L1: CLI delegation → dispatcher.route(SUBAGENT_DELEGATE_L1) → "
+                       "SubAgentDelegateL1Handler → delegate_l1() → execute_l1() → "
+                       "provider.create() (child loop) → parent ToolRuntimeMediator; "
+                       "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback)",
+        result_feedback_path="L1: provider 实际返回 summary; L0: deterministic keyword-match",
+        not_ready_behavior="L1 code path complete (child loop + parent-mediated tools), "
+                           "真实 provider child loop dogfood pending (REAL-EVIDENCE-006)",
         decision_meta={
-            "why_fake_demo": "L0 是 deterministic/demo executor；"
-                             "不调 provider、不执行工具、不写 memory、不 spawn 进程；"
-                             "L1/L2 child agent 未实现",
+            "why_partial": "L1 code path complete: execute_l1() 调用 provider.create(), "
+                           "child tool_use 经 mediate_child_tool_request() 走 parent pipeline, "
+                           "CLI shortcut 迁入 dispatcher path (SUBAGENT_DELEGATE_L1); "
+                           "真实 provider child loop dogfood 未验证 (REAL-EVIDENCE-006)",
         },
     ),
     "checkpoint.save": BranchPointState(

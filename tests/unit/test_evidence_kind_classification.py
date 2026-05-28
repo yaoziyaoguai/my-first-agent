@@ -86,6 +86,10 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.STREAMING_EVENT,
         RuntimeActionType.CLI_SHOW_MEMORIES,
         RuntimeActionType.CLI_SHOW_SUBAGENTS,
+        RuntimeActionType.SUBAGENT_DELEGATE_L1,
+        RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST,
+        RuntimeActionType.SUBAGENT_CHILD_RESULT,
+        RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION,
     }
     probe_types = {
         RuntimeActionType.SKILL_SELECT,
@@ -94,6 +98,9 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.MEMORY_RECALL,
         RuntimeActionType.MEMORY_CONSOLIDATE,
         RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
+        RuntimeActionType.CHECKPOINT_SAVE,
+        RuntimeActionType.CHECKPOINT_RESUME,
+        RuntimeActionType.MCP_BRIDGE_LIFECYCLE,
         RuntimeActionType.SUBAGENT_DELEGATE_L0,  # 每 turn routing check, 默认 probe
     }
     assert business_types.isdisjoint(probe_types), \

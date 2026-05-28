@@ -125,15 +125,18 @@ def test_mcp_invoke_is_partial():
     )
 
 
-def test_subagent_delegate_is_fake_demo():
-    """subagent.delegate 必须标 FAKE_DEMO——L0 deterministic executor。"""
+def test_subagent_delegate_is_partial():
+    """subagent.delegate 标 PARTIAL——L1 code path complete, real dogfood pending。"""
     bp = get_branch_point("subagent.delegate")
     assert bp is not None
-    assert bp.status == BranchPointStatus.FAKE_DEMO, (
-        f"subagent.delegate 应标 FAKE_DEMO 而非 {bp.status}——"
-        f"L0 不调 provider/不执行工具/不写 memory"
+    assert bp.status == BranchPointStatus.PARTIAL, (
+        f"subagent.delegate 应标 PARTIAL 而非 {bp.status}——"
+        f"L1 code path complete (execute_l1 + delegate_l1 + CLI dispatcher migration)"
     )
-    assert not bp.is_capability_complete(), "FAKE_DEMO 不应声称 capability complete"
+    assert not bp.is_capability_complete(), "PARTIAL 不应声称 capability complete"
+    assert "REAL-EVIDENCE-006" in str(bp.decision_meta.get("why_partial", "")), (
+        "subagent.delegate 的 why_partial 必须引用 REAL-EVIDENCE-006"
+    )
 
 
 def test_memory_branch_points_are_partial():

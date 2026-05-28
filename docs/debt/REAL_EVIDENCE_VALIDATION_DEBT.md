@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 2.2b)
+**最后更新**: 2026-05-28 (Loop 2.2b — REAL-EVIDENCE-002/003 confirmed)
 
 ---
 
@@ -53,12 +53,12 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 
 | 字段 | 值 |
 |------|-----|
-| **Source** | Loop 2.2 / commit 749ad06 |
+| **Source** | Loop 2.2 / commit 2d26c2a；Loop 2.2b / commit 98b4163 |
 | **Capability** | Skill Activation — real model SKILL_SELECT tool call |
-| **Missing evidence** | 真实模型（非 FakeProvider）通过 tool call 触发 SKILL_SELECT dispatch |
-| **Required validation** | 使用真实 LLM provider 启动 chat；发送需要 skill 的任务；验证模型输出了 skill.select tool call；验证 dispatcher action_log 包含 SKILL_SELECT event；验证下一轮 system prompt 包含 [Active Skill Instructions] |
-| **Current evidence** | FakeProvider 路径通过 turn-end hook 自动选择 skill；13 L2 skill bridge tests pass；3 L3 skill tests pass |
-| **Status** | pending real model tool call |
+| **Missing evidence** | 真实模型（非 FakeProvider）在真实 chat loop 中是否触发 SKILL_SELECT tool call |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 输入能触发 Skill selection 的用户请求；(3) 验证模型是否真实调用 SKILL_SELECT tool；(4) 验证 SkillRegistry / dispatcher / RuntimeDecisionFrame 有对应 evidence；(5) 验证 `_active_skill` 被设置并进入后续 runtime path（system prompt 包含 [Active Skill Instructions]） |
+| **Current evidence** | registry bridge 已连接、prompt injection 已实现、13 L2 skill bridge tests pass + 6 L3 pipeline tests pass；allowed_tools enforcement code path 已完成（15 contract tests pass）；但**未运行真实模型 SKILL_SELECT** |
+| **Status** | pending real API / real model validation |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 
@@ -68,12 +68,12 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 
 | 字段 | 值 |
 |------|-----|
-| **Source** | Loop 2.2b |
+| **Source** | Loop 2.2b / commit 98b4163 |
 | **Capability** | Skill allowed_tools enforcement — real dogfood E2E |
 | **Missing evidence** | 真实 core loop 中 skill allowed_tools 约束工具执行的端到端验证 |
-| **Required validation** | 启动真实 chat loop；激活一个声明了 allowed_tools 的 skill；验证在该 skill 激活期间，非允许工具被真实拦截；验证拦截日志和用户可见消息反映 skill constraint reject；验证 skill 取消激活后工具恢复正常 |
-| **Current evidence** | 15 L2 skill tool enforcement contract tests pass；ToolGateHandler 检查 skill_allowed_tools payload；ToolRuntimeMediator 传递 skill_allowed_tools；被 block 的工具不进入 execute_single_tool |
-| **Status** | pending real dogfood |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发一个带 allowed_tools 的 active Skill；(3) 让模型尝试调用允许工具，验证可正常执行；(4) 让模型尝试调用不允许工具，验证在执行前被 ToolGateHandler block（gate_disposition="rejected"）；(5) 验证 blocked tool 不进入 execute_single_tool（tool_execution_log status="blocked_by_policy"）；(6) 验证 dispatcher / RuntimeDecisionFrame / trace evidence 与用户可见结果一致；(7) 验证 skill 取消激活后工具恢复正常 |
+| **Current evidence** | 15 skill tool enforcement contract tests pass（6 ToolGate + 6 Mediator + 3 NotFakeable）；ToolGateHandler 在生产路径中检查 skill_allowed_tools → rejected；ToolRuntimeMediator 传递 skill_allowed_tools；blocked 工具返回 FORCE_STOP 不进 execute_single_tool；但**未运行真实 API / real dogfood** |
+| **Status** | pending real API / real dogfood validation |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 

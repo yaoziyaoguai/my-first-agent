@@ -252,6 +252,22 @@ def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
     return masked
 
 
+def _checkpoint_save_persist_adapter(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Catalog-owned adapter for CheckpointSave.persist invocation。"""
+    return {
+        "task_status": str(payload.get("task_status") or "unknown"),
+        "persisted": True,
+    }
+
+
+def _checkpoint_resume_restore_adapter(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Catalog-owned adapter for CheckpointResume.restore invocation。"""
+    return {
+        "resume_mode": str(payload.get("resume_mode") or "interactive"),
+        "restored": True,
+    }
+
+
 def _memory_consolidation_adapter(payload: Mapping[str, Any]) -> Any:
     """Catalog-owned adapter for consolidation pipeline invocation。
 
@@ -555,6 +571,28 @@ class RuntimeActionTargetCatalog:
             call_signature="redact(runtime_state_summary: str)",
         ),
         _descriptor(
+            "checkpoint.save",
+            "agent.runtime_integration.checkpoint_save.CheckpointSaveHandler",
+            "CheckpointSave",
+            operation="persist",
+            invocation_adapter_id="CheckpointSave.persist",
+            implementation_id="agent.checkpoint.save_checkpoint",
+            adapter=_checkpoint_save_persist_adapter,
+            function_called="CheckpointSave.persist",
+            call_signature="persist(task_status: str)",
+        ),
+        _descriptor(
+            "checkpoint.resume",
+            "agent.runtime_integration.checkpoint_resume.CheckpointResumeHandler",
+            "CheckpointResume",
+            operation="restore",
+            invocation_adapter_id="CheckpointResume.restore",
+            implementation_id="agent.checkpoint.load_checkpoint_to_state",
+            adapter=_checkpoint_resume_restore_adapter,
+            function_called="CheckpointResume.restore",
+            call_signature="restore(resume_mode: str)",
+        ),
+        _descriptor(
             "streaming.provider_call",
             "agent.runtime_integration.streaming_provider.StreamingProviderCallHandler",
             "StreamingProtocol",
@@ -761,6 +799,54 @@ class RuntimeActionTargetCatalog:
             ("CheckpointSafeSummary",),
             operation="test_catalog_adapter",
             invocation_adapter_id="CheckpointSafeSummary.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.save",
+            ("CheckpointSave",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointSave.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.save",
+            ("CheckpointSave",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointSave.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.save",
+            ("CheckpointSave",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointSave.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "tests.runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.resume",
+            ("CheckpointResume",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointResume.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "runtime_integration.test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.resume",
+            ("CheckpointResume",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointResume.test_catalog_adapter",
+        ),
+        *_test_descriptors(
+            "test_runtime_action_contract",
+            "_CatalogAllowedForgedCallableHandler",
+            "checkpoint.resume",
+            ("CheckpointResume",),
+            operation="test_catalog_adapter",
+            invocation_adapter_id="CheckpointResume.test_catalog_adapter",
         ),
         *_test_descriptors(
             "tests.runtime_integration.test_runtime_action_contract",

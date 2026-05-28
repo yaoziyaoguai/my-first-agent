@@ -30,6 +30,8 @@ class RuntimeActionType(StrEnum):
     MEMORY_CONSOLIDATE = "memory.consolidate"
     MEMORY_FORGET = "memory.forget"
     CHECKPOINT_SAFE_SUMMARY = "checkpoint.safe_summary"
+    CHECKPOINT_SAVE = "checkpoint.save"
+    CHECKPOINT_RESUME = "checkpoint.resume"
     STREAMING_PROVIDER_CALL = "streaming.provider_call"
     # STREAMING_EVENT：单 event 验证和 per-event evidence 收集。
     # handler 已注册（phase1_hook.py），catalog entry 指向 validate_stream_event。
@@ -67,6 +69,8 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.MEMORY_CONSOLIDATE: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.MEMORY_FORGET: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CHECKPOINT_SAFE_SUMMARY: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.CHECKPOINT_SAVE: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.CHECKPOINT_RESUME: _EVIDENCE_KIND_PROBE,
     RuntimeActionType.STREAMING_PROVIDER_CALL: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.STREAMING_EVENT: _EVIDENCE_KIND_BUSINESS,
     # SUBAGENT_DELEGATE_L0 每 turn 无差别运行，绝大多数返回 rejected（pure routing

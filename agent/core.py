@@ -270,6 +270,41 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
                 return
 
 
+def _dispatch_checkpoint_save(dispatcher, state, source="core.chat"):
+    """通过 dispatcher 中介 checkpoint 保存，产生 RuntimeAction evidence。
+
+    dispatcher 为 None 时回退到直接 save_checkpoint() 调用。
+    """
+    if dispatcher is None:
+        from agent.checkpoint import save_checkpoint
+
+        save_checkpoint(state, source=source)
+        return
+
+    from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    pending_tool = getattr(state.task, "pending_tool", None)
+    pending_ui = getattr(state.task, "pending_user_input_request", None)
+    route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+    route(
+        RuntimeActionRequest(
+            action_type=RuntimeActionType.CHECKPOINT_SAVE,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "_state": state,
+                "source": source,
+                "task_status": getattr(state.task, "status", None),
+                "current_step_index": getattr(state.task, "current_step_index", None),
+                "pending_tool": pending_tool,
+                "pending_user_input_request": pending_ui,
+            },
+        ),
+        core_entrypoint="core.chat",
+        runtime_hook_name="save_checkpoint",
+    )
+
+
 def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
     """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
@@ -715,7 +750,6 @@ def chat(
         # 复用 awaiting_user_input 机制等待用户确认。
         confirmation_request = _memory_runtime.get_pending_confirmation(result.candidate_id)
         if confirmation_request is not None:
-            from agent.checkpoint import save_checkpoint as _save_ckpt
             from agent.memory_interaction import build_memory_pending_request
 
             pending = build_memory_pending_request(
@@ -725,7 +759,7 @@ def chat(
             )
             state.task.pending_user_input_request = pending
             state.task.status = "awaiting_user_input"
-            _save_ckpt(state, source="memory_confirmation")
+            _dispatch_checkpoint_save(_p1_dispatcher, state, source="memory_confirmation")
             _safe_emit_runtime_event(
                 on_runtime_event,
                 memory_confirmation_requested_event(pending),
@@ -962,9 +996,7 @@ def _compress_history_and_sync_checkpoint(loop_ctx: LoopContext) -> None:
     state.memory.working_summary = new_summary
     # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
     if compression_happened and state.task.current_plan:
-        from agent.checkpoint import save_checkpoint as _save_checkpoint
-
-        _save_checkpoint(state)
+        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
 
 
 def _run_planning_phase(
@@ -1020,8 +1052,7 @@ def _run_planning_phase(
 
     # 一旦计划生成完毕且状态切到 awaiting_plan_confirmation，必须立刻落盘。
     # 否则用户此时 Ctrl+C，计划会完全丢失、重启后无感。
-    from agent.checkpoint import save_checkpoint as _save_checkpoint
-    _save_checkpoint(state)
+    _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
 
     # 计划展示给用户，但此时还没有正式接受执行。RuntimeEvent 只投影 UI，不改变
     # current_plan / checkpoint / conversation.messages 的业务边界。

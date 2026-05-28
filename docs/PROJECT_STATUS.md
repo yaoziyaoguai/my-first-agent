@@ -165,7 +165,7 @@
 | subagent.delegate | FAKE_DEMO | FAKE_LOCAL_USER_PATH | 仅 L0 deterministic executor |
 | memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
-| checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | true resume 不恢复 running state |
+| checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | code path complete: save/load 走 dispatcher + evidence chain 闭合；real validation pending (REAL-EVIDENCE-004) |
 | trace.summary | PARTIAL | FAKE_LOCAL_USER_PATH | in-memory action_log，无 durable store |
 
 **Overclaim 防护规则**：
@@ -233,7 +233,7 @@
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — code path complete：forget→dispatcher done；recall fallback fixed；store mismatch 已修复；15 L2+L3 contract tests pass。real dogfood E2E 已登记为 validation debt [REAL-EVIDENCE-001](docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md)，不阻塞后续代码 loop |
 | Loop 2.2 | Skill Activation Main-Path Completion | **code path complete, real validation pending** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler 拦截非允许工具→rejected→FORCE_STOP→不进 execute_single_tool，ToolRuntimeMediator 传递 skill_allowed_tools；(3) 13 L2 contract + 6 L3 pipeline + 15 skill tool enforcement tests 全部通过。剩余：真实模型 SKILL_SELECT tool call（REAL-EVIDENCE-002）、real dogfood E2E（REAL-EVIDENCE-003）已登记为 validation debt |
-| Loop 2.3 | Storage/Checkpoint True Resume | pending |
+| Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
 | Loop 2.4 | MCP Main-Path Readiness | pending — bridge 接入 core.chat |
 | Loop 3.2 | Real SubAgent L1/L2 | pending |
 
@@ -247,7 +247,7 @@
 | B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
 | B4 | MCP real connection | 需要外部 MCP server |
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
-| B6 | Checkpoint true state restoration | 需要 schema 大改 |
+| B6 | Checkpoint true state restoration | code path complete — save/load 走 dispatcher evidence chain；session.py resume 有 dispatcher evidence recording；real API roundtrip validation pending（REAL-EVIDENCE-004） |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
 | B8 | TUI architecture | 需要 TUI framework decision |
 

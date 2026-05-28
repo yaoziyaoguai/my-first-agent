@@ -283,12 +283,14 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         status=BranchPointStatus.PARTIAL,
         evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
         trigger_condition="plan 确认后、memory confirmation 时、loop 完成时",
-        execution_path="core.chat → save_checkpoint(state) → JSON dump",
-        result_feedback_path="checkpoint 文件落盘",
+        execution_path="core.chat → dispatcher.route(CHECKPOINT_SAVE) → "
+                       "CheckpointSaveHandler → save_checkpoint → JSON dump",
+        result_feedback_path="checkpoint 文件落盘 + dispatcher evidence",
         not_ready_behavior="save 失败不阻塞主路径",
         decision_meta={
-            "why_partial": "save/load schema 存在版本治理；"
-                           "true resume 尚未完整实现（不恢复 running tool/model 状态）",
+            "why_partial": "code path complete: save 走 dispatcher + evidence chain 闭合；"
+                           "real API/model validation pending (REAL-EVIDENCE-004)；"
+                           "session.py 退出路径仍为 direct call",
         },
     ),
     "checkpoint.resume": BranchPointState(
@@ -296,12 +298,14 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         status=BranchPointStatus.PARTIAL,
         evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
         trigger_condition="启动时存在未完成 checkpoint",
-        execution_path="load_checkpoint → schema migration → 部分状态恢复",
-        result_feedback_path="恢复的 state 进入 main loop",
+        execution_path="session.resume → load_checkpoint_to_state → "
+                       "dispatcher.route(CHECKPOINT_RESUME) → evidence recording",
+        result_feedback_path="恢复的 state 进入 main loop + dispatcher evidence",
         not_ready_behavior="resume 失败时从零开始",
         decision_meta={
-            "why_partial": "checkpoint load 恢复 JSON state + UI replay；"
-                           "不恢复 running model/tool execution 状态",
+            "why_partial": "code path complete: load 走 dispatcher evidence recording；"
+                           "session.py 中 dispatcher 按需构建（非主 loop dispatcher 实例）；"
+                           "real API/model validation pending (REAL-EVIDENCE-004)",
         },
     ),
     "trace.summary": BranchPointState(

@@ -6,20 +6,11 @@
 import os
 import sys
 
-from agent.logger import log_event, save_session_snapshot, SESSION_ID
-from agent.health_check import run_health_check
-from agent.memory import (
-    init_memory,
-    cleanup_old_episodes,
-    extract_memories_from_session,
-    _format_extraction_summary,
-)
-from agent.memory_review import count_pending_proposals
 from agent.checkpoint import (
+    clear_checkpoint,
     load_checkpoint,
     load_checkpoint_to_state,
     save_checkpoint,
-    clear_checkpoint,
 )
 from agent.cli_renderer import (
     STAGE_LABEL,
@@ -31,8 +22,16 @@ from agent.display_events import (
     build_tool_awaiting_confirmation_event,
     render_display_event,
 )
-from config import SYSTEM_PROMPT, MODEL_NAME
-
+from agent.health_check import run_health_check
+from agent.logger import SESSION_ID, log_event, save_session_snapshot
+from agent.memory import (
+    _format_extraction_summary,
+    cleanup_old_episodes,
+    extract_memories_from_session,
+    init_memory,
+)
+from agent.memory_review import count_pending_proposals
+from config import MODEL_NAME, SYSTEM_PROMPT
 
 # ========== 启动 ==========
 
@@ -91,9 +90,42 @@ def _checkpoint_has_actionable_resume(task_data: dict, conv_data: dict) -> bool:
     if task_data.get("current_plan") and (task_data.get("current_step_index") or 0) > 0:
         return True
     msg_count = len(conv_data.get("messages", []))
-    if msg_count > 0 and status != "idle":
-        return True
-    return False
+    return bool(msg_count > 0 and status != "idle")
+
+
+def _try_dispatch_checkpoint_resume(state, resume_mode="interactive"):
+    """尝试通过 dispatcher 记录 CHECKPOINT_RESUME evidence。
+
+    session.py 在 chat() 之前运行，dispatcher 尚未构建。这里按需构建一个
+    dispatcher 实例仅用于 evidence recording——load_checkpoint_to_state 已在
+    调用方执行完毕，handler 通过 _already_loaded 跳过重复 load。
+    构建失败时静默跳过（resume 本身已完成，仅缺少 dispatcher evidence）。
+    """
+    try:
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        dispatcher = build_phase1_dispatcher()
+        route = getattr(dispatcher, "route_from_runtime_loop", dispatcher.route)
+        route(
+            RuntimeActionRequest(
+                action_type=RuntimeActionType.CHECKPOINT_RESUME,
+                source="session.resume",
+                parent_trace_id="",
+                payload={
+                    "_state": state,
+                    "resume_mode": resume_mode,
+                    "_already_loaded": True,
+                },
+            ),
+            core_entrypoint="session.resume",
+            runtime_hook_name="resume_checkpoint",
+        )
+    except Exception:
+        pass
 
 
 def try_resume_from_checkpoint():
@@ -142,6 +174,7 @@ def try_resume_from_checkpoint():
         print("[系统] 检测到管道输入，自动恢复最近任务。")
         restored = load_checkpoint_to_state(get_state())
         if restored:
+            _try_dispatch_checkpoint_resume(get_state())
             _replay_awaiting_prompt(get_state())
         return
 
@@ -355,6 +388,7 @@ def handle_resume_choice(choice: str) -> None:
 
     restored = load_checkpoint_to_state(get_state())
     if restored:
+        _try_dispatch_checkpoint_resume(get_state())
         _replay_awaiting_prompt(get_state())
     else:
         print("\n[系统] 恢复断点失败。\n")

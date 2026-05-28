@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-28 (Loop 2.2b — REAL-EVIDENCE-002/003 confirmed)
+**最后更新**: 2026-05-28 (Loop 2.3 — REAL-EVIDENCE-004 registered)
 
 ---
 
@@ -74,6 +74,21 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发一个带 allowed_tools 的 active Skill；(3) 让模型尝试调用允许工具，验证可正常执行；(4) 让模型尝试调用不允许工具，验证在执行前被 ToolGateHandler block（gate_disposition="rejected"）；(5) 验证 blocked tool 不进入 execute_single_tool（tool_execution_log status="blocked_by_policy"）；(6) 验证 dispatcher / RuntimeDecisionFrame / trace evidence 与用户可见结果一致；(7) 验证 skill 取消激活后工具恢复正常 |
 | **Current evidence** | 15 skill tool enforcement contract tests pass（6 ToolGate + 6 Mediator + 3 NotFakeable）；ToolGateHandler 在生产路径中检查 skill_allowed_tools → rejected；ToolRuntimeMediator 传递 skill_allowed_tools；blocked 工具返回 FORCE_STOP 不进 execute_single_tool；但**未运行真实 API / real dogfood** |
 | **Status** | pending real API / real dogfood validation |
+| **Blocking current code loop** | no |
+| **Blocking READY claim** | yes |
+
+---
+
+### REAL-EVIDENCE-004
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Loop 2.3 / Storage-Checkpoint True Resume |
+| **Capability** | Checkpoint save/resume dispatcher-mediated evidence chain — real API/model roundtrip validation |
+| **Missing evidence** | 真实 LLM provider 下跨保存/恢复的完整 dispatcher evidence chain 连续性验证 |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 checkpoint save（plan 生成、memory confirmation、或压缩同步）；(3) 验证 CHECKPOINT_SAVE dispatcher evidence 产生且 save_succeeded=True；(4) 模拟中断（Ctrl+C）并在下次启动时 resume；(5) 验证 CHECKPOINT_RESUME dispatcher evidence 产生且 restore_succeeded=True；(6) 验证 resume 后 conversation context、task state、pending action 一致继续；(7) 验证 save→resume dispatcher evidence chain 可追溯（action_log 中两种 action type 都存在）；(8) 验证 RuntimeDecisionFrame 正确反映 checkpoint 状态；(9) 验证不是 save/load file smoke 或 no-crash 冒充 true resume |
+| **Current evidence** | 16 contract tests pass（4 save mediation + 5 resume mediation + 4 roundtrip + 2 not fakeable + 1 L3 hook-level）；core.py 3 处 direct save_checkpoint 已迁入 dispatcher-mediated CHECKPOINT_SAVE；session.py resume 路径通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；CheckpointSaveHandler/CheckpointResumeHandler 在 phase1_hook.py 注册；RuntimeDecisionFrame checkpoint branch points 更新为 code path complete；但**未运行真实 API / real dogfood** |
+| **Status** | pending real API / real dogfood roundtrip validation |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | yes |
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent.runtime_integration.checkpoint_resume import CheckpointResumeHandler
+from agent.runtime_integration.checkpoint_save import CheckpointSaveHandler
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
 from agent.runtime_integration.dispatcher import ActionHandlerRegistry, RuntimeActionDispatcher
 from agent.runtime_integration.evidence import RuntimeActionModuleObserver
@@ -114,6 +116,14 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.CHECKPOINT_SAFE_SUMMARY,
         CheckpointSafeSummaryHandler(),
+    )
+    registry.register(
+        RuntimeActionType.CHECKPOINT_SAVE,
+        CheckpointSaveHandler(),
+    )
+    registry.register(
+        RuntimeActionType.CHECKPOINT_RESUME,
+        CheckpointResumeHandler(),
     )
     registry.register(
         RuntimeActionType.MEMORY_CONSOLIDATE,

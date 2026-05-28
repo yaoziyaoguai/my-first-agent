@@ -257,7 +257,7 @@
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
 
-**当前阶段**：developer prototype / developer-dogfood。所有 safe-to-auto-run items 完成，剩余均需架构决策或新能力设计。
+**Loop 4.1 完成，全部安全可自动修代码 loop 已闭环。** 当前全部 safe-to-auto-run items 完成，剩余均需真实验证或架构决策。
 
 ---
 

@@ -1,0 +1,59 @@
+{
+  "date": "2026-05-29",
+  "evidence_id": "REAL-EVIDENCE-007",
+  "results": [
+    {
+      "case": "W1",
+      "verdict": "PASS",
+      "detail": "MCP bridge registered 2 tool(s) via real StdioMCPClient → echo fixture, decision=allowed"
+    },
+    {
+      "case": "W2",
+      "verdict": "PASS",
+      "detail": "MCP tools visible in TOOL_REGISTRY: ['mcp__echo_fixture__mcp_echo', 'mcp__echo_fixture__mcp_demo_status']"
+    },
+    {
+      "case": "W3",
+      "verdict": "CONCERN",
+      "detail": "Model did not select MCP tool in conversation — this is model autonomous decision, not a code defect. MCP tools were available in TOOL_REGISTRY but model chose not to use them. Guardrail 1: no forced tool_choice or system prompt hack applied.",
+      "mcp_tools_available": [
+        "mcp__echo_fixture__mcp_echo",
+        "mcp__echo_fixture__mcp_demo_status"
+      ],
+      "action_types": [
+        "checkpoint.safe_summary",
+        "memory.consolidate",
+        "memory.recall",
+        "memory.turn_end_proposal",
+        "skill.select",
+        "subagent.delegate_l0",
+        "tool.gate",
+        "tool.invoke",
+        "tool.request",
+        "tool.result"
+      ]
+    },
+    {
+      "case": "W4",
+      "verdict": "CONCERN",
+      "detail": "TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline not exercised for MCP tool — model did not select MCP tool",
+      "tool_gate_count": 2,
+      "tool_invoke_count": 1
+    },
+    {
+      "case": "W5",
+      "verdict": "CONCERN",
+      "detail": "MCP result not in model context — model did not invoke MCP tool"
+    },
+    {
+      "case": "W6",
+      "verdict": "CONCERN",
+      "detail": "Cannot verify semantic content — model did not invoke MCP tool"
+    }
+  ],
+  "summary": {
+    "PASS": 2,
+    "FAIL": 0,
+    "CONCERN": 4
+  }
+}

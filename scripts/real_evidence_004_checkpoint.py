@@ -44,11 +44,15 @@ def run_checkpoint_roundtrip() -> None:
     from agent.runtime_integration.schema import RuntimeActionRequest
     from agent.state import AgentState, RuntimeState
 
-    # 创建临时 checkpoint 路径
+    # 创建临时 checkpoint 路径并重定向 CHECKPOINT_PATH
+    # 这样 dispatcher handler 会将 checkpoint 写入 temp path（与 Part B 模式一致）
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="checkpoint_", delete=False) as f:
         checkpoint_path = Path(f.name)
-    # 删除以便 save_checkpoint 创建
     checkpoint_path.unlink(missing_ok=True)
+
+    import agent.checkpoint as cp_mod
+    original_path = cp_mod.CHECKPOINT_PATH
+    cp_mod.CHECKPOINT_PATH = checkpoint_path
 
     try:
         # --- A1: 构造带 pending state 的 state 并保存 ---
@@ -88,12 +92,26 @@ def run_checkpoint_roundtrip() -> None:
         ))
 
         # 验证 checkpoint 文件存在且内容正确
-        import agent.checkpoint as cp_mod
         saved = cp_mod.load_checkpoint(path=checkpoint_path)
         if saved is None:
-            # 可能 dispatcher handler 保存到了默认路径，直接调用 save_checkpoint
-            cp_mod.save_checkpoint(state, source="test_checkpoint_roundtrip", path=checkpoint_path)
-            saved = cp_mod.load_checkpoint(path=checkpoint_path)
+            # Guardrail 2: 不静默 fallback
+            # 检查 action_log 中的 CHECKPOINT_SAVE evidence
+            action_log = getattr(dispatcher, "action_log", [])
+            save_events = [
+                e for e in action_log
+                if str(getattr(e, "action_type", "")) == str(RuntimeActionType.CHECKPOINT_SAVE)
+            ]
+            if save_events:
+                record("A1a", "PASS",
+                       f"CHECKPOINT_SAVE evidence in dispatcher action_log: "
+                       f"{len(save_events)} event(s), "
+                       f"status={getattr(save_events[0], 'status', 'unknown')}")
+                saved = cp_mod.load_checkpoint()
+            else:
+                record("A1a", "FAIL",
+                       "Checkpoint save produced no file and no dispatcher evidence — "
+                       "handler may not have processed CHECKPOINT_SAVE request")
+                return
 
         if saved:
             task_data = saved.get("task", {})
@@ -213,6 +231,7 @@ def run_checkpoint_roundtrip() -> None:
             record("A7", "FAIL", "Checkpoint state is empty/idle — this would be a no-crash pass")
 
     finally:
+        cp_mod.CHECKPOINT_PATH = original_path
         checkpoint_path.unlink(missing_ok=True)
 
 
@@ -236,10 +255,25 @@ def run_real_provider_checkpoint() -> None:
 
     record("B0", "PASS", f"Real provider configured: {provider_type}")
 
-    collector: list[Any] = []
-
     def on_runtime_event(event: Any) -> None:
         collector.append(event)
+
+    collector: list[Any] = []
+    dispatcher = None
+
+    try:
+        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+        dispatcher = build_phase1_dispatcher()
+    except Exception:
+        pass
+
+    if dispatcher is None:
+        record("B0", "CONCERN",
+               "Cannot build dispatcher for real provider checkpoint validation — "
+               "CHECKPOINT_SAVE evidence cannot be observed")
+        return
+
+    record("B0", "PASS", f"Real provider configured: {provider_type}, dispatcher ready")
 
     # 使用临时 checkpoint 路径
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="checkpoint_", delete=False) as f:
@@ -253,44 +287,46 @@ def run_real_provider_checkpoint() -> None:
     try:
         from agent.core import chat as core_chat
 
-        # B1: 运行真实 provider chat，触发 checkpoint save
-        print("\n  --- B1: Real provider chat → checkpoint save ---")
+        # B1: 运行真实 provider chat，注入 dispatcher 以观察 CHECKPOINT_SAVE evidence
+        print("\n  --- B1: Real provider chat → checkpoint save (dispatcher-injected) ---")
         print("  Sending: '帮我创建一个标题为 checkpoint validation test 的笔记'")
         core_chat(
             user_input="帮我创建一个标题为 checkpoint validation test 的笔记",
             provider=provider,
+            runtime_action_dispatcher=dispatcher,
             on_runtime_event=on_runtime_event,
         )
         print("  chat completed")
 
-        # 检查是否有 CHECKPOINT_SAVE evidence
+        # 检查 dispatcher action_log 中的 CHECKPOINT_SAVE evidence
         from agent.runtime_integration.schema import RuntimeActionType
+        action_log = getattr(dispatcher, "action_log", [])
         save_events = [
-            e for e in collector
-            if getattr(e, "action_type", None) == RuntimeActionType.CHECKPOINT_SAVE
+            e for e in action_log
+            if str(getattr(e, "action_type", "")) == str(RuntimeActionType.CHECKPOINT_SAVE)
         ]
         if save_events:
             for se in save_events:
                 status = getattr(se, "status", "unknown")
                 ev = getattr(se, "evidence", {}) or {}
                 record("B1", "PASS",
-                       f"CHECKPOINT_SAVE dispatched in real core loop: status={status}, "
-                       f"source={ev.get('source', '?')}")
+                       f"CHECKPOINT_SAVE dispatched in real core loop via dispatcher: "
+                       f"status={status}, source={ev.get('source', '?')}")
         else:
-            # 检查 checkpoint 文件是否被写入（可能通过非 dispatcher 路径）
+            # 检查 checkpoint 文件是否被写入
             if checkpoint_path.exists():
                 record("B1", "CONCERN",
-                       "Checkpoint file written but no CHECKPOINT_SAVE evidence — "
-                       "may have used direct save_checkpoint fallback")
+                       "Checkpoint file written but no CHECKPOINT_SAVE dispatcher evidence — "
+                       "save may have bypassed dispatcher. Guardrail 2 violation.")
             else:
                 record("B1", "CONCERN",
-                       "No CHECKPOINT_SAVE evidence and no checkpoint file — "
+                       "No CHECKPOINT_SAVE dispatcher evidence and no checkpoint file — "
                        "model may not have triggered tool call or checkpoint save. "
                        "This is expected if confirmation='always' blocked tool execution "
                        "before checkpoint save point.",
-                       events_count=len(collector),
-                       event_types=sorted(set(
-                           str(getattr(e, "action_type", "?")) for e in collector
+                       action_log_size=len(action_log),
+                       action_types=sorted(set(
+                           str(getattr(e, "action_type", "?")) for e in action_log
                        )))
 
         # B2: 验证 checkpoint 有 actionable state

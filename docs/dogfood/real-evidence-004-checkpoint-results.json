@@ -48,12 +48,26 @@
       "detail": "Real provider configured: anthropic_compatible"
     },
     {
+      "case": "B0",
+      "verdict": "PASS",
+      "detail": "Real provider configured: anthropic_compatible, dispatcher ready"
+    },
+    {
       "case": "B1",
       "verdict": "CONCERN",
-      "detail": "No CHECKPOINT_SAVE evidence and no checkpoint file — model may not have triggered tool call or checkpoint save. This is expected if confirmation='always' blocked tool execution before checkpoint save point.",
-      "events_count": 5,
-      "event_types": [
-        "?"
+      "detail": "No CHECKPOINT_SAVE dispatcher evidence and no checkpoint file — model may not have triggered tool call or checkpoint save. This is expected if confirmation='always' blocked tool execution before checkpoint save point.",
+      "action_log_size": 12,
+      "action_types": [
+        "checkpoint.safe_summary",
+        "memory.consolidate",
+        "memory.recall",
+        "memory.turn_end_proposal",
+        "skill.select",
+        "subagent.delegate_l0",
+        "tool.gate",
+        "tool.invoke",
+        "tool.request",
+        "tool.result"
       ]
     },
     {
@@ -66,7 +80,7 @@
     }
   ],
   "summary": {
-    "PASS": 9,
+    "PASS": 10,
     "FAIL": 0,
     "CONCERN": 2
   }

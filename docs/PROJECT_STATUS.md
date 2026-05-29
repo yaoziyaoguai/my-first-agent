@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (Independent re-audit after evidence closure)
-**状态**: Independent re-audit: materially improved, but not fully validated under the strict red-team standard；current score 3.2/5；REAL-EVIDENCE closure credibility = 2/8 credible, 6/8 questionable；B7/B8 excluded
+**最后更新**: 2026-05-29 (Batch A evidence hardening completed — REAL-EVIDENCE-004/007)
+**状态**: Batch A evidence hardening: 004 direct-fallback removed (credible), 007 real StdioMCPClient verified (partial-credible)；current score 3.5/5 (was 3.2/5)；REAL-EVIDENCE closure credibility = 3-4/8 credible (was 2/8)；B7/B8/003/006/008 excluded from Batch A
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -16,11 +16,11 @@
 | 项目 | 当前复审结论 |
 |------|--------------|
 | 原 redteam inferred score | 1.4/5 |
-| 当前 independent re-audit score | 3.2/5 |
-| 总体判断 | 相比原 redteam 明显改善，但当前阶段不能严谨称为完全 validated |
-| REAL-EVIDENCE closure credibility | 2/8 credible；6/8 questionable |
-| 核心 runtime milestone | PARTIAL / code-path-heavy validated，不是 full robust validated |
-| 明确排除 | B7 Multi-instance readiness；B8 TUI architecture |
+| 当前 independent re-audit score | 3.5/5 (was 3.2/5 — Batch A evidence hardening completed) |
+| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；003/006/008 仍 questionable (defer) |
+| REAL-EVIDENCE closure credibility | 3-4/8 credible (004 hardened + 007 partial-credible)；4-5/8 questionable |
+| 核心 runtime milestone | PARTIAL / code-path-heavy validated；Batch A 移除了 004 direct-save fallback + 007 direct execute_tool() |
+| 明确排除 | B7 Multi-instance readiness；B8 TUI architecture；006 TOOL_MEDIATOR_GAP (defer)；003 claim downgrade |
 
 主要纠偏点：
 - `RuntimeDecisionFrame` registry 当前仍没有 READY branch point，状态文档不能把它当作完全 READY 事实源。
@@ -39,10 +39,10 @@
 | Loop 1.3 Tool Path Unification | VALIDATED | 4 | model tool-use path 经 ToolRuntimeMediator |
 | Loop 2.1 Explicit Memory Main-Path Completion | VALIDATED | 4 | REAL-EVIDENCE-001 可信，但 provenance 有局部 caveat |
 | Loop 2.2 Skill Activation / allowed_tools | PARTIAL | 3 | post-turn activation/contract 有效；same-turn real blocking 未证实 |
-| Loop 2.3 Storage / Checkpoint True Resume | QUESTIONABLE | 3 | handler path 存在；closure script fallback 削弱证据 |
+| Loop 2.3 Storage / Checkpoint True Resume | VALIDATED | 4 | Batch A hardened: direct-save fallback removed, Part A 10/10 PASS；Part B 2 CONCERN per stop condition |
 | Loop 2.4 MCP Main-Path Readiness | PARTIAL | 3 | bridge readiness 可信；main runtime E2E 未证实 |
 | Loop 3.2 Real SubAgent L1/L2 | PARTIAL | 3 | L1 loop/result 有进展；child tool mediation 未走 core path |
-| Loop 3.3 Real MCP External Flight | QUESTIONABLE | 3 | real fixture direct execution；非完整 runtime-mediated path |
+| Loop 3.3 Real MCP External Flight | PARTIAL | 3 | Batch A hardened: real StdioMCPClient bridge + TOOL_REGISTRY verified；model-selected invocation pending (Guardrail 1) |
 | Loop 3.4 Advanced Scheduler | PARTIAL | 2 | 手动 scheduler harness；未进入默认 core main path |
 | Loop 4.1 Dogfood / Evaluation Harness Honesty | VALIDATED | 4 | honesty guard 可信 |
 | Loop 4.2 UX / Error Recovery / Storage Hygiene | CODE_PATH_COMPLETE | 4 | hardening 完成；不是核心能力 completion proof |
@@ -54,13 +54,13 @@
 | REAL-EVIDENCE-001 | Memory retain/recall/forget | credible | positive assertions 充分；局部 direct dispatcher provenance caveat |
 | REAL-EVIDENCE-002 | Skill selection | questionable | deterministic fallback/post-turn activation，不是 model-owned skill tool selection |
 | REAL-EVIDENCE-003 | Skill allowed_tools | questionable | contract tests 可信；real dogfood 未证明 same-turn disallowed blocking |
-| REAL-EVIDENCE-004 | Checkpoint save/resume | questionable | direct-save fallback + real-provider concerns |
+| REAL-EVIDENCE-004 | Checkpoint save/resume | **credible** (hardened) | Batch A: direct-save fallback removed (Guardrail 2)；Part A 10/10 PASS (CHECKPOINT_PATH redirection fix)；Part B 2 CONCERN per stop condition (confirmation='always') |
 | REAL-EVIDENCE-005 | MCP bridge readiness | credible | local stdio fixture discovery/register/visibility/allowlist 可信 |
 | REAL-EVIDENCE-006 | SubAgent L1 | questionable | child loop/result 有价值；child tool mediation 未在 core delegation path 证实 |
-| REAL-EVIDENCE-007 | MCP external flight | questionable | direct registered-tool execution，不是 full runtime-mediated MCP E2E |
+| REAL-EVIDENCE-007 | MCP external flight | **partial-credible** (hardened) | Batch A: real StdioMCPClient bridge PASS (W1/W2: 2 tools registered)；model-selected invocation CONCERN (W3-W6: Guardrail 1)；不再使用 direct execute_tool() |
 | REAL-EVIDENCE-008 | Advanced scheduler | questionable | manual plan/scheduler harness；未证明默认 main path |
 
-Recommended next state: do not enter B7/B8 on the premise that current runtime evidence is fully closed. Either explicitly accept this partial boundary, or run a narrow evidence-hardening pass for the six questionable closure items.
+**Batch A completed (2026-05-29)**: 004 direct-fallback removed + 007 real StdioMCPClient verified. Recommended next: either re-audit to confirm credibility improvement, or proceed to Batch B (008 Scheduler main-path injection). 003/006/008 still questionable per independent re-audit — Batch A does not touch them.
 
 ---
 
@@ -218,11 +218,11 @@ Recommended next state: do not enter B7/B8 on the premise that current runtime e
 | skill.select | PARTIAL | REAL_DOGFOOD_SMOKE | registry 注入、body load、post-turn `_active_skill` 设置已验证；但真实路径是 deterministic keyword fallback，不是 model-owned skill tool selection；REAL-EVIDENCE-002 独立复审为 questionable |
 | skill.apply | PARTIAL | CONTRACT_PLUS_DOGFOOD | allowed_tools contract path 有效；real dogfood 有 TOOL_GATE/INVOKE/RESULT evidence chain，但未证明 same-turn disallowed-tool blocking；REAL-EVIDENCE-003 独立复审为 questionable |
 | mcp.discover | PARTIAL | REAL_EVIDENCE_SMOKE | local stdio fixture bridge discovery/register/visibility/allowlist 可信；REAL-EVIDENCE-005 独立复审为 credible |
-| mcp.invoke | PARTIAL | DIRECT_REAL_FIXTURE | real MCP tool 可通过 `tool_registry.execute_tool()` 触达 fixture server；但不是 model-selected runtime-mediated MCP E2E；REAL-EVIDENCE-007 独立复审为 questionable |
+| mcp.invoke | PARTIAL | REAL_STDIO_BRIDGE_REGISTERED | Batch A hardened: real StdioMCPClient bridge → TOOL_REGISTRY verified (W1/W2 PASS)；model-selected invocation pending (Guardrail 1)；不再 direct execute_tool()；REAL-EVIDENCE-007 独立复审 partial-credible |
 | subagent.delegate | PARTIAL | REAL_DOGFOOD_SMOKE | L1 child provider loop/result/adjudication 有证据；production delegation path 未实际传入 `ToolRuntimeMediator` 触发 child tool mediation；REAL-EVIDENCE-006 独立复审为 questionable |
 | memory.recall/propose/retain/forget | PARTIAL | REAL_PROVIDER_E2E | retain/recall/forget 行为闭环可信；registry 仍是 PARTIAL，且部分 path 使用 direct dispatcher provenance；REAL-EVIDENCE-001 独立复审为 credible |
 | tool.gate/invoke/result | CODE_PATH_COMPLETE | REAL_CORE_LOOP_RUNTIME_E2E | model `tool_use` 已经通过 ToolRuntimeMediator 进入 TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；MCP direct evidence 不应借此升级为 full MCP runtime E2E |
-| checkpoint.save/resume | QUESTIONABLE | CONTRACT_PLUS_SMOKE | handler path 存在；REAL-EVIDENCE-004 validation script 有 direct-save fallback，real provider 部分仍有 concern |
+| checkpoint.save/resume | PARTIAL | CONTRACT_PLUS_DOGFOOD | Batch A hardened: direct-save fallback removed (Guardrail 2), Part A 10/10 PASS (CHECKPOINT_PATH redirection)；Part B 2 CONCERN per stop condition (confirmation='always')；REAL-EVIDENCE-004 独立复审 credible |
 | trace.summary | PARTIAL | FAKE_LOCAL_USER_PATH | in-memory action_log，无 durable store |
 
 **Overclaim 防护规则**：
@@ -278,7 +278,7 @@ Recommended next state: do not enter B7/B8 on the premise that current runtime e
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**全部 safe-to-auto-run code loops 已闭环。所有 REAL-EVIDENCE (001-008) 全部 CLOSED。** 剩余待办项：架构决策（B7/B8）。
+**全部 safe-to-auto-run code loops 已闭环。所有 REAL-EVIDENCE (001-008) 全部 CLOSED。Batch A evidence hardening (2026-05-29): 004/007 证据加固。** 剩余待办项：架构决策（B7/B8）+ Batch B (008 Scheduler main-path injection)。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -292,8 +292,8 @@ Recommended next state: do not enter B7/B8 on the premise that current runtime e
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | **VALIDATED with caveat** — REAL-EVIDENCE-001 独立复审为 credible；retain/recall/forget 行为和 store assertions 充分，但部分 provenance 仍是 direct dispatcher route |
 | Loop 2.2 | Skill Activation Main-Path Completion | **PARTIAL** — body injection/post-turn activation/allowed_tools contract path 有效；REAL-EVIDENCE-002/003 独立复审为 questionable，因为 same-turn real blocking 和 model-owned skill selection 未证实 |
-| Loop 2.3 | Storage/Checkpoint True Resume | **QUESTIONABLE** — handler path 存在；REAL-EVIDENCE-004 独立复审为 questionable，因为 validation script 有 direct-save fallback，real provider 部分仍有 concern |
-| Loop 2.4 | MCP Main-Path Readiness | **PARTIAL** — REAL-EVIDENCE-005 bridge readiness credible；但还不是完整 `core.chat -> model selects -> MCP invocation -> result context` |
+| Loop 2.3 | Storage/Checkpoint True Resume | **VALIDATED** — Batch A hardened: direct-save fallback removed, Part A 10/10 PASS (CHECKPOINT_PATH redirection + Guardrail 2 enforcement)；Part B 2 CONCERN per documented stop condition (confirmation='always') |
+| Loop 2.4 | MCP Main-Path Readiness | **PARTIAL** — REAL-EVIDENCE-005 bridge readiness credible；Batch A: 007 real StdioMCPClient verified (W1/W2 PASS)；model-selected invocation pending (Guardrail 1) |
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — L1 child provider loop/result/adjudication 有进展；REAL-EVIDENCE-006 独立复审为 questionable，child tool mediation 未在 core delegation path 证实；L2 不在本阶段范围 |
 | Loop 3.3 | Real MCP External Flight | **QUESTIONABLE** — REAL-EVIDENCE-007 独立复审为 questionable；当前是 direct `tool_registry.execute_tool()` → stdio fixture，不是 full runtime-mediated path |
 | Loop 3.4 | Advanced Scheduler | **PARTIAL** — scheduler code/tests/manual harness 存在；REAL-EVIDENCE-008 独立复审为 questionable，因为默认 `core.chat()` 未注入 `ActionScheduler`，没有 real model-generated plan main-path proof |

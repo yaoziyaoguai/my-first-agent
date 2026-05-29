@@ -16,3 +16,4 @@ blog/
 summary.md
 state.json
 runs/
+agent_log.archived-*.jsonl

@@ -1,12 +1,16 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-29 (Real provider dogfood re-validation: REAL-EVIDENCE-002/003 closed)
+**最后更新**: 2026-05-29 (Loop 4.2 UX / Error Recovery / Storage Hygiene completed)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
 ---
 
 ## 2026-05-29
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| **Loop 4.2: UX / Error Recovery / Storage Hygiene** | — | **COMPLETED — product hardening** — 10 files (+188/-36): (1) Provider error → RuntimeEvent fallback: `core.py:_call_model()` catch ProviderError → `control_message()` → `ProviderResponse(content=[], stop_reason="end_turn")`, 不 crash；(2) Scheduler node failure → RuntimeEvent: `loop.py:run_main_loop()` detect `halted` → `control_message()` with node title + error reason;(3) Checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent in `session.py`；(4) ProviderNotImplementedError message: user-friendly Chinese with config guidance；(5) Health check: `agent/health_check.py` — `run_provider_health_checks()` 独立于主循环错误处理；(6) Response handlers: `agent/response_handlers.py` ToolBlockedEvent Chinese message；(7) Storage hygiene: `.gitignore` add `state.json`/`runs/`；(8) Trace report: `_emit_run_summary()` 新增 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps fields + `render_compact_run_summary()` 展示新字段；(9) ruff clean; 6/6 streaming protocol tests pass; 568/574 regression pass (6 pre-existing: catalog missing descriptors, skill handler KeyError, pipeline structure outdated expected_types, HOME isolation)；(10) 全部 safe-to-auto-run code loops 已闭环，剩余 REAL-EVIDENCE-004/005/006/007/008 + B4/B6/B7/B8 需真实验证或架构决策 |
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|

@@ -11,6 +11,7 @@ from typing import Any
 
 from agent.checkpoint import clear_checkpoint, save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
+from agent.display_events import tool_blocked_event as _tool_blocked_event
 from agent.display_events import user_input_requested
 from agent.model_output_resolution import (
     EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
@@ -306,6 +307,14 @@ def handle_tool_use_response(
                 messages=messages,
             )
         if result == FORCE_STOP:
+            # Loop 4.2: 用户可见 tool blocked 事件
+            if turn_state.on_runtime_event is not None:
+                turn_state.on_runtime_event(
+                    _tool_blocked_event(
+                        block.name,
+                        "被安全策略拒绝执行（TOOL_GATE rejected），具体原因见上方工具消息",
+                    ),
+                )
             remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
             _fill_placeholder_results(
                 messages,

@@ -82,6 +82,10 @@ from agent.model_output_dispatch import (
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
 from agent.planner import format_plan_for_display, generate_plan
 from agent.prompt_builder import build_system_prompt
+from agent.provider.protocol import (
+    ProviderError,
+    ProviderResponse,
+)
 from agent.provider_evidence import (
     resolve_provider_evidence_metadata as _resolve_provider_evidence_metadata,
 )
@@ -1223,26 +1227,35 @@ def _call_model(
     request_messages = build_execution_messages_from_state(state)
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
-    response = call_model(
-        provider=getattr(loop_ctx, "model_provider", None),
-        legacy_client=loop_ctx.client,
-        model_name=loop_ctx.model_name,
-        system_prompt=turn_state.system_prompt,
-        messages=request_messages,
-        tools=get_model_visible_tools(max_mcp_tools=5),
-        emit_text_delta=(
-            (lambda text: turn_state.on_runtime_event(assistant_delta(text)))
-            if turn_state.on_runtime_event is not None
-            else None
-        ),
-        emit_tool_request=(
-            (lambda: turn_state.on_runtime_event(tool_requested()))
-            if turn_state.on_runtime_event is not None
-            else None
-        ),
-        print_assistant_newline=turn_state.print_assistant_newline,
-        _streaming_events_out=_streaming_events_out,
-    )
+    try:
+        response = call_model(
+            provider=getattr(loop_ctx, "model_provider", None),
+            legacy_client=loop_ctx.client,
+            model_name=loop_ctx.model_name,
+            system_prompt=turn_state.system_prompt,
+            messages=request_messages,
+            tools=get_model_visible_tools(max_mcp_tools=5),
+            emit_text_delta=(
+                (lambda text: turn_state.on_runtime_event(assistant_delta(text)))
+                if turn_state.on_runtime_event is not None
+                else None
+            ),
+            emit_tool_request=(
+                (lambda: turn_state.on_runtime_event(tool_requested()))
+                if turn_state.on_runtime_event is not None
+                else None
+            ),
+            print_assistant_newline=turn_state.print_assistant_newline,
+            _streaming_events_out=_streaming_events_out,
+        )
+    except ProviderError as exc:
+        # Loop 4.2: 将 provider 异常转为用户可见的 RuntimeEvent，避免 traceback 崩溃。
+        error_msg = str(exc)
+        if turn_state.on_runtime_event is not None:
+            turn_state.on_runtime_event(
+                control_message(f"[Provider 错误] 模型调用失败：{error_msg}")
+            )
+        return ProviderResponse(content=[], stop_reason="end_turn")
 
     # ===== 协议观察：打印返回结构 =====
     # _debug_print_response(response)

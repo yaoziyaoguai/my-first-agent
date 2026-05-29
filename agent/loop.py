@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.display_events import RuntimeEvent, loop_max_iterations_event
+from agent.display_events import RuntimeEvent, control_message, loop_max_iterations_event
 from agent.loop_context import LoopContext
 from agent.runtime_observer import log_event as log_runtime_event
 
@@ -707,6 +707,11 @@ def _emit_run_summary(
     error_reasons: list[str] = []
     business_events = 0
     probe_events = 0
+    # Loop 4.2: Skill / MCP / Scheduler 证据计数
+    skill_activations = 0
+    skill_names: list[str] = []
+    mcp_tool_invocations = 0
+    scheduler_plan_steps = 0
 
     # 中文学习说明：turn_end hook 每轮无条件运行 MEMORY_TURN_END_PROPOSAL、
     # MEMORY_CONSOLIDATE、MEMORY_RECALL、SUBAGENT_DELEGATE_L0。它们是 lifecycle
@@ -751,6 +756,19 @@ def _emit_run_summary(
             target = str(getattr(event, "target_identity", ""))
             if target:
                 tool_names.append(target)
+        elif at.startswith("skill."):
+            if status == "success":
+                skill_activations += 1
+                target = str(getattr(event, "target_identity", ""))
+                if target:
+                    skill_names.append(target)
+        elif at.startswith("mcp."):
+            if status == "success" and at == "mcp.invoke":
+                mcp_tool_invocations += 1
+        elif (
+            at.startswith("action_plan.") or at == "scheduler.node_enter"
+        ) and status == "success":
+            scheduler_plan_steps += 1
 
     # 也从 state 中提取本轮工具调用信息（如果 action_log 没有 tool 事件）
     state = dependencies.state
@@ -782,6 +800,10 @@ def _emit_run_summary(
         business_events=business_events,
         probe_events=probe_events,
         decision_frame_summary=decision_summary,
+        skill_activations=skill_activations,
+        skill_names=skill_names,
+        mcp_tool_invocations=mcp_tool_invocations,
+        scheduler_plan_steps=scheduler_plan_steps,
     )
     dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
 
@@ -853,6 +875,19 @@ def run_main_loop(
             _next_node = _scheduler.next_node()
             if _next_node is not None:
                 _scheduler.execute_node(_next_node)
+                # Loop 4.2: node 可能因失败导致 plan halt——通知用户。
+                if _scheduler.state.status == "halted":
+                    _failed_info = _scheduler.state.node_results.get(
+                        _next_node.node_id, {}
+                    )
+                    _err = _failed_info.get("error", "未知错误")
+                    _evt = control_message(
+                        f"[Scheduler] 步骤「{_next_node.title or _next_node.node_id}」"
+                        f"执行失败：{_err}，计划已停止。"
+                    )
+                    dependencies.safe_emit_runtime_event(
+                        turn_state.on_runtime_event, _evt
+                    )
                 continue  # 不调模型，直接推进下一个 action node
             else:
                 _scheduler.complete_plan()

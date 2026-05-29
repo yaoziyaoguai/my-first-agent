@@ -393,7 +393,10 @@ def handle_resume_choice(choice: str) -> None:
         _try_dispatch_checkpoint_resume(get_state())
         _replay_awaiting_prompt(get_state())
     else:
-        print("\n[系统] 恢复断点失败。\n")
+        print(
+            "\n[系统] 恢复断点失败——checkpoint 数据可能已损坏或与当前版本不兼容。"
+            "已清除断点，回到对话模式。可直接输入新任务。\n"
+        )
         get_state().task.status = "idle"
 
 

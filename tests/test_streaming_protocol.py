@@ -6,9 +6,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
-
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -155,7 +154,7 @@ def test_model_call_without_provider_fails_closed_before_legacy_stream() -> None
         def messages(self):  # noqa: ANN201
             raise AssertionError("legacy stream path must not be touched")
 
-    with pytest.raises(ProviderNotImplementedError, match="model_provider_required"):
+    with pytest.raises(ProviderNotImplementedError, match="未配置 LLM provider"):
         call_model(
             provider=None,
             legacy_client=ForbiddenLegacyClient(),

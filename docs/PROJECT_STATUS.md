@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (Real provider dogfood: REAL-EVIDENCE-002/003 closed)
-**状态**: Loop 4.1 完成；真实 provider dogfood 重验证通过 — Skill Selection (REAL-EVIDENCE-002 CLOSED), Skill allowed_tools Enforcement (REAL-EVIDENCE-003 CLOSED), SubAgent L1 (REAL-EVIDENCE-006 pending — 需 real-model subagent descriptor)；`agent/evaluation_honesty.py` EvidenceClassification 4 级枚举 + 41 个 guard tests 通过
+**最后更新**: 2026-05-29 (Loop 4.2 UX / Error Recovery / Storage Hygiene completed)
+**状态**: Loop 4.2 完成 — provider error RuntimeEvent fallback、scheduler node failure notification、checkpoint resume confirmation、session/file hygiene (.gitignore)、trace report Skill/MCP/Scheduler enrichment；10 files changed, 188 insertions, 36 deletions
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -219,7 +219,9 @@
 
 ## 2. 推荐下一步
 
-**Loop 4.1 完成。** 红队补审发现 Dogfood/Evaluation Harness 14/14 降级——根因是把 fake/direct-call/expected_events/no-crash/smoke 当 capability completion。新建 `agent/evaluation_honesty.py`（EvidenceClassification 4 级枚举 + classify_evaluation 分类引擎 + EvaluationReport schema），41 个 guard tests 确保 overclaim 模式不再出现。`scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段。**Loop 2.2/3.2 真实 provider dogfood 验证 (2026-05-28)**: Skill Selection validated, Skill allowed_tools evidence chain verified, SubAgent L0 delegation confirmed。
+**Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
+
+**全部 safe-to-auto-run code loops 已闭环。** 剩余待办项均需真实验证（REAL-EVIDENCE-004/005/006/007/008）或架构决策（B4/B6/B7/B8）。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -239,6 +241,7 @@
 | Loop 3.3 | Real MCP External Flight | **code path complete, real validation pending** — (1) module-level bridge state；(2) dynamic mcp_available；(3) main.py wiring；(4) 30 new contract tests PASS；(5) 11 getattr bug fixes；(6) 66/67 regression PASS。剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007） |
 | Loop 3.4 | Advanced Scheduler | **PARTIAL** — code path complete, real validation pending: (1) `agent/action_scheduler.py` — ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；(2) `agent/runtime_integration/action_scheduler_handler.py` — 5 个 RuntimeActionType handler 在 dispatcher 注册（共 16 handlers）；(3) `agent/loop.py` — scheduler 挂在 run_main_loop() 内层 model loop 前；(4) RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；(5) 46 个 contract tests 全部通过；(6) 不宣称 READY — 剩真实 provider plan→scheduler E2E [REAL-EVIDENCE-008] |
 | Loop 4.1 | Evaluation/Dogfood Harness Honesty | **code path complete** — (1) `agent/evaluation_honesty.py`（~220 lines）：EvidenceClassification 4 级枚举 + EvaluationEvidence/EvaluationReport dataclass + classify_evaluation/classify_smoke_vs_capability 分类引擎；(2) NON_CAPABILITY_PROVIDERS/ASSERTIONS + CAPABILITY_ASSERTIONS frozenset 定义；(3) `scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段；(4) 41 个 guard tests（`tests/unit/test_evaluation_honesty.py`，10 classes）全部通过；(5) SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt |
+| Loop 4.2 | UX / Error Recovery / Storage Hygiene | **COMPLETED** — product hardening, not new core capability: (1) provider error → RuntimeEvent fallback（`_call_model()` catch ProviderError → `control_message()` → empty ProviderResponse，不 crash）；(2) scheduler node failure → RuntimeEvent notification（`run_main_loop()` 检测 halted status → `control_message()` 显示 node title + error）；(3) checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent 在 session.py 中 emit；(4) storage hygiene: `.gitignore` 添加 `state.json`/`runs/`；(5) trace report enrichment: `_emit_run_summary()` 含 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps；(6) 6 streaming protocol tests + 4 个 contract confirmations 通过；ruff clean；568/574 tests pass（6 pre-existing failures） |
 
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER
@@ -257,7 +260,7 @@
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
 
-**Loop 4.1 完成，全部安全可自动修代码 loop 已闭环。** 当前全部 safe-to-auto-run items 完成，剩余均需真实验证或架构决策。
+**Loop 4.2 完成，全部安全可自动修代码 loop 已闭环。** 当前全部 safe-to-auto-run items 完成，剩余均需真实验证或架构决策。
 
 ---
 

@@ -417,27 +417,34 @@ def run_summary_event(
     business_events: int = 0,
     probe_events: int = 0,
     decision_frame_summary: dict[str, Any] | None = None,
+    skill_activations: int = 0,
+    skill_names: list[str] | None = None,
+    mcp_tool_invocations: int = 0,
+    scheduler_plan_steps: int = 0,
 ) -> RuntimeEvent:
     """构造 run summary 展示事件。
 
     每轮 chat() 结束后产出结构化运行摘要，让用户/开发者能看懂
     本轮发生了什么。数据来源：TurnState 计数 + RuntimeActionDispatcher evidence。
 
-    新增字段（Issue 5: Run summary enrichment）：
-    - tool_names: 本轮实际调用的工具名列表（脱敏后）
-    - memory_actions: Memory 操作类型列表（如 proposed/retained/forgotten）
-    - subagent_names: 被委托的 SubAgent 名称列表
-    - error_reasons: 错误/阻塞原因列表（脱敏后，不包含 secret/API key）
+    Loop 4.2 新增字段：
+    - skill_activations / skill_names: Skill 激活次数与名称
+    - mcp_tool_invocations: MCP 工具调用次数
+    - scheduler_plan_steps: Scheduler 计划步骤数
     """
     tool_names = [_mask_preview_secrets(str(name)) for name in tool_names or []]
     memory_actions = [_mask_preview_secrets(str(action)) for action in memory_actions or []]
     subagent_names = [_mask_preview_secrets(str(name)) for name in subagent_names or []]
     error_reasons = [_mask_preview_secrets(str(reason)) for reason in error_reasons or []]
+    skill_names = [_mask_preview_secrets(str(name)) for name in skill_names or []]
 
     parts = ["本轮运行摘要"]
     parts.append(f"  循环次数：{loop_iterations}")
-    if tool_calls == 0 and memory_operations == 0 and not subagent_delegations:
-        parts.append("  本轮活动：未调用工具 / 未写入 Memory / 未委托 SubAgent")
+    if (
+        tool_calls == 0 and memory_operations == 0
+        and not subagent_delegations and not skill_activations
+    ):
+        parts.append("  本轮活动：未调用工具 / 未写入 Memory / 未委托 SubAgent / 未激活 Skill")
     if tool_calls > 0:
         parts.append(f"  工具调用：{tool_calls} 次")
         if tool_names:
@@ -450,6 +457,14 @@ def run_summary_event(
         parts.append(f"  SubAgent 委托：{subagent_delegations} 次")
         if subagent_names:
             parts.append(f"    子代理：{', '.join(subagent_names)}")
+    if skill_activations:
+        parts.append(f"  Skill 激活：{skill_activations} 次")
+        if skill_names:
+            parts.append(f"    Skill：{', '.join(skill_names)}")
+    if mcp_tool_invocations:
+        parts.append(f"  MCP 工具调用：{mcp_tool_invocations} 次")
+    if scheduler_plan_steps:
+        parts.append(f"  Scheduler 计划步骤：{scheduler_plan_steps} 步")
     if error_reasons:
         parts.append(f"  错误：{'; '.join(error_reasons)}")
         parts.append("  调试提示：先看 provider mode、health/logs 和 current status 文档")
@@ -469,6 +484,10 @@ def run_summary_event(
             "error_reasons": error_reasons,
             "business_events": business_events,
             "probe_events": probe_events,
+            "skill_activations": skill_activations,
+            "skill_names": skill_names,
+            "mcp_tool_invocations": mcp_tool_invocations,
+            "scheduler_plan_steps": scheduler_plan_steps,
             **({"decision_frame_summary": decision_frame_summary}
                if decision_frame_summary is not None else {}),
         },
@@ -611,6 +630,27 @@ def feedback_intent_requested(
     return RuntimeEvent(
         event_type=EVENT_FEEDBACK_INTENT_REQUESTED,
         text=_format_user_input_request(pending),
+        metadata=payload,
+    )
+
+
+def tool_blocked_event(
+    tool_name: str,
+    reason: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeEvent:
+    """构造工具被安全策略阻断的用户可见事件。
+
+    与 tool_result_visible 不同：工具被 blocked 后**没有执行**，因此不产生
+    tool_result。本事件告知用户哪个工具被什么策略阻止，并提供可操作的下一步建议。
+    """
+    payload = dict(metadata or {})
+    payload["tool"] = tool_name
+    payload["reason"] = reason
+    return RuntimeEvent(
+        event_type=EVENT_TOOL_RESULT_VISIBLE,
+        text=f"[安全策略] 工具 {tool_name} 未执行：{reason}",
         metadata=payload,
     )
 

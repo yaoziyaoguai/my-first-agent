@@ -22,13 +22,13 @@
 import subprocess
 from pathlib import Path
 
-from agent.logger import log_event
 # 中文学习边界：health check 需要检查工具注册表的完整性（tool_registry_integrity /
 # tool_risk_distribution），必须在模块加载时显式触发 agent.tools 的导入以完成
 # @register_tool 装饰器注册。不把这个 import 藏在 check 函数内部，是为了让副作用
 # （工具注册）在 health check 入口处显式可见，而不是隐藏在个别函数的执行路径中。
 # 这不会改变 tool_registry 的注册机制，也不修改任何 agent/tools/*.py。
 import agent.tools  # noqa: F401  触发所有 @register_tool 装饰器
+from agent.logger import log_event
 from config import PROJECT_DIR
 
 
@@ -259,7 +259,9 @@ def check_tool_registry_integrity():
             "message": "工具注册表为空",
         }
 
-    required_fields = ("name", "description", "parameters", "capability", "risk_level", "output_policy")
+    required_fields = (
+        "name", "description", "parameters", "capability", "risk_level", "output_policy"
+    )
     issues: list[str] = []
     meta_tool_count = 0
     for name, info in TOOL_REGISTRY.items():
@@ -284,7 +286,9 @@ def check_tool_registry_integrity():
         }
     return {
         "status": "pass",
-        "current_value": f"{total} 工具（{business_tools} 业务 + {meta_tool_count} 元工具），metadata 完整",
+        "current_value": (
+            f"{total} 工具（{business_tools} 业务 + {meta_tool_count} 元工具），metadata 完整"
+        ),
         "path": "agent/tool_registry.py",
         "risk": "无",
         "action": "无需操作",
@@ -346,8 +350,15 @@ def check_tool_risk_distribution():
         ),
         "path": "agent/tool_registry.py",
         "risk": "; ".join(warnings) if warnings else "无",
-        "action": "检查高 risk 工具是否确实需要高 risk；细化工具 capability 分类" if warnings else "无需操作",
-        "message": "工具风险分布正常" if status == "pass" else f"工具风险分布需关注: {'; '.join(warnings)}",
+        "action": (
+            "检查高 risk 工具是否确实需要高 risk；细化工具 capability 分类"
+            if warnings else "无需操作"
+        ),
+        "message": (
+            "工具风险分布正常"
+            if status == "pass"
+            else f"工具风险分布需关注: {'; '.join(warnings)}"
+        ),
         "risk_counts": risk_counts,
         "capability_counts": capability_counts,
         "total_tools": total,
@@ -484,6 +495,46 @@ def check_mcp_config_readiness():
     }
 
 
+def check_runs_accumulation():
+    """检查 runs/ 目录下的 trace 文件是否堆积过多。"""
+    runs_dir = PROJECT_DIR / "runs"
+    rel_path = _relative_path(runs_dir)
+    if not runs_dir.exists():
+        return {
+            "status": "pass",
+            "current_value": "0 个文件（目录不存在）",
+            "path": rel_path,
+            "risk": "无",
+            "action": "无需操作",
+            "message": "runs 目录不存在",
+        }
+
+    run_files = list(runs_dir.glob("*.jsonl"))
+    count = len(run_files)
+    if count > 20:
+        return {
+            "status": "warn",
+            "current_value": f"{count} 个 trace 文件",
+            "path": rel_path,
+            "risk": "trace 文件长期累积占用磁盘空间，且不影响 Runtime 正确性。",
+            "action": (
+                "人工清理旧 trace 文件（不会自动执行，复制粘贴）：\n"
+                f"  ls -t {rel_path}/*.jsonl | tail -n +21 | xargs rm"
+            ),
+            "message": f"runs/ 下发现 {count} 个 trace 文件，建议清理旧文件",
+            "count": count,
+        }
+    return {
+        "status": "pass",
+        "current_value": f"{count} 个 trace 文件",
+        "path": rel_path,
+        "risk": "无",
+        "action": "无需操作",
+        "message": "runs 文件数量正常",
+        "count": count,
+    }
+
+
 def collect_health_results():
     """运行所有健康检查并写入 log_event，但**不打印**任何东西。
 
@@ -498,6 +549,7 @@ def collect_health_results():
         "backup_accumulation": check_backup_accumulation,
         "log_size": check_log_size,
         "session_accumulation": check_session_accumulation,
+        "runs_accumulation": check_runs_accumulation,
         "tool_registry_integrity": check_tool_registry_integrity,
         "tool_risk_distribution": check_tool_risk_distribution,
         "mcp_config_readiness": check_mcp_config_readiness,

@@ -57,7 +57,10 @@ def call_model(
         provider = legacy_client.provider
 
     if provider is None:
-        raise ProviderNotImplementedError("model_provider_required")
+        raise ProviderNotImplementedError(
+            "未配置 LLM provider，无法调用模型。请检查 config/config.yaml 中 "
+            "provider 配置，或确认环境变量 MY_FIRST_AGENT_LLM_PROVIDER 已设置。"
+        )
 
     if getattr(provider, "supports_streaming", False):
         stream_events = provider.stream(system=system_prompt, messages=messages, tools=tools)

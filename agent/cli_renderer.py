@@ -326,21 +326,28 @@ def render_compact_run_summary(metadata: dict[str, Any]) -> str:
     memory_operations = metadata.get("memory_operations", 0)
     subagent_delegations = metadata.get("subagent_delegations", 0)
     stop_reason = metadata.get("stop_reason", "未知")
+    skill_activations = metadata.get("skill_activations", 0)
+    mcp_tool_invocations = metadata.get("mcp_tool_invocations", 0)
+    scheduler_plan_steps = metadata.get("scheduler_plan_steps", 0)
 
     tool_names: list[str] = metadata.get("tool_names", []) or []
     memory_actions: list[str] = metadata.get("memory_actions", []) or []
     subagent_names: list[str] = metadata.get("subagent_names", []) or []
+    skill_names: list[str] = metadata.get("skill_names", []) or []
     error_reasons: list[str] = metadata.get("error_reasons", []) or []
 
     # 检测是否有字段被脱敏
-    all_display_strings = tool_names + memory_actions + subagent_names + error_reasons
+    all_display_strings = tool_names + memory_actions + subagent_names + skill_names + error_reasons
     redacted = any("[REDACTED]" in s for s in all_display_strings)
 
     parts = [f"[run] iter={loop_iterations}"]
 
-    has_activity = tool_calls > 0 or memory_operations > 0 or subagent_delegations > 0
+    has_activity = (
+        tool_calls > 0 or memory_operations > 0
+        or subagent_delegations > 0 or skill_activations > 0
+    )
     if not has_activity:
-        parts.append("— 普通对话，无工具/Memory/SubAgent 活动")
+        parts.append("— 普通对话，无工具/Memory/SubAgent/Skill 活动")
     else:
         if tool_calls > 0:
             names_str = ",".join(tool_names) if tool_names else "?"
@@ -351,6 +358,13 @@ def render_compact_run_summary(metadata: dict[str, Any]) -> str:
         if subagent_delegations > 0:
             names_str = ",".join(subagent_names) if subagent_names else "?"
             parts.append(f"sub={subagent_delegations}({names_str})")
+        if skill_activations > 0:
+            names_str = ",".join(skill_names) if skill_names else "?"
+            parts.append(f"skill={skill_activations}({names_str})")
+        if mcp_tool_invocations > 0:
+            parts.append(f"mcp={mcp_tool_invocations}")
+        if scheduler_plan_steps > 0:
+            parts.append(f"scheduler={scheduler_plan_steps}")
 
     parts.append(f"redacted={'yes' if redacted else 'no'}")
     parts.append(f"stop={stop_reason}")

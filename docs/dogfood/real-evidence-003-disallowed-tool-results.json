@@ -1,0 +1,37 @@
+{
+  "date": "2026-05-29",
+  "evidence_id": "REAL-EVIDENCE-003",
+  "method": "FakeProvider deterministic tool_use + main runtime path",
+  "results": [
+    {
+      "case": "D3",
+      "verdict": "PASS",
+      "detail": "TOOL_GATE rejected disallowed tool demo.echo_task_summary: status=rejected, decision=rejected"
+    },
+    {
+      "case": "D4",
+      "verdict": "PASS",
+      "detail": "skill_allowed_tools present in TOOL_GATE evidence: ('demo.write_demo_note',)"
+    },
+    {
+      "case": "D5",
+      "verdict": "PASS",
+      "detail": "No TOOL_INVOKE for disallowed tool — blocked BEFORE execution"
+    },
+    {
+      "case": "D6",
+      "verdict": "PASS",
+      "detail": "TOOL_RESULT trace for blocked tool: tool_name=demo.echo_task_summary, validation_failed=True"
+    },
+    {
+      "case": "D7",
+      "verdict": "PASS",
+      "detail": "Evidence chain through main runtime path: TOOL_GATE source=ToolRuntimeMediator, all_types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'streaming.event', 'streaming.provider_call', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result'], not a direct dispatcher.route() call"
+    }
+  ],
+  "summary": {
+    "PASS": 5,
+    "FAIL": 0,
+    "CONCERN": 0
+  }
+}

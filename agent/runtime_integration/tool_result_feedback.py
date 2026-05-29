@@ -175,7 +175,8 @@ class ToolResultFeedbackHandler:
         """
         payload = dict(request.payload)
         tool_name = payload.get("tool_name")
-        # tool_output: 区分 "key missing" (None from .get()) vs "value is None" ("tool_output" in payload)
+        # tool_output: 区分 "key missing" (None from .get()) vs
+        # "value is None" ("tool_output" in payload)
         tool_output_missing = "tool_output" not in payload
         tool_output = payload.get("tool_output")
         execution_status = str(payload.get("execution_status") or "success")
@@ -208,10 +209,13 @@ class ToolResultFeedbackHandler:
                 payload={
                     "disposition": "failed",
                     "error": "missing required field: tool_output",
+                    "tool_name": tool_name,
                     "prompt_section": "",
                 },
                 observed_call=None,
                 evidence_extra={
+                    "tool_name": tool_name,
+                    "execution_status": execution_status,
                     "validation_failed": True,
                     "missing_field": "tool_output",
                     "external_side_effects": False,

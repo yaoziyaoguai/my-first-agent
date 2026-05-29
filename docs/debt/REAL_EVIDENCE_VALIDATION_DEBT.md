@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-29 (008 Batch B implementation complete — scheduler now enters main runtime path via core.chat(); 001-007 CLOSED)
+**最后更新**: 2026-05-29 (008 Batch B partial-credible — scheduler injectable into main runtime path; 001-007 CLOSED)
 
 ---
 
@@ -164,13 +164,14 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Missing evidence** | 真实 LLM 生成的 plan 通过 scheduler 推进执行（fake plan → scheduler execution 不证明 real provider plan parsing 正确） |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) planner.generate_plan() 返回真实 JSON plan；(3) scheduler 从真实 JSON plan 构造 ActionPlan；(4) scheduler 按序推进 node（TOOL_CALL/MEMORY_RETAIN/SKILL_SELECT 等）；(5) 每个 node 产生 dispatcher evidence（NODE_ENTER/NODE_EXIT）；(6) plan 完成后产生 ACTION_PLAN_COMPLETE evidence；(7) 验证 scheduler decision 影响 model context 和 user response |
 | **Current evidence** | Loop 3.4 SDD 完成（`docs/design/advanced-scheduler-contract.md`）；7 项架构决策；implementation 完成：`agent/action_scheduler.py`（554 lines）+ `agent/runtime_integration/action_scheduler_handler.py` + `agent/loop.py` scheduler integration + RuntimeDecisionFrame 5 新 branch points；46 个 contract tests 全部通过（7 classes, 20 test intents covered）；scheduler 通过 dispatcher 产生 5 种 business evidence；137/137 regression tests pass |
-| **Status** | **Batch B implementation complete** — core.chat() 接受 `action_scheduler` 参数 → _run_main_loop() → LoopDependencies 注入 → run_main_loop() scheduler preprocessing block 实际触发（不再 dead code）。20 个 new contract tests (`tests/runtime_integration/test_scheduler_main_path.py`) 全部通过：T1-T2 注入契约、T3-T7 主路径 evidence、T8 跨 node influence、T9-T10 失败/回归、T11-T15 边界防护、N1-N4 不可伪装。66/66 scheduler tests pass（46 已有 + 20 新增）。原 overclaim 已纠正。 |
+| **Status** | **Batch B partial-credible — code-path injection credible** — core.chat() 接受 `action_scheduler` 参数 → _run_main_loop() → LoopDependencies 注入 → run_main_loop() scheduler preprocessing block 实际触发（不再 dead code）。20 个 new contract tests (`tests/runtime_integration/test_scheduler_main_path.py`) 全部通过：T1-T2 注入契约、T3-T7 主路径 evidence、T8 跨 node influence、T9-T10 失败/回归、T11-T15 边界防护、N1-N4 不可伪装。66/66 scheduler tests pass（46 已有 + 20 新增）。原 overclaim 已纠正。**Remaining caveats**: (1) 没有 full `core.chat(..., action_scheduler=scheduler)` E2E 测试——现有 tests 在 `run_main_loop()` level 验证，跳过了 core.chat() 的 planning phase/confirmation pipeline 等上游路径；(2) ActionPlan 仍是 hand-built fixture（`_simple_plan()`），不是 real model-generated plan——builder/planner bridge 不在本阶段 scope；(3) 以上 caveats 不是 B7/B8 blocker。 |
 | **Blocking current code loop** | no |
-| **Blocking READY claim** | no — scheduler now on default main runtime path |
+| **Blocking READY claim** | no — scheduler now injectable into main runtime path via core.chat(action_scheduler=...) |
 | **Overclaim corrected** | 2026-05-29 |
 | **Batch B implementation** | `docs/design/batch-b-scheduler-main-path-injection.md` — SDD; `tests/runtime_integration/test_scheduler_main_path.py` — 20 tests; `agent/core.py` — 7-line injection |
+| **Post-review** | **PASS_WITH_CONCERNS** (2026-05-29 independent audit) — injection chain structurally correct at run_main_loop() level; partial-credible; docs wording corrected to conservative claims |
 | **Previous closing evidence (overclaimed)** | `scripts/real_evidence_008_scheduler.py` — manual harness, not main-path evidence |
-| **Commit** | pending |
+| **Commit** | dfb5c6f |
 
 ---
 

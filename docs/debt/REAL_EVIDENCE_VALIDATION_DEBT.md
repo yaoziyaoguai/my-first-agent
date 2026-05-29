@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-29 (ALL REAL-EVIDENCE CLOSED — REAL-EVIDENCE-001/002/003/004/005/006/007/008 all validated)
+**最后更新**: 2026-05-29 (008 overclaim corrected → Batch B SDD complete; 001-007 CLOSED; 008 implementation pending)
 
 ---
 
@@ -93,8 +93,8 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Capability** | Checkpoint save/resume dispatcher-mediated evidence chain — real API/model roundtrip validation |
 | **Missing evidence** | 真实 LLM provider 下跨保存/恢复的完整 dispatcher evidence chain 连续性验证 |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 触发 checkpoint save（plan 生成、memory confirmation、或压缩同步）；(3) 验证 CHECKPOINT_SAVE dispatcher evidence 产生且 save_succeeded=True；(4) 模拟中断（Ctrl+C）并在下次启动时 resume；(5) 验证 CHECKPOINT_RESUME dispatcher evidence 产生且 restore_succeeded=True；(6) 验证 resume 后 conversation context、task state、pending action 一致继续；(7) 验证 save→resume dispatcher evidence chain 可追溯（action_log 中两种 action type 都存在）；(8) 验证 RuntimeDecisionFrame 正确反映 checkpoint 状态；(9) 验证不是 save/load file smoke 或 no-crash 冒充 true resume |
-| **Current evidence** | 16 contract tests pass（4 save mediation + 5 resume mediation + 4 roundtrip + 2 not fakeable + 1 L3 hook-level）；core.py 3 处 direct save_checkpoint 已迁入 dispatcher-mediated CHECKPOINT_SAVE；session.py resume 路径通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；CheckpointSaveHandler/CheckpointResumeHandler 在 phase1_hook.py 注册；RuntimeDecisionFrame checkpoint branch points 更新为 code path complete；**Batch A evidence hardening (2026-05-29)**: Part A (roundtrip) — 10 PASS / 0 FAIL (A1a/A1b/A2/A3/A4/A5/A6/A7 all PASS)；direct-save fallback 已移除 (Guardrail 2: dispatcher 不可用时标 CONCERN 而非静默 fallback)；CHECKPOINT_PATH 重定向确保 dispatcher handler 写入正确 temp path；Part B (real provider chat) — 2 CONCERN (B1/B2) 归因为 confirmation='always' policy 阻止 tool execution → checkpoint save 未触发，属安全特性而非代码缺陷 |
-| **Status** | **CLOSED (hardened)** — Part A: 10 PASS / 0 FAIL — checkpoint save/resume dispatcher evidence chain 完整验证，direct-save fallback 已移除；Part B: 2 CONCERN — confirmation='always' 阻止 real provider checkpoint save；总计 10 PASS / 0 FAIL / 2 CONCERN |
+| **Current evidence** | 16 contract tests pass（4 save mediation + 5 resume mediation + 4 roundtrip + 2 not fakeable + 1 L3 hook-level）；core.py 3 处 direct save_checkpoint 已迁入 dispatcher-mediated CHECKPOINT_SAVE；session.py resume 路径通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；CheckpointSaveHandler/CheckpointResumeHandler 在 phase1_hook.py 注册；RuntimeDecisionFrame checkpoint branch points 更新为 code path complete；**Batch A evidence hardening (2026-05-29)**: Part A (roundtrip) — 10 PASS / 0 FAIL (A1a/A1b/A2/A3/A4/A5/A6/A7 all PASS)；direct-save fallback 已移除 (Guardrail 2: dispatcher 不可用时标 CONCERN 而非静默 fallback)；CHECKPOINT_PATH 重定向确保 dispatcher handler 写入正确 temp path；Part B (real provider chat) — 2 CONCERN (B1/B2): action_log 中 tool.gate/tool.invoke/tool.result 均存在（工具执行管道活跃），但缺失 checkpoint.save/CHECKPOINT_SAVE —— checkpoint save trigger condition not met in this conversation，tools were executing but no save point was reached |
+| **Status** | **CLOSED (hardened)** — Part A: 10 PASS / 0 FAIL — checkpoint save/resume dispatcher evidence chain 完整验证，direct-save fallback 已移除；Part B: 2 CONCERN — tools executing (tool.gate/invoke/result in action_log) but no checkpoint save point reached；总计 10 PASS / 0 FAIL / 2 CONCERN |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | no |
 | **Closed date** | 2026-05-29 |
@@ -164,11 +164,12 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Missing evidence** | 真实 LLM 生成的 plan 通过 scheduler 推进执行（fake plan → scheduler execution 不证明 real provider plan parsing 正确） |
 | **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) planner.generate_plan() 返回真实 JSON plan；(3) scheduler 从真实 JSON plan 构造 ActionPlan；(4) scheduler 按序推进 node（TOOL_CALL/MEMORY_RETAIN/SKILL_SELECT 等）；(5) 每个 node 产生 dispatcher evidence（NODE_ENTER/NODE_EXIT）；(6) plan 完成后产生 ACTION_PLAN_COMPLETE evidence；(7) 验证 scheduler decision 影响 model context 和 user response |
 | **Current evidence** | Loop 3.4 SDD 完成（`docs/design/advanced-scheduler-contract.md`）；7 项架构决策；implementation 完成：`agent/action_scheduler.py`（554 lines）+ `agent/runtime_integration/action_scheduler_handler.py` + `agent/loop.py` scheduler integration + RuntimeDecisionFrame 5 新 branch points；46 个 contract tests 全部通过（7 classes, 20 test intents covered）；scheduler 通过 dispatcher 产生 5 种 business evidence；137/137 regression tests pass |
-| **Status** | **CLOSED** — real provider scheduler E2E validated；9 PASS / 0 FAIL / 0 CONCERN — S0 (provider connectivity), S1 (ACTION_PLAN_START dispatched), S2 (NODE_ENTER ×2), S3 (NODE_EXIT ×3: completed×2 / skipped×1), S4 (ACTION_PLAN_COMPLETE dispatched), S5 (cross-node influence via condition_flags: step_2 → skip_step_3), S6 (condition-triggered skip evidence), S7 (real provider core.chat() for 2 nodes), S8 (not a no-crash PASS — 8 positive assertions) |
+| **Status** | **OVERCLAIMED → Batch B SDD complete** — 原 CLOSED 标记为 overclaim: 验证脚本手动构造 ActionScheduler + hardcoded ActionPlan，不在 core.chat() 默认 main runtime path；ActionScheduler 代码 + loop.py integration 存在但 core.chat() 不注入 → scheduler preprocessing block 为 dead code。Batch B SDD (`docs/design/batch-b-scheduler-main-path-injection.md`) 定义 main-path injection plan: core.chat() 接受 action_scheduler 参数 → LoopDependencies 注入 → run_main_loop() scheduler preprocessing 实际触发。Implementation pending。 |
 | **Blocking current code loop** | no |
-| **Blocking READY claim** | no |
-| **Closed date** | 2026-05-29 |
-| **Closing evidence** | `scripts/real_evidence_008_scheduler.py` — 9 PASS / 0 FAIL / 0 CONCERN；结果文件 `docs/dogfood/real-evidence-008-scheduler-results.json` |
+| **Blocking READY claim** | yes — scheduler not on default main runtime path |
+| **Overclaim corrected** | 2026-05-29 |
+| **Batch B SDD** | `docs/design/batch-b-scheduler-main-path-injection.md` — main-path injection plan defined |
+| **Previous closing evidence (overclaimed)** | `scripts/real_evidence_008_scheduler.py` — manual harness, not main-path evidence |
 
 ---
 

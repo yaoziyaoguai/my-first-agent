@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (Batch A evidence hardening completed — REAL-EVIDENCE-004/007)
-**状态**: Batch A evidence hardening: 004 direct-fallback removed (credible), 007 real StdioMCPClient verified (partial-credible)；current score 3.5/5 (was 3.2/5)；REAL-EVIDENCE closure credibility = 3-4/8 credible (was 2/8)；B7/B8/003/006/008 excluded from Batch A
+**最后更新**: 2026-05-29 (Batch A attribution corrected + Batch B SDD complete)
+**状态**: Batch A evidence hardening: 004 direct-fallback removed (credible), 007 real StdioMCPClient verified (partial-credible)；004 B1/B2 归因已修正; Batch B SDD complete — Scheduler main-path injection design ready; current score 3.5/5；REAL-EVIDENCE closure credibility = 3-4/8 credible
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -17,7 +17,7 @@
 |------|--------------|
 | 原 redteam inferred score | 1.4/5 |
 | 当前 independent re-audit score | 3.5/5 (was 3.2/5 — Batch A evidence hardening completed) |
-| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；003/006/008 仍 questionable (defer) |
+| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；004 B1/B2 归因已修正（非 confirmation='always' 阻止工具执行，而是 checkpoint save trigger condition not met）；008 Batch B SDD complete；003/006 仍 questionable (defer) |
 | REAL-EVIDENCE closure credibility | 3-4/8 credible (004 hardened + 007 partial-credible)；4-5/8 questionable |
 | 核心 runtime milestone | PARTIAL / code-path-heavy validated；Batch A 移除了 004 direct-save fallback + 007 direct execute_tool() |
 | 明确排除 | B7 Multi-instance readiness；B8 TUI architecture；006 TOOL_MEDIATOR_GAP (defer)；003 claim downgrade |
@@ -39,11 +39,11 @@
 | Loop 1.3 Tool Path Unification | VALIDATED | 4 | model tool-use path 经 ToolRuntimeMediator |
 | Loop 2.1 Explicit Memory Main-Path Completion | VALIDATED | 4 | REAL-EVIDENCE-001 可信，但 provenance 有局部 caveat |
 | Loop 2.2 Skill Activation / allowed_tools | PARTIAL | 3 | post-turn activation/contract 有效；same-turn real blocking 未证实 |
-| Loop 2.3 Storage / Checkpoint True Resume | VALIDATED | 4 | Batch A hardened: direct-save fallback removed, Part A 10/10 PASS；Part B 2 CONCERN per stop condition |
+| Loop 2.3 Storage / Checkpoint True Resume | VALIDATED | 4 | Batch A hardened: direct-save fallback removed, Part A 10/10 PASS；Part B 2 CONCERN — checkpoint save trigger condition not met (tools executing but no save point reached) |
 | Loop 2.4 MCP Main-Path Readiness | PARTIAL | 3 | bridge readiness 可信；main runtime E2E 未证实 |
 | Loop 3.2 Real SubAgent L1/L2 | PARTIAL | 3 | L1 loop/result 有进展；child tool mediation 未走 core path |
 | Loop 3.3 Real MCP External Flight | PARTIAL | 3 | Batch A hardened: real StdioMCPClient bridge + TOOL_REGISTRY verified；model-selected invocation pending (Guardrail 1) |
-| Loop 3.4 Advanced Scheduler | PARTIAL | 2 | 手动 scheduler harness；未进入默认 core main path |
+| Loop 3.4 Advanced Scheduler | PARTIAL | 2 | Batch B SDD complete — scheduler main-path injection design ready; implementation pending: core.chat() 需支持 ActionScheduler 注入; 008 原 CLOSED 标记为 overclaim (manual harness ≠ main-path evidence) |
 | Loop 4.1 Dogfood / Evaluation Harness Honesty | VALIDATED | 4 | honesty guard 可信 |
 | Loop 4.2 UX / Error Recovery / Storage Hygiene | CODE_PATH_COMPLETE | 4 | hardening 完成；不是核心能力 completion proof |
 
@@ -54,13 +54,13 @@
 | REAL-EVIDENCE-001 | Memory retain/recall/forget | credible | positive assertions 充分；局部 direct dispatcher provenance caveat |
 | REAL-EVIDENCE-002 | Skill selection | questionable | deterministic fallback/post-turn activation，不是 model-owned skill tool selection |
 | REAL-EVIDENCE-003 | Skill allowed_tools | questionable | contract tests 可信；real dogfood 未证明 same-turn disallowed blocking |
-| REAL-EVIDENCE-004 | Checkpoint save/resume | **credible** (hardened) | Batch A: direct-save fallback removed (Guardrail 2)；Part A 10/10 PASS (CHECKPOINT_PATH redirection fix)；Part B 2 CONCERN per stop condition (confirmation='always') |
+| REAL-EVIDENCE-004 | Checkpoint save/resume | **credible** (hardened) | Batch A: direct-save fallback removed (Guardrail 2)；Part A 10/10 PASS (CHECKPOINT_PATH redirection fix)；Part B 2 CONCERN — tools executing (tool.gate/invoke/result in action_log) but no checkpoint save point reached |
 | REAL-EVIDENCE-005 | MCP bridge readiness | credible | local stdio fixture discovery/register/visibility/allowlist 可信 |
 | REAL-EVIDENCE-006 | SubAgent L1 | questionable | child loop/result 有价值；child tool mediation 未在 core delegation path 证实 |
 | REAL-EVIDENCE-007 | MCP external flight | **partial-credible** (hardened) | Batch A: real StdioMCPClient bridge PASS (W1/W2: 2 tools registered)；model-selected invocation CONCERN (W3-W6: Guardrail 1)；不再使用 direct execute_tool() |
-| REAL-EVIDENCE-008 | Advanced scheduler | questionable | manual plan/scheduler harness；未证明默认 main path |
+| REAL-EVIDENCE-008 | Advanced scheduler | questionable → **Batch B SDD complete** | ActionScheduler code + loop.py integration exist but core.chat() 不注入 → dead code in default path; 原 CLOSED 为 overclaim (manual harness); Batch B SDD defines main-path injection plan; implementation pending |
 
-**Batch A completed (2026-05-29)**: 004 direct-fallback removed + 007 real StdioMCPClient verified. Recommended next: either re-audit to confirm credibility improvement, or proceed to Batch B (008 Scheduler main-path injection). 003/006/008 still questionable per independent re-audit — Batch A does not touch them.
+**Batch A completed (2026-05-29)**: 004 direct-fallback removed + 007 real StdioMCPClient verified. **004 B1/B2 归因修正 (2026-05-29)**: action_log 中 tool.gate/invoke/result 均存在 → 工具执行管道活跃，根因非 confirmation='always' 阻止工具执行，而是 checkpoint save trigger condition not met。**Batch B SDD complete (2026-05-29)**: `docs/design/batch-b-scheduler-main-path-injection.md` — 008 原 CLOSED 为 overclaim (manual harness)，需 code-path hardening 让 ActionScheduler 进入 core.chat() 默认 main runtime path。003/006 still questionable per independent re-audit.
 
 ---
 

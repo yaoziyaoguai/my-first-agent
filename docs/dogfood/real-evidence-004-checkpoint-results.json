@@ -55,7 +55,7 @@
     {
       "case": "B1",
       "verdict": "CONCERN",
-      "detail": "No CHECKPOINT_SAVE dispatcher evidence and no checkpoint file — model may not have triggered tool call or checkpoint save. This is expected if confirmation='always' blocked tool execution before checkpoint save point.",
+      "detail": "No CHECKPOINT_SAVE dispatcher evidence and no checkpoint file — action_log shows tool.gate/tool.invoke/tool.result are all present (tools executing), but no checkpoint.save/CHECKPOINT_SAVE was dispatched. Checkpoint save trigger condition not met in this conversation: tools were executing through the pipeline but no save point was reached.",
       "action_log_size": 12,
       "action_types": [
         "checkpoint.safe_summary",
@@ -73,7 +73,7 @@
     {
       "case": "B2",
       "verdict": "CONCERN",
-      "detail": "No checkpoint file — model either completed without tool calls or confirmation='always' prevented tool execution before save point",
+      "detail": "No checkpoint file — tools executed through pipeline (tool.gate/invoke/result present in action_log) but checkpoint save trigger condition not met, no save point was reached in this conversation",
       "collector_types": [
         "?"
       ]

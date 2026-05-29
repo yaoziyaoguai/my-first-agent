@@ -1,0 +1,73 @@
+{
+  "date": "2026-05-29",
+  "evidence_id": "REAL-EVIDENCE-004",
+  "results": [
+    {
+      "case": "A1a",
+      "verdict": "PASS",
+      "detail": "Checkpoint saved: task_status=awaiting_confirmation, messages=2, pending_tool=demo.write_demo_note"
+    },
+    {
+      "case": "A1b",
+      "verdict": "PASS",
+      "detail": "CHECKPOINT_SAVE dispatched through handler"
+    },
+    {
+      "case": "A2",
+      "verdict": "PASS",
+      "detail": "Checkpoint content complete: messages count=2, status=awaiting_confirmation, pending_tool preserved"
+    },
+    {
+      "case": "A3",
+      "verdict": "PASS",
+      "detail": "State restored correctly: messages/status/pending_tool all match"
+    },
+    {
+      "case": "A4",
+      "verdict": "PASS",
+      "detail": "CHECKPOINT_RESUME dispatched — handler accepted payload"
+    },
+    {
+      "case": "A5",
+      "verdict": "PASS",
+      "detail": "Conversation continuity verified: 2 messages match"
+    },
+    {
+      "case": "A6",
+      "verdict": "PASS",
+      "detail": "Checkpoint correctly detected as actionable (awaiting_confirmation + pending_tool)"
+    },
+    {
+      "case": "A7",
+      "verdict": "PASS",
+      "detail": "Checkpoint has semantically meaningful state (not just empty/idle)"
+    },
+    {
+      "case": "B0",
+      "verdict": "PASS",
+      "detail": "Real provider configured: anthropic_compatible"
+    },
+    {
+      "case": "B1",
+      "verdict": "CONCERN",
+      "detail": "No CHECKPOINT_SAVE evidence and no checkpoint file — model may not have triggered tool call or checkpoint save. This is expected if confirmation='always' blocked tool execution before checkpoint save point.",
+      "events_count": 5,
+      "event_types": [
+        "?"
+      ]
+    },
+    {
+      "case": "B2",
+      "verdict": "CONCERN",
+      "detail": "No checkpoint file — model either completed without tool calls or confirmation='always' prevented tool execution before save point",
+      "collector_types": [
+        "?"
+      ]
+    }
+  ],
+  "summary": {
+    "PASS": 9,
+    "FAIL": 0,
+    "CONCERN": 2
+  }
+}

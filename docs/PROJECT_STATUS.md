@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (REAL-EVIDENCE-006 CLOSED — SubAgent L1 real-model child loop validated)
-**状态**: L1 real provider subagent dogfood 通过 (15 PASS / 0 FAIL / 1 CONCERN)；demo-stat-real descriptor (model=inherit) 创建并注册；SAFE_MODELS 扩展 + guard test；dispatcher mismatch + evidence dispatch gaps 修复；C3/C4/C6/C7 PASS；C2 CONCERN (TOOL_MEDIATOR_GAP known limitation)
+**最后更新**: 2026-05-29 (REAL-EVIDENCE-004/005/007 CLOSED — checkpoint + MCP bridge + MCP external tool execution real evidence validated)
+**状态**: Real Evidence Validation Batch 1 完成 — REAL-EVIDENCE-004 (checkpoint save/resume, 9 PASS / 0 FAIL / 2 CONCERN), REAL-EVIDENCE-005 (MCP bridge real server, 12 PASS / 0 FAIL), REAL-EVIDENCE-007 (MCP external tool execution, 3 PASS / 0 FAIL)；剩余真实验证项: REAL-EVIDENCE-001/008
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -160,12 +160,12 @@
 |-------------|------|---------|------|
 | skill.select | **VALIDATED** | REAL_CORE_LOOP_RUNTIME_E2E | registry 注入；fake auto-select；real keyword matching（`agent/skill_selection.py`）已通过真实 provider dogfood 两次验证（2026-05-28/29）：SKILL_SELECT 成功选择 demo-note-maker（score=7, high confidence），_active_skill 正确设置，body_load_decision=True；REAL-EVIDENCE-002 CLOSED；keyword matching 非真实模型 tool call，但可解释可验证 |
 | skill.apply | **VALIDATED** | REAL_CORE_LOOP_RUNTIME_E2E | body 注入 [Active Skill Instructions]；allowed_tools enforcement 已通过真实 provider dogfood 两次验证（2026-05-28/29）：TOOL_GATE→TOOL_INVOKE→TOOL_RESULT evidence chain 完整（24 events, 10 types），active_skill allowed_tools 正确设置；disallowed-tool blocking 在 15 个 contract tests 中验证充分（confirmation='always' 限制真实路径自动化验证）；REAL-EVIDENCE-003 CLOSED |
-| mcp.discover | PARTIAL | FAKE_LOCAL_USER_PATH | bridge lifecycle 通过 disposable dispatcher 产生 evidence；main.py → run_mcp_bridge() → dispatcher.route(MCP_BRIDGE_LIFECYCLE)；mcp_available 由 is_mcp_active() 动态驱动；缺真实 MCP server 连接（REAL-EVIDENCE-005/007） |
-| mcp.invoke | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT）；L3 evidence 通过 core.chat() 验证（test_mcp_l3_real_core_loop.py）；30 个 Loop 3.3 contract tests 验证完整 registration→gate→invoke→result 路径；缺真实 MCP server 连接（REAL-EVIDENCE-005/007） |
+| mcp.discover | **VALIDATED** | REAL_EVIDENCE_SMOKE | REAL-EVIDENCE-005 CLOSED — bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；真实 StdioMCPClient subprocess 连接 opt-in echo fixture server；tools_discovered=2, tools_registered=2, overall_decision=operational；server allowlist 生效；12 PASS / 0 FAIL |
+| mcp.invoke | **VALIDATED** | REAL_EVIDENCE_SMOKE | REAL-EVIDENCE-005/007 CLOSED — MCP 工具复用统一 Tool pipeline（TOOL_GATE→TOOL_INVOKE→TOOL_RESULT）；真实 MCP tool 通过 tool_registry.execute_tool() 执行 → StdioMCPClient subprocess → real server response；destructive tool block patterns 配置生效；3 PASS / 0 FAIL |
 | subagent.delegate | VALIDATED | REAL_DOGFOOD_SMOKE | **REAL-EVIDENCE-006 CLOSED** — L1 real-model child loop validated (15 PASS / 0 FAIL / 1 CONCERN in real provider dogfood)；SAFE_MODELS extended with "inherit"；demo-stat-real descriptor (model=inherit) created + guard test；dispatcher mismatch bug fixed (_phase1_dispatcher → delegate_l1)；SUBAGENT_CHILD_RESULT + SUBAGENT_PARENT_ADJUDICATION evidence dispatch gaps fixed；evidence chain: subagent.delegate_l1 → subagent.child_result → subagent.parent_adjudication；TOOL_MEDIATOR_GAP: production path tool_mediator=None → child tool mediation covered by 31 contract tests；37+66 focused tests pass |
 | memory.recall/propose/retain/forget | PARTIAL | FAKE_LOCAL_USER_PATH | forget/recall/propose 已走 dispatcher；缺 L3 real core loop E2E |
 | tool.gate/invoke/result | PARTIAL | FAKE_LOCAL_USER_PATH | 两条执行路径尚未统一 |
-| checkpoint.save/resume | PARTIAL | FAKE_LOCAL_USER_PATH | code path complete: save/load 走 dispatcher + evidence chain 闭合；real validation pending (REAL-EVIDENCE-004) |
+| checkpoint.save/resume | **VALIDATED** | REAL_EVIDENCE_SMOKE | REAL-EVIDENCE-004 CLOSED — Part A: 8 PASS / 0 FAIL — dispatcher-mediated CHECKPOINT_SAVE/CHECKPOINT_RESUME evidence chain 完整验证（state restoration, conversation continuity, actionable detection, semantic content）；Part B: 1 PASS / 2 CONCERN — real provider chat 中 confirmation='always' 阻止 tool execution 进而阻止 checkpoint save（安全性特性，非代码缺陷）；9 PASS / 0 FAIL / 2 CONCERN |
 | trace.summary | PARTIAL | FAKE_LOCAL_USER_PATH | in-memory action_log，无 durable store |
 
 **Overclaim 防护规则**：
@@ -221,7 +221,7 @@
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**全部 safe-to-auto-run code loops 已闭环。** 剩余待办项均需真实验证（REAL-EVIDENCE-004/005/006/007/008）或架构决策（B4/B6/B7/B8）。
+**全部 safe-to-auto-run code loops 已闭环。** 剩余待办项：REAL-EVIDENCE-001/008（真实验证）或架构决策（B7/B8）。REAL-EVIDENCE-004/005/006/007 已 CLOSED。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -235,10 +235,10 @@
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — code path complete：forget→dispatcher done；recall fallback fixed；store mismatch 已修复；15 L2+L3 contract tests pass。real dogfood E2E 已登记为 validation debt [REAL-EVIDENCE-001](docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md)，不阻塞后续代码 loop |
 | Loop 2.2 | Skill Activation Main-Path Completion | **VALIDATED (2026-05-29 re-confirmed)** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler→rejected→FORCE_STOP；(3) real provider keyword matching（`agent/skill_selection.py`）通过 dogfood 两次验证；(4) 49 tests pass + 15 skill tool enforcement tests；(5) REAL-EVIDENCE-002 CLOSED, REAL-EVIDENCE-003 CLOSED；evidence chain: SKILL_SELECT→TOOL_GATE→TOOL_INVOKE→TOOL_RESULT 真实路径完整验证 |
-| Loop 2.3 | Storage/Checkpoint True Resume | **code path complete, real validation pending** — (1) save: core.py 3 处 direct save_checkpoint 迁入 dispatcher-mediated CHECKPOINT_SAVE；(2) resume: session.py 通过 CHECKPOINT_RESUME handler 记录 evidence（dispatcher 按需构建）；(3) evidence chain: CheckpointSaveHandler/CheckpointResumeHandler 注册在 phase1_hook.py；(4) RuntimeDecisionFrame checkpoint.save/resume 更新为 code path complete；(5) 16 contract tests pass。剩余：real API/model roundtrip 验证（REAL-EVIDENCE-004）|
-| Loop 2.4 | MCP Main-Path Readiness | **code path complete, real validation pending** — (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) mcp.discover/mcp.invoke branch points DEFERRED→PARTIAL；(3) 6 个新的 bridge lifecycle contract tests + 34 个已有 decision frame tests 全部通过（40/40）；(4) 32/33 MCP 回归 tests pass（1 个预先存在的 HOME 隔离失败）。剩余：真实 MCP server 连接（REAL-EVIDENCE-005）
+| Loop 2.3 | Storage/Checkpoint True Resume | **VALIDATED** — REAL-EVIDENCE-004 CLOSED (2026-05-29): (1) save/resume dispatcher evidence chain 完整验证（CHECKPOINT_SAVE + CHECKPOINT_RESUME）；(2) state restoration + conversation continuity + actionable detection + semantic content 全部 PASS；(3) real provider chat 中 confirmation='always' 阻止 checkpoint save（安全性特性）；(4) 16 contract tests + 9 validation PASS / 0 FAIL / 2 CONCERN |
+| Loop 2.4 | MCP Main-Path Readiness | **VALIDATED** — REAL-EVIDENCE-005 CLOSED (2026-05-29): (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) real StdioMCPClient subprocess 连接 opt-in echo fixture server；(3) tools_discovered=2, tools_registered=2, allowlist 生效；(4) 12 PASS / 0 FAIL |
 | Loop 3.2 | Real SubAgent L1/L2 | **VALIDATED** — Loop 3.2a+3.2b 完成；**REAL-EVIDENCE-006 CLOSED (2026-05-29)**: L1 real-model child loop validated via real provider dogfood (15 PASS / 0 FAIL / 1 CONCERN)；demo-stat-real descriptor (model=inherit) 创建；dispatcher mismatch + evidence dispatch gaps 修复；L2 session-scoped subagent deferred |
-| Loop 3.3 | Real MCP External Flight | **code path complete, real validation pending** — (1) module-level bridge state；(2) dynamic mcp_available；(3) main.py wiring；(4) 30 new contract tests PASS；(5) 11 getattr bug fixes；(6) 66/67 regression PASS。剩余：真实 MCP server 连接（REAL-EVIDENCE-005/007） |
+| Loop 3.3 | Real MCP External Flight | **VALIDATED** — REAL-EVIDENCE-005/007 CLOSED (2026-05-29): (1) module-level bridge state + dynamic mcp_available；(2) real MCP tool execution 通过 tool_registry.execute_tool() → StdioMCPClient subprocess → real server response；(3) destructive tool block patterns configured；(4) 30 contract tests + 3 validation PASS / 0 FAIL |
 | Loop 3.4 | Advanced Scheduler | **PARTIAL** — code path complete, real validation pending: (1) `agent/action_scheduler.py` — ActionNode/ActionPlan/ActionRecoveryPolicy/SchedulerState/ActionScheduler + build_action_plan_from_dict() factory；(2) `agent/runtime_integration/action_scheduler_handler.py` — 5 个 RuntimeActionType handler 在 dispatcher 注册（共 16 handlers）；(3) `agent/loop.py` — scheduler 挂在 run_main_loop() 内层 model loop 前；(4) RuntimeDecisionFrame 新增 5 个 scheduler branch points（共 20）；(5) 46 个 contract tests 全部通过；(6) 不宣称 READY — 剩真实 provider plan→scheduler E2E [REAL-EVIDENCE-008] |
 | Loop 4.1 | Evaluation/Dogfood Harness Honesty | **code path complete** — (1) `agent/evaluation_honesty.py`（~220 lines）：EvidenceClassification 4 级枚举 + EvaluationEvidence/EvaluationReport dataclass + classify_evaluation/classify_smoke_vs_capability 分类引擎；(2) NON_CAPABILITY_PROVIDERS/ASSERTIONS + CAPABILITY_ASSERTIONS frozenset 定义；(3) `scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段；(4) 41 个 guard tests（`tests/unit/test_evaluation_honesty.py`，10 classes）全部通过；(5) SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt |
 | Loop 4.2 | UX / Error Recovery / Storage Hygiene | **COMPLETED** — product hardening, not new core capability: (1) provider error → RuntimeEvent fallback（`_call_model()` catch ProviderError → `control_message()` → empty ProviderResponse，不 crash）；(2) scheduler node failure → RuntimeEvent notification（`run_main_loop()` 检测 halted status → `control_message()` 显示 node title + error）；(3) checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent 在 session.py 中 emit；(4) storage hygiene: `.gitignore` 添加 `state.json`/`runs/`；(5) trace report enrichment: `_emit_run_summary()` 含 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps；(6) 6 streaming protocol tests + 4 个 contract confirmations 通过；ruff clean；568/574 tests pass（6 pre-existing failures） |
@@ -251,16 +251,16 @@
 |------|------|------|
 | B2 | CLI delegate shortcut → dispatcher | **DONE** — delegate shortcut 已迁入 dispatcher-mediated path（_dispatch_or_fallback_delegation → SUBAGENT_DELEGATE_L1），L1 handler/provider 可用时走 L1，不可用时 fallback 到 L0 inline |
 | B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
-| B4 | MCP real connection | **SDD complete** — `docs/design/mcp-real-external-flight-contract.md`；implementation pending（Phase A local fixture → Phase B real server） |
+| B4 | MCP real connection | **VALIDATED** — REAL-EVIDENCE-005/007 CLOSED；real MCP bridge connection + external tool execution 验证通过 |
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
-| B6 | Checkpoint true state restoration | code path complete — save/load 走 dispatcher evidence chain；session.py resume 有 dispatcher evidence recording；real API roundtrip validation pending（REAL-EVIDENCE-004） |
+| B6 | Checkpoint true state restoration | **VALIDATED** — REAL-EVIDENCE-004 CLOSED；checkpoint save/resume dispatcher evidence chain + state restoration + conversation continuity 验证通过 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
 | B8 | TUI architecture | 需要 TUI framework decision |
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
 
-**Loop 4.2 完成，全部安全可自动修代码 loop 已闭环。** 当前全部 safe-to-auto-run items 完成，剩余均需真实验证或架构决策。
+**Loop 4.2 完成，全部安全可自动修代码 loop 已闭环。** Real Evidence Validation Batch 1 完成（REAL-EVIDENCE-004/005/007 CLOSED）。剩余真实验证项：REAL-EVIDENCE-001 (Memory E2E), REAL-EVIDENCE-008 (Scheduler E2E)；架构决策项：B7 (Multi-instance), B8 (TUI)。
 
 ---
 

@@ -11,6 +11,7 @@
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
 | **008 Gap A+B: scheduler credible** | — | **REAL-EVIDENCE-008 → credible** — Gap A: `scripts/real_evidence_008_scheduler_core_chat_e2e.py` — `_run_main_loop(action_scheduler=...)` E2E evidence chain 闭合 (10/10 PASS: V1 non-empty result + V2 ACTION_PLAN_START + V3 NODE_ENTER/EXIT + V4 ACTION_PLAN_COMPLETE + V5 condition_flags + V6 NODE_FAILURE halt + V7 evidence chain complete + V8 not manual harness + V9 topological order + V10 backward compat)。使用 FakeProvider + hand-built ActionPlan，不修改 production code。Gap B: `build_action_plan_from_model_output()` in `agent/action_scheduler.py` (~50 lines) — JSON 字符串 → ActionPlan bridge，支持 markdown code fence 剥离、无效 node 跳过（不 crash）、空 nodes ValueError、多余字段容忍、无效 recovery fallback。7/7 new tests PASS (`TestBuildActionPlanFromModelOutput`)。27/27 scheduler tests total (20 existing + 7 new)。Production code: `action_scheduler.py` +~50 lines (bridge function only)。结果文件: `docs/dogfood/real-evidence-008-gap-a-results.json`。Score: 3.8→3.9/5。Credibility: 5→6 credible (001/004/005/006/007/008)。Caveat: model JSON generation 未闭合 (需 planner.generate_plan() 连接)。**未触及**: 003/006/007/002/B7/B8。 |
+| **008 independent review** | — | **PASS_WITH_CONCERNS** — 独立 review 文档 `docs/reviews/2026-05-29-real-evidence-008-independent-review.md` 创建。verdict: PASS_WITH_CONCERNS, credible, production code risk medium-low。B7/B8 entry gate: NOT FULLY MET (model-generated stable JSON plan caveat 未闭合)。 |
 
 ## 2026-05-29
 

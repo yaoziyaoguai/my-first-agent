@@ -358,6 +358,9 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 |--------|--------|
 | 当前项目状态 | `docs/PROJECT_STATUS.md`（本文件） |
 | 进度账本 | `docs/PROGRESS_LEDGER.md` |
+| 008 独立 review | `docs/reviews/2026-05-29-real-evidence-008-independent-review.md` |
+| 007 独立 review | `docs/reviews/2026-05-29-real-evidence-007-independent-review.md` |
+| 006 独立 review | `docs/reviews/2026-05-29-real-evidence-006-independent-review.md` |
 | 工程流程 | `docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/dev/ENGINEERING_WORKFLOW.md` |
 | 最新 dogfood (direct) | `docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` |
 | 最新 dogfood (interactive) | `docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md` |

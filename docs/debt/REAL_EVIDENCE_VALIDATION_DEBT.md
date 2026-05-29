@@ -178,6 +178,7 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Previous closing evidence (overclaimed)** | `scripts/real_evidence_008_scheduler.py` — manual harness, not main-path evidence |
 | **Closed date** | 2026-05-30 |
 | **Closing evidence** | Gap A validation script (10/10 PASS) + Gap B bridge implementation (7/7 tests PASS) + 27/27 scheduler tests pass |
+| **Independent review** | **PASS_WITH_CONCERNS** (2026-05-29) — `docs/reviews/2026-05-29-real-evidence-008-independent-review.md`；B7/B8 entry gate NOT FULLY MET（model JSON generation caveat 未闭合）；production code risk medium-low |
 
 ---
 

@@ -1,6 +1,6 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (006 → credible: child_tools schema fix resolved MODEL_BEHAVIOR_CONCERN — 12/12 PASS, full evidence chain闭合)
+**最后更新**: 2026-05-29 (006 independent review PASS_WITH_CONCERNS cleanup — schema content + unauthorized exclusion tests added; M7a/M7b evidence reporting corrected)
 **状态**: 阶段性收口。Score 3.8/5。Credibility: 5/8 credible (001/004/005/006/007) + 2/8 partial-credible (003/008) + 1/8 questionable (002)。003: FakeProvider + scripted main-path evidence，非 real provider same-turn disallowed-tool dogfood。006: **credible — 完整 evidence chain 闭合 (12/12 PASS)**: parent→child→tool mediation→result→adjudication 全链路 real provider E2E 验证通过；child_tools schema fix (execute_l1() 从 request.allowed_tools + TOOL_REGISTRY 构建 tool schema) 解决了 child model 无法输出 structured tool_use 的根因。007: **完整 runtime-mediated execution chain 已验证** (10/10 PASS)。008: scheduler code-path injection credible 但缺 full core.chat E2E + real model-generated ActionPlan。B7/B8 仍排除。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。

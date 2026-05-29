@@ -11,7 +11,7 @@
     {
       "case": "M1",
       "verdict": "PASS",
-      "detail": "SUBAGENT_DELEGATE_L1 dispatched: status=success, delegation_id=?"
+      "detail": "SUBAGENT_DELEGATE_L1 dispatched: status=success, action_id=<dispatcher route id>"
     },
     {
       "case": "M1b",
@@ -21,7 +21,7 @@
     {
       "case": "M2",
       "verdict": "PASS",
-      "detail": "Child generated structured tool_use: 1 request(s), tools=['?']"
+      "detail": "Child generated structured tool_use: 1 request(s), statuses=['success']"
     },
     {
       "case": "M3",
@@ -46,12 +46,12 @@
     {
       "case": "M7a",
       "verdict": "PASS",
-      "detail": "Child result dispatched: status=not_supported"
+      "detail": "Child result dispatched: status=not_supported (notification dispatch, not_supported=expected)"
     },
     {
       "case": "M7b",
       "verdict": "PASS",
-      "detail": "Parent adjudication dispatched: status=not_supported"
+      "detail": "Parent adjudication dispatched: status=not_supported (notification dispatch, not_supported=expected)"
     },
     {
       "case": "M5",

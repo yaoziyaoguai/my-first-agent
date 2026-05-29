@@ -52,6 +52,18 @@ def _events_by_type(action_log: list[Any], action_type: str) -> list[Any]:
 
 
 def _safe_payload(e: Any) -> dict[str, Any]:
+    """读取 event 的业务 payload。
+
+    RuntimeActionResult 同时有 payload（业务数据）和 evidence（dispatcher 元数据）；
+    RuntimeActionEvent 只有 evidence 没有 payload。
+    优先读 payload，fallback 到 evidence（其中只含 dispatcher 元数据）。
+    """
+    payload = getattr(e, "payload", None)
+    if payload is not None:
+        try:
+            return dict(payload)
+        except Exception:
+            pass
     evidence = getattr(e, "evidence", None)
     if evidence is not None:
         try:
@@ -152,15 +164,23 @@ def run_subagent_real_provider_e2e() -> None:
     action_log = getattr(dispatcher, "action_log", [])
 
     # ── M1: Delegation dispatched ──
+    # 注意：action_log 中的 RuntimeActionEvent 不含 payload（业务数据在
+    # RuntimeActionResult.payload 中，转换到 event 时被丢弃）。
+    # delegation_id 只能从 evidence 中的 dispatcher 元数据推断；
+    # 如果 _safe_payload 返回 {} → 业务字段不可用。
     l1_events = _events_by_type(action_log, RAT.SUBAGENT_DELEGATE_L1)
     l0_events = _events_by_type(action_log, RAT.SUBAGENT_DELEGATE_L0)
 
     if l1_events:
         l1_status = _safe_status(l1_events[0])
-        l1_payload = _safe_payload(l1_events[0])
+        l1_evidence = _safe_payload(l1_events[0])
+        l1_delegation_id = (
+            l1_evidence.get("delegation_id")
+            or l1_evidence.get("action_id", "?")
+        )
         record("M1", "PASS",
                f"SUBAGENT_DELEGATE_L1 dispatched: status={l1_status}, "
-               f"delegation_id={l1_payload.get('delegation_id', '?')}")
+               f"action_id={l1_delegation_id}")
     elif l0_events:
         l0_status = _safe_status(l0_events[0])
         record("M1", "CONCERN",
@@ -195,12 +215,11 @@ def run_subagent_real_provider_e2e() -> None:
         action_log, RAT.SUBAGENT_CHILD_TOOL_REQUEST
     )
     if child_tool_requests:
-        ct_payloads = [_safe_payload(e) for e in child_tool_requests]
-        ct_tool_names = [p.get("tool_name", "?") for p in ct_payloads]
+        ct_statuses = [_safe_status(e) for e in child_tool_requests]
         record("M2", "PASS",
                f"Child generated structured tool_use: "
                f"{len(child_tool_requests)} request(s), "
-               f"tools={ct_tool_names}")
+               f"statuses={ct_statuses}")
     else:
         record("M2", "MODEL_BEHAVIOR_CONCERN",
                "No SUBAGENT_CHILD_TOOL_REQUEST — "
@@ -275,6 +294,12 @@ def run_subagent_real_provider_e2e() -> None:
                            f"{len(tool_results)} event(s)")
 
     # ── M7: Child final result → parent adjudication ──
+    # SUBAGENT_CHILD_RESULT / SUBAGENT_PARENT_ADJUDICATION 是 L1 handler
+    # 内部发出的 notification 式 dispatch（非 actionable request）。
+    # 它们没有注册 handler → dispatcher 返回 _unsupported_result
+    # → RuntimeActionEvent.status = "not_supported"。
+    # 这是预期行为：event 存在即证明 L1 handler 执行了 dispatch；
+    # status 反映的是「无 handler 消费此通知」，不是 dispatch 失败。
     child_results_events = _events_by_type(
         action_log, RAT.SUBAGENT_CHILD_RESULT
     )
@@ -284,16 +309,32 @@ def run_subagent_real_provider_e2e() -> None:
 
     if child_results_events:
         cr_status = _safe_status(child_results_events[0])
+        cr_evidence = _safe_payload(child_results_events[0])
+        cr_summary = cr_evidence.get("summary_preview", "")[:80]
+        cr_note = (
+            " (notification dispatch, not_supported=expected)"
+            if cr_status == "not_supported" else ""
+        )
         record("M7a", "PASS",
-               f"Child result dispatched: status={cr_status}")
+               f"Child result dispatched: status={cr_status}"
+               + (f", summary='{cr_summary}'" if cr_summary else "")
+               + cr_note)
     else:
         record("M7a", "CONCERN",
                "No SUBAGENT_CHILD_RESULT — child may not have completed")
 
     if parent_adjudications:
         pa_status = _safe_status(parent_adjudications[0])
+        pa_evidence = _safe_payload(parent_adjudications[0])
+        pa_adjudication = pa_evidence.get("adjudication", "")
+        pa_note = (
+            " (notification dispatch, not_supported=expected)"
+            if pa_status == "not_supported" else ""
+        )
         record("M7b", "PASS",
-               f"Parent adjudication dispatched: status={pa_status}")
+               f"Parent adjudication dispatched: status={pa_status}"
+               + (f", adjudication={pa_adjudication}" if pa_adjudication else "")
+               + pa_note)
     else:
         record("M7b", "CONCERN",
                "No SUBAGENT_PARENT_ADJUDICATION")

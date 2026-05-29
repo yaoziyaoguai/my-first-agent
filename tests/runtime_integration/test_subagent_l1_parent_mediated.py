@@ -1363,3 +1363,182 @@ class TestGreenPhaseMediatorInjection:
         由 running `pytest ...test_subagent_l1_parent_mediated.py -v` 隐式保证。
         实现时必须在 full suite 中验证 24 tests 全部通过。
         """
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 006 Independent Review — Schema Content & Unauthorized Tool Exclusion
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestChildToolSchemaContent:
+    """验证 child provider.create(tools=...) 收到正确的 tool schema。
+
+    依赖 TOOL_REGISTRY（需 import agent.tools 触发注册）。
+    使用 _SpyProvider.calls 检查传给 provider 的 tools 参数。
+    """
+
+    def test_child_tools_contains_read_file_schema(self):
+        """child provider 收到的 tools 中包含 read_file 的完整 schema。"""
+        import agent.tools  # noqa: F401 — 触发 TOOL_REGISTRY 注册
+        from agent.tool_registry import TOOL_REGISTRY
+
+        provider = _SpyProvider()
+        ctx = _make_ctx("read a file")
+
+        execute_l1(ctx, delegation_id="test-schema-1", provider=provider)
+
+        assert len(provider.calls) >= 1, "provider 应至少被调用一次"
+        tools = provider.calls[0].get("tools", [])
+        assert len(tools) >= 1, f"tools 不应为空，实际 {tools}"
+
+        read_file_tool = None
+        for t in tools:
+            if t.get("name") == "read_file":
+                read_file_tool = t
+                break
+        assert read_file_tool is not None, (
+            f"child tools 中应有 read_file，实际 tools={[t.get('name') for t in tools]}"
+        )
+
+        # 断言 schema 来自 TOOL_REGISTRY
+        registry_entry = TOOL_REGISTRY["read_file"]
+        assert read_file_tool["name"] == registry_entry["name"]
+        assert read_file_tool["description"] == registry_entry["description"]
+
+        input_schema = read_file_tool["input_schema"]
+        assert isinstance(input_schema, dict), (
+            f"input_schema 应为 dict，实际 {type(input_schema)}"
+        )
+        assert "path" in input_schema, (
+            f"input_schema 应包含 'path' 参数，实际 keys={list(input_schema.keys())}"
+        )
+        assert input_schema["path"]["type"] == "string"
+        assert "description" in input_schema["path"]
+
+    def test_child_tools_schema_matches_registry_verbatim(self):
+        """child tools 中每个 tool 的 name/description/input_schema 与 TOOL_REGISTRY 一致。"""
+        import agent.tools  # noqa: F401
+        from agent.tool_registry import TOOL_REGISTRY
+
+        provider = _SpyProvider()
+        ctx = _make_ctx("count files")
+
+        execute_l1(ctx, delegation_id="test-schema-2", provider=provider)
+
+        tools = provider.calls[0].get("tools", [])
+        for tool in tools:
+            name = tool["name"]
+            assert name in TOOL_REGISTRY, (
+                f"tool '{name}' 不在 TOOL_REGISTRY 中"
+            )
+            reg = TOOL_REGISTRY[name]
+            assert tool["name"] == reg["name"], (
+                f"tool '{name}' name 不匹配 registry: "
+                f"{tool['name']!r} vs {reg['name']!r}"
+            )
+            assert tool["description"] == reg["description"], (
+                f"tool '{name}' description 不匹配 registry"
+            )
+            # input_schema 来自 registry entry["parameters"]
+            expected_schema = reg.get("parameters", {})
+            assert tool["input_schema"] == expected_schema, (
+                f"tool '{name}' input_schema 不匹配 registry: "
+                f"{tool['input_schema']} vs {expected_schema}"
+            )
+
+
+class TestChildToolUnauthorizedExclusion:
+    """验证未授权工具不会暴露给 child。
+
+    request.allowed_tools=("read_file",) 时，即使 TOOL_REGISTRY 中有
+    shell、demo 等其他工具，child_tools 也只应包含 read_file。
+    """
+
+    def test_only_allowed_tool_exposed_to_child(self):
+        """request.allowed_tools=("read_file",) → child_tools 只有 read_file。"""
+        import agent.tools  # noqa: F401
+
+        provider = _SpyProvider()
+        ctx = _make_ctx("safe read-only task")
+
+        execute_l1(ctx, delegation_id="test-unauth-1", provider=provider)
+
+        tools = provider.calls[0].get("tools", [])
+        tool_names = [t["name"] for t in tools]
+
+        # child_tools 中应有 read_file
+        assert "read_file" in tool_names, (
+            f"child tools 应包含 read_file，实际 {tool_names}"
+        )
+
+        # 不应包含其他未授权工具
+        unauthorized = [
+            n for n in tool_names
+            if n != "read_file"
+        ]
+        assert len(unauthorized) == 0, (
+            f"child tools 不应包含未授权工具，实际包含: {unauthorized}"
+        )
+
+    def test_shell_not_exposed_when_not_allowed(self):
+        """shell 工具不应进入 child_tools（request 中未授权）。"""
+        import agent.tools  # noqa: F401
+        from agent.tool_registry import TOOL_REGISTRY
+
+        # 确认 TOOL_REGISTRY 中有 shell
+        shell_keys = [k for k in TOOL_REGISTRY if "shell" in k.lower()]
+        assert len(shell_keys) > 0, (
+            f"TOOL_REGISTRY 中应有 shell 类工具，实际 keys={sorted(TOOL_REGISTRY.keys())}"
+        )
+
+        provider = _SpyProvider()
+        ctx = _make_ctx("read-only task")
+
+        execute_l1(ctx, delegation_id="test-unauth-2", provider=provider)
+
+        tools = provider.calls[0].get("tools", [])
+        tool_names = [t["name"] for t in tools]
+
+        for sk in shell_keys:
+            assert sk not in tool_names, (
+                f"shell 工具 '{sk}' 不应出现在 child_tools 中，"
+                f"但实际 tools={tool_names}"
+            )
+
+    def test_demo_tools_not_exposed_when_not_allowed(self):
+        """demo.* 工具不应进入 child_tools（request 中未授权）。"""
+        import agent.tools  # noqa: F401
+        from agent.tool_registry import TOOL_REGISTRY
+
+        demo_keys = [k for k in TOOL_REGISTRY if k.startswith("demo.")]
+        assert len(demo_keys) > 0, (
+            f"TOOL_REGISTRY 中应有 demo.* 工具，实际 keys={sorted(TOOL_REGISTRY.keys())}"
+        )
+
+        provider = _SpyProvider()
+        ctx = _make_ctx("read-only task")
+
+        execute_l1(ctx, delegation_id="test-unauth-3", provider=provider)
+
+        tools = provider.calls[0].get("tools", [])
+        tool_names = [t["name"] for t in tools]
+
+        for dk in demo_keys:
+            assert dk not in tool_names, (
+                f"demo 工具 '{dk}' 不应出现在 child_tools 中，"
+                f"但实际 tools={tool_names}"
+            )
+
+    def test_registry_has_more_tools_than_allowed(self):
+        """确认 TOOL_REGISTRY 中的工具数 > allowed_tools 数（排除 falsely-true 风险）。"""
+        import agent.tools  # noqa: F401
+        from agent.tool_registry import TOOL_REGISTRY
+
+        all_registry_tools = set(TOOL_REGISTRY.keys())
+        # _make_ctx 默认 allowed_tools=("read_file",)
+        allowed = {"read_file"}
+        assert len(all_registry_tools) > len(allowed), (
+            f"TOOL_REGISTRY 应有比 allowed_tools 更多的工具，"
+            f"否则 '未授权工具不泄露' 的断言可能是 falsely true；"
+            f"registry={sorted(all_registry_tools)}, allowed={sorted(allowed)}"
+        )

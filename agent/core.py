@@ -597,7 +597,7 @@ def chat(
                 parent_trace_id="",
                 payload={"record_id": record_id},
             )
-            _result = _p1_dispatcher.route(_req)
+            _result = _phase1_dispatcher.route(_req)
             return bool(_result.payload.get("forgotten")) if _result else False
 
         # 支持按 ID 删除：forget id:<record_id>（精确匹配 + 短 ID 前缀匹配）

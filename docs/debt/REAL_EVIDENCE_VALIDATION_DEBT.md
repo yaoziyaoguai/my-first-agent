@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-29 (REAL-EVIDENCE-004/005/007/008 CLOSED — checkpoint real API roundtrip + MCP bridge real server connection + MCP external tool execution + scheduler real provider E2E validated)
+**最后更新**: 2026-05-29 (ALL REAL-EVIDENCE CLOSED — REAL-EVIDENCE-001/002/003/004/005/006/007/008 all validated)
 
 ---
 
@@ -41,11 +41,13 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Source** | Loop 2.1 / commit 480da7e |
 | **Capability** | Explicit Memory Main-Path Completion |
 | **Missing evidence** | real core loop dogfood E2E |
-| **Required validation** | 启动真实 chat loop；输入 `/forget` 或"忘记"命令；验证 dispatcher-mediated MEMORY_FORGET path；验证 retain/recall/forget 使用共享 store；验证用户可见结果与 durable evidence 一致 |
-| **Current evidence** | 5 L2 MemoryForget contract tests pass；5 L3 shared-store contract tests pass；65 focused tests pass |
-| **Status** | pending real dogfood |
+| **Required validation** | 启动真实 chat loop；输入"记住"命令触发 retain → CONFIRMATION_REQUIRED → 确认 → MEMORY_PROPOSE dispatch → store 写入；MEMORY_RECALL dispatch → 返回正确内容；输入"忘记"命令 → MEMORY_FORGET dispatch → store 移除；验证 retain/recall/forget 使用共享 store；forget 后 recall 不再返回已删除 memory |
+| **Current evidence** | 5 L2 MemoryForget contract tests pass；5 L3 shared-store contract tests pass；65 focused tests pass；**REAL-EVIDENCE-001 dogfood validation (2026-05-29)**: 真实 provider memory dogfood E2E 验证通过 — 13/13 PASS (M0-M7)；retain → CONFIRMATION_REQUIRED → 确认 → MEMORY_PROPOSE dispatched → store written；MEMORY_RECALL dispatched → correct content returned (1 item, 532 chars)；MEMORY_FORGET dispatched → store removal confirmed (1→0)；post-forget recall empty (0 items, no Python reference)；shared store consistency confirmed (InMemoryMemoryStore, same id)；not no-crash PASS (12 positive assertions) |
+| **Status** | **CLOSED** — real provider memory retain/recall/forget E2E validated |
 | **Blocking current code loop** | no |
-| **Blocking READY claim** | yes |
+| **Blocking READY claim** | no |
+| **Closed date** | 2026-05-29 |
+| **Closing evidence** | `scripts/real_evidence_001_memory.py` — 13 PASS / 0 FAIL / 0 CONCERN；结果文件 `docs/dogfood/real-evidence-001-memory-results.json`；修复 `agent/core.py:600` MEMORY_FORGET dispatcher 路由（`_p1_dispatcher` → `_phase1_dispatcher`）使注入 dispatcher 可观测 forget evidence |
 
 ---
 

@@ -1,0 +1,76 @@
+{
+  "evidence_id": "REAL-EVIDENCE-001",
+  "description": "Memory real core loop dogfood E2E",
+  "summary": {
+    "pass": 13,
+    "fail": 0,
+    "concern": 0
+  },
+  "results": [
+    {
+      "case": "M0",
+      "verdict": "PASS",
+      "detail": "Provider connectivity OK (2.2s)"
+    },
+    {
+      "case": "M1a",
+      "verdict": "PASS",
+      "detail": "Retain triggered CONFIRMATION_REQUIRED — chat blocked (returned '')"
+    },
+    {
+      "case": "M1b",
+      "verdict": "PASS",
+      "detail": "Pending confirmation set: kind=memory_confirmation, question=我可以长期记住这条信息吗？\n在 2026 年 5 月 29 日的真实验证中，用户证实 Python 是他们的首选语言\n来源: candidate:candida"
+    },
+    {
+      "case": "M2a",
+      "verdict": "PASS",
+      "detail": "MEMORY_PROPOSE dispatched: status=success, proposal_id=?"
+    },
+    {
+      "case": "M2b",
+      "verdict": "PASS",
+      "detail": "Memory written to store: 1 records, latest=在 2026 年 5 月 29 日的真实验证中，用户证实 Python 是他们的首选语言"
+    },
+    {
+      "case": "M3a",
+      "verdict": "PASS",
+      "detail": "MEMORY_RECALL returned stored content: 1 items, preview=--- Memory ---\nApproved memory snapshot:\nSelection reason: Memory Kernel v1 recall\n- [user] 在 2026 年"
+    },
+    {
+      "case": "M3b",
+      "verdict": "PASS",
+      "detail": "MEMORY_RECALL evidence in action_log: 2 event(s)"
+    },
+    {
+      "case": "M3c",
+      "verdict": "PASS",
+      "detail": "Memory confirmed in shared store: 1 total"
+    },
+    {
+      "case": "M4a",
+      "verdict": "PASS",
+      "detail": "MEMORY_FORGET dispatched: status=success, matched=?"
+    },
+    {
+      "case": "M4b",
+      "verdict": "PASS",
+      "detail": "Memory removed from store: 1 → 0, Python memory no longer present"
+    },
+    {
+      "case": "M5",
+      "verdict": "PASS",
+      "detail": "Post-forget recall excludes deleted memory: 0 items, no Python reference"
+    },
+    {
+      "case": "M6",
+      "verdict": "PASS",
+      "detail": "Shared store confirmed: type=InMemoryMemoryStore, id=4341889264, retain/recall/forget all reference same instance"
+    },
+    {
+      "case": "M7",
+      "verdict": "PASS",
+      "detail": "Not a no-crash PASS: 12 positive assertions, 0 fails, 0 concerns"
+    }
+  ]
+}

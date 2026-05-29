@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (REAL-EVIDENCE-004/005/007/008 CLOSED — checkpoint + MCP bridge + MCP external tool + scheduler real provider E2E validated)
-**状态**: Real Evidence Validation Batch 1+2 完成 — REAL-EVIDENCE-004/005/007/008 CLOSED；剩余真实验证项: REAL-EVIDENCE-001 (Memory E2E)
+**最后更新**: 2026-05-29 (ALL REAL-EVIDENCE CLOSED — 8/8 validated；Memory retain/recall/forget 完整闭环通过真实 provider E2E)
+**状态**: Real Evidence Validation 全部完成 — 8/8 REAL-EVIDENCE CLOSED；无剩余真实验证项
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -221,7 +221,7 @@
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**全部 safe-to-auto-run code loops 已闭环。** 剩余待办项：REAL-EVIDENCE-001/008（真实验证）或架构决策（B7/B8）。REAL-EVIDENCE-004/005/006/007 已 CLOSED。
+**全部 safe-to-auto-run code loops 已闭环。所有 REAL-EVIDENCE (001-008) 全部 CLOSED。** 剩余待办项：架构决策（B7/B8）。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -233,7 +233,7 @@
 | Loop 1.1 | Unified Runtime Decision Spine | **COMPLETED** — 已实现 |
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
-| Loop 2.1 | Explicit Memory Main-Path Completion | **PARTIAL** — code path complete：forget→dispatcher done；recall fallback fixed；store mismatch 已修复；15 L2+L3 contract tests pass。real dogfood E2E 已登记为 validation debt [REAL-EVIDENCE-001](docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md)，不阻塞后续代码 loop |
+| Loop 2.1 | Explicit Memory Main-Path Completion | **VALIDATED** — code path complete + real dogfood E2E validated (2026-05-29)：13/13 PASS (M0-M7)；retain→MEMORY_PROPOSE→store write；MEMORY_RECALL→correct content；MEMORY_FORGET→store removal；shared store consistency confirmed。REAL-EVIDENCE-001 CLOSED |
 | Loop 2.2 | Skill Activation Main-Path Completion | **VALIDATED (2026-05-29 re-confirmed)** — (1) body injection: SKILL_SELECT→body load→[Active Skill Instructions] 注入 prompt；(2) allowed_tools enforcement: ToolGateHandler→rejected→FORCE_STOP；(3) real provider keyword matching（`agent/skill_selection.py`）通过 dogfood 两次验证；(4) 49 tests pass + 15 skill tool enforcement tests；(5) REAL-EVIDENCE-002 CLOSED, REAL-EVIDENCE-003 CLOSED；evidence chain: SKILL_SELECT→TOOL_GATE→TOOL_INVOKE→TOOL_RESULT 真实路径完整验证 |
 | Loop 2.3 | Storage/Checkpoint True Resume | **VALIDATED** — REAL-EVIDENCE-004 CLOSED (2026-05-29): (1) save/resume dispatcher evidence chain 完整验证（CHECKPOINT_SAVE + CHECKPOINT_RESUME）；(2) state restoration + conversation continuity + actionable detection + semantic content 全部 PASS；(3) real provider chat 中 confirmation='always' 阻止 checkpoint save（安全性特性）；(4) 16 contract tests + 9 validation PASS / 0 FAIL / 2 CONCERN |
 | Loop 2.4 | MCP Main-Path Readiness | **VALIDATED** — REAL-EVIDENCE-005 CLOSED (2026-05-29): (1) bridge lifecycle 通过 disposable dispatcher 产生 MCP_BRIDGE_LIFECYCLE evidence；(2) real StdioMCPClient subprocess 连接 opt-in echo fixture server；(3) tools_discovered=2, tools_registered=2, allowlist 生效；(4) 12 PASS / 0 FAIL |
@@ -260,7 +260,7 @@
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
 
-**Loop 4.2 完成，全部安全可自动修代码 loop 已闭环。** Real Evidence Validation Batch 1+2 完成（REAL-EVIDENCE-004/005/007/008 CLOSED）。剩余真实验证项：REAL-EVIDENCE-001 (Memory E2E)；架构决策项：B7 (Multi-instance), B8 (TUI)。
+**Loop 4.2 完成，全部安全可自动修代码 loop 已闭环。** Real Evidence Validation 全部完成（8/8 REAL-EVIDENCE CLOSED）。剩余架构决策项：B7 (Multi-instance), B8 (TUI)。
 
 ---
 

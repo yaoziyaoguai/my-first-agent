@@ -2,7 +2,7 @@
 
 **日期**: 2026-05-29
 **类型**: 阶段性架构复盘
-**范围**: evidence-hardening 阶段（原始 redteam → 当前 3.6/5 基线）
+**范围**: evidence-hardening 阶段（原始 redteam → 当前 3.7/5 保守基线）
 **审计算子**: 独立架构复盘 agent，非实现 agent
 **代码变更**: 无
 
@@ -12,7 +12,7 @@
 
 First Agent 是一个 **Agent Runtime Lab / Evidence-driven runtime prototype**，不是 Claude Code 或 Codex 的竞品。它的核心实验问题是：一个 agent runtime 应该在多大程度上拥有自己的 decision vocabulary、evidence chain 和 capability classification，才能诚实地回答"我现在能做什么"。
 
-当前阶段从原始 redteam 审计的推断基线 **1.4/5** 提升到 **3.6/5**。提升主要来自两项工作：
+当前阶段从原始 redteam 审计的推断基线 **1.4/5** 提升到 **3.7/5**（保守基线）。提升主要来自两项工作：
 
 - **Batch A**（evidence-only hardening）：加固了 Checkpoint（004）和 MCP bridge（007）的验证脚本和证据链，未修改生产代码。
 - **Batch B**（code-path hardening）：将 ActionScheduler 注入到 `core.chat()` 主路径中，使 scheduler preprocessing block 从 dead code 变为可触发路径。
@@ -71,7 +71,7 @@ Memory recall 统一走 dispatcher path（`refresh_runtime_system_prompt(dispatc
 
 实现了确定性 keyword matching skill selection（`select_skill_for_real_provider()`），body load 和 active skill prompt injection 已连接。allowed_tools contract path 有效：`ToolRuntimeMediator` 检查 `skill_allowed_tools`，disallowed tool → rejected → FORCE_STOP。
 
-**已知限制**: selection 是 deterministic fallback，不是 model-owned skill tool selection（REAL-EVIDENCE-002 questionable）；same-turn disallowed-tool blocking 在真实路径中未证实（REAL-EVIDENCE-003 questionable），因为 confirmation='always' 策略阻止了所有 tool execution。
+**已知限制**: selection 是 deterministic fallback，不是 model-owned skill tool selection（REAL-EVIDENCE-002 questionable）；same-turn disallowed-tool blocking 已通过 main runtime path (core.chat → ToolRuntimeMediator → TOOL_GATE) 验证，但 production dogfood 因 confirmation='always' 策略阻止了 tool execution（REAL-EVIDENCE-003 partial-credible）。
 
 ### 2.6 Checkpoint True Resume Evidence Hardening
 
@@ -87,7 +87,7 @@ Memory recall 统一走 dispatcher path（`refresh_runtime_system_prompt(dispatc
 
 L1 child provider loop 已实现：child 调真实 provider → 返回结果 → parent adjudication。Real provider dogfood 验证了 delegate → child_result → parent_adjudication evidence chain（15 PASS / 0 FAIL / 1 CONCERN）。
 
-**已知限制**: TOOL_MEDIATOR_GAP — `core.py` 传入 `tool_mediator=None`，child tool mediation 无法在 production delegation path 触发（31 contract tests 已充分验证逻辑）。
+**已知限制**: TOOL_MEDIATOR_GAP 已修复（ToolRuntimeMediator 在 `_dispatch_or_fallback_delegation()` 中构造并 set_provider()）；42 contract tests 验证 child tool mediation 逻辑；real provider child structured tool_use E2E 未实现（MODEL_BEHAVIOR_CONCERN），SimpleNamespace turn_state / _turn_context caveat 存在（REAL-EVIDENCE-006 partial-credible）。后续须作为单独新阶段处理。
 
 ### 2.9 Advanced Scheduler
 
@@ -111,9 +111,9 @@ Provider error → RuntimeEvent fallback（不 crash）；scheduler node failure
 
 ### 3.1 Overall Score
 
-**3.6 / 5**
+**3.7 / 5**（保守基线，不再上调）
 
-比原始 redteam inferred 1.4/5 明显改善；不敢标 4.0+，因为仍有多项 questionable 和 partial-credible 未闭合。
+比原始 redteam inferred 1.4/5 明显改善；不敢标 4.0+，因为仍有多项 partial-credible 和 questionable 未闭合。
 
 ### 3.2 Credible（3/8）
 
@@ -123,27 +123,28 @@ Provider error → RuntimeEvent fallback（不 crash）；scheduler node failure
 | REAL-EVIDENCE-004 | Checkpoint save/resume | **credible** (hardened) | Batch A: direct-save fallback removed, Part A 10/10 PASS；Part B 2 CONCERN 归因修正（checkpoint save trigger condition not met） |
 | REAL-EVIDENCE-005 | MCP bridge readiness | credible | 真实 StdioMCPClient subprocess JSON-RPC: 12/12 PASS，tools_discovered=2, tools_registered=2, allowlist 生效 |
 
-### 3.3 Partial-Credible（1/8）
+### 3.3 Partial-Credible（4/8）
 
 | ID | Capability | 硬化后状态 | 关键证据 | Caveats |
 |----|-----------|----------|---------|---------|
+| REAL-EVIDENCE-003 | Skill allowed_tools | **partial-credible** | Contract tests + main runtime path (core.chat → ToolRuntimeMediator → TOOL_GATE) 验证 disallowed-tool blocking | FakeProvider + scripted skill activation，非 real model SKILL_SELECT；production dogfood 因 confirmation='always' 无法自动验证 same-turn blocking |
+| REAL-EVIDENCE-006 | SubAgent L1 | **partial-credible** | Code path complete: execute_l1() + delegate_l1() + ToolRuntimeMediator injection；42 contract tests pass | 缺 real provider child structured tool_use E2E；SimpleNamespace turn_state / _turn_context caveat 存在；后续须作为单独新阶段处理 |
+| REAL-EVIDENCE-007 | MCP external flight | **partial-credible** | MCP pipeline entry (TOOL_GATE) 通过 FakeProvider + main runtime path 验证；bridge registration 通过 real StdioMCPClient | TOOL_INVOKE / StdioMCPClient.call_tool / real MCP result / conversation feedback 未验证；后续须作为单独新阶段处理 |
 | REAL-EVIDENCE-008 | Advanced scheduler | **partial-credible** (code-path injection credible) | Batch B: core.chat() 注入 chain 结构正确，20 contract tests + 66/66 pass | 缺 full core.chat() E2E；ActionPlan 为 hand-built fixture；无 real model-generated plan |
 
-### 3.4 Questionable（4/8）
+### 3.4 Questionable（1/8）
 
 | ID | Capability | 状态 | 为什么 questionable |
 |----|-----------|------|-------------------|
 | REAL-EVIDENCE-002 | Skill selection | questionable | 确定性 keyword fallback，不是 model-owned skill tool selection |
-| REAL-EVIDENCE-003 | Skill allowed_tools | questionable | Contract tests 充分但 real dogfood 未证明 same-turn disallowed-tool blocking（confirmation='always' 安全策略阻止 tool execution） |
-| REAL-EVIDENCE-006 | SubAgent L1 | questionable | Child tool mediation 未在 core delegation path 证实（TOOL_MEDIATOR_GAP: tool_mediator=None） |
-| REAL-EVIDENCE-007 | MCP external flight | questionable | Bridge 已验证；model-selected MCP invocation 未实现（W3-W6 CONCERN） |
 
 ### 3.5 Deferred / Optional
 
 | Item | Disposition | Reason |
 |------|------------|--------|
-| 003 Skill allowed_tools | 不建议继续投入 | confirmation='always' 是安全特性；contract tests 验证充分；same-turn blocking 验证需要绕过安全策略的 scripted dogfood |
-| 006 TOOL_MEDIATOR_GAP | 可选后续 code hardening | 31 contract tests 已充分验证逻辑；production fix 需要 tool_mediator 依赖注入设计（state/messages/turn_context），非 trivial change |
+| 003 Skill allowed_tools | 不建议继续投入 | confirmation='always' 是安全特性；contract tests + main-path evidence 验证充分（partial-credible）；same-turn blocking 验证需要绕过安全策略的 scripted dogfood |
+| 006 real provider E2E | 后续单独新阶段 | 42 contract tests 已充分验证逻辑；real provider child structured tool_use E2E 需要模型行为配合，非 trivial change |
+| 007 real MCP invocation | 后续单独新阶段 | TOOL_INVOKE / call_tool / result / feedback 未验证；confirmation='always' 在 production 中阻止 TOOL_INVOKE |
 | B7 Multi-instance | 后续大型架构决策 | 需要消除模块级单例；不是当前阶段范围 |
 | B8 TUI | 后续产品化决策 | 需要 TUI framework decision；不是当前阶段范围 |
 
@@ -186,9 +187,9 @@ TOOL_MEDIATOR_GAP（006）暴露了 SubAgent 架构的核心张力：child tool 
 | Risk | Severity | Detail |
 |------|---------|--------|
 | 002 Skill model-owned selection | P2 | 当前 deterministic keyword fallback 是明确设计选择，不是缺失。但如果在后续阶段声称 Skill 就绪，必须先解决 model-owned selection |
-| 003 Skill allowed_tools real blocking | P2 | 不建议继续投入。confirmation='always' 是安全特性，contract tests 验证充分 |
-| 006 SubAgent TOOL_MEDIATOR_GAP | P2 | **唯一推荐后续 code hardening**。31 contract tests 已充分验证逻辑，但 production delegation path 仍无法触发 child tool mediation |
-| 007 MCP model-selected invocation | P2 | Bridge/registration 已验证（W1/W2 PASS）；model 自主选择 MCP tool 是模型行为约束，非代码缺陷。后续如需补，需 scripted scenario 或 prompt design |
+| 003 Skill allowed_tools real blocking | P2 | 不建议继续投入。confirmation='always' 是安全特性，contract tests + main-path evidence 验证充分（partial-credible） |
+| 006 SubAgent real provider E2E | P2 | **后续单独新阶段**。42 contract tests 已充分验证逻辑，缺 real provider child structured tool_use E2E。SimpleNamespace caveat 存在 |
+| 007 MCP real invocation | P2 | **后续单独新阶段**。TOOL_INVOKE / call_tool / result / feedback 未验证；confirmation='always' 在 production 中阻止 TOOL_INVOKE |
 | 008 Scheduler full E2E | P2 | 缺 full core.chat() E2E + real model-generated ActionPlan。code-path injection 已验证，但完整闭环需要 planner bridge + E2E test |
 | B7/B8 | deferred | 后续大型架构/产品化决策，不进入当前阶段 |
 
@@ -198,20 +199,20 @@ TOOL_MEDIATOR_GAP（006）暴露了 SubAgent 架构的核心张力：child tool 
 
 ### 6.1 Evidence-Hardening 已进入递减收益
 
-Batch A（004+007 evidence-only）将 credibility 从 2/8 推到 3/8；Batch B（008 code-path injection）推到 3 credible + 1 partial-credible。剩余的 questionable items（002/003/006/007）都不再是"加固验证脚本"能解决的——它们要么是设计选择（002 确定性 fallback）、要么是安全特性的必然结果（003 confirmation='always'）、要么是结构性代码缺口（006 TOOL_MEDIATOR_GAP）、要么是模型行为约束（007 model-selected invocation）。
+Batch A（004+007 evidence-only）将 credibility 从 2/8 推到 3/8；Batch B（008 code-path injection）推到 3 credible + 1 partial-credible。独立 combined review 保守结论：3 credible (001/004/005) + 4 partial-credible (003/006/007/008) + 1 questionable (002)。剩余的 partial-credible items（003/006/007/008）和 questionable item（002）都不再是"加固验证脚本"能解决的——它们要么是设计选择（002 确定性 fallback）、要么是安全特性的必然结果（003 confirmation='always'）、要么需要 real provider/model E2E（006/007/008）。
 
-### 6.2 003/006/B7/B8 都不是"小补证据"
+### 6.2 006/007/B7/B8 都不是"小补证据"
 
-- **003**: 需要 scripted dogfood 诱导 disallowed tool 场景，需要绕过 confirmation='always' 策略或以其他方式在不削弱安全性的前提下验证 blocking 行为
-- **006**: 需要 tool_mediator 依赖注入设计，触及 state/messages/turn_context，是独立的 SDD+TDD loop
+- **006**: real provider child structured tool_use E2E 需要模型行为配合（MODEL_BEHAVIOR_CONCERN），非代码修复能解决；SimpleNamespace caveat 仍需处理
+- **007**: TOOL_INVOKE / call_tool / result / feedback 未验证，confirmation='always' 在 production 中阻止 TOOL_INVOKE
 - **B7**: 需要消除模块级单例，是全局架构变更
 - **B8**: 需要 TUI framework decision，是产品化决策
 
 这几项都不是当前阶段 batch 的合理延续——它们是各自独立的下一阶段。
 
-### 6.3 3.6/5 已经足够支撑阶段性架构总结
+### 6.3 3.7/5 已经足够支撑阶段性架构总结
 
-从 1.4/5 → 3.6/5 的提升代表了：移除了 direct-save fallback、消除了 Scheduler dead code、建立了 evidence classification 体系、建立了 RuntimeDecisionFrame、完成了 8 个 REAL-EVIDENCE 中 4 个的硬化（3 credible + 1 partial-credible）。这是一个有意义的阶段性里程碑。
+从 1.4/5 → 3.7/5（保守基线）的提升代表了：移除了 direct-save fallback、消除了 Scheduler dead code、建立了 evidence classification 体系、建立了 RuntimeDecisionFrame、完成了 8 个 REAL-EVIDENCE 的硬化（3 credible + 4 partial-credible + 1 questionable）。这是一个有意义的阶段性里程碑。
 
 ### 6.4 后续如果继续，应单独开下一阶段
 
@@ -223,8 +224,8 @@ Batch A（004+007 evidence-only）将 credibility 从 2/8 推到 3/8；Batch B�
 
 以下选项**只列不启动**。每个选项都需要独立的 scope definition、SDD 和 reviewer approval 才能进入。
 
-- **Option A**: 停止当前阶段，做学习总结。直接收口，把 3.6/5 作为阶段性基线记录，转向学习总结或新实验方向。
-- **Option B**: 单独开 006 TOOL_MEDIATOR_GAP hardening。唯一推荐后续 code hardening——修复 `core.py` 中 `tool_mediator=None` 的传递，使 child tool mediation 在 production delegation path 中可用。风险中高，需要 tool_mediator 依赖注入设计。
+- **Option A**: 停止当前阶段，做学习总结。直接收口，把 3.7/5 作为阶段性基线记录，转向学习总结或新实验方向。
+- **Option B**: 单独开 006 real provider E2E hardening。real provider child structured tool_use E2E + SimpleNamespace caveat 修复。风险中高，需要模型行为配合。
 - **Option C**: 单独开 B7 Multi-instance readiness。消除模块级单例，使 runtime 支持多实例。大型架构变更。
 - **Option D**: 单独开 B8 TUI architecture。TUI framework selection + implementation。产品化决策。
 - **Option E**: 继续完善 scheduler full core.chat() E2E / model-generated plan bridge。将 008 从 partial-credible 推到 credible。
@@ -256,6 +257,7 @@ Batch A（004+007 evidence-only）将 credibility 从 2/8 推到 3/8；Batch B�
 | 2026-05-29 | Independent re-audit after closure | 3.2/5 | 2/8 credible, 6/8 questionable |
 | 2026-05-29 | Batch A complete (004+007 evidence-only) | 3.5/5 | 3-4/8 credible |
 | 2026-05-29 | Batch B complete (008 code-path injection) | 3.6/5 | 3 credible, 1 partial-credible, 4 questionable |
+| 2026-05-29 | 保守证据可信度基线（独立 combined review） | 3.7/5 | 3 credible (001/004/005), 4 partial-credible (003/006/007/008), 1 questionable (002) |
 
 ## Appendix B: Key Architecture Decisions Preserved
 

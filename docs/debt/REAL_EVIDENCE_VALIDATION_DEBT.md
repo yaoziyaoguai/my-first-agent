@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-29 (Independent combined review — 003/006/007 partial-credible caveats documented; 001-008 CLOSED with credibility classification)
+**最后更新**: 2026-05-29 (保守证据可信度基线 — 阶段性收口；003/006/007 partial-credible；TOOL_INVOKE/call_tool/result/feedback 未验证)
 
 ---
 
@@ -148,13 +148,13 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Missing evidence** | 真实外部 MCP server 的完整连接→discovery→registration→tool_use→execution→result 路径 |
 | **Required validation** | (1) 搭建本地 real MCP server fixture（如 filesystem 或 echo server）；(2) 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + `MY_FIRST_AGENT_MCP_DRY_RUN=0` + MCP config 文件含真实 server entry；(3) 启动 real chat loop；(4) 验证 `run_mcp_bridge(mode="registration", dry_run=False)` → StdioMCPClient 真实连接 → list_tools → 通过 policy gate → TOOL_REGISTRY 注册（FakeMCPClient 无真实 server 进程）；(5) 验证注册的 MCP tools 出现在 `get_model_visible_tools(max_mcp_tools=5)` 中；(6) 验证模型 tool_use MCP tool → TOOL_GATE（含 server_allowlist 校验）→ TOOL_INVOKE → StdioMCPClient.call_tool（非 FakeMCPClient）→ real server response → TOOL_RESULT → dispatcher evidence；(7) 验证 destructive tool name block（含 server_allowlist 边界）；(8) 验证 confirmation="always" 在 real core loop 中正确拦截（非 test hack `confirmation="never"`） |
 | **Current evidence** | bridge lifecycle dispatcher evidence（MCP_BRIDGE_LIFECYCLE + disposable dispatcher）；L3 core.chat() tests 验证 MCP tool pipeline（但使用 FakeMCPClient + confirmation='never' test hack）；mcp.discover/mcp.invoke branch points 标 PARTIAL（code path complete, real server pending）；Loop 3.3 SDD 完成（`docs/design/mcp-real-external-flight-contract.md`）定义 opt-in contract + 17 test intents；Loop 3.3 code-path completion: 30 个 contract tests 全部通过；**Batch A evidence hardening (2026-05-29)**: W1 (MCP bridge via real StdioMCPClient → echo fixture) PASS — 2 tools registered；W2 (MCP tools in TOOL_REGISTRY) PASS；W3-W6 CONCERN — 模型未选择 MCP tool（Guardrail 1: 不 hack model behavior）；**007 main-path hardening (2026-05-29)**: `scripts/real_evidence_007_mcp_invoke.py` — FakeProvider deterministic tool_use + real StdioMCPClient bridge + main runtime path (core.chat → ToolRuntimeMediator → TOOL_GATE) — 8 PASS / 0 FAIL / 1 CONCERN (V0: fixture exists, V1: real bridge registration, V2a: TOOL_REGISTRY, V2b: model-visible, V3: FakeProvider tool_use→TOOL_GATE, V4: confirmation_required pipeline entry, V5b: TOOL_RESULT dispatched, V6: ToolRuntimeMediator provenance). 1 CONCERN (V5a): confirmation='always' blocks TOOL_INVOKE (expected for MCP tools) |
-| **Status** | **CLOSED (partial-credible)** — MCP unified pipeline entry 通过 FakeProvider + main runtime path 验证。**Real invocation (2026-05-29)**: `scripts/real_evidence_007_mcp_invoke.py` 重写 — confirmation='never' override 使 TOOL_INVOKE 首次通过。9 PASS / 0 FAIL / 1 CONCERN — full chain TOOL_GATE→TOOL_INVOKE→TOOL_RESULT verified (W3/W4/W5/W8 PASS)；real StdioMCPClient.call_tool 通过 subprocess 执行 (W5 PASS)。W6 CONCERN: result original_size=0 — 疑似 mediator._route_result() 字段不匹配 (result_summary vs tool_output)。确认策略在验证后正确恢复；生产默认策略不变。保持 partial-credible。 |
+| **Status** | **CLOSED (partial-credible)** — MCP pipeline entry (TOOL_GATE) 通过 FakeProvider + main runtime path 验证。**保守结论**: TOOL_INVOKE / StdioMCPClient.call_tool / real MCP result / conversation feedback 未验证——confirmation='never' override 非生产路径，不能作为 TOOL_INVOKE 可信证据。已知 mediator._route_result() 字段不匹配 (result_summary vs tool_output) 导致 result_size=0，未修复。保持 partial-credible。后续如继续，007 real MCP invocation 须作为单独新阶段处理。 |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | no |
 | **Closed date** | 2026-05-29 |
-| **Closing evidence** | `scripts/real_evidence_007_mcp_invoke.py` — 9 PASS / 0 FAIL / 1 CONCERN (FakeProvider + real StdioMCPClient + confirmation='never' override + main runtime path)；fixture `scripts/fixtures/mcp_echo_server.py`；结果文件 `docs/dogfood/real-evidence-007-mcp-invoke-results.json` |
-| **Known limitation** | W6 result_size=0 — mediator._route_result() sends `result_summary` but ToolResultFeedbackHandler expects `tool_output`；不影响 TOOL_GATE→TOOL_INVOKE→TOOL_RESULT chain 完整性验证。Model-selected MCP invocation not achieved (Guardrail 1 — FakeProvider 用于确定性 tool_use)。 |
-| **Credibility** | partial-credible — full execution chain verified (TOOL_GATE→TOOL_INVOKE→TOOL_RESULT) but W6 result feedback incomplete + model-selected invocation not tested |
+| **Closing evidence** | `scripts/real_evidence_007_mcp_invoke.py` — FakeProvider + real StdioMCPClient bridge registration PASS (W1/W2: 2 tools registered)；TOOL_GATE pipeline entry PASS (W3/W4)；TOOL_INVOKE 未验证 (confirmation='always' blocks in production; confirmation='never' override 非可信证据)；fixture `scripts/fixtures/mcp_echo_server.py`；结果文件 `docs/dogfood/real-evidence-007-mcp-invoke-results.json` |
+| **Known limitation** | TOOL_INVOKE / StdioMCPClient.call_tool / real MCP result / conversation feedback 未验证——confirmation='always' 在 production 中阻止 TOOL_INVOKE；mediator._route_result() 字段不匹配 (result_summary vs tool_output) 导致 result_size=0，未修复。Model-selected MCP invocation 未实现 (Guardrail 1 — FakeProvider 用于确定性 tool_use)。 |
+| **Credibility** | partial-credible — MCP pipeline entry (TOOL_GATE) 已证明；TOOL_INVOKE / StdioMCPClient.call_tool / real MCP result / conversation feedback 未验证；后续须作为单独新阶段处理 |
 
 ---
 

@@ -489,11 +489,17 @@ def _try_phase1_turn_end_runtime_action(
             #   的 keyword matching → 没有匹配时不选择，保持 no_suitable_skill
             # - 匹配结果可解释（matched_terms, match_score），方便调试
             # - 确定性：相同输入总是相同输出，不依赖模型行为
+            # REAL-EVIDENCE-002: 检查模型是否已通过 tool_use("SKILL_SELECT",...)
+            # 自主选择了 skill。若已选择，跳过 keyword fallback，避免覆盖模型决策。
             elif _visible and last_user:
-                from agent.skill_selection import select_skill_for_real_provider
-                _decision = select_skill_for_real_provider(last_user, _visible)
-                if _decision is not None:
-                    _skill_payload["model_decision_metadata"] = _decision
+                import agent.core as _core
+                if getattr(_core, "_skill_selected_by_model", False):
+                    _core._skill_selected_by_model = False
+                else:
+                    from agent.skill_selection import select_skill_for_real_provider
+                    _decision = select_skill_for_real_provider(last_user, _visible)
+                    if _decision is not None:
+                        _skill_payload["model_decision_metadata"] = _decision
 
         skill_request = RuntimeActionRequest(
             action_type=RuntimeActionType.SKILL_SELECT,

@@ -247,6 +247,12 @@ class TurnState:
 # Loop 2.2: 跨 turn 追踪当前激活的 Skill（通过 dispatcher action_log 更新）。
 _active_skill: dict[str, str] = {}
 
+# REAL-EVIDENCE-002: 模型自主选择 Skill 标志。
+# - True: 模型在本 turn 通过 tool_use("SKILL_SELECT", ...) 选择了 skill，
+#   turn-end hook 检查此 flag 跳过 keyword fallback
+# - False: 初始状态 / 关键字 fallback 已执行 / turn-end 已消费
+_skill_selected_by_model = False
+
 
 def _update_active_skill_from_dispatcher(dispatcher) -> None:
     """从 dispatcher action_log 提取最近一次 SKILL_SELECT 成功结果。
@@ -1235,6 +1241,9 @@ def _call_model(
     # _debug_print_request(turn_state.system_prompt, request_messages, get_tool_definitions())
 
     try:
+        # REAL-EVIDENCE-002: 确保 SKILL_SELECT 在 TOOL_REGISTRY 中注册（幂等）。
+        from agent.skill_system.skill_tool import _ensure_skill_select_registered
+        _ensure_skill_select_registered()
         response = call_model(
             provider=getattr(loop_ctx, "model_provider", None),
             legacy_client=loop_ctx.client,

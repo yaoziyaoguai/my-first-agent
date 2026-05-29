@@ -55,16 +55,14 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 
 | 字段 | 值 |
 |------|-----|
-| **Source** | Loop 2.2 / commit 2d26c2a；Loop 2.2b / commit 98b4163 |
-| **Capability** | Skill Activation — real model SKILL_SELECT tool call |
-| **Missing evidence** | 真实模型（非 FakeProvider）在真实 chat loop 中是否触发 SKILL_SELECT tool call |
-| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 输入能触发 Skill selection 的用户请求；(3) 验证模型是否真实调用 SKILL_SELECT tool；(4) 验证 SkillRegistry / dispatcher / RuntimeDecisionFrame 有对应 evidence；(5) 验证 `_active_skill` 被设置并进入后续 runtime path（system prompt 包含 [Active Skill Instructions]） |
-| **Current evidence** | registry bridge 已连接、prompt injection 已实现、13 L2 skill bridge + 6 L3 pipeline + 15 skill tool enforcement tests pass；Loop 2.2 remediation (2026-05-28): 新增 `agent/skill_selection.py` 确定性 keyword matching fallback + 15 real provider selection tests pass；**Loop 2.2 real dogfood validation (2026-05-28)**: 真实 provider dogfood 验证通过 — SKILL_SELECT 不再返回 no_suitable_skill；selected_skill_id=demo-note-maker, body_load_decision=True, match_score=7 (high)；_active_skill 正确设置 (skill_id=demo-note-maker, body_len=300)；RuntimeDecisionFrame 反映 skill_registry_active=True；dispatcher evidence chain 完整；修复了 `_update_active_skill_from_dispatcher` 中 RuntimeActionEvent 字段访问 bug（event.result.payload → event.evidence）；**Re-validation (2026-05-29)**: 重新运行 `scripts/real_dogfood_skill_subagent_v2.py` — A2/A3/A4 全部 PASS（3/3），结果一致稳定 |
-| **Status** | **CLOSED** — real provider dogfood 两次通过，keyword matching fallback 可解释可验证 |
+| **Source** | Loop 2.2 / commit 2d26c2a；Loop 2.2b / commit 98b4163；model-owned path / REAL-EVIDENCE-002 implementation (2026-05-30) |
+| **Capability** | Skill Activation — model-owned SKILL_SELECT tool call via ToolRuntimeMediator pipeline |
+| **Missing evidence** | 真实模型（非 FakeProvider）在真实 chat loop 中是否自主触发 tool_use("SKILL_SELECT", ...) |
+| **Required validation** | (1) 使用真实 LLM provider 启动真实 chat loop；(2) 输入能触发 Skill selection 的用户请求；(3) 验证模型是否真实调用 SKILL_SELECT tool；(4) 验证 tool_use → TOOL_GATE → TOOL_INVOKE → TOOL_RESULT → _active_skill 完整 pipeline；(5) 验证 _skill_selected_by_model flag 正确设置 → turn-end hook 跳过 keyword fallback |
+| **Current evidence (2026-05-30)** | model-owned SKILL_SELECT 路径已实现：`agent/skill_system/skill_tool.py` → TOOL_REGISTRY 注册 → `get_model_visible_tools()` 可见 → `_call_model()` 前幂等注册 → ToolRuntimeMediator.mediate() pipeline (gate→invoke→result) → _active_skill + allowed_tools 绑定；keyword fallback 保留为 fallback (`_skill_selected_by_model` flag 区分两种路径)；11 unit + 12 integration tests + 10 validation script PASS；gate: ruff clean + git diff --check clean；controlled provider (FakeProvider) evidence 闭合 |
+| **Status** | **PARTIAL** — code-path credible (SKILL_SELECT TOOL_REGISTRY 注册 + ToolRuntimeMediator pipeline 已验证)；keyword matching fallback 仍保留；real provider 模型自主 tool_use("SKILL_SELECT") 触发未验证 |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | no |
-| **Closed date** | 2026-05-29 |
-| **Closing evidence** | `scripts/real_dogfood_skill_subagent_v2.py` — 12 PASS / 0 FAIL / 4 CONCERN；结果文件 `docs/dogfood/skill-subagent-real-dogfood-v2-results-2026-05-28.json` |
 
 ---
 

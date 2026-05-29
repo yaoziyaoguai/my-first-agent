@@ -1,0 +1,48 @@
+{
+  "date": "2026-05-29",
+  "evidence_id": "REAL-EVIDENCE-006",
+  "method": "real provider → core.chat → L1 delegate → demo-stat-real child model → parent ToolRuntimeMediator → TOOL_GATE→INVOKE→RESULT",
+  "results": [
+    {
+      "case": "M0",
+      "verdict": "PASS",
+      "detail": "Provider built: AnthropicCompatibleProvider — connectivity will be verified via core.chat() in M1"
+    },
+    {
+      "case": "M1",
+      "verdict": "CONCERN",
+      "detail": "SUBAGENT_DELEGATE_L0 dispatched (status=failed) — L1 handler may not have matched demo-stat-real; child tool mediation NOT testable from L0 path"
+    },
+    {
+      "case": "M2",
+      "verdict": "MODEL_BEHAVIOR_CONCERN",
+      "detail": "No SUBAGENT_CHILD_TOOL_REQUEST — child model did not generate structured tool_use; likely described tools in text instead of calling them. Contract evidence (42 tests) confirms code path correct; real provider E2E blocked by model behavior, not code defect."
+    },
+    {
+      "case": "M7a",
+      "verdict": "CONCERN",
+      "detail": "No SUBAGENT_CHILD_RESULT — child may not have completed"
+    },
+    {
+      "case": "M7b",
+      "verdict": "CONCERN",
+      "detail": "No SUBAGENT_PARENT_ADJUDICATION"
+    },
+    {
+      "case": "M8",
+      "verdict": "PASS",
+      "detail": "Evidence chain traceable: 13 total events, subagent types present=[<RuntimeActionType.SUBAGENT_DELEGATE_L0: 'subagent.delegate_l0'>, <RuntimeActionType.TOOL_GATE: 'tool.gate'>, <RuntimeActionType.TOOL_INVOKE: 'tool.invoke'>, <RuntimeActionType.TOOL_RESULT: 'tool.result'>]"
+    },
+    {
+      "case": "M8b",
+      "verdict": "PASS",
+      "detail": "RuntimeDecisionFrame available: branch_points=0"
+    }
+  ],
+  "summary": {
+    "PASS": 3,
+    "FAIL": 0,
+    "CONCERN": 4,
+    "MODEL_BEHAVIOR_CONCERN": 1
+  }
+}

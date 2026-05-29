@@ -16,18 +16,18 @@
 | 项目 | 当前复审结论 |
 |------|--------------|
 | 原 redteam inferred score | 1.4/5 |
-| 当前 independent re-audit score | 3.6/5 (was 3.5/5 after Batch A — Batch B partial-credible, injection chain verified, conservative score) |
-| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；004 B1/B2 归因已修正；Batch B partial-credible — core.chat() 注入 chain 结构正确（+7 lines, 20 contract tests），但缺 full core.chat() E2E + real model-generated ActionPlan；003 不建议继续投入；006 TOOL_MEDIATOR_GAP 可选后续 code hardening；B7/B8 大型架构/产品化决策 |
-| REAL-EVIDENCE closure credibility | 3/8 credible (001 + 004 hardened + 005)；1/8 partial-credible (008 code-path injection credible)；4/8 questionable (002/003/006/007) |
+| 当前 independent re-audit score | 3.8/5 (was 3.6/5 after Batch B — 006 TOOL_MEDIATOR_GAP implemented, child tool mediation now flows through core delegation path) |
+| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；004 B1/B2 归因已修正；Batch B partial-credible — core.chat() 注入 chain 结构正确（+7 lines, 20 contract tests），但缺 full core.chat() E2E + real model-generated ActionPlan；003 不建议继续投入；006 TOOL_MEDIATOR_GAP **已实现** — _dispatch_or_fallback_delegation() 内部构造 ToolRuntimeMediator 并传入 set_provider()，executor.py 硬编码占位符替换为真实 tool result；B7/B8 大型架构/产品化决策 |
+| REAL-EVIDENCE closure credibility | 4/8 credible (001 + 004 hardened + 005 + 006 hardened)；1/8 partial-credible (008 code-path injection credible)；3/8 questionable (002/003/007) |
 | 核心 runtime milestone | PARTIAL / code-path-heavy validated；Batch A 移除了 004 direct-save fallback + 007 direct execute_tool() |
-| 明确排除 | B7 Multi-instance readiness；B8 TUI architecture；006 TOOL_MEDIATOR_GAP (defer)；003 claim downgrade |
+| 明确排除 | B7 Multi-instance readiness；B8 TUI architecture；003 claim downgrade |
 
 主要纠偏点：
 - `RuntimeDecisionFrame` registry 当前仍没有 READY branch point，状态文档不能把它当作完全 READY 事实源。
 - Skill allowed_tools 的 contract path 有效，但 real dogfood 没有证明 same-turn disallowed-tool blocking。
 - Checkpoint validation 有 direct-save fallback，real provider 部分仍有 concern，不能称为 true resume fully validated。
 - MCP bridge readiness 可信；MCP external flight 仍主要是 direct `execute_tool()`，不是完整 model-selected runtime path。
-- SubAgent L1 child loop 有进展；production delegation path 未实际传入 `ToolRuntimeMediator` 触发 child tool mediation。
+- SubAgent L1 child loop 有进展；006 TOOL_MEDIATOR_GAP 已闭合 — _dispatch_or_fallback_delegation() 内部构造 ToolRuntimeMediator 并传入 set_provider()，child tool_use 走 TOOL_GATE→TOOL_INVOKE→execute_single_tool→TOOL_RESULT。
 - Scheduler 有代码和手动 harness；默认 `core.chat()` 没有注入 `ActionScheduler`，不应标为 main-path validated。
 
 ### Corrected Current Loop Scores
@@ -41,7 +41,7 @@
 | Loop 2.2 Skill Activation / allowed_tools | PARTIAL | 3 | post-turn activation/contract 有效；same-turn real blocking 未证实 |
 | Loop 2.3 Storage / Checkpoint True Resume | VALIDATED | 4 | Batch A hardened: direct-save fallback removed, Part A 10/10 PASS；Part B 2 CONCERN — checkpoint save trigger condition not met (tools executing but no save point reached) |
 | Loop 2.4 MCP Main-Path Readiness | PARTIAL | 3 | bridge readiness 可信；main runtime E2E 未证实 |
-| Loop 3.2 Real SubAgent L1/L2 | PARTIAL | 3 | L1 loop/result 有进展；child tool mediation 未走 core path |
+| Loop 3.2 Real SubAgent L1/L2 | CODE_PATH_COMPLETE | 4 | 006 TOOL_MEDIATOR_GAP 闭合 — core delegation path 构造 ToolRuntimeMediator 并传入 L1 handler；executor.py 硬编码占位符替换为真实 tool result；18 new contract tests + 24 existing L1 tests 全部通过 |
 | Loop 3.3 Real MCP External Flight | PARTIAL | 3 | Batch A hardened: real StdioMCPClient bridge + TOOL_REGISTRY verified；model-selected invocation pending (Guardrail 1) |
 | Loop 3.4 Advanced Scheduler | CODE_PATH_COMPLETE | 3 | Batch B partial-credible — core.chat() 注入 chain 结构正确（_run_main_loop → LoopDependencies → run_main_loop preprocessing）；20 new contract tests pass；66/66 scheduler tests pass；剩余 caveats: 无 full core.chat() E2E、ActionPlan 为 hand-built fixture |
 | Loop 4.1 Dogfood / Evaluation Harness Honesty | VALIDATED | 4 | honesty guard 可信 |
@@ -56,7 +56,7 @@
 | REAL-EVIDENCE-003 | Skill allowed_tools | questionable | contract tests 可信；real dogfood 未证明 same-turn disallowed blocking |
 | REAL-EVIDENCE-004 | Checkpoint save/resume | **credible** (hardened) | Batch A: direct-save fallback removed (Guardrail 2)；Part A 10/10 PASS (CHECKPOINT_PATH redirection fix)；Part B 2 CONCERN — tools executing (tool.gate/invoke/result in action_log) but no checkpoint save point reached |
 | REAL-EVIDENCE-005 | MCP bridge readiness | credible | local stdio fixture discovery/register/visibility/allowlist 可信 |
-| REAL-EVIDENCE-006 | SubAgent L1 | questionable | child loop/result 有价值；child tool mediation 未在 core delegation path 证实 |
+| REAL-EVIDENCE-006 | SubAgent L1 | **credible** (hardened) | 006 TOOL_MEDIATOR_GAP 闭合 — _dispatch_or_fallback_delegation() 内部构造 ToolRuntimeMediator → set_provider()；executor.py 硬编码占位符替换为 _turn_context 真实结果；42 contract tests PASS；缺 real provider dogfood 验证（Guardrail 1） |
 | REAL-EVIDENCE-007 | MCP external flight | **partial-credible** (hardened) | Batch A: real StdioMCPClient bridge PASS (W1/W2: 2 tools registered)；model-selected invocation CONCERN (W3-W6: Guardrail 1)；不再使用 direct execute_tool() |
 | REAL-EVIDENCE-008 | Advanced scheduler | **partial-credible** (code-path injection credible) | core.chat() 注入 chain 结构正确: action_scheduler → _run_main_loop() → LoopDependencies → run_main_loop() preprocessing 实际触发；20 contract tests 验证注入契约 + 主路径 evidence + 边界防护；66/66 tests pass。Caveats: (1) 无 full core.chat(..., action_scheduler=scheduler) E2E 测试；(2) ActionPlan 仍是 hand-built fixture；(3) 不是 B7/B8 blocker |
 
@@ -219,7 +219,7 @@
 | skill.apply | PARTIAL | CONTRACT_PLUS_DOGFOOD | allowed_tools contract path 有效；real dogfood 有 TOOL_GATE/INVOKE/RESULT evidence chain，但未证明 same-turn disallowed-tool blocking；REAL-EVIDENCE-003 独立复审为 questionable |
 | mcp.discover | PARTIAL | REAL_EVIDENCE_SMOKE | local stdio fixture bridge discovery/register/visibility/allowlist 可信；REAL-EVIDENCE-005 独立复审为 credible |
 | mcp.invoke | PARTIAL | REAL_STDIO_BRIDGE_REGISTERED | Batch A hardened: real StdioMCPClient bridge → TOOL_REGISTRY verified (W1/W2 PASS)；model-selected invocation pending (Guardrail 1)；不再 direct execute_tool()；REAL-EVIDENCE-007 独立复审 partial-credible |
-| subagent.delegate | PARTIAL | REAL_DOGFOOD_SMOKE | L1 child provider loop/result/adjudication 有证据；production delegation path 未实际传入 `ToolRuntimeMediator` 触发 child tool mediation；REAL-EVIDENCE-006 独立复审为 questionable |
+| subagent.delegate | CODE_PATH_COMPLETE | REAL_CORE_LOOP_RUNTIME_E2E | 006 TOOL_MEDIATOR_GAP 闭合 — core delegation path 构造 ToolRuntimeMediator 并传入 L1 handler；child tool_use → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；executor 读取 _turn_context 真实结果；REAL-EVIDENCE-006 hardened |
 | memory.recall/propose/retain/forget | PARTIAL | REAL_PROVIDER_E2E | retain/recall/forget 行为闭环可信；registry 仍是 PARTIAL，且部分 path 使用 direct dispatcher provenance；REAL-EVIDENCE-001 独立复审为 credible |
 | tool.gate/invoke/result | CODE_PATH_COMPLETE | REAL_CORE_LOOP_RUNTIME_E2E | model `tool_use` 已经通过 ToolRuntimeMediator 进入 TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；MCP direct evidence 不应借此升级为 full MCP runtime E2E |
 | checkpoint.save/resume | PARTIAL | CONTRACT_PLUS_DOGFOOD | Batch A hardened: direct-save fallback removed (Guardrail 2), Part A 10/10 PASS (CHECKPOINT_PATH redirection)；Part B 2 CONCERN per stop condition (confirmation='always')；REAL-EVIDENCE-004 独立复审 credible |
@@ -278,7 +278,7 @@
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**Batch A + Batch B complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。3/8 credible (001/004/005), 1/8 partial-credible (008 code-path injection credible), 4/8 questionable (002/003/006/007)。** 003 不建议继续投入；006 TOOL_MEDIATOR_GAP 可选后续 code hardening；B7/B8 大型架构/产品化决策不进入当前收口。
+**Batch A + Batch B + 006 complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。4/8 credible (001/004/005/006), 1/8 partial-credible (008 code-path injection credible), 3/8 questionable (002/003/007)。** 003 不建议继续投入；B7/B8 大型架构/产品化决策不进入当前收口。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。

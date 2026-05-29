@@ -1300,12 +1300,31 @@ def _dispatch_or_fallback_delegation(
     如果 dispatcher 中没有 L1 handler 或 provider 未设置 → 回退 L0 inline path
     （_execute_subagent_delegation）。
     """
+    from types import SimpleNamespace as _SimpleNamespace
+
     from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    # 006 TOOL_MEDIATOR_GAP: 为 L1 delegation 构造 ToolRuntimeMediator。
+    # 复用 response_handlers.py:230-247 的构造模式，使用 SimpleNamespace
+    # 作为最小 turn_state（delegation call sites 在 TurnState 创建之前）。
+    _tool_mediator = None
+    if dispatcher is not None:
+        from agent.tool_runtime_mediator import ToolRuntimeMediator as _Tmr
+        _skill_at = None
+        if _active_skill:
+            _skill_at = _active_skill.get("allowed_tools")
+        _tool_mediator = _Tmr(
+            dispatcher,
+            state=state,
+            turn_state=_SimpleNamespace(on_display_event=None, round_tool_traces=[]),
+            turn_context={},
+            messages=state.conversation.messages,
+            skill_allowed_tools=_skill_at,
+        )
 
     l1_handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1)
     if l1_handler is not None and provider is not None:
-        # 注入 provider 到 L1 handler
-        l1_handler.set_provider(provider, None)
+        l1_handler.set_provider(provider, _tool_mediator)
         # 通过 dispatcher 路由 delegation
         req = RuntimeActionRequest(
             action_type=RuntimeActionType.SUBAGENT_DELEGATE_L1,

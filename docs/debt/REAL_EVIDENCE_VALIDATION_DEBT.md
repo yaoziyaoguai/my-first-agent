@@ -133,7 +133,7 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Blocking READY claim** | no |
 | **Closed date** | 2026-05-29 |
 | **Closing evidence** | `scripts/real_dogfood_skill_subagent_v2.py` — 15 PASS / 0 FAIL / 1 CONCERN；`agent/subagent_system/descriptors/demo-stat-real/SUBAGENT.md`；37+66 focused tests pass；evidence chain: subagent.delegate_l1→subagent.child_result→subagent.parent_adjudication |
-| **Known limitation** | TOOL_MEDIATOR_GAP: `core.py:1301` passes `tool_mediator=None` to L1 handler → child 无法在 production 中通过 `mediate_child_tool_request()` 调用工具；contract tests 充分验证了 tool mediation 逻辑；production fix 需要 tool_mediator 在 delegation 点可用（非 trivial change，需 state/messages/turn_context 等依赖注入） |
+| **Known limitation** | ~~TOOL_MEDIATOR_GAP: `core.py` passes `tool_mediator=None` to L1 handler → child 无法在 production 中通过 `mediate_child_tool_request()` 调用工具。~~ **RESOLVED (2026-05-29)**: 006 TOOL_MEDIATOR_GAP implementation — `_dispatch_or_fallback_delegation()` 内部构造 ToolRuntimeMediator 并传入 `l1_handler.set_provider(provider, _tool_mediator)`；executor.py 硬编码占位符替换为 `_turn_context` 真实结果；42 contract tests PASS。**Remaining**: real provider dogfood 验证 child tool mediation 在 production path 的实际触发（需 model 生成 structured tool_use block 而非 text 描述）。|
 
 ---
 

@@ -9,7 +9,9 @@ from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult
 from agent.subagent_system.trace import make_trace_event
 
 
-def execute_local(context_package: object, *, delegation_id: str = "delegation-local") -> SubAgentResult:
+def execute_local(
+    context_package: object, *, delegation_id: str = "delegation-local",
+) -> SubAgentResult:
     """Execute deterministic L0 delegation.
 
     该 executor 不调用 provider、不执行工具、不 spawn 外部进程。它只把 packaged
@@ -276,7 +278,10 @@ def execute_l1(
                     })
                 else:
                     tools_executed.append(tool_name)
-                    result_text = f"[L1 child] 工具 {tool_name} 已执行。"
+                    _key = f"child:{delegation_id}:{tool_name}"
+                    _tc = getattr(tool_mediator, "_turn_context", {})
+                    _real = _tc.get(_key) if tool_mediator is not None else None
+                    result_text = _real or f"[L1 child] 工具 {tool_name} 已执行。"
                     child_messages.append({
                         "role": "user",
                         "content": [{

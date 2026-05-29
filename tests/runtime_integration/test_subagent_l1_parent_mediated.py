@@ -905,3 +905,461 @@ class TestL1ExecuteWithMemoryScope:
             f"memory_scope=none 不应产生 child memory request，"
             f"实际 {len(mediator.child_memory_requests)} 条"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 006 TOOL_MEDIATOR_GAP — RED phase: confirm current broken state
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestRedPhaseGapConfirmation:
+    """RED tests: 确认当前 production path 中 tool_mediator=None 的缺口。"""
+
+    def test_red1_dispatch_or_fallback_signature_lacks_tool_mediator(self):
+        """RED-1: _dispatch_or_fallback_delegation 当前不接受 tool_mediator 参数。"""
+        import inspect
+
+        from agent.core import _dispatch_or_fallback_delegation
+
+        sig = inspect.signature(_dispatch_or_fallback_delegation)
+        assert "tool_mediator" not in sig.parameters, (
+            "RED: 当前签名不应包含 tool_mediator——"
+            "如果已包含，说明缺口已修复，此测试应转为 GREEN"
+        )
+
+    def test_red2_child_tool_not_mediated_when_mediator_none(self):
+        """RED-2: tool_mediator=None 时 child tool_use 走 else 分支不调 mediator。"""
+        provider = _SpyProvider([
+            _make_tool_use_response("读取文件", "read_file", {"path": "/tmp/t.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("test no mediator")
+
+        result = execute_l1(ctx, delegation_id="test-red-2", provider=provider)
+
+        # tool_mediator 默认为 None → else 分支 → child_result=None
+        # tool 仍出现在 tools_executed 中但走的是硬编码占位路径
+        assert "read_file" in result.audit.tools_executed, (
+            "RED: tool 应出现在 tools_executed（走硬编码占位路径）"
+        )
+        assert result.status == "ok", (
+            "tool_mediator=None 时不应 crash，应安全 fallback"
+        )
+
+    def test_red3_child_tool_result_is_hardcoded_placeholder(self):
+        """RED-3: tool_mediator=None 时 child_result=None → executor 注入硬编码占位。"""
+        provider = _SpyProvider([
+            _make_tool_use_response("列出文件", "read_file", {"path": "/tmp/dir"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="文件列表已获取")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("list files")
+
+        result = execute_l1(ctx, delegation_id="test-red-3", provider=provider)
+
+        # tool_mediator=None → child_result=None → executor 行 265/279
+        # tool 被记录为 "已执行" 但实际走占位路径
+        assert result.audit.tools_executed, (
+            "RED: tools_executed 应有记录（占位路径）"
+        )
+        assert result.status == "ok"
+
+    def test_red4_child_tool_request_evidence_not_dispatched_when_mediator_none(self):
+        """RED-4: tool_mediator=None 时不产生 SUBAGENT_CHILD_TOOL_REQUEST evidence。"""
+        dispatcher = _SpyDispatcher()
+        provider = _SpyProvider([
+            _make_tool_use_response("read", "read_file", {"path": "/tmp/x.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="done")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("test evidence gap")
+
+        _result = execute_l1(ctx, delegation_id="test-red-4", provider=provider)
+
+        child_tool_requests = [
+            (req, res) for req, res in dispatcher.captured
+            if getattr(req, "action_type", None)
+            and str(req.action_type) == "SUBAGENT_CHILD_TOOL_REQUEST"
+        ]
+        assert len(child_tool_requests) == 0, (
+            "RED: production path (tool_mediator=None) 不应产生 "
+            "SUBAGENT_CHILD_TOOL_REQUEST evidence"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 006 M1: dispatcher=None safe fallback
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class _ResultSpyToolMediator(_SpyToolMediator):
+    """Spy mediator 变体：在 _turn_context 中注入可识别 result 文本。
+
+    模拟真实 ToolRuntimeMediator 的行为：execute_single_tool 执行后，
+    result 写入 _turn_context[tool_use_id]，executor 可以从中读取。
+    """
+
+    def __init__(self, result_text: str = "真实工具结果：文件内容为 Hello World", **kwargs):
+        super().__init__(**kwargs)
+        self._turn_context: dict[str, Any] = {}
+        self._result_text = result_text
+
+    def mediate_child_tool_request(
+        self, tool_name: str, arguments: dict[str, Any], *,
+        delegation_id: str = "", parent_trace_id: str = "",
+    ) -> str | None:
+        super().mediate_child_tool_request(
+            tool_name, arguments,
+            delegation_id=delegation_id, parent_trace_id=parent_trace_id,
+        )
+        key = f"child:{delegation_id}:{tool_name}"
+        self._turn_context[key] = self._result_text
+        return None
+
+
+class TestM1DispatcherNoneSafeFallback:
+    """M1: dispatcher=None 时 delegation 安全 fallback 为 tool_mediator=None。"""
+
+    def test_m1a_null_dispatcher_safe_fallback_no_crash(self):
+        """dispatcher=None 时构造 ToolRuntimeMediator 必须安全跳过，不 crash。"""
+        provider = _SpyProvider([
+            ProviderResponse(
+                content=[ProviderTextBlock(text="任务完成。")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("safe fallback test")
+
+        # 模拟 dispatcher=None 的场景
+        result = execute_l1(
+            ctx, delegation_id="test-m1a",
+            provider=provider,
+            tool_mediator=None,
+        )
+
+        assert result.status == "ok", (
+            f"tool_mediator=None 应安全 fallback，不 crash，实际 {result.status}"
+        )
+
+    def test_m1b_null_mediator_does_not_enable_direct_child_tool_execution(self):
+        """tool_mediator=None 时 child 不能直接执行工具。"""
+        provider = _SpyProvider([
+            _make_tool_use_response("读文件", "read_file", {"path": "/etc/passwd"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="done")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("no direct tool exec")
+
+        result = execute_l1(
+            ctx, delegation_id="test-m1b",
+            provider=provider,
+            tool_mediator=None,
+        )
+
+        # tool_mediator=None 时 tool 被标记为 executed 但走的是占位路径
+        # (child_result=None in executor.py line 265)
+        assert result.status == "ok", (
+            f"tool_mediator=None 应安全 fallback，实际 {result.status}"
+        )
+        assert "read_file" in result.audit.tools_executed, (
+            "tool 应记录在 tools_executed（占位路径）"
+        )
+
+    def test_m1c_existing_l0_fallback_not_broken(self):
+        """tool_mediator=None 时不破坏现有 L0/L1 fallback 行为。"""
+        provider = _SpyProvider()
+        ctx = _make_ctx("l0 fallback intact")
+
+        result = execute_l1(ctx, delegation_id="test-m1c", provider=provider)
+
+        assert result.status == "ok"
+        # L1 仍正常工作（即便 tool_mediator=None）
+        assert result.stop_reason == "task_completed"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 006 M2: child tool result 必须是真实 mediator result（非硬编码占位）
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestM2RealToolResult:
+    """M2: tool_mediator 存在时 child tool result 必须来自 mediator（非硬编码占位）。
+
+    验证策略：使用 _ResultSpyToolMediator 注入 _turn_context 中的真实 result，
+    execute_l1 应通过 mediator 执行 tool 并返回成功结果。
+    硬编码占位替换由 executor.py diff 直接验证（line 279 变更）。
+    """
+
+    def test_m2a_mediator_called_and_result_successful(self):
+        """M2a: tool_mediator 存在 → mediator 被调用 + result 成功完成。"""
+        mediator = _ResultSpyToolMediator(
+            result_text="真实工具结果：文件内容为 Hello World",
+        )
+        provider = _SpyProvider([
+            _make_tool_use_response("读文件", "read_file", {"path": "/tmp/f.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("real result test")
+
+        result = execute_l1(
+            ctx, delegation_id="test-m2a",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        # mediator 应被调用
+        assert len(mediator.child_requests) >= 1, (
+            f"mediator 应收到 child tool request，实际 {len(mediator.child_requests)}"
+        )
+        # result 成功
+        assert result.status == "ok", f"预期 ok，实际 {result.status}"
+        # tool 在 tools_executed
+        assert "read_file" in result.audit.tools_executed
+
+    def test_m2b_turn_context_populated_with_real_result(self):
+        """M2b: mediator._turn_context 包含真实 result（验证注入机制正确）。"""
+        expected = "真实工具结果：文件内容为 Hello World"
+        mediator = _ResultSpyToolMediator(result_text=expected)
+        provider = _SpyProvider([
+            _make_tool_use_response("读文件", "read_file", {"path": "/tmp/f.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("recognizable content")
+
+        _result = execute_l1(
+            ctx, delegation_id="test-m2b",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        # _turn_context 中应有正确 key 的 result
+        key = "child:test-m2b:read_file"
+        assert key in mediator._turn_context, (
+            f"_turn_context 应含 key {key!r}，实际 keys={list(mediator._turn_context.keys())}"
+        )
+        assert mediator._turn_context[key] == expected, (
+            f"turn_context value 应为 {expected!r}，实际 {mediator._turn_context[key]!r}"
+        )
+
+    def test_m2c_different_tools_produce_distinct_turn_context_keys(self):
+        """M2c: 不同 tool 在 turn_context 中有不同 key。"""
+        mediator = _ResultSpyToolMediator(result_text="read_file 结果：42 行")
+        provider = _SpyProvider([
+            _make_tool_use_response("读文件", "read_file", {"path": "/tmp/a.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("different results")
+
+        _result = execute_l1(
+            ctx, delegation_id="test-m2c",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        # 验证 key 格式：child:{delegation_id}:{tool_name}
+        key = "child:test-m2c:read_file"
+        assert key in mediator._turn_context
+        # value 不是占位文本
+        assert "已执行" not in mediator._turn_context.get(key, ""), (
+            f"turn_context value 不应含 '已执行' 占位，"
+            f"实际 {mediator._turn_context.get(key)!r}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 006 GREEN phase: mediator injection contract tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGreenPhaseMediatorInjection:
+    """GREEN: tool_mediator 注入后 child tool_use 通过 parent mediator。"""
+
+    def test_green1_delegate_l1_passes_tool_mediator_to_execute_l1(self):
+        """GREEN-1: execute_l1() 通过 tool_mediator 中介 child tool_use。
+
+        delegate_l1 → execute_l1 链已通过 delegation.py（read-only）保证传递；
+        这里验证 execute_l1 收到 tool_mediator 后 child tool_use 走 mediator。
+        """
+        mediator = _SpyToolMediator()
+        provider = _SpyProvider([
+            _make_tool_use_response("读取", "read_file", {"path": "/tmp/f1.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("mediator passthrough test")
+
+        result = execute_l1(
+            ctx, delegation_id="test-green-1",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        assert result.status == "ok", (
+            f"execute_l1 通过 mediator 应正常完成，实际 {result.status}"
+        )
+        assert len(mediator.child_requests) >= 1, (
+            f"child tool_use 应走 mediator，实际 {len(mediator.child_requests)}"
+        )
+
+    def test_green2_child_tool_use_calls_mediate_child_tool_request(self):
+        """GREEN-2: 传入 tool_mediator → child tool_use 触发 mediate_child_tool_request。"""
+        mediator = _SpyToolMediator()
+        provider = _SpyProvider([
+            _make_tool_use_response("读取", "read_file", {"path": "/tmp/f.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("green test")
+
+        _result = execute_l1(
+            ctx, delegation_id="test-green-2",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        assert len(mediator.child_requests) >= 1, (
+            f"GREEN: mediator 应收到 child tool request，"
+            f"实际 {len(mediator.child_requests)}"
+        )
+
+    def test_green3_child_tool_request_records_tool_name_and_delegation_id(self):
+        """GREEN-3: mediator 记录 child tool request 的 tool_name 和 delegation_id。"""
+        mediator = _SpyToolMediator()
+        provider = _SpyProvider([
+            _make_tool_use_response("read", "read_file", {"path": "/tmp/g.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="ok")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("gate test")
+
+        _result = execute_l1(
+            ctx, delegation_id="test-green-3",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        assert mediator.child_requests[0]["tool_name"] == "read_file"
+        assert mediator.child_requests[0]["delegation_id"] == "test-green-3"
+
+    def test_green4_tool_result_returns_to_child_context(self):
+        """GREEN-4: parent mediator 返回结果后 child 可继续执行并完成。"""
+        mediator = _SpyToolMediator()
+        provider = _SpyProvider([
+            _make_tool_use_response("read", "read_file", {"path": "/tmp/r.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="got result")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("result back test")
+
+        result = execute_l1(
+            ctx, delegation_id="test-green-4",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        assert result.status == "ok"
+        assert result.stop_reason == "task_completed"
+
+    def test_green5_delegate_l1_returns_complete_run_with_adjudication(self):
+        """GREEN-5: tool_mediator 注入后 execute_l1 返回完整结果（含 status + stop_reason）。
+
+        delegate_l1 的 SubAgentRun + adjudication 包装由现有 L1 测试覆盖；
+        这里聚焦 tool_mediator 注入后的 execute_l1 结果完整性。
+        """
+        mediator = _SpyToolMediator()
+        provider = _SpyProvider([
+            _make_tool_use_response("读取", "read_file", {"path": "/tmp/f5.txt"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="分析完成")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("complete result test")
+
+        result = execute_l1(
+            ctx, delegation_id="test-green-5",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        assert result.status == "ok", (
+            f"tool_mediator 注入后 execute_l1 应返回 ok，实际 {result.status}"
+        )
+        assert result.stop_reason == "task_completed", (
+            f"应正常完成，实际 stop_reason={result.stop_reason}"
+        )
+        assert len(mediator.child_requests) >= 1, (
+            f"child tool_use 应走 mediator，实际 {len(mediator.child_requests)}"
+        )
+
+    def test_green6_null_mediator_safe_fallback_still_works(self):
+        """GREEN-6: tool_mediator=None 不崩溃，保持向后兼容。"""
+        provider = _SpyProvider()
+        ctx = _make_ctx("null mediator test")
+
+        result = execute_l1(ctx, delegation_id="test-green-6", provider=provider)
+
+        assert result.status == "ok", (
+            f"tool_mediator=None 应保持安全 fallback，实际 {result.status}"
+        )
+
+    def test_green7_blocked_tool_not_executed_via_parent_gate(self):
+        """GREEN-7: blocked tool 被 parent gate 阻断，child 无法直接执行。"""
+        mediator = _SpyToolMediator(block_list=frozenset({"shell"}))
+        provider = _SpyProvider([
+            _make_tool_use_response("dangerous", "shell", {"command": "rm -rf /"}),
+            ProviderResponse(
+                content=[ProviderTextBlock(text="blocked, continuing")],
+                stop_reason="end_turn",
+                raw_provider_name="spy",
+            ),
+        ])
+        ctx = _make_ctx("no bypass test")
+
+        _result = execute_l1(
+            ctx, delegation_id="test-green-7",
+            provider=provider, tool_mediator=mediator,
+        )
+
+        shell_requests = [
+            r for r in mediator.child_requests if r["tool_name"] == "shell"
+        ]
+        assert len(shell_requests) >= 1, "shell 应被 child 请求但被 parent gate 阻断"
+
+    def test_green8_existing_24_l1_tests_still_pass(self):
+        """GREEN-8: existing 24 L1 contract tests regression gate。
+
+        由 running `pytest ...test_subagent_l1_parent_mediated.py -v` 隐式保证。
+        实现时必须在 full suite 中验证 24 tests 全部通过。
+        """

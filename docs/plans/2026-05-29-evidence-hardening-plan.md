@@ -1,12 +1,14 @@
 ---
 created: 2026-05-29
-status: active
+status: completed
 source: Independent re-audit after evidence closure (docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md)
-target_score: 3.2/5 → 3.7-4.0/5
+final_score: 3.7/5 (保守基线，不再上调)
 deepened: none
 ---
 
 # Evidence Hardening Plan — Narrow Pass
+
+> **Post-completion note (2026-05-29)**: Batch A (004 checkpoint + 007 MCP bridge evidence-only) 和 Batch B (008 scheduler code-path injection) 均已完成。独立 combined review 保守结论：**3.7/5**。Credibility: 3 credible (001/004/005) + 4 partial-credible (003/006/007/008) + 1 questionable (002)。003/006/007 均为 partial-credible，不标 fully validated。006 real provider E2E 和 007 real MCP invocation 须作为单独新阶段处理。B7/B8 排除。当前阶段建议阶段性收口。
 
 ## 1. Problem Frame
 
@@ -216,15 +218,16 @@ deepened: none
 - 模型不生成多步 plan → 模型行为约束，非代码问题
 **预计分数提升**: 在 Batch A 基础上 3.4-3.5 → 3.7-4.0
 
-## 6. Items Not in Current Pass
+## 6. Items Not in Current Pass (Post-Completion Status)
 
-| Item | Disposition | Reason |
-|------|------------|--------|
-| 006 TOOL_MEDIATOR_GAP | **defer** | 真正的代码缺口，修复需要 tool_mediator 依赖注入设计（state/messages/turn_context），风险中高。31 contract tests 已充分验证逻辑。建议在后续 SubAgent 深化 loop 中一并处理。 |
-| 003 Skill allowed_tools | **later optional** | 暂保持现状，不先降级 claim。后续如需补，单独做 scripted dogfood 诱导 disallowed tool 场景。 |
+| Item | Disposition | Current Status |
+|------|------------|----------------|
+| 006 TOOL_MEDIATOR_GAP | 已实现 (_dispatch_or_fallback_delegation 内部构造 ToolRuntimeMediator) | **partial-credible** — 42 contract tests pass，缺 real provider child structured tool_use E2E。后续须作为单独新阶段 |
+| 003 Skill allowed_tools | 已硬化 (FakeProvider + main runtime path) | **partial-credible** — 5/5 PASS，缺 real provider same-turn disallowed-tool dogfood。不建议继续投入 |
+| 007 MCP invocation | Batch A 已硬化 (TOOL_GATE entry proven) | **partial-credible** — TOOL_INVOKE / call_tool / result / feedback 未验证。后续须作为单独新阶段 |
 | B7 Multi-instance | **excluded** | 用户明确排除 |
 | B8 TUI | **excluded** | 用户明确排除 |
-| 002 Skill selection | **not in scope** | 独立复审 questionable 但未被用户列入要求 item；deterministic fallback + post-turn activation 是明确的设计选择，不是缺失 |
+| 002 Skill selection | **not in scope** | questionable — deterministic keyword fallback，不是 model-owned skill selection |
 
 ## 7. Recommendation
 

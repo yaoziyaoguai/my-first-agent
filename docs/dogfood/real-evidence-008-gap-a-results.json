@@ -1,0 +1,62 @@
+{
+  "evidence_id": "REAL-EVIDENCE-008-GAP-A",
+  "description": "Scheduler core.chat E2E via _run_main_loop(action_scheduler=...)",
+  "provider": "FakeProvider",
+  "action_plan_source": "hand-built ActionPlan fixture",
+  "total": 10,
+  "passed": 10,
+  "failed": 0,
+  "concerns": 0,
+  "results": [
+    {
+      "case": "V1",
+      "verdict": "PASS",
+      "detail": "non-empty result: all steps completed"
+    },
+    {
+      "case": "V2",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_START: plan_id=v2_evidence_start, total_events=1"
+    },
+    {
+      "case": "V3",
+      "verdict": "PASS",
+      "detail": "NODE_ENTER=2, NODE_EXIT=2"
+    },
+    {
+      "case": "V4",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_COMPLETE: disposition=completed"
+    },
+    {
+      "case": "V5",
+      "verdict": "PASS",
+      "detail": "condition flag triggered: 1 skipped NODE_EXIT"
+    },
+    {
+      "case": "V6",
+      "verdict": "PASS",
+      "detail": "NODE_FAILURE=1, halted disposition confirmed"
+    },
+    {
+      "case": "V7",
+      "verdict": "PASS",
+      "detail": "完整证据链: ['checkpoint.safe_summary', 'memory.consolidate', 'memory.turn_end_proposal', 'scheduler.action_plan_complete', 'scheduler.action_plan_start', 'scheduler.node_enter', 'scheduler.node_exit', 'skill.select', 'streaming.event', 'streaming.provider_call', 'subagent.delegate_l0', 'tool.gate', 'tool.request']"
+    },
+    {
+      "case": "V8",
+      "verdict": "PASS",
+      "detail": "scheduler 通过 _run_main_loop() preprocessing block 自动推进"
+    },
+    {
+      "case": "V9",
+      "verdict": "PASS",
+      "detail": "topological order: ['setup', 'main', 'cleanup']"
+    },
+    {
+      "case": "V10",
+      "verdict": "PASS",
+      "detail": "无 scheduler 时正常 fall through 到 model"
+    }
+  ]
+}

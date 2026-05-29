@@ -555,3 +555,79 @@ def build_action_plan_from_dict(plan_dict: dict[str, Any]) -> ActionPlan:
         entry_node_id=str(plan_dict["entry_node_id"]),
         description=str(plan_dict.get("description", "")),
     )
+
+
+def build_action_plan_from_model_output(raw_json: str) -> ActionPlan:
+    """从模型输出的 JSON 字符串构造 ActionPlan。
+
+    与 build_action_plan_from_dict 的关键区别：
+    - 输入是未验证的模型输出字符串（可能含 markdown code fence、多余字段）
+    - 无效 node（缺 node_id/action_type/target）被跳过而非 crash
+    - 空 nodes → ValueError
+    - 不连接 planner.generate_plan——这是纯 JSON→ActionPlan 桥接
+
+    输入容忍：
+    - ```json ... ``` code fence → 自动剥离
+    - JSON 内多余未知字段 → 忽略
+    - 单个 node 无效 → 跳过（不阻断整个 plan）
+    """
+    import json as _json
+
+    cleaned = raw_json.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+
+    plan_dict: dict[str, Any] = _json.loads(cleaned)
+    nodes_raw: list[dict[str, Any]] = list(plan_dict.get("nodes", []))
+
+    nodes: list[ActionNode] = []
+    skipped: list[str] = []
+    for raw in nodes_raw:
+        try:
+            node_id = str(raw.get("node_id", ""))
+            action_type = str(raw.get("action_type", ""))
+            target = str(raw.get("target", ""))
+        except Exception:
+            skipped.append(str(raw.get("node_id", "?")))
+            continue
+
+        if not node_id or not action_type or not target:
+            skipped.append(node_id or "?")
+            continue
+
+        recovery_raw = raw.get("recovery", {})
+        try:
+            recovery = ActionRecoveryPolicy(
+                max_retries=int(recovery_raw.get("max_retries", 0)),
+                fallback_node_id=recovery_raw.get("fallback_node_id"),
+                on_failure=str(recovery_raw.get("on_failure", "halt")),
+            )
+        except ValueError:
+            recovery = ActionRecoveryPolicy()
+
+        node = ActionNode(
+            node_id=node_id,
+            action_type=action_type,
+            target=target,
+            params=raw.get("params", {}),
+            depends_on=tuple(str(d) for d in raw.get("depends_on", [])),
+            recovery=recovery,
+            condition=str(raw["condition"]) if raw.get("condition") else None,
+            description=str(raw.get("description", "")),
+        )
+        nodes.append(node)
+
+    if not nodes:
+        raise ValueError(
+            f"build_action_plan_from_model_output: no valid nodes "
+            f"(parsed {len(nodes_raw)} raw, skipped {len(skipped)}: {skipped})"
+        )
+
+    return ActionPlan(
+        plan_id=str(plan_dict["plan_id"]),
+        nodes=tuple(nodes),
+        entry_node_id=str(plan_dict["entry_node_id"]),
+        description=str(plan_dict.get("description", "")),
+    )

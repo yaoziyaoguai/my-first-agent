@@ -16,6 +16,7 @@ from agent.action_scheduler import (
     ActionPlan,
     ActionRecoveryPolicy,
     ActionScheduler,
+    build_action_plan_from_model_output,
 )
 from agent.core import TurnState, _run_main_loop
 from agent.loop import LoopDependencies, run_main_loop
@@ -509,3 +510,151 @@ class TestSchedulerMainPathRegression:
         assert deps.action_scheduler is None
         assert deps.tool_gate_tool_name == "_safe_noop"
         assert deps.skill_registry is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gap B: build_action_plan_from_model_output — JSON → ActionPlan bridge
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBuildActionPlanFromModelOutput:
+    """Gap B: model 输出的 JSON 字符串 → ActionPlan 桥接。"""
+
+    def test_valid_json_produces_action_plan(self):
+        """有效 JSON 应产生正确的 ActionPlan。"""
+        raw = """{
+            "plan_id": "model_001",
+            "entry_node_id": "step_1",
+            "description": "model generated plan",
+            "nodes": [
+                {
+                    "node_id": "step_1",
+                    "action_type": "TOOL_CALL",
+                    "target": "web_search",
+                    "params": {"query": "test"},
+                    "depends_on": [],
+                    "description": "search step"
+                },
+                {
+                    "node_id": "step_2",
+                    "action_type": "MEMORY_RETAIN",
+                    "target": "session",
+                    "depends_on": ["step_1"],
+                    "description": "retain result"
+                }
+            ]
+        }"""
+        plan = build_action_plan_from_model_output(raw)
+        assert plan.plan_id == "model_001"
+        assert len(plan.nodes) == 2
+        assert plan.nodes[0].node_id == "step_1"
+        assert plan.nodes[0].action_type == "TOOL_CALL"
+        assert plan.nodes[1].depends_on == ("step_1",)
+
+    def test_strips_markdown_code_fence(self):
+        """应剥离 ```json ... ``` markdown code fence。"""
+        raw = """```json
+{
+    "plan_id": "fenced",
+    "entry_node_id": "n1",
+    "nodes": [
+        {"node_id": "n1", "action_type": "TOOL_CALL", "target": "test"}
+    ]
+}
+```"""
+        plan = build_action_plan_from_model_output(raw)
+        assert plan.plan_id == "fenced"
+        assert len(plan.nodes) == 1
+        assert plan.nodes[0].node_id == "n1"
+
+    def test_skips_invalid_node_missing_required_fields(self):
+        """缺 node_id/action_type/target 的 node 应被跳过。"""
+        raw = """{
+            "plan_id": "skip_test",
+            "entry_node_id": "good",
+            "nodes": [
+                {"node_id": "good", "action_type": "TOOL_CALL", "target": "t1"},
+                {"action_type": "TOOL_CALL", "target": "t2"},
+                {"node_id": "no_target", "action_type": "TOOL_CALL"},
+                {"node_id": "good2", "action_type": "TOOL_CALL", "target": "t3"}
+            ]
+        }"""
+        plan = build_action_plan_from_model_output(raw)
+        assert len(plan.nodes) == 2, f"expected 2 valid nodes, got {len(plan.nodes)}"
+        valid_ids = {n.node_id for n in plan.nodes}
+        assert valid_ids == {"good", "good2"}
+
+    def test_empty_nodes_raises_value_error(self):
+        """所有 node 均无效时应 raise ValueError。"""
+        raw = """{
+            "plan_id": "empty",
+            "entry_node_id": "bad",
+            "nodes": [
+                {"action_type": "TOOL_CALL"},
+                {"node_id": "nope"}
+            ]
+        }"""
+        import pytest
+        with pytest.raises(ValueError, match="no valid nodes"):
+            build_action_plan_from_model_output(raw)
+
+    def test_unknown_fields_tolerated(self):
+        """模型输出的多余未知字段应被忽略。"""
+        raw = """{
+            "plan_id": "extra_fields",
+            "entry_node_id": "n1",
+            "description": "has extra stuff",
+            "nodes": [
+                {
+                    "node_id": "n1",
+                    "action_type": "TOOL_CALL",
+                    "target": "test",
+                    "unknown_field": "ignore me",
+                    "confidence": 0.95,
+                    "reasoning": "model thinks this is important"
+                }
+            ]
+        }"""
+        plan = build_action_plan_from_model_output(raw)
+        assert len(plan.nodes) == 1
+        assert plan.nodes[0].node_id == "n1"
+
+    def test_model_like_output_with_whitespace(self):
+        """模型输出含多余空白/换行应正常解析。"""
+        raw = """
+
+        {
+            "plan_id": "whitespace",
+            "entry_node_id": "s1",
+            "nodes": [
+                {
+                    "node_id": "s1",
+                    "action_type": "TOOL_CALL",
+                    "target": "shell",
+                    "params": {"command": "echo hello"}
+                }
+            ]
+        }
+
+        """
+        plan = build_action_plan_from_model_output(raw)
+        assert plan.plan_id == "whitespace"
+        assert plan.nodes[0].target == "shell"
+
+    def test_invalid_recovery_falls_back_to_default(self):
+        """无效 recovery.on_failure 应 fallback 到默认 halt。"""
+        raw = """{
+            "plan_id": "bad_recovery",
+            "entry_node_id": "n1",
+            "nodes": [
+                {
+                    "node_id": "n1",
+                    "action_type": "TOOL_CALL",
+                    "target": "test",
+                    "recovery": {"on_failure": "retry_and_retry"}
+                }
+            ]
+        }"""
+        plan = build_action_plan_from_model_output(raw)
+        # 无效 recovery 应 fallback 到默认 halt，不 crash
+        assert plan.nodes[0].recovery.on_failure == "halt"

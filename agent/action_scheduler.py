@@ -328,6 +328,10 @@ class ActionScheduler:
 
         if success:
             self._state.completed_nodes.add(node.node_id)
+            # AD-6: merge condition_flags from executor result into scheduler state
+            _flags = result.get("condition_flags")
+            if isinstance(_flags, dict):
+                self._state.condition_flags.update(_flags)
             self._dispatch_node_exit(node, success=True)
         else:
             self._handle_failure(node, result)

@@ -882,7 +882,7 @@ def run_main_loop(
                     )
                     _err = _failed_info.get("error", "未知错误")
                     _evt = control_message(
-                        f"[Scheduler] 步骤「{_next_node.title or _next_node.node_id}」"
+                        f"[Scheduler] 步骤「{_next_node.description or _next_node.node_id}」"
                         f"执行失败：{_err}，计划已停止。"
                     )
                     dependencies.safe_emit_runtime_event(

@@ -478,6 +478,7 @@ def chat(
     on_trace_event: Callable[[Any], None] | None = None,
     provider=None,
     runtime_action_dispatcher=None,
+    action_scheduler=None,
     tool_gate_tool_name: str | None = None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
@@ -996,6 +997,7 @@ def chat(
         return _run_main_loop(
             turn_state, _loop_ctx,
             tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
+            action_scheduler=action_scheduler,
         )
 
     # 到这里意味着要开启一轮全新的任务。
@@ -1009,6 +1011,7 @@ def chat(
     return _handle_planning_phase_result(
         plan_result, turn_state, _loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
+        action_scheduler=action_scheduler,
     )
 
 
@@ -1110,6 +1113,7 @@ def _handle_planning_phase_result(
     *,
     tool_gate_tool_name: str | None = None,
     skill_registry: Any = None,
+    action_scheduler: Any = None,
 ) -> str:
     """统一处理 planning 的 cancelled / awaiting / ok 三种结果。"""
 
@@ -1120,6 +1124,7 @@ def _handle_planning_phase_result(
     return _run_main_loop(
         turn_state, loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry,
+        action_scheduler=action_scheduler,
     )
 
 
@@ -1150,6 +1155,7 @@ def _run_main_loop(
     *,
     tool_gate_tool_name: str | None = None,
     skill_registry: Any = None,
+    action_scheduler: Any = None,
 ) -> str:
     """兼容旧测试/调用方的 core-level 主循环入口。
 
@@ -1204,6 +1210,7 @@ def _run_main_loop(
         trace_run_id=getattr(turn_state, "trace_run_id", None),
         trace_id=getattr(turn_state, "trace_id", None),
         skill_registry=skill_registry,
+        action_scheduler=action_scheduler,
     )
     if tool_gate_tool_name is not None:
         _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name

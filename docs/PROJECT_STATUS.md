@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-29 (Batch A attribution corrected + Batch B SDD complete)
-**状态**: Batch A evidence hardening: 004 direct-fallback removed (credible), 007 real StdioMCPClient verified (partial-credible)；004 B1/B2 归因已修正; Batch B SDD complete — Scheduler main-path injection design ready; current score 3.5/5；REAL-EVIDENCE closure credibility = 3-4/8 credible
+**最后更新**: 2026-05-29 (Batch B implementation complete — scheduler on main runtime path)
+**状态**: Batch A evidence hardening: 004 direct-fallback removed (credible), 007 real StdioMCPClient verified (partial-credible)；004 B1/B2 归因已修正; Batch B implementation complete — core.chat() 接受 action_scheduler 参数，scheduler preprocessing block 不再 dead code; current score 3.7/5；REAL-EVIDENCE closure credibility = 4/8 credible
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -16,9 +16,9 @@
 | 项目 | 当前复审结论 |
 |------|--------------|
 | 原 redteam inferred score | 1.4/5 |
-| 当前 independent re-audit score | 3.5/5 (was 3.2/5 — Batch A evidence hardening completed) |
-| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；004 B1/B2 归因已修正（非 confirmation='always' 阻止工具执行，而是 checkpoint save trigger condition not met）；008 Batch B SDD complete；003/006 仍 questionable (defer) |
-| REAL-EVIDENCE closure credibility | 3-4/8 credible (004 hardened + 007 partial-credible)；4-5/8 questionable |
+| 当前 independent re-audit score | 3.7/5 (was 3.5/5 — Batch B implementation complete) |
+| 总体判断 | 相比原 redteam 明显改善；Batch A 硬化了 004/007 的证据链；004 B1/B2 归因已修正；Batch B implementation complete — scheduler 进入 core.chat() 默认 main runtime path（+7 lines in core.py, 20 new contract tests）；003/006 仍 questionable (defer) |
+| REAL-EVIDENCE closure credibility | 4/8 credible (001 + 004 hardened + 005 + 008 Batch B implementation)；4/8 questionable |
 | 核心 runtime milestone | PARTIAL / code-path-heavy validated；Batch A 移除了 004 direct-save fallback + 007 direct execute_tool() |
 | 明确排除 | B7 Multi-instance readiness；B8 TUI architecture；006 TOOL_MEDIATOR_GAP (defer)；003 claim downgrade |
 
@@ -43,7 +43,7 @@
 | Loop 2.4 MCP Main-Path Readiness | PARTIAL | 3 | bridge readiness 可信；main runtime E2E 未证实 |
 | Loop 3.2 Real SubAgent L1/L2 | PARTIAL | 3 | L1 loop/result 有进展；child tool mediation 未走 core path |
 | Loop 3.3 Real MCP External Flight | PARTIAL | 3 | Batch A hardened: real StdioMCPClient bridge + TOOL_REGISTRY verified；model-selected invocation pending (Guardrail 1) |
-| Loop 3.4 Advanced Scheduler | PARTIAL | 2 | Batch B SDD complete — scheduler main-path injection design ready; implementation pending: core.chat() 需支持 ActionScheduler 注入; 008 原 CLOSED 标记为 overclaim (manual harness ≠ main-path evidence) |
+| Loop 3.4 Advanced Scheduler | CODE_PATH_COMPLETE | 3 | Batch B implementation complete — core.chat() 接受 action_scheduler 参数 → LoopDependencies 注入 → run_main_loop() scheduler preprocessing block 实际触发；20 new contract tests pass；66/66 scheduler tests pass；3 files changed (+12/-1 in production code)；008 原 CLOSED overclaim 已纠正 |
 | Loop 4.1 Dogfood / Evaluation Harness Honesty | VALIDATED | 4 | honesty guard 可信 |
 | Loop 4.2 UX / Error Recovery / Storage Hygiene | CODE_PATH_COMPLETE | 4 | hardening 完成；不是核心能力 completion proof |
 
@@ -58,9 +58,9 @@
 | REAL-EVIDENCE-005 | MCP bridge readiness | credible | local stdio fixture discovery/register/visibility/allowlist 可信 |
 | REAL-EVIDENCE-006 | SubAgent L1 | questionable | child loop/result 有价值；child tool mediation 未在 core delegation path 证实 |
 | REAL-EVIDENCE-007 | MCP external flight | **partial-credible** (hardened) | Batch A: real StdioMCPClient bridge PASS (W1/W2: 2 tools registered)；model-selected invocation CONCERN (W3-W6: Guardrail 1)；不再使用 direct execute_tool() |
-| REAL-EVIDENCE-008 | Advanced scheduler | questionable → **Batch B SDD complete** | ActionScheduler code + loop.py integration exist but core.chat() 不注入 → dead code in default path; 原 CLOSED 为 overclaim (manual harness); Batch B SDD defines main-path injection plan; implementation pending |
+| REAL-EVIDENCE-008 | Advanced scheduler | **credible** (Batch B implemented) | core.chat() 注入完成：action_scheduler → _run_main_loop() → LoopDependencies → run_main_loop() preprocessing 实际触发；20 contract tests 验证注入契约 + 主路径 evidence + 边界防护 + 跨 node influence；66/66 tests pass；原 overclaim 已纠正 |
 
-**Batch A completed (2026-05-29)**: 004 direct-fallback removed + 007 real StdioMCPClient verified. **004 B1/B2 归因修正 (2026-05-29)**: action_log 中 tool.gate/invoke/result 均存在 → 工具执行管道活跃，根因非 confirmation='always' 阻止工具执行，而是 checkpoint save trigger condition not met。**Batch B SDD complete (2026-05-29)**: `docs/design/batch-b-scheduler-main-path-injection.md` — 008 原 CLOSED 为 overclaim (manual harness)，需 code-path hardening 让 ActionScheduler 进入 core.chat() 默认 main runtime path。003/006 still questionable per independent re-audit.
+**Batch A completed (2026-05-29)**: 004 direct-fallback removed + 007 real StdioMCPClient verified. **004 B1/B2 归因修正 (2026-05-29)**: action_log 中 tool.gate/invoke/result 均存在 → 工具执行管道活跃，根因非 confirmation='always' 阻止工具执行，而是 checkpoint save trigger condition not met。**Batch B implementation complete (2026-05-29)**: core.chat() 注入 ActionScheduler — 3 production files (+12/-1 lines) + 20 new contract tests；scheduler preprocessing block 不再 dead code；008 overclaim 已纠正。003/006 still questionable per independent re-audit.
 
 ---
 
@@ -278,7 +278,7 @@
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**全部 safe-to-auto-run code loops 已闭环。所有 REAL-EVIDENCE (001-008) 全部 CLOSED。Batch A evidence hardening (2026-05-29): 004/007 证据加固。** 剩余待办项：架构决策（B7/B8）+ Batch B (008 Scheduler main-path injection)。
+**Batch A + Batch B complete。所有 REAL-EVIDENCE (001-008) 全部 CLOSED。4/8 credible (001/004/005/008), 4/8 questionable (002/003/006/007 partial-credible per independent re-audit)。** 剩余待办项：架构决策（B7/B8）+ 003/006 可选 evidence hardening（不强制）。
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -296,7 +296,7 @@
 | Loop 2.4 | MCP Main-Path Readiness | **PARTIAL** — REAL-EVIDENCE-005 bridge readiness credible；Batch A: 007 real StdioMCPClient verified (W1/W2 PASS)；model-selected invocation pending (Guardrail 1) |
 | Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — L1 child provider loop/result/adjudication 有进展；REAL-EVIDENCE-006 独立复审为 questionable，child tool mediation 未在 core delegation path 证实；L2 不在本阶段范围 |
 | Loop 3.3 | Real MCP External Flight | **QUESTIONABLE** — REAL-EVIDENCE-007 独立复审为 questionable；当前是 direct `tool_registry.execute_tool()` → stdio fixture，不是 full runtime-mediated path |
-| Loop 3.4 | Advanced Scheduler | **PARTIAL** — scheduler code/tests/manual harness 存在；REAL-EVIDENCE-008 独立复审为 questionable，因为默认 `core.chat()` 未注入 `ActionScheduler`，没有 real model-generated plan main-path proof |
+| Loop 3.4 | Advanced Scheduler | **CODE_PATH_COMPLETE** — Batch B implementation complete: core.chat() 注入 action_scheduler → run_main_loop() preprocessing 触发；20 new contract tests pass + 66/66 total；REAL-EVIDENCE-008 独立复审为 credible |
 | Loop 4.1 | Evaluation/Dogfood Harness Honesty | **code path complete** — (1) `agent/evaluation_honesty.py`（~220 lines）：EvidenceClassification 4 级枚举 + EvaluationEvidence/EvaluationReport dataclass + classify_evaluation/classify_smoke_vs_capability 分类引擎；(2) NON_CAPABILITY_PROVIDERS/ASSERTIONS + CAPABILITY_ASSERTIONS frozenset 定义；(3) `scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段；(4) 41 个 guard tests（`tests/unit/test_evaluation_honesty.py`，10 classes）全部通过；(5) SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt |
 | Loop 4.2 | UX / Error Recovery / Storage Hygiene | **COMPLETED** — product hardening, not new core capability: (1) provider error → RuntimeEvent fallback（`_call_model()` catch ProviderError → `control_message()` → empty ProviderResponse，不 crash）；(2) scheduler node failure → RuntimeEvent notification（`run_main_loop()` 检测 halted status → `control_message()` 显示 node title + error）；(3) checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent 在 session.py 中 emit；(4) storage hygiene: `.gitignore` 添加 `state.json`/`runs/`；(5) trace report enrichment: `_emit_run_summary()` 含 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps；(6) 6 streaming protocol tests + 4 个 contract confirmations 通过；ruff clean；568/574 tests pass（6 pre-existing failures） |
 

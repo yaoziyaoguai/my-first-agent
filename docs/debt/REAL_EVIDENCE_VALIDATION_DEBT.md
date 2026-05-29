@@ -44,6 +44,7 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Required validation** | 启动真实 chat loop；输入"记住"命令触发 retain → CONFIRMATION_REQUIRED → 确认 → MEMORY_PROPOSE dispatch → store 写入；MEMORY_RECALL dispatch → 返回正确内容；输入"忘记"命令 → MEMORY_FORGET dispatch → store 移除；验证 retain/recall/forget 使用共享 store；forget 后 recall 不再返回已删除 memory |
 | **Current evidence** | 5 L2 MemoryForget contract tests pass；5 L3 shared-store contract tests pass；65 focused tests pass；**REAL-EVIDENCE-001 dogfood validation (2026-05-29)**: 真实 provider memory dogfood E2E 验证通过 — 13/13 PASS (M0-M7)；retain → CONFIRMATION_REQUIRED → 确认 → MEMORY_PROPOSE dispatched → store written；MEMORY_RECALL dispatched → correct content returned (1 item, 532 chars)；MEMORY_FORGET dispatched → store removal confirmed (1→0)；post-forget recall empty (0 items, no Python reference)；shared store consistency confirmed (InMemoryMemoryStore, same id)；not no-crash PASS (12 positive assertions) |
 | **Status** | **CLOSED** — real provider memory retain/recall/forget E2E validated |
+| **Caveat** | Recall validation includes direct `dispatcher.route_from_runtime_loop()` provenance (not through `core.chat()` → `refresh_runtime_system_prompt()` production path)；Retain/Forget have stronger `core.chat()` E2E evidence (CONFIRMATION_REQUIRED → MEMORY_PROPOSE / MEMORY_FORGET dispatch)。不影响 credible 结论，但 Recall production path 验证弱于 Retain/Forget。 |
 | **Blocking current code loop** | no |
 | **Blocking READY claim** | no |
 | **Closed date** | 2026-05-29 |

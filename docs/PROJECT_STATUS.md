@@ -215,8 +215,8 @@
 
 | Branch Point | 状态 | 证据等级 | 说明 |
 |-------------|------|---------|------|
-| skill.select | PARTIAL | REAL_DOGFOOD_SMOKE | registry 注入、body load、post-turn `_active_skill` 设置已验证；但真实路径是 deterministic keyword fallback，不是 model-owned skill tool selection；REAL-EVIDENCE-002 独立复审为 questionable |
-| skill.apply | PARTIAL | CONTRACT_PLUS_DOGFOOD | allowed_tools contract path 有效；real dogfood 有 TOOL_GATE/INVOKE/RESULT evidence chain，但未证明 same-turn disallowed-tool blocking；REAL-EVIDENCE-003 独立复审为 questionable |
+| skill.select | PARTIAL | REAL_DOGFOOD_SMOKE | model-owned SKILL_SELECT 工具路径已集成 (TOOL_REGISTRY→ToolRuntimeMediator→_active_skill)；keyword fallback 保留；controlled provider evidence 闭合；real provider 模型自主触发未验证；REAL-EVIDENCE-002 partial-credible (code-path credible) [supersedes 2026-05-29 questionable classification] |
+| skill.apply | PARTIAL | CONTRACT_PLUS_DOGFOOD | allowed_tools contract path 有效；real dogfood 有 TOOL_GATE/INVOKE/RESULT evidence chain；same-turn disallowed-tool blocking 未在 real provider 下验证 (confirmation='always' 阻止自动验证)；REAL-EVIDENCE-003 partial-credible [supersedes 2026-05-29 questionable classification] |
 | mcp.discover | PARTIAL | REAL_EVIDENCE_SMOKE | local stdio fixture bridge discovery/register/visibility/allowlist 可信；REAL-EVIDENCE-005 独立复审为 credible |
 | mcp.invoke | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | 007 runtime invocation path completed: TOOL_GATE→TOOL_INVOKE→StdioMCPClient.call_tool→TOOL_RESULT→conversation context 全链验证通过 (10/10 PASS)；mediator payload bug 已修复；REAL-EVIDENCE-007 credible |
 | subagent.delegate | CODE_PATH_COMPLETE | REAL_CORE_LOOP_RUNTIME_E2E | 006 TOOL_MEDIATOR_GAP 闭合 — core delegation path 构造 ToolRuntimeMediator 并传入 L1 handler；child tool_use → TOOL_GATE→TOOL_INVOKE→TOOL_RESULT；executor 读取 _turn_context 真实结果；**真实 L1 delegation 路径验证完毕** (validation script 修复后 L1 handler 正确路由)；52 contract tests PASS; REAL-EVIDENCE-006 stronger partial-credible (M2 child structured tool_use 受模型能力限制) |
@@ -278,7 +278,7 @@
 
 **Loop 4.2 完成。** 本轮为 product hardening——所有变更均为防御性错误处理、用户可见通知和存储整洁性改进，不新增核心能力。Provider error 不再 crash（RuntimeEvent fallback），scheduler node failure 用户可见通知，checkpoint resume 有确认消息，session/file hygiene 就位，trace report 覆盖 Skill/MCP/Scheduler evidence。
 
-**Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。5/8 credible (001/004/005/006/007), 2/8 partial-credible (003/008), 1/8 questionable (002)。** 006 upgraded to credible (child_tools schema fix 闭合 MODEL_BEHAVIOR_CONCERN — 完整 evidence chain 12/12 PASS, real provider E2E)；003 upgraded to partial-credible (main-path evidence hardened)；007 upgraded to credible (runtime invocation path completed — TOOL_GATE→TOOL_INVOKE→call_tool→TOOL_RESULT→context, 10/10 PASS, mediator bug fixed)。003 不建议继续投入；002 stays questionable；B7/B8 大型架构/产品化决策不进入当前收口。阶段性收口完成。
+**[historical — 2026-05-29 combined review baseline, superseded by 2026-05-30 baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。5/8 credible (001/004/005/006/007), 2/8 partial-credible (003/008), 1/8 questionable (002)。006 upgraded to credible (child_tools schema fix)；003 upgraded to partial-credible (main-path evidence hardened)；007 upgraded to credible (runtime invocation path completed)。003 不建议继续投入；002 stays questionable；B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): 6/8 credible (001/004/005/006/007/008) + 2/8 partial-credible (002/003) — see Section 0.**
 
 基于 2026-05-28 红队补审报告（`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md`），
 真实完成率仅 23.1%（27/117），根因为缺少 runtime-owned decision vocabulary。
@@ -291,12 +291,12 @@
 | Loop 1.2 | Evidence Classification Repair | **COMPLETED** — 已实现 |
 | Loop 1.3 | Tool Path Unification | **COMPLETED** — 方案 2（dispatcher 中介）完整实现，gate_disposition 驱动执行流 |
 | Loop 2.1 | Explicit Memory Main-Path Completion | **VALIDATED with caveat** — REAL-EVIDENCE-001 独立复审为 credible；retain/recall/forget 行为和 store assertions 充分，但部分 provenance 仍是 direct dispatcher route |
-| Loop 2.2 | Skill Activation Main-Path Completion | **PARTIAL** — body injection/post-turn activation/allowed_tools contract path 有效；REAL-EVIDENCE-002/003 独立复审为 questionable，因为 same-turn real blocking 和 model-owned skill selection 未证实 |
+| Loop 2.2 | Skill Activation Main-Path Completion | **PARTIAL** | model-owned SKILL_SELECT 工具路径已集成 (skill_tool.py→TOOL_REGISTRY→ToolRuntimeMediator→_active_skill)；keyword fallback 保留；controlled provider evidence 闭合；real provider 模型自主触发未验证。REAL-EVIDENCE-002 partial-credible (code-path credible)；003 partial-credible [supersedes 2026-05-29 questionable] |
 | Loop 2.3 | Storage/Checkpoint True Resume | **VALIDATED** — Batch A hardened: direct-save fallback removed, Part A 10/10 PASS (CHECKPOINT_PATH redirection + Guardrail 2 enforcement)；Part B 2 CONCERN per documented stop condition (confirmation='always') |
 | Loop 2.4 | MCP Main-Path Readiness | **PARTIAL** — REAL-EVIDENCE-005 bridge readiness credible；Batch A: 007 real StdioMCPClient verified (W1/W2 PASS)；model-selected invocation pending (Guardrail 1) |
-| Loop 3.2 | Real SubAgent L1/L2 | **PARTIAL** — L1 child provider loop/result/adjudication 有进展；REAL-EVIDENCE-006 独立复审为 questionable，child tool mediation 未在 core delegation path 证实；L2 不在本阶段范围 |
-| Loop 3.3 | Real MCP External Flight | **QUESTIONABLE** — REAL-EVIDENCE-007 独立复审为 questionable；当前是 direct `tool_registry.execute_tool()` → stdio fixture，不是 full runtime-mediated path |
-| Loop 3.4 | Advanced Scheduler | **CODE_PATH_COMPLETE** — Batch B partial-credible: core.chat() 注入 chain 结构正确，scheduler preprocessing 不再 dead code；20 new contract tests + 66/66 total pass；REAL-EVIDENCE-008 独立复审 partial-credible (code-path injection credible, full E2E + model-generated plan pending) |
+| Loop 3.2 | Real SubAgent L1/L2 | **VALIDATED** | 006 TOOL_MEDIATOR_GAP 闭合 — child_tools schema fix (execute_l1() 从 request.allowed_tools + TOOL_REGISTRY 构建)；REAL-EVIDENCE-006 credible — 完整 evidence chain 12/12 PASS real provider E2E；52 contract tests + 49 focused tests PASS；L2 不在本阶段范围 [supersedes 2026-05-29 questionable classification] |
+| Loop 3.3 | Real MCP External Flight | **VALIDATED** | 007 runtime invocation path completed: TOOL_GATE→TOOL_INVOKE→StdioMCPClient.call_tool→TOOL_RESULT→conversation context (10/10 PASS)；mediator payload bug 已修复；REAL-EVIDENCE-007 credible [supersedes 2026-05-29 questionable classification] |
+| Loop 3.4 | Advanced Scheduler | **VALIDATED** | 008 credible — Gap A: `_run_main_loop(action_scheduler=...)` E2E (10/10 PASS) + Gap B: `build_action_plan_from_model_output()` bridge (7/7 tests) + Model Plan: real provider → model JSON → bridge → scheduler → evidence (13/13 PASS)；27/27 scheduler tests pass；caveat: model plan 用 provider.create() 非 core.chat() (B7/B8 scope) [supersedes 2026-05-29 partial-credible classification] |
 | Loop 4.1 | Evaluation/Dogfood Harness Honesty | **code path complete** — (1) `agent/evaluation_honesty.py`（~220 lines）：EvidenceClassification 4 级枚举 + EvaluationEvidence/EvaluationReport dataclass + classify_evaluation/classify_smoke_vs_capability 分类引擎；(2) NON_CAPABILITY_PROVIDERS/ASSERTIONS + CAPABILITY_ASSERTIONS frozenset 定义；(3) `scripts/dogfood_interactive_harness.py` CaseResult 新增 evidence_classification 字段；(4) 41 个 guard tests（`tests/unit/test_evaluation_honesty.py`，10 classes）全部通过；(5) SMOKE_PASS ≠ CAPABILITY_PASS——fake/local/no-crash/expected_events 不能关闭 REAL-EVIDENCE debt |
 | Loop 4.2 | UX / Error Recovery / Storage Hygiene | **COMPLETED** — product hardening, not new core capability: (1) provider error → RuntimeEvent fallback（`_call_model()` catch ProviderError → `control_message()` → empty ProviderResponse，不 crash）；(2) scheduler node failure → RuntimeEvent notification（`run_main_loop()` 检测 halted status → `control_message()` 显示 node title + error）；(3) checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent 在 session.py 中 emit；(4) storage hygiene: `.gitignore` 添加 `state.json`/`runs/`；(5) trace report enrichment: `_emit_run_summary()` 含 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps；(6) 6 streaming protocol tests + 4 个 contract confirmations 通过；ruff clean；568/574 tests pass（6 pre-existing failures） |
 
@@ -317,7 +317,7 @@
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
 
-**Loop 4.2 hardening 完成。** 按 2026-05-29 independent re-audit，Real Evidence closure credibility 为 2/8 credible、6/8 questionable；不能再表述为 8/8 fully validated。B7 (Multi-instance) 与 B8 (TUI) 仍是后续架构/产品化决策，本轮排除。
+**[historical — 2026-05-29 independent re-audit baseline, superseded by 2026-05-30 baseline: 6/8 credible (001/004/005/006/007/008) + 2/8 partial-credible (002/003), score 3.9/5]** Loop 4.2 hardening 完成。按 2026-05-29 independent re-audit，当时 Real Evidence closure credibility 为 2/8 credible、6/8 questionable。B7 (Multi-instance) 与 B8 (TUI) 仍是后续架构/产品化决策，本轮排除。
 
 ---
 

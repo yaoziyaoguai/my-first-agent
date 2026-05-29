@@ -478,7 +478,12 @@ class ToolRuntimeMediator:
                         "tool_name": tool_name,
                         "tool_input": dict(tool_input) if tool_input else {},
                         "status": status,
-                        "result_summary": result_text,
+                        "tool_output": result_text,
+                        "execution_status": (
+                            "success" if result is None
+                            else "blocked" if result == FORCE_STOP
+                            else "pending"
+                        ),
                     },
                 ),
                 core_entrypoint="core.chat",

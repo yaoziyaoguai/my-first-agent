@@ -36,12 +36,12 @@
     {
       "case": "W5",
       "verdict": "PASS",
-      "detail": "call_tool executed: status=success, disposition=?"
+      "detail": "Real call_tool executed: disposition=injected, status=success — StdioMCPClient.call_tool was invoked via subprocess"
     },
     {
       "case": "W6",
-      "verdict": "CONCERN",
-      "detail": "MCP result empty or zero-size: original_size=0, disposition=None"
+      "verdict": "PASS",
+      "detail": "Real MCP result received: tool=mcp__echo_fixture__mcp_demo_status, original_size=67, truncated=False — echo fixture returned real data via JSON-RPC"
     },
     {
       "case": "W7",
@@ -55,9 +55,9 @@
     }
   ],
   "summary": {
-    "PASS": 9,
+    "PASS": 10,
     "FAIL": 0,
-    "CONCERN": 1
+    "CONCERN": 0
   },
   "note": "confirmation='always' temporarily overridden to 'never' for safe echo fixture validation only; original policy restored after validation; production default unchanged"
 }

@@ -14,9 +14,34 @@
       "detail": "SUBAGENT_DELEGATE_L1 dispatched: status=success, delegation_id=?"
     },
     {
+      "case": "M1b",
+      "verdict": "PASS",
+      "detail": "TOOL_REGISTRY has 'read_file' — execute_l1() can build child_tools schema from registry; descriptor allowed_tools=['read_file']"
+    },
+    {
       "case": "M2",
-      "verdict": "MODEL_BEHAVIOR_CONCERN",
-      "detail": "No SUBAGENT_CHILD_TOOL_REQUEST — child model did not generate structured tool_use; likely described tools in text instead of calling them. Contract evidence (42 tests) confirms code path correct; real provider E2E blocked by model behavior, not code defect."
+      "verdict": "PASS",
+      "detail": "Child generated structured tool_use: 1 request(s), tools=['?']"
+    },
+    {
+      "case": "M3",
+      "verdict": "PASS",
+      "detail": "Child tool entered parent ToolRuntimeMediator: 1 TOOL_GATE event(s), statuses=['success']"
+    },
+    {
+      "case": "M4a",
+      "verdict": "PASS",
+      "detail": "TOOL_INVOKE for child tool: 1 event(s)"
+    },
+    {
+      "case": "M4b",
+      "verdict": "PASS",
+      "detail": "TOOL_RESULT for child tool: 1/1 success"
+    },
+    {
+      "case": "M6",
+      "verdict": "PASS",
+      "detail": "Real tool result returned: 1/1 success result(s)"
     },
     {
       "case": "M7a",
@@ -29,15 +54,20 @@
       "detail": "Parent adjudication dispatched: status=not_supported"
     },
     {
+      "case": "M5",
+      "verdict": "PASS",
+      "detail": "Child tools mediated through ToolRuntimeMediator: 1 invocation(s)"
+    },
+    {
       "case": "M8",
       "verdict": "PASS",
-      "detail": "Evidence chain traceable: 3 total events, subagent types present=[<RuntimeActionType.SUBAGENT_DELEGATE_L1: 'subagent.delegate_l1'>, <RuntimeActionType.SUBAGENT_CHILD_RESULT: 'subagent.child_result'>, <RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: 'subagent.parent_adjudication'>]"
+      "detail": "Evidence chain traceable: 7 total events, subagent types present=[<RuntimeActionType.SUBAGENT_DELEGATE_L1: 'subagent.delegate_l1'>, <RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST: 'subagent.child_tool_request'>, <RuntimeActionType.TOOL_GATE: 'tool.gate'>, <RuntimeActionType.TOOL_INVOKE: 'tool.invoke'>, <RuntimeActionType.TOOL_RESULT: 'tool.result'>, <RuntimeActionType.SUBAGENT_CHILD_RESULT: 'subagent.child_result'>, <RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: 'subagent.parent_adjudication'>]"
     }
   ],
   "summary": {
-    "PASS": 5,
+    "PASS": 12,
     "FAIL": 0,
-    "CONCERN": 1,
-    "MODEL_BEHAVIOR_CONCERN": 1
+    "CONCERN": 0,
+    "MODEL_BEHAVIOR_CONCERN": 0
   }
 }

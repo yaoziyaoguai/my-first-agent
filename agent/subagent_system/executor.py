@@ -159,10 +159,18 @@ def execute_l1(
     role_prompt = getattr(context_package, "role_prompt", "")
     goal = getattr(context_package, "goal", task)
     constraints = getattr(context_package, "constraints", ())
-    allowed_tool_names = [
-        getattr(ts, "name", str(ts))
-        for ts in getattr(context_package, "allowed_tools", ())
+    # 收集 child 可用工具名：优先从 context_package.allowed_tools 取 object，
+    # 再合并 context_package.request.allowed_tools（descriptor 中的字符串名）。
+    _cp_tool_names: set[str] = set()
+    for ts in getattr(context_package, "allowed_tools", ()):
+        name = getattr(ts, "name", None)
+        if isinstance(name, str) and name:
+            _cp_tool_names.add(name)
+    _req = getattr(context_package, "request", None)
+    _req_tool_names = [
+        str(t) for t in getattr(_req, "allowed_tools", ()) or ()
     ]
+    allowed_tool_names = sorted(_cp_tool_names | set(_req_tool_names))
 
     # 构建 child system prompt
     system_prompt = _build_child_system_prompt(
@@ -177,14 +185,19 @@ def execute_l1(
         {"role": "user", "content": task},
     ]
 
-    # 构建 model-visible tools（复用 parent tool metadata）
+    # 构建 model-visible tools — 从 TOOL_REGISTRY 查找真实 tool schema
+    from agent.tool_registry import TOOL_REGISTRY as _TR
+
     child_tools: list[dict[str, Any]] = []
-    for ts in getattr(context_package, "allowed_tools", ()):
-        if hasattr(ts, "name") and hasattr(ts, "description"):
+    for name in allowed_tool_names:
+        entry = _TR.get(name)
+        if entry is not None:
             child_tools.append({
-                "name": getattr(ts, "name", ""),
-                "description": getattr(ts, "description", ""),
-                "input_schema": {"type": "object", "properties": {}, "required": []},
+                "name": entry["name"],
+                "description": entry["description"],
+                "input_schema": entry.get("parameters", {
+                    "type": "object", "properties": {}, "required": [],
+                }),
             })
 
     iterations_used = 0

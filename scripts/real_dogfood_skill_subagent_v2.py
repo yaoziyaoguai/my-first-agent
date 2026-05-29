@@ -26,7 +26,7 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from agent.runtime_integration.schema import RuntimeActionType as RAT
+from agent.runtime_integration.schema import RuntimeActionType as RAT  # noqa: E402, N817
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -155,8 +155,11 @@ def case_a_skill_selection(provider, dispatcher) -> None:
                    f"SKILL_SELECT success: selected={ss_payload.get('selected_skill_id')}, "
                    f"body_load_decision=True")
         else:
-            record("A2", "CONCERN",
-                   f"SKILL_SELECT status={ss_status}, body_load_decision={ss_payload.get('body_load_decision')}",
+            _detail = (
+                f"SKILL_SELECT status={ss_status}, "
+                f"body_load_decision={ss_payload.get('body_load_decision')}"
+            )
+            record("A2", "CONCERN", _detail,
                    status=ss_status, payload_preview=str(ss_payload)[:300])
 
         # A3: active_skill set
@@ -423,7 +426,8 @@ def main() -> None:
     # Build dispatcher
     try:
         dispatcher = build_dispatcher()
-        print(f"  dispatcher built, handlers={len(getattr(dispatcher, '_registry', {}).__dict__.get('_handlers', {}))}")
+        _handlers = getattr(dispatcher, '_registry', {}).__dict__.get('_handlers', {})
+        print(f"  dispatcher built, handlers={len(_handlers)}")
     except Exception as exc:
         print(f"  FAILED to build dispatcher: {type(exc).__name__}: {exc}")
         record("SETUP", "FAIL", f"Dispatcher build failed: {type(exc).__name__}: {exc}")
@@ -447,7 +451,10 @@ def main() -> None:
 
 
 def _write_results() -> None:
-    out_path = _project_root / "docs" / "dogfood" / "skill-subagent-real-dogfood-v2-results-2026-05-28.json"
+    out_path = (
+        _project_root / "docs" / "dogfood"
+        / "skill-subagent-real-dogfood-v2-results-2026-05-28.json"
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     passed = sum(1 for r in results if r["verdict"] == "PASS")

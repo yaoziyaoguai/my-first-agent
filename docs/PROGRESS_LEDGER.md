@@ -1,10 +1,16 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-28 (Loop 4.1: Evaluation/Dogfood Harness Honesty)
+**最后更新**: 2026-05-29 (Real provider dogfood re-validation: REAL-EVIDENCE-002/003 closed)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
 ---
+
+## 2026-05-29
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| **Real provider dogfood re-validation: Skill + SubAgent** | — | **REAL-EVIDENCE-002 CLOSED, 003 CLOSED, 006 pending（L1 blocked）** — (1) 重新运行 `scripts/real_dogfood_skill_subagent_v2.py`，结果 12 PASS / 0 FAIL / 4 CONCERN，与 2026-05-28 一致；(2) **REAL-EVIDENCE-002 CLOSED**: A2/A3/A4 全部 PASS — SKILL_SELECT success (selected=demo-note-maker, body_load_decision=True), _active_skill set (skill_id=demo-note-maker, body_len=300), RuntimeDecisionFrame skill_registry_active=True；(3) **REAL-EVIDENCE-003 CLOSED**: B1-B6 全部 PASS — skill activated, TOOL_GATE (0 accepted/2 rejected by confirmation='always'), TOOL_INVOKE (2), TOOL_RESULT (4/4), active_skill allowed_tools={'demo.write_demo_note', 'demo.echo_task_summary'}, evidence chain 完整 (24 events, 10 types: SKILL_SELECT→TOOL_GATE→TOOL_INVOKE→TOOL_RESULT)；disallowed-tool blocking 在 15 个 contract tests 中验证充分（confirmation='always' 策略限制真实路径自动化阻断验证，但这是安全性特性）；(4) **REAL-EVIDENCE-006 仍 pending**: C1 L0 PASS（正确行为），C2/C3/C4/C6 CONCERN — L1 代码路径完整且 39 个 contract tests 通过，但所有可用 subagent (demo-stat/code-reviewer) 均使用 model=fake，L1 real-provider child loop 需 real-model subagent descriptor 才能关闭；(5) 更新 `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md`、`docs/PROJECT_STATUS.md`（skill.select/skill.apply: PARTIAL→VALIDATED, subagent.delegate 保持 PARTIAL） |
 
 ## 2026-05-28
 

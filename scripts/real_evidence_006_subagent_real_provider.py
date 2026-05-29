@@ -112,10 +112,17 @@ def run_subagent_real_provider_e2e() -> None:
     # M1: Parent delegates to real-model child via demo-stat-real
     print("\n  --- M1: Parent delegates to demo-stat-real (real model child) ---")
     target_file = "agent/subagent_system/descriptors/demo-stat-real/SUBAGENT.md"
+    # 使用 CLI delegation 语法 "delegate to <name>: <task>" 触发
+    # detect_delegate_to_subagent → _dispatch_or_fallback_delegation
+    # → L1 handler → delegate_l1() → execute_l1()。
+    # 注意：不能用 "请 delegate..." 前缀，因为 detect_delegate_to_subagent
+    # 使用 re.match() 从字符串开头匹配，"请 " 会导致匹配失败。
+    # 注意：部分模型会输出 XML 格式的 tool_use 文本而非 API 原生 structured
+    # tool_use block。在 task 中显式要求 structured tool_use 以提高匹配率。
     user_msg = (
-        f"请 delegate to demo-stat-real，使用 read_file 工具读取文件 "
-        f"`{target_file}` 的内容，并告诉我这个文件的前三行是什么。"
-        f"你必须实际调用 read_file 工具来读取文件，不要只是描述你会做什么。"
+        f"delegate to demo-stat-real: 使用 read_file 工具读取文件 "
+        f"`{target_file}` 的前三行。重要：请使用 API structured tool_use "
+        f"block 调用 read_file，不要用 XML 标签或文本描述工具调用。"
     )
 
     t0 = time.monotonic()

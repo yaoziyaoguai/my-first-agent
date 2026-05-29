@@ -139,6 +139,11 @@ class ToolRuntimeMediator:
         # Step 1: 构建合成 tool_use_id
         tool_use_id = f"child:{delegation_id}:{tool_name}"
 
+        # Step 1.5: Dispatch child tool request evidence (best-effort)
+        self._dispatch_child_tool_evidence(
+            tool_name, arguments, delegation_id, parent_trace_id,
+        )
+
         # Step 2: TOOL_GATE — 复用 parent gate pipeline
         gate_disposition = self._route_gate(tool_name, arguments, tool_use_id)
 
@@ -257,6 +262,64 @@ class ToolRuntimeMediator:
             subagent_name, memory_scope, status="retained",
         )
         return None
+
+    def _dispatch_child_tool_evidence(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        delegation_id: str,
+        parent_trace_id: str,
+        *,
+        gate_disposition: str | None = None,
+    ) -> None:
+        """Dispatch SUBAGENT_CHILD_TOOL_REQUEST evidence (best-effort)."""
+        with contextlib.suppress(Exception):
+            self._dispatcher.route_from_runtime_loop(
+                RuntimeActionRequest(
+                    action_type=RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST,
+                    source="ToolRuntimeMediator",
+                    parent_trace_id=parent_trace_id or delegation_id,
+                    payload={
+                        "tool_name": tool_name,
+                        "arguments_preview": str(arguments)[:200],
+                        "delegation_id": delegation_id,
+                        "gate_disposition": gate_disposition,
+                    },
+                ),
+                core_entrypoint="core.chat",
+                runtime_hook_name="execute_l1",
+            )
+
+    def _dispatch_child_result_evidence(
+        self,
+        *,
+        delegation_id: str,
+        parent_trace_id: str,
+        subagent_name: str,
+        status: str,
+        stop_reason: str,
+        summary: str,
+        iterations_used: int,
+    ) -> None:
+        """Dispatch SUBAGENT_CHILD_RESULT evidence (best-effort)."""
+        with contextlib.suppress(Exception):
+            self._dispatcher.route_from_runtime_loop(
+                RuntimeActionRequest(
+                    action_type=RuntimeActionType.SUBAGENT_CHILD_RESULT,
+                    source="ToolRuntimeMediator",
+                    parent_trace_id=parent_trace_id or delegation_id,
+                    payload={
+                        "subagent_name": subagent_name,
+                        "delegation_id": delegation_id,
+                        "status": status,
+                        "stop_reason": stop_reason,
+                        "summary_preview": summary[:200],
+                        "iterations_used": iterations_used,
+                    },
+                ),
+                core_entrypoint="core.chat",
+                runtime_hook_name="execute_l1",
+            )
 
     def _dispatch_child_memory_evidence(
         self,

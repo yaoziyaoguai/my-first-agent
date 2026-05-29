@@ -57,7 +57,7 @@ class SubAgentDelegateL0Handler:
             )
 
         if payload.get("in_delegation_context") is True:
-            return self._reject(context, "nested delegation is forbidden", no_nested=False, subagent_name=subagent_name)
+            return self._reject(context, "nested delegation is forbidden", no_nested=False, subagent_name=subagent_name)  # noqa: E501
         if not subagent_name:
             return self._reject(context, "subagent_name is required", subagent_name=subagent_name)
         descriptor = self._registry.get_descriptor(subagent_name)
@@ -68,16 +68,16 @@ class SubAgentDelegateL0Handler:
 
         requested_tools = tuple(str(item) for item in payload.get("allowed_tools", ()))
         if not set(requested_tools).issubset(set(descriptor.allowed_tools)):
-            return self._reject(context, "requested tools exceed descriptor allowed_tools", subagent_name=subagent_name)
+            return self._reject(context, "requested tools exceed descriptor allowed_tools", subagent_name=subagent_name)  # noqa: E501
         if set(requested_tools) & _SHELL_LIKE_TOOLS:
-            return self._reject(context, "shell/external process is forbidden in L0", subagent_name=subagent_name)
+            return self._reject(context, "shell/external process is forbidden in L0", subagent_name=subagent_name)  # noqa: E501
         if payload.get("parent_adjudication_required") is not True:
-            return self._reject(context, "parent adjudication is required", subagent_name=subagent_name)
+            return self._reject(context, "parent adjudication is required", subagent_name=subagent_name)  # noqa: E501
 
         budget = dict(payload.get("budget") or {})
         max_iterations = int(budget.get("max_iterations", 1))
         if max_iterations > descriptor.max_iterations_default:
-            return self._reject(context, "budget exceeds descriptor max_iterations_default", subagent_name=subagent_name)
+            return self._reject(context, "budget exceeds descriptor max_iterations_default", subagent_name=subagent_name)  # noqa: E501
 
         subagent_request = SubAgentRequest(
             task=str(payload.get("delegation_goal") or ""),
@@ -101,10 +101,10 @@ class SubAgentDelegateL0Handler:
         adjudication_label = _adjudication_label(getattr(adjudication, "action", ""))
         result_payload = {
             "subagent_name": subagent_name,
-            "execution_result": getattr(run.result, "summary", "") if run.result is not None else "",
+            "execution_result": getattr(run.result, "summary", "") if run.result is not None else "",  # noqa: E501
             "delegate_once_called": True,
             "subagent_request_built": True,
-            "handoff_note": getattr(run.result, "handoff_back", None) if run.result is not None else None,
+            "handoff_note": getattr(run.result, "handoff_back", None) if run.result is not None else None,  # noqa: E501
             "adjudication": adjudication_label,
             "adjudication_reason": getattr(adjudication, "reason", ""),
             "parent_adjudicated": adjudication is not None,
@@ -171,10 +171,11 @@ class SubAgentDelegateL1Handler:
     因为 dispatcher 在 chat() 入口构建时 provider 尚未确定。
     """
 
-    def __init__(self, *, registry: SubAgentRegistry) -> None:
+    def __init__(self, *, registry: SubAgentRegistry, dispatcher: Any = None) -> None:
         self._registry = registry
         self._provider: Any = None
         self._tool_mediator: Any = None
+        self._dispatcher = dispatcher
 
     def set_provider(self, provider: Any, tool_mediator: Any = None) -> None:
         """由 core.chat() 在每次 delegation 前注入 provider + mediator。"""
@@ -288,12 +289,67 @@ class SubAgentDelegateL1Handler:
             "subagent_request_built": True,
             "status": getattr(result, "status", "unknown") if result else "unknown",
             "stop_reason": getattr(result, "stop_reason", "") if result else "",
-            "iterations_used": getattr(getattr(result, "audit", None), "iterations_used", 0) if result else 0,
+            "iterations_used": (
+                getattr(getattr(result, "audit", None), "iterations_used", 0)
+                if result else 0
+            ),
             "adjudication": adjudication_label,
             "adjudication_reason": getattr(adjudication, "reason", ""),
             "parent_adjudicated": adjudication is not None,
             "execution_mode": "L1",
         }
+
+        # Dispatch SUBAGENT_CHILD_RESULT evidence (best-effort)
+        if self._dispatcher is not None:
+            import contextlib
+            with contextlib.suppress(Exception):
+                from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+                self._dispatcher.route_from_runtime_loop(
+                    RuntimeActionRequest(
+                        action_type=RuntimeActionType.SUBAGENT_CHILD_RESULT,
+                        source="SubAgentDelegateL1Handler",
+                        parent_trace_id=request.parent_trace_id,
+                        payload={
+                            "subagent_name": subagent_name,
+                            "status": getattr(result, "status", "unknown") if result else "unknown",
+                            "stop_reason": getattr(result, "stop_reason", "") if result else "",
+                            "summary_preview": (
+                                getattr(result, "summary", "")[:200] if result else ""
+                            ),
+                            "iterations_used": (
+                                getattr(getattr(result, "audit", None), "iterations_used", 0)
+                                if result else 0
+                            ),
+                        },
+                    ),
+                    core_entrypoint="core.chat",
+                    runtime_hook_name="delegate_l1",
+                )
+
+        # Dispatch SUBAGENT_PARENT_ADJUDICATION evidence (best-effort)
+        if self._dispatcher is not None:
+            import contextlib
+            with contextlib.suppress(Exception):
+                from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+                self._dispatcher.route_from_runtime_loop(
+                    RuntimeActionRequest(
+                        action_type=RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION,
+                        source="SubAgentDelegateL1Handler",
+                        parent_trace_id=request.parent_trace_id,
+                        payload={
+                            "subagent_name": subagent_name,
+                            "adjudication": adjudication_label,
+                            "adjudication_reason": getattr(adjudication, "reason", ""),
+                            "child_status": (
+                                getattr(result, "status", "unknown")
+                                if result else "unknown"
+                            ),
+                        },
+                    ),
+                    core_entrypoint="core.chat",
+                    runtime_hook_name="delegate_l1",
+                )
+
         return context.success(
             handler_name=type(self).__name__,
             target_module="SubAgentExecutor",

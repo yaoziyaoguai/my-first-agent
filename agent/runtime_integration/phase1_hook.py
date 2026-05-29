@@ -205,4 +205,7 @@ def build_phase1_dispatcher(
         RuntimeActionType.ACTION_PLAN_COMPLETE,
     ):
         registry.register(_scheduler_at, _scheduler_handler)
-    return RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
+    _dispatcher = RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
+    # 注入 dispatcher 到 L1 handler（用于 SUBAGENT_PARENT_ADJUDICATION evidence dispatch）
+    _l1_handler._dispatcher = _dispatcher
+    return _dispatcher

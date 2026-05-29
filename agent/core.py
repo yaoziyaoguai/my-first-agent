@@ -529,6 +529,12 @@ def chat(
         skill_registry=_skill_registry,
     )
 
+    # 调用方注入的 runtime_action_dispatcher 优先（dogfood/测试注入点），必须先于
+    # CLI meta-command 赋值，使 delegation 证据落入调用方指定的 dispatcher。
+    _phase1_dispatcher = (
+        runtime_action_dispatcher if runtime_action_dispatcher is not None else _p1_dispatcher
+    )
+
     # ── CLI meta-command 边界说明 ──────────────────────────────────────────
     # 中文学习边界：CLI meta-command 的检测（detect）和渲染（render）已提取到
     # agent/cli_commands.py。core.chat() 仍然是唯一统一入口，但命令解析和渲染
@@ -716,7 +722,7 @@ def chat(
             subagent_name, task,
             delegation_reason="CLI meta-command delegation",
             on_runtime_event=on_runtime_event,
-            dispatcher=_p1_dispatcher,
+            dispatcher=_phase1_dispatcher,
             provider=provider,
             user_input=user_input,
         )
@@ -747,7 +753,7 @@ def chat(
             subagent_name, task,
             delegation_reason="NL delegation fixture",
             on_runtime_event=on_runtime_event,
-            dispatcher=_p1_dispatcher,
+            dispatcher=_phase1_dispatcher,
             provider=provider,
             user_input=user_input,
         )
@@ -936,13 +942,7 @@ def chat(
     # 确保 fake/real 共享同一 evidence path，不因 provider type 产生证据路径分歧。
     #
     # 构建本身无副作用：只有 loop turn-end 时 dispatcher.route() 才被调用。
-    # Loop 4: _p1_dispatcher 已在函数开头构建（用于 CLI READ_ONLY 命令走统一 dispatcher）。
-    # 调用方注入的 runtime_action_dispatcher 优先（dogfood/测试注入点），
-    # 否则复用 _p1_dispatcher。
-    if runtime_action_dispatcher is not None:
-        _phase1_dispatcher = runtime_action_dispatcher
-    else:
-        _phase1_dispatcher = _p1_dispatcher
+    # Loop 4: _phase1_dispatcher 已在函数开头与 _p1_dispatcher 一同设置。
 
     # ── Loop 1.1: Runtime Decision Spine ──────────────────────────────────────
     # 在入口处构建统一 decision frame，描述当前 turn 所有子系统分支点状态。

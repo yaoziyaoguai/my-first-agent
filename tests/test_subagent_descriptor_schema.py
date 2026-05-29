@@ -127,7 +127,11 @@ def test_invalid_descriptor_values_fail_closed(
     """Phase 1 不接受真实 LLM / unsupported modes / unsafe metadata。"""
 
     base = _valid_descriptor()
-    for key in ("name", "status", "model", "risk_level", "memory_scope", "max_iterations_default", "supported_modes"):
+    _keys = (
+        "name", "status", "model", "risk_level",
+        "memory_scope", "max_iterations_default", "supported_modes",
+    )
+    for key in _keys:
         if override.startswith(key):
             lines = base.splitlines()
             output: list[str] = []
@@ -150,3 +154,17 @@ def test_invalid_descriptor_values_fail_closed(
         load_subagent_descriptor(manifest_path)
 
     assert exc_info.value.code == expected_code
+
+
+def test_model_inherit_is_valid(tmp_path: Path) -> None:
+    """model=inherit 表示 child 继承 parent provider config，不持有独立 API key。
+
+    REAL-EVIDENCE-006 guard: 确保 model=inherit 的 subagent descriptor 能被
+    正常注册，使 L1 handler (execute_l1) 能通过 parent 注入的 provider 运行。
+    """
+    content = _valid_descriptor("demo-stat-real").replace("model: fake", "model: inherit")
+    manifest_path = _write_subagent_md(tmp_path / "demo-stat-real", content)
+    descriptor = load_subagent_descriptor(manifest_path)
+    assert descriptor.model == "inherit"
+    assert descriptor.name == "demo-stat-real"
+    assert descriptor.is_visible()

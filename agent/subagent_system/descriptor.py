@@ -6,24 +6,24 @@ SubAgent body、不调用 provider、不连接 ToolRegistry，也不读取真实
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
 from agent.subagent_system.errors import SubAgentLoadError
 from agent.subagent_system.execution_mode import EXECUTION_MODE_VALUES, LOCAL_EXECUTION_MODES
 
-
 SUBAGENT_MD_FILENAME = "SUBAGENT.md"
 REDACTED = "<redacted>"
 
 SUBAGENT_STATUSES = frozenset({"active", "deprecated", "disabled"})
 RISK_LEVELS = frozenset({"low", "medium", "high"})
-SAFE_MODELS = frozenset({"fake", "fixture", "none"})
+SAFE_MODELS = frozenset({"fake", "fixture", "none", "inherit"})
 MEMORY_SCOPES = frozenset({"none", "read_context", "propose"})
 CONFIRMATION_POLICIES = frozenset({"inherit_tool_policy", "require_parent"})
 KEBAB_CASE_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -80,7 +80,7 @@ def load_subagent_descriptor(path: str | Path) -> SubAgentDescriptor:
     if manifest_path.is_dir():
         manifest_path = manifest_path / SUBAGENT_MD_FILENAME
     if manifest_path.name != SUBAGENT_MD_FILENAME:
-        raise _load_error("INVALID_PATH", "SubAgent manifest must be SUBAGENT.md", path=manifest_path)
+        raise _load_error("INVALID_PATH", "SubAgent manifest must be SUBAGENT.md", path=manifest_path)  # noqa: E501
     try:
         raw_text = manifest_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -117,7 +117,7 @@ def load_subagent_descriptor(path: str | Path) -> SubAgentDescriptor:
 def _parse_frontmatter(raw_text: str, path: Path) -> dict[str, Any]:
     lines = raw_text.splitlines()
     if not lines or lines[0].strip() != "---":
-        raise _load_error("MISSING_FRONTMATTER", "SUBAGENT.md must start with frontmatter", path=path)
+        raise _load_error("MISSING_FRONTMATTER", "SUBAGENT.md must start with frontmatter", path=path)  # noqa: E501
     end_index = None
     for index, line in enumerate(lines[1:], start=1):
         if line.strip() == "---":
@@ -146,11 +146,15 @@ def _validate_frontmatter(data: dict[str, Any], path: Path) -> None:
 
     name = str(data["name"])
     if not KEBAB_CASE_PATTERN.match(name) or name != path.parent.name:
-        raise _load_error("INVALID_NAME", "SubAgent name must be kebab-case and match directory", path=path)
+        raise _load_error("INVALID_NAME", "SubAgent name must be kebab-case and match directory", path=path)  # noqa: E501
     if data["status"] not in SUBAGENT_STATUSES:
         raise _load_error("INVALID_STATUS", "Invalid SubAgent status", path=path)
     if data.get("model", "fake") not in SAFE_MODELS:
-        raise _load_error("INVALID_MODEL", "v1 SubAgent model must be fake/fixture/none", path=path)
+        raise _load_error(
+            "INVALID_MODEL",
+            "v1 SubAgent model must be fake/fixture/none/inherit",
+            path=path,
+        )
     if data.get("risk_level", "low") not in RISK_LEVELS:
         raise _load_error("INVALID_RISK_LEVEL", "Invalid SubAgent risk level", path=path)
     if data.get("memory_scope", "none") not in MEMORY_SCOPES:
@@ -159,7 +163,7 @@ def _validate_frontmatter(data: dict[str, Any], path: Path) -> None:
         raise _load_error("INVALID_CONFIRMATION_POLICY", "Invalid confirmation policy", path=path)
     max_iterations = data.get("max_iterations_default", 1)
     if not isinstance(max_iterations, int) or max_iterations < 1 or max_iterations > 10:
-        raise _load_error("INVALID_MAX_ITERATIONS", "max_iterations_default must be 1-10", path=path)
+        raise _load_error("INVALID_MAX_ITERATIONS", "max_iterations_default must be 1-10", path=path)  # noqa: E501
     supported_modes = _as_tuple(data.get("supported_modes", ("local_fake",)))
     if not supported_modes or not set(supported_modes).issubset(EXECUTION_MODE_VALUES):
         raise _load_error("INVALID_SUPPORTED_MODE", "Unsupported execution mode", path=path)

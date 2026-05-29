@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-29 (Loop 4.2 UX / Error Recovery / Storage Hygiene completed)
+**最后更新**: 2026-05-29 (REAL-EVIDENCE-006 CLOSED — L1 real-model child loop validated)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **REAL-EVIDENCE-006 CLOSED: L1 real-model child loop** | — | **CLOSED — L1 real-model child loop validated** — (1) 新建 `demo-stat-real` descriptor: model=inherit 使 child 继承 parent provider config，SAFE_MODELS 扩展 `"inherit"` + guard test；(2) **dispatcher mismatch fix**: `core.py` 中 `_phase1_dispatcher` 赋值移至 CLI delegation 代码之前；(3) **evidence dispatch gaps 修复**: `SUBAGENT_CHILD_TOOL_REQUEST` dispatch 在 `ToolRuntimeMediator._dispatch_child_tool_evidence()`（`mediate_child_tool_request()` 调用前触发）；`SUBAGENT_CHILD_RESULT` dispatch 在 L1 handler `handle()` 中；`SUBAGENT_PARENT_ADJUDICATION` dispatch 在 L1 handler `handle()` 中；(4) dispatcher 注入：`phase1_hook.py` 将 `_dispatcher` 注入 L1 handler（`_l1_handler._dispatcher = _dispatcher`）；(5) Real provider dogfood validation: 15 PASS / 0 FAIL / 1 CONCERN — C1 (SUBAGENT_DELEGATE_L1 success) / C3 (child result evidence) / C4 (parent adjudication) / C5 (memory scope=none expected) / C6 (L1 code path verified with real provider child loop) / C7 (25 events evidence chain: subagent.child_result + subagent.delegate_l1 + subagent.parent_adjudication)；C2 CONCERN: child 未调用 API tool_use（模型在 text 中描述工具而非 structured tool_use block），child tool mediation code path 由 31 contract tests 验证，production path 因 `core.py` 传入 `tool_mediator=None` 无法触发——这是已知限制（TOOL_MEDIATOR_GAP），不阻塞 CLOSED；(6) 37 L1 descriptor + 66 all-focused tests pass；(7) `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` / `docs/PROJECT_STATUS.md` 更新 |
 | **Loop 4.2: UX / Error Recovery / Storage Hygiene** | — | **COMPLETED — product hardening** — 10 files (+188/-36): (1) Provider error → RuntimeEvent fallback: `core.py:_call_model()` catch ProviderError → `control_message()` → `ProviderResponse(content=[], stop_reason="end_turn")`, 不 crash；(2) Scheduler node failure → RuntimeEvent: `loop.py:run_main_loop()` detect `halted` → `control_message()` with node title + error reason;(3) Checkpoint resume → `[系统] 正在恢复上次对话状态...` RuntimeEvent in `session.py`；(4) ProviderNotImplementedError message: user-friendly Chinese with config guidance；(5) Health check: `agent/health_check.py` — `run_provider_health_checks()` 独立于主循环错误处理；(6) Response handlers: `agent/response_handlers.py` ToolBlockedEvent Chinese message；(7) Storage hygiene: `.gitignore` add `state.json`/`runs/`；(8) Trace report: `_emit_run_summary()` 新增 skill_activations/skill_names/mcp_tool_invocations/scheduler_plan_steps fields + `render_compact_run_summary()` 展示新字段；(9) ruff clean; 6/6 streaming protocol tests pass; 568/574 regression pass (6 pre-existing: catalog missing descriptors, skill handler KeyError, pipeline structure outdated expected_types, HOME isolation)；(10) 全部 safe-to-auto-run code loops 已闭环，剩余 REAL-EVIDENCE-004/005/006/007/008 + B4/B6/B7/B8 需真实验证或架构决策 |
 
 | Milestone | Commit | 简述 |

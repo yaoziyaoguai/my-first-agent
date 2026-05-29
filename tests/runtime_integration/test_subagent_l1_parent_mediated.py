@@ -163,8 +163,30 @@ class _SpyToolMediator:
             return "rejected"
         return None
 
+    def _dispatch_child_tool_evidence(
+        self, tool_name: str, arguments: dict[str, Any],
+        delegation_id: str, parent_trace_id: str,
+        *, gate_disposition: str | None = None,
+    ) -> None:
+        """Spy: record child tool dispatch calls."""
+        self.child_requests.append({
+            "_dispatch": "child_tool",
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "delegation_id": delegation_id,
+            "parent_trace_id": parent_trace_id,
+            "gate_disposition": gate_disposition,
+        })
 
-def _make_tool_use_response(text: str, tool_name: str, tool_input: dict[str, Any]) -> ProviderResponse:
+    def _dispatch_child_result_evidence(
+        self, *, delegation_id: str, parent_trace_id: str,
+        subagent_name: str, status: str, stop_reason: str,
+        summary: str, iterations_used: int,
+    ) -> None:
+        """Spy: record child result dispatch calls."""
+
+
+def _make_tool_use_response(text: str, tool_name: str, tool_input: dict[str, Any]) -> ProviderResponse:  # noqa: E501
     """构建包含 tool_use 的 ProviderResponse。"""
     return ProviderResponse(
         content=[

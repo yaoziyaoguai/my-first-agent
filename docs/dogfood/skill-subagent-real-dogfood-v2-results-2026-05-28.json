@@ -30,7 +30,7 @@
     {
       "case": "B2",
       "verdict": "PASS",
-      "detail": "TOOL_GATE: 0 accepted, 2 rejected"
+      "detail": "TOOL_GATE: 0 accepted, 1 rejected"
     },
     {
       "case": "B3",
@@ -40,22 +40,22 @@
     {
       "case": "B4",
       "verdict": "PASS",
-      "detail": "TOOL_RESULT: 4/4 success"
+      "detail": "TOOL_RESULT: 3/3 success"
     },
     {
       "case": "B5",
       "verdict": "PASS",
-      "detail": "active_skill allowed_tools={'demo.write_demo_note', 'demo.echo_task_summary'}"
+      "detail": "active_skill allowed_tools={'demo.echo_task_summary', 'demo.write_demo_note'}"
     },
     {
       "case": "B6",
       "verdict": "PASS",
-      "detail": "Evidence chain complete: 24 events, types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result']"
+      "detail": "Evidence chain complete: 22 events, types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result']"
     },
     {
       "case": "C1",
       "verdict": "PASS",
-      "detail": "SUBAGENT_DELEGATE_L0 dispatched: status=failed (correct for fake-model subagent — L1 requires real-model subagent)"
+      "detail": "SUBAGENT_DELEGATE_L1 dispatched: status=success, delegation_id=?"
     },
     {
       "case": "C2",
@@ -64,13 +64,13 @@
     },
     {
       "case": "C3",
-      "verdict": "CONCERN",
-      "detail": "No child result event — delegation may have failed"
+      "verdict": "PASS",
+      "detail": "Child result returned: 1 result(s)"
     },
     {
       "case": "C4",
-      "verdict": "CONCERN",
-      "detail": "No parent adjudication event"
+      "verdict": "PASS",
+      "detail": "Parent adjudication: 1 adjudication(s)"
     },
     {
       "case": "C5",
@@ -79,18 +79,18 @@
     },
     {
       "case": "C6",
-      "verdict": "CONCERN",
-      "detail": "L1 code path not exercised: no real-model subagent available (both demo-stat and code-reviewer use model=fake). L1 handler code is complete but REAL-EVIDENCE-006 cannot be closed until a real-model subagent descriptor exists."
+      "verdict": "PASS",
+      "detail": "L1 code path verified with real provider child loop"
     },
     {
       "case": "C7",
       "verdict": "PASS",
-      "detail": "Evidence chain: 24 events, types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result']"
+      "detail": "Evidence chain: 25 events, types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'subagent.child_result', 'subagent.delegate_l0', 'subagent.delegate_l1', 'subagent.parent_adjudication', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result']"
     }
   ],
   "summary": {
-    "PASS": 12,
+    "PASS": 15,
     "FAIL": 0,
-    "CONCERN": 4
+    "CONCERN": 1
   }
 }

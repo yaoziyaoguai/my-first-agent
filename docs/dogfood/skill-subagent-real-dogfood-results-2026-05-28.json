@@ -1,0 +1,68 @@
+{
+  "date": "2026-05-28",
+  "provider": "kimi-k2.5 (anthropic_compatible)",
+  "results": [
+    {
+      "case": "S1a",
+      "verdict": "CONCERN",
+      "detail": "SKILL_SELECT NOT dispatched — model may not have triggered skill matching; check if demo-note-maker description matches user message pattern",
+      "events_count": 4
+    },
+    {
+      "case": "S1b",
+      "verdict": "CONCERN",
+      "detail": "Cannot verify — SKILL_SELECT not dispatched",
+      "blocked_by": "S1a"
+    },
+    {
+      "case": "S1c",
+      "verdict": "CONCERN",
+      "detail": "No tool activity detected"
+    },
+    {
+      "case": "S1d",
+      "verdict": "CONCERN",
+      "detail": "No TOOL_RESULT — tool execution may not have completed"
+    },
+    {
+      "case": "S1e",
+      "verdict": "CONCERN",
+      "detail": "No SKILL_SELECT in evidence chain. Types: ['?']"
+    },
+    {
+      "case": "S2a",
+      "verdict": "CONCERN",
+      "detail": "SUBAGENT_DELEGATE_L1 NOT dispatched; L0 events=0 — delegation may have fallen back to L0",
+      "l0_count": 0,
+      "total_events": 1
+    },
+    {
+      "case": "S2b",
+      "verdict": "CONCERN",
+      "detail": "Cannot verify — L1 not dispatched",
+      "blocked_by": "S2a"
+    },
+    {
+      "case": "S2c",
+      "verdict": "CONCERN",
+      "detail": "Cannot verify — L1 not dispatched",
+      "blocked_by": "S2a"
+    },
+    {
+      "case": "S2d",
+      "verdict": "CONCERN",
+      "detail": "Cannot verify",
+      "blocked_by": "S2a"
+    },
+    {
+      "case": "S2e",
+      "verdict": "PASS",
+      "detail": "Evidence chain: 1 events, types=['?']"
+    }
+  ],
+  "summary": {
+    "PASS": 1,
+    "FAIL": 0,
+    "CONCERN": 9
+  }
+}

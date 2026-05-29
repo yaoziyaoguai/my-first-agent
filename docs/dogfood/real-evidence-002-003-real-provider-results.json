@@ -1,0 +1,67 @@
+{
+  "date": "2026-05-30",
+  "evidence_ids": [
+    "REAL-EVIDENCE-002",
+    "REAL-EVIDENCE-003"
+  ],
+  "method": "Real provider core.chat() E2E via ToolRuntimeMediator",
+  "tag": "complete",
+  "results": [
+    {
+      "case": "R0",
+      "verdict": "PASS",
+      "detail": "provider connectivity ok: AnthropicCompatibleProvider"
+    },
+    {
+      "case": "R2",
+      "verdict": "PASS",
+      "detail": "SKILL_SELECT evidence found: selected=?, total events=1"
+    },
+    {
+      "case": "R3",
+      "verdict": "PASS",
+      "detail": "mediator pipeline: skill_select=1, tool_gate=3, tool_invoke=2"
+    },
+    {
+      "case": "R4",
+      "verdict": "PASS",
+      "detail": "skill_id=demo-note-maker, body_len=300, allowed_tools={'demo.write_demo_note', 'demo.echo_task_summary'}"
+    },
+    {
+      "case": "R5",
+      "verdict": "PASS",
+      "detail": "_skill_selected_by_model=False (active_skill populated=True)"
+    },
+    {
+      "case": "R6",
+      "verdict": "PASS",
+      "detail": "model-owned=True, keyword-fallback=False"
+    },
+    {
+      "case": "R8",
+      "verdict": "PASS",
+      "detail": "TOOL_GATE rejected disallowed tool 'SKILL_SELECT' via skill_allowed_tools→rejected (identified by decision=rejected + skill_allowed_tools present). active skill allowed: ('demo.echo_task_summary', 'demo.write_demo_note')"
+    },
+    {
+      "case": "R9",
+      "verdict": "PASS",
+      "detail": "No TOOL_INVOKE for disallowed tool 'SKILL_SELECT'"
+    },
+    {
+      "case": "R10",
+      "verdict": "PASS",
+      "detail": "skill_allowed_tools_present=True, decision_rejected=True, requested_tool_name_present=True, skill_allowed_tools=('demo.echo_task_summary', 'demo.write_demo_note')"
+    },
+    {
+      "case": "R11",
+      "verdict": "PASS",
+      "detail": "execute_single_tool not called for disallowed tool (FORCE_STOP from mediator)"
+    }
+  ],
+  "summary": {
+    "PASS": 10,
+    "FAIL": 0,
+    "CONCERN": 0,
+    "SKIP": 0
+  }
+}

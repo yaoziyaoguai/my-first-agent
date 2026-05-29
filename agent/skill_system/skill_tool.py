@@ -46,6 +46,7 @@ def _ensure_skill_select_registered():
                 "description": "选择此 Skill 的原因（可选）。",
             },
         },
+        "required": ["skill_id"],
         "confirmation": "never",
         "func": _skill_select_tool_func,
         "pre_execute": None,
@@ -57,13 +58,19 @@ def _ensure_skill_select_registered():
     }
 
 
-def _skill_select_tool_func(skill_id: str, reason: str = ""):
+def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
     """SKILL_SELECT 工具执行体——模型自主选择 Skill。
 
     由 ToolRuntimeMediator → execute_single_tool 调用。
     校验 skill_id、加载 body、更新 _active_skill、返回激活确认。
     unknown/malformed skill_id 返回描述性错误，不 crash。
     """
+    if not skill_id or not isinstance(skill_id, str):
+        return (
+            "SKILL_SELECT 调用缺少有效的 skill_id 参数。"
+            "请从 [Active Skills] 列表中选择一个 skill_id 传入。"
+        )
+
     from pathlib import Path
 
     from agent.skill_system.loader import SkillLoader

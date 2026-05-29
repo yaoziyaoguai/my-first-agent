@@ -17,10 +17,10 @@ import ast
 import importlib
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
+    "SKILL_SELECT",
     "demo.echo_task_summary",
     "demo.write_demo_note",
     "edit_file",
@@ -112,6 +112,13 @@ EXPECTED_INTERNAL_TOOL_SPECS = {
         "confirmation": "never",
         "meta_tool": True,
     },
+    "SKILL_SELECT": {
+        "capability": "skill_lifecycle",
+        "risk_level": "low",
+        "output_policy": "bounded_text",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
     "run_shell": {
         "capability": "command_execution",
         "risk_level": "high",
@@ -189,6 +196,11 @@ def test_model_visible_tools_match_runtime_allowed_tools() -> None:
     """
 
     _load_builtin_tools()
+
+    # REAL-EVIDENCE-002: SKILL_SELECT 是生产路径中 _call_model() 前注册的
+    # model-owned tool，contract test 必须反映这一注册。
+    from agent.skill_system.skill_tool import _ensure_skill_select_registered
+    _ensure_skill_select_registered()
 
     from agent.tool_registry import TOOL_REGISTRY, get_allowed_tools, get_model_visible_tools
 
@@ -330,6 +342,11 @@ def test_internal_tool_specs_expose_capability_risk_and_output_policy() -> None:
 
     _load_builtin_tools()
 
+    # REAL-EVIDENCE-002: SKILL_SELECT 是生产路径中 _call_model() 前注册的
+    # model-owned tool，contract test 必须反映这一注册。
+    from agent.skill_system.skill_tool import _ensure_skill_select_registered
+    _ensure_skill_select_registered()
+
     from agent.tool_registry import get_tool_specs
 
     specs = {spec["name"]: spec for spec in get_tool_specs()}
@@ -403,7 +420,7 @@ def test_meta_tools_are_explicitly_marked_but_still_model_visible() -> None:
         name for name, entry in TOOL_REGISTRY.items() if entry.get("meta_tool")
     }
 
-    assert EXPECTED_META_TOOLS <= visible_tools
+    assert visible_tools >= EXPECTED_META_TOOLS
     assert actual_meta_tools == EXPECTED_META_TOOLS
     assert {name for name in EXPECTED_META_TOOLS if is_meta_tool(name)} == EXPECTED_META_TOOLS
     assert not is_meta_tool("read_file")

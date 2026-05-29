@@ -43,6 +43,20 @@ class TestSkillSelectRegistration:
             f"SKILL_SELECT 应在 model-visible tools 中，实际: {names}"
         )
 
+    def test_r1b_schema_has_required_skill_id(self):
+        """R1b: SKILL_SELECT schema 应声明 required: ["skill_id"]。"""
+        from agent.skill_system.skill_tool import _ensure_skill_select_registered
+        from agent.tool_registry import TOOL_REGISTRY
+
+        _ensure_skill_select_registered()
+        entry = TOOL_REGISTRY["SKILL_SELECT"]
+
+        required = entry.get("required")
+        assert required is not None, "SKILL_SELECT schema 缺少 required 字段"
+        assert "skill_id" in required, (
+            f"required 应包含 skill_id, 实际: {required}"
+        )
+
     def test_r2b_registration_idempotent(self):
         """R2b: 多次调用 _ensure_skill_select_registered() 应是幂等的。"""
         from agent.skill_system.skill_tool import _ensure_skill_select_registered
@@ -85,12 +99,22 @@ class TestSkillSelectToolFunc:
         assert "已激活" not in result
 
     def test_r5_empty_skill_id_fallback(self):
-        """R5: skill_id="" → 返回错误信息。"""
+        """R5: skill_id="" → 返回描述性错误。"""
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         result = _skill_select_tool_func("")
 
-        assert "不可用" in result or "不" in result
+        assert "缺少" in result or "不可用" in result
+        assert "已激活" not in result
+
+    def test_r5b_non_string_skill_id_fallback(self):
+        """R5b: skill_id 为非字符串 → 安全失败。"""
+        from agent.skill_system.skill_tool import _skill_select_tool_func
+
+        result = _skill_select_tool_func(None)  # type: ignore[arg-type]
+
+        assert "缺少" in result or "不可用" in result
+        assert "已激活" not in result
 
     def test_r6_active_skill_set_after_activation(self):
         """R6: 激活后 _active_skill 应正确填充。"""

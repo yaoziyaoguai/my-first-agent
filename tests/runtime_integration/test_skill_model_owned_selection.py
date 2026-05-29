@@ -422,6 +422,183 @@ class TestKeywordFallbackPreserved:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# I13-I15: Turn-end hook fallback guard — flag 控制 keyword fallback 的循环级行为
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestTurnEndHookFallbackGuard:
+    """turn-end hook 中 _skill_selected_by_model flag 的循环级行为。
+
+    验证 loop.turn_end hook（_try_phase1_turn_end_runtime_action）在 skill
+    selection 阶段是否正确检查 flag 来决定是否触发 keyword fallback。
+    不绕过 loop 直接调用 tool func——通过完整的 hook 路径验证 loop 级行为。
+    """
+
+    @staticmethod
+    def _build_skill_dispatcher():
+        """构建包含 SKILL_SELECT handler 的 dispatcher。"""
+        registry = SkillRegistry(roots=[Path("skills")])
+        handler = SkillRuntimeActionHandler(
+            registry=registry, loader=SkillLoader(registry)
+        )
+        handler_registry = ActionHandlerRegistry()
+        handler_registry.register(RuntimeActionType.SKILL_SELECT, handler)
+        return RuntimeActionDispatcher(
+            registry=handler_registry, observer=RuntimeActionModuleObserver()
+        )
+
+    @staticmethod
+    def _build_dependencies(state, dispatcher):
+        """构建包含 skill_registry 的 LoopDependencies。"""
+
+        registry = SkillRegistry(roots=[Path("skills")])
+        deps = MagicMock()
+        deps.state = state
+        deps.provider_kind = "anthropic_compatible"
+        deps.provider_external_call = True
+        deps.skill_registry = registry
+        deps.runtime_action_dispatcher = dispatcher
+        deps.tool_gate_tool_name = "_safe_noop"
+        deps.streaming_events = []
+        return deps
+
+    @staticmethod
+    def _build_state_with_user_message(user_text: str):
+        """构造包含用户消息的 state。"""
+        state = MagicMock()
+        state.task.loop_iterations = 0
+        state.task.tool_call_count = 0
+        state.task.pending_retain_proposals = None
+        state.conversation.messages = [
+            {"role": "user", "content": user_text},
+        ]
+        return state
+
+    @staticmethod
+    def _capture_skill_selection_decisions(dispatcher) -> list[dict]:
+        """从 dispatcher action_log 提取 skill.select 事件的 evidence。
+
+        返回包含 body_load_decision / selected_skill_id 等字段的列表。
+        keyword fallback 触发时 body_load_decision=True；
+        被 skip 时 handler 返回 validation failure（payload 不含 model_decision_metadata）。
+        """
+        decisions: list[dict] = []
+        for event in dispatcher.action_log:
+            if str(getattr(event, "action_type", "")) == "skill.select":
+                evidence = getattr(event, "evidence", {}) or {}
+                decisions.append({
+                    "status": getattr(event, "status", ""),
+                    "body_load_decision": evidence.get("body_load_decision"),
+                    "selected_skill_id": evidence.get("selected_skill_id"),
+                    "selection_reason": evidence.get("selection_reason"),
+                })
+        return decisions
+
+    def test_i13_flag_true_suppresses_keyword_fallback(self):
+        """I13: _skill_selected_by_model=True → turn-end hook 跳过 keyword fallback。
+
+        模型已在当前 turn 通过 tool_use("SKILL_SELECT") 自主选择了 skill，
+        turn-end hook 应消费 flag 但不执行 keyword fallback。
+        """
+        import agent.core as _core
+        from agent.loop import _try_phase1_turn_end_runtime_action
+
+        _core._skill_selected_by_model = True
+        _core._active_skill = {}
+
+        dispatcher = self._build_skill_dispatcher()
+        state = self._build_state_with_user_message("写 demo 笔记")
+        deps = self._build_dependencies(state, dispatcher)
+
+        _try_phase1_turn_end_runtime_action(state, "test result", dispatcher, deps)
+
+        # flag 为 True 时不应触发 keyword fallback → body_load_decision 不为 True
+        decisions = self._capture_skill_selection_decisions(dispatcher)
+        body_loads = [d for d in decisions if d["body_load_decision"] is True]
+        assert len(body_loads) == 0, (
+            f"flag=True 时不应加载 skill body (keyword fallback 被 skip), "
+            f"实际加载: {body_loads}"
+        )
+
+        # flag 应被消费
+        assert _core._skill_selected_by_model is False, (
+            "flag 应在 turn-end hook 中被消费 (重置为 False)"
+        )
+
+    def test_i14_flag_false_allows_keyword_fallback(self):
+        """I14: _skill_selected_by_model=False → turn-end hook 正常执行 keyword fallback。
+
+        模型未自主选择 skill，turn-end hook 应通过 keyword matching 尝试匹配。
+        """
+        import agent.core as _core
+        from agent.loop import _try_phase1_turn_end_runtime_action
+
+        _core._skill_selected_by_model = False
+        _core._active_skill = {}
+
+        dispatcher = self._build_skill_dispatcher()
+        state = self._build_state_with_user_message("写 demo 笔记")
+        deps = self._build_dependencies(state, dispatcher)
+
+        _try_phase1_turn_end_runtime_action(state, "test result", dispatcher, deps)
+
+        # flag 为 False 时 keyword fallback 应触发 → body_load_decision=True
+        decisions = self._capture_skill_selection_decisions(dispatcher)
+        body_loads = [d for d in decisions if d["body_load_decision"] is True]
+        assert len(body_loads) >= 1, (
+            f"flag=False 时应触发 keyword fallback 加载 skill body, "
+            f"decisions: {decisions}"
+        )
+        assert body_loads[0]["selected_skill_id"] == "demo-note-maker", (
+            f"keyword fallback 应匹配 demo-note-maker, "
+            f"实际: {body_loads[0].get('selected_skill_id')}"
+        )
+
+    def test_i15_flag_not_leak_across_turns(self):
+        """I15: flag 消费后不会跨 turn 泄漏。
+
+        - flag=True → turn-end hook 消费 flag → flag=False
+        - 下一 turn flag=False → keyword fallback 正常触发
+        验证 flag 不会在消费后保持 True，也不会因其他原因残留。
+        """
+        import agent.core as _core
+        from agent.loop import _try_phase1_turn_end_runtime_action
+
+        # ── Turn 1: model-owned selection ──
+        _core._skill_selected_by_model = True
+        _core._active_skill = {}
+
+        dispatcher1 = self._build_skill_dispatcher()
+        state1 = self._build_state_with_user_message("写 demo 笔记")
+        deps1 = self._build_dependencies(state1, dispatcher1)
+
+        _try_phase1_turn_end_runtime_action(state1, "result turn 1", dispatcher1, deps1)
+
+        # Turn 1 后 flag 应为 False
+        assert _core._skill_selected_by_model is False
+        decisions1 = self._capture_skill_selection_decisions(dispatcher1)
+        body_loads1 = [d for d in decisions1 if d["body_load_decision"] is True]
+        assert len(body_loads1) == 0, "Turn 1 (flag=True): 不应触发 keyword fallback"
+
+        # ── Turn 2: 无 model-owned selection ──
+        # flag 已为 False，不应被 Turn 1 残留影响
+        dispatcher2 = self._build_skill_dispatcher()
+        state2 = self._build_state_with_user_message("写 demo 笔记")
+        deps2 = self._build_dependencies(state2, dispatcher2)
+
+        _try_phase1_turn_end_runtime_action(state2, "result turn 2", dispatcher2, deps2)
+
+        # Turn 2 后 flag 仍为 False
+        assert _core._skill_selected_by_model is False, (
+            "flag 在 turn 2 后不应泄漏为 True"
+        )
+        decisions2 = self._capture_skill_selection_decisions(dispatcher2)
+        body_loads2 = [d for d in decisions2 if d["body_load_decision"] is True]
+        assert len(body_loads2) >= 1, "Turn 2 (flag=False): keyword fallback 应正常触发"
+        assert body_loads2[0]["selected_skill_id"] == "demo-note-maker"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # I10-I12: Evidence distinction
 # ═════════════════════════════════════════════════════════════════════════════
 

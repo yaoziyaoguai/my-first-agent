@@ -1,0 +1,69 @@
+{
+  "evidence_id": "REAL-EVIDENCE-008",
+  "description": "Advanced Scheduler real provider E2E",
+  "summary": {
+    "pass": 9,
+    "fail": 0,
+    "concern": 0
+  },
+  "results": [
+    {
+      "case": "S0",
+      "verdict": "PASS",
+      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 1.6s)"
+    },
+    {
+      "case": "S1",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_START: plan_id=real-evidence-008-e2e, total_nodes=None, entry_node_id=None"
+    },
+    {
+      "case": "S2",
+      "verdict": "PASS",
+      "detail": "NODE_ENTER x2: ['step_1', 'step_2']"
+    },
+    {
+      "case": "S3",
+      "verdict": "PASS",
+      "detail": "NODE_EXIT x3: ['step_1/completed', 'step_2/completed', 'step_3/skipped']"
+    },
+    {
+      "case": "S4",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_COMPLETE: disposition=completed, completed=None/None"
+    },
+    {
+      "case": "S5",
+      "verdict": "PASS",
+      "detail": "Cross-node influence: skip_step_3=True set by step_2 → step_3 skipped, all flags={'step_1_done': True, 'skip_step_3': True}"
+    },
+    {
+      "case": "S6",
+      "verdict": "PASS",
+      "detail": "Condition-triggered skip: node=step_3, reason=?"
+    },
+    {
+      "case": "S7",
+      "verdict": "PASS",
+      "detail": "Real provider called via core.chat() for 2 nodes, plan status=completed"
+    },
+    {
+      "case": "S8",
+      "verdict": "PASS",
+      "detail": "Not a no-crash PASS: 8 positive assertions, 0 fails, 0 concerns"
+    }
+  ],
+  "run_info": {
+    "final_status": "completed",
+    "node_count": 2,
+    "completed_nodes": [
+      "step_1",
+      "step_2",
+      "step_3"
+    ],
+    "condition_flags": {
+      "step_1_done": true,
+      "skip_step_3": true
+    }
+  }
+}

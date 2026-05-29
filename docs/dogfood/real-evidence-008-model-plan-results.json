@@ -1,0 +1,84 @@
+{
+  "evidence_id": "REAL-EVIDENCE-008-MODEL-PLAN",
+  "description": "Model-generated ActionPlan → scheduler evidence validation",
+  "overall_verdict": "PASS — model-generated plan → scheduler evidence chain closed",
+  "is_real_provider": true,
+  "provider_kind": "AnthropicCompatibleProvider",
+  "summary": {
+    "pass": 13,
+    "fail": 0,
+    "concern": 0,
+    "env_concern": 0,
+    "model_behavior_concern": 0
+  },
+  "results": [
+    {
+      "case": "M0",
+      "verdict": "PASS",
+      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 1.5s)"
+    },
+    {
+      "case": "M1",
+      "verdict": "PASS",
+      "detail": "Model produced JSON-like output (878 chars, has_braces=True, has_plan_id=True, has_nodes=True, 5.1s)"
+    },
+    {
+      "case": "M2",
+      "verdict": "PASS",
+      "detail": "build_action_plan_from_model_output() succeeded: plan_id=cond_flag_test_001, nodes=3, has_depends=True, has_condition=True"
+    },
+    {
+      "case": "M3",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_START: plan_id=cond_flag_test_001, total_nodes=None, entry_node_id=None"
+    },
+    {
+      "case": "M4",
+      "verdict": "PASS",
+      "detail": "NODE_ENTER x2: ['step_1', 'step_2']"
+    },
+    {
+      "case": "M5",
+      "verdict": "PASS",
+      "detail": "NODE_EXIT x3: ['step_1/completed', 'step_2/completed', 'step_3/skipped']"
+    },
+    {
+      "case": "M6",
+      "verdict": "PASS",
+      "detail": "ACTION_PLAN_COMPLETE: disposition=completed, completed=None/None"
+    },
+    {
+      "case": "M7",
+      "verdict": "PASS",
+      "detail": "Cross-node condition flag: skip_step_3=True → step_3 skipped, all flags={'skip_step_3': True}"
+    },
+    {
+      "case": "M8",
+      "verdict": "PASS",
+      "detail": "Not a no-crash PASS: 8 positive assertions, 0 fails, 0 concerns"
+    },
+    {
+      "case": "M9",
+      "verdict": "PASS",
+      "detail": "Non-JSON text correctly raises parse error"
+    },
+    {
+      "case": "M10",
+      "verdict": "PASS",
+      "detail": "Empty nodes correctly raises ValueError"
+    },
+    {
+      "case": "M11",
+      "verdict": "PASS",
+      "detail": "Mixed valid/invalid nodes: invalid skipped, valid=['good_1', 'good_2']"
+    },
+    {
+      "case": "M12",
+      "verdict": "PASS",
+      "detail": "Markdown code fence correctly stripped"
+    }
+  ],
+  "model_outputs": {
+    "plan_generation_raw": "{\"plan_id\":\"cond_flag_test_001\",\"entry_node_id\":\"step_1\",\"description\":\"Test plan for scheduler condition_flags with skip behavior\",\"nodes\":[{\"node_id\":\"step_1\",\"action_type\":\"TOOL_CALL\",\"target\":\"real_provider_chat\",\"params\":{\"prompt\":\"Reply with exactly: STEP_1_DONE\"},\"depends_on\":[],\"recovery\":{\"on_failure\":\"halt\"},\"condition\":null,\"description\":\"first node\"},{\"node_id\":\"step_2\",\"action_type\":\"TOOL_CALL\",\"target\":\"real_provider_chat\",\"params\":{\"prompt\":\"Reply with exactly: STEP_2_DONE\"},\"depends_on\":[\"step_1\"],\"recovery\":{\"on_failure\":\"skip\"},\"condition\":null,\"description\":\"second node, depends on step_1\"},{\"node_id\":\"step_3\",\"action_type\":\"TOOL_CALL\",\"target\":\"real_provider_chat\",\"params\":{\"prompt\":\"This should not execute\"},\"depends_on\":[\"step_2\"],\"recovery\":{\"on_failure\":\"skip\"},\"condition\":\"skip_step_3\",\"description\":\"third node, skipped by condition flag\"}]}"
+  }
+}

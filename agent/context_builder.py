@@ -5,7 +5,6 @@ from agent.planner import Plan
 from agent.task_runtime import USER_INPUT_STEP_TYPES, get_latest_step_completion
 from config import STEP_COMPLETION_THRESHOLD
 
-
 # ====================================================================
 # 严格投影：state.conversation.messages → 合规的 Anthropic messages
 # ====================================================================
@@ -242,6 +241,13 @@ def build_execution_messages(state: Any) -> list[dict]:
     # 从任务完成（advance 设 done）到 reset_task 之间有短暂窗口，current_plan
     # 仍然存在但语义上任务已结束——这时不能再把旧步骤指令喂给模型。
     if state.task.current_plan and state.task.status != "done":
+        # 当 current_plan 是 ActionPlan 格式（plan_id + nodes）而非旧 Plan 格式
+        # （goal + steps）时，跳过 Plan.model_validate —— ActionPlan 是 planner↔scheduler
+        # 之间的契约，不需要在旧 Plan 上下文中渲染。
+        _plan_dict = state.task.current_plan
+        if "plan_id" in _plan_dict and "nodes" in _plan_dict:
+            return model_messages
+
         plan = Plan.model_validate(state.task.current_plan)
         current_step = state.task.current_step_index
 
@@ -315,19 +321,26 @@ def build_execution_messages(state: Any) -> list[dict]:
                     "- 如果偏离当前步骤目标，这是错误",
                     "",
                     "【完成要求】",
-                    "- 本步骤工作收尾时，**必须调用 `mark_step_complete` 工具**声明结束并打分（0-100）。",
-                    f"- 分值 ≥ {STEP_COMPLETION_THRESHOLD} 才算真正完成；低于该阈值系统会把 outstanding 注入下一轮让你继续。",
+                    "- 本步骤工作收尾时，**必须调用 `mark_step_complete` 工具**"
+                    "声明结束并打分（0-100）。",
+                    f"- 分值 ≥ {STEP_COMPLETION_THRESHOLD} 才算真正完成；"
+                    "低于该阈值系统会把 outstanding 注入下一轮让你继续。",
                     "- 严禁只在文本里说\"本步骤已完成\"而不调用工具——系统只认工具信号。",
                     "",
                     "【遇到信息缺口的处理纪律】",
-                    "- 如果当前步骤执行过程中发现缺少关键用户信息，且无法通过读文件 / 已有上下文 / 合理假设继续，",
+                    "- 如果当前步骤执行过程中发现缺少关键用户信息，"
+                    "且无法通过读文件 / 已有上下文 / 合理假设继续，",
                     "  调用元工具 `request_user_input` 暂停执行并向用户提一个最关键的问题。",
                     "- 只在真正阻塞继续执行时才调用；能通过合理假设继续就不要请求用户输入。",
                     "- 一次只问一个最关键问题，不要把多个问题串在一起。",
-                    "- 调用 `request_user_input` 时**不要同轮调用 `mark_step_complete`**（求助意味着步骤未完成）。",
-                    "- 调用 `request_user_input` 时**不要同轮混用普通业务工具**（先暂停、等用户回复后再继续）。",
-                    "- **禁止**只用普通自然语言向用户提问然后 end_turn——必须调 `request_user_input`。",
-                    "  违反协议时系统兜底会强制暂停 loop（你将看不到下一轮的「请继续」提示）。",
+                    "- 调用 `request_user_input` 时**不要同轮调用 `mark_step_complete`**"
+                    "（求助意味着步骤未完成）。",
+                    "- 调用 `request_user_input` 时**不要同轮混用普通业务工具**"
+                    "（先暂停、等用户回复后再继续）。",
+                    "- **禁止**只用普通自然语言向用户提问然后 end_turn"
+                    "——必须调 `request_user_input`。",
+                    "  违反协议时系统兜底会强制暂停 loop"
+                    "（你将看不到下一轮的「请继续」提示）。",
                 ])
 
             if step.step_type not in USER_INPUT_STEP_TYPES:
@@ -344,7 +357,8 @@ def build_execution_messages(state: Any) -> list[dict]:
                             f"- 上次打分：{score}/100（阈值 {STEP_COMPLETION_THRESHOLD}）",
                             f"- 上次自述完成度：{summary}",
                             f"- 上次承认的未完成项：{outstanding}",
-                            "- 请优先补齐未完成项，而不是重复已做过的工作；再次调用 mark_step_complete 时给出更客观的分值。",
+                            "- 请优先补齐未完成项，而不是重复已做过的工作；"
+                            "再次调用 mark_step_complete 时给出更客观的分值。",
                         ])
 
             model_messages.append({

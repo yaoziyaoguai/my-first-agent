@@ -1,5 +1,6 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,8 +85,10 @@ from agent.model_output_dispatch import (
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
 from agent.planner import (
     ACTION_PLAN_PROMPT,
+    SCHEMA_REPAIR_PROMPT,
     format_action_plan_for_display,
     format_plan_for_display,  # ⛔ LEGACY: Sunset v0.5+
+    validate_action_plan_raw,
 )
 from agent.prompt_builder import build_system_prompt
 from agent.provider.protocol import (
@@ -429,13 +432,18 @@ def _build_confirmation_context(
     state,
     turn_state,
     loop_ctx: LoopContext,
+    action_scheduler: Any = None,
 ) -> ConfirmationContext:
     """兼容入口：实际 ConfirmationContext 组装在 `agent.core_contexts`。"""
 
     return build_confirmation_context(
         state=state,
         turn_state=turn_state,
-        continue_fn=lambda ts: _run_main_loop(ts, loop_ctx),
+        # 在闭包中捕获 action_scheduler，保证 plan confirmation 后的
+        # continue_fn → _run_main_loop 路径不丢失 scheduler 注入。
+        continue_fn=lambda ts, _as=action_scheduler: _run_main_loop(
+            ts, loop_ctx, action_scheduler=_as
+        ),
         start_planning_fn=lambda inp, ts: _start_planning_for_handler(
             inp, ts, loop_ctx
         ),
@@ -990,6 +998,7 @@ def chat(
         state=state,
         turn_state=turn_state,
         loop_ctx=_loop_ctx,
+        action_scheduler=action_scheduler,
     )
 
     # v0.5.1 第三小步：5 条 pending confirmation 分支抽进
@@ -1118,32 +1127,157 @@ def _run_planning_phase(
     """
     from agent.planner import generate_action_plan
 
-    # ── 单次 API 调用 ──
+    # ── 单次 API 调用 + schema validation + 最多一次 repair retry ──
     planning_messages = build_planning_messages_from_state(state, user_input)
     clean_text = None
     raw = None
-    try:
-        response = loop_ctx.client.messages.create(
-            model=loop_ctx.model_name,
-            max_tokens=1024,
-            system=ACTION_PLAN_PROMPT,
-            messages=planning_messages,
-        )
-        result_text = ""
-        for block in response.content:
-            if block.type == "text":
-                result_text = block.text
-                break
-        clean_text = result_text.strip()
-        if clean_text.startswith("```"):
-            clean_text = clean_text.split("\n", 1)[1]
-        if clean_text.endswith("```"):
-            clean_text = clean_text.rsplit("```", 1)[0]
-        clean_text = clean_text.strip()
-        raw = json.loads(clean_text)
-    except Exception:
-        raw = None
-        clean_text = None
+    schema_retry_used = False
+
+    # 内联 helper: 调用模型获取 planning 结果
+    # 返回 (clean_text, raw_json_dict_or_None)
+    # clean_text 永远返回模型原始输出文本（用于诊断），
+    # raw 为 None 时表示 JSON 提取全部失败。
+    def _call_planning_model(_system: str, _messages: list[dict]) -> tuple[str | None, dict | None]:
+        try:
+            response = loop_ctx.client.messages.create(
+                max_tokens=4096,
+                system=_system,
+                messages=_messages,
+            )
+            result_text = ""
+            for block in response.content:
+                if block.type == "text":
+                    result_text = block.text
+                    break
+
+            if not result_text.strip():
+                # 模型返回空文本时记录 stop_reason + 内容块类型分布，
+                # 用于诊断 thinking/max_tokens 等导致的空响应。
+                _block_types = [getattr(b, "type", "?") for b in response.content]
+                _sr = getattr(response, "stop_reason", None)
+                log_event("planning_model_empty_text", {
+                    "stop_reason": _sr,
+                    "block_types": _block_types,
+                    "content_block_count": len(response.content),
+                })
+                return "", None
+
+            _raw_text = result_text.strip()
+            # 从模型输出中提取 JSON：先尝试直接 parse，失败则从 markdown
+            # fence 或大括号对中提取。
+            try:
+                _raw = json.loads(_raw_text)
+                return _raw_text, _raw
+            except json.JSONDecodeError:
+                pass
+
+            # 尝试从 ```json / ``` fence 中提取
+            fence_match = re.search(
+                r'```(?:json)?\s*\n(.*?)\n\s*```', _raw_text, re.DOTALL
+            )
+            if fence_match:
+                try:
+                    _raw = json.loads(fence_match.group(1).strip())
+                    return _raw_text, _raw
+                except json.JSONDecodeError:
+                    pass
+
+            # 最后尝试从 { ... } 对中提取（处理模型在 JSON 前后加文本的情况）
+            brace_match = re.search(r'\{[\s\S]*\}', _raw_text)
+            if brace_match:
+                try:
+                    _raw = json.loads(brace_match.group(0))
+                    return _raw_text, _raw
+                except json.JSONDecodeError:
+                    pass
+
+            # 所有提取失败——返回原始文本用于诊断
+            return _raw_text, None
+        except Exception as _exc:
+            log_event("planning_model_call_error", {
+                "error_type": type(_exc).__name__,
+                "error_msg": str(_exc)[:300],
+                "phase": "model_api_call",
+                "model_name": str(loop_ctx.model_name)[:100],
+                "system_len": len(_system or ""),
+                "message_count": len(_messages or []),
+            })
+            return None, None
+
+    clean_text, raw = _call_planning_model(ACTION_PLAN_PROMPT, planning_messages)
+    log_event("planning_mode_entered", {
+        "action_plan_prompt_used": True,
+        "phase": "_run_planning_phase",
+        "raw_parsed": raw is not None,
+        "clean_text_len": len(clean_text or ""),
+    })
+
+    # ── schema validation + repair retry ──
+    # 当 action_scheduler 传入时（scheduler 模式），强制 ActionPlan schema——
+    # 不允许模型输出 steps/tool 等旧格式后静默回退 legacy。
+    # raw is None（JSON 提取完全失败）时也尝试 repair retry。
+    if action_scheduler is not None:
+        if raw is not None:
+            is_valid, reason = validate_action_plan_raw(raw)
+        else:
+            is_valid = False
+            reason = "模型输出不是合法 JSON（无法提取 JSON 对象）"
+
+        if not is_valid:
+            log_event("action_plan_schema_invalid", {
+                "reason": reason,
+                "phase": "schema_validation",
+                "raw_was_none": raw is None,
+            })
+            # 一次 repair retry（需要 clean_text 非空才可重试）
+            if clean_text:
+                schema_retry_used = True
+                repair_content = SCHEMA_REPAIR_PROMPT.format(wrong_patterns=reason)
+                repair_messages = list(planning_messages) + [
+                    {"role": "assistant", "content": clean_text},
+                    {"role": "user", "content": repair_content},
+                ]
+                clean_text, raw = _call_planning_model(
+                    ACTION_PLAN_PROMPT, repair_messages
+                )
+                if raw is not None:
+                    is_valid2, reason2 = validate_action_plan_raw(raw)
+                    if is_valid2:
+                        is_valid = True
+                        log_event("action_plan_schema_validated", {
+                            "after_retry": True,
+                            "phase": "schema_repair_retry_success",
+                        })
+                    else:
+                        log_event("planning_failed", {
+                            "reason": reason2,
+                            "retry_used": True,
+                            "phase": "schema_repair_retry_failed",
+                        })
+                        raw = None
+                        clean_text = None
+                else:
+                    log_event("planning_failed", {
+                        "reason": "retry parse failed",
+                        "retry_used": True,
+                        "phase": "schema_repair_retry_parse_error",
+                    })
+                    clean_text = None
+            else:
+                log_event("planning_failed", {
+                    "reason": reason,
+                    "retry_used": False,
+                    "phase": "schema_validation_no_text_for_retry",
+                })
+    elif raw is not None and action_scheduler is None:
+        is_valid, reason = validate_action_plan_raw(raw)
+        if is_valid:
+            log_event("action_plan_schema_validated", {"after_retry": False})
+        # 无 scheduler 时不强制 schema——允许 legacy fallback
+        log_event("model_plan_received", {
+            "schema_valid": is_valid,
+            "has_scheduler": False,
+        })
 
     # ── 解析路径 1：通过 planner.generate_action_plan() 解析 ActionPlan ──
     # 这是 ActionPlan 解析的唯一正式入口。core.py 不再直接调用
@@ -1157,10 +1291,18 @@ def _run_planning_phase(
                 messages=planning_messages,
                 clean_text=clean_text,
             )
+            if action_plan is not None:
+                log_event("scheduler_load_success", {
+                    "plan_id": action_plan.plan_id,
+                    "nodes": len(action_plan.nodes),
+                    "schema_retry_used": schema_retry_used,
+                })
 
     # ── 解析路径 2：legacy Plan/PlanStep schema（回退桥接）──
+    # ⚠️ scheduler 模式下（action_scheduler set），schema 验证失败后不启用
+    # legacy fallback——模型必须输出正确 ActionPlan schema。
     legacy_plan = None
-    if action_plan is None and raw is not None:
+    if action_plan is None and raw is not None and action_scheduler is None:
         try:
             steps_estimate = raw.get("steps_estimate", 0)
             if isinstance(steps_estimate, (int, float)) and int(steps_estimate) <= 1:

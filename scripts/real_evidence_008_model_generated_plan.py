@@ -1,13 +1,16 @@
-"""REAL-EVIDENCE-008 Model-Generated ActionPlan Validation (v2).
+"""REAL-EVIDENCE-008 Model-Generated ActionPlan Validation (v3).
 
-验证目标: real model 能否稳定生成被 build_action_plan_from_model_output()
-成功解析的 JSON ActionPlan，并通过 core.chat → _run_main_loop(action_scheduler=scheduler)
+验证目标: real model 能否在强化后的 ACTION_PLAN_PROMPT + schema validation +
+最多一次 repair retry 下稳定生成合法 ActionPlan JSON，
+并通过 core.chat → _run_main_loop(action_scheduler=scheduler)
 完整 injection chain 产生 scheduler evidence。
 
-v2 关键变更（vs v1）:
-  - v1: provider.create() 直接调用 → model JSON → manual while loop
-  - v2: core.chat() → _run_planning_phase() → generate_action_plan() →
-        core.chat("y") → _run_main_loop(action_scheduler=scheduler) → evidence
+v3 关键变更（vs v2）:
+  - v2: 原始 ACTION_PLAN_PROMPT + model JSON → 出现 MODEL_BEHAVIOR_CONCERN
+  - v3: 强化后的 ACTION_PLAN_PROMPT（含禁止模式） + validate_action_plan_raw()
+        + 一次 repair retry + legacy fallback gate
+  - schema enforcement evidence: planning_mode_entered / action_plan_schema_validated
+        / action_plan_schema_invalid / planning_failed / scheduler_load_success
 
 v1 的 provider.create() 旁路和 manual while 不再是 008 主证据。
 v2 的主证据全部来自 core.chat main runtime path。
@@ -84,14 +87,18 @@ def _safe_payload(e: Any) -> dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 PLAN_GENERATION_USER_PROMPT = (
-    "请为以下测试任务生成执行计划 ActionPlan JSON：\n\n"
-    "步骤1 (step_1)：用 bash 工具列出当前目录文件。无依赖。\n"
-    "步骤2 (step_2)：用 read_file 工具读取 README.md。依赖 step_1 完成。\n"
-    "  如果失败则跳过（recovery.on_failure=skip）。\n"
-    "步骤3 (step_3)：用 write_file 工具创建 summary.txt。依赖 step_2 完成。\n"
-    "  但如果 step_2 设置了 skip_step_3 条件标志（condition=\"skip_step_3\"），则跳过此步骤。\n\n"
+    "请为以下任务生成执行计划 ActionPlan JSON：\n\n"
+    "node_1（node_id=\"node_1\"）：用 bash 工具列出当前目录文件。无依赖。\n"
+    "node_2（node_id=\"node_2\"）：用 read_file 工具读取 README.md。依赖 node_1 完成。\n"
+    "  如果失败则跳过（recovery.on_failure=\"skip\"）。\n"
+    "node_3（node_id=\"node_3\"）：用 write_file 工具创建 summary.txt。依赖 node_2 完成。\n"
+    "  但设置 condition=\"skip_step_3\"，"
+    "当 node_2 设置了 skip_step_3 条件标志时跳过此 node。\n\n"
     "输出要求：\n"
-    "- plan_id 使用 \"cond_flag_test_v2_001\"\n"
+    "- plan_id 使用 \"cond_flag_test_v3_001\"\n"
+    "- 使用 nodes（不是 steps）、node_id（不是 step_id）\n"
+    "- 使用 action_type + target（不是 tool）\n"
+    "- 使用 params（不是 args）\n"
     "- 严格输出 JSON，不要 markdown，不要解释\n"
     "- 每个 node 必须包含完整的 recovery 字段\n"
     "- depends_on 即使为空也要输出 []\n"

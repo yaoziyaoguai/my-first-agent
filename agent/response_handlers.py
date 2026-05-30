@@ -433,27 +433,32 @@ def _maybe_advance_step(state: Any) -> str | None:
     )
 
     if state.task.current_plan:
-        plan = Plan.model_validate(state.task.current_plan)
-        idx = state.task.current_step_index
+        # 当 current_plan 是 ActionPlan 格式时，不进入旧 Plan step 推进逻辑。
+        _plan_dict = state.task.current_plan
+        if "plan_id" in _plan_dict and "nodes" in _plan_dict:
+            pass
+        else:
+            plan = Plan.model_validate(state.task.current_plan)
+            idx = state.task.current_step_index
 
-        if idx < len(plan.steps) - 1:
-            if state.task.confirm_each_step:
-                state.task.status = "awaiting_step_confirmation"
-                save_checkpoint(state)
-                return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
-            advance_current_step_if_needed(state)
-            log_event(
-                "runtime.progress_applied",
-                event_source="runtime",
-                event_payload={
-                    **_current_step_fields(state),
-                    "current_step_index_before": before_index,
-                    "current_step_index_after": state.task.current_step_index,
-                    "should_continue_loop": True,
-                },
-                event_channel="progress",
-            )
-            return None
+            if idx < len(plan.steps) - 1:
+                if state.task.confirm_each_step:
+                    state.task.status = "awaiting_step_confirmation"
+                    save_checkpoint(state)
+                    return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
+                advance_current_step_if_needed(state)
+                log_event(
+                    "runtime.progress_applied",
+                    event_source="runtime",
+                    event_payload={
+                        **_current_step_fields(state),
+                        "current_step_index_before": before_index,
+                        "current_step_index_after": state.task.current_step_index,
+                        "should_continue_loop": True,
+                    },
+                    event_channel="progress",
+                )
+                return None
 
     advance_current_step_if_needed(state)
     log_event(
@@ -581,13 +586,17 @@ def handle_end_turn_response(
     _append_assistant_response(messages, response)
 
     if state.task.current_plan:
-        plan = Plan.model_validate(state.task.current_plan)
-        idx = state.task.current_step_index
-        current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
-        if current_step and current_step.step_type in USER_INPUT_STEP_TYPES:
-            state.task.status = "awaiting_user_input"
-            save_checkpoint(state)
-            return "\n[请补充上面的信息后继续]"
+        # ActionPlan 格式（plan_id + nodes）不进入旧 Plan step 逻辑，
+        # 避免 Plan.model_validate 对 ActionPlan dict 报 Field required。
+        _plan_dict = state.task.current_plan
+        if "plan_id" not in _plan_dict or "nodes" not in _plan_dict:
+            plan = Plan.model_validate(state.task.current_plan)
+            idx = state.task.current_step_index
+            current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
+            if current_step and current_step.step_type in USER_INPUT_STEP_TYPES:
+                state.task.status = "awaiting_user_input"
+                save_checkpoint(state)
+                return "\n[请补充上面的信息后继续]"
 
     # 步骤推进逻辑统一走 _maybe_advance_step——它读 mark_step_complete 日志判完成，
     # 而不是关键词匹配。end_turn 这条路径通常用于：

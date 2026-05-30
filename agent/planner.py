@@ -80,6 +80,14 @@ ACTION_PLAN_PROMPT = """你是一个任务规划器，输出机器可执行的 A
 - 多步骤任务 → 输出完整 ActionPlan JSON
 - 严格输出 JSON，不要 markdown，不要解释
 
+⛔ 禁止模式（CRITICAL — 违反将导致计划被拒绝）：
+- ❌ 不要使用 "steps" 键 — 必须使用 "nodes"
+- ❌ 不要使用 "step_id" 键 — 必须使用 "node_id"
+- ❌ 不要使用 "tool" 键 — 必须使用 "action_type" + "target"
+- ❌ 不要使用 "args" 键 — 必须使用 "params"
+- ❌ 不要省略 "steps_estimate" 字段（整数，>1 表示多步）
+- ❌ 不要省略 "entry_node_id" 字段
+
 如果是单步任务，输出：
 {
   "steps_estimate": 1
@@ -122,6 +130,77 @@ ACTION_PLAN_PROMPT = """你是一个任务规划器，输出机器可执行的 A
 - recovery 即使为默认值也要输出 {"on_failure": "halt"}
 - 顺序依赖的 node 必须显式声明 depends_on（如 step_2 depends_on ["step_1"]）
 """
+
+# 模型输出 schema 修复重试 prompt — 当模型使用了禁止的 key 时发送。
+# 明确告知模型它用错了什么 key，要求重新输出正确 schema。
+SCHEMA_REPAIR_PROMPT = """你的上一次输出不符合 ActionPlan schema，已被拒绝。
+
+错误：你使用了以下禁止的 key 或模式：
+{wrong_patterns}
+
+正确的 schema 要求：
+- 顶层: "steps_estimate" (int), "plan_id" (str), "entry_node_id" (str), "nodes" (array)
+- 每个 node 字段: node_id, action_type, target, params,
+  depends_on, recovery, condition, description
+- 关键纠正: nodes 不是 steps, node_id 不是 step_id, action_type+target 不是 tool, params 不是 args
+
+请重新输出完整、正确的 ActionPlan JSON。只输出 JSON，不要任何解释。"""
+
+
+def validate_action_plan_raw(raw: dict) -> tuple[bool, str]:
+    """验证模型输出的 raw JSON dict 是否符合 ActionPlan schema 要求。
+
+    检查项：
+    - nodes key 存在（不是 steps）
+    - 每个 node 有 node_id（不是 step_id）
+    - 每个 node 有 action_type + target（不是 tool）
+    - 每个 node 有 params（不是 args）
+    - steps_estimate > 1
+    - entry_node_id 存在
+
+    Returns:
+        (is_valid, reason) — is_valid=True 表示可通过，
+        is_valid=False 时 reason 描述错误（用于 repair prompt）。
+    """
+    wrong: list[str] = []
+
+    # 顶层 key 检查
+    if "steps" in raw and "nodes" not in raw:
+        wrong.append('顶层使用了 "steps"（应使用 "nodes"）')
+    if "nodes" not in raw:
+        wrong.append('顶层缺少 "nodes" key')
+    if "steps_estimate" not in raw:
+        wrong.append('缺少 "steps_estimate" 字段')
+    else:
+        se = raw.get("steps_estimate", 0)
+        if not isinstance(se, (int, float)) or int(se) <= 1:
+            wrong.append(f'steps_estimate={se}（多步任务必须 >1）')
+    if "entry_node_id" not in raw:
+        wrong.append('缺少 "entry_node_id" 字段')
+
+    # node 级 key 检查
+    nodes_container = raw.get("nodes") or raw.get("steps") or []
+    if isinstance(nodes_container, list) and len(nodes_container) > 0:
+        for i, node in enumerate(nodes_container):
+            if not isinstance(node, dict):
+                continue
+            prefix = f"node[{i}]"
+            if "step_id" in node and "node_id" not in node:
+                wrong.append(f'{prefix} 使用了 "step_id"（应使用 "node_id"）')
+            if "node_id" not in node:
+                wrong.append(f'{prefix} 缺少 "node_id"')
+            if "tool" in node and "action_type" not in node:
+                wrong.append(f'{prefix} 使用了 "tool"（应使用 "action_type" + "target"）')
+            if "action_type" not in node:
+                wrong.append(f'{prefix} 缺少 "action_type"')
+            if "target" not in node:
+                wrong.append(f'{prefix} 缺少 "target"')
+            if "args" in node and "params" not in node:
+                wrong.append(f'{prefix} 使用了 "args"（应使用 "params"）')
+
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, ""
 
 
 # ⛔ LEGACY: generate_plan() 返回旧 Plan 对象（PlanStep schema），

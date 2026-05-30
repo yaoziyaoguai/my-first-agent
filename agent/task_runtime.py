@@ -13,7 +13,6 @@ from typing import Any
 from agent.planner import Plan
 from config import STEP_COMPLETION_THRESHOLD
 
-
 USER_INPUT_STEP_TYPES = {"collect_input", "clarify"}
 
 
@@ -80,6 +79,14 @@ def advance_current_step_if_needed(state: Any) -> None:
     if not state.task.current_plan:
         state.task.status = "done"
         save_checkpoint(state, source="task_runtime.advance_current_step")
+        return
+
+    # 当 current_plan 是 ActionPlan 格式（plan_id + nodes）时，不进入旧 Plan
+    # step 推进逻辑——ActionPlan 的 node 推进由 scheduler 负责。
+    _plan_dict = state.task.current_plan
+    if "plan_id" in _plan_dict and "nodes" in _plan_dict:
+        state.task.status = "done"
+        save_checkpoint(state, source="task_runtime.advance_current_step_action_plan")
         return
 
     plan = Plan.model_validate(state.task.current_plan)

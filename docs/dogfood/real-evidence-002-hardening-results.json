@@ -12,22 +12,22 @@
     {
       "case": "R13",
       "verdict": "CONCERN",
-      "detail": "Non-steered prompt → SKILL_SELECT event present but no selected_skill_id. Evidence: {'action_id': 'act:4e98c14dc60a4d33a84708b6bd999e67', 'action_type': 'skill.select', 'dispatcher_route_id': 'route:b5028a43c69f45e284926de60bbfd5a9', 'dispatcher_result_id': 'result:a078819328f145a3a351a4048dd7d275', 'dispatcher_result_issued': True, 'dispatcher_routed': True, 'target_handler_invoked': True, 'handler_name': 'SkillRuntimeActionHandler', 'target_module': 'SkillLoader', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'module_invoked': True, 'invocation_proof': mappingproxy({'call_id': 'call:4b17d21c9e934572a2d18f398531f7b1', 'function_called': 'SkillLoader.no_suitable_skill', 'call_signature': 'no_suitable_skill(reason: str)', 'observed_at': '2026-05-30T00:11:44.425674+00:00', 'observation_method': 'module_spy'}), 'target_module_proof': mappingproxy({'proof_id': 'proof:078674f5f958467e8c68c90d41b911d1', 'observation_source': 'module_spy', 'observer_identity': 'RuntimeActionModuleObserver', 'observation_independent': True, 'linked_route_id': 'route:b5028a43c69f45e284926de60bbfd5a9', 'linked_action_id': 'act:4e98c14dc60a4d33a84708b6bd999e67', 'linked_action_type': 'skill.select', 'linked_handler_name': 'SkillRuntimeActionHandler', 'linked_target_module': 'SkillLoader', 'linked_call_id': 'call:4b17d21c9e934572a2d18f398531f7b1', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'linked_target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'descriptor_invocation_approved': True, 'linked_dispatcher_result_id': 'result:a078819328f145a3a351a4048dd7d275'}), 'result_returned_to_parent_runtime': True, 'parent_adjudicated': None, 'body_load_decision': False, 'no_suitable_skill': True, 'audit_only_skill_exclusion_evidence': mappingproxy({'hidden_or_disabled_exclusion_verified': True, 'excluded_count': 3, 'redacted_exclusion_reason_categories': ('manifest_invalid',)}), 'evidence_level': 'real_core_loop_runtime_e2e', 'runtime_action_source': 'core_loop', 'dispatcher_origin': 'runtime_loop', 'runtime_loop_invoked': True, 'core_loop_invoked': True, 'core_entrypoint': 'core.chat', 'runtime_hook_name': 'loop.turn_end', 'provider_kind': 'real', 'provider_external_call': True, 'external_side_effects': False}"
+      "detail": "Non-steered prompt → SKILL_SELECT event present but no selected_skill_id. Evidence: {'action_id': 'act:78281b4941bd4f4db353bc644b8417d2', 'action_type': 'skill.select', 'dispatcher_route_id': 'route:3dfcaf9c01074fefad596a9dac450172', 'dispatcher_result_id': 'result:999a141fc49e4d41883c08da3b173e33', 'dispatcher_result_issued': True, 'dispatcher_routed': True, 'target_handler_invoked': True, 'handler_name': 'SkillRuntimeActionHandler', 'target_module': 'SkillLoader', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'module_invoked': True, 'invocation_proof': mappingproxy({'call_id': 'call:23035591437b4c5ca37500ed2e8c9a56', 'function_called': 'SkillLoader.no_suitable_skill', 'call_signature': 'no_suitable_skill(reason: str)', 'observed_at': '2026-05-30T08:51:41.346698+00:00', 'observation_method': 'module_spy'}), 'target_module_proof': mappingproxy({'proof_id': 'proof:c1b6a7288584431397ba2e6edcfb1d17', 'observation_source': 'module_spy', 'observer_identity': 'RuntimeActionModuleObserver', 'observation_independent': True, 'linked_route_id': 'route:3dfcaf9c01074fefad596a9dac450172', 'linked_action_id': 'act:78281b4941bd4f4db353bc644b8417d2', 'linked_action_type': 'skill.select', 'linked_handler_name': 'SkillRuntimeActionHandler', 'linked_target_module': 'SkillLoader', 'linked_call_id': 'call:23035591437b4c5ca37500ed2e8c9a56', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'linked_target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'descriptor_invocation_approved': True, 'linked_dispatcher_result_id': 'result:999a141fc49e4d41883c08da3b173e33'}), 'result_returned_to_parent_runtime': True, 'parent_adjudicated': None, 'body_load_decision': False, 'no_suitable_skill': True, 'audit_only_skill_exclusion_evidence': mappingproxy({'hidden_or_disabled_exclusion_verified': True, 'excluded_count': 0, 'redacted_exclusion_reason_categories': ()}), 'evidence_level': 'real_core_loop_runtime_e2e', 'runtime_action_source': 'core_loop', 'dispatcher_origin': 'runtime_loop', 'runtime_loop_invoked': True, 'core_loop_invoked': True, 'core_entrypoint': 'core.chat', 'runtime_hook_name': 'loop.turn_end', 'provider_kind': 'real', 'provider_external_call': True, 'external_side_effects': False}"
     },
     {
       "case": "R14",
-      "verdict": "FAIL",
-      "detail": "skill_id=, body_len=0, allowed_tools=EMPTY"
+      "verdict": "PASS",
+      "detail": "skill_id=demo-note-maker, body_len=300, allowed_tools={'demo.echo_task_summary', 'demo.write_demo_note'}"
     },
     {
       "case": "R15a",
-      "verdict": "FAIL",
-      "detail": "Note request → no skill selected (should match demo-note-maker)"
+      "verdict": "PASS",
+      "detail": "Note request → demo-note-maker selected (score=3, reason=deterministic keyword match: user input matched skill 'demo-note-maker' via terms ['desc_cn_bigram:工具创建本地任务笔记', 'desc_cn_bigram:当用户要求写笔记', 'desc_cn_bigram:记录任务时匹配'] (score=3))"
     },
     {
       "case": "R15b",
-      "verdict": "FAIL",
-      "detail": "Translation request → no skill selected (should match quick-translator)"
+      "verdict": "PASS",
+      "detail": "Translation request → quick-translator selected (score=2, reason=deterministic keyword match: user input matched skill 'quick-translator' via terms ['desc_cn_bigram:快速翻译工具', 'desc_cn_bigram:当用户要求翻译'] (score=2))"
     },
     {
       "case": "R16",
@@ -37,7 +37,7 @@
     {
       "case": "R17",
       "verdict": "PASS",
-      "detail": "Single-skill scenario: model selected ? for note-taking request"
+      "detail": "Single-skill scenario: model selected demo-note-maker for note-taking request"
     },
     {
       "case": "R18",
@@ -76,8 +76,8 @@
     },
     {
       "case": "R25",
-      "verdict": "CONCERN",
-      "detail": "No skill selected in some runs: skills_per_run=[None, None, None]"
+      "verdict": "PASS",
+      "detail": "Consistent skill selection across runs: skills={'demo-note-maker'}, runs=3"
     },
     {
       "case": "R26",
@@ -87,13 +87,13 @@
     {
       "case": "R26-DEBUG",
       "verdict": "PASS",
-      "detail": "Stability detail: [{\"run\": 1, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 33, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 2, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 0, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 3, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 202, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}]"
+      "detail": "Stability detail: [{\"run\": 1, \"crashed\": false, \"skill_selected\": \"demo-note-maker\", \"skill_select_events\": 1, \"result_len\": 33, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 2, \"crashed\": false, \"skill_selected\": \"demo-note-maker\", \"skill_select_events\": 1, \"result_len\": 209, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 3, \"crashed\": false, \"skill_selected\": \"demo-note-maker\", \"skill_select_events\": 1, \"result_len\": 33, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}]"
     }
   ],
   "summary": {
-    "PASS": 9,
-    "FAIL": 3,
-    "CONCERN": 5,
+    "PASS": 13,
+    "FAIL": 0,
+    "CONCERN": 4,
     "SKIP": 0
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: demo-note-maker
-description: 围绕 demo 工具创建本地任务笔记。当用户要求"写笔记"、"记录任务"、"创建 demo note"、"make a note"时匹配。
+description: 围绕 demo 工具创建本地任务笔记。当用户要求"写笔记"、"记录任务"、"待办"、"备忘"、"记个笔记"、"创建 demo note"、"make a note"时匹配。
 version: 0.1.0
 status: active
 risk_level: low

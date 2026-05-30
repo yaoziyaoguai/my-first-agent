@@ -281,30 +281,36 @@ def validate_g2_multi_skill_competition(provider, dispatcher) -> None:
 
     # 笔记请求 → 应选 demo-note-maker
     note_decision = select_skill_for_real_provider("帮我写个笔记记录今天的会议", candidates)
-    if note_decision and note_decision.selected_skill_id == "demo-note-maker":
+    if note_decision and note_decision["selected_skill_id"] == "demo-note-maker":
+        nd_score = note_decision["match_score"]
+        nd_reason = note_decision["selection_reason"]
         record("R15a", "PASS",
-               f"Note request → demo-note-maker selected "
-               f"(score={note_decision.match_score}, "
-               f"reason={note_decision.selection_reason})")
+               "Note request → demo-note-maker selected "
+               f"(score={nd_score}, reason={nd_reason})")
     elif note_decision:
+        nd_sid = note_decision["selected_skill_id"]
+        nd_score = note_decision["match_score"]
         record("R15a", "CONCERN",
-               f"Note request → {note_decision.selected_skill_id} selected "
-               f"instead of demo-note-maker (score={note_decision.match_score})")
+               f"Note request → {nd_sid} selected "
+               f"instead of demo-note-maker (score={nd_score})")
     else:
         record("R15a", "FAIL",
                "Note request → no skill selected (should match demo-note-maker)")
 
     # 翻译请求 → 应选 quick-translator
     trans_decision = select_skill_for_real_provider("帮我把这段话翻译成英文", candidates)
-    if trans_decision and trans_decision.selected_skill_id == "quick-translator":
+    if trans_decision and trans_decision["selected_skill_id"] == "quick-translator":
+        td_score = trans_decision["match_score"]
+        td_reason = trans_decision["selection_reason"]
         record("R15b", "PASS",
-               f"Translation request → quick-translator selected "
-               f"(score={trans_decision.match_score}, "
-               f"reason={trans_decision.selection_reason})")
+               "Translation request → quick-translator selected "
+               f"(score={td_score}, reason={td_reason})")
     elif trans_decision:
+        td_sid = trans_decision["selected_skill_id"]
+        td_score = trans_decision["match_score"]
         record("R15b", "CONCERN",
-               f"Translation request → {trans_decision.selected_skill_id} selected "
-               f"instead of quick-translator (score={trans_decision.match_score})")
+               f"Translation request → {td_sid} selected "
+               f"instead of quick-translator (score={td_score})")
     else:
         record("R15b", "FAIL",
                "Translation request → no skill selected (should match quick-translator)")

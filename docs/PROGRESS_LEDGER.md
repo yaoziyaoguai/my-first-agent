@@ -1,10 +1,16 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-30 (003 hardening re-run v2: 11 PASS / 1 FAIL / 3 CONCERN / 1 SKIP — H2 direct+indirect PASS；2/3 H1 tools rejected；_active_skill 持久化正确)
+**最后更新**: 2026-05-31 (008 re-run confirmed 13/13 PASS; B7/B8 entry gate updated; _run_planning_phase() unified to ActionPlan/Legacy dual parsing; 22 ruff errors fixed)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
 ---
+
+## 2026-05-31
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| **008 re-run confirmed + B7/B8 entry gate updated** | 0e4930e | **008 re-run: 13/13 PASS confirmed** — `scripts/real_evidence_008_model_generated_plan.py` 重新运行通过。`docs/reviews/2026-05-29-real-evidence-008-independent-review.md` B7/B8 entry gate 更新: NOT FULLY MET → runtime prerequisites mostly satisfied。Model-generated stable ActionPlan JSON 状态: NOT MET → MET (13/13 PASS)。独立 review test count 更新: 27/27 → 83/83。**008 仍保持 credible**。Commit `0e4930e`: `fix(runtime): unify 008 planning schema path` — `_run_planning_phase()` 重构为单次 API 调用 + ActionPlan/Legacy 双解析，22 ruff errors 修复。 |
 
 ## 2026-05-30
 

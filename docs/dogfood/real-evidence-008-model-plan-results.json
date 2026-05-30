@@ -15,12 +15,12 @@
     {
       "case": "M0",
       "verdict": "PASS",
-      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 1.5s)"
+      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 2.3s)"
     },
     {
       "case": "M1",
       "verdict": "PASS",
-      "detail": "Model produced JSON-like output (878 chars, has_braces=True, has_plan_id=True, has_nodes=True, 5.1s)"
+      "detail": "Model produced JSON-like output (878 chars, has_braces=True, has_plan_id=True, has_nodes=True, 5.4s)"
     },
     {
       "case": "M2",

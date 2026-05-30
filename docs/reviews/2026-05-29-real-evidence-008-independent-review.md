@@ -182,10 +182,10 @@ def build_action_plan_from_model_output(raw_output: str) -> ActionPlan:
 | 008 credibility | **credible** | Gap A+B evidence chain closed |
 | Scheduler injection chain verified | **PASS** | `_run_main_loop(action_scheduler=...)` → 10/10 PASS |
 | Plan bridge complete | **PASS** | `build_action_plan_from_model_output()` → 7/7 PASS |
-| Model-generated stable ActionPlan JSON | **NOT MET** | methodology/model-behavior limitation —— planner.generate_plan() 未实现 |
-| All scheduler tests pass | **PASS** | 27/27 PASS |
+| Model-generated stable ActionPlan JSON | **MET (2026-05-30)** | 13/13 PASS via `real_evidence_008_model_generated_plan.py` — real AnthropicCompatibleProvider → model JSON output → bridge → scheduler → evidence chain complete |
+| All scheduler tests pass | **PASS** | 83/83 PASS (27 original + 20 main-path + 7 bridge + 29 contract) |
 
-**B7/B8 entry gate: NOT FULLY MET.** Model-generated stable JSON plan 仍是未闭合 caveat。B7/B8 作为大型架构/产品化决策，需要此 gate 闭合后方可进入。当前阶段建议收口，不进入 B7/B8 implementation。
+**B7/B8 entry gate: runtime prerequisites mostly satisfied.** Model-generated stable JSON plan caveat 已闭合（13/13 PASS, 2026-05-30 re-run confirmed）。仍需评估 002 implementation scope 后方可进入 B7/B8。当前阶段仍建议收口，不进入 B7/B8 implementation。
 
 ---
 

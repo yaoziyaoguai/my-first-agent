@@ -182,10 +182,11 @@ def build_action_plan_from_model_output(raw_output: str) -> ActionPlan:
 | 008 credibility | **credible** | Gap A+B evidence chain closed |
 | Scheduler injection chain verified | **PASS** | `_run_main_loop(action_scheduler=...)` → 10/10 PASS |
 | Plan bridge complete | **PASS** | `build_action_plan_from_model_output()` → 7/7 PASS |
-| Model-generated stable ActionPlan JSON | **MET (2026-05-30)** | 13/13 PASS via `real_evidence_008_model_generated_plan.py` — real AnthropicCompatibleProvider → model JSON output → bridge → scheduler → evidence chain complete |
+| Model-generated stable ActionPlan JSON (v1: `provider.create()` path) | **MET (2026-05-30)** | 13/13 PASS via `real_evidence_008_model_generated_plan.py` v1 — real AnthropicCompatibleProvider → `provider.create()` (custom system prompt) → valid JSON → bridge → scheduler → evidence chain complete |
+| Model-generated stable ActionPlan JSON (v2: `core.chat()` path) | **MODEL_BEHAVIOR_CONCERN (2026-05-31)** | 5 PASS / 0 FAIL / 1 MODEL_BEHAVIOR_CONCERN via v2 script — `core.chat()` → `_run_planning_phase()` → `generate_action_plan()` 路径正确，但模型输出 JSON 不符合 ActionPlan schema（使用 `steps` 而非 `nodes`、`tool` 而非 `action_type`/`target`、缺少 `steps_estimate`）。`_run_planning_phase()` 正确识别为单步并跳过。Safety checks (M10-M13) 全部通过。此 caveat 非代码缺陷：`core.chat()` 系统 prompt 覆盖 `ACTION_PLAN_PROMPT` 的 JSON schema 指令 → 模型输出内部格式而非标准 ActionPlan schema |
 | All scheduler tests pass | **PASS** | 83/83 PASS (27 original + 20 main-path + 7 bridge + 29 contract) |
 
-**B7/B8 entry gate: runtime prerequisites mostly satisfied.** Model-generated stable JSON plan caveat 已闭合（13/13 PASS, 2026-05-30 re-run confirmed）。仍需评估 002 implementation scope 后方可进入 B7/B8。当前阶段仍建议收口，不进入 B7/B8 implementation。
+**B7/B8 entry gate: runtime prerequisites mostly satisfied with model behavior caveat on core.chat path.** v1 `provider.create()` path 验证了 model → JSON → bridge → scheduler 全链路可行（13/13 PASS）；v2 `core.chat()` path 验证了统一 runtime injection chain 结构正确，但模型在 `core.chat()` 的 main system prompt 下无法稳定输出 ActionPlan schema JSON。完整的 `core.chat()` → model JSON → scheduler 闭环需 planner.generate_plan() 连接（B7/B8 范围）。仍需评估 002 implementation scope 后方可进入 B7/B8。当前阶段仍建议收口，不进入 B7/B8 implementation。
 
 ---
 

@@ -7,7 +7,6 @@ from uuid import uuid4
 
 import agent.tools  # noqa: F401  触发所有工具注册
 from agent import protocol_debug as _protocol_debug
-from agent.action_scheduler import build_action_plan_from_model_output
 
 # ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
@@ -71,6 +70,7 @@ from agent.display_events import (
     subagent_list_event,
     tool_requested,
 )
+from agent.logger import log_event
 from agent.loop import LoopDependencies, run_main_loop
 from agent.loop_context import LoopContext
 from agent.memory import compress_history
@@ -1099,22 +1099,29 @@ def _run_planning_phase(
     """任务规划阶段：单次 API 调用 + 双解析路径（ActionPlan → legacy Plan fallback）。
 
     ActionPlan 是 planner ↔ scheduler 之间唯一正式机器执行契约。
-    generate_action_plan() 让模型直接输出 ActionNode 兼容 JSON
-    （action_type/target/params/depends_on/recovery），无需 heuristic 映射。
+    generate_action_plan() 是 ActionPlan 解析的唯一正式入口——
+    _run_planning_phase() 只负责 API 调用和结果编排，不内联解析逻辑。
 
     解析策略（仅一次 API 调用）：
     1. 使用 ACTION_PLAN_PROMPT 调用模型
-    2. 优先以 ActionPlan schema 解析（build_action_plan_from_model_output）
+    2. 委托 planner.generate_action_plan(clean_text=...) 解析 ActionPlan
     3. 失败时回退 legacy Plan/PlanStep 解析 + plan_to_action_plan() 桥接
 
-    这避免两次 API 调用消耗额外响应——对 FakeAnthropicClient 测试至关重要。
+    关键架构边界：
+    - core.py 只做 orchestration（API 调用 + 结果路由）
+    - planner.py 拥有 ActionPlan 解析逻辑（generate_action_plan）
+    - core.py 不再内联 markdown 剥离/JSON 解析/build_action_plan_from_model_output
 
     注意：state 引用模块级全局 AgentState（非 turn_state 形参）。
     build_planning_messages_from_state / state.conversation / state.task
     均操作模块级 state；仅 on_runtime_event 使用 turn_state。
     """
+    from agent.planner import generate_action_plan
+
     # ── 单次 API 调用 ──
     planning_messages = build_planning_messages_from_state(state, user_input)
+    clean_text = None
+    raw = None
     try:
         response = loop_ctx.client.messages.create(
             model=loop_ctx.model_name,
@@ -1136,18 +1143,20 @@ def _run_planning_phase(
         raw = json.loads(clean_text)
     except Exception:
         raw = None
+        clean_text = None
 
-    # ── 解析路径 1：ActionPlan schema（正式路径）──
+    # ── 解析路径 1：通过 planner.generate_action_plan() 解析 ActionPlan ──
+    # 这是 ActionPlan 解析的唯一正式入口。core.py 不再直接调用
+    # build_action_plan_from_model_output()——所有解析逻辑由 planner 拥有。
     action_plan = None
-    if raw is not None:
-        try:
-            steps_estimate = raw.get("steps_estimate", 0)
-            if isinstance(steps_estimate, (int, float)) and int(steps_estimate) <= 1:
-                pass  # 单步任务
-            elif raw.get("plan_id") and raw.get("nodes"):
-                action_plan = build_action_plan_from_model_output(clean_text)
-        except Exception:
-            action_plan = None
+    if clean_text is not None and raw is not None:
+        steps_estimate = raw.get("steps_estimate", 0)
+        if isinstance(steps_estimate, (int, float)) and int(steps_estimate) > 1:
+            action_plan = generate_action_plan(
+                user_input, loop_ctx.client, loop_ctx.model_name,
+                messages=planning_messages,
+                clean_text=clean_text,
+            )
 
     # ── 解析路径 2：legacy Plan/PlanStep schema（回退桥接）──
     legacy_plan = None
@@ -1179,9 +1188,17 @@ def _run_planning_phase(
         state.task.status = "awaiting_plan_confirmation"
 
         if action_scheduler is not None:
-            import contextlib
-            with contextlib.suppress(Exception):
+            try:
                 action_scheduler.load_plan(action_plan)
+            except Exception:
+                log_event("planning_handoff_failure", {
+                    "error": "action_scheduler.load_plan() failed",
+                    "plan_id": action_plan.plan_id,
+                    "phase": "ActionPlan handoff",
+                })
+                # 调度器加载失败时不展示 plan confirmation——
+                # 不允许用户看到"按此计划执行吗？"但 scheduler 实际没加载。
+                action_plan = None
 
         _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
 
@@ -1207,8 +1224,14 @@ def _run_planning_phase(
                     legacy_plan, plan_id=f"legacy-{legacy_plan.goal[:40]}"
                 )
                 action_scheduler.load_plan(_legacy_action_plan)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_event("planning_handoff_failure", {
+                    "error": f"legacy bridge failed: {type(exc).__name__}: {exc}",
+                    "plan_id": f"legacy-{legacy_plan.goal[:40]}",
+                    "phase": "Legacy Plan→ActionPlan handoff",
+                })
+                # legacy 桥接失败不阻塞 plan confirmation——legacy 路径本身
+                # 已是 fallback，用户仍可见旧 Plan 展示。
 
         state.task.current_plan = legacy_plan.model_dump()
         state.task.user_goal = user_input

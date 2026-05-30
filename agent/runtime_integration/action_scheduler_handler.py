@@ -66,6 +66,12 @@ class ActionSchedulerHandler:
         disposition = str(payload.get("disposition") or "")
         error_msg = str(payload.get("error") or "")
         success_flag = payload.get("success")
+        # P5: 补齐 evidence payload——ACTION_PLAN_START 需 total_nodes/entry_node_id，
+        # ACTION_PLAN_COMPLETE 需 completed_nodes/total_nodes/failed_nodes。
+        total_nodes = payload.get("total_nodes")
+        entry_node_id = str(payload.get("entry_node_id") or "")
+        completed_nodes = payload.get("completed_nodes")
+        failed_nodes = payload.get("failed_nodes")
 
         # 验证必填 key
         required = self._REQUIRED_KEYS.get(action_type)
@@ -101,6 +107,14 @@ class ActionSchedulerHandler:
             "capability_type": "advanced_scheduler",
             "production_capability": True,
         }
+        if total_nodes is not None:
+            evidence_extra["total_nodes"] = total_nodes
+        if entry_node_id:
+            evidence_extra["entry_node_id"] = entry_node_id
+        if completed_nodes is not None:
+            evidence_extra["completed_nodes"] = completed_nodes
+        if failed_nodes is not None:
+            evidence_extra["failed_nodes"] = failed_nodes
         if error_msg:
             evidence_extra["error"] = error_msg
             evidence_extra["failure_count"] = payload.get("failure_count", 0)

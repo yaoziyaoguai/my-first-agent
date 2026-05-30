@@ -196,7 +196,7 @@ def generate_plan(user_input, client, model_name, messages=None):
         return None
 
 
-def generate_action_plan(user_input, client, model_name, messages=None):
+def generate_action_plan(user_input, client, model_name, messages=None, *, clean_text=None):
     """正式规划入口：让模型直接输出 ActionPlan schema JSON。
 
     与 generate_plan() 的关键区别：
@@ -205,6 +205,16 @@ def generate_action_plan(user_input, client, model_name, messages=None):
     - 解析通过 build_action_plan_from_model_output() 完成，无需 heuristic 映射
     - 返回 ActionPlan（可被 ActionScheduler 直接消费），而非旧 Plan
 
+    Args:
+        user_input: 用户原始输入
+        client: 模型 client（clean_text 非空时仅用于签名兼容，不调用 API）
+        model_name: 模型名（clean_text 非空时仅用于签名兼容）
+        messages: 可选的完整 messages 列表
+        clean_text: 可选——当调用方（_run_planning_phase）已完成 API 调用和
+                    文本清洗后传入。此时跳过 client.messages.create()，
+                    直接解析 JSON。这是 planner ↔ runtime 的统一委托解析入口，
+                    消除 core.py 中重复的 markdown 剥离/JSON 解析逻辑。
+
     Returns:
         ActionPlan on success, None on single-step task or error.
     """
@@ -212,28 +222,34 @@ def generate_action_plan(user_input, client, model_name, messages=None):
     from agent.action_scheduler import build_action_plan_from_model_output
 
     try:
-        plan_messages = messages if messages else [{"role": "user", "content": user_input}]
-        response = client.messages.create(
-            model=model_name,
-            max_tokens=1024,
-            system=ACTION_PLAN_PROMPT,
-            messages=plan_messages,
-        )
+        if clean_text is not None:
+            # ── 委托路径：API 调用已由 _run_planning_phase() 完成 ──
+            # clean_text 已剥离 markdown fence 并 strip，直接解析 JSON。
+            raw = json.loads(clean_text)
+        else:
+            # ── 独立路径：自行完成 API 调用 ──
+            plan_messages = messages if messages else [{"role": "user", "content": user_input}]
+            response = client.messages.create(
+                model=model_name,
+                max_tokens=1024,
+                system=ACTION_PLAN_PROMPT,
+                messages=plan_messages,
+            )
 
-        result_text = ""
-        for block in response.content:
-            if block.type == "text":
-                result_text = block.text
-                break
+            result_text = ""
+            for block in response.content:
+                if block.type == "text":
+                    result_text = block.text
+                    break
 
-        clean_text = result_text.strip()
-        if clean_text.startswith("```"):
-            clean_text = clean_text.split("\n", 1)[1]
-        if clean_text.endswith("```"):
-            clean_text = clean_text.rsplit("```", 1)[0]
-        clean_text = clean_text.strip()
+            clean_text = result_text.strip()
+            if clean_text.startswith("```"):
+                clean_text = clean_text.split("\n", 1)[1]
+            if clean_text.endswith("```"):
+                clean_text = clean_text.rsplit("```", 1)[0]
+            clean_text = clean_text.strip()
 
-        raw = json.loads(clean_text)
+            raw = json.loads(clean_text)
 
         # 单步任务直接跳过
         steps_estimate = raw.get("steps_estimate", 0)

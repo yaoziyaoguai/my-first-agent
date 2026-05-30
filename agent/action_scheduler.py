@@ -557,27 +557,31 @@ def build_action_plan_from_dict(plan_dict: dict[str, Any]) -> ActionPlan:
     )
 
 
+# ⛔ LEGACY BRIDGE: plan_to_action_plan() — 硬编码 step_type→action_type 映射。
+#
+# 中文学习说明：
+# 这个函数通过硬编码映射表（read→read_file, analyze→read_file, ...）
+# 将旧 Plan/PlanStep 转换为 ActionPlan/ActionNode。丢失信息且不可靠——
+# "analyze" 和 "report" 都映射为 read_file，planner 的语义意图被压平。
+#
+# 正式路径：generate_action_plan() 让模型直接输出 ActionNode 兼容 JSON
+# （action_type/target/params/depends_on/recovery），无需 heuristic 映射。
+# ActionScheduler 只消费 ActionPlan——绝不消费旧 Plan。
+#
+# 保留原因：_run_planning_phase() 在 generate_action_plan() 失败时的回退路径。
+# 不是 silent fallback——调用方必须显式处理映射失败。
+# 无法映射旧 Plan 时必须显式失败（raise ValueError），不能猜测执行。
+#
+# Sunset: generate_action_plan() 稳定产出 ActionPlan 后移除。
 def plan_to_action_plan(plan: Any, plan_id: str = "") -> ActionPlan:
-    """从 planner 产出的 Plan 对象构造 ActionPlan。
+    """[LEGACY BRIDGE] 从旧 Plan 对象构造 ActionPlan——硬编码 heuristic 映射。
 
-    中文学习说明：
-    这是 planner 和 scheduler 之间的 schema 桥接层（P1 fix）。
-    Plan 使用 PlanStep（step_id/title/description/step_type/suggested_tool），
-    ActionPlan 使用 ActionNode（node_id/action_type/target/params/depends_on/recovery）。
-    本函数负责：
-    1. step_type → action_type 映射（read→TOOL_CALL(read_file) 等）
-    2. suggested_tool → target（fallback: step_type 推断工具）
-    3. 隐式顺序 → 显式 depends_on（step_N depends_on step_N-1）
-    4. title+description → ActionNode.description
-    5. 默认 recovery=halt（安全默认：失败即停止）
+    仅作为 generate_action_plan() 失败时的回退路径。不可作为 formal planning path。
+    无法映射旧 Plan 时显式失败（raise ValueError），不可 silent fallback。
 
-    映射规则：
-    - read/analyze → TOOL_CALL, target=read_file 或 suggested_tool
-    - edit → TOOL_CALL, target=write_file 或 suggested_tool
-    - run_command → TOOL_CALL, target=bash 或 suggested_tool
-    - report → TOOL_CALL, target=read_file（报告由模型生成，非工具执行）
-    - collect_input/clarify → TOOL_CALL, target=request_user_input
-    - 未知 step_type → TOOL_CALL, target=step_type 原值（保持可追溯）
+    Raises:
+        TypeError: plan 不是 Plan 实例
+        ValueError: plan.steps 为空
     """
     # 延迟 import 避免循环依赖
     from agent.plan_schema import Plan  # noqa: F811

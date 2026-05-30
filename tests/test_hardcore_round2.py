@@ -16,16 +16,15 @@ from tests.conftest import (
     meta_complete_response,
     text_response,
 )
-from tests.test_main_loop import (
-    _reset_core_module,
-    _register_test_tool,
-)
 from tests.test_complex_scenarios import (
-    _tool_use_resp,
-    _plan_response,
     _count_tool_pairs,
+    _plan_response,
+    _tool_use_resp,
 )
-
+from tests.test_main_loop import (
+    _register_test_tool,
+    _reset_core_module,
+)
 
 # ============================================================
 # 硬核 6：plan feedback 累积导致 user_goal 字符串无限膨胀
@@ -185,7 +184,7 @@ def test_tool_raising_system_exit_does_not_crash_agent(monkeypatch):
     ⚠️ 已修复：2026-04 tool_registry.execute_tool 用 BaseException 兜住，
     KeyboardInterrupt 透穿保证用户可中断。
     """
-    from agent.tool_registry import TOOL_REGISTRY, register_tool, execute_tool
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
 
     @register_tool(
         name="exit_tool",
@@ -350,15 +349,24 @@ def test_planner_with_empty_steps_does_not_crash(monkeypatch):
     期望：planner 应当拒绝这种不一致 JSON，返回 None（走单步路径），
     不应当创建一个 step 列表为空的 Plan 对象。
     """
+    malformed_json = (
+        '{"steps_estimate": 3, "goal": "任务",'
+        ' "steps": [], "needs_confirmation": true}'
+    )
     malformed_plan = FakeResponse(
-        content=[FakeTextBlock(text='{"steps_estimate": 3, "goal": "任务", "steps": [], "needs_confirmation": true}')],
+        content=[FakeTextBlock(text=malformed_json)],
         stop_reason="end_turn",
     )
+    # v0.5+: _run_planning_phase() 先走 ActionPlan parse（消费 1 个 response），
+    # 失败后 fallback 到 legacy parse（再消费 1 个），最后 execution 消费第 3 个。
     fake = FakeAnthropicClient(
         responses=[
-            malformed_plan,
-            # 如果 planner 正确拒绝，会走单步——需要一个 execution 响应
-            text_response("我用单步处理：你好"),
+            malformed_plan,                    # ActionPlan parse → 无 plan_id/nodes → None
+            FakeResponse(                       # legacy parse → steps 为空 → None
+                content=[FakeTextBlock(text=malformed_json)],
+                stop_reason="end_turn",
+            ),
+            text_response("我用单步处理：你好"),  # execution 消费
         ]
     )
     state = _reset_core_module(monkeypatch, fake)

@@ -1,4 +1,5 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -6,6 +7,7 @@ from uuid import uuid4
 
 import agent.tools  # noqa: F401  触发所有工具注册
 from agent import protocol_debug as _protocol_debug
+from agent.action_scheduler import build_action_plan_from_model_output
 
 # ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
@@ -80,7 +82,11 @@ from agent.model_output_dispatch import (
     dispatch_model_output,
 )
 from agent.pending_confirmation_dispatch import dispatch_pending_confirmation
-from agent.planner import format_plan_for_display, generate_plan
+from agent.planner import (
+    ACTION_PLAN_PROMPT,
+    format_action_plan_for_display,
+    format_plan_for_display,  # ⛔ LEGACY: Sunset v0.5+
+)
 from agent.prompt_builder import build_system_prompt
 from agent.provider.protocol import (
     ProviderError,
@@ -1015,7 +1021,10 @@ def chat(
     # 等）都有可能带着旧值进新任务。
     state.reset_task()
 
-    plan_result = _run_planning_phase(user_input, turn_state, _loop_ctx)
+    plan_result = _run_planning_phase(
+        user_input, turn_state, _loop_ctx,
+        action_scheduler=action_scheduler,
+    )
     return _handle_planning_phase_result(
         plan_result, turn_state, _loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
@@ -1025,6 +1034,38 @@ def chat(
 
 
 # ========== 规划阶段 ==========
+
+
+def _action_plan_to_dict(action_plan) -> dict[str, Any]:
+    """将 ActionPlan 序列化为 JSON-safe dict（用于 state.task.current_plan 持久化）。
+
+    ActionPlan 是 frozen dataclass，不可直接 JSON 序列化。
+    此 helper 递归展开 nodes/tuple/dataclass → dict/list，保证 checkpoint
+    序列化兼容。
+    """
+    nodes = []
+    for node in action_plan.nodes:
+        nodes.append({
+            "node_id": node.node_id,
+            "action_type": node.action_type,
+            "target": node.target,
+            "params": dict(node.params),
+            "depends_on": list(node.depends_on),
+            "recovery": {
+                "max_retries": node.recovery.max_retries,
+                "fallback_node_id": node.recovery.fallback_node_id,
+                "on_failure": node.recovery.on_failure,
+            },
+            "condition": node.condition,
+            "description": node.description,
+        })
+    return {
+        "plan_id": action_plan.plan_id,
+        "nodes": nodes,
+        "entry_node_id": action_plan.entry_node_id,
+        "status": action_plan.status,
+        "description": action_plan.description,
+    }
 
 
 def _compress_history_and_sync_checkpoint(loop_ctx: LoopContext) -> None:
@@ -1052,67 +1093,153 @@ def _run_planning_phase(
     user_input: str,
     turn_state: TurnState,
     loop_ctx: LoopContext,
+    *,
+    action_scheduler: Any = None,
 ) -> str:
-    """任务规划阶段；只推进 planning 状态并通过 RuntimeEvent 展示计划。"""
-    plan = generate_plan(
-        user_input,
-        loop_ctx.client,
-        loop_ctx.model_name,
-        build_planning_messages_from_state(state, user_input),
-    )
+    """任务规划阶段：单次 API 调用 + 双解析路径（ActionPlan → legacy Plan fallback）。
 
-    # 无论走哪条分支，用户原始输入都必须归档到 conversation.messages。
-    # 否则「多步计划 → y 确认 → 执行」路径里，执行阶段模型看不到用户原话，
-    # 只能依赖 planner 的二次总结 plan.goal，丢失细节。
+    ActionPlan 是 planner ↔ scheduler 之间唯一正式机器执行契约。
+    generate_action_plan() 让模型直接输出 ActionNode 兼容 JSON
+    （action_type/target/params/depends_on/recovery），无需 heuristic 映射。
+
+    解析策略（仅一次 API 调用）：
+    1. 使用 ACTION_PLAN_PROMPT 调用模型
+    2. 优先以 ActionPlan schema 解析（build_action_plan_from_model_output）
+    3. 失败时回退 legacy Plan/PlanStep 解析 + plan_to_action_plan() 桥接
+
+    这避免两次 API 调用消耗额外响应——对 FakeAnthropicClient 测试至关重要。
+
+    注意：state 引用模块级全局 AgentState（非 turn_state 形参）。
+    build_planning_messages_from_state / state.conversation / state.task
+    均操作模块级 state；仅 on_runtime_event 使用 turn_state。
+    """
+    # ── 单次 API 调用 ──
+    planning_messages = build_planning_messages_from_state(state, user_input)
+    try:
+        response = loop_ctx.client.messages.create(
+            model=loop_ctx.model_name,
+            max_tokens=1024,
+            system=ACTION_PLAN_PROMPT,
+            messages=planning_messages,
+        )
+        result_text = ""
+        for block in response.content:
+            if block.type == "text":
+                result_text = block.text
+                break
+        clean_text = result_text.strip()
+        if clean_text.startswith("```"):
+            clean_text = clean_text.split("\n", 1)[1]
+        if clean_text.endswith("```"):
+            clean_text = clean_text.rsplit("```", 1)[0]
+        clean_text = clean_text.strip()
+        raw = json.loads(clean_text)
+    except Exception:
+        raw = None
+
+    # ── 解析路径 1：ActionPlan schema（正式路径）──
+    action_plan = None
+    if raw is not None:
+        try:
+            steps_estimate = raw.get("steps_estimate", 0)
+            if isinstance(steps_estimate, (int, float)) and int(steps_estimate) <= 1:
+                pass  # 单步任务
+            elif raw.get("plan_id") and raw.get("nodes"):
+                action_plan = build_action_plan_from_model_output(clean_text)
+        except Exception:
+            action_plan = None
+
+    # ── 解析路径 2：legacy Plan/PlanStep schema（回退桥接）──
+    legacy_plan = None
+    if action_plan is None and raw is not None:
+        try:
+            steps_estimate = raw.get("steps_estimate", 0)
+            if isinstance(steps_estimate, (int, float)) and int(steps_estimate) <= 1:
+                pass  # 单步任务
+            else:
+                from agent.plan_schema import Plan, PlannerOutput
+
+                decision = PlannerOutput.model_validate(raw)
+                if decision.goal and decision.steps:
+                    legacy_plan = Plan(
+                        goal=decision.goal,
+                        thinking=decision.thinking,
+                        steps=decision.steps,
+                        needs_confirmation=decision.needs_confirmation,
+                    )
+        except Exception:
+            legacy_plan = None
+
+    # ── 统一处理结果 ──
+    if action_plan is not None:
+        state.conversation.messages.append({"role": "user", "content": user_input})
+        state.task.current_plan = _action_plan_to_dict(action_plan)
+        state.task.user_goal = user_input
+        state.task.current_step_index = 0
+        state.task.status = "awaiting_plan_confirmation"
+
+        if action_scheduler is not None:
+            import contextlib
+            with contextlib.suppress(Exception):
+                action_scheduler.load_plan(action_plan)
+
+        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
+
+        if turn_state.on_runtime_event is not None:
+            turn_state.on_runtime_event(
+                plan_confirmation_requested(
+                    f"{format_action_plan_for_display(action_plan)}\n按此计划执行吗？(y/n/输入修改意见):",
+                    metadata={"source": "planning_phase", "schema": "ActionPlan"},
+                )
+            )
+        return "awaiting_plan_confirmation"
+
+    # 无论走哪条分支，用户原始输入都必须归档
     state.conversation.messages.append({"role": "user", "content": user_input})
 
-    if not plan:
-        # 这里可能是：planner 判定单步任务，或 planner 自身出错。
-        # 单步分支是预期路径；但出错也会走这里，给用户一行轻量提示以便察觉。
-        if turn_state.on_runtime_event is not None:
-            turn_state.on_runtime_event(control_message("[系统] 未生成多步计划，按单步处理。"))
-        return "ok"
+    if legacy_plan is not None:
+        # ⛔ LEGACY bridge: 旧 Plan → ActionPlan → scheduler
+        _legacy_action_plan = None
+        if action_scheduler is not None:
+            try:
+                from agent.action_scheduler import plan_to_action_plan as _legacy_bridge
+                _legacy_action_plan = _legacy_bridge(
+                    legacy_plan, plan_id=f"legacy-{legacy_plan.goal[:40]}"
+                )
+                action_scheduler.load_plan(_legacy_action_plan)
+            except Exception:
+                pass
 
-    state.task.current_plan = plan.model_dump()
-    state.task.user_goal = user_input
-    state.task.current_step_index = 0
-    state.task.confirm_each_step = any(
-        marker in user_input
-        for marker in (
-            "每步确认",
-            "每一步确认",
-            "每一步都确认",
-            "每步都确认",
-            "每一步都让我确认",
-            "每步都让我确认",
-            "做完一步问我",
-            "每做完一步问我",
-            "一步一确认",
-            "每步推理",
-            "每一步推理",
-            "逐步推理",
-            "一步一步推理",
-            "不要自动下一步",
-            "不要自动继续",
-            "先别自动执行下一步",
-        )
-    )
-    state.task.status = "awaiting_plan_confirmation"
-
-    # 一旦计划生成完毕且状态切到 awaiting_plan_confirmation，必须立刻落盘。
-    # 否则用户此时 Ctrl+C，计划会完全丢失、重启后无感。
-    _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
-
-    # 计划展示给用户，但此时还没有正式接受执行。RuntimeEvent 只投影 UI，不改变
-    # current_plan / checkpoint / conversation.messages 的业务边界。
-    if turn_state.on_runtime_event is not None:
-        turn_state.on_runtime_event(
-            plan_confirmation_requested(
-                f"{format_plan_for_display(plan)}\n按此计划执行吗？(y/n/输入修改意见):",
-                metadata={"source": "planning_phase"},
+        state.task.current_plan = legacy_plan.model_dump()
+        state.task.user_goal = user_input
+        state.task.current_step_index = 0
+        state.task.confirm_each_step = any(
+            marker in user_input
+            for marker in (
+                "每步确认", "每一步确认", "每一步都确认", "每步都确认",
+                "每一步都让我确认", "每步都让我确认", "做完一步问我",
+                "每做完一步问我", "一步一确认", "每步推理",
+                "每一步推理", "逐步推理", "一步一步推理",
+                "不要自动下一步", "不要自动继续", "先别自动执行下一步",
             )
         )
-    return "awaiting_plan_confirmation"
+        state.task.status = "awaiting_plan_confirmation"
+
+        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
+
+        if turn_state.on_runtime_event is not None:
+            turn_state.on_runtime_event(
+                plan_confirmation_requested(
+                    f"{format_plan_for_display(legacy_plan)}\n按此计划执行吗？(y/n/输入修改意见):",
+                    metadata={"source": "planning_phase", "schema": "Plan (legacy)"},
+                )
+            )
+        return "awaiting_plan_confirmation"
+
+    # 单步任务或规划失败
+    if turn_state.on_runtime_event is not None:
+        turn_state.on_runtime_event(control_message("[系统] 未生成多步计划，按单步处理。"))
+    return "ok"
 
 
 def _handle_planning_phase_result(

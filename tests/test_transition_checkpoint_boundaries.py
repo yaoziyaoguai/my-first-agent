@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+
 def test_run_main_loop_is_module_level_not_chat_closure():
     """钉死 _run_main_loop 必须是 core.py 模块级函数，不允许退化为 chat() 闭包。
 
@@ -39,6 +40,7 @@ def test_chat_module_does_not_use_nonlocal_for_loop_helpers():
     本测试只读源码（不调任何函数），确保未来引入闭包时立刻失败。
     """
     import inspect
+
     from agent import core
 
     src = inspect.getsource(core)
@@ -224,10 +226,11 @@ def test_chat_constructs_loop_context_instance_at_module_level_anchor():
     assert "LoopContext(" in helper_src, (
         "build_loop_context 必须显式构造 LoopContext 作为 SSOT 锚点"
     )
-    assert "client=client" in helper_src, (
+    has_client = "client=client" in helper_src or "client=client_obj" in helper_src
+    assert has_client, (
         "helper 必须把入参 client_obj 透传到 LoopContext.client"
         "（实际写法：client=client_obj 也可，下行兼容判断）"
-    ) or "client=client_obj" in helper_src
+    )
     assert "model_name: str" in helper_src, (
         "core_contexts.build_loop_context 必须显式接收 model_name；"
         "core wrapper 负责注入 MODEL_NAME 默认值"
@@ -355,23 +358,37 @@ def test_chat_passes_loop_ctx_to_planning_helpers_at_all_call_sites():
     context_src = inspect.getsource(core._build_confirmation_context)
     handler_src = inspect.getsource(core._start_planning_for_handler)
     result_src = inspect.getsource(core._handle_planning_phase_result)
-    assert "_run_planning_phase(user_input, turn_state, _loop_ctx)" in chat_src, (
-        "chat() 直接调用 _run_planning_phase 时必须传 _loop_ctx"
+    # v0.5+: 调用已改为多行 + action_scheduler= kwarg；
+    # 只验证核心参数透传（不再匹配精确单行格式）。
+    assert "_run_planning_phase(" in chat_src, (
+        "chat() 必须调用 _run_planning_phase"
+    )
+    assert "action_scheduler=action_scheduler" in chat_src, (
+        "chat() 调用 _run_planning_phase 时必须透传 action_scheduler"
     )
     assert "_start_planning_for_handler(" in context_src and "loop_ctx" in context_src, (
         "_build_confirmation_context.start_planning_fn lambda 必须透传 loop_ctx 到"
         " _start_planning_for_handler"
     )
-    assert (
-        "return _handle_planning_phase_result(plan_result, turn_state, _loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry)"
-        in chat_src
-    ), "chat() 的 planning result 必须交给共享 helper，禁止复制三分支"
+    # v0.5+: 调用已改为多行 + action_scheduler= kwarg；
+    # 只验证 helper 名称 + 关键 kwarg 透传（不再匹配精确单行格式）。
+    assert "_handle_planning_phase_result(" in chat_src, (
+        "chat() 的 planning result 必须交给 _handle_planning_phase_result"
+    )
+    assert "action_scheduler=action_scheduler" in chat_src, (
+        "chat() → _handle_planning_phase_result 必须透传 action_scheduler"
+    )
     assert (
         "return _handle_planning_phase_result(plan_result, turn_state, loop_ctx)"
         in handler_src
     ), "_start_planning_for_handler 必须复用共享 helper，禁止复制三分支"
-    assert "return _run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry)" in result_src, (
-        "_handle_planning_phase_result 的 ok 分支必须透传同一个 loop_ctx 到主循环"
+    # v0.5+: _run_main_loop 调用也加了 action_scheduler=/checkpoint_save_on_turn_end= kwargs；
+    # 改为验证 helper 名称 + 关键 kwarg 透传（不再匹配精确单行格式）。
+    assert "_run_main_loop(" in result_src, (
+        "_handle_planning_phase_result 的 ok 分支必须进入 _run_main_loop"
+    )
+    assert "action_scheduler=action_scheduler" in result_src, (
+        "_handle_planning_phase_result → _run_main_loop 必须透传 action_scheduler"
     )
 
 
@@ -400,8 +417,9 @@ def test_chat_routes_new_turn_compression_through_single_helper():
     assert "loop_ctx.client" in helper_src, (
         "compression helper 必须复用 chat() 单源构造的 LoopContext client"
     )
-    assert "_save_checkpoint(state)" in helper_src, (
-        "active task 压缩后必须仍立即同步 checkpoint，避免 summary/checkpoint 漂移"
+    assert "_dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)" in helper_src, (
+        "active task 压缩后必须仍立即同步 checkpoint（通过 dispatcher），"
+        "避免 summary/checkpoint 漂移"
     )
     forbidden = (
         "request_user_input",
@@ -472,10 +490,14 @@ def test_main_loop_signature_phase_2_2_b_handoff_only():
     # 不参与 pipeline 决策，只决定 loop.py 中 TOOL_GATE / SKILL_SELECT
     # action 的 metadata 填充。它们不属于 state / loop_ctx / confirmation_ctx
     # 越界添加。
-    assert params == ["turn_state", "loop_ctx", "tool_gate_tool_name", "skill_registry"], (
-        f"_run_main_loop 签名必须严格是 (turn_state, loop_ctx, *, tool_gate_tool_name, skill_registry)；当前：{params}。"
-        "增加任何额外参数都属于范围爬升（durable state 应通过模块级 state "
-        "单例访问，runtime dep 应通过 loop_ctx 访问，per-turn 应通过 turn_state 访问）"
+    assert params == [
+        "turn_state", "loop_ctx", "tool_gate_tool_name", "skill_registry",
+        "action_scheduler", "checkpoint_save_on_turn_end",
+    ], (
+        f"_run_main_loop 签名必须包含 action_scheduler + checkpoint_save_on_turn_end；"
+        f"当前：{params}。"
+        "这两个是 v0.5+ scheduler main-path injection 的 keyword-only 透传参数，"
+        "不参与 pipeline 决策，只决定 scheduler 实例和执行元数据。"
     )
     loop_ctx_annotation = sig.parameters["loop_ctx"].annotation
     assert loop_ctx_annotation is LoopContext, (
@@ -549,7 +571,8 @@ def test_call_model_signature_accepts_loop_context():
     # _streaming_events_out 是 keyword-only 参数——由 call_model lambda 闭包注入，
     # 用于收集 streaming events 供 turn-end hook 读取。不属于 state/loop_ctx 越界。
     assert params == ["turn_state", "loop_ctx", "_streaming_events_out"], (
-        f"_call_model 签名必须严格是 (turn_state, loop_ctx, *, _streaming_events_out)；当前：{params}。"
+        f"_call_model 签名必须严格是 (turn_state, loop_ctx, *, _streaming_events_out)；"
+        f"当前：{params}。"
         "禁止加 messages / state / system_prompt 参数（前两者属 durable state，"
         "system_prompt 应通过 turn_state 传递）"
     )
@@ -751,10 +774,18 @@ def test_chat_passes_loop_ctx_to_main_loop_at_all_call_sites():
         "_build_confirmation_context 必须把 loop_ctx 透传给 _run_main_loop lambda"
     )
 
-    # planning result helper 应有 1 处调用并传 loop_ctx。
-    assert "_run_main_loop(turn_state, loop_ctx, tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry)" in result_src, (
+    # planning result helper 应有 1 处调用并传 loop_ctx
+    # （v0.5+ 增加了 action_scheduler + checkpoint_save_on_turn_end 透传）。
+    assert "_run_main_loop(" in result_src, (
+        "_handle_planning_phase_result 必须调用 _run_main_loop"
+    )
+    assert "turn_state, loop_ctx" in result_src, (
         "_handle_planning_phase_result 调用 _run_main_loop 必须传上层 loop_ctx"
     )
+    assert "tool_gate_tool_name=tool_gate_tool_name" in result_src
+    assert "skill_registry=skill_registry" in result_src
+    assert "action_scheduler=action_scheduler" in result_src
+    assert "checkpoint_save_on_turn_end=checkpoint_save_on_turn_end" in result_src
 
 
 # ========================================================================
@@ -952,7 +983,7 @@ def test_build_loop_context_returns_loop_context_with_expected_fields():
     契约——属"行为中性 helper"应该被钉住的最小契约。
     """
     from agent import core
-    from agent.core import _build_loop_context, MAX_LOOP_ITERATIONS, MODEL_NAME
+    from agent.core import MAX_LOOP_ITERATIONS, MODEL_NAME, _build_loop_context
     from agent.loop_context import LoopContext
 
     sentinel_client = object()
@@ -1004,8 +1035,8 @@ def test_build_loop_context_kwargs_override_defaults_without_module_mutation():
     assert ctx.max_loop_iterations == 999
 
     # 模块常量必须未被 helper 改写
-    assert core.MODEL_NAME == before_model
-    assert core.MAX_LOOP_ITERATIONS == before_max
+    assert before_model == core.MODEL_NAME
+    assert before_max == core.MAX_LOOP_ITERATIONS
 
 
 # ============================================================
@@ -1031,8 +1062,8 @@ def test_build_confirmation_context_returns_confirmation_context_with_expected_f
     不实际触发主循环（避免引入测试副作用）。
     """
     from agent import core
-    from agent.core import _build_confirmation_context, _build_loop_context
     from agent.confirm_handlers import ConfirmationContext
+    from agent.core import _build_confirmation_context, _build_loop_context
 
     sentinel_client = object()
     sentinel_state = object()

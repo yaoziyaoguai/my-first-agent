@@ -92,15 +92,35 @@ def select_skill_for_real_provider(
                 score += 1
                 matched_terms.append(f"desc:{word}")
 
-        # 3b. 中文子串 fallback：对于不含空格的中文片段，
-        # 检查是否作为整体出现在 user input 中（处理"笔记"这类被
-        # 包含在更长的中文 token 中的关键词）
-        _chinese_spans = re.findall(r"[一-鿿]+", desc_lower)
+        # 3b. 中文 bigram 重叠匹配：中文不像英文有空格分词，
+        # "写笔记" 在 "帮我写一个笔记" 中不是连续子串，
+        # 但它们的 bigram 集合有交集（"笔记"），因此可以匹配。
+        # bigram 匹配比精确子串匹配更宽松，但结合多信号
+        # （name/tags/description）和分数阈值可控制精度。
+        _chinese_spans: list[str] = re.findall(r"[一-鿿]+", desc_lower)
+        _input_cn_spans: list[str] = re.findall(r"[一-鿿]+", normalized_input)
+        _input_bigrams: set[str] = set()
+        for _cn in _input_cn_spans:
+            for _j in range(len(_cn) - 1):
+                _input_bigrams.add(_cn[_j:_j + 2])
+
         for span in _chinese_spans:
             span_stripped = span.strip()
-            if len(span_stripped) >= 2 and span_stripped in normalized_input:
+            if len(span_stripped) < 2:
+                continue
+            # 精确子串匹配（保留原有逻辑，覆盖"记录任务"这类完整匹配）
+            if span_stripped in normalized_input:
                 score += 1
                 matched_terms.append(f"desc_cn:{span_stripped}")
+                continue
+            # bigram 重叠匹配：至少需要 1 个 bigram 重叠
+            _span_bigrams = {
+                span_stripped[_j:_j + 2]
+                for _j in range(len(span_stripped) - 1)
+            }
+            if _span_bigrams & _input_bigrams:
+                score += 1
+                matched_terms.append(f"desc_cn_bigram:{span_stripped}")
 
         if score > best_score:
             best_score = score

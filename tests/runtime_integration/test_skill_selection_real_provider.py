@@ -353,3 +353,51 @@ class TestChineseKeywordMatching:
         assert result.get("match_score", 0) >= 3, (
             f"多关键词应得分 >= 3，实际 {result.get('match_score')}"
         )
+
+    def test_r11d_chinese_bigram_non_contiguous(self):
+        """R11d: 中文 bigram 重叠匹配——"写笔记"在"写一个笔记"中不连续。"""
+        descriptors = _make_demo_descriptors()
+        result = select_skill_for_real_provider("帮我写一个笔记", descriptors)
+        assert result is not None, (
+            "bigram 重叠匹配应能匹配'写笔记'→'帮我写一个笔记'"
+        )
+        assert result["selected_skill_id"] == "demo-note-maker"
+        # bigram 匹配至少产生 score >= 1
+        assert result.get("match_score", 0) >= 1
+
+    def test_r11e_chinese_bigram_no_match_unrelated(self):
+        """R11e: 无关中文输入不应 bigram 匹配。"""
+        descriptors = _make_demo_descriptors()
+        result = select_skill_for_real_provider("帮我查一下天气", descriptors)
+        assert result is None, (
+            "无关输入不应匹配任何 skill"
+        )
+
+    def test_r11f_chinese_bigram_multi_skill_prefers_best(self):
+        """R11f: 多个 skill 下 bigram 匹配选最高分。"""
+        blog = SkillDescriptor(
+            name="blog-writing",
+            description='创建和编辑博客文章。当用户要求"写博客"、"发表文章"时匹配。',
+            version="0.1.0",
+            status="active",
+            risk_level="low",
+            tags=("blog", "writing"),
+            allowed_tools=(),
+        )
+        demo = SkillDescriptor(
+            name="demo-note-maker",
+            description='围绕 demo 工具创建本地任务笔记。当用户要求"写笔记"、"记录任务"时匹配。',
+            version="0.1.0",
+            status="active",
+            risk_level="low",
+            tags=("demo", "note", "local"),
+            allowed_tools=(),
+        )
+
+        result = select_skill_for_real_provider(
+            "帮我写一个博客文章", [blog, demo]
+        )
+        assert result is not None, "应匹配到 blog-writing"
+        assert result["selected_skill_id"] == "blog-writing", (
+            f"应匹配 blog-writing，实际 {result['selected_skill_id']}"
+        )

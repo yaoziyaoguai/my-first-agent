@@ -1,0 +1,99 @@
+{
+  "date": "2026-05-30",
+  "evidence_id": "REAL-EVIDENCE-002",
+  "method": "Real provider core.chat() E2E via ToolRuntimeMediator — 002 hardening: non-steered prompt, multi-skill competition, no suitable skill, empty visible_skills, stability",
+  "tag": "complete",
+  "results": [
+    {
+      "case": "R12",
+      "verdict": "PASS",
+      "detail": "core.chat() completed: result_len=33, meaningful=yes"
+    },
+    {
+      "case": "R13",
+      "verdict": "CONCERN",
+      "detail": "Non-steered prompt → SKILL_SELECT event present but no selected_skill_id. Evidence: {'action_id': 'act:4e98c14dc60a4d33a84708b6bd999e67', 'action_type': 'skill.select', 'dispatcher_route_id': 'route:b5028a43c69f45e284926de60bbfd5a9', 'dispatcher_result_id': 'result:a078819328f145a3a351a4048dd7d275', 'dispatcher_result_issued': True, 'dispatcher_routed': True, 'target_handler_invoked': True, 'handler_name': 'SkillRuntimeActionHandler', 'target_module': 'SkillLoader', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'module_invoked': True, 'invocation_proof': mappingproxy({'call_id': 'call:4b17d21c9e934572a2d18f398531f7b1', 'function_called': 'SkillLoader.no_suitable_skill', 'call_signature': 'no_suitable_skill(reason: str)', 'observed_at': '2026-05-30T00:11:44.425674+00:00', 'observation_method': 'module_spy'}), 'target_module_proof': mappingproxy({'proof_id': 'proof:078674f5f958467e8c68c90d41b911d1', 'observation_source': 'module_spy', 'observer_identity': 'RuntimeActionModuleObserver', 'observation_independent': True, 'linked_route_id': 'route:b5028a43c69f45e284926de60bbfd5a9', 'linked_action_id': 'act:4e98c14dc60a4d33a84708b6bd999e67', 'linked_action_type': 'skill.select', 'linked_handler_name': 'SkillRuntimeActionHandler', 'linked_target_module': 'SkillLoader', 'linked_call_id': 'call:4b17d21c9e934572a2d18f398531f7b1', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'linked_target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'descriptor_invocation_approved': True, 'linked_dispatcher_result_id': 'result:a078819328f145a3a351a4048dd7d275'}), 'result_returned_to_parent_runtime': True, 'parent_adjudicated': None, 'body_load_decision': False, 'no_suitable_skill': True, 'audit_only_skill_exclusion_evidence': mappingproxy({'hidden_or_disabled_exclusion_verified': True, 'excluded_count': 3, 'redacted_exclusion_reason_categories': ('manifest_invalid',)}), 'evidence_level': 'real_core_loop_runtime_e2e', 'runtime_action_source': 'core_loop', 'dispatcher_origin': 'runtime_loop', 'runtime_loop_invoked': True, 'core_loop_invoked': True, 'core_entrypoint': 'core.chat', 'runtime_hook_name': 'loop.turn_end', 'provider_kind': 'real', 'provider_external_call': True, 'external_side_effects': False}"
+    },
+    {
+      "case": "R14",
+      "verdict": "FAIL",
+      "detail": "skill_id=, body_len=0, allowed_tools=EMPTY"
+    },
+    {
+      "case": "R15a",
+      "verdict": "FAIL",
+      "detail": "Note request → no skill selected (should match demo-note-maker)"
+    },
+    {
+      "case": "R15b",
+      "verdict": "FAIL",
+      "detail": "Translation request → no skill selected (should match quick-translator)"
+    },
+    {
+      "case": "R16",
+      "verdict": "CONCERN",
+      "detail": "LIMITATION: core.chat() builds its own skill_registry internally; cannot inject second skill without production code change. Multi-skill competition validated at select_skill_for_real_provider() level only (R15a/R15b). Full core.chat() E2E multi-skill requires plumbing skill_registry as a chat() parameter (B7/B8 scope)."
+    },
+    {
+      "case": "R17",
+      "verdict": "PASS",
+      "detail": "Single-skill scenario: model selected ? for note-taking request"
+    },
+    {
+      "case": "R18",
+      "verdict": "PASS",
+      "detail": "core.chat() completed: result_len=7, answer_contains_2=yes"
+    },
+    {
+      "case": "R19",
+      "verdict": "CONCERN",
+      "detail": "MODEL_BEHAVIOR_CONCERN: model called SKILL_SELECT(?) for math question. Model may be over-eager to use skills."
+    },
+    {
+      "case": "R20",
+      "verdict": "PASS",
+      "detail": "_active_skill not populated for non-skill request"
+    },
+    {
+      "case": "R21",
+      "verdict": "PASS",
+      "detail": "select_skill_for_real_provider([]) → None — empty candidates handled safely"
+    },
+    {
+      "case": "R22",
+      "verdict": "CONCERN",
+      "detail": "LIMITATION: core.chat() always builds its own skill_registry with skills/ directory. Empty visible_skills E2E requires chat() to accept skill_registry parameter (production code change — B7/B8 scope). Unit-level safety verified at R21."
+    },
+    {
+      "case": "R23",
+      "verdict": "PASS",
+      "detail": "Empty SkillRegistry: list_visible()=[] — handler should receive empty candidates and return no_suitable_skill"
+    },
+    {
+      "case": "R24",
+      "verdict": "PASS",
+      "detail": "All 3 runs completed without crash: crashes=0/3"
+    },
+    {
+      "case": "R25",
+      "verdict": "CONCERN",
+      "detail": "No skill selected in some runs: skills_per_run=[None, None, None]"
+    },
+    {
+      "case": "R26",
+      "verdict": "PASS",
+      "detail": "SKILL_SELECT evidence per run: [1, 1, 1] (all_have_select=True)"
+    },
+    {
+      "case": "R26-DEBUG",
+      "verdict": "PASS",
+      "detail": "Stability detail: [{\"run\": 1, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 33, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 2, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 0, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}, {\"run\": 3, \"crashed\": false, \"skill_selected\": null, \"skill_select_events\": 1, \"result_len\": 202, \"event_types\": [\"checkpoint.safe_summary\", \"memory.consolidate\", \"memory.recall\", \"memory.turn_end_proposal\", \"skill.select\", \"subagent.delegate_l0\", \"tool.gate\", \"tool.invoke\", \"tool.request\", \"tool.result\"]}]"
+    }
+  ],
+  "summary": {
+    "PASS": 9,
+    "FAIL": 3,
+    "CONCERN": 5,
+    "SKIP": 0
+  }
+}

@@ -17,10 +17,12 @@ from agent.action_scheduler import (
     ActionRecoveryPolicy,
     ActionScheduler,
     build_action_plan_from_model_output,
+    plan_to_action_plan,
 )
 from agent.core import TurnState, _run_main_loop
 from agent.loop import LoopDependencies, run_main_loop
 from agent.loop_context import LoopContext
+from agent.plan_schema import Plan, PlanStep
 from agent.runtime_integration.action_scheduler_handler import ActionSchedulerHandler
 from agent.runtime_integration.dispatcher import (
     ActionHandlerRegistry,
@@ -658,3 +660,176 @@ class TestBuildActionPlanFromModelOutput:
         plan = build_action_plan_from_model_output(raw)
         # 无效 recovery 应 fallback 到默认 halt，不 crash
         assert plan.nodes[0].recovery.on_failure == "halt"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# plan_to_action_plan() — Plan → ActionPlan schema bridge (P1 fix)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPlanToActionPlan:
+    """Plan (planner 产出) → ActionPlan (scheduler 消费) 转换器合约测试。
+
+    P1 fix: 闭合 planner 和 scheduler 之间的 schema gap。
+    """
+
+    def test_converts_all_step_types(self):
+        """7 种 step_type 全部正确映射为 TOOL_CALL + 对应 target。"""
+        plan = Plan(
+            goal="测试所有步骤类型映射",
+            steps=[
+                PlanStep(step_id="s1", title="读取", description="读文件",
+                         step_type="read"),
+                PlanStep(step_id="s2", title="分析", description="分析内容",
+                         step_type="analyze"),
+                PlanStep(step_id="s3", title="编辑", description="修改文件",
+                         step_type="edit"),
+                PlanStep(step_id="s4", title="执行", description="运行命令",
+                         step_type="run_command"),
+                PlanStep(step_id="s5", title="报告", description="生成报告",
+                         step_type="report"),
+                PlanStep(step_id="s6", title="收集", description="收集输入",
+                         step_type="collect_input"),
+                PlanStep(step_id="s7", title="澄清", description="澄清需求",
+                         step_type="clarify"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert len(result.nodes) == 7
+        expected_targets = {
+            "s1": "read_file", "s2": "read_file", "s3": "write_file",
+            "s4": "bash", "s5": "read_file",
+            "s6": "request_user_input", "s7": "request_user_input",
+        }
+        for node in result.nodes:
+            assert node.action_type == "TOOL_CALL", (
+                f"{node.node_id}: expected TOOL_CALL, got {node.action_type}"
+            )
+            assert node.target == expected_targets[node.node_id], (
+                f"{node.node_id}: expected {expected_targets[node.node_id]}, got {node.target}"
+            )
+
+    def test_sequential_depends_on(self):
+        """隐式顺序 → 显式 depends_on: step_N depends_on step_N-1。"""
+        plan = Plan(
+            goal="测试依赖链",
+            steps=[
+                PlanStep(step_id="step-1", title="第一步", description="先读",
+                         step_type="read"),
+                PlanStep(step_id="step-2", title="第二步", description="再分析",
+                         step_type="analyze"),
+                PlanStep(step_id="step-3", title="第三步", description="最后写",
+                         step_type="edit"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert result.nodes[0].depends_on == ()
+        assert result.nodes[1].depends_on == ("step-1",)
+        assert result.nodes[2].depends_on == ("step-2",)
+
+    def test_suggested_tool_becomes_target(self):
+        """suggested_tool 存在时覆盖 step_type 默认 target。"""
+        plan = Plan(
+            goal="测试工具覆盖",
+            steps=[
+                PlanStep(step_id="s1", title="搜索", description="网页搜索",
+                         step_type="read", suggested_tool="web_search"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert result.nodes[0].target == "web_search"
+        assert result.nodes[0].action_type == "TOOL_CALL"
+
+    def test_empty_steps_raises(self):
+        """空 steps 应抛出 ValueError。"""
+        plan = Plan(goal="空计划", steps=[])
+        try:
+            plan_to_action_plan(plan)
+            raise AssertionError("应该抛出 ValueError")
+        except ValueError:
+            pass
+
+    def test_preserves_goal_and_description(self):
+        """Plan goal → ActionPlan.description，entry_node_id = 第一个 step。"""
+        plan = Plan(
+            goal="读取并分析 README",
+            steps=[
+                PlanStep(step_id="s1", title="读取 README", description="读取项目 README",
+                         step_type="read"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert result.description == "读取并分析 README"
+        assert result.entry_node_id == "s1"
+        assert len(result.nodes) == 1
+
+    def test_params_include_step_metadata(self):
+        """params 应包含 description/expected_outcome/completion_criteria。"""
+        plan = Plan(
+            goal="测试 params",
+            steps=[
+                PlanStep(
+                    step_id="s1", title="分析代码", description="分析 core.py 结构",
+                    step_type="analyze", expected_outcome="代码结构报告",
+                    completion_criteria="输出包含模块列表",
+                ),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        params = dict(result.nodes[0].params)
+        assert params["description"] == "分析 core.py 结构"
+        assert params["expected_outcome"] == "代码结构报告"
+        assert params["completion_criteria"] == "输出包含模块列表"
+
+    def test_unknown_step_type_preserved_as_target(self):
+        """未知 step_type 保持原值作为 target，action_type=TOOL_CALL。"""
+        plan = Plan(
+            goal="测试未知类型",
+            steps=[
+                PlanStep(step_id="s1", title="自定义", description="未知操作",
+                         step_type="custom_action"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert result.nodes[0].action_type == "TOOL_CALL"
+        assert result.nodes[0].target == "custom_action"
+
+    def test_wrong_type_raises(self):
+        """非 Plan 对象应抛出 TypeError。"""
+        try:
+            plan_to_action_plan({"steps": []})  # type: ignore[arg-type]
+            raise AssertionError("应该抛出 TypeError")
+        except TypeError:
+            pass
+
+    def test_custom_plan_id(self):
+        """显式传入 plan_id 应覆盖默认生成。"""
+        plan = Plan(
+            goal="测试 plan_id",
+            steps=[
+                PlanStep(step_id="s1", title="读取", description="读文件",
+                         step_type="read"),
+            ],
+        )
+        result = plan_to_action_plan(plan, plan_id="custom-id")
+        assert result.plan_id == "custom-id"
+
+    def test_default_recovery_is_halt(self):
+        """默认 recovery=halt（安全默认：失败即停止）。"""
+        plan = Plan(
+            goal="测试 recovery",
+            steps=[
+                PlanStep(step_id="s1", title="读取", description="读文件",
+                         step_type="read"),
+            ],
+        )
+        result = plan_to_action_plan(plan)
+
+        assert result.nodes[0].recovery.on_failure == "halt"
+        assert result.nodes[0].recovery.max_retries == 0

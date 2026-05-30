@@ -557,6 +557,100 @@ def build_action_plan_from_dict(plan_dict: dict[str, Any]) -> ActionPlan:
     )
 
 
+def plan_to_action_plan(plan: Any, plan_id: str = "") -> ActionPlan:
+    """从 planner 产出的 Plan 对象构造 ActionPlan。
+
+    中文学习说明：
+    这是 planner 和 scheduler 之间的 schema 桥接层（P1 fix）。
+    Plan 使用 PlanStep（step_id/title/description/step_type/suggested_tool），
+    ActionPlan 使用 ActionNode（node_id/action_type/target/params/depends_on/recovery）。
+    本函数负责：
+    1. step_type → action_type 映射（read→TOOL_CALL(read_file) 等）
+    2. suggested_tool → target（fallback: step_type 推断工具）
+    3. 隐式顺序 → 显式 depends_on（step_N depends_on step_N-1）
+    4. title+description → ActionNode.description
+    5. 默认 recovery=halt（安全默认：失败即停止）
+
+    映射规则：
+    - read/analyze → TOOL_CALL, target=read_file 或 suggested_tool
+    - edit → TOOL_CALL, target=write_file 或 suggested_tool
+    - run_command → TOOL_CALL, target=bash 或 suggested_tool
+    - report → TOOL_CALL, target=read_file（报告由模型生成，非工具执行）
+    - collect_input/clarify → TOOL_CALL, target=request_user_input
+    - 未知 step_type → TOOL_CALL, target=step_type 原值（保持可追溯）
+    """
+    # 延迟 import 避免循环依赖
+    from agent.plan_schema import Plan  # noqa: F811
+
+    if not isinstance(plan, Plan):
+        raise TypeError(f"plan_to_action_plan requires Plan object, got {type(plan).__name__}")
+
+    if not plan.steps:
+        raise ValueError("Plan.steps must not be empty")
+
+    # step_type → (action_type, default_target) 映射表
+    _step_type_map: dict[str, tuple[str, str]] = {
+        "read": ("TOOL_CALL", "read_file"),
+        "analyze": ("TOOL_CALL", "read_file"),
+        "edit": ("TOOL_CALL", "write_file"),
+        "run_command": ("TOOL_CALL", "bash"),
+        "report": ("TOOL_CALL", "read_file"),
+        "collect_input": ("TOOL_CALL", "request_user_input"),
+        "clarify": ("TOOL_CALL", "request_user_input"),
+    }
+
+    nodes: list[ActionNode] = []
+    prev_node_id: str | None = None
+
+    for _i, step in enumerate(plan.steps):
+        # 确定 action_type 和 target
+        action_type, default_target = _step_type_map.get(
+            step.step_type, ("TOOL_CALL", step.step_type)
+        )
+        target = step.suggested_tool if step.suggested_tool else default_target
+
+        # 构造 params：含 description/expected_outcome/completion_criteria
+        params: dict[str, Any] = {}
+        if step.description:
+            params["description"] = step.description
+        if step.expected_outcome:
+            params["expected_outcome"] = step.expected_outcome
+        if step.completion_criteria:
+            params["completion_criteria"] = step.completion_criteria
+
+        # depends_on: 隐式顺序 → 显式依赖（step_N depends_on step_N-1）
+        depends_on: tuple[str, ...] = (prev_node_id,) if prev_node_id else ()
+
+        # recovery: 默认 halt（安全默认）
+        recovery = ActionRecoveryPolicy(on_failure="halt")
+
+        # description: title + description 合并
+        desc = step.title
+        if step.description:
+            desc += f": {step.description}"
+
+        node = ActionNode(
+            node_id=step.step_id,
+            action_type=action_type,
+            target=target,
+            params=params,
+            depends_on=depends_on,
+            recovery=recovery,
+            condition=None,
+            description=desc,
+        )
+        nodes.append(node)
+        prev_node_id = step.step_id
+
+    plan_id_final = plan_id if plan_id else f"plan-{plan.goal[:40]}"
+    return ActionPlan(
+        plan_id=plan_id_final,
+        nodes=tuple(nodes),
+        entry_node_id=plan.steps[0].step_id,
+        description=plan.goal,
+    )
+
+
 def build_action_plan_from_model_output(raw_json: str) -> ActionPlan:
     """从模型输出的 JSON 字符串构造 ActionPlan。
 

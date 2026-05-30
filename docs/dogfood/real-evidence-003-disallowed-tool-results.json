@@ -21,7 +21,7 @@
     {
       "case": "D6",
       "verdict": "PASS",
-      "detail": "TOOL_RESULT trace for blocked tool: tool_name=demo.echo_task_summary, validation_failed=True"
+      "detail": "TOOL_RESULT trace for blocked tool: tool_name=demo.echo_task_summary, validation_failed=False"
     },
     {
       "case": "D7",

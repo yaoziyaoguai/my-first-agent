@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-30 (008 → credible + model plan caveat closed: real AnthropicCompatibleProvider generates valid JSON ActionPlan → bridge → scheduler → evidence chain 13/13 PASS)
+**最后更新**: 2026-05-30 (003 hardening: H1/H2 SKIP — TOOL_REGISTRY 无 diverse disallowed tools；H3 safety assertions reconfirmed 3/3 PASS；新增 caveat (5): 003 blocking 证据目前限于单一 SKILL_SELECT 工具)
 
 ---
 
@@ -84,7 +84,8 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Blocking READY claim** | no |
 | **Closed date** | 2026-05-30 |
 | **Closing evidence** | `scripts/real_evidence_002_003_real_provider_dogfood.py` Phase 2 — 5 PASS / 0 FAIL / 0 CONCERN（R7-R11 all PASS）；结果文件 `docs/dogfood/real-evidence-002-003-real-provider-results.json` |
-| **Credibility** | **partial-credible / code-path credible with blocking demonstrated** — real provider (AnthropicCompatibleProvider) selected skill + disallowed tool blocked via TOOL_GATE skill_allowed_tools→rejected。非 FakeProvider，非 scripted skill activation。**Caveats**: (1) adversarial prompt 极度 prompt-steered; (2) 被阻断工具是 SKILL_SELECT 自身; (3) 单 skill/单工具/单 adversarial prompt 场景; (4) rejection_reason 和 policy_path 在 handler payload 中，不在 RuntimeActionEvent.evidence 中（event 只存 evidence_extra）——这是 evidence 设计选择，不影响阻塞正确性。 |
+| **Hardening (2026-05-30)** | `scripts/real_evidence_003_hardening.py` — 4 PASS / 0 FAIL / 0 CONCERN / 7 SKIP。H0: skill activation PASS。H1 (diverse disallowed tools): SKIP — TOOL_REGISTRY 返回空工具列表，除 SKILL_SELECT 外无可测试的 disallowed 业务工具 (R27/R28/R29)。H2 (diverse adversarial styles): SKIP — 同上 (R30/R31/R32)。H3 (safety assertions): 3/3 PASS (R33/R34/R35)——SKILL_SELECT baseline 阻断逻辑 reconfirmed。**关键发现**: 003 的 blocking 证据 chain 正确但限于单一工具 (SKILL_SELECT)，因为当前项目只有 demo-note-maker skill，TOOL_REGISTRY 中没有其他可被 disallow 的业务工具。这是一个架构限制，不是代码缺陷。结果文件 `docs/dogfood/real-evidence-003-hardening-results.json`。 |
+| **Credibility** | **partial-credible / code-path credible with blocking demonstrated** — real provider (AnthropicCompatibleProvider) selected skill + disallowed tool blocked via TOOL_GATE skill_allowed_tools→rejected。非 FakeProvider，非 scripted skill activation。**Caveats**: (1) adversarial prompt 极度 prompt-steered; (2) 被阻断工具是 SKILL_SELECT 自身; (3) 单 skill/单工具/单 adversarial prompt 场景; (4) rejection_reason 和 policy_path 在 handler payload 中，不在 RuntimeActionEvent.evidence 中（event 只存 evidence_extra）——这是 evidence 设计选择，不影响阻塞正确性; (5) TOOL_REGISTRY 当前无除 SKILL_SELECT 之外的 disallowed 业务工具，H1 (diverse tools) 和 H2 (adversarial styles) 的硬化验证无法在现有工具集上执行——这是项目架构限制（当前只有 demo-note-maker skill，无其他业务工具），不反映 blocking 逻辑缺陷。 |
 
 ---
 

@@ -38,7 +38,6 @@ from agent.runtime_integration.evidence import (
 )
 from agent.runtime_integration.schema import RuntimeActionRequest
 
-
 # ========== 测试辅助工厂 ==========
 
 
@@ -113,8 +112,8 @@ class _PipelineSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
-        result = self._real.route_from_runtime_loop(request)
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: Any) -> Any:
+        result = self._real.route_from_runtime_loop(request, **kwargs)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
 
@@ -231,7 +230,7 @@ class TestHookLevelCheckpointSafeSummaryL3:
 
     def test_t2_hook_level_checkpoint_safe_summary_l3(self):
         """T2: _try_phase1_turn_end_runtime_action 正确 dispatch CHECKPOINT_SAFE_SUMMARY。"""
-        from agent.loop import _try_phase1_turn_end_runtime_action, LoopDependencies
+        from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
 
         real_dispatcher = _build_full_dispatcher()
         spy = _PipelineSpy(real_dispatcher)
@@ -374,3 +373,153 @@ class TestNoRealAPIOrEnv:
         # T4 验证隔离环境中所有操作完成无异常。
         # FakeProvider 是确定性 provider，不发起网络请求，不读 .env。
         # HOME 指向隔离目录保证即使误读也不会触及真实数据。
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P2: Turn-end checkpoint save trigger contract tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestTurnEndCheckpointSave:
+    """P2: turn-end checkpoint save trigger 合约测试。
+
+    验证 checkpoint_save_on_turn_end 参数正确通过 chat() → _run_main_loop()
+    → LoopDependencies → run_main_loop() 链路，在 turn-end hook 完成后
+    触发 CHECKPOINT_SAVE dispatch。
+    """
+
+    def test_loop_dependencies_default_false(self):
+        """checkpoint_save_on_turn_end 默认 False——向后兼容。"""
+        from agent.loop import LoopDependencies
+
+        deps = LoopDependencies(
+            state=_mock_state(),
+            call_model=lambda ts, lc: _fake_model_response(),
+            dispatch_model_output=lambda resp: "ok",
+            runtime_loop_fields=lambda: {},
+            safe_emit_runtime_event=lambda s, e: None,
+            clear_checkpoint=lambda: None,
+        )
+        assert deps.checkpoint_save_on_turn_end is False, (
+            "默认应为 False（向后兼容）"
+        )
+
+    def test_chat_param_threads_to_loop_dependencies(self):
+        """chat(checkpoint_save_on_turn_end=True) → LoopDependencies 正确传递。"""
+        import inspect
+
+        # 验证 chat() 接受此参数
+        from agent.core import chat
+
+        sig = inspect.signature(chat)
+        assert "checkpoint_save_on_turn_end" in sig.parameters, (
+            "chat() 应接受 checkpoint_save_on_turn_end 参数"
+        )
+
+        param = sig.parameters["checkpoint_save_on_turn_end"]
+        assert param.default is False, (
+            f"默认值应为 False，实际 {param.default!r}"
+        )
+
+    def test_chat_with_turn_end_save_runs_without_crash(self):
+        """chat(checkpoint_save_on_turn_end=True) 不 crash。
+
+        使用 FakeProvider 验证参数传递链完整，不产生异常。
+        """
+        from agent.core import chat
+        from agent.provider.fake_provider import FakeProvider
+
+        result = chat(
+            "hello",
+            provider=FakeProvider(),
+            checkpoint_save_on_turn_end=True,
+        )
+        assert isinstance(result, str)
+        # 不 crash 即通过——证明参数传递链完整
+
+    def test_chat_with_turn_end_save_dispatches_checkpoint_evidence(self):
+        """checkpoint_save_on_turn_end=True + dispatcher → CHECKPOINT_SAVE dispatched。
+
+        验证通过注入 dispatcher spy 确认 CHECKPOINT_SAVE action 被触发。
+        """
+        from agent.core import chat
+        from agent.provider.fake_provider import FakeProvider
+        from agent.runtime_integration.schema import RuntimeActionType
+
+        real_dispatcher = _build_full_dispatcher()
+        spy = _PipelineSpy(real_dispatcher)
+
+        result = chat(
+            "hello",
+            provider=FakeProvider(),
+            runtime_action_dispatcher=spy,
+            checkpoint_save_on_turn_end=True,
+        )
+        assert isinstance(result, str)
+
+        # CHECKPOINT_SAVE 应出现在 captured actions 中
+        checkpoint_saves = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.CHECKPOINT_SAVE
+        ]
+        assert len(checkpoint_saves) >= 1, (
+            f"checkpoint_save_on_turn_end=True 应触发 CHECKPOINT_SAVE dispatch，"
+            f"实际 captured types: {[r.action_type.value for _, r, _ in spy.captured]}"
+        )
+
+        # 验证 evidence 来自 turn_end source
+        for _, req, _ in checkpoint_saves:
+            payload = dict(req.payload) if req.payload else {}
+            # CHECKPOINT_SAVE 的 payload 含 _state 和 source
+            assert "_state" in payload, (
+                f"CHECKPOINT_SAVE payload 应含 _state，实际 keys={list(payload.keys())}"
+            )
+
+    def test_chat_with_turn_end_save_disabled_no_checkpoint(self):
+        """默认 checkpoint_save_on_turn_end=False 时不应触发 CHECKPOINT_SAVE。
+
+        验证默认行为不变——不影响现有 conversation flow。
+        """
+        from agent.core import chat
+        from agent.provider.fake_provider import FakeProvider
+        from agent.runtime_integration.schema import RuntimeActionType
+
+        real_dispatcher = _build_full_dispatcher()
+        spy = _PipelineSpy(real_dispatcher)
+
+        result = chat(
+            "hello",
+            provider=FakeProvider(),
+            runtime_action_dispatcher=spy,
+            # 不传 checkpoint_save_on_turn_end——使用默认 False
+        )
+        assert isinstance(result, str)
+
+        # 默认不应有来自 turn_end 的 CHECKPOINT_SAVE
+        # 注意: 可能有来自 memory_confirmation 等其他 source 的 CHECKPOINT_SAVE
+        turn_end_saves = [
+            (m, r, res) for m, r, res in spy.captured
+            if r.action_type == RuntimeActionType.CHECKPOINT_SAVE
+            and dict(r.payload).get("source") == "turn_end"
+        ]
+        assert len(turn_end_saves) == 0, (
+            "默认 checkpoint_save_on_turn_end=False 时不应有 turn_end CHECKPOINT_SAVE"
+        )
+
+
+def _mock_state():
+    from unittest.mock import MagicMock
+    s = MagicMock()
+    s.task.status = "running"
+    s.task.current_step_index = 0
+    s.task.pending_tool = None
+    s.task.pending_user_input_request = None
+    return s
+
+
+def _fake_model_response():
+    from unittest.mock import MagicMock
+    r = MagicMock()
+    r.content = [MagicMock(text="hello", type="text")]
+    r.stop_reason = "end_turn"
+    return r

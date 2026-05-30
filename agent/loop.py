@@ -672,6 +672,10 @@ class LoopDependencies:
     # 默认 None——兼容旧行为。注入后 run_main_loop() 在 call_model() 之前
     # 预处理 active action plan，按 depends_on 拓扑顺序推进 action node。
     action_scheduler: Any = None
+    # P2: turn-end checkpoint save trigger。
+    # 默认 False（向后兼容）。True 时每轮 turn-end hook 完成后自动通过 dispatcher
+    # 触发 CHECKPOINT_SAVE，确保 real provider conversation 能产生 checkpoint evidence。
+    checkpoint_save_on_turn_end: bool = False
 
 
 def _emit_run_summary(
@@ -814,6 +818,47 @@ def _emit_run_summary(
     dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, summary_event)
 
 
+def _dispatch_turn_end_checkpoint_save(dependencies: LoopDependencies) -> None:
+    """P2: turn-end checkpoint save trigger。
+
+    通过 dispatcher 触发 CHECKPOINT_SAVE，handler 负责实际 save_checkpoint()。
+    任何异常静默吞掉——checkpoint 保存失败不阻塞 conversation flow。
+    """
+    try:
+        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+        dispatcher = dependencies.runtime_action_dispatcher
+        if dispatcher is None:
+            return
+        state = dependencies.state
+        pending_tool = getattr(state.task, "pending_tool", None)
+        pending_ui = getattr(state.task, "pending_user_input_request", None)
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = getattr(dispatcher, "route", None)
+        if route is None:
+            return
+        route(
+            RuntimeActionRequest(
+                action_type=RuntimeActionType.CHECKPOINT_SAVE,
+                source="core_loop",
+                parent_trace_id="",
+                payload={
+                    "_state": state,
+                    "source": "turn_end",
+                    "task_status": getattr(state.task, "status", None),
+                    "current_step_index": getattr(state.task, "current_step_index", None),
+                    "pending_tool": pending_tool,
+                    "pending_user_input_request": pending_ui,
+                },
+            ),
+            core_entrypoint="core.chat",
+            runtime_hook_name="turn_end_checkpoint_save",
+        )
+    except Exception:
+        pass
+
+
 def run_main_loop(
     turn_state: Any,
     loop_ctx: LoopContext,
@@ -911,6 +956,15 @@ def run_main_loop(
                     dependencies.state, result, dependencies.runtime_action_dispatcher,
                     dependencies=dependencies,
                 )
+            # P2: turn-end checkpoint save trigger。
+            # 当 checkpoint_save_on_turn_end=True 时，在 turn-end hook 完成后
+            # 通过 dispatcher 触发 CHECKPOINT_SAVE，确保 real provider
+            # conversation 可产生 checkpoint evidence。
+            if (
+                dependencies.checkpoint_save_on_turn_end
+                and dependencies.runtime_action_dispatcher is not None
+            ):
+                _dispatch_turn_end_checkpoint_save(dependencies)
             _emit_run_summary(
                 turn_state,
                 loop_ctx,

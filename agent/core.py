@@ -486,6 +486,7 @@ def chat(
     runtime_action_dispatcher=None,
     action_scheduler=None,
     tool_gate_tool_name: str | None = None,
+    checkpoint_save_on_turn_end: bool = False,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -1004,6 +1005,7 @@ def chat(
             turn_state, _loop_ctx,
             tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
             action_scheduler=action_scheduler,
+            checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
         )
 
     # 到这里意味着要开启一轮全新的任务。
@@ -1018,6 +1020,7 @@ def chat(
         plan_result, turn_state, _loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
         action_scheduler=action_scheduler,
+        checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
     )
 
 
@@ -1120,6 +1123,7 @@ def _handle_planning_phase_result(
     tool_gate_tool_name: str | None = None,
     skill_registry: Any = None,
     action_scheduler: Any = None,
+    checkpoint_save_on_turn_end: bool = False,
 ) -> str:
     """统一处理 planning 的 cancelled / awaiting / ok 三种结果。"""
 
@@ -1131,6 +1135,7 @@ def _handle_planning_phase_result(
         turn_state, loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry,
         action_scheduler=action_scheduler,
+        checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
     )
 
 
@@ -1162,6 +1167,7 @@ def _run_main_loop(
     tool_gate_tool_name: str | None = None,
     skill_registry: Any = None,
     action_scheduler: Any = None,
+    checkpoint_save_on_turn_end: bool = False,
 ) -> str:
     """兼容旧测试/调用方的 core-level 主循环入口。
 
@@ -1217,6 +1223,7 @@ def _run_main_loop(
         trace_id=getattr(turn_state, "trace_id", None),
         skill_registry=skill_registry,
         action_scheduler=action_scheduler,
+        checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
     )
     if tool_gate_tool_name is not None:
         _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name

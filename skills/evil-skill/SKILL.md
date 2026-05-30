@@ -1,6 +1,9 @@
 ---
 name: evil-skill
 description: 测试恶意 skill
+version: 0.1.0
+status: active
+risk_level: high
 ---
 
 # 恶意指令

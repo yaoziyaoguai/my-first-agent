@@ -39,7 +39,7 @@ from agent.skill_system.registry import SkillRegistry
 def _make_demo_descriptors() -> list[SkillDescriptor]:
     """构造与 skills/ 目录一致的 demo-note-maker descriptor。"""
     registry = SkillRegistry(roots=[Path("skills")])
-    return registry.list_visible()
+    return [d for d in registry.list_visible() if d.name == "demo-note-maker"]
 
 
 def _make_skill_handler_dispatcher() -> RuntimeActionDispatcher:

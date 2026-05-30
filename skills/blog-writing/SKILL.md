@@ -1,9 +1,11 @@
 ---
 name: blog-writing
 description: 用于写作技术博客。当用户要求"写博客"、"blog"、"写一篇文章"时使用。
+version: 1.0.0
+status: active
+risk_level: low
 metadata:
   author: Jinkun
-  version: "1.0"
 ---
 
 # 博客写作指南

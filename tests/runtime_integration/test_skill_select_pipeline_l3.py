@@ -33,7 +33,6 @@ from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
 
-
 # ========== 测试辅助 ==========
 
 
@@ -131,7 +130,7 @@ class TestSkillSelectNonEmptyRegistryL3:
                 "memory_scope": desc.memory_scope,
             })
 
-        selected = visible[0]
+        selected = next((d for d in visible if d.name == "demo-note-maker"), visible[0])
         return {
             "core_loop_invoked": True,
             "core_entrypoint": "core.chat",
@@ -143,7 +142,9 @@ class TestSkillSelectNonEmptyRegistryL3:
             "available_skill_metadata": available_meta,
             "model_decision_metadata": {
                 "selected_skill_id": selected.name,
-                "selection_reason": "fake provider auto-selection: demo skill matched for E2E verification",
+                "selection_reason": (
+                    "fake provider auto-selection: demo skill matched for E2E verification"
+                ),
                 "selection_confidence": "high",
             },
         }
@@ -247,7 +248,12 @@ class TestSkillSelectNonEmptyRegistryL3:
         )
         # 验证失败原因与 metadata 匹配相关
         failure_reason = result.payload.get("failure_reason", "")
-        assert "does not match" in failure_reason or "not present" in failure_reason or "not available" in failure_reason, (
+        reason_mismatch = (
+            "does not match" in failure_reason
+            or "not present" in failure_reason
+            or "not available" in failure_reason
+        )
+        assert reason_mismatch, (
             f"failure_reason 应指向 metadata/registry 不匹配，实际 {failure_reason!r}"
         )
 
@@ -264,9 +270,9 @@ def test_build_skill_registry_finds_demo_skill():
     names = {d.name for d in visible}
     assert "demo-note-maker" in names
 
-    # 验证旧格式 skill（缺少 version/status）进入 load_errors 而非 visible list
+    # 验证所有 skill manifest 通过 validation（version/status 已补齐）
     errors = registry.get_load_errors()
-    assert len(errors) >= 1, "旧格式 skill 应产生 load_errors"
+    assert len(errors) == 0, f"所有 skill manifest 应通过 validation，实际 load_errors={errors}"
 
 
 # ========== S6: build_phase1_dispatcher 集成验证 ==========

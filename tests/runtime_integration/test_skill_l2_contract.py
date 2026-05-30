@@ -128,11 +128,20 @@ def test_fake_provider_chat_skill_registry_active_in_frame():
 
 
 def test_build_skill_registry_has_load_errors():
-    """旧格式 skill（缺少 version/status）应进入 load_errors 而非 visible list。"""
+    """所有 skills/ 下 SKILL.md manifest 均应通过 validation（version/status 已补齐）。
+
+    历史上有 3 个 skill（blog-writing/evil-skill/pdf）缺少 version/status 字段导致
+    MISSING_VERSION 错误。修复后 0 load_errors，4 visible skills。
+    """
     registry = build_skill_registry()
     errors = registry.get_load_errors()
-    assert len(errors) >= 1, (
-        "旧格式 skill 应产生 load_errors，验证 registry loading 的健壮性"
+    visible = registry.list_visible()
+    assert len(errors) == 0, (
+        f"所有 skill manifest 应通过 validation，实际 load_errors={errors}"
+    )
+    assert len(visible) == 4, (
+        f"skills/ 下应有 4 个 visible skill，实际 {len(visible)}: "
+        f"{[d.name for d in visible]}"
     )
 
 

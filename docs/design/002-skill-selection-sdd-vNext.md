@@ -1,7 +1,7 @@
 # 002 Skill Selection — SDD / Architecture vNext
 
 日期: 2026-05-31
-状态: design — SPEC/SDD 阶段，不包含 production code 实现
+状态: design — SPEC/SDD 阶段，不包含 production code 实现。**[Implementation complete (2026-05-31, ab013ed): Plan 3 Phase 2-7 implemented + Loop 7 D05/D06 closed; 002 now credible (12/12 PASS dogfood); remaining scope caveats: prompt-steered, single-skill. See `docs/PROJECT_STATUS.md` for current status.]**
 目标: 定义 002 Skill Selection 从 partial-credible 到 credible 的完整架构设计
 
 ---

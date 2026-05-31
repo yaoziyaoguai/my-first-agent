@@ -123,22 +123,24 @@ Loop 1 (P0): Runtime integration ✅ COMPLETED (aef2f8f)
   ├── TDD GREEN: 23/23 tests pass, 93/93 skill tests pass, 247/247 unit+integration pass ✅
   └── Gate: focused tests + ruff + git diff --check ✅
 
-Loop 2 (P0 evidence): Dogfood re-run (需要真实 provider)
+Loop 2 (P0 evidence): Dogfood re-run (需要真实 provider) ⏸️ DEFERRED
   ├── Update/rerun dogfood script
   ├── Verify D01/D02 change from CONCERN → PASS
   └── Document any remaining CONCERN
+  └── ⏸️ 需要真实 provider API 调用，当前 session 未授权
 
-Loop 3 (P1): Fallback downgrade verification
-  ├── Verify turn-end hook only triggers when turn-start didn't produce result
-  ├── Verify _skill_selected_by_model flag correctly prevents keyword override
-  └── Update loop.py comments to reflect safety-fallback-only status
+Loop 3 (P1): Fallback downgrade verification ✅ COMPLETED
+  ├── Verify turn-end hook only triggers when turn-start didn't produce result ✅
+  ├── Verify _skill_selected_by_model flag correctly prevents keyword override ✅
+  └── Update loop.py comments to reflect safety-fallback-only status ✅
 
-Loop 4 (P1+P2): Docs overclaim correction
-  ├── PROJECT_STATUS.md: accurate wording
-  ├── PROGRESS_LEDGER.md: remove "fully implemented and verified"
-  └── Update remediation todo status
+Loop 4 (P1+P2): Docs overclaim correction ✅ COMPLETED
+  ├── PROJECT_STATUS.md: accurate wording ✅ (removed fixed caveat #3, updated header)
+  ├── PROGRESS_LEDGER.md: remove "fully implemented and verified" ✅ (add Loop 1 P0 fix entry)
+  └── Update remediation todo status ✅
 
-Loop 5 (P3): test_skill_retriever.py uncommitted fix
+Loop 5 (P3): test_skill_retriever.py uncommitted fix ✅ COMPLETED (7c79e7c)
+  └── ruff I001 import reorder fix committed
 ```
 
 ---

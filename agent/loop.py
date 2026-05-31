@@ -428,8 +428,17 @@ def _try_phase1_turn_end_runtime_action(
     # 通过 dispatcher 生成，fake/real 共享核心路径。
 
     # SKILL_SELECT action（独立 try/except——失败不阻断其他 dispatch）
-    # 中文学习边界：Skill Selection 通过 turn-end hook dispatch 验证 L3 evidence
-    # chain 完整。
+    # 中文学习边界：Skill Selection 的 PRIMARY path 是 turn-start structured
+    # selection（refresh_runtime_system_prompt() → SkillCandidateRetriever.retrieve()
+    # → build_skill_selection_section() → selection section 注入 system prompt
+    # → 模型在候选 skill routing 信息上下文中使用 SKILL_SELECT tool）。
+    #
+    # turn-end hook 中的 SKILL_SELECT dispatch 是 SAFETY FALLBACK ONLY：
+    # - 当 turn-start selection 未产生匹配结果（无候选 skill / 模型未选择）时，
+    #   通过 keyword matching 提供兜底
+    # - 如果模型已通过 tool_use 自主选择 skill
+    #   （_skill_selected_by_model=True），跳过 keyword fallback
+    # - 确定性 keyword matching 结果可解释（matched_terms, match_score）
     #
     # skill_registry 为 None 时（向后兼容）：payload 不含 skill metadata，
     # handler 返回 "no skills available"，L3 evidence 路径保持完整。

@@ -11,10 +11,9 @@
 
 ### 1.1 状态
 
-- **002 当前**: NOT CREDIBLE
-- **002 正确标记**: partial-credible / code-path credible with real-model evidence (Plan 2 model-owned tool_use + Plan 3 lifecycle)
-- **核心缺口**: Plan 3 的 turn-start structured selection phase 未真正接入 runtime 生产路径
-- **真实实现**: Plan 2 模型自主 tool_use (SKILL_SELECT tool) + Plan 3 lifecycle 管理 + turn-end keyword fallback
+- **002 当前**: **credible** (Loop 7, ab013ed — 12 PASS / 0 CONCERN / 0 FAIL, D04/D05/D06 全部关闭)
+- **002 正确标记**: credible, remaining scope caveats (prompt-steered, single-skill) are non-blocking
+- **Plan 3 所有缺口已闭合**: retriever + selection section 已接入 runtime (Loop 1, aef2f8f)；D03 重分类为 manifest language policy；D05/D06 关闭 (Loop 7, ab013ed)
 
 ### 1.2 问题本质
 
@@ -248,8 +247,7 @@ Loop 7 (dogfood fix): close D05/D06 validation gaps ✅ COMPLETED
 - [x] ~~dogfood CONCERN 关闭或有明确非阻塞解释~~ → P0-3
 
 ### 不会声称:
-- 002 fully credible (仍有 caveats)
-- Plan 3 pipeline fully implemented (直到 B7/B8 完成)
+- 002 fully credible (仍有 scope caveats: prompt-steered, single-skill — non-blocking, recorded in DEBT.md)
 - product-ready
 
 ---

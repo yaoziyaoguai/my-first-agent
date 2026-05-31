@@ -215,7 +215,7 @@
 
 | Branch Point | 状态 | 证据等级 | 说明 |
 |-------------|------|---------|------|
-| skill.select | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | model-owned SKILL_SELECT real provider 验证通过 (6/6 PASS)；AnthropicCompatibleProvider 模型自主 tool_use("SKILL_SELECT") → ToolRuntimeMediator pipeline → _active_skill → model-owned path 确认；REAL-EVIDENCE-002 partial-credible (prompt-steered single-skill single-run caveats remain) |
+| skill.select | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | model-owned SKILL_SELECT real provider 验证通过 (Plan 3 pipeline, 12/12 PASS, ab013ed)；AnthropicCompatibleProvider 模型自主 tool_use("SKILL_SELECT") → ToolRuntimeMediator pipeline → ActiveSkillLifecycle → model-owned path 确认；REAL-EVIDENCE-002 **credible** (scope caveats: prompt-steered, single-skill — non-blocking) |
 | skill.apply | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | allowed_tools real provider 验证通过 (5/5 PASS)；real SKILL_SELECT activates demo-note-maker → adversarial prompt → SKILL_SELECT blocked via skill_allowed_tools→rejected → no TOOL_INVOKE；REAL-EVIDENCE-003 partial-credible (prompt-steered single-tool adversarial caveats remain) |
 | mcp.discover | PARTIAL | REAL_EVIDENCE_SMOKE | local stdio fixture bridge discovery/register/visibility/allowlist 可信；REAL-EVIDENCE-005 独立复审为 credible |
 | mcp.invoke | PARTIAL | REAL_CORE_LOOP_RUNTIME_E2E | 007 runtime invocation path completed: TOOL_GATE→TOOL_INVOKE→StdioMCPClient.call_tool→TOOL_RESULT→conversation context 全链验证通过 (10/10 PASS)；mediator payload bug 已修复；REAL-EVIDENCE-007 credible |

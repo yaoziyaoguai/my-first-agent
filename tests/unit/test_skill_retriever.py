@@ -16,9 +16,8 @@ RED 状态说明：
 
 from __future__ import annotations
 
-from agent.skill_system.retriever import SkillCandidateRetriever
-
 from agent.skill_system.descriptor import SkillManifest
+from agent.skill_system.retriever import SkillCandidateRetriever
 
 # ---- helpers ----
 

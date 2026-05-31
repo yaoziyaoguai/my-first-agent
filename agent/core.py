@@ -112,6 +112,8 @@ from agent.runtime_decision_frame import (
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
 from agent.runtime_loop_fields import build_runtime_loop_fields
 from agent.skill_system.lifecycle import get_default_lifecycle as _get_lifecycle
+from agent.skill_system.prompt_section import build_skill_selection_section
+from agent.skill_system.retriever import SkillCandidateRetriever
 from agent.state import create_agent_state, task_status_requires_plan
 from agent.subagent_inline import execute_subagent_delegation as _execute_subagent_delegation
 from agent.tool_registry import get_model_visible_tools
@@ -366,7 +368,9 @@ def _dispatch_checkpoint_save(dispatcher, state, source="core.chat"):
     )
 
 
-def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
+def refresh_runtime_system_prompt(
+    dispatcher=None, *, skill_registry=None, user_input: str = "",
+):
     """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
     Loop 3 (Memory E2E) 收敛：当 dispatcher 可用时，MEMORY_RECALL 通过
@@ -376,9 +380,30 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
     Loop 2.2: skill_registry 用于生成可用技能列表 prompt section；
     注入激活 Skill body（上一轮 SKILL_SELECT 成功加载的 body）。
 
+    Phase 3: 当 user_input 非空且有 skill_registry 时，执行 turn-start
+    structured skill selection：
+    - dispatch skill.selection.entered evidence
+    - SkillCandidateRetriever.retrieve(user_input, skill_registry)
+    - dispatch skill.candidates.built evidence（含候选数量和名称）
+    - build_skill_selection_section(candidates) → 注入 selection_section
     返回 (system_prompt, snapshot_item_count)，调用方由此获得 memory 条数，
     无需再直接调用 _memory_runtime.snapshot_for_prompt()。
     """
+    # Phase 3: turn-start skill candidate retrieval
+    selection_section = ""
+    if user_input and skill_registry is not None:
+        # 记录 selection phase 进入 evidence
+        if dispatcher is not None:
+            _dispatch_skill_selection_entered(dispatcher, user_input)
+        # 检索候选 skill
+        retriever = SkillCandidateRetriever()
+        candidates = retriever.retrieve(user_input, skill_registry)
+        # 记录候选构建 evidence
+        if dispatcher is not None:
+            _dispatch_skill_candidates_built(dispatcher, candidates)
+        # 生成 selection prompt section
+        selection_section = build_skill_selection_section(candidates)
+
     if dispatcher is not None:
         from agent.runtime_integration.schema import (
             RuntimeActionRequest,
@@ -401,6 +426,7 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
             memory_section=memory_section,
             skill_registry=skill_registry,
             active_skill_section=_active_skill_section(),
+            selection_section=selection_section,
         )
     else:
         memory_snapshot = _memory_runtime.snapshot_for_prompt()
@@ -409,10 +435,72 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
             memory_snapshot=memory_snapshot,
             skill_registry=skill_registry,
             active_skill_section=_active_skill_section(),
+            selection_section=selection_section,
         )
 
     state.set_system_prompt(system_prompt)
     return state.get_system_prompt(), snapshot_item_count
+
+
+def _dispatch_skill_selection_entered(dispatcher, user_input: str) -> None:
+    """Phase 3: 记录 turn-start skill selection phase 进入 evidence。
+
+    这是每 turn 的 probe event——每次 model call 前无条件执行，
+    大多数情况下无有效候选时返回 noop。
+    """
+    from agent.runtime_integration.schema import (
+        RuntimeActionRequest,
+        RuntimeActionType,
+    )
+
+    try:
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SKILL_SELECTION_ENTERED,
+            source="core_loop",
+            parent_trace_id="",
+            payload={"user_input_length": len(user_input)},
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
+        route(request)
+    except Exception:
+        # evidence dispatch 失败不阻塞 main loop
+        pass
+
+
+def _dispatch_skill_candidates_built(
+    dispatcher, candidates: list,
+) -> None:
+    """Phase 3: 记录 skill candidates 构建 evidence。
+
+    在 SkillCandidateRetriever.retrieve() 返回后 dispatch，
+    payload 包含候选数量和名称列表，用于验证 selection phase 产出。
+    """
+    from agent.runtime_integration.schema import (
+        RuntimeActionRequest,
+        RuntimeActionType,
+    )
+
+    try:
+        candidate_names = [c.skill_name for c in candidates]
+        request = RuntimeActionRequest(
+            action_type=RuntimeActionType.SKILL_CANDIDATES_BUILT,
+            source="core_loop",
+            parent_trace_id="",
+            payload={
+                "candidate_count": len(candidates),
+                "candidate_names": candidate_names,
+            },
+        )
+        route = getattr(dispatcher, "route_from_runtime_loop", None)
+        if route is None:
+            route = dispatcher.route
+        route(request)
+    except Exception:
+        # evidence dispatch 失败不阻塞 main loop
+        pass
+
 
 refresh_runtime_system_prompt()
 
@@ -889,9 +977,11 @@ def chat(
 
     # Loop 3 (Memory E2E): 传入 dispatcher 统一 recall 路径
     # Loop 2.2: 传入 skill_registry 生成 Skill 可用列表 prompt section
+    # Phase 3: 传入 user_input — turn-start skill candidate retrieval + selection section
     runtime_system_prompt, snapshot_item_count = refresh_runtime_system_prompt(
         dispatcher=runtime_action_dispatcher,
         skill_registry=_skill_registry,
+        user_input=user_input,
     )
 
     # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。

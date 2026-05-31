@@ -29,6 +29,7 @@ def build_system_prompt(
     memory_section: str = "",
     skill_registry: Any = None,
     active_skill_section: str = "",
+    selection_section: str = "",
 ) -> str:
     """组装完整的 system prompt。
 
@@ -41,6 +42,10 @@ def build_system_prompt(
 
     Loop 2.2: skill_registry 用于生成可用技能列表；active_skill_section
     用于注入上一轮 SKILL_SELECT 成功加载的 skill body。
+
+    Phase 3: selection_section 用于注入 turn-start 候选 skill 选择器 section，
+    放在 skills listing 之后、active skill body 之前，让模型在候选 skill
+    routing 信息上下文中做选择。
     """
     parts = [SYSTEM_PROMPT]
 
@@ -54,6 +59,10 @@ def build_system_prompt(
     skills_section = build_skills_section(skill_registry)
     if skills_section:
         parts.append(skills_section)
+
+    # Phase 3: 注入 turn-start skill 候选选择器 section
+    if selection_section:
+        parts.append(selection_section)
 
     # Loop 2.2: 注入当前激活 Skill 的 body 作为模型 instruction
     if active_skill_section:

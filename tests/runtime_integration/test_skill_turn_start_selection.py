@@ -618,3 +618,207 @@ class TestRetrieverPromptIntegration:
             "即使无 skill_registry，system prompt 也应正常生成"
         )
         assert isinstance(prompt, str)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# P0 Runtime Integration Tests — refresh_runtime_system_prompt + retriever
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestBuildSystemPromptSelectionSection:
+    """验证 build_system_prompt() 的 selection_section 参数行为。"""
+
+    def test_selection_section_included_in_prompt(self):
+        """有 selection_section 时必须出现在最终 prompt 中。"""
+        from agent.prompt_builder import build_system_prompt
+
+        prompt = build_system_prompt(
+            selection_section="## Skill 选择\n\n候选: demo-note-maker",
+        )
+        assert "## Skill 选择" in prompt, (
+            f"selection_section 必须出现在 prompt 中，实际: {prompt[:300]}"
+        )
+        assert "demo-note-maker" in prompt
+
+    def test_empty_selection_section_not_injected(self):
+        """selection_section 为空时不注入任何内容。"""
+        from agent.prompt_builder import build_system_prompt
+
+        prompt_no_selection = build_system_prompt(selection_section="")
+        prompt_none_default = build_system_prompt()
+
+        # 两者应该一致（空 selection_section 等同于不传）
+        assert prompt_no_selection == prompt_none_default, (
+            "空 selection_section 应等同于不传参数"
+        )
+
+    def test_selection_section_position(self):
+        """selection_section 应出现在 skills listing 之后、active_skill 之前。"""
+        from agent.prompt_builder import build_system_prompt
+
+        manifest = _make_manifest(name="demo-skill", description="测试技能。")
+        registry = MockRegistry([manifest])
+
+        prompt = build_system_prompt(
+            skill_registry=registry,
+            selection_section="## Skill 选择\n\n候选内容",
+            active_skill_section="这是激活 skill 的 body",
+        )
+
+        # selection section 应在 skills listing 之后
+        skills_pos = prompt.find("demo-skill")
+        selection_pos = prompt.find("## Skill 选择")
+        active_pos = prompt.find("[Active Skill Instructions]")
+
+        assert skills_pos >= 0, "skills listing 必须存在"
+        assert selection_pos >= 0, "selection section 必须存在"
+        assert active_pos >= 0, "active skill section 必须存在"
+        assert skills_pos < selection_pos < active_pos, (
+            f"顺序应为: skills({skills_pos}) < selection({selection_pos})"
+            f" < active({active_pos})"
+        )
+
+
+class TestRefreshRuntimeSystemPromptEvidence:
+    """验证 refresh_runtime_system_prompt() 的 evidence dispatch 行为。
+
+    这些测试直接验证 P0 修复的核心目标：
+    - retriever 在 runtime path 被调用
+    - selection.entered + candidates.built evidence 被 dispatch
+    - selection section 被注入到 system prompt
+    """
+
+    def test_selection_section_in_runtime_prompt(self):
+        """用户输入匹配 skill trigger 时，runtime prompt 必须包含 selection section。
+
+        这是 P0 修复的核心验证——retriever → candidates → selection_section
+        必须在 runtime prompt 中可见。
+        """
+        from agent.core import refresh_runtime_system_prompt
+
+        manifest = _make_manifest(
+            name="demo-note-maker",
+            description="创建本地任务笔记。",
+            triggers=("写笔记",),
+        )
+        registry = MockRegistry([manifest])
+
+        prompt, count = refresh_runtime_system_prompt(
+            skill_registry=registry,
+            user_input="写笔记",
+        )
+        assert "Skill 选择" in prompt, (
+            f"匹配 trigger 时 prompt 应包含 selection section，"
+            f"实际: {prompt[:500]}"
+        )
+        assert "demo-note-maker" in prompt
+
+    def test_no_selection_section_for_unrelated_input(self):
+        """无关输入不产生 selection section（无候选匹配）。"""
+        from agent.core import refresh_runtime_system_prompt
+
+        manifest = _make_manifest(
+            name="demo-note-maker",
+            description="创建本地任务笔记。",
+            triggers=("写笔记",),
+        )
+        registry = MockRegistry([manifest])
+
+        prompt, count = refresh_runtime_system_prompt(
+            skill_registry=registry,
+            user_input="今天天气真好",
+        )
+        # 无关输入 → 无候选 → 无 selection section
+        assert "Skill 选择" not in prompt, (
+            f"无关输入不应产生 selection section，"
+            f"但 prompt 中包含: {prompt[:500]}"
+        )
+
+    def test_evidence_dispatched_when_user_input_provided(self):
+        """dispatcher 可用时，selection.entered + candidates.built evidence 被 dispatch。
+
+        使用 spy dispatcher 验证 evidence 确实被触发。
+        """
+        from agent.core import refresh_runtime_system_prompt
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+        )
+        from agent.runtime_integration.schema import RuntimeActionType
+
+        manifest = _make_manifest(
+            name="demo-note-maker",
+            description="测试技能。",
+            triggers=("写笔记",),
+        )
+        registry = MockRegistry([manifest])
+
+        # 构建 spy dispatcher（无需真实 handler，只记录路由调用）
+        action_registry = ActionHandlerRegistry()
+        dispatcher = RuntimeActionDispatcher(registry=action_registry)
+
+        prompt, count = refresh_runtime_system_prompt(
+            dispatcher=dispatcher,
+            skill_registry=registry,
+            user_input="写笔记",
+        )
+
+        # action_log 应包含 selection.entered 和 candidates.built
+        action_types = [a.action_type for a in dispatcher.action_log]
+        assert RuntimeActionType.SKILL_SELECTION_ENTERED in action_types, (
+            f"action_log 必须包含 SKILL_SELECTION_ENTERED，"
+            f"实际: {action_types}"
+        )
+        assert RuntimeActionType.SKILL_CANDIDATES_BUILT in action_types, (
+            f"action_log 必须包含 SKILL_CANDIDATES_BUILT，"
+            f"实际: {action_types}"
+        )
+
+        # selection section 必须出现在 prompt 中
+        assert "Skill 选择" in prompt
+
+    def test_evidence_not_dispatched_for_empty_user_input(self):
+        """空 user_input 时不触发 selection evidence。"""
+        from agent.core import refresh_runtime_system_prompt
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+        )
+        from agent.runtime_integration.schema import RuntimeActionType
+
+        manifest = _make_manifest(name="demo", description="desc。")
+        registry = MockRegistry([manifest])
+
+        action_registry = ActionHandlerRegistry()
+        dispatcher = RuntimeActionDispatcher(registry=action_registry)
+
+        prompt, count = refresh_runtime_system_prompt(
+            dispatcher=dispatcher,
+            skill_registry=registry,
+            user_input="",  # 空输入
+        )
+
+        action_types = [a.action_type for a in dispatcher.action_log]
+        assert RuntimeActionType.SKILL_SELECTION_ENTERED not in action_types, (
+            "空 user_input 不应触发 selection evidence"
+        )
+
+    def test_selection_phase_not_broken_by_missing_skill_registry(self):
+        """无 skill_registry 时 selection phase 应安静跳过，不 crash。"""
+        from agent.core import refresh_runtime_system_prompt
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+        )
+
+        action_registry = ActionHandlerRegistry()
+        dispatcher = RuntimeActionDispatcher(registry=action_registry)
+
+        # 无 skill_registry + 有 user_input → 不应 crash
+        prompt, count = refresh_runtime_system_prompt(
+            dispatcher=dispatcher,
+            skill_registry=None,
+            user_input="写笔记",
+        )
+        assert len(prompt) > 0
+        assert "Skill 选择" not in prompt

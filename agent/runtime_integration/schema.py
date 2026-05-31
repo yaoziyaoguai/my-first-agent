@@ -50,6 +50,9 @@ class RuntimeActionType(StrEnum):
     CLI_SHOW_MEMORIES = "cli.show_memories"
     CLI_SHOW_SUBAGENTS = "cli.show_subagents"
     MCP_BRIDGE_LIFECYCLE = "mcp.bridge_lifecycle"
+    # Phase 3 turn-start skill selection evidence（per-turn probe，非用户可见业务动作）
+    SKILL_SELECTION_ENTERED = "skill.selection.entered"
+    SKILL_CANDIDATES_BUILT = "skill.candidates.built"
     # Loop 3.4: Advanced Scheduler — runtime-owned action graph executor evidence
     ACTION_PLAN_START = "scheduler.action_plan_start"
     NODE_ENTER = "scheduler.node_enter"
@@ -99,6 +102,9 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.MCP_BRIDGE_LIFECYCLE: _EVIDENCE_KIND_PROBE,
+    # Phase 3: turn-start skill selection evidence — per-turn probe
+    RuntimeActionType.SKILL_SELECTION_ENTERED: _EVIDENCE_KIND_PROBE,
+    RuntimeActionType.SKILL_CANDIDATES_BUILT: _EVIDENCE_KIND_PROBE,
     # Loop 3.4: Scheduler evidence — 全部 business（runtime-owned action graph 决策）
     RuntimeActionType.ACTION_PLAN_START: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.NODE_ENTER: _EVIDENCE_KIND_BUSINESS,

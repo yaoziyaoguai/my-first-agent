@@ -104,6 +104,10 @@ class SkillDescriptor:
     manifest_path: Path | None = None
     """SKILL.md 文件路径（内部字段）。"""
 
+    # ── Plan 3 manifest foundation — Level 1 公开字段 ──
+    aliases: tuple[str, ...] = ()
+    """skill 别名列表，供 SkillCandidateRetriever 做候选评分。"""
+
     def is_visible(self) -> bool:
         """disabled / legacy 状态默认不对模型可见。"""
         return self.status not in ("disabled", "legacy")
@@ -132,6 +136,20 @@ class SkillManifest:
     raw_frontmatter: dict[str, object] = field(default_factory=dict)
     """原始 frontmatter dict（仅审计用，已做 redact 处理）。"""
 
+    # ── Plan 3 manifest foundation 新增字段（全部 optional）──
+    when_to_use: str | None = None
+    """适合使用此 skill 的场景描述，供 SkillCandidateRetriever 做 routing。"""
+    when_not_to_use: str | None = None
+    """不适合使用此 skill 的场景描述，供 negative matching 使用。"""
+    triggers: tuple[str, ...] = ()
+    """触发此 skill 的关键词/短语列表——精确匹配权重最高。"""
+    negative_triggers: tuple[str, ...] = ()
+    """反触发词——命中则排除此 skill。"""
+    aliases: tuple[str, ...] = ()
+    """skill 别名列表，用于中文/英文/缩写等多语言匹配。"""
+    locale: str | None = None
+    """skill 的主要语言区域（如 zh-CN, en-US）。"""
+
     def to_descriptor(self) -> SkillDescriptor:
         """从 Manifest 提取 Level 1 公开元数据投影。"""
         return SkillDescriptor(
@@ -145,6 +163,8 @@ class SkillManifest:
             memory_scope=self.memory_scope,
             root=self.root,
             manifest_path=self.manifest_path,
+            # Plan 3 manifest foundation — Level 1 公开字段
+            aliases=self.aliases,
         )
 
     def is_visible(self) -> bool:

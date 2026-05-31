@@ -17,10 +17,10 @@ from pathlib import Path
 import yaml
 
 from agent.skill_system.descriptor import (
-    SKILL_STATUSES,
-    RISK_LEVELS,
     CONFIRMATION_POLICIES,
     MEMORY_SCOPES,
+    RISK_LEVELS,
+    SKILL_STATUSES,
     SkillManifest,
     SkillResourceManifest,
 )
@@ -172,6 +172,33 @@ def parse_skill_md(file_path: Path) -> tuple[dict[str, object], str]:
 
 # ---- Schema 校验 ----
 
+def _parse_optional_str(raw: dict[str, object], key: str) -> str | None:
+    """从 raw frontmatter 中提取可选字符串字段。
+
+    空字符串视为 None，多行 YAML 字符串自动 strip。
+    """
+    value = raw.get(key)
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
+def _parse_str_list(raw: dict[str, object], key: str) -> tuple[str, ...]:
+    """从 raw frontmatter 中提取字符串列表字段。
+
+    非 list 类型值静默返回空 tuple（向后兼容）。
+    """
+    value = raw.get(key)
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        str(item).strip()
+        for item in value
+        if isinstance(item, (str, int, float)) and str(item).strip()
+    )
+
+
 def validate_manifest(
     raw: dict[str, object],
     skill_root: Path | None = None,
@@ -207,7 +234,7 @@ def validate_manifest(
     if not name or not _VALID_NAME_RE.match(name):
         raise SkillLoadError(
             code=CODE_INVALID_NAME,
-            message=f"无效的 Skill name: '{name}'——必须是小写字母、数字、连字符、下划线，以字母开头",
+            message=f"无效的 Skill name: '{name}'——须为小写字母、数字、连字符、下划线，以字母开头",
             path=manifest_path,
             recoverable=False,
             safe_preview="Skill 名称格式无效",
@@ -335,6 +362,13 @@ def validate_manifest(
         owner=owner,
         resources=resources,
         raw_frontmatter=redacted_frontmatter,  # type: ignore[arg-type]
+        # ── Plan 3 manifest foundation 新字段 ──
+        when_to_use=_parse_optional_str(raw, "when_to_use"),
+        when_not_to_use=_parse_optional_str(raw, "when_not_to_use"),
+        triggers=_parse_str_list(raw, "triggers"),
+        negative_triggers=_parse_str_list(raw, "negative_triggers"),
+        aliases=_parse_str_list(raw, "aliases"),
+        locale=_parse_optional_str(raw, "locale"),
     )
 
 

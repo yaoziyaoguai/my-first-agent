@@ -3,7 +3,7 @@
 **创建日期**: 2026-05-31
 **审计来源**: 002 Skill Selection Plan 3 独立架构审计报告 (Sections A-J)
 **当前状态**: Loop 3 IN PROGRESS — closing remaining 002 credible blockers (D03/D05/D06 + coverage + docs)
-**最后更新**: 2026-05-31 (Loop 3 closeout: D01/D02→PASS via SkillSelectionProbeHandler, D03 Chinese bigram matching, D05 skill_allowed_tools in evidence_extra, D06 negative_triggers, coverage tests, docs sync)
+**最后更新**: 2026-05-31 (Loop 4: 移除中文 bigram/partial-match 跨语言 hack，改为 manifest 显式声明语言匹配)
 
 ---
 
@@ -95,8 +95,8 @@ Phase 2 (SkillCandidateRetriever) 和 Phase 3 (build_skill_selection_section) �
 
 ## 4. P2/P3 Issues
 
-### P2-1: 中文关键词匹配弱
-- **处置**: 已知限制，已在 002 hardening 中确认。本轮不修。登记 caveat。
+### P2-1: 多语言匹配
+- **处置**: 不修（非 runtime 缺陷）。skill 用什么语言声明 metadata 就按什么语言匹配。英文 skill 不自动匹配中文 prompt。多语言支持由 manifest 显式声明。后续 slash command 提供显式 skill 调用路径。
 
 ### P2-2: chat() 内部构建 SkillRegistry，外部无法注入多 skill E2E
 - **处置**: 架构限制，需 chat() 接口变更。本轮不修。登记为 B7 前置任务。
@@ -144,59 +144,66 @@ Loop 4 (P1+P2): Docs overclaim correction ✅ COMPLETED
 Loop 5 (P3): test_skill_retriever.py uncommitted fix ✅ COMPLETED (7c79e7c)
   └── ruff I001 import reorder fix committed
 
+Loop 6 (redesign): 按 manifest 语言声明匹配 ✅ COMPLETED (c8b0a00 + pending)
+  ├── 移除 _chinese_bigram_overlap / _chinese_partial_match / _contains_chinese ✅
+  ├── retriever 只匹配 manifest 显式声明的 metadata ✅
+  ├── D03 重分类: runtime gap → manifest language coverage decision ✅
+  ├── new tests: English-only no match for Chinese / Chinese manifest matches Chinese / Math no_skill ✅
+  ├── 22/22 retriever tests PASS ✅
+  └── Docs: remediation todo + PROJECT_STATUS + PROGRESS_LEDGER updated ✅
+
 ---
 
-## Loop 3: close remaining 002 credible blockers ✅ COMPLETED (2026-05-31)
+## Loop 3: close remaining 002 credible blockers ✅ COMPLETED (2026-05-31, then REDESIGNED in Loop 4)
 
-**目标**: 解决 D03/D05/D06 CONCERN + coverage gaps + docs stale，使 002 具备升级 credible 的条件。
+**Note**: Loop 3 的原始实现包含了中文 bigram/partial-match 跨语言猜测逻辑。
+Loop 4 用户决策后移除了这些 hack，改为 manifest 显式声明语言匹配。
 
-### P1-1 / D03: 中文检索弱 ✅ FIXED
+### Loop 3 完成的工作（保留）:
+- SKILL.md 添加了中文 triggers/aliases（manifest 显式声明中文支持）
+- SKILL.md 添加了 negative_triggers
+- Negative trigger 匹配逻辑保留（纯子串匹配，非中文特有）
+- D05 skill_allowed_tools 已在 evidence_extra
+- Coverage tests (已更新为 manifest-based matching)
 
-- **根因**: `demo-note-maker` SKILL.md 缺少 `triggers`/`aliases` 字段。`SkillCandidateRetriever._score_by_keywords()` 使用空格分词（英文适用），对中文输入完全无效。
-- **修复**:
-  - SKILL.md 添加了中文 `triggers`（"写笔记"、"记笔记"、"做笔记"、"创建笔记"、"记录任务"、"待办"、"备忘"等）和 `aliases`（"笔记"、"记事"、"记事本"等）
-  - `retriever.py` 增强了中文 bigram 子串匹配（`_chinese_bigram_overlap()`, `_chinese_partial_match()`），不引入 jieba/BM25/embedding
-  - 中文 trigger 支持双向子串匹配 + bigram 部分匹配
-- **完成标准**: ✅ 中文笔记/待办/记录类 prompt 能召回 demo-note-maker
+### Loop 3 被移除的部分（Loop 4 反转）:
+- ❌ `_chinese_bigram_overlap()` — 中文 bigram 重叠计算（跨语言猜测）
+- ❌ `_chinese_partial_match()` — 中文 bigram 部分匹配（跨语言猜测）
+- ❌ `_score_by_keywords()` 中的中文 bigram 路径
+- ❌ `_score_by_triggers()` 中的中文 bigram 分支
 
-### P1-2 / D06: 数学 prompt 误触发 skill.select ✅ MITIGATED
+---
 
-- **根因**: 模型行为 issue + skill manifest 无 `negative_triggers` 过滤
-- **修复**:
-  - SKILL.md 添加了 `negative_triggers`（"数学"、"计算"、"解方程"、"微积分"、"天气"、"翻译"等 12 项）
-  - `prompt_section.py` selection section 强化 no_skill 优先于错误 skill 的引导
-- **完成标准**: ✅ 数学/无关 prompt 在 retriever 层被 negative_triggers 过滤；模型行为层仍为 MODEL_BEHAVIOR_CONCERN
+## Loop 4: 按 manifest 语言声明匹配 ✅ COMPLETED (2026-05-31)
 
-### P2-1 / D05: TOOL_GATE payload 字段名不一致 ✅ PARTIALLY FIXED
+**用户决策**: 不做隐式跨语言匹配。SkillCandidateRetriever 只匹配 manifest 显式声明的 metadata。
+skill 用什么语言声明，就按什么语言匹配。
 
-- **修复**: `tool_gate.py` 中 `skill_allowed_tools` 已添加到 evidence_extra
-- **剩余**: dogfood 脚本对 D05 的断言仍需与 handler 实际输出对齐
+### 设计原则
 
-### P2-2: coverage gaps ✅ FIXED
+1. **不跨语言**: 英文 metadata 只匹配英文 prompt；中文 metadata 只匹配中文 prompt
+2. **不留 hack**: `_chinese_bigram_overlap` / `_chinese_partial_match` / `_contains_chinese` 全部移除
+3. **不引入依赖**: 无 jieba/BM25/embedding
+4. **由 manifest 决定**: demo-note-maker 如要支持中文，在 SKILL.md 中显式声明中文 triggers/aliases
+5. **斜杠命令兜底**: 后续 slash command 提供显式 skill 调用路径，不靠自动猜测
 
-- ✅ 中文正例/负例 focused tests 已添加 (test_skill_retriever.py: 中文正例 5 个, 中文负例 3 个)
-- ✅ 多 skill 竞争覆盖 (test_skill_retriever.py: test_multi_skill_competition)
-- ✅ 中文 bigram 重叠测试 (test_chinese_bigram_overlap, test_chinese_partial_match, test_chinese_keyword_scoring)
+### D03 重分类
 
-### P2-3: docs stale ✅ FIXED
+| 旧分类 | 新分类 | 理由 |
+|--------|--------|------|
+| runtime integration gap（retriever 未接入） | manifest language coverage decision | retriever 已接入 runtime (D01/D02 PASS)；是否匹配取决于 manifest 是否有中文 metadata |
+| 需要中文 bigram hack 关闭 | 不关闭，改为 expected-by-design | 英文 skill 匹配中文 prompt 不是 runtime 职责 |
 
-- PROJECT_STATUS header caveat #3 已修正
-- 002 当前状态: credible-with-caveats
+- **Case A**: manifest 声明中文 metadata → 中文 prompt 应召回 skill → tests 已验证 PASS
+- **Case B**: manifest 未声明中文 metadata → 中文 prompt no_suitable_skill 是 expected → tests 已验证 PASS
 
-### 受影响文件
+### 代码变更
 
-| 文件 | 变更类型 | 说明 |
-|------|---------|------|
-| `skills/demo-note-maker/SKILL.md` | MODIFY | 添加 triggers/aliases/negative_triggers/when_to_use/when_not_to_use |
-| `agent/skill_system/retriever.py` | MODIFY | 增强 _score_by_keywords 中文子串匹配 |
-| `agent/skill_system/prompt_section.py` | MODIFY | 强化 selection section 的 no_skill 引导 |
-| `tests/unit/test_skill_retriever.py` | MODIFY | 中文正例/负例 + 多 skill 竞争 |
-| `agent/tool_runtime_mediator.py` | MODIFY (如需要) | TOOL_GATE payload 字段标准化 |
-| `scripts/real_evidence_002_plan3_dogfood.py` | MODIFY | D05 assertion 更新 |
-| `docs/dogfood/real-evidence-002-plan3-results.json` | UPDATE | dogfood re-run 后更新 |
-| `docs/PROJECT_STATUS.md` | MODIFY | 修正 caveat #3 过期描述 |
-| `docs/PROGRESS_LEDGER.md` | MODIFY | Loop 3 milestone |
-| `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | MODIFY (如需要) | 更新 002 相关 debt |
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| `agent/skill_system/retriever.py` | 移除 ~46 行 | 移除 _chinese_bigram_overlap/_chinese_partial_match/_contains_chinese/import re |
+| `tests/unit/test_skill_retriever.py` | +3 tests, 更新 docstrings | English-only manifest no match for Chinese / Chinese manifest matches Chinese / Math prompt no_skill |
+| `skills/demo-note-maker/SKILL.md` | 保持 | 已有中文 triggers/aliases（manifest 显式声明） |
 
 ```
 
@@ -218,7 +225,7 @@ Loop 5 (P3): test_skill_retriever.py uncommitted fix ✅ COMPLETED (7c79e7c)
 
 ### 可以保留 caveat (P1/P2):
 - [x] ~~turn-end keyword fallback 作为 safety net 仍存在~~ (安全性正向)
-- [x] ~~中文关键词匹配弱~~ → Loop 3 已修复 (Chinese bigram matching)
+- [x] ~~中文关键词匹配弱~~ → 设计决策: 不跨语言匹配。多语言由 manifest 显式声明。英文 skill 不自动匹配中文是 expected behavior。
 - [ ] chat() 无法注入多 skill registry (架构限制 → B7)
 - [ ] deactivate 无自动触发 (B7 lifecycle management)
 - [ ] _active_skill dict deprecated 待清理 (B7)

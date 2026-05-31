@@ -311,20 +311,20 @@ def test_candidates_sorted_by_score_descending():
 
 
 # ==================================================================
-# Loop 3: 中文正例测试 — 中文自然输入应召回 demo-note-maker
+# 中文正例测试 — manifest 显式声明中文 metadata 时中文 prompt 可匹配
 # ==================================================================
 
 
 def test_chinese_positive_write_note():
     """中文正例: "帮我写个笔记" 应召回 demo-note-maker。
 
-    验证中文 trigger bigram 部分匹配 + 中文 bigram 关键词重叠能
-    在无空格中文输入下产生有效候选。
+    通过 manifest 显式声明的中文 trigger/alias 匹配——不依赖跨语言猜测。
+    "帮我写个笔记" 包含 alias "笔记" → alias match。
     """
     manifest = _make_manifest(
         name="demo-note-maker",
         description="围绕 demo 工具创建本地任务笔记",
-        triggers=("写笔记", "记笔记", "做笔记", "记录任务", "待办", "备忘"),
+        triggers=("写笔记", "记笔记", "做笔记", "写个笔记", "记录任务", "待办", "备忘"),
         aliases=("笔记", "note", "记事"),
         tags=("demo", "note", "local"),
     )
@@ -380,7 +380,7 @@ def test_chinese_positive_organize_notes():
 
 
 # ==================================================================
-# Loop 3: 中文负例测试 — 无关中文输入不应误召回
+# 中文负例测试 — 无关中文输入不应误召回（通过 negative_triggers 排除）
 # ==================================================================
 
 
@@ -444,8 +444,83 @@ def test_chinese_negative_solve_math():
 
 
 # ==================================================================
-# Loop 3: 多 Skill 竞争 — 构造两个 manifest 验证排序
+# Loop 4: 多语言匹配边界 — 不跨语言，则由 manifest 显式声明
 # ==================================================================
+
+
+def test_english_only_manifest_no_match_for_chinese_prompt():
+    """manifest 仅有英文 metadata 时中文 prompt 不应匹配。
+
+    不做隐式跨语言猜测——英文 skill 不自动匹配中文 prompt。
+    如果 skill 要支持中文，必须在 manifest 中显式声明中文 aliases/triggers。
+    """
+    english_only = _make_manifest(
+        name="demo-note-maker",
+        description="Create local task notes around demo tools",
+        triggers=("write note", "make a note"),
+        aliases=("note", "notes", "task note"),
+        tags=("demo", "note", "local"),
+    )
+    registry = MockRegistry([english_only])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("帮我写个笔记", registry, top_k=5)
+    assert candidates == [], (
+        "仅有英文 metadata 的 skill 不应被中文 prompt 匹配，实际: "
+        f"{[(c.skill_name, c.score, c.match_reason) for c in candidates]}"
+    )
+
+
+def test_chinese_manifest_matches_chinese_prompt():
+    """manifest 声明中文 aliases/triggers 时中文 prompt 应正确匹配。
+
+    skill 用什么语言声明 metadata，就按什么语言匹配。
+    """
+    bilingual = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=(
+            "写笔记", "记笔记", "做笔记", "创建笔记", "记录任务",
+            "待办", "备忘", "写个笔记", "记个笔记",
+        ),
+        aliases=("笔记", "记事", "记事本", "note", "demo note"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([bilingual])
+    retriever = _make_retriever()
+
+    # 各种中文自然输入应能匹配
+    for prompt in ["帮我写个笔记", "记录一下这个待办", "把这个想法整理成笔记", "记个笔记"]:
+        candidates = retriever.retrieve(prompt, registry, top_k=5)
+        assert len(candidates) > 0, (
+            f"中文 prompt「{prompt}」应召回 demo-note-maker"
+            f"（manifest 已声明中文 metadata），实际: 空列表"
+        )
+        assert candidates[0].skill_name == "demo-note-maker"
+
+
+def test_math_prompt_no_skill():
+    """数学 prompt 不应触发任何 skill（通过 negative_triggers + 无匹配）。
+
+    验证 D06：收紧匹配边界，不因宽泛匹配误触发。
+    """
+    note_maker = _make_manifest(
+        name="demo-note-maker",
+        description="创建本地任务笔记",
+        triggers=("写笔记", "记笔记", "创建笔记"),
+        aliases=("笔记",),
+        negative_triggers=("数学", "计算", "解方程", "微积分", "算一下", "求值", "evaluate"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([note_maker])
+    retriever = _make_retriever()
+
+    for prompt in ["计算 123 * 456", "帮我解一道数学题", "1+1等于几"]:
+        candidates = retriever.retrieve(prompt, registry, top_k=5)
+        assert candidates == [], (
+            f"数学 prompt「{prompt}」不应触发任何 skill，实际: "
+            f"{[(c.skill_name, c.score) for c in candidates]}"
+        )
 
 
 def test_multi_skill_correct_ranking():

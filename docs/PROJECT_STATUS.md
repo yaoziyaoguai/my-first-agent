@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B8 Phase 3: TUI Default Workbench Readiness — 133/133 tests PASS, 7 视图导航 + TaskCenter + EvidenceDetail + DocsConsistency + NavigationBar + CommandCatalog v2 + Default Entry Readiness checklist)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 3 COMPLETED** — TUI 从单屏 dashboard 升级为多视图工作台: 7 视图键盘导航 (← → / 1-7), NavigationBar, TaskCenterPanel (B8/B7 phase status), EvidenceDetailPanel (001-008 详情), DocsConsistencyPanel (4 关键文档检测), CommandCatalog v2 (workflow stage + risk level 绑定), Default Entry Readiness checklist (12 项, TUI 不立即切换为默认入口)。133 tests PASS (74 Phase 1+2 + 59 Phase 3)。TypeScript 编译 clean。B8 Phase 4 (Safe Execution) 不进入当前阶段。
+**最后更新**: 2026-06-01 (B8 Phase 4: Safe Command Execution — 178/178 tests PASS, confirmation gate + whitelist/blacklist + dry-run + audit log + ResultPanel)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 4 COMPLETED** — TUI 从 preview-only 升级为可执行安全命令。Phase 1-2: 静态仪表盘 + Command Shell (74 tests)。Phase 3: 7 视图键盘导航 + NavigationBar + TaskCenterPanel + EvidenceDetailPanel + Default Entry Readiness checklist (59 new tests)。Phase 4: 安全命令执行 — confirmation gate + whitelist/blacklist + dry-run + audit log + ConfirmOverlay/ResultPanel/DryRunOverlay 组件。白名单 6 命令 (status/gates/docs-check/autorun/audit/dogfood)，黑名单 12 模式。45 新 Phase 4 tests。178/178 tests PASS。TypeScript 编译 clean。B8 Phase 5 (AutoRun 工作流集成) 为推荐下一步。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -276,9 +276,9 @@
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1 (静态仪表盘), Phase 2 (Command Shell), Phase 3 (Default Workbench Readiness) 全部 COMPLETED — 133/133 tests PASS, tsc --noEmit clean。
+**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-4 全部 COMPLETED — 178/178 tests PASS, tsc --noEmit clean。
 
-**B8 Phase 4 (安全命令执行) 为推荐下一步**。详见 `docs/roadmap/b8-tui-workbench-roadmap.md`。Phase 4 启 confirmation gate + dry-run 优先，TUI 从 preview-only 升级为可执行安全命令。不进入当前阶段。B7 multi-instance readiness 不进入当前阶段。
+**B8 Phase 5 (AutoRun 工作流集成) 为推荐下一步**。详见 `docs/roadmap/b8-tui-workbench-roadmap.md`。Phase 5 通过 Phase 4 命令执行基础设施接入 AutoRun workflow，TUI 为 launcher/view layer。Phase 6 BLOCKED by B7。Phase 7 FUTURE。B7 multi-instance readiness 不进入当前阶段。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 
@@ -314,7 +314,7 @@
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | **Phase 1-3 COMPLETED** (静态仪表盘 + Command Shell + 默认入口就绪, 133/133 tests PASS)。Phase 4 (安全命令执行) 为推荐下一步。路线图: `docs/roadmap/b8-tui-workbench-roadmap.md` |
+| B8 | TUI architecture | **Phase 1-4 COMPLETED** (178/178 tests PASS)。Phase 4: 安全命令执行 (confirmation gate + whitelist/blacklist + dry-run + audit log)。Phase 5 (AutoRun 集成) 为推荐下一步。路线图: `docs/roadmap/b8-tui-workbench-roadmap.md` |
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）

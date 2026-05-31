@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B8 Phase 6A: Static Evidence/Gate/Dogfood Browser — 227/227 tests PASS)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 6A COMPLETED** — TUI 静态证据浏览器：evidenceBrowser.ts (JSON 解析) + gateHistory.ts (6 gates) + EvidenceBrowserPanel + DogfoodDetailPanel, 21 new tests, wired into Dashboard evidence view。
+**最后更新**: 2026-06-01 (B8 Phase 6A COMPLETED + Phase 6B/7 debt recorded → Polish Loop 激活)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 1-6A COMPLETED** (227/227 tests PASS)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。B7 not started。下一步: B8 Polish / Default Workbench Readiness Loop。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -278,7 +278,9 @@
 
 **当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-6A 全部 COMPLETED — 227/227 tests PASS, tsc --noEmit clean。
 
-**B8 Phase 6B (多实例历史浏览器) 为下一步**。Phase 6B BLOCKED by B7。Phase 7 FUTURE。B7 multi-instance readiness 不进入当前阶段。
+**B8 Phase 6B (多实例历史浏览器) DEFERRED** — 缺 session/run/instance identity + evidence namespace。**Phase 7 DEFERRED** — 缺 append-only event source contract。详见 `docs/debt/b8-tui-workbench-technical-debt.md`。B7 not started。TUI not default entry yet。CLI fallback retained。
+
+**下一步: B8 Polish / Default Workbench Readiness Loop** — 不进入 B7, 不改 runtime。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 

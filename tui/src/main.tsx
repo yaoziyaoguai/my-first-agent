@@ -13,6 +13,7 @@ import { loadCommandCatalog } from "./data/commandCatalog";
 import { loadNextAction } from "./data/nextAction";
 import { listDogfoodFiles } from "./data/evidenceBrowser";
 import { parseGateHistory } from "./data/gateHistory";
+import { readAuditEntries } from "./data/auditLog";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
@@ -127,6 +128,7 @@ function App() {
   const gateHistory = parseGateHistory(
     projectStatusDoc + "\n" + progressLedgerDoc,
   );
+  const auditEntries = readAuditEntries(REPO_ROOT);
 
   return (
     <Dashboard
@@ -138,6 +140,7 @@ function App() {
       nextAction={nextAction}
       evidenceFiles={evidenceFiles}
       gateHistory={gateHistory}
+      auditEntries={auditEntries}
     />
   );
 }

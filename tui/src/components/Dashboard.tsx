@@ -32,8 +32,11 @@ import { DryRunOverlay } from "./DryRunOverlay";
 import { ResultPanel } from "./ResultPanel";
 import { EvidenceBrowserPanel } from "./EvidenceBrowserPanel";
 import { DogfoodDetailPanel } from "./DogfoodDetailPanel";
+import { AuditLogPanel } from "./AuditLogPanel";
+import { DefaultEntryReadinessPanel } from "./DefaultEntryReadinessPanel";
 import type { EvidenceFileEntry } from "../data/evidenceBrowser";
 import type { GateResult } from "../data/gateHistory";
+import type { AuditLogEntry } from "../data/auditLog";
 import { isSelectable } from "../data/safetyModel";
 import { isAllowed } from "../data/executionWhitelist";
 import {
@@ -54,6 +57,7 @@ interface Props {
   nextAction: string;
   evidenceFiles: EvidenceFileEntry[];
   gateHistory: GateResult[];
+  auditEntries: AuditLogEntry[];
 }
 
 const VIEW_ID_MAP: Record<string, ViewId> = {
@@ -73,7 +77,7 @@ type Phase4Mode =
   | "executing"  // confirmed, executing (future: actual exec)
   | "result";    // showing result
 
-export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory }: Props) {
+export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries }: Props) {
   const [nav, setNav] = useState(createNavigationState());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [evidenceSelectedIndex, setEvidenceSelectedIndex] = useState(0);
@@ -381,15 +385,25 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
         );
       case "gates":
         return (
-          <Box flexDirection="row" marginBottom={1}>
-            <GatePanel git={git} />
-            <EvidencePreviewPanel results={dogfood} />
+          <Box flexDirection="column" marginBottom={1}>
+            <Box flexDirection="row" marginBottom={1}>
+              <GatePanel git={git} />
+              <EvidencePreviewPanel results={dogfood} />
+            </Box>
+            <Box>
+              <AuditLogPanel entries={auditEntries} />
+            </Box>
           </Box>
         );
       case "docs":
         return (
-          <Box marginBottom={1}>
-            <DocsConsistencyPanel />
+          <Box flexDirection="column" marginBottom={1}>
+            <Box marginBottom={1}>
+              <DocsConsistencyPanel />
+            </Box>
+            <Box>
+              <DefaultEntryReadinessPanel />
+            </Box>
           </Box>
         );
     }
@@ -417,7 +431,7 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
       {/* Footer */}
       <Box flexDirection="column">
         <Text dimColor>
-          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}{nav.currentView === "evidence" ? "↑↓: browse evidence | " : ""}B8 Phase 6A — static evidence browser | {new Date().toISOString().slice(0, 10)}
+          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}{nav.currentView === "evidence" ? "↑↓: browse evidence | " : ""}B8 Polish Loop 1 — workbench readiness | {new Date().toISOString().slice(0, 10)}
         </Text>
       </Box>
     </Box>

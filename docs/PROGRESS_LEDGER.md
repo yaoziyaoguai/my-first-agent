@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B8 Phase 6A: Static Evidence/Gate/Dogfood Browser — 227/227 tests PASS)
+**最后更新**: 2026-06-01 (B8 Phase 6A COMPLETED + Phase 6B/7 debt recorded → Polish Loop)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B8 Phase 6B/7 Debt Recorded** | — | **B8 Architecture Extension Loop — Phase 6B/7 Technical Debt 正式记录** — 创建 `docs/debt/b8-tui-workbench-technical-debt.md`: Phase 6B deferred (缺 session/run/instance identity + evidence namespace), Phase 7 deferred (缺 append-only event source contract), TUI default-entry deferred, B7 not started。B8 继续 Polish / Default Workbench Readiness Loop。|
 | **B8 Phase 6A: Static Evidence/Gate/Dogfood Browser** | — | **B8 Architecture Extension Loop — Phase 6A COMPLETED** — TUI 静态证据浏览器。新增: evidenceBrowser.ts + gateHistory.ts + EvidenceBrowserPanel + DogfoodDetailPanel。21 new tests + 206 regression = 227/227 PASS。Phase 6 拆分: 6A (静态, 不依赖 B7) COMPLETED / 6B (多实例历史, BLOCKED by B7)。|
 | **B8 Phase 5: AutoRun Workflow Integration** | — | **B8 Architecture Extension Loop — Phase 5 COMPLETED** — TUI 通过 Phase 4 命令执行基础设施接入 AutoRun workflow。新增数据模型: autorunAdapter.ts (AUTORUN_COMMANDS 固定模板: continue/status/audit/dogfood/gates, isFixedTemplate/getAutorunCommand/validateAutorunTemplate — 防注入), autorunState.ts (parseAutoRunState/deriveAutoRunStatus — 从 PROJECT_STATUS 解析), reviewPacket.ts (buildReviewPacket/parseGitLogForReview — 从 git log + test output 构建 review)。新增组件: AutoRunPanel (status/phase/loop/tests/gates/next 展示), HardStopOverlay (reason/detail/loop + user actions), ReviewPacketPanel (tests/gates/commits)。Dashboard 不变 (Phase 4 复用 confirm/result 流)。28 新 Phase 5 tests + 178 regression = 206/206 PASS。TypeScript 编译 clean。Phase 6 BLOCKED by B7。
 | **B8 Phase 4: Safe Command Execution** | — | **B8 Architecture Extension Loop — Phase 4 COMPLETED** — TUI 从 preview-only 升级为可执行安全命令。新增数据模型: executionWhitelist.ts (白名单 isAllowed + 黑名单 isBlocked + getPhase4ExecutableCommands), executionGate.ts (createConfirmationRequest/confirmExecution/cancelExecution/dryRunExecution + double confirmation for autorun + EXECUTION_TIMEOUT_MS/CONFIRMATION_TIMEOUT_MS), auditLog.ts (JSONL append-only + 10MB rotation + readAuditEntries), commandResult.ts (parseExecResult + createTimeoutResult)。新增组件: ConfirmOverlay (single/double confirmation), ResultPanel (exit code/stdout/stderr/timeout), DryRunOverlay (would-execute preview)。Dashboard 重写: Phase 4 confirm→dry-run→result 完整流程。白名单: status/gates/docs-check/autorun/audit/dogfood。黑名单: git push --force/reset --hard/branch -D/clean -f/rm -rf/sudo/chmod/chown。45 新 Phase 4 tests + 133 regression = 178/178 PASS。TypeScript 编译 clean。 |

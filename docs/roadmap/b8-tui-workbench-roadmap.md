@@ -1,9 +1,9 @@
 # B8 TypeScript TUI Workbench — 分阶段路线
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-01 (AutoRun Readiness Hardening)
+**最后更新**: 2026-06-01 (B8 Phase 6A COMPLETED + Phase 6B/7 debt recorded)
 **来源**: `/plan-eng-review` → B8 Roadmap / Default Entry Readiness Review → AutoRun Hardening
-**依赖文档**: `docs/design/b8-ts-tui-workbench-sdd.md` (Phase 1-3 SDD)、`docs/PROJECT_STATUS.md` (当前状态)
+**依赖文档**: `docs/design/b8-ts-tui-workbench-sdd.md` (Phase 1-3 SDD)、`docs/PROJECT_STATUS.md` (当前状态)、`docs/debt/b8-tui-workbench-technical-debt.md` (Phase 6B/7 deferred debt)
 
 ---
 
@@ -826,6 +826,48 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 
 ---
 
+## 11.4 B8 Polish / Default Workbench Readiness Loop
+
+### 目标
+
+在不进入 B7、不做实时流、不改 runtime 的情况下，把 TUI 打磨成更接近默认工作台。
+
+### 可做事项
+
+| 优先级 | 项目 | 描述 | 依赖 |
+|--------|------|------|------|
+| P1 | AuditLogPanel | auditLog.ts rotation 已就绪，UI 未暴露 — 新增只读 audit history 视图 | 无 (auditLog.ts 已有) |
+| P1 | DefaultEntryReadinessPanel | 展示 TUI 距默认入口还差什么, Phase 6B/7 debt, CLI fallback retained | 无 (静态配置) |
+| P2 | Empty/unknown/stale states | EvidenceBrowserPanel/DocsConsistencyPanel 的 edge case 展示更清晰 | 无 |
+| P2 | Keyboard help | 导航提示、快捷键说明, 让 TUI 更像可用工作台 | 无 |
+| P2 | Layout polish | panel spacing, selected state, terminal resize behavior (如 Ink 支持) | 无 |
+| P3 | Command UX polish | safe/blocked/confirmation 分类更清楚, command preview/result panel 更易读 | 无 |
+| P3 | Docs consistency polish | current/historical/superseded 状态展示, next action 更清晰 | 无 |
+| P3 | Tests polish | malformed data tests, no .env access tests, navigation state tests | 无 |
+
+### 明确不做
+
+- 不进入 B7
+- 不做 Phase 6B / Phase 7
+- 不执行真实 AutoRun
+- 不调用真实 API
+- 不读取 .env
+- 不改 Python runtime
+- 不做 Web UI
+- 不把 TUI 设为默认入口
+- 不新增大型依赖
+
+### Polish Loop 1 (当前)
+
+1. **AuditLogPanel** — 只读 audit history 视图, 不执行命令, 不写 runtime state
+2. **DefaultEntryReadinessPanel** — 静态 checklist, 展示已完成/blocked/待审核
+3. **Better empty states** — EvidenceBrowserPanel 无文件时, DocsConsistencyPanel stale 时
+4. **Keyboard hints** — footer 增强, 可选 help overlay
+
+预计新增 tests: ~15。预计总测试数: ~242。
+
+---
+
 ## 12. 文档导航
 
 | 想了解 | 读这里 |
@@ -834,6 +876,7 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 | 当前项目状态 | `docs/PROJECT_STATUS.md` |
 | 进度历史 | `docs/PROGRESS_LEDGER.md` |
 | B8 路线（本文件） | `docs/roadmap/b8-tui-workbench-roadmap.md` |
+| B8 Technical Debt (6B/7) | `docs/debt/b8-tui-workbench-technical-debt.md` |
 | 工程流程 | `docs/dev/AUTO_RUN_WORKFLOW.md` |
 | 真实证据债务 | `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` |
 | TUI 源码 | `tui/src/` |

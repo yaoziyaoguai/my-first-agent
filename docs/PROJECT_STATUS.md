@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-31 (B8 Phase 2: TUI command shell + AutoRun workflow launcher — 74/74 tests PASS, CommandCatalog + SafetyModel + CommandPanel + NextActionPanel + CommandPreview 完成, TUI 升级为交互式工作台)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 2 COMPLETED** — TUI command shell 可交互 (`cd tui && npm start`): CommandCatalog (8 命令, 5 级 SafetyModel), CommandPanel (↑↓ 导航, Enter 预览), NextActionPanel (推荐下一步), CommandPreview (shell command 展示, 不执行), Phase 1 28 tests + Phase 2 46 tests PASS, TypeScript 编译 clean。Phase 3 (实时 evidence stream) 不进入当前阶段。
+**最后更新**: 2026-06-01 (B8 Phase 3: TUI Default Workbench Readiness — 133/133 tests PASS, 7 视图导航 + TaskCenter + EvidenceDetail + DocsConsistency + NavigationBar + CommandCatalog v2 + Default Entry Readiness checklist)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 3 COMPLETED** — TUI 从单屏 dashboard 升级为多视图工作台: 7 视图键盘导航 (← → / 1-7), NavigationBar, TaskCenterPanel (B8/B7 phase status), EvidenceDetailPanel (001-008 详情), DocsConsistencyPanel (4 关键文档检测), CommandCatalog v2 (workflow stage + risk level 绑定), Default Entry Readiness checklist (12 项, TUI 不立即切换为默认入口)。133 tests PASS (74 Phase 1+2 + 59 Phase 3)。TypeScript 编译 clean。B8 Phase 4 (Safe Execution) 不进入当前阶段。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

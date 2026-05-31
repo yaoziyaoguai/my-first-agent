@@ -1,8 +1,8 @@
 # B8 TypeScript TUI Workbench — SDD
 
 **创建日期**: 2026-05-31
-**最后更新**: 2026-05-31 (Phase 2 SDD)
-**状态**: Phase 1 COMPLETED, Phase 2 SPEC/SDD
+**最后更新**: 2026-06-01 (Phase 3 SDD — Default Workbench Readiness)
+**状态**: Phase 1 COMPLETED, Phase 2 COMPLETED, Phase 3 SPEC/SDD (in progress)
 **类型**: Architecture Extension Loop — 新跨领域关注点
 
 ---
@@ -13,13 +13,24 @@
 
 **Phase 1 (COMPLETED — `eba77ad`)**: 只读静态仪表盘 — 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview)。
 
-**Phase 2 (本轮)**: TUI command shell + AutoRun workflow launcher。TUI 从 read-only observer 升级为可交互的工作台入口，展示可用命令、推荐下一步、command preview。**不直接执行高风险命令。**
+**Phase 2 (COMPLETED — `3c8e178`)**: TUI command shell + AutoRun workflow launcher。CommandCatalog (8 命令, 5 级 SafetyModel), CommandPanel (分组 + ↑↓ 导航), NextActionPanel, CommandPreview (overlay, 不执行)。
+
+**Phase 3 (本轮): TUI Default Workbench Readiness**。TUI 从单屏 dashboard 升级为多视图工作台——7 视图切换、TaskCenter、WorkflowState 解析、EvidenceDetail 展开、DocsConsistency 检测、CommandCatalog v2（workflow stage 绑定）。确立 TUI 为**未来默认入口**（不立即切换），CLI 为**显式 fallback**（永不删除）。定义 Default Entry Readiness Checklist（切换前必须通过）。**仍 preview-only，不执行命令，不调用 API。**
+
+**Phase 3 七大能力域**:
+1. Navigation Model — 7 视图切换（Overview/Evidence/Workflow/Commands/Tasks/Gates/Docs）
+2. TaskCenterPanel — B8/B7 phase 状态矩阵
+3. WorkflowState Model — 从 PROJECT_STATUS/PROGRESS_LEDGER/SDD 解析
+4. EvidenceDetail Model — 001-008 详情（status/dogfood/commit/caveats/nextAction）
+5. DocsConsistency Model — 关键文档存在性检测
+6. CommandCatalog v2 — 命令绑定 workflow stage + risk level
+7. Default Entry Readiness — 切换前必须通过的 checklist
 
 **后续 Phase（不在本轮范围）**:
-- Phase 3: 实时 runtime evidence 流（通过 agent_log.jsonl tail 或 dispatcher stream）
 - Phase 4: 安全命令执行（explicit confirmation gate + dry-run 优先）
-- Phase 5: 多实例监控（B7 multi-instance 后端就绪后）
-- Phase 6: 完整 TUI Agent Workbench（CLI 降级为 fallback，TUI 为主入口）
+- Phase 5: 实时 runtime evidence 流（agent_log.jsonl tail / dispatcher stream）
+- Phase 6: 多实例监控（B7 multi-instance 后端就绪后）
+- Phase 7: 完整 TUI Agent Workbench（CLI 降级为 fallback，TUI 为主入口）
 
 ---
 
@@ -283,6 +294,121 @@ Phase 2 不执行任何命令，只展示 metadata + shell command preview。
 | `agent-run` | Agent Run | execution | `disabled` | disabled (planned Phase 4+) |
 | `deploy` | Deploy | execution | `disabled` | disabled (future Phase) |
 
+#### 2.3.4 Phase 3: Default Workbench Readiness
+
+**目标**: TUI 从单屏 dashboard 升级为完整多视图工作台，确立 TUI 为未来默认入口，CLI 为显式 fallback。
+
+**行业参考**:
+- **Hermes Agent** (OpenClaw): subagent worktree 隔离 + 结构化输出 + TUI 状态面板
+- **Pi TUI** (OpenClaw): Ink-based 终端工作台，command shell 模式
+- **Claude Code**: 终端内 agent 交互，slash command 模式
+- 共同模式: 终端优先 → 结构化面板 → 命令/状态分离 → fallback CLI 保留
+
+**7 大能力域**:
+
+1. **Navigation Model** — 多 view 切换
+   - Views: Overview | Evidence | Workflow | Commands | Tasks | Gates | Docs
+   - `←` / `→` 或数字键 1-7 切换视图
+   - NavigationBar 组件展示当前 view 及可用 views
+   - View state model: `{ currentView: ViewId, views: ViewDef[] }`
+
+2. **TaskCenterPanel** — AutoRun 任务中心
+   - 展示 B8/B7 各 Phase 及其状态:
+     | Phase | 状态 |
+     |-------|------|
+     | B8 Phase 1 (Static Dashboard) | completed |
+     | B8 Phase 2 (Command Shell) | completed |
+     | B8 Phase 3 (Default Workbench Readiness) | recommended (current) |
+     | B8 Phase 4 (Safe Execution) | deferred |
+     | B8 Phase 5 (Real-time Stream) | deferred |
+     | B7 Multi-instance Readiness | blocked |
+   - 每项展示: status label + why 说明
+   - 数据源: 硬编码 JSON 配置 `tui/src/data/tasks.json`
+
+3. **WorkflowState Model** — 工作流状态解析
+   - 从 PROJECT_STATUS / PROGRESS_LEDGER / B8 SDD 解析:
+     - currentStage: "B8 Phase 3"
+     - completedMilestones: [...]
+     - deferredItems: [...]
+     - nextRecommended: "B8 Phase 3 Default Workbench Readiness"
+   - 纯数据层，不依赖 Claude task list
+
+4. **Evidence Detail Model** — 001-008 详情
+   - 扩展现有 RealEvidenceRow 为 EvidenceDetail:
+     - status, capability, latestDogfood, latestCommit, caveats, nextAction
+   - 数据源: 硬编码 JSON 配置 `tui/src/data/evidenceDetails.json`
+   - Phase 3 先做数据模型 + 简单列表 UI
+
+5. **Docs Consistency Model** — 文档一致性
+   - 检查关键文档存在性:
+     - PROJECT_STATUS.md, PROGRESS_LEDGER.md
+     - REAL_EVIDENCE_VALIDATION_DEBT.md
+     - B8 SDD
+   - 状态: present / missing / unknown
+   - 数据层: `checkDocsExist()` 纯函数 + shell command preview
+
+6. **CommandCatalog v2** — 命令与 workflow stage 绑定
+   - 扩展现有 CommandCatalog: 每个 command 绑定对应的 workflow stage
+   - 新增 `workflowStage` 字段: "audit" | "remediation" | "implementation" | "dogfood" | "gates" | "docs" | "any"
+   - 新增 `riskLevel` 字段: "low" | "medium" | "high"
+   - 新增命令: "Start B8 Phase 4", "Open final audit prompt", "Run docs check"
+   - 仍 preview-only
+
+7. **Default Entry Readiness** — 切换 TUI 为默认入口的前置条件
+   - 不立即切换；定义 checklist，后续 Phase 满足全部条件后才切换
+   - Checklist (Phase 3 期间记录，不强制全部通过):
+     - [ ] 7 视图导航可用且无 crash
+     - [ ] TaskCenter 正确反映 B8/B7 状态
+     - [ ] WorkflowState 解析与 PROJECT_STATUS 一致
+     - [ ] EvidenceDetail 001-008 数据与 docs/debt 一致
+     - [ ] DocsConsistency 正确检测所有关键文档
+     - [ ] CommandCatalog v2 所有命令有 workflow stage 绑定
+     - [ ] 中文 IME 输入就绪（见 §2.3.5）
+     - [ ] 74 Phase 1+2 tests 全部 PASS（无回归）
+     - [ ] ~37 Phase 3 tests 全部 PASS
+     - [ ] tsc --noEmit 零错误
+     - [ ] CLI 仍可独立运行（TUI 不破坏 CLI）
+     - [ ] npm start 成功渲染所有新面板
+
+**中文 IME 输入就绪** (§2.3.5):
+- Ink `useInput` 处理原始按键，中文 IME 组合输入（拼音 → 汉字）可能被拆分为多个 input 事件
+- Phase 3 仅使用单键导航（←/→/1-7/q/Esc），不受 IME 影响
+- 后续 Phase 如需要文本输入（搜索、过滤），需验证 IME 组合输入不会被错误拦截
+- 当前状态: **不阻塞** — 单键导航不经过 IME pipeline
+
+**Phase 3 硬约束 (13 项 "不做")**:
+1. 不执行任何 shell 命令
+2. 不读取 .env / 不调用真实 API
+3. 不改 Python runtime / core path
+4. 不引入大型依赖
+5. 不把 TUI 做成第二 runtime
+6. 不删除 CLI / 不废弃 CLI
+7. 不把 TUI 立即设为唯一默认入口
+8. 不做 Web UI
+9. 不进入 B7 multi-instance implementation
+10. 不做 real-time evidence stream
+11. 不执行 AutoRun 命令
+12. 不启动 agent run
+13. 不写 checkpoint
+
+**Phase 3 数据层新增文件**:
+```
+tui/src/
+├── data/
+│   ├── navigation.ts       # NavigationState model
+│   ├── tasks.ts             # TaskCenter data (JSON)
+│   ├── tasks.json           # B8/B7 phase status 配置
+│   ├── workflowState.ts     # WorkflowState parser
+│   ├── evidenceDetails.ts   # EvidenceDetail model
+│   ├── evidenceDetails.json # 001-008 详情配置
+│   └── docsConsistency.ts   # Docs check model
+├── components/
+│   ├── NavigationBar.tsx    # View switcher
+│   ├── TaskCenterPanel.tsx  # Task center
+│   ├── EvidenceDetailPanel.tsx # 001-008 详情
+│   └── DocsConsistencyPanel.tsx # Docs status
+```
+
 ---
 
 ## 6. Component Design
@@ -471,9 +597,24 @@ CommandPreview 作为 overlay 显示在底部，按 `Enter` 时出现，按 `Esc
 | `nextActionPanel.test.ts` | 推荐下一步渲染, 空值容错 | 3 |
 | `safetyModel.test.ts` | 五级分类, 映射到组件行为, disabled 不可选中 | 4 |
 | **Phase 2 Subtotal** | | **~24** |
-| **Total (Phase 1 + 2)** | | **~49** |
+| **Total (Phase 1 + 2)** | | **74** |
 
-### 7.4 Phase 2 RED → GREEN 顺序
+### 7.4 Phase 3 Test Layer (NEW)
+
+| 测试文件 | 覆盖 | 测试数量 (预估) |
+|---------|------|----------------|
+| `navigation.test.ts` | ViewId enum, NavigationState 切换, 边界 (first/last view), 无效 view 拒绝 | 6 |
+| `tasks.test.ts` | TaskCenter JSON 加载, 状态分类 (recommended/deferred/completed/not-started), 缺失文件容错, why 字段 | 6 |
+| `workflowState.test.ts` | 解析 currentStage/completedMilestones/deferredItems/nextRecommended, 空文件容错, 格式容错 | 5 |
+| `evidenceDetails.test.ts` | 001-008 详情加载, 字段完整性 (status/dogfood/commit/caveats), 缺失文件容错 | 5 |
+| `docsConsistency.test.ts` | 文件存在/缺失/未知检测, 容错, shell command preview | 4 |
+| `navigationBar.test.ts` | view 渲染, 当前 view 高亮, view 列表展示 | 4 |
+| `taskCenterPanel.test.ts` | recommended/deferred/completed/not-started 渲染, why 文本展示 | 4 |
+| `noExecution.test.ts` | 确认无 exec/execSync/spawn/child_process 引入, 无 .env 读取 | 3 |
+| **Phase 3 Subtotal** | | **~37** |
+| **Total (Phase 1 + 2 + 3)** | | **~111** |
+
+### 7.5 Phase 2 RED → GREEN 顺序
 
 1. `commandCatalog.test.ts` RED → GREEN
 2. `commandPanel.test.ts` RED → GREEN
@@ -526,9 +667,29 @@ CommandPreview 作为 overlay 显示在底部，按 `Enter` 时出现，按 `Esc
 - **不做安全命令执行**: Phase 4+（confirmation gate + dry-run）
 - **不废弃 CLI**: CLI 仍然可用，只是 TUI 成为推荐入口
 
+### 9.3 Phase 3 Additional Non-Goals
+
+- **不执行任何 shell 命令**: 同 Phase 2，所有 exec 路径不可达
+- **不读取 .env / 不调用真实 API**: 同 Phase 1/2
+- **不把 TUI 设为唯一默认入口**: 定义 readiness checklist 但不切换
+- **不删除 CLI**: CLI 永不被删除，始终作为 fallback
+- **不进入 B7 multi-instance implementation**: 同 Phase 1/2
+- **不做 real-time evidence stream**: Phase 5+
+- **不执行 AutoRun 命令 / 不启动 agent run**: Phase 4+
+- **不改 Python runtime / core path**: 同 Phase 1/2
+- **不写 checkpoint**: TUI 不触发 session checkpoint
+- **不做 Web UI**: 同 Phase 1/2
+- **不引入大型依赖**: 依赖表面与 Phase 2 一致
+
 ---
 
-## 10. Future AutoRun Integration (Phase 2 为入口)
+## 10. Future AutoRun Integration (Phase 3 为入口)
+
+Phase 3 TUI 已是多视图工作台，展示 AutoRun workflow 等命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
+
+```bash
+# 当前 Phase 3 用户流程
+# TUI 浏览命令 → 复制 shell command → 粘贴到 CLI 执行
 
 Phase 2 TUI 已是 command shell，展示 AutoRun workflow 等命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
 

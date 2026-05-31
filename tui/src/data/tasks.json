@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "phase": "b8-phase-1",
+      "label": "B8 Phase 1 (Static Dashboard)",
+      "status": "completed",
+      "why": "Static 5-panel read-only dashboard completed (eba77ad)"
+    },
+    {
+      "phase": "b8-phase-2",
+      "label": "B8 Phase 2 (Command Shell)",
+      "status": "completed",
+      "why": "CommandCatalog + SafetyModel + CommandPreview completed (3c8e178)"
+    },
+    {
+      "phase": "b8-phase-3",
+      "label": "B8 Phase 3 (Default Workbench Readiness)",
+      "status": "recommended",
+      "why": "当前最高优先级: 7 视图工作台、TaskCenter、EvidenceDetail、DocsConsistency、CommandCatalog v2、Default Entry Readiness checklist"
+    },
+    {
+      "phase": "b8-phase-4",
+      "label": "B8 Phase 4 (Safe Execution)",
+      "status": "deferred",
+      "why": "TUI 工作台成熟后启用: explicit confirmation gate + dry-run 优先"
+    },
+    {
+      "phase": "b8-phase-5",
+      "label": "B8 Phase 5 (Real-time Stream)",
+      "status": "deferred",
+      "why": "需要 runtime infra 支持 agent_log.jsonl tail / dispatcher stream"
+    },
+    {
+      "phase": "b7",
+      "label": "B7 Multi-instance Readiness",
+      "status": "blocked",
+      "why": "需要 B7 backend infra 就绪 (multi-instance orchestrator)"
+    }
+  ]
+}

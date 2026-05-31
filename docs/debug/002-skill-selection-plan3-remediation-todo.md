@@ -2,8 +2,8 @@
 
 **创建日期**: 2026-05-31
 **审计来源**: 002 Skill Selection Plan 3 独立架构审计报告 (Sections A-J)
-**当前状态**: Loop 1 (P0) COMPLETED — retriever + selection_section + evidence 已接入 runtime
-**最后更新**: 2026-05-31 (aef2f8f P0 fix, 9874b53 test fix)
+**当前状态**: Loop 2 (P0 evidence) COMPLETED — real provider dogfood 确认 D01/D02 PASS
+**最后更新**: 2026-05-31 (Loop 2 dogfood re-run: 9 PASS / 3 CONCERN / 0 FAIL)
 
 ---
 
@@ -123,11 +123,11 @@ Loop 1 (P0): Runtime integration ✅ COMPLETED (aef2f8f)
   ├── TDD GREEN: 23/23 tests pass, 93/93 skill tests pass, 247/247 unit+integration pass ✅
   └── Gate: focused tests + ruff + git diff --check ✅
 
-Loop 2 (P0 evidence): Dogfood re-run (需要真实 provider) ⏸️ DEFERRED
-  ├── Update/rerun dogfood script
-  ├── Verify D01/D02 change from CONCERN → PASS
-  └── Document any remaining CONCERN
-  └── ⏸️ 需要真实 provider API 调用，当前 session 未授权
+Loop 2 (P0 evidence): Dogfood re-run ✅ COMPLETED
+  ├── Re-run scripts/real_evidence_002_plan3_dogfood.py ✅
+  ├── Verify D01/D02 change from CONCERN → PASS ✅ (D01: selection.entered PASS, D02: candidates.built PASS)
+  ├── Results: 9 PASS / 3 CONCERN / 0 FAIL (AnthropicCompatibleProvider, 101.4s)
+  └── Remaining CONCERN: D03 (model no_suitable_skill), D05 (TOOL_GATE payload field name), D06 (model math prompt) — all non-blocking
 
 Loop 3 (P1): Fallback downgrade verification ✅ COMPLETED
   ├── Verify turn-end hook only triggers when turn-start didn't produce result ✅

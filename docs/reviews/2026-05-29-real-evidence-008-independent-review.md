@@ -59,14 +59,13 @@ model output (raw JSON string)
 
 ## Score Impact
 
-**3.8 → 3.9** (not product-ready — score still below product-ready threshold)
+**3.9/5 conservative baseline with caveats** (score unchanged — not product-ready)
 
-提升原因: Gap A 闭合了 scheduler main-path injection evidence chain —— `_run_main_loop(action_scheduler=...)` 首次通过完整 runtime path 验证，不再有 dead code。Gap B 实现了 model JSON output → ActionPlan bridge，使 scheduler 可消费模型生成的 plan 结构。
+提升原因: Gap A 闭合了 scheduler main-path injection evidence chain —— `_run_main_loop(action_scheduler=...)` 首次通过完整 runtime path 验证，不再有 dead code。Gap B 实现了 model JSON output → ActionPlan bridge，使 scheduler 可消费模型生成的 plan 结构。**v3 (2026-05-31)**: 最后一个 caveat 已关闭 — `core.chat()` planning path 通过 ACTION_PLAN_PROMPT + schema validation + repair retry → real model stable ActionPlan JSON → bridge → scheduler → 14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN。ReAct main loop preserved。Scheduler remains opt-in branch executor。ActionPlan is planning branch contract, not global forced runtime path。
 
-3.9/5 不声称 product-ready。以下 caveats 限制更高分数：
-- model JSON generation 未闭合 —— ActionPlan 来自 hand-built fixture 或 hand-written JSON，非真实 LLM 自主生成稳定 ActionPlan JSON
-- 未验证 scheduler + real model plan generation 的完整闭环
-- scheduler 不处于默认活跃路径 —— 需显式传入 `action_scheduler=` 参数
+不声称 product-ready。以下因素限制更高分数：
+- 002 skill selection 仍需 MCP-style manifest / 多语言触发调研后再设计
+- B7/B8 大型架构/产品化决策未进入当前阶段
 
 ---
 
@@ -81,7 +80,7 @@ model output (raw JSON string)
 | REAL-EVIDENCE-005 | MCP bridge real server connection | credible | real StdioMCPClient subprocess JSON-RPC, 12/12 PASS |
 | REAL-EVIDENCE-006 | SubAgent real provider child tool mediation | credible | 12/12 PASS real provider E2E; complete evidence chain closed |
 | REAL-EVIDENCE-007 | MCP runtime-mediated invocation | credible | FakeProvider + confirmation override caveats, code path complete |
-| **REAL-EVIDENCE-008** | **Scheduler core.chat E2E + plan bridge** | **credible** | **Gap A: 10/10 PASS injection chain + Gap B: 7/7 tests PASS bridge; caveat: model JSON generation 未闭合** |
+| **REAL-EVIDENCE-008** | **Scheduler core.chat E2E + plan bridge** | **credible** | **Gap A: 10/10 PASS + Gap B: 7/7 PASS + Model Plan v1 (provider.create()) 13/13 PASS + v3 (core.chat() planning path) 14/14 PASS; last caveat closed 2026-05-31** |
 
 ---
 
@@ -156,9 +155,9 @@ def build_action_plan_from_model_output(raw_output: str) -> ActionPlan:
 
 | Caveat | Impact | Mitigation |
 |--------|--------|-----------|
-| model JSON generation 未闭合 | ActionPlan 来自 hand-built fixture 或 hand-written JSON，非真实 LLM 自主生成稳定 ActionPlan JSON | methodology/model-behavior limitation，非代码路径缺口；scheduler code path + bridge code 已验证可消费 model-generated JSON |
-| `core.chat(action_scheduler=scheduler)` 非默认活跃路径 | scheduler 需显式传入参数激活，默认 `action_scheduler=None` | 设计选择 —— scheduler 是 opt-in orchestration layer，不是默认 runtime path |
-| Gap A 使用 FakeProvider | 未验证真实模型在 scheduler 驱动下的多 turn 行为 | Gap B bridge 已使 scheduler 可消费 model-generated plan；real model multi-turn 验证需 `planner.generate_plan()` 连接 |
+| ~~model JSON generation 未闭合~~ **→ CLOSED (v3, 2026-05-31)** | ActionPlan 来自 hand-built fixture 或 hand-written JSON，非真实 LLM 自主生成稳定 ActionPlan JSON | **v3 闭合**: `core.chat()` → `_run_planning_phase()` (ACTION_PLAN_PROMPT + schema validation + 1 repair retry) → real model outputs stable ActionPlan JSON (3 nodes, has_depends, has_condition) → bridge → scheduler → **14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN** |
+| `core.chat(action_scheduler=scheduler)` 非默认活跃路径 | scheduler 需显式传入参数激活，默认 `action_scheduler=None` | 设计选择 —— scheduler 是 opt-in orchestration layer（branch executor），不是默认 runtime path。ReAct main loop preserved。ActionPlan is planning branch contract, not global forced runtime path。No second runtime introduced |
+| Gap A 使用 FakeProvider | 未验证真实模型在 scheduler 驱动下的多 turn 行为 | v3 `core.chat()` planning path 已验证 real model → stable ActionPlan JSON → scheduler → evidence chain 全链路；FakeProvider 仅用于 Gap A 的 scheduler injection chain 结构验证 |
 
 ---
 
@@ -183,10 +182,10 @@ def build_action_plan_from_model_output(raw_output: str) -> ActionPlan:
 | Scheduler injection chain verified | **PASS** | `_run_main_loop(action_scheduler=...)` → 10/10 PASS |
 | Plan bridge complete | **PASS** | `build_action_plan_from_model_output()` → 7/7 PASS |
 | Model-generated stable ActionPlan JSON (v1: `provider.create()` path) | **MET (2026-05-30)** | 13/13 PASS via `real_evidence_008_model_generated_plan.py` v1 — real AnthropicCompatibleProvider → `provider.create()` (custom system prompt) → valid JSON → bridge → scheduler → evidence chain complete |
-| Model-generated stable ActionPlan JSON (v2: `core.chat()` path) | **MODEL_BEHAVIOR_CONCERN (2026-05-31)** | 5 PASS / 0 FAIL / 1 MODEL_BEHAVIOR_CONCERN via v2 script — `core.chat()` → `_run_planning_phase()` → `generate_action_plan()` 路径正确，但模型输出 JSON 不符合 ActionPlan schema（使用 `steps` 而非 `nodes`、`tool` 而非 `action_type`/`target`、缺少 `steps_estimate`）。`_run_planning_phase()` 正确识别为单步并跳过。Safety checks (M10-M13) 全部通过。此 caveat 非代码缺陷：`core.chat()` 系统 prompt 覆盖 `ACTION_PLAN_PROMPT` 的 JSON schema 指令 → 模型输出内部格式而非标准 ActionPlan schema |
-| All scheduler tests pass | **PASS** | 83/83 PASS (27 original + 20 main-path + 7 bridge + 29 contract) |
+| Model-generated stable ActionPlan JSON (v2: `core.chat()` path) | **MODEL_BEHAVIOR_CONCERN (2026-05-31)** → **CLOSED (v3, 2026-05-31)** | 5 PASS / 0 FAIL / 1 MODEL_BEHAVIOR_CONCERN via v2 script → **v3 fix**: `_run_planning_phase()` uses isolated ACTION_PLAN_PROMPT (not contaminated by main ReAct prompt) + schema validation + 1 repair retry → real model outputs stable ActionPlan JSON (plan_id=cond_flag_test_v3_001, 3 nodes, has_depends, has_condition) → bridge → scheduler → **14 PASS / 0 FAIL / 0 CONCERN**。不再有 MODEL_BEHAVIOR_CONCERN |
+| All scheduler tests pass | **PASS** | 104/104 PASS (27 original + 20 main-path + 7 bridge + 29 contract + 21 new schema) |
 
-**B7/B8 entry gate: runtime prerequisites mostly satisfied with model behavior caveat on core.chat path.** v1 `provider.create()` path 验证了 model → JSON → bridge → scheduler 全链路可行（13/13 PASS）；v2 `core.chat()` path 验证了统一 runtime injection chain 结构正确，但模型在 `core.chat()` 的 main system prompt 下无法稳定输出 ActionPlan schema JSON。完整的 `core.chat()` → model JSON → scheduler 闭环需 planner.generate_plan() 连接（B7/B8 范围）。仍需评估 002 implementation scope 后方可进入 B7/B8。当前阶段仍建议收口，不进入 B7/B8 implementation。
+**B7/B8 entry gate: runtime prerequisites satisfied — 008 evidence chain fully closed.** v1 `provider.create()` path 验证了 model → JSON → bridge → scheduler 全链路可行（13/13 PASS）；v3 `core.chat()` planning path 验证了统一 runtime injection chain + real model stable ActionPlan JSON（14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN）。008 no longer blocks future readiness discussion。002 remains a separate unresolved design topic — requires MCP-style skill manifest / multilingual skill selection research before redesign。B7/B8 are not in scope for this documentation update。Before B7/B8, 002 skill selection design still needs separate research and decision。
 
 ---
 

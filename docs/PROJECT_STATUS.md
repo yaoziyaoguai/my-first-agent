@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B8 Phase 5: AutoRun Workflow Integration — 206/206 tests PASS)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 5 COMPLETED** — TUI 通过 Phase 4 命令执行基础设施接入 AutoRun workflow。
+**最后更新**: 2026-06-01 (B8 Phase 6A: Static Evidence/Gate/Dogfood Browser — 227/227 tests PASS)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 6A COMPLETED** — TUI 静态证据浏览器：evidenceBrowser.ts (JSON 解析) + gateHistory.ts (6 gates) + EvidenceBrowserPanel + DogfoodDetailPanel, 21 new tests, wired into Dashboard evidence view。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -276,9 +276,9 @@
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-5 全部 COMPLETED — 206/206 tests PASS, tsc --noEmit clean。
+**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-6A 全部 COMPLETED — 227/227 tests PASS, tsc --noEmit clean。
 
-**B8 Phase 6 (证据/门禁/Dogfood 浏览器) 为下一步**。Phase 6 BLOCKED by B7。Phase 7 FUTURE。B7 multi-instance readiness 不进入当前阶段。
+**B8 Phase 6B (多实例历史浏览器) 为下一步**。Phase 6B BLOCKED by B7。Phase 7 FUTURE。B7 multi-instance readiness 不进入当前阶段。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 
@@ -314,7 +314,7 @@
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | **Phase 1-5 COMPLETED** (206/206 tests PASS)。Phase 5: AutoRun 工作流集成 (autorunAdapter + AutoRunPanel + HardStopOverlay + ReviewPacketPanel)。Phase 6 (证据浏览器) BLOCKED by B7。路线图: `docs/roadmap/b8-tui-workbench-roadmap.md` |
+| B8 | TUI architecture | **Phase 1-6A COMPLETED** (227/227 tests PASS)。Phase 6A: 静态证据浏览器 (evidenceBrowser + gateHistory + EvidenceBrowserPanel + DogfoodDetailPanel)。Phase 6B (多实例历史) BLOCKED by B7。路线图: `docs/roadmap/b8-tui-workbench-roadmap.md` |
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）

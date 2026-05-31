@@ -11,6 +11,8 @@ import { parseDogfoodResult } from "./data/dogfoodResults";
 import { buildGitInfo } from "./data/gitInfo";
 import { loadCommandCatalog } from "./data/commandCatalog";
 import { loadNextAction } from "./data/nextAction";
+import { listDogfoodFiles } from "./data/evidenceBrowser";
+import { parseGateHistory } from "./data/gateHistory";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
@@ -119,6 +121,12 @@ function App() {
   const nextAction = loadNextAction(
     path.join(REPO_ROOT, "docs", "PROJECT_STATUS.md"),
   );
+  const evidenceFiles = listDogfoodFiles(
+    path.join(REPO_ROOT, "docs", "dogfood"),
+  );
+  const gateHistory = parseGateHistory(
+    projectStatusDoc + "\n" + progressLedgerDoc,
+  );
 
   return (
     <Dashboard
@@ -128,6 +136,8 @@ function App() {
       git={git}
       catalog={catalog}
       nextAction={nextAction}
+      evidenceFiles={evidenceFiles}
+      gateHistory={gateHistory}
     />
   );
 }

@@ -27,14 +27,14 @@ eba77ad                 3c8e178                  2ae13ab
 └───────────────────────────────────────────────────────────┘
     │
     ▼
-Phase 4 (NEXT)          Phase 5 (AFTER P4)      Phase 6 (BLOCKED by B7)
-安全命令执行             AutoRun 工作流集成       证据/门禁/Dogfood 浏览器
-confirmation gate       TUI→AutoRun launcher    多数据源 + 历史浏览器
+Phase 4 (COMPLETED)      Phase 5 (COMPLETED)      Phase 6A (COMPLETED)
+安全命令执行             AutoRun 工作流集成       静态证据/门禁浏览器
+confirmation gate       TUI→AutoRun launcher    JSON 解析 + gate history
     │                       │                       │
     ▼                       ▼                       ▼
-Phase 7 (FUTURE)
-运行时 Event Stream 查看器
-read-only stream, 不回写
+Phase 6B (BLOCKED by B7)  Phase 7 (FUTURE)
+多实例历史浏览器          运行时 Event Stream 查看器
+trend, commit linkage    read-only stream, 不回写
 ```
 
 ### 1.2 各 Phase 交付物
@@ -46,8 +46,9 @@ read-only stream, 不回写
 | **Phase 3** | 默认入口就绪 | **COMPLETED** | 7 视图导航, 133 tests | — |
 | **Phase 4** | 安全命令执行 | **READY** | confirmation gate, dry-run, audit log | ✅ |
 | **Phase 5** | AutoRun 工作流集成 | **READY** | TUI→AutoRun launcher, state panel, review packet | ✅ (after P4) |
-| **Phase 6** | 证据/门禁/Dogfood 浏览器 | **BLOCKED** (by B7 infra + P4/P5) | 多数据源浏览器, 历史面板 | ❌ |
-| **Phase 7** | 运行时 Event Stream 查看器 | **FUTURE** (after P4-P6) | read-only stream viewer | ❌ |
+| **Phase 6A** | 静态证据/门禁/Dogfood 浏览器 | **COMPLETED** | 本地 JSON 解析, gate history, 证据浏览 | ✅ (已自动执行) |
+| **Phase 6B** | 多实例历史浏览器 | **BLOCKED** (by B7) | multi-run history, 趋势, commit linkage | ❌ |
+| **Phase 7** | 运行时 Event Stream 查看器 | **FUTURE** (after P4-P6B) | read-only stream viewer | ❌ |
 
 ---
 
@@ -427,51 +428,84 @@ interface AutoRunState {
 
 ---
 
-## 5. Phase 6: 证据/门禁/Dogfood 浏览器 (BLOCKED by B7)
+## 5. Phase 6A: 静态证据/门禁/Dogfood 浏览器 (COMPLETED)
 
-**状态**: BLOCKED。B7 multi-instance 后端就绪 + Phase 4/5 完成后开始。
-**阻塞条件**:
-1. B7 消除模块级单例 (B7 未启动, 本轮不做)
-2. Phase 4 (安全命令执行) COMPLETED
-3. Phase 5 (AutoRun 集成) COMPLETED
-4. `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` 中所有 001-008 为最终状态
+**状态**: COMPLETED (2026-06-01)。
+**设计决策**: Phase 6 拆分为 6A (静态浏览器，不依赖 B7) 和 6B (多实例历史浏览器，依赖 B7)。
 
 ### 5.1 目标
 
-TUI 提供多维度数据浏览器：证据详情 (001-008)、dogfood 结果历史、gate 执行历史、commit 关联。所有数据来自本地文件，不发起网络请求，不修改 runtime 状态。
+TUI 提供静态证据浏览器：解析本地 `docs/dogfood/*.json` 文件 → EvidenceFileEntry 列表；解析 PROJECT_STATUS + PROGRESS_LEDGER 文本 → GateResult 列表。所有数据来自本地只读文件。
 
-### 5.2 数据源
+### 5.2 数据源与实现
 
-| 浏览器 | 数据源 | 解析器 |
-|--------|--------|--------|
-| Evidence Detail | `tui/src/data/evidenceDetails.json` (已有) + `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | JSON load + MD parse |
-| Dogfood Results | `docs/dogfood/*.json` (已有解析器 `dogfoodResults.ts`) | 扩展为历史浏览器 |
-| Gate History | `git log --oneline` + commit message 中 gate 结果 | git log parse (已有) |
-| Commit Linkage | `git log --oneline -n 50` | 将 commit 关联到 evidence/dogfood/gate |
+| 文件 | 类型 | 内容 |
+|------|------|------|
+| `tui/src/data/evidenceBrowser.ts` | NEW | EvidenceFileEntry 解析, listDogfoodFiles, buildEvidenceFileIndex |
+| `tui/src/data/gateHistory.ts` | NEW | GateResult 解析, parseGateHistory, KNOWN_GATES (6) |
+| `tui/src/components/EvidenceBrowserPanel.tsx` | NEW | Evidence 文件列表 (status badges: ✓/⚠/△/?, P/C/F counts) |
+| `tui/src/components/DogfoodDetailPanel.tsx` | NEW | 选中 evidence 详情 + gate history 列表 |
 
-### 5.3 History Model
+### 5.3 Stale/Unknown Handling
+
+- Evidence 文件 JSON 解析失败 → status "unknown", error 字段记录原因
+- Gate 无匹配 keyword → status "unknown", source "none"
+- 空输入 → 返回所有 6 个 known gates 为 "unknown"（不伪造 pass）
+- 解析不崩溃 — try/catch 全覆盖
+
+### 5.4 约束
+
+- **不写入 runtime 状态** — 所有数据来自只读文件
+- **不修改 evidence 数据** — 浏览不改变
+- **不触发 dogfood 执行** — 仅浏览历史结果
+- **不执行 gate 命令** — 仅浏览历史
+- **不连接外部服务** — 数据全部本地
+
+### 5.5 测试
+
+| 测试文件 | 覆盖 | 数量 |
+|---------|------|------|
+| `evidenceBrowser.test.ts` | normalizeVerdictCounts, parseDogfoodFile, buildEvidenceFileIndex | 11 |
+| `gateHistory.test.ts` | parseGateHistory, getLatestGateResults, GateResult type | 10 |
+| **Phase 6A 新增** | | **21** |
+
+### 5.6 Stop Conditions
+
+| 条件 | 行为 |
+|------|------|
+| 需要读取 .env / secrets | **HARD_STOP** |
+| 需要修改 runtime 状态 | **HARD_STOP** |
+
+---
+
+## 5B. Phase 6B: 多实例历史浏览器 (BLOCKED by B7)
+
+**状态**: BLOCKED。B7 multi-instance 后端就绪后开始。
+
+### 5B.1 目标
+
+扩展 6A 的静态浏览器为多实例历史浏览器：multi-run evidence 时间线、dogfood 趋势、commit 关联。依赖 B7 消除模块级单例以支持多实例数据聚合。
+
+### 5B.2 History Model (保留原设计，待 B7)
 
 ```typescript
 interface EvidenceHistory {
-  id: string;                // "REAL-EVIDENCE-001"
+  id: string;
   capability: string;
   timeline: EvidenceSnapshot[];
 }
 
 interface EvidenceSnapshot {
-  date: string;              // ISO 8601
+  date: string;
   status: "credible" | "credible-with-caveats" | "partial-credible";
   commit: string;
-  dogfoodResult: string;     // path to result JSON
+  dogfoodResult: string;
   notes: string;
 }
 
 interface DogfoodHistory {
-  results: DogfoodResult[];  // sorted by date desc
-  trends: {
-    passTrend: number[];     // last 10 runs
-    concernTrend: number[];
-  };
+  results: DogfoodResult[];
+  trends: { passTrend: number[]; concernTrend: number[] };
 }
 
 interface GateHistory {
@@ -481,55 +515,36 @@ interface GateHistory {
 interface GateRun {
   date: string;
   commit: string;
-  gate: string;              // "vitest", "tsc", "ruff", etc.
+  gate: string;
   result: "pass" | "fail";
   details: string;
 }
 ```
 
-### 5.4 Stale/Unknown Handling
+### 5B.3 阻塞条件
 
-- Evidence 数据有 `lastUpdated` 字段 → 超过 30 天标 `[stale]`
-- Dogfood result 文件缺失 → 标 `[missing]`，不崩溃
-- Gate 历史无记录 → 显示 "no gate history available"
-- Commit 无法关联 → 标 `[unlinked]`
+1. B7 消除模块级单例 (B7 未启动)
+2. Phase 6A COMPLETED ✅
+3. `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` 中所有 001-008 为最终状态
 
-### 5.5 约束
+### 5B.4 Stop Conditions
 
-- **不写入 runtime 状态** — 所有数据来自只读文件
-- **不修改 evidence 数据** — 浏览不改变
-- **不触发 dogfood 执行** — 仅浏览历史结果
-- **不执行 gate 命令** — 仅浏览历史
-- **不连接外部服务** — 数据全部本地
+| 条件 | 行为 |
+|------|------|
+| B7 未就绪 | **HARD_STOP** — Phase 6B 不能开始 |
+| 需要读取 .env / secrets | **HARD_STOP** |
+| 需要修改 runtime 状态 | **HARD_STOP** |
 
-### 5.6 实现文件 (预估，待 Phase 6 SDD 确认)
+### 5B.5 实现文件 (预估，待 Phase 6B SDD 确认)
 
 | 文件 | 类型 | 内容 |
 |------|------|------|
 | `tui/src/data/evidenceHistory.ts` | NEW data | Evidence 历史时间线 |
 | `tui/src/data/dogfoodHistory.ts` | NEW data | Dogfood 结果历史 + 趋势 |
-| `tui/src/data/gateHistory.ts` | NEW data | Gate 历史解析 |
-| `tui/src/components/EvidenceBrowser.tsx` | NEW component | Evidence 浏览器面板 |
-| `tui/src/components/DogfoodBrowser.tsx` | NEW component | Dogfood 历史面板 |
-| `tui/src/components/GateHistoryPanel.tsx` | NEW component | Gate 历史面板 |
+| `tui/src/components/EvidenceHistoryPanel.tsx` | NEW component | Evidence 历史面板 |
+| `tui/src/components/DogfoodHistoryPanel.tsx` | NEW component | Dogfood 历史面板 |
 
-### 5.7 Stop Conditions
-
-| 条件 | 行为 |
-|------|------|
-| B7 未就绪 | **HARD_STOP** — Phase 6 不能开始 |
-| 需要读取 .env / secrets | **HARD_STOP** |
-| 需要修改 runtime 状态 | **HARD_STOP** |
-
-### 5.8 测试计划 (预估)
-
-| 测试文件 | 覆盖 | 预估数量 |
-|---------|------|---------|
-| `evidenceHistory.test.ts` | 时间线构建, stale 检测, missing 容错 | 5 |
-| `dogfoodHistory.test.ts` | 历史排序, 趋势计算, 文件缺失 | 5 |
-| `gateHistory.test.ts` | git log 解析, commit 关联 | 5 |
-| **Phase 6 新增** | | **~15** |
-| **总计** | | **~188** |
+| **Phase 6B 新增** | | **~15** |
 
 ---
 
@@ -638,7 +653,7 @@ interface StreamEvent {
 
 ### 7.1 连续执行许可
 
-AutoRun 在满足以下所有条件时，可连续执行 Phase 4 → Phase 5 (Phase 6/7 blocked):
+AutoRun 在满足以下所有条件时，可连续执行 Phase 4 → Phase 5 → Phase 6A (Phase 6B/7 blocked):
 
 1. 每个 Phase gate 全部通过
 2. 无 HARD_STOP 触发
@@ -713,17 +728,16 @@ Context < 10% 时:
 ### 8.1 依赖链
 
 ```
-Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 ──► Phase 7
-                                         │            │
-                                         └── Phase 6 ──┘
-                                              ▲
-                                         B7 后端就绪 (BLOCKED)
+Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 ──► Phase 6A ──► Phase 6B ──► Phase 7
+                                                                           ▲
+                                                                      B7 后端就绪 (BLOCKED)
 ```
 
 - **Phase 4** 不依赖外部条件（纯 TUI 前端 + node child_process）
 - **Phase 5** 依赖 Phase 4 的命令执行基础设施
-- **Phase 6** 依赖 B7 multi-instance 后端 (BLOCKED)
-- **Phase 7** 依赖 Phase 4/5/6 全部完成 (FUTURE)
+- **Phase 6A** 静态浏览器，不依赖 B7 (COMPLETED)
+- **Phase 6B** 多实例历史浏览器，依赖 B7 multi-instance 后端 (BLOCKED)
+- **Phase 7** 依赖 Phase 4/5/6A/6B 全部完成 (FUTURE)
 
 ### 8.2 风险矩阵
 
@@ -732,7 +746,7 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 | Ink useInput 中文 IME 文本输入截断 | 中 | 中 | Phase 4+ | Phase 4 早期验证；必要时切换到 raw stdin 模式 |
 | child_process exec 白名单绕过 | 低 | 高 | Phase 4 | 编译时检查 no dynamic exec；白名单 hardcoded |
 | agent_log.jsonl 写入速度 > 轮询速度 | 低 | 低 | Phase 5 | 增量读取 + debounce 重渲染 |
-| B7 架构变更破坏 TUI 数据契约 | 低 | 高 | Phase 6 | 预留 B7 field reservation (SDD §11) |
+| B7 架构变更破坏 TUI 数据契约 | 低 | 高 | Phase 6B | 预留 B7 field reservation (SDD §11) |
 | Node.js 版本升级导致 Ink 不兼容 | 低 | 中 | 全 Phase | 锁定 Ink 5.x + React 18 |
 | Phase 4+ 修改破坏 Phase 1-3 回归 | 中 | 高 | 全 Phase | 133+ tests 回归套件；只扩展不重写 |
 | child_process 引入新子进程模式 | 低 | 高 | Phase 4 | 编译时扫描 `spawn`/`fork`/`execFile` |
@@ -746,31 +760,32 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 | D-001 | TUI 为未来默认入口，CLI 为显式 fallback | 2026-05-31 | Phase 3 确立；CLI 永不删除 |
 | D-002 | 不立即切换 TUI 为默认入口 | 2026-05-31 | Default Entry Readiness checklist 全部通过后才切换 |
 | D-003 | Phase 4 启 confirmation gate + dry-run 优先 | 2026-06-01 | 安全命令执行的最小可行方案 |
-| D-004 | Phase 6 阻塞于 B7 后端 | 2026-05-31 | B7 multi-instance 消除模块级单例后才能多实例监控 |
+| D-004 | Phase 6 拆分为 6A/6B | 2026-05-31 | 6A 静态浏览器不依赖 B7，可立即做；6B 多实例历史需 B7 消除模块级单例 |
 | D-005 | 不引入 WebSocket/SSE 做实时流 | 2026-06-01 | Phase 7 用文件 tail + polling 保持依赖最小化 |
 | D-006 | 不把 TUI 做成第二 runtime | 2026-05-31 | TUI 是 UI 层，不改 Python runtime 行为 |
 | D-007 | TUI 不重写 AutoRun | 2026-06-01 | TUI 通过固定命令模板接入，不实现 AutoRun 逻辑 |
-| D-008 | AutoRun 连续执行许可 | 2026-06-01 | Phase 4→5 可连续，Phase 6/7 因 B7 阻塞不连续 |
+| D-008 | AutoRun 连续执行许可 | 2026-06-01 | Phase 4→5→6A 可连续，Phase 6B/7 因 B7 阻塞不连续 |
 | D-009 | Phase Transition Gate 10 项检查 | 2026-06-01 | 每 Phase 完成后强制执行 |
 | D-010 | Failed gate retry limit = 2 | 2026-06-01 | 同一 gate 连续 2 次失败 → HARD_STOP + root cause |
 | D-011 | Context < 10% handoff | 2026-06-01 | 写 `docs/handoff/`, 最小 gates, safe commit/push, 停止 |
+| D-012 | Phase 6A 静态浏览器 | 2026-06-01 | JSON 解析 + gate history 文本解析，不依赖 B7，21 tests |
 
 ---
 
 ## 10. 门禁矩阵
 
-| Gate | Phase 1-3 | Phase 4 | Phase 5 | Phase 6 | Phase 7 |
-|------|----------|---------|---------|---------|---------|
-| `npx tsc --noEmit` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `npx vitest run` | ✅ 133 | ✅ ~158 | ✅ ~173 | ✅ ~188 | ✅ ~200 |
-| Phase 1-3 regression | — | ✅ 133 | ✅ 133 | ✅ 133 | ✅ 133 |
-| git diff --check | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 白名单扫描 | N/A | ✅ | ✅ | ✅ | ✅ |
-| no .env access | N/A | ✅ | ✅ | ✅ | ✅ |
-| no new deps | N/A | ✅ | ✅ | ✅ | ✅ |
-| `npm start` smoke | ✅ | ✅ | ✅ | ✅ | ✅ |
-| CLI 独立运行 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| AutoRun Contract (Phase Transition) | N/A | ✅ | ✅ | ✅ | ✅ |
+| Gate | Phase 1-3 | Phase 4 | Phase 5 | Phase 6A | Phase 6B | Phase 7 |
+|------|----------|---------|---------|---------|---------|---------|
+| `npx tsc --noEmit` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cd tui && npm test` | ✅ 133 | ✅ 188 | ✅ 206 | ✅ 227 | ✅ TBD | ✅ TBD |
+| Phase 1-3 regression | — | ✅ 133 | ✅ 133 | ✅ 133 | ✅ 133 | ✅ 133 |
+| git diff --check | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 白名单扫描 | N/A | ✅ | ✅ | ✅ | ✅ | ✅ |
+| no .env access | N/A | ✅ | ✅ | ✅ | ✅ | ✅ |
+| no new deps | N/A | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `npm start` smoke | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CLI 独立运行 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| AutoRun Contract (Phase Transition) | N/A | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
@@ -832,3 +847,4 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 |------|------|
 | 2026-06-01a | 初始版本 — B8 Roadmap / Default Entry Readiness Review |
 | 2026-06-01b | AutoRun Readiness Hardening — Phase 4/5 补全可执行细节 (命令白名单/黑名单/确认模型/dry-run/audit log/result panel/过渡 gate/stop conditions), Phase 6/7 补全数据模型/约束/测试计划, 新增 AutoRun Continuous Execution Contract (§7) + Phase Transition Gate + Failed Gate Retry Limit + Context Low Handoff |
+| 2026-06-01c | Phase 6A COMPLETED — 拆分 Phase 6 为 6A (静态浏览器) + 6B (B7-dependent 多实例历史); 实现 evidenceBrowser.ts (EvidenceFileEntry 解析), gateHistory.ts (6 known gates parse), EvidenceBrowserPanel, DogfoodDetailPanel; 21 new tests; 227/227 tests PASS; wired into Dashboard evidence view with ↑↓ navigation |

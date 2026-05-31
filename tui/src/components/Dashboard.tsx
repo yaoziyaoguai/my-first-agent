@@ -30,6 +30,10 @@ import { DocsConsistencyPanel } from "./DocsConsistencyPanel";
 import { ConfirmOverlay } from "./ConfirmOverlay";
 import { DryRunOverlay } from "./DryRunOverlay";
 import { ResultPanel } from "./ResultPanel";
+import { EvidenceBrowserPanel } from "./EvidenceBrowserPanel";
+import { DogfoodDetailPanel } from "./DogfoodDetailPanel";
+import type { EvidenceFileEntry } from "../data/evidenceBrowser";
+import type { GateResult } from "../data/gateHistory";
 import { isSelectable } from "../data/safetyModel";
 import { isAllowed } from "../data/executionWhitelist";
 import {
@@ -48,6 +52,8 @@ interface Props {
   git: GitInfo;
   catalog: CommandCatalog;
   nextAction: string;
+  evidenceFiles: EvidenceFileEntry[];
+  gateHistory: GateResult[];
 }
 
 const VIEW_ID_MAP: Record<string, ViewId> = {
@@ -67,9 +73,10 @@ type Phase4Mode =
   | "executing"  // confirmed, executing (future: actual exec)
   | "result";    // showing result
 
-export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction }: Props) {
+export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory }: Props) {
   const [nav, setNav] = useState(createNavigationState());
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [evidenceSelectedIndex, setEvidenceSelectedIndex] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [phase4Mode, setPhase4Mode] = useState<Phase4Mode>("preview");
   const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null);
@@ -271,6 +278,20 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction }:
         }
       }
     }
+
+    // Evidence browser navigation (only in Evidence view)
+    if (nav.currentView === "evidence") {
+      if (key.upArrow) {
+        setEvidenceSelectedIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setEvidenceSelectedIndex((prev) =>
+          Math.min(evidenceFiles.length - 1, prev + 1),
+        );
+        return;
+      }
+    }
   });
 
   const renderCommandsView = () => {
@@ -328,8 +349,20 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction }:
         );
       case "evidence":
         return (
-          <Box marginBottom={1}>
-            <EvidenceDetailPanel />
+          <Box flexDirection="column" marginBottom={1}>
+            <Box marginBottom={1}>
+              <EvidenceDetailPanel />
+            </Box>
+            <Box flexDirection="row">
+              <EvidenceBrowserPanel
+                entries={evidenceFiles}
+                selectedIndex={evidenceSelectedIndex}
+              />
+              <DogfoodDetailPanel
+                entry={evidenceFiles[evidenceSelectedIndex] ?? null}
+                gates={gateHistory}
+              />
+            </Box>
           </Box>
         );
       case "workflow":
@@ -384,7 +417,7 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction }:
       {/* Footer */}
       <Box flexDirection="column">
         <Text dimColor>
-          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}B8 Phase 4 — safe execution | {new Date().toISOString().slice(0, 10)}
+          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}{nav.currentView === "evidence" ? "↑↓: browse evidence | " : ""}B8 Phase 6A — static evidence browser | {new Date().toISOString().slice(0, 10)}
         </Text>
       </Box>
     </Box>

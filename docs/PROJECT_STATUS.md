@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-31 (003 Loop 8: 13 PASS / 0 FAIL / 4 CONCERN — H2 adversarial direct/indirect PASS (read_file target fix); execution_suppressed evidence added; no-TOOL_INVOKE after rejection verified; 003 升级为 credible)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。002: **credible** — Plan 3 pipeline + manifest-based language matching — 12/12 PASS。003: **credible** — lifecycle→mediator→gate allowed_tools enforcement 全链闭合, multiple disallowed business tools blocked (read_file/read_file_lines/SKILL_SELECT), H2 adversarial styles 2/3 PASS (direct+indirect via read_file target), execution_suppressed evidence + no-TOOL_INVOKE verified by focused tests + dogfood, 24 focused tests PASS。**Remaining CONCERN (全部 MODEL_BEHAVIOR)**: (1) request_user_input 模型主动规避 → 非代码缺陷; (2) privilege_escalation framing 模型拒绝 → 非代码缺陷; (3) prompt-steered adversarial prompts → 已知限制; (4) 单 skill 场景 → 已知限制。006: **credible — 完整 evidence chain 闭合 (12/12 PASS)**。007: **credible-with-caveats — runtime-mediated execution chain 已验证** (10/10 PASS)；caveat: FakeProvider deterministic tool_use + confirmation='never' validation-only override（验证方法学 scope note，非 runtime blocker）。008: **credible — evidence chain fully closed, 最后一个 caveat 已关闭 (2026-05-31 v3)**。
+**最后更新**: 2026-05-31 (B8-lite Phase 1: TypeScript TUI 只读仪表盘 — 5 面板 skeleton 完成, 28/28 tests PASS, SDD at `docs/design/b8-ts-tui-workbench-sdd.md`)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8-lite Phase 1 COMPLETED** — TypeScript TUI 只读仪表盘可运行 (`cd tui && npm start`): 静态数据加载、5 面板布局 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview)、28 focused tests PASS、TypeScript 编译 clean。Phase 2+ (实时 evidence stream / 交互式操作) 不进入当前阶段。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -276,9 +276,9 @@
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B7/B8 不进入当前阶段。
+**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8-lite Phase 1 COMPLETED (静态仪表盘 — `cd tui && npm start`)。
 
-**推荐下一步：B8-lite TS TUI observer** — 在进入完整 B8 TUI 架构前，先做一个最小化的 TypeScript TUI observer（只读监控面板），用于观察 runtime evidence 流。
+**B8-lite Phase 1 已交付**: TypeScript TUI 只读仪表盘 — 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview), 28 focused tests PASS, TypeScript 编译 clean。Phase 2+ (实时 evidence stream / 交互式操作) 为后续阶段，不进入当前阶段。B7 multi-instance readiness 不进入当前阶段。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 

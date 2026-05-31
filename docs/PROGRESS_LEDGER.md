@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-05-31 (002 Skill Selection SDD vNext — Architecture Extension Loop SPEC/SDD phase complete)
+**最后更新**: 2026-05-31 (B8-lite Phase 1: TypeScript TUI 只读仪表盘完成)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B8-lite Phase 1: TypeScript TUI static dashboard** | — | **B8 Architecture Extension Loop — Phase 1 COMPLETED** — TypeScript (Ink 5 + React 18) TUI 只读仪表盘 (`tui/`): 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview), `npm start` 启动, 数据来自 `docs/PROJECT_STATUS.md`/`docs/PROGRESS_LEDGER.md`/`docs/dogfood/*.json`/git。28/28 focused tests PASS。TypeScript 编译 clean。SDD: `docs/design/b8-ts-tui-workbench-sdd.md`。明确不进入 Phase 2+。|
 | **003 Loop 8: close remaining caveats — 003 upgraded to credible** | — | **REAL-EVIDENCE-003 Loop 8 (13 PASS / 0 FAIL / 4 CONCERN)** — H2 adversarial target fix: prefer read_file over request_user_input → direct + indirect styles PASS (2/3 H2)；execution_suppressed: True added to rejected TOOL_GATE evidence (tool_gate.py)；TestRejectedGateNoToolExecution (6 new focused tests): no TOOL_INVOKE after rejection verified for read_file/read_file_lines/request_user_input + execution_suppressed evidence + allowed contrast；24 focused tests PASS。Remaining 4 CONCERN all MODEL_BEHAVIOR (request_user_input model avoidance, privilege_escalation model refusal — not code defects)。003 upgraded from credible-with-caveats to **credible**。7/8 REAL-EVIDENCE credible + 1/8 credible-with-caveats (007)。Result: `docs/dogfood/real-evidence-003-hardening-results.json`。|
 | **003 hardening v3: active_skill_id evidence fix + R36 completeness [superseded by Loop 8]** | — | **REAL-EVIDENCE-003 hardening v3 (10 PASS / 0 FAIL / 7 CONCERN / 0 SKIP)** — Production code fix: mediator._route_gate() 动态读取 active_skill_id 并传入 gate_payload；ToolGateHandler rejected+allowed 双路径 evidence_extra 包含 active_skill_id。R36 (NEW): All rejected TOOL_GATE events have complete evidence fields (active_skill_id, requested_tool_name, skill_allowed_tools, policy_path, rejection_reason, decision=rejected)。4 new focused tests (`TestActiveSkillIdInGateEvidence`)。27/27 focused tests PASS。Multiple disallowed business tools (read_file/read_file_lines/SKILL_SELECT) blocked via skill_allowed_tools→rejected。003 升级为 **credible-with-caveats**。Caveats: prompt-steered, request_user_input 模型规避 (defense-in-depth), 单 skill 场景, H2 对抗风格全部 CONCERN。结果文件: `docs/dogfood/real-evidence-003-hardening-results.json`。 |
 | **002 Loop 4: Manifest-based language matching redesign** | 641cffb | 用户决策移除中文 bigram/partial-match 跨语言 hack。`_chinese_bigram_overlap`/`_chinese_partial_match`/`_contains_chinese` 从 retriever.py 移除 (~46 lines)。Retriever 现在只匹配 manifest 显式声明的 metadata——不做隐式跨语言翻译。Skill 用什么语言声明 metadata 就按什么语言匹配。英文 skill 不自动匹配中文 prompt（expected-by-design）。多语言支持由 manifest 显式声明中文 aliases/triggers。D03 重分类为 manifest language coverage decision（非 runtime gap）。新增 tests: English-only manifest no match for Chinese / Chinese manifest matches Chinese (4 prompts) / Math prompt no_skill (3 prompts)。22/22 retriever tests PASS。 |

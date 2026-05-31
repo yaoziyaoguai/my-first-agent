@@ -1,22 +1,25 @@
 # B8 TypeScript TUI Workbench — SDD
 
 **创建日期**: 2026-05-31
-**状态**: SPEC/SDD 阶段
+**最后更新**: 2026-05-31 (Phase 2 SDD)
+**状态**: Phase 1 COMPLETED, Phase 2 SPEC/SDD
 **类型**: Architecture Extension Loop — 新跨领域关注点
 
 ---
 
 ## 1. Vision
 
-**最终形态**: 终端内 Agent Workbench（TUI），开发者可通过键盘驱动的终端界面观察、调试、操控 First Agent 运行时。
+**最终形态**: TUI 替代 CLI 成为 First Agent 的默认交互入口。开发者通过终端工作台完成所有工程操作（状态查看、命令执行、workflow 编排），CLI 保留为底层能力和 fallback。
 
-**Phase 1 (本轮)**: 只读静态仪表盘 — 从 `docs/` 和 git 读取已有工程数据并展示，不连接运行时。
+**Phase 1 (COMPLETED — `eba77ad`)**: 只读静态仪表盘 — 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview)。
+
+**Phase 2 (本轮)**: TUI command shell + AutoRun workflow launcher。TUI 从 read-only observer 升级为可交互的工作台入口，展示可用命令、推荐下一步、command preview。**不直接执行高风险命令。**
 
 **后续 Phase（不在本轮范围）**:
-- Phase 2: 实时 runtime evidence 流（通过 agent_log.jsonl tail 或 dispatcher stream）
-- Phase 3: 交互式操作（触发 dogfood、切换 branch、启动/停止 agent）
-- Phase 4: 多实例监控（B7 multi-instance 后端就绪后）
-- Phase 5: 完整 TUI Agent Workbench（直接在工作台中与 agent 对话）
+- Phase 3: 实时 runtime evidence 流（通过 agent_log.jsonl tail 或 dispatcher stream）
+- Phase 4: 安全命令执行（explicit confirmation gate + dry-run 优先）
+- Phase 5: 多实例监控（B7 multi-instance 后端就绪后）
+- Phase 6: 完整 TUI Agent Workbench（CLI 降级为 fallback，TUI 为主入口）
 
 ---
 
@@ -40,6 +43,64 @@
 - 文件读取失败时不崩溃，面板显示错误标记
 - 支持 80 列终端宽度
 - 所有数据源为本地文件，不发起网络请求
+
+### 2.3 Phase 2: Command Shell + Workflow Launcher
+
+#### 2.3.1 目标
+
+TUI 从只读 observer 升级为交互式 command shell：
+
+1. **CommandCatalog** — 定义可用命令列表（AutoRun / status / audit / dogfood / gates / docs check），仅展示 metadata，不执行
+2. **CommandPanel** — 展示命令列表、描述、risk level、是否需要 confirmation、是否 currently executable
+3. **NextActionPanel** — 从 PROJECT_STATUS 读取当前推荐下一步
+4. **CommandPreview** — 选中命令后展示将要执行的 shell command 或 prompt，Phase 2 只 preview
+5. **SafetyModel** — 五级安全分级: read-only / preview-only / requires-confirmation / disabled / future-executable
+
+#### 2.3.2 安全模型
+
+| 级别 | 含义 | Phase 2 行为 | 示例 |
+|------|------|-------------|------|
+| `read-only` | 纯数据展示 | 直接展示 | Overview, EvidenceStatus |
+| `preview-only` | 展示命令但不可执行 | 展示 shell command 文本 | status check, gate check |
+| `requires-confirmation` | 需显式确认 | 展示命令 + 注明 "requires confirmation" | dogfood run |
+| `disabled` | Phase 2 不可执行 | 灰显 + 注明 "not available in Phase 2" | git push, real API call |
+| `future-executable` | 后续 Phase 支持 | 灰显 + 注明 "planned Phase 3+" | agent run, deploy |
+
+**Phase 2 硬约束**:
+- 不执行任何 shell 命令（所有 `exec` 路径编译时不可达）
+- 不读取 `.env`
+- 不调用真实 API
+- 不启动真实 agent run
+- 不执行 destructive actions (git push / rm / force)
+- TUI 不是第二 runtime — 不绕过 Python main path
+
+#### 2.3.3 TUI ↔ CLI 关系
+
+```
+┌─────────────────────────────────────────┐
+│              TUI (默认入口)              │
+│  ┌──────────┐  ┌──────────┐            │
+│  │ Command  │  │ Next     │            │
+│  │ Panel    │  │ Action   │            │
+│  └──────────┘  └──────────┘            │
+│  ┌──────────────────────┐              │
+│  │   Command Preview    │              │
+│  │ (show, NOT execute)  │              │
+│  └──────────────────────┘              │
+│         │                              │
+│         │ "copy & paste to CLI"        │
+│         ▼                              │
+│  ┌──────────────────────┐              │
+│  │  CLI (底层 fallback)  │              │
+│  │  python main.py ...   │              │
+│  └──────────────────────┘              │
+└─────────────────────────────────────────┘
+```
+
+- TUI 是**未来默认入口** — 用户首先打开 TUI
+- CLI 是**底层能力和 fallback** — TUI 出问题时回退到 CLI
+- Phase 2 用户流程: TUI 浏览命令 → 复制命令 → 粘贴到 CLI 执行
+- Phase 2 不废弃 CLI，不删除任何 CLI 功能
 
 ---
 
@@ -182,6 +243,46 @@ interface CommitInfo {
 
 **解析策略**: 子进程执行 `git` 命令，解析 stdout。
 
+### 5.5 `commandCatalog.ts` (Phase 2 NEW)
+
+```typescript
+type SafetyLevel = "read-only" | "preview-only" | "requires-confirmation" | "disabled" | "future-executable";
+
+interface CommandDefinition {
+  id: string;                    // "autorun", "status", "audit", "dogfood", "gates"
+  name: string;                  // 用户可见名称
+  description: string;           // 简述
+  category: "diagnostics" | "execution" | "workflow" | "gates" | "docs";
+  safetyLevel: SafetyLevel;
+  requiresConfirmation: boolean;
+  executableInPhase2: boolean;
+  shellCommand?: string;         // 对应的 CLI 命令 (preview 用)
+  relatedSkills?: string[];      // 关联的 AutoRun skills
+  riskNote?: string;             // 风险说明
+}
+
+interface CommandCatalog {
+  version: string;
+  commands: CommandDefinition[];
+}
+```
+
+**数据源**: 硬编码 JSON 配置文件 `tui/src/data/commands.json`，不在代码中动态生成。
+Phase 2 不执行任何命令，只展示 metadata + shell command preview。
+
+**Phase 2 命令清单**:
+
+| ID | Name | Category | Safety | Phase 2 行为 |
+|----|------|----------|--------|-------------|
+| `autorun` | AutoRun Workflow | workflow | `requires-confirmation` | preview-only |
+| `status` | Project Status | diagnostics | `preview-only` | preview-only |
+| `audit` | Full System Audit | diagnostics | `requires-confirmation` | preview-only |
+| `dogfood` | Dogfood Run | execution | `requires-confirmation` | preview-only |
+| `gates` | Code Gates | gates | `preview-only` | preview-only |
+| `docs-check` | Docs Consistency | docs | `preview-only` | preview-only |
+| `agent-run` | Agent Run | execution | `disabled` | disabled (planned Phase 4+) |
+| `deploy` | Deploy | execution | `disabled` | disabled (future Phase) |
+
 ---
 
 ## 6. Component Design
@@ -230,6 +331,114 @@ interface CommitInfo {
 - `q` / `Ctrl+C`: 退出
 - Tab 键: 切换面板焦点（高亮边框）— 可选，Phase 1 不做
 
+### 6.4 CommandPanel (Phase 2 NEW)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Commands                                                  │
+│                                                            │
+│  ▶ autorun        AutoRun Workflow     [requires-confirm]  │
+│    status         Project Status       [preview-only]      │
+│    audit          Full System Audit    [requires-confirm]  │
+│    dogfood        Dogfood Run          [requires-confirm]  │
+│    gates          Code Gates           [preview-only]      │
+│    docs-check     Docs Consistency     [preview-only]      │
+│    agent-run      Agent Run            [disabled - Ph 4+]  │
+│    deploy         Deploy               [disabled - future] │
+│                                                            │
+│  ↑↓ navigate  Enter preview  q quit                       │
+└────────────────────────────────────────────────────────────┘
+```
+
+- 展示所有可用命令，按 category 分组
+- 当前选中行高亮（`▶` 前缀）
+- safety level 用颜色标记: preview-only=cyan, requires-confirmation=yellow, disabled=dim
+- `disabled` 命令灰显，不可选中
+- `↑` / `↓` 导航，`Enter` 进入 CommandPreview
+
+### 6.5 NextActionPanel (Phase 2 NEW)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Next Action                                               │
+│                                                            │
+│  📋 B8-lite Phase 2: TUI command shell + AutoRun launcher  │
+│                                                            │
+│  Why: TUI 从只读 observer 升级为交互式工作台入口            │
+│                                                            │
+│  Source: PROJECT_STATUS.md §推荐下一步                      │
+└────────────────────────────────────────────────────────────┘
+```
+
+- 展示 PROJECT_STATUS 中当前推荐下一步
+- 只读，从 `parseProjectStatus()` 的 `recommendedNext` 字段获取
+- 作为用户决策参考，不是自动触发器
+
+### 6.6 CommandPreview (Phase 2 NEW)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Command Preview — autorun                                 │
+│                                                            │
+│  Safety:       requires-confirmation                       │
+│  Phase 2:      preview-only (copy & paste to CLI)          │
+│  Risk:         启动完整 AutoRun loop，可能执行 git push     │
+│                                                            │
+│  Shell command:                                            │
+│  cd /path/to/repo && python main.py auto-run               │
+│                                                            │
+│  ────────────────────────────────────────────────────────  │
+│  ⚠  Phase 2 不执行此命令。请复制到终端手动运行。           │
+│                                                            │
+│  Esc back   q quit                                        │
+└────────────────────────────────────────────────────────────┘
+```
+
+- 展示选中命令的完整 metadata
+- 展示等价 shell command
+- 明确标记 "Phase 2 不执行"
+- `Esc` 返回 CommandPanel
+
+### 6.7 Phase 2 整体布局
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  First Agent Workbench — B8                      main        │
+│                                                              │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐│
+│  │      Overview           │  │     Evidence Status        ││
+│  └─────────────────────────┘  └────────────────────────────┘│
+│                                                              │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐│
+│  │      Commands           │  │     Next Action            ││
+│  └─────────────────────────┘  └────────────────────────────┘│
+│                                                              │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │                    Workflow                              ││
+│  └──────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐│
+│  │      Gate               │  │   Evidence Preview         ││
+│  └─────────────────────────┘  └────────────────────────────┘│
+│                                                              │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │   Command Preview (conditional, overlay on Enter)       ││
+│  └──────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────┘
+```
+
+CommandPreview 作为 overlay 显示在底部，按 `Enter` 时出现，按 `Esc` 消失。
+
+### 6.8 交互 (Phase 2)
+
+| 按键 | 行为 |
+|------|------|
+| `q` / `Ctrl+C` | 退出 |
+| `↑` / `↓` | 命令列表导航 |
+| `Enter` | 展示选中命令的 CommandPreview |
+| `Esc` | 关闭 CommandPreview 返回 CommandPanel |
+| `Tab` | 切换面板焦点 |
+
 ---
 
 ## 7. TDD Plan
@@ -252,6 +461,28 @@ interface CommitInfo {
 4. `gitInfo.test.ts` RED → GREEN
 5. 组件 smoke tests（Dashboard renders without crash）
 
+### 7.3 Phase 2 Test Layer
+
+| 测试文件 | 覆盖 | 测试数量 (预估) |
+|---------|------|----------------|
+| `commandCatalog.test.ts` | JSON 加载, command 解析, safety level 验证, 缺失文件容错 | 7 |
+| `commandPanel.test.ts` | 命令列表渲染, 分组, 高亮行, disabled 灰显 | 5 |
+| `commandPreview.test.ts` | preview 内容渲染, shell command 展示, safety level 颜色, Esc 行为 | 5 |
+| `nextActionPanel.test.ts` | 推荐下一步渲染, 空值容错 | 3 |
+| `safetyModel.test.ts` | 五级分类, 映射到组件行为, disabled 不可选中 | 4 |
+| **Phase 2 Subtotal** | | **~24** |
+| **Total (Phase 1 + 2)** | | **~49** |
+
+### 7.4 Phase 2 RED → GREEN 顺序
+
+1. `commandCatalog.test.ts` RED → GREEN
+2. `commandPanel.test.ts` RED → GREEN
+3. `commandPreview.test.ts` RED → GREEN
+4. `nextActionPanel.test.ts` RED → GREEN
+5. `safetyModel.test.ts` RED → GREEN
+6. Phase 1 regression（25 tests must still PASS）
+7. Dashboard Phase 2 布局 smoke test
+
 ---
 
 ## 8. Gates
@@ -268,6 +499,8 @@ interface CommitInfo {
 
 ## 9. Non-Goals (明确排除)
 
+### 9.1 Phase 1 Non-Goals
+
 - **不连接 runtime**: 不读取 agent_log.jsonl 流，不连接 dispatcher
 - **不修改 Python 代码**: 不对 agent/ 做任何改动
 - **不读 .env**: 不触碰 secret
@@ -279,18 +512,35 @@ interface CommitInfo {
 - **不做交互式操作**: 不触发 dogfood、不切换 branch
 - **不处理实时更新**: Phase 1 一次性加载，不 watch 文件变化
 
+### 9.2 Phase 2 Additional Non-Goals
+
+- **不执行任何 shell 命令**: 所有 `exec` 路径编译时不可达
+- **不读取 .env**: 同 Phase 1
+- **不调用真实 API**: 不发起网络请求
+- **不启动真实 agent run**: 不调用 `python main.py`
+- **不执行 destructive actions**: git push / rm / force 等
+- **不绕过 Python main path**: TUI 不是第二 runtime
+- **不修改 Python 代码**: 同 Phase 1
+- **不处理 B7 multi-instance**: 同 Phase 1
+- **不处理实时 runtime evidence 流**: Phase 3+
+- **不做安全命令执行**: Phase 4+（confirmation gate + dry-run）
+- **不废弃 CLI**: CLI 仍然可用，只是 TUI 成为推荐入口
+
 ---
 
-## 10. Future AutoRun Integration (Phase 2+ 预留)
+## 10. Future AutoRun Integration (Phase 2 为入口)
 
-B8-lite 完成后，后续 `/auto-run` 可以在启动时自动唤起 TUI 展示当前状态：
+Phase 2 TUI 已是 command shell，展示 AutoRun workflow 等命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
 
 ```bash
-# 未来 /auto-run step 0
-(cd tui && npm start) &  # 后台启动 TUI
+# 当前 Phase 2 用户流程
+# TUI 浏览命令 → 复制 shell command → 粘贴到 CLI 执行
+
+# 未来 Phase 4+ 流程
+# TUI 选中命令 → 确认 → 直接执行
 ```
 
-当前 Phase 1 不做此集成。
+当前 Phase 2 不做此集成（exec 路径编译时不可达）。
 
 ---
 
@@ -313,6 +563,8 @@ TUI 面板中暂不渲染多实例信息。
 
 ## 12. Implementation Plan
 
+### 12.1 Phase 1 (COMPLETED — `eba77ad`)
+
 | Phase | 内容 | 预估文件数 | 预估行数 |
 |-------|------|-----------|---------|
 | 0 | SDD + design review | 1 (本文档) | ~250 |
@@ -323,10 +575,24 @@ TUI 面板中暂不渲染多实例信息。
 | 5 | Gates + smoke test | — | — |
 | 6 | Docs update + commit/push | 3 docs | ~30 diffs |
 
-**总计**: ~17 个文件, ~800 行 TypeScript (含测试), ~200 行配置/docs diff
+**Phase 1 总计**: ~17 个文件, ~800 行 TypeScript (含测试), ~200 行配置/docs diff
+
+### 12.2 Phase 2 (本轮)
+
+| Phase | 内容 | 预估文件数 | 预估行数 |
+|-------|------|-----------|---------|
+| 0 | SDD update (Phase 2 sections) | 1 | ~150 |
+| 1 | commands.json + commandCatalog.ts | 2 | ~80 |
+| 2 | TDD RED: commandCatalog + safety model + component tests | 5 test files | ~200 |
+| 3 | GREEN: commandCatalog + CommandPanel + NextActionPanel + CommandPreview | 4 src files | ~350 |
+| 4 | Dashboard Phase 2 布局重构 + safety model 集成 | 2 src files | ~100 |
+| 5 | Gates + smoke test | — | — |
+| 6 | Docs update + commit/push | 3 docs | ~30 diffs |
+
+**Phase 2 新增**: ~8 个文件, ~730 行 TypeScript (含测试), ~180 行 docs diff
+**Phase 1 + 2 总计**: ~25 个文件, ~1530 行 TypeScript, ~380 行配置/docs diff
 
 ---
-
 ## 13. Risk Assessment
 
 | 风险 | 概率 | 影响 | 缓解 |
@@ -336,3 +602,6 @@ TUI 面板中暂不渲染多实例信息。
 | Git 子进程跨平台差异 | 低 | 低 | 仅 macOS 环境，`git status --short` 格式稳定 |
 | 终端宽度 < 80 列 | 低 | 低 | 不做响应式，文档注明最小宽度 |
 | 依赖安装慢 | 低 | 低 | 仅 ink + react + tsx + vitest，依赖量小 |
+| Phase 2: Ink `useInput` 多键绑定冲突 | 中 | 中 | 分层 focus 管理；CommandPreview overlay 独占输入 |
+| Phase 2: 命令 JSON schema 演化 | 低 | 低 | 硬编码 schema 版本号；不向后兼容时改 version |
+| Phase 2: Phase 1 回归破坏 | 低 | 高 | Phase 1 25 tests 作为回归套件；Dashboard 布局仅扩展不重写 |

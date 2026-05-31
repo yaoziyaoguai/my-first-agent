@@ -96,7 +96,7 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
 
     allowed_tools = frozenset(descriptor.allowed_tools)
 
-    # 更新跨 turn active skill 状态（供后续 refresh_runtime_system_prompt 使用）
+    # Phase 4 (Plan 3): 通过 lifecycle 更新跨 turn active skill 状态
     import agent.core as _core
 
     _core._active_skill = {
@@ -104,6 +104,14 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
         "body": body_str,
         "allowed_tools": allowed_tools,
     }
+    from agent.skill_system.lifecycle import get_default_lifecycle
+    _lc = get_default_lifecycle()
+    _lc.activate(
+        skill_id=skill_id,
+        body=body_str,
+        allowed_tools=tuple(allowed_tools),
+        activated_by="model_selection",
+    )
     # model-owned selection flag — turn-end hook 检查此 flag 跳过 keyword fallback
     _core._skill_selected_by_model = True
 

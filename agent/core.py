@@ -111,6 +111,7 @@ from agent.runtime_decision_frame import (
 )
 from agent.runtime_event_safety import safe_emit_runtime_event as _safe_emit_runtime_event
 from agent.runtime_loop_fields import build_runtime_loop_fields
+from agent.skill_system.lifecycle import get_default_lifecycle as _get_lifecycle
 from agent.state import create_agent_state, task_status_requires_plan
 from agent.subagent_inline import execute_subagent_delegation as _execute_subagent_delegation
 from agent.tool_registry import get_model_visible_tools
@@ -253,8 +254,17 @@ class TurnState:
     print_assistant_newline: bool = False
 
 
-# Loop 2.2: 跨 turn 追踪当前激活的 Skill（通过 dispatcher action_log 更新）。
 _active_skill: dict[str, str] = {}
+"""向后兼容——写入 lifecycle 后同步到此 dict。新增代码应使用 _get_lifecycle()。"""
+
+
+def _active_skill_section() -> str:
+    """从 lifecycle 获取当前 active_skill body，用于 prompt 注入。"""
+    active = _get_lifecycle().get_active()
+    if active is not None:
+        return active.body
+    return ""
+
 
 # REAL-EVIDENCE-002: 模型自主选择 Skill 标志。
 # - True: 模型在本 turn 通过 tool_use("SKILL_SELECT", ...) 选择了 skill，
@@ -271,8 +281,11 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
     body_load_decision、selected_skill_id 等），而 loaded_body_preview 和
     allowed_tools_after_selection 仅存在于 RuntimeActionResult.payload 中，
     不会进入 event。因此需要从 SkillRegistry 重新加载 body 和 allowed_tools。
+
+    Phase 4 (Plan 3): 使用 ActiveSkillLifecycle 管理状态，同时更新向后兼容 dict。
     """
     global _active_skill
+    lifecycle = _get_lifecycle()
     for event in reversed(getattr(dispatcher, "action_log", [])):
         if getattr(event, "action_type", None) is None:
             continue
@@ -282,8 +295,6 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
                 skill_id = str(evidence.get("selected_skill_id") or "")
                 if not skill_id:
                     continue
-                # 从 SkillRegistry 加载 body 和 allowed_tools（这些不在
-                # evidence 中，只在 RuntimeActionResult.payload 中）
                 body = ""
                 allowed_tools: frozenset[str] = frozenset()
                 try:
@@ -302,6 +313,14 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
                     body = ""
                     allowed_tools = frozenset()
                 if skill_id and body:
+                    # Phase 4: 通过 lifecycle 管理状态
+                    lifecycle.activate(
+                        skill_id=skill_id,
+                        body=body,
+                        allowed_tools=tuple(allowed_tools),
+                        activated_by="model_selection",
+                    )
+                    # 向后兼容 dict 同步更新
                     _active_skill = {
                         "skill_id": skill_id,
                         "body": body,
@@ -381,7 +400,7 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
         system_prompt = build_system_prompt(
             memory_section=memory_section,
             skill_registry=skill_registry,
-            active_skill_section=_active_skill.get("body", ""),
+            active_skill_section=_active_skill_section(),
         )
     else:
         memory_snapshot = _memory_runtime.snapshot_for_prompt()
@@ -389,7 +408,7 @@ def refresh_runtime_system_prompt(dispatcher=None, *, skill_registry=None):
         system_prompt = build_system_prompt(
             memory_snapshot=memory_snapshot,
             skill_registry=skill_registry,
-            active_skill_section=_active_skill.get("body", ""),
+            active_skill_section=_active_skill_section(),
         )
 
     state.set_system_prompt(system_prompt)
@@ -1618,9 +1637,7 @@ def _dispatch_or_fallback_delegation(
     _tool_mediator = None
     if dispatcher is not None:
         from agent.tool_runtime_mediator import ToolRuntimeMediator as _Tmr
-        _skill_at = None
-        if _active_skill:
-            _skill_at = _active_skill.get("allowed_tools")
+        _skill_at = _get_lifecycle().get_allowed_tools() or None
         _tool_mediator = _Tmr(
             dispatcher,
             state=state,

@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "script": "real_evidence_002_plan3_dogfood.py",
+    "phase": "Phase 6",
+    "plan": "Plan 3",
+    "target": "002 Skill Selection"
+  },
+  "results": [
+    {
+      "case": "D01",
+      "verdict": "CONCERN",
+      "detail": "No selection.entered evidence, but skill.select found — selection phase may not produce entered evidence"
+    },
+    {
+      "case": "D02",
+      "verdict": "CONCERN",
+      "detail": "No candidates.built evidence. Available: ['memory.recall', 'tool.gate', 'tool.invoke', 'tool.result', 'memory.turn_end_proposal', 'tool.request', 'checkpoint.safe_summary', 'memory.consolidate', 'skill.select', 'subagent.delegate_l0']"
+    },
+    {
+      "case": "D03",
+      "verdict": "PASS",
+      "detail": "Model selected skill: demo-note-maker, activated_by=?"
+    },
+    {
+      "case": "D04",
+      "verdict": "PASS",
+      "detail": "Lifecycle active: skill_id=demo-note-maker, allowed_tools_count=2"
+    },
+    {
+      "case": "D05",
+      "verdict": "PASS",
+      "detail": "TOOL_GATE received skill_allowed_tools: count=2, tools=['demo.echo_task_summary', 'demo.write_demo_note']"
+    },
+    {
+      "case": "D06",
+      "verdict": "CONCERN",
+      "detail": "Model selected skill for math prompt: ? — unexpected"
+    },
+    {
+      "case": "D07",
+      "verdict": "PASS",
+      "detail": "Model-owned selection (keyword fallback not needed): selected=?"
+    },
+    {
+      "case": "D08",
+      "verdict": "PASS",
+      "detail": "Gate rejection evidence: reason=shell-like tool is out of scope, tool=?"
+    },
+    {
+      "case": "P3S9",
+      "verdict": "PASS",
+      "detail": "Lifecycle activate: is_active=True, skill_id=demo-note-maker"
+    },
+    {
+      "case": "P3S10",
+      "verdict": "PASS",
+      "detail": "Lifecycle deactivate: is_active=False, skill_id=None"
+    },
+    {
+      "case": "P3S11",
+      "verdict": "PASS",
+      "detail": "Tool gate invoked: total=3, allowed=2"
+    },
+    {
+      "case": "P3S12",
+      "verdict": "PASS",
+      "detail": "All gate events allowed (3 total) — model respected allowed_tools constraint"
+    }
+  ]
+}

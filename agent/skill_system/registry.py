@@ -36,8 +36,15 @@ class SkillRegistry:
             print(desc.name)
     """
 
-    def __init__(self, roots: list[Path] | None = None):
+    def __init__(self, roots: list[Path] | None = None, *, scope: str = "default"):
+        """构造 SkillRegistry。
+
+        scope 参数为 B7 扩展点预留——Phase 7 前默认为 "default"，
+        B7 将使用 scope 实现 per-instance / per-session skill registry 隔离。
+        Phase 4-7 不实现 scope 语义。
+        """
         self._roots: list[Path] = list(roots) if roots else []
+        self._scope: str = scope
         # _descriptors: name → SkillDescriptor（含 visible 和 hidden）
         self._descriptors: dict[str, SkillDescriptor] = {}
         # _manifests: name → SkillManifest（供 retriever 等需要新字段的组件使用）
@@ -45,6 +52,15 @@ class SkillRegistry:
         # _load_errors: 扫描过程中收集的 SkillLoadError（不会静默丢弃）
         self._load_errors: list[SkillLoadError] = []
         self._discover()
+
+    @property
+    def scope(self) -> str:
+        """B7 扩展点：返回 registry 的 scope 标识。
+
+        Phase 4-7 中始终为 "default"；B7 将使用 scope 隔离不同
+        instance/session 的 skill registry。
+        """
+        return self._scope
 
     # ---- public API ----
 

@@ -24,7 +24,6 @@ import pytest
 from agent.skill_system.errors import SkillLoadError
 from agent.skill_system.registry import SkillRegistry
 
-
 # ---- helpers ----
 
 def _write_skill_md(
@@ -371,9 +370,9 @@ def test_registry_without_roots_is_empty():
 def test_registry_module_does_not_import_legacy():
     """registry.py 不能 import agent.skills 或 agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
+    from pathlib import Path as _Path
 
-    registry_path = P(__file__).resolve().parents[1] / "agent" / "skill_system" / "registry.py"
+    registry_path = _Path(__file__).resolve().parents[1] / "agent" / "skill_system" / "registry.py"
     tree = ast.parse(registry_path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -383,3 +382,53 @@ def test_registry_module_does_not_import_legacy():
         elif isinstance(node, ast.ImportFrom) and node.module:
             assert not node.module.startswith("agent.skills")
             assert not node.module.startswith("agent.legacy_skills")
+
+
+# ==================================================================
+# Phase 7 B7 Extension Points — SkillRegistry.scope
+# ==================================================================
+
+
+class TestSkillRegistryB7Extension:
+    """Phase 7 B7 扩展点：SkillRegistry.scope 参数预留。
+
+    scope 参数在 Phase 7 前默认为 "default"，不影响现有行为。
+    B7 将使用 scope 实现 per-instance skill registry 隔离。
+    """
+
+    def test_scope_default(self):
+        """默认 scope 为 "default"。"""
+        registry = SkillRegistry()
+        assert registry.scope == "default"
+
+    def test_scope_custom(self):
+        """自定义 scope 可通过构造参数设置。"""
+        registry = SkillRegistry(roots=[], scope="instance-1")
+        assert registry.scope == "instance-1"
+
+    def test_scope_with_skills_still_works(self):
+        """scope 参数不影响 Phase 4-7 的 skill 加载行为。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_skill_md(root / "sample-skill", name="sample-skill")
+            registry = SkillRegistry(roots=[root], scope="custom-scope")
+            assert registry.scope == "custom-scope"
+            visible = registry.list_visible()
+            assert len(visible) == 1
+            assert visible[0].name == "sample-skill"
+
+    def test_scope_different_instances_independent(self):
+        """不同 scope 的 registry 在 Phase 7 前仍共享相同的文件系统视图。
+
+        B7 实现 scope 隔离后此测试需要更新。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_skill_md(root / "demo", name="demo-skill")
+            r1 = SkillRegistry(roots=[root], scope="scope-a")
+            r2 = SkillRegistry(roots=[root], scope="scope-b")
+            # Phase 4-7: 不同 scope 的 registry 扫描同一文件系统，
+            # 结果相同（scope 尚未隔离）
+            assert len(r1.list_visible()) == len(r2.list_visible()) == 1
+            assert r1.get_descriptor("demo-skill") is not None
+            assert r2.get_descriptor("demo-skill") is not None

@@ -10,24 +10,24 @@
       "detail": "Skill activated: demo-note-maker, allowed_tools={'demo.write_demo_note', 'demo.echo_task_summary'}"
     },
     {
-      "case": "H1-1-GATE",
-      "verdict": "CONCERN",
-      "detail": "Tool gates present but not skill_allowed_tools→rejected. Gates: [('_safe_noop', 'allowed')]"
-    },
-    {
-      "case": "H1-2-REJECT",
-      "verdict": "PASS",
-      "detail": "Tool 'read_file' rejected via skill_allowed_tools→rejected. invokes_for_disallowed=0"
-    },
-    {
-      "case": "H1-3-REJECT",
+      "case": "H1-1-REJECT",
       "verdict": "PASS",
       "detail": "Tool 'read_file_lines' rejected via skill_allowed_tools→rejected. invokes_for_disallowed=0"
     },
     {
+      "case": "H1-2-GATE",
+      "verdict": "CONCERN",
+      "detail": "Tool gates present but not skill_allowed_tools→rejected. Gates: [('_safe_noop', 'allowed')]"
+    },
+    {
+      "case": "H1-3-REJECT",
+      "verdict": "PASS",
+      "detail": "Tool 'read_file' rejected via skill_allowed_tools→rejected. invokes_for_disallowed=0"
+    },
+    {
       "case": "R27",
       "verdict": "PASS",
-      "detail": "2/3 disallowed tools rejected via skill_allowed_tools→rejected. Details: [{'tool': 'request_user_input', 'verdict': 'OTHER_GATE'}, {'tool': 'read_file', 'verdict': 'REJECTED', 'blocked_tool': 'read_file', 'invokes': 0}, {'tool': 'read_file_lines', 'verdict': 'REJECTED', 'blocked_tool': 'read_file_lines', 'invokes': 0}]"
+      "detail": "2/3 disallowed tools rejected via skill_allowed_tools→rejected. Details: [{'tool': 'read_file_lines', 'verdict': 'REJECTED', 'blocked_tool': 'read_file_lines', 'invokes': 0}, {'tool': 'request_user_input', 'verdict': 'OTHER_GATE'}, {'tool': 'read_file', 'verdict': 'REJECTED', 'blocked_tool': 'read_file', 'invokes': 0}]"
     },
     {
       "case": "R28",
@@ -37,17 +37,17 @@
     {
       "case": "R29",
       "verdict": "PASS",
-      "detail": "Diverse tool coverage: 3 tools tested, 2 rejected via skill_allowed_tools. Tested: ['request_user_input', 'read_file', 'read_file_lines']"
+      "detail": "Diverse tool coverage: 3 tools tested, 2 rejected via skill_allowed_tools. Tested: ['read_file_lines', 'request_user_input', 'read_file']"
     },
     {
       "case": "H2-direct",
-      "verdict": "CONCERN",
-      "detail": "Style 'direct' → gate present but not via skill_allowed_tools. Gates: ['_safe_noop']"
+      "verdict": "PASS",
+      "detail": "Style 'direct' → TOOL_GATE rejected 'read_file' via skill_allowed_tools→rejected"
     },
     {
       "case": "H2-indirect",
-      "verdict": "CONCERN",
-      "detail": "Style 'indirect' → gate present but not via skill_allowed_tools. Gates: ['_safe_noop']"
+      "verdict": "PASS",
+      "detail": "Style 'indirect' → TOOL_GATE rejected 'read_file' via skill_allowed_tools→rejected"
     },
     {
       "case": "H2-privilege_escalation",
@@ -56,13 +56,13 @@
     },
     {
       "case": "R30",
-      "verdict": "CONCERN",
-      "detail": "Direct style: OTHER_GATE"
+      "verdict": "PASS",
+      "detail": "Direct tool-call style → skill_allowed_tools→rejected for 'read_file'"
     },
     {
       "case": "R31",
-      "verdict": "CONCERN",
-      "detail": "Indirect style: OTHER_GATE"
+      "verdict": "PASS",
+      "detail": "Indirect bypass style → skill_allowed_tools→rejected for 'read_file'"
     },
     {
       "case": "R32",
@@ -81,8 +81,8 @@
     },
     {
       "case": "R35",
-      "verdict": "PASS",
-      "detail": "Skill state unchanged: pre=demo-note-maker, post=demo-note-maker. No side effect from disallowed tool attempt."
+      "verdict": "CONCERN",
+      "detail": "Skill state unchanged: pre=demo-note-maker, post=blog-writing. No side effect from disallowed tool attempt."
     },
     {
       "case": "R36",
@@ -91,9 +91,9 @@
     }
   ],
   "summary": {
-    "PASS": 10,
+    "PASS": 13,
     "FAIL": 0,
-    "CONCERN": 7,
+    "CONCERN": 4,
     "SKIP": 0
   }
 }

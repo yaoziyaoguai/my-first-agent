@@ -123,6 +123,7 @@ class ToolGateHandler:
                     "active_skill_id": active_skill_id,
                     "policy_path": "skill_allowed_tools→rejected",
                     "rejection_reason": "tool not in active skill allowed_tools",
+                    "execution_suppressed": True,
                 },
                 error_safe_preview="tool not in active skill allowed_tools",
             )

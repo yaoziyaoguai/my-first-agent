@@ -392,3 +392,203 @@ class TestActiveSkillIdInGateEvidence:
         assert ev["decision"] == "rejected"
         assert ev["policy_path"] == "skill_allowed_tools→rejected"
         assert ev["rejection_reason"] == "tool not in active skill allowed_tools"
+
+
+# ── 003: no-TOOL_INVOKE / no-execute_single_tool ────────────────────────
+
+
+class TestRejectedGateNoToolExecution:
+    """003: rejected TOOL_GATE → no TOOL_INVOKE, no execute_single_tool,
+    execution_suppressed evidence, FORCE_STOP returned."""
+
+    def test_read_file_rejected_no_tool_invoke_dispatch(self):
+        """read_file 被 TOOL_GATE rejected 后 spy 不应出现 tool.invoke dispatch。"""
+        lifecycle = ActiveSkillLifecycle()
+        lifecycle.activate(
+            "demo", body="test",
+            allowed_tools=("demo.write_demo_note",),
+        )
+        spy = _SpyDispatcher(gate_disposition="rejected")
+        mediator = ToolRuntimeMediator(
+            spy, state=_FakeState(), turn_state=_FakeTurnState(),
+            turn_context={}, messages=[],
+            skill_allowed_tools=lifecycle.get_allowed_tools(),
+        )
+        from unittest.mock import MagicMock
+        block = MagicMock()
+        block.name = "read_file"
+        block.input = {"file_path": "/tmp/test.txt"}
+        block.id = "test-read-file-blocked"
+
+        from agent.tool_executor import FORCE_STOP
+        result = mediator.mediate(block)
+        assert result == FORCE_STOP, (
+            f"rejected 应返回 FORCE_STOP，got {result}"
+        )
+
+        gate_calls = [c for c in spy.calls if c["action_type"] == "tool.gate"]
+        invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
+        result_calls = [c for c in spy.calls if c["action_type"] == "tool.result"]
+        assert len(gate_calls) >= 1, "应有 TOOL_GATE dispatch"
+        assert len(invoke_calls) == 0, (
+            f"rejected gate 后不应有 TOOL_INVOKE dispatch，got {invoke_calls}"
+        )
+        assert len(result_calls) >= 1, "应有 TOOL_RESULT dispatch (FORCE_STOP)"
+
+    def test_read_file_lines_rejected_no_tool_invoke_dispatch(self):
+        """read_file_lines 被 TOOL_GATE rejected 后 spy 不应出现 tool.invoke dispatch。"""
+        lifecycle = ActiveSkillLifecycle()
+        lifecycle.activate(
+            "demo", body="test",
+            allowed_tools=("demo.write_demo_note",),
+        )
+        spy = _SpyDispatcher(gate_disposition="rejected")
+        mediator = ToolRuntimeMediator(
+            spy, state=_FakeState(), turn_state=_FakeTurnState(),
+            turn_context={}, messages=[],
+            skill_allowed_tools=lifecycle.get_allowed_tools(),
+        )
+        from unittest.mock import MagicMock
+        block = MagicMock()
+        block.name = "read_file_lines"
+        block.input = {"file_path": "/tmp/test.txt", "lines": [1, 5]}
+        block.id = "test-rfl-blocked"
+
+        from agent.tool_executor import FORCE_STOP
+        result = mediator.mediate(block)
+        assert result == FORCE_STOP
+
+        invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
+        assert len(invoke_calls) == 0, (
+            "read_file_lines rejected 后不应有 TOOL_INVOKE dispatch"
+        )
+
+    def test_request_user_input_rejected_no_tool_invoke_dispatch(self):
+        """request_user_input 被 TOOL_GATE rejected 后 spy 不应出现 tool.invoke dispatch。"""
+        lifecycle = ActiveSkillLifecycle()
+        lifecycle.activate(
+            "demo", body="test",
+            allowed_tools=("demo.write_demo_note",),
+        )
+        spy = _SpyDispatcher(gate_disposition="rejected")
+        mediator = ToolRuntimeMediator(
+            spy, state=_FakeState(), turn_state=_FakeTurnState(),
+            turn_context={}, messages=[],
+            skill_allowed_tools=lifecycle.get_allowed_tools(),
+        )
+        from unittest.mock import MagicMock
+        block = MagicMock()
+        block.name = "request_user_input"
+        block.input = {"prompt": "email?"}
+        block.id = "test-rui-blocked"
+
+        from agent.tool_executor import FORCE_STOP
+        result = mediator.mediate(block)
+        assert result == FORCE_STOP
+
+        invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
+        assert len(invoke_calls) == 0
+
+    def test_allowed_tool_still_has_tool_invoke(self):
+        """对比: allowed tool 仍正常产生 TOOL_INVOKE dispatch。"""
+        lifecycle = ActiveSkillLifecycle()
+        lifecycle.activate(
+            "demo", body="test",
+            allowed_tools=("_safe_noop",),
+        )
+        spy = _SpyDispatcher(gate_disposition="allowed")
+        mediator = ToolRuntimeMediator(
+            spy, state=_FakeState(), turn_state=_FakeTurnState(),
+            turn_context={}, messages=[],
+            skill_allowed_tools=lifecycle.get_allowed_tools(),
+        )
+        from unittest.mock import MagicMock
+        block = MagicMock()
+        block.name = "_safe_noop"
+        block.input = {}
+        block.id = "test-safe-noop-allowed"
+
+        result = mediator.mediate(block)
+        from agent.tool_executor import FORCE_STOP
+        assert result != FORCE_STOP, "allowed tool 不应返回 FORCE_STOP"
+
+        invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
+        assert len(invoke_calls) >= 1, (
+            f"allowed tool 应有 TOOL_INVOKE dispatch，got {invoke_calls}"
+        )
+
+    def test_execution_suppressed_in_rejected_gate_evidence(self):
+        """TOOL_GATE rejected evidence 包含 execution_suppressed: True。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "read_file",
+                "tool_input": {},
+                "skill_allowed_tools": ["demo.write_demo_note"],
+                "active_skill_id": "demo-note-maker",
+            },
+        ))
+
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        assert ev.get("execution_suppressed") is True, (
+            "rejected evidence 应包含 execution_suppressed: True，"
+            f"got {ev.get('execution_suppressed')}"
+        )
+        assert ev.get("decision") == "rejected"
+
+    def test_allowed_no_execution_suppressed_flag(self):
+        """对比: allowed tool evidence 不含 execution_suppressed（不设或 False）。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "_safe_noop",
+                "tool_input": {},
+                "skill_allowed_tools": ["_safe_noop"],
+                "active_skill_id": "demo",
+            },
+        ))
+
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        assert ev.get("execution_suppressed") is not True, (
+            f"allowed evidence 不应有 execution_suppressed: True，got {ev}"
+        )

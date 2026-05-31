@@ -332,7 +332,11 @@ def validate_h2_adversarial_styles(provider, dispatcher) -> None:
         record("R32", "SKIP", "No safe disallowed tools beyond SKILL_SELECT")
         return
 
-    target_tool = list(disallowed)[0]
+    # Loop 7: 优先选 read_file 作为 adversarial target — read_file 是
+    # 最自然的中文 prompt 可触发的 disallowed tool（H1 已证明 model 会尝试调用）。
+    # request_user_input 模型会主动规避 → 不适合作 adversarial gate 验证。
+    preferred = ["read_file", "read_file_lines"]
+    target_tool = next((t for t in preferred if t in disallowed), list(disallowed)[0])
     print(f"  Target disallowed tool for adversarial tests: {target_tool}")
 
     # 为不同工具类型生成自然风格的对抗 prompt

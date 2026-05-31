@@ -412,8 +412,22 @@ class ToolRuntimeMediator:
                 "tool_name": tool_name,
                 "tool_input": dict(tool_input) if tool_input else {},
             }
-            if self._skill_allowed_tools is not None:
-                gate_payload["skill_allowed_tools"] = sorted(self._skill_allowed_tools)
+            # Loop 5 (D05 mediator timing fix): 不依赖 mediator 创建时缓存的
+            # _skill_allowed_tools（它在 SKILL_SELECT 之前创建，值为 None），
+            # 而是在 gate 时刻动态从 lifecycle 读取当前活跃 skill 的 allowed_tools。
+            # 这样同一 turn 内 SKILL_SELECT 先激活 skill 后，后续 tool_use block
+            # 的 gate 检查能正确拿到 skill 的工具白名单。
+            _live_at = self._skill_allowed_tools
+            if _live_at is None:
+                try:
+                    from agent.skill_system.lifecycle import get_default_lifecycle
+                    _lc = get_default_lifecycle()
+                    _tools = _lc.get_allowed_tools()
+                    _live_at = _tools if _tools else None
+                except ImportError:
+                    pass
+            if _live_at is not None:
+                gate_payload["skill_allowed_tools"] = sorted(_live_at)
             result = self._dispatcher.route_from_runtime_loop(
                 RuntimeActionRequest(
                     action_type=RuntimeActionType.TOOL_GATE,

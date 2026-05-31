@@ -93,6 +93,9 @@ class ToolGateHandler:
         # lookup 之前检查，非允许工具直接 rejected，不进入 execute_single_tool。
         # 安全策略检查，不走 invoke_registered_target（无对应 catalog entry），
         # evidence 由 TOOL_GATE dispatch 自身提供。
+        # Loop 5: evidence_extra 中显式包含 policy_path/rejection_reason，
+        # 与 allowed path 的 **result_payload 展开对齐，dogfood 脚本可统一从
+        # evidence 读取 gate disposition 字段。
         if skill_allowed_tools and tool_name not in skill_allowed_tools:
             return context.rejected(
                 handler_name=type(self).__name__,
@@ -116,6 +119,8 @@ class ToolGateHandler:
                     "dogfood_overlay_found": False,
                     "decision": "rejected",
                     "skill_allowed_tools": list(skill_allowed_tools),
+                    "policy_path": "skill_allowed_tools→rejected",
+                    "rejection_reason": "tool not in active skill allowed_tools",
                 },
                 error_safe_preview="tool not in active skill allowed_tools",
             )

@@ -23,8 +23,8 @@
     },
     {
       "case": "D04",
-      "verdict": "CONCERN",
-      "detail": "skill.select present but no skill selected"
+      "verdict": "PASS",
+      "detail": "Lifecycle active: skill_id=demo-note-maker, allowed_tools_count=2"
     },
     {
       "case": "D05",
@@ -59,7 +59,7 @@
     {
       "case": "P3S11",
       "verdict": "PASS",
-      "detail": "Tool gate invoked: total=2, allowed=1"
+      "detail": "Tool gate invoked: total=1, allowed=1"
     },
     {
       "case": "P3S12",

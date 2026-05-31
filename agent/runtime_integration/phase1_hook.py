@@ -31,6 +31,7 @@ from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.memory_retain import MemoryRetainHandler
 from agent.runtime_integration.schema import RuntimeActionType
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
+from agent.runtime_integration.skill_selection_probe import SkillSelectionProbeHandler
 from agent.runtime_integration.streaming_provider import (
     StreamingEventHandler,
     StreamingProviderCallHandler,
@@ -148,6 +149,18 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.SKILL_SELECT,
         SkillRuntimeActionHandler(registry=_skill_registry, loader=_skill_loader),
+    )
+    # SKILL_SELECTION_ENTERED / SKILL_CANDIDATES_BUILT：probe handler，
+    # 透传 request payload（candidate_count、candidate_names、user_input_length）
+    # 至 evidence，确保 dogfood/harness 能从 action_log 读取这些字段。
+    _probe_handler = SkillSelectionProbeHandler()
+    registry.register(
+        RuntimeActionType.SKILL_SELECTION_ENTERED,
+        _probe_handler,
+    )
+    registry.register(
+        RuntimeActionType.SKILL_CANDIDATES_BUILT,
+        _probe_handler,
     )
     # SUBAGENT_DELEGATE_L0：demo subagent registry 非空，handler 可定位已注册 subagent。
     # PF-05: 使用 agent/subagent_system/descriptors/ 而非 tests/fixtures/subagents。

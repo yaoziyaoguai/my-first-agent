@@ -10,10 +10,16 @@ Phase 2 实现（来自 002 SDD §5.1）：
 - 纯函数式评分，不调用网络/LLM
 - 所有输入已通过 SkillManifest 校验，不做二次校验
 - 返回不可变 SkillCandidate 列表
+
+中文匹配增强（Loop 3）：
+- 中文无空格分词，传统 split() 将整句视为一个 token
+- 使用字符级 bigram 重叠计算中文相似度（轻量，不依赖 jieba/BM25）
+- trigger/alias 匹配对中文做子串包含检测（"写个笔记" 包含 "笔记" 等部分匹配）
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from agent.skill_system.descriptor import SkillManifest
@@ -24,6 +30,50 @@ _TRIGGER_EXACT_WEIGHT = 3.0
 _TRIGGER_SUBSTRING_WEIGHT = 2.5
 _ALIAS_WEIGHT = 2.0
 _KEYWORD_WEIGHT = 1.0
+
+# 中文字符正则（Unicode CJK 统一表意文字区间）
+_CJK_RE = re.compile(r"[一-鿿㐀-䶿]")
+
+
+def _contains_chinese(text: str) -> bool:
+    """检测文本是否包含中文字符。"""
+    return bool(_CJK_RE.search(text))
+
+
+def _chinese_bigram_overlap(user_text: str, target_text: str) -> int:
+    """计算两个中文文本的字符 bigram 重叠数。
+
+    中文无空格分词，使用 bigram 作为轻量 tokenization：
+    "帮我写个笔记" → {"帮我", "我写", "写个", "个笔", "笔记"}
+    "写笔记" → {"写笔", "笔记"}
+
+    Returns:
+        overlap count (bigram 交集中的元素数)
+    """
+    def _bigrams(s: str) -> set[str]:
+        # 只从连续中文字符中提取 bigram
+        chars = _CJK_RE.findall(s)
+        return {chars[i] + chars[i + 1] for i in range(len(chars) - 1)}
+
+    user_bigrams = _bigrams(user_text)
+    target_bigrams = _bigrams(target_text)
+    return len(user_bigrams & target_bigrams)
+
+
+def _chinese_partial_match(user_lower: str, target_lower: str) -> bool:
+    """中文部分匹配：检测 user 是否包含 target 的任意连续中文子串。
+
+    中文 trigger "写笔记" 对 "帮我写个笔记" 做放宽匹配：
+    将 trigger 拆为最小2字子串，检查 user 是否包含其中任一。
+    "写笔记" → ["写笔", "笔记"] → user "帮我写个笔记" 包含 "笔记" ✓
+    """
+    chars = _CJK_RE.findall(target_lower)
+    for i in range(len(chars) - 1):
+        bigram = chars[i] + chars[i + 1]
+        if bigram in user_lower:
+            return True
+    # 单字 trigger 直接检查包含
+    return bool(len(chars) == 1 and chars[0] in user_lower)
 
 
 @dataclass(frozen=True)
@@ -125,6 +175,9 @@ class SkillCandidateRetriever:
 
         双向子串匹配：用户输入含 trigger 或 trigger 含用户输入均计为子串匹配。
         只取最高分的单个匹配。
+
+        中文增强：中文 trigger 使用 bigram 部分匹配（"写笔记" 的 bigram "笔记"
+        在 "帮我写个笔记" 中存在即命中子串匹配）。
         """
         best_score = 0.0
         best_term = ""
@@ -132,11 +185,17 @@ class SkillCandidateRetriever:
             t_lower = trigger.lower()
             if t_lower == user_lower:
                 return (_TRIGGER_EXACT_WEIGHT, [trigger])
-            if (
-                t_lower in user_lower or user_lower in t_lower
-            ) and best_score < _TRIGGER_SUBSTRING_WEIGHT:
+            if (t_lower in user_lower or user_lower in t_lower) \
+                    and best_score < _TRIGGER_SUBSTRING_WEIGHT:
                 best_score = _TRIGGER_SUBSTRING_WEIGHT
                 best_term = trigger
+            # 中文 bigram 部分匹配 —— "写个笔记" 不完全包含 "写笔记"，
+            # 但 "写个笔记" 包含 "笔记" bigram，仍应触发子串匹配
+            elif _contains_chinese(t_lower) and _contains_chinese(user_lower):
+                if _chinese_partial_match(user_lower, t_lower) \
+                        and best_score < _TRIGGER_SUBSTRING_WEIGHT:
+                    best_score = _TRIGGER_SUBSTRING_WEIGHT
+                    best_term = trigger
         if best_score > 0:
             return (best_score, [best_term])
         return (0.0, [])
@@ -163,12 +222,27 @@ class SkillCandidateRetriever:
         """Pass 3: name/description/tags 关键词匹配——权重 1.0。
 
         将 manifest 的 name、description、tags 分词后与用户输入词集取交集。
+
+        中文增强（Loop 3）：对中文文本使用 bigram 重叠度计算关键词相关性，
+        弥补空格分词对中文无效的问题。
+        - bigram 重叠 >= 3 → 视为强相关 → 权重 * 3
+        - bigram 重叠 >= 1 → 视为弱相关 → 权重 * 1
         """
         manifest_text = f"{manifest.name} {manifest.description} {' '.join(manifest.tags)}"
         manifest_words = set(manifest_text.lower().split())
         hits = user_words & manifest_words
         if hits:
             return (_KEYWORD_WEIGHT * len(hits), list(hits))
+
+        # 中文 bigram 匹配（作为英文关键词匹配的补充）
+        user_text = " ".join(user_words)
+        if _contains_chinese(user_text):
+            overlap = _chinese_bigram_overlap(user_text, manifest_text)
+            if overlap >= 3:
+                return (_KEYWORD_WEIGHT * 3, [f"中文 bigram 重叠({overlap})"])
+            elif overlap >= 1:
+                return (_KEYWORD_WEIGHT, [f"中文 bigram 重叠({overlap})"])
+
         return (0.0, [])
 
     # ---- negative penalty ----

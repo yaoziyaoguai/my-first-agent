@@ -14,17 +14,17 @@
     {
       "case": "D02",
       "verdict": "PASS",
-      "detail": "candidates.built evidence: candidates=0, top_k=?"
+      "detail": "candidates.built evidence: candidates=1, top_k=?"
     },
     {
       "case": "D03",
-      "verdict": "CONCERN",
-      "detail": "skill.select dispatched but no selected_skill_id: {'action_id': 'act:ef3985e31419460b83d6a73ea8dadca4', 'action_type': 'skill.select', 'dispatcher_route_id': 'route:4a64e694432449a4ba4be90fc30387b7', 'dispatcher_result_id': 'result:32646b552b6c463b871c67e1562ae100', 'dispatcher_result_issued': True, 'dispatcher_routed': True, 'target_handler_invoked': True, 'handler_name': 'SkillRuntimeActionHandler', 'target_module': 'SkillLoader', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'module_invoked': True, 'invocation_proof': mappingproxy({'call_id': 'call:c311f2961eb14a46bec2db24472d2a25', 'function_called': 'SkillLoader.no_suitable_skill', 'call_signature': 'no_suitable_skill(reason: str)', 'observed_at': '2026-05-31T05:45:58.708820+00:00', 'observation_method': 'module_spy'}), 'target_module_proof': mappingproxy({'proof_id': 'proof:1a0f0fac95b84a9ba8fa2fa9b6dcafac', 'observation_source': 'module_spy', 'observer_identity': 'RuntimeActionModuleObserver', 'observation_independent': True, 'linked_route_id': 'route:4a64e694432449a4ba4be90fc30387b7', 'linked_action_id': 'act:ef3985e31419460b83d6a73ea8dadca4', 'linked_action_type': 'skill.select', 'linked_handler_name': 'SkillRuntimeActionHandler', 'linked_target_module': 'SkillLoader', 'linked_call_id': 'call:c311f2961eb14a46bec2db24472d2a25', 'target_catalog_id': 'skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'linked_target_handle': 'target:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill', 'target_descriptor_id': 'descriptor:skill.select:agent.runtime_integration.skill_action.SkillRuntimeActionHandler:SkillLoader:no_suitable_skill:SkillLoader.no_suitable_skill', 'invocation_adapter_id': 'SkillLoader.no_suitable_skill', 'implementation_id': 'agent.skill_system.loader.SkillLoader.no_suitable_skill', 'callable_identity': 'function:agent.runtime_integration.evidence._skill_no_suitable_skill_adapter', 'target_catalog_allowed': True, 'target_identity_valid': True, 'descriptor_invocation_approved': True, 'linked_dispatcher_result_id': 'result:32646b552b6c463b871c67e1562ae100'}), 'result_returned_to_parent_runtime': True, 'parent_adjudicated': None, 'body_load_decision': False, 'no_suitable_skill': True, 'audit_only_skill_exclusion_evidence': mappingproxy({'hidden_or_disabled_exclusion_verified': True, 'excluded_count': 0, 'redacted_exclusion_reason_categories': ()}), 'evidence_level': 'real_core_loop_runtime_e2e', 'runtime_action_source': 'core_loop', 'dispatcher_origin': 'runtime_loop', 'runtime_loop_invoked': True, 'core_loop_invoked': True, 'core_entrypoint': 'core.chat', 'runtime_hook_name': 'loop.turn_end', 'provider_kind': 'real', 'provider_external_call': True, 'external_side_effects': False}"
+      "verdict": "PASS",
+      "detail": "Model selected skill: demo-note-maker, activated_by=?"
     },
     {
       "case": "D04",
-      "verdict": "PASS",
-      "detail": "Lifecycle active: skill_id=demo-note-maker, allowed_tools_count=2"
+      "verdict": "CONCERN",
+      "detail": "skill.select present but no skill selected"
     },
     {
       "case": "D05",
@@ -64,7 +64,7 @@
     {
       "case": "P3S12",
       "verdict": "PASS",
-      "detail": "All gate events allowed (1 total) — model respected allowed_tools constraint"
+      "detail": "All gate events allowed (2 total) — model respected allowed_tools constraint"
     }
   ]
 }

@@ -12,6 +12,48 @@ tags:
   - note
   - local
 memory_scope: none
+# ── Plan 3 结构化检索字段 ──
+# triggers: 精确/子串匹配权重最高的触发词（中英文双语）
+triggers:
+  - write note
+  - make a note
+  - 写笔记
+  - 记笔记
+  - 做笔记
+  - 创建笔记
+  - 记录任务
+  - 待办
+  - 备忘
+  - 写个笔记
+  - 记个笔记
+# aliases: 别名匹配（中英文变体）
+aliases:
+  - note
+  - notes
+  - 笔记
+  - 记事
+  - 记事本
+  - task note
+  - demo note
+# negative_triggers: 命中则排除此 skill
+negative_triggers:
+  - 数学
+  - 计算
+  - 解方程
+  - 微积分
+  - 天气
+  - 翻译
+  - 查天气
+  - 算一下
+  - 求值
+  - evaluate
+  - what is the weather
+# when_to_use: 适合使用的场景
+when_to_use: "用户想要写笔记、记录任务、创建待办或备忘时"
+# when_not_to_use: 不适合使用的场景
+when_not_to_use: "用户询问数学、计算、天气、翻译等无关任务时"
+# locale: 主要语言区域
+locale: zh-CN
 ---
 
 # Demo Note Maker

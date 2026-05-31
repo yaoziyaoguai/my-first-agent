@@ -205,6 +205,22 @@ class ToolGateHandler:
             "target_module_invoked": False,
             "dangerous_tool_function_invoked": False,
         }
+        # 构建 evidence_extra，包含 skill_allowed_tools（如有）
+        # Loop 3: allowed path 也要携带 skill_allowed_tools，确保
+        # D05 dogfood 能够通过 evidence 验证 lifecycle→mediator→gate 链路
+        evidence_extra: dict[str, Any] = {
+            **result_payload,
+            "requested_tool_name": tool_name,
+            "requested_capability": requested_capability,
+            "capability_type": "production_tool_registry",
+            "production_capability": True,
+            "resolved_tool_name": tool_name if entry is not None else None,
+            "production_registry_found": production_registry_found,
+            "dogfood_overlay_found": False,
+            "decision": decision,
+        }
+        if skill_allowed_tools:
+            evidence_extra["skill_allowed_tools"] = list(skill_allowed_tools)
         return context.result(
             status="confirmation_required" if gate_disposition == "confirmation_required" else (
                 "success" if gate_disposition == "allowed" else "rejected"
@@ -213,17 +229,7 @@ class ToolGateHandler:
             target_module="ToolRegistry",
             payload=result_payload,
             observed_call=observed,
-            evidence_extra={
-                **result_payload,
-                "requested_tool_name": tool_name,
-                "requested_capability": requested_capability,
-                "capability_type": "production_tool_registry",
-                "production_capability": True,
-                "resolved_tool_name": tool_name if entry is not None else None,
-                "production_registry_found": production_registry_found,
-                "dogfood_overlay_found": False,
-                "decision": decision,
-            },
+            evidence_extra=evidence_extra,
         )
 
     def _handle_fake_tool(

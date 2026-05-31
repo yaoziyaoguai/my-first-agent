@@ -72,11 +72,18 @@ def build_skill_selection_section(candidates: list[SkillCandidate]) -> str:
 
     lines.append("")
     lines.append(
-        "如果以上某个 Skill 适合当前任务，请调用 `SKILL_SELECT` 工具并传入 "
-        "对应的 `skill_id` 来激活它。激活后 Skill 的完整指令会注入到后续对话中。"
+        "**重要：只在真正需要时选择 Skill。**"
     )
     lines.append(
-        "如果以上 Skills 都不适合，请直接回复用户，**不要**调用 SKILL_SELECT。"
+        "如果当前任务是数学计算、闲聊、天气查询、翻译、代码调试等与候选 Skill "
+        "描述明显无关的请求，**请直接回复用户**，不要调用 SKILL_SELECT。"
+    )
+    lines.append(
+        "只有当用户明确请求候选 Skill 所描述的能力（如笔记、记录、备忘等）时，"
+        "才调用 `SKILL_SELECT` 工具并传入对应的 `skill_id`。"
+    )
+    lines.append(
+        "激活后 Skill 的完整指令会注入到后续对话中。"
     )
 
     return "\n".join(lines)

@@ -308,3 +308,200 @@ def test_candidates_sorted_by_score_descending():
     assert candidates[0].skill_name == "high-match", (
         f"最高分应来自 high-match，实际: {candidates[0].skill_name}"
     )
+
+
+# ==================================================================
+# Loop 3: 中文正例测试 — 中文自然输入应召回 demo-note-maker
+# ==================================================================
+
+
+def test_chinese_positive_write_note():
+    """中文正例: "帮我写个笔记" 应召回 demo-note-maker。
+
+    验证中文 trigger bigram 部分匹配 + 中文 bigram 关键词重叠能
+    在无空格中文输入下产生有效候选。
+    """
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记", "记笔记", "做笔记", "记录任务", "待办", "备忘"),
+        aliases=("笔记", "note", "记事"),
+        tags=("demo", "note", "local"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("帮我写个笔记", registry, top_k=5)
+    assert len(candidates) > 0, (
+        "中文「帮我写个笔记」应召回 demo-note-maker，实际: 空列表"
+    )
+    actual_name = candidates[0].skill_name if candidates else "no candidate"
+    assert candidates[0].skill_name == "demo-note-maker", (
+        f"应召回 demo-note-maker，实际: {actual_name}"
+    )
+    assert candidates[0].score > 0, f"得分应 > 0，实际: {candidates[0].score}"
+
+
+def test_chinese_positive_record_todo():
+    """中文正例: "记录一下这个待办" 应召回 demo-note-maker。"""
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记", "记录任务", "待办", "备忘"),
+        aliases=("笔记", "note"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("记录一下这个待办", registry, top_k=5)
+    assert len(candidates) > 0, (
+        "中文「记录一下这个待办」应召回 demo-note-maker"
+    )
+    assert candidates[0].skill_name == "demo-note-maker"
+
+
+def test_chinese_positive_organize_notes():
+    """中文正例: "把这个想法整理成笔记" 应召回 demo-note-maker。"""
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记", "记笔记", "创建笔记"),
+        aliases=("笔记", "note", "记事"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("把这个想法整理成笔记", registry, top_k=5)
+    assert len(candidates) > 0, (
+        "中文「把这个想法整理成笔记」应召回 demo-note-maker"
+    )
+
+
+# ==================================================================
+# Loop 3: 中文负例测试 — 无关中文输入不应误召回
+# ==================================================================
+
+
+def test_chinese_negative_math():
+    """中文负例: "计算 123 * 456" 不应召回 demo-note-maker。
+
+    验证 negative_triggers（"计算"、"算一下"等）能排除数学类输入。
+    """
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记",),
+        aliases=("笔记",),
+        negative_triggers=("数学", "计算", "算一下", "求值"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("计算 123 * 456", registry, top_k=5)
+    assert candidates == [], (
+        f"数学 prompt「计算 123 * 456」不应召回 demo-note-maker，实际: {candidates}"
+    )
+
+
+def test_chinese_negative_weather():
+    """中文负例: "查一下天气" 不应召回 demo-note-maker。"""
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记",),
+        aliases=("笔记",),
+        negative_triggers=("天气", "查天气"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("查一下天气", registry, top_k=5)
+    assert candidates == [], (
+        f"天气 prompt「查一下天气」不应召回 demo-note-maker，实际: {candidates}"
+    )
+
+
+def test_chinese_negative_solve_math():
+    """中文负例: "帮我解一道数学题" 不应召回 demo-note-maker。"""
+    manifest = _make_manifest(
+        name="demo-note-maker",
+        description="围绕 demo 工具创建本地任务笔记",
+        triggers=("写笔记",),
+        negative_triggers=("数学", "解方程", "计算"),
+        tags=("demo", "note"),
+    )
+    registry = MockRegistry([manifest])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("帮我解一道数学题", registry, top_k=5)
+    assert candidates == [], (
+        f"数学 prompt「帮我解一道数学题」不应召回 demo-note-maker，实际: {candidates}"
+    )
+
+
+# ==================================================================
+# Loop 3: 多 Skill 竞争 — 构造两个 manifest 验证排序
+# ==================================================================
+
+
+def test_multi_skill_correct_ranking():
+    """两个 skill manifest 同时存在时，应正确排序候选。
+
+    - note-maker: 有 note 相关 trigger/alias → 高匹配
+    - code-reviewer: 与 note 无关 → 低匹配/不匹配
+    """
+    note_maker = _make_manifest(
+        name="note-maker",
+        description="创建本地笔记",
+        triggers=("写笔记", "记笔记", "记录"),
+        aliases=("笔记", "note"),
+        tags=("demo", "note"),
+    )
+    code_reviewer = _make_manifest(
+        name="code-reviewer",
+        description="代码审查工具",
+        triggers=("review", "code review"),
+        aliases=("review", "cr"),
+        tags=("code", "review"),
+    )
+    registry = MockRegistry([note_maker, code_reviewer])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("帮我写个笔记", registry, top_k=5)
+    assert len(candidates) >= 1, "应至少有一个候选"
+    # note-maker 应排第一
+    assert candidates[0].skill_name == "note-maker", (
+        f"note-maker 应排第一，实际 top: {candidates[0].skill_name}"
+    )
+
+
+def test_multi_skill_unrelated_no_false_positive():
+    """多 skill 环境下，无关输入不应乱选任何 skill。"""
+    note_maker = _make_manifest(
+        name="note-maker",
+        description="创建本地笔记",
+        triggers=("写笔记",),
+        aliases=("笔记",),
+    )
+    code_reviewer = _make_manifest(
+        name="code-reviewer",
+        description="代码审查工具",
+        triggers=("review",),
+        aliases=("cr",),
+    )
+    pdf = _make_manifest(
+        name="pdf-converter",
+        description="PDF 转换工具",
+        triggers=("pdf", "convert"),
+    )
+    registry = MockRegistry([note_maker, code_reviewer, pdf])
+    retriever = _make_retriever()
+
+    candidates = retriever.retrieve("今天天气怎么样", registry, top_k=5)
+    assert candidates == [], (
+        f"无关 prompt 不应产生候选，实际: {[c.skill_name for c in candidates]}"
+    )

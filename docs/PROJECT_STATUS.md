@@ -276,9 +276,9 @@
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8-lite Phase 1 COMPLETED (静态仪表盘 — `cd tui && npm start`)。
+**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1 (静态仪表盘), Phase 2 (Command Shell), Phase 3 (Default Workbench Readiness) 全部 COMPLETED — 133/133 tests PASS, tsc --noEmit clean。
 
-**B8-lite Phase 1 已交付**: TypeScript TUI 只读仪表盘 — 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview), 28 focused tests PASS, TypeScript 编译 clean。Phase 2+ (实时 evidence stream / 交互式操作) 为后续阶段，不进入当前阶段。B7 multi-instance readiness 不进入当前阶段。
+**B8 Phase 4 (安全命令执行) 为推荐下一步**。详见 `docs/roadmap/b8-tui-workbench-roadmap.md`。Phase 4 启 confirmation gate + dry-run 优先，TUI 从 preview-only 升级为可执行安全命令。不进入当前阶段。B7 multi-instance readiness 不进入当前阶段。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 
@@ -314,7 +314,7 @@
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | 需要 TUI framework decision |
+| B8 | TUI architecture | **Phase 1-3 COMPLETED** (静态仪表盘 + Command Shell + 默认入口就绪, 133/133 tests PASS)。Phase 4 (安全命令执行) 为推荐下一步。路线图: `docs/roadmap/b8-tui-workbench-roadmap.md` |
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
@@ -374,6 +374,8 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
 | 能力边界定义 | `docs/CAPABILITY_BOUNDARIES.md` |
 | SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
+| B8 TUI 路线图 | `docs/roadmap/b8-tui-workbench-roadmap.md` |
+| B8 SDD (Phase 1-3) | `docs/design/b8-ts-tui-workbench-sdd.md` |
 | Skill 系统架构 | `docs/design/skill-system-architecture.md` |
 | MCP 系统架构 | `docs/design/mcp-architecture.md` |
 | MCP Real External Flight 契约 | `docs/design/mcp-real-external-flight-contract.md` |

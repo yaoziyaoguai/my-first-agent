@@ -2,7 +2,7 @@
 
 **创建日期**: 2026-05-31
 **最后更新**: 2026-06-01 (Phase 3 SDD — Default Workbench Readiness)
-**状态**: Phase 1 COMPLETED, Phase 2 COMPLETED, Phase 3 SPEC/SDD (in progress)
+**状态**: Phase 1 COMPLETED, Phase 2 COMPLETED, Phase 3 COMPLETED (133/133 tests PASS)
 **类型**: Architecture Extension Loop — 新跨领域关注点
 
 ---
@@ -26,10 +26,10 @@
 6. CommandCatalog v2 — 命令绑定 workflow stage + risk level
 7. Default Entry Readiness — 切换前必须通过的 checklist
 
-**后续 Phase（不在本轮范围）**:
-- Phase 4: 安全命令执行（explicit confirmation gate + dry-run 优先）
-- Phase 5: 实时 runtime evidence 流（agent_log.jsonl tail / dispatcher stream）
-- Phase 6: 多实例监控（B7 multi-instance 后端就绪后）
+**后续 Phase (Phase 4-7 路线图)**: 详见 `docs/roadmap/b8-tui-workbench-roadmap.md`。
+- Phase 4: 安全命令执行（confirmation gate + dry-run 优先）
+- Phase 5: 实时 evidence 流（agent_log.jsonl tail / dispatcher stream）
+- Phase 6: 多实例监控（B7 后端就绪后）
 - Phase 7: 完整 TUI Agent Workbench（CLI 降级为 fallback，TUI 为主入口）
 
 ---

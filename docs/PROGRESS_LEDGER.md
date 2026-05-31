@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B8 Phase 3: TUI Default Workbench Readiness — 133/133 tests PASS)
+**最后更新**: 2026-06-01 (B8 Roadmap / Default Entry Readiness Review — 路线文档就绪)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -11,6 +11,7 @@
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
 | **B8 Phase 3: TUI Default Workbench Readiness** | — | **B8 Architecture Extension Loop — Phase 3 COMPLETED** — TUI 从单屏 dashboard 升级为多视图工作台。7 视图键盘导航 (←→/1-7): Overview/Evidence/Workflow/Commands/Tasks/Gates/Docs。新增数据模型: navigation.ts (ViewId/ViewDef/NavigationState), tasks.ts (TaskCenterItem/TaskStatus), workflowState.ts (WorkflowState parser), evidenceDetails.ts (EvidenceDetail 001-008), docsConsistency.ts (DocsCheckResult), noExecution.ts (安全扫描)。JSON 配置: tasks.json (B8/B7 phase status), evidenceDetails.json (001-008 详情)。新增组件: NavigationBar, TaskCenterPanel, EvidenceDetailPanel, DocsConsistencyPanel。CommandCatalog v2: workflowStage + riskLevel 字段。Default Entry Readiness checklist (12 项, 不立即切换)。SDD 更新: Chinese IME 就绪说明、行业参考 (Hermes/OpenClaw/Pi TUI/Claude Code)、13 项硬约束。133/133 tests PASS (74 Phase 1+2 + 59 Phase 3)。TypeScript 编译 clean。SDD: `docs/design/b8-ts-tui-workbench-sdd.md`。Phase 4 (Safe Execution) 不进入当前阶段。|
+| **B8 Roadmap / Default Entry Readiness Review** | — | `/plan-eng-review` 完成 B8 路线文档审计。创建 `docs/roadmap/b8-tui-workbench-roadmap.md`（12 sections, ~300 lines）：Phase 全景图、Phase 4-7 详细规划、依赖链与风险矩阵、8 项关键决策记录、全阶段门禁矩阵、约束与不做列表。SDD 状态从 "in progress" → COMPLETED。PROJECT_STATUS §2 推荐下一步更新为 B8 Phase 4。路线文档补齐 Phase 4-9 规划缺口（原 SDD 仅一句话摘要）。|
 | **Loop 2.4 收口: plan scope complete** | — | **Loop 2.4 MCP Main-Path Readiness plan scope 确认完成** — 全部 9 个 step 已在 a318237 执行完毕。PARTIAL 是 plan 设计的终端状态（DEFERRED→PARTIAL 达成），非遗留缺陷。Scope 外项（真实 MCP server 连接 REAL-EVIDENCE-005/007、confirmation='always' 变更）已在 plan §Out of Scope 明确排除。mcp.discover/mcp.invoke branch points 均为 PARTIAL + FAKE_LOCAL_USER_PATH evidence level。无待处理 Loop 2.4 工作项。过时 task list 项清理：17 项标记 completed（#16-#19, #131, #136, #164, #176-#179, #183-#185, #206, #209-#211, #223-#226, #231-#232）。 |
 
 ## 2026-05-31

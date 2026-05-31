@@ -20,7 +20,7 @@ from agent.skill_system.errors import (
     CODE_DUPLICATE_NAME,
     SkillLoadError,
 )
-from agent.skill_system.schema import load_skill_manifest, SKILL_MD_FILENAME
+from agent.skill_system.schema import SKILL_MD_FILENAME, load_skill_manifest
 
 
 class SkillRegistry:
@@ -40,6 +40,8 @@ class SkillRegistry:
         self._roots: list[Path] = list(roots) if roots else []
         # _descriptors: name → SkillDescriptor（含 visible 和 hidden）
         self._descriptors: dict[str, SkillDescriptor] = {}
+        # _manifests: name → SkillManifest（供 retriever 等需要新字段的组件使用）
+        self._manifests: dict[str, object] = {}
         # _load_errors: 扫描过程中收集的 SkillLoadError（不会静默丢弃）
         self._load_errors: list[SkillLoadError] = []
         self._discover()
@@ -72,6 +74,18 @@ class SkillRegistry:
         self._roots.append(root)
         self._scan_root(root)
 
+    def list_visible_manifests(self) -> list[object]:
+        """返回所有可见 skill 的 SkillManifest 列表。
+
+        供 SkillCandidateRetriever 等需要 manifest 新字段的组件使用。
+        返回类型为 object 以避免循环导入（实际为 SkillManifest）。
+        """
+        return [
+            m
+            for name, m in self._manifests.items()
+            if self._descriptors.get(name) and self._descriptors[name].is_visible()
+        ]
+
     def get_load_errors(self) -> list[SkillLoadError]:
         """返回扫描过程中收集的所有 SkillLoadError。
 
@@ -83,6 +97,7 @@ class SkillRegistry:
     def reset(self) -> None:
         """清空并重新扫描所有 root——用于测试和配置变更。"""
         self._descriptors.clear()
+        self._manifests.clear()
         self._load_errors.clear()
         self._discover()
 
@@ -119,6 +134,7 @@ class SkillRegistry:
                 self._load_errors.append(exc)
                 continue
             descriptor = manifest.to_descriptor()
+            self._manifests[descriptor.name] = manifest
 
             # duplicate name detection
             if descriptor.name in self._descriptors:

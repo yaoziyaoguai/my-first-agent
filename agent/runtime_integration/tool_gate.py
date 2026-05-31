@@ -51,6 +51,7 @@ class ToolGateHandler:
         tool_name = str(payload.get("tool_name") or "")
         requested_capability = str(payload.get("requested_capability") or "")
         skill_allowed_tools = payload.get("skill_allowed_tools")
+        active_skill_id = payload.get("active_skill_id")
 
         if not tool_name:
             # 中文学习注释：当 action_type 为 tool.request 且 tool_name 为空时，
@@ -119,6 +120,7 @@ class ToolGateHandler:
                     "dogfood_overlay_found": False,
                     "decision": "rejected",
                     "skill_allowed_tools": list(skill_allowed_tools),
+                    "active_skill_id": active_skill_id,
                     "policy_path": "skill_allowed_tools→rejected",
                     "rejection_reason": "tool not in active skill allowed_tools",
                 },
@@ -226,6 +228,8 @@ class ToolGateHandler:
         }
         if skill_allowed_tools:
             evidence_extra["skill_allowed_tools"] = list(skill_allowed_tools)
+        if active_skill_id:
+            evidence_extra["active_skill_id"] = active_skill_id
         return context.result(
             status="confirmation_required" if gate_disposition == "confirmation_required" else (
                 "success" if gate_disposition == "allowed" else "rejected"

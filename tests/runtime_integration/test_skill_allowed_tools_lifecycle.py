@@ -225,3 +225,170 @@ class TestLifecycleAllowedToolsSource:
         t1 = lifecycle.get_allowed_tools()
         t2 = lifecycle.get_allowed_tools()
         assert t1 == t2 == tools
+
+
+# ── 003 evidence completeness ──────────────────────────────────────────
+
+
+class TestActiveSkillIdInGateEvidence:
+    """003: TOOL_GATE evidence 包含 active_skill_id（rejected + allowed 路径）。"""
+
+    def test_rejected_path_includes_active_skill_id(self):
+        """disallowed tool 的 TOOL_GATE evidence 包含 active_skill_id。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        result = dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "read_file",
+                "tool_input": {},
+                "skill_allowed_tools": ["demo.write_demo_note"],
+                "active_skill_id": "demo-note-maker",
+            },
+        ))
+
+        assert result.payload["gate_disposition"] == "rejected"
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        assert ev.get("active_skill_id") == "demo-note-maker", (
+            f"rejected evidence 应包含 active_skill_id，got: {ev.get('active_skill_id')}"
+        )
+        assert ev.get("decision") == "rejected"
+        assert ev.get("policy_path") == "skill_allowed_tools→rejected"
+        assert "skill_allowed_tools" in ev
+
+    def test_allowed_path_includes_active_skill_id(self):
+        """allowed tool 的 TOOL_GATE evidence 也包含 active_skill_id。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        result = dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "_safe_noop",
+                "tool_input": {},
+                "skill_allowed_tools": ["_safe_noop", "demo.echo_task_summary"],
+                "active_skill_id": "demo-note-maker",
+            },
+        ))
+
+        assert result.payload["gate_disposition"] == "allowed"
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        assert ev.get("active_skill_id") == "demo-note-maker", (
+            f"allowed evidence 应包含 active_skill_id，got: {ev.get('active_skill_id')}"
+        )
+
+    def test_no_active_skill_id_when_not_in_payload(self):
+        """当 payload 不含 active_skill_id 时，evidence 也不应包含。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "_safe_noop",
+                "tool_input": {},
+            },
+        ))
+
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        assert "active_skill_id" not in ev, (
+            f"无 active_skill_id payload 时 evidence 不应包含，got: {ev.get('active_skill_id')}"
+        )
+
+    def test_rejected_evidence_fields_complete(self):
+        """003 要求的 evidence 字段全部存在: active_skill_id, requested_tool_name,
+        skill_allowed_tools, policy_path, rejection_reason, decision=rejected。"""
+        from agent.runtime_integration import (
+            ActionHandlerRegistry,
+            RuntimeActionDispatcher,
+            RuntimeActionType,
+        )
+        from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+        from agent.runtime_integration.tool_gate import ToolGateHandler
+
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry, observer=RuntimeActionModuleObserver(),
+        )
+
+        from agent.runtime_integration.schema import RuntimeActionRequest
+        dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "request_user_input",
+                "tool_input": {"prompt": "email?"},
+                "skill_allowed_tools": ["demo.write_demo_note"],
+                "active_skill_id": "demo-note-maker",
+            },
+        ))
+
+        log = dispatcher.action_log
+        gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
+        assert len(gate_events) >= 1
+        ev = dict(gate_events[-1].evidence)
+        required_fields = [
+            "active_skill_id", "requested_tool_name", "skill_allowed_tools",
+            "policy_path", "rejection_reason",
+        ]
+        missing = [f for f in required_fields if f not in ev]
+        assert not missing, f"003 evidence 缺少字段: {missing}"
+        assert ev["active_skill_id"] == "demo-note-maker"
+        assert ev["requested_tool_name"] == "request_user_input"
+        assert ev["decision"] == "rejected"
+        assert ev["policy_path"] == "skill_allowed_tools→rejected"
+        assert ev["rejection_reason"] == "tool not in active skill allowed_tools"

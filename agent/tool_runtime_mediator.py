@@ -418,16 +418,26 @@ class ToolRuntimeMediator:
             # 这样同一 turn 内 SKILL_SELECT 先激活 skill 后，后续 tool_use block
             # 的 gate 检查能正确拿到 skill 的工具白名单。
             _live_at = self._skill_allowed_tools
+            _active_skill_id: str | None = None
             if _live_at is None:
                 try:
                     from agent.skill_system.lifecycle import get_default_lifecycle
                     _lc = get_default_lifecycle()
                     _tools = _lc.get_allowed_tools()
                     _live_at = _tools if _tools else None
+                    _active_skill_id = _lc.get_active_skill_id()
+                except ImportError:
+                    pass
+            else:
+                try:
+                    from agent.skill_system.lifecycle import get_default_lifecycle
+                    _active_skill_id = get_default_lifecycle().get_active_skill_id()
                 except ImportError:
                     pass
             if _live_at is not None:
                 gate_payload["skill_allowed_tools"] = sorted(_live_at)
+            if _active_skill_id is not None:
+                gate_payload["active_skill_id"] = _active_skill_id
             result = self._dispatcher.route_from_runtime_loop(
                 RuntimeActionRequest(
                     action_type=RuntimeActionType.TOOL_GATE,

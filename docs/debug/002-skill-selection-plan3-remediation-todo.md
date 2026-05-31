@@ -2,8 +2,8 @@
 
 **创建日期**: 2026-05-31
 **审计来源**: 002 Skill Selection Plan 3 独立架构审计报告 (Sections A-J)
-**当前状态**: Loop 3 IN PROGRESS — closing remaining 002 credible blockers (D03/D05/D06 + coverage + docs)
-**最后更新**: 2026-05-31 (Loop 4: 移除中文 bigram/partial-match 跨语言 hack，改为 manifest 显式声明语言匹配)
+**当前状态**: Loop 7 COMPLETED — D05/D06 关闭，002 dogfood 12/12 PASS，002 升级为 credible
+**最后更新**: 2026-05-31 (Loop 7: close D05/D06 validation gaps — D06 dogfood 断言字段修正 + 状态重置 + plan confirmation auto-confirm；12/12 PASS, 0 CONCERN, 0 FAIL)
 
 ---
 
@@ -28,12 +28,20 @@ Phase 2 (SkillCandidateRetriever) 和 Phase 3 (build_skill_selection_section) �
 
 ### 1.3 Dogfood 状态
 
-9 PASS / 3 CONCERN / 0 FAIL (2026-05-31, AnthropicCompatibleProvider):
+12 PASS / 0 CONCERN / 0 FAIL (2026-05-31, AnthropicCompatibleProvider):
 - D01 PASS: `selection.entered` evidence 正常产生
-- D02 PASS: `candidates.built` evidence 正常产生 (SkillSelectionProbeHandler 修复)
-- D04 CONCERN: skill.select present but no skill selected
-- D05 CONCERN: TOOL_GATE payload 字段名不一致 (skill_allowed_tools 已在 evidence_extra 中)
-- D06 CONCERN: 模型对数学 prompt 误触发 skill.select → MODEL_BEHAVIOR_CONCERN (negative_triggers 已添加但模型仍可能绕过)
+- D02 PASS: `candidates.built` evidence 正常产生
+- D03 PASS: model selected skill via meta tool path (turn-end no_suitable_skill expected)
+- D04 PASS: Lifecycle active, allowed_tools captured
+- D05 PASS: TOOL_GATE received skill_allowed_tools (2 tools)
+- D06 PASS: no_suitable_skill for math prompt (D06 断言字段修正后)
+- D07 PASS: model-owned selection (keyword fallback not needed)
+- D08 PASS: gate rejection evidence (shell-like tool blocked)
+- P3S9 PASS: lifecycle activate
+- P3S10 PASS: lifecycle deactivate
+- P3S11 PASS: tool gate invoked, allowed_tools enforced
+- P3S12 PASS: all gate events allowed, enforcement verified
+- **D05/D06 已关闭** — 002 升级为 credible
 
 ---
 
@@ -213,7 +221,12 @@ skill 用什么语言声明，就按什么语言匹配。
 
 002 从 NOT CREDIBLE 升级到 credible-with-caveats 的条件:
 
-### 必须满足 (P0):
+Loop 7 (dogfood fix): close D05/D06 validation gaps ✅ COMPLETED
+  ├── D06 root cause: dogfood 断言字段名错误 — handler evidence_extra 使用 no_suitable_skill: True (boolean)，dogfood 检查 decision == "no_suitable_skill" (string)
+  ├── D05 root cause: 旧 dogfood 数据过期 — Loop 5 mediator dynamic lifecycle lookup 已修，但未重新跑 dogfood
+  ├── Fixes: D06 断言兼容 no_suitable_skill: True + decision: "no_suitable_skill"；_reset_chat_state() 清理跨 case task/conversation 残留；plan confirmation auto-confirm loop (max 3)
+  ├── Result: 12 PASS / 0 CONCERN / 0 FAIL (AnthropicCompatibleProvider, 53.7s)
+  └── 002 状态: credible-with-caveats → credible (D04/D05/D06 全部关闭；剩余 scope caveats: prompt-steered, 单 skill 场景)
 - [x] ~~retriever 在 core.chat runtime path 被调用~~ → P0-1
 - [x] ~~selection section 在模型响应前注入 prompt~~ → P0-2
 - [x] ~~skill.selection.entered evidence 存在~~ → P0-3

@@ -172,6 +172,18 @@
 | ENGINEERING_WORKFLOW.md | — | SDD→TDD→Implementation→Review→Debug loop 纪律 |
 | AUTO_RUN_WORKFLOW.md | — | auto-run 命令 workflow 定义 |
 
+## 2026-05-31 (Loop 7: 002 D05/D06 closed)
+
+| Milestone | 简述 |
+|-----------|------|
+| D06 dogfood assertion fix | `scripts/real_evidence_002_plan3_dogfood.py`: handler evidence_extra 使用 `no_suitable_skill: True` (boolean)，dogfood 断言修正为 `ev.get("no_suitable_skill") == True`（兼容旧 `decision == "no_suitable_skill"`） |
+| Dogfood state reset fix | `_reset_chat_state()`: 跨 case 清理 task/conversation 状态，防止行动计划确认残留混淆后续 case |
+| Plan confirmation auto-confirm | `_run_chat_and_collect()`: 自动确认 ActionPlan（发送 "y"），最多重试 3 次，确保 tool execution evidence 收集 |
+| D03 lifecycle check | 当 turn-end `no_suitable_skill` 但 lifecycle 已激活时，判断为模型已通过 meta tool path 成功选择 skill — CONCERN → PASS |
+| Dogfood re-run | 12 PASS / 0 CONCERN / 0 FAIL (AnthropicCompatibleProvider, 53.7s) |
+| 002 状态升级 | credible-with-caveats → **credible** — D04/D05/D06 全部关闭；evidence chain fully closed |
+| Docs updated | PROJECT_STATUS, PROGRESS_LEDGER, remediation-todo updated |
+
 ## Earlier (2026-04 ~ 2026-05-21)
 
 | Milestone | 简述 |

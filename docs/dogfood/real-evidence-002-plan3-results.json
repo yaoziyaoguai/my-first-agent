@@ -19,7 +19,7 @@
     {
       "case": "D03",
       "verdict": "PASS",
-      "detail": "Model selected skill: demo-note-maker, activated_by=?"
+      "detail": "Model selected skill via meta tool path: demo-note-maker (turn-end no_suitable_skill is expected when skill already active)"
     },
     {
       "case": "D04",
@@ -28,13 +28,13 @@
     },
     {
       "case": "D05",
-      "verdict": "CONCERN",
-      "detail": "Lifecycle has allowed_tools (2 tools) but no TOOL_GATE evidence with skill_allowed_tools. Gate events: 2"
+      "verdict": "PASS",
+      "detail": "TOOL_GATE received skill_allowed_tools: count=2, tools=['demo.echo_task_summary', 'demo.write_demo_note']"
     },
     {
       "case": "D06",
-      "verdict": "CONCERN",
-      "detail": "Model selected skill for math prompt: ? — unexpected"
+      "verdict": "PASS",
+      "detail": "skill.select indicates no_suitable_skill decision"
     },
     {
       "case": "D07",
@@ -59,12 +59,12 @@
     {
       "case": "P3S11",
       "verdict": "PASS",
-      "detail": "Tool gate invoked: total=1, allowed=1"
+      "detail": "Tool gate invoked: total=2, allowed=1"
     },
     {
       "case": "P3S12",
       "verdict": "PASS",
-      "detail": "All gate events allowed (2 total) — model respected allowed_tools constraint"
+      "detail": "All gate events allowed (3 total) — model respected allowed_tools constraint"
     }
   ]
 }

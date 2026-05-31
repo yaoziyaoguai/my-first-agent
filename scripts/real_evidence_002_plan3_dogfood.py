@@ -83,6 +83,27 @@ def _cleanup_skill_state():
     _lc.deactivate()
 
 
+def _reset_chat_state():
+    """重置 task / conversation 状态，确保每个 dogfood case 从干净状态开始。
+
+    core.chat() 使用全局单例 state，跨 case 残留的 current_plan /
+    user_goal / conversation.messages 会导致模型在下一个 case 中混淆
+    （例如把新 prompt 当成对上一个 plan 的修改意见）。
+    """
+    import agent.core as _core
+    st = _core.get_state()
+    st.task.status = "idle"
+    st.task.current_plan = None
+    st.task.user_goal = None
+    st.task.current_step_index = 0
+    st.task.pending_tool = None
+    st.task.pending_user_input_request = None
+    st.task.effective_review_request = False
+    st.task.retry_count = 0
+    st.task.last_error = None
+    st.conversation.messages.clear()
+
+
 def _extract_evidence(dispatcher) -> dict[str, list[dict[str, Any]]]:
     """从 dispatcher action_log 提取分类 evidence。"""
     action_log = getattr(dispatcher, "action_log", [])
@@ -108,9 +129,15 @@ def _clear_action_log(dispatcher) -> None:
 
 
 def _run_chat_and_collect(prompt: str, provider, dispatcher) -> tuple[str, dict]:
-    """运行 core.chat() 并返回 (result_text, evidence_by_type)。"""
+    """运行 core.chat() 并返回 (result_text, evidence_by_type)。
+
+    每个 case 从干净的 task / conversation 状态开始，避免跨 case 状态残留。
+    如果模型生成 ActionPlan 导致 chat() 返回 "awaiting_plan_confirmation"，
+    自动确认计划（发送 "y"）继续执行流程，最多重试 3 次。
+    """
     import agent.core as core
 
+    _reset_chat_state()
     _cleanup_skill_state()
     _clear_action_log(dispatcher)
 
@@ -125,6 +152,32 @@ def _run_chat_and_collect(prompt: str, provider, dispatcher) -> tuple[str, dict]
         import traceback
         traceback.print_exc()
         return "", {}
+
+    # 模型可能生成 ActionPlan → chat() 返回 "awaiting_plan_confirmation"。
+    # 自动确认计划以继续执行 tool calls 并收集 evidence。
+    # 某些 prompt 可能触发级联计划生成（确认后模型再次输出新计划），
+    # 用循环处理，最多 3 次。
+    auto_confirm_attempts = 0
+    while chat_result == "awaiting_plan_confirmation" and auto_confirm_attempts < 3:
+        auto_confirm_attempts += 1
+        try:
+            chat_result = core.chat(
+                "y",
+                provider=provider,
+                runtime_action_dispatcher=dispatcher,
+            )
+        except Exception as exc:
+            record("CHAT", "FAIL",
+                   f"core.chat() crashed on plan confirmation "
+                   f"(attempt {auto_confirm_attempts}): {type(exc).__name__}: {exc}")
+            import traceback
+            traceback.print_exc()
+            break
+
+    if chat_result == "awaiting_plan_confirmation":
+        record("CHAT", "CONCERN",
+               f"Plan confirmation still pending after {auto_confirm_attempts} "
+               f"auto-confirm attempts — model may be stuck in plan generation loop")
 
     evidence = _extract_evidence(dispatcher)
     return str(chat_result), evidence
@@ -221,15 +274,27 @@ def validate_g1_model_selection_received(provider, dispatcher) -> bool:
                    f"Model selected skill: {selected_id}, "
                    f"activated_by={ev.get('activated_by', '?')}")
             return True
-        else:
-            decision = ev.get("decision", "")
-            if decision == "no_suitable_skill":
-                record("D03", "CONCERN",
-                       "Model decided no_suitable_skill — retry with more targeted prompt")
-                return False
+        # turn-end hook 可能在模型已通过 meta tool path 成功调用
+        # SKILL_SELECT 后产生 no_suitable_skill evidence——此时 lifecycle
+        # 已激活，模型实际已成功选择 skill
+        no_suitable = (
+            ev.get("no_suitable_skill") or ev.get("decision") == "no_suitable_skill"
+        )
+        if no_suitable:
+            from agent.skill_system.lifecycle import get_default_lifecycle
+            _lc = get_default_lifecycle()
+            if _lc.is_active():
+                record("D03", "PASS",
+                       f"Model selected skill via meta tool path: "
+                       f"{_lc.get_active_skill_id()} (turn-end no_suitable_skill is expected "
+                       f"when skill already active)")
+                return True
             record("D03", "CONCERN",
-                   f"skill.select dispatched but no selected_skill_id: {ev}")
+                   "Model decided no_suitable_skill and lifecycle not active")
             return False
+        record("D03", "CONCERN",
+               f"skill.select dispatched but no selected_skill_id: {ev}")
+        return False
     else:
         record("D03", "FAIL",
                f"No skill.select evidence. Available: {list(evidence_by_type.keys())}")
@@ -357,7 +422,9 @@ def validate_g2_no_skill(provider, dispatcher) -> bool:
         return True
     elif select_events:
         ev = select_events[0].get("evidence", {})
-        if ev.get("decision") == "no_suitable_skill":
+        # handler evidence_extra 中 canonical 字段为 no_suitable_skill: True
+        # （boolean），同时兼容旧 decision == "no_suitable_skill"（string）
+        if ev.get("no_suitable_skill") or ev.get("decision") == "no_suitable_skill":
             record("D06", "PASS",
                    "skill.select indicates no_suitable_skill decision")
             return True

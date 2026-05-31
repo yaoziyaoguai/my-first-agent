@@ -50,3 +50,39 @@ export interface CommitInfo {
   hash: string;
   message: string;
 }
+
+/** 安全等级 */
+export type SafetyLevel =
+  | "read-only"
+  | "preview-only"
+  | "requires-confirmation"
+  | "disabled"
+  | "future-executable";
+
+/** 命令类别 */
+export type CommandCategory =
+  | "diagnostics"
+  | "execution"
+  | "workflow"
+  | "gates"
+  | "docs";
+
+/** 单个命令定义 */
+export interface CommandDefinition {
+  id: string;
+  name: string;
+  description: string;
+  category: CommandCategory;
+  safetyLevel: SafetyLevel;
+  requiresConfirmation: boolean;
+  executableInPhase2: boolean;
+  shellCommand?: string;
+  relatedSkills?: string[];
+  riskNote?: string;
+}
+
+/** 命令目录 */
+export interface CommandCatalog {
+  version: string;
+  commands: CommandDefinition[];
+}

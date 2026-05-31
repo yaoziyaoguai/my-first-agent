@@ -9,6 +9,8 @@ import { parseProjectStatus } from "./data/projectStatus";
 import { parseProgressLedger } from "./data/progressLedger";
 import { parseDogfoodResult } from "./data/dogfoodResults";
 import { buildGitInfo } from "./data/gitInfo";
+import { loadCommandCatalog } from "./data/commandCatalog";
+import { loadNextAction } from "./data/nextAction";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
@@ -113,9 +115,20 @@ function App() {
   const ledger = parseProgressLedger(progressLedgerDoc);
   const dogfood = loadDogfoodResults();
   const git = loadGitInfo();
+  const catalog = loadCommandCatalog();
+  const nextAction = loadNextAction(
+    path.join(REPO_ROOT, "docs", "PROJECT_STATUS.md"),
+  );
 
   return (
-    <Dashboard status={status} ledger={ledger} dogfood={dogfood} git={git} />
+    <Dashboard
+      status={status}
+      ledger={ledger}
+      dogfood={dogfood}
+      git={git}
+      catalog={catalog}
+      nextAction={nextAction}
+    />
   );
 }
 

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-05-31 (B8-lite Phase 1: TypeScript TUI 只读仪表盘 — 5 面板 skeleton 完成, 28/28 tests PASS, SDD at `docs/design/b8-ts-tui-workbench-sdd.md`)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8-lite Phase 1 COMPLETED** — TypeScript TUI 只读仪表盘可运行 (`cd tui && npm start`): 静态数据加载、5 面板布局 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview)、28 focused tests PASS、TypeScript 编译 clean。Phase 2+ (实时 evidence stream / 交互式操作) 不进入当前阶段。
+**最后更新**: 2026-05-31 (B8 Phase 2: TUI command shell + AutoRun workflow launcher — 74/74 tests PASS, CommandCatalog + SafetyModel + CommandPanel + NextActionPanel + CommandPreview 完成, TUI 升级为交互式工作台)
+**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 2 COMPLETED** — TUI command shell 可交互 (`cd tui && npm start`): CommandCatalog (8 命令, 5 级 SafetyModel), CommandPanel (↑↓ 导航, Enter 预览), NextActionPanel (推荐下一步), CommandPreview (shell command 展示, 不执行), Phase 1 28 tests + Phase 2 46 tests PASS, TypeScript 编译 clean。Phase 3 (实时 evidence stream) 不进入当前阶段。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

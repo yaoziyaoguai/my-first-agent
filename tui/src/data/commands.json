@@ -1,0 +1,96 @@
+{
+  "version": "0.2.0",
+  "commands": [
+    {
+      "id": "autorun",
+      "name": "AutoRun Workflow",
+      "description": "启动完整 AutoRun 工程 loop（状态审计 → 执行 → gates → docs → commit/push）",
+      "category": "workflow",
+      "safetyLevel": "requires-confirmation",
+      "requiresConfirmation": true,
+      "executableInPhase2": false,
+      "shellCommand": "python main.py auto-run",
+      "relatedSkills": ["auto-run", "compound-engineering:ce-work"],
+      "riskNote": "可能执行 git push 和真实 API 调用"
+    },
+    {
+      "id": "status",
+      "name": "Project Status",
+      "description": "展示 PROJECT_STATUS.md 当前能力评分和 REAL-EVIDENCE 状态",
+      "category": "diagnostics",
+      "safetyLevel": "preview-only",
+      "requiresConfirmation": false,
+      "executableInPhase2": false,
+      "shellCommand": "cat docs/PROJECT_STATUS.md | head -60",
+      "relatedSkills": ["auto-run"]
+    },
+    {
+      "id": "audit",
+      "name": "Full System Audit",
+      "description": "运行 G-Stack 全系统能力审计并生成 severity table",
+      "category": "diagnostics",
+      "safetyLevel": "requires-confirmation",
+      "requiresConfirmation": true,
+      "executableInPhase2": false,
+      "shellCommand": "python main.py audit",
+      "relatedSkills": ["gstack:gstack-audit"],
+      "riskNote": "审计可能读取大量仓库文件"
+    },
+    {
+      "id": "dogfood",
+      "name": "Dogfood Run",
+      "description": "执行 dogfood case matrix 验证 REAL-EVIDENCE 能力",
+      "category": "execution",
+      "safetyLevel": "requires-confirmation",
+      "requiresConfirmation": true,
+      "executableInPhase2": false,
+      "shellCommand": "python main.py dogfood",
+      "relatedSkills": ["auto-run"],
+      "riskNote": "需配置 Provider；可能调用真实 API"
+    },
+    {
+      "id": "gates",
+      "name": "Code Gates",
+      "description": "运行代码质量门禁（ruff + pytest + git diff --check）",
+      "category": "gates",
+      "safetyLevel": "preview-only",
+      "requiresConfirmation": false,
+      "executableInPhase2": false,
+      "shellCommand": "ruff check agent/ && python -m pytest -x -q && git diff --check",
+      "relatedSkills": []
+    },
+    {
+      "id": "docs-check",
+      "name": "Docs Consistency",
+      "description": "检查文档一致性：PROJECT_STATUS ↔ PROGRESS_LEDGER ↔ DEBT 状态对齐",
+      "category": "docs",
+      "safetyLevel": "preview-only",
+      "requiresConfirmation": false,
+      "executableInPhase2": false,
+      "shellCommand": "rg 'credible' docs/PROJECT_STATUS.md docs/PROGRESS_LEDGER.md",
+      "relatedSkills": []
+    },
+    {
+      "id": "agent-run",
+      "name": "Agent Run",
+      "description": "启动真实 agent 实例执行用户任务",
+      "category": "execution",
+      "safetyLevel": "disabled",
+      "requiresConfirmation": true,
+      "executableInPhase2": false,
+      "relatedSkills": [],
+      "riskNote": "Phase 4+ 才支持 TUI 触发 agent run"
+    },
+    {
+      "id": "deploy",
+      "name": "Deploy",
+      "description": "部署到生产环境",
+      "category": "execution",
+      "safetyLevel": "disabled",
+      "requiresConfirmation": true,
+      "executableInPhase2": false,
+      "relatedSkills": [],
+      "riskNote": "需 CI/CD 集成，不在当前 scope"
+    }
+  ]
+}

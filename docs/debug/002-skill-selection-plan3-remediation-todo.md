@@ -2,7 +2,8 @@
 
 **创建日期**: 2026-05-31
 **审计来源**: 002 Skill Selection Plan 3 独立架构审计报告 (Sections A-J)
-**当前状态**: NOT CREDIBLE — Plan 3 核心差异化能力未接入 runtime
+**当前状态**: Loop 1 (P0) COMPLETED — retriever + selection_section + evidence 已接入 runtime
+**最后更新**: 2026-05-31 (aef2f8f P0 fix, 9874b53 test fix)
 
 ---
 
@@ -113,16 +114,16 @@ Phase 2 (SkillCandidateRetriever) 和 Phase 3 (build_skill_selection_section) �
 ## 5. 修复顺序
 
 ```
-Loop 1 (P0): Runtime integration
-  ├── TDD RED: 写 failing tests 验证 retriever + selection_section 未接入 runtime
+Loop 1 (P0): Runtime integration ✅ COMPLETED (aef2f8f)
+  ├── TDD RED: 写 failing tests 验证 retriever + selection_section 未接入 runtime ✅
   ├── Implementation:
-  │   ├── prompt_builder.py: add selection_section parameter to build_system_prompt()
-  │   ├── core.py: refresh_runtime_system_prompt() accept user_input, call retriever + build_skill_selection_section()
-  │   └── core.py: dispatch selection.entered + candidates.built evidence via dispatcher
-  ├── TDD GREEN: tests pass
-  └── Gate: focused tests + ruff + git diff --check
+  │   ├── prompt_builder.py: add selection_section parameter to build_system_prompt() ✅
+  │   ├── core.py: refresh_runtime_system_prompt() accept user_input, call retriever + build_skill_selection_section() ✅
+  │   └── core.py: dispatch selection.entered + candidates.built evidence via dispatcher ✅
+  ├── TDD GREEN: 23/23 tests pass, 93/93 skill tests pass, 247/247 unit+integration pass ✅
+  └── Gate: focused tests + ruff + git diff --check ✅
 
-Loop 2 (P0 evidence): Dogfood re-run
+Loop 2 (P0 evidence): Dogfood re-run (需要真实 provider)
   ├── Update/rerun dogfood script
   ├── Verify D01/D02 change from CONCERN → PASS
   └── Document any remaining CONCERN

@@ -91,6 +91,12 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.SUBAGENT_CHILD_RESULT,
         RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION,
         RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST,
+        # Loop 3.4: scheduler evidence — runtime-owned action graph 决策
+        RuntimeActionType.ACTION_PLAN_START,
+        RuntimeActionType.NODE_ENTER,
+        RuntimeActionType.NODE_EXIT,
+        RuntimeActionType.NODE_FAILURE,
+        RuntimeActionType.ACTION_PLAN_COMPLETE,
     }
     probe_types = {
         RuntimeActionType.SKILL_SELECT,
@@ -103,6 +109,9 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.CHECKPOINT_RESUME,
         RuntimeActionType.MCP_BRIDGE_LIFECYCLE,
         RuntimeActionType.SUBAGENT_DELEGATE_L0,  # 每 turn routing check, 默认 probe
+        # Phase 3: turn-start skill selection — per-turn lifecycle probe
+        RuntimeActionType.SKILL_SELECTION_ENTERED,
+        RuntimeActionType.SKILL_CANDIDATES_BUILT,
     }
     assert business_types.isdisjoint(probe_types), \
         f"Overlap between business and probe: {business_types & probe_types}"

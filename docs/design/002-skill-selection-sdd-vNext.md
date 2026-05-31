@@ -683,11 +683,14 @@ B8 只处理以下能力，当前不进入：
 | Plan 3 selected as target architecture | **ACCEPTED** |
 | Plan 2 standalone path | **REJECTED** |
 | Plan 2 metadata retained as Plan 3 foundation | **ACCEPTED** |
+| Q1-Q6 user decisions | **CONFIRMED** (2026-05-31, see §8.4) |
+| Architecture design review | **PASSED** (2026-05-31, see §8.7) |
 | Implementation | **NOT STARTED** |
 | Production code changed | **NO** |
 | Tests changed | **NO** |
 | B7/B8 started | **NO** |
 | 002 status | **partial-credible** (until implementation + dogfood pass) |
+| Next step | **TDD RED tests plan → Phase 1 M01-M06** |
 
 ### 8.2 Design Soundness
 
@@ -709,83 +712,68 @@ B8 只处理以下能力，当前不进入：
 | selection prompt 增加 context budget | 低 | token 消耗增加 | top-K=5，每个候选 routing info 截断 |
 | selection phase 增加 latency | 低 | 每次 turn 多一次 retriever 调用 | retriever 纯内存计算，无 I/O |
 
-### 8.4 用户决策点
+### 8.4 用户决策点（CONFIRMED）
 
-以下问题需要在进入 implementation 前由用户决策。
-
-**Plan 3 selected as target architecture. Plan 2 standalone rejected. Plan 2 metadata retained only as Plan 3 foundation.**
+以下问题已在 2026-05-31 由用户确认。**Plan 3 selected as target architecture. Plan 2 standalone rejected. Plan 2 metadata retained only as Plan 3 foundation.**
 
 ---
 
-**Q1: SKILL_SELECT future role**
+**Q1: SKILL_SELECT future role → CONFIRMED: C**
 
-SKILL_SELECT tool 在 Plan 3 中的角色：
+> **C. both: runtime selection action primary + ordinary tool compatibility path**
 
-- **A. ordinary compatibility tool only** — SKILL_SELECT 保持为普通工具，不走 selection phase，保留为兼容路径
-- **B. runtime selection action** (推荐) — SKILL_SELECT 作为 selection phase 中模型表达"我要选 skill"的 runtime action
-- **C. both: runtime selection action primary + ordinary tool compatibility path** — B + 同时保留为普通工具（兼容旧行为）
+选择 C 而非推荐 B 的理由：保留普通工具兼容路径提供防御性——如果 turn-start selection phase 因任何原因未触发（例如 prompt injection 失败、retriever 返回空但模型后续自行识别出 skill），模型仍可通过标准 tool_use 路径调用 SKILL_SELECT。两个路径收敛到同一 ToolRuntimeMediator pipeline 和 ActiveSkillLifecycle.activate()，不构成双主路径。
 
-**推荐 B**。理由: Plan 3 的 selection phase 是主路径，SKILL_SELECT 是其自然载体。保留为普通工具路径（C）增加复杂度但提供兼容性——然而 002 当前不是 production system，兼容旧行为价值有限。A 会制造 selection phase 和 SKILL_SELECT tool 的双轨分裂。
-
----
-
-**Q2: Selection phase**
-
-selection phase 的触发策略：
-
-- **A. turn-start primary only** — selection phase 仅在 turn-start 触发，不保留 turn-end fallback
-- **B. turn-start primary + turn-end safety fallback** (推荐) — turn-start 为主，turn-end keyword fallback 作为 safety net
-- **C. current turn-end fallback only** — 保持现状，不做 Plan 3（与 Plan 3 rejected 冲突，不推荐）
-
-**推荐 B**。理由: turn-start primary 是 Plan 3 的核心机制。turn-end safety fallback 提供 defense-in-depth——模型完全不调用 select_skill 时仍有兜底。这是工程上的稳健做法，不需要模型行为完全可靠。
+架构影响：
+- SKILL_SELECT 需要同时注册为 selection phase runtime action 和 TOOL_REGISTRY 普通工具
+- 两条路径共享同一个 SkillSelectToolHandler
+- Evidence 需要区分 `activated_by="selection_phase"` 和 `activated_by="tool_use_compatibility"`
+- TDD 需补充双路径收敛测试（见 §8.7 审查发现 #3）
 
 ---
 
-**Q3: Candidate retrieval**
+**Q2: Selection phase → CONFIRMED: B**
 
-候选检索的实现方式：
+> **B. turn-start primary + turn-end safety fallback**
 
-- **A. aliases / trigger examples / lexical first** (推荐) — 纯词法匹配，无 BM25，无 embedding
-- **B. BM25 as optional enhancement** — lexical + BM25 可选
-- **C. embedding deferred** — 保留 embedding 为未来方向
-
-**推荐 A**。理由: aliases + triggers 是 skill 作者主动维护的高质量信号，比 BM25 统计相关性更可靠。BM25 对中文 tokenization 困难，且引入额外复杂度。Phase 2 先用 lexical，如果实际使用中发现匹配不足，未来再考虑 BM25 enhancement。
+与推荐一致。turn-start selection phase 为主路径，turn-end keyword fallback 降级为 safety net。
 
 ---
 
-**Q4: active_skill lifecycle**
+**Q3: Candidate retrieval → CONFIRMED: A**
 
-active_skill 的生命周期模式：
+> **A. aliases / trigger examples / lexical first**（BM25 optional future, embedding deferred）
 
-- **A. single-turn** — 每次 turn 激活后自动清除
-- **B. multi-turn until task complete** (推荐) — 跨 turn 保持，直到 task complete / 模型切换 / 用户取消
-- **C. explicit skill session** — 用户显式开始/结束 skill session
-
-**推荐 B**。理由: single-turn 失去了 Plan 3 的核心价值（跨 turn skill 上下文保持）。explicit session 增加用户 friction 且需 TUI 支持（B8）。multi-turn until task complete 是自然的工作模式：用户激活一个 skill → 多轮对话都在该 skill 上下文中 → task 完成后自动 deactivate。
+与推荐一致。纯词法匹配，不引入 BM25 或 embedding 依赖。
 
 ---
 
-**Q5: allowed_tools source**
+**Q4: active_skill lifecycle → CONFIRMED: B**
 
-allowed_tools 的来源：
+> **B. multi-turn until task complete**
 
-- **A. manifest declares, runtime validates/enforces** (推荐) — manifest 声明 allowed_tools，runtime 通过 ToolRuntimeMediator/TOOL_GATE 强制实施
-- **B. runtime registry only** — allowed_tools 由 runtime 配置，不在 manifest 中声明
-- **C. manifest only** — manifest 声明但不 enforcement（现状）
-
-**推荐 A**。理由: manifest declares + runtime enforces 是能力与安全分离的正确设计。skill 作者声明"我需要这些工具"，runtime 负责"我只给你这些工具"。这是 003 hardening 已验证的模式。
+与推荐一致。跨 turn 保持 active_skill，task complete / 模型切换 / 用户取消时 deactivate。
 
 ---
 
-**Q6: Fallback policy**
+**Q5: allowed_tools source → CONFIRMED: C**
 
-keyword fallback 的策略：
+> **C. manifest declares, runtime validates/enforces**
 
-- **A. safety fallback only** (推荐) — keyword fallback 仅在模型完全不调用 select_skill 时触发，且仅 high confidence + 无歧义时激活
-- **B. test-only** — keyword fallback 仅在 test 环境启用
-- **C. keep as main path** — keyword fallback 保持为主路径（与 Plan 3 rejected 冲突，不推荐）
+用户选择 C（manifest declares + runtime enforces），注意 SDD 原推荐为 A 且描述相同——选项标签 A/C 在不同版本间可能不一致。已确认：manifest 声明 allowed_tools，runtime 通过 ToolRuntimeMediator/TOOL_GATE 强制实施。
 
-**推荐 A**。理由: Plan 3 的主路径是 turn-start selection phase。keyword fallback 的定位必须是 safety net，不是主路径。保持为 safety fallback only 确保：(1) 不喧宾夺主；(2) 模型行为 evidence 不被 fallback 掩盖；(3) fallback 的低准确率（当前已知缺陷）不影响主路径 credible 判定。
+架构影响：
+- 与推荐方案实质一致（manifest declares + runtime enforces）
+- Phase 5 设计无需调整
+- 对应测试 A01-A04 不变
+
+---
+
+**Q6: Fallback policy → CONFIRMED: A**
+
+> **A. safety fallback only**
+
+与推荐一致。keyword fallback 仅 high confidence + 无歧义时触发，不作为主路径。
 
 ---
 
@@ -802,11 +790,228 @@ keyword fallback 的策略：
 
 ### 8.6 Next Steps
 
-1. **Architecture design review** (当前 gate) — 用户确认 6 个决策问题
-2. **TDD RED tests** — Phase 1 → Phase 2 → ... → Phase 6
-3. **Implementation loop** — 每 phase GREEN → refactor
-4. **Real provider dogfood** — Phase 6 真实模型验证
-5. **Credibility判定** — Phase 6 通过后 002 可标 credible
+1. ~~**Architecture design review** (当前 gate) — 用户确认 6 个决策问题~~ ✅ PASSED (2026-05-31, see §8.7)
+2. **TDD RED tests plan formalization** — 补充 §8.7 审查发现 #8 的双路径收敛测试
+3. **Phase 1 TDD RED tests (M01-M06)** — manifest foundation 测试先行
+4. **Implementation loop** — 每 phase GREEN → refactor
+5. **Real provider dogfood** — Phase 6 真实模型验证
+6. **Credibility判定** — Phase 6 通过后 002 可标 credible
+
+### 8.7 Architecture Design Review Outcome
+
+**日期**: 2026-05-31
+**审查范围**: §8.2 Design Soundness + 9 项用户指定审查点 + Q1-Q6 决策一致性
+**结论**: **PASS** — Plan 3 架构设计通过审查，无阻塞性问题。1 项 TDD 补充建议（非阻塞）。
+
+---
+
+#### 审查点 #1: Plan 3 是否真的能闭合 002 当前 caveats
+
+**判定**: PASS
+
+002 当前 5 个根因维度（§1.1）的闭合分析：
+
+| 根因维度 | 当前缺陷 | Plan 3 方案 | 闭合? |
+|---------|---------|------------|------|
+| 时序 | turn-end hook 事后补救 | turn-start selection phase（Phase 3） | ✅ |
+| 匹配 | 中文 bigram fallback | SkillCandidateRetriever: trigger/alias/lexical（Phase 2） | ✅ |
+| 决策权 | runtime 替模型选 | 模型通过 select_skill 自主选择（Phase 3） | ✅ |
+| 路由信息 | description + tags 仅两项 | when_to_use/triggers/aliases/negative_triggers（Phase 1） | ✅ |
+| SkillSelector | 从未接入生产路径 | SkillCandidateRetriever 替代 select_skill_for_real_provider 作为主路径 | ✅ |
+
+**结论**: Plan 3 闭合了所有 5 个根因维度。闭合质量取决于 Phase 6 real provider dogfood 验证——如果模型频繁不调用 select_skill，safety fallback 会成为事实主路径（见 #6），届时 002 仍为 partial-credible。
+
+---
+
+#### 审查点 #2: turn-start selection phase 是否会破坏现有 ReAct loop
+
+**判定**: PASS
+
+Plan 3 的 turn-start injection 是 **additive injection point**，不是 replacement：
+
+```
+Before (current):
+  turn_start → build_system_prompt → model_call → tool_exec → turn_end
+
+After (Plan 3):
+  turn_start → retriever → selection_prompt_injection → model_call → [select_skill?] → tool_exec → turn_end
+                                                    ↑
+                                             injection point
+```
+
+- ReAct main loop 结构不变（model → tool → model → tool）
+- Selection phase 失败（retriever 返回空、模型输出 no_skill）→ 正常 ReAct 继续
+- Selection phase 成功 → skill body 注入下一轮 system prompt → 仍走 ReAct loop
+- S01-S06 中的 S05/S06 专门验证"不阻塞 main loop"
+
+**结论**: 不破坏 ReAct loop。selection phase 注入发生在 model call 之前的 prompt 构建阶段，不影响 ReAct 的 observe→plan→act 循环。
+
+---
+
+#### 审查点 #3: runtime selection action + ordinary compatibility tool 是否会造成双主路径
+
+**判定**: PASS（附 TDD 补充建议）
+
+Q1=C 选择了两条路径：selection phase runtime action（主路径）和 TOOL_REGISTRY compatibility tool（兼容路径）。
+
+**为什么不是双主路径**：
+- 两条路径共享同一 SkillSelectToolHandler（Phase 3）
+- 两条路径走同一 ToolRuntimeMediator pipeline（TOOL_GATE → TOOL_INVOKE → TOOL_RESULT）
+- 两条路径收敛于同一 ActiveSkillLifecycle.activate()（Phase 4）
+- Evidence 通过 `activated_by` 字段区分来源（`"selection_phase"` vs `"tool_use_compatibility"`）
+
+**TDD 补充建议**（非阻塞）：
+- §7.3 需新增 S07: `test_selection_phase_and_compatibility_tool_converge_to_same_lifecycle()` — 验证两条路径激活的 ActiveSkill 对象等价
+- §7.3 需新增 E07: `test_evidence_distinguishes_selection_phase_vs_compatibility()` — 验证 activated_by 字段正确区分来源
+
+---
+
+#### 审查点 #4: multi-turn active_skill lifecycle 是否安全
+
+**判定**: PASS
+
+安全性分析：
+
+| 关注点 | 分析 | 状态 |
+|--------|------|------|
+| 跨 turn 状态一致性 | ActiveSkillLifecycle 是单例，state 不可变（frozen dataclass） | ✅ |
+| 过期 skill context | deactivate 条件明确：task complete / 模型切换 / 用户取消 | ✅ |
+| checkpoint 一致性 | active_skill 纳入 checkpoint save/resume（Phase 4, L06） | ✅ |
+| 并发/多实例 | Phase 7 前仅 single-instance，B7 namespace 预留扩展点 | ✅ |
+| 状态泄漏 | deactivate() 清除所有 active_skill 引用 | ✅ |
+| switch 原子性 | switch() = deactivate() + activate()，中间无裸露状态 | ✅ |
+
+**结论**: multi-turn lifecycle 安全。关键保障是明确的 deactivate 触发条件和 checkpoint 集成。
+
+---
+
+#### 审查点 #5: allowed_tools manifest declares / runtime validates/enforces 是否边界清晰
+
+**判定**: PASS
+
+边界分析（Q5=C 确认）：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ DECLARATION (manifest — skill 作者维护)                  │
+│                                                         │
+│ SKILL.md frontmatter → SkillManifest.allowed_tools      │
+│ validate_manifest() 检查格式                              │
+│ SkillRegistry 存储                                       │
+│                                                         │
+│ 作者说："我需要这些工具"                                    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ ENFORCEMENT (runtime — 系统保证)                          │
+│                                                         │
+│ ActiveSkillLifecycle.get_active().allowed_tools          │
+│   → ToolRuntimeMediator.mediate()                        │
+│     → TOOL_GATE                                          │
+│       → allowed (tool in allowed_tools)                  │
+│       → rejected (tool not in allowed_tools)             │
+│       → confirmation_required (inherit_tool_policy)      │
+│                                                         │
+│ 系统保证："我只给你这些工具"                                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Declaration 和 enforcement 之间有 SkillManifest → ActiveSkillLifecycle 的单向数据流
+- Runtime 不修改 manifest（immutable frozen dataclass）
+- Manifest 不感知 runtime enforcement 细节
+- 003 hardening 已验证此模式
+
+**结论**: 边界清晰。declaration 和 enforcement 各司其职，无交叉依赖。
+
+---
+
+#### 审查点 #6: safety fallback 是否不会重新变成事实主路径
+
+**判定**: PASS（设计层面），实际取决于 Phase 6 dogfood 验证
+
+设计层面的防护：
+
+| 防护层 | 机制 | 效果 |
+|--------|------|------|
+| 触发时机 | fallback 仅在 turn-end 触发，selection phase 在 turn-start 先执行 | selection phase 优先 |
+| 触发条件 | 仅 high confidence + 无歧义 | 低匹配不激活 |
+| Evidence 区分 | `activated_by="keyword_fallback"` vs `"selection_phase"` | 可审计，可度量 |
+| 退化检测 | Phase 6 D07 验证 fallback 触发频率 | 如果 fallback 频率 > selection，触发 MODEL_BEHAVIOR_CONCERN |
+| 架构约束 | keyword fallback 不是主路径——SDD 明确声明 | 防止口径退化 |
+
+**风险**: 如果 Phase 6 dogfood 显示 fallback 触发频率显著高于 selection phase，说明 turn-start injection 未能有效引导模型调用 select_skill。此时 002 不能标 credible——这是正确的门禁行为。
+
+**结论**: 设计层面防护充分。实际退化检测依赖 Phase 6 evidence。
+
+---
+
+#### 审查点 #7: 是否会影响 Memory / MCP / SubAgent / Scheduler / Checkpoint
+
+**判定**: PASS
+
+子系统影响分析：
+
+| 子系统 | 影响 | 说明 |
+|--------|------|------|
+| **Memory** | 无影响 | active_skill.memory_scope 已在 SkillManifest 中定义，Plan 3 不改变其行为 |
+| **MCP** | 无影响 | MCP bridge 是 startup-only 操作（per REAL-EVIDENCE-005），与 per-turn selection phase 无交互 |
+| **SubAgent** | 无影响（Phase 7 前） | Plan 3 仅 single-instance；B7 SubAgent namespace 在 Phase 7 预留扩展点，不实现 |
+| **Scheduler** | 无影响 | ActionPlan-based scheduler 是独立 code path（008），skill selection 不涉及 plan execution |
+| **Checkpoint** | 正向影响 | Phase 4 L06: active_skill 状态纳入 checkpoint save/resume，增强了恢复能力 |
+
+**结论**: Plan 3 是 additive change，不影响现有子系统。Checkpoint 获得正向增强。
+
+---
+
+#### 审查点 #8: 是否需要在 implementation 前补 TDD RED tests
+
+**判定**: PASS（§7 测试计划充分，附 1 项补充建议）
+
+§7 现有测试计划：M01-M06（6）+ R01-R05（5）+ T01-T08（8）+ E01-E06（6）+ S01-S06（6）+ L01-L06（6）+ A01-A04（4）+ D01-D08（8）+ 62+ regression = **111+ tests**。
+
+补充建议（非阻塞——可在 TDD 阶段补充）：
+
+| 补充 ID | 测试 | 原因 |
+|---------|------|------|
+| S07 | `test_selection_phase_and_compatibility_tool_converge` | Q1=C 双路径收敛验证 |
+| E07 | `test_evidence_distinguishes_selection_vs_compatibility` | Q1=C evidence 来源区分 |
+| R06 | `test_retriever_penalizes_low_quality_candidates` | retriever 返回空列表的场景丰富化 |
+
+**结论**: 现有测试计划覆盖充分。3 项补充为 Q1=C 专门测试，不影响 Phase 1 启动。
+
+---
+
+#### 审查点 #9: 是否还有必须用户拍板的问题
+
+**判定**: PASS（无剩余决策点）
+
+Q1-Q6 已全部确认。Phase 1-6 的 scope/gates/rollback 策略已明确。B7/B8 边界清晰。以下不是需要用户决策的问题，而是实现阶段的正常判断：
+- retriever scoring weights 具体数值 → 实现时 tuning
+- selection prompt 精确措辞 → 实现时 iteration
+- deactivate 的 "task complete" 判定逻辑 → 实现时设计
+
+**结论**: 无需用户进一步决策。可以进入 TDD RED tests。
+
+---
+
+#### 最终审查结论
+
+| 审查点 | 判定 |
+|--------|------|
+| #1 闭合 002 caveats | ✅ PASS |
+| #2 不破坏 ReAct loop | ✅ PASS |
+| #3 双路径不分裂 | ✅ PASS（附 TDD 补充建议） |
+| #4 multi-turn lifecycle 安全 | ✅ PASS |
+| #5 allowed_tools 边界清晰 | ✅ PASS |
+| #6 safety fallback 不喧宾夺主 | ✅ PASS（需 Phase 6 dogfood 验证） |
+| #7 不影响子系统 | ✅ PASS |
+| #8 TDD RED tests 充分 | ✅ PASS（附 3 项补充建议） |
+| #9 无剩余用户决策 | ✅ PASS |
+
+**Overall: PASS** — Plan 3 架构设计通过审查。阻塞问题: 0。TDD 补充建议: 3 项（非阻塞，见 #3 和 #8）。
+
+**下一步**: 按 AutoRun Architecture Extension Loop，进入 TDD RED tests plan — 以 Phase 1 manifest foundation 测试（M01-M06）为起点。
 
 ---
 

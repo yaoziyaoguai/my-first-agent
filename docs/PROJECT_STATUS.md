@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B8 Phase 6B readiness cleanup)
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 Phase 6B Readiness Cleanup completed — 44 pre-existing/non-B7 failures processed (2 fixed + 9 previously xfailed + 28 now xfailed = 0 live failures)。4369 passed, 18 skipped, 28 xfailed, 0 failed。B8 Phase 6B ready for implementation。Ready for B8 Phase 7: NO — blocked by Phase 6B implementation。TUI default entry NOT ACTIVATED。007 remains credible-with-caveats。not product-ready。
+**最后更新**: 2026-06-02 (B8 Phase 5: Development Workflow Panel wired)
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 Phase 6B Readiness Cleanup completed — 44 pre-existing/non-B7 failures processed (0 live failures, 28 xfailed)。4369 passed, 18 skipped, 28 xfailed, 0 failed。B8 Phase 5 COMPLETED — Development Workflow Panel wired into Dashboard (HardStopOverlay + ReviewPacketPanel + AutoRunPanel), 287/287 TUI tests PASS。B8 Phase 6B DEFERRED — blocked by B7 runtime identity model。B8 Phase 7 DEFERRED — blocked by append-only event source contract。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -51,8 +51,9 @@ B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信
 | 项目 | 状态 |
 |------|------|
 | B8 Phase 6B Readiness Cleanup | **COMPLETED** — 44 pre-existing failures processed (0 live failures, 28 xfailed) |
-| B8 Phase 6B Implementation | Ready — cleanup gate passed。4369 passed, 18 skipped, 28 xfailed, 0 failed |
-| B8 Phase 7 | NOT ready — blocked by Phase 6B implementation |
+| B8 Phase 5 (Dev Workflow Panel) | **COMPLETED** (fc0c9a2) — HardStopOverlay + ReviewPacketPanel + AutoRunPanel wired, 287 TUI tests PASS |
+| B8 Phase 6B Implementation | **DEFERRED** — blocked by B7 runtime identity model (session/run/instance + evidence namespace + multi-run storage contract) |
+| B8 Phase 7 | **DEFERRED** — blocked by append-only event source contract |
 | TUI default entry | NOT ACTIVATED |
 
 ### Failure Classification Summary

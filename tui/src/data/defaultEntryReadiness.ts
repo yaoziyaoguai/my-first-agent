@@ -47,7 +47,7 @@ export function getReadinessItems(): ReadinessItem[] {
     {
       id: "R04",
       label: "安全命令执行 (白名单 + confirmation gate)",
-      description: "status/gates/docs-check/autorun/audit/dogfood 可执行",
+      description: "status/gates/docs-check/dev-workflow/audit/dogfood 可执行",
       status: "done",
     },
     {
@@ -58,8 +58,8 @@ export function getReadinessItems(): ReadinessItem[] {
     },
     {
       id: "R06",
-      label: "AutoRun workflow 集成",
-      description: "固定模板命令, preview→confirm→dry-run→exec 流程",
+      label: "Dev Workflow Panel (provisional)",
+      description: "固定模板命令, preview→confirm→dry-run→exec 流程 — dev-only, may be removed",
       status: "done",
     },
     {

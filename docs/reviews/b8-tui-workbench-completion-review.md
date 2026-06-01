@@ -61,15 +61,16 @@
 | Result panel | exit code/stdout/stderr/timeout 展示 |
 | 测试 | 178 tests PASS (133 + 45 Phase 4) |
 
-### 2.5 Phase 5: AutoRun Workflow Integration (5c81cbf)
+### 2.5 Phase 5: Development Workflow / Review Panel (fc0c9a2 — provisional dev-only)
 
 | 项目 | 详情 |
 |------|------|
-| 接入方式 | TUI 通过固定命令模板接入，不重写 AutoRun |
-| AUTORUN_COMMANDS | 固定模板: continue/status/audit/dogfood/gates |
+| 产品边界 | AutoRun 是 Coding Agent 开发期 workflow，非 First Agent 产品特性 |
+| 接入方式 | TUI 通过固定命令模板接入 Coding Agent workflow |
+| AUTORUN_COMMANDS | 固定模板: continue/status/audit/dogfood/gates — dev-only |
 | 注入防护 | `isFixedTemplate()` / `validateAutorunTemplate()` 验证 |
-| 组件 | AutoRunPanel (状态/phase/loop/tests/gates/next), HardStopOverlay, ReviewPacketPanel |
-| 测试 | 206 tests PASS (178 + 28 Phase 5) |
+| 组件 | AutoRunPanel (Development Workflow Panel), HardStopOverlay, ReviewPacketPanel — dev-only |
+| 测试 | 287 tests PASS |
 
 ### 2.6 Phase 6A: Static Evidence/Gate/Dogfood Browser (e3449d4)
 
@@ -200,7 +201,7 @@ B8 在当前边界内已达成以下目标：
 1. **7 阶段完整交付** (Phase 1/2/3/4/5/6A + Polish Loop 1-2)
 2. **260/260 tests PASS**, tsc --noEmit clean
 3. **安全边界完整**: 白名单/黑名单/确认模型/dry-run/audit log/注入防护
-4. **AutoRun 工作流集成**: TUI 可通过固定命令模板安全接入 AutoRun
+4. **Dev Workflow Panel (provisional dev-only)**: TUI 可通过固定命令模板安全接入 Coding Agent engineering workflow。AutoRun 是 Coding Agent 开发期工程 skill，非 First Agent 产品特性。
 5. **静态证据浏览器**: 本地 JSON 解析 + gate history 文本解析
 6. **文档一致性检测**: 文件存在性 + 内容 staleness (STALE_MARKERS)
 7. **代码安全扫描**: noExecution.ts 真实文件扫描 (9 forbidden patterns)

@@ -1,4 +1,5 @@
-/** Phase 5: AutoRun approved command adapter — 固定模板，不动态拼接 */
+/** Phase 5: Approved command adapter for Coding Agent dev workflow — provisional dev-only, may be removed.
+ *  Fixed templates only, no dynamic construction. AutoRun is NOT a First Agent runtime product feature. */
 export const AUTORUN_COMMANDS: Record<string, string> = {
   continue: "cd <repo> && python main.py auto-run --continue",
   status: "cd <repo> && python main.py status",

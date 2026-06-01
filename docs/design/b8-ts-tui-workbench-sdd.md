@@ -13,7 +13,7 @@
 
 **Phase 1 (COMPLETED — `eba77ad`)**: 只读静态仪表盘 — 5 面板 (Overview/EvidenceStatus/Workflow/Gate/EvidencePreview)。
 
-**Phase 2 (COMPLETED — `3c8e178`)**: TUI command shell + AutoRun workflow launcher。CommandCatalog (8 命令, 5 级 SafetyModel), CommandPanel (分组 + ↑↓ 导航), NextActionPanel, CommandPreview (overlay, 不执行)。
+**Phase 2 (COMPLETED — `3c8e178`)**: TUI command shell + Development Workflow launcher（Coding Agent 工程 workflow 入口, provisional dev-only）。CommandCatalog (8 命令, 5 级 SafetyModel), CommandPanel (分组 + ↑↓ 导航), NextActionPanel, CommandPreview (overlay, 不执行)。
 
 **Phase 3 (本轮): TUI Default Workbench Readiness**。TUI 从单屏 dashboard 升级为多视图工作台——7 视图切换、TaskCenter、WorkflowState 解析、EvidenceDetail 展开、DocsConsistency 检测、CommandCatalog v2（workflow stage 绑定）。确立 TUI 为**未来默认入口**（不立即切换），CLI 为**显式 fallback**（永不删除）。定义 Default Entry Readiness Checklist（切换前必须通过）。**仍 preview-only，不执行命令，不调用 API。**
 
@@ -28,7 +28,7 @@
 
 **后续 Phase (Phase 4-7 路线图)**: 详见 `docs/roadmap/b8-tui-workbench-roadmap.md`。
 - Phase 4: 安全命令执行（confirmation gate + dry-run 优先）
-- Phase 5: 实时 evidence 流（agent_log.jsonl tail / dispatcher stream）
+- Phase 5: Development Workflow / Review Panel (provisional dev-only, may be removed)
 - Phase 6: 多实例监控（B7 后端就绪后）
 - Phase 7: 完整 TUI Agent Workbench（CLI 降级为 fallback，TUI 为主入口）
 
@@ -61,7 +61,7 @@
 
 TUI 从只读 observer 升级为交互式 command shell：
 
-1. **CommandCatalog** — 定义可用命令列表（AutoRun / status / audit / dogfood / gates / docs check），仅展示 metadata，不执行
+1. **CommandCatalog** — 定义可用命令列表（Development Workflow / status / audit / dogfood / gates / docs check），仅展示 metadata，不执行
 2. **CommandPanel** — 展示命令列表、描述、risk level、是否需要 confirmation、是否 currently executable
 3. **NextActionPanel** — 从 PROJECT_STATUS 读取当前推荐下一步
 4. **CommandPreview** — 选中命令后展示将要执行的 shell command 或 prompt，Phase 2 只 preview
@@ -268,7 +268,7 @@ interface CommandDefinition {
   requiresConfirmation: boolean;
   executableInPhase2: boolean;
   shellCommand?: string;         // 对应的 CLI 命令 (preview 用)
-  relatedSkills?: string[];      // 关联的 AutoRun skills
+  relatedSkills?: string[];      // 关联的 Coding Agent dev workflow skills
   riskNote?: string;             // 风险说明
 }
 
@@ -285,7 +285,7 @@ Phase 2 不执行任何命令，只展示 metadata + shell command preview。
 
 | ID | Name | Category | Safety | Phase 2 行为 |
 |----|------|----------|--------|-------------|
-| `autorun` | AutoRun Workflow | workflow | `requires-confirmation` | preview-only |
+| `autorun` | Dev Workflow (provisional) | workflow | `requires-confirmation` | preview-only |
 | `status` | Project Status | diagnostics | `preview-only` | preview-only |
 | `audit` | Full System Audit | diagnostics | `requires-confirmation` | preview-only |
 | `dogfood` | Dogfood Run | execution | `requires-confirmation` | preview-only |
@@ -312,7 +312,7 @@ Phase 2 不执行任何命令，只展示 metadata + shell command preview。
    - NavigationBar 组件展示当前 view 及可用 views
    - View state model: `{ currentView: ViewId, views: ViewDef[] }`
 
-2. **TaskCenterPanel** — AutoRun 任务中心
+2. **TaskCenterPanel** — 开发任务中心 (Coding Agent engineering phase status)
    - 展示 B8/B7 各 Phase 及其状态:
      | Phase | 状态 |
      |-------|------|
@@ -387,7 +387,7 @@ Phase 2 不执行任何命令，只展示 metadata + shell command preview。
 8. 不做 Web UI
 9. 不进入 B7 multi-instance implementation
 10. 不做 real-time evidence stream
-11. 不执行 AutoRun 命令
+11. 不执行 Coding Agent workflow 命令
 12. 不启动 agent run
 13. 不写 checkpoint
 
@@ -463,7 +463,7 @@ tui/src/
 ┌────────────────────────────────────────────────────────────┐
 │  Commands                                                  │
 │                                                            │
-│  ▶ autorun        AutoRun Workflow     [requires-confirm]  │
+│  ▶ autorun        Dev Workflow (prov)     [requires-confirm]  │
 │    status         Project Status       [preview-only]      │
 │    audit          Full System Audit    [requires-confirm]  │
 │    dogfood        Dogfood Run          [requires-confirm]  │
@@ -488,7 +488,7 @@ tui/src/
 ┌────────────────────────────────────────────────────────────┐
 │  Next Action                                               │
 │                                                            │
-│  📋 B8-lite Phase 2: TUI command shell + AutoRun launcher  │
+│  📋 B8-lite Phase 2: TUI command shell + Dev Workflow     │
 │                                                            │
 │  Why: TUI 从只读 observer 升级为交互式工作台入口            │
 │                                                            │
@@ -504,11 +504,11 @@ tui/src/
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  Command Preview — autorun                                 │
+│  Command Preview — autorun (dev workflow)                   │
 │                                                            │
 │  Safety:       requires-confirmation                       │
 │  Phase 2:      preview-only (copy & paste to CLI)          │
-│  Risk:         启动完整 AutoRun loop，可能执行 git push     │
+│  Risk:         启动 Coding Agent 工程 loop，可能执行 git push│
 │                                                            │
 │  Shell command:                                            │
 │  cd /path/to/repo && python main.py auto-run               │
@@ -675,7 +675,7 @@ CommandPreview 作为 overlay 显示在底部，按 `Enter` 时出现，按 `Esc
 - **不删除 CLI**: CLI 永不被删除，始终作为 fallback
 - **不进入 B7 multi-instance implementation**: 同 Phase 1/2
 - **不做 real-time evidence stream**: Phase 5+
-- **不执行 AutoRun 命令 / 不启动 agent run**: Phase 4+
+- **不执行 Coding Agent workflow 命令 / 不启动 agent run**: Phase 4+
 - **不改 Python runtime / core path**: 同 Phase 1/2
 - **不写 checkpoint**: TUI 不触发 session checkpoint
 - **不做 Web UI**: 同 Phase 1/2
@@ -683,15 +683,15 @@ CommandPreview 作为 overlay 显示在底部，按 `Enter` 时出现，按 `Esc
 
 ---
 
-## 10. Future AutoRun Integration (Phase 3 为入口)
+## 10. Dev Workflow Integration (Phase 3+ — provisional dev-only)
 
-Phase 3 TUI 已是多视图工作台，展示 AutoRun workflow 等命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
+Phase 3 TUI 已是多视图工作台，展示 Coding Agent engineering workflow 命令（provisional dev-only）。后续 Phase 4+ 可以直接通过 TUI 触发执行：
 
 ```bash
 # 当前 Phase 3 用户流程
 # TUI 浏览命令 → 复制 shell command → 粘贴到 CLI 执行
 
-Phase 2 TUI 已是 command shell，展示 AutoRun workflow 等命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
+Phase 2 TUI 已是 command shell，展示 Coding Agent dev workflow 命令。后续 Phase 4+ 可以直接通过 TUI 触发执行：
 
 ```bash
 # 当前 Phase 2 用户流程

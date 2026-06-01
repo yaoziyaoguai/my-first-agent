@@ -33,7 +33,7 @@ export function HardStopOverlay({ reason, detail, loop }: Props) {
         <Text bold>User action needed:</Text>
         <Text dimColor>1. Review the stop reason above</Text>
         <Text dimColor>2. Fix the issue in your terminal</Text>
-        <Text dimColor>3. Resume AutoRun: /auto-run --continue</Text>
+        <Text dimColor>3. Resume Coding Agent workflow: /auto-run --continue</Text>
       </Box>
     </Box>
   );

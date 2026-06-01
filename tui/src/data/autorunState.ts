@@ -1,4 +1,5 @@
-/** Phase 5: AutoRun state from PROJECT_STATUS.md + git log */
+/** Phase 5: Development workflow state parser — provisional dev-only, may be removed.
+ *  AutoRun is a Coding Agent engineering workflow, NOT a First Agent runtime product feature. */
 export interface AutoRunState {
   currentPhase: string;
   status: "idle" | "running" | "completed" | "hard_stop";

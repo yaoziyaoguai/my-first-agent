@@ -27,9 +27,9 @@
     },
     {
       "phase": "b8-phase-5",
-      "label": "B8 Phase 5 (AutoRun Workflow Integration)",
+      "label": "B8 Phase 5 (Dev Workflow Panel — provisional dev-only)",
       "status": "completed",
-      "why": "AutoRun adapter + workflow launcher + state/review packet panels 全部完成 (5c81cbf)"
+      "why": "Dev Workflow Panel + HardStopOverlay + ReviewPacketPanel wired — dev-only, may be removed"
     },
     {
       "phase": "b8-phase-6a",

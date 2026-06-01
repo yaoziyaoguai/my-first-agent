@@ -1,8 +1,8 @@
 # B8 TypeScript TUI Workbench — 分阶段路线
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-02 (Phase 4 COMPLETED — 安全命令执行完整交付)
-**来源**: `/plan-eng-review` → B8 Roadmap / Default Entry Readiness Review → AutoRun Hardening
+**最后更新**: 2026-06-02 (Phase 5 COMPLETED — Development Workflow Panel wired)
+**来源**: `/plan-eng-review` → B8 Roadmap / Default Entry Readiness Review
 **依赖文档**: `docs/design/b8-ts-tui-workbench-sdd.md` (Phase 1-3 SDD)、`docs/PROJECT_STATUS.md` (当前状态)、`docs/debt/b8-tui-workbench-technical-debt.md` (Phase 6B/7 deferred debt)
 
 ---
@@ -28,9 +28,9 @@ eba77ad                 3c8e178                  2ae13ab
     │
     ▼
 Phase 4 (COMPLETED)      Phase 5 (COMPLETED)      Phase 6A (COMPLETED)
-安全命令执行             AutoRun 工作流集成       静态证据/门禁浏览器
-whitelist+黑名单          TUI→AutoRun launcher    JSON 解析 + gate history
-+env sanitize+audit log
+安全命令执行             Dev Workflow Panel       静态证据/门禁浏览器
+whitelist+黑名单          HardStop+ReviewPacket    JSON 解析 + gate history
++env sanitize+audit log   +AutoRunPanel wired
     │                       │                       │
     ▼                       ▼                       ▼
 Phase 6B (BLOCKED by B7)  Phase 7 (FUTURE)
@@ -46,7 +46,7 @@ trend, commit linkage    read-only stream, 不回写
 | **Phase 2** | Command Shell | **COMPLETED** | CommandCatalog, CommandPanel, 74 tests | — |
 | **Phase 3** | 默认入口就绪 | **COMPLETED** | 7 视图导航, 133 tests | — |
 | **Phase 4** | 安全命令执行 | **COMPLETED** | whitelist + 黑名单 + env sanitize + async exec + audit log, 285 tests | ✅ |
-| **Phase 5** | AutoRun 工作流集成 | **READY** | TUI→AutoRun launcher, state panel, review packet (components exist, not wired) | ✅ (after P4) |
+| **Phase 5** | Development Workflow Panel | **COMPLETED** | HardStopOverlay + ReviewPacketPanel + AutoRunPanel wired into workflow view, 287 tests | ✅ (after P4) |
 | **Phase 6A** | 静态证据/门禁/Dogfood 浏览器 | **COMPLETED** | 本地 JSON 解析, gate history, 证据浏览 | ✅ (已自动执行) |
 | **Phase 6B** | 多实例历史浏览器 | **BLOCKED** (by B7) | multi-run history, 趋势, commit linkage | ❌ |
 | **Phase 7** | 运行时 Event Stream 查看器 | **FUTURE** (after P4-P6B) | read-only stream viewer | ❌ |
@@ -272,159 +272,56 @@ interface AuditLogEntry {
 
 ---
 
-## 4. Phase 5: AutoRun 工作流集成 (AFTER P4 — READY)
+## 4. Phase 5: Development Workflow / Review Panel (COMPLETED — provisional dev-only)
 
-**状态**: READY for AutoRun (Phase 4 完成后)。
+**状态**: COMPLETED (fc0c9a2)。**provisional dev-only, may be removed before productization。**
 **依赖**: Phase 4 (安全命令执行可用)。
-**预估文件数**: ~10 (3 新组件 + 4 新数据模型 + 3 新测试文件)
-**预估行数**: ~500 TypeScript (含测试)
-**Phase 入口条件**: Phase 4 COMPLETED, ~158 tests PASS, Phase 4 gates all pass
+**实际交付**: 3 组件 wired into Dashboard workflow view, 287 TUI tests PASS
 
-### 4.1 目标
+### 4.1 产品边界声明
 
-TUI 通过 Phase 4 的命令执行基础设施接入 AutoRun workflow。TUI 不重写 AutoRun，不绕过 AutoRun。用户通过 TUI 发起 AutoRun → 确认 → 执行 → 实时查看状态 → 查看 review packet → 识别 HARD_STOP。
+**AutoRun 是 Coding Agent（Claude Code / Codex）开发 First Agent 时使用的工程 workflow/skill，不是 First Agent 产品本身的核心能力。** B8 TUI Workbench 的产品主线是 multi-agent/session/run/instance observation、evidence history、event stream、checkpoint/evidence/gate review。
 
-### 4.2 核心原则
+Phase 5 中展示的 Development Workflow Panel / ReviewPacketPanel / HardStopOverlay 仅服务于开发期 Coding Agent workflow 观察，属于 provisional dev-only 工具，后续可移除或降级。
 
-1. **TUI 不重写 AutoRun** — TUI 只通过 approved command adapter 接入，不实现 AutoRun 逻辑
-2. **不绕过 AutoRun workflow** — 所有 AutoRun 操作走 `/auto-run` skill，TUI 只是 launcher
-3. **不 unattended execution** — 每个高风险步骤需要用户确认
-4. **TUI 是 AutoRun 的 view layer** — AutoRun 的 Python runtime 执行，TUI 展示状态
+Phase 6B（multi-instance history browser）和 Phase 7（runtime event stream viewer）是 B8 的产品主线能力，不受 Phase 5 影响。
 
-### 4.3 Approved Command Adapter
+### 4.2 已交付的 dev-only 组件
 
-TUI 通过以下固定命令模式接入 AutoRun:
+| 组件 | 用途 | 产品地位 |
+|------|------|---------|
+| AutoRunPanel | 展示开发期 workflow 状态（phase/loop/tests/gates/next） | provisional dev-only |
+| HardStopOverlay | 展示开发期 HARD_STOP 原因和修复指引 | provisional dev-only |
+| ReviewPacketPanel | 展示开发期 review packet（tests/gates/commits） | provisional dev-only |
+| autorunAdapter.ts | Coding Agent 固定命令模板（continue/status/audit/dogfood/gates） | provisional dev-only |
+| autorunState.ts | 从 PROJECT_STATUS.md 解析开发期 workflow 状态 | provisional dev-only |
+| reviewPacket.ts | 从 git log + test output 构建 review 摘要 | provisional dev-only |
 
-```typescript
-// 所有 AutoRun 命令都是固定模板，不动态拼接
-const AUTORUN_COMMANDS: Record<string, string> = {
-  "continue": "cd <repo> && python main.py auto-run --continue",
-  "status":   "cd <repo> && python main.py status",
-  "audit":    "cd <repo> && python main.py audit --readonly",
-  "dogfood":  "cd <repo> && python main.py dogfood --case=<id>",
-  "gates":    "cd <repo> && ruff check . && python -m pytest tests/ -x -q",
-};
-```
+### 4.3 核心约束
 
-禁止:
-- 动态构建 `auto-run <user_typed_prompt>`（防止注入）
-- 将 TUI 用户输入直接拼接到 shell 命令
-- 从 agent_log.jsonl 读取 AutoRun 状态并自行决策下一步
+1. **TUI 不实现 AutoRun 逻辑** — 仅通过 approved command adapter 接入固定模板
+2. **TUI 不自动启动 Coding Agent workflow** — 所有操作需用户确认
+3. **TUI 是 view layer** — Coding Agent workflow 由 Python runtime 执行
+4. **后续可移除或降级** — 所有 Phase 5 组件在产品化前可移除，不影响 Phase 6B/7 产品主线
 
-### 4.4 用户流程
-
-```
-TUI CommandPanel → 选中 "AutoRun Continue"
-→ CommandPreview (Phase 2 复用) — 显示将执行的命令
-→ Confirmation Overlay (Phase 4 复用) — 确认执行
-→ 执行 (Phase 4 exec path)
-→ AutoRun State Panel — 展示当前状态
-  ┌────────────────────────────────────────────┐
-  │  AutoRun State                             │
-  │                                            │
-  │  Status: RUNNING                           │
-  │  Loop:   Phase 4 implementation            │
-  │  Stage:  TDD RED tests                     │
-  │  Output: writing phase4 tests...           │
-  │                                            │
-  │  [View Full Log]  [Stop]                   │
-  └────────────────────────────────────────────┘
-→ 完成 → Review Packet Display
-  ┌────────────────────────────────────────────┐
-  │  AutoRun Review — Phase 4                  │
-  │                                            │
-  │  Tests:   25/25 PASS                       │
-  │  TypeScript: clean                          │
-  │  Gates:    all pass                        │
-  │  Commit:   feat(tui): add phase 4          │
-  │                                            │
-  │  [View Diff]  [Next Loop]  [Stop]          │
-  └────────────────────────────────────────────┘
-```
-
-### 4.5 HARD_STOP Display
-
-AutoRun 遇到 HARD_STOP 时:
-```
-┌────────────────────────────────────────────┐
-│  ⛔ HARD_STOP — AutoRun Paused              │
-│                                            │
-│  Reason: 白名单外命令请求执行              │
-│  Detail: attempted exec of "rm -rf"        │
-│  Loop:    Phase 4 implementation           │
-│                                            │
-│  User action needed:                       │
-│  1. Review the stop reason above           │
-│  2. Fix the issue in your terminal         │
-│  3. Resume AutoRun: /auto-run --continue   │
-│                                            │
-│  [Exit TUI]  [Copy Stop Reason]            │
-└────────────────────────────────────────────┘
-```
-
-### 4.6 AutoRun State Panel
-
-从 `docs/PROJECT_STATUS.md` + `git log` 派生（不运行 AutoRun Python 进程）:
-
-```typescript
-interface AutoRunState {
-  currentPhase: string;         // "Phase 4"
-  status: "idle" | "running" | "completed" | "hard_stop";
-  lastLoop: string;             // "Loop N"
-  lastCommit: string;           // hash
-  testsPass: number;
-  gatesStatus: "all_pass" | "partial" | "failed";
-  nextRecommended: string;      // from PROJECT_STATUS
-  hardStopReason?: string;
-}
-```
-
-- 数据源: PROJECT_STATUS.md 解析（已有解析器） + git log
-- 不解析 agent_log.jsonl（Phase 5 不读 runtime logs）
-- `status: "running"` 仅在 Phase 4 exec path 中 AutoRun 进程活跃时为 true
-
-### 4.7 实现文件
+### 4.4 实现文件 (已交付, 全部 dev-only)
 
 | 文件 | 类型 | 内容 |
 |------|------|------|
-| `tui/src/data/autorunAdapter.ts` | NEW data | AUTORUN_COMMANDS 固定模板, 命令验证 |
-| `tui/src/data/autorunState.ts` | NEW data | PROJECT_STATUS 解析→AutoRunState |
-| `tui/src/data/reviewPacket.ts` | NEW data | 从 git log + test output 构建 review summary |
-| `tui/src/components/AutoRunPanel.tsx` | NEW component | AutoRun 状态面板 |
-| `tui/src/components/HardStopOverlay.tsx` | NEW component | HARD_STOP 展示 |
-| `tui/src/components/ReviewPacketPanel.tsx` | NEW component | Review packet 展示 |
-| `tui/src/components/Dashboard.tsx` | MODIFY | 新增 AutoRun view 或扩展现有 Commands view |
+| `tui/src/data/autorunAdapter.ts` | data | AUTORUN_COMMANDS 固定模板 — dev-only |
+| `tui/src/data/autorunState.ts` | data | PROJECT_STATUS 解析 — dev-only |
+| `tui/src/data/reviewPacket.ts` | data | git log + test output → review — dev-only |
+| `tui/src/components/AutoRunPanel.tsx` | component | Development Workflow Panel — dev-only |
+| `tui/src/components/HardStopOverlay.tsx` | component | HARD_STOP display — dev-only |
+| `tui/src/components/ReviewPacketPanel.tsx` | component | Review packet display — dev-only |
+| `tui/src/components/Dashboard.tsx` | MODIFY | workflow view 串联以上组件 |
 
-### 4.8 Stop Conditions
-
-| 条件 | 行为 |
-|------|------|
-| 用户尝试动态构建 auto-run 命令 | **HARD_STOP** |
-| AutoRun 进程返回非零 exit code | 展示错误, 暂停, 不等同于 HARD_STOP |
-| git status 显示 dirty (非预期文件) | **HARD_STOP** |
-| Phase 1-4 回归失败 | **HARD_STOP** |
-| 发现非 AutoRun 标准命令模板被执行 | **HARD_STOP** |
-| AutoRun 进程超时 (300s) | kill → 展示 timeout, 暂停 |
-
-### 4.9 测试计划
-
-| 测试文件 | 覆盖 | 预估数量 |
-|---------|------|---------|
-| `autorunAdapter.test.ts` | 固定命令模板, 注入防护, 验证逻辑 | 6 |
-| `autorunState.test.ts` | PROJECT_STATUS 解析, status 映射, 边界 | 5 |
-| `reviewPacket.test.ts` | git log 解析, test output 解析, summary 构建 | 4 |
-| **Phase 5 新增** | | **~15** |
-| **总计** | | **~173** |
-
-### 4.10 门禁
+### 4.5 门禁
 
 | Gate | 命令 | 预期 |
 |------|------|------|
 | TypeScript | `npx tsc --noEmit` | 0 errors |
-| Phase 5 tests | `npx vitest run` | all pass |
-| Phase 1-4 regression | `npx vitest run` | ~158/158 |
-| 命令注入扫描 | grep 动态字符串拼接 exec | 0 matches (仅固定模板) |
-| no .env | grep `.env` / `process.env.` in new files | 0 matches |
+| TUI tests | `cd tui && npm test` | 287/287 PASS |
 | git diff --check | — | clean |
 
 ---

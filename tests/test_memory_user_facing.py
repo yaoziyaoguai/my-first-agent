@@ -72,8 +72,7 @@ class TestMemoryRuntimeListRecords:
             updated_by_operation=MemoryOperationType.RETAIN,
         )
         store.apply_operation_intent = lambda *args, **kwargs: None  # bypass
-        # _records 是 {record.id: record} dict
-        store._records = {record.id: record}
+        store._records = {store._namespaced_key(record.id): record}
 
         runtime = MemoryRuntime(store=store)
         records = runtime.list_records()

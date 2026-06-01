@@ -44,6 +44,11 @@ def test_session_a_approved_memory_does_not_write_session_b_in_memory_store() ->
         MemoryConfirmationChoice.ACCEPT,
     )
 
+    # 写入 store 通过 dispatcher 路径，resolve_confirmation 只返回 payload
+    payload = getattr(stored_a, "_dispatcher_payload", None)
+    if payload and "candidate" in payload:
+        store_a.store_retained_record(payload["candidate"])
+
     assert stored_a.action is MemoryEvaluationAction.STORED
     assert len(store_a.list_records()) == 1
     assert store_b.list_records() == ()

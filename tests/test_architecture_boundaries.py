@@ -573,6 +573,9 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", 1),
     ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", 4),
     ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", 1),
+    # B7 Loop 4: _dispatch_checkpoint_save 在 dispatcher=None 时
+    # 直接调用 save_checkpoint(session_id=, run_id=) 走 v2 identity 路径。
+    ("agent.core", "_dispatch_checkpoint_save", "save_checkpoint", 1),
     # Global Architecture Debt Remediation：loop guard 的 checkpoint clear
     # 已从 core.py 主循环实现迁到 agent.loop orchestration。
     ("agent.loop", "run_main_loop", "clear_checkpoint", 1),
@@ -584,17 +587,22 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", 1),
     ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", 3),
     ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", 2),
+    # B7 v2: session checkpoint loading 收口到 _load_checkpoint_best_effort /
+    # _load_checkpoint_to_state_best_effort 两个 helper（per-session identity 感知），
+    # 替代了以往 try_resume_from_checkpoint / handle_resume_choice 的分散调用。
+    ("agent.session", "_load_checkpoint_best_effort", "load_checkpoint", 2),
+    ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint_to_state", 2),
     ("agent.session", "finalize_session", "save_checkpoint", 1),
     ("agent.session", "handle_double_interrupt", "save_checkpoint", 1),
     ("agent.session", "handle_interrupt_choice", "clear_checkpoint", 1),
     ("agent.session", "handle_interrupt_with_checkpoint", "save_checkpoint", 1),
     ("agent.session", "handle_resume_choice", "clear_checkpoint", 1),
-    ("agent.session", "handle_resume_choice", "load_checkpoint_to_state", 1),
     ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", 1),
-    ("agent.session", "try_resume_from_checkpoint", "load_checkpoint", 1),
-    ("agent.session", "try_resume_from_checkpoint", "load_checkpoint_to_state", 1),
-    ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", 2),
+    # B7: advance_current_step_if_needed 新增一次 save（identity-per-run checkpoint 路径）。
+    ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", 3),
     ("agent.tool_executor", "execute_single_tool", "save_checkpoint", 4),
+    # B7: ToolRuntimeMediator confirmation_required 路径（mediator gate 阻断后保存状态）。
+    ("agent.tool_runtime_mediator", "_handle_confirmation_required", "save_checkpoint", 1),
     ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", 1),
     ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", 3),
 )

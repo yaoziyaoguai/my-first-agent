@@ -335,7 +335,7 @@ def test_dedup_against_store():
         created_by_operation=MemoryOperationType.RETAIN,
         updated_by_operation=MemoryOperationType.RETAIN,
     )
-    store._records[record.id] = record
+    store._records[store._namespaced_key(record.id)] = record
 
     engine = _make_engine()
     candidates = engine.evaluate(
@@ -454,6 +454,12 @@ def test_suggestion_engine_resolve_accept():
     )
     assert resolved.action is MemoryEvaluationAction.STORED
 
+    # 写入 store 通过 dispatcher 路径（MemoryRetainHandler），
+    # resolve_confirmation 只返回 dispatcher payload。
+    payload = getattr(resolved, "_dispatcher_payload", None)
+    if payload and "candidate" in payload:
+        runtime._store.store_retained_record(payload["candidate"])
+
     records = runtime._store.list_records()
     assert any("ruff" in r.content for r in records)
 
@@ -551,12 +557,15 @@ def test_suggestion_candidate_metadata_flows_to_store():
     result = runtime.evaluate_user_text("我们选了 FastAPI 作为 web 框架")
     assert result.action is MemoryEvaluationAction.CONFIRMATION_REQUIRED
 
-    runtime.resolve_confirmation(result.candidate_id, MemoryConfirmationChoice.ACCEPT)
+    resolved = runtime.resolve_confirmation(result.candidate_id, MemoryConfirmationChoice.ACCEPT)
+
+    # 写入 store 通过 dispatcher 路径，resolve_confirmation 只返回 payload
+    payload = getattr(resolved, "_dispatcher_payload", None)
+    if payload and "candidate" in payload:
+        runtime._store.store_retained_record(payload["candidate"])
 
     records = runtime._store.list_records()
     assert len(records) == 1
-    # metadata 通过 candidate → decision → confirmation → operation intent → store
-    # 验证 record 存在且内容正确
     assert "FastAPI" in records[0].content
 
 

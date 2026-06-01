@@ -45,7 +45,7 @@ def test_memory_confirmation_delegates_to_memory_interaction(monkeypatch):
 
     calls = []
 
-    def fake_handle(user_input, ctx, *, memory_runtime, on_runtime_event):
+    def fake_handle(user_input, ctx, *, memory_runtime, on_runtime_event, dispatcher=None):
         calls.append((user_input, ctx, memory_runtime, on_runtime_event))
         return "memory-confirmation-result"
 

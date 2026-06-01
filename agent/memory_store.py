@@ -234,6 +234,29 @@ class InMemoryMemoryStore:
     def _namespaced_key(self, record_id: str) -> str:
         return f"{self._namespace}:{record_id}"
 
+    def store_retained_record(self, candidate: dict) -> None:
+        """B7 兼容层：从 dispatcher payload candidate 直接写入 store。
+
+        MemoryRuntime.resolve_confirmation 在无 dispatcher 路径中使用此方法
+        确保 store 写入。dispatcher 路径中 MemoryRetainHandler 基于相同
+        record_id 写入，与本次调用幂等。
+        """
+        record_id = str(candidate.get("proposal_id", ""))
+        content = str(candidate.get("content", ""))
+        if not record_id or not content:
+            return
+        record = MemoryRecord(
+            id=record_id,
+            content=content,
+            scope=MemoryScope.USER,
+            source_summary="user_explicit",
+            safety_summary="no_safety_concern",
+            audit_id=f"audit:{record_id}",
+            created_by_operation=MemoryOperationType.RETAIN,
+            updated_by_operation=MemoryOperationType.RETAIN,
+        )
+        self._records[self._namespaced_key(record_id)] = record
+
     def _extract_id(self, namespaced_key: str) -> str:
         prefix = f"{self._namespace}:"
         if namespaced_key.startswith(prefix):

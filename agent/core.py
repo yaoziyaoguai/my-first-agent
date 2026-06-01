@@ -713,8 +713,8 @@ def chat(
     # B7: 设置 skill_tool 的活跃 session namespace key——
     # _skill_select_tool_func 通过此值获取 per-session lifecycle，
     # 避免依赖 logger.get_runtime_session_id() 的 import-time SESSION_ID fallback。
+    # 实际 set 推迟到工具执行路径入口处以配合 try/finally cleanup。
     from agent.skill_system.skill_tool import set_active_session_ns as _set_skill_ns
-    _set_skill_ns(_ns_key)
 
     from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
     _chat_identity = _RuntimeIdentity(
@@ -1211,39 +1211,45 @@ def chat(
     # 路径；返回 str 表示已被某个 confirmation handler 接管。
     # baseline 由 tests/test_pending_confirmation_dispatch.py 11 条
     # characterization tests 钉死（cdd1427）。详见 helper docstring。
-    _dispatched = _dispatch_pending_confirmation(state, user_input, confirmation_ctx)
-    if _dispatched is not None:
-        return _dispatched
+    # B7: 工具执行路径入口处设置 session namespace 并用 try/finally 确保 cleanup。
+    _set_skill_ns(_ns_key)
+    try:
+        _dispatched = _dispatch_pending_confirmation(state, user_input, confirmation_ctx)
+        if _dispatched is not None:
+            return _dispatched
 
-    _compress_history_and_sync_checkpoint(_loop_ctx)
+        _compress_history_and_sync_checkpoint(_loop_ctx)
 
-    # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
-    if state.task.current_plan and state.task.status == "running":
-        state.conversation.messages.append({"role": "user", "content": user_input})
-        return _run_main_loop(
-            turn_state, _loop_ctx,
+        # 如果当前已有运行中的任务，则默认把这次输入视为"继续当前任务"的反馈。
+        if state.task.current_plan and state.task.status == "running":
+            state.conversation.messages.append({"role": "user", "content": user_input})
+            return _run_main_loop(
+                turn_state, _loop_ctx,
+                tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
+                action_scheduler=action_scheduler,
+                checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
+            )
+
+        # 到这里意味着要开启一轮全新的任务。
+        # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
+        # 不触发 done 路径、tool_execution_log / pending_tool 残留到下一个任务"
+        # 这种 bug。之前这里只重置 4 个计数字段，其他字段（log/pending/user_goal
+        # 等）都有可能带着旧值进新任务。
+        state.reset_task()
+
+        plan_result = _run_planning_phase(
+            user_input, turn_state, _loop_ctx,
+            action_scheduler=action_scheduler,
+        )
+        return _handle_planning_phase_result(
+            plan_result, turn_state, _loop_ctx,
             tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
             action_scheduler=action_scheduler,
             checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
         )
-
-    # 到这里意味着要开启一轮全新的任务。
-    # 用 state.reset_task() 一次性清干净 task 层所有字段，避免"单步任务收尾
-    # 不触发 done 路径、tool_execution_log / pending_tool 残留到下一个任务"
-    # 这种 bug。之前这里只重置 4 个计数字段，其他字段（log/pending/user_goal
-    # 等）都有可能带着旧值进新任务。
-    state.reset_task()
-
-    plan_result = _run_planning_phase(
-        user_input, turn_state, _loop_ctx,
-        action_scheduler=action_scheduler,
-    )
-    return _handle_planning_phase_result(
-        plan_result, turn_state, _loop_ctx,
-        tool_gate_tool_name=tool_gate_tool_name, skill_registry=_skill_registry,
-        action_scheduler=action_scheduler,
-        checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
-    )
+    finally:
+        from agent.skill_system.skill_tool import clear_active_session_ns as _clear_skill_ns
+        _clear_skill_ns()
 
 
 # ========== 规划阶段 ==========

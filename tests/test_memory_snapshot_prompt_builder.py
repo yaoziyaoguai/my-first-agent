@@ -63,7 +63,7 @@ def test_empty_memory_snapshot_preserves_current_prompt_behavior(monkeypatch) ->
     from agent.memory_contracts import MemorySnapshot
     from agent.prompt_builder import build_system_prompt
 
-    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda: "")
+    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda skill_registry=None: "")
 
     baseline = build_system_prompt()
     with_empty_snapshot = build_system_prompt(memory_snapshot=MemorySnapshot.empty())
@@ -82,7 +82,7 @@ def test_prompt_builder_renders_approved_snapshot_with_provenance_and_reason(mon
     from agent.memory_contracts import MemorySnapshot, MemorySnapshotItem
     from agent.prompt_builder import build_system_prompt
 
-    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda: "")
+    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda skill_registry=None: "")
 
     snapshot = MemorySnapshot(
         items=(
@@ -119,7 +119,7 @@ def test_snapshot_rendering_respects_rendered_budget(monkeypatch) -> None:
     from agent.memory_contracts import MemorySnapshot, MemorySnapshotItem
     from agent.prompt_builder import build_system_prompt
 
-    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda: "")
+    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda skill_registry=None: "")
 
     snapshot = MemorySnapshot(
         items=(
@@ -161,7 +161,7 @@ def test_sensitive_snapshot_item_is_filtered_not_plaintext_injected(monkeypatch)
     from agent.memory_contracts import MemorySnapshot, MemorySnapshotItem
     from agent.prompt_builder import build_system_prompt
 
-    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda: "")
+    monkeypatch.setattr("agent.prompt_builder.build_skills_section", lambda skill_registry=None: "")
 
     snapshot = MemorySnapshot(
         items=(

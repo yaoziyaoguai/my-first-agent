@@ -32,6 +32,12 @@ def _get_active_session_ns() -> str:
     return _active_session_ns
 
 
+def clear_active_session_ns() -> None:
+    """B7: 清除活跃 session 的 namespace key（由 chat() finally 块调用）。"""
+    global _active_session_ns
+    _active_session_ns = ""
+
+
 def _ensure_skill_select_registered():
     """确保 SKILL_SELECT 已在 TOOL_REGISTRY 中注册（幂等）。
 

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 3 — Phase 1-4 in progress)
-**状态**: B7 **remediation Loop 3 in progress** — Codex red-line audit 发现仍存在 P1 identity/MCP session gaps。Phase 1 (turn-start identity propagation) 已修复，Phase 2 (MCP decision frame session lookup) 已修复，Phase 3 (SKILL_SELECT lifecycle global fallback) 已修复，Phase 4 (checkpoint confirmation paths v2 identity) 缺失 identity 已修复。Phase 5-8 pending。Red/Green evidence tests: 10/10 PASS。B7 completed: NO。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: Phase 5-8 continue。
+**最后更新**: 2026-06-01 (B7 remediation Loop 4 — Phase 1-5 complete, Phase 6-8 pending)
+**状态**: B7 **remediation Loop 4 in progress** — Phase 1: `_active_session_ns` production cleanup (try/finally + conftest fixture, 5 new tests PASS)。Phase 2: 15 evidence tests (SKILL_SELECT lifecycle + checkpoint identity, 25/25 PASS)。Phase 3: checkpoint call inventory baselines updated。Phase 4: memory namespace regression triage — 7 B7-caused fixed (compat layer removed, namespace key mismatches, dispatcher kwarg), 21 pre-existing documented。Phase 5: `docs/dogfood/scratch/` gitignored。Phases 6-8 pending (docs finalize, focused triage, gates/commit/push)。B7 completed: NO。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: Phase 7 full focused triage。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

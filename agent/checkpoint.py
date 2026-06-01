@@ -10,13 +10,24 @@ from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
 
+
+def checkpoint_path(session_id: str, run_id: str) -> Path:
+    """B7: 返回 per-run checkpoint 路径。
+
+    v2 路径: memory/checkpoints/{session_id}/{run_id}.json
+    不传 session_id/run_id 时仍使用 v1 路径 CHECKPOINT_PATH。
+    """
+    return PROJECT_DIR / "memory" / "checkpoints" / session_id / f"{run_id}.json"
+
 # checkpoint schema 版本常量——每次 schema 不兼容变更时递增。
 # v0: 无 schema_version 字段（Loop 6 之前的所有 checkpoint）
 # v1: 新增 meta.schema_version = "checkpoint.v1"，与 v0 结构兼容
+# v2: per-run path + identity 字段（B7）
 SCHEMA_VERSION = "checkpoint.v1"
+SCHEMA_VERSION_V2 = "checkpoint.v2"
 
 # 可安全迁移的已知版本（运行时不拒绝这些版本）
-_KNOWN_VERSIONS: frozenset[str] = frozenset({"checkpoint.v1"})
+_KNOWN_VERSIONS: frozenset[str] = frozenset({"checkpoint.v1", "checkpoint.v2"})
 
 # v0（缺少 schema_version）在此注册表中映射到 v1 identity migration
 _MIGRATION_REGISTRY: dict[str | None, str] = {
@@ -183,7 +194,8 @@ def _load_checkpoint_silent(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
 
-def _build_checkpoint_from_state(state, *, path: Path | None = None):
+def _build_checkpoint_from_state(state, *, path: Path | None = None,
+                                 session_id: str = "", run_id: str = ""):
     """
     按当前 state 构造 checkpoint 数据。
 
@@ -191,6 +203,8 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None):
     - task：尽量保存完整 task 快照，避免后续新增状态漏存
     - memory：保存 memory 快照，但 conversation 仍单独处理
     - conversation：只保存 messages，并对过大的 tool_result 做截断
+
+    B7 v2: 如果 session_id + run_id 非空，写 v2 schema（per-run path + identity）。
     """
     existing = _load_checkpoint_silent(path) or {}
     existing_meta = existing.get("meta", {})
@@ -198,13 +212,24 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None):
     task_data = _copy_state_dict(state.task)
     memory_data = _copy_state_dict(state.memory)
 
+    use_v2 = bool(session_id and run_id)
+    schema_ver = SCHEMA_VERSION_V2 if use_v2 else SCHEMA_VERSION
+    now = _now_iso()
+
+    meta: dict[str, Any] = {
+        "schema_version": schema_ver,
+        "created_at": existing_meta.get("created_at", now),
+    }
+    if use_v2:
+        meta["session_id"] = session_id
+        meta["run_id"] = run_id
+        meta["updated_at"] = now
+    else:
+        meta["session_id"] = state.memory.session_id
+        meta["interrupted_at"] = now
+
     return {
-        "meta": {
-            "schema_version": SCHEMA_VERSION,
-            "session_id": state.memory.session_id,
-            "created_at": existing_meta.get("created_at", _now_iso()),
-            "interrupted_at": _now_iso(),
-        },
+        "meta": meta,
         "task": task_data,
         "memory": memory_data,
         "conversation": {
@@ -215,7 +240,8 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None):
     }
 
 
-def save_checkpoint(state, source: str | None = None, *, path: Path | None = None):
+def save_checkpoint(state, source: str | None = None, *, path: Path | None = None,
+                    session_id: str = "", run_id: str = ""):
     """按当前 state 结构保存断点。
 
     source 是 Runtime 观测字段，用来标记"是谁触发了这次保存"，帮助后续梳理
@@ -225,12 +251,17 @@ def save_checkpoint(state, source: str | None = None, *, path: Path | None = Non
     path 是可选的显式保存路径；不传则使用模块级 CHECKPOINT_PATH。
     测试中可通过 path= 注入临时路径，无需依赖 os.getcwd() 副作用。
 
+    B7: session_id + run_id 非空时写 v2 schema（per-run path + identity 字段）；
+    为空时写 v1 schema（向后兼容）。
+
     注意：checkpoint/debug 与用户可见输出是不同通道。默认只写 checkpoint 文件
     和 `checkpoint_saved` 结构化日志；只有设置 MY_FIRST_AGENT_DEBUG=1 时才把
     [CHECKPOINT] 短日志打印到 terminal。
     """
     target = path if path is not None else CHECKPOINT_PATH
-    checkpoint = _build_checkpoint_from_state(state, path=path)
+    checkpoint = _build_checkpoint_from_state(
+        state, path=path, session_id=session_id, run_id=run_id,
+    )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(

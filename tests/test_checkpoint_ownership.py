@@ -26,7 +26,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 AGENT_DIR = PROJECT_ROOT / "agent"
 
@@ -305,18 +304,16 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.core", "_compress_history_and_sync_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
-        ("agent.core", "_run_planning_phase", "save_checkpoint", "_save_checkpoint", 1),
-        # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支保存状态
-        ("agent.core", "chat", "save_checkpoint", "_save_ckpt", 1),
-        # Memory Interactive Confirmation v1：handle_memory_confirmation_reply
-        # 内部 lazy import save_checkpoint 以清 pending 并保存状态
+        # core.py checkpoint 调用收口到 _dispatch_checkpoint_save
+        ("agent.core", "_dispatch_checkpoint_save", "save_checkpoint", "save_checkpoint", 1),
         ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", "save_checkpoint", 3),
         ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", "clear_checkpoint", 2),
+        ("agent.runtime_integration.checkpoint_resume", "handle", "load_checkpoint_to_state", "_load", 1),
+        ("agent.runtime_integration.checkpoint_save", "handle", "save_checkpoint", "_save_checkpoint", 1),
         ("agent.session", "finalize_session", "save_checkpoint", "save_checkpoint", 1),
         ("agent.session", "handle_double_interrupt", "save_checkpoint", "save_checkpoint", 1),
         ("agent.session", "handle_interrupt_choice", "clear_checkpoint", "clear_checkpoint", 1),
@@ -326,8 +323,9 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.session", "try_resume_from_checkpoint", "load_checkpoint", "load_checkpoint", 1),
         ("agent.session", "try_resume_from_checkpoint", "load_checkpoint_to_state", "load_checkpoint_to_state", 1),
-        ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", "save_checkpoint", 2),
+        ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", "save_checkpoint", 3),
         ("agent.tool_executor", "execute_single_tool", "save_checkpoint", "save_checkpoint", 4),
+        ("agent.tool_runtime_mediator", "_handle_confirmation_required", "save_checkpoint", "save_checkpoint", 1),
         ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", "checkpoint.clear_checkpoint", 1),
         ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", "checkpoint.save_checkpoint", 3),
     )
@@ -346,22 +344,19 @@ def test_core_checkpoint_alias_calls_are_not_invisible_to_inventory() -> None:
 
     Architecture Pack 1 已经有 checkpoint inventory，但缺少 alias 解析。此测试
     确认 `_save_checkpoint` / `_clear_checkpoint` 会被纳入未来 checkpoint
-    gateway seam，而不是被误判为“core 没有 checkpoint 调用”。
+    gateway seam，而不是被误判为"core 没有 checkpoint 调用"。
+
+    core.py checkpoint save 已收口到 _dispatch_checkpoint_save，不再由
+    各函数直接调用 save_checkpoint。
     """
 
     calls = _checkpoint_operation_calls()
 
     assert (
         "agent.core",
-        "_compress_history_and_sync_checkpoint",
+        "_dispatch_checkpoint_save",
         "save_checkpoint",
-        "_save_checkpoint",
-    ) in calls
-    assert (
-        "agent.core",
-        "_run_planning_phase",
         "save_checkpoint",
-        "_save_checkpoint",
     ) in calls
     assert (
         "agent.core",
@@ -387,9 +382,12 @@ def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() ->
         "agent.core",
         "agent.memory_interaction",
         "agent.response_handlers",
+        "agent.runtime_integration.checkpoint_resume",
+        "agent.runtime_integration.checkpoint_save",
         "agent.session",
         "agent.task_runtime",
         "agent.tool_executor",
+        "agent.tool_runtime_mediator",
         "agent.transitions",
     }
 
@@ -546,10 +544,10 @@ def test_resumed_tool_execution_log_prevents_duplicate_tool_execution(
     不读取真实 sessions/runs，也不触碰真实工具。
     """
 
+    import agent.tool_executor as tool_executor
     from agent import checkpoint
     from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
     from agent.state import create_agent_state
-    import agent.tool_executor as tool_executor
 
     checkpoint_path = tmp_path / "checkpoint.json"
     monkeypatch.setattr(checkpoint, "CHECKPOINT_PATH", checkpoint_path)

@@ -36,6 +36,8 @@ class ActiveSkillLifecycle:
     def __init__(self, namespace: str = "default") -> None:
         self._active: ActiveSkill | None = None
         self._namespace = namespace
+        # B7: per-session model_selected flag，替代 core._skill_selected_by_model 模块单例。
+        self._model_selected: bool = False
 
     # ── public API ──────────────────────────────────────────────────────
 
@@ -129,6 +131,22 @@ class ActiveSkillLifecycle:
         # Phase 7 前忽略 namespace 参数
         _ = namespace
         return self.activate(skill_id, body, allowed_tools, activated_by)
+
+    # ── B7 model_selected flag ───────────────────────────────────────────
+
+    def set_model_selected(self) -> None:
+        """标记本轮模型已通过 tool_use 选择 Skill。"""
+        self._model_selected = True
+
+    def was_model_selected(self) -> bool:
+        """检查本轮模型是否已通过 tool_use 选择 Skill 并消费该标记。"""
+        return self._model_selected
+
+    def consume_model_selected(self) -> bool:
+        """检查并重置 model_selected 标记（turn-end hook 消费）。"""
+        was = self._model_selected
+        self._model_selected = False
+        return was
 
     # ── checkpoint support ──────────────────────────────────────────────
 

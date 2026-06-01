@@ -144,12 +144,32 @@ MAX_LOOP_ITERATIONS = 50              # 循环总次数兜底（防死循环）�
 
 _model_provider, client = build_default_model_client()
 
-# Memory Kernel v1 — 模块级 MemoryRuntime 实例。
+# Memory Kernel v1 — per-session MemoryRuntime registry。
 # 默认使用 InMemoryMemoryStore + 两阶段确认流程。
 # store 是 in-memory-only，不进 checkpoint、不进 State、不进文件。
-# v1 known limitation：模块级单例在多 session 下可能交叉污染 memory。
-# 测试可通过 monkeypatch 替换 _memory_runtime。
-_memory_runtime = create_memory_runtime()
+# B7: per-session 隔离——非默认 session_id 拥有独立 MemoryRuntime 实例，
+# 避免多 session 交叉污染 memory。
+# 测试可通过 monkeypatch 替换 _default_memory_runtime 或 _memory_runtime_registry。
+_default_memory_runtime = create_memory_runtime()
+_memory_runtime_registry: dict[str, Any] = {}
+
+
+def get_memory_runtime(session_id: str = "") -> Any:
+    """获取指定 session 的 MemoryRuntime 实例。
+
+    B7: per-session namespace 隔离。
+    - session_id 为空或 "default" → 返回 _memory_runtime（向后兼容别名，支持 monkeypatch）
+    - session_id 非默认 → 从 _memory_runtime_registry 查找/创建独立实例
+    """
+    if not session_id or session_id == "default":
+        return _memory_runtime
+    if session_id not in _memory_runtime_registry:
+        _memory_runtime_registry[session_id] = create_memory_runtime()
+    return _memory_runtime_registry[session_id]
+
+
+# 向后兼容别名 —— 无参代码仍可用 _memory_runtime 访问默认实例。
+_memory_runtime = _default_memory_runtime
 
 # Phase 5b L2 inline extraction trigger guard（session 级）。
 # 跟踪 turn count / task boundary / 预算消耗，决定何时触发 L2 extraction。
@@ -260,9 +280,13 @@ _active_skill: dict[str, str] = {}
 """向后兼容——写入 lifecycle 后同步到此 dict。新增代码应使用 _get_lifecycle()。"""
 
 
-def _active_skill_section() -> str:
-    """从 lifecycle 获取当前 active_skill body，用于 prompt 注入。"""
-    active = _get_lifecycle().get_active()
+def _active_skill_section(*, lifecycle=None) -> str:
+    """从 lifecycle 获取当前 active_skill body，用于 prompt 注入。
+
+    B7: 接受可选的 lifecycle 参数用于 per-session 隔离。
+    """
+    _lc = lifecycle if lifecycle is not None else _get_lifecycle()
+    active = _lc.get_active()
     if active is not None:
         return active.body
     return ""
@@ -275,7 +299,7 @@ def _active_skill_section() -> str:
 _skill_selected_by_model = False
 
 
-def _update_active_skill_from_dispatcher(dispatcher) -> None:
+def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") -> None:
     """从 dispatcher action_log 提取最近一次 SKILL_SELECT 成功结果。
 
     RuntimeActionEvent 扁平化存储 status/evidence/action_type——不使用嵌套的
@@ -285,9 +309,10 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
     不会进入 event。因此需要从 SkillRegistry 重新加载 body 和 allowed_tools。
 
     Phase 4 (Plan 3): 使用 ActiveSkillLifecycle 管理状态，同时更新向后兼容 dict。
+    B7: session_id 用于 per-session lifecycle 隔离。
     """
     global _active_skill
-    lifecycle = _get_lifecycle()
+    lifecycle = _get_lifecycle(session_id)
     for event in reversed(getattr(dispatcher, "action_log", [])):
         if getattr(event, "action_type", None) is None:
             continue
@@ -374,6 +399,7 @@ def _dispatch_checkpoint_save(dispatcher, state, source="core.chat", *, identity
 
 def refresh_runtime_system_prompt(
     dispatcher=None, *, skill_registry=None, user_input: str = "",
+    identity=None, namespace_key: str = "",
 ):
     """重新生成当前运行态实际生效的 system prompt，并写回 state。
 
@@ -392,7 +418,14 @@ def refresh_runtime_system_prompt(
     - build_skill_selection_section(candidates) → 注入 selection_section
     返回 (system_prompt, snapshot_item_count)，调用方由此获得 memory 条数，
     无需再直接调用 _memory_runtime.snapshot_for_prompt()。
+
+    B7: identity 参数用于 evidence 链，namespace_key 用于 per-session lifecycle 和 memory 隔离。
     """
+    # B7: namespace_key 用于 per-session 隔离（空字符串 → 默认实例）
+    _ns = namespace_key or ""
+    _lifecycle = _get_lifecycle(_ns)
+    _mem_rt = get_memory_runtime(_ns)
+
     # Phase 3: turn-start skill candidate retrieval
     selection_section = ""
     if user_input and skill_registry is not None:
@@ -429,16 +462,16 @@ def refresh_runtime_system_prompt(
         system_prompt = build_system_prompt(
             memory_section=memory_section,
             skill_registry=skill_registry,
-            active_skill_section=_active_skill_section(),
+            active_skill_section=_active_skill_section(lifecycle=_lifecycle),
             selection_section=selection_section,
         )
     else:
-        memory_snapshot = _memory_runtime.snapshot_for_prompt()
+        memory_snapshot = _mem_rt.snapshot_for_prompt()
         snapshot_item_count = len(memory_snapshot.items)
         system_prompt = build_system_prompt(
             memory_snapshot=memory_snapshot,
             skill_registry=skill_registry,
-            active_skill_section=_active_skill_section(),
+            active_skill_section=_active_skill_section(lifecycle=_lifecycle),
             selection_section=selection_section,
         )
 
@@ -553,6 +586,11 @@ def _build_confirmation_context(
 ) -> ConfirmationContext:
     """兼容入口：实际 ConfirmationContext 组装在 `agent.core_contexts`。"""
 
+    # B7: 从 loop_ctx 提取 session_id 获取 per-session MemoryRuntime。
+    _rt_id = getattr(loop_ctx, "runtime_identity", None)
+    _sid = getattr(_rt_id, "session_id", "") or "" if _rt_id is not None else ""
+    _mem_rt = get_memory_runtime(_sid)
+
     return build_confirmation_context(
         state=state,
         turn_state=turn_state,
@@ -565,7 +603,7 @@ def _build_confirmation_context(
             inp, ts, loop_ctx
         ),
         loop_ctx=loop_ctx,
-        memory_runtime=_memory_runtime,
+        memory_runtime=_mem_rt,
     )
 
 
@@ -656,6 +694,19 @@ def chat(
     if not user_input or not user_input.strip():
         return ""
 
+    # B7: 提前计算 session_id / RuntimeIdentity。
+    # _sid 用于 identity tracking（无显式 session_id 时生成 UUID）。
+    # _ns_key 用于 memory/lifecycle namespace 隔离（无显式 session_id 时为空 → 默认实例）。
+    _sid = session_id or str(uuid4())
+    _ns_key = session_id or ""  # empty → default lifecycle/memory（向后兼容 monkeypatch）
+    _mem_rt = get_memory_runtime(_ns_key)
+    from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
+    _chat_identity = _RuntimeIdentity(
+        session_id=_sid,
+        run_id=str(uuid4()),
+        instance_id=_sid,
+    )
+
     # Loop 4: 提前构建 dispatcher，使 CLI READ_ONLY 命令可走统一 dispatcher 路径。
     # 需要 SubAgentRegistry（show subagents）和 _memory_runtime（show memories）。
     from pathlib import Path as _Path
@@ -667,7 +718,7 @@ def chat(
     # Loop 2.2: 构建 skill_registry 一次，同时传给 dispatcher builder 和主路径。
     _skill_registry = _build_skill_registry()
     _p1_dispatcher = _build_p1(
-        memory_runtime=_memory_runtime,
+        memory_runtime=_mem_rt,
         subagent_registry=_SubAgentRegistry(roots=[_Path("agent/subagent_system/descriptors")]),
         skill_registry=_skill_registry,
     )
@@ -763,7 +814,7 @@ def chat(
                     memory_forgotten_event(1, keyword=f"id:{record_id}"),
                     fallback_prefix="\n",
                 )
-                remaining = _memory_runtime.list_records()
+                remaining = _mem_rt.list_records()
                 _safe_emit_runtime_event(
                     on_runtime_event,
                     memory_list_event(remaining),
@@ -772,7 +823,7 @@ def chat(
                 return f"已移除记忆（ID: {record_id}）。"
 
             # Step 2: 精确匹配失败 → 尝试前缀匹配（支持短 ID）
-            records = _memory_runtime.list_records()
+            records = _mem_rt.list_records()
             prefix_matches = [
                 r for r in records
                 if str(getattr(r, "id", "")).startswith(record_id)
@@ -785,7 +836,7 @@ def chat(
                         memory_forgotten_event(1, keyword=f"id:{record_id}"),
                         fallback_prefix="\n",
                     )
-                    remaining = _memory_runtime.list_records()
+                    remaining = _mem_rt.list_records()
                     _safe_emit_runtime_event(
                         on_runtime_event,
                         memory_list_event(remaining),
@@ -804,7 +855,7 @@ def chat(
             # Step 3: 前缀也没有匹配 → not found
             return f"未找到 ID 为「{record_id}」的记忆。"
         # 否则按 content 关键词匹配
-        records = _memory_runtime.list_records()
+        records = _mem_rt.list_records()
         matched = [
             r for r in records
             if forget_keyword.lower() in getattr(r, "content", "").lower()
@@ -820,7 +871,7 @@ def chat(
             memory_forgotten_event(removed_count, keyword=forget_keyword),
             fallback_prefix="\n",
         )
-        remaining = _memory_runtime.list_records()
+        remaining = _mem_rt.list_records()
         _safe_emit_runtime_event(
             on_runtime_event,
             memory_list_event(remaining),
@@ -868,6 +919,7 @@ def chat(
             dispatcher=_phase1_dispatcher,
             provider=provider,
             user_input=user_input,
+            session_id=_sid,
         )
         # 为 CLI delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -899,6 +951,7 @@ def chat(
             dispatcher=_phase1_dispatcher,
             provider=provider,
             user_input=user_input,
+            session_id=_sid,
         )
         # 为 NL delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -915,9 +968,10 @@ def chat(
 
     # Memory Kernel v1：评估用户输入是否触发 explicit memory 操作。
     # 这是 core.py 对 Memory 系统的唯一薄调用——不做 policy 判断、不操作 store、
-    # 不解析 decision。_memory_runtime 内部处理 policy → confirmation → store 全链路。
+    # 不解析 decision。MemoryRuntime 内部处理 policy → confirmation → store 全链路。
     # 当前 on_event 直接复用 on_runtime_event callback（如果调用方传入）。
-    result = _memory_runtime.evaluate_user_text(user_input, on_event=on_runtime_event)
+    # B7: 使用 per-session MemoryRuntime 实例隔离多 session memory。
+    result = _mem_rt.evaluate_user_text(user_input, on_event=on_runtime_event)
     if result.action is MemoryEvaluationAction.STORED:
         _safe_emit_runtime_event(
             on_runtime_event,
@@ -934,7 +988,7 @@ def chat(
         # Memory Interactive Confirmation v1：两阶段交互。
         # evaluate_user_text 已缓存 decision，这里设置 pending_user_input_request
         # 复用 awaiting_user_input 机制等待用户确认。
-        confirmation_request = _memory_runtime.get_pending_confirmation(result.candidate_id)
+        confirmation_request = _mem_rt.get_pending_confirmation(result.candidate_id)
         if confirmation_request is not None:
             from agent.memory_interaction import build_memory_pending_request
 
@@ -996,6 +1050,8 @@ def chat(
         dispatcher=runtime_action_dispatcher,
         skill_registry=_skill_registry,
         user_input=user_input,
+        identity=_chat_identity,
+        namespace_key=_ns_key,
     )
 
     # Memory Kernel v1：告知用户当前已加载的 memory 条数（仅在有条目时展示）。
@@ -1102,16 +1158,8 @@ def chat(
     )
     _set_last_decision_frame(_turn_decision_frame)
 
-    # B7: 在 chat() 入口构造 RuntimeIdentity
-    from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
-
-    _sid = session_id or str(uuid4())
-    _run_id = str(uuid4())
-    _chat_identity = _RuntimeIdentity(
-        session_id=_sid,
-        run_id=_run_id,
-        instance_id=_sid,
-    )
+    # B7: RuntimeIdentity 已在函数头部提前构造，此处复用。
+    # _chat_identity 和 _sid 由函数头部统一管理。
 
     _loop_ctx = _build_loop_context(
         client,
@@ -1670,11 +1718,13 @@ def _run_main_loop(
     result = run_main_loop(turn_state, loop_ctx, dependencies)
     # Loop 2.2: 主循环完成后，从 dispatcher action_log 提取 SKILL_SELECT 结果，
     # 更新跨 turn active skill 状态。
-    _update_active_skill_from_dispatcher(dependencies.runtime_action_dispatcher)
+    # B7: 从 identity 提取 session_id 用于 per-session lifecycle 隔离。
+    _rt_id = getattr(loop_ctx, "runtime_identity", None)
+    _sid = getattr(_rt_id, "session_id", "") or "" if _rt_id is not None else ""
+    _update_active_skill_from_dispatcher(
+        dependencies.runtime_action_dispatcher, session_id=_sid,
+    )
     return result
-
-
-
 def _call_model(
     turn_state: TurnState,
     loop_ctx: LoopContext,
@@ -1743,6 +1793,7 @@ def _dispatch_or_fallback_delegation(
     dispatcher,
     provider,
     user_input: str,
+    session_id: str = "",
 ) -> str:
     """Loop 3.2a: dispatcher-mediated L1 delegation，不存在则回退 L0 inline。
 
@@ -1765,7 +1816,7 @@ def _dispatch_or_fallback_delegation(
     _tool_mediator = None
     if dispatcher is not None:
         from agent.tool_runtime_mediator import ToolRuntimeMediator as _Tmr
-        _skill_at = _get_lifecycle().get_allowed_tools() or None
+        _skill_at = _get_lifecycle(session_id).get_allowed_tools() or None
         _tool_mediator = _Tmr(
             dispatcher,
             state=state,

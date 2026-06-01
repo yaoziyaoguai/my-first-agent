@@ -257,3 +257,281 @@ def _fake_event(**overrides) -> object:
     }
     defaults.update(overrides)
     return RuntimeActionEvent(**defaults)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 6: Dedupe — flush cursor prevents duplicate writes
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFlushDedupe:
+    def test_repeated_flush_does_not_duplicate_events(self):
+        """重复 flush 不会产生重复 event 行（flush_cursor dedupe）。"""
+        from agent.event_log import EventLogWriter
+        from agent.runtime_integration.dispatcher import RuntimeActionDispatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            dispatcher = RuntimeActionDispatcher()
+            dispatcher._action_log.append(
+                _fake_event(event_id="e-dedup-1"),
+            )
+            dispatcher._action_log.append(
+                _fake_event(event_id="e-dedup-2"),
+            )
+
+            # 第一次 flush
+            c1 = dispatcher.flush_to_event_log(writer)
+            # 第二次 flush — 不应有新行
+            c2 = dispatcher.flush_to_event_log(writer)
+            writer.close()
+
+            assert c1 == 2
+            assert c2 == 0, f"第二次 flush 应返回 0（无新 event），实际返回 {c2}"
+            lines = (Path(tmp) / "events.jsonl").read_text().strip().split("\n")
+            assert len(lines) == 2, f"文件应只有 2 行，实际 {len(lines)} 行"
+
+    def test_new_events_after_flush_are_written(self):
+        """flush 后新增 event 仍能被后续 flush 写入。"""
+        from agent.event_log import EventLogWriter
+        from agent.runtime_integration.dispatcher import RuntimeActionDispatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            dispatcher = RuntimeActionDispatcher()
+            dispatcher._action_log.append(_fake_event(event_id="batch1-1"))
+
+            dispatcher.flush_to_event_log(writer)
+            # 新增 event
+            dispatcher._action_log.append(_fake_event(event_id="batch2-1"))
+            dispatcher._action_log.append(_fake_event(event_id="batch2-2"))
+            c2 = dispatcher.flush_to_event_log(writer)
+            writer.close()
+
+            assert c2 == 2
+            lines = (Path(tmp) / "events.jsonl").read_text().strip().split("\n")
+            assert len(lines) == 3
+
+    def test_flush_cursor_persists_across_flushes(self):
+        """flush_cursor 不因中途失败而回退已验证的 event。"""
+        from agent.event_log import EventLogWriter
+        from agent.runtime_integration.dispatcher import RuntimeActionDispatcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            dispatcher = RuntimeActionDispatcher()
+            dispatcher._action_log.append(_fake_event(event_id="ok-1"))
+
+            c1 = dispatcher.flush_to_event_log(writer)
+            assert c1 == 1
+            # 再次 flush — cursor 已在末尾
+            c2 = dispatcher.flush_to_event_log(writer)
+            assert c2 == 0
+            writer.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 6: Event schema enrichment
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEventSchemaEnrichment:
+    def test_event_has_schema_version(self):
+        """每个 event 包含 schema_version 字段。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"event": "test"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["schema_version"] == "1.0"
+
+    def test_event_has_event_type(self):
+        """event_type 由 action_type 派生。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"action_type": "memory.store.write"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["event_type"] == "memory.store.write"
+
+    def test_event_has_source_subsystem(self):
+        """source_subsystem 由 source 映射。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"source": "skill"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["source_subsystem"] == "skill_system"
+
+    def test_unknown_source_maps_to_itself(self):
+        """未识别的 source 原样保留为 source_subsystem。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"source": "custom_module"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["source_subsystem"] == "custom_module"
+
+    def test_event_has_written_at_timestamp(self):
+        """每个 event 包含 written_at（Unix timestamp）。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"event": "test"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "written_at" in data
+            assert isinstance(data["written_at"], float)
+            assert data["written_at"] > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 6: Enhanced redaction
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEnhancedRedaction:
+    def test_env_var_like_field_name_is_redacted(self):
+        """大写+下划线字段名（如 OPENAI_API_KEY）被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"OPENAI_API_KEY": "sk-real-looking-key-12345678"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["OPENAI_API_KEY"] == "<REDACTED>"
+
+    def test_credential_field_is_redacted(self):
+        """字段名包含 'credential' 时被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"credentials": "my-secret-data"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["credentials"] == "<REDACTED>"
+
+    def test_private_field_is_redacted(self):
+        """字段名包含 'private' 时被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"private_key": "-----BEGIN RSA PRIVATE KEY-----"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["private_key"] == "<REDACTED>"
+
+    def test_normal_uppercase_field_not_redacted(self):
+        """普通大写字段名（不含 key/token/secret 等关键词）不被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"USER_NAME": "alice", "APP_VERSION": "1.0"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["USER_NAME"] == "alice"
+            assert data["APP_VERSION"] == "1.0"
+
+    def test_secret_nested_in_list(self):
+        """嵌套在 list 中的敏感字段也被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({
+                "items": [
+                    {"name": "item1", "api_key": "sk-list-item-key"},
+                    {"name": "item2", "token": "list-item-token"},
+                ],
+            })
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["items"][0]["api_key"] == "<REDACTED>"
+            assert data["items"][1]["token"] == "<REDACTED>"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 6: Bounded payload
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBoundedPayload:
+    def test_long_string_is_truncated(self):
+        """超过 _MAX_STRING_LEN 的字符串被截断。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            long_text = "x" * 10000
+            writer.append({"prompt": long_text})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert len(data["prompt"]) < 10000
+            assert "TRUNCATED" in data["prompt"]
+
+    def test_short_string_not_truncated(self):
+        """短字符串保持原样。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"msg": "hello"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["msg"] == "hello"
+
+    def test_nested_long_string_is_truncated(self):
+        """嵌套在 dict 中的长字符串也被截断。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({
+                "response": {
+                    "text": "y" * 8000,
+                    "metadata": {"source": "z" * 100},
+                },
+            })
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "TRUNCATED" in data["response"]["text"]
+            assert data["response"]["metadata"]["source"] == "z" * 100

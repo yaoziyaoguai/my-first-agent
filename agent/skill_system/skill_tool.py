@@ -114,6 +114,8 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
     )
     # model-owned selection flag — turn-end hook 检查此 flag 跳过 keyword fallback
     _core._skill_selected_by_model = True
+    # B7: 同时设置 per-lifecycle model_selected flag。
+    _lc.set_model_selected()
 
     return (
         f"Skill '{skill_id}' 已激活。\n\n"

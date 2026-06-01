@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation — Phase 1 security preflight COMPLETE, Phase 2 regression triage in progress)
-**状态**: B7 **partial** — Codex red-line audit found P1 issues。B7 completion claim SUPERSEDED。Remediation loop in progress。Security P1 (SEC-001): REMEDIATED — config.yaml key replaced, docs redacted, guard tests pass。Ready for B7 completion: NO。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: B7 Phase 2 regression triage。
+**最后更新**: 2026-06-01 (B7 remediation — Phase 5/6/7 COMPLETE, Phase 8 docs update in progress)
+**状态**: B7 **remediation candidate for independent review** — Codex red-line audit P1 issues addressed。Phase 0 security preflight PASS。Phase 5 namespace isolation production path: DONE (13/13 tests PASS, per-session lifecycle/memory/MCP bridge)。Phase 6 EventLogWriter contract: DONE (29/29 tests PASS, dedupe flush_cursor + schema_version/event_type/source_subsystem + enhanced redaction + bounded payload)。Phase 7 regression triage: DONE — all failures classified pre-existing, zero B7-caused regressions。Remediation scope: Phase 0-8 covered; docs update in progress。Ready for B7 completion: NOT YET (needs independent review)。Ready for B8 Phase 6B: NO (B7 completion needed first)。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: finish docs, commit, push, independent review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

@@ -320,6 +320,7 @@ class RuntimeActionDispatcher:
         self._registry = registry or ActionHandlerRegistry()
         self._observer = observer or RuntimeActionModuleObserver()
         self._action_log: list[RuntimeActionEvent] = []
+        self._flush_cursor: int = 0
 
     @property
     def action_log(self) -> tuple[RuntimeActionEvent, ...]:
@@ -566,20 +567,24 @@ class RuntimeActionDispatcher:
     # ── B7: Event Log flush ──────────────────────────────────────────
 
     def flush_to_event_log(self, writer: object) -> int:
-        """将 action_log 中所有 event 写入 EventLogWriter，返回写入条数。
+        """将 action_log 中未写入的 event 追加到 EventLogWriter，返回写入条数。
 
+        flush_cursor 确保同一 event 不会被重复写入（append-only dedupe）。
         flush 不改变 action_log（保留内存中的完整 event 列表）。
         写入失败不抛异常（best-effort）。
         """
         count = 0
         try:
-            for event in self._action_log:
+            start = self._flush_cursor
+            for idx in range(start, len(self._action_log)):
+                event = self._action_log[idx]
                 try:
                     event_dict = _runtime_action_event_to_dict(event)
                     writer.append(event_dict)  # type: ignore[union-attr]
+                    self._flush_cursor = idx + 1
                     count += 1
                 except Exception:
-                    # 单条写入失败不中断整体 flush
+                    # 单条写入失败不中断整体 flush，但不推进 cursor
                     continue
         except Exception:
             # 整体 flush 失败不抛异常

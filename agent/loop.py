@@ -514,7 +514,15 @@ def _try_phase1_turn_end_runtime_action(
             # 自主选择了 skill。若已选择，跳过 keyword fallback，避免覆盖模型决策。
             elif _visible and last_user:
                 import agent.core as _core
-                if getattr(_core, "_skill_selected_by_model", False):
+
+                # B7: 使用 per-session lifecycle 的 model_selected 标记替代模块单例。
+                from agent.skill_system.lifecycle import get_default_lifecycle as _get_lc
+                _lc_sid = getattr(_identity, "session_id", "default") if _identity else "default"
+                _lc = _get_lc(_lc_sid)
+                if _lc.consume_model_selected() or getattr(
+                    _core, "_skill_selected_by_model", False
+                ):
+                    # 清除模块级向后兼容标记（lifecycle 标记已由 consume 消费）
                     _core._skill_selected_by_model = False
                 else:
                     from agent.skill_selection import select_skill_for_real_provider

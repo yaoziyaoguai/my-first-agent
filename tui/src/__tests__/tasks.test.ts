@@ -49,7 +49,7 @@ describe("TaskCenter data model", () => {
     expect(phase5).toBeDefined();
     expect(phase5!.status).toBe("completed");
     expect(polish).toBeDefined();
-    expect(polish!.status).toBe("recommended");
+    expect(polish!.status).toBe("completed");
   });
 
   it("getTasksByStatus filters correctly", () => {

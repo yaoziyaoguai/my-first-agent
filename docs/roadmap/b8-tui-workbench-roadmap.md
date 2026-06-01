@@ -1,7 +1,7 @@
 # B8 TypeScript TUI Workbench — 分阶段路线
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-01 (B8 Phase 6A COMPLETED + Phase 6B/7 debt recorded)
+**最后更新**: 2026-06-01 (B8 Final Boundary Audit — boundary CLOSED)
 **来源**: `/plan-eng-review` → B8 Roadmap / Default Entry Readiness Review → AutoRun Hardening
 **依赖文档**: `docs/design/b8-ts-tui-workbench-sdd.md` (Phase 1-3 SDD)、`docs/PROJECT_STATUS.md` (当前状态)、`docs/debt/b8-tui-workbench-technical-debt.md` (Phase 6B/7 deferred debt)
 

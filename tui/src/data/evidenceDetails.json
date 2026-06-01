@@ -40,11 +40,11 @@
     {
       "id": "REAL-EVIDENCE-005",
       "capability": "MCP Bridge Lifecycle",
-      "status": "credible-with-caveats",
+      "status": "credible",
       "latestDogfood": "PASS — 6 contract tests, disposable dispatcher evidence",
       "latestCommit": "a318237",
       "caveats": "真实 MCP server 连接未验证 (REAL-EVIDENCE-005 debt)",
-      "nextAction": "等待真实 MCP server fixture (低优先级)"
+      "nextAction": "维持 credible，真实 MCP server fixture 低优先级"
     },
     {
       "id": "REAL-EVIDENCE-006",

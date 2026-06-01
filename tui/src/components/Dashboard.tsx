@@ -431,7 +431,7 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
       {/* Footer */}
       <Box flexDirection="column">
         <Text dimColor>
-          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}{nav.currentView === "evidence" ? "↑↓: browse evidence | " : ""}B8 Polish Loop 1 — workbench readiness | {new Date().toISOString().slice(0, 10)}
+          q: quit | ← → / 1-7: switch view | {nav.currentView === "commands" ? "↑↓: navigate | Enter: preview/execute | " : ""}{nav.currentView === "evidence" ? "↑↓: browse evidence | " : ""}B8 Phase 1-6A — boundary closed | {new Date().toISOString().slice(0, 10)}
         </Text>
       </Box>
     </Box>

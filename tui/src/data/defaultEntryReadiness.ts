@@ -70,7 +70,7 @@ export function getReadinessItems(): ReadinessItem[] {
     },
     {
       id: "R08",
-      label: "227/227 tests PASS + tsc clean",
+      label: "260/260 tests PASS + tsc clean",
       description: "全量测试通过, TypeScript 编译无错误",
       status: "done",
     },
@@ -78,7 +78,7 @@ export function getReadinessItems(): ReadinessItem[] {
       id: "R09",
       label: "Audit log browser UI",
       description: "只读 audit history 面板, 不写 runtime state",
-      status: "pending",
+      status: "done",
     },
     {
       id: "R10",

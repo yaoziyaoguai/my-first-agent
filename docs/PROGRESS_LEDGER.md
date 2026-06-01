@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B8 Completion Review)
+**最后更新**: 2026-06-01 (B8 Final Boundary Audit)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B8 Final Boundary Audit** | — | **B8 current boundary CLOSED** — B8 Phase 1-6A + Polish Loop 1-2 内无未解决问题。修复 5 项 stale data/display: tasks.json b8-polish status (recommended→completed), defaultEntryReadiness R08 test count (227→260), R09 AuditLogPanel (pending→done), Dashboard footer label, evidenceDetails.json 005 status (credible-with-caveats→credible)。260/260 tests PASS, tsc clean。TUI default entry NOT ACTIVATED。B7 NOT STARTED。下一个需要进入 B7 或更大架构决策。|
 | **B8 Completion Review** | — | **B8 阶段性收口审查通过** — 创建 `docs/reviews/b8-tui-workbench-completion-review.md`。审查结论: B8 Phase 1-6A + Polish Loop 1-2 可以阶段性收口。260/260 tests PASS, tsc clean。TUI default entry NOT ACTIVATED (checklist 未全部满足: Phase 6B/7 deferred + IME pending)。Phase 6B/7 DEFERRED by B7。CLI fallback RETAINED。B7 NOT STARTED。下一步: 用户决策 (B7 / B8 Polish / evidence 强化)。|
 | **B8 Polish Loop 2: Audit Findings Fixes** | 65822ad | **B8 Polish Loop — P1/P2 验收审计修复** — P1-1: root .gitignore 添加 `.tui_audit_log*`。P1-2: tasks.json 更新。P1-3: 测试数 227→241 同步。P2-1: noExecution.ts 真实文件扫描 (9 forbidden patterns)。P2-2: docsConsistency.ts 内容 staleness 检测。260/260 tests PASS。
 | **B8 Phase 6B/7 Debt Recorded** | — | **B8 Architecture Extension Loop — Phase 6B/7 Technical Debt 正式记录** — 创建 `docs/debt/b8-tui-workbench-technical-debt.md`: Phase 6B deferred (缺 session/run/instance identity + evidence namespace), Phase 7 deferred (缺 append-only event source contract), TUI default-entry deferred, B7 not started。B8 继续 Polish / Default Workbench Readiness Loop。|

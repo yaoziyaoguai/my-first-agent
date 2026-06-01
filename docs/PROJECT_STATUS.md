@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B8 Completion Review)
-**状态**: 阶段性收口。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 1-6A COMPLETED — 阶段性收口审查通过** (260/260 tests PASS)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。TUI default entry NOT ACTIVATED。B7 not started。下一步: 用户决策 — B7 或 B8 Polish 或 evidence 强化。详见 `docs/reviews/b8-tui-workbench-completion-review.md`。
+**最后更新**: 2026-06-01 (B8 Final Boundary Audit)
+**状态**: B8 current boundary CLOSED。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 1-6A + Polish Loop 1-2 内无未解决问题** (260/260 tests PASS, 5 stale data/display items fixed)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。TUI default entry NOT ACTIVATED。B7 NOT STARTED。下一个需要进入 B7 或更大架构决策。详见 `docs/reviews/b8-tui-workbench-completion-review.md` 和 `docs/debt/b8-tui-workbench-technical-debt.md`。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

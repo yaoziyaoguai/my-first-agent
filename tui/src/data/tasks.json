@@ -52,8 +52,8 @@
     {
       "phase": "b8-polish",
       "label": "B8 Polish Loop 2 (Acceptance Audit Fixes)",
-      "status": "recommended",
-      "why": "当前推荐: 修复验收审计发现的 P1/P2 问题 — .gitignore/tasks.json/test count/noExecution/docsConsistency"
+      "status": "completed",
+      "why": "P1/P2 验收审计修复已全部完成 (65822ad): .gitignore/tasks.json/test count/noExecution/docsConsistency"
     },
     {
       "phase": "b7",

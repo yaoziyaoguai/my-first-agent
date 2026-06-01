@@ -127,15 +127,15 @@ class TestSkillSelectViaToolMediator:
 
     def test_i2_skill_select_updates_active_skill(self):
         """I2: SKILL_SELECT 通过 mediator 执行后 _active_skill 应更新。"""
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.skill_system.skill_tool import _ensure_skill_select_registered
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
         _ensure_skill_select_registered()
         dispatcher = _build_full_dispatcher()
         state, turn_state = _build_mediator_state()
-        _core._active_skill = {}
-        _core._skill_selected_by_model = False
+        _state.set_active_skill({})
+        _state.set_skill_selected_by_model(False)
 
         mediator = ToolRuntimeMediator(
             dispatcher, state=state, turn_state=turn_state,
@@ -147,22 +147,22 @@ class TestSkillSelectViaToolMediator:
         )
         mediator.mediate(block)
 
-        assert _core._active_skill.get("skill_id") == "demo-note-maker"
-        assert len(_core._active_skill.get("body", "")) > 0
-        assert "demo.echo_task_summary" in _core._active_skill.get(
+        assert _state.get_active_skill().get("skill_id") == "demo-note-maker"
+        assert len(_state.get_active_skill().get("body", "")) > 0
+        assert "demo.echo_task_summary" in _state.get_active_skill().get(
             "allowed_tools", frozenset()
         )
 
     def test_i3_unknown_skill_via_mediator_returns_error(self):
         """I3: 未知 skill_id 通过 mediator → gate=allowed 但 tool func 返回错误。"""
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.skill_system.skill_tool import _ensure_skill_select_registered
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
         _ensure_skill_select_registered()
         dispatcher = _build_full_dispatcher()
         state, turn_state = _build_mediator_state()
-        _core._skill_selected_by_model = False
+        _state.set_skill_selected_by_model(False)
 
         mediator = ToolRuntimeMediator(
             dispatcher, state=state, turn_state=turn_state,
@@ -178,10 +178,10 @@ class TestSkillSelectViaToolMediator:
         assert result is None
 
         # unknown skill 不设置 model-owned flag
-        assert _core._skill_selected_by_model is False
+        assert _state.get_skill_selected_by_model() is False
 
         # _active_skill 不应被更新
-        assert _core._active_skill.get("skill_id") != "non-existent-skill-xyz"
+        assert _state.get_active_skill().get("skill_id") != "non-existent-skill-xyz"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -194,7 +194,7 @@ class TestAllowedToolsBinding:
 
     def test_i4_allowed_tools_passed_to_mediator(self):
         """I4: _active_skill.allowed_tools → mediator._skill_allowed_tools。"""
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.skill_system.skill_tool import _ensure_skill_select_registered
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
@@ -202,16 +202,16 @@ class TestAllowedToolsBinding:
         dispatcher = _build_full_dispatcher()
         state, turn_state = _build_mediator_state()
 
-        _core._active_skill = {
+        _state.set_active_skill({
             "skill_id": "demo-note-maker",
             "body": "test body",
             "allowed_tools": frozenset(["demo.echo_task_summary", "demo.write_demo_note"]),
-        }
+        })
 
         mediator = ToolRuntimeMediator(
             dispatcher, state=state, turn_state=turn_state,
             turn_context={}, messages=[],
-            skill_allowed_tools=_core._active_skill.get("allowed_tools"),
+            skill_allowed_tools=_state.get_active_skill().get("allowed_tools"),
         )
 
         assert mediator._skill_allowed_tools == frozenset([
@@ -346,22 +346,22 @@ class TestKeywordFallbackPreserved:
 
     def test_i9_model_owned_and_fallback_distinguishable(self):
         """I9: model-owned 和 keyword fallback 应可区分。"""
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         # model-owned path
-        _core._active_skill = {}
-        _core._skill_selected_by_model = False
+        _state.set_active_skill({})
+        _state.set_skill_selected_by_model(False)
         _skill_select_tool_func("demo-note-maker")
 
-        assert _core._skill_selected_by_model is True
-        assert _core._active_skill.get("skill_id") == "demo-note-maker"
-        assert "body" in _core._active_skill
-        assert "allowed_tools" in _core._active_skill
+        assert _state.get_skill_selected_by_model() is True
+        assert _state.get_active_skill().get("skill_id") == "demo-note-maker"
+        assert "body" in _state.get_active_skill()
+        assert "allowed_tools" in _state.get_active_skill()
 
         # keyword fallback path
-        _core._skill_selected_by_model = False
-        _core._active_skill = {}
+        _state.set_skill_selected_by_model(False)
+        _state.set_active_skill({})
 
         registry = SkillRegistry(roots=[Path("skills")])
         handler = SkillRuntimeActionHandler(
@@ -410,7 +410,7 @@ class TestKeywordFallbackPreserved:
         dispatcher.route_from_runtime_loop(request)
 
         # keyword fallback 不会设置 _skill_selected_by_model
-        assert _core._skill_selected_by_model is False, (
+        assert _state.get_skill_selected_by_model() is False, (
             "keyword fallback 不应设置 model-owned flag"
         )
 
@@ -418,7 +418,7 @@ class TestKeywordFallbackPreserved:
         from agent.core import _update_active_skill_from_dispatcher
         _update_active_skill_from_dispatcher(dispatcher)
 
-        assert _core._active_skill.get("skill_id") == "demo-note-maker"
+        assert _state.get_active_skill().get("skill_id") == "demo-note-maker"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -500,11 +500,11 @@ class TestTurnEndHookFallbackGuard:
         模型已在当前 turn 通过 tool_use("SKILL_SELECT") 自主选择了 skill，
         turn-end hook 应消费 flag 但不执行 keyword fallback。
         """
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.loop import _try_phase1_turn_end_runtime_action
 
-        _core._skill_selected_by_model = True
-        _core._active_skill = {}
+        _state.set_skill_selected_by_model(True)
+        _state.set_active_skill({})
 
         dispatcher = self._build_skill_dispatcher()
         state = self._build_state_with_user_message("写 demo 笔记")
@@ -521,7 +521,7 @@ class TestTurnEndHookFallbackGuard:
         )
 
         # flag 应被消费
-        assert _core._skill_selected_by_model is False, (
+        assert _state.get_skill_selected_by_model() is False, (
             "flag 应在 turn-end hook 中被消费 (重置为 False)"
         )
 
@@ -530,11 +530,11 @@ class TestTurnEndHookFallbackGuard:
 
         模型未自主选择 skill，turn-end hook 应通过 keyword matching 尝试匹配。
         """
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.loop import _try_phase1_turn_end_runtime_action
 
-        _core._skill_selected_by_model = False
-        _core._active_skill = {}
+        _state.set_skill_selected_by_model(False)
+        _state.set_active_skill({})
 
         dispatcher = self._build_skill_dispatcher()
         state = self._build_state_with_user_message("写 demo 笔记")
@@ -561,12 +561,12 @@ class TestTurnEndHookFallbackGuard:
         - 下一 turn flag=False → keyword fallback 正常触发
         验证 flag 不会在消费后保持 True，也不会因其他原因残留。
         """
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.loop import _try_phase1_turn_end_runtime_action
 
         # ── Turn 1: model-owned selection ──
-        _core._skill_selected_by_model = True
-        _core._active_skill = {}
+        _state.set_skill_selected_by_model(True)
+        _state.set_active_skill({})
 
         dispatcher1 = self._build_skill_dispatcher()
         state1 = self._build_state_with_user_message("写 demo 笔记")
@@ -575,7 +575,7 @@ class TestTurnEndHookFallbackGuard:
         _try_phase1_turn_end_runtime_action(state1, "result turn 1", dispatcher1, deps1)
 
         # Turn 1 后 flag 应为 False
-        assert _core._skill_selected_by_model is False
+        assert _state.get_skill_selected_by_model() is False
         decisions1 = self._capture_skill_selection_decisions(dispatcher1)
         body_loads1 = [d for d in decisions1 if d["body_load_decision"] is True]
         assert len(body_loads1) == 0, "Turn 1 (flag=True): 不应触发 keyword fallback"
@@ -589,7 +589,7 @@ class TestTurnEndHookFallbackGuard:
         _try_phase1_turn_end_runtime_action(state2, "result turn 2", dispatcher2, deps2)
 
         # Turn 2 后 flag 仍为 False
-        assert _core._skill_selected_by_model is False, (
+        assert _state.get_skill_selected_by_model() is False, (
             "flag 在 turn 2 后不应泄漏为 True"
         )
         decisions2 = self._capture_skill_selection_decisions(dispatcher2)
@@ -636,15 +636,15 @@ class TestEvidenceDistinction:
 
     def test_i11_no_direct_call_evidence(self):
         """I11: direct call 能设置 _active_skill 但无 gate/invoke/result evidence。"""
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.skill_system.skill_tool import _skill_select_tool_func
-        _core._skill_selected_by_model = False
+        _state.set_skill_selected_by_model(False)
 
         # direct call 设置 _active_skill（单元级可用但不产生 mediator evidence chain）
         result = _skill_select_tool_func("demo-note-maker")
 
         assert "已激活" in result
-        assert _core._skill_selected_by_model is True
+        assert _state.get_skill_selected_by_model() is True
 
     def test_i12_skill_select_not_meta_tool(self):
         """I12: SKILL_SELECT 的 meta_tool=False。"""

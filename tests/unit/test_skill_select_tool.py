@@ -117,13 +117,18 @@ class TestSkillSelectToolFunc:
         assert "已激活" not in result
 
     def test_r6_active_skill_set_after_activation(self):
-        """R6: 激活后 _active_skill 应正确填充。"""
+        """R6: 激活后 _active_skill 应正确填充。
+
+        B7 Targeted Cleanup: _active_skill 已从 agent.core 提取到
+        agent.skill_state（打破 core↔loop 和 core↔skill_tool 循环）。
+        测试改用 skill_state API。
+        """
+        from agent.skill_state import get_active_skill
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         _skill_select_tool_func("demo-note-maker")
 
-        import agent.core as _core
-        active = _core._active_skill
+        active = get_active_skill()
         assert active["skill_id"] == "demo-note-maker"
         assert len(active["body"]) > 0
         assert "demo.echo_task_summary" in active["allowed_tools"]
@@ -151,43 +156,50 @@ class TestSkillSelectToolFunc:
         )
 
     def test_r8_active_skill_includes_allowed_tools(self):
-        """R8: _active_skill 的 allowed_tools 来自 descriptor。"""
+        """R8: _active_skill 的 allowed_tools 来自 descriptor。
+
+        B7 Targeted Cleanup: _active_skill 已从 agent.core 提取到
+        agent.skill_state。测试改用 skill_state API。
+        """
+        from agent.skill_state import get_active_skill
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         _skill_select_tool_func("demo-note-maker")
 
-        import agent.core as _core
-        allowed = _core._active_skill.get("allowed_tools")
+        allowed = get_active_skill().get("allowed_tools")
         assert isinstance(allowed, frozenset)
         assert "demo.echo_task_summary" in allowed
         assert "demo.write_demo_note" in allowed
 
     def test_r9_unknown_skill_does_not_set_flag(self):
         """R9: 未知 skill 调用不应设置 _skill_selected_by_model。"""
-        import agent.core as _core
+        from agent.skill_state import (
+            get_skill_selected_by_model,
+            set_skill_selected_by_model,
+        )
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
-        _core._skill_selected_by_model = False
+        set_skill_selected_by_model(False)
 
         _skill_select_tool_func("non-existent-skill-xyz")
 
-        assert _core._skill_selected_by_model is False, (
+        assert get_skill_selected_by_model() is False, (
             "未知 skill 不应设置 flag"
         )
 
     def test_r10_unknown_skill_does_not_overwrite_active_skill(self):
         """R10: 未知 skill 调用不应覆盖 _active_skill。"""
-        import agent.core as _core
+        from agent.skill_state import get_active_skill
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         # 先激活一个有效的 skill
         _skill_select_tool_func("demo-note-maker")
-        original = _core._active_skill.copy()
+        original = get_active_skill().copy()
 
         # 再用无效 skill_id 调用
         _skill_select_tool_func("non-existent-skill-xyz")
 
         # _active_skill 不应被覆盖
-        assert _core._active_skill == original, (
+        assert get_active_skill() == original, (
             "无效 skill_id 不应覆盖 _active_skill"
         )

@@ -375,18 +375,18 @@ class TestSelectionEvidenceChain:
 
         验证 _skill_selected_by_model flag 可以区分两种路径。
         """
-        import agent.core as _core
+        import agent.skill_state as _state
 
         # 模拟 model-owned selection 成功后的状态
-        _core._skill_selected_by_model = True
+        _state.set_skill_selected_by_model(True)
 
         # flag 为 True 时，turn-end fallback 应跳过
-        assert _core._skill_selected_by_model is True, (
+        assert _state.get_skill_selected_by_model() is True, (
             "model-owned selection flag 应在 selection 成功后为 True"
         )
 
         # cleanup
-        _core._skill_selected_by_model = False
+        _state.set_skill_selected_by_model(False)
 
     def test_e04_no_skill_continues_normal_react(self):
         """E04: no_skill（无候选或无匹配）时系统正常继续 ReAct，不 crash。
@@ -475,7 +475,7 @@ class TestSelectionEvidenceChain:
         验证 _update_active_skill_from_dispatcher() 能正确提取
         SKILL_SELECT 成功结果并更新 _active_skill。
         """
-        import agent.core as _core
+        import agent.skill_state as _state
         from agent.runtime_integration import (
             ActionHandlerRegistry,
             RuntimeActionDispatcher,
@@ -491,7 +491,7 @@ class TestSelectionEvidenceChain:
         from agent.skill_system.loader import SkillLoader
 
         # 保存原始状态
-        original_active = _core._active_skill.copy() if _core._active_skill else {}
+        original_active = dict(_state.get_active_skill())
         try:
             registry_obj = SkillRegistry(roots=[Path("skills")])
 
@@ -538,15 +538,16 @@ class TestSelectionEvidenceChain:
             dispatcher.route(request)
 
             # _update_active_skill_from_dispatcher 应从 action_log 更新 _active_skill
+            import agent.core as _core
             _core._update_active_skill_from_dispatcher(dispatcher)
 
             # 检查 _active_skill 是否正确更新
-            assert _core._active_skill.get("skill_id") == "demo-note-maker", (
-                f"_active_skill 应从 dispatcher 更新，实际: {_core._active_skill}"
+            assert _state.get_active_skill().get("skill_id") == "demo-note-maker", (
+                f"_active_skill 应从 dispatcher 更新，实际: {_state.get_active_skill()}"
             )
         finally:
             # 恢复原始状态
-            _core._active_skill = original_active
+            _state.set_active_skill(original_active)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

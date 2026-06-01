@@ -43,16 +43,20 @@ def _reset_lifecycle_state():
     - 清除 _active_session_ns（skill_tool.py）
     - 重置 _active_skill / _skill_selected_by_model（core.py）
     """
-    import agent.core as _core
+    from agent.skill_state import (
+        get_active_skill,
+        set_skill_selected_by_model,
+    )
     from agent.skill_system.lifecycle import reset_default_lifecycle
     from agent.skill_system.skill_tool import clear_active_session_ns
 
     reset_default_lifecycle()
     clear_active_session_ns()
-    _core._active_skill = {}
-    _core._skill_selected_by_model = False
+    # 通过 skill_state accessor 清除，保证引用一致性——不直接赋值 _core._active_skill
+    get_active_skill().clear()
+    set_skill_selected_by_model(False)
     yield
     reset_default_lifecycle()
     clear_active_session_ns()
-    _core._active_skill = {}
-    _core._skill_selected_by_model = False
+    get_active_skill().clear()
+    set_skill_selected_by_model(False)

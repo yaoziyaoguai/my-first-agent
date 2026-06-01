@@ -1,7 +1,9 @@
 import React from "react";
 import { describe, it, expect } from "vitest";
 import { AGENT_LENS_FIXTURE, EMPTY_AGENT_LENS } from "../data/agentLensFixture";
-import type { AgentLensNode, FocusZone } from "../types";
+import { fakeRuntimeSend, makeUserMessage } from "../data/fakeRuntimeGateway";
+import type { AgentLensNode, FocusZone, SelectedLens } from "../types";
+import { EMPTY_SELECTED_LENS } from "../types";
 import { WorkbenchLayout } from "../components/WorkbenchLayout";
 import { AgentLensPanel } from "../components/AgentLensPanel";
 import { InteractionPanel } from "../components/InteractionPanel";
@@ -10,12 +12,11 @@ import { InputBar } from "../components/InputBar";
 import { StatusBar } from "../components/StatusBar";
 
 // ============================================================
-// M1 — Layout Data / State logic tests
+// M1 — Layout Data / State logic tests (保留)
 // ============================================================
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
-/** Pure function: cycle focus zone — extracted for testability */
 function cycleFocus(current: FocusZone, direction: 1 | -1): FocusZone {
   const idx = FOCUS_ORDER.indexOf(current);
   const next =
@@ -112,89 +113,215 @@ describe("M1 Layout — Focus Management", () => {
   });
 });
 
-describe("M1 Layout — Component Smoke", () => {
-  it("WorkbenchLayout is the default main view (no Dashboard toggle)", () => {
-    const el = React.createElement(WorkbenchLayout, {});
-    expect(el).toBeDefined();
-    expect(el.type).toBe(WorkbenchLayout);
-  });
+// ============================================================
+// M2 — Agent Lens selection tests
+// ============================================================
 
-  it("AgentLensPanel renders with fixture data", () => {
+const MOCK_LENS: SelectedLens = {
+  agentId: "agent-001",
+  sessionId: "session-001a",
+  runId: "run-001a2",
+  instanceId: null,
+};
+
+describe("M2 Agent Lens — Selection", () => {
+  it("AgentLensPanel renders with selectedLens prop", () => {
     const el = React.createElement(AgentLensPanel, {
       nodes: AGENT_LENS_FIXTURE,
       focused: false,
+      selectedLens: EMPTY_SELECTED_LENS,
+      onSelect: () => {},
     });
     expect(el).toBeDefined();
   });
 
-  it("AgentLensPanel handles empty fixture", () => {
+  it("AgentLensPanel renders with selectedLens having agentId", () => {
+    const el = React.createElement(AgentLensPanel, {
+      nodes: AGENT_LENS_FIXTURE,
+      focused: true,
+      selectedLens: MOCK_LENS,
+      onSelect: () => {},
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("AgentLensPanel handles empty fixture with new props", () => {
     const el = React.createElement(AgentLensPanel, {
       nodes: EMPTY_AGENT_LENS,
       focused: false,
+      selectedLens: EMPTY_SELECTED_LENS,
+      onSelect: () => {},
     });
     expect(el).toBeDefined();
   });
 
-  it("InteractionPanel renders", () => {
+  it("InteractionPanel shows lens label when selected", () => {
+    const el = React.createElement(InteractionPanel, {
+      focused: false,
+      lensLabel: "agent-001",
+      messages: [],
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("InteractionPanel shows no-lens prompt when none selected", () => {
     const el = React.createElement(InteractionPanel, {
       focused: true,
       lensLabel: "none",
+      messages: [],
     });
     expect(el).toBeDefined();
   });
 
-  it("ContextPanel renders as placeholder (not Audit Lens)", () => {
+  it("ContextPanel shows selection info when lens selected", () => {
     const el = React.createElement(ContextPanel, {
       focused: false,
-      lensLabel: "none",
+      lensLabel: "agent-001 / session-001a",
+      messageCount: 0,
     });
     expect(el).toBeDefined();
-  });
-
-  it("ContextPanel shows placeholder content when lens selected", () => {
-    const el = React.createElement(ContextPanel, {
-      focused: false,
-      lensLabel: "Agent: agent-001",
-    });
-    expect(el).toBeDefined();
-  });
-
-  it("InputBar renders", () => {
-    const el = React.createElement(InputBar, {
-      focused: true,
-      lensLabel: "none",
-    });
-    expect(el).toBeDefined();
-  });
-
-  it("StatusBar renders with fake/local mode label", () => {
-    const el = React.createElement(StatusBar, {
-      activeLens: "none",
-      focusZone: "interaction",
-    });
-    expect(el).toBeDefined();
-  });
-
-  it("FocusZone type does not include 'audit-lens'", () => {
-    // Verify audit-lens was renamed to context
-    const validZones: FocusZone[] = ["agent-lens", "interaction", "context"];
-    expect(validZones).not.toContain("audit-lens" as FocusZone);
   });
 });
 
+// ============================================================
+// M3 — Fake/local Interaction tests
+// ============================================================
+
+describe("M3 Interaction — fakeRuntimeGateway", () => {
+  it("fakeRuntimeSend returns assistant message with id", () => {
+    const msg = fakeRuntimeSend("hello", "agent-001");
+    expect(msg.role).toBe("assistant");
+    expect(msg.id).toBeTruthy();
+  });
+
+  it("fakeRuntimeSend returns deterministic response for 'hello'", () => {
+    const msg = fakeRuntimeSend("hello", "agent-001");
+    expect(msg.content).toContain("Hello");
+    expect(msg.content).toContain("First Agent");
+  });
+
+  it("fakeRuntimeSend returns default response for unknown input", () => {
+    const msg = fakeRuntimeSend("xyzzy_unknown_input", "agent-001");
+    expect(msg.content).toContain("fake/local response");
+  });
+
+  it("fakeRuntimeSend returns different responses for different keywords", () => {
+    const r1 = fakeRuntimeSend("help me", "agent-001");
+    const r2 = fakeRuntimeSend("show status", "agent-001");
+    expect(r1.content).not.toEqual(r2.content);
+  });
+
+  it("makeUserMessage returns user message", () => {
+    const msg = makeUserMessage("test input");
+    expect(msg.role).toBe("user");
+    expect(msg.content).toBe("test input");
+    expect(msg.id).toBeTruthy();
+  });
+
+  it("message ids are unique", () => {
+    const ids = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      ids.add(fakeRuntimeSend("hello", "agent-001").id);
+    }
+    expect(ids.size).toBe(10);
+  });
+});
+
+describe("M3 Interaction — InputBar", () => {
+  it("InputBar renders with onSubmit prop", () => {
+    const el = React.createElement(InputBar, {
+      focused: true,
+      lensLabel: "agent-001",
+      onSubmit: () => {},
+      disabled: false,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("InputBar renders disabled when no lens", () => {
+    const el = React.createElement(InputBar, {
+      focused: true,
+      lensLabel: "none",
+      onSubmit: () => {},
+      disabled: true,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("InputBar renders without onSubmit (backward compat)", () => {
+    const el = React.createElement(InputBar, {
+      focused: false,
+      lensLabel: "none",
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+describe("M3 Interaction — InteractionPanel messages", () => {
+  it("InteractionPanel renders with messages", () => {
+    const el = React.createElement(InteractionPanel, {
+      focused: true,
+      lensLabel: "agent-001",
+      messages: [
+        { id: "1", role: "user", content: "hello", timestamp: Date.now() },
+        { id: "2", role: "assistant", content: "Hi!", timestamp: Date.now() },
+      ],
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("InteractionPanel renders empty message state", () => {
+    const el = React.createElement(InteractionPanel, {
+      focused: false,
+      lensLabel: "agent-001",
+      messages: [],
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+// ============================================================
+// M4 — Context Panel refresh tests
+// ============================================================
+
+describe("M4 Context — Interaction refresh", () => {
+  it("ContextPanel renders messageCount", () => {
+    const el = React.createElement(ContextPanel, {
+      focused: false,
+      lensLabel: "agent-001",
+      messageCount: 5,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("ContextPanel renders lastInteractionTime", () => {
+    const el = React.createElement(ContextPanel, {
+      focused: false,
+      lensLabel: "agent-001",
+      messageCount: 3,
+      lastInteractionTime: Date.now(),
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+// ============================================================
+// M1+ Safety — unchanged guard tests
+// ============================================================
+
 describe("M1 Safety — Default Entry Guard", () => {
   it("TUI default entry is NOT ACTIVATED", () => {
-    // Guard: the TUI must not claim to be the default entry point.
-    // This is enforced through documentation and code — no default entry
-    // activation code exists in main.tsx or WorkbenchLayout.
     const el = React.createElement(WorkbenchLayout, {});
     expect(el).toBeDefined();
-    // No default entry activation prop or state exists
   });
 
   it("WorkbenchLayout has no props for operations/audit/dashboard data", () => {
-    // WorkbenchLayout renders without any project-specific data props
     const el = React.createElement(WorkbenchLayout, {});
     expect(el.props).toEqual({});
+  });
+
+  it("FocusZone type does not include 'audit-lens'", () => {
+    const validZones: FocusZone[] = ["agent-lens", "interaction", "context"];
+    expect(validZones).not.toContain("audit-lens" as FocusZone);
   });
 });

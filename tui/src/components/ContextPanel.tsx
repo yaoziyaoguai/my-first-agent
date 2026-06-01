@@ -4,13 +4,20 @@ import { Box, Text } from "ink";
 interface ContextPanelProps {
   focused: boolean;
   lensLabel: string;
+  /** M4: interaction stats */
+  messageCount?: number;
+  lastInteractionTime?: number | null;
 }
 
-/** 右侧 Context/Inspector 占位面板 — M1 mock/static placeholder。
+/** 右侧 Context/Inspector 占位面板 — M1 mock/static placeholder, M4 interaction refresh。
  *  不叫 Audit Lens。不渲染 PROJECT_STATUS / PROGRESS_LEDGER / dogfood / debt 等 Operation 内容。
- *  只展示当前 selected lens 的通用辅助信息 placeholder。
- *  具体展示模型后续重新设计。 */
-export function ContextPanel({ focused, lensLabel }: ContextPanelProps) {
+ *  只展示当前 selected lens 的通用辅助信息 placeholder。 */
+export function ContextPanel({
+  focused,
+  lensLabel,
+  messageCount = 0,
+  lastInteractionTime = null,
+}: ContextPanelProps) {
   const hasSelection = lensLabel !== "none";
 
   return (
@@ -26,6 +33,19 @@ export function ContextPanel({ focused, lensLabel }: ContextPanelProps) {
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>Selection</Text>
             <Text dimColor>{lensLabel}</Text>
+          </Box>
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>Interaction</Text>
+            <Text dimColor>
+              {messageCount > 0
+                ? `${messageCount} message(s)`
+                : "No messages yet"}
+            </Text>
+            {lastInteractionTime && (
+              <Text dimColor>
+                Last: {new Date(lastInteractionTime).toLocaleTimeString()}
+              </Text>
+            )}
           </Box>
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>Tool Calls</Text>

@@ -4,17 +4,31 @@ import { Box, Text, useInput } from "ink";
 interface InputBarProps {
   focused: boolean;
   lensLabel: string;
+  /** M3: onSubmit callback — sends user input to fakeRuntimeGateway */
+  onSubmit?: (content: string) => void;
+  /** M3: disabled when no lens selected */
+  disabled?: boolean;
 }
 
-/** 底部输入区域 — M1 只接受文本，M3 接入 RuntimeGateway.send() */
-export function InputBar({ focused, lensLabel }: InputBarProps) {
+/** 底部输入区域 — M1 只接受文本，M3 接入 RuntimeGateway */
+export function InputBar({
+  focused,
+  lensLabel,
+  onSubmit,
+  disabled = false,
+}: InputBarProps) {
   const [value, setValue] = useState("");
 
   useInput(
     (input, key) => {
       if (!focused) return;
       if (key.return) {
-        // M3: send via RuntimeGateway
+        if (disabled) return;
+        const trimmed = value.trim();
+        if (trimmed.length > 0 && onSubmit) {
+          onSubmit(trimmed);
+          setValue("");
+        }
         return;
       }
       if (key.backspace || key.delete) {
@@ -29,11 +43,19 @@ export function InputBar({ focused, lensLabel }: InputBarProps) {
     { isActive: focused },
   );
 
+  const hint = disabled
+    ? "Select an agent first (Tab to Agent Lens)"
+    : focused
+      ? "Type and press Enter to send"
+      : "Tab to focus";
+
   return (
     <Box flexDirection="column">
       <Box paddingLeft={1} paddingRight={1}>
         <Text dimColor>
-          {lensLabel ? `Context: ${lensLabel}` : "No context selected"}
+          {lensLabel !== "none"
+            ? `Context: ${lensLabel}`
+            : "No lens selected"}
         </Text>
       </Box>
       <Box paddingLeft={1} paddingRight={1} gap={1}>
@@ -42,11 +64,7 @@ export function InputBar({ focused, lensLabel }: InputBarProps) {
         </Text>
         <Text>
           {value || (
-            <Text dimColor>
-              {focused
-                ? "_"
-                : "Type your message... (Tab to focus)"}
-            </Text>
+            <Text dimColor>{focused ? "_" : hint}</Text>
           )}
           {focused && <Text dimColor>▊</Text>}
         </Text>

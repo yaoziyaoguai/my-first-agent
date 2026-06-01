@@ -3,6 +3,7 @@ import { Box, Text, useInput, useApp } from "ink";
 import type { FocusZone, SelectedLens } from "../types";
 import { EMPTY_SELECTED_LENS } from "../types";
 import { AGENT_LENS_FIXTURE } from "../data/agentLensFixture";
+import { fakeRuntimeSend, makeUserMessage, type RuntimeMessage } from "../data/fakeRuntimeGateway";
 import { AgentLensPanel } from "./AgentLensPanel";
 import { InteractionPanel } from "./InteractionPanel";
 import { ContextPanel } from "./ContextPanel";
@@ -11,26 +12,49 @@ import { StatusBar } from "./StatusBar";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
+/** 从 SelectedLens 构建人类可读 label */
+function lensToLabel(lens: SelectedLens): string {
+  const parts: string[] = [];
+  if (lens.agentId) parts.push(lens.agentId);
+  if (lens.sessionId) parts.push(lens.sessionId);
+  if (lens.runId) parts.push(lens.runId);
+  if (lens.instanceId) parts.push(lens.instanceId);
+  return parts.length > 0 ? parts.join(" / ") : "none";
+}
+
 /** B8 Interaction-first Workbench — 唯一默认主界面。
- *  不渲染 Dashboard / PROJECT_STATUS / AutoRun / dogfood / debt 等 Operation 内容。
- *  右侧为 Context/Inspector placeholder（非 Audit Lens）。
+ *  M2: selectedLens 驱动, M3: fake/local interaction, M4: Context refresh。
  *  所有 Operation / AutoRun / Project management displays: PAUSED。 */
 export function WorkbenchLayout() {
   const { exit } = useApp();
   const [focusZone, setFocusZone] = useState<FocusZone>("interaction");
-  const [selectedLens] = useState<SelectedLens>(EMPTY_SELECTED_LENS);
+  const [selectedLens, setSelectedLens] = useState<SelectedLens>(EMPTY_SELECTED_LENS);
+  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
 
-  const cycleFocus = useCallback(
-    (direction: 1 | -1) => {
-      setFocusZone((prev) => {
-        const idx = FOCUS_ORDER.indexOf(prev);
-        const next =
-          (((idx + direction) % FOCUS_ORDER.length) + FOCUS_ORDER.length) %
-          FOCUS_ORDER.length;
-        return FOCUS_ORDER[next];
-      });
+  const cycleFocus = useCallback((direction: 1 | -1) => {
+    setFocusZone((prev) => {
+      const idx = FOCUS_ORDER.indexOf(prev);
+      const next =
+        (((idx + direction) % FOCUS_ORDER.length) + FOCUS_ORDER.length) %
+        FOCUS_ORDER.length;
+      return FOCUS_ORDER[next];
+    });
+  }, []);
+
+  const handleLensSelect = useCallback((lens: SelectedLens) => {
+    setSelectedLens(lens);
+    // 切换到新的 lens 时清空消息
+    setMessages([]);
+  }, []);
+
+  const handleSubmit = useCallback(
+    (content: string) => {
+      if (!selectedLens.agentId) return;
+      const userMsg = makeUserMessage(content);
+      const assistantMsg = fakeRuntimeSend(content, selectedLens.agentId);
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
     },
-    [],
+    [selectedLens.agentId],
   );
 
   useInput((input, key) => {
@@ -47,16 +71,16 @@ export function WorkbenchLayout() {
     }
   });
 
-  const lensLabel = selectedLens.agentId
-    ? `Agent: ${selectedLens.agentId}`
-    : "none";
+  const lensLabel = lensToLabel(selectedLens);
+  const hasSelection = selectedLens.agentId !== null;
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
 
   return (
     <Box flexDirection="column">
       {/* 标题 */}
       <Box paddingLeft={1}>
         <Text bold>B8 Interaction-first Workbench</Text>
-        <Text dimColor> — M1 (Fixture Data)</Text>
+        <Text dimColor> — M2/M3/M4 MVP (fake/local mode)</Text>
       </Box>
 
       {/* 三区域 */}
@@ -66,7 +90,8 @@ export function WorkbenchLayout() {
           <AgentLensPanel
             nodes={AGENT_LENS_FIXTURE}
             focused={focusZone === "agent-lens"}
-            selectedId={selectedLens.agentId}
+            selectedLens={selectedLens}
+            onSelect={handleLensSelect}
           />
         </Box>
 
@@ -75,6 +100,7 @@ export function WorkbenchLayout() {
           <InteractionPanel
             focused={focusZone === "interaction"}
             lensLabel={lensLabel}
+            messages={messages}
           />
         </Box>
 
@@ -83,6 +109,8 @@ export function WorkbenchLayout() {
           <ContextPanel
             focused={focusZone === "context"}
             lensLabel={lensLabel}
+            messageCount={messages.length}
+            lastInteractionTime={lastMsg?.timestamp ?? null}
           />
         </Box>
       </Box>
@@ -93,7 +121,12 @@ export function WorkbenchLayout() {
       </Box>
 
       {/* 底部输入/状态区域 */}
-      <InputBar focused={focusZone === "interaction"} lensLabel={lensLabel} />
+      <InputBar
+        focused={focusZone === "interaction"}
+        lensLabel={lensLabel}
+        onSubmit={handleSubmit}
+        disabled={!hasSelection}
+      />
       <StatusBar activeLens={lensLabel} focusZone={focusZone} />
     </Box>
   );

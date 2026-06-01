@@ -1,12 +1,21 @@
-import React from "react";
-import { Box, Text } from "ink";
-import type { AgentLensNode } from "../types";
+import React, { useState, useMemo, useCallback } from "react";
+import { Box, Text, useInput } from "ink";
+import type { AgentLensNode, SelectedLens } from "../types";
+import { EMPTY_SELECTED_LENS } from "../types";
 
 interface AgentLensPanelProps {
   nodes: AgentLensNode[];
   focused: boolean;
-  /** 选中节点 ID (M2) */
-  selectedId?: string | null;
+  selectedLens: SelectedLens;
+  onSelect: (lens: SelectedLens) => void;
+}
+
+interface FlatNode {
+  id: string;
+  type: AgentLensNode["type"];
+  label: string;
+  status: AgentLensNode["status"];
+  depth: number;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -25,59 +34,60 @@ const TYPE_SYMBOLS: Record<string, string> = {
   instance: "●",
 };
 
-function AgentLensTreeNode({
-  node,
-  depth,
-  focused,
-  selectedId,
-}: {
-  node: AgentLensNode;
-  depth: number;
-  focused: boolean;
-  selectedId?: string | null;
-}) {
-  const isSelected = selectedId === node.id;
-  const indent = "  ".repeat(depth);
-  const symbol = TYPE_SYMBOLS[node.type] || "?";
-  const color = STATUS_COLORS[node.status] || "white";
-  const prefix = isSelected ? "▶" : " ";
-
-  return (
-    <Box flexDirection="column">
-      <Box>
-        <Text>
-          {indent}
-          <Text
-            bold={isSelected}
-            color={focused && isSelected ? "green" : undefined}
-          >
-            {prefix}{symbol} {node.label}
-          </Text>
-          {" "}
-          <Text color={color} dimColor={node.status === "historical" || node.status === "superseded"}>
-            [{node.status}]
-          </Text>
-        </Text>
-      </Box>
-      {node.children.map((child) => (
-        <AgentLensTreeNode
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          focused={focused}
-          selectedId={selectedId}
-        />
-      ))}
-    </Box>
-  );
+function flattenTree(
+  nodes: AgentLensNode[],
+  depth: number = 0,
+): FlatNode[] {
+  const result: FlatNode[] = [];
+  for (const node of nodes) {
+    result.push({
+      id: node.id,
+      type: node.type,
+      label: node.label,
+      status: node.status,
+      depth,
+    });
+    if (node.children.length > 0) {
+      result.push(...flattenTree(node.children, depth + 1));
+    }
+  }
+  return result;
 }
 
-/** 左侧 Agent Lens 面板 — M1 skeleton fixture, M2 navigation/selection */
+function selectedIdFromLens(lens: SelectedLens): string | null {
+  return lens.instanceId ?? lens.runId ?? lens.sessionId ?? lens.agentId;
+}
+
+/** 左侧 Agent Lens 面板 — M2: keyboard navigation + selection */
 export function AgentLensPanel({
   nodes,
   focused,
-  selectedId,
+  selectedLens,
+  onSelect,
 }: AgentLensPanelProps) {
+  const [highlightedIdx, setHighlightedIdx] = useState(0);
+  const flat = useMemo(() => flattenTree(nodes), [nodes]);
+  const selectedId = selectedIdFromLens(selectedLens);
+
+  useInput(
+    (input, key) => {
+      if (!focused) return;
+      if (key.upArrow) {
+        setHighlightedIdx((prev) => Math.max(0, prev - 1));
+      }
+      if (key.downArrow) {
+        setHighlightedIdx((prev) => Math.min(flat.length - 1, prev + 1));
+      }
+      if (key.return && flat.length > 0) {
+        const node = flat[highlightedIdx];
+        // 选中该节点对应层级最深的 lens
+        const newLens = buildLensFromNode(node, flat);
+        onSelect(newLens);
+      }
+    },
+    { isActive: focused },
+  );
+
   if (nodes.length === 0) {
     return (
       <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
@@ -94,20 +104,81 @@ export function AgentLensPanel({
           {focused ? "◆" : "─"} Agent Lens
         </Text>
       </Box>
-      {nodes.map((node) => (
-        <AgentLensTreeNode
-          key={node.id}
-          node={node}
-          depth={0}
-          focused={focused}
-          selectedId={selectedId}
-        />
-      ))}
+      {flat.map((node, idx) => {
+        const isHighlighted = focused && idx === highlightedIdx;
+        const isSelected = selectedId === node.id;
+        const indent = "  ".repeat(node.depth);
+        const symbol = TYPE_SYMBOLS[node.type] || "?";
+        const color = STATUS_COLORS[node.status] || "white";
+
+        return (
+          <Box key={node.id}>
+            <Text>
+              {indent}
+              <Text
+                bold={isSelected}
+                color={isHighlighted ? "green" : isSelected ? "blue" : undefined}
+                inverse={isHighlighted}
+              >
+                {isHighlighted ? "▶" : " "}{symbol} {node.label}
+              </Text>
+              {" "}
+              <Text
+                color={color}
+                dimColor={node.status === "historical" || node.status === "superseded"}
+              >
+                [{node.status}]
+              </Text>
+            </Text>
+          </Box>
+        );
+      })}
       <Box marginTop={1}>
         <Text dimColor>
-          {nodes.length} agent(s) — M1 fixture
+          {flat.length} nodes, {nodes.length} agent(s) — ↑↓ navigate, Enter select
         </Text>
       </Box>
     </Box>
   );
+}
+
+/** 根据 flat node 构建 SelectedLens */
+function buildLensFromNode(
+  node: FlatNode,
+  flat: FlatNode[],
+): SelectedLens {
+  const lens = { ...EMPTY_SELECTED_LENS };
+  const nodeIdx = flat.indexOf(node);
+
+  // 向上查找 parent nodes 补全 lens 层级
+  for (let i = nodeIdx - 1; i >= 0; i--) {
+    const anc = flat[i];
+    if (anc.depth === 0 && !lens.agentId) {
+      lens.agentId = anc.id;
+    }
+    if (anc.depth === 1 && anc.depth < node.depth && !lens.sessionId) {
+      lens.sessionId = anc.id;
+    }
+    if (anc.depth === 2 && anc.depth < node.depth && !lens.runId) {
+      lens.runId = anc.id;
+    }
+  }
+
+  // 对当前节点本身
+  switch (node.type) {
+    case "agent":
+      lens.agentId = node.id;
+      break;
+    case "session":
+      if (!lens.sessionId) lens.sessionId = node.id;
+      break;
+    case "run":
+      if (!lens.runId) lens.runId = node.id;
+      break;
+    case "instance":
+      lens.instanceId = node.id;
+      break;
+  }
+
+  return lens;
 }

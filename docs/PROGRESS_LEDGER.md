@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 4 — completed, independent review pending)
+**最后更新**: 2026-06-01 (B7 remediation Loop 5 — completed, independent review pending)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B7 Remediation Loop 5** | a3e5005 | **B7 remediation Loop 5 completed** — P1 memory retain compatibility restored. Root cause debug: two distinct root causes for 8 B7-caused failures. Root Cause A (5 tests): namespace key format mismatch in `_make_store_with_records` (bare key vs `_namespaced_key()`). Root Cause B (3 tests): `resolve_confirmation()` returned `_dispatcher_payload` without calling `store_retained_record()` — dead code after Loop 4 compat layer removal. Fix: `direct_write=True` parameter on `resolve_confirmation()` (backward-compatible default), dispatcher path passes `direct_write=False`. Added `store_retained_record()` to `FilesystemMemoryStore` (real fs-native store). Updated 5 regression tests to match new `direct_write=True` default. Phase 3 regression triage: 0 B7-caused failures across 10 focused groups. Phase 5 gates: security 3/3 PASS, event log 41/41 PASS, TUI 260/260 PASS, tsc clean, ruff clean (3 pre-existing memory_fs_store.py issues also fixed). B7 completed: NO (independent review pending). Phase 4 P2/P3 deferred: pre-existing non-B7 debt (runtime_e2e_disqualified_reason KeyError, 12 missing doc files). |
 | **B7 Remediation Loop 4** | 5cb5eb1 | **B7 remediation Loop 4 completed** — Phase 1: `_active_session_ns` production cleanup (try/finally in chat() + conftest fixture reset, 5 new tests). Phase 2: 15 new evidence tests (Phase 3 SKILL_SELECT lifecycle + Phase 4 checkpoint identity, 25/25 PASS). Phase 3: checkpoint call inventory baselines updated for B7 v2 refactoring (2 tests fixed). Phase 4: memory namespace regression triage — 7 B7-caused failures fixed (compat layer removed from resolve_confirmation, namespace key mismatches in 3 tests, dispatcher kwarg added to monkeypatch), 21 pre-existing failures documented. Phase 5: `docs/dogfood/scratch/` gitignored. Phase 6: PROGRESS_LEDGER / PROJECT_STATUS updated. Phase 7: focused triage across 10 test groups — 0 B7-caused failures. Phase 8: gates (security 3/3 PASS, event log 41/41 PASS, pre-commit ruff clean). B7 completed: NO (independent review pending). |
 | **B7 Remediation Loop 3** | 9dd0dfd | **B7 remediation Loop 3 completed** — Codex 独立复审发现新增 P1 问题。Phase 0: Red/Green evidence 建立 (10/10 PASS)。Phase 1: turn-start identity propagation 修复。Phase 2: RuntimeDecisionFrame MCP session lookup 修复。Phase 3: SKILL_SELECT lifecycle global fallback 修复。Phase 4: checkpoint confirmation paths identity 修复。B7 completed: NO。 |
 | **B7 Remediation Loop 2** | a639a4b | **B7 remediation P1 blockers fixed**

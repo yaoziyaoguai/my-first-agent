@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 4 — completed, independent review pending)
-**状态**: B7 **remediation Loop 4 completed** (5cb5eb1)。Phase 1: `_active_session_ns` production cleanup (try/finally + conftest fixture, 5 new tests PASS)。Phase 2: 15 evidence tests (SKILL_SELECT lifecycle + checkpoint identity, 25/25 PASS)。Phase 3: checkpoint call inventory baselines updated。Phase 4: memory namespace regression triage — 7 B7-caused fixed, 21 pre-existing documented。Phase 5: `docs/dogfood/scratch/` gitignored。Phase 6: docs finalized。Phase 7: focused triage across 10 test groups — 0 B7-caused failures。Phase 8: gates all PASS (security 3/3, event log 41/41, pre-commit ruff clean)。B7 completed: NO (independent review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: independent review of Loop 4。
+**最后更新**: 2026-06-01 (B7 remediation Loop 5 — completed, independent review pending)
+**状态**: B7 **remediation Loop 5 completed** (a3e5005)。P1 memory retain compatibility restored — `direct_write=True` parameter on `resolve_confirmation()`, dispatcher path avoids double-write, `store_retained_record()` added to `FilesystemMemoryStore`。8 B7-caused memory failures fixed (Root Cause A: namespace key format, Root Cause B: dead store_retained_record)。5 regression tests updated。Phase 3 regression triage: 0 B7-caused failures across 10 focused groups。Phase 5 gates: security 3/3 PASS, event log 41/41 PASS, TUI 260/260 PASS, tsc clean, ruff clean (3 pre-existing memory_fs_store.py issues also fixed)。B7 completed: NO (independent review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。Phase 4 P2/P3 deferred (pre-existing non-B7 debt: runtime_e2e_disqualified_reason KeyError, 12 missing doc files)。下一步: independent review of Loop 5。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

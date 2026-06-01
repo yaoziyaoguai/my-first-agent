@@ -1,38 +1,40 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B8 方向变更 — interaction-first workbench M0)
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 产品方向从"信息展示中心"改为"interaction-first workbench"（M0 文档阶段）。旧 Phase 1-6A 已交付能力保留为 auxiliary panels。287/287 TUI tests PASS, 4369 passed/18 skipped/28 xfailed/0 failed。TUI default entry NOT ACTIVATED。not product-ready。
+**最后更新**: 2026-06-02 (B8 M1 Interaction-first Workbench MVP — 方向校准完成, 代码/文档收口)
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1 Interaction-first Workbench MVP 已交付：3 区域布局（Agent Lens / Interaction / Context Panel）+ fixture data + 焦点管理。310/310 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
 ---
 
-## B8 Direction Correction — Interaction-first Workbench (2026-06-02)
+## B8 M1 — Interaction-first Workbench MVP (2026-06-02)
 
-B8 产品方向从"信息展示中心"改为"interaction-first workbench"。M0 为纯文档阶段（不改代码）：
+经过 4 轮方向校准 (Round 1-4)，B8 M1 已交付：
 
-| 文档 | 状态 |
+| 组件 | 状态 |
 |------|------|
-| `docs/proposals/b8-interaction-first-workbench-proposal.md` | **WRITTEN** — 待用户审阅（5 项决策） |
-| `docs/milestones/b8-interaction-first-workbench-milestones.md` | **WRITTEN** — M0-M8 定义完成 |
-| `docs/design/b8-interaction-first-workbench-sdd.md` | **WRITTEN** — 布局/数据模型/安全边界 |
-| `docs/plans/b8-interaction-first-workbench-tdd-plan.md` | **WRITTEN** — 107 new tests planned |
-| `docs/roadmap/b8-tui-workbench-roadmap.md` | **REWRITTEN** — interaction-first 方向 |
+| `WorkbenchLayout.tsx` | 3 区域布局（Agent Lens 25% / Interaction 50% / Context 25%） |
+| `AgentLensPanel.tsx` | agent/session/run/instance 树形选择（fixture data） |
+| `InteractionPanel.tsx` | 对话展示区域 placeholder |
+| `ContextPanel.tsx` | 通用 Context/Inspector placeholder（mock/static） |
+| `InputBar.tsx` | 基础文本输入 |
+| `StatusBar.tsx` | lens/focus/mode 信息 + keybinding hints |
+| `agentLensFixture.ts` | 3 agents fixture data |
+| `types.ts` | AgentLensNode, SelectedLens, FocusZone, EMPTY_SELECTED_LENS |
+| `layout.test.tsx` | 23 tests (fixture validation + focus management + component smoke + safety) |
 
-**核心变更**:
-- 布局: 7 视图工作台 → Agent Lens (25%) / Interaction View (50%) / Audit Lens (25%)
-- 里程碑: 按"面板数量" → 按"主入口成熟度"（M0-M8）
-- AutoRun: 永久 dev-only，不作为产品主线
-- 现有 Phase 1-6A 面板: 保留为 auxiliary panels
+**核心方向**:
+- First Agent = 通用 Agent Runtime/Workbench（不是 coding-engine 项目管理工具）
+- 布局: Agent Lens (25%) / Interaction View (50%) / **Context Panel** (25%)
+- 焦点管理: Tab 在 interaction → agent-lens → context 循环，Shift+Tab 反向
+- 右侧面板叫 **Context Panel**（不叫 Audit Lens）
+- Context Panel 内容为 mock/static generic placeholder（不展示 project-specific 数据）
 
-**待用户确认的 5 项决策**（见 proposal §10）:
-1. 接受 "interaction-first workbench" 替代 "信息展示中心"？
-2. 接受三区域布局方案？
-3. 接受按"主入口成熟度"定义里程碑？
-4. 接受保留 Phase 1-6A 面板为 auxiliary？
-5. 接受 AutoRun 永久 dev-only？
-
-M0 exit criteria: proposal 通过用户审阅 + 所有文档自审通过 + 287/287 tests + tsc clean。
+**PAUSED — 不产品化**:
+- 所有 Operations/AutoRun/Project dashboard 展示
+- evidence/gate/checkpoint/memory/event 审计面板
+- Dashboard.tsx（旧 7 视图，保留在磁盘但不 import）
+- 所有 project-specific operations 展示
 
 ---
 
@@ -77,9 +79,9 @@ B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信
 
 | 项目 | 状态 |
 |------|------|
-| B8 M0 (Direction Correction) | **IN PROGRESS** — proposal + milestones + SDD + TDD Plan 已写，待自审 + 用户审阅 |
-| B8 M1-M8 | **PENDING** — M0 完成后按依赖链依次推进 |
-| B8 旧 Phase 1-6A | **COMPLETED** — 全部能力保留为 auxiliary panels |
+| B8 M1 (Interaction-first MVP) | **DELIVERED** — 3 区域布局 + fixture data + 23 tests + tsc clean |
+| B8 M2+ | **PENDING** — M1 完成后按依赖链推进 |
+| B8 旧 Phase 1-6A | **PAUSED** — 保留在磁盘但不 import/渲染 |
 | TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
 
 ### Failure Classification Summary
@@ -373,11 +375,11 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-6A 全部 COMPLETED — 260/260 tests PASS, tsc --noEmit clean。
+**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007)。B8 M1 Interaction-first Workbench MVP delivered: 310/310 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard PAUSED。
 
-**B8 Phase 6B (多实例历史浏览器) DEFERRED** — 缺 session/run/instance identity + evidence namespace。**Phase 7 DEFERRED** — 缺 append-only event source contract。详见 `docs/debt/b8-tui-workbench-technical-debt.md`。B7 Final Cleanup Loop completed (088f4b4 + additional remediation), final independent completion review pending。TUI not default entry yet。CLI fallback retained。
+**B8 Phase 6B/7 DEFERRED** — 旧方向产物。详见 `docs/debt/b8-tui-workbench-technical-debt.md`。TUI not default entry yet。CLI fallback retained。
 
-**下一步: 用户决策** — B8 阶段性收口审查已完成 (`docs/reviews/b8-tui-workbench-completion-review.md`)。可选: (A) B7 Multi-instance Readiness, (B) B8 Polish 继续, (C) evidence 强化 (003/006/007/008)。不进入 B7, 不改 runtime, 不立即激活默认入口。
+**下一步**: B8 M2+ (Agent Lens 交互 / RuntimeGateway / Interaction 数据流) 或用户指定的其他方向。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 

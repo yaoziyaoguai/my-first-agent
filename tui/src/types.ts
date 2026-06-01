@@ -86,3 +86,48 @@ export interface CommandCatalog {
   version: string;
   commands: CommandDefinition[];
 }
+
+// ============================================================
+// B8 Interaction-first Workbench types (M1+)
+// ============================================================
+
+/** Agent Lens 树节点类型 */
+export type AgentLensNodeType = "agent" | "session" | "run" | "instance";
+
+/** Agent Lens 树节点状态 */
+export type AgentLensNodeStatus =
+  | "active"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "historical"
+  | "superseded";
+
+/** Agent Lens 树节点 */
+export interface AgentLensNode {
+  id: string;
+  type: AgentLensNodeType;
+  label: string;
+  status: AgentLensNodeStatus;
+  children: AgentLensNode[];
+  metadata?: Record<string, string>;
+}
+
+/** 选中的 lens 上下文 */
+export interface SelectedLens {
+  agentId: string | null;
+  sessionId: string | null;
+  runId: string | null;
+  instanceId: string | null;
+}
+
+/** 空 selected lens */
+export const EMPTY_SELECTED_LENS: SelectedLens = {
+  agentId: null,
+  sessionId: null,
+  runId: null,
+  instanceId: null,
+};
+
+/** 三区域焦点 */
+export type FocusZone = "agent-lens" | "interaction" | "context";

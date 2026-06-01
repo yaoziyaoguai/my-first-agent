@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (B8 Phase 5: Development Workflow Panel wired)
+**最后更新**: 2026-06-02 (B8 M1 Interaction-first Workbench MVP delivered)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B8 M1: Interaction-first MVP (方向校准 + 代码收口)** | — | **经过 4 轮方向校准 (Round 1-4)，B8 M1 交付**: 创建 8 个新文件 — WorkbenchLayout (3 区域布局: Agent Lens/Interaction/Context Panel)、AgentLensPanel (fixture 树)、InteractionPanel (placeholder)、ContextPanel (mock/static, 替代 AuditLensPanel)、InputBar、StatusBar、agentLensFixture (3 agents)、layout.test.tsx (23 tests)。类型定义: AgentLensNode, SelectedLens, FocusZone, EMPTY_SELECTED_LENS。焦点管理: Tab/Shift+Tab 三区域循环。main.tsx 简化为纯 WorkbenchLayout 渲染。删除 AuditLensPanel.tsx。Dashboard.tsx 保留但不 import。所有 Operations/AutoRun/Project dashboard **PAUSED**。SDD §1.5/§2/§7/§10 重写 — 移除 Project Operations Lens 概念，Audit Lens → Context Panel。Proposal 同步更新。PROJECT_STATUS/PROGRESS_LEDGER 更新。310/310 TUI tests PASS, tsc clean。TUI default entry NOT ACTIVATED。|
 | **B8 M0: Direction Correction (文档阶段)** | — | **B8 产品方向从"信息展示中心"改为"interaction-first workbench"** — 创建 proposal (`docs/proposals/b8-interaction-first-workbench-proposal.md`): why/what/boundary/core idea/innovation/safety/AutoRun boundary。创建 milestones (`docs/milestones/b8-interaction-first-workbench-milestones.md`): M0-M8 按"主入口成熟度"定义，非"面板数量"。SDD (`docs/design/b8-interaction-first-workbench-sdd.md`): 三区域布局/数据模型/RuntimeGateway boundary/dynamic audit/safety。TDD Plan (`docs/plans/b8-interaction-first-workbench-tdd-plan.md`): 107 new tests。Roadmap/debt/status 全部对齐。待用户审阅 proposal（5 项决策）。不改代码。|
 | **B8 Phase 6B Readiness Cleanup** | — | **44 pre-existing/non-B7 failures 全部处理** — 2 real fixes (health report runs_accumulation key, memory extraction LLM 调用失败 error message), 19 new xfails (9 end-turn reply + 7 state machine + 3 real env), 9 previously xfailed。4369 passed, 18 skipped, 28 xfailed, 0 failed。B8 Phase 6B implementation ready。B8 Phase 7: NOT ready (blocked by Phase 6B)。TUI default entry NOT ACTIVATED。|
 | **B8 Phase 5 Dev Workflow Panel** | fc0c9a2 | **Phase 5 Development Workflow Panel wired** — HardStopOverlay + ReviewPacketPanel + AutoRunPanel wired into Dashboard workflow view。All AutoRun labels renamed to Development Workflow (provisional dev-only) per user mandate。autoRunState 增强: hardStopReason + lastLoop extraction。main.tsx 构建 autoRunState/reviewPacket 数据管道。287/287 TUI tests PASS, tsc clean。7 files (+57/-10)。Pushed origin/main。B8 Phase 6B/7: DEFERRED (blocked by B7)。|

@@ -4,6 +4,7 @@
 **状态**: PROPOSAL — 待用户审阅
 **取代**: B8 原有 "信息展示中心" 产品方向
 **依赖**: B7 current-stage closed (accepted-with-caveats)
+**最近更新**: 2026-06-02 — 方向校准 (Round 1-3): 移除 Project Operations Lens, Audit Lens → Context Panel, Operations PAUSED
 
 ---
 
@@ -33,12 +34,17 @@ First Agent 的核心价值是**对话式 agent runtime**——用户输入 → 
 
 ## 2. Product Position
 
-**B8 = First Agent Interactive Workbench。**
+**B8 = First Agent Interaction-first Workbench。**
+
+First Agent 是一个**通用 Agent Runtime/Workbench**，不是 coding-engine 项目管理工具。
 
 - **不是** AutoRun 控制台
 - **不是** 单纯状态看板
 - **不是** 第二 runtime
-- **是** First Agent 的交互式主入口候选——用户在这里对话、观察、审计、决策
+- **不是** project management dashboard
+- **是** First Agent 的交互式主入口候选——用户在这里对话、观察、决策
+
+所有 Operations/AutoRun/Project dashboard 展示均为 **PAUSED**，不产品化。
 
 ---
 
@@ -49,21 +55,21 @@ First Agent 的核心价值是**对话式 agent runtime**——用户输入 → 
 ```
 ┌──────────────────┬──────────────────────────────┬──────────────────────┐
 │                  │                              │                      │
-│   Agent Lens     │     Interaction View         │   Audit Lens         │
+│   Agent Lens     │     Interaction View         │   Context Panel      │
 │   (左侧 25%)     │     (中间 50%)               │   (右侧 25%)         │
 │                  │                              │                      │
-│   agent/session  │  用户输入 → agent 响应        │  动态展示:            │
-│   /run/instance  │  tool calls → results        │  - evidence          │
-│   树形切换        │  memory proposals            │  - gate status       │
-│                  │  confirmation dialogs         │  - checkpoint        │
-│   current        │                              │  - memory summary    │
-│   historical     │                              │  - event stream      │
+│   agent/session  │  用户输入 → agent 响应        │  mock/static:        │
+│   /run/instance  │  tool calls → results        │  - Selection         │
+│   树形切换        │  memory proposals            │  - Tool Calls        │
+│                  │  confirmation dialogs         │  - Memory            │
+│   current        │                              │  - Checkpoint        │
+│   historical     │                              │  - Safety            │
 │   superseded     │                              │                      │
-│   active/paused  │                              │  随 selected lens    │
-│   completed/fail │                              │  动态变化             │
-│                  │                              │                      │
+│   active/paused  │                              │  通用 placeholder    │
+│   completed/fail │                              │  pending generic     │
+│                  │                              │  model               │
 ├──────────────────┴──────────────────────────────┴──────────────────────┤
-│  Input Bar / Pending Action / Status Bar                               │
+│  Input Bar / Status Bar                                                │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,12 +88,13 @@ First Agent 的核心价值是**对话式 agent runtime**——用户输入 → 
 - 展示 tool calls、memory proposals、confirmation dialogs
 - **不直接执行 tool，不直接写 memory/checkpoint**
 
-### 3.3 Audit Lens（右侧）
+### 3.3 Context Panel（右侧）
 
-- 随 selected lens 动态变化
-- 展示 evidence、gate、checkpoint、memory summary、event stream
-- 支持 interaction 后 refresh
-- xfail/caveat/accepted-with-caveats 状态展示正确
+- 通用 Context/Inspector placeholder（M1 mock/static）
+- 展示 Selection、Tool Calls、Memory、Checkpoint、Safety 等通用信息
+- 具体展示模型后续重新设计为通用 agent context model
+- **不叫 Audit Lens**
+- **不渲染 PROJECT_STATUS / PROGRESS_LEDGER / dogfood / debt 等 project-specific 数据**
 
 ### 3.4 Input Bar / Status Bar（底部）
 
@@ -137,24 +144,21 @@ TUI input
 
 AutoRun 是 Coding Agent（Claude Code / Codex）开发 First Agent 时使用的工程 workflow/skill，**不是 First Agent 产品本身的核心能力**。
 
-- Phase 5 组件（AutoRunPanel/HardStopOverlay/ReviewPacketPanel）保留为 `provisional dev-only, may be removed`
+- 所有 AutoRun/HardStop/ReviewPacket 面板 **PAUSED**
 - 不作为 B8 产品主线
 - B8 产品主线：Interaction-first Workbench（本文档方向）
 
 ---
 
-## 7. Existing Assets Retained
+## 7. Existing Assets — PAUSED
 
-以下 B8 Phase 1-6A 已交付能力全部保留为 auxiliary panels：
+以下 B8 Phase 1-6A 已交付能力**全部 PAUSED**，不渲染在当前 WorkbenchLayout 中：
 
-| 能力 | 新位置 | 用途 |
-|------|--------|------|
-| Evidence Browser | Audit Lens 子面板 | 多实例 evidence 历史 |
-| Gate History | Audit Lens 子面板 | 当前 run gate 状态 |
-| Audit Log | Audit Lens 子面板 | 命令执行审计 |
-| Docs Consistency | Audit Lens 子面板 | 文档一致性检查 |
-| Command Shell | 保留为 advanced 功能 | 安全命令执行 |
-| Dev Workflow Panel | 保留 dev-only | Coding Agent 工程使用 |
+- Evidence Browser / Gate History / Audit Log / Docs Consistency
+- Command Shell / Dev Workflow Panel
+- 所有 project-specific operations 面板
+
+Dashboard.tsx 保留在磁盘但不被 import。后续如需产品化，重新设计为通用模型。
 
 ---
 
@@ -166,9 +170,9 @@ AutoRun 是 Coding Agent（Claude Code / Codex）开发 First Agent 时使用的
 | Phase = 面板数量 | Milestone = 主入口成熟度 |
 | 无交互能力 | Interaction View 为核心 |
 | 无 lens 概念 | Agent/Session/Run/Instance Lens |
-| 静态数据加载 | 动态审计随 lens 刷新 |
-| 审计信息在独立标签页 | 审计信息在交互界面右侧 |
-| Roadmap 被 AutoRun 污染 | Roadmap 清晰分为产品主线/dev-only |
+| Audit Lens (project-specific) | Context Panel (通用 placeholder) |
+| Operations/AutoRun 面板 | PAUSED，不产品化 |
+| Roadmap 被 AutoRun 污染 | Roadmap 聚焦 interaction-first MVP |
 
 ---
 

@@ -1,161 +1,16 @@
 import React from "react";
-import { render, useInput, useApp } from "ink";
-import fs from "node:fs";
+import { render } from "ink";
 import path from "node:path";
-import { execSync } from "node:child_process";
 
-import { Dashboard } from "./components/Dashboard";
-import { parseProjectStatus } from "./data/projectStatus";
-import { parseProgressLedger } from "./data/progressLedger";
-import { parseDogfoodResult } from "./data/dogfoodResults";
-import { buildGitInfo } from "./data/gitInfo";
-import { loadCommandCatalog } from "./data/commandCatalog";
-import { loadNextAction } from "./data/nextAction";
-import { listDogfoodFiles } from "./data/evidenceBrowser";
-import { parseGateHistory } from "./data/gateHistory";
-import { readAuditEntries } from "./data/auditLog";
-import { parseAutoRunState } from "./data/autorunState";
-import { buildReviewPacket } from "./data/reviewPacket";
+import { WorkbenchLayout } from "./components/WorkbenchLayout";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
-function readOrEmpty(filePath: string): string {
-  try {
-    return fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return "";
-  }
-}
-
-function readJsonOrNull(filePath: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  } catch {
-    return null;
-  }
-}
-
-function loadDogfoodResults(): ReturnType<typeof parseDogfoodResult>[] {
-  const dogfoodDir = path.join(REPO_ROOT, "docs", "dogfood");
-  let files: string[] = [];
-  try {
-    files = fs.readdirSync(dogfoodDir).filter((f) => f.endsWith(".json"));
-  } catch {
-    return [];
-  }
-
-  const withMtime = files
-    .map((f) => {
-      const fullPath = path.join(dogfoodDir, f);
-      try {
-        const stat = fs.statSync(fullPath);
-        return { file: f, mtime: stat.mtimeMs };
-      } catch {
-        return { file: f, mtime: 0 };
-      }
-    })
-    .sort((a, b) => b.mtime - a.mtime);
-
-  return withMtime.slice(0, 5).flatMap(({ file }) => {
-    const json = readJsonOrNull(path.join(dogfoodDir, file));
-    if (!json) return [];
-    return [parseDogfoodResult(file, json)];
-  });
-}
-
-function loadGitInfo(): ReturnType<typeof buildGitInfo> {
-  let branch = "";
-  let headCommit = "";
-  let statusStdout = "";
-  let logStdout = "";
-
-  try {
-    branch = execSync("git branch --show-current", {
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-    }).trim();
-  } catch { /* ignore */ }
-
-  try {
-    headCommit = execSync("git rev-parse HEAD", {
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-    }).trim();
-  } catch { /* ignore */ }
-
-  try {
-    statusStdout = execSync("git status --short", {
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-    }).trim();
-  } catch { /* ignore */ }
-
-  try {
-    logStdout = execSync("git log --oneline -n 10", {
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-    }).trim();
-  } catch { /* ignore */ }
-
-  return buildGitInfo(branch, headCommit, statusStdout, logStdout);
-}
-
+/** B8 Interaction-first Workbench — 默认入口。
+ *  不渲染 Dashboard / PROJECT_STATUS / AutoRun / dogfood / debt 等 Operation 相关内容。
+ *  所有数据自包含（fixture），Context Panel 使用 mock/static placeholder。 */
 function App() {
-  const { exit } = useApp();
-
-  useInput((input) => {
-    if (input === "q") {
-      exit();
-    }
-  });
-
-  const projectStatusDoc = readOrEmpty(
-    path.join(REPO_ROOT, "docs", "PROJECT_STATUS.md"),
-  );
-  const progressLedgerDoc = readOrEmpty(
-    path.join(REPO_ROOT, "docs", "PROGRESS_LEDGER.md"),
-  );
-
-  const status = parseProjectStatus(projectStatusDoc);
-  const ledger = parseProgressLedger(progressLedgerDoc);
-  const dogfood = loadDogfoodResults();
-  const git = loadGitInfo();
-  const catalog = loadCommandCatalog();
-  const nextAction = loadNextAction(
-    path.join(REPO_ROOT, "docs", "PROJECT_STATUS.md"),
-  );
-  const evidenceFiles = listDogfoodFiles(
-    path.join(REPO_ROOT, "docs", "dogfood"),
-  );
-  const gateHistory = parseGateHistory(
-    projectStatusDoc + "\n" + progressLedgerDoc,
-  );
-  const auditEntries = readAuditEntries(REPO_ROOT);
-
-  const autoRunState = parseAutoRunState(projectStatusDoc);
-  const gitLog = git.recentCommits.map((c) => `${c.hash} ${c.message}`).join("\n");
-  const reviewPacket = buildReviewPacket(
-    autoRunState.currentPhase,
-    gitLog,
-    projectStatusDoc,
-  );
-
-  return (
-    <Dashboard
-      status={status}
-      ledger={ledger}
-      dogfood={dogfood}
-      git={git}
-      catalog={catalog}
-      nextAction={nextAction}
-      evidenceFiles={evidenceFiles}
-      gateHistory={gateHistory}
-      auditEntries={auditEntries}
-      autoRunState={autoRunState}
-      reviewPacket={reviewPacket}
-      repoRoot={REPO_ROOT}
-    />
-  );
+  return <WorkbenchLayout />;
 }
 
 render(<App />);

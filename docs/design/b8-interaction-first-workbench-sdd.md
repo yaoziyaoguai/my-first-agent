@@ -11,9 +11,44 @@
 
 ## 1. Product Position
 
-B8 = First Agent Interactive Workbench。TUI 的默认布局从"7 视图工作台"改为三区域聚焦布局：Agent Lens / Interaction View / Audit Lens。Interaction View 是默认焦点区域。
+B8 = First Agent Interaction-first Workbench。First Agent 是一个**通用 Agent Runtime/Workbench**，不是 coding-engine 项目管理工具。
 
-旧 SDD（b8-ts-tui-workbench-sdd.md）的 Phase 1-6A 已交付能力全部保留为 auxiliary panels，在 Audit Lens 子面板中复用。
+TUI 默认布局为三区域聚焦布局：Agent Lens (25%) / Interaction View (50%) / Context Panel (25%)。Interaction View 是默认焦点区域。
+
+**所有 Operation / AutoRun / Project dashboard / Audit 展示均为 PAUSED，不产品化。** 右侧面板为通用 Context/Inspector placeholder（mock/static），不叫 Audit Lens。
+
+---
+
+## 1.5 Product Boundary
+
+### 1.5.1 B8 Interaction-first Workbench MVP（当前范围）
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| Agent Lens | M1 fixture data | agent/session/run/instance 树形选择 |
+| Interaction View | M1 placeholder | 用户 ↔ agent 对话区域 |
+| Context Panel | M1 mock/static | 通用 Context/Inspector placeholder |
+| Input Bar | M1 基础输入 | 文本输入区域 |
+| Status Bar | M1 状态栏 | lens/focus/mode 信息 |
+
+### 1.5.2 PAUSED — 不产品化
+
+以下内容**全部 PAUSED**，不在 WorkbenchLayout 中渲染，不作为产品功能开发：
+
+- PROJECT_STATUS / PROGRESS_LEDGER 解析和展示
+- dogfood results / review packet / gate history
+- technical debt / docs consistency
+- AutoRun / HardStop / Dev Workflow 面板
+- command catalog / safety model 面板
+- evidence / gate / checkpoint / memory / event 审计面板
+- Dashboard.tsx 整页切换（旧 7 视图工作台）
+- 所有 project-specific operations 展示
+
+这些是 First Agent 项目自身的工程运维数据，不是 First Agent 通用产品的功能。后续如需产品化，重新设计为通用模型。
+
+### 1.5.3 Legacy Dashboard
+
+`tui/src/components/Dashboard.tsx` 保留在磁盘上但不被 import 或渲染。它是旧 7 视图工作台实现，已归档。
 
 ---
 
@@ -24,40 +59,32 @@ B8 = First Agent Interactive Workbench。TUI 的默认布局从"7 视图工作�
 ```
 ┌──────────────────┬──────────────────────────────┬──────────────────────┐
 │                  │                              │                      │
-│   Agent Lens     │     Interaction View         │   Audit Lens         │
+│   Agent Lens     │     Interaction View         │   Context Panel      │
 │   (左侧 25%)     │     (中间 50%)               │   (右侧 25%)         │
 │                  │                              │                      │
-│   agent/session  │  用户输入 → agent 响应        │  动态展示:            │
-│   /run/instance  │  tool calls → results        │  - evidence          │
-│   树形切换        │  memory proposals            │  - gate status       │
-│                  │  confirmation dialogs         │  - checkpoint        │
-│   current        │                              │  - memory summary    │
-│   historical     │                              │  - event stream      │
+│   agent/session  │  用户输入 → agent 响应        │  mock/static:        │
+│   /run/instance  │  tool calls → results        │  - Selection         │
+│   树形切换        │  memory proposals            │  - Tool Calls        │
+│                  │  confirmation dialogs         │  - Memory            │
+│   current        │                              │  - Checkpoint        │
+│   historical     │                              │  - Safety            │
 │   superseded     │                              │                      │
-│   active/paused  │                              │  随 selected lens    │
-│   completed/fail │                              │  动态变化             │
-│                  │                              │                      │
+│   active/paused  │                              │  通用 placeholder    │
+│   completed/fail │                              │  pending generic     │
+│                  │                              │  model               │
 ├──────────────────┴──────────────────────────────┴──────────────────────┤
-│  Input Bar / Pending Action / Status Bar                               │
+│  Input Bar / Status Bar                                                │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 组件树
+### 2.2 组件树 (当前 M1)
 
 ```
 WorkbenchLayout
 ├── AgentLensPanel
 │   └── AgentLensNode (递归树节点)
-├── InteractionView
-│   ├── InteractionMessageList
-│   │   └── InteractionMessage (user/agent/tool_call/memory_proposal)
-│   └── PendingActionPanel (M5)
-├── AuditLensPanel
-│   ├── EvidenceSubPanel
-│   ├── GateSubPanel
-│   ├── CheckpointSubPanel
-│   ├── MemorySubPanel
-│   └── EventSubPanel (M7)
+├── InteractionPanel (placeholder)
+├── ContextPanel (mock/static placeholder)
 ├── InputBar
 └── StatusBar
 ```
@@ -66,17 +93,19 @@ WorkbenchLayout
 
 | 区域 | 默认焦点 | 切换方式 |
 |------|---------|---------|
-| InteractionView (含 InputBar) | **是** (default) | Tab |
-| AgentLensPanel | 否 | Tab |
-| AuditLensPanel | 否 | Tab |
+| Interaction | **是** (default) | Tab |
+| Agent Lens | 否 | Tab |
+| Context | 否 | Tab |
 
-- 默认焦点在 InputBar（InteractionView 区域）
-- Tab 键在三区域间循环切换
-- 在 AgentLens 内 ↑↓ 导航树节点，Enter 选中
+- 默认焦点在 Interaction 区域
+- Tab 键在 interaction → agent-lens → context 三区域间循环切换
+- Shift+Tab 反向循环
+- 在 AgentLens 内 ↑↓ 导航树节点，Enter 选中 (M2+)
+- `q` 退出
 
-### 2.4 Existing Auxiliary Panels 定位
+### 2.4 Existing Auxiliary Panels — PAUSED
 
-旧 7 视图（Overview/EvidenceStatus/Workflow/Commands/Tasks/Gates/Docs）通过 keybinding（如 `Ctrl+A`）切换到一个 auxiliary view，不占用默认三区域布局。
+旧 7 视图（Overview/EvidenceStatus/Workflow/Commands/Tasks/Gates/Docs）和所有 project-specific operations 面板**全部 PAUSED**，不渲染。Dashboard.tsx 保留在磁盘但不被 import。
 
 ---
 
@@ -340,18 +369,25 @@ TUI InputBar
 
 ---
 
-## 7. Dev-Only Panels
+## 7. PAUSED — Operations & Project Management Displays
 
-### 7.1 AutoRun / Dev Workflow Panel
+### 7.1 声明
 
-- Phase 5 组件（AutoRunPanel / HardStopOverlay / ReviewPacketPanel）保留为 `provisional dev-only, may be removed`
-- 不作为 B8 产品主线
-- 通过 keybinding 访问，不占用默认布局
+以下内容**全部 PAUSED，不产品化**。它们不属于 First Agent 通用 Workbench 的产品核心：
 
-### 7.2 Coding Agent 工程命令
+- PROJECT_STATUS / PROGRESS_LEDGER 解析展示
+- dogfood results / review packet / gate history
+- technical debt / docs consistency
+- AutoRun / HardStop / Dev Workflow 面板
+- command catalog / safety model 面板
+- evidence / gate / checkpoint / memory / event 审计面板
+- Dashboard.tsx（旧 7 视图工作台，保留在磁盘但不 import）
 
-- 保留但不作为 interaction-first workbench 的默认交互路径
-- 用户通过 keybinding 切换到 auxiliary view 访问
+这些是 First Agent 项目自身的工程运维数据，不是 First Agent 通用产品的功能。
+
+### 7.2 Legacy Dashboard
+
+`Dashboard.tsx` 保留在磁盘上但不被任何组件 import 或渲染。不提供整页切换 hotkey。
 
 ---
 
@@ -394,7 +430,7 @@ TUI InputBar
 
 ---
 
-## 10. Project Structure (目标态)
+## 10. Project Structure (当前 M1)
 
 ```
 tui/
@@ -402,32 +438,16 @@ tui/
 │   ├── main.tsx                        # 入口: render(<WorkbenchLayout />)
 │   ├── components/
 │   │   ├── WorkbenchLayout.tsx         # 顶层三区域布局 (M1)
-│   │   ├── AgentLensPanel.tsx          # Agent/Session/Run/Instance 树 (M2)
-│   │   ├── InteractionView.tsx         # 对话展示区域 (M1, M3)
-│   │   ├── AuditLensPanel.tsx          # 动态审计面板 (M1, M4)
-│   │   ├── InputBar.tsx               # 底部输入区域 (M1, M3)
-│   │   ├── StatusBar.tsx              # 底部状态栏 (M1, M5)
-│   │   └── PendingActionPanel.tsx     # 待确认操作列表 (M5)
+│   │   ├── AgentLensPanel.tsx          # Agent/Session/Run/Instance 树 (M1)
+│   │   ├── InteractionPanel.tsx        # 对话展示区域 placeholder (M1)
+│   │   ├── ContextPanel.tsx            # 通用 Context/Inspector placeholder (M1)
+│   │   ├── InputBar.tsx               # 底部输入区域 (M1)
+│   │   └── StatusBar.tsx              # 底部状态栏 (M1)
 │   ├── data/
-│   │   ├── agentLensFixture.ts         # Fake agent/session/run 树 (M2)
-│   │   ├── fakeRuntimeGateway.ts      # Fake RuntimeGateway 实现 (M3)
-│   │   ├── auditDataProvider.ts       # Audit data 加载和筛选 (M4)
-│   │   └── eventStreamReader.ts       # events.jsonl reader (M7)
-│   ├── types/
-│   │   ├── lens.ts                     # AgentLensNode, SelectedLens
-│   │   ├── interaction.ts             # InteractionMessage, InteractionResponse
-│   │   ├── audit.ts                    # AuditSnapshot, EvidenceSummary
-│   │   ├── gateway.ts                 # RuntimeGateway 接口
-│   │   └── events.ts                  # EventRecord, EventSourceContract (M7)
+│   │   └── agentLensFixture.ts         # Fake agent/session/run 树 (M1)
+│   ├── types.ts                        # AgentLensNode, SelectedLens, FocusZone
 │   └── __tests__/
-│       ├── layout.test.tsx
-│       ├── agentLens.test.tsx
-│       ├── interaction.test.tsx
-│       ├── auditLens.test.tsx
-│       ├── runtimeGateway.test.ts
-│       ├── pendingAction.test.tsx
-│       ├── eventStream.test.ts
-│       └── safety.test.ts
+│       └── layout.test.tsx             # 23 tests (M1)
 └── package.json
 ```
 
@@ -438,3 +458,4 @@ tui/
 | 日期 | 变更 |
 |------|------|
 | 2026-06-02 | 初始版本 — interaction-first 架构，替代旧 b8-ts-tui-workbench-sdd.md |
+| 2026-06-02 | Product Boundary Reconciliation (Rounds 1-3) — 移除 Project Operations Lens 概念；Audit Lens → Context Panel；所有 Operations/AutoRun/Project dashboard 标记 PAUSED |

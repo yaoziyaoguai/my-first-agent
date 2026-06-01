@@ -3,15 +3,15 @@
   "commands": [
     {
       "id": "autorun",
-      "name": "AutoRun Workflow",
-      "description": "启动完整 AutoRun 工程 loop（状态审计 → 执行 → gates → docs → commit/push）",
+      "name": "Development Workflow Panel",
+      "description": "启动开发期 AutoRun 工程 loop（状态审计 → 执行 → gates → docs → commit/push）。provisional dev-only, may be removed.",
       "category": "workflow",
       "safetyLevel": "requires-confirmation",
       "requiresConfirmation": true,
       "executableInPhase2": false,
       "shellCommand": "python main.py auto-run",
       "relatedSkills": ["auto-run", "compound-engineering:ce-work"],
-      "riskNote": "可能执行 git push 和真实 API 调用"
+      "riskNote": "开发期 Coding Agent workflow，不是 First Agent 产品功能。可能执行 git push 和真实 API 调用"
     },
     {
       "id": "status",

@@ -13,11 +13,11 @@
 
 | # | Debt | 状态 | 阻塞原因 | 偿还条件 |
 |---|------|------|---------|---------|
-| D-B8-01 | Phase 6B multi-run evidence history browser | **DEFERRED** | 缺 session/run/instance identity model | B7 readiness SDD + identity model |
+| D-B8-01 | Phase 6B multi-run evidence history browser | **DEFERRED** | 缺 evidence namespace + multi-run storage contract（B7 RuntimeIdentity 已有 session_id/run_id/instance_id 字段，但 namespace/storage 层缺失） | evidence namespace model + storage contract |
 | D-B8-02 | Phase 7 runtime event stream viewer | **DEFERRED** | 缺 append-only runtime event source contract | B7 readiness + event source contract |
-| D-B8-03 | TUI default-entry activation | **DEFERRED** | Default Entry Readiness checklist 未全部通过 | IME/paste/6B/7/audit log UI |
+| D-B8-03 | TUI default-entry activation | **DEFERRED** | Default Entry Readiness checklist 未全部通过 | IME/paste/6B/7 |
 | D-B8-04 | Chinese IME / multi-line input / paste | **PENDING** | Ink 5 useInput 中文 IME 行为待验证 | 实际终端验证 + 必要时 raw stdin fallback |
-| D-B8-05 | Persistent audit log browser UI | **PENDING** | auditLog.ts 已有 rotation, UI 未暴露 | AuditLogPanel 只读展示 |
+| D-B8-05 | Persistent audit log browser UI | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现并接入 Dashboard gates 视图 |
 | D-B8-06 | High-risk commands remain blocked | **BY DESIGN** | 安全约束: no force push/reset --hard/rm -rf | 不计划解除; 属于安全特性 |
 
 ---

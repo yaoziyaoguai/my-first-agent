@@ -141,6 +141,7 @@ function App() {
       evidenceFiles={evidenceFiles}
       gateHistory={gateHistory}
       auditEntries={auditEntries}
+      repoRoot={REPO_ROOT}
     />
   );
 }

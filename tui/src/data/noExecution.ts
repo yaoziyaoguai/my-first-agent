@@ -23,6 +23,10 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
  */
 const SCANNER_SELF_FILES = new Set(["data/noExecution.ts"]);
 const GIT_READONLY_FILES = new Set(["main.tsx"]);
+/** Phase 4: commandExecutor 使用 child_process.exec，但通过 executionService 的安全门（白名单+黑名单+env sanitize）保护 */
+const PHASE4_EXECUTOR_FILES = new Set(["services/commandExecutor.ts"]);
+/** Phase 4: executionService 使用 process.env 仅用于 sanitizeEnv() 清除敏感变量 */
+const PHASE4_SERVICE_FILES = new Set(["services/executionService.ts"]);
 
 export interface ScanViolation {
   file: string;
@@ -84,12 +88,24 @@ export function scanForForbiddenImports(rootDir?: string): ScanResult {
       const rawViolations = scanSourceText(content, relPath);
 
       // main.tsx 的 execSync 仅用于 git 只读操作 — 已审查安全
-      if (GIT_READONLY_FILES.has(relPath)) {
+      // services/commandExecutor.ts 的 exec 通过 executionService 安全门保护
+      if (GIT_READONLY_FILES.has(relPath) || PHASE4_EXECUTOR_FILES.has(relPath)) {
         const filtered = rawViolations.filter((v) => {
           // execSync( 调用中如果包含 "git" 则为已知安全例外
           if (v.pattern === "execSync()" && /\bgit\b/.test(v.content)) {
             return false;
           }
+          // commandExecutor.ts 中 import { exec } — 通过 executionService 安全门
+          if (PHASE4_EXECUTOR_FILES.has(relPath) && (v.pattern === "child_process.exec()" || v.pattern === "spawn()")) {
+            return false;
+          }
+          return true;
+        });
+        allViolations.push(...filtered);
+      } else if (PHASE4_SERVICE_FILES.has(relPath)) {
+        // executionService.ts 的 process.env 仅用于 sanitizeEnv() 清除敏感变量 — 已审查安全
+        const filtered = rawViolations.filter((v) => {
+          if (v.pattern === "process.env") return false;
           return true;
         });
         allViolations.push(...filtered);

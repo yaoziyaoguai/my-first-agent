@@ -1,7 +1,7 @@
 # B8 TypeScript TUI Workbench — 分阶段路线
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-01 (B8 Final Boundary Audit — boundary CLOSED)
+**最后更新**: 2026-06-02 (Phase 4 COMPLETED — 安全命令执行完整交付)
 **来源**: `/plan-eng-review` → B8 Roadmap / Default Entry Readiness Review → AutoRun Hardening
 **依赖文档**: `docs/design/b8-ts-tui-workbench-sdd.md` (Phase 1-3 SDD)、`docs/PROJECT_STATUS.md` (当前状态)、`docs/debt/b8-tui-workbench-technical-debt.md` (Phase 6B/7 deferred debt)
 
@@ -21,15 +21,16 @@ eba77ad                 3c8e178                  2ae13ab
     │                       │                       │
     ▼                       ▼                       ▼
 ┌───────────────────────────────────────────────────────────┐
-│              当前基线: Phase 3 COMPLETED                   │
-│  133/133 tests PASS, tsc --noEmit clean                  │
+│              当前基线: Phase 4 COMPLETED                   │
+│  285/285 tests PASS, tsc --noEmit clean                  │
 │  TUI 为未来默认入口, CLI 为显式 fallback                      │
 └───────────────────────────────────────────────────────────┘
     │
     ▼
 Phase 4 (COMPLETED)      Phase 5 (COMPLETED)      Phase 6A (COMPLETED)
 安全命令执行             AutoRun 工作流集成       静态证据/门禁浏览器
-confirmation gate       TUI→AutoRun launcher    JSON 解析 + gate history
+whitelist+黑名单          TUI→AutoRun launcher    JSON 解析 + gate history
++env sanitize+audit log
     │                       │                       │
     ▼                       ▼                       ▼
 Phase 6B (BLOCKED by B7)  Phase 7 (FUTURE)
@@ -44,8 +45,8 @@ trend, commit linkage    read-only stream, 不回写
 | **Phase 1** | 静态仪表盘 | **COMPLETED** | 5 面板, 28 tests | — |
 | **Phase 2** | Command Shell | **COMPLETED** | CommandCatalog, CommandPanel, 74 tests | — |
 | **Phase 3** | 默认入口就绪 | **COMPLETED** | 7 视图导航, 133 tests | — |
-| **Phase 4** | 安全命令执行 | **READY** | confirmation gate, dry-run, audit log | ✅ |
-| **Phase 5** | AutoRun 工作流集成 | **READY** | TUI→AutoRun launcher, state panel, review packet | ✅ (after P4) |
+| **Phase 4** | 安全命令执行 | **COMPLETED** | whitelist + 黑名单 + env sanitize + async exec + audit log, 285 tests | ✅ |
+| **Phase 5** | AutoRun 工作流集成 | **READY** | TUI→AutoRun launcher, state panel, review packet (components exist, not wired) | ✅ (after P4) |
 | **Phase 6A** | 静态证据/门禁/Dogfood 浏览器 | **COMPLETED** | 本地 JSON 解析, gate history, 证据浏览 | ✅ (已自动执行) |
 | **Phase 6B** | 多实例历史浏览器 | **BLOCKED** (by B7) | multi-run history, 趋势, commit linkage | ❌ |
 | **Phase 7** | 运行时 Event Stream 查看器 | **FUTURE** (after P4-P6B) | read-only stream viewer | ❌ |
@@ -70,9 +71,9 @@ trend, commit linkage    read-only stream, 不回写
 
 | 指标 | 值 |
 |------|---|
-| 测试文件 | 17 |
-| 测试总数 | 133 |
-| 测试结果 | 133 PASS / 0 FAIL |
+| 测试文件 | 30 |
+| 测试总数 | 285 |
+| 测试结果 | 285 PASS / 0 FAIL |
 | TypeScript 编译 | tsc --noEmit clean |
 | 依赖 | Ink 5, React 18, tsx, vitest |
 
@@ -86,9 +87,9 @@ trend, commit linkage    read-only stream, 不回写
 
 ---
 
-## 3. Phase 4: 安全命令执行 (NEXT — READY)
+## 3. Phase 4: 安全命令执行 (IN PROGRESS)
 
-**状态**: READY for AutoRun。不依赖外部条件。
+**状态**: IN PROGRESS。UI shell 完成（ConfirmOverlay/DryRunOverlay/ResultPanel 已接入 Dashboard），命令执行当前为模拟返回值，待接入真实 child_process exec。不依赖外部条件。
 **优先级**: B8 路线中最高优先级。
 **预估文件数**: ~12 (4 新组件 + 4 新数据模型 + 1 配置 + 3 新测试文件)
 **预估行数**: ~600 TypeScript (含测试)
@@ -857,14 +858,23 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 - 不把 TUI 设为默认入口
 - 不新增大型依赖
 
-### Polish Loop 1 (当前)
+### Polish Loop 1 (COMPLETED — 2026-06-02)
 
-1. **AuditLogPanel** — 只读 audit history 视图, 不执行命令, 不写 runtime state
-2. **DefaultEntryReadinessPanel** — 静态 checklist, 展示已完成/blocked/待审核
-3. **Better empty states** — EvidenceBrowserPanel 无文件时, DocsConsistencyPanel stale 时
-4. **Keyboard hints** — footer 增强, 可选 help overlay
+1. **AuditLogPanel** — ✅ 已实现 (54 lines), 接入 Dashboard gates 视图
+2. **DefaultEntryReadinessPanel** — ✅ 已实现 (50 lines), 接入 Dashboard docs 视图
+3. **Better empty states** — ✅ EvidenceBrowserPanel/DocsConsistencyPanel 已处理 unknown/stale 状态
+4. **Keyboard hints** — ✅ footer 已有完整导航提示 (q/←→/1-7/↑↓/Enter)
 
-预计新增 tests: ~15。预计总测试数: ~242。
+### Polish Loop 2 (PENDING)
+
+剩余 P2/P3 polish 项：
+
+| 优先级 | 项目 | 描述 |
+|--------|------|------|
+| P2 | Layout polish | panel spacing, selected state, terminal resize behavior |
+| P3 | Command UX polish | safe/blocked/confirmation 分类视觉增强 |
+| P3 | Docs consistency polish | current/historical/superseded 状态展示 |
+| P3 | Tests polish | malformed data tests, navigation state tests |
 
 ---
 

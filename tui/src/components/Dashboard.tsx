@@ -46,7 +46,8 @@ import {
   dryRunExecution,
   type ConfirmationResult,
 } from "../data/executionGate";
-import { parseExecResult, type ExecutionResult } from "../data/commandResult";
+import type { ExecutionResult } from "../data/commandResult";
+import { execute } from "../services/executionService";
 
 interface Props {
   status: ProjectStatus;
@@ -58,6 +59,7 @@ interface Props {
   evidenceFiles: EvidenceFileEntry[];
   gateHistory: GateResult[];
   auditEntries: AuditLogEntry[];
+  repoRoot: string;
 }
 
 const VIEW_ID_MAP: Record<string, ViewId> = {
@@ -77,7 +79,7 @@ type Phase4Mode =
   | "executing"  // confirmed, executing (future: actual exec)
   | "result";    // showing result
 
-export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries }: Props) {
+export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries, repoRoot }: Props) {
   const [nav, setNav] = useState(createNavigationState());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [evidenceSelectedIndex, setEvidenceSelectedIndex] = useState(0);
@@ -124,18 +126,18 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
         setConfirmResult(confirmed);
         setPhase4Mode("executing");
 
-        // Build simulated execution result
-        const execR = parseExecResult(
-          selectedCommand.id,
-          selectedCommand.shellCommand ?? "",
-          selectedCommand.safetyLevel,
-          0,
-          `Command "${selectedCommand.id}" executed successfully via Phase 4 gate.`,
-          "",
-          0,
-        );
-        setExecutionResult(execR);
-        setPhase4Mode("result");
+        const confirmationType: AuditLogEntry["confirmation"] =
+          selectedCommand.id === "autorun" ? "double" : "single";
+        execute({
+          commandId: selectedCommand.id,
+          shellCommand: selectedCommand.shellCommand ?? "",
+          safetyLevel: selectedCommand.safetyLevel,
+          repoRoot,
+          confirmation: confirmationType,
+        }).then((execR) => {
+          setExecutionResult(execR);
+          setPhase4Mode("result");
+        });
         return;
       }
 
@@ -156,13 +158,20 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
     // In dry-run overlay
     if (phase4Mode === "dry-run") {
       if (input === "y" || input === "e") {
-        setPhase4Mode("confirm");
-        const req = createConfirmationRequest(selectedCommand);
-        const conf = confirmExecution(req);
-        setConfirmResult(conf);
-        if (conf.status === "confirmed" || !conf.needsDoubleConfirmText) {
-          setPhase4Mode("executing");
-        }
+        setPhase4Mode("executing");
+
+        const confirmationType: AuditLogEntry["confirmation"] = "single";
+        execute({
+          commandId: selectedCommand.id,
+          shellCommand: selectedCommand.shellCommand ?? "",
+          safetyLevel: selectedCommand.safetyLevel,
+          repoRoot,
+          confirmation: confirmationType,
+        }).then((execR) => {
+          setExecutionResult(execR);
+          setPhase4Mode("result");
+        });
+        return;
         return;
       }
       if (input === "n" || key.escape) {

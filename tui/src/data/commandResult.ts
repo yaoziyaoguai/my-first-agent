@@ -1,4 +1,4 @@
-/** Phase 4: exec 结果类型 */
+/** Phase 4: exec 结果类型 + parse/format（纯函数，无副作用） */
 import type { SafetyLevel } from "../types";
 
 export interface ExecutionResult {
@@ -13,6 +13,15 @@ export interface ExecutionResult {
   timedOut: boolean;
 }
 
+const MAX_OUTPUT = 50_000;
+
+function truncate(s: string): { text: string; truncated: boolean } {
+  if (s.length > MAX_OUTPUT) {
+    return { text: s.slice(0, MAX_OUTPUT) + "\n... [truncated]", truncated: true };
+  }
+  return { text: s, truncated: false };
+}
+
 export function parseExecResult(
   commandId: string,
   shellCommand: string,
@@ -22,19 +31,18 @@ export function parseExecResult(
   stderr: string,
   durationMs: number,
 ): ExecutionResult {
-  const MAX_OUTPUT = 50_000;
-  const stdoutTruncated = stdout.length > MAX_OUTPUT;
-  const stderrTruncated = stderr.length > MAX_OUTPUT;
+  const out = truncate(stdout);
+  const err = truncate(stderr);
 
   return {
     commandId,
     shellCommand,
     safetyLevel,
     exitCode,
-    stdout: stdoutTruncated ? stdout.slice(0, MAX_OUTPUT) + "\n... [truncated]" : stdout,
-    stderr: stderrTruncated ? stderr.slice(0, MAX_OUTPUT) + "\n... [truncated]" : stderr,
+    stdout: out.text,
+    stderr: err.text,
     durationMs,
-    truncated: stdoutTruncated || stderrTruncated,
+    truncated: out.truncated || err.truncated,
     timedOut: false,
   };
 }

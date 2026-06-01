@@ -36,11 +36,20 @@ describe("TaskCenter data model", () => {
     expect(phase2!.status).toBe("completed");
   });
 
-  it("contains B8 Phase 3 as recommended (current)", () => {
+  it("Phase 3/4/5 are completed, Polish is recommended", () => {
     const tasks = loadTasks();
     const phase3 = tasks.find((t) => t.phase === "b8-phase-3");
+    const phase4 = tasks.find((t) => t.phase === "b8-phase-4");
+    const phase5 = tasks.find((t) => t.phase === "b8-phase-5");
+    const polish = tasks.find((t) => t.phase === "b8-polish");
     expect(phase3).toBeDefined();
-    expect(phase3!.status).toBe("recommended");
+    expect(phase3!.status).toBe("completed");
+    expect(phase4).toBeDefined();
+    expect(phase4!.status).toBe("completed");
+    expect(phase5).toBeDefined();
+    expect(phase5!.status).toBe("completed");
+    expect(polish).toBeDefined();
+    expect(polish!.status).toBe("recommended");
   });
 
   it("getTasksByStatus filters correctly", () => {

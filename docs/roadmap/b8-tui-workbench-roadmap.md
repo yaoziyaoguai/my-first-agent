@@ -777,7 +777,7 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 | Gate | Phase 1-3 | Phase 4 | Phase 5 | Phase 6A | Phase 6B | Phase 7 |
 |------|----------|---------|---------|---------|---------|---------|
 | `npx tsc --noEmit` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cd tui && npm test` | ✅ 133 | ✅ 188 | ✅ 206 | ✅ 227 | ✅ TBD | ✅ TBD |
+| `cd tui && npm test` | ✅ 133 | ✅ 188 | ✅ 206 | ✅ 241 | ✅ TBD | ✅ TBD |
 | Phase 1-3 regression | — | ✅ 133 | ✅ 133 | ✅ 133 | ✅ 133 | ✅ 133 |
 | git diff --check | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 白名单扫描 | N/A | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -890,4 +890,4 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 |------|------|
 | 2026-06-01a | 初始版本 — B8 Roadmap / Default Entry Readiness Review |
 | 2026-06-01b | AutoRun Readiness Hardening — Phase 4/5 补全可执行细节 (命令白名单/黑名单/确认模型/dry-run/audit log/result panel/过渡 gate/stop conditions), Phase 6/7 补全数据模型/约束/测试计划, 新增 AutoRun Continuous Execution Contract (§7) + Phase Transition Gate + Failed Gate Retry Limit + Context Low Handoff |
-| 2026-06-01c | Phase 6A COMPLETED — 拆分 Phase 6 为 6A (静态浏览器) + 6B (B7-dependent 多实例历史); 实现 evidenceBrowser.ts (EvidenceFileEntry 解析), gateHistory.ts (6 known gates parse), EvidenceBrowserPanel, DogfoodDetailPanel; 21 new tests; 227/227 tests PASS; wired into Dashboard evidence view with ↑↓ navigation |
+| 2026-06-01c | Phase 6A COMPLETED — 拆分 Phase 6 为 6A (静态浏览器) + 6B (B7-dependent 多实例历史); 实现 evidenceBrowser.ts (EvidenceFileEntry 解析), gateHistory.ts (6 known gates parse), EvidenceBrowserPanel, DogfoodDetailPanel; 21 new tests; 241/241 tests PASS (after Polish Loop); wired into Dashboard evidence view with ↑↓ navigation |

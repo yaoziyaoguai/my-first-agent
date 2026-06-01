@@ -890,4 +890,5 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 
 |------|------|
 | 2026-06-01a | 初始版本 — B8 Roadmap / Default Entry Readiness Review |
 | 2026-06-01b | AutoRun Readiness Hardening — Phase 4/5 补全可执行细节 (命令白名单/黑名单/确认模型/dry-run/audit log/result panel/过渡 gate/stop conditions), Phase 6/7 补全数据模型/约束/测试计划, 新增 AutoRun Continuous Execution Contract (§7) + Phase Transition Gate + Failed Gate Retry Limit + Context Low Handoff |
-| 2026-06-01c | Phase 6A COMPLETED — 拆分 Phase 6 为 6A (静态浏览器) + 6B (B7-dependent 多实例历史); 实现 evidenceBrowser.ts (EvidenceFileEntry 解析), gateHistory.ts (6 known gates parse), EvidenceBrowserPanel, DogfoodDetailPanel; 21 new tests; 241/241 tests PASS (after Polish Loop); wired into Dashboard evidence view with ↑↓ navigation |
+| 2026-06-01c | Phase 6A COMPLETED — 拆分 Phase 6 为 6A (静态浏览器) + 6B (B7-dependent 多实例历史); 实现 evidenceBrowser.ts, gateHistory.ts, EvidenceBrowserPanel, DogfoodDetailPanel; 21 new tests; 241/241 tests PASS (after Polish Loop); wired into Dashboard evidence view with ↑↓ navigation |
+| 2026-06-01d | B8 Completion Review — `docs/reviews/b8-tui-workbench-completion-review.md`。阶段性收口审查通过。260/260 tests PASS。Phase 6B/7 DEFERRED。TUI default entry NOT ACTIVATED。|

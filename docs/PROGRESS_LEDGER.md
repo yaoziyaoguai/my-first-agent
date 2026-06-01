@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B8 Polish Loop 2 — acceptance audit P1/P2 fixes)
+**最后更新**: 2026-06-01 (B8 Completion Review)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,7 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| **B8 Polish Loop 2: Audit Findings Fixes** | — | **B8 Polish Loop — P1/P2 验收审计修复** — P1-1: root .gitignore 添加 `.tui_audit_log*` 保护 audit log runtime files。P1-2: tasks.json 更新至当前状态 (Phase 3/4/5/6A completed, 6B/7 blocked, Polish Loop 2 recommended, B7 not-started)。P1-3: 测试数 227→241 同步修正 (PROJECT_STATUS/PROGRESS_LEDGER/roadmap)。P2-1: noExecution.ts 实现真实文件扫描 (9 forbidden patterns + allowlist + scanSourceText 纯函数)，14 focused tests。P2-2: docsConsistency.ts 新增内容 staleness 检测 (STALE_MARKERS + scanContentForStaleMarkers), DocsConsistencyPanel 显示 stale/current/unknown, 18 tests (6 staleness + 12 existing)。260/260 tests PASS, tsc clean。|
+| **B8 Completion Review** | — | **B8 阶段性收口审查通过** — 创建 `docs/reviews/b8-tui-workbench-completion-review.md`。审查结论: B8 Phase 1-6A + Polish Loop 1-2 可以阶段性收口。260/260 tests PASS, tsc clean。TUI default entry NOT ACTIVATED (checklist 未全部满足: Phase 6B/7 deferred + IME pending)。Phase 6B/7 DEFERRED by B7。CLI fallback RETAINED。B7 NOT STARTED。下一步: 用户决策 (B7 / B8 Polish / evidence 强化)。|
+| **B8 Polish Loop 2: Audit Findings Fixes** | 65822ad | **B8 Polish Loop — P1/P2 验收审计修复** — P1-1: root .gitignore 添加 `.tui_audit_log*`。P1-2: tasks.json 更新。P1-3: 测试数 227→241 同步。P2-1: noExecution.ts 真实文件扫描 (9 forbidden patterns)。P2-2: docsConsistency.ts 内容 staleness 检测。260/260 tests PASS。
 | **B8 Phase 6B/7 Debt Recorded** | — | **B8 Architecture Extension Loop — Phase 6B/7 Technical Debt 正式记录** — 创建 `docs/debt/b8-tui-workbench-technical-debt.md`: Phase 6B deferred (缺 session/run/instance identity + evidence namespace), Phase 7 deferred (缺 append-only event source contract), TUI default-entry deferred, B7 not started。B8 继续 Polish / Default Workbench Readiness Loop。|
 | **B8 Phase 6A: Static Evidence/Gate/Dogfood Browser** | — | **B8 Architecture Extension Loop — Phase 6A COMPLETED** — TUI 静态证据浏览器。新增: evidenceBrowser.ts + gateHistory.ts + EvidenceBrowserPanel + DogfoodDetailPanel。21 new tests + 206 regression = 241/241 PASS (after Polish Loop 2 additions)。Phase 6 拆分: 6A (静态, 不依赖 B7) COMPLETED / 6B (多实例历史, BLOCKED by B7)。|
 | **B8 Phase 5: AutoRun Workflow Integration** | — | **B8 Architecture Extension Loop — Phase 5 COMPLETED** — TUI 通过 Phase 4 命令执行基础设施接入 AutoRun workflow。新增数据模型: autorunAdapter.ts (AUTORUN_COMMANDS 固定模板: continue/status/audit/dogfood/gates, isFixedTemplate/getAutorunCommand/validateAutorunTemplate — 防注入), autorunState.ts (parseAutoRunState/deriveAutoRunStatus — 从 PROJECT_STATUS 解析), reviewPacket.ts (buildReviewPacket/parseGitLogForReview — 从 git log + test output 构建 review)。新增组件: AutoRunPanel (status/phase/loop/tests/gates/next 展示), HardStopOverlay (reason/detail/loop + user actions), ReviewPacketPanel (tests/gates/commits)。Dashboard 不变 (Phase 4 复用 confirm/result 流)。28 新 Phase 5 tests + 178 regression = 206/206 PASS。TypeScript 编译 clean。Phase 6 BLOCKED by B7。

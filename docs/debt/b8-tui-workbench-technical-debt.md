@@ -151,7 +151,7 @@ B7 readiness SDD
 
 | 项目 | 状态 |
 |------|------|
-| B8 Phase 1-6A | **COMPLETED** (227/227 tests PASS) |
+| B8 Phase 1-6A | **COMPLETED** (260/260 tests PASS)。阶段性收口审查通过 — `docs/reviews/b8-tui-workbench-completion-review.md` |
 | B8 Phase 6B | **DEFERRED** — 缺 session/run/instance identity + evidence namespace |
 | B8 Phase 7 | **DEFERRED** — 缺 append-only event source contract |
 | B7 implementation | **NOT STARTED** — 不在当前阶段 |

@@ -137,7 +137,14 @@ def test_staged_diff_contains_no_real_key_pattern() -> None:
     )
     staged_diff = result.stdout
 
-    assert not _contains_real_key(staged_diff), (
+    # 只检查新增行（+ 开头），避免 context lines 中的占位断言
+    # （如 verify that Anthropic key prefix is excluded from banners）导致误报。
+    added_lines = "\n".join(
+        line[1:] for line in staged_diff.split("\n")
+        if line.startswith("+") and not line.startswith("+++")
+    )
+
+    assert not _contains_real_key(added_lines), (
         "staged diff 中包含疑似真实 API key 片段 — "
         "立即检查，不要 commit"
     )

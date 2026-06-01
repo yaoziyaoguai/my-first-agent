@@ -118,14 +118,16 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
 
     allowed_tools = frozenset(descriptor.allowed_tools)
 
-    # Phase 4 (Plan 3): 通过 lifecycle 更新跨 turn active skill 状态
-    import agent.core as _core
+    # Phase 4 (Plan 3): 通过 lifecycle 更新跨 turn active skill 状态。
+    # _active_skill / _skill_selected_by_model 已提取到 agent.skill_state，
+    # 打破 agent.core ↔ agent.skill_system.skill_tool 直接模块循环。
+    from agent.skill_state import set_active_skill, set_skill_selected_by_model
 
-    _core._active_skill = {
+    set_active_skill({
         "skill_id": skill_id,
         "body": body_str,
         "allowed_tools": allowed_tools,
-    }
+    })
     # B7: 显式 session namespace key——避免依赖 logger get_runtime_session_id()
     # 的 import-time SESSION_ID fallback。chat() 在工具执行前设置此值。
     from agent.skill_system.lifecycle import get_default_lifecycle
@@ -138,7 +140,7 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
         activated_by="model_selection",
     )
     # model-owned selection flag — turn-end hook 检查此 flag 跳过 keyword fallback
-    _core._skill_selected_by_model = True
+    set_skill_selected_by_model(True)
     # B7: 同时设置 per-lifecycle model_selected flag。
     _lc.set_model_selected()
 

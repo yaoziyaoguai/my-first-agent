@@ -129,16 +129,24 @@ class TestSkillSelectToolFunc:
         assert "demo.echo_task_summary" in active["allowed_tools"]
 
     def test_r7_skill_selected_by_model_flag(self):
-        """R7: _skill_selected_by_model 应在 tool func 调用后为 True。"""
-        import agent.core as _core
+        """R7: _skill_selected_by_model 应在 tool func 调用后为 True。
+
+        B7 Targeted Cleanup: _skill_selected_by_model 已从 agent.core 提取到
+        agent.skill_state（打破 core↔loop 和 core↔skill_tool 循环）。
+        测试改用 skill_state API。
+        """
+        from agent.skill_state import (
+            get_skill_selected_by_model,
+            set_skill_selected_by_model,
+        )
         from agent.skill_system.skill_tool import _skill_select_tool_func
 
         # Reset flag
-        _core._skill_selected_by_model = False
+        set_skill_selected_by_model(False)
 
         _skill_select_tool_func("demo-note-maker")
 
-        assert _core._skill_selected_by_model is True, (
+        assert get_skill_selected_by_model() is True, (
             "model-owned selection 后 flag 应为 True"
         )
 

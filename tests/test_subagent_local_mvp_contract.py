@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = PROJECT_ROOT / "agent" / "subagents" / "local.py"
 FIXTURE_PROFILE = PROJECT_ROOT / "tests" / "fixtures" / "subagents" / "code-reviewer"
@@ -134,10 +133,12 @@ def test_real_llm_process_and_tool_bypass_profiles_are_rejected(tmp_path) -> Non
 def test_delegation_request_result_are_parent_controlled_and_redacted() -> None:
     """delegation 只是结构化请求/结果；parent policy 决定能否使用。"""
 
-    from agent.subagents.local import build_delegation_request
-    from agent.subagents.local import complete_fake_delegation
-    from agent.subagents.local import format_delegation_result_for_display
-    from agent.subagents.local import load_local_subagent_profile
+    from agent.subagents.local import (
+        build_delegation_request,
+        complete_fake_delegation,
+        format_delegation_result_for_display,
+        load_local_subagent_profile,
+    )
 
     profile_result = load_local_subagent_profile(FIXTURE_PROFILE)
     profile = profile_result.profile
@@ -193,7 +194,7 @@ def test_subagent_local_mvp_has_no_runtime_network_process_or_provider_dependenc
 def test_subagent_local_mvp_docs_record_non_goals() -> None:
     """docs 必须说明 Subagent MVP 不是真实 LLM/进程/remote delegation。"""
 
-    text = (PROJECT_ROOT / "docs" / "SUBAGENT_LOCAL_MVP.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "SUBAGENT_LOCAL_MVP.md").read_text(encoding="utf-8")  # noqa: E501
 
     for phrase in (
         "fake/local profile + delegation contract",

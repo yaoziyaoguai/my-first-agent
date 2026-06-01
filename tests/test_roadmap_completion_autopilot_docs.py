@@ -9,14 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_roadmap_records_safe_local_skill_and_subagent_mvp_status() -> None:
     """canonical roadmap 要记录 fake/local MVP 已完成和真实集成 deferred。"""
 
-    text = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
 
     required = (
         "MCP CLI Config Management safe apply governance 已完成",
@@ -36,7 +35,7 @@ def test_roadmap_records_safe_local_skill_and_subagent_mvp_status() -> None:
 def test_roadmap_completion_autopilot_doc_has_release_readiness_packet() -> None:
     """总 closure doc 必须包含 completion matrix、packs、non-goals 和 tag policy。"""
 
-    text = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -60,8 +59,8 @@ def test_roadmap_completion_autopilot_doc_has_release_readiness_packet() -> None
 def test_roadmap_records_observability_local_trace_foundation() -> None:
     """Stage 6 completion 需要记录 local-only trace 基础和真实日志边界。"""
 
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
-    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
+    closure = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -80,8 +79,8 @@ def test_roadmap_records_observability_local_trace_foundation() -> None:
 def test_roadmap_records_structured_tool_result_envelope_foundation() -> None:
     """Stage 7 要记录 ToolResult 结构化 seam，而不是只保留 prefix debt。"""
 
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
-    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
+    closure = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -100,8 +99,8 @@ def test_roadmap_records_structured_tool_result_envelope_foundation() -> None:
 def test_roadmap_records_local_config_foundation() -> None:
     """Stage 8 local productization 需要 safe-path config foundation。"""
 
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
-    closure = (PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
+    closure = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -129,11 +128,13 @@ def test_roadmap_no_longer_lists_historical_xfails_as_open_backlog() -> None:
     否则后续 agent 会重复进入已经关闭的 TUI/runtime 路径。
     """
 
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
 
     assert "历史 XFAIL backlog 已收口" in roadmap
     assert "Tool System + MCP Safety Foundation Complete" in roadmap
-    assert "真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计" in roadmap
+    assert (
+        "真实 provider stream abort / cancel_token 仍是后续单独 runtime lifecycle 设计" in roadmap
+    )
     stale_phrases = (
         "known XFAIL 收口",
         "XFAIL-1 / XFAIL-2 保留为独立 backlog",
@@ -153,7 +154,7 @@ def test_autopilot_closure_doc_records_status_alignment_review() -> None:
     """
 
     closure = (
-        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -169,7 +170,7 @@ def test_autopilot_closure_doc_records_status_alignment_review() -> None:
 def test_deferred_roadmap_boundaries_doc_exists() -> None:
     """只剩 planning-only 边界时，也要用文档说明为什么不能自动实现。"""
 
-    text = (PROJECT_ROOT / "docs" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -191,7 +192,7 @@ def test_deferred_roadmap_boundaries_doc_exists() -> None:
 def test_safe_local_release_readiness_doc_exists() -> None:
     """最终 release readiness 只能是可审计清单，不是 tag 授权。"""
 
-    text = (PROJECT_ROOT / "docs" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -217,14 +218,14 @@ def test_release_tag_preparation_doc_is_planning_only() -> None:
     preparation 与 execution 分开，避免后续 agent 把 checklist 误当授权。
     """
 
-    prep = (PROJECT_ROOT / "docs" / "RELEASE_TAG_PREPARATION.md").read_text(
+    prep = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RELEASE_TAG_PREPARATION.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
-    readiness = (PROJECT_ROOT / "docs" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(
+    readiness = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "SAFE_LOCAL_RELEASE_READINESS.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
     closure = (
-        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -252,12 +253,12 @@ def test_mcp_external_integration_readiness_doc_is_fake_first() -> None:
     """
 
     readiness = (
-        PROJECT_ROOT / "docs" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
+        PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
     ).read_text(encoding="utf-8")
-    config_doc = (PROJECT_ROOT / "docs" / "MCP_CONFIG_MANAGEMENT.md").read_text(
+    config_doc = (PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_CONFIG_MANAGEMENT.md").read_text(
         encoding="utf-8"
     )
-    deferred = (PROJECT_ROOT / "docs" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(
+    deferred = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "DEFERRED_ROADMAP_BOUNDARIES.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -289,12 +290,12 @@ def test_runtime_trace_toolresult_migration_doc_is_compatibility_first() -> None
     """
 
     migration = (
-        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
     ).read_text(encoding="utf-8")
-    local_trace = (PROJECT_ROOT / "docs" / "LOCAL_TRACE_FOUNDATION.md").read_text(
+    local_trace = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "LOCAL_TRACE_FOUNDATION.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
-    tool_result = (PROJECT_ROOT / "docs" / "TOOL_RESULT_ENVELOPE.md").read_text(
+    tool_result = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "TOOL_RESULT_ENVELOPE.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -324,11 +325,11 @@ def test_remaining_roadmap_completion_doc_records_final_authorization_boundaries
     """
 
     remaining = (
-        PROJECT_ROOT / "docs" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"  # noqa: E501
     ).read_text(encoding="utf-8")
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
     closure = (
-        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -352,14 +353,14 @@ def test_remaining_roadmap_completion_doc_records_final_authorization_boundaries
 def test_human_review_packet_is_actionable_without_authorizing_release() -> None:
     """human review packet 要可执行 review，但不能授权 tag/release/真实集成。"""
 
-    packet = (PROJECT_ROOT / "docs" / "HUMAN_REVIEW_PACKET.md").read_text(
+    packet = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "HUMAN_REVIEW_PACKET.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
     remaining = (
-        PROJECT_ROOT / "docs" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "REMAINING_ROADMAP_COMPLETION_AUTOPILOT.md"  # noqa: E501
     ).read_text(encoding="utf-8")
     closure = (
-        PROJECT_ROOT / "docs" / "ROADMAP_COMPLETION_AUTOPILOT.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP_COMPLETION_AUTOPILOT.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -383,9 +384,9 @@ def test_release_tag_authorization_packet_is_no_tag_design() -> None:
     """release/tag authorization packet 只能描述授权门槛，不能实际打 tag。"""
 
     packet = (
-        PROJECT_ROOT / "docs" / "RELEASE_TAG_AUTHORIZATION_PACKET.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RELEASE_TAG_AUTHORIZATION_PACKET.md"
     ).read_text(encoding="utf-8")
-    prep = (PROJECT_ROOT / "docs" / "RELEASE_TAG_PREPARATION.md").read_text(
+    prep = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RELEASE_TAG_PREPARATION.md").read_text(  # noqa: E501
         encoding="utf-8"
     )
 
@@ -409,10 +410,10 @@ def test_real_mcp_integration_slice_design_is_authorization_gated() -> None:
     """真实 MCP design 可以完成，但必须保持 no secret / no endpoint / no network。"""
 
     design = (
-        PROJECT_ROOT / "docs" / "MCP_REAL_INTEGRATION_SLICE_DESIGN.md"
+        PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_REAL_INTEGRATION_SLICE_DESIGN.md"
     ).read_text(encoding="utf-8")
     readiness = (
-        PROJECT_ROOT / "docs" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
+        PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_EXTERNAL_INTEGRATION_READINESS.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -437,10 +438,10 @@ def test_runtime_trace_toolresult_slice_design_is_non_rewrite() -> None:
     """runtime trace / ToolResult design 只能规划小切片，不能授权 broad rewrite。"""
 
     design = (
-        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RUNTIME_TRACE_TOOLRESULT_SLICE_DESIGN.md"  # noqa: E501
     ).read_text(encoding="utf-8")
     migration = (
-        PROJECT_ROOT / "docs" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "RUNTIME_TRACE_TOOLRESULT_MIGRATION.md"
     ).read_text(encoding="utf-8")
 
     required = (
@@ -464,9 +465,9 @@ def test_final_roadmap_completion_evidence_packet_links_finalization_docs() -> N
     """最终 evidence packet 要把授权包和两个 design 包收束到同一审计入口。"""
 
     final = (
-        PROJECT_ROOT / "docs" / "FINAL_ROADMAP_COMPLETION_EVIDENCE.md"
+        PROJECT_ROOT / "docs" / "archive" / "root-stale" / "FINAL_ROADMAP_COMPLETION_EVIDENCE.md"
     ).read_text(encoding="utf-8")
-    human = (PROJECT_ROOT / "docs" / "HUMAN_REVIEW_PACKET.md").read_text(
+    human = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "HUMAN_REVIEW_PACKET.md").read_text(
         encoding="utf-8"
     )
 
@@ -493,7 +494,7 @@ def test_final_roadmap_completion_evidence_packet_links_finalization_docs() -> N
 def test_roadmap_near_term_plan_is_historical_not_active_menu() -> None:
     """旧 Near-term table 不能再诱导 agent 输出菜单而停止推进。"""
 
-    roadmap = (PROJECT_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    roadmap = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md").read_text(encoding="utf-8")  # noqa: E501
 
     assert "Historical Near-term Execution Plan" in roadmap
     assert "not an active menu" in roadmap

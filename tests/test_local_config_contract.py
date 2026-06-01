@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -137,7 +136,7 @@ def test_local_config_sample_fixture_is_loadable_and_documented() -> None:
     from agent.local_config import load_local_agent_config
 
     fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "local_config" / "agent.local.json"
-    docs_path = PROJECT_ROOT / "docs" / "LOCAL_CONFIG_FOUNDATION.md"
+    docs_path = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "LOCAL_CONFIG_FOUNDATION.md"
 
     config = load_local_agent_config(fixture_path)
     redacted = json.dumps(config.to_redacted_dict(), ensure_ascii=False, sort_keys=True)

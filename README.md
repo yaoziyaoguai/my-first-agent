@@ -23,6 +23,14 @@ pip install -r requirements.txt
 
 默认使用 deterministic fake provider，不调用真实 LLM，不访问网络，不需要 API key。
 
+其他入口：`python main.py --shell`（TUI 交互模式）。
+
+Health: python main.py health；Logs: python main.py logs --tail 50。
+
+当前为 **safe-local** 阶段：不调用真实 API、不访问网络、不需要 API key。
+Skill System 仍为 **实验性**（详见 `V0_3_SKILL_SYSTEM_STATUS`），**not a full Textual IDE**。
+演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
+
 ## Config
 
 **唯一推荐入口**: `config/config.yaml`（provider section）。

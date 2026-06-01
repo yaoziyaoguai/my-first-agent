@@ -278,7 +278,7 @@
 
 **当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007 — validation scope note only)。B8 Phase 1-6A 全部 COMPLETED — 260/260 tests PASS, tsc --noEmit clean。
 
-**B8 Phase 6B (多实例历史浏览器) DEFERRED** — 缺 session/run/instance identity + evidence namespace。**Phase 7 DEFERRED** — 缺 append-only event source contract。详见 `docs/debt/b8-tui-workbench-technical-debt.md`。B7 not started。TUI not default entry yet。CLI fallback retained。
+**B8 Phase 6B (多实例历史浏览器) DEFERRED** — 缺 session/run/instance identity + evidence namespace。**Phase 7 DEFERRED** — 缺 append-only event source contract。详见 `docs/debt/b8-tui-workbench-technical-debt.md`。B7 Final Cleanup Loop completed (088f4b4 + additional remediation), final independent completion review pending。TUI not default entry yet。CLI fallback retained。
 
 **下一步: 用户决策** — B8 阶段性收口审查已完成 (`docs/reviews/b8-tui-workbench-completion-review.md`)。可选: (A) B7 Multi-instance Readiness, (B) B8 Polish 继续, (C) evidence 强化 (003/006/007/008)。不进入 B7, 不改 runtime, 不立即激活默认入口。
 

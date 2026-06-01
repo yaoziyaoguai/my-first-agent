@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = PROJECT_ROOT / "agent" / "mcp_config.py"
 
@@ -264,7 +263,7 @@ def test_mcp_config_sample_fixture_is_loadable_and_documented() -> None:
     from agent.mcp_config_service import inspect_mcp_server
 
     fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "mcp_config" / "safe-mcp.json"
-    docs_path = PROJECT_ROOT / "docs" / "MCP_CONFIG_MANAGEMENT.md"
+    docs_path = PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_CONFIG_MANAGEMENT.md"
 
     validation = load_mcp_config(fixture_path)
     inspection = inspect_mcp_server(fixture_path, "fixture")

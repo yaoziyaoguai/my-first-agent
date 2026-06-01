@@ -9,6 +9,11 @@ from uuid import uuid4
 import agent.tools  # noqa: F401  触发所有工具注册
 from agent import protocol_debug as _protocol_debug
 
+# B7: skill_state 提取 _skill_selected_by_model / _active_skill 到独立模块，
+# 打破 agent.core ↔ agent.loop 和 agent.core ↔ agent.skill_system.skill_tool
+# 两对直接模块循环。core/loop/skill_tool 现在共享 import 本模块，无循环。
+from agent import skill_state as _skill_state
+
 # ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
 # 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
@@ -276,7 +281,10 @@ class TurnState:
     print_assistant_newline: bool = False
 
 
-_active_skill: dict[str, str] = {}
+# ⛔ DEPRECATED: _active_skill dict 的 canonical source 在 agent.skill_state。
+# 保留此模块级引用指向同一 dict 对象以维持向后兼容。
+# 写入应通过 skill_state.set_active_skill()，保证引用一致性。
+_active_skill = _skill_state.get_active_skill()
 """向后兼容——写入 lifecycle 后同步到此 dict。新增代码应使用 _get_lifecycle()。"""
 
 
@@ -292,11 +300,10 @@ def _active_skill_section(*, lifecycle=None) -> str:
     return ""
 
 
-# REAL-EVIDENCE-002: 模型自主选择 Skill 标志。
-# - True: 模型在本 turn 通过 tool_use("SKILL_SELECT", ...) 选择了 skill，
-#   turn-end hook 检查此 flag 跳过 keyword fallback
+# _skill_selected_by_model flag 已提取到 agent.skill_state——见 import _skill_state。
+# 历史注释保留以供上下文：
+# - True: 模型在本 turn 通过 tool_use("SKILL_SELECT", ...) 选择了 skill
 # - False: 初始状态 / 关键字 fallback 已执行 / turn-end 已消费
-_skill_selected_by_model = False
 
 
 def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") -> None:
@@ -311,7 +318,6 @@ def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") ->
     Phase 4 (Plan 3): 使用 ActiveSkillLifecycle 管理状态，同时更新向后兼容 dict。
     B7: session_id 用于 per-session lifecycle 隔离。
     """
-    global _active_skill
     lifecycle = _get_lifecycle(session_id)
     for event in reversed(getattr(dispatcher, "action_log", [])):
         if getattr(event, "action_type", None) is None:
@@ -347,12 +353,12 @@ def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") ->
                         allowed_tools=tuple(allowed_tools),
                         activated_by="model_selection",
                     )
-                    # 向后兼容 dict 同步更新
-                    _active_skill = {
+                    # 向后兼容：同步到 skill_state（clear + update 保持引用一致性）
+                    _skill_state.set_active_skill({
                         "skill_id": skill_id,
                         "body": body,
                         "allowed_tools": allowed_tools,
-                    }
+                    })
                 return
 
 

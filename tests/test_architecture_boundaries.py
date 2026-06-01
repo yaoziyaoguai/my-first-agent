@@ -330,6 +330,37 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 提取到 agent/subagent_inline.py。行为保持型提取，所有委托执行
         # 仍通过 delegate_once() + SubAgentRegistry，不绕过统一入口。
         "agent.subagent_inline",
+        # ── B7 Multi-Instance Readiness imports ──
+        # 以下 imports 均为 B7 identity/namespace/checkpoint/memory/lifecycle
+        # 主线所需。每个 import 都对应 B7 的具体能力：
+        #   - runtime_identity: per-session identity (session_id/run_id)
+        #   - runtime_decision_frame: chat() 入口决策帧 evidence
+        #   - skill_system.lifecycle: per-session skill lifecycle 隔离
+        #   - skill_system.retriever: turn-start skill candidate 检索
+        #   - skill_system.prompt_section: skill selection prompt 注入
+        #   - skill_system.loader: skill body 加载（_update_active_skill_from_dispatcher 内 local import）  # noqa: E501
+        #   - skill_system.registry: skill 注册表查询（_update_active_skill_from_dispatcher 内 local import）  # noqa: E501
+        #   - skill_system.skill_tool: SKILL_SELECT 工具注册（chat() 内 local import）
+        #   - action_scheduler: ActionPlan 调度（_dispatch_or_fallback_delegation 内 local import）
+        #   - plan_schema: ActionPlan 序列化 schema
+        #   - tool_runtime_mediator: 统一 Tool 执行中介（B7 + pre-B7）
+        #   - logger: log_event 结构化日志（pre-B7，之前遗漏在 baseline）
+        #   - provider.protocol: ProviderError/ProviderResponse 类型（pre-B7，之前遗漏）
+        #   - skill_state: 共享 skill 状态标记（B7 Targeted Cleanup: 打破 core↔loop 和 core↔skill_tool 循环）  # noqa: E501
+        "agent.action_scheduler",
+        "agent.logger",
+        "agent.plan_schema",
+        "agent.provider.protocol",
+        "agent.runtime_decision_frame",
+        "agent.runtime_identity",
+        "agent.skill_state",
+        "agent.skill_system.lifecycle",
+        "agent.skill_system.loader",
+        "agent.skill_system.prompt_section",
+        "agent.skill_system.registry",
+        "agent.skill_system.retriever",
+        "agent.skill_system.skill_tool",
+        "agent.tool_runtime_mediator",
     }
 
     assert _collect_agent_imports(CORE_FILE) == expected
@@ -375,6 +406,25 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "get_l2_trigger_guard",
         "get_state",
         "refresh_runtime_system_prompt",
+        # ── B7 Multi-Instance Readiness helpers ──
+        # B7 在 core.py 新增了这些 top-level helpers。每个都是 runtime orchestrator
+        # 的编排胶水（orchestration glue），不属于 memory/skill/checkpoint 细节层：
+        #   - get_memory_runtime: per-session MemoryRuntime 工厂/查找
+        #   - _active_skill_section: 从 lifecycle 获取 active skill body（prompt 注入用）
+        #   - _update_active_skill_from_dispatcher: 从 dispatcher action_log 同步 skill 状态
+        #   - _dispatch_checkpoint_save: dispatcher 中介的 checkpoint 保存（产生 evidence）
+        #   - _dispatch_skill_selection_entered: turn-start skill selection 进入 evidence
+        #   - _dispatch_skill_candidates_built: skill candidate 检索结果 evidence
+        #   - _dispatch_or_fallback_delegation: SubAgent/Planner 委托/回退路由
+        #   - _action_plan_to_dict: ActionPlan → dict 序列化（dispatcher payload 用）
+        "_action_plan_to_dict",
+        "_active_skill_section",
+        "_dispatch_checkpoint_save",
+        "_dispatch_or_fallback_delegation",
+        "_dispatch_skill_candidates_built",
+        "_dispatch_skill_selection_entered",
+        "_update_active_skill_from_dispatcher",
+        "get_memory_runtime",
     }
 
     assert actual == expected

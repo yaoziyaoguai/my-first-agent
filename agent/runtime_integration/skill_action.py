@@ -80,6 +80,7 @@ class SkillRuntimeActionHandler:
                 evidence_extra={
                     "body_load_decision": False,
                     "no_suitable_skill": True,
+                    "runtime_e2e_disqualified_reason": "no selected_skill_id in model_decision_metadata",  # noqa: E501
                     "audit_only_skill_exclusion_evidence": (
                         self._audit_exclusion_evidence()
                     ),
@@ -141,6 +142,9 @@ class SkillRuntimeActionHandler:
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
+                    "runtime_e2e_disqualified_reason": (
+                        f"selected skill '{selected_skill_id}' is not available in registry"
+                    ),
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview="selected skill is not available",
@@ -168,6 +172,7 @@ class SkillRuntimeActionHandler:
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
+                    "runtime_e2e_disqualified_reason": "selected skill has no visible allowed tools",  # noqa: E501
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview="selected skill has no visible allowed tools",

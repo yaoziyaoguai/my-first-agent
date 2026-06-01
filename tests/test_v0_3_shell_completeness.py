@@ -59,9 +59,11 @@ def test_logs_subcommand_filters_wired(capsys):
 def test_shell_flag_enters_normal_cli_shell(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(main_module, "init_session", lambda: calls.append("init"))
-    monkeypatch.setattr(main_module, "try_resume_from_checkpoint", lambda: calls.append("resume"))
-    monkeypatch.setattr(main_module, "main_loop", lambda: calls.append("loop"))
+    monkeypatch.setattr(main_module, "init_session", lambda **kw: calls.append("init"))
+    monkeypatch.setattr(
+        main_module, "try_resume_from_checkpoint", lambda **kw: calls.append("resume")
+    )
+    monkeypatch.setattr(main_module, "main_loop", lambda **kw: calls.append("loop"))
     monkeypatch.setattr(main_module, "_selected_input_backend", lambda: "simple")
 
     assert main_module.main(["--shell"]) == 0
@@ -127,7 +129,7 @@ def test_v0_3_health_maintenance_doc_exists_and_matches_entrypoints():
 
 
 def test_cli_output_contract_section_13_present():
-    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "CLI_OUTPUT_CONTRACT.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "CLI_OUTPUT_CONTRACT.md").read_text(encoding="utf-8")  # noqa: E501
     assert "## 13" in text
     assert "python main.py logs" in text
     assert "python main.py health" in text
@@ -179,7 +181,7 @@ def test_health_report_renders_without_error():
 # ---------- M1-M4 不做的清单仍在文档中显式登记 ----------
 
 def test_planning_doc_keeps_non_goals_visible():
-    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")  # noqa: E501
     # v0.3 显式不做的能力清单必须保留，不能被「完成态」误读为已实现
     for forbidden in (
         "Reflect",
@@ -330,8 +332,9 @@ def test_log_viewer_can_recover_four_tool_outcomes_from_real_jsonl(tmp_path, mon
 # 但没有回归守护。如果未来某一轮误把 Reflect 写进 v0.3 完成态，这个测试会拦下。
 
 def test_reflect_self_correction_marked_out_of_scope_in_all_user_docs():
+    # README 已简化为状态指针文档（2d1ea13），不再承载完整边界声明。
+    # Reflect 非目标边界由归档 docs 守护。
     docs_to_check = [
-        PROJECT_ROOT / "README.md",
         PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md",
         PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_BASIC_SHELL_USAGE.md",
     ]

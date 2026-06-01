@@ -16,7 +16,6 @@ import pytest
 
 from agent import cli_renderer
 
-
 # -- TOOL_REGISTRY 测试隔离 --
 # test_load_skill_does_not_import_legacy_modules_at_runtime 会触发
 # `from agent.tools import skill`，间接调用 @register_tool(name="load_skill")，
@@ -105,7 +104,7 @@ def test_skill_status_doc_exists_and_covers_key_sections():
 
 
 def test_planning_marks_m3_as_status_clarification_not_runtime():
-    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")
+    text = (PROJECT_ROOT / "docs" / "archive" / "v0.x" / "V0_3_PLANNING.md").read_text(encoding="utf-8")  # noqa: E501
     # M3 段必须出现「状态澄清」类语义，且不应承诺实现 Skill runtime
     assert "M3" in text
     # 不能宣称 M3 实现了 sub-agent / 权限白名单 / activation policy
@@ -163,7 +162,7 @@ def test_skill_docs_pin_phase0_namespace_and_checkpoint_boundaries() -> None:
         PROJECT_ROOT / "docs" / "archive" / "roadmap" / "SKILL_SYSTEM_IMPLEMENTATION_LOOP.md"
     ).read_text(encoding="utf-8")
     audit = (
-        PROJECT_ROOT / "docs" / "audit" / "SKILL_SYSTEM_AUDIT_CHECKLIST.md"
+        PROJECT_ROOT / "docs" / "archive" / "2026-05-27-cleanup" / "audit" / "SKILL_SYSTEM_AUDIT_CHECKLIST.md"  # noqa: E501
     ).read_text(encoding="utf-8")
 
     assert "formal implementation namespace is `agent/skill_system/`" in rfc

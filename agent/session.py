@@ -7,6 +7,7 @@ import os
 import sys
 
 from agent.checkpoint import (
+    checkpoint_path,
     clear_checkpoint,
     load_checkpoint,
     load_checkpoint_to_state,
@@ -37,6 +38,53 @@ from agent.memory import (
 )
 from agent.memory_review import count_pending_proposals
 from config import MODEL_NAME, SYSTEM_PROMPT
+
+# ========== B7 checkpoint v2 路径辅助 ==========
+
+def _resolve_session_id() -> str:
+    """返回当前 runtime session_id，无则返回空字符串。"""
+    try:
+        return get_runtime_session_id() or ""
+    except Exception:
+        return ""
+
+
+def _load_checkpoint_best_effort():
+    """尝试加载 v2 per-session checkpoint，回退 v1。
+
+    B7: 优先尝试 session-scoped checkpoint 目录下最新 run；
+    失败时回退 legacy memory/checkpoint.json。
+    """
+    _sid = _resolve_session_id()
+    if _sid:
+        _v2_dir = checkpoint_path(_sid, "_").parent
+        if _v2_dir.exists():
+            _run_files = sorted(
+                _v2_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            for _rf in _run_files:
+                _cp = load_checkpoint(path=_rf)
+                if _cp is not None:
+                    return _cp
+    return load_checkpoint()
+
+
+def _load_checkpoint_to_state_best_effort(state):
+    """B7: 尝试从 v2 路径恢复，回退 v1。"""
+    _sid = _resolve_session_id()
+    if _sid:
+        _v2_dir = checkpoint_path(_sid, "_").parent
+        if _v2_dir.exists():
+            _run_files = sorted(
+                _v2_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            for _rf in _run_files:
+                if load_checkpoint_to_state(state, path=_rf):
+                    return True
+    return load_checkpoint_to_state(state)
+
 
 # ========== 启动 ==========
 
@@ -158,7 +206,7 @@ def try_resume_from_checkpoint():
     # 延迟 import，避免循环依赖
     from agent.core import get_state
 
-    checkpoint = load_checkpoint()
+    checkpoint = _load_checkpoint_best_effort()
     # B2 契约：普通 CLI 下不能裸 print 整段 checkpoint dict（含 conversation messages）。
     # 这里只在 MY_FIRST_AGENT_DEBUG=1 时才打印调试信息，且打印的是 keys 而非 values，
     # 避免把会话历史泄到终端。详见 docs/CLI_OUTPUT_CONTRACT.md "禁止项"。
@@ -186,7 +234,7 @@ def try_resume_from_checkpoint():
     # 管道模式：不弹交互提示，自动恢复最近任务。
     if not sys.stdin.isatty():
         print("[系统] 检测到管道输入，自动恢复最近任务。")
-        restored = load_checkpoint_to_state(get_state())
+        restored = _load_checkpoint_to_state_best_effort(get_state())
         if restored:
             _try_dispatch_checkpoint_resume(get_state())
             _replay_awaiting_prompt(get_state())
@@ -356,7 +404,7 @@ def finalize_session():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint(state)
+        save_checkpoint(state, session_id=_resolve_session_id())
         print("[系统] 未完成的任务断点已保存，下次启动可继续。")
 
     print("会话已保存，再见！")
@@ -375,7 +423,7 @@ def handle_interrupt_with_checkpoint() -> bool:
     from agent.core import get_state
 
     state = get_state()
-    save_checkpoint(state)
+    save_checkpoint(state, session_id=_resolve_session_id())
 
     print("\n\n[系统] 当前任务已暂停，断点已保存。")
     print("  1. 继续当前任务")
@@ -400,7 +448,7 @@ def handle_resume_choice(choice: str) -> None:
         get_state().task.status = "idle"
         return
 
-    restored = load_checkpoint_to_state(get_state())
+    restored = _load_checkpoint_to_state_best_effort(get_state())
     if restored:
         _try_dispatch_checkpoint_resume(get_state())
         _replay_awaiting_prompt(get_state())
@@ -474,7 +522,7 @@ def handle_double_interrupt():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint(state)
+        save_checkpoint(state, session_id=_resolve_session_id())
         print("[系统] 任务断点已更新。")
 
     print("[系统] 下次启动可继续未完成的任务。再见！")

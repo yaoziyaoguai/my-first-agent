@@ -187,7 +187,7 @@ def test_main_loop_passes_latest_reply_to_next_input_event(monkeypatch):
         return events.pop(0)
 
     monkeypatch.setattr(main, "read_user_input_event", fake_read_user_input_event)
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         """simple CLI 新主路径会传 RuntimeEvent sink；旧 return 语义仍可兜底。"""
 
         assert on_runtime_event is not None
@@ -221,7 +221,7 @@ def test_simple_main_loop_prints_status_before_and_after_turn(monkeypatch, capsy
     def fake_read_user_input_event(*, latest_output: str = "", **_kwargs):
         return events.pop(0)
 
-    def fake_run_chat_for_backend(_user_input: str, *, backend: str):
+    def fake_run_chat_for_backend(_user_input: str, *, backend: str, **kwargs: object):
         assert backend == "simple"
         state.task.status = "awaiting_tool_confirmation"
         state.task.pending_tool = {"tool": "write_file", "input": {}}
@@ -250,7 +250,7 @@ def test_simple_backend_passes_runtime_event_sink_to_chat(monkeypatch, capsys):
     import main
     from agent.display_events import assistant_delta
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
         on_runtime_event(assistant_delta("好"))
@@ -280,7 +280,7 @@ def test_textual_runtime_turn_is_product_adapter_not_simple_cli(monkeypatch, cap
 
     events = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("TUI"))
         return ""
@@ -319,6 +319,7 @@ def test_simple_cli_runtime_turn_is_fallback_adapter_without_legacy_callbacks(
         on_runtime_event=None,
         on_output_chunk=None,
         on_display_event=None,
+        **kwargs: object,
     ) -> str:
         assert on_runtime_event is not None
         assert on_output_chunk is None
@@ -346,7 +347,7 @@ def test_simple_backend_renders_control_runtime_event(monkeypatch, capsys):
     import main
     from agent.display_events import control_message
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(control_message("等待用户确认"))
         return ""
@@ -371,7 +372,7 @@ def test_simple_backend_does_not_repeat_streamed_final_reply(monkeypatch, capsys
     import main
     from agent.display_events import assistant_delta
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你好"))
         return "你好"
@@ -410,7 +411,7 @@ def test_textual_main_loop_captures_printed_chat_output_as_latest_output(monkeyp
         seen_latest_outputs.append(latest_output)
         return events.pop(0)
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         """模拟 core.chat 普通 end_turn：正文 print，返回空串避免重复打印。"""
 
         assert on_runtime_event is not None
@@ -474,7 +475,7 @@ def test_textual_shell_input_handler_returns_printed_chat_output(monkeypatch):
 
     import main
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         """模拟 core.chat：正文 print，返回空串。"""
 
         assert on_runtime_event is not None
@@ -500,7 +501,7 @@ def test_textual_shell_input_handler_forwards_output_chunks(monkeypatch):
 
     seen_chunks = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
         on_runtime_event(assistant_delta("好"))
@@ -535,7 +536,7 @@ def test_textual_shell_input_handler_forwards_display_events(monkeypatch):
         body="工具: write_file\n路径: demo.md",
     )
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(runtime_display_event(event))
         return ""
@@ -559,7 +560,7 @@ def test_textual_shell_input_handler_forwards_runtime_events(monkeypatch):
 
     seen_events = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
         on_runtime_event(assistant_delta("好"))
@@ -590,7 +591,7 @@ def test_textual_shell_input_handler_renders_runtime_events_without_stdout(monke
 
     seen_events = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(control_message("工具等待确认"))
         return ""
@@ -617,7 +618,7 @@ def test_textual_runtime_event_suppresses_duplicate_stdout_completion(monkeypatc
 
     seen_events = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(control_message("等待确认"))
         print("等待确认")
@@ -647,7 +648,7 @@ def test_textual_runtime_event_ignores_unrelated_captured_stdout(monkeypatch):
 
     seen_events = []
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(control_message("RuntimeEvent 主路径"))
         print("旧 stdout 文案不应进入 Textual latest_output")
@@ -667,7 +668,7 @@ def test_textual_runtime_event_sink_keeps_stdout_fallback_when_no_event(monkeypa
 
     import main
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         print("旧路径用户可见输出")
         return ""
@@ -692,7 +693,7 @@ def test_textual_stdout_fallback_filters_debug_when_runtime_event_sink_has_no_ev
 
     import main
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         print("[CHECKPOINT] saved (status=running)")
         print("[RUNTIME_EVENT] event_type=loop.stop")
@@ -764,7 +765,7 @@ def test_textual_runtime_event_does_not_duplicate_into_legacy_callbacks(monkeypa
         body="工具: write_file",
     )
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
         on_runtime_event(runtime_display_event(display_event))
@@ -835,7 +836,7 @@ def test_textual_shell_input_handler_passes_confirmation_text_to_chat(monkeypatc
 
     seen_calls = []
 
-    def fake_chat(user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         """记录 main.py 传给 core.chat 的原始文本。"""
 
         seen_calls.append((user_input, on_runtime_event is not None))
@@ -863,7 +864,7 @@ def test_textual_shell_input_handler_drops_stdout_when_chunks_streamed(monkeypat
 
     from agent.display_events import assistant_delta
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         assert on_runtime_event is not None
         on_runtime_event(assistant_delta("你"))
         on_runtime_event(assistant_delta("好"))
@@ -886,7 +887,7 @@ def test_textual_shell_input_handler_filters_debug_output(monkeypatch):
 
     import main
 
-    def fake_chat(_user_input: str, *, on_runtime_event=None) -> str:
+    def fake_chat(_user_input: str, *, on_runtime_event=None, **kwargs: object) -> str:
         """模拟 stdout 混有用户可见文本和内部观测日志。"""
 
         assert on_runtime_event is not None
@@ -903,8 +904,8 @@ def test_textual_shell_input_handler_filters_debug_output(monkeypatch):
 def test_run_textual_main_loop_uses_persistent_shell_and_finalizes(monkeypatch):
     """textual backend 入口应走常驻 Shell，不再每轮创建 one-shot App。"""
 
-    import main
     import agent.input_backends.textual as textual_backend
+    import main
 
     calls = []
 
@@ -921,5 +922,6 @@ def test_run_textual_main_loop_uses_persistent_shell_and_finalizes(monkeypatch):
     main.run_textual_main_loop()
 
     assert len(calls) == 1
-    assert calls[0][0] is main._handle_textual_shell_input
+    # _handle_textual_shell_input wrapped in functools.partial for event_log_writer
+    assert calls[0][0].func is main._handle_textual_shell_input
     assert finalized == [True]

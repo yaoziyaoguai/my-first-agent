@@ -467,7 +467,7 @@ class TestMCPInvocationMainPath:
             def __init__(self, real):
                 self._real = real
 
-            def route_from_runtime_loop(self, request):
+            def route_from_runtime_loop(self, request, **kwargs: object):
                 result = self._real.route_from_runtime_loop(request)
                 captured.append(("route_from_runtime_loop", request, result))
                 return result
@@ -535,7 +535,7 @@ class TestMCPInvocationMainPath:
             def __init__(self, real):
                 self._real = real
 
-            def route_from_runtime_loop(self, request):
+            def route_from_runtime_loop(self, request, **kwargs: object):
                 result = self._real.route_from_runtime_loop(request)
                 captured.append(("route_from_runtime_loop", request, result))
                 return result
@@ -643,7 +643,7 @@ class TestMCPNotFakeable:
             def __init__(self, real):
                 self._real = real
 
-            def route_from_runtime_loop(self, request):
+            def route_from_runtime_loop(self, request, **kwargs: object):
                 result = self._real.route_from_runtime_loop(request)
                 if request.action_type == RuntimeActionType.TOOL_INVOKE:
                     pipeline_triggered.append(True)

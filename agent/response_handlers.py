@@ -168,6 +168,7 @@ def handle_tool_use_response(
     messages: list[dict[str, Any]],
     extract_text_fn,
     runtime_action_dispatcher: Any | None = None,
+    runtime_identity: Any = None,
 ) -> str | None:
     """Handle a model response whose stop_reason is tool_use.
 
@@ -247,6 +248,7 @@ def handle_tool_use_response(
             turn_context=turn_context,
             messages=messages,
             skill_allowed_tools=_skill_at,
+            identity=runtime_identity,
         )
     else:
         _mediator = None

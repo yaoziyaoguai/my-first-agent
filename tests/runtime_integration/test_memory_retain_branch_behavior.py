@@ -180,12 +180,14 @@ class _SpyDispatcher:
         *,
         core_entrypoint: str = "core.chat",
         runtime_hook_name: str = "loop.turn_end",
+        **kwargs: object,
     ) -> Any:
         self._route_from_runtime_loop_calls.append(request)
         result = self._real.route_from_runtime_loop(
             request,
             core_entrypoint=core_entrypoint,
             runtime_hook_name=runtime_hook_name,
+            **kwargs,
         )
         self._all_results.append(result)
         return result

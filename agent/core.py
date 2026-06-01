@@ -331,15 +331,18 @@ def _update_active_skill_from_dispatcher(dispatcher) -> None:
                 return
 
 
-def _dispatch_checkpoint_save(dispatcher, state, source="core.chat"):
+def _dispatch_checkpoint_save(dispatcher, state, source="core.chat", *, identity=None):
     """通过 dispatcher 中介 checkpoint 保存，产生 RuntimeAction evidence。
 
     dispatcher 为 None 时回退到直接 save_checkpoint() 调用。
+    B7: identity 用于 per-run checkpoint v2 路径。
     """
     if dispatcher is None:
         from agent.checkpoint import save_checkpoint
 
-        save_checkpoint(state, source=source)
+        _sid = getattr(identity, "session_id", "") or "" if identity is not None else ""
+        _rid = getattr(identity, "run_id", "") or "" if identity is not None else ""
+        save_checkpoint(state, source=source, session_id=_sid, run_id=_rid)
         return
 
     from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
@@ -365,6 +368,7 @@ def _dispatch_checkpoint_save(dispatcher, state, source="core.chat"):
         ),
         core_entrypoint="core.chat",
         runtime_hook_name="save_checkpoint",
+        identity=identity,
     )
 
 
@@ -580,6 +584,7 @@ def _dispatch_model_output(
     *,
     turn_state: "TurnState",
     runtime_action_dispatcher=None,
+    runtime_identity=None,
 ) -> str | None:
     """兼容入口：实际分派逻辑在 `agent.model_output_dispatch`。"""
 
@@ -593,6 +598,7 @@ def _dispatch_model_output(
         safe_emit_runtime_event=_safe_emit_runtime_event,
         max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
         runtime_action_dispatcher=runtime_action_dispatcher,
+        runtime_identity=runtime_identity,
     )
     return dispatch_model_output(
         response,
@@ -1225,7 +1231,10 @@ def _compress_history_and_sync_checkpoint(loop_ctx: LoopContext) -> None:
     state.memory.working_summary = new_summary
     # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
     if compression_happened and state.task.current_plan:
-        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
+        _dispatch_checkpoint_save(
+            loop_ctx.runtime_action_dispatcher, state,
+            identity=loop_ctx.runtime_identity,
+        )
 
 
 def _run_planning_phase(
@@ -1472,7 +1481,10 @@ def _run_planning_phase(
                 # 不允许用户看到"按此计划执行吗？"但 scheduler 实际没加载。
                 action_plan = None
 
-        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
+        _dispatch_checkpoint_save(
+            loop_ctx.runtime_action_dispatcher, state,
+            identity=loop_ctx.runtime_identity,
+        )
 
         if turn_state.on_runtime_event is not None:
             turn_state.on_runtime_event(
@@ -1520,7 +1532,10 @@ def _run_planning_phase(
         )
         state.task.status = "awaiting_plan_confirmation"
 
-        _dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)
+        _dispatch_checkpoint_save(
+            loop_ctx.runtime_action_dispatcher, state,
+            identity=loop_ctx.runtime_identity,
+        )
 
         if turn_state.on_runtime_event is not None:
             turn_state.on_runtime_event(
@@ -1624,6 +1639,7 @@ def _run_main_loop(
             response,
             turn_state=turn_state,
             runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
+            runtime_identity=loop_ctx.runtime_identity,
         ),
         runtime_loop_fields=_runtime_loop_fields,
         safe_emit_runtime_event=lambda sink, event: _safe_emit_runtime_event(

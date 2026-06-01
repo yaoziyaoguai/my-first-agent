@@ -78,7 +78,7 @@ class _ProposeSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
@@ -98,8 +98,8 @@ class TestMemoryProposeL3:
         """
         from agent import core
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
         from agent.memory_store import InMemoryMemoryStore
+        from agent.provider.fake_provider import FakeProvider
 
         store = InMemoryMemoryStore()
         real_dispatcher = _build_propose_dispatcher(store=store)
@@ -196,8 +196,8 @@ class TestMemoryProposeL3:
         """T3: confirmation_result="rejected" → dispatch 但不写入 store。"""
         from agent import core
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
         from agent.memory_store import InMemoryMemoryStore
+        from agent.provider.fake_provider import FakeProvider
 
         store = InMemoryMemoryStore()
         real_dispatcher = _build_propose_dispatcher(store=store)
@@ -245,8 +245,8 @@ class TestNoRealAPIOrEnv:
         """T4: MEMORY_PROPOSE L3 测试不读取真实 API / secret / env。"""
         from agent import core
         from agent.core import chat
-        from agent.provider.fake_provider import FakeProvider
         from agent.memory_store import InMemoryMemoryStore
+        from agent.provider.fake_provider import FakeProvider
 
         store = InMemoryMemoryStore()
         real_dispatcher = _build_propose_dispatcher(store=store)

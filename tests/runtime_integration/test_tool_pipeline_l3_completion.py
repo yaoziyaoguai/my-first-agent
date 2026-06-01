@@ -37,10 +37,9 @@ from agent.runtime_integration.evidence import (
     RuntimeActionModuleObserver,
 )
 from agent.runtime_integration.schema import RuntimeActionRequest
+from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
-from agent.runtime_integration.tool_gate import ToolGateHandler
-
 
 # ========== 测试辅助工厂 ==========
 
@@ -79,7 +78,7 @@ class _PipelineSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
@@ -385,7 +384,7 @@ class TestPhaseAFullPipelineL3HappyPath:
             assert evidence.get("runtime_hook_name") == "loop.turn_end"
 
         # 二次确认：classify_evidence_level
-        for method, request, action_result in pipeline_actions:
+        for _method, request, action_result in pipeline_actions:
             evidence = dict(action_result.evidence)
             level = classify_evidence_level(evidence)
             assert level == REAL_CORE_LOOP_RUNTIME_E2E, (
@@ -675,6 +674,7 @@ class TestPhaseDPipelineErrorIsolation:
         这是结构保证——通过代码审查验证（inspect 源码），非纯行为测试。
         """
         import inspect
+
         from agent.loop import _try_phase1_turn_end_runtime_action
 
         source = inspect.getsource(_try_phase1_turn_end_runtime_action)
@@ -1038,7 +1038,7 @@ class TestPhaseERegression:
         )
 
         # 验证所有 action 的 evidence 中无真实 API 痕迹
-        for method, request, result in spy.captured:
+        for _method, _request, result in spy.captured:
             evidence = dict(result.evidence)
             provider_kind = evidence.get("provider_kind", "")
             # fake provider 不应标记为 real
@@ -1061,6 +1061,7 @@ class TestPhaseFPipelineStructureConstraints:
         而非 "三个子系统" / "three subsystems"。
         """
         import inspect
+
         from agent.loop import _try_phase1_turn_end_runtime_action
 
         source = inspect.getsource(_try_phase1_turn_end_runtime_action)

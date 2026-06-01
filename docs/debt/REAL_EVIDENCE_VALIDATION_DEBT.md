@@ -1,7 +1,7 @@
 # Real Evidence / Dogfood / Real API Validation Debt
 
 **创建日期**: 2026-05-28
-**最后更新**: 2026-05-31 (003 Loop 8: 13 PASS / 0 FAIL / 4 CONCERN — H2 adversarial direct/indirect PASS via read_file target fix; execution_suppressed evidence added; no-TOOL_INVOKE verified; 003 upgraded to credible)
+**最后更新**: 2026-06-01 (B7 Phase 1 security preflight: config.yaml real key replaced with placeholder; docs secret fragments redacted; SEC-001 registered)
 
 ---
 
@@ -184,6 +184,24 @@ tests via `dispatcher.route_from_runtime_loop()`）验证，但缺少真实 CLI 
 | **Closed date** | 2026-05-30 (Gap A+B + Model Plan v1); last caveat closed 2026-05-31 (v3 core.chat() planning path) |
 | **Closing evidence** | Gap A validation script (10/10 PASS) + Gap B bridge implementation (7/7 tests PASS) + Model Plan v1 `provider.create()` path (13/13 PASS) + **Model Plan v3 `core.chat()` planning path (14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN)** + 104 scheduler/schema focused tests PASS |
 | **Independent review** | **PASS_WITH_CONCERNS → caveat closed** (2026-05-30): model JSON generation caveat 已闭合；B7/B8 entry gate: runtime prerequisites mostly satisfied——scheduler evidence chain fully closed 含 model-generated plan；仍需评估 002 implementation scope |
+
+---
+
+---
+
+## SEC-001: Tracked config.yaml contained real-looking API key
+
+| 字段 | 值 |
+|------|-----|
+| **Source** | Codex B7 red-line audit / Phase 1 security preflight (2026-06-01) |
+| **Risk type** | Secret leak — real-looking key in git-tracked file |
+| **File** | `config/config.yaml` (tracked) |
+| **Discovery** | `test_config_yaml_does_not_contain_real_api_key` FAILED |
+| **Action taken** | Replaced value with `sk-REPLACE_ME` placeholder |
+| **Docs fragments** | `docs/plans/` (2 lines), `docs/audit/` (3 lines) — all redacted |
+| **Guard tests** | 3 tests now PASS: config key check + plans fragments + audit fragments |
+| **Recommendation** | If the original key was ever valid, rotate/revoke it immediately |
+| **Status** | REMEDIATED — placeholder in place, guard tests pass |
 
 ---
 

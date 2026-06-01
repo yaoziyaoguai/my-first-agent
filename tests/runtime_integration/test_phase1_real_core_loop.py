@@ -522,10 +522,10 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         """测试 spy 透传 runtime-loop route，保留 hook 调用观察能力。"""
         self._route_calls.append(request)
-        return self._real.route_from_runtime_loop(request)
+        return self._real.route_from_runtime_loop(request, **kwargs)
 
     @property
     def action_log(self):

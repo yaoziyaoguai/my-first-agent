@@ -87,6 +87,8 @@ def test_loop_context_module_defines_frozen_dataclass_with_expected_fields():
         "max_loop_iterations",
         "model_provider",
         "runtime_action_dispatcher",
+        "runtime_identity",
+        "event_log_writer",
     }, (
         f"LoopContext 字段集合漂移：{field_names}；"
         "新增字段必须先评估是否属于 runtime dependency"
@@ -417,8 +419,12 @@ def test_chat_routes_new_turn_compression_through_single_helper():
     assert "loop_ctx.client" in helper_src, (
         "compression helper 必须复用 chat() 单源构造的 LoopContext client"
     )
-    assert "_dispatch_checkpoint_save(loop_ctx.runtime_action_dispatcher, state)" in helper_src, (
-        "active task 压缩后必须仍立即同步 checkpoint（通过 dispatcher），"
+    assert (
+        "_dispatch_checkpoint_save(" in helper_src
+        and "loop_ctx.runtime_action_dispatcher, state" in helper_src
+        and "identity=loop_ctx.runtime_identity" in helper_src
+    ), (
+        "active task 压缩后必须仍立即同步 checkpoint（通过 dispatcher + identity），"
         "避免 summary/checkpoint 漂移"
     )
     forbidden = (

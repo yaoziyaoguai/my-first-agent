@@ -78,7 +78,7 @@
   - 测试基线和 real provider dogfood 命令过期。
   - 仍包含旧 `.env` loader 思路。
 - `docs/design/config-legacy-sunset-contract.md`
-  - 仍把 `.env` secrets、`api_key_env`、`request_path/auth_scheme` 写成迁移合同的一部分。
+  - 仍把 legacy env-based secret/config loading 路径写成迁移合同的一部分。
   - 与 `docs/design/unified-project-config-contract.md` 和当前实现冲突。
 - `docs/archive/README.md`
   - 归档说明本身过期，仍声称某些旧文档保留在原路径或作为 canonical 参考。
@@ -323,7 +323,7 @@ provider:
    - `agent/provider/profiles.py`
    - `agent/provider/factory.py`
 2. diagnostics：
-   - legacy diagnostic still suggests `.env`、`api_key_env`、`provider.auth_scheme` in some paths。
+   - legacy diagnostic still suggests env-based config loading in some paths（已迁移至 unified config，legacy 路径仅作 fallback）。
 3. active docs：
    - `README.md`
    - `docs/design/config-legacy-sunset-contract.md`
@@ -354,7 +354,7 @@ provider:
 
 问题：
 
-- legacy diagnostic 仍会建议 `.env`、`api_key_env`、`provider.auth_scheme`。
+- legacy diagnostic 仍会建议 env-based config loading（已迁移至 unified config，legacy 路径仅作 fallback）。
 - `unsupported_auth_scheme` 的建议仍是修改 `provider.auth_scheme`。
 - `build_model_provider_from_env()` 命名本身仍暗示 env 是主入口。
 

@@ -258,7 +258,13 @@ def save_checkpoint(state, source: str | None = None, *, path: Path | None = Non
     和 `checkpoint_saved` 结构化日志；只有设置 MY_FIRST_AGENT_DEBUG=1 时才把
     [CHECKPOINT] 短日志打印到 terminal。
     """
-    target = path if path is not None else CHECKPOINT_PATH
+    # B7: session_id + run_id 均非空且未显式传 path 时，自动使用 v2 per-run 路径
+    if path is not None:
+        target = path
+    elif session_id and run_id:
+        target = checkpoint_path(session_id, run_id)
+    else:
+        target = CHECKPOINT_PATH
     checkpoint = _build_checkpoint_from_state(
         state, path=path, session_id=session_id, run_id=run_id,
     )

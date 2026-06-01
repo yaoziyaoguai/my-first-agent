@@ -93,7 +93,7 @@
 - `git update-index --skip-worktree config/config.yaml` 已应用 — git status 不再显示此文件为 dirty
 - 新增 `tests/test_config_secret_safety.py` — 8 个 guard tests 全部 PASS
 - 增强 `.git/hooks/pre-commit` — 新增真实 key 特征扫描 + config.yaml 误 stage 拦截
-- 提交版本 `config/config.yaml` 始终为 `sk-REPLACE_ME` 占位符
+- 提交版本 `config/config.yaml` 始终为 CONFIGURED 占位符（非真实 key）
 - 用户本地真实配置完整保留，未读取、未修改
 
 **风险**：中 — 涉及用户本地配置
@@ -141,7 +141,7 @@
 **完成记录（2026-05-27）**：
 - `agent/logger.py`：新增 `_redact_secrets()` / `_sanitize_log_data()` / `_rotate_log_if_needed()`；`log_event()` 写入前自动轮转+脱敏
 - `config.py`：新增 `MAX_LOG_SIZE_BYTES = 50 * 1024 * 1024`
-- Regex：`sk-[a-z]+(?:-[a-zA-Z0-9]+)*-[a-zA-Z0-9]{8,}` 匹配 sk-sp-/sk-ant-api03-/sk-or-v1- 等多段 key 格式
+- Regex：匹配主流 LLM provider API key 多段格式（prefix-segment-suffix），覆盖多 provider 变体
 - 新增 `tests/test_log_hygiene.py` — 21 tests (Sanitization 11 + Rotation 4 + E2E 3 + Boundary 3)
 - `.git/hooks/pre-commit`：同步更新 regex 为多段格式
 - 旧 773MB agent_log.jsonl 已删除

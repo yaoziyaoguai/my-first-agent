@@ -43,7 +43,6 @@ from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
 from agent.tool_registry import set_model_visible_tool_limits
 
-
 # 追踪本模块注册的 MCP 工具名，配合 cleanup fixture 在 test 后清理
 _registered_mcp_tool_names: set[str] = set()
 
@@ -89,7 +88,7 @@ class _PipelineSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
@@ -228,7 +227,7 @@ class TestBackwardCompat:
         )
 
         # 所有 stage 应达到 L3（_safe_noop 的 confirmation="never" → allowed）
-        for method, request, action_result in pipeline_actions:
+        for method, _request, action_result in pipeline_actions:
             assert method == "route_from_runtime_loop"
             evidence = dict(action_result.evidence)
             assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
@@ -351,7 +350,7 @@ class TestCoreChatMCPL3:
         assert len(result_payload.get("prompt_section", "")) > 0
 
         # 二次确认：classify_evidence_level
-        for method, request, action_result in pipeline_actions:
+        for _method, request, action_result in pipeline_actions:
             evidence = dict(action_result.evidence)
             level = classify_evidence_level(evidence)
             assert level == REAL_CORE_LOOP_RUNTIME_E2E, (
@@ -626,6 +625,7 @@ class TestNoRealAPIOrEnv:
         HOME 已设为隔离路径——如果误读了 .env 会因路径不存在而失败。
         """
         import os
+
         from agent.core import chat
         from agent.provider.fake_provider import FakeProvider
 

@@ -31,7 +31,6 @@ from agent.runtime_integration.evidence import (
 from agent.runtime_integration.schema import RuntimeActionRequest
 from agent.runtime_integration.tool_gate import ToolGateHandler
 
-
 # ========== 测试辅助 ==========
 
 
@@ -72,7 +71,7 @@ class _SpyDispatcher:
         self._route_calls.append(request)
         return self._real.route(request)
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         """测试 spy 透传 runtime-loop route，保留 core.chat 正路径分类。"""
         self._route_calls.append(request)
         return self._real.route_from_runtime_loop(request)

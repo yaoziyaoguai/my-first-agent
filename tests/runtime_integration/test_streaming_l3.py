@@ -75,7 +75,7 @@ class _SpyDispatcher:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
@@ -161,7 +161,8 @@ class TestStreamingL3:
         # handler 正常收集流式事件
         payload = dict(streaming_result.payload)
         assert payload.get("events_received", 0) > 0, (
-            f"FakeProvider stream() 应产出事件，实际 events_received={payload.get('events_received')}"
+            f"FakeProvider stream() 应产出事件，"
+            f"实际 events_received={payload.get('events_received')}"
         )
         assert payload.get("final_event_received") is True
         assert payload.get("text_delta_event_received") is True

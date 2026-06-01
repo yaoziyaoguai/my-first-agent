@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 Multi-instance Readiness COMPLETED)
-**状态**: B7 **COMPLETED** (5/5 slices, 63/63 B7 tests PASS, ruff clean)。Score 4.5/5 conservative baseline。Evidence collected: 8/8。B8 current boundary CLOSED。**B8 Phase 1-6A + Polish Loop 1-2 内无未解决问题** (260/260 tests PASS)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。TUI default entry NOT ACTIVATED。旧审计报告已标记 historical/superseded。下一步: 用户决定 B7 post-completion review / B8 Phase 6B/7 / 新方向。
+**最后更新**: 2026-06-01 (B7 remediation — Phase 1 security preflight COMPLETE, Phase 2 regression triage in progress)
+**状态**: B7 **partial** — Codex red-line audit found P1 issues。B7 completion claim SUPERSEDED。Remediation loop in progress。Security P1 (SEC-001): REMEDIATED — config.yaml key replaced, docs redacted, guard tests pass。Ready for B7 completion: NO。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: B7 Phase 2 regression triage。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

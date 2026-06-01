@@ -44,10 +44,18 @@ class CheckpointSaveHandler:
             },
         )
 
+        # B7: 从 context.identity 提取 session_id/run_id 写 v2 per-run 路径
+        _identity = getattr(context, "identity", None)
+        _session_id = getattr(_identity, "session_id", "") or ""
+        _run_id = getattr(_identity, "run_id", "") or ""
+
         save_ok = False
         if state is not None:
             try:
-                _save_checkpoint(state, source=source)
+                _save_checkpoint(
+                    state, source=source,
+                    session_id=_session_id, run_id=_run_id,
+                )
                 save_ok = True
             except Exception:
                 save_ok = False

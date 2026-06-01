@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 Multi-instance Readiness COMPLETED)
+**最后更新**: 2026-06-01 (B7 remediation in progress — Codex red-line audit)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,7 +10,8 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| **B7 Slice 5: Integration & Guard Tests** | 54a0632 | **B7 COMPLETED** — 13 multi-instance integration tests (multi-run 隔离, identity 传播链, 单实例回归, B8 契约验证)。63/63 B7 tests PASS (14 identity + 13 namespace + 10 checkpoint + 13 event_log + 13 integration)。ruff clean。 |
+| **B7 Codex Red-line Audit** | — | **B7 audited status: partial** — P1 security/runtime integration/checkpoint/event log/regression/docs overclaim 问题。B7 completion claim SUPERSEDED。Remediation loop started。Ready for B8 Phase 6B/7: NO。 |
+| **B7 Slice 5: Integration & Guard Tests** | 54a0632 | 13 multi-instance integration tests (multi-run 隔离, identity 传播链, 单实例回归, B8 契约验证)。63/63 B7 tests PASS。Claim of B7 COMPLETED later superseded by Codex audit。 |
 | **B7 Slice 4: Event Log Writer** | 837c010 | Per-session JSONL event log — EventLogWriter (append-only), flush_to_event_log() in dispatcher, turn-end flush hook in loop.py, secret redaction (field names + sk-/Bearer patterns), parameter chain main.py→chat()→LoopContext。 |
 | **B7 Slice 3: Checkpoint Namespace** | bcaacec | Per-run checkpoint path (v2 schema): `memory/checkpoints/{session_id}/{run_id}.json`, identity fields in meta, backward compatible with v1。 |
 | **B7 Slice 2: Namespace Injection** | 11a0096 | session_id/run_id injection: ActiveSkillLifecycle, MemoryStore, MCP bridge → config, ToolRuntimeMediator。 |

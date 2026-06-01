@@ -18,7 +18,9 @@ class _SpyDispatcher:
         self.calls: list = []
         self.action_log: list = []
 
-    def route_from_runtime_loop(self, request, core_entrypoint="", runtime_hook_name=""):
+    def route_from_runtime_loop(
+        self, request, core_entrypoint="", runtime_hook_name="", **kwargs: object,
+    ):
         from types import SimpleNamespace
 
         self.calls.append({

@@ -83,7 +83,7 @@ class _RecallSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result

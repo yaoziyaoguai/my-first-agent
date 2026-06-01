@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agent.runtime_integration import (
     ActionHandlerRegistry,
@@ -33,12 +34,10 @@ from agent.runtime_integration.evidence import (
 )
 from agent.runtime_integration.schema import RuntimeActionRequest
 from agent.runtime_integration.tool_gate import ToolGateHandler
-
 from tests.runtime_integration.test_tool_anchor_fake import (
     _build_phase1_dispatcher_with_tool_gate,
     _SpyDispatcher,
 )
-
 
 # ========== 测试辅助工具 ==========
 
@@ -554,8 +553,10 @@ class TestConfirmationRequiredClassificationBoundaries:
                 captured.append(("route", request, result))
                 return result
 
-            def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
-                result = self._real.route_from_runtime_loop(request)
+            def route_from_runtime_loop(
+                self, request: RuntimeActionRequest, **kwargs: object,
+            ) -> Any:
+                result = self._real.route_from_runtime_loop(request, **kwargs)
                 captured.append(("route_from_runtime_loop", request, result))
                 return result
 

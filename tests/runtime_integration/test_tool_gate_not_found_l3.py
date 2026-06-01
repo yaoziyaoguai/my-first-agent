@@ -71,7 +71,7 @@ class _PipelineSpy:
         self.captured.append(("route", request, result))
         return result
 
-    def route_from_runtime_loop(self, request: RuntimeActionRequest) -> Any:
+    def route_from_runtime_loop(self, request: RuntimeActionRequest, **kwargs: object) -> Any:
         result = self._real.route_from_runtime_loop(request)
         self.captured.append(("route_from_runtime_loop", request, result))
         return result
@@ -203,7 +203,7 @@ class TestHookLevelNotFoundL3:
 
     def test_t2_hook_level_not_found_tool_l3(self):
         """T2: _try_phase1_turn_end_runtime_action 中 not_found 工具被正确拒绝。"""
-        from agent.loop import _try_phase1_turn_end_runtime_action, LoopDependencies
+        from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
 
         real_dispatcher = _build_pipeline_dispatcher()
         spy = _PipelineSpy(real_dispatcher)

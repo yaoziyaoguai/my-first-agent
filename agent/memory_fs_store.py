@@ -16,12 +16,13 @@ Phase 4 minimal implementation — 只实现 spike 已验证过的部分：
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+import contextlib
 import json
 import os
 import re
 import threading
 import warnings
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -31,7 +32,8 @@ try:
 except ImportError:  # pragma: no cover - current target is POSIX/macOS, fallback is best-effort.
     fcntl = None  # type: ignore[assignment]
 
-from agent.memory_contracts import MemoryScope
+from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
+from agent.memory_contracts import MemoryDecisionType, MemoryScope
 from agent.memory_operations import (
     MemoryAuditSummary,
     MemoryOperationIntent,
@@ -43,12 +45,12 @@ from agent.memory_store import (
     MemoryRecord,
     MemoryStoreApplyResult,
     MemoryStoreApplyStatus,
+    _validate_apply_inputs,
     derive_memory_record_id,
     find_duplicate_record,
     find_record_by_content,
     intent_rejects_store_write,
     mutating_intent_allows_store_write,
-    _validate_apply_inputs,
 )
 
 # ── topic routing ──────────────────────────────────────────────────────────
@@ -121,10 +123,8 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
             val = val.lower() == "true"
         # parse number
         elif val.replace(".", "").replace("-", "").replace("e", "").replace("+", "").isdigit():
-            try:
+            with contextlib.suppress(ValueError):
                 val = float(val) if "." in val or "e" in val.lower() else int(val)
-            except ValueError:
-                pass
         meta[key] = val
     return meta, body
 
@@ -193,24 +193,23 @@ def _locked_filesystem_rmw(target_path: Path):
     target_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = target_path.with_name(f".{target_path.name}.lock")
     process_lock = _process_lock_for(lock_path)
-    with process_lock:
-        with lock_path.open("a+b") as lock_file:
+    with process_lock, lock_path.open("a+b") as lock_file:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        else:
+            # fcntl 不可用时只能降级为 best-effort 写入；这是可观测性
+            # warning，不改变 memory governance，也不输出任何 memory 正文。
+            warnings.warn(
+                "filesystem memory lock degraded: fcntl unavailable; "
+                "using process-local best-effort lock only",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        try:
+            yield
+        finally:
             if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            else:
-                # fcntl 不可用时只能降级为 best-effort 写入；这是可观测性
-                # warning，不改变 memory governance，也不输出任何 memory 正文。
-                warnings.warn(
-                    "filesystem memory lock degraded: fcntl unavailable; "
-                    "using process-local best-effort lock only",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            try:
-                yield
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _atomic_write_text(filepath: Path, text: str) -> None:
@@ -650,6 +649,42 @@ class FilesystemMemoryStore:
                 records.append(rec)
         return tuple(records)
 
+    def store_retained_record(self, candidate: dict) -> None:
+        """从 dispatcher payload candidate 直接写入 filesystem store。
+
+        MemoryRuntime.resolve_confirmation 在 direct_write 模式中调用此方法，
+        构造最小 MemoryOperationIntent 后走 _apply_retain 标准写入路径。
+        """
+        record_id = str(candidate.get("proposal_id", ""))
+        content = str(candidate.get("content", ""))
+        if not record_id or not content:
+            return
+
+        scope_raw = candidate.get("scope", "user")
+        try:
+            scope = MemoryScope(scope_raw)
+        except ValueError:
+            scope = MemoryScope.USER
+
+        intent = MemoryOperationIntent(
+            operation_type=MemoryOperationType.RETAIN,
+            decision_type=MemoryDecisionType.RETAIN,
+            confirmation_status=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            content_summary=content,
+            source_summary=f"candidate:{record_id}",
+            scope=scope,
+            safety_summary="no_safety_concern",
+            sensitive_redacted=False,
+            user_visible_summary=content[:80],
+            memory_type="semantic",
+            source_type="explicit_user_request",
+        )
+
+        from agent.memory_operations import build_memory_audit_summary
+        audit = build_memory_audit_summary(intent)
+        self._apply_retain(intent, _derive_audit_id_fs(audit))
+
     # ── recall API ───────────────────────────────────────────────────────
 
     def recall(
@@ -700,7 +735,7 @@ class FilesystemMemoryStore:
         candidates.sort(key=lambda x: x[1].get("created_at", ""), reverse=True)
 
         records = []
-        for record_id, entry in candidates[:max_items]:
+        for record_id, _entry in candidates[:max_items]:
             rec = self.get_record(record_id)
             if rec is not None:
                 records.append(rec)
@@ -761,7 +796,9 @@ class FilesystemMemoryStore:
             message="memory record retained to filesystem",
         )
 
-    def _apply_use_once(self, intent: MemoryOperationIntent, audit_id: str) -> MemoryStoreApplyResult:
+    def _apply_use_once(
+        self, intent: MemoryOperationIntent, audit_id: str
+    ) -> MemoryStoreApplyResult:
         record_id = derive_memory_record_id(intent.source_summary)
         meta = _meta_from_intent(intent, audit_id, record_id)
         meta["approval_status"] = "session_only"

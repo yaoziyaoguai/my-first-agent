@@ -386,16 +386,20 @@ class MemoryRuntime:
         candidate_id: str | None,
         choice: MemoryConfirmationChoice,
         free_text: str | None = None,
+        *,
+        direct_write: bool = True,
     ) -> MemoryEvaluationResult:
         """应用用户确认结果：生成 confirmation result → 构造 _dispatcher_payload。
 
-        不再直接写 store——改为返回 _dispatcher_payload 供 core.py 通过
-        dispatcher (MEMORY_PROPOSE → MemoryRetainHandler) 统一写入。
+        direct_write=True（默认，向后兼容）时直接写 store，非 dispatcher 路径
+        调用方（测试、CLI 等）无需手动处理 _dispatcher_payload。
+        direct_write=False 时仅返回 _dispatcher_payload，由 dispatcher 路径
+        （memory_interaction.py → MemoryRetainHandler）统一写入，避免双写。
 
         这是 evaluate_user_text 的第二阶段：
         1. 从 _pending_decision 缓存中取出 decision + confirmation_request
         2. 用 resolve_memory_confirmation_choice 生成 MemoryConfirmationResult
-        3. approved → operation intent → store 写入
+        3. approved → 构造 candidate_payload → (direct_write 时写 store)
         4. 清缓存，返回 MemoryEvaluationResult
         """
         pending = self._pending_decision
@@ -454,15 +458,21 @@ class MemoryRuntime:
                 "decision_type": decision.decision_type.value,
                 "candidate_id": candidate_id,
             })
-            # SESSION_ONLY：构造 _dispatcher_payload，由 core.py 通过 dispatcher 写入 store
+            # SESSION_ONLY：构造 _dispatcher_payload；direct_write 时同步写 store
             candidate_payload = self._build_candidate_payload(decision)
+            if direct_write and self._store is not None:
+                self._store.store_retained_record(candidate_payload)
             self._pending_decision = None
             return MemoryEvaluationResult(
                 action=MemoryEvaluationAction.STORED,
                 decision_type=decision.decision_type,
                 candidate_id=candidate_id,
                 content_summary=content_summary,
-                reason="仅本次会话使用，等待 dispatcher 写入",
+                reason=(
+                    "仅本次会话使用，已写入 store"
+                    if direct_write
+                    else "仅本次会话使用，等待 dispatcher 写入"
+                ),
                 _dispatcher_payload={
                     "confirmation_result": confirmation_result.choice.value,
                     "proposal_id": candidate_id,
@@ -470,12 +480,15 @@ class MemoryRuntime:
                 },
             )
 
-        # -- approved：构造 _dispatcher_payload 供 core.py dispatch ----------
+        # -- approved：构造 _dispatcher_payload；direct_write 时同步写 store -----
         self._pending_decision = None
 
         candidate_payload = self._build_candidate_payload(
             decision, content_override=confirmation_result.approved_content
         )
+
+        if direct_write and self._store is not None:
+            self._store.store_retained_record(candidate_payload)
 
         self._log("memory.confirmation_approved", {
             "decision_type": decision.decision_type.value,
@@ -487,7 +500,7 @@ class MemoryRuntime:
             decision_type=decision.decision_type,
             candidate_id=candidate_id,
             content_summary=content_summary,
-            reason="已确认，等待 dispatcher 写入 store",
+            reason="已确认，已写入 store" if direct_write else "已确认，等待 dispatcher 写入 store",
             _dispatcher_payload={
                 "confirmation_result": confirmation_result.choice.value,
                 "proposal_id": candidate_id,

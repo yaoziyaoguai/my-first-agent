@@ -261,8 +261,10 @@ def handle_memory_confirmation_reply(
 
     candidate_id: str | None = pending.get("_candidate_id")
 
-    # 2. 执行确认结果
-    result = memory_runtime.resolve_confirmation(candidate_id, choice, free_text)
+    # 2. 执行确认结果（direct_write=False：由 dispatcher 统一写入，避免双写）
+    result = memory_runtime.resolve_confirmation(
+        candidate_id, choice, free_text, direct_write=False,
+    )
     # result is MemoryEvaluationResult
 
     # 3. 若 _dispatcher_payload 存在，通过 dispatcher 走统一写入路径

@@ -167,9 +167,9 @@ class TestMemoryRecallInjection:
         from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         store = InMemoryMemoryStore()
-        # _records 是 {record.id: record} dict
+        # 使用 namespaced key，与 list_records() 前缀过滤一致
         store._records = {
-            "m1": MemoryRecord(
+            store._namespaced_key("m1"): MemoryRecord(
                 id="m1",
                 content="用户是数据工程师",
                 scope=MemoryScope.USER,

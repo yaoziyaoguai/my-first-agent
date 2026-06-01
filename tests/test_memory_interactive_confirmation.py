@@ -178,7 +178,7 @@ def test_get_pending_confirmation_returns_cached_request():
 
 
 def test_resolve_confirmation_accept_returns_dispatcher_payload():
-    """Loop 15: resolve_confirmation 不再直接写 store——返回 _dispatcher_payload。"""
+    """resolve_confirmation accept 默认 direct_write=True，写 store 并返回 _dispatcher_payload。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -197,9 +197,9 @@ def test_resolve_confirmation_accept_returns_dispatcher_payload():
     assert "I like blue" in payload["candidate"]["content"]
     assert "content_hash" in payload["candidate"]
     assert "scope" in payload["candidate"]
-    # store 未被直接写入——由 dispatcher 负责
+    # direct_write=True 默认行为：store 已被直接写入
     records = runtime._store.list_records()
-    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+    assert len(records) == 1, "direct_write=True 应直接写 store"
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ def test_resolve_confirmation_reject_does_not_write():
 
 
 def test_resolve_confirmation_session_only_returns_dispatcher_payload():
-    """Loop 15: SESSION_ONLY 也返回 _dispatcher_payload，不直接写 store。"""
+    """SESSION_ONLY direct_write=True 默认行为：返回 _dispatcher_payload 并写 store。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -245,9 +245,9 @@ def test_resolve_confirmation_session_only_returns_dispatcher_payload():
     assert payload["confirmation_result"] == "session_only"
     assert payload["proposal_id"] == result.candidate_id
     assert isinstance(payload["candidate"], dict)
-    # store 未被直接写入
+    # direct_write=True 默认行为：store 已被写入
     records = runtime._store.list_records()
-    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+    assert len(records) == 1, "direct_write=True 应直接写 store"
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ def test_resolve_confirmation_session_only_returns_dispatcher_payload():
 
 
 def test_resolve_confirmation_edit_and_accept_returns_dispatcher_payload():
-    """Loop 15: EDIT_AND_ACCEPT 返回 _dispatcher_payload，内容为编辑后版本。"""
+    """EDIT_AND_ACCEPT direct_write=True 默认：返回 payload 并写 store，内容为编辑后版本。"""
     runtime = _make_runtime()
     result = runtime.evaluate_user_text("remember that I like blue")
 
@@ -270,9 +270,10 @@ def test_resolve_confirmation_edit_and_accept_returns_dispatcher_payload():
     payload = resolved._dispatcher_payload
     assert payload is not None, "EDIT_AND_ACCEPT 应返回 _dispatcher_payload"
     assert "green" in payload["candidate"]["content"]
-    # store 未被直接写入
+    # direct_write=True 默认行为：store 已被写入
     records = runtime._store.list_records()
-    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+    assert len(records) == 1, "direct_write=True 应直接写 store"
+    assert "green" in records[0].content
 
 
 # ---------------------------------------------------------------------------

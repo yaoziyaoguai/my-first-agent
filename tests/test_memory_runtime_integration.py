@@ -72,7 +72,7 @@ def _evaluate_and_confirm(
 
 
 def test_explicit_retain_flows_to_dispatcher_payload():
-    """Loop 15: resolve_confirmation 返回 _dispatcher_payload，不再直接写 store。"""
+    """resolve_confirmation direct_write=True 默认：返回 _dispatcher_payload 并直接写 store。"""
     runtime = _make_runtime()
 
     result = _evaluate_and_confirm(runtime, "remember that my favorite color is blue")
@@ -83,9 +83,9 @@ def test_explicit_retain_flows_to_dispatcher_payload():
     assert payload["confirmation_result"] == "accept"
     assert "my favorite color is blue" in payload["candidate"]["content"]
     assert "content_hash" in payload["candidate"]
-    # store 未被直接写入——由 dispatcher 负责
+    # direct_write=True 默认行为：store 已被直接写入
     records = runtime._store.list_records()  # type: ignore[union-attr]
-    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+    assert len(records) == 1, "direct_write=True 应直接写 store"
 
 
 def test_chinese_retain_returns_dispatcher_payload():
@@ -452,7 +452,7 @@ def test_memory_runtime_does_not_use_input():
 
 
 def test_two_phase_confirm_flow_returns_dispatcher_payload():
-    """Loop 15: v1 两阶段交互返回 _dispatcher_payload，store 由 dispatcher 写入。"""
+    """v1 两阶段交互 direct_write=True 默认：返回 _dispatcher_payload 并直接写 store。"""
     from agent.memory_runtime import MemoryEvaluationAction
     from agent.memory_store import InMemoryMemoryStore
 
@@ -476,9 +476,9 @@ def test_two_phase_confirm_flow_returns_dispatcher_payload():
     assert "I prefer concise answers" in payload["candidate"]["content"]
     assert "content_hash" in payload["candidate"]
 
-    # store 未被直接写入
+    # direct_write=True 默认行为：store 已被直接写入
     records = runtime._store.list_records()
-    assert len(records) == 0, "resolve_confirmation 不应直接写 store"
+    assert len(records) == 1, "direct_write=True 应直接写 store"
 
     # audit events 包含 confirmation_accepted 和 confirmation_approved
     event_types = [e[0] for e in events]

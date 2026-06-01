@@ -32,7 +32,7 @@ from agent.memory_operations import (
     MemoryOperationType,
     build_memory_audit_summary,
 )
-from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus, MemoryRecord
+from agent.memory_store import InMemoryMemoryStore, MemoryRecord, MemoryStoreApplyStatus
 from agent.runtime_integration import (
     ActionHandlerRegistry,
     RuntimeActionDispatcher,
@@ -44,7 +44,6 @@ from agent.runtime_integration.evidence import (
 )
 from agent.runtime_integration.memory_recall import MemoryRecallHandler
 from agent.runtime_integration.schema import RuntimeActionRequest
-
 
 # ========== 测试辅助工厂 ==========
 
@@ -120,8 +119,8 @@ def _make_store_with_records(
     """
     store = InMemoryMemoryStore()
     for record in records:
-        # 直接写入 store internal records dict（测试便利）
-        store._records[record.id] = record
+        # 使用 namespaced key 写入，与 list_records() 前缀过滤一致
+        store._records[store._namespaced_key(record.id)] = record
     return store
 
 

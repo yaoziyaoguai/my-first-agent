@@ -1,8 +1,32 @@
 # B8 TypeScript TUI Workbench — SDD
 
+> **STATUS: SUPERSEDED / HISTORICAL**
+>
+> This document describes the earlier **information-dashboard-oriented** B8 direction
+> (Phase 1-7, panel-stacking model: "TUI 替代 CLI 成为默认交互入口").
+>
+> **Superseded by (B8 current source of truth)**:
+> 1. `docs/proposals/b8-interaction-first-workbench-proposal.md` — why/what/boundary
+> 2. `docs/milestones/b8-interaction-first-workbench-milestones.md` — M0-M8 by entry maturity
+> 3. `docs/design/b8-interaction-first-workbench-sdd.md` — layout/data model/safety
+> 4. `docs/plans/b8-interaction-first-workbench-tdd-plan.md` — test strategy
+>
+> **Current B8 direction**: Interaction-first Workbench — 交互优先，审计辅助。
+> Agent Lens / Interaction View / Audit Lens 三区域布局，Milestone 按"主入口成熟度"定义。
+>
+> **This document remains for**:
+> - Historical reference for existing Phase 1-6A panels and implementation details
+> - Technical decisions (Ink 5, React 18, tsx, Vitest) that carry forward
+> - Data layer design patterns that may be adapted for new components
+>
+> **This document must NOT be used as**:
+> - Current B8 product direction or implementation authority
+> - Source of truth for milestone definition (use M0-M8, not Phase 1-7)
+> - Authority for layout design (use 3-zone, not 7-view dashboard)
+
 **创建日期**: 2026-05-31
 **最后更新**: 2026-06-01 (Phase 3 SDD — Default Workbench Readiness)
-**状态**: Phase 1 COMPLETED, Phase 2 COMPLETED, Phase 3 COMPLETED (133/133 tests PASS)
+**状态**: **SUPERSEDED** — Phase 1-6A COMPLETED; 产品方向已改为 interaction-first workbench
 **类型**: Architecture Extension Loop — 新跨领域关注点
 
 ---

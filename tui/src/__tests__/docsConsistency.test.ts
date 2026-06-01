@@ -16,7 +16,7 @@ describe("DocsConsistency model", () => {
     expect(names).toContain("PROJECT_STATUS.md");
     expect(names).toContain("PROGRESS_LEDGER.md");
     expect(names).toContain("REAL_EVIDENCE_VALIDATION_DEBT.md");
-    expect(names).toContain("B8 TUI SDD");
+    expect(names).toContain("B8 Interaction-first Workbench SDD");
     expect(results.length).toBeGreaterThanOrEqual(4);
   });
 

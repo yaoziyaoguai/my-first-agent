@@ -1,13 +1,40 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B8 Phase 5: Development Workflow Panel wired)
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 Phase 6B Readiness Cleanup completed — 44 pre-existing/non-B7 failures processed (0 live failures, 28 xfailed)。4369 passed, 18 skipped, 28 xfailed, 0 failed。B8 Phase 5 COMPLETED — Development Workflow Panel wired into Dashboard (HardStopOverlay + ReviewPacketPanel + AutoRunPanel), 287/287 TUI tests PASS。B8 Phase 6B DEFERRED — blocked by B7 runtime identity model。B8 Phase 7 DEFERRED — blocked by append-only event source contract。TUI default entry NOT ACTIVATED。not product-ready。
+**最后更新**: 2026-06-02 (B8 方向变更 — interaction-first workbench M0)
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 产品方向从"信息展示中心"改为"interaction-first workbench"（M0 文档阶段）。旧 Phase 1-6A 已交付能力保留为 auxiliary panels。287/287 TUI tests PASS, 4369 passed/18 skipped/28 xfailed/0 failed。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
 ---
 
-## B7 Current-Stage Close-Out (2026-06-02)
+## B8 Direction Correction — Interaction-first Workbench (2026-06-02)
+
+B8 产品方向从"信息展示中心"改为"interaction-first workbench"。M0 为纯文档阶段（不改代码）：
+
+| 文档 | 状态 |
+|------|------|
+| `docs/proposals/b8-interaction-first-workbench-proposal.md` | **WRITTEN** — 待用户审阅（5 项决策） |
+| `docs/milestones/b8-interaction-first-workbench-milestones.md` | **WRITTEN** — M0-M8 定义完成 |
+| `docs/design/b8-interaction-first-workbench-sdd.md` | **WRITTEN** — 布局/数据模型/安全边界 |
+| `docs/plans/b8-interaction-first-workbench-tdd-plan.md` | **WRITTEN** — 107 new tests planned |
+| `docs/roadmap/b8-tui-workbench-roadmap.md` | **REWRITTEN** — interaction-first 方向 |
+
+**核心变更**:
+- 布局: 7 视图工作台 → Agent Lens (25%) / Interaction View (50%) / Audit Lens (25%)
+- 里程碑: 按"面板数量" → 按"主入口成熟度"（M0-M8）
+- AutoRun: 永久 dev-only，不作为产品主线
+- 现有 Phase 1-6A 面板: 保留为 auxiliary panels
+
+**待用户确认的 5 项决策**（见 proposal §10）:
+1. 接受 "interaction-first workbench" 替代 "信息展示中心"？
+2. 接受三区域布局方案？
+3. 接受按"主入口成熟度"定义里程碑？
+4. 接受保留 Phase 1-6A 面板为 auxiliary？
+5. 接受 AutoRun 永久 dev-only？
+
+M0 exit criteria: proposal 通过用户审阅 + 所有文档自审通过 + 287/287 tests + tsc clean。
+
+---
 
 B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信审计 (commit 3f2f6b2) 确认：
 
@@ -50,11 +77,10 @@ B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信
 
 | 项目 | 状态 |
 |------|------|
-| B8 Phase 6B Readiness Cleanup | **COMPLETED** — 44 pre-existing failures processed (0 live failures, 28 xfailed) |
-| B8 Phase 5 (Dev Workflow Panel) | **COMPLETED** (fc0c9a2) — HardStopOverlay + ReviewPacketPanel + AutoRunPanel wired, 287 TUI tests PASS |
-| B8 Phase 6B Implementation | **DEFERRED** — blocked by B7 runtime identity model (session/run/instance + evidence namespace + multi-run storage contract) |
-| B8 Phase 7 | **DEFERRED** — blocked by append-only event source contract |
-| TUI default entry | NOT ACTIVATED |
+| B8 M0 (Direction Correction) | **IN PROGRESS** — proposal + milestones + SDD + TDD Plan 已写，待自审 + 用户审阅 |
+| B8 M1-M8 | **PENDING** — M0 完成后按依赖链依次推进 |
+| B8 旧 Phase 1-6A | **COMPLETED** — 全部能力保留为 auxiliary panels |
+| TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
 
 ### Failure Classification Summary
 

@@ -73,7 +73,7 @@ const REQUIRED_DOCS: DocDef[] = [
   { name: "PROJECT_STATUS.md", path: "../docs/PROJECT_STATUS.md" },
   { name: "PROGRESS_LEDGER.md", path: "../docs/PROGRESS_LEDGER.md" },
   { name: "REAL_EVIDENCE_VALIDATION_DEBT.md", path: "../docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md" },
-  { name: "B8 TUI SDD", path: "../docs/design/b8-ts-tui-workbench-sdd.md" },
+  { name: "B8 Interaction-first Workbench SDD", path: "../docs/design/b8-interaction-first-workbench-sdd.md" },
 ];
 
 function resolvePath(relativePath: string): string {

@@ -1,24 +1,24 @@
 # B8 TUI Workbench — Technical Debt
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-02 (B7 current-stage closed — accepted-with-caveats)
-**依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`
-**范围**: 仅记录 B8 TUI Workbench 自身的 deferred phase / missing prerequisite debt。不记录 B7 implementation debt。
+**最后更新**: 2026-06-02 (B8 方向变更 — interaction-first workbench)
+**依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`、`docs/milestones/b8-interaction-first-workbench-milestones.md`
+**范围**: 仅记录 B8 TUI Workbench 自身的 deferred milestone / missing prerequisite debt。不记录 B7 implementation debt。
 
-**B7 close-out note (2026-06-02)**: B7 current-stage closed。D-B8-01/D-B8-02 的阻塞仍是 runtime identity model / event source contract（非 B7 未完成）。Phase 6B eligible for readiness planning — conditioned on cleanup（见 PROJECT_STATUS）。
+**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。M0 为纯文档阶段（proposal + milestones + SDD + TDD plan），不改代码。旧 Phase 1-6A 已交付能力保留为 auxiliary panels。
 
 ---
 
 ## 1. 当前 B8 Debt 总览
 
-| # | Debt | 状态 | 阻塞原因 | 偿还条件 |
-|---|------|------|---------|---------|
-| D-B8-01 | Phase 6B multi-run evidence history browser | **DEFERRED** | 缺 evidence namespace + multi-run storage contract（B7 RuntimeIdentity 已有 session_id/run_id/instance_id 字段，但 namespace/storage 层缺失） | evidence namespace model + storage contract |
-| D-B8-02 | Phase 7 runtime event stream viewer | **DEFERRED** | 缺 append-only runtime event source contract | B7 readiness + event source contract |
-| D-B8-03 | TUI default-entry activation | **DEFERRED** | Default Entry Readiness checklist 未全部通过 | IME/paste/6B/7 |
-| D-B8-04 | Chinese IME / multi-line input / paste | **PENDING** | Ink 5 useInput 中文 IME 行为待验证 | 实际终端验证 + 必要时 raw stdin fallback |
-| D-B8-05 | Persistent audit log browser UI | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现并接入 Dashboard gates 视图 |
-| D-B8-06 | High-risk commands remain blocked | **BY DESIGN** | 安全约束: no force push/reset --hard/rm -rf | 不计划解除; 属于安全特性 |
+| # | Debt | 映射 Milestone | 状态 | 阻塞原因 | 偿还条件 |
+|---|------|---------------|------|---------|---------|
+| D-B8-01 | Multi-instance history browser | **M6** | **DEFERRED** | 缺 evidence namespace + multi-run storage contract | M6: EvidenceNamespace + MultiRunStorageContract 契约定义 |
+| D-B8-02 | Runtime event stream viewer | **M7** | **DEFERRED** | 缺 append-only runtime event source contract | M7: EventSourceContract + EventStreamReader |
+| D-B8-03 | TUI default-entry activation | **M8** | **DEFERRED** | M1-M7 未完成，Default Entry Readiness checklist 未全部通过 | M8: 用户显式批准 |
+| D-B8-04 | Chinese IME / multi-line input / paste | **M8** | **PENDING** | Ink 5 useInput 中文 IME 行为待验证 | M8: IME/paste 基础测试 |
+| D-B8-05 | Persistent audit log browser UI | N/A (旧 Phase) | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现，在 Audit Lens 中复用 |
+| D-B8-06 | High-risk commands remain blocked | N/A (旧 Phase) | **BY DESIGN** | 安全约束: no force push/reset --hard/rm -rf | 不计划解除; 属于安全特性 |
 
 ---
 
@@ -153,14 +153,15 @@ B7 readiness SDD
 
 | 项目 | 状态 |
 |------|------|
-| B8 Phase 1-6A | **COMPLETED** (260/260 tests PASS)。阶段性收口审查通过 — `docs/reviews/b8-tui-workbench-completion-review.md` |
-| B8 Phase 5 (Dev Workflow Panel) | **COMPLETED** (fc0c9a2) — HardStopOverlay + ReviewPacketPanel + AutoRunPanel wired into Dashboard workflow view, 287 TUI tests PASS |
-| B8 Phase 6B | **DEFERRED** — 缺 session/run/instance identity + evidence namespace |
-| B8 Phase 7 | **DEFERRED** — 缺 append-only event source contract |
+| B8 旧 Phase 1-6A | **COMPLETED** — 全部能力保留为 auxiliary panels |
+| B8 M0 (Direction Correction) | **IN PROGRESS** — proposal + milestones + SDD + TDD Plan 已写，待用户审阅 |
+| B8 M1-M8 | **PENDING** — M0 完成后按依赖链依次推进 |
+| M6 (Multi-instance History) | **DEFERRED** — 缺 evidence namespace + multi-run storage contract |
+| M7 (Event Stream) | **DEFERRED** — 缺 append-only event source contract |
+| M8 (Default Entry) | **DEFERRED** — M1-M7 未完成 |
 | B7 implementation | **NOT STARTED** — 不在当前阶段 |
-| TUI default entry | **NOT ACTIVATED** — Default Entry Readiness checklist 未全部通过 |
+| TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
 | CLI fallback | **RETAINED** — CLI 为显式 fallback, 永不删除 |
-| B8 polish | **CAN CONTINUE** — 静态 UI 改进不依赖 B7 |
 | Product readiness | **NOT PRODUCT-READY** — 不声称 production-ready |
 
-**下一步**: B8 Polish / Default Workbench Readiness Loop (不进入 B7)。
+**下一步**: M0 完成 → 用户审阅 proposal → M1 实现。

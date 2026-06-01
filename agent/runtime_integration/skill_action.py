@@ -57,11 +57,15 @@ class SkillRuntimeActionHandler:
             for item in payload.get("available_skill_metadata", ())
         ]
 
-        # Loop 2.2: 所有路径都先通过 invoke_registered_target 建立 L3 evidence chain，
-        # 再根据 disposition 返回不同 status/payload。evidence level 不受 disposition 影响。
+        # 中文学习注释 —— rejection/failure ≠ runtime_e2e disqualification：
+        # 所有路径都先通过 invoke_registered_target 建立 L3 evidence chain，
+        # 再根据 disposition 返回不同 status/payload。handler 内部的 validation failure
+        # 或 expected rejection 使用 failure_reason 记录原因，不影响 evidence level。
+        # runtime_e2e_disqualified_reason 保留给 dispatcher 层真正的 dispatch 链级错误
+        # （如 mismatched action_id、unissued result），不在 handler 业务层使用。
         # 当 handler 内 registry 与 turn-end hook 注入的 metadata 来自不同 registry 实例时
         # （如测试中 spy dispatcher 用空 registry 而 core.py 注入了真实 registry），
-        # descriptor 查找失败不应导致 evidence level 降级。
+        # descriptor 查找失败是 handler 内的正常 rejection，不应导致 evidence level 降级。
         if not selected_skill_id:
             _l3_observed = context.invoke_registered_target(
                 target_module="SkillLoader",
@@ -80,7 +84,7 @@ class SkillRuntimeActionHandler:
                 evidence_extra={
                     "body_load_decision": False,
                     "no_suitable_skill": True,
-                    "runtime_e2e_disqualified_reason": "no selected_skill_id in model_decision_metadata",  # noqa: E501
+                    "failure_reason": "no selected_skill_id in model_decision_metadata",
                     "audit_only_skill_exclusion_evidence": (
                         self._audit_exclusion_evidence()
                     ),
@@ -116,7 +120,7 @@ class SkillRuntimeActionHandler:
                     "body_load_decision": False,
                     "no_suitable_skill": not bool(available_metadata),
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
-                    "runtime_e2e_disqualified_reason": failure,
+                    "failure_reason": failure,
                 },
                 error_safe_preview=failure,
             )
@@ -142,7 +146,7 @@ class SkillRuntimeActionHandler:
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
-                    "runtime_e2e_disqualified_reason": (
+                    "failure_reason": (
                         f"selected skill '{selected_skill_id}' is not available in registry"
                     ),
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
@@ -172,7 +176,7 @@ class SkillRuntimeActionHandler:
                     "selected_skill_id": selected_skill_id,
                     "selection_reason": selection_reason,
                     "selection_confidence": selection_confidence,
-                    "runtime_e2e_disqualified_reason": "selected skill has no visible allowed tools",  # noqa: E501
+                    "failure_reason": "selected skill has no visible allowed tools",
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
                 },
                 error_safe_preview="selected skill has no visible allowed tools",

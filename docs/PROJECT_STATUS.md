@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 Skill-State Compatibility Remediation — completed)
-**状态**: B7 **Skill-State Compatibility Remediation completed**。Codex 独立复审 (06bfee5) 发现的 6 个 B7-caused runtime integration test failures 全部修复：tests 从直接读写 `agent.core._active_skill`/`_skill_selected_by_model` 迁移到 `agent.skill_state` accessors。额外发现并修复 2 个 regression failures（test_r6/test_r8 + conftest.py fixture 断开 core→skill_state 引用链）。Final Cleanup Loop P2/P3 此前已完成。B7 completed: NO (final independent completion review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。007 remains credible-with-caveats。not product-ready。下一步: final independent completion review。
+**最后更新**: 2026-06-01 (B7 Runtime-E2E Semantics Cleanup — completed)
+**状态**: B7 **Runtime-E2E Semantics Cleanup completed**。Codex 独立复审发现的 4 个 B7-caused `runtime_e2e` classification failures 修复：`skill_action.py` handler 将 `runtime_e2e_disqualified_reason` 错误用于 handler 内部 validation failure，导致 `is_runtime_e2e_evidence()` 返回 False → evidence 降级为 `subsystem_integration`。Fix: 4 处改为 `failure_reason`。33/33 focused tests PASS。Zero new regression。4 B7-caused failures: 0。B7 completed: NO (final independent completion review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。TUI default entry NOT ACTIVATED。not product-ready。下一步: final independent completion review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

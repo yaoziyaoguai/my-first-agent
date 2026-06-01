@@ -1493,7 +1493,19 @@ def _now_iso() -> str:
 
 
 def is_runtime_e2e_evidence(evidence: Mapping[str, Any]) -> bool:
-    """判断 evidence 是否满足 R.6 Runtime E2E 证据链。"""
+    """判断 evidence 是否满足 R.6 Runtime E2E 证据链。
+
+    中文学习注释 —— rejection/failure ≠ runtime_e2e disqualification：
+    - is_runtime_e2e_evidence 只检查 evidence chain 的结构完整性，不检查 handler
+      的 disposition（failed/rejected/success 均不改变证据链结构）。
+    - runtime_e2e_disqualified_reason 由 dispatcher 层设置，用于标记真正的
+      dispatch 链级错误（handler returned mismatched action_id、unissued result）。
+    - handler 内部的 validation failure 使用 failure_reason（不设置
+      runtime_e2e_disqualified_reason），避免误伤证据链分类。
+    - classify_evidence_level() 会进一步区分 real_core_loop_runtime_e2e
+      （需 dispatcher_origin=="runtime_loop" + runtime_loop_invoked）和
+      harness_runtime_e2e（直接 dispatcher.route() 调用，无 runtime loop provenance）。
+    """
 
     if evidence.get("runtime_e2e_disqualified_reason"):
         return False

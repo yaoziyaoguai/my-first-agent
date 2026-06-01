@@ -19,11 +19,11 @@ from agent.runtime_integration import (
     classify_evidence_level,
 )
 from agent.runtime_integration.checkpoint_summary import CheckpointSafeSummaryHandler
+from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
 from agent.runtime_integration.memory_hook import MemoryTurnEndProposalHandler
 from agent.runtime_integration.skill_action import SkillRuntimeActionHandler
 from agent.runtime_integration.streaming_provider import StreamingProviderCallHandler
 from agent.runtime_integration.subagent_action import SubAgentDelegateL0Handler
-from agent.runtime_integration.memory_consolidate import MemoryConsolidateHandler
 from agent.runtime_integration.tool_gate import DogfoodOverlayTool, ToolGateHandler
 
 
@@ -34,7 +34,10 @@ def _dispatch(handler, request: RuntimeActionRequest):  # noqa: ANN001
     return dispatcher.route(request), dispatcher
 
 
-def _write_skill(root: Path, name: str, *, status: str = "active", allowed_tools: tuple[str, ...] = ("read_file",)) -> None:
+def _write_skill(
+    root: Path, name: str, *,
+    status: str = "active", allowed_tools: tuple[str, ...] = ("read_file",),
+) -> None:
     skill_dir = root / name
     skill_dir.mkdir(parents=True)
     skill_dir.joinpath("SKILL.md").write_text(
@@ -70,7 +73,9 @@ def _skill_request(payload: dict) -> RuntimeActionRequest:
     )
 
 
-def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selection(tmp_path: Path) -> None:
+def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selection(
+    tmp_path: Path,
+) -> None:
     """Skill handler 只验证模型结构化选择，body 在 selected_skill_id 后才加载。"""
 
     skill_root = tmp_path / "skills"
@@ -107,7 +112,10 @@ def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selectio
     assert "Skill body for code-review" in result.payload["loaded_body_preview"]
     assert result.evidence["evidence_level"] == "harness_runtime_e2e"
     assert result.evidence["target_module"] == "SkillLoader"
-    assert result.evidence["target_module_proof"]["observer_identity"] != "SkillRuntimeActionHandler"
+    assert (
+        result.evidence["target_module_proof"]["observer_identity"]
+        != "SkillRuntimeActionHandler"
+    )
     assert result.evidence["audit_only_skill_exclusion_evidence"]["excluded_count"] == 1
     assert "audit_only_skill_exclusion_evidence" not in result.payload
     assert "docs" not in str(result.payload)
@@ -117,7 +125,9 @@ def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selectio
 
 
 @pytest.mark.parametrize("missing_key", ["selection_reason", "selection_confidence"])
-def test_skill_missing_selection_metadata_is_not_runtime_e2e(tmp_path: Path, missing_key: str) -> None:
+def test_skill_missing_selection_metadata_is_not_runtime_e2e(
+    tmp_path: Path, missing_key: str,
+) -> None:
     """缺 selection_reason/confidence 时 handler 不得后验补字段。"""
 
     skill_root = tmp_path / "skills"
@@ -166,7 +176,7 @@ def test_hidden_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> No
 
     assert result.status == "failed"
     assert result.evidence["evidence_level"] != "runtime_e2e"
-    assert result.evidence["runtime_e2e_disqualified_reason"] == (
+    assert result.evidence["failure_reason"] == (
         "available_skill_metadata does not match registry visible skills"
     )
     assert "audit_only_skill_exclusion_evidence" not in result.payload
@@ -184,7 +194,10 @@ def test_disabled_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> 
         "task_summary": "review core.py",
         "available_skill_metadata": [
             {"skill_id": "code-review", "description": "x", "tags": [], "risk_level": "low"},
-            {"skill_id": "disabled-docs", "description": "disabled", "tags": [], "risk_level": "low"},
+            {
+                "skill_id": "disabled-docs",
+                "description": "disabled", "tags": [], "risk_level": "low",
+            },
         ],
         "model_decision_metadata": {
             "selected_skill_id": "code-review",
@@ -220,7 +233,7 @@ def test_available_skill_metadata_must_match_registry_visible_ids(tmp_path: Path
 
     assert result.status == "failed"
     assert result.evidence["evidence_level"] != "runtime_e2e"
-    assert result.evidence["runtime_e2e_disqualified_reason"] == (
+    assert result.evidence["failure_reason"] == (
         "available_skill_metadata does not match registry visible skills"
     )
 
@@ -359,7 +372,9 @@ def test_fake_tool_production_registry_found_true_fails(monkeypatch: pytest.Monk
     })
     handler = ToolGateHandler(
         dogfood_overlay={
-            "fake.shell": DogfoodOverlayTool(name="fake.shell", requested_capability="shell_execution")
+            "fake.shell": DogfoodOverlayTool(
+                name="fake.shell", requested_capability="shell_execution",
+            )
         }
     )
 
@@ -382,7 +397,9 @@ def test_fake_blocked_path_confirmation_required_is_not_allowed() -> None:
 
     handler = ToolGateHandler(
         dogfood_overlay={
-            "fake.shell": DogfoodOverlayTool(name="fake.shell", requested_capability="shell_execution")
+            "fake.shell": DogfoodOverlayTool(
+                name="fake.shell", requested_capability="shell_execution",
+            )
         }
     )
 
@@ -390,7 +407,10 @@ def test_fake_blocked_path_confirmation_required_is_not_allowed() -> None:
         action_type=RuntimeActionType.TOOL_REQUEST,
         source="llm_tool_call",
         parent_trace_id="trace-tool",
-        payload={"tool_name": "fake.shell", "tool_args": {}, "requested_capability": "shell_execution"},
+        payload={
+            "tool_name": "fake.shell", "tool_args": {},
+            "requested_capability": "shell_execution",
+        },
         constraints={"no_shell"},
     ))
 

@@ -16,10 +16,11 @@ Memory Kernel v1 — MemoryRecord 字段说明：
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
-from typing import Iterable, Protocol
+from typing import Protocol
 
 from agent.memory_contracts import MemoryScope
 from agent.memory_operations import (
@@ -27,7 +28,6 @@ from agent.memory_operations import (
     MemoryOperationIntent,
     MemoryOperationType,
 )
-
 
 MUTATING_OPERATION_TYPES = frozenset({
     MemoryOperationType.RETAIN,
@@ -223,10 +223,22 @@ class InMemoryMemoryStore:
 
     它只把传入的 MemoryRecord 保存在进程内 dict；没有文件 IO、网络、LLM、
     provider、MCP、checkpoint 或 runtime 默认接入。
+
+    B7: namespace 参数提供 per-session 内存隔离。内部 key 前缀为 f"{namespace}:{record.id}"。
     """
 
-    def __init__(self, records: Iterable[MemoryRecord] = ()) -> None:
-        self._records = {record.id: record for record in records}
+    def __init__(self, records: Iterable[MemoryRecord] = (), *, namespace: str = "default") -> None:
+        self._records = {f"{namespace}:{record.id}": record for record in records}
+        self._namespace = namespace
+
+    def _namespaced_key(self, record_id: str) -> str:
+        return f"{self._namespace}:{record_id}"
+
+    def _extract_id(self, namespaced_key: str) -> str:
+        prefix = f"{self._namespace}:"
+        if namespaced_key.startswith(prefix):
+            return namespaced_key[len(prefix):]
+        return namespaced_key
 
     def apply_operation_intent(
         self,
@@ -263,7 +275,7 @@ class InMemoryMemoryStore:
         # USE_ONCE：仅本次会话使用，写入 store 但不授权长期记忆
         if intent.operation_type is MemoryOperationType.USE_ONCE:
             record = _record_from_intent(intent, audit_id, approval_status="session_only")
-            self._records[record.id] = record
+            self._records[self._namespaced_key(record.id)] = record
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.APPLIED,
                 operation_type=intent.operation_type,
@@ -289,10 +301,11 @@ class InMemoryMemoryStore:
         if intent.operation_type is MemoryOperationType.RETAIN:
             # 去重检查：相同 content + memory_type + scope 不重复写入
             # Metadata Continuity (RFC §14.5): 使用 intent.memory_type，不 fallback
+            # B7: 仅在当前 namespace 内去重
             memory_type = intent.memory_type
             existing = find_duplicate_record(
                 intent.content_summary, memory_type, intent.scope,
-                self._records.values(),
+                self.list_records(),
             )
             if existing is not None:
                 return MemoryStoreApplyResult(
@@ -304,8 +317,11 @@ class InMemoryMemoryStore:
                 )
             # approval_status 跟随 confirmation_status：
             # T1 → "approved", T2 → "auto_retained", USE_ONCE → "session_only"
-            record = _record_from_intent(intent, audit_id, approval_status=intent.confirmation_status.value)
-            self._records[record.id] = record
+            record = _record_from_intent(
+                intent, audit_id,
+                approval_status=intent.confirmation_status.value,
+            )
+            self._records[self._namespaced_key(record.id)] = record
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.APPLIED,
                 operation_type=intent.operation_type,
@@ -329,15 +345,21 @@ class InMemoryMemoryStore:
         )
 
     def get_record(self, record_id: str) -> MemoryRecord | None:
-        return self._records.get(record_id)
+        return self._records.get(self._namespaced_key(record_id))
 
     def list_records(self) -> tuple[MemoryRecord, ...]:
-        return tuple(self._records[key] for key in sorted(self._records))
+        prefix = f"{self._namespace}:"
+        return tuple(
+            self._records[key]
+            for key in sorted(self._records)
+            if key.startswith(prefix)
+        )
 
     def remove_record(self, record_id: str) -> bool:
         """按 record_id 移除一条记录（直接操作，不经过 policy 管线）。"""
-        if record_id in self._records:
-            del self._records[record_id]
+        ns_key = self._namespaced_key(record_id)
+        if ns_key in self._records:
+            del self._records[ns_key]
             return True
         return False
 
@@ -347,7 +369,8 @@ class InMemoryMemoryStore:
         audit_id: str,
     ) -> MemoryStoreApplyResult:
         record_id = derive_memory_record_id(intent.source_summary)
-        existing = self._records.get(record_id)
+        ns_key = self._namespaced_key(record_id)
+        existing = self._records.get(ns_key)
         if existing is None:
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.NOT_FOUND,
@@ -368,7 +391,7 @@ class InMemoryMemoryStore:
             updated_by_operation=MemoryOperationType.UPDATE,
             sensitive_redacted=intent.sensitive_redacted,
         )
-        self._records[record_id] = updated
+        self._records[ns_key] = updated
         return MemoryStoreApplyResult(
             status=MemoryStoreApplyStatus.APPLIED,
             operation_type=intent.operation_type,
@@ -384,7 +407,8 @@ class InMemoryMemoryStore:
     ) -> MemoryStoreApplyResult:
         # 按 content 匹配而非 source_summary 派生 ID
         # source_summary 的 identity 不稳定（依赖原始输入措辞）
-        target = find_record_by_content(intent.content_summary, self._records.values())
+        # B7: 仅在当前 namespace 内搜索
+        target = find_record_by_content(intent.content_summary, self.list_records())
         if target is None:
             return MemoryStoreApplyResult(
                 status=MemoryStoreApplyStatus.NOT_FOUND,
@@ -393,7 +417,8 @@ class InMemoryMemoryStore:
                 audit_id=audit_id,
                 message="memory record not found for forget (按 content 未匹配到任何 record)",
             )
-        existing = self._records.pop(target.id, None)
+        ns_key = self._namespaced_key(target.id)
+        existing = self._records.pop(ns_key, None)
         return MemoryStoreApplyResult(
             status=MemoryStoreApplyStatus.APPLIED,
             operation_type=intent.operation_type,

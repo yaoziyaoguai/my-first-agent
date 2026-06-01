@@ -161,15 +161,29 @@ class ActiveSkillLifecycle:
 
 # 模块级默认 lifecycle 实例——跨 turn 状态保持。
 # core.py 通过此实例访问 active_skill 状态。
+# B7: _lifecycle_registry 提供 per-session namespace 隔离。
+_lifecycle_registry: dict[str, ActiveSkillLifecycle] = {}
 _default_lifecycle = ActiveSkillLifecycle()
+# 向后兼容：_default_lifecycle 仍可被无参 get_default_lifecycle() 访问，
+# 对应 "default" namespace。
 
 
-def get_default_lifecycle() -> ActiveSkillLifecycle:
-    """获取模块级默认 ActiveSkillLifecycle 实例。"""
-    return _default_lifecycle
+def get_default_lifecycle(session_id: str = "default") -> ActiveSkillLifecycle:
+    """获取指定 session 的 ActiveSkillLifecycle 实例。
+
+    B7: 支持 per-session namespace 隔离。
+    - session_id="default"（默认）→ 返回模块级 _default_lifecycle（向后兼容）
+    - session_id 非 "default" → 从 _lifecycle_registry 查找/创建独立 lifecycle
+    """
+    if session_id == "default":
+        return _default_lifecycle
+    if session_id not in _lifecycle_registry:
+        _lifecycle_registry[session_id] = ActiveSkillLifecycle(namespace=session_id)
+    return _lifecycle_registry[session_id]
 
 
 def reset_default_lifecycle() -> None:
-    """重置默认 lifecycle（测试用）。"""
+    """重置默认 lifecycle 和所有 per-session lifecycle（测试用）。"""
     global _default_lifecycle
     _default_lifecycle = ActiveSkillLifecycle()
+    _lifecycle_registry.clear()

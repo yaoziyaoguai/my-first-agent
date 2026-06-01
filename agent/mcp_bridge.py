@@ -42,27 +42,36 @@ from agent.mcp_stdio import StdioMCPClient
 
 MCPBridgeMode = Literal["disabled", "discovery", "registration"]
 
-# ── Module-level bridge status（Loop 3.3）────────────────────────────────────────
+# ── Module-level bridge status（Loop 3.3 / B7 namespace）───────────────────────
 # 在 main.py 中 bridge 成功后设置，供 runtime_decision_frame 读取 mcp_available 状态。
 # 仅记录已注册工具数——不缓存 raw descriptor / config / secret。
+# B7: per-session registry 替代单一 module-level 变量，支持 multi-instance 隔离。
 
-_mcp_bridge_tools_registered: int = 0
-
-
-def set_mcp_bridge_result(tools_registered: int) -> None:
-    """main.py 在 bridge 成功后调用，记录已注册 MCP 工具数。"""
-    global _mcp_bridge_tools_registered
-    _mcp_bridge_tools_registered = tools_registered
+_mcp_bridge_registry: dict[str, int] = {}
 
 
-def get_mcp_bridge_tools_registered() -> int:
-    """返回最近一次 bridge 注册的 MCP 工具数（0 = 未运行或无工具）。"""
-    return _mcp_bridge_tools_registered
+def set_mcp_bridge_result(tools_registered: int, *, session_id: str = "default") -> None:
+    """main.py 在 bridge 成功后调用，记录已注册 MCP 工具数。
+
+    B7: 按 session_id 隔离，支持 multi-instance namespace。
+    """
+    _mcp_bridge_registry[session_id] = tools_registered
 
 
-def is_mcp_active() -> bool:
-    """MCP 是否已通过 bridge 成功注册至少一个工具。"""
-    return _mcp_bridge_tools_registered > 0
+def get_mcp_bridge_tools_registered(*, session_id: str = "default") -> int:
+    """返回指定 session 的 MCP 工具注册数（0 = 未运行或无工具）。
+
+    B7: 按 session_id 查询，不回退到其他 session 的值。
+    """
+    return _mcp_bridge_registry.get(session_id, 0)
+
+
+def is_mcp_active(*, session_id: str = "default") -> bool:
+    """MCP 是否已通过 bridge 成功注册至少一个工具。
+
+    B7: 按 session_id 判断。
+    """
+    return _mcp_bridge_registry.get(session_id, 0) > 0
 
 
 @dataclass(frozen=True, slots=True)

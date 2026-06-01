@@ -53,6 +53,7 @@ class ToolRuntimeMediator:
         messages: list[dict[str, Any]],
         skill_allowed_tools: frozenset[str] | None = None,
         store: Any = None,
+        identity: Any = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._state = state
@@ -61,6 +62,7 @@ class ToolRuntimeMediator:
         self._messages = messages
         self._skill_allowed_tools = skill_allowed_tools
         self._store = store
+        self._identity = identity
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -288,6 +290,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="execute_l1",
+                identity=self._identity,
             )
 
     def _dispatch_child_result_evidence(
@@ -319,6 +322,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="execute_l1",
+                identity=self._identity,
             )
 
     def _dispatch_child_memory_evidence(
@@ -350,6 +354,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="execute_l1",
+                identity=self._identity,
             )
 
     # ── gate disposition handlers ─────────────────────────────────────────
@@ -419,10 +424,13 @@ class ToolRuntimeMediator:
             # 的 gate 检查能正确拿到 skill 的工具白名单。
             _live_at = self._skill_allowed_tools
             _active_skill_id: str | None = None
+            _session_id = (
+                self._identity.session_id if self._identity else "default"
+            )
             if _live_at is None:
                 try:
                     from agent.skill_system.lifecycle import get_default_lifecycle
-                    _lc = get_default_lifecycle()
+                    _lc = get_default_lifecycle(session_id=_session_id)
                     _tools = _lc.get_allowed_tools()
                     _live_at = _tools if _tools else None
                     _active_skill_id = _lc.get_active_skill_id()
@@ -431,7 +439,8 @@ class ToolRuntimeMediator:
             else:
                 try:
                     from agent.skill_system.lifecycle import get_default_lifecycle
-                    _active_skill_id = get_default_lifecycle().get_active_skill_id()
+                    _lifecycle = get_default_lifecycle(session_id=_session_id)
+                    _active_skill_id = _lifecycle.get_active_skill_id()
                 except ImportError:
                     pass
             if _live_at is not None:
@@ -447,6 +456,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="handle_tool_use_response",
+                identity=self._identity,
             )
             return result.payload.get("gate_disposition")
         except Exception:
@@ -469,6 +479,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="handle_tool_use_response",
+                identity=self._identity,
             )
 
     def _route_result(
@@ -512,6 +523,7 @@ class ToolRuntimeMediator:
                 ),
                 core_entrypoint="core.chat",
                 runtime_hook_name="handle_tool_use_response",
+                identity=self._identity,
             )
 
 

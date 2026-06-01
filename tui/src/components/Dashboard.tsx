@@ -37,6 +37,11 @@ import { DefaultEntryReadinessPanel } from "./DefaultEntryReadinessPanel";
 import type { EvidenceFileEntry } from "../data/evidenceBrowser";
 import type { GateResult } from "../data/gateHistory";
 import type { AuditLogEntry } from "../data/auditLog";
+import type { AutoRunState } from "../data/autorunState";
+import type { ReviewPacket } from "../data/reviewPacket";
+import { AutoRunPanel } from "./AutoRunPanel";
+import { HardStopOverlay } from "./HardStopOverlay";
+import { ReviewPacketPanel } from "./ReviewPacketPanel";
 import { isSelectable } from "../data/safetyModel";
 import { isAllowed } from "../data/executionWhitelist";
 import {
@@ -59,6 +64,8 @@ interface Props {
   evidenceFiles: EvidenceFileEntry[];
   gateHistory: GateResult[];
   auditEntries: AuditLogEntry[];
+  autoRunState: AutoRunState;
+  reviewPacket: ReviewPacket;
   repoRoot: string;
 }
 
@@ -79,7 +86,7 @@ type Phase4Mode =
   | "executing"  // confirmed, executing (future: actual exec)
   | "result";    // showing result
 
-export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries, repoRoot }: Props) {
+export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries, autoRunState, reviewPacket, repoRoot }: Props) {
   const [nav, setNav] = useState(createNavigationState());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [evidenceSelectedIndex, setEvidenceSelectedIndex] = useState(0);
@@ -380,8 +387,18 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
         );
       case "workflow":
         return (
-          <Box marginBottom={1}>
-            <WorkflowPanel milestones={ledger.milestones} />
+          <Box flexDirection="column" marginBottom={1}>
+            {autoRunState.status === "hard_stop" && autoRunState.hardStopReason && (
+              <HardStopOverlay
+                reason={autoRunState.hardStopReason}
+                loop={autoRunState.lastLoop || undefined}
+              />
+            )}
+            <AutoRunPanel state={autoRunState} />
+            <ReviewPacketPanel packet={reviewPacket} />
+            <Box marginTop={1}>
+              <WorkflowPanel milestones={ledger.milestones} />
+            </Box>
           </Box>
         );
       case "commands":

@@ -14,6 +14,8 @@ import { loadNextAction } from "./data/nextAction";
 import { listDogfoodFiles } from "./data/evidenceBrowser";
 import { parseGateHistory } from "./data/gateHistory";
 import { readAuditEntries } from "./data/auditLog";
+import { parseAutoRunState } from "./data/autorunState";
+import { buildReviewPacket } from "./data/reviewPacket";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
@@ -130,6 +132,14 @@ function App() {
   );
   const auditEntries = readAuditEntries(REPO_ROOT);
 
+  const autoRunState = parseAutoRunState(projectStatusDoc);
+  const gitLog = git.recentCommits.map((c) => `${c.hash} ${c.message}`).join("\n");
+  const reviewPacket = buildReviewPacket(
+    autoRunState.currentPhase,
+    gitLog,
+    projectStatusDoc,
+  );
+
   return (
     <Dashboard
       status={status}
@@ -141,6 +151,8 @@ function App() {
       evidenceFiles={evidenceFiles}
       gateHistory={gateHistory}
       auditEntries={auditEntries}
+      autoRunState={autoRunState}
+      reviewPacket={reviewPacket}
       repoRoot={REPO_ROOT}
     />
   );

@@ -1,4 +1,4 @@
-/** Phase 5: HARD_STOP 覆盖层 */
+/** Phase 5: HARD_STOP overlay — provisional dev-only */
 import React from "react";
 import { Box, Text } from "ink";
 
@@ -12,7 +12,7 @@ export function HardStopOverlay({ reason, detail, loop }: Props) {
   return (
     <Box flexDirection="column" borderStyle="double" borderColor="red" padding={1} marginBottom={1}>
       <Text bold color="red">
-        ⛔ HARD_STOP — AutoRun Paused
+        ⛔ HARD_STOP — Development Workflow Paused
       </Text>
       <Box marginTop={1}>
         <Text>

@@ -1,4 +1,4 @@
-/** Phase 5: Review Packet 展示面板 */
+/** Phase 5: Development Workflow Review — provisional dev-only, may be removed */
 import React from "react";
 import { Box, Text } from "ink";
 import type { ReviewPacket } from "../data/reviewPacket";
@@ -11,8 +11,9 @@ export function ReviewPacketPanel({ packet }: Props) {
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="green" padding={1} marginBottom={1}>
       <Text bold color="green">
-        AutoRun Review — {packet.currentPhase}
+        Development Workflow Review — {packet.currentPhase}
       </Text>
+      <Text dimColor>provisional dev-only, may be removed — not a First Agent product feature</Text>
       <Box marginTop={1}>
         <Text>Tests: {packet.testSummary}</Text>
       </Box>

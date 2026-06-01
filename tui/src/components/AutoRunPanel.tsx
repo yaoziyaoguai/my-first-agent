@@ -1,4 +1,4 @@
-/** Phase 5: AutoRun 状态面板 */
+/** Phase 5: Development Workflow Panel — provisional dev-only, may be removed */
 import React from "react";
 import { Box, Text } from "ink";
 import type { AutoRunState } from "../data/autorunState";
@@ -27,7 +27,8 @@ export function AutoRunPanel({ state }: Props) {
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="cyan" padding={1} marginBottom={1}>
-      <Text bold>AutoRun State</Text>
+      <Text bold>Development Workflow Panel</Text>
+      <Text dimColor>provisional dev-only, may be removed — not a First Agent product feature</Text>
       <Box>
         <Text>
           Status: <Text color={statusColor}>{statusLabel}</Text>

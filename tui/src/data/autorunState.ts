@@ -17,15 +17,20 @@ export function parseAutoRunState(projectStatusText: string): AutoRunState {
     /B8 Phase \d+\s*[^)]*\)\s*为推荐下一步/,
   );
   const gatesMatch = projectStatusText.match(/all_pass|partial|failed/);
+  const loopMatch = projectStatusText.match(/Loop\s+([\d.]+)/i);
+  const hardStopMatch = projectStatusText.match(
+    /HARD_STOP[:\s]+([^\n]+)/i,
+  );
 
   return {
     currentPhase: phaseMatch?.[1] ?? "",
     status: deriveAutoRunStatus(projectStatusText),
-    lastLoop: "",
+    lastLoop: loopMatch?.[1] ?? "",
     lastCommit: "",
     testsPass: testsMatch ? parseInt(testsMatch[1], 10) : 0,
     gatesStatus: (gatesMatch?.[0] as AutoRunState["gatesStatus"]) ?? "all_pass",
     nextRecommended: nextMatch?.[0] ?? "",
+    hardStopReason: hardStopMatch?.[1]?.trim(),
   };
 }
 

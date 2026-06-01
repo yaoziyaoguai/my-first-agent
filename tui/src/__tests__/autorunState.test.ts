@@ -48,6 +48,17 @@ describe("autorunState", () => {
       const state = parseAutoRunState(SAMPLE_PROJECT_STATUS);
       expect(state.testsPass).toBeGreaterThan(0);
     });
+
+    it("extracts hardStopReason from HARD_STOP line", () => {
+      const text = "HARD_STOP: context below 10% — user must decide";
+      const state = parseAutoRunState(text);
+      expect(state.hardStopReason).toBe("context below 10% — user must decide");
+    });
+
+    it("returns undefined hardStopReason when no HARD_STOP", () => {
+      const state = parseAutoRunState(SAMPLE_PROJECT_STATUS);
+      expect(state.hardStopReason).toBeUndefined();
+    });
   });
 
   describe("deriveAutoRunStatus", () => {

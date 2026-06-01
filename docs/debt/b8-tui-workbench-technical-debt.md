@@ -1,9 +1,11 @@
 # B8 TUI Workbench — Technical Debt
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-01
+**最后更新**: 2026-06-02 (B7 current-stage closed — accepted-with-caveats)
 **依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`
 **范围**: 仅记录 B8 TUI Workbench 自身的 deferred phase / missing prerequisite debt。不记录 B7 implementation debt。
+
+**B7 close-out note (2026-06-02)**: B7 current-stage closed。D-B8-01/D-B8-02 的阻塞仍是 runtime identity model / event source contract（非 B7 未完成）。Phase 6B eligible for readiness planning — conditioned on cleanup（见 PROJECT_STATUS）。
 
 ---
 

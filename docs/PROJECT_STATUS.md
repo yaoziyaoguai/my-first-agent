@@ -1,9 +1,66 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 Runtime-E2E Semantics Cleanup — completed)
-**状态**: B7 **Runtime-E2E Semantics Cleanup completed**。Codex 独立复审发现的 4 个 B7-caused `runtime_e2e` classification failures 修复：`skill_action.py` handler 将 `runtime_e2e_disqualified_reason` 错误用于 handler 内部 validation failure，导致 `is_runtime_e2e_evidence()` 返回 False → evidence 降级为 `subsystem_integration`。Fix: 4 处改为 `failure_reason`。33/33 focused tests PASS。Zero new regression。4 B7-caused failures: 0。B7 completed: NO (final independent completion review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。TUI default entry NOT ACTIVATED。not product-ready。下一步: final independent completion review。
+**最后更新**: 2026-06-02 (B7 current-stage close-out)
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。Skill-state P1: not regressed。Runtime-E2E semantics: resolved。Architecture boundary: intact。P3 docs: honest。B7-caused failures: 0。No further B7 remediation loop required。44 pre-existing/non-B7 failures remain（不阻塞 B7 close，应在 B8 Phase 6B readiness 阶段处理）。Ready for B8 Phase 6B: YES — conditioned on cleanup。Ready for B8 Phase 7: NO — blocked by Phase 6B。TUI default entry NOT ACTIVATED。007 remains credible-with-caveats。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
+
+---
+
+## B7 Current-Stage Close-Out (2026-06-02)
+
+B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信审计 (commit 3f2f6b2) 确认：
+
+- Skill-state P1: not regressed
+- Runtime-E2E semantics: resolved
+- Architecture boundary: intact
+- P3 docs: honest
+- B7-caused failures: 0
+- No further B7 remediation loop required
+
+### Caveats
+
+44 pre-existing/non-B7 failures remain。这些不是 B7 blocker，不阻塞 B7 close，但应在 B8 Phase 6B readiness cleanup 阶段处理。分布如下：
+
+| 分组 | 数量 |
+|------|------|
+| Provider contract | 5 |
+| Startup readiness | 4 |
+| Main loop end_turn | 6 |
+| Second round dogfood | 4 |
+| Local trial readiness | 6 |
+| Confirmation flow | 2 |
+| V0.1 smoke playbook | 2 |
+| Runtime action contract | 2 |
+| MCP L3 real core loop | 2 |
+| Skill L2 contract | 1 |
+| Tool pipeline L3 | 1 |
+| Evidence taxonomy guard | 1 |
+| Completion handoff | 1 |
+| Executor audit | 1 |
+| Hardcore scenarios | 1 |
+| Health report | 1 |
+| Long running | 1 |
+| Memory extraction | 1 |
+| Runtime trace RFC | 1 |
+| User path dogfood | 1 |
+| **Total** | **44** |
+
+### B8 Readiness
+
+| 项目 | 状态 |
+|------|------|
+| B8 Phase 6B | Eligible for readiness planning / cleanup — conditioned on cleanup，not implementation-unlocked without cleanup |
+| B8 Phase 7 | NOT ready — blocked by Phase 6B |
+| TUI default entry | NOT ACTIVATED |
+
+### 007
+
+Remains credible-with-caveats（validation scope note: FakeProvider deterministic tool_use + confirmation='never' override，非 runtime blocker）。
+
+### Product Status
+
+Not product-ready。Do not claim all tests pass。Do not claim full regression clean。
 
 ---
 

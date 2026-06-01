@@ -1,10 +1,16 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 Runtime-E2E Semantics Cleanup — completed)
+**最后更新**: 2026-06-02 (B7 current-stage close-out)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
 ---
+
+## 2026-06-02
+
+| Milestone | Commit | 简述 |
+|-----------|--------|------|
+| **B7 Current-Stage Close-Out** | — | **B7 current-stage closed — accepted-with-caveats**。Codex 独立红队诚信审计 (commit 3f2f6b2) 确认：Skill-state P1 not regressed, Runtime-E2E semantics resolved, architecture boundary intact, P3 docs honest, B7-caused failures: 0。No further B7 remediation loop required。44 pre-existing/non-B7 failures remain（不阻塞 B7 close，应在 B8 Phase 6B readiness 处理）。Ready for B8 Phase 6B: YES — conditioned on cleanup。Ready for B8 Phase 7: NO — blocked by Phase 6B。TUI default entry NOT ACTIVATED。|
 
 ## 2026-06-01
 

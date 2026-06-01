@@ -517,12 +517,14 @@ def _build_loop_context(
     max_loop_iterations: int = MAX_LOOP_ITERATIONS,
     provider=None,
     runtime_action_dispatcher=None,
+    runtime_identity=None,
 ) -> LoopContext:
     """兼容入口：实际 LoopContext 组装在 `agent.core_contexts`。
 
     provider: 可选的 ModelProvider 实例。传入则注入到 loop context，
               不传则回退到 build_model_provider_from_env()。
     runtime_action_dispatcher: Phase 1 RuntimeActionDispatcher 注入点。
+    runtime_identity: B7 RuntimeIdentity 注入点。
     """
 
     return build_loop_context(
@@ -531,6 +533,7 @@ def _build_loop_context(
         max_loop_iterations=max_loop_iterations,
         provider=provider,
         runtime_action_dispatcher=runtime_action_dispatcher,
+        runtime_identity=runtime_identity,
     )
 
 
@@ -608,6 +611,7 @@ def chat(
     action_scheduler=None,
     tool_gate_tool_name: str | None = None,
     checkpoint_save_on_turn_end: bool = False,
+    session_id: str = "",
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -1088,12 +1092,24 @@ def chat(
     )
     _set_last_decision_frame(_turn_decision_frame)
 
+    # B7: 在 chat() 入口构造 RuntimeIdentity
+    from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
+
+    _sid = session_id or str(uuid4())
+    _run_id = str(uuid4())
+    _chat_identity = _RuntimeIdentity(
+        session_id=_sid,
+        run_id=_run_id,
+        instance_id=_sid,
+    )
+
     _loop_ctx = _build_loop_context(
         client,
         model_name=MODEL_NAME,
         max_loop_iterations=MAX_LOOP_ITERATIONS,
         provider=provider,
         runtime_action_dispatcher=_phase1_dispatcher,
+        runtime_identity=_chat_identity,
     )
 
     # v0.5 Phase 3 第二小步：ConfirmationContext 构造走 _build_confirmation_context()
@@ -1625,6 +1641,7 @@ def _run_main_loop(
         skill_registry=skill_registry,
         action_scheduler=action_scheduler,
         checkpoint_save_on_turn_end=checkpoint_save_on_turn_end,
+        runtime_identity=loop_ctx.runtime_identity,
     )
     if tool_gate_tool_name is not None:
         _deps_fields["tool_gate_tool_name"] = tool_gate_tool_name

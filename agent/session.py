@@ -23,7 +23,12 @@ from agent.display_events import (
     render_display_event,
 )
 from agent.health_check import run_health_check
-from agent.logger import SESSION_ID, log_event, save_session_snapshot
+from agent.logger import (
+    get_runtime_session_id,
+    log_event,
+    save_session_snapshot,
+    set_runtime_session_id,
+)
 from agent.memory import (
     _format_extraction_summary,
     cleanup_old_episodes,
@@ -35,13 +40,20 @@ from config import MODEL_NAME, SYSTEM_PROMPT
 
 # ========== 启动 ==========
 
-def init_session():
+def init_session(*, session_id: str | None = None):
     """启动时调用：初始化记忆 + 健康检查 + 渲染 session header。
+
+    B7: 接受可选的 session_id 参数。传入时设置 runtime session_id 并使用它；
+    不传时回退到 import-time SESSION_ID（向后兼容）。
 
     v0.3 M1 升级：用 cli_renderer.render_session_header 替代旧的两行
     print，把阶段标签 / cwd / 健康摘要一次性结构化显示，并把 health_check
     切成 verbose=False 模式避免刷屏（详情仍可用 `python main.py health` 查看）。
     """
+    if session_id is not None:
+        set_runtime_session_id(session_id)
+
+    _sid = get_runtime_session_id()
     init_memory()
     cleanup_old_episodes()
 
@@ -58,7 +70,7 @@ def init_session():
 
     print(
         render_session_header(
-            session_id=SESSION_ID,
+            session_id=_sid,
             cwd=os.getcwd(),
             stage_label=STAGE_LABEL,
             health_summary=summarize_health(health_results),

@@ -262,6 +262,10 @@ class RuntimeActionEvent:
     status: str
     evidence: Mapping[str, Any]
     parent_trace_id: str
+    # B7: multi-instance identity fields（默认 "" 保证向后兼容）
+    session_id: str = ""
+    run_id: str = ""
+    instance_id: str = ""
     timestamp: str = field(default_factory=now_iso)
 
     def __post_init__(self) -> None:

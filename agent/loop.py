@@ -685,6 +685,8 @@ class LoopDependencies:
     # 默认 False（向后兼容）。True 时每轮 turn-end hook 完成后自动通过 dispatcher
     # 触发 CHECKPOINT_SAVE，确保 real provider conversation 能产生 checkpoint evidence。
     checkpoint_save_on_turn_end: bool = False
+    # B7: RuntimeIdentity 注入点（multi-instance readiness）
+    runtime_identity: Any = None
 
 
 def _emit_run_summary(

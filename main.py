@@ -5,6 +5,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from uuid import uuid4
 
 from agent.checkpoint import load_checkpoint
 from agent.cli.commands import dispatch_maintenance_command
@@ -505,7 +506,10 @@ def main(argv: list[str] | None = None) -> int:
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
     _init_mcp_bridge_if_enabled()
-    init_session()
+
+    # B7: session_id 在 main() startup 时生成（非 import-time）
+    _session_id = str(uuid4())
+    init_session(session_id=_session_id)
     try_resume_from_checkpoint()
 
     # P2 修复：try_resume_from_checkpoint 可能将 status 设为

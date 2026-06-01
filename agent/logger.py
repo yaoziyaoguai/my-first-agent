@@ -8,6 +8,22 @@ from pathlib import Path
 from config import LOG_FILE, MAX_LOG_SIZE_BYTES, SNAPSHOT_DIR, ensure_snapshot_dir
 
 SESSION_ID = str(uuid.uuid4())
+"""Import-time session ID（向后兼容）。B7 引入 set_runtime_session_id() 后，
+运行时调用应优先使用 get_runtime_session_id() 获取 session_id。"""
+
+_runtime_session_id: str | None = None
+"""B7: main.py startup 时通过 set_runtime_session_id() 设置的 session_id。"""
+
+
+def set_runtime_session_id(session_id: str) -> None:
+    """B7: 设置运行时 session_id（由 main.py startup 调用）。"""
+    global _runtime_session_id
+    _runtime_session_id = session_id
+
+
+def get_runtime_session_id() -> str:
+    """返回运行时 session_id（如果已设置），否则回退到 import-time SESSION_ID。"""
+    return _runtime_session_id or SESSION_ID
 
 # 真实 API key 脱敏正则：匹配 sk-<type>-<secret> 和 sk-<type>-<sub>-<secret> 等多段格式
 # 匹配 sk-sp-..., sk-ant-...-..., sk-or-... 等多段 key 格式
@@ -112,7 +128,7 @@ def log_event(event_type, data):
 
     entry = {
         "timestamp": datetime.now().isoformat(),
-        "session_id": SESSION_ID,
+        "session_id": get_runtime_session_id(),
         "event": event_type,
         "data": _sanitize_log_data(data),
     }
@@ -137,8 +153,9 @@ def make_serializable(messages):
 
 
 def save_session_snapshot(messages):
+    _sid = get_runtime_session_id()
     snapshot = {
-        "session_id": SESSION_ID,
+        "session_id": _sid,
         "saved_at": datetime.now().isoformat(),
         "message_count": len(messages),
         "messages": make_serializable(messages),
@@ -146,6 +163,6 @@ def save_session_snapshot(messages):
     # config import 不再创建 sessions/；snapshot 写入前显式初始化目录，
     # 让 runtime IO 副作用留在 logger 边界，而不是配置导入边界。
     ensure_snapshot_dir()
-    snapshot_file = SNAPSHOT_DIR / f"session_{SESSION_ID}.json"
+    snapshot_file = SNAPSHOT_DIR / f"session_{_sid}.json"
     with open(snapshot_file, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, ensure_ascii=False, indent=2)

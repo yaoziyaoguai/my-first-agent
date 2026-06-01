@@ -67,7 +67,9 @@ class ActionHandler(Protocol):
     observer 不会进入 model-visible payload，也不会由 handler 自己生成 proof。
     """
 
-    def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext) -> RuntimeActionResult:
+    def handle(
+        self, request: RuntimeActionRequest, context: RuntimeActionContext,
+    ) -> RuntimeActionResult:
         ...
 
 
@@ -105,6 +107,8 @@ class RuntimeActionContext:
     dispatcher_origin: str = "direct_dispatcher"
     core_entrypoint: str = ""
     runtime_hook_name: str = ""
+    # B7: RuntimeIdentity（multi-instance readiness）
+    identity: Any = None
     _issued_result_ids: set[int] = field(default_factory=set, init=False, repr=False)
 
     def observe_module_call(
@@ -346,6 +350,7 @@ class RuntimeActionDispatcher:
         *,
         core_entrypoint: str = "core.chat",
         runtime_hook_name: str = "loop.turn_end",
+        identity: Any = None,
     ) -> RuntimeActionResult:
         """Runtime loop 专用 route，写入 dispatcher-owned provenance。
 
@@ -353,12 +358,15 @@ class RuntimeActionDispatcher:
         real_core_loop_runtime_e2e 只能由这个入口产生。provenance 由 dispatcher
         参数写入 evidence，不从 request.payload 读取，避免 dogfood/harness 通过
         payload 字段伪造真实 core loop 证据。
+
+        B7: identity 参数由 dispatcher 注入，不从 request.payload 读取（防伪）。
         """
         return self._route(
             request,
             dispatcher_origin="runtime_loop",
             core_entrypoint=core_entrypoint,
             runtime_hook_name=runtime_hook_name,
+            identity=identity,
         )
 
     def _route(
@@ -368,6 +376,7 @@ class RuntimeActionDispatcher:
         dispatcher_origin: str,
         core_entrypoint: str,
         runtime_hook_name: str,
+        identity: Any = None,
     ) -> RuntimeActionResult:
         started = monotonic()
         action_id = new_action_id()
@@ -393,6 +402,7 @@ class RuntimeActionDispatcher:
             dispatcher_origin=dispatcher_origin,
             core_entrypoint=core_entrypoint,
             runtime_hook_name=runtime_hook_name,
+            identity=identity,
         )
         if handler is None:
             result = self._unsupported_result(request, context)
@@ -410,7 +420,9 @@ class RuntimeActionDispatcher:
                 )
 
         latency_ms = max(0, int((monotonic() - started) * 1000))
-        final_result = self._mark_returned_to_parent(request, context, result, latency_ms=latency_ms)
+        final_result = self._mark_returned_to_parent(
+            request, context, result, latency_ms=latency_ms,
+        )
         self._action_log.append(RuntimeActionEvent(
             event_id=new_event_id(),
             action_id=final_result.action_id,
@@ -419,6 +431,9 @@ class RuntimeActionDispatcher:
             status=final_result.status,
             evidence=final_result.evidence,
             parent_trace_id=request.parent_trace_id,
+            session_id=_safe_identity_attr(identity, "session_id"),
+            run_id=_safe_identity_attr(identity, "run_id"),
+            instance_id=_safe_identity_attr(identity, "instance_id"),
         ))
         return final_result
 
@@ -476,7 +491,10 @@ class RuntimeActionDispatcher:
         *,
         latency_ms: int,
     ) -> RuntimeActionResult:
-        if result.action_id != context.action_id or result.evidence.get("action_id") != context.action_id:
+        if (
+            result.action_id != context.action_id
+            or result.evidence.get("action_id") != context.action_id
+        ):
             result = context.failed(
                 handler_name=context.handler_name or "unknown",
                 target_module=str(result.evidence.get("target_module") or "unknown"),
@@ -499,7 +517,9 @@ class RuntimeActionDispatcher:
                 observed_call=None,
                 evidence_extra={
                     "error_type": "RuntimeActionUnissuedResult",
-                    "runtime_e2e_disqualified_reason": "handler returned unissued RuntimeActionResult",
+                    "runtime_e2e_disqualified_reason": (
+                        "handler returned unissued RuntimeActionResult"
+                    ),
                 },
                 error_safe_preview="handler returned unissued RuntimeActionResult",
             )
@@ -547,3 +567,10 @@ class RuntimeActionDispatcher:
 def _handler_identity(handler: ActionHandler) -> str:
     handler_type = type(handler)
     return f"{handler_type.__module__}.{handler_type.__qualname__}"
+
+
+def _safe_identity_attr(identity: Any, attr: str) -> str:
+    """安全提取 identity 属性，identity 为 None 或缺少属性时返回 ""。"""
+    if identity is None:
+        return ""
+    return str(getattr(identity, attr, ""))

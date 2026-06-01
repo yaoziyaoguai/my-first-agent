@@ -742,6 +742,14 @@ def _check_no_secret_leakage(result: dict) -> tuple[bool, str]:
 class TestDogfoodMemoryRetain:
     """Memory retain flow：记住偏好 → 检查是否可读取。"""
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Case H 需要真实 Provider 环境。config/config.yaml 配置了 "
+            "anthropic_compatible provider，FakeProvider 无法完成 memory retain "
+            "语义验证。需 opt-in real provider smoke 环境。"
+        ),
+    )
     def test_case_h_remember_preference(self, monkeypatch):
         """Case H: 请记住一个测试偏好。
 

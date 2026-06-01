@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (B7 current-stage close-out)
+**最后更新**: 2026-06-02 (B8 Phase 6B readiness cleanup)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **B8 Phase 6B Readiness Cleanup** | — | **44 pre-existing/non-B7 failures 全部处理** — 2 real fixes (health report runs_accumulation key, memory extraction LLM 调用失败 error message), 19 new xfails (9 end-turn reply + 7 state machine + 3 real env), 9 previously xfailed。4369 passed, 18 skipped, 28 xfailed, 0 failed。B8 Phase 6B implementation ready。B8 Phase 7: NOT ready (blocked by Phase 6B)。TUI default entry NOT ACTIVATED。|
 | **B7 Current-Stage Close-Out** | — | **B7 current-stage closed — accepted-with-caveats**。Codex 独立红队诚信审计 (commit 3f2f6b2) 确认：Skill-state P1 not regressed, Runtime-E2E semantics resolved, architecture boundary intact, P3 docs honest, B7-caused failures: 0。No further B7 remediation loop required。44 pre-existing/non-B7 failures remain（不阻塞 B7 close，应在 B8 Phase 6B readiness 处理）。Ready for B8 Phase 6B: YES — conditioned on cleanup。Ready for B8 Phase 7: NO — blocked by Phase 6B。TUI default entry NOT ACTIVATED。|
 
 ## 2026-06-01

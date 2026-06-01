@@ -47,6 +47,7 @@ def test_collect_health_results_includes_all_baseline_checks():
         "backup_accumulation",
         "log_size",
         "session_accumulation",
+        "runs_accumulation",
         "tool_registry_integrity",
         "tool_risk_distribution",
         "mcp_config_readiness",
@@ -166,7 +167,7 @@ def test_format_health_report_json_is_valid_and_stable():
     assert set(payload.keys()) == {"overall", "checks"}
     assert payload["overall"] == "error"
     for name, check in payload["checks"].items():
-        assert REQUIRED_KEYS <= set(check.keys()), f"{name} JSON 缺字段"
+        assert set(check.keys()) >= REQUIRED_KEYS, f"{name} JSON 缺字段"
 
 
 def test_format_health_report_json_handles_empty():

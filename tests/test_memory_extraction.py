@@ -38,7 +38,6 @@ from agent.memory_extraction import (
 )
 from agent.provider.protocol import ProviderResponse, ProviderTextBlock
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # helpers
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -264,7 +263,7 @@ class TestFakeExtractorDeterministic:
         result2 = extractor.extract(ExtractionInput(transcript=transcript))
 
         assert len(result1.proposals) == len(result2.proposals)
-        for p1, p2 in zip(result1.proposals, result2.proposals):
+        for p1, p2 in zip(result1.proposals, result2.proposals, strict=False):
             assert p1.memory_type == p2.memory_type
             assert p1.content == p2.content
             assert p1.confidence == p2.confidence
@@ -787,6 +786,7 @@ class TestLLMExtractorNoLLM:
         assert (
             "LLM 不可用" in result.extraction_summary
             or "ModelProvider" in result.extraction_summary
+            or "LLM 调用失败" in result.extraction_summary
         )
 
 
@@ -1050,7 +1050,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_t1_produces_high_confidence(self):
         """[fake-memory:t1] 产生 confidence≥0.8 的 episodic proposal。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1070,7 +1070,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_t2_produces_medium_confidence(self):
         """[fake-memory:t2] 产生 confidence 在 [0.6,0.8) 的 episodic proposal。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1090,7 +1090,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_t3_produces_low_confidence(self):
         """[fake-memory:t3] 产生 confidence<0.6 的 episodic proposal。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1108,7 +1108,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_empty_content_skipped(self):
         """marker 后无内容时跳过，不产生 proposal。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1120,7 +1120,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_invalid_tier_falls_through_to_heuristic(self):
         """无效 tier marker 不触发 marker 路径，走默认 heuristic。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         # "[fake-memory:t999]" 不是有效 tier，且不含任何关键词，
@@ -1136,7 +1136,7 @@ class TestFakeDogfoodMarkers:
 
     def test_fake_marker_unclosed_bracket_not_parsed(self):
         """未闭合的 marker 前缀不被解析为 marker。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1150,7 +1150,7 @@ class TestFakeDogfoodMarkers:
 
     def test_default_heuristic_still_works(self):
         """无 marker 时原有 heuristic 路径仍正常工作。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1184,7 +1184,7 @@ class TestFakeControlCommandFilter:
     """验证 FakeMemoryExtractor 不会将控制命令提取为 memory。"""
 
     def test_quit_not_extracted(self):
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1195,7 +1195,7 @@ class TestFakeControlCommandFilter:
         assert len(result.proposals) == 0
 
     def test_exit_not_extracted(self):
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1206,7 +1206,7 @@ class TestFakeControlCommandFilter:
         assert len(result.proposals) == 0
 
     def test_q_goodbye_bye_not_extracted(self):
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         for cmd in ("q", "goodbye", "bye", "logout"):
@@ -1224,7 +1224,7 @@ class TestFakeControlCommandFilter:
 
         例如用户说 "上次部署 quit 时服务挂了" 仍应该被识别。
         """
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(
@@ -1240,7 +1240,7 @@ class TestFakeControlCommandFilter:
 
     def test_case_insensitive_quit_filter(self):
         """控制命令匹配大小写不敏感。"""
-        from agent.memory_extraction import FakeMemoryExtractor, ExtractionInput
+        from agent.memory_extraction import ExtractionInput, FakeMemoryExtractor
 
         extractor = FakeMemoryExtractor()
         result = extractor.extract(

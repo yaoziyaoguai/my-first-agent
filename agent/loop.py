@@ -870,6 +870,27 @@ def _dispatch_turn_end_checkpoint_save(dependencies: LoopDependencies) -> None:
         pass
 
 
+def _dispatch_turn_end_event_log_flush(
+    dependencies: LoopDependencies, loop_ctx: LoopContext,
+) -> None:
+    """B7: turn-end event log flush trigger。
+
+    如果 EventLogWriter 已注入，将 dispatcher action_log 中的 event
+    写入 per-session JSONL 文件。任何异常静默吞掉。
+    """
+    try:
+        writer = getattr(loop_ctx, "event_log_writer", None)
+        dispatcher = dependencies.runtime_action_dispatcher
+        if writer is None or dispatcher is None:
+            return
+        flush = getattr(dispatcher, "flush_to_event_log", None)
+        if flush is None:
+            return
+        flush(writer)
+    except Exception:
+        pass
+
+
 def run_main_loop(
     turn_state: Any,
     loop_ctx: LoopContext,
@@ -976,6 +997,9 @@ def run_main_loop(
                 and dependencies.runtime_action_dispatcher is not None
             ):
                 _dispatch_turn_end_checkpoint_save(dependencies)
+            # B7: turn-end event log flush — 将 action_log 写入 per-session JSONL
+            if getattr(loop_ctx, "event_log_writer", None) is not None:
+                _dispatch_turn_end_event_log_flush(dependencies, loop_ctx)
             _emit_run_summary(
                 turn_state,
                 loop_ctx,

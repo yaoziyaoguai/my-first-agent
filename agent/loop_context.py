@@ -104,6 +104,8 @@ class LoopContext:
     )
     # B7: RuntimeIdentity 注入点（multi-instance readiness）
     runtime_identity: Any | None = field(default=None, repr=False, compare=False, hash=False)
+    # B7: EventLogWriter 注入点（per-session event log）
+    event_log_writer: Any | None = field(default=None, repr=False, compare=False, hash=False)
 
     def __post_init__(self) -> None:
         """构造期最小契约校验。

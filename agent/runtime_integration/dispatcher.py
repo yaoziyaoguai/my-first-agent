@@ -563,6 +563,42 @@ class RuntimeActionDispatcher:
             timestamp=result.timestamp,
         )
 
+    # ── B7: Event Log flush ──────────────────────────────────────────
+
+    def flush_to_event_log(self, writer: object) -> int:
+        """将 action_log 中所有 event 写入 EventLogWriter，返回写入条数。
+
+        flush 不改变 action_log（保留内存中的完整 event 列表）。
+        写入失败不抛异常（best-effort）。
+        """
+        count = 0
+        try:
+            for event in self._action_log:
+                try:
+                    event_dict = _runtime_action_event_to_dict(event)
+                    writer.append(event_dict)  # type: ignore[union-attr]
+                    count += 1
+                except Exception:
+                    # 单条写入失败不中断整体 flush
+                    continue
+        except Exception:
+            # 整体 flush 失败不抛异常
+            pass
+        return count
+
+
+def _runtime_action_event_to_dict(event: object) -> dict:
+    """将 RuntimeActionEvent 转为可 JSON 序列化的 dict。"""
+    from dataclasses import fields
+
+    result: dict = {}
+    for f in fields(event):
+        value = getattr(event, f.name)
+        if isinstance(value, Mapping):
+            value = dict(value)
+        result[f.name] = value
+    return result
+
 
 def _handler_identity(handler: ActionHandler) -> str:
     handler_type = type(handler)

@@ -518,6 +518,7 @@ def _build_loop_context(
     provider=None,
     runtime_action_dispatcher=None,
     runtime_identity=None,
+    event_log_writer=None,
 ) -> LoopContext:
     """兼容入口：实际 LoopContext 组装在 `agent.core_contexts`。
 
@@ -525,6 +526,7 @@ def _build_loop_context(
               不传则回退到 build_model_provider_from_env()。
     runtime_action_dispatcher: Phase 1 RuntimeActionDispatcher 注入点。
     runtime_identity: B7 RuntimeIdentity 注入点。
+    event_log_writer: B7 EventLogWriter 注入点（per-session event log）。
     """
 
     return build_loop_context(
@@ -534,6 +536,7 @@ def _build_loop_context(
         provider=provider,
         runtime_action_dispatcher=runtime_action_dispatcher,
         runtime_identity=runtime_identity,
+        event_log_writer=event_log_writer,
     )
 
 
@@ -612,6 +615,7 @@ def chat(
     tool_gate_tool_name: str | None = None,
     checkpoint_save_on_turn_end: bool = False,
     session_id: str = "",
+    event_log_writer=None,
 ) -> str:
     """主入口：对话 + 规划 + 工具执行。
 
@@ -1110,6 +1114,7 @@ def chat(
         provider=provider,
         runtime_action_dispatcher=_phase1_dispatcher,
         runtime_identity=_chat_identity,
+        event_log_writer=event_log_writer,
     )
 
     # v0.5 Phase 3 第二小步：ConfirmationContext 构造走 _build_confirmation_context()

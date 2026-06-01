@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 4 — Phase 1-5 complete, Phase 6-8 pending)
+**最后更新**: 2026-06-01 (B7 remediation Loop 4 — completed, independent review pending)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,7 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| **B7 Remediation Loop 4** | (pending) | **B7 remediation Loop 4 in progress** — Phase 1: `_active_session_ns` production cleanup (try/finally in chat() + conftest fixture reset, 5 new tests). Phase 2: 15 new evidence tests (Phase 3 SKILL_SELECT lifecycle + Phase 4 checkpoint identity, 25/25 PASS). Phase 3: checkpoint call inventory baselines updated for B7 v2 refactoring (2 tests fixed). Phase 4: memory namespace regression triage — 7 B7-caused failures fixed (compat layer removed from resolve_confirmation, namespace key mismatches in 3 tests, dispatcher kwarg added to monkeypatch), 21 pre-existing failures documented (10 docs missing, 6 recall not implemented, 4 other, 1 skeleton). Phase 5: `docs/dogfood/scratch/` added to .gitignore. Phases 6-8 pending. B7 completed: NO. |
+| **B7 Remediation Loop 4** | 5cb5eb1 | **B7 remediation Loop 4 completed** — Phase 1: `_active_session_ns` production cleanup (try/finally in chat() + conftest fixture reset, 5 new tests). Phase 2: 15 new evidence tests (Phase 3 SKILL_SELECT lifecycle + Phase 4 checkpoint identity, 25/25 PASS). Phase 3: checkpoint call inventory baselines updated for B7 v2 refactoring (2 tests fixed). Phase 4: memory namespace regression triage — 7 B7-caused failures fixed (compat layer removed from resolve_confirmation, namespace key mismatches in 3 tests, dispatcher kwarg added to monkeypatch), 21 pre-existing failures documented. Phase 5: `docs/dogfood/scratch/` gitignored. Phase 6: PROGRESS_LEDGER / PROJECT_STATUS updated. Phase 7: focused triage across 10 test groups — 0 B7-caused failures. Phase 8: gates (security 3/3 PASS, event log 41/41 PASS, pre-commit ruff clean). B7 completed: NO (independent review pending). |
 | **B7 Remediation Loop 3** | 9dd0dfd | **B7 remediation Loop 3 completed** — Codex 独立复审发现新增 P1 问题。Phase 0: Red/Green evidence 建立 (10/10 PASS)。Phase 1: turn-start identity propagation 修复。Phase 2: RuntimeDecisionFrame MCP session lookup 修复。Phase 3: SKILL_SELECT lifecycle global fallback 修复。Phase 4: checkpoint confirmation paths identity 修复。B7 completed: NO。 |
 | **B7 Remediation Loop 2** | a639a4b | **B7 remediation P1 blockers fixed**
 | **B7 Codex Red-line Audit** | — | **B7 audited status: partial** — P1 security/runtime integration/checkpoint/event log/regression/docs overclaim 问题。B7 completion claim SUPERSEDED。Remediation loop started。Ready for B8 Phase 6B/7: NO。 |

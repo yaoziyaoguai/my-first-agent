@@ -55,10 +55,10 @@ class TestMemoryRuntimeListRecords:
         assert runtime.list_records() == ()
 
     def test_list_records_with_stored_memory(self):
-        from agent.memory_runtime import MemoryRuntime
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         store = InMemoryMemoryStore()
         record = MemoryRecord(
@@ -92,9 +92,9 @@ class TestMemoryListEvent:
 
     def test_with_records(self):
         from agent.display_events import memory_list_event
-        from agent.memory_store import MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import MemoryRecord
 
         records = (
             MemoryRecord(
@@ -161,10 +161,10 @@ class TestMemoryRecallInjection:
 
     def test_refresh_system_prompt_includes_memory_snapshot(self):
         """已批准的 memory 进入 system prompt。"""
-        from agent.memory_store import MemoryRecord, InMemoryMemoryStore
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         store = InMemoryMemoryStore()
         # _records 是 {record.id: record} dict
@@ -196,8 +196,9 @@ class TestMemoryRecallInjection:
         此前 audit Issue 4 报告"Memory recall 无用户可见性"，实际代码已
         实现该通知——本测试钉死这一行为，防止回归。
         """
-        import agent.tools  # noqa: F401
         from unittest.mock import MagicMock, patch
+
+        import agent.tools  # noqa: F401
         from agent.core import chat
         from agent.display_events import RuntimeEvent
         from agent.memory_contracts import (
@@ -272,8 +273,8 @@ class TestMemoryForgetFlow:
 
     def test_policy_detects_forget(self):
         """Policy 应检测 '忘记 X' 并返回 FORGET decision。"""
-        from agent.memory_policy import DeterministicMemoryPolicy
         from agent.memory_contracts import MemoryDecisionType
+        from agent.memory_policy import DeterministicMemoryPolicy
 
         policy = DeterministicMemoryPolicy()
         decision = policy.decide("忘记 用户叫Alice")
@@ -281,8 +282,8 @@ class TestMemoryForgetFlow:
 
     def test_policy_detects_forget_english(self):
         """Policy 应检测 'forget X' 并返回 FORGET decision。"""
-        from agent.memory_policy import DeterministicMemoryPolicy
         from agent.memory_contracts import MemoryDecisionType
+        from agent.memory_policy import DeterministicMemoryPolicy
 
         policy = DeterministicMemoryPolicy()
         decision = policy.decide("forget user name is Alice")
@@ -368,9 +369,9 @@ class TestMemoryRemoveRecord:
 
     def test_remove_record_by_id_succeeds(self):
         """按 id 移除已存在的 record。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:test123",
@@ -396,10 +397,10 @@ class TestMemoryRemoveRecord:
 
     def test_runtime_remove_record_succeeds(self):
         """MemoryRuntime.remove_record 委托给 store.remove_record。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:rt001",
@@ -434,10 +435,10 @@ class TestMemoryWriteRecallVisible:
 
     def test_memory_persists_across_runtime_calls(self):
         """同一 store 实例上的 record 跨 list_records/list_records 调用可见。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:e2e1",
@@ -459,10 +460,10 @@ class TestMemoryWriteRecallVisible:
 
     def test_memory_snapshot_includes_stored_records(self):
         """已批准的 records 出现在 MemorySnapshot 中。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:e2e3",
@@ -483,10 +484,10 @@ class TestMemoryWriteRecallVisible:
 
     def test_memory_list_records_reflects_store(self):
         """list_records() 返回 store 中所有已批准 records。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         records = [
             MemoryRecord(
@@ -508,10 +509,10 @@ class TestMemoryWriteRecallVisible:
 
     def test_forget_removes_matching_record(self):
         """forget 后匹配的 record 不再出现在 list 中。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
         from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         records = [
             MemoryRecord(
@@ -570,9 +571,9 @@ class TestForgetByIdPrefixMatching:
 
     def test_prefix_match_forgets_single_record(self):
         """短 ID 前缀匹配到唯一记录 → 成功删除。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         full_id = "memory:fake:abcd1234efgh5678"
         record = MemoryRecord(
@@ -600,9 +601,9 @@ class TestForgetByIdPrefixMatching:
 
     def test_ambiguous_prefix_returns_multiple_matches(self):
         """前缀匹配到多条 → 不删除其中任何一条，返回歧义。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         shared_prefix = "memory:fake:shared"
         records = [
@@ -637,9 +638,9 @@ class TestForgetByIdPrefixMatching:
 
     def test_invalid_prefix_returns_none(self):
         """不在任何 record id 中出现的短 ID → 0 条匹配 → not found。"""
-        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:real-record-id",
@@ -675,9 +676,9 @@ class TestRenderMemoryListFields:
     def test_render_shows_source_type(self):
         """render_memory_list 应显示 source_type 而非不存在的 source 字段。"""
         from agent.cli_commands import render_memory_list
-        from agent.memory_store import MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:render1",
@@ -699,9 +700,9 @@ class TestRenderMemoryListFields:
     def test_render_shows_created_at_from_metadata(self):
         """metadata 中有 created_at → 显示该时间。"""
         from agent.cli_commands import render_memory_list
-        from agent.memory_store import MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:render2",
@@ -720,9 +721,9 @@ class TestRenderMemoryListFields:
     def test_render_shows_unavailable_when_no_created_at(self):
         """metadata 无 created_at → 诚实显示 unavailable。"""
         from agent.cli_commands import render_memory_list
-        from agent.memory_store import MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import MemoryRecord
 
         record = MemoryRecord(
             id="memory:fake:render3",
@@ -741,9 +742,9 @@ class TestRenderMemoryListFields:
     def test_render_shows_short_id_prefix(self):
         """记忆列表显示短 ID（[:8]）以便用户复制用于 forget。"""
         from agent.cli_commands import render_memory_list
-        from agent.memory_store import MemoryRecord
         from agent.memory_contracts import MemoryScope
         from agent.memory_operations import MemoryOperationType
+        from agent.memory_store import MemoryRecord
 
         full_id = "memory:fake:abcd1234efgh5678ijkl"
         record = MemoryRecord(

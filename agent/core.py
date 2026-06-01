@@ -714,9 +714,8 @@ def chat(
     # _skill_select_tool_func 通过此值获取 per-session lifecycle，
     # 避免依赖 logger.get_runtime_session_id() 的 import-time SESSION_ID fallback。
     # 实际 set 推迟到工具执行路径入口处以配合 try/finally cleanup。
-    from agent.skill_system.skill_tool import set_active_session_ns as _set_skill_ns
-
     from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
+    from agent.skill_system.skill_tool import set_active_session_ns as _set_skill_ns
     _chat_identity = _RuntimeIdentity(
         session_id=_sid,
         run_id=str(uuid4()),

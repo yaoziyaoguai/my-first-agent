@@ -13,7 +13,6 @@ from pathlib import Path
 
 from agent.memory_contracts import MemoryScope, MemorySensitivity
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_BUILDER = PROJECT_ROOT / "agent" / "prompt_builder.py"
 CONTRACT_MODULE = PROJECT_ROOT / "agent" / "memory_contracts.py"
@@ -308,8 +307,8 @@ def test_build_system_prompt_includes_tool_use_guidance() -> None:
 def test_fake_provider_chat_still_works_after_prompt_change() -> None:
     """验证 fake provider 路径不受 system prompt 修改影响。"""
     from agent.core import chat
-    from agent.provider.fake_provider import FakeProvider
     from agent.display_events import RuntimeEvent
+    from agent.provider.fake_provider import FakeProvider
 
     events: list[RuntimeEvent] = []
 

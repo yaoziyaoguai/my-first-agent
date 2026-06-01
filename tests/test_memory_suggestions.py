@@ -28,7 +28,6 @@ from agent.memory_suggestions import (
     EngineConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -593,7 +592,7 @@ def test_multiple_rules_single_text():
 
 def test_engine_config_is_frozen():
     config = EngineConfig(max_candidates_per_session=5)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         config.max_candidates_per_session = 10  # type: ignore
 
 

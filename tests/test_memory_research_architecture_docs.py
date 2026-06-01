@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RESEARCH_DOC = PROJECT_ROOT / "docs" / "MEMORY_RESEARCH.md"
-ARCH_DOC = PROJECT_ROOT / "docs" / "MEMORY_ARCHITECTURE.md"
-ROADMAP = PROJECT_ROOT / "docs" / "ROADMAP.md"
+_ROOT_STALE = PROJECT_ROOT / "docs" / "archive" / "root-stale"
+RESEARCH_DOC = _ROOT_STALE / "MEMORY_RESEARCH.md"
+ARCH_DOC = _ROOT_STALE / "MEMORY_ARCHITECTURE.md"
+ROADMAP = _ROOT_STALE / "ROADMAP.md"
 
 
 def _read(path: Path) -> str:

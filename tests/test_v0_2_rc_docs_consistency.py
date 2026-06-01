@@ -19,11 +19,23 @@ import pytest
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 
 
+_ROOT_STALE_FILES = frozenset({
+    "RUNTIME_STATE_MACHINE.md",
+    "RUNTIME_EVENT_BOUNDARIES.md",
+    "CHECKPOINT_RESUME_SEMANTICS.md",
+    "RUNTIME_ERROR_RECOVERY.md",
+    "CLI_OUTPUT_CONTRACT.md",
+})
+
+
 def _resolve(name: str) -> Path:
-    """V0_* 文件已归档到 docs/archive/v0.x/，非 V0_* 文件仍在 docs/。"""
+    """V0_* 文件已归档到 docs/archive/v0.x/；root-stale 文件已归档到
+    docs/archive/root-stale/；非归档文件仍在 docs/。"""
     m = re.match(r"(V0_.+)$", name)
     if m:
         return DOCS / "archive" / "v0.x" / m.group(1)
+    if name in _ROOT_STALE_FILES:
+        return DOCS / "archive" / "root-stale" / name
     return DOCS / name
 
 

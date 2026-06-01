@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNBOOK = PROJECT_ROOT / "docs" / "rfc" / "archived" / "MEMORY_DOGFOODING_STAGE3.md"
-ARCHITECTURE = PROJECT_ROOT / "docs" / "MEMORY_ARCHITECTURE.md"
+ARCHITECTURE = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "MEMORY_ARCHITECTURE.md"
 
 
 def _runbook() -> str:

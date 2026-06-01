@@ -11,10 +11,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MEMORY_MODULE = PROJECT_ROOT / "agent" / "memory.py"
-ROADMAP = PROJECT_ROOT / "docs" / "ROADMAP.md"
+ROADMAP = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md"
 
 
 def _agent_imports(path: Path) -> set[str]:

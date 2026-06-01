@@ -24,7 +24,6 @@ from agent.display_events import (
     render_runtime_event_for_cli,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -217,12 +216,12 @@ class TestMemoryEventTypeConstants:
 
 class TestPendingInteractionDoc:
     def test_doc_exists(self):
-        doc_path = PROJECT_ROOT / "docs" / "PENDING_INTERACTION_MODEL.md"
+        doc_path = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "PENDING_INTERACTION_MODEL.md"
         assert doc_path.exists(), f"Expected doc at {doc_path}"
         assert doc_path.is_file()
 
     def test_doc_has_required_sections(self):
-        doc_path = PROJECT_ROOT / "docs" / "PENDING_INTERACTION_MODEL.md"
+        doc_path = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "PENDING_INTERACTION_MODEL.md"
         content = doc_path.read_text(encoding="utf-8")
         required = [
             "为什么需要",
@@ -235,6 +234,6 @@ class TestPendingInteractionDoc:
             assert section in content, f"Missing section: {section}"
 
     def test_doc_is_not_empty(self):
-        doc_path = PROJECT_ROOT / "docs" / "PENDING_INTERACTION_MODEL.md"
+        doc_path = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "PENDING_INTERACTION_MODEL.md"
         content = doc_path.read_text(encoding="utf-8")
         assert len(content) > 500, "Doc should have substantial content"

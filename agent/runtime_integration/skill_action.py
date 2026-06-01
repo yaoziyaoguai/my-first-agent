@@ -115,6 +115,7 @@ class SkillRuntimeActionHandler:
                     "body_load_decision": False,
                     "no_suitable_skill": not bool(available_metadata),
                     "audit_only_skill_exclusion_evidence": self._audit_exclusion_evidence(),
+                    "runtime_e2e_disqualified_reason": failure,
                 },
                 error_safe_preview=failure,
             )

@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 5 — completed, independent review pending)
-**状态**: B7 **remediation Loop 5 completed** (a3e5005)。P1 memory retain compatibility restored — `direct_write=True` parameter on `resolve_confirmation()`, dispatcher path avoids double-write, `store_retained_record()` added to `FilesystemMemoryStore`。8 B7-caused memory failures fixed (Root Cause A: namespace key format, Root Cause B: dead store_retained_record)。5 regression tests updated。Phase 3 regression triage: 0 B7-caused failures across 10 focused groups。Phase 5 gates: security 3/3 PASS, event log 41/41 PASS, TUI 260/260 PASS, tsc clean, ruff clean (3 pre-existing memory_fs_store.py issues also fixed)。B7 completed: NO (independent review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。Phase 4 P2/P3 deferred (pre-existing non-B7 debt: runtime_e2e_disqualified_reason KeyError, 12 missing doc files)。下一步: independent review of Loop 5。
+**最后更新**: 2026-06-01 (B7 Final Cleanup Loop — completed, ready for final independent completion review)
+**状态**: B7 **Final Cleanup Loop completed**。P2 runtime_e2e_disqualified_reason KeyError fixed (skill_action.py validation failure path 补 evidence_extra)。P3 9 archived doc references updated (test paths 指向 docs/archive/root-stale/)。B7 P1 blockers closed by Loop 5, P2/P3 closed by Final Cleanup。B7 completed: NO (final independent completion review pending)。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。007 remains credible-with-caveats。not product-ready。下一步: final independent completion review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 2 — Phase 1-6 COMPLETE, pushed a639a4b)
+**最后更新**: 2026-06-01 (B7 remediation Loop 3 — Phase 1-4 in progress)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -11,6 +11,7 @@
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
 | **B7 Remediation Loop 2** | a639a4b | **B7 remediation P1 blockers fixed** — Phase 1: identity unified propagation (session_id threaded through 7 main.py layers). Phase 2: MCP bridge per-session scoping (session_id before bridge init). Phase 3: skill lifecycle per-session (get_runtime_session_id()). Phase 4: EventLogWriter redaction enhanced (env-var assign, JWT, long hex/base64 tokens, 11 new tests). Phase 5: regression triage (8 groups, 0 B7-caused). Phase 6: docs corrected. All gates PASS: security 3/3, TUI 260/260 + tsc, ruff clean. B7 status: remediation candidate for independent review. |
+| **B7 Remediation Loop 3** | (pending) | **B7 remediation Loop 3 in progress** — Codex 独立复审发现新增 P1 问题。Phase 0: Red/Green evidence 建立 (10/10 PASS)。Phase 1: turn-start identity propagation 修复 (SKILL_SELECTION_ENTERED/SKILL_CANDIDATES_BUILT/MEMORY_RECALL events 携带 identity)。Phase 2: RuntimeDecisionFrame MCP session lookup 修复 (build_decision_frame_from_chat_params 接受 session_id 参数)。Phase 3: SKILL_SELECT lifecycle global fallback 修复 (skill_tool.py 使用显式 session namespace key)。Phase 4: checkpoint confirmation paths identity 修复 (memory_confirmation checkpoint save 传入 identity)。B7 completed: NO。 |
 | **B7 Codex Red-line Audit** | — | **B7 audited status: partial** — P1 security/runtime integration/checkpoint/event log/regression/docs overclaim 问题。B7 completion claim SUPERSEDED。Remediation loop started。Ready for B8 Phase 6B/7: NO。 |
 | **B7 Slice 5: Integration & Guard Tests** | 54a0632 | 13 multi-instance integration tests (multi-run 隔离, identity 传播链, 单实例回归, B8 契约验证)。63/63 B7 tests PASS。Claim of B7 COMPLETED later superseded by Codex audit。 |
 | **B7 Slice 4: Event Log Writer** | 837c010 | Per-session JSONL event log — EventLogWriter (append-only), flush_to_event_log() in dispatcher, turn-end flush hook in loop.py, secret redaction (field names + sk-/Bearer patterns), parameter chain main.py→chat()→LoopContext。 |

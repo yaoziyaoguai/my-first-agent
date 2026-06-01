@@ -721,10 +721,14 @@ def build_decision_frame_from_chat_params(
     runtime_action_dispatcher=None,
     tool_gate_tool_name: str | None = None,
     action_scheduler=None,
+    session_id: str = "",
 ) -> RuntimeDecisionFrame:
     """从 core.chat() 的参数构造 RuntimeDecisionFrame。
 
     自动推断各子系统状态——不做乐观假设，只陈述已知事实。
+
+    B7: session_id 用于 per-session MCP bridge 查询，避免 decision frame
+    总是读 default session。
     """
     # Provider 模式推断
     provider_mode = "unknown"
@@ -776,6 +780,9 @@ def build_decision_frame_from_chat_params(
             _node_id = _sched_state.current_node_id or ""
             _completed = len(_sched_state.completed_nodes)
 
+    # B7: session_id 非空时查询 per-session MCP bridge，否则回退 default。
+    _mcp_active = _is_mcp_active(session_id=session_id) if session_id else _is_mcp_active()
+
     return build_decision_frame(
         user_input=user_input,
         provider_mode=provider_mode,
@@ -784,7 +791,7 @@ def build_decision_frame_from_chat_params(
         active_skill_candidates=active_candidates,
         memory_explicit_request=False,  # 由 evaluate_user_text 后置判定
         tool_gate_tool_name=gate_name,
-        mcp_available=_is_mcp_active(),
+        mcp_available=_mcp_active,
         subagent_available=False,  # 仅 L0 fake/demo
         subagent_level="L0",
         evidence_level=ev_level,

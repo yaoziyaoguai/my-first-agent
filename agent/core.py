@@ -431,13 +431,13 @@ def refresh_runtime_system_prompt(
     if user_input and skill_registry is not None:
         # 记录 selection phase 进入 evidence
         if dispatcher is not None:
-            _dispatch_skill_selection_entered(dispatcher, user_input)
+            _dispatch_skill_selection_entered(dispatcher, user_input, identity=identity)
         # 检索候选 skill
         retriever = SkillCandidateRetriever()
         candidates = retriever.retrieve(user_input, skill_registry)
         # 记录候选构建 evidence
         if dispatcher is not None:
-            _dispatch_skill_candidates_built(dispatcher, candidates)
+            _dispatch_skill_candidates_built(dispatcher, candidates, identity=identity)
         # 生成 selection prompt section
         selection_section = build_skill_selection_section(candidates)
 
@@ -454,9 +454,10 @@ def refresh_runtime_system_prompt(
             payload={},
         )
         route = getattr(dispatcher, "route_from_runtime_loop", None)
-        if route is None:
-            route = dispatcher.route
-        result = route(request)
+        if route is not None:
+            result = route(request, identity=identity)
+        else:
+            result = dispatcher.route(request)
         memory_section = result.payload.get("prompt_section", "")
         snapshot_item_count = int(result.payload.get("snapshot_item_count") or 0)
         system_prompt = build_system_prompt(
@@ -479,11 +480,14 @@ def refresh_runtime_system_prompt(
     return state.get_system_prompt(), snapshot_item_count
 
 
-def _dispatch_skill_selection_entered(dispatcher, user_input: str) -> None:
+def _dispatch_skill_selection_entered(dispatcher, user_input: str, *, identity=None) -> None:
     """Phase 3: 记录 turn-start skill selection phase 进入 evidence。
 
     这是每 turn 的 probe event——每次 model call 前无条件执行，
     大多数情况下无有效候选时返回 noop。
+
+    B7: identity 参数传入 dispatcher，使 SKILL_SELECTION_ENTERED event 携带
+    session_id/run_id/instance_id。
     """
     from agent.runtime_integration.schema import (
         RuntimeActionRequest,
@@ -498,21 +502,25 @@ def _dispatch_skill_selection_entered(dispatcher, user_input: str) -> None:
             payload={"user_input_length": len(user_input)},
         )
         route = getattr(dispatcher, "route_from_runtime_loop", None)
-        if route is None:
-            route = dispatcher.route
-        route(request)
+        if route is not None:
+            route(request, identity=identity)
+        else:
+            dispatcher.route(request)
     except Exception:
         # evidence dispatch 失败不阻塞 main loop
         pass
 
 
 def _dispatch_skill_candidates_built(
-    dispatcher, candidates: list,
+    dispatcher, candidates: list, *, identity=None,
 ) -> None:
     """Phase 3: 记录 skill candidates 构建 evidence。
 
     在 SkillCandidateRetriever.retrieve() 返回后 dispatch，
     payload 包含候选数量和名称列表，用于验证 selection phase 产出。
+
+    B7: identity 参数传入 dispatcher，使 SKILL_CANDIDATES_BUILT event 携带
+    session_id/run_id/instance_id。
     """
     from agent.runtime_integration.schema import (
         RuntimeActionRequest,
@@ -531,9 +539,10 @@ def _dispatch_skill_candidates_built(
             },
         )
         route = getattr(dispatcher, "route_from_runtime_loop", None)
-        if route is None:
-            route = dispatcher.route
-        route(request)
+        if route is not None:
+            route(request, identity=identity)
+        else:
+            dispatcher.route(request)
     except Exception:
         # evidence dispatch 失败不阻塞 main loop
         pass
@@ -700,6 +709,13 @@ def chat(
     _sid = session_id or str(uuid4())
     _ns_key = session_id or ""  # empty → default lifecycle/memory（向后兼容 monkeypatch）
     _mem_rt = get_memory_runtime(_ns_key)
+
+    # B7: 设置 skill_tool 的活跃 session namespace key——
+    # _skill_select_tool_func 通过此值获取 per-session lifecycle，
+    # 避免依赖 logger.get_runtime_session_id() 的 import-time SESSION_ID fallback。
+    from agent.skill_system.skill_tool import set_active_session_ns as _set_skill_ns
+    _set_skill_ns(_ns_key)
+
     from agent.runtime_identity import RuntimeIdentity as _RuntimeIdentity
     _chat_identity = _RuntimeIdentity(
         session_id=_sid,
@@ -999,7 +1015,10 @@ def chat(
             )
             state.task.pending_user_input_request = pending
             state.task.status = "awaiting_user_input"
-            _dispatch_checkpoint_save(_p1_dispatcher, state, source="memory_confirmation")
+            _dispatch_checkpoint_save(
+                _p1_dispatcher, state, source="memory_confirmation",
+                identity=_chat_identity,
+            )
             _safe_emit_runtime_event(
                 on_runtime_event,
                 memory_confirmation_requested_event(pending),
@@ -1155,6 +1174,7 @@ def chat(
         skill_registry=_skill_registry,
         runtime_action_dispatcher=_phase1_dispatcher,
         tool_gate_tool_name=tool_gate_tool_name,
+        session_id=_sid,
     )
     _set_last_decision_frame(_turn_decision_frame)
 

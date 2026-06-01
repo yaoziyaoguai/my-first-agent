@@ -18,4 +18,5 @@ state.json
 runs/
 agent_log.archived-*.jsonl
 tui/node_modules/
+node_modules/
 .tui_audit_log*

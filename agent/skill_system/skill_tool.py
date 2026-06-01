@@ -15,6 +15,22 @@ from __future__ import annotations
 
 from agent.tool_registry import TOOL_REGISTRY
 
+# B7: 显式 session namespace key——chat() 在工具执行前设置，
+# 使 _skill_select_tool_func 无需依赖 logger.get_runtime_session_id()
+# 的 import-time SESSION_ID fallback。
+_active_session_ns: str = ""
+
+
+def set_active_session_ns(ns: str) -> None:
+    """B7: 设置当前活跃 session 的 namespace key（由 chat() 调用）。"""
+    global _active_session_ns
+    _active_session_ns = ns
+
+
+def _get_active_session_ns() -> str:
+    """B7: 返回当前活跃 session 的 namespace key。"""
+    return _active_session_ns
+
 
 def _ensure_skill_select_registered():
     """确保 SKILL_SELECT 已在 TOOL_REGISTRY 中注册（幂等）。
@@ -104,9 +120,11 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
         "body": body_str,
         "allowed_tools": allowed_tools,
     }
-    from agent.logger import get_runtime_session_id
+    # B7: 显式 session namespace key——避免依赖 logger get_runtime_session_id()
+    # 的 import-time SESSION_ID fallback。chat() 在工具执行前设置此值。
     from agent.skill_system.lifecycle import get_default_lifecycle
-    _lc = get_default_lifecycle(get_runtime_session_id())
+    _ns = _get_active_session_ns() if _get_active_session_ns() else "default"
+    _lc = get_default_lifecycle(_ns)
     _lc.activate(
         skill_id=skill_id,
         body=body_str,

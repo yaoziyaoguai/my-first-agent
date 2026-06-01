@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation Loop 2 — Phase 1-6 COMPLETE, pushed a639a4b)
-**状态**: B7 **remediation candidate for independent review** — Codex red-line audit P1 issues addressed (commit a639a4b)。Phase 1: identity propagation (session_id threaded through 7 main.py layers, EventLogWriter now shares core runtime identity)。Phase 2: MCP bridge per-session scoping (session_id generated before bridge init, `_mcp_bridge_registry` keyed by session)。Phase 3: skill lifecycle per-session (skill_tool.py + response_handlers.py use `get_runtime_session_id()`)。Phase 4: EventLogWriter redaction enhanced (env-var assignment, JWT, long hex/base64 token patterns, 11 new tests, 41/41 event log tests PASS)。Phase 5: regression triage (8 grouped categories, zero B7-caused regressions, all failures pre-existing)。Phase 6: docs updated (this file + PROGRESS_LEDGER)。All gates: security 3/3, TUI 260/260 + typecheck, ruff, git diff --check。Ready for B7 completion: NOT YET (needs independent review)。Ready for B8 Phase 6B: NO (B7 completion needed first)。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: independent review。
+**最后更新**: 2026-06-01 (B7 remediation Loop 3 — Phase 1-4 in progress)
+**状态**: B7 **remediation Loop 3 in progress** — Codex red-line audit 发现仍存在 P1 identity/MCP session gaps。Phase 1 (turn-start identity propagation) 已修复，Phase 2 (MCP decision frame session lookup) 已修复，Phase 3 (SKILL_SELECT lifecycle global fallback) 已修复，Phase 4 (checkpoint confirmation paths v2 identity) 缺失 identity 已修复。Phase 5-8 pending。Red/Green evidence tests: 10/10 PASS。B7 completed: NO。Ready for B8 Phase 6B: NO。Ready for B8 Phase 7: NO。B8 current boundary CLOSED。TUI default entry NOT ACTIVATED。下一步: Phase 5-8 continue。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

@@ -1,6 +1,7 @@
 # Full Subsystem Capability Audit Red-Team Addendum
 
-日期：2026-05-28
+**状态: historical — superseded by 2026-05-29~31 evidence closure loops (002/003/006/008)。当前 PROJECT_STATUS.md 为事实源。**
+**日期**：2026-05-28
 范围：只读红队补审；未改生产代码，未读取 `config/config.yaml`，未调用真实 API，未读取真实 session/log/private data，未 commit/push/tag。
 上一版报告：`docs/audits/2026-05-28-full-subsystem-capability-completion-audit.md`
 

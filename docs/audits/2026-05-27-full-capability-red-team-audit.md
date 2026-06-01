@@ -1,5 +1,6 @@
 # 全能力红队达标审计报告
 
+**状态: historical — superseded by 2026-05-28 full-subsystem audits + redteam addendum + 2026-05-29~31 evidence closure loops。当前 PROJECT_STATUS.md 为事实源。**
 日期：2026-05-27
 模式：`audit_only` — 只读审计，不改生产代码、不改测试、不调用真实 API
 范围：全代码库 15 个能力域 (A-O) 的达标程度审计

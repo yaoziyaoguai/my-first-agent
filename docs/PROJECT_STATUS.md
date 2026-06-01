@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-01 (B8 Final Boundary Audit)
-**状态**: B8 current boundary CLOSED。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 1-6A + Polish Loop 1-2 内无未解决问题** (260/260 tests PASS, 5 stale data/display items fixed)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。TUI default entry NOT ACTIVATED。B7 NOT STARTED。下一个需要进入 B7 或更大架构决策。详见 `docs/reviews/b8-tui-workbench-completion-review.md` 和 `docs/debt/b8-tui-workbench-technical-debt.md`。
+**最后更新**: 2026-06-01 (B7 Pre-SDD Cleanup)
+**状态**: B8 current boundary CLOSED。B7 pre-SDD cleanup completed — Ready for B7 SDD: YES, Ready for B7 implementation: NO。Score 4.5/5 conservative baseline。Evidence collected: 8/8。Credible: 7/8 (001/002/003/004/005/006/008), Credible-with-caveats: 1/8 (007 — validation scope note)。**B8 Phase 1-6A + Polish Loop 1-2 内无未解决问题** (260/260 tests PASS)。Phase 6B/7 deferred (详见 `docs/debt/b8-tui-workbench-technical-debt.md`)。TUI default entry NOT ACTIVATED。B7 NOT STARTED。旧审计报告已标记 historical/superseded。P1-1~P1-4 + P2-1~P2-5 + cross-cutting requirements 已纳入 `docs/debt/b7-pre-sdd-redline-debt.md`。下一步: 等待用户确认进入 B7 SDD。详见 `docs/debt/b7-pre-sdd-redline-debt.md`。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

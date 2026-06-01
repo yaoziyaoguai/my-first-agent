@@ -1,5 +1,6 @@
 # /auto-run 停止行为审计
 
+**状态: historical — audit scope limited to auto-run workflow behavior。核心约束已整合到当前 `docs/dev/ENGINEERING_WORKFLOW.md` 和 `.claude/commands/auto-run.md`。**
 日期：2026-05-27
 审计员：Coding Agent（自审计）
 范围：`.claude/commands/auto-run.md`、`docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/PROJECT_STATUS.md`、`docs/plans/2026-05-27-capability-remediation-loop-plan.md`

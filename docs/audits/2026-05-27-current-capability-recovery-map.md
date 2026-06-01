@@ -1,5 +1,6 @@
 # Current Capability Recovery Map
 
+**状态: historical — superseded by 2026-05-28 full-subsystem audits + 2026-05-29~31 evidence closure loops。当前 PROJECT_STATUS 和 PROGRESS_LEDGER 为最新状态。**
 **日期**: 2026-05-28 (post-Loop 15 update)
 **基于**: 全能力红队审计 (4.2/10) + 12 remediation loops + Loops 14-18 完成 + 最新严格复审
 **用途**: 事实源——区分真实能力和 overclaim，指导 safe-to-auto-run 修复优先级

@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-01 (B7 remediation — Phase 5/6/7 COMPLETE, docs update in progress)
+**最后更新**: 2026-06-01 (B7 remediation Loop 2 — Phase 1-6 COMPLETE, pushed a639a4b)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,7 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
-| **B7 Remediation Phase 0-7** | — | **B7 remediation advancing** — Phase 0: security preflight PASS。Phase 5: namespace isolation production path (13/13 tests PASS — per-session lifecycle/memory/MCP bridge)。Phase 6: EventLogWriter contract (29/29 tests PASS — dedupe flush_cursor, schema_version/event_type/source_subsystem, enhanced redaction, bounded payload)。Phase 7: regression triage — all failures pre-existing, zero B7-caused regressions。Phase 8 docs update in progress。B7 status: remediation candidate for independent review。 |
+| **B7 Remediation Loop 2** | a639a4b | **B7 remediation P1 blockers fixed** — Phase 1: identity unified propagation (session_id threaded through 7 main.py layers). Phase 2: MCP bridge per-session scoping (session_id before bridge init). Phase 3: skill lifecycle per-session (get_runtime_session_id()). Phase 4: EventLogWriter redaction enhanced (env-var assign, JWT, long hex/base64 tokens, 11 new tests). Phase 5: regression triage (8 groups, 0 B7-caused). Phase 6: docs corrected. All gates PASS: security 3/3, TUI 260/260 + tsc, ruff clean. B7 status: remediation candidate for independent review. |
 | **B7 Codex Red-line Audit** | — | **B7 audited status: partial** — P1 security/runtime integration/checkpoint/event log/regression/docs overclaim 问题。B7 completion claim SUPERSEDED。Remediation loop started。Ready for B8 Phase 6B/7: NO。 |
 | **B7 Slice 5: Integration & Guard Tests** | 54a0632 | 13 multi-instance integration tests (multi-run 隔离, identity 传播链, 单实例回归, B8 契约验证)。63/63 B7 tests PASS。Claim of B7 COMPLETED later superseded by Codex audit。 |
 | **B7 Slice 4: Event Log Writer** | 837c010 | Per-session JSONL event log — EventLogWriter (append-only), flush_to_event_log() in dispatcher, turn-end flush hook in loop.py, secret redaction (field names + sk-/Bearer patterns), parameter chain main.py→chat()→LoopContext。 |

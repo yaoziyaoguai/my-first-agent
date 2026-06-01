@@ -234,8 +234,10 @@ def handle_tool_use_response(
 
         _skill_at: frozenset[str] | None = None
         try:
+            from agent.logger import get_runtime_session_id
             from agent.skill_system.lifecycle import get_default_lifecycle
-            _lc = get_default_lifecycle()
+            _sid = getattr(runtime_identity, "session_id", "") or get_runtime_session_id()
+            _lc = get_default_lifecycle(_sid)
             _tools = _lc.get_allowed_tools()
             _skill_at = _tools if _tools else None
         except ImportError:

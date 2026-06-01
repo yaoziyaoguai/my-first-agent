@@ -535,3 +535,200 @@ class TestBoundedPayload:
             data = json.loads(line)
             assert "TRUNCATED" in data["response"]["text"]
             assert data["response"]["metadata"]["source"] == "z" * 100
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phase 4: Enhanced value redaction — env-var assign, JWT, long tokens
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEnvVarAssignRedaction:
+    """env-var 赋值形态的 secret redaction。"""
+
+    def test_openai_api_key_assignment_redacted(self):
+        """OPENAI_API_KEY=sk-xxx 在普通字段值中被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"prompt": "export OPENAI_API_KEY=sk-ant-abc123def456ghi789"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "OPENAI_API_KEY=<REDACTED>" in data["prompt"]
+            assert "sk-ant" not in data["prompt"]
+
+    def test_anthropic_api_key_assignment_redacted(self):
+        """ANTHROPIC_API_KEY=... 被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"env": "ANTHROPIC_API_KEY=sk-ant-secret12345678"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "ANTHROPIC_API_KEY=<REDACTED>" in data["env"]
+            assert "sk-ant-secret" not in data["env"]
+
+    def test_generic_api_key_assignment_redacted(self):
+        """*_API_KEY=value 形态被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"config": "SERVICE_API_KEY=abcdef1234567890abcdef1234567890"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "SERVICE_API_KEY=<REDACTED>" in data["config"]
+            assert "abcdef" not in data["config"]
+
+    def test_secret_env_assign_redacted(self):
+        """*_SECRET=... 和 *_TOKEN=... 等形态被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({
+                "line1": "DB_PASSWORD=super-secret-pwd-12345",
+                "line2": "AUTH_TOKEN=ghp_abc123def456ghi789jkl",
+            })
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "DB_PASSWORD=<REDACTED>" in data["line1"]
+            assert "AUTH_TOKEN=<REDACTED>" in data["line2"]
+
+    def test_normal_env_assign_not_redacted(self):
+        """普通 env var 赋值（不含 secret 关键词）不被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"config": "LOG_LEVEL=debug"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["config"] == "LOG_LEVEL=debug"
+
+
+class TestJWTTokenRedaction:
+    """JWT token 在普通字段值中被脱敏。"""
+
+    def test_jwt_in_ordinary_field_is_redacted(self):
+        """普通字段中的 JWT token 被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            jwt = (
+                "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+                "dozjgN1P_MR36HvzVkwdHR4FzpXb3YzL9Xm4jOq1NCc"
+            )
+            writer.append({"auth_header": f"Authorization: Bearer {jwt}"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            # JWT 被 redact, Bearer 也被 redact
+            assert "eyJ" not in data["auth_header"]
+            assert "<REDACTED>" in data["auth_header"]
+
+    def test_jwt_alone_in_field_is_redacted(self):
+        """仅有 JWT 的字段值被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            jwt = "eyJhbGciOiJSUzI1NiJ9.eyJ1c2VyIjoiYWxpY2UifQ.signature_part_here_abc123"
+            writer.append({"raw_token": jwt})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["raw_token"] == "<REDACTED>"
+
+
+class TestLongTokenRedaction:
+    """long hex / base64 token 在普通字段中被脱敏。"""
+
+    def test_hex_token_40_chars_is_redacted(self):
+        """40 位 hex 字符串在普通字段中被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            hex_token = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"  # 42 chars
+            writer.append({"note": f"token: {hex_token}"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert hex_token not in data["note"]
+            assert "<REDACTED>" in data["note"]
+
+    def test_b64_token_60_chars_is_redacted(self):
+        """60 位 base64-like 字符串在普通字段中被脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            b64_token = "dGhpcyBpc0E2MGNoYXJhY3RlclN0cmluZ1Rlc3RGb3JCYXNlNjRSZWRhY3Rpb25UZXN0"
+            writer.append({"raw": b64_token})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["raw"] == "<REDACTED>"
+
+    def test_repeated_single_char_not_false_positive(self):
+        """重复单字符长字符串不被误脱敏（如 'x' * 10000）。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"data": "x" * 5001})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert "<REDACTED>" not in data["data"]
+            assert "TRUNCATED" in data["data"]
+
+
+class TestNoFalsePositiveRedaction:
+    """确保增强 redaction 不产生误报。"""
+
+    def test_short_string_not_redacted(self):
+        """短字符串不被误脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            writer.append({"msg": "hello world", "count": "42"})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["msg"] == "hello world"
+            assert data["count"] == "42"
+
+    def test_common_hash_not_redacted(self):
+        """32 位 hex（如 MD5 hash）不被误脱敏。"""
+        from agent.event_log import EventLogWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = EventLogWriter(session_dir=Path(tmp))
+            md5_hash = "d41d8cd98f00b204e9800998ecf8427e"
+            writer.append({"hash": md5_hash})
+            writer.close()
+
+            line = (Path(tmp) / "events.jsonl").read_text().strip()
+            data = json.loads(line)
+            assert data["hash"] == md5_hash

@@ -56,6 +56,7 @@ def _run_textual_runtime_turn(
     on_display_event: Callable[[DisplayEvent], None] | None = None,
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
     event_log_writer: Any = None,
+    session_id: str = "",
 ) -> tuple[str, str]:
     """执行一轮 Textual 产品主路径，并返回 latest_output fallback。
 
@@ -118,6 +119,7 @@ def _run_textual_runtime_turn(
             user_input,
             on_runtime_event=forward_runtime_event,
             event_log_writer=event_log_writer,
+            session_id=session_id,
         )
     if emitted_runtime_event and runtime_event_outputs:
         latest_output = _merge_chat_outputs(
@@ -140,7 +142,7 @@ def _run_textual_runtime_turn(
 
 
 def _run_simple_cli_runtime_turn(
-    user_input: str, *, event_log_writer: Any = None
+    user_input: str, *, event_log_writer: Any = None, session_id: str = ""
 ) -> tuple[str, str]:
     """执行一轮 simple CLI fallback adapter。
 
@@ -176,6 +178,7 @@ def _run_simple_cli_runtime_turn(
         user_input,
         on_runtime_event=forward_simple_runtime_event,
         event_log_writer=event_log_writer,
+        session_id=session_id,
     )
     if simple_streamed_any_chunk:
         # core.py 在无 sink 时代负责补这个换行；simple CLI 接管 RuntimeEvent 后，
@@ -197,6 +200,7 @@ def _run_chat_for_backend(
     on_display_event: Callable[[DisplayEvent], None] | None = None,
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
     event_log_writer: Any = None,
+    session_id: str = "",
 ) -> tuple[str, str]:
     """按 UI adapter 分派一轮 Runtime 调用。
 
@@ -213,9 +217,12 @@ def _run_chat_for_backend(
             on_display_event=on_display_event,
             on_runtime_event=on_runtime_event,
             event_log_writer=event_log_writer,
+            session_id=session_id,
         )
 
-    return _run_simple_cli_runtime_turn(user_input, event_log_writer=event_log_writer)
+    return _run_simple_cli_runtime_turn(
+        user_input, event_log_writer=event_log_writer, session_id=session_id
+    )
 
 
 def _handle_textual_shell_input(
@@ -225,6 +232,7 @@ def _handle_textual_shell_input(
     on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
     *,
     event_log_writer: Any = None,
+    session_id: str = "",
 ) -> str:
     """处理常驻 Textual Shell 提交的文本，并返回用户可见输出。
 
@@ -263,14 +271,15 @@ def _handle_textual_shell_input(
         on_display_event=on_display_event,
         on_runtime_event=on_runtime_event,
         event_log_writer=event_log_writer,
+        session_id=session_id,
     )
     return latest_output
 
 
-def run_textual_main_loop(event_log_writer: Any = None) -> None:
+def run_textual_main_loop(event_log_writer: Any = None, *, session_id: str = "") -> None:
     """运行常驻 Textual backend。
 
-    one-shot TUI 的闪退闪回来自”提交即 app.exit，再由 main 重建 App”。这里改成
+    one-shot TUI 的闪退闪回来自"提交即 app.exit，再由 main 重建 App"。这里改成
     一个常驻 I/O Shell：Textual 只显示/收集 I/O，Runtime 仍通过 main 调用
     chat()，checkpoint 仍由既有 Runtime/session 逻辑负责。
     """
@@ -279,12 +288,16 @@ def run_textual_main_loop(event_log_writer: Any = None) -> None:
 
     from agent.input_backends.textual import run_textual_io_shell
 
-    handler = partial(_handle_textual_shell_input, event_log_writer=event_log_writer)
+    handler = partial(
+        _handle_textual_shell_input,
+        event_log_writer=event_log_writer,
+        session_id=session_id,
+    )
     run_textual_io_shell(chat_handler=handler)
     finalize_session()
 
 
-def main_loop(event_log_writer: Any = None):
+def main_loop(event_log_writer: Any = None, *, session_id: str = ""):
     last_interrupt_time = 0
     latest_output = ""
     last_status_line = ""
@@ -376,6 +389,7 @@ def main_loop(event_log_writer: Any = None):
                 user_input,
                 backend=backend,
                 event_log_writer=event_log_writer,
+                session_id=session_id,
             )
             if new_latest_output:
                 latest_output = new_latest_output
@@ -438,7 +452,7 @@ def _try_dispatch_mcp_bridge_lifecycle(report, mode: str, dry_run: bool) -> None
         pass
 
 
-def _init_mcp_bridge_if_enabled() -> None:
+def _init_mcp_bridge_if_enabled(*, session_id: str = "") -> None:
     """MCP bridge thin wrapper：只在 MY_FIRST_AGENT_MCP_ENABLE=1 时运行。
 
     不修改 core.py、不绕过 policy gate、默认 disabled。
@@ -447,6 +461,7 @@ def _init_mcp_bridge_if_enabled() -> None:
     MCP_BRIDGE_LIFECYCLE evidence。
     Loop 3.3: 支持 server_allowlist / config_path 显式传入；
     bridge 成功后通过 set_mcp_bridge_result() 更新决策脊柱 mcp_available。
+    B7: session_id 用于 per-session MCP bridge state 隔离。
     """
     import os
 
@@ -480,7 +495,7 @@ def _init_mcp_bridge_if_enabled() -> None:
             dry_run=dry_run,
         )
         # Loop 3.3: 更新决策脊柱 mcp_available 状态
-        set_mcp_bridge_result(report.tools_registered)
+        set_mcp_bridge_result(report.tools_registered, session_id=session_id)
 
         # Loop 2.4: 通过 disposable dispatcher 记录 MCP_BRIDGE_LIFECYCLE evidence
         _try_dispatch_mcp_bridge_lifecycle(report, mode, dry_run)
@@ -524,13 +539,14 @@ def main(argv: list[str] | None = None) -> int:
     if command_result is not None:
         return command_result
 
+    # B7: session_id 在 main() startup 时生成（非 import-time），
+    # 必须在 MCP bridge 初始化之前生成，以确保 per-session MCP state 隔离。
+    _session_id = str(uuid4())
+
     # MCP bridge：受控 readiness 层，默认 disabled。
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
-    _init_mcp_bridge_if_enabled()
-
-    # B7: session_id 在 main() startup 时生成（非 import-time）
-    _session_id = str(uuid4())
+    _init_mcp_bridge_if_enabled(session_id=_session_id)
     init_session(session_id=_session_id)
     try_resume_from_checkpoint()
 
@@ -552,9 +568,9 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     if _selected_input_backend() == "textual":
-        run_textual_main_loop(event_log_writer=_event_log_writer)
+        run_textual_main_loop(event_log_writer=_event_log_writer, session_id=_session_id)
     else:
-        main_loop(event_log_writer=_event_log_writer)
+        main_loop(event_log_writer=_event_log_writer, session_id=_session_id)
     return 0
 
 

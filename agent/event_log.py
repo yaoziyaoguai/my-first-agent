@@ -13,8 +13,19 @@ from typing import Any
 
 # 脱敏正则
 _KEY_REDACT_RE = re.compile(r"sk-[a-z]+(?:-[a-zA-Z0-9]+)*-[a-zA-Z0-9]{8,}")
-_BEARER_REDACT_RE = re.compile(r"Bearer [a-zA-Z0-9_\-]{20,}")
-# 长 token 字符串（base64-like, hex, 或随机字符串 >= 32 chars）
+_BEARER_REDACT_RE = re.compile(r"Bearer [a-zA-Z0-9_\-+/=]{20,}")
+# env-var 赋值形态：OPENAI_API_KEY=sk-xxx, ANTHROPIC_API_KEY=..., *_API_KEY=... 等
+_ENV_ASSIGN_SECRET_RE = re.compile(
+    r"\b[A-Z][A-Z0-9_]*(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE|KEY)"
+    r"[A-Z0-9_]*\s*=\s*[^\s,;}\]\)]+",
+    re.IGNORECASE,
+)
+# JWT token: eyJ... (base64url of {"alg"...}) . payload . signature
+_JWT_RE = re.compile(r"eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+")
+# long hex strings (40+ hex chars, like raw tokens; exclude all-same-char strings)
+_LONG_HEX_TOKEN_RE = re.compile(r"\b(?!([a-fA-F0-9])\1{39,})[a-fA-F0-9]{40,}\b")
+# long base64-like strings (40+ chars with character diversity — not all same char)
+_LONG_B64_TOKEN_RE = re.compile(r"(?!([a-zA-Z0-9_\-+/=])\1{39,})[a-zA-Z0-9_\-+/=]{40,}")
 # 需要脱敏的字段名（大小写不敏感）
 _SECRET_FIELD_PATTERNS = (
     "key", "token", "secret", "password", "authorization", "api_key",
@@ -58,11 +69,24 @@ def _map_source_to_subsystem(source: str) -> str:
 
 
 def _redact_value(value: str) -> str:
-    """对单个字符串值脱敏。"""
+    """对单个字符串值脱敏（纯值扫描，不依赖字段名）。"""
     if not isinstance(value, str):
         return value
+    # JWT tokens — 在 Bearer/sk- 之前处理，避免 Bearer regex 截断 JWT 中的 '.'
+    value = _JWT_RE.sub("<REDACTED>", value)
+    # sk-... API key
     value = _KEY_REDACT_RE.sub("<REDACTED>", value)
+    # Bearer token（含 Authorization: Bearer ... 形态）
     value = _BEARER_REDACT_RE.sub("Bearer <REDACTED>", value)
+    # env-var 赋值形态：OPENAI_API_KEY=sk-xxx 等（只 redact value 部分）
+    value = _ENV_ASSIGN_SECRET_RE.sub(
+        lambda m: m.group(0).split("=")[0].rstrip() + "=<REDACTED>",
+        value,
+    )
+    # long hex tokens（40+ hex chars，排除全同字符）
+    value = _LONG_HEX_TOKEN_RE.sub("<REDACTED>", value)
+    # long base64-like tokens（40+ chars with character diversity）
+    value = _LONG_B64_TOKEN_RE.sub("<REDACTED>", value)
     return value
 
 

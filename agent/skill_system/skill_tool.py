@@ -104,8 +104,9 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
         "body": body_str,
         "allowed_tools": allowed_tools,
     }
+    from agent.logger import get_runtime_session_id
     from agent.skill_system.lifecycle import get_default_lifecycle
-    _lc = get_default_lifecycle()
+    _lc = get_default_lifecycle(get_runtime_session_id())
     _lc.activate(
         skill_id=skill_id,
         body=body_str,

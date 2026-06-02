@@ -55,6 +55,18 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - **Malformed safety**: 4/4 PASS (M10-M13)。
 - **Current-stage remains closed**。ENV_CONCERN 是环境配置问题，不是 current-stage blocker。
 
+### Next-Stage D-04 — Runtime Gateway Foundation (2026-06-02)
+
+**D-04 B8 real runtime gateway** (handoff §8, §9 Route 1):
+
+- `tui/src/services/` — RuntimeGateway interface + FakeRuntimeAdapter + BlockedRealAdapter 创建。
+- 429/429 TUI tests PASS (含 17 个新 gateway tests)。tsc clean。
+- FakeRuntimeAdapter 保持当前 fake/local 行为，`source: "fake"` 标注。
+- BlockedRealAdapter 返回 explicit blocked message，不静默 fallback 到 fake。
+- 不读 .env，不调 core.chat()，不调真实 provider，不创建第二 runtime，不绕过 ToolRuntimeMediator。
+- TUI default entry NOT ACTIVATED。
+- **Status**: ACTIVE — contract + fake adapter delivered。Real gateway adapter blocked by user authorization。
+
 ---
 
 ## B8 M1 — Interaction-first Workbench MVP (2026-06-02)

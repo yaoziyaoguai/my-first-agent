@@ -1,9 +1,9 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { PendingAction } from "../data/pendingAction";
+import type { PendingActionProjection } from "../services";
 
 interface PendingActionPanelProps {
-  actions: PendingAction[];
+  actions: PendingActionProjection[];
   focused: boolean;
   highlightedIdx: number;
   onApprove: (actionId: string) => void;

@@ -1,13 +1,13 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { RuntimeMessage } from "../data/fakeRuntimeGateway";
+import type { InteractionMessage } from "../services";
 
 interface InteractionPanelProps {
   focused: boolean;
   /** 当前选中的 lens 信息 */
   lensLabel: string;
   /** M3: conversation message history */
-  messages: RuntimeMessage[];
+  messages: InteractionMessage[];
 }
 
 const ROLE_COLORS: Record<string, string> = {

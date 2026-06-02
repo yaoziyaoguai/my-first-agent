@@ -186,3 +186,13 @@ b3e0863 `validation(evidence): validate scheduler model generated plan`:
 
 REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 scope caveats（prompt-steered, single-skill）为非 blocker 限制。
 002 的多语言 skill manifest / 非 prompt-steered activation 设计是 **future debt**，归入下一阶段 D-09，不阻塞 current-stage close-out。
+
+### 2026-06-02 — Next-Stage D-04 Runtime Gateway Foundation
+
+**D-04 B8 real runtime gateway** (handoff §8, §9 Route 1):
+
+- `tui/src/services/` 创建: RuntimeGateway interface + FakeRuntimeAdapter (包装现有 fake/local) + BlockedRealAdapter (explicit blocked message, no silent fallback)。
+- 429/429 TUI tests PASS (17 new gateway tests)。tsc clean。
+- WorkbenchLayout 已从 services 导入 gateway，不再直接 import fakeRuntimeGateway/pendingAction。
+- 不读 .env，不调 core.chat()，不调真实 provider。
+- Contract delivered。Real gateway adapter requires user authorization。

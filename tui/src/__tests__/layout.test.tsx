@@ -10,6 +10,7 @@ import {
   type PendingAction,
   type ControlledOperationGateway,
 } from "../data/pendingAction";
+import type { PendingActionProjection } from "../services";
 import { WorkbenchLayout, lensMatch } from "../components/WorkbenchLayout";
 import { AgentLensPanel } from "../components/AgentLensPanel";
 import { InteractionPanel } from "../components/InteractionPanel";
@@ -436,7 +437,7 @@ describe("M5 Pending Action — ControlledOperationGateway", () => {
 });
 
 describe("M5 Pending Action — PendingActionPanel", () => {
-  const pendingAction: PendingAction = {
+  const pendingAction: PendingActionProjection = {
     actionId: "pending-1",
     type: "tool_confirmation",
     title: "Execute Tool",
@@ -446,7 +447,7 @@ describe("M5 Pending Action — PendingActionPanel", () => {
     createdAt: Date.now(),
     selectedLens: MOCK_LENS_FOR_M5,
     requiresConfirmation: true,
-    source: "fake/local",
+    source: "fake",
   };
 
   it("renders with single pending action", () => {
@@ -473,7 +474,7 @@ describe("M5 Pending Action — PendingActionPanel", () => {
   });
 
   it("renders with approved action showing outcome", () => {
-    const approvedAction: PendingAction = {
+    const approvedAction: PendingActionProjection = {
       ...pendingAction,
       status: "approved",
       outcomeMessage: "[fake/local] APPROVED: test",
@@ -489,7 +490,7 @@ describe("M5 Pending Action — PendingActionPanel", () => {
   });
 
   it("renders with rejected action showing outcome", () => {
-    const rejectedAction: PendingAction = {
+    const rejectedAction: PendingActionProjection = {
       ...pendingAction,
       status: "rejected",
       outcomeMessage: "[fake/local] REJECTED: test",

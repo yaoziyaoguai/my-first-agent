@@ -3,12 +3,12 @@ import { Box, Text, useInput, useApp } from "ink";
 import type { FocusZone, SelectedLens } from "../types";
 import { EMPTY_SELECTED_LENS } from "../types";
 import { AGENT_LENS_FIXTURE } from "../data/agentLensFixture";
-import { fakeRuntimeSend, makeUserMessage, type RuntimeMessage } from "../data/fakeRuntimeGateway";
 import {
-  generateFakePendingActions,
-  createFakeGateway,
-  type PendingAction,
-} from "../data/pendingAction";
+  createFakeRuntimeAdapter,
+  type RuntimeGateway,
+  type RuntimeResponse,
+  type PendingActionProjection,
+} from "../services";
 import { AgentLensPanel } from "./AgentLensPanel";
 import { InteractionPanel } from "./InteractionPanel";
 import { ContextPanel } from "./ContextPanel";
@@ -50,17 +50,18 @@ function lensToLabel(lens: SelectedLens): string {
 }
 
 /** B8 Interaction-first Workbench — 唯一默认主界面。
- *  M2: selectedLens 驱动, M3: fake/local interaction, M4: Context refresh。
+ *  M2: selectedLens 驱动, M3: fake/local interaction (via RuntimeGateway), M4: Context refresh。
+ *  D-04: gateway 通过 RuntimeGateway 接口接入，默认使用 FakeRuntimeAdapter。
  *  所有 Operation / AutoRun / Project management displays: PAUSED。 */
 export function WorkbenchLayout() {
   const { exit } = useApp();
   const [focusZone, setFocusZone] = useState<FocusZone>("interaction");
   const [selectedLens, setSelectedLens] = useState<SelectedLens>(EMPTY_SELECTED_LENS);
-  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
-  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [messages, setMessages] = useState<RuntimeResponse["messages"]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingActionProjection[]>([]);
   const [highlightedPendingIdx, setHighlightedPendingIdx] = useState(0);
 
-  const gateway = React.useMemo(() => createFakeGateway(), []);
+  const gateway: RuntimeGateway = React.useMemo(() => createFakeRuntimeAdapter(), []);
   const historySource: HistorySource = React.useMemo(() => createFakeHistorySource(), []);
   const eventReader: EventStreamReader = React.useMemo(() => createEventStreamReader(), []);
   const { events: fixtureEvents, errors: fixtureErrors } = React.useMemo(
@@ -80,64 +81,76 @@ export function WorkbenchLayout() {
 
   const handleLensSelect = useCallback((lens: SelectedLens) => {
     setSelectedLens(lens);
-    // 切换到新的 lens 时清空消息
     setMessages([]);
   }, []);
 
   const handleSubmit = useCallback(
-    (content: string) => {
+    async (content: string) => {
       if (!selectedLens.agentId) return;
-      const userMsg = makeUserMessage(content);
-      const assistantMsg = fakeRuntimeSend(content, selectedLens.agentId);
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
-
-      const actions = generateFakePendingActions(selectedLens, content);
-      if (actions.length > 0) {
-        setPendingActions((prev) => [...prev, ...actions]);
+      const response = await gateway.send({
+        userInput: content,
+        lens: selectedLens,
+        interactionId: `ix-${Date.now()}`,
+      });
+      setMessages((prev) => [...prev, ...response.messages]);
+      if (response.pendingActions.length > 0) {
+        setPendingActions((prev) => [...prev, ...response.pendingActions]);
         setFocusZone("interaction");
       }
     },
-    [selectedLens],
+    [selectedLens, gateway],
   );
 
   const handleApprove = useCallback(
-    (actionId: string) => {
+    async (actionId: string) => {
+      const result = await gateway.approve({
+        actionId,
+        lens: selectedLens,
+      });
+      setMessages((prevMsgs) => [
+        ...prevMsgs,
+        {
+          id: `outcome-${result.actionId}`,
+          role: "system",
+          content: result.outcomeMessage,
+          timestamp: result.resolvedAt,
+        },
+      ]);
       setPendingActions((prev) =>
-        prev.map((a) => {
-          if (a.actionId !== actionId) return a;
-          const result = gateway.approve(a);
-          const outcomeMsg: RuntimeMessage = {
-            id: `outcome-${result.actionId}`,
-            role: "system",
-            content: result.outcomeMessage,
-            timestamp: result.resolvedAt,
-          };
-          setMessages((prevMsgs) => [...prevMsgs, outcomeMsg]);
-          return { ...a, status: result.status, outcomeMessage: result.outcomeMessage };
-        }),
+        prev.map((a) =>
+          a.actionId !== actionId
+            ? a
+            : { ...a, status: result.status as PendingActionProjection["status"], outcomeMessage: result.outcomeMessage },
+        ),
       );
     },
-    [gateway],
+    [selectedLens, gateway],
   );
 
   const handleReject = useCallback(
-    (actionId: string) => {
+    async (actionId: string) => {
+      const result = await gateway.reject({
+        actionId,
+        lens: selectedLens,
+      });
+      setMessages((prevMsgs) => [
+        ...prevMsgs,
+        {
+          id: `outcome-${result.actionId}`,
+          role: "system",
+          content: result.outcomeMessage,
+          timestamp: result.resolvedAt,
+        },
+      ]);
       setPendingActions((prev) =>
-        prev.map((a) => {
-          if (a.actionId !== actionId) return a;
-          const result = gateway.reject(a);
-          const outcomeMsg: RuntimeMessage = {
-            id: `outcome-${result.actionId}`,
-            role: "system",
-            content: result.outcomeMessage,
-            timestamp: result.resolvedAt,
-          };
-          setMessages((prevMsgs) => [...prevMsgs, outcomeMsg]);
-          return { ...a, status: result.status, outcomeMessage: result.outcomeMessage };
-        }),
+        prev.map((a) =>
+          a.actionId !== actionId
+            ? a
+            : { ...a, status: result.status as PendingActionProjection["status"], outcomeMessage: result.outcomeMessage },
+        ),
       );
     },
-    [gateway],
+    [selectedLens, gateway],
   );
 
   const pendingCount = pendingActions.filter((a) => a.status === "pending" && lensMatch(a.selectedLens, selectedLens)).length;

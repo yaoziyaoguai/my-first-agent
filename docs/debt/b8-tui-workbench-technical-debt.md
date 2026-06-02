@@ -163,5 +163,6 @@ B7 readiness SDD
 | TUI default entry | **NOT ACTIVATED** — 用户批准前不激活 |
 | CLI fallback | **RETAINED** — CLI 为显式 fallback, 永不删除 |
 | Product readiness | **NOT PRODUCT-READY** — 不声称 production-ready |
+| D-04 Runtime Gateway | **ACTIVE** — contract + FakeRuntimeAdapter + BlockedRealAdapter delivered (429/429 TUI tests PASS)；real gateway blocked by user authorization。SDD: `docs/design/runtime-gateway-foundation-sdd.md` |
 
-**当前阶段**: close-out candidate — B8 fake/local foundation 可阶段性收口；remaining debt 属于 default-entry/user approval、真实 runtime adapter、IME/paste、多实例真实 identity，不是当前 blocker。
+**当前阶段**: post-closeout next-stage — D-04 gateway foundation delivered；next: D-02/D-09 per handoff inventory。

@@ -279,8 +279,8 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
     ),
     "subagent.delegate": BranchPointState(
         branch_id="subagent.delegate",
-        status=BranchPointStatus.PARTIAL,
-        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        status=BranchPointStatus.READY,
+        evidence_level=EvidenceLevel.REAL_API_INTERACTIVE,
         trigger_condition="每 turn turn-end hook (SUBAGENT_DELEGATE_L0 probe) + "
                           "CLI delegate/NL delegation shortcut (SUBAGENT_DELEGATE_L1 business)",
         execution_path="L1: CLI delegation → dispatcher.route(SUBAGENT_DELEGATE_L1) → "
@@ -293,16 +293,15 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
                        "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback)",
         result_feedback_path="L1: provider 实际返回 summary + child memory store write; "
                              "L0: deterministic keyword-match",
-        not_ready_behavior="L1 code path complete (child loop + parent-mediated tools + "
-                           "parent-mediated memory scope), "
-                           "真实 provider child loop dogfood pending (REAL-EVIDENCE-006)",
+        not_ready_behavior="L1 代码路径完整 (REAL-EVIDENCE-006 CLOSED: 12/12 PASS); "
+                           "L2 native loop SPEC 就绪, gated behind policy; "
+                           "TOOL_MEDIATOR_GAP 已知 (production call site fix pending)",
         decision_meta={
-            "why_partial": "L1 code path complete: execute_l1() 调用 provider.create(), "
-                           "child tool_use 经 mediate_child_tool_request() 走 parent pipeline, "
-                           "child memory 经 mediate_child_memory_request() 走 parent store "
-                           "(namespaced, dispatcher evidence, memory_scope=none/propose), "
-                           "CLI shortcut 迁入 dispatcher path (SUBAGENT_DELEGATE_L1); "
-                           "真实 provider child loop dogfood 未验证 (REAL-EVIDENCE-006)",
+            "why_active": "REAL-EVIDENCE-006 CLOSED (credible): "
+                          "完整 parent→child→tool mediation→result→adjudication "
+                          "evidence chain 通过真实 provider E2E 验证 (12/12 PASS); "
+                          "L2 native loop SDD delivered (D-01), "
+                          "implementation + real provider dogfood deferred",
         },
     ),
     "checkpoint.save": BranchPointState(
@@ -513,11 +512,14 @@ class RuntimeDecisionFrame:
     mcp_branch_points: tuple[str, ...] = ("mcp.discover", "mcp.invoke")
 
     # ── SubAgent 层 ──
-    subagent_available: bool = False
-    """SubAgent 是否可用（当前仅 L0 fake/demo）。"""
+    subagent_available: bool = True
+    """SubAgent 是否可用（L1 已验证, REAL-EVIDENCE-006 CLOSED）。"""
 
-    subagent_level: str = "L0"
-    """SubAgent 级别：L0 (fake/demo) / L1 / L2。"""
+    subagent_level: str = "L1"
+    """SubAgent 级别：L0 (fake/demo) / L1 / L2。L1 是生产基线。"""
+
+    subagent_l2_gated: bool = True
+    """L2 是否被 policy gate 拦截（real_llm_tool_requesting_allowed）。"""
 
     subagent_branch_points: tuple[str, ...] = ("subagent.delegate",)
 
@@ -649,8 +651,9 @@ def build_decision_frame(
     memory_type: str = "unknown",
     tool_gate_tool_name: str = "_safe_noop",
     mcp_available: bool = False,
-    subagent_available: bool = False,
-    subagent_level: str = "L0",
+    subagent_available: bool = True,
+    subagent_level: str = "L1",
+    subagent_l2_gated: bool = True,
     checkpoint_pending: bool = False,
     confirmation_required: bool = False,
     evidence_level: EvidenceLevel = EvidenceLevel.DOCS_DESIGN,
@@ -684,6 +687,7 @@ def build_decision_frame(
         mcp_branch_points=("mcp.discover", "mcp.invoke"),
         subagent_available=subagent_available,
         subagent_level=subagent_level,
+        subagent_l2_gated=subagent_l2_gated,
         checkpoint_pending=checkpoint_pending,
         confirmation_required=confirmation_required,
         evidence_level=evidence_level,
@@ -792,8 +796,9 @@ def build_decision_frame_from_chat_params(
         memory_explicit_request=False,  # 由 evaluate_user_text 后置判定
         tool_gate_tool_name=gate_name,
         mcp_available=_mcp_active,
-        subagent_available=False,  # 仅 L0 fake/demo
-        subagent_level="L0",
+        subagent_available=True,   # L1 已验证 (REAL-EVIDENCE-006 CLOSED)
+        subagent_level="L1",       # L1 是生产基线
+        subagent_l2_gated=True,    # L2 gated behind policy
         evidence_level=ev_level,
         decision_meta={
             "has_dispatcher": runtime_action_dispatcher is not None,

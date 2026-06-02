@@ -40,11 +40,18 @@ def test_branch_point_registry_has_20_points():
 
 
 def test_no_branch_point_is_ready():
-    """当前阶段没有任何 branch point 应标 READY。"""
+    """只有 subagent.delegate 应标 READY——REAL-EVIDENCE-006 CLOSED (12/12 PASS)。"""
+    ready_ids = {"subagent.delegate"}
     for bp in list_branch_points():
-        assert bp.status != BranchPointStatus.READY, (
-            f"{bp.branch_id} 不应标 READY——当前没有子系统完成生产级主路径验证"
-        )
+        if bp.branch_id in ready_ids:
+            assert bp.status == BranchPointStatus.READY, (
+                f"{bp.branch_id} 应标 READY——"
+                f"REAL-EVIDENCE-006 CLOSED (12/12 real provider E2E PASS)"
+            )
+        else:
+            assert bp.status != BranchPointStatus.READY, (
+                f"{bp.branch_id} 不应标 READY——当前没有子系统完成生产级主路径验证"
+            )
 
 
 def test_all_branch_points_have_evidence_level():
@@ -125,17 +132,17 @@ def test_mcp_invoke_is_partial():
     )
 
 
-def test_subagent_delegate_is_partial():
-    """subagent.delegate 标 PARTIAL——L1 code path complete, real dogfood pending。"""
+def test_subagent_delegate_is_ready():
+    """subagent.delegate 标 READY——REAL-EVIDENCE-006 CLOSED (12/12 PASS)。"""
     bp = get_branch_point("subagent.delegate")
     assert bp is not None
-    assert bp.status == BranchPointStatus.PARTIAL, (
-        f"subagent.delegate 应标 PARTIAL 而非 {bp.status}——"
-        f"L1 code path complete (execute_l1 + delegate_l1 + CLI dispatcher migration)"
+    assert bp.status == BranchPointStatus.READY, (
+        f"subagent.delegate 应标 READY 而非 {bp.status}——"
+        f"REAL-EVIDENCE-006 CLOSED (12/12 real provider E2E PASS)"
     )
-    assert not bp.is_capability_complete(), "PARTIAL 不应声称 capability complete"
-    assert "REAL-EVIDENCE-006" in str(bp.decision_meta.get("why_partial", "")), (
-        "subagent.delegate 的 why_partial 必须引用 REAL-EVIDENCE-006"
+    assert bp.is_capability_complete(), "READY 应声称 capability complete"
+    assert "REAL-EVIDENCE-006" in str(bp.decision_meta.get("why_active", "")), (
+        "subagent.delegate 的 why_active 必须引用 REAL-EVIDENCE-006"
     )
 
 
@@ -186,7 +193,7 @@ def test_build_decision_frame_minimal():
     assert frame.provider_mode == "unknown"
     assert not frame.skill_registry_active
     assert not frame.mcp_available
-    assert frame.subagent_level == "L0"
+    assert frame.subagent_level == "L1"
 
 
 def test_build_decision_frame_with_fake_provider():
@@ -221,9 +228,11 @@ def test_build_decision_frame_marks_model_memory_as_deferred():
 
 
 def test_build_decision_frame_no_silent_ready():
-    """没有任何子系统自动标 READY——必须显式传入证据。"""
+    """除 subagent.delegate 外，无子系统自动标 READY。"""
     frame = build_decision_frame("test")
     for bp_id, bp in frame.get_branch_point_states().items():
+        if bp_id == "subagent.delegate":
+            continue  # REAL-EVIDENCE-006 CLOSED → legitimately READY
         assert bp.status != BranchPointStatus.READY, (
             f"{bp_id} 不应在最小参数构造时自动标 READY"
         )
@@ -239,9 +248,11 @@ def test_capability_summary_never_claims_complete():
     assert not summary["can_claim_capability_complete"], (
         "当前没有任何子系统达到生产级完成度，不应声称 capability complete"
     )
-    assert summary["ready"] == 0
-    # Loop 2.4: MCP branch points 从 DEFERRED 迁入 PARTIAL 后，
-    # not_ready 可能为 0，但 partial 应 > 0（有 PARTIAL/FAKE_DEMO 子系统）
+    # subagent.delegate 已标 READY (REAL-EVIDENCE-006 CLOSED)
+    assert summary["ready"] == 1, (
+        f"subagent.delegate (REAL-EVIDENCE-006 CLOSED) 应计入 ready: {summary}"
+    )
+    # 仍有 PARTIAL 或 FAKE_DEMO 子系统
     assert summary["partial"] > 0 or summary["fake_demo"] > 0, (
         f"应有 PARTIAL 或 FAKE_DEMO 子系统: partial={summary['partial']}, "
         f"fake_demo={summary['fake_demo']}"
@@ -255,10 +266,10 @@ def test_all_branch_point_ids_returns_all():
     assert len(ids) == 20, f"应有 20 个 branch point IDs: {len(ids)}"
 
 
-def test_ready_count_is_zero():
-    """ready_count 在当前状态下应为 0。"""
+def test_ready_count_is_one():
+    """ready_count 应为 1——subagent.delegate 已 READY (REAL-EVIDENCE-006 CLOSED)。"""
     frame = build_decision_frame("test")
-    assert frame.ready_count() == 0
+    assert frame.ready_count() == 1
 
 
 def test_partial_count_positive():
@@ -311,10 +322,12 @@ def test_count_by_status_sum_is_20():
     assert total == 20, f"状态计数总和应为 20: {counts}"
 
 
-def test_count_by_status_has_no_ready():
-    """count_by_status 不应有 READY 计数。"""
+def test_count_by_status_has_one_ready():
+    """count_by_status 应有 1 个 READY——subagent.delegate。"""
     counts = count_by_status()
-    assert BranchPointStatus.READY not in counts or counts[BranchPointStatus.READY] == 0
+    assert counts.get(BranchPointStatus.READY, 0) == 1, (
+        f"subagent.delegate 应计入 READY: {counts}"
+    )
 
 
 # ── no-crash 不能是 capability PASS 合约 ───────────────────────────────────────
@@ -422,7 +435,7 @@ def test_chat_decision_frame_mcp_not_available_by_default():
 
 
 def test_chat_decision_frame_subagent_not_available():
-    """默认 chat 路径 SubAgent 不应标可用——仅 L0 fake/demo。"""
+    """默认 chat 路径 SubAgent 应标可用——L1 已验证 (REAL-EVIDENCE-006 CLOSED)。"""
     import agent.core as core
 
     core.state.reset_task()
@@ -430,7 +443,7 @@ def test_chat_decision_frame_subagent_not_available():
 
     frame = get_last_decision_frame()
     assert frame is not None
-    assert not frame.subagent_available, (
-        "默认 chat 路径 SubAgent 不应标可用——"
-        "L0 fake/demo 不是成熟 SubAgent E2E"
+    assert frame.subagent_available, (
+        "默认 chat 路径 SubAgent 应标可用——"
+        "L1 已验证 (REAL-EVIDENCE-006 CLOSED: 12/12 PASS)"
     )

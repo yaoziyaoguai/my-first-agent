@@ -3,6 +3,8 @@
 **最后更新**: 2026-06-02 (current-stage frozen — close-out handoff delivered)
 **Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
+**TUI Visual Target**: `docs/design/first-agent-tui-visual-target-v1.md` — 22 组件映射、6 区域布局合同、data source policy。独立审计: **ACCEPTED-WITH-CAVEATS**（3 caveats 不阻塞 Slice A）。
+**TUI Slice A Plan**: `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md` — 28 new files + 3 test files。static visual shell + mock data + theme + tests。不接 runtime/provider/MCP。
 **状态**: **CURRENT-STAGE FROZEN — yes-with-caveats**。B7 **closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付 (accepted, final caveats closed, 2f995b9)。412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。下一阶段需重新 SPEC/TDD/Review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。

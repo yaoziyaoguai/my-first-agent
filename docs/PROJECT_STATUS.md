@@ -90,16 +90,21 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - Non-prompt-steered real model validation: **future real-env task**。
 - **Status**: ACTIVE — Plan 3 manifest fields 已接入确定性选择器。002 保持 credible (12/12 PASS)。
 
-### Next-Stage D-01 — SubAgent L2 Native Loop SDD (2026-06-02)
+### Next-Stage D-01 — SubAgent L2 Native Loop (COMPLETED — 2026-06-02)
 
 **D-01 B3 SubAgent L2 native loop** (handoff §8, future debt):
 
 - SPEC delivered: `docs/design/subagent-l2-native-loop-sdd.md`。
-- L2 定义：independent stop condition、parent adjudication mandatory gate、child-initiated revision、batched memory proposals、deepened tool access (grep/glob)、legacy L0 shortcut removal。
-- 8 files identified for implementation (executor/delegation/result/runtime/decision_frame/schema/handler/phase1_hook)。
-- L2 gated behind `SubAgentPolicy.real_llm_tool_requesting_allowed`。
-- Implementation + real provider dogfood: **future task**.
-- **Status**: ACTIVE — SPEC delivered。Implementation pending.
+- **Implementation delivered** (6498c52):
+  - S1: `TASK_COMPLETED_BY_CHILD` 枚举 + `batch_memory_proposals`/`revision_history` 类型扩展。
+  - S2: `execute_l2()` — child turn loop、end_turn 检测、bracket-counting `_parse_batch_memory()`。
+  - S3: `delegate_l2()` — revision loop + adjudication gate (accept/reject/request_revision/ask_user) + `is_l2_gated`/`l2_available` runtime helpers。
+  - S4: `SUBAGENT_DELEGATE_L2`/`SUBAGENT_CHILD_BATCH_MEMORY` action types + `SubAgentDelegateL2Handler` + phase1_hook 注册。
+  - S5: 20 L2 contract tests with `_SpyProvider` + `_SpyToolMediator`。
+- L2 gated behind `SubAgentPolicy.real_llm_tool_requesting_allowed`（safe default: gated when policy absent）。
+- All tests use `_SpyProvider` — no real API。
+- Real provider dogfood: **future task**.
+- **Status**: COMPLETED。Gates: 20/20 L2 contract + 8/8 delegation contract + 34/34 decision frame + 79/79 docs source-of-truth PASS, ruff clean。
 
 ---
 

@@ -167,3 +167,22 @@ B7 不重新打开，除非出现新的 P0 证据。
 9. 不要恢复 Dashboard / AutoRun / Project Operations / Dynamic Audit
 
 **本 handoff 是下一阶段开发的启动基线。**
+
+---
+
+## 11. Next-Stage Evidence Notes
+
+### 2026-06-02 — Post-Closeout 008 Re-Validation
+
+b3e0863 `validation(evidence): validate scheduler model generated plan`:
+
+- REAL-EVIDENCE-008 v3 re-validation ran post-closeout。
+- **ENV_CONCERN**: `config.yaml` provider.api_key 是 `sk-REPLACE_ME` 占位符（SEC-001），模型调用返回 401。
+- 008 caveat 已于 2026-05-31 关闭（v3: 14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN），当前 ENV_CONCERN **不重新打开 caveat**。
+- 104/104 scheduler focused tests PASS。Malformed safety 4/4 PASS。
+- ENV_CONCERN 是环境配置问题，非代码缺陷，非 current-stage blocker。
+
+### 002 Skill Selection Design
+
+REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 scope caveats（prompt-steered, single-skill）为非 blocker 限制。
+002 的多语言 skill manifest / 非 prompt-steered activation 设计是 **future debt**，归入下一阶段 D-09，不阻塞 current-stage close-out。

@@ -46,6 +46,15 @@ Close-out audit report: `docs/audit/b1-b8-current-stage-close-out-audit.md`.
 
 Current-stage close-out: **FROZEN — yes-with-caveats** (final baseline: `60fd71e`)。不进入 B9。下一阶段以 handoff doc 为启动基线。Remaining caveats are documented future debt or validation-scope caveats, not current blockers. Not product-ready。
 
+### Post-Closeout Evidence Maintenance (2026-06-02)
+
+b3e0863 `validation(evidence): validate scheduler model generated plan` — post-closeout REAL-EVIDENCE-008 re-validation:
+
+- **104/104 scheduler focused tests PASS**, ruff clean.
+- **ENV_CONCERN**: `config.yaml` api_key 是 `sk-REPLACE_ME` 占位符（SEC-001），模型调用返回 401，无法重新验证 model-generated ActionPlan JSON。这不是代码缺陷，不是 MODEL_BEHAVIOR_CONCERN。008 caveat 已于 2026-05-31 关闭（v3: 14/14 PASS），当前 ENV_CONCERN 不重新打开 caveat。
+- **Malformed safety**: 4/4 PASS (M10-M13)。
+- **Current-stage remains closed**。ENV_CONCERN 是环境配置问题，不是 current-stage blocker。
+
 ---
 
 ## B8 M1 — Interaction-first Workbench MVP (2026-06-02)

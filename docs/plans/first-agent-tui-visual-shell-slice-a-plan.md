@@ -2,7 +2,7 @@
 
 **创建日期**: 2026-06-02
 **上游文档**: `docs/design/first-agent-tui-visual-target-v1.md` (Visual Target, ACCEPTED-WITH-CAVEATS)
-**状态**: READY — 等待用户批准后进入实现
+**状态**: **IMPLEMENTED** — 2026-06-02 全部交付
 
 ---
 

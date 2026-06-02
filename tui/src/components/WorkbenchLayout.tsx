@@ -15,6 +15,8 @@ import { ContextPanel } from "./ContextPanel";
 import { InputBar } from "./InputBar";
 import { StatusBar } from "./StatusBar";
 import { PendingActionPanel } from "./PendingActionPanel";
+import { HistoryPanel } from "./HistoryPanel";
+import { createFakeHistorySource, type HistorySource } from "../data/agentHistoryIndex";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
@@ -40,6 +42,7 @@ export function WorkbenchLayout() {
   const [highlightedPendingIdx, setHighlightedPendingIdx] = useState(0);
 
   const gateway = React.useMemo(() => createFakeGateway(), []);
+  const historySource: HistorySource = React.useMemo(() => createFakeHistorySource(), []);
 
   const cycleFocus = useCallback((direction: 1 | -1) => {
     setFocusZone((prev) => {
@@ -210,6 +213,15 @@ export function WorkbenchLayout() {
         onApprove={handleApprove}
         onReject={handleReject}
       />
+
+      {/* M6 — HistoryPanel（只读 projection） */}
+      {hasSelection && (
+        <HistoryPanel
+          focused={focusZone === "context"}
+          agentId={selectedLens.agentId}
+          historySource={historySource}
+        />
+      )}
 
       {/* 分隔线 */}
       <Box>

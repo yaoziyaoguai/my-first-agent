@@ -538,6 +538,231 @@ describe("M5 Pending Action — ContextPanel with pending", () => {
 });
 
 // ============================================================
+// M6 — Multi-instance History Foundation tests
+// ============================================================
+
+import {
+  EVIDENCE_NAMESPACE_CATALOG,
+  DEFAULT_STORAGE_CONTRACT,
+  isEvidenceRegistered,
+  filterByKind,
+  getMultiRunEvidences,
+  validateFileName,
+  type EvidenceNamespace,
+  type MultiRunStorageContract,
+} from "../data/evidenceNamespace";
+import {
+  createFakeHistorySource,
+  filterRunsByStatus,
+  getEvidenceStatusSummary,
+  getGateStatusSummary,
+  type HistorySource,
+  type AgentHistoryIndex,
+  type RunHistory,
+} from "../data/agentHistoryIndex";
+import { HistoryPanel } from "../components/HistoryPanel";
+
+describe("M6 Evidence Namespace — Contract", () => {
+  it("catalog has 8 evidence entries", () => {
+    expect(EVIDENCE_NAMESPACE_CATALOG).toHaveLength(8);
+  });
+
+  it("all entries have unique evidenceId", () => {
+    const ids = EVIDENCE_NAMESPACE_CATALOG.map((e) => e.evidenceId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("all entries are kind 'global' (current baseline)", () => {
+    for (const ns of EVIDENCE_NAMESPACE_CATALOG) {
+      expect(ns.kind).toBe("global");
+    }
+  });
+
+  it("isEvidenceRegistered returns true for known evidence", () => {
+    expect(isEvidenceRegistered("evidence-001")).toBe(true);
+    expect(isEvidenceRegistered("evidence-008")).toBe(true);
+  });
+
+  it("isEvidenceRegistered returns false for unknown evidence", () => {
+    expect(isEvidenceRegistered("evidence-999")).toBe(false);
+  });
+
+  it("filterByKind returns correct subset", () => {
+    const globals = filterByKind("global");
+    expect(globals).toHaveLength(8);
+    const perRun = filterByKind("per-run");
+    expect(perRun).toHaveLength(0);
+  });
+
+  it("getMultiRunEvidences returns empty (no multi-run yet)", () => {
+    const multi = getMultiRunEvidences();
+    // Currently all are multiRun: false — B7 readiness pending
+    expect(multi).toHaveLength(0);
+  });
+});
+
+describe("M6 MultiRunStorageContract — Contract", () => {
+  it("default contract has expected values", () => {
+    expect(DEFAULT_STORAGE_CONTRACT.fileNaming).toBe("{evidence_id}-{run_id}.json");
+    expect(DEFAULT_STORAGE_CONTRACT.storageRoot).toBe("docs/dogfood/");
+    expect(DEFAULT_STORAGE_CONTRACT.ttlDays).toBe(90);
+    expect(DEFAULT_STORAGE_CONTRACT.autoCleanup).toBe(false);
+    expect(DEFAULT_STORAGE_CONTRACT.maxRuns).toBe(50);
+  });
+
+  it("validateFileName accepts valid {evidence_id}-{run_id}.json", () => {
+    expect(validateFileName("evidence-001-run-abc.json", DEFAULT_STORAGE_CONTRACT)).toBe(true);
+  });
+
+  it("validateFileName rejects invalid names", () => {
+    expect(validateFileName("bad-name.json", DEFAULT_STORAGE_CONTRACT)).toBe(false);
+    expect(validateFileName("evidence-001.json", DEFAULT_STORAGE_CONTRACT)).toBe(false);
+  });
+
+  it("validateFileName with date pattern", () => {
+    const dateContract: MultiRunStorageContract = {
+      ...DEFAULT_STORAGE_CONTRACT,
+      fileNaming: "{date}-{evidence_id}.json",
+    };
+    expect(validateFileName("2026-06-01-evidence-001.json", dateContract)).toBe(true);
+    expect(validateFileName("evidence-001-run-abc.json", dateContract)).toBe(false);
+  });
+});
+
+describe("M6 Agent History — HistorySource", () => {
+  let source: HistorySource;
+
+  beforeEach(() => {
+    source = createFakeHistorySource();
+  });
+
+  it("source is 'fake/local'", () => {
+    expect(source.source).toBe("fake/local");
+  });
+
+  it("listAgentIds returns 3 agents", () => {
+    const ids = source.listAgentIds();
+    expect(ids).toHaveLength(3);
+    expect(ids).toContain("agent-001");
+    expect(ids).toContain("agent-002");
+    expect(ids).toContain("agent-003");
+  });
+
+  it("getAgentHistory returns non-null for known agent", () => {
+    const history = source.getAgentHistory("agent-001");
+    expect(history).not.toBeNull();
+    expect(history!.agentId).toBe("agent-001");
+  });
+
+  it("getAgentHistory returns null for unknown agent", () => {
+    expect(source.getAgentHistory("agent-999")).toBeNull();
+  });
+
+  it("agent history has sessions with runs", () => {
+    const history = source.getAgentHistory("agent-001")!;
+    expect(history.sessions.length).toBeGreaterThanOrEqual(1);
+    for (const session of history.sessions) {
+      expect(session.runs.length).toBeGreaterThanOrEqual(1);
+      for (const run of session.runs) {
+        expect(run.runId).toBeTruthy();
+        expect(run.agentId).toBe("agent-001");
+        expect(run.sessionId).toBe(session.sessionId);
+      }
+    }
+  });
+
+  it("getRunHistory returns run by ID", () => {
+    const run = source.getRunHistory("run-001a1");
+    expect(run).not.toBeNull();
+    expect(run!.runId).toBe("run-001a1");
+    expect(run!.status).toBe("completed");
+  });
+
+  it("getRunHistory returns null for unknown run", () => {
+    expect(source.getRunHistory("run-999")).toBeNull();
+  });
+
+  it("filterRunsByStatus filters correctly", () => {
+    const history = source.getAgentHistory("agent-001")!;
+    const completed = filterRunsByStatus(history, "completed");
+    expect(completed.length).toBeGreaterThanOrEqual(1);
+    for (const run of completed) {
+      expect(run.status).toBe("completed");
+    }
+  });
+
+  it("getEvidenceStatusSummary counts correctly", () => {
+    const history = source.getAgentHistory("agent-001")!;
+    const summary = getEvidenceStatusSummary(history);
+    expect(summary.size).toBeGreaterThan(0);
+    for (const [, counts] of summary) {
+      expect(counts.pass + counts.fail + counts.partial + counts.unknown).toBeGreaterThan(0);
+    }
+  });
+
+  it("getGateStatusSummary counts correctly", () => {
+    const history = source.getAgentHistory("agent-001")!;
+    const summary = getGateStatusSummary(history);
+    expect(summary.size).toBeGreaterThan(0);
+    for (const [, counts] of summary) {
+      expect(counts.pass + counts.fail).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("M6 History — HistoryPanel", () => {
+  const source = createFakeHistorySource();
+
+  it("renders without agent selection", () => {
+    const el = React.createElement(HistoryPanel, {
+      focused: false,
+      agentId: null,
+      historySource: source,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders with known agent", () => {
+    const el = React.createElement(HistoryPanel, {
+      focused: true,
+      agentId: "agent-001",
+      historySource: source,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders with unknown agent (empty state)", () => {
+    const el = React.createElement(HistoryPanel, {
+      focused: false,
+      agentId: "agent-999",
+      historySource: source,
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+describe("M6 Safety — Guard tests", () => {
+  it("HistorySource marker is always 'fake/local'", () => {
+    const source = createFakeHistorySource();
+    expect(source.source).toBe("fake/local");
+  });
+
+  it("HistorySource does not expose any write operations", () => {
+    const source = createFakeHistorySource();
+    // HistorySource interface has only read methods + source marker
+    const keys = Object.keys(source);
+    expect(keys).toContain("source");
+    expect(keys).toContain("getAgentHistory");
+    expect(keys).toContain("getRunHistory");
+    expect(keys).toContain("listAgentIds");
+    // No write methods
+    expect(keys).not.toContain("write");
+    expect(keys).not.toContain("save");
+    expect(keys).not.toContain("update");
+  });
+});
+
+// ============================================================
 // M1+ Safety — unchanged guard tests
 // ============================================================
 

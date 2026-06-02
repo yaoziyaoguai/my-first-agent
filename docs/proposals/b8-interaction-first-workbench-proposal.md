@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench Proposal
 
 **创建日期**: 2026-06-02
-**状态**: PROPOSAL — 待用户审阅
+**状态**: ACCEPTED — M1-M8 delivered (fake/local foundation), accepted-with-caveats pending remediation
 **取代**: B8 原有 "信息展示中心" 产品方向
 **依赖**: B7 current-stage closed (accepted-with-caveats)
 **最近更新**: 2026-06-02 — 方向校准 (Round 1-3): 移除 Project Operations Lens, Audit Lens → Context Panel, Operations PAUSED
@@ -77,7 +77,7 @@ First Agent 是一个**通用 Agent Runtime/Workbench**，不是 coding-engine �
 
 - 展示 agent/session/run/instance 树
 - 支持切换 selected lens
-- 切换后 Interaction View 和 Audit Lens 同步变化
+- 切换后 Interaction View 和 Context Panel 同步变化
 - 状态标记：current / historical / superseded / active / paused / completed / failed
 
 ### 3.2 Interaction View（中间）

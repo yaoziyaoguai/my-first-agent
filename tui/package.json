@@ -1,7 +1,7 @@
 {
   "name": "first-agent-tui",
   "version": "0.1.0",
-  "description": "B8 TypeScript TUI Workbench — Phase 1 static dashboard",
+  "description": "First Agent interaction-first workbench — fake/local MVP",
   "private": true,
   "type": "module",
   "scripts": {

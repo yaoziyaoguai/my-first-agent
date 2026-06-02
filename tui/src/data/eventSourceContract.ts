@@ -169,7 +169,19 @@ function redactObject(
     if (containsSensitiveKey(key, contract)) {
       redactedFields.push(fullKey);
       result[key] = contract.redaction.replacement;
-    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((item, idx) => {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          return redactObject(
+            item as Record<string, unknown>,
+            contract,
+            redactedFields,
+            `${fullKey}[${idx}]`,
+          );
+        }
+        return item;
+      });
+    } else if (value && typeof value === "object") {
       result[key] = redactObject(
         value as Record<string, unknown>,
         contract,

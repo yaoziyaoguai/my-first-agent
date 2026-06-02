@@ -19,8 +19,8 @@
          │ E2E  │  M8 smoke: npm start → 三区域渲染 → q 退出
          ├──────┤
          │ 集成  │  M3: InputBar → FakeRuntimeGateway → InteractionView
-         │      │  M4: selectedLens → AuditLens 刷新
-         │      │  M7: EventStreamReader → AuditLens Event 子面板
+         │      │  M4: selectedLens → ContextPanel 刷新
+         │      │  M7: EventStreamReader → ContextPanel Event 子面板
          ├──────┤
          │ 单元  │  所有 data 层纯函数、组件渲染、状态管理
          └──────┘
@@ -47,8 +47,8 @@
 
 | ID | 测试 | 类别 |
 |----|------|------|
-| M1-L1 | WorkbenchLayout 渲染三区域: AgentLensPanel / InteractionView / AuditLensPanel | 单元 |
-| M1-L2 | 三区域宽度比例: AgentLens 25% / InteractionView 50% / AuditLens 25% | 单元 |
+| M1-L1 | WorkbenchLayout 渲染三区域: AgentLensPanel / InteractionView / ContextPanel | 单元 |
+| M1-L2 | 三区域宽度比例: AgentLens 25% / InteractionView 50% / ContextPanel 25% | 单元 |
 | M1-L3 | InputBar 在底部渲染 | 单元 |
 | M1-L4 | StatusBar 在底部渲染 | 单元 |
 | M1-L5 | 默认焦点在 InputBar | 单元 |
@@ -59,8 +59,8 @@
 | ID | 测试 | 类别 |
 |----|------|------|
 | M1-F1 | Tab 从 InputBar → AgentLensPanel | 单元 |
-| M1-F2 | Tab 从 AgentLensPanel → AuditLensPanel | 单元 |
-| M1-F3 | Tab 从 AuditLensPanel → InputBar（循环） | 单元 |
+| M1-F2 | Tab 从 AgentLensPanel → ContextPanel | 单元 |
+| M1-F3 | Tab 从 ContextPanel → InputBar（循环） | 单元 |
 | M1-F4 | Shift+Tab 反向切换焦点 | 单元 |
 
 ### 2.3 现有资产保留测试 (2)
@@ -108,7 +108,7 @@
 |----|------|------|
 | M2-S1 | selectedLens 变化 → InteractionView 清空对话历史 | 集成 |
 | M2-S2 | selectedLens 变化 → InteractionView 显示新 context（"Agent: X / Session: Y / Run: Z"） | 集成 |
-| M2-S3 | selectedLens 变化 → AuditLens 数据重载 | 集成 |
+| M2-S3 | selectedLens 变化 → ContextPanel 数据重载 | 集成 |
 | M2-S4 | 同一 lens 重复选中不触发重载（幂等） | 单元 |
 
 ### 3.5 M2 禁止项测试 (2)
@@ -178,14 +178,14 @@
 
 ---
 
-## 5. M4 Tests — Dynamic Audit Lens MVP
+## 5. M4 Tests — Context Inspector MVP
 
-### 5.1 Audit Lens 刷新 (4)
+### 5.1 Context Panel 刷新 (4)
 
 | ID | 测试 | 类别 |
 |----|------|------|
-| M4-R1 | AuditLens 随 selectedLens 切换刷新 | 集成 |
-| M4-R2 | Interaction 后 AuditLens 可手动 refresh | 集成 |
+| M4-R1 | ContextPanel 随 selectedLens 切换刷新 | 集成 |
+| M4-R2 | Interaction 后 ContextPanel 可手动 refresh | 集成 |
 | M4-R3 | 空 selectedLens → empty state | 单元 |
 | M4-R4 | 同一 selectedLens 不重复加载（去重） | 单元 |
 
@@ -289,7 +289,7 @@
 
 ---
 
-## 8. M7 Tests — Runtime Event Stream / Audit Lens
+## 8. M7 Tests — Runtime Event Stream / EventPanel
 
 ### 8.1 EventStreamReader (5)
 
@@ -379,7 +379,7 @@
 | M1 Layout | 12 | 2 | 14 |
 | M2 Agent Lens | 13 | 2 | 15 |
 | M3 Interaction MVP | 18 | 2 | 20 |
-| M4 Dynamic Audit | 15 | 0 | 15 |
+| M4 Context Inspector | 15 | 0 | 15 |
 | M5 Pending Action | 9 | 3 | 12 |
 | M6 Multi-instance | 9 | 2 | 11 |
 | M7 Event Stream | 10 | 2 | 12 |

@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — Milestones
 
 **创建日期**: 2026-06-02
-**状态**: DRAFT — 待用户审阅
+**状态**: COMPLETED — M1-M8 delivered (fake/local foundation), accepted-with-caveats pending remediation
 **依赖文档**: `docs/proposals/b8-interaction-first-workbench-proposal.md`
 
 ---
@@ -63,17 +63,17 @@
 ## M1 — Interaction-first Layout
 
 ### Goal
-TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Audit Lens"三区域布局。默认焦点在 Interaction View。现有 auxiliary panels 不再抢占主界面。
+TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Context Panel"三区域布局。默认焦点在 Interaction View。现有 auxiliary panels 不再抢占主界面。
 
 ### Scope
-- 实现 `WorkbenchLayout` 组件：左侧 AgentLens (25%) / 中间 InteractionView (50%) / 右侧 AuditLens (25%)
+- 实现 `WorkbenchLayout` 组件：左侧 AgentLens (25%) / 中间 InteractionView (50%) / 右侧 ContextPanel (25%)
 - 实现 `InputBar` 组件（底部输入区域，初期只接受文本，不发送）
 - 实现 `StatusBar` 组件（底部状态栏）
 - 实现 `AgentLensPanel` 组件（agent/session/run/instance 树，初期 fake/local fixture 数据）
 - 实现 `InteractionPanel` 组件（对话展示区域，初期只显示 placeholder）
-- 实现 `AuditLensPanel` 组件（动态审计信息，初期复用现有 evidence/gate/audit 面板数据）
+- 实现 `ContextPanel` 组件（通用 Context/Inspector placeholder，初期复用现有 evidence/gate/audit 面板数据）
 - 现有 7 视图导航保留但降级为 secondary（可通过 keybinding 切换到 auxiliary panels）
-- 键盘焦点管理：默认焦点在 InputBar，Tab 切换到 AgentLens/AuditLens
+- 键盘焦点管理：默认焦点在 InputBar，Tab 切换到 AgentLens/ContextPanel
 
 ### Non-goals
 - 不连接真实 runtime gateway
@@ -87,7 +87,7 @@ TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Aud
 - M1 completion report
 
 ### Required Tests
-- Layout 结构测试：AgentLens/InteractionView/AuditLens 三区域存在
+- Layout 结构测试：AgentLens/InteractionView/ContextPanel 三区域存在
 - 焦点管理测试：默认焦点在 InteractionView
 - InputBar 接受文本输入
 - AgentLens 展示 fake fixture 数据
@@ -118,14 +118,14 @@ TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Aud
 ## M2 — Agent Lens / Selected Context
 
 ### Goal
-Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interaction View 和 Audit Lens 同步变化。
+Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interaction View 和 Context Panel 同步变化。
 
 ### Scope
 - `AgentLens` 数据模型：AgentLensNode（id/type/label/status/children）
 - `SelectedLens` 状态管理：当前选中的 agent/session/run/instance
 - `AgentLensPanel` 增强：树形展开/折叠、↑↓ 导航、Enter 选中
 - `InteractionView` 响应 lens 切换：清空对话历史，显示新 context
-- `AuditLens` 响应 lens 切换：重新加载对应 evidence/gate/audit 数据
+- `ContextPanel` 响应 lens 切换：重新加载对应 evidence/gate/audit 数据
 - 状态标记：active/paused/completed/failed/historical/superseded
 - 初期数据：fake/local fixture（从 PROJECT_STATUS/PROGRESS_LEDGER 构建模拟 agent/session/run 树）
 
@@ -144,7 +144,7 @@ Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interact
 - ↑↓ 导航在树节点间移动
 - Enter 选中节点 → selectedLens 更新
 - selectedLens 变化 → InteractionView 清空
-- selectedLens 变化 → AuditLens 数据重载
+- selectedLens 变化 → ContextPanel 数据重载
 - 状态标记正确渲染（active/paused/completed/failed）
 - 空树状态：无 agent/session/run 时展示 empty state
 - 现有 tests 回归
@@ -153,7 +153,7 @@ Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interact
 - [ ] AgentLens 展示 ≥3 agent 的模拟树
 - [ ] ↑↓/Enter 可切换 selected lens
 - [ ] 切换后 Interaction View 显示 "Agent: X / Session: Y / Run: Z"
-- [ ] 切换后 Audit Lens 数据刷新
+- [ ] 切换后 Context Panel 数据刷新
 - [ ] 所有 tests PASS, tsc clean
 - [ ] Default entry NOT ACTIVATED
 
@@ -225,16 +225,16 @@ Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interact
 
 ---
 
-## M4 — Dynamic Audit Lens MVP
+## M4 — Context Inspector MVP
 
 ### Goal
-Audit Lens 随 selected lens 和 interaction 动态刷新。展示 evidence、gate、event、checkpoint、memory summary。不把 xfail 当 pass。
+Context Panel 随 selected lens 和 interaction 动态刷新。展示 evidence、gate、event、checkpoint、memory summary。不把 xfail 当 pass。
 
 ### Scope
-- `AuditSnapshot` 数据模型：evidence/gate/checkpoint/memory/event 子视图
-- `DynamicAuditState` 管理：selected lens → audit data 映射
-- `AuditLensPanel` 增强：多子面板（Evidence/Gate/Checkpoint/Memory/Event），Tab 切换
-- Interaction 后自动 refresh audit data（从 fake/local fixture 重新加载）
+- `InspectorSnapshot` 数据模型：evidence/gate/checkpoint/memory/event 子视图
+- `ContextInspectorState` 管理：selected lens → context data 映射
+- `ContextPanel` 增强：多子面板（Evidence/Gate/Checkpoint/Memory/Event），Tab 切换
+- Interaction 后自动 refresh context data（从 fake/local fixture 重新加载）
 - xfail/caveat/accepted-with-caveats 状态展示正确
 - 数据源：复用现有 evidenceBrowser/gateHistory/auditLog/docsConsistency 数据模型，但按 selected lens 筛选或标记"global"
 
@@ -245,14 +245,14 @@ Audit Lens 随 selected lens 和 interaction 动态刷新。展示 evidence、ga
 - 不激活 default entry
 
 ### Required Docs
-- SDD §6 Dynamic Audit Refresh 更新
+- SDD §6 Context Refresh 更新
 - M4 completion report
 
 ### Required Tests
-- AuditLens 随 selected lens 切换刷新
+- ContextPanel 随 selected lens 切换刷新
 - Evidence 子面板展示正确
 - Gate 子面板展示正确
-- Interaction 后 AuditLens 可手动/自动 refresh
+- Interaction 后 ContextPanel 可手动/自动 refresh
 - xfail 状态展示为 xfail（不是 pass）
 - caveat 文本展示
 - accepted-with-caveats 状态展示
@@ -260,8 +260,8 @@ Audit Lens 随 selected lens 和 interaction 动态刷新。展示 evidence、ga
 - 现有 tests 回归
 
 ### Exit Criteria
-- [ ] AuditLens 展示 ≥3 子面板（Evidence/Gate/Audit/Memory）
-- [ ] 切换 selected lens → AuditLens 数据变化
+- [ ] ContextPanel 展示 ≥3 子面板（Evidence/Gate/Audit/Memory）
+- [ ] 切换 selected lens → ContextPanel 数据变化
 - [ ] Interaction 后 refresh → 数据更新
 - [ ] xfail 正确标注
 - [ ] 所有 tests PASS, tsc clean
@@ -385,15 +385,15 @@ Interaction 中产生的 pending action（tool confirmation、memory proposal）
 
 ---
 
-## M7 — Runtime Event Stream / Audit Lens
+## M7 — Runtime Event Stream / EventPanel
 
 ### Goal
-定义 event source contract。Audit Lens 支持 events.jsonl reader（只读，不 tail real process）。
+定义 event source contract。Context Panel 支持 events.jsonl reader（只读，不 tail real process）。
 
 ### Scope
 - `EventSourceContract` 定义：event schema、namespace、backpressure、redaction、truncation 策略
 - `EventStreamReader` 实现：解析 events.jsonl，支持 malformed/missing/partial write
-- Audit Lens Event 子面板：展示 parsed events，支持 type/session/run/instance filter
+- Context Panel Event 子面板：展示 parsed events，支持 type/session/run/instance filter
 - Redaction indicator：脱敏字段标注 `[redacted]`
 - 只读：不 tail real process，不写 runtime
 - 数据源：初期使用 fake/local fixture events.jsonl
@@ -423,7 +423,7 @@ Interaction 中产生的 pending action（tool confirmation、memory proposal）
 ### Exit Criteria
 - [ ] Event source contract 定义完成
 - [ ] EventStreamReader 正确解析 fixture events.jsonl
-- [ ] Audit Lens Event 子面板展示 events
+- [ ] Context Panel Event 子面板展示 events
 - [ ] Malformed/partial write 安全处理
 - [ ] 所有 tests PASS, tsc clean
 - [ ] Default entry NOT ACTIVATED
@@ -502,7 +502,7 @@ M0 (Direction Correction)
 M1 (Layout) ──────► M2 (Agent Lens) ──────► M3 (Interaction MVP)
                       │                         │
                       ▼                         ▼
-                    M4 (Dynamic Audit) ◄────────┘
+                    M4 (Context Inspector) ◄────────┘
                       │
                       ▼
                     M5 (Controlled Action)
@@ -517,7 +517,7 @@ M1 (Layout) ──────► M2 (Agent Lens) ──────► M3 (Inte
                     M8 (Default Entry Readiness)
 ```
 
-M1-M3 是交互核心链，M4-M5 是审计增强链，M6-M7 是历史/流链。
+M1-M3 是交互核心链，M4-M5 是 context/controlled 链，M6-M7 是历史/流链。
 
 ---
 
@@ -526,3 +526,4 @@ M1-M3 是交互核心链，M4-M5 是审计增强链，M6-M7 是历史/流链。
 | 日期 | 变更 |
 |------|------|
 | 2026-06-02 | 初始版本 — M0-M8 定义，按主入口成熟度而非面板数量 |
+| 2026-06-02 | B8 remediation — Audit Lens → Context Panel/Inspector, Dynamic Audit → Context Inspector, M1-M8 fake/local foundation 状态对齐 |

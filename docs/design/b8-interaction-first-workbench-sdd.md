@@ -288,7 +288,7 @@ TUI InputBar
     → (future) CoreChatGateway: core.chat() main path
       → ToolRuntimeMediator / Memory / Checkpoint / EventLog
   → InteractionView 渲染响应
-  → AuditLens 刷新
+  → ContextPanel 刷新
 ```
 
 ### 4.3 FakeRuntimeGateway (M3)
@@ -310,15 +310,15 @@ TUI InputBar
 
 ---
 
-## 5. Dynamic Audit Refresh (M4)
+## 5. Context Refresh (M4)
 
 ### 5.1 刷新触发条件
 
 | 触发 | 行为 |
 |------|------|
-| selectedLens 变化 | AuditLens 重新加载所有子面板数据 |
-| Interaction 完成（收到 response） | AuditLens 自动或手动 refresh |
-| 用户手动 refresh（keybinding） | AuditLens 重新加载 |
+| selectedLens 变化 | ContextPanel 重新加载所有子面板数据 |
+| Interaction 完成（收到 response） | ContextPanel 自动或手动 refresh |
+| 用户手动 refresh（keybinding） | ContextPanel 重新加载 |
 
 ### 5.2 数据源映射
 

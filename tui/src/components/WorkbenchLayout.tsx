@@ -28,6 +28,17 @@ import { DefaultEntryReadinessPanel } from "./DefaultEntryReadinessPanel";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
+/** 判断两个 SelectedLens 是否属于同一上下文。
+ *  匹配所有非 null 字段：agentId 必须相等，sessionId/runId/instanceId
+ *  仅在两者都非 null 时才比较。 */
+function lensMatch(a: SelectedLens, b: SelectedLens): boolean {
+  if (a.agentId !== b.agentId) return false;
+  if (a.sessionId !== null && b.sessionId !== null && a.sessionId !== b.sessionId) return false;
+  if (a.runId !== null && b.runId !== null && a.runId !== b.runId) return false;
+  if (a.instanceId !== null && b.instanceId !== null && a.instanceId !== b.instanceId) return false;
+  return true;
+}
+
 /** 从 SelectedLens 构建人类可读 label */
 function lensToLabel(lens: SelectedLens): string {
   const parts: string[] = [];
@@ -55,10 +66,6 @@ export function WorkbenchLayout() {
   const { events: fixtureEvents, errors: fixtureErrors } = React.useMemo(
     () => eventReader.parse(FAKE_EVENTS_JSONL),
     [eventReader],
-  );
-  const eventSummary: InspectorSummary | null = React.useMemo(
-    () => (fixtureEvents.length > 0 ? eventReader.summarize(fixtureEvents) : null),
-    [eventReader, fixtureEvents],
   );
 
   const cycleFocus = useCallback((direction: 1 | -1) => {
@@ -133,7 +140,17 @@ export function WorkbenchLayout() {
     [gateway],
   );
 
-  const pendingCount = pendingActions.filter((a) => a.status === "pending").length;
+  const pendingCount = pendingActions.filter((a) => a.status === "pending" && lensMatch(a.selectedLens, selectedLens)).length;
+  const lensFilteredPending = pendingActions.filter((a) => lensMatch(a.selectedLens, selectedLens));
+  const lensFilteredHighlightedIdx = Math.min(highlightedPendingIdx, lensFilteredPending.length - 1);
+
+  const filteredEvents = fixtureEvents.filter((e) => {
+    if (selectedLens.runId) return e.runId === selectedLens.runId;
+    if (selectedLens.sessionId) return e.sessionId === selectedLens.sessionId;
+    return true;
+  });
+  const filteredEventSummary: InspectorSummary | null =
+    filteredEvents.length > 0 ? eventReader.summarize(filteredEvents) : null;
 
   useInput((input, key) => {
     if (input === "q") {
@@ -152,25 +169,25 @@ export function WorkbenchLayout() {
 
     if (key.upArrow) {
       setHighlightedPendingIdx((prev) =>
-        prev > 0 ? prev - 1 : pendingActions.length - 1,
+        prev > 0 ? prev - 1 : lensFilteredPending.length - 1,
       );
       return;
     }
     if (key.downArrow) {
       setHighlightedPendingIdx((prev) =>
-        prev < pendingActions.length - 1 ? prev + 1 : 0,
+        prev < lensFilteredPending.length - 1 ? prev + 1 : 0,
       );
       return;
     }
     if (key.return) {
-      const action = pendingActions[highlightedPendingIdx];
+      const action = lensFilteredPending[lensFilteredHighlightedIdx];
       if (action && action.status === "pending") {
         handleApprove(action.actionId);
       }
       return;
     }
     if (key.escape) {
-      const action = pendingActions[highlightedPendingIdx];
+      const action = lensFilteredPending[lensFilteredHighlightedIdx];
       if (action && action.status === "pending") {
         handleReject(action.actionId);
       }
@@ -222,11 +239,11 @@ export function WorkbenchLayout() {
         </Box>
       </Box>
 
-      {/* M5 — PendingActionPanel */}
+      {/* M5 — PendingActionPanel (filtered by selectedLens) */}
       <PendingActionPanel
-        actions={pendingActions}
+        actions={lensFilteredPending}
         focused={focusZone === "interaction"}
-        highlightedIdx={highlightedPendingIdx}
+        highlightedIdx={lensFilteredHighlightedIdx}
         onApprove={handleApprove}
         onReject={handleReject}
       />
@@ -240,13 +257,13 @@ export function WorkbenchLayout() {
         />
       )}
 
-      {/* M7 — EventPanel（只读 projection） */}
+      {/* M7 — EventPanel（只读 projection，filtered by selectedLens） */}
       {hasSelection && (
         <EventPanel
           focused={focusZone === "context"}
-          events={fixtureEvents}
+          events={filteredEvents}
           errorCount={fixtureErrors.length}
-          summary={eventSummary}
+          summary={filteredEventSummary}
           hasAgent={hasSelection}
         />
       )}

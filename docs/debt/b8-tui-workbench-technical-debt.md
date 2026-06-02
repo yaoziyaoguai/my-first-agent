@@ -5,7 +5,7 @@
 **依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`、`docs/milestones/b8-interaction-first-workbench-milestones.md`
 **范围**: 仅记录 B8 TUI Workbench 自身的 deferred milestone / missing prerequisite debt。不记录 B7 implementation debt。
 
-**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M4 delivered (320f64e)**: Agent Lens selection + fake interaction + Context refresh。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
+**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M8 delivered (19aa77a)**: 394/394 TUI tests PASS, tsc clean。M1-M8 fake/local foundation 全部交付，accepted-with-caveats pending remediation。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
 
 ---
 
@@ -13,11 +13,11 @@
 
 | # | Debt | 映射 Milestone | 状态 | 阻塞原因 | 偿还条件 |
 |---|------|---------------|------|---------|---------|
-| D-B8-01 | Multi-instance history browser | **M6** | **DEFERRED** | 缺 evidence namespace + multi-run storage contract | M6: EvidenceNamespace + MultiRunStorageContract 契约定义 |
-| D-B8-02 | Runtime event stream viewer | **M7** | **DEFERRED** | 缺 append-only runtime event source contract | M7: EventSourceContract + EventStreamReader |
-| D-B8-03 | TUI default-entry activation | **M8** | **DEFERRED** | M1-M7 未完成，Default Entry Readiness checklist 未全部通过 | M8: 用户显式批准 |
+| D-B8-01 | Multi-instance history browser | **M6** | **COMPLETED-WITH-CAVEATS** | 已交付 fake/local foundation — EvidenceNamespace + MultiRunStorageContract 契约定义完成，AgentLens 历史浏览（只读 projection） | 真实 runtime identity / B7 multi-instance orchestrator |
+| D-B8-02 | Runtime event stream viewer | **M7** | **COMPLETED-WITH-CAVEATS** | 已交付 fake/local foundation — EventSourceContract + EventStreamReader (JSONL only, no live tail) | 真实 runtime event source (live tail agent_log.jsonl) |
+| D-B8-03 | TUI default-entry activation | **M8** | **ACTIVE** | Default Entry Readiness checklist (18 items) 已完成，但 default entry NOT ACTIVATED | 用户显式批准 |
 | D-B8-04 | Chinese IME / multi-line input / paste | **M8** | **PENDING** | Ink 5 useInput 中文 IME 行为待验证 | M8: IME/paste 基础测试 |
-| D-B8-05 | Persistent audit log browser UI | N/A (旧 Phase) | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现，在 Audit Lens 中复用 |
+| D-B8-05 | Persistent audit log browser UI | N/A (旧 Phase) | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现，在 Context Panel 中复用 |
 | D-B8-06 | High-risk commands remain blocked | N/A (旧 Phase) | **BY DESIGN** | 安全约束: no force push/reset --hard/rm -rf | 不计划解除; 属于安全特性 |
 
 ---
@@ -154,14 +154,14 @@ B7 readiness SDD
 | 项目 | 状态 |
 |------|------|
 | B8 旧 Phase 1-6A | **COMPLETED** — 全部能力保留为 auxiliary panels |
-| B8 M0 (Direction Correction) | **IN PROGRESS** — proposal + milestones + SDD + TDD Plan 已写，待用户审阅 |
-| B8 M1-M8 | **PENDING** — M0 完成后按依赖链依次推进 |
-| M6 (Multi-instance History) | **DEFERRED** — 缺 evidence namespace + multi-run storage contract |
-| M7 (Event Stream) | **DEFERRED** — 缺 append-only event source contract |
-| M8 (Default Entry) | **DEFERRED** — M1-M7 未完成 |
+| B8 M0 (Direction Correction) | **COMPLETED** — proposal + milestones + SDD + TDD Plan 已写，用户已接受 |
+| B8 M1-M8 | **COMPLETED** — 全部 fake/local foundation 交付 (19aa77a)，394/394 tests PASS，tsc clean |
+| M6 (Multi-instance History) | **COMPLETED-WITH-CAVEATS** — EvidenceNamespace + MultiRunStorageContract 契约定义完成，缺真实 runtime identity |
+| M7 (Event Stream) | **COMPLETED-WITH-CAVEATS** — EventSourceContract + EventStreamReader 完成 (JSONL only)，缺 live tail |
+| M8 (Default Entry) | **ACTIVE** — Readiness checklist 完成，default entry NOT ACTIVATED，等用户批准 |
 | B7 implementation | **NOT STARTED** — 不在当前阶段 |
-| TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
+| TUI default entry | **NOT ACTIVATED** — 用户批准前不激活 |
 | CLI fallback | **RETAINED** — CLI 为显式 fallback, 永不删除 |
 | Product readiness | **NOT PRODUCT-READY** — 不声称 production-ready |
 
-**下一步**: M0 完成 → 用户审阅 proposal → M1 实现。
+**当前阶段**: accepted-with-caveats pending remediation → close-out candidate。独立审计发现的 B8 caveats 正在逐条修复。

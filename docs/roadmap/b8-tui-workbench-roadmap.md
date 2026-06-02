@@ -26,10 +26,10 @@
 
 | 能力 | 新位置 | 用途 |
 |------|--------|------|
-| Evidence Browser | Audit Lens 子面板 | 多实例 evidence 历史 |
-| Gate History | Audit Lens 子面板 | 当前 run gate 状态 |
-| Audit Log | Audit Lens 子面板 | 命令执行审计 |
-| Docs Consistency | Audit Lens 子面板 | 文档一致性检查 |
+| Evidence Browser | Context Panel 子面板 | 多实例 evidence 历史 |
+| Gate History | Context Panel 子面板 | 当前 run gate 状态 |
+| Audit Log | Context Panel 子面板 | 命令执行审计 |
+| Docs Consistency | Context Panel 子面板 | 文档一致性检查 |
 | Command Shell | 保留为 advanced 功能 | 安全命令执行 |
 | Dev Workflow Panel | 保留 dev-only | Coding Agent 工程使用 |
 
@@ -38,13 +38,13 @@
 ## 2. Milestone 全景
 
 ```
-M0 (Direction Correction) — 文档阶段，当前
+M0 (Direction Correction) — 文档阶段，已完成
   │
   ▼
 M1 (Layout) ──────► M2 (Agent Lens) ──────► M3 (Interaction MVP)
   │                     │                         │
   ▼                     ▼                         ▼
-M4 (Dynamic Audit) ◄────┘                         │
+M4 (Context Inspector) ◄────┘                         │
   │                                                │
   ▼                                                │
 M5 (Controlled Action) ◄───────────────────────────┘
@@ -63,15 +63,15 @@ M8 (Default Entry Readiness)
 
 | Milestone | 名称 | 状态 | 关键交付物 | 新增 Tests |
 |-----------|------|------|-----------|-----------|
-| **M0** | Direction Correction | **IN PROGRESS** | Proposal + Milestones + SDD + TDD Plan | 0 (regression only) |
-| **M1** | Interaction-first Layout | **PENDING** | WorkbenchLayout, InputBar, StatusBar, 3-zone layout | 14 |
-| **M2** | Agent Lens / Selected Context | **PENDING** | AgentLensNode 树, SelectedLens 状态, 树导航 | 15 |
-| **M3** | Interaction MVP | **PENDING** | RuntimeGateway 接口, FakeRuntimeGateway, InteractionView | 20 |
-| **M4** | Dynamic Audit Lens MVP | **PENDING** | AuditSnapshot, DynamicAuditState, 多子面板 | 15 |
-| **M5** | Controlled Action / Pending Confirmation | **PENDING** | PendingAction, approve/reject through gateway | 12 |
-| **M6** | Multi-instance History Foundation | **PENDING** | EvidenceNamespace contract, MultiRunStorageContract | 11 |
-| **M7** | Runtime Event Stream / Audit Lens | **PENDING** | EventSourceContract, EventStreamReader | 12 |
-| **M8** | Default Entry Readiness | **PENDING** | Safety scan, user approval, runtime bypass guard | 8 |
+| **M0** | Direction Correction | **COMPLETED** | Proposal + Milestones + SDD + TDD Plan | 0 (regression only) |
+| **M1** | Interaction-first Layout | **DELIVERED** | WorkbenchLayout, InputBar, StatusBar, 3-zone layout | 14 |
+| **M2** | Agent Lens / Selected Context | **DELIVERED** | AgentLensNode 树, SelectedLens 状态, 树导航 | 15 |
+| **M3** | Interaction MVP | **DELIVERED** | RuntimeGateway 接口, FakeRuntimeGateway, InteractionView | 20 |
+| **M4** | Context Inspector MVP | **DELIVERED** | InspectorSnapshot, ContextInspectorState, 多子面板 | 15 |
+| **M5** | Controlled Action / Pending Confirmation | **DELIVERED** | PendingAction, approve/reject through gateway | 12 |
+| **M6** | Multi-instance History Foundation | **DELIVERED** | EvidenceNamespace contract, MultiRunStorageContract | 11 |
+| **M7** | Runtime Event Stream / EventPanel | **DELIVERED** | EventSourceContract, EventStreamReader | 12 |
+| **M8** | Default Entry Readiness | **DELIVERED** | Safety scan, user approval, runtime bypass guard | 8 |
 
 **M0-M8 新增 tests 合计: 107。现有 tests: 287。全部通过时约 394 tests。**
 
@@ -97,9 +97,9 @@ M0 是纯文档阶段，不改代码：
 - [x] Milestones M0-M8 定义完成
 - [x] SDD 定义布局、数据模型、安全边界
 - [x] TDD Plan 覆盖所有 milestone 的测试策略
-- [ ] Roadmap/debt/status 与上述文档一致（本轮）
-- [ ] 用户审阅 proposal 并确认 5 项决策
-- [ ] 287/287 tests PASS, tsc clean
+- [x] Roadmap/debt/status 与上述文档一致
+- [x] 用户审阅 proposal 并确认 5 项决策
+- [x] 287/287 tests PASS, tsc clean
 
 ---
 
@@ -133,7 +133,7 @@ M0 是纯文档阶段，不改代码：
 |----|------|------|------|
 | D-013 | B8 产品方向从"信息展示中心"改为"interaction-first workbench" | 2026-06-02 | 主入口的第一能力是交互，审计是辅助 |
 | D-014 | Milestone 按"主入口成熟度"定义，不按"面板数量" | 2026-06-02 | 防止 Coding Agent 按面板完成度判断进度 |
-| D-015 | M0-M8 依赖链: M1→M2→{M3, M4→M5→M6→M7→M8} | 2026-06-02 | M1-M3 交互核心链，M4-M5 审计增强链，M6-M7 历史/流链 |
+| D-015 | M0-M8 依赖链: M1→M2→{M3, M4→M5→M6→M7→M8} | 2026-06-02 | M1-M3 交互核心链，M4-M5 context/controlled 链，M6-M7 历史/流链 |
 | D-016 | 所有 M1-M7 期间 default entry NOT ACTIVATED | 2026-06-02 | M8 用户显式批准后才激活 |
 | D-017 | AutoRun 永久 dev-only | 2026-06-02 | AutoRun 是 Coding Agent 工程工具，不是 First Agent 产品能力 |
 

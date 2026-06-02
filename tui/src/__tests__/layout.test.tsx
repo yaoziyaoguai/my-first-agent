@@ -763,6 +763,235 @@ describe("M6 Safety — Guard tests", () => {
 });
 
 // ============================================================
+// M7 — Runtime Event Stream / Inspector tests
+// ============================================================
+
+import {
+  DEFAULT_EVENT_SOURCE_CONTRACT,
+  redactValue,
+  redactPayload,
+  containsSensitiveKey,
+  type EventSourceContract,
+  type RuntimeTraceItem,
+} from "../data/eventSourceContract";
+import {
+  createEventStreamReader,
+  FAKE_EVENTS_JSONL,
+  MALFORMED_JSONL,
+  type EventStreamReader,
+} from "../data/eventStreamReader";
+import { EventPanel } from "../components/EventPanel";
+
+describe("M7 EventSourceContract — Contract", () => {
+  it("default contract is fake/local", () => {
+    expect(DEFAULT_EVENT_SOURCE_CONTRACT.source).toBe("fake/local");
+  });
+
+  it("default contract has supportsTail false", () => {
+    expect(DEFAULT_EVENT_SOURCE_CONTRACT.supportsTail).toBe(false);
+  });
+
+  it("redaction is enabled by default", () => {
+    expect(DEFAULT_EVENT_SOURCE_CONTRACT.redaction.enabled).toBe(true);
+  });
+
+  it("redaction patterns include sensitive keys", () => {
+    const patterns = DEFAULT_EVENT_SOURCE_CONTRACT.redaction.patterns;
+    expect(patterns).toContain("api_key");
+    expect(patterns).toContain("token");
+    expect(patterns).toContain("secret");
+  });
+
+  it("redactValue redacts sensitive key", () => {
+    expect(redactValue("api_key", "sk-secret", DEFAULT_EVENT_SOURCE_CONTRACT)).toBe("[redacted]");
+  });
+
+  it("redactValue does not redact normal key", () => {
+    expect(redactValue("toolName", "read_file", DEFAULT_EVENT_SOURCE_CONTRACT)).toBe("read_file");
+  });
+
+  it("redactPayload redacts nested sensitive keys", () => {
+    const payload = { api_key: "sk-123", tool: "read", token: "bearer-xyz" };
+    const { redacted, redactedFields } = redactPayload(payload, DEFAULT_EVENT_SOURCE_CONTRACT);
+    expect(redacted.api_key).toBe("[redacted]");
+    expect(redacted.token).toBe("[redacted]");
+    expect(redacted.tool).toBe("read");
+    expect(redactedFields).toContain("api_key");
+    expect(redactedFields).toContain("token");
+  });
+
+  it("containsSensitiveKey detects sensitive patterns", () => {
+    expect(containsSensitiveKey("apiKey", DEFAULT_EVENT_SOURCE_CONTRACT)).toBe(true);
+    expect(containsSensitiveKey("authorization", DEFAULT_EVENT_SOURCE_CONTRACT)).toBe(true);
+    expect(containsSensitiveKey("userName", DEFAULT_EVENT_SOURCE_CONTRACT)).toBe(false);
+  });
+});
+
+describe("M7 EventStreamReader — Parsing", () => {
+  let reader: EventStreamReader;
+
+  beforeEach(() => {
+    reader = createEventStreamReader();
+  });
+
+  it("parses valid JSONL fixture", () => {
+    const { events, errors } = reader.parse(FAKE_EVENTS_JSONL);
+    expect(events.length).toBeGreaterThanOrEqual(15);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("handles empty content", () => {
+    const { events, errors } = reader.parse("");
+    expect(events).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("handles whitespace-only content", () => {
+    const { events, errors } = reader.parse("   \n  \n  ");
+    expect(events).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("handles malformed lines without crashing", () => {
+    const { events, errors } = reader.parse(MALFORMED_JSONL);
+    // Should parse valid lines
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    // Should report malformed lines
+    expect(errors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("parsed events have required fields", () => {
+    const { events } = reader.parse(FAKE_EVENTS_JSONL);
+    for (const event of events) {
+      expect(event.eventId).toBeTruthy();
+      expect(event.eventType).toBeTruthy();
+      expect(event.timestamp).toBeTruthy();
+      expect(typeof event.sessionId).toBe("string");
+      expect(typeof event.runId).toBe("string");
+    }
+  });
+
+  it("sensitive fields are redacted in parsed events", () => {
+    const { events } = reader.parse(FAKE_EVENTS_JSONL);
+    const evt016 = events.find((e) => e.eventId === "evt-016");
+    expect(evt016).toBeDefined();
+    expect(evt016!.redacted).toBe(true);
+    expect(evt016!.redactedFields.length).toBeGreaterThan(0);
+  });
+});
+
+describe("M7 EventStreamReader — Filter & Summarize", () => {
+  let reader: EventStreamReader;
+  let events: RuntimeTraceItem[];
+
+  beforeEach(() => {
+    reader = createEventStreamReader();
+    const result = reader.parse(FAKE_EVENTS_JSONL);
+    events = result.events;
+  });
+
+  it("filter by event type returns matching events", () => {
+    const filtered = reader.filter(events, { eventTypes: ["tool_invoke"] });
+    expect(filtered.length).toBeGreaterThanOrEqual(2);
+    for (const e of filtered) {
+      expect(e.eventType).toBe("tool_invoke");
+    }
+  });
+
+  it("filter by session ID returns matching events", () => {
+    const filtered = reader.filter(events, { sessionIds: ["session-001a"] });
+    expect(filtered.length).toBeGreaterThan(0);
+    for (const e of filtered) {
+      expect(e.sessionId).toBe("session-001a");
+    }
+  });
+
+  it("filter by run ID returns matching events", () => {
+    const filtered = reader.filter(events, { runIds: ["run-001a1"] });
+    expect(filtered.length).toBeGreaterThan(0);
+    for (const e of filtered) {
+      expect(e.runId).toBe("run-001a1");
+    }
+  });
+
+  it("filter with limit truncates results", () => {
+    const filtered = reader.filter(events, { limit: 5 });
+    expect(filtered).toHaveLength(5);
+  });
+
+  it("summarize produces correct InspectorSummary", () => {
+    const summary = reader.summarize(events);
+    expect(summary.totalEvents).toBe(events.length);
+    expect(summary.sessionCount).toBeGreaterThanOrEqual(1);
+    expect(summary.runCount).toBeGreaterThanOrEqual(1);
+    expect(summary.timeRange.earliest).toBeTruthy();
+    expect(summary.timeRange.latest).toBeTruthy();
+    expect(summary.eventTypeCounts.size).toBeGreaterThan(0);
+  });
+});
+
+describe("M7 EventPanel — Rendering", () => {
+  const reader = createEventStreamReader();
+  const { events } = reader.parse(FAKE_EVENTS_JSONL);
+  const summary = reader.summarize(events);
+
+  it("renders with events", () => {
+    const el = React.createElement(EventPanel, {
+      focused: true,
+      events,
+      errorCount: 0,
+      summary,
+      hasAgent: true,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders without agent (empty state)", () => {
+    const el = React.createElement(EventPanel, {
+      focused: false,
+      events: [],
+      errorCount: 0,
+      summary: null,
+      hasAgent: false,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders with parse errors", () => {
+    const el = React.createElement(EventPanel, {
+      focused: false,
+      events,
+      errorCount: 3,
+      summary,
+      hasAgent: true,
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+describe("M7 Safety — Guard tests", () => {
+  it("EventSourceContract source is 'fake/local'", () => {
+    expect(DEFAULT_EVENT_SOURCE_CONTRACT.source).toBe("fake/local");
+  });
+
+  it("EventSourceContract does not support tail", () => {
+    expect(DEFAULT_EVENT_SOURCE_CONTRACT.supportsTail).toBe(false);
+  });
+
+  it("EventStreamReader does not expose write methods", () => {
+    const reader = createEventStreamReader();
+    const keys = Object.keys(reader);
+    expect(keys).toContain("contract");
+    expect(keys).toContain("parse");
+    expect(keys).toContain("filter");
+    expect(keys).toContain("summarize");
+    expect(keys).not.toContain("write");
+    expect(keys).not.toContain("append");
+    expect(keys).not.toContain("tail");
+  });
+});
+
+// ============================================================
 // M1+ Safety — unchanged guard tests
 // ============================================================
 

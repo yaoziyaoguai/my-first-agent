@@ -17,6 +17,13 @@ import { StatusBar } from "./StatusBar";
 import { PendingActionPanel } from "./PendingActionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { createFakeHistorySource, type HistorySource } from "../data/agentHistoryIndex";
+import { EventPanel } from "./EventPanel";
+import {
+  createEventStreamReader,
+  FAKE_EVENTS_JSONL,
+  type EventStreamReader,
+} from "../data/eventStreamReader";
+import type { InspectorSummary } from "../data/eventSourceContract";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
@@ -43,6 +50,15 @@ export function WorkbenchLayout() {
 
   const gateway = React.useMemo(() => createFakeGateway(), []);
   const historySource: HistorySource = React.useMemo(() => createFakeHistorySource(), []);
+  const eventReader: EventStreamReader = React.useMemo(() => createEventStreamReader(), []);
+  const { events: fixtureEvents, errors: fixtureErrors } = React.useMemo(
+    () => eventReader.parse(FAKE_EVENTS_JSONL),
+    [eventReader],
+  );
+  const eventSummary: InspectorSummary | null = React.useMemo(
+    () => (fixtureEvents.length > 0 ? eventReader.summarize(fixtureEvents) : null),
+    [eventReader, fixtureEvents],
+  );
 
   const cycleFocus = useCallback((direction: 1 | -1) => {
     setFocusZone((prev) => {
@@ -220,6 +236,17 @@ export function WorkbenchLayout() {
           focused={focusZone === "context"}
           agentId={selectedLens.agentId}
           historySource={historySource}
+        />
+      )}
+
+      {/* M7 — EventPanel（只读 projection） */}
+      {hasSelection && (
+        <EventPanel
+          focused={focusZone === "context"}
+          events={fixtureEvents}
+          errorCount={fixtureErrors.length}
+          summary={eventSummary}
+          hasAgent={hasSelection}
         />
       )}
 

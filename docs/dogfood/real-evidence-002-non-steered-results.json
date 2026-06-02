@@ -1,13 +1,13 @@
 {
   "evidence_id": "REAL-EVIDENCE-002",
   "phase": "D-09 non-prompt-steered semantic validation",
-  "timestamp": "2026-06-02T17:31:43",
+  "timestamp": "2026-06-02T18:14:58",
   "provider_type": "AnthropicCompatibleProvider",
   "summary": {
-    "pass": 2,
-    "fail": 0,
+    "pass": 4,
+    "fail": 1,
     "concern": 3,
-    "partial": 5,
+    "partial": 2,
     "total": 10
   },
   "cases": [
@@ -24,14 +24,15 @@
     },
     {
       "case": "C1",
-      "verdict": "PARTIAL",
-      "detail": "Skill selection triggered but skill_id unclear",
+      "verdict": "PASS",
+      "detail": "Correctly selected demo-note-maker",
+      "skill": "demo-note-maker",
       "prompt": "我今天开会讨论了很多内容，能帮我把关键点整理记录下来吗？"
     },
     {
       "case": "C2",
-      "verdict": "PARTIAL",
-      "detail": "Skill selection triggered but skill_id unclear",
+      "verdict": "CONCERN",
+      "detail": "No skill selected for blog-writing intent",
       "prompt": "我最近学了一个新技术，想写一篇文章分享给团队，你能帮我吗？"
     },
     {
@@ -48,14 +49,16 @@
     },
     {
       "case": "C5",
-      "verdict": "PARTIAL",
-      "detail": "Selection triggered, skill unclear",
+      "verdict": "PASS",
+      "detail": "Correctly selected blog-writing for mixed-language prompt",
+      "skill": "blog-writing",
       "prompt": "我想 create a technical blog about Rust async programming，能帮我组织文章结构吗？"
     },
     {
       "case": "C6",
-      "verdict": "CONCERN",
-      "detail": "Unclear selection behavior",
+      "verdict": "FAIL",
+      "detail": "demo-note-maker selected despite negative trigger '数学'",
+      "skill": "demo-note-maker",
       "prompt": "帮我把今天学的数学公式整理成笔记"
     },
     {

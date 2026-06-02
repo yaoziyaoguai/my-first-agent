@@ -523,10 +523,26 @@ def _try_phase1_turn_end_runtime_action(
                 # B7: 使用 per-session lifecycle 的 model_selected 标记替代模块单例。
                 from agent.skill_system.lifecycle import get_default_lifecycle as _get_lc
                 _lc_sid = getattr(_identity, "session_id", "default") if _identity else "default"
-                _lc = _get_lc(_lc_sid)
+                # D-09 fix: 与 _skill_select_tool_func 保持一致的空值处理——
+                # 空字符串 → "default"，避免 namespace 不一致导致跨 handler
+                # 无法获取 lifecycle active_skill。
+                _lc = _get_lc(_lc_sid or "default")
                 if _lc.consume_model_selected() or get_skill_selected_by_model():
                     # 清除模块级向后兼容标记（lifecycle 标记已由 consume 消费）
                     set_skill_selected_by_model(False)
+                    # D-09 fix: 模型通过 tool_use 自主选择 skill 后，
+                    # 从 lifecycle 填充 model_decision_metadata，
+                    # 使 SkillRuntimeActionHandler 能提取 selected_skill_id。
+                    _active_skill = _lc.get_active()
+                    if _active_skill is not None:
+                        _skill_payload["model_decision_metadata"] = {
+                            "selected_skill_id": _active_skill.skill_id,
+                            "selection_reason": (
+                                f"model tool_use SKILL_SELECT: "
+                                f"{_active_skill.skill_id}"
+                            ),
+                            "selection_confidence": "high",
+                        }
                 else:
                     from agent.skill_selection import select_skill_for_real_provider
                     _decision = select_skill_for_real_provider(last_user, _visible)

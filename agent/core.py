@@ -1217,7 +1217,10 @@ def chat(
     # baseline 由 tests/test_pending_confirmation_dispatch.py 11 条
     # characterization tests 钉死（cdd1427）。详见 helper docstring。
     # B7: 工具执行路径入口处设置 session namespace 并用 try/finally 确保 cleanup。
-    _set_skill_ns(_ns_key)
+    # D-09 fix: 使用 _sid (UUID) 而非 _ns_key (empty string fallback)，
+    # 使 skill_tool lifecycle 与 turn-end hook lifecycle 共享同一 namespace，
+    # 确保 model_selected flag 和 active_skill 可被 turn-end hook 正确读取。
+    _set_skill_ns(_sid)
     try:
         _dispatched = _dispatch_pending_confirmation(state, user_input, confirmation_ctx)
         if _dispatched is not None:

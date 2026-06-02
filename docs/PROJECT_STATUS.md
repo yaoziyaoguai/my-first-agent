@@ -1,6 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-06-02 (B8 M5-M8 Interaction-first Workbench — pending actions + multi-instance history + event stream + default entry readiness)
+**TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
 **状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M2-M8 Interaction-first Workbench MVP 全部交付：Agent Lens 选择 + fake/local interaction + Context refresh + 受控 Pending Actions (M5) + Multi-instance History Foundation contracts (M6) + Runtime Event Stream contracts (M7) + Default Entry Readiness checklist (M8)。394/394 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。

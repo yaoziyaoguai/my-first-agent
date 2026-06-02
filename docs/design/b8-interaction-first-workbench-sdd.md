@@ -1,7 +1,8 @@
 # B8 Interaction-first Workbench — SDD
 
 **创建日期**: 2026-06-02
-**状态**: DRAFT — 待配套 TDD Plan
+**状态**: COMPLETED — M1-M8 全部交付，394/394 TUI tests PASS
+**设计方向**: `docs/design/first-agent-tui-design.md`（终端原生、交互优先、克制可观测）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
 - `docs/milestones/b8-interaction-first-workbench-milestones.md`

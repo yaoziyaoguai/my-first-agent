@@ -1,12 +1,13 @@
 # B8 Interaction-first Workbench — Roadmap
 
 **创建日期**: 2026-06-02
-**状态**: M1-M4 DELIVERED (320f64e) — Agent Lens selection + fake interaction + Context refresh。M5+ PENDING。
+**状态**: M1-M8 DELIVERED (19aa77a) — 全量 interaction-first workbench MVP 交付。394/394 TUI tests PASS, tsc clean。TUI default entry NOT ACTIVATED。
 **取代**: 旧 B8 Phase 1-7 路线（"信息展示中心"方向，归档为历史参考）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
 - `docs/milestones/b8-interaction-first-workbench-milestones.md`
 - `docs/design/b8-interaction-first-workbench-sdd.md`
+- `docs/design/first-agent-tui-design.md`
 - `docs/plans/b8-interaction-first-workbench-tdd-plan.md`
 
 ---

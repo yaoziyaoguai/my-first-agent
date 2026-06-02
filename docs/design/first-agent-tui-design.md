@@ -224,7 +224,7 @@ agent-002 (paused)
 
 | 场景 | 用词 | 不用 |
 |------|------|------|
-| 测试全通过 | `394/394 PASS` | `✅ All tests passed!` |
+| 测试全通过 | `412/412 PASS` | `✅ All tests passed!` |
 | 无数据 | `—` | `Nothing to show` |
 | 空 agent list | `no agents` | `No agents available. Please create one.` |
 | 未选中 lens | `none` | `Please select an agent from the left panel` |
@@ -319,7 +319,7 @@ Ink 使用 ANSI color names。以下为建议 token 映射：
 
 ```
 DO:
-  394/394 PASS  tsc clean  NOT ACTIVATED
+  412/412 PASS  tsc clean  NOT ACTIVATED
 
 DON'T:
   ✅ All 394 tests passed successfully!

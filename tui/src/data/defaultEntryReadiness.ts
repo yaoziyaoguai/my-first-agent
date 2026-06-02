@@ -121,7 +121,7 @@ export function getReadinessItems(): ReadinessItem[] {
     // ---- Gates ----
     {
       id: "R15",
-      label: "394/394 tests PASS + tsc clean",
+      label: "412/412 tests PASS + tsc clean",
       description: "全量 TUI 测试通过, TypeScript 编译无错误",
       status: "done",
     },

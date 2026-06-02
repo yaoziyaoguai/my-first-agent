@@ -26,7 +26,9 @@
 | REAL-EVIDENCE-007 | MCP runtime-mediated invocation | accepted-with-caveats | FakeProvider deterministic tool_use + confirmation override validation caveat |
 | REAL-EVIDENCE-008 | Advanced scheduler | accepted | evidence chain fully closed；scheduler remains opt-in |
 
-### 架构演进项目 (B1-B8)
+### 架构演进项目 (B1-B8) — 历史架构分类账
+
+以下为历史架构演进里程碑，作为 REAL-EVIDENCE 的架构上下文保留。当前能力定义以 REAL-EVIDENCE-001..008 为准。
 
 | Item | 描述 | 状态 |
 |------|------|------|
@@ -37,7 +39,7 @@
 | **B5** | Skill runtime 深化 | **ACCEPTED-WITH-CAVEATS** — allowed_tools 强边界实施，real-model caveats |
 | **B6** | Checkpoint true state restoration | **ACCEPTED-WITH-CAVEATS** — direct-save 漏洞移除，trigger condition caveat |
 | **B7** | Multi-instance readiness | **ACCEPTED-WITH-CAVEATS** — namespace/events 基础契约完成 (3f2f6b2) |
-| **B8** | TUI architecture (Interaction-first) | **ACCEPTED-WITH-CAVEATS** — fake/local M1-M8 MVP (ccd89f5) |
+| **B8** | TUI architecture (Interaction-first) | **ACCEPTED** — fake/local M1-M8 MVP (2f995b9, final caveats closed) |
 
 Close-out audit report: `docs/audit/b1-b8-current-stage-close-out-audit.md`.
 

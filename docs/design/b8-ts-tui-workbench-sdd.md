@@ -12,7 +12,7 @@
 > 4. `docs/plans/b8-interaction-first-workbench-tdd-plan.md` — test strategy
 >
 > **Current B8 direction**: Interaction-first Workbench — 交互优先，审计辅助。
-> Agent Lens / Interaction View / Audit Lens 三区域布局，Milestone 按"主入口成熟度"定义。
+> Agent Lens / Interaction View / Context Panel (then-called Audit Lens) 三区域布局，Milestone 按"主入口成熟度"定义。
 >
 > **This document remains for**:
 > - Historical reference for existing Phase 1-6A panels and implementation details

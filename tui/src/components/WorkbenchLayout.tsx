@@ -31,7 +31,7 @@ const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 /** 判断两个 SelectedLens 是否属于同一上下文。
  *  匹配所有非 null 字段：agentId 必须相等，sessionId/runId/instanceId
  *  仅在两者都非 null 时才比较。 */
-function lensMatch(a: SelectedLens, b: SelectedLens): boolean {
+export function lensMatch(a: SelectedLens, b: SelectedLens): boolean {
   if (a.agentId !== b.agentId) return false;
   if (a.sessionId !== null && b.sessionId !== null && a.sessionId !== b.sessionId) return false;
   if (a.runId !== null && b.runId !== null && a.runId !== b.runId) return false;
@@ -147,7 +147,8 @@ export function WorkbenchLayout() {
   const filteredEvents = fixtureEvents.filter((e) => {
     if (selectedLens.runId) return e.runId === selectedLens.runId;
     if (selectedLens.sessionId) return e.sessionId === selectedLens.sessionId;
-    return true;
+    if (selectedLens.agentId) return e.agentId === selectedLens.agentId;
+    return false;
   });
   const filteredEventSummary: InspectorSummary | null =
     filteredEvents.length > 0 ? eventReader.summarize(filteredEvents) : null;

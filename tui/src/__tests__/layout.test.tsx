@@ -10,7 +10,7 @@ import {
   type PendingAction,
   type ControlledOperationGateway,
 } from "../data/pendingAction";
-import { WorkbenchLayout } from "../components/WorkbenchLayout";
+import { WorkbenchLayout, lensMatch } from "../components/WorkbenchLayout";
 import { AgentLensPanel } from "../components/AgentLensPanel";
 import { InteractionPanel } from "../components/InteractionPanel";
 import { ContextPanel } from "../components/ContextPanel";
@@ -988,6 +988,184 @@ describe("M7 Safety — Guard tests", () => {
     expect(keys).not.toContain("write");
     expect(keys).not.toContain("append");
     expect(keys).not.toContain("tail");
+  });
+});
+
+// ============================================================
+// M7 Redaction — Array redaction regression (close-out)
+// ============================================================
+
+describe("M7 Redaction — Array redaction", () => {
+  it("redacts sensitive fields in array of objects", () => {
+    const payload = {
+      items: [
+        { name: "item1", api_key: "sk-secret-1" },
+        { name: "item2", api_key: "sk-secret-2" },
+      ],
+    };
+    const { redacted, redactedFields } = redactPayload(payload, DEFAULT_EVENT_SOURCE_CONTRACT);
+    const items = redacted.items as Array<Record<string, unknown>>;
+    expect(items[0].api_key).toBe("[redacted]");
+    expect(items[0].name).toBe("item1");
+    expect(items[1].api_key).toBe("[redacted]");
+    expect(items[1].name).toBe("item2");
+    expect(redactedFields).toContain("items[0].api_key");
+    expect(redactedFields).toContain("items[1].api_key");
+  });
+
+  it("redacts sensitive fields in nested arrays", () => {
+    const payload = {
+      groups: [
+        {
+          members: [
+            { id: "m1", token: "tok-1" },
+            { id: "m2", token: "tok-2" },
+          ],
+        },
+      ],
+    };
+    const { redacted, redactedFields } = redactPayload(payload, DEFAULT_EVENT_SOURCE_CONTRACT);
+    const groups = redacted.groups as Array<Record<string, unknown>>;
+    const members = groups[0].members as Array<Record<string, unknown>>;
+    expect(members[0].token).toBe("[redacted]");
+    expect(members[0].id).toBe("m1");
+    expect(redactedFields).toContain("groups[0].members[0].token");
+  });
+
+  it("preserves non-sensitive values in array elements", () => {
+    const payload = {
+      steps: [
+        { order: 1, label: "first" },
+        { order: 2, label: "second" },
+      ],
+    };
+    const { redacted, redactedFields } = redactPayload(payload, DEFAULT_EVENT_SOURCE_CONTRACT);
+    const steps = redacted.steps as Array<Record<string, unknown>>;
+    expect(steps[0].order).toBe(1);
+    expect(steps[0].label).toBe("first");
+    expect(steps[1].order).toBe(2);
+    expect(steps[1].label).toBe("second");
+    expect(redactedFields).toHaveLength(0);
+  });
+});
+
+// ============================================================
+// M5 Pending Action Scoping — selectedLens filtered regression (close-out)
+// ============================================================
+
+describe("M5 Pending Action Scoping", () => {
+  const lensA: SelectedLens = { agentId: "agent-001", sessionId: null, runId: null, instanceId: null };
+  const lensB: SelectedLens = { agentId: "agent-002", sessionId: null, runId: null, instanceId: null };
+  const lensA_run1: SelectedLens = { agentId: "agent-001", sessionId: "session-001a", runId: "run-001a1", instanceId: null };
+
+  it("lensMatch returns true for same agent lens", () => {
+    expect(lensMatch(lensA, { ...lensA })).toBe(true);
+  });
+
+  it("lensMatch returns false for different agent lens", () => {
+    expect(lensMatch(lensA, lensB)).toBe(false);
+  });
+
+  it("lensMatch returns false when sessionId differs", () => {
+    const lensS1: SelectedLens = { agentId: "agent-001", sessionId: "session-001a", runId: null, instanceId: null };
+    const lensS2: SelectedLens = { agentId: "agent-001", sessionId: "session-001b", runId: null, instanceId: null };
+    expect(lensMatch(lensS1, lensS2)).toBe(false);
+  });
+
+  it("lensMatch returns true when runId matches", () => {
+    const lensR1: SelectedLens = { agentId: "agent-001", sessionId: "session-001a", runId: "run-001a1", instanceId: null };
+    const lensR1Copy: SelectedLens = { agentId: "agent-001", sessionId: "session-001a", runId: "run-001a1", instanceId: null };
+    expect(lensMatch(lensR1, lensR1Copy)).toBe(true);
+  });
+
+  it("generateFakePendingActions includes selectedLens in each action", () => {
+    const actions = generateFakePendingActions(lensA, "execute tool read_file");
+    expect(actions.length).toBeGreaterThan(0);
+    for (const a of actions) {
+      expect(a.selectedLens).toBeDefined();
+      expect(a.selectedLens.agentId).toBe(lensA.agentId);
+    }
+  });
+
+  it("actions from lens A do not match lens B", () => {
+    const actionsA = generateFakePendingActions(lensA, "tool execute something");
+    expect(actionsA.length).toBeGreaterThan(0);
+    const matchingB = actionsA.filter((a) => lensMatch(a.selectedLens, lensB));
+    expect(matchingB).toHaveLength(0);
+  });
+
+  it("actions from lens A match lens A", () => {
+    const actionsA = generateFakePendingActions(lensA_run1, "tool execute something");
+    const matchingA = actionsA.filter((a) => lensMatch(a.selectedLens, lensA_run1));
+    expect(matchingA.length).toBe(actionsA.length);
+  });
+});
+
+// ============================================================
+// M7 Event Scoping — agentId/sessionId/runId filtered regression (close-out)
+// ============================================================
+
+describe("M7 Event Scoping — agentId/sessionId/runId filtering", () => {
+  let reader: EventStreamReader;
+  let allEvents: RuntimeTraceItem[];
+
+  beforeEach(() => {
+    reader = createEventStreamReader();
+    const result = reader.parse(FAKE_EVENTS_JSONL);
+    allEvents = result.events;
+  });
+
+  it("fixture events include agentId on parsed items", () => {
+    for (const e of allEvents) {
+      expect(e.agentId).toBeTruthy();
+    }
+  });
+
+  it("agent-001 events >= 16", () => {
+    const agent001Events = allEvents.filter((e) => e.agentId === "agent-001");
+    expect(agent001Events.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it("agent-002 events >= 3", () => {
+    const agent002Events = allEvents.filter((e) => e.agentId === "agent-002");
+    expect(agent002Events.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("agent-003 has no events (empty state)", () => {
+    const agent003Events = allEvents.filter((e) => e.agentId === "agent-003");
+    expect(agent003Events).toHaveLength(0);
+  });
+
+  it("filter by runId returns only that run events", () => {
+    const run1Events = allEvents.filter((e) => e.runId === "run-001a1");
+    expect(run1Events.length).toBeGreaterThanOrEqual(10);
+    for (const e of run1Events) {
+      expect(e.runId).toBe("run-001a1");
+    }
+  });
+
+  it("filter by sessionId returns only that session events", () => {
+    const session1Events = allEvents.filter((e) => e.sessionId === "session-001a");
+    expect(session1Events.length).toBeGreaterThanOrEqual(16);
+    for (const e of session1Events) {
+      expect(e.sessionId).toBe("session-001a");
+    }
+  });
+
+  it("summary on filtered events has correct counts", () => {
+    const agent002Events = allEvents.filter((e) => e.agentId === "agent-002");
+    const summary = reader.summarize(agent002Events);
+    expect(summary.totalEvents).toBe(agent002Events.length);
+    expect(summary.runCount).toBe(1);
+    expect(summary.sessionCount).toBe(1);
+  });
+
+  it("empty filter result produces empty summary with zero counts", () => {
+    const empty = allEvents.filter((e) => e.agentId === "agent-003");
+    const summary = reader.summarize(empty);
+    expect(summary.totalEvents).toBe(0);
+    expect(summary.runCount).toBe(0);
+    expect(summary.sessionCount).toBe(0);
   });
 });
 

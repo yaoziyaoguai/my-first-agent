@@ -34,6 +34,8 @@ export interface RuntimeTraceItem {
   eventType: RuntimeEventType;
   /** ISO 8601 timestamp */
   timestamp: string;
+  /** 所属 agent ID（从 payload.agentId 或顶层字段解析） */
+  agentId: string | null;
   /** 所属 session ID */
   sessionId: string;
   /** 所属 run ID */

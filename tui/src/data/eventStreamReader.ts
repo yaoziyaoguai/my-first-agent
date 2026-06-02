@@ -76,6 +76,7 @@ export function createEventStreamReader(
             eventId: raw.eventId as string,
             eventType: raw.eventType,
             timestamp: raw.timestamp as string,
+            agentId: (raw.agentId as string | null) ?? (raw.payload?.agentId as string | null) ?? null,
             sessionId: (raw.sessionId as string) ?? "unknown",
             runId: (raw.runId as string) ?? "unknown",
             instanceId: (raw.instanceId as string | null) ?? null,
@@ -161,23 +162,27 @@ export function createEventStreamReader(
 /** Fake/local fixture events — 模拟 runtime event stream。
  *  不来自真实 Python runtime，不含真实 secret。 */
 export const FAKE_EVENTS_JSONL = [
-  `{"eventId":"evt-001","eventType":"agent_start","timestamp":"2026-06-01T10:00:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"agentId":"agent-001","version":"1.0"}}`,
-  `{"eventId":"evt-002","eventType":"turn_start","timestamp":"2026-06-01T10:00:01Z","sessionId":"session-001a","runId":"run-001a1","payload":{"turnNumber":1,"userInput":"hello"}}`,
-  `{"eventId":"evt-003","eventType":"skill_select","timestamp":"2026-06-01T10:00:02Z","sessionId":"session-001a","runId":"run-001a1","payload":{"skillName":"greeting","confidence":0.95}}`,
-  `{"eventId":"evt-004","eventType":"tool_gate","timestamp":"2026-06-01T10:00:03Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","allowed":true,"risk":"low"}}`,
-  `{"eventId":"evt-005","eventType":"tool_invoke","timestamp":"2026-06-01T10:00:04Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","args":{"path":"/tmp/test.txt"}}}`,
-  `{"eventId":"evt-006","eventType":"tool_result","timestamp":"2026-06-01T10:00:05Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","success":true,"result":"file content here"}}`,
-  `{"eventId":"evt-007","eventType":"turn_end","timestamp":"2026-06-01T10:00:06Z","sessionId":"session-001a","runId":"run-001a1","payload":{"turnNumber":1,"assistantResponse":"Hello!"}}`,
-  `{"eventId":"evt-008","eventType":"checkpoint_create","timestamp":"2026-06-01T10:01:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"checkpointId":"ckpt-001","size":1024}}`,
-  `{"eventId":"evt-009","eventType":"memory_write","timestamp":"2026-06-01T10:02:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"memoryKey":"user_name","value":"Alice"}}`,
-  `{"eventId":"evt-010","eventType":"agent_error","timestamp":"2026-06-01T10:03:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"error":"Connection timeout","retryable":true}}`,
-  `{"eventId":"evt-011","eventType":"safety_gate","timestamp":"2026-06-01T10:04:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"trigger":"delete_file","allowed":false,"risk":"critical"}}`,
-  `{"eventId":"evt-012","eventType":"action_plan_start","timestamp":"2026-06-01T10:05:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"planId":"plan-001","nodeCount":3}}`,
-  `{"eventId":"evt-013","eventType":"node_enter","timestamp":"2026-06-01T10:05:01Z","sessionId":"session-001a","runId":"run-001a2","payload":{"nodeId":"node-1","nodeType":"action","label":"Read config"}}`,
-  `{"eventId":"evt-014","eventType":"node_exit","timestamp":"2026-06-01T10:05:02Z","sessionId":"session-001a","runId":"run-001a2","payload":{"nodeId":"node-1","success":true}}`,
-  `{"eventId":"evt-015","eventType":"action_plan_complete","timestamp":"2026-06-01T10:05:03Z","sessionId":"session-001a","runId":"run-001a2","payload":{"planId":"plan-001","allNodesPassed":true}}`,
+  `{"eventId":"evt-001","agentId":"agent-001","eventType":"agent_start","timestamp":"2026-06-01T10:00:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"version":"1.0"}}`,
+  `{"eventId":"evt-002","agentId":"agent-001","eventType":"turn_start","timestamp":"2026-06-01T10:00:01Z","sessionId":"session-001a","runId":"run-001a1","payload":{"turnNumber":1,"userInput":"hello"}}`,
+  `{"eventId":"evt-003","agentId":"agent-001","eventType":"skill_select","timestamp":"2026-06-01T10:00:02Z","sessionId":"session-001a","runId":"run-001a1","payload":{"skillName":"greeting","confidence":0.95}}`,
+  `{"eventId":"evt-004","agentId":"agent-001","eventType":"tool_gate","timestamp":"2026-06-01T10:00:03Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","allowed":true,"risk":"low"}}`,
+  `{"eventId":"evt-005","agentId":"agent-001","eventType":"tool_invoke","timestamp":"2026-06-01T10:00:04Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","args":{"path":"/tmp/test.txt"}}}`,
+  `{"eventId":"evt-006","agentId":"agent-001","eventType":"tool_result","timestamp":"2026-06-01T10:00:05Z","sessionId":"session-001a","runId":"run-001a1","payload":{"toolName":"read_file","success":true,"result":"file content here"}}`,
+  `{"eventId":"evt-007","agentId":"agent-001","eventType":"turn_end","timestamp":"2026-06-01T10:00:06Z","sessionId":"session-001a","runId":"run-001a1","payload":{"turnNumber":1,"assistantResponse":"Hello!"}}`,
+  `{"eventId":"evt-008","agentId":"agent-001","eventType":"checkpoint_create","timestamp":"2026-06-01T10:01:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"checkpointId":"ckpt-001","size":1024}}`,
+  `{"eventId":"evt-009","agentId":"agent-001","eventType":"memory_write","timestamp":"2026-06-01T10:02:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"memoryKey":"user_name","value":"Alice"}}`,
+  `{"eventId":"evt-010","agentId":"agent-001","eventType":"agent_error","timestamp":"2026-06-01T10:03:00Z","sessionId":"session-001a","runId":"run-001a1","payload":{"error":"Connection timeout","retryable":true}}`,
+  `{"eventId":"evt-011","agentId":"agent-001","eventType":"safety_gate","timestamp":"2026-06-01T10:04:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"trigger":"delete_file","allowed":false,"risk":"critical"}}`,
+  `{"eventId":"evt-012","agentId":"agent-001","eventType":"action_plan_start","timestamp":"2026-06-01T10:05:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"planId":"plan-001","nodeCount":3}}`,
+  `{"eventId":"evt-013","agentId":"agent-001","eventType":"node_enter","timestamp":"2026-06-01T10:05:01Z","sessionId":"session-001a","runId":"run-001a2","payload":{"nodeId":"node-1","nodeType":"action","label":"Read config"}}`,
+  `{"eventId":"evt-014","agentId":"agent-001","eventType":"node_exit","timestamp":"2026-06-01T10:05:02Z","sessionId":"session-001a","runId":"run-001a2","payload":{"nodeId":"node-1","success":true}}`,
+  `{"eventId":"evt-015","agentId":"agent-001","eventType":"action_plan_complete","timestamp":"2026-06-01T10:05:03Z","sessionId":"session-001a","runId":"run-001a2","payload":{"planId":"plan-001","allNodesPassed":true}}`,
   // 含敏感字段的 event（测试脱敏）
-  `{"eventId":"evt-016","eventType":"tool_invoke","timestamp":"2026-06-01T10:06:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"toolName":"api_call","args":{"api_key":"sk-very-secret-key","token":"bearer-token-123"}}}`,
+  `{"eventId":"evt-016","agentId":"agent-001","eventType":"tool_invoke","timestamp":"2026-06-01T10:06:00Z","sessionId":"session-001a","runId":"run-001a2","payload":{"toolName":"api_call","args":{"api_key":"sk-very-secret-key","token":"bearer-token-123"}}}`,
+  // agent-002 events
+  `{"eventId":"evt-017","agentId":"agent-002","eventType":"agent_start","timestamp":"2026-06-01T10:10:00Z","sessionId":"session-002a","runId":"run-002a1","payload":{"version":"1.0"}}`,
+  `{"eventId":"evt-018","agentId":"agent-002","eventType":"tool_invoke","timestamp":"2026-06-01T10:10:01Z","sessionId":"session-002a","runId":"run-002a1","payload":{"toolName":"run_tests","args":{"filter":"test_mcp"}}}`,
+  `{"eventId":"evt-019","agentId":"agent-002","eventType":"tool_result","timestamp":"2026-06-01T10:10:02Z","sessionId":"session-002a","runId":"run-002a1","payload":{"toolName":"run_tests","success":true}}`,
 ].join("\n");
 
 /** Malformed 测试数据 */

@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — Milestones
 
 **创建日期**: 2026-06-02
-**状态**: COMPLETED — M1-M8 delivered (fake/local foundation), accepted-with-caveats pending remediation
+**状态**: COMPLETED — M1-M8 delivered (fake/local foundation), close-out audit applied, candidate for final close
 **依赖文档**: `docs/proposals/b8-interaction-first-workbench-proposal.md`
 
 ---

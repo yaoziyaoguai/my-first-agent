@@ -5,7 +5,7 @@
 **依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`、`docs/milestones/b8-interaction-first-workbench-milestones.md`
 **范围**: 仅记录 B8 TUI Workbench 自身的 deferred milestone / missing prerequisite debt。不记录 B7 implementation debt。
 
-**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M8 delivered (19aa77a)**: 394/394 TUI tests PASS, tsc clean。M1-M8 fake/local foundation 全部交付，accepted-with-caveats pending remediation。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
+**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M8 delivered (19aa77a)**: 412/412 TUI tests PASS, tsc clean。M1-M8 fake/local foundation 全部交付，close-out audit applied。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
 
 ---
 
@@ -164,4 +164,4 @@ B7 readiness SDD
 | CLI fallback | **RETAINED** — CLI 为显式 fallback, 永不删除 |
 | Product readiness | **NOT PRODUCT-READY** — 不声称 production-ready |
 
-**当前阶段**: accepted-with-caveats pending remediation → close-out candidate。独立审计发现的 B8 caveats 正在逐条修复。
+**当前阶段**: close-out candidate — 独立审计 remediation applied，final close-out audit 通过。

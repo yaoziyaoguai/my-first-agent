@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench Proposal
 
 **创建日期**: 2026-06-02
-**状态**: ACCEPTED — M1-M8 delivered (fake/local foundation), accepted-with-caveats pending remediation
+**状态**: ACCEPTED — M1-M8 delivered (fake/local foundation), close-out audit applied, candidate for final close
 **取代**: B8 原有 "信息展示中心" 产品方向
 **依赖**: B7 current-stage closed (accepted-with-caveats)
 **最近更新**: 2026-06-02 — 方向校准 (Round 1-3): 移除 Project Operations Lens, Audit Lens → Context Panel, Operations PAUSED
@@ -193,7 +193,7 @@ Dashboard.tsx 保留在磁盘但不被 import。后续如需产品化，重新�
 本文档是 proposal，需要用户确认以下决策后进入 Milestone 规划和实现：
 
 1. **产品方向**：接受 "interaction-first workbench" 替代 "信息展示中心"？
-2. **布局方案**：接受 Agent Lens / Interaction View / Audit Lens 三区域布局？
+2. **布局方案**：接受 Agent Lens / Interaction View / Context Panel 三区域布局？
 3. **Milestone 方式**：接受按"主入口成熟度"而非"面板数量"定义里程碑？
 4. **现有资产**：接受保留 Phase 1-6A 面板为 auxiliary，不丢弃？
 5. **AutoRun**：接受 AutoRun 永久 dev-only？

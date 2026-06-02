@@ -61,6 +61,7 @@
 |------|------|
 | `audit/b1-b8-current-stage-close-out-audit.md` | B1-B8 close-out 审计 (2026-06-02) |
 | `debt/first-agent-open-items.md` | **Unresolved open items** — audit result: AGENT_AUTO=zero, P0/P1/P2=no |
+| `manual-trials/first-agent-user-trial-guide.md` | **User manual trial guide** — UMT-001~003 step-by-step, result log template |
 | `debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | Real evidence validation debt (REAL-EVIDENCE-001..008) |
 | `debt/b8-tui-workbench-technical-debt.md` | B8 TUI 技术债务 |
 | `debt/b7-pre-sdd-redline-debt.md` | B7 pre-SDD redline (completed) |

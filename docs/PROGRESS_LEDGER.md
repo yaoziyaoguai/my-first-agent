@@ -8,6 +8,7 @@
 
 | Milestone | 简述 |
 |-----------|------|
+| **User Manual Trial Guide Created** | **COMPLETED** (ece15e9) — `docs/manual-trials/first-agent-user-trial-guide.md`: 5 trial groups (T-IME/T-PASTE/T-MLINE/T-COMBO/T-FLOW), 20+ step-by-step scenarios, result log template, evidence policy, open items 回填流程, quick start checklist。覆盖 UMT-001~003。|
 | **Unresolved Open Items Recorded** | **COMPLETED** (82dff68) — Open items by owner documented in `docs/debt/first-agent-open-items.md`: 4 MBC (MODEL_BEHAVIOR_CONCERN), 3 UMT (USER_MANUAL_TRIAL), 3 PD (PRODUCT_DECISION), 3 FD (FUTURE_DEBT)。AGENT_AUTO=zero。P0/P1/P2=no。Current-stage remains closed。Recommended entry routes: User Manual Trial → Product Decision → Skill Hardening → Future MCP。|
 | **Authorized Real Provider Re-Validation** | — | **用户配置真实 provider key 后安全验证 3 条路径**: (1) 008 model-generated ActionPlan: 14/14 PASS, 0 FAIL, 0 CONCERN (AnthropicCompatibleProvider) — ENV_CONCERN 关闭。(2) 002 non-prompt-steered skill selection: 7/10 PASS (上次 4/10), C6 negative trigger bypass + C3/C7 over-eager selection 仍为 MODEL_BEHAVIOR_CONCERN。(3) 003 hardening disallowed-tool blocking: 1 PASS / 0 FAIL / 13 CONCERN — disallowed tools 走 OTHER_GATE 非 skill_allowed_tools→rejected，模型行为变化。Current-stage remains closed。不激活 TUI default entry。不 product-ready。|
 | **Docs staleness fix** | **COMPLETED** (72c46f2) — CURRENT_DOCS.md Slice B status PLAN READY → IMPLEMENTED。Handoff doc final baseline 表新增 post-closeout HEAD bbdb75b, Slice B 段更新为 IMPLEMENTED。Slice B plan LeftRail deferred 标注。|

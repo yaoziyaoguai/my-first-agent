@@ -50,7 +50,9 @@
 
 **Why not auto-fixed now**: Ink 框架不提供 compositionstart/compositionupdate/compositionend 事件，自动化测试无法覆盖 IME 组合态。真实终端行为与 CI 环境有差异。
 
-**Recommended route**: 用户在真实终端中参照 `docs/design/b8-input-readiness-validation.md` checklist 逐项验证。
+**Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 逐步骤手动试用操作手册，含 result log template、evidence policy、回填流程。
+
+**Recommended route**: 用户在真实终端中参照 `docs/design/b8-input-readiness-validation.md` checklist + `docs/manual-trials/first-agent-user-trial-guide.md` 逐项验证。
 
 ### 2.3 PRODUCT_DECISION
 

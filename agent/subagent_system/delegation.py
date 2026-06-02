@@ -6,8 +6,13 @@ from typing import Any
 
 from agent.subagent_system.adjudication import adjudicate_result
 from agent.subagent_system.context import build_context_package
-from agent.subagent_system.executor import execute_l1, execute_local
-from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult, SubAgentRun
+from agent.subagent_system.executor import execute_l1, execute_l2, execute_local
+from agent.subagent_system.result import (
+    ParentAdjudicationResult,
+    SubAgentAuditRecord,
+    SubAgentResult,
+    SubAgentRun,
+)
 from agent.subagent_system.trace import make_trace_event
 
 
@@ -40,7 +45,9 @@ def delegate_once(request: object, registry: object) -> SubAgentRun:
         parent_trace_id=getattr(request, "parent_trace_id", ""),
         data={"role": getattr(request, "role", "")},
     )
-    context_package = build_context_package(request=request, descriptor=descriptor, tool_snapshots=())
+    context_package = build_context_package(
+        request=request, descriptor=descriptor, tool_snapshots=()
+    )
     packaged = make_trace_event(
         "context_packaged",
         delegation_id=delegation_id,
@@ -209,7 +216,9 @@ def delegate_l1(
         parent_trace_id=getattr(request, "parent_trace_id", ""),
         data={"role": getattr(request, "role", ""), "level": "L1"},
     )
-    context_package = build_context_package(request=request, descriptor=descriptor, tool_snapshots=())
+    context_package = build_context_package(
+        request=request, descriptor=descriptor, tool_snapshots=()
+    )
     packaged = make_trace_event(
         "context_packaged",
         delegation_id=delegation_id,
@@ -242,5 +251,150 @@ def delegate_l1(
         result=result,
         adjudication=adjudication,
         revision_count=0,
+    )
+
+
+def delegate_l2(
+    request: object,
+    registry: object,
+    *,
+    provider: Any = None,
+    tool_mediator: Any = None,
+    parent_dispatcher: Any = None,
+    max_revisions: int = 3,
+) -> SubAgentRun:
+    """Run one L2 native-loop delegation with independent stop condition.
+
+    L2 在 L1 基础上增加：
+    - independent stop condition（child 自主 end_turn）
+    - parent adjudication mandatory gate（accept/reject/revision）
+    - child-initiated revision request（clarification_question）
+    - deepened tool access（grep, glob）
+    - batched memory proposals
+
+    Args:
+        request: SubAgentRequest
+        registry: SubAgentRegistry
+        provider: parent provider instance
+        tool_mediator: parent ToolRuntimeMediator
+        parent_dispatcher: parent RuntimeActionDispatcher
+        max_revisions: max revision cycles before hard stop
+    """
+    delegation_id = f"{getattr(request, 'parent_trace_id', 'trace')}:subagent-l2"
+    descriptor = _find_descriptor(request, registry)
+
+    if descriptor is None:
+        result = _missing_descriptor_result(request, delegation_id)
+        adjudication = adjudicate_result(result, request, revision_count=0)
+        return SubAgentRun(
+            delegation_id=delegation_id,
+            state="failed",
+            request=request,
+            descriptor=None,
+            context_package=None,
+            result=result,
+            adjudication=adjudication,
+            revision_count=0,
+        )
+
+    started = make_trace_event(
+        "delegation_started",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={"role": getattr(request, "role", ""), "level": "L2"},
+    )
+    context_package = build_context_package(
+        request=request, descriptor=descriptor, tool_snapshots=()
+    )
+    packaged = make_trace_event(
+        "context_packaged",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={"subagent": getattr(descriptor, "name", ""), "level": "L2"},
+    )
+
+    # L2 core execution loop with revision support
+    revision_history: list[SubAgentRun] = []
+    current_package = context_package
+    final_result: SubAgentResult | None = None
+    final_adjudication: ParentAdjudicationResult | None = None
+    revision_count = 0
+
+    for rev in range(max_revisions + 1):
+        revision_count = rev
+        result = execute_l2(
+            current_package,
+            delegation_id=delegation_id,
+            provider=provider,
+            tool_mediator=tool_mediator,
+        )
+        result = _with_trace_prefix(result, (started, packaged))
+
+        adjudication = adjudicate_result(result, request, revision_count=revision_count)
+
+        adjudicated = make_trace_event(
+            "result_adjudicated",
+            delegation_id=delegation_id,
+            parent_trace_id=getattr(request, "parent_trace_id", ""),
+            data={"action": adjudication.action, "level": "L2", "revision": revision_count},
+        )
+        result = _with_trace_suffix(result, (adjudicated,))
+
+        final_result = result
+        final_adjudication = adjudication
+
+        # adjudication gate decisions
+        if adjudication.action == "accept_result":
+            break
+        if adjudication.action == "reject_result":
+            break
+        if adjudication.action == "request_revision" and rev < max_revisions:
+            prev_run = SubAgentRun(
+                delegation_id=delegation_id,
+                state="revision_requested",
+                request=request,
+                descriptor=descriptor,
+                context_package=current_package,
+                result=result,
+                adjudication=adjudication,
+                revision_count=revision_count,
+            )
+            revision_history.append(prev_run)
+            revised_request = adjudication.revised_request
+            if revised_request is not None:
+                current_package = build_context_package(
+                    request=revised_request,
+                    descriptor=descriptor,
+                    tool_snapshots=(),
+                )
+            continue
+        if adjudication.action == "ask_user":
+            break
+        break  # unknown action — safety break
+
+    final = make_trace_event(
+        "l2_delegation_complete",
+        delegation_id=delegation_id,
+        parent_trace_id=getattr(request, "parent_trace_id", ""),
+        data={
+            "total_revisions": revision_count,
+            "final_action": final_adjudication.action if final_adjudication else "unknown",
+        },
+    )
+    final_result = _with_trace_suffix(
+        final_result or _missing_descriptor_result(request, delegation_id),
+        (final,),
+    )
+
+    return SubAgentRun(
+        delegation_id=delegation_id,
+        state="completed",
+        request=request,
+        descriptor=descriptor,
+        context_package=context_package,
+        result=final_result,
+        adjudication=final_adjudication,
+        revision_count=revision_count,
+        revision_history=tuple(revision_history),
     )
 

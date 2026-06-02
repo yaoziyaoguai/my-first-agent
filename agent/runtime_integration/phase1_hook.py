@@ -40,6 +40,9 @@ from agent.runtime_integration.subagent_action import (
     SubAgentDelegateL0Handler,
     SubAgentDelegateL1Handler,
 )
+from agent.runtime_integration.subagent_delegate_l2 import (
+    SubAgentDelegateL2Handler,
+)
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
@@ -178,6 +181,12 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L1,
         _l1_handler,
+    )
+    # Next-stage D-01: L2 handler 共享 _subagent_registry
+    _l2_handler = SubAgentDelegateL2Handler(registry=_subagent_registry)
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_L2,
+        _l2_handler,
     )
     # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(

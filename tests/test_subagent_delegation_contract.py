@@ -49,6 +49,7 @@ def test_execution_mode_and_stop_reason_enums_cover_rfc_values() -> None:
     }
     assert {reason.value for reason in SubAgentStopReason} == {
         "task_completed",
+        "task_completed_by_child",
         "task_completed_low_confidence",
         "max_iterations_exceeded",
         "max_context_exceeded",

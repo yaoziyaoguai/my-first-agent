@@ -72,6 +72,7 @@ class SubAgentResult:
     clarification_question: str | None
     trace_events: tuple[object, ...]
     stop_reason: str
+    batch_memory_proposals: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,19 +88,19 @@ class ParentAdjudicationResult:
     user_question: str | None = None
 
     @classmethod
-    def accept(cls, reason: str, *, merged_summary: str | None = None) -> "ParentAdjudicationResult":
+    def accept(cls, reason: str, *, merged_summary: str | None = None) -> ParentAdjudicationResult:
         return cls(action="accept_result", reason=reason, merged_summary=merged_summary)
 
     @classmethod
-    def reject(cls, reason: str) -> "ParentAdjudicationResult":
+    def reject(cls, reason: str) -> ParentAdjudicationResult:
         return cls(action="reject_result", reason=reason)
 
     @classmethod
-    def request_revision(cls, reason: str, revised_request: object) -> "ParentAdjudicationResult":
+    def request_revision(cls, reason: str, revised_request: object) -> ParentAdjudicationResult:
         return cls(action="request_revision", reason=reason, revised_request=revised_request)
 
     @classmethod
-    def ask_user(cls, reason: str, user_question: str) -> "ParentAdjudicationResult":
+    def ask_user(cls, reason: str, user_question: str) -> ParentAdjudicationResult:
         return cls(action="ask_user", reason=reason, user_question=user_question)
 
 
@@ -115,6 +116,7 @@ class SubAgentRun:
     result: SubAgentResult | None
     adjudication: ParentAdjudicationResult | None
     revision_count: int
+    revision_history: tuple[SubAgentRun, ...] = ()
     created_at: float = 0.0
     updated_at: float = 0.0
 

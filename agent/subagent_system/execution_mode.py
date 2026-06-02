@@ -20,6 +20,7 @@ class SubAgentExecutionMode(Enum):
 
 class SubAgentStopReason(Enum):
     TASK_COMPLETED = "task_completed"
+    TASK_COMPLETED_BY_CHILD = "task_completed_by_child"
     TASK_COMPLETED_LOW_CONFIDENCE = "task_completed_low_confidence"
     MAX_ITERATIONS_EXCEEDED = "max_iterations_exceeded"
     MAX_CONTEXT_EXCEEDED = "max_context_exceeded"

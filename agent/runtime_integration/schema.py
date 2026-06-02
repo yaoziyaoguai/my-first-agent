@@ -44,6 +44,9 @@ class RuntimeActionType(StrEnum):
     SUBAGENT_PARENT_ADJUDICATION = "subagent.parent_adjudication"
     # Loop 3.2b: child memory proposal → parent-mediated store write
     SUBAGENT_CHILD_MEMORY_REQUEST = "subagent.child_memory_request"
+    # Next-stage D-01: SubAgent L2 native loop action types
+    SUBAGENT_DELEGATE_L2 = "subagent.delegate_l2"
+    SUBAGENT_CHILD_BATCH_MEMORY = "subagent.child_batch_memory"
     # CLI meta-command action types（Loop 4: Runtime Entry Consolidation）
     # READ_ONLY CLI commands 走 dispatcher 获得 evidence chain，不再绕过统一入口。
     # MUTATING/DELEGATING commands (forget/delegate) 需要 confirmation pipeline 就绪后再迁入。
@@ -99,6 +102,8 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.SUBAGENT_CHILD_RESULT: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_DELEGATE_L2: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_CHILD_BATCH_MEMORY: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_MEMORIES: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.CLI_SHOW_SUBAGENTS: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.MCP_BRIDGE_LIFECYCLE: _EVIDENCE_KIND_PROBE,

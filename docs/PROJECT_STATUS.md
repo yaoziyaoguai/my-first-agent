@@ -67,6 +67,14 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - TUI default entry NOT ACTIVATED。
 - **Status**: ACTIVE — contract + fake adapter delivered。Real gateway adapter blocked by user authorization。
 
+### Next-Stage D-02 — MCP Real External Connection Readiness (2026-06-02)
+
+**D-02 MCP real external server connection** (handoff §8, §9 Route 3):
+
+- Current state: code path complete — bridge lifecycle dispatcher evidence + local stdio echo fixture (REAL-EVIDENCE-005: 12/12 PASS) + runtime-mediated invocation chain (REAL-EVIDENCE-007: 10/10 PASS)。
+- Readiness plan: `docs/design/mcp-real-external-connection-readiness.md`。
+- **Status**: BLOCKED_BY_EXTERNAL_SERVER — 需用户提供外部 MCP server fixture/config。
+
 ---
 
 ## B8 M1 — Interaction-first Workbench MVP (2026-06-02)

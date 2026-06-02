@@ -5,10 +5,12 @@ import type {
   MessageBlockData,
   ToolCallBlockData,
   PendingActionBlockData,
+  ToolResultTableData,
 } from "../../data/visualShellTypes";
 import { MessageBlock } from "./MessageBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { PendingActionBlock } from "./PendingActionBlock";
+import { ToolResultTableBlock } from "./ToolResultTableBlock";
 import { SECTION_HEADER, DIM_TEXT } from "../../theme/visualShellTheme";
 
 interface MainWorkAreaProps {
@@ -16,6 +18,7 @@ interface MainWorkAreaProps {
   messages: MessageBlockData[];
   toolCalls: ToolCallBlockData[];
   pendingActions: PendingActionBlockData[];
+  tableResults?: ToolResultTableData[];
   fakeLabel: string;
 }
 
@@ -24,12 +27,14 @@ export function MainWorkArea({
   messages,
   toolCalls,
   pendingActions,
+  tableResults,
   fakeLabel,
 }: MainWorkAreaProps) {
   const isEmpty =
     messages.length === 0 &&
     toolCalls.length === 0 &&
-    pendingActions.length === 0;
+    pendingActions.length === 0 &&
+    (!tableResults || tableResults.length === 0);
 
   return (
     <Box
@@ -67,6 +72,16 @@ export function MainWorkArea({
             .map((pa) => (
               <PendingActionBlock key={pa.id} action={pa} />
             ))}
+
+          {/* Tool result tables — Slice B readiness */}
+          {tableResults?.map((tr, i) => (
+            <ToolResultTableBlock
+              key={`table-${i}`}
+              headers={tr.headers}
+              rows={tr.rows}
+              maxRows={tr.maxRows}
+            />
+          ))}
         </>
       )}
     </Box>

@@ -8,6 +8,7 @@ import type {
   MessageBlockData,
   ToolCallBlockData,
   PendingActionBlockData,
+  ToolResultTableData,
   InspectorStatusData,
   BottomStatusData,
   TopBarData,
@@ -122,6 +123,26 @@ export const MOCK_INSPECTOR: InspectorStatusData = {
   evidence: { itemCount: 8 },
 };
 
+export const MOCK_TABLE_RESULTS: ToolResultTableData[] = [
+  {
+    headers: ["Field", "Value"],
+    rows: [
+      ["status", "ok"],
+      ["provider", "fake/local"],
+      ["tools", "5"],
+    ],
+  },
+  {
+    headers: ["Tool", "Count", "Status"],
+    rows: [
+      ["read_file", "3", "pass"],
+      ["write_file", "1", "pending"],
+      ["grep", "0", "idle"],
+    ],
+    maxRows: 5,
+  },
+];
+
 export const MOCK_BOTTOM_STATUS: BottomStatusData = {
   version: "v0.x",
   runtime: "unified",
@@ -142,6 +163,7 @@ export const FULL_FIXTURE: VisualShellFixture = {
   messages: MOCK_MESSAGES,
   toolCalls: MOCK_TOOL_CALLS,
   pendingActions: MOCK_PENDING_ACTIONS,
+  tableResults: MOCK_TABLE_RESULTS,
   inspector: MOCK_INSPECTOR,
   bottomStatus: MOCK_BOTTOM_STATUS,
 };
@@ -169,6 +191,7 @@ export const EMPTY_FIXTURE: VisualShellFixture = {
   messages: [],
   toolCalls: [],
   pendingActions: [],
+  tableResults: [],
   inspector: {
     activeContext: { agentId: "—", runId: "—" },
     runtimeDecision: {

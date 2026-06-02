@@ -4,7 +4,9 @@
 **Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
 **TUI Visual Target**: `docs/design/first-agent-tui-visual-target-v1.md` — 22 组件映射、6 区域布局合同、data source policy。独立审计: **ACCEPTED-WITH-CAVEATS**（3 caveats 不阻塞 Slice A）。
-**TUI Slice A**: **IMPLEMENTED** — `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md`。25 组件 + 3 test files (30 tests) + theme + types + fixtures。static visual shell + mock/fake data + render tests。不接 runtime/provider/MCP。459/459 TUI tests PASS, tsc clean。
+**TUI Slice A**: **IMPLEMENTED** — `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md`。25 组件 + 3 test files (30 tests) + theme + types + fixtures。static visual shell + mock/fake data + render tests。不接 runtime/provider/MCP。461/461 TUI tests PASS, tsc clean。
+**TUI Slice B**: **PLAN READY** — `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md`。Wire existing safe data into Slice A visual shell。yes-with-caveats。pre-Slice B cleanup: ToolResultTableBlock wired into MainWorkArea (2 new tests)。no P0/P1 blocker。不调 real provider/MCP/activate default entry。
+**Next-Stage Gap Audit**: **COMPLETED** (2026-06-02) — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker。0 secret leak。推荐路线: Option B — TUI Slice B。
 **状态**: **CURRENT-STAGE FROZEN — yes-with-caveats**。B7 **closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付 (accepted, final caveats closed, 2f995b9)。TUI Visual Shell Slice A delivered。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。下一阶段需重新 SPEC/TDD/Review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
@@ -107,6 +109,33 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - All tests use `_SpyProvider` — no real API。
 - Real provider dogfood: **future task**.
 - **Status**: COMPLETED。Gates: 20/20 L2 contract + 8/8 delegation contract + 34/34 decision frame + 79/79 docs source-of-truth PASS, ruff clean。
+
+### Next-Stage Gap Audit — 2026-06-02
+
+**独立只读审计** — 8 维度 capability inventory (Runtime/Provider, MCP, Skill Selection, SubAgent, Memory/Checkpoint, TUI, Evidence/Docs, Legacy)。5 phase (Phase 0-5)。0 P0/P1 blocker。0 secret leak。current-stage remains closed。
+
+**Slice B 就绪判定**: yes-with-caveats。
+
+**Top 5 remaining technical gaps**:
+1. Provider real API key — `sk-REPLACE_ME` 占位符阻塞 3 条真实验证路径
+2. MCP external production connection — `MY_FIRST_AGENT_MCP_ENABLE` 未设置
+3. Skill negative trigger bypass (C6) — MODEL_BEHAVIOR_CONCERN
+4. Chinese IME validation — MANUAL_PENDING，需真实终端人工验证
+5. ToolResultTableBlock unwired — **DONE in pre-Slice B cleanup**
+
+**Auto-fixable (completed)**:
+- ToolResultTableBlock wiring — 5 files changed, 2 new tests, 461/461 PASS
+
+**User-config items**:
+- 替换 `sk-REPLACE_ME` 为真实 DashScope API key (不 commit)
+- 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + 外部 MCP server 路径
+- 人工终端验证 Chinese IME (iTerm2/Terminal.app + CJK input method)
+- 批准 TUI default entry activation (blocked, NOT ACTIVATED)
+- Legacy Dashboard/AutoRun cleanup 决策 (Option C: on-disk keep)
+
+**Slice B allowed data**: RuntimeDecisionFrame summary, MCP local smoke status, skill evidence summary, checkpoint/memory read-only summary, pending actions, selected lens/session/run/instance state, docs-derived data (Developer/Evidence lens only)。
+
+**Slice B forbidden**: no real provider call, no real MCP server, no memory/checkpoint/event write, no ToolRuntimeMediator bypass, no default entry activation, no product-ready claim, no Dashboard resurrection。
 
 ---
 

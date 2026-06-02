@@ -1,8 +1,19 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (current-stage frozen — close-out handoff delivered, final baseline: 60fd71e)
+**最后更新**: 2026-06-02 (Slice B plan ready — pre-Slice B cleanup: ToolResultTableBlock wired)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+## 2026-06-02 (Post-Closeout — Next-Stage Gap Audit + Slice B Readiness)
+
+| Milestone | 简述 |
+|-----------|------|
+| Next-Stage Tech Stack / Capability Gap Audit | **COMPLETED** — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker, 0 secret leak。current-stage remains closed。推荐 Route: Option B — TUI Slice B |
+| ToolResultTableBlock wired (pre-Slice B) | 5 files changed: `visualShellTypes.ts` (+ToolResultTableData), `visualShellFixtures.ts` (+MOCK_TABLE_RESULTS), `MainWorkArea.tsx` (import+render), `TuiShell.tsx` (pass through), `visualShellRender.test.tsx` (+2 tests)。461/461 TUI tests PASS, tsc clean |
+| Slice B plan created | `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md` — 9 sections: purpose, non-goals, allowed data sources, component wiring plan, first step, test plan, acceptance criteria, constraints, version history |
+| Docs updated for gap audit | PROJECT_STATUS.md: Slice B readiness + gap audit section。handoff: annotated with post-closeout status。debt: B8 workbench debt updated |
+
+---
 
 ---
 

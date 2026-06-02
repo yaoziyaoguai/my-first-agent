@@ -69,6 +69,7 @@ export function TuiShell({
             messages={fixture.messages}
             toolCalls={fixture.toolCalls}
             pendingActions={fixture.pendingActions}
+            tableResults={fixture.tableResults}
             fakeLabel={fixture._label}
           />
 

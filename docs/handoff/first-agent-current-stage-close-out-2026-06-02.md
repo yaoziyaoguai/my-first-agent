@@ -382,3 +382,28 @@ REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 s
 - Not activating TUI default entry
 
 **Classification**: PASS (TUI gates) + MANUAL_IME_PENDING (Chinese input method).
+
+### 2026-06-02 — Post-Closeout Gap Audit + Slice B Readiness
+
+**Next-Stage Tech Stack / Capability Gap Audit** executed as independent read-only audit:
+
+- **Phase 0**: HEAD `088e05b` == origin/main, clean working tree. PASS.
+- **Phase 1**: Cross-validated all source-of-truth docs + agent/runtime/MCP/provider/skill/memory/checkpoint code. Consistent. PASS.
+- **Phase 2**: 8-dimension capability inventory (A-H) compiled — Runtime/Provider, MCP, Skill, SubAgent, Memory/Checkpoint, TUI, Evidence/Docs, Legacy.
+- **Phase 3**: 7 missing dependencies identified — 3 ENV_CONFIG, 4 SCOPE_DEBT.
+- **Phase 4**: Slice B readiness: **yes-with-caveats**. ToolResultTableBlock unwired is only minor finding, now fixed.
+- **Phase 5**: Recommended route: **Option B — TUI Slice B (wire existing safe data into Slice A visual shell)**.
+
+**Pre-Slice B cleanup**: ToolResultTableBlock wired into MainWorkArea (5 files, +2 tests, 461/461 PASS, tsc clean).
+
+**Slice B plan**: `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md` — PLAN READY.
+
+**Current-stage remains closed**. Slice B not implemented yet. No real provider/MCP/default entry activation.
+
+**Top remaining gaps**:
+1. Provider real API key — `sk-REPLACE_ME` 占位符
+2. MCP external production — `MY_FIRST_AGENT_MCP_ENABLE` 未设置
+3. Skill negative trigger C6 — MODEL_BEHAVIOR_CONCERN
+4. Chinese IME — MANUAL_PENDING
+
+**Next action**: Full Slice B implementation — wire RuntimeDecisionFrame summary, MCP bridge status, skill evidence, checkpoint/memory read-only summaries into ContextInspectorPanel and other Slice A components. See Slice B plan for scope.

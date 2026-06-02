@@ -80,6 +80,13 @@ export interface PendingActionBlockData {
   status: "pending" | "approved" | "rejected";
 }
 
+/** Tool result table 数据 — Slice B readiness */
+export interface ToolResultTableData {
+  headers: string[];
+  rows: string[][];
+  maxRows?: number;
+}
+
 /** MCP 状态摘要 */
 export interface McpStatusData {
   status: "ready" | "partial" | "blocked" | "disabled";
@@ -148,6 +155,7 @@ export interface VisualShellFixture {
   messages: MessageBlockData[];
   toolCalls: ToolCallBlockData[];
   pendingActions: PendingActionBlockData[];
+  tableResults?: ToolResultTableData[];
   inspector: InspectorStatusData;
   bottomStatus: BottomStatusData;
 }

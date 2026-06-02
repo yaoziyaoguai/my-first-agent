@@ -25,6 +25,7 @@ import {
   MOCK_PENDING_ACTIONS,
   MOCK_INSPECTOR,
   MOCK_BOTTOM_STATUS,
+  MOCK_TABLE_RESULTS,
 } from "../data/visualShellFixtures";
 
 // ── TuiShell render tests ──
@@ -180,6 +181,37 @@ describe("MainWorkArea", () => {
   });
 
   test("renders empty state placeholder", () => {
+    const { lastFrame } = render(
+      <MainWorkArea
+        width={56}
+        messages={[]}
+        toolCalls={[]}
+        pendingActions={[]}
+        fakeLabel="[fake/local fixture]"
+      />,
+    );
+    expect(lastFrame()).toContain("no messages yet");
+  });
+
+  test("renders tool result table blocks", () => {
+    const { lastFrame } = render(
+      <MainWorkArea
+        width={56}
+        messages={[]}
+        toolCalls={[]}
+        pendingActions={[]}
+        tableResults={MOCK_TABLE_RESULTS}
+        fakeLabel="[fake/local fixture]"
+      />,
+    );
+    const output = lastFrame();
+    expect(output).toContain("Field");
+    expect(output).toContain("Value");
+    expect(output).toContain("status");
+    expect(output).toContain("provider");
+  });
+
+  test("table results still empty when omitted", () => {
     const { lastFrame } = render(
       <MainWorkArea
         width={56}

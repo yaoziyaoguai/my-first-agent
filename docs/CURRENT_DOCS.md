@@ -23,7 +23,7 @@
 | 文档 | 状态 | 说明 |
 |------|------|------|
 | `plans/first-agent-tui-visual-shell-slice-a-plan.md` | **IMPLEMENTED** | Slice A: static visual shell。代码基准: `088e05b` |
-| `plans/first-agent-tui-visual-shell-slice-b-plan.md` | **PLAN READY** | Slice B: wire existing safe data into Slice A shell。not yet implemented |
+| `plans/first-agent-tui-visual-shell-slice-b-plan.md` | **IMPLEMENTED** (2026-06-02) | Slice B: wire existing safe data into Slice A shell。484/484 TUI tests PASS, tsc clean |
 | `design/b8-interaction-first-workbench-sdd.md` | COMPLETED-WITH-CAVEATS | B8 SDD（取代旧 `b8-ts-tui-workbench-sdd.md`） |
 | `design/b8-input-readiness-validation.md` | DRAFT | IME/paste/multiline readiness。IME: MANUAL_PENDING |
 | `design/runtime-gateway-foundation-sdd.md` | DRAFT | D-04 RuntimeGateway contract + FakeRuntimeAdapter |

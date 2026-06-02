@@ -106,7 +106,7 @@ ToolResultTableBlock 已接入 MainWorkArea 渲染流（pre-Slice B 最小修复
 - [x] 461/461 TUI tests PASS
 - [x] tsc clean
 - [x] ContextInspectorPanel wired with safe summary data
-- [ ] LeftRail lens selection 驱动 panel 内容变化
+- [ ] LeftRail lens selection 驱动 panel 内容变化 — **DEFERRED** (Slice B scope: 可选项目，非阻塞。当前 selectedLens 仅通过 fixture 静态传入，完整 lens 切换需 Slice C/D 阶段实现)
 - [x] docs updated (PROJECT_STATUS, PROGRESS_LEDGER, handoff)
 - [x] current-stage remains closed
 

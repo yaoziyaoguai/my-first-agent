@@ -10,10 +10,11 @@
 
 | 项目 | 值 |
 |------|-----|
-| Final commit | `2da5e22` |
-| 包含 | `de20a36` (D-04 gateway baseline) + `2da5e22` (D-09 namespace fix) |
+| Final commit (close-out baseline) | `2da5e22` |
+| Post-closeout HEAD | `bbdb75b` (Slice B IMPLEMENTED) |
+| 包含 | `de20a36` (D-04 gateway baseline) + `2da5e22` (D-09 namespace fix) + `bbdb75b` (TUI Slice B safe data wiring) |
 | HEAD == origin/main | yes |
-| Working tree | 1 untracked (handoff updated) |
+| Working tree | docs-only updates (handoff + CURRENT_DOCS staleness fix) |
 | Gemini final verification | pass |
 | Codex final verification | pass |
 
@@ -396,9 +397,9 @@ REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 s
 
 **Pre-Slice B cleanup**: ToolResultTableBlock wired into MainWorkArea (5 files, +2 tests, 461/461 PASS, tsc clean).
 
-**Slice B plan**: `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md` — PLAN READY.
+**Slice B**: **IMPLEMENTED** (2026-06-02) — `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md`。3 new data files (safeDataSources.ts, visualShellDataAdapter.ts, dataAdapter test) + component wiring + 7 new integration tests。484/484 TUI tests PASS, tsc clean。All safe data wired into TuiShell。Current-stage remains closed。不调 real provider/MCP/activate default entry。
 
-**Current-stage remains closed**. Slice B not implemented yet. No real provider/MCP/default entry activation.
+**Current-stage remains closed**. Slice B delivered. Next-stage candidate routes remain as documented below.
 
 **Top remaining gaps**:
 1. Provider real API key — `sk-REPLACE_ME` 占位符
@@ -406,4 +407,4 @@ REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 s
 3. Skill negative trigger C6 — MODEL_BEHAVIOR_CONCERN
 4. Chinese IME — MANUAL_PENDING
 
-**Next action**: Full Slice B implementation — wire RuntimeDecisionFrame summary, MCP bridge status, skill evidence, checkpoint/memory read-only summaries into ContextInspectorPanel and other Slice A components. See Slice B plan for scope.
+**Next action**: Slice B delivered — 484/484 PASS。Next-stage candidate: see §9 for remaining routes (D-02 MCP local smoke, D-04 real gateway adapter, D-06 terminal validation, D-09 non-prompt-steered validation)。All require either user config or manual trial。

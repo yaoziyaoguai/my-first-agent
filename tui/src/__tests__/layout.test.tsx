@@ -1,15 +1,22 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { AGENT_LENS_FIXTURE, EMPTY_AGENT_LENS } from "../data/agentLensFixture";
 import { fakeRuntimeSend, makeUserMessage } from "../data/fakeRuntimeGateway";
 import type { AgentLensNode, FocusZone, SelectedLens } from "../types";
 import { EMPTY_SELECTED_LENS } from "../types";
+import {
+  generateFakePendingActions,
+  createFakeGateway,
+  type PendingAction,
+  type ControlledOperationGateway,
+} from "../data/pendingAction";
 import { WorkbenchLayout } from "../components/WorkbenchLayout";
 import { AgentLensPanel } from "../components/AgentLensPanel";
 import { InteractionPanel } from "../components/InteractionPanel";
 import { ContextPanel } from "../components/ContextPanel";
 import { InputBar } from "../components/InputBar";
 import { StatusBar } from "../components/StatusBar";
+import { PendingActionPanel } from "../components/PendingActionPanel";
 
 // ============================================================
 // M1 — Layout Data / State logic tests (保留)
@@ -300,6 +307,231 @@ describe("M4 Context — Interaction refresh", () => {
       lensLabel: "agent-001",
       messageCount: 3,
       lastInteractionTime: Date.now(),
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+// ============================================================
+// M5 — Pending Action / Controlled Interaction tests
+// ============================================================
+
+const MOCK_LENS_FOR_M5: SelectedLens = {
+  agentId: "agent-001",
+  sessionId: "session-001a",
+  runId: "run-001a2",
+  instanceId: null,
+};
+
+describe("M5 Pending Action — Data Model", () => {
+  it("generateFakePendingActions returns tool_confirmation for 'tool' keyword", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "run tool");
+    expect(actions.some((a) => a.type === "tool_confirmation")).toBe(true);
+  });
+
+  it("generateFakePendingActions returns memory_proposal for 'memory' keyword", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "store memory");
+    expect(actions.some((a) => a.type === "memory_proposal")).toBe(true);
+  });
+
+  it("generateFakePendingActions returns checkpoint_save for 'save' keyword", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "save checkpoint");
+    expect(actions.some((a) => a.type === "checkpoint_save")).toBe(true);
+  });
+
+  it("generateFakePendingActions returns safety_gate for 'delete' keyword", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "delete files");
+    expect(actions.some((a) => a.type === "safety_gate")).toBe(true);
+  });
+
+  it("safety_gate actions have riskLevel 'critical'", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "rm -rf destroy");
+    const safety = actions.find((a) => a.type === "safety_gate");
+    expect(safety).toBeDefined();
+    expect(safety!.riskLevel).toBe("critical");
+  });
+
+  it("all generated actions have source 'fake/local'", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "run tool memory save delete");
+    for (const a of actions) {
+      expect(a.source).toBe("fake/local");
+    }
+  });
+
+  it("all generated actions have status 'pending'", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "run tool");
+    for (const a of actions) {
+      expect(a.status).toBe("pending");
+    }
+  });
+
+  it("all generated actions have unique actionIds", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "run tool memory save delete");
+    const ids = new Set(actions.map((a) => a.actionId));
+    expect(ids.size).toBe(actions.length);
+  });
+
+  it("no pending actions for unrelated input", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "hello world");
+    expect(actions).toHaveLength(0);
+  });
+
+  it("action requiresConfirmation defaults correctly", () => {
+    const actions = generateFakePendingActions(MOCK_LENS_FOR_M5, "run tool save");
+    const toolAction = actions.find((a) => a.type === "tool_confirmation");
+    const checkpointAction = actions.find((a) => a.type === "checkpoint_save");
+    expect(toolAction!.requiresConfirmation).toBe(true);
+    expect(checkpointAction!.requiresConfirmation).toBe(false);
+  });
+});
+
+describe("M5 Pending Action — ControlledOperationGateway", () => {
+  let gateway: ControlledOperationGateway;
+  let action: PendingAction;
+
+  beforeEach(() => {
+    gateway = createFakeGateway();
+    action = {
+      actionId: "pending-1",
+      type: "tool_confirmation",
+      title: "Execute Tool",
+      description: "Test tool execution",
+      riskLevel: "medium",
+      status: "pending",
+      createdAt: Date.now(),
+      selectedLens: MOCK_LENS_FOR_M5,
+      requiresConfirmation: true,
+      source: "fake/local",
+    };
+  });
+
+  it("approve returns status 'approved'", () => {
+    const result = gateway.approve(action);
+    expect(result.status).toBe("approved");
+    expect(result.actionId).toBe("pending-1");
+  });
+
+  it("approve returns outcomeMessage with '[fake/local] APPROVED' prefix", () => {
+    const result = gateway.approve(action);
+    expect(result.outcomeMessage).toContain("[fake/local] APPROVED");
+    expect(result.outcomeMessage).toContain("No real tool executed");
+  });
+
+  it("reject returns status 'rejected'", () => {
+    const result = gateway.reject(action);
+    expect(result.status).toBe("rejected");
+    expect(result.actionId).toBe("pending-1");
+  });
+
+  it("reject returns outcomeMessage with '[fake/local] REJECTED' prefix", () => {
+    const result = gateway.reject(action);
+    expect(result.outcomeMessage).toContain("[fake/local] REJECTED");
+    expect(result.outcomeMessage).toContain("cancelled");
+  });
+
+  it("ApprovalResult has resolvedAt timestamp after createdAt", () => {
+    const result = gateway.approve(action);
+    expect(result.resolvedAt).toBeGreaterThanOrEqual(action.createdAt);
+  });
+});
+
+describe("M5 Pending Action — PendingActionPanel", () => {
+  const pendingAction: PendingAction = {
+    actionId: "pending-1",
+    type: "tool_confirmation",
+    title: "Execute Tool",
+    description: "Test tool execution",
+    riskLevel: "medium",
+    status: "pending",
+    createdAt: Date.now(),
+    selectedLens: MOCK_LENS_FOR_M5,
+    requiresConfirmation: true,
+    source: "fake/local",
+  };
+
+  it("renders with single pending action", () => {
+    const el = React.createElement(PendingActionPanel, {
+      actions: [pendingAction],
+      focused: true,
+      highlightedIdx: 0,
+      onApprove: () => {},
+      onReject: () => {},
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders without error for empty actions array", () => {
+    const el = React.createElement(PendingActionPanel, {
+      actions: [],
+      focused: false,
+      highlightedIdx: 0,
+      onApprove: () => {},
+      onReject: () => {},
+    });
+    // Component returns null from render, but createElement always returns an element
+    expect(el).toBeDefined();
+  });
+
+  it("renders with approved action showing outcome", () => {
+    const approvedAction: PendingAction = {
+      ...pendingAction,
+      status: "approved",
+      outcomeMessage: "[fake/local] APPROVED: test",
+    };
+    const el = React.createElement(PendingActionPanel, {
+      actions: [approvedAction],
+      focused: false,
+      highlightedIdx: 0,
+      onApprove: () => {},
+      onReject: () => {},
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("renders with rejected action showing outcome", () => {
+    const rejectedAction: PendingAction = {
+      ...pendingAction,
+      status: "rejected",
+      outcomeMessage: "[fake/local] REJECTED: test",
+    };
+    const el = React.createElement(PendingActionPanel, {
+      actions: [rejectedAction],
+      focused: false,
+      highlightedIdx: 0,
+      onApprove: () => {},
+      onReject: () => {},
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+describe("M5 Pending Action — StatusBar", () => {
+  it("StatusBar renders with pendingCount 0", () => {
+    const el = React.createElement(StatusBar, {
+      activeLens: "agent-001",
+      focusZone: "interaction",
+      pendingCount: 0,
+    });
+    expect(el).toBeDefined();
+  });
+
+  it("StatusBar renders with pendingCount > 0", () => {
+    const el = React.createElement(StatusBar, {
+      activeLens: "agent-001",
+      focusZone: "interaction",
+      pendingCount: 3,
+    });
+    expect(el).toBeDefined();
+  });
+});
+
+describe("M5 Pending Action — ContextPanel with pending", () => {
+  it("ContextPanel renders with pendingCount", () => {
+    const el = React.createElement(ContextPanel, {
+      focused: false,
+      lensLabel: "agent-001",
+      messageCount: 2,
+      pendingCount: 1,
     });
     expect(el).toBeDefined();
   });

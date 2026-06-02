@@ -7,6 +7,8 @@ interface ContextPanelProps {
   /** M4: interaction stats */
   messageCount?: number;
   lastInteractionTime?: number | null;
+  /** M5: pending actions count */
+  pendingCount?: number;
 }
 
 /** 右侧 Context/Inspector 占位面板 — M1 mock/static placeholder, M4 interaction refresh。
@@ -17,6 +19,7 @@ export function ContextPanel({
   lensLabel,
   messageCount = 0,
   lastInteractionTime = null,
+  pendingCount = 0,
 }: ContextPanelProps) {
   const hasSelection = lensLabel !== "none";
 
@@ -62,6 +65,11 @@ export function ContextPanel({
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>Safety</Text>
             <Text dimColor>local fake mode</Text>
+            {pendingCount > 0 && (
+              <Text color="yellow">
+                ⚡ {pendingCount} pending action(s)
+              </Text>
+            )}
           </Box>
         </>
       ) : (

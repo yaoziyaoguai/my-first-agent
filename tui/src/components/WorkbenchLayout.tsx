@@ -4,11 +4,17 @@ import type { FocusZone, SelectedLens } from "../types";
 import { EMPTY_SELECTED_LENS } from "../types";
 import { AGENT_LENS_FIXTURE } from "../data/agentLensFixture";
 import { fakeRuntimeSend, makeUserMessage, type RuntimeMessage } from "../data/fakeRuntimeGateway";
+import {
+  generateFakePendingActions,
+  createFakeGateway,
+  type PendingAction,
+} from "../data/pendingAction";
 import { AgentLensPanel } from "./AgentLensPanel";
 import { InteractionPanel } from "./InteractionPanel";
 import { ContextPanel } from "./ContextPanel";
 import { InputBar } from "./InputBar";
 import { StatusBar } from "./StatusBar";
+import { PendingActionPanel } from "./PendingActionPanel";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
@@ -30,6 +36,10 @@ export function WorkbenchLayout() {
   const [focusZone, setFocusZone] = useState<FocusZone>("interaction");
   const [selectedLens, setSelectedLens] = useState<SelectedLens>(EMPTY_SELECTED_LENS);
   const [messages, setMessages] = useState<RuntimeMessage[]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [highlightedPendingIdx, setHighlightedPendingIdx] = useState(0);
+
+  const gateway = React.useMemo(() => createFakeGateway(), []);
 
   const cycleFocus = useCallback((direction: 1 | -1) => {
     setFocusZone((prev) => {
@@ -53,9 +63,57 @@ export function WorkbenchLayout() {
       const userMsg = makeUserMessage(content);
       const assistantMsg = fakeRuntimeSend(content, selectedLens.agentId);
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
+
+      const actions = generateFakePendingActions(selectedLens, content);
+      if (actions.length > 0) {
+        setPendingActions((prev) => [...prev, ...actions]);
+        setFocusZone("interaction");
+      }
     },
-    [selectedLens.agentId],
+    [selectedLens],
   );
+
+  const handleApprove = useCallback(
+    (actionId: string) => {
+      setPendingActions((prev) =>
+        prev.map((a) => {
+          if (a.actionId !== actionId) return a;
+          const result = gateway.approve(a);
+          const outcomeMsg: RuntimeMessage = {
+            id: `outcome-${result.actionId}`,
+            role: "system",
+            content: result.outcomeMessage,
+            timestamp: result.resolvedAt,
+          };
+          setMessages((prevMsgs) => [...prevMsgs, outcomeMsg]);
+          return { ...a, status: result.status, outcomeMessage: result.outcomeMessage };
+        }),
+      );
+    },
+    [gateway],
+  );
+
+  const handleReject = useCallback(
+    (actionId: string) => {
+      setPendingActions((prev) =>
+        prev.map((a) => {
+          if (a.actionId !== actionId) return a;
+          const result = gateway.reject(a);
+          const outcomeMsg: RuntimeMessage = {
+            id: `outcome-${result.actionId}`,
+            role: "system",
+            content: result.outcomeMessage,
+            timestamp: result.resolvedAt,
+          };
+          setMessages((prevMsgs) => [...prevMsgs, outcomeMsg]);
+          return { ...a, status: result.status, outcomeMessage: result.outcomeMessage };
+        }),
+      );
+    },
+    [gateway],
+  );
+
+  const pendingCount = pendingActions.filter((a) => a.status === "pending").length;
 
   useInput((input, key) => {
     if (input === "q") {
@@ -67,6 +125,34 @@ export function WorkbenchLayout() {
         cycleFocus(-1);
       } else {
         cycleFocus(1);
+      }
+      return;
+    }
+    if (pendingCount === 0) return;
+
+    if (key.upArrow) {
+      setHighlightedPendingIdx((prev) =>
+        prev > 0 ? prev - 1 : pendingActions.length - 1,
+      );
+      return;
+    }
+    if (key.downArrow) {
+      setHighlightedPendingIdx((prev) =>
+        prev < pendingActions.length - 1 ? prev + 1 : 0,
+      );
+      return;
+    }
+    if (key.return) {
+      const action = pendingActions[highlightedPendingIdx];
+      if (action && action.status === "pending") {
+        handleApprove(action.actionId);
+      }
+      return;
+    }
+    if (key.escape) {
+      const action = pendingActions[highlightedPendingIdx];
+      if (action && action.status === "pending") {
+        handleReject(action.actionId);
       }
     }
   });
@@ -80,7 +166,7 @@ export function WorkbenchLayout() {
       {/* 标题 */}
       <Box paddingLeft={1}>
         <Text bold>B8 Interaction-first Workbench</Text>
-        <Text dimColor> — M2/M3/M4 MVP (fake/local mode)</Text>
+        <Text dimColor> — M2/M3/M4/M5 MVP (fake/local mode)</Text>
       </Box>
 
       {/* 三区域 */}
@@ -111,9 +197,19 @@ export function WorkbenchLayout() {
             lensLabel={lensLabel}
             messageCount={messages.length}
             lastInteractionTime={lastMsg?.timestamp ?? null}
+            pendingCount={pendingCount}
           />
         </Box>
       </Box>
+
+      {/* M5 — PendingActionPanel */}
+      <PendingActionPanel
+        actions={pendingActions}
+        focused={focusZone === "interaction"}
+        highlightedIdx={highlightedPendingIdx}
+        onApprove={handleApprove}
+        onReject={handleReject}
+      />
 
       {/* 分隔线 */}
       <Box>
@@ -127,7 +223,11 @@ export function WorkbenchLayout() {
         onSubmit={handleSubmit}
         disabled={!hasSelection}
       />
-      <StatusBar activeLens={lensLabel} focusZone={focusZone} />
+      <StatusBar
+        activeLens={lensLabel}
+        focusZone={focusZone}
+        pendingCount={pendingCount}
+      />
     </Box>
   );
 }

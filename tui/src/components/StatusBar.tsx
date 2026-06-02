@@ -5,10 +5,11 @@ import type { FocusZone } from "../types";
 interface StatusBarProps {
   activeLens: string;
   focusZone: FocusZone;
+  pendingCount?: number;
 }
 
 /** 底部状态栏 */
-export function StatusBar({ activeLens, focusZone }: StatusBarProps) {
+export function StatusBar({ activeLens, focusZone, pendingCount = 0 }: StatusBarProps) {
   const zoneLabel: Record<FocusZone, string> = {
     interaction: "Interaction",
     "agent-lens": "Agent Selector",
@@ -29,6 +30,9 @@ export function StatusBar({ activeLens, focusZone }: StatusBarProps) {
         <Text dimColor>
           Focus: <Text bold>{zoneLabel[focusZone]}</Text>
         </Text>
+        {pendingCount > 0 && (
+          <Text color="yellow">⚡ {pendingCount} pending</Text>
+        )}
       </Box>
       <Box gap={2}>
         <Text dimColor>fake/local mode</Text>

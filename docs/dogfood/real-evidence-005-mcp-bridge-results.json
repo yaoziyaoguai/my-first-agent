@@ -38,7 +38,7 @@
     {
       "case": "V4",
       "verdict": "PASS",
-      "detail": "MCP tools visible to model: [\"{'name': 'mcp__echo_fixture__mcp_echo', 'description': '[MCP:echo-fixture] Echo the input message back. A safe read-only tool for MCP bridge validation.', 'input_schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'description': 'The message to echo back.'}}, 'required': ['message']}}\", \"{'name': 'mcp__echo_fixture__mcp_demo_status', 'description': '[MCP:echo-fixture] Return a static status object. A safe read-only tool for MCP bridge validation.', 'input_schema': {'type': 'object', 'properties': {}, 'required': []}}\"]"
+      "detail": "MCP tools visible to model: [\"{'name': 'mcp__echo_fixture__mcp_echo', 'description': '[MCP:echo-fixture] Echo the input message back. Safe read-only MCP bridge validation tool.', 'input_schema': {'type': 'object', 'properties': {'message': {'type': 'string', 'description': 'The message to echo back.'}}, 'required': ['message']}}\", \"{'name': 'mcp__echo_fixture__mcp_demo_status', 'description': '[MCP:echo-fixture] Return a static status object. Safe read-only MCP bridge validation tool.', 'input_schema': {'type': 'object', 'properties': {}, 'required': []}}\"]"
     },
     {
       "case": "V5",
@@ -63,7 +63,7 @@
     {
       "case": "W2",
       "verdict": "PASS",
-      "detail": "Destructive tool block patterns configured: frozenset({'write_file', 'run_shell', 'execute_command', 'remove_file', 'run_command', 'edit_file', 'delete_file', 'create_directory', 'rename', 'move_file'})"
+      "detail": "Destructive tool block patterns configured: frozenset({'edit_file', 'run_command', 'execute_command', 'write_file', 'remove_file', 'delete_file', 'run_shell', 'move_file', 'create_directory', 'rename'})"
     }
   ],
   "summary": {

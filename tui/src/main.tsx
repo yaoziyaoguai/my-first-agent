@@ -2,10 +2,11 @@ import React from "react";
 import { render } from "ink";
 import path from "node:path";
 
+import { TuiShell } from "./components/shell/TuiShell";
+import { SAFE_DATA_FIXTURE } from "./data/visualShellFixtures";
 import { WorkbenchLayout } from "./components/WorkbenchLayout";
 
-// Slice A — Visual Shell export (component-level only, NOT default entry).
-// To smoke-test standalone: import { TuiShell } and render with FULL_FIXTURE/EMPTY_FIXTURE/SAFE_DATA_FIXTURE.
+// Slice A — Visual Shell exports
 export { TuiShell } from "./components/shell/TuiShell";
 export { FULL_FIXTURE, EMPTY_FIXTURE, SAFE_DATA_FIXTURE, SAFE_DATA_PROVENANCE } from "./data/visualShellFixtures";
 export type { VisualShellFixture } from "./data/visualShellTypes";
@@ -38,11 +39,15 @@ export {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
-/** B8 Interaction-first Workbench — 默认入口。
- *  不渲染 Dashboard / PROJECT_STATUS / AutoRun / dogfood / debt 等 Operation 相关内容。
- *  所有数据自包含（fixture），Context Panel 使用 mock/static placeholder。 */
+const isLegacy = process.argv.includes("--legacy") || process.argv.includes("--workbench");
+
+/** 默认入口: Visual Shell (TuiShell + SAFE_DATA_FIXTURE)。
+ *  --legacy / --workbench: 旧 B8 Interaction-first Workbench。 */
 function App() {
-  return <WorkbenchLayout />;
+  if (isLegacy) {
+    return <WorkbenchLayout />;
+  }
+  return <TuiShell fixture={SAFE_DATA_FIXTURE} />;
 }
 
 render(<App />);

@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/main.tsx",
+    "start:legacy": "tsx src/main.tsx --legacy",
+    "start:workbench": "tsx src/main.tsx --workbench",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

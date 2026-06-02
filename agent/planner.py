@@ -170,7 +170,12 @@ def validate_action_plan_raw(raw: dict) -> tuple[bool, str]:
     if "nodes" not in raw:
         wrong.append('顶层缺少 "nodes" key')
     if "steps_estimate" not in raw:
-        wrong.append('缺少 "steps_estimate" 字段')
+        # auto-derive from node count when nodes exist
+        nodes_container = raw.get("nodes") or []
+        if isinstance(nodes_container, list) and len(nodes_container) > 1:
+            raw["steps_estimate"] = len(nodes_container)
+        else:
+            wrong.append('缺少 "steps_estimate" 字段')
     else:
         se = raw.get("steps_estimate", 0)
         if not isinstance(se, (int, float)) or int(se) <= 1:

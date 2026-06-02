@@ -1503,7 +1503,11 @@ def _run_planning_phase(
     action_plan = None
     if clean_text is not None and raw is not None:
         steps_estimate = raw.get("steps_estimate", 0)
-        if isinstance(steps_estimate, (int, float)) and int(steps_estimate) > 1:
+        node_count = len(raw.get("nodes") or [])
+        multi_step = (
+            isinstance(steps_estimate, (int, float)) and int(steps_estimate) > 1
+        )
+        if multi_step or node_count > 1:
             action_plan = generate_action_plan(
                 user_input, loop_ctx.client, loop_ctx.model_name,
                 messages=planning_messages,

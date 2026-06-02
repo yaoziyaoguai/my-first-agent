@@ -4,16 +4,27 @@ import { Box, Text } from "ink";
 import type { BottomStatusData } from "../../data/visualShellTypes";
 import { DIM_TEXT } from "../../theme/visualShellTheme";
 
+type FocusZone = "agent-lens" | "interaction" | "context";
+const ZONE_LABEL: Record<FocusZone, string> = {
+  interaction: "Input",
+  "agent-lens": "Lens",
+  context: "Context",
+};
+
 interface BottomStatusBarProps {
   data: BottomStatusData;
   width: number;
   evidenceLens: boolean;
+  focusZone?: FocusZone;
+  messageCount?: number;
 }
 
 export function BottomStatusBar({
   data,
   width,
   evidenceLens,
+  focusZone,
+  messageCount,
 }: BottomStatusBarProps) {
   const parts = [
     data.version,
@@ -24,6 +35,8 @@ export function BottomStatusBar({
     `mcp: ${data.mcpStatus}`,
     data.provider,
     evidenceLens ? "[EVIDENCE]" : null,
+    focusZone ? `focus: ${ZONE_LABEL[focusZone]}` : null,
+    messageCount !== undefined && messageCount > 0 ? `msgs: ${messageCount}` : null,
     "q: quit  Tab: switch",
   ].filter(Boolean);
 

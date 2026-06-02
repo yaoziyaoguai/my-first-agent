@@ -12,9 +12,11 @@ import {
 
 interface SessionPanelProps {
   data: SessionItem;
+  focused?: boolean;
+  selectedIdx?: number;
 }
 
-export function SessionPanel({ data }: SessionPanelProps) {
+export function SessionPanel({ data, focused = false, selectedIdx = 0 }: SessionPanelProps) {
   if (!data.agentId) {
     return (
       <Box flexDirection="column">

@@ -228,9 +228,9 @@ describe("MainWorkArea", () => {
 // ── InputDock tests ──
 
 describe("InputDock", () => {
-  test("renders input area with placeholder", () => {
+  test("renders input area with input value", () => {
     const { lastFrame } = render(
-      <InputDock width={56} placeholder="test input" isFake={true} />,
+      <InputDock width={56} inputValue="test input" isFake={true} />,
     );
     expect(lastFrame()).toContain("test input");
     expect(lastFrame()).toContain("[fake/local]");
@@ -238,7 +238,7 @@ describe("InputDock", () => {
 
   test("renders command chips", () => {
     const { lastFrame } = render(
-      <InputDock width={56} placeholder="" isFake={false} />,
+      <InputDock width={56} isFake={false} />,
     );
     expect(lastFrame()).toContain("/ask");
     expect(lastFrame()).toContain("/help");

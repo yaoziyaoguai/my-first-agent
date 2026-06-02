@@ -1,6 +1,5 @@
 import React from "react";
 import { render } from "ink";
-import path from "node:path";
 
 import { TuiShell } from "./components/shell/TuiShell";
 import { SAFE_DATA_FIXTURE } from "./data/visualShellFixtures";
@@ -36,8 +35,6 @@ export {
   SAFE_EVIDENCE_ITEMS,
   SAFE_SKILL_EVIDENCE,
 } from "./data/safeDataSources";
-
-const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
 const isLegacy = process.argv.includes("--legacy") || process.argv.includes("--workbench");
 

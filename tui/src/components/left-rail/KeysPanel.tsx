@@ -3,7 +3,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { SECTION_HEADER, DIM_TEXT } from "../../theme/visualShellTheme";
 
-export function KeysPanel() {
+export function KeysPanel({ focused = false }: { focused?: boolean }) {
   const keys = [
     "Tab: switch",
     "↑↓: navigate",

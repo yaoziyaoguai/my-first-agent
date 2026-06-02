@@ -22,6 +22,8 @@ interface LeftRailProps {
   sessions: SessionItem;
   runtimeStatus: RuntimeStatusData;
   fakeLabel: string;
+  focused?: boolean;
+  selectedIdx?: number;
 }
 
 export function LeftRail({
@@ -32,6 +34,8 @@ export function LeftRail({
   sessions,
   runtimeStatus,
   fakeLabel,
+  focused = false,
+  selectedIdx = 0,
 }: LeftRailProps) {
   return (
     <Box
@@ -39,9 +43,12 @@ export function LeftRail({
       height={height}
       flexDirection="column"
       borderStyle="single"
-      borderColor="gray"
+      borderColor={focused ? "green" : "gray"}
     >
-      <Text dimColor>{fakeLabel}</Text>
+      <Box>
+        <Text dimColor>{fakeLabel}</Text>
+        {focused && <Text color="green" bold> ◉</Text>}
+      </Box>
       <WorkspacePanel items={workspaces} />
       <Box>
         <Text dimColor>{BORDER_CHARS.h.repeat(width - 4)}</Text>
@@ -50,7 +57,7 @@ export function LeftRail({
       <Box>
         <Text dimColor>{BORDER_CHARS.h.repeat(width - 4)}</Text>
       </Box>
-      <SessionPanel data={sessions} />
+      <SessionPanel data={sessions} focused={focused} selectedIdx={selectedIdx} />
       <Box>
         <Text dimColor>{BORDER_CHARS.h.repeat(width - 4)}</Text>
       </Box>
@@ -58,7 +65,7 @@ export function LeftRail({
       <Box>
         <Text dimColor>{BORDER_CHARS.h.repeat(width - 4)}</Text>
       </Box>
-      <KeysPanel />
+      <KeysPanel focused={focused} />
     </Box>
   );
 }

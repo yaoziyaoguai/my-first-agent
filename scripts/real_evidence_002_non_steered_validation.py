@@ -142,13 +142,13 @@ def get_selected_skill(evidence: dict) -> str | None:
     """Extract selected skill_id from evidence."""
     skill_selects = evidence.get("skill.select", [])
     for s in skill_selects:
-        sid = s.get("evidence", {}).get("skill_id", "")
+        sid = s.get("evidence", {}).get("selected_skill_id", "")
         if sid:
             return sid
     # also check for tool-based SKILL_SELECT
     tool_results = evidence.get("tool.result", [])
     for t in tool_results:
-        sid = t.get("evidence", {}).get("skill_id", "")
+        sid = t.get("evidence", {}).get("selected_skill_id", "")
         if sid:
             return sid
     return None

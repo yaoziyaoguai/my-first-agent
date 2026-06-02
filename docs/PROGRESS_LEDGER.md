@@ -1,13 +1,14 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (Slice B plan ready — pre-Slice B cleanup: ToolResultTableBlock wired)
+**最后更新**: 2026-06-02 (docs source-of-truth audit completed)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
-## 2026-06-02 (Post-Closeout — Next-Stage Gap Audit + Slice B Readiness)
+## 2026-06-02 (Post-Closeout — Docs Audit + Gap Audit + Slice B Readiness)
 
 | Milestone | 简述 |
 |-----------|------|
+| **Docs Source-of-Truth Audit** | **COMPLETED** — 168 个 markdown 文件全量 inventory + code cross-check。10/10 consistency checks pass: TUI Slice A implemented ✓, Slice B plan only ✓, MCP local smoke only ✓, IME MANUAL_PENDING ✓, TUI default NOT ACTIVATED ✓, Dashboard/AutoRun not mainline ✓, current-stage FROZEN ✓。`docs/CURRENT_DOCS.md` 创建 (5 节导航: Start Here, Current Implementation, Evidence/Audit/Debt, Historical/Superseded, Rules)。2 scratch 文件标注。0 overclaim 发现。0 secret leak。无代码修改 (仅 doc editing)。|
 | Next-Stage Tech Stack / Capability Gap Audit | **COMPLETED** — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker, 0 secret leak。current-stage remains closed。推荐 Route: Option B — TUI Slice B |
 | ToolResultTableBlock wired (pre-Slice B) | 5 files changed: `visualShellTypes.ts` (+ToolResultTableData), `visualShellFixtures.ts` (+MOCK_TABLE_RESULTS), `MainWorkArea.tsx` (import+render), `TuiShell.tsx` (pass through), `visualShellRender.test.tsx` (+2 tests)。461/461 TUI tests PASS, tsc clean |
 | Slice B plan created | `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md` — 9 sections: purpose, non-goals, allowed data sources, component wiring plan, first step, test plan, acceptance criteria, constraints, version history |

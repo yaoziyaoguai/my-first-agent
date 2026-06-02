@@ -1,96 +1,111 @@
-# B1-B8 Current-Stage Close-Out Audit
+# B1-B8 Current-stage Close-out Audit
 
-**日期**: 2026-06-02
-**目标**: B1-B8 Global Evidence-backed Audit + Close-out Sweep
-**范围**: B1-B8 capabilities as defined in the current roadmap and recovery maps.
-**方法**: 只读审计，通过 codebase、测试覆盖和 git history 的交叉验证得出独立且诚实的结论。
+**Date**: 2026-06-02
+**Starting HEAD**: `2f995b95113c5bd0828884f0da6cee380c533cd4`
+**Scope**: Global evidence-backed audit for B1-B8 current-stage close-out.
+**Mode**: Read evidence from git, code, tests, and active docs; apply only low-risk docs honesty remediation.
 
----
+## Safety Boundary
 
-## 1. B1-B8 Definition Table
+- No `.env` read.
+- No real API call.
+- No private data inspection.
+- No TUI default entry activation.
+- No B9 work.
+- No real runtime adapter implementation.
+- No `core.chat` / ReAct loop rewrite.
+- No second runtime.
+- No `ToolRuntimeMediator` bypass.
 
-| B ID | 名称 / Capability Name | 当前文档声称状态 | 主要 Source Files | 相关测试文件 | 是否 Fake/Local / Real |
-|---|---|---|---|---|---|
-| **B1** | Memory write dispatcher migration | COMPLETED / VALIDATED | `agent/memory_interaction.py`, `agent/memory_runtime.py` | `tests/unit/test_memory_interaction.py` | Real-runtime |
-| **B2** | CLI delegate shortcut → dispatcher | DONE | `agent/core.py`, `agent/subagent_inline.py` | - | Real-runtime |
-| **B3** | SubAgent L1/L2 成熟化 | NOT STARTED / VALIDATED (L1 credible) | `agent/subagent_system/`, `agent/core.py` | `tests/runtime_integration/test_subagent_l1_execution.py` | Real-runtime (L1) / Pending (L2) |
-| **B4** | MCP real connection | PARTIAL | `agent/mcp_bridge.py`, `agent/mcp/` | `tests/runtime_integration/test_mcp_real_external_flight.py` | Mixed (stdio fixture / real path) |
-| **B5** | Skill runtime 深化 | code path complete / VALIDATED | `agent/skill_state.py`, `agent/runtime_integration/` | `tests/unit/test_skill_state.py`, `tests/runtime_integration/` | Real-runtime |
-| **B6** | Checkpoint true state restoration | QUESTIONABLE / VALIDATED (with caveats) | `agent/checkpoint.py`, `agent/runtime_decision_frame.py` | `tests/unit/test_checkpoint.py` | Real-runtime |
-| **B7** | Multi-instance readiness | accepted-with-caveats | `agent/memory_fs_store.py`, `agent/session.py`, `agent/loop.py` | `tests/test_b7_event_log.py`, `tests/test_b7_multi_instance_integration.py` | Real-runtime (Foundation built) |
-| **B8** | TUI architecture (Interaction-first) | accepted-with-caveats / DELIVERED | `tui/src/main.tsx`, `tui/src/components/` | `tui/src/__tests__/` (394 tests) | Fake/Local (M1-M8 MVP) |
+## Definition Source
 
----
+The repository does not contain one clean, modern "B1-B8" definition series. Early v0.1 B1/B2/B3 smoke/playbook entries remain historical guard evidence. For this close-out sweep, current B1-B8 is mapped to the active `REAL-EVIDENCE-001..008` capability chain in `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md`.
 
-## 2. B1-B8 Evidence-Backed Status Table
+| B | Current definition | Primary code | Primary tests | Status | Boundary |
+|---|--------------------|--------------|---------------|--------|----------|
+| B1 / REAL-EVIDENCE-001 | Memory retain/recall/forget | `agent/runtime_integration/memory_retain.py`, `memory_recall.py`, `memory_forget.py` | `tests/runtime_integration/test_memory_*` | accepted-with-caveats | credible real-provider evidence; recall provenance caveat |
+| B2 / REAL-EVIDENCE-002 | Skill selection / `SKILL_SELECT` | `agent/skill_system/`, `agent/runtime_integration/skill_action.py` | `tests/unit/test_skill_select_tool.py`, `tests/runtime_integration/test_skill_*` | accepted-with-caveats | prompt-steered / single-skill caveats |
+| B3 / REAL-EVIDENCE-003 | Skill `allowed_tools` enforcement | `agent/tool_runtime_mediator.py`, `agent/runtime_integration/tool_gate.py` | `tests/runtime_integration/test_skill_allowed_tools_lifecycle.py`, `test_skill_tool_enforcement.py` | accepted-with-caveats | model-behavior concerns remain, not code blocker |
+| B4 / REAL-EVIDENCE-004 | Checkpoint save/resume | `agent/runtime_integration/checkpoint_save.py`, `checkpoint_resume.py`, `agent/checkpoint.py` | `tests/runtime_integration/test_checkpoint_*` | accepted-with-caveats | Part B save-point caveat |
+| B5 / REAL-EVIDENCE-005 | MCP bridge readiness | `agent/mcp_bridge.py`, `agent/mcp_stdio.py` | `tests/runtime_integration/test_mcp_bridge_lifecycle.py`, `tests/test_mcp_stdio_integration.py` | accepted-with-caveats | local stdio fixture / opt-in bridge evidence |
+| B6 / REAL-EVIDENCE-006 | SubAgent L1 | `agent/subagent_system/`, `agent/runtime_integration/subagent_action.py` | `tests/runtime_integration/test_subagent_l1_parent_mediated.py` | accepted-with-caveats | real-provider child mediation credible; cleanup debt remains |
+| B7 / REAL-EVIDENCE-007 | MCP runtime-mediated invocation | `agent/tool_runtime_mediator.py`, `agent/mcp_bridge.py`, `agent/mcp_stdio.py` | `tests/runtime_integration/test_mcp_real_external_flight.py`, `tests/test_real_mcp_flight.py` | accepted-with-caveats | FakeProvider deterministic `tool_use` validation caveat |
+| B8 / REAL-EVIDENCE-008 | Advanced scheduler | `agent/action_scheduler.py`, `agent/planner.py`, `agent/core.py`, `agent/loop.py` | `tests/runtime_integration/test_scheduler_main_path.py`, `tests/unit/test_action_plan_schema.py` | accepted | evidence chain closed; scheduler remains opt-in |
 
-| B ID | 审计状态 | 证据 (代码/测试/Commit) | 是否阻塞 Close-out |
-|---|---|---|---|
-| **B1** | **accepted** | `resolve_confirmation` 成功返回 `_dispatcher_payload`，并由 `dispatcher.route(_req)` 接管。证明 write path 已迁移。 | No |
-| **B2** | **accepted** | `core.py` 中的 delegation 已经切换为调用 `dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1)`，并且具备 fallback 逻辑。 | No |
-| **B3** | **accepted-with-caveats** | L1 完整走通 ToolRuntimeMediator 逻辑，证据链闭环。L2 不在当前范围内。| No |
-| **B4** | **partial** (as designed) | MCP bridge local discovery 可信。外部 invocation 是 direct registered-tool execution，没有 full E2E 真实连接。符合设计预期。| No |
-| **B5** | **accepted-with-caveats** | `allowed_tools` enforcement 完全生效 (13 PASS)。真实模型 SKILL_SELECT + real dogfood E2E (002/003) 证明了 code path。Caveats 是模型表现。 | No |
-| **B6** | **accepted-with-caveats** | `direct-save` fallback 已被移除，确保 dispatcher 必须发挥作用。Caveat：部分 stop condition（如 `confirmation='always'`）未能在实际交互中触发保存点。 | No |
-| **B7** | **accepted-with-caveats** | Namespace injection, event log writer (append-only), 和 per-run checkpoint path 均已实现 (3f2f6b2)。Codex 审计通过。 | No |
-| **B8** | **accepted-with-caveats** | M1-M8 (Interaction-first Workbench) 代码实现完全遵从 fake/local 隔离边界 (ccd89f5)。394 个测试用例覆盖全面。TUI 入口安全保持在 NOT ACTIVATED。 | No |
+## B7 / B8 Stage Status
 
----
+| Stage | Audited status | Evidence | Current blocker? |
+|-------|----------------|----------|------------------|
+| B7 current-stage | accepted-with-caveats | independent close-out recorded in `PROJECT_STATUS.md`; B7-caused failures 0 | no |
+| B8 TUI stage | accepted-with-caveats | `tui/src/main.tsx` renders `WorkbenchLayout`; 412/412 TUI tests pass; docs now mark fake/local | no |
 
-## 3. Remediated Items
+B8 TUI is not product-ready. M1-M8 are a fake/local interaction-first foundation. M6/M7 do not provide a real multi-instance runtime or real event stream adapter. M8 is readiness checklist only; TUI default entry is **NOT ACTIVATED**.
 
-1. **B8 UI Scoping Issues**: M5 `PendingActions` 和 M7 `EventPanel` 已成功实现基于 `selectedLens` 的数据过滤 (commit: ccd89f5)。
-2. **B8 Data Redaction**: `EventSourceContract` 中的数组递归脱敏漏洞已被修复 (commit: ccd89f5)。
-3. **Docs Honesty & Alignment**: 旧的 "Phase 6B/7" 以及 "Audit Lens" 词汇已被更新或归档，"Context Panel" 和 "Context Inspector" 成为 M0-M8 的统一规范。
+## Product Boundary Evidence
 
-## 4. Remaining Caveats
+- `tui/src/main.tsx` renders `WorkbenchLayout` as the only default TUI surface.
+- `WorkbenchLayout` filters pending actions and event summaries by selected lens.
+- `EventSourceContract` declares `source: "fake/local"` and `supportsTail: false`.
+- `EventStreamReader` reads fixture JSONL and handles malformed/partial local data; it does not tail a real process.
+- Legacy `Dashboard.tsx`, AutoRun, command execution, audit log, docs/project parsers remain on disk as historical/auxiliary code. They are not the default mainline and are not product core.
 
-1. **Fake/Local Mocking (B8)**: B8 的数据主要依赖 fixture 隔离（fake/local），并非连接真实的 runtime state。这并非缺陷，而是当前阶段刻意保持的边界。
-2. **Model Behavior Conflation (B3/B5)**: 测试中出现的部分失败（如 `test_second_round_dogfooding_smoke.py` 的 xfail）属于 `FakeProvider` 的行为语义变化（如非空 end-turn reply），而非核心控制流代码的缺陷。
+## Issue Inventory
 
-## 5. Future Debts
+| ID | Severity | Type | Evidence | Blocking close-out? | Disposition |
+|----|----------|------|----------|---------------------|-------------|
+| I-01 | P2 | docs stale / overclaim | active B8 docs still referenced `394/394`, planning-era audit/dashboard wording, and default-entry approval wording | yes until fixed | fixed now |
+| I-02 | P2 | docs ambiguity | B1-B8 numbering conflicted with early v0.1 B1/B2/B3 history and `REAL-EVIDENCE-001..008` | yes until clarified | fixed now |
+| I-03 | P3 | legacy code caveat | `Dashboard.tsx`, AutoRun/command/audit modules remain on disk | no | keep as legacy/auxiliary debt |
+| I-04 | Future debt | real adapter pending | B8 M6/M7 rely on fake/local fixtures and contracts | no | keep as future adapter debt |
+| I-05 | Future debt | product decision | TUI default entry activation needs explicit approval | no | keep NOT ACTIVATED |
+| I-06 | Future debt | UX validation | Chinese IME / paste / multiline caveats remain | no | keep as M8 future debt |
+| I-07 | Validation caveat | real-evidence scope | 001-007 have accepted-with-caveats scope notes in REAL_EVIDENCE_VALIDATION_DEBT | no | keep documented caveats |
 
-1. **B3 L2 SubAgent Integration**: 现阶段仅实现和验证了 L1。L2 需要更成熟的模型和真实的 E2E。
-2. **B4 Real MCP Server Connection**: 需要实际挂载外部 MCP Server 完成 real external flight E2E 测试。
-3. **B7 Multi-instance Real Adapter**: B8 TUI 需要一个 real adapter 去消费 B7 提供的底层 multi-instance file system 数据。
-4. **TUI Default Entry Activation (B8)**: TUI 尚不支持作为产品的 Default Entry。需在解决 IME（输入法）问题和真实数据接入后由用户手动 Activation。
+No P0/P1 current-stage blocker was found in this sweep.
 
-## 6. No-Action / Superseded Items
+## Remediated In This Sweep
 
-- `Dashboard.tsx` 及 AutoRun UI：保留在代码库作为历史遗留物和 dev-only 的入口，但不进入 default entry 产品主线。
-- B8 "Phase 1-6A" 相关的所有设计文档：均已标为 SUPERSEDED，由 `first-agent-tui-design.md` 等 M0-M8 规范完全接管。
+- `PROJECT_STATUS.md`: verified current B1-B8 mapping, close-out candidate status, and superseded early backlog table are already aligned.
+- `PROGRESS_LEDGER.md`: added evidence-backed close-out row and corrected M5-M8 fake/local wording.
+- B8 roadmap/milestone/SDD/TDD/debt/proposal docs: removed active overclaims around Audit Lens, Dynamic Audit, Project Operations, AutoRun mainline, and stale 394/394 test count.
+- B8 docs now explicitly say M6/M7 are fake/local foundations and real adapters are future debt.
+- B8 docs now explicitly say TUI default entry is NOT ACTIVATED and product-ready is NO.
 
----
+## Remaining Caveats
 
-## 7. Gates
+| Caveat | Owner stage | Reason it is not a current blocker |
+|--------|-------------|------------------------------------|
+| B8 real multi-instance history adapter | future B8/B9 decision | Requires real runtime identity / adapter; forbidden to fake as current ability |
+| B8 real runtime event stream adapter | future B8/B9 decision | Requires structured runtime event source; TUI must not create second runtime |
+| TUI default entry activation | user/product decision | M8 checklist is complete but activation is explicitly withheld |
+| IME/paste/multiline validation | TUI polish | Known limitation; not needed for fake/local close-out |
+| Legacy Dashboard/AutoRun code on disk | cleanup/product decision | Not imported by default mainline; deleting history is not required for current close-out |
 
-运行在最新 HEAD (`2f995b9`) 环境下：
+## Gate Evidence
 
-- `cd tui && npm test` 
-  - Exit code: 0
-  - Summary: 394 passed (394) in 3.32s
-- `cd tui && npm run typecheck` 
-  - Exit code: 0
-- `.venv/bin/python -m pytest tests/test_architecture_boundaries.py` 
-  - Exit code: 0
-  - Summary: 24 passed in 5.19s
-- `.venv/bin/python -m pytest tests/test_b7_event_log.py` 
-  - Exit code: 0
-  - Summary: 41 passed in 1.68s
-- `git diff --check`
-  - Exit code: 0 (clean tree)
-- Timeout: No
+Final post-remediation gates:
 
----
+| Command | Exit code | Timeout | Result |
+|---------|-----------|---------|--------|
+| `cd tui && npm test` | 0 | no | 412/412 TUI tests PASS |
+| `cd tui && npm run typecheck` | 0 | no | `tsc --noEmit` clean |
+| `git diff --check` | 0 | no | clean |
+| `.venv/bin/python -m pytest tests/test_local_trial_readiness.py::test_plans_docs_contain_no_secret_fragments tests/test_local_trial_readiness.py::test_audit_docs_contain_no_secret_fragments --tb=short -q` | 0 | no | 2 passed |
+| `.venv/bin/python -m pytest tests/test_docs_source_of_truth.py --tb=short -q` | 0 | no | 79 passed |
+| `rg --files -g .pre-commit-config.yaml -g .pre-commit-config.yml` | 1 | no | no pre-commit config found; no effective pre-commit gate |
 
-## 8. Final Current-Stage Close-Out Recommendation
+Safety-skipped: provider diagnostics real-key guard. That test reads local provider configuration; its failure path can expose a key prefix. This sweep did not read real config or print secret-like values.
 
-经过严谨的代码审查与测试覆盖的交叉验证，确认 **B1-B8 Capabilities 均达到了 Current-Stage 的设计目标**。
+## Final Recommendation
 
-- 所有的 "Overclaim" 已经被明确地降级和诚实标记为 "PARTIAL" 或 "Fake/Local"。
-- M1-M8 工作台作为 Fake/Local MVP 拥有非常高的工程质量。
-- B1-B7 在底层 Runtime 阶段已充分验证了 Dispatcher, Tool Gate, Checkpoint, Namespace, MCP Foundation 等机制的合理性。
+First Agent current-stage can close **yes-with-caveats**.
 
-**Recommendation**: The First Agent is officially declared a **Current-Stage Close-Out Candidate (Accepted-with-Caveats)**.
+- B7 final status: accepted-with-caveats.
+- B8 final status: accepted-with-caveats.
+- B8 product boundary: clean for current default mainline.
+- Fake/local boundary: honest after remediation.
+- TUI default entry: not activated.
+- Need another B8 remediation loop: no, unless final independent audit finds new active-doc or code blockers.
+- Ready to move beyond B8: yes-with-caveats, after final independent close-out audit and without starting B9 in this sweep.
 
-可以停止在 B1-B8 上添加新 feature，封版并准备步入下一架构周期。
+Recommended next prompt: final independent audit of current HEAD and this report, focused on active-doc honesty, TUI default-entry non-activation, fake/local boundary, and absence of Dashboard/AutoRun/Product Operations mainline resurrection.

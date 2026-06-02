@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — SDD
 
 **创建日期**: 2026-06-02
-**状态**: COMPLETED — M1-M8 全部交付，394/394 TUI tests PASS
+**状态**: COMPLETED-WITH-CAVEATS — M1-M8 fake/local foundation delivered, 412/412 TUI tests PASS
 **设计方向**: `docs/design/first-agent-tui-design.md`（终端原生、交互优先、克制可观测）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
@@ -26,11 +26,13 @@ TUI 默认布局为三区域聚焦布局：Agent Lens (25%) / Interaction View (
 
 | 能力 | 状态 | 说明 |
 |------|------|------|
-| Agent Lens | M1 fixture data | agent/session/run/instance 树形选择 |
-| Interaction View | M1 placeholder | 用户 ↔ agent 对话区域 |
-| Context Panel | M1 mock/static | 通用 Context/Inspector placeholder |
-| Input Bar | M1 基础输入 | 文本输入区域 |
-| Status Bar | M1 状态栏 | lens/focus/mode 信息 |
+| Agent Lens | M1-M8 fake/local fixture | agent/session/run/instance 树形选择；不是真实 runtime identity |
+| Interaction View | M3 fake/local gateway | 用户 ↔ fake/local agent response；不调用真实 `core.chat()` |
+| Context Panel | M4-M8 generic inspector | 通用 Context/Inspector + pending/history/event foundation；不是 Audit Dashboard |
+| Input Bar | M3 fake/local submit | 文本输入到 `FakeRuntimeGateway` |
+| Status Bar | M5+ pending/count/status | selected-lens scoped pending/status |
+| History/Event Foundation | M6/M7 contracts | fake/local fixtures + contracts；real adapters pending |
+| Default Entry Readiness | M8 checklist | checklist delivered；default entry NOT ACTIVATED |
 
 ### 1.5.2 PAUSED — 不产品化
 
@@ -78,14 +80,14 @@ TUI 默认布局为三区域聚焦布局：Agent Lens (25%) / Interaction View (
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 组件树 (当前 M1)
+### 2.2 组件树 (当前 M1-M8)
 
 ```
 WorkbenchLayout
 ├── AgentLensPanel
 │   └── AgentLensNode (递归树节点)
-├── InteractionPanel (placeholder)
-├── ContextPanel (mock/static placeholder)
+├── InteractionPanel (fake/local interaction history)
+├── ContextPanel (generic Context/Inspector + fake/local projections)
 ├── InputBar
 └── StatusBar
 ```
@@ -201,31 +203,28 @@ interface PendingAction {
 }
 ```
 
-### 3.5 Audit Snapshot (M4)
+### 3.5 Context Snapshot (M4)
 
 ```typescript
-interface AuditSnapshot {
+interface ContextSnapshot {
   lens: SelectedLens;
-  evidence: EvidenceSummary[];
-  gate: GateStatusSummary;
+  selection: SelectionSummary;
+  interaction: InteractionSummary;
   checkpoint: CheckpointSummary | null;
   memory: MemorySummary;
   events: EventRecord[];  // M7 前为空数组
 }
 
-interface EvidenceSummary {
-  id: string;
-  type: string;
-  verdict: string;
-  status: "pass" | "fail" | "xfail" | "caveat" | "accepted-with-caveats";
-  summary: string;
+interface SelectionSummary {
+  agentId: string | null;
+  sessionId: string | null;
+  runId: string | null;
+  instanceId: string | null;
 }
 
-interface GateStatusSummary {
-  totalGates: number;
-  passed: number;
-  failed: number;
-  xfail: number;
+interface InteractionSummary {
+  messageCount: number;
+  lastInteractionTime: number | null;
 }
 
 interface CheckpointSummary {
@@ -269,7 +268,7 @@ interface RuntimeGateway {
 interface InteractionResponse {
   messages: InteractionMessage[];
   pendingActions: PendingAction[];
-  auditDelta: Partial<AuditSnapshot>;
+  contextDelta: Partial<ContextSnapshot>;
 }
 
 interface ApprovalResult {
@@ -322,13 +321,13 @@ TUI InputBar
 
 ### 5.2 数据源映射
 
-| Audit 子面板 | M0-M3 数据源 | M4+ 数据源 |
-|-------------|-------------|-----------|
-| Evidence | 现有 evidenceBrowser 数据模型，按 selectedLens 筛选 | DynamicAuditState 管理映射 |
-| Gate | 现有 gateHistory 数据模型 | 同左 |
-| Checkpoint | fake/local fixture | MultiRunStorageContract (M6) |
-| Memory | fake/local fixture | MemorySummary projection |
-| Event | 空 | events.jsonl reader (M7) |
+| Context 区域 | 当前数据源 | 边界 |
+|-------------|-----------|------|
+| Selection | self-contained `agentLensFixture` / selectedLens state | fake/local，不读取 `PROJECT_STATUS` / `PROGRESS_LEDGER` |
+| Interaction | `FakeRuntimeGateway` response | 不调用真实 `core.chat()` / provider |
+| Pending Action | fake/local `ControlledOperationGateway` | 不执行真实 tool，不写 memory/checkpoint/event log |
+| History Foundation | fake/local `AgentHistoryIndex` / contract fixtures | M6 foundation；真实 adapter pending |
+| Event Foundation | fake/local event fixture / `EventStreamReader` | M7 foundation；不 tail real process，不读真实 event log |
 
 ### 5.3 xfail/caveat 展示规则
 
@@ -431,24 +430,29 @@ TUI InputBar
 
 ---
 
-## 10. Project Structure (当前 M1)
+## 10. Project Structure (当前 M1-M8)
 
 ```
 tui/
 ├── src/
 │   ├── main.tsx                        # 入口: render(<WorkbenchLayout />)
 │   ├── components/
-│   │   ├── WorkbenchLayout.tsx         # 顶层三区域布局 (M1)
-│   │   ├── AgentLensPanel.tsx          # Agent/Session/Run/Instance 树 (M1)
-│   │   ├── InteractionPanel.tsx        # 对话展示区域 placeholder (M1)
-│   │   ├── ContextPanel.tsx            # 通用 Context/Inspector placeholder (M1)
-│   │   ├── InputBar.tsx               # 底部输入区域 (M1)
-│   │   └── StatusBar.tsx              # 底部状态栏 (M1)
+│   │   ├── WorkbenchLayout.tsx         # 顶层三区域布局 + selected lens state (M1-M8)
+│   │   ├── AgentLensPanel.tsx          # Agent/Session/Run/Instance 树 (fake/local)
+│   │   ├── InteractionPanel.tsx        # fake/local 对话展示区域
+│   │   ├── ContextPanel.tsx            # 通用 Context/Inspector
+│   │   ├── HistoryPanel.tsx            # fake/local history projection (M6)
+│   │   ├── EventPanel.tsx              # fake/local event projection (M7)
+│   │   ├── InputBar.tsx                # 底部输入区域
+│   │   └── StatusBar.tsx               # 底部状态栏
 │   ├── data/
-│   │   └── agentLensFixture.ts         # Fake agent/session/run 树 (M1)
+│   │   ├── agentLensFixture.ts         # fake/local agent/session/run 树
+│   │   ├── fakeRuntimeGateway.ts       # fake/local interaction gateway
+│   │   ├── eventSourceContract.ts      # M7 fake/local contract + redaction
+│   │   └── eventStreamReader.ts        # M7 fixture JSONL reader
 │   ├── types.ts                        # AgentLensNode, SelectedLens, FocusZone
 │   └── __tests__/
-│       └── layout.test.tsx             # 23 tests (M1)
+│       └── layout.test.tsx             # WorkbenchLayout regressions incl. M5/M7 scoping
 └── package.json
 ```
 
@@ -460,3 +464,4 @@ tui/
 |------|------|
 | 2026-06-02 | 初始版本 — interaction-first 架构，替代旧 b8-ts-tui-workbench-sdd.md |
 | 2026-06-02 | Product Boundary Reconciliation (Rounds 1-3) — 移除 Project Operations Lens 概念；Audit Lens → Context Panel；所有 Operations/AutoRun/Project dashboard 标记 PAUSED |
+| 2026-06-02 | B1-B8 close-out sweep — 更新为 M1-M8 fake/local foundation、412/412 gate、Context Snapshot、real adapters pending |

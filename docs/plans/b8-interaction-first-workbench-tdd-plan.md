@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — TDD Plan
 
 **创建日期**: 2026-06-02
-**状态**: COMPLETED — 394/394 tests PASS, 31 test files, M1-M8 full coverage
+**状态**: COMPLETED-WITH-CAVEATS — 412/412 TUI tests PASS, 31 test files, M1-M8 fake/local coverage
 **设计方向**: `docs/design/first-agent-tui-design.md`（终端原生、交互优先、克制可观测）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
@@ -35,9 +35,10 @@
 
 ### 1.3 回归基线
 
-- 现有 287/287 TUI tests 保持 PASS
+- 规划时既有 287/287 TUI tests 保持 PASS；当前 close-out gate 为 412/412
 - 每个 milestone 完成后全量回归
 - 不允许为让新测试通过而改旧测试的断言语义
+- 当前 close-out gate 为 412/412 TUI tests PASS；本计划中的数量表是规划基线，后续 remediation 增加了 selected-lens scoping、recursive redaction、event scoping 等回归测试。
 
 ---
 
@@ -195,7 +196,7 @@
 |----|------|------|
 | M4-P1 | Evidence 子面板展示 ≥1 条 evidence | 单元 |
 | M4-P2 | Gate 子面板展示 gate 统计数据 | 单元 |
-| M4-P3 | Audit 子面板展示命令执行记录 | 单元 |
+| M4-P3 | Context Panel 不渲染 Audit Dashboard；保持 generic inspector | 守护 |
 | M4-P4 | Memory 子面板展示 memory summary | 单元 |
 | M4-P5 | Tab 在子面板间切换 | 单元 |
 
@@ -386,7 +387,7 @@
 | M8 Default Entry | 4 | 4 | 8 |
 | **Total** | **90** | **17** | **107** |
 
-加上现有 287 tests，全部通过时约 394 tests。
+加上规划时既有 287 tests，原预计约 394 tests。当前实现和 remediation 后实际 gate 为 **412/412 TUI tests PASS**。
 
 ---
 
@@ -413,3 +414,4 @@ Milestone 间: M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8（严格依�
 | 日期 | 变更 |
 |------|------|
 | 2026-06-02 | 初始版本 — 覆盖 M0-M8 测试策略，107 new tests |
+| 2026-06-02 | B1-B8 close-out sweep — 对齐 412/412 实际 gate，标注 fake/local coverage 与非 production-ready caveat |

@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — Roadmap
 
 **创建日期**: 2026-06-02
-**状态**: M1-M8 DELIVERED (19aa77a) — 全量 interaction-first workbench MVP 交付。394/394 TUI tests PASS, tsc clean。TUI default entry NOT ACTIVATED。
+**状态**: M1-M8 DELIVERED-WITH-CAVEATS (current HEAD 2f995b9) — interaction-first workbench fake/local MVP 交付。412/412 TUI tests PASS, tsc clean。TUI default entry NOT ACTIVATED。not product-ready。
 **取代**: 旧 B8 Phase 1-7 路线（"信息展示中心"方向，归档为历史参考）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
@@ -22,16 +22,14 @@
 
 ### 1.2 旧资产保留
 
-旧 B8 Phase 1-6A 已交付能力全部保留：
+旧 B8 Phase 1-6A 已交付能力保留在磁盘，但不在当前 WorkbenchLayout 默认渲染，也不作为 B8 产品主线：
 
-| 能力 | 新位置 | 用途 |
-|------|--------|------|
-| Evidence Browser | Context Panel 子面板 | 多实例 evidence 历史 |
-| Gate History | Context Panel 子面板 | 当前 run gate 状态 |
-| Audit Log | Context Panel 子面板 | 命令执行审计 |
-| Docs Consistency | Context Panel 子面板 | 文档一致性检查 |
-| Command Shell | 保留为 advanced 功能 | 安全命令执行 |
-| Dev Workflow Panel | 保留 dev-only | Coding Agent 工程使用 |
+| 能力 | 当前状态 | 说明 |
+|------|----------|------|
+| Evidence Browser / Gate History | legacy/auxiliary | 不由 `tui/src/main.tsx` 或 `WorkbenchLayout` import |
+| Audit Log / Docs Consistency | legacy/auxiliary | 不复用为 Context Panel 子面板 |
+| Command Shell | paused/dev-only | 不在 interaction-first 产品核心 |
+| Dev Workflow Panel / AutoRun | paused/dev-only | Coding Agent 工程工具，不是 First Agent 产品能力 |
 
 ---
 
@@ -71,9 +69,9 @@ M8 (Default Entry Readiness)
 | **M5** | Controlled Action / Pending Confirmation | **DELIVERED** | PendingAction, approve/reject through gateway | 12 |
 | **M6** | Multi-instance History Foundation | **DELIVERED** | EvidenceNamespace contract, MultiRunStorageContract | 11 |
 | **M7** | Runtime Event Stream / EventPanel | **DELIVERED** | EventSourceContract, EventStreamReader | 12 |
-| **M8** | Default Entry Readiness | **DELIVERED** | Safety scan, user approval, runtime bypass guard | 8 |
+| **M8** | Default Entry Readiness | **DELIVERED-WITH-CAVEATS** | Readiness checklist + safety/runtime bypass guards；user approval pending, default entry NOT ACTIVATED | 8+ regression |
 
-**M0-M8 新增 tests 合计: 107。现有 tests: 287。全部通过时约 394 tests。**
+**当前 TUI gate**: 412/412 tests PASS。原 107-test 规划是里程碑设计基线，后续 remediation 又增加了 selected-lens scoping / recursive redaction / event scoping regressions。
 
 ---
 
@@ -81,9 +79,9 @@ M8 (Default Entry Readiness)
 
 | 指标 | 值 |
 |------|---|
-| TUI tests | 287/287 PASS |
+| TUI tests | 412/412 PASS |
 | TypeScript | tsc --noEmit clean |
-| Python tests | 4369 passed, 18 skipped, 28 xfailed, 0 failed |
+| Python tests | 非 B8 TUI 主 gate；历史全量 Python 结果见 `PROJECT_STATUS.md`，xfail 不按 pass 计 |
 | TUI default entry | NOT ACTIVATED |
 | 技术栈 | Ink 5 + React 18, tsx, Vitest |
 
@@ -99,7 +97,7 @@ M0 是纯文档阶段，不改代码：
 - [x] TDD Plan 覆盖所有 milestone 的测试策略
 - [x] Roadmap/debt/status 与上述文档一致
 - [x] 用户审阅 proposal 并确认 5 项决策
-- [x] 287/287 tests PASS, tsc clean
+- [x] 412/412 TUI tests PASS, tsc clean (current HEAD)
 
 ---
 
@@ -112,7 +110,7 @@ M0 是纯文档阶段，不改代码：
 3. 不删除 CLI / 不废弃 CLI
 4. 不做 Web UI
 5. 不引入数据库、WebSocket、SSE
-6. 不把 TUI 设为默认入口（M8 前 NOT ACTIVATED）
+6. 不把 TUI 设为默认入口（M8 readiness delivered 后仍需用户显式批准；当前 NOT ACTIVATED）
 7. 不进入 B7 multi-instance implementation
 8. AutoRun 永久 dev-only
 
@@ -160,3 +158,4 @@ M0 是纯文档阶段，不改代码：
 | 日期 | 变更 |
 |------|------|
 | 2026-06-02 | 完全重写 — interaction-first 方向，M0-M8 里程碑替代旧 Phase 1-7 |
+| 2026-06-02 | B1-B8 close-out sweep — 对齐 412/412 gate、fake/local boundary、legacy auxiliary 非主线、default entry NOT ACTIVATED |

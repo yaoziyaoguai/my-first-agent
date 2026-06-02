@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench Proposal
 
 **创建日期**: 2026-06-02
-**状态**: ACCEPTED — M1-M8 delivered (fake/local foundation), close-out audit applied, candidate for final close
+**状态**: ACCEPTED — M1-M8 delivered as fake/local foundation, current-stage close-out candidate
 **取代**: B8 原有 "信息展示中心" 产品方向
 **依赖**: B7 current-stage closed (accepted-with-caveats)
 **最近更新**: 2026-06-02 — 方向校准 (Round 1-3): 移除 Project Operations Lens, Audit Lens → Context Panel, Operations PAUSED
@@ -112,8 +112,8 @@ First Agent 是一个**通用 Agent Runtime/Workbench**，不是 coding-engine �
 | 维度 | Claude Code / Codex | First Agent Workbench |
 |------|---------------------|-----------------------|
 | Session 切换 | 单 session | 多 agent/session/run/instance 切换 |
-| 审计可见性 | 有限（仅当前对话） | 动态审计随 lens 变化 |
-| 交互+审计闭环 | 分离（对话 vs 日志文件） | 同一界面闭环 |
+| Context 可见性 | 有限（仅当前对话） | generic Context Panel 随 lens 变化 |
+| 交互+Context 闭环 | 分离（对话 vs 日志文件） | 同一界面观察 fake/local context |
 | Agent 状态感知 | 隐式 | 显式 Agent Lens |
 | 多实例 | 不支持 | 核心设计目标 |
 
@@ -188,12 +188,14 @@ Dashboard.tsx 保留在磁盘但不被 import。后续如需产品化，重新�
 
 ---
 
-## 10. Decision Required
+## 10. Decision Record
 
-本文档是 proposal，需要用户确认以下决策后进入 Milestone 规划和实现：
+本文档的方向已经接受，并用于 M1-M8 fake/local foundation 实现。以下决策保留为记录；它们不表示当前仍待用户确认：
 
-1. **产品方向**：接受 "interaction-first workbench" 替代 "信息展示中心"？
-2. **布局方案**：接受 Agent Lens / Interaction View / Context Panel 三区域布局？
-3. **Milestone 方式**：接受按"主入口成熟度"而非"面板数量"定义里程碑？
-4. **现有资产**：接受保留 Phase 1-6A 面板为 auxiliary，不丢弃？
-5. **AutoRun**：接受 AutoRun 永久 dev-only？
+1. **产品方向**：accepted — "interaction-first workbench" 替代 "信息展示中心"。
+2. **布局方案**：accepted — Agent Lens / Interaction View / Context Panel 三区域布局。
+3. **Milestone 方式**：accepted — 按"主入口成熟度"而非"面板数量"定义里程碑。
+4. **现有资产**：accepted-with-caveats — Phase 1-6A 代码保留为 legacy/auxiliary，不在当前 WorkbenchLayout 默认渲染。
+5. **AutoRun**：accepted — 永久 dev-only，不作为 First Agent 产品核心。
+
+Default entry activation 仍未批准；TUI default entry 保持 **NOT ACTIVATED**。

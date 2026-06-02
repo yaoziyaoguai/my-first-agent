@@ -1,11 +1,11 @@
 # B8 TUI Workbench — Technical Debt
 
 **创建日期**: 2026-06-01
-**最后更新**: 2026-06-02 (B8 方向变更 — interaction-first workbench)
+**最后更新**: 2026-06-02 (B1-B8 close-out sweep — B8 evidence-backed status cleanup)
 **依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`、`docs/milestones/b8-interaction-first-workbench-milestones.md`
 **范围**: 仅记录 B8 TUI Workbench 自身的 deferred milestone / missing prerequisite debt。不记录 B7 implementation debt。
 
-**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M8 delivered (19aa77a)**: 412/412 TUI tests PASS, tsc clean。M1-M8 fake/local foundation 全部交付，close-out audit applied。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
+**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M8 delivered as fake/local foundation (current HEAD 2f995b9)**: 412/412 TUI tests PASS, tsc clean。旧 Phase 1-6A 已交付能力保留在磁盘作为 legacy/auxiliary code，不是当前 WorkbenchLayout 默认主线。
 
 ---
 
@@ -14,10 +14,10 @@
 | # | Debt | 映射 Milestone | 状态 | 阻塞原因 | 偿还条件 |
 |---|------|---------------|------|---------|---------|
 | D-B8-01 | Multi-instance history browser | **M6** | **COMPLETED-WITH-CAVEATS** | 已交付 fake/local foundation — EvidenceNamespace + MultiRunStorageContract 契约定义完成，AgentLens 历史浏览（只读 projection） | 真实 runtime identity / B7 multi-instance orchestrator |
-| D-B8-02 | Runtime event stream viewer | **M7** | **COMPLETED-WITH-CAVEATS** | 已交付 fake/local foundation — EventSourceContract + EventStreamReader (JSONL only, no live tail) | 真实 runtime event source (live tail agent_log.jsonl) |
+| D-B8-02 | Runtime event stream viewer | **M7** | **COMPLETED-WITH-CAVEATS** | 已交付 fake/local foundation — EventSourceContract + EventStreamReader (fixture JSONL only, no live tail) | 真实 runtime event source adapter（不能由 TUI 自建第二 runtime） |
 | D-B8-03 | TUI default-entry activation | **M8** | **ACTIVE** | Default Entry Readiness checklist (18 items) 已完成，但 default entry NOT ACTIVATED | 用户显式批准 |
 | D-B8-04 | Chinese IME / multi-line input / paste | **M8** | **PENDING** | Ink 5 useInput 中文 IME 行为待验证 | M8: IME/paste 基础测试 |
-| D-B8-05 | Persistent audit log browser UI | N/A (旧 Phase) | **RESOLVED** (2026-06-02) | — | AuditLogPanel 已实现，在 Context Panel 中复用 |
+| D-B8-05 | Persistent audit log browser UI | N/A (旧 Phase) | **HISTORICAL / NOT PRODUCT CORE** | 旧 `AuditLogPanel` / `auditLog.ts` 保留在 legacy/auxiliary code；当前 WorkbenchLayout 不复用、不渲染 audit dashboard | 如未来需要，必须重设计为通用 Context Inspector，且保持 fake/local honesty |
 | D-B8-06 | High-risk commands remain blocked | N/A (旧 Phase) | **BY DESIGN** | 安全约束: no force push/reset --hard/rm -rf | 不计划解除; 属于安全特性 |
 
 ---
@@ -140,8 +140,8 @@ B7 readiness SDD
 
 ### 5.3 不依赖 B7 的 Polish 可先行
 
-以下 polish 项不依赖任何 B7 能力, 当前即可做:
-- AuditLogPanel (auditLog.ts rotation 已就绪)
+以下 polish 项不依赖任何 B7 能力, 当前可作为 dev-only/auxiliary debt 记录；它们不等于 B8 产品主线:
+- AuditLogPanel / auditLog.ts（旧资产，仅 dev-only/auxiliary，不在 WorkbenchLayout 默认渲染）
 - DefaultEntryReadinessPanel (静态 checklist)
 - Empty/unknown/stale states
 - Keyboard hints
@@ -153,15 +153,15 @@ B7 readiness SDD
 
 | 项目 | 状态 |
 |------|------|
-| B8 旧 Phase 1-6A | **COMPLETED** — 全部能力保留为 auxiliary panels |
+| B8 旧 Phase 1-6A | **HISTORICAL / PAUSED** — 能力保留在磁盘，当前 WorkbenchLayout 不 import/渲染 |
 | B8 M0 (Direction Correction) | **COMPLETED** — proposal + milestones + SDD + TDD Plan 已写，用户已接受 |
-| B8 M1-M8 | **COMPLETED** — 全部 fake/local foundation 交付 (19aa77a)，394/394 tests PASS，tsc clean |
+| B8 M1-M8 | **COMPLETED-WITH-CAVEATS** — fake/local foundation 交付 (2f995b9)，412/412 TUI tests PASS，tsc clean；real adapters pending |
 | M6 (Multi-instance History) | **COMPLETED-WITH-CAVEATS** — EvidenceNamespace + MultiRunStorageContract 契约定义完成，缺真实 runtime identity |
-| M7 (Event Stream) | **COMPLETED-WITH-CAVEATS** — EventSourceContract + EventStreamReader 完成 (JSONL only)，缺 live tail |
+| M7 (Event Stream) | **COMPLETED-WITH-CAVEATS** — EventSourceContract + EventStreamReader 完成 (fixture JSONL only)，缺真实 runtime adapter/live tail |
 | M8 (Default Entry) | **ACTIVE** — Readiness checklist 完成，default entry NOT ACTIVATED，等用户批准 |
-| B7 implementation | **NOT STARTED** — 不在当前阶段 |
+| B7 current-stage | **CLOSED — ACCEPTED-WITH-CAVEATS** — 当前阶段已收口；B8 real runtime adapters 仍是 future debt |
 | TUI default entry | **NOT ACTIVATED** — 用户批准前不激活 |
 | CLI fallback | **RETAINED** — CLI 为显式 fallback, 永不删除 |
 | Product readiness | **NOT PRODUCT-READY** — 不声称 production-ready |
 
-**当前阶段**: close-out candidate — 独立审计 remediation applied，final close-out audit 通过。
+**当前阶段**: close-out candidate — B8 fake/local foundation 可阶段性收口；remaining debt 属于 default-entry/user approval、真实 runtime adapter、IME/paste、多实例真实 identity，不是当前 blocker。

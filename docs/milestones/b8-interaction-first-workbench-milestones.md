@@ -1,8 +1,21 @@
 # B8 Interaction-first Workbench — Milestones
 
 **创建日期**: 2026-06-02
-**状态**: COMPLETED — M1-M8 delivered (fake/local foundation), close-out audit applied, candidate for final close
+**状态**: COMPLETED-WITH-CAVEATS — M1-M8 delivered as fake/local foundation, current-stage close-out candidate
 **依赖文档**: `docs/proposals/b8-interaction-first-workbench-proposal.md`
+
+---
+
+## Actual Status Override (2026-06-02)
+
+本文最初是 M0-M8 规划文档。当前事实以代码、测试和 `docs/audit/b1-b8-current-stage-close-out-audit.md` 为准：
+
+- M1-M8 已作为 **fake/local foundation** 交付；412/412 TUI tests PASS，tsc clean。
+- M6/M7 是 foundation/contract/fixture viewer，不是真实 multi-instance runtime 或真实 runtime event stream。
+- TUI default entry **NOT ACTIVATED**；M8 是 readiness checklist，不是默认入口启用。
+- 旧 Dashboard / AutoRun / Project Operations / Audit 面板保留为 legacy/auxiliary，不在当前 WorkbenchLayout 默认主线。
+
+下方仍保留部分规划期 exit criteria；如与本节冲突，以本节和 close-out audit 为准。
 
 ---
 
@@ -38,7 +51,7 @@
 - `docs/plans/b8-interaction-first-workbench-tdd-plan.md`
 
 ### Required Tests
-- 现有 287/287 TUI tests 必须继续 PASS（不引入 regression）
+- 规划时既有 287/287 TUI tests 必须继续 PASS；当前 close-out gate 为 412/412
 - tsc --noEmit clean
 
 ### Exit Criteria
@@ -47,7 +60,7 @@
 - [ ] SDD 定义布局、数据模型、安全边界
 - [ ] TDD Plan 覆盖所有 milestone 的测试策略
 - [ ] Roadmap/debt/status 与上述文档一致
-- [ ] 287/287 tests PASS, tsc clean
+- [ ] 当前全量 TUI tests PASS, tsc clean（close-out gate: 412/412）
 
 ### Stop Conditions
 - 文档自审未通过 → 继续修文档，不进入 M1
@@ -71,8 +84,8 @@ TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Con
 - 实现 `StatusBar` 组件（底部状态栏）
 - 实现 `AgentLensPanel` 组件（agent/session/run/instance 树，初期 fake/local fixture 数据）
 - 实现 `InteractionPanel` 组件（对话展示区域，初期只显示 placeholder）
-- 实现 `ContextPanel` 组件（通用 Context/Inspector placeholder，初期复用现有 evidence/gate/audit 面板数据）
-- 现有 7 视图导航保留但降级为 secondary（可通过 keybinding 切换到 auxiliary panels）
+- 实现 `ContextPanel` 组件（通用 Context/Inspector placeholder，不复用 project-specific evidence/gate/audit 面板）
+- 旧 7 视图导航不进入默认主线；如未来需要，只能作为重新设计后的 auxiliary/dev-only 能力
 - 键盘焦点管理：默认焦点在 InputBar，Tab 切换到 AgentLens/ContextPanel
 
 ### Non-goals
@@ -99,7 +112,7 @@ TUI 默认布局从"7 视图工作台"改为"Agent Lens / Interaction View / Con
 - [ ] InputBar 可输入文本
 - [ ] AgentLens 展示 fixture agent/session/run 树
 - [ ] Tab 可在三区域间切换焦点
-- [ ] 现有 auxiliary panels 可通过 keybinding 访问
+- [ ] 旧 auxiliary panels 不占用默认布局；当前 WorkbenchLayout 不提供整页 Dashboard 切换
 - [ ] 所有 tests PASS, tsc clean
 - [ ] Default entry NOT ACTIVATED
 
@@ -127,7 +140,7 @@ Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interact
 - `InteractionView` 响应 lens 切换：清空对话历史，显示新 context
 - `ContextPanel` 响应 lens 切换：重新加载对应 evidence/gate/audit 数据
 - 状态标记：active/paused/completed/failed/historical/superseded
-- 初期数据：fake/local fixture（从 PROJECT_STATUS/PROGRESS_LEDGER 构建模拟 agent/session/run 树）
+- 初期数据：self-contained fake/local fixture；不读取 `PROJECT_STATUS` / `PROGRESS_LEDGER` 作为主 UI 数据源
 
 ### Non-goals
 - 不连接真实 runtime 获取 agent/session/run 列表
@@ -228,15 +241,15 @@ Agent Lens 可以展示和切换 agent/session/run/instance，切换后 Interact
 ## M4 — Context Inspector MVP
 
 ### Goal
-Context Panel 随 selected lens 和 interaction 动态刷新。展示 evidence、gate、event、checkpoint、memory summary。不把 xfail 当 pass。
+Context Panel 随 selected lens 和 interaction 动态刷新。当前实现展示通用 selection / message count / pending / history / event foundation，不渲染 project-specific audit dashboard。不把 xfail 当 pass。
 
 ### Scope
-- `InspectorSnapshot` 数据模型：evidence/gate/checkpoint/memory/event 子视图
+- `InspectorSnapshot` 数据模型：通用 context/selection/interaction summary；history/event foundation 使用 fake/local projection
 - `ContextInspectorState` 管理：selected lens → context data 映射
-- `ContextPanel` 增强：多子面板（Evidence/Gate/Checkpoint/Memory/Event），Tab 切换
+- `ContextPanel` 增强：通用 Context/Inspector；history/event viewer 只读 fake/local projection，非 audit dashboard
 - Interaction 后自动 refresh context data（从 fake/local fixture 重新加载）
 - xfail/caveat/accepted-with-caveats 状态展示正确
-- 数据源：复用现有 evidenceBrowser/gateHistory/auditLog/docsConsistency 数据模型，但按 selected lens 筛选或标记"global"
+- 数据源：self-contained fake/local fixture；不复用 `PROJECT_STATUS` / `PROGRESS_LEDGER` / dogfood / debt 作为默认产品数据源
 
 ### Non-goals
 - 不做实时 event tail（那是 M7）
@@ -260,7 +273,7 @@ Context Panel 随 selected lens 和 interaction 动态刷新。展示 evidence�
 - 现有 tests 回归
 
 ### Exit Criteria
-- [ ] ContextPanel 展示 ≥3 子面板（Evidence/Gate/Audit/Memory）
+- [ ] ContextPanel 展示 generic Context/Inspector；不叫 Audit Lens，不渲染 audit dashboard
 - [ ] 切换 selected lens → ContextPanel 数据变化
 - [ ] Interaction 后 refresh → 数据更新
 - [ ] xfail 正确标注
@@ -478,7 +491,7 @@ Interaction 中产生的 pending action（tool confirmation、memory proposal）
 - [ ] q 退出，CLI fallback 正常
 - [ ] 安全扫描通过（no secret leak）
 - [ ] Runtime bypass guard tests PASS
-- [ ] 用户批准 default entry activation
+- [ ] 用户未批准时保持 default entry NOT ACTIVATED；readiness checklist 完成不等于激活
 - [ ] 所有 tests PASS, tsc clean
 
 ### Stop Conditions
@@ -527,3 +540,4 @@ M1-M3 是交互核心链，M4-M5 是 context/controlled 链，M6-M7 是历史/�
 |------|------|
 | 2026-06-02 | 初始版本 — M0-M8 定义，按主入口成熟度而非面板数量 |
 | 2026-06-02 | B8 remediation — Audit Lens → Context Panel/Inspector, Dynamic Audit → Context Inspector, M1-M8 fake/local foundation 状态对齐 |
+| 2026-06-02 | B1-B8 close-out sweep — 标注规划期条目与实际实现边界；M6/M7 fake/local caveats、default entry NOT ACTIVATED、legacy panels 非主线 |

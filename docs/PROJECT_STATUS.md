@@ -636,6 +636,7 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 配置示例 | `config/config.example.yaml` |
 | 运行时宪法 | `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` |
 | 历史文档 | `docs/archive/` |
+| 未结问题清单 | `docs/debt/first-agent-open-items.md` — audit at 82dff68, AGENT_AUTO=zero |
 
 ---
 

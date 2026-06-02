@@ -71,6 +71,7 @@
 | `dogfood/README.md` | Dogfood 报告索引 |
 | `dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` | 最新全量 dogfood sweep |
 | `dogfood/GLOBAL_REAL_API_DOGFOOD_REPORT.md` | Global real API dogfood report |
+| **AGENT_DOGFOOD_AUTO Suite** | **COMPLETE** (2026-06-03) — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
 
 ---
 

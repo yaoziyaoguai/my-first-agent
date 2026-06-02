@@ -8,7 +8,7 @@
 
 | Milestone | 简述 |
 |-----------|------|
-| **v1 AGENT_DOGFOOD_AUTO Ran — CLEAN** | — | 6 批次 focused tests: Entry/CLI/Textual 68 ✓, User-path dogfood smoke 25 ✓ (1 xf), MCP local fixture 38 ✓ (2 xf), Memory/checkpoint 42 ✓, Docs/arch/secret 111 ✓, Dogfood boundaries 94 ✓ (4 xf)。TUI 495 ✓, tsc clean。ruff: legacy pre-existing only。0 AGENT_FIX_AUTO issues。7 xfailed: REAL_ENV_REQUIRED (Case H, MCP L3), MODEL_BEHAVIOR_DESIGN (FakeProvider state machine)。V1: NOT_READY_AGENT_DOGFOOD_REMAINS。|
+| **v1 AGENT_DOGFOOD_AUTO Ran — CLEAN** | — | 6 批次 focused tests: Entry/CLI/Textual 68 ✓, User-path dogfood smoke 25 ✓ (1 xf), MCP local fixture 38 ✓ (2 xf), Memory/checkpoint 42 ✓, Docs/arch/secret 111 ✓, Dogfood boundaries 94 ✓ (4 xf)。TUI 495 ✓, tsc clean。ruff: legacy pre-existing only。0 AGENT_FIX_AUTO issues。7 xfailed: REAL_ENV_REQUIRED (Case H, MCP L3), MODEL_BEHAVIOR_DESIGN (FakeProvider state machine)。AGENT_DOGFOOD_COMPLETE — AGENT_FIX_AUTO_REMAINING=0。V1_CLOSEOUT_WAITING_ON: USER_MANUAL_TRIAL + PRODUCT_DECISION。REAL_ENV_REQUIRED/MODEL_BEHAVIOR_DESIGN/FUTURE_DEBT → v2/backlog。|
 | **Entry Command Clarification IMPLEMENTED** | `19deb47` | `main.py` 入口命令澄清：`--plain`(simple CLI，默认行为)、`--tui`/`--textual`(Textual TUI backend，设置 `MY_FIRST_AGENT_INPUT_BACKEND=textual`)、`--shell`(deprecated，打印 stderr 迁移提示，仍走 plain CLI 兼容)。11/11 contract tests PASS, 91/91 regression tests PASS。README + manual trial guide `--shell`→`--tui` 更新。CURRENT_DOCS + PROJECT_STATUS + PROGRESS_LEDGER 更新。default entry NOT ACTIVATED。|
 
 ## 2026-06-02 (Post-Closeout — Docs Audit + Gap Audit + Slice B Readiness + Real Provider Re-Validation)

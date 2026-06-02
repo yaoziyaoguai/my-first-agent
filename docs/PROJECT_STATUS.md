@@ -1,10 +1,47 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B8 M5-M8 Interaction-first Workbench — pending actions + multi-instance history + event stream + default entry readiness)
+**最后更新**: 2026-06-02 (B1-B8 current-stage close-out sweep + B8 final docs honesty cleanup)
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M2-M8 Interaction-first Workbench MVP 全部交付：Agent Lens 选择 + fake/local interaction + Context refresh + 受控 Pending Actions (M5) + Multi-instance History Foundation contracts (M6) + Runtime Event Stream contracts (M7) + Default Entry Readiness checklist (M8)。394/394 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付：Agent Lens 选择 + fake/local interaction + Context refresh + 受控 Pending Actions (M5) + Multi-instance History Foundation contracts (M6) + Runtime Event Stream contracts (M7) + Default Entry Readiness checklist (M8)。412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
+
+---
+
+## 2026-06-02 Global Current-Stage Close-out Sweep
+
+本轮对当前仓库中的核心能力进行收口。早期 v0.1 `B1/B2/B3` smoke/playbook 仍保留为 historical guard，不作为当前能力定义。
+当前能力定义分为两部分：**REAL-EVIDENCE (核心能力 E2E 验证)** 与 **架构演进项目 (B1-B8)**。
+
+### REAL-EVIDENCE 状态 (核心能力验证)
+
+| Evidence ID | Current capability definition | Current status | Boundary |
+|---|-------------------------------|----------------|----------|
+| REAL-EVIDENCE-001 | Memory retain/recall/forget | accepted-with-caveats | real provider evidence credible；recall provenance caveat 非当前 blocker |
+| REAL-EVIDENCE-002 | Skill selection / SKILL_SELECT | accepted-with-caveats | real provider evidence credible；prompt-steered / single-skill caveats |
+| REAL-EVIDENCE-003 | Skill allowed_tools enforcement | accepted-with-caveats | code path credible；remaining CONCERN are model behavior |
+| REAL-EVIDENCE-004 | Checkpoint save/resume | accepted-with-caveats | Part A hardened；Part B save-point not reached caveat |
+| REAL-EVIDENCE-005 | MCP bridge readiness | accepted-with-caveats | local stdio fixture, opt-in bridge evidence |
+| REAL-EVIDENCE-006 | SubAgent L1 | accepted-with-caveats | real provider child tool mediation credible；future cleanup remains |
+| REAL-EVIDENCE-007 | MCP runtime-mediated invocation | accepted-with-caveats | FakeProvider deterministic tool_use + confirmation override validation caveat |
+| REAL-EVIDENCE-008 | Advanced scheduler | accepted | evidence chain fully closed；scheduler remains opt-in |
+
+### 架构演进项目 (B1-B8)
+
+| Item | 描述 | 状态 |
+|------|------|------|
+| **B1** | Memory write dispatcher migration | **COMPLETED** — write path 已统一至 dispatcher |
+| **B2** | CLI delegate shortcut → dispatcher | **DONE** — CLI delegation 已通过 dispatcher 路由，并保留 fallback |
+| **B3** | SubAgent L1/L2 成熟化 | **ACCEPTED-WITH-CAVEATS** (L1) — L1 mediation 验证闭环，L2 future debt |
+| **B4** | MCP real connection | **PARTIAL** — bridge 可信，real external flight pending |
+| **B5** | Skill runtime 深化 | **ACCEPTED-WITH-CAVEATS** — allowed_tools 强边界实施，real-model caveats |
+| **B6** | Checkpoint true state restoration | **ACCEPTED-WITH-CAVEATS** — direct-save 漏洞移除，trigger condition caveat |
+| **B7** | Multi-instance readiness | **ACCEPTED-WITH-CAVEATS** — namespace/events 基础契约完成 (3f2f6b2) |
+| **B8** | TUI architecture (Interaction-first) | **ACCEPTED-WITH-CAVEATS** — fake/local M1-M8 MVP (ccd89f5) |
+
+Close-out audit report: `docs/audit/b1-b8-current-stage-close-out-audit.md`.
+
+Current-stage recommendation: **close-out candidate accepted-with-caveats**. Remaining caveats are documented future debt or validation-scope caveats, not current blockers. Not product-ready。
 
 ---
 
@@ -84,9 +121,9 @@ B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信
 | B8 M2 (Agent Lens selection) | **DELIVERED** — keyboard nav (↑↓/Enter) + selectedLens 驱动全界面 |
 | B8 M3 (Fake Interaction) | **DELIVERED** — fakeRuntimeGateway + InputBar submit + message list |
 | B8 M4 (Context refresh) | **DELIVERED** — messageCount + lastInteractionTime + lens switch refresh |
-| B8 M5 (Pending Actions) | **DELIVERED** — fake/local PendingAction + ControlledOperationGateway + PendingActionPanel + 26 tests |
-| B8 M6 (History Foundation) | **DELIVERED** — EvidenceNamespace + MultiRunStorageContract + AgentHistoryIndex + HistoryPanel + 26 tests |
-| B8 M7 (Event Stream) | **DELIVERED** — EventSourceContract + EventStreamReader + EventPanel + redaction + 25 tests |
+| B8 M5 (Pending Actions) | **DELIVERED** — fake/local PendingAction + ControlledOperationGateway + PendingActionPanel；selectedLens scoping regression covered |
+| B8 M6 (History Foundation) | **DELIVERED** — fake/local EvidenceNamespace + MultiRunStorageContract + AgentHistoryIndex + HistoryPanel；real adapter pending |
+| B8 M7 (Event Stream) | **DELIVERED** — fake/local EventSourceContract + EventStreamReader + EventPanel + recursive redaction + selectedLens scoping |
 | B8 M8 (Default Entry Readiness) | **DELIVERED** — 18-item readiness checklist updated with M5-M8 completion, still NOT ACTIVATED |
 | B8 旧 Phase 1-6A | **PAUSED** — 保留在磁盘但不 import/渲染 |
 | TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
@@ -382,11 +419,9 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 
 ## 2. 推荐下一步
 
-**当前阶段收口完成。** REAL-EVIDENCE 001-008 全部闭合：7/8 credible, 1/8 credible-with-caveats (007)。B8 M2/M3/M4 Interaction-first Workbench MVP delivered: 321/321 TUI tests PASS (34 layout tests), tsc clean。所有 Operations/AutoRun/Project dashboard PAUSED。
+**当前阶段 close-out candidate。** REAL-EVIDENCE 001-008 全部有代码/测试/审计证据：7/8 accepted-with-caveats, 1/8 accepted。B8 M1-M8 Interaction-first Workbench fake/local MVP delivered: 412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard PAUSED。TUI default entry NOT ACTIVATED。CLI fallback retained。
 
-**B8 Phase 6B/7 DEFERRED** — 旧方向产物。TUI not default entry yet。CLI fallback retained。
-
-**下一步**: B8 M5-M8 全部交付 (cc5d90f)。394/394 TUI tests PASS。可选：B7 multi-instance readiness 推进或用户指定方向。
+**下一步**: final independent audit of `docs/audit/b1-b8-current-stage-close-out-audit.md` + current HEAD。不要进入 B9，不激活 TUI default entry，不把 fake/local foundation 写成真实 runtime 能力。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 
@@ -413,16 +448,7 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 **已完成的历史 loops（安全可自动修）**：
 - Loop 14-18, Loop 15 (Memory Write Dispatcher), Loop 1-13 — 详见 PROGRESS_LEDGER
 
-**需要架构决策的项目（B2-B8）**：
-| Item | 描述 | 状态 |
-|------|------|------|
-| B2 | CLI delegate shortcut → dispatcher | **DONE** — delegate shortcut 已迁入 dispatcher-mediated path（_dispatch_or_fallback_delegation → SUBAGENT_DELEGATE_L1），L1 handler/provider 可用时走 L1，不可用时 fallback 到 L0 inline |
-| B3 | SubAgent L1/L2 成熟化 | 需要真实 subagent execution |
-| B4 | MCP real connection | PARTIAL — bridge readiness credible；external invocation 仍是 direct registered-tool execution，非完整 runtime-mediated MCP E2E |
-| B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
-| B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
-| B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | **[legacy] Phase 1-6A 已归档 — 被 interaction-first B8 取代** (2026-06-02 方向变更)。旧能力保留在磁盘但不 import/渲染。Interaction-first B8 M1-M8 已交付 (cc5d90f): Agent Lens + fake interaction + Context refresh + Pending Actions + History Foundation + Event Stream + Default Entry Readiness。394/394 TUI tests PASS。TUI default entry NOT ACTIVATED。|
+**[historical — superseded by 2026-06-02 global close-out sweep]** 旧 “需要架构决策的项目（B2-B8）” 表使用的是早期 backlog 编号，不能作为当前 B1-B8 能力状态。当前 B1-B8 定义见本文 “Global B1-B8 Close-out Sweep” 与 `REAL-EVIDENCE-001..008`。其中 B7 current-stage 已 closed accepted-with-caveats；B8 TUI architecture 已切换为 interaction-first fake/local MVP，旧 Phase 1-6A 保留在磁盘但不 import/渲染。TUI default entry NOT ACTIVATED。
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）

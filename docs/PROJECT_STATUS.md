@@ -1,8 +1,9 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B1-B8 current-stage close-out sweep + B8 final docs honesty cleanup)
+**最后更新**: 2026-06-02 (current-stage frozen — close-out handoff delivered)
+**Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付：Agent Lens 选择 + fake/local interaction + Context refresh + 受控 Pending Actions (M5) + Multi-instance History Foundation contracts (M6) + Runtime Event Stream contracts (M7) + Default Entry Readiness checklist (M8)。412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
+**状态**: **CURRENT-STAGE FROZEN — yes-with-caveats**。B7 **closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付 (accepted, final caveats closed, 2f995b9)。412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。下一阶段需重新 SPEC/TDD/Review。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -43,7 +44,7 @@
 
 Close-out audit report: `docs/audit/b1-b8-current-stage-close-out-audit.md`.
 
-Current-stage recommendation: **close-out candidate accepted-with-caveats**. Remaining caveats are documented future debt or validation-scope caveats, not current blockers. Not product-ready。
+Current-stage close-out: **FROZEN — yes-with-caveats** (final baseline: `60fd71e`)。不进入 B9。下一阶段以 handoff doc 为启动基线。Remaining caveats are documented future debt or validation-scope caveats, not current blockers. Not product-ready。
 
 ---
 

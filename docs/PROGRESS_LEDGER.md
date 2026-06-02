@@ -1,6 +1,6 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (B1-B8 Current-Stage Global Close-Out completed)
+**最后更新**: 2026-06-02 (current-stage frozen — close-out handoff delivered, final baseline: 60fd71e)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
@@ -10,6 +10,7 @@
 
 | Milestone | Commit | 简述 |
 |-----------|--------|------|
+| **Current-Stage Close-Out Handoff / Freeze** | 60fd71e (pending) | **阶段冻结** — handoff doc delivered: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md`。First Agent current-stage frozen — yes-with-caveats。Gemini + Codex final verification pass。Future debt list (8 items) documented。Next-stage candidate routes (6 routes) identified。Next session must start from handoff doc。不进入 B9。|
 | **Global B1-B8 Current-Stage Close-Out** | — | **Evidence-backed current-stage sweep** — 本轮把当前仓库 B1-B8 定义映射为 `REAL-EVIDENCE-001..008`，早期 v0.1 B1/B2/B3 smoke/playbook 保留为 historical guard。结论为 current-stage close-out candidate / accepted-with-caveats：B1-B7 有 validation-scope 或 future-debt caveats，B8/REAL-EVIDENCE-008 accepted；B8 TUI stage 是 fake/local interaction-first MVP，非 real adapter / 非 product-ready。修复 active docs 中 stale 394/394、Audit/Dynamic Audit/Project Operations/AutoRun 主线误读、default entry activation 误读。详见 `docs/audit/b1-b8-current-stage-close-out-audit.md`。不进入 B9，不激活 TUI default entry，不制造 real adapter overclaim。 |
 | **B8 TUI Design Direction** | — | **First Agent TUI 设计语言定义** — 新建 `docs/design/first-agent-tui-design.md`（13 节）：product personality（终端原生/交互优先/克制可观测）、layout principles（三区域 25/50/25）、interaction hierarchy（L1 Input→L2 Response→L3 Pending→L4 Context）、Context Panel rules、Agent Lens selection rules、Input/Pending Action rules、status/state language、color token（8 ANSI colors + 使用规则）、typography/spacing（80-120 列、等宽字体、box-drawing）、do/don't examples（5 组对比）、fake/local honesty rules（6 种强制标注 + 6  种禁止声称）、accessibility/readability（色彩对比、键盘可达、CJK）、what not to build（13 项明确不产品化/不过度工程/不误导）。对齐 B8 M1-M8 全部交付物。相关文档（roadmap/SDD/TDD plan/PROJECT_STATUS）同步更新。|
 | **B8 M8: Default Entry Readiness** | cc5d90f | **M8 Default Entry Readiness Checklist 更新** — 16→18 项 readiness items。R01-R04 (M1-M4 done), R05 (M5 done), R06-R07 (M6 done), R08-R09 (M7 done), R10-R11 (auxiliary panels + security execution done), R12-R13 (blocked-b7: multi-instance history real + event stream real), R14 (blocked-ime), R15 (412/412 current TUI tests + tsc clean after remediation), R16 (CLI fallback retained done), R17 (TUI default entry NOT ACTIVATED — explicitly maintained guard done), R18 (no second runtime guard done)。DefaultEntryReadinessPanel 在 context focus 时显示。M8 是 readiness checklist；default entry remains NOT ACTIVATED；not product-ready。|

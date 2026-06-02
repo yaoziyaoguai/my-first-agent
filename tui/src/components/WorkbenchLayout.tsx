@@ -24,6 +24,7 @@ import {
   type EventStreamReader,
 } from "../data/eventStreamReader";
 import type { InspectorSummary } from "../data/eventSourceContract";
+import { DefaultEntryReadinessPanel } from "./DefaultEntryReadinessPanel";
 
 const FOCUS_ORDER: FocusZone[] = ["interaction", "agent-lens", "context"];
 
@@ -185,7 +186,7 @@ export function WorkbenchLayout() {
       {/* 标题 */}
       <Box paddingLeft={1}>
         <Text bold>B8 Interaction-first Workbench</Text>
-        <Text dimColor> — M2/M3/M4/M5 MVP (fake/local mode)</Text>
+        <Text dimColor> — M2-M8 MVP (fake/local mode)</Text>
       </Box>
 
       {/* 三区域 */}
@@ -267,6 +268,9 @@ export function WorkbenchLayout() {
         focusZone={focusZone}
         pendingCount={pendingCount}
       />
+
+      {/* M8 — Default Entry Readiness（仅 context focus 时显示） */}
+      {focusZone === "context" && <DefaultEntryReadinessPanel />}
     </Box>
   );
 }

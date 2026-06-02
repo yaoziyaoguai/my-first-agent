@@ -1,4 +1,6 @@
-/** Phase Polish: Default Entry Readiness Checklist */
+/** M8 — Default Entry Readiness Checklist。
+ *  评估 TUI 是否可以作为 First Agent 默认入口候选。
+ *  所有 blocked 项解除后需用户显式批准。当前 NOT ACTIVATED。 */
 export type ReadinessStatus = "done" | "blocked-b8-debt" | "blocked-b7" | "blocked-ime" | "pending";
 
 export interface ReadinessItem {
@@ -10,7 +12,7 @@ export interface ReadinessItem {
 
 const STATUS_LABELS: Record<ReadinessStatus, string> = {
   done: "✓ done",
-  "blocked-b8-debt": "✗ blocked (B8: Phase 6B/7 deferred)",
+  "blocked-b8-debt": "✗ blocked (B8 deferred)",
   "blocked-b7": "✗ blocked (B7 readiness)",
   "blocked-ime": "✗ blocked (IME/multi-line input)",
   pending: "○ pending",
@@ -26,101 +28,120 @@ const STATUS_COLORS: Record<ReadinessStatus, string> = {
 
 export function getReadinessItems(): ReadinessItem[] {
   return [
+    // ---- Interaction-first Workbench (M1-M4) ----
     {
       id: "R01",
-      label: "TUI 启动并展示 dashboard",
-      description: "npm start 成功渲染 7 视图工作台",
+      label: "Interaction-first Workbench 3-zone layout",
+      description: "AgentLens(25%) / InteractionView(50%) / Context(25%) + InputBar + StatusBar",
       status: "done",
     },
     {
       id: "R02",
-      label: "静态数据源全部解析",
-      description: "PROJECT_STATUS / PROGRESS_LEDGER / dogfood JSON / git info",
+      label: "Agent Lens selection + fixture 树导航",
+      description: "agent/session/run/instance 层级树, Tab/Shift+Tab focus cycling",
       status: "done",
     },
     {
       id: "R03",
-      label: "7 视图键盘导航",
-      description: "← → / 1-7 视图切换, ↑↓ 列表导航",
+      label: "Fake/local interaction (M3)",
+      description: "FakeRuntimeGateway.send() 关键词匹配响应, InputBar 提交",
       status: "done",
     },
     {
       id: "R04",
-      label: "安全命令执行 (白名单 + confirmation gate)",
-      description: "status/gates/docs-check/dev-workflow/audit/dogfood 可执行",
+      label: "Context Panel interaction refresh (M4)",
+      description: "messageCount, lastInteractionTime, pendingCount 动态刷新",
       status: "done",
     },
+    // ---- Controlled Interaction (M5) ----
     {
       id: "R05",
-      label: "Audit log (JSONL append-only + rotation)",
-      description: "命令执行审计记录, 10MB 自动 rotation",
+      label: "Pending Action / Controlled Interaction (M5)",
+      description: "Fake/local PendingAction model + approve/reject via ControlledOperationGateway + PendingActionPanel",
       status: "done",
     },
+    // ---- Multi-instance History (M6) ----
     {
       id: "R06",
-      label: "Dev Workflow Panel (provisional)",
-      description: "固定模板命令, preview→confirm→dry-run→exec 流程 — dev-only, may be removed",
+      label: "EvidenceNamespace contract (M6)",
+      description: "8 evidence namespace 定义, MultiRunStorageContract — fake/local, B7 real pending",
       status: "done",
     },
     {
       id: "R07",
-      label: "Static evidence/gate browser",
-      description: "dogfood JSON 解析, gate history 文本解析, 21 tests",
+      label: "Agent History Index (M6)",
+      description: "AgentHistoryIndex + HistorySource + HistoryPanel (fake/local fixture) — 只读 projection",
       status: "done",
     },
+    // ---- Runtime Event Stream (M7) ----
     {
       id: "R08",
-      label: "260/260 tests PASS + tsc clean",
-      description: "全量测试通过, TypeScript 编译无错误",
+      label: "EventSourceContract definition (M7)",
+      description: "EventSourceContract + redaction + backpressure 策略 — fake/local, B7 real pending",
       status: "done",
     },
     {
       id: "R09",
-      label: "Audit log browser UI",
-      description: "只读 audit history 面板, 不写 runtime state",
+      label: "EventStreamReader + EventPanel (M7)",
+      description: "JSONL parse + malformed/partial write handling + EventPanel — 只读 projection",
+      status: "done",
+    },
+    // ---- Existing auxiliary assets (retained) ----
+    {
+      id: "R10",
+      label: "Auxiliary panels retained",
+      description: "Evidence Browser, Gate History, Audit Log, Dev Workflow — 保留为 auxiliary, 不占主界面",
       status: "done",
     },
     {
-      id: "R10",
-      label: "Phase 6B multi-run evidence history",
-      description: "需要 session/run/instance identity + evidence namespace",
-      status: "blocked-b8-debt",
-    },
-    {
       id: "R11",
-      label: "Phase 7 runtime event stream viewer",
-      description: "需要 append-only event source contract",
-      status: "blocked-b8-debt",
+      label: "安全命令执行 (白名单 + confirmation gate)",
+      description: "CommandExecutor + ExecutionService + safety gate + audit log — auxiliary only",
+      status: "done",
     },
+    // ---- Blocked items ----
     {
       id: "R12",
-      label: "B7 multi-instance readiness",
-      description: "session/run/instance identity model 就绪后恢复 Phase 6B/7",
+      label: "Multi-instance history (B7 real)",
+      description: "真实 evidence namespace + multi-run storage contract 依赖 B7 session/run/instance identity",
       status: "blocked-b7",
     },
     {
       id: "R13",
+      label: "Runtime event stream (B7 real)",
+      description: "真实 append-only event source contract + tail 依赖 B7 runtime infrastructure",
+      status: "blocked-b7",
+    },
+    {
+      id: "R14",
       label: "Chinese IME / multi-line input / paste",
       description: "Ink useInput 中文输入行为待实际终端验证",
       status: "blocked-ime",
     },
-    {
-      id: "R14",
-      label: "Terminal resize 行为",
-      description: "Ink 自动重渲染, 待大窗口/小窗口边界验证",
-      status: "pending",
-    },
+    // ---- Gates ----
     {
       id: "R15",
+      label: "394/394 tests PASS + tsc clean",
+      description: "全量 TUI 测试通过, TypeScript 编译无错误",
+      status: "done",
+    },
+    {
+      id: "R16",
       label: "CLI fallback 保留",
       description: "CLI 为显式 fallback, 永不删除",
       status: "done",
     },
     {
-      id: "R16",
-      label: "用户显式确认 TUI 为默认入口",
-      description: "所有 blocked 项解除后需用户决策",
-      status: "blocked-b8-debt",
+      id: "R17",
+      label: "TUI default entry NOT ACTIVATED",
+      description: "M8 用户显式批准前不激活。所有 blocked 项解除后需用户决策。",
+      status: "done",
+    },
+    {
+      id: "R18",
+      label: "No second runtime / no real API calls / no .env reads",
+      description: "TUI 层面不创建第二 runtime, 不调用真实 API, 不读取 .env",
+      status: "done",
     },
   ];
 }

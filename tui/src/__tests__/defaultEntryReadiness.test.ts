@@ -10,9 +10,9 @@ import {
 
 describe("defaultEntryReadiness", () => {
   describe("getReadinessItems", () => {
-    it("returns 16 readiness items", () => {
+    it("returns 18 readiness items", () => {
       const items = getReadinessItems();
-      expect(items).toHaveLength(16);
+      expect(items).toHaveLength(18);
     });
 
     it("each item has id, label, description, status", () => {
@@ -24,22 +24,16 @@ describe("defaultEntryReadiness", () => {
       }
     });
 
-    it("at least 8 items are done", () => {
+    it("at least 12 items are done (M5/M6/M7/M8 completed)", () => {
       const items = getReadinessItems();
       const done = items.filter((i) => i.status === "done");
-      expect(done.length).toBeGreaterThanOrEqual(8);
+      expect(done.length).toBeGreaterThanOrEqual(12);
     });
 
-    it("has blocked-b8-debt items for Phase 6B/7", () => {
-      const items = getReadinessItems();
-      const b8blocked = items.filter((i) => i.status === "blocked-b8-debt");
-      expect(b8blocked.length).toBeGreaterThanOrEqual(2);
-    });
-
-    it("has blocked-b7 item", () => {
+    it("has blocked-b7 items for multi-instance + event stream", () => {
       const items = getReadinessItems();
       const b7blocked = items.filter((i) => i.status === "blocked-b7");
-      expect(b7blocked.length).toBeGreaterThanOrEqual(1);
+      expect(b7blocked.length).toBeGreaterThanOrEqual(2);
     });
 
     it("has blocked-ime item", () => {
@@ -50,14 +44,21 @@ describe("defaultEntryReadiness", () => {
 
     it("CLI fallback item is done", () => {
       const items = getReadinessItems();
-      const cli = items.find((i) => i.id === "R15");
+      const cli = items.find((i) => i.id === "R16");
       expect(cli?.status).toBe("done");
     });
 
-    it("default entry activation is blocked", () => {
+    it("TUI default entry is NOT ACTIVATED (done = explicitly maintained)", () => {
       const items = getReadinessItems();
-      const activation = items.find((i) => i.id === "R16");
-      expect(activation?.status).toContain("blocked");
+      const activation = items.find((i) => i.id === "R17");
+      expect(activation?.status).toBe("done");
+      expect(activation?.label).toContain("NOT ACTIVATED");
+    });
+
+    it("no second runtime guard is done", () => {
+      const items = getReadinessItems();
+      const guard = items.find((i) => i.id === "R18");
+      expect(guard?.status).toBe("done");
     });
   });
 
@@ -65,7 +66,7 @@ describe("defaultEntryReadiness", () => {
     it("returns correct totals", () => {
       const summary = getReadinessSummary();
       expect(summary.done + summary.blocked + summary.pending).toBe(summary.total);
-      expect(summary.total).toBe(16);
+      expect(summary.total).toBe(18);
     });
   });
 

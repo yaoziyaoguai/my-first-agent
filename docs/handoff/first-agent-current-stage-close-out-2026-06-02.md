@@ -214,3 +214,50 @@ REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 s
 - WorkbenchLayout 已从 services 导入 gateway，不再直接 import fakeRuntimeGateway/pendingAction。
 - 不读 .env，不调 core.chat()，不调真实 provider。
 - Contract delivered。Real gateway adapter requires user authorization。
+
+### 2026-06-02 — Next-Stage Units 1-4 Post-Authorization Assessment
+
+**Phase 0 — Environment Baseline**:
+- HEAD == origin/main at `6c005ef` (clean tree, main branch)
+- Provider: `anthropic_compatible` via `config/config.yaml`, model `kimi-k2.5`, base_url configured (DashScope)
+- **auth_status: placeholder_only** (`sk-REPLACE_ME` in config.yaml, no env var overrides set)
+- **MCP: not enabled** (`MY_FIRST_AGENT_MCP_ENABLE` not set)
+- **Real-env validation possible: NO** — both provider and MCP require real credentials
+
+**Unit 1 — D-04 Runtime Gateway Real Adapter (BLOCKED)**:
+- Cannot run real provider smoke: `sk-REPLACE_ME` placeholder → 401 on any real call
+- Runtime gateway foundation validated: 429/429 TUI tests PASS, tsc clean, contract delivered
+- BlockedRealAdapter operates correctly (explicit blocked message, no silent fallback)
+- Classification: **ENV_CONCERN** — provider not configured with real key
+- Next step: replace `sk-REPLACE_ME` in `config/config.yaml` with real DashScope API key
+
+**Unit 2 — D-02 MCP Real Connection (BLOCKED)**:
+- REAL-EVIDENCE-005 already CLOSED (12/12 PASS with opt-in echo fixture)
+- REAL-EVIDENCE-007 already CLOSED (credible-with-caveats, 10/10 PASS via FakeProvider + real StdioMCPClient)
+- Loop 2.4 MCP bridge lifecycle evidence code complete: 6/6 tests PASS, branch points PARTIAL
+- `MY_FIRST_AGENT_MCP_ENABLE` not set → bridge won't activate in production
+- Classification: **EXTERNAL_MCP_CONFIG_MISSING** — MCP bridge not enabled
+- Next step: set `MY_FIRST_AGENT_MCP_ENABLE=1` + configure MCP server path
+
+**Unit 3 — D-09 002 Skill Selection (COMPLETED — no new work needed)**:
+- REAL-EVIDENCE-002 already CLOSED (credible, 12/12 real provider PASS)
+- D-09 Plan 3 wiring already done (triggers/aliases/negative_triggers in selector, 43/43 tests PASS)
+- Non-prompt-steered real validation is future real-env task — blocked by same placeholder key
+- Classification: **ENV_CONCERN** for semantic matching enhancement only; core 002 is CLOSED
+- Next step: replace placeholder key, then run non-prompt-steered dogfood
+
+**Unit 4 — D-06 Manual Terminal Validation (MANUAL_PENDING — confirmed)**:
+- TUI confirmed rendering correctly: 3-zone layout, Agent Lens (13 nodes, 3 agents), Interaction View, Context Panel all render via `tsx src/main.tsx`
+- Ink `useInput` requires TTY raw mode → IME/paste/multiline testing cannot be done in non-interactive terminal
+- Error: "Raw mode is not supported on the current process.stdin"
+- All 7 IME scenarios remain MANUAL_PENDING (require real terminal with CJK input method)
+- All 7 paste scenarios remain NOT_TESTED (require OS clipboard access in real terminal)
+- Classification: **MANUAL_PENDING** — requires human operator with real terminal
+- Next step: human operator runs `cd tui && npm start` in iTerm2/Terminal.app, follows checklist in `docs/design/b8-input-readiness-validation.md`
+
+**Summary — All four units assessed**:
+- Unit 1/2/3 blocked by same root cause: placeholder API key in config.yaml
+- Unit 3 core work (002 real validation) already done; only enhancement layer blocked
+- Unit 4 confirmed MANUAL_PENDING — needs human terminal operator
+- No new code changes needed (all gates already pass from prior commits)
+- Recommend user replace `sk-REPLACE_ME` with real key, then re-run AutoLoop for Units 1-3 real validation

@@ -1,7 +1,7 @@
 # B8 Interaction-first Workbench — Roadmap
 
 **创建日期**: 2026-06-02
-**状态**: DRAFT — M0 文档阶段，待用户审阅 proposal
+**状态**: M1-M4 DELIVERED (320f64e) — Agent Lens selection + fake interaction + Context refresh。M5+ PENDING。
 **取代**: 旧 B8 Phase 1-7 路线（"信息展示中心"方向，归档为历史参考）
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`

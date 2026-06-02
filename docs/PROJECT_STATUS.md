@@ -418,7 +418,7 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | **Phase 1-6A COMPLETED — 阶段性收口审查通过** (260/260 tests PASS)。Phase 6A: 静态证据浏览器。Phase 6B (多实例历史) DEFERRED by B7。Polish Loop 1 (readiness panels) + Polish Loop 2 (audit P1/P2 fixes) COMPLETED。Completion review: `docs/reviews/b8-tui-workbench-completion-review.md`。TUI default entry NOT ACTIVATED。|
+| B8 | TUI architecture | **[legacy] Phase 1-6A 已归档 — 被 interaction-first B8 取代** (2026-06-02 方向变更)。旧能力保留在磁盘但不 import/渲染。Interaction-first B8 M1-M4 已交付 (320f64e): Agent Lens 选择 + fake interaction + Context refresh。321/321 TUI tests PASS。TUI default entry NOT ACTIVATED。|
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）
@@ -478,8 +478,12 @@ Legacy（不推荐）：.env / FIRST_AGENT_PROVIDER_PROFILE / MY_FIRST_AGENT_LLM
 | 修复计划 | `docs/plans/source-of-truth-repair-plan-2026-05-27.md` |
 | 能力边界定义 | `docs/CAPABILITY_BOUNDARIES.md` |
 | SubAgent 边界架构 | `docs/design/subagent-boundary-architecture.md` |
-| B8 TUI 路线图 | `docs/roadmap/b8-tui-workbench-roadmap.md` |
-| B8 SDD (Phase 1-3) | `docs/design/b8-ts-tui-workbench-sdd.md` |
+| B8 Interaction-first 路线图 | `docs/roadmap/b8-tui-workbench-roadmap.md` |
+| B8 Interaction-first proposal | `docs/proposals/b8-interaction-first-workbench-proposal.md` |
+| B8 Interaction-first SDD | `docs/design/b8-interaction-first-workbench-sdd.md` |
+| B8 Interaction-first TDD Plan | `docs/plans/b8-interaction-first-workbench-tdd-plan.md` |
+| B8 Interaction-first milestones | `docs/milestones/b8-interaction-first-workbench-milestones.md` |
+| B8 SDD (legacy, Phase 1-3) | `docs/design/b8-ts-tui-workbench-sdd.md` |
 | Skill 系统架构 | `docs/design/skill-system-architecture.md` |
 | MCP 系统架构 | `docs/design/mcp-architecture.md` |
 | MCP Real External Flight 契约 | `docs/design/mcp-real-external-flight-contract.md` |

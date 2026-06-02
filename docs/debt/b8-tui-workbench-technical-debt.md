@@ -5,7 +5,7 @@
 **依赖文档**: `docs/roadmap/b8-tui-workbench-roadmap.md`、`docs/PROJECT_STATUS.md`、`docs/milestones/b8-interaction-first-workbench-milestones.md`
 **范围**: 仅记录 B8 TUI Workbench 自身的 deferred milestone / missing prerequisite debt。不记录 B7 implementation debt。
 
-**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。M0 为纯文档阶段（proposal + milestones + SDD + TDD plan），不改代码。旧 Phase 1-6A 已交付能力保留为 auxiliary panels。
+**方向变更 note (2026-06-02)**: B8 产品方向从"信息展示中心"改为"interaction-first workbench"。旧 Phase 6B/7 debt 映射到新 M6/M7。**M1-M4 delivered (320f64e)**: Agent Lens selection + fake interaction + Context refresh。旧 Phase 1-6A 已交付能力保留为 auxiliary/dead code。
 
 ---
 

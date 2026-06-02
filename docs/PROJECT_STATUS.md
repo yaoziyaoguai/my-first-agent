@@ -53,12 +53,26 @@ Current-stage close-out: **FROZEN — yes-with-caveats** (final baseline: `60fd7
 
 ### Post-Closeout Evidence Maintenance (2026-06-02)
 
-b3e0863 `validation(evidence): validate scheduler model generated plan` — post-closeout REAL-EVIDENCE-008 re-validation:
+b3e0863 `validation(evidence): validate scheduler model generated plan` — post-closeout REAL-EVIDENCE-008 re-validation (ENV_CONCERN):
 
 - **104/104 scheduler focused tests PASS**, ruff clean.
-- **ENV_CONCERN**: `config.yaml` api_key 是 `sk-REPLACE_ME` 占位符（SEC-001），模型调用返回 401，无法重新验证 model-generated ActionPlan JSON。这不是代码缺陷，不是 MODEL_BEHAVIOR_CONCERN。008 caveat 已于 2026-05-31 关闭（v3: 14/14 PASS），当前 ENV_CONCERN 不重新打开 caveat。
+- **ENV_CONCERN (已关闭 — 2026-06-02)**: `config.yaml` api_key 是 `sk-REPLACE_ME` 占位符时 008 re-validation 因 401 无法重跑。用户配置真实 provider key 后重跑 **14/14 PASS, 0 FAIL, 0 CONCERN**（AnthropicCompatibleProvider, `scripts/real_evidence_008_model_generated_plan.py`）。ENV_CONCERN 关闭，008 保持 credible。
 - **Malformed safety**: 4/4 PASS (M10-M13)。
-- **Current-stage remains closed**。ENV_CONCERN 是环境配置问题，不是 current-stage blocker。
+- **Current-stage remains closed**。
+
+**002 non-prompt-steered re-validation (2026-06-02)**:
+
+- 用户配置真实 provider key 后重跑: **7 PASS / 1 FAIL / 2 CONCERN**（上次 4/1/3/2，AnthropicCompatibleProvider, `scripts/real_evidence_002_non_steered_validation.py`）。
+- C2/C4/C8: CONCERN/PARTIAL → PASS。C6: FAIL (negative trigger bypass, MODEL_BEHAVIOR_CONCERN)。C3/C7: CONCERN (over-eager selection, MODEL_BEHAVIOR_CONCERN)。
+- 确定性 selector (Plan 3: 43/43 PASS) 正确执行 negative_triggers 排除；模型 owned SKILL_SELECT 路径负触发绕过是模型行为，非代码缺陷。
+- Current-stage remains closed。
+
+**003 hardening re-validation (2026-06-02)**:
+
+- 用户配置真实 provider key 后重跑 (`scripts/real_evidence_003_hardening.py`): **1 PASS / 0 FAIL / 13 CONCERN / 3 SKIP**。
+- Disallowed tools 走 OTHER_GATE 而非 `skill_allowed_tools→rejected` — 模型行为变化，非代码回归。skill_allowed_tools gate 代码路径已验证 (Loop 8: 13/0/4 PASS)。
+- No side effect from disallowed tool attempts (R35 verified)。
+- Current-stage remains closed。
 
 ### Next-Stage D-04 — Runtime Gateway Foundation (2026-06-02)
 
@@ -93,7 +107,7 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - 纯确定性匹配，不调用 LLM/provider/embedding。
 - `when_to_use`/`when_not_to_use` 语义匹配: **future real-env task** (需 LLM)。
 - Non-prompt-steered real model validation: **future real-env task**。
-- **Status**: ACTIVE — Plan 3 manifest fields 已接入确定性选择器。002 保持 credible (12/12 PASS)。
+- **Status**: ACTIVE — Plan 3 manifest fields 已接入确定性选择器。002 保持 credible (12/12 PASS)。Non-prompt-steered real model validation: 7 PASS / 1 FAIL / 2 CONCERN (AnthropicCompatibleProvider, 2026-06-02)。C6 negative trigger bypass + C3/C7 over-eager selection 为 MODEL_BEHAVIOR_CONCERN。
 
 ### Next-Stage D-01 — SubAgent L2 Native Loop (COMPLETED — 2026-06-02)
 

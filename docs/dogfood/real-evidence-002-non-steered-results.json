@@ -1,13 +1,13 @@
 {
   "evidence_id": "REAL-EVIDENCE-002",
   "phase": "D-09 non-prompt-steered semantic validation",
-  "timestamp": "2026-06-02T18:14:58",
+  "timestamp": "2026-06-02T22:15:04",
   "provider_type": "AnthropicCompatibleProvider",
   "summary": {
-    "pass": 4,
+    "pass": 7,
     "fail": 1,
-    "concern": 3,
-    "partial": 2,
+    "concern": 2,
+    "partial": 0,
     "total": 10
   },
   "cases": [
@@ -31,8 +31,9 @@
     },
     {
       "case": "C2",
-      "verdict": "CONCERN",
-      "detail": "No skill selected for blog-writing intent",
+      "verdict": "PASS",
+      "detail": "Correctly selected blog-writing",
+      "skill": "blog-writing",
       "prompt": "我最近学了一个新技术，想写一篇文章分享给团队，你能帮我吗？"
     },
     {
@@ -43,8 +44,9 @@
     },
     {
       "case": "C4",
-      "verdict": "PARTIAL",
-      "detail": "Selection triggered, skill unclear",
+      "verdict": "PASS",
+      "detail": "Correctly selected demo-note-maker for English prompt",
+      "skill": "demo-note-maker",
       "prompt": "I need to jot down some todos from today's standup meeting."
     },
     {
@@ -69,8 +71,9 @@
     },
     {
       "case": "C8",
-      "verdict": "PARTIAL",
-      "detail": "Selection triggered, skill unclear",
+      "verdict": "PASS",
+      "detail": "Correctly selected blog-writing for sharing intent",
+      "skill": "blog-writing",
       "prompt": "我最近在学 Rust，想分享一下学习心得"
     }
   ]

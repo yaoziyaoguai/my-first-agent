@@ -16,12 +16,12 @@
     {
       "case": "M0",
       "verdict": "PASS",
-      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 8.1s)"
+      "detail": "Provider connectivity OK (AnthropicCompatibleProvider, 2.1s)"
     },
     {
       "case": "M1",
       "verdict": "PASS",
-      "detail": "core.chat() → planning phase → ActionPlan loaded: plan_id=cond_flag_test_v3_001, nodes=3, has_active_plan=True, 9.3s"
+      "detail": "core.chat() → planning phase → ActionPlan loaded: plan_id=cond_flag_test_v3_001, nodes=3, has_active_plan=True, 7.3s"
     },
     {
       "case": "M2",
@@ -31,7 +31,7 @@
     {
       "case": "M3",
       "verdict": "PASS",
-      "detail": "_run_main_loop(action_scheduler=...) executed: final_status=completed, completed=['node_3', 'node_1', 'node_2'], flags={'skip_step_3': True}, 4.7s"
+      "detail": "_run_main_loop(action_scheduler=...) executed: final_status=completed, completed=['node_3', 'node_2', 'node_1'], flags={'skip_step_3': True}, 7.5s"
     },
     {
       "case": "M4",

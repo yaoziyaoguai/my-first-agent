@@ -4,10 +4,12 @@
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
-## 2026-06-02 (Post-Closeout — Docs Audit + Gap Audit + Slice B Readiness)
+## 2026-06-02 (Post-Closeout — Docs Audit + Gap Audit + Slice B Readiness + Real Provider Re-Validation)
 
 | Milestone | 简述 |
 |-----------|------|
+| **Authorized Real Provider Re-Validation** | — | **用户配置真实 provider key 后安全验证 3 条路径**: (1) 008 model-generated ActionPlan: 14/14 PASS, 0 FAIL, 0 CONCERN (AnthropicCompatibleProvider) — ENV_CONCERN 关闭。(2) 002 non-prompt-steered skill selection: 7/10 PASS (上次 4/10), C6 negative trigger bypass + C3/C7 over-eager selection 仍为 MODEL_BEHAVIOR_CONCERN。(3) 003 hardening disallowed-tool blocking: 1 PASS / 0 FAIL / 13 CONCERN — disallowed tools 走 OTHER_GATE 非 skill_allowed_tools→rejected，模型行为变化。Current-stage remains closed。不激活 TUI default entry。不 product-ready。|
+| **Docs staleness fix** | **COMPLETED** (72c46f2) — CURRENT_DOCS.md Slice B status PLAN READY → IMPLEMENTED。Handoff doc final baseline 表新增 post-closeout HEAD bbdb75b, Slice B 段更新为 IMPLEMENTED。Slice B plan LeftRail deferred 标注。|
 | **Docs Source-of-Truth Audit** | **COMPLETED** — 168 个 markdown 文件全量 inventory + code cross-check。10/10 consistency checks pass: TUI Slice A implemented ✓, Slice B plan only ✓, MCP local smoke only ✓, IME MANUAL_PENDING ✓, TUI default NOT ACTIVATED ✓, Dashboard/AutoRun not mainline ✓, current-stage FROZEN ✓。`docs/CURRENT_DOCS.md` 创建 (5 节导航: Start Here, Current Implementation, Evidence/Audit/Debt, Historical/Superseded, Rules)。2 scratch 文件标注。0 overclaim 发现。0 secret leak。无代码修改 (仅 doc editing)。|
 | Next-Stage Tech Stack / Capability Gap Audit | **COMPLETED** — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker, 0 secret leak。current-stage remains closed。推荐 Route: Option B — TUI Slice B |
 | **TUI Slice B IMPLEMENTED** | — | **Wire safe data into Slice A visual shell** — 3 new data files (safeDataSources.ts ~180 lines, visualShellDataAdapter.ts ~170 lines, dataAdapter test ~200 lines) + component wiring (types _label widened to string, InspectorStatusData.evidence extended with items/skillEvidence, ContextInspectorPanel richer evidence display, fixtures exports SAFE_DATA_FIXTURE/SAFE_DATA_PROVENANCE, main.tsx exports adapter types + safe data sources) + 7 new integration tests (render test file: 20→27 tests)。484/484 TUI tests PASS, tsc clean。Fake/local boundaries explicit。all safe data wired into TuiShell。current-stage remains closed。见 `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md`。|

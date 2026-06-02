@@ -10,44 +10,44 @@
       "detail": "Skill activated: demo-note-maker, allowed_tools={'demo.write_demo_note', 'demo.echo_task_summary'}"
     },
     {
-      "case": "H1-1-REJECT",
-      "verdict": "PASS",
-      "detail": "Tool 'read_file_lines' rejected via skill_allowed_tools→rejected. invokes_for_disallowed=0"
+      "case": "H1-1-GATE",
+      "verdict": "CONCERN",
+      "detail": "Tool gates present but not skill_allowed_tools→rejected. Gates: [('read_file_lines', 'allowed'), ('_safe_noop', 'allowed')]"
     },
     {
       "case": "H1-2-GATE",
       "verdict": "CONCERN",
+      "detail": "Tool gates present but not skill_allowed_tools→rejected. Gates: [('read_file', 'allowed'), ('_safe_noop', 'allowed')]"
+    },
+    {
+      "case": "H1-3-GATE",
+      "verdict": "CONCERN",
       "detail": "Tool gates present but not skill_allowed_tools→rejected. Gates: [('_safe_noop', 'allowed')]"
     },
     {
-      "case": "H1-3-REJECT",
-      "verdict": "PASS",
-      "detail": "Tool 'read_file' rejected via skill_allowed_tools→rejected. invokes_for_disallowed=0"
-    },
-    {
       "case": "R27",
-      "verdict": "PASS",
-      "detail": "2/3 disallowed tools rejected via skill_allowed_tools→rejected. Details: [{'tool': 'read_file_lines', 'verdict': 'REJECTED', 'blocked_tool': 'read_file_lines', 'invokes': 0}, {'tool': 'request_user_input', 'verdict': 'OTHER_GATE'}, {'tool': 'read_file', 'verdict': 'REJECTED', 'blocked_tool': 'read_file', 'invokes': 0}]"
+      "verdict": "CONCERN",
+      "detail": "0/3 rejected via skill_allowed_tools. Model may not have attempted disallowed tools. Details: [{'tool': 'read_file_lines', 'verdict': 'OTHER_GATE'}, {'tool': 'read_file', 'verdict': 'OTHER_GATE'}, {'tool': 'request_user_input', 'verdict': 'OTHER_GATE'}]"
     },
     {
       "case": "R28",
-      "verdict": "PASS",
-      "detail": "TOOL_INVOKE check: all_rejected_have_zero_invokes=True"
+      "verdict": "SKIP",
+      "detail": "No rejected tools to check TOOL_INVOKE for"
     },
     {
       "case": "R29",
-      "verdict": "PASS",
-      "detail": "Diverse tool coverage: 3 tools tested, 2 rejected via skill_allowed_tools. Tested: ['read_file_lines', 'request_user_input', 'read_file']"
+      "verdict": "CONCERN",
+      "detail": "Diverse tool coverage: 3 tools tested, 0 rejected via skill_allowed_tools. Tested: ['read_file_lines', 'read_file', 'request_user_input']"
     },
     {
       "case": "H2-direct",
-      "verdict": "PASS",
-      "detail": "Style 'direct' → TOOL_GATE rejected 'read_file' via skill_allowed_tools→rejected"
+      "verdict": "CONCERN",
+      "detail": "Style 'direct' → gate present but not via skill_allowed_tools. Gates: ['read_file', '_safe_noop']"
     },
     {
       "case": "H2-indirect",
-      "verdict": "PASS",
-      "detail": "Style 'indirect' → TOOL_GATE rejected 'read_file' via skill_allowed_tools→rejected"
+      "verdict": "CONCERN",
+      "detail": "Style 'indirect' → gate present but not via skill_allowed_tools. Gates: ['read_file', '_safe_noop']"
     },
     {
       "case": "H2-privilege_escalation",
@@ -56,13 +56,13 @@
     },
     {
       "case": "R30",
-      "verdict": "PASS",
-      "detail": "Direct tool-call style → skill_allowed_tools→rejected for 'read_file'"
+      "verdict": "CONCERN",
+      "detail": "Direct style: OTHER_GATE"
     },
     {
       "case": "R31",
-      "verdict": "PASS",
-      "detail": "Indirect bypass style → skill_allowed_tools→rejected for 'read_file'"
+      "verdict": "CONCERN",
+      "detail": "Indirect style: OTHER_GATE"
     },
     {
       "case": "R32",
@@ -71,13 +71,13 @@
     },
     {
       "case": "R33",
-      "verdict": "PASS",
-      "detail": "TOOL_GATE rejected disallowed tool 'SKILL_SELECT' via skill_allowed_tools→rejected (active_skill_id=demo-note-maker)"
+      "verdict": "CONCERN",
+      "detail": "No disallowed tool rejected via skill_allowed_tools→rejected with active_skill_id. Gates: [('SKILL_SELECT', 'success'), ('_safe_noop', 'success')]"
     },
     {
       "case": "R34",
-      "verdict": "PASS",
-      "detail": "No TOOL_INVOKE for disallowed tool 'SKILL_SELECT': found=0"
+      "verdict": "SKIP",
+      "detail": "No baseline rejected gate"
     },
     {
       "case": "R35",
@@ -86,14 +86,14 @@
     },
     {
       "case": "R36",
-      "verdict": "PASS",
-      "detail": "All 1 rejected TOOL_GATE events have complete evidence fields: ['active_skill_id', 'requested_tool_name', 'skill_allowed_tools', 'policy_path', 'rejection_reason']"
+      "verdict": "SKIP",
+      "detail": "No rejected TOOL_GATE events to validate"
     }
   ],
   "summary": {
-    "PASS": 13,
+    "PASS": 1,
     "FAIL": 0,
-    "CONCERN": 4,
-    "SKIP": 0
+    "CONCERN": 13,
+    "SKIP": 3
   }
 }

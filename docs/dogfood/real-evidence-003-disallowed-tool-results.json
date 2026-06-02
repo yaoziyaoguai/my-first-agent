@@ -5,18 +5,18 @@
   "results": [
     {
       "case": "D3",
-      "verdict": "PASS",
-      "detail": "TOOL_GATE rejected disallowed tool demo.echo_task_summary: status=rejected, decision=rejected"
+      "verdict": "FAIL",
+      "detail": "TOOL_GATE status=success, decision=allowed, expected status='rejected'. skill_allowed_tools in evidence: None"
     },
     {
       "case": "D4",
-      "verdict": "PASS",
-      "detail": "skill_allowed_tools present in TOOL_GATE evidence: ('demo.write_demo_note',)"
+      "verdict": "CONCERN",
+      "detail": "skill_allowed_tools NOT in TOOL_GATE evidence — rejection may be from another policy, not skill constraint"
     },
     {
       "case": "D5",
-      "verdict": "PASS",
-      "detail": "No TOOL_INVOKE for disallowed tool — blocked BEFORE execution"
+      "verdict": "FAIL",
+      "detail": "TOOL_INVOKE found for disallowed tool: 3 event(s) — tool was NOT properly blocked!"
     },
     {
       "case": "D6",
@@ -26,12 +26,12 @@
     {
       "case": "D7",
       "verdict": "PASS",
-      "detail": "Evidence chain through main runtime path: TOOL_GATE source=ToolRuntimeMediator, all_types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.select', 'streaming.event', 'streaming.provider_call', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result'], not a direct dispatcher.route() call"
+      "detail": "Evidence chain through main runtime path: TOOL_GATE source=ToolRuntimeMediator, all_types=['checkpoint.safe_summary', 'memory.consolidate', 'memory.recall', 'memory.turn_end_proposal', 'skill.candidates.built', 'skill.select', 'skill.selection.entered', 'streaming.event', 'streaming.provider_call', 'subagent.delegate_l0', 'tool.gate', 'tool.invoke', 'tool.request', 'tool.result'], not a direct dispatcher.route() call"
     }
   ],
   "summary": {
-    "PASS": 5,
-    "FAIL": 0,
-    "CONCERN": 0
+    "PASS": 2,
+    "FAIL": 2,
+    "CONCERN": 1
   }
 }

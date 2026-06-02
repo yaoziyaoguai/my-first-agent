@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (B8 M2/M3/M4 Interaction-first Workbench — agent lens selection + fake interaction + context refresh)
-**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M2/M3/M4 Interaction-first Workbench MVP 已交付：Agent Lens 选择驱动 Interaction + Context Panel、fake/local interaction (RuntimeGateway boundary)、Context Panel 随交互刷新。321/321 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
+**最后更新**: 2026-06-02 (B8 M5-M8 Interaction-first Workbench — pending actions + multi-instance history + event stream + default entry readiness)
+**状态**: B7 **current-stage closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M2-M8 Interaction-first Workbench MVP 全部交付：Agent Lens 选择 + fake/local interaction + Context refresh + 受控 Pending Actions (M5) + Multi-instance History Foundation contracts (M6) + Runtime Event Stream contracts (M7) + Default Entry Readiness checklist (M8)。394/394 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 
@@ -83,7 +83,10 @@ B7 current-stage **closed — accepted-with-caveats**。Codex 独立红队诚信
 | B8 M2 (Agent Lens selection) | **DELIVERED** — keyboard nav (↑↓/Enter) + selectedLens 驱动全界面 |
 | B8 M3 (Fake Interaction) | **DELIVERED** — fakeRuntimeGateway + InputBar submit + message list |
 | B8 M4 (Context refresh) | **DELIVERED** — messageCount + lastInteractionTime + lens switch refresh |
-| B8 M5+ | **PENDING** — M4 完成后按依赖链推进 |
+| B8 M5 (Pending Actions) | **DELIVERED** — fake/local PendingAction + ControlledOperationGateway + PendingActionPanel + 26 tests |
+| B8 M6 (History Foundation) | **DELIVERED** — EvidenceNamespace + MultiRunStorageContract + AgentHistoryIndex + HistoryPanel + 26 tests |
+| B8 M7 (Event Stream) | **DELIVERED** — EventSourceContract + EventStreamReader + EventPanel + redaction + 25 tests |
+| B8 M8 (Default Entry Readiness) | **DELIVERED** — 18-item readiness checklist updated with M5-M8 completion, still NOT ACTIVATED |
 | B8 旧 Phase 1-6A | **PAUSED** — 保留在磁盘但不 import/渲染 |
 | TUI default entry | **NOT ACTIVATED** — M8 前不激活 |
 
@@ -382,7 +385,7 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 
 **B8 Phase 6B/7 DEFERRED** — 旧方向产物。TUI not default entry yet。CLI fallback retained。
 
-**下一步**: M5+ (PendingAction / RuntimeGateway 深化) 或用户指定方向。
+**下一步**: B8 M5-M8 全部交付 (cc5d90f)。394/394 TUI tests PASS。可选：B7 multi-instance readiness 推进或用户指定方向。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 
@@ -418,7 +421,7 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 | B5 | Skill runtime 深化 | code path complete — body 注入 + allowed_tools enforcement 已实现；缺真实模型 SKILL_SELECT + real dogfood E2E（REAL-EVIDENCE-002/003） |
 | B6 | Checkpoint true state restoration | QUESTIONABLE — handler path 存在；REAL-EVIDENCE-004 closure 被 direct-save fallback 和 real-provider concerns 削弱 |
 | B7 | Multi-instance readiness | 需要消除模块级单例 |
-| B8 | TUI architecture | **[legacy] Phase 1-6A 已归档 — 被 interaction-first B8 取代** (2026-06-02 方向变更)。旧能力保留在磁盘但不 import/渲染。Interaction-first B8 M1-M4 已交付 (320f64e): Agent Lens 选择 + fake interaction + Context refresh。321/321 TUI tests PASS。TUI default entry NOT ACTIVATED。|
+| B8 | TUI architecture | **[legacy] Phase 1-6A 已归档 — 被 interaction-first B8 取代** (2026-06-02 方向变更)。旧能力保留在磁盘但不 import/渲染。Interaction-first B8 M1-M8 已交付 (cc5d90f): Agent Lens + fake interaction + Context refresh + Pending Actions + History Foundation + Event Stream + Default Entry Readiness。394/394 TUI tests PASS。TUI default entry NOT ACTIVATED。|
 
 **剩余 PARTIAL**：
 - Memory extractor zero proposals（procedural 走 inline confirmation，episodic 可能需要 extractor redesign）

@@ -131,19 +131,23 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 
 **Slice B 就绪判定**: yes-with-caveats。
 
-**Top 5 remaining technical gaps**:
-1. Provider real API key — `sk-REPLACE_ME` 占位符阻塞 3 条真实验证路径
-2. MCP external production connection — `MY_FIRST_AGENT_MCP_ENABLE` 未设置
-3. Skill negative trigger bypass (C6) — MODEL_BEHAVIOR_CONCERN
-4. Chinese IME validation — MANUAL_PENDING，需真实终端人工验证
-5. ToolResultTableBlock unwired — **DONE in pre-Slice B cleanup**
+**Top 5 remaining technical gaps** (updated 2026-06-02):
+1. Skill negative trigger bypass (C6) — MODEL_BEHAVIOR_CONCERN（模型 owned SKILL_SELECT 路径绕过确定性 negative_triggers）
+2. MCP external production connection — `MY_FIRST_AGENT_MCP_ENABLE` 未设置 + 外部 MCP server fixture 待配置
+3. Chinese IME validation — MANUAL_PENDING，需真实终端人工验证
+4. D-04 real gateway adapter — blocked by TUI default entry activation (PRODUCT_DECISION)
+5. Memory extractor zero proposals — episodic extractor redesign (FUTURE_DEBT)
 
-**Auto-fixable (completed)**:
-- ToolResultTableBlock wiring — 5 files changed, 2 new tests, 461/461 PASS
+**Post-closeout validated (2026-06-02)**:
+- 008 model-generated ActionPlan: 14/14 PASS — ENV_CONCERN 关闭
+- 002 non-prompt-steered skill selection: 7/10 PASS, C6/C3/C7 MODEL_BEHAVIOR_CONCERN
+- 003 disallowed-tool hardening: 1 PASS / 0 FAIL / 13 CONCERN (OTHER_GATE, MODEL_BEHAVIOR)
+- D-01 SubAgent L2 native loop: COMPLETED
+- D-02 local filesystem MCP smoke: DONE
 
 **User-config items**:
-- 替换 `sk-REPLACE_ME` 为真实 DashScope API key (不 commit)
-- 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + 外部 MCP server 路径
+- ~~替换 `sk-REPLACE_ME` 为真实 DashScope API key~~ — **DONE** (用户已配置, 不 commit)
+- 设置 `MY_FIRST_AGENT_MCP_ENABLE=1` + 外部 MCP server 路径 (for FUTURE_DEBT production MCP)
 - 人工终端验证 Chinese IME (iTerm2/Terminal.app + CJK input method)
 - 批准 TUI default entry activation (blocked, NOT ACTIVATED)
 - Legacy Dashboard/AutoRun cleanup 决策 (Option C: on-disk keep)

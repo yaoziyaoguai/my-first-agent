@@ -52,6 +52,7 @@
 | `rfc/MEMORY_CANONICAL_RFC.md` | **Canonical** | Memory 权威 RFC |
 | `rfc/SKILL_CANONICAL_RFC.md` | **Canonical** | Skill 权威 RFC |
 | `rfc/SUBAGENT_CANONICAL_RFC.md` | **Canonical** | SubAgent 权威 RFC |
+| `design/entry-command-clarification.md` | IMPLEMENTED (2026-06-03) | 入口命令澄清：`--plain` / `--tui` / `--textual` / `--shell`(deprecated) |
 
 ---
 

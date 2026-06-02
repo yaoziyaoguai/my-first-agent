@@ -1,11 +1,12 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-02 (current-stage frozen — close-out handoff delivered)
+**最后更新**: 2026-06-03 (entry command clarification + 008 re-validation complete)
 **Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
 **TUI Visual Target**: `docs/design/first-agent-tui-visual-target-v1.md` — 22 组件映射、6 区域布局合同、data source policy。独立审计: **ACCEPTED-WITH-CAVEATS**（3 caveats 不阻塞 Slice A）。
 **TUI Slice A**: **IMPLEMENTED** — `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md`。25 组件 + 3 test files (30 tests) + theme + types + fixtures。static visual shell + mock/fake data + render tests。不接 runtime/provider/MCP。461/461 TUI tests PASS, tsc clean。
 **TUI Slice B**: **IMPLEMENTED** (2026-06-02) — `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md`。3 new data files (safeDataSources.ts, visualShellDataAdapter.ts, visualShellDataAdapter.test.ts) + component wiring (types + fixtures + inspector + exports) + integration tests (7 new in visualShellRender.test.tsx)。484/484 TUI tests PASS, tsc clean。Fake/local boundaries explicit。all safe data wired into TuiShell。current-stage remains closed。不调 real provider/MCP/activate default entry。
+**Entry Command Clarification**: **IMPLEMENTED** (2026-06-03) — `main.py` 入口命令澄清：`--plain`(simple CLI，默认)、`--tui`/`--textual`(Textual TUI)、`--shell`(deprecated，兼容 plain CLI)。11/11 contract tests PASS。README + manual trial guide 更新。default entry NOT ACTIVATED。
 **Docs Source-of-Truth Audit**: **COMPLETED** (2026-06-02) — 168 个 markdown 文件全量 inventory + code cross-check。10/10 code consistency checks pass。`docs/CURRENT_DOCS.md` 导航文档创建。2 scratch files 标注。无 overclaim 发现。所有历史文档已有正确 banner。
 **Next-Stage Gap Audit**: **COMPLETED** (2026-06-02) — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker。0 secret leak。推荐路线: Option B — TUI Slice B。
 **状态**: **CURRENT-STAGE FROZEN — yes-with-caveats**。B7 **closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付 (accepted, final caveats closed, 2f995b9)。TUI Visual Shell Slice A delivered。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。下一阶段需重新 SPEC/TDD/Review。

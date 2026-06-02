@@ -10,7 +10,8 @@
 
 ```bash
 python main.py
-python main.py --shell   # 显式进入同一个基础 CLI Shell
+python main.py --tui     # Textual TUI 交互模式（推荐）
+python main.py --shell   # ⚠️ 已弃用 (2026-06-03)，仍兼容 plain CLI；请使用 --tui
 ```
 
 启动屏会显示结构化 header（详见 `docs/CLI_OUTPUT_CONTRACT.md` §12.1）：

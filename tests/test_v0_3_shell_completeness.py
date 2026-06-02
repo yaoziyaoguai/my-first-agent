@@ -141,11 +141,13 @@ def test_cli_output_contract_section_13_present():
 def test_readme_documents_all_v0_3_subcommands():
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     for cmd in (
-        "python main.py --shell",
+        "python main.py --tui",
         "python main.py health",
         "python main.py logs",
     ):
         assert cmd in text, f"README 缺命令：{cmd}"
+    # --shell 已弃用，但 README 仍应提及 deprecation
+    assert "--shell" in text, "README 应提及 --shell 已弃用"
 
 
 def test_readme_startup_example_matches_current_header_shape():

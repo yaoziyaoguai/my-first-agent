@@ -525,8 +525,27 @@ def main(argv: list[str] | None = None) -> int:
     print(render_provider_mode_banner(), file=sys.stderr)
 
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in {"--shell", "shell"}:
-        argv = argv[1:]
+
+    # ── 入口命令解析（Entry Command Clarification, 2026-06-03）──
+    # --plain     → simple/plain CLI backend（默认，无需特殊处理）
+    # --tui       → Textual TUI backend（候选 v1 TUI 主入口）
+    # --textual   → --tui alias
+    # --shell     → deprecated（向后兼容：仍走 plain CLI，输出迁移提示）
+    _selected_entry = ""
+    if argv and argv[0] in {"--plain", "--tui", "--textual", "--shell", "shell"}:
+        _selected_entry = argv.pop(0).lstrip("-")
+
+    if _selected_entry in {"shell"}:
+        print(
+            "[entry] --shell is deprecated. Use --plain for CLI or --tui for Textual TUI.",
+            file=sys.stderr,
+        )
+        # 向后兼容：--shell 仍走 plain CLI，不突然改变行为
+        _selected_entry = ""
+
+    if _selected_entry in {"tui", "textual"}:
+        import os as _os
+        _os.environ[INPUT_BACKEND_ENV] = "textual"
 
     if argv and argv[0] in {"--help", "-h", "help"}:
         print(render_onboarding())

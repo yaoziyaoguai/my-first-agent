@@ -1,8 +1,14 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-02 (docs source-of-truth audit completed)
+**最后更新**: 2026-06-03 (entry command clarification)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+## 2026-06-03 (Entry Command Clarification)
+
+| Milestone | 简述 |
+|-----------|------|
+| **Entry Command Clarification IMPLEMENTED** | — | `main.py` 入口命令澄清：`--plain`(simple CLI，默认行为)、`--tui`/`--textual`(Textual TUI backend，设置 `MY_FIRST_AGENT_INPUT_BACKEND=textual`)、`--shell`(deprecated，打印 stderr 迁移提示，仍走 plain CLI 兼容)。11/11 contract tests PASS, 91/91 regression tests PASS。README + manual trial guide `--shell`→`--tui` 更新。CURRENT_DOCS + PROJECT_STATUS + PROGRESS_LEDGER 更新。default entry NOT ACTIVATED。|
 
 ## 2026-06-02 (Post-Closeout — Docs Audit + Gap Audit + Slice B Readiness + Real Provider Re-Validation)
 

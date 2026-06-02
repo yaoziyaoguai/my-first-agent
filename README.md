@@ -23,7 +23,7 @@ pip install -r requirements.txt
 
 默认使用 deterministic fake provider，不调用真实 LLM，不访问网络，不需要 API key。
 
-其他入口：`python main.py --shell`（TUI 交互模式）。
+其他入口：`python main.py --tui`（Textual TUI 交互模式），`cd tui && npm start`（Ink Visual Shell）。`--shell` 已弃用，仍兼容 plain CLI。
 
 Health: python main.py health；Logs: python main.py logs --tail 50。
 

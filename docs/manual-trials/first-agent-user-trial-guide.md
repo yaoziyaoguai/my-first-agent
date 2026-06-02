@@ -71,7 +71,7 @@ Terminal version: [___]
 OS: [macOS version — 点  → 关于本机]
 Shell: [echo $SHELL]
 Input method: [macOS 拼音 / 搜狗 / 鼠须管 / 日文假名 / 韩文 / other: ___]
-TUI mode: [Textual --shell / Ink npm start — 见 §4]
+TUI mode: [Textual --tui / Ink npm start — 见 §4]
 Python: [python3 --version]
 Node: [node --version if using Ink TUI]
 ```
@@ -94,12 +94,12 @@ Node: [node --version if using Ink TUI]
 ```bash
 cd /Users/jinkun.wang/work_space/my-first-agent
 source .venv/bin/activate
-python main.py --shell
+python main.py --tui
 ```
 
 - 后端：基于 Textual（Python TUI 框架）
 - 输入方式：Textual Input widget
-- 这是 README.md 记录的 `--shell` 入口
+- 这是 README.md 记录的 `--tui` 入口（`--shell` 已弃用，仍兼容 plain CLI）
 - 默认使用 fake provider（不调真实 API，零 secret 风险）
 - **推荐从入口 A 开始**
 
@@ -119,7 +119,7 @@ npm start
 
 ### 入口比较
 
-| 维度 | 入口 A (Textual --shell) | 入口 B (Ink npm start) |
+| 维度 | 入口 A (Textual --tui) | 入口 B (Ink npm start) |
 |------|--------------------------|------------------------|
 | IME 行为 | Textual Input widget 处理 | Ink useInput 处理 |
 | 粘贴行为 | Textual 原生支持 | Ink 不区分键盘/粘贴 |
@@ -143,7 +143,7 @@ npm start
 | 项 | 内容 |
 |----|------|
 | **Purpose** | 验证中文拼音 IME 在 TUI 输入框中的组合态/确认态行为 |
-| **Setup** | 入口 A (`python main.py --shell`)，确认 TUI 启动成功，输入区域可见 |
+| **Setup** | 入口 A (`python main.py --tui`)，确认 TUI 启动成功，输入区域可见 |
 | **Actions** | 1. 切换到中文输入法 (macOS 拼音) 2. 在输入框输入拼音 `jintian` (今天) 3. 观察候选词列表是否正常显示（在输入框之外还是覆盖了 TUI 界面） 4. 按空格/数字键确认候选词 5. 输入完整短句: "今天天气不错" 6. 按 Enter 提交 |
 | **Expected** | 拼音组合态期间不触发 TUI submit（中间拼音字母不应被当作最终输入提交）；按 Enter 时提交的是"今天天气不错"而非 `jintiantianqibucuo` |
 | **Observe** | 候选词窗口是否遮挡 TUI、输入框字符是否正确渲染、是否有乱码/重复字符 |
@@ -207,8 +207,7 @@ npm start
 | 项 | 内容 |
 |----|------|
 | **Purpose** | 验证粘贴短文本正确追加到输入框 |
-| **Setup** | 入口 A (`python main.py --shell`) |
-| **Actions** | 1. 先在输入框手动打 "前缀：" 2. 从其他窗口复制短文本 (< 50 chars)，例如 "Hello, this is pasted text." 3. 在 TUI 输入框中 Cmd+V 粘贴 4. 按 Enter 提交 |
+| **Setup** | 入口 A (`python main.py --tui`) |
 | **Expected** | 输入框显示 "前缀：Hello, this is pasted text."，提交后完整接收 |
 | **Fail criteria** | 粘贴被忽略、粘贴内容覆盖而非追加、粘贴触发意外提交 |
 
@@ -410,7 +409,7 @@ python main.py demo "create a test note"
 |------|------|
 | Terminal screenshot | 输入框状态、提交前后对比。不含 API key/secret/私人文件路径 |
 | Terminal copy text | `Cmd+A` → `Cmd+C` 复制 TUI 中可见文本（不含后台日志） |
-| Exact command used | 例如 `python main.py --shell` |
+| Exact command used | 例如 `python main.py --tui` |
 | git state | `git log --oneline -1` + `git status -sb` |
 | Time | 每次 trial 时间戳 |
 
@@ -499,7 +498,7 @@ mkdir -p docs/manual-trials/evidence
 - [ ] Step 1: `cd /Users/jinkun.wang/work_space/my-first-agent && git status -sb` — 确认 clean
 - [ ] Step 2: 记录 Environment (Terminal / OS / Shell / Input Method) 到 §6
 - [ ] Step 3: 打开 §6 Result Log 模板，复制到编辑器
-- [ ] Step 4: `source .venv/bin/activate && python main.py --shell` — 启动入口 A
+- [ ] Step 4: `source .venv/bin/activate && python main.py --tui` — 启动入口 A
 - [ ] Step 5: 执行 T-FLOW-2 (英文基线) → 填入 Result Log
 - [ ] Step 6: 从 T-IME-1 开始 → T-IME-2 → T-IME-3 → T-IME-4
 - [ ] Step 7: 执行 T-PASTE-1 → T-PASTE-2 → T-PASTE-3 → T-PASTE-4

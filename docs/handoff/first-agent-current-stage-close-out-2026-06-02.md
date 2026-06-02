@@ -187,6 +187,14 @@ b3e0863 `validation(evidence): validate scheduler model generated plan`:
 REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 scope caveats（prompt-steered, single-skill）为非 blocker 限制。
 002 的多语言 skill manifest / 非 prompt-steered activation 设计是 **future debt**，归入下一阶段 D-09，不阻塞 current-stage close-out。
 
+### 2026-06-02 — Next-Stage D-01 SubAgent L2 Native Loop SDD
+
+**D-01 B3 SubAgent L2 native loop** (handoff §8):
+
+- SPEC: `docs/design/subagent-l2-native-loop-sdd.md` — L2 execution flow (independent stop condition / parent adjudication gate / child-initiated revision / batched memory / deepened tool access grep+glob / legacy L0 removal)。
+- L2 gated behind `SubAgentPolicy.real_llm_tool_requesting_allowed`。
+- Implementation + real provider dogfood: **future task**。
+
 ### 2026-06-02 — Next-Stage D-09 002 Skill Selection Plan 3 Wiring
 
 **D-09 Skill Selection deterministic enhancement** (handoff §11, future debt D-09):

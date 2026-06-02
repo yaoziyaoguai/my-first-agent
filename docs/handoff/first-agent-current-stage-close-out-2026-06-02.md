@@ -187,6 +187,16 @@ b3e0863 `validation(evidence): validate scheduler model generated plan`:
 REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 scope caveats（prompt-steered, single-skill）为非 blocker 限制。
 002 的多语言 skill manifest / 非 prompt-steered activation 设计是 **future debt**，归入下一阶段 D-09，不阻塞 current-stage close-out。
 
+### 2026-06-02 — Next-Stage D-09 002 Skill Selection Plan 3 Wiring
+
+**D-09 Skill Selection deterministic enhancement** (handoff §11, future debt D-09):
+
+- `SkillDescriptor` 新增 `triggers`/`negative_triggers` Level 1 公开字段。
+- `SkillSelector` 接入 Plan 3 manifest: triggers（子串精确匹配 0.4 权重）、aliases（词级匹配 0.3 权重）、negative_triggers（黑名单排除）。
+- 43/43 selector + manifest tests PASS (14 new)。168 broader skill system tests PASS。ruff clean。
+- `when_to_use`/`when_not_to_use` 语义匹配 和 non-prompt-steered real model validation 归入 **future real-env task**。
+- 002 保持 credible (12/12 PASS)。002 caveats 不变。
+
 ### 2026-06-02 — Next-Stage D-04 Runtime Gateway Foundation
 
 **D-04 B8 real runtime gateway** (handoff §8, §9 Route 1):

@@ -108,6 +108,12 @@ class SkillDescriptor:
     aliases: tuple[str, ...] = ()
     """skill 别名列表，供 SkillCandidateRetriever 做候选评分。"""
 
+    triggers: tuple[str, ...] = ()
+    """触发关键词/短语——精确/子串匹配权重最高，供 SkillSelector 做确定性匹配。"""
+
+    negative_triggers: tuple[str, ...] = ()
+    """反触发词——命中则排除此 skill，供 SkillSelector 做黑名单过滤。"""
+
     def is_visible(self) -> bool:
         """disabled / legacy 状态默认不对模型可见。"""
         return self.status not in ("disabled", "legacy")
@@ -165,6 +171,8 @@ class SkillManifest:
             manifest_path=self.manifest_path,
             # Plan 3 manifest foundation — Level 1 公开字段
             aliases=self.aliases,
+            triggers=self.triggers,
+            negative_triggers=self.negative_triggers,
         )
 
     def is_visible(self) -> bool:

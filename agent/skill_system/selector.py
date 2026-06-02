@@ -14,13 +14,14 @@ from dataclasses import dataclass
 
 from agent.skill_system.registry import SkillRegistry
 
-
 # ---- Scoring constants ----
 
 _SCORE_EXACT_NAME = 1.0
+_SCORE_TRIGGER = 0.4
 _SCORE_NAME_WORD = 0.3
-_SCORE_DESC_WORD = 0.15
+_SCORE_ALIAS_WORD = 0.3
 _SCORE_TAG = 0.2
+_SCORE_DESC_WORD = 0.15
 _DEPRECATED_MULTIPLIER = 0.5
 _CONFIDENCE_THRESHOLD = 0.25
 _AMBIGUITY_GAP = 0.15
@@ -100,7 +101,10 @@ class SkillSelector:
         # ---- Pass 2: 关键词评分 ----
         scored: list[tuple[str, float]] = []
         for desc in visible:
-            score = self._score_descriptor(desc, goal_words)
+            # negative_triggers 黑名单排除（Plan 3）
+            if self._has_negative_trigger_match(desc, goal_lower):
+                continue
+            score = self._score_descriptor(desc, goal_words, goal_lower)
             if score > 0:
                 # deprecated 惩罚
                 if desc.status == "deprecated":
@@ -125,7 +129,10 @@ class SkillSelector:
                 selected=False,
                 skill_name=None,
                 confidence=best_score,
-                reason=f"best match '{best_name}' score {best_score:.2f} below threshold {min_confidence}",
+                reason=(
+                    f"best match '{best_name}' score {best_score:.2f}"
+                    f" below threshold {min_confidence}"
+                ),
                 alternatives=tuple(name for name, _ in scored[:3]),
             )
 
@@ -147,8 +154,12 @@ class SkillSelector:
             requires_user_confirmation=requires_confirmation,
         )
 
-    def _score_descriptor(self, desc, goal_words: set[str]) -> float:
-        """对单个 SkillDescriptor 打分（仅使用 metadata）。"""
+    def _score_descriptor(self, desc, goal_words: set[str], goal_lower: str) -> float:
+        """对单个 SkillDescriptor 打分（仅使用 metadata）。
+
+        Plan 3 增强：triggers（子串/精确高权重）、aliases（名称级权重）、
+        negative_triggers（黑名单排除）。
+        """
         score = 0.0
 
         name_lower = desc.name.lower()
@@ -159,17 +170,39 @@ class SkillSelector:
 
         tags_lower = {t.lower() for t in desc.tags}
 
+        # ---- triggers: 精确/子串匹配，权重最高 ----
+        for trigger in desc.triggers:
+            trigger_lower = trigger.lower().strip()
+            if not trigger_lower:
+                continue
+            if trigger_lower in goal_lower:
+                score += _SCORE_TRIGGER
+
+        # ---- aliases: 词级匹配，权重同 name ----
+        for alias in desc.aliases:
+            alias_lower = alias.lower()
+            alias_parts = set(alias_lower.replace("-", " ").replace("_", " ").split())
+            for word in goal_words:
+                if word in alias_parts:
+                    score += _SCORE_ALIAS_WORD
+
+        # ---- name / description / tag 匹配（原有逻辑） ----
         for word in goal_words:
-            # name 中的词匹配
             if word in name_parts:
                 score += _SCORE_NAME_WORD
-            # description 中的词匹配
             if word in desc_words:
                 score += _SCORE_DESC_WORD
 
-        # tag 匹配
         for tag in tags_lower:
             if tag in goal_words:
                 score += _SCORE_TAG
 
         return score
+
+    def _has_negative_trigger_match(self, desc, goal_lower: str) -> bool:
+        """检查用户查询是否命中 skill 的 negative_triggers（黑名单）。"""
+        for nt in desc.negative_triggers:
+            nt_lower = nt.lower().strip()
+            if nt_lower and nt_lower in goal_lower:
+                return True
+        return False

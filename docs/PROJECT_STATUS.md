@@ -75,6 +75,21 @@ b3e0863 `validation(evidence): validate scheduler model generated plan` — post
 - Readiness plan: `docs/design/mcp-real-external-connection-readiness.md`。
 - **Status**: BLOCKED_BY_EXTERNAL_SERVER — 需用户提供外部 MCP server fixture/config。
 
+### Next-Stage D-09 — 002 Skill Selection Plan 3 Wiring (2026-06-02)
+
+**D-09 Skill Selection deterministic enhancement** (handoff §11, future debt):
+
+- `agent/skill_system/descriptor.py` — `SkillDescriptor` 新增 `triggers`/`negative_triggers` 字段（Level 1 公开元数据），`SkillManifest.to_descriptor()` 传递这两个字段。
+- `agent/skill_system/selector.py` — `SkillSelector` 接入 Plan 3 manifest 字段：
+  - `triggers`: 子串/精确匹配，权重 0.4（高于 name word 0.3）
+  - `aliases`: 词级匹配，权重 0.3（等同 name word）
+  - `negative_triggers`: 黑名单排除（命中则 skill score=0）
+- 43/43 selector + manifest tests PASS (14 new Plan 3 tests)。168 broader skill system tests PASS。ruff clean。
+- 纯确定性匹配，不调用 LLM/provider/embedding。
+- `when_to_use`/`when_not_to_use` 语义匹配: **future real-env task** (需 LLM)。
+- Non-prompt-steered real model validation: **future real-env task**。
+- **Status**: ACTIVE — Plan 3 manifest fields 已接入确定性选择器。002 保持 credible (12/12 PASS)。
+
 ---
 
 ## B8 M1 — Interaction-first Workbench MVP (2026-06-02)

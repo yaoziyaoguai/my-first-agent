@@ -384,13 +384,10 @@ def test_triggers_preserved_in_raw_frontmatter():
 # ==================================================================
 
 def test_aliases_included_in_descriptor():
-    """M05: SkillDescriptor 应暴露 aliases 作为 Level 1 公开元数据。
+    """M05: SkillDescriptor 应暴露 aliases/triggers/negative_triggers 作为 Level 1 公开元数据。
 
-    RED: SkillDescriptor 尚无 aliases 字段，to_descriptor() 不传递 aliases。
-    此测试预期因 AttributeError 而失败。
-
-    aliases 必须是 Level 1 公开元数据——SkillCandidateRetriever (Phase 2)
-    需要通过 descriptor 访问 aliases 做候选评分。
+    aliases/triggers/negative_triggers 必须是 Level 1 公开元数据——
+    SkillSelector 需要通过 descriptor 访问它们做确定性匹配。
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "aliased-skill"
@@ -399,28 +396,39 @@ def test_aliases_included_in_descriptor():
         desc = manifest.to_descriptor()
 
         assert isinstance(desc, SkillDescriptor)
+        # aliases
         assert hasattr(desc, "aliases"), (
             "SkillDescriptor 必须暴露 aliases 字段供 retriever 使用"
         )
-        assert isinstance(desc.aliases, tuple), (
-            f"aliases 应为 tuple，实际为 {type(desc.aliases)}"
-        )
+        assert isinstance(desc.aliases, tuple)
         assert "note" in desc.aliases
         assert "笔记" in desc.aliases
         assert "demo-note" in desc.aliases
+        # triggers
+        assert hasattr(desc, "triggers"), (
+            "SkillDescriptor 必须暴露 triggers 字段供 selector 使用"
+        )
+        assert isinstance(desc.triggers, tuple)
+        assert "写笔记" in desc.triggers
+        # negative_triggers
+        assert hasattr(desc, "negative_triggers"), (
+            "SkillDescriptor 必须暴露 negative_triggers 字段供 selector 使用"
+        )
+        assert isinstance(desc.negative_triggers, tuple)
+        assert "写代码" in desc.negative_triggers
 
 
 def test_descriptor_aliases_empty_for_old_skills():
-    """M05 扩展: 旧 skill 的 descriptor.aliases 应为空 tuple。"""
+    """M05 扩展: 旧 skill 的 descriptor Plan 3 字段应为空 tuple。"""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "old-skill"
         path = _write_skill_md(_valid_frontmatter_minimal(), root)
         manifest = load_skill_manifest(path)
         desc = manifest.to_descriptor()
 
-        assert desc.aliases == (), (
-            f"旧 skill 的 aliases 应为空 tuple，实际: {desc.aliases!r}"
-        )
+        assert desc.aliases == ()
+        assert desc.triggers == ()
+        assert desc.negative_triggers == ()
 
 
 # ==================================================================

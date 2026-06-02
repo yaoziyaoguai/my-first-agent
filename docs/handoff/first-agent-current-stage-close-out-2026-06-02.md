@@ -303,3 +303,27 @@ REAL-EVIDENCE-002 当前状态: **credible**（12/12 PASS, ab013ed）。已知 s
 - `git diff --check`: clean.
 - Secret scan on new files: 0 occurrences of `sk-`.
 - `config/config.yaml` NOT staged (skip-worktree active, `git diff --cached` empty).
+
+### 2026-06-02 — 008 Model-Generated ActionPlan Caveat CLOSED
+
+**REAL-EVIDENCE-008 remaining caveat resolved**:
+
+- **Bug found**: `_run_planning_phase()` (core.py:1505) only checked `steps_estimate > 1`
+  to trigger `generate_action_plan()`, but model outputs use `nodes` field (ActionPlan
+  schema). Model correctly generated 3-node ActionPlan JSON but it was never parsed.
+- **Bug 2 found**: `validate_action_plan_raw()` (planner.py:172) required `steps_estimate`
+  field but ActionPlan doesn't use it. Now auto-derives from `len(nodes)` when nodes exist.
+- **Fix**: `agent/core.py` — also checks `node_count > 1` for `generate_action_plan()` gate.
+  `agent/planner.py` — auto-derives `steps_estimate` from node count.
+- **Result**: 008 v3 14/14 PASS, 0 MODEL_BEHAVIOR_CONCERN. Full evidence chain:
+  real model → JSON ActionPlan → generate_action_plan() → scheduler.load_plan() →
+  core.chat('y') → _run_main_loop() → ACTION_PLAN_START → NODE_ENTER x2 →
+  NODE_EXIT x3 (including skipped) → ACTION_PLAN_COMPLETE → condition_flags.
+- **008 caveat CLOSED** — model-generated stable ActionPlan JSON validated end-to-end.
+- 106 scheduler/planner tests PASS. 103 arch boundaries/docs tests PASS.
+- Commit: `c084651`.
+
+**B7/B8 entry gate impact**:
+- 008 caveat removed → one less blocker.
+- B7/B8 entry gate now: runtime prerequisites mostly satisfied + D-09 evidence extraction fix pending re-run.
+- Still needs 002 skill selection real validation re-run with fixed evidence extraction (D-09-E1).

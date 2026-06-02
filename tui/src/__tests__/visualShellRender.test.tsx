@@ -293,3 +293,123 @@ describe("ContextInspectorPanel", () => {
     expect(lastFrame()).toContain("Evidence Snapshot");
   });
 });
+
+// ── Slice B — safe data fixture integration tests ──
+
+import {
+  SAFE_DATA_FIXTURE,
+} from "../data/visualShellFixtures";
+
+describe("TuiShell safe data fixture", () => {
+  test("SAFE_DATA_FIXTURE renders all 6 zones", () => {
+    const { lastFrame } = render(
+      <TuiShell fixture={SAFE_DATA_FIXTURE} width={120} height={36} />,
+    );
+    const output = lastFrame();
+    expect(output).toBeTruthy();
+    expect(output).toContain("First Agent TUI");
+    // evidence: 8 items appears in the 1-line collapsed summary
+    expect(output).toContain("evidence:");
+  });
+
+  test("SAFE_DATA_FIXTURE shows safe data label, not fake/local fixture", () => {
+    const { lastFrame } = render(
+      <TuiShell fixture={SAFE_DATA_FIXTURE} width={120} height={36} />,
+    );
+    const output = lastFrame();
+    expect(output).toContain("[safe data — not product-ready]");
+    expect(output).not.toContain("[fake/local fixture]");
+  });
+
+  test("SAFE_DATA_FIXTURE MCP bridge shows 14 tools from local smoke", () => {
+    const { lastFrame } = render(
+      <TuiShell fixture={SAFE_DATA_FIXTURE} width={120} height={36} />,
+    );
+    // MCP discover count should appear in the output
+    expect(lastFrame()).toContain("14");
+  });
+
+  test("SAFE_DATA_FIXTURE provider label shows anthropic_compatible", () => {
+    const { lastFrame } = render(
+      <TuiShell fixture={SAFE_DATA_FIXTURE} width={120} height={36} />,
+    );
+    expect(lastFrame()).toContain("anthropic_compatible");
+  });
+
+  test("SAFE_DATA_FIXTURE bottom status shows correct tool count", () => {
+    const { lastFrame } = render(
+      <TuiShell fixture={SAFE_DATA_FIXTURE} width={120} height={36} />,
+    );
+    // bottom bar shows toolCount=5 from SAFE_BOTTOM_STATUS
+    expect(lastFrame()).toContain("v0.x");
+  });
+});
+
+describe("ContextInspectorPanel evidence detail", () => {
+  test("Evidence lens shows item names when provided", () => {
+    const inspectorWithItems = {
+      ...MOCK_INSPECTOR,
+      evidence: {
+        itemCount: 3,
+        items: ["REAL-EVIDENCE-001", "REAL-EVIDENCE-002", "REAL-EVIDENCE-003"],
+      },
+    };
+    const { lastFrame } = render(
+      <ContextInspectorPanel
+        width={36}
+        height={36}
+        data={inspectorWithItems}
+        evidenceLens={true}
+        fakeLabel="[safe data — not product-ready]"
+      />,
+    );
+    const output = lastFrame();
+    expect(output).toContain("REAL-EVIDENCE-001");
+    expect(output).toContain("REAL-EVIDENCE-002");
+    expect(output).toContain("REAL-EVIDENCE-003");
+  });
+
+  test("Evidence lens shows skill evidence when provided", () => {
+    const inspectorWithSkill = {
+      ...MOCK_INSPECTOR,
+      evidence: {
+        itemCount: 2,
+        items: ["E-001"],
+        skillEvidence: {
+          status: "accepted-with-caveats",
+          summary: "Plan 3 wired (43/43 PASS). Non-prompt-steered: future.",
+        },
+      },
+    };
+    const { lastFrame } = render(
+      <ContextInspectorPanel
+        width={36}
+        height={36}
+        data={inspectorWithSkill}
+        evidenceLens={true}
+        fakeLabel="[safe data — not product-ready]"
+      />,
+    );
+    const output = lastFrame();
+    expect(output).toContain("Skill Evidence (D-09)");
+    expect(output).toContain("accepted-with-caveats");
+    expect(output).toContain("Plan 3 wired");
+  });
+
+  test("Evidence lens without items shows placeholder", () => {
+    const inspectorNoItems = {
+      ...MOCK_INSPECTOR,
+      evidence: { itemCount: 5 },
+    };
+    const { lastFrame } = render(
+      <ContextInspectorPanel
+        width={36}
+        height={36}
+        data={inspectorNoItems}
+        evidenceLens={true}
+        fakeLabel="[fake/local fixture]"
+      />,
+    );
+    expect(lastFrame()).toContain("no evidence detail");
+  });
+});

@@ -121,7 +121,16 @@ export interface InspectorStatusData {
   mcpBridge: McpStatusData;
   recentEvents: RecentEventItem[];
   memory: { entryCount: number; lastCheckpointId: string };
-  evidence: { itemCount: number };
+  evidence: {
+    itemCount: number;
+    /** Evidence item labels (Developer/Evidence lens only) */
+    items?: string[];
+    /** D-09 skill evidence summary */
+    skillEvidence?: {
+      status: string;
+      summary: string;
+    };
+  };
 }
 
 /** BottomStatusBar 数据 */
@@ -146,7 +155,7 @@ export interface TopBarData {
 
 /** 完整 Visual Shell fixture 容器 */
 export interface VisualShellFixture {
-  _label: "[fake/local fixture]";
+  _label: string;
   topBar: TopBarData;
   workspaces: WorkspaceItem[];
   viewLens: ViewLensItem[];

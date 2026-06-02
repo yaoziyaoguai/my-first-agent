@@ -1,4 +1,5 @@
-/** Slice A — 所有 22 组件的 [fake/local] 静态 mock 数据。 */
+/** Slice A — 所有 22 组件的 [fake/local] 静态 mock 数据。
+ *  Slice B — 导出 adapter-built SAFE_DATA_FIXTURE。 */
 import type {
   VisualShellFixture,
   WorkspaceItem,
@@ -13,6 +14,27 @@ import type {
   BottomStatusData,
   TopBarData,
 } from "./visualShellTypes";
+import { buildVisualShellViewModel } from "./visualShellDataAdapter";
+import {
+  SAFE_RUNTIME_DECISION,
+  SAFE_MCP_STATUS,
+  SAFE_TOOL_SUMMARY,
+  SAFE_EVENTS,
+  SAFE_MEMORY_CKPT,
+  SAFE_PROVIDER_LABEL,
+  SAFE_RUNTIME_STATUS,
+  SAFE_BOTTOM_STATUS,
+  SAFE_TOP_BAR,
+  SAFE_WORKSPACES,
+  SAFE_LENSES,
+  SAFE_SESSIONS,
+  SAFE_MESSAGES,
+  SAFE_TOOL_CALLS,
+  SAFE_PENDING_ACTIONS,
+  SAFE_TABLE_RESULTS,
+  SAFE_EVIDENCE_ITEMS,
+  SAFE_SKILL_EVIDENCE,
+} from "./safeDataSources";
 
 export const MOCK_TOP_BAR: TopBarData = {
   productName: "First Agent TUI",
@@ -216,3 +238,32 @@ export const EMPTY_FIXTURE: VisualShellFixture = {
     provider: "none",
   },
 };
+
+/** Slice B — adapter-built fixture from safe data sources。
+ *  _label: "[safe data — not product-ready]"
+ *  provenance 通过 view model 暴露。 */
+const SAFE_VIEW_MODEL = buildVisualShellViewModel({
+  lens: "Agent",
+  runtimeDecision: SAFE_RUNTIME_DECISION,
+  mcpStatus: SAFE_MCP_STATUS,
+  toolSummary: SAFE_TOOL_SUMMARY,
+  events: SAFE_EVENTS,
+  memoryCkpt: SAFE_MEMORY_CKPT,
+  evidenceItemCount: SAFE_EVIDENCE_ITEMS.length,
+  evidenceItems: SAFE_EVIDENCE_ITEMS,
+  providerLabel: SAFE_PROVIDER_LABEL,
+  runtimeStatus: SAFE_RUNTIME_STATUS,
+  bottomStatus: SAFE_BOTTOM_STATUS,
+  topBar: SAFE_TOP_BAR,
+  workspaces: SAFE_WORKSPACES,
+  lenses: SAFE_LENSES,
+  sessions: SAFE_SESSIONS,
+  messages: SAFE_MESSAGES,
+  toolCalls: SAFE_TOOL_CALLS,
+  pendingActions: SAFE_PENDING_ACTIONS,
+  tableResults: SAFE_TABLE_RESULTS,
+  skillEvidence: SAFE_SKILL_EVIDENCE,
+});
+
+export const SAFE_DATA_FIXTURE: VisualShellFixture = SAFE_VIEW_MODEL.fixture;
+export const SAFE_DATA_PROVENANCE = SAFE_VIEW_MODEL.provenance;

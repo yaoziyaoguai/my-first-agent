@@ -1,7 +1,7 @@
 # TUI Visual Shell Slice B — Wire Existing Safe Data
 
 **创建日期**: 2026-06-02
-**状态**: PLAN READY — not yet implemented
+**状态**: IMPLEMENTED (2026-06-02)
 **依赖**: `docs/design/first-agent-tui-visual-target-v1.md` §4 Data Source Policy
 **上游**: Slice A IMPLEMENTED (`088e05b`)
 
@@ -105,10 +105,10 @@ ToolResultTableBlock 已接入 MainWorkArea 渲染流（pre-Slice B 最小修复
 - [x] ToolResultTableBlock wired into MainWorkArea
 - [x] 461/461 TUI tests PASS
 - [x] tsc clean
-- [ ] ContextInspectorPanel wired with safe summary data
+- [x] ContextInspectorPanel wired with safe summary data
 - [ ] LeftRail lens selection 驱动 panel 内容变化
-- [ ] docs updated (PROJECT_STATUS, PROGRESS_LEDGER, handoff)
-- [ ] current-stage remains closed
+- [x] docs updated (PROJECT_STATUS, PROGRESS_LEDGER, handoff)
+- [x] current-stage remains closed
 
 ---
 

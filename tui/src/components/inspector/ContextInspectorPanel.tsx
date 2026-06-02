@@ -91,7 +91,30 @@ export function ContextInspectorPanel({
             <Text {...SECTION_HEADER}>Evidence Snapshot</Text>
             <Text dimColor>items: {data.evidence.itemCount}</Text>
             <Text dimColor>source: docs/dogfood/</Text>
-            <Text dimColor>status: [evidence lens]</Text>
+            {data.evidence.items && data.evidence.items.length > 0 ? (
+              data.evidence.items.map((item, i) => (
+                <Text key={i} dimColor>
+                  {"  "}
+                  {item}
+                </Text>
+              ))
+            ) : (
+              <Text dimColor>  (no evidence detail)</Text>
+            )}
+            {data.evidence.skillEvidence && (
+              <>
+                <Box>
+                  <Text dimColor>{BORDER_CHARS.h.repeat(width - 4)}</Text>
+                </Box>
+                <Text {...SECTION_HEADER}>Skill Evidence (D-09)</Text>
+                <Text dimColor>
+                  status: {data.evidence.skillEvidence.status}
+                </Text>
+                <Text dimColor>
+                  {data.evidence.skillEvidence.summary}
+                </Text>
+              </>
+            )}
           </Box>
         </>
       ) : (

@@ -131,7 +131,7 @@ B7 不重新打开，除非出现新的 P0 证据。
 | D-04 | B8 real runtime gateway | fake/local MVP only | 连接 core.chat 主路径 |
 | D-05 | B8 TUI default entry activation | NOT ACTIVATED | 需用户显式批准 + real gateway |
 | D-06 | B8 IME / paste / multiline validation | blocked-ime (R14) — checklist created | 实际终端验证 |
-| D-07 | Legacy Dashboard / AutoRun cleanup | 保留在磁盘，不 import | 确定清理策略后执行 |
+| D-07 | Legacy Dashboard / AutoRun cleanup | plan created — Option C (on-disk keep) | 需用户决策后执行 archive/remove |
 | D-08 | Product-ready / release readiness | not product-ready | 需 real adapter E2E 全部通过 |
 
 ---

@@ -1,659 +1,491 @@
-# First Agent — User Manual Trial Guide
+# First Agent — Manual Trial Guide（可执行试用剧本）
 
-**创建**: 2026-06-02 | **最后更新**: 2026-06-03 (entry priority correction)
-**目标基线**: `afc18dd` — `docs(status): clarify v1 readiness after agent dogfood completion`
-**用途**: 项目 owner 本机真实终端手动试用指南。不是自动化测试，不是 dogfood 报告。
-**目标**: 验证 `docs/debt/first-agent-open-items.md` 中的 USER_MANUAL_TRIAL 项目，不修复它们。
-**入口优先级**: Plain CLI（稳定主入口）> Textual TUI（v1 候选）> `--shell` deprecated 兼容检查 > Ink npm start（prototype only, 非 v1 主路径）
+**创建**: 2026-06-02 | **重写**: 2026-06-03 (executable playbook rewrite)
+**基线**: `f6807ef` — v1 engineering closeout
+**用途**: 项目 owner 本机真实终端手动试用操作手册。**可作为 Coding Agent 陪跑剧本** — 复制 §5 的 prompt 给 Coding Agent，让它作为只读试用助手。
+**目标**: 验证 `docs/debt/first-agent-v2-priority-backlog.md` §1 USER_MANUAL_TRIAL 项目，不修复它们。
 
 ---
 
 ## 1. Purpose
 
-本文档是 **First Agent project owner (你)** 用的手动试用操作手册。
+本文档是 **First Agent project owner（你）** 用的手动试用操作手册，同时也是一个**可执行剧本**：你可以把 §5 的 prompt 复制给一个 Coding Agent，让它作为只读助手陪你跑完整个试用流程。
 
-与自动化测试 / dogfood 报告 / 审计文档的区别：
+**本文档不是**：
+- 自动化测试（不产生 pytest exit code）
+- Dogfood 报告（不调真实 API）
+- 修复指南（不修代码）
+- v1 验收标准（v1 engineering closeout 已完成）
 
-| 维度 | 自动测试 | Dogfood 报告 | 本 Trial Guide |
-|------|---------|-------------|---------------|
-| 执行者 | Agent | Agent + 真实 API | **你** |
-| 证据类型 | test pass/fail | L3 real evidence | **manual trial log** |
-| 目标 | 代码正确性 | 能力验证 | **用户路径可用性判定** |
-| 产出 | pytest exit code | dogfood result JSON | **UMT pass/fail/blocker + evidence** |
-
-关键约束：
-- 不修代码，只看当前状态下的真实表现
-- 不把 partial workaround 写成 "user-usable"
-- 试完后回填 open items 状态，不是关闭它们
+**本文档是**：
+- 你在真实终端中手动验证用户路径的 step-by-step 剧本
+- Coding Agent 作为只读助手的操作手册
+- v2 USER_MANUAL_TRIAL backlog 的证据来源
 
 ---
 
-## 2. Scope
+## 2. Entry Policy
 
-覆盖以下 manual trial 项目：
+四个入口，按优先级排列。**从 Plain CLI 开始，不要从 Ink prototype 开始。**
 
-| Trial ID | Category | Description | Source |
-|----------|----------|-------------|--------|
-| T-CLI | Plain CLI baseline | Plain CLI 输入/退出/基础交互 | 本 guide §5.1 |
-| T-IME | UMT-001 | Chinese IME validation (Textual TUI) | `docs/debt/first-agent-open-items.md` UMT-001 |
-| T-PASTE | UMT-002 | Paste / multiline (Textual TUI) | `docs/debt/first-agent-open-items.md` UMT-002 |
-| T-MLINE | UMT-002 后半 | Multiline input (Textual TUI) | `docs/debt/first-agent-open-items.md` UMT-002 |
-| T-RESIZE | — | Terminal resize (Textual TUI) | 本 guide §5.5 |
-| T-EXIT | — | Ctrl+C / q / exit (Textual TUI) | 本 guide §5.6 |
-| T-CONFIG | — | provider config missing/error UX | 本 guide §5.7 |
-| T-E2E | — | one simple E2E task (Plain CLI) | 本 guide §5.8 |
-| T-COMBO | UMT-003 | Combined terminal real interaction | `docs/debt/first-agent-open-items.md` UMT-003 |
-| T-SHELL | — | `--shell` deprecated compatibility | 本 guide §5.10 |
-| T-INK | — | Ink prototype optional sanity check | 本 guide §6 (optional appendix) |
-
-每个 Trial 引用 `docs/design/b8-input-readiness-validation.md` 中的对应 checklist（I1-I7, P1-P7, M1-M4 等）。
-
-不在 scope：
-- MBC hardening (MODEL_BEHAVIOR_CONCERN)
-- Product decision (PD-001~005)
-- Future debt (FD-001~003)
-- 代码修改
-- MCP production setup
-- Ink npm start 作为 v1 验收项（仅为 optional prototype check）
-
----
-
-## 3. Preconditions
-
-### 3.1 在你开始之前必须确认
-
-- [ ] 当前仓库路径：`/Users/jinkun.wang/work_space/my-first-agent`
-- [ ] `git status` 显示 clean，无 uncommitted changes
-- [ ] `git branch --show-current` = `main`
-- [ ] `git rev-list --left-right --count @{u}...HEAD` = `0  0` (与 origin/main 同步)
-- [ ] `config/config.yaml` 未被 `git status` 列为 modified/staged
-- [ ] 不打印、不提交、不复制 `config/config.yaml` 中的 API key
-- [ ] 不打开任何可能捕获终端内容的录屏/直播工具（如果有，关闭后再开始）
-- [ ] 如果 trial 中需要截图，确认截图不含 API key / secret / 私人数据
-
-### 3.2 环境记录
-
-开始前记录以下信息（用于填入 §7 Result Log）：
-
-```text
-Terminal: [iTerm2 / Terminal.app / Ghostty / other: ___]
-Terminal version: [___]
-OS: [macOS version — 点  → 关于本机]
-Shell: [echo $SHELL]
-Input method: [macOS 拼音 / 搜狗 / 鼠须管 / 日文假名 / 韩文 / other: ___]
-Entry mode: [Plain CLI / Textual --tui — 见 §4]
-Python: [python3 --version]
-Node: [node --version, only if testing Ink prototype]
-```
-
-### 3.3 安全边界
-
-- **禁止** `cat config/config.yaml` 后复制内容到 trial log
-- **禁止** 把 API key / secret 放进截图、log、或本文档回填
-- **禁止** 在 trial 期间 `git add config/config.yaml`
-- 如果 config.yaml 被意外修改且含真实 key：**立即停止**，`git checkout config/config.yaml`
-
----
-
-## 4. How to Start
-
-项目有四个入口，**优先级不同**。按以下顺序试用，不要从 Ink prototype 开始。
-
-### 入口 1：Plain CLI（当前稳定主入口 — 先试这个）
-
-```bash
-cd /Users/jinkun.wang/work_space/my-first-agent
-source .venv/bin/activate
-python main.py
-# 或等效: first-agent / python main.py --plain
-```
-
-- 后端：Python 标准 REPL-like CLI（非 TUI 框架）
-- 输入方式：`input()` 行读取
-- 当前唯一稳定主入口，所有 runtime capability 通过此路径验证
-- 默认使用 fake provider（不调真实 API）
-- `--plain` 为显式声明标志，默认行为等同
-- **这是 v1 manual trial 的基线入口 — priority 1**
-
-### 入口 2：Textual TUI（v1 TUI 候选 — priority 2）
-
-```bash
-cd /Users/jinkun.wang/work_space/my-first-agent
-source .venv/bin/activate
-python main.py --tui
-# 或等效: python main.py --textual
-```
-
-- 后端：基于 Textual（Python TUI 框架）
-- 输入方式：Textual Input widget
-- 设置 `MY_FIRST_AGENT_INPUT_BACKEND=textual` 环境变量
-- 默认使用 fake provider（不调真实 API，零 secret 风险）
-- 这是 v1 TUI 主入口候选，但不是当前默认入口
-- **TUI default entry NOT ACTIVATED**
-
-### 入口 3：`--shell` Deprecated 兼容检查（priority 3 — 仅验证兼容性）
-
-```bash
-python main.py --shell
-```
-
-- 已弃用标志（2026-06-03），打印 stderr deprecation warning
-- 行为等同 plain CLI（向后兼容，不断路）
-- **不作为 Textual TUI 推荐入口**
-- **本 trial 中仅用于验证 deprecation warning 正常输出**
-
-### 入口 4：Ink/React TUI（prototype / visual experiment — priority 4）
-
-```bash
-cd /Users/jinkun.wang/work_space/my-first-agent/tui
-npm start
-```
-
-- 前端：基于 Ink 5 + React 18（Node.js TUI 框架）
-- 输入方式：Ink `useInput` hook
-- 这是 visual shell prototype / visual experiment
-- 所有数据自包含 fixture，不连接 runtime
-- **不作为 v1 主入口**
-- **不作为 v1 manual trial 主路径**
-- **不阻塞 v1 tag，除非文档明确决定把 Ink 纳入 v1 scope**
-- 仅用于 optional prototype sanity check / Ink useInput 行为对比
-
-### 入口优先级总览
-
-| 优先级 | 入口 | 命令 | 定位 | v1 trial 角色 |
-|--------|------|------|------|---------------|
+| 优先级 | 入口 | 启动命令 | 定位 | Trial 角色 |
+|--------|------|---------|------|-----------|
 | **1** | Plain CLI | `python main.py` | 稳定主入口 | **基线验证** |
 | **2** | Textual TUI | `python main.py --tui` | v1 TUI 候选 | **IME/paste/multiline 主验证路径** |
 | **3** | `--shell` deprecated | `python main.py --shell` | 兼容性检查 | 仅验证 deprecation warning |
 | **4** | Ink prototype | `cd tui && npm start` | visual experiment | optional sanity check only |
 
-> **注意**: 本 trial guide v1 范围以入口 1 (Plain CLI) 和入口 2 (Textual TUI) 为主。入口 3 仅做兼容性确认。入口 4 是 optional 的 prototype check，不作为 v1 验收项。所有入口命令如有本地路径差异，使用你的实际路径。
+**前置条件**（每次试用前确认）：
+- `git status` clean，`git branch --show-current` = `main`
+- `git rev-list --left-right --count @{u}...HEAD` = `0 0`
+- `config/config.yaml` 未被 `git status` 列为 modified/staged
+- 虚拟环境已激活：`source .venv/bin/activate`
+- 不录屏 / 不直播（如果截图，确认不含 API key）
 
 ---
 
-## 5. Trial Scenarios
+## 3. Safety Rules
 
-### 5.1 T-CLI — Plain CLI Baseline（priority 1 — 先完成这个）
+### 3.1 人类必须遵守
 
-**Purpose**: 确认当前稳定主入口 Plain CLI 可用，建立基线后再进入 TUI trial。
+- **禁止** `cat config/config.yaml` 后复制内容到 trial log
+- **禁止** 把 API key / secret 放进截图、log、或本文档回填
+- **禁止** 在 trial 期间 `git add config/config.yaml` 或 `.env`
+- 如果 `config/config.yaml` 被意外修改且含真实 key：**立即停止**，`git checkout config/config.yaml`
+- 截图不含 API key / secret / 私人文件路径 / HOME 目录内容
 
-#### T-CLI-1: 启动 Plain CLI
+### 3.2 Coding Agent 必须遵守（写进 §5 prompt）
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 `python main.py` 正常启动，结构化 header 显示正确 |
-| **Setup** | `source .venv/bin/activate && python main.py` |
-| **Actions** | 1. 执行启动命令 2. 观察启动屏输出 3. 确认 header 含 session / cwd / health 行 4. 确认 `你:` 提示符出现 |
-| **Expected** | 结构化 header 单屏输出，无裸 dict、无 traceback |
-| **Pass criteria** | header 显示正常，提示符可交互 |
-| **Fail criteria** | 启动 crash、header 损坏、提示符不可见 |
-
-#### T-CLI-2: 英文输入与响应
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 CLI 英文输入通路正常 |
-| **Setup** | 入口 1 (`python main.py`)，已启动到交互提示符 |
-| **Actions** | 输入 "hello" → Enter |
-| **Expected** | 系统响应（fake provider），无 crash、无 hang |
-| **Pass criteria** | 输入被接收，有响应返回 |
-| **Fail criteria** | 输入无响应、crash、hang |
-
-#### T-CLI-3: 中文输入
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 CLI `input()` 行读取对中文的支持 |
-| **Setup** | 入口 1 |
-| **Actions** | 输入 "你好世界" → Enter |
-| **Expected** | 中文被正确接收和处理 |
-| **Pass criteria** | 中文输入被正确接收，无乱码 |
-| **Fail criteria** | 中文输入乱码、truncated、crash |
-
-#### T-CLI-4: 正常退出
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 `quit` 正常退出 |
-| **Setup** | 入口 1 |
-| **Actions** | 输入 `quit` → Enter |
-| **Expected** | session finalized，正常退出，exit code 0 |
-| **Pass criteria** | 正常退出，无 traceback |
-| **Fail criteria** | 退出时 crash、hang、exit code 非 0 |
-
-#### T-CLI-5: Ctrl+C 中断
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 Ctrl+C 中断行为 |
-| **Setup** | 入口 1 |
-| **Actions** | 1. 启动后输入一些文本但不提交 2. 按 Ctrl+C |
-| **Expected** | 按 checkpoint 状态走中断流程（无 checkpoint → 提示退出 / 有 checkpoint → 保存） |
-| **Pass criteria** | 不 crash，有明确的中断响应 |
-| **Fail criteria** | Ctrl+C 无响应、crash、数据损坏 |
-
-#### T-CLI-6: Ctrl+D / EOF 退出
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 Ctrl+D 正常退出 |
-| **Setup** | 入口 1 |
-| **Actions** | 启动后按 Ctrl+D |
-| **Expected** | finalize session，正常退出 |
-| **Pass criteria** | 正常退出，无 traceback |
-| **Note** | 如果 Ctrl+D 行为不同于预期，记录观察，不做 fail 判定 |
+- 不读 `.env`、不读 `config/config.yaml` 内容
+- 不 `cat` / `echo` / `print` API key
+- 不修改代码、不 commit、不 push、不 tag
+- 不把 no-crash 写成 PASS
+- 不把 partial workaround 写成 "可用"
+- 不声称 product-ready
+- 不激活 TUI default entry
 
 ---
 
-### 5.2 T-IME — Chinese IME Validation (UMT-001)
+## 4. Roles
 
-**Source**: `docs/debt/first-agent-open-items.md` UMT-001
-**Input readiness checklist**: `docs/design/b8-input-readiness-validation.md` §2.1 I1-I7
+试用过程中角色严格分离：
 
-> **重要**: 以下 IME 场景主验证路径为入口 2 (Textual TUI `python main.py --tui`)。Ink prototype 的 IME 行为对比移至 §6 (optional appendix)。
+### 4.1 你必须做（Coding Agent 无法替代）
 
-#### T-IME-1: 中文短句输入
+| 类别 | 具体操作 |
+|------|---------|
+| 真实终端操作 | 启动/停止程序、Ctrl+C、Ctrl+D、Cmd+Tab 切换窗口 |
+| 中文输入法 | 切换输入法、拼音输入、候选词选择、确认提交 |
+| 粘贴 | Cmd+V 粘贴（含中文/英文/混合/多行） |
+| 窗口操作 | 拖动调整终端窗口大小 |
+| 主观判断 | "候选词窗口是否遮挡 TUI"、"中文标点是否正常渲染"、"乱码是否可接受" |
+| 截图 | 对终端截图（不含 secret） |
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证中文拼音 IME 在 Textual TUI 输入框中的组合态/确认态行为 |
-| **Setup** | 入口 2 (`python main.py --tui`)，确认 TUI 启动成功，输入区域可见 |
-| **Actions** | 1. 切换到中文输入法 (macOS 拼音) 2. 在输入框输入拼音 `jintian` (今天) 3. 观察候选词列表是否正常显示（在输入框之外还是覆盖了 TUI 界面） 4. 按空格/数字键确认候选词 5. 输入完整短句: "今天天气不错" 6. 按 Enter 提交 |
-| **Expected** | 拼音组合态期间不触发 TUI submit（中间拼音字母不应被当作最终输入提交）；按 Enter 时提交的是"今天天气不错"而非 `jintiantianqibucuo` |
-| **Observe** | 候选词窗口是否遮挡 TUI、输入框字符是否正确渲染、是否有乱码/重复字符 |
-| **Pass criteria** | 完整中文句子一次性提交成功，中间无乱码/截断/意外提交 |
-| **Fail criteria** | 拼音中间态被提交、确认后出现乱码、候选词窗口导致 TUI layout 错位 |
-| **Blocker criteria** | 中文输入完全不可用（所有中文字符变成问号/方框/空白） |
-| **Evidence** | 提交前后各一张截图、输入框显示截图（不含私人数据） |
+### 4.2 Coding Agent 可以帮你做（如果你复制了 §5 prompt）
 
-#### T-IME-2: 中英文混合输入
+| 类别 | 具体操作 |
+|------|---------|
+| 基线检查 | 确认 git status、HEAD 对齐、branch 正确 |
+| 命令建议 | 告诉你下一步该执行什么命令 |
+| 结果记录 | 根据你的描述填写 trial report |
+| 分类判定 | 根据严重度规则判定 PASS/FAIL/P0/P1/P2/P3 |
+| 报告生成 | 汇总所有 trial 结果生成最终报告 |
+| v2 backlog 更新 | 根据 trial 结果建议 backlog 更新 |
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 IME 在中文和英文之间切换时输入不丢字符 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 1. 输入 "今天" (中文 IME) 2. 切换回英文 3. 输入 " I learned Rust async" 4. 再切换中文 5. 输入 " 很有收获" 6. 按 Enter 提交 |
-| **Expected** | 完整混合文本: "今天 I learned Rust async 很有收获"，无丢失段 |
-| **Fail criteria** | IME 切换导致前半段字符被清除、中英文衔接处出现多余空格或乱码 |
+### 4.3 Coding Agent 禁止做
 
-#### T-IME-3: 中文 + 特殊字符/标点
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证中文标点和特殊字符在 IME 中的表现 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 输入 "今天学习了以下内容：" 2. 换行或接续输入 "1. Rust async/await 模式" 3. 接续 "2. Python coroutine" 4. 接续 "——以上。" |
-| **Expected** | 中文标点（：、/、——、。）全部正确渲染 |
-| **Fail criteria** | 中文标点变成乱码、全角/半角混淆、em-dash 无法输入 |
-
-#### T-IME-4: Backspace 中文删除
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证按 Backspace 时按完整中文字符删除，不产生半字符乱码 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 输入 "你好世界" 2. 按 Backspace 2 次 3. 输入 "朋友" 4. 按 Enter 提交 |
-| **Expected** | 最终提交: "你好朋友"；Backspace 每次删除一个完整中文汉字，不出现半字符乱码 |
-| **Fail criteria** | 删除后出现 � 或方框、一次 Backspace 只删了半个汉字 |
+| 禁止行为 | 原因 |
+|---------|------|
+| 自动修代码 | trial 目标是验证，不是修复 |
+| commit / push / tag | 文档-only 操作，不改变代码基线 |
+| 读取 secret | 安全红线 |
+| 声称 trial 完成 | 只有你能判定 trial 是否真正完成 |
+| 把 no-crash 标 PASS | 不 crash 是最低标准 |
+| 激活 TUI default entry | 需产品决策 |
+| 连接生产 MCP server | 安全红线 |
 
 ---
 
-### 5.3 T-PASTE — Paste Validation (UMT-002)
+## 5. Copy-paste Coding Agent Prompt
 
-**Source**: `docs/debt/first-agent-open-items.md` UMT-002
-**Input readiness checklist**: `docs/design/b8-input-readiness-validation.md` §2.2 P1-P7
-
-> **重要**: 以下粘贴操作主验证路径为入口 2 (Textual TUI)。Ink 粘贴对比移至 §6。
-
-#### T-PASTE-1: 粘贴短文本 (Cmd+V)
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证粘贴短文本正确追加到输入框 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Expected** | 输入框显示 "前缀：Hello, this is pasted text."，提交后完整接收 |
-| **Fail criteria** | 粘贴被忽略、粘贴内容覆盖而非追加、粘贴触发意外提交 |
-
-#### T-PASTE-2: 粘贴多行文本
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证粘贴多行文本时 TUI 不崩溃、不意外提交 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 从编辑器复制以下多行文本：<br>`第一行：`<br>`第二行：`<br>`第三行：`<br>（每行都是中文+标点，含换行） 2. Cmd+V 粘贴到 TUI 输入框 3. 观察行为 4. 如果未自动提交，按 Enter |
-| **Expected** | 理想：所有行粘贴进输入框，保留换行；可接受：换行被空格替代或只保留第一行但明确截断；不可接受：粘贴瞬间触发 submit 导致只提交第一行、TUI crash |
-| **Fail criteria** | 粘贴时意外触发提交、TUI crash/卡死、粘贴内容完全丢失 |
-
-#### T-PASTE-3: 粘贴中文 + 英文 + 符号混合
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 CJK + ASCII + emoji 混合粘贴完整保留 |
-| **Setup** | 入口 2 |
-| **Actions** | 复制并粘贴: `今天完成了 3 项任务 ✅：Rust async 重构、Python API 修复、文档更新 📝` |
-| **Expected** | 全部字符保留，emoji 不变成乱码 |
-| **Fail criteria** | CJK 变成乱码、emoji 丢失或变成问号 |
-
-#### T-PASTE-4: 粘贴后编辑再提交
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证粘贴后手动编辑不被阻止 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 粘贴文本 2. 用方向键移动到中间某位置 (如果支持) 3. 手动输入/删除几个字 4. 按 Enter 提交 |
-| **Expected** | 提交的是粘贴+编辑后的最终文本 |
-| **Note** | 如果 TUI 不支持光标移动和中间编辑，记录 NOT_SUPPORTED，不判 fail |
+**使用方式**：打开一个新的 Coding Agent 会话，复制以下全部内容（从 `---BEGIN PROMPT---` 到 `---END PROMPT---`），粘贴发送。然后按照 Coding Agent 的引导逐步执行试用。
 
 ---
 
-### 5.4 T-MLINE — Multiline Input Validation (UMT-002 后半)
+### ---BEGIN PROMPT---
 
-**Source**: `docs/debt/first-agent-open-items.md` UMT-002
-**Input readiness checklist**: `docs/design/b8-input-readiness-validation.md` §2.3 M1-M4
+```
+你是 First Agent 项目的 manual trial 陪跑助手。
 
-> **重要**: 多行输入支持取决于 TUI 框架。入口 2 (Textual) 可能有内置支持；入口 4 (Ink) 明确 NOT_IMPLEMENTED。以下场景以入口 2 为主。Ink 多行对比移至 §6。
+## 你的角色
 
-#### T-MLINE-1: 多行输入与提交区分
+你是**只读助手**。你帮助我完成手动试用，记录结果，判定严重度，生成报告。你不能操作我的终端，不能修改代码，不能 commit。
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证是否能输入多行、是否能区分换行操作和提交操作 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 1. 在输入框中尝试输入第一行文字 2. 试 Shift+Enter / Option+Enter / Ctrl+Enter 插入换行（如果框架支持） 3. 输入第二行 4. 按 Enter 提交 |
-| **Expected** | 理想：Shift+Enter 换行，Enter 提交，两行都进入提交内容；可接受：不支持多行但明确（Enter 直接提交单行） |
-| **Fail criteria** | 换行被当作提交、TUI 在换行后崩溃 |
-| **Note** | 如果 TUI 框架明确不支持多行输入，记录 NOT_SUPPORTED，不判 fail |
+## 项目背景
 
-#### T-MLINE-2: 粘贴多行 + 手动追加
+- 项目：First Agent — 本地优先 Agent Runtime 实验项目
+- 仓库路径：/Users/jinkun.wang/work_space/my-first-agent
+- 当前基线：v1 engineering closeout (tag v1.0.0-engineering-closeout)
+- 试用目标：验证 v2 USER_MANUAL_TRIAL backlog 中的项目
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证粘贴多行后手动打字不破坏内容 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 粘贴来自 T-PASTE-2 的多行文本 2. 如果粘贴成功且未自动提交，在末尾手动输入 "——完" 3. 按 Enter 提交 |
-| **Expected** | 提交内容包含粘贴的多行文本 + 手动追加的 "——完" |
-| **Note** | 取决于 T-PASTE-2 的结果 |
+## 安全红线（严格遵守）
 
----
+以下行为**绝对禁止**，违反任一项立即停止：
 
-### 5.5 T-RESIZE — Terminal Resize (Textual TUI)
+1. 不读 `.env` 文件
+2. 不读 `config/config.yaml` 内容（不 cat / echo / print）
+3. 不打印、不复制、不泄露 API key
+4. 不修改任何代码文件
+5. 不 commit、不 push、不 tag
+6. 不读取 HOME 目录下私人文件
+7. 不连接外部 MCP server
+8. 不把 no-crash 标为 PASS
+9. 不声称 "product-ready" / "user-usable"
+10. 不激活 TUI default entry
 
-#### T-RESIZE-1: 调整终端窗口大小
+## 试用流程
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 resize 终端窗口时 Textual TUI 不崩溃、输入不丢 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 1. 在输入框中输入一些文字但不提交 2. 拖动窗口改变大小 (横向拉宽、纵向拉高) 3. 观察 TUI 是否重绘正常 4. 继续打字 5. 按 Enter |
-| **Expected** | TUI 重绘，输入内容保留 |
-| **Fail criteria** | resize 后 TUI crash/render 错位/输入丢失 |
+按以下 4 个 Phase 顺序引导我执行：
 
----
+### Phase 1: Plain CLI 基线（必须最先完成）
 
-### 5.6 T-EXIT — Exit Paths (Textual TUI)
+引导我执行以下 trial cases。每完成一个，让我告诉你结果，你记录。
 
-#### T-EXIT-1: q 退出
+**T-CLI-1**: 启动 Plain CLI
+- 我执行的命令: `cd /Users/jinkun.wang/work_space/my-first-agent && source .venv/bin/activate && python main.py`
+- 我需要观察: 启动屏 header 是否正常（含 session/cwd/health 行），`你:` 提示符是否出现
+- Pass: header 正常，提示符可交互
+- Fail: 启动 crash / header 损坏 / 提示符不可见 / 出现 traceback
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 Textual TUI 中按 `q` 正常退出 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 按 `q` |
-| **Expected** | 正常退出，exit code 0 |
-| **Pass criteria** | 正常退出，无 traceback |
-| **Fail criteria** | crash、hang |
+**T-CLI-2**: 英文输入
+- 我在 `你:` 提示符下输入: `hello` → Enter
+- Pass: 输入被接收，有响应返回
+- Fail: 无响应 / crash / hang
 
-#### T-EXIT-2: Ctrl+C 中断
+**T-CLI-3**: 中文输入
+- 我输入: `你好世界` → Enter
+- Pass: 中文被正确接收，无乱码
+- Fail: 中文乱码 / truncated / crash
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 Textual TUI 中 Ctrl+C 中断行为 |
-| **Setup** | 入口 2 |
-| **Actions** | 按 Ctrl+C |
-| **Expected** | session finalized，正常退出或走中断流程 |
-| **Pass criteria** | 不 crash，有明确的退出响应 |
-| **Fail criteria** | 无响应、crash |
+**T-CLI-4**: quit 退出
+- 我输入: `quit` → Enter
+- Pass: session finalized，正常退出，exit code 0
+- Fail: 退出时 crash / hang / exit code 非 0
 
----
+**T-CLI-5**: Ctrl+C 中断
+- 我操作: 启动后输入一些文本但不提交，按 Ctrl+C
+- Pass: 不 crash，有明确的中断响应
+- Fail: Ctrl+C 无响应 / crash / 数据损坏
 
-### 5.7 T-CONFIG — Provider Config UX
+**T-CLI-6**: Ctrl+D / EOF 退出
+- 我操作: 启动后按 Ctrl+D
+- Pass: 正常退出，无 traceback
+- Fail: crash / hang
+- 注意: 如果行为不同于预期，记录观察，不做 fail 判定
 
-#### T-CONFIG-1: config missing / error UX
+### Phase 2: Textual TUI 主验证
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证当 provider config 缺失或异常时的 UX 表现 |
-| **Setup** | 入口 1 (`python main.py`) — fake provider 默认启用 |
-| **Actions** | 1. 正常启动 2. 观察启动屏 health 行是否报告 provider 状态 3. 尝试输入触发 tool use 的请求 |
-| **Expected** | fake provider 正常服务，不 crash；如果 provider 不可用应有明确提示而非静默失败 |
-| **Pass criteria** | fake provider 正常响应的同时，错误路径有合理 UX |
-| **Fail criteria** | provider 错误导致 crash、静默无响应（非预期行为） |
-| **Note** | 本 trial 不要求修改 config/config.yaml；只用 fake provider 默认配置 |
+引导我执行以下 trial cases（入口: `python main.py --tui`）。
 
----
+**T-FLOW-2**: TUI 英文基线
+- 我输入: `hello world` → Enter
+- Pass: 英文输入正常响应
+- Fail: crash / 无响应
 
-### 5.8 T-E2E — Simple End-to-End Task (Plain CLI)
+**T-IME-1**: 中文短句输入 (UMT-001)
+- 我操作: 切换到中文输入法 → 输入拼音 `jintian` → 观察候选词 → 确认 → 输入完整短句 "今天天气不错" → Enter
+- 关键观察: 拼音组合态期间是否触发 TUI submit？候选词窗口是否遮挡 TUI？是否有乱码？
+- Pass: 完整中文句子一次性提交成功，中间无乱码/截断/意外提交
+- Fail: 拼音中间态被提交 / 确认后出现乱码 / 候选词窗口导致 TUI layout 错位
+- P0: 中文输入完全不可用（所有中文字符变成问号/方框/空白）
 
-#### T-E2E-1: 完成一个简单任务
+**T-IME-2**: 中英文混合输入
+- 我操作: 输入 "今天" (中文) → 切换英文 → 输入 " I learned Rust async" → 切换中文 → 输入 " 很有收获" → Enter
+- Pass: 完整混合文本 "今天 I learned Rust async 很有收获"，无丢失段
+- Fail: IME 切换导致前段字符被清除 / 衔接处出现乱码
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证从 Plain CLI 入口完成一个简单端到端任务的完整路径 |
-| **Setup** | 入口 1 (`python main.py`) |
-| **Actions** | 1. 启动 Plain CLI 2. 输入一个简单任务请求，例如 "帮我计算 123 + 456"（或等效的简单计算） 3. 观察 calculate tool 是否被调用 4. 观察结果是否正确返回 5. 输入 `quit` 退出 |
-| **Expected** | 任务请求 → calculate tool invoked → 结果返回 → 正常退出 |
-| **Pass criteria** | 完整闭环，各阶段无 crash |
-| **Fail criteria** | tool 未触发、结果错误、中途 crash |
-| **Note** | 使用 fake provider 即可，不要求真实 API |
+**T-IME-3**: 中文 + 特殊字符/标点
+- 我操作: 输入含中文标点的文本 "今天学习了以下内容：1. Rust async/await 模式 2. Python coroutine ——以上。"
+- Pass: 中文标点（：、/、——、。）全部正确渲染
+- Fail: 中文标点变成乱码 / 全角半角混淆 / em-dash 无法输入
 
----
+**T-IME-4**: Backspace 中文删除
+- 我操作: 输入 "你好世界" → Backspace 2 次 → 输入 "朋友" → Enter
+- Pass: 最终提交 "你好朋友"，Backspace 每次删除一个完整中文汉字
+- Fail: 删除后出现 � 或方框 / 一次 Backspace 只删半个汉字
 
-### 5.9 T-COMBO — Combined Terminal Real Interaction (UMT-003)
+**T-PASTE-1**: 粘贴短文本
+- 我操作: 复制 "Hello, this is pasted text." → 在 TUI 输入框中输入 "前缀：" → Cmd+V → Enter
+- Pass: 输入框显示 "前缀：Hello, this is pasted text."，提交后完整接收
+- Fail: 粘贴被忽略 / 粘贴覆盖而非追加 / 粘贴触发意外提交
 
-**Source**: `docs/debt/first-agent-open-items.md` UMT-003
+**T-PASTE-2**: 粘贴多行文本
+- 我操作: 从编辑器复制 3 行文本（每行中文+标点，含换行）→ Cmd+V 粘贴到 TUI 输入框 → 观察行为
+- 理想: 所有行粘贴进输入框，保留换行
+- 可接受: 换行被空格替代或只保留第一行但明确截断
+- 不可接受: 粘贴瞬间触发 submit（只提交第一行）/ TUI crash
+- Fail: 意外触发提交 / TUI crash / 粘贴内容完全丢失
 
-> **重要**: 以下组合场景主验证路径为入口 2 (Textual TUI)。
+**T-PASTE-3**: 粘贴中文 + 英文 + emoji 混合
+- 我操作: 复制并粘贴 "今天完成了 3 项任务 ✅：Rust async 重构、Python API 修复、文档更新 📝"
+- Pass: 全部字符保留，emoji 不变成乱码
+- Fail: CJK 乱码 / emoji 丢失或变问号
 
-#### T-COMBO-1: IME + 粘贴组合
+**T-PASTE-4**: 粘贴后编辑再提交
+- 我操作: 粘贴文本 → 方向键移动光标（如支持）→ 手动输入/删除几个字 → Enter
+- Pass: 提交的是粘贴+编辑后的最终文本
+- 注意: 如 TUI 不支持光标移动和中间编辑，记录 NOT_SUPPORTED
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证中文 IME 输入与粘贴操作之间切换不丢状态 |
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 1. 用中文 IME 输入 "需求：" 2. 从编辑器粘贴一段英文: "implement async runtime" 3. 再切回中文 IME 输入 "——优先级高" 4. 按 Enter |
-| **Expected** | 最终提交: "需求：implement async runtime——优先级高" |
-| **Fail criteria** | 粘贴后 IME 切换导致前段中文被清除 |
+**T-MLINE-1**: 多行输入与提交区分
+- 我操作: 尝试 Shift+Enter / Option+Enter / Ctrl+Enter 插入换行 → 输入第二行 → Enter 提交
+- 理想: Shift+Enter 换行，Enter 提交
+- 可接受: 不支持多行但明确（Enter 直接提交单行）
+- Fail: 换行被当作提交 / TUI 崩溃
+- 注意: 如框架不支持多行，记录 NOT_SUPPORTED
 
-#### T-COMBO-2: 粘贴多行 + 中文 IME 追加
+**T-MLINE-2**: 粘贴多行 + 手动追加
+- 前提: T-PASTE-2 通过
+- 我操作: 粘贴多行文本 → 末尾手动输入 "——完" → Enter
+- Pass: 提交内容包含粘贴的多行 + "——完"
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 组合验证 paste + multiline + IME |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 粘贴多行文本 2. 在末尾用中文 IME 追加 "以上" 3. 按 Enter 提交 |
-| **Expected** | 根据 T-PASTE-2 和 T-IME-1 的结果确定 |
-| **Fail criteria** | 中文追加导致粘贴内容被清除、TUI crash |
+**T-RESIZE-1**: 调整终端窗口大小
+- 我操作: 输入一些文字但不提交 → 拖动窗口改变大小 → 观察 TUI 重绘 → 继续打字 → Enter
+- Pass: TUI 重绘正常，输入内容保留
+- Fail: resize 后 TUI crash / render 错位 / 输入丢失
 
-#### T-COMBO-3: 切换终端窗口后回来
+**T-EXIT-1**: q 退出
+- 我操作: 按 `q`
+- Pass: 正常退出，exit code 0
+- Fail: crash / hang
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 Cmd+Tab 切走后再回来，TUI 输入状态不丢失 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 用中文 IME 输入 "测试文本" 但不提交 2. Cmd+Tab 切换到另一个应用 3. 等待 5 秒 4. Cmd+Tab 切换回终端 5. 继续输入 "继续输入" 6. 按 Enter |
-| **Expected** | 最终提交: "测试文本继续输入"，中间切换不丢已输入内容 |
-| **Fail criteria** | 切回后输入内容被清除、TUI 渲染异常 |
+**T-EXIT-2**: Ctrl+C 中断
+- 我操作: 按 Ctrl+C
+- Pass: 不 crash，有明确的退出响应
+- Fail: 无响应 / crash
 
-#### T-COMBO-4: 调整终端窗口大小
+### Phase 3: 综合场景
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 resize 终端窗口时 Textual TUI 不崩溃、输入不丢 |
-| **Setup** | 入口 2 |
-| **Actions** | 1. 在输入框中输入一些文字但不提交 2. 拖动窗口改变大小 (横向拉宽、纵向拉高) 3. 观察 TUI 是否重绘正常 4. 继续打字 5. 按 Enter |
-| **Expected** | TUI 重绘，输入内容保留 |
-| **Fail criteria** | resize 后 TUI crash/render 错位/输入丢失 |
+**T-CONFIG-1**: Provider config UX
+- 入口: `python main.py`（fake provider 默认启用）
+- 我操作: 正常启动 → 观察 health 行 → 输入触发 tool use 的请求
+- Pass: fake provider 正常服务；如不可用有明确提示
+- Fail: provider 错误导致 crash / 静默无响应
 
----
+**T-E2E-1**: 简单端到端任务
+- 入口: `python main.py`
+- 我操作: 输入 "帮我计算 123 + 456" → 观察 calculate tool 是否被调用 → 确认结果 → quit 退出
+- Pass: 完整闭环（请求→tool invoke→结果返回→退出），各阶段无 crash
+- Fail: tool 未触发 / 结果错误 / 中途 crash
+- 注意: 使用 fake provider 即可，不要求真实 API
 
-### 5.10 T-SHELL — `--shell` Deprecated Compatibility
+**T-COMBO-1**: IME + 粘贴组合
+- 入口: `python main.py --tui`
+- 我操作: 中文 IME 输入 "需求：" → Cmd+V 粘贴 "implement async runtime" → 切中文输入 "——优先级高" → Enter
+- Pass: 最终提交 "需求：implement async runtime——优先级高"
+- Fail: 粘贴后 IME 切换导致前段中文被清除
 
-#### T-SHELL-1: deprecation warning
+**T-COMBO-2**: 粘贴多行 + 中文 IME 追加
+- 我操作: 粘贴多行文本 → 末尾用中文 IME 追加 "以上" → Enter
+- Pass: 根据 T-PASTE-2 和 T-IME-1 结果判定
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 验证 `python main.py --shell` 正确输出 deprecation warning 并回退到 plain CLI |
-| **Setup** | 入口 3 (`python main.py --shell`) |
-| **Actions** | 1. 执行 `python main.py --shell` 2. 观察 stderr 输出 3. 确认 deprecation warning 可见 |
-| **Expected** | stderr 输出: `[entry] --shell is deprecated. Use --plain for CLI or --tui for Textual TUI.`；然后正常进入 plain CLI |
-| **Pass criteria** | deprecation warning 输出，CLI 正常运行 |
-| **Fail criteria** | crash、无 deprecation warning、行为断裂 |
+**T-COMBO-3**: 切换应用后回来
+- 我操作: 输入 "测试文本" 不提交 → Cmd+Tab 切走 → 等 5 秒 → Cmd+Tab 切回 → 输入 "继续输入" → Enter
+- Pass: 最终提交 "测试文本继续输入"
+- Fail: 切回后输入内容被清除 / TUI 渲染异常
 
----
+### Phase 4: 兼容性与 prototype（optional）
 
-### 5.11 T-FLOW — 基础交互流（附加，不绑定特定 UMT）
+**T-SHELL-1**: --shell deprecated 兼容性
+- 我执行: `python main.py --shell`
+- Pass: stderr 输出 deprecation warning，然后正常进入 plain CLI
+- Fail: crash / 无 deprecation warning
 
-作为背景，确认基础 CLI/TUI 交互路径是否通路。这些不替代 UMT trial，但提供上下文。
+**T-FLOW-3**: CLI demo 命令
+- 我执行: `python main.py demo "create a test note"`
+- Pass: 正常输出，无 Python traceback
 
-#### T-FLOW-1: Plain CLI 英文基线
+**T-INK-1** (optional): Ink 中文行为
+- 入口: `cd tui && npm start`
+- 我操作: 在 InputBar 中输入中文短句
+- 不做 pass/fail 判定，只记录观察
 
-| 项 | 内容 |
-|----|------|
-| **Setup** | 入口 1 (`python main.py`) |
-| **Actions** | 输入 "hello world" → Enter |
-| **Purpose** | 确认 Plain CLI 英文输入通道正常 |
-| **Note** | 等同于 T-CLI-2，此处为快速 smoke |
+**T-INK-2** (optional): Ink 粘贴
+- 入口: `cd tui && npm start`
+- 我操作: Cmd+V 粘贴短文本
+- 如无效只记录（Ink 有意过滤 ctrl/meta 组合键）
 
-#### T-FLOW-2: Textual TUI 英文基线
+**T-INK-3** (optional): Ink 多行
+- 入口: `cd tui && npm start`
+- 我操作: 尝试 Shift+Enter / 粘贴多行
+- 只记录，不判 fail
 
-| 项 | 内容 |
-|----|------|
-| **Setup** | 入口 2 (`python main.py --tui`) |
-| **Actions** | 输入 "hello world" → Enter |
-| **Purpose** | 确认 Textual TUI 英文输入通道正常 |
-| **Note** | 建立 TUI 基线 |
+## 每次 trial 后你需要做的事
 
-#### T-FLOW-3: CLI demo 命令
+1. 让我确认: PASS / FAIL / BLOCKED / NOT_SUPPORTED / PARTIAL
+2. 如果是 FAIL，按 §6 严重度规则判定 P0/P1/P2/P3
+3. 记录到 trial report（§8 模板）
+4. 告诉我下一个 trial 是什么
+5. 如果我连续多个 FAIL 或累了，问我是否暂停
 
-```bash
-python main.py demo "create a test note"
+## 全部完成后你需要做的事
+
+1. 汇总所有 trial 结果
+2. 按 §7 分类（PASS_WITH_EVIDENCE / PASS_WITH_CAVEAT / FAIL_P0 / FAIL_P1 / FAIL_P2 / FAIL_P3 / BLOCKED / NOT_SUPPORTED / MANUAL_IME_PENDING）
+3. 生成最终 trial report
+4. 列出建议的 v2 backlog 更新（哪些 UMT 可以更新状态、哪些需要新增）
+
+## 严重度规则
+
+见下方 §6。你必须在判定时使用这套规则。
+
+## 环境记录
+
+开始前让我确认并记录：
+- Terminal: [iTerm2 / Terminal.app / Ghostty / other]
+- OS: macOS version
+- Shell: [zsh / bash]
+- Input method: [macOS 拼音 / 搜狗 / 鼠须管 / other]
 ```
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 确认 CLI demo 通路正常 (fake provider) |
-| **Observe** | 输出是否正常、是否有 Python traceback |
-| **Note** | 如果失败，可能是 venv 未激活或依赖未安装 |
+### ---END PROMPT---
 
 ---
 
-## 6. Ink Prototype Optional Appendix
+## 6. Severity Rules
 
-以下 trials 仅用于验证 Ink/React prototype (`cd tui && npm start`) 的输入行为。**不作为 v1 验收项，不阻塞 v1 tag**。Ink prototype 是 visual experiment，所有数据自包含 fixture，不连接 runtime。
+| 严重度 | 定义 | 触发条件 | 示例 |
+|--------|------|---------|------|
+| **P0** | 数据丢失 / secret 泄露 / 无法退出 / 危险操作 | trial 中发现安全漏洞、数据损坏、或程序完全不可用 | 中文输入完全不可用（所有字符变 ?/方框/空白）；API key 出现在终端输出中 |
+| **P1** | 主要入口不可用 / 核心交互断裂 | Plain CLI 或 Textual TUI 的关键路径 fail | Plain CLI 无法启动；Textual TUI crash on startup；IME 中文输入 crash；粘贴 crash |
+| **P2** | 重要 UX 问题 / 体验显著下降 | 非崩溃但严重影响使用的问题 | 多行输入 awkward；resize 后 layout 错位但可恢复；错误消息不清晰 |
+| **P3** | 视觉瑕疵 / wording / 次要 layout | 不影响核心功能的小问题 | 中文渲染偏移 1-2 字符；颜色不统一；提示文字不准确 |
 
-### 6.1 T-INK-1: Ink useInput 中文行为
+### 6.1 严重度与 v2 backlog 映射
 
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 对比入口 4 (Ink) 的中文输入行为，验证 `docs/design/b8-input-readiness-validation.md` 的 IME 分析 |
-| **Setup** | `cd tui && npm start`，确认 WorkbenchLayout 渲染成功 |
-| **Actions** | 在 InputBar 中输入中文短句（同 T-IME-1 的 Actions） |
-| **Expected** | 观察 Ink useInput 是否逐键提交 composition 中间态 |
-| **Pass** | 不做 pass/fail 判定，只记录观察结果 |
-| **Note** | 入口 4 是 prototype，不作为 v1 production 标准 |
-
-### 6.2 T-INK-2: Ink 粘贴行为
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 对比 Ink useInput (过滤 `key.ctrl`) 下的 Cmd+V 行为 |
-| **Setup** | `cd tui && npm start` |
-| **Actions** | 在 InputBar 中 Cmd+V 粘贴短文本 |
-| **Expected** | 如果粘贴无效，只记录，不判 fail |
-| **Note** | 入口 4 的 InputBar 有意过滤了 ctrl/meta 组合键，粘贴可能不可用 — 这是预期行为 |
-
-### 6.3 T-INK-3: Ink 多行
-
-| 项 | 内容 |
-|----|------|
-| **Purpose** | 确认入口 4 多行 NOT_IMPLEMENTED 状态是否准确 |
-| **Setup** | `cd tui && npm start` |
-| **Actions** | 尝试 Shift+Enter / 粘贴多行 |
-| **Expected per docs**: 多行 NOT_IMPLEMENTED |
-| **Note** | 只记录，不判 fail |
+| Trial 发现 | v2 backlog 操作 |
+|-----------|----------------|
+| P0 FAIL | 立即新增 P0 issue 到 v2 backlog，阻塞 v2 启动 |
+| P1 FAIL | 新增或更新 UMT-001/UMT-002 为 CONFIRMED_FAIL，提升优先级 |
+| P2 FAIL | 新增 P2 issue 到 v2 backlog 或更新已有 item |
+| P3 FAIL | 新增 P3 issue 到 FUTURE_DEBT |
+| BLOCKED | 标注阻塞原因（环境/配置/依赖），记录到 backlog |
+| NOT_SUPPORTED | 转 FUTURE_DEBT，标注"当前不支持" |
 
 ---
 
-## 7. Result Log Template
+## 7. Result Classification
 
-每次试用后填写一行。复制以下表格，多轮试用时追加。
+每个 trial case 完成后标记以下之一：
+
+| 结果 | 含义 | 后续操作 |
+|------|------|---------|
+| `PASS_WITH_EVIDENCE` | 通过，有截图或终端文本证据 | 记录证据路径，更新 backlog 状态 |
+| `PASS_WITH_CAVEAT` | 通过但有已知限制 | 记录 caveat，不标为完全通过 |
+| `FAIL_P0` | 失败，严重度 P0 | 立即记录，阻塞 v2 启动 |
+| `FAIL_P1` | 失败，严重度 P1 | 更新对应 UMT 状态为 CONFIRMED_FAIL |
+| `FAIL_P2` | 失败，严重度 P2 | 新增 v2 backlog item |
+| `FAIL_P3` | 失败，严重度 P3 | 转 FUTURE_DEBT |
+| `BLOCKED` | 无法执行（环境/依赖/前置条件未满足）| 记录 blocker，等待条件满足 |
+| `NOT_SUPPORTED` | 功能不支持（设计如此，非 bug）| 转 FUTURE_DEBT |
+| `MANUAL_IME_PENDING` | IME 验证无法自动完成，需人工确认 | 保留为 pending，不标完成 |
+
+---
+
+## 8. Trial Report Template
+
+### 8.1 环境信息
 
 ```text
-| Trial ID   | Date | Environment | Input | Expected | Actual | Result | Evidence path | Notes | Follow-up |
-|------------|------|-------------|-------|----------|--------|--------|---------------|-------|-----------|
-| T-CLI-1    |      | macOS __ / iTerm2 __ / 拼音 / Plain CLI | — | 正常启动 |    |    |    |    |    |
-| T-CLI-2    |      |             | hello | 正常响应 |    |    |    |    |    |
-| T-CLI-3    |      |             | 你好世界 | 正常接收 |    |    |    |    |    |
-| T-CLI-4    |      |             | quit | 正常退出 |    |    |    |    |    |
-| T-CLI-5    |      |             | Ctrl+C | 中断响应 |    |    |    |    |    |
-| T-CLI-6    |      |             | Ctrl+D | 正常退出 |    |    |    |    |    |
-| T-IME-1    |      | macOS __ / iTerm2 __ / 拼音 / Textual TUI | 今天天气不错 | 完整中文提交 |    |    |    |    |    |
-| T-IME-2    |      |             |       |          |        |        |               |       |           |
-| T-IME-3    |      |             |       |          |        |        |               |       |           |
-| T-IME-4    |      |             |       |          |        |        |               |       |           |
-| T-PASTE-1  |      |             |       |          |        |        |               |       |           |
-| T-PASTE-2  |      |             |       |          |        |        |               |       |           |
-| T-PASTE-3  |      |             |       |          |        |        |               |       |           |
-| T-PASTE-4  |      |             |       |          |        |        |               |       |           |
-| T-MLINE-1  |      |             |       |          |        |        |               |       |           |
-| T-MLINE-2  |      |             |       |          |        |        |               |       |           |
-| T-RESIZE-1 |      |             |       |          |        |        |               |       |           |
-| T-EXIT-1   |      |             |       |          |        |        |               |       |           |
-| T-EXIT-2   |      |             |       |          |        |        |               |       |           |
-| T-CONFIG-1 |      |             |       |          |        |        |               |       |           |
-| T-E2E-1    |      |             |       |          |        |        |               |       |           |
-| T-COMBO-1  |      |             |       |          |        |        |               |       |           |
-| T-COMBO-2  |      |             |       |          |        |        |               |       |           |
-| T-COMBO-3  |      |             |       |          |        |        |               |       |           |
-| T-COMBO-4  |      |             |       |          |        |        |               |       |           |
-| T-SHELL-1  |      |             |       |          |        |        |               |       |           |
-| T-FLOW-1   |      |             |       |          |        |        |               |       |           |
-| T-FLOW-2   |      |             |       |          |        |        |               |       |           |
-| T-FLOW-3   |      |             |       |          |        |        |               |       |           |
-| T-INK-1    |      |             |       |          |        |        |               |       |           |
-| T-INK-2    |      |             |       |          |        |        |               |       |           |
-| T-INK-3    |      |             |       |          |        |        |               |       |           |
+Date: [YYYY-MM-DD HH:MM]
+Terminal: [iTerm2 / Terminal.app / Ghostty / other: ___]
+OS: [macOS version]
+Shell: [zsh / bash]
+Input method: [macOS 拼音 / 搜狗 / 鼠须管 / other: ___]
+HEAD: [git rev-parse HEAD]
+Baseline: f6807ef (v1 engineering closeout)
 ```
 
-**Result 值**：`PASS` / `FAIL` / `BLOCKED` / `NOT_SUPPORTED` / `PARTIAL`
+### 8.2 Trial Results
 
-**Environment 格式**: `macOS <version> / <terminal> / <input-method> / <entry-mode>`
+```text
+| Trial ID   | Result | Severity | Evidence | Notes |
+|------------|--------|----------|----------|-------|
+| T-CLI-1    |        | —        |          |       |
+| T-CLI-2    |        | —        |          |       |
+| T-CLI-3    |        | —        |          |       |
+| T-CLI-4    |        | —        |          |       |
+| T-CLI-5    |        | —        |          |       |
+| T-CLI-6    |        | —        |          |       |
+| T-FLOW-2   |        | —        |          |       |
+| T-IME-1    |        |          |          |       |
+| T-IME-2    |        |          |          |       |
+| T-IME-3    |        |          |          |       |
+| T-IME-4    |        |          |          |       |
+| T-PASTE-1  |        |          |          |       |
+| T-PASTE-2  |        |          |          |       |
+| T-PASTE-3  |        |          |          |       |
+| T-PASTE-4  |        |          |          |       |
+| T-MLINE-1  |        |          |          |       |
+| T-MLINE-2  |        |          |          |       |
+| T-RESIZE-1 |        |          |          |       |
+| T-EXIT-1   |        | —        |          |       |
+| T-EXIT-2   |        | —        |          |       |
+| T-CONFIG-1 |        | —        |          |       |
+| T-E2E-1    |        | —        |          |       |
+| T-COMBO-1  |        |          |          |       |
+| T-COMBO-2  |        |          |          |       |
+| T-COMBO-3  |        |          |          |       |
+| T-SHELL-1  |        | —        |          |       |
+| T-FLOW-3   |        | —        |          |       |
+| T-INK-1    |        | —        |          | optional |
+| T-INK-2    |        | —        |          | optional |
+| T-INK-3    |        | —        |          | optional |
+```
+
+### 8.3 Summary
+
+```text
+Total: [N] trials
+PASS_WITH_EVIDENCE: [N]
+PASS_WITH_CAVEAT: [N]
+FAIL_P0: [N]
+FAIL_P1: [N]
+FAIL_P2: [N]
+FAIL_P3: [N]
+BLOCKED: [N]
+NOT_SUPPORTED: [N]
+MANUAL_IME_PENDING: [N]
+```
+
+### 8.4 v2 Backlog Updates Needed
+
+```text
+[列出需要新增/更新的 v2 backlog items，含 UMT ID、新状态、证据]
+```
 
 ---
 
-## 8. Evidence Policy
+## 9. Evidence Policy
 
-### 8.1 收集什么
+### 9.1 收集什么
 
 | 类型 | 说明 |
 |------|------|
-| Terminal screenshot | 输入框状态、提交前后对比。不含 API key/secret/私人文件路径 |
+| Terminal screenshot | 输入框状态、提交前后对比。**不含 API key / secret / 私人文件路径** |
 | Terminal copy text | `Cmd+A` → `Cmd+C` 复制 TUI 中可见文本（不含后台日志） |
-| Exact command used | 例如 `python main.py --tui` |
+| Exact command | 例如 `python main.py --tui` |
 | git state | `git log --oneline -1` + `git status -sb` |
 | Time | 每次 trial 时间戳 |
 
-### 8.2 不收集什么
+### 9.2 不收集什么
 
 - API key / secret / token / password
 - `config/config.yaml` 内容
 - `.env` 内容
-- 私人文件路径 (HOME 目录以外的个人文件)
-- 真实的 runtime logs 如果含 API key（日志默认已脱敏，但检查后再保存）
+- 私人文件路径
+- 真实 runtime logs（如含 API key）
 
-### 8.3 存储位置
-
-建议截图保存在 `docs/manual-trials/evidence/` 下：
+### 9.3 存储
 
 ```bash
 mkdir -p docs/manual-trials/evidence
@@ -661,119 +493,58 @@ mkdir -p docs/manual-trials/evidence
 
 命名: `trial-<trial-id>-<date>-<seq>.png`
 
-> **注意**: `docs/manual-trials/evidence/` 如果有截图，不要提交到 git（截图体积大，且可能含终端 private data）。可以加到 `.gitignore` 或手动忽略。
+**截图不要提交到 git**（体积大，可能含终端 private data）。
 
 ---
 
-## 9. How to Update Open Items After Trial
+## 10. Next Steps After Trial
 
-### 9.1 回填流程
+### 10.1 回填 v2 backlog
 
-1. 完成一组 trial (例如 T-IME-1~4)
-2. 打开 `docs/debt/first-agent-open-items.md`
-3. 在对应的 UMT 行后追加 trial 结果摘要
+Trial 完成后，打开 `docs/debt/first-agent-v2-priority-backlog.md`，在 §1 USER_MANUAL_TRIAL 中更新对应 UMT 的状态：
 
-### 9.2 结果映射
+| Trial Result | UMT 更新 |
+|-------------|---------|
+| 全部 IME trial PASS | UMT-001 状态可更新为 VERIFIED_ON_MANUAL_TRIAL |
+| 部分 IME trial FAIL | UMT-001 标注具体 fail 项和严重度 |
+| 全部 Paste trial PASS | UMT-002 状态可更新为 VERIFIED_ON_MANUAL_TRIAL |
+| T-COMBO 全部 PASS | UMT-003 状态可更新为 VERIFIED_ON_MANUAL_TRIAL |
 
-| Trial Result | 对 UMT 的处理 | 后续 |
-|-------------|--------------|------|
-| PASS | 标注为 `VERIFIED_ON_MANUAL_TRIAL` + date + evidence path | UMT 可以从 open items 中降级 |
-| FAIL | 标注为 `CONFIRMED_FAIL` + trial ID | 新增 bug / open item |
-| BLOCKED | 标注为 `BLOCKED` + reason | 记录 blocker；如果是环境依赖，标 REAL_ENV_REQUIRED |
-| NOT_SUPPORTED | 标注为 `NOT_SUPPORTED` | 转 FUTURE_DEBT |
-| PARTIAL | 标注为 `PARTIAL` + what passed / what didn't | 拆分为多个子项 |
+### 10.2 跨分类转换
 
-### 9.3 跨分类转换
+如果 trial 发现某个问题不属于 USER_MANUAL_TRIAL：
 
-如果 trial 发现某个 UMT 实际属于其他分类：
-
-| 发现 | 转换目标 | 示例 |
-|------|---------|------|
-| 行为是模型决定的，代码路径正确 | MBC (MODEL_BEHAVIOR_CONCERN) | "粘贴后模型错误解读内容" |
-| 需要产品/架构决策 | PD (PRODUCT_DECISION) | "多行输入应该支持但需要框架迁移" |
-| 当前不阻塞，需要未来专项 | FD (FUTURE_DEBT) | "Ink 多行输入 NOT_IMPLEMENTED" |
-| 需要外部环境配置 | REAL_ENV_REQUIRED | "需要特定终端版本" |
+| 发现 | 转到 | 示例 |
+|------|------|------|
+| 行为由模型决定，代码路径正确 | MBD (MODEL_BEHAVIOR_DESIGN) | "粘贴后模型错误解读内容" |
+| 需要产品/架构决策 | PD (PRODUCT_DECISION) | "多行输入需框架迁移" |
+| 当前不阻塞，未来专项 | FD (FUTURE_DEBT) | "Ink 多行 NOT_IMPLEMENTED" |
+| 需外部环境配置 | RER (REAL_ENV_REQUIRED) | "需特定终端版本" |
 | 确认是代码 bug | 新增 bug issue | "IME backspace 产生半字符乱码" |
 
-### 9.4 不做什么
+### 10.3 不做的事
 
-- **不直接标 RESOLVED**，除非正向 PASS evidence + 你自己认定
-- **不把 no-crash 写成 PASS** — 不 crash 是最低标准，不是 capability
-- **不把 partial workaround 写成 "可用"**
+- **不直接标 RESOLVED**，除非 PASS evidence + 你自己认定
+- **不把 no-crash 写成 PASS**
+- **不把 partial workaround 写成"可用"**
+- **不修代码**（trial 目标是验证，不是修复）
 
 ---
 
-## 10. Stop Conditions
+## 11. Stop Conditions
 
 以下情况**立即停止**：
 
-1. `config/config.yaml` 被修改且 `git diff` 显示它包含真实 key — `git checkout config/config.yaml`
+1. `config/config.yaml` 被修改且含真实 key → `git checkout config/config.yaml`
 2. 截图/终端输出中出现真实 API key 或 secret
-3. TUI 卡死无法恢复 (Ctrl+C 无效且 `kill` 无效)
-4. 你发现当前命令与实际仓库代码不一致
-5. trial 步骤与 `docs/debt/first-agent-open-items.md` 的描述矛盾
-6. 需要 Product Decision 才能继续（例如需要激活 TUI default entry 但不确定要不要做）
+3. TUI 卡死无法恢复（Ctrl+C 无效）
+4. 当前命令与仓库代码不一致
+5. 需要 Product Decision 才能继续
 
 停止后：
-- 记录在 §7 Result Log，标注 `BLOCKED`
-- 不要继续修改代码或配置文件
-- 如果是 secret 安全风险，优先处理 secret
-
----
-
-## 11. Quick Start Checklist
-
-按优先级顺序执行，**不要跳级**：
-
-### Phase 1: Plain CLI 基线（priority 1 — 必须最先完成）
-
-- [ ] Step 1: `cd /Users/jinkun.wang/work_space/my-first-agent && git status -sb` — 确认 clean
-- [ ] Step 2: 记录 Environment (Terminal / OS / Shell / Input Method) 到 §7
-- [ ] Step 3: 打开 §7 Result Log 模板，复制到编辑器
-- [ ] Step 4: `source .venv/bin/activate && python main.py` — 启动 Plain CLI
-- [ ] Step 5: 执行 T-CLI-1 (启动) → T-CLI-2 (英文) → T-CLI-3 (中文)
-- [ ] Step 6: 执行 T-CLI-4 (quit) → T-CLI-5 (Ctrl+C) → T-CLI-6 (Ctrl+D)
-- [ ] Step 7: 执行 T-FLOW-1 (英文 baseline smoke)
-
-### Phase 2: Textual TUI 主验证（priority 2 — Plain CLI 基线完成后）
-
-- [ ] Step 8: `source .venv/bin/activate && python main.py --tui` — 启动 Textual TUI
-- [ ] Step 9: 执行 T-FLOW-2 (英文基线)
-- [ ] Step 10: 执行 T-IME-1 → T-IME-2 → T-IME-3 → T-IME-4（中文 IME）
-- [ ] Step 11: 执行 T-PASTE-1 → T-PASTE-2 → T-PASTE-3 → T-PASTE-4（粘贴）
-- [ ] Step 12: 执行 T-MLINE-1 → T-MLINE-2（多行）
-- [ ] Step 13: 执行 T-RESIZE-1（resize）
-- [ ] Step 14: 执行 T-EXIT-1 → T-EXIT-2（退出路径）
-
-### Phase 3: 综合场景
-
-- [ ] Step 15: 执行 T-CONFIG-1（provider UX）
-- [ ] Step 16: 执行 T-E2E-1（E2E 任务 — Plain CLI）
-- [ ] Step 17: 执行 T-COMBO-1 → T-COMBO-3 → T-COMBO-4（组合场景）
-
-### Phase 4: 兼容性与 prototype（optional）
-
-- [ ] Step 18: 执行 T-SHELL-1（deprecated 兼容性）
-- [ ] Step 19 (optional): 执行 T-INK-1 → T-INK-2 → T-INK-3（Ink prototype）
-- [ ] Step 20: 执行 T-FLOW-3（CLI demo）
-
-### Phase 5: 汇总
-
-- [ ] Step 21: 汇总 §7 Result Log，按 §9 回填 `docs/debt/first-agent-open-items.md`
-
-### 建议顺序
-
-按优先级逐 Phase 进行，每个 Phase 内：
-1. Plain CLI 基线 (T-CLI-1~6, T-FLOW-1) — **最先完成**
-2. Textual TUI 英文基线 (T-FLOW-2)
-3. Textual TUI 中文 IME (T-IME-1~4) — 最关键的 TUI 验证
-4. Textual TUI 粘贴 (T-PASTE-1~4) — 注意 T-PASTE-2 有意外提交风险（Textual 下 risk 较低）
-5. Textual TUI 多行 (T-MLINE-1~2) — 可能 NOT_SUPPORTED
-6. Textual TUI 交互 (T-RESIZE / T-EXIT)
-7. Plain CLI E2E 任务 (T-E2E-1)
-8. 组合场景 (T-COMBO-1~4) — 接近真实使用
-9. 兼容性 (T-SHELL-1)
-10. Ink prototype optional check (T-INK-1~3) — **最后，且不作为 v1 验收**
+- 在 trial report 中标注 `BLOCKED`
+- 不修改代码或配置文件
+- secret 风险优先处理
 
 ---
 
@@ -781,9 +552,11 @@ mkdir -p docs/manual-trials/evidence
 
 | Doc | 说明 |
 |-----|------|
-| `docs/debt/first-agent-open-items.md` | UMT-001~003 source |
-| `docs/design/b8-input-readiness-validation.md` | IME/Paste/Multiline checklist |
+| `docs/debt/first-agent-v2-priority-backlog.md` | v2 优先项分类（§1 USER_MANUAL_TRIAL） |
+| `docs/debt/first-agent-open-items.md` | v1 open items（UMT-001~003 原始定义） |
+| `docs/design/b8-input-readiness-validation.md` | IME/Paste/Multiline readiness checklist |
 | `docs/design/entry-command-clarification.md` | 入口命令优先级与架构说明 |
+| `docs/releases/v1/first-agent-v1-closeout.md` | v1 engineering closeout baseline |
 | `docs/PROJECT_STATUS.md` | 当前项目状态 |
 | `docs/PROGRESS_LEDGER.md` | 进度历史 |
 | `README.md` | 快速启动命令 |

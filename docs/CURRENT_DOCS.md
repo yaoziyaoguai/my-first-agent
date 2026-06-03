@@ -15,7 +15,7 @@
 | 2 | `CURRENT_DOCS.md` | 本文件 — 文档导航 |
 | 3 | `releases/v1/first-agent-v1-closeout.md` | **v1 engineering baseline 声明** — 已完成能力、caveats、gates |
 | 4 | `debt/first-agent-v2-priority-backlog.md` | **v2 优先项分类** — 5 类 backlog, P1/P2/P3 |
-| 5 | `manual-trials/first-agent-user-trial-guide.md` | 手动试用操作手册 |
+| 5 | `manual-trials/first-agent-user-trial-guide.md` | **可执行试用剧本** — 含 Coding Agent 陪跑 prompt、角色分离、严重度规则、v2 backlog 映射 |
 | 6 | `dev/ENGINEERING_WORKFLOW.md` | 工程流程 |
 | 7 | `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 统一 runtime flow contract |
 

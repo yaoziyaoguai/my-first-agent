@@ -15,7 +15,7 @@
 | UMT-002 | Paste / multiline | P1 | user | 需真实终端粘贴行为，自动化无法覆盖终端 paste buffer | 粘贴中文/英文/mixed/特殊字符/multiline 块，记录 pass/fail | 参照 trial guide §3-4 |
 | UMT-003 | Terminal real interaction | P2 | user | IME + paste + multiline 组合场景依赖前两项完成 | UMT-001 + UMT-002 通过后验证组合场景 | UMT-001/002 完成后 |
 
-**Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 12 trial groups, 逐步骤手动试用操作手册。
+**Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 可执行试用剧本，含 Coding Agent 陪跑 prompt、角色分离、严重度规则（P0-P3）、trial report 模板。
 
 ---
 

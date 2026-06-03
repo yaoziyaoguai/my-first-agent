@@ -1,8 +1,9 @@
 # First Agent — Unresolved Open Items
 
 **创建**: 2026-06-02
-**Current baseline**: `d3a73ca` — `fix(release): clear v1 code bugs in evidence taxonomy and LLM extractor provider isolation`
-**Independent audit**: 82dff68 reliable baseline — yes。P0/P1/P2 blocker: no。Secret leak: no。AGENT_AUTO tasks: zero。
+**Current baseline**: `pending-this-remediation` — `fix(release): isolate v1 tests and align release docs`
+**Independent audit**: P0/P1/P2 blocker: no。Secret leak: no。AGENT_FIX_AUTO tasks: 0 (4406 passed, 0 failed, 37 xfailed)。
+**Full pytest**: 4406 passed, 18 skipped, 37 xfailed — release-clean (0 live failures).
 
 ---
 
@@ -56,15 +57,17 @@
 
 ### 2.3 PRODUCT_DECISION
 
-需要用户产品决策的项目。
+需要用户产品决策的项目（对齐 `PROJECT_STATUS.md` PD-001~PD-005）。
 
-| ID | Issue | Detail | Options |
-|----|-------|--------|---------|
-| PD-001 | TUI default entry activation | `main.tsx` 当前默认入口是 `WorkbenchLayout`，`TuiShell` 仅 component-level export。激活 TUI 默认入口需要用户决策。 | A) 保持 CLI fallback + TuiShell component export；B) 切换到 TuiShell 为默认入口 |
-| PD-002 | D-04 real gateway adapter | `BlockedRealAdapter` 已创建，`FakeRuntimeAdapter` 已接入。是否接入真实 `core.chat()` 路径需用户决策。 | A) 保持 fake/local；B) 接 real gateway (需 provider + MCP 配置) |
-| PD-003 | Legacy Dashboard / AutoRun cleanup | 32 active files + 54 legacy files。当前 Option C: on-disk keep + header comment。 | A) Full remove / B) Archive / C) On-disk keep (推荐) |
+| ID | Issue | Detail | Owner |
+|----|-------|--------|-------|
+| PD-001 | Textual TUI 为未来默认 terminal app | 当前 `python main.py --tui`(Textual TUI) 为候选入口，plain CLI 为稳定主入口。是否将 Textual TUI 作为 v2 默认 terminal app。 | user |
+| PD-002 | Plain CLI fallback 保留 | 当前 `python main.py`(Plain CLI) 为稳定主入口。v2 是否保留为 fallback。 | user |
+| PD-003 | Ink prototype 冻结/归档 | `cd tui && npm start`(Ink TuiShell) 当前为 default npm start 入口，但仍为 prototype/visual experiment。v2 是否冻结/归档。 | user |
+| PD-004 | --shell deprecated/remove | `--shell` flag 当前为 deprecated compatibility only。v2 是否移除。 | user |
+| PD-005 | v1 tag wording | v1 close-out tag 命名（如 `v1.0.0-dev` / `v1-engineering-baseline` / `v1-agent-dogfood-complete`）。 | user |
 
-**Why not auto-fixed now**: 这些决策影响产品方向和架构结构，不能由 Agent 自动决定。
+**Why not auto-fixed now**: 这些决策影响产品方向，不能由 Agent 自动决定。当前 v1 engineering baseline 已完成，等待用户决策后方可 tag。
 
 ### 2.4 FUTURE_DEBT / REAL_ENV_REQUIRED
 

@@ -1958,40 +1958,39 @@ class TestInlineApiKeyConfig:
 
 
 def test_config_yaml_does_not_contain_real_api_key():
-    """config/config.yaml 中 api_key 字段不得包含真实 API key。
+    """已提交的 config 模板中 api_key 字段不得包含真实 API key。
+
+    只检查仓库中已提交的 config 模板（config.example.yaml、config/examples/*.yaml），
+    不读取用户本地 config/config.yaml（含用户真实 key，不应被测试触及）。
 
     唯一合法占位符: sk-REPLACE_ME。
-    任何其他 sk- 前缀的值都是疑似真实 key，必须阻止提交。
-
-    这个测试是最小可行的 secret guard：gate 失败 = 不能 commit/push。
+    任何其他 sk- 前缀的值都是疑似真实 key。
     """
     import re
 
-    config_path = PROJECT_ROOT / "config" / "config.yaml"
-    if not config_path.is_file():
-        return  # 无 config.yaml 则无需检查
+    committed_configs = [
+        PROJECT_ROOT / "config" / "config.example.yaml",
+    ]
+    examples_dir = PROJECT_ROOT / "config" / "examples"
+    if examples_dir.is_dir():
+        committed_configs.extend(sorted(examples_dir.glob("*.yaml")))
 
-    content = config_path.read_text(encoding="utf-8")
-
-    # 匹配 api_key: <value> 行
-    api_key_match = re.search(r'^\s*api_key:\s*(.+)$', content, re.MULTILINE)
-    if not api_key_match:
-        return  # 无 api_key 字段则无需检查
-
-    key_value = api_key_match.group(1).strip()
-
-    # sk-REPLACE_ME 是唯一合法占位符
-    if key_value == "sk-REPLACE_ME":
-        return
-
-    # 检查是否包含真实 API key 特征
-    if key_value.startswith("sk-") and len(key_value) > 15:
-        raise AssertionError(
-            f"config/config.yaml 中 api_key 疑似真实 key: {key_value[:8]}...\n"
-            "真实 API key 不应提交到 git。请将 api_key 替换为 sk-REPLACE_ME 占位符，\n"
-            "在本地运行时再替换为真实 key。\n"
-            "如果此值确实是占位符而非真实 key，请联系维护者更新此 guard。"
-        )
+    for config_path in committed_configs:
+        if not config_path.is_file():
+            continue
+        content = config_path.read_text(encoding="utf-8")
+        api_key_match = re.search(r'^\s*api_key:\s*(.+)$', content, re.MULTILINE)
+        if not api_key_match:
+            continue
+        key_value = api_key_match.group(1).strip()
+        if key_value == "sk-REPLACE_ME":
+            continue
+        if key_value.startswith("sk-") and len(key_value) > 15:
+            raise AssertionError(
+                f"{config_path.name} 中 api_key 疑似真实 key（已 redacted）。\n"
+                "真实 API key 不应提交到 git。请将 api_key 替换为 sk-REPLACE_ME 占位符。\n"
+                "如果此值确实是占位符而非真实 key，请联系维护者更新此 guard。"
+            )
 
 
 def test_no_real_api_key_in_git_diff_staged():
@@ -2026,7 +2025,7 @@ def test_no_real_api_key_in_git_diff_staged():
                     continue
                 if key_val.startswith("sk-") and len(key_val) > 15:
                     raise AssertionError(
-                        f"git diff --cached 中包含疑似真实 API key: {key_val[:8]}...\n"
+                        "git diff --cached 中包含疑似真实 API key（已 redacted）。\n"
                         "真实 API key 即将被 commit——已拦截。\n"
                         "请 git reset HEAD config/config.yaml 取消暂存，"
                         "将 api_key 替换为 sk-REPLACE_ME 占位符后重新 commit。"

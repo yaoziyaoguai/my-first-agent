@@ -101,7 +101,7 @@
 3. **不要把 fake/local 当成 real** — TUI 所有 fake/local 标记不可移除，不能写成 product-ready
 4. **不要恢复 Dashboard / AutoRun / Project Operations 为主线** — 这些是 legacy，保留但不在当前入口
 5. **不要读 .env / 打印 / 提交 secret** — 安全红线
-6. **不要激活 TUI default entry** — `main.tsx` 中 `WorkbenchLayout` 是默认入口，`TuiShell` 是 component-level export only
+6. **不要激活 TUI default entry** — `npm start` 默认入口为 `TuiShell`（Ink visual shell prototype）。`WorkbenchLayout` 仅通过 `--legacy`/`--workbench` flag 访问。TuiShell 仍然是 prototype/visual experiment，非 v1 验收路径。
 7. **如果 PROJECT_STATUS.md 与其他 doc 冲突，以 PROJECT_STATUS.md 为准**
 8. **archive/ 只能作为历史参考，不能作为当前指令**
 

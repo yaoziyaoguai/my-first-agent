@@ -30,6 +30,7 @@
 | PD-003 | Ink prototype 冻结/归档 | P1 | user | `cd tui && npm start` (Ink TuiShell) 当前为 default npm start 入口，但仍为 prototype/visual experiment | 用户明确决定 v2 是否冻结/归档 Ink prototype | 用户决策后执行 freeze/archive 或继续维护 |
 | PD-004 | --shell deprecated/remove | P2 | user | `--shell` flag 当前为 deprecated compatibility only | 用户明确决定 v2 是否移除 | 用户决策后移除或保留 |
 | PD-005 | v1 tag wording | P2 | user | v1 close-out tag 命名需用户决定 | 用户确定 tag 名称 | 用户决策后打 tag |
+| PD-006 | Legacy Dashboard / AutoRun cleanup | P2 | user | 当前 PAUSED，B8 方向已转为 Interaction-first Workbench；保留需产品决策 | 用户明确决定 v2 是否清理/归档/删除 legacy Dashboard 和 AutoRun 代码及文档 | 用户决策后执行 cleanup |
 
 ---
 
@@ -78,7 +79,7 @@
 | Priority | Count | Items |
 |----------|-------|-------|
 | **P1** | 6 | UMT-001, UMT-002, PD-001, PD-002, PD-003 |
-| **P2** | 8 | UMT-003, PD-004, PD-005, RER-001, RER-002, RER-003, MBD-001, MBD-002, MBD-003 |
+| **P2** | 9 | UMT-003, PD-004, PD-005, PD-006, RER-001, RER-002, RER-003, MBD-001, MBD-002, MBD-003 |
 | **P3** | 5 | MBD-004, FD-001, FD-002, FD-003, FD-004 |
 
 **v1 closeout 不受以上任何项目阻塞。** 所有项目均为 v2 阶段规划输入，非当前阶段 blocker。

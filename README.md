@@ -6,12 +6,16 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 
 ## 当前状态（2026-06-03）
 
+- ✅ **v1 engineering closeout prepared** — `docs/releases/v1/first-agent-v1-closeout.md`
 - ✅ **AGENT_DOGFOOD_AUTO suite 通过** — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected
+- ✅ **Full pytest: 4406 passed, 0 failed, 37 xfailed** — code-clean baseline
 - ✅ **TUI Visual Shell Slice A+B delivered** — 静态 visual shell + safe data wiring, 不接 runtime/provider
 - 🟡 **V1 Closeout: USER_MANUAL_TRIAL + PRODUCT_DECISION pending** — 非代码阻塞项
-- ❌ **不声称 broadly user-usable** — current-stage remains FROZEN
+- ❌ **不声称 broadly user-usable** — not product-ready, current-stage remains FROZEN
+- 📋 **v2 next source**: [docs/debt/first-agent-v2-priority-backlog.md](docs/debt/first-agent-v2-priority-backlog.md)
 
 最新状态：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+最新 closeout：[docs/releases/v1/first-agent-v1-closeout.md](docs/releases/v1/first-agent-v1-closeout.md)
 最新 dogfood：[docs/dogfood/README.md](docs/dogfood/README.md)
 
 ## 快速开始

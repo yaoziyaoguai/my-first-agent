@@ -4,6 +4,12 @@
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
+## 2026-06-03 (v1 Engineering Closeout + Docs Alignment)
+
+| Milestone | 简述 |
+|-----------|------|
+| **v1 Engineering Closeout Prepared** | — | **docs-only** — `docs/releases/v1/first-agent-v1-closeout.md` created: engineering baseline declaration with completed capabilities, entry policy, gates/evidence (full pytest 4406/0/37, memory backend 14/14, docs 79/79, TUI 495/495), accepted caveats (USER_MANUAL_TRIAL, PRODUCT_DECISION, REAL_ENV_REQUIRED, MODEL_BEHAVIOR_DESIGN, FUTURE_DEBT), security confirmation, v2 handoff. `docs/archive/v1/README.md` created: v1 historical docs index with archive banner template and v2 source-of-truth rule. CURRENT_DOCS.md: v2 quick start section added. README/PROJECT_STATUS/PROGRESS_LEDGER: v1 closeout references. v2 priority backlog exists (5 categories, P1/P2/P3). **Recommended tag**: `v1.0.0-engineering-closeout` (not yet created). Not product-ready. Default entry NOT ACTIVATED. |
+
 ## 2026-06-03 (v1 AGENT_DOGFOOD_AUTO Suite + Manual Trial Entry Fix + v1 Blocker Remediation)
 
 | Milestone | 简述 |

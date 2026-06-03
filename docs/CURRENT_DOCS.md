@@ -5,12 +5,38 @@
 
 ---
 
+## 0. V2 Quick Start (v2 工作先读这里)
+
+**v1 engineering closeout 已完成** (`docs/releases/v1/first-agent-v1-closeout.md`)。v2 工作从以下文档开始，不要从 v1 过程文档开始：
+
+| 顺序 | 文档 | 说明 |
+|------|------|------|
+| 1 | `README.md` | 项目入口、当前状态、安全边界 |
+| 2 | `CURRENT_DOCS.md` | 本文件 — 文档导航 |
+| 3 | `releases/v1/first-agent-v1-closeout.md` | **v1 engineering baseline 声明** — 已完成能力、caveats、gates |
+| 4 | `debt/first-agent-v2-priority-backlog.md` | **v2 优先项分类** — 5 类 backlog, P1/P2/P3 |
+| 5 | `manual-trials/first-agent-user-trial-guide.md` | 手动试用操作手册 |
+| 6 | `dev/ENGINEERING_WORKFLOW.md` | 工程流程 |
+| 7 | `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 统一 runtime flow contract |
+
+**关键规则**:
+- v1 archived docs are historical — **不要作为 v2 implementation source-of-truth**
+- v2 从 backlog + current runtime contract 开始
+- Ink TUI remains prototype unless v2 product decision changes it
+- Plain CLI remains stable primary
+- Textual remains candidate
+- default entry NOT ACTIVATED
+- not product-ready
+
+---
+
 ## 1. Start Here (必须优先读)
 
 | 优先级 | 文档 | 说明 |
 |--------|------|------|
 | **P0** | `PROJECT_STATUS.md` | 第一优先。当前状态、能力定义 (REAL-EVIDENCE-001..008)、B1-B8 架构分类账、close-out 声明 |
 | **P0** | `PROGRESS_LEDGER.md` | 关键 milestones 历史、commit/date/milestone 映射 |
+| **P0** | `releases/v1/first-agent-v1-closeout.md` | **v1 engineering closeout** — baseline 声明、caveats、gates、v2 handoff |
 | **P0** | `handoff/first-agent-current-stage-close-out-2026-06-02.md` | **FROZEN** 阶段交接声明、future debt list、下次 session 启动指令 |
 | **P1** | `design/first-agent-tui-visual-target-v1.md` | TUI 22 组件映射、6 区域布局合同、data source policy |
 | **P1** | `design/first-agent-tui-design.md` | TUI 设计语言：颜色/token/排版/间距/交互层级 |

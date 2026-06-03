@@ -95,10 +95,13 @@
 | `reviews/b8-tui-workbench-completion-review.md` | B8 completion review (2026-06-01) |
 | `reviews/2026-05-29-first-agent-runtime-lab-stage-review.md` | Runtime lab stage review |
 | `dogfood/README.md` | Dogfood 报告索引 |
-| `dogfood/v1-synthetic-user-dogfood-report.md` | **v1 Synthetic User Dogfood** (2026-06-04) — HOTFIX_DECISION_REQUIRED |
-| `dogfood/v1-synthetic-user-dogfood-plan.md` | v1 Synthetic User Dogfood plan |
+| `dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` | **v1 Runtime-First Dogfood** (2026-06-04) — F-001 P0 CONFIRMED+EXTENDED (session 持久化), HOTFIX_DECISION_REQUIRED |
+| `dogfood/v1-runtime-first-synthetic-user-dogfood-plan.md` | v1 Runtime-First Dogfood plan (28 能力清单, 17 journey 设计) |
+| `debt/v1-runtime-first-synthetic-user-dogfood-findings.md` | **v1 Runtime-First Dogfood Findings** (2026-06-04) — 5 findings + 8 gaps |
+| `dogfood/v1-synthetic-user-dogfood-report.md` | **v1 Synthetic User Dogfood** (prior evidence) — HOTFIX_DECISION_REQUIRED |
+| `dogfood/v1-synthetic-user-dogfood-plan.md` | v1 Synthetic User Dogfood plan (prior evidence) |
 | `dogfood/GLOBAL_REAL_API_DOGFOOD_REPORT.md` | Global real API dogfood report |
-| `debt/v1-synthetic-user-dogfood-findings.md` | **v1 Dogfood Findings** (2026-06-04) — F-001 P0: config/config.yaml read not blocked |
+| `debt/v1-synthetic-user-dogfood-findings.md` | **v1 Dogfood Findings** (prior evidence) — F-001 P0: config/config.yaml read not blocked |
 | **AGENT_DOGFOOD_AUTO Suite** | **COMPLETE** (2026-06-03) — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
 
 ---

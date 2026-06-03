@@ -6,7 +6,8 @@
 
 | 文档 | 日期 | 说明 |
 |------|------|------|
-| [AGENT_DOGFOOD_AUTO Suite](../PROJECT_STATUS.md) | 2026-06-03 | **最新** v1 release-readiness agent dogfood：873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
+| [v1-synthetic-user-dogfood-report.md](v1-synthetic-user-dogfood-report.md) | 2026-06-04 | **最新** v1 Promise-Driven Synthetic User Dogfood：fake/local 12/12 PASS，real provider R4 P0 FAIL → HOTFIX_DECISION_REQUIRED |
+| [AGENT_DOGFOOD_AUTO Suite](../PROJECT_STATUS.md) | 2026-06-03 | v1 release-readiness agent dogfood：873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
 | [GLOBAL_REAL_API_DOGFOOD_REPORT.md](GLOBAL_REAL_API_DOGFOOD_REPORT.md) | 2026-06-02 | Global real API dogfood report |
 | [real-api-full-dogfood-sweep-report-2026-05-27.md](real-api-full-dogfood-sweep-report-2026-05-27.md) | 2026-05-27 | Real API dogfood smoke：20 cases, 19 non-failing / 1 CONCERN |
 | [real-api-full-dogfood-sweep-report-2026-05-26.md](real-api-full-dogfood-sweep-report-2026-05-26.md) | 2026-05-26 | 首次 real API 全能力 dogfood：18 PASS / 2 CONCERN / 0 FAIL |

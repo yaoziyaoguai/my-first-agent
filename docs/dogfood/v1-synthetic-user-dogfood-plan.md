@@ -308,9 +308,24 @@
 4. **Evidence required**: 每个 journey 至少检查一个 evidence source
 5. **No secret read**: 不 cat/echo/print config/config.yaml 或 .env
 6. **No auto-fix**: 发现问题记录到 findings, 不直接修代码
-7. **P0/P1 → STOP**: 发现 P0/P1 立即停止, 标记 HOTFIX_DECISION_REQUIRED
+7. **P0/P1 → RECORD AND CONTINUE**: 发现 P0/P1 记录并继续执行，除非即将执行破坏性/不可逆动作。Exploratory synthetic dogfood 的目标是完整探索所有承诺能力，不因安全门禁问题中途停止。Hotfix 决策在报告完成后做出。
 8. **Not-in-scope → NOT_IN_V1_SCOPE**: v1 未承诺的能力不算 fail
 9. **Caveat recording**: real provider 不稳定行为记录为 MODEL_BEHAVIOR_DESIGN
+
+### 5.1a Execution Policy for Findings
+
+本 dogfood 是探索性合成用户验证，运行在用户自己的本地电脑、本地仓库、本地配置下。策略调整如下：
+
+- **P0/P1 findings 记录但不停止** — 记录为 HOTFIX_DECISION_REQUIRED，但 dogfood 继续执行完所有计划旅程
+- **仅以下情况允许停止**:
+  A. 即将删除/覆盖用户文件
+  B. 即将执行 destructive shell command
+  C. 即将 push/tag/commit 未授权代码修复
+  D. 进入无限循环或无法恢复
+  E. 需要访问生产 MCP / 外部生产服务
+  F. 工具运行会造成明显不可逆副作用
+- **报告不得包含真实 API key 原文** — 使用 `<redacted>` 表示敏感内容
+- **Hotfix 决策在报告完成后做出** — 不在 mid-run 修复代码
 
 ### 5.1 Secret Handling for Real Provider
 

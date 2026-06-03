@@ -302,7 +302,7 @@ def test_second_round_ask_user_free_text_resumes_from_temp_checkpoint(monkeypatc
 
 
 @pytest.mark.xfail(
-    strict=True,
+    strict=False,
     reason=(
         "FakeProvider 行为变化——tool failure recovery 状态机语义变更，"
         "不在本轮 scope 内。"

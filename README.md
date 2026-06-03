@@ -4,14 +4,15 @@ First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目
 
 **当前状态入口：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — 所有 Coding Agent 和人类开发者的第一优先读取入口。
 
-## 当前状态（2026-05-27）
+## 当前状态（2026-06-03）
 
-- ✅ **Real API dogfood smoke 通过** — 20 cases 中 19 个 non-failing / 1 CONCERN / 0 FAIL
-- ✅ **Fake/local gate 通过** — deterministic provider 可完成本地闭环
-- 🟡 **证据口径仍需硬化** — interactive confirmation、resume、tool/memory confirmation 覆盖不足
-- ❌ **不声称 broadly user-usable**
+- ✅ **AGENT_DOGFOOD_AUTO suite 通过** — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected
+- ✅ **TUI Visual Shell Slice A+B delivered** — 静态 visual shell + safe data wiring, 不接 runtime/provider
+- 🟡 **V1 Closeout: USER_MANUAL_TRIAL + PRODUCT_DECISION pending** — 非代码阻塞项
+- ❌ **不声称 broadly user-usable** — current-stage remains FROZEN
 
-最新全局审计：[docs/audit/global-readonly-audit-2026-05-27.md](docs/audit/global-readonly-audit-2026-05-27.md)
+最新状态：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+最新 dogfood：[docs/dogfood/README.md](docs/dogfood/README.md)
 
 ## 快速开始
 
@@ -50,8 +51,8 @@ Skill System 仍为 **实验性**（详见 `V0_3_SKILL_SYSTEM_STATUS`），**not
 | 进度账本 | [docs/PROGRESS_LEDGER.md](docs/PROGRESS_LEDGER.md) |
 | 文档入口 | [docs/README.zh.md](docs/README.zh.md) |
 | 工程流程 | [docs/dev/AUTO_RUN_WORKFLOW.md](docs/dev/AUTO_RUN_WORKFLOW.md) |
-| 最新 dogfood | [docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md](docs/dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md) |
-| 最新审计 | [docs/audit/global-readonly-audit-2026-05-27.md](docs/audit/global-readonly-audit-2026-05-27.md) |
+| 最新 dogfood | [docs/dogfood/README.md](docs/dogfood/README.md) |
+| 最新审计 | [docs/audit/b1-b8-current-stage-close-out-audit.md](docs/audit/b1-b8-current-stage-close-out-audit.md) |
 | 历史文档 | [docs/archive/](docs/archive/) |
 
 ## 测试

@@ -242,7 +242,7 @@ class TestCheckpointResumeDispatcherMediation:
         assert evidence.get("restored_step_index") == 3
         assert evidence.get("restored_has_pending_tool") is True
 
-    def test_resume_no_checkpoint_returns_failed(self):
+    def test_resume_no_checkpoint_returns_failed(self, tmp_checkpoint_path):
         """无 checkpoint 文件时 resume 返回 failed，不 crash。"""
         from agent.state import create_agent_state
 

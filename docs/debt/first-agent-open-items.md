@@ -1,7 +1,7 @@
 # First Agent — Unresolved Open Items
 
 **创建**: 2026-06-02
-**Current baseline**: `82dff68` — `docs(status): reconcile post-provider remaining issues and update stale gaps`
+**Current baseline**: `d3a73ca` — `fix(release): clear v1 code bugs in evidence taxonomy and LLM extractor provider isolation`
 **Independent audit**: 82dff68 reliable baseline — yes。P0/P1/P2 blocker: no。Secret leak: no。AGENT_AUTO tasks: zero。
 
 ---

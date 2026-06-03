@@ -115,6 +115,7 @@
 | `rfc/archived/` | 已并入 canonical RFC | `rfc/MEMORY_CANONICAL_RFC.md` |
 | `00-overview/` `01-getting-started/` `02-architecture/` `05-testing-dogfood/` `06-audit/` | 旧 overlay 结构，仍当前但部分内容可能过期 | 以 `PROJECT_STATUS.md` 为准 |
 | `learning/` | 历史 lesson learned | — |
+| `releases/legacy/RELEASE_NOTES_v0.*.md` | v0 阶段发布记录，已从根目录迁移 | `releases/v1/first-agent-v1-closeout.md` (v1 baseline) |
 
 ---
 

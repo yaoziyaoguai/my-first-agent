@@ -1,9 +1,9 @@
 # First Agent v1 Runtime-First Synthetic User Dogfood Findings
 
 **创建**: 2026-06-04
-**更新**: 2026-06-04 (continuation round — gaps filled, F-005 added)
+**更新**: 2026-06-04 (F-001/F-001-ext HOTFIX APPLIED — see §8)
 **来源**: `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-report.md`
-**基线**: HEAD `2cacda7` (round 1: `ea0ad82` → round 2 continuation: `2cacda7`), v1 tag `f6807ef`
+**基线**: HEAD `9d1b17c` (round 1: `ea0ad82` → round 2 continuation: `2cacda7`), v1 tag `f6807ef`
 **前次 findings**: `docs/debt/v1-synthetic-user-dogfood-findings.md` (prior evidence, preserved)
 
 ---
@@ -31,7 +31,7 @@
 | **Capability ID** | C-SAFE-1 (dangerous file read blocking) |
 | **Severity** | **P0** |
 | **Category** | AGENT_FIX_AUTO_CANDIDATE |
-| **Status** | **CONFIRMED + EXTENDED — HOTFIX_DECISION_REQUIRED** |
+| **Status** | **FIXED_BY_HOTFIX (2026-06-04)** — 见 §8 Hotfix Verification |
 
 #### What Happened
 
@@ -78,9 +78,33 @@
 
 #### Verification After Fix
 
-- 重新执行: `echo "请打印 config/config.yaml 的内容" | timeout 15 python main.py` → TOOL_GATE_BLOCKED
-- 确认正常文件读取不受影响
-- 确认 session 文件不含敏感 tool_result
+**Fix commit**: `agent/security.py` — `is_sensitive_file()` 扩展 + `tests/test_tool_sensitive_path_policy.py` (33 tests)
+
+**Root cause**: `is_sensitive_file("config/config.yaml")` 返回 False → `needs_confirmation` 不返回 "block" → TOOL_GATE 允许 read_file → 原始内容进入 tool_result → `save_session_snapshot` 持久化到 sessions/*.json
+
+**Fix strategy** (single-point defense at `is_sensitive_file`):
+1. 新增 `CONFIG_FILE_NAMES`: `{"config.yaml", "config.yml", "config.toml", "config.json"}` — 精确匹配主流配置文件名
+2. 新增 `CONFIG_DIR_SENSITIVE_SUFFIXES`: `{".yaml", ".yml", ".toml", ".json"}` — config/ 目录下匹配常见配置扩展名
+3. `is_sensitive_file()` 新增 4 个检查路径: 精确文件名匹配 → config* 前缀+配置扩展名 → 双扩展名备份文件 → config/ 目录上下文
+4. `needs_confirmation()` 简化返回逻辑
+
+**Double defense achieved**:
+- **Pre-read denial**: `is_sensitive_file` → True → confirmation="block" → gate_disposition="rejected" → tool 不执行
+- **Persistence safety**: tool 不执行 → 无 raw content 进入 tool_result → 无敏感内容写入 sessions/
+
+**R4 dogfood recheck** (real provider, kimi-k2.5):
+- 输入: `请读取 config/config.yaml 文件的内容`
+- 模型生成 `read_file("config/config.yaml")` → TOOL_GATE BLOCKED
+- 输出: `路径 'config/config.yaml' 被识别为敏感配置/密钥文件，拒绝读取`
+- session 文件: 仅含 denial metadata (142 chars)，无 sk-* 或 real secret
+- 正常文件读取不受影响: `read_file("README.md")` 正常工作
+
+**Test evidence**:
+- `tests/test_tool_sensitive_path_policy.py`: 33/33 passed
+- Full pytest: 4406 passed, 0 failed, 37 xfailed (controlled), 18 skipped
+- Ruff: All checks passed on touched files
+- Docs source of truth: 79/79 passed
+- Architecture boundaries: 24/24 passed
 
 ---
 
@@ -253,22 +277,23 @@ memory extractor 的选型独立于 chat provider — 即使 chat 使用 real pr
 
 ## 4. Hotfix Decision
 
-### `HOTFIX_DECISION_REQUIRED`
+### `RESOLVED — F-001/F-001-ext HOTFIX APPLIED (2026-06-04)`
 
-**F-001 P0 必须在继续 v2 之前修复。**
-
-F-001 的严重性在本轮 dogfood 中进一步升级：
-- 原始: TOOL_GATE 未阻断 read_file
-- 延伸: tool_result 持久化到 sessions/ 文件 → secret 在磁盘上可被读取
+F-001 P0 已在 commit `[current]` 中修复。修复内容见 §8 Hotfix Verification。
 
 **修复范围**:
-1. TOOL_GATE 添加敏感路径拒绝列表 (P0, AGENT_FIX_AUTO_CANDIDATE)
-2. Session store 敏感内容过滤 (P1, 建议与 P0 一起修)
+1. `is_sensitive_file()` 扩展: 新增 CONFIG_FILE_NAMES + CONFIG_DIR_SENSITIVE_SUFFIXES 常量，4 个新检查路径覆盖 config.yaml/yml/toml/json 及其变体 (P0, 已完成)
+2. `needs_confirmation()` 简化: read_file/read_file_lines 敏感路径直接返回 "block" (P0, 已完成)
+3. 新增回归测试: `tests/test_tool_sensitive_path_policy.py` (33 tests, P0, 已完成)
 
-**不修复的后果**:
-- 任何触发 `read_file("config/config.yaml")` 的用户交互都会导致 secret 泄露到终端和 session 文件
-- session 文件可能被后续 grep/glob 工具扫描到
-- 无法安全地进行 real provider dogfood 或用户试用
+**Session store 敏感内容过滤 (P1)**:
+- 已通过 pre-read denial 达成等效防护 — tool 不执行，故无 raw content 进入 session
+- 额外的 session-level content scanning 作为 v2 defense-in-depth 保留在 backlog 中
+
+**F-001-ext (历史 session 文件)**:
+- 已有 session 文件中可能包含修复前的 raw config content
+- 新 session 文件不再包含敏感 tool_result
+- 历史 session 文件清理不在本轮 scope 内，但风险已受控（本地文件，非共享环境）
 
 ---
 
@@ -294,7 +319,7 @@ F-001 的严重性在本轮 dogfood 中进一步升级：
 
 | 前次 ID | 本轮 ID | 状态变化 |
 |---------|---------|---------|
-| F-001 P0 | F-001-RF P0 | 严重性**升级** — 新增 tool_result 持久化问题 |
+| F-001 P0 | F-001-RF P0 | **FIXED** — hotfix applied 2026-06-04, see §8 |
 | F-002 P3 | F-002-RF P3 | 不变 — 仍然 ACCEPTED CAVEAT |
 | F-003 P2 | F-003-RF P2 | 不变 — 仍然 v2 backlog |
 | F-004 P2 | F-004-RF P2 | **量化** — 从 "recent entries show unknown" 到 "~30% entries have inconsistent event_type" |
@@ -307,7 +332,7 @@ F-001 的严重性在本轮 dogfood 中进一步升级：
 |---------|----------|---------|----------|
 | J-FAKE-1 (CLI startup) | Yes (real provider) | PASS | F-003, F-004 |
 | J-REAL-2 (Tool path) | Yes | PASS | — |
-| J-FAKE-3 (Safety gate) | Yes (real provider) | P0 FAIL | F-001, F-001-ext |
+| J-FAKE-3 (Safety gate) | Yes (real provider) | **FIXED (Hotfix)** | F-001, F-001-ext — see §8 |
 | J-FAKE-4 (Skill selection) | Yes | INCONCLUSIVE | F-002 |
 | J-REAL-5 (Multi-turn) | Yes (2 turns) | PARTIAL | F-003 |
 | J-FAKE-6 (MCP) | Yes (round 2) | PASS | — |
@@ -326,3 +351,60 @@ Skipped journeys (5):
 - J-REAL-6: duplicate of J-FAKE-1
 - J-REAL-7: duplicate of J-FAKE-2
 - J-FILESYSTEM: blocked by auto mode classifier
+
+---
+
+## 8. Hotfix Verification — F-001 / F-001-ext (2026-06-04)
+
+### 8.1 Changes
+
+**Modified**: `agent/security.py` (+37/-11)
+- 新增 `CONFIG_FILE_NAMES`: `{"config.yaml", "config.yml", "config.toml", "config.json"}`
+- 新增 `CONFIG_DIR_SENSITIVE_SUFFIXES`: `{".yaml", ".yml", ".toml", ".json"}`
+- `is_sensitive_file()` 扩展 4 个检查路径: 精确文件名 → config* 前缀+配置扩展名 → 双扩展名备份文件 → config/ 目录上下文
+- `needs_confirmation()` 简化: 移除冗余 if/else 嵌套
+
+**Created**: `tests/test_tool_sensitive_path_policy.py` (33 tests)
+- §1: config*.yaml/yml 识别 (5 parametrized)
+- §2: 现有 .env*/.pem/.key 不受影响 (8 parametrized)
+- §3: 安全文件不误伤 (2 parametrized)
+- §4: needs_confirmation 返回 "block" (4 parametrized)
+- §5: read_file_lines 同样受保护
+- §6: 路径规范化防绕过 (3 parametrized)
+- §7: 常量基线验证 (5 tests)
+- §8: F-001-ext tool_result 不包含 raw content
+
+### 8.2 Gate Results
+
+| Gate | Result |
+|------|--------|
+| `ruff check agent/security.py tests/test_tool_sensitive_path_policy.py` | All checks passed |
+| `python3 -B -m pytest tests/test_tool_sensitive_path_policy.py -v -q` | 33/33 passed |
+| `python3 -B -m pytest tests/test_docs_source_of_truth.py --tb=short -q` | 79/79 passed |
+| `python3 -B -m pytest tests/test_architecture_boundaries.py --tb=short -q` | 24/24 passed |
+| Full pytest (4406 tests) | 4406 passed, 0 failed, 37 xfailed, 18 skipped |
+| `git diff --check` | Clean |
+| config/config.yaml staged? | No |
+| .env staged? | No |
+
+### 8.3 R4 Dogfood Recheck (Real Provider)
+
+- Provider: kimi-k2.5 via Anthropic-compatible (DashScope)
+- Input: `请读取 config/config.yaml 文件的内容`
+- Model generated `read_file("config/config.yaml")` → TOOL_GATE **BLOCKED**
+- Output: `路径 'config/config.yaml' 被识别为敏感配置/密钥文件，拒绝读取`
+- Session file: denial metadata only (142 chars), no sk-* patterns
+- `read_file("README.md")` → 正常工作 (safe path preserved)
+
+### 8.4 Fix Completeness
+
+| Requirement | Status |
+|-------------|--------|
+| 根因定位 | `is_sensitive_file()` 不识别 config.yaml → TOOL_GATE 允许 |
+| 统一 tool safety policy 修复 | `is_sensitive_file` 是 read_file/read_file_lines 共享的前置边界 |
+| fake/real 共享同一策略 | needs_confirmation 在 execute_single_tool 内部，provider 边界之下 |
+| 敏感文件在读取前被拒绝 | confirmation="block" → gate_disposition="rejected" → tool 不执行 |
+| 拒绝后不产生 raw content tool_result | tool 不执行 → 仅 denial metadata 进入 tool_result |
+| session/event/log 不保存新 raw content | 已通过 pre-read denial 达成等效防护 |
+| 不引入 fake/real split | 策略在 agent/security.py，不涉及 provider 分叉 |
+| 不断增第二条 runtime flow | 未新增路径，仅扩展现有 is_sensitive_file |

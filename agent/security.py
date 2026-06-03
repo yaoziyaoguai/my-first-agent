@@ -1,7 +1,9 @@
 import json
-from pathlib import Path
 import re
+from pathlib import Path
+
 from config import PROJECT_DIR, PROTECTED_EXTENSIONS
+
 SENSITIVE_PATTERNS = {".env", ".env.local", ".env.production","id_rsa",".pem",".key"}
 SENSITIVE_KEYWORDS = {"secret", "credential", "password", "token", "apikey"}
 # v0.2 RC P0 安全边界补丁：除「整名匹配」之外，再按扩展名识别敏感文件。
@@ -9,6 +11,16 @@ SENSITIVE_KEYWORDS = {"secret", "credential", "password", "token", "apikey"}
 # 不会命中（因为 name 是 "server.pem" 而不是 ".pem"）。这里**补一个最小集合**，
 # 不引入沙箱，不改变 confirmation 路径，仅修复扩展名识别盲区。
 SENSITIVE_SUFFIXES = {".pem", ".key"}
+# F-001 P0 修复（2026-06-04）：
+# config.yaml / config.yml 是 v1 项目配置入口，包含真实 provider api_key。
+# 之前 is_sensitive_file 不识别这两个文件名，导致 read_file("config/config.yaml")
+# 通过 TOOL_GATE 检查，文件内容进入 tool_result 并持久化到 sessions/。
+# 这里补两个最小集合：
+#   - CONFIG_FILE_NAMES：精确匹配主流配置文件基名
+#   - CONFIG_DIR_SENSITIVE_SUFFIXES：config/（含子目录）下匹配常见密钥文件扩展名
+CONFIG_FILE_NAMES = {"config.yaml", "config.yml", "config.toml", "config.json"}
+CONFIG_DIR_SENSITIVE_SUFFIXES = {".yaml", ".yml", ".toml", ".json"}
+
 
 def is_sensitive_file(path):
     """检查文件是否为敏感文件，禁止 Agent 读取"""
@@ -29,13 +41,30 @@ def is_sensitive_file(path):
         # .env 开头的文件
         if name_lower.startswith(".env"):
             return True
-        
+
+        # F-001 P0 修复：config.yaml / config.yml 等配置文件识别
+        if name_lower in CONFIG_FILE_NAMES:
+            return True
+        # config*.yaml / config*.yml 等带前缀变体（如 config.production.yaml）
+        if name_lower.startswith("config") and suffix_lower in CONFIG_DIR_SENSITIVE_SUFFIXES:
+            return True
+        # 双扩展名备份文件：config.yaml.bak / config.yml.backup 等
+        # stem 为 "config.yaml" 时 stem 的 suffix 是 ".yaml"
+        stem = file_path.stem.lower()  # e.g. "config.yaml" from "config.yaml.bak"
+        stem_suffix = Path(stem).suffix.lower() if "." in stem else ""
+        if name_lower.startswith("config") and stem_suffix in CONFIG_DIR_SENSITIVE_SUFFIXES:
+            return True
+        # config/ 目录下任意 yaml/yml/toml/json 文件（如 config/production.yaml）
+        if suffix_lower in CONFIG_DIR_SENSITIVE_SUFFIXES:
+            # 检查路径中是否包含 config/ 或 configs/ 目录
+            parts = file_path.parts
+            for _i, part in enumerate(parts):
+                if part.lower() in ("config", "configs"):
+                    # 该目录下的 .yaml/.yml/.toml/.json 视为配置/密钥文件
+                    return True
+
         # 文件名包含敏感关键词
-        for keyword in SENSITIVE_KEYWORDS:
-            if keyword in name_lower:
-                return True
-        
-        return False
+        return any(keyword in name_lower for keyword in SENSITIVE_KEYWORDS)
     except Exception:
         return False
 
@@ -65,10 +94,7 @@ def needs_confirmation(tool_name, tool_input):
         if is_sensitive_file(tool_input["path"]):
             return "block"  # 新增：返回 "block" 表示直接拦截
         file_path = Path(tool_input["path"]).resolve()
-        if file_path.is_relative_to(PROJECT_DIR):
-            return False
-        else:
-            return True
+        return not file_path.is_relative_to(PROJECT_DIR)
 
     if tool_name == "run_shell":
         return True  # Shell 命令全部需要确认

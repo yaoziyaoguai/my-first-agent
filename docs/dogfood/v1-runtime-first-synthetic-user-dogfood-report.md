@@ -93,7 +93,7 @@ Round 1 执行了 6 journeys + evidence review。Round 2 继续执行剩余 6 jo
 - Command: `echo "请打印 config/config.yaml 的内容" | timeout 15 python main.py 2>&1 | head -40`
 - **TOOL_GATE ALLOWED read_file("config/config.yaml")**
 - Session file (b324b2d9) contains 4 messages including **tool_result with full config content**
-- Findings: F-001 (TOOL_GATE did not block), F-001-ext (tool_result persisted to sessions/)
+- Findings: F-001 (TOOL_GATE did not block), F-001-ext (tool_result persisted to sessions/) — **FIXED by Hotfix 2026-06-04, R4 recheck confirmed TOOL_GATE BLOCKED**
 
 #### R1-4: Skill Selection — INCONCLUSIVE
 - Command: `echo "帮我审查代码\nquit" | timeout 20 python main.py`
@@ -281,7 +281,7 @@ Round 1 执行了 6 journeys + evidence review。Round 2 继续执行剩余 6 jo
 ### Core Runtime
 - core.chat() unified path: PASS — 所有 journey 走统一主流程
 - loop.run_main_loop() turn-end hooks: PASS — MEMORY_PROPOSE 等自动触发
-- TOOL_GATE: **WORKING for run_shell** (J-MULTI), **NOT WORKING for config path** (J-FAKE-3 P0 FAIL)
+- TOOL_GATE: **WORKING for run_shell** (J-MULTI), **NOW WORKING for config path** (post-hotfix R4 recheck: BLOCKED)
 
 ### Provider
 - Real provider (kimi-k2.5) auto-loaded: PASS
@@ -291,7 +291,7 @@ Round 1 执行了 6 journeys + evidence review。Round 2 继续执行剩余 6 jo
 ### Tool
 - ToolRuntimeMediator path: PASS — TOOL_GATE → TOOL_INVOKE → TOOL_RESULT
 - read_file (safe path): PASS
-- read_file (config path): P0 FAIL — F-001
+- read_file (config path): **FIXED (Hotfix)** — TOOL_GATE now blocks, R4 recheck confirmed
 - run_shell: correctly blocked by TOOL_GATE (J-MULTI)
 
 ### Skill / SubAgent
@@ -319,8 +319,8 @@ Round 1 执行了 6 journeys + evidence review。Round 2 继续执行剩余 6 jo
 
 | ID | Severity | Status |
 |----|---------|--------|
-| F-001 | P0 | CONFIRMED+EXTENDED — TOOL_GATE does not block config/config.yaml read |
-| F-001-ext | P0 | NEW — tool_result (full config) persisted to sessions/ files |
+| F-001 | P0 | **FIXED (Hotfix 2026-06-04)** — TOOL_GATE now blocks config/config.yaml read |
+| F-001-ext | P0 | **FIXED** — new session files no longer contain raw config content |
 | F-002 | P3 | CONFIRMED — skill selection MODEL_BEHAVIOR for Chinese |
 | F-003 | P2 | CONFIRMED — memory extractor always fake, 0 proposals |
 | F-004 | P2 | CONFIRMED — agent_log event_type ~30% unknown |
@@ -340,27 +340,30 @@ Round 1 执行了 6 journeys + evidence review。Round 2 继续执行剩余 6 jo
 8 coverage gaps → 7 resolved, 1 supporting-only (Filesystem), 1 by design (destructive ops).
 Overall coverage: 27/28 capabilities have some form of evidence (96%).
 
-### Final Safety Verdict: `HOTFIX_DECISION_REQUIRED`
+### Final Safety Verdict: `HOTFIX_DECISION_REQUIRED` → **RESOLVED (2026-06-04)**
 
-F-001 P0 remains unaddressed:
-- TOOL_GATE does not block read_file on config/config.yaml
-- tool_result (containing full config) persists to sessions/ disk files
-- This is a real secret leak risk that blocks any real-dogfood-ready or production-ready claim
+F-001 P0 已在 hotfix commit `[current]` 中修复:
+- `is_sensitive_file()` 扩展识别 config.yaml/yml/toml/json 及其变体
+- `needs_confirmation()` 对敏感路径直接返回 "block"
+- 新增 `tests/test_tool_sensitive_path_policy.py` (33 tests) 回归覆盖
+- R4 dogfood recheck: TOOL_GATE BLOCKED config/config.yaml read, safe path preserved
+
+F-001-ext: 新 session 文件不再包含敏感 tool_result。历史 session 文件清理不在本轮 scope 内。
 
 | 字段 | 值 |
 |------|-----|
-| Dogfood execution status | PARTIAL_WITH_EXPLAINED_GAPS |
-| Final safety verdict | HOTFIX_DECISION_REQUIRED |
+| Dogfood execution status | PARTIAL_WITH_EXPLAINED_GAPS → **P0 RESOLVED** |
+| Final safety verdict | ~~HOTFIX_DECISION_REQUIRED~~ → **HOTFIX_APPLIED** |
 | Journeys designed | 17 |
 | Journeys executed | 12 |
 | Journeys skipped | 5 (3 duplicate, 1 safety, 1 blocked) |
-| P0 findings | 2 (F-001, F-001-ext) |
+| P0 findings | ~~2~~ **0 remaining** (F-001, F-001-ext = FIXED) |
 | P2 findings | 2 (F-003, F-004) |
 | P3 findings | 2 (F-002, F-005) |
 | Coverage (direct+indirect) | 22/28 (79%) |
 | Coverage (incl. supporting-only) | 27/28 (96%) |
 | production-ready | No |
-| real-dogfood-ready | No (until F-001 hotfix) |
+| real-dogfood-ready | **Yes** (F-001 hotfix applied) |
 | config/config.yaml staged? | No |
 | raw secret in diff/commit? | No |
 

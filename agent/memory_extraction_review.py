@@ -210,7 +210,7 @@ def run_extraction_review(
         extraction_summary=result.extraction_summary,
     )
 
-    for display_index, (orig_index, req) in enumerate(requests, start=1):
+    for display_index, (_orig_index, req) in enumerate(requests, start=1):
         _display_proposal(req, display_index, total_confirmable, output_fn=output_fn)
 
         choice, free_text = _collect_choice(req, input_fn=input_fn, output_fn=output_fn)
@@ -337,7 +337,7 @@ def run_extraction_review_cli() -> int:
     )
     if use_real_llm:
         print("[Memory Extract] 使用真实 LLM extraction（MEMORY_EXTRACTION_REAL_LLM=1）")
-        extractor = LLMMemoryExtractor()
+        extractor = create_extractor("llm")
     else:
         print(
             "[Memory Extract] 使用 fake extractor（skeleton mode）。"

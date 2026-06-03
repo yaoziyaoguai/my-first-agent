@@ -97,6 +97,9 @@ def test_business_and_probe_are_mutually_exclusive():
         RuntimeActionType.NODE_EXIT,
         RuntimeActionType.NODE_FAILURE,
         RuntimeActionType.ACTION_PLAN_COMPLETE,
+        # Next-stage D-01: SubAgent L2 native loop action types
+        RuntimeActionType.SUBAGENT_DELEGATE_L2,
+        RuntimeActionType.SUBAGENT_CHILD_BATCH_MEMORY,
     }
     probe_types = {
         RuntimeActionType.SKILL_SELECT,

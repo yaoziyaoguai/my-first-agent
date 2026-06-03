@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from agent.provider.factory import build_model_provider_from_env
 from agent.provider.protocol import ModelProvider, ProviderError
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Data Structures
@@ -119,18 +119,15 @@ PROMPT_INJECTION_PATTERNS = (
 
 def _contains_sensitive(text: str) -> bool:
     """检查文本是否包含疑似 secret / API key / password。"""
-    for pattern in SENSITIVE_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in SENSITIVE_PATTERNS)
 
 
 def _contains_prompt_injection(text: str) -> bool:
     """检查文本是否包含 prompt injection pattern。"""
-    for pattern in PROMPT_INJECTION_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    return False
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in PROMPT_INJECTION_PATTERNS
+    )
 
 
 def filter_sensitive_proposals(
@@ -245,7 +242,9 @@ class FakeMemoryExtractor:
     # ── fake dogfood marker → confidence mapping ──────────────────────────
     # 仅 FakeMemoryExtractor 使用；LLMMemoryExtractor 不识别。
     # T1: >= 0.8 → pending confirmation; T2: [0.6,0.8) → auto-retain; T3: < 0.6 → ignored
-    _MARKER_CONFIDENCE: dict[str, float] = field(default_factory=lambda: {"t1": 0.85, "t2": 0.65, "t3": 0.45})
+    _MARKER_CONFIDENCE: dict[str, float] = field(
+        default_factory=lambda: {"t1": 0.85, "t2": 0.65, "t3": 0.45}
+    )
 
     # ── 控制命令列表，不应被提取为 memory ─────────────────────────────
     _CONTROL_COMMANDS: tuple[str, ...] = (
@@ -490,11 +489,6 @@ class LLMMemoryExtractor:
     max_tokens: int = 2048
 
     def __post_init__(self) -> None:
-        if self.provider is None:
-            try:
-                self.provider = build_model_provider_from_env()
-            except ProviderError:
-                self.provider = None
         if self.model_name is None and self.provider is not None:
             self.model_name = getattr(self.provider, "provider_type", "provider")
 
@@ -752,6 +746,9 @@ def create_extractor(
         # 在 governance routing 阶段使用。
         _llm_fields = {"provider", "model_name", "max_tokens"}
         _llm_kwargs = {k: v for k, v in kwargs.items() if k in _llm_fields}
+        if "provider" not in _llm_kwargs:
+            with suppress(ProviderError):
+                _llm_kwargs["provider"] = build_model_provider_from_env()
         return LLMMemoryExtractor(**_llm_kwargs)
     if extractor_type == "l2_inline":
         # L2InlineExtractor 接受 use_real_llm + LLM kwargs

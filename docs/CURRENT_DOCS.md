@@ -69,7 +69,7 @@
 | `reviews/b8-tui-workbench-completion-review.md` | B8 completion review (2026-06-01) |
 | `reviews/2026-05-29-first-agent-runtime-lab-stage-review.md` | Runtime lab stage review |
 | `dogfood/README.md` | Dogfood 报告索引 |
-| `dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` | 最新全量 dogfood sweep |
+| `dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md` | Historical dogfood sweep (2026-05-27) |
 | `dogfood/GLOBAL_REAL_API_DOGFOOD_REPORT.md` | Global real API dogfood report |
 | **AGENT_DOGFOOD_AUTO Suite** | **COMPLETE** (2026-06-03) — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
 

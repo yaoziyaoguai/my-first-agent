@@ -268,6 +268,134 @@ def format_entry(entry: dict[str, Any]) -> str:
     return mask_secrets(line)
 
 
+def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> str:
+    """为单个 session 生成 one-screen evidence summary。
+
+    只展示结构化元信息，不 dump raw content / tool result 正文。
+    用于 `python main.py logs --session <id> --summary`。
+    """
+    real = [e for e in entries if not e.get("_broken")]
+    if not real:
+        return f"(no entries for session {session_id})"
+
+    # ── 基础 session 信息 ──
+    session_start = None
+    provider_type = "?"
+    model = "?"
+    entry = "?"
+    for e in real:
+        if e.get("event") == "session_start":
+            session_start = e
+            data = e.get("data", {})
+            provider_type = data.get("provider_type", "?")
+            model = data.get("model", "?")
+            entry = data.get("entry", "?")
+            break
+
+    # ── 事件统计 ──
+    event_counts: dict[str, int] = {}
+    tools_attempted = 0
+    tools_executed = 0
+    tools_blocked = 0
+    tools_blocked_sensitive = 0
+    tool_names: set[str] = set()
+    skill_selected = ""
+    checkpoints_saved = 0
+    first_ts = ""
+    last_ts = ""
+
+    for e in real:
+        ev = e.get("event", "")
+        event_counts[ev] = event_counts.get(ev, 0) + 1
+
+        ts = e.get("timestamp", "")
+        if ts:
+            if not first_ts:
+                first_ts = ts
+            last_ts = ts
+
+        # 收集工具名
+        data = e.get("data", {}) or {}
+        tool_name = data.get("tool", "")
+        if tool_name:
+            tool_names.add(tool_name)
+
+        if ev in ("tool_requested",):
+            tools_attempted += 1
+        elif ev in ("tool_executed",):
+            tools_executed += 1
+        elif ev in ("tool_blocked", "tool_blocked_sensitive",
+                     "tool_blocked_sensitive_read", "tool_blocked_protected_source"):
+            tools_blocked += 1
+            if "sensitive" in ev:
+                tools_blocked_sensitive += 1
+
+        if ev == "skill_selected":
+            skill_selected = data.get("skill", data.get("name", "")) or skill_selected
+
+        if ev in ("checkpoint_saved",):
+            checkpoints_saved += 1
+
+    # ── Evidence gaps ──
+    gaps: list[str] = []
+    if not session_start:
+        gaps.append("no session_start event — 未初始化 session")
+    if provider_type == "?":
+        gaps.append("provider_type unknown — 无法区分 fake/real")
+    if event_counts.get("user_input", 0) == 0:
+        gaps.append("no user_input events — 对话可能未发生")
+    if not last_ts:
+        gaps.append("no timestamps — 时间线不可审计")
+
+    # ── 组装输出 ──
+    bar = "─" * 58
+    lines = [
+        bar,
+        f"  Session Evidence Summary  ·  {session_id}",
+        bar,
+        f"  provider  : {provider_type}",
+        f"  model     : {model}",
+        f"  entry     : {entry}",
+        f"  start     : {first_ts or '?'}",
+        f"  end       : {last_ts or '?'}",
+        bar,
+        "  Events",
+        f"    user_input     : {event_counts.get('user_input', 0)}",
+        f"    agent_reply    : {event_counts.get('agent_reply', 0)}",
+        f"    llm_call       : {event_counts.get('llm_call', 0)}",
+        f"    llm_response   : {event_counts.get('llm_response', 0)}",
+        bar,
+        "  Tools",
+        f"    attempted      : {tools_attempted}",
+        f"    executed       : {tools_executed}",
+        f"    blocked        : {tools_blocked}",
+        f"    blocked (sens) : {tools_blocked_sensitive}",
+    ]
+    if tool_names:
+        lines.append(f"    tools used     : {', '.join(sorted(tool_names))}")
+    if skill_selected:
+        lines.append(f"    skill selected : {skill_selected}")
+    if checkpoints_saved:
+        lines.append(f"    checkpoints    : {checkpoints_saved}")
+
+    lines.append(bar)
+    lines.append("  Content Policy")
+    lines.append("    tool results in snapshot : summarized if >2KB or sensitive")
+    lines.append("    blocked sensitive tools  : denial metadata only")
+    lines.append("    raw secrets in logs      : redacted")
+
+    lines.append(bar)
+    if gaps:
+        lines.append("  Evidence Gaps")
+        for g in gaps:
+            lines.append(f"    ⚠  {g}")
+    else:
+        lines.append("  Evidence Gaps : none detected")
+    lines.append(bar)
+
+    return "\n".join(lines)
+
+
 def render_logs(
     *,
     log_path: Path | None = None,
@@ -276,10 +404,12 @@ def render_logs(
     event: str | None = None,
     tool: str | None = None,
     include_observer: bool = False,
+    summary: bool = False,
 ) -> str:
     """主入口：读 + 过滤 + 渲染 + 拼接。
 
     tail=None 表示不截断；默认 50 让人工调试时屏幕一屏内能放下。
+    summary=True 且指定 --session 时，输出 one-screen evidence summary。
     """
     entries = iter_log_entries(log_path=log_path, include_observer=include_observer)
     filtered = list(
@@ -288,6 +418,10 @@ def render_logs(
 
     broken_count = sum(1 for e in filtered if e.get("_broken"))
     real = [e for e in filtered if not e.get("_broken")]
+
+    # ── Summary 模式 ──
+    if summary and session_id:
+        return render_session_summary(session_id, real)
 
     if tail is not None and tail > 0:
         real = real[-tail:]

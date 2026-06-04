@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import uuid
@@ -7,12 +8,36 @@ from pathlib import Path
 
 from config import LOG_FILE, MAX_LOG_SIZE_BYTES, SNAPSHOT_DIR, ensure_snapshot_dir
 
+# 证据存储卫生：tool result 在 session snapshot 中的最大保留长度。
+# 超过此阈值的 content 替换为摘要 dict，避免 session 文件膨胀到几十 MB
+# 并防止敏感信息通过 snapshot 持久化泄漏。
+MAX_TOOL_RESULT_IN_SNAPSHOT = 2048  # 2KB
+_MAX_PREVIEW_CHARS = 200
+
+# 永远不应在 snapshot 中保留完整内容的敏感路径模式
+_SENSITIVE_PATH_PATTERNS = (
+    "config/config.yaml", "config/config.yml",
+    ".env", ".envrc", ".env.local",
+    "credentials", "secrets", "private", "key", "token",
+)
+
 SESSION_ID = str(uuid.uuid4())
 """Import-time session ID（向后兼容）。B7 引入 set_runtime_session_id() 后，
 运行时调用应优先使用 get_runtime_session_id() 获取 session_id。"""
 
 _runtime_session_id: str | None = None
 """B7: main.py startup 时通过 set_runtime_session_id() 设置的 session_id。"""
+
+_session_event_log_writer: object | None = None
+"""Evidence storage hygiene: per-session EventLogWriter 引用。
+由 main.py 在创建 EventLogWriter 后注入，save_session_snapshot
+通过此引用将 session_snapshot_saved 事件写入 events.jsonl。"""
+
+
+def set_session_event_log_writer(writer: object | None) -> None:
+    """注入 per-session EventLogWriter（main.py 调用）。"""
+    global _session_event_log_writer
+    _session_event_log_writer = writer
 
 
 def set_runtime_session_id(session_id: str) -> None:
@@ -197,13 +222,104 @@ def make_serializable(messages):
     return result
 
 
+def _looks_like_sensitive_path(path: str) -> bool:
+    """检查路径是否匹配敏感文件模式（config.yaml / .env / key / token 等）。"""
+    lowered = path.lower()
+    return any(pattern in lowered for pattern in _SENSITIVE_PATH_PATTERNS)
+
+
+def _summarize_tool_result_content(content: str, path: str = "") -> dict:
+    """对 tool result content 做证据存储摘要化。
+
+    - 超过 MAX_TOOL_RESULT_IN_SNAPSHOT 的 content → 摘要 dict
+    - 敏感路径的 content → 即使未超阈值也强制摘要化（永不保存原文）
+    - 未超阈值的普通 content → 原样返回（字符串，保持向后兼容）
+
+    返回 dict 时包含：result_size / result_hash / preview_redacted / truncated。
+    """
+    content_str = content if isinstance(content, str) else str(content)
+    content_bytes = content_str.encode("utf-8")
+    result_size = len(content_bytes)
+    result_hash = hashlib.sha256(content_bytes).hexdigest()[:16]
+    is_sensitive = _looks_like_sensitive_path(path)
+
+    if result_size <= MAX_TOOL_RESULT_IN_SNAPSHOT and not is_sensitive:
+        # 小内容且非敏感路径 → 保留原文
+        return content_str
+
+    # 超阈值或敏感路径 → 摘要 dict
+    preview = content_str[:_MAX_PREVIEW_CHARS]
+    return {
+        "result_size": result_size,
+        "result_hash": result_hash,
+        "preview_redacted": preview,
+        "truncated": True,
+    }
+
+
+def _process_messages_for_snapshot(messages: list) -> list:
+    """处理 messages：先做序列化，再对 tool_result content 做摘要化。
+
+    不改变原始 messages（不可变原则）。
+    通过 tool_use_id 配对 tool_use（含 path）和 tool_result（含 content）。
+    """
+    serialized = make_serializable(messages)
+
+    # 第一遍：收集所有 tool_use block，建立 tool_use_id → input 映射
+    tool_inputs: dict[str, dict] = {}
+    for msg in serialized:
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), list):
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tu_id = block.get("id", "")
+                    if tu_id:
+                        tool_inputs[tu_id] = {
+                            "input": block.get("input", {}),
+                            "name": block.get("name", ""),
+                        }
+
+    # 第二遍：对 tool_result 做摘要化
+    result = []
+    for msg in serialized:
+        if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+            new_blocks = []
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    tu_id = block.get("tool_use_id", "")
+                    raw = block.get("content", "")
+                    tool_info = tool_inputs.get(tu_id, {})
+                    tool_name = tool_info.get("name", "")
+                    path = tool_info.get("input", {}).get("path", "")
+
+                    summarized = _summarize_tool_result_content(raw, path)
+                    if isinstance(summarized, dict):
+                        summarized["tool_name"] = tool_name
+                        new_block = {
+                            "type": "tool_result",
+                            "tool_use_id": tu_id,
+                            "summary": summarized,
+                        }
+                        if block.get("is_error"):
+                            new_block["is_error"] = True
+                        new_blocks.append(new_block)
+                    else:
+                        # 小内容 → 保留原 block
+                        new_blocks.append(block)
+                else:
+                    new_blocks.append(block)
+            result.append({"role": msg["role"], "content": new_blocks})
+        else:
+            result.append(msg)
+    return result
+
+
 def save_session_snapshot(messages):
     _sid = get_runtime_session_id()
     snapshot = {
         "session_id": _sid,
         "saved_at": datetime.now().isoformat(),
         "message_count": len(messages),
-        "messages": make_serializable(messages),
+        "messages": _process_messages_for_snapshot(messages),
     }
     # config import 不再创建 sessions/；snapshot 写入前显式初始化目录，
     # 让 runtime IO 副作用留在 logger 边界，而不是配置导入边界。
@@ -211,3 +327,17 @@ def save_session_snapshot(messages):
     snapshot_file = SNAPSHOT_DIR / f"session_{_sid}.json"
     with open(snapshot_file, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, ensure_ascii=False, indent=2)
+
+    # Evidence storage hygiene: 将 snapshot_saved 事件写入 per-session events.jsonl
+    if _session_event_log_writer is not None:
+        with suppress(Exception):
+            _session_event_log_writer.append({
+                "action_type": "session.snapshot_saved",
+                "source": "session",
+                "event_id": f"ev-snapshot-{_sid[:8]}",
+                "data": {
+                    "session_id": _sid,
+                    "message_count": len(messages),
+                    "snapshot_file": str(snapshot_file),
+                },
+            })

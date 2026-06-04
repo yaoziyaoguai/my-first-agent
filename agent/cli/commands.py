@@ -171,6 +171,8 @@ def _dispatch_logs_command(rest: list[str], *, project_root: Path) -> int:
         print(f"--tail 需要整数，得到：{tail_str!r}")
         return 2
 
+    summary_mode = "--summary" in rest
+
     print(
         render_logs(
             tail=tail,
@@ -178,6 +180,7 @@ def _dispatch_logs_command(rest: list[str], *, project_root: Path) -> int:
             event=_opt("--event"),
             tool=_opt("--tool"),
             include_observer="--include-observer" in rest,
+            summary=summary_mode,
         )
     )
     return 0

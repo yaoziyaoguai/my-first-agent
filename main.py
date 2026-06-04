@@ -658,6 +658,32 @@ def main(argv: list[str] | None = None) -> int:
     _project_dir = Path(__file__).resolve().parent
     _event_log_writer = EventLogWriter(session_dir=_project_dir / "sessions" / _session_id)
 
+    # Evidence storage hygiene: 将 EventLogWriter 注入 logger 模块，
+    # 使 save_session_snapshot 能将 session_snapshot_saved 事件写入 events.jsonl。
+    from agent.logger import set_session_event_log_writer
+    set_session_event_log_writer(_event_log_writer)
+
+    # Evidence storage hygiene: 写入 session_start event 到 per-session events.jsonl，
+    # 确保每个新 session 的 events.jsonl 至少包含一条 session 初始化记录。
+    # 解决 257/263 historical sessions events.jsonl 为空的问题（只对新 session 有效）。
+    _provider_info = {}
+    try:
+        from agent.session import _detect_provider_info
+        _provider_info = _detect_provider_info()
+    except Exception:
+        pass
+    _event_log_writer.append({
+        "action_type": "session.start",
+        "source": "session",
+        "event_id": f"ev-session-start-{_session_id[:8]}",
+        "data": {
+            "provider_type": _provider_info.get("provider_type", "?"),
+            "model": _provider_info.get("model", "?"),
+            "entry": _entry,
+            "session_id": _session_id,
+        },
+    })
+
     # Evidence readiness (2026-06-05): 每次 interactive run 启动时打印 session_id
     # 和 evidence query command，使用户在复测 G1-G5 golden E2E 后可快速定位证据。
     print(

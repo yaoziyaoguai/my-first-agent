@@ -84,12 +84,13 @@ class ToolRuntimeMediator:
         tool_use_id = block.id
 
         # Step 1: TOOL_GATE — dispatcher 门控（参与真实执行生命周期）
-        gate_disposition = self._route_gate(tool_name, tool_input, tool_use_id)
+        gate_result = self._route_gate(tool_name, tool_input, tool_use_id)
+        gate_disposition = gate_result["gate_disposition"]
 
         # Step 2: 根据 gate_disposition 分流
         if gate_disposition == "rejected" or gate_disposition is None:
             # 安全失败：blocked / rejected / malformed → 不执行工具
-            self._handle_blocked(tool_name, tool_input, tool_use_id, gate_disposition)
+            self._handle_blocked(tool_name, tool_input, tool_use_id, gate_result)
             self._route_result(tool_name, tool_input, tool_use_id, FORCE_STOP)
             return FORCE_STOP
 
@@ -147,10 +148,11 @@ class ToolRuntimeMediator:
         )
 
         # Step 2: TOOL_GATE — 复用 parent gate pipeline
-        gate_disposition = self._route_gate(tool_name, arguments, tool_use_id)
+        gate_result = self._route_gate(tool_name, arguments, tool_use_id)
+        gate_disposition = gate_result["gate_disposition"]
 
         if gate_disposition == "rejected" or gate_disposition is None:
-            self._handle_blocked(tool_name, arguments, tool_use_id, gate_disposition)
+            self._handle_blocked(tool_name, arguments, tool_use_id, gate_result)
             self._route_result(tool_name, arguments, tool_use_id, FORCE_STOP)
             return FORCE_STOP
 
@@ -364,21 +366,47 @@ class ToolRuntimeMediator:
         tool_name: str,
         tool_input: Any,
         tool_use_id: str,
-        gate_disposition: str | None,
+        gate_result: dict[str, Any],
     ) -> None:
-        """处理 blocked/rejected/malformed gate result：不执行工具。"""
-        reason = (
-            "工具被安全策略拒绝"
-            if gate_disposition == "rejected"
-            else "工具门控结果异常，安全失败"
-        )
-        result_text = f"[安全策略] {reason}：{tool_name}"
+        """处理 blocked/rejected/malformed gate result：不执行工具。
+
+        F-005: 从 gate_result 中提取 rejection_reason 和 evidence_extra，
+        构造有意义的拒绝反馈，帮助模型理解拒绝原因并尝试替代方案。
+        """
+        gate_disposition = gate_result.get("gate_disposition")
+        rejection_reason = gate_result.get("rejection_reason")
+        evidence_extra = gate_result.get("evidence_extra") or {}
+
+        # 构建拒绝消息的核心部分
+        if rejection_reason:
+            reason_text = f"工具被安全策略拒绝：{rejection_reason}"
+        elif gate_disposition == "rejected":
+            reason_text = "工具被安全策略拒绝"
+        else:
+            reason_text = "工具门控结果异常，安全失败"
+
+        # 构建消息部件
+        parts: list[str] = [f"[安全策略] {reason_text}：{tool_name}"]
+
+        # 当拒绝与 skill 工具约束相关时，提供可用替代工具建议
+        skill_tools: list[str] | None = evidence_extra.get("skill_allowed_tools")
+        if skill_tools:
+            tools_str = "、".join(skill_tools[:8])
+            parts.append(
+                f"当前 skill 允许使用的工具有：{tools_str}。"
+                f"请使用这些工具完成目标，或向用户说明当前 skill 不支持 {tool_name}。"
+            )
+        else:
+            parts.append("请尝试其他方法完成目标，或向用户说明此操作不被允许。")
+
+        result_text = "\n".join(parts)
         append_tool_result(self._messages, tool_use_id, result_text)
         self._state.task.tool_execution_log[tool_use_id] = {
             "tool": tool_name,
             "input": dict(tool_input) if tool_input else {},
             "result": result_text,
             "status": "blocked_by_policy",
+            "rejection_reason": rejection_reason,
             "step_index": self._state.task.current_step_index,
         }
 
@@ -403,14 +431,20 @@ class ToolRuntimeMediator:
 
     def _route_gate(
         self, tool_name: str, tool_input: Any, tool_use_id: str
-    ) -> str | None:
+    ) -> dict[str, Any]:
         """TOOL_GATE：dispatcher 门控 evidence（execute_single_tool 之前调用）。
 
         Loop 2.2b: skill_allowed_tools 传入 payload，由 ToolGateHandler 执行
         skill 工具约束检查，非允许工具返回 rejected。
 
+        F-005: 返回完整 gate result（含 rejection_reason / evidence_extra），
+        使 _handle_blocked 能构造有意义的拒绝反馈，而非仅写"被安全策略拒绝"。
+
         Returns:
-            gate_disposition: "allowed" / "rejected" / "confirmation_required" / None
+            dict with keys:
+            - gate_disposition: "allowed" / "rejected" / "confirmation_required" / None
+            - rejection_reason: str | None
+            - evidence_extra: dict | None
         """
         try:
             gate_payload: dict[str, Any] = {
@@ -458,9 +492,17 @@ class ToolRuntimeMediator:
                 runtime_hook_name="handle_tool_use_response",
                 identity=self._identity,
             )
-            return result.payload.get("gate_disposition")
+            return {
+                "gate_disposition": result.payload.get("gate_disposition"),
+                "rejection_reason": result.payload.get("rejection_reason"),
+                "evidence_extra": getattr(result, "evidence_extra", None),
+            }
         except Exception:
-            return None
+            return {
+                "gate_disposition": None,
+                "rejection_reason": None,
+                "evidence_extra": None,
+            }
 
     def _route_invoke(
         self, tool_name: str, tool_input: Any, tool_use_id: str

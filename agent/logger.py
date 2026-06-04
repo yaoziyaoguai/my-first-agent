@@ -85,6 +85,45 @@ def _rotate_log_if_needed() -> None:
         log_path.rename(archive_path)  # rename 失败不影响日志写入
 
 
+# ── legacy event_type → 结构化类别映射 ──────────────────────────────────
+# F-004: 旧 agent_log.jsonl 使用任意字符串作为 event_type（如 "health_check"、
+# "planning_mode_entered"、"linter_passed"），在 log_viewer 中因无 taxonomy
+# 映射而显示为 "?"。此映射表将已知旧事件字符串归一化为结构化类别。
+_LEGACY_EVENT_TYPE_MAP: dict[str, str] = {
+    # context compression
+    "context_compression_start": "system.context_compression",
+    "context_compression_done": "system.context_compression",
+    # health check
+    "health_check": "system.health_check",
+    # planning
+    "planning_mode_entered": "planning.mode_entered",
+    "planning_model_empty_text": "planning.model_error",
+    "planning_model_call_error": "planning.model_error",
+    "action_plan_schema_invalid": "planning.schema_invalid",
+    "action_plan_schema_validated": "planning.schema_validated",
+    "planning_failed": "planning.failed",
+    "model_plan_received": "planning.plan_received",
+    "scheduler_load_success": "planning.scheduler_loaded",
+    "planning_handoff_failure": "planning.handoff_failure",
+    "plan_skipped": "planning.skipped",
+    "plan_error": "planning.error",
+    "plan_generated": "planning.generated",
+    "action_plan_generated": "planning.generated",
+    # linting / quality
+    "linter_passed": "quality.lint_passed",
+    "linter_issues": "quality.lint_issues",
+}
+
+
+def _normalize_legacy_event_type(event_type: str) -> str:
+    """将旧版任意 event_type 字符串映射到结构化类别。
+
+    已知字符串直接映射；未知字符串保留原值（不静默吞掉），
+    便于 log_viewer 区分"已知未映射"和"真正未知"。
+    """
+    return _LEGACY_EVENT_TYPE_MAP.get(event_type, event_type)
+
+
 def log_event(event_type, data):
     """legacy 低层日志入口：把单条事件追加到 ``LOG_FILE`` (agent_log.jsonl)。
 
@@ -92,6 +131,10 @@ def log_event(event_type, data):
     - 写入前自动轮转（>50MB）
     - data 递归脱敏（API key / Bearer token 替换为 ***REDACTED***）
     - 字符串值超过 2000 字符自动截断
+
+    F-004 (event_type normalization)：
+    - 写入时同时保留原始 event_type 和归一化后的 event_category，
+      使 log_viewer 可按结构化类别分类而不丢失原始信息。
 
     ────────────────────────────────────────────────────────────────────
     v0.5 命名碰撞警告（务必读完再写新代码）
@@ -126,10 +169,12 @@ def log_event(event_type, data):
     """
     _rotate_log_if_needed()
 
+    normalized = _normalize_legacy_event_type(event_type)
     entry = {
         "timestamp": datetime.now().isoformat(),
         "session_id": get_runtime_session_id(),
         "event": event_type,
+        "event_category": normalized,
         "data": _sanitize_log_data(data),
     }
     with open(LOG_FILE, "a", encoding="utf-8") as f:

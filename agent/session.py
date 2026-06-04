@@ -86,13 +86,49 @@ def _load_checkpoint_to_state_best_effort(state):
     return load_checkpoint_to_state(state)
 
 
+def _detect_provider_info() -> dict[str, str]:
+    """在 session 启动时检测 provider_type 和 model，不输出 secret。
+
+    Evidence readiness (2026-06-05): session_start 必须携带 provider/entry 信息，
+    否则无法从 996 个 historical sessions 中区分 fake vs real、--plain vs --tui。
+    复用 cli_renderer.render_provider_mode_banner 的检测路径，保持一致性。
+    """
+    try:
+        from agent.provider.simple_config import load_unified_provider_config
+        unified = load_unified_provider_config()
+        return {
+            "provider_type": unified.config.provider_type,
+            "model": unified.config.model or "unspecified",
+            "config_source": str(unified.source),
+        }
+    except Exception:
+        pass
+    # fallback: legacy env
+    import os as _os
+    provider_env = _os.getenv("MY_FIRST_AGENT_LLM_PROVIDER", "fake")
+    model_env = (
+        _os.getenv("MY_FIRST_AGENT_LLM_MODEL")
+        or _os.getenv("ANTHROPIC_MODEL")
+        or _os.getenv("OPENAI_MODEL")
+        or "unspecified"
+    )
+    return {
+        "provider_type": provider_env.strip().lower() or "fake",
+        "model": model_env or "unspecified",
+        "config_source": "legacy_env",
+    }
+
+
 # ========== 启动 ==========
 
-def init_session(*, session_id: str | None = None):
+def init_session(*, session_id: str | None = None, entry: str = ""):
     """启动时调用：初始化记忆 + 健康检查 + 渲染 session header。
 
     B7: 接受可选的 session_id 参数。传入时设置 runtime session_id 并使用它；
     不传时回退到 import-time SESSION_ID（向后兼容）。
+
+    Evidence readiness (2026-06-05): 接受 entry 参数（--plain/--tui/--textual），
+    写入 session_start 事件，使后续 golden E2E 复测可区分入口路径。
 
     v0.3 M1 升级：用 cli_renderer.render_session_header 替代旧的两行
     print，把阶段标签 / cwd / 健康摘要一次性结构化显示，并把 health_check
@@ -105,8 +141,13 @@ def init_session(*, session_id: str | None = None):
     init_memory()
     cleanup_old_episodes()
 
+    _provider_info = _detect_provider_info()
     log_event("session_start", {
         "system_prompt_length": len(SYSTEM_PROMPT),
+        "provider_type": _provider_info["provider_type"],
+        "model": _provider_info["model"],
+        "config_source": _provider_info["config_source"],
+        "entry": entry or "plain",
     })
 
     health_results = run_health_check(verbose=False)

@@ -650,12 +650,22 @@ def main(argv: list[str] | None = None) -> int:
     # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
     _init_mcp_bridge_if_enabled(session_id=_session_id)
-    init_session(session_id=_session_id)
+    _entry = _selected_entry or "plain"
+    init_session(session_id=_session_id, entry=_entry)
     try_resume_from_checkpoint()
 
     # B7 Slice 4: per-session event log writer
     _project_dir = Path(__file__).resolve().parent
     _event_log_writer = EventLogWriter(session_dir=_project_dir / "sessions" / _session_id)
+
+    # Evidence readiness (2026-06-05): 每次 interactive run 启动时打印 session_id
+    # 和 evidence query command，使用户在复测 G1-G5 golden E2E 后可快速定位证据。
+    print(
+        f"\n[evidence] session={_session_id[:8]}  "
+        f"entry={_entry}  "
+        f"query: python main.py logs --session {_session_id[:8]} --include-observer",
+        file=sys.stderr,
+    )
 
     # P2 修复：try_resume_from_checkpoint 可能将 status 设为
     # awaiting_resume_choice。进入 main_loop / textual shell 前必须先解析。

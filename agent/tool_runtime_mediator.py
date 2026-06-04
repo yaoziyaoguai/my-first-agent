@@ -63,6 +63,7 @@ class ToolRuntimeMediator:
         self._skill_allowed_tools = skill_allowed_tools
         self._store = store
         self._identity = identity
+        self._rejection_counts: dict[str, int] = {}
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -383,10 +384,27 @@ class ToolRuntimeMediator:
         elif gate_disposition == "rejected":
             reason_text = "工具被安全策略拒绝"
         else:
-            reason_text = "工具门控结果异常，安全失败"
+            reason_text = "工具门控结果异常，工具执行被安全策略阻止"
+
+        # P2-001: 追踪连续重复拒绝，递增反馈强度
+        self._rejection_counts[tool_name] = self._rejection_counts.get(tool_name, 0) + 1
+        consecutive_count = self._rejection_counts[tool_name]
 
         # 构建消息部件
         parts: list[str] = [f"[安全策略] {reason_text}：{tool_name}"]
+
+        # P2-001: 根据连续拒绝次数升级反馈强度
+        if consecutive_count >= 3:
+            parts.append(
+                f"⚠️ 此操作已被连续拒绝 {consecutive_count} 次。"
+                f"请停止尝试 {tool_name}，改用其他方法完成目标，"
+                f"或向用户说明此操作不被允许并建议替代方案。"
+            )
+        elif consecutive_count >= 2:
+            parts.append(
+                f"此操作已被重复拒绝。请不要再尝试 {tool_name}，"
+                f"换用其他方法或向用户说明限制。"
+            )
 
         # 当拒绝与 skill 工具约束相关时，提供可用替代工具建议
         skill_tools: list[str] | None = evidence_extra.get("skill_allowed_tools")
@@ -447,8 +465,16 @@ class ToolRuntimeMediator:
             - evidence_extra: dict | None
         """
         try:
+            # USER_RECHECK-P1-001: 部分 provider（如 kimi-k2.5）会剥离工具名的
+            # namespace 前缀（demo.echo_task_summary → echo_task_summary），
+            # 导致 TOOL_GATE 的 skill_allowed_tools 检查用短名匹配 namespaced 全名
+            # 时失败。这里调用 _normalize_tool_name 将短名归一化为注册表全名，
+            # 使 skill allowed_tools enforcement 与 execute_tool 走同一归一化路径。
+            from agent.tool_registry import _normalize_tool_name
+            _normalized = _normalize_tool_name(tool_name)
+            _effective_name = _normalized if _normalized is not None else tool_name
             gate_payload: dict[str, Any] = {
-                "tool_name": tool_name,
+                "tool_name": _effective_name,
                 "tool_input": dict(tool_input) if tool_input else {},
             }
             # Loop 5 (D05 mediator timing fix): 不依赖 mediator 创建时缓存的

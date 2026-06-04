@@ -229,6 +229,94 @@ class TestToolGateSkillEnforcement:
             f"fake.* 工具应走 overlay 路径而非 skill constraint，got status={result.status}"
         )
 
+    # ── USER_RECHECK-P1-001: namespace normalization in TOOL_GATE ──────────
+
+    def test_stripped_tool_name_matches_namespaced_allowed_tools(
+        self, gate_dispatcher,
+    ):
+        """USER_RECHECK-P1-001: provider 剥离命名空间后的短名应匹配 namespaced allowed_tools。
+
+        kimi-k2.5 等 provider 会将 demo.echo_task_summary → echo_task_summary。
+        TOOL_GATE 必须在检查 skill_allowed_tools 之前通过 _normalize_tool_name()
+        将短名归一化为注册表全名，否则 namespaced allowed_tools 永远匹配不上。
+        """
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        result = gate_dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "echo_task_summary",  # stripped by provider
+                "tool_input": {},
+                "skill_allowed_tools": [
+                    "demo.echo_task_summary", "demo.write_demo_note",
+                ],
+            },
+        ))
+        assert result.payload["gate_disposition"] == "allowed", (
+            f"剥离命名空间后的短名应通过 _normalize_tool_name 匹配到 namespaced "
+            f"allowed_tools，got {result.payload}"
+        )
+
+    def test_stripped_write_demo_note_matches_namespaced_allowed_tools(
+        self, gate_dispatcher,
+    ):
+        """USER_RECHECK-P1-001: write_demo_note 短名也应匹配 namespaced allowed_tools。"""
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        result = gate_dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "write_demo_note",  # stripped by provider
+                "tool_input": {"path": "workspace/demo/test/note.md", "content": "t"},
+                "skill_allowed_tools": [
+                    "demo.echo_task_summary", "demo.write_demo_note",
+                ],
+            },
+        ))
+        # demo.write_demo_note 注册时 confirmation="always"，
+        # 归一化成功后 gate_disposition 为 "confirmation_required"（不是 "allowed"）。
+        # 这里验证的是归一化本身成功（不被 rejected），而非 confirmation policy。
+        assert result.payload["gate_disposition"] in ("allowed", "confirmation_required"), (
+            f"write_demo_note 短名应通过归一化匹配 namespaced allowed_tools"
+            f"（allowed 或 confirmation_required 均为归一化成功），"
+            f"got {result.payload}"
+        )
+
+    def test_stripped_name_still_blocked_when_not_in_allowed_tools(
+        self, gate_dispatcher,
+    ):
+        """短名工具不在 allowed_tools 中时仍应被拒绝（安全不降级）。"""
+        from agent.runtime_integration.schema import (
+            RuntimeActionRequest,
+            RuntimeActionType,
+        )
+
+        result = gate_dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_GATE,
+            source="test",
+            parent_trace_id="",
+            payload={
+                "tool_name": "read_file",  # 不在 demo skill allowed_tools 中
+                "tool_input": {"path": "/tmp/test.txt"},
+                "skill_allowed_tools": [
+                    "demo.echo_task_summary", "demo.write_demo_note",
+                ],
+            },
+        ))
+        assert result.payload["gate_disposition"] == "rejected", (
+            f"不在 allowed_tools 中的工具应被 rejected（含归一化后），got {result.payload}"
+        )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ToolRuntimeMediator integration tests

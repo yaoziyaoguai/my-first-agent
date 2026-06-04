@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent import tool_result_contract
 from agent.checkpoint import save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
 from agent.display_events import (
@@ -20,14 +21,16 @@ from agent.display_events import (
     mask_user_visible_secrets,
     tool_result_visible,
 )
-from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
-from agent import tool_result_contract
 from agent.pending_requests import PendingUserInputRequest
+from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
 from agent.runtime_trace_emitter import emit_tool_result_trace_event
 from agent.tool_audit import emit_tool_audit_event
-from agent.tool_registry import execute_tool, is_meta_tool
-from agent.tool_registry import needs_tool_confirmation, _normalize_tool_name
-
+from agent.tool_registry import (
+    _normalize_tool_name,
+    execute_tool,
+    is_meta_tool,
+    needs_tool_confirmation,
+)
 
 AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
@@ -65,8 +68,12 @@ def _describe_policy_denial(tool_name: str, tool_input: dict[str, Any]) -> str:
         if is_sensitive_file(path):
             return (
                 f"[安全策略] 路径 '{path}' 被识别为敏感配置/密钥文件"
-                "（如 .env / .pem / .key / 含 secret/credential/password/token），"
+                "（如 .env / .pem / .key / config.yaml / 含 secret/credential/password/token），"
                 "Runtime 默认禁止 Agent 读取以避免泄漏凭证；本工具调用未执行。"
+                "请勿建议将敏感文件复制到其他路径再读取——这是同样的安全风险。"
+                "你可以：(1) 询问想检查的具体配置项名称，"
+                "(2) 提供不含 secret 的安全配置检查清单，"
+                "(3) 使用 redacted 示例说明配置格式。"
             )
 
     # 其他 block 来源（未来扩展）：保留中性但区分于「用户拒绝」的措辞。
@@ -444,7 +451,11 @@ def execute_single_tool(
         ),
     )
     # 工具审计：执行完成后发射成功/失败审计事件，safe_preview 来自 envelope
-    audit_event_type = "tool_failed" if envelope.status in ("failed", "rejected_by_check") else "tool_executed"
+    audit_event_type = (
+        "tool_failed"
+        if envelope.status in ("failed", "rejected_by_check")
+        else "tool_executed"
+    )
     emit_tool_audit_event(
         event_type=audit_event_type,
         tool_name=tool_name,
@@ -543,7 +554,11 @@ def execute_pending_tool(
     if envelope.error_type and envelope.status != "executed":
         display_text = f"{envelope.status_text}（{envelope.error_type}）"
     # 工具审计：pending tool 确认执行完成后也发射审计事件，error_type 在此保留
-    audit_event_type = "tool_failed" if envelope.status in ("failed", "rejected_by_check") else "tool_executed"
+    audit_event_type = (
+        "tool_failed"
+        if envelope.status in ("failed", "rejected_by_check")
+        else "tool_executed"
+    )
     emit_tool_audit_event(
         event_type=audit_event_type,
         tool_name=tool_name,

@@ -43,15 +43,22 @@ class ToolGateHandler:
         import agent.tools  # noqa: F401 - ensure production tools are registered
         from agent.tool_registry import (
             TOOL_REGISTRY,
+            _normalize_tool_name,
             get_model_visible_tools,
             needs_tool_confirmation,
         )
 
         payload = dict(request.payload)
-        tool_name = str(payload.get("tool_name") or "")
+        _raw_tool_name = str(payload.get("tool_name") or "")
         requested_capability = str(payload.get("requested_capability") or "")
         skill_allowed_tools = payload.get("skill_allowed_tools")
         active_skill_id = payload.get("active_skill_id")
+
+        # USER_RECHECK-P1-001: 部分 provider (kimi-k2.5) 剥离 namespace 前缀，
+        # 将 demo.echo_task_summary → echo_task_summary。归一化为注册表全名，
+        # 使 skill_allowed_tools 检查、TOOL_REGISTRY lookup 等后续逻辑使用一致的全名。
+        _normalized = _normalize_tool_name(_raw_tool_name)
+        tool_name = _normalized if _normalized is not None else _raw_tool_name
 
         if not tool_name:
             # 中文学习注释：当 action_type 为 tool.request 且 tool_name 为空时，

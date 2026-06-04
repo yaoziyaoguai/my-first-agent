@@ -68,6 +68,7 @@ def blocked_context(monkeypatch):
     mediator._state = state
     mediator._identity = None
     mediator._dispatcher = None  # type: ignore[assignment]
+    mediator._rejection_counts = {}
 
     return mediator, messages
 
@@ -225,4 +226,117 @@ def test_blocked_message_suggests_alternative_when_available(blocked_context) ->
     # 消息应有意义（不只重复工具名）
     assert len(result_text) > len("run_shell") + 5, (
         f"F-005: 拒绝消息应有实质性内容，实际: {result_text!r}"
+    )
+
+
+# =============================================================================
+# P2-001 — 连续重复拒绝反馈升级
+# =============================================================================
+
+
+def test_first_rejection_no_escalation(blocked_context) -> None:
+    """P2-001: 首次拒绝不包含升级措辞。"""
+    mediator, messages = blocked_context
+
+    mediator._handle_blocked(
+        tool_name="run_shell",
+        tool_input={"command": "ls"},
+        tool_use_id="tu_p2_001_1",
+        gate_result={"gate_disposition": "rejected"},
+    )
+
+    result_text = messages.appended[0]["result_text"]
+    assert "连续拒绝" not in result_text, (
+        f"首次不应包含'连续拒绝'措辞，实际: {result_text!r}"
+    )
+    assert "已被重复拒绝" not in result_text, (
+        f"首次不应包含'已被重复拒绝'措辞，实际: {result_text!r}"
+    )
+
+
+def test_second_rejection_escalates(blocked_context) -> None:
+    """P2-001: 第二次拒绝应包含升级措辞，提醒模型换方法。"""
+    mediator, messages = blocked_context
+
+    mediator._handle_blocked(
+        tool_name="run_shell",
+        tool_input={"command": "ls"},
+        tool_use_id="tu_p2_001_2a",
+        gate_result={"gate_disposition": "rejected"},
+    )
+    mediator._handle_blocked(
+        tool_name="run_shell",
+        tool_input={"command": "whoami"},
+        tool_use_id="tu_p2_001_2b",
+        gate_result={"gate_disposition": "rejected"},
+    )
+
+    result_text = messages.appended[1]["result_text"]
+    assert "已被重复拒绝" in result_text, (
+        f"第二次拒绝应包含'已被重复拒绝'升级措辞，实际: {result_text!r}"
+    )
+    assert "换用其他方法" in result_text, (
+        f"第二次拒绝应建议换用其他方法，实际: {result_text!r}"
+    )
+
+
+def test_third_rejection_strong_escalation(blocked_context) -> None:
+    """P2-001: 第三次及以上拒绝应强力升级，包含次数和明确的停止指令。"""
+    mediator, messages = blocked_context
+
+    for i in range(4):
+        mediator._handle_blocked(
+            tool_name="run_shell",
+            tool_input={"command": f"cmd_{i}"},
+            tool_use_id=f"tu_p2_001_3_{i}",
+            gate_result={"gate_disposition": "rejected"},
+        )
+
+    result_text = messages.appended[3]["result_text"]
+    assert "连续拒绝" in result_text, (
+        f"第三次及以上拒绝应包含'连续拒绝'措辞，实际: {result_text!r}"
+    )
+    assert "4" in result_text, (
+        f"应包含实际拒绝次数，实际: {result_text!r}"
+    )
+    assert "停止尝试" in result_text, (
+        f"应包含明确的停止尝试指令，实际: {result_text!r}"
+    )
+
+
+def test_different_tools_independent_counts(blocked_context) -> None:
+    """P2-001: 不同工具的拒绝计数应独立，不互相干扰。"""
+    mediator, messages = blocked_context
+
+    # 拒绝 run_shell 2 次
+    mediator._handle_blocked(
+        tool_name="run_shell",
+        tool_input={"command": "ls"},
+        tool_use_id="tu_p2_001_4a",
+        gate_result={"gate_disposition": "rejected"},
+    )
+    mediator._handle_blocked(
+        tool_name="run_shell",
+        tool_input={"command": "whoami"},
+        tool_use_id="tu_p2_001_4b",
+        gate_result={"gate_disposition": "rejected"},
+    )
+
+    # 首次拒绝 read_file（不同工具，计数应独立）
+    mediator._handle_blocked(
+        tool_name="read_file",
+        tool_input={"path": "/tmp/test.txt"},
+        tool_use_id="tu_p2_001_4c",
+        gate_result={"gate_disposition": "rejected"},
+    )
+
+    second_shell = messages.appended[1]["result_text"]
+    first_read = messages.appended[2]["result_text"]
+
+    assert "已被重复拒绝" in second_shell, "run_shell 第二次拒绝应升级"
+    assert "已被重复拒绝" not in first_read, (
+        f"read_file 首次拒绝不应受 run_shell 计数影响，实际: {first_read!r}"
+    )
+    assert "连续拒绝" not in first_read, (
+        f"read_file 首次拒绝不应包含'连续拒绝'，实际: {first_read!r}"
     )

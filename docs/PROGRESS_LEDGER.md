@@ -1,8 +1,17 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-03 (v1 release blocker remediation — 6 P1 blockers cleared, full pytest 4406/0/37, AGENT_FIX_AUTO=0)
+**最后更新**: 2026-06-04 (post-hotfix dogfood re-run complete — F-001~F-005 terminal, READY_FOR_USER_MANUAL_TRIAL)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+## 2026-06-04 (Post-Hotfix Dogfood Re-Run + Manual Trial Guide Refresh)
+
+| Milestone | 简述 |
+|-----------|------|
+| **Manual Trial Guide Refreshed** | `docs/manual-trials/first-agent-user-trial-guide.md` — 重写至 post-hotfix 基线 (`2a908d6`)：§1 当前状态含 F-001~F-005 terminal 状态 + Coding Agent 已验证项 + synthetic dogfood 不覆盖项；§5 陪跑 prompt 含已知状态上下文 + 更新后的 T-001~T-010 runtime 验证场景；TUI 验证精简为 5 个核心 trial。PROJECT_STATUS/CURRENT_DOCS 同步更新。 |
+| **Post-Remediation Dogfood Re-Run** | `2a908d6` — **docs update** — runtime-first dogfood re-run 验证 F-001~F-005 修复效果：6 journeys (A-F) 通过 real provider (`python main.py` 入口)。F-001 (config 读取阻止) TOOL_GATE blocked ✓；F-001-ext (session 不存 raw config) denial metadata only ✓；F-004 (event_category 规范化) last 20 entries 0 unknown ✓；F-005 (rejection 反馈) 含具体原因 + 替代建议 ✓；F-002 ACCEPTED_AS_CAVEAT；F-003 FIX_DOC_EXPECTATION。所有 findings terminal。 |
+| **F-004 + F-005 Remediation** | `29bf618` — **code fix** — F-004: `agent/logger.py` 新增 `_LEGACY_EVENT_TYPE_MAP` 17 条映射 + `_normalize_legacy_event_type()` + `log_event()` 写入 `event_category`。F-005: `agent/tool_runtime_mediator.py` `_route_gate()` 返回完整 dict (gate_disposition + rejection_reason + evidence_extra) + `_handle_blocked()` 构建多段拒绝消息含 skill_allowed_tools 建议。新增 `tests/test_event_type_normalization.py` (6 tests) + `tests/test_tool_rejection_feedback.py` (6 tests)。Ruff clean。 |
+| **F-001 + F-001-ext Hotfix** | `1912377` — **code fix** — `agent/security.py` `is_sensitive_file()` 扩展识别 config.yaml/.env 等敏感配置/密钥文件 → `needs_confirmation()` 返回 `"block"` → TOOL_GATE 在读取前拒绝。`tests/test_tool_sensitive_path_policy.py` 33 tests PASS。Session 文件仅 denial metadata (142 chars)，无 raw config。 |
 
 ## 2026-06-03 (v1 Engineering Closeout + Docs Alignment)
 

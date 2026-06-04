@@ -1,8 +1,10 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-03 (v1 engineering closeout prepared — `docs/releases/v1/first-agent-v1-closeout.md`)
+**最后更新**: 2026-06-04 (post-hotfix dogfood re-run complete — all F-001~F-005 terminal, **READY_FOR_USER_MANUAL_TRIAL**)
 **Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
-**V1 Closeout**: `docs/releases/v1/first-agent-v1-closeout.md` — engineering baseline 声明、caveats、gates、v2 handoff. **Recommended tag**: `v1.0.0-engineering-closeout` (not yet created).
+**V1 Closeout**: `docs/releases/v1/first-agent-v1-closeout.md` — engineering baseline 声明、caveats、gates、v2 handoff. **Tagged**: `v1.0.0-engineering-closeout` → `f6807ef`.
+**Post-Hotfix Dogfood**: `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` §10 — F-001/F-001-ext/F-004/F-005 FIXED_BY_RECHECK, F-002 ACCEPTED_AS_CAVEAT, F-003 FIX_DOC_EXPECTATION。所有 findings terminal。
+**Manual Trial Guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 已更新至 post-hotfix 基线（`2a908d6`），含 §5 Coding Agent 陪跑 prompt。
 **TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
 **TUI Visual Target**: `docs/design/first-agent-tui-visual-target-v1.md` — 22 组件映射、6 区域布局合同、data source policy。独立审计: **ACCEPTED-WITH-CAVEATS**（3 caveats 不阻塞 Slice A）。
 **TUI Slice A**: **IMPLEMENTED** — `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md`。25 组件 + 3 test files (30 tests) + theme + types + fixtures。static visual shell + mock/fake data + render tests。不接 runtime/provider/MCP。461/461 TUI tests PASS, tsc clean。

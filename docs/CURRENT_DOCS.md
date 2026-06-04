@@ -95,9 +95,9 @@
 | `reviews/b8-tui-workbench-completion-review.md` | B8 completion review (2026-06-01) |
 | `reviews/2026-05-29-first-agent-runtime-lab-stage-review.md` | Runtime lab stage review |
 | `dogfood/README.md` | Dogfood 报告索引 |
-| `dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` | **v1 Runtime-First Dogfood** (2026-06-04) — F-001 P0 CONFIRMED+EXTENDED (session 持久化), HOTFIX_DECISION_REQUIRED |
+| `dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` | **v1 Runtime-First Dogfood** (2026-06-04) — §10 post-remediation re-run: F-001/F-001-ext/F-004/F-005 FIXED_BY_RECHECK, F-002 ACCEPTED_AS_CAVEAT, F-003 FIX_DOC_EXPECTATION. All findings terminal. |
 | `dogfood/v1-runtime-first-synthetic-user-dogfood-plan.md` | v1 Runtime-First Dogfood plan (28 能力清单, 17 journey 设计) |
-| `debt/v1-runtime-first-synthetic-user-dogfood-findings.md` | **v1 Runtime-First Dogfood Findings** (2026-06-04) — 5 findings + 8 gaps |
+| `debt/v1-runtime-first-synthetic-user-dogfood-findings.md` | **v1 Runtime-First Dogfood Findings** (2026-06-04) — 5 findings + 8 gaps + §9 post-remediation re-run verification |
 | `dogfood/v1-synthetic-user-dogfood-report.md` | **v1 Synthetic User Dogfood** (prior evidence) — HOTFIX_DECISION_REQUIRED |
 | `dogfood/v1-synthetic-user-dogfood-plan.md` | v1 Synthetic User Dogfood plan (prior evidence) |
 | `dogfood/GLOBAL_REAL_API_DOGFOOD_REPORT.md` | Global real API dogfood report |

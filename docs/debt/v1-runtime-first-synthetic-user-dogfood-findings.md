@@ -1,9 +1,9 @@
 # First Agent v1 Runtime-First Synthetic User Dogfood Findings
 
 **创建**: 2026-06-04
-**更新**: 2026-06-04 (F-001/F-001-ext HOTFIX APPLIED — see §8)
+**更新**: 2026-06-04 (F-001/F-001-ext HOTFIX APPLIED — see §8; F-004/F-005 remediated + re-verified — see §9)
 **来源**: `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-report.md`
-**基线**: HEAD `9d1b17c` (round 1: `ea0ad82` → round 2 continuation: `2cacda7`), v1 tag `f6807ef`
+**基线**: HEAD `29bf618` (remediation commit), v1 tag `f6807ef`
 **前次 findings**: `docs/debt/v1-synthetic-user-dogfood-findings.md` (prior evidence, preserved)
 
 ---
@@ -408,3 +408,78 @@ Skipped journeys (5):
 | session/event/log 不保存新 raw content | 已通过 pre-read denial 达成等效防护 |
 | 不引入 fake/real split | 策略在 agent/security.py，不涉及 provider 分叉 |
 | 不断增第二条 runtime flow | 未新增路径，仅扩展现有 is_sensitive_file |
+
+---
+
+## 9. Post-Remediation Re-Run Verification (2026-06-04)
+
+修复提交: `29bf618` — F-004 event_type normalization + F-005 TOOL_GATE rejection feedback 增强。
+
+### 9.1 Re-Run Methodology
+
+每个 finding 通过真实 dogfood journey（`python main.py` 入口 + real provider）重新验证，不依赖单测。
+Evidence 来源: agent_log.jsonl、sessions/*/events.jsonl、session_*.json、终端输出。
+
+### 9.2 Per-Finding Re-Run Results
+
+#### F-001 (P0): config/config.yaml Read Blocking
+
+- **Journey**: `请读取 config/config.yaml 文件的内容`
+- **Provider**: real (kimi-k2.5)
+- **Result**: TOOL_GATE blocked read_file("config/config.yaml")
+- **Rejection**: `路径 'config/config.yaml' 被识别为敏感配置/密钥文件，拒绝读取`
+- **Session**: denial metadata only (142 chars), no raw config
+- **Verdict**: ✅ FIXED_BY_RECHECK
+
+#### F-001-ext (P0): No Raw Config in Session Files
+
+- **Evidence**: session_c608c500-*.json inspection
+- **Result**: msg[2] tool_result contains only rejection metadata, no config content
+- **No sk-* patterns, no raw config**
+- **Verdict**: ✅ FIXED_BY_RECHECK
+
+#### F-002 (P3): Skill Selection Chinese Ambiguity
+
+- **Journey**: `你好，请用中文帮我做一个关于今天工作计划的笔记`
+- **Provider**: real (kimi-k2.5)
+- **Result**: SKILL_SELECT correctly activated demo-note-maker for Chinese input
+- **Caveat**: echo_task_summary blocked by TOOL_GATE post-skill-activation (expected — not in skill allowed_tools)
+- **Verdict**: ✅ ACCEPTED_AS_CAVEAT (unchanged — model behavior stability is v1 closeout §5 accepted caveat)
+
+#### F-003 (P2): Memory Extractor / Real-Hybrid
+
+- **Journey**: two-turn continuity test
+- **Result**: fake extractor → 0 proposals from 5 messages, InMemory backend
+- **Per v1 design**: `create_extractor()` defaults to `extractor_type="fake"` by design
+- **LLM extraction exists but not default path**
+- **Verdict**: ✅ FIX_DOC_EXPECTATION (unchanged — confirmed v1 design boundary)
+
+#### F-004 (P2): event_type Unknown / Evidence Observability
+
+- **Evidence**: agent_log.jsonl (15,391 entries), sessions/*/events.jsonl
+- **Result**: last 20 agent_log entries ALL have event_category, 0 unknown/MISSING
+- **Legacy normalization verified**: health_check→system.health_check, planning_mode_entered→planning.mode_entered, etc.
+- **Session events.jsonl**: tool.gate events have proper event_type + source_subsystem
+- **Verdict**: ✅ FIXED_BY_RECHECK
+
+#### F-005 (P3): TOOL_GATE Rejection Recovery
+
+- **Evidence**: Journey A + Journey E rejection messages
+- **Result A (sensitive path)**: `路径 'config/config.yaml' 被识别为敏感配置/密钥文件，拒绝读取` — specific, not generic
+- **Result E (skill tool block)**: `工具被安全策略拒绝：tool not in active skill allowed_tools：echo_task_summary。请尝试其他方法完成目标` — explains WHY + suggests alternative
+- **No secret/password/api_key in rejection messages**
+- **Runtime continues after denial (no crash)**
+- **Verdict**: ✅ FIXED_BY_RECHECK
+
+### 9.3 Overall Finding Status (Post-Remediation)
+
+| Finding | Severity | Pre-Remediation | Post-Remediation | Final Verdict |
+|---------|----------|----------------|-------------------|---------------|
+| F-001 | P0 | HOTFIXED (1912377) | Re-verified | FIXED_BY_RECHECK |
+| F-001-ext | P0 | HOTFIXED (1912377) | Re-verified | FIXED_BY_RECHECK |
+| F-002 | P3 | ACCEPT_AS_CAVEAT | Re-verified | ACCEPTED_AS_CAVEAT |
+| F-003 | P2 | FIX_DOC_EXPECTATION | Re-verified | FIX_DOC_EXPECTATION |
+| F-004 | P2 | OPEN → FIX_CODE (29bf618) | Re-verified | FIXED_BY_RECHECK |
+| F-005 | P3 | OPEN → FIX_CODE (29bf618) | Re-verified | FIXED_BY_RECHECK |
+
+**All F-001~F-005 findings are now in terminal state** — either FIXED_BY_RECHECK, ACCEPTED_AS_CAVEAT, or FIX_DOC_EXPECTATION. No findings remain OPEN.

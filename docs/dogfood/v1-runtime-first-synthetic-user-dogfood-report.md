@@ -1,8 +1,8 @@
 # First Agent v1 Runtime-First Synthetic User Dogfood Report
 
 **创建**: 2026-06-04
-**更新**: 2026-06-04 (continuation round — gaps filled)
-**基线**: v1.0.0-engineering-closeout (tag `f6807ef`), HEAD `2cacda7`
+**更新**: 2026-06-04 (continuation round — gaps filled; post-remediation re-run after 29bf618)
+**基线**: v1.0.0-engineering-closeout (tag `f6807ef`), HEAD `29bf618`
 **执行者**: Coding Agent (DeepSeek v4 Pro)
 **计划**: `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-plan.md`
 **前次报告**: `docs/dogfood/v1-synthetic-user-dogfood-report.md` (prior evidence, preserved)
@@ -396,3 +396,97 @@ agent_log.jsonl: 523 lines
 sessions/: 795 entries
 checkpoints/: 212 files (unchanged, InMemory)
 ```
+
+---
+
+## 10. Post-Remediation Re-Run (after 29bf618)
+
+**日期**: 2026-06-04
+**修复提交**: `29bf618` (F-004 + F-005 code fixes)
+**目的**: 在真实 dogfood 路径中重新验证 F-001~F-005 修复效果，不依赖单测。
+
+### 10.1 Re-Run Journeys
+
+| Journey | Finding | Input | Provider | Result |
+|---------|---------|-------|----------|--------|
+| A | F-001/F-001-ext | `请读取 config/config.yaml 文件的内容` | real (kimi-k2.5) | PASS — TOOL_GATE blocked, session has denial metadata only |
+| B | F-004 (agent_log) | evidence inspection | N/A | PASS — last 20 entries all have event_category, 0 unknown |
+| C | F-005 (rejection) | `请读取 config/config.yaml 文件的内容` | real (kimi-k2.5) | PASS — rejection message includes reason + blocked |
+| D | F-002 (skill Chinese) | `请用中文帮我做一个关于今天工作计划的笔记` | real (kimi-k2.5) | PASS — SKILL_SELECT activated correctly for Chinese input |
+| E | F-005 (skill tool block) | (follow-up to D) | real (kimi-k2.5) | PASS — echo_task_summary blocked with "tool not in active skill allowed_tools" |
+| F | F-003 (memory/checkpoint) | two-turn continuity | real (kimi-k2.5) | CONFIRMED — fake extractor, 0 proposals, InMemory backend |
+
+### 10.2 Finding Re-Eval Results
+
+#### F-001: Secret Read Blocking — FIXED
+
+- Journey A: model generated `read_file("config/config.yaml")` → TOOL_GATE **BLOCKED**
+- Rejection message: `路径 'config/config.yaml' 被识别为敏感配置/密钥文件，拒绝读取`
+- Session file (`session_c608c500-*.json`): denial metadata only, no raw config content
+- **Verdict**: FIXED_BY_RECHECK
+
+#### F-001-ext: No Raw Config in Session — FIXED
+
+- Session file inspection: msg[2] is `tool_result` with tool_use_id "toolu_functions.read_file:0", role "user", content is rejection metadata only (142 chars)
+- No sk-* patterns, no raw config content
+- **Verdict**: FIXED_BY_RECHECK
+
+#### F-004: event_type Normalization — FIXED
+
+- agent_log.jsonl (15,391 entries): last 20 entries all have `event_category` field
+- Distribution: runtime_observer (14), checkpoint_saved (1), planning.error (1), planning.mode_entered (1), planning.plan_received (1), planning.schema_validated (1), system.health_check (1)
+- 0 unknown/MISSING in last 20
+- Legacy normalization verified: health_check→system.health_check, planning_mode_entered→planning.mode_entered, model_plan_received→planning.plan_received
+- Session-level events.jsonl: tool.gate events recorded with proper event_type
+- **Verdict**: FIXED_BY_RECHECK
+
+#### F-005: TOOL_GATE Rejection Feedback — FIXED
+
+- Journey A: rejection message includes `被识别为敏感配置/密钥文件，拒绝读取` — specific reason, not generic
+- Journey E: `工具被安全策略拒绝：tool not in active skill allowed_tools：echo_task_summary` — explains WHY and suggests trying other methods
+- Session events.jsonl records tool.gate events with source_subsystem
+- model/runtime continues after denial (no crash)
+- No secret/password/api_key in rejection messages
+- **Verdict**: FIXED_BY_RECHECK
+
+#### F-002: Skill Selection Chinese Ambiguity — ACCEPTED_AS_CAVEAT (不变)
+
+- Journey D: Chinese input `你好，请用中文帮我做一个关于今天工作计划的笔记` → SKILL_SELECT correctly activated demo-note-maker
+- Skill selection code path works correctly for Chinese input
+- Model behavior around tool selection post-skill-activation has caveats (echo_task_summary blocked by gate)
+- Per v1 closeout §5: model behavior stability is an accepted caveat
+- **Verdict**: ACCEPTED_AS_CAVEAT (unchanged, confirmed by re-run)
+
+#### F-003: Memory Extractor / Real-Hybrid — FIX_DOC_EXPECTATION (不变)
+
+- Journey F: two-turn conversation, 5 messages, fake extractor → 0 proposals
+- Memory backend: InMemory (ephemeral)
+- checkpoint directory: does not exist (InMemory mode)
+- Session file saved with full message history (continuity within single chat)
+- Per v1 design: `create_extractor()` defaults to `extractor_type="fake"` by design
+- LLM extraction exists in codebase but requires explicit provider injection — not default path
+- **Verdict**: FIX_DOC_EXPECTATION (unchanged, confirmed by re-run)
+
+### 10.3 Final Finding Status Table
+
+| Finding | Pre-Remediation | Post-Remediation | Re-Run Verdict |
+|---------|----------------|-------------------|----------------|
+| F-001 | HOTFIXED (1912377) | HOTFIXED (1912377) | FIXED_BY_RECHECK |
+| F-001-ext | HOTFIXED (1912377) | HOTFIXED (1912377) | FIXED_BY_RECHECK |
+| F-002 | ACCEPT_AS_CAVEAT | ACCEPT_AS_CAVEAT | ACCEPTED_AS_CAVEAT |
+| F-003 | FIX_DOC_EXPECTATION | FIX_DOC_EXPECTATION | FIX_DOC_EXPECTATION |
+| F-004 | OPEN | FIX_CODE (29bf618) | FIXED_BY_RECHECK |
+| F-005 | OPEN | FIX_CODE (29bf618) | FIXED_BY_RECHECK |
+
+### 10.4 Evidence Summary
+
+| Evidence Source | Before Remediation | After Remediation |
+|----------------|-------------------|-------------------|
+| agent_log.jsonl event_category | missing on legacy entries | present on all new entries |
+| agent_log.jsonl unknown rate | high (legacy "?" in log_viewer) | 0/20 in recent entries |
+| TOOL_GATE rejection message | generic "被安全策略拒绝" | specific reason + tool name |
+| Session events.jsonl | no event_type on entries | tool.gate with source_subsystem |
+| config read blocking | NOT blocked (P0) | BLOCKED with clear reason |
+| Session raw config | persisted in session file | denial metadata only |
+| Memory extractor | fake (0 proposals) | fake (0 proposals) — expected |
+| Checkpoint directory | InMemory (no files) | InMemory (no files) — expected |

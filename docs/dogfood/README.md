@@ -6,7 +6,7 @@
 
 | 文档 | 日期 | 说明 |
 |------|------|------|
-| [v1-runtime-first-synthetic-user-dogfood-report.md](v1-runtime-first-synthetic-user-dogfood-report.md) | 2026-06-04 | **最新** v1 Runtime-First Synthetic User Dogfood：入口驱动设计，28 能力覆盖矩阵，6 journey 执行。F-001 P0 CONFIRMED+EXTENDED (session 持久化泄露)，F-002 P3 CONFIRMED，F-003 P2 CONFIRMED，F-004 P2 CONFIRMED。HOTFIX_DECISION_REQUIRED |
+| [v1-runtime-first-synthetic-user-dogfood-report.md](v1-runtime-first-synthetic-user-dogfood-report.md) | 2026-06-04 | **最新** v1 Runtime-First Synthetic User Dogfood：入口驱动设计，28 能力覆盖矩阵，6 journey 执行。§10 post-remediation re-run：F-001/F-001-ext FIXED_BY_RECHECK，F-004/F-005 FIXED_BY_RECHECK，F-002 ACCEPTED_AS_CAVEAT，F-003 FIX_DOC_EXPECTATION。All findings terminal. |
 | [v1-synthetic-user-dogfood-report.md](v1-synthetic-user-dogfood-report.md) | 2026-06-04 | **前次尝试 (prior evidence)** v1 Synthetic User Dogfood：17/17 journeys 执行 (11 fake/local + 6 real)。F-001 P0 HOTFIX_DECISION_REQUIRED，F-002 P3 MODEL_BEHAVIOR，F-003/F-004 P2 FUTURE_DEBT |
 | [v1-runtime-first-synthetic-user-dogfood-plan.md](v1-runtime-first-synthetic-user-dogfood-plan.md) | 2026-06-04 | **Runtime-First 方案**：28 能力清单，12 问题旧 dogfood 批判，17 journey 设计，coverage matrix |
 | [AGENT_DOGFOOD_AUTO Suite](../PROJECT_STATUS.md) | 2026-06-03 | v1 release-readiness agent dogfood：873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |

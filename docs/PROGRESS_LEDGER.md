@@ -1,8 +1,15 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-04 (USER_MANUAL_TRIAL_COMPLETE_WITH_P1_FINDINGS)
+**最后更新**: 2026-06-04 (**P1_REMEDIATED_PENDING_USER_RECHECK**)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+## 2026-06-04 (User Manual Trial P1/P2/P3 Remediation)
+
+| Milestone | 简述 |
+|-----------|------|
+| **P1/P2/P3 Findings Remediated** | 6 findings 全部修复：健康检查 tool_registry_integrity (bug fix)、UMT-P1-001 TUI Ctrl+C 退出 (binding 补齐)、UMT-P1-002 Skill 工具 overblocking (skill-aware explicit_allowlist)、UMT-P2-001 弱 fallback (FORCE_STOP 不终止循环)、UMT-P2-002 粘贴/快捷键 (4 focused tests)、UMT-P3-001 无后缀文件名解析 (extension fallback)。Status: P1_REMEDIATED_PENDING_USER_RECHECK。 |
+| **Manual Trial Report Updated** | `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §6 Remediation Results 追加：每个 finding 的 root cause、fix、gate results、status。 |
 
 ## 2026-06-04 (User Manual Trial + Findings Recorded)
 

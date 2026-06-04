@@ -331,16 +331,17 @@ def handle_tool_use_response(
                     "不会在后续自动重试——如有需要请换用其他方式"
                 ),
             )
-            # v0.2 RC smoke 修复：FORCE_STOP 的唯一来源是 policy block
-            # （tool_executor.py 的 confirmation == "block" 分支），不是
-            # 「用户连续拒绝多次」。Runtime 中也并不存在用户拒绝计数器。
-            # 旧消息「用户连续拒绝多次操作，任务已停止」会让用户在仅一次
-            # 安全拒绝后误以为系统在指责自己。改为如实陈述策略阻断，
-            # 并提示用户上文工具消息有具体拒绝原因。
-            return (
-                "工具调用被安全策略阻断，本任务已停止。"
-                "具体拒绝原因见上方工具消息。"
-            )
+            # UMT-P2-001: 不在这里 return 停止循环。
+            # _handle_blocked 已将拒绝原因写入 messages（tool_result），
+            # 模型在下一轮会看到拒绝反馈并尝试替代方案。
+            # 将 stop_reason 记录到 tool_execution_log 供审计，但不阻断循环。
+            state.task.tool_execution_log.setdefault("_last_block_reason", {})
+            state.task.tool_execution_log["_last_block_reason"] = {
+                "tool": block.name,
+                "reason": "被安全策略拒绝执行（TOOL_GATE rejected）。"
+                          "具体拒绝原因已写入上方工具消息，模型将尝试替代方案。",
+            }
+            # consume block (already handled by mediator) and continue to next
         if result == AWAITING_USER:
             log_event(
                 "loop.stop",

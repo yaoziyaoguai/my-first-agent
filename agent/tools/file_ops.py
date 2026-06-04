@@ -1,31 +1,33 @@
 from pathlib import Path
+
 from agent.tool_registry import register_tool
 from config import PROJECT_DIR
+
 FILE_CONTENT_LIMIT = 50000
 
 
 def _check_read_permission(tool_input):
     """read_file 的确认规则"""
     from agent.security import is_sensitive_file
-    
+
     path = tool_input.get("path", "")
-    
+
     # 敏感文件：直接拦截
     if is_sensitive_file(path):
         return "block"
-    
+
     # 项目内：静默执行
     file_path = Path(path).resolve()
-    if file_path.is_relative_to(PROJECT_DIR):
-        return False
-    
-    # 项目外：需确认
-    return True
+    # 项目外：需确认（非项目内则确认）
+    return not file_path.is_relative_to(PROJECT_DIR)
 
 
 @register_tool(
     name="read_file",
-    description="读取一个文件的内容。如果文件较大（超过10000字符），会返回文件概览而非完整内容，此时请使用 read_file_lines 按行读取具体部分，不要重复调用 read_file 尝试不同路径。",
+    description=(
+        "读取一个文件的内容。如果文件较大（超过10000字符），会返回文件概览而非完整内容，"
+        "此时请使用 read_file_lines 按行读取具体部分，不要重复调用 read_file 尝试不同路径。"
+    ),
     parameters={
         "path": {
             "type": "string",
@@ -40,22 +42,42 @@ def _check_read_permission(tool_input):
 def read_file(path):
     try:
         file_path = Path(path)
+        # UMT-P3-001: 无后缀文件名友好处理。
+        # 精确路径不存在时，尝试追加常见文档后缀寻找匹配文件。
+        # 只对不包含已知敏感路径段的文件名生效（不扩展 config/.env）。
+        if not file_path.exists():
+            original_name = file_path.name
+            sensitive_names = frozenset({
+                "config", ".env", "credentials", "secret", "token", "key",
+            })
+            # 不含点说明无后缀（如 README、Makefile），且不匹配敏感名时才尝试扩展
+            if ("." not in original_name
+                    and original_name.lower() not in sensitive_names
+                    and original_name != original_name.upper()):  # 不是全大写（LICENSE 等）
+                safe_extensions = (".md", ".txt", ".rst")
+                parent = file_path.parent
+                for ext in safe_extensions:
+                    candidate = parent / f"{original_name}{ext}"
+                    if candidate.exists():
+                        file_path = candidate
+                        break
+
         if not file_path.exists():
             return f"错误：文件 '{path}' 不存在"
-        
+
         content = file_path.read_text(encoding="utf-8", errors="replace")
         total_lines = len(content.splitlines())
-        
+
         if len(content) <=FILE_CONTENT_LIMIT:
             return content
-        
+
         from agent.tools.outline import extract_file_outline
-        
+
         preview = content[:3000]
         suffix = file_path.suffix.lower()
         outline = extract_file_outline(content, suffix)
         outline_text = "\n".join(outline[:200])
-        
+
         return (
             f"[读取成功 - 文件较大，以下为概览]\n"
             f"路径: {path}\n"
@@ -66,7 +88,8 @@ def read_file(path):
             f"{preview}\n\n"
             f"[文件结构目录]\n"
             f"{outline_text}\n\n"
-            f"[说明] 文件已成功读取。以上是概览信息。如需查看具体行范围，请使用 read_file_lines 工具。不要重复调用 read_file。"
+            f"[说明] 文件已成功读取。以上是概览信息。如需查看具体行范围，"
+            f"请使用 read_file_lines 工具。不要重复调用 read_file。"
         )
     except Exception as e:
         return f"读取错误：{e}"
@@ -74,7 +97,10 @@ def read_file(path):
 
 @register_tool(
     name="read_file_lines",
-    description="按指定行号范围读取文件内容。适合在 read_file 查看概览后，进一步查看某一段代码或文本。",
+    description=(
+        "按指定行号范围读取文件内容。适合在 read_file 查看概览后，"
+        "进一步查看某一段代码或文本。"
+    ),
     parameters={
         "path": {
             "type": "string",

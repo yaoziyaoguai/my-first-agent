@@ -15,15 +15,17 @@
 | UMT-002 | Paste / multiline | P1 | user | 需真实终端粘贴行为，自动化无法覆盖终端 paste buffer | 粘贴中文/英文/mixed/特殊字符/multiline 块，记录 pass/fail | 参照 trial guide §3-4 |
 | UMT-003 | Terminal real interaction | P2 | user | IME + paste + multiline 组合场景依赖前两项完成 | UMT-001 + UMT-002 通过后验证组合场景 | UMT-001/002 完成后 |
 
-### USER_MANUAL_TRIAL Findings (2026-06-04)
+### USER_MANUAL_TRIAL Findings (2026-06-04) — REMEDIATED 2026-06-04
 
-| ID | Issue | Priority | Owner | Why not v1 blocker | Required evidence before closure | Recommended next loop |
-|----|-------|----------|-------|--------------------|----------------------------------|----------------------|
-| **UMT-P1-001** | Textual TUI deadlock / cannot exit | **P1** | agent | v1 验收发现，影响可停止性和交互主路径 | TUI 正常捕获 Ctrl+C 和 q 键，无死锁响应 | TUI stability / signal handling hardening |
-| **UMT-P1-002** | TOOL_GATE overblocks valid Skill tools | **P1** | agent | v1 验收发现，导致 Skill 系统不可用 | 区分 sensitive file block 与 valid skill allowed_tools，Skill 正常执行 | TOOL_GATE policy refinement |
-| **UMT-P2-001** | Weak fallback after TOOL_GATE rejection | **P2** | agent | F-005 已部分改进，但真实试用说明仍需增强 | 被拒后 Agent 尝试安全替代路径而不直接停止 | Intelligent fallback logic enhancement |
-| **UMT-P2-002** | Textual paste / shortcut handling incomplete | **P2** | agent | 交互体验欠缺 | 支持 Cmd+V 粘贴和快捷键退出 | Textual TUI capability completion |
-| **UMT-P3-001** | Extensionless file path resolution weak | **P3** | agent | 小体验瑕疵 | `read_file` 自动尝试常见后缀 | File path resolution refinement |
+**Status: P1_REMEDIATED_PENDING_USER_RECHECK** — 所有 findings 已有代码修复 + focused tests + gates 验证。详见 `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §6 Remediation Results。
+
+| ID | Issue | Priority | Remediation Status |
+|----|-------|----------|-------------------|
+| **UMT-P1-001** | Textual TUI deadlock / cannot exit | **P1** | **FIXED_BY_RECHECK** — 添加 Ctrl+C binding + ChatTextArea._on_key 处理。31/31 Textual tests PASS. |
+| **UMT-P1-002** | TOOL_GATE overblocks valid Skill tools | **P1** | **FIXED_BY_RECHECK** — skill-aware explicit_allowlist in _call_model(). 3 new contract tests. |
+| **UMT-P2-001** | Weak fallback after TOOL_GATE rejection | **P2** | **FIXED_BY_RECHECK** — FORCE_STOP 不再终止循环，rejection 信息写入 tool_execution_log 作为模型反馈。 |
+| **UMT-P2-002** | Textual paste / shortcut handling incomplete | **P2** | **FIXED_BY_RECHECK_WITH_CAVEAT** — TextArea 原生支持 paste；4 focused tests added。Cmd+V 行为依赖终端模拟器 (macOS caveat)。 |
+| **UMT-P3-001** | Extensionless file path resolution weak | **P3** | **FIXED_BY_RECHECK** — 无后缀文件名自动尝试 .md/.txt/.rst 扩展名。敏感文件名不扩展。 |
 
 **Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 可执行试用剧本，含 Coding Agent 陪跑 prompt、角色分离、严重度规则（P0-P3）、trial report 模板。
 

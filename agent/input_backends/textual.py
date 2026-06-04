@@ -123,6 +123,7 @@ def _build_textual_app_class() -> type[Any]:
             ("f10", "submit", "提交"),
             ("escape", "cancel", "取消"),
             ("ctrl+q", "close_input", "退出"),
+            ("ctrl+c", "close_input", "退出"),
         ]
 
         def __init__(self, *, prompt_text: str, latest_output: str = "") -> None:
@@ -136,7 +137,7 @@ def _build_textual_app_class() -> type[Any]:
                 yield Static(output_text, id="output-panel", classes="output-panel")
                 yield TextArea("", id="input-area", classes="input-panel")
                 yield Static(
-                    f"{self.prompt_text}Enter 换行 | Ctrl+S/Ctrl+Enter/F10 提交 | Esc 取消 | Ctrl+Q 退出",
+                    f"{self.prompt_text}Enter 换行 | Ctrl+S/Ctrl+Enter/F10 提交 | Esc 取消 | Ctrl+Q/Ctrl+C 退出",  # noqa: E501
                     id="help-bar",
                     classes="help-bar",
                 )
@@ -191,6 +192,15 @@ def _build_textual_shell_app_class() -> type[Any]:
         """
 
         def _on_key(self, event: Any) -> None:
+            # Ctrl+C 优先于所有其他按键——无论输入框是否有内容，立即退出。
+            # TextArea 默认不消费 ctrl+c，但终端可能发 SIGINT 而非按键事件；
+            # 这个处理确保 Textual 收到 ctrl+c 按键事件时可靠退出。
+            if event.key == "ctrl+c":
+                event.prevent_default()
+                event.stop()
+                self.app.action_close_input()
+                return
+
             if event.key == "enter":
                 event.prevent_default()
                 event.stop()
@@ -248,6 +258,7 @@ def _build_textual_shell_app_class() -> type[Any]:
             ("f10", "submit", "提交"),
             ("escape", "cancel", "取消"),
             ("ctrl+q", "close_input", "退出"),
+            ("ctrl+c", "close_input", "退出"),
             ("ctrl+s", "submit", "备用提交"),
         ]
 
@@ -280,7 +291,7 @@ def _build_textual_shell_app_class() -> type[Any]:
                     )
                 yield ChatTextArea("", id="input-area", classes="input-panel")
                 yield Static(
-                    f"{self.prompt_text}Enter 提交 | Shift+Enter/Ctrl+Enter 换行 | F10 备用提交 | Esc 清空 | Ctrl+Q 退出",
+                    f"{self.prompt_text}Enter 提交 | Shift+Enter/Ctrl+Enter 换行 | F10 备用提交 | Esc 清空 | Ctrl+Q/Ctrl+C 退出",  # noqa: E501
                     id="help-bar",
                     classes="help-bar",
                 )

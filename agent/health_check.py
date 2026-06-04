@@ -267,7 +267,9 @@ def check_tool_registry_integrity():
     for name, info in TOOL_REGISTRY.items():
         if info.get("meta_tool"):
             meta_tool_count += 1
-        missing = [f for f in required_fields if not info.get(f)]
+        # 使用 is None 而非 not info.get(f)，因为 parameters={}（零参数工具）
+        # 是合法的 falsy 值，不应被误判为缺失字段。
+        missing = [f for f in required_fields if info.get(f) is None]
         if missing:
             issues.append(f"工具 '{name}' 缺少字段: {missing}")
 

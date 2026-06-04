@@ -827,6 +827,12 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "state.task.consecutive_max_tokens",
         ),
         ("agent.response_handlers", "handle_tool_use_response", "state.task.tool_call_count"),
+        # UMT-P2-001: FORCE_STOP 不终止循环，写入 tool_execution_log 传递拒绝原因给模型
+        (
+            "agent.response_handlers",
+            "handle_tool_use_response",
+            "state.task.tool_execution_log",
+        ),
         ("agent.session", "handle_interrupt_choice", "state.reset_task()"),
         ("agent.session", "handle_interrupt_choice", "state.task.status"),
         ("agent.session", "handle_interrupt_with_checkpoint", "state.task.status"),

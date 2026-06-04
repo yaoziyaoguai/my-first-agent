@@ -79,7 +79,7 @@ def test_textual_backend_headless_smoke_exposes_real_widget_ids_and_classes():
             assert help_bar.id == "help-bar"
             assert "help-bar" in help_bar.classes
             assert "你:" in help_bar.content
-            assert "Ctrl+Q" in help_bar.content
+            assert "Ctrl+Q/Ctrl+C" in help_bar.content
             assert "Ctrl+D" not in help_bar.content
 
     asyncio.run(run_smoke())
@@ -170,7 +170,7 @@ def test_textual_shell_headless_smoke_exposes_conversation_and_input_widgets():
             assert help_bar.id == "help-bar"
             assert "help-bar" in help_bar.classes
             assert "Enter 提交" in help_bar.content
-            assert "Ctrl+Q 退出" in help_bar.content
+            assert "Ctrl+Q/Ctrl+C 退出" in help_bar.content
             assert "Ctrl+D" not in help_bar.content
 
     asyncio.run(run_smoke())
@@ -987,5 +987,172 @@ def test_textual_shell_escape_can_cancel_running_generation():
             assert "第一段" not in rendered
             assert "第二段不应出现" not in rendered
             assert "最终完成文本不应覆盖中断提示" not in rendered
+
+    asyncio.run(run_smoke())
+
+
+# ========== UMT-P1-001: Ctrl+C 退出 ==========
+
+
+def test_textual_shell_ctrl_c_binding_exists():
+    """UMT-P1-001: Ctrl+C 必须注册为退出 binding。"""
+    _require_textual()
+    from agent.input_backends.textual import _build_textual_shell_app_class
+    app_cls = _build_textual_shell_app_class()
+    bindings = {(key, action) for key, action, _description in app_cls.BINDINGS}
+    assert ("ctrl+c", "close_input") in bindings, (
+        "Ctrl+C 必须绑定为 close_input，确保用户可用 Ctrl+C 退出 TUI"
+    )
+
+
+def test_textual_shell_ctrl_c_exits_without_submitting_draft():
+    """UMT-P1-001: Ctrl+C 退出时不应误提交草稿。"""
+    _require_textual()
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        seen_inputs = []
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(
+            chat_handler=lambda text, on_runtime_event=None: (
+                seen_inputs.append(text) or "unused"
+            )
+        )
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            input_area.load_text("这是一段草稿")
+            await pilot.press("ctrl+c")
+            assert seen_inputs == [], "Ctrl+C 退出不应触发任何 chat_handler 调用"
+
+    asyncio.run(run_smoke())
+
+
+def test_textual_one_shot_ctrl_c_binding_exists():
+    """UMT-P1-001: one-shot TUI 也应注册 Ctrl+C 退出 binding。"""
+    _require_textual()
+    from agent.input_backends.textual import _build_textual_app_class
+    app_cls = _build_textual_app_class()
+    bindings = {(key, action) for key, action, _description in app_cls.BINDINGS}
+    assert ("ctrl+c", "close_input") in bindings, (
+        "one-shot TUI 的 Ctrl+C 也应绑定为 close_input"
+    )
+
+
+# ========== UMT-P2-002: 粘贴 / 快捷键行为 ==========
+
+
+def test_textual_shell_paste_multiline_insert_does_not_crash():
+    """UMT-P2-002: 在 TextArea 中模拟粘贴多行文本不应崩溃。
+
+    Textual TextArea 本身支持多行输入，粘贴应被视为普通文本插入。
+    平台差异：macOS Terminal 通过 Cmd+V / 中键粘贴，实际由终端模拟器控制。
+    """
+    _require_textual()
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(chat_handler=lambda text, on_runtime_event=None: "unused")
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            # 模拟多行粘贴 — insert 到 TextArea
+            pasted = "第一行\n第二行\n第三行"
+            input_area.load_text(pasted)
+            await pilot.pause()
+            assert input_area.text == pasted, (
+                "多行粘贴应当被 TextArea 接受并保持多行内容"
+            )
+
+    asyncio.run(run_smoke())
+
+
+def test_textual_shell_paste_bulk_text_does_not_block_ui():
+    """UMT-P2-002: 大量文本粘贴不应阻塞 UI。
+
+    TextArea 应能处理合理大小的输入并保持响应。
+    """
+    _require_textual()
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(chat_handler=lambda text, on_runtime_event=None: "unused")
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            # 模拟 2000 字符粘贴 — 不应导致 UI 卡死
+            bulk = "x" * 2000
+            input_area.load_text(bulk)
+            await pilot.pause()
+            assert len(input_area.text) == 2000, "大量文本粘贴应被完整接受"
+            # UI 必须仍然可响应 — 清空输入区应工作
+            input_area.clear()
+            await pilot.pause()
+            assert input_area.text == "", "粘贴后清空应正常工作"
+
+    asyncio.run(run_smoke())
+
+
+def test_textual_shell_paste_then_submit_works():
+    """UMT-P2-002: 粘贴后提交应正常触发 chat_handler。"""
+    _require_textual()
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        seen_inputs = []
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(
+            chat_handler=lambda text, on_runtime_event=None: (
+                seen_inputs.append(text) or "unused"
+            )
+        )
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            # 粘贴一段内容后按回车提交
+            input_area.load_text("粘贴的内容")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert seen_inputs == ["粘贴的内容"], (
+                "粘贴后提交应正常将内容传递给 chat_handler"
+            )
+
+    asyncio.run(run_smoke())
+
+
+def test_textual_shell_ctrl_q_shortcut_still_works():
+    """UMT-P2-002: 快捷键 Ctrl+Q 必须在粘贴等其他操作后仍然可用。
+
+    这是 UMT-P1-001 修复的回退保护 — 确保关键字绑定不受内容影响。
+    """
+    _require_textual()
+    from textual.widgets import TextArea
+
+    from agent.input_backends.textual import _build_textual_shell_app_class
+
+    async def run_smoke() -> None:
+        seen_inputs = []
+        app_cls = _build_textual_shell_app_class()
+        app = app_cls(
+            chat_handler=lambda text, on_runtime_event=None: (
+                seen_inputs.append(text) or "unused"
+            )
+        )
+        async with app.run_test() as pilot:
+            input_area = app.query_one("#input-area", TextArea)
+            # 填充内容后再按 Ctrl+Q — 应退出而不提交
+            input_area.load_text("测试快捷键")
+            await pilot.pause()
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+            assert seen_inputs == [], (
+                "Ctrl+Q 退出不应提交任何内容"
+            )
 
     asyncio.run(run_smoke())

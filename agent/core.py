@@ -121,7 +121,7 @@ from agent.skill_system.prompt_section import build_skill_selection_section
 from agent.skill_system.retriever import SkillCandidateRetriever
 from agent.state import create_agent_state, task_status_requires_plan
 from agent.subagent_inline import execute_subagent_delegation as _execute_subagent_delegation
-from agent.tool_registry import get_model_visible_tools
+from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
 from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
 
 DEBUG_PROTOCOL = False
@@ -1778,13 +1778,40 @@ def _call_model(
         # REAL-EVIDENCE-002: 确保 SKILL_SELECT 在 TOOL_REGISTRY 中注册（幂等）。
         from agent.skill_system.skill_tool import _ensure_skill_select_registered
         _ensure_skill_select_registered()
+
+        # UMT-P1-002: 活跃 skill 时限制模型可见工具范围。
+        # 不限制时模型看到所有工具但只能用 skill.allowed_tools 中的工具，
+        # 导致模型尝试调用其他工具时被 TOOL_GATE 拒绝（"overblocking"）。
+        # 修复：活跃 skill 时通过 explicit_allowlist 将模型可见工具
+        # 收窄为 skill.allowed_tools + 元工具 + SKILL_SELECT。
+        _skill_visible_allowlist: frozenset[str] | None = None
+        try:
+            from agent.skill_system.lifecycle import get_default_lifecycle
+            _rt_id = getattr(loop_ctx, "runtime_identity", None)
+            _sid = getattr(_rt_id, "session_id", "default") if _rt_id is not None else "default"
+            _lc = get_default_lifecycle(session_id=_sid)
+            _active_tools = _lc.get_allowed_tools()
+            if _active_tools:
+                # 技能工具 + 元工具 + SKILL_SELECT（用于切换/退出技能）
+                _meta_tool_names = frozenset({
+                    name for name, info in TOOL_REGISTRY.items()
+                    if info.get("meta_tool")
+                })
+                _skill_visible_allowlist = (
+                    frozenset(_active_tools) | _meta_tool_names | {"SKILL_SELECT"}
+                )
+        except ImportError:
+            pass
+
         response = call_model(
             provider=getattr(loop_ctx, "model_provider", None),
             legacy_client=loop_ctx.client,
             model_name=loop_ctx.model_name,
             system_prompt=turn_state.system_prompt,
             messages=request_messages,
-            tools=get_model_visible_tools(max_mcp_tools=5),
+            tools=get_model_visible_tools(
+                max_mcp_tools=5, explicit_allowlist=_skill_visible_allowlist
+            ),
             emit_text_delta=(
                 (lambda text: turn_state.on_runtime_event(assistant_delta(text)))
                 if turn_state.on_runtime_event is not None

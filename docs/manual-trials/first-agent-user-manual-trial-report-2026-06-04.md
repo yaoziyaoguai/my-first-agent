@@ -60,3 +60,35 @@
 3. **P1 Fix**: 精细化 `TOOL_GATE` 策略，区分敏感文件读取与合法 Skill 调用。
 4. **P2 Fix**: 增强被拒后的 fallback 逻辑。
 5. **P2 Fix**: 补齐 TUI 粘贴和快捷键支持。
+
+---
+
+## 6. Remediation Results (2026-06-04)
+
+**Remediation baseline**: `fb6c68c` (original trial findings commit)
+
+### 6.1 Remediation Summary
+
+| Finding ID | Severity | Status | Root Cause | Fix |
+|-----------|----------|--------|------------|-----|
+| **健康检查 tool_registry_integrity** | Error | **FIXED_BY_RECHECK** | `is None` vs falsy check bug — `metadata.get("output_policy")` is `None` for `command.spawn` (registered in `MCPCommands` via shell)，`not None` evaluates to `False`, incorrectly treated as missing metadata. | Changed `not info.get(f)` to `info.get(f) is None` in `run_health_check()` (previous session). |
+| **UMT-P1-001** | P1 | **FIXED_BY_RECHECK** | Textual TUI only bound `ctrl+q` for exit, which macOS Terminal intercepts for XON/XOFF flow control. No fallback exit keybinding. | Added `ctrl+c` binding to both `LightweightInputApp` and `PersistentInputShell` BINDINGS lists; added `ctrl+c` handling in `ChatTextArea._on_key()` to call `action_close_input()`; updated help bar text to show "Ctrl+Q/Ctrl+C 退出". 31/31 Textual tests PASS. |
+| **UMT-P1-002** | P1 | **FIXED_BY_RECHECK** | `get_model_visible_tools()` not skill-aware — model received all tools but only skill.allowed_tools subset could pass TOOL_GATE, causing model to attempt non-allowed tools and receive overblocking rejections. | Added skill-aware `explicit_allowlist` computation in `_call_model()` in `agent/core.py`: when a skill is active, model-visible tools are narrowed to `skill.allowed_tools + meta_tools + SKILL_SELECT`. 3 new contract tests added to `test_demo_tools_contract.py`. |
+| **UMT-P2-001** | P2 | **FIXED_BY_RECHECK** | `FORCE_STOP` handling in `response_handlers.py` returned a stop message that ended the conversation loop, preventing model from trying alternative approaches. | Changed `handle_tool_use_response` to write rejection info to `state.task.tool_execution_log` and let the loop continue instead of returning a terminal stop message. Model now receives rejection as tool_result feedback and can try alternatives. |
+| **UMT-P2-002** | P2 | **FIXED_BY_RECHECK_WITH_CAVEAT** | Textual's `TextArea` widget handles paste natively through terminal-level events. No code changes needed for basic paste — Ctrl+V / Cmd+V work through terminal paste. Previous "not supported" report likely due to TUI deadlock (UMT-P1-001) preventing paste from being delivered. | Added 4 focused tests for paste behavior: multiline insert, bulk text (2000 chars), paste-then-submit, and Ctrl+Q shortcut integrity after paste. 31/31 Textual tests PASS. **Caveat**: Cmd+V paste behavior is terminal-emulator-dependent on macOS; the TUI application cannot intercept OS-level paste shortcuts. |
+| **UMT-P3-001** | P3 | **FIXED_BY_RECHECK** | `read_file` required exact path match; no extension-based fallback for files like `README`. | Added extensionless path resolution in `agent/tools/file_ops.py`: when exact path doesn't exist, tries common document extensions (`.md`, `.txt`, `.rst`). Does NOT expand sensitive filenames (`config`, `.env`, `credentials`, `secret`, `token`, `key`). |
+
+### 6.2 Gate Results
+
+```text
+test_tool_sensitive_path_policy.py ................ 33 passed
+test_docs_source_of_truth.py .......................... 79 passed
+test_architecture_boundaries.py ........................ 24 passed
+test_demo_tools_contract.py ........... 11 passed
+test_input_backends_textual.py ............................... 31 passed
+ruff check (all touched files) .................................. ALL CLEAN
+```
+
+### 6.3 Status After Remediation
+
+**P1_REMEDIATED_PENDING_USER_RECHECK** — all P1 findings have code fixes + focused tests + gate verification. Requires human user recheck to confirm TUI exit, Skill tool access, and overall usability.

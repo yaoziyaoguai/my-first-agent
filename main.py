@@ -672,6 +672,19 @@ def main(argv: list[str] | None = None) -> int:
         _provider_info = _detect_provider_info()
     except Exception:
         pass
+
+    # 注入 session 上下文到 evidence_recorder，使后续所有 record_evidence()
+    # 调用自动填充 session_id / provider_type / model / entry / run_id。
+    try:
+        from agent.evidence_recorder import set_session_context
+        set_session_context(
+            session_id=_session_id,
+            entry=_entry,
+            provider_type=_provider_info.get("provider_type", "unknown"),
+            provider_model=_provider_info.get("model", "unknown"),
+        )
+    except Exception:
+        pass
     _event_log_writer.append({
         "action_type": "session.start",
         "source": "session",

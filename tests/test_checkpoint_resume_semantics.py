@@ -34,7 +34,7 @@ def tmp_checkpoint_path(tmp_path, monkeypatch):
 
 def _save_then_load(src):
     """save → 新建空 state → load 的小工具。"""
-    from agent.checkpoint import save_checkpoint, load_checkpoint_to_state
+    from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
 
     save_checkpoint(src, source="tests.resume.smoke")
     dst = create_agent_state(system_prompt="other")
@@ -243,15 +243,18 @@ def test_unknown_memory_keys_are_dropped_on_resume(tmp_checkpoint_path):
 # ---------------------------------------------------------------------------
 
 def test_resume_preserves_tool_use_tool_result_pairing():
-    """大 tool_result 截断不能破坏 tool_use_id 配对。
+    """大 tool_result 摘要化不能破坏 tool_use_id 配对。
 
     Anthropic 协议硬要求：assistant 里每个 tool_use.id 必须出现在紧随其后的
-    user message 的 tool_result.tool_use_id 中。如果 _truncate_messages_for_checkpoint
+    user message 的 tool_result.tool_use_id 中。如果 summarize_messages_for_persistence
     把 tool_result block 拆开或丢弃，下次 _project_to_api 投影会构造非法 messages。
-    """
-    from agent.checkpoint import MAX_RESULT_LENGTH
 
-    huge = "x" * (MAX_RESULT_LENGTH * 3)
+    v0.5 统一持久化策略后：大 tool_result 被替换为 summary dict（不再保留 raw content），
+    但 tool_use_id 配对和 type 字段必须保留。
+    """
+    from agent.evidence_persistence import MAX_TOOL_RESULT_BYTES
+
+    huge = "x" * (MAX_TOOL_RESULT_BYTES * 3)
     src = create_agent_state(system_prompt="test")
     src.conversation.messages = [
         {"role": "user", "content": "do it"},
@@ -284,8 +287,12 @@ def test_resume_preserves_tool_use_tool_result_pairing():
     assert tool_use_ids == ["T1"]
     assert tool_result_block["type"] == "tool_result"
     assert tool_result_block["tool_use_id"] == "T1"
-    # 内容被截断，但块结构没拆。
-    assert len(tool_result_block["content"]) <= MAX_RESULT_LENGTH
+    # 内容被摘要化（summary dict），不再保留 raw content，但块结构没拆。
+    assert "content" not in tool_result_block, (
+        "大 tool_result 应被摘要化，不保留 raw content"
+    )
+    assert "summary" in tool_result_block
+    assert tool_result_block["summary"]["truncated"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +468,7 @@ def test_resume_does_not_attach_runtime_only_attrs_to_task(tmp_checkpoint_path):
     覆盖 _filter_to_declared_fields 白名单契约的核心边界。
     """
     import json
+
     from agent.checkpoint import load_checkpoint_to_state
 
     # 人工构造：故意往 task / memory 里放 runtime-only key + 一些声明字段

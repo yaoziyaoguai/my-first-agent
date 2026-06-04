@@ -9,12 +9,10 @@
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import tempfile
 from pathlib import Path
 from unittest import mock
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # 1. Session snapshot content truncation
@@ -38,42 +36,43 @@ class TestSessionSnapshotToolResultTruncation:
             path="README.md", content=large_content
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                assert len(snap_files) == 1
-                snapshot = json.loads(snap_files[0].read_text())
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            assert len(snap_files) == 1
+            snapshot = json.loads(snap_files[0].read_text())
 
-                # 找到 tool result 消息
-                raw = json.dumps(snapshot)
-                # 原始大内容不应全文出现在 snapshot 中
-                assert large_content not in raw, (
-                    "大文件内容不应全文出现在 session snapshot 中"
-                )
+            raw = json.dumps(snapshot)
+            assert large_content not in raw, (
+                "大文件内容不应全文出现在 session snapshot 中"
+            )
 
     def test_tool_result_summary_has_required_fields(self):
-        """摘要 dict 必须包含 tool_name / result_size / result_hash / truncated。"""
+        """摘要 dict 必须包含 result_size / result_hash / truncated。"""
         large_content = "y" * 3000
         messages = _make_read_file_messages(
             path="data.txt", content=large_content
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                snapshot = json.loads(snap_files[0].read_text())
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            snapshot = json.loads(snap_files[0].read_text())
 
-                # 在消息中搜索摘要字段
-                raw = json.dumps(snapshot)
-                assert "result_size" in raw, "摘要应包含 result_size"
-                assert "result_hash" in raw, "摘要应包含 result_hash"
-                assert "truncated" in raw, "摘要应包含 truncated 标记"
+            raw = json.dumps(snapshot)
+            assert "result_size" in raw, "摘要应包含 result_size"
+            assert "result_hash" in raw, "摘要应包含 result_hash"
+            assert "truncated" in raw, "摘要应包含 truncated 标记"
 
     def test_small_tool_result_may_have_preview(self):
         """小文件结果可以保留短预览，但不能无限制保存全文。"""
@@ -82,32 +81,35 @@ class TestSessionSnapshotToolResultTruncation:
             path="small.txt", content=small_content
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                snapshot = json.loads(snap_files[0].read_text())
-                raw = json.dumps(snapshot)
-                # 小内容可以保留，这是合理的
-                assert small_content in raw or "preview" in raw.lower(), (
-                    "小内容应可预览或保留"
-                )
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            snapshot = json.loads(snap_files[0].read_text())
+            raw = json.dumps(snapshot)
+            assert small_content in raw or "preview" in raw.lower(), (
+                "小内容应可预览或保留"
+            )
 
     def test_snapshot_message_count_and_session_id_preserved(self):
         """摘要替换不应丢失 message_count / session_id 等元信息。"""
         messages = _make_read_file_messages(path="README.md", content="test")
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                snapshot = json.loads(snap_files[0].read_text())
-                assert "session_id" in snapshot
-                assert "message_count" in snapshot
-                assert snapshot["message_count"] > 0
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            snapshot = json.loads(snap_files[0].read_text())
+            assert "session_id" in snapshot
+            assert "message_count" in snapshot
+            assert snapshot["message_count"] > 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -134,20 +136,22 @@ class TestBlockedSensitiveToolEvidence:
             raw_result=secret_content,
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                snapshot = json.loads(snap_files[0].read_text())
-                raw = json.dumps(snapshot)
-                assert secret_content not in raw, (
-                    "敏感内容不应出现在 snapshot 中"
-                )
-                assert "sk-very-secret" not in raw, (
-                    "API key 不应泄漏到 snapshot"
-                )
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            snapshot = json.loads(snap_files[0].read_text())
+            raw = json.dumps(snapshot)
+            assert secret_content not in raw, (
+                "敏感内容不应出现在 snapshot 中"
+            )
+            assert "sk-very-secret" not in raw, (
+                "API key 不应泄漏到 snapshot"
+            )
 
     def test_blocked_env_not_in_snapshot(self):
         """.env 被 block 后，snapshot 不含环境变量内容。"""
@@ -158,16 +162,18 @@ class TestBlockedSensitiveToolEvidence:
             raw_result=env_content,
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                raw = json.dumps(json.loads(snap_files[0].read_text()))
-                assert "DATABASE_PASSWORD" not in raw, (
-                    "密码不应泄漏到 snapshot"
-                )
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            raw = json.dumps(json.loads(snap_files[0].read_text()))
+            assert "DATABASE_PASSWORD" not in raw, (
+                "密码不应泄漏到 snapshot"
+            )
 
     def test_blocked_tool_denial_metadata_present(self):
         """block 事件至少包含 tool_name / path / decision / reason 元信息。"""
@@ -176,17 +182,18 @@ class TestBlockedSensitiveToolEvidence:
             path="config/config.yaml",
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                raw = json.dumps(json.loads(snap_files[0].read_text()))
-                # 至少应包含工具名和路径
-                assert "read_file" in raw or "config/config.yaml" in raw, (
-                    "denial metadata 至少应包含工具名或路径信息"
-                )
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            raw = json.dumps(json.loads(snap_files[0].read_text()))
+            assert "read_file" in raw or "config/config.yaml" in raw, (
+                "denial metadata 至少应包含工具名或路径信息"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -359,7 +366,6 @@ class TestEventsJsonlNotEmpty:
             session_dir = Path(tmp)
             writer = EventLogWriter(session_dir=session_dir)
 
-            # 模拟写入 session_start event
             writer.append({
                 "action_type": "session.start",
                 "source": "session",
@@ -453,11 +459,10 @@ class TestLogViewerSummary:
             _make_log_entry("user_input", {"content": "quit"}),
         ]
         result = render_session_summary("s-test", entries)
-        # 应包含用户输入计数
         assert "3" in result or "user_input" in result.lower()
 
     def test_render_summary_counts_tools(self):
-        """summary 输出统计 tool 事件。"""
+        """summary 输出统计 tool 事件和工具名。"""
         from agent.log_viewer import render_session_summary
 
         entries = [
@@ -468,7 +473,6 @@ class TestLogViewerSummary:
             _make_log_entry("tool_blocked", {"tool": "read_file"}),
         ]
         result = render_session_summary("s-test", entries)
-        # 应包含工具计数
         assert "read_file" in result
 
     def test_render_summary_no_raw_content(self):
@@ -493,12 +497,10 @@ class TestLogViewerSummary:
         """summary 应标注 evidence gaps（如缺少 session_start 等）。"""
         from agent.log_viewer import render_session_summary
 
-        # 没有 session_start 事件的 session — 应标记 gap
         entries = [
             _make_log_entry("user_input", {"content": "hello"}),
         ]
         result = render_session_summary("s-gap", entries)
-        # 有关 gap 的信息
         assert any(
             word in result.lower()
             for word in ["gap", "缺少", "missing", "no session_start"]
@@ -535,23 +537,271 @@ class TestContentHashInSnapshot:
 
     def test_result_hash_is_sha256_prefix(self):
         """result_hash 是 sha256 的前 16 位 hex。"""
-        content = b"test content for hashing"
-        expected_hash = hashlib.sha256(content).hexdigest()[:16]
-
         large_content = "z" * 3000  # 超过阈值触发摘要
         messages = _make_read_file_messages(
             path="hash_test.txt", content=large_content
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)):
-                from agent.logger import save_session_snapshot
-                save_session_snapshot(messages)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch("agent.logger.SNAPSHOT_DIR", Path(tmp)),
+        ):
+            from agent.logger import save_session_snapshot
+            save_session_snapshot(messages)
 
-                snap_files = list(Path(tmp).glob("session_*.json"))
-                raw = json.dumps(json.loads(snap_files[0].read_text()))
-                # 应该有 result_hash 字段（前 16 位 hex）
-                assert "result_hash" in raw
+            snap_files = list(Path(tmp).glob("session_*.json"))
+            raw = json.dumps(json.loads(snap_files[0].read_text()))
+            assert "result_hash" in raw
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 8. Checkpoint — unified persistence policy
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCheckpointSummarizesToolResults:
+    """验证 checkpoint 使用统一 persistence policy 后不再保存 raw content。
+
+    v0.5 迁移前 checkpoint 使用独立 _truncate_messages_for_checkpoint 做截断，
+    将敏感路径的前 2000 字符仍写入 checkpoint。迁移到 summarize_messages_for_persistence
+    后，checkpoint 与 session snapshot 使用同一策略：敏感路径内容→summary dict。
+    """
+
+    def test_checkpoint_summarizes_large_tool_result(self):
+        """大 tool_result 不保留 raw content，替换为 summary dict。"""
+        from agent.checkpoint import save_checkpoint
+        from agent.evidence_persistence import MAX_TOOL_RESULT_BYTES
+        from agent.state import create_agent_state
+
+        huge = "x" * (MAX_TOOL_RESULT_BYTES * 3)
+        src = create_agent_state(system_prompt="test")
+        src.conversation.messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "T-huge-001",
+                        "content": huge,
+                    }
+                ],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp) / "checkpoint.json"
+            save_checkpoint(src, path=tmp_path)
+
+            on_disk = json.loads(tmp_path.read_text(encoding="utf-8"))
+            block = on_disk["conversation"]["messages"][0]["content"][0]
+            assert "content" not in block, (
+                "大 tool_result 不应保留 raw content"
+            )
+            summary = block.get("summary", {})
+            assert summary.get("truncated") is True
+            assert summary.get("result_size") == len(huge.encode("utf-8"))
+            assert "result_hash" in summary
+
+    def test_checkpoint_blocks_sensitive_content(self):
+        """config/config.yaml 内容不应出现在 checkpoint 中。"""
+        from agent.checkpoint import save_checkpoint
+        from agent.state import create_agent_state
+
+        secret = "api_key: sk-abc123def456"
+        src = create_agent_state(system_prompt="test")
+        src.conversation.messages = [
+            {"role": "user", "content": [{"type": "text", "text": "read config"}]},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tu-s-001",
+                        "name": "read_file",
+                        "input": {"path": "config/config.yaml"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu-s-001",
+                        "content": secret,
+                    }
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp) / "checkpoint.json"
+            save_checkpoint(src, path=tmp_path)
+
+            raw = tmp_path.read_text(encoding="utf-8")
+            assert "sk-abc123def456" not in raw, (
+                "敏感 API key 不应出现在 checkpoint 中"
+            )
+            assert "config/config.yaml" in raw, (
+                "路径信息应保留以确保 denial metadata 可审计"
+            )
+
+    def test_checkpoint_small_non_sensitive_content_ok(self):
+        """小而非敏感的工具结果可以保留原文。"""
+        from agent.checkpoint import save_checkpoint
+        from agent.state import create_agent_state
+
+        small_content = "README content: First Agent"
+        src = create_agent_state(system_prompt="test")
+        src.conversation.messages = [
+            {"role": "user", "content": [{"type": "text", "text": "read README"}]},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tu-readme",
+                        "name": "read_file",
+                        "input": {"path": "README.md"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu-readme",
+                        "content": small_content,
+                    }
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp) / "checkpoint.json"
+            save_checkpoint(src, path=tmp_path)
+
+            raw = tmp_path.read_text(encoding="utf-8")
+            assert small_content in raw, (
+                "小于阈值的非敏感内容应可保留"
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 9. Evidence recorder
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvidenceRecorder:
+    """验证 evidence_recorder 的统一 envelope 和 session context 注入。"""
+
+    def test_record_evidence_produces_valid_envelope(self):
+        """record_evidence 返回包含所有标准字段的 envelope dict。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-001",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test-model",
+        )
+
+        envelope = record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            phase="end",
+            status="success",
+        )
+
+        required_fields = {
+            "schema_version", "event_id", "session_id", "timestamp",
+            "entry", "provider_type", "provider_model",
+            "subsystem", "operation", "phase", "status",
+            "safe_summary", "metadata",
+        }
+        missing = required_fields - envelope.keys()
+        assert not missing, f"envelope 缺少字段: {missing}"
+        assert envelope["subsystem"] == "tool"
+        assert envelope["operation"] == "invoke_result_summary"
+        assert envelope["session_id"] == "sid-001"
+        assert envelope["provider_type"] == "fake"
+
+    def test_set_session_context_and_get(self):
+        """set_session_context 设置的上下文可通过 get_session_context 取回。"""
+        from agent.evidence_recorder import (
+            get_session_context,
+            set_session_context,
+        )
+
+        set_session_context(
+            session_id="sid-context",
+            entry="tui",
+            provider_type="anthropic",
+            provider_model="claude-sonnet-4-6",
+            run_id="run-001",
+        )
+
+        ctx = get_session_context()
+        assert ctx["session_id"] == "sid-context"
+        assert ctx["entry"] == "tui"
+        assert ctx["provider_type"] == "anthropic"
+        assert ctx["provider_model"] == "claude-sonnet-4-6"
+        assert ctx["run_id"] == "run-001"
+
+    def test_record_evidence_sensitive_marks(self):
+        """blocked sensitive tool 的 evidence 必须标记 sensitive=True,
+        content_persisted=False, content_redacted=True。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-sec",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            phase="end",
+            status="blocked",
+            reason_code="sensitive_path",
+            safe_summary="tool=read_file path=config/config.yaml blocked",
+            sensitive=True,
+            content_persisted=False,
+            content_redacted=True,
+        )
+
+        assert envelope["sensitive"] is True
+        assert envelope["content_persisted"] is False
+        assert envelope["content_redacted"] is True
+        assert envelope["status"] == "blocked"
+        assert envelope["reason_code"] == "sensitive_path"
+
+    def test_record_tool_result_summary_blocked(self):
+        """record_tool_result_summary 在 blocked 时使用强制摘要模式。"""
+        from agent.evidence_recorder import (
+            record_tool_result_summary,
+            set_session_context,
+        )
+
+        set_session_context(
+            session_id="sid-tool", entry="plain",
+            provider_type="fake", provider_model="test",
+        )
+
+        envelope = record_tool_result_summary(
+            tool_name="read_file",
+            path="config/config.yaml",
+            content="secret: value",
+            status="blocked",
+            reason_code="sensitive_path",
+        )
+
+        assert envelope["status"] == "blocked"
+        assert envelope["sensitive"] is True
+        assert envelope["content_persisted"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════

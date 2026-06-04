@@ -6,6 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
+# 统一持久化策略：checkpoint 不再维护独立的 tool_result 截断逻辑，
+# 所有消息处理委托给 evidence_persistence。
+from agent.evidence_persistence import summarize_messages_for_persistence
 from config import PROJECT_DIR
 
 CHECKPOINT_PATH = PROJECT_DIR / "memory" / "checkpoint.json"
@@ -233,7 +236,7 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
         "task": task_data,
         "memory": memory_data,
         "conversation": {
-            "messages": _truncate_messages_for_checkpoint(
+            "messages": summarize_messages_for_persistence(
                 state.conversation.messages
             ),
         },

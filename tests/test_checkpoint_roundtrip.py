@@ -102,12 +102,19 @@ def test_load_old_checkpoint_without_new_fields_does_not_crash(tmp_checkpoint_pa
     assert dst.task.tool_execution_log == {}
 
 
-def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
-    """单条 tool_result 内容超过 MAX_RESULT_LENGTH 应当被截断。"""
-    from agent.checkpoint import MAX_RESULT_LENGTH, save_checkpoint
+def test_checkpoint_summarizes_large_tool_results(tmp_checkpoint_path):
+    """大 tool_result 内容应被摘要化，不保留原始 content。
+
+    v0.5 统一持久化策略前，checkpoint 使用独立的 _truncate_messages_for_checkpoint
+    做截断（保留前 N 字符的 raw string）。迁移到 evidence_persistence 后，超过
+    2KB 的 tool_result 被替换为 summary dict（result_size/result_hash/preview_redacted），
+    原始 content 不再写入 checkpoint。
+    """
+    from agent.checkpoint import save_checkpoint
+    from agent.evidence_persistence import MAX_TOOL_RESULT_BYTES
     from agent.state import create_agent_state
 
-    huge_result = "x" * (MAX_RESULT_LENGTH * 3)
+    huge_result = "x" * (MAX_TOOL_RESULT_BYTES * 3)
     src = create_agent_state(system_prompt="test")
     src.conversation.messages = [
         {
@@ -124,11 +131,17 @@ def test_checkpoint_truncates_large_tool_results(tmp_checkpoint_path):
     save_checkpoint(src)
 
     on_disk = json.loads(tmp_checkpoint_path.read_text(encoding="utf-8"))
-    stored_content = on_disk["conversation"]["messages"][0]["content"][0]["content"]
+    block = on_disk["conversation"]["messages"][0]["content"][0]
 
-    assert len(stored_content) <= MAX_RESULT_LENGTH, (
-        f"大 tool_result 应当被截断到 {MAX_RESULT_LENGTH}，实际长度 {len(stored_content)}"
+    # 统一策略后：大 tool_result → summary dict，没有 raw content
+    assert "content" not in block, (
+        "大 tool_result 不应保留 raw content，应替换为 summary dict"
     )
+    summary = block.get("summary", {})
+    assert summary.get("truncated") is True
+    assert summary.get("result_size") == len(huge_result.encode("utf-8"))
+    assert "result_hash" in summary
+    assert len(summary.get("preview_redacted", "")) <= 200
 
 
 def test_checkpoint_truncation_config_rejects_invalid_values():

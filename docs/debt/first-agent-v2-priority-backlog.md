@@ -1,7 +1,22 @@
 # First Agent — v2 Priority Backlog
 
-**创建**: 2026-06-03
+**创建**: 2026-06-03 | **最后更新**: 2026-06-05
 **用途**: v2 阶段优先项分类管理。所有项目均为 v1 非阻塞项（non-code-blocker, non-AGENT_FIX_AUTO），等待对应 owner 决策或后续专项工程。
+
+---
+
+## 0. ENTRY GATE — CORE_CHAT_STABILIZATION_REQUIRED
+
+**2026-06-05**: 本 backlog 所有项目（含 P1）在 Core Chat Stabilization golden E2E 退出条件满足前 **不得启动**。
+
+**退出条件** (见 `PROJECT_STATUS.md`):
+- G1-G5 全部 REAL_USER_VERIFIED 或 REAL_PROVIDER_E2E_VERIFIED + 用户抽样确认
+- 不允许 fake-only close
+- 不允许 focused-tests-only close
+
+**理由**: 自动 dogfood 和 focused tests 不再足以关闭用户路径问题。架构红队审计发现 fake/real 分裂 (DANGEROUS_SPLIT)、文档 overclaim、FIXED_BY_RECHECK 自证循环等问题。必须先建立可信 Code Chat 主线。
+
+**Only after exit**: 恢复 v2 backlog 工作。
 
 ---
 
@@ -105,7 +120,7 @@
 | **P2** | 9 | UMT-003, PD-004, PD-005, PD-006, RER-001, RER-002, RER-003, MBD-001, MBD-002, MBD-003 |
 | **P3** | 5 | MBD-004, FD-001, FD-002, FD-003, FD-004 |
 
-**v1 closeout 不受以上任何项目阻塞。** 所有项目均为 v2 阶段规划输入，非当前阶段 blocker。
+**v2 backlog 全部项目受 Core Chat Stabilization golden E2E gate 阻塞。** v1 closeout is HISTORICAL — 以 PROJECT_STATUS.md 当前 CORE_CHAT_STABILIZATION_REQUIRED 状态为准。
 
 ---
 

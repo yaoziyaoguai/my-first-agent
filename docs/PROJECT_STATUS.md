@@ -1,19 +1,122 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-04 (**USER_RECHECK_FAILED_WITH_P1_FINDINGS** — 2 P1 + 1 P2 仍未修复)
-**Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 阶段冻结声明、future debt list、下次 session 启动指令
-**V1 Closeout**: `docs/releases/v1/first-agent-v1-closeout.md` — engineering baseline 声明、caveats、gates、v2 handoff. **Tagged**: `v1.0.0-engineering-closeout` → `f6807ef`.
-**Post-Hotfix Dogfood**: `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` §10 — F-001/F-001-ext/F-004/F-005 FIXED_BY_RECHECK, F-002 ACCEPTED_AS_CAVEAT, F-003 FIX_DOC_EXPECTATION。所有 findings terminal。
-**Manual Trial Guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 已更新至 post-hotfix 基线（`2a908d6`），含 §5 Coding Agent 陪跑 prompt。
-**TUI design direction**: `docs/design/first-agent-tui-design.md` — 终端原生、交互优先、克制可观测。13 节设计语言定义。
-**TUI Visual Target**: `docs/design/first-agent-tui-visual-target-v1.md` — 22 组件映射、6 区域布局合同、data source policy。独立审计: **ACCEPTED-WITH-CAVEATS**（3 caveats 不阻塞 Slice A）。
-**TUI Slice A**: **IMPLEMENTED** — `docs/plans/first-agent-tui-visual-shell-slice-a-plan.md`。25 组件 + 3 test files (30 tests) + theme + types + fixtures。static visual shell + mock/fake data + render tests。不接 runtime/provider/MCP。461/461 TUI tests PASS, tsc clean。
-**TUI Slice B**: **IMPLEMENTED** (2026-06-02) — `docs/plans/first-agent-tui-visual-shell-slice-b-plan.md`。3 new data files (safeDataSources.ts, visualShellDataAdapter.ts, visualShellDataAdapter.test.ts) + component wiring (types + fixtures + inspector + exports) + integration tests (7 new in visualShellRender.test.tsx)。484/484 TUI tests PASS, tsc clean。Fake/local boundaries explicit。all safe data wired into TuiShell。current-stage remains closed。不调 real provider/MCP/activate default entry。
-**Entry Command Clarification**: **IMPLEMENTED** (2026-06-03) — `main.py` 入口命令澄清：`--plain`(simple CLI，默认)、`--tui`/`--textual`(Textual TUI)、`--shell`(deprecated，兼容 plain CLI)。11/11 contract tests PASS。README + manual trial guide 更新。default entry NOT ACTIVATED。
-**v1 AGENT_DOGFOOD_AUTO Suite**: **RAN — CLEAN** (2026-06-03) — 6 批次 focused 测试全部通过：Entry/CLI/Textual (68)、User-path dogfood smoke (25)、MCP local fixture (38)、Memory/checkpoint (42)、Docs/architecture/secret (111)、Dogfood boundaries (94)。7 xfailed（已知/预期：REAL_ENV_REQUIRED, MODEL_BEHAVIOR_DESIGN）。TUI: 495/495 PASS, tsc clean。0 AGENT_FIX_AUTO issues。ruff: legacy pre-existing only。V1 readiness: AGENT_DOGFOOD_COMPLETE — AGENT_FIX_AUTO_REMAINING=0。V1_CLOSEOUT_WAITING_ON: USER_MANUAL_TRIAL (UMT-001/002/003) + PRODUCT_DECISION (PD-001~005)。REAL_ENV_REQUIRED / MODEL_BEHAVIOR_DESIGN / FUTURE_DEBT → v2/backlog（见 `docs/debt/first-agent-v2-priority-backlog.md`）。Manual trial 入口优先级已修正：Plain CLI (`python main.py`) → Textual TUI (`python main.py --tui`) → `--shell` deprecated compat → Ink prototype (`cd tui && npm start`, 非 v1 验收)。
-**v1 Release Blocker Remediation**: **COMPLETED** (2026-06-03) — 6 P1 blockers 全部修复：(1) Filesystem memory backend tests 已隔离 (14/14 pass)；(2) Provider diagnostic secret-safety 已修复 — 不再读取真实 config.yaml，key prefix 不暴露 (82/82 pass)；(3) Docs/status overclaim 已修正 — AGENT_FIX_AUTO=0 经验证为真；(4) Entry/Ink stale wording 已修正 — CURRENT_DOCS.md 反映 TuiShell=default；(5) Open-items baseline + PD-001~005 已对齐，v2 priority backlog 已创建；(6) Touched Python files ruff clean，full repo ~991 legacy pre-existing documented。Full pytest: 4406 passed, 0 failed, 18 skipped, 37 xfailed。V1 readiness: **READY_FOR_FINAL_INDEPENDENT_AUDIT**。no tag yet。no product-ready claim。
-**Next-Stage Gap Audit**: **COMPLETED** (2026-06-02) — 8 维度 capability inventory (A-H)，5 phase read-only audit。0 P0/P1 blocker。0 secret leak。推荐路线: Option B — TUI Slice B。
-**状态**: **USER_RECHECK_FAILED_WITH_P1_FINDINGS**。用户真实终端复测（eaf2982）发现 TOOL_GATE overblocking Skill 工具 (USER_RECHECK-P1-001) + TUI 不可交互 (USER_RECHECK-P1-002) + weak fallback/重复重试 (USER_RECHECK-P2-001) 仍未修复。需根因级重新调查。不建议进入 v2 implementation。B7 **closed — accepted-with-caveats**（Codex 独立红队诚信审计，commit 3f2f6b2）。B8 M1-M8 Interaction-first Workbench fake/local MVP 全部交付 (accepted, final caveats closed, 2f995b9)。TUI Visual Shell Slice A delivered。所有 Operations/AutoRun/Project dashboard **PAUSED**。TUI default entry NOT ACTIVATED。not product-ready。下一阶段需重新 SPEC/TDD/Review。
+**最后更新**: 2026-06-05
+**当前状态**: **CORE_CHAT_STABILIZATION_REQUIRED**
+**前次状态**: USER_RECHECK_FAILED_WITH_P1_FINDINGS (2026-06-04) — 2 P1 + 1 P2 在真实用户路径下复测失败。
+**架构红队审计**: 2026-06-05 完成（只读，未落盘）。核心结论: fake/real 两套系统已形成，~95% 测试只覆盖 fake 路径，FIXED_BY_RECHECK 自证循环已固化，文档存在 overclaim。统一运行时骨架正确但需要止血收敛。
+**Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 历史阶段冻结声明。
+**V1 Closeout**: `docs/releases/v1/first-agent-v1-closeout.md` — **HISTORICAL**。已标记 `v1.0.0-engineering-closeout` → `f6807ef`。其中 §4 存在事实错误（声称 test_architecture_boundaries.py 不存在），见 errata。
+
+本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
+
+---
+
+## 核心决策 (2026-06-05)
+
+**在 Core Chat golden E2E 通过之前，不进入任何 v2 feature、TUI、MCP、Memory、SubAgent 扩展。**
+
+当前最重要的工作不是继续扩功能，而是确保这条路径真实可信：
+
+```
+python main.py --plain → real provider → core.chat → ToolRuntimeMediator → TOOL_GATE/INVOKE/RESULT → evidence
+```
+
+所有其他能力（TUI、MCP、Memory、SubAgent）在这条主线被用户真实验证通过之前，不得继续推进。
+
+---
+
+## 1. 状态分类体系 (Status Taxonomy)
+
+以下状态词在整个仓库中必须统一使用，不允许混用：
+
+| 状态 | 含义 | 可作为完成证据？ |
+|------|------|:---:|
+| **REAL_USER_VERIFIED** | 真实入口 (`python main.py --plain`) + 真实 provider + 用户手动复测通过 | **YES** |
+| **REAL_PROVIDER_E2E_VERIFIED** | 真实 provider 下自动 E2E 通过（脚本/subprocess），但非人工确认 | **YES (with sampling)** |
+| **FAKE_VERIFIED** | fake provider / synthetic 路径通过，只能证明替身路径正确 | **NO** — 不能用于 close capability |
+| **FOCUSED_TEST_VERIFIED** | 单元测试 / focused tests 通过，只证明局部逻辑正确 | **NO** — 不能用于 close capability |
+| **SYNTHETIC_DOGFOOD_VERIFIED** | 自动 dogfood 通过，必须标明 fake/real provider | **FAKE: NO / REAL: partial** |
+| **USER_RECHECK_FAILED** | 用户复测失败 | 优先级**高于**任何自动验证 |
+| **EXPERIMENTAL** | 代码存在，不能作为 v1 主能力证据 | **NO** |
+| **FROZEN** | 保留代码在磁盘，不再投入主线 | **NO** |
+| **DOCS_ONLY** | 文档或计划存在，但未被真实代码路径证明 | **NO** |
+| **ACCEPTED_CAVEAT** | 已知缺口，明确接受 | **NO** — 不等于 fixed |
+
+**禁止模式**:
+- 不把 FAKE_VERIFIED 写成 "verified"
+- 不把 FOCUSED_TEST_VERIFIED 写成 "capability complete"
+- 不写 FIXED_BY_RECHECK，除非有 USER_RECHECK 通过证据
+- 不把 accepted-with-caveats 写成 resolved
+
+---
+
+## 2. 子系统真实状态定级 (2026-06-05)
+
+| 子系统 | 实际状态 | 可信证据等级 | 定级 |
+|--------|---------|:-----------:|------|
+| **Plain CLI** (`python main.py --plain`) | 稳定主入口，real provider 可配 | REAL_PROVIDER_E2E (interactive dogfood 15/15) | **PRIMARY_PATH** |
+| **Core runtime** (`core.chat` / `loop.py`) | 统一调度器，设计正确，工程完整 | FAKE_VERIFIED (95% tests) + REAL_PROVIDER_E2E (interactive dogfood) | **PRESERVE** — 需要 golden E2E |
+| **ToolRuntimeMediator** (GATE→INVOKE→RESULT) | 统一工具流水线，工程正确 | REAL_PROVIDER_E2E (12/12 real provider SKILL_SELECT) | **PRESERVE** |
+| **Tool safety** (sensitive path policy) | config.yaml/.env 拒绝有效 | REAL_USER_VERIFIED (F-001 真实路径复测确认) | **PRESERVE** |
+| **Skill** (SKILL_SELECT + allowed_tools) | BASE_TOOLS 追加模型已修复 (70a565b) | FAKE_VERIFIED (37 focused tests) + USER_RECHECK_FAILED (P1) | **PRESERVE_AS_MODULE** — 需 golden E2E recheck |
+| **Memory** (extract/propose/retain/recall) | W3/W4/W5 分层补丁，FakeMemoryExtractor 默认 | FAKE_VERIFIED (FakeMemoryExtractor) + REAL_PROVIDER_E2E (opt-in) | **PRESERVE_AS_SKELETON** — 不在主线验证通过前推进 |
+| **MCP** (bridge + invoke) | bridge 启动注册，FakeMCPClient 默认 (dry_run=True) | FAKE_VERIFIED (local stdio fixture) | **PRESERVE_AS_ADAPTER_SKELETON** — 不标 production ready |
+| **SubAgent** (L0/L1/L2) | L0=deterministic fake, L1=real LLM, L2=native loop | FAKE_VERIFIED (L1/L2 _SpyProvider tests) | **FROZEN** — 不在主线验证通过前推进 |
+| **Textual TUI** (`python main.py --tui`) | 事件驱动后端，真实 runtime 接入 | USER_RECHECK_FAILED (P1 deadlock) | **CANDIDATE** — 不激活默认入口 |
+| **Ink TUI** (`cd tui && npm start`) | TypeScript 独立进程，SAFE_DATA_FIXTURE 固定数据 | FAKE_VERIFIED (不接真实 runtime) | **FROZEN_PROTOTYPE** |
+| **Dogfood reports** | 多个报告，fake/synthetic 占多数 | 混杂 (fake + real + synthetic) | **EVIDENCE_ARCHIVE** — 不作为 source of truth |
+| **v1 closeout doc** | engineering baseline 声明 | DOCS_ONLY — 有事实错误 (test_architecture_boundaries.py) | **HISTORICAL** — 需要 errata |
+
+---
+
+## 3. Core Chat Stabilization Before V2
+
+### Goal
+
+在恢复任何 v2 feature 之前，先建立可信 Code Chat 主线。
+
+### Scope
+
+只聚焦：
+- `python main.py --plain`
+- real provider
+- `core.chat` / unified runtime
+- `read_file README`
+- block `config/config.yaml`
+- `demo-note-maker` Skill
+- quit / Ctrl+C
+- session/evidence
+
+### Non-goals
+
+不修 Ink TUI。不推进 MCP production。不推进 Memory advanced。不推进 SubAgent。不推进 B7/B8/B9。不新增大文档。不继续 fake closeout。
+
+### Golden E2E — 5 条最小真实路径
+
+| ID | 路径 | 验证内容 |
+|----|------|---------|
+| **G1** | `python main.py --plain` → hello → quit | 基础对话 + 正常退出 |
+| **G2** | `python main.py --plain` → read README → summarize entry strategy | 基础只读工具 + Skill 激活后不丢 base tools |
+| **G3** | `python main.py --plain` → request `config/config.yaml` → must block → safe fallback | sensitive path policy |
+| **G4** | `python main.py --plain` → demo-note-maker Skill → legal skill tools execute → base read tools still available | Skill 工具作用域正确 |
+| **G5** | `python main.py --plain` → Ctrl+C twice → graceful exit and session save | 信号处理 + checkpoint |
+
+### Exit Criteria
+
+- G1-G5 全部 **REAL_USER_VERIFIED** 或 **REAL_PROVIDER_E2E_VERIFIED** + 用户抽样确认
+- **不允许** fake-only 关闭
+- **不允许** focused tests 单独关闭
+- 文档状态一致
+
+### Only After Exit
+
+再考虑 Textual TUI → MCP → Memory → SubAgent → v2 features（按此顺序）。
+
+---
+
+## 4. 历史架构分类账 (B1-B8) — 仅供参考
+
+以下为历史架构演进里程碑，在 Core Chat stabilization 期间**不继续推进**。
 
 本文档是 Coding Agent 和人类开发者的**第一优先读取入口**。如果其他文档与本文档冲突，以本文档为准。
 

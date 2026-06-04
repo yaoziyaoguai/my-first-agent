@@ -1,10 +1,16 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-04 (**USER_RECHECK_FAILED_WITH_P1_FINDINGS**)
+**最后更新**: 2026-06-05 (**CORE_CHAT_STABILIZATION_REQUIRED**)
 
-记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+记录关键 milestones，倒序排列。
 
-## 2026-06-04 (USER_RECHECK — FAILED)
+## 2026-06-05 (Core Chat Stabilization — Stop Drift)
+
+| Milestone | 简述 |
+|-----------|------|
+| **CORE_CHAT_STABILIZATION_REQUIRED** | 架构红队审计（2026-06-05，只读）确认 fake/real 两套系统已形成，~95% 测试只覆盖 fake 路径。PROJECT_STATUS.md 重写顶部状态段：移除自相矛盾的三种状态声明，新增统一状态分类体系（10 种状态词），子系统真实状态定级（PLAIN CLI=PRIMARY_PATH, Ink TUI=FROZEN_PROTOTYPE, SubAgent=FROZEN, MCP/Memory=SKELETON），Core Chat Stabilization Before V2 计划（5 条 golden E2E）。v1-closeout.md §4 修正 test_architecture_boundaries.py 不存在的事实错误。 |
+
+## 2026-06-04 (USER_RECHECK — FAILED) [HISTORICAL — SUPERSEDED]
 
 | Milestone | 简述 |
 |-----------|------|

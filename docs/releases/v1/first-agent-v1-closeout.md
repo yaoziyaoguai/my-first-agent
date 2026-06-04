@@ -89,7 +89,7 @@ Architecture boundaries are enforced through:
 - import cycle detection (ongoing via ruff I-rule)
 - B1-B8 architecture classification ledger in PROJECT_STATUS.md
 
-No standalone `test_architecture_boundaries.py` file exists; boundaries are validated through the docs source-of-truth test suite and PROJECT_STATUS.md as the authoritative architecture reference.
+Architecture boundaries are additionally enforced through `tests/test_architecture_boundaries.py` (27 AST-based characterization tests, added post-closeout). The claim in the original v1 closeout that no such file existed was a factual error — corrected 2026-06-05.
 
 ---
 

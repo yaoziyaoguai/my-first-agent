@@ -5,26 +5,39 @@
 
 ---
 
-## 0. V2 Quick Start (v2 工作先读这里)
+## 0. V2 Quick Start — BLOCKED
 
-**v1 engineering closeout 已完成** (`docs/releases/v1/first-agent-v1-closeout.md`)。v2 工作从以下文档开始，不要从 v1 过程文档开始：
+**当前状态: CORE_CHAT_STABILIZATION_REQUIRED** — 见 `PROJECT_STATUS.md`。
 
+v2 feature 工作**在 Core Chat Stabilization golden E2E (G1-G5) 全部 REAL_USER_VERIFIED 之前不得启动**。
+
+v1 engineering closeout (`docs/releases/v1/first-agent-v1-closeout.md`) 是 HISTORICAL_CLOSEOUT，不是当前 active baseline。部分 claim 已被后续 USER_RECHECK 推翻。
+
+**当前唯一工作方向**: 完成 Core Chat Stabilization 5 条 golden E2E:
+- G1: `python main.py --plain` → hello → quit
+- G2: `python main.py --plain` → read README → summarize entry strategy
+- G3: `python main.py --plain` → request config/config.yaml → must block → safe fallback
+- G4: `python main.py --plain` → demo-note-maker Skill → legal skill tools execute (base read tools preserved)
+- G5: `python main.py --plain` → Ctrl+C twice → graceful exit and session save
+
+**Only after** G1-G5 全部 REAL_USER_VERIFIED 或 REAL_PROVIDER_E2E_VERIFIED + 用户抽样确认，才能进入 v2 backlog。
+
+**当前仍有效的参考文档** (status stabilization 期间):
 | 顺序 | 文档 | 说明 |
 |------|------|------|
-| 1 | `README.md` | 项目入口、当前状态、安全边界 |
+| 1 | `PROJECT_STATUS.md` | **第一优先** — CORE_CHAT_STABILIZATION_REQUIRED 状态、status taxonomy、subsystem classification、golden E2E |
 | 2 | `CURRENT_DOCS.md` | 本文件 — 文档导航 |
-| 3 | `releases/v1/first-agent-v1-closeout.md` | **v1 engineering baseline 声明** — 已完成能力、caveats、gates |
-| 4 | `debt/first-agent-v2-priority-backlog.md` | **v2 优先项分类** — 5 类 backlog, P1/P2/P3 |
-| 5 | `manual-trials/first-agent-user-trial-guide.md` | **可执行试用剧本** — 含 Coding Agent 陪跑 prompt、角色分离、严重度规则、v2 backlog 映射 |
-| 6 | `dev/ENGINEERING_WORKFLOW.md` | 工程流程 |
-| 7 | `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 统一 runtime flow contract |
+| 3 | `debt/first-agent-v2-priority-backlog.md` | v2 优先项分类 — **BLOCKED until golden E2E exit** |
+| 4 | `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 统一 runtime flow contract |
+| 5 | `dev/ENGINEERING_WORKFLOW.md` | 工程流程 |
 
 **关键规则**:
-- v1 archived docs are historical — **不要作为 v2 implementation source-of-truth**
-- v2 从 backlog + current runtime contract 开始
-- Ink TUI remains prototype unless v2 product decision changes it
-- Plain CLI remains stable primary
-- Textual remains candidate
+- v1 closeout is HISTORICAL — 以 PROJECT_STATUS.md 当前状态为准
+- 不允许 fake-only close，不允许 focused-tests-only close
+- Ink TUI: FROZEN_PROTOTYPE
+- Textual TUI: CANDIDATE / NOT_PRIMARY
+- Plain CLI: PRIMARY_PATH
+- SubAgent: FROZEN
 - default entry NOT ACTIVATED
 - not product-ready
 

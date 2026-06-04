@@ -1,6 +1,14 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-04 (post-hotfix dogfood re-run complete — F-001~F-005 terminal, READY_FOR_USER_MANUAL_TRIAL)
+**最后更新**: 2026-06-04 (USER_MANUAL_TRIAL_COMPLETE_WITH_P1_FINDINGS)
+
+记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
+
+## 2026-06-04 (User Manual Trial + Findings Recorded)
+
+| Milestone | 简述 |
+|-----------|------|
+| **User Manual Trial Complete** | `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` — 真人试用完成，发现 2 个 P1 级严重问题（TUI 死锁、Skill 过度阻断）及多个 P2 体验问题。状态更新为 `USER_MANUAL_TRIAL_COMPLETE_WITH_P1_FINDINGS`。不建议直接进入 v2 implementation。 |
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 

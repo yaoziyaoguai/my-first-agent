@@ -15,6 +15,16 @@
 | UMT-002 | Paste / multiline | P1 | user | 需真实终端粘贴行为，自动化无法覆盖终端 paste buffer | 粘贴中文/英文/mixed/特殊字符/multiline 块，记录 pass/fail | 参照 trial guide §3-4 |
 | UMT-003 | Terminal real interaction | P2 | user | IME + paste + multiline 组合场景依赖前两项完成 | UMT-001 + UMT-002 通过后验证组合场景 | UMT-001/002 完成后 |
 
+### USER_MANUAL_TRIAL Findings (2026-06-04)
+
+| ID | Issue | Priority | Owner | Why not v1 blocker | Required evidence before closure | Recommended next loop |
+|----|-------|----------|-------|--------------------|----------------------------------|----------------------|
+| **UMT-P1-001** | Textual TUI deadlock / cannot exit | **P1** | agent | v1 验收发现，影响可停止性和交互主路径 | TUI 正常捕获 Ctrl+C 和 q 键，无死锁响应 | TUI stability / signal handling hardening |
+| **UMT-P1-002** | TOOL_GATE overblocks valid Skill tools | **P1** | agent | v1 验收发现，导致 Skill 系统不可用 | 区分 sensitive file block 与 valid skill allowed_tools，Skill 正常执行 | TOOL_GATE policy refinement |
+| **UMT-P2-001** | Weak fallback after TOOL_GATE rejection | **P2** | agent | F-005 已部分改进，但真实试用说明仍需增强 | 被拒后 Agent 尝试安全替代路径而不直接停止 | Intelligent fallback logic enhancement |
+| **UMT-P2-002** | Textual paste / shortcut handling incomplete | **P2** | agent | 交互体验欠缺 | 支持 Cmd+V 粘贴和快捷键退出 | Textual TUI capability completion |
+| **UMT-P3-001** | Extensionless file path resolution weak | **P3** | agent | 小体验瑕疵 | `read_file` 自动尝试常见后缀 | File path resolution refinement |
+
 **Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 可执行试用剧本，含 Coding Agent 陪跑 prompt、角色分离、严重度规则（P0-P3）、trial report 模板。
 
 ---

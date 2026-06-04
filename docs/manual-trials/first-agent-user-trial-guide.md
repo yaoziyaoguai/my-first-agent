@@ -5,6 +5,9 @@
 **v1 tag**: `v1.0.0-engineering-closeout` → `f6807ef`（pre-hotfix engineering baseline）
 **用途**: 项目 owner 本机真实终端手动试用操作手册。**可作为 Coding Agent 陪跑剧本** — 复制 §5 的 prompt 给 Coding Agent，让它作为只读试用助手。
 
+**总体结论**: **USER_MANUAL_TRIAL_COMPLETE_WITH_P1_FINDINGS** (2026-06-04)
+**核心发现**: 发现严重 P1 级缺陷（TUI 死锁、Skill 过度阻断），不建议进入 v2 implementation，需先处理 P1 修复。详细报告见 `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md`。
+
 ---
 
 ## 1. Current State

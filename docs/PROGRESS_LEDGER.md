@@ -1,15 +1,21 @@
 # Progress Ledger — First Agent
 
-**最后更新**: 2026-06-04 (**P1_REMEDIATED_PENDING_USER_RECHECK**)
+**最后更新**: 2026-06-04 (**USER_RECHECK_FAILED_WITH_P1_FINDINGS**)
 
 记录关键 milestones，倒序排列。每个 milestone 包含日期、commit、简述。
 
-## 2026-06-04 (User Manual Trial P1/P2/P3 Remediation)
+## 2026-06-04 (USER_RECHECK — FAILED)
 
 | Milestone | 简述 |
 |-----------|------|
-| **P1/P2/P3 Findings Remediated** | 6 findings 全部修复：健康检查 tool_registry_integrity (bug fix)、UMT-P1-001 TUI Ctrl+C 退出 (binding 补齐)、UMT-P1-002 Skill 工具 overblocking (skill-aware explicit_allowlist)、UMT-P2-001 弱 fallback (FORCE_STOP 不终止循环)、UMT-P2-002 粘贴/快捷键 (4 focused tests)、UMT-P3-001 无后缀文件名解析 (extension fallback)。Status: P1_REMEDIATED_PENDING_USER_RECHECK。 |
-| **Manual Trial Report Updated** | `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §6 Remediation Results 追加：每个 finding 的 root cause、fix、gate results、status。 |
+| **USER_RECHECK_FAILED_WITH_P1_FINDINGS** | 用户真实终端复测（eaf2982）发现 Coding Agent 声称的 P1 修复不成立：USER_RECHECK-P1-001 (TOOL_GATE overblocking Skill 工具 — `write_demo_note`/`echo_task_summary` 仍被拒)、USER_RECHECK-P1-002 (Textual TUI 启动后直接退出，不可交互)、USER_RECHECK-P2-001 (weak fallback — 模型重复重试同一被拒工具 ~16 次)。3 个新 P3：USER_RECHECK-P3-001/002/003。详见 `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §7。 |
+
+## 2026-06-04 (User Manual Trial P1/P2/P3 Remediation — SUPERSEDED by USER_RECHECK)
+
+| Milestone | 简述 |
+|-----------|------|
+| **P1/P2/P3 Findings Remediated** | 6 findings 修复尝试。Status was P1_REMEDIATED_PENDING_USER_RECHECK，但 USER_RECHECK 发现 UMT-P1-001/UMT-P1-002/UMT-P2-001 实际未修复 → SUPERSEDED。 |
+| **Manual Trial Report Updated** | `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §6 Remediation Results 追加。 |
 
 ## 2026-06-04 (User Manual Trial + Findings Recorded)
 

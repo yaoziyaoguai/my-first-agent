@@ -17,15 +17,26 @@
 
 ### USER_MANUAL_TRIAL Findings (2026-06-04) — REMEDIATED 2026-06-04
 
-**Status: P1_REMEDIATED_PENDING_USER_RECHECK** — 所有 findings 已有代码修复 + focused tests + gates 验证。详见 `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §6 Remediation Results。
+**Status: USER_RECHECK_FAILED_WITH_P1_FINDINGS** — Coding Agent 声称修复完成（eaf2982），但用户真实终端复测发现 2 个 P1 + 1 个 P2 仍未修复。详见 `docs/manual-trials/first-agent-user-manual-trial-report-2026-06-04.md` §7 USER_RECHECK Results。
 
 | ID | Issue | Priority | Remediation Status |
 |----|-------|----------|-------------------|
-| **UMT-P1-001** | Textual TUI deadlock / cannot exit | **P1** | **FIXED_BY_RECHECK** — 添加 Ctrl+C binding + ChatTextArea._on_key 处理。31/31 Textual tests PASS. |
-| **UMT-P1-002** | TOOL_GATE overblocks valid Skill tools | **P1** | **FIXED_BY_RECHECK** — skill-aware explicit_allowlist in _call_model(). 3 new contract tests. |
-| **UMT-P2-001** | Weak fallback after TOOL_GATE rejection | **P2** | **FIXED_BY_RECHECK** — FORCE_STOP 不再终止循环，rejection 信息写入 tool_execution_log 作为模型反馈。 |
-| **UMT-P2-002** | Textual paste / shortcut handling incomplete | **P2** | **FIXED_BY_RECHECK_WITH_CAVEAT** — TextArea 原生支持 paste；4 focused tests added。Cmd+V 行为依赖终端模拟器 (macOS caveat)。 |
-| **UMT-P3-001** | Extensionless file path resolution weak | **P3** | **FIXED_BY_RECHECK** — 无后缀文件名自动尝试 .md/.txt/.rst 扩展名。敏感文件名不扩展。 |
+| **UMT-P1-001** | Textual TUI deadlock / cannot exit | **P1** | **STILL_OPEN** — USER_RECHECK 发现 `python main.py --tui` 启动后直接退出，不可交互（不再 deadlock 但根本进不了 TUI）。→ USER_RECHECK-P1-002 |
+| **UMT-P1-002** | TOOL_GATE overblocks valid Skill tools | **P1** | **STILL_OPEN** — USER_RECHECK 发现 `write_demo_note`/`echo_task_summary` 仍被 TOOL_GATE 拒绝，explicit_allowlist 修复未生效。→ USER_RECHECK-P1-001 |
+| **UMT-P2-001** | Weak fallback after TOOL_GATE rejection | **P2** | **STILL_OPEN** — USER_RECHECK 发现模型反复重试同一被拒工具 ~16 次，未优雅恢复。→ USER_RECHECK-P2-001 |
+| **UMT-P2-002** | Textual paste / shortcut handling incomplete | **P2** | **UNCHANGED** — USER_RECHECK 未复测（TUI 不可交互，无法验证粘贴）。 |
+| **UMT-P3-001** | Extensionless file path resolution weak | **P3** | **FIXED** — USER_RECHECK 确认 README 读取成功，extensionless path resolution 通过。 |
+
+### USER_RECHECK Findings (2026-06-04) — NEW
+
+| ID | Issue | Priority | Status |
+|----|-------|----------|--------|
+| **USER_RECHECK-P1-001** | demo-note-maker Skill tools (`write_demo_note`/`echo_task_summary`) still rejected by TOOL_GATE after Skill activation | **P1** | OPEN — 对应 UMT-P1-002 |
+| **USER_RECHECK-P1-002** | `python main.py --tui` does not enter usable interactive Textual TUI; exits after startup/memory extraction | **P1** | OPEN — 对应 UMT-P1-001 |
+| **USER_RECHECK-P2-001** | TOOL_GATE rejection recovery still weak; model retries same rejected tools ~16 times | **P2** | OPEN — 对应 UMT-P2-001 |
+| **USER_RECHECK-P3-001** | Sensitive config fallback answer too generic; not project-specific | **P3** | OPEN |
+| **USER_RECHECK-P3-002** | Rejection suggestion recommends copying sensitive config to non-sensitive path (bypass risk) | **P3** | OPEN |
+| **USER_RECHECK-P3-003** | README entry strategy wording may be stale (claims `python main.py demo "..."` as default) | **P3** | OPEN |
 
 **Trial guide**: `docs/manual-trials/first-agent-user-trial-guide.md` — 可执行试用剧本，含 Coding Agent 陪跑 prompt、角色分离、严重度规则（P0-P3）、trial report 模板。
 

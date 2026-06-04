@@ -63,7 +63,9 @@ def test_call_model_uses_non_streaming_provider_when_loop_context_has_provider(m
     monkeypatch.setattr(
         core,
         "get_model_visible_tools",
-        lambda max_mcp_tools: [{"name": "fake_tool", "input_schema": {"type": "object"}}],
+        lambda max_mcp_tools=5, explicit_allowlist=None: [
+            {"name": "fake_tool", "input_schema": {"type": "object"}}
+        ],
     )
 
     provider = _Provider()

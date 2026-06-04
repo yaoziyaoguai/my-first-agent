@@ -528,6 +528,13 @@ def test_pending_tool_and_execution_log_persistence_writers_are_reviewed() -> No
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_tool", 3),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log", 3),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log.pop()", 1),
+        # UMT-P2-001: FORCE_STOP 不终止循环，handle_tool_use_response 写入
+        # tool_execution_log 传递拒绝原因给模型作为 feedback。这个写入与
+        # tool_executor 中的 tool_execution_log 写入是不重叠的路径：
+        # tool_executor 写入的是成功执行结果，handle_tool_use_response 写入的是
+        # TOOL_GATE rejection 信息。两者共享同一 key 但服务于不同的 checkpoint
+        # 语义——resume 时需要两者都保留以防止重复执行和重复拒绝。
+        ("agent.response_handlers", "handle_tool_use_response", "state.task.tool_execution_log", 1),
     }
 
     assert actual == expected

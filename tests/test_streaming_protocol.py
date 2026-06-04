@@ -117,7 +117,10 @@ def test_core_call_model_uses_provider_stream_interface(monkeypatch) -> None:
 
     emitted: list[str] = []
     monkeypatch.setattr(core, "build_execution_messages_from_state", lambda _state: [])
-    monkeypatch.setattr(core, "get_model_visible_tools", lambda max_mcp_tools=5: [])
+    monkeypatch.setattr(
+        core, "get_model_visible_tools",
+        lambda max_mcp_tools=5, explicit_allowlist=None: [],
+    )
 
     turn_state = SimpleNamespace(
         system_prompt="system",

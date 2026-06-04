@@ -361,6 +361,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.skill_system.retriever",
         "agent.skill_system.skill_tool",
         "agent.tool_runtime_mediator",
+        # v1.1 Skill tool-scope fix：_call_model() 内 local import，仅用于
+        # BASE_TOOLS 合并到 skill visible allowlist。不改变 core 的模块级
+        # import surface，不引入新的模块级耦合。
+        "agent.tool_scope",
     }
 
     assert _collect_agent_imports(CORE_FILE) == expected

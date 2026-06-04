@@ -1797,8 +1797,15 @@ def _call_model(
                     name for name, info in TOOL_REGISTRY.items()
                     if info.get("meta_tool")
                 })
+                # v1.1 skill tool-scope fix: Skill 激活后 visible_tools =
+                # BASE_TOOLS + skill_allowed_tools + meta_tools + SKILL_SELECT，
+                # 不剥夺 Agent 基础只读/控制能力。
+                from agent.tool_scope import BASE_TOOLS
                 _skill_visible_allowlist = (
-                    frozenset(_active_tools) | _meta_tool_names | {"SKILL_SELECT"}
+                    frozenset(_active_tools)
+                    | _meta_tool_names
+                    | {"SKILL_SELECT"}
+                    | BASE_TOOLS
                 )
         except ImportError:
             pass

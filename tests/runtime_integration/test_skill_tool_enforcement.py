@@ -295,7 +295,11 @@ class TestToolGateSkillEnforcement:
     def test_stripped_name_still_blocked_when_not_in_allowed_tools(
         self, gate_dispatcher,
     ):
-        """短名工具不在 allowed_tools 中时仍应被拒绝（安全不降级）。"""
+        """非 BASE_TOOL 工具不在 allowed_tools 中时仍应被拒绝（安全不降级）。
+
+        v1.1: read_file 已是 BASE_TOOL，不受 skill_allowed_tools 限制。
+        改用 edit_file（非 BASE_TOOL）验证非白名单工具仍被 gate 拦截。
+        """
         from agent.runtime_integration.schema import (
             RuntimeActionRequest,
             RuntimeActionType,
@@ -306,7 +310,7 @@ class TestToolGateSkillEnforcement:
             source="test",
             parent_trace_id="",
             payload={
-                "tool_name": "read_file",  # 不在 demo skill allowed_tools 中
+                "tool_name": "edit_file",  # 非 BASE_TOOL，不在 demo skill allowed_tools 中
                 "tool_input": {"path": "/tmp/test.txt"},
                 "skill_allowed_tools": [
                     "demo.echo_task_summary", "demo.write_demo_note",

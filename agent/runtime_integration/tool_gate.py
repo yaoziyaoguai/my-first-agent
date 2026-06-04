@@ -104,7 +104,16 @@ class ToolGateHandler:
         # Loop 5: evidence_extra 中显式包含 policy_path/rejection_reason，
         # 与 allowed path 的 **result_payload 展开对齐，dogfood 脚本可统一从
         # evidence 读取 gate disposition 字段。
-        if skill_allowed_tools and tool_name not in skill_allowed_tools:
+        # v1.1: BASE_TOOLS 不受 skill allowed_tools 约束——
+        # read_file / read_file_lines / mark_step_complete / request_user_input
+        # 在 Skill 激活后仍可用，不因不在 skill allowed_tools 中被拒绝。
+        from agent.tool_scope import is_base_tool
+
+        if (
+            skill_allowed_tools
+            and tool_name not in skill_allowed_tools
+            and not is_base_tool(tool_name)
+        ):
             return context.rejected(
                 handler_name=type(self).__name__,
                 target_module="ToolRegistry",

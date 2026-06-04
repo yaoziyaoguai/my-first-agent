@@ -335,6 +335,90 @@ def main_loop(event_log_writer: Any = None, *, session_id: str = ""):
                         break
                 continue
 
+            # v1.1 工具确认 UX 增强：awaiting_tool_confirmation 时展示
+            # 工具名、路径、操作、风险等上下文信息，让用户明确知道系统在等什么。
+            # 空输入时必须重提示选项，不能当作普通对话继续。
+            if state.task.status == "awaiting_tool_confirmation" and state.task.pending_tool:
+                _pending = state.task.pending_tool
+                _tname = _pending.get("tool", "?")
+                _tinput = _pending.get("input") or {}
+                _tpath = _tinput.get("path") or _tinput.get("file_path") or ""
+                _tcontent = _tinput.get("content")
+                _twrites = (
+                    "write" in _tname.lower()
+                    or "edit" in _tname.lower()
+                )
+                _tnetwork = "fetch" in _tname.lower()
+
+                print()
+                print("━" * 55)
+                print("需要你确认工具执行：")
+                print(f"  工具：{_tname}")
+                if _tpath:
+                    print(f"  路径：{_tpath}")
+                if isinstance(_tcontent, str):
+                    preview = _tcontent[:120].replace("\n", "\\n")
+                    if len(_tcontent) > 120:
+                        preview += f"...(共 {len(_tcontent)} 字符)"
+                    print(f"  内容预览：{preview}")
+                if _twrites:
+                    print("  风险：会写入文件")
+                if _tnetwork:
+                    print("  风险：会访问网络")
+                print()
+                print("请输入：")
+                print("  y       = 执行")
+                print("  n       = 拒绝")
+                print("  explain = 查看为什么需要确认")
+                print("  cancel  = 取消本轮工具调用")
+                print("━" * 55)
+
+                event = read_user_input_event(
+                    prompt_text="确认工具执行 (y/n/explain/cancel): ",
+                    latest_output="",
+                )
+                intent = classify_user_input(
+                    event.envelope.raw_text if event.envelope is not None else None,
+                    source=event.event_source,
+                    state=get_state(),
+                    event_type=event.event_type,
+                )
+
+                if intent.kind == "cancel":
+                    raise KeyboardInterrupt
+                if intent.kind == "eof":
+                    finalize_session()
+                    break
+                if event.envelope is None:
+                    continue
+                user_input = intent.normalized_text
+
+                # 空输入重提示选项，不能当作普通对话继续
+                if intent.kind == "empty":
+                    print("(请选择 y / n / explain / cancel)")
+                    continue
+
+                if intent.kind == "exit":
+                    finalize_session()
+                    break
+
+                reply, new_latest_output = _run_chat_for_backend(
+                    user_input,
+                    backend=backend,
+                    event_log_writer=event_log_writer,
+                    session_id=session_id,
+                )
+                if new_latest_output:
+                    latest_output = new_latest_output
+                if reply:
+                    print(reply)
+                if backend in ("", "simple"):
+                    status_line = render_status_line(summarize_session_status(get_state()))
+                    if status_line != last_status_line:
+                        print(f"\n{status_line}")
+                        last_status_line = status_line
+                continue
+
             event = read_user_input_event(latest_output=latest_output)
             intent = classify_user_input(
                 event.envelope.raw_text if event.envelope is not None else None,

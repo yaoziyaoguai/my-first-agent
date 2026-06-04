@@ -236,7 +236,10 @@ class TestActiveSkillIdInGateEvidence:
     """003: TOOL_GATE evidence 包含 active_skill_id（rejected + allowed 路径）。"""
 
     def test_rejected_path_includes_active_skill_id(self):
-        """disallowed tool 的 TOOL_GATE evidence 包含 active_skill_id。"""
+        """disallowed tool 的 TOOL_GATE evidence 包含 active_skill_id。
+
+        v1.1: read_file 已是 BASE_TOOL，不再被拒绝。改用 write_file（非 BASE_TOOL）。
+        """
         from agent.runtime_integration import (
             ActionHandlerRegistry,
             RuntimeActionDispatcher,
@@ -257,7 +260,7 @@ class TestActiveSkillIdInGateEvidence:
             source="test",
             parent_trace_id="",
             payload={
-                "tool_name": "read_file",
+                "tool_name": "write_file",  # 非 BASE_TOOL
                 "tool_input": {},
                 "skill_allowed_tools": ["demo.write_demo_note"],
                 "active_skill_id": "demo-note-maker",
@@ -351,7 +354,10 @@ class TestActiveSkillIdInGateEvidence:
 
     def test_rejected_evidence_fields_complete(self):
         """003 要求的 evidence 字段全部存在: active_skill_id, requested_tool_name,
-        skill_allowed_tools, policy_path, rejection_reason, decision=rejected。"""
+        skill_allowed_tools, policy_path, rejection_reason, decision=rejected。
+
+        v1.1: request_user_input 已是 BASE_TOOL，不再被拒绝。改用 write_file（非 BASE_TOOL）。
+        """
         from agent.runtime_integration import (
             ActionHandlerRegistry,
             RuntimeActionDispatcher,
@@ -372,8 +378,8 @@ class TestActiveSkillIdInGateEvidence:
             source="test",
             parent_trace_id="",
             payload={
-                "tool_name": "request_user_input",
-                "tool_input": {"prompt": "email?"},
+                "tool_name": "write_file",  # 非 BASE_TOOL
+                "tool_input": {"path": "/tmp/test.txt"},
                 "skill_allowed_tools": ["demo.write_demo_note"],
                 "active_skill_id": "demo-note-maker",
             },
@@ -390,7 +396,7 @@ class TestActiveSkillIdInGateEvidence:
         missing = [f for f in required_fields if f not in ev]
         assert not missing, f"003 evidence 缺少字段: {missing}"
         assert ev["active_skill_id"] == "demo-note-maker"
-        assert ev["requested_tool_name"] == "request_user_input"
+        assert ev["requested_tool_name"] == "write_file"
         assert ev["decision"] == "rejected"
         assert ev["policy_path"] == "skill_allowed_tools→rejected"
         assert ev["rejection_reason"] == "tool not in active skill allowed_tools"
@@ -520,7 +526,10 @@ class TestRejectedGateNoToolExecution:
         )
 
     def test_execution_suppressed_in_rejected_gate_evidence(self):
-        """TOOL_GATE rejected evidence 包含 execution_suppressed: True。"""
+        """TOOL_GATE rejected evidence 包含 execution_suppressed: True。
+
+        v1.1: read_file 已是 BASE_TOOL，不再被拒绝。改用 write_file（非 BASE_TOOL）。
+        """
         from agent.runtime_integration import (
             ActionHandlerRegistry,
             RuntimeActionDispatcher,
@@ -541,7 +550,7 @@ class TestRejectedGateNoToolExecution:
             source="test",
             parent_trace_id="",
             payload={
-                "tool_name": "read_file",
+                "tool_name": "write_file",  # 非 BASE_TOOL
                 "tool_input": {},
                 "skill_allowed_tools": ["demo.write_demo_note"],
                 "active_skill_id": "demo-note-maker",

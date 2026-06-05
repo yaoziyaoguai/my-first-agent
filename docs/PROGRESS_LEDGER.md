@@ -9,6 +9,8 @@
 | Milestone | 简述 |
 |-----------|------|
 | **CORE_CHAT_STABILIZATION_REQUIRED** | 架构红队审计（2026-06-05，只读）确认 fake/real 两套系统已形成，~95% 测试只覆盖 fake 路径。PROJECT_STATUS.md 重写顶部状态段：移除自相矛盾的三种状态声明，新增统一状态分类体系（10 种状态词），子系统真实状态定级（PLAIN CLI=PRIMARY_PATH, Ink TUI=FROZEN_PROTOTYPE, SubAgent=FROZEN, MCP/Memory=SKELETON），Core Chat Stabilization Before V2 计划（5 条 golden E2E）。v1-closeout.md §4 修正 test_architecture_boundaries.py 不存在的事实错误。 |
+|| **Evidence Recorder Runtime Wiring** | `b29fa1c` — `record_evidence()` 接入 tool_executor.py (3 点)、tool_runtime_mediator.py (2 点)、checkpoint.py (1 点)。全局 EventLogWriter 支持。log_viewer summary 可解析 evidence.recorded 事件。8 tests added。 |
+|| **Future Subsystem Extension Contract** | evidence_recorder metadata 摘要化 (>2KB→dict)；log_viewer summary 新增 generic "Subsystem Events" section，未知子系统 (subsystem≠tool/checkpoint) 自动聚合展示。8 extension contract tests。 |
 
 ## 2026-06-04 (USER_RECHECK — FAILED) [HISTORICAL — SUPERSEDED]
 

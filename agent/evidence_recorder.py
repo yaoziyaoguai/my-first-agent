@@ -43,6 +43,7 @@ Envelope 字段（所有事件通用）：
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -54,6 +55,10 @@ from agent.evidence_persistence import (
 )
 
 SCHEMA_VERSION = "1.0"
+
+# metadata 值超过此字节数时替换为摘要 dict
+_MAX_METADATA_VALUE_BYTES = 2048  # 2KB
+_MAX_METADATA_PREVIEW_CHARS = 200
 
 # 模块级上下文（由 main.py 在 session 启动时注入）
 _session_context: dict[str, str] = {}
@@ -93,6 +98,27 @@ def get_session_context() -> dict[str, str]:
     return dict(_session_context)
 
 
+def _summarize_metadata_value(value: Any, max_bytes: int = _MAX_METADATA_VALUE_BYTES) -> Any:
+    """对 metadata 中的大字符串值做摘要化。
+
+    只处理 str 类型的大值；其他类型（int/float/bool/list/dict）原样保留。
+    摘要 dict 包含 result_size / result_hash / preview_redacted / truncated，
+    与 evidence_persistence 的摘要格式一致。
+    """
+    if not isinstance(value, str):
+        return value
+    content_bytes = value.encode("utf-8")
+    if len(content_bytes) <= max_bytes:
+        return value
+    return {
+        "result_size": len(content_bytes),
+        "result_hash": hashlib.sha256(content_bytes).hexdigest()[:16],
+        "preview_redacted": value[:_MAX_METADATA_PREVIEW_CHARS],
+        "truncated": True,
+        "content_persisted": False,
+    }
+
+
 def _build_envelope(
     *,
     subsystem: str,
@@ -128,7 +154,7 @@ def _build_envelope(
         "content_persisted": content_persisted,
         "content_redacted": content_redacted,
         "sensitive": sensitive,
-        "metadata": metadata or {},
+        "metadata": {k: _summarize_metadata_value(v) for k, v in (metadata or {}).items()},
     }
 
 

@@ -114,6 +114,22 @@ python main.py --plain → real provider → core.chat → ToolRuntimeMediator �
 
 ---
 
+## Evidence Infrastructure — Future Subsystem Extension Contract (2026-06-05)
+
+Evidence recorder (`agent/evidence_recorder.py`) 支持未来未知子系统无侵入接入：
+
+- **不需要新增日志文件类型** — 所有事件走 `record_evidence()` 统一写入 `agent_log.jsonl` + per-session `events.jsonl`
+- **不需要改核心 envelope schema** — `subsystem`/`operation`/`phase`/`status` 是自由字符串，不硬编码枚举
+- **不需要在 log_viewer 中硬编码特殊解析** — 非 tool/checkpoint 的 `evidence.recorded` 事件自动聚合到 "Subsystem Events" generic section
+- **metadata 大字符串值自动摘要化** — >2KB 的 metadata 值替换为 `{result_size, result_hash, preview_redacted, truncated}` 摘要 dict
+- **sensitive 标记仍有效** — `sensitive=True` + `content_redacted=True` 正确传递到 envelope
+
+**MCP/Skill/Memory/SubAgent/TUI 必须通过 `record_evidence()` 写 evidence，不得各自新建日志系统。**
+
+
+
+---
+
 ## 4. 历史架构分类账 (B1-B8) — 仅供参考
 
 以下为历史架构演进里程碑，在 Core Chat stabilization 期间**不继续推进**。

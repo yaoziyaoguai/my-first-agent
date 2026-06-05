@@ -1086,6 +1086,295 @@ class TestLogViewerSummaryWithEvidence:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 12. Future subsystem extension contract
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFutureSubsystemExtension:
+    """验证未来未知子系统可通过统一 evidence recorder 无侵入接入。
+
+    中文学习边界：
+    - 这里的测试不是实现 camera/servo 功能，而是验证 evidence 基础设施的
+      可扩展性契约（extension contract）。
+    - 为什么需要 extension contract：如果每个新子系统都需要修改 envelope schema、
+      log_viewer 解析逻辑、或自建日志文件，系统会快速腐化成 MindForge 式的补丁堆砌。
+    - 契约核心：未知子系统只需调用 record_evidence() 即可获得完整的 evidence
+      生命周期支持（写入、查询、summary 展示），不需要改动基础设施代码。
+    """
+
+    def test_future_subsystem_event_recorded(self):
+        """未知子系统 event 可通过 record_evidence 写入并返回合法 envelope。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-future-001",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="future_camera",
+            operation="frame_analyze",
+            phase="end",
+            status="ok",
+            safe_summary="camera frame analyzed: 30fps",
+            metadata={"camera_id": "front", "fps": 30},
+        )
+
+        assert envelope["subsystem"] == "future_camera"
+        assert envelope["operation"] == "frame_analyze"
+        assert envelope["phase"] == "end"
+        assert envelope["status"] == "ok"
+        assert envelope["session_id"] == "sid-future-001"
+        assert "event_id" in envelope
+
+    def test_future_subsystem_event_written_to_events_jsonl(self):
+        """未知子系统 event 应写入 per-session events.jsonl。"""
+        import tempfile
+        from pathlib import Path
+
+        from agent.event_log import EventLogWriter
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-future-002",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            writer = EventLogWriter(session_dir=session_dir)
+
+            record_evidence(
+                subsystem="future_servo",
+                operation="motion_plan",
+                phase="decision",
+                status="blocked",
+                reason_code="safety_limit",
+                safe_summary="servo motion blocked: angle > 180°",
+                metadata={"decision": "blocked", "reason": "safety_limit"},
+                event_log_writer=writer,
+            )
+            writer.close()
+
+            log_path = session_dir / "events.jsonl"
+            assert log_path.exists()
+            lines = log_path.read_text().strip().split("\n")
+            assert len(lines) >= 1
+
+            import json
+            event = json.loads(lines[0])
+            assert event["action_type"] == "future_servo.motion_plan"
+            assert event["source"] == "future_servo"
+            assert event["status"] == "blocked"
+
+    def test_future_subsystem_in_summary_generic_section(self):
+        """未知子系统 event 应在 logs --summary 的 generic subsystem section 展示。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "fake", "model": "test", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "future_camera",
+                "operation": "frame_analyze",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "camera frame analyzed: 30fps",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "future_servo",
+                "operation": "motion_plan",
+                "phase": "decision",
+                "status": "blocked",
+                "safe_summary": "servo motion blocked",
+            }),
+        ]
+        result = render_session_summary("s-future", entries)
+        assert "future_camera" in result or "future_servo" in result, (
+            f"summary 应展示未来子系统事件，实际输出: {result[:300]}"
+        )
+
+    def test_unknown_subsystem_no_envelope_schema_change(self):
+        """添加未知子系统不应改变 envelope schema 字段集合。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-schema",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        # 已知子系统 envelope
+        known = record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            status="ok",
+        )
+        # 未知子系统 envelope
+        unknown = record_evidence(
+            subsystem="future_camera",
+            operation="frame_analyze",
+            status="ok",
+            metadata={"custom": "value"},
+        )
+
+        assert set(known.keys()) == set(unknown.keys()), (
+            f"未知子系统的 envelope 字段应与已知子系统一致\n"
+            f"known only: {set(known.keys()) - set(unknown.keys())}\n"
+            f"unknown only: {set(unknown.keys()) - set(known.keys())}"
+        )
+
+    def test_log_viewer_no_crash_on_unknown_subsystem(self):
+        """log_viewer 遇到未知 subsystem/operation 不应崩溃。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "fake", "model": "test", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "completely_unknown_xyz",
+                "operation": "something_strange",
+                "phase": "unknown_phase",
+                "status": "unknown_status",
+                "safe_summary": "",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "",
+                "operation": "",
+                "phase": "",
+                "status": "",
+                "safe_summary": "",
+            }),
+        ]
+        result = render_session_summary("s-no-crash", entries)
+        assert "s-no-crash" in result or "no-crash" in result, (
+            "应正常输出 summary 而非崩溃"
+        )
+
+    def test_future_subsystem_does_not_affect_tool_counters(self):
+        """未知子系统 event 不应影响 tool executed/blocked 计数器。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "fake", "model": "test", "entry": "plain",
+            }),
+            # 真正的 tool 事件
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "tool=read_file executed",
+            }),
+            # 未来子系统事件（不应计入 tool 统计）
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "future_camera",
+                "operation": "frame_analyze",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "camera frame analyzed",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "future_servo",
+                "operation": "motion_plan",
+                "phase": "decision",
+                "status": "blocked",
+                "safe_summary": "servo motion blocked",
+            }),
+        ]
+        result = render_session_summary("s-counters", entries)
+        # tool executed 应为 1，不应包含 future_camera/future_servo 的 ok/blocked
+        assert "executed       : 1" in result, (
+            f"tool executed 应仅为 1，实际输出: {result[:500]}"
+        )
+        assert "blocked        : 0" in result, (
+            f"tool blocked 应仅为 0，实际输出: {result[:500]}"
+        )
+
+    def test_future_subsystem_large_metadata_summarized(self):
+        """未知子系统 metadata 中的大字符串值应被摘要化。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-large-meta",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        huge_debug_blob = "DEBUG_FRAME_DATA_" + "x" * 5000
+        envelope = record_evidence(
+            subsystem="future_camera",
+            operation="frame_analyze",
+            phase="end",
+            status="ok",
+            safe_summary="frame analyzed",
+            metadata={
+                "camera_id": "front",
+                "large_debug_blob": huge_debug_blob,
+            },
+        )
+
+        # metadata 中的大值应被摘要化（必须被摘要，不可跳过）
+        meta = envelope.get("metadata", {})
+        blob_value = meta.get("large_debug_blob", "")
+        assert isinstance(blob_value, dict), (
+            f"大 metadata 值应被摘要化为 dict，实际类型: {type(blob_value)}"
+        )
+        assert blob_value.get("truncated") is True, (
+            f"大 metadata 值应标记 truncated，实际: {blob_value}"
+        )
+        assert "result_size" in blob_value
+        assert "result_hash" in blob_value
+        assert huge_debug_blob not in str(blob_value), (
+            "原始大内容不应保留在 metadata 摘要中"
+        )
+        # 小值应保持不变
+        assert meta.get("camera_id") == "front"
+
+    def test_future_subsystem_sensitive_metadata_redacted(self):
+        """标记 sensitive 的 event 其 metadata 应被脱敏。"""
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-sensitive-meta",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="future_servo",
+            operation="motion_plan",
+            phase="decision",
+            status="blocked",
+            reason_code="safety_limit",
+            safe_summary="motion blocked",
+            sensitive=True,
+            content_redacted=True,
+            metadata={
+                "decision": "blocked",
+                "reason": "safety_limit",
+                "internal_token": "sk-secret-token-12345",
+            },
+        )
+
+        assert envelope["sensitive"] is True
+        assert envelope["content_redacted"] is True
+        # envelope 级别的 sensitive flag 应被正确传递
+        meta = envelope.get("metadata", {})
+        assert meta.get("decision") == "blocked"
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
 

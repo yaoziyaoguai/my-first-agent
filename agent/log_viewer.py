@@ -303,6 +303,8 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     checkpoints_saved = 0
     first_ts = ""
     last_ts = ""
+    # 非 tool/checkpoint 的 evidence.recorded 事件 → generic subsystem aggregation
+    other_subsystem_events: dict[str, int] = {}
 
     for e in real:
         ev = e.get("event", "")
@@ -360,6 +362,11 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
                         tools_blocked += 1
             elif subsystem == "checkpoint":
                 checkpoints_saved += 1
+            elif subsystem:
+                # 未知子系统 → generic aggregation（不硬编码未来能力）
+                phase_val = data.get("phase", "")
+                key = f"{subsystem}.{op} {phase_val} {status}".strip()
+                other_subsystem_events[key] = other_subsystem_events.get(key, 0) + 1
 
         if ev == "skill_selected":
             skill_selected = data.get("skill", data.get("name", "")) or skill_selected
@@ -409,6 +416,11 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     if checkpoints_saved:
         lines.append(f"    checkpoints    : {checkpoints_saved}")
 
+    if other_subsystem_events:
+        lines.append(bar)
+        lines.append("  Subsystem Events")
+        for key, count in sorted(other_subsystem_events.items()):
+            lines.append(f"    {key} × {count}")
     lines.append(bar)
     lines.append("  Content Policy")
     lines.append("    tool results in snapshot : summarized if >2KB or sensitive")

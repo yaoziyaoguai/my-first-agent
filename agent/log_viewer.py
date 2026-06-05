@@ -309,6 +309,8 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     last_ts = ""
     # 非 tool/checkpoint 的 evidence.recorded 事件 → generic subsystem aggregation
     other_subsystem_events: dict[str, int] = {}
+    # user_input 从 evidence.recorded 路径计数（替代 legacy event="user_input"）
+    user_input_from_evidence = 0
 
     # 去重：executor 和 mediator 会对同一 tool_use_id 各写一次 evidence，
     # 保留两份事件用于调试，但 summary 中的逻辑计数必须只计一次。
@@ -419,6 +421,8 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
             elif subsystem == "session":
                 if op == "end":
                     session_ended = True
+                elif op == "user_input":
+                    user_input_from_evidence += 1
             elif subsystem == "checkpoint":
                 checkpoints_saved += 1
             elif subsystem:
@@ -441,7 +445,11 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
         gaps.append("no session.end evidence — session 可能未正常退出")
     if provider_type == "?":
         gaps.append("provider_type unknown — 无法区分 fake/real")
-    if event_counts.get("user_input", 0) == 0:
+    # user_input 计数优先来自 evidence.recorded 路径（新），legacy event="user_input"
+    # 作为兼容旧 session 的 fallback。两者不会重复：record_evidence 写入的是
+    # event="evidence.recorded"，legacy log_event("user_input") 写入的是 event="user_input"。
+    _total_user_input = user_input_from_evidence + event_counts.get("user_input", 0)
+    if _total_user_input == 0:
         gaps.append("no user_input events — 对话可能未发生")
     if not last_ts:
         gaps.append("no timestamps — 时间线不可审计")
@@ -459,7 +467,7 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
         f"  end       : {last_ts or '?'}",
         bar,
         "  Events",
-        f"    user_input     : {event_counts.get('user_input', 0)}",
+        f"    user_input     : {_total_user_input}",
         f"    agent_reply    : {event_counts.get('agent_reply', 0)}",
         f"    llm_call       : {event_counts.get('llm_call', 0)}",
         f"    llm_response   : {event_counts.get('llm_response', 0)}",

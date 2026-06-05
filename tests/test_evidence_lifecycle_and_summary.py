@@ -145,13 +145,14 @@ def _make_evidence_entry(
     safe_summary: str = "",
     reason_code: str = "",
     timestamp: str = "",
+    phase: str = "",
 ) -> dict:
     """构造 agent_log.jsonl 中 evidence.recorded 条目。"""
     ts = timestamp or f"2026-06-05T{10 + len(session_id):02d}:00:00.000Z"
     data: dict = {
         "subsystem": subsystem,
         "operation": operation,
-        "phase": "end" if operation == "invoke_result_summary" else "decision",
+        "phase": phase or ("end" if operation == "invoke_result_summary" else "decision"),
         "status": status,
         "reason_code": reason_code,
         "safe_summary": safe_summary or f"tool=test_tool status={status}",
@@ -633,3 +634,221 @@ def test_execute_pending_tool_failure_path_writes_error_evidence():
     assert data["status"] == "error"
     assert data["content_persisted"] is False
     assert data["metadata"]["from_pending_tool"] is True
+
+
+# ═══════════════════════════════════════════════════════
+# P3: user_input → record_evidence 迁移测试
+# ═══════════════════════════════════════════════════════
+
+
+def test_user_input_record_evidence_envelope():
+    """user_input 通过 record_evidence 写入，携带完整 envelope 上下文。
+
+    中文注释：迁移前 user_input 使用 legacy log_event("user_input", ...)，
+    不携带 session_id / provider / entry 等 envelope 字段，summary 需要从
+    session.start 推断。迁移后 record_evidence 自动补齐上下文。
+    """
+    test_sid = f"test-ui-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="real",
+        provider_model="claude-sonnet-4-6",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    envelope = record_evidence(
+        subsystem="session",
+        operation="user_input",
+        phase="input",
+        status="ok",
+        safe_summary="input len=11 src=pipe",
+        content_persisted=False,
+        sensitive=False,
+        metadata={
+            "input_length": 11,
+            "backend": "simple",
+            "source": "pipe",
+            "content_preview": "hello world",
+        },
+    )
+
+    # envelope 完整性
+    assert envelope["session_id"] == test_sid
+    assert envelope["entry"] == "plain"
+    assert envelope["provider_type"] == "real"
+    assert envelope["provider_model"] == "claude-sonnet-4-6"
+    assert envelope["subsystem"] == "session"
+    assert envelope["operation"] == "user_input"
+    assert envelope["phase"] == "input"
+    assert envelope["status"] == "ok"
+    assert envelope["content_persisted"] is False
+    assert envelope["sensitive"] is False
+
+    # EventLogWriter 写入验证
+    user_input_events = [
+        e for e in writer.events if e.get("action_type") == "session.user_input"
+    ]
+    assert len(user_input_events) == 1
+    ev = user_input_events[0]
+    data = ev["data"]
+    assert data["session_id"] == test_sid
+    assert data["entry"] == "plain"
+    assert data["provider_type"] == "real"
+
+
+def test_user_input_long_content_truncated():
+    """长 user_input 的 content_preview 应被截断，不持久化全文。
+
+    中文注释：record_evidence metadata 中超过 2KB 的字符串值会被自动摘要化。
+    但 content_preview 本身应在调用方侧截断（main.py 中限制 200 字符），
+    避免大段内容进入 agent_log.jsonl。
+    """
+    test_sid = f"test-ui-long-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    long_input = "A" * 5000
+    _preview = long_input[:197] + "..."
+
+    envelope = record_evidence(
+        subsystem="session",
+        operation="user_input",
+        phase="input",
+        status="ok",
+        safe_summary="input len=5000 src=interactive",
+        content_persisted=False,
+        sensitive=False,
+        metadata={
+            "input_length": 5000,
+            "backend": "simple",
+            "source": "interactive",
+            "content_preview": _preview,
+        },
+    )
+
+    # preview 应截断到 200 字符
+    metadata = envelope["metadata"]
+    assert len(metadata["content_preview"]) <= 200
+    assert metadata["content_preview"].endswith("...")
+    # 全长不应出现在 preview 中
+    assert long_input not in metadata["content_preview"]
+
+
+def test_summary_counts_user_input_from_evidence():
+    """log_viewer summary 应正确计数 evidence.recorded 中的 user_input。
+
+    中文注释：迁移后 user_input 不再以 event="user_input" 写入 agent_log.jsonl，
+    而是以 event="evidence.recorded" + subsystem="session" + operation="user_input" 写入。
+    summary 必须能正确识别并计数。
+    """
+    sid = "test-sum-ui"
+    entries = [
+        _make_entry("session_start", sid, data=SAMPLE_DATA),
+        _make_evidence_entry(sid, "session", "user_input", "ok",
+                             safe_summary="input len=5 src=pipe", phase="input"),
+        _make_evidence_entry(sid, "session", "end", "ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "user_input     : 1" in result
+    assert "no session.end evidence" not in result
+
+
+def test_user_input_no_duplicate_with_legacy():
+    """evidence.recorded 和 legacy event="user_input" 共存时合并计数。
+
+    中文注释：迁移过渡期可能存在旧 session 的 legacy event="user_input" 事件。
+    evidence.recorded 路径的 user_input 和 legacy 事件使用不同的 event 字段，
+    两者求和作为总数。
+    """
+    sid = "test-dedup-ui"
+    entries = [
+        _make_entry("session_start", sid, data=SAMPLE_DATA),
+        # 新路径：evidence.recorded ×2
+        _make_evidence_entry(sid, "session", "user_input", "ok",
+                             safe_summary="input len=5 src=pipe", phase="input"),
+        # 旧路径：legacy event="user_input"
+        _make_entry("user_input", sid, data={"content": "hello", "length": 5}),
+        _make_evidence_entry(sid, "session", "user_input", "ok",
+                             safe_summary="input len=5 src=pipe", phase="input"),
+        _make_evidence_entry(sid, "session", "end", "ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    # 2 evidence.recorded user_input + 1 legacy = 3
+    assert "user_input     : 3" in result
+
+
+def test_user_input_quit_not_counted():
+    """quit 不应被计为 user_input。
+
+    中文注释：quit/exit 在 main loop 的 classify_user_input 阶段就被拦截
+    （intent.kind="exit"），不会进入 _run_chat_for_backend，因此不会触发
+    record_evidence(subsystem="session", operation="user_input")。
+    """
+    sid = "test-quit-ui"
+    entries = [
+        _make_entry("session_start", sid, data=SAMPLE_DATA),
+        _make_entry("agent_reply", sid, data={"reply": "再见！", "quit_command": True}),
+        _make_evidence_entry(sid, "session", "end", "ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "user_input     : 0" in result
+
+
+def test_user_input_envelope_fields_in_events_jsonl():
+    """EventLogWriter 写入的 events.jsonl 中 user_input 事件应包含完整字段。
+
+    中文注释：events.jsonl 是 per-session 的结构化事件日志，action_type 为
+    "session.user_input"，data 中包含完整 envelope。
+    """
+    test_sid = f"test-evtlog-ui-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test-model",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    record_evidence(
+        subsystem="session",
+        operation="user_input",
+        phase="input",
+        status="ok",
+        safe_summary="input len=9 src=interactive",
+        content_persisted=False,
+        metadata={
+            "input_length": 9,
+            "backend": "simple",
+            "source": "interactive",
+            "content_preview": "test input",
+        },
+    )
+
+    ui_events = [
+        e for e in writer.events if e.get("action_type") == "session.user_input"
+    ]
+    assert len(ui_events) == 1
+    ev = ui_events[0]
+    assert ev["source"] == "session"
+    assert ev["event_id"].startswith("evt-")
+    assert ev["status"] == "ok"
+
+    data = ev["data"]
+    assert data["session_id"] == test_sid
+    assert data["provider_type"] == "fake"
+    assert data["provider_model"] == "test-model"
+    assert data["entry"] == "plain"
+    assert data["subsystem"] == "session"
+    assert data["operation"] == "user_input"
+    assert data["content_persisted"] is False
+    assert data["metadata"]["source"] == "interactive"
+    assert data["metadata"]["input_length"] == 9

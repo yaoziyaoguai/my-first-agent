@@ -210,14 +210,38 @@ def _run_chat_for_backend(
     InputIntent、checkpoint 写入、状态机判断或新的 stdout 字符串过滤。
     """
 
-    # 记录 user_input event 到 agent_log.jsonl——log_viewer summary 依赖此事件
-    # 判断对话是否发生（no user_input events → evidence gap）。
-    # 这里统一覆盖 pipe stdin / interactive CLI / Textual TUI 三条路径，
-    # 不分别在各 backend adapter 里散落记录。
+    # user_input 通过统一 evidence recorder 写入，不再使用 legacy log_event。
+    # record_evidence 自动补齐 session_id / provider / entry / envelope 上下文，
+    # summary 以 evidence.recorded 路径为主事实源。
     try:
-        from agent.logger import log_event
+        from agent.evidence_recorder import record_evidence
 
-        log_event("user_input", {"content": user_input[:200], "length": len(user_input)})
+        _source = "unknown"
+        if backend == "textual":
+            _source = "tui"
+        elif not sys.stdin.isatty():
+            _source = "pipe"
+        else:
+            _source = "interactive"
+
+        _input_len = len(user_input)
+        _preview = user_input[:200] if _input_len <= 200 else user_input[:197] + "..."
+
+        record_evidence(
+            subsystem="session",
+            operation="user_input",
+            phase="input",
+            status="ok",
+            safe_summary=f"input len={_input_len} src={_source}",
+            content_persisted=False,
+            sensitive=False,
+            metadata={
+                "input_length": _input_len,
+                "backend": backend,
+                "source": _source,
+                "content_preview": _preview,
+            },
+        )
     except Exception:
         pass
 

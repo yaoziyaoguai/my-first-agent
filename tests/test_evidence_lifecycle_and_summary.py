@@ -1175,3 +1175,213 @@ def test_per_session_summary_no_raw_content():
     result = log_viewer.render_session_summary(sid, per_session_entries)
     assert "raw tool results" in result
     assert "never persisted in events" in result
+
+
+# ═══════════════════════════════════════════════════════
+# Per-session Tool Dedup — metadata.tool_use_id 去重
+# ═══════════════════════════════════════════════════════
+
+
+def _make_ps_evidence_entry(
+    session_id: str,
+    subsystem: str,
+    operation: str,
+    status: str,
+    tool_use_id: str = "",
+    safe_summary: str = "",
+    reason_code: str = "",
+    phase: str = "",
+    metadata: dict | None = None,
+) -> dict:
+    """构造 per-session format evidence entry（模拟 _read_per_session_events 转换后格式）。
+
+    per-session events 中 tool_use_id 位于 data.metadata.tool_use_id，
+    不同于 global log 中 data.tool_use_id 的顶层位置。
+    这个 helper 构造的就是 log_viewer render_session_summary 实际接收的 data 结构。
+    """
+    ts = f"2026-06-05T{12 + len(session_id):02d}:00:00.000Z"
+    meta = dict(metadata or {})
+    if tool_use_id:
+        meta["tool_use_id"] = tool_use_id
+    data: dict = {
+        "subsystem": subsystem,
+        "operation": operation,
+        "phase": phase or ("end" if operation == "invoke_result_summary" else "decision"),
+        "status": status,
+        "reason_code": reason_code,
+        "safe_summary": safe_summary or f"tool=test_tool status={status}",
+        "metadata": meta,
+    }
+    return {
+        "timestamp": ts,
+        "session_id": session_id,
+        "event": "evidence.recorded",
+        "data": data,
+    }
+
+
+def test_ps_tool_dedup_by_metadata_tool_use_id():
+    """per-session event 中 metadata.tool_use_id 正确去重。
+
+    中文注释：这是 P2 bug 的直接回归测试——
+    _tool_dedup_key() 之前只读 data.tool_use_id（顶层），
+    per-session events 中 tool_use_id 在 data.metadata.tool_use_id，
+    导致 gate_decision + invoke_result_summary 产生不同 fallback key，计数翻倍。
+    """
+    sid = "test-ps-dedup-01"
+    tool_id = "toolu_functions.read_file:0"
+    entries = [
+        _make_ps_evidence_entry(sid, "session", "start", "ok",
+                                safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                                tool_use_id=tool_id,
+                                safe_summary="tool=read_file allowed: README.md"),
+        _make_ps_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                                tool_use_id=tool_id,
+                                safe_summary="tool=read_file ok: result_size=3155"),
+        _make_ps_evidence_entry(sid, "session", "end", "ok",
+                                safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+
+
+def test_ps_sensitive_blocked_dedup_by_metadata_tool_use_id():
+    """sensitive blocked 路径：gate_decision blocked + invoke_result_summary blocked，
+    同一 metadata.tool_use_id，summary 为 attempted=1 blocked=1 blocked_sens=1。
+
+    中文注释：最关键的 P2 回归——sensitive block 时 mediator 写 gate_decision blocked，
+    executor 写 invoke_result_summary blocked，如果去重失效会变成 attempted=2 blocked=2。
+    """
+    sid = "test-ps-dedup-02"
+    tool_id = "toolu_functions.read_file:0"
+    entries = [
+        _make_ps_evidence_entry(sid, "session", "start", "ok",
+                                safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        # mediator: gate_decision blocked (sensitive_path)
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "blocked",
+                                tool_use_id=tool_id,
+                                reason_code="sensitive_path",
+                                safe_summary="tool=read_file blocked: sensitive path"),
+        # executor: invoke_result_summary blocked
+        _make_ps_evidence_entry(sid, "tool", "invoke_result_summary", "blocked",
+                                tool_use_id=tool_id,
+                                reason_code="sensitive_path",
+                                safe_summary="tool=read_file blocked: sensitive path"),
+        _make_ps_evidence_entry(sid, "session", "end", "ok",
+                                safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "blocked        : 1" in result
+    assert "blocked (sens) : 1" in result
+
+
+def test_ps_readme_allowed_path_not_regressed():
+    """README allowed 路径使用 per-session format 时不回归——
+    attempted=1 executed=1，不会因去重修复而错误翻倍或归零。
+    """
+    sid = "test-ps-dedup-03"
+    tool_id = "toolu_functions.read_file:0"
+    entries = [
+        _make_ps_evidence_entry(sid, "session", "start", "ok",
+                                safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                                tool_use_id=tool_id,
+                                safe_summary="tool=read_file allowed: README.md"),
+        _make_ps_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                                tool_use_id=tool_id,
+                                safe_summary="tool=read_file ok: result_size=3155"),
+        _make_ps_evidence_entry(sid, "session", "end", "ok",
+                                safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+
+
+def test_ps_global_log_fallback_still_works():
+    """global log 格式（data.tool_use_id 顶层）仍然正确去重——
+    修复不应破坏已有 global log 的去重能力。
+    """
+    sid = "test-ps-dedup-04"
+    tool_id = "toolu_global_top_level"
+    entries = [
+        _make_evidence_entry(sid, "session", "start", "ok",
+                             safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        _make_evidence_entry(sid, "tool", "gate_decision", "ok",
+                             tool_use_id=tool_id),
+        _make_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                             tool_use_id=tool_id),
+        _make_evidence_entry(sid, "session", "end", "ok",
+                             safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+
+
+def test_ps_skipped_pending_failed_counters_not_regressed():
+    """per-session format 下 skipped / pending / failed 计数器不回归。
+    """
+    sid = "test-ps-dedup-05"
+    t_skip = "toolu_skip_id"
+    t_fail = "toolu_fail_id"
+    t_ok = "toolu_ok_id"
+    entries = [
+        _make_ps_evidence_entry(sid, "session", "start", "ok",
+                                safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        # skipped tool
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "skipped",
+                                tool_use_id=t_skip,
+                                reason_code="idempotent_cache",
+                                safe_summary="tool=read_file skipped: idempotent cache hit"),
+        # failed tool (error)
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                                tool_use_id=t_fail,
+                                safe_summary="tool=read_file allowed"),
+        _make_ps_evidence_entry(sid, "tool", "invoke_result_summary", "error",
+                                tool_use_id=t_fail,
+                                safe_summary="tool=read_file error: file not found"),
+        # successful tool
+        _make_ps_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                                tool_use_id=t_ok,
+                                safe_summary="tool=read_file allowed"),
+        _make_ps_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                                tool_use_id=t_ok,
+                                safe_summary="tool=read_file ok"),
+        _make_ps_evidence_entry(sid, "session", "end", "ok",
+                                safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 3" in result
+    assert "executed       : 1" in result
+    assert "failed         : 1" in result
+    assert "skipped        : 1" in result
+
+
+def test_ps_no_raw_content_in_summary():
+    """per-session format summary 不泄漏 raw content。
+    """
+    sid = "test-ps-dedup-06"
+    entries = [
+        _make_ps_evidence_entry(sid, "session", "start", "ok",
+                                safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "raw tool results" in result
+    assert "never persisted in events" in result
+    assert "config/config.yaml" not in result

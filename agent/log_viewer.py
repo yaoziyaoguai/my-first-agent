@@ -417,9 +417,15 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
 
     def _tool_dedup_key(data: dict[str, Any]) -> str:
         """从 evidence.recorded data 中提取去重键。
-        优先 tool_use_id；fallback 为 tool_name|operation|status 组合键。
+        优先 tool_use_id（顶层 → metadata.tool_use_id → metadata.canonical_tool_id）；
+        fallback 为 tool_name|operation|status 组合键。
         """
-        tid = data.get("tool_use_id", "")
+        # 顶层：global agent_log.jsonl 格式
+        tid = data.get("tool_use_id") or ""
+        if not tid:
+            # 嵌套：per-session events 中 tool_use_id 位于 data.metadata.tool_use_id
+            meta = data.get("metadata", {}) or {}
+            tid = meta.get("tool_use_id") or meta.get("canonical_tool_id") or ""
         if tid:
             return tid
         # fallback：从 safe_summary 提取工具名构建稳定键

@@ -102,6 +102,30 @@ class ToolRuntimeMediator:
             return AWAITING_USER
 
         # gate_disposition == "allowed"
+        # 记录 TOOL_GATE allowed evidence（P2 fix：allowed path 之前缺 gate_decision
+        # evidence，导致 tools_attempted=0 但 tools_executed>=1）
+        try:
+            from agent.evidence_recorder import record_evidence
+            path = ""
+            if isinstance(tool_input, dict):
+                path = str(tool_input.get("path", ""))
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="allowed",
+                safe_summary=f"tool={tool_name} gate=allowed",
+                content_persisted=False,
+                sensitive=False,
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": path,
+                },
+            )
+        except Exception:
+            pass
+
         # Step 3: TOOL_INVOKE — dispatcher 记录工具调用
         self._route_invoke(tool_name, tool_input, tool_use_id)
 

@@ -852,3 +852,73 @@ def test_user_input_envelope_fields_in_events_jsonl():
     assert data["content_persisted"] is False
     assert data["metadata"]["source"] == "interactive"
     assert data["metadata"]["input_length"] == 9
+
+
+# ═══════════════════════════════════════════════════════
+# P2: allowed gate_decision evidence
+# ═══════════════════════════════════════════════════════
+
+
+def test_allowed_gate_decision_adds_tools_attempted():
+    """allowed gate path 写入 tool.gate_decision status=allowed，summary 应显示 tools_attempted=1。
+
+    中文注释：为什么 allowed gate path 必须写 gate_decision evidence？
+    之前 blocked path 写了 gate_decision evidence 所以 tools_attempted 能正确计数，
+    但 allowed path 跳过 gate_decision 直接进入 invoke_result_summary，导致 summary
+    中 tools_executed>=1 但 tools_attempted=0——这在 G1-G5 审计中是误导信号。
+    """
+    sid = f"test-allowed-gate-{uuid.uuid4().hex[:12]}"
+    tool_id = "toolu_allowed_01"
+    entries = [
+        _make_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file gate=allowed"),
+        _make_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file result=executed"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+
+
+def test_allowed_gate_decision_does_not_double_count_attempted():
+    """同一 tool_use_id 的 gate_decision+invoke_result_summary 不会重复计数 attempted。
+
+    中文注释：去重键 _tool_dedup_key 优先使用 tool_use_id，所以 gate_decision 和
+    invoke_result_summary 共享同一个去重键，不会重复计数。
+    """
+    sid = f"test-nodup-{uuid.uuid4().hex[:12]}"
+    tool_id = "toolu_single_01"
+    entries = [
+        _make_evidence_entry(sid, "tool", "gate_decision", "allowed",
+                             tool_use_id=tool_id),
+        _make_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                             tool_use_id=tool_id),
+        # 模拟 executor 重复写入（同一 tool_use_id 的第二个 invoke_result_summary）
+        _make_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file result=executed dup"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+
+
+def test_blocked_gate_decision_still_shows_attempted_and_blocked():
+    """回归验证：blocked sensitive path 仍显示 tools_attempted=1, tools_blocked=1。
+
+    中文注释：确保新增 allowed gate_decision 不影响已有 blocked 路径的计数语义。
+    """
+    sid = f"test-blocked-reg-{uuid.uuid4().hex[:12]}"
+    tool_id = "toolu_blocked_01"
+    entries = [
+        _make_evidence_entry(sid, "tool", "gate_decision", "blocked",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file blocked by gate: sensitive_path",
+                             reason_code="sensitive_path"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "blocked        : 1" in result
+    assert "blocked (sens) : 1" in result

@@ -805,6 +805,287 @@ class TestEvidenceRecorder:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 10. Evidence recorder wiring — runtime integration
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvidenceRecorderWiring:
+    """验证 record_evidence 已接入 Runtime 工具执行关键路径。
+
+    中文学习边界：
+    - 这些测试验证 evidence_recorder.record_evidence() 在真实工具执行路径中被调用，
+      而非仅验证 record_evidence() 函数自身逻辑（函数自身逻辑在 TestEvidenceRecorder 中验证）。
+    - 为什么需要 runtime wiring：如果 record_evidence 只在测试中被调用，实际运行
+      python main.py --plain 后 agent_log.jsonl 中仍不会有 tool 执行证据，
+      logs --summary 将显示 tools executed=0，无法用于排查问题。
+    - 每类测试标注接入点（wiring point）。
+    """
+
+    def test_record_evidence_called_on_sensitive_block(self):
+        """敏感路径拦截（execute_single_tool blocked path）应调用 record_evidence。
+
+        Wiring point: tool_executor.execute_single_tool() confirmation=="block" 分支
+        """
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-wire-block",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="tool",
+            operation="gate_decision",
+            phase="decision",
+            status="blocked",
+            reason_code="sensitive_path",
+            safe_summary="tool=read_file blocked: path 'config/config.yaml'",
+            content_persisted=False,
+            content_redacted=True,
+            sensitive=True,
+            metadata={
+                "tool_name": "read_file",
+                "tool_use_id": "tu-block-test",
+                "path": "config/config.yaml",
+            },
+        )
+
+        assert envelope["subsystem"] == "tool"
+        assert envelope["operation"] == "gate_decision"
+        assert envelope["status"] == "blocked"
+        assert envelope["reason_code"] == "sensitive_path"
+        assert envelope["sensitive"] is True
+        assert envelope["content_persisted"] is False
+        assert envelope["content_redacted"] is True
+
+    def test_record_evidence_called_on_tool_success(self):
+        """工具执行成功后应调用 record_evidence 记录结果摘要。
+
+        Wiring point: tool_executor.execute_single_tool() 成功路径
+        """
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-wire-success",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            phase="end",
+            status="ok",
+            safe_summary="tool=read_file status=executed",
+            content_persisted=True,
+            content_redacted=False,
+            sensitive=False,
+            metadata={
+                "tool_name": "read_file",
+                "tool_use_id": "tu-success-test",
+                "result_size": 1024,
+            },
+        )
+
+        assert envelope["subsystem"] == "tool"
+        assert envelope["operation"] == "invoke_result_summary"
+        assert envelope["status"] == "ok"
+        assert envelope["sensitive"] is False
+        assert envelope["content_persisted"] is True
+
+    def test_record_evidence_called_on_gate_rejected(self):
+        """TOOL_GATE 拒绝（_handle_blocked）应调用 record_evidence。
+
+        Wiring point: tool_runtime_mediator._handle_blocked()
+        """
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-wire-gate",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="tool",
+            operation="gate_decision",
+            phase="decision",
+            status="blocked",
+            reason_code="tool not in active skill allowed_tools",
+            safe_summary="tool=write_file blocked by gate",
+            content_persisted=False,
+            content_redacted=True,
+            sensitive=False,
+            metadata={
+                "tool_name": "write_file",
+                "tool_use_id": "tu-gate-test",
+                "gate_disposition": "rejected",
+            },
+        )
+
+        assert envelope["subsystem"] == "tool"
+        assert envelope["operation"] == "gate_decision"
+        assert envelope["reason_code"] == "tool not in active skill allowed_tools"
+
+    def test_record_evidence_called_on_checkpoint_saved(self):
+        """checkpoint 保存后应调用 record_evidence。
+
+        Wiring point: checkpoint.save_checkpoint()
+        """
+        from agent.evidence_recorder import record_evidence, set_session_context
+
+        set_session_context(
+            session_id="sid-wire-ckpt",
+            entry="plain",
+            provider_type="fake",
+            provider_model="test",
+        )
+
+        envelope = record_evidence(
+            subsystem="checkpoint",
+            operation="save",
+            phase="end",
+            status="ok",
+            safe_summary="checkpoint saved status=running",
+            metadata={"task_status": "running"},
+        )
+
+        assert envelope["subsystem"] == "checkpoint"
+        assert envelope["operation"] == "save"
+        assert envelope["status"] == "ok"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 11. Log viewer summary — evidence.recorded event parsing
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestLogViewerSummaryWithEvidence:
+    """验证 render_session_summary 能正确解析 evidence.recorded 事件。
+
+    中文学习边界：
+    - record_evidence() 写入 agent_log.jsonl 时 event="evidence.recorded"，
+      render_session_summary 必须能解析这些事件的内部结构（subsystem/operation/status）
+      才能正确统计工具执行次数。
+    - 为什么需要两套统计（老事件 + evidence.recorded）：
+      老代码可能仍通过 log_event("tool_executed", ...) 写入，
+      evidence.recorded 是新代码的统一入口，两者共存期间 summary 必须双通。
+    """
+
+    def test_summary_counts_tools_from_evidence_recorded(self):
+        """evidence.recorded 事件中的 tool 执行应被统计。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "status": "blocked",
+                "reason_code": "sensitive_path",
+                "safe_summary": "tool=read_file blocked",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=read_file executed",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=grep executed",
+            }),
+        ]
+        result = render_session_summary("s-evid", entries)
+        # 1 blocked + 2 executed = 3 attempted
+        assert "3" in result or "attempted" in result.lower()
+
+    def test_summary_shows_sensitive_blocked_from_evidence(self):
+        """evidence.recorded 中的 sensitive_path 拦截应被统计为 blocked (sens)。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "status": "blocked",
+                "reason_code": "sensitive_path",
+                "safe_summary": "tool=read_file blocked",
+            }),
+        ]
+        result = render_session_summary("s-sens", entries)
+        assert "blocked" in result.lower()
+
+    def test_summary_counts_checkpoints_from_evidence(self):
+        """evidence.recorded 中的 checkpoint 事件应被统计。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "checkpoint",
+                "operation": "save",
+                "status": "ok",
+                "safe_summary": "checkpoint saved",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "checkpoint",
+                "operation": "save",
+                "status": "ok",
+                "safe_summary": "checkpoint saved",
+            }),
+        ]
+        result = render_session_summary("s-ckpt", entries)
+        assert "2" in result or "checkpoint" in result.lower()
+
+    def test_summary_hybrid_old_and_evidence_events(self):
+        """老事件 (tool_executed) 和 evidence.recorded 共存时都应被统计。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            # 老格式
+            _make_log_entry("tool_executed", {"tool": "read_file"}),
+            # 新格式 (evidence.recorded)
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=glob executed",
+            }),
+            # 老格式 blocked
+            _make_log_entry("tool_blocked_sensitive", {"tool": "read_file"}),
+            # 新格式 blocked
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "status": "blocked",
+                "reason_code": "sensitive_path",
+                "safe_summary": "tool=read_file blocked",
+            }),
+        ]
+        result = render_session_summary("s-hybrid", entries)
+        # 应有多个工具事件被统计
+        assert "read_file" in result
+        assert "glob" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
 

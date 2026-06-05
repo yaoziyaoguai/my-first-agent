@@ -663,6 +663,14 @@ def main(argv: list[str] | None = None) -> int:
     from agent.logger import set_session_event_log_writer
     set_session_event_log_writer(_event_log_writer)
 
+    # Evidence recorder wiring: 注入 EventLogWriter 到 evidence_recorder，
+    # 使 record_evidence() 可自动写入 per-session events.jsonl。
+    try:
+        from agent.evidence_recorder import set_event_log_writer
+        set_event_log_writer(_event_log_writer)
+    except Exception:
+        pass
+
     # Evidence storage hygiene: 写入 session_start event 到 per-session events.jsonl，
     # 确保每个新 session 的 events.jsonl 至少包含一条 session 初始化记录。
     # 解决 257/263 historical sessions events.jsonl 为空的问题（只对新 session 有效）。

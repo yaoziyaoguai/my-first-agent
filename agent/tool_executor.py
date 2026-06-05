@@ -336,6 +336,27 @@ def execute_single_tool(
             status="blocked_by_policy",
             safe_preview=denial_summary[:500],
         )
+        # Evidence recorder: 记录敏感路径拦截 evidence
+        try:
+            from agent.evidence_recorder import record_evidence
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="blocked",
+                reason_code="sensitive_path",
+                safe_summary=f"tool={tool_name} blocked: {denial_summary[:100]}",
+                content_persisted=False,
+                content_redacted=True,
+                sensitive=True,
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": (tool_input or {}).get("path", ""),
+                },
+            )
+        except Exception:
+            pass
         emit_display_event(
             turn_state.on_display_event,
             build_tool_status_event(
@@ -365,6 +386,23 @@ def execute_single_tool(
             step_index=state.task.current_step_index,
             status="awaiting_confirmation",
         )
+        # Evidence recorder: 记录确认等待 evidence
+        try:
+            from agent.evidence_recorder import record_evidence
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="confirmation_required",
+                safe_summary=f"tool={tool_name} requires user confirmation",
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": (tool_input or {}).get("path", ""),
+                },
+            )
+        except Exception:
+            pass
         # 工具确认是 Runtime 的 control plane 状态；DisplayEvent 只是 UI 投影。
         # 不把这段预览写进 conversation.messages，避免模型在下一轮把 UI 文案当事实。
         emit_display_event(
@@ -466,6 +504,28 @@ def execute_single_tool(
         safe_preview=envelope.safe_preview,
         content_length=envelope.content_length,
     )
+    # Evidence recorder: 记录工具执行结果 evidence
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            phase="end",
+            status="error" if envelope.status in ("failed", "rejected_by_check") else "ok",
+            reason_code=envelope.error_type or "",
+            safe_summary=f"tool={tool_name} status={envelope.status}",
+            content_persisted=True,
+            content_redacted=False,
+            sensitive=False,
+            metadata={
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "result_size": len(str(result)),
+                "content_length": envelope.content_length,
+            },
+        )
+    except Exception:
+        pass
     # WP-F：工具执行完成后发射 RuntimeEvent，让 on_runtime_event 监听者
     # （TUI / CLI / observer）能展示用户可见的工具结果摘要。不影响 messages 中的
     # tool_result 协议、checkpoint 或 dispatch——只是展示层的投影。

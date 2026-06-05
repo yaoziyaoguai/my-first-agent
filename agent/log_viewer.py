@@ -330,6 +330,37 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
             if "sensitive" in ev:
                 tools_blocked_sensitive += 1
 
+        # 解析 evidence.recorded 事件（统一 evidence recorder 写入）
+        if ev == "evidence.recorded":
+            subsystem = data.get("subsystem", "")
+            op = data.get("operation", "")
+            status = data.get("status", "")
+            # 从 safe_summary 或 metadata 中提取工具名
+            evidence_tool_name = (
+                data.get("safe_summary", "").removeprefix("tool=").split()[0]
+                if data.get("safe_summary", "").startswith("tool=")
+                else ""
+            )
+            if evidence_tool_name:
+                tool_names.add(evidence_tool_name)
+            if subsystem == "tool":
+                if op == "gate_decision":
+                    tools_attempted += 1
+                    if status == "blocked":
+                        tools_blocked += 1
+                        # 检查是否 sensitive path 拦截
+                        if "sensitive_path" in str(data.get("reason_code", "")):
+                            tools_blocked_sensitive += 1
+                    elif status == "confirmation_required":
+                        pass  # confirmation 不计入 attempted/executed/blocked
+                elif op in ("invoke_result_summary",):
+                    if status == "ok":
+                        tools_executed += 1
+                    elif status in ("blocked", "error"):
+                        tools_blocked += 1
+            elif subsystem == "checkpoint":
+                checkpoints_saved += 1
+
         if ev == "skill_selected":
             skill_selected = data.get("skill", data.get("name", "")) or skill_selected
 

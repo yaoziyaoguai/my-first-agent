@@ -306,6 +306,25 @@ def save_checkpoint(state, source: str | None = None, *, path: Path | None = Non
         except Exception:
             # checkpoint 本身已保存成功；观测日志失败不能改变业务行为。
             pass
+        # Evidence recorder: 记录 checkpoint.saved evidence
+        try:
+            from agent.evidence_recorder import record_evidence
+            record_evidence(
+                subsystem="checkpoint",
+                operation="save",
+                phase="end",
+                status="ok",
+                safe_summary=f"checkpoint saved status={status}",
+                metadata={
+                    "task_status": status,
+                    "checkpoint_source": source,
+                    "current_step_index": getattr(
+                        state.task, "current_step_index", None,
+                    ),
+                },
+            )
+        except Exception:
+            pass
         if _debug_stdout_enabled():
             if source:
                 print(f"[CHECKPOINT] saved (status={status}, source={source})")

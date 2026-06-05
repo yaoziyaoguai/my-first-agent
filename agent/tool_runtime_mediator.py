@@ -386,6 +386,33 @@ class ToolRuntimeMediator:
         else:
             reason_text = "工具门控结果异常，工具执行被安全策略阻止"
 
+        # Evidence recorder: 记录 TOOL_GATE 拒绝 evidence
+        try:
+            from agent.evidence_recorder import record_evidence
+            path = ""
+            if isinstance(tool_input, dict):
+                path = str(tool_input.get("path", ""))
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="blocked",
+                reason_code=rejection_reason or "gate_rejected",
+                safe_summary=f"tool={tool_name} blocked by gate: {reason_text[:80]}",
+                content_persisted=False,
+                content_redacted=True,
+                sensitive=False,
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": path,
+                    "gate_disposition": gate_disposition,
+                    "rejection_reason": rejection_reason,
+                },
+            )
+        except Exception:
+            pass
+
         # P2-001: 追踪连续重复拒绝，递增反馈强度
         self._rejection_counts[tool_name] = self._rejection_counts.get(tool_name, 0) + 1
         consecutive_count = self._rejection_counts[tool_name]
@@ -570,6 +597,34 @@ class ToolRuntimeMediator:
             status = "awaiting_confirmation"
         else:
             status = "unknown"
+
+        # Evidence recorder: 记录工具结果 evidence
+        try:
+            from agent.evidence_recorder import record_evidence
+            evidence_status = {
+                "executed": "ok",
+                "blocked_by_policy": "blocked",
+                "awaiting_confirmation": "pending",
+                "unknown": "error",
+            }.get(status, "error")
+            path = ""
+            if isinstance(tool_input, dict):
+                path = str(tool_input.get("path", ""))
+            record_evidence(
+                subsystem="tool",
+                operation="invoke_result_summary",
+                phase="end",
+                status=evidence_status,
+                safe_summary=f"tool={tool_name} result={status}",
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": path,
+                    "execution_status": status,
+                },
+            )
+        except Exception:
+            pass
 
         with contextlib.suppress(Exception):
             self._dispatcher.route_from_runtime_loop(

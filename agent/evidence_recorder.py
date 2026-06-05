@@ -58,6 +58,16 @@ SCHEMA_VERSION = "1.0"
 # 模块级上下文（由 main.py 在 session 启动时注入）
 _session_context: dict[str, str] = {}
 
+# 模块级 EventLogWriter（由 main.py 在创建 EventLogWriter 后注入）
+# record_evidence() 自动使用此 writer 写入 per-session events.jsonl
+_event_log_writer: object | None = None
+
+
+def set_event_log_writer(writer: object | None) -> None:
+    """注入 per-session EventLogWriter，使 record_evidence() 可自动写 events.jsonl。"""
+    global _event_log_writer
+    _event_log_writer = writer
+
 
 def set_session_context(
     *,
@@ -186,10 +196,11 @@ def record_evidence(
             "session_id": envelope["session_id"],
         })
 
-    # 写入 per-session events.jsonl（如果 writer 可用）
-    if event_log_writer is not None:
+    # 写入 per-session events.jsonl（优先使用显式传入的 writer，否则用全局 writer）
+    _writer = event_log_writer or _event_log_writer
+    if _writer is not None:
         with suppress(Exception):
-            event_log_writer.append({
+            _writer.append({
                 "action_type": f"{subsystem}.{operation}",
                 "source": subsystem,
                 "event_id": envelope["event_id"],
@@ -253,5 +264,5 @@ def record_tool_result_summary(
             "path": path,
             "result_summary": summary if isinstance(summary, dict) else None,
         },
-        event_log_writer=event_log_writer,
+        event_log_writer=event_log_writer or _event_log_writer,
     )

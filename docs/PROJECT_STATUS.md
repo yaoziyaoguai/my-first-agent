@@ -130,6 +130,25 @@ Evidence recorder (`agent/evidence_recorder.py`) 支持未来未知子系统无�
 
 ---
 
+## Evidence Lifecycle & Summary Fix (2026-06-05, e77937f)
+
+修复 5 个审计发现的 evidence 问题：
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| session.start evidence session_id 为空 | `set_session_context()` 在 `init_session()` 之后调用 | 重排 main.py 顺序，先注入上下文再 init_session |
+| session.end evidence 缺失 | `finalize_session()` 和 `handle_double_interrupt()` 均未调用 record_evidence | 新增 `_record_session_end()` helper |
+| `tools_executed=0` 误报 | log_viewer 将 `status="error"` 错误放入 blocked 集合，阻止后续 ok 计数 | 分离 failed/blocked/executed 去重集合 |
+| skipped/pending 不可见 | summary 无对应计数器 | 新增 `tools_failed`, `tools_skipped`, `pending_tools_executed` |
+| `content_persisted=True` 误导 | tool_executor 硬编码 True 但只存 metadata 不存 raw content | 改为 `False`，summary 展示同步修正 |
+
+Summary 现在展示 7 个工具计数器：attempted, executed, blocked, blocked (sens), failed, skipped, pending exec。
+session 缺失 session.end 时会在 evidence gaps 中显示 `no session.end evidence` 警告。
+Content Policy 行更新为：`raw tool results: never persisted in events`。
+真实 mini-run 中如果模型未触发目标工具路径，需如实记录 `REAL_MODEL_DID_NOT_TRIGGER_TOOL`。
+
+---
+
 ## 4. 历史架构分类账 (B1-B8) — 仅供参考
 
 以下为历史架构演进里程碑，在 Core Chat stabilization 期间**不继续推进**。

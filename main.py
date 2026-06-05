@@ -651,11 +651,32 @@ def main(argv: list[str] | None = None) -> int:
     # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
     _init_mcp_bridge_if_enabled(session_id=_session_id)
     _entry = _selected_entry or "plain"
-    init_session(session_id=_session_id, entry=_entry)
-    try_resume_from_checkpoint()
+    _project_dir = Path(__file__).resolve().parent
+
+    # ── Evidence context 必须在 init_session 之前注入 ──
+    # init_session() 内部会调用 record_evidence(session.start)，
+    # 如果 _session_context 和 _event_log_writer 尚未注入，
+    # record_evidence 的 envelope 会缺少 session_id / provider / entry，
+    # 且 per-session events.jsonl 不会收到 session.start 事件。
+    _provider_info = {}
+    try:
+        from agent.session import _detect_provider_info
+        _provider_info = _detect_provider_info()
+    except Exception:
+        pass
+
+    try:
+        from agent.evidence_recorder import set_session_context
+        set_session_context(
+            session_id=_session_id,
+            entry=_entry,
+            provider_type=_provider_info.get("provider_type", "unknown"),
+            provider_model=_provider_info.get("model", "unknown"),
+        )
+    except Exception:
+        pass
 
     # B7 Slice 4: per-session event log writer
-    _project_dir = Path(__file__).resolve().parent
     _event_log_writer = EventLogWriter(session_dir=_project_dir / "sessions" / _session_id)
 
     # Evidence storage hygiene: 将 EventLogWriter 注入 logger 模块，
@@ -671,28 +692,11 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass
 
-    # Evidence storage hygiene: 写入 session_start event 到 per-session events.jsonl，
-    # 确保每个新 session 的 events.jsonl 至少包含一条 session 初始化记录。
-    # 解决 257/263 historical sessions events.jsonl 为空的问题（只对新 session 有效）。
-    _provider_info = {}
-    try:
-        from agent.session import _detect_provider_info
-        _provider_info = _detect_provider_info()
-    except Exception:
-        pass
+    init_session(session_id=_session_id, entry=_entry)
+    try_resume_from_checkpoint()
 
-    # 注入 session 上下文到 evidence_recorder，使后续所有 record_evidence()
-    # 调用自动填充 session_id / provider_type / model / entry / run_id。
-    try:
-        from agent.evidence_recorder import set_session_context
-        set_session_context(
-            session_id=_session_id,
-            entry=_entry,
-            provider_type=_provider_info.get("provider_type", "unknown"),
-            provider_model=_provider_info.get("model", "unknown"),
-        )
-    except Exception:
-        pass
+    # dual-write: session.start 也通过 direct EventLogWriter 写入一次，
+    # 作为 record_evidence() 的冗余备份，兼容历史 session 查询。
     _event_log_writer.append({
         "action_type": "session.start",
         "source": "session",

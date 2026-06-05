@@ -298,9 +298,13 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     tools_executed = 0
     tools_blocked = 0
     tools_blocked_sensitive = 0
+    tools_failed = 0
+    tools_skipped = 0
+    pending_tools_executed = 0
     tool_names: set[str] = set()
     skill_selected = ""
     checkpoints_saved = 0
+    session_ended = False
     first_ts = ""
     last_ts = ""
     # 非 tool/checkpoint 的 evidence.recorded 事件 → generic subsystem aggregation
@@ -309,9 +313,13 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     # 去重：executor 和 mediator 会对同一 tool_use_id 各写一次 evidence，
     # 保留两份事件用于调试，但 summary 中的逻辑计数必须只计一次。
     # 优先使用 tool_use_id；无 tool_use_id 时回退到稳定组合键。
+    # 注意：blocked / failed / executed / skipped 各用独立集合，
+    # error 不再错误进入 blocked 集合，避免 error→ok 时 executed 被过滤。
     _dedup_tool_attempted: set[str] = set()
     _dedup_tool_executed: set[str] = set()
     _dedup_tool_blocked: set[str] = set()
+    _dedup_tool_failed: set[str] = set()
+    _dedup_tool_skipped: set[str] = set()
 
     def _tool_dedup_key(data: dict[str, Any]) -> str:
         """从 evidence.recorded data 中提取去重键。
@@ -379,22 +387,34 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
                         # 检查是否 sensitive path 拦截
                         if "sensitive_path" in str(data.get("reason_code", "")):
                             tools_blocked_sensitive += 1
+                    elif status == "skipped":
+                        if dk not in _dedup_tool_skipped:
+                            _dedup_tool_skipped.add(dk)
+                            tools_skipped += 1
                     elif status == "confirmation_required":
                         pass  # confirmation 不计入 attempted/executed/blocked
                 elif op in ("invoke_result_summary",):
-                    # 同一 tool_use_id 的 executor/mediator 双重写入去重。
-                    # 跨类别互斥：已在 blocked 集合中的不重复计入 executed，反之亦然。
-                    # 这同时处理了 mediator 对失败工具误标 ok 的边界情况。
-                    already_seen = (
-                        dk in _dedup_tool_executed
-                        or dk in _dedup_tool_blocked
-                    )
-                    if status == "ok" and not already_seen:
-                        _dedup_tool_executed.add(dk)
-                        tools_executed += 1
-                    elif status in ("blocked", "error") and not already_seen:
+                    # 去重规则（修复 error→ok 计数错误）：
+                    # - blocked / failed / executed 使用独立集合，互不干扰
+                    # - error 进入 failed 集合，不进入 blocked 集合
+                    # - ok 只检查 executed 集合去重，不被 error/blocked 污染
+                    # - 同一 tool_use_id error→ok 时：failed>=1, executed=1
+                    if status == "ok":
+                        if dk not in _dedup_tool_executed:
+                            _dedup_tool_executed.add(dk)
+                            tools_executed += 1
+                    elif status == "error":
+                        if dk not in _dedup_tool_failed:
+                            _dedup_tool_failed.add(dk)
+                            tools_failed += 1
+                    elif status == "blocked" and dk not in _dedup_tool_blocked:
                         _dedup_tool_blocked.add(dk)
                         tools_blocked += 1
+                elif op in ("pending_execute",):
+                    pending_tools_executed += 1
+            elif subsystem == "session":
+                if op == "end":
+                    session_ended = True
             elif subsystem == "checkpoint":
                 checkpoints_saved += 1
             elif subsystem:
@@ -413,6 +433,8 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     gaps: list[str] = []
     if not session_start:
         gaps.append("no session_start event — 未初始化 session")
+    if not session_ended:
+        gaps.append("no session.end evidence — session 可能未正常退出")
     if provider_type == "?":
         gaps.append("provider_type unknown — 无法区分 fake/real")
     if event_counts.get("user_input", 0) == 0:
@@ -444,6 +466,12 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
         f"    blocked        : {tools_blocked}",
         f"    blocked (sens) : {tools_blocked_sensitive}",
     ]
+    if tools_failed:
+        lines.append(f"    failed         : {tools_failed}")
+    if tools_skipped:
+        lines.append(f"    skipped        : {tools_skipped}")
+    if pending_tools_executed:
+        lines.append(f"    pending exec   : {pending_tools_executed}")
     if tool_names:
         lines.append(f"    tools used     : {', '.join(sorted(tool_names))}")
     if skill_selected:
@@ -458,9 +486,10 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
             lines.append(f"    {key} × {count}")
     lines.append(bar)
     lines.append("  Content Policy")
-    lines.append("    tool results in snapshot : summarized if >2KB or sensitive")
-    lines.append("    blocked sensitive tools  : denial metadata only")
-    lines.append("    raw secrets in logs      : redacted")
+    lines.append("    raw tool results        : never persisted in events")
+    lines.append("    result metadata (size)  : stored")
+    lines.append("    blocked sensitive tools : denial metadata only")
+    lines.append("    raw secrets in logs     : redacted")
 
     lines.append(bar)
     if gaps:

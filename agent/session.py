@@ -452,6 +452,25 @@ def _run_session_end_memory_extraction(messages, client, model_name) -> dict:
     return extraction_summary
 
 
+def _record_session_end(status: str = "ok", reason: str = "") -> None:
+    """记录 session.end evidence，使 session 生命周期完整闭环。
+
+    session.start / session.end 配对是 logs --summary 可信排查的基础。
+    """
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="session",
+            operation="end",
+            phase="end",
+            status=status,
+            reason_code=reason,
+            safe_summary=f"session_end status={status}" + (f" reason={reason}" if reason else ""),
+        )
+    except Exception:
+        pass
+
+
 def finalize_session():
     """正常退出（quit 或双 Ctrl+C）：提取记忆 + 保存快照 + 保存 state 断点。
 
@@ -469,6 +488,7 @@ def finalize_session():
         save_checkpoint(state, session_id=_resolve_session_id())
         print("[系统] 未完成的任务断点已保存，下次启动可继续。")
 
+    _record_session_end(status="ok")
     print("会话已保存，再见！")
 
 
@@ -587,4 +607,5 @@ def handle_double_interrupt():
         save_checkpoint(state, session_id=_resolve_session_id())
         print("[系统] 任务断点已更新。")
 
+    _record_session_end(status="ok", reason="double_interrupt")
     print("[系统] 下次启动可继续未完成的任务。再见！")

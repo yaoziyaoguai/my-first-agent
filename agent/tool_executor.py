@@ -532,7 +532,7 @@ def execute_single_tool(
             status="error" if envelope.status in ("failed", "rejected_by_check") else "ok",
             reason_code=envelope.error_type or "",
             safe_summary=f"tool={tool_name} status={envelope.status}",
-            content_persisted=True,
+            content_persisted=False,
             content_redacted=False,
             sensitive=False,
             metadata={
@@ -658,7 +658,7 @@ def execute_pending_tool(
             status="error" if envelope.status in ("failed", "rejected_by_check") else "ok",
             reason_code=envelope.error_type or "",
             safe_summary=f"tool={tool_name} status={envelope.status} (pending_execute)",
-            content_persisted=True,
+            content_persisted=False,
             content_redacted=False,
             sensitive=False,
             metadata={

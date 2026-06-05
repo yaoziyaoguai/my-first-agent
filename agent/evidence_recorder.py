@@ -211,7 +211,7 @@ def record_evidence(
     # 写入全局 lightweight index（agent_log.jsonl）
     with suppress(Exception):
         from agent.logger import log_event
-        log_event("evidence.recorded", {
+        log_data: dict[str, Any] = {
             "subsystem": subsystem,
             "operation": operation,
             "phase": phase,
@@ -220,7 +220,10 @@ def record_evidence(
             "safe_summary": safe_summary[:200],
             "event_id": envelope["event_id"],
             "session_id": envelope["session_id"],
-        })
+        }
+        if metadata and "tool_use_id" in metadata:
+            log_data["tool_use_id"] = metadata["tool_use_id"]
+        log_event("evidence.recorded", log_data)
 
     # 写入 per-session events.jsonl（优先使用显式传入的 writer，否则用全局 writer）
     _writer = event_log_writer or _event_log_writer

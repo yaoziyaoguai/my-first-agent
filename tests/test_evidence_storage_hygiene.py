@@ -1375,6 +1375,203 @@ class TestFutureSubsystemExtension:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Tool Count Dedup — executor 和 mediator 对同一 tool_use_id 各写一次
+# evidence，summary 中的逻辑工具调用次数必须去重（只计一次）。
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvidenceToolCountDedup:
+    """验证 logs --session <id> --summary 中工具计数去重。
+
+    背景：executor（tool_executor.py）和 mediator（tool_runtime_mediator.py）
+    会对同一次工具调用各写一条 invoke_result_summary evidence。
+    两条记录都有调试价值，但 summary 中 tools_executed/tools_blocked
+    必须表示逻辑工具调用次数（去重后），而非 evidence 事件的原始计数。
+    """
+
+    def test_single_tool_executed_counts_once(self):
+        """单次成功工具调用在 summary 中 executed=1，不因 mediator+executor
+        双重写入而变成 2。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            # executor 写入 invoke_result_summary
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "tool=read_file status=executed",
+                "tool_use_id": "tu-001",
+            }),
+            # mediator 对同一 tool_use_id 再次写入 invoke_result_summary
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "tool=read_file result=executed",
+                "tool_use_id": "tu-001",
+            }),
+        ]
+        result = render_session_summary("s-dedup-exec", entries)
+        # 应在 summary 中显示 executed=1 而非 2
+        assert "executed       : 1" in result, (
+            f"去重后 executed 应为 1，实际输出:\n{result}"
+        )
+        assert "executed       : 2" not in result, (
+            f"不应出现 executed=2（未去重的原始计数），实际输出:\n{result}"
+        )
+
+    def test_two_different_tools_count_twice(self):
+        """两次不同 tool_use_id 的成功调用应计为 executed=2。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            # 工具调用 A（executor + mediator 双重写入）
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=read_file status=executed",
+                "tool_use_id": "tu-001",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=read_file result=executed",
+                "tool_use_id": "tu-001",
+            }),
+            # 工具调用 B（executor + mediator 双重写入）
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=grep status=executed",
+                "tool_use_id": "tu-002",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=grep result=executed",
+                "tool_use_id": "tu-002",
+            }),
+        ]
+        result = render_session_summary("s-dedup-two", entries)
+        assert "executed       : 2" in result, (
+            f"两次不同工具调用应计为 executed=2，实际输出:\n{result}"
+        )
+
+    def test_blocked_tool_dedup_across_operations(self):
+        """同一 tool_use_id 的 gate_decision blocked 和 invoke_result_summary
+        blocked 去重后只计一次 blocked。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            # mediator._handle_blocked 写入 gate_decision
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "phase": "decision",
+                "status": "blocked",
+                "reason_code": "sensitive_path",
+                "safe_summary": "tool=read_file blocked by gate",
+                "tool_use_id": "tu-block-001",
+            }),
+            # mediator._route_result 写入 invoke_result_summary
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "phase": "end",
+                "status": "blocked",
+                "safe_summary": "tool=read_file result=blocked_by_policy",
+                "tool_use_id": "tu-block-001",
+            }),
+        ]
+        result = render_session_summary("s-dedup-block", entries)
+        # blocked 应只计一次
+        assert "blocked        : 1" in result, (
+            f"去重后 blocked 应为 1，实际输出:\n{result}"
+        )
+        # attempted 也只应计一次（gate_decision 只写了一条，但也验证一下）
+        assert "attempted      : 1" in result, (
+            f"attempted 应为 1，实际输出:\n{result}"
+        )
+
+    def test_dedup_without_tool_use_id_fallback_key(self):
+        """无 tool_use_id 时回退到组合键去重。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            # 无 tool_use_id — 依赖 fallback 组合键 (tool_name|op|status)
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=read_file status=executed",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "ok",
+                "safe_summary": "tool=read_file status=executed",
+            }),
+        ]
+        result = render_session_summary("s-dedup-fallback", entries)
+        assert "executed       : 1" in result, (
+            f"fallback 去重后 executed 应为 1，实际输出:\n{result}"
+        )
+
+    def test_dedup_preserves_sensitive_block_count(self):
+        """去重不影响 sensitive block 的计数（仍基于原始 finding）。"""
+        from agent.log_viewer import render_session_summary
+
+        entries = [
+            _make_log_entry("session_start", {
+                "provider_type": "real", "model": "claude", "entry": "plain",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "status": "blocked",
+                "reason_code": "sensitive_path",
+                "safe_summary": "tool=read_file blocked: config/config.yaml",
+                "tool_use_id": "tu-sens-001",
+            }),
+            _make_log_entry("evidence.recorded", {
+                "subsystem": "tool",
+                "operation": "invoke_result_summary",
+                "status": "blocked",
+                "safe_summary": "tool=read_file result=blocked_by_policy",
+                "tool_use_id": "tu-sens-001",
+            }),
+        ]
+        result = render_session_summary("s-dedup-sens", entries)
+        # blocked 去重后为 1，但 sensitive 标记保留
+        assert "blocked        : 1" in result, (
+            f"去重后 blocked 应为 1，实际输出:\n{result}"
+        )
+        # sensitive_path reason_code 应仍能在输出中找到
+        assert "blocked (sens)" in result, (
+            f"应包含 blocked (sens) 标记，实际输出:\n{result}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
 

@@ -292,6 +292,24 @@ def execute_single_tool(
             status="idempotent_cache",
             safe_preview=str(cached)[:500],
         )
+        # Evidence recorder: 幂等跳过也属于 Runtime branch point，
+        # 必须进入统一 evidence，不能只靠 legacy emit_tool_audit_event。
+        try:
+            from agent.evidence_recorder import record_evidence
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="skipped",
+                reason_code="idempotent_cache",
+                safe_summary=f"tool={tool_name} skipped (already executed)",
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                },
+            )
+        except Exception:
+            pass
         if not has_tool_result(messages, tool_use_id):
             append_tool_result(messages, tool_use_id, cached)
         return None
@@ -629,6 +647,30 @@ def execute_pending_tool(
         safe_preview=envelope.safe_preview,
         content_length=envelope.content_length,
     )
+    # Evidence recorder: pending tool 确认执行后也必须进入统一 evidence，
+    # 与 execute_single_tool 路径保持一致，不能只依赖 legacy emit_tool_audit_event。
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="tool",
+            operation="invoke_result_summary",
+            phase="end",
+            status="error" if envelope.status in ("failed", "rejected_by_check") else "ok",
+            reason_code=envelope.error_type or "",
+            safe_summary=f"tool={tool_name} status={envelope.status} (pending_execute)",
+            content_persisted=True,
+            content_redacted=False,
+            sensitive=False,
+            metadata={
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "result_size": len(str(result)),
+                "content_length": envelope.content_length,
+                "from_pending_tool": True,
+            },
+        )
+    except Exception:
+        pass
     emit_display_event(
         turn_state.on_display_event,
         build_tool_status_event(

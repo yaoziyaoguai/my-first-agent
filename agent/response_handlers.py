@@ -37,6 +37,30 @@ MAX_REPEATED_TOOL_INPUTS = 3
 TEXT_PREVIEW_LIMIT = 120
 
 
+def _record_runtime_evidence(
+    operation: str, status: str, safe_summary: str,
+    *, metadata: dict | None = None,
+) -> None:
+    """把 Runtime branch point 事件送入统一 evidence recorder。
+
+    Runtime branch point（loop.stop / model.response / progress / end_turn）
+    必须并行写入 evidence，不能只依赖 legacy log_event。
+    """
+    try:
+        from agent.evidence_recorder import record_evidence
+
+        record_evidence(
+            subsystem="runtime",
+            operation=operation,
+            phase="end" if status in ("ok", "skipped") else "error",
+            status=status,
+            safe_summary=safe_summary,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
+
+
 def _log_model_event(event: RuntimeEvent, *, event_channel: str | None = None) -> None:
     """把 ModelOutputResolution 的结果送进 observer。
 
@@ -193,6 +217,12 @@ def handle_tool_use_response(
         event_payload=observation,
         event_channel="tool_use",
     )
+    _record_runtime_evidence(
+        "model_response", "ok",
+        f"model_response channel=tool_use stop_reason={observation.get('stop_reason')}"
+        f" tools={observation.get('tool_use_names')}",
+        metadata=observation,
+    )
     log_event(
         "model.tool_use",
         event_source="model",
@@ -257,7 +287,7 @@ def handle_tool_use_response(
 
     for idx, block in enumerate(tool_use_blocks):
         # 先把模型输出归类成事件并记录下来；后续仍沿用原来的
-        # execute_single_tool 路径。这样第一阶段只做到“事件可见”，不迁移执行层。
+        # execute_single_tool 路径。这样第一阶段只做到"事件可见"，不迁移执行层。
         model_event = resolve_tool_use_block(block)
         _log_model_event(model_event, event_channel="tool_use")
 
@@ -358,6 +388,18 @@ def handle_tool_use_response(
                 },
                 event_channel="tool_use",
             )
+            _record_runtime_evidence(
+                "loop", "stop",
+                "awaiting_tool_or_user_confirmation",
+                metadata={
+                    "pending_tool_name": (
+                        state.task.pending_tool or {}
+                    ).get("tool"),
+                    "pending_user_input_kind": (
+                        state.task.pending_user_input_request or {}
+                    ).get("awaiting_kind"),
+                },
+            )
             remaining_business = [b for b in tool_use_blocks[idx + 1:] if not is_meta_tool(b.name)]
             _fill_placeholder_results(
                 messages,
@@ -427,6 +469,11 @@ def _maybe_advance_step(state: Any) -> str | None:
             },
             event_channel="progress",
         )
+        _record_runtime_evidence(
+            "progress", "no_progress",
+            "mark_step_complete missing or below threshold",
+            metadata={"_current_step_index": getattr(state.task, "current_step_index", None)},
+        )
         return None
 
     log_event(
@@ -438,6 +485,11 @@ def _maybe_advance_step(state: Any) -> str | None:
             "mark_step_complete_called": True,
         },
         event_channel="progress",
+    )
+    _record_runtime_evidence(
+        "progress", "detected",
+        "step progress detected via mark_step_complete",
+        metadata={"step_index_before": before_index},
     )
 
     if state.task.current_plan:
@@ -466,6 +518,15 @@ def _maybe_advance_step(state: Any) -> str | None:
                     },
                     event_channel="progress",
                 )
+                _record_runtime_evidence(
+                    "progress", "applied",
+                    f"step advanced {before_index} → {state.task.current_step_index}",
+                    metadata={
+                        "step_index_before": before_index,
+                        "step_index_after": state.task.current_step_index,
+                        "should_continue_loop": True,
+                    },
+                )
                 return None
 
     advance_current_step_if_needed(state)
@@ -479,6 +540,16 @@ def _maybe_advance_step(state: Any) -> str | None:
             "should_continue_loop": state.task.status != "done",
         },
         event_channel="progress",
+    )
+    _record_runtime_evidence(
+        "progress", "applied",
+        f"step advanced {before_index} → {state.task.current_step_index}"
+        f" done={state.task.status == 'done'}",
+        metadata={
+            "step_index_before": before_index,
+            "step_index_after": state.task.current_step_index,
+            "task_status": state.task.status,
+        },
     )
 
     if state.task.status == "done":
@@ -533,6 +604,11 @@ def handle_max_tokens_response(
         event_payload=observation,
         event_channel="max_tokens",
     )
+    _record_runtime_evidence(
+        "model_response", "ok",
+        f"model_response channel=max_tokens stop_reason={observation.get('stop_reason')}",
+        metadata=observation,
+    )
     log_event(
         "model.max_tokens",
         event_source="model",
@@ -582,6 +658,11 @@ def handle_end_turn_response(
         event_source="model",
         event_payload=observation,
         event_channel="end_turn",
+    )
+    _record_runtime_evidence(
+        "model_response", "ok",
+        f"model_response channel=end_turn stop_reason={observation.get('stop_reason')}",
+        metadata=observation,
     )
     log_event(
         "model.end_turn",
@@ -639,6 +720,17 @@ def handle_end_turn_response(
             },
             event_channel="assistant_text",
         )
+        _record_runtime_evidence(
+            "end_turn", "no_completion",
+            f"end_turn without step completion "
+            f"(consecutive={state.task.consecutive_end_turn_without_progress})",
+            metadata={
+                "had_text_output": bool(text_content),
+                "consecutive_end_turn_without_progress": (
+                    state.task.consecutive_end_turn_without_progress
+                ),
+            },
+        )
 
         # end_turn 没有 tool_use 结构：text_requested_user_input 是协议外文本兜底，
         # runtime.no_progress 是 runtime 观察到的无进展事件。当前仍由本 handler
@@ -667,7 +759,17 @@ def handle_end_turn_response(
                 },
                 event_channel="assistant_text",
             )
-            # awaiting_kind 只标记“为什么 runtime 正在等用户”，不改变 status。
+            _record_runtime_evidence(
+                "progress", "no_progress",
+                f"no progress in end_turn: {model_event.event_type}",
+                metadata={
+                    "no_progress_reason": model_event.event_type,
+                    "consecutive_end_turn_without_progress": (
+                        state.task.consecutive_end_turn_without_progress
+                    ),
+                },
+            )
+            # awaiting_kind 只标记"为什么 runtime 正在等用户"，不改变 status。
             # fallback_question 来自模型普通文本求助；no_progress 来自 runtime 观察到
             # 连续无进展。两者恢复后都仍按 runtime_user_input_answer 处理。
             awaiting_kind = (

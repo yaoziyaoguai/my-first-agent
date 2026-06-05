@@ -365,6 +365,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # BASE_TOOLS 合并到 skill visible allowlist。不改变 core 的模块级
         # import surface，不引入新的模块级耦合。
         "agent.tool_scope",
+        # Evidence migration: core.py / planner.py / response_handlers.py /
+        # tool_executor.py / session.py 均通过 helper 函数在 Runtime branch
+        # point 处延迟 import evidence_recorder，实现 dual-write 过渡。
+        "agent.evidence_recorder",
     }
 
     assert _collect_agent_imports(CORE_FILE) == expected
@@ -429,6 +433,9 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_dispatch_skill_selection_entered",
         "_update_active_skill_from_dispatcher",
         "get_memory_runtime",
+        # Evidence migration: 模块级 helper，把 Runtime branch point 事件送入
+        # 统一 evidence recorder（dual-write：保留 legacy log_event + 新增 record_evidence）。
+        "_record_core_evidence",
     }
 
     assert actual == expected

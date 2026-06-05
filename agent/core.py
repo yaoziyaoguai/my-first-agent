@@ -124,6 +124,32 @@ from agent.subagent_inline import execute_subagent_delegation as _execute_subage
 from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
 from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
 
+
+def _record_core_evidence(
+    operation: str,
+    status: str,
+    safe_summary: str,
+    *,
+    metadata: dict | None = None,
+) -> None:
+    """core Runtime branch point 统一 evidence 接入。
+
+    保留 legacy log_event 作为 compatibility，但 Runtime 事实源必须是
+    record_evidence。此 helper 避免在多个调用点重复 try/except/import。
+    """
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="core",
+            operation=operation,
+            phase="end" if status in ("ok", "skipped") else "error",
+            status=status,
+            safe_summary=safe_summary,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
+
 DEBUG_PROTOCOL = False
 # MY_FIRST_AGENT_PROTOCOL_DUMP 的实际 guard 在 agent.protocol_debug 中；
 # 这里保留兼容锚点，避免外部测试/诊断脚本误判 core 默认会输出协议 dump。
@@ -1381,6 +1407,8 @@ def _run_planning_phase(
                     "block_types": _block_types,
                     "content_block_count": len(response.content),
                 })
+                _record_core_evidence(
+                    "planning_model", "error", "planning model returned empty text")
                 return "", None
 
             _raw_text = result_text.strip()
@@ -1415,6 +1443,9 @@ def _run_planning_phase(
             # 所有提取失败——返回原始文本用于诊断
             return _raw_text, None
         except Exception as _exc:
+            _record_core_evidence(
+                "planning_model", "error",
+                f"planning model call error: {type(_exc).__name__}")
             log_event("planning_model_call_error", {
                 "error_type": type(_exc).__name__,
                 "error_msg": str(_exc)[:300],
@@ -1426,6 +1457,7 @@ def _run_planning_phase(
             return None, None
 
     clean_text, raw = _call_planning_model(ACTION_PLAN_PROMPT, planning_messages)
+    _record_core_evidence("planning_entered", "ok", "planning mode entered")
     log_event("planning_mode_entered", {
         "action_plan_prompt_used": True,
         "phase": "_run_planning_phase",
@@ -1445,6 +1477,10 @@ def _run_planning_phase(
             reason = "模型输出不是合法 JSON（无法提取 JSON 对象）"
 
         if not is_valid:
+            _record_core_evidence(
+                "schema_validation", "error",
+                f"action plan schema invalid: {reason[:100]}",
+                metadata={"reason": reason})
             log_event("action_plan_schema_invalid", {
                 "reason": reason,
                 "phase": "schema_validation",
@@ -1465,11 +1501,19 @@ def _run_planning_phase(
                     is_valid2, reason2 = validate_action_plan_raw(raw)
                     if is_valid2:
                         is_valid = True
+                        _record_core_evidence(
+                            "schema_validation", "ok",
+                            "action plan schema validated after retry",
+                            metadata={"after_retry": True})
                         log_event("action_plan_schema_validated", {
                             "after_retry": True,
                             "phase": "schema_repair_retry_success",
                         })
                     else:
+                        _record_core_evidence(
+                            "planning_failed", "error",
+                            f"planning failed after retry: {reason2[:100]}",
+                            metadata={"reason": reason2, "retry_used": True})
                         log_event("planning_failed", {
                             "reason": reason2,
                             "retry_used": True,
@@ -1478,6 +1522,9 @@ def _run_planning_phase(
                         raw = None
                         clean_text = None
                 else:
+                    _record_core_evidence(
+                        "planning_failed", "error", "planning failed: retry parse error",
+                        metadata={"retry_used": True})
                     log_event("planning_failed", {
                         "reason": "retry parse failed",
                         "retry_used": True,
@@ -1485,6 +1532,10 @@ def _run_planning_phase(
                     })
                     clean_text = None
             else:
+                _record_core_evidence(
+                    "planning_failed", "error",
+                    f"planning failed: {reason[:100]}",
+                    metadata={"reason": reason, "retry_used": False})
                 log_event("planning_failed", {
                     "reason": reason,
                     "retry_used": False,
@@ -1494,7 +1545,12 @@ def _run_planning_phase(
         is_valid, reason = validate_action_plan_raw(raw)
         if is_valid:
             log_event("action_plan_schema_validated", {"after_retry": False})
+            _record_core_evidence("schema_validation", "ok", "action plan schema validated")
         # 无 scheduler 时不强制 schema——允许 legacy fallback
+        _record_core_evidence(
+            "model_plan_received", "ok",
+            f"model plan received schema_valid={is_valid}",
+            metadata={"schema_valid": is_valid})
         log_event("model_plan_received", {
             "schema_valid": is_valid,
             "has_scheduler": False,
@@ -1517,6 +1573,9 @@ def _run_planning_phase(
                 clean_text=clean_text,
             )
             if action_plan is not None:
+                _record_core_evidence(
+                    "scheduler_load", "ok",
+                    f"scheduler load success plan_id={action_plan.plan_id}")
                 log_event("scheduler_load_success", {
                     "plan_id": action_plan.plan_id,
                     "nodes": len(action_plan.nodes),
@@ -1558,6 +1617,9 @@ def _run_planning_phase(
             try:
                 action_scheduler.load_plan(action_plan)
             except Exception:
+                _record_core_evidence(
+                    "scheduler_load", "error",
+                    "planning handoff: scheduler.load_plan() failed")
                 log_event("planning_handoff_failure", {
                     "error": "action_scheduler.load_plan() failed",
                     "plan_id": action_plan.plan_id,
@@ -1595,6 +1657,9 @@ def _run_planning_phase(
                 )
                 action_scheduler.load_plan(_legacy_action_plan)
             except Exception as exc:
+                _record_core_evidence(
+                    "scheduler_load", "error",
+                    f"legacy bridge failed: {type(exc).__name__}")
                 log_event("planning_handoff_failure", {
                     "error": f"legacy bridge failed: {type(exc).__name__}: {exc}",
                     "plan_id": f"legacy-{legacy_plan.goal[:40]}",

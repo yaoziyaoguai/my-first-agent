@@ -149,6 +149,27 @@ def init_session(*, session_id: str | None = None, entry: str = ""):
         "config_source": _provider_info["config_source"],
         "entry": entry or "plain",
     })
+    # Evidence recorder: session.start 是核心 Runtime branch point，
+    # 必须进入统一 evidence，后续排查靠它关联 provider/entry/session_id。
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="session",
+            operation="start",
+            phase="start",
+            status="ok",
+            safe_summary=f"session_start provider={_provider_info['provider_type']}"
+                        f" model={_provider_info['model']}"
+                        f" entry={entry or 'plain'}",
+            metadata={
+                "provider_type": _provider_info["provider_type"],
+                "provider_model": _provider_info["model"],
+                "config_source": _provider_info["config_source"],
+                "entry": entry or "plain",
+            },
+        )
+    except Exception:
+        pass
 
     health_results = run_health_check(verbose=False)
 

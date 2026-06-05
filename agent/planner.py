@@ -5,6 +5,32 @@ from pydantic import ValidationError
 from agent.logger import log_event
 from agent.plan_schema import Plan, PlannerOutput
 
+
+def _record_planner_evidence(
+    operation: str,
+    status: str,
+    safe_summary: str,
+    *,
+    metadata: dict | None = None,
+) -> None:
+    """planner Runtime branch point 统一 evidence 接入。
+
+    保留 legacy log_event 作为 compatibility，但 Runtime 事实源必须是
+    record_evidence。此 helper 避免在 12+ 个调用点重复 try/except/import。
+    """
+    try:
+        from agent.evidence_recorder import record_evidence
+        record_evidence(
+            subsystem="planner",
+            operation=operation,
+            phase="end" if status in ("ok", "skipped") else "error",
+            status=status,
+            safe_summary=safe_summary,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ⛔ LEGACY: PLANNING_PROMPT / generate_plan() — 旧 Plan/PlanStep schema 路径
 #
@@ -250,11 +276,20 @@ def generate_plan(user_input, client, model_name, messages=None):
         # 单步任务直接跳过
         if decision.steps_estimate <= 1:
             log_event("plan_skipped", {"reason": "single_step", "input": user_input[:100]})
+            _record_planner_evidence(
+                "plan_decision", "skipped",
+                "plan skipped: single_step",
+                metadata={"reason": "single_step"},
+            )
             return None
 
         # 多步任务必须有 goal 和 steps
         if not decision.goal or not decision.steps:
             log_event("plan_error", {"error": "missing goal or steps", "raw": raw})
+            _record_planner_evidence(
+                "plan_decision", "error",
+                "plan error: missing goal or steps",
+            )
             return None
 
         plan = Plan(
@@ -269,14 +304,21 @@ def generate_plan(user_input, client, model_name, messages=None):
             "steps": len(plan.steps),
             "steps_estimate": decision.steps_estimate,
         })
+        _record_planner_evidence(
+            "plan_generated", "ok",
+            f"plan_generated steps={len(plan.steps)}",
+            metadata={"steps": len(plan.steps), "steps_estimate": decision.steps_estimate},
+        )
 
         return plan
 
     except (json.JSONDecodeError, ValidationError) as e:
         log_event("plan_error", {"error": str(e)})
+        _record_planner_evidence("plan_decision", "error", f"plan parse error: {str(e)[:100]}")
         return None
     except Exception as e:
         log_event("plan_error", {"error": str(e)})
+        _record_planner_evidence("plan_decision", "error", f"plan error: {str(e)[:100]}")
         return None
 
 
@@ -339,6 +381,10 @@ def generate_action_plan(user_input, client, model_name, messages=None, *, clean
         steps_estimate = raw.get("steps_estimate", 0)
         if isinstance(steps_estimate, (int, float)) and int(steps_estimate) <= 1:
             log_event("plan_skipped", {"reason": "single_step", "input": user_input[:100]})
+            _record_planner_evidence(
+                "action_plan_decision", "skipped",
+                "action_plan skipped: single_step",
+            )
             return None
 
         # 多步任务：必须有 plan_id / nodes / entry_node_id
@@ -346,6 +392,10 @@ def generate_action_plan(user_input, client, model_name, messages=None, *, clean
             log_event(
                 "plan_error",
                 {"error": "missing plan_id or nodes", "raw_keys": list(raw.keys())},
+            )
+            _record_planner_evidence(
+                "action_plan_decision", "error",
+                "action_plan error: missing plan_id or nodes",
             )
             return None
 
@@ -356,17 +406,37 @@ def generate_action_plan(user_input, client, model_name, messages=None, *, clean
             "nodes": len(action_plan.nodes),
             "entry_node_id": action_plan.entry_node_id,
         })
+        _record_planner_evidence(
+            "action_plan_generated", "ok",
+            f"action_plan_generated plan_id={action_plan.plan_id} nodes={len(action_plan.nodes)}",
+            metadata={"plan_id": action_plan.plan_id, "nodes": len(action_plan.nodes)},
+        )
 
         return action_plan
 
     except (json.JSONDecodeError, KeyError) as e:
         log_event("plan_error", {"error": str(e), "phase": "generate_action_plan"})
+        _record_planner_evidence(
+            "action_plan_decision", "error",
+            f"action_plan parse error: {str(e)[:100]}",
+            metadata={"phase": "generate_action_plan"},
+        )
         return None
     except ValueError as e:
         log_event("plan_error", {"error": str(e), "phase": "generate_action_plan_parse"})
+        _record_planner_evidence(
+            "action_plan_decision", "error",
+            f"action_plan parse error: {str(e)[:100]}",
+            metadata={"phase": "generate_action_plan_parse"},
+        )
         return None
     except Exception as e:
         log_event("plan_error", {"error": str(e), "phase": "generate_action_plan"})
+        _record_planner_evidence(
+            "action_plan_decision", "error",
+            f"action_plan error: {str(e)[:100]}",
+            metadata={"phase": "generate_action_plan"},
+        )
         return None
 
 

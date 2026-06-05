@@ -32,6 +32,9 @@ from typing import Any
 
 from config import LOG_FILE
 
+# sessions/ 目录的父目录（即项目根目录），用于定位 per-session events.jsonl
+_PROJECT_DIR = Path(__file__).resolve().parent.parent
+
 # 默认在 logs 视图里隐藏的高噪声事件类型。
 # runtime_observer 在常见日志里占 ~86% 条目，对人工调试基本没用，加 --include-observer 才显示。
 _NOISY_EVENT_TYPES = {"runtime_observer"}
@@ -266,6 +269,95 @@ def format_entry(entry: dict[str, Any]) -> str:
     if summary:
         line = f"{line}  {summary}"
     return mask_secrets(line)
+
+
+# ── Per-session events.jsonl helpers ──
+
+
+def _resolve_session_dir(session_id_prefix: str, project_dir: Path | None = None) -> Path | None:
+    """将会话 ID 前缀解析为 sessions/<id>/ 目录路径。
+
+    扫描 sessions/ 目录，返回第一个匹配前缀的目录。
+    返回 None 表示无匹配。
+    """
+    _base = project_dir or _PROJECT_DIR
+    sessions_dir = _base / "sessions"
+    if not sessions_dir.exists():
+        return None
+    for d in sorted(sessions_dir.iterdir(), reverse=True):
+        if d.is_dir() and d.name.startswith(session_id_prefix):
+            return d
+    return None
+
+
+def _read_per_session_events(session_dir: Path) -> list[dict[str, Any]]:
+    """读取 per-session events.jsonl，转换为 agent_log.jsonl 兼容的 entry 格式。
+
+    返回的每条 entry 包含 event / session_id / timestamp / data 字段，
+    可直接传入 render_session_summary()。
+
+    per-session events.jsonl 的 data 字段即为 evidence envelope，
+    含 subsystem / operation / phase / status / metadata 等全部上下文。
+    """
+    events_path = session_dir / "events.jsonl"
+    if not events_path.exists():
+        return []
+
+    entries: list[dict[str, Any]] = []
+    with open(events_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            data = ev.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            session_id = data.get("session_id", "")
+            timestamp = data.get("timestamp", "")
+
+            # 核心 evidence 事件：转换为 evidence.recorded 格式
+            entry = {
+                "event": "evidence.recorded",
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "data": data,
+            }
+            entries.append(entry)
+
+            # 从 session.start 事件中提取 session 身份信息（模拟 legacy session_start entry）
+            action_type = ev.get("action_type", "")
+            if action_type == "session.start":
+                metadata = data.get("metadata", {}) or {}
+                entries.append({
+                    "event": "session_start",
+                    "session_id": session_id,
+                    "timestamp": timestamp,
+                    "data": {
+                        "entry": metadata.get("entry", data.get("entry", "plain")),
+                        "provider_type": metadata.get("provider_type",
+                                                     data.get("provider_type", "?")),
+                        "model": metadata.get("provider_model",
+                                              data.get("provider_model", "?")),
+                    },
+                })
+            # user_input events → 兼容 legacy event="user_input"
+            elif action_type == "session.user_input":
+                entries.append({
+                    "event": "user_input",
+                    "session_id": session_id,
+                    "timestamp": timestamp,
+                    "data": {"content": data.get("safe_summary", "")},
+                })
+
+    return entries
+
+
+# ── Summary rendering ──
 
 
 def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> str:
@@ -540,7 +632,38 @@ def render_logs(
 
     # ── Summary 模式 ──
     if summary and session_id:
-        return render_session_summary(session_id, real)
+        # 优先读取 per-session events.jsonl（新日志体系的主事实源），
+        # 缺失或为空时 fallback 到 agent_log.jsonl（global index / compatibility）。
+        session_dir = _resolve_session_dir(session_id)
+        if session_dir is not None:
+            per_session_entries = _read_per_session_events(session_dir)
+            if per_session_entries:
+                summary_text = render_session_summary(session_id, per_session_entries)
+                # 在 session_id 行后面插入 evidence_source 行
+                source_line = "  evidence_source : per_session_events"
+                lines_list = summary_text.split("\n")
+                # 在第二个分隔线（索引=2）之前插入
+                insert_at = 2
+                for i, ln in enumerate(lines_list):
+                    if ln.startswith("─" * 50) and i > 0:
+                        insert_at = i
+                        break
+                lines_list.insert(insert_at, source_line)
+                return "\n".join(lines_list)
+
+        # Fallback：per-session events 缺失或为空，回退到 agent_log.jsonl
+        summary_text = render_session_summary(session_id, real)
+        source_line = "  evidence_source : fallback_global_log"
+        warning_line = "  ⚠  warning : per_session_events_missing_or_empty"
+        lines_list = summary_text.split("\n")
+        insert_at = 2
+        for i, ln in enumerate(lines_list):
+            if ln.startswith("─" * 50) and i > 0:
+                insert_at = i
+                break
+        lines_list.insert(insert_at, warning_line)
+        lines_list.insert(insert_at, source_line)
+        return "\n".join(lines_list)
 
     if tail is not None and tail > 0:
         real = real[-tail:]

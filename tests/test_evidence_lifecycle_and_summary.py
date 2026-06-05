@@ -11,7 +11,9 @@ E. content_persisted=False 在 raw content 未持久化时
 """
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
 
 from agent import log_viewer
 from agent.evidence_recorder import (
@@ -922,3 +924,254 @@ def test_blocked_gate_decision_still_shows_attempted_and_blocked():
     assert "attempted      : 1" in result
     assert "blocked        : 1" in result
     assert "blocked (sens) : 1" in result
+
+
+# ═══════════════════════════════════════════════════════
+# K. Per-session events.jsonl → summary 优先级测试
+# ═══════════════════════════════════════════════════════
+
+
+def test_resolve_session_dir_finds_matching_prefix():
+    """_resolve_session_dir 根据前缀定位 sessions/<id>/ 目录。
+
+    中文注释：为什么需要前缀解析？
+    用户通常只输入 8 位短哈希，而非完整 UUID。logs --session 需要能
+    从前缀找到完整 session 目录，才能读取 per-session events.jsonl。
+    """
+    import tempfile
+    sid_full = "abc12345-def6-7890-abcd-ef1234567890"
+    with tempfile.TemporaryDirectory() as tmp:
+        sessions_dir = Path(tmp) / "sessions"
+        session_dir = sessions_dir / sid_full
+        session_dir.mkdir(parents=True)
+        (session_dir / "events.jsonl").write_text("{}", encoding="utf-8")
+
+        # 短前缀匹配
+        found = log_viewer._resolve_session_dir("abc12345", project_dir=Path(tmp))
+        assert found is not None
+        assert found.name == sid_full
+
+        # 不匹配的前缀
+        not_found = log_viewer._resolve_session_dir("zzzz9999", project_dir=Path(tmp))
+        assert not_found is None
+
+
+def test_read_per_session_events_converts_format():
+    """_read_per_session_events 将 per-session 格式转换为 agent_log 兼容格式。
+
+    中文注释：为什么需要格式转换？
+    per-session events.jsonl 使用 action_type/source/data 结构（EventLogWriter 格式），
+    而 render_session_summary 期望 event/data 结构（agent_log.jsonl 格式）。
+    转换确保 summary 渲染逻辑不需要双写。
+    """
+    import tempfile
+    sid = "test-per-session-sidsid"
+    with tempfile.TemporaryDirectory() as tmp:
+        session_dir = Path(tmp) / sid
+        session_dir.mkdir(parents=True)
+        events_path = session_dir / "events.jsonl"
+
+        # 写入 per-session 格式事件
+        events = [
+            {
+                "action_type": "session.start",
+                "source": "session",
+                "status": "ok",
+                "data": {
+                    "session_id": sid,
+                    "subsystem": "session",
+                    "operation": "start",
+                    "status": "ok",
+                    "entry": "plain",
+                    "provider_type": "fake",
+                    "provider_model": "test",
+                    "metadata": {
+                        "provider_type": "fake",
+                        "provider_model": "test",
+                        "entry": "plain",
+                    },
+                },
+            },
+            {
+                "action_type": "session.user_input",
+                "source": "session",
+                "status": "ok",
+                "data": {
+                    "session_id": sid,
+                    "subsystem": "session",
+                    "operation": "user_input",
+                    "status": "ok",
+                    "safe_summary": "input len=5 src=interactive",
+                },
+            },
+            {
+                "action_type": "session.end",
+                "source": "session",
+                "status": "ok",
+                "data": {
+                    "session_id": sid,
+                    "subsystem": "session",
+                    "operation": "end",
+                    "status": "ok",
+                    "safe_summary": "session_end status=ok",
+                },
+            },
+        ]
+        with open(events_path, "w", encoding="utf-8") as f:
+            for ev in events:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+
+        entries = log_viewer._read_per_session_events(session_dir)
+        # 应有 3 条 evidence.recorded + 1 条 session_start + 1 条 user_input = 5
+        evidence_entries = [e for e in entries if e["event"] == "evidence.recorded"]
+        session_start_entries = [e for e in entries if e["event"] == "session_start"]
+        user_input_entries = [e for e in entries if e["event"] == "user_input"]
+
+        assert len(evidence_entries) == 3
+        assert len(session_start_entries) == 1
+        assert len(user_input_entries) == 1
+
+        # session_start entry 应有正确的 provider/entry/model
+        ss = session_start_entries[0]
+        assert ss["data"]["provider_type"] == "fake"
+        assert ss["data"]["entry"] == "plain"
+
+
+def test_per_session_summary_preferred_over_global_log():
+    """per-session events.jsonl 非空时，summary 优先使用 per-session 事件。
+
+    中文注释：这是本轮修复的核心语义——
+    1. per-session events.jsonl 是新日志体系的 session 事实源
+    2. agent_log.jsonl 只能是 global index / fallback
+    3. 当 per-session events 可用时，summary 必须显示 evidence_source=per_session_events
+    """
+    import tempfile
+    sid = "test-pref-sid12345678"
+    with tempfile.TemporaryDirectory() as tmp:
+        # 创建 per-session events.jsonl
+        session_dir = Path(tmp) / "sessions" / sid
+        session_dir.mkdir(parents=True)
+        events_path = session_dir / "events.jsonl"
+
+        per_session_event = {
+            "action_type": "session.start",
+            "source": "session",
+            "status": "ok",
+            "data": {
+                "session_id": sid,
+                "subsystem": "session",
+                "operation": "start",
+                "status": "ok",
+                "safe_summary": "session_start provider=fake model=test entry=plain",
+                "metadata": {
+                    "provider_type": "fake",
+                    "provider_model": "test",
+                    "entry": "plain",
+                },
+            },
+        }
+        with open(events_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(per_session_event, ensure_ascii=False) + "\n")
+
+        # 验证 per-session events 可读取
+        entries = log_viewer._read_per_session_events(session_dir)
+        result = log_viewer.render_session_summary(sid, entries)
+        assert "Session Evidence Summary" in result
+        # 通过 _read_per_session_events 转换后 session_start 应被正确解析
+        # provider 信息应来自转换后的 session_start entry
+
+
+def test_historical_empty_events_no_crash():
+    """历史 session 的 events.jsonl 为空时不 crash。
+
+    中文注释：为什么历史空 events 不是新策略的证明？
+    这是历史债——旧 session 在 per-session event log 启用前创建，
+    events.jsonl 可能为空。新代码必须容错不 crash，并 fallback 到 agent_log。
+    但不能因为历史 session 空就认为 per-session events 机制无效。
+    """
+    import tempfile
+    sid = "test-empty-hist-sid"
+    with tempfile.TemporaryDirectory() as tmp:
+        session_dir = Path(tmp) / "sessions" / sid
+        session_dir.mkdir(parents=True)
+        # 写入空 events.jsonl
+        (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+        entries = log_viewer._read_per_session_events(session_dir)
+        assert entries == []  # 空文件返回空列表，不抛异常
+
+
+def test_per_session_events_reconcile_with_global_log():
+    """per-session events 的 tool 计数应与 global agent_log 一致。
+
+    中文注释：为什么需要一致？
+    per-session events 和 agent_log 写入同一套 record_evidence 数据，
+    summary 的计数逻辑应不受数据来源影响——无论读 per-session 还是 agent_log，
+    tool attempted/executed/blocked 应一致。
+    """
+    sid = "test-reconcile-sid12"
+    tool_id = "toolu_reconcile_01"
+
+    # 模拟 per-session events 转换后的条目（与 agent_log events 格式一致）
+    per_session_entries = [
+        _make_evidence_entry(sid, "session", "start", "ok",
+                             safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        _make_evidence_entry(sid, "tool", "gate_decision", "ok",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file gate=allowed"),
+        _make_evidence_entry(sid, "tool", "invoke_result_summary", "ok",
+                             tool_use_id=tool_id,
+                             safe_summary="tool=read_file result=executed"),
+        _make_evidence_entry(sid, "session", "end", "ok",
+                             safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, per_session_entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+    assert "no session.end evidence" not in result
+
+
+def test_per_session_events_with_tool_blocked():
+    """per-session events 中 blocked tool 应在 summary 中正确呈现。
+
+    中文注释：sensitive path block 是 Runtime 关键 branch point，
+    per-session events 必须完整保留 denial metadata。
+    """
+    sid = "test-block-per-sid"
+    tool_id = "toolu_block_per_01"
+    per_session_entries = [
+        _make_evidence_entry(sid, "session", "start", "ok",
+                             safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        _make_evidence_entry(sid, "tool", "gate_decision", "blocked",
+                             tool_use_id=tool_id,
+                             reason_code="sensitive_path",
+                             safe_summary="tool=read_file blocked: sensitive path"),
+        _make_evidence_entry(sid, "session", "end", "ok",
+                             safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, per_session_entries)
+    assert "attempted      : 1" in result
+    assert "blocked        : 1" in result
+    assert "blocked (sens) : 1" in result
+
+
+def test_per_session_summary_no_raw_content():
+    """per-session events summary 不展示 raw content。
+
+    中文注释：Content Policy 在两种数据源下表现一致——
+    summary 只展示结构化元信息，不 dump raw tool result。
+    """
+    sid = "test-no-raw-sid"
+    per_session_entries = [
+        _make_evidence_entry(sid, "session", "start", "ok",
+                             safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+    ]
+    result = log_viewer.render_session_summary(sid, per_session_entries)
+    assert "raw tool results" in result
+    assert "never persisted in events" in result

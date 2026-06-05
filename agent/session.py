@@ -566,6 +566,7 @@ def handle_interrupt_choice(choice: str) -> bool:
 
     if choice == "3":
         save_session_snapshot(state.conversation.messages)
+        _record_session_end(status="ok", reason="menu_exit")
         print("[系统] 再见！")
         return True
 

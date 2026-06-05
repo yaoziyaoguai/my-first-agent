@@ -412,6 +412,10 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
                         tools_blocked += 1
                 elif op in ("pending_execute",):
                     pending_tools_executed += 1
+                    # pending_execute 是用户确认后的实际执行——同时计入 executed
+                    if dk and dk not in _dedup_tool_executed:
+                        _dedup_tool_executed.add(dk)
+                        tools_executed += 1
             elif subsystem == "session":
                 if op == "end":
                     session_ended = True

@@ -250,20 +250,24 @@ def test_skipped_tool_appears_as_skipped_not_executed():
 
 
 def test_pending_execute_visible_in_summary():
-    """pending tool 确认执行后在 summary 中可见 pending exec 计数。"""
+    """pending tool 确认执行后在 summary 中可见 pending exec 计数。
+    同时 pending_execute 也应计入 executed（用户确认后实际执行了）。
+    """
     sid = "test-pending-01"
     tool_id = "toolu_pending"
     entries = [
         _make_entry("session_start", sid, data=SAMPLE_DATA),
         _make_evidence_entry(sid, "tool", "gate_decision", "confirmation_required",
                              tool_use_id=tool_id),
-        # pending_execute operation
+        # pending_execute operation — 与 tool_executor.py 真实 operation 一致
         _make_evidence_entry(sid, "tool", "pending_execute", "ok",
                              tool_use_id=tool_id,
                              safe_summary="tool=write_file status=success (pending_execute)"),
     ]
     result = log_viewer.render_session_summary(sid, entries)
     assert "pending exec   : 1" in result
+    # pending_execute 确认后也计入 executed
+    assert "executed       : 1" in result
 
 
 # ═══════════════════════════════════════════════════════
@@ -382,3 +386,118 @@ def test_summary_shows_failed_counter_when_errors():
     result = log_viewer.render_session_summary(sid, entries)
     assert "failed         : 1" in result
     assert "blocked        : 0" in result
+
+
+# ═══════════════════════════════════════════════════════
+# G. Caveat 1 — 单一 logical session.start
+# ═══════════════════════════════════════════════════════
+
+
+def test_single_logical_session_start_no_gap():
+    """summary 中只有一个 evidence.recorded session.start 时不应出现 gap。
+
+    中文注释：为什么不能有 duplicate session.start？
+    如果 evidence_recorder 和 direct EventLogWriter 各写一条 session.start，
+    per-session events 里 count=2——但 summary 应只看 evidence.recorded 事件。
+    这个测试验证：只有一条 evidence.recorded 的 session.start 时，session 正常启动。
+    """
+    sid = "test-single-start"
+    entries = [
+        # 只有一条 evidence.recorded session.start（不再是两条）
+        _make_entry("session_start", sid, data=SAMPLE_DATA),
+        _make_evidence_entry(sid, "session", "start", "ok",
+                             safe_summary="session_start provider=fake model=test entry=plain"),
+        _make_entry("user_input", sid, data={"content": "hello"}),
+        _make_entry("agent_reply", sid, data={"content": "hi"}),
+        _make_evidence_entry(sid, "session", "end", "ok",
+                             safe_summary="session_end status=ok"),
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "no session_start event" not in result
+    assert "no session.end evidence" not in result
+
+
+# ═══════════════════════════════════════════════════════
+# H. Caveat 3 — Ctrl+C menu option 3 记录 session.end
+# ═══════════════════════════════════════════════════════
+
+
+def test_interrupt_menu_option_3_records_session_end():
+    """handle_interrupt_choice("3") 必须调用 _record_session_end()。
+
+    中文注释：为什么 Ctrl+C menu option 3 必须记录 session.end？
+    option 3 是 graceful exit path——用户主动选择退出，和 quit / Ctrl+C×2
+    语义一致。缺 session.end 会导致后续排查误判为「异常退出」。
+    """
+    import contextlib
+    from unittest.mock import patch
+
+    import agent.session as session_module
+    from agent.evidence_recorder import set_event_log_writer, set_session_context
+
+    test_sid = f"test-menu3-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    with contextlib.suppress(Exception):
+        session_module.set_runtime_session_id(test_sid)
+
+    writer.events.clear()
+
+    # mock save_session_snapshot 以避免 state.conversation 依赖
+    with patch.object(session_module, "save_session_snapshot", return_value=None):
+        result = session_module.handle_interrupt_choice("3")
+
+    assert result is True  # 返回 True 表示退出
+
+    session_end_events = [e for e in writer.events if e.get("action_type") == "session.end"]
+    assert len(session_end_events) >= 1, (
+        f"handle_interrupt_choice('3') 应写入 session.end evidence，"
+        f"实际 events: {writer.events}"
+    )
+
+
+# ═══════════════════════════════════════════════════════
+# I. Caveat 4 — content_persisted=False 语义验证
+# ═══════════════════════════════════════════════════════
+
+
+def test_invoke_result_summary_content_not_persisted():
+    """invoke_result_summary 的 content_persisted 必须为 False。
+
+    中文注释：为什么 invoke_result_summary 不能 content_persisted=True？
+    invoke_result_summary 只存 result_size/hash/status/safe_summary，
+    不存 raw content。content_persisted=True 会误导审计以为原始内容已落盘，
+    实际上原始内容根本不在 events 中。
+    """
+    set_session_context(
+        session_id="test-cp-false",
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    from agent.evidence_recorder import record_evidence
+    envelope = record_evidence(
+        subsystem="tool",
+        operation="invoke_result_summary",
+        phase="end",
+        status="ok",
+        safe_summary="tool=read_file status=executed",
+        content_persisted=False,
+        content_redacted=False,
+        sensitive=False,
+        metadata={
+            "tool_name": "read_file",
+            "tool_use_id": "tu-test",
+            "result_size": 1024,
+        },
+    )
+    assert envelope["content_persisted"] is False
+    assert envelope["content_redacted"] is False
+    assert envelope["sensitive"] is False

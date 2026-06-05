@@ -695,19 +695,9 @@ def main(argv: list[str] | None = None) -> int:
     init_session(session_id=_session_id, entry=_entry)
     try_resume_from_checkpoint()
 
-    # dual-write: session.start 也通过 direct EventLogWriter 写入一次，
-    # 作为 record_evidence() 的冗余备份，兼容历史 session 查询。
-    _event_log_writer.append({
-        "action_type": "session.start",
-        "source": "session",
-        "event_id": f"ev-session-start-{_session_id[:8]}",
-        "data": {
-            "provider_type": _provider_info.get("provider_type", "?"),
-            "model": _provider_info.get("model", "?"),
-            "entry": _entry,
-            "session_id": _session_id,
-        },
-    })
+    # session.start 已由 init_session() 内 record_evidence(subsystem="session",
+    # operation="start") 统一写入 per-session events.jsonl。不再 duplicate direct
+    # append——每 session 只允许一个 logical session.start。
 
     # Evidence readiness (2026-06-05): 每次 interactive run 启动时打印 session_id
     # 和 evidence query command，使用户在复测 G1-G5 golden E2E 后可快速定位证据。

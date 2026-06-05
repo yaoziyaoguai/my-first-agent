@@ -880,7 +880,7 @@ class TestEvidenceRecorderWiring:
             phase="end",
             status="ok",
             safe_summary="tool=read_file status=executed",
-            content_persisted=True,
+            content_persisted=False,
             content_redacted=False,
             sensitive=False,
             metadata={
@@ -894,7 +894,7 @@ class TestEvidenceRecorderWiring:
         assert envelope["operation"] == "invoke_result_summary"
         assert envelope["status"] == "ok"
         assert envelope["sensitive"] is False
-        assert envelope["content_persisted"] is True
+        assert envelope["content_persisted"] is False
 
     def test_record_evidence_called_on_gate_rejected(self):
         """TOOL_GATE 拒绝（_handle_blocked）应调用 record_evidence。

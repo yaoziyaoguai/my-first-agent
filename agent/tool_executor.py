@@ -653,7 +653,7 @@ def execute_pending_tool(
         from agent.evidence_recorder import record_evidence
         record_evidence(
             subsystem="tool",
-            operation="invoke_result_summary",
+            operation="pending_execute",
             phase="end",
             status="error" if envelope.status in ("failed", "rejected_by_check") else "ok",
             reason_code=envelope.error_type or "",

@@ -501,3 +501,135 @@ def test_invoke_result_summary_content_not_persisted():
     assert envelope["content_persisted"] is False
     assert envelope["content_redacted"] is False
     assert envelope["sensitive"] is False
+
+
+# ═══════════════════════════════════════════════════════
+# J. execute_pending_tool 实际代码路径 evidence 测试
+# ═══════════════════════════════════════════════════════
+
+
+def test_execute_pending_tool_actual_path_writes_evidence():
+    """execute_pending_tool 实际代码路径必须调用 record_evidence。
+
+    中文注释：为什么不能用 synthetic _make_evidence_entry 代替？
+    synthetic 测试只验证 log_viewer 解析 evidence.recorded 事件的能力，
+    不验证 tool_executor.execute_pending_tool 是否真正调用了 record_evidence。
+    如果 try/except 静默吞掉异常、或 record_evidence 调用被意外删除、
+    或 operation 名被改回 "invoke_result_summary"，synthetic 测试不会发现。
+    这个测试通过 mock execute_tool + spy record_evidence 来验证真实调用路径。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    import agent.tool_executor as te
+
+    test_sid = f"test-pending-real-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.current_step_index = 1
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    messages: list[dict[str, object]] = []
+    pending: dict[str, object] = {
+        "tool_use_id": "toolu_pending_real_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt", "content": "hello"},
+    }
+
+    with patch.object(te, "execute_tool", return_value="执行完成。"):
+        result = te.execute_pending_tool(
+            state=state,
+            turn_state=turn_state,
+            messages=messages,
+            pending=pending,
+        )
+
+    assert "执行完成。" in result
+
+    # 验证 evidence.recorded 事件已写入 per-session events
+    # EventLogWriter 格式：action_type/source/event_id/status/data{envelope}
+    pending_evidence = [
+        e for e in writer.events if e.get("action_type") == "tool.pending_execute"
+    ]
+    assert len(pending_evidence) >= 1, (
+        f"execute_pending_tool 应写入 tool.pending_execute evidence，"
+        f"实际 events: {writer.events}"
+    )
+    ev = pending_evidence[0]
+    data = ev["data"]
+    assert data["subsystem"] == "tool"
+    assert data["operation"] == "pending_execute"
+    assert data["status"] == "ok"
+    assert data["content_persisted"] is False
+    assert data["metadata"]["from_pending_tool"] is True
+
+
+def test_execute_pending_tool_failure_path_writes_error_evidence():
+    """execute_pending_tool 失败时 evidence status 应为 error。
+
+    中文注释：pending tool 执行失败（工具内部安全检查拒绝）和 block 是不同语义——
+    block 是策略拒绝（TOOL_GATE），error 是执行失败。evidence 必须正确区分。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    import agent.tool_executor as te
+
+    test_sid = f"test-pending-fail-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.current_step_index = 1
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    messages: list[dict[str, object]] = []
+    pending: dict[str, object] = {
+        "tool_use_id": "toolu_pending_fail_test",
+        "tool": "shell_command",
+        "input": {"cmd": "rm -rf /"},
+    }
+
+    with patch.object(
+        te, "execute_tool", return_value="拒绝执行：路径不在白名单"
+    ):
+        _result = te.execute_pending_tool(
+            state=state,
+            turn_state=turn_state,
+            messages=messages,
+            pending=pending,
+        )
+
+    pending_evidence = [
+        e for e in writer.events if e.get("action_type") == "tool.pending_execute"
+    ]
+    assert len(pending_evidence) >= 1
+    ev = pending_evidence[0]
+    data = ev["data"]
+    assert data["status"] == "error"
+    assert data["content_persisted"] is False
+    assert data["metadata"]["from_pending_tool"] is True

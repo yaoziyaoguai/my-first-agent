@@ -210,6 +210,17 @@ def _run_chat_for_backend(
     InputIntent、checkpoint 写入、状态机判断或新的 stdout 字符串过滤。
     """
 
+    # 记录 user_input event 到 agent_log.jsonl——log_viewer summary 依赖此事件
+    # 判断对话是否发生（no user_input events → evidence gap）。
+    # 这里统一覆盖 pipe stdin / interactive CLI / Textual TUI 三条路径，
+    # 不分别在各 backend adapter 里散落记录。
+    try:
+        from agent.logger import log_event
+
+        log_event("user_input", {"content": user_input[:200], "length": len(user_input)})
+    except Exception:
+        pass
+
     if backend == "textual":
         return _run_textual_runtime_turn(
             user_input,

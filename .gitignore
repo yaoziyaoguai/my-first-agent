@@ -21,3 +21,4 @@ tui/node_modules/
 node_modules/
 .tui_audit_log*
 docs/dogfood/scratch/
+.DS_Store

@@ -18,6 +18,12 @@ from agent.input_intents import classify_confirmation_response
 from agent.pending_requests import PendingUserInputRequest
 from agent.planner import format_plan_for_display
 from agent.runtime_observer import log_event as _log_runtime_event
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
+)
 
 ContinueFn = Callable[[Any], str]
 StartPlanningFn = Callable[[str, Any], str]
@@ -137,6 +143,15 @@ def _request_feedback_intent_choice(
       顶层字段不变，旧 checkpoint 兼容自然成立。
     """
     state = ctx.state
+
+    result = apply_task_transition(state, TaskTransitionRequest(
+        event=TransitionEvent.FEEDBACK_INTENT_REQUIRED,
+        owner="confirmation.dispatcher.feedback_intent_request",
+        expected_from_status=origin_status,
+    ))
+    if not result.allowed:
+        return f"[系统] feedback_intent 状态迁移失败: {result.reason}"
+
     pending: PendingUserInputRequest = {
         "awaiting_kind": "feedback_intent",
         "question": FEEDBACK_INTENT_QUESTION,
@@ -149,8 +164,8 @@ def _request_feedback_intent_choice(
         "origin_status": origin_status,
     }
     state.task.pending_user_input_request = pending
-    state.task.status = "awaiting_feedback_intent"
-    save_checkpoint(state, source="confirm_handlers.feedback_intent_request")
+    if result.checkpoint_action == CheckpointAction.SAVE:
+        save_checkpoint(state, source="confirm_handlers.feedback_intent_request")
 
     emit = getattr(ctx.turn_state, "on_runtime_event", None)
     if emit is not None:

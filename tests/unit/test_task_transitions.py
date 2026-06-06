@@ -1,13 +1,16 @@
-"""Phase 1A Task Transition API unit tests.
+"""Phase 1A + Phase 1B Task Transition API unit tests.
 
 覆盖 apply_task_transition() 的：
-- 合法 transition（plan accept / tool accept/reject/feedback）
+- Phase 1A: plan/tool confirmation transitions
+- Phase 1B: feedback_intent request/cancel/as_feedback transitions
+- Phase 1B: PLAN_GENERATED transitions (both origin_status paths)
+- Phase 1B: origin_status sentinel resolution
+- Phase 1B: resolve_origin_status() validation
 - expected_from_status mismatch → denied
 - invalid transition → denied
 - denied 时不修改状态
 - checkpoint_action per-rule 正确
-- Phase 1A table 不含 feedback_intent / origin_status restore rules
-- transition table coverage 只检查 Phase 1A covered statuses
+- transition table keys exactness (Phase 1A 4 + Phase 1B 6 = 10)
 """
 
 from __future__ import annotations
@@ -17,10 +20,12 @@ from dataclasses import dataclass
 from agent.confirmation.dispatcher import ConfirmationContext
 from agent.confirmation.tool import handle_tool_confirmation
 from agent.transitions import (
+    _ORIGIN_STATUS_ALLOWLIST,
     CheckpointAction,
     TaskTransitionRequest,
     TransitionEvent,
     apply_task_transition,
+    resolve_origin_status,
     validate_task_transition,
 )
 
@@ -32,6 +37,7 @@ from agent.transitions import (
 @dataclass
 class _TaskStub:
     status: str
+    pending_user_input_request: dict | None = None
 
 
 @dataclass
@@ -39,8 +45,8 @@ class _StateStub:
     task: _TaskStub
 
 
-def _make_state(status: str) -> _StateStub:
-    return _StateStub(task=_TaskStub(status=status))
+def _make_state(status: str, pending: dict | None = None) -> _StateStub:
+    return _StateStub(task=_TaskStub(status=status, pending_user_input_request=pending))
 
 
 # ============================================================================
@@ -219,8 +225,8 @@ DEFERRED_STATUSES = {
 }
 
 
-class TestPhase1ACoverage:
-    """transition table coverage — 只检查 Phase 1A covered statuses。"""
+class TestPhase1BCoverage:
+    """transition table coverage — Phase 1A + Phase 1B。"""
 
     def test_all_phase1a_covered_statuses_have_rules(self):
         """Phase 1A 覆盖的每个 status 至少有一条 outgoing transition。"""
@@ -238,54 +244,79 @@ class TestPhase1ACoverage:
 
     def test_deferred_statuses_allowed_no_rules(self):
         """deferred statuses 允许无 transition rule。"""
-
         for status in DEFERRED_STATUSES:
-            # 不要求每个 deferred status 都有 rule
-            # 这里只验证它们确实不在 Phase 1A covered set 中
             assert status not in PHASE_1A_COVERED_STATUSES, (
                 f"{status} is in DEFERRED_STATUSES but also in "
                 f"PHASE_1A_COVERED_STATUSES — inconsistency"
             )
 
-    def test_no_feedback_intent_rules_in_phase1a(self):
-        """Phase 1A table 不含 feedback_intent / origin_status restore rules。"""
+    def test_phase1b_feedback_intent_rules_present(self):
+        """Phase 1B: feedback_intent request rules 存在。"""
         from agent.transitions import _TRANSITION_TABLE
 
-        for (from_status, event), _rule in _TRANSITION_TABLE.items():
-            assert from_status != "awaiting_feedback_intent", (
-                f"Phase 1A table must not contain awaiting_feedback_intent rule: "
-                f"({from_status!r}, {event!r})"
-            )
-            assert from_status != "running" or event not in (
-                TransitionEvent.FEEDBACK_INTENT_REQUIRED,
-            ), (
-                f"Phase 1A table must not contain feedback_intent rule: "
-                f"({from_status!r}, {event!r})"
-            )
+        keys = set(_TRANSITION_TABLE.keys())
+        assert ("awaiting_plan_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED) in keys
+        assert ("awaiting_step_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED) in keys
+        assert ("awaiting_feedback_intent", TransitionEvent.USER_CANCELLED) in keys
+        assert ("awaiting_feedback_intent", TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK) in keys
 
-    def test_no_origin_status_restore_in_phase1a(self):
-        """Phase 1A table 中 to_status 不含 sentinel。"""
+    def test_phase1b_origin_status_sentinel_rules_use_sentinel(self):
+        """Phase 1B: restore origin_status 的 rule 使用 <origin_status> sentinel。"""
         from agent.transitions import _TRANSITION_TABLE
 
-        for (from_status, event), rule in _TRANSITION_TABLE.items():
-            assert rule.to_status != "<origin_status>", (
-                f"Phase 1A table must not contain origin_status sentinel: "
-                f"({from_status!r}, {event!r}) → {rule.to_status!r}"
-            )
+        cancel_rule = _TRANSITION_TABLE[
+            ("awaiting_feedback_intent", TransitionEvent.USER_CANCELLED)
+        ]
+        as_feedback_rule = _TRANSITION_TABLE[
+            ("awaiting_feedback_intent", TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK)
+        ]
+        assert cancel_rule.to_status == "<origin_status>"
+        assert as_feedback_rule.to_status == "<origin_status>"
+        assert cancel_rule.checkpoint_action == CheckpointAction.SAVE
+        assert as_feedback_rule.checkpoint_action == CheckpointAction.SAVE
 
-    def test_transition_table_keys_exact_phase1a(self):
-        """_TRANSITION_TABLE 键恰好等于 Phase 1A 四条规则。"""
+    def test_phase1b_plan_generated_rules_present(self):
+        """Phase 1B: PLAN_GENERATED rules 覆盖两种 origin。"""
+        from agent.transitions import _TRANSITION_TABLE
+
+        keys = set(_TRANSITION_TABLE.keys())
+        assert ("awaiting_plan_confirmation", TransitionEvent.PLAN_GENERATED) in keys
+        assert ("awaiting_step_confirmation", TransitionEvent.PLAN_GENERATED) in keys
+
+        plan_rule = _TRANSITION_TABLE[
+            ("awaiting_plan_confirmation", TransitionEvent.PLAN_GENERATED)
+        ]
+        step_rule = _TRANSITION_TABLE[
+            ("awaiting_step_confirmation", TransitionEvent.PLAN_GENERATED)
+        ]
+        assert plan_rule.to_status == "awaiting_plan_confirmation"
+        assert step_rule.to_status == "awaiting_plan_confirmation"
+        assert plan_rule.checkpoint_action == CheckpointAction.SAVE
+        assert step_rule.checkpoint_action == CheckpointAction.SAVE
+
+    def test_transition_table_keys_exact(self):
+        """_TRANSITION_TABLE 键恰好等于 Phase 1A (4) + Phase 1B (6) = 10 rules。"""
         from agent.transitions import _TRANSITION_TABLE
 
         expected_keys = {
+            # Phase 1A (4)
             ("awaiting_plan_confirmation", TransitionEvent.USER_ACCEPTED),
             ("awaiting_tool_confirmation", TransitionEvent.USER_ACCEPTED),
             ("awaiting_tool_confirmation", TransitionEvent.USER_REJECTED),
             ("awaiting_tool_confirmation", TransitionEvent.USER_FEEDBACK),
+            # Phase 1B: feedback_intent request (2)
+            ("awaiting_plan_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED),
+            ("awaiting_step_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED),
+            # Phase 1B: feedback_intent cancel / as_feedback restore (2)
+            ("awaiting_feedback_intent", TransitionEvent.USER_CANCELLED),
+            ("awaiting_feedback_intent", TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK),
+            # Phase 1B: planner re-generate after feedback (2)
+            ("awaiting_plan_confirmation", TransitionEvent.PLAN_GENERATED),
+            ("awaiting_step_confirmation", TransitionEvent.PLAN_GENERATED),
         }
         actual_keys = set(_TRANSITION_TABLE.keys())
         assert actual_keys == expected_keys, (
-            f"Phase 1A table keys mismatch.\n"
+            f"Table keys mismatch.\n"
             f"Extra: {actual_keys - expected_keys}\n"
             f"Missing: {expected_keys - actual_keys}"
         )
@@ -334,7 +365,7 @@ class TestTransitionRuleInvariants:
             )
 
     def test_all_to_status_values_are_known(self):
-        """to_status 值应为当前已知合法 status。"""
+        """to_status 值应为已知合法 status 或 <origin_status> sentinel。"""
         from agent.transitions import _TRANSITION_TABLE
 
         known = {
@@ -344,6 +375,7 @@ class TestTransitionRuleInvariants:
             "awaiting_feedback_intent", "awaiting_resume_choice",
             "awaiting_interrupt_choice",
             "done", "failed", "cancelled",
+            "<origin_status>",  # Phase 1B sentinel
         }
         for key, rule in _TRANSITION_TABLE.items():
             assert rule.to_status in known, (
@@ -630,3 +662,290 @@ class TestStaleStateHandlerRejects:
 
         handle_tool_confirmation("n", ctx)
         assert len(called) == 0, "stale state 下 reject 不应触发 continue_fn"
+
+
+# ============================================================================
+# I. resolve_origin_status 测试
+# ============================================================================
+
+
+class TestOriginStatusResolver:
+    """resolve_origin_status() 的 allowlist 验证。"""
+
+    def test_awaiting_plan_confirmation_allowed(self):
+        state = _make_state("running", pending={"origin_status": "awaiting_plan_confirmation"})
+        assert resolve_origin_status(state) == "awaiting_plan_confirmation"
+
+    def test_awaiting_step_confirmation_allowed(self):
+        state = _make_state("running", pending={"origin_status": "awaiting_step_confirmation"})
+        assert resolve_origin_status(state) == "awaiting_step_confirmation"
+
+    def test_missing_key_denied(self):
+        state = _make_state("running", pending={})
+        assert resolve_origin_status(state) is None
+
+    def test_none_denied(self):
+        state = _make_state("running", pending={"origin_status": None})
+        assert resolve_origin_status(state) is None
+
+    def test_empty_string_denied(self):
+        state = _make_state("running", pending={"origin_status": ""})
+        assert resolve_origin_status(state) is None
+
+    def test_unknown_status_denied(self):
+        state = _make_state("running", pending={"origin_status": "unknown_status"})
+        assert resolve_origin_status(state) is None
+
+    def test_done_denied(self):
+        state = _make_state("running", pending={"origin_status": "done"})
+        assert resolve_origin_status(state) is None
+
+    def test_failed_denied(self):
+        state = _make_state("running", pending={"origin_status": "failed"})
+        assert resolve_origin_status(state) is None
+
+    def test_cancelled_denied(self):
+        state = _make_state("running", pending={"origin_status": "cancelled"})
+        assert resolve_origin_status(state) is None
+
+    def test_awaiting_resume_choice_denied(self):
+        state = _make_state("running", pending={"origin_status": "awaiting_resume_choice"})
+        assert resolve_origin_status(state) is None
+
+    def test_awaiting_interrupt_choice_denied(self):
+        state = _make_state("running", pending={"origin_status": "awaiting_interrupt_choice"})
+        assert resolve_origin_status(state) is None
+
+    def test_running_denied(self):
+        state = _make_state("running", pending={"origin_status": "running"})
+        assert resolve_origin_status(state) is None
+
+    def test_idle_denied(self):
+        state = _make_state("running", pending={"origin_status": "idle"})
+        assert resolve_origin_status(state) is None
+
+    def test_awaiting_tool_confirmation_denied(self):
+        state = _make_state("running", pending={"origin_status": "awaiting_tool_confirmation"})
+        assert resolve_origin_status(state) is None
+
+    def test_no_pending_attr_denied(self):
+        """state.task 没有 pending_user_input_request 属性时返回 None。"""
+        state = _make_state("running")
+        state.task.pending_user_input_request = None  # type: ignore
+        assert resolve_origin_status(state) is None
+
+
+# ============================================================================
+# J. Phase 1B transition rule 功能测试
+# ============================================================================
+
+
+class TestPhase1BFeedbackIntentTransitions:
+    """Phase 1B: feedback_intent request / cancel / as_feedback transition。"""
+
+    def test_feedback_intent_request_from_plan_confirmation(self):
+        state = _make_state("awaiting_plan_confirmation")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_REQUIRED,
+            owner="confirmation.dispatcher.feedback_intent_request",
+            expected_from_status="awaiting_plan_confirmation",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_feedback_intent"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_feedback_intent"
+
+    def test_feedback_intent_request_from_step_confirmation(self):
+        state = _make_state("awaiting_step_confirmation")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_REQUIRED,
+            owner="confirmation.dispatcher.feedback_intent_request",
+            expected_from_status="awaiting_step_confirmation",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_feedback_intent"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_feedback_intent"
+
+    def test_feedback_intent_request_wrong_from_status_denied(self):
+        state = _make_state("running")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_REQUIRED,
+            owner="test",
+            expected_from_status="awaiting_plan_confirmation",
+        ))
+        assert result.allowed is False
+        assert state.task.status == "running"
+
+
+class TestPhase1BFeedbackIntentCancel:
+    """Phase 1B: cancel path — origin_status sentinel restore。"""
+
+    def test_cancel_restores_plan_confirmation_origin(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "awaiting_plan_confirmation"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="confirmation.plan.feedback_intent_cancel",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_plan_confirmation"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_plan_confirmation"
+
+    def test_cancel_restores_step_confirmation_origin(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "awaiting_step_confirmation"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="confirmation.plan.feedback_intent_cancel",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_step_confirmation"
+        assert state.task.status == "awaiting_step_confirmation"
+
+    def test_cancel_invalid_origin_denied(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "unknown"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="confirmation.plan.feedback_intent_cancel",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is False
+        assert "origin_status sentinel resolution failed" in result.reason.lower()
+        assert result.checkpoint_action == CheckpointAction.NONE
+        assert state.task.status == "awaiting_feedback_intent"
+
+    def test_cancel_missing_origin_denied(self):
+        state = _make_state("awaiting_feedback_intent")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="confirmation.plan.feedback_intent_cancel",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is False
+        assert "origin_status sentinel resolution failed" in result.reason.lower()
+
+    def test_cancel_wrong_from_status_denied(self):
+        state = _make_state("running")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="test",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is False
+        assert "mismatch" in result.reason.lower()
+
+
+class TestPhase1BFeedbackIntentAsFeedback:
+    """Phase 1B: as_feedback path — restore + plan_generated。"""
+
+    def test_as_feedback_restore_plan_confirmation_origin(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "awaiting_plan_confirmation"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK,
+            owner="confirmation.plan.feedback_intent_as_feedback_restore",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_plan_confirmation"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_plan_confirmation"
+
+    def test_as_feedback_restore_step_confirmation_origin(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "awaiting_step_confirmation"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK,
+            owner="confirmation.plan.feedback_intent_as_feedback_restore",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_step_confirmation"
+        assert state.task.status == "awaiting_step_confirmation"
+
+    def test_as_feedback_invalid_origin_denied(self):
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "done"},
+        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK,
+            owner="confirmation.plan.feedback_intent_as_feedback_restore",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        assert result.allowed is False
+        assert state.task.status == "awaiting_feedback_intent"
+
+
+class TestPhase1BPlanGenerated:
+    """Phase 1B: PLAN_GENERATED transition — 覆盖两种 origin。"""
+
+    def test_plan_generated_from_plan_confirmation(self):
+        state = _make_state("awaiting_plan_confirmation")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="confirmation.plan.feedback_intent_as_feedback_enter",
+            expected_from_status=None,
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_plan_confirmation"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_plan_confirmation"
+
+    def test_plan_generated_from_step_confirmation(self):
+        state = _make_state("awaiting_step_confirmation")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="confirmation.plan.feedback_intent_as_feedback_enter",
+            expected_from_status=None,
+        ))
+        assert result.allowed is True
+        assert result.next_status == "awaiting_plan_confirmation"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_plan_confirmation"
+
+    def test_plan_generated_from_running_denied(self):
+        state = _make_state("running")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="test",
+            expected_from_status=None,
+        ))
+        assert result.allowed is False
+
+    def test_plan_generated_denied_no_state_mutation(self):
+        state = _make_state("running")
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="test",
+            expected_from_status=None,
+        ))
+        assert result.allowed is False
+        assert result.checkpoint_action == CheckpointAction.NONE
+        assert state.task.status == "running"
+
+
+class TestPhase1BAllowlist:
+    """Phase 1B: _ORIGIN_STATUS_ALLOWLIST 常量测试。"""
+
+    def test_allowlist_contains_expected_values(self):
+        expected = {"awaiting_plan_confirmation", "awaiting_step_confirmation"}
+        assert expected == _ORIGIN_STATUS_ALLOWLIST
+
+    def test_allowlist_is_frozenset(self):
+        assert isinstance(_ORIGIN_STATUS_ALLOWLIST, frozenset)

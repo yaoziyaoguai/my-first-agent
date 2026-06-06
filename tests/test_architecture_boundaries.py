@@ -739,7 +739,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "_request_feedback_intent_choice",
             "state.task.pending_user_input_request",
         ),
-        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "state.task.status"),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.reset_task()"),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.current_plan"),
         (
@@ -752,7 +751,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "handle_feedback_intent_choice",
             "state.task.pending_user_input_request",
         ),
-        ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.status"),
         ("agent.confirmation.plan", "handle_plan_confirmation", "state.reset_task()"),
         ("agent.confirmation.plan", "handle_step_confirmation", "state.reset_task()"),
         ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool"),
@@ -1530,15 +1528,11 @@ _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
     ("agent/core.py", "_run_planning_phase", "assign",
      "state.task.status", "awaiting_plan_confirmation"): 2,
 
-    # ── confirmation/plan.py (Phase 1A 后: accept→0, 剩 feedback_intent 3) ──
-    ("agent/confirmation/plan.py", "handle_feedback_intent_choice", "assign",
-     "state.task.status", "<origin_status>"): 2,
-    ("agent/confirmation/plan.py", "handle_feedback_intent_choice", "assign",
-     "state.task.status", "<variable>"): 1,
+    # ── confirmation/plan.py (Phase 1B 后: feedback_intent 3→0) ──
+    # handle_feedback_intent_choice 的 3 处裸写已迁移至 apply_task_transition()。
 
-    # ── confirmation/dispatcher.py ──
-    ("agent/confirmation/dispatcher.py", "_request_feedback_intent_choice", "assign",
-     "state.task.status", "awaiting_feedback_intent"): 1,
+    # ── confirmation/dispatcher.py (Phase 1B 后: feedback_intent_request 1→0) ──
+    # _request_feedback_intent_choice 的 1 处裸写已迁移至 apply_task_transition()。
 
     # ── memory_interaction.py ──
     ("agent/memory_interaction.py", "handle_memory_confirmation_reply", "assign",

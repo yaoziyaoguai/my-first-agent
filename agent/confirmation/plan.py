@@ -173,9 +173,18 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         cancel_transition = feedback_intent_transition(FeedbackIntentKind.CANCELLED)
         assert cancel_transition.should_checkpoint
         assert cancel_transition.clear_pending_user_input
+
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="confirmation.plan.feedback_intent_cancel",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        if not result.allowed:
+            return f"[系统] 取消反馈意图状态迁移失败: {result.reason}"
+
         state.task.pending_user_input_request = None
-        state.task.status = origin_status
-        save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
+        if result.checkpoint_action == CheckpointAction.SAVE:
+            save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
         _emit_confirmation_observer_event(
             "confirmation.feedback_intent.cancelled",
             payload={
@@ -191,8 +200,16 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
         )
         assert as_feedback_transition.should_checkpoint
         assert as_feedback_transition.clear_pending_user_input
+
+        restore_result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK,
+            owner="confirmation.plan.feedback_intent_as_feedback_restore",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+        if not restore_result.allowed:
+            return f"[系统] 反馈处理状态迁移失败: {restore_result.reason}"
+
         state.task.pending_user_input_request = None
-        state.task.status = origin_status
         append_control_event(messages, "plan_feedback", {"feedback": feedback_text})
         revised_goal = (
             f"{state.task.user_goal}\n\n"
@@ -210,8 +227,17 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
             return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
         state.task.current_plan = plan.model_dump()
         state.task.current_step_index = 0
-        state.task.status = as_feedback_transition.next_status or "awaiting_plan_confirmation"
-        save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
+
+        plan_result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="confirmation.plan.feedback_intent_as_feedback_enter",
+            expected_from_status=None,
+        ))
+        if not plan_result.allowed:
+            return f"[系统] 重新进入计划确认状态失败: {plan_result.reason}"
+
+        if plan_result.checkpoint_action == CheckpointAction.SAVE:
+            save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
         _emit_plan_confirmation(ctx, plan, source="feedback_intent_choice")
         _emit_confirmation_observer_event(
             "confirmation.feedback_intent.as_feedback",

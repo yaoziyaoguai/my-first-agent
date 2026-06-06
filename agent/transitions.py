@@ -52,6 +52,7 @@ class TransitionEvent(Enum):
     TASK_COMPLETED = "task.completed"
     TOOL_CONFIRMATION_REQUIRED = "tool.confirmation_required"
     FEEDBACK_INTENT_REQUIRED = "feedback_intent.required"
+    FEEDBACK_INTENT_AS_FEEDBACK = "feedback_intent.as_feedback"
     EXECUTION_FAILED = "execution.failed"
     INCONSISTENCY_DETECTED = "inconsistency.detected"
 
@@ -105,16 +106,17 @@ class TaskTransitionResult:
     checkpoint_action: CheckpointAction
 
 
-# Phase 1A transition table：只覆盖 awaiting_plan_confirmation 和
-# awaiting_tool_confirmation 的确定性 transition。
-# feedback_intent / origin_status restore 不进 Phase 1A。
+# Phase 1A + Phase 1B transition table: 覆盖 plan/step confirmation、
+# tool confirmation、feedback_intent 的确定性 transition。
+# Phase 1B 新增 6 条 feedback_intent / origin_status restore / PLAN_GENERATED rule。
+# <origin_status> sentinel 在 apply_task_transition() 中通过 resolve_origin_status()
+# 解析，不在 table lookup 阶段处理。
 _TRANSITION_TABLE: dict[tuple[str, TransitionEvent], TransitionRule] = {
-    # plan confirmation accept
+    # === Phase 1A: plan/tool confirmation (4 rules) ===
     ("awaiting_plan_confirmation", TransitionEvent.USER_ACCEPTED): TransitionRule(
         to_status="running",
         checkpoint_action=CheckpointAction.SAVE,
     ),
-    # tool confirmation — 四条路径全部 → running + SAVE
     ("awaiting_tool_confirmation", TransitionEvent.USER_ACCEPTED): TransitionRule(
         to_status="running",
         checkpoint_action=CheckpointAction.SAVE,
@@ -127,7 +129,61 @@ _TRANSITION_TABLE: dict[tuple[str, TransitionEvent], TransitionRule] = {
         to_status="running",
         checkpoint_action=CheckpointAction.SAVE,
     ),
+    # === Phase 1B: feedback_intent request (2 rules) ===
+    ("awaiting_plan_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED): TransitionRule(
+        to_status="awaiting_feedback_intent",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    ("awaiting_step_confirmation", TransitionEvent.FEEDBACK_INTENT_REQUIRED): TransitionRule(
+        to_status="awaiting_feedback_intent",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    # === Phase 1B: feedback_intent cancel / as_feedback restore (2 rules) ===
+    # to_status="<origin_status>" 是 sentinel，apply_task_transition() 执行时
+    # 通过 resolve_origin_status() 解析为实际 origin_status。
+    ("awaiting_feedback_intent", TransitionEvent.USER_CANCELLED): TransitionRule(
+        to_status="<origin_status>",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    ("awaiting_feedback_intent", TransitionEvent.FEEDBACK_INTENT_AS_FEEDBACK): TransitionRule(
+        to_status="<origin_status>",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    # === Phase 1B: planner re-generate after feedback (2 rules) ===
+    # 覆盖 plan/step confirmation 两种 origin_status restore 路径。
+    ("awaiting_plan_confirmation", TransitionEvent.PLAN_GENERATED): TransitionRule(
+        to_status="awaiting_plan_confirmation",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    ("awaiting_step_confirmation", TransitionEvent.PLAN_GENERATED): TransitionRule(
+        to_status="awaiting_plan_confirmation",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
 }
+
+
+_ORIGIN_STATUS_SENTINEL = "<origin_status>"
+
+# origin_status allowlist：仅这两个 confirmation 状态可从 feedback_intent 恢复。
+_ORIGIN_STATUS_ALLOWLIST = frozenset({
+    "awaiting_plan_confirmation",
+    "awaiting_step_confirmation",
+})
+
+
+def resolve_origin_status(state: Any) -> str | None:
+    """从 state.task.pending_user_input_request 读取并验证 origin_status。
+
+    返回解析后的 status 字符串，或 None（无法解析/不在 allowlist 内）。
+    caller 负责将 None 解释为 deny。
+    """
+    pending = getattr(state.task, "pending_user_input_request", None) or {}
+    origin = pending.get("origin_status")
+    if not isinstance(origin, str) or not origin.strip():
+        return None
+    if origin not in _ORIGIN_STATUS_ALLOWLIST:
+        return None
+    return origin
 
 
 def apply_task_transition(
@@ -140,6 +196,7 @@ def apply_task_transition(
     - 从 state.task.status 读取权威 from_status
     - 若 expected_from_status 不匹配 → allowed=False，不修改状态
     - 查 _TRANSITION_TABLE 验证 (from_status, event)
+    - 若 rule.to_status 为 '<origin_status>' sentinel → resolve_origin_status()
     - 执行 state.task.status = rule.to_status
     - 返回 TaskTransitionResult 含 checkpoint_action
 
@@ -185,19 +242,39 @@ def apply_task_transition(
             checkpoint_action=CheckpointAction.NONE,
         )
 
+    # 解析 <origin_status> sentinel
+    resolved_to_status = rule.to_status
+    if resolved_to_status == _ORIGIN_STATUS_SENTINEL:
+        origin = resolve_origin_status(state)
+        if origin is None:
+            return TaskTransitionResult(
+                allowed=False,
+                reason=(
+                    f"origin_status sentinel resolution failed: "
+                    f"pending origin_status missing, empty, or not in allowlist "
+                    f"{sorted(_ORIGIN_STATUS_ALLOWLIST)!r}"
+                ),
+                previous_status=actual_from,
+                next_status=None,
+                event=request.event,
+                owner=request.owner,
+                checkpoint_action=CheckpointAction.NONE,
+            )
+        resolved_to_status = origin
+
     # 执行 transition
-    state.task.status = rule.to_status
+    state.task.status = resolved_to_status
     log_transition(
         from_state=actual_from,
         event_type=request.event.value,
-        target_state=rule.to_status,
+        target_state=resolved_to_status,
     )
 
     return TaskTransitionResult(
         allowed=True,
-        reason=f"transition {actual_from!r} + {request.event.value!r} → {rule.to_status!r}",
+        reason=f"transition {actual_from!r} + {request.event.value!r} → {resolved_to_status!r}",
         previous_status=actual_from,
-        next_status=rule.to_status,
+        next_status=resolved_to_status,
         event=request.event,
         owner=request.owner,
         checkpoint_action=rule.checkpoint_action,

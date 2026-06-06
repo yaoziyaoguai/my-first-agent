@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import re
+import textwrap
 from collections import Counter
 from pathlib import Path
 
@@ -753,10 +754,8 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.status"),
         ("agent.confirmation.plan", "handle_plan_confirmation", "state.reset_task()"),
-        ("agent.confirmation.plan", "handle_plan_confirmation", "state.task.status"),
         ("agent.confirmation.plan", "handle_step_confirmation", "state.reset_task()"),
         ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool"),
-        ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.status"),
         ("agent.confirmation.user_input", "handle_user_input_step", "state.reset_task()"),
         # Memory Interactive Confirmation v1：handle_memory_confirmation_reply
         # 清 pending 并恢复 origin_status。
@@ -865,6 +864,7 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ("agent.tool_executor", "execute_single_tool", "state.task.status"),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log"),
         ("agent.tool_executor", "execute_pending_tool", "state.task.tool_execution_log"),
+        ("agent.transitions", "apply_task_transition", "state.task.status"),
         ("agent.transitions", "apply_user_replied_transition", "state.reset_task()"),
         (
             "agent.transitions",
@@ -1328,3 +1328,338 @@ def test_run_mcp_tool_pipeline_is_harness_only() -> None:
         f"run_mcp_tool_pipeline is harness-only. "
         f"Production code must not reference it. Violations: {violations}"
     )
+
+
+# ============================================================================
+# Phase 1A: Direct Status Mutation Baseline
+# ============================================================================
+#
+# 扫描范围说明：
+# 本测试只检测 agent/ 下 `state.task.status = ...` 形式的直接赋值
+# （包括 assign / setattr / 简单 alias）。以下模式不在 Phase 1A 扫描范围内，
+# 因为在当前代码中它们不经过模块级 `state` 引用：
+#   - self.task.status = ...（如 AgentState.reset_task，self 非 state 引用）
+#   - self._state.task.status = ...（如 ToolRuntimeMediator）
+#   - get_state().task.status = ...（如 session.py 部分路径）
+# 这些写入点已在 §B baseline 中以注释形式登记，后续 Phase 扩展扫描范围时覆盖。
+
+
+def _build_parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def _enclosing_scope_opt(tree: ast.AST, target: ast.AST,
+                         parents: dict[ast.AST, ast.AST]) -> str:
+    """优化版 enclosing scope：使用预建的 parent_map。"""
+    current = target
+    while current in parents:
+        current = parents[current]
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current.name
+        if isinstance(current, ast.ClassDef):
+            return f"{current.name}.<class>"
+    return "<module>"
+
+
+def _status_value_expr_opt(node: ast.AST) -> str:
+    """归一化 status 值。"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id == "origin_status":
+            return "<origin_status>"
+        return "<variable>"
+    if isinstance(node, ast.Attribute):
+        return "<variable>"
+    return "<variable>"
+
+
+def _scan_tree_mutations(
+    tree: ast.Module, file_rel: str,
+) -> list[dict[str, object]]:
+    """扫描单个 AST 树中的 `state.task.status = ...` 裸写点。
+
+    与 _collect_direct_status_mutations() 使用相同逻辑，但接受任意 AST 树，
+    使 alias 检测可通过合成 AST 正向验证。
+    """
+    mutations: list[dict[str, object]] = []
+    parents = _build_parent_map(tree)
+
+    # 收集 alias: task = state.task
+    # Phase 1A alias 支持范围：函数作用域内简单变量别名
+    alias_map: dict[tuple[str, str], str] = {}
+    for node in ast.walk(tree):
+        function = _enclosing_scope_opt(tree, node, parents)
+        if isinstance(node, ast.Assign):
+            val_name = _qualified_name(node.value)
+            if val_name == "state.task":
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        alias_map[(function, target.id)] = target.id
+
+    for node in ast.walk(tree):
+        function = _enclosing_scope_opt(tree, node, parents)
+
+        # setattr(state.task, "status", ...)
+        if isinstance(node, ast.Call):
+            func_name = _qualified_name(node.func)
+            if func_name == "setattr" and len(node.args) >= 2:
+                arg0_name = _qualified_name(node.args[0])
+                if arg0_name == "state.task" and (
+                    isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == "status"
+                ):
+                        mutations.append({
+                            "file": file_rel,
+                            "function": function,
+                            "mutation_kind": "setattr",
+                            "target_shape": "state.task.status",
+                            "status_value": "<variable>",
+                            "lineno": node.lineno,
+                        })
+
+        # state.task.status = ...
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                name = _qualified_name(target)
+                shape = None
+                if name and name == "state.task.status":
+                    shape = "state.task.status"
+                # alias: task.status = ...
+                elif (isinstance(target, ast.Attribute)
+                      and target.attr == "status"
+                      and isinstance(target.value, ast.Name)):
+                    alias_key = (function, target.value.id)
+                    if alias_key in alias_map:
+                        shape = "state.task.status"
+                if shape is None:
+                    continue
+                status_val = _status_value_expr_opt(node.value)
+                mutations.append({
+                    "file": file_rel,
+                    "function": function,
+                    "mutation_kind": "assign",
+                    "target_shape": shape,
+                    "status_value": status_val,
+                    "lineno": node.lineno,
+                })
+
+    return mutations
+
+
+def _collect_direct_status_mutations() -> list[dict[str, object]]:
+    """收集 agent/ 下所有 `state.task.status = ...` 裸写点。
+
+    检测模式：
+    - state.task.status = "..." (ast.Assign)
+    - state.task.status = variable (Name/Attribute rhs)
+    - setattr(state.task, "status", ...) (ast.Call)
+    - 简单 alias: task = state.task; task.status = "..." (Phase 1A 限定深度)
+
+    Phase 1A 不覆盖：self.task.status / self._state.task.status / get_state().task.status
+
+    返回 list[dict]，每项 file/function/mutation_kind/target_shape/
+    status_value/lineno（行号仅用于错误报告）。
+    """
+    mutations: list[dict[str, object]] = []
+    for path in _agent_python_files():
+        tree = _read_tree(path)
+        file_rel = str(path.relative_to(PROJECT_ROOT))
+        mutations.extend(_scan_tree_mutations(tree, file_rel))
+    return mutations
+
+
+def _aggregate_mutations(
+    mutations: list[dict[str, object]],
+) -> dict[tuple[str, str, str, str, str], int]:
+    """聚合 -> (file, function, kind, shape, value) 计数。行号不参与 key。"""
+    from collections import Counter
+    keys = [
+        (
+            str(m["file"]), str(m["function"]),
+            str(m["mutation_kind"]), str(m["target_shape"]),
+            str(m["status_value"]),
+        )
+        for m in mutations
+    ]
+    return dict(Counter(keys))
+
+
+# Phase 1A 迁移后 direct status mutation baseline。
+#
+# Key: (file, function, mutation_kind, target_shape, status_value)
+# 行号仅用于错误报告。
+#
+# Phase 1A 迁移 5 个点（均已从 baseline 移除）:
+#   - confirmation/plan.py handle_plan_confirmation accept: "running" assign
+#     → 迁移到 apply_task_transition()
+#   - confirmation/tool.py handle_tool_confirmation 4×"running": 全部迁移
+#
+# 以下模式不在 Phase 1A 扫描范围（已知 gap，后续阶段覆盖）:
+#   - agent/state.py AgentState.reset_task: self.task.status = "idle"
+#   - agent/tool_runtime_mediator.py _handle_confirmation_required: self._state.task.status
+#   - agent/session.py 中 get_state().task.status 路径
+#   - agent/session.py handle_interrupt_choice 中 state.task.status = "idle" (line 652)
+#     注: 该行使用函数参数 state 而非模块级 state，AST 扫描可检测但行 652 在
+#     当前 handle_interrupt_choice 中与 line 636 ("running") 并存。
+
+_DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
+    # ── transition layer 内部（唯一合法新增写入点）──
+    ("agent/transitions.py", "apply_task_transition", "assign",
+     "state.task.status", "<variable>"): 1,
+    ("agent/transitions.py", "apply_user_replied_transition", "assign",
+     "state.task.status", "awaiting_step_confirmation"): 1,
+    ("agent/transitions.py", "apply_user_replied_transition", "assign",
+     "state.task.status", "running"): 1,
+
+    # ── session.py ──
+    ("agent/session.py", "handle_interrupt_choice", "assign",
+     "state.task.status", "idle"): 1,
+    ("agent/session.py", "handle_interrupt_choice", "assign",
+     "state.task.status", "running"): 1,
+    ("agent/session.py", "handle_interrupt_with_checkpoint", "assign",
+     "state.task.status", "awaiting_interrupt_choice"): 1,
+
+    # ── core.py ──
+    ("agent/core.py", "chat", "assign",
+     "state.task.status", "awaiting_user_input"): 1,
+    ("agent/core.py", "_run_planning_phase", "assign",
+     "state.task.status", "awaiting_plan_confirmation"): 2,
+
+    # ── confirmation/plan.py (Phase 1A 后: accept→0, 剩 feedback_intent 3) ──
+    ("agent/confirmation/plan.py", "handle_feedback_intent_choice", "assign",
+     "state.task.status", "<origin_status>"): 2,
+    ("agent/confirmation/plan.py", "handle_feedback_intent_choice", "assign",
+     "state.task.status", "<variable>"): 1,
+
+    # ── confirmation/dispatcher.py ──
+    ("agent/confirmation/dispatcher.py", "_request_feedback_intent_choice", "assign",
+     "state.task.status", "awaiting_feedback_intent"): 1,
+
+    # ── memory_interaction.py ──
+    ("agent/memory_interaction.py", "handle_memory_confirmation_reply", "assign",
+     "state.task.status", "<origin_status>"): 1,
+    ("agent/memory_interaction.py", "_clear_pending_and_save", "assign",
+     "state.task.status", "<origin_status>"): 1,
+
+    # ── task_runtime.py ──
+    ("agent/task_runtime.py", "advance_current_step_if_needed", "assign",
+     "state.task.status", "done"): 3,
+    ("agent/task_runtime.py", "advance_current_step_if_needed", "assign",
+     "state.task.status", "running"): 1,
+
+    # ── tool_executor.py ──
+    ("agent/tool_executor.py", "execute_single_tool", "assign",
+     "state.task.status", "awaiting_tool_confirmation"): 1,
+    ("agent/tool_executor.py", "execute_single_tool", "assign",
+     "state.task.status", "awaiting_user_input"): 1,
+
+    # ── response_handlers.py ──
+    ("agent/response_handlers.py", "_maybe_advance_step", "assign",
+     "state.task.status", "awaiting_step_confirmation"): 1,
+    ("agent/response_handlers.py", "handle_end_turn_response", "assign",
+     "state.task.status", "awaiting_user_input"): 2,
+}
+
+# apply_task_transition 是唯一合法新增写入点，已在 baseline 中以 count=1 登记。
+# 同函数内新增第二个 state.task.status 写入将触发 count mismatch。
+
+
+def test_direct_status_mutation_baseline() -> None:
+    """Phase 1A: 禁止新增 state.task.status 裸写。
+
+    - baseline 匹配不依赖行号
+    - 行号仅用于错误报告
+    - apply_task_transition() 是唯一合法新增写入点
+    - reset_task() / get_state().task.status / self._state.task.status
+      不在 Phase 1A 扫描范围（已知 gap）
+    - Phase 1A 迁移掉的 5 个点已从 baseline 移除
+    """
+    mutations = _collect_direct_status_mutations()
+    actual = _aggregate_mutations(mutations)
+
+    new_mutations: list[str] = []
+    count_mismatches: list[str] = []
+
+    for key, count in sorted(actual.items()):
+        file, function, kind, shape, value = key
+        expected_count = _DIRECT_STATUS_MUTATION_BASELINE.get(key)
+
+        if expected_count is None:
+            line_infos = [
+                f"  line {m['lineno']}"
+                for m in mutations
+                if (m["file"] == file and m["function"] == function
+                    and m["mutation_kind"] == kind and m["target_shape"] == shape
+                    and str(m["status_value"]) == value)
+            ]
+            new_detail = (
+                f"NEW: ({file}, {function}, {kind}, {shape}, {value!r}) "
+                f"count={count}"
+            )
+            if line_infos:
+                new_detail += "\n" + "\n".join(line_infos)
+            new_mutations.append(new_detail)
+        elif expected_count != count:
+            line_infos = [
+                f"  line {m['lineno']}"
+                for m in mutations
+                if (m["file"] == file and m["function"] == function
+                    and m["mutation_kind"] == kind and m["target_shape"] == shape
+                    and str(m["status_value"]) == value)
+            ]
+            detail = (
+                f"COUNT MISMATCH: ({file}, {function}, {kind}, {shape}, {value!r}) "
+                f"expected={expected_count}, actual={count}"
+            )
+            if line_infos:
+                detail += "\n" + "\n".join(line_infos)
+            count_mismatches.append(detail)
+
+    errors: list[str] = []
+    if new_mutations:
+        errors.append(
+            f"NEW direct status mutations detected ({len(new_mutations)}):\n"
+            + "\n".join(f"  - {n}" for n in new_mutations)
+            + "\n\nUse apply_task_transition() instead."
+        )
+    if count_mismatches:
+        errors.append(
+            f"COUNT MISMATCHES ({len(count_mismatches)}):\n"
+            + "\n".join(f"  - {c}" for c in count_mismatches)
+        )
+    if errors:
+        raise AssertionError("\n\n".join(errors))
+
+
+def test_alias_detection_positive_fixture() -> None:
+    """合成 AST 验证 alias 检测能识别 task = state.task; task.status = ...
+
+    Phase 1A alias_map 使用 (function, var_name) 字符串 key。
+    当前 agent 源码没有 task = state.task 模式，因此 baseline
+    从未正向执行 alias 识别逻辑。此测试用合成 AST 钉死：
+    - 即使以后 alias_map 退化回 AST 节点对象 key，此测试仍会失败。
+    """
+    src = textwrap.dedent("""\
+    def handle_something():
+        task = state.task
+        task.status = "running"
+    """)
+    tree = ast.parse(src)
+    mutations = _scan_tree_mutations(tree, "test/fixture.py")
+
+    assert len(mutations) == 1, (
+        f"expected 1 alias mutation, got {len(mutations)}: {mutations}"
+    )
+    m = mutations[0]
+    assert m["target_shape"] == "state.task.status", (
+        f"alias mutation should normalize to state.task.status, "
+        f"got {m['target_shape']!r}"
+    )
+    assert m["status_value"] == "running"
+    assert m["mutation_kind"] == "assign"
+    assert m["function"] == "handle_something"

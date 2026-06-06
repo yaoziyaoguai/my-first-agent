@@ -7,6 +7,15 @@
 from __future__ import annotations
 
 from agent.checkpoint import clear_checkpoint, save_checkpoint
+from agent.confirmation.dispatcher import (
+    _FEEDBACK_INTENT_VALID_CHOICES,
+    ConfirmationContext,
+    _confirmation_response,
+    _emit_confirmation_observer_event,
+    _emit_plan_confirmation,
+    _request_feedback_intent_choice,
+)
+from agent.context_builder import build_planning_messages
 from agent.conversation_events import append_control_event
 from agent.display_events import feedback_intent_requested
 from agent.planner import generate_plan
@@ -19,16 +28,11 @@ from agent.runtime_events import (
     step_confirmation_transition,
 )
 from agent.task_runtime import advance_current_step_if_needed
-
-from agent.context_builder import build_planning_messages
-
-from agent.confirmation.dispatcher import (
-    _FEEDBACK_INTENT_VALID_CHOICES,
-    ConfirmationContext,
-    _confirmation_response,
-    _emit_confirmation_observer_event,
-    _emit_plan_confirmation,
-    _request_feedback_intent_choice,
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
 )
 
 
@@ -41,13 +45,15 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     response = _confirmation_response(confirm)
 
     if response == "accept":
-        accept_transition = plan_confirmation_transition(
-            PlanConfirmationKind.PLAN_ACCEPTED
-        )
+        result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_ACCEPTED,
+            owner="confirmation.plan.accept",
+            expected_from_status="awaiting_plan_confirmation",
+        ))
+        if not result.allowed:
+            return f"[系统] plan accept 状态迁移失败: {result.reason}"
         append_control_event(messages, "plan_confirm_yes", {})
-        if accept_transition.next_status:
-            state.task.status = accept_transition.next_status
-        if accept_transition.should_checkpoint:
+        if result.checkpoint_action == CheckpointAction.SAVE:
             save_checkpoint(state)
         _emit_confirmation_observer_event(
             "confirmation.plan.accepted",

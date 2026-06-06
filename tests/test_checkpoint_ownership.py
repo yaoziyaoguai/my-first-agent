@@ -454,9 +454,7 @@ def test_pending_confirmation_persistence_writers_are_reviewed() -> None:
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.current_step_index", 1),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.pending_user_input_request", 2),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "state.task.status", 3),
-        ("agent.confirmation.plan", "handle_plan_confirmation", "state.task.status", 1),
         ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool", 2),
-        ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.status", 4),
     }
 
     assert actual_checkpoint_calls == expected_checkpoint_calls

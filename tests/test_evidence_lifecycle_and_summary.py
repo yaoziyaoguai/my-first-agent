@@ -1663,6 +1663,7 @@ def test_pending_denied_path_no_evidence():
 
     state = SimpleNamespace()
     state.task = SimpleNamespace()
+    state.task.status = "awaiting_tool_confirmation"
     state.task.tool_execution_log = {}
     state.task.pending_tool = {
         "tool_use_id": "toolu_deny_test",
@@ -1726,6 +1727,7 @@ def test_handle_tool_confirmation_accept_uses_mediator_when_available():
 
     state = SimpleNamespace()
     state.task = SimpleNamespace()
+    state.task.status = "awaiting_tool_confirmation"
     state.task.tool_execution_log = {}
     state.task.pending_tool = {
         "tool_use_id": "toolu_hct_m_test",
@@ -1792,6 +1794,7 @@ def test_pending_accept_constructs_mediator_on_demand_with_dispatcher():
 
     state = SimpleNamespace()
     state.task = SimpleNamespace()
+    state.task.status = "awaiting_tool_confirmation"
     state.task.tool_execution_log = {}
     state.task.pending_tool = {
         "tool_use_id": "toolu_odm_test",
@@ -1863,6 +1866,7 @@ def test_pending_accept_falls_back_when_no_mediator_and_no_dispatcher():
 
     state = SimpleNamespace()
     state.task = SimpleNamespace()
+    state.task.status = "awaiting_tool_confirmation"
     state.task.tool_execution_log = {}
     state.task.pending_tool = {
         "tool_use_id": "toolu_nodisp_test",
@@ -1926,6 +1930,7 @@ def test_mediate_route_invoke_records_evidence_not_executes_via_dispatcher():
 
     state = SimpleNamespace()
     state.task = SimpleNamespace()
+    state.task.status = "awaiting_tool_confirmation"
     state.task.tool_execution_log = {}
     state.task.pending_tool = None
     state.conversation = SimpleNamespace()

@@ -16,6 +16,13 @@ from agent.runtime_events import (
     tool_result_transition,
 )
 from agent.tool_executor import execute_pending_tool
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 
 
 def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -34,6 +41,15 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     response = _confirmation_response(confirm)
 
     if response == "accept":
+        accept_req = TaskTransitionRequest(
+            event=TransitionEvent.USER_ACCEPTED,
+            owner="confirmation.tool.accept_validate",
+            expected_from_status="awaiting_tool_confirmation",
+        )
+        preflight = validate_task_transition(state, accept_req)
+        if not preflight.allowed:
+            return f"[系统] tool accept 前置验证失败: {preflight.reason}"
+
         append_control_event(messages, "tool_confirm_yes", pending)
         try:
             # P1-2: 优先通过 ToolRuntimeMediator 执行 pending tool，
@@ -76,9 +92,14 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
                     pending["tool_use_id"],
                     f"[工具 {tool_name} 执行异常] {type(e).__name__}: {e}",
                 )
-            if failed_transition.next_status:
-                state.task.status = failed_transition.next_status
-            if failed_transition.should_checkpoint:
+            accept_error_result = apply_task_transition(state, TaskTransitionRequest(
+                event=TransitionEvent.USER_ACCEPTED,
+                owner="confirmation.tool.accept_error",
+                expected_from_status="awaiting_tool_confirmation",
+            ))
+            if not accept_error_result.allowed:
+                return f"[系统] tool accept error 状态迁移失败: {accept_error_result.reason}"
+            if accept_error_result.checkpoint_action == CheckpointAction.SAVE:
                 save_checkpoint(state)
             _emit_confirmation_observer_event(
                 "confirmation.tool.accepted_failed",
@@ -94,9 +115,14 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         )
         if success_transition.clear_pending_tool:
             state.task.pending_tool = None
-        if success_transition.next_status:
-            state.task.status = success_transition.next_status
-        if success_transition.should_checkpoint:
+        accept_result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_ACCEPTED,
+            owner="confirmation.tool.accept_success",
+            expected_from_status="awaiting_tool_confirmation",
+        ))
+        if not accept_result.allowed:
+            return f"[系统] tool accept 状态迁移失败: {accept_result.reason}"
+        if accept_result.checkpoint_action == CheckpointAction.SAVE:
             save_checkpoint(state)
         _emit_confirmation_observer_event(
             "confirmation.tool.accepted_success",
@@ -107,7 +133,22 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         )
         return ctx.continue_fn(turn_state)
 
-    # 用户拒绝或反馈
+    # 用户拒绝或反馈 — 先验证 transition 合法性，再执行副作用
+    if response == "reject":
+        reject_event = TransitionEvent.USER_REJECTED
+        reject_owner = "confirmation.tool.reject"
+    else:
+        reject_event = TransitionEvent.USER_FEEDBACK
+        reject_owner = "confirmation.tool.feedback"
+
+    preflight = validate_task_transition(state, TaskTransitionRequest(
+        event=reject_event,
+        owner=reject_owner,
+        expected_from_status="awaiting_tool_confirmation",
+    ))
+    if not preflight.allowed:
+        return f"[系统] tool {response} 前置验证失败: {preflight.reason}"
+
     transition = tool_result_transition(ToolResultTransitionKind.USER_REJECTION)
     if transition.clear_pending_tool:
         state.task.pending_tool = None
@@ -139,8 +180,14 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
 
     if response == "reject":
         append_control_event(messages, "tool_confirm_no", pending)
-        state.task.status = "running"
-        if transition.should_checkpoint:
+        reject_result = apply_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_REJECTED,
+            owner="confirmation.tool.reject",
+            expected_from_status="awaiting_tool_confirmation",
+        ))
+        if not reject_result.allowed:
+            return f"[系统] tool reject 状态迁移失败: {reject_result.reason}"
+        if reject_result.checkpoint_action == CheckpointAction.SAVE:
             save_checkpoint(state)
         _emit_confirmation_observer_event(
             "confirmation.tool.rejected",
@@ -152,8 +199,14 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         "feedback": confirm,
         "tool": tool_name,
     })
-    state.task.status = "running"
-    if transition.should_checkpoint:
+    feedback_result = apply_task_transition(state, TaskTransitionRequest(
+        event=TransitionEvent.USER_FEEDBACK,
+        owner="confirmation.tool.feedback",
+        expected_from_status="awaiting_tool_confirmation",
+    ))
+    if not feedback_result.allowed:
+        return f"[系统] tool feedback 状态迁移失败: {feedback_result.reason}"
+    if feedback_result.checkpoint_action == CheckpointAction.SAVE:
         save_checkpoint(state)
     _emit_confirmation_observer_event(
         "confirmation.tool.feedback",

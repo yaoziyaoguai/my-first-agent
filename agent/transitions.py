@@ -1,17 +1,22 @@
-"""显式 transition 层：把输入解析结果落地成 runtime 状态变化。
+"""显式 transition 层：task status 状态迁移的统一入口。
 
-`input_resolution` 和本模块的边界很重要：
-- `input_resolution` 只判断用户输入属于哪类语义，不改 state；
-- `transitions` 执行真正的 action，例如 append step_input、清 pending、
-  推进 step、保存 checkpoint。
+本模块提供两层 transition：
+1. 通用 task status transition API（Phase 1A 新增）：
+   - TransitionEvent / CheckpointAction / TransitionRule
+   - TaskTransitionRequest / TaskTransitionResult
+   - apply_task_transition()
+2. 已有 user_replied transition（保持向后兼容）：
+   - TransitionResult / apply_user_replied_transition()
 
-第一阶段这里只处理 `awaiting_user_input + USER_REPLIED`，不是完整状态机框架，
-也不是通用 action engine。目标是先把最容易混淆的用户输入恢复链路显式化。
+apply_task_transition() 是 Phase 1A 新增的唯一合法 state.task.status 写入点。
+caller 根据返回的 TaskTransitionResult.checkpoint_action 自行执行
+save_checkpoint / clear_checkpoint，transition layer 不自动操作 checkpoint。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from agent import checkpoint
@@ -24,8 +29,236 @@ from agent.input_resolution import (
 from agent.runtime_observer import log_actions, log_transition
 from agent.task_runtime import advance_current_step_if_needed
 
-
 EVENT_USER_REPLIED = "user.replied"
+
+# ============================================================================
+# Phase 1A: 通用 task status transition API
+# ============================================================================
+
+
+class TransitionEvent(Enum):
+    """确定性 task status transition 事件。
+
+    Phase 1A 只需要 USER_ACCEPTED / USER_REJECTED / USER_FEEDBACK。
+    其余事件为后续 Phase 预留，不在 Phase 1A transition table 中。
+    """
+    USER_ACCEPTED = "user.accepted"
+    USER_REJECTED = "user.rejected"
+    USER_FEEDBACK = "user.feedback"
+    # 后续 Phase 预留
+    USER_CANCELLED = "user.cancelled"
+    PLAN_GENERATED = "plan.generated"
+    STEP_ADVANCED = "step.advanced"
+    TASK_COMPLETED = "task.completed"
+    TOOL_CONFIRMATION_REQUIRED = "tool.confirmation_required"
+    FEEDBACK_INTENT_REQUIRED = "feedback_intent.required"
+    EXECUTION_FAILED = "execution.failed"
+    INCONSISTENCY_DETECTED = "inconsistency.detected"
+
+
+class CheckpointAction(Enum):
+    """transition 后 caller 应执行的 checkpoint 操作。"""
+    NONE = "none"
+    SAVE = "save"
+    CLEAR = "clear"
+
+
+@dataclass(frozen=True, slots=True)
+class TransitionRule:
+    """单条 transition rule：(from_status, event) → to_status + checkpoint 行为。
+
+    checkpoint_action 绑定到 rule 而非 event，因为同一 event 在不同
+    from_status 下的 checkpoint 行为可能不同（如 USER_REJECTED 对于
+    plan confirmation vs tool confirmation）。
+    """
+    to_status: str
+    checkpoint_action: CheckpointAction
+
+
+@dataclass(frozen=True, slots=True)
+class TaskTransitionRequest:
+    """task status transition 请求。
+
+    caller 不传权威 from_status — apply_task_transition() 内部从
+    state.task.status 读取权威值。expected_from_status 是可选断言，
+    不匹配时 transition 被 deny。
+    """
+    event: TransitionEvent
+    owner: str
+    expected_from_status: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskTransitionResult:
+    """task status transition 执行结果。
+
+    这是独立新类型，不复用/扩展已有 transitions.TransitionResult
+    或 runtime_events.TransitionResult。两者保持原有语义不变。
+    """
+    allowed: bool
+    reason: str
+    previous_status: str
+    next_status: str | None
+    event: TransitionEvent
+    owner: str
+    checkpoint_action: CheckpointAction
+
+
+# Phase 1A transition table：只覆盖 awaiting_plan_confirmation 和
+# awaiting_tool_confirmation 的确定性 transition。
+# feedback_intent / origin_status restore 不进 Phase 1A。
+_TRANSITION_TABLE: dict[tuple[str, TransitionEvent], TransitionRule] = {
+    # plan confirmation accept
+    ("awaiting_plan_confirmation", TransitionEvent.USER_ACCEPTED): TransitionRule(
+        to_status="running",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    # tool confirmation — 四条路径全部 → running + SAVE
+    ("awaiting_tool_confirmation", TransitionEvent.USER_ACCEPTED): TransitionRule(
+        to_status="running",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    ("awaiting_tool_confirmation", TransitionEvent.USER_REJECTED): TransitionRule(
+        to_status="running",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+    ("awaiting_tool_confirmation", TransitionEvent.USER_FEEDBACK): TransitionRule(
+        to_status="running",
+        checkpoint_action=CheckpointAction.SAVE,
+    ),
+}
+
+
+def apply_task_transition(
+    state: Any,
+    request: TaskTransitionRequest,
+) -> TaskTransitionResult:
+    """验证并执行 task status transition。
+
+    职责：
+    - 从 state.task.status 读取权威 from_status
+    - 若 expected_from_status 不匹配 → allowed=False，不修改状态
+    - 查 _TRANSITION_TABLE 验证 (from_status, event)
+    - 执行 state.task.status = rule.to_status
+    - 返回 TaskTransitionResult 含 checkpoint_action
+
+    不负责：
+    - save_checkpoint / clear_checkpoint（caller 根据 checkpoint_action 执行）
+    - LLM reasoning / plan generation / tool execution
+    """
+    actual_from = state.task.status
+
+    # 可选断言：caller 预期当前状态
+    if (
+        request.expected_from_status is not None
+        and request.expected_from_status != actual_from
+    ):
+        return TaskTransitionResult(
+            allowed=False,
+            reason=(
+                f"expected_from_status mismatch: "
+                f"expected={request.expected_from_status!r}, "
+                f"actual={actual_from!r}"
+            ),
+            previous_status=actual_from,
+            next_status=None,
+            event=request.event,
+            owner=request.owner,
+            checkpoint_action=CheckpointAction.NONE,
+        )
+
+    # 查 transition table
+    key = (actual_from, request.event)
+    rule = _TRANSITION_TABLE.get(key)
+    if rule is None:
+        return TaskTransitionResult(
+            allowed=False,
+            reason=(
+                f"no transition rule for "
+                f"from_status={actual_from!r}, event={request.event.value!r}"
+            ),
+            previous_status=actual_from,
+            next_status=None,
+            event=request.event,
+            owner=request.owner,
+            checkpoint_action=CheckpointAction.NONE,
+        )
+
+    # 执行 transition
+    state.task.status = rule.to_status
+    log_transition(
+        from_state=actual_from,
+        event_type=request.event.value,
+        target_state=rule.to_status,
+    )
+
+    return TaskTransitionResult(
+        allowed=True,
+        reason=f"transition {actual_from!r} + {request.event.value!r} → {rule.to_status!r}",
+        previous_status=actual_from,
+        next_status=rule.to_status,
+        event=request.event,
+        owner=request.owner,
+        checkpoint_action=rule.checkpoint_action,
+    )
+
+
+def validate_task_transition(
+    state: Any,
+    request: TaskTransitionRequest,
+) -> TaskTransitionResult:
+    """只读验证 transition 是否合法，不修改 state.task.status。
+
+    用于 caller 必须在执行副作用（工具调用、clear pending、append result、
+    save checkpoint 等）之前确认 transition 合法的场景。
+    验证通过后 caller 仍需调用 apply_task_transition() 执行实际 mutation。
+    """
+    actual_from = state.task.status
+
+    if (
+        request.expected_from_status is not None
+        and request.expected_from_status != actual_from
+    ):
+        return TaskTransitionResult(
+            allowed=False,
+            reason=(
+                f"expected_from_status mismatch: "
+                f"expected={request.expected_from_status!r}, "
+                f"actual={actual_from!r}"
+            ),
+            previous_status=actual_from,
+            next_status=None,
+            event=request.event,
+            owner=request.owner,
+            checkpoint_action=CheckpointAction.NONE,
+        )
+
+    key = (actual_from, request.event)
+    rule = _TRANSITION_TABLE.get(key)
+    if rule is None:
+        return TaskTransitionResult(
+            allowed=False,
+            reason=(
+                f"no transition rule for "
+                f"from_status={actual_from!r}, event={request.event.value!r}"
+            ),
+            previous_status=actual_from,
+            next_status=None,
+            event=request.event,
+            owner=request.owner,
+            checkpoint_action=CheckpointAction.NONE,
+        )
+
+    return TaskTransitionResult(
+        allowed=True,
+        reason="preflight validation passed",
+        previous_status=actual_from,
+        next_status=rule.to_status,
+        event=request.event,
+        owner=request.owner,
+        checkpoint_action=rule.checkpoint_action,
+    )
 
 
 @dataclass(frozen=True, slots=True)

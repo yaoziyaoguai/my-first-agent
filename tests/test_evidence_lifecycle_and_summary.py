@@ -1385,3 +1385,383 @@ def test_ps_no_raw_content_in_summary():
     assert "raw tool results" in result
     assert "never persisted in events" in result
     assert "config/config.yaml" not in result
+
+
+# ═══════════════════════════════════════════════════════
+# K. P1-2 mediate_pending 统一路径测试
+# ═══════════════════════════════════════════════════════
+
+
+def test_mediate_pending_records_gate_decision_evidence():
+    """mediate_pending 必须写入 gate_decision (allowed) evidence。
+
+    架构契约：pending 确认后的工具执行必须走 mediator 统一路径，
+    产生 gate_decision → invoke → pending_execute → result 完整证据链。
+    此测试验证 gate_decision 在 mediator 路径中被记录。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    import agent.tool_runtime_mediator as tmr_mod
+
+    test_sid = f"test-medpen-gate-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.current_step_index = 1
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    messages: list[dict[str, object]] = []
+    pending: dict[str, object] = {
+        "tool_use_id": "toolu_medpen_gate_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt", "content": "hello"},
+    }
+
+    fake_dispatcher = MagicMock()
+    fake_dispatcher.route_from_runtime_loop.return_value = SimpleNamespace(
+        payload={"gate_disposition": "allowed"},
+    )
+
+    mediator = tmr_mod.ToolRuntimeMediator(
+        fake_dispatcher,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=messages,
+    )
+
+    with patch.object(
+        tmr_mod, "execute_pending_tool", return_value="执行完成。"
+    ):
+        result = mediator.mediate_pending(pending)
+
+    assert "执行完成。" in result
+
+    # 验证 gate_decision evidence 已写入
+    gate_events = [
+        e for e in writer.events
+        if e.get("action_type") == "tool.gate_decision"
+    ]
+    assert len(gate_events) >= 1, (
+        f"mediate_pending 应写入 gate_decision evidence，"
+        f"实际 events: {writer.events}"
+    )
+    ev = gate_events[0]
+    data = ev["data"]
+    assert data["status"] == "allowed"
+    assert data["metadata"]["from_pending_tool"] is True
+    assert data["metadata"]["confirmation_already_approved"] is True
+
+
+def test_mediate_pending_does_not_re_gate():
+    """mediate_pending 不得调用 _route_gate 重新门控。
+
+    架构契约：pending tool 在 initial tool_use 时已通过 TOOL_GATE
+    （allowed 或 confirmation_required）。用户确认后不应再次检查 gate，
+    否则可能导致：
+    - 重复弹确认（confirmation_required 再次触发）
+    - skill_allowed_tools 过期导致合法 pending tool 被 block
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    import agent.tool_runtime_mediator as tmr_mod
+
+    test_sid = f"test-medpen-nogate-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.current_step_index = 1
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    pending: dict[str, object] = {
+        "tool_use_id": "toolu_medpen_nogate",
+        "tool": "write_file",
+        "input": {"path": "test.txt", "content": "hello"},
+    }
+
+    fake_dispatcher = MagicMock()
+    fake_dispatcher.route_from_runtime_loop.return_value = SimpleNamespace(
+        payload={"gate_disposition": "allowed"},
+    )
+
+    mediator = tmr_mod.ToolRuntimeMediator(
+        fake_dispatcher,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=[],
+    )
+
+    # Spy _route_gate
+    with patch.object(
+        mediator, "_route_gate", wraps=mediator._route_gate
+    ) as spy_gate, patch.object(
+        tmr_mod, "execute_pending_tool", return_value="执行完成。"
+    ):
+        mediator.mediate_pending(pending)
+
+    # _route_gate 不应被调用 — pending 已确认
+    assert spy_gate.call_count == 0, (
+        f"mediate_pending 不应调用 _route_gate（pending 已确认），"
+        f"实际调用 {spy_gate.call_count} 次"
+    )
+
+
+def test_mediate_pending_evidence_chain_in_summary():
+    """mediate_pending 路径的 summary 计数器正确。
+
+    gate_decision (allowed) + pending_execute (ok) → attempted=1 executed=1 pending=1。
+    不重复计数。
+    """
+    sid = "test-medpen-summary"
+    ts = "2026-06-06T12:00:00.000000Z"
+    tid = "toolu_medpen_summary_01"
+
+    entries = [
+        # session start
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        # gate_decision (allowed, from_pending_tool) — mediator 写入
+        {
+            "event": "evidence.recorded",
+            "timestamp": ts,
+            "session_id": sid,
+            "data": {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "phase": "decision",
+                "status": "allowed",
+                "safe_summary": "tool=write_file gate=allowed (pending confirmed)",
+                "metadata": {
+                    "tool_name": "write_file",
+                    "tool_use_id": tid,
+                    "from_pending_tool": True,
+                    "confirmation_already_approved": True,
+                },
+            },
+        },
+        # pending_execute (ok) — execute_pending_tool 写入
+        {
+            "event": "evidence.recorded",
+            "timestamp": ts,
+            "session_id": sid,
+            "data": {
+                "subsystem": "tool",
+                "operation": "pending_execute",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "tool=write_file status=executed (pending_execute)",
+                "metadata": {
+                    "tool_name": "write_file",
+                    "tool_use_id": tid,
+                    "from_pending_tool": True,
+                },
+            },
+        },
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+    assert "pending exec   : 1" in result
+    assert "blocked        : 0" in result
+
+
+def test_mediate_pending_double_counting_prevention():
+    """同一 tool_use_id 的 gate_decision + pending_execute 不重复计数。
+
+    即使 gate_decision 和 pending_execute 各出现一次，attempted 和 executed
+    应各为 1（不是 2）。
+    """
+    sid = "test-medpen-dedup"
+    ts = "2026-06-06T12:00:00.000000Z"
+    tid = "toolu_medpen_dedup_01"
+
+    entries = [
+        _make_entry("session_start", sid, data={
+            "provider_type": "fake", "model": "test", "entry": "plain"}),
+        {
+            "event": "evidence.recorded",
+            "timestamp": ts,
+            "session_id": sid,
+            "data": {
+                "subsystem": "tool",
+                "operation": "gate_decision",
+                "phase": "decision",
+                "status": "allowed",
+                "safe_summary": "tool=write_file gate=allowed (pending confirmed)",
+                "metadata": {"tool_name": "write_file", "tool_use_id": tid},
+            },
+        },
+        {
+            "event": "evidence.recorded",
+            "timestamp": ts,
+            "session_id": sid,
+            "data": {
+                "subsystem": "tool",
+                "operation": "pending_execute",
+                "phase": "end",
+                "status": "ok",
+                "safe_summary": "tool=write_file status=executed (pending_execute)",
+                "metadata": {"tool_name": "write_file", "tool_use_id": tid},
+            },
+        },
+    ]
+    result = log_viewer.render_session_summary(sid, entries)
+    assert "attempted      : 1" in result
+    assert "executed       : 1" in result
+    assert "pending exec   : 1" in result
+    assert "blocked        : 0" in result
+
+
+def test_pending_denied_path_no_evidence():
+    """用户拒绝 pending tool 时不产生 pending_execute evidence。
+
+    拒绝路径：handle_tool_confirmation 的 reject 分支不调 mediate_pending，
+    也不调 execute_pending_tool。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from agent.confirmation.dispatcher import ConfirmationContext
+    from agent.confirmation.tool import handle_tool_confirmation
+
+    test_sid = f"test-pend-deny-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_deny_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt"},
+    }
+    state.conversation = SimpleNamespace()
+    state.conversation.messages = []
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    def _continue(ts):
+        return "CONTINUE"
+
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test",
+        continue_fn=_continue,
+    )
+
+    with patch("agent.confirmation.tool.save_checkpoint"):
+        result = handle_tool_confirmation("no", ctx)
+
+    assert "CONTINUE" in result
+    # 不应有 pending_execute evidence
+    pending_events = [
+        e for e in writer.events
+        if e.get("action_type") == "tool.pending_execute"
+    ]
+    assert len(pending_events) == 0, (
+        f"reject 路径不应写入 pending_execute evidence，"
+        f"实际: {pending_events}"
+    )
+
+
+def test_handle_tool_confirmation_accept_uses_mediator_when_available():
+    """handle_tool_confirmation accept 时优先使用 mediator.mediate_pending()。
+
+    验证：当 turn_state._tool_mediator 存在时，accept 路径走 mediator
+    而不是直接调 execute_pending_tool。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from agent.confirmation.dispatcher import ConfirmationContext
+    from agent.confirmation.tool import handle_tool_confirmation
+
+    test_sid = f"test-hct-m-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_hct_m_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt"},
+    }
+    state.conversation = SimpleNamespace()
+    state.conversation.messages = []
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+
+    # 注入 fake mediator
+    fake_mediator = MagicMock()
+    fake_mediator.mediate_pending.return_value = "mediator result"
+    turn_state._tool_mediator = fake_mediator
+
+    def _continue(ts):
+        return "CONTINUE"
+
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test",
+        continue_fn=_continue,
+    )
+
+    with patch("agent.confirmation.tool.save_checkpoint"), patch(
+        "agent.confirmation.tool.execute_pending_tool"
+    ) as mock_direct:
+        result = handle_tool_confirmation("yes", ctx)
+
+    assert "CONTINUE" in result
+    # mediator.mediate_pending 应被调用
+    fake_mediator.mediate_pending.assert_called_once()
+    # 直接 execute_pending_tool 不应被调用（fallback 不触发）
+    mock_direct.assert_not_called()

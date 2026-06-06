@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from agent.checkpoint import save_checkpoint
+from agent.confirmation.dispatcher import (
+    ConfirmationContext,
+    _confirmation_response,
+    _emit_confirmation_observer_event,
+)
 from agent.conversation_events import append_control_event
 from agent.runtime_events import (
     ToolConfirmationKind,
@@ -11,12 +16,6 @@ from agent.runtime_events import (
     tool_result_transition,
 )
 from agent.tool_executor import execute_pending_tool
-
-from agent.confirmation.dispatcher import (
-    ConfirmationContext,
-    _confirmation_response,
-    _emit_confirmation_observer_event,
-)
 
 
 def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -37,12 +36,19 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     if response == "accept":
         append_control_event(messages, "tool_confirm_yes", pending)
         try:
-            execute_pending_tool(
-                state=state,
-                turn_state=turn_state,
-                messages=messages,
-                pending=pending,
-            )
+            # P1-2: 优先通过 ToolRuntimeMediator 执行 pending tool，
+            # 确保走统一 gate_decision → invoke → pending_execute → result 证据链。
+            # mediator 不可用时回退到直接 execute_pending_tool（向后兼容）。
+            mediator = getattr(ctx.turn_state, "_tool_mediator", None)
+            if mediator is not None:
+                mediator.mediate_pending(pending)
+            else:
+                execute_pending_tool(
+                    state=state,
+                    turn_state=turn_state,
+                    messages=messages,
+                    pending=pending,
+                )
         except Exception as e:
             failed_transition = tool_confirmation_transition(
                 ToolConfirmationKind.TOOL_ACCEPTED_FAILED

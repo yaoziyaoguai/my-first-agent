@@ -29,7 +29,7 @@ from typing import Any
 
 from agent.conversation_events import append_tool_result
 from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
+from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_pending_tool, execute_single_tool
 
 
 class ToolRuntimeMediator:
@@ -140,6 +140,80 @@ class ToolRuntimeMediator:
 
         # Step 5: TOOL_RESULT — dispatcher 记录执行结果
         self._route_result(tool_name, tool_input, tool_use_id, result)
+
+        return result
+
+    def mediate_pending(self, pending: dict[str, Any]) -> str:
+        """执行已确认的 pending tool，走统一 mediator evidence 链。
+
+        用户已在 pending confirmation UI 中确认（confirmation_already_approved），
+        不会重新弹确认。但仍通过 ToolRuntimeMediator 统一路径记录：
+        gate_decision → TOOL_INVOKE dispatch → execute_pending_tool → TOOL_RESULT dispatch。
+
+        execute_pending_tool 作为底层 executor 负责实际的工具执行和
+        display/audit/messages/checkpoint 等所有 post-execution 能力。
+        """
+        tool_use_id = pending["tool_use_id"]
+        tool_name = pending["tool"]
+        tool_input = pending["input"]
+
+        # Step 1: gate_decision evidence（已确认，不重新 gate）
+        try:
+            from agent.evidence_recorder import record_evidence
+            path = ""
+            if isinstance(tool_input, dict):
+                path = str(tool_input.get("path", ""))
+            record_evidence(
+                subsystem="tool",
+                operation="gate_decision",
+                phase="decision",
+                status="allowed",
+                safe_summary=f"tool={tool_name} gate=allowed (pending confirmed)",
+                content_persisted=False,
+                sensitive=False,
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "path": path,
+                    "from_pending_tool": True,
+                    "confirmation_already_approved": True,
+                },
+            )
+        except Exception:
+            pass
+
+        # Step 2: TOOL_INVOKE dispatch
+        self._route_invoke(tool_name, tool_input, tool_use_id)
+
+        # Step 3: 执行 pending tool（底层 executor 处理全部执行细节）
+        result = execute_pending_tool(
+            state=self._state,
+            turn_state=self._turn_state,
+            messages=self._messages,
+            pending=pending,
+        )
+
+        # Step 4: TOOL_RESULT dispatch
+        with contextlib.suppress(Exception):
+            result_text = str(self._turn_context.get(tool_use_id, ""))[:500]
+            self._dispatcher.route_from_runtime_loop(
+                RuntimeActionRequest(
+                    action_type=RuntimeActionType.TOOL_RESULT,
+                    source="ToolRuntimeMediator",
+                    parent_trace_id=tool_use_id,
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_input": dict(tool_input) if tool_input else {},
+                        "status": "executed",
+                        "tool_output": result_text,
+                        "execution_status": "success",
+                        "from_pending_tool": True,
+                    },
+                ),
+                core_entrypoint="core.chat",
+                runtime_hook_name="handle_tool_use_response",
+                identity=self._identity,
+            )
 
         return result
 

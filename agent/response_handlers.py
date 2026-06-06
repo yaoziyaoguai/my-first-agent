@@ -282,8 +282,12 @@ def handle_tool_use_response(
             skill_allowed_tools=_skill_at,
             identity=runtime_identity,
         )
+        # P1-2: 将 mediator 挂到 turn_state，使 handle_tool_confirmation
+        # 能通过 mediator.mediate_pending() 走统一工具执行路径。
+        turn_state._tool_mediator = _mediator
     else:
         _mediator = None
+        turn_state._tool_mediator = None
 
     for idx, block in enumerate(tool_use_blocks):
         # 先把模型输出归类成事件并记录下来；后续仍沿用原来的

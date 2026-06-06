@@ -1,17 +1,23 @@
-"""MCP Tool Orchestrator — thin composition layer.
+"""MCP Tool Orchestrator — test-harness / runtime-integration helper (HARNESS-ONLY).
 
-中文学习边界：
-本模块是把 MCP tool-like call 串入已有 TOOL_GATE → TOOL_INVOKE → TOOL_RESULT
-管线的 thin orchestrator。它不是 dispatcher handler、不注册新的 RuntimeActionType、
-不新增 Anchor、不新增 branch point、不新增 runtime flow。
+⚠️ 本模块是 harness-only，不是生产 MCP execution path。
 
-orchestrator 持有 dispatcher 引用，内部调用 dispatcher.route() 串联三个已有
-handler，自己只负责编排逻辑（何时继续、何时停止）。所有业务逻辑（gate 检查、
-工具执行、结果格式化）仍在已有 handler/adapter 中。
+生产 MCP 工具的正确路径：
+- 注册：register_mcp_tools() → TOOL_REGISTRY
+- 执行：Agent Loop → ToolRuntimeMediator → tool_executor → registered MCP tool closure
+  → client.call_tool
+- TOOL_INVOKE dispatcher path 是 evidence-only，不执行真实工具
 
-证据分类：
-- orchestrator 调用 dispatcher.route() → harness_runtime_e2e（target_module_proof 完整）
-- 不是 real_core_loop_runtime_e2e（没有从 route_from_runtime_loop 进入）
+run_mcp_tool_pipeline() 仅允许用于：
+- tests/runtime_integration/ 下的 harness validation 测试
+- 本地开发调试 / demo 用途
+
+禁止：
+- 生产代码 import 或调用 run_mcp_tool_pipeline
+- 将 run_mcp_tool_pipeline 作为 MCP 工具的生产执行入口
+
+本模块不注册新的 RuntimeActionType、不新增 Anchor、不新增 branch point、
+不新增 runtime flow。所有业务逻辑仍在已有 handler/adapter 中。
 """
 
 from __future__ import annotations

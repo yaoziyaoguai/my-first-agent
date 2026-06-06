@@ -1265,3 +1265,66 @@ def test_dispatcher_tool_invoke_is_evidence_only_and_does_not_execute_tool(
         assert result.payload["execution_status"] == "not_executed"
     finally:
         TOOL_REGISTRY.pop(tool_name, None)
+
+
+# ── MCP Boundary Hardening Phase 1: harness-only boundary ──
+
+
+def test_run_mcp_tool_pipeline_is_harness_only() -> None:
+    """run_mcp_tool_pipeline 是 harness-only，生产代码不得引用。
+
+    mcp_tool_orchestrator.py 自身和 tests/ 下的文件可以引用。
+    agent/ 下其他模块（包括 mcp.py/mcp_bridge.py/mcp_audit.py 等）
+    不得 import 或调用 run_mcp_tool_pipeline。
+
+    生产 MCP 工具执行路径：
+    Agent Loop → ToolRuntimeMediator → tool_executor → registered MCP tool closure
+    """
+    import ast
+
+    agent_root = PROJECT_ROOT / "agent"
+    allowed_modules = {
+        "agent/runtime_integration/mcp_tool_orchestrator.py",
+    }
+
+    violations: dict[str, set[str]] = {}
+
+    for py_file in agent_root.rglob("*.py"):
+        rel = str(py_file.relative_to(PROJECT_ROOT))
+        if rel in allowed_modules:
+            continue
+
+        source = py_file.read_text()
+        tree = ast.parse(source)
+
+        found: set[str] = set()
+        for node in ast.walk(tree):
+            # bare import of mcp_tool_orchestrator
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "mcp_tool_orchestrator" in alias.name:
+                        found.add(f"bare import {alias.name}")
+            # import from mcp_tool_orchestrator
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if "mcp_tool_orchestrator" in module:
+                    for alias in node.names:
+                        found.add(f"import {alias.name} from {module}")
+            # call to run_mcp_tool_pipeline (name reference)
+            elif isinstance(node, ast.Name):
+                if node.id == "run_mcp_tool_pipeline":
+                    found.add("call run_mcp_tool_pipeline")
+            # attribute access
+            elif (
+                isinstance(node, ast.Attribute)
+                and node.attr == "run_mcp_tool_pipeline"
+            ):
+                found.add("attribute: run_mcp_tool_pipeline")
+
+        if found:
+            violations[rel] = found
+
+    assert violations == {}, (
+        f"run_mcp_tool_pipeline is harness-only. "
+        f"Production code must not reference it. Violations: {violations}"
+    )

@@ -436,7 +436,9 @@ def check_mcp_config_readiness():
     try:
         from agent.mcp_audit import emit_mcp_server_discovered
 
-        event = emit_mcp_server_discovered("smoke_srv")
+        event = emit_mcp_server_discovered(
+            "smoke_srv", dry_run=False, transport="health_check", mode="smoke",
+        )
         if event.server_name == "smoke_srv":
             smoke_results["audit_emitter"] = "ok"
         else:

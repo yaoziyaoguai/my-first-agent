@@ -8,10 +8,11 @@ tool descriptor、call result、client protocol、fake client，以及“显式 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from agent.mcp_models import (
     MCPClient,
@@ -20,7 +21,6 @@ from agent.mcp_models import (
     mcp_registry_tool_name,
 )
 from agent.tool_registry import TOOL_REGISTRY, register_tool
-
 
 SENSITIVE_CONFIG_NAMES = frozenset({".env", "agent_log.jsonl"})
 SENSITIVE_CONFIG_PARTS = frozenset({"sessions", "runs"})
@@ -185,14 +185,14 @@ def register_mcp_tools(
     注意：MCP client 不写 checkpoint、不参与 runtime transition，
     也不绕过 HITL。
     """
-    from agent.mcp_policy import evaluate_server_policy, evaluate_tool_policy
     from agent.mcp_audit import (
         emit_mcp_server_blocked,
         emit_mcp_server_discovered,
-        emit_mcp_tools_listed,
-        emit_mcp_tool_registered,
         emit_mcp_tool_blocked,
+        emit_mcp_tool_registered,
+        emit_mcp_tools_listed,
     )
+    from agent.mcp_policy import evaluate_server_policy, evaluate_tool_policy
 
     allowlist = server_allowlist or frozenset()
     registered: list[str] = []
@@ -209,18 +209,32 @@ def register_mcp_tools(
             server_allowlist=allowlist if allowlist else None,
             dry_run=dry_run,
         )
+        _transport = "fake" if dry_run else server.transport
         if server_result.decision == "blocked":
             emit_mcp_server_blocked(
                 server.name,
                 reason=server_result.reason,
+                dry_run=dry_run,
+                transport=_transport,
+                mode="registration",
             )
             continue
-        emit_mcp_server_discovered(server.name)
+        emit_mcp_server_discovered(
+            server.name,
+            dry_run=dry_run,
+            transport=_transport,
+            mode="registration",
+        )
 
         # 第二层：list_tools → tool policy gate
         descriptors = client.list_tools(server)
         _total_discovered += len(descriptors)
-        emit_mcp_tools_listed(server.name, tool_count=len(descriptors))
+        emit_mcp_tools_listed(
+            server.name, tool_count=len(descriptors),
+            dry_run=dry_run,
+            transport=_transport,
+            mode="registration",
+        )
 
         for descriptor in descriptors:
             if descriptor.server_name != server.name:
@@ -241,6 +255,9 @@ def register_mcp_tools(
                     server.name,
                     descriptor.name,
                     reason=tool_result.reason,
+                    dry_run=dry_run,
+                    transport=_transport,
+                    mode="registration",
                 )
                 continue
 
@@ -276,7 +293,12 @@ def register_mcp_tools(
                 output_policy="bounded_text",
             )(_call_mcp_tool)
             registered.append(registry_name)
-            emit_mcp_tool_registered(server.name, descriptor.name)
+            emit_mcp_tool_registered(
+                server.name, descriptor.name,
+                dry_run=dry_run,
+                transport=_transport,
+                mode="registration",
+            )
 
     if _discovery_stats is not None:
         _discovery_stats["discovered"] = _total_discovered

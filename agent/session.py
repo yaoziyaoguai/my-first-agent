@@ -6,6 +6,7 @@
 import os
 import sys
 
+import agent.checkpoint as _cp
 from agent.checkpoint import (
     checkpoint_path,
     clear_checkpoint,
@@ -39,7 +40,7 @@ from agent.memory import (
 from agent.memory_review import count_pending_proposals
 from config import MODEL_NAME, SYSTEM_PROMPT
 
-# ========== B7 checkpoint v2 路径辅助 ==========
+# ========== checkpoint 路径辅助 ==========
 
 def _resolve_session_id() -> str:
     """返回当前 runtime session_id，无则返回空字符串。"""
@@ -49,41 +50,118 @@ def _resolve_session_id() -> str:
         return ""
 
 
-def _load_checkpoint_best_effort():
-    """尝试加载 v2 per-session checkpoint，回退 v1。
+def _single_file_checkpoint_ok(single_cp, current_sid: str) -> bool:
+    """检查 single-file checkpoint (formerly v1) 是否属于当前 session。
 
-    B7: 优先尝试 session-scoped checkpoint 目录下最新 run；
-    失败时回退 legacy memory/checkpoint.json。
+    - 无 session_id metadata：legacy 兼容，允许加载
+    - 有 session_id 且匹配当前 session：允许加载
+    - 有 session_id 且不匹配：拒绝（cross-session contamination guard）
+    """
+    if single_cp is None:
+        return False
+    _meta = single_cp.get("meta", {}) or {}
+    _sid = _meta.get("session_id", "")
+    if not _sid:
+        return True   # legacy: no session_id → allow
+    return _sid == current_sid
+
+
+def _load_checkpoint_best_effort():
+    """加载最新 checkpoint，按 mtime 选择（single-file vs session-scoped）。
+
+    Single-file checkpoint (formerly "v1"): memory/checkpoint.json
+    Session-scoped checkpoint (formerly "v2"): memory/checkpoints/{sid}/*.json
+
+    Gap 4 fix: 不再无条件优先 session-scoped。当两者同时存在时按 mtime
+    选择最新的；拒绝跨 session 的 single-file checkpoint (P2-1)；
+    legacy single-file 无 session_id 时保留向后兼容。
     """
     _sid = _resolve_session_id()
+
+    # 收集最佳 session-scoped candidate（当前 session 下 mtime 最新的）
+    _best_session = None
+    _best_session_mtime = 0.0
     if _sid:
-        _v2_dir = checkpoint_path(_sid, "_").parent
-        if _v2_dir.exists():
-            _run_files = sorted(
-                _v2_dir.glob("*.json"),
-                key=lambda p: p.stat().st_mtime, reverse=True,
-            )
-            for _rf in _run_files:
-                _cp = load_checkpoint(path=_rf)
-                if _cp is not None:
-                    return _cp
-    return load_checkpoint()
+        _session_dir = checkpoint_path(_sid, "_").parent
+        if _session_dir.exists():
+            for _rf in _session_dir.glob("*.json"):
+                _candidate = load_checkpoint(path=_rf)
+                if _candidate is not None:
+                    _mt = _rf.stat().st_mtime
+                    if _mt > _best_session_mtime:
+                        _best_session = _candidate
+                        _best_session_mtime = _mt
+
+    # single-file candidate (formerly v1)
+    _single_cp = load_checkpoint()
+    _single_mtime = _cp.CHECKPOINT_PATH.stat().st_mtime if _cp.CHECKPOINT_PATH.exists() else 0.0
+    _single_ok = _single_file_checkpoint_ok(_single_cp, _sid)
+
+    # 两者都有：按 mtime 选最新，兼顾 session 匹配
+    if _best_session is not None and _single_ok:
+        if _single_mtime > _best_session_mtime:
+            return _single_cp
+        else:
+            return _best_session
+
+    if _best_session is not None:
+        return _best_session
+    if _single_ok:
+        return _single_cp
+    return None
 
 
 def _load_checkpoint_to_state_best_effort(state):
-    """B7: 尝试从 v2 路径恢复，回退 v1。"""
+    """恢复到 state：按 mtime 选最新 checkpoint（single-file vs session-scoped）。
+
+    Single-file checkpoint (formerly "v1"): memory/checkpoint.json
+    Session-scoped checkpoint (formerly "v2"): memory/checkpoints/{sid}/*.json
+
+    策略：
+    1. 按 mtime 从新到旧尝试 session-scoped checkpoints，跳过损坏的 (P2-2)
+    2. 若所有 session-scoped 均失败，fallback 到 single-file（需 session 匹配
+       或 legacy 兼容，P2-1）
+    3. 在两者间按 mtime 选择最新的
+    """
     _sid = _resolve_session_id()
+
+    # P2-2: 按 mtime 从新到旧找第一个可解析的 session-scoped checkpoint
+    _best_session_mtime = 0.0
+    _best_session_path = None
     if _sid:
-        _v2_dir = checkpoint_path(_sid, "_").parent
-        if _v2_dir.exists():
-            _run_files = sorted(
-                _v2_dir.glob("*.json"),
+        _session_dir = checkpoint_path(_sid, "_").parent
+        if _session_dir.exists():
+            _session_paths = sorted(
+                _session_dir.glob("*.json"),
                 key=lambda p: p.stat().st_mtime, reverse=True,
             )
-            for _rf in _run_files:
-                if load_checkpoint_to_state(state, path=_rf):
-                    return True
-    return load_checkpoint_to_state(state)
+            for _sp in _session_paths:
+                # 用 load_checkpoint 验证文件可解析（跳过损坏的）
+                if load_checkpoint(path=_sp) is not None:
+                    _best_session_path = _sp
+                    _best_session_mtime = _sp.stat().st_mtime
+                    break
+
+    # single-file candidate (formerly v1)
+    _single_mtime = _cp.CHECKPOINT_PATH.stat().st_mtime if _cp.CHECKPOINT_PATH.exists() else 0.0
+    _single_cp = load_checkpoint() if _cp.CHECKPOINT_PATH.exists() else None
+    _single_ok = _single_file_checkpoint_ok(_single_cp, _sid)
+
+    # 决定加载哪个（按 mtime 选最新，session-scoped 优先于平局）
+    _pick_single = False
+    if _best_session_path is not None and _single_ok:
+        if _single_mtime > _best_session_mtime:
+            _pick_single = True
+    elif _best_session_path is None and _single_ok:
+        _pick_single = True
+
+    if _pick_single:
+        return load_checkpoint_to_state(state)
+
+    if _best_session_path is not None:
+        return load_checkpoint_to_state(state, path=_best_session_path)
+
+    return False
 
 
 def _detect_provider_info() -> dict[str, str]:

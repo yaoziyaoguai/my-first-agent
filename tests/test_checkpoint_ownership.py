@@ -314,9 +314,13 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", "clear_checkpoint", 2),
         ("agent.runtime_integration.checkpoint_resume", "handle", "load_checkpoint_to_state", "_load", 1),
         ("agent.runtime_integration.checkpoint_save", "handle", "save_checkpoint", "_save_checkpoint", 1),
-        # B7 v2: session checkpoint loading 收口到 _load_checkpoint_best_effort /
+        # B7: session checkpoint loading 收口到 _load_checkpoint_best_effort /
         # _load_checkpoint_to_state_best_effort（per-session identity 感知）。
         ("agent.session", "_load_checkpoint_best_effort", "load_checkpoint", "load_checkpoint", 2),
+        # Gap 4 fix: _load_checkpoint_to_state_best_effort 新增 load_checkpoint()
+        # 调用以验证 session-scoped checkpoint 可解析性（P2-2 损坏跳过）和
+        # single-file checkpoint 存在性（P2-1 cross-session guard）。
+        ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint", "load_checkpoint", 2),
         ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint_to_state", "load_checkpoint_to_state", 2),
         ("agent.session", "finalize_session", "save_checkpoint", "save_checkpoint", 1),
         ("agent.session", "handle_double_interrupt", "save_checkpoint", "save_checkpoint", 1),

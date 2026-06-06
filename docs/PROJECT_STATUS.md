@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
-**最后更新**: 2026-06-05
-**当前状态**: **CORE_CHAT_STABILIZATION_REQUIRED**
+**最后更新**: 2026-06-06
+**当前状态**: **CORE_CHAT_STABILIZATION_REQUIRED**（Runtime Foundation 三个子阶段已 closeout，见 §Runtime Foundation Closeout）
 **前次状态**: USER_RECHECK_FAILED_WITH_P1_FINDINGS (2026-06-04) — 2 P1 + 1 P2 在真实用户路径下复测失败。
 **架构红队审计**: 2026-06-05 完成（只读，未落盘）。核心结论: fake/real 两套系统已形成，~95% 测试只覆盖 fake 路径，FIXED_BY_RECHECK 自证循环已固化，文档存在 overclaim。统一运行时骨架正确但需要止血收敛。
 **Close-out handoff**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — 历史阶段冻结声明。
@@ -60,7 +60,7 @@ python main.py --plain → real provider → core.chat → ToolRuntimeMediator �
 | **Tool safety** (sensitive path policy) | config.yaml/.env 拒绝有效 | REAL_USER_VERIFIED (F-001 真实路径复测确认) | **PRESERVE** |
 | **Skill** (SKILL_SELECT + allowed_tools) | BASE_TOOLS 追加模型已修复 (70a565b) | FAKE_VERIFIED (37 focused tests) + USER_RECHECK_FAILED (P1) | **PRESERVE_AS_MODULE** — 需 golden E2E recheck |
 | **Memory** (extract/propose/retain/recall) | W3/W4/W5 分层补丁，FakeMemoryExtractor 默认 | FAKE_VERIFIED (FakeMemoryExtractor) + REAL_PROVIDER_E2E (opt-in) | **PRESERVE_AS_SKELETON** — 不在主线验证通过前推进 |
-| **MCP** (bridge + invoke) | bridge 启动注册，FakeMCPClient 默认 (dry_run=True) | FAKE_VERIFIED (local stdio fixture) | **PRESERVE_AS_ADAPTER_SKELETON** — 不标 production ready |
+| **MCP** (bridge + invoke) | Phase 1 boundary hardened (0d8008e): audit → record_evidence, harness-only 标记, fake/real 可区分 | FAKE_VERIFIED + REAL_EVIDENCE (per-session events.jsonl 落盘) | **PRESERVE_AS_ADAPTER_SKELETON** — Phase 1 closeout, 不标 production ready |
 | **SubAgent** (L0/L1/L2) | L0=deterministic fake, L1=real LLM, L2=native loop | FAKE_VERIFIED (L1/L2 _SpyProvider tests) | **FROZEN** — 不在主线验证通过前推进 |
 | **Textual TUI** (`python main.py --tui`) | 事件驱动后端，真实 runtime 接入 | USER_RECHECK_FAILED (P1 deadlock) | **CANDIDATE** — 不激活默认入口 |
 | **Ink TUI** (`cd tui && npm start`) | TypeScript 独立进程，SAFE_DATA_FIXTURE 固定数据 | FAKE_VERIFIED (不接真实 runtime) | **FROZEN_PROTOTYPE** |
@@ -146,6 +146,77 @@ Summary 现在展示 7 个工具计数器：attempted, executed, blocked, blocke
 session 缺失 session.end 时会在 evidence gaps 中显示 `no session.end evidence` 警告。
 Content Policy 行更新为：`raw tool results: never persisted in events`。
 真实 mini-run 中如果模型未触发目标工具路径，需如实记录 `REAL_MODEL_DID_NOT_TRIGGER_TOOL`。
+
+
+## Runtime Foundation Closeout (2026-06-06)
+
+以下三个子阶段已在 `fix/checkpoint-v1-v2-split-brain` 分支上 closeout。
+每个 closeout 均为 FINAL——**不得重开**，除非出现明确 P1/P2 新证据。
+
+### 3.1 Tool Execution Entry Consolidation — FINAL
+
+- pending confirmation accept 已回到 `ToolRuntimeMediator`。`_route_invoke` double execution 风险已修复。
+- `TOOL_INVOKE` dispatcher path 已变为 evidence-only（记录但不执行）。
+- 真实工具执行路径收口为：**`ToolRuntimeMediator → tool_executor`**。
+- 后续不重开 Tool Entry 的 P3/LOW，除非出现明确 P1/P2 证据。
+
+### 3.2 Agent Loop Contract / Checkpoint Gap 4 — FINAL
+
+- single-file checkpoint 与 session-scoped checkpoint 的恢复点选择冲突已修复。
+- cross-session checkpoint contamination 已修复。
+- corrupted session-scoped checkpoint fallback 已修复。
+- checkpoint scope selection 相关测试已补。
+- `run_id` identity、pending reject/feedback unified evidence、normal turn-end checkpoint 维持 P3/后置，不阻塞当前阶段。
+
+### 3.3 MCP Boundary Hardening Phase 1 — FINAL
+
+- **Commit**: `0d8008e`（`fix(mcp): harden audit evidence boundary`）。
+- `agent/runtime_integration/mcp_tool_orchestrator.py` 已明确标记为 **harness-only**。
+- Production MCP execution path 明确为：
+  `register_mcp_tools → TOOL_REGISTRY → Agent Loop → ToolRuntimeMediator → tool_executor → registered MCP tool closure → client.call_tool`
+- MCP audit lifecycle/discovery/registration events 已接入 `record_evidence(subsystem="mcp")`。
+- MCP audit evidence metadata 已包含 `dry_run`、`transport`、`mode`。
+- fake / real / health_check / smoke 路径可通过 evidence 区分。
+- 已新增真实 `record_evidence → EventLogWriter → sessions/<session_id>/events.jsonl` 落盘测试。
+- MCP tool execution 语义未改变，复用普通 `ToolRuntimeMediator` evidence。
+- Fake path 与 real path 共用 `MCPClient` Protocol、`register_mcp_tools`、`TOOL_REGISTRY`、Agent Loop、`ToolRuntimeMediator`；差异主要在 transport 层。
+- 当前实现是 MCP stdio client 子集，不实现生产 MCP server / HTTP/SSE/Streamable HTTP / long-lived subprocess。
+
+### 3.4 后置项（非 blocker）
+
+以下为明确后置事项，不阻塞当前阶段：
+
+- MCP `logs --session --summary` 专用段
+- MCP discovery mode 更完整 audit events
+- MCP long-lived subprocess / stateful MCP session
+- HTTP/SSE/Streamable HTTP transport
+- structured MCP result（不再压平成 legacy string）
+- `run_id` identity / event envelope / observability dashboard
+- `_fallback_log` 异常策略
+- Skill / SubAgent / Memory
+- Runtime State Machine / State Transition Consolidation
+
+### 3.5 推荐下一阶段
+
+**Runtime State Transition Audit**（只读审计，不实现状态机）：
+
+- 梳理 `task.status` 谁在改
+- pending confirmation 状态谁在改
+- interrupt / resume 状态谁在改
+- checkpoint 保存与状态变化是否一致
+- tool accept / reject / feedback 是否状态一致
+- MCP 作为普通 tool 是否引入新状态分支
+- 是否需要轻量 transition API，还是暂时不需要状态机重构
+
+### 3.6 明确非目标
+
+- 不重开 Tool Entry closeout
+- 不重开 Checkpoint Gap 4
+- 不重开 MCP Boundary Phase 1
+- 不直接进入 Skill / SubAgent / Memory
+- 不直接实现 Runtime State Machine
+- 不把日志体系扩成 observability / trace / dashboard
+- 不继续做 MCP 功能扩展（除非后续明确进入 MCP Phase 2）
 
 ---
 
@@ -682,9 +753,11 @@ Not product-ready。Do not claim all tests pass。Do not claim full regression c
 
 ## 2. 推荐下一步
 
-**当前阶段 close-out candidate。** REAL-EVIDENCE 001-008 全部有代码/测试/审计证据：7/8 accepted-with-caveats, 1/8 accepted。B8 M1-M8 Interaction-first Workbench fake/local MVP delivered: 412/412 TUI tests PASS, tsc clean。所有 Operations/AutoRun/Project dashboard PAUSED。TUI default entry NOT ACTIVATED。CLI fallback retained。
+**Runtime Foundation 三个子阶段已 closeout（2026-06-06）**，详见 §Runtime Foundation Closeout。
 
-**下一步**: final independent audit of `docs/audit/b1-b8-current-stage-close-out-audit.md` + current HEAD。不要进入 B9，不激活 TUI default entry，不把 fake/local foundation 写成真实 runtime 能力。
+**下一步**: **Runtime State Transition Audit**（只读审计，不实现状态机）。目标：梳理 Agent Loop / Tool / MCP / checkpoint / confirmation 的状态变化分布。详见 §3.5。
+
+**之前状态**: current-stage close-out candidate。REAL-EVIDENCE 001-008 全部有代码/测试/审计证据：7/8 accepted-with-caveats, 1/8 accepted。B8 M1-M8 Interaction-first Workbench fake/local MVP delivered: 412/412 TUI tests PASS, tsc clean。
 
 **[historical — superseded by 2026-05-30 002/003 real provider validation baseline]** Independent combined review complete — 阶段性收口。所有 REAL-EVIDENCE (001-008) CLOSED。8/8 evidence collected；5/8 credible + 3/8 partial-credible / credible-with-caveats。002 upgraded to partial-credible / code-path credible with real-model evidence (real provider SKILL_SELECT, prompt-steered single-skill single-run caveats)；003 upgraded to partial-credible / code-path credible with blocking demonstrated (real provider disallowed-tool blocking, prompt-steered single-tool adversarial caveats)。B7/B8 大型架构/产品化决策不进入当前收口。**Current baseline (2026-05-30): see Section 0.**
 

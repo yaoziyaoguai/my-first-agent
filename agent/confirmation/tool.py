@@ -38,8 +38,23 @@ def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         try:
             # P1-2: 优先通过 ToolRuntimeMediator 执行 pending tool，
             # 确保走统一 gate_decision → invoke → pending_execute → result 证据链。
-            # mediator 不可用时回退到直接 execute_pending_tool（向后兼容）。
+            #
+            # 关键修复（P1-2 冲突复核）：turn_state 是 chat() 每次调用新建的
+            # per-invocation 对象，而 pending confirmation 跨越两次 chat() 调用。
+            # turn_state._tool_mediator 在第一次调用中设置，第二次调用时已不存在。
+            # 因此当 _tool_mediator 为 None 但 ctx.dispatcher 可用时，即时构造
+            # mediator 以保证 pending accept 路径必然进入 mediator-controlled path。
             mediator = getattr(ctx.turn_state, "_tool_mediator", None)
+            if mediator is None and ctx.dispatcher is not None:
+                from agent.tool_runtime_mediator import ToolRuntimeMediator
+                mediator = ToolRuntimeMediator(
+                    ctx.dispatcher,
+                    state=state,
+                    turn_state=turn_state,
+                    turn_context={},
+                    messages=messages,
+                )
+                ctx.turn_state._tool_mediator = mediator
             if mediator is not None:
                 mediator.mediate_pending(pending)
             else:

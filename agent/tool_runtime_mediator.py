@@ -658,21 +658,29 @@ class ToolRuntimeMediator:
     def _route_invoke(
         self, tool_name: str, tool_input: Any, tool_use_id: str
     ) -> None:
-        """TOOL_INVOKE：dispatcher 记录工具调用（execute_single_tool 之前调用）。"""
+        """TOOL_INVOKE evidence 记录（不通过 dispatcher 执行工具）。
+
+        P1-2 冲突复核关键修复：原来的 _route_invoke 通过 dispatcher 路由
+        TOOL_INVOKE → ToolInvokeHandler.handle() → invoke_registered_target
+        → _tool_invoke_adapter() → execute_tool()，导致工具被 dispatcher
+        执行一次，随后 mediate()/mediate_pending() 又调用 execute_single_tool/
+        execute_pending_tool 执行第二次。现在改用 record_evidence 直接记录
+        evidence，不触发 dispatcher handler 的工具执行路径。
+        """
         with contextlib.suppress(Exception):
-            self._dispatcher.route_from_runtime_loop(
-                RuntimeActionRequest(
-                    action_type=RuntimeActionType.TOOL_INVOKE,
-                    source="ToolRuntimeMediator",
-                    parent_trace_id=tool_use_id,
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_input": dict(tool_input) if tool_input else {},
-                    },
-                ),
-                core_entrypoint="core.chat",
-                runtime_hook_name="handle_tool_use_response",
-                identity=self._identity,
+            from agent.evidence_recorder import record_evidence
+            record_evidence(
+                subsystem="tool",
+                operation="invoke_started",
+                phase="execution",
+                status="ok",
+                safe_summary=f"tool={tool_name} invoke_started",
+                content_persisted=False,
+                sensitive=False,
+                metadata={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                },
             )
 
     def _route_result(

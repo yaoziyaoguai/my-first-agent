@@ -117,11 +117,15 @@ class TestToolRuntimeMediatorContract:
     def test_t1_mediate_dispatches_tool_gate_before_execution(
         self, mediator_dispatcher, mediator_state
     ):
-        """TOOL_GATE 在 execute_single_tool 之前被 dispatch。
+        """TOOL_GATE / TOOL_RESULT dispatch，execute_single_tool 恰好一次。
 
-        验证：调用 mediate() 后 dispatcher.action_log 中 TOOL_GATE event
-        确在 TOOL_INVOKE 之前。使用 _safe_noop（registered → allowed）。
+        P1-2 冲突复核更新：_route_invoke 不再通过 dispatcher dispatch TOOL_INVOKE
+        （消除双重执行），改由 record_evidence 直接记录 invoke_started evidence。
+        验证 mediate() 后 dispatcher.action_log 产生 TOOL_GATE / TOOL_RESULT，
+        但不包含 TOOL_INVOKE；execute_single_tool 被恰好调一次。
         """
+        from unittest.mock import patch
+
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
         state, turn_state, messages = mediator_state
@@ -133,8 +137,16 @@ class TestToolRuntimeMediatorContract:
             messages=messages,
         )
 
-        block = _make_tool_use_block()
-        mediator.mediate(block)
+        with patch(
+            "agent.tool_runtime_mediator.execute_single_tool"
+        ) as mock_exec:
+            mock_exec.return_value = None
+            block = _make_tool_use_block()
+            mediator.mediate(block)
+
+        assert mock_exec.call_count == 1, (
+            f"execute_single_tool 应恰好被调一次，实际 {mock_exec.call_count} 次"
+        )
 
         log = mediator_dispatcher.action_log
         gate_events = [e for e in log if str(e.action_type) == "tool.gate"]
@@ -142,16 +154,22 @@ class TestToolRuntimeMediatorContract:
         result_events = [e for e in log if str(e.action_type) == "tool.result"]
 
         assert len(gate_events) >= 1, "mediate() 必须 dispatch TOOL_GATE"
-        assert len(invoke_events) >= 1, "mediate() 必须 dispatch TOOL_INVOKE"
+        assert len(invoke_events) == 0, (
+            "mediate() 不应 dispatch TOOL_INVOKE（_route_invoke 改用 record_evidence 避免双重执行）"
+        )
         assert len(result_events) >= 1, "mediate() 必须 dispatch TOOL_RESULT"
 
     def test_t2_tool_gate_dispatched_before_tool_invoke(
         self, mediator_dispatcher, mediator_state
     ):
-        """TOOL_GATE event 在 TOOL_INVOKE event 之前出现。
+        """TOOL_GATE event 在 TOOL_RESULT event 之前出现。
 
-        验证 dispatcher-mediated lifecycle 顺序：GATE → INVOKE → RESULT。
+        P1-2 冲突复核更新：_route_invoke 不再 dispatch TOOL_INVOKE，
+        生命周期顺序变为 GATE → (execute_single_tool via _route_invoke) → RESULT。
+        验证 dispatcher.action_log 中 GATE 在 RESULT 之前。
         """
+        from unittest.mock import patch
+
         from agent.tool_runtime_mediator import ToolRuntimeMediator
 
         state, turn_state, messages = mediator_state
@@ -163,33 +181,39 @@ class TestToolRuntimeMediatorContract:
             messages=messages,
         )
 
-        block = _make_tool_use_block()
-        mediator.mediate(block)
+        with patch(
+            "agent.tool_runtime_mediator.execute_single_tool"
+        ) as mock_exec:
+            mock_exec.return_value = None
+            block = _make_tool_use_block()
+            mediator.mediate(block)
+
+        assert mock_exec.call_count == 1, (
+            f"execute_single_tool 应恰好被调一次，实际 {mock_exec.call_count} 次"
+        )
 
         log = mediator_dispatcher.action_log
         gate_idx = next(
             i for i, e in enumerate(log) if str(e.action_type) == "tool.gate"
         )
-        invoke_idx = next(
-            i for i, e in enumerate(log) if str(e.action_type) == "tool.invoke"
-        )
         result_idx = next(
             i for i, e in enumerate(log) if str(e.action_type) == "tool.result"
         )
 
-        assert (
-            gate_idx < invoke_idx < result_idx
-        ), f"顺序错误: GATE@{gate_idx} → INVOKE@{invoke_idx} → RESULT@{result_idx}"
+        assert gate_idx < result_idx, (
+            f"顺序错误: GATE@{gate_idx} 应在 RESULT@{result_idx} 之前"
+        )
 
     def test_t3_handle_tool_use_response_uses_mediator_when_dispatcher_available(
         self, mediator_dispatcher, mediator_state, monkeypatch
     ):
         """handle_tool_use_response 在有 dispatcher 时走 mediator 路径。
 
-        验证：传入 runtime_action_dispatcher 后，工具执行路径经过 mediator，
-        dispatcher.action_log 产生 TOOL_GATE / TOOL_INVOKE / TOOL_RESULT。
+        P1-2 冲突复核更新：_route_invoke 不再 dispatch TOOL_INVOKE。
+        验证 dispatcher.action_log 产生 TOOL_GATE / TOOL_RESULT，
+        execute_single_tool 被恰好调一次。
         """
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from agent.response_handlers import handle_tool_use_response
 
@@ -203,13 +227,21 @@ class TestToolRuntimeMediatorContract:
         def fake_extract_text(content):
             return ""
 
-        result = handle_tool_use_response(
-            response,
-            state=state,
-            turn_state=turn_state,
-            messages=messages,
-            extract_text_fn=fake_extract_text,
-            runtime_action_dispatcher=mediator_dispatcher,
+        with patch(
+            "agent.tool_runtime_mediator.execute_single_tool"
+        ) as mock_exec:
+            mock_exec.return_value = None
+            result = handle_tool_use_response(
+                response,
+                state=state,
+                turn_state=turn_state,
+                messages=messages,
+                extract_text_fn=fake_extract_text,
+                runtime_action_dispatcher=mediator_dispatcher,
+            )
+
+        assert mock_exec.call_count == 1, (
+            f"execute_single_tool 应恰好被调一次，实际 {mock_exec.call_count} 次"
         )
 
         log = mediator_dispatcher.action_log
@@ -220,8 +252,8 @@ class TestToolRuntimeMediatorContract:
         assert len(gate_events) >= 1, (
             "handle_tool_use_response 在有 dispatcher 时必须 dispatch TOOL_GATE"
         )
-        assert len(invoke_events) >= 1, (
-            "handle_tool_use_response 在有 dispatcher 时必须 dispatch TOOL_INVOKE"
+        assert len(invoke_events) == 0, (
+            "handle_tool_use_response 不应 dispatch TOOL_INVOKE（避免双重执行）"
         )
         assert len(result_events) >= 1, (
             "handle_tool_use_response 在有 dispatcher 时必须 dispatch TOOL_RESULT"

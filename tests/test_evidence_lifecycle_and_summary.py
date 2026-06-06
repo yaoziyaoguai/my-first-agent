@@ -1765,3 +1765,235 @@ def test_handle_tool_confirmation_accept_uses_mediator_when_available():
     fake_mediator.mediate_pending.assert_called_once()
     # 直接 execute_pending_tool 不应被调用（fallback 不触发）
     mock_direct.assert_not_called()
+
+
+def test_pending_accept_constructs_mediator_on_demand_with_dispatcher():
+    """真实两轮 pending confirmation 路径：turn_state 无 mediator 但有 dispatcher。
+
+    验证审计 A 发现的缺陷已修复——chat() 每次调用创建新 turn_state，
+    _tool_mediator 在第二次调用时不存在。但 ctx.dispatcher 可用时，
+    handle_tool_confirmation 应即时构造 mediator，不 fallback 到 direct path。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from agent.confirmation.dispatcher import ConfirmationContext
+    from agent.confirmation.tool import handle_tool_confirmation
+
+    test_sid = f"test-odm-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_odm_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt"},
+    }
+    state.conversation = SimpleNamespace()
+    state.conversation.messages = []
+
+    # 新 turn_state — 没有 _tool_mediator（模拟第二次 chat() 调用）
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+    # 关键：不设置 _tool_mediator
+
+    fake_dispatcher = MagicMock()
+
+    def _continue(ts):
+        return "CONTINUE"
+
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test",
+        continue_fn=_continue,
+        dispatcher=fake_dispatcher,
+    )
+
+    with patch("agent.confirmation.tool.save_checkpoint"), patch(
+        "agent.tool_runtime_mediator.ToolRuntimeMediator"
+    ) as mock_mediator_cls, patch(
+        "agent.confirmation.tool.execute_pending_tool"
+    ) as mock_direct:
+        fake_mediator = MagicMock()
+        fake_mediator.mediate_pending.return_value = "on-demand result"
+        mock_mediator_cls.return_value = fake_mediator
+
+        result = handle_tool_confirmation("yes", ctx)
+
+    assert "CONTINUE" in result
+    # 应即时构造了 mediator
+    mock_mediator_cls.assert_called_once()
+    # mediator.mediate_pending 应被调用
+    fake_mediator.mediate_pending.assert_called_once()
+    # 直接 execute_pending_tool 不应被调用（不走 fallback）
+    mock_direct.assert_not_called()
+    # turn_state 上现在应有 _tool_mediator（被重新挂上）
+    assert getattr(turn_state, "_tool_mediator", None) is fake_mediator
+
+
+def test_pending_accept_falls_back_when_no_mediator_and_no_dispatcher():
+    """无 mediator 且无 dispatcher 时仍走 fallback direct path（向后兼容）。"""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from agent.confirmation.dispatcher import ConfirmationContext
+    from agent.confirmation.tool import handle_tool_confirmation
+
+    test_sid = f"test-nodisp-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.pending_tool = {
+        "tool_use_id": "toolu_nodisp_test",
+        "tool": "write_file",
+        "input": {"path": "test.txt"},
+    }
+    state.conversation = SimpleNamespace()
+    state.conversation.messages = []
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+    # 无 _tool_mediator，无 dispatcher
+
+    def _continue(ts):
+        return "CONTINUE"
+
+    ctx = ConfirmationContext(
+        state=state,
+        turn_state=turn_state,
+        client=None,
+        model_name="test",
+        continue_fn=_continue,
+        dispatcher=None,
+    )
+
+    with patch("agent.confirmation.tool.save_checkpoint"), patch(
+        "agent.confirmation.tool.execute_pending_tool"
+    ) as mock_direct:
+        mock_direct.return_value = None
+        result = handle_tool_confirmation("yes", ctx)
+
+    assert "CONTINUE" in result
+    # dispatcher 不可用，应走 fallback direct path
+    mock_direct.assert_called_once()
+
+
+def test_mediate_route_invoke_records_evidence_not_executes_via_dispatcher():
+    """mediate() 的 _route_invoke 改用 record_evidence，不再通过 dispatcher 执行工具。
+
+    验证：_route_invoke 不再调用 dispatcher.route_from_runtime_loop()
+    （避免 ToolInvokeHandler → execute_tool 导致双重执行）。
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from agent.tool_registry import TOOL_REGISTRY
+    from agent.tool_runtime_mediator import ToolRuntimeMediator
+
+    test_sid = f"test-ri-{uuid.uuid4().hex[:12]}"
+    set_session_context(
+        session_id=test_sid,
+        entry="plain",
+        provider_type="fake",
+        provider_model="test",
+    )
+    writer = _FakeEventLogWriter()
+    set_event_log_writer(writer)
+
+    fake_dispatcher = MagicMock()
+
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.pending_tool = None
+    state.conversation = SimpleNamespace()
+    state.conversation.messages = []
+
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+    turn_state.pending_tool_result = None
+    turn_state.tool_call_count = 0
+    turn_state.should_force_stop = False
+
+    mediator = ToolRuntimeMediator(
+        fake_dispatcher,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=[],
+    )
+
+    # 注册 write_file 到 registry（如果尚未注册）
+    from agent.tool_registry import register_tool
+    if "write_file" not in TOOL_REGISTRY:
+        register_tool(
+            name="write_file",
+            func=lambda path, content=None: "ok",
+            description="test",
+            parameters={"type": "object", "properties": {}},
+            risk_level="medium",
+        )
+
+    class FakeBlock:
+        id = "toolu_ri_test"
+        name = "write_file"
+        input = {"path": "/tmp/test_ri.txt"}
+
+    with patch("agent.tool_runtime_mediator.execute_single_tool") as mock_exec:
+        mock_exec.return_value = None
+        mediator.mediate(FakeBlock())
+
+    # execute_single_tool 应被调一次（不是零次，不是两次）
+    assert mock_exec.call_count == 1, (
+        f"execute_single_tool 应恰好被调一次，实际 {mock_exec.call_count} 次"
+    )
+
+    # dispatcher.route_from_runtime_loop 应只在 _route_gate 和 _route_result
+    # 被调用（TOOL_GATE + TOOL_RESULT），不应包含 TOOL_INVOKE
+    invoke_calls = [
+        c for c in fake_dispatcher.route_from_runtime_loop.call_args_list
+        if c[0][0].action_type == "tool.invoke"
+    ]
+    assert len(invoke_calls) == 0, (
+        f"dispatcher 不应被 _route_invoke 调用（避免双重执行），"
+        f"但实际调了 {len(invoke_calls)} 次"
+    )
+
+    # gate_decision evidence 应被记录
+    gate_events = [
+        e for e in writer.events
+        if e.get("data", {}).get("operation") == "gate_decision"
+    ]
+    assert len(gate_events) >= 1, "应至少有一条 gate_decision evidence"
+
+    # invoke_started evidence 应被记录（替代旧的 dispatcher TOOL_INVOKE）
+    invoke_events = [
+        e for e in writer.events
+        if e.get("data", {}).get("operation") == "invoke_started"
+    ]
+    assert len(invoke_events) >= 1, (
+        f"应至少有一条 invoke_started evidence，实际 {len(invoke_events)} 条"
+    )

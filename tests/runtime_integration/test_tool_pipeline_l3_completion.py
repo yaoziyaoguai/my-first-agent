@@ -743,11 +743,10 @@ class TestPhaseDPipelineErrorIsolation:
 
 
     def test_d3_failed_invoke_produces_error_execution_status(self):
-        """D3: invoke_result.status != "success" → TOOL_RESULT execution_status="error"。
+        """D3: TOOL_INVOKE evidence-only → TOOL_RESULT execution_status="not_executed"。
 
-        P2 focused remediation 核心测试——验证当 TOOL_INVOKE handler 抛异常
-        导致 invoke_result.status != "success" 时，TOOL_RESULT 的 execution_status
-        必须为 "error"，不得默认为 "success"。
+        P1-2 contract cleanup 后，TOOL_INVOKE handler 不执行工具函数；
+        即使注册工具本身会抛异常，也不能在 dispatcher path 触发执行。
 
         使用抛异常的注册工具模拟 invoke 失败场景。
         """
@@ -794,7 +793,7 @@ class TestPhaseDPipelineErrorIsolation:
                 dependencies=deps,
             )
 
-            # 验证 TOOL_RESULT 存在且 execution_status="error"
+            # 验证 TOOL_RESULT 存在且 execution_status="not_executed"
             result_entries = [
                 (m, r, res) for m, r, res in spy.captured
                 if r.action_type == RuntimeActionType.TOOL_RESULT
@@ -806,18 +805,18 @@ class TestPhaseDPipelineErrorIsolation:
 
             result_request = result_entries[0][1]
             exec_status = result_request.payload.get("execution_status")
-            assert exec_status == "error", (
-                f"invoke 失败时 TOOL_RESULT execution_status 应为 'error'，"
+            assert exec_status == "not_executed", (
+                f"evidence-only invoke 后 TOOL_RESULT execution_status 应为 "
+                f"'not_executed'，"
                 f"实际 {exec_status!r}"
             )
         finally:
             TOOL_REGISTRY.pop(throwing_name, None)
 
     def test_d4_successful_invoke_preserves_execution_status(self):
-        """D4: invoke_result.status == "success" → TOOL_RESULT 保留 payload execution_status。
+        """D4: evidence-only invoke → TOOL_RESULT 保留 not_executed 状态。
 
-        P2 focused remediation 正向验证——当 TOOL_INVOKE 成功时，TOOL_RESULT
-        的 execution_status 应保留 invoke payload 中的值（默认为 "success"）。
+        TOOL_INVOKE 成功表示 invoke_started evidence 被记录，不表示工具执行成功。
         """
         import agent.tools  # noqa: F401
         from agent.loop import LoopDependencies, _try_phase1_turn_end_runtime_action
@@ -843,7 +842,7 @@ class TestPhaseDPipelineErrorIsolation:
             dependencies=deps,
         )
 
-        # _safe_noop 成功 → TOOL_RESULT execution_status 应为 "success"
+        # _safe_noop 不在 TOOL_INVOKE handler 执行 → not_executed
         result_entries = [
             (m, r, res) for m, r, res in spy.captured
             if r.action_type == RuntimeActionType.TOOL_RESULT
@@ -852,8 +851,9 @@ class TestPhaseDPipelineErrorIsolation:
 
         result_request = result_entries[0][1]
         exec_status = result_request.payload.get("execution_status")
-        assert exec_status == "success", (
-            f"_safe_noop 成功时 execution_status 应为 'success'，"
+        assert exec_status == "not_executed", (
+            f"_safe_noop evidence-only invoke 后 execution_status 应为 "
+            f"'not_executed'，"
             f"实际 {exec_status!r}"
         )
 

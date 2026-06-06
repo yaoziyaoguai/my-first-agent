@@ -4,12 +4,13 @@
 Tool invoke 归属 Contract Section 2 "tool execution / confirmation handling" 分支点。
 它不是新 Anchor、不是新 capability milestone、不是新 runtime flow。
 tool.invoke = 接收 tool_name + tool_input → 查找 TOOL_REGISTRY → 执行工具函数 →
-返回 tool_output + evidence。
+返回 invoke_started evidence，不执行工具。
 
 测试分层：
 - L1 (subsystem_integration): handler 直接调用
 - L2 (harness_runtime_e2e): dispatcher.route()
-- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — verified in test_tool_pipeline_l3_completion.py
+- L3 (real_core_loop_runtime_e2e): route_from_runtime_loop()
+  verified in test_tool_pipeline_l3_completion.py
 
 架构依据：
 - docs/specs/tool-invoke-branch-behavior/SPEC.md
@@ -25,13 +26,9 @@ from agent.runtime_integration import (
     RuntimeActionDispatcher,
     RuntimeActionType,
 )
-from agent.runtime_integration.evidence import (
-    HARNESS_RUNTIME_E2E,
-    RuntimeActionModuleObserver,
-)
+from agent.runtime_integration.evidence import HARNESS_RUNTIME_E2E, RuntimeActionModuleObserver
 from agent.runtime_integration.schema import RuntimeActionRequest
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
-
 
 # ========== 测试辅助工厂 ==========
 
@@ -72,10 +69,10 @@ def _dispatch_tool_invoke(
 
 
 class TestInvokeHappyPath:
-    """Phase A: 工具通过 handler 被实际调用并返回结果。"""
+    """Phase A: TOOL_INVOKE handler 只记录 evidence-only marker。"""
 
     def test_a1_allowed_tool_invoked(self):
-        """A1: allowed tool 被成功 invoke，返回 tool_output。"""
+        """A1: allowed tool 不会通过 TOOL_INVOKE handler 执行。"""
         import agent.tools  # noqa: F401 - ensure tools registered
         dispatcher = _build_dispatcher()
 
@@ -87,15 +84,15 @@ class TestInvokeHappyPath:
 
         assert result.status == "success"
         payload = dict(result.payload)
-        assert payload["disposition"] == "invoked"
-        assert payload["tool_invoked"] is True
-        assert payload["tool_output"] == "noop: ok"
-        assert payload["execution_status"] == "success"
+        assert payload["disposition"] == "evidence_only"
+        assert payload["tool_invoked"] is False
+        assert payload["tool_output"] is None
+        assert payload["execution_status"] == "not_executed"
         evidence = dict(result.evidence)
         assert evidence["tool_name"] == "_safe_noop"
 
     def test_a2_tool_output_matches_actual_return(self):
-        """A2: tool_output 内容与工具实际返回值一致。"""
+        """A2: TOOL_INVOKE 不返回实际工具输出。"""
         import agent.tools  # noqa: F401
         dispatcher = _build_dispatcher()
 
@@ -105,11 +102,11 @@ class TestInvokeHappyPath:
         )
 
         payload = dict(result.payload)
-        assert payload["tool_output"] == "noop: ok"
-        assert "noop" in payload["tool_output"]
+        assert payload["tool_output"] is None
+        assert payload["execution_status"] == "not_executed"
 
     def test_a3_confirmable_noop_invoked(self):
-        """A3: confirmation="always" 的工具在 gate 放行后仍可 invoke。"""
+        """A3: confirmation="always" 工具也不会通过 TOOL_INVOKE 执行。"""
         import agent.tools  # noqa: F401
         dispatcher = _build_dispatcher()
 
@@ -121,9 +118,9 @@ class TestInvokeHappyPath:
 
         assert result.status == "success"
         payload = dict(result.payload)
-        assert payload["disposition"] == "invoked"
-        assert payload["tool_invoked"] is True
-        assert payload["tool_output"] == "confirmable_noop: ok"
+        assert payload["disposition"] == "evidence_only"
+        assert payload["tool_invoked"] is False
+        assert payload["tool_output"] is None
 
     def test_a4_dangerous_tool_function_invoked_low_risk(self):
         """A4: low risk 工具的 dangerous_tool_function_invoked 为 False。"""
@@ -381,8 +378,8 @@ class TestNegative:
 
             assert result.status == "success"  # handler 层面不崩溃
             payload = dict(result.payload)
-            assert payload["execution_status"] == "error"
-            assert payload["tool_invoked"] is True  # 函数确实被调用了
+            assert payload["execution_status"] == "not_executed"
+            assert payload["tool_invoked"] is False
         finally:
             TOOL_REGISTRY.pop("_test_broken_tool", None)
 

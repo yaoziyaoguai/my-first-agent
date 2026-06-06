@@ -1158,3 +1158,107 @@ def test_register_mcp_tools_is_only_registry_mutation_point() -> None:
     assert violations == {}, (
         f"Only agent/mcp.py may mutate TOOL_REGISTRY. Violations: {violations}"
     )
+
+
+def test_mediator_route_invoke_does_not_dispatch_tool_invoke() -> None:
+    """ToolRuntimeMediator._route_invoke 不通过 dispatcher dispatch TOOL_INVOKE。
+
+    P1-2 冲突复核关键修复：_route_invoke 改用 record_evidence 直接记录
+    invoke_started evidence，不再调用 dispatcher.route / route_from_runtime_loop
+    触发 ToolInvokeHandler → execute_tool() 双重执行路径。
+
+    此测试用源码检查钉死该架构边界。如果未来有人在 _route_invoke 中重新
+    加入 dispatcher route TOOL_INVOKE 调用，此测试必须失败。
+    """
+    mediator_path = PROJECT_ROOT / "agent" / "tool_runtime_mediator.py"
+    source = mediator_path.read_text()
+
+    # 提取 _route_invoke 方法体（从 def 行到下一个同缩进级别的 def / class）
+    import re
+    _invoke_re = (
+        r'def _route_invoke\(.*?\n(.*?)(?=\n    def |\n    @|\nclass |\Z)'
+    )
+    match = re.search(_invoke_re, source, re.DOTALL)
+    assert match is not None, "找不到 _route_invoke 方法"
+    method_body = match.group(0)
+
+    # 禁止在 _route_invoke 中通过 dispatcher 路由 TOOL_INVOKE
+    _forbidden_route = "dispatcher.route(RuntimeActionRequest"
+    _forbidden_route_loop = (
+        "dispatcher.route_from_runtime_loop(RuntimeActionRequest"
+    )
+    forbidden_patterns = [
+        (_forbidden_route, "dispatcher.route() 调用"),
+        (_forbidden_route_loop, "dispatcher.route_from_runtime_loop() 调用"),
+    ]
+    for pattern, desc in forbidden_patterns:
+        assert pattern not in method_body, (
+            f"_route_invoke 禁止 {desc}——必须只使用 record_evidence 直接记录 evidence，"
+            f"不得通过 dispatcher 触发 ToolInvokeHandler 工具执行"
+        )
+
+    # 必须包含 record_evidence 调用
+    assert "record_evidence" in method_body, (
+        "_route_invoke 必须调用 record_evidence 记录 invoke_started evidence"
+    )
+
+
+def test_dispatcher_tool_invoke_is_evidence_only_and_does_not_execute_tool(
+    monkeypatch,
+) -> None:
+    """直接 dispatch TOOL_INVOKE 也不能执行工具。
+
+    架构边界：TOOL_INVOKE 现在只表达 invoke_started evidence。真实工具执行
+    只能发生在 ToolRuntimeMediator → tool_executor 路径；即使未来有旧路径误把
+    TOOL_INVOKE dispatch 到 ToolInvokeHandler，也不能绕过 mediator 执行工具。
+    """
+    from agent.runtime_integration import (
+        ActionHandlerRegistry,
+        RuntimeActionDispatcher,
+        RuntimeActionRequest,
+        RuntimeActionType,
+    )
+    from agent.runtime_integration.evidence import RuntimeActionModuleObserver
+    from agent.runtime_integration.tool_invoke import ToolInvokeHandler
+    from agent.tool_registry import TOOL_REGISTRY, register_tool
+
+    tool_name = "_architecture_boundary_no_execute"
+    TOOL_REGISTRY.pop(tool_name, None)
+    @register_tool(
+        name=tool_name,
+        description="architecture boundary fixture",
+        parameters={"type": "object", "properties": {}},
+        risk_level="medium",
+        confirmation="never",
+    )
+    def _should_not_run():
+        return "should not run"
+
+    execute_calls: list[tuple[tuple, dict]] = []
+
+    def _fail_if_executed(*args, **kwargs):
+        execute_calls.append((args, kwargs))
+        raise AssertionError("TOOL_INVOKE dispatcher path must not execute tools")
+
+    monkeypatch.setattr("agent.tool_registry.execute_tool", _fail_if_executed)
+
+    try:
+        registry = ActionHandlerRegistry()
+        registry.register(RuntimeActionType.TOOL_INVOKE, ToolInvokeHandler())
+        dispatcher = RuntimeActionDispatcher(
+            registry=registry,
+            observer=RuntimeActionModuleObserver(),
+        )
+
+        result = dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.TOOL_INVOKE,
+            source="architecture_boundary_test",
+            parent_trace_id="trace:architecture-boundary",
+            payload={"tool_name": tool_name, "tool_input": {}},
+        ))
+
+        assert execute_calls == []
+        assert result.payload["tool_invoked"] is False
+        assert result.payload["execution_status"] == "not_executed"
+    finally:
+        TOOL_REGISTRY.pop(tool_name, None)

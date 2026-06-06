@@ -122,7 +122,9 @@ class TestSkillSelectViaToolMediator:
         result_events = [e for e in log if str(e.action_type) == "tool.result"]
 
         assert len(gate_events) >= 1, "mediate() 必须 dispatch TOOL_GATE"
-        assert len(invoke_events) >= 1, "mediate() 必须 dispatch TOOL_INVOKE"
+        assert len(invoke_events) == 0, (
+            "mediate() 不应 dispatch TOOL_INVOKE（_route_invoke 改用 record_evidence）"
+        )
         assert len(result_events) >= 1, "mediate() 必须 dispatch TOOL_RESULT"
 
     def test_i2_skill_select_updates_active_skill(self):
@@ -631,7 +633,9 @@ class TestEvidenceDistinction:
         assert "tool.gate" in action_types, (
             f"action_log 应含 tool.gate, 实际: {action_types}"
         )
-        assert "tool.invoke" in action_types
+        assert "tool.invoke" not in action_types, (
+            "mediate() 不应 dispatch TOOL_INVOKE（_route_invoke 改用 record_evidence）"
+        )
         assert "tool.result" in action_types
 
     def test_i11_no_direct_call_evidence(self):

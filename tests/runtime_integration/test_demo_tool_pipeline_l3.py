@@ -147,14 +147,14 @@ class TestDemoEchoTaskSummaryL3Pipeline:
         invoke_evidence = dict(invoke_result.evidence)
         assert invoke_evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
 
-        # 验证工具确实被调用了（非 not_found）
-        assert invoke_result.payload.get("disposition") == "invoked", (
-            f"demo.echo_task_summary 应被 invoked，"
+        # TOOL_INVOKE 只记录 invoke_started evidence，不执行工具
+        assert invoke_result.payload.get("disposition") == "evidence_only", (
+            f"demo.echo_task_summary 应只记录 evidence_only，"
             f"实际 {invoke_result.payload.get('disposition')!r}"
         )
-        # 验证 tool_output 有意义
-        tool_output = invoke_result.payload.get("tool_output", "")
-        assert len(tool_output) > 0, "demo.echo_task_summary 应有非空输出"
+        assert invoke_result.payload.get("tool_invoked") is False
+        assert invoke_result.payload.get("execution_status") == "not_executed"
+        assert invoke_result.payload.get("tool_output") is None
 
         # 验证 TOOL_RESULT 达到 L3
         result_entries = by_type.get("tool.result", [])

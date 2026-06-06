@@ -497,8 +497,12 @@ class TestRejectedGateNoToolExecution:
         invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
         assert len(invoke_calls) == 0
 
-    def test_allowed_tool_still_has_tool_invoke(self):
-        """对比: allowed tool 仍正常产生 TOOL_INVOKE dispatch。"""
+    def test_allowed_tool_no_longer_dispatches_tool_invoke(self):
+        """allowed tool 不再通过 dispatcher dispatch TOOL_INVOKE。
+
+        P1-2 修复后 _route_invoke 改用 record_evidence 直接记录 evidence，
+        不再调用 dispatcher.route_from_runtime_loop(TOOL_INVOKE)，避免双重执行。
+        """
         lifecycle = ActiveSkillLifecycle()
         lifecycle.activate(
             "demo", body="test",
@@ -520,10 +524,18 @@ class TestRejectedGateNoToolExecution:
         from agent.tool_executor import FORCE_STOP
         assert result != FORCE_STOP, "allowed tool 不应返回 FORCE_STOP"
 
+        # TOOL_INVOKE 不再通过 dispatcher dispatch
         invoke_calls = [c for c in spy.calls if c["action_type"] == "tool.invoke"]
-        assert len(invoke_calls) >= 1, (
-            f"allowed tool 应有 TOOL_INVOKE dispatch，got {invoke_calls}"
+        assert len(invoke_calls) == 0, (
+            f"allowed tool 不应通过 dispatcher dispatch TOOL_INVOKE"
+            f"（_route_invoke 改用 record_evidence），got {invoke_calls}"
         )
+
+        # TOOL_GATE 和 TOOL_RESULT 仍通过 dispatcher
+        gate_calls = [c for c in spy.calls if c["action_type"] == "tool.gate"]
+        result_calls = [c for c in spy.calls if c["action_type"] == "tool.result"]
+        assert len(gate_calls) >= 1, "mediate() 必须 dispatch TOOL_GATE"
+        assert len(result_calls) >= 1, "mediate() 必须 dispatch TOOL_RESULT"
 
     def test_execution_suppressed_in_rejected_gate_evidence(self):
         """TOOL_GATE rejected evidence 包含 execution_suppressed: True。

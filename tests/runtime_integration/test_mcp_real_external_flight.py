@@ -438,8 +438,8 @@ class TestMCPDestructiveToolBlock:
 class TestMCPInvocationMainPath:
     """MCP tool invocation 复用统一 Tool pipeline。"""
 
-    def test_mcp_tool_goes_through_gate_invoke_result(self):
-        """MCP tool 经过 TOOL_GATE → TOOL_INVOKE → TOOL_RESULT 完整管线。"""
+    def test_mcp_tool_goes_through_gate_invoke_result(self, monkeypatch):
+        """MCP tool 经过 TOOL_GATE → invoke_started evidence → TOOL_RESULT。"""
         from agent.core import chat
         from agent.provider.fake_provider import FakeProvider
         from agent.runtime_integration.tool_gate import ToolGateHandler
@@ -451,6 +451,17 @@ class TestMCPInvocationMainPath:
 
         # 注册测试 MCP tool（confirmation="never" 允许 gate 通过）
         registry_name = _register_test_mcp_tool_direct("demo", "hello", confirmation="never")
+        invoke_started_events: list[dict[str, Any]] = []
+
+        def _capture_record_evidence(**kwargs):
+            if kwargs.get("operation") == "invoke_started":
+                invoke_started_events.append(kwargs)
+            return {"data": kwargs}
+
+        monkeypatch.setattr(
+            "agent.evidence_recorder.record_evidence",
+            _capture_record_evidence,
+        )
 
         registry = ActionHandlerRegistry()
         registry.register(RuntimeActionType.TOOL_GATE, ToolGateHandler())
@@ -495,16 +506,19 @@ class TestMCPInvocationMainPath:
             )
         ]
         assert "tool.gate" in action_types, f"应有 TOOL_GATE，实际: {action_types}"
-        assert "tool.invoke" in action_types, f"应有 TOOL_INVOKE，实际: {action_types}"
         assert "tool.result" in action_types, f"应有 TOOL_RESULT，实际: {action_types}"
+        assert invoke_started_events, "应记录 invoke_started evidence"
+        assert any(
+            e.get("metadata", {}).get("tool_name") == registry_name
+            for e in invoke_started_events
+        ), f"invoke_started evidence 应包含 MCP tool={registry_name}"
 
-        # 验证顺序
+        # 新语义：真实执行由 mediator → tool_executor 完成；TOOL_INVOKE 不再
+        # 作为 dispatcher 执行入口参与顺序断言。只验证主路径 gate 在 result 前。
         gate_idx = action_types.index("tool.gate")
-        invoke_idx = action_types.index("tool.invoke")
         result_idx = action_types.index("tool.result")
-        assert gate_idx < invoke_idx < result_idx, (
-            f"顺序应为 GATE<INVOKE<RESULT，实际 "
-            f"GATE={gate_idx} INVOKE={invoke_idx} RESULT={result_idx}"
+        assert gate_idx < result_idx, (
+            f"顺序应为 GATE<RESULT，实际 GATE={gate_idx} RESULT={result_idx}"
         )
 
     def test_mcp_tool_with_confirmation_always_blocked_at_gate(self):
@@ -645,7 +659,10 @@ class TestMCPNotFakeable:
 
             def route_from_runtime_loop(self, request, **kwargs: object):
                 result = self._real.route_from_runtime_loop(request)
-                if request.action_type == RuntimeActionType.TOOL_INVOKE:
+                if request.action_type in (
+                    RuntimeActionType.TOOL_GATE,
+                    RuntimeActionType.TOOL_RESULT,
+                ):
                     pipeline_triggered.append(True)
                 return result
 
@@ -657,8 +674,9 @@ class TestMCPNotFakeable:
         chat("hello", provider=FakeProvider(), runtime_action_dispatcher=spy,
             tool_gate_tool_name=registry_name)
 
-        assert len(pipeline_triggered) > 0, (
-            "MCP tool 应经过 TOOL_INVOKE pipeline——不是 direct-call-only"
+        assert len(pipeline_triggered) >= 2, (
+            "MCP tool 应经过 ToolRuntimeMediator 的 gate/result pipeline，"
+            "不是 direct-call-only"
         )
 
     def test_not_no_crash__has_business_assertions(self):

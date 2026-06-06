@@ -4,7 +4,7 @@ error 是 TOOL_INVOKE 的 error-path branch behavior。
 归属已有 TOOL_INVOKE branch point，不新增 Anchor、不新增 branch point。
 
 测试分层：
-- L3: core.chat() → TOOL_GATE(allowed) → TOOL_INVOKE(execution_status="error")
+- L3: core.chat() → TOOL_GATE(allowed) → TOOL_INVOKE(evidence-only)
 - L2: dispatcher.route() 直接调用
 
 架构依据：
@@ -83,7 +83,7 @@ def _register_error_tool():
     """注册一个 gate 放行但 invoke 失败的工具。
 
     confirmation="never" → TOOL_GATE 返回 allowed
-    函数体内抛 ValueError → TOOL_INVOKE 返回 execution_status="error"
+    TOOL_INVOKE 不执行函数体，因此返回 execution_status="not_executed"
     """
     from agent.tool_registry import register_tool
 
@@ -166,15 +166,15 @@ class TestCoreChatToolInvokeErrorL3:
         assert evidence.get("dispatcher_origin") == "runtime_loop"
         assert evidence.get("runtime_loop_invoked") is True
 
-        # TOOL_INVOKE payload: execution_status="error"
+        # TOOL_INVOKE payload: evidence-only，不执行工具
         invoke_payload = dict(invoke_result.payload)
-        assert invoke_payload.get("disposition") == "invoked", (
-            f"error path disposition 应为 'invoked'，"
+        assert invoke_payload.get("disposition") == "evidence_only", (
+            f"error path disposition 应为 'evidence_only'，"
             f"实际 {invoke_payload.get('disposition')!r}"
         )
-        assert invoke_payload.get("tool_invoked") is True
-        assert invoke_payload.get("execution_status") == "error", (
-            f"execution_status 应为 'error'，"
+        assert invoke_payload.get("tool_invoked") is False
+        assert invoke_payload.get("execution_status") == "not_executed", (
+            f"execution_status 应为 'not_executed'，"
             f"实际 {invoke_payload.get('execution_status')!r}"
         )
 
@@ -220,9 +220,10 @@ class TestDirectDispatcherToolInvokeErrorL2:
         assert evidence.get("dispatcher_origin") == "direct_dispatcher"
         assert evidence.get("core_entrypoint") != "core.chat"
 
-        # error path 仍被正确记录
+        # direct TOOL_INVOKE 只记录 evidence-only marker
         invoke_payload = dict(result.payload)
-        assert invoke_payload.get("execution_status") == "error"
+        assert invoke_payload.get("execution_status") == "not_executed"
+        assert invoke_payload.get("tool_invoked") is False
 
 
 # ===== T3: no real API =====
@@ -257,4 +258,5 @@ class TestNoRealAPIOrEnv:
         evidence = dict(invoke_result.evidence)
         assert evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
         invoke_payload = dict(invoke_result.payload)
-        assert invoke_payload.get("execution_status") == "error"
+        assert invoke_payload.get("execution_status") == "not_executed"
+        assert invoke_payload.get("tool_invoked") is False

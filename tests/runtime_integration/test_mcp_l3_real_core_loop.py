@@ -342,7 +342,8 @@ class TestCoreChatMCPL3:
         invoke_result = invoke_entries[0][2]
         invoke_evidence = dict(invoke_result.evidence)
         assert invoke_result.status == "success"
-        assert invoke_evidence.get("tool_invoked") is True
+        assert invoke_evidence.get("tool_invoked") is False
+        assert invoke_evidence.get("execution_status") == "not_executed"
         assert invoke_evidence.get("capability") == "mcp_tool"
 
         # TOOL_RESULT 特定验证：MCP 结果被格式化
@@ -515,7 +516,8 @@ class TestHookLevelMCPL3:
         invoke_evidence = dict(invoke_entries[0][2].evidence)
         assert invoke_evidence.get("evidence_level") == REAL_CORE_LOOP_RUNTIME_E2E
         assert invoke_entries[0][2].status == "success"
-        assert invoke_evidence.get("tool_invoked") is True
+        assert invoke_evidence.get("tool_invoked") is False
+        assert invoke_evidence.get("execution_status") == "not_executed"
 
         # TOOL_RESULT: 必须存在且为 L3
         result_entries = by_type.get("tool.result", [])

@@ -207,16 +207,15 @@ def _tool_result_format_adapter(payload: Mapping[str, Any]) -> Any:
 
 
 def _tool_invoke_adapter(payload: Mapping[str, Any]) -> Any:
-    """Catalog-owned adapter for tool execution。
+    """Catalog-owned adapter for TOOL_INVOKE evidence-only lookup。
 
-    中文学习边界：这个 adapter 是 execute_tool() 的 catalog-owned wrapper。
-    handler 不直接调用 tool_registry.execute_tool()，而是通过
-    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    中文学习边界：TOOL_INVOKE 不再是工具执行入口。这个 adapter 只能读取
+    TOOL_REGISTRY 元数据，不能调用 execute_tool()；真实工具执行只能通过
+    ToolRuntimeMediator → tool_executor 发生。
     """
-    from agent.tool_registry import TOOL_REGISTRY, execute_tool
+    from agent.tool_registry import TOOL_REGISTRY
 
     tool_name = str(payload.get("tool_name") or "")
-    tool_input = dict(payload.get("tool_input") or {})
 
     if tool_name not in TOOL_REGISTRY:
         return {
@@ -228,16 +227,10 @@ def _tool_invoke_adapter(payload: Mapping[str, Any]) -> Any:
         }
 
     info = TOOL_REGISTRY[tool_name]
-    result = execute_tool(tool_name, tool_input)
-    # "[工具" 匹配本地工具错误格式（如 "[工具执行出错]"）。
-    # "错误：MCP 工具" 匹配 MCPCallResult.to_legacy_tool_result() 的
-    # MCP 错误消息格式："错误：MCP 工具 {server}/{tool} 执行失败：{detail}"。
-    # 两种格式都必须被识别为 error，否则对应工具错误会被 silently classified as success。
-    is_error = isinstance(result, str) and ("[工具" in result or "错误：MCP 工具" in result)
     return {
         "found": True,
-        "tool_output": result,
-        "execution_status": "error" if is_error else "success",
+        "tool_output": None,
+        "execution_status": "not_executed",
         "risk_level": info.get("risk_level", "medium"),
         "capability": info.get("capability", ""),
     }
@@ -525,12 +518,12 @@ class RuntimeActionTargetCatalog:
             "tool.invoke",
             "agent.runtime_integration.tool_invoke.ToolInvokeHandler",
             "ToolRegistry",
-            operation="execute_tool",
-            invocation_adapter_id="ToolRegistry.execute_tool",
-            implementation_id="agent.tool_registry.execute_tool",
+            operation="lookup_invoke_metadata",
+            invocation_adapter_id="ToolRegistry.lookup_invoke_metadata",
+            implementation_id="agent.tool_registry.TOOL_REGISTRY.lookup",
             adapter=_tool_invoke_adapter,
-            function_called="execute_tool",
-            call_signature="execute_tool(tool_name, tool_input)",
+            function_called="ToolRegistry.lookup_invoke_metadata",
+            call_signature="lookup_invoke_metadata(tool_name: str)",
         ),
         _descriptor(
             "tool.request",

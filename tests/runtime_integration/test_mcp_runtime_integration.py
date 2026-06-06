@@ -221,23 +221,25 @@ class TestMCPToolGate:
 
 
 class TestMCPToolInvoke:
-    """Phase B: 验证 MCP 工具通过 TOOL_INVOKE handler 被实际执行。"""
+    """Phase B: 验证 TOOL_INVOKE handler 只记录 evidence。"""
 
     def test_b1_allowed_mcp_tool_invoked_via_dispatcher(self):
-        """B1: MCP 工具通过 TOOL_INVOKE handler 被实际执行，返回正确结果。"""
-        registry_name = _register_fake_mcp_tool("demo_b1", "hello", result_content="bonjour from MCP")
+        """B1: MCP 工具通过 TOOL_INVOKE handler 不会被执行。"""
+        registry_name = _register_fake_mcp_tool(
+            "demo_b1", "hello", result_content="bonjour from MCP"
+        )
         dispatcher = _build_mcp_dispatcher()
 
         result = _dispatch_tool_invoke(dispatcher, registry_name)
 
         assert result.status == "success"
         payload = dict(result.payload)
-        assert payload["disposition"] == "invoked"
-        assert payload["tool_invoked"] is True
-        assert "bonjour from MCP" in str(payload["tool_output"])
-        assert payload["execution_status"] == "success"
+        assert payload["disposition"] == "evidence_only"
+        assert payload["tool_invoked"] is False
+        assert payload["tool_output"] is None
+        assert payload["execution_status"] == "not_executed"
         # forbidden
-        assert payload["tool_invoked"] is not False
+        assert payload["tool_invoked"] is not True
 
     def test_b2_mcp_tool_not_found_in_tool_invoke(self):
         """B2: 不在 TOOL_REGISTRY 中的 MCP 工具名返回 not_found。"""
@@ -260,7 +262,7 @@ class TestMCPToolInvoke:
         assert payload["dangerous_tool_function_invoked"] is True
 
     def test_b4_mcp_tool_external_side_effects_false(self):
-        """B4: MCP 工具的 external_side_effects=False（mcp_tool 不在 _EXTERNAL_SIDE_EFFECT_CAPABILITIES 中）。"""
+        """B4: MCP 工具不会被标为 external_side_effects。"""
         registry_name = _register_fake_mcp_tool("demo_b4", "hello")
         dispatcher = _build_mcp_dispatcher()
 
@@ -321,7 +323,9 @@ class TestMCPOrchestratorPipeline:
         """D1: orchestrator 串联完整管线，三个 action 都在 action_log 中。"""
         from agent.runtime_integration.mcp_tool_orchestrator import run_mcp_tool_pipeline
 
-        registry_name = _register_fake_mcp_tool("demo_d1", "hello", result_content="pipeline result")
+        registry_name = _register_fake_mcp_tool(
+            "demo_d1", "hello", result_content="pipeline result"
+        )
         dispatcher = _build_mcp_dispatcher()
 
         result = run_mcp_tool_pipeline(dispatcher, registry_name, {})
@@ -334,15 +338,16 @@ class TestMCPOrchestratorPipeline:
         # invoke_result
         assert result.invoke_result is not None
         invoke_payload = dict(result.invoke_result.payload)
-        assert invoke_payload["tool_invoked"] is True
-        assert "pipeline result" in str(invoke_payload["tool_output"])
+        assert invoke_payload["tool_invoked"] is False
+        assert invoke_payload["tool_output"] is None
+        assert invoke_payload["execution_status"] == "not_executed"
 
         # result_feedback
         assert result.result_feedback is not None
         feedback_payload = dict(result.result_feedback.payload)
-        assert feedback_payload["disposition"] == "injected"
+        assert feedback_payload["disposition"] == "empty"
         prompt_section = str(feedback_payload.get("prompt_section", ""))
-        assert prompt_section != ""
+        assert "无输出" in prompt_section
 
         # 三个 action 都在 action_log 中
         assert result.action_log_entries == 3
@@ -424,7 +429,9 @@ class TestMCPEdgeCases:
         result = _dispatch_tool_invoke(dispatcher, registry_name, {})
 
         payload = dict(result.payload)
-        assert payload["disposition"] == "invoked"
+        assert payload["disposition"] == "evidence_only"
+        assert payload["tool_invoked"] is False
+        assert payload["execution_status"] == "not_executed"
 
     def test_e4_mcp_tool_name_with_special_chars(self):
         """E4: mcp_registry_tool_name 生成的名称正确处理。
@@ -443,15 +450,8 @@ class TestMCPEdgeCases:
         assert result.status in ("success", "confirmation_required", "rejected")
 
 
-    def test_e5_mcp_tool_error_classified_as_error(self):
-        """E5: MCP 工具错误结果被正确分类为 error status。
-
-        P2 bug 修复验证：_tool_invoke_adapter 的 error detection 不能只靠
-        "[工具" 字符串匹配。MCP 错误消息格式为：
-          "错误：MCP 工具 {server}/{tool} 执行失败：{detail}"
-        其中不包含 "[工具"，修复前会被 silently classified as success。
-        修复后应正确识别为 execution_status="error"。
-        """
+    def test_e5_mcp_tool_error_is_not_executed_by_tool_invoke(self):
+        """E5: MCP 工具错误不会在 TOOL_INVOKE dispatcher path 执行。"""
         # 注册返回 is_error=True 的 MCP 工具，模拟 MCP server 错误
         registry_name = _register_fake_mcp_tool(
             "demo_e5", "hello",
@@ -463,15 +463,11 @@ class TestMCPEdgeCases:
 
         result = _dispatch_tool_invoke(dispatcher, registry_name, {})
 
-        # 修复前：execution_status="success"（"[工具" 不匹配 MCP 错误格式）
-        # 修复后：execution_status="error"
         payload = dict(result.payload)
-        assert payload["disposition"] == "invoked"
-        assert payload["tool_invoked"] is True
-        assert payload["execution_status"] == "error", (
-            f"P2 bug: MCP error 未被识别，execution_status={payload['execution_status']}，"
-            f"tool_output={payload['tool_output'][:100]!r}"
-        )
+        assert payload["disposition"] == "evidence_only"
+        assert payload["tool_invoked"] is False
+        assert payload["tool_output"] is None
+        assert payload["execution_status"] == "not_executed"
 
 
 # ========== Phase F: Regression Isolation (L2) ==========
@@ -509,7 +505,9 @@ class TestMCPRegression:
         )
         assert invoke_result.status == "success"
         invoke_payload = dict(invoke_result.payload)
-        assert invoke_payload["disposition"] == "invoked"
+        assert invoke_payload["disposition"] == "evidence_only"
+        assert invoke_payload["tool_invoked"] is False
+        assert invoke_payload["execution_status"] == "not_executed"
 
         feedback_result = dispatcher.route(
             RuntimeActionRequest(

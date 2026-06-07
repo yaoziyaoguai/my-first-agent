@@ -29,8 +29,21 @@ from agent.task_runtime import (
     advance_current_step_if_needed,
     is_current_step_completed,
 )
-from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_single_tool
+from agent.tool_executor import (
+    AWAITING_USER,
+    FORCE_STOP,
+    TRANSITION_DENIED,
+    execute_single_tool,
+)
 from agent.tool_registry import is_meta_tool
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TaskTransitionResult,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
@@ -112,6 +125,38 @@ def _text_preview(text: str) -> str:
     if len(compact) <= TEXT_PREVIEW_LIMIT:
         return compact
     return compact[:TEXT_PREVIEW_LIMIT] + "..."
+
+
+def _apply_preflight_transition(
+    state: Any,
+    request: TaskTransitionRequest,
+) -> TaskTransitionResult:
+    """先只读验证，再用同一个 resolution 执行 transition。"""
+    preflight = validate_task_transition(state, request)
+    if not preflight.allowed:
+        return preflight
+    return apply_task_transition(state, request, preflight=preflight)
+
+
+def _record_end_turn_observation(observation: dict[str, Any]) -> None:
+    """记录 end_turn 观测；需要 transition 的分支只能在 apply allowed 后调用。"""
+    log_event(
+        "model.response_received",
+        event_source="model",
+        event_payload=observation,
+        event_channel="end_turn",
+    )
+    _record_runtime_evidence(
+        "model_response", "ok",
+        f"model_response channel=end_turn stop_reason={observation.get('stop_reason')}",
+        metadata=observation,
+    )
+    log_event(
+        "model.end_turn",
+        event_source="model",
+        event_payload=observation,
+        event_channel="end_turn",
+    )
 
 
 def _response_observation(
@@ -347,6 +392,8 @@ def handle_tool_use_response(
                 turn_context=turn_context,
                 messages=messages,
             )
+        if result == TRANSITION_DENIED:
+            return "[系统] request_user_input 状态迁移失败，本轮已停止且未提交等待状态。"
         if result == FORCE_STOP:
             # Loop 4.2: 用户可见 tool blocked 事件
             if turn_state.on_runtime_event is not None:
@@ -480,6 +527,49 @@ def _maybe_advance_step(state: Any) -> str | None:
         )
         return None
 
+    if state.task.current_plan:
+        # 每步确认分支先完成 transition preflight；denied 时不能先写 observer、
+        # checkpoint 或 step index。其他 step advance/done 路径由共享 helper 处理。
+        _plan_dict = state.task.current_plan
+        if "plan_id" not in _plan_dict or "nodes" not in _plan_dict:
+            plan = Plan.model_validate(state.task.current_plan)
+            idx = state.task.current_step_index
+            if idx < len(plan.steps) - 1 and state.task.confirm_each_step:
+                request = TaskTransitionRequest(
+                    event=TransitionEvent.STEP_CONFIRMATION_REQUIRED,
+                    owner="response_handlers.maybe_advance_step",
+                    expected_from_status="running",
+                )
+                transition = _apply_preflight_transition(state, request)
+                if not transition.allowed:
+                    return f"[系统] step confirmation 状态迁移失败: {transition.reason}"
+                assert transition.checkpoint_action is CheckpointAction.SAVE
+
+                log_event(
+                    "runtime.progress_detected",
+                    event_source="runtime",
+                    event_payload={
+                        **_current_step_fields(state),
+                        "current_step_index_before": before_index,
+                        "mark_step_complete_called": True,
+                    },
+                    event_channel="progress",
+                )
+                _record_runtime_evidence(
+                    "progress", "detected",
+                    "step progress detected via mark_step_complete",
+                    metadata={"step_index_before": before_index},
+                )
+                save_checkpoint(state)
+                return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
+
+    transition = advance_current_step_if_needed(
+        state,
+        owner="response_handlers.maybe_advance_step",
+    )
+    if not transition.allowed:
+        return f"[系统] step advance 状态迁移失败: {transition.reason}"
+
     log_event(
         "runtime.progress_detected",
         event_source="runtime",
@@ -496,44 +586,6 @@ def _maybe_advance_step(state: Any) -> str | None:
         metadata={"step_index_before": before_index},
     )
 
-    if state.task.current_plan:
-        # 当 current_plan 是 ActionPlan 格式时，不进入旧 Plan step 推进逻辑。
-        _plan_dict = state.task.current_plan
-        if "plan_id" in _plan_dict and "nodes" in _plan_dict:
-            pass
-        else:
-            plan = Plan.model_validate(state.task.current_plan)
-            idx = state.task.current_step_index
-
-            if idx < len(plan.steps) - 1:
-                if state.task.confirm_each_step:
-                    state.task.status = "awaiting_step_confirmation"
-                    save_checkpoint(state)
-                    return "\n[请确认: y 进入下一步 / n 停止任务 / 输入意见以重规划]"
-                advance_current_step_if_needed(state)
-                log_event(
-                    "runtime.progress_applied",
-                    event_source="runtime",
-                    event_payload={
-                        **_current_step_fields(state),
-                        "current_step_index_before": before_index,
-                        "current_step_index_after": state.task.current_step_index,
-                        "should_continue_loop": True,
-                    },
-                    event_channel="progress",
-                )
-                _record_runtime_evidence(
-                    "progress", "applied",
-                    f"step advanced {before_index} → {state.task.current_step_index}",
-                    metadata={
-                        "step_index_before": before_index,
-                        "step_index_after": state.task.current_step_index,
-                        "should_continue_loop": True,
-                    },
-                )
-                return None
-
-    advance_current_step_if_needed(state)
     log_event(
         "runtime.progress_applied",
         event_source="runtime",
@@ -556,16 +608,18 @@ def _maybe_advance_step(state: Any) -> str | None:
         },
     )
 
-    if state.task.status == "done":
-        clear_checkpoint()
+    if transition.checkpoint_action is CheckpointAction.CLEAR:
         state.conversation.messages.append({
             "role": "assistant",
             "content": [{"type": "text", "text": "好的，任务已完成。"}],
         })
+        clear_checkpoint()
         state.reset_task()
         return "好的，任务已完成。"
 
-    return ""
+    assert transition.checkpoint_action is CheckpointAction.SAVE
+    save_checkpoint(state)
+    return None
 
 
 def _fill_placeholder_results(
@@ -657,27 +711,9 @@ def handle_end_turn_response(
         state=state,
         extract_text_fn=extract_text_fn,
     )
-    log_event(
-        "model.response_received",
-        event_source="model",
-        event_payload=observation,
-        event_channel="end_turn",
-    )
-    _record_runtime_evidence(
-        "model_response", "ok",
-        f"model_response channel=end_turn stop_reason={observation.get('stop_reason')}",
-        metadata=observation,
-    )
-    log_event(
-        "model.end_turn",
-        event_source="model",
-        event_payload=observation,
-        event_channel="end_turn",
-    )
-    state.task.consecutive_max_tokens = 0
-
-    _append_assistant_response(messages, response)
-
+    text_content = extract_text_fn(response.content)
+    step_completed_before = is_current_step_completed(state)
+    needs_collect_input = False
     if state.task.current_plan:
         # ActionPlan 格式（plan_id + nodes）不进入旧 Plan step 逻辑，
         # 避免 Plan.model_validate 对 ActionPlan dict 报 Field required。
@@ -686,10 +722,121 @@ def handle_end_turn_response(
             plan = Plan.model_validate(state.task.current_plan)
             idx = state.task.current_step_index
             current_step = plan.steps[idx] if 0 <= idx < len(plan.steps) else None
-            if current_step and current_step.step_type in USER_INPUT_STEP_TYPES:
-                state.task.status = "awaiting_user_input"
-                save_checkpoint(state)
-                return "\n[请补充上面的信息后继续]"
+            needs_collect_input = bool(
+                current_step and current_step.step_type in USER_INPUT_STEP_TYPES
+            )
+
+    projected_no_progress = state.task.consecutive_end_turn_without_progress + 1
+    model_event = None
+    pending_request: PendingUserInputRequest | None = None
+    if (
+        not needs_collect_input
+        and state.task.current_plan
+        and state.task.status == "running"
+        and not step_completed_before
+    ):
+        model_event = resolve_end_turn_output(text_content, projected_no_progress)
+        if (
+            model_event is not None
+            and model_event.event_type in (
+                EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
+                EVENT_RUNTIME_NO_PROGRESS,
+            )
+        ):
+            awaiting_kind = (
+                "fallback_question"
+                if model_event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
+                else "no_progress"
+            )
+            pending_request = {
+                "awaiting_kind": awaiting_kind,
+                "question": (
+                    text_content[:500] if text_content
+                    else "[模型 end_turn 但未声明步骤完成；请你介入]"
+                ),
+                "why_needed": (
+                    "模型未调用 request_user_input；为防 loop 死循环，"
+                    "系统强制暂停等你回应"
+                ),
+                "options": [],
+                "context": "",
+                "tool_use_id": "",
+                "step_index": state.task.current_step_index,
+            }
+
+    if needs_collect_input or pending_request is not None:
+        request = TaskTransitionRequest(
+            event=TransitionEvent.USER_INPUT_REQUIRED,
+            owner=(
+                "response_handlers.collect_input_required"
+                if needs_collect_input
+                else "response_handlers.end_turn_user_input_required"
+            ),
+            expected_from_status="running",
+        )
+        transition = _apply_preflight_transition(state, request)
+        if not transition.allowed:
+            return f"[系统] user input 状态迁移失败: {transition.reason}"
+        assert transition.checkpoint_action is CheckpointAction.SAVE
+
+        # transition 已成功后才提交 message/counter/pending/observer/checkpoint。
+        _append_assistant_response(messages, response)
+        state.task.consecutive_max_tokens = 0
+
+        if needs_collect_input:
+            _record_end_turn_observation(observation)
+            save_checkpoint(state)
+            return "\n[请补充上面的信息后继续]"
+
+        state.task.consecutive_end_turn_without_progress = projected_no_progress
+        state.task.pending_user_input_request = pending_request
+        _record_end_turn_observation(observation)
+        log_event(
+            "runtime.end_turn_without_completion",
+            event_source="runtime",
+            event_payload={
+                **_current_step_fields(state),
+                "had_text_output": bool(text_content),
+                "had_tool_use": False,
+                "mark_step_complete_called": False,
+                "request_user_input_called": False,
+            },
+            event_channel="assistant_text",
+        )
+        _record_runtime_evidence(
+            "end_turn", "no_completion",
+            f"end_turn without step completion (consecutive={projected_no_progress})",
+            metadata={
+                "had_text_output": bool(text_content),
+                "consecutive_end_turn_without_progress": projected_no_progress,
+            },
+        )
+        assert model_event is not None
+        _log_model_event(model_event, event_channel="assistant_text")
+        log_event(
+            "runtime.no_progress_detected",
+            event_source="runtime",
+            event_payload={
+                **_current_step_fields(state),
+                "no_progress_reason": model_event.event_type,
+                "text_preview": _text_preview(text_content),
+            },
+            event_channel="assistant_text",
+        )
+        _record_runtime_evidence(
+            "progress", "no_progress",
+            f"no progress in end_turn: {model_event.event_type}",
+            metadata={
+                "no_progress_reason": model_event.event_type,
+                "consecutive_end_turn_without_progress": projected_no_progress,
+            },
+        )
+        save_checkpoint(state)
+        return ""
+
+    _record_end_turn_observation(observation)
+    state.task.consecutive_max_tokens = 0
+    _append_assistant_response(messages, response)
 
     # 步骤推进逻辑统一走 _maybe_advance_step——它读 mark_step_complete 日志判完成，
     # 而不是关键词匹配。end_turn 这条路径通常用于：
@@ -699,6 +846,9 @@ def handle_end_turn_response(
     advance_reply = _maybe_advance_step(state)
     if advance_reply is not None:
         return advance_reply
+    if step_completed_before:
+        # 本轮已经产生真实 step progress，不能再把同一响应计为 no-progress。
+        return None
 
     if state.task.current_plan and state.task.status == "running":
         # 双层兜底：模型 end_turn 但没调任何工具、也没 mark_step_complete。
@@ -710,8 +860,7 @@ def handle_end_turn_response(
         #         强制停。覆盖陈述句问题之类启发式漏判的场景。
         # no_progress 是安全阀，不是正常完成机制；正常路径仍应由
         # mark_step_complete / request_user_input 等结构化信号驱动。
-        text_content = extract_text_fn(response.content)
-        state.task.consecutive_end_turn_without_progress += 1
+        state.task.consecutive_end_turn_without_progress = projected_no_progress
         log_event(
             "runtime.end_turn_without_completion",
             event_source="runtime",
@@ -731,7 +880,7 @@ def handle_end_turn_response(
             metadata={
                 "had_text_output": bool(text_content),
                 "consecutive_end_turn_without_progress": (
-                    state.task.consecutive_end_turn_without_progress
+                    projected_no_progress
                 ),
             },
         )
@@ -739,67 +888,8 @@ def handle_end_turn_response(
         # end_turn 没有 tool_use 结构：text_requested_user_input 是协议外文本兜底，
         # runtime.no_progress 是 runtime 观察到的无进展事件。当前仍由本 handler
         # 负责真正切 awaiting_user_input；resolver 只提供事件分类。
-        model_event = resolve_end_turn_output(
-            text_content,
-            state.task.consecutive_end_turn_without_progress,
-        )
         if model_event is not None:
             _log_model_event(model_event, event_channel="assistant_text")
-
-        if (
-            model_event is not None
-            and model_event.event_type in (
-                EVENT_MODEL_TEXT_REQUESTED_USER_INPUT,
-                EVENT_RUNTIME_NO_PROGRESS,
-            )
-        ):
-            log_event(
-                "runtime.no_progress_detected",
-                event_source="runtime",
-                event_payload={
-                    **_current_step_fields(state),
-                    "no_progress_reason": model_event.event_type,
-                    "text_preview": _text_preview(text_content),
-                },
-                event_channel="assistant_text",
-            )
-            _record_runtime_evidence(
-                "progress", "no_progress",
-                f"no progress in end_turn: {model_event.event_type}",
-                metadata={
-                    "no_progress_reason": model_event.event_type,
-                    "consecutive_end_turn_without_progress": (
-                        state.task.consecutive_end_turn_without_progress
-                    ),
-                },
-            )
-            # awaiting_kind 只标记"为什么 runtime 正在等用户"，不改变 status。
-            # fallback_question 来自模型普通文本求助；no_progress 来自 runtime 观察到
-            # 连续无进展。两者恢复后都仍按 runtime_user_input_answer 处理。
-            awaiting_kind = (
-                "fallback_question"
-                if model_event.event_type == EVENT_MODEL_TEXT_REQUESTED_USER_INPUT
-                else "no_progress"
-            )
-            pending_request: PendingUserInputRequest = {
-                "awaiting_kind": awaiting_kind,
-                "question": (
-                    text_content[:500] if text_content
-                    else "[模型 end_turn 但未声明步骤完成；请你介入]"
-                ),
-                "why_needed": (
-                    "模型未调用 request_user_input；为防 loop 死循环，"
-                    "系统强制暂停等你回应"
-                ),
-                "options": [],
-                "context": "",
-                "tool_use_id": "",
-                "step_index": state.task.current_step_index,
-            }
-            state.task.pending_user_input_request = pending_request
-            state.task.status = "awaiting_user_input"
-            save_checkpoint(state)
-            return ""
 
         # 第一次：温和软驱动（保留现有"模型在思考、注入提示推它继续"的行为）。
         # 提示里同时把 request_user_input 的协议要求重申一遍，引导模型回到正轨。

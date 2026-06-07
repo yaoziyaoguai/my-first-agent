@@ -122,6 +122,13 @@ from agent.skill_system.retriever import SkillCandidateRetriever
 from agent.state import create_agent_state, task_status_requires_plan
 from agent.subagent_inline import execute_subagent_delegation as _execute_subagent_delegation
 from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
 
 
@@ -1018,7 +1025,9 @@ def chat(
     # 不解析 decision。MemoryRuntime 内部处理 policy → confirmation → store 全链路。
     # 当前 on_event 直接复用 on_runtime_event callback（如果调用方传入）。
     # B7: 使用 per-session MemoryRuntime 实例隔离多 session memory。
-    result = _mem_rt.evaluate_user_text(user_input, on_event=on_runtime_event)
+    # confirmation-required event 必须等 transition 成功后再发出；evaluate 阶段
+    # 只允许 MemoryRuntime 计算本地结果，不能提前产生 UI side effect。
+    result = _mem_rt.evaluate_user_text(user_input, on_event=None)
     if result.action is MemoryEvaluationAction.STORED:
         _safe_emit_runtime_event(
             on_runtime_event,
@@ -1039,13 +1048,29 @@ def chat(
         if confirmation_request is not None:
             from agent.memory_interaction import build_memory_pending_request
 
+            origin_status = state.task.status
             pending = build_memory_pending_request(
                 confirmation_request,
                 candidate_id=result.candidate_id,
-                origin_status=state.task.status,
+                origin_status=origin_status,
             )
+            transition_request = TaskTransitionRequest(
+                event=TransitionEvent.MEMORY_CONFIRMATION_REQUIRED,
+                owner="core.chat.memory_confirmation",
+                expected_from_status=origin_status,
+            )
+            preflight = validate_task_transition(state, transition_request)
+            if not preflight.allowed:
+                return ""
+            transition = apply_task_transition(
+                state,
+                transition_request,
+                preflight=preflight,
+            )
+            if not transition.allowed:
+                return ""
+            assert transition.checkpoint_action is CheckpointAction.SAVE
             state.task.pending_user_input_request = pending
-            state.task.status = "awaiting_user_input"
             _dispatch_checkpoint_save(
                 _p1_dispatcher, state, source="memory_confirmation",
                 identity=_chat_identity,
@@ -1572,15 +1597,6 @@ def _run_planning_phase(
                 messages=planning_messages,
                 clean_text=clean_text,
             )
-            if action_plan is not None:
-                _record_core_evidence(
-                    "scheduler_load", "ok",
-                    f"scheduler load success plan_id={action_plan.plan_id}")
-                log_event("scheduler_load_success", {
-                    "plan_id": action_plan.plan_id,
-                    "nodes": len(action_plan.nodes),
-                    "schema_retry_used": schema_retry_used,
-                })
 
     # ── 解析路径 2：legacy Plan/PlanStep schema（回退桥接）──
     # ⚠️ scheduler 模式下（action_scheduler set），schema 验证失败后不启用
@@ -1607,11 +1623,24 @@ def _run_planning_phase(
 
     # ── 统一处理结果 ──
     if action_plan is not None:
-        state.conversation.messages.append({"role": "user", "content": user_input})
-        state.task.current_plan = _action_plan_to_dict(action_plan)
+        plan_payload = _action_plan_to_dict(action_plan)
+        user_message = {"role": "user", "content": user_input}
+        request = TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="core.run_planning_phase.action_plan",
+            expected_from_status="idle",
+        )
+        preflight = validate_task_transition(state, request)
+        if not preflight.allowed:
+            return "planning_transition_denied"
+        transition = apply_task_transition(state, request, preflight=preflight)
+        if not transition.allowed:
+            return "planning_transition_denied"
+
+        state.task.current_plan = plan_payload
         state.task.user_goal = user_input
         state.task.current_step_index = 0
-        state.task.status = "awaiting_plan_confirmation"
+        state.conversation.messages.append(user_message)
 
         if action_scheduler is not None:
             try:
@@ -1625,10 +1654,20 @@ def _run_planning_phase(
                     "plan_id": action_plan.plan_id,
                     "phase": "ActionPlan handoff",
                 })
-                # 调度器加载失败时不展示 plan confirmation——
-                # 不允许用户看到"按此计划执行吗？"但 scheduler 实际没加载。
-                action_plan = None
+                # transition 已生效但 scheduler 未接管时，显式回到 factory idle；
+                # 不保存 awaiting 状态，也不展示伪成功 confirmation。
+                state.reset_task()
+                return "planning_handoff_failed"
+            _record_core_evidence(
+                "scheduler_load", "ok",
+                f"scheduler load success plan_id={action_plan.plan_id}")
+            log_event("scheduler_load_success", {
+                "plan_id": action_plan.plan_id,
+                "nodes": len(action_plan.nodes),
+                "schema_retry_used": schema_retry_used,
+            })
 
+        assert transition.checkpoint_action is CheckpointAction.SAVE
         _dispatch_checkpoint_save(
             loop_ctx.runtime_action_dispatcher, state,
             identity=loop_ctx.runtime_identity,
@@ -1643,35 +1682,9 @@ def _run_planning_phase(
             )
         return "awaiting_plan_confirmation"
 
-    # 无论走哪条分支，用户原始输入都必须归档
-    state.conversation.messages.append({"role": "user", "content": user_input})
-
     if legacy_plan is not None:
-        # ⛔ LEGACY bridge: 旧 Plan → ActionPlan → scheduler
-        _legacy_action_plan = None
-        if action_scheduler is not None:
-            try:
-                from agent.action_scheduler import plan_to_action_plan as _legacy_bridge
-                _legacy_action_plan = _legacy_bridge(
-                    legacy_plan, plan_id=f"legacy-{legacy_plan.goal[:40]}"
-                )
-                action_scheduler.load_plan(_legacy_action_plan)
-            except Exception as exc:
-                _record_core_evidence(
-                    "scheduler_load", "error",
-                    f"legacy bridge failed: {type(exc).__name__}")
-                log_event("planning_handoff_failure", {
-                    "error": f"legacy bridge failed: {type(exc).__name__}: {exc}",
-                    "plan_id": f"legacy-{legacy_plan.goal[:40]}",
-                    "phase": "Legacy Plan→ActionPlan handoff",
-                })
-                # legacy 桥接失败不阻塞 plan confirmation——legacy 路径本身
-                # 已是 fallback，用户仍可见旧 Plan 展示。
-
-        state.task.current_plan = legacy_plan.model_dump()
-        state.task.user_goal = user_input
-        state.task.current_step_index = 0
-        state.task.confirm_each_step = any(
+        plan_payload = legacy_plan.model_dump()
+        confirm_each_step = any(
             marker in user_input
             for marker in (
                 "每步确认", "每一步确认", "每一步都确认", "每步都确认",
@@ -1681,8 +1694,46 @@ def _run_planning_phase(
                 "不要自动下一步", "不要自动继续", "先别自动执行下一步",
             )
         )
-        state.task.status = "awaiting_plan_confirmation"
+        user_message = {"role": "user", "content": user_input}
+        request = TaskTransitionRequest(
+            event=TransitionEvent.PLAN_GENERATED,
+            owner="core.run_planning_phase.legacy_plan",
+            expected_from_status="idle",
+        )
+        preflight = validate_task_transition(state, request)
+        if not preflight.allowed:
+            return "planning_transition_denied"
+        transition = apply_task_transition(state, request, preflight=preflight)
+        if not transition.allowed:
+            return "planning_transition_denied"
 
+        state.task.current_plan = plan_payload
+        state.task.user_goal = user_input
+        state.task.current_step_index = 0
+        state.task.confirm_each_step = confirm_each_step
+        state.conversation.messages.append(user_message)
+
+        # ⛔ LEGACY bridge: 旧 Plan → ActionPlan → scheduler
+        if action_scheduler is not None:
+            try:
+                from agent.action_scheduler import plan_to_action_plan as _legacy_bridge
+                legacy_action_plan = _legacy_bridge(
+                    legacy_plan, plan_id=f"legacy-{legacy_plan.goal[:40]}"
+                )
+                action_scheduler.load_plan(legacy_action_plan)
+            except Exception as exc:
+                _record_core_evidence(
+                    "scheduler_load", "error",
+                    f"legacy bridge failed: {type(exc).__name__}")
+                log_event("planning_handoff_failure", {
+                    "error": f"legacy bridge failed: {type(exc).__name__}: {exc}",
+                    "plan_id": f"legacy-{legacy_plan.goal[:40]}",
+                    "phase": "Legacy Plan→ActionPlan handoff",
+                })
+                state.reset_task()
+                return "planning_handoff_failed"
+
+        assert transition.checkpoint_action is CheckpointAction.SAVE
         _dispatch_checkpoint_save(
             loop_ctx.runtime_action_dispatcher, state,
             identity=loop_ctx.runtime_identity,
@@ -1698,6 +1749,7 @@ def _run_planning_phase(
         return "awaiting_plan_confirmation"
 
     # 单步任务或规划失败
+    state.conversation.messages.append({"role": "user", "content": user_input})
     if turn_state.on_runtime_event is not None:
         turn_state.on_runtime_event(control_message("[系统] 未生成多步计划，按单步处理。"))
     return "ok"
@@ -1719,6 +1771,10 @@ def _handle_planning_phase_result(
         return "好的，已取消。"
     if plan_result == "awaiting_plan_confirmation":
         return ""
+    if plan_result == "planning_transition_denied":
+        return "[系统] planning 状态迁移失败，未修改当前任务。"
+    if plan_result == "planning_handoff_failed":
+        return "[系统] 计划未能交给调度器，任务已安全重置。"
     return _run_main_loop(
         turn_state, loop_ctx,
         tool_gate_tool_name=tool_gate_tool_name, skill_registry=skill_registry,

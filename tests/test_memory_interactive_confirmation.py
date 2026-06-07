@@ -970,6 +970,103 @@ def test_handle_memory_confirmation_reply_dispatcher_writes_to_store(
     assert "I like blue" in records[0].content
 
 
+def test_memory_confirmation_denied_origin_has_no_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Phase 3 U1: 非法 memory origin 必须在 resolve/dispatcher 前拒绝。"""
+    from agent.confirm_handlers import handle_user_input_step
+
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    pending["_origin_status"] = "done"
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    dispatcher = SpyDispatcher()
+    ctx.dispatcher = dispatcher
+
+    resolve_calls: list[tuple] = []
+    original_resolve = runtime.resolve_confirmation
+
+    def _record_resolve(*args, **kwargs):
+        resolve_calls.append((args, kwargs))
+        return original_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "resolve_confirmation", _record_resolve)
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        "agent.checkpoint.save_checkpoint",
+        lambda *_args, source=None, **_kwargs: save_calls.append(source),
+    )
+    original_pending = dict(pending)
+
+    reply = handle_user_input_step("1", ctx)
+
+    assert "无法" in reply or "拒绝" in reply
+    assert ctx.state.task.status == "awaiting_user_input"
+    assert ctx.state.task.pending_user_input_request == original_pending
+    assert resolve_calls == []
+    assert dispatcher.calls == []
+    assert save_calls == []
+
+
+def test_memory_confirmation_missing_origin_uses_running_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Phase 3 U1: 两个 origin key 都缺失时保持 legacy running fallback。"""
+    from agent.confirm_handlers import handle_user_input_step
+
+    _patch_memory_interaction_checkpoint(monkeypatch)
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    pending.pop("_origin_status")
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+
+    reply = handle_user_input_step("4", ctx)
+
+    assert reply == "已拒绝，不记住这条信息。"
+    assert ctx.state.task.status == "running"
+    assert ctx.state.task.pending_user_input_request is None
+
+
+def test_memory_confirmation_stale_preflight_does_not_resolve_or_clear(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Phase 3 U1: validate 后状态变化时 apply 拒绝，handler 不提交副作用。"""
+    import agent.memory_interaction as memory_interaction
+    from agent.confirm_handlers import handle_user_input_step
+    from agent.transitions import apply_task_transition as real_apply
+
+    runtime = _make_runtime()
+    pending, _candidate_id = _make_pending_from_runtime(runtime)
+    ctx = _make_confirmation_context(pending=pending, memory_runtime=runtime)
+    resolve_calls: list[tuple] = []
+    original_resolve = runtime.resolve_confirmation
+
+    def _record_resolve(*args, **kwargs):
+        resolve_calls.append((args, kwargs))
+        return original_resolve(*args, **kwargs)
+
+    def _stale_apply(state, request, *, preflight=None):
+        state.task.status = "running"
+        return real_apply(state, request, preflight=preflight)
+
+    monkeypatch.setattr(runtime, "resolve_confirmation", _record_resolve)
+    monkeypatch.setattr(memory_interaction, "apply_task_transition", _stale_apply)
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        "agent.checkpoint.save_checkpoint",
+        lambda *_args, source=None, **_kwargs: save_calls.append(source),
+    )
+    original_pending = dict(pending)
+
+    reply = handle_user_input_step("1", ctx)
+
+    assert "无法" in reply
+    assert ctx.state.task.status == "running"
+    assert ctx.state.task.pending_user_input_request == original_pending
+    assert resolve_calls == []
+    assert save_calls == []
+
+
 def test_memory_interaction_does_not_directly_write_store():
     """Loop 15 Phase 4: memory_interaction 模块不直接 import store 写入方法。"""
     import ast

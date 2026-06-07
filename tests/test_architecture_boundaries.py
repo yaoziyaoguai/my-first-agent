@@ -116,6 +116,154 @@ def _enclosing_scope(tree: ast.AST, target: ast.AST) -> str:
     return "<module>"
 
 
+def _phase2_transition_request_inventory() -> set[tuple[str, str, str, str, str]]:
+    """收集 Phase 2 transition request 的真实 call-site 使用关系。
+
+    table exactness 只能证明规则集合完整；这里从 production AST 读取 event、
+    expected_from_status 和 owner，防止 handler 回退后留下未使用规则。
+    """
+
+    phase2_events = {
+        "USER_INPUT_RESOLVED",
+        "STEP_CONFIRMATION_REQUIRED",
+        "USER_INPUT_REQUIRED",
+    }
+    inventory: set[tuple[str, str, str, str, str]] = set()
+    for path in (
+        AGENT_DIR / "transitions.py",
+        AGENT_DIR / "response_handlers.py",
+        AGENT_DIR / "tool_executor.py",
+    ):
+        tree = _read_tree(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _qualified_name(node.func) != "TaskTransitionRequest":
+                continue
+
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            event_node = keywords.get("event")
+            expected_node = keywords.get("expected_from_status")
+            owner_node = keywords.get("owner")
+            if not isinstance(event_node, ast.Attribute):
+                continue
+            if event_node.attr not in phase2_events:
+                continue
+            if expected_node is None or owner_node is None:
+                continue
+
+            expected_statuses = {
+                child.value
+                for child in ast.walk(expected_node)
+                if isinstance(child, ast.Constant) and isinstance(child.value, str)
+            }
+            owners = {
+                child.value
+                for child in ast.walk(owner_node)
+                if isinstance(child, ast.Constant) and isinstance(child.value, str)
+            }
+            for expected_status in expected_statuses:
+                for owner in owners:
+                    inventory.add(
+                        (
+                            _module_name(path),
+                            _enclosing_scope(tree, node),
+                            event_node.attr,
+                            expected_status,
+                            owner,
+                        )
+                    )
+    return inventory
+
+
+def _phase3_transition_request_inventory() -> set[tuple[str, str, str, str, str]]:
+    """收集 Phase 3 直接 request 与 task-runtime 动态 request 的真实位置。"""
+    phase3_events = {
+        "MEMORY_CONFIRMATION_REQUIRED",
+        "MEMORY_CONFIRMATION_RESOLVED",
+        "PLAN_GENERATED",
+        "TOOL_CONFIRMATION_REQUIRED",
+    }
+    inventory: set[tuple[str, str, str, str, str]] = set()
+    for path in (
+        AGENT_DIR / "core.py",
+        AGENT_DIR / "memory_interaction.py",
+        AGENT_DIR / "tool_executor.py",
+        AGENT_DIR / "tool_runtime_mediator.py",
+        AGENT_DIR / "transitions.py",
+    ):
+        tree = _read_tree(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _qualified_name(node.func) != "TaskTransitionRequest":
+                continue
+
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            event_node = keywords.get("event")
+            expected_node = keywords.get("expected_from_status")
+            owner_node = keywords.get("owner")
+            event_name = _qualified_name(event_node) if event_node is not None else None
+            event = (
+                event_name.rsplit(".", 1)[-1]
+                if event_name and event_name.startswith("TransitionEvent.")
+                else "<dynamic>"
+            )
+            if event not in phase3_events and event != "<dynamic>":
+                continue
+
+            expected_statuses = {
+                child.value
+                for child in ast.walk(expected_node)
+                if isinstance(child, ast.Constant) and isinstance(child.value, str)
+            } if expected_node is not None else set()
+            owners = {
+                child.value
+                for child in ast.walk(owner_node)
+                if isinstance(child, ast.Constant) and isinstance(child.value, str)
+            } if owner_node is not None else set()
+            for expected_status in expected_statuses or {"<dynamic>"}:
+                for owner in owners or {"<dynamic>"}:
+                    inventory.add(
+                        (
+                            _module_name(path),
+                            _enclosing_scope(tree, node),
+                            event,
+                            expected_status,
+                            owner,
+                        )
+                    )
+    return inventory
+
+
+def _phase3_step_advance_caller_inventory() -> set[tuple[str, str, str]]:
+    """收集共享 task-runtime 六条 rule 的三个真实 handler caller。"""
+    inventory: set[tuple[str, str, str]] = set()
+    for path in (
+        AGENT_DIR / "transitions.py",
+        AGENT_DIR / "confirmation" / "plan.py",
+        AGENT_DIR / "response_handlers.py",
+    ):
+        tree = _read_tree(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _qualified_name(node.func) != "advance_current_step_if_needed":
+                continue
+            owner_node = next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "owner"),
+                None,
+            )
+            if not isinstance(owner_node, ast.Constant) or not isinstance(
+                owner_node.value, str
+            ):
+                continue
+            inventory.add(
+                (_module_name(path), _enclosing_scope(tree, node), owner_node.value)
+            )
+    return inventory
+
+
 def _collect_agent_imports(path: Path) -> set[str]:
     """收集一个源码文件声明的 `agent.*` 依赖。
 
@@ -362,6 +510,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.skill_system.retriever",
         "agent.skill_system.skill_tool",
         "agent.tool_runtime_mediator",
+        "agent.transitions",
         # v1.1 Skill tool-scope fix：_call_model() 内 local import，仅用于
         # BASE_TOOLS 合并到 skill visible allowlist。不改变 core 的模块级
         # import surface，不引入新的模块级耦合。
@@ -631,7 +780,7 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", 2),
     ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", 1),
     ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", 1),
-    ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", 1),
+    ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", 2),
     ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", 1),
     ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", 4),
     ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", 1),
@@ -645,7 +794,7 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     # lazy import save_checkpoint 以清 pending 并保存状态（v1 compromise）。
     ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", 1),
     ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", 1),
-    ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", 1),
+    ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", 2),
     ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", 1),
     ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", 3),
     ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", 2),
@@ -663,11 +812,9 @@ _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.session", "handle_interrupt_with_checkpoint", "save_checkpoint", 1),
     ("agent.session", "handle_resume_choice", "clear_checkpoint", 1),
     ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", 1),
-    # B7: advance_current_step_if_needed 新增一次 save（identity-per-run checkpoint 路径）。
-    ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", 3),
     ("agent.tool_executor", "execute_single_tool", "save_checkpoint", 4),
-    # B7: ToolRuntimeMediator confirmation_required 路径（mediator gate 阻断后保存状态）。
-    ("agent.tool_runtime_mediator", "_handle_confirmation_required", "save_checkpoint", 1),
+    # Phase 3：mediator 在 route side effects 完成后统一保存一次。
+    ("agent.tool_runtime_mediator", "mediate", "save_checkpoint", 1),
     ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", 1),
     ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", 3),
 )
@@ -704,7 +851,6 @@ _RUNTIME_MUTATION_OWNER_BASELINE = {
     "agent.memory_interaction",
     "agent.response_handlers",
     "agent.session",
-    "agent.task_runtime",
     "agent.tool_executor",
     "agent.transitions",
 }
@@ -755,8 +901,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ("agent.confirmation.plan", "handle_step_confirmation", "state.reset_task()"),
         ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool"),
         ("agent.confirmation.user_input", "handle_user_input_step", "state.reset_task()"),
-        # Memory Interactive Confirmation v1：handle_memory_confirmation_reply
-        # 清 pending 并恢复 origin_status。
         (
             "agent.memory_interaction",
             "handle_memory_confirmation_reply",
@@ -764,28 +908,16 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ),
         (
             "agent.memory_interaction",
-            "handle_memory_confirmation_reply",
-            "state.task.status",
-        ),
-        # Phase 7 inline confirmation：terminal reply / fallback 后由
-        # memory_interaction helper 清 pending 并恢复 origin_status。
-        (
-            "agent.memory_interaction",
             "_clear_pending_and_save",
             "state.task.pending_user_input_request",
-        ),
-        (
-            "agent.memory_interaction",
-            "_clear_pending_and_save",
-            "state.task.status",
         ),
         ("agent.loop", "run_main_loop", "state.reset_task()"),
         ("agent.loop", "run_main_loop", "state.task.loop_iterations"),
         ("agent.core", "_run_planning_phase", "state.task.confirm_each_step"),
         ("agent.core", "_run_planning_phase", "state.task.current_plan"),
         ("agent.core", "_run_planning_phase", "state.task.current_step_index"),
-        ("agent.core", "_run_planning_phase", "state.task.status"),
         ("agent.core", "_run_planning_phase", "state.task.user_goal"),
+        ("agent.core", "_run_planning_phase", "state.reset_task()"),
         (
             "agent.core",
             "_compress_history_and_sync_checkpoint",
@@ -797,13 +929,11 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "state.memory.working_summary",
         ),
         # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支
-        # 设置 pending_user_input_request 和 status。
+        # transition 后设置 pending_user_input_request。
         ("agent.core", "chat", "state.task.pending_user_input_request"),
-        ("agent.core", "chat", "state.task.status"),
         ("agent.core", "chat", "state.reset_task()"),
         ("agent.core", "refresh_runtime_system_prompt", "state.set_system_prompt()"),
         ("agent.response_handlers", "_maybe_advance_step", "state.reset_task()"),
-        ("agent.response_handlers", "_maybe_advance_step", "state.task.status"),
         ("agent.response_handlers", "handle_end_turn_response", "state.reset_task()"),
         (
             "agent.response_handlers",
@@ -820,7 +950,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "handle_end_turn_response",
             "state.task.pending_user_input_request",
         ),
-        ("agent.response_handlers", "handle_end_turn_response", "state.task.status"),
         (
             "agent.response_handlers",
             "handle_max_tokens_response",
@@ -847,21 +976,19 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ("agent.session", "handle_interrupt_choice", "state.reset_task()"),
         ("agent.session", "handle_interrupt_choice", "state.task.status"),
         ("agent.session", "handle_interrupt_with_checkpoint", "state.task.status"),
-        (
-            "agent.task_runtime",
-            "advance_current_step_if_needed",
-            "state.task.current_step_index",
-        ),
-        ("agent.task_runtime", "advance_current_step_if_needed", "state.task.status"),
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_tool"),
         (
             "agent.tool_executor",
             "execute_single_tool",
             "state.task.pending_user_input_request",
         ),
-        ("agent.tool_executor", "execute_single_tool", "state.task.status"),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log"),
         ("agent.tool_executor", "execute_pending_tool", "state.task.tool_execution_log"),
+        (
+            "agent.transitions",
+            "advance_current_step_if_needed",
+            "state.task.current_step_index",
+        ),
         ("agent.transitions", "apply_task_transition", "state.task.status"),
         ("agent.transitions", "apply_user_replied_transition", "state.reset_task()"),
         (
@@ -869,7 +996,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "apply_user_replied_transition",
             "state.task.pending_user_input_request",
         ),
-        ("agent.transitions", "apply_user_replied_transition", "state.task.status"),
     }
 
     assert _runtime_state_mutation_inventory() == expected
@@ -1487,7 +1613,7 @@ def _aggregate_mutations(
     return dict(Counter(keys))
 
 
-# Phase 1A 迁移后 direct status mutation baseline。
+# Phase 3 迁移后 direct status mutation baseline。
 #
 # Key: (file, function, mutation_kind, target_shape, status_value)
 # 行号仅用于错误报告。
@@ -1497,9 +1623,8 @@ def _aggregate_mutations(
 #     → 迁移到 apply_task_transition()
 #   - confirmation/tool.py handle_tool_confirmation 4×"running": 全部迁移
 #
-# 以下模式不在 Phase 1A 扫描范围（已知 gap，后续阶段覆盖）:
+# 以下模式不在当前 scanner 范围（已知 gap，Phase 4 覆盖）:
 #   - agent/state.py AgentState.reset_task: self.task.status = "idle"
-#   - agent/tool_runtime_mediator.py _handle_confirmation_required: self._state.task.status
 #   - agent/session.py 中 get_state().task.status 路径
 #   - agent/session.py handle_interrupt_choice 中 state.task.status = "idle" (line 652)
 #     注: 该行使用函数参数 state 而非模块级 state，AST 扫描可检测但行 652 在
@@ -1509,11 +1634,6 @@ _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
     # ── transition layer 内部（唯一合法新增写入点）──
     ("agent/transitions.py", "apply_task_transition", "assign",
      "state.task.status", "<variable>"): 1,
-    ("agent/transitions.py", "apply_user_replied_transition", "assign",
-     "state.task.status", "awaiting_step_confirmation"): 1,
-    ("agent/transitions.py", "apply_user_replied_transition", "assign",
-     "state.task.status", "running"): 1,
-
     # ── session.py ──
     ("agent/session.py", "handle_interrupt_choice", "assign",
      "state.task.status", "idle"): 1,
@@ -1522,41 +1642,6 @@ _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
     ("agent/session.py", "handle_interrupt_with_checkpoint", "assign",
      "state.task.status", "awaiting_interrupt_choice"): 1,
 
-    # ── core.py ──
-    ("agent/core.py", "chat", "assign",
-     "state.task.status", "awaiting_user_input"): 1,
-    ("agent/core.py", "_run_planning_phase", "assign",
-     "state.task.status", "awaiting_plan_confirmation"): 2,
-
-    # ── confirmation/plan.py (Phase 1B 后: feedback_intent 3→0) ──
-    # handle_feedback_intent_choice 的 3 处裸写已迁移至 apply_task_transition()。
-
-    # ── confirmation/dispatcher.py (Phase 1B 后: feedback_intent_request 1→0) ──
-    # _request_feedback_intent_choice 的 1 处裸写已迁移至 apply_task_transition()。
-
-    # ── memory_interaction.py ──
-    ("agent/memory_interaction.py", "handle_memory_confirmation_reply", "assign",
-     "state.task.status", "<origin_status>"): 1,
-    ("agent/memory_interaction.py", "_clear_pending_and_save", "assign",
-     "state.task.status", "<origin_status>"): 1,
-
-    # ── task_runtime.py ──
-    ("agent/task_runtime.py", "advance_current_step_if_needed", "assign",
-     "state.task.status", "done"): 3,
-    ("agent/task_runtime.py", "advance_current_step_if_needed", "assign",
-     "state.task.status", "running"): 1,
-
-    # ── tool_executor.py ──
-    ("agent/tool_executor.py", "execute_single_tool", "assign",
-     "state.task.status", "awaiting_tool_confirmation"): 1,
-    ("agent/tool_executor.py", "execute_single_tool", "assign",
-     "state.task.status", "awaiting_user_input"): 1,
-
-    # ── response_handlers.py ──
-    ("agent/response_handlers.py", "_maybe_advance_step", "assign",
-     "state.task.status", "awaiting_step_confirmation"): 1,
-    ("agent/response_handlers.py", "handle_end_turn_response", "assign",
-     "state.task.status", "awaiting_user_input"): 2,
 }
 
 # apply_task_transition 是唯一合法新增写入点，已在 baseline 中以 count=1 登记。
@@ -1564,14 +1649,14 @@ _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
 
 
 def test_direct_status_mutation_baseline() -> None:
-    """Phase 1A: 禁止新增 state.task.status 裸写。
+    """Phase 3: 禁止恢复已迁移的 state.task.status 裸写。
 
     - baseline 匹配不依赖行号
     - 行号仅用于错误报告
     - apply_task_transition() 是唯一合法新增写入点
     - reset_task() / get_state().task.status / self._state.task.status
       不在 Phase 1A 扫描范围（已知 gap）
-    - Phase 1A 迁移掉的 5 个点已从 baseline 移除
+    - Phase 2/3 迁移掉的 W01-W17（除既有非目标项）已从 baseline 移除
     """
     mutations = _collect_direct_status_mutations()
     actual = _aggregate_mutations(mutations)
@@ -1628,6 +1713,204 @@ def test_direct_status_mutation_baseline() -> None:
         )
     if errors:
         raise AssertionError("\n\n".join(errors))
+
+
+def test_phase2_transition_rules_have_real_callsite_usage_inventory() -> None:
+    """Phase 2 五条规则必须由真实 handler path 使用。"""
+
+    expected = {
+        (
+            "agent.transitions",
+            "apply_user_replied_transition",
+            "USER_INPUT_RESOLVED",
+            "awaiting_user_input",
+            "transitions.runtime_user_input_answer",
+        ),
+        (
+            "agent.transitions",
+            "apply_user_replied_transition",
+            "STEP_CONFIRMATION_REQUIRED",
+            "awaiting_user_input",
+            "transitions.collect_input_answer",
+        ),
+        (
+            "agent.response_handlers",
+            "_maybe_advance_step",
+            "STEP_CONFIRMATION_REQUIRED",
+            "running",
+            "response_handlers.maybe_advance_step",
+        ),
+        (
+            "agent.response_handlers",
+            "handle_end_turn_response",
+            "USER_INPUT_REQUIRED",
+            "running",
+            "response_handlers.collect_input_required",
+        ),
+        (
+            "agent.response_handlers",
+            "handle_end_turn_response",
+            "USER_INPUT_REQUIRED",
+            "running",
+            "response_handlers.end_turn_user_input_required",
+        ),
+        (
+            "agent.tool_executor",
+            "execute_single_tool",
+            "USER_INPUT_REQUIRED",
+            "running",
+            "agent.tool_executor.execute_single_tool.request_user_input",
+        ),
+        (
+            "agent.tool_executor",
+            "execute_single_tool",
+            "USER_INPUT_REQUIRED",
+            "idle",
+            "agent.tool_executor.execute_single_tool.request_user_input",
+        ),
+    }
+
+    assert _phase2_transition_request_inventory() == expected
+
+
+def test_phase3_transition_rules_have_real_callsite_usage_inventory() -> None:
+    """Phase 3 十二条规则均登记真实 request/helper caller，不借 exactness 代替。"""
+    direct_requests = {
+        (
+            "agent.core",
+            "chat",
+            "MEMORY_CONFIRMATION_REQUIRED",
+            "<dynamic>",
+            "core.chat.memory_confirmation",
+        ),
+        (
+            "agent.core",
+            "_run_planning_phase",
+            "PLAN_GENERATED",
+            "idle",
+            "core.run_planning_phase.action_plan",
+        ),
+        (
+            "agent.core",
+            "_run_planning_phase",
+            "PLAN_GENERATED",
+            "idle",
+            "core.run_planning_phase.legacy_plan",
+        ),
+        (
+            "agent.memory_interaction",
+            "handle_memory_confirmation_reply",
+            "MEMORY_CONFIRMATION_RESOLVED",
+            "awaiting_user_input",
+            "memory_interaction.resolve_confirmation",
+        ),
+        (
+            "agent.memory_interaction",
+            "handle_inline_confirmation_reply",
+            "MEMORY_CONFIRMATION_RESOLVED",
+            "awaiting_user_input",
+            "memory_interaction.inline_confirmation",
+        ),
+        (
+            "agent.tool_executor",
+            "execute_single_tool",
+            "TOOL_CONFIRMATION_REQUIRED",
+            "idle",
+            "agent.tool_executor.execute_single_tool.tool_confirmation",
+        ),
+        (
+            "agent.tool_executor",
+            "execute_single_tool",
+            "TOOL_CONFIRMATION_REQUIRED",
+            "running",
+            "agent.tool_executor.execute_single_tool.tool_confirmation",
+        ),
+        (
+            "agent.tool_runtime_mediator",
+            "_handle_confirmation_required",
+            "TOOL_CONFIRMATION_REQUIRED",
+            "idle",
+            "tool_runtime_mediator.handle_confirmation_required",
+        ),
+        (
+            "agent.tool_runtime_mediator",
+            "_handle_confirmation_required",
+            "TOOL_CONFIRMATION_REQUIRED",
+            "running",
+            "tool_runtime_mediator.handle_confirmation_required",
+        ),
+        (
+            "agent.transitions",
+            "advance_current_step_if_needed",
+            "<dynamic>",
+            "<dynamic>",
+            "<dynamic>",
+        ),
+    }
+    step_callers = {
+        (
+            "agent.transitions",
+            "apply_user_replied_transition",
+            "transitions.collect_input_answer",
+        ),
+        (
+            "agent.confirmation.plan",
+            "handle_step_confirmation",
+            "confirmation.plan.step_accept",
+        ),
+        (
+            "agent.response_handlers",
+            "_maybe_advance_step",
+            "response_handlers.maybe_advance_step",
+        ),
+    }
+
+    assert _phase3_transition_request_inventory() == direct_requests
+    assert _phase3_step_advance_caller_inventory() == step_callers
+
+    # 显式 rule-to-caller inventory：shared rules 列出所有真实 caller。
+    rule_callers = {
+        ("idle", "MEMORY_CONFIRMATION_REQUIRED"): {"agent.core.chat"},
+        ("running", "MEMORY_CONFIRMATION_REQUIRED"): {"agent.core.chat"},
+        ("awaiting_user_input", "MEMORY_CONFIRMATION_RESOLVED"): {
+            "agent.memory_interaction.handle_memory_confirmation_reply",
+            "agent.memory_interaction.handle_inline_confirmation_reply",
+        },
+        ("running", "STEP_ADVANCED"): {"agent.response_handlers._maybe_advance_step"},
+        ("running", "TASK_COMPLETED"): {"agent.response_handlers._maybe_advance_step"},
+        ("awaiting_user_input", "STEP_ADVANCED"): {
+            "agent.transitions.apply_user_replied_transition"
+        },
+        ("awaiting_user_input", "TASK_COMPLETED"): {
+            "agent.transitions.apply_user_replied_transition"
+        },
+        ("awaiting_step_confirmation", "STEP_ADVANCED"): {
+            "agent.confirmation.plan.handle_step_confirmation"
+        },
+        ("awaiting_step_confirmation", "TASK_COMPLETED"): {
+            "agent.confirmation.plan.handle_step_confirmation"
+        },
+        ("idle", "PLAN_GENERATED"): {"agent.core._run_planning_phase"},
+        ("idle", "TOOL_CONFIRMATION_REQUIRED"): {
+            "agent.tool_executor.execute_single_tool",
+            "agent.tool_runtime_mediator._handle_confirmation_required",
+        },
+        ("running", "TOOL_CONFIRMATION_REQUIRED"): {
+            "agent.tool_executor.execute_single_tool",
+            "agent.tool_runtime_mediator._handle_confirmation_required",
+        },
+    }
+    assert len(rule_callers) == 12
+    assert all(rule_callers.values())
+
+    from agent.transitions import _TRANSITION_TABLE
+
+    phase3_rule_keys = {
+        (from_status, event.name)
+        for from_status, event in _TRANSITION_TABLE
+        if (from_status, event.name) in rule_callers
+    }
+    assert phase3_rule_keys == set(rule_callers)
 
 
 def test_alias_detection_positive_fixture() -> None:

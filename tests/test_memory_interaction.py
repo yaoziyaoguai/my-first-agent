@@ -304,3 +304,88 @@ def test_confirm_handler_does_not_parse_inline_memory_metadata():
     assert "correction_pattern" not in src
     assert "evidence_summary" not in src
     assert "apply_inline_confirmation_response" not in src
+
+
+def test_inline_confirmation_denied_origin_has_no_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    """Phase 3 U1: origin denied 时不得入队、fallback、清 pending 或保存。"""
+    from agent.memory_interaction import (
+        build_inline_confirmation_pending_request,
+        handle_inline_confirmation_reply,
+    )
+
+    runtime = MemoryRuntime(store=InMemoryMemoryStore())
+    pending = build_inline_confirmation_pending_request(
+        _make_inline_request(),
+        origin_status="done",
+    )
+    ctx = _make_context(pending=pending, runtime=runtime)
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        "agent.checkpoint.save_checkpoint",
+        lambda *_args, source=None, **_kwargs: save_calls.append(source),
+    )
+    original_pending = json.loads(json.dumps(pending))
+
+    reply = handle_inline_confirmation_reply(
+        "1",
+        ctx,
+        store=runtime._store,
+        fallback_memory_root=tmp_path,
+    )
+
+    assert "无法" in reply or "拒绝" in reply
+    assert ctx.state.task.status == "awaiting_user_input"
+    assert ctx.state.task.pending_user_input_request == original_pending
+    assert ctx.state.task.pending_retain_proposals == []
+    assert len(runtime._store.list_records()) == 0
+    assert not (tmp_path / "_pending").exists()
+    assert save_calls == []
+
+
+def test_inline_confirmation_stale_preflight_does_not_enqueue_or_clear(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    """Phase 3 U1: inline apply stale 时不入队、不 fallback、不保存。"""
+    import agent.memory_interaction as memory_interaction
+    from agent.memory_interaction import (
+        build_inline_confirmation_pending_request,
+        handle_inline_confirmation_reply,
+    )
+    from agent.transitions import apply_task_transition as real_apply
+
+    runtime = MemoryRuntime(store=InMemoryMemoryStore())
+    pending = build_inline_confirmation_pending_request(
+        _make_inline_request(),
+        origin_status="running",
+    )
+    ctx = _make_context(pending=pending, runtime=runtime)
+
+    def _stale_apply(state, request, *, preflight=None):
+        state.task.status = "running"
+        return real_apply(state, request, preflight=preflight)
+
+    monkeypatch.setattr(memory_interaction, "apply_task_transition", _stale_apply)
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        "agent.checkpoint.save_checkpoint",
+        lambda *_args, source=None, **_kwargs: save_calls.append(source),
+    )
+    original_pending = json.loads(json.dumps(pending))
+
+    reply = handle_inline_confirmation_reply(
+        "1",
+        ctx,
+        store=runtime._store,
+        fallback_memory_root=tmp_path,
+    )
+
+    assert "无法" in reply
+    assert ctx.state.task.status == "running"
+    assert ctx.state.task.pending_user_input_request == original_pending
+    assert ctx.state.task.pending_retain_proposals == []
+    assert not (tmp_path / "_pending").exists()
+    assert save_calls == []

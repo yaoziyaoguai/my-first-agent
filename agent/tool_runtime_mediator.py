@@ -29,7 +29,21 @@ from typing import Any
 
 from agent.conversation_events import append_tool_result
 from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-from agent.tool_executor import AWAITING_USER, FORCE_STOP, execute_pending_tool, execute_single_tool
+from agent.tool_executor import (
+    AWAITING_USER,
+    FORCE_STOP,
+    TRANSITION_DENIED,
+    execute_pending_tool,
+    execute_single_tool,
+)
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TaskTransitionResult,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 
 
 class ToolRuntimeMediator:
@@ -97,8 +111,18 @@ class ToolRuntimeMediator:
 
         if gate_disposition == "confirmation_required":
             # 需要用户确认 → 不执行工具，设置 pending_tool
-            self._handle_confirmation_required(tool_name, tool_input, tool_use_id)
+            transition = self._handle_confirmation_required(
+                tool_name,
+                tool_input,
+                tool_use_id,
+            )
+            if not transition.allowed:
+                return TRANSITION_DENIED
             self._route_result(tool_name, tool_input, tool_use_id, AWAITING_USER)
+            assert transition.checkpoint_action is CheckpointAction.SAVE
+            from agent.checkpoint import save_checkpoint
+
+            save_checkpoint(self._state)
             return AWAITING_USER
 
         # gate_disposition == "allowed"
@@ -558,17 +582,31 @@ class ToolRuntimeMediator:
         tool_name: str,
         tool_input: Any,
         tool_use_id: str,
-    ) -> None:
-        """处理 confirmation_required gate result：设置 pending_tool。"""
-        from agent.checkpoint import save_checkpoint
-
-        self._state.task.pending_tool = {
+    ) -> TaskTransitionResult:
+        """先迁移状态，再提交 pending_tool；checkpoint 由 mediate() 持有。"""
+        pending_tool = {
             "tool_use_id": tool_use_id,
             "tool": tool_name,
             "input": dict(tool_input) if tool_input else {},
         }
-        self._state.task.status = "awaiting_tool_confirmation"
-        save_checkpoint(self._state)
+        request = TaskTransitionRequest(
+            event=TransitionEvent.TOOL_CONFIRMATION_REQUIRED,
+            owner="tool_runtime_mediator.handle_confirmation_required",
+            expected_from_status=(
+                "idle" if self._state.task.status == "idle" else "running"
+            ),
+        )
+        preflight = validate_task_transition(self._state, request)
+        if not preflight.allowed:
+            return preflight
+        transition = apply_task_transition(
+            self._state,
+            request,
+            preflight=preflight,
+        )
+        if transition.allowed:
+            self._state.task.pending_tool = pending_tool
+        return transition
 
     # ── private helpers ────────────────────────────────────────────────────
 

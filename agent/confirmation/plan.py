@@ -90,15 +90,20 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
     response = _confirmation_response(confirm)
 
     if response == "accept":
+        transition = advance_current_step_if_needed(
+            state,
+            owner="confirmation.plan.step_accept",
+        )
+        if not transition.allowed:
+            return f"[系统] step accept 状态迁移失败: {transition.reason}"
+
         append_control_event(messages, "step_confirm_yes", {})
-        advance_current_step_if_needed(state)
-        if state.task.status == "done":
+        if transition.checkpoint_action is CheckpointAction.CLEAR:
             done_transition = step_confirmation_transition(
                 StepConfirmationKind.STEP_ACCEPTED_TASK_DONE
             )
             assert not done_transition.should_checkpoint
-            from agent.checkpoint import clear_checkpoint as _clear_ck
-            _clear_ck()
+            clear_checkpoint()
             state.reset_task()
             _emit_confirmation_observer_event(
                 "confirmation.step.accepted_task_done",
@@ -108,6 +113,7 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         continue_transition = step_confirmation_transition(
             StepConfirmationKind.STEP_ACCEPTED_CONTINUE
         )
+        assert transition.checkpoint_action is CheckpointAction.SAVE
         if continue_transition.should_checkpoint:
             save_checkpoint(state)
         _emit_confirmation_observer_event(

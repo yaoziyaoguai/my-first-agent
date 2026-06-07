@@ -1,16 +1,16 @@
 
 
-"""Task runtime helpers.
+"""Task runtime completion checks and compatibility exports.
 
-This module owns task/step state transitions and step-completion checks.
-It does not call the model and does not execute tools.
+状态迁移由 ``agent.transitions`` 统一拥有；本模块保留既有
+``advance_current_step_if_needed`` import surface，避免调用方批量改名。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from agent.planner import Plan
+from agent.transitions import advance_current_step_if_needed  # noqa: F401
 from config import STEP_COMPLETION_THRESHOLD
 
 USER_INPUT_STEP_TYPES = {"collect_input", "clarify"}
@@ -65,36 +65,3 @@ def is_current_step_completed(state: Any) -> bool:
     if not isinstance(score, int):
         return False
     return score >= STEP_COMPLETION_THRESHOLD
-
-
-def advance_current_step_if_needed(state: Any) -> None:
-    """Advance current task step, or mark task done when all steps are complete.
-
-    任何让 status 跨状态跳变（done / running with new step_index）的 mutate
-    都必须立刻 save_checkpoint，否则重启后会进入"旧步骤已过、新步骤未记录"的
-    不一致态。
-    """
-    from agent.checkpoint import save_checkpoint
-
-    if not state.task.current_plan:
-        state.task.status = "done"
-        save_checkpoint(state, source="task_runtime.advance_current_step")
-        return
-
-    # 当 current_plan 是 ActionPlan 格式（plan_id + nodes）时，不进入旧 Plan
-    # step 推进逻辑——ActionPlan 的 node 推进由 scheduler 负责。
-    _plan_dict = state.task.current_plan
-    if "plan_id" in _plan_dict and "nodes" in _plan_dict:
-        state.task.status = "done"
-        save_checkpoint(state, source="task_runtime.advance_current_step_action_plan")
-        return
-
-    plan = Plan.model_validate(state.task.current_plan)
-
-    if state.task.current_step_index < len(plan.steps) - 1:
-        state.task.current_step_index += 1
-        state.task.status = "running"
-    else:
-        state.task.status = "done"
-
-    save_checkpoint(state, source="task_runtime.advance_current_step")

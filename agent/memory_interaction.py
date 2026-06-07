@@ -36,6 +36,13 @@ from agent.memory_emergence import (
     InlineConfirmationResponse,
 )
 from agent.pending_requests import PendingUserInputRequest
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 
 
 def _now_iso() -> str:
@@ -250,8 +257,6 @@ def handle_memory_confirmation_reply(
 
     state = ctx.state
     pending = state.task.pending_user_input_request or {}
-    origin_status = pending.get("_origin_status", "running")
-
     # 1. 解析用户选择
     try:
         choice, free_text = parse_memory_confirmation_reply(user_text, pending)
@@ -260,6 +265,23 @@ def handle_memory_confirmation_reply(
         return "请输入有效选项（数字 1-5 或自由文本）。"
 
     candidate_id: str | None = pending.get("_candidate_id")
+
+    transition_request = TaskTransitionRequest(
+        event=TransitionEvent.MEMORY_CONFIRMATION_RESOLVED,
+        owner="memory_interaction.resolve_confirmation",
+        expected_from_status="awaiting_user_input",
+    )
+    preflight = validate_task_transition(state, transition_request)
+    if not preflight.allowed:
+        return f"无法处理 memory confirmation：{preflight.reason}"
+    transition = apply_task_transition(
+        state,
+        transition_request,
+        preflight=preflight,
+    )
+    if not transition.allowed:
+        return f"无法处理 memory confirmation：{transition.reason}"
+    assert transition.checkpoint_action is CheckpointAction.SAVE
 
     # 2. 执行确认结果（direct_write=False：由 dispatcher 统一写入，避免双写）
     result = memory_runtime.resolve_confirmation(
@@ -283,28 +305,24 @@ def handle_memory_confirmation_reply(
         )
         dispatcher.route(_req)
 
-    # 4. 清 pending，恢复状态
+    # 4. transition 已恢复状态；此处只提交其余副作用。
     state.task.pending_user_input_request = None
-    state.task.status = origin_status
-    save_checkpoint(state, source="memory_interaction.resolve")
-
-    # 5. emit 结果事件
 
     if result.action is MemoryEvaluationAction.STORED:
         from agent.display_events import memory_stored_event as _stored_evt
         _sink_runtime_event(on_runtime_event, _stored_evt(result.content_summary))
-        return f"已记住：{result.content_summary}"
-
-    if result.action is MemoryEvaluationAction.REJECTED:
-        return "已拒绝，不记住这条信息。"
-
-    if result.action is MemoryEvaluationAction.BLOCKED:
+        reply = f"已记住：{result.content_summary}"
+    elif result.action is MemoryEvaluationAction.REJECTED:
+        reply = "已拒绝，不记住这条信息。"
+    elif result.action is MemoryEvaluationAction.BLOCKED:
         from agent.display_events import memory_blocked_event as _blocked_evt
         _sink_runtime_event(on_runtime_event, _blocked_evt(result.reason))
-        return f"已拦截：{result.reason}"
+        reply = f"已拦截：{result.reason}"
+    else:
+        reply = f"已处理：{result.reason}"
 
-    # SESSION_ONLY 或其他：返回确认信息
-    return f"已处理：{result.reason}"
+    save_checkpoint(state, source="memory_interaction.resolve")
+    return reply
 
 
 def handle_inline_confirmation_reply(
@@ -330,26 +348,56 @@ def handle_inline_confirmation_reply(
 
     state = ctx.state
     pending = state.task.pending_user_input_request or {}
-    origin_status = pending.get("_origin_status", "running")
+    transition_request = TaskTransitionRequest(
+        event=TransitionEvent.MEMORY_CONFIRMATION_RESOLVED,
+        owner="memory_interaction.inline_confirmation",
+        expected_from_status="awaiting_user_input",
+    )
+    preflight = validate_task_transition(state, transition_request)
+    if not preflight.allowed:
+        return f"无法处理 inline memory confirmation：{preflight.reason}"
 
     try:
         request = _inline_request_from_pending(pending)
     except (KeyError, TypeError, ValueError) as exc:
-        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        transition = apply_task_transition(
+            state,
+            transition_request,
+            preflight=preflight,
+        )
+        if not transition.allowed:
+            return f"无法处理 inline memory confirmation：{transition.reason}"
+        _clear_pending_and_save(state, save_checkpoint)
         return f"未写入：inline confirmation payload 无效（{exc}）。"
 
     try:
         response = parse_inline_confirmation_reply(user_text, pending)
     except ValueError:
+        transition = apply_task_transition(
+            state,
+            transition_request,
+            preflight=preflight,
+        )
+        if not transition.allowed:
+            return f"无法处理 inline memory confirmation：{transition.reason}"
         fallback = _fallback_inline_confirmation_to_pending_review(
             request,
             memory_root=fallback_memory_root,
         )
-        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        _clear_pending_and_save(state, save_checkpoint)
         return (
             "未收到确认回复，已 fallback 到 pending_review；"
             f"未写入正式 procedural store（dispatched={fallback.dispatched}）。"
         )
+
+    transition = apply_task_transition(
+        state,
+        transition_request,
+        preflight=preflight,
+    )
+    if not transition.allowed:
+        return f"无法处理 inline memory confirmation：{transition.reason}"
+    assert transition.checkpoint_action is CheckpointAction.SAVE
 
     if response.action in {"accept", "edit_accept"}:
         # 将已确认的 proposal 入队，由 turn-end hook 中 MEMORY_PROPOSE dispatch 执行写入。
@@ -370,11 +418,11 @@ def handle_inline_confirmation_reply(
             "confirmation_result": "accepted",
             "queued_at": _now_iso(),
         })
-        _clear_pending_and_save(state, origin_status, save_checkpoint)
+        _clear_pending_and_save(state, save_checkpoint)
         return "已确认，将在下一轮通过 runtime dispatcher 写入 procedural memory。"
 
     result = apply_inline_confirmation_response(request, response, store)
-    _clear_pending_and_save(state, origin_status, save_checkpoint)
+    _clear_pending_and_save(state, save_checkpoint)
     if result.action == "reject":
         return "已拒绝，未写入 procedural memory。"
     return "已记录为其他回复，未写入 procedural memory。"
@@ -455,12 +503,10 @@ def _fallback_inline_confirmation_to_pending_review(
 
 def _clear_pending_and_save(
     state: Any,
-    origin_status: str,
     save_checkpoint_fn: Any,
 ) -> None:
-    """清理 terminal inline pending 并恢复原 status。"""
+    """transition 成功后清理 terminal inline pending 并保存。"""
     state.task.pending_user_input_request = None
-    state.task.status = origin_status
     save_checkpoint_fn(state, source="memory_interaction.inline_confirmation")
 
 

@@ -20,8 +20,12 @@ from agent.task_runtime import (
     get_latest_step_completion,
     is_current_step_completed,
 )
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionResult,
+    TransitionEvent,
+)
 from config import STEP_COMPLETION_THRESHOLD
-
 
 # ---------- is_current_step_completed ----------
 
@@ -34,7 +38,15 @@ class _FakeState:
         self.task.tool_execution_log = {}
 
 
-def _record_meta(state, *, score, summary="done", outstanding="无", step_index=None, tool_use_id="meta1"):
+def _record_meta(
+    state,
+    *,
+    score,
+    summary="done",
+    outstanding="无",
+    step_index=None,
+    tool_use_id="meta1",
+):
     """在 fake state 里塞一条 mark_step_complete 日志。"""
     state.task.tool_execution_log[tool_use_id] = {
         "tool": "mark_step_complete",
@@ -117,32 +129,94 @@ def test_get_latest_step_completion_returns_last_recorded_for_current_step():
 def test_advance_from_non_last_step_moves_to_next(monkeypatch):
     """第 1 步 → 第 2 步：step_index++，status=running。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
+    saves = []
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda *args, **kwargs: saves.append(1))
 
     state = _FakeState(_make_plan_dict(), step_index=0)
-    advance_current_step_if_needed(state)
+    result = advance_current_step_if_needed(state, owner="test.non_last")
     assert state.task.current_step_index == 1
     assert state.task.status == "running"
+    assert result.allowed is True
+    assert result.checkpoint_action is CheckpointAction.SAVE
+    assert saves == []
 
 
 def test_advance_from_last_step_marks_done(monkeypatch):
     """最后一步完成后 status=done。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
+    saves = []
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda *args, **kwargs: saves.append(1))
 
     state = _FakeState(_make_plan_dict(), step_index=1)
-    advance_current_step_if_needed(state)
+    result = advance_current_step_if_needed(state, owner="test.last")
     assert state.task.status == "done"
+    assert result.checkpoint_action is CheckpointAction.CLEAR
+    assert saves == []
 
 
 def test_advance_without_plan_marks_done(monkeypatch):
     """没有 plan 时直接 done，不会 crash。"""
     from agent import checkpoint
-    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda s, source=None: None)
+    saves = []
+    monkeypatch.setattr(checkpoint, "save_checkpoint", lambda *args, **kwargs: saves.append(1))
 
     state = _FakeState(plan_dict=None)
-    advance_current_step_if_needed(state)
+    result = advance_current_step_if_needed(state, owner="test.no_plan")
     assert state.task.status == "done"
+    assert result.checkpoint_action is CheckpointAction.CLEAR
+    assert saves == []
+
+
+def test_advance_denied_keeps_step_index_and_status():
+    """缺少 caller-state rule 时，不得留下 partial step/status mutation。"""
+    state = _FakeState(_make_plan_dict(), step_index=0)
+    state.task.status = "idle"
+
+    result = advance_current_step_if_needed(state, owner="test.denied")
+
+    assert result.allowed is False
+    assert state.task.current_step_index == 0
+    assert state.task.status == "idle"
+
+
+def test_advance_action_plan_marks_task_completed():
+    """ActionPlan node 由 scheduler 推进；当前 helper 保留既有完成语义。"""
+    state = _FakeState({"plan_id": "p1", "nodes": []}, step_index=0)
+
+    result = advance_current_step_if_needed(state, owner="test.action_plan")
+
+    assert result.allowed is True
+    assert result.event is TransitionEvent.TASK_COMPLETED
+    assert result.checkpoint_action is CheckpointAction.CLEAR
+    assert state.task.current_step_index == 0
+    assert state.task.status == "done"
+
+
+def test_advance_apply_denied_does_not_commit_step_index(monkeypatch):
+    """preflight 后 apply 拒绝时，local decision 不得提交到 step index。"""
+    import agent.transitions as transitions
+
+    state = _FakeState(_make_plan_dict(), step_index=0)
+
+    def deny_apply(_state, request, *, preflight):
+        assert preflight.allowed is True
+        return TaskTransitionResult(
+            allowed=False,
+            reason="stale",
+            previous_status="running",
+            next_status=None,
+            event=request.event,
+            owner=request.owner,
+            checkpoint_action=CheckpointAction.NONE,
+        )
+
+    monkeypatch.setattr(transitions, "apply_task_transition", deny_apply)
+
+    result = advance_current_step_if_needed(state, owner="test.apply_denied")
+
+    assert result.allowed is False
+    assert state.task.current_step_index == 0
+    assert state.task.status == "running"
 
 
 # ---------- conversation_events ----------
@@ -160,7 +234,7 @@ def test_append_control_event_writes_semantic_text():
     # content 是 list of blocks
     assert isinstance(content, list)
     text = content[0].get("text", "")
-    assert "用户接受" in text and "y" != text.strip()
+    assert "用户接受" in text and text.strip() != "y"
 
 
 def test_append_control_event_includes_feedback_payload():

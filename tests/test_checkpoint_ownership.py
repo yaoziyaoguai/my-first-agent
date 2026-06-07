@@ -299,8 +299,7 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
         ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
-        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 2),
         ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
@@ -308,7 +307,7 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.core", "_dispatch_checkpoint_save", "save_checkpoint", "save_checkpoint", 1),
         ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 2),
         ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", "save_checkpoint", 3),
         ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", "clear_checkpoint", 2),
@@ -328,9 +327,8 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         ("agent.session", "handle_interrupt_with_checkpoint", "save_checkpoint", "save_checkpoint", 1),
         ("agent.session", "handle_resume_choice", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.task_runtime", "advance_current_step_if_needed", "save_checkpoint", "save_checkpoint", 3),
         ("agent.tool_executor", "execute_single_tool", "save_checkpoint", "save_checkpoint", 4),
-        ("agent.tool_runtime_mediator", "_handle_confirmation_required", "save_checkpoint", "save_checkpoint", 1),
+        ("agent.tool_runtime_mediator", "mediate", "save_checkpoint", "save_checkpoint", 1),
         ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", "checkpoint.clear_checkpoint", 1),
         ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", "checkpoint.save_checkpoint", 3),
     )
@@ -341,6 +339,109 @@ def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
         )
     )
 
+    assert actual == expected
+
+
+def test_phase2_transition_checkpoint_ownership_is_explicit() -> None:
+    """Phase 2 wrapper 保持内部 owner，entry caller 按 SAVE 各保存一次。"""
+
+    from agent.transitions import _TRANSITION_TABLE, CheckpointAction, TransitionEvent
+
+    expected = {
+        (
+            "awaiting_user_input",
+            TransitionEvent.USER_INPUT_RESOLVED,
+        ): (CheckpointAction.NONE, "agent.transitions.apply_user_replied_transition"),
+        (
+            "awaiting_user_input",
+            TransitionEvent.STEP_CONFIRMATION_REQUIRED,
+        ): (CheckpointAction.NONE, "agent.transitions.apply_user_replied_transition"),
+        (
+            "running",
+            TransitionEvent.STEP_CONFIRMATION_REQUIRED,
+        ): (CheckpointAction.SAVE, "agent.response_handlers._maybe_advance_step"),
+        (
+            "running",
+            TransitionEvent.USER_INPUT_REQUIRED,
+        ): (
+            CheckpointAction.SAVE,
+            "agent.response_handlers.handle_end_turn_response / "
+            "agent.tool_executor.execute_single_tool",
+        ),
+        (
+            "idle",
+            TransitionEvent.USER_INPUT_REQUIRED,
+        ): (CheckpointAction.SAVE, "agent.tool_executor.execute_single_tool"),
+    }
+
+    actual = {
+        key: (rule.checkpoint_action, expected[key][1])
+        for key, rule in _TRANSITION_TABLE.items()
+        if key in expected
+    }
+    assert actual == expected
+
+
+def test_phase3_transition_checkpoint_ownership_is_explicit() -> None:
+    """Phase 3 rule 只声明动作，save/clear 由列出的真实 caller 执行一次。"""
+    from agent.transitions import _TRANSITION_TABLE, CheckpointAction, TransitionEvent
+
+    expected = {
+        ("idle", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED): (
+            CheckpointAction.SAVE,
+            "agent.core.chat",
+        ),
+        ("running", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED): (
+            CheckpointAction.SAVE,
+            "agent.core.chat",
+        ),
+        ("awaiting_user_input", TransitionEvent.MEMORY_CONFIRMATION_RESOLVED): (
+            CheckpointAction.SAVE,
+            "agent.memory_interaction handlers",
+        ),
+        ("running", TransitionEvent.STEP_ADVANCED): (
+            CheckpointAction.SAVE,
+            "agent.response_handlers._maybe_advance_step",
+        ),
+        ("running", TransitionEvent.TASK_COMPLETED): (
+            CheckpointAction.CLEAR,
+            "agent.response_handlers._maybe_advance_step",
+        ),
+        ("awaiting_user_input", TransitionEvent.STEP_ADVANCED): (
+            CheckpointAction.SAVE,
+            "agent.transitions.apply_user_replied_transition",
+        ),
+        ("awaiting_user_input", TransitionEvent.TASK_COMPLETED): (
+            CheckpointAction.CLEAR,
+            "agent.transitions.apply_user_replied_transition",
+        ),
+        ("awaiting_step_confirmation", TransitionEvent.STEP_ADVANCED): (
+            CheckpointAction.SAVE,
+            "agent.confirmation.plan.handle_step_confirmation",
+        ),
+        ("awaiting_step_confirmation", TransitionEvent.TASK_COMPLETED): (
+            CheckpointAction.CLEAR,
+            "agent.confirmation.plan.handle_step_confirmation",
+        ),
+        ("idle", TransitionEvent.PLAN_GENERATED): (
+            CheckpointAction.SAVE,
+            "agent.core._run_planning_phase",
+        ),
+        ("idle", TransitionEvent.TOOL_CONFIRMATION_REQUIRED): (
+            CheckpointAction.SAVE,
+            "agent.tool_executor.execute_single_tool",
+        ),
+        ("running", TransitionEvent.TOOL_CONFIRMATION_REQUIRED): (
+            CheckpointAction.SAVE,
+            "agent.tool_executor / agent.tool_runtime_mediator",
+        ),
+    }
+
+    actual = {
+        key: (rule.checkpoint_action, expected[key][1])
+        for key, rule in _TRANSITION_TABLE.items()
+        if key in expected
+    }
     assert actual == expected
 
 
@@ -390,7 +491,6 @@ def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() ->
         "agent.runtime_integration.checkpoint_resume",
         "agent.runtime_integration.checkpoint_save",
         "agent.session",
-        "agent.task_runtime",
         "agent.tool_executor",
         "agent.tool_runtime_mediator",
         "agent.transitions",
@@ -430,8 +530,7 @@ def test_pending_confirmation_persistence_writers_are_reviewed() -> None:
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
         ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "_clear_ck", 1),
-        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
+        ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 2),
         ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
@@ -526,7 +625,9 @@ def test_pending_tool_and_execution_log_persistence_writers_are_reviewed() -> No
         ("agent.confirmation.tool", "handle_tool_confirmation", "state.task.pending_tool", 2),
         ("agent.tool_executor", "execute_pending_tool", "state.task.tool_execution_log", 1),
         ("agent.tool_executor", "execute_single_tool", "state.task.pending_tool", 3),
-        ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log", 3),
+        # Phase 2 W09：request_user_input 在 preflight/apply 后使用独立提交点，
+        # 因此同一 owner 的静态写入点从 3 增为 4。
+        ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log", 4),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log.pop()", 1),
         # UMT-P2-001: FORCE_STOP 不终止循环，handle_tool_use_response 写入
         # tool_execution_log 传递拒绝原因给模型作为 feedback。这个写入与

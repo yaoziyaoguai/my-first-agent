@@ -1,4 +1,4 @@
-"""Phase 1A + Phase 1B Task Transition API unit tests.
+"""Phase 1A + Phase 1B + Phase 2 + Phase 3 Task Transition API unit tests.
 
 覆盖 apply_task_transition() 的：
 - Phase 1A: plan/tool confirmation transitions
@@ -10,13 +10,17 @@
 - invalid transition → denied
 - denied 时不修改状态
 - checkpoint_action per-rule 正确
-- transition table keys exactness (Phase 1A 4 + Phase 1B 6 = 10)
+- Phase 2: human-waiting entry/exit rules and shared preflight/apply contract
+- transition table keys exactness (Phase 1A 4 + Phase 1B 6 + Phase 2 5 + Phase 3 12 = 27)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
+import agent.transitions as transitions_module
 from agent.confirmation.dispatcher import ConfirmationContext
 from agent.confirmation.tool import handle_tool_confirmation
 from agent.transitions import (
@@ -226,7 +230,7 @@ DEFERRED_STATUSES = {
 
 
 class TestPhase1BCoverage:
-    """transition table coverage — Phase 1A + Phase 1B。"""
+    """transition table coverage — Phase 1A + Phase 1B + Phase 2。"""
 
     def test_all_phase1a_covered_statuses_have_rules(self):
         """Phase 1A 覆盖的每个 status 至少有一条 outgoing transition。"""
@@ -294,8 +298,40 @@ class TestPhase1BCoverage:
         assert plan_rule.checkpoint_action == CheckpointAction.SAVE
         assert step_rule.checkpoint_action == CheckpointAction.SAVE
 
+    def test_phase2_human_waiting_rules_present_with_expected_actions(self):
+        """Phase 2: 五条 human-waiting rules 的目标和 checkpoint owner 明确。"""
+        from agent.transitions import _TRANSITION_TABLE
+
+        expected = {
+            (
+                "awaiting_user_input",
+                TransitionEvent.USER_INPUT_RESOLVED,
+            ): ("running", CheckpointAction.NONE),
+            (
+                "awaiting_user_input",
+                TransitionEvent.STEP_CONFIRMATION_REQUIRED,
+            ): ("awaiting_step_confirmation", CheckpointAction.NONE),
+            (
+                "running",
+                TransitionEvent.STEP_CONFIRMATION_REQUIRED,
+            ): ("awaiting_step_confirmation", CheckpointAction.SAVE),
+            (
+                "running",
+                TransitionEvent.USER_INPUT_REQUIRED,
+            ): ("awaiting_user_input", CheckpointAction.SAVE),
+            (
+                "idle",
+                TransitionEvent.USER_INPUT_REQUIRED,
+            ): ("awaiting_user_input", CheckpointAction.SAVE),
+        }
+
+        for key, (to_status, checkpoint_action) in expected.items():
+            rule = _TRANSITION_TABLE[key]
+            assert rule.to_status == to_status
+            assert rule.checkpoint_action == checkpoint_action
+
     def test_transition_table_keys_exact(self):
-        """_TRANSITION_TABLE 键恰好等于 Phase 1A (4) + Phase 1B (6) = 10 rules。"""
+        """table keys 恰好等于 Phase 1A/1B、Phase 2 和完整 Phase 3。"""
         from agent.transitions import _TRANSITION_TABLE
 
         expected_keys = {
@@ -313,8 +349,34 @@ class TestPhase1BCoverage:
             # Phase 1B: planner re-generate after feedback (2)
             ("awaiting_plan_confirmation", TransitionEvent.PLAN_GENERATED),
             ("awaiting_step_confirmation", TransitionEvent.PLAN_GENERATED),
+            # Phase 2: human-waiting entry/exit (5)
+            ("awaiting_user_input", TransitionEvent.USER_INPUT_RESOLVED),
+            ("awaiting_user_input", TransitionEvent.STEP_CONFIRMATION_REQUIRED),
+            ("running", TransitionEvent.STEP_CONFIRMATION_REQUIRED),
+            ("running", TransitionEvent.USER_INPUT_REQUIRED),
+            ("idle", TransitionEvent.USER_INPUT_REQUIRED),
+            # Phase 3 U1: memory confirmation (3)
+            ("idle", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED),
+            ("running", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED),
+            (
+                "awaiting_user_input",
+                TransitionEvent.MEMORY_CONFIRMATION_RESOLVED,
+            ),
+            # Phase 3 U2: task runtime advance/completion (6)
+            ("running", TransitionEvent.STEP_ADVANCED),
+            ("running", TransitionEvent.TASK_COMPLETED),
+            ("awaiting_user_input", TransitionEvent.STEP_ADVANCED),
+            ("awaiting_user_input", TransitionEvent.TASK_COMPLETED),
+            ("awaiting_step_confirmation", TransitionEvent.STEP_ADVANCED),
+            ("awaiting_step_confirmation", TransitionEvent.TASK_COMPLETED),
+            # Phase 3 U3: planning entry (1)
+            ("idle", TransitionEvent.PLAN_GENERATED),
+            # Phase 3 U4: tool confirmation entry (2)
+            ("idle", TransitionEvent.TOOL_CONFIRMATION_REQUIRED),
+            ("running", TransitionEvent.TOOL_CONFIRMATION_REQUIRED),
         }
         actual_keys = set(_TRANSITION_TABLE.keys())
+        assert len(TransitionEvent) == 17
         assert actual_keys == expected_keys, (
             f"Table keys mismatch.\n"
             f"Extra: {actual_keys - expected_keys}\n"
@@ -347,6 +409,18 @@ class TestCheckpointActionPerRule:
         values = {CheckpointAction.NONE, CheckpointAction.SAVE, CheckpointAction.CLEAR}
         assert len(values) == 3
 
+    def test_phase3_task_runtime_checkpoint_actions(self):
+        """Task runtime 只返回 caller-owned SAVE/CLEAR，不得内部持久化。"""
+        from agent.transitions import _TRANSITION_TABLE
+
+        for status in ("running", "awaiting_user_input", "awaiting_step_confirmation"):
+            assert _TRANSITION_TABLE[
+                (status, TransitionEvent.STEP_ADVANCED)
+            ].checkpoint_action is CheckpointAction.SAVE
+            assert _TRANSITION_TABLE[
+                (status, TransitionEvent.TASK_COMPLETED)
+            ].checkpoint_action is CheckpointAction.CLEAR
+
 
 # ============================================================================
 # D. TransitionRule invariants
@@ -376,6 +450,7 @@ class TestTransitionRuleInvariants:
             "awaiting_interrupt_choice",
             "done", "failed", "cancelled",
             "<origin_status>",  # Phase 1B sentinel
+            "<memory_origin_status>",  # Phase 3 memory-specific sentinel
         }
         for key, rule in _TRANSITION_TABLE.items():
             assert rule.to_status in known, (
@@ -485,6 +560,266 @@ class TestValidateTaskTransition:
         ))
         assert result.allowed is True
         assert result.checkpoint_action == CheckpointAction.SAVE
+
+    def test_validate_resolves_dynamic_target_before_apply(self):
+        """preflight 必须返回最终 target，不能把 sentinel 泄给 caller。"""
+        state = _make_state(
+            "awaiting_feedback_intent",
+            pending={"origin_status": "awaiting_step_confirmation"},
+        )
+        result = validate_task_transition(state, TaskTransitionRequest(
+            event=TransitionEvent.USER_CANCELLED,
+            owner="test.dynamic_preflight",
+            expected_from_status="awaiting_feedback_intent",
+        ))
+
+        assert result.allowed is True
+        assert result.next_status == "awaiting_step_confirmation"
+        assert state.task.status == "awaiting_feedback_intent"
+
+
+class TestApplyTaskTransitionWithPreflight:
+    """Phase 2: apply 消费同一个 preflight，并拒绝 stale/mismatched result。"""
+
+    def test_apply_uses_allowed_preflight(self):
+        state = _make_state("running")
+        request = TaskTransitionRequest(
+            event=TransitionEvent.USER_INPUT_REQUIRED,
+            owner="test.user_input_required",
+            expected_from_status="running",
+        )
+        preflight = validate_task_transition(state, request)
+
+        result = apply_task_transition(state, request, preflight=preflight)
+
+        assert result.allowed is True
+        assert result.next_status == "awaiting_user_input"
+        assert result.checkpoint_action == CheckpointAction.SAVE
+        assert state.task.status == "awaiting_user_input"
+
+    def test_apply_denies_stale_preflight_without_mutation(self):
+        state = _make_state("running")
+        request = TaskTransitionRequest(
+            event=TransitionEvent.USER_INPUT_REQUIRED,
+            owner="test.user_input_required",
+            expected_from_status="running",
+        )
+        preflight = validate_task_transition(state, request)
+        state.task.status = "idle"
+
+        result = apply_task_transition(state, request, preflight=preflight)
+
+        assert result.allowed is False
+        assert result.checkpoint_action == CheckpointAction.NONE
+        assert "stale" in result.reason.lower()
+        assert state.task.status == "idle"
+
+    def test_apply_denies_preflight_from_another_owner(self):
+        state = _make_state("running")
+        original_request = TaskTransitionRequest(
+            event=TransitionEvent.USER_INPUT_REQUIRED,
+            owner="test.owner_a",
+            expected_from_status="running",
+        )
+        preflight = validate_task_transition(state, original_request)
+        different_request = TaskTransitionRequest(
+            event=TransitionEvent.USER_INPUT_REQUIRED,
+            owner="test.owner_b",
+            expected_from_status="running",
+        )
+
+        result = apply_task_transition(
+            state,
+            different_request,
+            preflight=preflight,
+        )
+
+        assert result.allowed is False
+        assert result.checkpoint_action == CheckpointAction.NONE
+        assert "preflight" in result.reason.lower()
+        assert state.task.status == "running"
+
+
+class TestPhase3MemoryOriginResolver:
+    """Phase 3 U1: memory origin 使用专用 resolver，不污染 generic allowlist。"""
+
+    def test_memory_events_and_rules_exist(self):
+        assert TransitionEvent.MEMORY_CONFIRMATION_REQUIRED.value == (
+            "memory_confirmation.required"
+        )
+        assert TransitionEvent.MEMORY_CONFIRMATION_RESOLVED.value == (
+            "memory_confirmation.resolved"
+        )
+
+        table = transitions_module._TRANSITION_TABLE
+        assert table[
+            ("idle", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED)
+        ].to_status == "awaiting_user_input"
+        assert table[
+            ("running", TransitionEvent.MEMORY_CONFIRMATION_REQUIRED)
+        ].to_status == "awaiting_user_input"
+        resolved_rule = table[
+            ("awaiting_user_input", TransitionEvent.MEMORY_CONFIRMATION_RESOLVED)
+        ]
+        assert resolved_rule.to_status == "<memory_origin_status>"
+        assert resolved_rule.checkpoint_action == CheckpointAction.SAVE
+
+    @pytest.mark.parametrize(
+        ("pending", "allowed", "target", "source_key"),
+        [
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "idle"},
+                True,
+                "idle",
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "running"},
+                True,
+                "running",
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_inline_confirmation", "origin_status": "idle"},
+                True,
+                "idle",
+                "origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation"},
+                True,
+                "running",
+                "legacy_missing_fallback",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": None},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": ""},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "done"},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "failed"},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "cancelled"},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": "unknown"},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {
+                    "awaiting_kind": "memory_confirmation",
+                    "_origin_status": "awaiting_resume_choice",
+                },
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {
+                    "awaiting_kind": "memory_confirmation",
+                    "_origin_status": "awaiting_interrupt_choice",
+                },
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {
+                    "awaiting_kind": "memory_confirmation",
+                    "_origin_status": "awaiting_tool_confirmation",
+                },
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {"awaiting_kind": "memory_confirmation", "_origin_status": 123},
+                False,
+                None,
+                "_origin_status",
+            ),
+            (
+                {
+                    "awaiting_kind": "memory_confirmation",
+                    "_origin_status": "idle",
+                    "origin_status": "running",
+                },
+                False,
+                None,
+                None,
+            ),
+            (
+                {"awaiting_kind": "collect_input", "_origin_status": "running"},
+                False,
+                None,
+                None,
+            ),
+        ],
+    )
+    def test_memory_origin_resolution_contract(
+        self,
+        pending,
+        allowed,
+        target,
+        source_key,
+    ):
+        resolver = transitions_module.resolve_memory_origin_status
+        result = resolver(_make_state("awaiting_user_input", pending=pending))
+
+        assert result.allowed is allowed
+        assert result.target_status == target
+        assert result.source_key == source_key
+
+    def test_memory_preflight_resolves_target_and_apply_reuses_it(self):
+        state = _make_state(
+            "awaiting_user_input",
+            pending={
+                "awaiting_kind": "memory_confirmation",
+                "_origin_status": "idle",
+            },
+        )
+        request = TaskTransitionRequest(
+            event=TransitionEvent.MEMORY_CONFIRMATION_RESOLVED,
+            owner="memory_interaction.resolve",
+            expected_from_status="awaiting_user_input",
+        )
+
+        preflight = validate_task_transition(state, request)
+        assert preflight.allowed is True
+        assert preflight.next_status == "idle"
+
+        state.task.pending_user_input_request["_origin_status"] = "done"
+        result = apply_task_transition(state, request, preflight=preflight)
+
+        assert result.allowed is True
+        assert state.task.status == "idle"
+        expected_generic_origins = frozenset({
+            "awaiting_plan_confirmation",
+            "awaiting_step_confirmation",
+        })
+        assert expected_generic_origins == _ORIGIN_STATUS_ALLOWLIST
 
 
 # ============================================================================

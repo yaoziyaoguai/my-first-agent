@@ -31,9 +31,17 @@ from agent.tool_registry import (
     is_meta_tool,
     needs_tool_confirmation,
 )
+from agent.transitions import (
+    CheckpointAction,
+    TaskTransitionRequest,
+    TransitionEvent,
+    apply_task_transition,
+    validate_task_transition,
+)
 
 AWAITING_USER = "__awaiting_user__"
 FORCE_STOP = "__force_stop__"
+TRANSITION_DENIED = "__transition_denied__"
 
 # 兼容旧调用方：常量源头已经收口到 tool_result_contract，这里只保留别名。
 TOOL_FAILURE_PREFIXES = tool_result_contract.TOOL_FAILURE_PREFIXES
@@ -193,6 +201,7 @@ def execute_single_tool(
     - None: normal execution completed, caller may continue processing tools
     - AWAITING_USER: tool requires human confirmation; caller should stop loop
     - FORCE_STOP: tool was blocked or rejected enough times; caller should stop task
+    - TRANSITION_DENIED: human-waiting transition was denied; caller must stop loop
 
     **元工具特殊路径**：`mark_step_complete` 这类系统控制信号工具，只写 state.task.
     tool_execution_log（供 task_runtime 读分值判断），不写 messages——它们的
@@ -225,7 +234,7 @@ def execute_single_tool(
             # 模型真实重复输出最后一条 Assistant 总结。
             tool_use_id = f"{tool_use_id}#step:{state.task.current_step_index}"
 
-        state.task.tool_execution_log[tool_use_id] = {
+        meta_log_entry = {
             "tool": tool_name,
             "input": tool_input,
             "result": "",   # 元工具没有业务语义上的返回值
@@ -250,13 +259,10 @@ def execute_single_tool(
             current_idx = state.task.current_step_index
             stale_mark_ids = [
                 tid
-                for tid, entry in state.task.tool_execution_log.items()
+                for tid, entry in execution_log.items()
                 if entry.get("tool") == "mark_step_complete"
                 and entry.get("step_index") == current_idx
             ]
-            for tid in stale_mark_ids:
-                state.task.tool_execution_log.pop(tid, None)
-
             pending_request: PendingUserInputRequest = {
                 # awaiting_kind 是 pending 内部的等待来源标记，不是新的 status。
                 # 它随现有 task 快照进 checkpoint，但不改变 checkpoint 顶层结构。
@@ -268,9 +274,32 @@ def execute_single_tool(
                 "tool_use_id": tool_use_id,
                 "step_index": current_idx,
             }
-            state.task.pending_user_input_request = pending_request
-            state.task.status = "awaiting_user_input"
 
+            request = TaskTransitionRequest(
+                event=TransitionEvent.USER_INPUT_REQUIRED,
+                owner="agent.tool_executor.execute_single_tool.request_user_input",
+                expected_from_status=(
+                    "idle" if state.task.status == "idle" else "running"
+                ),
+            )
+            preflight = validate_task_transition(state, request)
+            if not preflight.allowed:
+                return TRANSITION_DENIED
+            transition = apply_task_transition(
+                state,
+                request,
+                preflight=preflight,
+            )
+            if not transition.allowed:
+                return TRANSITION_DENIED
+            assert transition.checkpoint_action is CheckpointAction.SAVE
+
+            state.task.tool_execution_log[tool_use_id] = meta_log_entry
+            for tid in stale_mark_ids:
+                state.task.tool_execution_log.pop(tid, None)
+            state.task.pending_user_input_request = pending_request
+        else:
+            state.task.tool_execution_log[tool_use_id] = meta_log_entry
         save_checkpoint(state)
         return None
 
@@ -389,13 +418,26 @@ def execute_single_tool(
         return FORCE_STOP
 
     if confirmation is True:
-        state.task.pending_tool = {
+        pending_tool = {
             "tool_use_id": tool_use_id,
             "tool": tool_name,
             "input": tool_input,
         }
-        state.task.status = "awaiting_tool_confirmation"
-        save_checkpoint(state)
+        request = TaskTransitionRequest(
+            event=TransitionEvent.TOOL_CONFIRMATION_REQUIRED,
+            owner="agent.tool_executor.execute_single_tool.tool_confirmation",
+            expected_from_status=(
+                "idle" if state.task.status == "idle" else "running"
+            ),
+        )
+        preflight = validate_task_transition(state, request)
+        if not preflight.allowed:
+            return TRANSITION_DENIED
+        transition = apply_task_transition(state, request, preflight=preflight)
+        if not transition.allowed:
+            return TRANSITION_DENIED
+
+        state.task.pending_tool = pending_tool
         # 工具审计：记录需要用户确认的工具调用
         emit_tool_audit_event(
             event_type="tool_requires_confirmation",
@@ -430,6 +472,8 @@ def execute_single_tool(
                 tool_input=tool_input,
             ),
         )
+        assert transition.checkpoint_action is CheckpointAction.SAVE
+        save_checkpoint(state)
         return AWAITING_USER
 
     emit_display_event(

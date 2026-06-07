@@ -37,6 +37,8 @@ class _FakeState:
     class Task:
         tool_execution_log: dict = {}
         current_step_index: int = 0
+        status: str = "running"
+        pending_tool: dict | None = None
 
     task: Task = Task()
     memory: _FakeMemory = _FakeMemory()
@@ -143,24 +145,17 @@ def test_handle_blocked_tool_execution_log_status(blocked_context) -> None:
     assert log_entry["tool"] == "unsafe_tool"
 
 
-def test_handle_confirmation_required_sets_pending_tool(
-    blocked_context, monkeypatch
-) -> None:
+def test_handle_confirmation_required_sets_pending_tool(blocked_context) -> None:
     """F-005: confirmation_required 必须正确设置 pending_tool。"""
     mediator, _ = blocked_context
 
-    # _handle_confirmation_required 内部调用 save_checkpoint，
-    # 这里 mock 掉以避免访问真实文件系统
-    import agent.checkpoint as checkpoint_mod
-
-    monkeypatch.setattr(checkpoint_mod, "save_checkpoint", lambda state: None)
-
-    mediator._handle_confirmation_required(
+    result = mediator._handle_confirmation_required(
         tool_name="write_file",
         tool_input={"path": "/tmp/test.txt"},
         tool_use_id="tu_004",
     )
 
+    assert result.allowed is True
     assert mediator._state.task.pending_tool is not None, (
         "F-005: confirmation_required 必须设置 pending_tool"
     )

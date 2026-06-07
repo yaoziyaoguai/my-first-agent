@@ -47,8 +47,8 @@ def test_empty_input_guard_does_not_enter_transition_for_collect_path(
     monkeypatch,
 ):
     """空输入没有产生事实，handler 应留在等待态，不执行任何 transition action。"""
-    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
     import agent.confirm_handlers as confirm_handlers
+    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
 
     def fail_transition(**_kwargs):
         raise AssertionError("empty_user_input 不应进入 transition/action 层")
@@ -88,8 +88,8 @@ def test_empty_input_guard_preserves_runtime_pending(
     monkeypatch,
 ):
     """runtime 求助等待用户时，空白输入不能清 pending，也不能继续 loop。"""
-    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
     import agent.confirm_handlers as confirm_handlers
+    from agent.confirm_handlers import ConfirmationContext, handle_user_input_step
 
     def fail_transition(**_kwargs):
         raise AssertionError("empty_user_input 不应进入 transition/action 层")
@@ -135,9 +135,9 @@ def test_collect_input_transition_advances_step_and_saves(
     capsys,
 ):
     """collect_input 答复落地后应推进 step，并记录为普通 step_input。"""
+    import agent.runtime_observer as observer
     from agent.input_resolution import resolve_user_input
     from agent.transitions import apply_user_replied_transition
-    import agent.runtime_observer as observer
 
     calls = _patch_checkpoint_counter(monkeypatch)
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
@@ -178,9 +178,9 @@ def test_runtime_user_input_transition_keeps_step_clears_pending_and_saves(
     capsys,
 ):
     """执行期求助答复只补当前 step：清 pending，但不推进 step_index。"""
+    import agent.runtime_observer as observer
     from agent.input_resolution import resolve_user_input
     from agent.transitions import apply_user_replied_transition
-    import agent.runtime_observer as observer
 
     calls = _patch_checkpoint_counter(monkeypatch)
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
@@ -225,6 +225,117 @@ def test_runtime_user_input_transition_keeps_step_clears_pending_and_saves(
         "[ACTIONS] "
         "action_names=append_step_input_with_question,clear_pending_user_input,save_checkpoint"
     ) in out
+
+
+def test_runtime_user_input_denied_has_no_side_effects(
+    fresh_state,
+    two_step_plan,
+    monkeypatch,
+):
+    """W01: stale state denied 时不能清 pending、append、保存或继续 loop。"""
+    from agent.input_resolution import RUNTIME_USER_INPUT_ANSWER, InputResolution
+    from agent.transitions import apply_user_replied_transition
+
+    calls = _patch_checkpoint_counter(monkeypatch)
+    pending = {
+        "awaiting_kind": "request_user_input",
+        "question": "预算是多少？",
+        "why_needed": "用于当前步骤",
+    }
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "running"
+    fresh_state.task.current_step_index = 0
+    fresh_state.task.pending_user_input_request = pending
+    before_messages = list(fresh_state.conversation.messages)
+    resolution = InputResolution(
+        kind=RUNTIME_USER_INPUT_ANSWER,
+        content="3500 元",
+        pending_user_input_request=pending,
+    )
+
+    result = apply_user_replied_transition(
+        state=fresh_state,
+        messages=fresh_state.conversation.messages,
+        resolution=resolution,
+    )
+
+    assert result.should_continue_loop is False
+    assert "状态迁移失败" in result.reply
+    assert fresh_state.task.status == "running"
+    assert fresh_state.task.current_step_index == 0
+    assert fresh_state.task.pending_user_input_request == pending
+    assert fresh_state.conversation.messages == before_messages
+    assert calls == {"save": 0, "clear": 0}
+
+
+def test_collect_confirm_transition_uses_wrapper_checkpoint_once(
+    fresh_state,
+    two_step_plan,
+    monkeypatch,
+):
+    """W02: collect answer 进入 step confirmation，wrapper 最后只保存一次。"""
+    from agent.input_resolution import COLLECT_INPUT_ANSWER, InputResolution
+    from agent.transitions import apply_user_replied_transition
+
+    calls = _patch_checkpoint_counter(monkeypatch)
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "awaiting_user_input"
+    fresh_state.task.current_step_index = 0
+    fresh_state.task.confirm_each_step = True
+    resolution = InputResolution(
+        kind=COLLECT_INPUT_ANSWER,
+        content="旅游出行，舒适型",
+        should_advance_step=True,
+    )
+
+    result = apply_user_replied_transition(
+        state=fresh_state,
+        messages=fresh_state.conversation.messages,
+        resolution=resolution,
+    )
+
+    assert result.should_continue_loop is False
+    assert "请确认" in result.reply
+    assert fresh_state.task.status == "awaiting_step_confirmation"
+    assert fresh_state.task.current_step_index == 0
+    assert calls == {"save": 1, "clear": 0}
+    assert any("旅游出行，舒适型" in text for text in _step_input_texts(fresh_state))
+
+
+def test_collect_confirm_denied_has_no_side_effects(
+    fresh_state,
+    two_step_plan,
+    monkeypatch,
+):
+    """W02: stale state denied 时不能 append、推进、保存、reset 或 continue。"""
+    from agent.input_resolution import COLLECT_INPUT_ANSWER, InputResolution
+    from agent.transitions import apply_user_replied_transition
+
+    calls = _patch_checkpoint_counter(monkeypatch)
+    fresh_state.task.current_plan = two_step_plan
+    fresh_state.task.status = "running"
+    fresh_state.task.current_step_index = 0
+    fresh_state.task.confirm_each_step = True
+    before_messages = list(fresh_state.conversation.messages)
+    resolution = InputResolution(
+        kind=COLLECT_INPUT_ANSWER,
+        content="旅游出行，舒适型",
+        should_advance_step=True,
+    )
+
+    result = apply_user_replied_transition(
+        state=fresh_state,
+        messages=fresh_state.conversation.messages,
+        resolution=resolution,
+    )
+
+    assert result.should_continue_loop is False
+    assert "状态迁移失败" in result.reply
+    assert fresh_state.task.status == "running"
+    assert fresh_state.task.current_step_index == 0
+    assert fresh_state.task.pending_user_input_request is None
+    assert fresh_state.conversation.messages == before_messages
+    assert calls == {"save": 0, "clear": 0}
 
 
 def test_checkpoint_restore_with_pending_resolves_as_runtime_answer(

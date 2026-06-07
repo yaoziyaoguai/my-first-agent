@@ -3,8 +3,12 @@
 把原来散在 main.py 里的 session 相关逻辑集中到这里。
 """
 
+import inspect
 import os
 import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import agent.checkpoint as _cp
 from agent.checkpoint import (
@@ -12,7 +16,6 @@ from agent.checkpoint import (
     clear_checkpoint,
     load_checkpoint,
     load_checkpoint_to_state,
-    save_checkpoint,
 )
 from agent.cli_renderer import (
     STAGE_LABEL,
@@ -38,6 +41,11 @@ from agent.memory import (
     init_memory,
 )
 from agent.memory_review import count_pending_proposals
+from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+from agent.runtime_integration.skill_lifecycle import (
+    clear_skill_lifecycle_for_resume,
+    restore_skill_lifecycle_from_checkpoint,
+)
 from config import MODEL_NAME, SYSTEM_PROMPT
 
 # ========== checkpoint 路径辅助 ==========
@@ -48,6 +56,30 @@ def _resolve_session_id() -> str:
         return get_runtime_session_id() or ""
     except Exception:
         return ""
+
+
+def save_checkpoint(state: Any, source: str | None = None, **kwargs: Any) -> None:
+    """Compatibility patch symbol; session saves still use runtime gateway."""
+    kwargs.setdefault("session_id", _resolve_session_id())
+    try:
+        signature = inspect.signature(save_runtime_checkpoint)
+    except (TypeError, ValueError):
+        save_runtime_checkpoint(state, source=source, **kwargs)
+        return
+
+    parameters = signature.parameters
+    accepts_var_kwargs = any(
+        param.kind is inspect.Parameter.VAR_KEYWORD
+        for param in parameters.values()
+    )
+    accepted_kwargs = (
+        dict(kwargs)
+        if accepts_var_kwargs
+        else {key: value for key, value in kwargs.items() if key in parameters}
+    )
+    if accepts_var_kwargs or "source" in parameters:
+        accepted_kwargs["source"] = source
+    save_runtime_checkpoint(state, **accepted_kwargs)
 
 
 def _single_file_checkpoint_ok(single_cp, current_sid: str) -> bool:
@@ -111,7 +143,19 @@ def _load_checkpoint_best_effort():
     return None
 
 
-def _load_checkpoint_to_state_best_effort(state):
+@dataclass(frozen=True)
+class SelectedCheckpointRestoreResult:
+    success: bool
+    checkpoint: dict[str, Any] | None = None
+    path: Path | None = None
+
+    def __bool__(self) -> bool:
+        return self.success
+
+
+def _load_selected_checkpoint_to_state_best_effort(
+    state,
+) -> SelectedCheckpointRestoreResult:
     """恢复到 state：按 mtime 选最新 checkpoint（single-file vs session-scoped）。
 
     Single-file checkpoint (formerly "v1"): memory/checkpoint.json
@@ -122,6 +166,7 @@ def _load_checkpoint_to_state_best_effort(state):
     2. 若所有 session-scoped 均失败，fallback 到 single-file（需 session 匹配
        或 legacy 兼容，P2-1）
     3. 在两者间按 mtime 选择最新的
+    4. 返回实际选中的 checkpoint/path，供 session resume 成功后同步恢复 skill
     """
     _sid = _resolve_session_id()
 
@@ -155,13 +200,40 @@ def _load_checkpoint_to_state_best_effort(state):
     elif _best_session_path is None and _single_ok:
         _pick_single = True
 
+    _chosen_cp = None
+    _chosen_path: Path | None = None
     if _pick_single:
-        return load_checkpoint_to_state(state)
+        _chosen_cp = _single_cp
+        _chosen_path = _cp.CHECKPOINT_PATH
+    elif _best_session_path is not None:
+        _chosen_path = _best_session_path
+
+    if _pick_single:
+        restored = load_checkpoint_to_state(state)
+        if restored and _chosen_path is not None:
+            _chosen_cp = load_checkpoint(path=_chosen_path)
+        return SelectedCheckpointRestoreResult(
+            bool(restored and _chosen_cp is not None),
+            checkpoint=_chosen_cp if restored else None,
+            path=_chosen_path if restored else None,
+        )
 
     if _best_session_path is not None:
-        return load_checkpoint_to_state(state, path=_best_session_path)
+        restored = load_checkpoint_to_state(state, path=_best_session_path)
+        if restored:
+            _chosen_cp = load_checkpoint(path=_best_session_path)
+        return SelectedCheckpointRestoreResult(
+            bool(restored and _chosen_cp is not None),
+            checkpoint=_chosen_cp if restored else None,
+            path=_chosen_path if restored else None,
+        )
 
-    return False
+    return SelectedCheckpointRestoreResult(False)
+
+
+def _load_checkpoint_to_state_best_effort(state):
+    """Backward-compatible bool wrapper for older callers/tests."""
+    return _load_selected_checkpoint_to_state_best_effort(state).success
 
 
 def _detect_provider_info() -> dict[str, str]:
@@ -364,6 +436,11 @@ def try_resume_from_checkpoint():
     if not _checkpoint_has_actionable_resume(task_data, conv_data):
         # 静默清理历史残留，避免误导用户「有未完成的任务」。
         clear_checkpoint()
+        clear_skill_lifecycle_for_resume(
+            get_state(),
+            reason="no_actionable_resume",
+            source="session.try_resume_from_checkpoint",
+        )
         # v0.3 M1：把「静默清理」也变成一行可见提示，方便用户确认 resume 行为。
         print(render_resume_status({"actionable": False}))
         return
@@ -374,10 +451,21 @@ def try_resume_from_checkpoint():
     # 管道模式：不弹交互提示，自动恢复最近任务。
     if not sys.stdin.isatty():
         print("[系统] 检测到管道输入，自动恢复最近任务。")
-        restored = _load_checkpoint_to_state_best_effort(get_state())
-        if restored:
+        restore_result = _load_selected_checkpoint_to_state_best_effort(get_state())
+        if restore_result.success:
+            restore_skill_lifecycle_from_checkpoint(
+                get_state(),
+                restore_result.checkpoint,
+                source="session.try_resume_from_checkpoint",
+            )
             _try_dispatch_checkpoint_resume(get_state())
             _replay_awaiting_prompt(get_state())
+        else:
+            clear_skill_lifecycle_for_resume(
+                get_state(),
+                reason="state_restore_failed",
+                source="session.try_resume_from_checkpoint",
+            )
         return
 
     # TTY 模式：交给 main_loop 通过正常输入后端收口读取用户选择。
@@ -563,7 +651,7 @@ def finalize_session():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint(state, session_id=_resolve_session_id())
+        save_checkpoint(state)
         print("[系统] 未完成的任务断点已保存，下次启动可继续。")
 
     _record_session_end(status="ok")
@@ -583,7 +671,7 @@ def handle_interrupt_with_checkpoint() -> bool:
     from agent.core import get_state
 
     state = get_state()
-    save_checkpoint(state, session_id=_resolve_session_id())
+    save_checkpoint(state)
 
     print("\n\n[系统] 当前任务已暂停，断点已保存。")
     print("  1. 继续当前任务")
@@ -604,15 +692,30 @@ def handle_resume_choice(choice: str) -> None:
     choice = choice.strip().lower()
     if choice != "y":
         clear_checkpoint()
+        clear_skill_lifecycle_for_resume(
+            get_state(),
+            reason="resume_declined",
+            source="session.handle_resume_choice",
+        )
         print("\n[系统] 已清除断点，回到对话模式，可以直接输入新任务。\n")
         get_state().task.status = "idle"
         return
 
-    restored = _load_checkpoint_to_state_best_effort(get_state())
-    if restored:
+    restore_result = _load_selected_checkpoint_to_state_best_effort(get_state())
+    if restore_result.success:
+        restore_skill_lifecycle_from_checkpoint(
+            get_state(),
+            restore_result.checkpoint,
+            source="session.handle_resume_choice",
+        )
         _try_dispatch_checkpoint_resume(get_state())
         _replay_awaiting_prompt(get_state())
     else:
+        clear_skill_lifecycle_for_resume(
+            get_state(),
+            reason="state_restore_failed",
+            source="session.handle_resume_choice",
+        )
         print(
             "\n[系统] 恢复断点失败——checkpoint 数据可能已损坏或与当前版本不兼容。"
             "已清除断点，回到对话模式。可直接输入新任务。\n"
@@ -637,6 +740,15 @@ def handle_interrupt_choice(choice: str) -> bool:
         return False
 
     if choice == "2":
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+
+        deactivate_active_skill_for_task_boundary(
+            state,
+            reason="user_abandon",
+            source="session.user_abandon",
+        )
         clear_checkpoint()
         state.reset_task()
         print("[系统] 任务已放弃，回到对话模式。\n")
@@ -683,7 +795,7 @@ def handle_double_interrupt():
     save_session_snapshot(messages)
 
     if state.task.current_plan:
-        save_checkpoint(state, session_id=_resolve_session_id())
+        save_checkpoint(state)
         print("[系统] 任务断点已更新。")
 
     _record_session_end(status="ok", reason="double_interrupt")

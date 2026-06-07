@@ -248,6 +248,83 @@ class TestActiveSkillLifecycleCheckpointSupport:
         assert self.lifecycle.get_active_skill_id() == "new"
 
 
+class TestCheckpointMetadataAPI:
+    """U1: to_checkpoint_metadata() / restore_from_checkpoint_metadata()。"""
+
+    def setup_method(self):
+        self.lifecycle = ActiveSkillLifecycle()
+
+    # ── to_checkpoint_metadata() ──────────────────────────────────────
+
+    def test_to_checkpoint_metadata_has_no_body(self):
+        """checkpoint metadata 不含 body 字段。"""
+        self.lifecycle.activate(
+            "demo-note-maker",
+            body="some skill body content",
+            allowed_tools=("demo.write_demo_note", "demo.read_demo_note"),
+        )
+        meta = self.lifecycle.to_checkpoint_metadata()
+        assert meta["skill_id"] == "demo-note-maker"
+        assert meta["allowed_tools"] == ["demo.write_demo_note", "demo.read_demo_note"]
+        assert meta["activated_by"] == "model_selection"
+        assert meta["namespace"] == "default"
+        assert "body" not in meta
+
+    def test_to_checkpoint_metadata_when_inactive(self):
+        """无 active_skill 时返回空 dict。"""
+        meta = self.lifecycle.to_checkpoint_metadata()
+        assert meta == {}
+
+    def test_to_checkpoint_metadata_never_leaks_raw_content(self):
+        """metadata 不含 raw SKILL.md / prompt section / resource / secret。"""
+        self.lifecycle.activate("demo", body="# SKILL.md raw content\nprompt: secret")
+        meta = self.lifecycle.to_checkpoint_metadata()
+        assert "body" not in meta
+        assert "prompt" not in meta
+        assert "resource" not in meta
+        assert "secret" not in meta
+
+    # ── restore_from_checkpoint_metadata() ────────────────────────────
+
+    def test_restore_from_checkpoint_metadata_uses_provided_body(self):
+        """restore 使用调用方传入的 body（从 loader 重新加载的完整 body）。"""
+        skill = self.lifecycle.restore_from_checkpoint_metadata(
+            skill_id="demo",
+            body="full body from loader",
+            allowed_tools=("tool.a",),
+        )
+        assert skill.body == "full body from loader"
+        assert self.lifecycle.get_active().body == "full body from loader"
+
+    def test_restore_from_checkpoint_metadata_uses_provided_allowed_tools(self):
+        """allowed_tools 使用调用方传入的当前 manifest 值，不盲信 checkpoint 旧值。"""
+        self.lifecycle.restore_from_checkpoint_metadata(
+            skill_id="demo",
+            body="body",
+            allowed_tools=("tool.a", "tool.b", "tool.c"),
+        )
+        assert self.lifecycle.get_allowed_tools() == frozenset({"tool.a", "tool.b", "tool.c"})
+
+    def test_restore_from_checkpoint_metadata_overwrites_previous(self):
+        """restore 替换已有 active_skill。"""
+        self.lifecycle.activate("old", body="old")
+        self.lifecycle.restore_from_checkpoint_metadata(
+            skill_id="new",
+            body="new body",
+            allowed_tools=(),
+        )
+        assert self.lifecycle.get_active_skill_id() == "new"
+
+    def test_restore_from_checkpoint_metadata_tags_activated_by(self):
+        """activated_by 默认为 checkpoint_resume。"""
+        skill = self.lifecycle.restore_from_checkpoint_metadata(
+            skill_id="demo",
+            body="body",
+            allowed_tools=(),
+        )
+        assert skill.activated_by == "checkpoint_resume"
+
+
 class TestActiveSkillLifecycleB7Extension:
     """Phase 7 B7 extension points。"""
 
@@ -279,3 +356,116 @@ class TestActiveSkillLifecycleB7Extension:
         self.lifecycle.activate_in_namespace("ns-b", "skill-b", body="b")
         # Phase 4: 第二个调用覆盖第一个（共享状态）
         assert self.lifecycle.get_active_skill_id() == "skill-b"
+
+
+class TestActiveSkillTaskBoundaryDeactivation:
+    """U4: task boundary deactivation helper 测试。"""
+
+    def setup_method(self):
+        self.lifecycle = ActiveSkillLifecycle()
+
+    def test_deactivate_clears_active_skill(self):
+        """activate → deactivate_for_task_boundary → is_active() 为 False。"""
+        self.lifecycle.activate("demo", body="test body")
+        from agent.skill_system.task_boundary import (
+            DeactivateResult,
+            deactivate_active_skill_for_task_boundary,
+        )
+        result = deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="new_task",
+            source="test",
+        )
+        assert result == DeactivateResult.DEACTIVATED
+        assert not self.lifecycle.is_active()
+
+    def test_deactivate_returns_deactivated(self):
+        """有 active skill 时返回 DEACTIVATED。"""
+        self.lifecycle.activate("demo", body="test body")
+        from agent.skill_system.task_boundary import (
+            DeactivateResult,
+            deactivate_active_skill_for_task_boundary,
+        )
+        result = deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="task_complete",
+            source="test",
+        )
+        assert result == DeactivateResult.DEACTIVATED
+
+    def test_no_active_skill_returns_no_active_skill(self):
+        """无 active skill 时返回 NO_ACTIVE_SKILL，幂等。"""
+        from agent.skill_system.task_boundary import (
+            DeactivateResult,
+            deactivate_active_skill_for_task_boundary,
+        )
+        result = deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="new_task",
+            source="test",
+        )
+        assert result == DeactivateResult.NO_ACTIVE_SKILL
+        assert not self.lifecycle.is_active()
+
+    def test_evidence_callback_called_on_deactivate(self):
+        """activate → deactivate → evidence_callback 被调用且参数正确。"""
+        self.lifecycle.activate("demo", body="test body")
+        calls = []
+
+        def cb(**kwargs):
+            calls.append(kwargs)
+
+        from agent.skill_system.task_boundary import (
+            deactivate_active_skill_for_task_boundary,
+        )
+        deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="task_complete",
+            source="test.caller",
+            evidence_callback=cb,
+        )
+        assert len(calls) == 1
+        assert calls[0]["subsystem"] == "skill"
+        assert calls[0]["operation"] == "deactivated"
+        assert "demo" in calls[0]["safe_summary"]
+        assert "task_complete" in calls[0]["safe_summary"]
+        assert "test.caller" in calls[0]["safe_summary"]
+
+    def test_no_active_skill_no_evidence(self):
+        """无 active skill 时不记录 evidence。"""
+        calls = []
+
+        def cb(**kwargs):
+            calls.append(kwargs)
+
+        from agent.skill_system.task_boundary import (
+            deactivate_active_skill_for_task_boundary,
+        )
+        deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="new_task",
+            source="test",
+            evidence_callback=cb,
+        )
+        assert len(calls) == 0
+
+    def test_safe_summary_does_not_contain_body(self):
+        """evidence safe_summary 不含 skill body。"""
+        self.lifecycle.activate("demo", body="secret body content here")
+        calls = []
+
+        def cb(**kwargs):
+            calls.append(kwargs)
+
+        from agent.skill_system.task_boundary import (
+            deactivate_active_skill_for_task_boundary,
+        )
+        deactivate_active_skill_for_task_boundary(
+            self.lifecycle,
+            reason="user_abandon",
+            source="test",
+            evidence_callback=cb,
+        )
+        assert len(calls) == 1
+        assert "secret body content here" not in calls[0]["safe_summary"]
+        assert "secret" not in calls[0]["safe_summary"].lower().split("body")

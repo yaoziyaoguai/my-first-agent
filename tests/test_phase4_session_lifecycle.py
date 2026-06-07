@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from agent.state import create_agent_state
+from tests.conftest import FakeAnthropicClient, text_response
 
 
 def _patch_get_state(monkeypatch, state):
@@ -87,7 +88,7 @@ def test_interrupt_with_checkpoint_saves_then_sets_transient(monkeypatch):
     _patch_get_state(monkeypatch, state)
     save_calls = []
     monkeypatch.setattr(
-        session, "save_checkpoint",
+        session, "save_runtime_checkpoint",
         lambda _state, session_id=None: save_calls.append(state.task.status),
     )
     monkeypatch.setattr(session, "_resolve_session_id", lambda: "test-session")
@@ -109,7 +110,7 @@ def test_interrupt_transient_not_persisted_to_checkpoint(monkeypatch):
     _patch_get_state(monkeypatch, state)
     saved_states = []
     monkeypatch.setattr(
-        session, "save_checkpoint",
+        session, "save_runtime_checkpoint",
         lambda s, session_id=None: saved_states.append(s.task.status),
     )
     monkeypatch.setattr(session, "_resolve_session_id", lambda: "test-session")
@@ -151,7 +152,9 @@ def test_resume_choice_restore_success_replays_prompt(monkeypatch):
     state.task.status = "awaiting_resume_choice"
     _patch_get_state(monkeypatch, state)
     monkeypatch.setattr(
-        session, "_load_checkpoint_to_state_best_effort", lambda _state: True,
+        session,
+        "_load_selected_checkpoint_to_state_best_effort",
+        lambda _state: session.SelectedCheckpointRestoreResult(True, checkpoint={}),
     )
     replay_calls = []
     monkeypatch.setattr(
@@ -175,7 +178,9 @@ def test_resume_choice_restore_failed_falls_to_idle(monkeypatch):
     state.task.status = "awaiting_resume_choice"
     _patch_get_state(monkeypatch, state)
     monkeypatch.setattr(
-        session, "_load_checkpoint_to_state_best_effort", lambda _state: False,
+        session,
+        "_load_selected_checkpoint_to_state_best_effort",
+        lambda _state: session.SelectedCheckpointRestoreResult(False),
     )
 
     session.handle_resume_choice("y")
@@ -252,6 +257,49 @@ def test_interrupt_choice_invalid_falls_to_idle(monkeypatch):
 
     assert result is False
     assert state.task.status == "idle"
+
+
+def test_core_state_inconsistency_reset_clears_active_skill_before_next_prompt(
+    monkeypatch,
+):
+    """1114: running/no-plan 自愈 reset 是真实任务边界，必须先清 active skill。"""
+    from agent import core
+    from agent.skill_system.lifecycle import get_default_lifecycle, reset_default_lifecycle
+
+    reset_default_lifecycle()
+    session_id = "state-inconsistency-skill-boundary"
+    stale_body = "STALE_INCONSISTENCY_SKILL_BODY"
+    state = create_agent_state(system_prompt="test")
+    state.memory.session_id = session_id
+    state.task.status = "running"
+    state.task.current_plan = None
+    monkeypatch.setattr(core, "state", state)
+
+    lifecycle = get_default_lifecycle(session_id)
+    lifecycle.activate(
+        "stale-inconsistency-skill",
+        body=stale_body,
+        allowed_tools=("read_file",),
+    )
+
+    client = FakeAnthropicClient([text_response("not a structured plan")])
+    import agent.response_handlers as response_handlers
+
+    monkeypatch.setattr(response_handlers, "clear_checkpoint", lambda: None)
+
+    result = core.chat(
+        "start a clean task",
+        provider=client.provider,
+        session_id=session_id,
+    )
+
+    assert result == "not a structured plan"
+    assert lifecycle.get_active() is None
+
+    model_request = client.requests[-1]
+    assert stale_body not in model_request["system"]
+    visible_tool_names = {item["name"] for item in model_request["tools"]}
+    assert "run_shell" in visible_tool_names
 
 
 # ============================================================================

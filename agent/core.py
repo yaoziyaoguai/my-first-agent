@@ -398,15 +398,15 @@ def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") ->
 def _dispatch_checkpoint_save(dispatcher, state, source="core.chat", *, identity=None):
     """通过 dispatcher 中介 checkpoint 保存，产生 RuntimeAction evidence。
 
-    dispatcher 为 None 时回退到直接 save_checkpoint() 调用。
+    dispatcher 为 None 时回退到 runtime checkpoint gateway。
     B7: identity 用于 per-run checkpoint v2 路径。
     """
     if dispatcher is None:
-        from agent.checkpoint import save_checkpoint
+        from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 
         _sid = getattr(identity, "session_id", "") or "" if identity is not None else ""
         _rid = getattr(identity, "run_id", "") or "" if identity is not None else ""
-        save_checkpoint(state, source=source, session_id=_sid, run_id=_rid)
+        save_runtime_checkpoint(state, source=source, session_id=_sid, run_id=_rid)
         return
 
     from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
@@ -1111,6 +1111,16 @@ def chat(
         # v0.5.1 YF1：用 _safe_emit_runtime_event 包住 sink 调用，
         # 防止 callback raise 跳过下面的 state.reset_task()。
         _safe_emit_runtime_event(on_runtime_event, _evt)
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+
+        deactivate_active_skill_for_task_boundary(
+            state,
+            reason="state_inconsistency_reset",
+            source="core.state_inconsistency_reset",
+            session_id=_sid,
+        )
         state.reset_task()
 
     # 注意：不要在这里无条件压缩历史。
@@ -1294,6 +1304,15 @@ def chat(
         # 不触发 done 路径、tool_execution_log / pending_tool 残留到下一个任务"
         # 这种 bug。之前这里只重置 4 个计数字段，其他字段（log/pending/user_goal
         # 等）都有可能带着旧值进新任务。
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+        deactivate_active_skill_for_task_boundary(
+            state,
+            reason="new_task",
+            source="core.new_task_boundary",
+            session_id=_sid,
+        )
         state.reset_task()
 
         plan_result = _run_planning_phase(
@@ -1656,6 +1675,21 @@ def _run_planning_phase(
                 })
                 # transition 已生效但 scheduler 未接管时，显式回到 factory idle；
                 # 不保存 awaiting 状态，也不展示伪成功 confirmation。
+                from agent.runtime_integration.skill_lifecycle import (
+                    deactivate_active_skill_for_task_boundary,
+                )
+
+                _rt_id = getattr(loop_ctx, "runtime_identity", None)
+                _sid = (
+                    getattr(_rt_id, "session_id", "") or ""
+                    if _rt_id is not None else ""
+                )
+                deactivate_active_skill_for_task_boundary(
+                    state,
+                    reason="planning_handoff_failed",
+                    source="core.run_planning_phase.action_plan_handoff_failed",
+                    session_id=_sid,
+                )
                 state.reset_task()
                 return "planning_handoff_failed"
             _record_core_evidence(
@@ -1834,6 +1868,28 @@ def _run_main_loop(
     # 共享可变列表：call_model() 通过 _streaming_events_out 填充，
     # turn-end hook 从 dependencies.streaming_events 读取
     _streaming_events: list = []
+    # B7: 从 identity 提取 session_id，用于 task-boundary cleanup 和
+    # turn-end active skill 更新。必须在 LoopDependencies callback 捕获前计算。
+    _rt_id = getattr(loop_ctx, "runtime_identity", None)
+    _sid = getattr(_rt_id, "session_id", "") or "" if _rt_id is not None else ""
+
+    def _deactivate_task_boundary(
+        _state,
+        *,
+        reason: str,
+        source: str,
+        session_id: str = "",
+    ) -> None:
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+
+        deactivate_active_skill_for_task_boundary(
+            _state,
+            reason=reason,
+            source=source,
+            session_id=session_id,
+        )
 
     # 按位参数构造 LoopDependencies。tool_gate_tool_name 仅在显式传入时覆盖默认值
     # "_safe_noop"，避免 None 覆盖 dataclass 默认值。
@@ -1855,6 +1911,12 @@ def _run_main_loop(
             fallback_prefix="\n",
         ),
         clear_checkpoint=_clear_checkpoint,
+        task_boundary_callback=lambda reason, source: _deactivate_task_boundary(
+            state,
+            reason=reason,
+            source=source,
+            session_id=_sid,
+        ),
         runtime_action_dispatcher=loop_ctx.runtime_action_dispatcher,
         provider_kind=resolved_kind,
         provider_external_call=resolved_call,
@@ -1877,9 +1939,6 @@ def _run_main_loop(
     result = run_main_loop(turn_state, loop_ctx, dependencies)
     # Loop 2.2: 主循环完成后，从 dispatcher action_log 提取 SKILL_SELECT 结果，
     # 更新跨 turn active skill 状态。
-    # B7: 从 identity 提取 session_id 用于 per-session lifecycle 隔离。
-    _rt_id = getattr(loop_ctx, "runtime_identity", None)
-    _sid = getattr(_rt_id, "session_id", "") or "" if _rt_id is not None else ""
     _update_active_skill_from_dispatcher(
         dependencies.runtime_action_dispatcher, session_id=_sid,
     )

@@ -250,9 +250,8 @@ def handle_memory_confirmation_reply(
     不负责：
     - 不直接操作 store
     - 不调 LLM
-    - 不 import checkpoint（通过 ctx.state + save_checkpoint 间接操作）
+    - 不 import low-level checkpoint（通过 runtime checkpoint gateway 间接操作）
     """
-    from agent.checkpoint import save_checkpoint
     from agent.memory_runtime import MemoryEvaluationAction
 
     state = ctx.state
@@ -321,7 +320,9 @@ def handle_memory_confirmation_reply(
     else:
         reply = f"已处理：{result.reason}"
 
-    save_checkpoint(state, source="memory_interaction.resolve")
+    from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+
+    save_runtime_checkpoint(state, source="memory_interaction.resolve")
     return reply
 
 
@@ -343,8 +344,8 @@ def handle_inline_confirmation_reply(
     - reject/other/no response 都是 no-write；no response 通过 pending_review
       兜底保存 candidate，避免 inline 失败导致候选丢失。
     """
-    from agent.checkpoint import save_checkpoint
     from agent.memory_emergence import apply_inline_confirmation_response
+    from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 
     state = ctx.state
     pending = state.task.pending_user_input_request or {}
@@ -367,7 +368,7 @@ def handle_inline_confirmation_reply(
         )
         if not transition.allowed:
             return f"无法处理 inline memory confirmation：{transition.reason}"
-        _clear_pending_and_save(state, save_checkpoint)
+        _clear_pending_and_save(state, save_runtime_checkpoint)
         return f"未写入：inline confirmation payload 无效（{exc}）。"
 
     try:
@@ -384,7 +385,7 @@ def handle_inline_confirmation_reply(
             request,
             memory_root=fallback_memory_root,
         )
-        _clear_pending_and_save(state, save_checkpoint)
+        _clear_pending_and_save(state, save_runtime_checkpoint)
         return (
             "未收到确认回复，已 fallback 到 pending_review；"
             f"未写入正式 procedural store（dispatched={fallback.dispatched}）。"
@@ -418,11 +419,11 @@ def handle_inline_confirmation_reply(
             "confirmation_result": "accepted",
             "queued_at": _now_iso(),
         })
-        _clear_pending_and_save(state, save_checkpoint)
+        _clear_pending_and_save(state, save_runtime_checkpoint)
         return "已确认，将在下一轮通过 runtime dispatcher 写入 procedural memory。"
 
     result = apply_inline_confirmation_response(request, response, store)
-    _clear_pending_and_save(state, save_checkpoint)
+    _clear_pending_and_save(state, save_runtime_checkpoint)
     if result.action == "reject":
         return "已拒绝，未写入 procedural memory。"
     return "已记录为其他回复，未写入 procedural memory。"

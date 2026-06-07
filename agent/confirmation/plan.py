@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from agent.checkpoint import clear_checkpoint, save_checkpoint
+from agent.checkpoint import clear_checkpoint
 from agent.confirmation.dispatcher import (
     _FEEDBACK_INTENT_VALID_CHOICES,
     ConfirmationContext,
@@ -27,6 +27,10 @@ from agent.runtime_events import (
     plan_confirmation_transition,
     step_confirmation_transition,
 )
+from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+from agent.runtime_integration.skill_lifecycle import (
+    deactivate_active_skill_for_task_boundary,
+)
 from agent.task_runtime import advance_current_step_if_needed
 from agent.transitions import (
     CheckpointAction,
@@ -34,6 +38,24 @@ from agent.transitions import (
     TransitionEvent,
     apply_task_transition,
 )
+
+
+def save_checkpoint(state, source=None, **kwargs):
+    """Compatibility patch symbol; production still goes through the gateway."""
+    save_runtime_checkpoint(state, source=source, **kwargs)
+
+
+def _deactivate_task_boundary(
+    state,
+    *,
+    reason: str,
+    source: str,
+) -> None:
+    deactivate_active_skill_for_task_boundary(
+        state,
+        reason=reason,
+        source=source,
+    )
 
 
 def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
@@ -68,6 +90,11 @@ def handle_plan_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         append_control_event(messages, "plan_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，已取消。"})
         assert not reject_transition.should_checkpoint
+        _deactivate_task_boundary(
+            state,
+            reason="plan_rejected",
+            source="confirmation.plan.rejected",
+        )
         state.reset_task()
         clear_checkpoint()
         _emit_confirmation_observer_event(
@@ -103,6 +130,11 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
                 StepConfirmationKind.STEP_ACCEPTED_TASK_DONE
             )
             assert not done_transition.should_checkpoint
+            _deactivate_task_boundary(
+                state,
+                reason="step_accepted_task_done",
+                source="confirmation.step.accepted_task_done",
+            )
             clear_checkpoint()
             state.reset_task()
             _emit_confirmation_observer_event(
@@ -129,6 +161,11 @@ def handle_step_confirmation(user_input: str, ctx: ConfirmationContext) -> str:
         append_control_event(messages, "step_confirm_no", {})
         messages.append({"role": "assistant", "content": "好的，当前任务已停止。"})
         assert not reject_transition.should_checkpoint
+        _deactivate_task_boundary(
+            state,
+            reason="step_rejected",
+            source="confirmation.step.rejected",
+        )
         state.reset_task()
         clear_checkpoint()
         _emit_confirmation_observer_event(
@@ -190,7 +227,10 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
 
         state.task.pending_user_input_request = None
         if result.checkpoint_action == CheckpointAction.SAVE:
-            save_checkpoint(state, source="confirm_handlers.feedback_intent_cancel")
+            save_checkpoint(
+                state,
+                source="confirm_handlers.feedback_intent_cancel",
+            )
         _emit_confirmation_observer_event(
             "confirmation.feedback_intent.cancelled",
             payload={
@@ -228,6 +268,11 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
             build_planning_messages(state, revised_goal),
         )
         if not plan:
+            _deactivate_task_boundary(
+                state,
+                reason="feedback_replan_failed",
+                source="confirmation.feedback_intent.as_feedback",
+            )
             state.reset_task()
             clear_checkpoint()
             return "未能根据你的补充意见重新生成计划，请重新描述你的需求。"
@@ -243,7 +288,10 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
             return f"[系统] 重新进入计划确认状态失败: {plan_result.reason}"
 
         if plan_result.checkpoint_action == CheckpointAction.SAVE:
-            save_checkpoint(state, source="confirm_handlers.feedback_intent_as_feedback")
+            save_checkpoint(
+                state,
+                source="confirm_handlers.feedback_intent_as_feedback",
+            )
         _emit_plan_confirmation(ctx, plan, source="feedback_intent_choice")
         _emit_confirmation_observer_event(
             "confirmation.feedback_intent.as_feedback",
@@ -261,10 +309,20 @@ def handle_feedback_intent_choice(user_input: str, ctx: ConfirmationContext) -> 
     assert not as_new_task_transition.should_checkpoint
     assert as_new_task_transition.clear_pending_user_input
     if ctx.start_planning_fn is None:
+        _deactivate_task_boundary(
+            state,
+            reason="feedback_as_new_task_no_planner",
+            source="confirmation.feedback_intent.as_new_task",
+        )
         state.reset_task()
         clear_checkpoint()
         return "请重新输入你的新任务。"
 
+    _deactivate_task_boundary(
+        state,
+        reason="feedback_as_new_task",
+        source="confirmation.feedback_intent.as_new_task",
+    )
     state.reset_task()
     clear_checkpoint()
     _emit_confirmation_observer_event(

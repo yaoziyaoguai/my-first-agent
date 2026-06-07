@@ -120,9 +120,9 @@ class ToolRuntimeMediator:
                 return TRANSITION_DENIED
             self._route_result(tool_name, tool_input, tool_use_id, AWAITING_USER)
             assert transition.checkpoint_action is CheckpointAction.SAVE
-            from agent.checkpoint import save_checkpoint
+            from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 
-            save_checkpoint(self._state)
+            save_runtime_checkpoint(self._state)
             return AWAITING_USER
 
         # gate_disposition == "allowed"

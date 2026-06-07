@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agent.checkpoint import save_checkpoint
 from agent.confirmation.dispatcher import (
     ConfirmationContext,
     _confirmation_response,
@@ -15,6 +14,7 @@ from agent.runtime_events import (
     tool_confirmation_transition,
     tool_result_transition,
 )
+from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 from agent.tool_executor import execute_pending_tool
 from agent.transitions import (
     CheckpointAction,
@@ -23,6 +23,12 @@ from agent.transitions import (
     apply_task_transition,
     validate_task_transition,
 )
+
+
+def save_checkpoint(state, source=None, **kwargs):
+    """Backward-compatible patch symbol that still uses the runtime gateway."""
+
+    save_runtime_checkpoint(state, source=source, **kwargs)
 
 
 def handle_tool_confirmation(user_input: str, ctx: ConfirmationContext) -> str:

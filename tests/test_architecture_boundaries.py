@@ -360,11 +360,49 @@ def _checkpoint_call_inventory() -> Counter[tuple[str, str, str]]:
     for path in _agent_python_files():
         tree = _read_tree(path)
         module = _module_name(path)
+        checkpoint_aliases: dict[str, str] = {}
+        for import_node in ast.walk(tree):
+            if isinstance(import_node, ast.ImportFrom):
+                if import_node.module == "agent":
+                    for alias in import_node.names:
+                        if alias.name == "checkpoint":
+                            checkpoint_aliases[alias.asname or alias.name] = (
+                                "agent.checkpoint"
+                            )
+                elif import_node.module == "agent.checkpoint":
+                    for alias in import_node.names:
+                        if alias.name in operations:
+                            checkpoint_aliases[alias.asname or alias.name] = (
+                                f"agent.checkpoint.{alias.name}"
+                            )
+            elif isinstance(import_node, ast.Import):
+                for alias in import_node.names:
+                    if alias.name == "agent.checkpoint":
+                        checkpoint_aliases[alias.asname or alias.name] = (
+                            "agent.checkpoint"
+                        )
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             name = _qualified_name(node.func)
-            operation = name.rsplit(".", 1)[-1] if name else None
+            if not name:
+                continue
+
+            operation: str | None = None
+            if module == "agent.checkpoint" and name in operations:
+                operation = name
+            elif name in checkpoint_aliases and checkpoint_aliases[name].startswith(
+                "agent.checkpoint."
+            ):
+                operation = checkpoint_aliases[name].rsplit(".", 1)[-1]
+            elif "." in name:
+                base, attr = name.rsplit(".", 1)
+                if checkpoint_aliases.get(base) == "agent.checkpoint" and attr in operations:
+                    operation = attr
+                elif module == "agent.loop" and name == "dependencies.clear_checkpoint":
+                    operation = "clear_checkpoint"
+
             if operation in operations:
                 inventory[(module, _enclosing_scope(tree, node), operation)] += 1
     return inventory
@@ -457,6 +495,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 构建 RuntimeActionDispatcher 并注入到 LoopContext。不改变 core 的
         # 模块级 import surface，不引入新的模块级耦合。
         "agent.runtime_integration.phase1_hook",
+        "agent.runtime_integration.skill_lifecycle",
         # Loop 3 (Memory E2E)：refresh_runtime_system_prompt() 内部 local import，
         # 仅用于构造 RuntimeActionRequest 并 dispatch MEMORY_RECALL。
         # 不改变 core 的模块级 import surface，不引入新的模块级耦合。
@@ -505,6 +544,7 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.skill_state",
         "agent.skill_system.lifecycle",
         "agent.skill_system.loader",
+        "agent.runtime_integration.checkpoint_save",
         "agent.skill_system.prompt_section",
         "agent.skill_system.registry",
         "agent.skill_system.retriever",
@@ -775,48 +815,36 @@ def test_input_display_boundary_modules_do_not_mutate_runtime_state() -> None:
 
 _CHECKPOINT_CALL_BASELINE: tuple[tuple[str, str, str, int], ...] = (
     ("agent.checkpoint", "load_checkpoint_to_state", "load_checkpoint", 1),
-    ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "save_checkpoint", 1),
     ("agent.confirmation.plan", "handle_feedback_intent_choice", "clear_checkpoint", 3),
-    ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", 2),
     ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", 1),
-    ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", 1),
     ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", 2),
-    ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", 1),
-    ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", 4),
     ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", 1),
-    # B7 Loop 4: _dispatch_checkpoint_save 在 dispatcher=None 时
-    # 直接调用 save_checkpoint(session_id=, run_id=) 走 v2 identity 路径。
-    ("agent.core", "_dispatch_checkpoint_save", "save_checkpoint", 1),
     # Global Architecture Debt Remediation：loop guard 的 checkpoint clear
     # 已从 core.py 主循环实现迁到 agent.loop orchestration。
     ("agent.loop", "run_main_loop", "clear_checkpoint", 1),
-    # Memory Interactive Confirmation v1：handle_memory_confirmation_reply 内
-    # lazy import save_checkpoint 以清 pending 并保存状态（v1 compromise）。
-    ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", 1),
     ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", 1),
-    ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", 2),
     ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", 1),
-    ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", 3),
     ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", 2),
+    ("agent.runtime_integration.checkpoint_resume", "handle", "load_checkpoint_to_state", 1),
+    ("agent.runtime_integration.checkpoint_save", "save_runtime_checkpoint", "save_checkpoint", 1),
     # B7: session checkpoint loading 收口到 _load_checkpoint_best_effort /
-    # _load_checkpoint_to_state_best_effort 两个 helper（per-session identity 感知）。
+    # _load_selected_checkpoint_to_state_best_effort 两个 helper（per-session identity 感知）。
     ("agent.session", "_load_checkpoint_best_effort", "load_checkpoint", 2),
     # Gap 4 fix: _load_checkpoint_to_state_best_effort 新增 load_checkpoint()
     # 调用以验证 session-scoped checkpoint 可解析性（P2-2 损坏跳过）和
     # single-file checkpoint 存在性（P2-1 cross-session guard）。
-    ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint", 2),
-    ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint_to_state", 2),
-    ("agent.session", "finalize_session", "save_checkpoint", 1),
-    ("agent.session", "handle_double_interrupt", "save_checkpoint", 1),
+    # U3: state restore 成功后重读同一路径，返回实际恢复的 checkpoint。
+    ("agent.session", "_load_selected_checkpoint_to_state_best_effort", "load_checkpoint", 4),
+    (
+        "agent.session",
+        "_load_selected_checkpoint_to_state_best_effort",
+        "load_checkpoint_to_state",
+        2,
+    ),
     ("agent.session", "handle_interrupt_choice", "clear_checkpoint", 1),
-    ("agent.session", "handle_interrupt_with_checkpoint", "save_checkpoint", 1),
     ("agent.session", "handle_resume_choice", "clear_checkpoint", 1),
     ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", 1),
-    ("agent.tool_executor", "execute_single_tool", "save_checkpoint", 4),
-    # Phase 3：mediator 在 route side effects 完成后统一保存一次。
-    ("agent.tool_runtime_mediator", "mediate", "save_checkpoint", 1),
     ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", 1),
-    ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", 3),
 )
 
 

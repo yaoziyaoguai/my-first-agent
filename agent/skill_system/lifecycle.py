@@ -150,13 +150,56 @@ class ActiveSkillLifecycle:
 
     # ── checkpoint support ──────────────────────────────────────────────
 
-    def to_dict(self) -> dict:
-        """序列化为可持久化 dict（checkpoint save 用）。"""
+    def to_checkpoint_metadata(self) -> dict:
+        """返回 checkpoint-safe active skill metadata（不含 body/raw 内容）。
+
+        checkpoint 路径必须使用此 API；不得使用 to_dict() 作为 checkpoint contract。
+        返回字段仅包含：skill_id、allowed_tools、activated_by、activated_at、namespace。
+        """
         if self._active is None:
             return {}
         return {
             "skill_id": self._active.skill_id,
-            "body": self._active.body[:500],  # checkpoint 截断长 body
+            "allowed_tools": list(self._active.allowed_tools),
+            "activated_by": self._active.activated_by,
+            "activated_at": self._active.activated_at,
+            "namespace": self._namespace,
+        }
+
+    def restore_from_checkpoint_metadata(
+        self,
+        skill_id: str,
+        body: str,
+        allowed_tools: tuple[str, ...],
+        activated_at: float | None = None,
+        activated_by: str = "checkpoint_resume",
+    ) -> ActiveSkill:
+        """apply-only restore：使用已 validate/load 的 body 和当前 manifest allowed_tools。
+
+        调用方必须先通过 SkillLoader.load_body() 加载完整 body，
+        并从当前 descriptor/manifest 获取 allowed_tools（不盲信 checkpoint 旧值）。
+        本方法只做 activate，不做 validate/load/fallback。
+        """
+        skill = ActiveSkill(
+            skill_id=skill_id,
+            body=body,
+            allowed_tools=allowed_tools,
+            activated_at=activated_at if activated_at is not None else time.time(),
+            activated_by=activated_by,
+        )
+        self._active = skill
+        return skill
+
+    # to_dict() / restore_from_dict() 保留用于向后兼容和测试，
+    # 不作为 checkpoint contract。checkpoint 路径必须使用
+    # to_checkpoint_metadata() / restore_from_checkpoint_metadata()。
+    def to_dict(self) -> dict:
+        """序列化为 dict（向后兼容/测试用；不作为 checkpoint contract）。"""
+        if self._active is None:
+            return {}
+        return {
+            "skill_id": self._active.skill_id,
+            "body": self._active.body[:500],  # 截断长 body（仅供测试/兼容）
             "allowed_tools": list(self._active.allowed_tools),
             "activated_at": self._active.activated_at,
             "activated_by": self._active.activated_by,
@@ -164,7 +207,7 @@ class ActiveSkillLifecycle:
         }
 
     def restore_from_dict(self, data: dict) -> None:
-        """从 checkpoint dict 恢复 active_skill 状态。"""
+        """从 dict 恢复 active_skill 状态（向后兼容/测试用；不作为 checkpoint contract）。"""
         if not data or "skill_id" not in data:
             self._active = None
             return

@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any
 
 from agent import tool_result_contract
-from agent.checkpoint import save_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
 from agent.display_events import (
     build_tool_awaiting_confirmation_event,
@@ -23,6 +22,7 @@ from agent.display_events import (
 )
 from agent.pending_requests import PendingUserInputRequest
 from agent.runtime_events import ToolResultTransitionKind, tool_result_transition
+from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 from agent.runtime_trace_emitter import emit_tool_result_trace_event
 from agent.tool_audit import emit_tool_audit_event
 from agent.tool_registry import (
@@ -46,6 +46,12 @@ TRANSITION_DENIED = "__transition_denied__"
 # 兼容旧调用方：常量源头已经收口到 tool_result_contract，这里只保留别名。
 TOOL_FAILURE_PREFIXES = tool_result_contract.TOOL_FAILURE_PREFIXES
 TOOL_REJECTION_PREFIXES = tool_result_contract.TOOL_REJECTION_PREFIXES
+
+
+def save_checkpoint(state: Any, source: str | None = None, **kwargs: Any) -> None:
+    """Backward-compatible patch symbol that still uses the runtime gateway."""
+
+    save_runtime_checkpoint(state, source=source, **kwargs)
 
 
 def _classify_tool_outcome(result: str) -> tuple[str, str, str]:

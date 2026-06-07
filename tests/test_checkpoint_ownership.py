@@ -182,7 +182,7 @@ def _checkpoint_operation_calls() -> Counter[tuple[str, str, str, str]]:
                 continue
 
             operation: str | None = None
-            if call_name in CHECKPOINT_OPERATIONS:
+            if module == "agent.checkpoint" and call_name in CHECKPOINT_OPERATIONS:
                 operation = call_name
             elif call_name in aliases and aliases[call_name].startswith(
                 "agent.checkpoint."
@@ -286,51 +286,36 @@ def test_forbidden_input_display_layers_do_not_touch_checkpoint_api() -> None:
 
 
 def test_checkpoint_operation_call_inventory_is_alias_aware() -> None:
-    """固化 save/load/clear 调用点白名单，包含 core.py alias 调用。
+    """固化 checkpoint 调用点合同，包含 low-level save alias 调用。
 
-    这是 inventory，不是永久设计认可。当前 save/clear 很分散，后续 gateway
-    或 helper extraction 应先更新这张表，再移动 production 代码。
+    U6 后 production recoverable save 必须通过 runtime checkpoint gateway；
+    alias-aware inventory 应只看到 gateway 调用 low-level save_checkpoint。
     """
 
     expected: tuple[tuple[str, str, str, str, int], ...] = (
         ("agent.checkpoint", "load_checkpoint_to_state", "load_checkpoint", "load_checkpoint", 1),
-        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
-        ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
         ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 2),
-        ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
-        # core.py checkpoint 调用收口到 _dispatch_checkpoint_save
-        ("agent.core", "_dispatch_checkpoint_save", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.memory_interaction", "handle_memory_confirmation_reply", "save_checkpoint", "save_checkpoint", 1),
         ("agent.response_handlers", "_maybe_advance_step", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.response_handlers", "_maybe_advance_step", "save_checkpoint", "save_checkpoint", 2),
         ("agent.response_handlers", "handle_end_turn_response", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.response_handlers", "handle_end_turn_response", "save_checkpoint", "save_checkpoint", 3),
         ("agent.response_handlers", "handle_tool_use_response", "clear_checkpoint", "clear_checkpoint", 2),
         ("agent.runtime_integration.checkpoint_resume", "handle", "load_checkpoint_to_state", "_load", 1),
-        ("agent.runtime_integration.checkpoint_save", "handle", "save_checkpoint", "_save_checkpoint", 1),
+        ("agent.runtime_integration.checkpoint_save", "save_runtime_checkpoint", "save_checkpoint", "_save_checkpoint", 1),
         # B7: session checkpoint loading 收口到 _load_checkpoint_best_effort /
-        # _load_checkpoint_to_state_best_effort（per-session identity 感知）。
+        # _load_selected_checkpoint_to_state_best_effort（per-session identity 感知）。
         ("agent.session", "_load_checkpoint_best_effort", "load_checkpoint", "load_checkpoint", 2),
         # Gap 4 fix: _load_checkpoint_to_state_best_effort 新增 load_checkpoint()
         # 调用以验证 session-scoped checkpoint 可解析性（P2-2 损坏跳过）和
         # single-file checkpoint 存在性（P2-1 cross-session guard）。
-        ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint", "load_checkpoint", 2),
-        ("agent.session", "_load_checkpoint_to_state_best_effort", "load_checkpoint_to_state", "load_checkpoint_to_state", 2),
-        ("agent.session", "finalize_session", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.session", "handle_double_interrupt", "save_checkpoint", "save_checkpoint", 1),
+        # U3: state restore 成功后重读同一路径，返回实际恢复的 checkpoint。
+        ("agent.session", "_load_selected_checkpoint_to_state_best_effort", "load_checkpoint", "load_checkpoint", 4),
+        ("agent.session", "_load_selected_checkpoint_to_state_best_effort", "load_checkpoint_to_state", "load_checkpoint_to_state", 2),
         ("agent.session", "handle_interrupt_choice", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.session", "handle_interrupt_with_checkpoint", "save_checkpoint", "save_checkpoint", 1),
         ("agent.session", "handle_resume_choice", "clear_checkpoint", "clear_checkpoint", 1),
         ("agent.session", "try_resume_from_checkpoint", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.tool_executor", "execute_single_tool", "save_checkpoint", "save_checkpoint", 4),
-        ("agent.tool_runtime_mediator", "mediate", "save_checkpoint", "save_checkpoint", 1),
         ("agent.transitions", "apply_user_replied_transition", "clear_checkpoint", "checkpoint.clear_checkpoint", 1),
-        ("agent.transitions", "apply_user_replied_transition", "save_checkpoint", "checkpoint.save_checkpoint", 3),
     )
     actual = tuple(
         sorted(
@@ -446,29 +431,29 @@ def test_phase3_transition_checkpoint_ownership_is_explicit() -> None:
 
 
 def test_core_checkpoint_alias_calls_are_not_invisible_to_inventory() -> None:
-    """专门钉住本轮 inventory 发现的 core.py alias blind spot。
+    """专门钉住 low-level save alias 只能存在于 runtime gateway。
 
     Architecture Pack 1 已经有 checkpoint inventory，但缺少 alias 解析。此测试
     确认 `_save_checkpoint` / `_clear_checkpoint` 会被纳入未来 checkpoint
     gateway seam，而不是被误判为"core 没有 checkpoint 调用"。
 
-    core.py checkpoint save 已收口到 _dispatch_checkpoint_save，不再由
-    各函数直接调用 save_checkpoint。
+    core.py checkpoint save 已收口到 runtime gateway，不再由任何 core helper
+    直接调用 low-level save_checkpoint。
     """
 
     calls = _checkpoint_operation_calls()
 
     assert (
+        "agent.runtime_integration.checkpoint_save",
+        "save_runtime_checkpoint",
+        "save_checkpoint",
+        "_save_checkpoint",
+    ) in calls
+    assert (
         "agent.core",
         "_dispatch_checkpoint_save",
         "save_checkpoint",
         "save_checkpoint",
-    ) in calls
-    assert (
-        "agent.core",
-        "_run_main_loop",
-        "clear_checkpoint",
-        "_clear_checkpoint",
     ) not in calls
 
 
@@ -481,18 +466,12 @@ def test_checkpoint_operation_owner_modules_are_reviewed_for_future_gateway() ->
 
     expected_owner_modules = {
         "agent.checkpoint",
-        "agent.confirmation.dispatcher",
         "agent.confirmation.plan",
-        "agent.confirmation.tool",
         "agent.confirmation.user_input",
-        "agent.core",
-        "agent.memory_interaction",
         "agent.response_handlers",
         "agent.runtime_integration.checkpoint_resume",
         "agent.runtime_integration.checkpoint_save",
         "agent.session",
-        "agent.tool_executor",
-        "agent.tool_runtime_mediator",
         "agent.transitions",
     }
 
@@ -525,14 +504,9 @@ def test_pending_confirmation_persistence_writers_are_reviewed() -> None:
         if key[0] in _confirmation_modules
     }
     expected_checkpoint_calls = {
-        ("agent.confirmation.dispatcher", "_request_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.plan", "handle_feedback_intent_choice", "clear_checkpoint", "clear_checkpoint", 3),
-        ("agent.confirmation.plan", "handle_feedback_intent_choice", "save_checkpoint", "save_checkpoint", 2),
         ("agent.confirmation.plan", "handle_plan_confirmation", "clear_checkpoint", "clear_checkpoint", 1),
-        ("agent.confirmation.plan", "handle_plan_confirmation", "save_checkpoint", "save_checkpoint", 1),
         ("agent.confirmation.plan", "handle_step_confirmation", "clear_checkpoint", "clear_checkpoint", 2),
-        ("agent.confirmation.plan", "handle_step_confirmation", "save_checkpoint", "save_checkpoint", 1),
-        ("agent.confirmation.tool", "handle_tool_confirmation", "save_checkpoint", "save_checkpoint", 4),
         ("agent.confirmation.user_input", "handle_user_input_step", "clear_checkpoint", "clear_checkpoint", 1),
     }
     actual_state_writes = {

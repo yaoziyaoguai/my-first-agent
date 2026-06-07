@@ -7,6 +7,7 @@ import json
 import pytest
 
 from agent.loop_context import LoopContext
+from agent.skill_system.lifecycle import get_default_lifecycle, reset_default_lifecycle
 from tests.conftest import FakeAnthropicClient, text_response
 
 
@@ -65,6 +66,22 @@ def _planning_context(raw: dict):
     )
 
 
+def _planning_context_with_session(raw: dict, session_id: str):
+    from agent.runtime_identity import RuntimeIdentity
+
+    client = FakeAnthropicClient([text_response(json.dumps(raw))])
+    return LoopContext(
+        client=client,
+        model_name="test-model",
+        max_loop_iterations=3,
+        runtime_identity=RuntimeIdentity(
+            session_id=session_id,
+            run_id="test-run",
+            instance_id=session_id,
+        ),
+    )
+
+
 def _install_state(monkeypatch, *, status: str):
     from agent import core
     from agent.state import create_agent_state
@@ -80,6 +97,39 @@ def _turn_state(core, events):
         system_prompt="test",
         on_runtime_event=events.append,
     )
+
+
+def _assert_lifecycle_boundary_clean(session_id: str, *, stale_body: str) -> None:
+    from agent import core
+
+    lifecycle = get_default_lifecycle(session_id)
+    assert lifecycle.get_active() is None
+
+    prompt, _ = core.refresh_runtime_system_prompt(namespace_key=session_id)
+    assert stale_body not in prompt
+
+    visible_tool_names = _visible_tool_names_for_session(core, session_id)
+    assert "run_shell" in visible_tool_names
+    assert visible_tool_names != {"read_file", "SKILL_SELECT"}
+
+
+def _visible_tool_names_for_session(core, session_id: str) -> set[str]:
+    client = FakeAnthropicClient([text_response("done")])
+    loop_ctx = _planning_context_with_session(_action_raw(), session_id)
+    loop_ctx = type(loop_ctx)(
+        client=client,
+        model_name=loop_ctx.model_name,
+        max_loop_iterations=loop_ctx.max_loop_iterations,
+        runtime_identity=loop_ctx.runtime_identity,
+    )
+    turn_state = core.TurnState(system_prompt="test")
+
+    core._call_model(turn_state, loop_ctx)
+
+    return {
+        item["name"]
+        for item in client.requests[-1]["tools"]
+    }
 
 
 def test_legacy_plan_from_idle_applies_then_saves_once(monkeypatch):
@@ -174,7 +224,16 @@ def test_planning_from_running_is_denied_without_state_side_effects(
 def test_action_plan_scheduler_failure_cleans_task_without_save_or_confirmation(
     monkeypatch,
 ):
+    reset_default_lifecycle()
+    session_id = "planning-action-handoff-failed"
+    stale_body = "STALE_ACTION_SKILL_BODY"
     core, state = _install_state(monkeypatch, status="idle")
+    state.memory.session_id = session_id
+    get_default_lifecycle(session_id).activate(
+        "stale-action-skill",
+        body=stale_body,
+        allowed_tools=("read_file",),
+    )
     saves = []
     events = []
 
@@ -191,7 +250,7 @@ def test_action_plan_scheduler_failure_cleans_task_without_save_or_confirmation(
     result = core._run_planning_phase(
         "demo task",
         _turn_state(core, events),
-        _planning_context(_action_raw()),
+        _planning_context_with_session(_action_raw(), session_id),
         action_scheduler=FailingScheduler(),
     )
 
@@ -201,6 +260,63 @@ def test_action_plan_scheduler_failure_cleans_task_without_save_or_confirmation(
     assert state.task.user_goal is None
     assert saves == []
     assert events == []
+    _assert_lifecycle_boundary_clean(session_id, stale_body=stale_body)
+
+
+def test_legacy_plan_with_scheduler_does_not_enter_handoff_boundary(
+    monkeypatch,
+):
+    reset_default_lifecycle()
+    session_id = "planning-legacy-handoff-unreachable"
+    stale_body = "STALE_LEGACY_SKILL_BODY"
+    core, state = _install_state(monkeypatch, status="idle")
+    state.memory.session_id = session_id
+    get_default_lifecycle(session_id).activate(
+        "stale-legacy-skill",
+        body=stale_body,
+        allowed_tools=("read_file",),
+    )
+    saves = []
+    events = []
+
+    class FailingScheduler:
+        def load_plan(self, _plan):
+            raise RuntimeError("legacy load failed")
+
+    monkeypatch.setattr(
+        core,
+        "_dispatch_checkpoint_save",
+        lambda *_args, **_kwargs: saves.append(1),
+    )
+
+    result = core._run_planning_phase(
+        "demo task",
+        _turn_state(core, events),
+        _planning_context_with_session(_legacy_raw(), session_id),
+        action_scheduler=FailingScheduler(),
+    )
+
+    assert result == "ok"
+    assert state.task.status == "idle"
+    assert state.task.current_plan is None
+    assert state.task.user_goal is None
+    assert saves == []
+    assert len(events) == 1
+    assert get_default_lifecycle(session_id).get_active() is not None
+
+
+def test_legacy_scheduler_handoff_reset_branch_is_not_reachable() -> None:
+    """1742 是历史 defensive 分支；当前 scheduler 模式不会构造 legacy_plan。"""
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core._run_planning_phase)
+    assert (
+        "if action_plan is None and raw is not None and action_scheduler is None:"
+        in src
+    )
+    assert "action_scheduler.load_plan(legacy_action_plan)" in src
 
 
 def test_planning_failure_results_do_not_enter_main_loop(monkeypatch):

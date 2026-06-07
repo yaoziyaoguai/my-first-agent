@@ -492,17 +492,19 @@ def _try_phase1_turn_end_runtime_action(
             _skill_payload["task_summary"] = (result_text or "")[:500]
 
             # fake provider 路径：自动生成 model_decision_metadata，
-            # 使 handler 走通 body_load_decision=True 成功路径
-            if provider_kind == "fake" and _visible:
-                _selected = _visible[0]
-                _skill_payload["model_decision_metadata"] = {
-                    "selected_skill_id": _selected.name,
-                    "selection_reason": (
-                        f"fake provider auto-selection: demo skill '{_selected.name}' "
-                        f"matched for First Usable Task E2E verification"
-                    ),
-                    "selection_confidence": "high",
-                }
+            # 使 handler 走通 body_load_decision=True 成功路径。
+            # U5: 显式两段式 guard —— visible 为空时不访问 [0]。
+            if provider_kind == "fake":
+                if _visible:
+                    _selected = _visible[0]
+                    _skill_payload["model_decision_metadata"] = {
+                        "selected_skill_id": _selected.name,
+                        "selection_reason": (
+                            f"fake provider auto-selection: demo skill '{_selected.name}' "
+                            f"matched for First Usable Task E2E verification"
+                        ),
+                        "selection_confidence": "high",
+                    }
             # 真实 provider 路径：确定性 keyword matching fallback。
             # 中文学习注释 —— 与 fake auto-select 的关键区别：
             # - fake: 无条件选择第一个可见 skill → 仅用于测试 L3 evidence chain
@@ -695,6 +697,7 @@ class LoopDependencies:
     runtime_loop_fields: Callable[[], dict[str, Any]]
     safe_emit_runtime_event: Callable[[Callable[[RuntimeEvent], None] | None, RuntimeEvent], None]
     clear_checkpoint: Callable[[], None]
+    task_boundary_callback: Callable[..., None] | None = None
     runtime_action_dispatcher: Any | None = None
     # hook 参数化：预解析的 coarse-grained provider evidence metadata
     # 这些字段在 core.py _run_main_loop 中由 _resolve_provider_evidence_metadata 填充
@@ -982,6 +985,11 @@ def run_main_loop(
             )
             event = loop_max_iterations_event(loop_ctx.max_loop_iterations)
             dependencies.safe_emit_runtime_event(turn_state.on_runtime_event, event)
+            if dependencies.task_boundary_callback is not None:
+                dependencies.task_boundary_callback(
+                    reason="max_loop_iterations",
+                    source="loop.run_main_loop",
+                )
             dependencies.clear_checkpoint()
             state.reset_task()
             _emit_run_summary(

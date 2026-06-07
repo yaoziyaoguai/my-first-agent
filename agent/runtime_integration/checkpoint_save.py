@@ -6,8 +6,98 @@ Loop 2.3: 将 save_checkpoint() 从 direct call 迁入 dispatcher，
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
+from typing import Any
+
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
+
+
+class CheckpointSkillMetadataError(RuntimeError):
+    """Raised when an active skill cannot produce checkpoint-safe metadata."""
+
+
+def _runtime_session_id(state: Any, explicit_session_id: str = "") -> str:
+    if explicit_session_id:
+        return explicit_session_id
+    memory = getattr(state, "memory", None)
+    return str(getattr(memory, "session_id", "") or "default")
+
+
+def _active_skill_extra_sections(
+    state: Any,
+    *,
+    session_id: str = "",
+) -> dict[str, Any] | None:
+    """Collect checkpoint-safe active skill metadata at the write boundary."""
+    from agent.skill_system.lifecycle import get_default_lifecycle
+
+    lifecycle = get_default_lifecycle(_runtime_session_id(state, session_id))
+    active = lifecycle.get_active()
+    if active is None:
+        return None
+
+    metadata = lifecycle.to_checkpoint_metadata()
+    if not metadata:
+        raise CheckpointSkillMetadataError(
+            "active skill checkpoint metadata is empty"
+        )
+    return {"skill": metadata}
+
+
+def save_runtime_checkpoint(
+    state: Any,
+    source: str | None = None,
+    *,
+    path: Path | None = None,
+    session_id: str = "",
+    run_id: str = "",
+    extra_sections: dict[str, Any] | None = None,
+) -> None:
+    """Save a recoverable checkpoint through the runtime-owned gateway.
+
+    Skill lifecycle metadata is collected at the final write boundary so every
+    production owner gets a fresh, checkpoint-safe top-level ``skill`` section.
+    """
+    from agent.checkpoint import save_checkpoint as _save_checkpoint
+
+    runtime_extra_sections = dict(extra_sections or {})
+    skill_extra_sections = _active_skill_extra_sections(state, session_id=session_id)
+    if skill_extra_sections:
+        runtime_extra_sections.update(skill_extra_sections)
+    checkpoint_kwargs: dict[str, Any] = {}
+    if path is not None:
+        checkpoint_kwargs["path"] = path
+    if session_id:
+        checkpoint_kwargs["session_id"] = session_id
+    if run_id:
+        checkpoint_kwargs["run_id"] = run_id
+    if runtime_extra_sections:
+        checkpoint_kwargs["extra_sections"] = runtime_extra_sections
+    try:
+        signature = inspect.signature(_save_checkpoint)
+    except (TypeError, ValueError):
+        accepted_kwargs = dict(checkpoint_kwargs)
+        accepted_kwargs["source"] = source
+    else:
+        parameters = signature.parameters
+        accepts_var_kwargs = any(
+            param.kind is inspect.Parameter.VAR_KEYWORD
+            for param in parameters.values()
+        )
+        accepted_kwargs = (
+            dict(checkpoint_kwargs)
+            if accepts_var_kwargs
+            else {
+                key: value
+                for key, value in checkpoint_kwargs.items()
+                if key in parameters
+            }
+        )
+        if accepts_var_kwargs or "source" in parameters:
+            accepted_kwargs["source"] = source
+    _save_checkpoint(state, **accepted_kwargs)
 
 
 class CheckpointSaveHandler:
@@ -17,8 +107,6 @@ class CheckpointSaveHandler:
     """
 
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
-        from agent.checkpoint import save_checkpoint as _save_checkpoint
-
         payload = dict(request.payload)
         state = payload.get("_state")
         source = str(payload.get("source") or "dispatcher")
@@ -52,7 +140,7 @@ class CheckpointSaveHandler:
         save_ok = False
         if state is not None:
             try:
-                _save_checkpoint(
+                save_runtime_checkpoint(
                     state, source=source,
                     session_id=_session_id, run_id=_run_id,
                 )

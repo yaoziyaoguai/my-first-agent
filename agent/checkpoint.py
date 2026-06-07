@@ -41,6 +41,12 @@ _MIGRATION_REGISTRY: dict[str | None, str] = {
 # 可通过 set_checkpoint_truncation_config() 覆盖；测试中可注入自定义值。
 _DEFAULT_MAX_RESULT_LENGTH = 2000
 _DEFAULT_MAX_TOOL_RESULTS = 50  # 单条消息中保留的 tool_result 块数量上限
+_RESERVED_TOP_LEVEL_SECTIONS = frozenset({
+    "meta",
+    "task",
+    "memory",
+    "conversation",
+})
 
 # 运行时配置（模块级可变，供测试/config 覆盖）
 _max_result_length: int = _DEFAULT_MAX_RESULT_LENGTH
@@ -197,8 +203,22 @@ def _load_checkpoint_silent(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
 
+def _validate_extra_sections(extra_sections: dict[str, Any] | None) -> dict[str, Any]:
+    """验证 runtime-owned optional section，避免覆盖 checkpoint 核心结构。"""
+    if not extra_sections:
+        return {}
+    reserved = sorted(set(extra_sections) & _RESERVED_TOP_LEVEL_SECTIONS)
+    if reserved:
+        raise ValueError(
+            "extra_sections cannot override reserved checkpoint sections: "
+            + ", ".join(reserved)
+        )
+    return extra_sections
+
+
 def _build_checkpoint_from_state(state, *, path: Path | None = None,
-                                 session_id: str = "", run_id: str = ""):
+                                 session_id: str = "", run_id: str = "",
+                                 extra_sections: dict[str, Any] | None = None):
     """
     按当前 state 构造 checkpoint 数据。
 
@@ -206,9 +226,12 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
     - task：尽量保存完整 task 快照，避免后续新增状态漏存
     - memory：保存 memory 快照，但 conversation 仍单独处理
     - conversation：只保存 messages，并对过大的 tool_result 做截断
+    - extra_sections：可选的顶层额外 section（如 skill metadata）；
+      checkpoint 层不关心其内容，只负责持久化
 
     B7 v2: 如果 session_id + run_id 非空，写 v2 schema（per-run path + identity）。
     """
+    extra_sections = _validate_extra_sections(extra_sections)
     existing = _load_checkpoint_silent(path) or {}
     existing_meta = existing.get("meta", {})
 
@@ -231,7 +254,7 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
         meta["session_id"] = state.memory.session_id
         meta["interrupted_at"] = now
 
-    return {
+    checkpoint: dict[str, Any] = {
         "meta": meta,
         "task": task_data,
         "memory": memory_data,
@@ -242,9 +265,19 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
         },
     }
 
+    # 注入 optional extra sections（如 skill metadata）；不为空时才写入，
+    # 避免污染无 active skill 的 checkpoint
+    if extra_sections:
+        for key, value in extra_sections.items():
+            if value:  # 跳过空 dict / None
+                checkpoint[key] = value
+
+    return checkpoint
+
 
 def save_checkpoint(state, source: str | None = None, *, path: Path | None = None,
-                    session_id: str = "", run_id: str = ""):
+                    session_id: str = "", run_id: str = "",
+                    extra_sections: dict[str, Any] | None = None):
     """按当前 state 结构保存断点。
 
     source 是 Runtime 观测字段，用来标记"是谁触发了这次保存"，帮助后续梳理
@@ -253,6 +286,9 @@ def save_checkpoint(state, source: str | None = None, *, path: Path | None = Non
 
     path 是可选的显式保存路径；不传则使用模块级 CHECKPOINT_PATH。
     测试中可通过 path= 注入临时路径，无需依赖 os.getcwd() 副作用。
+
+    extra_sections 是可选的顶层额外 section（如 {"skill": {...}}）；
+    checkpoint 层不关心其内容，只负责持久化。
 
     B7: session_id + run_id 非空时写 v2 schema（per-run path + identity 字段）；
     为空时写 v1 schema（向后兼容）。
@@ -270,6 +306,7 @@ def save_checkpoint(state, source: str | None = None, *, path: Path | None = Non
         target = CHECKPOINT_PATH
     checkpoint = _build_checkpoint_from_state(
         state, path=path, session_id=session_id, run_id=run_id,
+        extra_sections=extra_sections,
     )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)

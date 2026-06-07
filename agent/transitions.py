@@ -15,6 +15,7 @@ save_checkpoint / clear_checkpoint，transition layer 不自动操作 checkpoint
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -682,6 +683,8 @@ def apply_user_replied_transition(
     state: Any,
     messages: list[dict[str, Any]],
     resolution: InputResolution,
+    save_checkpoint_fn: Callable[..., None] | None = None,
+    task_boundary_callback: Callable[..., None] | None = None,
 ) -> TransitionResult:
     """执行 `awaiting_user_input + USER_REPLIED` 的显式状态转移。
 
@@ -736,7 +739,11 @@ def apply_user_replied_transition(
         # pending 表示“系统正在等这一条用户答复”。答复已经写入 step_input 后，
         # 必须清掉 pending，否则下一轮用户输入还会被误认为是在回答旧问题。
         state.task.pending_user_input_request = None
-        checkpoint.save_checkpoint(state, source="transitions.runtime_user_input_answer")
+        _save_checkpoint = save_checkpoint_fn
+        if _save_checkpoint is None:
+            from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+            _save_checkpoint = save_runtime_checkpoint
+        _save_checkpoint(state, source="transitions.runtime_user_input_answer")
         log_transition(
             from_state="awaiting_user_input",
             event_type=EVENT_USER_REPLIED,
@@ -784,7 +791,11 @@ def apply_user_replied_transition(
             # 保留原有“每步确认”语义：collect_input 已完成，但是否进入下一步
             # 仍交给用户确认，所以这里不直接 advance。
             append_control_event(messages, "step_input", step_input_payload)
-            checkpoint.save_checkpoint(state, source="transitions.collect_input_answer")
+            _save_checkpoint = save_checkpoint_fn
+            if _save_checkpoint is None:
+                from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+                _save_checkpoint = save_runtime_checkpoint
+            _save_checkpoint(state, source="transitions.collect_input_answer")
             log_transition(
                 from_state="awaiting_user_input",
                 event_type=EVENT_USER_REPLIED,
@@ -810,6 +821,11 @@ def apply_user_replied_transition(
 
         if transition.checkpoint_action is CheckpointAction.CLEAR:
             # 最后一个 collect_input/clarify step 被用户答复后，任务可能直接完成。
+            if task_boundary_callback is not None:
+                task_boundary_callback(
+                    reason="collect_input_task_completed",
+                    source="transitions.collect_input_answer",
+                )
             checkpoint.clear_checkpoint()
             state.reset_task()
             log_transition(
@@ -829,7 +845,11 @@ def apply_user_replied_transition(
             )
 
         assert transition.checkpoint_action is CheckpointAction.SAVE
-        checkpoint.save_checkpoint(state, source="transitions.collect_input_answer")
+        _save_checkpoint = save_checkpoint_fn
+        if _save_checkpoint is None:
+            from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+            _save_checkpoint = save_runtime_checkpoint
+        _save_checkpoint(state, source="transitions.collect_input_answer")
         log_transition(
             from_state="awaiting_user_input",
             event_type=EVENT_USER_REPLIED,

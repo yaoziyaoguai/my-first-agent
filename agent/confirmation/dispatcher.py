@@ -9,7 +9,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from agent.checkpoint import save_checkpoint
 from agent.display_events import (
     feedback_intent_requested,
     plan_confirmation_requested,
@@ -165,7 +164,12 @@ def _request_feedback_intent_choice(
     }
     state.task.pending_user_input_request = pending
     if result.checkpoint_action == CheckpointAction.SAVE:
-        save_checkpoint(state, source="confirm_handlers.feedback_intent_request")
+        from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+
+        save_runtime_checkpoint(
+            state,
+            source="confirm_handlers.feedback_intent_request",
+        )
 
     emit = getattr(ctx.turn_state, "on_runtime_event", None)
     if emit is not None:

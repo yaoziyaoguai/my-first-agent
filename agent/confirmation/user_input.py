@@ -6,15 +6,16 @@
 
 from __future__ import annotations
 
-from agent.checkpoint import clear_checkpoint
-from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
-from agent.transitions import apply_user_replied_transition
+import inspect
 
+from agent.checkpoint import clear_checkpoint
 from agent.confirmation.dispatcher import (
     ConfirmationContext,
     _emit_confirmation_observer_event,
 )
 from agent.confirmation.memory import dispatch_memory_confirmation
+from agent.input_resolution import EMPTY_USER_INPUT, resolve_user_input
+from agent.transitions import apply_user_replied_transition
 
 
 def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
@@ -45,6 +46,15 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     current_plan = state.task.current_plan
 
     if not current_plan and not state.task.pending_user_input_request:
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+
+        deactivate_active_skill_for_task_boundary(
+            state,
+            reason="invalid_user_input_state",
+            source="confirmation.user_input.invalid_state",
+        )
         state.reset_task()
         clear_checkpoint()
         return ""
@@ -57,10 +67,12 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
         )
         return "请输入有效内容，或输入取消/退出。"
 
-    transition = apply_user_replied_transition(
+    transition = _apply_user_replied_transition(
         state=state,
         messages=messages,
         resolution=resolution,
+        save_checkpoint_fn=_save_runtime_checkpoint_for_user_input,
+        task_boundary_callback=_task_boundary_callback(ctx),
     )
     _emit_confirmation_observer_event(
         "confirmation.user_input.resolved",
@@ -72,3 +84,46 @@ def handle_user_input_step(user_input: str, ctx: ConfirmationContext) -> str:
     if transition.should_continue_loop:
         return ctx.continue_fn(turn_state)
     return transition.reply
+
+
+def _apply_user_replied_transition(**kwargs):
+    """Apply user-input transition while preserving legacy unit-test fakes."""
+    try:
+        signature = inspect.signature(apply_user_replied_transition)
+    except (TypeError, ValueError):
+        return apply_user_replied_transition(**kwargs)
+
+    parameters = signature.parameters
+    accepts_var_kwargs = any(
+        param.kind is inspect.Parameter.VAR_KEYWORD
+        for param in parameters.values()
+    )
+    if accepts_var_kwargs:
+        return apply_user_replied_transition(**kwargs)
+    filtered = {
+        key: value
+        for key, value in kwargs.items()
+        if key in parameters
+    }
+    return apply_user_replied_transition(**filtered)
+
+
+def _save_runtime_checkpoint_for_user_input(state, *, source: str) -> None:
+    from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+
+    save_runtime_checkpoint(state, source=source)
+
+
+def _task_boundary_callback(ctx: ConfirmationContext):
+    def _callback(*, reason: str, source: str) -> None:
+        from agent.runtime_integration.skill_lifecycle import (
+            deactivate_active_skill_for_task_boundary,
+        )
+
+        deactivate_active_skill_for_task_boundary(
+            ctx.state,
+            reason=reason,
+            source=source,
+        )
+
+    return _callback

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.checkpoint import clear_checkpoint, save_checkpoint
+from agent.checkpoint import clear_checkpoint
 from agent.conversation_events import append_tool_result, has_tool_result
 from agent.display_events import tool_blocked_event as _tool_blocked_event
 from agent.display_events import user_input_requested
@@ -23,6 +23,7 @@ from agent.model_output_resolution import (
 )
 from agent.pending_requests import PendingUserInputRequest
 from agent.planner import Plan
+from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
 from agent.runtime_observer import log_event
 from agent.task_runtime import (
     USER_INPUT_STEP_TYPES,
@@ -48,6 +49,11 @@ from agent.transitions import (
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_REPEATED_TOOL_INPUTS = 3
 TEXT_PREVIEW_LIMIT = 120
+
+
+def save_checkpoint(state: Any, source: str | None = None, **kwargs: Any) -> None:
+    """Compatibility patch symbol; production still goes through the gateway."""
+    save_runtime_checkpoint(state, source=source, **kwargs)
 
 
 def _record_runtime_evidence(
@@ -136,6 +142,18 @@ def _apply_preflight_transition(
     if not preflight.allowed:
         return preflight
     return apply_task_transition(state, request, preflight=preflight)
+
+
+def _deactivate_task_boundary(state: Any, *, reason: str, source: str) -> None:
+    from agent.runtime_integration.skill_lifecycle import (
+        deactivate_active_skill_for_task_boundary,
+    )
+
+    deactivate_active_skill_for_task_boundary(
+        state,
+        reason=reason,
+        source=source,
+    )
 
 
 def _record_end_turn_observation(observation: dict[str, Any]) -> None:
@@ -293,6 +311,11 @@ def handle_tool_use_response(
 
     if state.task.tool_call_count > MAX_TOOL_CALLS_PER_TURN:
         _fill_placeholder_results(messages, business_blocks, reason="工具调用次数超限，未执行")
+        _deactivate_task_boundary(
+            state,
+            reason="tool_call_limit_exceeded",
+            source="response_handlers.handle_tool_use_response",
+        )
         clear_checkpoint()
         state.reset_task()
         return "工具调用次数过多，请简化任务或分步执行。"
@@ -375,6 +398,11 @@ def handle_tool_use_response(
                         "检测到同一工具和同一输入被重复请求多次，"
                         "为避免无限重试，本轮未执行"
                     ),
+                )
+                _deactivate_task_boundary(
+                    state,
+                    reason="repeated_tool_input_limit",
+                    source="response_handlers.handle_tool_use_response",
                 )
                 clear_checkpoint()
                 state.reset_task()
@@ -613,6 +641,11 @@ def _maybe_advance_step(state: Any) -> str | None:
             "role": "assistant",
             "content": [{"type": "text", "text": "好的，任务已完成。"}],
         })
+        _deactivate_task_boundary(
+            state,
+            reason="task_completed",
+            source="response_handlers.maybe_advance_step",
+        )
         clear_checkpoint()
         state.reset_task()
         return "好的，任务已完成。"
@@ -907,6 +940,11 @@ def handle_end_turn_response(
         return None
 
     if not state.task.current_plan:
+        _deactivate_task_boundary(
+            state,
+            reason="no_current_plan_reset",
+            source="response_handlers.handle_end_turn_response",
+        )
         clear_checkpoint()
         state.reset_task()
 

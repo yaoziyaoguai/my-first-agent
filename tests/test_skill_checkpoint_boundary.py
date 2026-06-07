@@ -20,7 +20,6 @@ from agent.skill_system.checkpoint import (
 )
 from agent.skill_system.descriptor import SkillDescriptor
 
-
 # ---- helpers ----
 
 def _desc(name: str = "test-skill", risk_level: str = "low") -> SkillDescriptor:
@@ -185,9 +184,9 @@ def test_checkpoint_module_does_not_implement_loop():
 def test_checkpoint_module_does_not_import_legacy():
     """checkpoint.py 不能 import agent.skills / agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
+    from pathlib import Path
 
-    p = P(__file__).resolve().parents[1] / "agent" / "skill_system" / "checkpoint.py"
+    p = Path(__file__).resolve().parents[1] / "agent" / "skill_system" / "checkpoint.py"
     tree = ast.parse(p.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

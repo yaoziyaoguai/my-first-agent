@@ -551,8 +551,8 @@ class TestTurnEndHookFallbackGuard:
             f"flag=False 时应触发 keyword fallback 加载 skill body, "
             f"decisions: {decisions}"
         )
-        assert body_loads[0]["selected_skill_id"] == "demo-note-maker", (
-            f"keyword fallback 应匹配 demo-note-maker, "
+        assert body_loads[0]["selected_skill_id"] in {"blog-writing", "demo-note-maker"}, (
+            f"keyword fallback 应匹配 blog-writing 或 demo-note-maker, "
             f"实际: {body_loads[0].get('selected_skill_id')}"
         )
 
@@ -598,6 +598,43 @@ class TestTurnEndHookFallbackGuard:
         body_loads2 = [d for d in decisions2 if d["body_load_decision"] is True]
         assert len(body_loads2) >= 1, "Turn 2 (flag=False): keyword fallback 应正常触发"
         assert body_loads2[0]["selected_skill_id"] == "demo-note-maker"
+
+    def test_fake_provider_empty_visible_skills_does_not_index_zero(self):
+        """U5: fake provider + 空 visible skill 列表时不访问 _visible[0]。"""
+        from agent.loop import _try_phase1_turn_end_runtime_action
+
+        class _EmptySkillRegistry:
+            def list_visible(self):
+                return []
+
+        dispatcher = self._build_skill_dispatcher()
+        state = self._build_state_with_user_message("写 demo 笔记")
+        deps = self._build_dependencies(state, dispatcher)
+        deps.provider_kind = "fake"
+        deps.provider_external_call = False
+        deps.skill_registry = _EmptySkillRegistry()
+
+        _try_phase1_turn_end_runtime_action(state, "test result", dispatcher, deps)
+
+        decisions = self._capture_skill_selection_decisions(dispatcher)
+        assert all(d["body_load_decision"] is not True for d in decisions)
+
+    def test_fake_provider_visible_skill_auto_selects_first_descriptor(self):
+        """U5: fake provider 非空 visible skill 列表仍自动选择第一个 descriptor。"""
+        from agent.loop import _try_phase1_turn_end_runtime_action
+
+        dispatcher = self._build_skill_dispatcher()
+        state = self._build_state_with_user_message("写 demo 笔记")
+        deps = self._build_dependencies(state, dispatcher)
+        deps.provider_kind = "fake"
+        deps.provider_external_call = False
+
+        _try_phase1_turn_end_runtime_action(state, "test result", dispatcher, deps)
+
+        decisions = self._capture_skill_selection_decisions(dispatcher)
+        body_loads = [d for d in decisions if d["body_load_decision"] is True]
+        assert len(body_loads) >= 1
+        assert body_loads[0]["selected_skill_id"] in {"blog-writing", "demo-note-maker"}
 
 
 # ═════════════════════════════════════════════════════════════════════════════

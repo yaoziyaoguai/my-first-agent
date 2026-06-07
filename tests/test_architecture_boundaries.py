@@ -1505,10 +1505,15 @@ def _status_value_expr_opt(node: ast.AST) -> str:
 def _scan_tree_mutations(
     tree: ast.Module, file_rel: str,
 ) -> list[dict[str, object]]:
-    """扫描单个 AST 树中的 `state.task.status = ...` 裸写点。
+    """扫描单个 AST 树中的 task.status 裸写点。
 
-    与 _collect_direct_status_mutations() 使用相同逻辑，但接受任意 AST 树，
-    使 alias 检测可通过合成 AST 正向验证。
+    Phase 4 扩展覆盖范围：
+    - state.task.status = ...
+    - self.task.status = ...
+    - self._state.task.status = ...
+    - get_state().task.status = ...
+    - 简单 alias: task = state.task; task.status = ...
+    - setattr(state.task, "status", ...)
     """
     mutations: list[dict[str, object]] = []
     parents = _build_parent_map(tree)
@@ -1524,6 +1529,26 @@ def _scan_tree_mutations(
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         alias_map[(function, target.id)] = target.id
+
+    # Phase 4: 匹配 .task.status 写入的各种 receiver 模式
+    task_status_receivers = {
+        "state.task.status",
+        "self.task.status",
+        "self._state.task.status",
+    }
+
+    def _is_get_state_call_task_status(target: ast.AST) -> bool:
+        """检测 get_state().task.status = ... 模式。"""
+        if not (isinstance(target, ast.Attribute) and target.attr == "status"):
+            return False
+        mid = target.value
+        if not (isinstance(mid, ast.Attribute) and mid.attr == "task"):
+            return False
+        call = mid.value
+        if isinstance(call, ast.Call):
+            fn = _qualified_name(call.func)
+            return fn in {"get_state", "self.get_state"}
+        return False
 
     for node in ast.walk(tree):
         function = _enclosing_scope_opt(tree, node, parents)
@@ -1546,13 +1571,20 @@ def _scan_tree_mutations(
                             "lineno": node.lineno,
                         })
 
-        # state.task.status = ...
+        # direct assignment patterns
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 name = _qualified_name(target)
                 shape = None
-                if name and name == "state.task.status":
-                    shape = "state.task.status"
+
+                # state.task.status / self.task.status / self._state.task.status
+                if name and name in task_status_receivers:
+                    shape = name
+
+                # get_state().task.status = ...
+                elif _is_get_state_call_task_status(target):
+                    shape = "get_state().task.status"
+
                 # alias: task.status = ...
                 elif (isinstance(target, ast.Attribute)
                       and target.attr == "status"
@@ -1560,6 +1592,7 @@ def _scan_tree_mutations(
                     alias_key = (function, target.value.id)
                     if alias_key in alias_map:
                         shape = "state.task.status"
+
                 if shape is None:
                     continue
                 status_val = _status_value_expr_opt(node.value)
@@ -1576,15 +1609,16 @@ def _scan_tree_mutations(
 
 
 def _collect_direct_status_mutations() -> list[dict[str, object]]:
-    """收集 agent/ 下所有 `state.task.status = ...` 裸写点。
+    """收集 agent/ 下所有 task.status 裸写点。
 
-    检测模式：
+    Phase 4 检测模式：
     - state.task.status = "..." (ast.Assign)
+    - self.task.status = "..." (ast.Assign)
+    - self._state.task.status = "..." (ast.Assign)
+    - get_state().task.status = "..." (ast.Assign + Call receiver)
     - state.task.status = variable (Name/Attribute rhs)
     - setattr(state.task, "status", ...) (ast.Call)
     - 简单 alias: task = state.task; task.status = "..." (Phase 1A 限定深度)
-
-    Phase 1A 不覆盖：self.task.status / self._state.task.status / get_state().task.status
 
     返回 list[dict]，每项 file/function/mutation_kind/target_shape/
     status_value/lineno（行号仅用于错误报告）。
@@ -1613,35 +1647,53 @@ def _aggregate_mutations(
     return dict(Counter(keys))
 
 
-# Phase 3 迁移后 direct status mutation baseline。
+# Phase 4 final legal writer baseline。
 #
 # Key: (file, function, mutation_kind, target_shape, status_value)
 # 行号仅用于错误报告。
 #
-# Phase 1A 迁移 5 个点（均已从 baseline 移除）:
-#   - confirmation/plan.py handle_plan_confirmation accept: "running" assign
-#     → 迁移到 apply_task_transition()
-#   - confirmation/tool.py handle_tool_confirmation 4×"running": 全部迁移
+# Phase 4 scanner 现在覆盖所有写入模式：
+#   - state.task.status = ...
+#   - self.task.status = ...
+#   - self._state.task.status = ...
+#   - get_state().task.status = ...
+#   - alias: task = state.task; task.status = ...
+#   - setattr(state.task, "status", ...)
 #
-# 以下模式不在当前 scanner 范围（已知 gap，Phase 4 覆盖）:
-#   - agent/state.py AgentState.reset_task: self.task.status = "idle"
-#   - agent/session.py 中 get_state().task.status 路径
-#   - agent/session.py handle_interrupt_choice 中 state.task.status = "idle" (line 652)
-#     注: 该行使用函数参数 state 而非模块级 state，AST 扫描可检测但行 652 在
-#     当前 handle_interrupt_choice 中与 line 636 ("running") 并存。
+# Final legal writers (8 total):
+#   1. apply_task_transition — transition layer 唯一合法新增写入点
+#   2. AgentState.reset_task — special factory reset (self.task.status)
+#   3-8. session.py W18-W23 — session-only transient writes，不进入 task table
+#
+# Session transient contract:
+#   - awaiting_resume_choice / awaiting_interrupt_choice 不持久化到 checkpoint
+#   - 它们是 CLI session routing 内存态，不参与 plan/step/tool task transition
+#   - handle_resume_choice / handle_interrupt_choice 的 idle/running 恢复是
+#     session lifecycle 行为，不是普通 task transition
 
 _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
-    # ── transition layer 内部（唯一合法新增写入点）──
+    # ── 1. transition layer 内部（唯一合法新增写入点）──
     ("agent/transitions.py", "apply_task_transition", "assign",
      "state.task.status", "<variable>"): 1,
-    # ── session.py ──
-    ("agent/session.py", "handle_interrupt_choice", "assign",
-     "state.task.status", "idle"): 1,
-    ("agent/session.py", "handle_interrupt_choice", "assign",
-     "state.task.status", "running"): 1,
+    # ── 2. special factory reset ──
+    ("agent/state.py", "reset_task", "assign",
+     "self.task.status", "idle"): 1,
+    # ── 3-8. session-only transient writes (W18-W23) ──
+    # W23: try_resume_from_checkpoint — TTY 模式设 transient awaiting
+    ("agent/session.py", "try_resume_from_checkpoint", "assign",
+     "get_state().task.status", "awaiting_resume_choice"): 1,
+    # W18: handle_interrupt_with_checkpoint — 保存后设 transient
     ("agent/session.py", "handle_interrupt_with_checkpoint", "assign",
      "state.task.status", "awaiting_interrupt_choice"): 1,
-
+    # W19: handle_resume_choice — no-resume 回到 idle
+    ("agent/session.py", "handle_resume_choice", "assign",
+     "get_state().task.status", "idle"): 2,
+    # W21: handle_interrupt_choice — 继续当前任务
+    ("agent/session.py", "handle_interrupt_choice", "assign",
+     "state.task.status", "running"): 1,
+    # W22: handle_interrupt_choice — invalid/fallback 回到 idle
+    ("agent/session.py", "handle_interrupt_choice", "assign",
+     "state.task.status", "idle"): 1,
 }
 
 # apply_task_transition 是唯一合法新增写入点，已在 baseline 中以 count=1 登记。
@@ -1649,14 +1701,13 @@ _DIRECT_STATUS_MUTATION_BASELINE: dict[tuple[str, str, str, str, str], int] = {
 
 
 def test_direct_status_mutation_baseline() -> None:
-    """Phase 3: 禁止恢复已迁移的 state.task.status 裸写。
+    """Phase 4: final legal writer 双向 equality baseline。
 
     - baseline 匹配不依赖行号
     - 行号仅用于错误报告
-    - apply_task_transition() 是唯一合法新增写入点
-    - reset_task() / get_state().task.status / self._state.task.status
-      不在 Phase 1A 扫描范围（已知 gap）
-    - Phase 2/3 迁移掉的 W01-W17（除既有非目标项）已从 baseline 移除
+    - Phase 4 scanner 覆盖全部写入模式
+    - Final 8 legal writers: transition entry (1) + reset_task (1) + session-only (6)
+    - 双向检测: unexpected actual + missing expected 同时发现
     """
     mutations = _collect_direct_status_mutations()
     actual = _aggregate_mutations(mutations)
@@ -1711,6 +1762,20 @@ def test_direct_status_mutation_baseline() -> None:
             f"COUNT MISMATCHES ({len(count_mismatches)}):\n"
             + "\n".join(f"  - {c}" for c in count_mismatches)
         )
+
+    # Phase 4 双向检测: expected 中有但 actual 中缺失的 entry
+    missing_expected = [
+        f"MISSING: {key!r} expected_count={count}"
+        for key, count in sorted(_DIRECT_STATUS_MUTATION_BASELINE.items())
+        if key not in actual
+    ]
+    if missing_expected:
+        errors.append(
+            f"MISSING expected entries ({len(missing_expected)}):\n"
+            + "\n".join(f"  - {m}" for m in missing_expected)
+            + "\n\nBaseline expects writes that no longer exist in code."
+        )
+
     if errors:
         raise AssertionError("\n\n".join(errors))
 

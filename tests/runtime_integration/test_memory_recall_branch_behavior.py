@@ -124,7 +124,7 @@ def _make_store_with_records(
     return store
 
 
-def _build_dispatcher(store: InMemoryMemoryStore | None = None) -> RuntimeActionDispatcher:
+def _build_dispatcher(store=None) -> RuntimeActionDispatcher:
     """构建注册了 MEMORY_RECALL handler 的 dispatcher。"""
     registry = ActionHandlerRegistry()
     registry.register(
@@ -175,6 +175,43 @@ class TestRecallHappyPath:
         assert payload["snapshot_item_count"] >= 1
         assert "--- Memory ---" in payload["prompt_section"]
         assert result.evidence.get("target_module_proof") is not None
+
+    def test_filesystem_store_recall_injects_prompt_and_safe_evidence(self, tmp_path):
+        """Filesystem store 中已 commit 的 memory 必须能通过 MEMORY_RECALL 进入 prompt。"""
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        raw_content = "FS RECALL RAW MEMORY SHOULD ENTER PROMPT"
+        store = FilesystemMemoryStore(root_dir=tmp_path / "memory")
+        intent = MemoryOperationIntent(
+            operation_type=MemoryOperationType.RETAIN,
+            decision_type=MemoryDecisionType.RETAIN,
+            confirmation_status=MemoryConfirmationStatus.APPROVED,
+            user_choice=MemoryConfirmationChoice.ACCEPT,
+            content_summary=raw_content,
+            source_summary="filesystem recall source",
+            scope=MemoryScope.USER,
+            safety_summary="safe",
+            sensitive_redacted=False,
+            user_visible_summary=raw_content[:80],
+        )
+        store.apply_operation_intent(intent, build_memory_audit_summary(intent))
+        reopened = FilesystemMemoryStore(root_dir=tmp_path / "memory")
+        dispatcher = _build_dispatcher(reopened)
+
+        result = _dispatch_recall(dispatcher)
+
+        assert result.status == "success"
+        assert result.payload["disposition"] == "recalled"
+        assert result.payload["snapshot_item_count"] == 1
+        assert raw_content in result.payload["prompt_section"]
+        assert result.evidence["store_backend"] == "filesystem"
+        assert result.evidence["memory_recall_requested"]["event_type"] == "memory.recall.requested"
+        assert result.evidence["memory_recall_completed"]["event_type"] == "memory.recall.completed"
+        assert "memory_recall_failed" not in result.evidence
+
+        evidence_text = str(result.evidence)
+        assert raw_content not in evidence_text
+        assert str(tmp_path) not in evidence_text
 
     def test_a2_recall_respects_snapshot_budget_max_5_items(self):
         """A2: 超过 5 条 non-procedural 时 snapshot 截断。"""

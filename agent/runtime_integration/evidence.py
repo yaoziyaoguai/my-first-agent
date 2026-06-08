@@ -143,13 +143,12 @@ def _memory_policy_decide_adapter(payload: Mapping[str, Any]) -> Any:
 
 def _memory_store_apply_intent_adapter(payload: Mapping[str, Any]) -> Any:
     from agent.memory_operations import MemoryAuditSummary, MemoryOperationIntent
-    from agent.memory_store import InMemoryMemoryStore
 
     store = payload.get("store")
     intent = payload.get("intent")
     audit_summary = payload.get("audit_summary")
-    if not isinstance(store, InMemoryMemoryStore):
-        raise TypeError("store must be InMemoryMemoryStore or its subclass")
+    if not _looks_like_memory_store(store):
+        raise TypeError("store must implement MemoryStoreProtocol")
     if not isinstance(intent, MemoryOperationIntent):
         raise TypeError("intent must be MemoryOperationIntent")
     if not isinstance(audit_summary, MemoryAuditSummary):
@@ -168,13 +167,12 @@ def _memory_recall_snapshot_adapter(payload: Mapping[str, Any]) -> Any:
         MemorySnapshotBuildOptions,
         build_memory_snapshot_from_store,
     )
-    from agent.memory_store import InMemoryMemoryStore
 
     store = payload.get("store")
     options_dict = payload.get("options") or {}
 
-    if not isinstance(store, InMemoryMemoryStore):
-        raise TypeError("store must be InMemoryMemoryStore or its subclass")
+    if not _looks_like_memory_store(store):
+        raise TypeError("store must implement MemoryStoreProtocol")
 
     options = MemorySnapshotBuildOptions(
         selection_reason=str(options_dict.get("selection_reason") or "Memory Kernel v1 recall"),
@@ -182,6 +180,20 @@ def _memory_recall_snapshot_adapter(payload: Mapping[str, Any]) -> Any:
         rendered_char_budget=int(options_dict.get("rendered_char_budget") or 500),
     )
     return build_memory_snapshot_from_store(store, options)
+
+
+def _looks_like_memory_store(store: Any) -> bool:
+    """用公开协议方法做 duck-typing，避免 catalog adapter 绑死单个 store 实现。"""
+
+    return all(
+        callable(getattr(store, method_name, None))
+        for method_name in (
+            "apply_operation_intent",
+            "get_record",
+            "list_records",
+            "remove_record",
+        )
+    )
 
 
 def _tool_result_format_adapter(payload: Mapping[str, Any]) -> Any:
@@ -575,9 +587,9 @@ class RuntimeActionTargetCatalog:
             "MemoryStore",
             operation="apply_operation_intent",
             invocation_adapter_id="MemoryStore.apply_operation_intent",
-            implementation_id="agent.memory_store.InMemoryMemoryStore.apply_operation_intent",
+            implementation_id="agent.memory_store.MemoryStoreProtocol.apply_operation_intent",
             adapter=_memory_store_apply_intent_adapter,
-            function_called="InMemoryMemoryStore.apply_operation_intent",
+            function_called="MemoryStoreProtocol.apply_operation_intent",
             call_signature="apply_operation_intent(intent, audit_summary)",
         ),
         _descriptor(

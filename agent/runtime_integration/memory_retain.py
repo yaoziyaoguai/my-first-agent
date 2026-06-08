@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from agent.evidence_recorder import build_memory_evidence_metadata
 from agent.memory_confirmation import MemoryConfirmationChoice, MemoryConfirmationStatus
 from agent.memory_contracts import MemoryDecisionType, MemoryScope
 from agent.memory_operations import (
@@ -27,7 +28,7 @@ from agent.memory_operations import (
     MemoryOperationType,
     build_memory_audit_summary,
 )
-from agent.memory_store import InMemoryMemoryStore
+from agent.memory_store import InMemoryMemoryStore, MemoryStoreProtocol
 
 
 def _now_iso() -> str:
@@ -61,7 +62,7 @@ class MemoryRetainHandler:
         handler = MemoryRetainHandler(store=InMemoryMemoryStore())
     """
 
-    def __init__(self, *, store: InMemoryMemoryStore | None = None) -> None:
+    def __init__(self, *, store: MemoryStoreProtocol | None = None) -> None:
         self._store = store or InMemoryMemoryStore()
 
     def handle(self, request, context):
@@ -83,6 +84,7 @@ class MemoryRetainHandler:
             "no_silent_retain": True,
             "real_episodes_read": False,
             "external_side_effects": external_side_effects,
+            "store_backend": store_backend,
         }
         if provider_kind:
             base_evidence["provider_kind"] = provider_kind
@@ -250,6 +252,20 @@ class MemoryRetainHandler:
                 },
             )
         except Exception as exc:
+            failed_metadata = build_memory_evidence_metadata(
+                event_type="memory.commit_failed",
+                operation="commit",
+                source_type="explicit_user",
+                decision="failed",
+                backend=store_backend,
+                memory_id=proposal_id,
+                record_id=proposal_id,
+                reason="apply_operation_intent_exception",
+                raw_fields={
+                    "proposal_id": proposal_id,
+                    "content_summary": content,
+                },
+            )
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="MemoryStore",
@@ -263,10 +279,26 @@ class MemoryRetainHandler:
                 observed_call=None,
                 evidence_extra={
                     **base_evidence,
+                    "memory_commit_failed": failed_metadata,
                     "error_type": type(exc).__name__,
                 },
-                error_safe_preview=str(exc),
+                error_safe_preview=type(exc).__name__,
             )
+        committed_metadata = build_memory_evidence_metadata(
+            event_type="memory.committed",
+            operation="commit",
+            source_type="explicit_user",
+            decision="allowed",
+            backend=store_backend,
+            memory_id=proposal_id,
+            record_id=proposal_id,
+            count=1,
+            reason="record_committed",
+            raw_fields={
+                "proposal_id": proposal_id,
+                "content_summary": content,
+            },
+        )
 
         return context.success(
             handler_name=type(self).__name__,
@@ -280,5 +312,8 @@ class MemoryRetainHandler:
                 "content_hash": actual_hash or expected_hash,
             },
             observed_call=observed,
-            evidence_extra=base_evidence,
+            evidence_extra={
+                **base_evidence,
+                "memory_committed": committed_metadata,
+            },
         )

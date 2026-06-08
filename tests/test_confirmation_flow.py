@@ -376,13 +376,6 @@ def test_tool_confirmation_uses_unified_chinese_reject_placeholder(monkeypatch):
 
 # ---------- 幂等性 ----------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FakeProvider 行为变化——tool_use_id 重复出现可能与新的 end_turn reply 语义"
-        "和确认流程变更有关，不在本轮 scope 内。"
-    ),
-)
 def test_tool_execution_log_is_idempotent(monkeypatch):
     """同一个 tool_use_id 出现两次，第二次不应该重复执行工具。
 

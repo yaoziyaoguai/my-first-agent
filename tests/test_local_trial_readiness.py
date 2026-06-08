@@ -643,7 +643,7 @@ def test_local_trial_checklist_commands_match_cli_entrypoints(monkeypatch, capsy
 
 def test_release_notes_v0_3_published() -> None:
     """RELEASE_NOTES_v0.3.md 是 v0.3.1 发布的主要外部参考。"""
-    path = REPO_ROOT / "RELEASE_NOTES_v0.3.md"
+    path = REPO_ROOT / "docs/releases/legacy/RELEASE_NOTES_v0.3.md"
     assert path.exists()
     text = path.read_text(encoding="utf-8")
     for landmark in ["M1", "M2", "M3", "M4", "request_user_input", "676 passed"]:

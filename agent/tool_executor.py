@@ -48,6 +48,14 @@ TOOL_FAILURE_PREFIXES = tool_result_contract.TOOL_FAILURE_PREFIXES
 TOOL_REJECTION_PREFIXES = tool_result_contract.TOOL_REJECTION_PREFIXES
 
 
+def _safe_path_metadata(tool_input: Any) -> dict[str, Any]:
+    if not isinstance(tool_input, dict) or "path" not in tool_input:
+        return {}
+    from agent.evidence_recorder import build_safe_path_metadata
+
+    return build_safe_path_metadata(tool_input.get("path", ""))
+
+
 def save_checkpoint(state: Any, source: str | None = None, **kwargs: Any) -> None:
     """Backward-compatible patch symbol that still uses the runtime gateway."""
 
@@ -405,7 +413,7 @@ def execute_single_tool(
                 metadata={
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
-                    "path": (tool_input or {}).get("path", ""),
+                    **_safe_path_metadata(tool_input),
                 },
             )
         except Exception:
@@ -464,7 +472,7 @@ def execute_single_tool(
                 metadata={
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
-                    "path": (tool_input or {}).get("path", ""),
+                    **_safe_path_metadata(tool_input),
                 },
             )
         except Exception:

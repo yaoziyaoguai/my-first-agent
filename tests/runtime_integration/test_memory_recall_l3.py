@@ -13,6 +13,7 @@ dispatch 后产生 real_core_loop_runtime_e2e evidence。
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agent.runtime_integration import (
@@ -199,6 +200,31 @@ class TestMemoryRecallL3:
         payload = dict(recall_result.payload)
         assert payload.get("disposition") == "no_memory"
         assert payload.get("snapshot_item_count") == 0
+
+    def test_default_chat_pre_loop_recall_reaches_event_log(self, tmp_path):
+        """默认 chat() 不显式传 dispatcher 时，pre-loop recall 也进入 evidence 链。"""
+        from agent.core import chat
+        from agent.event_log import EventLogWriter
+        from agent.provider.fake_provider import FakeProvider
+
+        writer = EventLogWriter(tmp_path / "session")
+
+        result = chat(
+            "hello",
+            provider=FakeProvider(),
+            event_log_writer=writer,
+        )
+        writer.close()
+
+        assert isinstance(result, str)
+        events_path = tmp_path / "session" / "events.jsonl"
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+        events = [json.loads(line) for line in lines]
+        recall_events = [
+            event for event in events
+            if event.get("action_type") == "memory.recall"
+        ]
+        assert recall_events, "默认 chat() 的 pre-loop MEMORY_RECALL 必须写入 events.jsonl"
 
 
 # ═══════════════════════════════════════════════════════════════════════

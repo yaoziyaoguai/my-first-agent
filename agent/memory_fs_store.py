@@ -53,6 +53,22 @@ from agent.memory_store import (
     mutating_intent_allows_store_write,
 )
 
+_DURABLE_ROOT_ENV_KEYS = ("MEMORY_STORE_ROOT", "MEMORY_ROOT")
+
+
+def resolve_configured_memory_root() -> Path | None:
+    """返回显式配置的 durable memory root；未配置时返回 None。
+
+    Memory v0 不再把 ``Path.home() / ".my-first-agent" / "memory"`` 当作
+    隐式默认值，避免在测试或生产中静默写入真实 HOME。
+    """
+    for env_key in _DURABLE_ROOT_ENV_KEYS:
+        value = os.getenv(env_key)
+        if value and value.strip():
+            return Path(value).expanduser()
+    return None
+
+
 # ── topic routing ──────────────────────────────────────────────────────────
 
 DEFAULT_TOPIC_FILES = {
@@ -548,13 +564,13 @@ class FilesystemMemoryStore:
     """
 
     def __init__(self, root_dir: Path | str | None = None) -> None:
-        # 优先级：显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT > 默认 ~/.my-first-agent/memory
-        import os as _os
+        # 优先级：显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT；无显式 root 时 fail closed。
         if root_dir is None:
-            root_dir = (
-                _os.getenv("MEMORY_STORE_ROOT")
-                or _os.getenv("MEMORY_ROOT")
-                or (Path.home() / ".my-first-agent" / "memory")
+            root_dir = resolve_configured_memory_root()
+        if root_dir is None:
+            raise ValueError(
+                "FilesystemMemoryStore requires explicit MEMORY_STORE_ROOT "
+                "or MEMORY_ROOT; silent HOME fallback is disabled"
             )
         self.root_dir = Path(root_dir)
         try:
@@ -648,6 +664,20 @@ class FilesystemMemoryStore:
             if rec is not None:
                 records.append(rec)
         return tuple(records)
+
+    def remove_record(self, record_id: str) -> bool:
+        """按 record_id 删除一条 filesystem memory，满足 MemoryStoreProtocol。"""
+
+        entry = self._index.get(record_id)
+        if entry is None:
+            return False
+        filepath = self.root_dir / entry["file"]
+        removed = remove_memory_section(filepath, record_id)
+        if not removed:
+            return False
+        _remove_index_entry(self.root_dir, record_id)
+        self._index = _load_index(self.root_dir)
+        return True
 
     def store_retained_record(self, candidate: dict) -> None:
         """从 dispatcher payload candidate 直接写入 filesystem store。

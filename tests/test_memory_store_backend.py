@@ -37,26 +37,56 @@ class TestDefaultBackend:
 class TestFilesystemBackend:
     """MEMORY_STORE_BACKEND=filesystem 行为。"""
 
-    def test_filesystem_backend_uses_filesystem_store(self, monkeypatch):
+    def test_filesystem_backend_uses_filesystem_store(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path / "memory"))
         from agent.memory_fs_store import FilesystemMemoryStore
 
         rt = create_memory_runtime()
         assert isinstance(rt._store, FilesystemMemoryStore)
 
-    def test_memory_fs_alias_uses_filesystem_store(self, monkeypatch):
+    def test_memory_fs_alias_uses_filesystem_store(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "memory_fs")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path / "memory"))
         from agent.memory_fs_store import FilesystemMemoryStore
 
         rt = create_memory_runtime()
         assert isinstance(rt._store, FilesystemMemoryStore)
 
-    def test_fs_alias_uses_filesystem_store(self, monkeypatch):
+    def test_fs_alias_uses_filesystem_store(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "fs")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path / "memory"))
         from agent.memory_fs_store import FilesystemMemoryStore
 
         rt = create_memory_runtime()
         assert isinstance(rt._store, FilesystemMemoryStore)
+
+    def test_u0_filesystem_backend_without_root_currently_uses_home_default(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """U0 characterization superseded by U3: 未配置 root 不再使用 HOME。"""
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.delenv("MEMORY_STORE_ROOT", raising=False)
+        monkeypatch.delenv("MEMORY_ROOT", raising=False)
+        fake_home = tmp_path / "fake_home"
+
+        from pathlib import Path
+
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        rt = create_memory_runtime()
+
+        assert isinstance(rt._store, InMemoryMemoryStore)
+        assert not (fake_home / ".my-first-agent" / "memory").exists()
+
+    def test_u3_no_duplicate_production_filesystem_store_export(self):
+        """U3: production FilesystemMemoryStore 只能从 agent.memory_fs_store 导入。"""
+        import agent.memory_store as memory_store
+        from agent.memory_fs_store import FilesystemMemoryStore as RealFilesystemMemoryStore
+
+        assert not hasattr(memory_store, "FilesystemMemoryStore")
+        assert RealFilesystemMemoryStore.__module__ == "agent.memory_fs_store"
 
 
 class TestInvalidBackend:
@@ -86,15 +116,8 @@ class TestFilesystemStoreIntegration:
             build_memory_audit_summary,
         )
 
-        # 让 FS store 写到 tmp_path 避免污染真实目录
-        import agent.memory_fs_store as mfs
-
-        original_init = mfs.FilesystemMemoryStore.__init__
-
-        def tmp_init(self, root_dir=None):
-            original_init(self, root_dir=tmp_path / "memory")
-
-        monkeypatch.setattr(mfs.FilesystemMemoryStore, "__init__", tmp_init)
+        # 让 FS store 写到 tmp_path，且通过 U3 显式 durable root 策略启用。
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path / "memory"))
         rt = create_memory_runtime()
 
         intent = MemoryOperationIntent(
@@ -146,6 +169,73 @@ class TestMemoryRoot:
 
         store = FilesystemMemoryStore()
         assert store.root_dir == root
+
+    def test_filesystem_store_without_root_fails_closed(self, monkeypatch):
+        """FilesystemMemoryStore 不再 silent 写 HOME 默认路径。"""
+        monkeypatch.delenv("MEMORY_STORE_ROOT", raising=False)
+        monkeypatch.delenv("MEMORY_ROOT", raising=False)
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        with pytest.raises(ValueError, match="MEMORY_STORE_ROOT"):
+            FilesystemMemoryStore()
+
+    def test_filesystem_backend_without_root_warns_and_falls_back_to_inmemory(
+        self,
+        monkeypatch,
+    ):
+        """未配置 durable root 时 runtime 只能用 InMemory fallback + warning evidence。"""
+        calls: list[tuple[str, dict]] = []
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.delenv("MEMORY_STORE_ROOT", raising=False)
+        monkeypatch.delenv("MEMORY_ROOT", raising=False)
+
+        rt = create_memory_runtime(
+            event_logger=lambda event, payload=None: calls.append((event, payload or {}))
+        )
+
+        assert isinstance(rt._store, InMemoryMemoryStore)
+        assert calls
+        assert calls[0][0] == "memory.backend_warning"
+        assert calls[0][1]["backend"] == "in_memory"
+        assert calls[0][1]["reason"] == "durable_root_not_configured"
+
+    def test_filesystem_backend_with_root_emits_backend_selected(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """显式 tmp root 才启用 filesystem durable backend，并产生 selected evidence。"""
+        calls: list[tuple[str, dict]] = []
+        root = tmp_path / "configured_memory"
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
+        monkeypatch.setenv("MEMORY_STORE_ROOT", str(root))
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        rt = create_memory_runtime(
+            event_logger=lambda event, payload=None: calls.append((event, payload or {}))
+        )
+
+        assert isinstance(rt._store, FilesystemMemoryStore)
+        assert rt._store.root_dir == root
+        assert root.exists()
+        assert calls[0][0] == "memory.backend_selected"
+        assert calls[0][1]["backend"] == "filesystem"
+        assert "root_hash" in calls[0][1]
+        assert str(root) not in str(calls)
+
+    def test_inmemory_backend_warning_for_non_durable_readiness(self, monkeypatch):
+        """InMemory 可作为 session fallback，但不能作为 durable readiness。"""
+        calls: list[tuple[str, dict]] = []
+        monkeypatch.setenv("MEMORY_STORE_BACKEND", "memory")
+
+        rt = create_memory_runtime(
+            event_logger=lambda event, payload=None: calls.append((event, payload or {}))
+        )
+
+        assert isinstance(rt._store, InMemoryMemoryStore)
+        assert calls[0][0] == "memory.backend_warning"
+        assert calls[0][1]["backend"] == "in_memory"
+        assert calls[0][1]["durable_ready"] is False
 
     def test_explicit_root_overrides_env(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")

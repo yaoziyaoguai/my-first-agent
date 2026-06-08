@@ -599,10 +599,22 @@ def _runtime_action_event_to_dict(event: object) -> dict:
     result: dict = {}
     for f in fields(event):
         value = getattr(event, f.name)
-        if isinstance(value, Mapping):
-            value = dict(value)
-        result[f.name] = value
+        result[f.name] = _json_safe_event_value(value)
     return result
+
+
+def _json_safe_event_value(value: Any) -> Any:
+    """把 RuntimeActionEvent 投影成 JSON-safe 值，不改变内存 evidence。"""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_safe_event_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple | list):
+        return [_json_safe_event_value(item) for item in value]
+    if isinstance(value, set | frozenset):
+        return sorted(_json_safe_event_value(item) for item in value)
+    return value
 
 
 def _handler_identity(handler: ActionHandler) -> str:

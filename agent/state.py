@@ -5,7 +5,6 @@ from typing import Any
 
 from agent.pending_requests import PendingUserInputRequest
 
-
 # TaskState.status 目前仍是单字段，里面混合了 task 生命周期、plan 确认、
 # step 确认、用户输入等待、工具确认等多个维度。下面这组 helper 是拆分状态模型
 # 前的过渡层：先把硬编码字符串判断收口到一个地方，避免 core.py / handler 继续
@@ -64,7 +63,7 @@ def is_terminal_task_status(status: str) -> bool:
     return status in TERMINAL_TASK_STATUSES
 
 
-def task_status_requires_plan(task: "TaskState") -> bool:
+def task_status_requires_plan(task: TaskState) -> bool:
     """判断当前 task.status 在 `current_plan is None` 时是否不一致。
 
     这个 helper 只服务第一阶段的 core invariant，不改变状态 schema：
@@ -177,6 +176,10 @@ class MemoryState:
     # 可放用户偏好、长期约束、跨会话记忆等
     long_term_notes: list[str] = field(default_factory=list)
 
+    # MemoryStore 引用元数据。checkpoint 只保存这类安全 reference，
+    # 不保存完整长期记忆 records。
+    memory_store_reference: dict[str, Any] | None = None
+
     # checkpoint 数据
     # 先宽松一点，用 dict 保存恢复会话需要的信息
     checkpoint_data: dict[str, Any] | None = None
@@ -210,7 +213,9 @@ class TaskState:
 
     # 当前任务状态
     # 可选值示例：
-    # idle / planning / running / awaiting_plan_confirmation / awaiting_step_confirmation / awaiting_user_input / awaiting_tool_confirmation / done / failed
+    # idle / planning / running / awaiting_plan_confirmation /
+    # awaiting_step_confirmation / awaiting_user_input /
+    # awaiting_tool_confirmation / done / failed
     status: str = "idle"
 
     # 当前轮重试次数
@@ -255,7 +260,8 @@ class TaskState:
 
     # 已确认待 retain 的 memory proposals
     # 用户在 inline confirmation 中确认后入队，turn-end hook 中 dispatch MEMORY_PROPOSE
-    # 每个 entry: {proposal_id, content, content_hash, scope, sensitivity, source, confirmation_result, queued_at}
+    # 每个 entry: {proposal_id, content, content_hash, scope, sensitivity, source,
+    # confirmation_result, queued_at}
     pending_retain_proposals: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -333,7 +339,7 @@ class AgentState:
 
 
 
-    
+
 
     def add_user_message(self, content: str) -> None:
         """

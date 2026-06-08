@@ -27,11 +27,14 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
+from agent.evidence_recorder import record_memory_runtime_event
 from agent.memory_confirmation import (
     MemoryConfirmationChoice,
     MemoryConfirmationRequest,
@@ -41,13 +44,99 @@ from agent.memory_confirmation import (
     resolve_memory_confirmation_choice,
 )
 from agent.memory_contracts import MemoryDecision, MemoryDecisionType, MemorySnapshot
+from agent.memory_operations import (
+    build_memory_audit_summary,
+    build_memory_operation_intent,
+)
 from agent.memory_policy import DeterministicMemoryPolicy
 from agent.memory_snapshot_generator import (
     MemorySnapshotBuildOptions,
     build_memory_snapshot_from_store,
 )
-from agent.memory_store import InMemoryMemoryStore, MemoryStoreProtocol
+from agent.memory_store import (
+    InMemoryMemoryStore,
+    MemoryStoreApplyStatus,
+    MemoryStoreProtocol,
+    derive_memory_record_id,
+)
 from agent.memory_suggestions import DeterministicSuggestionEngine
+
+
+def _hash_backend_root(root: Path | str | None) -> str:
+    if root is None:
+        return ""
+    return "memroot:" + hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
+
+
+def _emit_backend_event(
+    logger: MemoryEventLogger | None,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    sink = logger or record_memory_runtime_event
+    with contextlib.suppress(Exception):
+        sink(event_type, payload)
+
+
+def _root_kind_for(root: Path | None) -> str:
+    if root is None:
+        return "session"
+    root_str = str(root)
+    if "/tmp" in root_str or "/var/folders/" in root_str:
+        return "test_tmp"
+    return "configured"
+
+
+def _hash_seen_memory_ids(record_ids: tuple[str, ...] | list[str] = ()) -> str:
+    safe_ids = sorted(str(record_id) for record_id in record_ids if str(record_id))
+    if not safe_ids:
+        return ""
+    digest = hashlib.sha256("|".join(safe_ids).encode("utf-8")).hexdigest()[:16]
+    return f"memids:{digest}"
+
+
+def build_memory_store_reference(
+    *,
+    backend: str,
+    namespace: str = "default",
+    root_kind: str = "session",
+    root: Path | str | None = None,
+    store_revision: str = "",
+    record_ids: tuple[str, ...] | list[str] = (),
+    record_count: int = 0,
+) -> dict[str, Any]:
+    """构造 checkpoint-safe MemoryStore reference metadata。
+
+    只输出 backend/root hash/count/revision，不输出 raw memory records、
+    raw record_id 或完整 filesystem path。
+    """
+    ids_hash = _hash_seen_memory_ids(record_ids)
+    revision = store_revision
+    if not revision:
+        revision_payload = "|".join((
+            backend,
+            namespace,
+            root_kind,
+            _hash_backend_root(root),
+            str(record_count),
+            ids_hash,
+        ))
+        revision = "memrev:" + hashlib.sha256(
+            revision_payload.encode("utf-8")
+        ).hexdigest()[:16]
+    reference: dict[str, Any] = {
+        "backend": backend,
+        "namespace": namespace,
+        "root_kind": root_kind,
+        "store_revision": revision,
+        "record_count": int(record_count),
+    }
+    root_hash = _hash_backend_root(root)
+    if root_hash:
+        reference["root_hash"] = root_hash
+    if ids_hash:
+        reference["last_seen_ids_hash"] = ids_hash
+    return reference
 
 
 class MemoryEvaluationAction(StrEnum):
@@ -87,7 +176,7 @@ MemoryEventLogger = Callable[[str, dict | None], None]
 
 
 def _noop_event_logger(event_type: str, payload: dict | None = None) -> None:
-    """默认空 event logger，不写任何日志。"""
+    """测试/废弃兼容空 logger；生产默认走 record_memory_runtime_event。"""
     return
 
 
@@ -134,7 +223,7 @@ class MemoryRuntime:
         """
         self._policy = policy or DeterministicMemoryPolicy()
         self._store = store
-        self._log = event_logger or _noop_event_logger
+        self._log = event_logger or record_memory_runtime_event
         self._suggestion_engine = suggestion_engine
         # 两阶段确认缓存：key=candidate_id, value=dict(decision, confirmation_request)
         self._pending_decision: dict[str, Any] | None = None
@@ -483,6 +572,13 @@ class MemoryRuntime:
         # -- approved：构造 _dispatcher_payload；direct_write 时同步写 store -----
         self._pending_decision = None
 
+        if decision.decision_type is MemoryDecisionType.UPDATE:
+            return self._resolve_confirmed_update(
+                confirmation_result,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+            )
+
         candidate_payload = self._build_candidate_payload(
             decision, content_override=confirmation_result.approved_content
         )
@@ -506,6 +602,90 @@ class MemoryRuntime:
                 "proposal_id": candidate_id,
                 "candidate": candidate_payload,
             },
+        )
+
+    def _resolve_confirmed_update(
+        self,
+        confirmation_result: MemoryConfirmationResult,
+        *,
+        candidate_id: str | None,
+        content_summary: str,
+    ) -> MemoryEvaluationResult:
+        """执行 explicit update confirmation，失败必须留下安全 evidence。
+
+        Memory v0 没有 model-visible update tool；已有用户显式 ``update memory:``
+        路径在用户确认后由 MemoryRuntime 处理，避免误走 retain handler。
+        """
+
+        intent = build_memory_operation_intent(confirmation_result)
+        record_id = derive_memory_record_id(intent.source_summary)
+
+        if self._store is None:
+            self._log("memory.update_failed", {
+                "decision_type": intent.decision_type.value,
+                "candidate_id": candidate_id,
+                "record_id": record_id,
+                "reason": "store_unavailable",
+            })
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.REJECTED,
+                decision_type=intent.decision_type,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+                reason="更新失败：memory store 不可用",
+            )
+
+        try:
+            apply_result = self._store.apply_operation_intent(
+                intent,
+                build_memory_audit_summary(intent),
+            )
+        except Exception:
+            self._log("memory.update_failed", {
+                "decision_type": intent.decision_type.value,
+                "candidate_id": candidate_id,
+                "record_id": record_id,
+                "reason": "apply_operation_intent_exception",
+            })
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.REJECTED,
+                decision_type=intent.decision_type,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+                reason="更新失败：memory store 写入异常",
+            )
+
+        if apply_result.status is MemoryStoreApplyStatus.APPLIED:
+            self._log("memory.updated", {
+                "decision_type": intent.decision_type.value,
+                "candidate_id": candidate_id,
+                "record_id": record_id,
+                "reason": "record_updated",
+            })
+            return MemoryEvaluationResult(
+                action=MemoryEvaluationAction.STORED,
+                decision_type=intent.decision_type,
+                candidate_id=candidate_id,
+                content_summary=content_summary,
+                reason="已确认，已更新 store",
+            )
+
+        self._log("memory.update_failed", {
+            "decision_type": intent.decision_type.value,
+            "candidate_id": candidate_id,
+            "record_id": record_id,
+            "reason": (
+                "record_not_found"
+                if apply_result.status is MemoryStoreApplyStatus.NOT_FOUND
+                else apply_result.status.value
+            ),
+        })
+        return MemoryEvaluationResult(
+            action=MemoryEvaluationAction.REJECTED,
+            decision_type=intent.decision_type,
+            candidate_id=candidate_id,
+            content_summary=content_summary,
+            reason="更新失败：未找到可更新的记忆",
         )
 
     # -- snapshot generation -----------------------------------------------
@@ -588,25 +768,82 @@ def create_memory_runtime(
 
     Store 选择策略：
     - 显式传 store 参数 → 使用传入的 store
-    - MEMORY_STORE_BACKEND=filesystem → FilesystemMemoryStore
-      · 落盘路径由 MEMORY_STORE_ROOT / MEMORY_ROOT 控制，默认 ~/.my-first-agent/memory/
-    - 默认 → InMemoryMemoryStore
+    - MEMORY_STORE_BACKEND=filesystem → 仅在显式 durable root 已配置时启用 FilesystemMemoryStore
+    - 未配置 durable root → InMemory session/test fallback + memory.backend_warning evidence
+    - 默认 → InMemoryMemoryStore + non-durable warning
     - 无效 MEMORY_STORE_BACKEND 值 → 抛出 ValueError
     - FilesystemMemoryStore 初始化失败（如权限不足）→ 不静默降级，抛出 OSError
     """
-    import os as _os
-
+    backend = os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
     if store is not None:
         resolved_store = store
+        store_type = type(store).__name__
+        if "Filesystem" in store_type:
+            root = Path(getattr(store, "root_dir", ""))
+            _emit_backend_event(
+                event_logger,
+                "memory.backend_selected",
+                {
+                    "backend": "filesystem",
+                    "durable_ready": True,
+                    "root_kind": _root_kind_for(root),
+                    "root_hash": _hash_backend_root(root),
+                },
+            )
+        else:
+            _emit_backend_event(
+                event_logger,
+                "memory.backend_warning",
+                {
+                    "backend": "in_memory",
+                    "durable_ready": False,
+                    "reason": "explicit_inmemory_store",
+                },
+            )
     else:
-        backend = _os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
         if backend in ("memory", "in_memory", "inmemory"):
             resolved_store = InMemoryMemoryStore()
+            _emit_backend_event(
+                event_logger,
+                "memory.backend_warning",
+                {
+                    "backend": "in_memory",
+                    "durable_ready": False,
+                    "reason": "session_fallback",
+                },
+            )
         elif backend in ("filesystem", "memory_fs", "fs"):
-            from agent.memory_fs_store import FilesystemMemoryStore
+            from agent.memory_fs_store import (
+                FilesystemMemoryStore,
+                resolve_configured_memory_root,
+            )
 
-            # FilesystemMemoryStore.__init__ 自己读 MEMORY_STORE_ROOT / MEMORY_ROOT
-            resolved_store = FilesystemMemoryStore()
+            root = resolve_configured_memory_root()
+            if root is None:
+                resolved_store = InMemoryMemoryStore()
+                _emit_backend_event(
+                    event_logger,
+                    "memory.backend_warning",
+                    {
+                        "backend": "in_memory",
+                        "requested_backend": "filesystem",
+                        "durable_ready": False,
+                        "root_kind": "session",
+                        "reason": "durable_root_not_configured",
+                    },
+                )
+            else:
+                resolved_store = FilesystemMemoryStore(root_dir=root)
+                _emit_backend_event(
+                    event_logger,
+                    "memory.backend_selected",
+                    {
+                        "backend": "filesystem",
+                        "durable_ready": True,
+                        "root_kind": _root_kind_for(root),
+                        "root_hash": _hash_backend_root(root),
+                    },
+                )
         else:
             raise ValueError(
                 f"不支持的 MEMORY_STORE_BACKEND 值：{backend!r}。"
@@ -616,5 +853,5 @@ def create_memory_runtime(
     return MemoryRuntime(
         policy=DeterministicMemoryPolicy(),
         store=resolved_store,
-        event_logger=event_logger or _noop_event_logger,
+        event_logger=event_logger,
     )

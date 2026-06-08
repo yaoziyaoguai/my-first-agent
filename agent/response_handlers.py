@@ -256,6 +256,7 @@ def handle_tool_use_response(
     extract_text_fn,
     runtime_action_dispatcher: Any | None = None,
     runtime_identity: Any = None,
+    memory_runtime: Any = None,
 ) -> str | None:
     """Handle a model response whose stop_reason is tool_use.
 
@@ -349,6 +350,7 @@ def handle_tool_use_response(
             messages=messages,
             skill_allowed_tools=_skill_at,
             identity=runtime_identity,
+            memory_runtime=memory_runtime,
         )
         # P1-2: 将 mediator 挂到 turn_state，使 handle_tool_confirmation
         # 能通过 mediator.mediate_pending() 走统一工具执行路径。

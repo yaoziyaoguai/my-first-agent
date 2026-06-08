@@ -513,11 +513,12 @@ def _derive_audit_id(audit_summary: MemoryAuditSummary) -> str:
     return f"audit:fake:{digest[:16]}"
 
 
-class FilesystemMemoryStore(InMemoryMemoryStore):
-    """基于文件系统的 memory store 骨架。
+class TestFilesystemMemoryStore(InMemoryMemoryStore):
+    """测试用 filesystem-like store 骨架。
 
-    D2 测试需要的外部副作用 store backend。与 InMemoryMemoryStore 共享
-    同一 apply_operation_intent 逻辑（继承），仅标记为 filesystem backend。
+    D2 旧测试需要的 external_side_effects marker。真实 production filesystem
+    backend 只能从 ``agent.memory_fs_store.FilesystemMemoryStore`` 导入，避免
+    与此 fake/local skeleton 混淆。
     """
 
     def __init__(self, base_dir: str) -> None:

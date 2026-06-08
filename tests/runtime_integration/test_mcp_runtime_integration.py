@@ -388,6 +388,32 @@ class TestMCPOrchestratorPipeline:
         # forbidden: 不能是 real_core_loop_runtime_e2e（没有从 runtime loop 进入）
         assert all("real_core_loop" not in level for level in levels)
 
+    def test_u0_mcp_tool_result_does_not_auto_write_memory_store(self):
+        """U0 characterization: MCP tool result 当前不会自动写 MemoryStore。"""
+        from agent.memory_store import InMemoryMemoryStore
+        from agent.runtime_integration.mcp_tool_orchestrator import run_mcp_tool_pipeline
+
+        store = InMemoryMemoryStore()
+        registry_name = _register_fake_mcp_tool(
+            "demo_u0_memory",
+            "hello",
+            result_content="remember this should not auto-write memory",
+        )
+        dispatcher = _build_mcp_dispatcher()
+
+        result = run_mcp_tool_pipeline(
+            dispatcher,
+            registry_name,
+            {"query": "remember this should not auto-write memory"},
+        )
+
+        assert result.action_log_entries == 3
+        assert store.list_records() == ()
+        assert all(
+            str(event.action_type) != "memory.propose"
+            for event in dispatcher.action_log
+        )
+
 
 # ========== Phase E: Negative / Edge Cases (L1 + L2) ==========
 

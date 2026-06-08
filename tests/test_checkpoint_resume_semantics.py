@@ -580,7 +580,8 @@ def test_resume_preserves_working_summary_in_memory():
         "用户之前要求 agent 帮他 review 一个仓库的 auth 模块，"
         "agent 已完成前两个文件的扫描，发现 1 个潜在的 SQL 注入风险。"
     )
-    # long_term_notes 也是 MemoryState 的可持久字段，顺手覆盖以验证不互相冲突
+    # long_term_notes 是旧式隐式长期记忆字段；Memory v0 只允许 checkpoint
+    # 保留 MemoryStore 引用，不再恢复长期记忆正文。
     src.memory.long_term_notes = ["用户偏好使用中文回复"]
 
     dst = _save_then_load(src)
@@ -593,5 +594,4 @@ def test_resume_preserves_working_summary_in_memory():
         "是否仍持久化 memory 段？_filter_to_declared_fields 白名单是否仍含 "
         "working_summary？"
     )
-    # long_term_notes 顺带验证不被 working_summary 测试干扰
-    assert dst.memory.long_term_notes == src.memory.long_term_notes
+    assert dst.memory.long_term_notes == []

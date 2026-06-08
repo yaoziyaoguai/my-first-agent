@@ -20,6 +20,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
+    "MEMORY_FORGET_REQUEST",
+    "MEMORY_LIST",
+    "MEMORY_REMEMBER_REQUEST",
     "SKILL_SELECT",
     "demo.echo_task_summary",
     "demo.write_demo_note",
@@ -42,6 +45,27 @@ PREMATURE_SKILL_TOOL_NAMES = {
 LOW_VALUE_NARROW_TOOL_NAMES = {"calculate"}
 EXPECTED_META_TOOLS = {"mark_step_complete", "request_user_input"}
 EXPECTED_INTERNAL_TOOL_SPECS = {
+    "MEMORY_FORGET_REQUEST": {
+        "capability": "memory_request",
+        "risk_level": "low",
+        "output_policy": "bounded_text",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
+    "MEMORY_LIST": {
+        "capability": "memory_request",
+        "risk_level": "low",
+        "output_policy": "bounded_text",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
+    "MEMORY_REMEMBER_REQUEST": {
+        "capability": "memory_request",
+        "risk_level": "low",
+        "output_policy": "bounded_text",
+        "confirmation": "never",
+        "meta_tool": False,
+    },
     "_safe_noop": {
         "capability": "local_action",
         "risk_level": "low",

@@ -196,51 +196,58 @@ class TestMemoryRecallInjection:
         此前 audit Issue 4 报告"Memory recall 无用户可见性"，实际代码已
         实现该通知——本测试钉死这一行为，防止回归。
         """
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         import agent.tools  # noqa: F401
         from agent.core import chat
         from agent.display_events import RuntimeEvent
-        from agent.memory_contracts import (
-            MemoryScope,
-            MemorySnapshot,
-            MemorySnapshotItem,
-        )
-        from agent.memory_runtime import MemoryEvaluationAction, MemoryEvaluationResult
+        from agent.memory_contracts import MemoryScope
+        from agent.memory_operations import MemoryOperationType
+        from agent.memory_runtime import MemoryRuntime
+        from agent.memory_store import InMemoryMemoryStore, MemoryRecord
         from agent.provider.fake_provider import FakeProvider
 
-        # 构造包含两条记忆的 MemorySnapshot
-        snapshot = MemorySnapshot(
-            items=(
-                MemorySnapshotItem(
-                    content="用户偏好简洁回答",
-                    scope=MemoryScope.USER,
-                    provenance="test:fixture",
-                    selection_reason="deterministic baseline",
-                ),
-                MemorySnapshotItem(
-                    content="用户是数据工程师",
-                    scope=MemoryScope.USER,
-                    provenance="test:fixture",
-                    selection_reason="deterministic baseline",
-                ),
+        store = InMemoryMemoryStore((
+            MemoryRecord(
+                id="m-injected-1",
+                content="用户偏好简洁回答",
+                scope=MemoryScope.USER,
+                source_summary="test:fixture",
+                safety_summary="safe",
+                audit_id="audit:m-injected-1",
+                created_by_operation=MemoryOperationType.RETAIN,
+                updated_by_operation=MemoryOperationType.RETAIN,
             ),
-            selection_reason="deterministic baseline",
-        )
+            MemoryRecord(
+                id="m-injected-2",
+                content="用户是数据工程师",
+                scope=MemoryScope.USER,
+                source_summary="test:fixture",
+                safety_summary="safe",
+                audit_id="audit:m-injected-2",
+                created_by_operation=MemoryOperationType.RETAIN,
+                updated_by_operation=MemoryOperationType.RETAIN,
+            ),
+        ))
+        runtime = MemoryRuntime(store=store)
 
-        mock_runtime = MagicMock()
-        mock_runtime.evaluate_user_text.return_value = MemoryEvaluationResult(
-            action=MemoryEvaluationAction.NO_OP,
-        )
-        mock_runtime.snapshot_for_prompt.return_value = snapshot
+        def get_runtime(_session_id: str = "") -> MemoryRuntime:
+            return runtime
 
-        events: list[RuntimeEvent] = []
+        # chat() 现在通过 dispatcher MEMORY_RECALL handler 读取 shared MemoryStore；
+        # patch get_memory_runtime 而不是 snapshot_for_prompt，避免绕过证据链。
+        with patch("agent.core.get_memory_runtime", get_runtime):
+            events: list[RuntimeEvent] = []
 
-        def sink(e: RuntimeEvent) -> None:
-            events.append(e)
+            def sink(e: RuntimeEvent) -> None:
+                events.append(e)
 
-        with patch("agent.core._memory_runtime", mock_runtime):
-            chat("hello", provider=FakeProvider(), on_runtime_event=sink)
+            chat(
+                "hello",
+                provider=FakeProvider(),
+                on_runtime_event=sink,
+                session_id="memory-injected-test",
+            )
 
         event_types = [getattr(e, "event_type", None) for e in events]
         memory_injected = [

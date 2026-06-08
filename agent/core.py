@@ -1,4 +1,5 @@
 """Agent 主循环：流程编排 + 模型调用 + stop_reason 分派。"""
+import contextlib
 import json
 import re
 from collections.abc import Callable
@@ -79,7 +80,7 @@ from agent.display_events import (
 from agent.logger import log_event
 from agent.loop import LoopDependencies, run_main_loop
 from agent.loop_context import LoopContext
-from agent.memory import compress_history
+from agent.memory import compress_history, set_working_summary_scratchpad
 from agent.memory_l2 import L2TriggerGuard as _L2TriggerGuard
 from agent.memory_runtime import MemoryEvaluationAction, create_memory_runtime
 from agent.model_call import build_default_model_client, call_model
@@ -333,6 +334,79 @@ def _active_skill_section(*, lifecycle=None) -> str:
     return ""
 
 
+def _active_skill_memory_scope(*, lifecycle=None, skill_registry=None) -> str:
+    """返回当前 active Skill 的 memory_scope，无法确认时 fail-closed 为 none。"""
+    _lc = lifecycle if lifecycle is not None else _get_lifecycle()
+    active = _lc.get_active()
+    if active is None:
+        return ""
+    descriptor = None
+    if skill_registry is not None:
+        with contextlib.suppress(Exception):
+            descriptor = skill_registry.get_descriptor(active.skill_id)
+    if descriptor is None:
+        return "none"
+    return str(getattr(descriptor, "memory_scope", "none") or "none")
+
+
+def _memory_recall_policy_payload(*, memory_scope: str) -> dict[str, Any]:
+    if memory_scope != "none":
+        return {}
+    return {
+        "policy_path": "skill.memory_scope",
+        "decision": "blocked",
+        "reason": "skill_memory_scope_none",
+        "source_type": "skill",
+    }
+
+
+def _record_direct_skill_memory_recall_blocked() -> None:
+    """dispatcher 不可用时也记录 Skill memory_scope recall block evidence。"""
+    with contextlib.suppress(Exception):
+        from agent.evidence_recorder import record_memory_evidence
+
+        record_memory_evidence(
+            event_type="memory.policy_blocked",
+            operation="recall",
+            phase="decision",
+            status="blocked",
+            source_type="skill",
+            decision="blocked",
+            policy_path="skill.memory_scope",
+            reason="skill_memory_scope_none",
+            count=0,
+        )
+        record_memory_evidence(
+            event_type="memory.recall.skipped",
+            operation="recall",
+            phase="decision",
+            status="blocked",
+            source_type="skill",
+            decision="skipped",
+            policy_path="skill.memory_scope",
+            reason="skill_memory_scope_none",
+            count=0,
+        )
+
+
+def _record_direct_memory_recall_skipped_no_dispatcher() -> None:
+    """dispatcher=None 时禁止无 evidence 的 prompt-affecting recall。"""
+    with contextlib.suppress(Exception):
+        from agent.evidence_recorder import record_memory_evidence
+
+        record_memory_evidence(
+            event_type="memory.recall.skipped",
+            operation="recall",
+            phase="decision",
+            status="blocked",
+            source_type="system",
+            decision="skipped",
+            policy_path="memory.recall.dispatcher_required",
+            reason="no_dispatcher_fallback",
+            count=0,
+        )
+
+
 # _skill_selected_by_model flag 已提取到 agent.skill_state——见 import _skill_state。
 # 历史注释保留以供上下文：
 # - True: 模型在本 turn 通过 tool_use("SKILL_SELECT", ...) 选择了 skill
@@ -444,7 +518,8 @@ def refresh_runtime_system_prompt(
 
     Loop 3 (Memory E2E) 收敛：当 dispatcher 可用时，MEMORY_RECALL 通过
     RuntimeActionDispatcher 统一 dispatch，确保 fake/real 共享核心 recall 路径。
-    模块初始化时 dispatcher 为 None，回退到直接路径。
+        dispatcher 为 None 时不执行 prompt-affecting recall，避免无 evidence 的
+        MemoryStore 内容影响 system prompt。
 
     Loop 2.2: skill_registry 用于生成可用技能列表 prompt section；
     注入激活 Skill body（上一轮 SKILL_SELECT 成功加载的 body）。
@@ -464,6 +539,10 @@ def refresh_runtime_system_prompt(
     _ns = namespace_key or ""
     _lifecycle = _get_lifecycle(_ns)
     _mem_rt = get_memory_runtime(_ns)
+    _skill_memory_scope = _active_skill_memory_scope(
+        lifecycle=_lifecycle,
+        skill_registry=skill_registry,
+    )
 
     # Phase 3: turn-start skill candidate retrieval
     selection_section = ""
@@ -490,7 +569,9 @@ def refresh_runtime_system_prompt(
             action_type=RuntimeActionType.MEMORY_RECALL,
             source="core_loop",
             parent_trace_id="",
-            payload={},
+            payload=_memory_recall_policy_payload(
+                memory_scope=_skill_memory_scope,
+            ),
         )
         route = getattr(dispatcher, "route_from_runtime_loop", None)
         if route is not None:
@@ -506,8 +587,13 @@ def refresh_runtime_system_prompt(
             selection_section=selection_section,
         )
     else:
-        memory_snapshot = _mem_rt.snapshot_for_prompt()
-        snapshot_item_count = len(memory_snapshot.items)
+        if _skill_memory_scope == "none":
+            memory_snapshot = None
+            _record_direct_skill_memory_recall_blocked()
+        else:
+            memory_snapshot = None
+            _record_direct_memory_recall_skipped_no_dispatcher()
+        snapshot_item_count = 0
         system_prompt = build_system_prompt(
             memory_snapshot=memory_snapshot,
             skill_registry=skill_registry,
@@ -674,6 +760,7 @@ def _dispatch_model_output(
 ) -> str | None:
     """兼容入口：实际分派逻辑在 `agent.model_output_dispatch`。"""
 
+    _sid = getattr(runtime_identity, "session_id", "") or "" if runtime_identity is not None else ""
     dependencies = ModelOutputDispatchDependencies(
         state=state,
         handle_max_tokens_response=handle_max_tokens_response,
@@ -685,6 +772,7 @@ def _dispatch_model_output(
         max_consecutive_max_tokens=MAX_CONTINUE_ATTEMPTS,
         runtime_action_dispatcher=runtime_action_dispatcher,
         runtime_identity=runtime_identity,
+        memory_runtime=get_memory_runtime(_sid),
     )
     return dispatch_model_output(
         response,
@@ -1132,7 +1220,7 @@ def chat(
     # Loop 2.2: 传入 skill_registry 生成 Skill 可用列表 prompt section
     # Phase 3: 传入 user_input — turn-start skill candidate retrieval + selection section
     runtime_system_prompt, snapshot_item_count = refresh_runtime_system_prompt(
-        dispatcher=runtime_action_dispatcher,
+        dispatcher=_phase1_dispatcher,
         skill_registry=_skill_registry,
         user_input=user_input,
         identity=_chat_identity,
@@ -1370,17 +1458,22 @@ def _compress_history_and_sync_checkpoint(loop_ctx: LoopContext) -> None:
 
     # 到这里才是真正的「新一轮对话」：可以安全做压缩。
     messages = state.conversation.messages
+    previous_summary = state.memory.working_summary
     compressed_messages, new_summary = compress_history(
         messages,
         loop_ctx.client,
         existing_summary=state.memory.working_summary,
         max_recent_messages=state.runtime.max_recent_messages,
     )
+    safe_summary = set_working_summary_scratchpad(
+        state,
+        new_summary,
+        reason="history_compression",
+    )
     compression_happened = (
-        compressed_messages is not messages or new_summary != state.memory.working_summary
+        compressed_messages is not messages or safe_summary != previous_summary
     )
     state.conversation.messages = compressed_messages
-    state.memory.working_summary = new_summary
     # 压缩真实发生且当前存在运行中任务时，立刻落盘，避免 summary 与 checkpoint 不一致。
     if compression_happened and state.task.current_plan:
         _dispatch_checkpoint_save(

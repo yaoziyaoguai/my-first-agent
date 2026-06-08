@@ -216,6 +216,92 @@ def _validate_extra_sections(extra_sections: dict[str, Any] | None) -> dict[str,
     return extra_sections
 
 
+_MEMORY_REFERENCE_FIELDS = frozenset({
+    "backend",
+    "namespace",
+    "root_kind",
+    "root_hash",
+    "store_revision",
+    "record_count",
+    "last_seen_ids_hash",
+})
+
+
+def _checkpoint_safe_memory_data(memory_data: dict[str, Any]) -> dict[str, Any]:
+    """只把 session scratchpad 与 MemoryStore reference 写入 checkpoint。
+
+    long_term_notes 是旧的隐式长期记忆字段，不能继续把 raw memory body 当作
+    checkpoint 内容保存；Memory v0 的长期 source-of-truth 是 MemoryStore。
+    """
+    safe = dict(memory_data)
+    try:
+        from agent.memory import redact_working_summary
+
+        safe["working_summary"], _ = redact_working_summary(
+            safe.get("working_summary")
+        )
+    except Exception:
+        pass
+    safe["long_term_notes"] = []
+    reference = safe.get("memory_store_reference")
+    if isinstance(reference, dict):
+        safe["memory_store_reference"] = {
+            key: reference[key]
+            for key in _MEMORY_REFERENCE_FIELDS
+            if key in reference and reference[key] not in (None, "")
+        }
+    else:
+        safe["memory_store_reference"] = None
+    return safe
+
+
+def _record_memory_reference_event(
+    event_type: str,
+    reference: dict[str, Any] | None,
+    *,
+    reason: str = "",
+) -> None:
+    """记录 checkpoint/memory reference evidence，失败不影响 checkpoint 语义。"""
+    if not reference:
+        return
+    try:
+        from agent.evidence_recorder import record_memory_evidence
+
+        blocked = "mismatch" in event_type or "skipped" in event_type
+        record_memory_evidence(
+            event_type=event_type,
+            operation="restore" if "restore" in event_type else "checkpoint_reference",
+            phase="end",
+            status="blocked" if blocked else "success",
+            source_type="system",
+            decision="blocked" if blocked else "allowed",
+            reason=reason,
+            backend=str(reference.get("backend") or "unknown"),
+            count=int(reference.get("record_count") or 0),
+            metadata_extra={
+                "checkpoint_ref": str(reference.get("store_revision") or ""),
+                "store_revision": str(reference.get("store_revision") or ""),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _reference_looks_mismatched(reference: dict[str, Any] | None) -> bool:
+    if not reference:
+        return False
+    backend = str(reference.get("backend") or "")
+    # checkpoint.py 没有当前 MemoryStore 实例上下文；filesystem reference 只能证明
+    # 过去保存过某个 store 指纹，不能在 resume 时静默宣称当前 store 已匹配。
+    if backend == "filesystem":
+        return True
+    try:
+        has_records = int(reference.get("record_count") or 0) > 0
+        return has_records and not reference.get("last_seen_ids_hash")
+    except Exception:
+        return True
+
+
 def _build_checkpoint_from_state(state, *, path: Path | None = None,
                                  session_id: str = "", run_id: str = "",
                                  extra_sections: dict[str, Any] | None = None):
@@ -236,7 +322,7 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
     existing_meta = existing.get("meta", {})
 
     task_data = _copy_state_dict(state.task)
-    memory_data = _copy_state_dict(state.memory)
+    memory_data = _checkpoint_safe_memory_data(_copy_state_dict(state.memory))
 
     use_v2 = bool(session_id and run_id)
     schema_ver = SCHEMA_VERSION_V2 if use_v2 else SCHEMA_VERSION
@@ -271,6 +357,12 @@ def _build_checkpoint_from_state(state, *, path: Path | None = None,
         for key, value in extra_sections.items():
             if value:  # 跳过空 dict / None
                 checkpoint[key] = value
+
+    _record_memory_reference_event(
+        "memory.reference_saved",
+        memory_data.get("memory_store_reference"),
+        reason="checkpoint_save",
+    )
 
     return checkpoint
 
@@ -467,8 +559,46 @@ def load_checkpoint_to_state(state, *, path: Path | None = None):
         memory_data = _filter_to_declared_fields(
             MemoryState, checkpoint.get("memory", {}) or {}
         )
+        memory_data = _checkpoint_safe_memory_data(memory_data)
         for key, value in memory_data.items():
             setattr(state.memory, key, value)
+        working_summary = memory_data.get("working_summary")
+        if working_summary:
+            try:
+                from agent.memory import record_working_summary_event
+
+                record_working_summary_event(
+                    "memory.summary_restored",
+                    reason="checkpoint_resume",
+                    summary=str(working_summary),
+                    count=1,
+                )
+            except Exception:
+                pass
+        memory_reference = memory_data.get("memory_store_reference")
+        if isinstance(memory_reference, dict) and memory_reference:
+            _record_memory_reference_event(
+                "memory.reference_checked",
+                memory_reference,
+                reason="checkpoint_resume",
+            )
+            if _reference_looks_mismatched(memory_reference):
+                _record_memory_reference_event(
+                    "memory.reference_mismatch",
+                    memory_reference,
+                    reason="checkpoint_reference_mismatch",
+                )
+                _record_memory_reference_event(
+                    "memory.restore_skipped",
+                    memory_reference,
+                    reason="checkpoint_memory_records_not_restored",
+                )
+            else:
+                _record_memory_reference_event(
+                    "memory.restored",
+                    memory_reference,
+                    reason="checkpoint_reference_restored",
+                )
 
         # 恢复 conversation.messages（append-only 事件流；tool_traces 不属于恢复语义）。
         conv_data = checkpoint.get("conversation", {}) or {}

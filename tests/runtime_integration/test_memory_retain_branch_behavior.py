@@ -125,7 +125,7 @@ def _build_phase1_dispatcher() -> RuntimeActionDispatcher:
 
 
 def _build_phase1_dispatcher_with_retain_handler(
-    store: InMemoryMemoryStore | None = None,
+    store=None,
 ) -> RuntimeActionDispatcher:
     """构建包含 retain handler 的 Phase 1 dispatcher。
 
@@ -228,6 +228,63 @@ class TestRetainPositivePath:
         assert result.payload["stored"] is True
         assert result.payload["proposal_id"] == candidate["proposal_id"]
         assert result.evidence["no_silent_retain"] is True
+
+    def test_retain_filesystem_store_commits_and_records_safe_evidence(self, tmp_path):
+        """Filesystem backend 也必须通过 dispatcher commit。
+
+        catalog adapter 不允许只认 InMemory store。
+        """
+        from agent.memory_fs_store import FilesystemMemoryStore
+
+        raw_content = "FS COMMIT RAW MEMORY SHOULD RECALL"
+        store = FilesystemMemoryStore(root_dir=tmp_path / "memory")
+        dispatcher = _build_phase1_dispatcher_with_retain_handler(store=store)
+        candidate = _make_test_candidate(
+            content=raw_content,
+            proposal_id="candidate:fs-commit-001",
+        )
+
+        result = dispatcher.route(_make_retain_request(candidate=candidate))
+
+        assert result.status == "success"
+        assert result.payload["disposition"] == "retain"
+        assert result.payload["stored"] is True
+        assert result.evidence["store_backend"] == "filesystem"
+        assert "memory_commit_failed" not in result.evidence
+        assert result.evidence["memory_committed"]["event_type"] == "memory.committed"
+        assert result.evidence["memory_committed"]["backend"] == "filesystem"
+        assert result.evidence["memory_committed"]["count"] == 1
+        assert raw_content not in str(result.evidence["memory_committed"])
+
+        records = store.list_records()
+        assert len(records) == 1
+        assert records[0].content == raw_content
+
+        reopened = FilesystemMemoryStore(root_dir=tmp_path / "memory")
+        assert [record.content for record in reopened.list_records()] == [raw_content]
+
+    def test_retain_store_exception_emits_memory_commit_failed_safe_evidence(self):
+        """store 写入失败必须产生 memory.commit_failed，且不泄漏 raw memory。"""
+
+        class BrokenStore(InMemoryMemoryStore):
+            def apply_operation_intent(self, intent, audit_summary):
+                raise RuntimeError("RAW MEMORY TEXT SHOULD NOT LOG")
+
+        raw_content = "RAW MEMORY TEXT SHOULD NOT LOG"
+        store = BrokenStore()
+        dispatcher = _build_phase1_dispatcher_with_retain_handler(store=store)
+        candidate = _make_test_candidate(content=raw_content)
+        request = _make_retain_request(candidate=candidate)
+
+        result = dispatcher.route(request)
+
+        assert result.status == "failed"
+        evidence = dict(result.evidence)
+        assert evidence["memory_commit_failed"]["event_type"] == "memory.commit_failed"
+        assert evidence["memory_commit_failed"]["reason"] == "apply_operation_intent_exception"
+        serialized = str(evidence)
+        assert raw_content not in serialized
+        assert candidate["proposal_id"] not in serialized
 
     def test_retain_verified_proposal_in_store_after_write(self):
         """A2: store.write() 后 proposal 可在 store 中查回。
@@ -768,12 +825,12 @@ class TestRetainFakeRealBoundary:
         import tempfile
         from pathlib import Path
 
-        from agent.memory_store import FilesystemMemoryStore
+        from agent.memory_store import TestFilesystemMemoryStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store_path = Path(tmpdir) / "test_memory"
             store_path.mkdir(parents=True, exist_ok=True)
-            fs_store = FilesystemMemoryStore(base_dir=str(store_path))
+            fs_store = TestFilesystemMemoryStore(base_dir=str(store_path))
 
             dispatcher = _build_phase1_dispatcher_with_retain_handler(store=fs_store)
             request = _make_retain_request()

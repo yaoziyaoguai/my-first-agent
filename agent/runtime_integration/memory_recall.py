@@ -21,8 +21,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from agent.evidence_recorder import build_memory_evidence_metadata
 from agent.memory import build_memory_section
-from agent.memory_store import InMemoryMemoryStore
+from agent.memory_store import InMemoryMemoryStore, MemoryStoreProtocol
 
 
 def _now_iso() -> str:
@@ -59,7 +60,7 @@ class MemoryRecallHandler:
     refresh_runtime_system_prompt() 行为一致。
     """
 
-    def __init__(self, *, store: InMemoryMemoryStore | None = None) -> None:
+    def __init__(self, *, store: MemoryStoreProtocol | None = None) -> None:
         self._store = store or InMemoryMemoryStore()
 
     def handle(self, request, context):
@@ -76,9 +77,71 @@ class MemoryRecallHandler:
         selection_reason = str(payload.get("selection_reason") or "Memory Kernel v1 recall")
         max_items = int(payload.get("max_items") or 5)
         rendered_char_budget = int(payload.get("rendered_char_budget") or 500)
+        policy_path = str(payload.get("policy_path") or "")
+        policy_decision = str(payload.get("decision") or "")
+        policy_reason = str(payload.get("reason") or "")
 
         store_backend = _store_backend_name(self._store)
         external_side_effects = _has_external_side_effects(self._store)
+        requested_metadata = build_memory_evidence_metadata(
+            event_type="memory.recall.requested",
+            operation="recall",
+            source_type="explicit_user",
+            decision="pending",
+            backend=store_backend,
+            count=0,
+            reason="pre_loop_prompt_recall",
+        )
+
+        if policy_decision == "blocked":
+            blocked_metadata = build_memory_evidence_metadata(
+                event_type="memory.policy_blocked",
+                operation="recall",
+                source_type="skill",
+                decision="blocked",
+                policy_path=policy_path or "skill.memory_scope",
+                backend=store_backend,
+                count=0,
+                reason=policy_reason or "skill_memory_scope_blocked",
+            )
+            skipped_metadata = build_memory_evidence_metadata(
+                event_type="memory.recall.skipped",
+                operation="recall",
+                source_type="skill",
+                decision="skipped",
+                policy_path=policy_path or "skill.memory_scope",
+                backend=store_backend,
+                count=0,
+                reason=policy_reason or "skill_memory_scope_blocked",
+            )
+            return context.success(
+                handler_name=type(self).__name__,
+                target_module="MemoryRuntime",
+                payload={
+                    "disposition": "policy_blocked",
+                    "snapshot_item_count": 0,
+                    "omitted_count": 0,
+                    "prompt_section": "",
+                    "selection_reason": selection_reason,
+                },
+                observed_call=None,
+                evidence_extra={
+                    "memory_recall_requested": requested_metadata,
+                    "memory_policy_blocked": blocked_metadata,
+                    "memory_recall_skipped": skipped_metadata,
+                    "disposition": "policy_blocked",
+                    "snapshot_item_count": 0,
+                    "omitted_count": 0,
+                    "store_backend": store_backend,
+                    "external_side_effects": external_side_effects,
+                    "policy_path": policy_path or "skill.memory_scope",
+                    "read_only_operation": True,
+                    "no_silent_retain": True,
+                    "no_consolidation": True,
+                    "no_emergence": True,
+                    "no_proactive_reminder": True,
+                },
+            )
 
         # ── 构造 snapshot options ──────────────────────────────────────────
         options = {
@@ -92,18 +155,83 @@ class MemoryRecallHandler:
         # invocation 的唯一入口。它通过 catalog-owned adapter 调用
         # build_memory_snapshot_from_store()，mint trusted target_module_proof。
         # handler 不自己构造 proof，也不绕过 catalog。
-        observed = context.invoke_registered_target(
-            target_module="MemoryRuntime",
-            operation="build_memory_snapshot",
-            payload={"store": self._store, "options": options},
-        )
-
-        snapshot = observed.value  # MemorySnapshot
-
-        # ── 渲染 prompt section ────────────────────────────────────────────
-        prompt_section = build_memory_section(snapshot)
+        try:
+            observed = context.invoke_registered_target(
+                target_module="MemoryRuntime",
+                operation="build_memory_snapshot",
+                payload={"store": self._store, "options": options},
+            )
+            snapshot = observed.value  # MemorySnapshot
+            # ── 渲染 prompt section ────────────────────────────────────────────
+            prompt_section = build_memory_section(snapshot)
+        except Exception as exc:
+            failed_metadata = build_memory_evidence_metadata(
+                event_type="memory.recall.failed",
+                operation="recall",
+                source_type="explicit_user",
+                decision="failed",
+                backend=store_backend,
+                count=0,
+                reason="snapshot_build_failed",
+            )
+            return context.failed(
+                handler_name=type(self).__name__,
+                target_module="MemoryRuntime",
+                payload={
+                    "disposition": "failed",
+                    "snapshot_item_count": 0,
+                    "omitted_count": 0,
+                    "prompt_section": "",
+                    "selection_reason": selection_reason,
+                },
+                observed_call=None,
+                evidence_extra={
+                    "memory_recall_requested": requested_metadata,
+                    "memory_recall_failed": failed_metadata,
+                    "disposition": "failed",
+                    "snapshot_item_count": 0,
+                    "omitted_count": 0,
+                    "store_backend": store_backend,
+                    "external_side_effects": external_side_effects,
+                    "error_type": type(exc).__name__,
+                    "read_only_operation": True,
+                    "no_silent_retain": True,
+                    "no_consolidation": True,
+                    "no_emergence": True,
+                    "no_proactive_reminder": True,
+                },
+                error_safe_preview=type(exc).__name__,
+            )
 
         disposition = "recalled" if snapshot.items else "no_memory"
+        completed_metadata = build_memory_evidence_metadata(
+            event_type="memory.recall.completed",
+            operation="recall",
+            source_type="explicit_user",
+            decision="allowed" if snapshot.items else "skipped",
+            backend=store_backend,
+            count=len(snapshot.items),
+            reason=disposition,
+        )
+        skipped_metadata = (
+            build_memory_evidence_metadata(
+                event_type="memory.recall.skipped",
+                operation="recall",
+                source_type="explicit_user",
+                decision="skipped",
+                backend=store_backend,
+                count=0,
+                reason="no_memory",
+            )
+            if not snapshot.items
+            else None
+        )
+        memory_evidence = {
+            "memory_recall_requested": requested_metadata,
+            "memory_recall_completed": completed_metadata,
+        }
+        if skipped_metadata is not None:
+            memory_evidence["memory_recall_skipped"] = skipped_metadata
 
         return context.success(
             handler_name=type(self).__name__,
@@ -117,10 +245,10 @@ class MemoryRecallHandler:
             },
             observed_call=observed,
             evidence_extra={
+                **memory_evidence,
                 "disposition": disposition,
                 "snapshot_item_count": len(snapshot.items),
                 "omitted_count": snapshot.omitted_count,
-                "selection_reason": selection_reason,
                 "store_backend": store_backend,
                 "external_side_effects": external_side_effects,
                 "no_silent_retain": True,

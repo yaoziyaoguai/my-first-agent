@@ -401,6 +401,7 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
     last_ts = ""
     # 非 tool/checkpoint 的 evidence.recorded 事件 → generic subsystem aggregation
     other_subsystem_events: dict[str, int] = {}
+    memory_events: dict[str, int] = {}
     # user_input 从 evidence.recorded 路径计数（替代 legacy event="user_input"）
     user_input_from_evidence = 0
 
@@ -523,6 +524,17 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
                     user_input_from_evidence += 1
             elif subsystem == "checkpoint":
                 checkpoints_saved += 1
+            elif subsystem == "memory":
+                metadata = data.get("metadata", {}) or {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                event_type = str(metadata.get("event_type") or f"memory.{op}")
+                display_name = (
+                    event_type.removeprefix("memory.")
+                    .replace("_", " ")
+                    .replace(".", " ")
+                )
+                memory_events[display_name] = memory_events.get(display_name, 0) + 1
             elif subsystem:
                 # 未知子系统 → generic aggregation（不硬编码未来能力）
                 phase_val = data.get("phase", "")
@@ -588,6 +600,12 @@ def render_session_summary(session_id: str, entries: list[dict[str, Any]]) -> st
         lines.append(f"    skill selected : {skill_selected}")
     if checkpoints_saved:
         lines.append(f"    checkpoints    : {checkpoints_saved}")
+
+    if memory_events:
+        lines.append(bar)
+        lines.append("  Memory")
+        for key, count in sorted(memory_events.items()):
+            lines.append(f"    {key:<17}: {count}")
 
     if other_subsystem_events:
         lines.append(bar)

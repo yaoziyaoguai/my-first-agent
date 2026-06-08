@@ -297,6 +297,7 @@ class MemoryOriginResolution:
 
 _MEMORY_AWAITING_KINDS = frozenset({
     "memory_confirmation",
+    "memory_forget_confirmation",
     "memory_inline_confirmation",
 })
 _MEMORY_ORIGIN_ALLOWLIST = frozenset({"idle", "running"})

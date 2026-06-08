@@ -44,6 +44,37 @@ _SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
 )
 
 
+def _path_kind(path: str) -> str:
+    if path.startswith("~"):
+        return "home"
+    if (
+        path == "/tmp"
+        or path.startswith("/tmp/")
+        or path == "/private/tmp"
+        or path.startswith("/private/tmp/")
+        or "/var/folders/" in path
+    ):
+        return "tmp"
+    if path.startswith("/"):
+        return "absolute"
+    if path.strip():
+        return "relative"
+    return "unknown"
+
+
+def _safe_path_metadata(path: str) -> dict[str, Any]:
+    """持久化 metadata 只能记录路径类别和 hash，不暴露 basename/full path。"""
+
+    raw = str(path or "")
+    if not raw:
+        return {}
+    return {
+        "path_kind": _path_kind(raw),
+        "path_hash": f"path:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}",
+        "redacted": True,
+    }
+
+
 def looks_like_sensitive_path(path: str) -> bool:
     """检查路径是否匹配敏感文件模式。
 
@@ -90,10 +121,9 @@ def summarize_content_for_persistence(
 
     # 超阈值或敏感路径 → 摘要 dict
     # 敏感路径的 preview 必须是安全替代文本，不能包含原始内容
-    if is_sensitive:
-        preview = f"[REDACTED] sensitive path: {path}"
-    else:
-        preview = content_str[:MAX_PREVIEW_CHARS]
+    preview = (
+        "[REDACTED] sensitive path" if is_sensitive else content_str[:MAX_PREVIEW_CHARS]
+    )
     summary: dict[str, Any] = {
         "result_size": result_size,
         "result_hash": result_hash,
@@ -141,10 +171,9 @@ def summarize_tool_result_for_persistence(
     result_size = len(content_bytes)
     result_hash = hashlib.sha256(content_bytes).hexdigest()[:16]
     is_sensitive = looks_like_sensitive_path(path)
-    if is_sensitive:
-        preview = f"[REDACTED] sensitive path: {path}"
-    else:
-        preview = content_str[:MAX_PREVIEW_CHARS]
+    preview = (
+        "[REDACTED] sensitive path" if is_sensitive else content_str[:MAX_PREVIEW_CHARS]
+    )
 
     summary: dict[str, Any] = {
         "result_size": result_size,
@@ -167,9 +196,8 @@ def build_denial_metadata(
     reason_code: str = "sensitive_path",
 ) -> dict[str, Any]:
     """为 blocked sensitive tool 构建 denial metadata（不含任何 content）。"""
-    return {
+    metadata = {
         "tool_name": tool_name,
-        "path": path,
         "decision": "blocked",
         "reason_code": reason_code,
         "content_persisted": False,
@@ -180,6 +208,8 @@ def build_denial_metadata(
         "preview_redacted": "",
         "truncated": False,
     }
+    metadata.update(_safe_path_metadata(path))
+    return metadata
 
 
 def summarize_messages_for_persistence(

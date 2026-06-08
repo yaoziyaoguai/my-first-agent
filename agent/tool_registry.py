@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal, TypedDict
 
-
 ToolResultContent = str | list[Any]
 ToolFunction = Callable[..., Any]
 PreExecuteHook = Callable[[str, dict[str, Any], Any], ToolResultContent | None]
@@ -52,6 +51,7 @@ TOOL_CAPABILITIES = frozenset({
     "command_execution",
     "network_fetch",
     "mcp_tool",
+    "memory_request",
     "skill_lifecycle",
     "runtime_control",
 })
@@ -193,7 +193,7 @@ def get_tool_definitions():
     模型调用应使用 get_model_visible_tools() 以控制上下文预算。
     """
     definitions = []
-    for name, info in TOOL_REGISTRY.items():
+    for _name, info in TOOL_REGISTRY.items():
         definitions.append({
             "name": info["name"],
             "description": info["description"],

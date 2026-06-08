@@ -142,10 +142,13 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         execution_path="core.chat → refresh_runtime_system_prompt(dispatcher=...) "
                        "→ dispatcher → MemoryRecallHandler → build_system_prompt",
         result_feedback_path="dispatcher result → system_prompt → model context",
-        not_ready_behavior="dispatcher=None 时回退到直接 _memory_runtime.snapshot_for_prompt()",
+        not_ready_behavior=(
+            "dispatcher=None 时跳过 prompt-affecting recall，并记录 no_dispatcher_fallback"
+        ),
         decision_meta={
             "why_partial": "默认路径需要 injected dispatcher；"
-                           "dispatcher=None 时走 direct snapshot fallback（模块初始化期）",
+                           "dispatcher=None 时禁止 direct snapshot fallback，"
+                           "避免无 evidence 注入 memory",
         },
     ),
     "memory.propose": BranchPointState(

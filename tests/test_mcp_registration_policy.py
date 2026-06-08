@@ -232,7 +232,7 @@ def test_register_respects_server_name_mismatch():
             [server], client,
             server_allowlist=frozenset({"real_srv"}),
         )
-        assert False, "应抛出 ValueError"
+        raise AssertionError("应抛出 ValueError")
     except ValueError:
         pass
 
@@ -322,7 +322,7 @@ def test_audit_does_not_leak_raw_descriptor(monkeypatch):
 
     captured: list[dict] = []
 
-    def spy(server_name, tool_name, *, reason=""):
+    def spy(server_name, tool_name, *, reason="", **_safe_metadata):
         captured.append({
             "server_name": server_name,
             "tool_name": tool_name,

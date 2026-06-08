@@ -372,14 +372,15 @@ def test_v0_roundtrip_preserves_all_data(tmp_checkpoint_path):
     ok = load_checkpoint_to_state(state, path=tmp_checkpoint_path)
     assert ok is True
     assert state.task.tool_call_count == 2
-    assert state.memory.long_term_notes == ["note 1"]
+    assert state.memory.long_term_notes == []
 
     # 重新保存（应变为 v1）
     save_checkpoint(state, path=tmp_checkpoint_path)
     data = load_checkpoint(path=tmp_checkpoint_path)
     assert data is not None
     assert data["meta"]["schema_version"] == SCHEMA_VERSION
-    # 原始数据保留
+    # task / scratchpad 数据保留；长期 memory 正文不再由 checkpoint 恢复。
     assert data["task"]["status"] == "awaiting_tool_confirmation"
     assert data["task"]["loop_iterations"] == 5
     assert data["memory"]["working_summary"] == "summary text"
+    assert data["memory"]["long_term_notes"] == []

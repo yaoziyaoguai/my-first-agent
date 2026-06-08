@@ -10,6 +10,38 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.evidence_recorder import build_memory_evidence_metadata
+
+
+def _delete_requested_metadata(record_id: str) -> dict[str, Any]:
+    return build_memory_evidence_metadata(
+        event_type="memory.delete_requested",
+        operation="delete",
+        source_type="explicit_user",
+        decision="pending",
+        record_id=record_id,
+        reason="user_requested_forget",
+        raw_fields={"record_id": record_id},
+    )
+
+
+def _delete_completed_metadata(
+    event_type: str,
+    *,
+    record_id: str,
+    decision: str,
+    reason: str,
+) -> dict[str, Any]:
+    return build_memory_evidence_metadata(
+        event_type=event_type,
+        operation="delete",
+        source_type="explicit_user",
+        decision=decision,
+        record_id=record_id,
+        reason=reason,
+        raw_fields={"record_id": record_id},
+    )
+
 
 class MemoryForgetHandler:
     """forget memory 的 dispatcher handler。
@@ -27,8 +59,15 @@ class MemoryForgetHandler:
     def handle(self, request: Any, context: Any) -> Any:
         payload = dict(request.payload) if request.payload else {}
         record_id = str(payload.get("record_id") or "")
+        requested_metadata = _delete_requested_metadata(record_id)
 
         if not record_id or self._memory_runtime is None:
+            completed_metadata = _delete_completed_metadata(
+                "memory.delete_failed",
+                record_id=record_id,
+                decision="blocked",
+                reason="missing_record_id" if not record_id else "no_memory_runtime",
+            )
             return context.rejected(
                 handler_name=type(self).__name__,
                 target_module="MemoryRuntime",
@@ -44,13 +83,20 @@ class MemoryForgetHandler:
                 evidence_extra={
                     "disposition": "rejected",
                     "forgotten": False,
-                    "record_id": record_id,
+                    "memory_delete_requested": requested_metadata,
+                    "memory_delete_completed": completed_metadata,
                 },
             )
 
         try:
             removed = self._memory_runtime.remove_record(record_id)
         except Exception:
+            completed_metadata = _delete_completed_metadata(
+                "memory.delete_failed",
+                record_id=record_id,
+                decision="failed",
+                reason="remove_record_exception",
+            )
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="MemoryRuntime",
@@ -63,11 +109,18 @@ class MemoryForgetHandler:
                 evidence_extra={
                     "disposition": "failed",
                     "forgotten": False,
-                    "record_id": record_id,
+                    "memory_delete_requested": requested_metadata,
+                    "memory_delete_completed": completed_metadata,
                 },
             )
 
         if removed:
+            completed_metadata = _delete_completed_metadata(
+                "memory.deleted",
+                record_id=record_id,
+                decision="allowed",
+                reason="record_removed",
+            )
             return context.success(
                 handler_name=type(self).__name__,
                 target_module="MemoryRuntime",
@@ -80,10 +133,17 @@ class MemoryForgetHandler:
                 evidence_extra={
                     "disposition": "forgotten",
                     "forgotten": True,
-                    "record_id": record_id,
+                    "memory_delete_requested": requested_metadata,
+                    "memory_delete_completed": completed_metadata,
                 },
             )
 
+        completed_metadata = _delete_completed_metadata(
+            "memory.delete_failed",
+            record_id=record_id,
+            decision="failed",
+            reason="record_not_found",
+        )
         return context.success(
             handler_name=type(self).__name__,
             target_module="MemoryRuntime",
@@ -96,6 +156,7 @@ class MemoryForgetHandler:
             evidence_extra={
                 "disposition": "not_found",
                 "forgotten": False,
-                "record_id": record_id,
+                "memory_delete_requested": requested_metadata,
+                "memory_delete_completed": completed_metadata,
             },
         )

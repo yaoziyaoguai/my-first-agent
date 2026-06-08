@@ -617,10 +617,14 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         #   - _action_plan_to_dict: ActionPlan → dict 序列化（dispatcher payload 用）
         "_action_plan_to_dict",
         "_active_skill_section",
+        "_active_skill_memory_scope",
         "_dispatch_checkpoint_save",
         "_dispatch_or_fallback_delegation",
         "_dispatch_skill_candidates_built",
         "_dispatch_skill_selection_entered",
+        "_memory_recall_policy_payload",
+        "_record_direct_memory_recall_skipped_no_dispatcher",
+        "_record_direct_skill_memory_recall_blocked",
         "_update_active_skill_from_dispatcher",
         "get_memory_runtime",
         # Evidence migration: 模块级 helper，把 Runtime branch point 事件送入
@@ -871,11 +875,13 @@ def test_checkpoint_call_inventory_is_explicitly_reviewed() -> None:
 _RUNTIME_MUTATION_OWNER_BASELINE = {
     "agent.checkpoint",
     "agent.confirmation.dispatcher",
+    "agent.confirmation.memory",
     "agent.confirmation.plan",
     "agent.confirmation.tool",
     "agent.confirmation.user_input",
     "agent.core",
     "agent.loop",
+    "agent.memory",
     "agent.memory_interaction",
     "agent.response_handlers",
     "agent.session",
@@ -939,6 +945,16 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "_clear_pending_and_save",
             "state.task.pending_user_input_request",
         ),
+        (
+            "agent.confirmation.memory",
+            "_handle_memory_forget_confirmation",
+            "state.task.pending_user_input_request",
+        ),
+        (
+            "agent.memory",
+            "set_working_summary_scratchpad",
+            "state.memory.working_summary",
+        ),
         ("agent.loop", "run_main_loop", "state.reset_task()"),
         ("agent.loop", "run_main_loop", "state.task.loop_iterations"),
         ("agent.core", "_run_planning_phase", "state.task.confirm_each_step"),
@@ -950,11 +966,6 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
             "agent.core",
             "_compress_history_and_sync_checkpoint",
             "state.conversation.messages",
-        ),
-        (
-            "agent.core",
-            "_compress_history_and_sync_checkpoint",
-            "state.memory.working_summary",
         ),
         # Memory Interactive Confirmation v1：chat() CONFIRMATION_REQUIRED 分支
         # transition 后设置 pending_user_input_request。
@@ -1931,6 +1942,20 @@ def test_phase3_transition_rules_have_real_callsite_usage_inventory() -> None:
             "TOOL_CONFIRMATION_REQUIRED",
             "running",
             "tool_runtime_mediator.handle_confirmation_required",
+        ),
+        (
+            "agent.tool_runtime_mediator",
+            "_set_memory_confirmation_pending",
+            "MEMORY_CONFIRMATION_REQUIRED",
+            "<dynamic>",
+            "<dynamic>",
+        ),
+        (
+            "agent.tool_runtime_mediator",
+            "_set_memory_forget_pending",
+            "MEMORY_CONFIRMATION_REQUIRED",
+            "<dynamic>",
+            "tool_runtime_mediator.memory_forget_request",
         ),
         (
             "agent.transitions",

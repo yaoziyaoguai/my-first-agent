@@ -161,7 +161,7 @@ class _SpyToolMediator:
         })
         if memory_scope == "none":
             return "rejected"
-        return None
+        return "deferred"
 
     def _dispatch_child_tool_evidence(
         self, tool_name: str, arguments: dict[str, Any],
@@ -594,15 +594,15 @@ class _DummyStateForMemory:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# T8: Child memory proposal → parent-mediated store write
+# T8: Child memory request → v0 lockdown
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestL1ChildMemoryParentMediated:
-    """T8: child memory proposal 通过 parent ToolRuntimeMediator 写入 store。"""
+    """T8: child memory request 在 Memory v0 中只能 rejected/deferred evidence-only。"""
 
-    def test_memory_scope_propose_writes_to_store(self):
-        """memory_scope=propose → store.apply_operation_intent 被调用。"""
+    def test_memory_scope_propose_is_deferred_without_store_write(self):
+        """SubAgent memory_scope=propose → deferred，不直接写 MemoryStore。"""
         store = _SpyStore()
         mediator = _make_mediator_for_memory_tests(store=store)
 
@@ -614,11 +614,27 @@ class TestL1ChildMemoryParentMediated:
             memory_scope="propose",
         )
 
-        assert result is None, f"propose 应返回 None (success)，实际 {result!r}"
-        assert len(store.calls) == 1, (
-            f"propose 应调用 store.apply_operation_intent 1 次，"
-            f"实际 {len(store.calls)} 次"
-        )
+        assert result == "deferred"
+        assert store.calls == []
+        assert store.list_records() == ()
+
+    def test_u8_non_none_memory_scopes_do_not_direct_write_to_store(self):
+        """U8 lockdown: non-none scope 都不得 direct commit 到 MemoryStore。"""
+        for scope in ("propose", "read", "read_context", "write", "unknown"):
+            store = _SpyStore()
+            mediator = _make_mediator_for_memory_tests(store=store)
+
+            result = mediator.mediate_child_memory_request(
+                key=f"scope_{scope}",
+                value=f"child payload for {scope}",
+                subagent_name="u0_agent",
+                delegation_id="u0-delegation",
+                memory_scope=scope,
+            )
+
+            assert result == "deferred", f"{scope} 应 deferred，实际 {result!r}"
+            assert store.calls == [], f"{scope} 不得直接写 MemoryStore"
+            assert store.list_records() == ()
 
     def test_memory_scope_none_no_write(self):
         """memory_scope=none → store 不被调用。"""
@@ -637,6 +653,22 @@ class TestL1ChildMemoryParentMediated:
             f"memory_scope=none 不应调用 store，实际调用了 {len(store.calls)} 次"
         )
 
+    def test_u0_memory_scope_none_currently_rejected_without_store_write(self):
+        """U0 characterization: none 当前 rejected/no write。"""
+        store = _SpyStore()
+        mediator = _make_mediator_for_memory_tests(store=store)
+
+        result = mediator.mediate_child_memory_request(
+            key="u0_none",
+            value="none payload",
+            subagent_name="u0_agent",
+            delegation_id="u0-none",
+            memory_scope="none",
+        )
+
+        assert result == "rejected"
+        assert store.calls == []
+
     def test_memory_scope_none_is_default(self):
         """未指定 memory_scope 时默认 none → 不写入 store。"""
         store = _SpyStore()
@@ -651,56 +683,58 @@ class TestL1ChildMemoryParentMediated:
         assert result == "rejected", f"默认应返回 'rejected'，实际 {result!r}"
         assert len(store.calls) == 0
 
-    def test_namespace_isolation_between_subagents(self):
-        """不同 subagent 的 memory key 使用不同 namespace 前缀。"""
+    def test_different_subagent_requests_stay_evidence_only(self):
+        """不同 subagent 的请求也不得通过 namespace 隔离名义写入 store。"""
         store = _SpyStore()
         mediator = _make_mediator_for_memory_tests(store=store)
 
-        mediator.mediate_child_memory_request(
+        result_a = mediator.mediate_child_memory_request(
             key="finding",
             value="agent_a 的发现",
             subagent_name="agent_a",
             memory_scope="propose",
         )
-        mediator.mediate_child_memory_request(
+        result_b = mediator.mediate_child_memory_request(
             key="finding",
             value="agent_b 的发现",
             subagent_name="agent_b",
             memory_scope="propose",
         )
 
-        assert len(store.calls) == 2
+        assert result_a == "deferred"
+        assert result_b == "deferred"
+        assert store.calls == []
 
-        source_a = store.calls[0]["intent"].source_summary
-        source_b = store.calls[1]["intent"].source_summary
-
-        assert "agent_a" in source_a, (
-            f"agent_a 的 source_summary 应含 'agent_a'，实际 {source_a!r}"
-        )
-        assert "agent_b" in source_b, (
-            f"agent_b 的 source_summary 应含 'agent_b'，实际 {source_b!r}"
-        )
-        assert source_a != source_b, (
-            f"不同 subagent 的 source_summary 应不同: {source_a!r} vs {source_b!r}"
-        )
-
-    def test_store_record_contains_child_content(self):
-        """写入 store 的 record content 应为 child 提供的 value。"""
+    def test_child_payload_is_not_persisted_to_store_record(self):
+        """child payload 不得作为长期 memory record 持久化。"""
         store = _SpyStore()
         mediator = _make_mediator_for_memory_tests(store=store)
 
-        mediator.mediate_child_memory_request(
+        result = mediator.mediate_child_memory_request(
             key="analysis_result",
             value="代码库共有 42 个 Python 文件",
             subagent_name="analyzer",
             memory_scope="propose",
         )
 
-        records = store.list_records()
-        assert len(records) == 1
-        assert "42 个 Python 文件" in records[0].content, (
-            f"store record 应包含 child 内容，实际 {records[0].content!r}"
+        assert result == "deferred"
+        assert store.list_records() == ()
+
+    def test_u8_child_request_does_not_use_auto_retained_accept_direct_path(self):
+        """U8 lockdown: child request 不再使用 AUTO_RETAINED + ACCEPT 直接写入。"""
+        store = _SpyStore()
+        mediator = _make_mediator_for_memory_tests(store=store)
+
+        result = mediator.mediate_child_memory_request(
+            key="no_confirmation",
+            value="无需确认就写入的 child payload",
+            subagent_name="u0_agent",
+            delegation_id="u0-no-confirmation",
+            memory_scope="propose",
         )
+
+        assert result == "deferred"
+        assert store.calls == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -767,6 +801,78 @@ class TestL1ChildMemoryDispatcherEvidence:
             "即使被 rejected，child memory request 也应有 dispatcher evidence"
         )
 
+    def test_u8_child_memory_evidence_omits_raw_key_and_value_preview(self):
+        """U8 lockdown: dispatcher evidence 只包含 safe hash/count/reason 字段。"""
+        from agent.runtime_integration.schema import RuntimeActionType
+
+        dispatcher = _SpyDispatcher()
+        store = _SpyStore()
+        mediator = _make_mediator_for_memory_tests(store=store, dispatcher=dispatcher)
+
+        mediator.mediate_child_memory_request(
+            key="raw_child_key",
+            value="raw child payload should be removed in U8",
+            subagent_name="test_agent",
+            delegation_id="u0-raw-evidence",
+            memory_scope="propose",
+        )
+
+        payloads = [
+            dict(req.payload)
+            for req, _res in dispatcher.captured
+            if req.action_type in (
+                RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST,
+                "subagent.child_memory_request",
+            )
+        ]
+        assert payloads, "child memory request 应产生 evidence payload"
+        payload = payloads[-1]
+        assert "key" not in payload
+        assert "value_preview" not in payload
+        assert "raw_child_key" not in str(payload)
+        assert "raw child payload should be removed in U8" not in str(payload)
+        assert payload["child_payload_hash"].startswith("mempayload:")
+        assert payload["key_hash"].startswith("memkey:")
+        assert payload["redacted"] is True
+        assert payload["count"] == 1
+        assert payload["policy_path"] == "child_memory_v0_lockdown"
+        assert payload["decision"] == "deferred"
+
+    def test_u8_child_memory_records_lifecycle_events_without_child_proposal(self, monkeypatch):
+        """U8 lockdown: 记录 received/deferred，不发 child_proposal_created。"""
+        from agent import evidence_recorder
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_record_evidence(**kwargs):
+            calls.append(kwargs)
+            return {"data": {"metadata": kwargs.get("metadata", {})}}
+
+        monkeypatch.setattr(evidence_recorder, "record_evidence", fake_record_evidence)
+
+        store = _SpyStore()
+        mediator = _make_mediator_for_memory_tests(store=store)
+
+        result = mediator.mediate_child_memory_request(
+            key="raw_child_key",
+            value="RAW CHILD PAYLOAD SHOULD NOT LOG",
+            subagent_name="test_agent",
+            delegation_id="u8-lifecycle",
+            memory_scope="propose",
+        )
+
+        assert result == "deferred"
+        assert store.calls == []
+        event_types = [call["metadata"]["event_type"] for call in calls]
+        assert "memory.child_request_received" in event_types
+        assert "memory.child_request_deferred" in event_types
+        assert "memory.child_request_rejected" not in event_types
+        assert "memory.child_proposal_created" not in event_types
+        serialized = str(calls)
+        assert "RAW CHILD PAYLOAD SHOULD NOT LOG" not in serialized
+        assert "raw_child_key" not in serialized
+        assert "value_preview" not in serialized
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # T10: Child memory not fakeable
@@ -777,29 +883,22 @@ class TestL1ChildMemoryNotFakeable:
     """T10: child memory 不能通过 direct-call/docs-only/no-crash 冒充。"""
 
     def test_child_cannot_directly_call_store(self):
-        """验证 child memory 必须通过 mediator — 直接写 store 不算 child memory capability。"""
+        """验证 child memory 必须通过 mediator，但 mediator 也不得 direct write。"""
         store = _SpyStore()
         mediator = _make_mediator_for_memory_tests(store=store)
 
-        mediator.mediate_child_memory_request(
+        result = mediator.mediate_child_memory_request(
             key="mediated",
             value="通过 mediator",
             subagent_name="test_agent",
             memory_scope="propose",
         )
 
-        # 验证 mediator 确实调了 store（证明走的是 mediated path）
-        assert len(store.calls) == 1, (
-            "mediated path 应调用 store"
-        )
-        # 验证调用来自 mediator（source_summary 含 subagent 标识）
-        intent = store.calls[0]["intent"]
-        assert "test_agent" in intent.source_summary, (
-            f"store write source 应标识 subagent，实际 {intent.source_summary!r}"
-        )
+        assert result == "deferred"
+        assert store.calls == []
 
     def test_not_docs_only(self):
-        """child memory 必须经过 dispatcher 产生 evidence，不能仅靠文档声称。"""
+        """child memory lockdown 必须经过 dispatcher evidence，不能仅靠文档声称。"""
         dispatcher = _SpyDispatcher()
         store = _SpyStore()
         mediator = _make_mediator_for_memory_tests(store=store, dispatcher=dispatcher)
@@ -815,8 +914,7 @@ class TestL1ChildMemoryNotFakeable:
         assert len(dispatcher.captured) >= 1, (
             "child memory 必须有 dispatcher evidence，不能仅靠文档"
         )
-        # store 必须被调用（不能只是 no-crash）
-        assert len(store.calls) == 1, "store 必须被调用，不能只是 no-crash"
+        assert store.calls == [], "v0 child memory request 不得直接写 store"
 
     def test_no_store_without_mediator(self):
         """没有 mediator 时 child memory 不应写入 store。"""

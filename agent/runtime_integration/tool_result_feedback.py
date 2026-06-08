@@ -34,6 +34,27 @@ _SECRET_PATTERNS = (
 
 _REDACTED_PLACEHOLDER = "[已隐藏敏感内容]"
 
+_SAFE_TOOL_RESULT_EVIDENCE_FIELDS = frozenset({
+    "memory_tool_input_redacted",
+    "memory_tool_result_redacted",
+    "operation",
+    "count",
+    "content_hash",
+    "content_length",
+    "memory_id_hash",
+    "record_id_hash",
+    "record_id_hashes",
+    "memory_id_hashes",
+    "query_hash",
+    "query_length",
+    "redacted",
+    "source_type",
+    "policy_path",
+    "reason",
+    "path_kind",
+    "path_hash",
+})
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -241,6 +262,11 @@ class ToolResultFeedbackHandler:
         formatted: dict[str, Any] = observed.value
         formatted_output: str = formatted.get("formatted_output", "")
         disposition: str = formatted.get("disposition", "injected")
+        safe_payload_evidence = {
+            key: payload[key]
+            for key in _SAFE_TOOL_RESULT_EVIDENCE_FIELDS
+            if key in payload
+        }
 
         # ── 生成 prompt section ────────────────────────────────────────────
         prompt_section = _build_tool_result_section(
@@ -264,6 +290,7 @@ class ToolResultFeedbackHandler:
                 "tool_name": tool_name,
                 "execution_status": execution_status,
                 "disposition": disposition,
+                **safe_payload_evidence,
                 "result_original_size": formatted.get("original_size", 0),
                 "result_was_redacted": formatted.get("was_redacted", False),
                 "result_was_truncated": formatted.get("was_truncated", False),

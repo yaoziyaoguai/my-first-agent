@@ -7,15 +7,17 @@ MemoryRuntime/Store -> MemorySnapshot -> prompt_builder。它不调用真实 LLM
 
 from __future__ import annotations
 
+import pytest
+
 from agent.memory_confirmation import MemoryConfirmationChoice
 from agent.memory_contracts import MemoryScope, MemorySnapshot
+from agent.memory_operations import MemoryOperationType
 from agent.memory_runtime import MemoryRuntime
 from agent.memory_snapshot_generator import (
     MemorySnapshotBuildOptions,
     build_memory_snapshot_from_store,
 )
 from agent.memory_store import InMemoryMemoryStore, MemoryRecord
-from agent.memory_operations import MemoryOperationType
 from agent.prompt_builder import build_system_prompt
 
 
@@ -147,3 +149,76 @@ def test_deterministic_selector_order_and_budget_are_reproducible() -> None:
     assert first == second
     assert [item.content for item in first.items] == ["第一条", "第二条"]
     assert first.omitted_count == 1
+
+
+def test_dispatcher_none_refresh_does_not_inject_memory_without_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Memory v0: dispatcher=None 不能无 evidence 地把 memory 注入 prompt。"""
+    from agent import core, evidence_recorder
+    from agent.state import create_agent_state
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        evidence_recorder,
+        "record_evidence",
+        lambda **kwargs: calls.append(kwargs) or {"data": {"metadata": kwargs.get("metadata", {})}},
+    )
+    store = InMemoryMemoryStore((
+        _record("u0-direct", "DISPATCHER NONE RAW MEMORY SHOULD NOT INJECT"),
+    ))
+    runtime = MemoryRuntime(store=store)
+    monkeypatch.setattr(core, "state", create_agent_state(system_prompt=""))
+    monkeypatch.setattr(core, "_memory_runtime", runtime)
+
+    prompt, count = core.refresh_runtime_system_prompt(dispatcher=None)
+
+    assert count == 0
+    assert "DISPATCHER NONE RAW MEMORY SHOULD NOT INJECT" not in prompt
+    assert any(
+        call.get("metadata", {}).get("event_type") == "memory.recall.skipped"
+        and call.get("metadata", {}).get("reason") == "no_dispatcher_fallback"
+        for call in calls
+    )
+    assert "DISPATCHER NONE RAW MEMORY SHOULD NOT INJECT" not in str(calls)
+
+
+def test_v0_default_memory_runtime_log_records_safe_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Memory v0: 默认 MemoryRuntime logger 接入 built-in evidence。"""
+    import agent.evidence_recorder as evidence_recorder
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        evidence_recorder,
+        "record_evidence",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    runtime = MemoryRuntime(store=InMemoryMemoryStore())
+    result = runtime.evaluate_user_text("remember that U0 log baseline exists")
+
+    assert result.candidate_id is not None
+    event_types = [call["metadata"]["event_type"] for call in calls]
+    assert "memory.proposed" in event_types
+    assert "memory.proposal_surfaced" in event_types
+    assert "U0 log baseline exists" not in str(calls)
+    assert result.candidate_id not in str(calls)
+
+
+def test_u0_working_summary_is_hidden_prompt_context_not_user_memory() -> None:
+    """U0 characterization: working_summary 进模型上下文，但不进 MemoryStore list。"""
+    from agent.context_builder import build_execution_messages
+    from agent.state import create_agent_state
+
+    state = create_agent_state(system_prompt="")
+    state.memory.working_summary = "U0 hidden working summary"
+    messages = build_execution_messages(state)
+
+    assert any("U0 hidden working summary" in str(m.get("content")) for m in messages)
+
+    runtime = MemoryRuntime(store=InMemoryMemoryStore())
+    listed = runtime.list_records()
+    assert listed == ()
+    assert "U0 hidden working summary" not in str(listed)

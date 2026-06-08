@@ -1,5 +1,6 @@
 import json
-from config import MAX_MESSAGES, MAX_MESSAGE_CHARS, MODEL_NAME
+import re
+
 from agent.logger import log_event, make_serializable
 from agent.memory_contracts import MemorySensitivity, MemorySnapshot, MemorySnapshotItem
 from agent.memory_runtime_hooks import (
@@ -8,6 +9,115 @@ from agent.memory_runtime_hooks import (
     _maybe_run_consolidation,
     _maybe_run_emergence,
 )
+from config import MAX_MESSAGE_CHARS, MAX_MESSAGES, MODEL_NAME
+
+_WORKING_SUMMARY_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"(?i)\b(api[_-]?key|password|secret|token|credential)\s*[:=]\s*[^\s,;]+"
+        ),
+        r"\1=[REDACTED]",
+    ),
+    (
+        re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{8,}"),
+        "Bearer [REDACTED]",
+    ),
+    (
+        re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}\b"),
+        "[REDACTED_SECRET]",
+    ),
+)
+
+
+def redact_working_summary(summary: str | None) -> tuple[str | None, bool]:
+    """对 session scratchpad 摘要做最小 secret-like 脱敏。
+
+    `working_summary` 会进入 checkpoint 和后续 prompt，但它不是长期用户记忆。
+    这里不做语义改写，只移除常见可逆 credential 片段，避免压缩摘要把 secret
+    样式内容带入恢复链路。
+    """
+    if not summary:
+        return summary, False
+    redacted = summary
+    for pattern, replacement in _WORKING_SUMMARY_SECRET_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted, redacted != summary
+
+
+def record_working_summary_event(
+    event_type: str,
+    *,
+    reason: str,
+    summary: str | None = None,
+    count: int | None = None,
+) -> None:
+    """通过内置 evidence 体系记录 `working_summary` lifecycle 事件。"""
+    try:
+        from agent.evidence_recorder import record_memory_evidence
+
+        record_memory_evidence(
+            event_type=event_type,
+            operation="summarize",
+            phase="end",
+            status="success",
+            source_type="hidden_summary",
+            decision="allowed",
+            reason=reason,
+            count=count,
+            raw_fields={"content": summary or ""},
+        )
+    except Exception:
+        # 摘要 evidence 失败不能阻断主对话或 checkpoint restore。
+        pass
+
+
+def set_working_summary_scratchpad(
+    state,
+    summary: str | None,
+    *,
+    reason: str,
+) -> str | None:
+    """设置 session scratchpad 摘要并记录安全 lifecycle evidence。
+
+    这是 `working_summary` 的写入/清理 owner。它只修改 `state.memory`
+    scratchpad，不写 MemoryStore，不创建 MemoryRecord，也不代表用户长期记忆。
+    """
+    previous = getattr(state.memory, "working_summary", None)
+    safe_summary, was_redacted = redact_working_summary(summary)
+    if safe_summary == previous:
+        if was_redacted:
+            record_working_summary_event(
+                "memory.summary_redacted",
+                reason=reason,
+                summary=summary,
+                count=1,
+            )
+        return safe_summary
+
+    state.memory.working_summary = safe_summary
+    if was_redacted:
+        record_working_summary_event(
+            "memory.summary_redacted",
+            reason=reason,
+            summary=summary,
+            count=1,
+        )
+    if safe_summary:
+        event_type = "memory.summary_updated" if previous else "memory.summary_created"
+        record_working_summary_event(
+            event_type,
+            reason=reason,
+            summary=safe_summary,
+            count=1,
+        )
+    elif previous:
+        record_working_summary_event(
+            "memory.summary_cleared",
+            reason=reason,
+            summary=previous,
+            count=0,
+        )
+    return safe_summary
 
 
 def estimate_messages_size(messages):
@@ -27,10 +137,7 @@ def _truncate_tool_result_content(obj, threshold=200, keep_prefix=200):
         is_tool_result = obj.get("type") == "tool_result"
         for k, v in obj.items():
             if is_tool_result and k == "content":
-                if isinstance(v, str):
-                    content_text = v
-                else:
-                    content_text = json.dumps(v, ensure_ascii=False)
+                content_text = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
                 if len(content_text) > threshold:
                     content_text = content_text[:keep_prefix] + "...(已截断)"
                 new_obj[k] = content_text
@@ -109,7 +216,12 @@ def _find_safe_split_index(messages, preferred_recent: int) -> int:
     return 0  # 兜底：放弃压缩
 
 
-def compress_history(messages, client, existing_summary: str | None = None, max_recent_messages: int = 6):
+def compress_history(
+    messages,
+    client,
+    existing_summary: str | None = None,
+    max_recent_messages: int = 6,
+):
     """
     检查并压缩消息历史。
 
@@ -340,6 +452,14 @@ def extract_memories_from_session(
     """
     import os as _os
 
+    from agent.memory_confirmation import (
+        MemoryConfirmationChoice,
+        MemoryConfirmationStatus,
+    )
+    from agent.memory_contracts import (
+        MemoryDecisionType,
+        MemoryScope,
+    )
     from agent.memory_extraction import (
         ExtractionInput,
         create_extractor,
@@ -348,21 +468,13 @@ def extract_memories_from_session(
         proposal_to_candidate,
     )
     from agent.memory_operations import (
-        MemoryOperationType,
         MemoryOperationIntent,
+        MemoryOperationType,
         build_memory_audit_summary,
     )
     from agent.memory_store import (
         MemoryStoreApplyStatus,
         find_duplicate_record,
-    )
-    from agent.memory_confirmation import (
-        MemoryConfirmationChoice,
-        MemoryConfirmationStatus,
-    )
-    from agent.memory_contracts import (
-        MemoryDecisionType,
-        MemoryScope,
     )
 
     # ── 初始化返回结构 ──────────────────────────────────────────────────
@@ -462,7 +574,7 @@ def extract_memories_from_session(
     #   - sensitivity ≤ MEDIUM
     #   - 单 session 上限 3 条
     #   - 必须标记 approval_status="auto_retained"
-    MAX_T2_PER_SESSION = 3
+    max_t2_per_session = 3
     t2_count = 0
 
     for proposal in episodic_proposals:
@@ -475,7 +587,7 @@ def extract_memories_from_session(
 
         # ── T2: confidence [0.6, 0.8) → governed auto-retain ─────────
         if 0.6 <= confidence < 0.8:
-            if t2_count >= MAX_T2_PER_SESSION:
+            if t2_count >= max_t2_per_session:
                 summary["t3_ignored"] += 1
                 continue
 

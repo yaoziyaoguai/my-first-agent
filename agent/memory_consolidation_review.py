@@ -26,7 +26,6 @@ from pathlib import Path
 
 from agent.memory_consolidation import ConsolidationCandidate
 
-
 # ── Dispatch Result ──────────────────────────────────────────────────────────
 
 
@@ -93,22 +92,21 @@ def _validate_candidate_for_dispatch(candidate: ConsolidationCandidate) -> str |
 # ── 路径解析 ──────────────────────────────────────────────────────────────────
 
 
-def _resolve_memory_root(memory_root: Path | str | None = None) -> Path:
+def _resolve_memory_root(memory_root: Path | str | None = None) -> Path | None:
     """解析 memory 根目录路径。
 
     优先级与 FilesystemMemoryStore / memory_review._resolve_memory_root 一致：
-    显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT > ~/.my-first-agent/memory
+    显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT。未配置时 fail closed。
     """
     import os as _os
 
     if memory_root is not None:
         return Path(memory_root)
-    root_str = (
-        _os.getenv("MEMORY_STORE_ROOT")
-        or _os.getenv("MEMORY_ROOT")
-        or str(Path.home() / ".my-first-agent" / "memory")
-    )
-    return Path(root_str)
+    for env_key in ("MEMORY_STORE_ROOT", "MEMORY_ROOT"):
+        value = _os.getenv(env_key)
+        if value and value.strip():
+            return Path(value).expanduser()
+    return None
 
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────
@@ -146,6 +144,14 @@ def dispatch_consolidation_candidates_to_pending_review(
     from datetime import datetime, timezone
 
     root = _resolve_memory_root(memory_root)
+    if root is None:
+        return ConsolidationPendingDispatchResult(
+            dispatched=0,
+            skipped_duplicate=0,
+            skipped_invalid=0,
+            warnings=("durable_memory_root_not_configured",),
+            proposal_filepaths=(),
+        )
     pending_dir = root / "_pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
 

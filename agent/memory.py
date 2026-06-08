@@ -1,5 +1,6 @@
 import json
 import re
+from hashlib import sha256
 
 from agent.logger import log_event, make_serializable
 from agent.memory_contracts import MemorySensitivity, MemorySnapshot, MemorySnapshotItem
@@ -405,6 +406,41 @@ def cleanup_old_episodes() -> None:
 
 
 
+def _safe_memory_root_metadata(root: object | None) -> dict[str, object]:
+    """Return evidence-safe metadata for a durable memory root.
+
+    The raw filesystem path is deliberately not returned. Session/runtime
+    summaries can carry these fields across boundaries without leaking tmp,
+    HOME, or absolute paths into evidence/log output.
+    """
+    if root is None:
+        return {
+            "root_redacted": True,
+            "root_kind": "none",
+            "path_kind": "none",
+        }
+    from agent.evidence_recorder import build_safe_path_metadata
+
+    raw = str(root)
+    path_metadata = build_safe_path_metadata(raw)
+    return {
+        "root_hash": f"memroot:{sha256(raw.encode('utf-8')).hexdigest()[:16]}",
+        "path_hash": path_metadata.get("path_hash", ""),
+        "root_kind": path_metadata.get("path_kind", "unknown"),
+        "path_kind": path_metadata.get("path_kind", "unknown"),
+        "root_redacted": True,
+    }
+
+
+def _attach_store_summary_metadata(summary: dict, store, backend: str) -> None:
+    """Attach backend/root metadata without exposing raw filesystem paths."""
+    summary["store_backend"] = backend
+    if hasattr(store, "root_dir"):
+        summary.update(_safe_memory_root_metadata(getattr(store, "root_dir", None)))
+    else:
+        summary.update(_safe_memory_root_metadata(None))
+
+
 def extract_memories_from_session(
     messages,
     client,
@@ -491,32 +527,38 @@ def extract_memories_from_session(
     t1_proposals: list[dict] = []  # T1 pending proposals，循环结束后持久化
 
     # ── 创建 store ──────────────────────────────────────────────────────
-    # store_backend / store_root 注入 summary，供 dogfood 可见性审计。
+    # store_backend / safe root metadata 注入 summary，供 dogfood 可见性审计。
     # session.py 不直接查询 store 内部；summary 是唯一的跨边界信息载体。
+    # 这里不能暴露 raw filesystem root；只传 hash/kind/redacted metadata。
     if store is None:
         backend = _os.getenv("MEMORY_STORE_BACKEND", "memory").strip()
-        summary["store_backend"] = backend
         if backend in ("memory", "in_memory", "inmemory"):
             from agent.memory_store import InMemoryMemoryStore
             store = InMemoryMemoryStore()
-            summary["store_root"] = None  # InMemory 无文件系统路径
+            _attach_store_summary_metadata(summary, store, backend)
         elif backend in ("filesystem", "memory_fs", "fs"):
-            from agent.memory_fs_store import FilesystemMemoryStore
-            store = FilesystemMemoryStore()
-            # FilesystemMemoryStore.root_dir 是 resolved Path
-            summary["store_root"] = str(store.root_dir) if hasattr(store, "root_dir") else None
+            from agent.memory_fs_store import FilesystemMemoryStore, resolve_configured_memory_root
+
+            root = resolve_configured_memory_root()
+            if root is None:
+                summary["store_backend"] = backend
+                summary.update(_safe_memory_root_metadata(None))
+                summary["errors"].append("durable_memory_root_not_configured")
+                return summary
+            store = FilesystemMemoryStore(root_dir=root)
+            _attach_store_summary_metadata(summary, store, backend)
         else:
             summary["errors"].append(
                 f"不支持的 MEMORY_STORE_BACKEND: {backend!r}"
             )
             summary["store_backend"] = backend
-            summary["store_root"] = None
+            summary.update(_safe_memory_root_metadata(None))
             return summary
     else:
         # store 被显式注入 → 从 store 实例推断 backend 信息
         store_cls_name = type(store).__name__
-        summary["store_backend"] = "filesystem" if "Filesystem" in store_cls_name else "memory"
-        summary["store_root"] = str(store.root_dir) if hasattr(store, "root_dir") else None
+        backend = "filesystem" if "Filesystem" in store_cls_name else "memory"
+        _attach_store_summary_metadata(summary, store, backend)
 
     # ── 构造 transcript（过滤 system 消息，保留 user/assistant）─────────
     transcript = [
@@ -778,18 +820,19 @@ def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _resolve_memory_root() -> str:
+def _resolve_memory_root() -> str | None:
     """解析 memory 根目录路径。
 
     优先级与 FilesystemMemoryStore 一致：
-    MEMORY_STORE_ROOT > MEMORY_ROOT > ~/.my-first-agent/memory
+    MEMORY_STORE_ROOT > MEMORY_ROOT。未显式配置时 fail closed。
+
+    不再 fallback 到 ``~/.my-first-agent/memory``，避免 legacy session-end
+    extraction / T1 pending 在测试或生产中静默写 HOME。
     """
     import os as _os
-    from pathlib import Path
     return (
         _os.getenv("MEMORY_STORE_ROOT")
         or _os.getenv("MEMORY_ROOT")
-        or str(Path.home() / ".my-first-agent" / "memory")
     )
 
 
@@ -842,6 +885,8 @@ def _persist_t1_pending_proposals(proposals: list[dict]) -> None:
     from pathlib import Path
 
     root = _resolve_memory_root()
+    if not root:
+        raise RuntimeError("durable_memory_root_not_configured")
     pending_dir = Path(root) / "_pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
 
@@ -873,7 +918,7 @@ def _format_extraction_summary(summary: dict) -> str:
     Dogfood 关键信息：
     - store backend（InMemory / filesystem）
     - InMemory → ephemeral warning
-    - filesystem → store root path
+    - filesystem → safe root metadata，不显示 raw filesystem path
     - T2 auto_retained / T1 pending / T3 ignored 计数
     - errors 摘要（不堆栈）
     """
@@ -883,7 +928,6 @@ def _format_extraction_summary(summary: dict) -> str:
 
     # ── Store 可见性 ──────────────────────────────────────────────────
     backend = summary.get("store_backend", "unknown")
-    store_root = summary.get("store_root")
     if backend in ("memory", "in_memory", "inmemory"):
         lines.append("  Store:  InMemory（ephemeral）")
         lines.append(
@@ -893,9 +937,13 @@ def _format_extraction_summary(summary: dict) -> str:
             "     如需持久化，请设置 MEMORY_STORE_BACKEND=filesystem。"
         )
     elif backend in ("filesystem", "memory_fs", "fs"):
-        root_str = store_root or "unknown"
+        root_hash = summary.get("root_hash", "")
+        root_kind = summary.get("root_kind", "unknown")
+        path_kind = summary.get("path_kind", "unknown")
         lines.append("  Store:  Filesystem")
-        lines.append(f"  Root:   {root_str}")
+        lines.append(f"  Root:   redacted kind={root_kind} path_kind={path_kind}")
+        if root_hash:
+            lines.append(f"  Root hash: {root_hash}")
     else:
         lines.append(f"  Store:  {backend}")
 

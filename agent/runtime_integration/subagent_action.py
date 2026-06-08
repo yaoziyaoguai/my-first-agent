@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,22 @@ from agent.subagent_system.registry import SubAgentRegistry
 from agent.subagent_system.request import SubAgentRequest
 
 _SHELL_LIKE_TOOLS = frozenset({"shell", "bash", "run_shell"})
+
+
+def _safe_hash(value: object, *, prefix: str) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    return f"{prefix}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _safe_text_metadata(value: object, *, label: str, prefix: str) -> dict[str, object]:
+    raw = str(value or "")
+    return {
+        f"{label}_hash": _safe_hash(raw, prefix=prefix),
+        f"{label}_length": len(raw),
+        "redacted": True,
+    }
 
 
 class SubAgentDelegateL0Handler:
@@ -118,9 +135,32 @@ class SubAgentDelegateL0Handler:
             observed_call=observed,
             parent_adjudicated=True,
             evidence_extra={
-                key: value
-                for key, value in result_payload.items()
-                if key != "parent_adjudicated"
+                **{
+                    key: value
+                    for key, value in result_payload.items()
+                    if key
+                    not in {
+                        "parent_adjudicated",
+                        "execution_result",
+                        "handoff_note",
+                        "adjudication_reason",
+                    }
+                },
+                **_safe_text_metadata(
+                    result_payload.get("execution_result", ""),
+                    label="execution_result",
+                    prefix="childresult",
+                ),
+                **_safe_text_metadata(
+                    result_payload.get("handoff_note", ""),
+                    label="handoff_note",
+                    prefix="childhandoff",
+                ),
+                **_safe_text_metadata(
+                    result_payload.get("adjudication_reason", ""),
+                    label="adjudication_reason",
+                    prefix="childreason",
+                ),
             },
         )
 
@@ -264,18 +304,23 @@ class SubAgentDelegateL1Handler:
                 tool_mediator=self._tool_mediator,
             )
         except Exception as exc:
+            error_type = type(exc).__name__
             return context.failed(
                 handler_name=type(self).__name__,
                 target_module="SubAgentExecutor",
                 payload={
                     "subagent_name": subagent_name,
                     "delegate_l1_called": True,
-                    "failure_reason": str(exc),
+                    "failure_reason": error_type,
                 },
                 observed_call=None,
                 parent_adjudicated=True,
-                evidence_extra={"delegate_l1_called": True, "error": str(exc)},
-                error_safe_preview=f"L1 delegation failed: {exc}",
+                evidence_extra={
+                    "delegate_l1_called": True,
+                    "error_type": error_type,
+                    "redacted": True,
+                },
+                error_safe_preview=f"L1 delegation failed: {error_type}",
             )
 
         result = run.result
@@ -313,8 +358,10 @@ class SubAgentDelegateL1Handler:
                             "subagent_name": subagent_name,
                             "status": getattr(result, "status", "unknown") if result else "unknown",
                             "stop_reason": getattr(result, "stop_reason", "") if result else "",
-                            "summary_preview": (
-                                getattr(result, "summary", "")[:200] if result else ""
+                            **_safe_text_metadata(
+                                getattr(result, "summary", "") if result else "",
+                                label="summary",
+                                prefix="childsummary",
                             ),
                             "iterations_used": (
                                 getattr(getattr(result, "audit", None), "iterations_used", 0)
@@ -339,7 +386,11 @@ class SubAgentDelegateL1Handler:
                         payload={
                             "subagent_name": subagent_name,
                             "adjudication": adjudication_label,
-                            "adjudication_reason": getattr(adjudication, "reason", ""),
+                            **_safe_text_metadata(
+                                getattr(adjudication, "reason", ""),
+                                label="adjudication_reason",
+                                prefix="childreason",
+                            ),
                             "child_status": (
                                 getattr(result, "status", "unknown")
                                 if result else "unknown"
@@ -357,9 +408,26 @@ class SubAgentDelegateL1Handler:
             observed_call=None,
             parent_adjudicated=True,
             evidence_extra={
-                key: value
-                for key, value in result_payload.items()
-                if key != "parent_adjudicated"
+                **{
+                    key: value
+                    for key, value in result_payload.items()
+                    if key
+                    not in {
+                        "parent_adjudicated",
+                        "execution_result",
+                        "adjudication_reason",
+                    }
+                },
+                **_safe_text_metadata(
+                    result_payload.get("execution_result", ""),
+                    label="execution_result",
+                    prefix="childresult",
+                ),
+                **_safe_text_metadata(
+                    result_payload.get("adjudication_reason", ""),
+                    label="adjudication_reason",
+                    prefix="childreason",
+                ),
             },
         )
 

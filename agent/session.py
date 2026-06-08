@@ -37,7 +37,7 @@ from agent.logger import (
 from agent.memory import (
     _format_extraction_summary,
     cleanup_old_episodes,
-    extract_memories_from_session,
+    extract_memories_from_session,  # noqa: F401 - compatibility monkeypatch seam.
     init_memory,
 )
 from agent.memory_review import count_pending_proposals
@@ -601,19 +601,47 @@ def _replay_awaiting_prompt(state):
 # ========== 退出 ==========
 
 def _run_session_end_memory_extraction(messages, client, model_name) -> dict:
-    """Session-end memory extraction 的 thin orchestration helper。
+    """Freeze legacy session-end memory extraction with safe evidence.
 
-    职责：
-    - 调用 extract_memories_from_session() 触发 extraction → governance → persistence
-    - 通过 _format_extraction_summary() 展示结果
-
-    不参与 T1/T2/T3 routing 决策，不直接操作 store 文件结构。
-
-    被 finalize_session() 和 handle_double_interrupt() 共用，
-    确保正常退出和 Ctrl+C×2 退出都执行 session-end extraction。
+    Post-Memory hardening freezes this production exit hook because the legacy
+    path can write MemoryStore/_pending outside MemoryRuntime governance. The
+    lower-level extraction helper remains available for explicit legacy tests
+    and tools, but normal quit / Ctrl+C x2 only record safe skipped evidence.
     """
-    print("\n[系统] 正在提取本次对话的记忆...")
-    extraction_summary = extract_memories_from_session(messages, client, model_name)
+    reason = "legacy_session_end_extraction_disabled"
+    extraction_summary = {
+        "total_messages": len(messages or []),
+        "total_proposals": 0,
+        "t2_auto_retained": 0,
+        "t1_pending": 0,
+        "t3_ignored": 0,
+        "dedup_hits": 0,
+        "errors": [],
+        "false_positives_note": "legacy session-end memory extraction skipped",
+        "source": "session_end_extraction",
+        "decision": "skipped",
+        "reason": reason,
+        "policy_path": "session_end_legacy_extraction_freeze",
+        "redacted": True,
+    }
+    try:
+        from agent.evidence_recorder import record_memory_evidence
+
+        record_memory_evidence(
+            event_type="memory.proposal_skipped",
+            operation="extract",
+            phase="decision",
+            status="skipped",
+            source_type="session",
+            decision="skipped",
+            policy_path="session_end_legacy_extraction_freeze",
+            reason=reason,
+            count=0,
+            raw_fields={},
+        )
+    except Exception:
+        pass
+    print("\n[系统] session-end legacy memory extraction 已跳过。")
     print(_format_extraction_summary(extraction_summary))
     return extraction_summary
 
@@ -647,7 +675,7 @@ def finalize_session():
     state = get_state()
     messages = state.conversation.messages
 
-    _run_session_end_memory_extraction(messages, client, MODEL_NAME)
+    extraction_summary = _run_session_end_memory_extraction(messages, client, MODEL_NAME)
     save_session_snapshot(messages)
 
     if state.task.current_plan:
@@ -656,6 +684,7 @@ def finalize_session():
 
     _record_session_end(status="ok")
     print("会话已保存，再见！")
+    return extraction_summary
 
 
 # ========== 中断处理 ==========
@@ -790,7 +819,7 @@ def handle_double_interrupt():
     messages = state.conversation.messages
 
     # session-end memory extraction（与 finalize_session 共用同一 helper）
-    _run_session_end_memory_extraction(messages, client, MODEL_NAME)
+    extraction_summary = _run_session_end_memory_extraction(messages, client, MODEL_NAME)
 
     save_session_snapshot(messages)
 
@@ -800,3 +829,4 @@ def handle_double_interrupt():
 
     _record_session_end(status="ok", reason="double_interrupt")
     print("[系统] 下次启动可继续未完成的任务。再见！")
+    return extraction_summary

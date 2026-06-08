@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from time import monotonic
@@ -23,6 +24,7 @@ from agent.runtime_integration.schema import (
     new_action_id,
     new_event_id,
     normalize_action_type,
+    runtime_action_support_status,
 )
 
 HANDLER_EVIDENCE_RESERVED_FIELDS = frozenset({
@@ -443,6 +445,11 @@ class RuntimeActionDispatcher:
         request: RuntimeActionRequest,
         context: RuntimeActionContext,
     ) -> RuntimeActionResult:
+        support = None
+        with contextlib.suppress(Exception):
+            support = runtime_action_support_status(request.action_type)
+        is_deferred = bool(support and support.support_status == "deferred")
+        reason = "deferred_action" if is_deferred else "no handler registered"
         evidence = {
             "action_id": context.action_id,
             "action_type": action_type_value(request.action_type),
@@ -469,6 +476,9 @@ class RuntimeActionDispatcher:
             "runtime_action_source": request.source,
             "dispatcher_origin": context.dispatcher_origin,
             "runtime_loop_invoked": context.dispatcher_origin == "runtime_loop",
+            "support_status": "deferred" if is_deferred else "unsupported",
+            "reason": reason,
+            "redacted": True,
         }
         if context.dispatcher_origin == "runtime_loop":
             evidence["core_loop_invoked"] = True
@@ -479,7 +489,7 @@ class RuntimeActionDispatcher:
             action_type=request.action_type,
             action_id=context.action_id,
             status="not_supported",
-            payload={"reason": "no handler registered"},
+            payload={"reason": reason},
             evidence=evidence,
             error_safe_preview="action not supported",
         )

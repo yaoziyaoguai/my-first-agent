@@ -110,6 +110,29 @@ def _safe_tool_input_metadata(tool_name: str, tool_input: Any) -> dict[str, Any]
     return {key: value for key, value in metadata.items() if value not in ("", None)}
 
 
+def _safe_child_arguments_metadata(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Project child tool arguments into safe evidence metadata."""
+    import json
+
+    serialized = json.dumps(arguments or {}, ensure_ascii=False, sort_keys=True, default=str)
+    metadata: dict[str, Any] = {
+        "arguments_hash": _hash_memory_tool_value(serialized, prefix="childargs"),
+        "argument_key_count": len(arguments or {}),
+        "redacted": True,
+    }
+    metadata.update(_tool_input_path_metadata(arguments))
+    return {key: value for key, value in metadata.items() if value not in ("", None)}
+
+
+def _safe_child_text_metadata(value: str, *, prefix: str) -> dict[str, Any]:
+    raw = str(value or "")
+    return {
+        f"{prefix}_hash": _hash_memory_tool_value(raw, prefix=f"child{prefix}"),
+        f"{prefix}_length": len(raw),
+        "redacted": True,
+    }
+
+
 class ToolRuntimeMediator:
     """Dispatcher-mediated tool execution 中介层。
 
@@ -712,7 +735,7 @@ class ToolRuntimeMediator:
                     parent_trace_id=parent_trace_id or delegation_id,
                     payload={
                         "tool_name": tool_name,
-                        "arguments_preview": str(arguments)[:200],
+                        **_safe_child_arguments_metadata(arguments),
                         "delegation_id": delegation_id,
                         "gate_disposition": gate_disposition,
                     },
@@ -745,7 +768,7 @@ class ToolRuntimeMediator:
                         "delegation_id": delegation_id,
                         "status": status,
                         "stop_reason": stop_reason,
-                        "summary_preview": summary[:200],
+                        **_safe_child_text_metadata(summary, prefix="summary"),
                         "iterations_used": iterations_used,
                     },
                 ),

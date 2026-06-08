@@ -21,7 +21,6 @@ from agent.memory import (
     extract_memories_from_session,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # _format_extraction_summary 可见性测试
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -54,14 +53,14 @@ def test_format_summary_shows_inmemory_ephemeral_warning():
     assert "T1 pending:" in output
 
 
-def test_format_summary_shows_filesystem_store_root():
-    """Filesystem backend 时格式化输出必须显示 store root 路径。
-
-    这确保 dogfood 时用户能确认 T2 record 写入了正确的目录。
-    """
+def test_format_summary_shows_filesystem_safe_root_metadata():
+    """Filesystem backend summary 只能显示 safe root metadata，不显示 raw path。"""
     summary = {
         "store_backend": "filesystem",
-        "store_root": "/tmp/dogfood_memory_store",
+        "root_hash": "memroot:abc123",
+        "root_kind": "tmp",
+        "path_kind": "tmp",
+        "root_redacted": True,
         "total_messages": 5,
         "total_proposals": 1,
         "t2_auto_retained": 1,
@@ -74,7 +73,9 @@ def test_format_summary_shows_filesystem_store_root():
     output = _format_extraction_summary(summary)
 
     assert "Filesystem" in output
-    assert "/tmp/dogfood_memory_store" in output
+    assert "memroot:abc123" in output
+    assert "tmp" in output
+    assert "/tmp/dogfood_memory_store" not in output
     assert "T2 auto-retained:" in output
 
 
@@ -278,11 +279,11 @@ def test_memory_extract_cli_real_llm_opt_in_respected(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_extract_memories_adds_store_info_to_summary(monkeypatch, tmp_path):
-    """extract_memories_from_session 的 summary 必须包含 store_backend 和 store_root。
+def test_extract_memories_adds_safe_store_info_to_summary(monkeypatch, tmp_path):
+    """extract_memories_from_session summary 必须包含 safe root metadata。
 
     这是 session.py 可见性的唯一信息来源：session.py 不直接查询 store，
-    而是从 summary dict 读取 store 信息。
+    而是从 summary dict 读取 store 信息。raw filesystem path 不得跨边界暴露。
     """
     monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
     monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
@@ -290,8 +291,12 @@ def test_extract_memories_adds_store_info_to_summary(monkeypatch, tmp_path):
     # 空 messages → 快速返回（不进入 extraction），但 store 信息已注入
     summary = extract_memories_from_session([], None, None)
     assert summary["store_backend"] == "filesystem"
-    assert summary["store_root"] is not None
-    assert str(tmp_path) in summary["store_root"]
+    assert "store_root" not in summary
+    assert summary["root_hash"].startswith("memroot:")
+    assert summary["path_hash"].startswith("path:")
+    assert summary["root_kind"] in {"tmp", "absolute"}
+    assert summary["root_redacted"] is True
+    assert str(tmp_path) not in str(summary)
 
 
 def test_extract_memories_default_inmemory_store(monkeypatch):
@@ -300,7 +305,9 @@ def test_extract_memories_default_inmemory_store(monkeypatch):
 
     summary = extract_memories_from_session([], None, None)
     assert summary["store_backend"] == "memory"
-    assert summary["store_root"] is None
+    assert "store_root" not in summary
+    assert summary["root_redacted"] is True
+    assert summary["root_kind"] == "none"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -409,18 +416,13 @@ def test_extract_session_real_llm_false_uses_fake(monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# handle_double_interrupt extraction hook 测试（Slice 1 P1-2 验证）
+# handle_double_interrupt session-end memory freeze 测试
 # ═══════════════════════════════════════════════════════════════════════════════
-# 这些测试验证 Ctrl+C×2 退出路径会触发 session-end memory extraction，
-# 不验证 extraction quality。
+# 这些测试验证 Ctrl+C×2 退出路径不会触发 legacy extraction 或 raw path 输出。
 
 
 class TestDoubleInterruptExtractionHook:
-    """验证 handle_double_interrupt() 会触发 session-end memory extraction。
-
-    所有测试使用 monkeypatch 替换 extract_memories_from_session()，
-    返回 fake summary，不调用真实 LLM，不读取 .env。
-    """
+    """验证 handle_double_interrupt() 冻结 legacy session-end extraction。"""
 
     FAKE_SUMMARY = {
         "store_backend": "memory",
@@ -435,13 +437,8 @@ class TestDoubleInterruptExtractionHook:
         "false_positives_note": "",
     }
 
-    def test_double_interrupt_calls_extraction(self, monkeypatch):
-        """handle_double_interrupt() 必须调用 extract_memories_from_session()。
-
-        修复前：Ctrl+C×2 路径只保存 snapshot，跳过 extraction。
-        修复后：复用 _run_session_end_memory_extraction() helper，
-        与 finalize_session 走同一条 extraction 路径。
-        """
+    def test_double_interrupt_skips_legacy_extraction(self, monkeypatch):
+        """handle_double_interrupt() 不得调用 legacy extract_memories_from_session()。"""
         called = {"count": 0, "messages": None}
 
         def fake_extract(messages, client, model_name, *, store=None):
@@ -465,15 +462,14 @@ class TestDoubleInterruptExtractionHook:
 
         from agent.session import handle_double_interrupt
 
-        handle_double_interrupt()
+        summary = handle_double_interrupt()
 
-        assert called["count"] == 1, (
-            f"handle_double_interrupt 应调用 extract_memories_from_session 1 次，"
-            f"实际 {called['count']} 次"
-        )
+        assert called["count"] == 0
+        assert summary["decision"] == "skipped"
+        assert summary["reason"] == "legacy_session_end_extraction_disabled"
 
-    def test_double_interrupt_shows_extraction_summary(self, monkeypatch, capsys):
-        """handle_double_interrupt() 应展示 extraction summary。
+    def test_double_interrupt_shows_skipped_summary(self, monkeypatch, capsys):
+        """handle_double_interrupt() 应展示 safe skipped summary。
 
         _format_extraction_summary 的输出必须出现在终端中。
         """
@@ -495,15 +491,12 @@ class TestDoubleInterruptExtractionHook:
         captured = capsys.readouterr()
         output = captured.out + captured.err
 
-        # summary 关键词应可见
-        assert "提取" in output, f"summary 应显示 extraction 提示，实际输出: {output[:300]}"
-        assert "记忆" in output
+        assert "已跳过" in output
+        assert "Memory Extraction Summary" in output
+        assert "legacy session-end memory extraction skipped" in output
 
-    def test_double_interrupt_inmemory_warning_visible(self, monkeypatch, capsys):
-        """InMemory backend 时 summary 应展示 ephemeral 警告。
-
-        Ctrl+C×2 退出路径与正常 quit 一样需要通知用户 T2 未持久化。
-        """
+    def test_double_interrupt_does_not_show_inmemory_write_warning(self, monkeypatch, capsys):
+        """冻结后不应暗示 InMemory/T2 写入发生。"""
         inmemory_summary = dict(self.FAKE_SUMMARY)
         inmemory_summary["store_backend"] = "memory"
         inmemory_summary["store_root"] = None
@@ -526,20 +519,12 @@ class TestDoubleInterruptExtractionHook:
         captured = capsys.readouterr()
         output = captured.out + captured.err
 
-        # InMemory warning 关键词
-        assert ("inmemory" in output.lower()
-                or "InMemory" in output
-                or "内存" in output
-                or "未持久化" in output), (
-            f"InMemory backend warning 应在 double interrupt 输出中可见，"
-            f"实际: {output[:300]}"
-        )
+        assert "legacy session-end memory extraction skipped" in output
+        assert "T2 auto-retained: 0" in output
+        assert "InMemory" not in output
 
-    def test_double_interrupt_filesystem_root_visible(self, monkeypatch, capsys, tmp_path):
-        """Filesystem backend 时 summary 应展示 store root 路径。
-
-        用户需要知道记忆落盘的具体位置。
-        """
+    def test_double_interrupt_filesystem_root_not_visible(self, monkeypatch, capsys, tmp_path):
+        """Filesystem root raw path 不得在 double interrupt 输出中可见。"""
         fs_summary = dict(self.FAKE_SUMMARY)
         fs_summary["store_backend"] = "filesystem"
         fs_summary["store_root"] = str(tmp_path)
@@ -562,10 +547,8 @@ class TestDoubleInterruptExtractionHook:
         captured = capsys.readouterr()
         output = captured.out + captured.err
 
-        assert str(tmp_path) in output, (
-            f"filesystem root {tmp_path} 应在 double interrupt 输出中可见，"
-            f"实际: {output[:300]}"
-        )
+        assert str(tmp_path) not in output
+        assert "legacy session-end memory extraction skipped" in output
 
 
 def _make_mock_state(messages=None):
@@ -668,16 +651,16 @@ class TestConsolidationRuntimeHookGate:
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
         # 先写入 3 条 episodic records（共享关键词确保分组成功）
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent,
-            MemoryOperationType,
-            MemoryDecisionType,
             MemoryConfirmationChoice,
             MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
             build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         for i in range(3):
@@ -733,16 +716,16 @@ class TestConsolidationRuntimeHookGate:
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent,
-            MemoryOperationType,
-            MemoryDecisionType,
             MemoryConfirmationChoice,
             MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
             build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         for i in range(3):
@@ -814,13 +797,16 @@ class TestConsolidationRuntimeHookSafety:
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent, MemoryOperationType,
-            MemoryDecisionType, MemoryConfirmationChoice,
-            MemoryConfirmationStatus, build_memory_audit_summary,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         for i in range(3):
@@ -867,13 +853,16 @@ class TestConsolidationRuntimeHookSafety:
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent, MemoryOperationType,
-            MemoryDecisionType, MemoryConfirmationChoice,
-            MemoryConfirmationStatus, build_memory_audit_summary,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         for i in range(3):
@@ -924,6 +913,7 @@ class TestConsolidationRuntimeHookSafety:
 
         import ast
         import inspect
+
         from agent.memory import _maybe_run_consolidation
 
         source = inspect.getsource(_maybe_run_consolidation)
@@ -955,13 +945,16 @@ class TestConsolidationRuntimeHookFailureIsolation:
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent, MemoryOperationType,
-            MemoryDecisionType, MemoryConfirmationChoice,
-            MemoryConfirmationStatus, build_memory_audit_summary,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         # 写入 3 条 episodic + 1 条 rejected episodic（loader 应跳过）
@@ -1003,13 +996,16 @@ class TestConsolidationRuntimeHookFailureIsolation:
         monkeypatch.setenv("MEMORY_STORE_BACKEND", "filesystem")
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
+        from agent.memory_contracts import MemoryScope
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_operations import (
-            MemoryOperationIntent, MemoryOperationType,
-            MemoryDecisionType, MemoryConfirmationChoice,
-            MemoryConfirmationStatus, build_memory_audit_summary,
+            MemoryConfirmationChoice,
+            MemoryConfirmationStatus,
+            MemoryDecisionType,
+            MemoryOperationIntent,
+            MemoryOperationType,
+            build_memory_audit_summary,
         )
-        from agent.memory_contracts import MemoryScope
 
         store = FilesystemMemoryStore(root_dir=str(tmp_path))
         for i in range(3):

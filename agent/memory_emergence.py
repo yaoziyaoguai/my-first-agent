@@ -42,7 +42,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agent.memory_confirmation_forms import (
     DISALLOWED_MEMORY_CONFIRMATION_FORMS as _DISALLOWED_CONFIRMATION_FORMS,
+)
+from agent.memory_confirmation_forms import (
     MemoryConfirmationForm as ConfirmationForm,
+)
+from agent.memory_confirmation_forms import (
     validate_memory_confirmation_form as _validate_confirmation_form,
 )
 
@@ -443,21 +447,21 @@ def _build_evidence_summary(group: list[CorrectionEvidence]) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _resolve_memory_root(memory_root: Path | str | None = None) -> Path:
+def _resolve_memory_root(memory_root: Path | str | None = None) -> Path | None:
     """解析 memory 根目录路径。
 
-    优先级与 FilesystemMemoryStore / memory_review._resolve_memory_root 一致。
+    优先级与 FilesystemMemoryStore / memory_review._resolve_memory_root 一致：
+    显式参数 > MEMORY_STORE_ROOT > MEMORY_ROOT。未配置时 fail closed。
     """
     import os as _os
 
     if memory_root is not None:
         return Path(memory_root)
-    root_str = (
-        _os.getenv("MEMORY_STORE_ROOT")
-        or _os.getenv("MEMORY_ROOT")
-        or str(Path.home() / ".my-first-agent" / "memory")
-    )
-    return Path(root_str)
+    for env_key in ("MEMORY_STORE_ROOT", "MEMORY_ROOT"):
+        value = _os.getenv(env_key)
+        if value and value.strip():
+            return Path(value).expanduser()
+    return None
 
 
 def _compute_procedural_identity(candidate: ProceduralCandidate) -> str:
@@ -520,6 +524,14 @@ def dispatch_procedural_candidates_to_pending_review(
     from datetime import datetime, timezone
 
     root = _resolve_memory_root(memory_root)
+    if root is None:
+        return ProceduralDispatchResult(
+            dispatched=0,
+            skipped_duplicate=0,
+            skipped_invalid=0,
+            warnings=("durable_memory_root_not_configured",),
+            proposal_filepaths=(),
+        )
     pending_dir = root / "_pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
 
@@ -736,7 +748,7 @@ class InlineConfirmationApplyResult:
 
     status: InlineConfirmationApplyStatus
     action: InlineConfirmationAction
-    store_result: "MemoryStoreApplyResult | None"
+    store_result: MemoryStoreApplyResult | None
     message: str
 
 
@@ -791,10 +803,10 @@ def prepare_procedural_inline_confirmation_request(
 
 def accept_inline_confirmation(
     request: InlineConfirmationRequest,
-    store: "MemoryStoreProtocol",
+    store: MemoryStoreProtocol,
     *,
     edited_content: str | None = None,
-) -> "MemoryStoreApplyResult":
+) -> MemoryStoreApplyResult:
     """处理 inline confirmation 的 accept / edit_accept。
 
     只在 explicit human accept 后写入 store。
@@ -873,7 +885,7 @@ def accept_inline_confirmation(
 def apply_inline_confirmation_response(
     request: InlineConfirmationRequest,
     response: InlineConfirmationResponse,
-    store: "MemoryStoreProtocol",
+    store: MemoryStoreProtocol,
 ) -> InlineConfirmationApplyResult:
     """应用 inline confirmation response，集中封装写入边界。
 

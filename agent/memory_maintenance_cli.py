@@ -15,7 +15,14 @@ from agent.memory_review import _resolve_memory_root
 
 
 def _memory_root_arg(value: str | None) -> Path:
-    return Path(value) if value else Path(_resolve_memory_root())
+    if value:
+        return Path(value)
+    root = _resolve_memory_root()
+    if root is None:
+        raise SystemExit(
+            "MEMORY_STORE_ROOT or MEMORY_ROOT is required for memory maintenance"
+        )
+    return Path(root)
 
 
 def run_memory_maintenance_cli(argv: list[str] | None = None) -> int:
@@ -94,4 +101,3 @@ def run_memory_maintenance_cli(argv: list[str] | None = None) -> int:
 
     parser.print_help()
     return 2
-

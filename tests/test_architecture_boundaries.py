@@ -474,7 +474,6 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.loop",
         "agent.loop_context",
         "agent.memory",
-        "agent.memory_fs_store",
         "agent.memory_interaction",
         "agent.memory_l2",
         "agent.memory_runtime",
@@ -500,6 +499,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 仅用于构造 RuntimeActionRequest 并 dispatch MEMORY_RECALL。
         # 不改变 core 的模块级 import surface，不引入新的模块级耦合。
         "agent.runtime_integration.schema",
+        # Post-Memory hardening：CLI meta-command glue 从 core.py 移到专用
+        # handler；core 只做薄 dispatch，不直接承载 show/forget/show-subagents
+        # 行为分支。
+        "agent.runtime_integration.cli_handlers",
         "agent.state",
         # Phase 2 SubAgent demo：chat() 内 local import，仅用于
         # "show subagents" CLI meta-command。

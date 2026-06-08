@@ -10,6 +10,15 @@ pending_review / explicit confirmation 路径，绝不 silent retain 或 auto ap
 from __future__ import annotations
 
 
+def _safe_store_root_for_pending_dispatch(store) -> object | None:
+    """Return an explicit filesystem store root for pending-review dispatch.
+
+    Runtime hooks must not rely on legacy review helpers to resolve HOME. Only a
+    configured/shared filesystem store may supply the root for `_pending` writes.
+    """
+    return getattr(store, "root_dir", None)
+
+
 def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
     """Phase 6 consolidation runtime hook -- gate + orchestration thin layer.
 
@@ -86,7 +95,24 @@ def _maybe_run_consolidation(store, extraction_summary: dict) -> dict:
             "llm_warnings": list(pipeline_result.llm_warnings),
         }
 
-    store_root = extraction_summary.get("store_root")
+    store_root = _safe_store_root_for_pending_dispatch(store)
+    if store_root is None:
+        return {
+            "enabled": True,
+            "dry_run": False,
+            "evidence_count": evidence_count,
+            "candidate_count": pipeline_result.candidate_count,
+            "validator_pass_count": pipeline_result.validator_pass_count,
+            "would_dispatch_count": 0,
+            "dispatched_count": 0,
+            "warnings": ["durable_memory_root_not_configured"],
+            "direct_store_write": False,
+            "auto_approve": False,
+            "llm_enabled": pipeline_result.llm_enabled,
+            "llm_enhanced_count": pipeline_result.llm_enhanced_count,
+            "llm_warnings": list(pipeline_result.llm_warnings),
+            "skipped": "durable_memory_root_not_configured",
+        }
     dispatch_result = dispatch_consolidation_candidates_to_pending_review(
         list(pipeline_result.candidates),
         memory_root=store_root,
@@ -205,9 +231,13 @@ def _maybe_run_emergence(store, extraction_summary: dict) -> dict:
         summary["skipped_pattern_count"] = detection.skipped_count
         return summary
 
-    store_root = extraction_summary.get("store_root")
-    if store_root is None and hasattr(store, "root_dir"):
-        store_root = str(store.root_dir)
+    store_root = _safe_store_root_for_pending_dispatch(store)
+    if store_root is None:
+        summary["skipped"] = "durable_memory_root_not_configured"
+        summary["disabled_reason"] = "durable_memory_root_not_configured"
+        summary["gate_reason"] = "durable_memory_root_not_configured"
+        summary["warnings"].append("durable_memory_root_not_configured")
+        return summary
 
     dispatch = dispatch_procedural_candidates_to_pending_review(
         list(detection.candidates),

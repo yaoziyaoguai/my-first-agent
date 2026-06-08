@@ -226,6 +226,106 @@ class RuntimeActionRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeActionSupportDescriptor:
+    """RuntimeAction support ownership metadata.
+
+    The catalog is intentionally separate from handler registration. Some
+    action types exist as reserved schema/evidence shapes before Sub-agent v0;
+    callers must not treat that as production support.
+    """
+
+    action_type: RuntimeActionType
+    support_status: str
+    production_supported: bool
+    reserved: bool = False
+    expected_behavior: str = ""
+    evidence_requirements: str = ""
+    raw_child_payload_allowed: bool = False
+    subagent_v0_owner: str = ""
+    add_handler_now: bool = True
+
+
+_DEFERRED_SUBAGENT_SUPPORT: dict[RuntimeActionType, RuntimeActionSupportDescriptor] = {
+    RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST,
+        support_status="deferred",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="evidence-only or direct-dispatch unsupported/deferred",
+        evidence_requirements="safe tool/status/hash metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 child tool ownership",
+        add_handler_now=False,
+    ),
+    RuntimeActionType.SUBAGENT_CHILD_RESULT: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_CHILD_RESULT,
+        support_status="deferred",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="evidence-only or direct-dispatch unsupported/deferred",
+        evidence_requirements="safe result status/count/hash metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 child result contract",
+        add_handler_now=False,
+    ),
+    RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION,
+        support_status="deferred",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="explicit deferred; no parent adjudication behavior",
+        evidence_requirements="safe decision/disposition metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 adjudication plan",
+        add_handler_now=False,
+    ),
+    RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_CHILD_MEMORY_REQUEST,
+        support_status="deferred",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="reject/defer evidence-only; never write MemoryStore",
+        evidence_requirements="safe hashes/counts/reason only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 memory boundary",
+        add_handler_now=False,
+    ),
+    RuntimeActionType.SUBAGENT_CHILD_BATCH_MEMORY: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_CHILD_BATCH_MEMORY,
+        support_status="deferred",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="reserved/deferred; no MemoryStore write",
+        evidence_requirements="safe count/hash/reason only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 batch memory schema",
+        add_handler_now=False,
+    ),
+}
+
+
+def runtime_action_support_status(
+    action_type: RuntimeActionType | str,
+) -> RuntimeActionSupportDescriptor:
+    """Return explicit production/deferred support ownership for an action."""
+    normalized = normalize_action_type(action_type)
+    if isinstance(normalized, RuntimeActionType) and normalized in _DEFERRED_SUBAGENT_SUPPORT:
+        return _DEFERRED_SUBAGENT_SUPPORT[normalized]
+    if isinstance(normalized, RuntimeActionType):
+        return RuntimeActionSupportDescriptor(
+            action_type=normalized,
+            support_status="production",
+            production_supported=True,
+            reserved=False,
+            expected_behavior="requires registered handler when production-supported",
+            evidence_requirements="handler-specific safe evidence",
+            raw_child_payload_allowed=False,
+            add_handler_now=True,
+        )
+    raise ValueError(f"unknown RuntimeActionType: {action_type!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeActionResult:
     """RuntimeAction 的不可变结果。
 

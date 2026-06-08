@@ -386,6 +386,14 @@ def handle_inline_confirmation_reply(
             memory_root=fallback_memory_root,
         )
         _clear_pending_and_save(state, save_runtime_checkpoint)
+        if getattr(fallback, "dispatched", 0) == 0 and any(
+            warning == "durable_memory_root_not_configured"
+            for warning in getattr(fallback, "warnings", ())
+        ):
+            return (
+                "未收到确认回复，pending_review fallback 已跳过："
+                "durable_memory_root_not_configured；未写入正式 procedural store。"
+            )
         return (
             "未收到确认回复，已 fallback 到 pending_review；"
             f"未写入正式 procedural store（dispatched={fallback.dispatched}）。"

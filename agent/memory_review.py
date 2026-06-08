@@ -42,25 +42,24 @@ from agent.memory_store import (
     MemoryStoreProtocol,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 路径解析（与 memory.py _resolve_memory_root 保持一致）
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _resolve_memory_root() -> str:
+def _resolve_memory_root() -> str | None:
     """解析 memory 根目录路径。
 
     优先级与 FilesystemMemoryStore / memory.py:_resolve_memory_root 一致：
-    MEMORY_STORE_ROOT > MEMORY_ROOT > ~/.my-first-agent/memory
-    """
-    import os as _os
+    MEMORY_STORE_ROOT > MEMORY_ROOT。未显式配置时 fail closed。
 
-    return (
-        _os.getenv("MEMORY_STORE_ROOT")
-        or _os.getenv("MEMORY_ROOT")
-        or str(Path.home() / ".my-first-agent" / "memory")
-    )
+    Pending review 只能读取明确配置或显式传入的 durable root；这里不再回退
+    到 HOME，避免 session 启动提示或 review CLI 在未配置时触碰真实用户目录。
+    """
+    from agent.memory_fs_store import resolve_configured_memory_root
+
+    root = resolve_configured_memory_root()
+    return str(root) if root is not None else None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -122,6 +121,8 @@ def list_pending_proposals(
     格式损坏的 JSON 文件会被跳过并报告 warning，不会中断整个扫描。
     """
     root = memory_root or _resolve_memory_root()
+    if root is None:
+        return []
     pending_dir = Path(root) / "_pending"
     if not pending_dir.exists():
         return []
@@ -459,7 +460,8 @@ def run_pending_review_cli(
                 result = accept_pending_proposal(proposal, store)
                 if result.status is MemoryStoreApplyStatus.APPLIED:
                     summary["accepted"] += 1
-                    print(f"  ✓ 已接受并写入 store。record_id={result.record.id if result.record else 'N/A'}")
+                    record_id = result.record.id if result.record else "N/A"
+                    print(f"  ✓ 已接受并写入 store。record_id={record_id}")
                 else:
                     summary["errors"].append(
                         f"accept 失败 ({proposal.filepath.name}): {result.message}"
@@ -492,7 +494,8 @@ def run_pending_review_cli(
                 result = edit_and_accept_pending_proposal(proposal, edited, store)
                 if result.status is MemoryStoreApplyStatus.APPLIED:
                     summary["edited"] += 1
-                    print(f"  ✓ 已编辑并写入 store。record_id={result.record.id if result.record else 'N/A'}")
+                    record_id = result.record.id if result.record else "N/A"
+                    print(f"  ✓ 已编辑并写入 store。record_id={record_id}")
                 else:
                     summary["errors"].append(
                         f"edit 失败 ({proposal.filepath.name}): {result.message}"

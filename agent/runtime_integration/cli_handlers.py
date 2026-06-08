@@ -17,6 +17,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.cli_commands import (
+    detect_forget_memory,
+    detect_show_memories,
+    detect_show_subagents,
+    render_memory_forget_not_found,
+    render_memory_forget_result,
+    render_memory_list,
+    render_subagent_list,
+)
+from agent.display_events import (
+    memory_forgotten_event,
+    memory_list_event,
+    subagent_list_event,
+)
+from agent.runtime_event_safety import safe_emit_runtime_event
+from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
 
 class CliShowMemoriesHandler:
     """show memories CLI command 的 dispatcher handler。
@@ -67,3 +84,149 @@ class CliShowSubagentsHandler:
             observed_call=None,
             evidence_extra={"disposition": "completed", "descriptor_count": len(descriptors)},
         )
+
+
+def handle_cli_meta_command(
+    user_input: str,
+    *,
+    read_only_dispatcher: Any,
+    mutating_dispatcher: Any,
+    memory_runtime: Any,
+    on_runtime_event: Any = None,
+) -> str | None:
+    """Handle existing CLI meta-commands outside core.py.
+
+    Scope is intentionally limited to the three real commands that already
+    existed before hardening: show memories, forget memory, and show subagents.
+    This does not add update/correction commands or any Sub-agent feature work.
+    """
+    if detect_show_memories(user_input):
+        result = read_only_dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.CLI_SHOW_MEMORIES,
+            source="core.chat",
+            parent_trace_id="",
+            payload={"user_input": user_input},
+        ))
+        records = result.payload.get("records", ()) if result else ()
+        safe_emit_runtime_event(
+            on_runtime_event,
+            memory_list_event(records),
+            fallback_prefix="\n",
+        )
+        return render_memory_list(records)
+
+    forget_keyword = detect_forget_memory(user_input)
+    if forget_keyword:
+        return _handle_forget_memory_cli(
+            forget_keyword,
+            dispatcher=mutating_dispatcher,
+            memory_runtime=memory_runtime,
+            on_runtime_event=on_runtime_event,
+        )
+
+    if detect_show_subagents(user_input):
+        result = read_only_dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.CLI_SHOW_SUBAGENTS,
+            source="core.chat",
+            parent_trace_id="",
+            payload={"user_input": user_input},
+        ))
+        descriptors = result.payload.get("descriptors", ()) if result else ()
+        safe_emit_runtime_event(
+            on_runtime_event,
+            subagent_list_event(descriptors),
+            fallback_prefix="\n",
+        )
+        return render_subagent_list(descriptors)
+
+    return None
+
+
+def _handle_forget_memory_cli(
+    forget_keyword: str,
+    *,
+    dispatcher: Any,
+    memory_runtime: Any,
+    on_runtime_event: Any = None,
+) -> str:
+    def forget_via_dispatcher(record_id: str) -> bool:
+        result = dispatcher.route(RuntimeActionRequest(
+            action_type=RuntimeActionType.MEMORY_FORGET,
+            source="core.chat",
+            parent_trace_id="",
+            payload={"record_id": record_id},
+        ))
+        return bool(result.payload.get("forgotten")) if result else False
+
+    if forget_keyword.lower().startswith("id:"):
+        record_id = forget_keyword[3:].strip()
+        if forget_via_dispatcher(record_id):
+            safe_emit_runtime_event(
+                on_runtime_event,
+                memory_forgotten_event(1, keyword=f"id:{record_id}"),
+                fallback_prefix="\n",
+            )
+            remaining = memory_runtime.list_records()
+            safe_emit_runtime_event(
+                on_runtime_event,
+                memory_list_event(remaining),
+                fallback_prefix="\n",
+            )
+            return f"已移除记忆（ID: {record_id}）。"
+
+        records = memory_runtime.list_records()
+        prefix_matches = [
+            record for record in records
+            if str(getattr(record, "id", "")).startswith(record_id)
+        ]
+        if len(prefix_matches) == 1:
+            matched_id = prefix_matches[0].id
+            if forget_via_dispatcher(matched_id):
+                safe_emit_runtime_event(
+                    on_runtime_event,
+                    memory_forgotten_event(1, keyword=f"id:{record_id}"),
+                    fallback_prefix="\n",
+                )
+                remaining = memory_runtime.list_records()
+                safe_emit_runtime_event(
+                    on_runtime_event,
+                    memory_list_event(remaining),
+                    fallback_prefix="\n",
+                )
+                return f"已移除记忆（ID: {record_id} → {matched_id}）。"
+            return f"移除记忆失败（ID: {matched_id}）。"
+        if len(prefix_matches) > 1:
+            matched_ids = [
+                str(getattr(record, "id", "?"))[:12] for record in prefix_matches
+            ]
+            return (
+                f"前缀「{record_id}」匹配到 {len(prefix_matches)} 条记忆，"
+                f"无法确定要删除哪一条。请使用更长的 ID 前缀重试。\n"
+                f"匹配到的 ID：{', '.join(matched_ids)}"
+            )
+        return f"未找到 ID 为「{record_id}」的记忆。"
+
+    records = memory_runtime.list_records()
+    matched = [
+        record for record in records
+        if forget_keyword.lower() in getattr(record, "content", "").lower()
+    ]
+    if not matched:
+        return render_memory_forget_not_found(forget_keyword)
+
+    removed_count = 0
+    for record in matched:
+        if forget_via_dispatcher(record.id):
+            removed_count += 1
+    safe_emit_runtime_event(
+        on_runtime_event,
+        memory_forgotten_event(removed_count, keyword=forget_keyword),
+        fallback_prefix="\n",
+    )
+    remaining = memory_runtime.list_records()
+    safe_emit_runtime_event(
+        on_runtime_event,
+        memory_list_event(remaining),
+        fallback_prefix="\n",
+    )
+    return render_memory_forget_result(forget_keyword, removed_count)

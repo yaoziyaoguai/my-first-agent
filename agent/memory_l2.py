@@ -21,10 +21,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agent.memory import _build_t1_pending_dict
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # L2 Trigger Guard — RFC §11.3 触发约束
@@ -112,10 +112,7 @@ class L2TriggerGuard:
         if self._is_task_boundary(user_input):
             return True
 
-        if self._turn_count >= self.turn_threshold:
-            return True
-
-        return False
+        return self._turn_count >= self.turn_threshold
 
     def mark_triggered(self) -> None:
         """L2 extraction 触发后调用。
@@ -176,6 +173,11 @@ def run_l2_inline_extraction(
     从 conversation segment 中提取 memory candidate，
     按 RFC §10.4 governance 矩阵路由到 T1/T2/T3。
 
+    Post-Memory hardening boundary:
+        这是显式直调 helper，不是 ``core.chat()`` 的 automatic production path。
+        automatic L2 触发只能返回 skipped/deferred safe summary，不能经由本
+        helper 构造 standalone store、apply T2 或持久化 T1 pending。
+
     Args:
         messages: 当前 session 的对话消息（通常为最近 N 条）
         store: MemoryStoreProtocol 实例
@@ -195,6 +197,7 @@ def run_l2_inline_extraction(
     """
     import os as _os
 
+    from agent.memory_contracts import MemoryScope, MemorySensitivity
     from agent.memory_extraction import (
         ExtractionInput,
         create_extractor,
@@ -208,7 +211,6 @@ def run_l2_inline_extraction(
         MemoryOperationType,
         build_memory_audit_summary,
     )
-    from agent.memory_contracts import MemoryScope, MemorySensitivity
     from agent.memory_store import MemoryStoreApplyStatus
 
     if summary is None:
@@ -268,7 +270,7 @@ def run_l2_inline_extraction(
     #   - T3: confidence < 0.6
     #   - T1: confidence ≥ 0.8 的 episodic，或 ≥ 0.6 的 non-episodic
 
-    MAX_T2_PER_SESSION = 3
+    max_t2_per_session = 3
     t2_count = 0
     t1_proposals: list[dict] = []
 
@@ -297,7 +299,7 @@ def run_l2_inline_extraction(
         # ── Episodic routing ─────────────────────────────────────────
         # T2: episodic + confidence [0.6, 0.8)
         if 0.6 <= confidence < 0.8:
-            if t2_count >= MAX_T2_PER_SESSION:
+            if t2_count >= max_t2_per_session:
                 summary["t3_ignored"] += 1
                 continue
 
@@ -363,3 +365,70 @@ def run_l2_inline_extraction(
             summary["errors"].append(f"L2 T1 pending 持久化失败: {exc}")
 
     return summary
+
+
+def maybe_run_l2_inline(
+    messages: list[dict],
+    *,
+    guard: L2TriggerGuard | None = None,
+    model_name: str = "claude-haiku-4-5",
+) -> dict:
+    """Bounded automatic L2 inline orchestration for core.py.
+
+    ``core.py`` must not construct durable stores directly, and this automatic
+    path must not construct a standalone store on its behalf. In this hardening
+    stage L2 productionization stays deferred even when a durable root is
+    configured: no HOME fallback, no write path, no T1 pending persistence, and
+    no raw transcript/path in the returned summary.
+    """
+    from agent.memory_fs_store import resolve_configured_memory_root
+
+    summary: dict[str, Any] = {
+        "source": "l2_inline_extraction",
+        "decision": "skipped",
+        "reason": "",
+        "redacted": True,
+        "total_proposals": 0,
+        "t1_pending": 0,
+        "t2_auto_retained": 0,
+        "t3_ignored": 0,
+        "dedup_hits": 0,
+        "errors": [],
+    }
+    root = resolve_configured_memory_root()
+    if root is None:
+        summary["reason"] = "durable_memory_root_not_configured"
+        _record_l2_skipped(summary["reason"])
+        return summary
+
+    summary["decision"] = "deferred"
+    summary["reason"] = "l2_inline_automatic_path_deferred"
+    summary.update(_safe_l2_root_metadata(root))
+    _record_l2_skipped(summary["reason"])
+    return summary
+
+
+def _safe_l2_root_metadata(root: Path) -> dict[str, Any]:
+    from agent.memory import _safe_memory_root_metadata
+
+    return _safe_memory_root_metadata(root)
+
+
+def _record_l2_skipped(reason: str) -> None:
+    try:
+        from agent.evidence_recorder import record_memory_evidence
+
+        record_memory_evidence(
+            event_type="memory.proposal_skipped",
+            operation="extract",
+            phase="decision",
+            status="skipped",
+            source_type="system",
+            decision="skipped",
+            policy_path="l2_inline_extraction_deferred",
+            reason=reason,
+            count=0,
+            raw_fields={},
+        )
+    except Exception:
+        pass

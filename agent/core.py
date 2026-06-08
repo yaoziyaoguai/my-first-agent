@@ -8,12 +8,6 @@ from typing import Any
 from uuid import uuid4
 
 import agent.tools  # noqa: F401  触发所有工具注册
-from agent import protocol_debug as _protocol_debug
-
-# B7: skill_state 提取 _skill_selected_by_model / _active_skill 到独立模块，
-# 打破 agent.core ↔ agent.loop 和 agent.core ↔ agent.skill_system.skill_tool
-# 两对直接模块循环。core/loop/skill_tool 现在共享 import 本模块，无循环。
-from agent import skill_state as _skill_state
 
 # ⛔ DEPRECATED: _looks_like_* re-exports 仅为向后兼容保留。
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
@@ -22,26 +16,18 @@ from agent import skill_state as _skill_state
 # Why kept: 旧测试和 dogfood scripts 仍通过 core._looks_like_* 引用。
 # Removal criteria: 所有外部引用迁移到 agent.cli_commands 直 import 后移除。
 # Sunset: v0.4+。不新增引用到此别名。
-from agent.cli_commands import (  # noqa: F401  — deprecated backward-compat re-exports
+from agent import cli_commands as _cli_commands
+from agent import protocol_debug as _protocol_debug
+
+# B7: skill_state 提取 _skill_selected_by_model / _active_skill 到独立模块，
+# 打破 agent.core ↔ agent.loop 和 agent.core ↔ agent.skill_system.skill_tool
+# 两对直接模块循环。core/loop/skill_tool 现在共享 import 本模块，无循环。
+from agent import skill_state as _skill_state
+from agent.cli_commands import (
     detect_delegate_to_subagent as _looks_like_delegate_to_subagent,
 )
 from agent.cli_commands import (
-    detect_forget_memory as _looks_like_forget_memory,
-)
-from agent.cli_commands import (
     detect_nl_delegation as _looks_like_nl_delegation,
-)
-from agent.cli_commands import (
-    detect_show_memories as _looks_like_show_memories,
-)
-from agent.cli_commands import (
-    detect_show_subagents as _looks_like_show_subagents,
-)
-from agent.cli_commands import (
-    render_memory_forget_not_found,
-    render_memory_forget_result,
-    render_memory_list,
-    render_subagent_list,
 )
 from agent.confirm_handlers import (
     ConfirmationContext,
@@ -66,15 +52,12 @@ from agent.display_events import (
     control_message,
     memory_blocked_event,
     memory_confirmation_requested_event,
-    memory_forgotten_event,
     memory_injected_event,
-    memory_list_event,
     memory_stored_event,
     plan_confirmation_requested,
     render_runtime_event_for_cli,
     runtime_display_event,
     state_inconsistency_reset_event,
-    subagent_list_event,
     tool_requested,
 )
 from agent.logger import log_event
@@ -131,6 +114,10 @@ from agent.transitions import (
     validate_task_transition,
 )
 from config import MAX_CONTINUE_ATTEMPTS, MODEL_NAME
+
+_looks_like_show_memories = _cli_commands.detect_show_memories
+_looks_like_forget_memory = _cli_commands.detect_forget_memory
+_looks_like_show_subagents = _cli_commands.detect_show_subagents
 
 
 def _record_core_evidence(
@@ -242,7 +229,7 @@ def _is_explicit_l2_trigger(text: str) -> bool:
 # 新增 CLI 命令的 detect/render 逻辑应直接写入 agent/cli_commands.py。
 
 
-def _maybe_run_l2_inline(state) -> None:
+def _maybe_run_l2_inline(state) -> dict | None:
     """Phase 5b L2 inline extraction thin hook。
 
     从 state.conversation.messages 中取最近消息，
@@ -254,25 +241,16 @@ def _maybe_run_l2_inline(state) -> None:
     当前 L2 extraction 结果未注入 prompt builder ——
     这是 Phase 5b foundation，recall/injection 留待后续。
     """
-    try:
-        from agent.memory_fs_store import FilesystemMemoryStore
-        from agent.memory_l2 import run_l2_inline_extraction
+    from agent.memory_l2 import maybe_run_l2_inline
 
-        messages = state.conversation.messages
-        # 取最近 20 条消息作为 L2 inline extraction 的 segment
-        recent = list(messages[-20:]) if len(messages) > 20 else list(messages)
-        if not recent:
-            return
-
-        store = FilesystemMemoryStore()
-        run_l2_inline_extraction(
-            recent,
-            store,
-            guard=_l2_trigger_guard,
-        )
-    except Exception:
-        # L2 extraction 失败不应影响 conversation flow
-        pass
+    messages = state.conversation.messages
+    recent = list(messages[-20:]) if len(messages) > 20 else list(messages)
+    if not recent:
+        return None
+    return maybe_run_l2_inline(
+        recent,
+        guard=_l2_trigger_guard,
+    )
 
 # 统一会话状态：
 # 先把 system prompt 放进 runtime，
@@ -892,158 +870,21 @@ def chat(
     # 后续新增 CLI 命令应在 cli_commands.py 新增 detect/render 函数，
     # 并在 core.chat() 入口处新增薄调用块。
     #
-    # ── Memory management CLI commands ──────────────────────────────────────
-    # 检测由 agent/cli_commands 完成（纯字符串匹配）；服务调用（memory_runtime）
-    # 留在 core.chat 内，不经过 command router。渲染由 cli_commands 的 render 函数完成。
-    #
-    # CLI-ONLY (CommandCategory.READ_ONLY): show memories
-    # Loop 4: 走统一 dispatcher 路径获取 records（替代直接调用 _memory_runtime）
-    if _looks_like_show_memories(user_input):
-        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-        _req = RuntimeActionRequest(
-            action_type=RuntimeActionType.CLI_SHOW_MEMORIES,
-            source="core.chat",
-            parent_trace_id="",
-            payload={"user_input": user_input},
-        )
-        _result = _p1_dispatcher.route(_req)
-        records = _result.payload.get("records", ()) if _result else ()
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            memory_list_event(records),
-            fallback_prefix="\n",
-        )
-        return render_memory_list(records)
+    # ── CLI meta-command thin dispatch ──────────────────────────────────────
+    # U4 hardening: core.py 只保留一次薄调用。真实存在的 show memories /
+    # forget memory / show subagents 逻辑由 runtime_integration.cli_handlers
+    # 承载；不新增 update/correction CLI。
+    from agent.runtime_integration.cli_handlers import handle_cli_meta_command
 
-    # WP-A：forget / 忘记记忆 CLI meta-command。
-    # Loop 2.1: forget 操作通过 dispatcher (MEMORY_FORGET) 统一证据链，
-    # 不再直接调用 _memory_runtime.remove_record()。
-    #
-    # CLI-ONLY (CommandCategory.MUTATING): forget memory — 绕过 confirmation policy
-    # 直接执行移除（用户已明确表达 forget 意图，无需二次确认）。
-    forget_keyword = _looks_like_forget_memory(user_input)
-    if forget_keyword:
-
-        def _forget_via_dispatcher(record_id: str) -> bool:
-            """通过 dispatcher 执行 memory forget，返回是否成功移除。"""
-            from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-            _req = RuntimeActionRequest(
-                action_type=RuntimeActionType.MEMORY_FORGET,
-                source="core.chat",
-                parent_trace_id="",
-                payload={"record_id": record_id},
-            )
-            _result = _phase1_dispatcher.route(_req)
-            return bool(_result.payload.get("forgotten")) if _result else False
-
-        # 支持按 ID 删除：forget id:<record_id>（精确匹配 + 短 ID 前缀匹配）
-        #
-        # 为什么显示短 ID 就必须支持短 ID 前缀匹配：
-        # - show memories 输出只显示前8位短 ID，用户会自然复制使用
-        # - 如果 forget 只支持完整 ID（UUID），用户永远无法用显示出来的 ID 删除
-        # - 前缀匹配解决了这个距离问题
-        #
-        # 为什么前缀冲突必须 ambiguity 而不能误删：
-        # - 8 位前缀在理论上可能碰撞（虽然实际中极少见）
-        # - 误删是静默数据丢失——这对 memory governance 不可接受
-        # - ambiguity 提示要求用户明确指定更多前缀位，保持用户意图为最终仲裁者
-        if forget_keyword.lower().startswith("id:"):
-            record_id = forget_keyword[3:].strip()
-            # Step 1: 尝试精确匹配（完整 ID） — 通过 dispatcher
-            if _forget_via_dispatcher(record_id):
-                _safe_emit_runtime_event(
-                    on_runtime_event,
-                    memory_forgotten_event(1, keyword=f"id:{record_id}"),
-                    fallback_prefix="\n",
-                )
-                remaining = _mem_rt.list_records()
-                _safe_emit_runtime_event(
-                    on_runtime_event,
-                    memory_list_event(remaining),
-                    fallback_prefix="\n",
-                )
-                return f"已移除记忆（ID: {record_id}）。"
-
-            # Step 2: 精确匹配失败 → 尝试前缀匹配（支持短 ID）
-            records = _mem_rt.list_records()
-            prefix_matches = [
-                r for r in records
-                if str(getattr(r, "id", "")).startswith(record_id)
-            ]
-            if len(prefix_matches) == 1:
-                matched_id = prefix_matches[0].id
-                if _forget_via_dispatcher(matched_id):
-                    _safe_emit_runtime_event(
-                        on_runtime_event,
-                        memory_forgotten_event(1, keyword=f"id:{record_id}"),
-                        fallback_prefix="\n",
-                    )
-                    remaining = _mem_rt.list_records()
-                    _safe_emit_runtime_event(
-                        on_runtime_event,
-                        memory_list_event(remaining),
-                        fallback_prefix="\n",
-                    )
-                    return f"已移除记忆（ID: {record_id} → {matched_id}）。"
-                return f"移除记忆失败（ID: {matched_id}）。"
-            elif len(prefix_matches) > 1:
-                # 前缀匹配到多条记录 → ambiguity，不误删
-                matched_ids = [str(getattr(r, "id", "?"))[:12] for r in prefix_matches]
-                return (
-                    f"前缀「{record_id}」匹配到 {len(prefix_matches)} 条记忆，"
-                    f"无法确定要删除哪一条。请使用更长的 ID 前缀重试。\n"
-                    f"匹配到的 ID：{', '.join(matched_ids)}"
-                )
-            # Step 3: 前缀也没有匹配 → not found
-            return f"未找到 ID 为「{record_id}」的记忆。"
-        # 否则按 content 关键词匹配
-        records = _mem_rt.list_records()
-        matched = [
-            r for r in records
-            if forget_keyword.lower() in getattr(r, "content", "").lower()
-        ]
-        if not matched:
-            return render_memory_forget_not_found(forget_keyword)
-        removed_count = 0
-        for r in matched:
-            if _forget_via_dispatcher(r.id):
-                removed_count += 1
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            memory_forgotten_event(removed_count, keyword=forget_keyword),
-            fallback_prefix="\n",
-        )
-        remaining = _mem_rt.list_records()
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            memory_list_event(remaining),
-            fallback_prefix="\n",
-        )
-        return render_memory_forget_result(forget_keyword, removed_count)
-
-    # show subagents CLI meta-command：检测 → registry lookup → 渲染。
-    # 渲染由 cli_commands.render_subagent_list 完成。
-    #
-    # CLI-ONLY (CommandCategory.READ_ONLY): show subagents
-    # 注意：descriptors 来自 agent/subagent_system/descriptors/——显式 DEMO-ONLY。
-    # 产品路径不应依赖 test fixtures（RT-07）。
-    # Loop 4: 走统一 dispatcher 路径获取 descriptors（替代直接调用 SubAgentRegistry）
-    if _looks_like_show_subagents(user_input):
-        from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-        _req = RuntimeActionRequest(
-            action_type=RuntimeActionType.CLI_SHOW_SUBAGENTS,
-            source="core.chat",
-            parent_trace_id="",
-            payload={"user_input": user_input},
-        )
-        _result = _p1_dispatcher.route(_req)
-        descriptors = _result.payload.get("descriptors", ()) if _result else ()
-        _safe_emit_runtime_event(
-            on_runtime_event,
-            subagent_list_event(descriptors),
-            fallback_prefix="\n",
-        )
-        return render_subagent_list(descriptors)
+    cli_result = handle_cli_meta_command(
+        user_input,
+        read_only_dispatcher=_p1_dispatcher,
+        mutating_dispatcher=_phase1_dispatcher,
+        memory_runtime=_mem_rt,
+        on_runtime_event=on_runtime_event,
+    )
+    if cli_result is not None:
+        return cli_result
 
     # delegate to subagent CLI meta-command：检测 → dispatcher-mediated 委托 → 渲染。
     # Loop 3.2a: delegation 走统一 dispatcher 路径（SUBAGENT_DELEGATE_L1），

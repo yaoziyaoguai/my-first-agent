@@ -1,110 +1,52 @@
 # First Agent 文档入口
 
-本文档为新开发者、架构审计者和 Coding Agent 提供稳定的阅读入口。
+本文档只保留当前开发所需入口。历史计划、旧审计、旧 dogfood 和错误方向设计不作为当前依据。
 
----
+## 必读顺序
 
-## 从这里开始（必读）
-
-1. **[PROJECT_STATUS.md](PROJECT_STATUS.md)** — 当前项目状态：capability 状态、已知 issues、活跃约束、config 规则、推荐下一步
-2. **[PROGRESS_LEDGER.md](PROGRESS_LEDGER.md)** — 进度账本：关键 milestones、已修复 bugs、P3 积压
-3. **[dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md)** — 工程流程、loop 入口点、deferred/stop 条件
-
-Coding Agent 每次启动必须先读上述三个文件。
-
----
-
-## 当前 Dogfood
-
-| 文档 | 说明 |
-|------|------|
-| [dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md](dogfood/real-api-full-dogfood-sweep-report-2026-05-27.md) | 最新 real API dogfood 报告（19 PASS / 1 CONCERN / 0 FAIL） |
-| [plans/real-api-full-dogfood-remediation-plan-2026-05-26.md](plans/real-api-full-dogfood-remediation-plan-2026-05-26.md) | ISSUE-001/002 修复记录 |
-
----
-
-## 运行时宪法
-
-| 文档 | 说明 |
-|------|------|
-| [real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md](real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) | 统一 runtime flow 契约、branch points、classification rules |
-
----
-
-## Config
-
-| 文件 | 说明 |
-|------|------|
-| `config/config.yaml` | 当前推荐配置入口（本地可含 API key，不可 commit） |
-| `config/config.example.yaml` | 配置参考（fake 安全默认） |
-| `config/examples/` | Kimi/GLM/fake 等 provider 示例 |
-
-**Legacy 路径（不推荐）**：`FIRST_AGENT_PROVIDER_PROFILE`、`MY_FIRST_AGENT_LLM_PROVIDER`、`config/provider_profiles.yaml`。
-
----
-
-## Canonical Specs
-
-| 文档 | 领域 |
-|------|------|
-| [rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md) | Memory 系统 |
-| [rfc/SKILL_CANONICAL_RFC.md](rfc/SKILL_CANONICAL_RFC.md) | Skill 系统 |
-| [rfc/SUBAGENT_CANONICAL_RFC.md](rfc/SUBAGENT_CANONICAL_RFC.md) | SubAgent 系统 |
-
----
-
-## 设计契约
-
-| 文档 | 说明 |
-|------|------|
-| [design/fake-provider-scripted-scenario-contract.md](design/fake-provider-scripted-scenario-contract.md) | FakeProvider 脚本化场景契约 |
-| [design/config-legacy-sunset-contract.md](design/config-legacy-sunset-contract.md) | Legacy 配置路径 sunset 时间线 |
-| [design/dogfood-harness-contract.md](design/dogfood-harness-contract.md) | Dogfood harness 契约 |
-| [design/run-summary-compact-report.md](design/run-summary-compact-report.md) | Run summary 报告 |
-
----
-
-## 工程文档
-
-| 文档 | 说明 |
-|------|------|
-| [dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md) | Auto-run workflow 定义 |
-| [dev/ENGINEERING_WORKFLOW.md](dev/ENGINEERING_WORKFLOW.md) | 工程流程纪律（SDD→TDD→Impl→Review→Debug） |
-
----
-
-## 审计和计划
-
-审计和计划文档数量较多，状态各异。以以下索引为准：
-
-- [audit/README.md](audit/README.md) — 审计文档 active vs historical 分类
-- [plans/README.md](plans/README.md) — 计划文档 active vs historical 分类
-- [dogfood/README.md](dogfood/README.md) — Dogfood 报告 active vs historical 分类
-
----
-
-## Archive
-
-历史文档统一放在 [archive/](archive/) 下，包括：
-
-- `archive/design/` — 历史架构设计
-- `archive/implementation-notes/` — 历史实现笔记
-- `archive/specs/` — 历史 SPEC/TDD
-- `archive/root-stale/` — 根目录移动过来的过期文档
-- `archive/v0.x/` — V0.x 版本记录
-- `archive/refactor/` — 重构历史
-- `archive/llm-provider/` — LLM provider legacy 文档
-- `archive/mcp/` — MCP 历史
-
-**Archive 中的文档不作为当前状态参考。**
-
----
-
-## 术语约定
-
-| 中文 | English | 含义 |
+| 顺序 | 文档 | 用途 |
 |---|---|---|
-| 主代理运行时 | Parent Agent Runtime | 拥有主 loop、状态、模型调用和分派 |
-| 工具注册中心 | ToolRegistry | 工具 authority，决定工具定义、风险、confirmation |
-| 检查点 | Checkpoint | 安全恢复边界 |
-| 人工确认 | Confirmation | 高风险动作的人类控制边界 |
+| 1 | [PROJECT_STATUS.md](PROJECT_STATUS.md) | 当前状态、实现地图、边界和下一步 |
+| 2 | [00-overview/CURRENT_CAPABILITY_STATUS.zh.md](00-overview/CURRENT_CAPABILITY_STATUS.zh.md) | 当前能力一页版 |
+| 3 | [06-audit/CURRENT_AUDIT_STATUS.zh.md](06-audit/CURRENT_AUDIT_STATUS.zh.md) | 当前审计口径 |
+| 4 | [dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md) | 自动化工程流程和 hard stops |
+| 5 | [PROGRESS_LEDGER.md](PROGRESS_LEDGER.md) | 历史里程碑账本，仅作追溯 |
+
+## 当前实现源头
+
+| 能力 | 当前 source of truth |
+|---|---|
+| Runtime baseline | `main.py`, `agent/core.py`, `agent/loop.py` |
+| Tool/MCP boundary | `agent/tool_runtime_mediator.py`, `agent/tool_executor.py`, `agent/runtime_integration/tool_invoke.py`, `agent/runtime_integration/mcp_tool_orchestrator.py` |
+| Memory v0 | `agent/memory_runtime.py`, `agent/memory_contracts.py`, `agent/evidence_recorder.py` |
+| Skill lifecycle | `agent/skill_system/`, `agent/runtime_integration/skill_lifecycle.py` |
+| Sub-agent v0 | `agent/runtime_integration/subagent_action.py`, `agent/subagent_system/v0_contract.py` |
+| Evidence/logging | `agent/evidence_recorder.py`, `agent/event_log.py`, `agent/log_viewer.py` |
+
+## 配置
+
+| 文件 | 状态 |
+|---|---|
+| `config/config.yaml` | 当前本地配置入口；可含真实 key，但不得 commit |
+| `config/config.example.yaml` | 可提交模板；默认 fake/local |
+| `config/examples/` | 示例配置 |
+
+## 当前文档
+
+| 目录 | 用法 |
+|---|---|
+| [rfc/](rfc/) | Memory / Skill / SubAgent canonical RFC |
+| [design/](design/) | 当前仍有价值的架构设计；以 `PROJECT_STATUS.md` 为准 |
+| [plans/](plans/) | 只保留少量近期计划索引；旧计划不自动执行 |
+| [audit/](audit/) | 审计入口和少量保留审计 |
+| [dogfood/](dogfood/) | 证据材料；不等于当前能力 source of truth |
+| [archive/README.md](archive/README.md) | 历史参考；不得作为当前指令 |
+
+## 当前规则
+
+- archive 文档只能解释历史，不用于恢复旧路线。
+- 不恢复旧 L1/L2 production route。
+- 不新增第二 runtime。
+- child 不直接执行工具/MCP；parent runtime 保持控制。
+- Memory 不做 raw write，不做 auto-adoption。
+- FakeProvider 增长冻结，不把 fake-only 证据写成真实能力。

@@ -1,164 +1,46 @@
-# Current Documentation Map — First Agent
+# Current Documentation Map
 
-**创建**: 2026-06-02 (docs source-of-truth audit)
-**用途**: Coding Agent 的文档导航入口。每次 session 启动后，在所有其他 doc 之前先读 `PROJECT_STATUS.md`，然后按需查阅本文件。
+**最后更新**: 2026-06-10
+**用途**: 给人类维护者和 Coding Agent 一个短的当前文档地图。
 
----
+## Start Here
 
-## 0. V2 Quick Start — BLOCKED
+| 文档 | 状态 | 用途 |
+|---|---|---|
+| [PROJECT_STATUS.md](PROJECT_STATUS.md) | current source of truth | 当前实现地图、边界、授权状态 |
+| [00-overview/CURRENT_CAPABILITY_STATUS.zh.md](00-overview/CURRENT_CAPABILITY_STATUS.zh.md) | current summary | 当前能做什么、不能做什么 |
+| [06-audit/CURRENT_AUDIT_STATUS.zh.md](06-audit/CURRENT_AUDIT_STATUS.zh.md) | current audit entry | 审计口径和冻结项 |
+| [dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md) | workflow | 自动化工程流程 |
+| [PROGRESS_LEDGER.md](PROGRESS_LEDGER.md) | historical ledger | 历史里程碑追溯 |
 
-**当前状态: CORE_CHAT_STABILIZATION_REQUIRED** — 见 `PROJECT_STATUS.md`。
+## Current Implementation Docs
 
-v2 feature 工作**在 Core Chat Stabilization golden E2E (G1-G5) 全部 REAL_USER_VERIFIED 之前不得启动**。
+| 领域 | 当前参考 |
+|---|---|
+| Runtime flow | [real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md](real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md) |
+| Memory | [rfc/MEMORY_CANONICAL_RFC.md](rfc/MEMORY_CANONICAL_RFC.md) |
+| Skill | [rfc/SKILL_CANONICAL_RFC.md](rfc/SKILL_CANONICAL_RFC.md), [design/skill-system-architecture.md](design/skill-system-architecture.md) |
+| SubAgent | [rfc/SUBAGENT_CANONICAL_RFC.md](rfc/SUBAGENT_CANONICAL_RFC.md), [design/subagent-boundary-architecture.md](design/subagent-boundary-architecture.md) |
+| MCP | [design/mcp-architecture.md](design/mcp-architecture.md) |
+| Config | [design/config-legacy-sunset-contract.md](design/config-legacy-sunset-contract.md), [design/unified-project-config-contract.md](design/unified-project-config-contract.md) |
+| FakeProvider | [design/fake-provider-scripted-scenario-contract.md](design/fake-provider-scripted-scenario-contract.md) |
 
-v1 engineering closeout (`docs/releases/v1/first-agent-v1-closeout.md`) 是 HISTORICAL_CLOSEOUT，不是当前 active baseline。部分 claim 已被后续 USER_RECHECK 推翻。
+## Historical Areas
 
-**当前唯一工作方向**: 完成 Core Chat Stabilization 5 条 golden E2E:
-- G1: `python main.py --plain` → hello → quit
-- G2: `python main.py --plain` → read README → summarize entry strategy
-- G3: `python main.py --plain` → request config/config.yaml → must block → safe fallback
-- G4: `python main.py --plain` → demo-note-maker Skill → legal skill tools execute (base read tools preserved)
-- G5: `python main.py --plain` → Ctrl+C twice → graceful exit and session save
+这些目录保留历史证据或旧计划，不能作为当前执行依据：
 
-**Only after** G1-G5 全部 REAL_USER_VERIFIED 或 REAL_PROVIDER_E2E_VERIFIED + 用户抽样确认，才能进入 v2 backlog。
+- [archive/README.md](archive/README.md)
+- [audits/](audits/)
+- [releases/](releases/)
+- [reviews/](reviews/)
+- [handoff/](handoff/)
+- 旧 TUI/B7/B8 计划和 closeout 文档
 
-**当前仍有效的参考文档** (status stabilization 期间):
-| 顺序 | 文档 | 说明 |
-|------|------|------|
-| 1 | `PROJECT_STATUS.md` | **第一优先** — CORE_CHAT_STABILIZATION_REQUIRED 状态、status taxonomy、subsystem classification、golden E2E |
-| 2 | `CURRENT_DOCS.md` | 本文件 — 文档导航 |
-| 3 | `debt/first-agent-v2-priority-backlog.md` | v2 优先项分类 — **BLOCKED until golden E2E exit** |
-| 4 | `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | 统一 runtime flow contract |
-| 5 | `dev/ENGINEERING_WORKFLOW.md` | 工程流程 |
+## Agent Rules
 
-**关键规则**:
-- v1 closeout is HISTORICAL — 以 PROJECT_STATUS.md 当前状态为准
-- 不允许 fake-only close，不允许 focused-tests-only close
-- Ink TUI: FROZEN_PROTOTYPE
-- Textual TUI: CANDIDATE / NOT_PRIMARY
-- Plain CLI: PRIMARY_PATH
-- SubAgent: FROZEN
-- default entry NOT ACTIVATED
-- not product-ready
-
----
-
-## 1. Start Here (必须优先读)
-
-| 优先级 | 文档 | 说明 |
-|--------|------|------|
-| **P0** | `PROJECT_STATUS.md` | 第一优先。当前状态、能力定义 (REAL-EVIDENCE-001..008)、B1-B8 架构分类账、close-out 声明 |
-| **P0** | `PROGRESS_LEDGER.md` | 关键 milestones 历史、commit/date/milestone 映射 |
-| **P0** | `releases/v1/first-agent-v1-closeout.md` | **v1 engineering closeout** — baseline 声明、caveats、gates、v2 handoff |
-| **P0** | `handoff/first-agent-current-stage-close-out-2026-06-02.md` | **FROZEN** 阶段交接声明、future debt list、下次 session 启动指令 |
-| **P1** | `design/first-agent-tui-visual-target-v1.md` | TUI 22 组件映射、6 区域布局合同、data source policy |
-| **P1** | `design/first-agent-tui-design.md` | TUI 设计语言：颜色/token/排版/间距/交互层级 |
-
----
-
-## 2. Current Implementation (活跃实现文档)
-
-### TUI
-| 文档 | 状态 | 说明 |
-|------|------|------|
-| `plans/first-agent-tui-visual-shell-slice-a-plan.md` | **IMPLEMENTED** | Slice A: static visual shell。代码基准: `088e05b` |
-| `plans/first-agent-tui-visual-shell-slice-b-plan.md` | **IMPLEMENTED** (2026-06-02) | Slice B: wire existing safe data into Slice A shell。484/484 TUI tests PASS, tsc clean |
-| `design/b8-interaction-first-workbench-sdd.md` | COMPLETED-WITH-CAVEATS | B8 SDD（取代旧 `b8-ts-tui-workbench-sdd.md`） |
-| `design/b8-input-readiness-validation.md` | DRAFT | IME/paste/multiline readiness。IME: MANUAL_PENDING |
-| `design/runtime-gateway-foundation-sdd.md` | DRAFT | D-04 RuntimeGateway contract + FakeRuntimeAdapter |
-| `design/legacy-dashboard-cleanup-plan.md` | DRAFT | Legacy Dashboard/AutoRun/Project Operations 清理方案 |
-| `roadmap/b8-tui-workbench-roadmap.md` | CURRENT | B8 roadmap M1-M8 |
-| `milestones/b8-interaction-first-workbench-milestones.md` | CURRENT | B8 milestone tracking |
-| `proposals/b8-interaction-first-workbench-proposal.md` | CURRENT | B8 方向变更提案 (Accepted) |
-
-### Agent Runtime
-| 文档 | 状态 | 说明 |
-|------|------|------|
-| `design/SKILL_SYSTEM_SDD.md` | CURRENT | Skill System SDD |
-| `design/skill-system-architecture.md` | CURRENT | Skill 架构 |
-| `design/SUBAGENT_SYSTEM_SDD.md` | CURRENT | SubAgent System SDD |
-| `design/subagent-boundary-architecture.md` | CURRENT | SubAgent boundary |
-| `design/mcp-architecture.md` | CURRENT | MCP 架构 |
-| `design/mcp-real-external-connection-readiness.md` | DRAFT | D-02 MCP external connection (local smoke only) |
-| `design/mcp-real-external-flight-contract.md` | DRAFT | Loop 3.3 Real MCP external flight contract |
-| `design/unified-project-config-contract.md` | CURRENT | 统一配置合同 (取代旧 provider-profile-config-contract) |
-| `design/config-legacy-sunset-contract.md` | CURRENT | Config 遗留 sunset |
-| `design/tool-path-unification-l1.3.md` | IMPLEMENTED | Tool 路径统一 (Loop 1.3) |
-| `design/runtime-decision-spine.md` | IMPLEMENTED | Runtime Decision Spine |
-| `design/advanced-scheduler-contract.md` | DRAFT | Advanced Scheduler SDD |
-| `design/batch-b-scheduler-main-path-injection.md` | DRAFT | Scheduler main-path injection |
-| `real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md` | ACTIVE | 统一 runtime flow contract |
-| `rfc/MEMORY_CANONICAL_RFC.md` | **Canonical** | Memory 权威 RFC |
-| `rfc/SKILL_CANONICAL_RFC.md` | **Canonical** | Skill 权威 RFC |
-| `rfc/SUBAGENT_CANONICAL_RFC.md` | **Canonical** | SubAgent 权威 RFC |
-| `design/entry-command-clarification.md` | IMPLEMENTED (2026-06-03) | 入口命令澄清：`--plain` / `--tui` / `--textual` / `--shell`(deprecated) |
-
----
-
-## 3. Evidence / Audit / Debt
-
-| 文档 | 说明 |
-|------|------|
-| `audit/b1-b8-current-stage-close-out-audit.md` | B1-B8 close-out 审计 (2026-06-02) |
-| `debt/first-agent-open-items.md` | **Unresolved open items** — audit result: AGENT_AUTO=zero, P0/P1/P2=no |
-| `manual-trials/first-agent-user-trial-guide.md` | **User manual trial guide** — 12 trial groups (T-CLI/T-IME/T-PASTE/T-MLINE/T-RESIZE/T-EXIT/T-CONFIG/T-E2E/T-COMBO/T-SHELL/T-FLOW/T-INK)。入口优先级: Plain CLI → Textual TUI → --shell compat → Ink prototype (非 v1 验收) |
-| `debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | Real evidence validation debt (REAL-EVIDENCE-001..008) |
-| `debt/b8-tui-workbench-technical-debt.md` | B8 TUI 技术债务 |
-| `debt/b7-pre-sdd-redline-debt.md` | B7 pre-SDD redline (completed) |
-| `reviews/b8-tui-workbench-completion-review.md` | B8 completion review (2026-06-01) |
-| `reviews/2026-05-29-first-agent-runtime-lab-stage-review.md` | Runtime lab stage review |
-| `dogfood/README.md` | Dogfood 报告索引 |
-| `dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` | **v1 Runtime-First Dogfood** (2026-06-04) — §10 post-remediation re-run: F-001/F-001-ext/F-004/F-005 FIXED_BY_RECHECK, F-002 ACCEPTED_AS_CAVEAT, F-003 FIX_DOC_EXPECTATION. All findings terminal. |
-| `dogfood/v1-runtime-first-synthetic-user-dogfood-plan.md` | v1 Runtime-First Dogfood plan (28 能力清单, 17 journey 设计) |
-| `debt/v1-runtime-first-synthetic-user-dogfood-findings.md` | **v1 Runtime-First Dogfood Findings** (2026-06-04) — 5 findings + 8 gaps + §9 post-remediation re-run verification |
-| `dogfood/v1-synthetic-user-dogfood-report.md` | **v1 Synthetic User Dogfood** (prior evidence) — HOTFIX_DECISION_REQUIRED |
-| `dogfood/v1-synthetic-user-dogfood-plan.md` | v1 Synthetic User Dogfood plan (prior evidence) |
-| `dogfood/GLOBAL_REAL_API_DOGFOOD_REPORT.md` | Global real API dogfood report |
-| `debt/v1-synthetic-user-dogfood-findings.md` | **v1 Dogfood Findings** (prior evidence) — F-001 P0: config/config.yaml read not blocked |
-| **AGENT_DOGFOOD_AUTO Suite** | **COMPLETE** (2026-06-03) — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected |
-
----
-
-## 4. Historical / Superseded (只能作为历史参考)
-
-这些文档**不能**作为当前实现 source of truth：
-
-| 目录/文档 | 原因 | 替代文档 |
-|-----------|------|---------|
-| `archive/` | 全量历史文档 (15 子目录) | 见各子目录 README |
-| `design/b8-ts-tui-workbench-sdd.md` | 旧 B8 SDD (信息展示中心方向) | `design/b8-interaction-first-workbench-sdd.md` |
-| `design/provider-profile-config-contract.md` | 已取代 | `design/unified-project-config-contract.md` |
-| `audits/` (plural) | 所有 5 个审计已被 close-out 覆盖 | `audit/b1-b8-current-stage-close-out-audit.md` |
-| `dogfood/scratch/` | 临时草稿 | — |
-| `rfc/archived/` | 已并入 canonical RFC | `rfc/MEMORY_CANONICAL_RFC.md` |
-| `00-overview/` `01-getting-started/` `02-architecture/` `05-testing-dogfood/` `06-audit/` | 旧 overlay 结构，仍当前但部分内容可能过期 | 以 `PROJECT_STATUS.md` 为准 |
-| `learning/` | 历史 lesson learned | — |
-| `releases/legacy/RELEASE_NOTES_v0.*.md` | v0 阶段发布记录，已从根目录迁移 | `releases/v1/first-agent-v1-closeout.md` (v1 baseline) |
-
----
-
-## 5. Rules for Coding Agent
-
-当 Coding Agent 读文档时，必须遵守以下规则：
-
-1. **不要重开 current-stage close-out** — `PROJECT_STATUS.md` 标记 FROZEN，不进入 B9
-2. **不要把 future debt 当 current blocker** — `debt/REAL_EVIDENCE_VALIDATION_DEBT.md` 是未来债，不是当前 P0
-3. **不要把 fake/local 当成 real** — TUI 所有 fake/local 标记不可移除，不能写成 product-ready
-4. **不要恢复 Dashboard / AutoRun / Project Operations 为主线** — 这些是 legacy，保留但不在当前入口
-5. **不要读 .env / 打印 / 提交 secret** — 安全红线
-6. **不要激活 TUI default entry** — `npm start` 默认入口为 `TuiShell`（Ink visual shell prototype）。`WorkbenchLayout` 仅通过 `--legacy`/`--workbench` flag 访问。TuiShell 仍然是 prototype/visual experiment，非 v1 验收路径。
-7. **如果 PROJECT_STATUS.md 与其他 doc 冲突，以 PROJECT_STATUS.md 为准**
-8. **archive/ 只能作为历史参考，不能作为当前指令**
-
----
-
-## 6. 常见任务快速入口
-
-| 任务 | 先读 |
-|------|------|
-| 实现 TUI 新功能 | `PROJECT_STATUS.md` → `design/first-agent-tui-visual-target-v1.md` → `plans/first-agent-tui-visual-shell-slice-a-plan.md` |
-| 修复 TUI bug | `PROJECT_STATUS.md` → 相关 Slice plan → `debt/b8-tui-workbench-technical-debt.md` |
-| 新增 runtime capability | `PROJECT_STATUS.md` → 相关 Canonical RFC → 相关 design doc |
-| Dogfood 验证 | `dogfood/README.md` → 最新 sweep report → `PROJECT_STATUS.md` REAL-EVIDENCE 表 |
-| 架构变更 | `PROJECT_STATUS.md` → 相关 Canonical RFC → `handoff/` close-out doc |
-| 文档清理 | 本文件 → `PROJECT_STATUS.md` → `archive/README.md` |
+- 如果 `PROJECT_STATUS.md` 与其他文档冲突，以 `PROJECT_STATUS.md` 为准。
+- 不把 dogfood、旧 closeout 或 archive 文档当成当前 backlog。
+- 不恢复旧 L1/L2 production route。
+- 不恢复 direct tool/MCP execution。
+- 不新增 raw memory write、auto-adoption 或第二 runtime。
+- 文档清理时优先删除旧上下文；代码删除必须先做引用和测试证明。

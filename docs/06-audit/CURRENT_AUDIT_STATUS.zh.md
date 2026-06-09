@@ -1,95 +1,41 @@
 # Current Audit Status
 
-这篇文档是当前审计状态入口，记录项目整体健康度和各 Area 的当前审计结论，方便 push 前快速判断。
-
-不替代独立审计报告，也不作为 tag/release 授权。
-
-**事实源**：以当前代码、最新 commits 和 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md) 为准。archive docs 不是当前入口。
+当前审计入口。事实源以 [Project Status](../PROJECT_STATUS.md) 和 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md) 为准。archive docs 不是当前入口。
 
 ## 总体结论
 
-Status: **Active — Source-of-Truth Repair** — 基于 2026-05-27 全局只读审计修复文档冲突和 config 安全边界。
+Status: **Active — repository cleanup / source-of-truth repair**。
 
-- ✅ `real-api-dogfood-smoke`：20 cases，19 non-failing / 1 CONCERN / 0 FAIL（kimi-k2.5, 2026-05-27）。
-- 🟡 `developer prototype / developer-dogfood`：核心功能可用，interactive path 覆盖不足。不可标 user-usable。
-- 🟡 `evidence hardening needed`：dogfood 多数是 direct provider smoke，不是完整 runtime E2E。
-- ❌ `broadly user-usable agent`：不在当前 scope。
+- 当前阶段是 **developer prototype / developer-dogfood**。
+- 当前代码主线是 `main.py → agent/core.py → agent/loop.py`。
+- 工具主线是 `ToolRuntimeMediator → tool_executor`；`TOOL_INVOKE` dispatcher path 只保留 evidence-only marker。
+- Memory v0、Skill lifecycle、Sub-agent v0 已有当前实现和测试保护网，清理时不得破坏。
 
-**当前最高优先级下一步**：Interactive Dogfood Harness（y/n、resume、tool/memory confirmation），在证据口径硬化后做小规模授权 real API rerun。
+## 当前审计边界
 
-**AutoRun 模式**：cleanup/source-of-truth only。不做新能力建设、不做 industry comparison、不新增 feature。除非用户显式改变目标。
+| Area | 状态 | 风险 |
+|---|---|---|
+| Runtime/Core/Loop | preserve | 不引入第二 runtime，不做大重构 |
+| Tool/MCP boundary | preserve | 不恢复 direct execution；MCP 走普通 tool 管线 |
+| Memory v0 | preserve | 不新增 raw write / auto-adoption |
+| Skill lifecycle | preserve | checkpoint metadata 不保存 raw skill body |
+| Sub-agent v0 | preserve | child 不直接执行工具/MCP/Memory；parent runtime 负责裁决 |
+| Legacy L1/L2 | frozen / compatibility only | 不恢复为当前主线 |
+| Documentation | cleanup target | 删除旧计划、旧审计和错误方向上下文 |
 
-**最新全局审计**：[global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md) — 2026-05-27 只读审计，P0=0, P1=3, P2=7。
+## 冻结项
 
-## 当前阶段入口
+- **FakeProvider 冻结**：FakeProvider 只能作为 deterministic test double，不继续扩成 fake planner / fake reasoning engine。
+- **Memory Consolidation pipeline 冻结**：Consolidation 相关路径保留为 deferred / contract evidence，不作为当前推进目标。
+- 旧 TUI/B7/B8 closeout、旧 dogfood report、旧 archive docs 不作为当前行动源。
 
-当前一页状态：[Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md)
+## 当前可推送性
 
-当前行动依据：
-- [PROJECT_STATUS.md](../PROJECT_STATUS.md) — 当前项目状态入口（第一优先读取）
-- [PROGRESS_LEDGER.md](../PROGRESS_LEDGER.md) — 进度账本
-- [global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md) — 最新全局审计
-- [source-of-truth-repair-plan-2026-05-27.md](../plans/source-of-truth-repair-plan-2026-05-27.md) — 基于审计的修复计划
+cleanup/source-of-truth 文档改动可以在本地检查通过后提交。不要 push，除非用户明确授权。
 
-已完成的能力建设（历史证据，非当前行动指令）：
-- WP1-WP4: First Usable Task MVP
-- Memory 主线、Skill System safe-local 基线、SubAgent L0 deterministic/local 基线
-- Tool Pipeline L3、Global Red-Team Remediation (RT-01~RT-18, 6 phases)
-- Cleanup-Only Remediation (PF-01~PF-15)
-- Low-Complexity Remediation (6 项 safe-to-auto-run 补齐)
-- Documentation Source-of-Truth Reset
+## 保留审计资料
 
-## Area status
-
-| Area | Status | Evidence | Risk |
-|---|---|---|---|
-| Runtime/Core/Loop | Healthy | `core.chat()` → `loop.py` → Tool Pipeline / RuntimeAction dispatcher 主路径统一；fake/real 共享同一 runtime | P3: `core.py` 仍偏大 |
-| ToolRegistry/ToolExecutor | Healthy | ToolRegistry metadata、confirmation、visibility 治理完整 | 测试隔离需持续关注 |
-| Memory | Healthy with explicit gaps | no silent retain / no auto approve；confirmation → pending_retain_proposals → turn-end MEMORY_PROPOSE dispatch；deterministic recall/injection baseline 覆盖 governance | real LLM semantic recall/injection quality 仍是 future gated；Memory Consolidation pipeline 已冻结 |
-| Skill | Healthy | formal `agent/skill_system/`；legacy 隔离；synthetic + real API dogfood 证据 | 非 marketplace，非远程安装 |
-| SubAgent | Healthy | L0 complete；T1 synthetic dogfood 16/16；L1-L5 gated/future | none blocking |
-| Checkpoint | Healthy | 截断 tool_result；过滤未知字段；safe summary 边界 | none blocking |
-| Confirmation / Ask User | Healthy | request_user_input / memory confirmation / tool confirmation 复用 runtime 边界 | none blocking |
-| CLI/TUI | Acceptable with P3 adapter debt | adapter/presentation only | P3: `main.py` 仍承担 adapter 兼容 |
-| Dogfood | Healthy with evidence gaps | real API smoke 19/20 non-failing；fake/local baseline | interactive path 覆盖不足（y/n, resume, tool/memory confirmation）；多数 case 是 direct provider smoke |
-| Provider config | Acceptable with P1 safety concern | `AgentProviderConfig` + factory；`config/config.yaml` 是唯一推荐入口 | `config/config.yaml` 当前 dirty 且含本地真实 key；安全边界需文档化 |
-| Security/Secrets | Healthy | `.env` / `agent_log.jsonl` / sessions/runs/memory episodes 不进仓库 | do not read real artifacts in audit |
-| Documentation | Healthy — source-of-truth reset 完成 | active ~30 docs；~150+ historical/expired docs archived | archive docs 不能被 AutoRun 当作当前入口 |
-
-## Ready to push?
-
-**Yes — for cleanup/source-of-truth changes.** 当前 main HEAD 已通过 ruff + focused tests。
-
-**No — for new capability.** 能力建设暂停，manual human dogfood 是下一步。不做新 feature、新能力、新审计。
-
-## Known limitations / P3 backlog
-
-- `core.py` remains a runtime hub；不建议本轮机械拆分。
-- Memory Consolidation pipeline 已冻结（6 个 consolidation 文件的 dispatch/handler path 已验证，business operation / real LLM consolidation deferred）。
-- FakeProvider 增长已冻结（不继续增强为 fake planner / fake reasoning engine）。
-- Memory real LLM recall/injection quality 仍是 future gated track。
-- SubAgent L1-L5 仍是 gated/future。
-- Sandbox/worktree/parallel SubAgent 仍是 future/contract。
-- Real MCP server activation 仍是 opt-in。
-- DB/graph/embedding/vector store 不是默认 memory backend。
-- `openai_compatible` streaming 仍是 unsupported by design，fail closed。
-- Skill/SubAgent real user dogfood 和 true multi-process/session productization 仍是 future tracks。
-
-## Latest verification baseline
-
-- ruff: passed
-- full pytest: `~3380 passed, 18 skipped`（最近全量基线，见 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md)）
-- synthetic subagent dogfood: `16/16 passed`
-- synthetic skill dogfood: `12/12 passed`
-- synthetic global dogfood: `12/12 无 crash（SMOKE_PASS 级别，非 capability PASS）`
-
-## 历史审计证据
-
-以下文档已归档或标记为 historical，保留为实现证据链，**不作为当前行动源**：
-
-- v0.9.x Stabilization 文档包：`docs/archive/refactor/V0_9_X_*`（RFC/SDD/TDD/Implementation Loop/Dogfood/Audit Checklist）
-- Runtime Integration 文档包：`docs/archive/runtime-integration/RUNTIME_INTEGRATION_*`（RFC/SDD/TDD/Implementation Loop/E2E Dogfood Plan/Audit Checklist）
-- 历史审计：`docs/archive/2026-05-27-cleanup/audit/`
-- 历史计划：`docs/archive/2026-05-27-cleanup/plans/`
-
-**AutoRun 不得将以上 historical/archived 文档当作当前 backlog 或执行依据。**
+- [global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md)
+- [audit/README.md](../audit/README.md)
+- [plans/README.md](../plans/README.md)
+- [dogfood/README.md](../dogfood/README.md)

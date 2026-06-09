@@ -1,22 +1,15 @@
-# 计划文档索引 (Plans Index)
+# Plans Index
 
-本目录包含 my-first-agent 的计划文档。
+本目录里的计划多数是历史上下文。不要因为计划存在就自动执行；先看 [PROJECT_STATUS.md](../PROJECT_STATUS.md)。
 
-## Active Plans
+## 当前可参考
 
-| 文档 | 说明 |
-|------|------|
-| [real-api-full-dogfood-remediation-plan-2026-05-26.md](real-api-full-dogfood-remediation-plan-2026-05-26.md) | ISSUE-001/002 修复记录 |
-| [first-agent-subsystem-integration-roadmap.md](first-agent-subsystem-integration-roadmap.md) | 子系统集成 roadmap — AutoRun queue 定义 |
-| [user-usable-agent-runtime-mvp-plan.md](user-usable-agent-runtime-mvp-plan.md) | 用户可用 agent runtime MVP 计划 |
-| [user-usable-agent-runtime-issue-sweep.md](user-usable-agent-runtime-issue-sweep.md) | 用户可用性 issue sweep |
+| 文档 | 状态 |
+|---|---|
+| [2026-06-08-memory-v0-architecture-cleanup-plan.md](2026-06-08-memory-v0-architecture-cleanup-plan.md) | Memory v0 cleanup 历史计划，已用于理解边界 |
+| [2026-06-09-subagent-v0-init-plan.md](2026-06-09-subagent-v0-init-plan.md) | Sub-agent v0 历史计划，当前以代码和测试为准 |
+| [2026-06-09-post-memory-runtime-architecture-hardening-plan.md](2026-06-09-post-memory-runtime-architecture-hardening-plan.md) | Runtime hardening 历史计划 |
 
-## Reference
+## 历史参考
 
-| 文档 | 说明 |
-|------|------|
-| [documentation-source-of-truth-reset-2026-05-26.md](documentation-source-of-truth-reset-2026-05-26.md) | 文档 source-of-truth reset 盘点（归档操作参考） |
-
-## Archive
-
-已完成和 superseded 的计划已归档至 [archive/2026-05-27-cleanup/plans/](../archive/2026-05-27-cleanup/plans/)。
+旧 dogfood、TUI、B7/B8、capability remediation 和 source-of-truth reset 计划只解释历史，不作为当前 backlog。删除或归档这些计划前必须先做引用检查。

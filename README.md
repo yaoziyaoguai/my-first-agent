@@ -1,95 +1,72 @@
 # my-first-agent
 
-First Agent 是一个本地优先（local-first）的 Agent Runtime 实验项目。
+First Agent 是一个 local-first 的 Agent Runtime 实验项目。当前仓库目标是保留真实实现、测试保护网和少量准确文档，减少旧计划和错误方向对后续 Agent 的干扰。
 
-**当前状态入口：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — 所有 Coding Agent 和人类开发者的第一优先读取入口。
+**当前状态入口：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)**。如果其他文档与它冲突，以 `PROJECT_STATUS.md` 为准。
 
-## 当前状态（2026-06-03）
+## 当前状态
 
-- ✅ **v1 engineering closeout prepared** — `docs/releases/v1/first-agent-v1-closeout.md`
-- ✅ **AGENT_DOGFOOD_AUTO suite 通过** — 873 tests PASS, 0 AGENT_FIX_AUTO, 7 xfailed known/expected
-- ✅ **Full pytest: 4406 passed, 0 failed, 37 xfailed** — code-clean baseline
-- ✅ **TUI Visual Shell Slice A+B delivered** — 静态 visual shell + safe data wiring, 不接 runtime/provider
-- 🟡 **V1 Closeout: USER_MANUAL_TRIAL + PRODUCT_DECISION pending** — 非代码阻塞项
-- ❌ **不声称 broadly user-usable** — not product-ready, current-stage remains FROZEN
-- 📋 **v2 next source**: [docs/debt/first-agent-v2-priority-backlog.md](docs/debt/first-agent-v2-priority-backlog.md)
-
-最新状态：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
-最新 closeout：[docs/releases/v1/first-agent-v1-closeout.md](docs/releases/v1/first-agent-v1-closeout.md)
-最新 dogfood：[docs/dogfood/README.md](docs/dogfood/README.md)
+- 阶段：**developer prototype / developer-dogfood**，不是面向普通用户的产品。
+- 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
+- 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
+- Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
+- Skill lifecycle：`agent/skill_system/` + `agent/runtime_integration/skill_lifecycle.py`。
+- Sub-agent v0：`agent/runtime_integration/subagent_action.py` + `agent/subagent_system/v0_contract.py`。
+- Legacy L1/L2 subagent route 保留为 compatibility/frozen，不是当前 production route。
 
 ## 快速开始
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+.venv/bin/python main.py --plain
 ```
 
-**主要入口：**
-
-- `python main.py` 或 `python main.py --plain` — 纯文本 CLI 交互模式（默认推荐）
-- `python main.py --tui` — Textual TUI 交互模式（候选 v1 TUI）
-- `python main.py health` — 健康检查
-- `python main.py logs` — 日志查看
-
-**演示命令：**
+配置模板：
 
 ```bash
-.venv/bin/python main.py demo "create a demo note about today's local run"
+cp config/config.example.yaml config/config.yaml
 ```
 
-**其他：** `cd tui && npm start`（Ink Visual Shell 原型）。`--shell` 已弃用，仍兼容 plain CLI。
+`config/config.yaml` 是个人本地配置入口；如果包含真实 key，**不得 commit**。.env / legacy provider profile 只作为历史兼容语境，不是推荐主路径。
 
-Health: python main.py health；Logs: python main.py logs --tail 50。
+## 常用命令
 
-当前为 **safe-local** 阶段：不调用真实 API、不访问网络、不需要 API key。
-Skill System 仍为 **实验性**（详见 `V0_3_SKILL_SYSTEM_STATUS`），**not a full Textual IDE**。
-演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
+```bash
+.venv/bin/python main.py --plain
+.venv/bin/python main.py --tui
+.venv/bin/python main.py health
+.venv/bin/python main.py logs --tail 50
+.venv/bin/python -m pytest tests/ -q
+```
 
-## Config
+`--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-**唯一推荐入口**: `config/config.yaml`（provider section）。
-
-- 默认 faked 安全路径，零 API key 可运行
-- 如需真实 provider，编辑 `provider` section 设置 `enabled: true`
-- `api_key` 可直接写入 `config/config.yaml`（个人本地项目），**但不得 commit**
-- Legacy 路径（`FIRST_AGENT_PROVIDER_PROFILE`、`MY_FIRST_AGENT_LLM_PROVIDER`、`.env`）已 deprecated
-
-参考：[config/config.example.yaml](config/config.example.yaml)、[config/examples/](config/examples/)
+当前为 **safe-local** 默认阶段：默认不调用真实 API、不访问网络、不需要 API key。Skill System 仍为 **实验性**（历史状态说明见 `docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md`），**not a full Textual IDE**。演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
 
 ## 文档导航
 
 | 想了解 | 读这里 |
-|--------|--------|
-| 当前项目状态 | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
-| 进度账本 | [docs/PROGRESS_LEDGER.md](docs/PROGRESS_LEDGER.md) |
+|---|---|
+| 当前状态 | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
+| 当前能力 | [docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md) |
 | 文档入口 | [docs/README.zh.md](docs/README.zh.md) |
 | 工程流程 | [docs/dev/AUTO_RUN_WORKFLOW.md](docs/dev/AUTO_RUN_WORKFLOW.md) |
-| 最新 dogfood | [docs/dogfood/README.md](docs/dogfood/README.md) |
-| 最新审计 | [docs/audit/b1-b8-current-stage-close-out-audit.md](docs/audit/b1-b8-current-stage-close-out-audit.md) |
+| 审计入口 | [docs/06-audit/CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md) |
 | 历史文档 | [docs/archive/](docs/archive/) |
 
 ## 测试
 
 ```bash
-ruff check agent tests scripts
-python -m pytest tests/ -x -q
+.venv/bin/ruff check .
+.venv/bin/python -m pytest -q -rx
+git diff --check
 ```
 
 ## 安全边界
 
-- 默认不调用真实 API、不访问网络
-- 不读取 `.env`、`agent_log.jsonl`、sessions/runs/private data
-- 不 commit `config/config.yaml`（含真实 key）
-- 不 tag / release / force push
-
-## 核心架构
-
-```text
-User → CLI/TUI adapter → Parent Agent Runtime
-  → ToolRegistry / ToolExecutor
-  → Memory Governance
-  → Skill System
-  → SubAgent System (L0)
-  → Checkpoint / Confirmation
-```
+- 不读取或提交真实 `.env`、`agent_log.jsonl`、sessions/runs、真实 MCP config、真实 skill/subagent 目录或 private data。
+- 不输出 secret，不展开环境变量里的 secret。
+- 不默认调用真实 provider、真实 MCP endpoint 或真实外部服务。
+- 不提交 `config/config.yaml`、`.codex/hooks.json`、`graphify-out/` 或本地 generated artifacts。

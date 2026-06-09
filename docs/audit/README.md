@@ -1,15 +1,12 @@
-# 审计文档索引 (Audit Documentation Index)
+# Audit Documentation Index
 
-本目录包含 my-first-agent 的独立审计文档。
+本目录只保留当前仍有引用价值的审计入口。旧审计、阶段性审计和失败草稿不作为当前执行依据。
 
-## 当前
+## 保留
 
-当前 close-out 审计：
+| 文档 | 状态 |
+|---|---|
+| [global-readonly-audit-2026-05-27.md](global-readonly-audit-2026-05-27.md) | 历史全局只读审计证据 |
+| [b1-b8-current-stage-close-out-audit.md](b1-b8-current-stage-close-out-audit.md) | 历史 close-out 审计证据 |
 
-- [B1-B8 Current-stage Close-out Audit](b1-b8-current-stage-close-out-audit.md)
-
-历史审计文档已归档至 [archive/2026-05-27-cleanup/audit/](../archive/2026-05-27-cleanup/audit/)。
-
-当前阶段已冻结。Close-out handoff: [first-agent-current-stage-close-out-2026-06-02.md](../handoff/first-agent-current-stage-close-out-2026-06-02.md)。
-
-当前项目状态以 [PROJECT_STATUS.md](../PROJECT_STATUS.md) 和 [PROGRESS_LEDGER.md](../PROGRESS_LEDGER.md) 为准。
+当前状态以 [PROJECT_STATUS.md](../PROJECT_STATUS.md) 和 [CURRENT_AUDIT_STATUS.zh.md](../06-audit/CURRENT_AUDIT_STATUS.zh.md) 为准。

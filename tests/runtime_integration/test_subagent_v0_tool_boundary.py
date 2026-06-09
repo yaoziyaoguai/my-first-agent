@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
@@ -41,6 +43,54 @@ def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
     assert result.payload["safe_arguments_metadata"]
     assert evidence["tool_executed"] is False
     assert "RAW_PATH_SHOULD_NOT_EXECUTE" not in repr(result.payload["safe_arguments_metadata"])
+    assert "requested_tool_reason" not in result.payload
+
+
+def test_provider_tool_reason_and_arguments_are_sanitized_not_returned_raw() -> None:
+    result = route_v0(payload={
+        "provider_output": {
+            "type": "tool_use",
+            "name": "read_file",
+            "input": {
+                "path": "/tmp/raw-tool-arg-path.txt",
+                "api_key": "tool-arg-secret",
+            },
+            "reason": (
+                "RAW_TOOL_REASON_SHOULD_NOT_LEAK "
+                "RAW_PROMPT_SHOULD_NOT_LEAK /tmp/raw-tool-reason-path.txt"
+            ),
+        },
+    })
+
+    assert result.payload["needs_parent_tool_request"] is True
+    assert result.payload["requested_tool_name"] == "read_file"
+    assert "requested_tool_reason" not in result.payload
+    reason_metadata = result.payload["requested_tool_reason_metadata"]
+    assert reason_metadata["requested_tool_reason_present"] is True
+    assert reason_metadata["requested_tool_reason_length"] > 0
+    assert reason_metadata["requested_tool_reason_hash"]
+    assert reason_metadata["requested_tool_reason_redacted"] is True
+    args_metadata = result.payload["safe_arguments_metadata"]
+    assert args_metadata["argument_count"] == 2
+    assert args_metadata["args_key_count"] == 2
+    assert args_metadata["args_keys_hash"]
+    assert "argument_keys" not in args_metadata
+    assert args_metadata["arguments_hash"]
+    assert args_metadata["redacted"] is True
+
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+    forbidden = (
+        "RAW_TOOL_REASON_SHOULD_NOT_LEAK",
+        "RAW_PROMPT_SHOULD_NOT_LEAK",
+        "/tmp/raw-tool-reason-path.txt",
+        "/tmp/raw-tool-arg-path.txt",
+        "tool-arg-secret",
+    )
+    for token in forbidden:
+        assert token not in serialized
 
 
 def test_unauthorized_tool_request_fails_closed_without_parent_state_mutation() -> None:

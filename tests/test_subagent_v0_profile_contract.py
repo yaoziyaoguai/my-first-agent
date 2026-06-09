@@ -73,7 +73,12 @@ def test_output_schema_constrains_safe_structured_result_and_invalid_output_fail
     }
     valid = route_v0(payload={
         "output_schema": output_schema,
-        "provider_output": {"summary": "safe"},
+        "provider_output": {
+            "summary": (
+                "RAW_PROVIDER_OUTPUT_SHOULD_NOT_LEAK "
+                "api_key=provider-secret /tmp/raw-provider-output.txt"
+            ),
+        },
     })
     invalid = route_v0(payload={
         "output_schema": output_schema,
@@ -81,5 +86,61 @@ def test_output_schema_constrains_safe_structured_result_and_invalid_output_fail
     })
 
     assert valid.status == "success"
+    summary_projection = valid.payload["safe_output"]["summary"]
+    assert summary_projection["type"] == "string"
+    assert summary_projection["length"] > 0
+    assert summary_projection["value_hash"]
+    assert summary_projection["redacted"] is True
+    serialized_valid = repr(valid.payload)
+    assert "RAW_PROVIDER_OUTPUT_SHOULD_NOT_LEAK" not in serialized_valid
+    assert "provider-secret" not in serialized_valid
+    assert "/tmp/raw-provider-output.txt" not in serialized_valid
     assert invalid.status in {"failed", "policy_blocked"}
     assert "RAW_OUTPUT" not in repr(invalid)
+
+
+def test_output_schema_sanitizes_nested_provider_output_without_raw_text() -> None:
+    output_schema = {
+        "type": "object",
+        "required": ["items", "metadata"],
+        "properties": {
+            "items": {"type": "array"},
+            "metadata": {"type": "object"},
+            "safe_count": {"type": "integer"},
+            "approved": {"type": "boolean"},
+        },
+    }
+    result = route_v0(payload={
+        "output_schema": output_schema,
+        "provider_output": {
+            "items": [
+                "RAW_ARRAY_TEXT_SHOULD_NOT_LEAK",
+                {"path": "/tmp/raw-nested-path.txt"},
+            ],
+            "metadata": {
+                "raw_context": "RAW_CONTEXT_SHOULD_NOT_LEAK",
+                "api_key": "nested-secret",
+            },
+            "safe_count": 2,
+            "approved": True,
+        },
+    })
+
+    assert result.status == "success"
+    safe_output = result.payload["safe_output"]
+    assert safe_output["items"]["type"] == "array"
+    assert safe_output["items"]["length"] == 2
+    assert safe_output["items"]["value_hash"]
+    assert safe_output["items"]["redacted"] is True
+    assert safe_output["metadata"]["type"] == "object"
+    assert safe_output["metadata"]["key_count"] == 2
+    assert safe_output["metadata"]["keys_hash"]
+    assert safe_output["metadata"]["redacted"] is True
+    assert safe_output["safe_count"]["value"] == 2
+    assert safe_output["approved"]["value"] is True
+    serialized = repr(result.payload)
+    assert "RAW_ARRAY_TEXT_SHOULD_NOT_LEAK" not in serialized
+    assert "/tmp/raw-nested-path.txt" not in serialized
+    assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
+    assert "nested-secret" not in serialized
+    assert result.payload["status"] != "ok"

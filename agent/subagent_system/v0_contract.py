@@ -56,18 +56,152 @@ def safe_arguments_metadata(value: object) -> dict[str, Any]:
     """Return shape-only metadata for child-requested arguments."""
 
     if isinstance(value, Mapping):
+        key_fingerprint = _stable_repr(tuple(sorted(str(key) for key in value)))
         return {
             "argument_count": len(value),
-            "argument_keys": tuple(sorted(str(key) for key in value)),
+            "args_key_count": len(value),
+            "args_keys_hash": stable_hash(key_fingerprint, prefix="argkeys"),
             "arguments_hash": stable_hash(_stable_repr(value), prefix="args"),
             "redacted": True,
         }
     return {
         "argument_count": 0,
-        "argument_keys": (),
+        "args_key_count": 0,
+        "args_keys_hash": "",
         "arguments_hash": stable_hash(type(value).__name__, prefix="args"),
         "redacted": True,
     }
+
+
+def sanitize_provider_value_for_result(
+    value: object,
+    *,
+    expected_type: str = "",
+    field_name: str = "",
+) -> dict[str, Any]:
+    """Project provider-derived values into result-safe metadata only.
+
+    中文学习边界：即使 output_schema 允许某个 string 字段，字段值仍可能来自
+    provider raw output。v0 contract result 不能返回原文，只返回 hash/length/shape。
+    """
+
+    del field_name
+    if isinstance(value, str):
+        return {
+            "type": "string",
+            "length": len(value),
+            "value_hash": stable_hash(value, prefix="value"),
+            "redacted": True,
+            "redaction_reason": "provider_text_redacted",
+            "forbidden_raw_text_detected": contains_forbidden_raw_text(value),
+        }
+    if isinstance(value, bool):
+        return {
+            "type": "boolean",
+            "value": value,
+            "redacted": False,
+        }
+    if isinstance(value, int) and not isinstance(value, bool):
+        return {
+            "type": "integer",
+            "value": value,
+            "redacted": False,
+        }
+    if isinstance(value, float):
+        return {
+            "type": "number",
+            "value": value,
+            "redacted": False,
+        }
+    if value is None:
+        return {
+            "type": expected_type or "null",
+            "value": None,
+            "redacted": False,
+        }
+    if isinstance(value, Mapping):
+        key_fingerprint = _stable_repr(tuple(sorted(str(key) for key in value)))
+        children = tuple(
+            {
+                "key_hash": stable_hash(str(key), prefix="key"),
+                "value": sanitize_provider_value_for_result(item),
+            }
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        )
+        return {
+            "type": "object",
+            "key_count": len(value),
+            "keys_hash": stable_hash(key_fingerprint, prefix="keys"),
+            "value_hash": stable_hash(_stable_repr(value), prefix="value"),
+            "children": children,
+            "redacted": True,
+            "redaction_reason": "provider_object_redacted",
+            "forbidden_raw_text_detected": contains_forbidden_raw_text(value),
+        }
+    if isinstance(value, (list, tuple)):
+        return {
+            "type": "array",
+            "length": len(value),
+            "value_hash": stable_hash(_stable_repr(value), prefix="value"),
+            "items": tuple(sanitize_provider_value_for_result(item) for item in value),
+            "redacted": True,
+            "redaction_reason": "provider_array_redacted",
+            "forbidden_raw_text_detected": contains_forbidden_raw_text(value),
+        }
+    return {
+        "type": type(value).__name__,
+        "value_hash": stable_hash(_stable_repr(value), prefix="value"),
+        "redacted": True,
+        "redaction_reason": "provider_value_redacted",
+        "forbidden_raw_text_detected": contains_forbidden_raw_text(value),
+    }
+
+
+def sanitize_text_metadata(
+    value: object,
+    *,
+    label: str,
+    prefix: str,
+) -> dict[str, Any]:
+    raw = str(value or "")
+    return {
+        f"{label}_present": bool(raw),
+        f"{label}_length": len(raw),
+        f"{label}_hash": stable_hash(raw, prefix=prefix),
+        f"{label}_redacted": True,
+    }
+
+
+def contains_forbidden_raw_text(value: object) -> bool:
+    """Detect sensitive-looking raw text without returning the text."""
+
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in (
+            "raw_prompt",
+            "raw provider",
+            "raw_provider",
+            "raw_output",
+            "raw_context",
+            "raw_exception",
+            "secret",
+            "api_key",
+            "apikey",
+            "token",
+            "bearer ",
+        )):
+            return True
+        if "/" in value or "\\" in value:
+            return True
+        return "sk-" in value
+    if isinstance(value, Mapping):
+        return any(
+            contains_forbidden_raw_text(key) or contains_forbidden_raw_text(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(contains_forbidden_raw_text(item) for item in value)
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +378,7 @@ class SubAgentV0Result:
     safe_output: Mapping[str, Any] = field(default_factory=dict)
     needs_parent_tool_request: bool = False
     requested_tool_name: str = ""
-    requested_tool_reason: str = ""
+    requested_tool_reason_metadata: Mapping[str, Any] = field(default_factory=dict)
     safe_arguments_metadata: Mapping[str, Any] = field(default_factory=dict)
     parent_decision_status: str = "pending"
     decision_type: str = ""
@@ -258,6 +392,11 @@ class SubAgentV0Result:
         object.__setattr__(self, "safe_output", MappingProxyType(dict(self.safe_output)))
         object.__setattr__(
             self,
+            "requested_tool_reason_metadata",
+            MappingProxyType(dict(self.requested_tool_reason_metadata)),
+        )
+        object.__setattr__(
+            self,
             "safe_arguments_metadata",
             MappingProxyType(dict(self.safe_arguments_metadata)),
         )
@@ -268,7 +407,7 @@ class SubAgentV0Result:
             "safe_output": dict(self.safe_output),
             "needs_parent_tool_request": self.needs_parent_tool_request,
             "requested_tool_name": self.requested_tool_name,
-            "requested_tool_reason": self.requested_tool_reason,
+            "requested_tool_reason_metadata": dict(self.requested_tool_reason_metadata),
             "safe_arguments_metadata": dict(self.safe_arguments_metadata),
             "parent_decision_status": self.parent_decision_status,
             "decision_type": self.decision_type,
@@ -336,13 +475,11 @@ def validate_structured_output(
         value = provider_output[field_name]
         if expected_type and not _matches_schema_type(value, expected_type):
             return False, {}, "output_field_type_mismatch"
-        if isinstance(value, (str, bool, int, float)) or value is None:
-            safe_output[field_name] = value
-        else:
-            safe_output[field_name] = {
-                "value_hash": stable_hash(_stable_repr(value), prefix="value"),
-                "redacted": True,
-            }
+        safe_output[field_name] = sanitize_provider_value_for_result(
+            value,
+            expected_type=expected_type,
+            field_name=field_name,
+        )
     return True, safe_output, ""
 
 

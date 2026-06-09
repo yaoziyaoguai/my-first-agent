@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
 from tests.runtime_integration.subagent_v0_contract_helpers import (
     V0_U4_EXECUTION_XFAIL,
     route_v0,
@@ -255,3 +257,65 @@ def test_provider_error_raw_message_is_redacted_across_all_surfaces() -> None:
     assert "RAW_PROVIDER_EXCEPTION" not in serialized
     assert "/tmp/raw-provider-path" not in serialized
     assert "sk-test-secret" not in serialized
+
+
+def test_prepared_context_metadata_is_allowlisted_before_evidence_surfaces() -> None:
+    dispatcher = build_phase1_dispatcher()
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+        source="subagent-v0-redaction-test",
+        parent_trace_id="parent-trace",
+        payload={
+            "profile_id": "default-v0",
+            "provider_mode": "fake_local",
+            "task": "summarize safely",
+            "prepared_v0_context": {
+                "metadata": {
+                    "context_hash": "ctx-safe-hash",
+                    "context_length": 42,
+                    "context_file_count": 1,
+                    "max_context_chars": 100,
+                    "max_files": 2,
+                    "policy_id": "policy-safe-id",
+                    "policy_rule_id": "policy-safe-rule",
+                    "policy_hash": "policy:safe-hash",
+                    "policy_decision_source": "runtime_contract",
+                    "policy_path": "/tmp/raw-policy-path.yaml",
+                    "raw_context": "RAW_CONTEXT_SHOULD_NOT_LEAK",
+                    "path": "/tmp/raw-context-path.txt",
+                    "raw_prompt": "RAW_PROMPT_SHOULD_NOT_LEAK",
+                    "api_key": "context-metadata-secret",
+                },
+            },
+        },
+    )
+
+    result = dispatcher.route(request)
+    metadata = result.evidence["context_metadata"]
+    surfaces = _redaction_surfaces(result)
+    serialized = json.dumps({
+        "payload": result.payload,
+        "surfaces": surfaces,
+    }, default=str)
+
+    assert metadata["context_hash"] == "ctx-safe-hash"
+    assert metadata["context_length"] == 42
+    assert metadata["context_file_count"] == 1
+    assert metadata["max_context_chars"] == 100
+    assert metadata["max_files"] == 2
+    assert metadata["policy_id"] == "policy-safe-id"
+    assert metadata["policy_rule_id"] == "policy-safe-rule"
+    assert metadata["policy_hash"] == "policy:safe-hash"
+    assert metadata["policy_decision_source"] == "runtime_contract"
+    assert metadata["context_metadata_redacted"] is True
+    assert metadata["dropped_context_metadata_count"] >= 4
+    forbidden = (
+        "policy_path",
+        "/tmp/raw-policy-path.yaml",
+        "RAW_CONTEXT_SHOULD_NOT_LEAK",
+        "/tmp/raw-context-path.txt",
+        "RAW_PROMPT_SHOULD_NOT_LEAK",
+        "context-metadata-secret",
+    )
+    for token in forbidden:
+        assert token not in serialized

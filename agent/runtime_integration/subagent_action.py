@@ -17,6 +17,7 @@ from agent.subagent_system.v0_contract import (
     SubAgentV0Result,
     provider_mode_allowed,
     safe_arguments_metadata,
+    sanitize_text_metadata,
     stable_hash,
     validate_output_schema_contract,
     validate_structured_output,
@@ -58,6 +59,52 @@ _V0_OPERATION_CAPABILITY_FLAGS = {
     "modify_parent_context": "can_modify_parent_context",
     "emit_parent_action": "can_emit_parent_action",
 }
+_V0_CONTEXT_METADATA_ALLOWLIST = frozenset({
+    "context_hash",
+    "context_length",
+    "context_file_count",
+    "max_context_chars",
+    "max_files",
+    "profile_id",
+    "policy_id",
+    "policy_rule_id",
+    "policy_hash",
+    "policy_decision_source",
+    "selected_file_ids",
+    "context_read_seam_calls",
+    "uncontrolled_path_read_text_calls",
+    "parent_policy_selects_all_files",
+})
+_V0_FORBIDDEN_CONTEXT_METADATA_KEYS = frozenset({
+    "policy_path",
+    "raw_path",
+    "path",
+    "file_path",
+    "raw_context",
+    "context_text",
+    "prompt",
+    "raw_prompt",
+    "raw_output",
+    "secret",
+    "api_key",
+    "token",
+    "exception_message",
+})
+_V0_SAFE_SCALAR_CONTEXT_FIELDS = frozenset({
+    "context_hash",
+    "context_length",
+    "context_file_count",
+    "max_context_chars",
+    "max_files",
+    "profile_id",
+    "policy_id",
+    "policy_rule_id",
+    "policy_hash",
+    "policy_decision_source",
+    "context_read_seam_calls",
+    "uncontrolled_path_read_text_calls",
+    "parent_policy_selects_all_files",
+})
 
 
 def _safe_hash(value: object, *, prefix: str) -> str:
@@ -74,6 +121,124 @@ def _safe_text_metadata(value: object, *, label: str, prefix: str) -> dict[str, 
         f"{label}_length": len(raw),
         "redacted": True,
     }
+
+
+def _sanitize_v0_context_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Allowlist parent-built v0 context evidence metadata.
+
+    中文学习边界：prepared_v0_context 来自 RuntimeAction payload seam，不能被当作
+    可信 evidence。这里仅保留 hash/length/count/policy identifiers 这类安全字段。
+    """
+
+    safe: dict[str, Any] = {}
+    dropped_count = 0
+    for raw_key, raw_value in metadata.items():
+        key = str(raw_key)
+        if key in _V0_FORBIDDEN_CONTEXT_METADATA_KEYS:
+            dropped_count += 1
+            continue
+        if key not in _V0_CONTEXT_METADATA_ALLOWLIST:
+            dropped_count += 1
+            continue
+        if key == "selected_file_ids":
+            safe[key] = _sanitize_selected_file_ids(raw_value)
+            continue
+        if key in _V0_SAFE_SCALAR_CONTEXT_FIELDS:
+            safe[key] = _sanitize_context_scalar(key, raw_value)
+            continue
+        dropped_count += 1
+
+    if dropped_count:
+        safe["context_metadata_redacted"] = True
+        safe["dropped_context_metadata_count"] = dropped_count
+    return safe
+
+
+def _sanitize_selected_file_ids(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raw_items = (value,)
+    elif isinstance(value, (list, tuple)):
+        raw_items = tuple(str(item) for item in value)
+    else:
+        return ()
+    return tuple(_sanitize_file_id(item) for item in raw_items)
+
+
+def _sanitize_file_id(file_id: str) -> str:
+    if _is_safe_context_identifier(file_id):
+        return file_id
+    return f"context_file:{stable_hash(file_id, prefix='file')[-16:]}"
+
+
+def _sanitize_v0_tool_name(tool_name: str) -> str:
+    if _is_safe_context_identifier(tool_name) and all(
+        char.isalnum() or char in {"_", "-", "."}
+        for char in tool_name
+    ):
+        return tool_name
+    return f"tool:{stable_hash(tool_name, prefix='tool')[-16:]}"
+
+
+def _is_safe_context_identifier(value: str) -> bool:
+    lowered = value.lower()
+    if not value or "/" in value or "\\" in value:
+        return False
+    return not any(marker in lowered for marker in (
+        "secret",
+        "api_key",
+        "token",
+        "password",
+        "raw_context",
+        "raw_prompt",
+        "raw_output",
+        "raw_path",
+    ))
+
+
+def _sanitize_context_scalar(key: str, value: object) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(0, value)
+    if key in {"context_length", "context_file_count", "max_context_chars", "max_files",
+               "context_read_seam_calls", "uncontrolled_path_read_text_calls"}:
+        return _coerce_nonnegative_int(value)
+    if isinstance(value, str) and _is_safe_context_scalar_text(key, value):
+        return value
+    return {
+        f"{key}_hash": stable_hash(value, prefix="metadata"),
+        f"{key}_length": len(str(value or "")),
+        "redacted": True,
+    }
+
+
+def _is_safe_context_scalar_text(key: str, value: str) -> bool:
+    lowered = value.lower()
+    if "/" in value or "\\" in value:
+        return False
+    if any(marker in lowered for marker in (
+        "secret",
+        "api_key",
+        "token",
+        "password",
+        "raw_context",
+        "raw_prompt",
+        "raw_output",
+        "raw_path",
+        "policy_path",
+    )):
+        return False
+    if key == "policy_decision_source":
+        return value in {"runtime_contract", "parent_policy", "profile_contract"}
+    return True
+
+
+def _coerce_nonnegative_int(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
 
 
 class SubAgentV0Handler:
@@ -348,7 +513,9 @@ class SubAgentV0Handler:
         v0_request: SubAgentV0Request,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        context_metadata = dict(v0_request.prepared_context_metadata)
+        context_metadata = _sanitize_v0_context_metadata(
+            v0_request.prepared_context_metadata
+        )
         flags = dict(profile.capability_flags.to_mapping())
         provider_allowed = (
             profile.capability_flags.can_call_provider
@@ -536,8 +703,8 @@ class SubAgentV0Handler:
         provider_output: dict[str, Any],
         base_evidence: dict[str, Any],
     ):
-        tool_name = str(provider_output.get("name") or "")
-        if tool_name in _SHELL_LIKE_TOOLS:
+        raw_tool_name = str(provider_output.get("name") or "")
+        if raw_tool_name in _SHELL_LIKE_TOOLS:
             return self._policy_blocked(
                 context,
                 profile=profile,
@@ -549,8 +716,12 @@ class SubAgentV0Handler:
         result = SubAgentV0Result(
             status="success",
             needs_parent_tool_request=True,
-            requested_tool_name=tool_name,
-            requested_tool_reason=str(provider_output.get("reason") or ""),
+            requested_tool_name=_sanitize_v0_tool_name(raw_tool_name),
+            requested_tool_reason_metadata=sanitize_text_metadata(
+                provider_output.get("reason"),
+                label="requested_tool_reason",
+                prefix="reason",
+            ),
             safe_arguments_metadata=safe_arguments_metadata(provider_output.get("input")),
         )
         return context.success(

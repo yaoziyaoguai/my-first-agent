@@ -53,6 +53,8 @@ _FORBIDDEN_PROFILE_ID_MARKERS = (
     "token",
     "password",
 )
+_SAFE_ALLOWED_TOOL_RE = re.compile(r"^[A-Za-z0-9_]{1,80}$")
+_FORBIDDEN_ALLOWED_TOOL_MARKERS = _FORBIDDEN_PROFILE_ID_MARKERS
 
 
 def stable_hash(value: object, *, prefix: str = "sha256") -> str:
@@ -87,6 +89,47 @@ def project_v0_profile_id(profile_id: object) -> tuple[str, dict[str, Any]]:
         return raw, metadata
     digest = str(metadata["hash"]).split(":")[-1] or "empty"
     return f"profile-redacted-{digest}", metadata
+
+
+def is_safe_v0_allowed_tool(tool_name: object) -> bool:
+    """Return whether an allowed tool id is safe to echo in evidence."""
+
+    raw = str(tool_name or "")
+    lowered = raw.lower()
+    if not _SAFE_ALLOWED_TOOL_RE.fullmatch(raw):
+        return False
+    return not any(marker in lowered for marker in _FORBIDDEN_ALLOWED_TOOL_MARKERS)
+
+
+def project_v0_allowed_tools(
+    allowed_tools: object,
+) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """Project allowed_tools into a safe allowlist plus hash-only metadata.
+
+    中文学习边界：allowed_tools 来自 profile/request，不是可信常量。它既会影响
+    requested_tool_name allowlist，也会进入 evidence，所以 unsafe item 必须在
+    contract 层先降级为 metadata，避免绕过 tool_use.name sanitizer。
+    """
+
+    raw_items = _as_str_tuple(allowed_tools)
+    safe_tools: list[str] = []
+    metadata_items: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        is_safe = is_safe_v0_allowed_tool(raw_item)
+        if is_safe:
+            safe_tools.append(raw_item)
+        metadata_items.append({
+            "length": len(raw_item),
+            "hash": stable_hash(raw_item, prefix="allowed_tool"),
+            "redacted": not is_safe,
+            "safe": is_safe,
+        })
+    return tuple(safe_tools), {
+        "count": len(raw_items),
+        "safe_count": len(safe_tools),
+        "redacted_count": len(raw_items) - len(safe_tools),
+        "items": tuple(metadata_items),
+    }
 
 
 def safe_arguments_metadata(value: object) -> dict[str, Any]:
@@ -281,6 +324,7 @@ class SubAgentV0ProfileContract:
     max_context_chars: int = DEFAULT_V0_MAX_CONTEXT_CHARS
     max_files: int = DEFAULT_V0_MAX_FILES
     allowed_tools: tuple[str, ...] = ()
+    allowed_tools_metadata: Mapping[str, Any] = field(default_factory=dict)
     output_schema: Mapping[str, Any] = field(default_factory=lambda: DEFAULT_V0_OUTPUT_SCHEMA)
     capability_flags: SubAgentV0CapabilityFlags = field(
         default_factory=SubAgentV0CapabilityFlags
@@ -362,13 +406,21 @@ class SubAgentV0ProfileContract:
             raise ValueError("max_context_chars must be non-negative")
         if self.max_files < 0:
             raise ValueError("max_files must be non-negative")
+        allowed_tools, allowed_tools_metadata = project_v0_allowed_tools(
+            self.allowed_tools
+        )
         object.__setattr__(self, "profile_id", profile_id)
         object.__setattr__(
             self,
             "profile_id_metadata",
             MappingProxyType(dict(profile_id_metadata)),
         )
-        object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
+        object.__setattr__(self, "allowed_tools", allowed_tools)
+        object.__setattr__(
+            self,
+            "allowed_tools_metadata",
+            MappingProxyType(dict(allowed_tools_metadata)),
+        )
         object.__setattr__(self, "output_schema", MappingProxyType(dict(self.output_schema)))
 
     @property
@@ -386,6 +438,7 @@ class SubAgentV0ProfileContract:
             "max_context_chars": self.max_context_chars,
             "max_files": self.max_files,
             "allowed_tools": self.allowed_tools,
+            "allowed_tools_metadata": MappingProxyType(dict(self.allowed_tools_metadata)),
             "output_schema_id": stable_hash(
                 _schema_fingerprint(self.output_schema),
                 prefix="schema",

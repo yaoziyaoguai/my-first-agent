@@ -386,3 +386,57 @@ def test_lifecycle_catalog_introspection_without_prepared_context_fails_closed()
     assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
     assert "RAW_CONTEXT_PATH_SHOULD_NOT_LEAK" not in serialized
     assert "sk-test-context-secret" not in serialized
+
+
+def test_invalid_output_schema_without_prepared_context_does_not_claim_context_built() -> None:
+    dispatcher = build_phase1_dispatcher()
+    result = dispatcher.route(_direct_v0_request({
+        "output_schema": {
+            "type": "array",
+            "raw_path": "/tmp/RAW_SCHEMA_PATH_SHOULD_NOT_LEAK",
+        },
+        "raw_context": "RAW_CONTEXT_SHOULD_NOT_LEAK",
+    }))
+    event_names = set(result.evidence["lifecycle_events"])
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert result.payload.get("parent_decision_status") != "pending"
+    assert "subagent.context.built" not in event_names
+    assert "subagent.provider.called" not in event_names
+    assert "subagent.provider.completed" not in event_names
+    assert "subagent.result.produced" not in event_names
+    assert "subagent.parent_decision.pending" not in event_names
+    assert "RAW_SCHEMA_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
+
+
+def test_invalid_output_schema_with_valid_prepared_context_fails_after_context_built() -> None:
+    result = route_v0(payload={
+        "output_schema": {
+            "type": "array",
+            "raw_path": "/tmp/RAW_SCHEMA_PATH_SHOULD_NOT_LEAK",
+        },
+        "provider_output": {"summary": "safe"},
+    })
+    event_names = set(result.evidence["lifecycle_events"])
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    assert result.status == "failed"
+    assert result.evidence["failure_kind"] == "invalid_output_schema"
+    assert result.evidence["output_schema_valid"] is False
+    assert "subagent.context.built" in event_names
+    assert "subagent.execution.failed" in event_names
+    assert "subagent.provider.called" not in event_names
+    assert "subagent.provider.completed" not in event_names
+    assert "subagent.result.produced" not in event_names
+    assert "subagent.parent_decision.pending" not in event_names
+    assert result.payload.get("parent_decision_status") != "pending"
+    assert "RAW_SCHEMA_PATH_SHOULD_NOT_LEAK" not in serialized

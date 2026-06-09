@@ -103,10 +103,13 @@ def _assert_no_policy_path_leak(surface: object) -> None:
 
 def _redaction_surfaces(result) -> dict[str, object]:
     surfaces = {
+        "payload": result.payload,
         "evidence": result.evidence,
-        "action_log": result.evidence["action_log"],
-        "log_viewer": result.evidence["log_viewer"],
     }
+    if "action_log" in result.evidence:
+        surfaces["action_log"] = result.evidence["action_log"]
+    if "log_viewer" in result.evidence:
+        surfaces["log_viewer"] = result.evidence["log_viewer"]
     if "checkpoint_metadata" in result.evidence:
         surfaces["checkpoint_metadata"] = result.evidence["checkpoint_metadata"]
     return surfaces
@@ -125,6 +128,40 @@ def test_required_v0_lifecycle_event_catalog_is_declared() -> None:
     assert "subagent.provider.completed" not in event_names
     assert "subagent.result.produced" not in event_names
     assert "subagent.parent_decision.pending" not in event_names
+
+
+def test_profile_allowed_tools_redacts_unsafe_items_from_result_surfaces() -> None:
+    raw_path_tool = "/tmp/RAW_TOOL_PATH_SHOULD_NOT_LEAK"
+    raw_token_tool = "sk-live-abc123"
+    result = route_v0(payload={
+        "profile_contract": {
+            "allowed_tools": (raw_path_tool, raw_token_tool, "safe_tool"),
+        },
+        "provider_output": {"summary": "safe"},
+    })
+    surfaces = _redaction_surfaces(result)
+    serialized = json.dumps(surfaces, default=str)
+    profile_contract = result.evidence["profile_contract"]
+    metadata = result.evidence["allowed_tools_metadata"]
+
+    assert result.status == "success"
+    assert result.evidence["allowed_tools"] == ("safe_tool",)
+    assert profile_contract["allowed_tools"] == ("safe_tool",)
+    assert metadata["count"] == 3
+    assert metadata["safe_count"] == 1
+    assert metadata["redacted_count"] == 2
+    assert len(metadata["items"]) == 3
+    redacted_items = [item for item in metadata["items"] if not item["safe"]]
+    assert len(redacted_items) == 2
+    for item in redacted_items:
+        assert item["redacted"] is True
+        assert item["hash"]
+        assert "RAW_TOOL_PATH_SHOULD_NOT_LEAK" not in item["hash"]
+        assert "sk-live-abc123" not in item["hash"]
+
+    assert raw_path_tool not in serialized
+    assert "RAW_TOOL_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert raw_token_tool not in serialized
 
 
 def test_success_path_emits_success_lifecycle_events_only() -> None:

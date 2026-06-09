@@ -20,6 +20,39 @@ def test_v0_profile_capability_flags_default_safe() -> None:
     assert profile["can_emit_parent_action"] is False
 
 
+def test_v0_profile_allowed_tools_projects_unsafe_items_to_metadata() -> None:
+    raw_path_tool = "/tmp/RAW_TOOL_PATH_SHOULD_NOT_LEAK"
+    raw_token_tool = "sk-live-abc123"
+    result = route_v0(payload={
+        "profile_contract": {
+            "allowed_tools": (raw_path_tool, raw_token_tool, "safe_tool"),
+        },
+        "provider_output": {
+            "type": "tool_use",
+            "name": "safe_tool",
+            "input": {"path": "/tmp/RAW_TOOL_ARG_SHOULD_NOT_LEAK"},
+        },
+    })
+    profile = result.evidence["profile_contract"]
+    metadata = profile["allowed_tools_metadata"]
+    serialized = repr({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    })
+
+    assert profile["allowed_tools"] == ("safe_tool",)
+    assert result.evidence["allowed_tools"] == ("safe_tool",)
+    assert metadata["count"] == 3
+    assert metadata["safe_count"] == 1
+    assert metadata["redacted_count"] == 2
+    assert result.payload["requested_tool_name"] == "safe_tool"
+    assert result.payload["requested_tool_name_metadata"]["requested_tool_name_allowed"] is True
+    assert raw_path_tool not in serialized
+    assert "RAW_TOOL_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert raw_token_tool not in serialized
+    assert "RAW_TOOL_ARG_SHOULD_NOT_LEAK" not in serialized
+
+
 def test_can_call_provider_obeys_provider_mode_allowed() -> None:
     fake_allowed = route_v0(payload={
         "profile_contract": {"provider_mode_allowed": "fake_only", "can_call_provider": True},

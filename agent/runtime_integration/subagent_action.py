@@ -372,6 +372,18 @@ class SubAgentV0Handler:
             profile.output_schema
         )
         if not output_schema_ok:
+            context_gate = self._bounded_context_gate(
+                profile=profile,
+                v0_request=v0_request,
+            )
+            if context_gate:
+                return self._context_gate_failed(
+                    context,
+                    profile=profile,
+                    v0_request=v0_request,
+                    base_evidence=base_evidence,
+                    failure_kind=context_gate,
+                )
             return self._failed_contract(
                 context,
                 payload=self._contract_result(status="failed").to_payload(),
@@ -592,6 +604,7 @@ class SubAgentV0Handler:
             "max_turns": profile.max_turns,
             "allowed_tool_count": len(profile.allowed_tools),
             "allowed_tools": profile.allowed_tools,
+            "allowed_tools_metadata": dict(profile.allowed_tools_metadata),
             "memory_scope": "none",
             "context_metadata": context_metadata,
             "uncontrolled_path_read_text_calls": int(

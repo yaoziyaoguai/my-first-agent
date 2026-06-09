@@ -4,103 +4,89 @@ from __future__ import annotations
 
 import pytest
 
-from agent.subagent_system.descriptor import SubAgentDescriptor
+from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
 
 
-@pytest.mark.xfail(strict=True, reason="Sub-agent v0 profile capability flags not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_profile_capability_flags_default_safe() -> None:
-    from agent.runtime_integration import subagent_action
+    result = route_v0(payload={"introspect_profile": True})
+    profile = result.evidence["profile_contract"]
 
-    profile = subagent_action.default_subagent_v0_profile()
-
-    assert profile.status == "product"
-    assert profile.max_turns == 1
-    assert profile.allowed_tools == ()
-    assert profile.can_use_tools is False
-    assert profile.can_write_memory is False
-    assert profile.can_write_checkpoint is False
-    assert profile.can_spawn_child is False
-    assert profile.can_modify_parent_context is False
-    assert profile.can_emit_parent_action is False
+    assert profile["status"] == "product"
+    assert profile["max_turns"] == 1
+    assert profile["allowed_tools"] == ()
+    assert profile["can_use_tools"] is False
+    assert profile["can_write_memory"] is False
+    assert profile["can_write_checkpoint"] is False
+    assert profile["can_spawn_child"] is False
+    assert profile["can_modify_parent_context"] is False
+    assert profile["can_emit_parent_action"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="V0 provider capability gate not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_can_call_provider_obeys_provider_mode_allowed() -> None:
-    from agent.runtime_integration import subagent_action
+    fake_allowed = route_v0(payload={
+        "profile_contract": {"provider_mode_allowed": "fake_only", "can_call_provider": True},
+        "provider_mode": "fake_local",
+    })
+    fake_blocks_real = route_v0(payload={
+        "profile_contract": {"provider_mode_allowed": "fake_only", "can_call_provider": True},
+        "provider_mode": "real_opt_in",
+    })
+    real_allowed = route_v0(payload={
+        "profile_contract": {"provider_mode_allowed": "real_opt_in", "can_call_provider": True},
+        "provider_mode": "real_opt_in",
+        "parent_opt_in": True,
+    })
 
-    fake_only = subagent_action.make_subagent_v0_profile(
-        provider_mode_allowed="fake_only",
-        can_call_provider=True,
-    )
-    real_capable = subagent_action.make_subagent_v0_profile(
-        provider_mode_allowed="real_opt_in",
-        can_call_provider=True,
-    )
-
-    assert subagent_action.can_call_provider(fake_only, provider_mode="fake_local") is True
-    assert subagent_action.can_call_provider(fake_only, provider_mode="real_opt_in") is False
-    assert subagent_action.can_call_provider(real_capable, provider_mode="real_opt_in") is True
+    assert fake_allowed.evidence["provider_call_allowed"] is True
+    assert fake_blocks_real.status in {"failed", "policy_blocked", "rejected"}
+    assert fake_blocks_real.evidence["provider_call_allowed"] is False
+    assert real_allowed.evidence["provider_call_allowed"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="Demo/product v0 profile separation not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_demo_profile_is_not_product_capability_and_product_status_is_explicit() -> None:
-    from agent.runtime_integration import subagent_action
+    demo = route_v0(payload={"profile_contract": {"status": "demo"}})
+    product = route_v0(payload={"profile_contract": {"status": "product"}})
 
-    demo = subagent_action.make_subagent_v0_profile(status="demo")
-    product = subagent_action.make_subagent_v0_profile(status="product")
-
-    assert subagent_action.is_product_subagent_v0_profile(demo) is False
-    assert subagent_action.is_product_subagent_v0_profile(product) is True
-    assert product.status == "product"
+    assert demo.evidence["product_capability"] is False
+    assert product.evidence["product_capability"] is True
+    assert product.evidence["profile_status"] == "product"
 
 
-@pytest.mark.xfail(strict=True, reason="Capability flags are metadata only before U3/U4 gates")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_capability_flags_are_execution_gates_not_descriptor_metadata_only() -> None:
-    from agent.runtime_integration import subagent_action
-
-    profile = subagent_action.make_subagent_v0_profile(
-        can_use_tools=False,
-        can_write_memory=False,
-        can_spawn_child=False,
-    )
-
-    for operation in ("use_tool", "write_memory", "spawn_child"):
-        result = subagent_action.enforce_subagent_v0_capability(profile, operation)
+    for operation, flag in (
+        ("use_tool", "can_use_tools"),
+        ("write_memory", "can_write_memory"),
+        ("spawn_child", "can_spawn_child"),
+    ):
+        result = route_v0(payload={
+            "requested_operation": operation,
+            "profile_contract": {flag: False},
+        })
         assert result.status in {"failed", "policy_blocked"}
-        assert result.evidence["event"] == "subagent.policy.blocked"
+        assert "subagent.policy.blocked" in result.evidence["lifecycle_events"]
+        assert result.evidence["capability_flag"] == flag
 
 
-@pytest.mark.xfail(strict=True, reason="V0 output_schema validation not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_output_schema_constrains_safe_structured_result_and_invalid_output_fails_closed() -> None:
-    from agent.runtime_integration import subagent_action
-
-    profile = subagent_action.make_subagent_v0_profile(
-        output_schema={
-            "type": "object",
-            "required": ["summary"],
-            "properties": {"summary": {"type": "string"}},
-        },
-    )
-
-    valid = subagent_action.validate_subagent_v0_output(profile, {"summary": "safe"})
-    invalid = subagent_action.validate_subagent_v0_output(profile, {"raw": "RAW_OUTPUT"})
+    output_schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+    }
+    valid = route_v0(payload={
+        "output_schema": output_schema,
+        "provider_output": {"summary": "safe"},
+    })
+    invalid = route_v0(payload={
+        "output_schema": output_schema,
+        "provider_output": {"raw": "RAW_OUTPUT"},
+    })
 
     assert valid.status == "ok"
     assert invalid.status in {"failed", "policy_blocked"}
     assert "RAW_OUTPUT" not in repr(invalid)
-
-
-def test_existing_subagent_descriptor_has_no_v0_product_capability_flags_yet() -> None:
-    descriptor = SubAgentDescriptor(
-        name="demo-agent",
-        description="demo",
-        role="demo",
-        status="active",
-    )
-
-    assert not hasattr(descriptor, "can_use_tools")
-    assert not hasattr(descriptor, "can_write_memory")
-    assert not hasattr(descriptor, "can_write_checkpoint")
-    assert not hasattr(descriptor, "can_spawn_child")
-    assert not hasattr(descriptor, "can_modify_parent_context")
-    assert not hasattr(descriptor, "can_emit_parent_action")

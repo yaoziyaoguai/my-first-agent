@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
-from agent.subagent_system.adjudication import adjudicate_result
 from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult
+from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
 
 
 def _ok_result() -> SubAgentResult:
@@ -46,36 +44,39 @@ def _ok_result() -> SubAgentResult:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="Old adjudication auto-accept remains before U6")
-def test_child_result_first_enters_parent_decision_pending_not_auto_accept() -> None:
-    request = type("Request", (), {"max_revisions": 0, "task": "task"})()
+@pytest.mark.xfail(**V0_XFAIL)
+def test_v0_child_result_first_enters_parent_decision_pending_not_legacy_auto_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.subagent_system.adjudication as adjudication
 
-    decision = adjudicate_result(_ok_result(), request, revision_count=0)
+    def forbidden_adjudicate(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("v0 production path called legacy auto-accept adjudication")
 
-    assert decision.action == "parent_decision.pending"
+    monkeypatch.setattr(adjudication, "adjudicate_result", forbidden_adjudicate)
+
+    result = route_v0(payload={"child_result": _ok_result()})
+
+    assert result.payload["parent_decision_status"] == "pending"
+    assert result.payload["adopted"] is False
+    assert result.evidence["event"] == "subagent.parent_decision.pending"
 
 
-@pytest.mark.xfail(strict=True, reason="V0 parent_decision.applied contract not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_parent_decision_applied_is_explicit_and_display_only_is_not_adoption() -> None:
-    from agent.runtime_integration import subagent_action
+    result = route_v0(payload={
+        "child_result": _ok_result(),
+        "parent_decision": {"decision_type": "display_only"},
+    })
 
-    pending = subagent_action.create_subagent_v0_parent_decision_pending(_ok_result())
-    applied = subagent_action.apply_subagent_v0_parent_decision(
-        pending,
-        decision_type="display_only",
-    )
-
-    assert pending.status == "pending"
-    assert applied.status == "applied"
-    assert applied.decision_type == "display_only"
-    assert applied.adopted is False
-    assert applied.evidence_event == "subagent.parent_decision.applied"
+    assert result.payload["parent_decision_status"] == "applied"
+    assert result.payload["decision_type"] == "display_only"
+    assert result.payload["adopted"] is False
+    assert "subagent.parent_decision.applied" in result.evidence["lifecycle_events"]
 
 
-@pytest.mark.xfail(strict=True, reason="Display-only mutation guards not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_display_only_does_not_mutate_parent_owned_state() -> None:
-    from agent.runtime_integration import subagent_action
-
     parent_state = {
         "memory": (),
         "checkpoint": {},
@@ -83,23 +84,50 @@ def test_display_only_does_not_mutate_parent_owned_state() -> None:
         "prompt": "parent prompt",
         "messages": (),
     }
-    before = replace if False else repr(parent_state)
+    before = repr(parent_state)
 
-    subagent_action.display_subagent_v0_safe_summary(
-        parent_state=parent_state,
-        safe_summary="safe",
-        decision_type="display_only",
-    )
+    result = route_v0(payload={
+        "child_result": _ok_result(),
+        "parent_state": parent_state,
+        "parent_decision": {"decision_type": "display_only"},
+    })
 
     assert repr(parent_state) == before
+    assert result.evidence["memory_mutated"] is False
+    assert result.evidence["checkpoint_mutated"] is False
+    assert result.evidence["context_mutated"] is False
+    assert result.evidence["prompt_mutated"] is False
+    assert result.evidence["messages_mutated"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="V0 path does not yet bypass old auto-accept helper")
-def test_old_adjudication_auto_accept_helper_is_not_used_by_v0_production_path() -> None:
-    from agent.runtime_integration import subagent_action
+@pytest.mark.xfail(**V0_XFAIL)
+def test_old_adjudication_auto_accept_helper_is_not_used_by_v0_production_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.subagent_system.adjudication as adjudication
 
-    source = subagent_action.describe_subagent_v0_parent_decision_path()
+    def forbidden_adjudicate(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy adjudicate_result was called")
 
-    assert "adjudicate_result(" not in source
-    assert "accept_result" not in source
-    assert "parent_decision.pending" in source
+    monkeypatch.setattr(adjudication, "adjudicate_result", forbidden_adjudicate)
+
+    result = route_v0(payload={"child_result": _ok_result()})
+
+    assert result.payload["parent_decision_status"] == "pending"
+    assert result.evidence["legacy_adjudication_called"] is False
+
+
+@pytest.mark.xfail(**V0_XFAIL)
+def test_can_emit_parent_action_false_prevents_direct_parent_action() -> None:
+    result = route_v0(payload={
+        "profile_capabilities": {"can_emit_parent_action": False},
+        "child_result": {
+            "parent_action": {"type": "memory.write", "content": "RAW_PARENT_ACTION"}
+        },
+    })
+
+    assert result.status in {"failed", "policy_blocked", "success"}
+    assert result.evidence["can_emit_parent_action"] is False
+    assert result.evidence["direct_parent_action_emitted"] is False
+    assert result.payload["parent_decision_status"] == "pending"
+    assert "RAW_PARENT_ACTION" not in repr(result.evidence)

@@ -7,15 +7,19 @@ weakening the boundary.
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
-from agent.runtime_integration import schema as runtime_schema
 from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
 from agent.runtime_integration.schema import (
+    RuntimeActionRequest,
     RuntimeActionType,
     runtime_action_support_status,
+)
+from agent.subagent_system import delegation, executor
+from tests.runtime_integration.subagent_v0_contract_helpers import (
+    V0_MISSING_REASON,
+    route_v0,
+    v0_action_type,
 )
 
 DEFERRED_SUBAGENT_ACTIONS = (
@@ -27,9 +31,13 @@ DEFERRED_SUBAGENT_ACTIONS = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="Sub-agent v0 action/handler not implemented yet")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AttributeError,
+    reason=V0_MISSING_REASON,
+)
 def test_subagent_delegate_v0_is_the_only_product_v0_handler() -> None:
-    action = RuntimeActionType.SUBAGENT_DELEGATE_V0
+    action = v0_action_type()
     descriptor = runtime_action_support_status(action)
     dispatcher = build_phase1_dispatcher()
 
@@ -60,24 +68,29 @@ def test_subagent_delegate_l2_is_not_registered_in_production_dispatcher() -> No
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L2) is None
 
 
-@pytest.mark.xfail(strict=True, reason="SubAgentV0Handler not implemented yet")
-def test_v0_handler_cannot_call_l1_l2_executor_or_delegation_helpers() -> None:
-    from agent.runtime_integration import subagent_action
+@pytest.mark.xfail(
+    strict=True,
+    raises=(AssertionError, AttributeError),
+    reason="V0 handler missing or L1/L2 freeze gate not complete before U3A",
+)
+def test_v0_product_route_does_not_call_l1_l2_executor_or_delegation_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy L1/L2 path was called from v0 product route")
 
-    handler_cls = subagent_action.SubAgentV0Handler
-    source = inspect.getsource(handler_cls)
+    monkeypatch.setattr(executor, "execute_l1", forbidden_call)
+    monkeypatch.setattr(executor, "execute_l2", forbidden_call)
+    monkeypatch.setattr(delegation, "execute_l1", forbidden_call)
+    monkeypatch.setattr(delegation, "execute_l2", forbidden_call)
+    monkeypatch.setattr(delegation, "delegate_l1", forbidden_call)
+    monkeypatch.setattr(delegation, "delegate_l2", forbidden_call)
 
-    forbidden = (
-        "execute_l1",
-        "execute_l2",
-        "delegate_l1",
-        "delegate_l2",
-        "SubAgentDelegateL2Handler",
-        "batch_memory",
-        "request_revision",
-    )
-    for token in forbidden:
-        assert token not in source
+    result = route_v0()
+
+    assert result.status in {"success", "rejected", "failed"}
+    assert result.evidence.get("action_type") == v0_action_type().value
+    assert result.evidence.get("handler_name") == "SubAgentV0Handler"
 
 
 def test_child_actions_remain_deferred_reserved_and_unregistered() -> None:
@@ -92,11 +105,13 @@ def test_child_actions_remain_deferred_reserved_and_unregistered() -> None:
         assert dispatcher.get_handler(action) is None
 
 
-@pytest.mark.xfail(strict=True, reason="Sub-agent v0 RuntimeActionType not added yet")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AttributeError,
+    reason=V0_MISSING_REASON,
+)
 def test_runtime_action_schema_declares_v0_without_l1_l2_co_production() -> None:
-    assert hasattr(RuntimeActionType, "SUBAGENT_DELEGATE_V0")
-
-    v0_action = RuntimeActionType.SUBAGENT_DELEGATE_V0
+    v0_action = v0_action_type()
     legacy_actions = (
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         RuntimeActionType.SUBAGENT_DELEGATE_L1,
@@ -109,35 +124,105 @@ def test_runtime_action_schema_declares_v0_without_l1_l2_co_production() -> None
     )
 
 
-@pytest.mark.xfail(strict=True, reason="V0 one-runtime contract not implemented yet")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AttributeError,
+    reason="V0 handler/executor contract not implemented yet",
+)
 def test_v0_has_no_second_runtime_or_autonomous_child_loop_contract() -> None:
-    from agent.runtime_integration import subagent_action
+    result = route_v0(payload={"max_turns": 1})
 
-    handler_cls = subagent_action.SubAgentV0Handler
-    source = inspect.getsource(handler_cls).lower()
-
-    forbidden = (
-        "while ",
-        "for iteration",
-        "max_revisions",
-        "child_messages.append",
-        "independent session",
-        "checkpoint writer",
-        "memory writer",
-    )
-    for token in forbidden:
-        assert token not in source
-    assert "max_turns" in source
-    assert "= 1" in source or ": 1" in source
+    assert result.evidence.get("max_turns") == 1
+    assert result.evidence.get("second_runtime_created") is False
+    assert result.evidence.get("autonomous_child_loop") is False
+    assert result.evidence.get("l2_revision_loop") is False
+    assert result.evidence.get("batch_memory_seen") is False
 
 
 def test_no_v0_action_is_currently_hidden_under_existing_l1_l2_names() -> None:
-    action_values = {item.value for item in RuntimeActionType}
-
     assert "subagent.delegate_v0" not in {
         RuntimeActionType.SUBAGENT_DELEGATE_L0.value,
         RuntimeActionType.SUBAGENT_DELEGATE_L1.value,
         RuntimeActionType.SUBAGENT_DELEGATE_L2.value,
     }
-    assert "subagent.delegate_v0" not in action_values
-    assert not hasattr(runtime_schema.RuntimeActionType, "SUBAGENT_DELEGATE_V0")
+
+
+@pytest.mark.xfail(strict=True, reason="L1 still production-supported before U3A freeze")
+def test_subagent_delegate_l1_is_not_product_v0_production_handler() -> None:
+    descriptor = runtime_action_support_status(RuntimeActionType.SUBAGENT_DELEGATE_L1)
+    dispatcher = build_phase1_dispatcher()
+
+    assert descriptor.production_supported is False
+    assert descriptor.support_status in {"deferred", "experimental", "test_only", "compat_only"}
+    assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1) is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=(AssertionError, AttributeError),
+    reason="V0 product route missing or L1 production fallback not frozen before U3A",
+)
+def test_product_v0_delegation_never_falls_back_to_l1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_delegate_l1(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("delegate_l1 fallback was used by product v0 delegation")
+
+    monkeypatch.setattr(delegation, "delegate_l1", forbidden_delegate_l1)
+
+    result = route_v0(payload={"requested_profile_status": "product"})
+
+    assert result.evidence.get("action_type") == v0_action_type().value
+    assert result.evidence.get("legacy_fallback_used") is False
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=(AssertionError, AttributeError),
+    reason="V0 product route missing or L2 production route not frozen before U3A",
+)
+def test_product_v0_delegation_never_triggers_l2_handler_or_l2_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.runtime_integration import subagent_delegate_l2
+
+    def forbidden_l2(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy L2 path was used by product v0 delegation")
+
+    monkeypatch.setattr(subagent_delegate_l2.SubAgentDelegateL2Handler, "handle", forbidden_l2)
+    monkeypatch.setattr(executor, "execute_l2", forbidden_l2)
+    monkeypatch.setattr(delegation, "delegate_l2", forbidden_l2)
+
+    result = route_v0(payload={"requested_profile_status": "product"})
+
+    assert result.evidence.get("action_type") == v0_action_type().value
+    assert result.evidence.get("legacy_fallback_used") is False
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="L2 still production-registered before U3A freeze",
+)
+def test_subagent_delegate_l2_direct_production_route_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.runtime_integration import subagent_delegate_l2
+
+    def forbidden_l2_handler(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("SubAgentDelegateL2Handler was invoked from production dispatcher")
+
+    monkeypatch.setattr(
+        subagent_delegate_l2.SubAgentDelegateL2Handler,
+        "handle",
+        forbidden_l2_handler,
+    )
+    dispatcher = build_phase1_dispatcher()
+
+    assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L2) is None
+    result = dispatcher.route(RuntimeActionRequest(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L2,
+        source="subagent-v0-red-guardrail",
+        parent_trace_id="parent",
+        payload={"task": "must not run"},
+    ))
+    assert result.status == "not_supported"

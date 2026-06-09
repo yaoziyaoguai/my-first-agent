@@ -2,84 +2,101 @@
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
+from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
 
-@pytest.mark.xfail(strict=True, reason="Sub-agent v0 tool gate not implemented yet")
+
+@pytest.mark.xfail(**V0_XFAIL)
 def test_child_tools_are_disabled_by_default() -> None:
-    from agent.runtime_integration import subagent_action
+    result = route_v0()
+    evidence = dict(result.evidence)
 
-    profile = subagent_action.default_subagent_v0_profile()
-
-    assert profile.allowed_tools == ()
-    assert profile.can_use_tools is False
+    assert evidence["allowed_tool_count"] == 0
+    assert evidence["can_use_tools"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="V0 tool_use sanitizer not implemented yet")
-def test_tool_use_becomes_parent_tool_request_metadata_not_execution() -> None:
-    from agent.runtime_integration import subagent_action
+@pytest.mark.xfail(**V0_XFAIL)
+def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.tool_executor as tool_executor
+    import agent.tool_runtime_mediator as tool_runtime_mediator
 
-    result = subagent_action.parse_subagent_v0_provider_output({
-        "tool_use": {
+    def forbidden_execute(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("v0 child tool_use executed a parent tool")
+
+    monkeypatch.setattr(tool_executor, "execute_single_tool", forbidden_execute)
+    monkeypatch.setattr(tool_runtime_mediator, "execute_single_tool", forbidden_execute)
+    result = route_v0(payload={
+        "provider_output": {
+            "type": "tool_use",
             "name": "read_file",
             "input": {"path": "RAW_PATH_SHOULD_NOT_EXECUTE"},
             "reason": "needs context",
         },
     })
+    evidence = dict(result.evidence)
 
-    assert result.needs_parent_tool_request is True
-    assert result.requested_tool_name == "read_file"
-    assert result.safe_arguments_metadata
-    assert result.tool_executed is False
-    assert "RAW_PATH_SHOULD_NOT_EXECUTE" not in repr(result.safe_arguments_metadata)
+    assert result.payload["needs_parent_tool_request"] is True
+    assert result.payload["requested_tool_name"] == "read_file"
+    assert result.payload["safe_arguments_metadata"]
+    assert evidence["tool_executed"] is False
+    assert "RAW_PATH_SHOULD_NOT_EXECUTE" not in repr(result.payload["safe_arguments_metadata"])
 
 
-@pytest.mark.xfail(strict=True, reason="V0 unauthorized tool fail-closed path not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_unauthorized_tool_request_fails_closed_without_parent_state_mutation() -> None:
-    from agent.runtime_integration import subagent_action
-
-    result = subagent_action.handle_subagent_v0_tool_request(
-        requested_tool_name="shell",
-        requested_arguments={"cmd": "echo should-not-run"},
-        profile=subagent_action.default_subagent_v0_profile(),
-    )
+    result = route_v0(payload={
+        "provider_output": {
+            "type": "tool_use",
+            "name": "shell",
+            "input": {"cmd": "echo should-not-run"},
+        },
+    })
+    evidence = dict(result.evidence)
 
     assert result.status in {"policy_blocked", "failed"}
-    assert result.tool_executed is False
-    assert result.parent_messages_mutated is False
-    assert result.parent_checkpoint_mutated is False
+    assert evidence["tool_executed"] is False
+    assert evidence["parent_messages_mutated"] is False
+    assert evidence["parent_checkpoint_mutated"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="SubAgentV0Handler not implemented yet")
-def test_v0_child_path_cannot_call_direct_tool_execution_apis() -> None:
-    from agent.runtime_integration import subagent_action
+@pytest.mark.xfail(**V0_XFAIL)
+def test_v0_child_path_cannot_call_direct_tool_execution_apis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.tool_executor as tool_executor
+    import agent.tool_runtime_mediator as tool_runtime_mediator
 
-    source = inspect.getsource(subagent_action.SubAgentV0Handler)
+    def forbidden_execute(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("direct parent tool execution API was called")
 
-    forbidden = (
-        "execute_single_tool",
-        "ToolRuntimeMediator.execute",
-        "subprocess",
-        "requests.",
-        "Path.write_text",
-        "open(",
-        "shell",
-        "bash",
-    )
-    for token in forbidden:
-        assert token not in source
+    monkeypatch.setattr(tool_executor, "execute_single_tool", forbidden_execute)
+    monkeypatch.setattr(tool_runtime_mediator, "execute_single_tool", forbidden_execute)
+
+    result = route_v0(payload={
+        "provider_output": {
+            "type": "tool_use",
+            "name": "read_file",
+            "input": {"path": "file.txt"},
+        },
+    })
+
+    assert result.payload["needs_parent_tool_request"] is True
+    assert result.evidence["tool_executed"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="Child tool result checkpoint isolation not implemented yet")
+@pytest.mark.xfail(**V0_XFAIL)
 def test_child_tool_result_cannot_enter_parent_messages_or_checkpoint() -> None:
-    from agent.runtime_integration import subagent_action
+    result = route_v0(payload={
+        "raw_child_tool_result": "RAW_TOOL_RESULT_SHOULD_NOT_LEAK",
+    })
+    surfaces = {
+        "parent_messages": result.evidence.get("parent_messages", ()),
+        "parent_checkpoint": result.evidence.get("parent_checkpoint", {}),
+        "checkpoint_metadata": result.evidence.get("checkpoint_metadata", {}),
+    }
 
-    state = subagent_action.simulate_subagent_v0_tool_result_boundary(
-        raw_tool_result="RAW_TOOL_RESULT_SHOULD_NOT_LEAK",
-    )
-
-    assert "RAW_TOOL_RESULT_SHOULD_NOT_LEAK" not in repr(state.parent_messages)
-    assert "RAW_TOOL_RESULT_SHOULD_NOT_LEAK" not in repr(state.parent_checkpoint)
-    assert state.child_scratch_metadata["tool_result_hash"]
+    assert result.evidence["tool_result_hash"]
+    assert "RAW_TOOL_RESULT_SHOULD_NOT_LEAK" not in repr(surfaces)

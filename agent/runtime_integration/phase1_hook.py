@@ -171,14 +171,14 @@ def build_phase1_dispatcher(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
     )
-    # SUBAGENT_DELEGATE_V0：U3 只注册 contract-only shell。
-    # 不调用 provider/tool/memory/checkpoint，不触发 child loop；U4 前保持 fail-closed。
+    # SUBAGENT_DELEGATE_V0：唯一 product sub-agent Runtime path。
+    # U4 只允许 parent-controlled bounded execution，不执行 child tools/Memory/Checkpoint。
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_V0,
         SubAgentV0Handler(),
     )
     # U3A freeze gate：L1/L2 旧 child loops 只能作为 legacy/test/demo/compat
-    # 直接调用面保留，不能再注册到 product RuntimeAction dispatcher。这样未来 U4
+    # 直接调用面保留，不能再注册到 product RuntimeAction dispatcher。这样 v0 execution
     # 只能沿 SUBAGENT_DELEGATE_V0 这一条 Runtime path 前进，避免两套 child loop 并存。
     # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(

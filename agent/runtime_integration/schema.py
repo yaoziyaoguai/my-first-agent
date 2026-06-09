@@ -39,7 +39,7 @@ class RuntimeActionType(StrEnum):
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
     # Loop 3.2a: SubAgent L1 parent-mediated child loop action types
     SUBAGENT_DELEGATE_L1 = "subagent.delegate_l1"
-    # Product Sub-agent v0: contract-only handler shell in U3, execution deferred to U4.
+    # Product Sub-agent v0: parent-controlled bounded execution path.
     SUBAGENT_DELEGATE_V0 = "subagent.delegate.v0"
     SUBAGENT_CHILD_TOOL_REQUEST = "subagent.child_tool_request"
     SUBAGENT_CHILD_RESULT = "subagent.child_result"

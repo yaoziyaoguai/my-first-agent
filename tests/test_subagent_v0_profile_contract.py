@@ -84,8 +84,17 @@ def test_output_schema_constrains_safe_structured_result_and_invalid_output_fail
         "output_schema": output_schema,
         "provider_output": {"raw": "RAW_OUTPUT"},
     })
+    non_mapping = route_v0(payload={
+        "output_schema": output_schema,
+        "provider_output": "RAW_PROVIDER_TEXT_SHOULD_NOT_LEAK",
+    })
 
     assert valid.status == "success"
+    assert valid.evidence["provider_adapter_type"] == "SubAgentV0ProviderAdapter"
+    assert valid.evidence["provider_called"] is True
+    assert valid.evidence["provider_completed"] is True
+    assert valid.evidence["output_schema_valid"] is True
+    assert valid.evidence["safe_structured_result"] is True
     summary_projection = valid.payload["safe_output"]["summary"]
     assert summary_projection["type"] == "string"
     assert summary_projection["length"] > 0
@@ -96,7 +105,20 @@ def test_output_schema_constrains_safe_structured_result_and_invalid_output_fail
     assert "provider-secret" not in serialized_valid
     assert "/tmp/raw-provider-output.txt" not in serialized_valid
     assert invalid.status in {"failed", "policy_blocked"}
+    assert invalid.evidence["failure_kind"] == "output_schema_validation_failed"
+    assert invalid.evidence["provider_called"] is True
+    assert invalid.evidence["provider_completed"] is False
+    assert invalid.evidence["output_schema_valid"] is False
+    assert "subagent.provider.called" in invalid.evidence["lifecycle_events"]
+    assert "subagent.provider.completed" not in invalid.evidence["lifecycle_events"]
+    assert "subagent.execution.failed" in invalid.evidence["lifecycle_events"]
     assert "RAW_OUTPUT" not in repr(invalid)
+    assert non_mapping.status == "failed"
+    assert non_mapping.evidence["failure_kind"] == "output_schema_validation_failed"
+    assert non_mapping.evidence["provider_called"] is True
+    assert non_mapping.evidence["provider_completed"] is False
+    assert non_mapping.evidence["output_schema_valid"] is False
+    assert "RAW_PROVIDER_TEXT_SHOULD_NOT_LEAK" not in repr(non_mapping)
 
 
 def test_output_schema_sanitizes_nested_provider_output_without_raw_text() -> None:

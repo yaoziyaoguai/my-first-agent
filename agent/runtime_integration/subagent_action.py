@@ -280,11 +280,12 @@ def _coerce_nonnegative_int(value: object) -> int:
 
 
 class SubAgentV0Handler:
-    """Contract-only product v0 RuntimeAction handler.
+    """Product v0 RuntimeAction handler.
 
     中文学习边界：
-    U3 只建立 RuntimeAction/Profile/Request/Result 合同和 fail-closed gates。
-    这里不调用 provider、不执行工具、不写 Memory/Checkpoint、不启动 child loop。
+    U4 只实现 parent-controlled、bounded、single-turn 的最小 execution path。
+    fake/real provider mode 共用 request/context/result/sanitizer/evidence 路径；
+    child 仍不能执行工具、写 Memory/Checkpoint、修改 parent state 或触发 L1/L2。
     """
 
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
@@ -374,6 +375,7 @@ class SubAgentV0Handler:
             error_type = type(failure).__name__ if failure is not None else "ProviderFailure"
             return self._failed_contract(
                 context,
+                target_module="SubAgentV0Executor",
                 payload=self._contract_result(status="failed").to_payload(),
                 reason=error_type,
                 lifecycle_events=(
@@ -383,8 +385,14 @@ class SubAgentV0Handler:
                 ),
                 evidence_extra={
                     **base_evidence,
-                    "provider_called": False,
+                    "execution_started": True,
+                    "contract_only": False,
+                    "not_implemented": False,
+                    "provider_adapter_type": "SubAgentV0ProviderAdapter",
+                    "provider_called": True,
+                    "provider_completed": False,
                     "provider_error_type": error_type,
+                    "failure_kind": "provider_failure",
                     "safe_error_metadata": {
                         "error_type": error_type,
                         "error_hash": stable_hash(error_type, prefix="error"),
@@ -428,58 +436,18 @@ class SubAgentV0Handler:
                 base_evidence=base_evidence,
             )
 
-        if provider_output is not None:
-            if isinstance(provider_output, Mapping) and "batch_memory" in provider_output:
-                return self._policy_blocked(
-                    context,
-                    profile=profile,
-                    v0_request=v0_request,
-                    requested_operation="write_memory",
-                    capability_flag="can_write_memory",
-                    base_evidence={
-                        **base_evidence,
-                        "batch_memory_seen": False,
-                        "memory_proposals_count": 0,
-                        "pending_memory_proposal_created": False,
-                    },
-                )
-            valid, safe_output, validation_error = validate_structured_output(
-                profile.output_schema,
-                provider_output,
-            )
-            if not valid:
-                return self._failed_contract(
-                    context,
-                    payload=self._contract_result(status="failed").to_payload(),
-                    reason=validation_error,
-                    lifecycle_events=(
-                        *_COMMON_V0_LIFECYCLE_EVENTS,
-                        "subagent.execution.failed",
-                    ),
-                    evidence_extra={
-                        **base_evidence,
-                        "failure_kind": "output_schema_validation_failed",
-                        "output_schema_valid": True,
-                        "output_validation_error": validation_error,
-                    },
-                )
-            result = self._contract_result(status="success", safe_output=safe_output)
-            return context.success(
-                handler_name=type(self).__name__,
-                target_module="SubAgentV0Contract",
-                payload=result.to_payload(),
-                observed_call=None,
-                parent_adjudicated=False,
-                evidence_extra={
+        if isinstance(provider_output, Mapping) and "batch_memory" in provider_output:
+            return self._policy_blocked(
+                context,
+                profile=profile,
+                v0_request=v0_request,
+                requested_operation="write_memory",
+                capability_flag="can_write_memory",
+                base_evidence={
                     **base_evidence,
-                    "output_schema_valid": True,
-                    "safe_structured_result": True,
-                    "lifecycle_events": (
-                        *_COMMON_V0_LIFECYCLE_EVENTS,
-                        "subagent.result.produced",
-                        "subagent.parent_decision.pending",
-                    ),
-                    "event": "subagent.parent_decision.pending",
+                    "batch_memory_seen": False,
+                    "memory_proposals_count": 0,
+                    "pending_memory_proposal_created": False,
                 },
             )
 
@@ -522,27 +490,12 @@ class SubAgentV0Handler:
                 },
             )
 
-        result = self._contract_result(status="success")
-        return context.success(
-            handler_name=type(self).__name__,
-            target_module="SubAgentV0Contract",
-            payload=result.to_payload(),
-            observed_call=None,
-            parent_adjudicated=False,
-            evidence_extra={
-                **base_evidence,
-                "contract_only": True,
-                "not_implemented": True,
-                "provider_call_allowed": profile.capability_flags.can_call_provider,
-                "lifecycle_events": (
-                    *_COMMON_V0_LIFECYCLE_EVENTS,
-                    "subagent.result.produced",
-                    "subagent.parent_decision.pending",
-                )
-                if scenario == "success"
-                else _COMMON_V0_LIFECYCLE_EVENTS,
-                "event": "subagent.execution.started",
-            },
+        return self._execute_v0(
+            context,
+            profile=profile,
+            v0_request=v0_request,
+            payload=payload,
+            base_evidence=base_evidence,
         )
 
     def _base_evidence(
@@ -603,7 +556,7 @@ class SubAgentV0Handler:
             "memory_store_write": False,
             "memory_runtime_direct_write": False,
             "checkpoint_write": False,
-            "checkpoint_metadata": self._checkpoint_metadata(profile, status="contract_only"),
+            "checkpoint_metadata": self._checkpoint_metadata(profile, status="pending"),
             "parent_messages_mutated": False,
             "parent_checkpoint_mutated": False,
             "context_mutated": False,
@@ -710,6 +663,7 @@ class SubAgentV0Handler:
         self,
         context: RuntimeActionContext,
         *,
+        target_module: str = "SubAgentV0Contract",
         payload: dict[str, Any],
         reason: str,
         lifecycle_events: tuple[str, ...],
@@ -717,7 +671,7 @@ class SubAgentV0Handler:
     ):
         return context.failed(
             handler_name=type(self).__name__,
-            target_module="SubAgentV0Contract",
+            target_module=target_module,
             payload=payload,
             observed_call=None,
             parent_adjudicated=False,
@@ -731,6 +685,132 @@ class SubAgentV0Handler:
             },
             error_safe_preview=reason,
         )
+
+    def _execute_v0(
+        self,
+        context: RuntimeActionContext,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+        payload: dict[str, Any],
+        base_evidence: dict[str, Any],
+    ):
+        provider_output = self._call_v0_provider_adapter(
+            profile=profile,
+            v0_request=v0_request,
+            payload=payload,
+        )
+        valid, safe_output, validation_error = validate_structured_output(
+            profile.output_schema,
+            provider_output,
+        )
+        if not valid:
+            return self._failed_contract(
+                context,
+                target_module="SubAgentV0Executor",
+                payload=self._contract_result(status="failed").to_payload(),
+                reason=validation_error,
+                lifecycle_events=(
+                    *_COMMON_V0_LIFECYCLE_EVENTS,
+                    "subagent.provider.called",
+                    "subagent.execution.failed",
+                ),
+                evidence_extra={
+                    **base_evidence,
+                    "execution_started": True,
+                    "contract_only": False,
+                    "not_implemented": False,
+                    "provider_adapter_type": "SubAgentV0ProviderAdapter",
+                    "provider_called": True,
+                    "provider_completed": False,
+                    "provider_raw_output_redacted": True,
+                    "failure_kind": "output_schema_validation_failed",
+                    "output_schema_valid": False,
+                    "output_validation_error": validation_error,
+                },
+            )
+
+        result = self._contract_result(status="success", safe_output=safe_output)
+        lifecycle_events = (
+            *_COMMON_V0_LIFECYCLE_EVENTS,
+            "subagent.provider.called",
+            "subagent.provider.completed",
+            "subagent.result.produced",
+            "subagent.parent_decision.pending",
+        )
+        return context.success(
+            handler_name=type(self).__name__,
+            target_module="SubAgentV0Executor",
+            payload=result.to_payload(),
+            observed_call=None,
+            parent_adjudicated=False,
+            evidence_extra={
+                **base_evidence,
+                "execution_started": True,
+                "contract_only": False,
+                "not_implemented": False,
+                "provider_adapter_type": "SubAgentV0ProviderAdapter",
+                "provider_called": True,
+                "provider_completed": True,
+                "provider_raw_output_redacted": True,
+                "output_schema_valid": True,
+                "safe_structured_result": True,
+                "parent_decision_status": "pending",
+                "auto_adoption": False,
+                "checkpoint_metadata": self._checkpoint_metadata(
+                    profile,
+                    status="success",
+                    result_hash=stable_hash(safe_output, prefix="result"),
+                ),
+                "lifecycle_events": lifecycle_events,
+                "lifecycle_event_payloads": self._lifecycle_event_payloads(
+                    profile,
+                    v0_request,
+                    lifecycle_events,
+                ),
+                "action_log": self._safe_action_log_preview(
+                    profile,
+                    v0_request,
+                    lifecycle_events=lifecycle_events,
+                ),
+                "log_viewer": {
+                    "subsystem": "subagent_v0",
+                    "event_count": len(lifecycle_events),
+                    "redacted": True,
+                },
+                "event": "subagent.parent_decision.pending",
+            },
+        )
+
+    def _call_v0_provider_adapter(
+        self,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Single v0 provider adapter seam for fake and real modes.
+
+        U4 does not perform network IO. Tests may inject provider_output to exercise
+        parsing; otherwise this adapter produces deterministic local structured output
+        that still flows through output_schema validation and sanitizer.
+        """
+
+        del profile
+        if "provider_output" in payload:
+            provider_output = payload.get("provider_output")
+            return dict(provider_output) if isinstance(provider_output, Mapping) else {
+                "_invalid_provider_output_type": type(provider_output).__name__,
+            }
+        provider_basis = {
+            "provider_mode": v0_request.provider_mode,
+            "profile_id": v0_request.profile_id,
+            "task_hash": v0_request.task_hash,
+            "context_hash": v0_request.prepared_context_metadata.get("context_hash", ""),
+        }
+        return {
+            "summary": stable_hash(provider_basis, prefix="v0summary"),
+        }
 
     def _tool_request_result(
         self,
@@ -790,13 +870,20 @@ class SubAgentV0Handler:
         self,
         profile: SubAgentV0ProfileContract,
         v0_request: SubAgentV0Request,
+        lifecycle_events: tuple[str, ...] | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        return ({
+        events = lifecycle_events or ("subagent.request.created",)
+        return tuple({
             "event": "subagent.request.created",
             "profile_id": profile.profile_id,
             "provider_mode": v0_request.provider_mode,
             "redacted": True,
-        },)
+        } if event == "subagent.request.created" else {
+            "event": event,
+            "profile_id": profile.profile_id,
+            "provider_mode": v0_request.provider_mode,
+            "redacted": True,
+        } for event in events)
 
     def _lifecycle_event_payloads(
         self,
@@ -850,12 +937,13 @@ class SubAgentV0Handler:
         profile: SubAgentV0ProfileContract,
         *,
         status: str,
+        result_hash: str = "",
     ) -> dict[str, str]:
         return {
             "delegation_id": stable_hash(profile.profile_id, prefix="delegation"),
             "profile_id": profile.profile_id,
             "status": status,
-            "result_hash": stable_hash(status, prefix="result"),
+            "result_hash": result_hash or stable_hash(status, prefix="result"),
             "decision": "pending",
         }
 

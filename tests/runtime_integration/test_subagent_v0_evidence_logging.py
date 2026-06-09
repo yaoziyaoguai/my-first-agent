@@ -8,10 +8,7 @@ import pytest
 
 from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
 from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
-from tests.runtime_integration.subagent_v0_contract_helpers import (
-    V0_U4_EXECUTION_XFAIL,
-    route_v0,
-)
+from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 COMMON_LIFECYCLE_REQUIRED_EVENTS = (
     "subagent.request.created",
@@ -121,7 +118,6 @@ def test_required_v0_lifecycle_event_catalog_is_declared() -> None:
     assert set(REQUIRED_V0_EVENTS) <= set(result.evidence["lifecycle_event_catalog"])
 
 
-@pytest.mark.xfail(**V0_U4_EXECUTION_XFAIL)
 def test_success_path_emits_success_lifecycle_events_only() -> None:
     result = route_v0(payload={"scenario": "success"})
     event_names = set(result.evidence["lifecycle_events"])
@@ -150,6 +146,13 @@ def test_failure_path_emits_failed_event_without_success_path_forgery() -> None:
         assert event_name not in event_names
     assert "subagent.execution.skipped" not in event_names
     assert "subagent.policy.blocked" not in event_names
+    assert result.evidence["target_module"] == "SubAgentV0Executor"
+    assert result.evidence["contract_only"] is False
+    assert result.evidence["not_implemented"] is False
+    assert result.evidence["provider_adapter_type"] == "SubAgentV0ProviderAdapter"
+    assert result.evidence["provider_called"] is True
+    assert result.evidence["provider_completed"] is False
+    assert result.evidence["failure_kind"] == "provider_failure"
     assert set(safe_error_metadata) >= SAFE_ERROR_FIELDS
     assert safe_error_metadata["error_type"] == "RuntimeError"
     assert safe_error_metadata["redacted"] is True

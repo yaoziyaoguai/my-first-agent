@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_profile_capability_flags_default_safe() -> None:
     result = route_v0(payload={"introspect_profile": True})
     profile = result.evidence["profile_contract"]
@@ -23,7 +20,6 @@ def test_v0_profile_capability_flags_default_safe() -> None:
     assert profile["can_emit_parent_action"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_can_call_provider_obeys_provider_mode_allowed() -> None:
     fake_allowed = route_v0(payload={
         "profile_contract": {"provider_mode_allowed": "fake_only", "can_call_provider": True},
@@ -45,7 +41,6 @@ def test_can_call_provider_obeys_provider_mode_allowed() -> None:
     assert real_allowed.evidence["provider_call_allowed"] is True
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_demo_profile_is_not_product_capability_and_product_status_is_explicit() -> None:
     demo = route_v0(payload={"profile_contract": {"status": "demo"}})
     product = route_v0(payload={"profile_contract": {"status": "product"}})
@@ -55,7 +50,6 @@ def test_demo_profile_is_not_product_capability_and_product_status_is_explicit()
     assert product.evidence["profile_status"] == "product"
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_capability_flags_are_execution_gates_not_descriptor_metadata_only() -> None:
     for operation, flag in (
         ("use_tool", "can_use_tools"),
@@ -71,7 +65,6 @@ def test_capability_flags_are_execution_gates_not_descriptor_metadata_only() -> 
         assert result.evidence["capability_flag"] == flag
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_output_schema_constrains_safe_structured_result_and_invalid_output_fails_closed() -> None:
     output_schema = {
         "type": "object",

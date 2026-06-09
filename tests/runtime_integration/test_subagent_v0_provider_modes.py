@@ -8,14 +8,12 @@ import pytest
 
 from agent.runtime_integration.schema import RuntimeActionResult
 from tests.runtime_integration.subagent_v0_contract_helpers import (
-    V0_XFAIL,
     build_v0_request,
     route_v0,
     v0_action_type,
 )
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_default_provider_mode_is_fake_local_safe_and_explicit() -> None:
     result = route_v0()
     evidence = dict(result.evidence)
@@ -27,7 +25,6 @@ def test_default_provider_mode_is_fake_local_safe_and_explicit() -> None:
     assert evidence["activated_from_environment"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_real_provider_requires_explicit_parent_opt_in_not_environment_drift() -> None:
     result = route_v0(payload={
         "provider_mode": "real_opt_in",
@@ -36,14 +33,13 @@ def test_real_provider_requires_explicit_parent_opt_in_not_environment_drift() -
     })
     evidence = dict(result.evidence)
 
-    assert result.status in {"rejected", "failed"}
+    assert result.status in {"rejected", "failed", "policy_blocked"}
     assert evidence["real_call_allowed"] is False
     assert evidence["provider_mode"] != "real_opt_in"
     assert evidence["provider_secret_present"] is True
     assert evidence["secret_material_exposed"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_fake_and_real_share_request_handler_executor_parser_result_and_evidence_path() -> None:
     fake_request = build_v0_request(provider_mode="fake_local")
     real_request = build_v0_request(provider_mode="real_opt_in")
@@ -76,7 +72,6 @@ def test_runtime_action_result_rejects_secret_like_evidence() -> None:
         )
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_provider_error_records_error_type_only_not_exception_string() -> None:
     result = route_v0(payload={
         "provider_failure": RuntimeError(
@@ -101,7 +96,6 @@ def test_provider_error_records_error_type_only_not_exception_string() -> None:
     assert "RuntimeError" in serialized
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_fake_result_is_not_labeled_as_real_and_secrets_stay_out_of_safe_surfaces() -> None:
     result = route_v0(payload={"secret_marker": "sk-test-secret"})
     serialized = json.dumps(

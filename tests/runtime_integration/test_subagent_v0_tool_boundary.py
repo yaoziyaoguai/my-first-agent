@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_child_tools_are_disabled_by_default() -> None:
     result = route_v0()
     evidence = dict(result.evidence)
@@ -16,7 +15,6 @@ def test_child_tools_are_disabled_by_default() -> None:
     assert evidence["can_use_tools"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -45,7 +43,6 @@ def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
     assert "RAW_PATH_SHOULD_NOT_EXECUTE" not in repr(result.payload["safe_arguments_metadata"])
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_unauthorized_tool_request_fails_closed_without_parent_state_mutation() -> None:
     result = route_v0(payload={
         "provider_output": {
@@ -62,7 +59,6 @@ def test_unauthorized_tool_request_fails_closed_without_parent_state_mutation() 
     assert evidence["parent_checkpoint_mutated"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_child_path_cannot_call_direct_tool_execution_apis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,7 +83,6 @@ def test_v0_child_path_cannot_call_direct_tool_execution_apis(
     assert result.evidence["tool_executed"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_child_tool_result_cannot_enter_parent_messages_or_checkpoint() -> None:
     result = route_v0(payload={
         "raw_child_tool_result": "RAW_TOOL_RESULT_SHOULD_NOT_LEAK",

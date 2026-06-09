@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
 def _forbid_legacy_adjudication(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
@@ -55,7 +55,6 @@ def _ok_result() -> SubAgentResult:
     )
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_child_result_first_enters_parent_decision_pending_not_legacy_auto_accept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -71,7 +70,6 @@ def test_v0_child_result_first_enters_parent_decision_pending_not_legacy_auto_ac
     assert result.evidence["event"] == "subagent.parent_decision.pending"
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_parent_decision_applied_is_explicit_and_display_only_is_not_adoption() -> None:
     result = route_v0(payload={
         "child_result": _ok_result(),
@@ -84,7 +82,6 @@ def test_parent_decision_applied_is_explicit_and_display_only_is_not_adoption() 
     assert "subagent.parent_decision.applied" in result.evidence["lifecycle_events"]
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_display_only_does_not_mutate_parent_owned_state() -> None:
     parent_state = {
         "memory": (),
@@ -109,7 +106,6 @@ def test_display_only_does_not_mutate_parent_owned_state() -> None:
     assert result.evidence["messages_mutated"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_old_adjudication_auto_accept_helper_is_not_used_by_v0_production_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -121,7 +117,6 @@ def test_old_adjudication_auto_accept_helper_is_not_used_by_v0_production_path(
     assert result.evidence["legacy_adjudication_called"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_can_emit_parent_action_false_prevents_direct_parent_action() -> None:
     result = route_v0(payload={
         "profile_capabilities": {"can_emit_parent_action": False},

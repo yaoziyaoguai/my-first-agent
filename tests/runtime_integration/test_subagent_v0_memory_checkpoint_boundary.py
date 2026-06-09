@@ -7,10 +7,9 @@ import inspect
 import pytest
 
 from agent.subagent_system import executor
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_profile_cannot_write_memory_checkpoint_or_emit_memory_requests() -> None:
     result = route_v0()
     evidence = dict(result.evidence)
@@ -21,7 +20,6 @@ def test_v0_profile_cannot_write_memory_checkpoint_or_emit_memory_requests() -> 
     assert evidence["memory_scope"] == "none"
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_no_batch_memory_pending_memory_proposal_or_direct_write_from_v0_result() -> None:
     result = route_v0(payload={
         "provider_output": {
@@ -38,7 +36,6 @@ def test_no_batch_memory_pending_memory_proposal_or_direct_write_from_v0_result(
     assert result.evidence["memory_store_write"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_v0_path_does_not_call_direct_memory_or_checkpoint_write_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -63,7 +60,6 @@ def test_v0_path_does_not_call_direct_memory_or_checkpoint_write_paths(
     assert result.evidence["checkpoint_write"] is False
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_parent_checkpoint_stores_safe_subagent_metadata_only() -> None:
     result = route_v0(payload={"raw_child_result": "RAW_CHILD_RESULT_SHOULD_NOT_LEAK"})
     metadata = result.evidence["checkpoint_metadata"]

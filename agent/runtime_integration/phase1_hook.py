@@ -39,6 +39,7 @@ from agent.runtime_integration.streaming_provider import (
 from agent.runtime_integration.subagent_action import (
     SubAgentDelegateL0Handler,
     SubAgentDelegateL1Handler,
+    SubAgentV0Handler,
 )
 from agent.runtime_integration.subagent_delegate_l2 import (
     SubAgentDelegateL2Handler,
@@ -173,6 +174,12 @@ def build_phase1_dispatcher(
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
+    )
+    # SUBAGENT_DELEGATE_V0：U3 只注册 contract-only shell。
+    # 不调用 provider/tool/memory/checkpoint，不触发 child loop；U4 前保持 fail-closed。
+    registry.register(
+        RuntimeActionType.SUBAGENT_DELEGATE_V0,
+        SubAgentV0Handler(),
     )
     # Loop 3.2a: SUBAGENT_DELEGATE_L1 — parent-mediated child loop with real provider。
     # L1 handler 共享 _subagent_registry。provider/tool_mediator 由 core.chat()

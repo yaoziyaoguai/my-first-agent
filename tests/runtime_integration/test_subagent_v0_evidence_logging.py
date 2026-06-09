@@ -6,7 +6,10 @@ import json
 
 import pytest
 
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration.subagent_v0_contract_helpers import (
+    V0_U4_EXECUTION_XFAIL,
+    route_v0,
+)
 
 COMMON_LIFECYCLE_REQUIRED_EVENTS = (
     "subagent.request.created",
@@ -110,14 +113,13 @@ def _redaction_surfaces(result) -> dict[str, object]:
     return surfaces
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_required_v0_lifecycle_event_catalog_is_declared() -> None:
     result = route_v0(payload={"introspect_lifecycle_catalog": True})
 
     assert set(REQUIRED_V0_EVENTS) <= set(result.evidence["lifecycle_event_catalog"])
 
 
-@pytest.mark.xfail(**V0_XFAIL)
+@pytest.mark.xfail(**V0_U4_EXECUTION_XFAIL)
 def test_success_path_emits_success_lifecycle_events_only() -> None:
     result = route_v0(payload={"scenario": "success"})
     event_names = set(result.evidence["lifecycle_events"])
@@ -133,7 +135,6 @@ def test_success_path_emits_success_lifecycle_events_only() -> None:
         assert event["redacted"] is True
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_failure_path_emits_failed_event_without_success_path_forgery() -> None:
     result = route_v0(payload={
         "scenario": "provider_failure",
@@ -154,7 +155,6 @@ def test_failure_path_emits_failed_event_without_success_path_forgery() -> None:
     assert "sk-test-secret" not in repr(safe_error_metadata)
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_skipped_path_emits_skipped_event_with_complete_policy_identifiers() -> None:
     result = route_v0(payload={
         "scenario": "skipped",
@@ -168,7 +168,6 @@ def test_skipped_path_emits_skipped_event_with_complete_policy_identifiers() -> 
     _assert_no_policy_path_leak(result.evidence)
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_policy_blocked_path_emits_policy_blocked_event() -> None:
     result = route_v0(payload={
         "scenario": "policy_blocked",
@@ -184,7 +183,6 @@ def test_policy_blocked_path_emits_policy_blocked_event() -> None:
     _assert_no_policy_path_leak(result.evidence)
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_no_raw_child_content_path_exception_or_secret_in_nonempty_surfaces() -> None:
     result = route_v0(payload={
         "scenario": "redaction_probe",
@@ -214,7 +212,6 @@ def test_no_raw_child_content_path_exception_or_secret_in_nonempty_surfaces() ->
         assert token not in serialized
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_skipped_policy_evidence_uses_safe_policy_identifiers_only() -> None:
     result = route_v0(payload={
         "scenario": "skipped",
@@ -228,7 +225,6 @@ def test_skipped_policy_evidence_uses_safe_policy_identifiers_only() -> None:
 
 
 @pytest.mark.parametrize(("scenario", "omitted_event"), MISSING_EVENT_CASES)
-@pytest.mark.xfail(**V0_XFAIL)
 def test_missing_required_event_fails_v0_execution(
     scenario: str,
     omitted_event: str,
@@ -243,7 +239,6 @@ def test_missing_required_event_fails_v0_execution(
     assert result.evidence["missing_lifecycle_event"] == omitted_event
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_provider_error_raw_message_is_redacted_across_all_surfaces() -> None:
     result = route_v0(payload={
         "scenario": "provider_failure",

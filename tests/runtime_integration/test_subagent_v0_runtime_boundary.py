@@ -17,8 +17,7 @@ from agent.runtime_integration.schema import (
 )
 from agent.subagent_system import delegation, executor
 from tests.runtime_integration.subagent_v0_contract_helpers import (
-    V0_MISSING_REASON,
-    MissingSubAgentV0Contract,
+    V0_U3A_FREEZE_XFAIL,
     route_v0,
     v0_action_type,
 )
@@ -32,11 +31,6 @@ DEFERRED_SUBAGENT_ACTIONS = (
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_subagent_delegate_v0_is_the_only_product_v0_handler() -> None:
     action = v0_action_type()
     descriptor = runtime_action_support_status(action)
@@ -59,11 +53,7 @@ def test_subagent_delegate_v0_is_the_only_product_v0_handler() -> None:
     assert set(product_handlers) == {action}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
+@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
 def test_subagent_delegate_l2_is_not_registered_in_production_dispatcher() -> None:
     v0_action_type()
     dispatcher = build_phase1_dispatcher()
@@ -74,11 +64,6 @@ def test_subagent_delegate_l2_is_not_registered_in_production_dispatcher() -> No
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L2) is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_v0_product_route_does_not_call_l1_l2_executor_or_delegation_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,11 +105,6 @@ def test_child_actions_remain_deferred_reserved_and_unregistered() -> None:
         assert dispatcher.get_handler(action) is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_runtime_action_schema_declares_v0_without_l1_l2_co_production() -> None:
     v0_action = v0_action_type()
     legacy_actions = (
@@ -139,11 +119,6 @@ def test_runtime_action_schema_declares_v0_without_l1_l2_co_production() -> None
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_v0_has_no_second_runtime_or_autonomous_child_loop_contract() -> None:
     result = route_v0(payload={"max_turns": 1})
 
@@ -162,11 +137,7 @@ def test_no_v0_action_is_currently_hidden_under_existing_l1_l2_names() -> None:
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
+@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
 def test_subagent_delegate_l1_is_not_product_v0_production_handler() -> None:
     v0_action_type()
     descriptor = runtime_action_support_status(RuntimeActionType.SUBAGENT_DELEGATE_L1)
@@ -177,11 +148,6 @@ def test_subagent_delegate_l1_is_not_product_v0_production_handler() -> None:
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1) is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_product_v0_delegation_never_falls_back_to_l1(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -196,11 +162,6 @@ def test_product_v0_delegation_never_falls_back_to_l1(
     assert result.evidence.get("legacy_fallback_used") is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
 def test_product_v0_delegation_never_triggers_l2_handler_or_l2_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,11 +180,7 @@ def test_product_v0_delegation_never_triggers_l2_handler_or_l2_executor(
     assert result.evidence.get("legacy_fallback_used") is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=MissingSubAgentV0Contract,
-    reason=V0_MISSING_REASON,
-)
+@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
 def test_subagent_delegate_l2_direct_production_route_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -174,3 +174,13 @@ V0_XFAIL = {
     "raises": MissingSubAgentV0Contract,
     "reason": V0_MISSING_REASON,
 }
+
+V0_U3A_FREEZE_XFAIL = {
+    "strict": True,
+    "reason": "SubAgent v0 U3A freeze gate not implemented yet",
+}
+
+V0_U4_EXECUTION_XFAIL = {
+    "strict": True,
+    "reason": "SubAgent v0 U4 execution/evidence path not implemented yet",
+}

@@ -39,6 +39,8 @@ class RuntimeActionType(StrEnum):
     SUBAGENT_DELEGATE_L0 = "subagent.delegate_l0"
     # Loop 3.2a: SubAgent L1 parent-mediated child loop action types
     SUBAGENT_DELEGATE_L1 = "subagent.delegate_l1"
+    # Product Sub-agent v0: contract-only handler shell in U3, execution deferred to U4.
+    SUBAGENT_DELEGATE_V0 = "subagent.delegate.v0"
     SUBAGENT_CHILD_TOOL_REQUEST = "subagent.child_tool_request"
     SUBAGENT_CHILD_RESULT = "subagent.child_result"
     SUBAGENT_PARENT_ADJUDICATION = "subagent.parent_adjudication"
@@ -98,6 +100,7 @@ _ACTION_TYPE_EVIDENCE_KIND: dict[RuntimeActionType, str] = {
     RuntimeActionType.SUBAGENT_DELEGATE_L0: _EVIDENCE_KIND_PROBE,
     # Loop 3.2a: SubAgent L1 类型均为 business（用户可见委托/工具/结果/裁决）
     RuntimeActionType.SUBAGENT_DELEGATE_L1: _EVIDENCE_KIND_BUSINESS,
+    RuntimeActionType.SUBAGENT_DELEGATE_V0: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_CHILD_RESULT: _EVIDENCE_KIND_BUSINESS,
     RuntimeActionType.SUBAGENT_PARENT_ADJUDICATION: _EVIDENCE_KIND_BUSINESS,
@@ -145,6 +148,8 @@ VALID_RESULT_STATUSES = frozenset({
     "confirmation_required",
     "not_supported",
     "failed",
+    "skipped",
+    "policy_blocked",
 })
 
 _SECRET_PATTERNS = (
@@ -246,6 +251,39 @@ class RuntimeActionSupportDescriptor:
 
 
 _DEFERRED_SUBAGENT_SUPPORT: dict[RuntimeActionType, RuntimeActionSupportDescriptor] = {
+    RuntimeActionType.SUBAGENT_DELEGATE_L0: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L0,
+        support_status="compat_only",
+        production_supported=False,
+        reserved=False,
+        expected_behavior="demo/compat L0 route; not product Sub-agent v0 capability",
+        evidence_requirements="safe demo/compat metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 product action boundary",
+        add_handler_now=True,
+    ),
+    RuntimeActionType.SUBAGENT_DELEGATE_L1: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L1,
+        support_status="compat_only",
+        production_supported=False,
+        reserved=False,
+        expected_behavior="legacy parent-mediated child loop; not product v0",
+        evidence_requirements="safe legacy metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 freeze gate",
+        add_handler_now=True,
+    ),
+    RuntimeActionType.SUBAGENT_DELEGATE_L2: RuntimeActionSupportDescriptor(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L2,
+        support_status="experimental",
+        production_supported=False,
+        reserved=True,
+        expected_behavior="experimental native loop pending U3A freeze; not product v0",
+        evidence_requirements="safe experimental metadata only",
+        raw_child_payload_allowed=False,
+        subagent_v0_owner="Sub-agent v0 freeze gate",
+        add_handler_now=True,
+    ),
     RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST: RuntimeActionSupportDescriptor(
         action_type=RuntimeActionType.SUBAGENT_CHILD_TOOL_REQUEST,
         support_status="deferred",

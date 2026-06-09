@@ -8,7 +8,6 @@ import pytest
 
 from tests.runtime_integration import subagent_v0_contract_helpers as v0_contract
 from tests.runtime_integration.subagent_v0_contract_helpers import (
-    V0_XFAIL,
     build_v0_context,
     route_v0,
 )
@@ -58,7 +57,6 @@ def test_v0_context_contract_helper_redacts_raw_path_from_metadata() -> None:
     assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_context_uses_parent_selected_files_and_enforces_limits() -> None:
     result = route_v0(payload={
         "parent_selected_files": ("a.py", "b.py"),
@@ -74,7 +72,6 @@ def test_context_uses_parent_selected_files_and_enforces_limits() -> None:
     assert "c.py" not in context_metadata["selected_file_ids"]
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_route_v0_context_builder_uses_contract_read_seam(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -96,7 +93,6 @@ def test_route_v0_context_builder_uses_contract_read_seam(
     assert result.evidence["context_metadata"]["context_read_seam_calls"] == 1
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_no_uncontrolled_path_read_text_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
     allowed_file_ids = {"a.py"}
     calls: list[str] = []
@@ -125,7 +121,6 @@ def test_no_uncontrolled_path_read_text_expansion(monkeypatch: pytest.MonkeyPatc
     assert result.evidence["parent_policy_selects_all_files"] is True
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_context_evidence_contains_only_hash_length_count_and_no_raw_path_or_text() -> None:
     result = route_v0(payload={
         "parent_context_blobs": {
@@ -142,7 +137,6 @@ def test_context_evidence_contains_only_hash_length_count_and_no_raw_path_or_tex
     assert "path" not in metadata
 
 
-@pytest.mark.xfail(**V0_XFAIL)
 def test_child_cannot_add_files_or_mutate_parent_context_prompt_or_messages() -> None:
     parent_state = {
         "context_files": ("parent.py",),

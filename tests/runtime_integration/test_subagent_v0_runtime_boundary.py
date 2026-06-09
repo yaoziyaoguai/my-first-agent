@@ -17,7 +17,6 @@ from agent.runtime_integration.schema import (
 )
 from agent.subagent_system import delegation, executor
 from tests.runtime_integration.subagent_v0_contract_helpers import (
-    V0_U3A_FREEZE_XFAIL,
     route_v0,
     v0_action_type,
 )
@@ -53,14 +52,14 @@ def test_subagent_delegate_v0_is_the_only_product_v0_handler() -> None:
     assert set(product_handlers) == {action}
 
 
-@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
 def test_subagent_delegate_l2_is_not_registered_in_production_dispatcher() -> None:
     v0_action_type()
     dispatcher = build_phase1_dispatcher()
     descriptor = runtime_action_support_status(RuntimeActionType.SUBAGENT_DELEGATE_L2)
 
     assert descriptor.production_supported is False
-    assert descriptor.support_status in {"deferred", "experimental", "test_only"}
+    assert descriptor.support_status in {"deferred", "experimental", "test_only", "compat_only"}
+    assert descriptor.add_handler_now is False
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L2) is None
 
 
@@ -137,7 +136,6 @@ def test_no_v0_action_is_currently_hidden_under_existing_l1_l2_names() -> None:
     }
 
 
-@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
 def test_subagent_delegate_l1_is_not_product_v0_production_handler() -> None:
     v0_action_type()
     descriptor = runtime_action_support_status(RuntimeActionType.SUBAGENT_DELEGATE_L1)
@@ -145,6 +143,7 @@ def test_subagent_delegate_l1_is_not_product_v0_production_handler() -> None:
 
     assert descriptor.production_supported is False
     assert descriptor.support_status in {"deferred", "experimental", "test_only", "compat_only"}
+    assert descriptor.add_handler_now is False
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1) is None
 
 
@@ -180,7 +179,50 @@ def test_product_v0_delegation_never_triggers_l2_handler_or_l2_executor(
     assert result.evidence.get("legacy_fallback_used") is False
 
 
-@pytest.mark.xfail(**V0_U3A_FREEZE_XFAIL)
+def test_subagent_delegate_l1_direct_production_route_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.runtime_integration import subagent_action
+
+    v0_action_type()
+
+    def forbidden_l1_handler(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("SubAgentDelegateL1Handler was invoked from production dispatcher")
+
+    def forbidden_l1_execution(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy L1 execution was invoked from production dispatcher")
+
+    monkeypatch.setattr(
+        subagent_action.SubAgentDelegateL1Handler,
+        "handle",
+        forbidden_l1_handler,
+    )
+    monkeypatch.setattr(executor, "execute_l1", forbidden_l1_execution)
+    monkeypatch.setattr(delegation, "delegate_l1", forbidden_l1_execution)
+    dispatcher = build_phase1_dispatcher()
+
+    assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L1) is None
+    result = dispatcher.route(RuntimeActionRequest(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_L1,
+        source="subagent-v0-red-guardrail",
+        parent_trace_id="parent",
+        payload={
+            "subagent_name": "code-reviewer",
+            "delegation_goal": "must not run /tmp/raw-secret.txt",
+            "api_key": "sk-live-u3a-freeze-secret",
+        },
+    ))
+
+    assert result.status == "not_supported"
+    assert result.payload == {"reason": "no handler registered"}
+    assert result.evidence["target_handler_invoked"] is False
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["result_returned_to_parent_runtime"] is True
+    surfaces = repr({"payload": result.payload, "evidence": result.evidence})
+    assert "/tmp/raw-secret.txt" not in surfaces
+    assert "sk-live-u3a-freeze-secret" not in surfaces
+
+
 def test_subagent_delegate_l2_direct_production_route_is_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -196,6 +238,8 @@ def test_subagent_delegate_l2_direct_production_route_is_unreachable(
         "handle",
         forbidden_l2_handler,
     )
+    monkeypatch.setattr(executor, "execute_l2", forbidden_l2_handler)
+    monkeypatch.setattr(delegation, "delegate_l2", forbidden_l2_handler)
     dispatcher = build_phase1_dispatcher()
 
     assert dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_L2) is None
@@ -203,6 +247,16 @@ def test_subagent_delegate_l2_direct_production_route_is_unreachable(
         action_type=RuntimeActionType.SUBAGENT_DELEGATE_L2,
         source="subagent-v0-red-guardrail",
         parent_trace_id="parent",
-        payload={"task": "must not run"},
+        payload={
+            "task": "must not run RAW_PROMPT_SHOULD_NOT_LEAK",
+            "policy_path": "/tmp/raw-policy-path",
+        },
     ))
     assert result.status == "not_supported"
+    assert result.payload == {"reason": "no handler registered"}
+    assert result.evidence["target_handler_invoked"] is False
+    assert result.evidence["module_invoked"] is False
+    assert result.evidence["result_returned_to_parent_runtime"] is True
+    surfaces = repr({"payload": result.payload, "evidence": result.evidence})
+    assert "RAW_PROMPT_SHOULD_NOT_LEAK" not in surfaces
+    assert "/tmp/raw-policy-path" not in surfaces

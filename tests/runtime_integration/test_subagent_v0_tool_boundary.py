@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from agent.tool_executor import FORCE_STOP
+from agent.tool_runtime_mediator import ToolRuntimeMediator
 from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
@@ -201,6 +204,54 @@ def test_v0_child_path_cannot_call_direct_tool_execution_apis(
 
     assert result.payload["needs_parent_tool_request"] is True
     assert result.evidence["tool_executed"] is False
+
+
+def test_tool_runtime_mediator_child_request_defaults_to_parent_decision_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent.tool_runtime_mediator as tool_runtime_mediator
+
+    captured_requests: list[object] = []
+
+    class _Dispatcher:
+        def route_from_runtime_loop(self, request: object, **_kwargs: object) -> object:
+            captured_requests.append(request)
+            return SimpleNamespace(status="not_supported", payload={}, evidence={})
+
+    def forbidden_execute(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("child tool request must not execute parent tool")
+
+    monkeypatch.setattr(tool_runtime_mediator, "execute_single_tool", forbidden_execute)
+    mediator = ToolRuntimeMediator(
+        _Dispatcher(),
+        state=SimpleNamespace(task=SimpleNamespace(tool_execution_log={})),
+        turn_state=SimpleNamespace(on_runtime_event=lambda _event: None),
+        turn_context={},
+        messages=[],
+    )
+
+    result = mediator.mediate_child_tool_request(
+        "read_file",
+        {"path": "/tmp/raw-child-tool-path.txt", "api_key": "sk-live-child-tool-secret"},
+        delegation_id="legacy-l1",
+        parent_trace_id="parent-trace",
+    )
+
+    assert result == FORCE_STOP
+    assert captured_requests
+    request_payload = captured_requests[-1].payload
+    assert request_payload["needs_parent_tool_request"] is True
+    assert request_payload["child_tool_direct_execution_blocked"] is True
+    assert request_payload["gate_disposition"] == "policy_blocked"
+    assert "arguments_hash" in request_payload
+    assert "argument_key_count" in request_payload
+    surfaces = json.dumps({
+        "request_payload": request_payload,
+        "turn_context": mediator._turn_context,
+        "messages": mediator._messages,
+    }, default=str)
+    assert "/tmp/raw-child-tool-path.txt" not in surfaces
+    assert "sk-live-child-tool-secret" not in surfaces
 
 
 def test_child_tool_result_cannot_enter_parent_messages_or_checkpoint() -> None:

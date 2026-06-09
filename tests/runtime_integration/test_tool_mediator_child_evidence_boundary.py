@@ -47,8 +47,11 @@ def test_child_tool_request_evidence_redacts_arguments_and_path() -> None:
     assert "arguments_preview" not in payload
     assert RAW_ARGUMENT not in str(payload)
     assert "raw query" not in str(payload)
+    assert "delegation-1" not in str(payload)
     assert payload["arguments_hash"].startswith("childargs:")
     assert payload["argument_key_count"] == 2
+    assert payload["delegation_id_hash"].startswith("childdelegation:")
+    assert payload["delegation_id_length"] == len("delegation-1")
     assert payload["path_hash"].startswith("path:")
     assert payload["path_kind"] in {"tmp", "absolute"}
     assert payload["redacted"] is True

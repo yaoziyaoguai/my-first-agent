@@ -38,11 +38,7 @@ from agent.runtime_integration.streaming_provider import (
 )
 from agent.runtime_integration.subagent_action import (
     SubAgentDelegateL0Handler,
-    SubAgentDelegateL1Handler,
     SubAgentV0Handler,
-)
-from agent.runtime_integration.subagent_delegate_l2 import (
-    SubAgentDelegateL2Handler,
 )
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
@@ -181,20 +177,9 @@ def build_phase1_dispatcher(
         RuntimeActionType.SUBAGENT_DELEGATE_V0,
         SubAgentV0Handler(),
     )
-    # Loop 3.2a: SUBAGENT_DELEGATE_L1 — parent-mediated child loop with real provider。
-    # L1 handler 共享 _subagent_registry。provider/tool_mediator 由 core.chat()
-    # 在 delegation 前通过 set_provider() 注入。
-    _l1_handler = SubAgentDelegateL1Handler(registry=_subagent_registry)
-    registry.register(
-        RuntimeActionType.SUBAGENT_DELEGATE_L1,
-        _l1_handler,
-    )
-    # Next-stage D-01: L2 handler 共享 _subagent_registry
-    _l2_handler = SubAgentDelegateL2Handler(registry=_subagent_registry)
-    registry.register(
-        RuntimeActionType.SUBAGENT_DELEGATE_L2,
-        _l2_handler,
-    )
+    # U3A freeze gate：L1/L2 旧 child loops 只能作为 legacy/test/demo/compat
+    # 直接调用面保留，不能再注册到 product RuntimeAction dispatcher。这样未来 U4
+    # 只能沿 SUBAGENT_DELEGATE_V0 这一条 Runtime path 前进，避免两套 child loop 并存。
     # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(
         RuntimeActionType.STREAMING_PROVIDER_CALL,
@@ -235,6 +220,4 @@ def build_phase1_dispatcher(
     ):
         registry.register(_scheduler_at, _scheduler_handler)
     _dispatcher = RuntimeActionDispatcher(registry=registry, observer=RuntimeActionModuleObserver())
-    # 注入 dispatcher 到 L1 handler（用于 SUBAGENT_PARENT_ADJUDICATION evidence dispatch）
-    _l1_handler._dispatcher = _dispatcher
     return _dispatcher

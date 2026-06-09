@@ -133,6 +133,42 @@ def _safe_child_text_metadata(value: str, *, prefix: str) -> dict[str, Any]:
     }
 
 
+def _safe_child_tool_name_metadata(tool_name: str) -> dict[str, Any]:
+    """Provider-derived child tool names are evidence-sensitive; never store raw."""
+
+    raw = str(tool_name or "")
+    return {
+        "tool_name_present": bool(raw),
+        "tool_name_length": len(raw),
+        "tool_name_hash": _hash_memory_tool_value(raw, prefix="childtool"),
+        "tool_name_redacted": True,
+    }
+
+
+def _safe_child_delegation_metadata(delegation_id: str) -> dict[str, Any]:
+    raw = str(delegation_id or "")
+    return {
+        "delegation_id_hash": _hash_memory_tool_value(raw, prefix="childdelegation"),
+        "delegation_id_length": len(raw),
+        "delegation_id_redacted": True,
+    }
+
+
+def _child_memory_policy_metadata(status: str) -> dict[str, Any]:
+    policy_rule_id = (
+        "child_memory_scope_none"
+        if status == "rejected"
+        else "child_memory_direct_write_disabled"
+    )
+    policy_basis = f"subagent_child_memory_v0_lockdown:{policy_rule_id}:{status}"
+    return {
+        "policy_id": "subagent_child_memory_v0_lockdown",
+        "policy_rule_id": policy_rule_id,
+        "policy_hash": _hash_memory_tool_value(policy_basis, prefix="policy"),
+        "policy_decision_source": "ToolRuntimeMediator",
+    }
+
+
 class ToolRuntimeMediator:
     """Dispatcher-mediated tool execution 中介层。
 
@@ -156,6 +192,7 @@ class ToolRuntimeMediator:
         store: Any = None,
         identity: Any = None,
         memory_runtime: Any = None,
+        allow_child_tool_execution: bool = False,
     ) -> None:
         self._dispatcher = dispatcher
         self._state = state
@@ -166,6 +203,7 @@ class ToolRuntimeMediator:
         self._store = store
         self._identity = identity
         self._memory_runtime = memory_runtime
+        self._allow_child_tool_execution = allow_child_tool_execution
         self._rejection_counts: dict[str, int] = {}
 
     # ── public ────────────────────────────────────────────────────────────
@@ -598,19 +636,31 @@ class ToolRuntimeMediator:
         delegation_id: str = "",
         parent_trace_id: str = "",
     ) -> str | None:
-        """Child tool_use → parent TOOL_GATE→TOOL_INVOKE→TOOL_RESULT pipeline.
+        """Child tool_use → parent-decision metadata by default.
 
-        child 不直接执行工具 — 所有工具执行通过 parent ToolRuntimeMediator。
-        blocked tool 在 TOOL_GATE 被拦截 → 返回 FORCE_STOP。
-        Skill allowed_tools enforcement 对 child tool request 同样生效。
+        U3A freeze gate：product runtime 中 child/sub-agent 不能直接执行工具。
+        默认只记录 SUBAGENT_CHILD_TOOL_REQUEST 的安全 evidence，并返回
+        FORCE_STOP。旧 L1/L2 的隔离兼容测试如确需覆盖历史执行路径，必须在构造
+        ToolRuntimeMediator 时显式传入 allow_child_tool_execution=True。
 
         Returns:
-            None: 工具已执行
-            FORCE_STOP: 被 gate 阻断
+            None: legacy opt-in path 工具已执行
+            FORCE_STOP: 默认冻结或 gate 阻断
             AWAITING_USER: 需要用户确认
         """
         # Step 1: 构建合成 tool_use_id
         tool_use_id = f"child:{delegation_id}:{tool_name}"
+
+        if not self._allow_child_tool_execution:
+            self._dispatch_child_tool_evidence(
+                tool_name,
+                arguments,
+                delegation_id,
+                parent_trace_id,
+                gate_disposition="policy_blocked",
+                child_tool_direct_execution_blocked=True,
+            )
+            return FORCE_STOP
 
         # Step 1.5: Dispatch child tool request evidence (best-effort)
         self._dispatch_child_tool_evidence(
@@ -725,6 +775,7 @@ class ToolRuntimeMediator:
         parent_trace_id: str,
         *,
         gate_disposition: str | None = None,
+        child_tool_direct_execution_blocked: bool = False,
     ) -> None:
         """Dispatch SUBAGENT_CHILD_TOOL_REQUEST evidence (best-effort)."""
         with contextlib.suppress(Exception):
@@ -734,9 +785,13 @@ class ToolRuntimeMediator:
                     source="ToolRuntimeMediator",
                     parent_trace_id=parent_trace_id or delegation_id,
                     payload={
-                        "tool_name": tool_name,
+                        **_safe_child_tool_name_metadata(tool_name),
                         **_safe_child_arguments_metadata(arguments),
-                        "delegation_id": delegation_id,
+                        **_safe_child_delegation_metadata(delegation_id),
+                        "needs_parent_tool_request": True,
+                        "child_tool_direct_execution_blocked": (
+                            child_tool_direct_execution_blocked
+                        ),
                         "gate_disposition": gate_disposition,
                     },
                 ),
@@ -792,22 +847,19 @@ class ToolRuntimeMediator:
         with contextlib.suppress(Exception):
             from agent.evidence_recorder import build_memory_evidence_metadata
 
+            policy_metadata = _child_memory_policy_metadata(status)
             metadata = build_memory_evidence_metadata(
                 event_type="memory.child_request_received",
                 source_type="child_agent",
                 operation="propose",
-                policy_path="child_memory_v0_lockdown",
                 decision=status,
-                reason=(
-                    "child_memory_scope_none"
-                    if status == "rejected"
-                    else "child_memory_direct_write_disabled"
-                ),
+                reason=policy_metadata["policy_rule_id"],
                 count=1,
                 redacted=True,
                 child_payload=value,
                 child_key=key,
                 raw_fields={"key": key, "value_preview": value},
+                extra=policy_metadata,
             )
             self._dispatcher.route_from_runtime_loop(
                 RuntimeActionRequest(
@@ -815,14 +867,14 @@ class ToolRuntimeMediator:
                     source="ToolRuntimeMediator",
                     parent_trace_id=parent_trace_id or delegation_id,
                     payload={
-                        "delegation_id": delegation_id,
+                        **_safe_child_delegation_metadata(delegation_id),
                         "status": status,
                         "child_payload_hash": metadata.get("child_payload_hash", ""),
                         "key_hash": metadata.get("key_hash", ""),
                         "redacted": True,
                         "count": 1,
                         "source_type": "child_agent",
-                        "policy_path": "child_memory_v0_lockdown",
+                        **policy_metadata,
                         "decision": status,
                         "reason": metadata.get("reason", ""),
                     },
@@ -853,7 +905,6 @@ class ToolRuntimeMediator:
                 status="blocked" if decision in {"blocked", "deferred"} else "success",
                 source_type="child_agent",
                 decision=decision,
-                policy_path="child_memory_v0_lockdown",
                 reason=reason,
                 count=1,
                 child_payload=value,

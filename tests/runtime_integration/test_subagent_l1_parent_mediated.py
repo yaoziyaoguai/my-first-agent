@@ -835,7 +835,11 @@ class TestL1ChildMemoryDispatcherEvidence:
         assert payload["key_hash"].startswith("memkey:")
         assert payload["redacted"] is True
         assert payload["count"] == 1
-        assert payload["policy_path"] == "child_memory_v0_lockdown"
+        assert "policy_path" not in payload
+        assert payload["policy_id"] == "subagent_child_memory_v0_lockdown"
+        assert payload["policy_rule_id"] == "child_memory_direct_write_disabled"
+        assert payload["policy_hash"].startswith("policy:")
+        assert payload["policy_decision_source"] == "ToolRuntimeMediator"
         assert payload["decision"] == "deferred"
 
     def test_u8_child_memory_records_lifecycle_events_without_child_proposal(self, monkeypatch):

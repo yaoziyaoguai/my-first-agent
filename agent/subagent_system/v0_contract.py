@@ -378,6 +378,7 @@ class SubAgentV0Result:
     safe_output: Mapping[str, Any] = field(default_factory=dict)
     needs_parent_tool_request: bool = False
     requested_tool_name: str = ""
+    requested_tool_name_metadata: Mapping[str, Any] = field(default_factory=dict)
     requested_tool_reason_metadata: Mapping[str, Any] = field(default_factory=dict)
     safe_arguments_metadata: Mapping[str, Any] = field(default_factory=dict)
     parent_decision_status: str = "pending"
@@ -390,6 +391,11 @@ class SubAgentV0Result:
         if self.parent_decision_status not in V0_PARENT_DECISION_STATUSES:
             raise ValueError("invalid parent decision status")
         object.__setattr__(self, "safe_output", MappingProxyType(dict(self.safe_output)))
+        object.__setattr__(
+            self,
+            "requested_tool_name_metadata",
+            MappingProxyType(dict(self.requested_tool_name_metadata)),
+        )
         object.__setattr__(
             self,
             "requested_tool_reason_metadata",
@@ -407,6 +413,7 @@ class SubAgentV0Result:
             "safe_output": dict(self.safe_output),
             "needs_parent_tool_request": self.needs_parent_tool_request,
             "requested_tool_name": self.requested_tool_name,
+            "requested_tool_name_metadata": dict(self.requested_tool_name_metadata),
             "requested_tool_reason_metadata": dict(self.requested_tool_reason_metadata),
             "safe_arguments_metadata": dict(self.safe_arguments_metadata),
             "parent_decision_status": self.parent_decision_status,

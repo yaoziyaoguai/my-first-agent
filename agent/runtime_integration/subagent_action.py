@@ -170,13 +170,51 @@ def _sanitize_file_id(file_id: str) -> str:
     return f"context_file:{stable_hash(file_id, prefix='file')[-16:]}"
 
 
-def _sanitize_v0_tool_name(tool_name: str) -> str:
-    if _is_safe_context_identifier(tool_name) and all(
-        char.isalnum() or char in {"_", "-", "."}
-        for char in tool_name
-    ):
-        return tool_name
-    return f"tool:{stable_hash(tool_name, prefix='tool')[-16:]}"
+def _sanitize_v0_tool_name(
+    tool_name: str,
+    *,
+    allowed_tool_names: Iterable[str],
+) -> tuple[str, dict[str, Any]]:
+    """Project provider-derived tool names into parent-safe metadata.
+
+    中文学习边界：tool_use.name 来自 child/provider output，不能因为看起来像
+    identifier 就原样返回。只有 parent/profile 明确 allowlist 的安全工具名才可
+    成为 requested_tool_name；其他情况只返回 hash/length/redacted metadata。
+    """
+
+    allowed = (
+        tool_name in set(str(name) for name in allowed_tool_names)
+        and _is_safe_v0_allowed_tool_identifier(tool_name)
+    )
+    metadata = {
+        "requested_tool_name_present": bool(tool_name),
+        "requested_tool_name_length": len(tool_name),
+        "requested_tool_name_hash": stable_hash(tool_name, prefix="tool"),
+        "requested_tool_name_redacted": not allowed,
+        "requested_tool_name_allowed": allowed,
+    }
+    if allowed:
+        return tool_name, metadata
+    return "", metadata
+
+
+def _is_safe_v0_allowed_tool_identifier(tool_name: str) -> bool:
+    lowered = tool_name.lower()
+    if not tool_name or len(tool_name) > 80:
+        return False
+    if any(char.isspace() for char in tool_name):
+        return False
+    if any(marker in lowered for marker in (
+        "sk-",
+        "api_key",
+        "secret",
+        "token",
+        "password",
+    )):
+        return False
+    if any(marker in tool_name for marker in ("/", "\\", ".", "~", ":")):
+        return False
+    return all(char.isalnum() or char in {"_"} for char in tool_name)
 
 
 def _is_safe_context_identifier(value: str) -> bool:
@@ -713,10 +751,15 @@ class SubAgentV0Handler:
                 capability_flag="can_use_tools",
                 base_evidence=base_evidence,
             )
+        safe_tool_name, tool_name_metadata = _sanitize_v0_tool_name(
+            raw_tool_name,
+            allowed_tool_names=profile.allowed_tools,
+        )
         result = SubAgentV0Result(
             status="success",
             needs_parent_tool_request=True,
-            requested_tool_name=_sanitize_v0_tool_name(raw_tool_name),
+            requested_tool_name=safe_tool_name,
+            requested_tool_name_metadata=tool_name_metadata,
             requested_tool_reason_metadata=sanitize_text_metadata(
                 provider_output.get("reason"),
                 label="requested_tool_reason",

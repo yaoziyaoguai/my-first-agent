@@ -9,6 +9,52 @@ import pytest
 from tests.runtime_integration.subagent_v0_contract_helpers import route_v0
 
 
+def _tool_use_payload(
+    *,
+    name: str,
+    allowed_tools: tuple[str, ...] = (),
+    tool_input: dict[str, object] | None = None,
+    reason: str = "needs context",
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "provider_output": {
+            "type": "tool_use",
+            "name": name,
+            "input": tool_input or {"path": "RAW_PATH_SHOULD_NOT_EXECUTE"},
+            "reason": reason,
+        },
+    }
+    if allowed_tools:
+        payload["profile_contract"] = {"allowed_tools": allowed_tools}
+    return payload
+
+
+def _serialized_tool_surfaces(result: object) -> str:
+    return json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+        "action_log": result.evidence.get("action_log"),
+        "log_viewer": result.evidence.get("log_viewer"),
+        "checkpoint_metadata": result.evidence.get("checkpoint_metadata"),
+    }, default=str)
+
+
+def _assert_non_allowlisted_tool_name_redacted(raw_tool_name: str) -> None:
+    result = route_v0(payload=_tool_use_payload(name=raw_tool_name))
+
+    assert result.payload["needs_parent_tool_request"] is True
+    assert result.payload["requested_tool_name"] == ""
+    metadata = result.payload["requested_tool_name_metadata"]
+    assert metadata["requested_tool_name_present"] is True
+    assert metadata["requested_tool_name_length"] == len(raw_tool_name)
+    assert metadata["requested_tool_name_hash"]
+    assert raw_tool_name not in metadata["requested_tool_name_hash"]
+    assert metadata["requested_tool_name_redacted"] is True
+    assert metadata["requested_tool_name_allowed"] is False
+    assert raw_tool_name not in _serialized_tool_surfaces(result)
+    assert result.evidence["tool_executed"] is False
+
+
 def test_child_tools_are_disabled_by_default() -> None:
     result = route_v0()
     evidence = dict(result.evidence)
@@ -28,18 +74,16 @@ def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
 
     monkeypatch.setattr(tool_executor, "execute_single_tool", forbidden_execute)
     monkeypatch.setattr(tool_runtime_mediator, "execute_single_tool", forbidden_execute)
-    result = route_v0(payload={
-        "provider_output": {
-            "type": "tool_use",
-            "name": "read_file",
-            "input": {"path": "RAW_PATH_SHOULD_NOT_EXECUTE"},
-            "reason": "needs context",
-        },
-    })
+    result = route_v0(payload=_tool_use_payload(
+        name="read_file",
+        allowed_tools=("read_file",),
+    ))
     evidence = dict(result.evidence)
 
     assert result.payload["needs_parent_tool_request"] is True
     assert result.payload["requested_tool_name"] == "read_file"
+    assert result.payload["requested_tool_name_metadata"]["requested_tool_name_allowed"] is True
+    assert result.payload["requested_tool_name_metadata"]["requested_tool_name_redacted"] is False
     assert result.payload["safe_arguments_metadata"]
     assert evidence["tool_executed"] is False
     assert "RAW_PATH_SHOULD_NOT_EXECUTE" not in repr(result.payload["safe_arguments_metadata"])
@@ -47,20 +91,18 @@ def test_tool_use_becomes_parent_tool_request_metadata_not_execution(
 
 
 def test_provider_tool_reason_and_arguments_are_sanitized_not_returned_raw() -> None:
-    result = route_v0(payload={
-        "provider_output": {
-            "type": "tool_use",
-            "name": "read_file",
-            "input": {
+    result = route_v0(payload=_tool_use_payload(
+        name="read_file",
+        allowed_tools=("read_file",),
+        tool_input={
                 "path": "/tmp/raw-tool-arg-path.txt",
                 "api_key": "tool-arg-secret",
-            },
-            "reason": (
-                "RAW_TOOL_REASON_SHOULD_NOT_LEAK "
-                "RAW_PROMPT_SHOULD_NOT_LEAK /tmp/raw-tool-reason-path.txt"
-            ),
         },
-    })
+        reason=(
+            "RAW_TOOL_REASON_SHOULD_NOT_LEAK "
+            "RAW_PROMPT_SHOULD_NOT_LEAK /tmp/raw-tool-reason-path.txt"
+        ),
+    ))
 
     assert result.payload["needs_parent_tool_request"] is True
     assert result.payload["requested_tool_name"] == "read_file"
@@ -93,6 +135,36 @@ def test_provider_tool_reason_and_arguments_are_sanitized_not_returned_raw() -> 
         assert token not in serialized
 
 
+def test_provider_token_like_tool_name_is_redacted_from_result_surfaces() -> None:
+    _assert_non_allowlisted_tool_name_redacted("sk-live-abc123")
+
+
+def test_provider_path_like_tool_name_is_redacted_from_result_surfaces() -> None:
+    _assert_non_allowlisted_tool_name_redacted("/tmp/secret/tool")
+
+
+def test_provider_identifier_like_tool_name_is_redacted_without_allowlist() -> None:
+    _assert_non_allowlisted_tool_name_redacted("normal_looking_but_not_allowlisted")
+
+
+def test_allowlisted_tool_name_can_be_returned_as_safe_parent_identifier() -> None:
+    result = route_v0(payload=_tool_use_payload(
+        name="read_file",
+        allowed_tools=("read_file",),
+    ))
+
+    metadata = result.payload["requested_tool_name_metadata"]
+    assert result.payload["needs_parent_tool_request"] is True
+    assert result.payload["requested_tool_name"] == "read_file"
+    assert metadata["requested_tool_name_present"] is True
+    assert metadata["requested_tool_name_length"] == len("read_file")
+    assert metadata["requested_tool_name_hash"]
+    assert "read_file" not in metadata["requested_tool_name_hash"]
+    assert metadata["requested_tool_name_redacted"] is False
+    assert metadata["requested_tool_name_allowed"] is True
+    assert result.evidence["tool_executed"] is False
+
+
 def test_unauthorized_tool_request_fails_closed_without_parent_state_mutation() -> None:
     result = route_v0(payload={
         "provider_output": {
@@ -121,13 +193,11 @@ def test_v0_child_path_cannot_call_direct_tool_execution_apis(
     monkeypatch.setattr(tool_executor, "execute_single_tool", forbidden_execute)
     monkeypatch.setattr(tool_runtime_mediator, "execute_single_tool", forbidden_execute)
 
-    result = route_v0(payload={
-        "provider_output": {
-            "type": "tool_use",
-            "name": "read_file",
-            "input": {"path": "file.txt"},
-        },
-    })
+    result = route_v0(payload=_tool_use_payload(
+        name="read_file",
+        allowed_tools=("read_file",),
+        tool_input={"path": "file.txt"},
+    ))
 
     assert result.payload["needs_parent_tool_request"] is True
     assert result.evidence["tool_executed"] is False

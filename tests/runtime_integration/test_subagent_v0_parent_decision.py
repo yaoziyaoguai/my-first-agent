@@ -8,6 +8,17 @@ from agent.subagent_system.result import SubAgentAuditRecord, SubAgentResult
 from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
 
 
+def _forbid_legacy_adjudication(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    import agent.subagent_system.adjudication as adjudication
+    import agent.subagent_system.delegation as delegation
+
+    def forbidden_adjudicate(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError(message)
+
+    monkeypatch.setattr(adjudication, "adjudicate_result", forbidden_adjudicate)
+    monkeypatch.setattr(delegation, "adjudicate_result", forbidden_adjudicate)
+
+
 def _ok_result() -> SubAgentResult:
     audit = SubAgentAuditRecord(
         subagent_name="test",
@@ -48,12 +59,10 @@ def _ok_result() -> SubAgentResult:
 def test_v0_child_result_first_enters_parent_decision_pending_not_legacy_auto_accept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import agent.subagent_system.adjudication as adjudication
-
-    def forbidden_adjudicate(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("v0 production path called legacy auto-accept adjudication")
-
-    monkeypatch.setattr(adjudication, "adjudicate_result", forbidden_adjudicate)
+    _forbid_legacy_adjudication(
+        monkeypatch,
+        "v0 production path called legacy auto-accept adjudication",
+    )
 
     result = route_v0(payload={"child_result": _ok_result()})
 
@@ -104,12 +113,7 @@ def test_display_only_does_not_mutate_parent_owned_state() -> None:
 def test_old_adjudication_auto_accept_helper_is_not_used_by_v0_production_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import agent.subagent_system.adjudication as adjudication
-
-    def forbidden_adjudicate(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("legacy adjudicate_result was called")
-
-    monkeypatch.setattr(adjudication, "adjudicate_result", forbidden_adjudicate)
+    _forbid_legacy_adjudication(monkeypatch, "legacy adjudicate_result was called")
 
     result = route_v0(payload={"child_result": _ok_result()})
 

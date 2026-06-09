@@ -27,12 +27,12 @@ def test_context_uses_parent_selected_files_and_enforces_limits() -> None:
 
 @pytest.mark.xfail(**V0_XFAIL)
 def test_no_uncontrolled_path_read_text_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pathlib import Path
+    import agent.subagent_system.context as legacy_context
 
-    def forbidden_read_text(self: Path, *_args: object, **_kwargs: object) -> str:
-        raise AssertionError(f"uncontrolled Path.read_text was called for {self}")
+    def forbidden_file_summary(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("v0 context path must not read files outside parent selection")
 
-    monkeypatch.setattr(Path, "read_text", forbidden_read_text)
+    monkeypatch.setattr(legacy_context, "_summarize_file", forbidden_file_summary)
 
     result = route_v0(payload={
         "parent_context_blobs": {"a.py": "safe parent-provided content"},

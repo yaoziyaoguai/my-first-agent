@@ -87,6 +87,6 @@ def test_output_schema_constrains_safe_structured_result_and_invalid_output_fail
         "provider_output": {"raw": "RAW_OUTPUT"},
     })
 
-    assert valid.status == "ok"
+    assert valid.status == "success"
     assert invalid.status in {"failed", "policy_blocked"}
     assert "RAW_OUTPUT" not in repr(invalid)

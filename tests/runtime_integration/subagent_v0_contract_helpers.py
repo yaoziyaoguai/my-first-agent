@@ -13,16 +13,20 @@ from typing import Any
 from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
 from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
 
-V0_MISSING_REASON = (
-    "SubAgentV0Handler not implemented yet; remove xfail when U3 introduces contract"
-)
+V0_MISSING_REASON = "SubAgentV0 contract not implemented yet"
+
+
+class MissingSubAgentV0Contract(RuntimeError):  # noqa: N818
+    """测试专用异常：只表示 v0 RuntimeAction contract 尚未落地。"""
 
 
 def v0_action_type() -> RuntimeActionType:
     try:
         return RuntimeActionType.SUBAGENT_DELEGATE_V0
     except AttributeError as exc:
-        raise AttributeError("RuntimeActionType.SUBAGENT_DELEGATE_V0 is missing") from exc
+        raise MissingSubAgentV0Contract(
+            "RuntimeActionType.SUBAGENT_DELEGATE_V0 is missing"
+        ) from exc
 
 
 def build_v0_request(
@@ -46,10 +50,13 @@ def build_v0_request(
 
 
 def build_v0_dispatcher_and_handler() -> tuple[Any, Any]:
+    action_type = v0_action_type()
     dispatcher = build_phase1_dispatcher()
-    handler = dispatcher.get_handler(v0_action_type())
+    handler = dispatcher.get_handler(action_type)
     if handler is None:
-        raise AttributeError("SUBAGENT_DELEGATE_V0 handler is not registered")
+        raise MissingSubAgentV0Contract(
+            "SUBAGENT_DELEGATE_V0 handler is not registered"
+        )
     if type(handler).__name__ != "SubAgentV0Handler":
         raise AssertionError(f"unexpected v0 handler: {type(handler).__name__}")
     return dispatcher, handler
@@ -62,6 +69,6 @@ def route_v0(payload: Mapping[str, Any] | None = None, *, provider_mode: str = "
 
 V0_XFAIL = {
     "strict": True,
-    "raises": (AssertionError, AttributeError),
+    "raises": MissingSubAgentV0Contract,
     "reason": V0_MISSING_REASON,
 }

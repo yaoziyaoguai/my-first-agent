@@ -34,16 +34,9 @@ SUCCESS_PATH_EVENTS = (
     "subagent.parent_decision.pending",
 )
 
-FAIL_CLOSED_REQUIRED_EVENTS = (
-    "subagent.request.created",
-    "subagent.profile.selected",
-    "subagent.context.built",
-    "subagent.execution.started",
-    "subagent.provider.called",
-    "subagent.provider.completed",
-    "subagent.result.produced",
-    "subagent.parent_decision.pending",
-)
+FAILURE_PATH_EVENTS = ("subagent.execution.failed",)
+SKIPPED_PATH_EVENTS = ("subagent.execution.skipped",)
+POLICY_BLOCKED_PATH_EVENTS = ("subagent.policy.blocked",)
 
 SAFE_POLICY_FIELDS = {
     "policy_id",
@@ -51,6 +44,13 @@ SAFE_POLICY_FIELDS = {
     "policy_hash",
     "policy_decision_source",
 }
+
+MISSING_EVENT_CASES = (
+    *(("success", event_name) for event_name in SUCCESS_PATH_EVENTS),
+    *(("provider_failure", event_name) for event_name in FAILURE_PATH_EVENTS),
+    *(("skipped", event_name) for event_name in SKIPPED_PATH_EVENTS),
+    *(("policy_blocked", event_name) for event_name in POLICY_BLOCKED_PATH_EVENTS),
+)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -79,12 +79,21 @@ def test_success_path_emits_success_lifecycle_events_only() -> None:
 
 @pytest.mark.xfail(**V0_XFAIL)
 def test_failure_path_emits_failed_event_without_success_path_forgery() -> None:
-    result = route_v0(payload={"scenario": "provider_failure"})
+    result = route_v0(payload={
+        "scenario": "provider_failure",
+        "provider_failure": RuntimeError("RAW_FAILURE_SHOULD_NOT_LEAK sk-test-secret"),
+    })
     event_names = set(result.evidence["lifecycle_events"])
+    safe_error_metadata = result.evidence["safe_error_metadata"]
 
     assert "subagent.execution.failed" in event_names
     assert "subagent.execution.skipped" not in event_names
     assert "subagent.policy.blocked" not in event_names
+    assert set(safe_error_metadata) >= {"error_type", "error_hash", "redacted"}
+    assert safe_error_metadata["error_type"] == "RuntimeError"
+    assert safe_error_metadata["redacted"] is True
+    assert "RAW_FAILURE_SHOULD_NOT_LEAK" not in repr(safe_error_metadata)
+    assert "sk-test-secret" not in repr(safe_error_metadata)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -98,17 +107,29 @@ def test_skipped_path_emits_skipped_event_with_complete_policy_identifiers() -> 
 
     assert "subagent.execution.skipped" in event_names
     assert set(skipped_metadata) >= SAFE_POLICY_FIELDS
+    for field in SAFE_POLICY_FIELDS:
+        assert skipped_metadata[field]
     assert "policy_path" not in skipped_metadata
     assert "/tmp/raw-policy-path.yaml" not in repr(skipped_metadata)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
 def test_policy_blocked_path_emits_policy_blocked_event() -> None:
-    result = route_v0(payload={"scenario": "policy_blocked", "blocked_operation": "use_tool"})
+    result = route_v0(payload={
+        "scenario": "policy_blocked",
+        "blocked_operation": "use_tool",
+        "raw_policy_path": "/tmp/raw-policy-path.yaml",
+    })
     event_names = set(result.evidence["lifecycle_events"])
+    blocked_metadata = result.evidence["blocked_policy_metadata"]
 
     assert "subagent.policy.blocked" in event_names
     assert result.evidence["blocked_operation"] == "use_tool"
+    assert set(blocked_metadata) >= SAFE_POLICY_FIELDS
+    for field in SAFE_POLICY_FIELDS:
+        assert blocked_metadata[field]
+    assert "policy_path" not in blocked_metadata
+    assert "/tmp/raw-policy-path.yaml" not in repr(blocked_metadata)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -155,20 +176,27 @@ def test_skipped_policy_evidence_uses_safe_policy_identifiers_only() -> None:
     metadata = result.evidence["skipped_policy_metadata"]
 
     assert set(metadata) >= SAFE_POLICY_FIELDS
+    for field in SAFE_POLICY_FIELDS:
+        assert metadata[field]
     assert "policy_path" not in metadata
     assert "/tmp/raw-policy-path.yaml" not in repr(metadata)
     assert "sk-test-secret" not in repr(metadata)
 
 
-@pytest.mark.parametrize("omitted_event", FAIL_CLOSED_REQUIRED_EVENTS)
+@pytest.mark.parametrize(("scenario", "omitted_event"), MISSING_EVENT_CASES)
 @pytest.mark.xfail(**V0_XFAIL)
-def test_missing_required_event_fails_v0_execution(omitted_event: str) -> None:
-    result = route_v0(payload={"omitted_lifecycle_event": omitted_event})
+def test_missing_required_event_fails_v0_execution(
+    scenario: str,
+    omitted_event: str,
+) -> None:
+    result = route_v0(payload={
+        "scenario": scenario,
+        "omitted_lifecycle_event": omitted_event,
+    })
 
     assert result.status in {"failed", "policy_blocked"}
     assert result.evidence["failure_kind"] == "missing_required_lifecycle_event"
     assert result.evidence["missing_lifecycle_event"] == omitted_event
-    assert result.evidence["provider_called"] is False
 
 
 @pytest.mark.xfail(**V0_XFAIL)

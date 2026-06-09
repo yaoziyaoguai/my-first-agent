@@ -1,9 +1,15 @@
 .env
-__pycache__
+__pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
 .venv
+.codex/hooks.json
 pytest.ini
 .README.md*
 agent_log.jsonl
@@ -21,4 +27,6 @@ tui/node_modules/
 node_modules/
 .tui_audit_log*
 docs/dogfood/scratch/
+docs/.ruff_cache/
+graphify-out/
 .DS_Store

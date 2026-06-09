@@ -6,7 +6,56 @@ import json
 
 import pytest
 
-from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
+from tests.runtime_integration import subagent_v0_contract_helpers as v0_contract
+from tests.runtime_integration.subagent_v0_contract_helpers import (
+    V0_XFAIL,
+    build_v0_context,
+    route_v0,
+)
+
+
+def test_v0_context_contract_helper_uses_read_seam_and_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    original_reader = v0_contract.read_v0_context_file
+
+    def spy_reader(file_id: str, parent_context_blobs: dict[str, str]) -> str:
+        calls.append(file_id)
+        return original_reader(file_id, parent_context_blobs)
+
+    monkeypatch.setattr(v0_contract, "read_v0_context_file", spy_reader)
+
+    context = build_v0_context({
+        "parent_selected_files": ("a.py", "b.py"),
+        "child_requested_files": ("child-added.py",),
+        "parent_context_blobs": {
+            "a.py": "safe parent content that must be truncated",
+            "b.py": "safe second parent content",
+            "child-added.py": "RAW_CHILD_CONTEXT_SHOULD_NOT_LEAK",
+        },
+        "max_context_chars": 20,
+        "max_files": 1,
+    })
+    metadata = context["metadata"]
+
+    assert calls == ["a.py"]
+    assert metadata["context_file_count"] == 1
+    assert metadata["context_length"] <= 20
+    assert metadata["selected_file_ids"] == ("a.py",)
+    assert "child-added.py" not in metadata["selected_file_ids"]
+
+
+def test_v0_context_contract_helper_redacts_raw_path_from_metadata() -> None:
+    context = build_v0_context({
+        "parent_context_blobs": {
+            "/tmp/RAW_PATH_SHOULD_NOT_LEAK.py": "RAW_CONTEXT_SHOULD_NOT_LEAK"
+        },
+    })
+    serialized = json.dumps(context["metadata"], default=str)
+
+    assert "RAW_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -26,19 +75,52 @@ def test_context_uses_parent_selected_files_and_enforces_limits() -> None:
 
 
 @pytest.mark.xfail(**V0_XFAIL)
-def test_no_uncontrolled_path_read_text_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent.subagent_system.context as legacy_context
+def test_route_v0_context_builder_uses_contract_read_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    original_reader = v0_contract.read_v0_context_file
 
-    def forbidden_file_summary(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("v0 context path must not read files outside parent selection")
+    def spy_reader(file_id: str, parent_context_blobs: dict[str, str]) -> str:
+        calls.append(file_id)
+        return original_reader(file_id, parent_context_blobs)
 
-    monkeypatch.setattr(legacy_context, "_summarize_file", forbidden_file_summary)
+    monkeypatch.setattr(v0_contract, "read_v0_context_file", spy_reader)
 
     result = route_v0(payload={
+        "parent_selected_files": ("a.py",),
         "parent_context_blobs": {"a.py": "safe parent-provided content"},
+    })
+
+    assert calls == ["a.py"]
+    assert result.evidence["context_metadata"]["context_read_seam_calls"] == 1
+
+
+@pytest.mark.xfail(**V0_XFAIL)
+def test_no_uncontrolled_path_read_text_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
+    allowed_file_ids = {"a.py"}
+    calls: list[str] = []
+    original_reader = v0_contract.read_v0_context_file
+
+    def parent_selected_reader(file_id: str, parent_context_blobs: dict[str, str]) -> str:
+        assert file_id in allowed_file_ids, (
+            "v0 context path must not read child-requested files"
+        )
+        calls.append(file_id)
+        return original_reader(file_id, parent_context_blobs)
+
+    monkeypatch.setattr(v0_contract, "read_v0_context_file", parent_selected_reader)
+
+    result = route_v0(payload={
+        "parent_selected_files": ("a.py",),
+        "parent_context_blobs": {
+            "a.py": "safe parent-provided content",
+            "child-added.py": "RAW_CHILD_CONTEXT_SHOULD_NOT_LEAK",
+        },
         "child_requested_files": ("child-added.py",),
     })
 
+    assert calls == ["a.py"]
     assert result.evidence["uncontrolled_path_read_text_calls"] == 0
     assert result.evidence["parent_policy_selects_all_files"] is True
 

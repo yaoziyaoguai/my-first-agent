@@ -8,11 +8,15 @@ import pytest
 
 from tests.runtime_integration.subagent_v0_contract_helpers import V0_XFAIL, route_v0
 
-REQUIRED_V0_EVENTS = (
+COMMON_LIFECYCLE_REQUIRED_EVENTS = (
     "subagent.request.created",
     "subagent.profile.selected",
     "subagent.context.built",
     "subagent.execution.started",
+)
+
+REQUIRED_V0_EVENTS = (
+    *COMMON_LIFECYCLE_REQUIRED_EVENTS,
     "subagent.provider.called",
     "subagent.provider.completed",
     "subagent.result.produced",
@@ -24,19 +28,36 @@ REQUIRED_V0_EVENTS = (
 )
 
 SUCCESS_PATH_EVENTS = (
-    "subagent.request.created",
-    "subagent.profile.selected",
-    "subagent.context.built",
-    "subagent.execution.started",
+    *COMMON_LIFECYCLE_REQUIRED_EVENTS,
     "subagent.provider.called",
     "subagent.provider.completed",
     "subagent.result.produced",
     "subagent.parent_decision.pending",
 )
 
-FAILURE_PATH_EVENTS = ("subagent.execution.failed",)
-SKIPPED_PATH_EVENTS = ("subagent.execution.skipped",)
-POLICY_BLOCKED_PATH_EVENTS = ("subagent.policy.blocked",)
+PROVIDER_FAILURE_PATH_EVENTS = (
+    *COMMON_LIFECYCLE_REQUIRED_EVENTS,
+    "subagent.provider.called",
+    "subagent.execution.failed",
+)
+SKIPPED_PATH_EVENTS = (
+    *COMMON_LIFECYCLE_REQUIRED_EVENTS,
+    "subagent.execution.skipped",
+)
+POLICY_BLOCKED_PATH_EVENTS = (
+    *COMMON_LIFECYCLE_REQUIRED_EVENTS,
+    "subagent.policy.blocked",
+)
+SUCCESS_FORBIDDEN_TERMINAL_EVENTS = (
+    "subagent.execution.failed",
+    "subagent.execution.skipped",
+    "subagent.policy.blocked",
+)
+PROVIDER_FAILURE_FORBIDDEN_SUCCESS_EVENTS = (
+    "subagent.provider.completed",
+    "subagent.result.produced",
+    "subagent.parent_decision.pending",
+)
 
 SAFE_POLICY_FIELDS = {
     "policy_id",
@@ -44,13 +65,49 @@ SAFE_POLICY_FIELDS = {
     "policy_hash",
     "policy_decision_source",
 }
+SAFE_ERROR_FIELDS = {"error_type", "error_hash", "redacted"}
+
+PATH_REQUIRED_EVENTS = {
+    "success": SUCCESS_PATH_EVENTS,
+    "provider_failure": PROVIDER_FAILURE_PATH_EVENTS,
+    "skipped": SKIPPED_PATH_EVENTS,
+    "policy_blocked": POLICY_BLOCKED_PATH_EVENTS,
+}
 
 MISSING_EVENT_CASES = (
-    *(("success", event_name) for event_name in SUCCESS_PATH_EVENTS),
-    *(("provider_failure", event_name) for event_name in FAILURE_PATH_EVENTS),
-    *(("skipped", event_name) for event_name in SKIPPED_PATH_EVENTS),
-    *(("policy_blocked", event_name) for event_name in POLICY_BLOCKED_PATH_EVENTS),
+    *(
+        pytest.param(scenario, event_name, id=f"{scenario}-missing-{event_name}")
+        for scenario, required_events in PATH_REQUIRED_EVENTS.items()
+        for event_name in required_events
+    ),
 )
+
+
+def _assert_safe_policy_metadata(metadata: dict[str, object]) -> None:
+    assert set(metadata) >= SAFE_POLICY_FIELDS
+    for field in SAFE_POLICY_FIELDS:
+        assert metadata[field]
+    assert "policy_path" not in metadata
+    serialized = json.dumps(metadata, default=str)
+    assert "policy_path" not in serialized
+    assert "/tmp/raw-policy-path.yaml" not in serialized
+
+
+def _assert_no_policy_path_leak(surface: object) -> None:
+    serialized = json.dumps(surface, default=str)
+    assert "policy_path" not in serialized
+    assert "/tmp/raw-policy-path.yaml" not in serialized
+
+
+def _redaction_surfaces(result) -> dict[str, object]:
+    surfaces = {
+        "evidence": result.evidence,
+        "action_log": result.evidence["action_log"],
+        "log_viewer": result.evidence["log_viewer"],
+    }
+    if "checkpoint_metadata" in result.evidence:
+        surfaces["checkpoint_metadata"] = result.evidence["checkpoint_metadata"]
+    return surfaces
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -66,9 +123,8 @@ def test_success_path_emits_success_lifecycle_events_only() -> None:
     event_names = set(result.evidence["lifecycle_events"])
 
     assert set(SUCCESS_PATH_EVENTS) <= event_names
-    assert "subagent.execution.failed" not in event_names
-    assert "subagent.execution.skipped" not in event_names
-    assert "subagent.policy.blocked" not in event_names
+    for event_name in SUCCESS_FORBIDDEN_TERMINAL_EVENTS:
+        assert event_name not in event_names
     for event in result.evidence["lifecycle_event_payloads"]:
         assert event["delegation_id"]
         assert event["parent_trace_id"] == "parent-trace"
@@ -86,10 +142,12 @@ def test_failure_path_emits_failed_event_without_success_path_forgery() -> None:
     event_names = set(result.evidence["lifecycle_events"])
     safe_error_metadata = result.evidence["safe_error_metadata"]
 
-    assert "subagent.execution.failed" in event_names
+    assert set(PROVIDER_FAILURE_PATH_EVENTS) <= event_names
+    for event_name in PROVIDER_FAILURE_FORBIDDEN_SUCCESS_EVENTS:
+        assert event_name not in event_names
     assert "subagent.execution.skipped" not in event_names
     assert "subagent.policy.blocked" not in event_names
-    assert set(safe_error_metadata) >= {"error_type", "error_hash", "redacted"}
+    assert set(safe_error_metadata) >= SAFE_ERROR_FIELDS
     assert safe_error_metadata["error_type"] == "RuntimeError"
     assert safe_error_metadata["redacted"] is True
     assert "RAW_FAILURE_SHOULD_NOT_LEAK" not in repr(safe_error_metadata)
@@ -105,12 +163,9 @@ def test_skipped_path_emits_skipped_event_with_complete_policy_identifiers() -> 
     event_names = set(result.evidence["lifecycle_events"])
     skipped_metadata = result.evidence["skipped_policy_metadata"]
 
-    assert "subagent.execution.skipped" in event_names
-    assert set(skipped_metadata) >= SAFE_POLICY_FIELDS
-    for field in SAFE_POLICY_FIELDS:
-        assert skipped_metadata[field]
-    assert "policy_path" not in skipped_metadata
-    assert "/tmp/raw-policy-path.yaml" not in repr(skipped_metadata)
+    assert set(SKIPPED_PATH_EVENTS) <= event_names
+    _assert_safe_policy_metadata(skipped_metadata)
+    _assert_no_policy_path_leak(result.evidence)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -123,13 +178,10 @@ def test_policy_blocked_path_emits_policy_blocked_event() -> None:
     event_names = set(result.evidence["lifecycle_events"])
     blocked_metadata = result.evidence["blocked_policy_metadata"]
 
-    assert "subagent.policy.blocked" in event_names
+    assert set(POLICY_BLOCKED_PATH_EVENTS) <= event_names
     assert result.evidence["blocked_operation"] == "use_tool"
-    assert set(blocked_metadata) >= SAFE_POLICY_FIELDS
-    for field in SAFE_POLICY_FIELDS:
-        assert blocked_metadata[field]
-    assert "policy_path" not in blocked_metadata
-    assert "/tmp/raw-policy-path.yaml" not in repr(blocked_metadata)
+    _assert_safe_policy_metadata(blocked_metadata)
+    _assert_no_policy_path_leak(result.evidence)
 
 
 @pytest.mark.xfail(**V0_XFAIL)
@@ -144,12 +196,7 @@ def test_no_raw_child_content_path_exception_or_secret_in_nonempty_surfaces() ->
         "raw_exception": RuntimeError("RAW_EXCEPTION_SHOULD_NOT_LEAK"),
         "secret": "sk-test-secret",
     })
-    surfaces = {
-        "evidence": result.evidence,
-        "action_log": result.evidence["action_log"],
-        "log_viewer": result.evidence["log_viewer"],
-        "checkpoint_metadata": result.evidence["checkpoint_metadata"],
-    }
+    surfaces = _redaction_surfaces(result)
     for name, surface in surfaces.items():
         assert surface, f"{name} must be non-empty; empty surfaces cannot prove redaction"
     serialized = json.dumps(surfaces, default=str)
@@ -175,11 +222,8 @@ def test_skipped_policy_evidence_uses_safe_policy_identifiers_only() -> None:
     })
     metadata = result.evidence["skipped_policy_metadata"]
 
-    assert set(metadata) >= SAFE_POLICY_FIELDS
-    for field in SAFE_POLICY_FIELDS:
-        assert metadata[field]
-    assert "policy_path" not in metadata
-    assert "/tmp/raw-policy-path.yaml" not in repr(metadata)
+    _assert_safe_policy_metadata(metadata)
+    _assert_no_policy_path_leak(result.evidence)
     assert "sk-test-secret" not in repr(metadata)
 
 
@@ -207,12 +251,7 @@ def test_provider_error_raw_message_is_redacted_across_all_surfaces() -> None:
             "RAW_PROVIDER_EXCEPTION /tmp/raw-provider-path sk-test-secret"
         ),
     })
-    surfaces = {
-        "evidence": result.evidence,
-        "action_log": result.evidence["action_log"],
-        "log_viewer": result.evidence["log_viewer"],
-        "checkpoint_metadata": result.evidence["checkpoint_metadata"],
-    }
+    surfaces = _redaction_surfaces(result)
     for name, surface in surfaces.items():
         assert surface, f"{name} must be non-empty"
     serialized = json.dumps(surfaces, default=str)

@@ -128,5 +128,5 @@ def test_can_emit_parent_action_false_prevents_direct_parent_action() -> None:
     assert result.status in {"failed", "policy_blocked", "success"}
     assert result.evidence["can_emit_parent_action"] is False
     assert result.evidence["direct_parent_action_emitted"] is False
-    assert result.payload["parent_decision_status"] == "pending"
+    assert result.payload["parent_decision_status"] != "pending"
     assert "RAW_PARENT_ACTION" not in repr(result.evidence)

@@ -348,18 +348,6 @@ class SubAgentV0Handler:
                 },
             )
 
-        requested_operation = self._requested_operation(payload)
-        capability_flag = _V0_OPERATION_CAPABILITY_FLAGS.get(requested_operation, "")
-        if capability_flag and not bool(getattr(profile.capability_flags, capability_flag)):
-            return self._policy_blocked(
-                context,
-                profile=profile,
-                v0_request=v0_request,
-                requested_operation=requested_operation,
-                capability_flag=capability_flag,
-                base_evidence=base_evidence,
-            )
-
         if payload.get("introspect_lifecycle_catalog") is True:
             result = self._contract_result(status="success")
             return context.success(
@@ -393,6 +381,32 @@ class SubAgentV0Handler:
                 },
             )
 
+        # 中文学习边界：从这里开始的分支都会产生 v0 execution/result outcome。
+        # 即使 provider_output/child_result 是测试注入，也不能绕过 parent-built
+        # bounded context，否则 lifecycle 会伪造 subagent.context.built。
+        context_gate = self._bounded_context_gate(
+            profile=profile,
+            v0_request=v0_request,
+        )
+        if context_gate:
+            return self._context_gate_failed(
+                context,
+                base_evidence=base_evidence,
+                failure_kind=context_gate,
+            )
+
+        requested_operation = self._requested_operation(payload)
+        capability_flag = _V0_OPERATION_CAPABILITY_FLAGS.get(requested_operation, "")
+        if capability_flag and not bool(getattr(profile.capability_flags, capability_flag)):
+            return self._policy_blocked(
+                context,
+                profile=profile,
+                v0_request=v0_request,
+                requested_operation=requested_operation,
+                capability_flag=capability_flag,
+                base_evidence=base_evidence,
+            )
+
         scenario = str(payload.get("scenario") or "")
         if scenario == "provider_failure" or payload.get("provider_failure") is not None:
             provider_gate = self._provider_execution_gate(
@@ -406,16 +420,6 @@ class SubAgentV0Handler:
                     v0_request=v0_request,
                     base_evidence=base_evidence,
                     failure_kind=provider_gate,
-                )
-            context_gate = self._bounded_context_gate(
-                profile=profile,
-                v0_request=v0_request,
-            )
-            if context_gate:
-                return self._context_gate_failed(
-                    context,
-                    base_evidence=base_evidence,
-                    failure_kind=context_gate,
                 )
             failure = payload.get("provider_failure")
             error_type = type(failure).__name__ if failure is not None else "ProviderFailure"
@@ -1099,7 +1103,7 @@ class SubAgentV0Handler:
         return SubAgentV0Result(
             status=status,
             safe_output=safe_output or {},
-            parent_decision_status="pending",
+            parent_decision_status="pending" if status == "success" else "none",
             adopted=False,
         )
 

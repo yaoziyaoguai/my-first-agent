@@ -279,3 +279,75 @@ def test_context_limits_fail_closed_before_provider_adapter(
     }, default=str)
     assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
     assert "/tmp/raw-context-path.txt" not in serialized
+
+
+def test_tool_use_provider_output_without_prepared_context_fails_closed() -> None:
+    dispatcher = build_phase1_dispatcher()
+    result = dispatcher.route(_direct_v0_request({
+        "provider_output": {
+            "type": "tool_use",
+            "name": "sk-live-tool-RAW",
+            "reason": "RAW_TOOL_REASON_SHOULD_NOT_LEAK",
+            "input": {"path": "/tmp/RAW_TOOL_PATH_SHOULD_NOT_LEAK"},
+        },
+    }))
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert result.payload.get("needs_parent_tool_request") is not True
+    assert "subagent.result.produced" not in set(result.evidence["lifecycle_events"])
+    assert "subagent.parent_decision.pending" not in set(result.evidence["lifecycle_events"])
+    assert "RAW_TOOL_REASON_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_TOOL_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert "sk-live-tool-RAW" not in serialized
+
+
+def test_child_result_without_prepared_context_does_not_enter_parent_decision() -> None:
+    dispatcher = build_phase1_dispatcher()
+    result = dispatcher.route(_direct_v0_request({
+        "child_result": {
+            "summary": "RAW_CHILD_RESULT_SHOULD_NOT_LEAK",
+            "path": "/tmp/RAW_CHILD_PATH_SHOULD_NOT_LEAK",
+        },
+    }))
+    event_names = set(result.evidence["lifecycle_events"])
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert "subagent.result.produced" not in event_names
+    assert "subagent.parent_decision.pending" not in event_names
+    assert result.payload.get("parent_decision_status") != "pending"
+    assert "RAW_CHILD_RESULT_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_CHILD_PATH_SHOULD_NOT_LEAK" not in serialized
+
+
+def test_batch_memory_provider_output_without_prepared_context_fails_closed() -> None:
+    dispatcher = build_phase1_dispatcher()
+    result = dispatcher.route(_direct_v0_request({
+        "provider_output": {
+            "batch_memory": [{
+                "key": "raw",
+                "value": "RAW_MEMORY_SHOULD_NOT_LEAK",
+                "path": "/tmp/RAW_MEMORY_PATH_SHOULD_NOT_LEAK",
+            }],
+        },
+    }))
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert result.evidence["batch_memory_seen"] is False
+    assert "subagent.result.produced" not in set(result.evidence["lifecycle_events"])
+    assert "RAW_MEMORY_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_MEMORY_PATH_SHOULD_NOT_LEAK" not in serialized

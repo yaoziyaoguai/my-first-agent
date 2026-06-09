@@ -178,11 +178,21 @@ def _direct_v0_request(payload: dict[str, object]) -> RuntimeActionRequest:
 
 def _assert_provider_not_called_for_context_gate(result: object) -> None:
     event_names = set(result.evidence["lifecycle_events"])
+    lifecycle_payload_events = {
+        str(event.get("event") or "")
+        for event in result.evidence.get("lifecycle_event_payloads", ())
+    }
+    action_log_events = {
+        str(event.get("event") or "")
+        for event in result.evidence.get("action_log", ())
+    }
 
     assert result.status in {"failed", "policy_blocked"}
     assert result.evidence["provider_called"] is False
     assert result.evidence["provider_completed"] is False
     assert "subagent.context.built" not in event_names
+    assert "subagent.context.built" not in lifecycle_payload_events
+    assert "subagent.context.built" not in action_log_events
     assert "subagent.provider.called" not in event_names
     assert "subagent.provider.completed" not in event_names
     assert "subagent.execution.failed" in event_names
@@ -351,3 +361,28 @@ def test_batch_memory_provider_output_without_prepared_context_fails_closed() ->
     assert "subagent.result.produced" not in set(result.evidence["lifecycle_events"])
     assert "RAW_MEMORY_SHOULD_NOT_LEAK" not in serialized
     assert "RAW_MEMORY_PATH_SHOULD_NOT_LEAK" not in serialized
+
+
+def test_lifecycle_catalog_introspection_without_prepared_context_fails_closed() -> None:
+    dispatcher = build_phase1_dispatcher()
+    result = dispatcher.route(_direct_v0_request({
+        "introspect_lifecycle_catalog": True,
+        "raw_context": "RAW_CONTEXT_SHOULD_NOT_LEAK",
+        "raw_path": "/tmp/RAW_CONTEXT_PATH_SHOULD_NOT_LEAK",
+        "secret": "sk-test-context-secret",
+    }))
+    event_names = set(result.evidence["lifecycle_events"])
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+    }, default=str)
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert result.payload.get("parent_decision_status") != "pending"
+    assert "subagent.context.built" not in event_names
+    assert "subagent.result.produced" not in event_names
+    assert "subagent.parent_decision.pending" not in event_names
+    assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
+    assert "RAW_CONTEXT_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert "sk-test-context-secret" not in serialized

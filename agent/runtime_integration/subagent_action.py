@@ -349,19 +349,23 @@ class SubAgentV0Handler:
             )
 
         if payload.get("introspect_lifecycle_catalog") is True:
-            result = self._contract_result(status="success")
-            return context.success(
-                handler_name=type(self).__name__,
-                target_module="SubAgentV0Contract",
-                payload=result.to_payload(),
-                observed_call=None,
-                parent_adjudicated=False,
-                evidence_extra={
-                    **base_evidence,
-                    "lifecycle_event_catalog": _V0_LIFECYCLE_CATALOG,
-                    "lifecycle_events": _COMMON_V0_LIFECYCLE_EVENTS,
-                    "event": "subagent.execution.started",
-                },
+            context_gate = self._bounded_context_gate(
+                profile=profile,
+                v0_request=v0_request,
+            )
+            if context_gate:
+                return self._context_gate_failed(
+                    context,
+                    profile=profile,
+                    v0_request=v0_request,
+                    base_evidence=base_evidence,
+                    failure_kind=context_gate,
+                )
+            return self._lifecycle_catalog_introspection(
+                context,
+                profile=profile,
+                v0_request=v0_request,
+                base_evidence=base_evidence,
             )
 
         output_schema_ok, output_schema_error = validate_output_schema_contract(
@@ -391,6 +395,8 @@ class SubAgentV0Handler:
         if context_gate:
             return self._context_gate_failed(
                 context,
+                profile=profile,
+                v0_request=v0_request,
                 base_evidence=base_evidence,
                 failure_kind=context_gate,
             )
@@ -707,6 +713,70 @@ class SubAgentV0Handler:
             },
         )
 
+    def _lifecycle_catalog_introspection(
+        self,
+        context: RuntimeActionContext,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+        base_evidence: dict[str, Any],
+    ):
+        """Return lifecycle catalog metadata without claiming child execution.
+
+        中文学习边界：introspection 是诊断/测试 metadata path，不是 v0 child
+        execution。即使调用方提供了 valid bounded context，也不能伪造
+        context.built、result.produced 或 parent_decision.pending。
+        """
+
+        result = self._contract_result(status="skipped")
+        lifecycle_events = (
+            "subagent.request.created",
+            "subagent.profile.selected",
+            "subagent.execution.skipped",
+        )
+        return context.result(
+            status="skipped",
+            handler_name=type(self).__name__,
+            target_module="SubAgentV0Contract",
+            payload=result.to_payload(),
+            observed_call=None,
+            parent_adjudicated=False,
+            evidence_extra={
+                **base_evidence,
+                "lifecycle_event_catalog": _V0_LIFECYCLE_CATALOG,
+                "lifecycle_events": lifecycle_events,
+                "lifecycle_event_payloads": self._lifecycle_event_payloads(
+                    profile,
+                    v0_request,
+                    lifecycle_events,
+                ),
+                "action_log": self._safe_action_log_preview(
+                    profile,
+                    v0_request,
+                    lifecycle_events=lifecycle_events,
+                ),
+                "log_viewer": {
+                    "subsystem": "subagent_v0",
+                    "event_count": len(lifecycle_events),
+                    "redacted": True,
+                },
+                "checkpoint_metadata": {
+                    **self._checkpoint_metadata(
+                        profile,
+                        status="skipped",
+                        result_hash=stable_hash("lifecycle_introspection", prefix="result"),
+                    ),
+                    "decision": "none",
+                },
+                "lifecycle_introspection_only": True,
+                "execution_started": False,
+                "provider_called": False,
+                "provider_completed": False,
+                "contract_only": True,
+                "event": "subagent.execution.skipped",
+            },
+        )
+
     def _failed_contract(
         self,
         context: RuntimeActionContext,
@@ -759,6 +829,8 @@ class SubAgentV0Handler:
         if context_gate:
             return self._context_gate_failed(
                 context,
+                profile=profile,
+                v0_request=v0_request,
                 base_evidence=base_evidence,
                 failure_kind=context_gate,
             )
@@ -958,15 +1030,18 @@ class SubAgentV0Handler:
         self,
         context: RuntimeActionContext,
         *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
         base_evidence: dict[str, Any],
         failure_kind: str,
     ):
+        lifecycle_events = _V0_CONTEXT_GATE_FAILURE_EVENTS
         return self._failed_contract(
             context,
             target_module="SubAgentV0Executor",
             payload=self._contract_result(status="failed").to_payload(),
             reason=failure_kind,
-            lifecycle_events=_V0_CONTEXT_GATE_FAILURE_EVENTS,
+            lifecycle_events=lifecycle_events,
             evidence_extra={
                 **base_evidence,
                 "execution_started": False,
@@ -983,6 +1058,30 @@ class SubAgentV0Handler:
                     "error_type": failure_kind,
                     "error_hash": stable_hash(failure_kind, prefix="context"),
                     "redacted": True,
+                },
+                "lifecycle_events": lifecycle_events,
+                "lifecycle_event_payloads": self._lifecycle_event_payloads(
+                    profile,
+                    v0_request,
+                    lifecycle_events,
+                ),
+                "action_log": self._safe_action_log_preview(
+                    profile,
+                    v0_request,
+                    lifecycle_events=lifecycle_events,
+                ),
+                "log_viewer": {
+                    "subsystem": "subagent_v0",
+                    "event_count": len(lifecycle_events),
+                    "redacted": True,
+                },
+                "checkpoint_metadata": {
+                    **self._checkpoint_metadata(
+                        profile,
+                        status="failed",
+                        result_hash=stable_hash(failure_kind, prefix="result"),
+                    ),
+                    "decision": "none",
                 },
             },
         )

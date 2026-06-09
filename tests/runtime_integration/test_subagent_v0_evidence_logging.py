@@ -114,8 +114,17 @@ def _redaction_surfaces(result) -> dict[str, object]:
 
 def test_required_v0_lifecycle_event_catalog_is_declared() -> None:
     result = route_v0(payload={"introspect_lifecycle_catalog": True})
+    event_names = set(result.evidence["lifecycle_events"])
 
     assert set(REQUIRED_V0_EVENTS) <= set(result.evidence["lifecycle_event_catalog"])
+    assert result.status == "skipped"
+    assert result.evidence["lifecycle_introspection_only"] is True
+    assert result.payload["parent_decision_status"] == "none"
+    assert "subagent.context.built" not in event_names
+    assert "subagent.provider.called" not in event_names
+    assert "subagent.provider.completed" not in event_names
+    assert "subagent.result.produced" not in event_names
+    assert "subagent.parent_decision.pending" not in event_names
 
 
 def test_success_path_emits_success_lifecycle_events_only() -> None:

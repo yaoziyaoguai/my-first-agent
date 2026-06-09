@@ -9,6 +9,7 @@ provider、不执行工具、不写 Memory/Checkpoint，也不读取真实文件
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -43,6 +44,15 @@ DEFAULT_V0_OUTPUT_SCHEMA: Mapping[str, Any] = MappingProxyType({
         "summary": MappingProxyType({"type": "string"}),
     }),
 })
+_SAFE_PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,63}$")
+_FORBIDDEN_PROFILE_ID_MARKERS = (
+    "sk-",
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+)
 
 
 def stable_hash(value: object, *, prefix: str = "sha256") -> str:
@@ -50,6 +60,33 @@ def stable_hash(value: object, *, prefix: str = "sha256") -> str:
     if not raw:
         return ""
     return f"{prefix}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def is_safe_v0_profile_id(profile_id: object) -> bool:
+    """Return whether a profile id is safe to echo in runtime evidence."""
+
+    raw = str(profile_id or "")
+    lowered = raw.lower()
+    if not _SAFE_PROFILE_ID_RE.fullmatch(raw):
+        return False
+    return not any(marker in lowered for marker in _FORBIDDEN_PROFILE_ID_MARKERS)
+
+
+def project_v0_profile_id(profile_id: object) -> tuple[str, dict[str, Any]]:
+    """Project profile ids before they reach payload/evidence/checkpoint surfaces."""
+
+    raw = str(profile_id or "")
+    metadata = {
+        "present": bool(raw),
+        "length": len(raw),
+        "hash": stable_hash(raw, prefix="profile"),
+        "redacted": not is_safe_v0_profile_id(raw),
+        "safe": is_safe_v0_profile_id(raw),
+    }
+    if metadata["safe"]:
+        return raw, metadata
+    digest = str(metadata["hash"]).split(":")[-1] or "empty"
+    return f"profile-redacted-{digest}", metadata
 
 
 def safe_arguments_metadata(value: object) -> dict[str, Any]:
@@ -237,6 +274,7 @@ class SubAgentV0ProfileContract:
     """Product v0 profile contract with safe defaults."""
 
     profile_id: str = "default-v0"
+    profile_id_metadata: Mapping[str, Any] = field(default_factory=dict)
     status: str = "product"
     provider_mode_allowed: str = "fake_only"
     max_turns: int = 1
@@ -263,9 +301,10 @@ class SubAgentV0ProfileContract:
             if name in profile_data:
                 capability_data[name] = profile_data[name]
 
-        profile_id = str(
+        raw_profile_id = str(
             profile_data.get("profile_id") or payload.get("profile_id") or "default-v0"
         )
+        profile_id, profile_id_metadata = project_v0_profile_id(raw_profile_id)
         status = str(
             profile_data.get("status")
             or payload.get("requested_profile_status")
@@ -293,6 +332,7 @@ class SubAgentV0ProfileContract:
         )
         return cls(
             profile_id=profile_id,
+            profile_id_metadata=profile_id_metadata,
             status=status,
             provider_mode_allowed=provider_mode_allowed,
             max_turns=max_turns,
@@ -304,7 +344,13 @@ class SubAgentV0ProfileContract:
         )
 
     def __post_init__(self) -> None:
-        if not self.profile_id:
+        profile_id = self.profile_id
+        profile_id_metadata = dict(self.profile_id_metadata)
+        if not profile_id or not profile_id_metadata:
+            profile_id, profile_id_metadata = project_v0_profile_id(profile_id or "default-v0")
+        elif not is_safe_v0_profile_id(profile_id):
+            profile_id, profile_id_metadata = project_v0_profile_id(profile_id)
+        if not profile_id:
             raise ValueError("profile_id is required")
         if self.status not in V0_PROFILE_STATUSES:
             raise ValueError("invalid SubAgentV0 profile status")
@@ -316,6 +362,12 @@ class SubAgentV0ProfileContract:
             raise ValueError("max_context_chars must be non-negative")
         if self.max_files < 0:
             raise ValueError("max_files must be non-negative")
+        object.__setattr__(self, "profile_id", profile_id)
+        object.__setattr__(
+            self,
+            "profile_id_metadata",
+            MappingProxyType(dict(profile_id_metadata)),
+        )
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
         object.__setattr__(self, "output_schema", MappingProxyType(dict(self.output_schema)))
 
@@ -327,6 +379,7 @@ class SubAgentV0ProfileContract:
         flags = dict(self.capability_flags.to_mapping())
         return {
             "profile_id": self.profile_id,
+            "profile_id_metadata": MappingProxyType(dict(self.profile_id_metadata)),
             "status": self.status,
             "provider_mode_allowed": self.provider_mode_allowed,
             "max_turns": self.max_turns,
@@ -357,12 +410,17 @@ class SubAgentV0Request:
         provider_mode = str(payload.get("provider_mode") or "fake_local")
         if provider_mode not in V0_PROVIDER_MODES:
             provider_mode = "disabled"
+        raw_profile = payload.get("profile_contract")
+        profile_data = dict(raw_profile) if isinstance(raw_profile, Mapping) else {}
+        profile_id, _profile_id_metadata = project_v0_profile_id(
+            profile_data.get("profile_id") or payload.get("profile_id") or "default-v0"
+        )
         prepared = payload.get("prepared_v0_context")
         context_metadata: Mapping[str, Any] = {}
         if isinstance(prepared, Mapping) and isinstance(prepared.get("metadata"), Mapping):
             context_metadata = dict(prepared["metadata"])
         return cls(
-            profile_id=str(payload.get("profile_id") or "default-v0"),
+            profile_id=profile_id,
             provider_mode=provider_mode,
             parent_opt_in=bool(payload.get("parent_opt_in")),
             task_hash=stable_hash(payload.get("task", ""), prefix="task"),

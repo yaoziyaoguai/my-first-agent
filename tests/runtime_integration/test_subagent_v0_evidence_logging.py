@@ -322,3 +322,46 @@ def test_prepared_context_metadata_is_allowlisted_before_evidence_surfaces() -> 
     )
     for token in forbidden:
         assert token not in serialized
+
+
+def test_unsafe_profile_id_is_projected_before_evidence_and_checkpoint_surfaces() -> None:
+    raw_profile_id = "/tmp/RAW_PROFILE_PATH_SHOULD_NOT_LEAK"
+    result = route_v0(payload={
+        "profile_id": raw_profile_id,
+        "profile_contract": {"profile_id": raw_profile_id},
+    })
+    surfaces = _redaction_surfaces(result)
+    serialized = json.dumps({
+        "payload": result.payload,
+        "evidence": result.evidence,
+        "surfaces": surfaces,
+        "lifecycle_event_payloads": result.evidence["lifecycle_event_payloads"],
+    }, default=str)
+    metadata = result.evidence["profile_id_metadata"]
+
+    assert raw_profile_id not in serialized
+    assert "RAW_PROFILE_PATH_SHOULD_NOT_LEAK" not in serialized
+    assert result.evidence["profile_id"].startswith("profile-redacted-")
+    assert result.evidence["checkpoint_metadata"]["profile_id"].startswith(
+        "profile-redacted-"
+    )
+    assert metadata["present"] is True
+    assert metadata["length"] == len(raw_profile_id)
+    assert metadata["hash"]
+    assert raw_profile_id not in metadata["hash"]
+    assert metadata["redacted"] is True
+    assert metadata["safe"] is False
+
+
+def test_safe_profile_id_remains_visible_in_lifecycle_surfaces() -> None:
+    result = route_v0(payload={"profile_id": "default-v0"})
+    serialized = json.dumps({
+        "evidence": result.evidence,
+        "checkpoint_metadata": result.evidence["checkpoint_metadata"],
+        "lifecycle_event_payloads": result.evidence["lifecycle_event_payloads"],
+    }, default=str)
+
+    assert result.evidence["profile_id"] == "default-v0"
+    assert result.evidence["profile_id_metadata"]["safe"] is True
+    assert result.evidence["checkpoint_metadata"]["profile_id"] == "default-v0"
+    assert "default-v0" in serialized

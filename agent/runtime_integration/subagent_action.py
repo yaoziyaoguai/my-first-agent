@@ -105,6 +105,18 @@ _V0_SAFE_SCALAR_CONTEXT_FIELDS = frozenset({
     "uncontrolled_path_read_text_calls",
     "parent_policy_selects_all_files",
 })
+_V0_REQUIRED_EXECUTION_CONTEXT_FIELDS = frozenset({
+    "context_hash",
+    "context_length",
+    "context_file_count",
+    "max_context_chars",
+    "max_files",
+})
+_V0_CONTEXT_GATE_FAILURE_EVENTS = (
+    "subagent.request.created",
+    "subagent.profile.selected",
+    "subagent.execution.failed",
+)
 
 
 def _safe_hash(value: object, *, prefix: str) -> str:
@@ -279,6 +291,18 @@ def _coerce_nonnegative_int(value: object) -> int:
     return max(0, parsed)
 
 
+def _provider_call_permitted(
+    *,
+    profile: SubAgentV0ProfileContract,
+    request: SubAgentV0Request,
+) -> bool:
+    if not profile.capability_flags.can_call_provider:
+        return False
+    if not provider_mode_allowed(profile=profile, request=request):
+        return False
+    return request.provider_mode != "real_opt_in" or profile.product_capability
+
+
 class SubAgentV0Handler:
     """Product v0 RuntimeAction handler.
 
@@ -371,6 +395,28 @@ class SubAgentV0Handler:
 
         scenario = str(payload.get("scenario") or "")
         if scenario == "provider_failure" or payload.get("provider_failure") is not None:
+            provider_gate = self._provider_execution_gate(
+                profile=profile,
+                v0_request=v0_request,
+            )
+            if provider_gate:
+                return self._provider_gate_failed(
+                    context,
+                    profile=profile,
+                    v0_request=v0_request,
+                    base_evidence=base_evidence,
+                    failure_kind=provider_gate,
+                )
+            context_gate = self._bounded_context_gate(
+                profile=profile,
+                v0_request=v0_request,
+            )
+            if context_gate:
+                return self._context_gate_failed(
+                    context,
+                    base_evidence=base_evidence,
+                    failure_kind=context_gate,
+                )
             failure = payload.get("provider_failure")
             error_type = type(failure).__name__ if failure is not None else "ProviderFailure"
             return self._failed_contract(
@@ -412,7 +458,7 @@ class SubAgentV0Handler:
                 base_evidence=base_evidence,
             )
 
-        if not provider_mode_allowed(profile=profile, request=v0_request):
+        if not _provider_call_permitted(profile=profile, request=v0_request):
             return self._policy_blocked(
                 context,
                 profile=profile,
@@ -508,10 +554,7 @@ class SubAgentV0Handler:
             v0_request.prepared_context_metadata
         )
         flags = dict(profile.capability_flags.to_mapping())
-        provider_allowed = (
-            profile.capability_flags.can_call_provider
-            and provider_mode_allowed(profile=profile, request=v0_request)
-        )
+        provider_allowed = _provider_call_permitted(profile=profile, request=v0_request)
         return {
             "request_type": "SubAgentV0Request",
             "handler_type": "SubAgentV0Handler",
@@ -522,6 +565,7 @@ class SubAgentV0Handler:
             "evidence_recorder_type": "RuntimeActionDispatcher",
             "profile_contract": profile.to_safe_evidence(),
             "profile_id": profile.profile_id,
+            "profile_id_metadata": dict(profile.profile_id_metadata),
             "profile_status": profile.status,
             "product_capability": profile.product_capability,
             "provider_mode": v0_request.provider_mode,
@@ -695,6 +739,26 @@ class SubAgentV0Handler:
         payload: dict[str, Any],
         base_evidence: dict[str, Any],
     ):
+        provider_gate = self._provider_execution_gate(profile=profile, v0_request=v0_request)
+        if provider_gate:
+            return self._provider_gate_failed(
+                context,
+                profile=profile,
+                v0_request=v0_request,
+                base_evidence=base_evidence,
+                failure_kind=provider_gate,
+            )
+        context_gate = self._bounded_context_gate(
+            profile=profile,
+            v0_request=v0_request,
+        )
+        if context_gate:
+            return self._context_gate_failed(
+                context,
+                base_evidence=base_evidence,
+                failure_kind=context_gate,
+            )
+
         provider_output = self._call_v0_provider_adapter(
             profile=profile,
             v0_request=v0_request,
@@ -811,6 +875,113 @@ class SubAgentV0Handler:
         return {
             "summary": stable_hash(provider_basis, prefix="v0summary"),
         }
+
+    def _provider_execution_gate(
+        self,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+    ) -> str:
+        if not profile.capability_flags.can_call_provider:
+            return "provider_capability_disabled"
+        if not provider_mode_allowed(profile=profile, request=v0_request):
+            if v0_request.provider_mode == "real_opt_in" and not v0_request.parent_opt_in:
+                return "real_provider_requires_parent_opt_in"
+            return "provider_mode_not_allowed"
+        if v0_request.provider_mode == "real_opt_in" and not profile.product_capability:
+            return "real_provider_requires_product_profile"
+        return ""
+
+    def _bounded_context_gate(
+        self,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+    ) -> str:
+        metadata = dict(v0_request.prepared_context_metadata)
+        if not metadata:
+            return "context_missing"
+        if not set(metadata) >= _V0_REQUIRED_EXECUTION_CONTEXT_FIELDS:
+            return "context_metadata_incomplete"
+        context_hash = str(metadata.get("context_hash") or "")
+        if not context_hash:
+            return "context_hash_missing"
+        if not _is_safe_context_scalar_text("context_hash", context_hash):
+            return "context_hash_unsafe"
+        context_length = _coerce_nonnegative_int(metadata.get("context_length"))
+        context_file_count = _coerce_nonnegative_int(metadata.get("context_file_count"))
+        max_context_chars = _coerce_nonnegative_int(metadata.get("max_context_chars"))
+        max_files = _coerce_nonnegative_int(metadata.get("max_files"))
+        if max_context_chars > profile.max_context_chars:
+            return "context_limit_contract_mismatch"
+        if max_files > profile.max_files:
+            return "context_limit_contract_mismatch"
+        if context_length > profile.max_context_chars or context_length > max_context_chars:
+            return "context_length_exceeds_limit"
+        if context_file_count > profile.max_files or context_file_count > max_files:
+            return "context_file_count_exceeds_limit"
+        return ""
+
+    def _provider_gate_failed(
+        self,
+        context: RuntimeActionContext,
+        *,
+        profile: SubAgentV0ProfileContract,
+        v0_request: SubAgentV0Request,
+        base_evidence: dict[str, Any],
+        failure_kind: str,
+    ):
+        return self._policy_blocked(
+            context,
+            profile=profile,
+            v0_request=v0_request,
+            requested_operation="call_provider",
+            capability_flag="can_call_provider",
+            base_evidence={
+                **base_evidence,
+                "provider_call_allowed": False,
+                "real_call_allowed": False,
+                "failure_kind": failure_kind,
+                "blocked_reason_metadata": {
+                    "reason_hash": stable_hash(failure_kind, prefix="reason"),
+                    "error_type": failure_kind,
+                    "redacted": True,
+                },
+            },
+        )
+
+    def _context_gate_failed(
+        self,
+        context: RuntimeActionContext,
+        *,
+        base_evidence: dict[str, Any],
+        failure_kind: str,
+    ):
+        return self._failed_contract(
+            context,
+            target_module="SubAgentV0Executor",
+            payload=self._contract_result(status="failed").to_payload(),
+            reason=failure_kind,
+            lifecycle_events=_V0_CONTEXT_GATE_FAILURE_EVENTS,
+            evidence_extra={
+                **base_evidence,
+                "execution_started": False,
+                "contract_only": False,
+                "not_implemented": False,
+                "provider_called": False,
+                "provider_completed": False,
+                "provider_adapter_type": "SubAgentV0ProviderAdapter",
+                "failure_kind": failure_kind,
+                "context_built": False,
+                "context_missing": failure_kind == "context_missing",
+                "context_not_built": True,
+                "context_gate_metadata": {
+                    "error_type": failure_kind,
+                    "error_hash": stable_hash(failure_kind, prefix="context"),
+                    "redacted": True,
+                },
+            },
+        )
 
     def _tool_request_result(
         self,

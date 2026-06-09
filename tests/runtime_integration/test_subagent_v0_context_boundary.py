@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
 from tests.runtime_integration import subagent_v0_contract_helpers as v0_contract
 from tests.runtime_integration.subagent_v0_contract_helpers import (
     build_v0_context,
@@ -158,3 +160,122 @@ def test_child_cannot_add_files_or_mutate_parent_context_prompt_or_messages() ->
     assert result.evidence["context_mutated"] is False
     assert result.evidence["prompt_mutated"] is False
     assert result.evidence["messages_mutated"] is False
+
+
+def _direct_v0_request(payload: dict[str, object]) -> RuntimeActionRequest:
+    return RuntimeActionRequest(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+        source="subagent-v0-context-gate-test",
+        parent_trace_id="parent-trace",
+        payload={
+            "profile_id": "default-v0",
+            "provider_mode": "fake_local",
+            "task": "summarize safely",
+            **payload,
+        },
+    )
+
+
+def _assert_provider_not_called_for_context_gate(result: object) -> None:
+    event_names = set(result.evidence["lifecycle_events"])
+
+    assert result.status in {"failed", "policy_blocked"}
+    assert result.evidence["provider_called"] is False
+    assert result.evidence["provider_completed"] is False
+    assert "subagent.context.built" not in event_names
+    assert "subagent.provider.called" not in event_names
+    assert "subagent.provider.completed" not in event_names
+    assert "subagent.execution.failed" in event_names
+
+
+def test_missing_prepared_context_fails_closed_before_provider_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher = build_phase1_dispatcher()
+    handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_V0)
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provider adapter must not run without bounded context")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    result = dispatcher.route(_direct_v0_request({}))
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_missing"
+    assert result.evidence["context_missing"] is True
+    assert result.evidence["context_not_built"] is True
+
+
+def test_empty_context_hash_fails_closed_before_provider_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher = build_phase1_dispatcher()
+    handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_V0)
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provider adapter must not run with empty context_hash")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    result = dispatcher.route(_direct_v0_request({
+        "prepared_v0_context": {
+            "metadata": {
+                "context_hash": "",
+                "context_length": 1,
+                "context_file_count": 1,
+                "max_context_chars": 10,
+                "max_files": 1,
+            },
+        },
+    }))
+
+    _assert_provider_not_called_for_context_gate(result)
+    assert result.evidence["failure_kind"] == "context_hash_missing"
+
+
+def test_context_limits_fail_closed_before_provider_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher = build_phase1_dispatcher()
+    handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_V0)
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provider adapter must not run when bounded context exceeds limits")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    too_long = dispatcher.route(_direct_v0_request({
+        "profile_contract": {"max_context_chars": 10, "max_files": 2},
+        "prepared_v0_context": {
+            "metadata": {
+                "context_hash": "ctx-safe-hash",
+                "context_length": 11,
+                "context_file_count": 1,
+                "max_context_chars": 10,
+                "max_files": 2,
+                "raw_context": "RAW_CONTEXT_SHOULD_NOT_LEAK",
+                "path": "/tmp/raw-context-path.txt",
+            },
+        },
+    }))
+    too_many_files = dispatcher.route(_direct_v0_request({
+        "profile_contract": {"max_context_chars": 100, "max_files": 1},
+        "prepared_v0_context": {
+            "metadata": {
+                "context_hash": "ctx-safe-hash",
+                "context_length": 10,
+                "context_file_count": 2,
+                "max_context_chars": 100,
+                "max_files": 1,
+            },
+        },
+    }))
+
+    _assert_provider_not_called_for_context_gate(too_long)
+    _assert_provider_not_called_for_context_gate(too_many_files)
+    assert too_long.evidence["failure_kind"] == "context_length_exceeds_limit"
+    assert too_many_files.evidence["failure_kind"] == "context_file_count_exceeds_limit"
+    serialized = json.dumps({
+        "too_long": too_long.evidence,
+        "too_many": too_many_files.evidence,
+    }, default=str)
+    assert "RAW_CONTEXT_SHOULD_NOT_LEAK" not in serialized
+    assert "/tmp/raw-context-path.txt" not in serialized

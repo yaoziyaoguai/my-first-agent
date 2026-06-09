@@ -8,6 +8,7 @@ import pytest
 
 from agent.runtime_integration.schema import RuntimeActionResult
 from tests.runtime_integration.subagent_v0_contract_helpers import (
+    build_v0_dispatcher_and_handler,
     build_v0_request,
     route_v0,
     v0_action_type,
@@ -111,3 +112,79 @@ def test_fake_result_is_not_labeled_as_real_and_secrets_stay_out_of_safe_surface
     assert result.evidence["real_call_allowed"] is False
     assert "real_opt_in" not in serialized
     assert "sk-test-secret" not in serialized
+
+
+def test_can_call_provider_false_blocks_adapter_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher, handler = build_v0_dispatcher_and_handler()
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provider adapter must not run when can_call_provider=false")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    result = dispatcher.route(build_v0_request(payload={
+        "profile_contract": {
+            "provider_mode_allowed": "fake_only",
+            "can_call_provider": False,
+        },
+    }))
+
+    assert result.status in {"policy_blocked", "failed"}
+    assert result.evidence["provider_call_allowed"] is False
+    assert "provider_called" not in result.evidence
+    assert "provider_completed" not in result.evidence
+    assert "subagent.provider.called" not in result.evidence["lifecycle_events"]
+    assert "subagent.provider.completed" not in result.evidence["lifecycle_events"]
+
+
+def test_real_provider_without_explicit_opt_in_blocks_before_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher, handler = build_v0_dispatcher_and_handler()
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("real provider adapter must require explicit parent opt-in")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    result = dispatcher.route(build_v0_request(provider_mode="real_opt_in", payload={
+        "provider_mode": "real_opt_in",
+        "parent_opt_in": False,
+        "profile_contract": {
+            "provider_mode_allowed": "real_opt_in",
+            "can_call_provider": True,
+        },
+    }))
+
+    assert result.status in {"policy_blocked", "failed"}
+    assert result.evidence["provider_call_allowed"] is False
+    assert result.evidence["real_call_allowed"] is False
+    assert "provider_called" not in result.evidence
+    assert "provider_completed" not in result.evidence
+    assert "subagent.provider.called" not in result.evidence["lifecycle_events"]
+
+
+def test_demo_profile_cannot_execute_real_provider_even_with_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher, handler = build_v0_dispatcher_and_handler()
+
+    def forbidden_provider_call(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("demo profile must not execute product real provider")
+
+    monkeypatch.setattr(handler, "_call_v0_provider_adapter", forbidden_provider_call)
+    result = dispatcher.route(build_v0_request(provider_mode="real_opt_in", payload={
+        "provider_mode": "real_opt_in",
+        "parent_opt_in": True,
+        "profile_contract": {
+            "status": "demo",
+            "provider_mode_allowed": "real_opt_in",
+            "can_call_provider": True,
+        },
+    }))
+
+    assert result.status in {"policy_blocked", "failed"}
+    assert result.evidence["product_capability"] is False
+    assert result.evidence["provider_call_allowed"] is False
+    assert "provider_called" not in result.evidence
+    assert "provider_completed" not in result.evidence

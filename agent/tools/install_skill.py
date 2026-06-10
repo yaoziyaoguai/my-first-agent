@@ -1,8 +1,9 @@
 # agent/tools/install_skill.py
 """Disabled legacy install_skill wrapper.
 
-旧 Skill installer 已隔离到 `agent.legacy_skills`，这里不再 import 旧
-`install_from_github`，避免显式导入 tool wrapper 时触达真实网络 / git clone /
+旧 Skill installer 的历史隔离目标 `agent.legacy_skills` **当前不存在**——
+该路径已迁移或删除，本 wrapper 仅保留显式 `install_skill` tool name，
+不再 import 旧 `install_from_github`，避免触达真实网络 / git clone /
 pip install 风险路径。正式 Skill lifecycle tools 将由 `agent/skill_system/`
 后续阶段重新实现。
 """

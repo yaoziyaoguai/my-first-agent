@@ -1,8 +1,10 @@
 # agent/tools/update_skill.py
 """Disabled legacy update_skill wrapper.
 
-旧 Skill updater 依赖 quarantined `agent.legacy_skills` installer；wrapper 保留
-显式 import path 但 fail closed，避免旧网络/文件写入路径继续作为默认链路。
+旧 Skill updater 的历史 installer 隔离目标 `agent.legacy_skills` **当前不存在**；
+wrapper 保留显式 `update_skill` tool name 但 fail closed，避免旧网络 /
+文件写入路径继续作为默认链路。`import agent.legacy_skills` 会 ImportError，
+quarantine 由目录不存在强制执行。
 """
 
 from agent.tool_registry import register_tool

@@ -8,8 +8,9 @@ implementation loop: tests and code should trace back to the contracts below.
 
 The formal implementation namespace is `agent/skill_system/`; legacy
 `agent/skills/` has been cleaned/quarantined and must not be used as a formal
-or reference implementation path. If `agent/legacy_skills/` exists, it is only
-historical migration material.
+or reference implementation path. `agent/legacy_skills/` is the tombstone's
+stale historical target — **该目录当前不存在**；`import agent.legacy_skills`
+会 ImportError，quarantine 由目录不存在强制执行。
 
 ## 1. Goal
 
@@ -85,9 +86,10 @@ Runtime. Skill cannot spawn another loop or claim SubAgent semantics.
 
 The old `agent/skills/` implementation has been cleaned/quarantined. It is not
 the formal namespace, not a reference implementation, and not a default tool
-path. Any remaining `agent/legacy_skills/` package is historical migration
-material only. Formal Skill System behavior is governed by this RFC, and the
-legacy module-level registry singleton is not the formal design.
+path. `agent/legacy_skills/` is the tombstone's stale historical target — that
+directory **does not currently exist**; any `import agent.legacy_skills`
+will raise ImportError. Formal Skill System behavior is governed by this RFC,
+and the legacy module-level registry singleton is not the formal design.
 
 ## 4. Filesystem-first Skill Structure
 
@@ -200,7 +202,9 @@ Formal lifecycle:
 ## 8. Legacy Quarantine Policy
 
 - Existing `agent/skills` is a tombstone path, not a formal implementation.
-- Any `agent/legacy_skills` code is quarantined historical prototype material.
+- `agent/legacy_skills` is the tombstone's stale historical target; the
+  directory **does not currently exist**, and `import agent.legacy_skills`
+  raises ImportError (quarantine by absence).
 - Formal Skill System is governed by this RFC.
 - Formal implementation must use `agent/skill_system/`.
 - Formal implementation must not import `agent.legacy_skills`.

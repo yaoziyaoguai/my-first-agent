@@ -69,18 +69,21 @@ Real API 下需要验证：
 - Skill descriptor 格式是否对 LLM 充分可见和可理解
 - Skill 选择错误时的 graceful degradation
 
-### 3.2 Legacy skills 并存 (P3)
+### 3.2 Legacy skills tombstone (P3)
 
-`agent/legacy_skills/` 和 `agent/skill_system/` 两套体系并存：
-- `legacy_skills/`：隔离的历史材料，仅 installer/updater 工具引用
-- `skill_system/`：当前活跃的 skill 系统
-- `agent/skills/__init__.py`：tombstone，引导到 skill_system
+`agent/skills/` 与 `agent/skill_system/` 两套体系并存——`agent/skills/`
+是 tombstone，`agent/legacy_skills/` 是 tombstone 的 stale historical target
+（**该目录当前不存在**，任何 import 都会 ImportError）：
+- `agent/skills/__init__.py`：active fail-closed tombstone
+- `agent/legacy_skills/`：stale historical target；当前不存在
+- `agent/skill_system/`：当前活跃的 skill 系统
 
 当前状态：
-- `legacy_skills/` 不被 runtime 路径 import（仅在 `agent/tools/install_skill.py`
-  和 `agent/tools/update_skill.py` 中作为 wrapper 引用）
+- `agent/legacy_skills/` 不被 runtime 路径 import（仅在
+  `agent/tools/install_skill.py` 和 `agent/tools/update_skill.py` 的 docstring
+  中作为历史引用保留）
 - 这些 wrapper 是显式的，不会在默认 tool 注册路径中被加载
-- 清理时机：当 skill_system 的 install/update 流程完成时
+- quarantine 由目录不存在强制执行
 
 ---
 

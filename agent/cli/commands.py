@@ -85,11 +85,6 @@ def dispatch_maintenance_command(
             return 1
         return 0
 
-    if argv and argv[0] in {"process", "scan", "preflight"}:
-        from llm.cli import main as process_main
-
-        return process_main(argv)
-
     if len(argv) >= 2 and argv[0] == "mcp" and argv[1] == "config":
         from agent.mcp_config_cli import run_mcp_config_cli
 

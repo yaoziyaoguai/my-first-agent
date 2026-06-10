@@ -29,7 +29,7 @@
 | skill.apply | STUB / DOCS_DESIGN | STUB / DOCS_DESIGN | not called out | not called out |
 | mcp.discover | DEFERRED / DOCS_DESIGN | DEFERRED / DOCS_DESIGN | "adapter skeleton / harness-aware" | "不默认连接真实外部 MCP server" |
 | mcp.invoke | DEFERRED / DOCS_DESIGN | DEFERRED / DOCS_DESIGN | not called out | not called out |
-| subagent.delegate | FAKE_DEMO / FAKE_LOCAL | FAKE_DEMO / FAKE_LOCAL | "v0 contract / child 不直接执行" | "L1/L2 legacy route frozen" |
+| subagent.delegate | **READY / REAL_API_INTERACTIVE** | FAKE_DEMO / FAKE_LOCAL | "v0 contract / child 不直接执行" | "L1/L2 legacy route frozen" |
 | checkpoint.save | PARTIAL / FAKE_LOCAL | PARTIAL / FAKE_LOCAL | not called out | not called out |
 | checkpoint.resume | PARTIAL / FAKE_LOCAL | PARTIAL / FAKE_LOCAL | not called out | not called out |
 | trace.summary | PARTIAL / FAKE_LOCAL | PARTIAL / FAKE_LOCAL | "evidence_recorder 统一写入" | mentioned via Evidence row |
@@ -62,6 +62,17 @@
 - 不改 PROJECT_STATUS 现状文本（属于 source-of-truth repair spike）。
 - 不改 CURRENT_CAPABILITY_STATUS 现状文本（属于 source-of-truth repair spike）。
 - 不强求 docs alignment — 仅记录 drift。
+
+### 关键 drift — post-repair audit 修正
+
+5. **subagent.delegate status word (P0)**: V4 table 把 subagent.delegate 标为
+   "FAKE_DEMO / FAKE_LOCAL"，但 `agent/runtime_decision_frame.py:283-285` 的
+   source-of-truth 枚举为 `READY / REAL_API_INTERACTIVE`（prod-006 已 closed）。
+   PROJECT_STATUS / CURRENT_CAPABILITY_STATUS 用 "v0 contract / child 不直接执行"
+   描述，语义一致。V4 table 已修正为 `READY / REAL_API_INTERACTIVE`。
+   **未修正**: 文档读者可能混淆 RuntimeAction delegate_l0/L1 (FAKE_DEMO partial)
+   与 subagent.delegate business path (READY); 两个语义不冲突，但词义错位需要
+   在 source-of-truth repair spike 里把 delegate_l0/L1 单独列项。
 
 ---
 

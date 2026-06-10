@@ -70,3 +70,26 @@ def test_v6_addendum_substantively_references_consolidation_and_emergence() -> N
         "V6 addendum body must mention emergence — "
         f"got body={addendum_body!r}"
     )
+
+
+def test_v4_drift_table_subagent_delegate_reflects_runtime_decision_frame() -> None:
+    """V4 drift table 必须把 `subagent.delegate` 行对齐 RuntimeDecisionFrame SoT。
+
+    audit 2026-06-11: RuntimeDecisionFrame.subagent.delegate 是 READY/REAL_API_INTERACTIVE
+    但 V4 表把它写成 FAKE_DEMO；本次 audit 已在 drift table 上修正。
+    """
+    text = _DRIFT_DOC.read_text(encoding="utf-8")
+    v4_section = text.split("## 6.", 1)[0]
+    subagent_row = next(
+        (
+            line
+            for line in v4_section.splitlines()
+            if line.startswith("| subagent.delegate |")
+        ),
+        None,
+    )
+    assert subagent_row is not None, "V4 drift table must contain subagent.delegate row"
+    assert "READY" in subagent_row, (
+        "V4 drift table must show subagent.delegate = READY (RuntimeDecisionFrame SoT); "
+        f"got row={subagent_row!r}"
+    )

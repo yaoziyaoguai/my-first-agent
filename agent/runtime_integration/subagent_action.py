@@ -1,4 +1,18 @@
-"""subagent.delegate_l0 RuntimeAction handler."""
+"""subagent.delegate_l0 RuntimeAction handler.
+
+Path status legend (V3 Sub-agent path-status clarity):
+
+| Handler | Status | 行号 (approximate) | Notes |
+|---|---|---|---|
+| `SubAgentV0Handler` | **V0 current** | `~L306` | 唯一活跃 production path |
+| `SubAgentDelegateL0Handler` | **L0 probe (compat)** | `~L1257` | 仅兼容 test harness |
+| `SubAgentDelegateL1Handler` | **L1 frozen (legacy)** | `~L1424` | 历史 L1 prototype，非当前 |
+
+红线：
+- 不拆 `SubAgentV0Handler`（V0 设计 spike 单独做）。
+- 不恢复 L1 production route；L1 仅作历史参考。
+- L0 probe 不被 V0 production path 依赖；它的存活只为兼容 test harness。
+"""
 
 from __future__ import annotations
 
@@ -305,6 +319,9 @@ def _provider_call_permitted(
 
 class SubAgentV0Handler:
     """Product v0 RuntimeAction handler.
+
+    Path status: **V0 current** (the only production subagent path).
+    V0 设计由这条 handler 主线承担；L0 / L1 / L2 都不是当前 path。
 
     中文学习边界：
     U4 只实现 parent-controlled、bounded、single-turn 的最小 execution path。
@@ -1255,7 +1272,12 @@ class SubAgentV0Handler:
 
 
 class SubAgentDelegateL0Handler:
-    """Parent Runtime controlled L0 delegation handler."""
+    """Parent Runtime controlled L0 delegation handler.
+
+    Path status: **L0 probe** (compatibility / test harness only).
+    V0 product path is `SubAgentV0Handler`; L0 is kept for legacy L0 deterministic
+    test harness and inline-local compat. Not part of V0 production path.
+    """
 
     def __init__(self, *, registry: SubAgentRegistry) -> None:
         self._registry = registry
@@ -1423,6 +1445,10 @@ class SubAgentDelegateL0Handler:
 
 class SubAgentDelegateL1Handler:
     """Parent Runtime controlled L1 delegation handler — Loop 3.2a.
+
+    Path status: **L1-L2 frozen** (historical / future gated). Loop 3.2a
+    frozen implementation; L1/L2 is NOT current production route. V0 production
+    uses `SubAgentV0Handler` instead.
 
     L1 与 L0 关键区别：
     - child 调真实 provider（非 deterministic keyword-match）

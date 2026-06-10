@@ -7,7 +7,6 @@ dispatch 后产生 real_core_loop_runtime_e2e evidence。
 不新增 branch point、不新增 runtime flow。
 
 架构依据：
-- docs/specs/skill-l3/SPEC.md (Architecture Decision)
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 
 中文学习边界：

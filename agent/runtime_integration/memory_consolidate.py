@@ -14,8 +14,6 @@ semantic candidates 的只读操作。它不写 store、不做 LLM 增强（除�
 - MEMORY_RECALL：从 store 读取 snapshot 并注入 context
 - MEMORY_CONSOLIDATE：跨回合批量分析 episodic → semantic candidate（全新语义）
   三者均不涉及跨回合 episodic 的 batch analysis。
-
-SPEC: docs/specs/memory-consolidation-l3/SPEC.md
 """
 
 from __future__ import annotations

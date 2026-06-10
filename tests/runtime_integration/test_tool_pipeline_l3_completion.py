@@ -13,8 +13,6 @@ real_core_loop_runtime_e2e 分类。
 - L3 (real_core_loop_runtime_e2e): _try_phase1_turn_end_runtime_action → route_from_runtime_loop
 
 架构依据：
-- docs/specs/tool-pipeline-l3-completion/SPEC.md
-- docs/specs/tool-pipeline-l3-completion/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

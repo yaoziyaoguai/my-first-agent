@@ -2,13 +2,9 @@
 
 验证 MemoryConsolidateHandler 在 dispatcher.route() 路径下的
 行为：insufficient_evidence / no_candidates / consolidated 三个 disposition。
-
-SPEC: docs/specs/memory-consolidation-l3/SPEC.md
-TDD: docs/specs/memory-consolidation-l3/TDD.md
 """
 
 from __future__ import annotations
-
 
 from agent.memory_store import (
     InMemoryMemoryStore,

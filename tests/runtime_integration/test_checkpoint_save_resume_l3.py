@@ -16,8 +16,6 @@ route_from_runtime_loop() 真实路径，获得 L3 evidence，
 且 direct dispatcher.route 无法通过 payload 伪造升级为 L3。
 
 架构依据：
-- docs/specs/checkpoint-save-resume-l3/SPEC.md
-- docs/specs/checkpoint-save-resume-l3/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

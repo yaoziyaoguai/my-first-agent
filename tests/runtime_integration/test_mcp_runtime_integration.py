@@ -14,8 +14,6 @@ MCP tool-like execution 是已有 Tool branch point 下的一个 variant。
 - L3 (real_core_loop_runtime_e2e): verified in test_mcp_l3_real_core_loop.py
 
 架构依据：
-- docs/specs/mcp-runtime-integration/SPEC.md
-- docs/specs/mcp-runtime-integration/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

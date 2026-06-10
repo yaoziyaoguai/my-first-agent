@@ -16,8 +16,6 @@ not_found 是 Tool gate 的第四个 disposition 分支行为
 且 TOOL_INVOKE/TOOL_RESULT 不触发。
 
 架构依据：
-- docs/specs/tool-gate-not-found-l3/SPEC.md
-- docs/specs/tool-gate-not-found-l3/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

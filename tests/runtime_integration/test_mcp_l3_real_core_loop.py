@@ -15,8 +15,6 @@ TOOL_RESULT），不新增 Anchor、不新增 branch point、不新增 runtime f
 TOOL_INVOKE → TOOL_RESULT 完整管线，获得 L3 evidence。
 
 架构依据：
-- docs/specs/mcp-l3-real-core-loop/SPEC.md
-- docs/specs/mcp-l3-real-core-loop/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

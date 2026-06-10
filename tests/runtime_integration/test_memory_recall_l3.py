@@ -7,7 +7,6 @@ dispatch 后产生 real_core_loop_runtime_e2e evidence。
 不新增 branch point、不新增 runtime flow。
 
 架构依据：
-- docs/specs/memory-recall-branch-behavior/SPEC.md (L3 Wiring Architecture Decision)
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

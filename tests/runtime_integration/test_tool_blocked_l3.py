@@ -18,8 +18,6 @@ blocked 是 Tool gate 的第三个 disposition 分支行为
 2. _ 前缀非 allowlist 工具 → rejection_reason="internal tool is not in tool gate allowlist"
 
 架构依据：
-- docs/specs/tool-blocked-l3/SPEC.md
-- docs/specs/tool-blocked-l3/TDD.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

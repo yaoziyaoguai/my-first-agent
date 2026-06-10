@@ -7,10 +7,6 @@ not_found 是 TOOL_INVOKE 的防御性 branch behavior——即使 TOOL_GATE 返
 TOOL_REGISTRY 移除工具，触发 TOOL_INVOKE not_found。
 
 归属已有 TOOL_INVOKE branch point，不新增 Anchor、不新增 branch point。
-
-架构依据：
-- docs/specs/tool-invoke-not-found-l3/SPEC.md
-- docs/specs/tool-invoke-not-found-l3/TDD.md
 """
 
 from __future__ import annotations

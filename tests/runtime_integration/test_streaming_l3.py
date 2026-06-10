@@ -13,10 +13,6 @@ call_model() 已支持 streaming（model_call.py）：当 provider.supports_stre
 - L3 (real_core_loop_runtime_e2e): core.chat() → streaming dispatch via turn-end hook
   - STREAMING_PROVIDER_CALL：整轮 event 聚合 + collect_stream_response L3 evidence
   - STREAMING_EVENT：单 event 验证 + validate_stream_event L3 evidence
-
-架构依据：
-- docs/specs/streaming-l3/SPEC.md
-- docs/specs/streaming-l3/TDD.md
 """
 
 from __future__ import annotations

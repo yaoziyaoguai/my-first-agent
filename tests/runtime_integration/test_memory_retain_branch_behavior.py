@@ -12,9 +12,6 @@ retain = 已确认的 proposal → store.write() → disposition="retain"。
   verified via phase1_hook；C3 unskipped（MEMORY_PROPOSE 已接入 turn-end hook）
 
 架构依据：
-- docs/specs/memory-retain-branch-behavior/SPEC.md
-- docs/specs/memory-retain-branch-behavior/TDD.md
-- docs/specs/memory-retain-branch-behavior/IMPLEMENTATION_PLAN.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

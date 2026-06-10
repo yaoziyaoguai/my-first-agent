@@ -12,9 +12,6 @@ recall = 从 store 读取已批准 records → 生成 governed MemorySnapshot �
 - L3 (real_core_loop_runtime_e2e): route_from_runtime_loop() — verified in test_memory_recall_l3.py
 
 架构依据：
-- docs/specs/memory-recall-branch-behavior/SPEC.md
-- docs/specs/memory-recall-branch-behavior/TDD.md
-- docs/specs/memory-recall-branch-behavior/IMPLEMENTATION_PLAN.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

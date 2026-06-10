@@ -13,9 +13,6 @@ tool.invoke = 接收 tool_name + tool_input → 查找 TOOL_REGISTRY → 执行�
   verified in test_tool_pipeline_l3_completion.py
 
 架构依据：
-- docs/specs/tool-invoke-branch-behavior/SPEC.md
-- docs/specs/tool-invoke-branch-behavior/TDD.md
-- docs/specs/tool-invoke-branch-behavior/IMPLEMENTATION_PLAN.md
 - docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md
 """
 

@@ -6,10 +6,6 @@ emission 是完整的。Trace 是纯观测基础设施——不通过 dispatcher
 
 测试分层：
 - L3 (real_core_loop_runtime_e2e): core.chat() → on_trace_event 被调用
-
-架构依据：
-- docs/specs/local-trace-runtime-wiring/SPEC.md
-- docs/specs/local-trace-runtime-wiring/TDD.md
 """
 
 from __future__ import annotations

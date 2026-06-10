@@ -8,10 +8,6 @@ MEMORY_PROPOSE → MemoryRetainHandler → store.write()。
 测试分层：
 - L1/L2: 已有 test_memory_retain_branch_behavior.py 覆盖
 - L3 (real_core_loop_runtime_e2e): core.chat() → MEMORY_PROPOSE dispatch via turn-end hook
-
-架构依据：
-- docs/specs/memory-propose-l3/SPEC.md
-- docs/specs/memory-propose-l3/TDD.md
 """
 
 from __future__ import annotations

@@ -6,10 +6,6 @@ error 是 TOOL_INVOKE 的 error-path branch behavior。
 测试分层：
 - L3: core.chat() → TOOL_GATE(allowed) → TOOL_INVOKE(evidence-only)
 - L2: dispatcher.route() 直接调用
-
-架构依据：
-- docs/specs/tool-invoke-error-l3/SPEC.md
-- docs/specs/tool-invoke-error-l3/TDD.md
 """
 
 from __future__ import annotations

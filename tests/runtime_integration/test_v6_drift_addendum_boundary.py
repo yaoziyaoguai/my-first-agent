@@ -48,3 +48,25 @@ def test_v6_addendum_is_after_v5_sections() -> None:
     assert "## 7." not in trailing, (
         "Unexpected section 7 found after V6 — V6 was not the final section"
     )
+
+
+def test_v6_addendum_substantively_references_consolidation_and_emergence() -> None:
+    """V6 addendum 必须提到 `consolidation` 与 `emergence` 关键词，避免空标题。
+
+    这是行为 guard：drift 表格 V6 行如果被清空成只剩标题，
+    V6 doc-only 改动仍能通过结构断言但失去信息价值。强制 body 同时包含
+    "consolidation" 与 "emergence" 两个关键词（都是事实话题）。
+    """
+
+    text = _DRIFT_DOC.read_text(encoding="utf-8")
+    v6_index = text.find("## 6. Memory consolidation / emergence")
+    assert v6_index > 0, "V6 addendum not found"
+    addendum_body = text[v6_index:]
+    assert "consolidation" in addendum_body.lower(), (
+        "V6 addendum body must mention consolidation — "
+        f"got body={addendum_body!r}"
+    )
+    assert "emergence" in addendum_body.lower(), (
+        "V6 addendum body must mention emergence — "
+        f"got body={addendum_body!r}"
+    )

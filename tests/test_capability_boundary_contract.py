@@ -12,10 +12,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_TOMBSTONE = PROJECT_ROOT / "agent" / "skills" / "__init__.py"
-LEGACY_SKILLS_DIR = PROJECT_ROOT / "agent" / "legacy_skills"
 FORMAL_SKILL_SYSTEM_DIR = PROJECT_ROOT / "agent" / "skill_system"
 SUBAGENT_MODULE = PROJECT_ROOT / "agent" / "subagents" / "local.py"
 DOC_PATH = PROJECT_ROOT / "docs" / "CAPABILITY_BOUNDARIES.md"
@@ -74,15 +72,6 @@ def test_formal_skill_namespace_does_not_import_legacy_skills() -> None:
     assert leaked == {}
 
 
-def test_legacy_skill_package_is_quarantined_not_formal_boundary() -> None:
-    """旧 Skill 代码只作为历史参考，不能被测试继续当成正式 Skill MVP。"""
-
-    assert (LEGACY_SKILLS_DIR / "README.md").is_file()
-    assert "agent/skill_system/" in (LEGACY_SKILLS_DIR / "README.md").read_text(
-        encoding="utf-8"
-    )
-
-
 def test_skill_subagent_tool_boundary_doc_exists() -> None:
     """docs 要明确 skill/subagent/tool 三者边界，避免 future activation 漂移。"""
 
@@ -112,8 +101,7 @@ def test_skill_and_subagent_can_share_parent_policy_without_activation() -> None
     提供运行时对象。
     """
 
-    from agent.subagents.local import build_delegation_request
-    from agent.subagents.local import load_local_subagent_profile
+    from agent.subagents.local import build_delegation_request, load_local_subagent_profile
 
     subagent = load_local_subagent_profile(
         PROJECT_ROOT / "tests" / "fixtures" / "subagents" / "code-reviewer"

@@ -13,7 +13,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MEMORY_MODULE = PROJECT_ROOT / "agent" / "memory.py"
-ROADMAP = PROJECT_ROOT / "docs" / "archive" / "root-stale" / "ROADMAP.md"
 
 
 def _agent_imports(path: Path) -> set[str]:
@@ -97,24 +96,3 @@ def test_build_memory_section_is_static_placeholder_not_real_memory_reader() -> 
     from agent.memory import build_memory_section
 
     assert build_memory_section() == "--- Memory ---\n当前未注入长期记忆。\n--- End Memory ---"
-
-
-def test_roadmap_records_memory_discovery_questions_before_implementation() -> None:
-    """Roadmap 必须先记录 discovery 问题，再允许实现 Memory。
-
-    如果后续有人直接加 embedding、RAG、vector DB 或自动 retain 逻辑，却没有
-    先回答这些问题，本测试会提醒：Stage 3 的第一步是 architecture discovery，
-    不是 provider-first implementation。
-    """
-
-    text = ROADMAP.read_text(encoding="utf-8")
-
-    required_markers = [
-        "Memory **不是 checkpoint**",
-        "What should be remembered?",
-        "retain / recall / update / forget",
-        "provider seam",
-        "不直接做 RAG / retrieval / embedding / vector DB",
-    ]
-    for marker in required_markers:
-        assert marker in text

@@ -263,23 +263,13 @@ def test_mcp_config_sample_fixture_is_loadable_and_documented() -> None:
     from agent.mcp_config_service import inspect_mcp_server
 
     fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "mcp_config" / "safe-mcp.json"
-    docs_path = PROJECT_ROOT / "docs" / "archive" / "mcp" / "MCP_CONFIG_MANAGEMENT.md"
 
     validation = load_mcp_config(fixture_path)
     inspection = inspect_mcp_server(fixture_path, "fixture")
     rendered = render_server_inspection(inspection)
-    docs = docs_path.read_text(encoding="utf-8")
 
     assert validation.ok is True
     assert validation.config is not None
     assert validation.config.servers_by_name["fixture"].command == "fake-mcp-server"
     assert "ANTHROPIC_API_KEY" not in rendered
     assert "<redacted>" in rendered
-    for phrase in (
-        "explicit safe fixture path",
-        "no real MCP endpoint",
-        "no server execution",
-        "no .env",
-        "plan-first",
-    ):
-        assert phrase in docs

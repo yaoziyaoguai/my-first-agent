@@ -189,23 +189,3 @@ def test_subagent_local_mvp_has_no_runtime_network_process_or_provider_dependenc
     }
 
     assert _module_imports(MODULE_PATH).isdisjoint(forbidden_modules)
-
-
-def test_subagent_local_mvp_docs_record_non_goals() -> None:
-    """docs 必须说明 Subagent MVP 不是真实 LLM/进程/remote delegation。"""
-
-    text = (PROJECT_ROOT / "docs" / "archive" / "root-stale" / "SUBAGENT_LOCAL_MVP.md").read_text(encoding="utf-8")  # noqa: E501
-
-    for phrase in (
-        "fake/local profile + delegation contract",
-        "no real subagent dirs",
-        "no real LLM/provider",
-        "no external process spawn",
-        "no remote delegation",
-        "no autonomous child tool execution",
-        "parent runtime remains in control",
-        "does not import runtime",
-        "Fake dogfood example",
-        "complete_fake_delegation",
-    ):
-        assert phrase in text

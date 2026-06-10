@@ -393,6 +393,61 @@ def test_catalog_owned_invocation_descriptor_path_can_be_runtime_e2e() -> None:
     assert proof["callable_identity"] == result.evidence["callable_identity"]
 
 
+def test_dispatcher_registered_target_invocation_resolves_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dispatcher production path 必须通过 catalog resolve target descriptor。"""
+
+    resolve_calls: list[dict[str, str]] = []
+    original_resolve = RuntimeActionTargetCatalog.resolve
+
+    def resolve_spy(**kwargs: str):
+        resolve_calls.append(dict(kwargs))
+        return original_resolve(**kwargs)
+
+    monkeypatch.setattr(RuntimeActionTargetCatalog, "resolve", staticmethod(resolve_spy))
+
+    registry = ActionHandlerRegistry()
+    registry.register(RuntimeActionType.TOOL_REQUEST, _ObservedHandler())
+    dispatcher = RuntimeActionDispatcher(registry)
+
+    result = dispatcher.route(_request())
+
+    assert result.status == "success"
+    assert resolve_calls == [
+        {
+            "action_type": "tool.request",
+            "handler_name": "_ObservedHandler",
+            "handler_identity": f"{__name__}._ObservedHandler",
+            "target_module": "FakeTargetModule",
+            "operation": "run",
+        }
+    ]
+    assert result.evidence["target_catalog_allowed"] is True
+    assert result.evidence["target_identity_valid"] is True
+
+
+def test_target_catalog_resolve_is_metadata_only() -> None:
+    """catalog lookup 不应读写 observer runtime registries。"""
+
+    route_registry = dict(RuntimeActionModuleObserver._route_registry)
+    result_registry = dict(RuntimeActionModuleObserver._result_registry)
+    proof_registry = dict(RuntimeActionModuleObserver._proof_registry)
+
+    descriptor = RuntimeActionTargetCatalog.resolve(
+        action_type="tool.request",
+        handler_name="_ObservedHandler",
+        handler_identity=f"{__name__}._ObservedHandler",
+        target_module="FakeTargetModule",
+        operation="run",
+    )
+
+    assert descriptor is not None
+    assert descriptor.target_module == "FakeTargetModule"
+    assert descriptor.target_catalog_id
+    assert dict(RuntimeActionModuleObserver._route_registry) == route_registry
+    assert dict(RuntimeActionModuleObserver._result_registry) == result_registry
+    assert dict(RuntimeActionModuleObserver._proof_registry) == proof_registry
+
+
 def test_runtime_action_event_only_is_not_runtime_e2e() -> None:
     """receipt-only 不能通过：event 只能证明 route() 发生过，不能证明目标模块执行。"""
 
@@ -955,6 +1010,19 @@ _TEST_ONLY_TARGETS: frozenset[str] = frozenset({
     "FakeTargetModule",
 })
 
+_KNOWN_RUNTIME_ACTION_TYPES_WITHOUT_CATALOG_ENTRIES: frozenset[str] = frozenset({
+    "skill.candidates.built",
+    "skill.selection.entered",
+    "subagent.child_batch_memory",
+    "subagent.child_memory_request",
+    "subagent.child_result",
+    "subagent.child_tool_request",
+    "subagent.delegate.v0",
+    "subagent.delegate_l1",
+    "subagent.delegate_l2",
+    "subagent.parent_adjudication",
+})
+
 
 @pytest.mark.xfail(
     reason=(
@@ -977,6 +1045,15 @@ def test_all_runtime_action_types_have_catalog_entries() -> None:
         f"Catalog 缺少以下 RuntimeActionType 的 descriptor：{missing}。"
         f" 请在 agent/runtime_integration/evidence.py 的 RuntimeActionTargetCatalog._bindings 中注册。"
     )
+
+
+def test_runtime_action_type_catalog_gap_is_explicit_and_does_not_grow() -> None:
+    """新增 RuntimeActionType 时，catalog registration gap 不能静默扩大。"""
+
+    catalog_action_types = {binding.action_type for binding in RuntimeActionTargetCatalog._bindings}
+    all_action_types = {str(action_type) for action_type in RuntimeActionType}
+
+    assert all_action_types - catalog_action_types == _KNOWN_RUNTIME_ACTION_TYPES_WITHOUT_CATALOG_ENTRIES
 
 
 @pytest.mark.xfail(

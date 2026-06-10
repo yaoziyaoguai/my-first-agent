@@ -1,6 +1,6 @@
 """Phase 5: Skill Tool Binding 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 5）：
+测试范围（Skill Tool Binding）：
 - allowed_tools 是上限，不是授权绕过
 - ToolRegistry risk/capability filtering 仍生效
 - high-risk tool confirmation 仍保留
@@ -21,7 +21,6 @@ from agent.skill_system.tool_binding import (
     ToolBindingResult,
     validate_tool_request,
 )
-
 
 # ---- helpers ----
 
@@ -96,7 +95,11 @@ def test_tool_not_in_allowed_list_blocked():
     binding = SkillToolBinding(desc, registry)
     result = binding.check("write_file")
     assert result.allowed is False
-    assert "allowed_tools" in result.reason.lower() or "不在" in result.reason or "not in" in result.reason.lower()
+    assert (
+        "allowed_tools" in result.reason.lower()
+        or "不在" in result.reason
+        or "not in" in result.reason.lower()
+    )
 
 
 # ==================================================================
@@ -223,9 +226,11 @@ def test_tool_binding_result_fields():
 def test_tool_binding_module_does_not_import_legacy():
     """tool_binding.py 不能 import agent.skills / agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
+    from pathlib import Path
 
-    binding_path = P(__file__).resolve().parents[1] / "agent" / "skill_system" / "tool_binding.py"
+    binding_path = (
+        Path(__file__).resolve().parents[1] / "agent" / "skill_system" / "tool_binding.py"
+    )
     tree = ast.parse(binding_path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

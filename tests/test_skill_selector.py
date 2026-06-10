@@ -1,6 +1,6 @@
 """Phase 4: Deterministic Skill Selector 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 4）：
+测试范围（Deterministic Skill Selector）：
 - 显式名称选择
 - 无匹配 → no selection
 - 多匹配 → ranked candidates / ambiguity

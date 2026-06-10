@@ -6,8 +6,6 @@
 - 不回退到 type(provider).__name__ 或 provider class name
 - 未知 provider → fail-closed ("unknown", False)
 - 解析逻辑不读 .env / os.environ / API key
-
-架构依据：docs/plans/2026-05-21-002-feat-memory-anchor-hook-param-plan.md §U2
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 import pytest
-
 
 # _resolve_provider_evidence_metadata 尚未实现，预期 import 会失败
 # 这是 TDD red phase——先写测试，确认它们因为符号不存在而失败

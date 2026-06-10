@@ -1,6 +1,6 @@
 """Phase 3: Progressive Disclosure 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 3）：
+测试范围（Progressive Disclosure）：
 - Level 1 prompt 仅含 metadata
 - Level 2 body 仅在选中后加载
 - Level 3 references/scripts/templates 仅在显式请求时加载
@@ -23,12 +23,11 @@ import pytest
 from agent.skill_system.errors import SkillLoadError
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.prompt_section import (
-    build_skills_prompt_section,
     build_skill_body_section,
+    build_skills_prompt_section,
 )
 from agent.skill_system.registry import SkillRegistry
 from agent.skill_system.schema import SKILL_MD_FILENAME
-
 
 # ---- helpers ----
 
@@ -57,7 +56,12 @@ risk_level: low
     return path
 
 
-def _write_resource(skill_dir: Path, subdir: str, filename: str, content: str = "resource content") -> Path:
+def _write_resource(
+    skill_dir: Path,
+    subdir: str,
+    filename: str,
+    content: str = "resource content",
+) -> Path:
     p = skill_dir / subdir / filename
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
@@ -321,7 +325,11 @@ def test_loader_large_resource_policy():
 
         with pytest.raises(SkillLoadError) as exc_info:
             loader.load_resource("big-skill", "references", "large.md")
-        assert "过大" in exc_info.value.message or "size" in exc_info.value.message.lower() or "exceed" in exc_info.value.message.lower()
+        assert (
+            "过大" in exc_info.value.message
+            or "size" in exc_info.value.message.lower()
+            or "exceed" in exc_info.value.message.lower()
+        )
 
 
 # ==================================================================
@@ -402,16 +410,23 @@ def test_build_skill_body_section_is_per_skill():
 def test_loader_module_does_not_import_legacy():
     """loader.py 和 prompt_section.py 不能 import agent.skills / agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
 
     for module_path in ["agent/skill_system/loader.py", "agent/skill_system/prompt_section.py"]:
-        p = P(__file__).resolve().parents[1] / module_path
+        p = Path(__file__).resolve().parents[1] / module_path
         tree = ast.parse(p.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    assert not alias.name.startswith("agent.skills"), f"{module_path} imports {alias.name}"
-                    assert not alias.name.startswith("agent.legacy_skills"), f"{module_path} imports {alias.name}"
+                    assert not alias.name.startswith("agent.skills"), (
+                        f"{module_path} imports {alias.name}"
+                    )
+                    assert not alias.name.startswith("agent.legacy_skills"), (
+                        f"{module_path} imports {alias.name}"
+                    )
             elif isinstance(node, ast.ImportFrom) and node.module:
-                assert not node.module.startswith("agent.skills"), f"{module_path} imports {node.module}"
-                assert not node.module.startswith("agent.legacy_skills"), f"{module_path} imports {node.module}"
+                assert not node.module.startswith("agent.skills"), (
+                    f"{module_path} imports {node.module}"
+                )
+                assert not node.module.startswith("agent.legacy_skills"), (
+                    f"{module_path} imports {node.module}"
+                )

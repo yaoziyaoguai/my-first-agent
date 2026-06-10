@@ -14,8 +14,6 @@
 - test_phase1_real_core_loop.py 测试 Phase 1 基础设施接线（dispatcher、evidence、classification）
 - 本文件测试 Memory Anchor 专属边界（auto_approved 约束、no_action 处置、secret-like 路径等）
 - 两个文件独立演进，各自维护 spy/helper 定义，不互相依赖
-
-架构依据：docs/real-e2e/memory-anchor/SPEC.md, TDD.md, DOGFOOD_PLAN.md
 """
 
 from __future__ import annotations
@@ -368,7 +366,6 @@ class TestMemoryAnchorHandlerConstraints:
     由于 "记住" 前缀输入会触发 _memory_runtime.evaluate_user_text →
     CONFIRMATION_REQUIRED → chat() 提前返回空串 → turn-end hook 不触发，
     这组测试走 direct dispatcher.route() 路径以精确控制 handler 输入。
-    这是 TDD.md §1.3/§1.5 明确记录的设计选择。
     """
 
     def test_no_auto_approve(self):

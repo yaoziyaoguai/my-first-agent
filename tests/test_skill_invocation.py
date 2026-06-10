@@ -1,6 +1,6 @@
 """Phase 6: Runtime Invocation Adapter 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 6）：
+测试范围（Runtime Invocation Adapter）：
 - SkillInvocationRequest → SkillInvocationResult 流程
 - audit id 追踪
 - 错误处理
@@ -30,7 +30,6 @@ from agent.skill_system.result import (
     SkillAuditRecord,
     SkillInvocationResult,
 )
-
 
 # ---- helpers ----
 
@@ -279,16 +278,19 @@ def test_audit_record_safe_preview_no_secrets():
 def test_invocation_modules_do_not_import_legacy():
     """context.py / invocation.py / result.py 不能 import agent.skills / agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
 
     for mod in ["context.py", "invocation.py", "result.py"]:
-        p = P(__file__).resolve().parents[1] / "agent" / "skill_system" / mod
+        p = Path(__file__).resolve().parents[1] / "agent" / "skill_system" / mod
         tree = ast.parse(p.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     assert not alias.name.startswith("agent.skills"), f"{mod} imports {alias.name}"
-                    assert not alias.name.startswith("agent.legacy_skills"), f"{mod} imports {alias.name}"
+                    assert not alias.name.startswith("agent.legacy_skills"), (
+                        f"{mod} imports {alias.name}"
+                    )
             elif isinstance(node, ast.ImportFrom) and node.module:
                 assert not node.module.startswith("agent.skills"), f"{mod} imports {node.module}"
-                assert not node.module.startswith("agent.legacy_skills"), f"{mod} imports {node.module}"
+                assert not node.module.startswith("agent.legacy_skills"), (
+                    f"{mod} imports {node.module}"
+                )

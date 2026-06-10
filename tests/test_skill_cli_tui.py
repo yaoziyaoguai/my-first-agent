@@ -1,6 +1,6 @@
 """Phase 8: CLI/TUI Skill Presentation 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 9）：
+测试范围（CLI/TUI Skill Presentation）：
 - 列出可用 Skill 列表
 - 显示选中 Skill 信息
 - 显示被阻止的动作
@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path as P
+from pathlib import Path
 
 from agent.skill_system.descriptor import SkillDescriptor
 from agent.skill_system.presentation import (
@@ -131,7 +131,7 @@ def test_presentation_module_does_not_import_heavyweight():
     """presentation.py 不能导入 loader / runtime / checkpoint / handler。"""
     import agent.skill_system.presentation as pres_mod
 
-    p = P(pres_mod.__file__).resolve()
+    p = Path(pres_mod.__file__).resolve()
     tree = ast.parse(p.read_text(encoding="utf-8"))
     forbidden = {
         "agent.skill_system.loader",
@@ -163,7 +163,7 @@ def test_presentation_module_does_not_import_legacy():
     """presentation.py 不能 import agent.skills / agent.legacy_skills。"""
     import agent.skill_system.presentation as pres_mod
 
-    p = P(pres_mod.__file__).resolve()
+    p = Path(pres_mod.__file__).resolve()
     tree = ast.parse(p.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

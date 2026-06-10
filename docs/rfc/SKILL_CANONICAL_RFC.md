@@ -219,4 +219,4 @@ Formal lifecycle:
 - Runtime loop remains parent-owned.
 - CLI/TUI are presentation only.
 - Checkpoint/resume can explain any in-flight Skill invocation.
-- Full test plan in `docs/testing/SKILL_SYSTEM_TDD.md` passes phase by phase.
+- Full test suite under `tests/test_skill_*.py` passes (current source of truth alongside `agent/skill_system/`).

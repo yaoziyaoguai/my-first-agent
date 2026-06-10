@@ -11,8 +11,6 @@ gated 测试双门控设计（Constraint E）：
 只有两道门都通过才真正调用真实 API。
 
 非 gated 测试验证分类/约束/脱敏逻辑——不需要真实 API，可随 pytest 默认运行。
-
-架构依据：docs/plans/2026-05-22-001-feat-memory-anchor-real-smoke-plan.md
 """
 
 from __future__ import annotations

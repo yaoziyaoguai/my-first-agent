@@ -1,6 +1,6 @@
 """Phase 1: Skill Descriptor Schema 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 1）：
+测试范围（Skill Descriptor Schema）：
 - 合法 frontmatter → SkillManifest
 - 缺失必填字段 → fail closed with typed error
 - 无效 name/status/risk_level → fail closed
@@ -43,7 +43,6 @@ from agent.skill_system.schema import (
     load_skill_manifest,
     parse_skill_md,
 )
-
 
 # ---- helpers ----
 
@@ -234,7 +233,10 @@ def test_invalid_risk_level_defaults_to_low_and_passes():
         # 无效值由 schema.validate_manifest 处理
         with pytest.raises(SkillLoadError) as exc_info:
             load_skill_manifest(path)
-        assert "risk_level" in exc_info.value.message.lower() or exc_info.value.code == "INVALID_RISK_LEVEL"
+        assert (
+            "risk_level" in exc_info.value.message.lower()
+            or exc_info.value.code == "INVALID_RISK_LEVEL"
+        )
 
 
 # ==================================================================

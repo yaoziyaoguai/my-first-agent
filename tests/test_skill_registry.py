@@ -1,6 +1,6 @@
 """Phase 2: Filesystem Skill Registry 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 2）：
+测试范围（Filesystem Skill Registry）：
 - 确定性文件系统扫描
 - 重复名称 fail closed
 - disabled/hidden Skill 不可见

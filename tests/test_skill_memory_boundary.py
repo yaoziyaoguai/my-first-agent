@@ -1,6 +1,6 @@
 """Phase 7: Skill Memory Context Boundary 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 7）：
+测试范围（Skill Memory Context Boundary）：
 - memory_scope=none / read_context / propose_memory
 - Skill 通过 adapter 获取只读 context
 - Skill 不直接写 MemoryStore
@@ -17,7 +17,6 @@ from agent.skill_system.memory_boundary import (
     SkillMemoryBoundary,
     check_memory_proposal,
 )
-
 
 # ---- helpers ----
 
@@ -130,9 +129,9 @@ def test_check_memory_proposal_rejected_for_wrong_category():
 def test_memory_boundary_module_does_not_import_legacy():
     """memory_boundary.py 不能 import agent.skills / agent.legacy_skills。"""
     import ast
-    from pathlib import Path as P
+    from pathlib import Path
 
-    p = P(__file__).resolve().parents[1] / "agent" / "skill_system" / "memory_boundary.py"
+    p = Path(__file__).resolve().parents[1] / "agent" / "skill_system" / "memory_boundary.py"
     tree = ast.parse(p.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

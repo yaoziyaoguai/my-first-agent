@@ -1,6 +1,6 @@
 """Phase 7b: Skill Checkpoint/Resume Boundary 测试。
 
-测试范围（来自 docs/testing/SKILL_SYSTEM_TDD.md Phase 8 / Loop Phase 7b）：
+测试范围（Skill Checkpoint/Resume Boundary）：
 - in-flight Skill invocation 的 checkpoint 关联
 - resume 不重放 side effects
 - checkpoint 不保存 secrets

@@ -83,7 +83,6 @@ def format_health_report(results: Mapping[str, Mapping[str, Any]] | None) -> str
     lines.append(
         "提示：所有「建议」都是给你复制粘贴的命令，本程序**不会**自动执行清理。"
     )
-    lines.append("      详细维护指南：docs/archive/v0.x/V0_3_HEALTH_MAINTENANCE.md")
     lines.append(_BAR)
     return "\n".join(lines)
 

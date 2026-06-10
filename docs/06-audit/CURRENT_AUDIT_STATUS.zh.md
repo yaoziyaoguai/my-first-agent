@@ -32,8 +32,3 @@ Status: **Active — repository cleanup / source-of-truth repair**。
 ## 当前可推送性
 
 cleanup/source-of-truth 文档改动可以在本地检查通过后提交。不要 push，除非用户明确授权。
-
-## 保留审计入口
-
-- [audit/README.md](../audit/README.md)
-- [plans/README.md](../plans/README.md)

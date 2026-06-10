@@ -196,8 +196,7 @@ def test_active_index_links_to_existing_files():
         "docs/PROGRESS_LEDGER.md",
         "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
         "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-        "docs/plans/README.md",
-        "docs/audit/README.md",
+        "docs/CURRENT_DOCS.md",
     ]
 
     broken: list[str] = []
@@ -233,8 +232,8 @@ def test_active_index_docs_contain_no_hardcoded_secrets():
         "docs/PROJECT_STATUS.md",
         "docs/PROGRESS_LEDGER.md",
         "docs/README.zh.md",
-        "docs/audit/README.md",
-        "docs/plans/README.md",
+        "docs/CURRENT_DOCS.md",
+        "docs/CAPABILITY_BOUNDARIES.md",
     ]:
         if not (PROJECT_ROOT / doc_path).exists():
             continue
@@ -343,11 +342,12 @@ def test_auto_run_includes_hard_stops():
 
 
 def test_auto_run_forbids_archived_docs_as_current():
-    """auto-run.md 必须禁止以 archive docs 作为当前指令。"""
+    """auto-run.md 不得引用 docs/archive/ 作为当前工作源。"""
     text = _read_auto_run()
-    assert "archive" in text.lower()
-    # archive 只能作为历史参考
-    assert "历史参考" in text or "不能作为当前" in text or "current" in text.lower()
+    # 仓库不再保留 archive/ 目录；auto-run 不得将 archive 文档作为当前指令
+    assert "docs/archive" not in text
+    # 仓库规则必须以 PROJECT_STATUS.md 为最高事实源
+    assert "PROJECT_STATUS" in text
 
 
 def test_auto_run_forbids_legacy_provider_paths():

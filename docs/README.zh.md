@@ -37,13 +37,9 @@
 |---|---|
 | [rfc/](rfc/) | Memory / Skill / SubAgent canonical RFC |
 | [design/](design/) | 当前仍有价值的架构设计；以 `PROJECT_STATUS.md` 为准 |
-| [plans/](plans/) | 只保留少量近期计划索引；旧计划不自动执行 |
-| [audit/](audit/) | 审计入口和少量保留审计 |
-| [archive/README.md](archive/README.md) | 历史参考；不得作为当前指令 |
 
 ## 当前规则
 
-- archive 文档只能解释历史，不用于恢复旧路线。
 - 不恢复旧 L1/L2 production route。
 - 不新增第二 runtime。
 - child 不直接执行工具/MCP；parent runtime 保持控制。

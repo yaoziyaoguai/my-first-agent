@@ -43,7 +43,7 @@ cp config/config.example.yaml config/config.yaml
 
 `--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-当前为 **safe-local** 默认阶段：默认不调用真实 API、不访问网络、不需要 API key。Skill System 仍为 **实验性**（历史状态说明见 `docs/archive/v0.x/V0_3_SKILL_SYSTEM_STATUS.md`），**not a full Textual IDE**。演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
+当前为 **safe-local** 默认阶段：默认不调用真实 API、不访问网络、不需要 API key。Skill System 仍为 **实验性**，**not a full Textual IDE**。演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
 
 ## 文档导航
 
@@ -54,7 +54,6 @@ cp config/config.example.yaml config/config.yaml
 | 文档入口 | [docs/README.zh.md](docs/README.zh.md) |
 | 工程流程 | [docs/dev/AUTO_RUN_WORKFLOW.md](docs/dev/AUTO_RUN_WORKFLOW.md) |
 | 审计入口 | [docs/06-audit/CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md) |
-| 历史文档 | [docs/archive/](docs/archive/) |
 
 ## 测试
 

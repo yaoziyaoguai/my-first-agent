@@ -25,21 +25,9 @@
 | Config | [design/config-legacy-sunset-contract.md](design/config-legacy-sunset-contract.md), [design/unified-project-config-contract.md](design/unified-project-config-contract.md) |
 | FakeProvider | [design/fake-provider-scripted-scenario-contract.md](design/fake-provider-scripted-scenario-contract.md) |
 
-## Historical Areas
-
-这些目录保留历史证据或旧计划，不能作为当前执行依据：
-
-- [archive/README.md](archive/README.md)
-- [audits/](audits/)
-- [releases/](releases/)
-- reviews（历史 review 文件；当前事实源仍以 `PROJECT_STATUS.md` 为准）
-- [handoff/](handoff/)
-- 旧 TUI/B7/B8 计划和 closeout 文档
-
 ## Agent Rules
 
 - 如果 `PROJECT_STATUS.md` 与其他文档冲突，以 `PROJECT_STATUS.md` 为准。
-- 不把旧验证材料、旧 closeout 或 archive 文档当成当前 backlog。
 - 不恢复旧 L1/L2 production route。
 - 不恢复 direct tool/MCP execution。
 - 不新增 raw memory write、auto-adoption 或第二 runtime。

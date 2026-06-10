@@ -13,7 +13,7 @@ First Agent 工程技能调度器。基于当前项目状态和任务类型，�
 3. `docs/dev/AUTO_RUN_WORKFLOW.md` — 详细 workflow、loop 类型、gate 规则
 4. 当前任务相关的最新 report/plan（如有）
 
-**冲突规则**：如果旧文档与 PROJECT_STATUS.md 冲突，以 PROJECT_STATUS.md 为准。`docs/archive/` 只能作为历史参考，不能作为当前指令。如果发现 PROJECT_STATUS.md 已过期，先更新它。
+**冲突规则**：如果旧文档与 PROJECT_STATUS.md 冲突，以 PROJECT_STATUS.md 为准。仓库不再保留 archive 历史文档目录；所有过时文档已直接删除。如果发现 PROJECT_STATUS.md 已过期，先更新它。
 
 ---
 
@@ -508,7 +508,7 @@ PROJECT_STATUS 中 P0/P1 降级或标记 RESOLVED 必须通过以下 6 道门禁
 - 不让用户配置 `request_path` / `auth_scheme` / `api_key_env`
 - 不过度工程化简单配置
 - 不把 FakeProvider 做成 natural-language NLU
-- 不把 archive docs 当当前指令
+- 不把过时文档当当前指令
 - 不跳过 progress 更新就结束
 - 不 commit `config/config.yaml`（含真实 key）
 - 不 commit `.env` / `agent_log.jsonl`

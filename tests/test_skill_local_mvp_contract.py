@@ -3,9 +3,9 @@
 本轮不实现正式 Skill System，也不继续鼓励旧 `agent.skills.local` MVP 作为
 实现目标。测试只保护隔离结果：
 - 正式命名空间仍是 `agent/skill_system/`；
-- 旧实现只在 `agent/legacy_skills/` 作为历史材料；
+- 旧 `agent/legacy_skills/` 已删除（quarantine 由目录不存在强制执行）；
 - `agent.skills` 主路径是 tombstone；
-- 默认工具和 prompt 构造不能再导入旧实现。
+- 默认工具和 prompt 构造不能导入旧实现。
 """
 
 from __future__ import annotations
@@ -46,30 +46,16 @@ def test_agent_skills_is_tombstone_not_legacy_implementation() -> None:
     doc = skills_tombstone.__doc__ or ""
     assert "tombstone" in doc
     assert "agent/skill_system/" in doc
-    assert "agent/legacy_skills/" in doc
+    # agent/legacy_skills/ 已删除；tombstone 不需要引用旧隔离路径
 
 
-def test_legacy_skill_implementation_is_quarantined() -> None:
-    """旧实现移动到 `agent/legacy_skills`，仅作显式迁移材料。"""
+def test_legacy_skill_package_is_deleted() -> None:
+    """旧 `agent/legacy_skills` 包已删除；quarantine 由目录不存在强制执行。"""
 
-    expected_files = {
-        "__init__.py",
-        "installer.py",
-        "loader.py",
-        "local.py",
-        "parser.py",
-        "registry.py",
-        "safety.py",
-    }
-    assert expected_files.issubset(
-        {path.name for path in LEGACY_SKILLS_DIR.glob("*.py")}
+    assert not LEGACY_SKILLS_DIR.exists(), (
+        "agent/legacy_skills/ 应已删除——quarantine 由目录不存在强制执行，"
+        "而非依赖 README 中的\"不要用\"说明"
     )
-    assert (LEGACY_SKILLS_DIR / "README.md").is_file()
-
-    readme = (LEGACY_SKILLS_DIR / "README.md").read_text(encoding="utf-8")
-    assert "not the formal Skill System" in readme
-    assert "agent/skill_system/" in readme
-    assert "install_from_github" in readme
 
 
 def test_formal_skill_namespace_is_empty_or_independent() -> None:
@@ -129,18 +115,23 @@ def test_disabled_skill_lifecycle_wrappers_do_not_import_legacy_code() -> None:
         assert "agent/skill_system/" in source
 
 
-def test_legacy_installer_network_path_is_not_formal_tool_path() -> None:
-    """旧 installer 仍在隔离区，但正式/默认路径不能 import 或调用它。"""
+def test_skill_py_load_skill_fail_closed_no_legacy_import() -> None:
+    """`agent/tools/skill.py` 的 `load_skill` 仍 fail-closed 但不依赖旧包。
 
-    installer_source = (LEGACY_SKILLS_DIR / "installer.py").read_text(
-        encoding="utf-8"
-    )
-    assert "def install_from_github" in installer_source
-    assert "git clone" in installer_source
+    legacy_skills 已删除；wrapper 不 import 任何旧实现路径，
+    skill.py 也不能触达真实的 skill body 加载。
+    """
 
-    install_wrapper = (AGENT_DIR / "tools" / "install_skill.py").read_text(
-        encoding="utf-8"
+    skill_py = AGENT_DIR / "tools" / "skill.py"
+    source = skill_py.read_text(encoding="utf-8")
+    assert "Disabled legacy load_skill wrapper" in source or "已禁用" in source, (
+        "skill.py 必须声明为 disabled wrapper"
     )
-    assert "from agent.legacy_skills" not in install_wrapper
-    assert "install_from_github(" not in install_wrapper
-    assert "git clone、pip install" in install_wrapper
+    imports = _module_imports(skill_py)
+    assert "agent.legacy_skills" not in imports
+    assert "agent.skills" not in imports
+
+    install_skill_py = AGENT_DIR / "tools" / "install_skill.py"
+    if install_skill_py.exists():
+        install_source = install_skill_py.read_text(encoding="utf-8")
+        assert "from agent.legacy_skills" not in install_source

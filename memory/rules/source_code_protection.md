@@ -1,1 +1,0 @@
-禁止Agent修改受保护的源码文件(.py)，通过is_protected_source_file函数进行检查

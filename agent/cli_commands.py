@@ -11,7 +11,7 @@
 为什么从 core.py 提取：
 - core.py 的 chat() 是 runtime orchestrator，不应堆砌命令解析和文本渲染逻辑
 - 提取后 chat() 仍然是唯一用户入口，但命令解析职责分离到独立模块
-- 避免 core.py 持续膨胀，也为后续 manual dogfood 提供清晰的扩展点
+- 避免 core.py 持续膨胀，也为后续 local trial 提供清晰的扩展点
 
 架构约束：
 - detect 函数：纯字符串匹配，无 IO、无副作用
@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CommandIntent: typed command classification（RT-02 remediation）
@@ -257,7 +256,7 @@ def render_memory_list(records) -> str:
 
     为什么显示短 ID 就必须支持短 ID 删除：
     - 用户看到短 ID 会自然复制使用；如果不支持短 ID 前缀匹配，
-      forget id:<displayed_id> 永远失败，dogfood checklist step 8 阻塞。
+      forget id:<displayed_id> 永远失败，local trial 的 forget 场景阻塞。
     - 因此 forget 逻辑必须支持前缀匹配。
 
     为什么 created_at 缺失时诚实显示 unavailable：

@@ -7,7 +7,7 @@
 export interface RunEvidenceSummary {
   evidenceId: string;
   status: "pass" | "fail" | "partial" | "unknown";
-  /** dogfood report 中的关键发现 */
+  /** 静态 evidence report 中的关键发现 */
   summary: string;
 }
 

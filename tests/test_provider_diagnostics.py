@@ -589,7 +589,7 @@ def test_build_model_provider_from_env_defaults_to_fake():
 def test_main_fake_interactive_no_provider_env_var():
     """`python main.py` 不设置任何 provider 环境变量时普通聊天不崩溃。
 
-    这是人工 dogfood 发现的精确回归：
+    这是人工本地试用发现的精确回归：
     - 用户不设置任何 provider 环境变量
     - `python main.py status` 显示 provider mode=fake（diagnose_provider_config 默认）
     - 但 `python main.py` 交互模式崩溃：ProviderNotImplementedError("model_provider_required")

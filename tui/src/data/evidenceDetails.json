@@ -5,7 +5,7 @@
       "id": "REAL-EVIDENCE-001",
       "capability": "Memory (文件系统持久化)",
       "status": "credible",
-      "latestDogfood": "PASS — GLOBAL_REAL_API_DOGFOOD_REPORT.md",
+      "latestEvidence": "PASS — Memory regression suite",
       "latestCommit": "e32fc2c",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"
@@ -14,7 +14,7 @@
       "id": "REAL-EVIDENCE-002",
       "capability": "Skill Lifecycle (Plan 3)",
       "status": "credible",
-      "latestDogfood": "PASS — d05/d06 validation gaps closed",
+      "latestEvidence": "PASS — focused lifecycle tests",
       "latestCommit": "256838d",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"
@@ -23,7 +23,7 @@
       "id": "REAL-EVIDENCE-003",
       "capability": "Skill Allowed Tools Enforcement",
       "status": "credible",
-      "latestDogfood": "PASS — H2 resolved, gate enforcement verified",
+      "latestEvidence": "PASS — gate enforcement tests",
       "latestCommit": "29aafd8",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"
@@ -32,7 +32,7 @@
       "id": "REAL-EVIDENCE-004",
       "capability": "Tool Mediator (L1 child delegation)",
       "status": "credible",
-      "latestDogfood": "PASS",
+      "latestEvidence": "PASS",
       "latestCommit": "b015b0b",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"
@@ -41,7 +41,7 @@
       "id": "REAL-EVIDENCE-005",
       "capability": "MCP Bridge Lifecycle",
       "status": "credible",
-      "latestDogfood": "PASS — 6 contract tests, disposable dispatcher evidence",
+      "latestEvidence": "PASS — MCP contract tests",
       "latestCommit": "a318237",
       "caveats": "真实 MCP server 连接未验证 (REAL-EVIDENCE-005 debt)",
       "nextAction": "维持 credible，真实 MCP server fixture 低优先级"
@@ -50,7 +50,7 @@
       "id": "REAL-EVIDENCE-006",
       "capability": "Subagent Worktree Isolation",
       "status": "credible",
-      "latestDogfood": "PASS",
+      "latestEvidence": "PASS",
       "latestCommit": "156d04f",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"
@@ -59,7 +59,7 @@
       "id": "REAL-EVIDENCE-007",
       "capability": "MCP Main Path Invocation",
       "status": "credible-with-caveats",
-      "latestDogfood": "PASS — real_core_loop E2E L3 evidence",
+      "latestEvidence": "PASS — runtime invocation tests",
       "latestCommit": "cfd32c0",
       "caveats": "confirmation='always' 默认拦截 production 路径；真实 MCP server 连接未验证",
       "nextAction": "不阻塞 B8 Phase 3；等待真实 MCP server fixture (低优先级)"
@@ -68,7 +68,7 @@
       "id": "REAL-EVIDENCE-008",
       "capability": "Action Scheduler (ActionPlan E2E)",
       "status": "credible",
-      "latestDogfood": "PASS — core.chat(action_scheduler=scheduler) E2E + ActionPlan JSON",
+      "latestEvidence": "PASS — scheduler and ActionPlan tests",
       "latestCommit": "c7ba29e",
       "caveats": "无",
       "nextAction": "维持 credible，无需追加工作"

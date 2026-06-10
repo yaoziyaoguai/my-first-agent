@@ -665,16 +665,15 @@ def test_current_local_trial_entrypoints_match_project_baseline() -> None:
     for command in [
         ".venv/bin/python main.py demo",
         ".venv/bin/python main.py health --json",
-        "python scripts/dogfood_skill_system.py",
-        "python scripts/dogfood_subagent_system.py",
+        ".venv/bin/python -m pytest",
+        "tests/runtime_integration/test_subagent_v0_runtime_boundary.py",
     ]:
         assert command in getting_started
 
     combined = "\n".join([readme, getting_started, project_status]).lower()
     assert "developer prototype" in combined
-    assert "developer-dogfood" in combined
+    assert "local development" in combined
     assert "safe-local" in combined
-    assert "real api dogfood is gated" in combined or "real api dogfood 是 gated" in combined
     assert "production-ready" not in combined
 
 
@@ -750,21 +749,10 @@ def test_secret_fragment_lint_does_not_flag_ask_user_terms(tmp_path: Path) -> No
     assert _check_secret_fragments_in_dir(docs_dir, label="test") == []
 
 
-def test_dogfood_reports_contain_no_secret_fragments() -> None:
-    """RT-06 / PF-03: dogfood report 中不得包含可逆的 secret 片段。"""
-    violations = _check_secret_fragments_in_dir(
-        REPO_ROOT / "docs" / "dogfood", label="dogfood"
-    )
-    assert not violations, (
-        "dogfood report 包含可逆 secret 片段，请改为 CONFIGURED/SET/REDACTED/PRESENT：\n"
-        + "\n".join(violations)
-    )
-
-
 def test_plans_docs_contain_no_secret_fragments() -> None:
     """PF-03: docs/plans/ 中的文档不得包含可逆的 secret 片段。
 
-    redaction lint 扩展：之前仅覆盖 docs/dogfood，现在扩展到 docs/plans。
+    redaction lint 覆盖当前 plans 文档。
     """
     violations = _check_secret_fragments_in_dir(
         REPO_ROOT / "docs" / "plans", label="plans"
@@ -778,7 +766,7 @@ def test_plans_docs_contain_no_secret_fragments() -> None:
 def test_audit_docs_contain_no_secret_fragments() -> None:
     """PF-03: docs/audit/ 中的文档不得包含可逆的 secret 片段。
 
-    redaction lint 扩展：之前仅覆盖 docs/dogfood，现在扩展到 docs/audit。
+    redaction lint 覆盖当前 audit 文档。
     """
     violations = _check_secret_fragments_in_dir(
         REPO_ROOT / "docs" / "audit", label="audit"
@@ -800,19 +788,11 @@ def test_overview_docs_contain_no_secret_fragments() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "CURRENT_AUDIT_STATUS.zh.md 路径不存在（docs/06-audit/），"
-        "审计结构已重组为 docs/audits/ 扁平目录。"
-        "需更新路径引用。"
-    ),
-    strict=True,
-)
 def test_current_audit_status_is_current_entry_not_historical() -> None:
     """CURRENT_AUDIT_STATUS.zh.md 必须是当前审计状态入口，不能以 v0.9.x 为当前状态。
 
     Source-of-truth reset 后，该文件已从 v0.9.x historical notice 改写为
-    当前 Cleanup-Only / Awaiting Manual Human Dogfood 状态。验证：
+    当前 cleanup / local development 状态。验证：
     1. 不再是旧的历史提示（无 "v0.9.0 released"）
     2. 指向当前权威源
     3. 声明 archive docs 不是当前入口
@@ -826,10 +806,11 @@ def test_current_audit_status_is_current_entry_not_historical() -> None:
     assert "v0.9.x Deep Stabilization" not in text
     # 必须指向当前权威源
     assert "../00-overview/CURRENT_CAPABILITY_STATUS.zh.md" in opening
-    assert "../audit/capability-gap-audit-low-complexity-2026-05-25.md" in text
+    assert "../audit/README.md" in text
     # 必须以当前阶段为标题
     assert "Cleanup-Only" in text or "cleanup" in text.lower()
-    assert "Manual Human Dogfood" in text or "manual human dogfood" in text.lower()
+    assert "developer prototype" in text.lower()
+    assert "local development" in text.lower()
 
 
 def test_docs_readme_contain_no_secret_fragments() -> None:

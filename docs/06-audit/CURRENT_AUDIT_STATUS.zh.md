@@ -6,7 +6,7 @@
 
 Status: **Active — repository cleanup / source-of-truth repair**。
 
-- 当前阶段是 **developer prototype / developer-dogfood**。
+- 当前阶段是 **developer prototype / local development**。
 - 当前代码主线是 `main.py → agent/core.py → agent/loop.py`。
 - 工具主线是 `ToolRuntimeMediator → tool_executor`；`TOOL_INVOKE` dispatcher path 只保留 evidence-only marker。
 - Memory v0、Skill lifecycle、Sub-agent v0 已有当前实现和测试保护网，清理时不得破坏。
@@ -27,15 +27,13 @@ Status: **Active — repository cleanup / source-of-truth repair**。
 
 - **FakeProvider 冻结**：FakeProvider 只能作为 deterministic test double，不继续扩成 fake planner / fake reasoning engine。
 - **Memory Consolidation pipeline 冻结**：Consolidation 相关路径保留为 deferred / contract evidence，不作为当前推进目标。
-- 旧 TUI/B7/B8 closeout、旧 dogfood report、旧 archive docs 不作为当前行动源。
+- 旧 TUI/B7/B8 closeout、旧 evidence report、旧 archive docs 不作为当前行动源。
 
 ## 当前可推送性
 
 cleanup/source-of-truth 文档改动可以在本地检查通过后提交。不要 push，除非用户明确授权。
 
-## 保留审计资料
+## 保留审计入口
 
-- [global-readonly-audit-2026-05-27.md](../audit/global-readonly-audit-2026-05-27.md)
 - [audit/README.md](../audit/README.md)
 - [plans/README.md](../plans/README.md)
-- [dogfood/README.md](../dogfood/README.md)

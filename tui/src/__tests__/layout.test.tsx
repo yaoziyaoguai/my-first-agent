@@ -543,16 +543,6 @@ describe("M5 Pending Action — ContextPanel with pending", () => {
 // ============================================================
 
 import {
-  EVIDENCE_NAMESPACE_CATALOG,
-  DEFAULT_STORAGE_CONTRACT,
-  isEvidenceRegistered,
-  filterByKind,
-  getMultiRunEvidences,
-  validateFileName,
-  type EvidenceNamespace,
-  type MultiRunStorageContract,
-} from "../data/evidenceNamespace";
-import {
   createFakeHistorySource,
   filterRunsByStatus,
   getEvidenceStatusSummary,
@@ -562,73 +552,6 @@ import {
   type RunHistory,
 } from "../data/agentHistoryIndex";
 import { HistoryPanel } from "../components/HistoryPanel";
-
-describe("M6 Evidence Namespace — Contract", () => {
-  it("catalog has 8 evidence entries", () => {
-    expect(EVIDENCE_NAMESPACE_CATALOG).toHaveLength(8);
-  });
-
-  it("all entries have unique evidenceId", () => {
-    const ids = EVIDENCE_NAMESPACE_CATALOG.map((e) => e.evidenceId);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it("all entries are kind 'global' (current baseline)", () => {
-    for (const ns of EVIDENCE_NAMESPACE_CATALOG) {
-      expect(ns.kind).toBe("global");
-    }
-  });
-
-  it("isEvidenceRegistered returns true for known evidence", () => {
-    expect(isEvidenceRegistered("evidence-001")).toBe(true);
-    expect(isEvidenceRegistered("evidence-008")).toBe(true);
-  });
-
-  it("isEvidenceRegistered returns false for unknown evidence", () => {
-    expect(isEvidenceRegistered("evidence-999")).toBe(false);
-  });
-
-  it("filterByKind returns correct subset", () => {
-    const globals = filterByKind("global");
-    expect(globals).toHaveLength(8);
-    const perRun = filterByKind("per-run");
-    expect(perRun).toHaveLength(0);
-  });
-
-  it("getMultiRunEvidences returns empty (no multi-run yet)", () => {
-    const multi = getMultiRunEvidences();
-    // Currently all are multiRun: false — B7 readiness pending
-    expect(multi).toHaveLength(0);
-  });
-});
-
-describe("M6 MultiRunStorageContract — Contract", () => {
-  it("default contract has expected values", () => {
-    expect(DEFAULT_STORAGE_CONTRACT.fileNaming).toBe("{evidence_id}-{run_id}.json");
-    expect(DEFAULT_STORAGE_CONTRACT.storageRoot).toBe("docs/dogfood/");
-    expect(DEFAULT_STORAGE_CONTRACT.ttlDays).toBe(90);
-    expect(DEFAULT_STORAGE_CONTRACT.autoCleanup).toBe(false);
-    expect(DEFAULT_STORAGE_CONTRACT.maxRuns).toBe(50);
-  });
-
-  it("validateFileName accepts valid {evidence_id}-{run_id}.json", () => {
-    expect(validateFileName("evidence-001-run-abc.json", DEFAULT_STORAGE_CONTRACT)).toBe(true);
-  });
-
-  it("validateFileName rejects invalid names", () => {
-    expect(validateFileName("bad-name.json", DEFAULT_STORAGE_CONTRACT)).toBe(false);
-    expect(validateFileName("evidence-001.json", DEFAULT_STORAGE_CONTRACT)).toBe(false);
-  });
-
-  it("validateFileName with date pattern", () => {
-    const dateContract: MultiRunStorageContract = {
-      ...DEFAULT_STORAGE_CONTRACT,
-      fileNaming: "{date}-{evidence_id}.json",
-    };
-    expect(validateFileName("2026-06-01-evidence-001.json", dateContract)).toBe(true);
-    expect(validateFileName("evidence-001-run-abc.json", dateContract)).toBe(false);
-  });
-});
 
 describe("M6 Agent History — HistorySource", () => {
   let source: HistorySource;

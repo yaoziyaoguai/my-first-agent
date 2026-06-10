@@ -12,7 +12,7 @@ interface ContextPanelProps {
 }
 
 /** 右侧 Context/Inspector 占位面板 — M1 mock/static placeholder, M4 interaction refresh。
- *  不叫 Audit Lens。不渲染 PROJECT_STATUS / PROGRESS_LEDGER / dogfood / debt 等 Operation 内容。
+ *  不叫 Audit Lens。不渲染 PROJECT_STATUS / PROGRESS_LEDGER / debt 等 Operation 内容。
  *  只展示当前 selected lens 的通用辅助信息 placeholder。 */
 export function ContextPanel({
   focused,

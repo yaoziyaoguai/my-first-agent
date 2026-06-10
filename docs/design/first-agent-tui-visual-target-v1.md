@@ -438,7 +438,7 @@ TuiShell:
 | existing safe runtime state | 已通过安全审计的 runtime 状态 | 无需标注 |
 | fake/local fixture | TUI 开发用的假数据 | `[fake/local]` 或 `[fake/local fixture]` |
 | docs-derived status | 从 docs 推导的状态（如 milestone 完成状态） | `[docs-derived]` |
-| dogfood/evidence summary | 从 dogfood/evidence 文件提取的摘要 | `[evidence]` |
+| evidence summary | 从本地 evidence 文件提取的摘要 | `[evidence]` |
 | future adapter placeholder | 预留接口但未实现的 adapter | `[blocked: B7]` 或 `[future]` |
 
 ### 4.2 规则
@@ -473,7 +473,7 @@ TuiShell:
 
 - **中间**：仍然主交互区（不替换）
 - **右侧**：展开 Evidence Snapshot，包含：
-  - REAL-EVIDENCE 摘要（从 `docs/dogfood/` 提取）
+  - Evidence 摘要（从当前 evidence source 提取）
   - docs source-of-truth 状态
   - tests/gates 摘要
   - close-out status

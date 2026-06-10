@@ -4,7 +4,6 @@ export const AUTORUN_COMMANDS: Record<string, string> = {
   continue: "cd <repo> && python main.py auto-run --continue",
   status: "cd <repo> && python main.py status",
   audit: "cd <repo> && python main.py audit --readonly",
-  dogfood: "cd <repo> && python main.py dogfood --case=<id>",
   gates: "cd <repo> && ruff check . && python -m pytest tests/ -x -q",
 };
 

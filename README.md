@@ -6,7 +6,7 @@ First Agent 是一个 local-first 的 Agent Runtime 实验项目。当前仓库�
 
 ## 当前状态
 
-- 阶段：**developer prototype / developer-dogfood**，不是面向普通用户的产品。
+- 阶段：**developer prototype / local development**，不是面向普通用户的产品。
 - 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
 - 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
 - Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
@@ -29,7 +29,7 @@ pip install -r requirements.txt
 cp config/config.example.yaml config/config.yaml
 ```
 
-`config/config.yaml` 是个人本地配置入口；如果包含真实 key，**不得 commit**。.env / legacy provider profile 只作为历史兼容语境，不是推荐主路径。
+更多配置示例在 `config/examples/`。`config/config.yaml` 是个人本地配置入口；如果包含真实 key，**不得 commit**。.env / legacy provider profile 只作为历史兼容语境，不是推荐主路径。
 
 ## 常用命令
 

@@ -41,7 +41,7 @@ B7 前红线诚信独立审计确认：当前 First Agent runtime 在单实例�
 | P2-2 | MCP bridge module-level global | `agent/mcp_bridge.py` | session startup 操作需要对多实例可重复 |
 | P2-3 | in-memory `action_log` no durable store | `agent/runtime_integration/dispatcher.py` | 重启丢失全部 event history → Phase 7 不可实现 |
 | P2-4 | `SESSION_ID` import-time generation | `agent/session.py` | import 时固定，无法区分多 session |
-| P2-5 | 004 Part B checkpoint save trigger design constraint | `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | B7 需重新设计 trigger 条件 |
+| P2-5 | 004 Part B checkpoint save trigger design constraint | historical validation summary | B7 需重新设计 trigger 条件 |
 
 ---
 
@@ -102,7 +102,7 @@ B7 SDD 完成后，需通过 SDD review gate 才能进入 B7 implementation。
 | # | Item | Action | Status |
 |---|------|--------|--------|
 | A1 | `2026-05-28-full-subsystem-capability-completion-audit.md` untracked | `git add` 入库 | ✅ |
-| A2 | `GLOBAL_REAL_API_DOGFOOD_REPORT.md` untracked | `git add` 入库 | ✅ |
+| A2 | historical real-provider validation report untracked | recorded during historical cleanup | ✅ |
 | A3 | B7 前 debt 表未落到稳定文档 | 创建本文档 | ✅ |
 | A4 | Redaction/secret policy 口头约束 | 写入 §3.1 B7 SDD requirement | ✅ |
 | A5 | Redteam addendum 无 historical 标记 | 在 header 添加 historical 状态 | ✅ |

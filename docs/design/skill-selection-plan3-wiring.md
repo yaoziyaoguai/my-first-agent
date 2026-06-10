@@ -3,7 +3,7 @@
 **Date**: 2026-06-02
 **Status**: active
 **Type**: Next-stage enhancement (002 Skill Selection)
-**Parent**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` §11 D-09
+**Parent**: historical D-09 direction; current status lives in `docs/PROJECT_STATUS.md`.
 
 ## Background
 

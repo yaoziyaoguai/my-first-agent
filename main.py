@@ -636,11 +636,11 @@ def _init_mcp_bridge_if_enabled(*, session_id: str = "") -> None:
 
 def main(argv: list[str] | None = None) -> int:
     # legacy CLI 入口显式 opt-in 读取项目 .env；普通 import config 不再产生
-    # os.environ 副作用，provider/dogfood 路径继续走 scoped loader。
+    # os.environ 副作用，provider/real-api 路径继续走 scoped loader。
     load_legacy_dotenv_config(project_root=Path(__file__).resolve().parent)
 
     # PF-01: 启动时输出 provider mode 横幅，让用户明确当前是 fake/local 还是 real provider。
-    # manual human dogfood 第一 blocker——用户必须知道当前模式。
+    # local trial 第一 blocker——用户必须知道当前模式。
     print(render_provider_mode_banner(), file=sys.stderr)
 
     argv = list(sys.argv[1:] if argv is None else argv)

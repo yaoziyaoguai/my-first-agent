@@ -3,7 +3,7 @@
 **Date**: 2026-06-02
 **Status**: active
 **Type**: Next-stage design (B3 SubAgent L2)
-**Parent**: `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` §8 D-01
+**Parent**: historical D-01 direction; current status lives in `docs/PROJECT_STATUS.md`.
 **L1 baseline**: `docs/design/subagent-l1-l2-execution-contract.md` §2.3
 **REAL-EVIDENCE-006**: CLOSED (credible) — 12/12 PASS with real provider
 

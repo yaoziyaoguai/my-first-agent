@@ -136,6 +136,6 @@ SubAgent 系统实施三层边界隔离：
 
 - 当前状态入口：`docs/PROJECT_STATUS.md`
 - 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
-- Loop 4 完成记录：`docs/plans/2026-05-27-capability-remediation-loop-plan.md` Loop 4
+- Historical Loop 4 completion record has been removed during repository cleanup; use `docs/PROJECT_STATUS.md` for current boundaries.
 - SubAgentDelegateL0Handler：`agent/runtime_integration/subagent_action.py`
 - CLI delegation detection：`agent/cli_commands.py` → `detect_delegate_to_subagent` / `detect_nl_delegation`

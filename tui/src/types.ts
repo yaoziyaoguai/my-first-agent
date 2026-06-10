@@ -29,15 +29,6 @@ export interface ProgressLedger {
   milestones: Milestone[];
 }
 
-/** 单个 dogfood 结果 */
-export interface DogfoodResult {
-  fileName: string;
-  pass: number;
-  fail: number;
-  concern: number;
-  summary: string;
-}
-
 /** Git 信息 */
 export interface GitInfo {
   branch: string;

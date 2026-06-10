@@ -91,7 +91,7 @@ auto_run 不要求每次都从 SPEC 开始走完整 loop。根据任务类型选
 | 任务类型 | 起点 | 路径 |
 |---------|------|------|
 | **Bug fix** | evidence/report → failing test | 读 report → 写回归测试(red) → 定位根因 → fix → rerun affected gates → 更新 PROGRESS_LEDGER |
-| **Dogfood** | plan/report → run cases | 读 plan → 执行 cases → 记录 issues → 可选 safe fix → 更新 report/ledger |
+| **Validation** | contract/report → run checks | 读当前 contract → 执行 focused checks → 记录 issues → 可选 safe fix → 更新 status/ledger |
 | **Docs cleanup** | inventory → delete/archive/rewrite | 全量扫描 → 分类 → 删除/归档/重写 → source-of-truth tests → commit |
 | **Config fix** | config contract → diagnostics test | 读 contract → 写测试 → fix → smoke → 更新相关 docs |
 | **Architecture change** | design doc → review → tests → impl | 严格走 Normal/Architecture Extension Loop 全路径 |
@@ -178,7 +178,7 @@ deferred 后检查 queue 中是否还有其他 candidate，有则继续。
 - **loop 成功完成**（这不是停止条件，自动继续下一 loop）
 - **commit/push 完成**（这不是停止条件，自动继续下一 loop）
 
-**用户已授权真实 API dogfood 范围内的操作，不得在此范围内反复请求授权。**
+真实 API、外部服务、用户私有数据和本地配置仍需逐次显式授权；默认 auto-run 不读取 secret、不调用真实 provider。
 
 ## F. 选择下一个 Capability 的规则
 
@@ -222,7 +222,7 @@ AutoRun 不得将 `dispatch path verified` 当作 `L3 complete` 跳过 discovery
 - 不新增 Anchor
 - 不新增无界 branch point
 - 不新增第二条主流程
-- 不新增 fake loop / fake dispatcher / dogfood-only path
+- 不新增 fake loop / fake dispatcher / validation-only runtime path
 - 不让 direct handler / dispatcher / adapter call 冒充 L3
 - 不让 fake/real 变两套主流程
 - 不读取 .env

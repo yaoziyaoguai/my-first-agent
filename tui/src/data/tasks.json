@@ -33,9 +33,9 @@
     },
     {
       "phase": "b8-phase-6a",
-      "label": "B8 Phase 6A (Static Evidence/Gate/Dogfood Browser)",
+      "label": "B8 Phase 6A (Static Evidence/Gate Browser)",
       "status": "completed",
-      "why": "evidenceBrowser + gateHistory + EvidenceBrowserPanel + DogfoodDetailPanel 全部完成 (e3449d4)"
+      "why": "evidenceBrowser + gateHistory + EvidenceBrowserPanel 全部完成 (e3449d4)"
     },
     {
       "phase": "b8-phase-6b",

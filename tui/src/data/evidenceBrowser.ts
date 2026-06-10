@@ -1,4 +1,4 @@
-/** Phase 6A: Static Evidence Browser — 解析 dogfood JSON 文件并归一化 */
+/** Static Evidence Browser — 解析本地 evidence JSON 文件并归一化 */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -56,7 +56,7 @@ export function normalizeVerdictCounts(
   return { pass: 0, fail: 0, concern: 0 };
 }
 
-export function parseDogfoodFile(
+export function parseEvidenceFile(
   fileName: string,
   content: string,
 ): EvidenceFileEntry {
@@ -121,14 +121,14 @@ export function buildEvidenceFileIndex(
   return index;
 }
 
-export function listDogfoodFiles(dir: string): EvidenceFileEntry[] {
+export function listEvidenceFiles(dir: string): EvidenceFileEntry[] {
   try {
     if (!existsSync(dir)) return [];
     const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
     return files
       .map((f) => {
         const content = readFileSync(resolve(dir, f), "utf-8");
-        return parseDogfoodFile(f, content);
+        return parseEvidenceFile(f, content);
       })
       .sort((a, b) => b.date.localeCompare(a.date));
   } catch {

@@ -6,7 +6,7 @@
 2. 不新增 fake runtime / fake loop / fake dispatcher 主路径
 3. _safe_noop 通过最小 allowlist 进入 ToolRegistry gate，其他 _ 前缀工具仍 blocked
 4. TOOL_GATE action 独立于 MEMORY_TURN_END_PROPOSAL，各自 try/except 隔离
-5. dogfood checks 必须按 action_type == "tool.gate" 查找，不能用 actions[0/1]
+5. runtime checks 必须按 action_type == "tool.gate" 查找，不能用 actions[0/1]
 6. direct dispatcher 只能是 harness_runtime_e2e，不能冒充 real_core_loop_runtime_e2e
 
 架构依据：~/.claude/plans/velvety-brewing-boole.md
@@ -188,7 +188,7 @@ class TestToolAnchorSafeToolRegistryGate:
             "gate check 不得执行工具函数——dangerous_tool_function_invoked 必须为 False"
         )
 
-        # 不允许出现 dogfood overlay 路径
+        # 不允许出现旧 overlay 路径
         assert evidence.get("capability_type") == "production_tool_registry", (
             f"capability_type 必须为 'production_tool_registry'，"
             f"实际 {evidence.get('capability_type')!r}"
@@ -445,7 +445,7 @@ class TestToolAnchorCoreChatIntegration:
         - fake/real 必须共用同一条 core path
         - dispatcher 实例类型是 RuntimeActionDispatcher（不是 fake 子类）
         - handler 实例类型是 ToolGateHandler（不是 fake/mock handler）
-        - source 标记为 "core_loop"（不是 "fake_loop" 或 "dogfood_harness"）
+        - source 标记为 "core_loop"（不是 "fake_loop" 或旧 harness）
 
         Purpose: 钉死 fake/real 共用同一 core path
         Setup: FakeProvider + SpyDispatcher
@@ -612,7 +612,7 @@ class TestToolAnchorEvidenceAndSideEffects:
 
         中文学习边界——这个测试保护什么：
         - evidence_extra 中的 requested_tool_name 和 resolved_tool_name 一致
-        - capability_type 为 "production_tool_registry"（非 dogfood overlay）
+        - capability_type 为 "production_tool_registry"（非旧 overlay）
         - production_capability == True
         - evidence_level == real_core_loop_runtime_e2e
 
@@ -625,7 +625,7 @@ class TestToolAnchorEvidenceAndSideEffects:
           - capability_type == "production_tool_registry"
           - production_capability == True
           - evidence_level == real_core_loop_runtime_e2e
-        Forbidden: capability_type 为 dogfood overlay 路径
+        Forbidden: capability_type 为旧 overlay 路径
         Pass/fail: requested=resolved AND production_capability=True
         """
         from agent.core import chat
@@ -709,7 +709,7 @@ class TestToolAnchorEvidenceAndSideEffects:
         )
 
 
-# ========== Phase D: direct dispatch + failure isolation + dogfood ==========
+# ========== Phase D: direct dispatch + failure isolation + harness boundary ==========
 
 
 class TestToolAnchorDirectDispatchAndBoundaries:
@@ -722,7 +722,7 @@ class TestToolAnchorDirectDispatchAndBoundaries:
         - 手工构造 RuntimeActionRequest 并直接 dispatcher.route()
         - 即使 evidence chain 完整，缺 core_loop_invoked=True
           仍降级到 harness_runtime_e2e
-        - 防止 dogfood harness 或其他非 core loop 路径冒充 real
+        - 防止旧 harness 或其他非 core loop 路径冒充 real
 
         Purpose: 钉死 direct dispatch ≠ real_core_loop_runtime_e2e
         Setup: dispatcher with ToolGateHandler
@@ -851,15 +851,15 @@ class TestToolAnchorMemoryAndToolGateIsolation:
         )
 
 
-class TestToolAnchorDogfoodActionTypeSelection:
-    """测试 dogfood checks 的 action_type 定位策略。"""
+class TestToolAnchorRuntimeActionTypeSelection:
+    """测试 runtime action checks 的 action_type 定位策略。"""
 
-    def test_dogfood_finds_tool_gate_by_action_type(self):
-        """验证 dogfood checks 按 action_type == "tool.gate" 查找，不硬编码索引。
+    def test_runtime_checks_find_tool_gate_by_action_type(self):
+        """验证 checks 按 action_type == "tool.gate" 查找，不硬编码索引。
 
         中文学习边界——这个测试保护什么：
         - action_log 可能同时包含 memory 和 tool.gate event
-        - dogfood checks 必须迭代查找 action_type == "tool.gate"
+        - checks 必须迭代查找 action_type == "tool.gate"
         - 不得使用 actions[0] 或 actions[1] 硬编码索引
         - Memory checks 只检查 memory action，不得被 tool.gate 污染
 
@@ -887,7 +887,7 @@ class TestToolAnchorDogfoodActionTypeSelection:
 
         action_events = list(spy.action_log)
 
-        # 模拟 dogfood 的 action_type 查找逻辑
+        # 模拟当前 runtime action_type 查找逻辑
         memory_action = next(
             (a for a in action_events if str(a.action_type) == "memory.turn_end_proposal"),
             None,

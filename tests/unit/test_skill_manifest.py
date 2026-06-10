@@ -1,6 +1,6 @@
 """Phase 1 TDD RED Tests — Plan 3 Manifest Foundation (M01-M06).
 
-测试范围（来自 docs/design/002-skill-selection-sdd-vNext.md §7.1）：
+测试范围（historical Plan 3 manifest foundation contract）：
 - M01: 新字段默认值 (when_to_use/when_not_to_use/triggers/negative_triggers/aliases/locale)
 - M02: triggers 从 YAML list 解析为 tuple
 - M03: 旧 SKILL.md（无新字段）仍通过 validate_manifest（向后兼容）

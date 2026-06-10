@@ -68,7 +68,7 @@
 1. 在 config/mcp_servers 中添加真实 server entry
 2. 设置 `MY_FIRST_AGENT_MCP_ENABLE=1`
 3. 设置 `MY_FIRST_AGENT_MCP_DRY_RUN=0`
-4. 运行 `scripts/real_evidence_005_mcp_bridge.py` 验证 bridge connection
+4. 运行当前 MCP boundary focused tests 验证 bridge connection contract
 5. 运行真实 chat loop 验证 MCP tool 在 production confirmation 策略下的行为
 
 ## 5. Status

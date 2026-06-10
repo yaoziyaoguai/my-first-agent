@@ -183,7 +183,7 @@ flowchart TB
 ### U7. Fake / real / provider / backend guardrail cleanup
 
 - **Goal:** Ensure closeout claims are not fake-only when backend/provider differences matter.
-- **Files likely touched:** `tests/runtime_integration/test_memory_shared_store_l3.py`, `tests/runtime_integration/test_mcp_l3_real_core_loop.py`, `tests/test_provider_contract.py`, `tests/test_startup_readiness.py`, `tests/test_user_path_dogfood_smoke.py`.
+- **Files likely touched:** `tests/runtime_integration/test_memory_shared_store_l3.py`, `tests/runtime_integration/test_mcp_l3_real_core_loop.py`, `tests/test_provider_contract.py`, `tests/test_startup_readiness.py`, and current local trial readiness tests.
 - **Implementation approach:** Keep real provider integration deferred. Add or tighten real-like filesystem/backend tests that run locally without secrets. Reclassify xfails as either fixed guardrails or explicit deferred environment tests.
 - **Tests:** Filesystem/shared-store paths run without fake-only assumptions; config/provider xfails are classified; no test name claims real core loop when it only exercises a harness path; no closeout report can claim real provider coverage from fake provider evidence.
 - **Rollback:** Restore previous xfail markers if guardrail cleanup incorrectly blocks local development, while preserving the explicit deferred classification.

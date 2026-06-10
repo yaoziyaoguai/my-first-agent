@@ -27,10 +27,10 @@
 
 | ID | Issue | Detail | Evidence |
 |----|-------|--------|----------|
-| MBC-001 | 002 C6 negative trigger bypass | demo-note-maker 被选中，尽管 prompt 含"数学"（negative trigger）。模型 owned SKILL_SELECT 路径绕过确定性 selector 的 negative_triggers 排除。 | `docs/dogfood/real-evidence-002-non-steered-results.json` — C6: FAIL |
-| MBC-002 | 002 C3 over-eager selection | 模糊 prompt "帮我写点东西" 触发 SKILL_SELECT。模型在没有明确 skill 需求时过度主动。 | `docs/dogfood/real-evidence-002-non-steered-results.json` — C3: CONCERN |
-| MBC-003 | 002 C7 over-eager selection | 闲聊 "你好，请问今天是什么日期？" 触发 SKILL_SELECT。模型将无 skill 意图的对话误判为 skill 请求。 | `docs/dogfood/real-evidence-002-non-steered-results.json` — C7: CONCERN |
-| MBC-004 | 003 OTHER_GATE vs skill_allowed_tools→rejected | Disallowed tools 走 OTHER_GATE 而非 skill_allowed_tools→rejected。模型行为变化：不再主动尝试 disallowed tools。代码路径已验证 (Loop 8: 13/0/4 PASS)。无安全风险 (R35: no side effect)。 | `docs/dogfood/real-evidence-003-hardening-results.json` — 13 CONCERN |
+| MBC-001 | 002 C6 negative trigger bypass | demo-note-maker 被选中，尽管 prompt 含"数学"（negative trigger）。模型 owned SKILL_SELECT 路径绕过确定性 selector 的 negative_triggers 排除。 | historical validation summary — C6: FAIL |
+| MBC-002 | 002 C3 over-eager selection | 模糊 prompt "帮我写点东西" 触发 SKILL_SELECT。模型在没有明确 skill 需求时过度主动。 | historical validation summary — C3: CONCERN |
+| MBC-003 | 002 C7 over-eager selection | 闲聊 "你好，请问今天是什么日期？" 触发 SKILL_SELECT。模型将无 skill 意图的对话误判为 skill 请求。 | historical validation summary — C7: CONCERN |
+| MBC-004 | 003 OTHER_GATE vs skill_allowed_tools→rejected | Disallowed tools 走 OTHER_GATE 而非 skill_allowed_tools→rejected。模型行为变化：不再主动尝试 disallowed tools。代码路径已验证 (Loop 8: 13/0/4 PASS)。无安全风险 (R35: no side effect)。 | historical validation summary — 13 CONCERN |
 
 **Why not auto-fixed now**: 这些是模型行为层面的问题，不是代码逻辑缺陷。确定性 negative_triggers selector (43/43 PASS) 和 skill_allowed_tools gate 机制 (Loop 8: 13/0/4 PASS) 均已正确工作。模型 SKILL_SELECT 路径和 tool 选择行为由模型自身决定。
 
@@ -65,7 +65,7 @@
 | PD-002 | Plain CLI fallback 保留 | 当前 `python main.py`(Plain CLI) 为稳定主入口。v2 是否保留为 fallback。 | user |
 | PD-003 | Ink prototype 冻结/归档 | `cd tui && npm start`(Ink TuiShell) 当前为 default npm start 入口，但仍为 prototype/visual experiment。v2 是否冻结/归档。 | user |
 | PD-004 | --shell deprecated/remove | `--shell` flag 当前为 deprecated compatibility only。v2 是否移除。 | user |
-| PD-005 | v1 tag wording | v1 close-out tag 命名（如 `v1.0.0-dev` / `v1-engineering-baseline` / `v1-agent-dogfood-complete`）。 | user |
+| PD-005 | v1 tag wording | v1 close-out tag 命名（如 `v1.0.0-dev` / `v1-engineering-baseline`）。 | user |
 
 **Why not auto-fixed now**: 这些决策影响产品方向，不能由 Agent 自动决定。当前 v1 engineering baseline 已完成，等待用户决策后方可 tag。
 
@@ -124,8 +124,5 @@
 |-----|----------|
 | `docs/PROJECT_STATUS.md` | 当前状态 / REAL-EVIDENCE-001..008 |
 | `docs/PROGRESS_LEDGER.md` | 进度历史 |
-| `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` | FROZEN close-out handoff |
-| `docs/dogfood/real-evidence-002-non-steered-results.json` | 002 evidence |
-| `docs/dogfood/real-evidence-003-hardening-results.json` | 003 evidence |
+| `docs/PROJECT_STATUS.md` | 当前状态与冻结边界 |
 | `docs/design/b8-input-readiness-validation.md` | IME/paste/multiline checklist |
-| `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | Real evidence validation debt |

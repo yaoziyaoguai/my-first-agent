@@ -8,7 +8,6 @@ export const ALLOWED_COMMAND_IDS: ReadonlySet<string> = new Set([
   "docs-check",
   "autorun",
   "audit",
-  "dogfood",
 ]);
 
 /** 黑名单模式 (防 destructive/irreversible/sysadmin 命令) */

@@ -39,7 +39,7 @@ Memory 采用 filesystem-first 方向：Markdown memory store 是 source of trut
 
 ### Skill System
 
-正式命名空间是 `agent/skill_system/`。Skill 是 filesystem-first package，默认只暴露 metadata，只有被选中时才加载 body，references/scripts/templates/tests/dogfood 仍需按需加载。`agent/skills/` 是 tombstone，`agent/legacy_skills/` 只作历史材料。
+正式命名空间是 `agent/skill_system/`。Skill 是 filesystem-first package，默认只暴露 metadata，只有被选中时才加载 body，references/scripts/templates/tests 仍需按需加载。`agent/skills/` 是 tombstone，`agent/legacy_skills/` 只作历史材料。
 
 ### SubAgent System
 

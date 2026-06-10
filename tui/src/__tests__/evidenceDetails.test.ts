@@ -20,8 +20,8 @@ describe("EvidenceDetail model", () => {
       expect(typeof d.capability).toBe("string");
       expect(d.status).toBeDefined();
       expect(["credible", "credible-with-caveats", "partial-credible"]).toContain(d.status);
-      expect(d.latestDogfood).toBeDefined();
-      expect(typeof d.latestDogfood).toBe("string");
+      expect(d.latestEvidence).toBeDefined();
+      expect(typeof d.latestEvidence).toBe("string");
       expect(d.latestCommit).toBeDefined();
       expect(typeof d.latestCommit).toBe("string");
       expect(d.caveats).toBeDefined();

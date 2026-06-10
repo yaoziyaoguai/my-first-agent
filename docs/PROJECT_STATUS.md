@@ -1,7 +1,7 @@
 # Project Status — First Agent
 
 **最后更新**: 2026-06-10
-**当前状态**: **developer prototype / developer-dogfood**。当前工作重点是 repository cleanup、source-of-truth repair 和保持 runtime 边界清晰。
+**当前状态**: **developer prototype / local development**。当前工作重点是 repository cleanup、source-of-truth repair 和保持 runtime 边界清晰。
 
 本文档是 Coding Agent 和人类开发者的第一优先读取入口。如果其他文档与本文档冲突，以本文档为准。
 
@@ -49,7 +49,7 @@
 | [docs/06-audit/CURRENT_AUDIT_STATUS.zh.md](06-audit/CURRENT_AUDIT_STATUS.zh.md) | 当前审计入口 |
 | [docs/PROGRESS_LEDGER.md](PROGRESS_LEDGER.md) | 历史里程碑账本 |
 
-最新保留审计入口：[global-readonly-audit-2026-05-27.md](audit/global-readonly-audit-2026-05-27.md)。它是历史审计证据，不自动变成当前 backlog。
+当前审计入口是 [docs/06-audit/CURRENT_AUDIT_STATUS.zh.md](06-audit/CURRENT_AUDIT_STATUS.zh.md)。旧审计证据不自动变成当前 backlog。
 
 ## 授权状态
 

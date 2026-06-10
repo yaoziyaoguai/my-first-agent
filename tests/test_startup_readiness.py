@@ -7,9 +7,9 @@
 4. --help onboarding 输出包含关键 onboarding 信息
 5. main 模块可在无 .env 情况下 import
 
-为什么 startup readiness 是 manual dogfood 前置能力：
-- 用户在 dogfood checklist 第一步就是「按 README 安装并启动」
-- 如果启动就失败，dogfood 无法推进
+为什么 startup readiness 是 local trial 前置能力：
+- 用户在本地试用第一步就是「按 README 安装并启动」
+- 如果启动就失败，试用无法推进
 - 本测试确保 startup readiness check 脚本自身的行为是可信的
 
 为什么不读取真实 .env：
@@ -127,7 +127,7 @@ def test_readiness_script_runs_and_returns_zero():
     """check_startup_readiness.py 在干净环境中应返回 exit code 0（全部 PASS）。
 
     这不是 release packaging，只是 readiness check——exit code 0
-    表示 fake/local 默认安全路径已就绪，用户可以继续 manual dogfood。
+    表示 fake/local 默认安全路径已就绪，用户可以继续 local trial。
     """
     result = _run_readiness_script()
     assert result.returncode == 0, (

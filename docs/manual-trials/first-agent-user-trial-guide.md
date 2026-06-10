@@ -14,34 +14,34 @@
 
 ### 1.1 What happened
 
-- **v1.0.0-engineering-closeout** 已完成（tag `f6807ef`）：engineering baseline，code-clean（full pytest 0 failed），AGENT_DOGFOOD_AUTO complete。
-- **runtime-first synthetic dogfood** 发现 F-001~F-005，其中 F-001/F-001-ext 为 P0（config/config.yaml 读取未阻止 + session 持久化泄露）。
+- **v1.0.0-engineering-closeout** 已完成（tag `f6807ef`）：engineering baseline，code-clean（full pytest 0 failed），历史自动验证已完成。
+- **runtime-first synthetic validation** 发现 F-001~F-005，其中 F-001/F-001-ext 为 P0（config/config.yaml 读取未阻止 + session 持久化泄露）。
 - **F-001/F-001-ext 已 hotfix**（commit `1912377`）：`is_sensitive_file()` 扩展识别 config.yaml/.env，TOOL_GATE 在读取前拒绝。
 - **F-004/F-005 已修复**（commit `29bf618`）：event_type 规范化映射 + TOOL_GATE rejection feedback 增强。
-- **Post-remediation dogfood re-run 已通过**（commit `2a908d6`）：所有 F-001~F-005 已 terminal。
+- **Post-remediation validation re-run 已通过**（commit `2a908d6`）：所有 F-001~F-005 已 terminal。
 
 ### 1.2 What Coding Agent already validated
 
 | 验证项 | 方式 | 结果 |
 |--------|------|------|
-| F-001 config 读取阻止 | real provider dogfood re-run | TOOL_GATE blocked, session 仅 denial metadata |
+| F-001 config 读取阻止 | real provider validation re-run | TOOL_GATE blocked, session 仅 denial metadata |
 | F-001-ext session 不存 raw config | session 文件检查 | 无 sk-* 模式，无 raw config |
 | F-004 event_category 规范化 | agent_log.jsonl 检查 | last 20 entries 全部有 event_category, 0 unknown |
-| F-005 rejection 反馈质量 | real provider dogfood re-run | 拒绝消息含具体原因 + 替代建议 |
-| F-002 中文 skill selection | real provider dogfood re-run | SKILL_SELECT 正确激活，模型行为 caveat 保持 |
-| F-003 memory extractor | real provider dogfood re-run | fake extractor 0 proposals，v1 设计边界确认 |
+| F-005 rejection 反馈质量 | real provider validation re-run | 拒绝消息含具体原因 + 替代建议 |
+| F-002 中文 skill selection | real provider validation re-run | SKILL_SELECT 正确激活，模型行为 caveat 保持 |
+| F-003 memory extractor | real provider validation re-run | fake extractor 0 proposals，v1 设计边界确认 |
 | Full pytest | CI | 4400+ passed, 0 failed |
 | Docs/architecture gates | CI | 79/79 + 24/24 pass |
 | Focused tests (F-001/F-004/F-005) | CI | 45/45 pass |
 
-### 1.3 What synthetic dogfood does NOT cover
+### 1.3 What synthetic validation does NOT cover
 
 - **真人交互体验**：stdin pipe 无法模拟真实终端 IME 输入、粘贴、Ctrl+C、窗口 resize
 - **中文输入法行为**：compositionstart/compositionupdate/compositionend 事件链无法自动化
 - **用户理解与判断**：输出是否清晰、拒绝消息是否可理解、用户能否自行继续
 - **多轮连续使用**：stdin 方式无法真正实现两轮分离对话
 
-**synthetic dogfood 不等于真人试用。** 当前进入 USER_MANUAL_TRIAL。
+**synthetic validation 不等于真人试用。** 当前进入 USER_MANUAL_TRIAL。
 
 ### 1.4 Not product-ready
 
@@ -151,7 +151,7 @@ First Agent v1 是 engineering baseline，不是 product-ready release。以下�
 
 ## 当前已知状态（试用前必读）
 
-以下问题 Coding Agent 已通过 synthetic dogfood 自动验证，不需要你在 trial 中重新验证是否是 bug：
+以下问题 Coding Agent 已通过 historical synthetic validation 自动验证，不需要你在 trial 中重新验证是否是 bug：
 - F-001：config/config.yaml 读取已被 TOOL_GATE 阻止 ✅
 - F-001-ext：session 文件不再持久化 raw config ✅
 - F-004：agent_log.jsonl event_category 规范化已生效 ✅
@@ -539,10 +539,7 @@ mkdir -p docs/manual-trials/evidence
 
 | Doc | 说明 |
 |-----|------|
-| `docs/releases/v1/first-agent-v1-closeout.md` | v1 engineering closeout baseline |
 | `docs/debt/first-agent-v2-priority-backlog.md` | v2 优先项分类（§1 USER_MANUAL_TRIAL） |
-| `docs/dogfood/v1-runtime-first-synthetic-user-dogfood-report.md` | v1 Runtime-First Dogfood（含 §10 post-remediation re-run） |
-| `docs/debt/v1-runtime-first-synthetic-user-dogfood-findings.md` | v1 Dogfood Findings（F-001~F-005 全部 terminal） |
 | `docs/PROJECT_STATUS.md` | 当前项目状态 |
 | `docs/PROGRESS_LEDGER.md` | 进度历史 |
 | `docs/CURRENT_DOCS.md` | 文档导航 |

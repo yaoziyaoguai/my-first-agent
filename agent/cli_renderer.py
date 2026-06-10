@@ -245,7 +245,7 @@ def render_onboarding() -> str:
     """
     lines = [
         _BAR,
-        "  First Agent — local-first agent runtime (cleanup-only, awaiting human dogfood)",
+        "  First Agent — local-first agent runtime (developer prototype / local development)",
         _BAR,
         "",
         "  定位：个人 AI 助手 runtime。工程地基（Tool/Skill/SubAgent/Memory pipeline）",
@@ -253,10 +253,10 @@ def render_onboarding() -> str:
         "",
         "  当前状态：",
         "    • 一页状态文档：docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-        "    • fake/local rehearsal 已通过，但 agent-driven rehearsal 不是人工 dogfood",
-        "    • manual human dogfood 未完成；用户准备好后再按 dogfood checklist 走",
+        "    • fake/local rehearsal 只是工程验证，不等于产品可用性结论",
+        "    • local trial 以 README 和 docs/manual-trials/ 为当前入口",
         "    • real provider 401 已记录为 config/auth concern，AutoRun 不重试真实 API",
-        "    • not broadly user-ready：当前只适合 local-first dogfood / cleanup",
+        "    • not broadly user-ready：当前只适合本地开发和受控验证",
         "",
         "  ✅ 当前可用：",
         "    • Fake/local mode — Fake Provider 默认安全路径，无 API key，不联网",

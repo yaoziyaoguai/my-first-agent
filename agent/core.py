@@ -13,7 +13,7 @@ import agent.tools  # noqa: F401  触发所有工具注册
 # CLI meta-command 检测/渲染已提取到 agent.cli_commands。
 # 测试应直接从 agent.cli_commands import，不要再经由 core.py 的别名。
 #
-# Why kept: 旧测试和 dogfood scripts 仍通过 core._looks_like_* 引用。
+# Why kept: 旧测试和兼容验证路径仍通过 core._looks_like_* 引用。
 # Removal criteria: 所有外部引用迁移到 agent.cli_commands 直 import 后移除。
 # Sunset: v0.4+。不新增引用到此别名。
 from agent import cli_commands as _cli_commands

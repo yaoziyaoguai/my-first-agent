@@ -1,7 +1,7 @@
 """Source-of-Truth 一致性测试：防止过期文档模式复活。
 
 背景：2026-05-27 docs cleanup 建立了 PROJECT_STATUS.md / PROGRESS_LEDGER.md
-作为第一优先读取入口，归档了大量过期 plans/audit/dogfood 文档。
+作为第一优先读取入口，归档了大量过期 plans/audit/evidence 文档。
 
 这些测试守护以下不变量：
 
@@ -43,8 +43,9 @@ def test_project_status_exists():
 def test_progress_ledger_exists():
     """PROGRESS_LEDGER.md 必须存在，记录关键 milestones。"""
     text = _read("docs/PROGRESS_LEDGER.md")
-    assert "2026-05-27" in text
-    assert "ISSUE-002" in text or "fix" in text.lower()
+    assert "2026-06-10" in text
+    assert "Repository cleanup baseline" in text
+    assert "PROJECT_STATUS.md" in text
 
 
 # =========================================================================
@@ -67,7 +68,6 @@ ACTIVE_DOCS_GLOB = [
     "docs/00-overview/*.md",
     "docs/01-getting-started/*.md",
     "docs/02-architecture/*.md",
-    "docs/05-testing-dogfood/*.md",
     "docs/06-audit/*.md",
     "docs/design/*.md",
     "docs/dev/*.md",
@@ -196,7 +196,6 @@ def test_active_index_links_to_existing_files():
         "docs/PROGRESS_LEDGER.md",
         "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
         "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-        "docs/dogfood/README.md",
         "docs/plans/README.md",
         "docs/audit/README.md",
     ]
@@ -236,7 +235,6 @@ def test_active_index_docs_contain_no_hardcoded_secrets():
         "docs/README.zh.md",
         "docs/audit/README.md",
         "docs/plans/README.md",
-        "docs/dogfood/README.md",
     ]:
         if not (PROJECT_ROOT / doc_path).exists():
             continue
@@ -315,10 +313,9 @@ def test_auto_run_references_auto_run_workflow():
 
 
 def test_auto_run_includes_task_type_routing():
-    """auto-run.md 必须包含任务类型路由（bug_fix / dogfood / docs_cleanup 等）。"""
+    """auto-run.md 必须包含任务类型路由（bug_fix / docs_cleanup 等）。"""
     text = _read_auto_run()
     assert "bug_fix" in text
-    assert "dogfood" in text
     assert "docs_cleanup" in text
     assert "config_safety" in text
     assert "architecture_change" in text
@@ -422,10 +419,10 @@ def test_active_docs_mention_config_key_boundary():
     assert "config/config.yaml" in text
 
 
-def test_active_docs_reference_latest_audit():
-    """Active PROJECT_STATUS 必须引用最新审计报告。"""
+def test_active_docs_reference_current_audit_entry():
+    """Active PROJECT_STATUS 必须引用当前审计入口，而不是旧审计报告。"""
     text = _read("docs/PROJECT_STATUS.md")
-    assert "global-readonly-audit-2026-05-27.md" in text
+    assert "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md" in text
 
 
 def test_current_capability_status_no_401_as_current():
@@ -434,10 +431,10 @@ def test_current_capability_status_no_401_as_current():
     assert "401" not in text
 
 
-def test_current_audit_status_no_manual_dogfood_as_top_priority():
-    """CURRENT_AUDIT_STATUS 不得将 Manual Human Dogfood 写成最高优先级下一步。"""
+def test_current_audit_status_no_old_manual_trial_as_top_priority():
+    """CURRENT_AUDIT_STATUS 不得将旧 manual-trial 阶段写成最高优先级下一步。"""
     text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
-    assert "Manual Human Dogfood" not in text
+    assert "Manual Human" not in text
 
 
 def test_config_legacy_sunset_no_env_as_primary():
@@ -500,11 +497,14 @@ def test_auto_run_final_output_not_stop_signal():
     assert "进度日志" in text or "不是停止信号" in text or "not stop signal" in text.lower()
 
 
-def test_remediation_plan_no_stop_instruction():
-    """remediation plan 不得包含 '停止，等下一轮 /auto-run' 指令。"""
-    text = _read("docs/plans/2026-05-27-capability-remediation-loop-plan.md")
-    assert "停止，等下一轮 /auto-run" not in text
-    assert "自动继续" in text or "继续下一个 loop" in text
+def test_current_auto_run_docs_do_not_restore_old_stop_instruction():
+    """当前 auto-run 文档不得恢复 '停止，等下一轮 /auto-run' 指令。"""
+    for rel in [
+        ".claude/commands/auto-run.md",
+        "docs/dev/AUTO_RUN_WORKFLOW.md",
+    ]:
+        text = _read(rel)
+        assert "停止，等下一轮 /auto-run" not in text
 
 
 def test_project_status_has_auto_run_auth():
@@ -790,9 +790,6 @@ OVERCLAIM_SCAN_FILES = [
     "docs/PROGRESS_LEDGER.md",
     "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
     "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
-    "docs/plans/2026-05-27-capability-remediation-loop-plan.md",
-    "docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md",
-    "docs/audits/2026-05-27-current-capability-recovery-map.md",
     "docs/README.zh.md",
 ]
 
@@ -822,14 +819,14 @@ def test_no_doc_claims_all_p0_p1_resolved():
 def test_no_doc_claims_user_usable_unqualified():
     """Active docs 不得无条件声称 'user-usable'。
 
-    PROJECT_STATUS 明确：当前阶段是 developer prototype / developer-dogfood。
+    PROJECT_STATUS 明确：当前阶段是 developer prototype / local development。
     'limited user-usable' 也是 overclaim——developer prototype 不面向用户。
     """
     for rel, text in _read_overclaim_files().items():
         if "limited user-usable" in text:
             # 必须同时包含否定或 developer prototype 标记
             ok = ("不可标" in text or "developer prototype" in text
-                  or "developer-dogfood" in text or "不在当前" in text
+                  or "local development" in text or "不在当前" in text
                   or "不是" in text or "❌" in text)
             if not ok:
                 pytest.fail(
@@ -857,44 +854,24 @@ def test_no_doc_claims_12_12_completed_unqualified():
 def test_project_status_explicitly_developer_prototype():
     """PROJECT_STATUS.md 必须明确声明当前阶段为 developer prototype。
 
-    禁止 'user-usable'、'production-ready'、'real-dogfood-ready' 等过度声称。
+    禁止 'user-usable'、'production-ready' 等过度声称。
     """
     text = _read("docs/PROJECT_STATUS.md")
-    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+    assert "developer prototype" in text.lower() or "local development" in text.lower()
     # 不得包含被禁止的全局声称
     assert "broadly user-usable" not in text
     assert "production-ready" not in text
 
 
-def test_dogfood_report_smoke_pass_not_capability_pass():
-    """Interactive dogfood report 必须区分 SMOKE_PASS 和 capability PASS。
-
-    15/15 无 crash 不能标为 capability PASS——当前 report 必须标注 SMOKE_PASS 级别。
-    """
-    text = _read("docs/dogfood/real-api-interactive-dogfood-report-2026-05-27.md")
-    # 必须包含 evidence level 说明
-    assert "SMOKE_PASS" in text
-    # 必须包含 SMOKE_PASS 不是 capability PASS 的说明
-    ok_non_capability = (
-        "不是 capability PASS" in text.lower()
-        or "非 capability" in text.lower()
-        or "不 crash" in text.lower()
-    )
-    assert ok_non_capability
-
-
-def test_remediation_plan_honest_breakdown():
-    """Remediation plan line 5 必须包含 honest breakdown（不能只写 '12/12 全部完成'）。"""
-    text = _read("docs/plans/2026-05-27-capability-remediation-loop-plan.md")
-    # 必须明确指出哪些是实质代码变更，哪些是 admin/docs
-    assert "实质代码" in text or "admin/docs" in text or "OVERCLAIMED" in text
-    # 不得只写 "12/12 全部完成" 而没有任何 honest breakdown
-    if "12/12" in text:
-        assert "OVERCLAIMED" in text or "行政" in text or "docs" in text.lower()
+def test_current_docs_do_not_restore_old_remediation_overclaim():
+    """当前文档不得恢复旧 remediation plan 的 all-done overclaim。"""
+    for rel, text in _read_overclaim_files().items():
+        if "12/12" in text and "全部完成" in text:
+            pytest.fail(f"{rel}: 恢复了旧 remediation all-done overclaim")
 
 
 def test_progress_ledger_smoke_pass_honest():
-    """PROGRESS_LEDGER 中 dogfood 条目不得标为无条件的 'PASS'。
+    """PROGRESS_LEDGER 中历史 smoke 条目不得标为无条件的 'PASS'。
 
     必须标注 SMOKE_PASS 并附加说明（如 '无 crash，非 capability PASS'）。
     """
@@ -913,7 +890,7 @@ def test_capability_status_no_user_usable():
             " 'limited user-usable'（应为 'developer prototype'）"
         )
     # 确认正确标签
-    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+    assert "developer prototype" in text.lower() or "local development" in text.lower()
 
 
 def test_current_audit_status_no_user_usable():
@@ -922,7 +899,7 @@ def test_current_audit_status_no_user_usable():
     if "limited user-usable" in text:
         pytest.fail("CURRENT_AUDIT_STATUS 包含 'limited user-usable'（应为 'developer prototype'）")
     # 确认正确标签
-    assert "developer prototype" in text.lower() or "developer-dogfood" in text.lower()
+    assert "developer prototype" in text.lower() or "local development" in text.lower()
 
 
 def test_no_admin_completed_as_capability():
@@ -950,12 +927,11 @@ def test_no_admin_completed_as_capability():
             ), f"PROJECT_STATUS 中 {loop_id} 缺少 L0/文档化标记"
 
 
-def test_capability_recovery_map_has_overclaim_inventory():
-    """Capability recovery map 必须包含 Overclaim Inventory 表。
-
-    该表记录所有已发现的 overclaim 及其 honest status。
-    """
-    text = _read("docs/audits/2026-05-27-current-capability-recovery-map.md")
-    assert "Overclaim Inventory" in text or "Overclaim" in text
-    assert "Loop 13" in text
-    assert "15/15 PASS" in text or "SMOKE_PASS" in text
+def test_current_status_keeps_overclaim_boundaries():
+    """当前状态入口必须保留 overclaim 防线，而不是依赖旧 recovery map。"""
+    text = _read("docs/PROJECT_STATUS.md")
+    assert "developer prototype" in text.lower()
+    assert "not broadly user-ready" not in text.lower()
+    assert "production-ready" not in text.lower()
+    assert "FakeProvider" in text
+    assert "Memory Consolidation" in text

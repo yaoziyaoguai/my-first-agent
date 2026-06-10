@@ -5,7 +5,7 @@
   REVIEW_MODEL_NAME / MAX_* 等兼容常量。
 - 新 provider/API 配置的权威入口是 ``agent/provider/config.py``。
 - 本地 agent customization 配置的权威入口是 ``agent/local_config.py``。
-- provider dogfood / real-api path 不应依赖本模块的 os.environ mutation。
+- provider real-api / validation path 不应依赖本模块的 os.environ mutation。
 """
 
 import os
@@ -17,7 +17,7 @@ from dotenv import dotenv_values, load_dotenv
 def load_legacy_dotenv_config(project_root: Path | None = None) -> bool:
     """显式加载 legacy `.env` 配置，import config 时不会自动调用。
 
-    新 provider/dogfood 路径使用 agent/provider/config.py 与 scoped dotenv loader，
+    新 provider/real-api 路径使用 agent/provider/config.py 与 scoped dotenv loader，
     不依赖这里的 os.environ mutation。这个函数只保留给旧 CLI/手工入口在确实
     需要兼容 `.env` 时显式 opt-in；默认 override=False，shell 显式设置仍优先。
     """
@@ -88,7 +88,7 @@ def get_legacy_review_model_name() -> str | None:
 def _load_project_dotenv_values(project_root: Path | None = None) -> dict[str, str]:
     """通过项目配置层读取 dotenv 值，但不污染 ``os.environ``。
 
-    这是给 dogfood/测试用的安全边界：允许程序自动加载项目配置，
+    这是给显式 validation / 测试用的安全边界：允许程序自动加载项目配置，
     但返回值只在内存中传递，调用方不得打印、记录或序列化 secret value。
     """
     root = Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
@@ -112,7 +112,7 @@ def _resolve_scoped_config_value(
     """按 source kind 解析配置值，不暴露配置值本身。
 
     ``source kind`` 只描述来源类别：project_dotenv / shell_env / missing。
-    它用于 dogfood diagnostics，避免为了排查 provider 问题去打印 secret。
+    它用于 provider diagnostics，避免为了排查 provider 问题去打印 secret。
     """
     if prefer_project_dotenv:
         project_values = _load_project_dotenv_values(project_root)

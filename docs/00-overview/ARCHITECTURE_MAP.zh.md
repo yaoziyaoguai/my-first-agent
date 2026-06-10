@@ -18,7 +18,7 @@ User
       -> Skill System
       -> SubAgent System
       -> Checkpoint / Resume
-      -> Audit / Trace / Dogfood
+      -> Audit / Trace / Evidence
 ```
 
 ## Mermaid 图
@@ -35,7 +35,7 @@ flowchart TD
     R --> S[Skill System]
     R --> SA[SubAgent System]
     R --> C[Checkpoint / Resume]
-    R --> A[Audit / Trace / Dogfood]
+    R --> A[Audit / Trace / Evidence]
 
     S -. declares allowed_tools upper bound .-> TR
     SA -. requests parent-mediated tools .-> TR

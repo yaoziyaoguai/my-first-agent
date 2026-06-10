@@ -246,7 +246,7 @@ def test_fake_provider_tool_use_blocks_match_real_contract():
     不需要 provider-specific 分支。
 
     本测试不调用真实 API——FakeProvider 的 tool_use block 形状已经
-    验证了 contract。real provider 的 tool_use block 形状需要 dogfood 验证。
+    验证了 contract。real provider 的 tool_use block 形状需要显式 real-provider validation。
     """
     from agent.provider.fake_provider import FakeProvider
     from agent.provider.protocol import ToolUseBlock
@@ -282,7 +282,7 @@ def test_provider_swap_preserves_interface_across_fake_and_configured_types():
     都有 provider_type/supports_tools/supports_streaming。
 
     本测试只验证 interface existence，不调用真实 API。
-    真实 API 调用行为（tool_use 触发概率等）需要 dogfood 验证。
+    真实 API 调用行为（tool_use 触发概率等）需要显式 real-provider validation。
     """
     from agent.provider.config import AgentProviderConfig
     from agent.provider.factory import build_model_provider
@@ -436,12 +436,16 @@ def test_provider_backed_messages_rejects_unknown_legacy_overrides():
         )
 
 
-def test_dogfood_runners_do_not_import_provider_sdks_directly():
-    """dogfood runner 只能依赖 provider factory，不能散落 SDK-specific client。"""
+def test_provider_core_paths_do_not_import_provider_sdks_directly():
+    """当前 provider 核心路径只能依赖 provider factory/adapter，不能散落 SDK-specific client。"""
 
-    global_source = Path("scripts/dogfood_global_real_api.py").read_text(encoding="utf-8")
-    skill_source = Path("scripts/dogfood_skill_system.py").read_text(encoding="utf-8")
-    combined = f"{global_source}\n{skill_source}"
+    core_sources = [
+        Path("agent/provider/factory.py"),
+        Path("agent/provider/config.py"),
+        Path("agent/provider/legacy_adapter.py"),
+        Path("agent/core.py"),
+    ]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in core_sources)
 
     assert "import anthropic" not in combined
     assert "import openai" not in combined
@@ -783,7 +787,7 @@ class TestPhase1DispatcherDefaultBuild:
 class TestProviderModeBanner:
     """PF-01: startup provider mode banner 的 contract tests。
 
-    manual human dogfood 第一 blocker：用户启动时必须清楚当前是 fake/local 还是
+    local trial 第一 blocker：用户启动时必须清楚当前是 fake/local 还是
     real provider。这些测试验证：
     1. fake/default 启动不读取真实 API key
     2. banner 能正确区分 fake/real mode

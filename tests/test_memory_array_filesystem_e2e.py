@@ -1,6 +1,6 @@
-"""Phase 7 Memory Array filesystem E2E dogfood。
+"""Phase 7 Memory Array filesystem E2E。
 
-这些测试使用固定的临时根目录 /tmp/dogfood_memory_array_filesystem_e2e，
+这些测试使用固定的临时根目录 /tmp/memory_array_filesystem_e2e，
 只写 synthetic / non-sensitive data，不读取真实 sessions/runs、agent_log.jsonl
 或 .env 内容。
 
@@ -10,7 +10,7 @@
 - procedural emergence: active_records gate → pending_review → inline_confirmation seam
 - recall/snapshot 基础只读验证
 
-测试目标是 dogfood filesystem store 的真实落盘行为，不改变 memory governance 语义。
+测试目标是 filesystem store 的真实落盘行为，不改变 memory governance 语义。
 """
 
 from __future__ import annotations
@@ -56,20 +56,19 @@ from agent.memory_snapshot_generator import (
     build_memory_snapshot_from_store,
 )
 
+FILESYSTEM_E2E_ROOT = Path("/tmp/memory_array_filesystem_e2e")
 
-DOGFOOD_ROOT = Path("/tmp/dogfood_memory_array_filesystem_e2e")
 
-
-def _reset_dogfood_root() -> Path:
-    """只清理固定 /tmp dogfood 目录，避免误删真实 memory root。"""
-    expected = Path("/tmp/dogfood_memory_array_filesystem_e2e").resolve()
-    actual = DOGFOOD_ROOT.resolve()
+def _reset_filesystem_e2e_root() -> Path:
+    """只清理固定 /tmp 测试目录，避免误删真实 memory root。"""
+    expected = Path("/tmp/memory_array_filesystem_e2e").resolve()
+    actual = FILESYSTEM_E2E_ROOT.resolve()
     if actual != expected:
-        raise RuntimeError(f"unexpected dogfood root: {actual}")
-    if DOGFOOD_ROOT.exists():
-        shutil.rmtree(DOGFOOD_ROOT)
-    DOGFOOD_ROOT.mkdir(parents=True, exist_ok=True)
-    return DOGFOOD_ROOT
+        raise RuntimeError(f"unexpected filesystem e2e root: {actual}")
+    if FILESYSTEM_E2E_ROOT.exists():
+        shutil.rmtree(FILESYSTEM_E2E_ROOT)
+    FILESYSTEM_E2E_ROOT.mkdir(parents=True, exist_ok=True)
+    return FILESYSTEM_E2E_ROOT
 
 
 def _intent(
@@ -92,7 +91,7 @@ def _intent(
         content_summary=content,
         source_summary=source_summary,
         scope=scope,
-        safety_summary="synthetic non-sensitive dogfood evidence",
+        safety_summary="synthetic non-sensitive filesystem e2e evidence",
         sensitive_redacted=False,
         user_visible_summary=f"[synthetic] {content[:80]}",
         memory_type=memory_type,
@@ -115,7 +114,7 @@ def _write_episodic(
 ):
     intent = _intent(
         content=content,
-        source_summary=f"synthetic episodic dogfood source {index}",
+        source_summary=f"synthetic episodic filesystem e2e source {index}",
         memory_type="episodic",
         source_type="agent_suggested",
         confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
@@ -162,14 +161,14 @@ def _archive_count(root: Path, status: str) -> int:
     return len(sorted((root / "_pending" / "archived" / status).glob("t1_*.json")))
 
 
-def test_memory_array_filesystem_e2e_dogfood_report() -> None:
-    """Filesystem E2E dogfood 验证真实 _pending/ 和正式 memory records。
+def test_memory_array_filesystem_e2e_report() -> None:
+    """Filesystem E2E 验证真实 _pending/ 和正式 memory records。
 
     这些测试验证 RFC §10.5 / §15.5 中 procedural explicit confirmation 边界：
     pending_review 与 inline_confirmation 都必须先获得 human confirmation；
     reject/other 不写正式 store，procedural 不支持 silent retain 或 auto approve。
     """
-    root = _reset_dogfood_root()
+    root = _reset_filesystem_e2e_root()
     store = FilesystemMemoryStore(root_dir=root)
 
     # A. episodic T2 auto-retain：只允许 episodic 自动保留，confidence 必须保真。
@@ -403,7 +402,7 @@ def test_memory_array_filesystem_e2e_dogfood_report() -> None:
     snapshot = build_memory_snapshot_from_store(
         store,
         MemorySnapshotBuildOptions(
-            selection_reason="filesystem e2e dogfood recall smoke",
+            selection_reason="filesystem e2e recall smoke",
             max_items=5,
         ),
     )
@@ -444,7 +443,7 @@ def test_memory_array_filesystem_e2e_dogfood_report() -> None:
         "read_real_sessions_runs": "no",
         "read_agent_log": "no",
     }
-    report_path = root / "dogfood_report.json"
+    report_path = root / "filesystem_e2e_report.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     assert report["_pending"]["pending_count"] == 0

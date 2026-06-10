@@ -26,7 +26,6 @@
 | Integration | `integration` | 多个模块协作，无需真实 API | `test_provider_contract.py` |
 | Handler | `handler` / `direct` | 单个 handler/dispatcher 行为 | `test_confirm_handlers.py` |
 | E2E | `e2e`（仅在文件名中） | 全链路：入口 → core.chat → loop → 输出 | `test_first_usable_task_e2e.py` |
-| Dogfood | `dogfood` | 手动/脚本验证，非自动化 CI | `scripts/dogfood_*.py` |
 | Characterization | `characterization` | 保护当前行为不变，非验证正确性 | `test_command_boundary_characterization.py` |
 
 **关键区分：**

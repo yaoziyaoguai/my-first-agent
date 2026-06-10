@@ -13,7 +13,6 @@ describe("autorunAdapter", () => {
       expect(AUTORUN_COMMANDS).toHaveProperty("continue");
       expect(AUTORUN_COMMANDS).toHaveProperty("status");
       expect(AUTORUN_COMMANDS).toHaveProperty("audit");
-      expect(AUTORUN_COMMANDS).toHaveProperty("dogfood");
       expect(AUTORUN_COMMANDS).toHaveProperty("gates");
     });
 
@@ -38,7 +37,6 @@ describe("autorunAdapter", () => {
       expect(ALLOWED_AUTORUN_ACTIONS).toContain("continue");
       expect(ALLOWED_AUTORUN_ACTIONS).toContain("status");
       expect(ALLOWED_AUTORUN_ACTIONS).toContain("audit");
-      expect(ALLOWED_AUTORUN_ACTIONS).toContain("dogfood");
       expect(ALLOWED_AUTORUN_ACTIONS).toContain("gates");
     });
   });

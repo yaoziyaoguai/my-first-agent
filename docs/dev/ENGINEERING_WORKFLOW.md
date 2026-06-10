@@ -73,7 +73,7 @@ Review 不是只发生在实现完成之后。每个阶段的输出进入下一�
 | Implementation | 测试设计未覆盖该路径 | 回 TDD / Test Plan |
 | Implementation | 实现计划遗漏边界条件 | 回 Implementation Plan |
 | Implementation | 规格对 branch point 判断错误 | 回 SDD / SPEC |
-| Debug / Remediation | 根因是 dogfood/evidence 叙事错误 | 回文档和分类契约 |
+| Debug / Remediation | 根因是 validation/evidence 叙事错误 | 回文档和分类契约 |
 | Debug / Remediation | 根因是 branch point 不存在或定义错误 | 回 Unified Runtime Flow Contract |
 | Review 阶段 | 发现上游文档缺陷 | 回对应上游阶段 |
 
@@ -161,7 +161,7 @@ Review 不是只发生在实现完成之后。每个阶段的输出进入下一�
 
 - 临时 prompt 补红线（应用 Contract 而非绕过）
 - Anchor 叙事无限拆分（使用 branch behavior 而非新 Anchor）
-- dogfood 进入 core runtime（dogfood 只能调用 core.chat 并收集 evidence）
+- validation harness 进入 core runtime（验证只能调用 core.chat 并收集 evidence，不能成为第二 runtime）
 - fake/real 两套路径（fake/real 共享同一业务流，仅配置层不同）
 - 子系统 direct call 冒充 E2E（direct call 必须降级）
 - 只在最后做 review（review gate 必须在每个阶段之后）

@@ -11,7 +11,7 @@ Config Source 追踪（v0.11+）:
 为什么需要 config source 追踪：
 - 外层 Coding Agent 环境变量（如 DeepSeek）会通过 override=False 抢占项目 .env
 - 用户需要明确知道 provider 配置来自哪个源头
-- isolated 模式让 dogfood 可以只用项目 .env 配置，不受外层污染
+- isolated 模式让显式 provider validation 可以只用项目 .env 配置，不受外层污染
 """
 from __future__ import annotations
 
@@ -792,7 +792,7 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
                 )
         else:
             if diagnostic.api_key_present:
-                lines.append("  配置看起来完整，但连接性需 manual human dogfood 验证。")
+                lines.append("  配置看起来完整，但连接性需用户显式 real-provider validation。")
             else:
                 lines.append("  provider mode = real，但缺少 API key——连接性未验证。")
 

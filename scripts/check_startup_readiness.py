@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """First Agent 启动就绪检查（startup readiness check）。
 
-这个脚本是 manual human dogfood 的前置检查——在用户按 README 安装依赖后、
+这个脚本是 local trial 的前置检查——在用户按 README 安装依赖后、
 第一次交互前，验证 fake/local 默认安全路径能否正常启动。
 
 设计原则：
@@ -11,10 +11,10 @@
 - 输出脱敏：不打印任何路径、用户名、环境变量值
 - exit code 语义清晰：0=就绪, 1=有告警但可继续, 2=阻塞性错误
 
-为什么 startup readiness 是 manual dogfood 前置能力：
-- 用户在 dogfood checklist 的第一步就是「按 README 安装并启动」
-- 如果启动就失败（缺依赖、Python 版本不兼容、import 报错），dogfood 无法推进
-- 本脚本让用户在执行 dogfood 前先拿到一个 ok/not-ok 的明确信号，降低试错成本
+为什么 startup readiness 是 local trial 前置能力：
+- 用户在本地试用的第一步就是「按 README 安装并启动」
+- 如果启动就失败（缺依赖、Python 版本不兼容、import 报错），试用无法推进
+- 本脚本让用户在执行 local trial 前先拿到一个 ok/not-ok 的明确信号，降低试错成本
 
 为什么默认 fake/local 是安全路径：
 - fake provider 是 deterministic test fixture，不调用真实 LLM
@@ -206,7 +206,7 @@ def render_readiness_report(results: dict[str, tuple[bool, str]]) -> str:
         lines.append("  下一步：python main.py --help 查看 onboarding")
     else:
         lines.append("  结论：startup readiness 存在问题")
-        lines.append("  请先修复 FAIL 项再继续 manual dogfood")
+        lines.append("  请先修复 FAIL 项再继续 local trial")
 
     lines.append("")
     return "\n".join(lines)

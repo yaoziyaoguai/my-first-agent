@@ -99,7 +99,7 @@ L2 在 L1 基础上增加：
 - child 可做 nested file read / code search（受 allowed_tools 约束）
 - child memory proposals 可以 batch 提交
 
-**L2 不在 Loop 3.2 scope** — L2 需要 L1 完整实现 + real provider dogfood 后才能设计。
+**L2 不在 Loop 3.2 scope** — L2 需要 L1 完整实现 + explicitly authorized real-provider validation 后才能设计。
 
 ---
 
@@ -221,7 +221,7 @@ child 继续 loop 或 stop
 - 真实 provider 参与（不能是 FakeProvider）
 - 业务 disposition（allowed/executed/success）不是 probe/rejected/noop
 
-真实 provider dogfood 登记为 REAL-EVIDENCE-006。
+真实 provider validation 曾登记为 REAL-EVIDENCE-006；这是历史上下文，不是当前 source of truth。
 
 ---
 
@@ -278,8 +278,7 @@ child 继续 loop 或 stop
 
 ### 6.3 Real Evidence Debt
 
-- **REAL-EVIDENCE-006**：真实 provider child loop + parent-mediated tool execution + memory scope roundtrip（需真实 API dogfood 验证）
-- 登记位置：`docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md`
+- **REAL-EVIDENCE-006**：真实 provider child loop + parent-mediated tool execution + memory scope roundtrip（historical validation caveat；不作为当前 source of truth）
 
 ---
 
@@ -323,4 +322,4 @@ child 继续 loop 或 stop
 - 当前状态入口：`docs/PROJECT_STATUS.md`
 - 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
 - 统一 Runtime Flow 合约：`docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md`
-- REAL-EVIDENCE debt：`docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md`
+- 当前状态入口：`docs/PROJECT_STATUS.md`

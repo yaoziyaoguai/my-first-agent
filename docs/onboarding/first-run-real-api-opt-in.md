@@ -80,7 +80,7 @@ provider:
 当你从 fake mode 切换到 real API 时：
 
 1. **行为一致**：fake 和 real 共享核心 runtime 路径（dispatcher、tool pipeline、memory、subagent）
-2. **首次验证**：先用 `--health` 检查连接，再跑 dogfood
+2. **首次验证**：先用 `--health` 检查连接，再运行明确授权的 local/real-provider validation
 3. **已知差异**：
    - Fake mode 的 scripted response 可能不覆盖所有边缘情况
    - Real LLM 的 tool selection 行为可能与 fake scripted 不完全一致

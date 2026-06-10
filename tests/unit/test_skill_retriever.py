@@ -1,6 +1,6 @@
 """Phase 2 TDD RED Tests — Candidate Skill Retrieval (R01-R05).
 
-测试范围（来自 docs/design/002-skill-selection-sdd-vNext.md §7.2）：
+测试范围（historical Plan 3 candidate retrieval contract）：
 - R01: 无关输入 → 空列表
 - R02: user_input 精确命中 trigger → 最高分
 - R03: alias 命中 → 次高分

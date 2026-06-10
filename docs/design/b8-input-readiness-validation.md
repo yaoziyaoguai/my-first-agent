@@ -172,4 +172,4 @@ M8 R14 在以下条件满足前保持 `blocked-ime`：
 - `tui/src/components/WorkbenchLayout.tsx` — Tab focus cycling
 - `tui/src/data/defaultEntryReadiness.ts` — M8 R14 (blocked-ime)
 - `docs/design/first-agent-tui-design.md` — 终端原生设计原则
-- `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` — §8 D-06
+- `docs/PROJECT_STATUS.md` — 当前状态与冻结边界

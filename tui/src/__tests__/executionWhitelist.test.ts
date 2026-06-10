@@ -26,13 +26,12 @@ const makeCmd = (
 
 describe("executionWhitelist", () => {
   describe("ALLOWED_COMMAND_IDS", () => {
-    it("includes status, gates, docs-check, autorun, audit, dogfood", () => {
+    it("includes status, gates, docs-check, autorun, audit", () => {
       expect(ALLOWED_COMMAND_IDS).toContain("status");
       expect(ALLOWED_COMMAND_IDS).toContain("gates");
       expect(ALLOWED_COMMAND_IDS).toContain("docs-check");
       expect(ALLOWED_COMMAND_IDS).toContain("autorun");
       expect(ALLOWED_COMMAND_IDS).toContain("audit");
-      expect(ALLOWED_COMMAND_IDS).toContain("dogfood");
     });
 
     it("does not include agent-run or deploy", () => {

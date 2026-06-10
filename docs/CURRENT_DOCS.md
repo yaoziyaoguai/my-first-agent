@@ -39,7 +39,7 @@
 ## Agent Rules
 
 - 如果 `PROJECT_STATUS.md` 与其他文档冲突，以 `PROJECT_STATUS.md` 为准。
-- 不把 dogfood、旧 closeout 或 archive 文档当成当前 backlog。
+- 不把旧验证材料、旧 closeout 或 archive 文档当成当前 backlog。
 - 不恢复旧 L1/L2 production route。
 - 不恢复 direct tool/MCP execution。
 - 不新增 raw memory write、auto-adoption 或第二 runtime。

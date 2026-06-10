@@ -15,9 +15,8 @@ describe("DocsConsistency model", () => {
     const names = results.map((r) => r.name);
     expect(names).toContain("PROJECT_STATUS.md");
     expect(names).toContain("PROGRESS_LEDGER.md");
-    expect(names).toContain("REAL_EVIDENCE_VALIDATION_DEBT.md");
     expect(names).toContain("B8 Interaction-first Workbench SDD");
-    expect(results.length).toBeGreaterThanOrEqual(4);
+    expect(results.length).toBeGreaterThanOrEqual(3);
   });
 
   it("each result has required fields including contentStatus", () => {

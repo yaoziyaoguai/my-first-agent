@@ -6,7 +6,7 @@
 1. confirmation_required 是 tool.gate 下已有 branch behavior，非新 Anchor / 新 capability milestone
 2. tool.gate 的 gate 判定逻辑对 fake/real 完全相同——fake/real 只在配置层不同
 3. confirmation_required 时 tool function 不被调用（dangerous_tool_function_invoked=False）
-4. dogfood 不能通过直接构造 RuntimeAction 冒充 E2E（payload 不可升级分类）
+4. 旧 harness 不能通过直接构造 RuntimeAction 冒充 E2E（payload 不可升级分类）
 5. direct dispatcher 只能是 harness_runtime_e2e，direct handler call 只能是 subsystem_integration
 6. _safe_noop 的 confirmation="never" → allowed path 不可被破坏
 
@@ -159,7 +159,7 @@ class TestConfirmationRequiredPositiveExamples:
             assert evidence.get("registry_handler_invoked") is True
             assert payload.get("dangerous_tool_function_invoked") is False
             assert evidence.get("target_module_proof") is not None
-            # 确认走的是 production registry 路径，非 dogfood overlay
+            # 确认走的是 production registry 路径，非旧 overlay
             assert evidence.get("capability_type") == "production_tool_registry"
         finally:
             _unregister_test_tool()
@@ -513,7 +513,7 @@ class TestConfirmationRequiredClassificationBoundaries:
         - dangerous_tool_function_invoked=false
         - external_side_effects=false
         - evidence_level=real_core_loop_runtime_e2e
-        - 不新增 fake loop / fake dispatcher / dogfood-only path
+        - 不新增 fake loop / fake dispatcher / harness-only path
 
         中文学习边界——这个测试保护什么：
         B2 测试证明 route_from_runtime_loop() 可以产生 real_core_loop_runtime_e2e，
@@ -526,9 +526,9 @@ class TestConfirmationRequiredClassificationBoundaries:
         - 调用的是 production _try_phase1_turn_end_runtime_action（与 core loop 同一函数）
         - 使用 production LoopDependencies dataclass 实例
         - 走 production ToolGateHandler → tool.gate branch point
-        - spy 只观察不改变行为——与 Phase 1 dogfood 的 SpyDispatcher 模式一致
+        - spy 只观察不改变行为
 
-        为什么不是 dogfood-only path：
+        为什么不是 harness-only path：
         - production loop.py 在 turn-end 时调用同一函数
         - 唯一的"配置切换"是 LoopDependencies.tool_gate_tool_name 字段值
         - fake/real 共享同一 gate 逻辑——这条路径对 real provider 同样有效
@@ -661,9 +661,9 @@ class TestConfirmationRequiredClassificationBoundaries:
         level = classify_evidence_level(evidence)
         assert level == REAL_CORE_LOOP_RUNTIME_E2E
 
-        # === 断言组 5：不是 dogfood-only path ===
-        # payload 不含 dogfood 特有标记
-        assert "dogfood_harness" not in evidence
+        # === 断言组 5：不是旧 harness-only path ===
+        # payload 不含旧 harness 特有标记，且能力分类仍是 production registry。
+        assert evidence.get("source") != "legacy_harness"
         assert evidence.get("capability_type") == "production_tool_registry"
 
 

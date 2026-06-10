@@ -27,7 +27,7 @@ export function EvidenceBrowserPanel({ entries, selectedIndex }: Props) {
     return (
       <Box flexDirection="column" borderStyle="single" borderColor="dim" padding={1}>
         <Text bold>Evidence Files</Text>
-        <Text dimColor>No dogfood result files found in docs/dogfood/</Text>
+        <Text dimColor>No static evidence files configured</Text>
       </Box>
     );
   }

@@ -1,6 +1,6 @@
 # First Agent 文档入口
 
-本文档只保留当前开发所需入口。历史计划、旧审计、旧 dogfood 和错误方向设计不作为当前依据。
+本文档只保留当前开发所需入口。历史计划、旧审计、旧验证材料和错误方向设计不作为当前依据。
 
 ## 必读顺序
 
@@ -39,7 +39,6 @@
 | [design/](design/) | 当前仍有价值的架构设计；以 `PROJECT_STATUS.md` 为准 |
 | [plans/](plans/) | 只保留少量近期计划索引；旧计划不自动执行 |
 | [audit/](audit/) | 审计入口和少量保留审计 |
-| [dogfood/](dogfood/) | 证据材料；不等于当前能力 source of truth |
 | [archive/README.md](archive/README.md) | 历史参考；不得作为当前指令 |
 
 ## 当前规则

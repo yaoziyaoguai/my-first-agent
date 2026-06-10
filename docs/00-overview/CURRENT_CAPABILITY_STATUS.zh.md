@@ -2,7 +2,7 @@
 
 这篇文档用一页说明 First Agent 现在能做什么、不能做什么。
 
-当前标签：**developer prototype / developer-dogfood**。它适合继续做本地 runtime、Memory、Skill、Sub-agent 边界开发和测试，不是面向普通用户的产品。
+当前标签：**developer prototype / local development**。它适合继续做本地 runtime、Memory、Skill、Sub-agent 边界开发和测试，不是面向普通用户的产品。
 
 ## 现在可用
 

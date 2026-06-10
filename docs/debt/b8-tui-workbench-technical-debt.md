@@ -24,11 +24,11 @@
 
 ## 2. 为什么 Phase 6A 可以完成
 
-Phase 6A (静态证据/门禁/Dogfood 浏览器) 已于 2026-06-01 完成 (e3449d4)。
+Phase 6A (静态证据/门禁浏览器) 已于 2026-06-01 完成 (e3449d4)。相关旧实现已在 cleanup 中去除专用面板和旧验证数据源。
 
 6A 不依赖任何运行时能力:
 
-- **只读取静态文件**: `docs/dogfood/*.json` — 本地 JSON, 不依赖 runtime event source
+- **只读取静态文件**: 当前 evidence fixtures / docs summary，不依赖 runtime event source
 - **只解析文本摘要**: PROJECT_STATUS.md + PROGRESS_LEDGER.md — gate history 来自文档文本, 不需要真实 gate 执行记录
 - **不依赖 multi-instance backend**: 单实例静态文件解析, 不需要 session/run/instance identity
 - **不修改 runtime state**: 所有操作只读, 不写 checkpoint, 不触发 tool execution
@@ -40,13 +40,13 @@ Phase 6A (静态证据/门禁/Dogfood 浏览器) 已于 2026-06-01 完成 (e3449
 
 ## 3. 为什么 Phase 6B 暂时不能做
 
-Phase 6B 目标是多实例历史浏览器: multi-run evidence 时间线、dogfood 趋势、commit 关联。
+Phase 6B 目标是多实例历史浏览器: multi-run evidence 时间线、validation 趋势、commit 关联。
 
 当前缺失的前置能力:
 
 ### 3.1 session/run/instance identity model
 
-- 每个 AutoRun loop / dogfood run / gate run 需要唯一 identity
+- 每个 AutoRun loop / validation run / gate run 需要唯一 identity
 - 当前没有 session/run/instance 标识体系
 - 不存在跨实例的 "哪次 run 产生了哪个 evidence" 关联
 
@@ -56,9 +56,9 @@ Phase 6B 目标是多实例历史浏览器: multi-run evidence 时间线、dogfo
 - multi-run evidence history 需要区分 "同 evidence 的不同 run 结果"
 - 当前无 evidence namespace 设计
 
-### 3.3 dogfood/gate history source
+### 3.3 validation/gate history source
 
-- 当前 dogfood 结果是单文件覆盖写入, 不是 append-only history
+- 当前 validation 结果没有 append-only history
 - gate 执行历史无持久化记录 (仅存在于 commit message 文本)
 - 无结构化 gate run log
 

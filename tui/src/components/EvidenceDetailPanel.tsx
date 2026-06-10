@@ -28,7 +28,7 @@ export function EvidenceDetailPanel() {
               <Text color={statusColor}>[{d.status}]</Text>
             </Box>
             <Box flexDirection="row" gap={2}>
-              <Text dimColor>dogfood: {d.latestDogfood}</Text>
+              <Text dimColor>evidence: {d.latestEvidence}</Text>
               <Text dimColor>commit: {d.latestCommit}</Text>
             </Box>
             {d.caveats && d.caveats !== "无" ? (

@@ -6,7 +6,7 @@
 **依赖文档**:
 - `docs/proposals/b8-interaction-first-workbench-proposal.md`
 - `docs/milestones/b8-interaction-first-workbench-milestones.md`
-**取代**: `docs/design/b8-ts-tui-workbench-sdd.md`（旧"信息展示中心"方向，归档为历史参考）
+**取代**: 旧"信息展示中心"方向（旧 B8 SDD 已在 repository cleanup 中删除）
 
 ---
 
@@ -462,6 +462,6 @@ tui/
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-02 | 初始版本 — interaction-first 架构，替代旧 b8-ts-tui-workbench-sdd.md |
+| 2026-06-02 | 初始版本 — interaction-first 架构，替代旧信息展示中心方向 |
 | 2026-06-02 | Product Boundary Reconciliation (Rounds 1-3) — 移除 Project Operations Lens 概念；Audit Lens → Context Panel；所有 Operations/AutoRun/Project dashboard 标记 PAUSED |
 | 2026-06-02 | B1-B8 close-out sweep — 更新为 M1-M8 fake/local foundation、412/412 gate、Context Snapshot、real adapters pending |

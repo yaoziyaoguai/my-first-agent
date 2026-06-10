@@ -148,7 +148,7 @@ M0 是纯文档阶段，不改代码：
 | 当前项目状态 | `docs/PROJECT_STATUS.md` |
 | 进度历史 | `docs/PROGRESS_LEDGER.md` |
 | B8 Technical Debt | `docs/debt/b8-tui-workbench-technical-debt.md` |
-| 旧 B8 SDD (Phase 1-6A 历史参考) | `docs/design/b8-ts-tui-workbench-sdd.md` |
+| 旧 B8 SDD (Phase 1-6A 历史参考) | 已在 repository cleanup 中删除 |
 | TUI 源码 | `tui/src/` |
 
 ---

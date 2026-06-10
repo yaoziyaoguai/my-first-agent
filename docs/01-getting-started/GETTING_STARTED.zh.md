@@ -43,7 +43,7 @@ pip install -r requirements.txt
 .venv/bin/python main.py
 ```
 
-交互 CLI 会进入 Parent Agent Runtime。若未配置真实 provider，部分真实模型路径不可用；测试和 synthetic dogfood 不依赖真实 provider。
+交互 CLI 会进入 Parent Agent Runtime。若未配置真实 provider，部分真实模型路径不可用；当前 focused tests 不依赖真实 provider。
 
 ## 常用维护命令
 
@@ -59,8 +59,8 @@ pip install -r requirements.txt
 ## 测试
 
 ```bash
-ruff check agent tests scripts
-python -m pytest tests/ -x -q
+.venv/bin/python -m pytest tests/ -x -q
+.venv/bin/python -m pytest tests/runtime_integration/test_subagent_v0_runtime_boundary.py -q
 ```
 
 如果需要隔离 HOME：
@@ -69,22 +69,13 @@ python -m pytest tests/ -x -q
 HOME=/private/tmp/my-first-agent-test-home python -m pytest tests/ -x -q
 ```
 
-更多测试命令见 [TEST_MATRIX.zh.md](../05-testing-dogfood/TEST_MATRIX.zh.md)。
-
-## Synthetic dogfood
-
-```bash
-python scripts/dogfood_skill_system.py --tmp-root /tmp/my-first-agent-skill-dogfood --mode synthetic
-python scripts/dogfood_subagent_system.py --tmp-root /tmp/my-first-agent-subagent-dogfood --mode synthetic
-```
-
-Real API dogfood 是 gated：默认不跑，不在没有用户明确允许时读取 `.env` 或调用真实 provider。
+更多测试命令见根目录 [README.md](../../README.md) 和当前能力文档。
 
 ## 故障排查
 
 | 现象 | 处理 |
 |---|---|
-| `Missing ANTHROPIC_API_KEY` | 只有真实 CLI provider 需要 key；跑 tests / synthetic dogfood 不需要 |
+| `Missing ANTHROPIC_API_KEY` | 只有真实 CLI provider 需要 key；跑 focused tests 不需要 |
 | `health` 有 warn | 多数是维护提示，不等于 runtime 失败 |
 | checkpoint resume 提示 | 由 `agent/session.py` 判断是否 actionable；不要手动改 checkpoint schema |
 | Textual 未安装 | simple CLI fallback 仍可用；不要为文档任务安装新依赖 |

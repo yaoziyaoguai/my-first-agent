@@ -37,18 +37,6 @@
       "riskNote": "审计可能读取大量仓库文件"
     },
     {
-      "id": "dogfood",
-      "name": "Dogfood Run",
-      "description": "执行 dogfood case matrix 验证 REAL-EVIDENCE 能力",
-      "category": "execution",
-      "safetyLevel": "requires-confirmation",
-      "requiresConfirmation": true,
-      "executableInPhase2": false,
-      "shellCommand": "python main.py dogfood",
-      "relatedSkills": ["auto-run"],
-      "riskNote": "需配置 Provider；可能调用真实 API"
-    },
-    {
       "id": "gates",
       "name": "Code Gates",
       "description": "运行代码质量门禁（ruff + pytest + git diff --check）",

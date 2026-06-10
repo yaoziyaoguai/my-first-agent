@@ -52,6 +52,4 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
-markers = [
-    "dogfood: automated user-path dogfood regression tests",
-]
+markers = []

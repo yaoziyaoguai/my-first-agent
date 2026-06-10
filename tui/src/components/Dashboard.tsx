@@ -3,7 +3,6 @@ import { Box, Text, useInput, useApp } from "ink";
 import type {
   ProjectStatus,
   ProgressLedger,
-  DogfoodResult,
   GitInfo,
   CommandCatalog,
 } from "../types";
@@ -19,7 +18,6 @@ import { OverviewPanel } from "./OverviewPanel";
 import { EvidenceStatusPanel } from "./EvidenceStatusPanel";
 import { WorkflowPanel } from "./WorkflowPanel";
 import { GatePanel } from "./GatePanel";
-import { EvidencePreviewPanel } from "./EvidencePreviewPanel";
 import { CommandPanel } from "./CommandPanel";
 import { NextActionPanel } from "./NextActionPanel";
 import { CommandPreview as CommandPreviewOverlay } from "./CommandPreview";
@@ -31,11 +29,9 @@ import { ConfirmOverlay } from "./ConfirmOverlay";
 import { DryRunOverlay } from "./DryRunOverlay";
 import { ResultPanel } from "./ResultPanel";
 import { EvidenceBrowserPanel } from "./EvidenceBrowserPanel";
-import { DogfoodDetailPanel } from "./DogfoodDetailPanel";
 import { AuditLogPanel } from "./AuditLogPanel";
 import { DefaultEntryReadinessPanel } from "./DefaultEntryReadinessPanel";
 import type { EvidenceFileEntry } from "../data/evidenceBrowser";
-import type { GateResult } from "../data/gateHistory";
 import type { AuditLogEntry } from "../data/auditLog";
 import type { AutoRunState } from "../data/autorunState";
 import type { ReviewPacket } from "../data/reviewPacket";
@@ -57,12 +53,10 @@ import { execute } from "../services/executionService";
 interface Props {
   status: ProjectStatus;
   ledger: ProgressLedger;
-  dogfood: DogfoodResult[];
   git: GitInfo;
   catalog: CommandCatalog;
   nextAction: string;
   evidenceFiles: EvidenceFileEntry[];
-  gateHistory: GateResult[];
   auditEntries: AuditLogEntry[];
   autoRunState: AutoRunState;
   reviewPacket: ReviewPacket;
@@ -86,7 +80,7 @@ type Phase4Mode =
   | "executing"  // confirmed, executing (future: actual exec)
   | "result";    // showing result
 
-export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, evidenceFiles, gateHistory, auditEntries, autoRunState, reviewPacket, repoRoot }: Props) {
+export function Dashboard({ status, ledger, git, catalog, nextAction, evidenceFiles, auditEntries, autoRunState, reviewPacket, repoRoot }: Props) {
   const [nav, setNav] = useState(createNavigationState());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [evidenceSelectedIndex, setEvidenceSelectedIndex] = useState(0);
@@ -378,10 +372,6 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
                 entries={evidenceFiles}
                 selectedIndex={evidenceSelectedIndex}
               />
-              <DogfoodDetailPanel
-                entry={evidenceFiles[evidenceSelectedIndex] ?? null}
-                gates={gateHistory}
-              />
             </Box>
           </Box>
         );
@@ -414,7 +404,6 @@ export function Dashboard({ status, ledger, dogfood, git, catalog, nextAction, e
           <Box flexDirection="column" marginBottom={1}>
             <Box flexDirection="row" marginBottom={1}>
               <GatePanel git={git} />
-              <EvidencePreviewPanel results={dogfood} />
             </Box>
             <Box>
               <AuditLogPanel entries={auditEntries} />

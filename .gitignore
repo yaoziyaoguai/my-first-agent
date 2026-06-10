@@ -26,7 +26,6 @@ agent_log.archived-*.jsonl
 tui/node_modules/
 node_modules/
 .tui_audit_log*
-docs/dogfood/scratch/
 docs/.ruff_cache/
 graphify-out/
 .DS_Store

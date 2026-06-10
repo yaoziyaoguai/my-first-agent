@@ -1,6 +1,6 @@
 """Phase 3 TDD RED Tests — Turn-Start Structured Skill Selection (E01-E06 + S01-S06).
 
-测试范围（来自 docs/design/002-skill-selection-sdd-vNext.md §7.3）：
+测试范围（historical Plan 3 turn-start skill selection contract）：
 - E01-E06: Evidence chain — selection entered → candidates built → model selection →
   active_skill applied, selection vs fallback distinction, no_skill continuation,
   dispatcher origin, _active_skill update

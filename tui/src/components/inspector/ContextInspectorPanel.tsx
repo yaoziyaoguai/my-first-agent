@@ -90,7 +90,7 @@ export function ContextInspectorPanel({
           <Box flexDirection="column">
             <Text {...SECTION_HEADER}>Evidence Snapshot</Text>
             <Text dimColor>items: {data.evidence.itemCount}</Text>
-            <Text dimColor>source: docs/dogfood/</Text>
+            <Text dimColor>source: static evidence fixture</Text>
             {data.evidence.items && data.evidence.items.length > 0 ? (
               data.evidence.items.map((item, i) => (
                 <Text key={i} dimColor>

@@ -14,7 +14,7 @@
 - 不允许 fake-only close
 - 不允许 focused-tests-only close
 
-**理由**: 自动 dogfood 和 focused tests 不再足以关闭用户路径问题。架构红队审计发现 fake/real 分裂 (DANGEROUS_SPLIT)、文档 overclaim、FIXED_BY_RECHECK 自证循环等问题。必须先建立可信 Code Chat 主线。
+**理由**: 自动验证和 focused tests 不再足以关闭用户路径问题。架构红队审计发现 fake/real 分裂 (DANGEROUS_SPLIT)、文档 overclaim、FIXED_BY_RECHECK 自证循环等问题。必须先建立可信 Code Chat 主线。
 
 **Only after exit**: 恢复 v2 backlog 工作。
 
@@ -131,5 +131,5 @@
 | `docs/debt/first-agent-open-items.md` | v1 open items（当前阶段） |
 | `docs/PROJECT_STATUS.md` | 当前状态 + PD-001~005 定义 |
 | `docs/PROGRESS_LEDGER.md` | 进度历史 |
-| `docs/handoff/first-agent-current-stage-close-out-2026-06-02.md` | FROZEN 阶段交接 |
+| `docs/PROJECT_STATUS.md` | 当前状态与冻结边界 |
 | `docs/manual-trials/first-agent-user-trial-guide.md` | Manual trial guide |

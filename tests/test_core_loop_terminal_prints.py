@@ -77,6 +77,11 @@ artifact 排查
 
 from __future__ import annotations
 
+from agent.display_events import (
+    EVENT_LOOP_MAX_ITERATIONS,
+    EVENT_STATE_INCONSISTENCY_RESET,
+    EVENT_UNKNOWN_STOP_REASON,
+)
 from tests.conftest import (
     FakeAnthropicClient,
     FakeResponse,
@@ -88,11 +93,6 @@ from tests.test_main_loop import (
     _planner_no_plan_response,
     _register_test_tool,
     _reset_core_module,
-)
-from agent.display_events import (
-    EVENT_LOOP_MAX_ITERATIONS,
-    EVENT_STATE_INCONSISTENCY_RESET,
-    EVENT_UNKNOWN_STOP_REASON,
 )
 
 
@@ -522,7 +522,7 @@ def test_new_event_kinds_do_not_enter_messages_or_checkpoint(monkeypatch):
 # ==================================================================
 # v0.5.1 第一小步 · YF1 callback exception contract 测试
 # ==================================================================
-# 来源：v0.5.0 RELEASE_NOTES_v0.5.md / docs/V0_5_OBSERVER_AUDIT.md §8 YF1。
+# 来源：historical v0.5 terminal-printing regression notes。
 # 真实 bug：L306 / L670 / L789 三处迁移点采用 ``if cb is not None: cb(_evt)``
 # 直接调用模式。callback 实现内 raise 会沿调用栈冒到 chat() 调用方，
 # 跳过下游清理：
@@ -609,7 +609,7 @@ def test_l306_callback_raise_must_not_propagate_to_chat_caller(monkeypatch, caps
     except RuntimeError as exc:
         raise AssertionError(
             f"chat() 不能让 display callback 异常向上冒；YF1 未修。原始异常: {exc!r}"
-        )
+        ) from exc
 
 
 def test_l670_callback_raise_must_not_skip_clear_checkpoint(monkeypatch, capsys):
@@ -666,7 +666,7 @@ def test_l670_callback_raise_must_not_skip_clear_checkpoint(monkeypatch, capsys)
         except RuntimeError as exc:
             raise AssertionError(
                 f"L670 chat() 不能因 display callback 异常而崩溃；YF1 未修。{exc!r}"
-            )
+            ) from exc
 
         # 关键不变量：return value 必须正常返回
         assert ret == "对话循环次数过多，请简化任务或分步执行。", (
@@ -725,7 +725,7 @@ def test_l789_callback_raise_must_not_skip_loop_stop_observer(monkeypatch, capsy
         except RuntimeError as exc:
             raise AssertionError(
                 f"L789 chat() 不能因 display callback 异常而崩溃；YF1 未修。{exc!r}"
-            )
+            ) from exc
 
         assert ret == "意外的响应", (
             f"L789 callback raise 后 chat() 返回值丢失；YF1 未修。实际: {ret!r}"

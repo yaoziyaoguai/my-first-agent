@@ -11,7 +11,7 @@ export interface EvidenceDetail {
   id: string;
   capability: string;
   status: EvidenceStatus;
-  latestDogfood: string;
+  latestEvidence: string;
   latestCommit: string;
   caveats: string;
   nextAction: string;

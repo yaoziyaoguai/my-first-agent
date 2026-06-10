@@ -17,7 +17,6 @@ from agent.display_events import (
     render_runtime_event_for_cli,
 )
 
-
 DEBUG_OUTPUT_PREFIXES = (
     "[DEBUG]",
     "[CHECKPOINT]",
@@ -67,7 +66,7 @@ def _forward_runtime_event_to_legacy_callbacks(
 ) -> bool:
     """⛔ DEPRECATED — 把 RuntimeEvent 转发给旧 callback，并返回是否产生 assistant streaming。
 
-    Why kept: main.py CLI 和部分 dogfood scripts 仍通过 on_output_chunk/on_display_event
+    Why kept: main.py CLI 和历史验证脚本仍通过 on_output_chunk/on_display_event
     接收输出。新代码应使用 on_runtime_event 主路径。
     Sunset: v0.4+ — on_output_chunk/on_display_event 参数移除后此函数删除。
     Not default path — 这是旧 callback 兼容桥，不是新功能入口。

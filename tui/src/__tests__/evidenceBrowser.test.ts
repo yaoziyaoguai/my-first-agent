@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  listDogfoodFiles,
-  parseDogfoodFile,
+  listEvidenceFiles,
+  parseEvidenceFile,
   normalizeVerdictCounts,
   buildEvidenceFileIndex,
   type EvidenceFileEntry,
@@ -10,7 +10,7 @@ import {
 const SAMPLE_JSON = JSON.stringify({
   date: "2026-05-31",
   evidence_id: "REAL-EVIDENCE-003",
-  method: "real provider dogfood",
+  method: "current regression evidence",
   summary: { PASS: 13, FAIL: 0, CONCERN: 4, SKIP: 0 },
   results: [
     { case: "H2-direct-disallowed", verdict: "PASS", detail: "rejected" },
@@ -62,9 +62,9 @@ describe("evidenceBrowser", () => {
     });
   });
 
-  describe("parseDogfoodFile", () => {
+  describe("parseEvidenceFile", () => {
     it("returns parsed entry for valid JSON", () => {
-      const entry = parseDogfoodFile("real-evidence-003-results.json", SAMPLE_JSON);
+      const entry = parseEvidenceFile("real-evidence-003-results.json", SAMPLE_JSON);
       expect(entry.fileName).toBe("real-evidence-003-results.json");
       expect(entry.evidenceId).toBe("REAL-EVIDENCE-003");
       expect(entry.pass).toBe(13);
@@ -74,27 +74,27 @@ describe("evidenceBrowser", () => {
 
     it("handles missing evidence_id gracefully", () => {
       const json = JSON.stringify({ summary: { PASS: 5 } });
-      const entry = parseDogfoodFile("unknown.json", json);
+      const entry = parseEvidenceFile("unknown.json", json);
       expect(entry.evidenceId).toBe("");
       expect(entry.pass).toBe(5);
     });
 
     it("returns unknown status for malformed JSON", () => {
-      const entry = parseDogfoodFile("bad.json", "not valid json {");
+      const entry = parseEvidenceFile("bad.json", "not valid json {");
       expect(entry.fileName).toBe("bad.json");
       expect(entry.status).toBe("unknown");
       expect(entry.error).toContain("parse error");
     });
 
     it("handles empty string gracefully", () => {
-      const entry = parseDogfoodFile("empty.json", "");
+      const entry = parseEvidenceFile("empty.json", "");
       expect(entry.fileName).toBe("empty.json");
       expect(entry.status).toBe("unknown");
     });
   });
 
   describe("buildEvidenceFileIndex", () => {
-    it("maps evidence IDs to dogfood files", () => {
+    it("maps evidence IDs to evidence files", () => {
       const files: EvidenceFileEntry[] = [
         {
           fileName: "real-evidence-003-results.json",

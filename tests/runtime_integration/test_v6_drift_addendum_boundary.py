@@ -34,6 +34,7 @@ def test_v6_addendum_does_not_introduce_foreign_files() -> None:
         "CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md",
         "CURRENT_AUDIT_STATUS.zh.md",
         "CURRENT_CAPABILITY_DRIFT.zh.md",
+        "POST_REPAIR_AUDIT_DELTA.zh.md",
     ]), f"unexpected sibling files in docs/06-audit/: {siblings}"
 
 

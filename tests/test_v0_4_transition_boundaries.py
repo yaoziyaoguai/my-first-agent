@@ -10,9 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _SPLIT_TRANSITION_TEST_FILES = (
-    "test_transition_tool_failure_boundaries.py",
     "test_transition_tool_success_boundaries.py",
     "test_transition_model_output_boundaries.py",
     "test_transition_pending_confirmation_boundaries.py",

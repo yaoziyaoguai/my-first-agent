@@ -134,7 +134,8 @@ SubAgent 系统实施三层边界隔离：
 
 ## 6. 参考
 
-- 红队审计 E 域：`docs/audits/2026-05-27-full-capability-red-team-audit.md` §E
+- 当前状态入口：`docs/PROJECT_STATUS.md`
+- 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
 - Loop 4 完成记录：`docs/plans/2026-05-27-capability-remediation-loop-plan.md` Loop 4
 - SubAgentDelegateL0Handler：`agent/runtime_integration/subagent_action.py`
 - CLI delegation detection：`agent/cli_commands.py` → `detect_delegate_to_subagent` / `detect_nl_delegation`

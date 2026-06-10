@@ -1,7 +1,7 @@
 ---
 created: 2026-05-29
 status: completed
-source: Independent re-audit after evidence closure (docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md)
+source: Independent re-audit after evidence closure; current facts live in docs/PROJECT_STATUS.md and docs/06-audit/CURRENT_AUDIT_STATUS.zh.md
 final_score: 3.7/5 (保守基线，不再上调)
 deepened: none
 ---

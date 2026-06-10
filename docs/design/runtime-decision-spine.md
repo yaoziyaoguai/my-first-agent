@@ -20,9 +20,10 @@ First Agent 的子系统（Tool / MCP / Skill / Memory / SubAgent / Checkpoint /
 
 没有统一的地方表达"这个子系统在当前 turn 中处于什么状态"。
 
-上一版审计（2026-05-28 full-subsystem-capability-completion-audit）将 registry/descriptor/docs/guard-test 存在算作 COMPLETE，
-导致声称完成率 77%（90/117）。
-红队补审校正后真实完成率 23.1%（27/117）。
+历史审计曾把 registry/descriptor/docs/guard-test 存在算作 COMPLETE，
+导致完成率被高估。当前事实源已收敛到 `docs/PROJECT_STATUS.md` 和
+`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`；旧审计只作为背景，不再作为
+当前架构依据。
 
 根因：缺少一个 runtime-owned decision vocabulary，导致注册表存在即 COMPLETE、probe 通过即 E2E、direct-call 即 capability。
 

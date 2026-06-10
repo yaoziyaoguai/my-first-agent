@@ -1,7 +1,7 @@
 # 全能力达标 Remediation Loop Plan
 
 日期：2026-05-27
-依赖审计：`docs/audits/2026-05-27-full-capability-red-team-audit.md`
+历史触发：2026-05-27 全能力红队审计。当前事实源以 `docs/PROJECT_STATUS.md` 和 `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md` 为准。
 状态：active — 12/12 loops 已执行。其中 7 个能力修复 loops（1-8）有实质代码/测试变更；Loop 9-12 为文档/设计层（admin/docs）；Loop 13 被标记为 OVERCLAIMED（仅修 1 个分类却标 all P0/P1 resolved）；Loop 14 已完成 evidence gates 修复。详细评估见 `docs/audits/2026-05-27-current-capability-recovery-map.md`。
 
 ---

@@ -97,7 +97,8 @@ Skill 系统实施以下边界：
 
 ## 5. 参考
 
-- 红队审计 F 域：`docs/audits/2026-05-27-full-capability-red-team-audit.md` §F
+- 当前状态入口：`docs/PROJECT_STATUS.md`
+- 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
 - 能力边界定义：`docs/CAPABILITY_BOUNDARIES.md`
 - SubAgent 边界架构：`docs/design/subagent-boundary-architecture.md`
 - SkillRuntimeActionHandler：`agent/runtime_integration/skill_action.py`

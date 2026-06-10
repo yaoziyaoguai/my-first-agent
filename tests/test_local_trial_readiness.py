@@ -641,13 +641,41 @@ def test_local_trial_checklist_commands_match_cli_entrypoints(monkeypatch, capsy
     assert calls == ["init", "resume", "loop"]
 
 
-def test_release_notes_v0_3_published() -> None:
-    """RELEASE_NOTES_v0.3.md 是 v0.3.1 发布的主要外部参考。"""
-    path = REPO_ROOT / "docs/releases/legacy/RELEASE_NOTES_v0.3.md"
-    assert path.exists()
-    text = path.read_text(encoding="utf-8")
-    for landmark in ["M1", "M2", "M3", "M4", "request_user_input", "676 passed"]:
-        assert landmark in text, f"RELEASE_NOTES_v0.3.md 缺少关键内容：{landmark}"
+def test_current_local_trial_entrypoints_match_project_baseline() -> None:
+    """本地试用入口必须来自当前 baseline，而不是旧 release notes。
+
+    这条测试守护当前 clone 后的起步路径：README 给最短命令，
+    Getting Started 给 fake/local demo 和维护命令，PROJECT_STATUS 明确
+    developer prototype 边界。旧 v0 release notes 只是历史材料，不应再作为
+    local trial readiness 的 golden source。
+    """
+
+    readme = _read("README.md")
+    getting_started = _read("docs/01-getting-started/GETTING_STARTED.zh.md")
+    project_status = _read("docs/PROJECT_STATUS.md")
+
+    for command in [
+        ".venv/bin/python main.py --plain",
+        ".venv/bin/python main.py health",
+        ".venv/bin/python main.py logs --tail 50",
+        ".venv/bin/python -m pytest tests/ -q",
+    ]:
+        assert command in readme
+
+    for command in [
+        ".venv/bin/python main.py demo",
+        ".venv/bin/python main.py health --json",
+        "python scripts/dogfood_skill_system.py",
+        "python scripts/dogfood_subagent_system.py",
+    ]:
+        assert command in getting_started
+
+    combined = "\n".join([readme, getting_started, project_status]).lower()
+    assert "developer prototype" in combined
+    assert "developer-dogfood" in combined
+    assert "safe-local" in combined
+    assert "real api dogfood is gated" in combined or "real api dogfood 是 gated" in combined
+    assert "production-ready" not in combined
 
 
 def _check_secret_fragments_in_dir(

@@ -367,7 +367,7 @@ MindForge 如果要做一个 agent runtime harness，可以从本项目直接迁
 | 1 | `docs/PROJECT_STATUS.md` | 当前状态、分数、credibility matrix |
 | 2 | `docs/PROGRESS_LEDGER.md` | 完整进度历史 |
 | 3 | `docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md` | 每个 REAL-EVIDENCE 的详细证据和 caveat |
-| 4 | `docs/reviews/2026-05-29-first-agent-runtime-lab-stage-review.md` | 阶段性架构复盘 |
+| 4 | 2026-05-29 runtime lab stage review | 阶段性架构复盘；当前事实源以 `docs/PROJECT_STATUS.md` 为准 |
 | 5 | `docs/plans/2026-05-29-evidence-hardening-plan.md` | Batch A/B 的范围定义和分类逻辑 |
 | 6 | `docs/design/runtime-decision-spine.md` | Decision frame 设计原则 |
 | 7 | `docs/design/batch-b-scheduler-main-path-injection.md` | Batch B SDD |

@@ -1195,38 +1195,26 @@ Runtime 层当前承担 W1/W2 governance + confirmation + snapshot 协调，并�
 
 本 v2.1 取代以下所有文档：
 
-| 历史文档 | 处理 | 理由 |
+| 历史材料 | 处理 | 理由 |
 |------|:--:|------|
-| `docs/rfc/MEMORY_CANONICAL_RFC.md` (v2.0, v1.0) | **被本 v2.1 取代** | 增加 navigability + operational semantics |
-| `docs/MEMORY_CONSTITUTION.md` | **归档** → `docs/rfc/archived/` | 宪法原则被纳入 §1 |
-| `docs/PROACTIVE_MEMORY_ARCHITECTURE.md` | **归档** → `docs/rfc/archived/` | L1/L2/L3 设计被纳入 §11 和 §6-8 |
-| `docs/MEMORY_NEXT_STAGE_ARCHITECTURE.md` | **归档** → `docs/rfc/archived/` | Phase 2 历史规划，External Provider 设计明确不做 |
+| earlier versions of `MEMORY_CANONICAL_RFC.md` | **被本 v2.1 取代** | 增加 navigability + operational semantics |
+| pre-canonical Memory RFCs / architecture notes | **historical only** | 已被本文吸收；后续 cleanup 可删除具体旧文件 |
 
 ### 16.2 当前 Memory 文档体系
 
 ```
 docs/rfc/MEMORY_CANONICAL_RFC.md          ← ★ 唯一设计真相
-docs/DOGFOODING_GUIDE.md                  ← 操作/使用手册
-docs/ROADMAP.md                           ← 阶段路线图
-docs/review/MEMORY_PHASE5_DOGFOOD_001.md  ← 历史审计记录
-docs/rfc/archived/                        ← 归档设计文档（仅供历史参考）
-  ├── MEMORY_CONSTITUTION.md
-  ├── PROACTIVE_MEMORY_ARCHITECTURE.md
-  ├── MEMORY_NEXT_STAGE_ARCHITECTURE.md
-  ├── MEMORY_LIFECYCLE.md
-  ├── MEMORY_TAXONOMY.md
-  ├── RFC_MEMORY_GOVERNANCE_AND_EXTRACTION.md
-  ├── RFC_CONVERGENCE_AUDIT.md
-  └── MEMORY_DOGFOODING_STAGE3.md
+docs/PROJECT_STATUS.md                     ← 当前 Memory v0 状态和授权边界
+docs/06-audit/CURRENT_AUDIT_STATUS.zh.md   ← 当前审计入口
+docs/rfc/archived/                         ← historical only；目录完整性不是当前契约
 ```
 
 ### 16.3 文档规则
 
 - 设计 → `docs/rfc/MEMORY_CANONICAL_RFC.md`（唯一）
-- 路线图 → `docs/ROADMAP.md`
-- 操作手册 → `docs/DOGFOODING_GUIDE.md`
-- 审计记录 → `docs/review/*.md`
-- 历史/归档 → `docs/rfc/archived/*.md`
+- 当前状态 → `docs/PROJECT_STATUS.md`
+- 当前审计入口 → `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
+- 历史/归档 → 可在 cleanup 中删除；不得作为当前实现依据
 
 **不允许**创建新的平级设计文档。任何新增设计内容以 section 追加到本 RFC 或引用本 RFC。
 

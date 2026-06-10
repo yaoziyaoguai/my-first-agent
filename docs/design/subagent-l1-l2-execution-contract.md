@@ -320,6 +320,7 @@ child 继续 loop 或 stop
 
 - SubAgent L0 架构：`docs/design/subagent-boundary-architecture.md`
 - RuntimeDecisionFrame：`agent/runtime_decision_frame.py` §subagent.delegate
-- 红队补审：`docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md` §2.2 SubAgent (5→0)
+- 当前状态入口：`docs/PROJECT_STATUS.md`
+- 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
 - 统一 Runtime Flow 合约：`docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md`
 - REAL-EVIDENCE debt：`docs/debt/REAL_EVIDENCE_VALIDATION_DEBT.md`

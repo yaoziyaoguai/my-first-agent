@@ -3,7 +3,8 @@
 **日期**: 2026-05-28
 **状态**: architecture decision complete / implementation pending
 **依赖**: Loop 2.4 (MCP Main-Path Readiness — code path complete)
-**上游审计**: `docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md` Section 12, Loop 3.3
+**当前事实源**: `docs/PROJECT_STATUS.md`, `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
+**历史背景**: 2026-05-28 redteam addendum 曾把 real external MCP flight 列为缺口；该旧审计不再作为当前架构 source of truth。
 
 ---
 

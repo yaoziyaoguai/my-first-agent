@@ -37,6 +37,7 @@
 
 ## 参考
 
+- 当前状态入口：`docs/PROJECT_STATUS.md`
+- 当前审计入口：`docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
 - SubAgent 边界架构：`docs/design/subagent-boundary-architecture.md`
-- 红队审计 E 域：`docs/audits/2026-05-27-full-capability-red-team-audit.md` §E
-- Skill 系统分析：`docs/audits/2026-05-27-full-capability-red-team-audit.md` §F
+- Skill 系统架构：`docs/design/skill-system-architecture.md`

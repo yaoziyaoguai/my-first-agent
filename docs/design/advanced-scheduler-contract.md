@@ -4,7 +4,8 @@
 **状态**: architecture decision complete / implementation pending
 **依赖**: Phase 1 (Loop 1.1-1.3), Phase 2 (Skill/Memory/SubAgent/MCP main-path integration)
 **上游设计**: `docs/design/runtime-decision-spine.md` (Loop 1.1), `docs/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md`
-**审计依据**: `docs/audits/2026-05-28-full-subsystem-capability-completion-audit-redteam-addendum.md` §10, §12 (Loop 3.4)
+**当前事实源**: `docs/PROJECT_STATUS.md`, `docs/06-audit/CURRENT_AUDIT_STATUS.zh.md`
+**历史背景**: 2026-05-28 full-subsystem redteam addendum 曾指出 scheduler 证据口径过宽；该旧审计不再作为当前架构 source of truth。
 
 ---
 

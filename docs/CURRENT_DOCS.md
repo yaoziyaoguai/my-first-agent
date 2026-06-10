@@ -32,7 +32,7 @@
 - [archive/README.md](archive/README.md)
 - [audits/](audits/)
 - [releases/](releases/)
-- [reviews/](reviews/)
+- reviews（历史 review 文件；当前事实源仍以 `PROJECT_STATUS.md` 为准）
 - [handoff/](handoff/)
 - 旧 TUI/B7/B8 计划和 closeout 文档
 

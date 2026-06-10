@@ -62,3 +62,38 @@
 - 不改 PROJECT_STATUS 现状文本（属于 source-of-truth repair spike）。
 - 不改 CURRENT_CAPABILITY_STATUS 现状文本（属于 source-of-truth repair spike）。
 - 不强求 docs alignment — 仅记录 drift。
+
+---
+
+## 6. Memory consolidation / emergence (V6 — addendum)
+
+| Aspect | Source | Wording | Drift |
+|---|---|---|---|
+| consolidation overall | `agent/memory_consolidation.py:13` | "⛔ FROZEN (2026-05-25): Memory Consolidation pipeline 整体冻结" | OK |
+| consolidation engine | `agent/memory_consolidation_engine.py:6` | "⛔ FROZEN (2026-05-25)" | OK |
+| consolidation llm | `agent/memory_consolidation_llm.py:6` | "⛔ FROZEN (2026-05-25)" | OK |
+| consolidation review | `agent/memory_consolidation_review.py:6` | "⛔ FROZEN (2026-05-25)" | OK |
+| emergence module | `agent/memory_emergence.py:1` | "Phase 7 — W5 Emergence Detection Foundation" | 没有显式 "env-gated" 状态词；仅说 "foundation" |
+| emergence runtime gate | `agent/memory_runtime_hooks.py:143` | "默认关闭，必须显式设置 MEMORY_EMERGENCE_ENABLED=true" | 与 RuntimeDecisionFrame 没有枚举对齐 |
+| RuntimeDecisionFrame 枚举 | `agent/runtime_decision_frame.py` | 只列 `memory.recall/retain/propose`；没有 `memory.emergence` | emergence 不在 canonical status vocabulary |
+| CURRENT_CAPABILITY_STATUS row | `docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md` | 只提 "Memory v0 explicit retain" | emergence 不出现于 user-facing 摘要 |
+| PROJECT_STATUS row | `docs/PROJECT_STATUS.md` | "Memory v0 … 不做 raw write 或 auto-adoption" | emergence / consolidation pipeline 状态词缺位 |
+
+### 关键 V6 drift
+
+1. **status-word drift on emergence**: RuntimeDecisionFrame enum 不覆盖 `memory.emergence`，
+   emergence 是 env-gated + fail-closed 的 dispatcher 边界，没有 READY/PARTIAL/DEFERRED
+   词标注；外部 reader 看到 "Phase 7 foundation" 可能误以为接近 READY。
+
+2. **CURRENT_CAPABILITY_STATUS 与 PROJECT_STATUS 都未提 emergence / consolidation pipeline**：
+   只有模块顶部 "⛔ FROZEN" 注释，缺乏 user-facing 状态词。
+
+3. **consolidation pipeline 5 个 ⛔FROZEN 模块**没有集中索引——要靠读者自己 grep 才能
+   确认 pipeline 范围。RuntimeDecisionFrame 也没有 `memory.consolidation` 枚举。
+
+### V6 不做
+
+- 不写代码修改。
+- 不引入 `memory.emergence` 枚举（属于 source-of-truth repair spike）。
+- 不删除 / 改写 frozen consolidation 代码。
+- 不修改 emergence runtime hook 行为。

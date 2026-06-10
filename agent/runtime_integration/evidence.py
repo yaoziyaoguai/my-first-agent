@@ -249,12 +249,12 @@ def _tool_invoke_adapter(payload: Mapping[str, Any]) -> Any:
 
 
 def _checkpoint_safe_summary_adapter(payload: Mapping[str, Any]) -> str:
-    from agent.display_events import mask_user_visible_secrets
+    from agent.runtime_integration.safe_metadata import project_safe_metadata_text
 
-    masked = mask_user_visible_secrets(str(payload.get("runtime_state_summary") or ""))
-    if len(masked) > 2000:
-        return masked[:2000]
-    return masked
+    return project_safe_metadata_text(
+        str(payload.get("runtime_state_summary") or ""),
+        max_length=2000,
+    )
 
 
 def _checkpoint_save_persist_adapter(payload: Mapping[str, Any]) -> dict[str, Any]:

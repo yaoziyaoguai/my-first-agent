@@ -105,3 +105,28 @@ def test_projector_redacts_documented_secrets(secret_input: str) -> None:
     assert re.search(secret_patterns, projected) is None, (
         f"secret pattern leaked through projector: {projected!r}"
     )
+
+
+def test_projector_masks_before_truncation() -> None:
+    """projector 必须先 mask 再 truncate；反之 secret 会在 truncation 后幸存。
+
+    这个测试 P0：约束 projector 的 mask-then-truncate 顺序不可漂移。"""
+
+    secret = "sk-" + "abcdefghijklmnop"  # canonical sk- prefix triggers masker
+    truncated_only = project_safe_metadata_text(secret, max_length=4)
+    assert "sk-" not in truncated_only, (
+        f"secret prefix survived truncation: {truncated_only!r}"
+    )
+
+
+def test_projector_equivalent_to_inline_pipeline() -> None:
+    """project_safe_metadata_text 必须与 inline \"mask + truncate\" 等价。"""
+
+    text = "api_key=abc123def456 token=xyz789 short"
+    projector = project_safe_metadata_text(text, max_length=10)
+    masker = mask_user_visible_secrets(text)
+    inline = masker[:10] if len(masker) > 10 else masker
+    assert projector == inline, (
+        f"projector diverges from inline pipeline: "
+        f"projector={projector!r} inline={inline!r}"
+    )

@@ -126,3 +126,44 @@ def test_catalog_class_var_includes_bindings_and_indices() -> None:
         assert field_name in annotations, (
             f"`{field_name}` annotation missing — ClassVar declaration was lost"
         )
+
+
+def test_catalog_is_allowed_descriptor_rejects_unknown_descriptor_id() -> None:
+    """`is_allowed_descriptor` 必须拒绝不存在的 descriptor_id。
+
+    这是 behavioral guard：保证 `_by_descriptor_id` 索引在 unknown key 上
+    返回 False，而不是 fallback 命中第一条 binding。
+    """
+
+    binding = next(iter(RuntimeActionTargetCatalog._bindings))
+    allowed = RuntimeActionTargetCatalog.is_allowed_descriptor(
+        action_type=binding.action_type,
+        handler_name=binding.handler_name,
+        handler_identity=binding.handler_identity,
+        target_module=binding.target_module,
+        target_catalog_id=binding.target_catalog_id,
+        target_handle=binding.target_handle,
+        target_descriptor_id="unknown-descriptor-id",
+        invocation_adapter_id=binding.invocation_adapter_id,
+        implementation_id=binding.implementation_id,
+        callable_identity=binding.callable_identity,
+    )
+    assert allowed is False, (
+        "is_allowed_descriptor accepted unknown target_descriptor_id — "
+        "_by_descriptor_id index is not strict"
+    )
+
+
+def test_catalog_resolve_total_binding_count_includes_test_and_scheduler() -> None:
+    """_bindings 必须包含正式 + test + scheduler 三类 binding。
+
+    这是 structural guard：防止出现 silent growth / shrink of catalog
+    entries 而 runtime 只看得到其中一部分。
+    """
+
+    bindings = RuntimeActionTargetCatalog._bindings
+    descriptors = {b.target_descriptor_id for b in bindings}
+    has_test = any("test" in did.lower() for did in descriptors)
+    has_scheduler = any("scheduler" in did.lower() for did in descriptors)
+    assert has_test, "expected test_* descriptor in catalog"
+    assert has_scheduler, "expected scheduler_* descriptor in catalog"

@@ -70,12 +70,18 @@ def _safe_log_value(value: Any) -> Any:
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
-        from agent.display_events import mask_user_visible_secrets
+        # D1 (safe_metadata migration): route through the projector so the
+        # runtime_integration trust boundary has a single import surface and
+        # the mask-then-cap ordering is enforced at the projector boundary,
+        # not re-implemented inline.
+        from agent.runtime_integration.safe_metadata import (
+            project_safe_metadata_text_with_marker,
+        )
 
-        masked = mask_user_visible_secrets(value)
-        if len(masked) <= MAX_LOG_TEXT_PREVIEW:
-            return masked
-        return masked[:MAX_LOG_TEXT_PREVIEW] + "..."
+        return project_safe_metadata_text_with_marker(
+            value,
+            max_length=MAX_LOG_TEXT_PREVIEW,
+        )
     if isinstance(value, list):
         return [_safe_log_value(item) for item in value[:20]]
     if isinstance(value, tuple):
@@ -85,9 +91,14 @@ def _safe_log_value(value: Any) -> Any:
             str(key): _safe_log_value(val)
             for key, val in list(value.items())[:30]
         }
-    from agent.display_events import mask_user_visible_secrets
+    from agent.runtime_integration.safe_metadata import (
+        project_safe_metadata_text_with_marker,
+    )
 
-    return mask_user_visible_secrets(str(value))[:MAX_LOG_TEXT_PREVIEW]
+    return project_safe_metadata_text_with_marker(
+        str(value),
+        max_length=MAX_LOG_TEXT_PREVIEW,
+    )
 
 
 def _persist_observer_event(

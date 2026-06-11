@@ -27,7 +27,6 @@ import pytest
 
 from agent.runtime_decision_frame import (
     build_decision_frame,
-    get_last_decision_frame,
 )
 from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
 from agent.runtime_integration.schema import RuntimeActionType
@@ -157,7 +156,16 @@ def test_runtime_decision_frame_subagent_level_reflects_live_fact() -> None:
     # globally. The publish step lives in the chat-loop integration
     # (build_decision_frame_for_turn) which is exercised in the unit
     # tests. Here we just pin the factory's default value.
-    assert get_last_decision_frame() is None, (
-        "in-process, build_decision_frame() does NOT publish; this confirms "
+    #
+    # Note: in the full suite some earlier test may have populated
+    # _last_decision_frame via set_last_decision_frame, so we use
+    # monkeypatch to capture before/after and assert the factory
+    # itself did NOT publish.
+    import agent.runtime_decision_frame as rdf_mod
+    snapshot_before = rdf_mod._last_decision_frame
+    frame2 = build_decision_frame("test2")
+    assert rdf_mod._last_decision_frame is snapshot_before, (
+        "build_decision_frame() must NOT mutate the global _last_decision_frame; "
         "the live publish path is owned by the chat-loop integration"
     )
+    assert frame2.subagent_level == "inline_local_fallback"

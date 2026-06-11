@@ -1998,39 +1998,54 @@ def _dispatch_or_fallback_delegation(
         from agent.subagent_routing_flag import read_v0_routing_enabled
 
         if read_v0_routing_enabled():
-            v0_handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_V0)
-            if v0_handler is not None:
-                v0_req = RuntimeActionRequest(
-                    action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
-                    source="cli_nl_delegation",
-                    parent_trace_id=f"delegation-{uuid4().hex[:8]}",
-                    payload={
-                        "profile_id": "default-v0",
-                        "task": task,
-                        "subagent_name": subagent_name,
-                        "delegation_reason": delegation_reason,
-                        "provider_mode": "fake_local",
-                        "parent_opt_in": False,
-                        "parent_bounded": True,
-                        "parent_stop_condition": "delegation_completion",
-                        "tool_scope_inherited": True,
+            v0_req = RuntimeActionRequest(
+                action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+                source="cli_nl_delegation",
+                parent_trace_id=f"delegation-{uuid4().hex[:8]}",
+                payload={
+                    "profile_id": "default-v0",
+                    "task": task,
+                    "subagent_name": subagent_name,
+                    "delegation_reason": delegation_reason,
+                    "provider_mode": "fake_local",
+                    "parent_opt_in": False,
+                    "parent_bounded": True,
+                    "parent_stop_condition": "delegation_completion",
+                    "tool_scope_inherited": True,
+                    "prepared_v0_context": {
+                        "chunks": (),
+                        "metadata": {
+                            "context_hash": "0" * 64,
+                            "context_length": 0,
+                            "context_file_count": 0,
+                            "max_context_chars": 100_000,
+                            "max_files": 20,
+                            "context_read_seam_calls": 0,
+                            "uncontrolled_path_read_text_calls": 0,
+                            "parent_policy_selects_all_files": True,
+                            "selected_file_ids": (),
+                        },
                     },
+                },
+            )
+            # Always route through dispatcher — even if V0 handler is missing,
+            # dispatcher emits a not_supported event (with real source) and
+            # we fall back to inline-local. This is the controlled fallback
+            # contract: G6 depends on observing the not_supported event.
+            v0_result = dispatcher.route(v0_req)
+            if v0_result.status == "not_supported":
+                from agent.runtime_event_safety import safe_emit_runtime_event as _see
+                _see(
+                    on_runtime_event,
+                    _runtime_event_not_supported_fallback(subagent_name),
+                    fallback_prefix="\n",
                 )
-                v0_result = dispatcher.route(v0_req)
-                if v0_result.status == "not_supported":
-                    # handler 路径上 unavailable → controlled fallback
-                    from agent.runtime_event_safety import safe_emit_runtime_event as _see
-                    _see(
-                        on_runtime_event,
-                        _runtime_event_not_supported_fallback(subagent_name),
-                        fallback_prefix="\n",
-                    )
-                    return _execute_subagent_delegation(
-                        subagent_name, task,
-                        delegation_reason=delegation_reason,
-                        on_runtime_event=on_runtime_event,
-                    )
-                return _render_v0_delegate_result(subagent_name, v0_result)
+                return _execute_subagent_delegation(
+                    subagent_name, task,
+                    delegation_reason=delegation_reason,
+                    on_runtime_event=on_runtime_event,
+                )
+            return _render_v0_delegate_result(subagent_name, v0_result)
 
     # 006 TOOL_MEDIATOR_GAP: 为 L1 delegation 构造 ToolRuntimeMediator。
     # 复用 response_handlers.py:230-247 的构造模式，使用 SimpleNamespace

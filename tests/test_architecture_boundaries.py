@@ -521,6 +521,8 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         # 提取到 agent/subagent_inline.py。行为保持型提取，所有委托执行
         # 仍通过 delegate_once() + SubAgentRegistry，不绕过统一入口。
         "agent.subagent_inline",
+        # U3: SUBAGENT_V0_ROUTING_ENABLED env flag helper（default-off, opt-in）。
+        "agent.subagent_routing_flag",
         # ── B7 Multi-Instance Readiness imports ──
         # 以下 imports 均为 B7 identity/namespace/checkpoint/memory/lifecycle
         # 主线所需。每个 import 都对应 B7 的具体能力：
@@ -618,6 +620,8 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         #   - _dispatch_skill_candidates_built: skill candidate 检索结果 evidence
         #   - _dispatch_or_fallback_delegation: SubAgent/Planner 委托/回退路由
         #   - _action_plan_to_dict: ActionPlan → dict 序列化（dispatcher payload 用）
+        #   - _render_v0_delegate_result: U3 — V0 success 渲染（V0 result → CLI 形状）
+        #   - _runtime_event_not_supported_fallback: U3 — V0 handler-missing 的 display event
         "_action_plan_to_dict",
         "_active_skill_section",
         "_active_skill_memory_scope",
@@ -628,7 +632,9 @@ def test_core_top_level_runtime_entrypoints_are_reviewed() -> None:
         "_memory_recall_policy_payload",
         "_record_direct_memory_recall_skipped_no_dispatcher",
         "_record_direct_skill_memory_recall_blocked",
+        "_runtime_event_not_supported_fallback",
         "_update_active_skill_from_dispatcher",
+        "_render_v0_delegate_result",
         "get_memory_runtime",
         # Evidence migration: 模块级 helper，把 Runtime branch point 事件送入
         # 统一 evidence recorder（dual-write：保留 legacy log_event + 新增 record_evidence）。

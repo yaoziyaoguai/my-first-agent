@@ -280,11 +280,14 @@ def _mcp_bridge_lifecycle_initialize_adapter(payload: Mapping[str, Any]) -> dict
 
 
 def _memory_consolidation_adapter(payload: Mapping[str, Any]) -> Any:
-    """Catalog-owned adapter for consolidation pipeline invocation。
+    """Catalog-owned adapter for consolidation pipeline invocation.
 
-    中文学习边界：这个 adapter 是 run_consolidation_pipeline() 的
-    catalog-owned wrapper。handler 不直接调用 pipeline，而是通过
-    context.invoke_registered_target() → 此 adapter 获取 trusted target_module_proof。
+    The underlying pipeline module is FROZEN (2026-05-25). This adapter
+    is a compatibility shim: MEMORY_CONSOLIDATE is dispatched in
+    ``MemoryConsolidateHandler``, which calls back into the frozen
+    pipeline via this adapter. The dispatcher-bound handler itself is
+    NOT frozen, so the product path remains alive while the legacy
+    pipeline implementation stays frozen.
     """
     from agent.memory_consolidation_pipeline import run_consolidation_pipeline
     from agent.memory_store import InMemoryMemoryStore

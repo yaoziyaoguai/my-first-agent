@@ -1,16 +1,18 @@
 # Current Architecture Repair Roadmap (v2)
 
-> 状态：draft — 基于三份审计的合并结论，等待人工 review
+> 状态：active repair in progress — 2026-06-11/12 实施
 > 创建日期：2026-06-11
-> 本轮范围：只改本文；不改代码、不 git add、不 commit、不 push
+> 本轮范围：v2 修复已实施，Roadmap 状态按 2026-06-12 commit 状态更新
 
-## 1. Status
+## 1. Status（按 2026-06-12 commit 状态）
 
-- cleanup 阶段已收口（git log 最近 5 条 commit 均为 cleanup 类）
-- 本文档是 cleanup 后第一份统一架构修复路线图
-- 依据三份审计合并：审计一（Roadmap 二审）/ 审计二（严格 review comments）/ 审计三（架构审计摘要）
-- 来源主要为 conversation audit output；未在 `docs/06-audit/` 落盘独立审计文件
-- **requires human review before commit**；本轮不实施任何修复
+- **completed** (V1 路径内) — safe metadata projector 仍存在；private inline-equivalence 测试替换为 projector-contract 测试。
+- **completed** (V2) — `RuntimeActionTargetCatalog` 已从 `evidence.py` 提取到 `agent/runtime_integration/target_catalog.py`；65 bindings、helper builders、descriptor 同步迁移；`evidence.py` 保留 back-compat re-export。生产行为未变；新增 `tests/runtime_integration/test_target_catalog_extraction.py` 锁边界。
+- **completed** (V3 / V4 子集) — `runtime_decision_frame.py` 中 `subagent.delegate` 的 L1 是生产基线 claim 已修正为 V0 active / L1 legacy frozen。新增 `tests/runtime_integration/test_subagent_runtime_truth.py` 锁 runtime truth。
+- **protected_pending** (V1) — safe metadata 真正全量迁移尚未开始（当前只完成第一边界 `...ckpoint_safe_summary_adapter` 与 projector-contract 测试）。后续 migration 必须 one-trust-boundary per commit。
+- **documented_pending** (V4) — SubAgent L0/L1/L2 路径文档口径与代码一致；capability 文档 V4 表需后续 align。
+- **newly_discovered** — `target_catalog._memory_consolidation_adapter` 仍引用 frozen `memory_consolidation_pipeline`（FROZEN 2026-05-25 兼容层）。已加 compatibility docstring 标记与 `tests/runtime_integration/test_memory_consolidation_truth.py` 锁状态。
+- **deferred** — V5/V6/V7 未启动；按 V1/V2/V3 优先继续。
 
 ## 2. Git Baseline
 
@@ -49,9 +51,9 @@
 
 | # | area | issue | priority | next action |
 |---|---|---|---|---|
-| V1 | safe metadata / redaction | 仓库内存在多处独立 redact/sanitize 实现（runtime event、evidence persistence、MCP sanitizer、subagent/local、memory summary、local trace 等路径）；当前没有统一 projector | P1 | 先做可复现 inventory（精确命令/口径），再设计最小 safe metadata projector；不直接全量迁移 |
-| V2 | evidence.py / `RuntimeActionTargetCatalog` | `agent/runtime_integration/evidence.py` 偏厚（实测 1717 行）；`RuntimeActionTargetCatalog` 是 dispatcher production path 的信任根 | P1 | 先建 TargetCatalog production boundary test / import-boundary test，再做最小 extraction spike；不一次性拆分 |
-| V3 | SubAgent 多路径 | `agent/runtime_integration/subagent_action.py` 约 1663 行，包含 V0 current path、L0 probe、L1/L2 legacy/frozen path 及相关 helpers（实测 V0Handler 在 :306；L0Handler 在 :1257；L1Handler 在 :1424） | P2（P1-low） | 先标注各路径 status（V0 current / L0 probe / L1-L2 frozen / inline-local compat）；V0Handler 内部 builder 边界拆分必须单独 design spike，不作第一刀 |
+| V1 | safe metadata / redaction | 仓库内存在多处独立 redact/sanitize 实现；当前 projector 已存在 (`agent/runtime_integration/safe_metadata.py::project_safe_metadata_text`)，call site 迁移进行中 | P1 | 第一边界 (`_checkpoint_safe_summary_adapter`) 已迁移；后续调用点 one-trust-boundary per commit |
+| V2 | evidence.py / `RuntimeActionTargetCatalog` | extraction 已完成：catalog 在 `target_catalog.py` (1044 行)，`evidence.py` 现 705 行 | P1 | **completed** — 2026-06-12 commit `8be4dcb`；production boundary + extraction 测试已落 |
+| V3 | SubAgent 多路径 | SoT claim 与 runtime 不一致：runtime 真正 active 的是 V0，SoT 之前声称 L1 是 production | P2 → P1 | **partial**: SoT 已修正 (`fix(subagent)` commit `4d0d8e5`)；运行时 truth 测试已落 (`test_subagent_runtime_truth.py`) |
 | V4 | capability / 文档口径漂移 | `RuntimeDecisionFrame` 与 PROJECT_STATUS / CURRENT_CAPABILITY_STATUS / runtime-decision-spine 之间存在 capability status 漂移风险 | P2（P1-low docs-alignment） | 先列具体差异（diff table），再做 docs/code terminology alignment；不写为 Phase 1 第一刀 |
 | V5 | legacy skill tombstone wording | `agent/skills/__init__.py` 是 active fail-closed tombstone；其历史目标 `agent/legacy_skills/` 不存在 | P2 | 修正文档/注释/测试口径对齐为 "tombstone with stale historical target"；不恢复目录 |
 | V6 | Memory consolidation / emergence | consolidation 多文件 frozen；emergence env-gated / partially active | P2 | doc-code 口径对齐；不急于重构 |

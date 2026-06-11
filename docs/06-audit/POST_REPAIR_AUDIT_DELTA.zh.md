@@ -17,10 +17,19 @@
 - e9b3381 V6 addendum substantive body assertion (V1 heading-only + V4 body substance)
 - fffd544 V4 subagent.delegate SoT alignment (P0-3 — RuntimeDecisionFrame SoT = READY, table was FAKE_DEMO)
 
+## repair round 2 (2026-06-12)
+
+- `4d0d8e5` fix(subagent): align SoT with V0-as-product runtime truth (8 boundary tests).
+- `8be4dcb` refactor(target-catalog): extract RuntimeActionTargetCatalog from evidence.py
+  (1011 lines moved; back-compat re-export; 11 boundary tests).
+- `508d27e` test(safe-metadata): replace inline-equivalence with projector contract.
+- `e87a5b0` test(memory): lock four-state consolidation truth + flag compat adapter.
+- `b76e645` test(v6-drift): drop brittle sibling-allowlist, keep contract.
+
 ## protected_pending (boundary protected, full migration pending)
 
-- RuntimeActionTargetCatalog extraction: protected by 7 boundary tests (V2 + ef7b73f) but
-  evidence.py is NOT split. Migration deferred to dedicated extraction spike.
+- RuntimeActionTargetCatalog extraction: **completed** in `8be4dcb`; new module
+  `agent/runtime_integration/target_catalog.py`; back-compat re-export.
 - safe_metadata projector: 1 of ≥3 known call sites migrated (evidence._checkpoint_safe_summary_adapter).
   Remaining migration sites: tool result preview, memory hook preview.
 - safe_metadata projector coverage: now 13 tests including order-pinning + inline equivalence.

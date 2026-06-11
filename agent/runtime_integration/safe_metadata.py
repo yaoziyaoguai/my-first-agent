@@ -26,7 +26,31 @@ sane truncation order for runtime_integration trust-boundary callers.
 
 from __future__ import annotations
 
+import re
+
 from agent.display_events import mask_user_visible_secrets
+
+# Defense-in-depth redactors for the evidence_persistence trust boundary
+# (D2). The canonical masker is chat-surface focused; these catch
+# additional secret shapes the leak-gate property test exercises. They
+# live here (not in display_events) because the leak-gate contract is a
+# projector-level invariant for the evidence_persistence boundary, and
+# display_events intentionally keeps its regex set narrow.
+_EXTRA_REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # AWS access key id.
+    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
+    # GitHub classic + fine-grained PATs.
+    re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    # Google OAuth refresh / access tokens (ya29.* family).
+    re.compile(r"\bya29\.[A-Za-z0-9_\-]{16,}\b"),
+    # Slack bot / user / app tokens.
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"),
+    # Generic JWT (3 base64url segments separated by dots).
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"),
+    # "Bearer <token>" prefix form.
+    re.compile(r"(?<![A-Za-z0-9])Bearer\s+[A-Za-z0-9._\-]{12,}", re.IGNORECASE),
+)
 
 
 def project_safe_metadata_text(
@@ -66,6 +90,8 @@ def project_safe_metadata_text_with_marker(
     if max_length <= 0:
         return ""
     masked = mask_user_visible_secrets(text)
+    for pattern in _EXTRA_REDACT_PATTERNS:
+        masked = pattern.sub("[REDACTED]", masked)
     cap = max(0, max_length - len(marker))
     if len(masked) <= cap:
         return masked

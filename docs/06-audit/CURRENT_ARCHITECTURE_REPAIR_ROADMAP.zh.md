@@ -38,16 +38,16 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ---
 
-## 1bis. Git / 文档 Baseline（重写时刻）
+## 1bis. Git / 文档 Baseline（再次重写时刻）
 
 - branch：`chore/architecture-repair-2026-06`
-- HEAD：`8fa8ce7`
-- dirty tracked：`AGENTS.md`（pre-existing，本轮不碰）
-- untracked：`.claude/settings.json`、`docs/architecture/ARCHITECTURE_NORTH_STAR.zh.md`、
-  `docs/plans/2026-06-12-001-...md`
+- HEAD（重写前）：`4ddf3e9`
 - North Star sha256（冻结）：`c73c2b3dbe926f30834a5d9ab20155cc947ab27158339a7c8b221d0d80568cde`
-- Roadmap sha256（重写前）：`d83bc60639364f0ba94f3d8dcaf030f5b98edc8842bbdbf87996f74b5ff5d82a`
-- 本轮：no git add / no commit / no push。
+- Plan sha256：`docs/plans/2026-06-12-002-feat-subagent-v0-production-routing-plan.md`（见文件 hash）
+- 本轮：no push；执行期内 Plan 与 Roadmap 都是 frozen read-only contract（执行 Agent 不得修改）。
+- 修订范围：仅修订 SA-1、新增 SA-2、修订 GE-1 Phase A、修订 GE-3、增加 §9.1 decision history。不重写其他主题或优先级。
+
+> 原 v3 重写 baseline（`8fa8ce7` / sha256 `d83bc606…`）见 git 历史；本轮 §1bis 不再冗余保留旧 commit id。
 
 ---
 
@@ -160,47 +160,120 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   - V0 `SubAgentV0Handler` 已 **registered + contract-verified**
     （`phase1_hook.py:179`，dispatcher 12/12 dispatch tests pass），但
     **未 production-routed**。
-  - live CLI/NL delegation = **L1-attempt → direct inline-local fallback
-    (local_fake)**（`core.py:2015` 尝试 L1 handler，`subagent_inline.py:37`
-    `execute_subagent_delegation` 以 `execution_mode="local_fake"` 落地）。
-  - registered **L0 handler** 与 **direct inline-local fallback** 是两条
-    *不同* 路径（用户裁决 #5）。
-  - L1-attempt 当前用 `dispatcher.route()`（direct provenance），**不是**
-    `route_from_runtime_loop()`（`core.py:2029`），缺 runtime-loop provenance。
-- **Target state**（用户裁决 #2/#3/#6/#7）：core production caller 路由到 **V0**；
-  inline-local 仅作为 **受控 fallback**；V0 wiring + fallback + observability +
-  rollback 全部验证后，再退出无效 L1-attempt。V0 是目标 production SubAgent
-  Runtime path。
-- **Gap / failure mode**：生产主路径偏离目标（V0 未路由）；Subagent critical
-  gate 无法到 3；L1 dispatcher 路径缺 runtime-loop provenance。
+  - live CLI/NL delegation 通过 pre-loop seam `_dispatch_or_fallback_delegation`
+    （`core.py:1973`）短路落地：L1 attempt 是 dead code（`SUBAGENT_DELEGATE_L1`
+    未注册），所以 live 路径是无条件 inline-local（`subagent_inline.py:37`，
+    `execution_mode=”local_fake”`，evidence-silent）。
+  - `core.chat` 始终构建 `_phase1_dispatcher`（`core.py:840`）并注入 loop
+    （`core.py:1184`），同一 dispatcher 可用于 pre-loop delegation。
+  - `fake_local` V0 success 路径 `observed_call=None`（`subagent_action.py:919`），
+    `is_runtime_e2e_evidence=False`，`classify_evidence_level` 真实返回
+    `subsystem_integration`（`evidence.py:616-648`）——这是 pre-loop 真实路径
+    可达的最高级别。
+- **Target state**（用户裁决 #2/#3/#6/#7 + Plan B1-A）：core production caller
+  通过 **RuntimeActionDispatcher** 路由到 **V0**（`route_from_runtime_loop`，
+  honest pinned `source=”cli_nl_delegation”`）；inline-local 仅作为
+  **受控 fallback**（结构性不可用时）；V0 wiring + 继承 + success/error/fallback
+  evidence + rollback 全部验证后退出 active。V0 是目标 production SubAgent
+  Runtime path（长期 Target 不变）。
+- **Gap / failure mode**：生产主路径偏离目标（V0 未路由）；
+  Pre-loop 真实路径只能产 `subsystem_integration`（`core_loop` provenance 不可
+  伪造，`source` 是 free `str`，且 `fake_local` 路径无 registered-target module
+  proof → 无法到 `harness_runtime_e2e`）。
 - **Repair direction**（本 Roadmap 只定义迁移，**不实施**；以下为迁移须满足的
   验收契约，不在本轮执行）：
-  1. live V0 boundary/integration test 作为验收契约——
-     `tests/runtime_integration/test_subagent_v0_runtime_boundary.py` **已存在**；
-     本轮仅确认其定义 live-path 覆盖契约，**不在本轮跑通/实现**，留待 wiring 窗口。
-  2. policy / tool / context / trace 继承经 V0 验证——验收须含一个断言
-     “child 继承 parent budget/permission/tool subset/trace id” 的 focused test
-     （契约定义，不在本轮实现）。
-  3. fallback behavior 明确（inline-local 何时、如何作为受控 fallback）；
-  4. evidence provenance（V0 路径经 `route_from_runtime_loop` 取得 runtime 证据）；
-  5. rollback plan（V0→inline-local 回退路径与开关），回退 test 须断言回退后
-     仍产出 evidence 且不进入第二 runtime（非“调用一次不抛错”即可）。
-- **Non-goals**：本轮不写 V0 wiring 代码；不删 inline-local（它是受控 fallback）；
-  不引入第二 runtime；不让 child 直接执行 tool/MCP/memory。
+  1. **default-off、flag-on V0 dispatcher routing**：新增 rollout flag
+     `SUBAGENT_V0_ROUTING_ENABLED`（默认 off，env-gate，参考
+     `memory_runtime_hooks.py:33` 的 `MEMORY_CONSOLIDATION_ENABLED` 模式）。本
+     窗口不翻默认值；flipping default 是独立后续工作（见 Non-goals）。
+  2. **真实 pre-loop provenance**：`route_from_runtime_loop` 携带 truthful
+     `core_entrypoint=”core.chat”`、`runtime_hook_name=”core.delegate”`、
+     pinned `source=”cli_nl_delegation”`（B1-A）。禁止伪造 `source=”core_loop”`。
+     真实 evidence label 为 `subsystem_integration`，本窗口不要求
+     `harness_runtime_e2e` / `core_loop` / L3 / gate=3。
+  3. **bounded inheritance**：V0 request 携带 `max_turns=1`、context caps
+     （`max_files` / `max_context_chars` / `parent_selected_files`）、permission
+     （`capability_flags`，tool/MCP/memory default-deny）、tool subset
+     （`allowed_tools`）、parent-built context、trace id。child 不直接执行
+     tool/MCP/memory。
+  4. **success / error / fallback evidence**：V0 success、error、controlled
+     fallback（flag on + V0 结构性不可用）各产一个 dispatcher
+     `RuntimeActionEvent`（fallback 通过 `_unsupported_result` 路径，不是手工
+     dict，不是新事件类型，不是第二条 emit 路径）。flag-off rollback 保持
+     evidence-silent（与现状一致）。
+  5. **可回滚**：flag off → 当前 inline-local，行为不变，evidence-silent；
+     滚回路径有 focused test 断言（不进入第二 runtime）。
+- **Non-goals**：
+  - 不删 inline-local（它是受控 fallback，R5/R7）；
+  - 本窗口 **不删 L1 attempt**（dead code，R8：保留；
+    “无效 L1-attempt 移除” 是后续独立工作，不在 SA-1 exit 范围）；
+  - 不翻 rollout 默认值（off→on 是独立后续工作，本窗口 default off）；
+  - 不搬迁 lifecycle 进 `run_main_loop`（B1-B / SA-2 单独研究，不在 SA-1
+    验收范围）；
+  - 不引入第二 runtime；不让 child 直接执行 tool/MCP/memory；
+  - 不要求 L3 / `core_loop` provenance / gate=3 / `harness_runtime_e2e`。
 - **Dependencies**：OD-1 = **已裁决（V0 为目标）**；`route_from_runtime_loop`
-  provenance 机制（已存在）；与 **GE-1 是 co-delivery**（见 GE-1 Dependencies）：
-  GE-1 的 subagent-delegation 场景先对 *当前* inline-local 路径取证，SA-1 落地后
-  *重指向* V0 断言——因此二者不构成循环前置，而是同窗口联合交付。
-- **Acceptance evidence**：live V0 boundary/integration test green（wiring 窗口）；
-  继承 focused test green；trace 显示 V0 路径 runtime provenance；fallback 与
-  rollback 各有 focused test（含上述 rollback 断言）。
-- **Rollback boundary**：迁移须可回退到当前 L1-attempt→inline-local；回退不丢
-  evidence；回退路径本身有 test。
-- **Owner**：`core.py` delegation 入口的下一位 owner（`V0_WIRING_DECISION.zh.md`
-  指 U7/U8 窗口）。
-- **Exit condition**：core 路由到 V0；inline-local 退为受控 fallback；
-  无效 L1-attempt 在 V0+fallback+observability+rollback 全部验证后移除；
-  Subagent gate 具备到 3 的证据。
+  provenance 机制（已存在）；与 **GE-1 是 co-delivery**（见 GE-1 Dependencies）。
+- **Acceptance evidence**（wiring 窗口）：
+  - flag-on V0 Golden E2E green（G4）；
+  - flag-off inline-local characterization green（G3，rollback 验证）；
+  - missing/invalid flag → off（off-cases 测试覆盖）；
+  - controlled fallback（flag on + handler 结构性不可用）→ dispatcher
+    `not_supported` event + inline-local render（G6）；
+  - provenance/evidence 断言：真实 `source=”cli_nl_delegation”` →
+    `classify_evidence_level == “subsystem_integration”`；伪造
+    `source=”core_loop”` 不改变 label（G7）；
+  - 完整 `pytest` 套件（golden_e2e / runtime_integration /
+    test_architecture_boundaries）以 flag off / on 两种姿态 green。
+- **Rollback boundary**：每 commit 独立可回退（commit matrix 见 Plan）；
+  flag off 即时回退到当前 inline-local（行为不变，evidence-silent）；历史
+  evidence 在 action log 中保留。
+- **Owner**：`core.py` delegation 入口的下一位 owner（实施窗口由 Plan
+  指派）。
+- **Exit condition**：default-off V0 production routing migration **已实现、
+  可观察、可回滚**——本项 **不单独宣称 SubAgent governance=3**。
+  gate→3 / `harness_runtime_e2e` 证据的获取由 **SA-2**（lifecycle integration
+  / L3 evidence design spike）独立研究后再决定。
+
+### SA-2 — SubAgent lifecycle integration / L3 evidence design spike  ·  P2  ·  `documented_pending`（`blocked_by_evidence`）
+
+- **North Star principle**：J（Bounded subagents）、B（One Runtime Spine）、
+  §20 Acceptance Rubric。
+- **Current fact**：SA-1 落地后 live V0 路径真实 evidence label 为
+  `subsystem_integration`（pre-loop seam 不可伪造 `core_loop` provenance，
+  `fake_local` 路径无 registered-target module proof → 不能到
+  `harness_runtime_e2e`）。是否需要搬迁 delegation 进 `run_main_loop` 以取得
+  `core_loop` provenance / L3 标签，**未在 SA-1 范围内论证**。
+- **Target state**：产出 **design spike 文档**，比较 L3 相对真实
+  `subsystem_integration` 的可观察收益，以及搬迁 lifecycle 进 `run_main_loop`
+  对以下方面的影响：
+  1. pre-loop 早返短路 / 渲染 / 对话状态 / tool 流 / checkpoint / fallback /
+     rollback；
+  2. parent / child bounded inheritance 是否仍成立（特别是 `max_turns=1`、
+     `provider_mode="fake_local"`、child 不直接 tool/MCP/memory 写入）；
+  3. 任何会引入 second runtime 风险的耦合。
+- **Gap / failure mode**：若不在本项里明确"收益—代价"评估，下游可能为追求
+  gate→3 分数而搬迁 lifecycle，破坏 North Star B / §15（single Runtime Spine，
+  禁第二 runtime）；或为追求分数伪造 `source="core_loop"` 违反 B1-A。
+- **Repair direction**：spike only；明确写出
+  "**L3 相对真实 `subsystem_integration` 的可接受收益是什么**" 与
+  "**为什么 pre-loop seam 不能作为合法 governed path**"。只有同时满足两点才
+  考虑进入 active 实施；任一不满足则保持 `subsystem_integration` 是 final。
+  **"无充分收益，不实施"是合法结论**。
+- **Non-goals**：
+  - **禁止为了评分（gate→3）搬迁 lifecycle**；
+  - 不在本项里实施搬迁；不预先承诺产出实施 plan；
+  - 不在 SA-2 期间改 SA-1 验收；不伪造 provenance。
+- **Dependencies**：SA-1 落地（拿到真实 `subsystem_integration` 证据作为
+  baseline）；GE-3 复算结果（如可获取）。
+- **Acceptance evidence**：spike 文档包含 (a) 收益表（含可拒绝项）、
+  (b) 风险与影响面清单、(c) 明确结论（"应进入 active 实施" /
+  "保持 `subsystem_integration` 为 final"）。Spike 通过 `blocked_by_evidence`
+  关卡前不算完成。
+- **Rollback boundary**：spike 阶段 doc-only；若后续进入 active 实施，须
+  独立 plan + 独立 commit matrix，不并入 SA-1。
+- **Owner**：架构 owner（待指派）。
+- **Exit condition**：spike 完成且结论明确；本项不规定必须实施搬迁。
 
 ---
 
@@ -440,10 +513,25 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   checkpoint-resume / fallback-error / evidence-trace reconstruction。
 - **Gap / failure mode**：顶层 e2e 仅 1 个 → 关键路径无回归保护；架构验收无可执行下限。
 - **Repair direction（分阶段，最小可行，不一开始建庞大测试平台）**：
-  - **Phase A**：simple conversation + tool success + subagent delegation。
-    subagent-delegation 场景先对 **当前 live 路径（L1-attempt→inline-local）**
-    取证（这是 live 路径，现在即可 green），SA-1 落地后 **重指向 V0 断言**——
-    借此打破 SA-1↔GE-1 的循环前置（见下 Dependencies）。
+  - **Phase A**（路径固定 `tests/golden_e2e/`）：
+    - G1 simple conversation；
+    - G2 tool success；
+    - G3 flag-off inline-local characterization（subagent delegation 的当前
+      live 行为取证，flag 显式置 off）；
+    - G4 flag-on V0 delegation（live path，`chat()` 驱动，flag 显式置 on）；
+    - G5 flag-off rollback（与 G3 行为一致，作为 standing rollback 证明）；
+    - G6 V0 unavailable → controlled fallback（flag on + handler 结构性不可用
+      → dispatcher `not_supported` event + inline-local render；V0 业务失败
+      走 error，不 fallback）；
+    - G7 provenance/evidence assertions（`source="cli_nl_delegation"` →
+      `classify_evidence_level == "subsystem_integration"`；伪造
+      `source="core_loop"` 不改变 label；success/error/controlled-fallback
+      各产 dispatcher event）。
+    Phase A **不要求 gate=3 / `harness_runtime_e2e`**；其 evidence level 由真实
+    路径决定（`subsystem_integration`）。
+    subagent-delegation 场景先对当前 live 路径（flag-off inline-local）取证
+    （现可 green），SA-1 落地后重指向 V0 断言——借此打破 SA-1↔GE-1 的循环前置
+    （见下 Dependencies）。
   - **Phase B**：memory read/write + checkpoint/resume。
   - **Phase C**：policy_blocked + evidence-trace reconstruction，**外加一个最小
     `tests/adversarial/` stub**（单个注入用例，复用既有 D2 leak-gate 参数化模式）。
@@ -484,16 +572,44 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **North Star principle**：§20 Acceptance Rubric、§21 DoD。
 - **Current fact**：§20 全 12 维度当前为 `provisional`；本轮 Gap Audit 给出
   逐维度证据，critical gates 均 = 2（基本成型，未 Done）。
-- **Target state**：SA-1 / GE-1 落地后重跑 rubric，回填实测分；目标 critical
-  gates → 3。
-- **Gap / failure mode**：不复算则 provisional 无法转为可执行验收。
-- **Repair direction**：在 SA-1 与 GE-1 Phase A/B 落地后，按 §20 anchors 逐项取证。
-- **Non-goals**：不平均分抵消 critical failure；不凭文件存在/测试数量评分。
-- **Dependencies**：SA-1、GE-1。
-- **Acceptance evidence**：一份逐维度证据回填的 rubric 复算。
+- **Target state**：SA-1 / GE-1 落地后**按真实 evidence 重新评分**：结果可维持
+  2 或达到 3，**由真实证据决定，不预先承诺升分**。Subagent critical gate 是否
+  升至 3 由 **SA-2** 单独研究决定（不在 GE-3 评分口径内）。
+- **Gap / failure mode**：不复算则 provisional 无法转为可执行验收；
+  若为提高分数伪造 provenance / 扩大 scope / 搬迁 lifecycle，会回退到 v2 的
+  governance smell（North Star B / §15）。
+- **Repair direction**：在 SA-1 与 GE-1 Phase A/B 落地后，按 §20 anchors 逐项
+  取证；SA-2（若进入 active 实施）落地后再次复算 Subagent critical gate。
+- **Non-goals**：
+  - **不得为提高分数伪造 provenance**（B1-A 红线）；
+  - **不得为提高分数扩大 scope**（本评分只接受 SA-1/GE-1 真实落地的 evidence）；
+  - **不得为提高分数搬迁 lifecycle**（B1-B / SA-2 单独 spike，不在评分诱导下
+    实施）；
+  - 不平均分抵消 critical failure；不凭文件存在/测试数量评分。
+- **Dependencies**：SA-1、GE-1；SA-2 结论（如可获取）。
+- **Acceptance evidence**：一份逐维度证据回填的 rubric 复算，**每分附真实
+  evidence 引用**（不写无源分数）。
 - **Rollback boundary**：doc-only。
 - **Owner**：架构审计 owner（待指派）。
-- **Exit condition**：rubric 实测回填，critical gates 状态明确。
+- **Exit condition**：rubric 实测回填，critical gates 状态明确（结果 = 2 或
+  = 3 均可接受；不得为追求 3 破坏 B1-A / B / §15）。
+
+---
+
+## 9.1. Decision History（SA-1/GE-1/GE-3 acceptance 修订记录）
+
+> 本节只记录本轮对 SA-1、SA-2、GE-1、GE-3 局部验收假设的修订。
+> 不重写其他主题或优先级。
+
+| # | 原假设 | 新证据（Plan 阶段核验） | 修订结论 |
+|---|---|---|---|
+| H-1 | SA-1 Exit 要求 "Subagent gate → 3" 与 "无效 L1-attempt 移除" | delegation 位于 pre-loop seam（`core.py:1973`），不是 `run_main_loop`；`source="core_loop"` 不可伪造（`schema.py:221` 是 free `str`，为 L3 唯一判别）；`fake_local` 路径无 registered-target module proof（`observed_call=None`）→ `classify_evidence_level` 真实返回 `subsystem_integration`（`evidence.py:616-648`） | SA-1 Exit 改为 "default-off V0 production routing migration 已实现、可观察、可回滚"；**不单独宣称 SubAgent governance=3**；L1 attempt 本窗口不删 |
+| H-2 | V0 wiring 应迁移进 `run_main_loop` 以取得 `core_loop` / L3 provenance | pre-loop seam 已是合法 governed path（同 `_phase1_dispatcher`）；`core_loop` provenance 在 pre-loop 不可达 | 保持 pre-loop seam（B1-A）；搬迁收益由 **SA-2**（lifecycle integration / L3 evidence design spike）独立 spike 评估，"无充分收益不实施"是合法结论 |
+| H-3 | SA-1 Repair direction 强调"必须 `route_from_runtime_loop` + `core_loop` provenance + gate=3" | `route_from_runtime_loop` 已存在；`core_loop` 不可达；gate=3 需要 L3 路径 | Repair direction 改为 default-off、flag-on V0 dispatcher routing、真实 pre-loop provenance、bounded inheritance、success/error/fallback evidence、可回滚 |
+| H-4 | evidence label 期待 `harness_runtime_e2e` | `fake_local` V0 success `observed_call=None` → `is_runtime_e2e_evidence=False` → `subsystem_integration` | 当前真实 evidence label 为 `subsystem_integration`；GE-1 Phase A 与 SA-1 接受此为正确结果 |
+| H-5 | GE-1 Phase A subagent 场景先对当前路径取证，SA-1 后重指向 V0 | 同 v3 已规划；本轮把路径与 checklist 钉到 `tests/golden_e2e/`：G1 simple conversation / G2 tool success / G3 flag-off inline-local / G4 flag-on V0 / G5 rollback / G6 V0-unavailable fallback / G7 provenance assertions | 维持 co-delivery 形态；GE-1 Phase A 不要求 gate=3 |
+| H-6 | GE-3 复算目标 critical gates → 3 | 复算结果由真实 evidence 决定，**不得**为提高分数伪造 provenance / 扩大 scope / 搬迁 lifecycle | 复算结果可维持 2 或达到 3；Subagent critical gate 升分由 SA-2 单独研究决定 |
+| H-7 | 实施期由执行 Agent 直接改 Roadmap | 执行期要求 "Plan + Roadmap 都是 frozen read-only contract"；执行 Agent 不得改文档 | 由 docs-only 流程在实施独立审计后单独执行 Roadmap 状态更新；本轮不再让执行 Agent 改 Roadmap |
 
 ---
 

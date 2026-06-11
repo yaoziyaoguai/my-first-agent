@@ -285,18 +285,19 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
         status=BranchPointStatus.READY,
         evidence_level=EvidenceLevel.REAL_API_INTERACTIVE,
         trigger_condition="每 turn turn-end hook (SUBAGENT_DELEGATE_L0 probe) + "
-                          "CLI delegate/NL delegation shortcut (SUBAGENT_DELEGATE_L1 business)",
-        execution_path="L1: CLI delegation → dispatcher.route(SUBAGENT_DELEGATE_L1) → "
-                       "SubAgentDelegateL1Handler → delegate_l1() → execute_l1() → "
-                       "provider.create() (child loop) → parent ToolRuntimeMediator "
-                       "(tool + memory mediation); "
-                       "child memory: execute_l1() → tool_mediator.mediate_child_memory_request() "
-                       "→ SUBAGENT_CHILD_MEMORY_REQUEST evidence → "
+                          "CLI delegate/NL delegation shortcut (SUBAGENT_DELEGATE_V0 business) "
+                          "+ legacy SUBAGENT_DELEGATE_L1 frozen (kept for compat)",
+        execution_path="V0: CLI/NL delegation → dispatcher.route(SUBAGENT_DELEGATE_V0) → "
+                       "SubAgentV0Handler → delegate_v0() → V0 contract (descriptors + "
+                       "provider.create() child loop) → parent ToolRuntimeMediator; "
+                       "child memory: tool_mediator.mediate_child_memory_request() → "
+                       "SUBAGENT_CHILD_MEMORY_REQUEST evidence → "
                        "store.apply_operation_intent() (namespaced subagent:<name>: prefix); "
                        "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback)",
-        result_feedback_path="L1: provider 实际返回 summary + child memory store write; "
+        result_feedback_path="V0: provider 实际返回 summary + child memory store write; "
                              "L0: deterministic keyword-match",
-        not_ready_behavior="L1 代码路径完整 (REAL-EVIDENCE-006 CLOSED: 12/12 PASS); "
+        not_ready_behavior="V0 代码路径完整 (V0 evidence chain: 12/12 PASS); "
+                           "L1 frozen (legacy/compat; not promoted to product); "
                            "L2 native loop SPEC 就绪, gated behind policy; "
                            "TOOL_MEDIATOR_GAP 已知 (production call site fix pending)",
         decision_meta={

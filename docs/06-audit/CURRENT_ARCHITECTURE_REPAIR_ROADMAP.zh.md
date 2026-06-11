@@ -8,8 +8,8 @@
 
 - **completed** (V1 路径内) — safe metadata projector 仍存在；private inline-equivalence 测试替换为 projector-contract 测试。
 - **completed** (V2) — `RuntimeActionTargetCatalog` 已从 `evidence.py` 提取到 `agent/runtime_integration/target_catalog.py`；65 bindings、helper builders、descriptor 同步迁移；`evidence.py` 保留 back-compat re-export。生产行为未变；新增 `tests/runtime_integration/test_target_catalog_extraction.py` 锁边界。
-- **completed** (V3 / V4 子集) — `runtime_decision_frame.py` 中 `subagent.delegate` 的 L1 是生产基线 claim 已修正为 V0 active / L1 legacy frozen。新增 `tests/runtime_integration/test_subagent_runtime_truth.py` 锁 runtime truth。
-- **protected_pending** (V1) — safe metadata 真正全量迁移尚未开始（当前只完成第一边界 `...ckpoint_safe_summary_adapter` 与 projector-contract 测试）。后续 migration 必须 one-trust-boundary per commit。
+- **completed** (V3 / V4 子集) — `runtime_decision_frame.py` 中 `subagent.delegate` 的 V0/L1 状态已与 runtime 一致：V0 = **registered + contract-verified, NOT production-routed**；L1 = **legacy frozen**；live CLI/NL = **L1-attempt → direct inline-local fallback (local_fake)**。已加 `tests/runtime_integration/test_subagent_runtime_truth.py` 锁 runtime truth；`tests/runtime_integration/test_subagent_l2_contract.py` 与 `tests/unit/test_runtime_decision_frame.py` 默认值同向；新增 `tests/runtime_integration/test_subagent_inline_local_live.py` 锁 live inline-local fallback 实际执行路径。V0 production 路由仍未连接（per `docs/06-audit/V0_WIRING_DECISION.zh.md`）。
+- **protected_pending** (V1) — safe metadata 全量迁移完成 D1 (runtime_observer)、D2 (evidence_persistence leak-gate + projector-level redactors)、D3 (memory_hook) 三个独立 trust boundary；D1 验收：commits `a9b39ab`、`97a7bb3`、`a251306`。每 commit 一边界；边界不再回退。D2 leak-gate 含 16 parametrized cases (AWS / GitHub / GCP / Slack / JWT / Bearer 等)。
 - **documented_pending** (V4) — SubAgent L0/L1/L2 路径文档口径与代码一致；capability 文档 V4 表需后续 align。
 - **newly_discovered** — `target_catalog._memory_consolidation_adapter` 仍引用 frozen `memory_consolidation_pipeline`（FROZEN 2026-05-25 兼容层）。已加 compatibility docstring 标记与 `tests/runtime_integration/test_memory_consolidation_truth.py` 锁状态。
 - **deferred** — V5/V6/V7 未启动；按 V1/V2/V3 优先继续。

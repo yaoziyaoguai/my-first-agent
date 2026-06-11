@@ -102,8 +102,8 @@ def test_v4_capability_table_reflects_v0_as_active_path() -> None:
     )
 
 
-def test_decision_frame_sot_v0_is_active_path() -> None:
-    """SoT BranchPointState for subagent.delegate must mention V0."""
+def test_decision_frame_sot_references_v0_registration() -> None:
+    """SoT BranchPointState for subagent.delegate must reference V0 (registered path)."""
     from agent import runtime_decision_frame as rdf
 
     state = rdf.BRANCH_POINT_REGISTRY["subagent.delegate"]
@@ -150,4 +150,62 @@ def test_phase1_hook_does_not_register_l1_as_product() -> None:
     )
     assert "SUBAGENT_DELEGATE_V0" in matches, (
         f"phase1_hook must register V0 as product. Got: {matches}"
+    )
+
+
+def test_production_cli_delegation_routes_l1_then_falls_back() -> None:
+    """The live CLI delegation path in core.py routes L1, then falls back to L0.
+
+    This pins the *production-called* dimension that distinguishes registered
+    (V0/L0 in phase1_hook) from production-called (L1-attempt → L0-fallback in
+    core.py). V0 is registered + contract-tested but is NOT the path core.py
+    actually drives today, so the SoT must not claim V0 is the live execution
+    path without qualification.
+    """
+    import inspect
+
+    from agent import core
+
+    src = inspect.getsource(core)
+    # The CLI delegation helper routes SUBAGENT_DELEGATE_L1.
+    assert "RuntimeActionType.SUBAGENT_DELEGATE_L1" in src, (
+        "core.py CLI delegation must still route L1 (then fall back)."
+    )
+    # No production routing of V0 exists yet.
+    assert "RuntimeActionType.SUBAGENT_DELEGATE_V0" not in src, (
+        "If core.py begins routing V0, update the SoT execution_path and this "
+        "test together; today V0 is registered-only, not production-called."
+    )
+
+
+def test_sot_does_not_overclaim_v0_as_live_execution_path() -> None:
+    """SoT must qualify V0 as registered/contract-tested, not the live CLI path.
+
+    H1 (2026-06-12 review): the SoT cannot state V0 is the production
+    execution_path while core.py routes L1→L0-fallback. The SoT must mark V0
+    as registered + contract-verified and describe the live path honestly.
+    """
+    from agent import runtime_decision_frame as rdf
+
+    state = rdf.BRANCH_POINT_REGISTRY["subagent.delegate"]
+    exec_path = state.execution_path
+
+    # The SoT must NOT claim the live CLI delegation routes V0. core.py routes
+    # SUBAGENT_DELEGATE_L1 (then falls back to L0 inline); V0 is registered but
+    # not production-called. This exact false claim is what H1 flagged.
+    assert "CLI/NL delegation → dispatcher.route(SUBAGENT_DELEGATE_V0)" not in exec_path, (
+        "SoT must not claim CLI/NL delegation routes V0; core.py routes L1→L0. "
+        f"got execution_path={exec_path!r}"
+    )
+
+    blob = (exec_path + " " + state.not_ready_behavior).lower()
+    # Must acknowledge the live CLI path is L1-attempt → L0-fallback.
+    assert "l0" in blob and ("fallback" in blob or "fall back" in blob or "回退" in blob), (
+        "SoT must describe the live CLI delegation path as L1→L0-fallback; "
+        f"got: {blob!r}"
+    )
+    # V0 must be qualified as registered + contract-verified, not the live path.
+    assert "registered" in blob, (
+        "SoT must mark V0 as registered (not the live execution path); "
+        f"got: {blob!r}"
     )

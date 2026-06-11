@@ -53,17 +53,52 @@ def test_all_consolidation_modules_have_frozen_banner() -> None:
         )
 
 
-def test_no_consolidation_module_is_dispatcher_registered() -> None:
-    """phase1_hook must not wire any consolidation RuntimeActionType."""
-    from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
+def test_frozen_consolidation_modules_are_not_imported_by_phase1_hook() -> None:
+    """phase1_hook must not import any FROZEN consolidation module directly.
 
-    dispatcher = build_phase1_dispatcher()
-    registered = {str(at) for at in dispatcher._registry._handlers}
+    The dispatcher registers `MemoryConsolidateHandler` (a NON-frozen handler in
+    `agent/runtime_integration/memory_consolidate.py`). That handler reaches the
+    frozen pipeline only through the documented compatibility adapter in
+    target_catalog. This test guards against a refactor that imports a frozen
+    module (e.g. `memory_consolidation_pipeline`) straight into the dispatcher
+    builder, which would promote frozen code to the hot path.
+
+    The previous version of this test compared the frozen module *file stems*
+    against dispatcher *action-type strings* (e.g. `memory_consolidation_pipeline`
+    vs `memory.consolidate`), which never matched and was therefore vacuously
+    true. This version inspects the actual phase1_hook source for frozen-module
+    imports.
+    """
+    import inspect
+
+    from agent.runtime_integration import phase1_hook
+
+    src = inspect.getsource(phase1_hook)
+    offenders = []
     for rel in CONSOLIDATION_MODULES:
-        module_name = Path(rel).stem
-        assert not any(module_name in r for r in registered), (
-            f"{module_name} appears in dispatcher registrations: {registered}"
-        )
+        stem = Path(rel).stem  # e.g. "memory_consolidation_pipeline"
+        if f"agent.{stem}" in src or f"import {stem}" in src or f"from {stem}" in src:
+            offenders.append(stem)
+    assert not offenders, (
+        "phase1_hook must not import frozen consolidation modules directly; "
+        f"offenders={offenders}. The non-frozen MemoryConsolidateHandler is the "
+        "only allowed dispatcher entry point."
+    )
+
+
+def test_memory_consolidate_handler_module_is_not_frozen() -> None:
+    """The dispatcher-registered handler module itself must NOT carry a FROZEN banner.
+
+    MEMORY_CONSOLIDATE is registered and runtime-reachable (loop.py emits it).
+    Its handler lives in a non-frozen module; only the downstream pipeline is
+    frozen. If someone freezes the handler module, this test fails so the
+    runtime-reachable/implementation-frozen distinction stays explicit.
+    """
+    handler_src = _read("agent/runtime_integration/memory_consolidate.py")
+    assert "⛔ FROZEN" not in handler_src, (
+        "memory_consolidate.py (the dispatcher-registered handler) must not be "
+        "frozen; it is the active runtime-reachable entry point."
+    )
 
 
 def test_consolidation_pipeline_is_referenced_only_via_compatibility_adapter() -> None:

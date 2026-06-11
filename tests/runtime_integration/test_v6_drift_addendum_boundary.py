@@ -24,21 +24,34 @@ def test_v6_addendum_section_marker_exists() -> None:
     )
 
 
-def test_v6_addendum_does_not_introduce_foreign_files() -> None:
-    """V6 addendum must live in the drift doc only — no new doc files split out.
+def test_v6_addendum_is_not_split_into_a_separate_doc() -> None:
+    """V6 content must live inside the drift doc, not a dedicated sibling file.
 
-    The previous sibling-allowlist test asserted a fixed list of filenames,
-    which is brittle: adding a future roadmap sibling would fail without any
-    real behavioural regression. The behavioural contract is that the
-    addendum content lives entirely inside CURRENT_CAPABILITY_DRIFT.zh.md,
-    not in a newly introduced sibling file.
+    The previous version of this test pinned an exact 4-file allowlist, which
+    was brittle (any new roadmap sibling broke it). The real contract is that
+    the V6 addendum body lives inside CURRENT_CAPABILITY_DRIFT.zh.md and is NOT
+    extracted into its own `*v6*` / `*emergence*` markdown file. This verifies
+    containment behaviourally instead of pinning the full directory listing.
     """
 
     text = _DRIFT_DOC.read_text(encoding="utf-8")
-    assert "## 6. Memory consolidation / emergence (V6" in text, (
-        "V6 addendum marker must live in the canonical drift doc; "
-        f"drift doc path={_DRIFT_DOC}"
+    # The V6 section body must be present in the canonical drift doc.
+    v6_index = text.find("## 6. Memory consolidation / emergence")
+    assert v6_index > 0, "V6 addendum must live in the canonical drift doc"
+    body = text[v6_index:]
+    assert len(body) > 200, (
+        "V6 section body looks empty — addendum may have been split out elsewhere"
     )
+
+    # No sibling markdown file should be a dedicated V6/emergence addendum.
+    audit_dir = _DRIFT_DOC.parent
+    for sibling in audit_dir.glob("*.md"):
+        if sibling == _DRIFT_DOC:
+            continue
+        name = sibling.name.lower()
+        assert "v6-addendum" not in name and "emergence-drift" not in name, (
+            f"V6 addendum must not be split into a dedicated file: {sibling.name}"
+        )
 
 
 def test_v6_addendum_is_after_v5_sections() -> None:

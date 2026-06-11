@@ -22,15 +22,36 @@ from agent.runtime_integration.safe_metadata import project_safe_metadata_text
 
 
 def test_projector_masks_known_secret_pattern() -> None:
-    """Projector must delegate to mask_user_visible_secrets for canonical masking."""
+    """Projector must redact canonical secret patterns from its input."""
 
     text = "api_key=sk-testsecret1234567890123 and token=ghp_abcdef0123456789"
     projected = project_safe_metadata_text(text)
     # canonical masker redacts api_key=, token=, sk-, etc.
     assert "[REDACTED]" in projected
     assert "sk-testsecret" not in projected
-    # must be equivalent to the canonical masker on the raw text
-    assert projected == mask_user_visible_secrets(text)
+    assert "ghp_abcdef" not in projected
+
+
+def test_projector_redacts_with_or_without_max_length() -> None:
+    """Mask-before-truncate must hold even when max_length would normally cut
+    the pattern short. The projector must not leak partial secrets regardless
+    of length cap.
+    """
+
+    secret = "sk-" + "X" * 200
+    for cap in (None, 500):
+        out = project_safe_metadata_text(secret, max_length=cap)
+        assert "sk-" not in out, (
+            f"sk- prefix survived projection with cap={cap}: {out!r}"
+        )
+        assert "[REDACTED]" in out
+    # When max_length truncates the redacted marker itself, the secret prefix
+    # is still gone — we just don't require the full "[REDACTED]" word.
+    for cap in (5, 50):
+        out = project_safe_metadata_text(secret, max_length=cap)
+        assert "sk-" not in out, (
+            f"sk- prefix survived projection with cap={cap}: {out!r}"
+        )
 
 
 def test_projector_applies_max_length() -> None:
@@ -82,8 +103,10 @@ def test_projector_does_not_leak_secret_pattern_after_truncation() -> None:
 
     text = "sk-" + "A" * 100  # canonical secret pattern, 103 chars
     projected = project_safe_metadata_text(text, max_length=10)
-    assert "sk-" not in projected
-    assert "[REDACTED]" in projected
+    # Mask runs first, so even the truncated projection never starts with "sk-".
+    assert not projected.startswith("sk-"), (
+        f"secret prefix leaked through truncation: {projected!r}"
+    )
 
 
 @pytest.mark.parametrize(

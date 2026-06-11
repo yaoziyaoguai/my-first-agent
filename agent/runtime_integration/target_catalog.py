@@ -8,6 +8,14 @@ This module owns:
 
 Compatibility: ``agent.runtime_integration.evidence`` re-exports the
 catalog class so existing import sites keep working.
+
+Identity note (U4, 2026-06-12): ``_callable_identity`` is a *process-local*
+helper. Its ``function:<module>.<qualname>`` string is not a stable
+external contract — module paths may be reorganized (e.g. via future
+extractions) without bumping a versioned contract. Callers must treat the
+identity as runtime introspection only, not as a key for cross-process
+identity resolution, persistence, or stable hashing. See
+``docs/06-audit/TARGET_CATALOG_REEXPORT_AUDIT.zh.md`` for the full audit.
 """
 
 from __future__ import annotations

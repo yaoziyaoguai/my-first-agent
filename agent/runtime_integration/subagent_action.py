@@ -2,16 +2,17 @@
 
 Path status legend (V3 Sub-agent path-status clarity):
 
-| Handler | Status | 行号 (approximate) | Notes |
+| Handler | Status | 行号 | Notes |
 |---|---|---|---|
-| `SubAgentV0Handler` | **V0 current** | `~L306` | 唯一活跃 production path |
-| `SubAgentDelegateL0Handler` | **L0 probe (compat)** | `~L1257` | 仅兼容 test harness |
+| `SubAgentV0Handler` | **V0 reg + verified** | `~L306` | reg ≠ routed；live = inline-local |
+| `SubAgentDelegateL0Handler` | **L0 probe (compat)** | `~L1257` | test harness compat only |
 | `SubAgentDelegateL1Handler` | **L1 frozen (legacy)** | `~L1424` | 历史 L1 prototype，非当前 |
 
 红线：
 - 不拆 `SubAgentV0Handler`（V0 设计 spike 单独做）。
 - 不恢复 L1 production route；L1 仅作历史参考。
 - L0 probe 不被 V0 production path 依赖；它的存活只为兼容 test harness。
+- 不把上面 live 描述称为 "V0 当前 production path"——V0 仅 registered + contract-verified。
 """
 
 from __future__ import annotations
@@ -320,8 +321,11 @@ def _provider_call_permitted(
 class SubAgentV0Handler:
     """Product v0 RuntimeAction handler.
 
-    Path status: **V0 current** (the only production subagent path).
+    Path status: **V0 registered + contract-verified, NOT yet production-routed**。
     V0 设计由这条 handler 主线承担；L0 / L1 / L2 都不是当前 path。
+    注意：registered 不等于 production-routed——core.py 仍 routes L1→inline-local
+    fallback（execution_mode='local_fake'），V0 production wiring 是 future work
+    （see V0_WIRING_DECISION）。
 
     中文学习边界：
     U4 只实现 parent-controlled、bounded、single-turn 的最小 execution path。

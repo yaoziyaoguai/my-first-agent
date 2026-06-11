@@ -450,10 +450,19 @@ class TestL2RuntimeDecisionFrame:
         frame = build_decision_frame("test")
         assert frame.subagent_l2_gated is True, "L2 应默认 gated behind policy"
 
-    def test_subagent_level_is_l1(self):
+    def test_subagent_level_is_inline_local_fallback(self):
         from agent.runtime_decision_frame import build_decision_frame
         frame = build_decision_frame("test")
-        assert frame.subagent_level == "L1", "默认 level 应为 L1（生产基线）"
+        # Live CLI/NL delegation is L1-attempt → direct inline-local fallback
+        # (subagent_inline.execute_subagent_delegation, execution_mode=local_fake).
+        # The "L1 是生产基线" framing enshrined a false claim: L1 is not
+        # registered, and the live path is the inline-local fallback, not the
+        # registered L0 probe or the registered-but-not-routed V0. See
+        # V0_WIRING_DECISION for the target architecture (V0 routing).
+        assert frame.subagent_level == "inline_local_fallback", (
+            "默认 level 应反映当前 live path（inline-local fallback），"
+            "而非未注册的 L1"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

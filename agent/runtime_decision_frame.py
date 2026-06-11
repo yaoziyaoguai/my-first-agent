@@ -283,32 +283,45 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
     "subagent.delegate": BranchPointState(
         branch_id="subagent.delegate",
         status=BranchPointStatus.READY,
-        evidence_level=EvidenceLevel.REAL_API_INTERACTIVE,
+        evidence_level=EvidenceLevel.FAKE_LOCAL_USER_PATH,
         trigger_condition="每 turn turn-end hook (SUBAGENT_DELEGATE_L0 probe) + "
                           "CLI delegate/NL delegation shortcut (routes SUBAGENT_DELEGATE_L1, "
-                          "falls back to L0 inline); SUBAGENT_DELEGATE_V0 registered + "
-                          "contract-verified but not yet production-called",
+                          "falls back to inline-local); SUBAGENT_DELEGATE_V0 registered + "
+                          "contract-verified but not yet production-routed",
         execution_path="Live CLI/NL delegation: core.chat → _dispatch_or_fallback_delegation → "
                        "dispatcher.route(SUBAGENT_DELEGATE_L1); L1 handler unregistered → "
-                       "falls back to L0 inline (_execute_subagent_delegation). "
-                       "V0 path (registered, contract-tested, NOT yet production-called): "
-                       "dispatcher.route(SUBAGENT_DELEGATE_V0) → SubAgentV0Handler → V0 contract "
+                       "falls back to direct inline-local "
+                       "(subagent_inline.execute_subagent_delegation, "
+                       "execution_mode='local_fake'). "
+                       "V0 path (registered, contract-tested, NOT yet "
+                       "production-routed): dispatcher.route(SUBAGENT_DELEGATE_V0) "
+                       "→ SubAgentV0Handler → V0 contract "
                        "(descriptors + bounded single-turn execution). "
-                       "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback)",
-        result_feedback_path="L1-attempt/L0-fallback: deterministic keyword-match summary; "
+                       "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback). "
+                       "L0 注册的 handler 与上面 inline-local fallback 不是同一条路径——"
+                       "registered L0 是 turn-end probe；live fallback 是直接 inline。",
+        result_feedback_path="L1-attempt/inline-local fallback: deterministic "
+                             "keyword-match summary; "
                              "V0 (when wired): provider summary + child memory store write",
         not_ready_behavior="V0 handler registered + contract-verified (V0 evidence chain: "
                            "12/12 PASS) but production call site (core.py) still routes "
-                           "L1→L0-fallback; V0 production wiring pending; "
+                           "L1→inline-local fallback; V0 production wiring pending; "
                            "L1 frozen (legacy/compat; not promoted to product); "
                            "L2 native loop SPEC 就绪, gated behind policy; "
-                           "TOOL_MEDIATOR_GAP 已知 (production call site fix pending)",
+                           "TOOL_MEDIATOR_GAP 已知 (production call site fix pending). "
+                           "Live path 是 inline-local fallback（local_fake），"
+                           "不是 registered L0 handler，也不是 V0 "
+                           "（V0 production wiring pending，"
+                           "see V0_WIRING_DECISION）。",
         decision_meta={
-            "why_active": "REAL-EVIDENCE-006 CLOSED (credible): "
-                          "完整 parent→child→tool mediation→result→adjudication "
-                          "evidence chain 通过真实 provider E2E 验证 (12/12 PASS); "
-                          "L2 native loop SDD delivered (D-01), "
-                          "implementation + real provider dogfood deferred",
+            "why_active": (
+                "REAL-EVIDENCE-006: Live CLI/NL delegation path 已通过 dispatcher + 关键字匹配"
+                " 在 fake provider 下验证（12/12 PASS）——但 path 本身是 L1-attempt → direct "
+                "inline-local fallback（execution_mode='local_fake'），不是 registered L0 "
+                "handler，也不是 V0。V0 contract-verified（12/12）但 production call site"
+                "（core.py）尚未 routing；L1 frozen（legacy/compat）；L2 native loop SPEC "
+                "就绪，implementation + real provider dogfood deferred。"
+            ),
         },
     ),
     "checkpoint.save": BranchPointState(
@@ -520,10 +533,23 @@ class RuntimeDecisionFrame:
 
     # ── SubAgent 层 ──
     subagent_available: bool = True
-    """SubAgent 是否可用（L1 已验证, REAL-EVIDENCE-006 CLOSED）。"""
+    """SubAgent 是否可用——"callable via inline-local (local_fake) fallback"
+    on the live path。Available 不再等于 "real API verified"；当前 live
+    执行是 inline-local fallback，``evidence_level`` 在 BranchPointState
+    上反映这一事实（``FAKE_LOCAL_USER_PATH``）。V0 已 register +
+    contract-verify，但 core 尚未 routing（见 ``V0_WIRING_DECISION``）。
+    """
 
-    subagent_level: str = "L1"
-    """SubAgent 级别：L0 (fake/demo) / L1 / L2。L1 是生产基线。"""
+    subagent_level: str = "inline_local_fallback"
+    """当前 live 实际执行的 subagent path 描述。
+
+    值为冻结常量 ``"inline_local_fallback"``，表达"L1-attempt → direct
+    inline-local fallback（``execution_mode='local_fake'``）"这一当前
+    runtime fact；它既不暗示注册的 L0 handler 在执行，也不暗示 L0/
+    inline 是目标架构（目标是 V0，see ``V0_WIRING_DECISION``）。registered
+    vs requested 的区分由 ``BranchPointState["subagent.delegate"]
+    .execution_path`` 承担。
+    """
 
     subagent_l2_gated: bool = True
     """L2 是否被 policy gate 拦截（real_llm_tool_requesting_allowed）。"""
@@ -659,7 +685,7 @@ def build_decision_frame(
     tool_gate_tool_name: str = "_safe_noop",
     mcp_available: bool = False,
     subagent_available: bool = True,
-    subagent_level: str = "L1",
+    subagent_level: str = "inline_local_fallback",
     subagent_l2_gated: bool = True,
     checkpoint_pending: bool = False,
     confirmation_required: bool = False,
@@ -803,8 +829,8 @@ def build_decision_frame_from_chat_params(
         memory_explicit_request=False,  # 由 evaluate_user_text 后置判定
         tool_gate_tool_name=gate_name,
         mcp_available=_mcp_active,
-        subagent_available=True,   # L1 已验证 (REAL-EVIDENCE-006 CLOSED)
-        subagent_level="L1",       # L1 是生产基线
+        subagent_available=True,   # live 路径可调用（inline-local fallback）
+        subagent_level="inline_local_fallback",  # 当前 live 实际执行的 path
         subagent_l2_gated=True,    # L2 gated behind policy
         evidence_level=ev_level,
         decision_meta={

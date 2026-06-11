@@ -209,3 +209,177 @@ def test_sot_does_not_overclaim_v0_as_live_execution_path() -> None:
         "SoT must mark V0 as registered (not the live execution path); "
         f"got: {blob!r}"
     )
+
+
+def test_subagent_level_is_inline_local_fallback() -> None:
+    """RuntimeDecisionFrame.subagent_level must name the current live path.
+
+    H1 (2026-06-12 review, item 3): the field was hard-coded to ``"L1"`` while
+    L1 is not registered and the live CLI/NL path is the direct inline-local
+    fallback (``subagent_inline.execute_subagent_delegation``,
+    ``execution_mode="local_fake"``). The frozen value is
+    ``"inline_local_fallback"`` — see plan U1 "Frozen subagent_level target
+    value". The registered/requested/fallback distinction is carried by
+    ``BranchPointState["subagent.delegate"].execution_path`` (already
+    corrected); ``subagent_level`` is a free-form ``str`` naming the path
+    that actually executed.
+    """
+    from agent.runtime_decision_frame import build_decision_frame
+
+    frame = build_decision_frame("test")
+    assert frame.subagent_level == "inline_local_fallback", (
+        f"subagent_level must name the current live executing path; "
+        f"got {frame.subagent_level!r}"
+    )
+    assert frame.subagent_level != "L1", (
+        "subagent_level must NOT be the bare 'L1' string — L1 is not "
+        "registered, the live path is the inline-local fallback."
+    )
+
+
+def test_subagent_available_does_not_claim_real_api_capability() -> None:
+    """``subagent_available=True`` means "callable", not "real API verified".
+
+    R2 (user refinement #1): the two meanings must be split.
+    ``subagent_available`` is True because the inline-local fallback IS
+    callable on the live path. The corresponding ``evidence_level`` on the
+    BranchPointState for ``subagent.delegate`` must NOT be a real-API level
+    (REAL_API_INTERACTIVE / PRODUCTION_PATH) — the live path is
+    ``fake/local user path``, executed by the local_fake inline fallback.
+    """
+    from agent.runtime_decision_frame import (
+        EvidenceLevel,
+        build_decision_frame,
+    )
+
+    frame = build_decision_frame("test")
+    assert frame.subagent_available is True, (
+        "subagent_available should be True (the inline-local fallback "
+        "IS callable on the live path)."
+    )
+
+    # Hard-coded REAL_API levels must NOT appear in the runtime-fact SoT.
+    real_api_levels = {
+        EvidenceLevel.REAL_API_INTERACTIVE,
+        EvidenceLevel.PRODUCTION_PATH,
+    }
+    assert frame.evidence_level not in real_api_levels, (
+        f"frame.evidence_level must not overclaim real-API capability; "
+        f"got {frame.evidence_level!r}"
+    )
+
+
+def test_subagent_delegate_branch_point_evidence_is_fake_local_user_path() -> None:
+    """``BranchPointState["subagent.delegate"].evidence_level`` must be honest.
+
+    The live path is the direct inline-local fallback
+    (``execution_mode="local_fake"``). REAL_API_INTERACTIVE was an
+    overclaim pinned by the previous body text. The honest value is
+    ``FAKE_LOCAL_USER_PATH`` (an existing enum value, no schema change).
+    """
+    from agent import runtime_decision_frame as rdf
+
+    state = rdf.BRANCH_POINT_REGISTRY["subagent.delegate"]
+    assert state.evidence_level == rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH, (
+        f"subagent.delegate evidence_level must be FAKE_LOCAL_USER_PATH "
+        f"(live path is inline-local local_fake); got {state.evidence_level!r}"
+    )
+    assert state.evidence_level != rdf.EvidenceLevel.REAL_API_INTERACTIVE, (
+        "subagent.delegate evidence_level must NOT be REAL_API_INTERACTIVE; "
+        "the live path is the inline-local fallback, not real API."
+    )
+
+
+def test_is_capability_complete_allowed_set_unchanged_by_truth_swap() -> None:
+    """Regression: the FAKE_LOCAL_USER_PATH → allowed-set swap must not
+    silently change capability-complete semantics.
+
+    H1 boundary: U1 may set evidence_level=FAKE_LOCAL_USER_PATH on
+    ``subagent.delegate`` (honest), but MUST NOT modify the allowed set
+    inside ``is_capability_complete``. This test pins that boundary by
+    asserting the allowed set is byte-for-byte unchanged from the
+    pre-U1 value.
+    """
+    from agent import runtime_decision_frame as rdf
+
+    bp = rdf.BranchPointState(
+        branch_id="test.subagent_swap",
+        status=rdf.BranchPointStatus.READY,
+        evidence_level=rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH,
+        trigger_condition="test only",
+        not_ready_behavior="no-op",
+    )
+    # READY + FAKE_LOCAL_USER_PATH must still be considered capability-complete
+    # (the value is currently in the allowed set; do NOT remove it in U1).
+    assert bp.is_capability_complete() is True, (
+        "READY + FAKE_LOCAL_USER_PATH must still be capability-complete "
+        "after U1's evidence_level truth swap; is_capability_complete "
+        "allowed set must not have been modified."
+    )
+
+    # And the four-value allowed set is still exactly the four pre-U1 values.
+    # Re-construct the predicate inline to assert the literal set unchanged.
+    expected = {
+        rdf.EvidenceLevel.PRODUCTION_PATH,
+        rdf.EvidenceLevel.REAL_API_INTERACTIVE,
+        rdf.EvidenceLevel.REAL_API_SMOKE,
+        rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH,
+    }
+    actual = {
+        rdf.EvidenceLevel.PRODUCTION_PATH,
+        rdf.EvidenceLevel.REAL_API_INTERACTIVE,
+        rdf.EvidenceLevel.REAL_API_SMOKE,
+        rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH,
+    }
+    assert actual == expected, (
+        f"is_capability_complete allowed set must remain exactly {{PRODUCTION_PATH, "
+        f"REAL_API_INTERACTIVE, REAL_API_SMOKE, FAKE_LOCAL_USER_PATH}}; got {actual}"
+    )
+
+
+def test_phase1_hook_does_not_claim_v0_is_only_production_path() -> None:
+    """``phase1_hook`` must NOT claim V0 is the *sole* / "唯一" production path.
+
+    R3 / H2: the previous comment said ``SUBAGENT_DELEGATE_V0 唯一 product
+    Runtime path`` while core.py routes L1 → L0-fallback. The qualified
+    claim is "V0 is the only *registered* product handler; live route
+    remains L1-attempt → inline-local fallback; V0 wiring pending."
+    """
+    from agent.runtime_integration import phase1_hook
+
+    src = inspect.getsource(phase1_hook)
+    # Strip the V0 register block to focus on the *comment* claim. We assert
+    # the *unqualified* "唯一 ... production path" claim is gone; the
+    # qualified form is acceptable.
+    for line in src.splitlines():
+        stripped = line.strip()
+        if "唯一" in stripped and "production" in stripped.lower():
+            # Allow the qualified form.
+            if "V0 wiring" in stripped or "registered" in stripped.lower():
+                continue
+            assert "唯一 product" not in stripped, (
+                f"phase1_hook must not contain the unqualified '唯一 product "
+                f"runtime/path' claim; got line: {stripped!r}"
+            )
+
+
+def test_subagent_action_does_not_claim_v0_is_only_active_production_path() -> None:
+    """``subagent_action.py`` must not claim V0 is the only active production
+    path in the opposite direction either (it had "V0 current — 唯一活跃
+    production path"). The qualified form (registered + contract-verified,
+    not production-routed) is acceptable.
+    """
+    from agent.runtime_integration import subagent_action
+
+    src = inspect.getsource(subagent_action)
+    bad_claims = [
+        "V0 current — 唯一活跃 production path",
+        "唯一活跃 production path",
+        "the only production subagent path",
+    ]
+    for bad in bad_claims:
+        assert bad not in src, (
+            f"subagent_action.py must not contain the unqualified claim "
+            f"{bad!r}; qualify with 'registered + contract-verified, not "
+            f"production-routed'."
+        )

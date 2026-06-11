@@ -50,6 +50,15 @@
   RuntimeDecisionFrame SoT inspection: SoT says READY/REAL_API_INTERACTIVE. The
   `SubAgentDelegateL0Handler` / `SubAgentDelegateL1Handler` are NOT the current
   production path — `SubAgentV0Handler` is. V4 table corrected.
+- "L1 = production path" was assumed by the prior `RuntimeDecisionFrame.subagent_level`
+  and by `phase1_hook` / `subagent_action.py` comments. **Invalidated** by 2026-06-12
+  read-only cross-audit: L1 is **never registered** (only V0 + L0 are), and the live
+  CLI/NL delegation path is **L1-attempt → direct inline-local fallback**
+  (`subagent_inline.execute_subagent_delegation`, `execution_mode="local_fake"`).
+  V0 is **registered + contract-verified but not production-routed**; the L1
+  qualification is "legacy / compat only". The structured fields and comments are
+  corrected in the U1 commit (no schema change, no production routing change). See
+  `V0_WIRING_DECISION.zh.md` for the target architecture.
 - "consolidation is fully frozen" was assumed by V6 addendum. **Partially invalid**:
   `agent.memory_consolidation*` modules are tagged ⛔FROZEN, but `memory.consolidate`
   is also a registered RuntimeAction in dispatcher. Two states coexist: pipeline frozen,

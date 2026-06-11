@@ -193,7 +193,11 @@ def test_build_decision_frame_minimal():
     assert frame.provider_mode == "unknown"
     assert not frame.skill_registry_active
     assert not frame.mcp_available
-    assert frame.subagent_level == "L1"
+    assert frame.subagent_level == "inline_local_fallback", (
+        "subagent_level must name the current live executing path "
+        "(L1-attempt → direct inline-local fallback), not the L1 label "
+        "that is no longer registered."
+    )
 
 
 def test_build_decision_frame_with_fake_provider():

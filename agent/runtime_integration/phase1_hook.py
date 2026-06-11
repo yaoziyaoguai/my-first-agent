@@ -171,15 +171,20 @@ def build_phase1_dispatcher(
         RuntimeActionType.SUBAGENT_DELEGATE_L0,
         SubAgentDelegateL0Handler(registry=_subagent_registry),
     )
-    # SUBAGENT_DELEGATE_V0：唯一 product sub-agent Runtime path。
+    # SUBAGENT_DELEGATE_V0：当前唯一 *registered* product sub-agent Runtime handler。
+    # 注意：core.py 仍 routes L1→inline-local fallback（execution_mode='local_fake'），
+    # V0 production wiring 尚未完成（see V0_WIRING_DECISION）。Registered 不等于
+    # production-routed；本行只声明 V0 已在 dispatcher 中 registered + contract-verified。
     # U4 只允许 parent-controlled bounded execution，不执行 child tools/Memory/Checkpoint。
     registry.register(
         RuntimeActionType.SUBAGENT_DELEGATE_V0,
         SubAgentV0Handler(),
     )
     # U3A freeze gate：L1/L2 旧 child loops 只能作为 legacy/test/demo/compat
-    # 直接调用面保留，不能再注册到 product RuntimeAction dispatcher。这样 v0 execution
-    # 只能沿 SUBAGENT_DELEGATE_V0 这一条 Runtime path 前进，避免两套 child loop 并存。
+    # 直接调用面保留，不能再注册到 product RuntimeAction dispatcher。Dispatcher 内部
+    # 因此只剩 {V0, L0} 两个 registered sub-agent action（registered 不等于
+    # production-routed：live CLI/NL 当前仍走 L1-attempt → direct inline-local
+    # fallback，core.py 尚未迁移到 route V0，see V0_WIRING_DECISION）。
     # STREAMING_PROVIDER_CALL：收集 streaming provider call evidence（整轮聚合）
     registry.register(
         RuntimeActionType.STREAMING_PROVIDER_CALL,

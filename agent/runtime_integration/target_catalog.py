@@ -1044,5 +1044,3 @@ class RuntimeActionTargetCatalog:
             and binding.implementation_id == implementation_id
             and binding.callable_identity == callable_identity
         )
-
-

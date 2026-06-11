@@ -48,4 +48,3 @@ def test_callable_identity_still_uses_function_module_path() -> None:
 
     ident = _callable_identity(_lookup_tool_registry_entry_adapter)
     assert ident.startswith("function:agent.runtime_integration.target_catalog."), ident
-

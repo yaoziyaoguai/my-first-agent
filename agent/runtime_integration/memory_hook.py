@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from agent.display_events import mask_user_visible_secrets
 from agent.evidence_recorder import build_memory_evidence_metadata
 from agent.memory_contracts import MemoryDecisionType
 from agent.memory_policy import DeterministicMemoryPolicy
 from agent.runtime_integration.dispatcher import RuntimeActionContext
+from agent.runtime_integration.safe_metadata import project_safe_metadata_text
 from agent.runtime_integration.schema import RuntimeActionRequest, contains_secret_like
 
 
@@ -154,7 +154,10 @@ class MemoryTurnEndProposalHandler:
                 "not_confirmed": True,
                 "auto_approved": False,
                 "real_episodes_read": False,
-                "proposal_preview": mask_user_visible_secrets(candidate.content)[:200],
+                "proposal_preview": project_safe_metadata_text(
+                    candidate.content,
+                    max_length=200,
+                ),
             }
         else:
             proposal_evidence = {

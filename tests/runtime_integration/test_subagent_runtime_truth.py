@@ -318,22 +318,29 @@ def test_is_capability_complete_allowed_set_unchanged_by_truth_swap() -> None:
     )
 
     # And the four-value allowed set is still exactly the four pre-U1 values.
-    # Re-construct the predicate inline to assert the literal set unchanged.
+    # Derive `actual` from the predicate (option B: grid) rather than hand-typed
+    # mirror of `expected` so a future mutation of the allowed set is caught.
+    allowed: set[rdf.EvidenceLevel] = set()
+    for ev in rdf.EvidenceLevel:
+        grid_bp = rdf.BranchPointState(
+            branch_id="test.subagent_swap_grid",
+            status=rdf.BranchPointStatus.READY,
+            evidence_level=ev,
+            trigger_condition="test only",
+            not_ready_behavior="no-op",
+        )
+        if grid_bp.is_capability_complete():
+            allowed.add(ev)
     expected = {
         rdf.EvidenceLevel.PRODUCTION_PATH,
         rdf.EvidenceLevel.REAL_API_INTERACTIVE,
         rdf.EvidenceLevel.REAL_API_SMOKE,
         rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH,
     }
-    actual = {
-        rdf.EvidenceLevel.PRODUCTION_PATH,
-        rdf.EvidenceLevel.REAL_API_INTERACTIVE,
-        rdf.EvidenceLevel.REAL_API_SMOKE,
-        rdf.EvidenceLevel.FAKE_LOCAL_USER_PATH,
-    }
-    assert actual == expected, (
+    assert allowed == expected, (
         f"is_capability_complete allowed set must remain exactly {{PRODUCTION_PATH, "
-        f"REAL_API_INTERACTIVE, REAL_API_SMOKE, FAKE_LOCAL_USER_PATH}}; got {actual}"
+        f"REAL_API_INTERACTIVE, REAL_API_SMOKE, FAKE_LOCAL_USER_PATH}}; "
+        f"derived set was {allowed}"
     )
 
 
@@ -348,18 +355,24 @@ def test_phase1_hook_does_not_claim_v0_is_only_production_path() -> None:
     from agent.runtime_integration import phase1_hook
 
     src = inspect.getsource(phase1_hook)
-    # Strip the V0 register block to focus on the *comment* claim. We assert
-    # the *unqualified* "唯一 ... production path" claim is gone; the
-    # qualified form is acceptable.
-    for line in src.splitlines():
-        stripped = line.strip()
-        if "唯一" in stripped and "production" in stripped.lower():
-            # Allow the qualified form.
-            if "V0 wiring" in stripped or "registered" in stripped.lower():
-                continue
-            assert "唯一 product" not in stripped, (
-                f"phase1_hook must not contain the unqualified '唯一 product "
-                f"runtime/path' claim; got line: {stripped!r}"
+    # Single-pass positive-qualifier check: any line containing '唯一' AND
+    # ('production' OR '生产' OR 'path' OR 'handler') must also contain a
+    # qualifier ('registered' / 'contract-verified' / 'wiring pending') on
+    # the same line. This catches both English and Chinese-only phrasings
+    # and requires a same-line qualifier (the same form a reflowed claim
+    # would have to keep).
+    qualifier_markers = ("registered", "contract-verified", "wiring pending")
+    for raw_line in src.splitlines():
+        stripped = raw_line.strip()
+        has_unique = "唯一" in stripped
+        has_path_word = any(
+            w in stripped.lower()
+            for w in ("production", "生产", "path", "handler")
+        )
+        if has_unique and has_path_word:
+            assert any(q in stripped for q in qualifier_markers), (
+                f"phase1_hook must not contain unqualified '唯一 ... "
+                f"production/path' claim; got line: {stripped!r}"
             )
 
 

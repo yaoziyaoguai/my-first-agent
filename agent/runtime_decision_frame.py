@@ -289,30 +289,33 @@ BRANCH_POINT_REGISTRY: dict[str, BranchPointState] = {
                           "falls back to inline-local); SUBAGENT_DELEGATE_V0 registered + "
                           "contract-verified but not yet production-routed",
         execution_path="Live CLI/NL delegation: core.chat → _dispatch_or_fallback_delegation → "
-                       "dispatcher.route(SUBAGENT_DELEGATE_L1); L1 handler unregistered → "
-                       "falls back to direct inline-local "
+                       "default-off SUBAGENT_V0_ROUTING_ENABLED flag. "
+                       "Flag-off: dispatcher.route(SUBAGENT_DELEGATE_L1); L1 handler "
+                       "unregistered → falls back to direct inline-local "
                        "(subagent_inline.execute_subagent_delegation, "
                        "execution_mode='local_fake'). "
-                       "V0 path (registered, contract-tested, NOT yet "
-                       "production-routed): dispatcher.route(SUBAGENT_DELEGATE_V0) "
+                       "Flag-on: dispatcher.route(SUBAGENT_DELEGATE_V0) "
                        "→ SubAgentV0Handler → V0 contract "
-                       "(descriptors + bounded single-turn execution). "
+                       "(descriptors + bounded single-turn execution); "
+                       "source='cli_nl_delegation'; "
+                       "evidence_level='subsystem_integration'. "
+                       "Missing/handler-unavailable → not_supported then controlled "
+                       "inline-local fallback. "
                        "L0 probe: turn-end → SUBAGENT_DELEGATE_L0 → rejected (fallback). "
                        "L0 注册的 handler 与上面 inline-local fallback 不是同一条路径——"
                        "registered L0 是 turn-end probe；live fallback 是直接 inline。",
         result_feedback_path="L1-attempt/inline-local fallback: deterministic "
                              "keyword-match summary; "
-                             "V0 (when wired): provider summary + child memory store write",
+                             "V0 (flag-on): provider summary + child memory store write",
         not_ready_behavior="V0 handler registered + contract-verified (V0 evidence chain: "
-                           "12/12 PASS) but production call site (core.py) still routes "
-                           "L1→inline-local fallback; V0 production wiring pending; "
+                           "12/12 PASS); U3 production call site (core.py) routes V0 "
+                           "behind SUBAGENT_V0_ROUTING_ENABLED (default off). "
+                           "Evidence label = subsystem_integration (本窗口 honest "
+                           "label, 不要求 harness_runtime_e2e / L3 / gate=3). "
                            "L1 frozen (legacy/compat; not promoted to product); "
-                           "L2 native loop SPEC 就绪, gated behind policy; "
-                           "TOOL_MEDIATOR_GAP 已知 (production call site fix pending). "
-                           "Live path 是 inline-local fallback（local_fake），"
-                           "不是 registered L0 handler，也不是 V0 "
-                           "（V0 production wiring pending，"
-                           "see V0_WIRING_DECISION）。",
+                           "L2 native loop SPEC 就绪, gated behind policy. "
+                           "default-on flip / lifecycle relocation / L1-L2 deletion "
+                           "均 deferred (见 Roadmap SA-1/SA-2)。",
         decision_meta={
             "why_active": (
                 "REAL-EVIDENCE-006: Live CLI/NL delegation path 已通过 dispatcher + 关键字匹配"

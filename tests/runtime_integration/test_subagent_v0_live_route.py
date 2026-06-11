@@ -186,21 +186,16 @@ def test_v0_inheritance_includes_parent_stop_condition_and_tool_scope() -> None:
     )
 
 
-# ── Guard: 这些 test 默认应 RED；U3 实施后 GREEN ─────────────────────────────
+# ── U3 sentinel (GREEN once agent.subagent_routing_flag is wired) ───────────
 
 
-@pytest.mark.xfail(
-    reason="U2 RED guard: SUBAGENT_V0_ROUTING_ENABLED env-flag not wired yet "
-    "(U3 minimum, flag-gated). Once U3 introduces agent.subagent_routing_flag, "
-    "remove this xfail.",
-    strict=True,
-)
 def test_v0_flag_helper_wired() -> None:
-    """U2 sentinel：U3 必须新增 agent.subagent_routing_flag.read_v0_routing_enabled。
+    """U3 sentinel: agent.subagent_routing_flag.read_v0_routing_enabled exists.
 
-    strict=True 表示"必须 PASS 才能去 mark U3 done"；U2 阶段让它失败，U3
-    阶段再 strict 化。
+    Replaces the U2 xfail guard — strict assertion is satisfied once U3 adds
+    the helper module. Keeps the test as a permanent regression guard so a
+    future refactor cannot accidentally remove the wiring.
     """
     from agent.subagent_routing_flag import read_v0_routing_enabled
 
-    assert read_v0_routing_enabled() is False  # pragma: no cover
+    assert read_v0_routing_enabled() is False  # default = off, no env var

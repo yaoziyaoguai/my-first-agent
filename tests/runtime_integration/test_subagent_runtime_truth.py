@@ -153,28 +153,32 @@ def test_phase1_hook_does_not_register_l1_as_product() -> None:
     )
 
 
-def test_production_cli_delegation_routes_l1_then_falls_back() -> None:
-    """The live CLI delegation path in core.py routes L1, then falls back to L0.
+def test_production_cli_delegation_routes_v0_when_flag_on() -> None:
+    """U3: core.py now wires flag-on V0 production routing.
 
-    This pins the *production-called* dimension that distinguishes registered
-    (V0/L0 in phase1_hook) from production-called (L1-attempt → L0-fallback in
-    core.py). V0 is registered + contract-tested but is NOT the path core.py
-    actually drives today, so the SoT must not claim V0 is the live execution
-    path without qualification.
+    Pin the *production-called* dimension: when ``SUBAGENT_V0_ROUTING_ENABLED``
+    is set, ``_dispatch_or_fallback_delegation`` dispatches
+    ``RuntimeActionType.SUBAGENT_DELEGATE_V0`` with ``source="cli_nl_delegation"``
+    before any L1/L0 fallback. The SoT must reflect this routing.
     """
     import inspect
 
     from agent import core
 
     src = inspect.getsource(core)
-    # The CLI delegation helper routes SUBAGENT_DELEGATE_L1.
-    assert "RuntimeActionType.SUBAGENT_DELEGATE_L1" in src, (
-        "core.py CLI delegation must still route L1 (then fall back)."
+    # U3: V0 production routing exists.
+    assert "RuntimeActionType.SUBAGENT_DELEGATE_V0" in src, (
+        "U3 must wire V0 routing into _dispatch_or_fallback_delegation; "
+        "missing from core.py."
     )
-    # No production routing of V0 exists yet.
-    assert "RuntimeActionType.SUBAGENT_DELEGATE_V0" not in src, (
-        "If core.py begins routing V0, update the SoT execution_path and this "
-        "test together; today V0 is registered-only, not production-called."
+    # source must be the real cli_nl_delegation token.
+    assert '"cli_nl_delegation"' in src, (
+        "V0 production request source must be 'cli_nl_delegation', never "
+        "'core_loop' (no forgery allowed)."
+    )
+    # Default off + missing/invalid → off handled by helper.
+    assert "from agent.subagent_routing_flag import read_v0_routing_enabled" in src, (
+        "core.py must consult the env-flag helper for off-by-default routing."
     )
 
 

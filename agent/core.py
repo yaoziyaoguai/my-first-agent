@@ -1981,20 +1981,56 @@ def _dispatch_or_fallback_delegation(
     user_input: str,
     session_id: str = "",
 ) -> str:
-    """Loop 3.2a: dispatcher-mediated L1 delegation，不存在则回退 L0 inline。
+    """Loop 3.2a + U3: dispatcher-mediated delegation。
 
-    优先走 dispatcher (SUBAGENT_DELEGATE_L1)：
-    1. 从 dispatcher 获取 L1 handler
-    2. 注入 provider（如果有）
-    3. 构建 RuntimeActionRequest → route
-    4. 成功则返回 delegation result
-
-    如果 dispatcher 中没有 L1 handler 或 provider 未设置 → 回退 L0 inline path
-    （_execute_subagent_delegation）。
+    Pre-loop seam 保留在 run_main_loop 之前；默认走 SUBAGENT_DELEGATE_L1 → 回退
+    L0 inline。当 SUBAGENT_V0_ROUTING_ENABLED=on 时改为走 SUBAGENT_DELEGATE_V0
+    handler（registered + contract-verified），不删除 L1 attempt，缺 handler
+    时回退 inline-local。
     """
     from types import SimpleNamespace as _SimpleNamespace
 
     from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
+
+    # U3: flag-on V0 routing. 优先级最高；缺 handler 时 fallback inline。
+    # source 固定为真实 "cli_nl_delegation"，payload 禁止伪造 core_loop。
+    if dispatcher is not None:
+        from agent.subagent_routing_flag import read_v0_routing_enabled
+
+        if read_v0_routing_enabled():
+            v0_handler = dispatcher.get_handler(RuntimeActionType.SUBAGENT_DELEGATE_V0)
+            if v0_handler is not None:
+                v0_req = RuntimeActionRequest(
+                    action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+                    source="cli_nl_delegation",
+                    parent_trace_id=f"delegation-{uuid4().hex[:8]}",
+                    payload={
+                        "profile_id": "default-v0",
+                        "task": task,
+                        "subagent_name": subagent_name,
+                        "delegation_reason": delegation_reason,
+                        "provider_mode": "fake_local",
+                        "parent_opt_in": False,
+                        "parent_bounded": True,
+                        "parent_stop_condition": "delegation_completion",
+                        "tool_scope_inherited": True,
+                    },
+                )
+                v0_result = dispatcher.route(v0_req)
+                if v0_result.status == "not_supported":
+                    # handler 路径上 unavailable → controlled fallback
+                    from agent.runtime_event_safety import safe_emit_runtime_event as _see
+                    _see(
+                        on_runtime_event,
+                        _runtime_event_not_supported_fallback(subagent_name),
+                        fallback_prefix="\n",
+                    )
+                    return _execute_subagent_delegation(
+                        subagent_name, task,
+                        delegation_reason=delegation_reason,
+                        on_runtime_event=on_runtime_event,
+                    )
+                return _render_v0_delegate_result(subagent_name, v0_result)
 
     # 006 TOOL_MEDIATOR_GAP: 为 L1 delegation 构造 ToolRuntimeMediator。
     # 复用 response_handlers.py:230-247 的构造模式，使用 SimpleNamespace
@@ -2043,4 +2079,47 @@ def _dispatch_or_fallback_delegation(
         subagent_name, task,
         delegation_reason=delegation_reason,
         on_runtime_event=on_runtime_event,
+    )
+
+
+def _render_v0_delegate_result(
+    subagent_name: str,
+    v0_result: object,
+) -> str:
+    """Render V0 dispatcher result as the CLI delegate-result shape.
+
+    V0 handler returns a RuntimeActionResult with status in
+    {"success", "failed", "not_supported"}; safe_output carries the
+    bounded, sanitized structured result.
+    """
+    from agent.cli_commands import render_delegate_result
+
+    status = str(getattr(v0_result, "status", "unknown"))
+    evidence = getattr(v0_result, "evidence", {}) or {}
+    payload_dict = dict(getattr(v0_result, "payload", {}) or {})
+    safe_output = payload_dict.get("safe_output", {}) or {}
+    summary = (
+        safe_output.get("summary", "")
+        if isinstance(safe_output, dict)
+        else ""
+    )
+    stop_reason = str(evidence.get("stop_reason", "") or "v0_completed")
+    return render_delegate_result(
+        subagent_name,
+        status,
+        summary,
+        stop_reason,
+        0.0,
+    )
+
+
+def _runtime_event_not_supported_fallback(
+    subagent_name: str,
+) -> object:
+    """Construct a RuntimeEvent for V0 not_supported → inline-local fallback."""
+    from agent.display_events import subagent_delegated_event
+    return subagent_delegated_event(
+        subagent_name,
+        "fallback_inline_local",
+        "V0 handler not available; controlled fallback to inline-local",
     )

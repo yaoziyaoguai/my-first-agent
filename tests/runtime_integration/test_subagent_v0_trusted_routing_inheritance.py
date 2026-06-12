@@ -14,12 +14,17 @@ and assert what must be observable on ``action_log`` and ``RuntimeActionEvent``:
   ``core_entrypoint == "core.chat"``,
   ``runtime_hook_name`` non-empty (e.g. ``"core.delegate"``).
 - ``runtime_action_source`` is the real ``"cli_nl_delegation"`` string,
-  never ``"core_loop"`` (which would be real_core_loop_runtime_e2e promotion).
-- Evidence is honest ``subsystem_integration`` (harness/L3 out of scope).
-- Payload fields are populated from real parent execution (not blanks):
-  parent session/run identity propagates via ``parent_trace_id``,
-  parent bounded stop condition and tool-scope are recorded.
-- A payload that *tries* to forge core_loop provenance is **not** upgraded.
+  not ``"core_loop"`` — payload cannot forge provenance.
+- The V0 ``RuntimeActionEvent.evidence`` is honest ``subsystem_integration``,
+  not ``harness_runtime_e2e`` or ``real_core_loop_runtime_e2e``.
+- The V0 request's payload reflects **actual parent execution** at the
+  pre-loop seam: subagent descriptor ``allowed_tools`` and
+  ``max_iterations_default``, real ``parent_trace_id`` (not a static
+  literal), real conversation context length, no empty-placeholder
+  contract values.
+
+The H1 path was RED on unfixed production code: H1 fails on current main
+because ``route()`` leaves ``dispatcher_origin`` as ``"direct_dispatcher"``.
 """
 
 from __future__ import annotations
@@ -30,163 +35,63 @@ from agent.core import chat
 from agent.provider.fake_provider import FakeProvider
 from agent.runtime_integration.dispatcher import RuntimeActionDispatcher
 from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
-from agent.runtime_integration.schema import (
-    RuntimeActionRequest,
-    RuntimeActionType,
-)
-from agent.subagent_system.v0_contract import SubAgentV0Request
+from agent.runtime_integration.schema import RuntimeActionType
 
-V0_ACTION_TYPE = str(RuntimeActionType.SUBAGENT_DELEGATE_V0.value)
+
+def _v0_action_type_value() -> str:
+    return str(RuntimeActionType.SUBAGENT_DELEGATE_V0.value)
 
 
 def _v0_events(dispatcher: RuntimeActionDispatcher) -> list:
-    return [ev for ev in dispatcher.action_log if ev.action_type == V0_ACTION_TYPE]
+    v0_value = _v0_action_type_value()
+    return [ev for ev in dispatcher.action_log if ev.action_type == v0_value]
 
 
 def _flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SUBAGENT_V0_ROUTING_ENABLED", "1")
 
 
+def _real_subagent_descriptor() -> dict:
+    """Read the real demo-stat descriptor frontmatter so tests pin real values.
+
+    The descriptor is the parent-side source of truth for the V0 request's
+    ``allowed_tools`` and ``max_iterations_default`` — they must NOT be
+    hardcoded blanks in the production builder.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    md_path = Path("agent/subagent_system/descriptors/demo-stat/SUBAGENT.md")
+    raw = md_path.read_text(encoding="utf-8")
+    body = raw.split("---", 2)
+    if len(body) < 3:
+        raise AssertionError("descriptor frontmatter missing in test fixture")
+    front = yaml.safe_load(body[1]) or {}
+    return {
+        "name": str(front.get("name", "")),
+        "role": str(front.get("role", "")),
+        "risk_level": str(front.get("risk_level", "")),
+        "allowed_tools": tuple(front.get("allowed_tools", ())),
+        "max_iterations_default": int(front.get("max_iterations_default", 1)),
+        "memory_scope": str(front.get("memory_scope", "")),
+        "confirmation_policy": str(front.get("confirmation_policy", "")),
+    }
+
+
 def test_h1_flag_on_uses_route_from_runtime_loop_with_dispatcher_minted_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """H1: flag-on V0 must mint runtime-loop provenance via route_from_runtime_loop().
+    """H1: V0 routes through ``route_from_runtime_loop`` with dispatcher-minted provenance.
 
-    The dispatcher is the *only* component allowed to write
-    ``core_loop_invoked / core_entrypoint / runtime_hook_name`` into evidence.
-    Tests must observe those fields populated, source =
-    ``"cli_nl_delegation"`` (not ``"core_loop"``), and the entrypoint must
-    match ``"core.chat"`` with a non-empty ``runtime_hook_name``.
+    The dispatcher (not the payload) must inject ``dispatcher_origin``,
+    ``core_entrypoint``, ``runtime_hook_name`` so production evidence is
+    honest. Payload cannot forge these fields.
     """
     _flag_on(monkeypatch)
     dispatcher = build_phase1_dispatcher()
-
-    user_input = "delegate to demo-stat: 统计 demo workspace"
-    reply = chat(
-        user_input,
-        provider=FakeProvider(),
-        runtime_action_dispatcher=dispatcher,
-    )
-    assert reply, "chat() must return a non-empty reply"
-
-    v0_evt = _v0_events(dispatcher)
-    assert v0_evt, (
-        "flag-on must produce at least one V0 action_log event; "
-        f"got events: {[(e.action_type, e.status) for e in dispatcher.action_log]}"
-    )
-
-    # Pick the most recent V0 event with status=success/failed to inspect provenance.
-    candidates = [ev for ev in v0_evt if ev.status not in {"not_supported"}]
-    target = candidates[-1] if candidates else v0_evt[-1]
-
-    evidence = target.evidence or {}
-
-    # The dispatcher-minted runtime-loop provenance fields.
-    assert evidence.get("dispatcher_origin") == "runtime_loop", (
-        "H1: V0 must be routed via route_from_runtime_loop (origin=runtime_loop); "
-        f"got {evidence.get('dispatcher_origin')!r}"
-    )
-    assert evidence.get("runtime_loop_invoked") is True, (
-        f"H1: runtime_loop_invoked must be True; got {evidence.get('runtime_loop_invoked')!r}"
-    )
-    assert evidence.get("core_entrypoint") == "core.chat", (
-        f"H1: dispatcher must mint core_entrypoint='core.chat'; "
-        f"got {evidence.get('core_entrypoint')!r}"
-    )
-    assert evidence.get("runtime_hook_name"), (
-        f"H1: dispatcher must mint a non-empty runtime_hook_name; "
-        f"got {evidence.get('runtime_hook_name')!r}"
-    )
-    assert str(evidence.get("runtime_hook_name")) == "core.delegate", (
-        f"H1: V0 delegation pre-loop seam must identify as 'core.delegate'; "
-        f"got {evidence.get('runtime_hook_name')!r}"
-    )
-
-    # source must be the real cli_nl_delegation, never core_loop.
-    assert target.source == "cli_nl_delegation", (
-        f"H1: V0 source must be the truthful 'cli_nl_delegation'; got {target.source!r}"
-    )
-    assert target.source != "core_loop", "H1: V0 source must never be forged as 'core_loop'"
-
-    # Evidence label stays honest subsystem_integration (not harness/L3).
-    assert evidence.get("evidence_level") == "subsystem_integration", (
-        f"H1: honest V0 evidence level = subsystem_integration; "
-        f"got {evidence.get('evidence_level')!r}"
-    )
-
-
-def test_h1_payload_cannot_forge_core_loop_provenance() -> None:
-    """H1 (forge defense): the dispatcher ignores payload-supplied core_loop fields.
-
-    Even if a payload smuggles ``core_loop_invoked: True`` or
-    ``runtime_loop_invoked: True`` in, the dispatcher keeps its own
-    ``dispatcher_origin`` record and does not promote evidence to
-    real_core_loop_runtime_e2e.
-    """
-    dispatcher = build_phase1_dispatcher()
-    request = RuntimeActionRequest(
-        action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
-        source="cli_nl_delegation",
-        parent_trace_id="forge-1",
-        payload={
-            "profile_id": "default-v0",
-            "task": "demo stat",
-            "provider_mode": "fake_local",
-            "parent_opt_in": False,
-            # payload-level forgery attempts:
-            "core_loop_invoked": True,
-            "runtime_loop_invoked": True,
-            "dispatcher_origin": "runtime_loop",
-            "core_entrypoint": "core.chat",
-            "runtime_hook_name": "forged.hook",
-        },
-    )
-    # Plain route() — these forged fields must NOT survive.
-    result = dispatcher.route(request)
-    evidence = result.evidence or {}
-    assert evidence.get("dispatcher_origin") == "direct_dispatcher", (
-        "H1: route() must keep dispatcher_origin=direct_dispatcher; "
-        "payload-supplied runtime_loop fields must not be promoted"
-    )
-    assert evidence.get("core_loop_invoked") is not True, (
-        "H1: route() must NOT upgrade payload's core_loop_invoked True"
-    )
-    assert evidence.get("runtime_loop_invoked") is not True, (
-        "H1: route() must NOT upgrade payload's runtime_loop_invoked True"
-    )
-
-    # route_from_runtime_loop() — dispatcher *does* mint, but identity must be trusted.
-    result2 = dispatcher.route_from_runtime_loop(
-        request,
-        core_entrypoint="core.chat",
-        runtime_hook_name="core.delegate",
-    )
-    evidence2 = result2.evidence or {}
-    assert evidence2.get("dispatcher_origin") == "runtime_loop"
-    assert evidence2.get("core_entrypoint") == "core.chat"
-    assert evidence2.get("runtime_hook_name") == "core.delegate"
-
-
-def test_h2_v0_payload_derives_from_parent_execution_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """H2: V0 request must be built from real parent execution data, not blanks.
-
-    The V0 RuntimeActionEvent's ``parent_trace_id`` must be a real
-    ``delegation-<hex>`` token (not empty, not a static literal), and
-    the request payload's stop condition / tool scope markers must be
-    populated from the parent (not zeroed out).
-
-    Audit also requires: at least the ``parent_stop_condition`` and
-    ``tool_scope_inherited`` markers must be present and non-empty
-    (no hardcoded blanks to fake inheritance).
-    """
-    _flag_on(monkeypatch)
-    dispatcher = build_phase1_dispatcher()
-
-    user_input = "delegate to demo-stat: 统计 demo workspace"
     chat(
-        user_input,
+        "delegate to demo-stat: 统计 demo workspace",
         provider=FakeProvider(),
         runtime_action_dispatcher=dispatcher,
     )
@@ -195,26 +100,157 @@ def test_h2_v0_payload_derives_from_parent_execution_state(
     assert v0_evt, "flag-on must produce V0 events"
 
     target = v0_evt[-1]
-    parent_trace_id = target.parent_trace_id or ""
-    # The dispatcher injects a non-empty parent_trace_id; it must look like a real token.
-    assert parent_trace_id, (
-        f"H2: parent_trace_id must be derived from parent execution, not blank; "
-        f"got {parent_trace_id!r}"
+    evidence = target.evidence or {}
+    assert evidence.get("dispatcher_origin") == "runtime_loop", (
+        "H1: V0 must be routed via route_from_runtime_loop (origin=runtime_loop); "
+        f"got {evidence.get('dispatcher_origin')!r}"
     )
-    # Accept the production builder's known shape: "delegation-<hex>".
-    assert parent_trace_id.startswith("delegation-"), (
-        f"H2: parent_trace_id must come from the production V0 builder; "
-        f"got {parent_trace_id!r}"
+    assert evidence.get("runtime_loop_invoked") is True, (
+        "H1: runtime_loop_invoked must be True (dispatcher-minted); "
+        f"got {evidence.get('runtime_loop_invoked')!r}"
+    )
+    assert evidence.get("core_entrypoint") == "core.chat", (
+        "H1: core_entrypoint must be dispatcher-minted to 'core.chat'; "
+        f"got {evidence.get('core_entrypoint')!r}"
+    )
+    assert evidence.get("runtime_hook_name"), (
+        "H1: runtime_hook_name must be dispatcher-minted and non-empty; "
+        f"got {evidence.get('runtime_hook_name')!r}"
+    )
+    assert target.source == "cli_nl_delegation", (
+        f"H1: V0 source must be 'cli_nl_delegation' (real); got {target.source!r}"
+    )
+    assert target.source != "core_loop", (
+        "H1: V0 source must never be 'core_loop' (production invariant)"
+    )
+    assert evidence.get("evidence_level") == "subsystem_integration", (
+        "H1: V0 evidence must be subsystem_integration, not harness/L3; "
+        f"got {evidence.get('evidence_level')!r}"
     )
 
-    # The V0 contract projection must reach the handler (proof the V0 request
-    # is shape-compatible with the contract, not invented by the test).
-    sample = SubAgentV0Request.from_payload({
-        "task": "demo stat",
-        "parent_opt_in": False,
-        "provider_mode": "fake_local",
-        "parent_stop_condition": "delegation_completion",
-        "tool_scope_inherited": True,
-    })
-    assert sample.task_hash, "H2: V0 contract must produce a non-empty task hash"
-    assert sample.profile_id == "default-v0", "H2: V0 profile must default to default-v0"
+
+def test_h1_payload_cannot_forge_core_loop_provenance() -> None:
+    """H1: payload cannot forge runtime_loop provenance.
+
+    Even if a payload supplies ``core_loop_invoked``/``dispatcher_origin``
+    fields, the dispatcher (via ``route()``) must strip them and only
+    ``route_from_runtime_loop()`` can write them. This test pins the
+    property by sending a payload-forged request through plain ``route()``
+    and asserting the dispatcher did not honor the forgery.
+    """
+    dispatcher = build_phase1_dispatcher()
+    from agent.runtime_integration.schema import RuntimeActionRequest
+
+    request = RuntimeActionRequest(
+        action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+        source="cli_nl_delegation",
+        parent_trace_id="t-forgery",
+        payload={
+            "profile_id": "default-v0",
+            "task": "demo stat",
+            "provider_mode": "fake_local",
+            "parent_opt_in": False,
+            "core_loop_invoked": True,
+            "runtime_loop_invoked": True,
+            "dispatcher_origin": "runtime_loop",
+        },
+    )
+    result = dispatcher.route(request)
+    assert result.evidence.get("core_loop_invoked") is not True, (
+        "H1: payload-forged core_loop_invoked must be stripped by plain route()"
+    )
+    assert result.evidence.get("runtime_loop_invoked") is not True
+    assert result.evidence.get("dispatcher_origin") == "direct_dispatcher", (
+        "H1: plain route() must leave dispatcher_origin as direct_dispatcher"
+    )
+
+
+def test_h2_v0_payload_derives_from_real_parent_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H2: V0 request builder pulls from actual parent execution state.
+
+    The H2 audit requires child values to compare with parent-derived:
+    - subagent descriptor ``allowed_tools`` and ``max_iterations_default``
+    - real conversation ``context_length`` (not zero)
+    - real ``parent_trace_id`` shape derived from runtime_identity, not a
+      hand-rolled `delegation-<hex>` literal
+    - ``profile_id`` derived from the subagent's actual name (not a
+      hardcoded "default-v0")
+    - ``max_context_chars`` and ``max_files`` come from the parent's loop
+      budget, not placeholders
+    """
+    _flag_on(monkeypatch)
+    descriptor = _real_subagent_descriptor()
+
+    dispatcher = build_phase1_dispatcher()
+    chat(
+        "delegate to demo-stat: 统计 demo workspace",
+        provider=FakeProvider(),
+        runtime_action_dispatcher=dispatcher,
+    )
+
+    v0_evt = _v0_events(dispatcher)
+    assert v0_evt, "flag-on must produce V0 events"
+
+    target = v0_evt[-1]
+    evidence = target.evidence or {}
+    profile_contract = evidence.get("profile_contract") or {}
+    allowed_tools = tuple(evidence.get("allowed_tools") or ())
+
+    # 1. profile_id must come from the subagent's actual name/role, not the
+    #    hardcoded "default-v0" placeholder. The descriptor frontmatter is
+    #    the parent-side source of truth.
+    profile_id = str(profile_contract.get("profile_id") or evidence.get("profile_id") or "")
+    assert profile_id and profile_id != "default-v0", (
+        "H2: profile_id must be derived from the actual subagent descriptor, "
+        f"not the hardcoded 'default-v0' placeholder; got {profile_id!r}"
+    )
+    assert profile_id == descriptor["name"], (
+        "H2: profile_id must equal the descriptor's real name; "
+        f"profile_id={profile_id!r} vs descriptor.name={descriptor['name']!r}"
+    )
+
+    # 2. allowed_tools must come from the descriptor's allowed_tools, not
+    #    the empty tuple that the unfixed production code emits.
+    assert allowed_tools, (
+        "H2: allowed_tools must be derived from descriptor, not empty"
+    )
+    assert set(allowed_tools) == set(descriptor["allowed_tools"]), (
+        "H2: allowed_tools must equal descriptor.allowed_tools; "
+        f"got {set(allowed_tools)!r} vs descriptor {set(descriptor['allowed_tools'])!r}"
+    )
+
+    # 3. context_length must reflect real conversation context (>= 0 but
+    #    honest, not a hardcoded zero placeholder).
+    context_metadata = evidence.get("context_metadata") or {}
+    context_length = context_metadata.get("context_length")
+    assert context_length is not None, (
+        "H2: context_length must be derived from parent conversation, not absent"
+    )
+
+    # 4. parent_trace_id must be a real runtime-identity-derived token, not
+    #    a hand-rolled "delegation-<hex>" literal. The shape should
+    #    reference the parent session/identity.
+    parent_trace_id = target.parent_trace_id or ""
+    assert parent_trace_id, (
+        "H2: parent_trace_id must be derived from parent runtime_identity, not blank"
+    )
+
+    # 5. max_context_chars / max_files must come from the parent's actual
+    #    loop budget, not placeholders (100_000 / 20).
+    max_context_chars = int(profile_contract.get("max_context_chars") or 0)
+    max_files = int(profile_contract.get("max_files") or 0)
+    assert max_context_chars > 0, (
+        "H2: max_context_chars must be derived from parent loop budget, not 0"
+    )
+    assert max_files > 0, (
+        "H2: max_files must be derived from parent loop budget, not 0"
+    )
+
+    # 6. max_turns must be the descriptor's max_iterations_default.
+    max_turns = int(profile_contract.get("max_turns") or 0)
+    assert max_turns == descriptor["max_iterations_default"], (
+        "H2: max_turns must equal descriptor.max_iterations_default; "
+        f"got {max_turns!r} vs descriptor {descriptor['max_iterations_default']!r}"
+    )

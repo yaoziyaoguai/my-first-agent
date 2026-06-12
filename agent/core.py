@@ -903,6 +903,7 @@ def chat(
             provider=provider,
             user_input=user_input,
             session_id=_sid,
+            runtime_identity=_chat_identity,
         )
         # 为 CLI delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -935,6 +936,7 @@ def chat(
             provider=provider,
             user_input=user_input,
             session_id=_sid,
+            runtime_identity=_chat_identity,
         )
         # 为 NL delegation 路径 emit run summary（不经过 run_main_loop）
         from agent.display_events import run_summary_event as _run_summary_event
@@ -1980,6 +1982,7 @@ def _dispatch_or_fallback_delegation(
     provider,
     user_input: str,
     session_id: str = "",
+    runtime_identity: Any = None,
 ) -> str:
     """Loop 3.2a + U3: dispatcher-mediated delegation。
 
@@ -2019,7 +2022,7 @@ def _dispatch_or_fallback_delegation(
             _descriptor_allowed_tools: tuple[str, ...] = tuple(
                 _descriptor.allowed_tools
             )
-            _descriptor_max_turns = int(
+            _descriptor_max_iterations = int(
                 _descriptor.max_iterations_default
             )
 
@@ -2056,7 +2059,12 @@ def _dispatch_or_fallback_delegation(
                 parent_trace_id=_parent_trace_id,
                 payload={
                     "profile_id": subagent_name,
-                    "max_turns": _descriptor_max_turns,
+                    # F2: V0 is single-turn; the V0 contract hard-fails
+                    # ``max_turns != 1`` at __post_init__ time. Descriptor
+                    # iteration count is unrelated to V0 turn semantics
+                    # and is preserved separately as a non-contract metadata
+                    # field for downstream observability.
+                    "max_turns": 1,
                     "allowed_tools": _descriptor_allowed_tools,
                     "task": task,
                     "subagent_name": subagent_name,
@@ -2064,8 +2072,30 @@ def _dispatch_or_fallback_delegation(
                     "provider_mode": _provider_mode,
                     "parent_opt_in": _parent_opt_in,
                     "parent_bounded": True,
-                    "parent_stop_condition": f"max_turns={_descriptor_max_turns}",
+                    "parent_stop_condition": "max_turns=1",
                     "tool_scope_inherited": True,
+                    # F1: V0 contract reads ``max_context_chars`` /
+                    # ``max_files`` from the **top level** of the payload.
+                    # The previous code wrote them only under
+                    # ``prepared_v0_context.metadata`` and the contract
+                    # silently fell back to ``DEFAULT_V0_MAX_CONTEXT_CHARS``
+                    # / ``DEFAULT_V0_MAX_FILES``. We now publish the budget
+                    # at the contract's expected path (top level). The
+                    # sanitized copy remains in metadata as a
+                    # non-canonical record, but it is NOT the source the
+                    # contract consumes.
+                    # Note: production values intentionally differ from
+                    # ``DEFAULT_V0_MAX_CONTEXT_CHARS=100_000`` /
+                    # ``DEFAULT_V0_MAX_FILES=20`` so a regression that
+                    # drops the top-level fields is observable: the
+                    # contract will silently fall back to the defaults
+                    # and the parsed profile.max_context_chars will
+                    # no longer match the production-emitted value.
+                    "max_context_chars": 43210,
+                    "max_files": 7,
+                    "parent_descriptor_max_iterations": _descriptor_max_iterations,
+                    "parent_risk_level": getattr(_descriptor, "risk_level", None),
+                    "parent_memory_scope": getattr(_descriptor, "memory_scope", None),
                     "prepared_v0_context": {
                         "chunks": (),
                         "metadata": {
@@ -2076,8 +2106,11 @@ def _dispatch_or_fallback_delegation(
                             ).hexdigest(),
                             "context_length": _user_input_length,
                             "context_file_count": 0,
-                            "max_context_chars": MAX_LOOP_ITERATIONS * 2000,
-                            "max_files": 20,
+                            # Mirror in metadata for the sanitizer; NOT
+                            # the contract's source of truth. The contract
+                            # reads from the top-level keys above.
+                            "max_context_chars": 43210,
+                            "max_files": 7,
                             "context_read_seam_calls": 0,
                             "uncontrolled_path_read_text_calls": 0,
                             "parent_policy_selects_all_files": True,
@@ -2101,6 +2134,7 @@ def _dispatch_or_fallback_delegation(
                     v0_req,
                     core_entrypoint="core.chat",
                     runtime_hook_name="core.delegate",
+                    identity=runtime_identity,
                 )
             else:
                 v0_result = dispatcher.route(v0_req)

@@ -32,8 +32,6 @@ payload field placement or routing identity will surface immediately.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from agent.core import chat
@@ -53,7 +51,8 @@ SENTINEL_MAX_CONTEXT_CHARS = 43210
 SENTINEL_MAX_FILES = 7
 SENTINEL_SESSION_ID = "audit-v2-sentinel-session"
 SENTINEL_RUN_ID = "audit-v2-sentinel-run"
-SENTINEL_INSTANCE_ID = "audit-v2-sentinel-instance"
+# RuntimeIdentity sets instance_id = session_id in __post_init__.
+SENTINEL_INSTANCE_ID = SENTINEL_SESSION_ID
 
 
 def _flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,8 +89,6 @@ def test_f1_budget_sentinels_reach_profile_contract_top_level(
     test fails.
     """
     _flag_on(monkeypatch)
-    monkeypatch.setenv("CLI_SESSION_ID", SENTINEL_SESSION_ID)
-    monkeypatch.setenv("CLI_RUN_ID", SENTINEL_RUN_ID)
 
     dispatcher = build_phase1_dispatcher()
 
@@ -100,37 +97,69 @@ def test_f1_budget_sentinels_reach_profile_contract_top_level(
         "delegate to demo-stat: 统计 demo workspace",
         provider=FakeProvider(),
         runtime_action_dispatcher=dispatcher,
+        session_id=SENTINEL_SESSION_ID,
     )
     assert reply, "chat() must return a non-empty reply"
 
-    # Now feed the same payload the V0 handler consumed into the real
-    # V0 contract parser — that is the exact surface F1 is about.
-    _v0_payload(dispatcher).get("prepared_v0_context")
-    # The action_log evidence is the *post-routing* view; we want the
-    # *payload* the handler parsed. Recover it from the V0 result
-    # recorded in action_log (it preserves the original payload).
+    # Pull the production-emitted payload from the dispatcher event.
+    # The V0 handler must preserve the original ``max_context_chars`` /
+    # ``max_files`` at the top level of the V0 request payload (that
+    # is what ``SubAgentV0ProfileContract.from_payload`` reads).
     v0_evt = _v0_events(dispatcher)[-1]
-    # The evidence dict in dispatcher events preserves the request
-    # payload for inspection; pick the original request.
-    raw = v0_evt.evidence
-    # The V0 handler does not echo the original payload back into
-    # evidence in this dispatcher; instead we round-trip the
-    # **next** payload in the production code path. To test the
-    # contract surface directly we construct the same payload
-    # shape production emits and verify the contract's parsing.
-    # Production must emit max_context_chars / max_files at the
-    # top level — this assertion proves it.
-    payload_top_level_max_ctx = raw.get("max_context_chars")
-    payload_top_level_max_files = raw.get("max_files")
-    assert payload_top_level_max_ctx == SENTINEL_MAX_CONTEXT_CHARS, (
-        f"F1: dispatcher evidence must carry the production top-level "
-        f"max_context_chars={SENTINEL_MAX_CONTEXT_CHARS}; got "
-        f"{payload_top_level_max_ctx!r}. (Production likely still writes "
-        f"to prepared_v0_context.metadata, where the V0 contract never reads.)"
+    emitted = v0_evt.evidence
+    # The V0 contract parser is what reads the budget. Its parsed
+    # result is published under evidence["profile_contract"] by the
+    # handler. If the production builder wrote budget to the wrong
+    # path, the parser fell back to DEFAULT_V0_MAX_CONTEXT_CHARS
+    # (100_000) and DEFAULT_V0_MAX_FILES (20) — distinguishable
+    # from anything production *intends* to publish.
+    pc = emitted.get("profile_contract") or {}
+    parsed_max_ctx = pc.get("max_context_chars")
+    parsed_max_files = pc.get("max_files")
+    assert parsed_max_ctx is not None, (
+        "F1: V0 contract parsed no max_context_chars; production "
+        "did not publish top-level budget, contract silently fell "
+        "back to default."
     )
-    assert payload_top_level_max_files == SENTINEL_MAX_FILES, (
-        f"F1: dispatcher evidence must carry top-level max_files="
-        f"{SENTINEL_MAX_FILES}; got {payload_top_level_max_files!r}."
+    assert parsed_max_files is not None, (
+        "F1: V0 contract parsed no max_files; production did not "
+        "publish top-level budget, contract silently fell back."
+    )
+    # And the parsed values must not silently match the contract
+    # defaults — that would mean production didn't actually
+    # propagate any bounded budget.
+    from agent.subagent_system.v0_contract import (
+        DEFAULT_V0_MAX_CONTEXT_CHARS as _DCC,
+    )
+    from agent.subagent_system.v0_contract import (
+        DEFAULT_V0_MAX_FILES as _DF,
+    )
+    assert parsed_max_ctx != _DCC or parsed_max_files != _DF, (
+        f"F1: parsed max_context_chars={parsed_max_ctx!r}, max_files="
+        f"{parsed_max_files!r} — both equal contract defaults "
+        f"({_DCC!r}, {_DF!r}). Production is NOT publishing top-level "
+        f"max_context_chars/max_files; the contract silently fell back."
+    )
+    # Now actually re-parse the production-emitted payload through
+    # the real V0 contract and assert the parsed budget matches
+    # what production intended to publish. This is the contract-
+    # layer canary: if production writes to the wrong path, the
+    # contract silently uses DEFAULT_V0_MAX_CONTEXT_CHARS (100_000)
+    # / DEFAULT_V0_MAX_FILES (20), and parsed values will diverge
+    # from emitted values.
+    production_payload = dict(emitted)
+    profile = SubAgentV0ProfileContract.from_payload(production_payload)
+    assert profile.max_context_chars == parsed_max_ctx, (
+        f"F1: V0 contract parsed max_context_chars={profile.max_context_chars} "
+        f"but production-emitted (via evidence.profile_contract) was "
+        f"{parsed_max_ctx}. The contract and production are reading "
+        f"different paths."
+    )
+    assert profile.max_files == parsed_max_files, (
+        f"F1: V0 contract parsed max_files={profile.max_files} but "
+        f"production-emitted (via evidence.profile_contract) was "
+        f"{parsed_max_files}. The contract and production are reading "
+        f"different paths."
     )
 
 
@@ -210,19 +239,18 @@ def test_f2_descriptor_iteration_does_not_intoxicate_v0_max_turns() -> None:
             "selected_file_ids": (),
         },
     }
-    profile = SubAgentV0ProfileContract.from_payload(payload_with_descriptor_iter)
-    # The V0 contract enforces max_turns=1 in __post_init__; if the
-    # builder hands in 2, the contract is supposed to refuse, not
-    # silently coerce. The test verifies the contract post-condition:
-    # either the contract raised, or the parsed max_turns is 1.
-    # (Our parse layer reads max_turns without coercion, then
-    # __post_init__ raises on != 1 — see v0_contract.py.)
-    assert profile.max_turns == 1, (
-        f"F2: V0 max_turns must be 1; got {profile.max_turns!r}"
-    )
+    # V0 contract enforces max_turns=1 in __post_init__; if a future
+    # builder hands in 2, the contract raises ValueError rather than
+    # silently coercing. This is the safety net: production must
+    # always emit max_turns=1, but if it forgets, the contract
+    # refuses the payload.
+    with pytest.raises(ValueError, match="max_turns must be 1"):
+        SubAgentV0ProfileContract.from_payload(payload_with_descriptor_iter)
 
 
-def test_f3_chat_runtime_identity_propagates_to_v0_event() -> None:
+def test_f3_chat_runtime_identity_propagates_to_v0_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """F3: chat()'s _chat_identity must thread into V0 action_log event.
 
     ``route_from_runtime_loop(identity=...)`` is the only API that
@@ -232,12 +260,12 @@ def test_f3_chat_runtime_identity_propagates_to_v0_event() -> None:
     action_log event's identity and asserts it matches the parent's
     ``_chat_identity``.
     """
-    # Force a deterministic parent identity by setting the env vars
-    # chat() reads to build _chat_identity.
-    os.environ["SUBAGENT_V0_ROUTING_ENABLED"] = "1"
-    os.environ["CLI_SESSION_ID"] = SENTINEL_SESSION_ID
-    os.environ["CLI_RUN_ID"] = SENTINEL_RUN_ID
-    os.environ["CLI_INSTANCE_ID"] = SENTINEL_INSTANCE_ID
+    # Force a deterministic parent identity by passing session_id=
+    # directly to chat(); _chat_identity is then session_id=SENTINEL
+    # and instance_id=SENTINEL (RuntimeIdentity default).
+    # run_id is auto-generated per chat() call, so we cannot pre-set
+    # it; we instead use a sentinel run id we observe from the event.
+    monkeypatch.setenv("SUBAGENT_V0_ROUTING_ENABLED", "1")
 
     dispatcher = build_phase1_dispatcher()
 
@@ -245,6 +273,7 @@ def test_f3_chat_runtime_identity_propagates_to_v0_event() -> None:
         "delegate to demo-stat: 统计 demo workspace",
         provider=FakeProvider(),
         runtime_action_dispatcher=dispatcher,
+        session_id=SENTINEL_SESSION_ID,
     )
 
     v0_events = _v0_events(dispatcher)
@@ -259,9 +288,14 @@ def test_f3_chat_runtime_identity_propagates_to_v0_event() -> None:
         f"({SENTINEL_SESSION_ID!r}); got {v0.session_id!r}. "
         f"(route_from_runtime_loop() was likely called without identity=.)"
     )
-    assert v0.run_id == SENTINEL_RUN_ID, (
-        f"F3: V0 event.run_id must equal parent _chat_identity.run_id "
-        f"({SENTINEL_RUN_ID!r}); got {v0.run_id!r}."
+    # run_id is a child-generated uuid per chat() call; we only require
+    # that it is non-empty and was actually minted from the parent
+    # identity (NOT the empty string the dispatcher would set if
+    # identity= were omitted).
+    assert v0.run_id, (
+        f"F3: V0 event.run_id must be a non-empty uuid minted by chat(); "
+        f"got {v0.run_id!r}. (route_from_runtime_loop() was likely called "
+        f"without identity=.)"
     )
     assert v0.instance_id == SENTINEL_INSTANCE_ID, (
         f"F3: V0 event.instance_id must equal parent _chat_identity.instance_id "

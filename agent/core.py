@@ -2028,11 +2028,24 @@ def _dispatch_or_fallback_delegation(
                     },
                 },
             )
-            # Always route through dispatcher — even if V0 handler is missing,
+            # Always route through dispatcher via route_from_runtime_loop() so
+            # provenance (dispatcher_origin, core_entrypoint, runtime_hook_name)
+            # is dispatcher-minted; payload-supplied core_loop fields cannot
+            # promote the evidence level. When V0 handler is missing, the
             # dispatcher emits a not_supported event (with real source) and
             # we fall back to inline-local. This is the controlled fallback
             # contract: G6 depends on observing the not_supported event.
-            v0_result = dispatcher.route(v0_req)
+            route_from_runtime_loop = getattr(
+                dispatcher, "route_from_runtime_loop", None
+            )
+            if route_from_runtime_loop is not None:
+                v0_result = route_from_runtime_loop(
+                    v0_req,
+                    core_entrypoint="core.chat",
+                    runtime_hook_name="core.delegate",
+                )
+            else:
+                v0_result = dispatcher.route(v0_req)
             if v0_result.status == "not_supported":
                 from agent.runtime_event_safety import safe_emit_runtime_event as _see
                 _see(

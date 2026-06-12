@@ -248,9 +248,15 @@ def test_h2_v0_payload_derives_from_real_parent_execution(
         "H2: max_files must be derived from parent loop budget, not 0"
     )
 
-    # 6. max_turns must be the descriptor's max_iterations_default.
+    # 6. max_turns must be 1 (V0 single-turn contract hard invariant).
+    #    descriptor.max_iterations_default is preserved separately as
+    #    parent_descriptor_max_iterations; it must NOT be the V0
+    #    max_turns. F2 unit test in test_subagent_v0_audit_v2.py
+    #    proves the contract hard-fails on max_turns != 1.
     max_turns = int(profile_contract.get("max_turns") or 0)
-    assert max_turns == descriptor["max_iterations_default"], (
-        "H2: max_turns must equal descriptor.max_iterations_default; "
-        f"got {max_turns!r} vs descriptor {descriptor['max_iterations_default']!r}"
+    assert max_turns == 1, (
+        f"H2: V0 max_turns must be 1 (single-turn contract); got {max_turns!r}. "
+        f"descriptor.max_iterations_default={descriptor['max_iterations_default']!r} "
+        f"must NOT be the V0 max_turns; it is preserved as "
+        f"parent_descriptor_max_iterations metadata instead."
     )

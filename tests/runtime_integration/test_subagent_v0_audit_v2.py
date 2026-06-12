@@ -125,20 +125,26 @@ def test_f1_budget_sentinels_reach_profile_contract_top_level(
         "F1: V0 contract parsed no max_files; production did not "
         "publish top-level budget, contract silently fell back."
     )
-    # And the parsed values must not silently match the contract
-    # defaults — that would mean production didn't actually
-    # propagate any bounded budget.
+    # And the parsed values must NOT equal the contract defaults —
+    # that would mean production didn't actually propagate a
+    # bounded budget (the contract silently fell back). Use strict
+    # inequality against the contract default on BOTH fields to
+    # close the partial-drift loophole.
     from agent.subagent_system.v0_contract import (
         DEFAULT_V0_MAX_CONTEXT_CHARS as _DCC,
     )
     from agent.subagent_system.v0_contract import (
         DEFAULT_V0_MAX_FILES as _DF,
     )
-    assert parsed_max_ctx != _DCC or parsed_max_files != _DF, (
-        f"F1: parsed max_context_chars={parsed_max_ctx!r}, max_files="
-        f"{parsed_max_files!r} — both equal contract defaults "
-        f"({_DCC!r}, {_DF!r}). Production is NOT publishing top-level "
-        f"max_context_chars/max_files; the contract silently fell back."
+    assert parsed_max_ctx != _DCC, (
+        f"F1: parsed max_context_chars={parsed_max_ctx!r} equals contract "
+        f"default {_DCC!r}. Production is NOT publishing top-level "
+        f"max_context_chars; the contract silently fell back."
+    )
+    assert parsed_max_files != _DF, (
+        f"F1: parsed max_files={parsed_max_files!r} equals contract "
+        f"default {_DF!r}. Production is NOT publishing top-level "
+        f"max_files; the contract silently fell back."
     )
     # Now actually re-parse the production-emitted payload through
     # the real V0 contract and assert the parsed budget matches

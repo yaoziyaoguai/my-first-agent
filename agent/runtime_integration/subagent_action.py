@@ -335,6 +335,10 @@ class SubAgentV0Handler:
 
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
         payload = dict(request.payload)
+
+        if payload.get("error") == "descriptor_not_found":
+            return self._descriptor_not_found(context, payload)
+
         try:
             profile = SubAgentV0ProfileContract.from_payload(payload)
             v0_request = SubAgentV0Request.from_payload(payload)
@@ -720,6 +724,37 @@ class SubAgentV0Handler:
             parent_adjudicated=False,
             evidence_extra=evidence_extra,
             error_safe_preview="subagent v0 policy blocked",
+        )
+
+    def _descriptor_not_found(
+        self,
+        context: RuntimeActionContext,
+        payload: dict[str, Any],
+    ):
+        subagent_name = str(payload.get("subagent_name") or payload.get("profile_id") or "unknown")
+        return context.rejected(
+            handler_name=type(self).__name__,
+            target_module="SubAgentV0Contract",
+            payload={},
+            observed_call=None,
+            parent_adjudicated=False,
+            evidence_extra={
+                "failure_kind": "descriptor_not_found",
+                "subagent_name": subagent_name,
+                "execution_started": False,
+                "provider_called": False,
+                "provider_completed": False,
+                "contract_only": True,
+                "lifecycle_events": (
+                    "subagent.request.created",
+                    "subagent.descriptor.not_found",
+                ),
+                "event": "subagent.descriptor.not_found",
+                "error_type": "descriptor_not_found",
+                "error_hash": stable_hash("descriptor_not_found", prefix="error"),
+                "redacted": True,
+            },
+            error_safe_preview=f"descriptor not found: {subagent_name}",
         )
 
     def _skipped_contract(

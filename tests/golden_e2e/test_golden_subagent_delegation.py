@@ -380,12 +380,15 @@ def test_g7_v0_business_error_is_error_not_fallback(
 ) -> None:
     """G7: V0 business error through chat() must surface failure, not fallback.
 
-    Uses the real SubAgentV0Handler's provider_mode="disabled" gate
-    as a controllable business-failure path: when the provider is
-    explicitly set to produce a disabled mode, the handler
-    policy-blocks, which is a real V0 business failure (not a fake
-    _Boom handler). The production chat() path must render this as
-    a failure, never silently swap to inline-local.
+    EVIDENCE SCOPE: This test proves that chat() renders status="failed" as
+    user-visible error (not inline-local fallback). It does NOT prove real
+    _failed_contract or _provider_failure paths — those are covered by
+    test_subagent_v0_failure_taxonomy.py::TestF31RealContractFailure and
+    TestF31RealProviderFailure which use the real SubAgentV0Handler.
+
+    The _ContractFailHandler here is a characterization fixture for the
+    chat() rendering path only. Do not treat it as evidence of real
+    failure surface coverage.
     """
     monkeypatch.setenv("SUBAGENT_V0_ROUTING_ENABLED", "1")
 

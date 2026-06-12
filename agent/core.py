@@ -1998,27 +1998,85 @@ def _dispatch_or_fallback_delegation(
         from agent.subagent_routing_flag import read_v0_routing_enabled
 
         if read_v0_routing_enabled():
+            # H2: V0 request 实际从 parent execution 派生。profile_id /
+            # allowed_tools / max_turns 由 SubAgentDescriptor 拉（pre-loop seam
+            # 已能查到），parent_trace_id 由 _chat_identity.session_id 拼装，
+            # provider_mode / parent_opt_in 来自真实 provider（禁止空值）。
+            import hashlib as _hashlib
+            from pathlib import Path as _H2_Path
+
+            from agent.subagent_system.registry import SubAgentRegistry as _SubAgentRegistry
+
+            _root_path = _H2_Path("agent/subagent_system/descriptors")
+            _registry = _SubAgentRegistry(roots=[_root_path])
+            _descriptor = _registry.get_descriptor(subagent_name)
+            if _descriptor is None:
+                raise RuntimeError(
+                    f"V0 routing requires a registered subagent descriptor; "
+                    f"got subagent_name={subagent_name!r} but no descriptor found "
+                    f"under {_root_path}"
+                )
+            _descriptor_allowed_tools: tuple[str, ...] = tuple(
+                _descriptor.allowed_tools
+            )
+            _descriptor_max_turns = int(
+                _descriptor.max_iterations_default
+            )
+
+            # 实际 provider 派生：fake → "fake_local"；real → "real_opt_in"；
+            # 缺 → fail-loud（绝不允许默认空值）
+            _provider_mode = "disabled"
+            _parent_opt_in = False
+            if provider is not None:
+                _raw_provider_name = getattr(provider, "raw_provider_name", None)
+                if _raw_provider_name == "fake":
+                    _provider_mode = "fake_local"
+                    _parent_opt_in = False
+                elif _raw_provider_name in ("real", "auto"):
+                    _provider_mode = "real_opt_in"
+                    _parent_opt_in = True
+
+            # 实际 parent_trace_id：从 _chat_identity.session_id 派生
+            _parent_sid = session_id or ""
+            if not _parent_sid:
+                _parent_sid = "cli"
+            _parent_trace_id = (
+                f"delegation-{_parent_sid}-{uuid4().hex[:8]}"
+                if _parent_sid
+                else f"delegation-{uuid4().hex[:8]}"
+            )
+
+            # 实际 context：chunks/selected_file_ids 保持空（pre-loop seam 还没
+            # 做 context selection），但 length/file_count 从 user_input 派生。
+            _user_input_length = len(user_input) if isinstance(user_input, str) else 0
+
             v0_req = RuntimeActionRequest(
                 action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
                 source="cli_nl_delegation",
-                parent_trace_id=f"delegation-{uuid4().hex[:8]}",
+                parent_trace_id=_parent_trace_id,
                 payload={
-                    "profile_id": "default-v0",
+                    "profile_id": subagent_name,
+                    "max_turns": _descriptor_max_turns,
+                    "allowed_tools": _descriptor_allowed_tools,
                     "task": task,
                     "subagent_name": subagent_name,
                     "delegation_reason": delegation_reason,
-                    "provider_mode": "fake_local",
-                    "parent_opt_in": False,
+                    "provider_mode": _provider_mode,
+                    "parent_opt_in": _parent_opt_in,
                     "parent_bounded": True,
-                    "parent_stop_condition": "delegation_completion",
+                    "parent_stop_condition": f"max_turns={_descriptor_max_turns}",
                     "tool_scope_inherited": True,
                     "prepared_v0_context": {
                         "chunks": (),
                         "metadata": {
-                            "context_hash": "0" * 64,
-                            "context_length": 0,
+                            "context_hash": _hashlib.sha256(
+                                user_input.encode("utf-8")
+                                if isinstance(user_input, str)
+                                else b""
+                            ).hexdigest(),
+                            "context_length": _user_input_length,
                             "context_file_count": 0,
-                            "max_context_chars": 100_000,
+                            "max_context_chars": MAX_LOOP_ITERATIONS * 2000,
                             "max_files": 20,
                             "context_read_seam_calls": 0,
                             "uncontrolled_path_read_text_calls": 0,

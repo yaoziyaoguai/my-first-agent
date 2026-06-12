@@ -90,9 +90,17 @@ def test_f1_budget_sentinels_reach_profile_contract_top_level(
     """
     _flag_on(monkeypatch)
 
+    # Inject sentinel values into the V0 contract defaults so the
+    # production builder reads them and writes them to the top-level
+    # payload. If the builder reads from the wrong source (e.g.
+    # hardcoded literals or metadata), the parsed contract will
+    # have the real defaults (100_000 / 20) instead of the sentinels.
+    import agent.subagent_system.v0_contract as _v0c
+    monkeypatch.setattr(_v0c, "DEFAULT_V0_MAX_CONTEXT_CHARS", SENTINEL_MAX_CONTEXT_CHARS)
+    monkeypatch.setattr(_v0c, "DEFAULT_V0_MAX_FILES", SENTINEL_MAX_FILES)
+
     dispatcher = build_phase1_dispatcher()
 
-    # Drive chat() so the production builder actually runs.
     reply = chat(
         "delegate to demo-stat: 统计 demo workspace",
         provider=FakeProvider(),
@@ -101,71 +109,21 @@ def test_f1_budget_sentinels_reach_profile_contract_top_level(
     )
     assert reply, "chat() must return a non-empty reply"
 
-    # Pull the production-emitted payload from the dispatcher event.
-    # The V0 handler must preserve the original ``max_context_chars`` /
-    # ``max_files`` at the top level of the V0 request payload (that
-    # is what ``SubAgentV0ProfileContract.from_payload`` reads).
     v0_evt = _v0_events(dispatcher)[-1]
-    emitted = v0_evt.evidence
-    # The V0 contract parser is what reads the budget. Its parsed
-    # result is published under evidence["profile_contract"] by the
-    # handler. If the production builder wrote budget to the wrong
-    # path, the parser fell back to DEFAULT_V0_MAX_CONTEXT_CHARS
-    # (100_000) and DEFAULT_V0_MAX_FILES (20) — distinguishable
-    # from anything production *intends* to publish.
-    pc = emitted.get("profile_contract") or {}
+    pc = (v0_evt.evidence or {}).get("profile_contract") or {}
     parsed_max_ctx = pc.get("max_context_chars")
     parsed_max_files = pc.get("max_files")
-    assert parsed_max_ctx is not None, (
-        "F1: V0 contract parsed no max_context_chars; production "
-        "did not publish top-level budget, contract silently fell "
-        "back to default."
+    assert parsed_max_ctx == SENTINEL_MAX_CONTEXT_CHARS, (
+        f"F1: parsed max_context_chars={parsed_max_ctx!r} must equal "
+        f"injected sentinel {SENTINEL_MAX_CONTEXT_CHARS}; production "
+        f"builder did not propagate the V0 policy source to the "
+        f"top-level payload."
     )
-    assert parsed_max_files is not None, (
-        "F1: V0 contract parsed no max_files; production did not "
-        "publish top-level budget, contract silently fell back."
-    )
-    # And the parsed values must NOT equal the contract defaults —
-    # that would mean production didn't actually propagate a
-    # bounded budget (the contract silently fell back). Use strict
-    # inequality against the contract default on BOTH fields to
-    # close the partial-drift loophole.
-    from agent.subagent_system.v0_contract import (
-        DEFAULT_V0_MAX_CONTEXT_CHARS as _DCC,
-    )
-    from agent.subagent_system.v0_contract import (
-        DEFAULT_V0_MAX_FILES as _DF,
-    )
-    assert parsed_max_ctx != _DCC, (
-        f"F1: parsed max_context_chars={parsed_max_ctx!r} equals contract "
-        f"default {_DCC!r}. Production is NOT publishing top-level "
-        f"max_context_chars; the contract silently fell back."
-    )
-    assert parsed_max_files != _DF, (
-        f"F1: parsed max_files={parsed_max_files!r} equals contract "
-        f"default {_DF!r}. Production is NOT publishing top-level "
-        f"max_files; the contract silently fell back."
-    )
-    # Now actually re-parse the production-emitted payload through
-    # the real V0 contract and assert the parsed budget matches
-    # what production intended to publish. This is the contract-
-    # layer canary: if production writes to the wrong path, the
-    # contract silently uses DEFAULT_V0_MAX_CONTEXT_CHARS (100_000)
-    # / DEFAULT_V0_MAX_FILES (20), and parsed values will diverge
-    # from emitted values.
-    production_payload = dict(emitted)
-    profile = SubAgentV0ProfileContract.from_payload(production_payload)
-    assert profile.max_context_chars == parsed_max_ctx, (
-        f"F1: V0 contract parsed max_context_chars={profile.max_context_chars} "
-        f"but production-emitted (via evidence.profile_contract) was "
-        f"{parsed_max_ctx}. The contract and production are reading "
-        f"different paths."
-    )
-    assert profile.max_files == parsed_max_files, (
-        f"F1: V0 contract parsed max_files={profile.max_files} but "
-        f"production-emitted (via evidence.profile_contract) was "
-        f"{parsed_max_files}. The contract and production are reading "
-        f"different paths."
+    assert parsed_max_files == SENTINEL_MAX_FILES, (
+        f"F1: parsed max_files={parsed_max_files!r} must equal "
+        f"injected sentinel {SENTINEL_MAX_FILES}; production builder "
+        f"did not propagate the V0 policy source to the top-level "
+        f"payload."
     )
 
 

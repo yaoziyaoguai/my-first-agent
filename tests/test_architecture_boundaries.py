@@ -523,6 +523,9 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.subagent_inline",
         # U3: SUBAGENT_V0_ROUTING_ENABLED env flag helper（default-off, opt-in）。
         "agent.subagent_routing_flag",
+        # V0 budget constants（DEFAULT_V0_MAX_CONTEXT_CHARS / DEFAULT_V0_MAX_FILES）
+        # used by production builder to source canonical context budget.
+        "agent.subagent_system.v0_contract",
         # ── B7 Multi-Instance Readiness imports ──
         # 以下 imports 均为 B7 identity/namespace/checkpoint/memory/lifecycle
         # 主线所需。每个 import 都对应 B7 的具体能力：

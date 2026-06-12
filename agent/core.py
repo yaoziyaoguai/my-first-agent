@@ -2009,15 +2009,51 @@ def _dispatch_or_fallback_delegation(
             from pathlib import Path as _H2_Path
 
             from agent.subagent_system.registry import SubAgentRegistry as _SubAgentRegistry
+            from agent.subagent_system.v0_contract import (
+                DEFAULT_V0_MAX_CONTEXT_CHARS,
+                DEFAULT_V0_MAX_FILES,
+            )
 
             _root_path = _H2_Path("agent/subagent_system/descriptors")
             _registry = _SubAgentRegistry(roots=[_root_path])
             _descriptor = _registry.get_descriptor(subagent_name)
             if _descriptor is None:
-                raise RuntimeError(
-                    f"V0 routing requires a registered subagent descriptor; "
-                    f"got subagent_name={subagent_name!r} but no descriptor found "
-                    f"under {_root_path}"
+                # B2: descriptor missing → route a rejected request
+                # through the dispatcher so the action_log gets an
+                # honest event, then return a stable user-visible
+                # not-found string. Do NOT raise — that crashes the
+                # user path. Do NOT execute child. Do NOT fallback
+                # to another subagent.
+                _reject_req = RuntimeActionRequest(
+                    action_type=RuntimeActionType.SUBAGENT_DELEGATE_V0,
+                    source="cli_nl_delegation",
+                    parent_trace_id=f"delegation-{session_id or 'cli'}-{uuid4().hex[:8]}",
+                    payload={
+                        "profile_id": subagent_name,
+                        "task": task,
+                        "subagent_name": subagent_name,
+                        "delegation_reason": delegation_reason,
+                        "error": "descriptor_not_found",
+                    },
+                )
+                route_fn = getattr(
+                    dispatcher, "route_from_runtime_loop", None
+                )
+                if route_fn is not None:
+                    route_fn(
+                        _reject_req,
+                        core_entrypoint="core.chat",
+                        runtime_hook_name="core.delegate",
+                        identity=runtime_identity,
+                    )
+                else:
+                    dispatcher.route(_reject_req)
+                from agent.cli_commands import render_delegate_not_found
+                visible_names = [
+                    d.name for d in _registry.list_visible()
+                ]
+                return render_delegate_not_found(
+                    subagent_name, visible_names
                 )
             _descriptor_allowed_tools: tuple[str, ...] = tuple(
                 _descriptor.allowed_tools
@@ -2026,16 +2062,20 @@ def _dispatch_or_fallback_delegation(
                 _descriptor.max_iterations_default
             )
 
-            # 实际 provider 派生：fake → "fake_local"；real → "real_opt_in"；
-            # 缺 → fail-loud（绝不允许默认空值）
+            # B1: provider mode 从 canonical provider_type 派生（所有
+            # provider 实例都有此属性）。之前错误地读
+            # raw_provider_name（只在 ProviderResponse 上，provider
+            # 实例上不存在），导致 FakeProvider 被识别为 disabled。
             _provider_mode = "disabled"
             _parent_opt_in = False
             if provider is not None:
-                _raw_provider_name = getattr(provider, "raw_provider_name", None)
-                if _raw_provider_name == "fake":
+                _provider_type = getattr(provider, "provider_type", None)
+                if _provider_type == "fake":
                     _provider_mode = "fake_local"
                     _parent_opt_in = False
-                elif _raw_provider_name in ("real", "auto"):
+                elif _provider_type in (
+                    "anthropic_native", "anthropic_compatible",
+                ):
                     _provider_mode = "real_opt_in"
                     _parent_opt_in = True
 
@@ -2074,25 +2114,15 @@ def _dispatch_or_fallback_delegation(
                     "parent_bounded": True,
                     "parent_stop_condition": "max_turns=1",
                     "tool_scope_inherited": True,
-                    # F1: V0 contract reads ``max_context_chars`` /
+                    # H1: V0 contract reads ``max_context_chars`` /
                     # ``max_files`` from the **top level** of the payload.
-                    # The previous code wrote them only under
-                    # ``prepared_v0_context.metadata`` and the contract
-                    # silently fell back to ``DEFAULT_V0_MAX_CONTEXT_CHARS``
-                    # / ``DEFAULT_V0_MAX_FILES``. We now publish the budget
-                    # at the contract's expected path (top level). The
-                    # sanitized copy remains in metadata as a
-                    # non-canonical record, but it is NOT the source the
-                    # contract consumes.
-                    # Note: production values intentionally differ from
-                    # ``DEFAULT_V0_MAX_CONTEXT_CHARS=100_000`` /
-                    # ``DEFAULT_V0_MAX_FILES=20`` so a regression that
-                    # drops the top-level fields is observable: the
-                    # contract will silently fall back to the defaults
-                    # and the parsed profile.max_context_chars will
-                    # no longer match the production-emitted value.
-                    "max_context_chars": 43210,
-                    "max_files": 7,
+                    # The canonical V0 policy source is
+                    # ``DEFAULT_V0_MAX_CONTEXT_CHARS`` /
+                    # ``DEFAULT_V0_MAX_FILES`` from the V0 contract
+                    # module. Tests inject non-default sentinels to
+                    # prove the propagation path is real.
+                    "max_context_chars": DEFAULT_V0_MAX_CONTEXT_CHARS,
+                    "max_files": DEFAULT_V0_MAX_FILES,
                     "parent_descriptor_max_iterations": _descriptor_max_iterations,
                     "parent_risk_level": getattr(_descriptor, "risk_level", None),
                     "parent_memory_scope": getattr(_descriptor, "memory_scope", None),
@@ -2109,8 +2139,8 @@ def _dispatch_or_fallback_delegation(
                             # Mirror in metadata for the sanitizer; NOT
                             # the contract's source of truth. The contract
                             # reads from the top-level keys above.
-                            "max_context_chars": 43210,
-                            "max_files": 7,
+                            "max_context_chars": DEFAULT_V0_MAX_CONTEXT_CHARS,
+                            "max_files": DEFAULT_V0_MAX_FILES,
                             "context_read_seam_calls": 0,
                             "uncontrolled_path_read_text_calls": 0,
                             "parent_policy_selects_all_files": True,

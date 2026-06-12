@@ -171,6 +171,233 @@ def test_f1_budget_sentinels_via_real_profile_contract_from_payload() -> None:
     )
 
 
+def test_f1_1_top_level_keys_required_and_parsed_equal() -> None:
+    """F1.1 falsification: prove the contract layer requires the top-level keys.
+
+    Three strict assertions in a single payload:
+
+    1. Top-level ``max_context_chars`` / ``max_files`` must be present
+       and equal to the value injected (i.e. the contract does not
+       silently fall back to ``DEFAULT_*`` when the keys exist).
+    2. The parsed contract values must equal the raw top-level
+       values (no transform, no clamp, no override).
+    3. The sentinels must be different from the canonical
+       ``DEFAULT_V0_MAX_CONTEXT_CHARS`` / ``DEFAULT_V0_MAX_FILES``;
+       if a future refactor makes the sentinels equal the defaults
+       (i.e. the test becomes a coincidence) the test fails loudly.
+    """
+    import agent.subagent_system.v0_contract as _v0c
+
+    assert SENTINEL_MAX_CONTEXT_CHARS != _v0c.DEFAULT_V0_MAX_CONTEXT_CHARS, (
+        f"F1.1 falsification: sentinel {SENTINEL_MAX_CONTEXT_CHARS} "
+        f"coincides with contract default; the test would pass "
+        f"trivially. Choose a sentinel != {_v0c.DEFAULT_V0_MAX_CONTEXT_CHARS}."
+    )
+    assert SENTINEL_MAX_FILES != _v0c.DEFAULT_V0_MAX_FILES, (
+        f"F1.1 falsification: sentinel {SENTINEL_MAX_FILES} "
+        f"coincides with contract default; the test would pass "
+        f"trivially. Choose a sentinel != {_v0c.DEFAULT_V0_MAX_FILES}."
+    )
+
+    payload = {
+        "max_context_chars": SENTINEL_MAX_CONTEXT_CHARS,
+        "max_files": SENTINEL_MAX_FILES,
+        "profile_id": "demo-stat",
+        "task": "统计 demo workspace",
+        "provider_mode": "fake_local",
+        "parent_opt_in": False,
+        "parent_stop_condition": "delegation_completion",
+        "tool_scope_inherited": True,
+        "allowed_tools": ("read_file",),
+        "prepared_v0_context": {
+            "context_hash": "deadbeef" * 8,
+            "context_length": 100,
+            "context_file_count": 0,
+            "max_context_chars": 999_999,
+            "max_files": 999,
+            "parent_policy_selects_all_files": True,
+            "selected_file_ids": (),
+        },
+    }
+    # (1) keys must be present
+    assert "max_context_chars" in payload
+    assert "max_files" in payload
+
+    profile = SubAgentV0ProfileContract.from_payload(payload)
+
+    # (2) parsed values equal the raw top-level values
+    assert profile.max_context_chars == payload["max_context_chars"], (
+        f"F1.1: parsed max_context_chars={profile.max_context_chars!r} "
+        f"!= raw top-level {payload['max_context_chars']!r}. "
+        f"Contract may have a transform, clamp, or hidden default."
+    )
+    assert profile.max_files == payload["max_files"], (
+        f"F1.1: parsed max_files={profile.max_files!r} "
+        f"!= raw top-level {payload['max_files']!r}."
+    )
+
+    # (3) sentinels differ from canonical contract defaults
+    assert profile.max_context_chars != _v0c.DEFAULT_V0_MAX_CONTEXT_CHARS, (
+        f"F1.1: parsed max_context_chars equals canonical default "
+        f"{_v0c.DEFAULT_V0_MAX_CONTEXT_CHARS}; the test would pass "
+        f"even with no top-level key. The falsification proves the "
+        f"path, not a coincidence."
+    )
+    assert profile.max_files != _v0c.DEFAULT_V0_MAX_FILES, (
+        f"F1.1: parsed max_files equals canonical default "
+        f"{_v0c.DEFAULT_V0_MAX_FILES}; falsification trivial."
+    )
+
+
+def test_f1_1_missing_top_level_keys_fall_back_to_contract_defaults() -> None:
+    """F1.1 falsification (negative): if top-level keys are absent,
+    the contract must fall back to ``DEFAULT_V0_MAX_CONTEXT_CHARS`` /
+    ``DEFAULT_V0_MAX_FILES``. This proves the previous positive test
+    is not passing because the contract always returns the sentinel;
+    the contract is reading from the top level.
+    """
+    import agent.subagent_system.v0_contract as _v0c
+
+    payload = {
+        # max_context_chars and max_files deliberately absent
+        "profile_id": "demo-stat",
+        "task": "统计 demo workspace",
+        "provider_mode": "fake_local",
+        "parent_opt_in": False,
+        "parent_stop_condition": "delegation_completion",
+        "tool_scope_inherited": True,
+        "allowed_tools": ("read_file",),
+        "prepared_v0_context": {
+            "context_hash": "deadbeef" * 8,
+            "context_length": 100,
+            "context_file_count": 0,
+            "parent_policy_selects_all_files": True,
+            "selected_file_ids": (),
+        },
+    }
+    assert "max_context_chars" not in payload
+    assert "max_files" not in payload
+
+    profile = SubAgentV0ProfileContract.from_payload(payload)
+
+    # Negative falsification: without top-level keys, the contract
+    # MUST return the canonical defaults. If it does not, either
+    # the contract is reading from the wrong place (e.g. metadata
+    # mirror) or it has hidden magic.
+    assert profile.max_context_chars == _v0c.DEFAULT_V0_MAX_CONTEXT_CHARS, (
+        f"F1.1 negative: with top-level keys absent, parsed "
+        f"max_context_chars={profile.max_context_chars!r} != "
+        f"canonical default {_v0c.DEFAULT_V0_MAX_CONTEXT_CHARS!r}. "
+        f"The contract is not reading from the top level; the "
+        f"positive test would pass even if the top-level path "
+        f"were broken."
+    )
+    assert profile.max_files == _v0c.DEFAULT_V0_MAX_FILES, (
+        f"F1.1 negative: with top-level keys absent, parsed "
+        f"max_files={profile.max_files!r} != canonical default "
+        f"{_v0c.DEFAULT_V0_MAX_FILES!r}."
+    )
+
+
+def test_f1_top_level_keys_present_in_raw_v0_request() -> None:
+    """F1.1: V0 request raw payload (top level) must contain the budget keys.
+
+    Tests the contract reader's surface independently of the dispatcher.
+    If the contract ever stops looking at the top level, the parsed
+    ``max_context_chars`` / ``max_files`` will equal the contract
+    defaults, not the injected sentinels.
+    """
+    import agent.subagent_system.v0_contract as _v0c
+
+    payload = {
+        "profile_id": "demo-stat",
+        "task": "统计 demo workspace",
+        "provider_mode": "fake_local",
+        "parent_opt_in": False,
+        "parent_stop_condition": "delegation_completion",
+        "tool_scope_inherited": True,
+        "allowed_tools": ("read_file",),
+        "max_context_chars": SENTINEL_MAX_CONTEXT_CHARS,
+        "max_files": SENTINEL_MAX_FILES,
+        "prepared_v0_context": {
+            "context_hash": "deadbeef" * 8,
+            "context_length": 100,
+            "context_file_count": 0,
+            "parent_policy_selects_all_files": True,
+            "selected_file_ids": (),
+        },
+    }
+
+    # Falsification guard: sentinels must differ from contract defaults
+    # so the test can actually distinguish "real path" from "default
+    # coincidence".
+    assert SENTINEL_MAX_CONTEXT_CHARS != _v0c.DEFAULT_V0_MAX_CONTEXT_CHARS
+    assert SENTINEL_MAX_FILES != _v0c.DEFAULT_V0_MAX_FILES
+
+    # Top-level keys must be present and equal sentinels
+    assert "max_context_chars" in payload
+    assert "max_files" in payload
+    assert payload["max_context_chars"] == SENTINEL_MAX_CONTEXT_CHARS
+    assert payload["max_files"] == SENTINEL_MAX_FILES
+
+    # Parsed contract must equal raw payload, NOT the contract default
+    profile = SubAgentV0ProfileContract.from_payload(payload)
+    assert profile.max_context_chars == SENTINEL_MAX_CONTEXT_CHARS, (
+        f"F1.1: parsed max_context_chars={profile.max_context_chars!r} "
+        f"must equal raw payload {SENTINEL_MAX_CONTEXT_CHARS!r}, not "
+        f"the contract default {_v0c.DEFAULT_V0_MAX_CONTEXT_CHARS!r}."
+    )
+    assert profile.max_files == SENTINEL_MAX_FILES, (
+        f"F1.1: parsed max_files={profile.max_files!r} must equal raw "
+        f"payload {SENTINEL_MAX_FILES!r}, not the contract default "
+        f"{_v0c.DEFAULT_V0_MAX_FILES!r}."
+    )
+
+
+def test_f1_falsification_removed_top_level_keys_fall_back_to_default() -> None:
+    """F1.1 falsification: removing the top-level keys MUST fall back to
+    contract defaults.
+
+    This proves the test in ``test_f1_top_level_keys_present_in_raw_v0_request``
+    is not passing due to a default-coincidence. If the contract still
+    reads the sentinels when they are absent, the propagation path is
+    not real.
+    """
+    import agent.subagent_system.v0_contract as _v0c
+
+    payload = {
+        "profile_id": "demo-stat",
+        "task": "统计 demo workspace",
+        "provider_mode": "fake_local",
+        "parent_opt_in": False,
+        "parent_stop_condition": "delegation_completion",
+        "tool_scope_inherited": True,
+        "allowed_tools": ("read_file",),
+        # NOTE: max_context_chars and max_files are intentionally absent
+        # at the top level. Metadata mirror is also absent so the
+        # contract has no source to read from.
+        "prepared_v0_context": {
+            "context_hash": "deadbeef" * 8,
+            "context_length": 100,
+            "context_file_count": 0,
+            "parent_policy_selects_all_files": True,
+            "selected_file_ids": (),
+        },
+    }
+
+    profile = SubAgentV0ProfileContract.from_payload(payload)
+    assert profile.max_context_chars == _v0c.DEFAULT_V0_MAX_CONTEXT_CHARS, (
+        f"F1.1 falsification: when top-level keys are removed, parsed "
+        f"max_context_chars={profile.max_context_chars!r} must equal "
+        f"contract default {_v0c.DEFAULT_V0_MAX_CONTEXT_CHARS!r}. If it "
+        f"does not, the contract is reading from somewhere unexpected."
+    )
+    assert profile.max_files == _v0c.DEFAULT_V0_MAX_FILES, (
+        f"F1.1 falsification: parsed max_files={profile.max_files!r} "
+        f"must equal contract default {_v0c.DEFAULT_V0_MAX_FILES!r}."
+    )
+
+
 def test_f2_descriptor_iteration_does_not_intoxicate_v0_max_turns() -> None:
     """F2: V0 contract must stay single-turn even when caller proposes max_turns=2.
 

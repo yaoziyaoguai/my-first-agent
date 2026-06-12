@@ -218,8 +218,26 @@ def test_g4_flag_on_delegate_routes_v0(
         f"V0 render 应含 '[SubAgent:' 前缀（render_delegate_result 形状），"
         f"实际: {reply!r}"
     )
-    assert "success" in reply.lower(), (
-        f"G4: user-visible reply must contain 'success'; got {reply!r}"
+    # G4 (F6.1): structured assertion on V0 event, NOT a localized
+    # "success" substring. The user-visible reply must align with the
+    # structured event (status=success, provider_mode=fake_local,
+    # provider_call_allowed=True, action_type=SUBAGENT_DELEGATE_V0,
+    # evidence_level=subsystem_integration). policy_blocked / failed
+    # must not pass G4.
+    ev = target
+    assert ev.evidence.get("provider_call_allowed") is True, (
+        f"G4: provider_call_allowed must be True for fake_local; got "
+        f"{ev.evidence.get('provider_call_allowed')!r}"
+    )
+    assert ev.action_type == v0_value, (
+        f"G4: action_type must be SUBAGENT_DELEGATE_V0; got {ev.action_type!r}"
+    )
+    assert ev.evidence.get("evidence_level") == "subsystem_integration", (
+        f"G4: evidence_level must be subsystem_integration; got "
+        f"{ev.evidence.get('evidence_level')!r}"
+    )
+    assert ev.status == "success", (
+        f"G4: policy_blocked / failed must not pass G4; got status={ev.status!r}"
     )
 
 
@@ -254,9 +272,60 @@ def test_g5_flag_off_rolls_back_to_inline_local(
 def test_g6_v0_handler_unavailable_controlled_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """G6: flag on 但 dispatcher 无 V0 handler → not_supported + controlled fallback。"""
+    """G6: flag on 但 dispatcher 无 V0 handler → not_supported BEFORE inline fallback.
+
+    F5.1: strict ordering via a call log spy — record when the dispatcher
+    dispatches a V0 request (proxying the dispatcher's route method), and
+    when the inline fallback is invoked. Assert the sequence is
+    "dispatcher_not_supported" then "fallback_called".
+    """
+    import agent.core as _core_mod
+
     monkeypatch.setenv("SUBAGENT_V0_ROUTING_ENABLED", "1")
     dispatcher = _build_dispatcher_with_no_v0_handler()
+
+    call_log: list[str] = []
+
+    # Spy on the inline fallback seam. The fallback is the private
+    # ``_execute_subagent_delegation`` module-level import in core.py.
+    # Wrap it to log the call.
+    original_inline = _core_mod._execute_subagent_delegation
+
+    def _spied_inline(*args, **kwargs):
+        call_log.append("fallback_called")
+        return original_inline(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _core_mod, "_execute_subagent_delegation", _spied_inline
+    )
+
+    # Spy on the dispatcher's trusted entry (``route_from_runtime_loop``)
+    # to record when the V0 request is routed (which is the not_supported
+    # path because we removed the V0 handler). Action_log gets the V0
+    # event DURING the route call.
+    import agent.runtime_integration.dispatcher as _dispatcher_mod
+    original_route = _dispatcher_mod.RuntimeActionDispatcher.route_from_runtime_loop
+
+    def _record_event(self, request, *, core_entrypoint, runtime_hook_name, identity):
+        result = original_route(
+            self, request,
+            core_entrypoint=core_entrypoint,
+            runtime_hook_name=runtime_hook_name,
+            identity=identity,
+        )
+        if result.status == "not_supported":
+            call_log.append("dispatcher_not_supported")
+        return result
+
+    monkeypatch.setattr(
+        _dispatcher_mod.RuntimeActionDispatcher,
+        "route_from_runtime_loop",
+        _record_event,
+    )
+
+    # Snapshot the pre-call action_log length to know how many events
+    # the V0 path added during this test.
+    pre_call_log_len = len(dispatcher.action_log)
 
     user_input = "delegate to demo-stat: 统计 demo workspace"
     reply = chat(
@@ -265,9 +334,10 @@ def test_g6_v0_handler_unavailable_controlled_fallback(
         runtime_action_dispatcher=dispatcher,
     )
 
+    # Reconstruct the V0 events produced during this test.
     v0_value = _v0_action_type_value()
     v0_events = [
-        ev for ev in dispatcher.action_log
+        ev for ev in dispatcher.action_log[pre_call_log_len:]
         if ev.action_type == v0_value
     ]
     assert v0_events, "G6: dispatcher 必须接收 V0 request 才会 emit not_supported"
@@ -279,16 +349,21 @@ def test_g6_v0_handler_unavailable_controlled_fallback(
             f"G6: 即便 not_supported 也要保持真实 source；got {ev.source!r}"
         )
 
-    # G6 (hardened): ordering — not_supported event must exist BEFORE
-    # the inline fallback reply is produced. We verify the V0
-    # not_supported event was recorded in the action_log (which is
-    # populated during route_from_runtime_loop, before the inline
-    # fallback call), and the reply contains inline-local output.
-    # If the ordering were reversed (inline first, then event), the
-    # action_log would be empty at assert time.
-    assert len(v0_events) >= 1, (
-        "G6: not_supported event must be recorded before inline fallback"
+    # F5.1: strict ordering proof.
+    # call_log must contain dispatcher_not_supported BEFORE fallback_called.
+    assert "dispatcher_not_supported" in call_log, (
+        f"G6: dispatcher must have been invoked; call_log={call_log}"
     )
+    assert "fallback_called" in call_log, (
+        f"G6: inline fallback must have been invoked; call_log={call_log}"
+    )
+    dispatcher_idx = call_log.index("dispatcher_not_supported")
+    fallback_idx = call_log.index("fallback_called")
+    assert dispatcher_idx < fallback_idx, (
+        f"G6 F5.1: dispatcher_not_supported must precede fallback_called; "
+        f"call_log={call_log}"
+    )
+
     # fallback: inline-local 形状
     assert "[SubAgent:" in reply, (
         f"G6: 缺 handler controlled fallback 必须渲染 inline-local 形状；"

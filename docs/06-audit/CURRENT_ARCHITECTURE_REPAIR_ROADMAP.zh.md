@@ -16,7 +16,7 @@
 > 主控视图——`## Repair Remaining Gap Classification`（10 类分类 + 依赖触发表）与
 > `## Architecture Repair Mainline Closure Readiness`（主线关闭判断）。本轮经
 > Graphify + 源码/测试核验 + 两个 fresh-context reviewer（architecture + adversarial）
-> 交叉验证；**审计发现 full suite 当前在 main 上为 RED**（见 §9.6 RED-1），故
+> 交叉验证；后续 RED-1 与 GE-1 Phase B/C 均已完成，但 GE-2/GE-3 仍未闭合，故
 > `MAINLINE_CLOSE_READY = NO`。原按 Theme 组织的 item 正文保留为详细背书，不删。
 
 ---
@@ -558,17 +558,20 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 9 — Golden E2E / Architecture Acceptance
 
-### GE-1 — Minimal Golden E2E suite（分阶段）  ·  P1  ·  `active`（Phase A completed）
+### GE-1 — Minimal Golden E2E suite（分阶段）  ·  P1  ·  `completed`（Phase A/B/C completed）
 
 - **North Star principle**：L（Evaluation-driven evolution）。
 - **定级理由（P1 而非 P2）**：Golden E2E 是 SubAgent critical gate（SA-1）与
   North Star §21 DoD item 4 的验收前提；没有它，SA-1 无法证明 live V0 路径，
   Test/eval 维度与 Subagent 维度都卡在无法到 3。它是 SA-1 的验收基础设施，
   因此与 SA-1 同级 P1。
-- **Current fact**：`tests/smoke/` 仅 1 个 e2e 文件
+- **Original fact**：`tests/smoke/` 仅 1 个 e2e 文件
   （`test_first_usable_task_e2e.py`）；无显式 Golden E2E 集合；无 `tests/adversarial/`。
+- **Current fact（2026-06-13）**：`tests/golden_e2e/` 已覆盖 Phase A/B/C；
+  `tests/adversarial/` 已落最小 safe stub。memory 仍是 frozen/env-gated truth，
+  本轮未解冻 memory、未实现 MEM-2。
 - **Target state**：最小 Golden E2E 套件，覆盖：simple conversation / tool success /
-  tool failure(policy_blocked) / memory read-write / subagent delegation /
+  tool failure(policy_blocked) / memory truth + checkpoint state / subagent delegation /
   checkpoint-resume / fallback-error / evidence-trace reconstruction。
 - **Gap / failure mode**：顶层 e2e 仅 1 个 → 关键路径无回归保护；架构验收无可执行下限。
 - **Repair direction（分阶段，最小可行，不一开始建庞大测试平台）**：
@@ -591,7 +594,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
     subagent-delegation 场景先对当前 live 路径（flag-off inline-local）取证
     （现可 green），SA-1 落地后重指向 V0 断言——借此打破 SA-1↔GE-1 的循环前置
     （见下 Dependencies）。
-  - **Phase B**：memory read/write + checkpoint/resume。
+  - **Phase B**：memory 当前 frozen/env-gated truth + checkpoint/resume local roundtrip。
   - **Phase C**：policy_blocked + evidence-trace reconstruction，**外加一个最小
     `tests/adversarial/` stub**（单个注入用例，复用既有 D2 leak-gate 参数化模式）。
     Phase C 是**最小覆盖**，不是 adversarial 平台；`tests/adversarial/` 仅落 1 个
@@ -616,7 +619,24 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   - G7 docstring 降级：不再作为真实 failure surface 唯一证据，
     F3.1 通过 real Handler integration tests 覆盖 contract/provider failure；
   - `tests/golden_e2e/` 8 passed。
-  - Phase B/C 待后续窗口。
+  - Phase B/C 当时待后续窗口；2026-06-13 已完成（见下方 Closure）。
+- **GE-1 Phase B/C Closure（2026-06-13）**：**Phase B/C completed**。Evidence：
+  - GE1-B1 memory golden：`test_golden_memory_checkpoint.py` +
+    `fixtures/memory_disabled.json` 锁定 consolidation frozen/env-gated、
+    emergence disabled-by-env，且默认 gate 不触碰 memory store；
+  - GE1-B2 checkpoint golden：`checkpoint_local_roundtrip.json` 锁定
+    `checkpoint.v1` local-file / intra-process save-load-restore；
+  - GE1-B3 policy golden：`ToolRuntimeMediator` + `ToolGateHandler`
+    对不在 active skill allowlist 的工具返回 `__force_stop__`，
+    `tool.invoke` count = 0，tool result message 不持久化原始输入 marker；
+  - GE1-B4 evidence-trace golden：`dispatcher.flush_to_event_log()`
+    输出 `tool.gate` + `tool.result` 两类 `RuntimeActionEvent`，
+    关键字段齐备，`claims_real_provider_e2e=false`；
+  - GE1-C1 adversarial stub：`tests/adversarial/test_minimal_policy_stub.py`
+    用空参数 forbidden tool name `shell` 验证 fail-closed、无危险执行；
+  - Verification：`tests/golden_e2e/ tests/adversarial/` 13 passed；
+    `tests/runtime_integration/` 1076 passed, 4 skipped, 6 xfailed；
+    `tests/` 4730 passed, 12 skipped, 26 xfailed。
 
 ### GE-2 — Capability documentation alignment  ·  P2  ·  `documented_pending`
 
@@ -734,28 +754,25 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## 9.6. Window 3 Post-Closure Audit Findings（2026-06-13 Gap Classification Audit）
 
-> 本节记录本轮 Gap Classification Audit 经 fresh-context reviewer + 本人源码/测试
-> 核验后**新发现**的两项。RED-1 是当前唯一 MUST_FIX_NOW；FOP-1 是 default-off 后的
-> pre-flip 缺陷。两者均不能在本轮修复（红线：本轮只改本 Roadmap，不改 Window closure
-> audit / production code）。
+> 本节记录 Gap Classification Audit 经 fresh-context reviewer + 本人源码/测试
+> 核验后**新发现**的两项。RED-1 在该审计时是唯一 MUST_FIX_NOW，后续已由
+> docs-fix 修复并恢复 full suite green；FOP-1 仍是 default-off 后的 pre-flip 缺陷。
 
 | ID | 发现 | 证据（本人核验） | Severity | 分类 | 阻塞主线关闭? |
 |---|---|---|---|---|---|
-| RED-1 | full suite 当前 RED：`tests/test_docs_source_of_truth.py::test_active_docs_no_stale_config_env_vars` FAILED——`docs/06-audit/WINDOW_3_CLOSURE_AUDIT.zh.md` 裸列 `MY_FIRST_AGENT_LLM_PROVIDER` / `FIRST_AGENT_PROVIDER_PROFILE` 无 `legacy/deprecated/不推荐` 标记 | `pytest …::test_active_docs_no_stale_config_env_vars` → 1 failed；guard 在 `test_docs_source_of_truth.py:55-76`，scope 含 `docs/06-audit/*.md` | **MUST_FIX_NOW** | **YES** |
+| RED-1 | full suite 曾 RED：`tests/test_docs_source_of_truth.py::test_active_docs_no_stale_config_env_vars` FAILED——`docs/06-audit/WINDOW_3_CLOSURE_AUDIT.zh.md` 裸列 `MY_FIRST_AGENT_LLM_PROVIDER` / `FIRST_AGENT_PROVIDER_PROFILE` 无 `legacy/deprecated/不推荐` 标记；后续已加 legacy marker 修复 | 当时证据：`pytest …::test_active_docs_no_stale_config_env_vars` → 1 failed；当前证据：full suite 4730 passed, 12 skipped, 26 xfailed | closed | **DONE** | NO |
 | FOP-1 | flag-on（`SUBAGENT_V0_ROUTING_ENABLED=on`）+ real provider 时 V0 路由返回 `policy_blocked`：core.py V0 payload 设 `provider_mode='real_opt_in'` 但未设 `provider_mode_allowed`，`v0_contract.py:357` 默认 `fake_only` → `provider_mode_allowed` 拒 real → `policy_blocked`（落入 `_render_v0_delegate_result`，非受控 inline fallback） | `v0_contract.py:357` 默认 `fake_only`；core.py `2090-2210` 仅设 `provider_mode`/`parent_opt_in`，无 `provider_mode_allowed` | Low（默认）/ **P1-on-flip** | **TRACKED_DEBT（pre-flip blocker）** | NO（当前 flag default-off）；**YES 对 default-on flip** |
 
-**RED-1 处置**：fix = 在 `WINDOW_3_CLOSURE_AUDIT.zh.md` 的 env-var 引用旁加 `legacy` 标记
-（一词修复）。**本轮红线禁止修改 Window closure audit**，故仅登记 + 上报，待单独
-docs-fix 授权。修复前 "full suite green" 前置为 **false**，W3 closure 自报 "4725 passed"
-应订正为 "4724 passed, 1 failed"。
+**RED-1 处置**：已由后续 docs-fix 在 `WINDOW_3_CLOSURE_AUDIT.zh.md` 的 env-var 引用旁
+加 `legacy` 标记关闭；当前 full suite green。
 **FOP-1 处置**：flag default-off，非当前生产风险；但 SA-1 "off→on 是独立后续工作" 的
 表述必须显式携带此 pre-flip blocker：default-on flip 前须修复 `provider_mode_allowed`
 传播（core.py V0 payload 注入 `profile_contract.provider_mode_allowed`）并补 real-provider
 路径测试。owner = `core.py` delegation 入口维护者；trigger = 准备 default-on flip；
 exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端到端测试。
 
-> RED-1 是审计 falsifiability 的正例：W3 closure 的 GREEN 自报被独立 reviewer + 本人
-> pytest 证伪。Gap Classification 据此把 `MAINLINE_CLOSE_READY` 钉为 NO。
+> RED-1 是审计 falsifiability 的正例：W3 closure 的 GREEN 自报曾被独立 reviewer + 本人
+> pytest 证伪；后续修复关闭了 RED-1，但 `MAINLINE_CLOSE_READY` 仍因 GE-2/GE-3 为 NO。
 
 ---
 
@@ -885,8 +902,8 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 | CM-1 | Capability | config 入口 import-boundary 未审 | **DONE** | completed (W3) | W3 inventory + W3-T1/T4；结论=保留现有 config，无 duplicate registry | 已修；"无重复→无需收敛"是合法完成 | no | — |
 | W1-D4 | SubAgent | fallback negative/非穷举 match | **DONE（test-guarded）** | test-guarded (W2) | `test_subagent_v0_fallback_dispatch.py`；`VALID_RESULT_STATUSES` 闭集在 `schema.py:384` 构造期 raise，未知 status 不可达→不会 silent success | 已中和（闭集）；残留仅 maintainability | no | 收紧 debt 描述（见 §9.3 注） |
 | H-1/H-2/H-3 | History | catalog extraction / D1-D3 / SoT 对齐 | **DONE** | move_to_history / protected_pending | `8be4dcb`/`a9b39ab`/`97a7bb3`/`a251306`/`5d1cdcb`；边界测试锁 | 已完成；护栏不回退 | no | 保持边界测试 |
-| **RED-1** | Docs SoT | W3 closure 裸列 stale env-var → active guard RED | **MUST_FIX_NOW** | failing on main | `pytest …test_active_docs_no_stale_config_env_vars`→1 failed（本人核验） | **本轮红线禁改 Window closure audit**；修复在允许范围外 | **YES** | 单独 docs-fix：在 `WINDOW_3_CLOSURE_AUDIT.zh.md` env-var 旁加 `legacy` 标记（一词） |
-| GE-1 Phase B/C | Golden E2E | memory/checkpoint/policy/evidence-trace + adversarial stub 无 golden | **FIX_NEXT（closure-blocking）** | active (P1) | `tests/golden_e2e/` 仅 conversation/tool/subagent；`tests/adversarial/` 不存在 | 是 DoD item 4 的覆盖项，但非 runtime risk；Phase A 已给 SA-1 验收地板 | **YES（formal close, DoD 4）** | 下一窗口补 Phase B/C golden |
+| **RED-1** | Docs SoT | W3 closure 裸列 stale env-var → active guard RED | **DONE** | completed (RED-1) | `WINDOW_3_CLOSURE_AUDIT.zh.md` legacy marker fix；本轮 full suite 4730 passed, 12 skipped, 26 xfailed | 已修；guard 恢复 green | no | — |
+| GE-1 Phase B/C | Golden E2E | memory/checkpoint/policy/evidence-trace + adversarial stub 无 golden | **DONE** | completed (GE-1 Phase B/C) | `test_golden_memory_checkpoint.py`、`test_golden_policy_evidence.py`、`test_minimal_policy_stub.py` + 5 fixtures；golden/adversarial 13 passed | 已修；仅新增 tests/fixtures，无 production 行为变化 | no | — |
 | GE-3 | Acceptance | §20 rubric 全 `provisional`，未复算 | **FIX_NEXT（closure-blocking）** | documented_pending (P2) | North Star §20 12 维全 provisional；§21 DoD item 8 要求每维 ≥2 *实测* | 复算须在 suite-green + SA-1/GE-1 evidence 后做；红线禁为升分伪造 | **YES（formal close, DoD 8）** | suite-green 后按 §20 anchors 逐维取证 |
 | GE-2 | Docs | capability status 四方漂移 | **DOC_ONLY** | documented_pending (P2) | `CURRENT_CAPABILITY_DRIFT.zh.md` / `CAPABILITY_BOUNDARIES.md` 已存在 | doc diff-table；DoD item 5 一致性 | partial（DoD 5） | 产可复现 diff table + terminology align |
 | RS-1 | Runtime Spine | North Star §7 topology 文字 vs mediated execution | **DOC_ONLY** | active (P2) | `tool_runtime_mediator.py:228-297` 单一 mediated path；direct-execute 仅 meta/dispatcher=None；boundary tests green | doc topology drift，**非代码缺陷**（两 reviewer 确认非第二 spine） | no | North Star §7 amendment 提案（另案，不本轮改 North Star） |
@@ -914,9 +931,7 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 
 | ID | Depends on | Blocked by | Trigger to revisit | Exit condition | Owner / decision needed | Recommended priority |
 |---|---|---|---|---|---|---|
-| RED-1 | none | 本轮红线（禁改 Window closure audit） | 立即（已 RED） | guard test green（加 `legacy` 标记后） | docs owner（单独 docs-fix 授权） | **P1（立即，最便宜）** |
-| GE-1 Phase B/C | SA-1 ✓、GE-1 Phase A ✓ | 无（可执行） | 启动下一窗口 | memory/checkpoint/policy golden green + `tests/adversarial/` stub | 测试 owner | P1（DoD 4） |
-| GE-3 | SA-1 ✓、GE-1 ✓、**suite green（当前 false，被 RED-1 卡）** | RED-1（suite 须先 green） | suite green 后 | §20 每维实测回填，每分附 evidence | 架构审计 owner | P2（DoD 8） |
+| GE-3 | SA-1 ✓、GE-1 ✓、suite green ✓ | 无（可执行） | 下一 closure step | §20 每维实测回填，每分附 evidence | 架构审计 owner | P2（DoD 8） |
 | GE-2 | 与 CR-2/CR-4 协同 | 无 | doc-align 批次 | 四方 diff-table 一致 + 可复现校验 | docs/runtime owner | P2（DoD 5） |
 | RS-1 | 无 | North Star amendment 需用户批准 | 评 PR 误判 topology 时 | North Star §7 文字与 mediated execution 一致 | core/mediator owner + 用户 | P2（doc-only） |
 | SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 | 无 | 无 | doc-align 批次 | 文档与代码/测试一致 | 各模块维护者 | P2/P3（doc-only） |
@@ -936,36 +951,32 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 
 > 依据 North Star §21 Definition of Done（逐项 conjunction，不取平均）逐条核验。
 
-1. **P0/P1 open 是否为 0?** —— P0 = 0；P1 = **非 0**：GE-1（P1）仍 `active`（Phase B/C 未做，DoD item 4）。SA-1（P1）已 completed。
-2. **MUST_FIX_NOW 是否为 0?** —— **非 0 = 1**：RED-1（active guard test 失败，full suite RED）。其修复在本轮红线允许范围外（Window closure audit）。
+1. **P0/P1 open 是否为 0?** —— 是。P0 = 0；P1 = 0。SA-1 与 GE-1 Phase A/B/C 均已 completed。
+2. **MUST_FIX_NOW 是否为 0?** —— 是。RED-1 已修复，当前 full suite green。
 3. **Blocker / High debt 是否为 0?** —— 是。所有 debt 为 Low（W1-D4 Medium 已 test-guarded）；三窗 review 均 0 Blocker / 0 High。
-4. **Window 1/2/3 closure 是否完整?** —— 是，三份 closure audit 存在且有 verdict；但 W3 closure 含 RED-1 的 doc-guard 违规，其 "4725 passed" 自报被证伪（实际 4724 passed, 1 failed）。
-5. **Full suite 最近一次是否 green?** —— **否**。最近 W3 closure 引用 4725 passed，但本轮核验当前 main 为 **4724 passed, 1 failed**（RED-1）。
-6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。除上述类别外，仍有 1 个 MUST_FIX_NOW（RED-1）+ 2 个 closure-blocking FIX_NEXT（GE-1 Phase B/C、GE-3）+ 1 个 DOC_ONLY DoD-5 项（GE-2）。
+4. **Window 1/2/3 closure 是否完整?** —— 是，三份 closure audit 存在且有 verdict；RED-1 已由后续 docs-fix 纠正。
+5. **Full suite 最近一次是否 green?** —— 是。本轮核验当前 main 为 **4730 passed, 12 skipped, 26 xfailed**。
+6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。GE-3 仍是 closure-blocking FIX_NEXT（DoD item 8）；GE-2 + doc-align cluster 仍是 DoD item 5。
 7. **当前是否可以关闭 architecture repair mainline?** —— 否。
 8. **若不能，少数必须修的项：**
-   - **RED-1**（MUST_FIX_NOW）：恢复 suite-green 前置（W3 closure audit 加 `legacy` 标记，一词修复，本轮范围外）。
-   - **GE-3**（DoD item 8）：§20 rubric 逐维实测 ≥2 复算——依赖 suite-green（被 RED-1 卡）。
-   - **GE-1 Phase B/C**（DoD item 4）：memory/checkpoint/policy/evidence-trace golden + adversarial stub。
+   - **GE-3**（DoD item 8）：§20 rubric 逐维实测 ≥2 复算。
    - **GE-2 + doc-align cluster**（DoD item 5）：capability/docs/runtime fact 一致。
 
 > 注：DoD items 1/2/3/6/7/9 已满足（无 Blocker/High、生产路径单 spine、Medium 已治理、
-> 扩展点稳定、deferred 无双主路径/双 SoT、Open decisions 均有 owner+exit）。未满足的是
-> items 4（golden 覆盖）、5（docs 一致）、8（rubric 实测）——加上 RED-1 这个 active guard
-> 失败。这些都是 **verification / documentation 完成度**，**不是 runtime/architecture risk**
-> （MUST_FIX_NOW 的 runtime-risk 计数 = 0；RED-1 是 test-integrity 类的 must-fix）。
+> 扩展点稳定、deferred 无双主路径/双 SoT、Open decisions 均有 owner+exit）。DoD item 4
+> 已由 GE-1 Phase B/C golden coverage 补齐；未满足的是 items 5（docs 一致）与
+> 8（rubric 实测）。这些都是 **verification / documentation 完成度**，**不是
+> runtime/architecture risk**。
 
 **MAINLINE_CLOSE_READY = NO**
 
 Remaining must-fix items:
-- RED-1：修复 `WINDOW_3_CLOSURE_AUDIT.zh.md` 的 stale env-var 引用（加 `legacy` 标记），恢复 full suite green。【本轮范围外，须单独 docs-fix 授权】
-- GE-3：suite-green 后按 §20 anchors 逐维复算 rubric（DoD item 8）。
-- GE-1 Phase B/C：补 memory/checkpoint/policy/evidence-trace golden + 最小 adversarial stub（DoD item 4）。
+- GE-3：按 §20 anchors 逐维复算 rubric（DoD item 8）。
 - GE-2 + doc-align（RS-1/SPA-2/MEM-1/CR-2/CR-4）：capability/docs/runtime fact 一致（DoD item 5）。
 
 > 这些都是 doc/test 完成项，无 runtime 风险、无外部 credential（除 W1-D5/real-provider）、
-> 无 owner 决策门槛（GE-3/GE-1/GE-2/RED-1 均 agent 可执行，仅 RED-1 受本轮红线限制）。
-> 一旦 RED-1 修复 + GE-1 Phase B/C + GE-2 + GE-3 复算确认每维 ≥2，主线即可关闭。
+> 无 owner 决策门槛（GE-3/GE-2 均 agent 可执行）。
+> 一旦 GE-2 完成 + GE-3 复算确认每维 ≥2，主线即可关闭。
 
 ---
 

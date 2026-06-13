@@ -2,10 +2,10 @@
 
 Post-repair module maturity / hardening 阶段的工作目录。
 
-**当前状态:Module Taxonomy Gate 已通过(`MODULE_TAXONOMY_APPROVED = YES`,Option γ,15 模块)。Module Maturity Audit 已完成。**
+**当前状态:Module Taxonomy Gate 已通过(`MODULE_TAXONOMY_APPROVED = YES`,Option γ,15 模块)。Module Maturity Audit 已完成;T-SKILL-GOLDEN 已关闭。**
 
 - Architecture Repair Mainline 仍 CLOSED(`ACCEPT_WITH_TRACKED_DEBT`)。本目录**不是** active repair queue,不开启 Window 4。
-- 本阶段只做文档型审计,不改 code / tests / North Star,不硬化任何模块。
+- 原 maturity audit 为 docs-only;T-SKILL-GOLDEN 关闭仅新增 golden test / fixture 与最小状态文档,不改 production code / North Star。
 - North Star 是目标模型,不是待办队列;North Star gap ≠ must-fix。
 
 ## 文件
@@ -13,7 +13,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | Path | Role | Status |
 |---|---|---|
 | `AGENT_MODULE_TAXONOMY_DECISION_REQUEST.zh.md` | 模块分法 gate 发现 + 决策(D1–D4 / C1–C2)+ 候选 option | current — 已由用户以 Option γ 批准 |
-| `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类 + HARDEN_NEXT(1)| current |
+| `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类;当前无 HARDEN_NEXT | current |
 | `POST_REPAIR_TRIGGER_REGISTRY.zh.md` | trigger 寄存器 + 激活 playbook("No trigger, no work");每个 blocked/deferred/harden 项的触发条件与开工路径 | current |
 
 ## 阅读顺序
@@ -25,5 +25,5 @@ Post-repair module maturity / hardening 阶段的工作目录。
 ## 关键结论(摘要)
 
 - Mainline 已串通;问题是**模块成熟度不均衡**(L3 骨架/横切簇 + L2 能力簇 + L1 dormant scheduler),且不均衡几乎全是**有意 deferred/blocked**。
-- **HARDEN_NEXT 仅 1 个**:Skill System 补 Golden E2E(锁当前实验行为);本轮仅推荐,不执行。
+- **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。

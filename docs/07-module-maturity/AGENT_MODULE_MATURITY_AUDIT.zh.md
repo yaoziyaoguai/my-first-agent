@@ -12,8 +12,9 @@
 - **Architecture Repair Mainline: CLOSED**(`ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE REPAIR MAINLINE CLOSED`)。
 - 本文件**不是** repair queue,不开启 Window 4,不重开 Architecture Repair。
 - **North Star 是目标模型,不是待办清单**;North Star gap ≠ must-fix。Gap 经 Trigger 判断后才可能成为 action。
-- 本轮**仅审计,不硬化任何模块**;不改 code / tests / North Star / 已关闭的 Window closure audits / 已关闭 Roadmap。
-- **Full suite reference**(引用 closure audit,本轮仅新增 markdown,未重跑):**4730 passed, 12 skipped, 26 xfailed**。
+- 原 Module Maturity Audit 为 docs-only;后续 T-SKILL-GOLDEN 关闭只新增 golden test / fixture 与最小状态文档,不改 production code / North Star / 已关闭的 Window closure audits / 已关闭 Roadmap。
+- **Pre-work full suite baseline**:**4730 passed, 12 skipped, 26 xfailed**。
+- **T-SKILL-GOLDEN fresh full suite**:**4731 passed, 12 skipped, 26 xfailed**。
 
 ---
 
@@ -82,7 +83,7 @@
 | 4 | MCP | **L2** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 5 | Memory | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 6 | SubAgent | **L2** | TRACKED_DEBT | no | no | High |
-| 7 | Skill System | **L2** | **HARDEN_NEXT** | no | **yes** | Medium |
+| 7 | Skill System | **L2** | NO_ACTION | no | no | Medium |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 9 | Policy / Approval | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 10 | Scheduler / Async | **L1** | BLOCKED_BY_DECISION | no | no | High |
@@ -92,7 +93,7 @@
 | 14 | Capability / Config / Registry Boundary | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 15 | Docs / Guardrails | **L3** | NO_ACTION | no | no | High |
 
-> **没有任何模块 blocks mainline**(mainline 已 closed)。最高成熟度为 **L3**;**全仓无 L4**(real provider/MCP/CI/credential 路径被项目规则与外部条件挡住)。HARDEN_NEXT **仅 1 个(Skill System)**。
+> **没有任何模块 blocks mainline**(mainline 已 closed)。最高成熟度为 **L3**;**全仓无 L4**(real provider/MCP/CI/credential 路径被项目规则与外部条件挡住)。当前无 HARDEN_NEXT;T-SKILL-GOLDEN 已完成并关闭。
 
 ---
 
@@ -166,15 +167,15 @@
 - **Trigger**:准备 V0 default-on / real-provider dogfood。**Exit**:provider_mode 传播 + real-provider V0 test(flip 前 FOP-1 转 blocker)。
 - **Owner/decision**:default-on flip 需 owner(+ external for real provider)。**Confidence**:High。
 
-### 7. Skill System — L2 — HARDEN_NEXT
-- **Current fact**:当前能力在 `agent/skill_system/`(registry/loader/selector/lifecycle/invocation/retriever/skill_tool);turn-start probe 选 skill 作为 evidence,不直接执行工具、不写 memory;legacy `agent/skills/__init__.py` 是 fail-closed tombstone;README 标"实验性"。**golden_e2e 中无 skill golden**(其它 4 个能力面 GE-1 都有 golden)。
+### 7. Skill System — L2 — NO_ACTION
+- **Current fact**:当前能力在 `agent/skill_system/`(registry/loader/selector/lifecycle/invocation/retriever/skill_tool);turn-start probe 选 skill 作为 evidence,不直接执行工具、不写 memory;legacy `agent/skills/__init__.py` 是 fail-closed tombstone;README 标"实验性"。`tests/golden_e2e/test_golden_skill_system.py` 已用本地 sample fixture 锁定 discovery / selection metadata / direct dispatcher selection / lifecycle handoff,不是 real `core.chat` E2E 证明。
 - **North Star target**:§9 Skill = `RuntimeActionType.SKILL_SELECT` evidence,渐进能力发现,不作 side effect。
-- **Evidence**:`agent/skill_system/registry.py:26 SkillRegistry`、`loader.py:37`、`runtime_integration/skill_action.py`/`skill_lifecycle.py`/`skill_selection_probe.py`;`agent/skills/__init__.py`(tombstone, `__all__=[]`);`docs/design/skill-system-architecture.md`、`docs/rfc/SKILL_CANONICAL_RFC.md`。无 `tests/golden_e2e/*skill*`。
-- **Maturity L2**:registered + lifecycle/selection 有 targeted test,但实验性、无 golden、不产生 side effect。
-- **Gap**:无 explicit Golden E2E 锁定当前 discovery/selection/lifecycle 行为(与其它能力面 GE-1 不对等)。
-- **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** **yes**(见 §7)。
-- **Action**:**HARDEN_NEXT**。**Why now**:补一个 Skill golden E2E 锁定当前实验行为,达成与 tool/subagent/memory/policy golden 的对等,防止静默漂移;**证据充分、下一步清晰(镜像现有 GE-1 fixture 模式)、验收清晰(golden 通过)、无 external/owner、不重开 repair、不过度设计**。
-- **Trigger**:已满足(本身即 trigger)。**Exit**:Skill discovery/selection/lifecycle golden 锁定并 green。
+- **Evidence**:`agent/skill_system/registry.py:26 SkillRegistry`、`loader.py:37`、`runtime_integration/skill_action.py`/`skill_lifecycle.py`/`skill_selection_probe.py`;`agent/skills/__init__.py`(tombstone, `__all__=[]`);`tests/golden_e2e/test_golden_skill_system.py`、`tests/golden_e2e/fixtures/skill_system_current_behavior.json`。
+- **Maturity L2**:registered + lifecycle/selection 有 targeted test + golden,但仍是实验性本地能力,不产生 side effect,不记 L3/L4。
+- **Gap**:本轮 Golden fixture 对等缺口已关闭;实验性状态不是自动 hardening trigger。
+- **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** no。
+- **Action**:NO_ACTION。**Why now**:T-SKILL-GOLDEN 已完成;没有证据或授权支持继续实现/重构 Skill System。
+- **Trigger**:closed。**Exit**:golden green,且 `git diff agent/` 为空。
 - **Owner/decision**:无。**Confidence**:Medium(skill 为实验性,golden 应锁"当前"而非"目标"行为,避免把实验当成 production-ready)。
 
 ### 8. Provider / Model Boundary — L3 — BLOCKED_BY_EXTERNAL
@@ -277,27 +278,20 @@
   - **L2 簇**(能力/横切,可用但受 owner·external 决策牵制):MCP、Memory、SubAgent、Skill、Policy/Approval、State/Checkpoint/Resume、Capability/Config(共 7 个,与 §4 L2 计数一致)。
   - **L1**:Scheduler(dormant)。
 - **不均衡来源**几乎全是**有意 deferred/blocked**(MEM-2、OD-7、OD-2/CM-2、W1-D5 real provider、REAL-EVIDENCE-007 real MCP、SPR-1、FOP-1、scheduler routing),不是断裂或回归。
-- **唯一"非 owner/external 阻塞"的真实成熟度洞**:Skill System 缺 golden(其它能力面都有)→ 已列 HARDEN_NEXT。
+- **原唯一"非 owner/external 阻塞"的成熟度洞已关闭**:Skill System golden 已补齐;没有自动产生新的 HARDEN_NEXT。
 - **跨模块一致性风险(需持续守护,非现在修)**:capability status 仍是口径而非统一 enum(CM-2 未建),所以"declared/registered/routed/dormant/deferred"靠文档 + per-surface 测试维持,存在长期 drift 风险 —— 由 Docs/Guardrails(L3)与 Capability/Config(L2)共同看守,触发条件出现前不强行 CM-2。
 
 ---
 
 ## 7. Recommended Next Hardening Candidates
 
-> 最多 1–3 个。本轮严格按 bounded-action rule 过滤,**仅 1 个**模块通过全部条件。
+> T-SKILL-GOLDEN 已完成;当前重新按 bounded-action rule 过滤后无 HARDEN_NEXT。
 
-### HARDEN_NEXT #1 — Skill System:补 Skill Golden E2E(锁定当前实验行为)
+### Completed — T-SKILL-GOLDEN
 
-- **现状/缺口**:Skill System 是唯一缺 Golden E2E **且不受 external/owner 阻塞**的能力面(tool/subagent/memory-checkpoint 等在 GE-1 已有 golden;MCP/Provider 的 golden 缺口被 external 阻塞,见下方过滤;policy-evidence 属横切 golden,不计入能力面对等集)。
-- **clear benefit**:锁定当前 discovery/selection(`SKILL_SELECT` probe)/lifecycle 行为,达成与其它能力面的 golden 对等,防止后续静默漂移;与 GE-1 既有 fixture 模式同构。
-- **clear validation path**:新增 `tests/golden_e2e/test_golden_skill_*.py` + fixture,断言当前实验行为;golden 通过即验收。
-- **no external credential**:✅ 纯本地 fake/local。
-- **no owner decision**:✅ 锁"当前"行为,不涉及 skill 是否升级为 side-effect 的目标决策。
-- **不重开 Architecture Repair**:✅ 加性测试,不改 runtime routing。
-- **不过度设计**:✅ 镜像现有 golden 模式,不引入新结构。
-- **重要约束**:golden 必须锁"当前实验事实"而非"目标能力",**不得把 skill 实验行为写成 production-ready**。
-
-> 说明:本轮**不执行**该 golden(用户要求"do not harden any module / audit only");这是给下一轮的有界推荐。
+- `tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json` 已锁定当前实验性本地 dispatcher/lifecycle 行为。
+- Skill System 保持 L2;本次完成不表示 production-ready、real provider E2E 或新 side-effect 能力。
+- 当前无新的 HARDEN_NEXT;其它 blocked/deferred 项状态不变。
 
 ### 为什么没有第 2、3 个(透明过滤)
 

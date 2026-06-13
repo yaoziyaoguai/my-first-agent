@@ -14,8 +14,9 @@
 - **本文件不是 active queue**:它是 trigger 寄存器 + 激活 playbook,只回答"什么条件下才允许开工、怎么开工、谁拍板、要什么证据"。
 - **核心原则:No trigger, no work.**(没有触发条件,不开工;触发达成后,才允许进入 scoped hardening / experiment / repair。)
 - North Star 仍是目标模型,不是待办清单;North Star gap ≠ 自动任务。
-- 本轮**不改 code / tests / North Star**,**不开 Window 4**,**不重开 Architecture Repair**,**不硬化任何模块**。
-- **Full suite reference**(引用,本轮仅新增 markdown,未重跑):**4730 passed, 12 skipped, 26 xfailed**。
+- T-SKILL-GOLDEN 关闭只新增 golden test / fixture 与本目录状态文档;**不改 production code / North Star**,**不开 Window 4**,**不重开 Architecture Repair**。
+- **Pre-work full suite baseline**:**4730 passed, 12 skipped, 26 xfailed**。
+- **T-SKILL-GOLDEN fresh full suite**:**4731 passed, 12 skipped, 26 xfailed**。
 
 ---
 
@@ -23,7 +24,7 @@
 
 - **Trigger = gap activation condition, not automatic task.** 一个 gap 存在,不等于现在要修;只有对应 trigger 达成,才进入 scoped work。
 - 每个 trigger 用统一字段刻画(见 §4):含义、为何未激活、激活路径、所需决策/外部资源/证据、达成后允许做什么、达成前禁止做什么、退出判据、owner、忽视风险、提前强行风险、引用证据。
-- Category 取自固定枚举:`HARDEN_NEXT_READY` / `BLOCKED_BY_DECISION` / `BLOCKED_BY_EXTERNAL` / `BLOCKED_BY_EVIDENCE` / `TRACKED_DEBT` / `OPTIONAL_OR_FUTURE` / `DROP_OR_NOOP`。不使用 maybe / later / TBD。
+- Category 取自固定枚举:`HARDEN_NEXT_READY` / `BLOCKED_BY_DECISION` / `BLOCKED_BY_EXTERNAL` / `BLOCKED_BY_EVIDENCE` / `TRACKED_DEBT` / `OPTIONAL_OR_FUTURE` / `DROP_OR_NOOP` / `COMPLETED`。不使用 maybe / later / TBD。
 - 所有 claim 以真实 file:line / test / closure audit / roadmap 交叉核验;Graphify(`graphify-out/graph.json`,2026-06-14)用于本 session 各模块 runtime fact discovery,不作单独依据。
 
 ---
@@ -32,7 +33,7 @@
 
 | Trigger ID | Module | Category | Active now? | Next action | Owner needed | External dep |
 |---|---|---|---|---|---|---|
-| **T-SKILL-GOLDEN** | Skill System | HARDEN_NEXT_READY | **YES(唯一)** | 写 scoped plan → 加 golden | no | no |
+| **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | BLOCKED_BY_EXTERNAL | no | 等 credential/CI | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | owner 决策 spike | **yes** | no |
@@ -46,7 +47,7 @@
 | T-W2D4 (L1 dead-code) | SubAgent | TRACKED_DEBT | no | 独立 cleanup 窗口 | no | no |
 | T-NS-CLEANUP | Docs/Guardrails(North Star) | OPTIONAL_OR_FUTURE(blocked_by_approval) | no | owner 批准 amendment | **yes** | no |
 
-> **当前唯一 active 可做:T-SKILL-GOLDEN。** 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
+> **当前无 active trigger。T-SKILL-GOLDEN 已完成并关闭。** 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
 >
 > 编号说明:**OD-4**(consolidation 默认 production)有意折叠进 **T-MEM2**(与 canonical-owner OD-9 同属一次 memory 决策,不会独立 fire),不单列。roadmap §9 的 **W-Low 债务簇**(W1-D1/D2/D3/D6/D7、W2-D1、W3-D1/D2)均为已治理 Low debt,owner/trigger/exit 由 roadmap §9.3–9.5 管辖,**有意不提升为本寄存器行**(避免把 Low debt 扩成 active surface)。
 
@@ -56,27 +57,21 @@
 
 ### T-SKILL-GOLDEN — Skill System golden
 - **Related module**: Skill System
-- **Current status**: L2;`agent/skill_system/` 真实(registry/loader/selector/lifecycle),`agent/skills/__init__.py` 是 tombstone;**golden_e2e 无 skill golden**(其它能力面 GE-1 都有)。
-- **Category**: `HARDEN_NEXT_READY`
-- **What it means**: 给 Skill System 补一个 Golden E2E,锁定**当前** discovery / selection(`SKILL_SELECT` probe)/ lifecycle 的真实行为,达成与 tool/subagent/memory-checkpoint golden 的对等。
-- **Activation state**: **已 active(唯一可现在做)** —— 唯一同时满足 bounded-action 全部条件(无 owner / 无 external)。下方 "Forbidden during work" 与 "Validation / exit" 是执行时的硬约束,不是 pre-fire gate。
-- **Activation path**:
-  1. inventory 当前 Skill System 行为(registry/selector/lifecycle/skill_tool),明确 experimental / legacy / tombstone 事实;
-  2. 锁"当前事实",**不是**"目标能力";
-  3. 新增 `tests/golden_e2e/test_golden_skill_*.py` + fixture(镜像现有 GE-1 fixture 模式);
-  4. **不重构 Skill System**;
-  5. targeted green(`tests/golden_e2e/`)→ 视需要 full suite;
-  6. 更新 `AGENT_MODULE_MATURITY_AUDIT.zh.md`(Skill L2→记录 golden 已锁)。
+- **Current status**: L2;`agent/skill_system/` 真实(registry/loader/selector/lifecycle),`agent/skills/__init__.py` 是 tombstone;Skill golden 已在 `tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json` 锁定当前实验事实。
+- **Category**: `COMPLETED`
+- **What it means**: 已用本地 sample fixture 锁定当前 discovery / selection metadata / direct dispatcher selection / lifecycle handoff,明确不是 real `core.chat` E2E 或 production-ready 证明。
+- **Activation state**: **completed / closed** —— 不再是 active hardening trigger,也不打开其它 trigger。
+- **Completed path**: inventory → RED fixture absence → golden fixture Green → targeted verification → maturity docs 最小更新;全程未改 `agent/`。
 - **Required decisions**: 无。
 - **Required external resources**: 无。
-- **Required evidence**: 当前 skill runtime 行为可被 fixture 复现。
-- **Allowed work after fires**: 写 scoped plan + 加 golden fixture/test + 更新 maturity doc。
+- **Required evidence**: 已满足;当前 Skill discovery/dispatcher/lifecycle 本地行为由 fixture 可重复复现。
+- **Allowed work after fires**: 已完成;无后续实现工作自动获得授权。
 - **Forbidden during work**(执行硬约束):**禁止重构 Skill System;禁止把实验行为写成 production-ready;禁止解冻/升级 skill 为 side-effect;golden 只新增于 `tests/golden_e2e/` + fixtures**。
-- **Validation / exit**: Skill golden green + maturity doc 更新;golden 明确锁"当前实验事实"。**客观天花板:`git diff agent/` 必须为空;若要让 golden 通过需改任何 `agent/` 源码,STOP —— 那说明在锁"目标"而非"当前",已超出本 trigger scope。**
+- **Validation / exit**: 已满足;Skill golden green + maturity doc 更新,且 `git diff agent/` 为空。golden 明确锁"当前实验事实",不声明真实 core-loop E2E。
 - **Owner needed**: 无(无需 owner 决策)。
 - **Risk if ignored**: Skill 行为静默漂移,与其它能力面 golden 覆盖不对等。
 - **Risk if forced early**: 低;唯一风险是把实验行为锁成"目标",必须用措辞规避。
-- **Reference evidence**: `agent/skill_system/registry.py:26`、`agent/skills/__init__.py`(tombstone);`ls tests/golden_e2e/`(无 skill);maturity audit §7。
+- **Reference evidence**: `agent/skill_system/registry.py:26`、`agent/skills/__init__.py`(tombstone)、`tests/golden_e2e/test_golden_skill_system.py`、`tests/golden_e2e/fixtures/skill_system_current_behavior.json`;maturity audit §7。
 
 ### T-PROVIDER-E2E — real provider E2E(W1-D5)
 - **Related module**: Provider / Model Boundary(L3)
@@ -353,13 +348,10 @@
 
 ## 5. What Can Be Done Now
 
-**仅 1 项可做:T-SKILL-GOLDEN(Skill System golden)。**
+**当前无 active trigger。T-SKILL-GOLDEN 已完成并关闭。**
 
-- 它满足 bounded-action 全部条件:证据充分(skill_system 真实 + 无 golden)、下一步清晰(镜像 GE-1 fixture)、验收清晰(golden green)、无 external credential、无 owner 决策、不重开 repair、不过度设计。
-- 约束:锁"当前实验事实"而非"目标能力";不重构 Skill System。
-- **其它项为何不能现在做**:T-PROVIDER-E2E / T-MCP-REAL 需 external credential/server;T-MEM2 / T-OD7 / T-CM2 / T-SCHED-ROUTE 需 owner 决策;T-SUBAGENT-FLIP 需 flip 决策 + real provider;T-SA2 需架构 spike 证据;T-SPR1 无当前 cross-host/long-task 消费者(deferred,需求出现后再配 OD-8);T-EOE1 需评测消费者 + OD-6;T-W2D4 需 V0 default-on 后的 cleanup 窗口;T-NS-CLEANUP 需 owner 批准。
-
-> 注:本轮**未执行** T-SKILL-GOLDEN(用户要求 trigger registry only,不 hardening)。它的执行属未来 scoped work,走 §7 Activation Workflow。
+- 关闭证据:`tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json`。
+- 其它 trigger 状态不变,没有因本次 golden 自动激活任何后续工作。
 
 ---
 
@@ -390,7 +382,7 @@
 2. **Write scoped plan** —— 只针对该 trigger 的最小 scope(可用 `ce-plan`),明确 Non-goals 与 rollback。
 3. **Review with architecture + adversarial reviewer** —— fresh-context 双 reviewer;有 Blocker/High 必须先修。
 4. **Implement only scoped change** —— 不顺手做其它 trigger;不扩 scope。
-5. **Verify targeted + full suite as needed** —— targeted green;触碰 runtime 路径时跑 full suite(引用基线 4730 passed, 12 skipped, 26 xfailed)。
+5. **Verify targeted + full suite as needed** —— targeted green;本轮已跑 fresh full suite(`4731 passed, 12 skipped, 26 xfailed`)。
 6. **Update maturity audit / trigger registry** —— 更新对应模块 L 级与本寄存器条目状态。
 7. **Do not reopen Architecture Repair unless explicitly required** —— 只有 trigger 明确要求(如触碰 runtime routing/provider/memory/scheduler/policy/fallback/evidence 边界)且 owner 批准时,才评估是否需要新的 documented repair mainline;否则保持 closed。
 
@@ -402,5 +394,5 @@
 - **Roadmap(trigger/exit/owner 权威)**:`docs/06-audit/CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md` §10 债务表(W1-D5/W2-D2/W2-D4/W3-D3/FOP-1)、§11 OD 寄存器(OD-2/5/6/7/8)、§9 综合分类、各 Theme(CM-2/SA-2/MEM-2/SPR-1/EOE-1/SPA-2/CR-1)。
 - **Closure/事实**:`ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md`(Remaining Debt 表)、`ARCHITECTURE_REPAIR_MAINLINE_RETROSPECTIVE.zh.md`、`docs/CAPABILITY_BOUNDARIES.md`。
 - **目标**:`docs/architecture/ARCHITECTURE_NORTH_STAR.zh.md`(§9/§10/§12/§13/§14/§23 OD-1..OD-8)。
-- **源码核验**:`agent/subagent_system/v0_contract.py:322/357`(FOP-1)、`agent/transitions.py`(OD-7 confirmation/awaiting_user)、`tests/runtime_integration/test_mcp_real_external_flight.py`(REAL-EVIDENCE-007)、`agent/core.py:697/772`(scheduler 默认 None)、`agent/memory_runtime_hooks.py:33/152`(memory 默认 off)、`ls tests/golden_e2e/`(无 skill golden)。
+- **源码核验**:`agent/subagent_system/v0_contract.py:322/357`(FOP-1)、`agent/transitions.py`(OD-7 confirmation/awaiting_user)、`tests/runtime_integration/test_mcp_real_external_flight.py`(REAL-EVIDENCE-007)、`agent/core.py:697/772`(scheduler 默认 None)、`agent/memory_runtime_hooks.py:33/152`(memory 默认 off)、`tests/golden_e2e/test_golden_skill_system.py`。
 - **Graphify**:`graphify-out/graph.json`(2026-06-14),本 session 跨全部 trigger 模块做 runtime fact discovery。

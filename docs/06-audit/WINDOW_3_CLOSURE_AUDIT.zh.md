@@ -51,8 +51,8 @@ Source facts checked：
   `load_provider_profiles`, `resolve_active_profile`, and
   `profile_to_agent_config`.
 - `agent/provider/factory.py` owns provider selection fallback:
-  `config/config.yaml` → `FIRST_AGENT_PROVIDER_PROFILE` →
-  `MY_FIRST_AGENT_LLM_PROVIDER` → fake provider.
+  `config/config.yaml` → `FIRST_AGENT_PROVIDER_PROFILE` (legacy env var) →
+  `MY_FIRST_AGENT_LLM_PROVIDER` (legacy env var) → fake provider.
 - `agent/local_config.py` is local/dev display metadata config, not provider factory owner.
 - `agent/mcp_config*.py` is MCP-specific parser/service/presenter/CLI surface.
 - `agent/core.py` keeps `chat(..., action_scheduler=None, ...)` and only forwards the

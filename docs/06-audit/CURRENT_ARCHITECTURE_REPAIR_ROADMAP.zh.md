@@ -16,8 +16,10 @@
 > 主控视图——`## Repair Remaining Gap Classification`（10 类分类 + 依赖触发表）与
 > `## Architecture Repair Mainline Closure Readiness`（主线关闭判断）。本轮经
 > Graphify + 源码/测试核验 + 两个 fresh-context reviewer（architecture + adversarial）
-> 交叉验证；后续 RED-1 与 GE-1 Phase B/C 均已完成，但 GE-2/GE-3 仍未闭合，故
-> `MAINLINE_CLOSE_READY = NO`。原按 Theme 组织的 item 正文保留为详细背书，不删。
+> 交叉验证；后续 RED-1、GE-1 Phase B/C、GE-2 + doc-align cluster 均已完成；
+> GE-3 rubric re-score 仍未闭合，故 `MAINLINE_CLOSE_READY = NO`。原按 Theme
+> 组织的 item 正文保留为详细背书，不删。GE-2 evidence 见
+> `docs/CAPABILITY_BOUNDARIES.md` 的 runtime fact diff table。
 
 ---
 
@@ -84,7 +86,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 1 — Runtime Spine
 
-### RS-1 — Tool mediated-execution topology alignment  ·  P2  ·  `active`
+### RS-1 — Tool mediated-execution topology alignment  ·  P2  ·  `completed-docs`
 
 - **North Star principle**：B（One Runtime Spine）、F（Controlled side effects）。
 - **Current fact**：业务 tool 的 TOOL_GATE / TOOL_RESULT 经
@@ -109,12 +111,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Non-goals**：不把 `execute_single_tool` 搬进 dispatcher handler（会复活
   双重执行）；不写第二条 tool execution path；不动 mediator 行为。
 - **Dependencies**：无（核验先行）。amendment 需用户批准。
-- **Acceptance evidence**：boundary tests 持续 green；一份 “mediated-execution
-  是 governed topology” 的说明 + （若采纳）North Star amendment 记录。
+- **Acceptance evidence**：boundary tests 持续 green；`docs/CAPABILITY_BOUNDARIES.md`
+  已把 “mediated execution 是 governed topology” 作为 Current Runtime Fact 记录。
 - **Rollback boundary**：纯文档/核验，无代码改动可回滚。
 - **Owner**：`core.py`/`tool_runtime_mediator.py` 维护者（待指派）。
-- **Exit condition**：North Star topology 文字与真实 mediated execution 一致，
-  且 boundary tests 锁定 gate/result/evidence 统一治理。
+- **Exit condition**：**completed-docs** — 当前 fact docs 已对齐真实 mediated
+  execution；North Star amendment 如未来需要，仍是单独用户批准事项，不属于本轮
+  GE-2 closure 前置。
 
 > RS 主线后续（V0 路由对 spine 的影响）见 **SA-1**。
 
@@ -152,7 +155,8 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   - W3-T5 将 scheduler wording 从不可达式 overclaim 收紧为
     `dormant-by-default / registered-not-routed in production`；
   - CM-2 仍为 `accepted_deferred`，未新增统一 capability contract/status；
-  - GE-2 仍是独立后续项，Window 3 未启动。
+  - GE-2 在 Window 3 closure 时仍是独立后续项；Architecture Repair Closure
+    Step 3 已通过 `docs/CAPABILITY_BOUNDARIES.md` fact table 完成 GE-2/doc-align。
 
 ### CM-2 — Unified Capability Contract  ·  P3  ·  `accepted_deferred`（Open OD-2）
 
@@ -312,7 +316,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 4 — Memory / Context Governance
 
-### MEM-1 — Memory consolidation / emergence 真实描述对齐  ·  P3  ·  `documented_pending`
+### MEM-1 — Memory consolidation / emergence 真实描述对齐  ·  P3  ·  `completed-docs`
 
 - **North Star principle**：I（Governed memory）。
 - **Current fact**：consolidation pipeline FROZEN（2026-05-25,
@@ -330,10 +334,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Non-goals**：不解冻 consolidation、不新增 raw write/auto-adoption/真实 LLM
   consolidation、不重构 memory。
 - **Dependencies**：无。
-- **Acceptance evidence**：docs 与 `test_memory_consolidation_truth.py` 一致。
+- **Acceptance evidence**：docs 与 `test_memory_consolidation_truth.py`、GE1-B1
+  memory golden、`docs/CAPABILITY_BOUNDARIES.md` fact table 一致。
 - **Rollback boundary**：doc-only。
 - **Owner**：memory 维护者（待指派）。
-- **Exit condition**：所有 memory 状态描述与代码/测试一致。
+- **Exit condition**：**completed-docs** — memory frozen / env-gated /
+  golden-locked 现状已在 capability fact table 与本 Roadmap 对齐；MEM-2 owner
+  决策仍独立 `blocked_by_decision`。
 
 ### MEM-2 — Memory canonical write owner  ·  P2  ·  `blocked_by_decision`（Open）
 
@@ -438,7 +445,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   - decision doc：`docs/06-audit/SPA1_MASKING_OWNERSHIP_DECISION.zh.md`；
   - 延伸债务 W2-D1（`_EXTRA_REDACT_PATTERNS` 长期归属）deferred，见 §9.4。
 
-### SPA-2 — Permission vs policy staging 口径  ·  P2  ·  `documented_pending`
+### SPA-2 — Permission vs policy staging 口径  ·  P2  ·  `completed-docs`
 
 - **North Star principle**：F（Controlled side effects）。
 - **Current fact**：gate（`tool_gate.py:184`）把 skill-allowlist + confirmation +
@@ -451,10 +458,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   独立 permission stage，需另案。
 - **Non-goals**：不为凑 5 步而制造 permission stage。
 - **Dependencies**：无。
-- **Acceptance evidence**：文档对 gate 折叠 permission 的说明与代码一致。
+- **Acceptance evidence**：`docs/CAPABILITY_BOUNDARIES.md` 记录 policy gate /
+  `gate_disposition` 现状，并明确 OD-7 production approval hook 仍 deferred。
 - **Rollback boundary**：doc-only。
 - **Owner**：runtime_integration 维护者（待指派）。
-- **Exit condition**：staging 口径与代码一致。
+- **Exit condition**：**completed-docs** — permission / approval / gate staging
+  已与 `ToolGateHandler`、mediator no-execution 语义对齐；未建设 production
+  approval hook。
 
 > Human approval hook（OD-7）= `accepted_deferred`：`confirmation_required`
 > 结果态已存在并接 AWAITING_USER；production 强制 approval hook 待 OD-7 裁决，
@@ -506,7 +516,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
     仍 registered、测试 seam 仍可手工注入；
   - no scheduler wiring。
 
-### CR-2 — Legacy skill tombstone wording  ·  P3  ·  `documented_pending`
+### CR-2 — Legacy skill tombstone wording  ·  P3  ·  `completed-docs`
 
 - **North Star principle**：K。
 - **Current fact**：`agent/skills/__init__.py` 是 active fail-closed tombstone；
@@ -517,12 +527,15 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Repair direction**：doc-align（含 `docs/design/skill-system-architecture.md` 等）。
 - **Non-goals**：不恢复 `agent/legacy_skills/` 或 `agent/skills/` 原型。
 - **Dependencies**：无。
-- **Acceptance evidence**：相关文档措辞统一；tombstone 行为测试保持。
+- **Acceptance evidence**：`docs/CAPABILITY_BOUNDARIES.md` 记录 tombstone /
+  `agent/skill_system/` 现状；当前 source-of-truth docs 不把 legacy path 写成
+  active capability。
 - **Rollback boundary**：doc-only。
 - **Owner**：skill_system 维护者（待指派）。
-- **Exit condition**：所有引用处口径一致。
+- **Exit condition**：**completed-docs** — legacy skill 口径已对齐为 tombstone
+  / stale historical target；不恢复旧实现。
 
-### CR-3 — TUI / local_demo compat labeling  ·  P3  ·  `documented_pending`（do-not-touch）
+### CR-3 — TUI / local_demo compat labeling  ·  P3  ·  `completed-docs / no-op`（do-not-touch）
 
 - **North Star principle**：A、K。
 - **Current fact**：`tui/`（根目录）+ `agent/local_demo.py` + `agent/local_trace.py`
@@ -535,12 +548,14 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Non-goals**：**不把 TUI/local_demo 当主线迁移**（用户裁决 #12 精神 + 红线）；
   不改其行为；不进入近期重构。
 - **Dependencies**：无。
-- **Acceptance evidence**：（可选）compat 标注存在。
+- **Acceptance evidence**：本轮 inventory 未发现 TUI / local_demo 被当前 docs
+  误写为 production primary path；保持 do-not-touch。
 - **Rollback boundary**：doc-only。
 - **Owner**：TUI/local 维护者（待指派）。
-- **Exit condition**：标注完成或显式判定无需标注。
+- **Exit condition**：**completed-docs / no-op** — 显式判定无需新增 compat
+  label；若未来改动 TUI/local demo，再由对应窗口标注。
 
-### CR-4 — Stale docs references  ·  P3  ·  `documented_pending`
+### CR-4 — Stale docs references  ·  P3  ·  `completed-docs`
 
 - **North Star principle**：Documentation accuracy（§18）。
 - **Current fact**：`docs/design/*` 可能引用已删除文件（如 `legacy_skills`）。
@@ -549,10 +564,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Repair direction**：用可复现命令（如 `rg "legacy_skills" docs/`）定位并修正引用。
 - **Non-goals**：不删除历史文档至不可追溯；不改设计结论。
 - **Dependencies**：与 CR-2 口径一致。
-- **Acceptance evidence**：`rg` 检查无 stale 引用。
+- **Acceptance evidence**：`rg` inventory 未发现当前 source-of-truth docs 继续把
+  deleted legacy path 写成 active path；历史 plans / closure audit 中的旧引用保留
+  为历史证据。
 - **Rollback boundary**：doc-only。
 - **Owner**：docs 维护者（待指派）。
-- **Exit condition**：stale 引用清零。
+- **Exit condition**：**completed-docs** — active/source-of-truth stale refs 已对齐；
+  历史引用不重写。
 
 ---
 
@@ -638,23 +656,27 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
     `tests/runtime_integration/` 1076 passed, 4 skipped, 6 xfailed；
     `tests/` 4730 passed, 12 skipped, 26 xfailed。
 
-### GE-2 — Capability documentation alignment  ·  P2  ·  `documented_pending`
+### GE-2 — Capability documentation alignment  ·  P2  ·  `completed-docs`
 
 - **North Star principle**：Documentation accuracy（§18）、K。
-- **Current fact**：`RuntimeDecisionFrame` / `PROJECT_STATUS` /
-  `CURRENT_CAPABILITY_STATUS` / `runtime-decision-spine` 之间 capability status
-  口径漂移（旧 V4）。
-- **Target state**：四方做可复现 diff table；code/test 决定 Current Fact；
-  docs/status 与结构化 SoT 一致；不手工维护多份互相重复的状态。
-- **Gap / failure mode**：多份状态文档互相漂移 → Documentation critical 维度卡在 2。
-- **Repair direction**：先产出可复现 diff table，再做 terminology alignment；
-  不改代码逻辑。
+- **Current fact**：GE-2 doc-align 已把 Current Runtime Fact 收敛到
+  `docs/CAPABILITY_BOUNDARIES.md`：Tool / Skill / SubAgent / Provider / Scheduler
+  / Policy / Memory / Checkpoint / Evidence trace / MCP 均有状态表，且明确
+  code/test/closure inventory 决定 Current Fact。
+- **Target state**：已完成。Current Fact 由 production code、可执行测试、closure
+  audit inventory 背书；docs/status 不再手工声称统一 `CapabilityStatus` 已存在。
+- **Gap / failure mode**：已关闭为 docs-completed；剩余 rubric 分数由 GE-3
+  单独复算，不在本轮提前给分。
+- **Repair direction**：completed-docs；不改代码逻辑。
 - **Non-goals**：不手工维护重复状态；不改 capability 行为。
 - **Dependencies**：与 CR-2/CR-4 口径协同。
-- **Acceptance evidence**：diff table + docs/status 与结构化 SoT 一致的断言。
+- **Acceptance evidence**：`docs/CAPABILITY_BOUNDARIES.md` runtime fact diff table；
+  本 Roadmap 分类表与 closure readiness 同步更新；docs/source-of-truth guard 通过。
 - **Rollback boundary**：doc-only。
 - **Owner**：docs/runtime 维护者（待指派）。
-- **Exit condition**：四方口径一致且可复现校验通过。
+- **Exit condition**：**completed-docs** — GE-2 + RS-1 / SPA-2 / MEM-1 /
+  CR-2 / CR-3 / CR-4 doc-align cluster 已完成；不引入 CM-2 unified
+  capability contract。
 
 ### GE-3 — Rubric re-score（架构验收复算）  ·  P2  ·  `documented_pending`
 
@@ -736,7 +758,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 |---|---|---|---|---|---|---|
 | W2-D1 | `_EXTRA_REDACT_PATTERNS` 长期归属（safe_metadata vs. display_events） | Low | 当前 boundary-local 定位清晰；仅多了一个"额外脱敏层"管理点 | safe_metadata / display_events 维护者 | trust-boundary contract 演进，或需统一 canonical masking 层时 | 明确迁移到 display_events（Option A 延迟版）或保持 boundary-local + 有 test 锁定 |
 | W2-D2 | OD-7：Human approval hook 进生产 | Low | `confirmation_required` 结果态存在且接 AWAITING_USER；强制生产 hook 待需求 | 项目 owner | 出现多用户/生产 approval 需求 | OD-7 裁决后独立窗口 |
-| W2-D3 | SPA-2：Permission vs policy staging 口径对齐 | Low | doc-only debt；gate 折叠 permission 无运行风险 | runtime_integration 维护者 | 有人误读 §4.F 5-step 独立 stage | doc-align 窗口 |
+| W2-D3 | SPA-2：Permission vs policy staging 口径对齐 | Low → **completed-docs** | Step 3 已记录 gate 折叠 permission 与 OD-7 deferred；无 open runtime debt | runtime_integration 维护者 | — | completed-docs；见 `docs/CAPABILITY_BOUNDARIES.md` |
 | W2-D4 | L1 attempt dead-code removal | Low | L1 dead branch（`core.py:2217` `delegate_l1_called` check）从未执行，handler 未注册 | SubAgent routing | V0 production default-on + 独立 cleanup 窗口 | 独立 cleanup 评估 + 删除 + tests 更新 |
 
 > 所有 W2 debt 均不阻塞 Window 2 关闭。W2-D1/D3/D4 为 Low，W2-D2（OD-7）已在 §11 登记为 Open。每条均有 trigger 和 exit condition。
@@ -772,7 +794,8 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端到端测试。
 
 > RED-1 是审计 falsifiability 的正例：W3 closure 的 GREEN 自报曾被独立 reviewer + 本人
-> pytest 证伪；后续修复关闭了 RED-1，但 `MAINLINE_CLOSE_READY` 仍因 GE-2/GE-3 为 NO。
+> pytest 证伪；后续修复关闭了 RED-1，Step 3 又关闭 GE-2/doc-align；
+> `MAINLINE_CLOSE_READY` 仍因 GE-3 rubric re-score 未完成而为 NO。
 
 ---
 
@@ -859,12 +882,12 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 ## 13. P0/P1/P2/P3 清单（active + pending）
 
 - **P0**：无（无安全/数据/核心不可运行/未治理第二 Runtime/权限或证据边界失效项）。
-- **P1**：**SA-1**（V0 production-path completion）、**GE-1**（minimal Golden E2E）。
-- **P2**：RS-1（topology alignment）、SPA-2（permission staging 口径）、
-  MEM-2（memory owner，blocked_by_decision）、GE-2（capability docs）、GE-3（rubric re-score）。
-  ~~SPA-1~~（completed Window 2）、~~CR-1~~（completed Window 2）、
-  ~~CM-1~~（completed Window 3）。
-- **P3**：MEM-1、CM-2、SPR-1、EOE-1、CR-2、CR-3、CR-4（多为 deferred/doc-align）。
+- **P1**：无 open。~~SA-1~~ 与 ~~GE-1~~ 已 completed。
+- **P2**：GE-3（rubric re-score，唯一 closure-blocking）、MEM-2（memory owner，
+  blocked_by_decision）、SA-2（deferred spike）。~~RS-1~~、~~SPA-2~~、
+  ~~GE-2~~ 已 completed-docs；~~SPA-1~~、~~CR-1~~、~~CM-1~~ 已 completed。
+- **P3**：CM-2、SPR-1、EOE-1 与 tracked debts。~~MEM-1~~、~~CR-2~~、
+  ~~CR-3~~、~~CR-4~~ 已 completed-docs/no-op。
 
 ## Repair Remaining Gap Classification
 
@@ -905,13 +928,13 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 | **RED-1** | Docs SoT | W3 closure 裸列 stale env-var → active guard RED | **DONE** | completed (RED-1) | `WINDOW_3_CLOSURE_AUDIT.zh.md` legacy marker fix；本轮 full suite 4730 passed, 12 skipped, 26 xfailed | 已修；guard 恢复 green | no | — |
 | GE-1 Phase B/C | Golden E2E | memory/checkpoint/policy/evidence-trace + adversarial stub 无 golden | **DONE** | completed (GE-1 Phase B/C) | `test_golden_memory_checkpoint.py`、`test_golden_policy_evidence.py`、`test_minimal_policy_stub.py` + 5 fixtures；golden/adversarial 13 passed | 已修；仅新增 tests/fixtures，无 production 行为变化 | no | — |
 | GE-3 | Acceptance | §20 rubric 全 `provisional`，未复算 | **FIX_NEXT（closure-blocking）** | documented_pending (P2) | North Star §20 12 维全 provisional；§21 DoD item 8 要求每维 ≥2 *实测* | 复算须在 suite-green + SA-1/GE-1 evidence 后做；红线禁为升分伪造 | **YES（formal close, DoD 8）** | suite-green 后按 §20 anchors 逐维取证 |
-| GE-2 | Docs | capability status 四方漂移 | **DOC_ONLY** | documented_pending (P2) | `CURRENT_CAPABILITY_DRIFT.zh.md` / `CAPABILITY_BOUNDARIES.md` 已存在 | doc diff-table；DoD item 5 一致性 | partial（DoD 5） | 产可复现 diff table + terminology align |
-| RS-1 | Runtime Spine | North Star §7 topology 文字 vs mediated execution | **DOC_ONLY** | active (P2) | `tool_runtime_mediator.py:228-297` 单一 mediated path；direct-execute 仅 meta/dispatcher=None；boundary tests green | doc topology drift，**非代码缺陷**（两 reviewer 确认非第二 spine） | no | North Star §7 amendment 提案（另案，不本轮改 North Star） |
-| SPA-2 | Safety | permission 折叠进 gate 无独立 stage | **DOC_ONLY** | documented_pending (P2) | `tool_gate.py:184` gate_disposition 折叠；North Star §4.F 已降级 Inference | doc-align | no | 说明 gate 折叠 permission |
-| MEM-1 | Memory | consolidation/emergence 真实描述 | **DOC_ONLY** | documented_pending (P3) | 两独立 off-by-default gate（`memory_runtime_hooks.py:33/152`）；truth test 锁 | doc-align，不解冻 | no | 引用 truth test 对齐文档 |
-| CR-2 | Compat | legacy skill tombstone 措辞 | **DOC_ONLY** | documented_pending (P3) | `agent/skills/__init__.py` tombstone；`legacy_skills/` 不存在 | doc-align | no | 统一 tombstone 措辞 |
-| CR-3 | Compat | TUI/local_demo compat label | **DOC_ONLY / OPTIONAL** | documented_pending (P3, do-not-touch) | 生产 spine 不 import tui/local_demo | 最多 1 行 doc label，可选 | no | 可选加 `# compat-path` |
-| CR-4 | Compat | stale docs references | **DOC_ONLY** | documented_pending (P3) | `rg legacy_skills docs/` 定位 | doc-only | no | 修正 stale 引用 |
+| GE-2 | Docs | capability status 四方漂移 | **DONE** | completed-docs (P2) | `docs/CAPABILITY_BOUNDARIES.md` runtime fact diff table；本 Roadmap 同步 closure readiness | 已完成；不引入 CM-2 / unified `CapabilityStatus` | no | — |
+| RS-1 | Runtime Spine | North Star §7 topology 文字 vs mediated execution | **DONE** | completed-docs (P2) | `docs/CAPABILITY_BOUNDARIES.md` 记录 mediated execution 是 governed current topology；boundary tests green | current-fact docs 已对齐；North Star amendment 另案且本轮不改 | no | — |
+| SPA-2 | Safety | permission 折叠进 gate 无独立 stage | **DONE** | completed-docs (P2) | capability fact table 记录 `ToolGateHandler` / `gate_disposition` / no-execution；OD-7 deferred | doc-align 完成；未建设 production approval hook | no | — |
+| MEM-1 | Memory | consolidation/emergence 真实描述 | **DONE** | completed-docs (P3) | capability fact table + GE1-B1 memory golden 锁定 frozen/env-gated/disabled_by_env | doc-align 完成；不解冻 memory；MEM-2 仍独立决策 | no | — |
+| CR-2 | Compat | legacy skill tombstone 措辞 | **DONE** | completed-docs (P3) | capability fact table 记录 `agent/skills` tombstone 与 `agent/skill_system/` current path | doc-align 完成；不恢复 legacy path | no | — |
+| CR-3 | Compat | TUI/local_demo compat label | **DONE / NOOP** | completed-docs/no-op (P3, do-not-touch) | inventory 未发现当前 docs 把 TUI/local_demo 写成 production primary path | 显式 no-op，保持 do-not-touch | no | — |
+| CR-4 | Compat | stale docs references | **DONE** | completed-docs (P3) | active/source-of-truth docs 已对齐；历史 plans/audits 的旧引用保留为历史证据 | doc-align 完成；不重写历史证据 | no | — |
 | SA-2 | SubAgent | L3 lifecycle relocation 收益未论证 | **DEFERRED** | documented_pending / blocked_by_evidence (P2) | live V0 真实 label = `subsystem_integration`（`evidence.py:616-648`）；`core_loop` 不可伪造 | spike-only；"无充分收益不实施"是合法结论；无 owner OD 卡 | no | 出现真实 L3/gate→3 需求时做 spike |
 | SPR-1 | State | 完整状态机 enum / 跨主机 resume | **DEFERRED** | accepted_deferred (OD-8, P3) | intra-process resume 已接线（`main.py:731`）；仅 cross-host/enum deferred | 无 long-task/HITL 消费者 | no | 真实长任务/HITL 需求出现 |
 | EOE-1 | Observability | cost 字段进 observability | **DEFERRED** | accepted_deferred (OD-6, P3) | `latency_ms` 已捕获；cost 非一等字段 | 无评测 harness 消费者 | no | 评测 harness 消费 cost 时 |
@@ -932,9 +955,6 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 | ID | Depends on | Blocked by | Trigger to revisit | Exit condition | Owner / decision needed | Recommended priority |
 |---|---|---|---|---|---|---|
 | GE-3 | SA-1 ✓、GE-1 ✓、suite green ✓ | 无（可执行） | 下一 closure step | §20 每维实测回填，每分附 evidence | 架构审计 owner | P2（DoD 8） |
-| GE-2 | 与 CR-2/CR-4 协同 | 无 | doc-align 批次 | 四方 diff-table 一致 + 可复现校验 | docs/runtime owner | P2（DoD 5） |
-| RS-1 | 无 | North Star amendment 需用户批准 | 评 PR 误判 topology 时 | North Star §7 文字与 mediated execution 一致 | core/mediator owner + 用户 | P2（doc-only） |
-| SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 | 无 | 无 | doc-align 批次 | 文档与代码/测试一致 | 各模块维护者 | P2/P3（doc-only） |
 | SA-2 | SA-1 ✓（baseline） | 缺 L3 真实需求（blocked_by_evidence） | 出现 gate→3 / L3 真实需求 | spike 文档结论明确（做 or 保持 subsystem_integration） | 架构 owner | P2（spike） |
 | SPR-1 | 无 | OD-8 + 无 long-task 消费者 | 跨主机/长任务/HITL 需求 | OD-8 裁决 + canonical enum | 项目 owner（OD-8/OD-10） | P3 |
 | EOE-1 | 无 | OD-6 + 无评测消费者 | 评测 harness 消费 cost | OD-6 裁决 | 项目 owner（OD-6） | P3 |
@@ -956,27 +976,26 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 3. **Blocker / High debt 是否为 0?** —— 是。所有 debt 为 Low（W1-D4 Medium 已 test-guarded）；三窗 review 均 0 Blocker / 0 High。
 4. **Window 1/2/3 closure 是否完整?** —— 是，三份 closure audit 存在且有 verdict；RED-1 已由后续 docs-fix 纠正。
 5. **Full suite 最近一次是否 green?** —— 是。本轮核验当前 main 为 **4730 passed, 12 skipped, 26 xfailed**。
-6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。GE-3 仍是 closure-blocking FIX_NEXT（DoD item 8）；GE-2 + doc-align cluster 仍是 DoD item 5。
+6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。GE-3 仍是唯一 closure-blocking FIX_NEXT（DoD item 8）；GE-2 + doc-align cluster 已 completed-docs（DoD item 5）。
 7. **当前是否可以关闭 architecture repair mainline?** —— 否。
 8. **若不能，少数必须修的项：**
    - **GE-3**（DoD item 8）：§20 rubric 逐维实测 ≥2 复算。
-   - **GE-2 + doc-align cluster**（DoD item 5）：capability/docs/runtime fact 一致。
 
 > 注：DoD items 1/2/3/6/7/9 已满足（无 Blocker/High、生产路径单 spine、Medium 已治理、
 > 扩展点稳定、deferred 无双主路径/双 SoT、Open decisions 均有 owner+exit）。DoD item 4
-> 已由 GE-1 Phase B/C golden coverage 补齐；未满足的是 items 5（docs 一致）与
-> 8（rubric 实测）。这些都是 **verification / documentation 完成度**，**不是
-> runtime/architecture risk**。
+> 已由 GE-1 Phase B/C golden coverage 补齐；DoD item 5 已由
+> `docs/CAPABILITY_BOUNDARIES.md` runtime fact diff table + 本 Roadmap alignment
+> 补齐；未满足的是 item 8（rubric 实测）。这是 **verification / documentation
+> 完成度**，**不是 runtime/architecture risk**。
 
 **MAINLINE_CLOSE_READY = NO**
 
 Remaining must-fix items:
 - GE-3：按 §20 anchors 逐维复算 rubric（DoD item 8）。
-- GE-2 + doc-align（RS-1/SPA-2/MEM-1/CR-2/CR-4）：capability/docs/runtime fact 一致（DoD item 5）。
 
 > 这些都是 doc/test 完成项，无 runtime 风险、无外部 credential（除 W1-D5/real-provider）、
-> 无 owner 决策门槛（GE-3/GE-2 均 agent 可执行）。
-> 一旦 GE-2 完成 + GE-3 复算确认每维 ≥2，主线即可关闭。
+> 无 owner 决策门槛（GE-3 agent 可执行）。
+> 一旦 GE-3 复算确认每维 ≥2，主线即可关闭。
 
 ---
 
@@ -988,9 +1007,11 @@ Remaining must-fix items:
    **（Window 1 已 completed，Window 2 继续推进 SA-2 spike）**
 2. ~~SPA-1（completed Window 2）+ CR-1（completed Window 2）~~
 3. ~~CM-1（completed Window 3）~~
-4. **GE-2**（capability docs diff-table）：清 Documentation critical 维度。
-5. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：评估搬迁收益与风险。
-6. **RS-1**（tool mediated-execution topology alignment）：核验 gate/result/evidence 统一治理。
+4. ~~GE-2 + doc-align cluster（completed-docs Step 3）~~：capability docs diff-table、
+   RS-1 / SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 已对齐。
+5. **GE-3**（rubric re-score）：下一 closure step，按 §20 anchors 逐维取证复算。
+6. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：deferred，等真实 L3/gate→3 需求触发。
+7. ~~RS-1（completed-docs）~~：tool mediated-execution topology 已记录为 current governed path；North Star amendment 仍需另案批准。
 
 ## 15. Final Verdict
 
@@ -1002,5 +1023,6 @@ Remaining must-fix items:
   不再占 active 优先级。
 - V0 wiring（SA-1）与 Golden E2E（GE-1）成为下一阶段明确主线。
 - deferred 项均已治理，不制造双主路径或双 SoT。
+- GE-2 + doc-align cluster 已 completed-docs；剩余 closure-blocking 仅 GE-3 rubric re-score。
 - 本 Roadmap 可按主题逐段生成 ce-plan，而无需现场重做架构决策。
 - 本文件仍是 draft，等待 human review；非 source-of-truth，不替代 North Star。

@@ -38,6 +38,7 @@
 | [rfc/](rfc/) | Memory / Skill / SubAgent canonical RFC |
 | [design/](design/) | 当前仍有价值的架构设计；以 `PROJECT_STATUS.md` 为准 |
 | [06-audit/](06-audit/) | Architecture Repair closure evidence 与历史审计材料；不要当作 active repair queue |
+| [07-module-maturity/](07-module-maturity/) | Post-repair 模块成熟度审计(15 模块,Option γ);不是 active repair queue |
 
 ## 当前规则
 

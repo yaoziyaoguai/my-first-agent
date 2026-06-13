@@ -20,6 +20,7 @@ Read these first for post-repair Module Maturity / Module Hardening work:
 | ../CAPABILITY_BOUNDARIES.md | Current runtime/capability fact table for module work | yes |
 | CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md | Closed historical repair record, remaining triggers/debt | only when you need repair history |
 | ../architecture/ARCHITECTURE_NORTH_STAR.zh.md | Target/principle authority | only for target/principle questions |
+| ../07-module-maturity/AGENT_MODULE_MATURITY_AUDIT.zh.md | Post-repair module maturity audit (15 modules, taxonomy APPROVED = YES). Not a repair queue | when doing module maturity/hardening work |
 
 ## Final Closure Evidence
 

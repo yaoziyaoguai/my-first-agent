@@ -1,0 +1,19 @@
+{
+  "mediator_result": "__force_stop__",
+  "force_stop": "__force_stop__",
+  "gate_event": {
+    "action_type": "tool.gate",
+    "status": "rejected",
+    "decision": "rejected",
+    "policy_path": "skill_allowed_tools→rejected",
+    "execution_suppressed": true
+  },
+  "tool_invoke_event_count": 0,
+  "execution_log_status": "blocked_by_policy",
+  "tool_result_message_count": 1,
+  "tool_result_message": {
+    "type": "tool_result",
+    "has_policy_reason": true,
+    "raw_input_marker_present": false
+  }
+}

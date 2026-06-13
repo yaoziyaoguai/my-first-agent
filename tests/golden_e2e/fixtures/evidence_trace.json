@@ -1,0 +1,33 @@
+{
+  "trace_kind": "direct_dispatcher_policy_receipt",
+  "flushed_event_count": 2,
+  "event_types": [
+    "tool.gate",
+    "tool.result"
+  ],
+  "all_events_have_required_fields": true,
+  "gate_trace": {
+    "action_type": "tool.gate",
+    "status": "rejected",
+    "handler_name": "ToolGateHandler",
+    "evidence_level": "subsystem_integration",
+    "execution_suppressed": true
+  },
+  "tool_result_trace": {
+    "action_type": "tool.result",
+    "status": "success",
+    "handler_name": "ToolResultFeedbackHandler",
+    "evidence_level": "harness_runtime_e2e",
+    "disposition": "empty",
+    "execution_status": "blocked",
+    "no_tool_invocation": true,
+    "external_side_effects": false,
+    "read_only_operation": true,
+    "no_memory_side_effects": true,
+    "result_original_size": 0,
+    "result_was_redacted": false,
+    "result_was_truncated": false
+  },
+  "raw_input_marker_persisted": false,
+  "claims_real_provider_e2e": false
+}

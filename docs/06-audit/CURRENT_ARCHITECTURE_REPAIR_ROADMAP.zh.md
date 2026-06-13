@@ -10,6 +10,14 @@
 > 本轮性质：**只重写本 Roadmap**。未改 North Star、production code、tests、
 >   audit delta、capability/status docs、现有 plans、AGENTS.md；未 add/commit/push。
 > 本文件不是 implementation plan，不含代码 diff，不生成 goal 命令。
+>
+> **2026-06-13 Remaining Gap Classification Audit 补注**：本轮在不改 North Star /
+> Window plan / Window closure audit / production code / tests 的前提下，新增两节
+> 主控视图——`## Repair Remaining Gap Classification`（10 类分类 + 依赖触发表）与
+> `## Architecture Repair Mainline Closure Readiness`（主线关闭判断）。本轮经
+> Graphify + 源码/测试核验 + 两个 fresh-context reviewer（architecture + adversarial）
+> 交叉验证；**审计发现 full suite 当前在 main 上为 RED**（见 §9.6 RED-1），故
+> `MAINLINE_CLOSE_READY = NO`。原按 Theme 组织的 item 正文保留为详细背书，不删。
 
 ---
 
@@ -724,6 +732,31 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 > 所有 W3 debt 均不阻塞 Window 3 关闭。它们分别是可读性/兼容保留/未来接线决策债，
 > 不是 CM-1 的失败项；CM-2、provider registry、scheduler wiring 均未启动。
 
+## 9.6. Window 3 Post-Closure Audit Findings（2026-06-13 Gap Classification Audit）
+
+> 本节记录本轮 Gap Classification Audit 经 fresh-context reviewer + 本人源码/测试
+> 核验后**新发现**的两项。RED-1 是当前唯一 MUST_FIX_NOW；FOP-1 是 default-off 后的
+> pre-flip 缺陷。两者均不能在本轮修复（红线：本轮只改本 Roadmap，不改 Window closure
+> audit / production code）。
+
+| ID | 发现 | 证据（本人核验） | Severity | 分类 | 阻塞主线关闭? |
+|---|---|---|---|---|---|
+| RED-1 | full suite 当前 RED：`tests/test_docs_source_of_truth.py::test_active_docs_no_stale_config_env_vars` FAILED——`docs/06-audit/WINDOW_3_CLOSURE_AUDIT.zh.md` 裸列 `MY_FIRST_AGENT_LLM_PROVIDER` / `FIRST_AGENT_PROVIDER_PROFILE` 无 `legacy/deprecated/不推荐` 标记 | `pytest …::test_active_docs_no_stale_config_env_vars` → 1 failed；guard 在 `test_docs_source_of_truth.py:55-76`，scope 含 `docs/06-audit/*.md` | **MUST_FIX_NOW** | **YES** |
+| FOP-1 | flag-on（`SUBAGENT_V0_ROUTING_ENABLED=on`）+ real provider 时 V0 路由返回 `policy_blocked`：core.py V0 payload 设 `provider_mode='real_opt_in'` 但未设 `provider_mode_allowed`，`v0_contract.py:357` 默认 `fake_only` → `provider_mode_allowed` 拒 real → `policy_blocked`（落入 `_render_v0_delegate_result`，非受控 inline fallback） | `v0_contract.py:357` 默认 `fake_only`；core.py `2090-2210` 仅设 `provider_mode`/`parent_opt_in`，无 `provider_mode_allowed` | Low（默认）/ **P1-on-flip** | **TRACKED_DEBT（pre-flip blocker）** | NO（当前 flag default-off）；**YES 对 default-on flip** |
+
+**RED-1 处置**：fix = 在 `WINDOW_3_CLOSURE_AUDIT.zh.md` 的 env-var 引用旁加 `legacy` 标记
+（一词修复）。**本轮红线禁止修改 Window closure audit**，故仅登记 + 上报，待单独
+docs-fix 授权。修复前 "full suite green" 前置为 **false**，W3 closure 自报 "4725 passed"
+应订正为 "4724 passed, 1 failed"。
+**FOP-1 处置**：flag default-off，非当前生产风险；但 SA-1 "off→on 是独立后续工作" 的
+表述必须显式携带此 pre-flip blocker：default-on flip 前须修复 `provider_mode_allowed`
+传播（core.py V0 payload 注入 `profile_contract.provider_mode_allowed`）并补 real-provider
+路径测试。owner = `core.py` delegation 入口维护者；trigger = 准备 default-on flip；
+exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端到端测试。
+
+> RED-1 是审计 falsifiability 的正例：W3 closure 的 GREEN 自报被独立 reviewer + 本人
+> pytest 证伪。Gap Classification 据此把 `MAINLINE_CLOSE_READY` 钉为 NO。
+
 ---
 
 ## Theme 10 — History / Completed Work
@@ -815,6 +848,126 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   ~~SPA-1~~（completed Window 2）、~~CR-1~~（completed Window 2）、
   ~~CM-1~~（completed Window 3）。
 - **P3**：MEM-1、CM-2、SPR-1、EOE-1、CR-2、CR-3、CR-4（多为 deferred/doc-align）。
+
+## Repair Remaining Gap Classification
+
+> **本节是按修复分类组织的主控视图**（2026-06-13 Gap Classification Audit）。
+> 上方按 Theme 组织的 item 正文保留为详细背书；本节把每个 gap 归入下列 10 类，并给出
+> 关闭依赖。分类规则、defer/drop/blocked 区别见 §分类方法说明（本节末）。
+
+### 分类方法说明（defer vs drop vs blocked vs tracked debt）
+
+- **DONE**：已实现/已 doc-correct + 有 test/closure evidence；不再是 repair 主线任务。
+- **MUST_FIX_NOW**：仍偏离 North Star、真实可执行、不需外部/owner、**不修会阻塞主线关闭**。本类必须极少。
+- **FIX_NEXT**：值得修、风险可控、是下一批；可能阻塞 *formal* close（DoD verification/coverage），但不是 runtime risk。
+- **DEFERRED**：方向认可、现在不做（缺真实需求/收益不明/时机不成熟）；有 trigger + exit。**defer = 延后，不是忘记，也不是否认问题。**
+- **BLOCKED_BY_DECISION**：需 owner/产品/架构裁决，agent 不能自决；贸然实现 = 过度设计。
+- **BLOCKED_BY_EXTERNAL**：需 credential/外部 provider/CI secret/稳定外部服务，无法纯本地闭环。
+- **DOC_ONLY**：runtime 基本无问题，主要是说明/命名/文档与代码不一致；修复主要是文档。
+- **TRACKED_DEBT**：已有 debt id + owner/trigger/exit，不阻塞当前主线，触发时处理。
+- **OPTIONAL_OR_FUTURE**：增强项，不属当前 repair 必须完成项。
+- **DROP_OR_NOOP**：审计确认原判断是 overclaim / 代码已证明非问题 / 目标不再适用。
+
+**blocked vs deferred**：blocked 有具体外部 gate（决策或 credential）卡住；deferred 是
+我们*主动选择*延后（条件未成熟），即使无人阻拦也不现在做。
+**deferred vs drop**：deferred 承认问题真实、未来会做；drop 判定原问题不成立 / 不再适用。
+**tracked debt 是否阻塞**：不阻塞当前 mainline——它们有治理（owner/trigger/exit），
+是"未来触发时处理"，不是"现在必须修"。
+
+### 表 1：总览分类表
+
+| ID | Theme | Original gap / item | Category | Status | Evidence | Why not simply fix in order? | Blocks mainline close? | Next action |
+|---|---|---|---|---|---|---|---|---|
+| SA-1 | SubAgent | V0 production routing 未接入 | **DONE** | completed (W1) | flag `SUBAGENT_V0_ROUTING_ENABLED`(core.py:1990)；G4 golden；W1 closure | 已修 | no | — |
+| GE-1 Phase A | Golden E2E | 无显式 golden 套件 | **DONE** | completed (W1) | `tests/golden_e2e/` 5 文件 G1–G7 green | 已修 | no | — |
+| SPA-1 | Safety | masking owner 未锁 | **DONE** | completed (W2) | `test_safe_metadata_ownership.py` 11 green；decision doc | 已修 | no | — |
+| CR-1 | Compat | action_scheduler 未治理标注 | **DONE** | completed (W2+W3 label) | 4 `test_cr1_*` green；docstring `dormant-by-default`（W3 收紧 "不可达" overclaim） | 已修，无残留 | no | — |
+| CM-1 | Capability | config 入口 import-boundary 未审 | **DONE** | completed (W3) | W3 inventory + W3-T1/T4；结论=保留现有 config，无 duplicate registry | 已修；"无重复→无需收敛"是合法完成 | no | — |
+| W1-D4 | SubAgent | fallback negative/非穷举 match | **DONE（test-guarded）** | test-guarded (W2) | `test_subagent_v0_fallback_dispatch.py`；`VALID_RESULT_STATUSES` 闭集在 `schema.py:384` 构造期 raise，未知 status 不可达→不会 silent success | 已中和（闭集）；残留仅 maintainability | no | 收紧 debt 描述（见 §9.3 注） |
+| H-1/H-2/H-3 | History | catalog extraction / D1-D3 / SoT 对齐 | **DONE** | move_to_history / protected_pending | `8be4dcb`/`a9b39ab`/`97a7bb3`/`a251306`/`5d1cdcb`；边界测试锁 | 已完成；护栏不回退 | no | 保持边界测试 |
+| **RED-1** | Docs SoT | W3 closure 裸列 stale env-var → active guard RED | **MUST_FIX_NOW** | failing on main | `pytest …test_active_docs_no_stale_config_env_vars`→1 failed（本人核验） | **本轮红线禁改 Window closure audit**；修复在允许范围外 | **YES** | 单独 docs-fix：在 `WINDOW_3_CLOSURE_AUDIT.zh.md` env-var 旁加 `legacy` 标记（一词） |
+| GE-1 Phase B/C | Golden E2E | memory/checkpoint/policy/evidence-trace + adversarial stub 无 golden | **FIX_NEXT（closure-blocking）** | active (P1) | `tests/golden_e2e/` 仅 conversation/tool/subagent；`tests/adversarial/` 不存在 | 是 DoD item 4 的覆盖项，但非 runtime risk；Phase A 已给 SA-1 验收地板 | **YES（formal close, DoD 4）** | 下一窗口补 Phase B/C golden |
+| GE-3 | Acceptance | §20 rubric 全 `provisional`，未复算 | **FIX_NEXT（closure-blocking）** | documented_pending (P2) | North Star §20 12 维全 provisional；§21 DoD item 8 要求每维 ≥2 *实测* | 复算须在 suite-green + SA-1/GE-1 evidence 后做；红线禁为升分伪造 | **YES（formal close, DoD 8）** | suite-green 后按 §20 anchors 逐维取证 |
+| GE-2 | Docs | capability status 四方漂移 | **DOC_ONLY** | documented_pending (P2) | `CURRENT_CAPABILITY_DRIFT.zh.md` / `CAPABILITY_BOUNDARIES.md` 已存在 | doc diff-table；DoD item 5 一致性 | partial（DoD 5） | 产可复现 diff table + terminology align |
+| RS-1 | Runtime Spine | North Star §7 topology 文字 vs mediated execution | **DOC_ONLY** | active (P2) | `tool_runtime_mediator.py:228-297` 单一 mediated path；direct-execute 仅 meta/dispatcher=None；boundary tests green | doc topology drift，**非代码缺陷**（两 reviewer 确认非第二 spine） | no | North Star §7 amendment 提案（另案，不本轮改 North Star） |
+| SPA-2 | Safety | permission 折叠进 gate 无独立 stage | **DOC_ONLY** | documented_pending (P2) | `tool_gate.py:184` gate_disposition 折叠；North Star §4.F 已降级 Inference | doc-align | no | 说明 gate 折叠 permission |
+| MEM-1 | Memory | consolidation/emergence 真实描述 | **DOC_ONLY** | documented_pending (P3) | 两独立 off-by-default gate（`memory_runtime_hooks.py:33/152`）；truth test 锁 | doc-align，不解冻 | no | 引用 truth test 对齐文档 |
+| CR-2 | Compat | legacy skill tombstone 措辞 | **DOC_ONLY** | documented_pending (P3) | `agent/skills/__init__.py` tombstone；`legacy_skills/` 不存在 | doc-align | no | 统一 tombstone 措辞 |
+| CR-3 | Compat | TUI/local_demo compat label | **DOC_ONLY / OPTIONAL** | documented_pending (P3, do-not-touch) | 生产 spine 不 import tui/local_demo | 最多 1 行 doc label，可选 | no | 可选加 `# compat-path` |
+| CR-4 | Compat | stale docs references | **DOC_ONLY** | documented_pending (P3) | `rg legacy_skills docs/` 定位 | doc-only | no | 修正 stale 引用 |
+| SA-2 | SubAgent | L3 lifecycle relocation 收益未论证 | **DEFERRED** | documented_pending / blocked_by_evidence (P2) | live V0 真实 label = `subsystem_integration`（`evidence.py:616-648`）；`core_loop` 不可伪造 | spike-only；"无充分收益不实施"是合法结论；无 owner OD 卡 | no | 出现真实 L3/gate→3 需求时做 spike |
+| SPR-1 | State | 完整状态机 enum / 跨主机 resume | **DEFERRED** | accepted_deferred (OD-8, P3) | intra-process resume 已接线（`main.py:731`）；仅 cross-host/enum deferred | 无 long-task/HITL 消费者 | no | 真实长任务/HITL 需求出现 |
+| EOE-1 | Observability | cost 字段进 observability | **DEFERRED** | accepted_deferred (OD-6, P3) | `latency_ms` 已捕获；cost 非一等字段 | 无评测 harness 消费者 | no | 评测 harness 消费 cost 时 |
+| CM-2 | Capability | 统一 Capability Contract | **BLOCKED_BY_DECISION** | accepted_deferred (OD-2, P3) | `idempotency_key/cost_hint/latency_hint` 仅 North Star 文字，无 .py | 无跨三者消费者；建设=投机抽象；红线 #13 禁 | no | OD-2 裁决后 |
+| MEM-2 | Memory | memory canonical write owner | **BLOCKED_BY_DECISION** | blocked_by_decision (OD-9, P2) | 职责拆分 memory.py/store/hooks；North Star §4.D 标 Open | 不擅自裁决 owner（裁决 #14） | no | owner 决策 |
+| OD-7 | Safety | human approval hook 进生产 | **BLOCKED_BY_DECISION** | accepted_deferred (W2-D2) | `confirmation_required` 已接 AWAITING_USER；debug 路径足够 | 需多用户/生产 approval 需求决策 | no | OD-7 裁决后 |
+| W1-D5 | SubAgent | real external provider failure E2E | **BLOCKED_BY_EXTERNAL** | tracked (Low/Medium) | 仅 integration evidence（payload 注入），无真实 provider E2E | 需 credential/CI secret；且须在 GE-1 Phase B infra 之后 | no | owner 提供稳定 test provider / 批准 fake-real adapter |
+| FOP-1 | SubAgent | flag-on real-provider V0 → policy_blocked | **TRACKED_DEBT（pre-flip blocker）** | newly found (§9.6) | `v0_contract.py:357` 默认 fake_only；core.py payload 不设 `provider_mode_allowed` | flag default-off，非当前生产风险 | no（default-off）；**YES 对 default-on flip** | default-on flip 前修 `provider_mode_allowed` 传播 + real-provider 测试 |
+| W1-D1/D2/D3/D6/D7 | SubAgent | route 命名/docstring/in-band error/stop literal/identity 债 | **TRACKED_DEBT** | tracked (Low) | §9.3 登记 | 均 Low，有 owner/trigger/exit | no | 触发时处理 |
+| W2-D1 | Safety | `_EXTRA_REDACT_PATTERNS` 长期归属 | **TRACKED_DEBT** | tracked (Low) | §9.4 登记 | boundary-local 定位清晰 | no | trust-boundary contract 演进 |
+| W2-D4 | SubAgent | L1 attempt dead-code removal | **TRACKED_DEBT** | tracked (Low) | dispatcher 无 L1 handler（本人核验 get_handler→None）；branch 不可达 | 删除需独立 cleanup 窗口 | no | V0 default-on + cleanup 窗口 |
+| W3-D1/D2/D3 | Capability/Compat | provider precedence 呈现 / fallback 退役 / scheduler wiring 决策 | **TRACKED_DEBT** | tracked (Low/P3) | §9.5 登记 | 可读性/兼容/未来接线债 | no | 各自 trigger |
+| S2 / S3 / S4 | (旧) | mediator/core-loop thickness、tests 重组 | **DROP_OR_NOOP** | REMOVE_AS_OBSOLETE (§2) | 无耦合证据，纯 cosmetic；helper 结构已存在 | 审计确认非真实问题 | no | 不做 |
+| scheduler "不可达" | Compat | W2 曾称 scheduler `inert/unreachable` | **DROP_OR_NOOP** | corrected (W3) | W3 收紧为 `dormant-by-default`；37 `test_scheduler_main_path` 证 seam 可注入 | 原措辞 overclaim，已修正 | no | — |
+
+### 表 2：依赖与触发表（未 DONE item）
+
+| ID | Depends on | Blocked by | Trigger to revisit | Exit condition | Owner / decision needed | Recommended priority |
+|---|---|---|---|---|---|---|
+| RED-1 | none | 本轮红线（禁改 Window closure audit） | 立即（已 RED） | guard test green（加 `legacy` 标记后） | docs owner（单独 docs-fix 授权） | **P1（立即，最便宜）** |
+| GE-1 Phase B/C | SA-1 ✓、GE-1 Phase A ✓ | 无（可执行） | 启动下一窗口 | memory/checkpoint/policy golden green + `tests/adversarial/` stub | 测试 owner | P1（DoD 4） |
+| GE-3 | SA-1 ✓、GE-1 ✓、**suite green（当前 false，被 RED-1 卡）** | RED-1（suite 须先 green） | suite green 后 | §20 每维实测回填，每分附 evidence | 架构审计 owner | P2（DoD 8） |
+| GE-2 | 与 CR-2/CR-4 协同 | 无 | doc-align 批次 | 四方 diff-table 一致 + 可复现校验 | docs/runtime owner | P2（DoD 5） |
+| RS-1 | 无 | North Star amendment 需用户批准 | 评 PR 误判 topology 时 | North Star §7 文字与 mediated execution 一致 | core/mediator owner + 用户 | P2（doc-only） |
+| SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 | 无 | 无 | doc-align 批次 | 文档与代码/测试一致 | 各模块维护者 | P2/P3（doc-only） |
+| SA-2 | SA-1 ✓（baseline） | 缺 L3 真实需求（blocked_by_evidence） | 出现 gate→3 / L3 真实需求 | spike 文档结论明确（做 or 保持 subsystem_integration） | 架构 owner | P2（spike） |
+| SPR-1 | 无 | OD-8 + 无 long-task 消费者 | 跨主机/长任务/HITL 需求 | OD-8 裁决 + canonical enum | 项目 owner（OD-8/OD-10） | P3 |
+| EOE-1 | 无 | OD-6 + 无评测消费者 | 评测 harness 消费 cost | OD-6 裁决 | 项目 owner（OD-6） | P3 |
+| CM-2 | 无 | OD-2 + 无跨三者消费者 | 出现跨 Tool/Skill/MCP 消费者 | OD-2 裁决 | 项目 owner（OD-2） | P3 |
+| MEM-2 | 无 | OD-9（owner 决策） | owner 决策启动 | canonical owner 裁决 + single-owner test | 项目 owner（OD-9） | P2 |
+| OD-7 | 无 | owner/产品决策 | 多用户/生产 approval 需求 | OD-7 裁决 | 项目 owner（OD-7） | P3 |
+| W1-D5 | GE-1 Phase B（infra 先行） | 外部 credential/CI secret | Phase B 落地 + credential 可用 | real-provider failure E2E green | SubAgent owner + 外部 | P3 |
+| FOP-1 | 无（代码内可修） | 仅在 default-on flip 前必须 | 准备 default-on flip | `provider_mode_allowed` 正确传播 + real-provider V0 测试 | core.py delegation owner | P1-on-flip（当前 P3） |
+| W1-D1/D2/D3/D6/D7、W2-D1/D4、W3-D1/D2/D3 | 各自 | 无 | 各自 trigger（§9.3/§9.4/§9.5） | 各自 exit | 各模块维护者 | P3（tracked） |
+
+---
+
+## Architecture Repair Mainline Closure Readiness
+
+> 依据 North Star §21 Definition of Done（逐项 conjunction，不取平均）逐条核验。
+
+1. **P0/P1 open 是否为 0?** —— P0 = 0；P1 = **非 0**：GE-1（P1）仍 `active`（Phase B/C 未做，DoD item 4）。SA-1（P1）已 completed。
+2. **MUST_FIX_NOW 是否为 0?** —— **非 0 = 1**：RED-1（active guard test 失败，full suite RED）。其修复在本轮红线允许范围外（Window closure audit）。
+3. **Blocker / High debt 是否为 0?** —— 是。所有 debt 为 Low（W1-D4 Medium 已 test-guarded）；三窗 review 均 0 Blocker / 0 High。
+4. **Window 1/2/3 closure 是否完整?** —— 是，三份 closure audit 存在且有 verdict；但 W3 closure 含 RED-1 的 doc-guard 违规，其 "4725 passed" 自报被证伪（实际 4724 passed, 1 failed）。
+5. **Full suite 最近一次是否 green?** —— **否**。最近 W3 closure 引用 4725 passed，但本轮核验当前 main 为 **4724 passed, 1 failed**（RED-1）。
+6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。除上述类别外，仍有 1 个 MUST_FIX_NOW（RED-1）+ 2 个 closure-blocking FIX_NEXT（GE-1 Phase B/C、GE-3）+ 1 个 DOC_ONLY DoD-5 项（GE-2）。
+7. **当前是否可以关闭 architecture repair mainline?** —— 否。
+8. **若不能，少数必须修的项：**
+   - **RED-1**（MUST_FIX_NOW）：恢复 suite-green 前置（W3 closure audit 加 `legacy` 标记，一词修复，本轮范围外）。
+   - **GE-3**（DoD item 8）：§20 rubric 逐维实测 ≥2 复算——依赖 suite-green（被 RED-1 卡）。
+   - **GE-1 Phase B/C**（DoD item 4）：memory/checkpoint/policy/evidence-trace golden + adversarial stub。
+   - **GE-2 + doc-align cluster**（DoD item 5）：capability/docs/runtime fact 一致。
+
+> 注：DoD items 1/2/3/6/7/9 已满足（无 Blocker/High、生产路径单 spine、Medium 已治理、
+> 扩展点稳定、deferred 无双主路径/双 SoT、Open decisions 均有 owner+exit）。未满足的是
+> items 4（golden 覆盖）、5（docs 一致）、8（rubric 实测）——加上 RED-1 这个 active guard
+> 失败。这些都是 **verification / documentation 完成度**，**不是 runtime/architecture risk**
+> （MUST_FIX_NOW 的 runtime-risk 计数 = 0；RED-1 是 test-integrity 类的 must-fix）。
+
+**MAINLINE_CLOSE_READY = NO**
+
+Remaining must-fix items:
+- RED-1：修复 `WINDOW_3_CLOSURE_AUDIT.zh.md` 的 stale env-var 引用（加 `legacy` 标记），恢复 full suite green。【本轮范围外，须单独 docs-fix 授权】
+- GE-3：suite-green 后按 §20 anchors 逐维复算 rubric（DoD item 8）。
+- GE-1 Phase B/C：补 memory/checkpoint/policy/evidence-trace golden + 最小 adversarial stub（DoD item 4）。
+- GE-2 + doc-align（RS-1/SPA-2/MEM-1/CR-2/CR-4）：capability/docs/runtime fact 一致（DoD item 5）。
+
+> 这些都是 doc/test 完成项，无 runtime 风险、无外部 credential（除 W1-D5/real-provider）、
+> 无 owner 决策门槛（GE-3/GE-1/GE-2/RED-1 均 agent 可执行，仅 RED-1 受本轮红线限制）。
+> 一旦 RED-1 修复 + GE-1 Phase B/C + GE-2 + GE-3 复算确认每维 ≥2，主线即可关闭。
+
+---
 
 ## 14. 下一批推荐主线
 

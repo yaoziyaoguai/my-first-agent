@@ -37,7 +37,7 @@
 
 ### 2.2 CR-1 — action_scheduler governance locked
 
-**状态**：`registered-not-routed / inert`（class 存在，production 无法触达）。
+**状态**：`dormant-by-default / registered-not-routed in production`（class 存在，生产入口默认不注入；测试可手工注入 seam）。
 
 | 证据 | 位置 | 结果 |
 |---|---|---|
@@ -134,7 +134,7 @@ All checks passed!
 **`ACCEPT_WITH_TRACKED_DEBT — WINDOW 2 CLOSED`**
 
 - SPA-1：canonical masking ownership 已 test-locked（Option B，11 tests GREEN）。
-- CR-1：action_scheduler inert 状态已 governance-labeled + AST boundary test-locked（4 tests GREEN）。
+- CR-1：action_scheduler dormant-by-default 状态已 governance-labeled + AST boundary test-locked（4 tests GREEN）。
 - W1-D4：fallback dispatch guard 已 test-locked（9 tests GREEN）。
 - 兼容路径 inventory 已作为 characterization snapshot 存档，不是 no-delete guarantee。
 - 全套 4720 tests 无意外失败；ruff clean；所有红线遵守。

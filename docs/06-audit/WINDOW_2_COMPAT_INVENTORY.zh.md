@@ -61,15 +61,15 @@
 
 ---
 
-## 5. action_scheduler（registered-not-routed / inert）
+## 5. action_scheduler（dormant-by-default / registered-not-routed in production）
 
 | 项目 | 内容 |
 |---|---|
 | **位置** | `agent/action_scheduler.py:215`（`class ActionScheduler`）；`agent/core.py:697/:772/:1333/:1735`（参数 `action_scheduler=None`） |
-| **状态** | **Inert** — class 定义存在但 core 默认不注入（`action_scheduler=None`）；`main.py:118/:177` 的 `chat()` 调用不传此参数 |
-| **用途** | Loop 3.4 Advanced Scheduler 的骨架实现；registered（代码存在）但 not-routed（默认 None）；当 `action_scheduler is not None` 时才激活（生产路径无法触达） |
+| **状态** | **Dormant-by-default** — class 定义存在，core 默认不注入（`action_scheduler=None`）；`main.py:118/:177` 的 `chat()` 调用不传此参数 |
+| **用途** | Loop 3.4 Advanced Scheduler 的骨架实现；registered（代码存在）但 production not-routed（默认 None）；当 `action_scheduler is not None` 时才激活，测试可手工注入该 seam |
 | **是否为 rollback path** | 否（未接入生产，不是 rollback path） |
-| **本窗口动作** | 加 inert 治理标注（CR-1）；加 AST boundary test（`test_architecture_boundaries.py`）；不接入、不删除 |
+| **本窗口动作** | 加 registered-not-routed 治理标注（CR-1）；加 AST boundary test（`test_architecture_boundaries.py`）；不接入、不删除 |
 | **未来评估触发** | OD-7 / CR-2 阶段，当 multi-turn planning 需求明确后 |
 
 ---

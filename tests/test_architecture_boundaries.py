@@ -2083,8 +2083,8 @@ _REPO_ROOT = Path(__file__).parent.parent
 def test_cr1_chat_default_action_scheduler_is_none() -> None:
     """W2-T3a: CR-1 — core.chat() 默认 action_scheduler 参数值为 None（AST 验证）。
 
-    action_scheduler 是 registered-not-routed / inert 状态：chat() 接受参数但
-    默认 None，main.py 不传此参数，因此生产路径 action_scheduler 永远是 None。
+    action_scheduler 是 registered-not-routed / dormant-by-default 状态：
+    chat() 接受参数但默认 None，生产入口不传此参数。
     使用 AST（非 grep）避免 docstring :221 中字面 ActionScheduler( 的误命中。
     """
     core_py = _REPO_ROOT / "agent" / "core.py"
@@ -2137,7 +2137,7 @@ def test_cr1_main_py_does_not_pass_action_scheduler_kwarg() -> None:
 
     main.py 是 production entry point。若 chat() 被传入 action_scheduler，
     则 scheduler 会被激活（action_scheduler is not None 分支）。
-    本测试确认 main.py 没有传此 kwarg，确保 inert 状态。
+    本测试确认 main.py 没有传此 kwarg，确保 dormant-by-default 状态。
 
     使用 AST 而非 grep——action_scheduler.py docstring :221 包含字面字符串
     `ActionScheduler(dispatcher=...)` 会污染 grep 结果。
@@ -2161,7 +2161,8 @@ def test_cr1_main_py_does_not_pass_action_scheduler_kwarg() -> None:
                         chat_calls_with_scheduler.append(getattr(node, "lineno", -1))
 
     assert chat_calls_with_scheduler == [], (
-        f"main.py 的 chat() 调用不应传 action_scheduler= kwarg（action_scheduler 是 inert）；"
+        "main.py 的 chat() 调用不应传 action_scheduler= kwarg"
+        "（action_scheduler 是 dormant-by-default）；"
         f"发现 {len(chat_calls_with_scheduler)} 处调用在行：{chat_calls_with_scheduler}"
     )
 
@@ -2170,7 +2171,7 @@ def test_cr1_action_scheduler_not_routed_in_production() -> None:
     """W2-T3c: CR-1 — action_scheduler 在 main.py 入口路径中不被注入（registered-not-routed）。
 
     验证 main.py 不从 agent.action_scheduler 导入 ActionScheduler（
-    如果 main.py 注入 scheduler，则 inert 状态被打破）。
+    如果 main.py 注入 scheduler，则 dormant-by-default 状态被打破）。
     使用 _collect_agent_imports 基础设施（复用 :267）。
     """
     main_py = _REPO_ROOT / "main.py"
@@ -2179,8 +2180,9 @@ def test_cr1_action_scheduler_not_routed_in_production() -> None:
     # main.py 不应 import agent.action_scheduler（注入端点）
     # core.py 允许 import（参数接受），但 main.py 不应主动构造 scheduler
     assert "agent.action_scheduler" not in imports, (
-        "main.py 不应 import agent.action_scheduler（action_scheduler 是 inert；"
-        "如果 main.py import 并构造 ActionScheduler，则 inert 状态被打破）"
+        "main.py 不应 import agent.action_scheduler"
+        "（action_scheduler 是 dormant-by-default；"
+        "如果 main.py import 并构造 ActionScheduler，则 dormant 状态被打破）"
     )
 
 
@@ -2213,3 +2215,315 @@ def test_cr1_action_scheduler_class_exists_and_is_not_wired() -> None:
     assert "action_scheduler=None" in core_src, (
         "core.py 必须有 action_scheduler=None 默认参数（not-routed 状态）"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# W3: CM-1 config/provider import-boundary + scheduler dormancy precision
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+WINDOW3_CM1_INVENTORY_DOC = (
+    _REPO_ROOT
+    / "docs"
+    / "06-audit"
+    / "WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md"
+)
+
+EXPECTED_CM1_CONFIG_SURFACES = {
+    "agent/provider/config.py",
+    "agent/provider/simple_config.py",
+    "agent/provider/profiles.py",
+    "agent/local_config.py",
+    "agent/mcp_config.py",
+    "agent/mcp_config_cli.py",
+    "agent/mcp_config_presenter.py",
+    "agent/mcp_config_service.py",
+}
+
+EXPECTED_CM1_OWNER_TOKENS = {
+    "agent/provider/config.py": ("AgentProviderConfig", "provider API"),
+    "agent/provider/simple_config.py": ("UnifiedProviderConfig", "config/config.yaml"),
+    "agent/provider/profiles.py": ("ProviderProfile", "profile"),
+    "agent/local_config.py": ("local/dev", "display"),
+    "agent/mcp_config.py": ("MCPConfig", "parser"),
+    "agent/mcp_config_cli.py": ("CLI adapter", "thin"),
+    "agent/mcp_config_presenter.py": ("Presenter", "render"),
+    "agent/mcp_config_service.py": ("service/use-case", "safe apply"),
+}
+
+SCHEDULER_ACTION_TYPE_NAMES = {
+    "ACTION_PLAN_START",
+    "NODE_ENTER",
+    "NODE_EXIT",
+    "NODE_FAILURE",
+    "ACTION_PLAN_COMPLETE",
+}
+
+
+def _markdown_table_rows_after_heading(
+    content: str,
+    heading: str,
+) -> list[dict[str, str]]:
+    """读取指定 heading 后的第一个 markdown table。
+
+    这里不引入 markdown parser：本测试只需要固定 inventory table 的
+    header/cell 快照。解析失败应让测试红，而不是静默猜测文档结构。
+    """
+
+    lines = content.splitlines()
+    start_index = next(
+        (index for index, line in enumerate(lines) if line.strip() == heading),
+        None,
+    )
+    assert start_index is not None, f"missing heading: {heading}"
+
+    table_lines: list[str] = []
+    for line in lines[start_index + 1:]:
+        if line.startswith("## ") and table_lines:
+            break
+        if line.startswith("|"):
+            table_lines.append(line)
+        elif table_lines and line.strip():
+            break
+
+    assert len(table_lines) >= 3, f"missing markdown table after {heading}"
+    headers = [_clean_markdown_cell(cell) for cell in table_lines[0].strip("|").split("|")]
+    rows: list[dict[str, str]] = []
+    for line in table_lines[2:]:
+        cells = [_clean_markdown_cell(cell) for cell in line.strip("|").split("|")]
+        rows.append(dict(zip(headers, cells, strict=True)))
+    return rows
+
+
+def _clean_markdown_cell(cell: str) -> str:
+    return cell.strip().strip(chr(96))
+
+
+def _actual_cm1_config_surfaces() -> set[str]:
+    mcp_config_surfaces = {
+        str(path.relative_to(_REPO_ROOT))
+        for path in (_REPO_ROOT / "agent").glob("mcp_config*.py")
+    }
+    return {
+        "agent/provider/config.py",
+        "agent/provider/simple_config.py",
+        "agent/provider/profiles.py",
+        "agent/local_config.py",
+        *mcp_config_surfaces,
+    }
+
+
+def _production_python_files_for_entrypoint_scan() -> tuple[Path, ...]:
+    return (
+        _REPO_ROOT / "main.py",
+        *_agent_python_files(),
+    )
+
+
+def _call_has_non_none_action_scheduler_kwarg(node: ast.Call) -> bool:
+    for keyword in node.keywords:
+        if keyword.arg != "action_scheduler":
+            continue
+        return not (
+            isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is None
+        )
+    return False
+
+
+def _phase1_registered_handler_names() -> dict[str, str]:
+    """从 phase1_hook.py AST 读取 RuntimeActionType -> handler snapshot。"""
+
+    tree = _read_tree(AGENT_DIR / "runtime_integration" / "phase1_hook.py")
+    registered: dict[str, str] = {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _qualified_name(node.func) != "registry.register":
+            continue
+        if len(node.args) < 2:
+            continue
+        action_arg, handler_arg = node.args[0], node.args[1]
+        action_name = _qualified_name(action_arg)
+        if action_name and action_name.startswith("RuntimeActionType."):
+            registered[action_name.rsplit(".", 1)[-1]] = _qualified_name(handler_arg) or ""
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For) or not isinstance(node.target, ast.Name):
+            continue
+        if not isinstance(node.iter, ast.Tuple):
+            continue
+        loop_action_names = {
+            name.rsplit(".", 1)[-1]
+            for element in node.iter.elts
+            if (name := _qualified_name(element))
+            and name.startswith("RuntimeActionType.")
+        }
+        if not loop_action_names:
+            continue
+        for child in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+            if not isinstance(child, ast.Call):
+                continue
+            if _qualified_name(child.func) != "registry.register":
+                continue
+            if len(child.args) < 2:
+                continue
+            if (
+                isinstance(child.args[0], ast.Name)
+                and child.args[0].id == node.target.id
+            ):
+                handler_name = _qualified_name(child.args[1]) or ""
+                for action_name in loop_action_names:
+                    registered[action_name] = handler_name
+
+    return registered
+
+
+def test_w3_cm1_config_inventory_matches_source_surfaces() -> None:
+    """W3-T1: CM-1 inventory 的 config surface 列表必须与源码事实一致。"""
+
+    assert WINDOW3_CM1_INVENTORY_DOC.is_file(), (
+        "Window 3 必须新增 CM-1 config/provider import-boundary inventory 文档"
+    )
+    content = WINDOW3_CM1_INVENTORY_DOC.read_text(encoding="utf-8")
+    rows = _markdown_table_rows_after_heading(
+        content,
+        "## 1. CM-1 Config Surface Inventory",
+    )
+
+    documented_paths = {row["Path"] for row in rows}
+    actual_paths = _actual_cm1_config_surfaces()
+    assert actual_paths == EXPECTED_CM1_CONFIG_SURFACES
+    assert documented_paths == actual_paths, (
+        "CM-1 inventory 必须以真实源码路径为准，尤其是 agent/provider/ "
+        f"与 mcp_config*.py surfaces；documented={sorted(documented_paths)}, "
+        f"actual={sorted(actual_paths)}"
+    )
+
+
+def test_w3_scheduler_dormant_by_default_full_entrypoint_scan() -> None:
+    """W3-T2: production entrypoint 不默认注入 action_scheduler。
+
+    scheduler seam 保留且可由测试手工注入；本测试只锁 production Python
+    入口不传非 None 的 action_scheduler=。
+    """
+
+    chat_calls_with_scheduler: list[str] = []
+    for path in _production_python_files_for_entrypoint_scan():
+        tree = _read_tree(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func_name = _qualified_name(node.func)
+            if func_name is None:
+                continue
+            if func_name.rsplit(".", 1)[-1] != "chat":
+                continue
+            if _call_has_non_none_action_scheduler_kwarg(node):
+                rel = path.relative_to(_REPO_ROOT)
+                chat_calls_with_scheduler.append(f"{rel}:{getattr(node, 'lineno', '?')}")
+
+    assert chat_calls_with_scheduler == [], (
+        "production chat() 调用不应默认注入 action_scheduler；"
+        f"found={chat_calls_with_scheduler}"
+    )
+
+
+def test_w3_scheduler_action_types_registered_but_not_core_injected() -> None:
+    """W3-T3: scheduler action types 只注册到 ActionSchedulerHandler 边界。
+
+    这锁住 handler registered/routed 的事实，同时防止 L1/L2 subagent action
+    type 被误注册为 production dispatcher handler。
+    """
+
+    registered = _phase1_registered_handler_names()
+
+    assert set(registered) >= SCHEDULER_ACTION_TYPE_NAMES, (
+        f"scheduler action types must stay registered: {registered}"
+    )
+    scheduler_registrations = {
+        action_name: registered[action_name]
+        for action_name in SCHEDULER_ACTION_TYPE_NAMES
+    }
+    assert scheduler_registrations == {
+        action_name: "_scheduler_handler"
+        for action_name in SCHEDULER_ACTION_TYPE_NAMES
+    }
+
+    scheduler_handler_actions = {
+        action_name
+        for action_name, handler_name in registered.items()
+        if handler_name == "_scheduler_handler"
+    }
+    assert scheduler_handler_actions == SCHEDULER_ACTION_TYPE_NAMES
+    assert "SUBAGENT_DELEGATE_L1" not in registered
+    assert "SUBAGENT_DELEGATE_L2" not in registered
+
+
+def test_w3_cm1_per_surface_owner_snapshot_is_descriptive_only() -> None:
+    """W3-T4: 每个 config surface 有 owner/用途快照，但不引入 CM-2 contract。"""
+
+    assert WINDOW3_CM1_INVENTORY_DOC.is_file(), (
+        "Window 3 CM-1 inventory doc must exist before owner snapshot can be checked"
+    )
+    content = WINDOW3_CM1_INVENTORY_DOC.read_text(encoding="utf-8")
+    rows = _markdown_table_rows_after_heading(
+        content,
+        "## 2. Per-Surface Owner Snapshot",
+    )
+    snapshot = {row["Path"]: row for row in rows}
+
+    assert set(snapshot) == EXPECTED_CM1_CONFIG_SURFACES
+    for path, required_tokens in EXPECTED_CM1_OWNER_TOKENS.items():
+        row_text = " ".join(snapshot[path].values())
+        for token in required_tokens:
+            assert token in row_text, f"{path} row must mention {token!r}"
+
+    forbidden_cm2_symbols = {
+        "CapabilityStatus",
+        "CapabilityContract",
+        "UnifiedCapability",
+        "registry-of-registries",
+    }
+    for symbol in forbidden_cm2_symbols:
+        assert symbol not in content, (
+            f"Window 3 inventory must stay descriptive CM-1, not define {symbol}"
+        )
+
+
+def test_w3_scheduler_label_precision_avoids_unreachable_overclaim() -> None:
+    """W3-T5: scheduler label 使用 dormant-by-default，而非不可达式 overclaim。"""
+
+    checked_files = (
+        AGENT_DIR / "action_scheduler.py",
+        _REPO_ROOT / "docs" / "06-audit" / "WINDOW_2_CLOSURE_AUDIT.zh.md",
+        _REPO_ROOT / "docs" / "06-audit" / "WINDOW_2_COMPAT_INVENTORY.zh.md",
+    )
+    forbidden_phrases = {
+        "scheduler 逻辑不可达",
+        "生产路径无法触达",
+        "生产无法触达",
+        "completely unreachable",
+        "impossible to route",
+        "dead path if seam remains injectable",
+    }
+    findings: list[str] = []
+    for path in checked_files:
+        text = path.read_text(encoding="utf-8")
+        for phrase in forbidden_phrases:
+            if phrase in text:
+                findings.append(f"{path.relative_to(_REPO_ROOT)}: {phrase}")
+
+    assert findings == [], (
+        "scheduler seam 存在且测试可手工注入，当前文档/注释应使用 "
+        "dormant-by-default / registered-not-routed in production，"
+        f"不要使用不可达式 overclaim: {findings}"
+    )
+
+    scheduler_docstring = ast.get_docstring(_read_tree(AGENT_DIR / "action_scheduler.py"))
+    assert scheduler_docstring is not None
+    assert "dormant-by-default" in scheduler_docstring
+    assert "registered-not-routed in production" in scheduler_docstring
+    assert "injectable seam" in scheduler_docstring
+    assert "manually injectable in tests" in scheduler_docstring

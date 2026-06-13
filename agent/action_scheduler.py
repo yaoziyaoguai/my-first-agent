@@ -1,10 +1,12 @@
 """Loop 3.4 — Advanced Scheduler: runtime-owned action graph executor.
 
 CR-1 治理标注（Window 2 SPA-1/CR-1）：
-状态：registered-not-routed / inert
+状态：dormant-by-default / registered-not-routed in production
 - ActionScheduler class 已定义（registered），但 core.chat() 默认 action_scheduler=None。
 - main.py 的 chat() 调用不传 action_scheduler= 参数（not-routed）。
-- 生产路径中 action_scheduler 永远是 None，scheduler 逻辑不可达（inert）。
+- injectable seam exists: 测试可以手工传入 action_scheduler 并覆盖主循环接线。
+- manually injectable in tests: runtime_integration scheduler tests 会显式构造并注入。
+- production entrypoints 默认不注入 scheduler，因此保持 dormant-by-default。
 - 不接入、不删除：接入需要 OD-7 / CR-2 专项窗口；删除需要独立 cleanup 窗口。
 - 使用 AST boundary test 锁住此状态（tests/test_architecture_boundaries.py::test_cr1_*）。
 

@@ -14,6 +14,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 |---|---|---|
 | `AGENT_MODULE_TAXONOMY_DECISION_REQUEST.zh.md` | 模块分法 gate 发现 + 决策(D1–D4 / C1–C2)+ 候选 option | current — 已由用户以 Option γ 批准 |
 | `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类 + HARDEN_NEXT(1)| current |
+| `POST_REPAIR_TRIGGER_REGISTRY.zh.md` | trigger 寄存器 + 激活 playbook("No trigger, no work");每个 blocked/deferred/harden 项的触发条件与开工路径 | current |
 
 ## 阅读顺序
 

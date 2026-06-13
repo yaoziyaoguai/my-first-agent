@@ -114,22 +114,37 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 2 — Capability Model: Tool / Skill / MCP
 
-### CM-1 — Config 入口 import-boundary spike  ·  P2  ·  `active`
+### CM-1 — Config 入口 import-boundary spike  ·  P2  ·  `completed`
 
 - **North Star principle**：K（Stable capability interfaces）。
-- **Current fact**：`config.py` / `simple_config.py` / `profiles.py` /
-  `local_config.py` / `mcp_config*.py` 并存（均实测存在）。
-- **Target state**：明确每个 config 入口的 import boundary 与调用面，判断是否
-  真有分散调用需收敛，或仅需文档说明边界。
-- **Gap / failure mode**：入口数量与“是否应收敛”未定；可能存在隐性多入口耦合。
+- **Current fact**：`agent/provider/config.py` /
+  `agent/provider/simple_config.py` / `agent/provider/profiles.py` /
+  `agent/local_config.py` / `agent/mcp_config*.py` 并存；Window 3
+  已确认三条 provider config surface 位于 `agent/provider/`，不是 agent 根目录。
+- **Target state**：已明确每个 config 入口的 import boundary 与调用面，并区分
+  owner / compatibility / wrapper / alternate entry。
+- **Gap / failure mode**：Window 3 已关闭：现有入口不是需要本窗口收敛的重复
+  provider registry；剩余为低风险呈现/退役决策债。
 - **Repair direction**：用可复现命令列出所有 import boundary（spike），再决定；
   不预先重构。
 - **Non-goals**：不合并 config 模块、不改 provider 选择逻辑、不动 `.env`。
 - **Dependencies**：无。
-- **Acceptance evidence**：一张 config import-boundary inventory 表 + 收敛/保留结论。
+- **Acceptance evidence**：`docs/06-audit/WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md`
+  + `tests/test_architecture_boundaries.py` 的 W3-T1/W3-T4 inventory/owner
+  snapshot 边界测试。
 - **Rollback boundary**：spike 产出文档，无代码改动。
 - **Owner**：config 维护者（待指派）。
-- **Exit condition**：inventory 完成且“收敛 or 保留”有结论。
+- **Exit condition**：**completed** — inventory 完成；结论为本窗口保留现有
+  provider factory / config surfaces，不做 provider registry、不做 CM-2。
+- **Window 3 Closure（2026-06-13）**：**completed**。Evidence：
+  - CM-1 inventory 记录 provider/config、simple_config、profiles、local_config、
+    mcp_config*.py、provider factory/selection；
+  - W3-T1/T4 锁定 inventory 与 per-surface owner snapshot；
+  - W3-T2/T3 锁定 action_scheduler seam 存在但 production 不默认注入；
+  - W3-T5 将 scheduler wording 从不可达式 overclaim 收紧为
+    `dormant-by-default / registered-not-routed in production`；
+  - CM-2 仍为 `accepted_deferred`，未新增统一 capability contract/status；
+  - GE-2 仍是独立后续项，Window 3 未启动。
 
 ### CM-2 — Unified Capability Contract  ·  P3  ·  `accepted_deferred`（Open OD-2）
 
@@ -441,7 +456,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 8 — Compatibility Retirement
 
-### CR-1 — action_scheduler governance（registered-not-routed）  ·  P2  ·  `completed`
+### CR-1 — action_scheduler governance（dormant-by-default / registered-not-routed）  ·  P2  ·  `completed`
 
 - **North Star principle**：A（Simplicity）、Compatibility lifecycle（§17）。
 - **Current fact**：`action_scheduler.py`（731 行）实现 ActionNode/ActionPlan/
@@ -449,12 +464,15 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   `action_scheduler=None`，所有接线被 `if action_scheduler is not None:` 守卫；
   仅测试构造实例。live planning 走 `planner.generate_plan`，非
   `generate_action_plan`。
-- **Target state**：显式标注 `registered-not-routed / inert`，并有边界证据防止
-  无意接入 production 或向框架化漂移。
-- **Gap / failure mode**：731 行 inert 代码未标注治理状态 → framework-drift 风险
-  （最接近 LangGraph 式 DAG 词汇的模块）。
+- **Target state**：显式标注
+  `dormant-by-default / registered-not-routed in production`，并有边界证据防止
+  无意接入 production 或向框架化漂移；保留测试可手工注入 seam 的事实。
+- **Gap / failure mode**：731 行 dormant-by-default 代码若被误称为“不可达”，会掩盖
+  `chat(action_scheduler=...)` 可注入 seam；若未标注治理状态，又有 framework-drift
+  风险（最接近 LangGraph 式 DAG 词汇的模块）。
 - **Repair direction**：顶部加 registered-not-routed 标注；加”无 production
-  instantiation”的边界测试或等效证据（参照 V0 治理模式）。
+  instantiation”的边界测试或等效证据（参照 V0 治理模式）；Window 3 已补充
+  label precision 测试，禁止把 seam 存在的 scheduler 误称为 unreachable。
 - **Non-goals**：**不拆、不删、不接 production**（用户裁决 #13），除非未来
   benchmark 证明需要。
 - **Dependencies**：无。
@@ -462,7 +480,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   模块顶部治理标注。
 - **Rollback boundary**：加标注 + 加测试，行为中性，可回退。
 - **Owner**：action_scheduler 维护者（待指派）。
-- **Exit condition**：inert 状态被标注且 test-locked。
+- **Exit condition**：dormant-by-default 状态被标注且 test-locked。
 - **Window 2 Closure（2026-06-13）**：**completed**。Evidence：
   - `agent/action_scheduler.py` 顶部加 CR-1 governance label（8 行中文标注）；
   - `test_cr1_chat_default_action_scheduler_is_none`：AST 验证 `core.chat()` `action_scheduler=None`；
@@ -472,6 +490,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   - 4 tests GREEN（`tests/test_architecture_boundaries.py`）；
   - compat inventory：`docs/06-audit/WINDOW_2_COMPAT_INVENTORY.zh.md §5`；
   - OD-7（接入生产）仍 deferred，见 §11 OD-7。
+- **Window 3 Label Correction（2026-06-13）**：**completed**。Evidence：
+  - `agent/action_scheduler.py` docstring 改为
+    `dormant-by-default / registered-not-routed in production`；
+  - Window 2 closure/compat docs 同步去除 scheduler “不可达” overclaim；
+  - W3-T2/T3/T5 验证 main.py/production entrypoint 不注入 scheduler、handler
+    仍 registered、测试 seam 仍可手工注入；
+  - no scheduler wiring。
 
 ### CR-2 — Legacy skill tombstone wording  ·  P3  ·  `documented_pending`
 
@@ -688,6 +713,17 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 > 所有 W2 debt 均不阻塞 Window 2 关闭。W2-D1/D3/D4 为 Low，W2-D2（OD-7）已在 §11 登记为 Open。每条均有 trigger 和 exit condition。
 
+## 9.5. Window 3 Deferred Debt（2026-06-13）
+
+| ID | Debt | Severity | Current impact | Owner | Trigger | Exit condition |
+|---|---|---|---|---|---|---|
+| W3-D1 | provider fallback precedence 的用户可见呈现仍分散在 factory/diagnostics/docs | Low | 行为清晰且 test-locked；仅影响排障时的阅读成本 | provider config 维护者 | provider diagnostics 或 config onboarding 再次修改 | 在一个 diagnostics/doc surface 中展示 precedence stack，并保持 factory 行为不变 |
+| W3-D2 | profiles/env fallback 是否长期保留未裁决 | Low | compatibility path 继续可用；不会阻塞 config/config.yaml owner | 项目 owner / provider config 维护者 | config/config.yaml 成熟后准备 deprecate legacy fallback | 独立 deprecation/retention 决策 + migration note + focused tests |
+| W3-D3 | action_scheduler 是否接入 production 仍 deferred | Low / P3 | 当前 dormant-by-default；无生产行为变化 | action_scheduler 维护者 | OD-7 / CR-2 或明确 multi-turn planning benchmark 需求 | 独立 plan 证明收益、接线、rollback 和 tests；不得在 CM-1 中顺手接入 |
+
+> 所有 W3 debt 均不阻塞 Window 3 关闭。它们分别是可读性/兼容保留/未来接线决策债，
+> 不是 CM-1 的失败项；CM-2、provider registry、scheduler wiring 均未启动。
+
 ---
 
 ## Theme 10 — History / Completed Work
@@ -774,9 +810,10 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 - **P0**：无（无安全/数据/核心不可运行/未治理第二 Runtime/权限或证据边界失效项）。
 - **P1**：**SA-1**（V0 production-path completion）、**GE-1**（minimal Golden E2E）。
-- **P2**：RS-1（topology alignment）、CM-1（config spike）、SPA-2（permission staging 口径）、
+- **P2**：RS-1（topology alignment）、SPA-2（permission staging 口径）、
   MEM-2（memory owner，blocked_by_decision）、GE-2（capability docs）、GE-3（rubric re-score）。
-  ~~SPA-1~~（completed Window 2）、~~CR-1~~（completed Window 2）。
+  ~~SPA-1~~（completed Window 2）、~~CR-1~~（completed Window 2）、
+  ~~CM-1~~（completed Window 3）。
 - **P3**：MEM-1、CM-2、SPR-1、EOE-1、CR-2、CR-3、CR-4（多为 deferred/doc-align）。
 
 ## 14. 下一批推荐主线
@@ -786,9 +823,10 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
    SA-1 落地后重指向 V0——非循环前置，是唯一能推动 critical gate 向 3 的组合。
    **（Window 1 已 completed，Window 2 继续推进 SA-2 spike）**
 2. ~~SPA-1（completed Window 2）+ CR-1（completed Window 2）~~
-3. **GE-2**（capability docs diff-table）：清 Documentation critical 维度。
-4. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：评估搬迁收益与风险。
-5. **RS-1**（tool mediated-execution topology alignment）：核验 gate/result/evidence 统一治理。
+3. ~~CM-1（completed Window 3）~~
+4. **GE-2**（capability docs diff-table）：清 Documentation critical 维度。
+5. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：评估搬迁收益与风险。
+6. **RS-1**（tool mediated-execution topology alignment）：核验 gate/result/evidence 统一治理。
 
 ## 15. Final Verdict
 

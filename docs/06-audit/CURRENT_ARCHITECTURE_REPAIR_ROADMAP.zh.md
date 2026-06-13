@@ -7,19 +7,23 @@
 > 权威分轴：North Star = Target / Principle authority；production code + 可执行测试
 >   = Current Runtime Fact authority。二者冲突时写成 Current→Target gap，
 >   不得改 North Star 迁就代码，也不得把 Target 伪装成 Current。
-> 本轮性质：**只重写本 Roadmap**。未改 North Star、production code、tests、
->   audit delta、capability/status docs、现有 plans、AGENTS.md；未 add/commit/push。
+> 本轮性质（2026-06-11 baseline）：当时只重写本 Roadmap。2026-06-13 Step 4
+>   仅在本 Roadmap 外新增 final closure audit；仍未改 North Star、production code、
+>   tests、Window closure audit、现有 plans、AGENTS.md；未 push。
 > 本文件不是 implementation plan，不含代码 diff，不生成 goal 命令。
 >
-> **2026-06-13 Remaining Gap Classification Audit 补注**：本轮在不改 North Star /
-> Window plan / Window closure audit / production code / tests 的前提下，新增两节
-> 主控视图——`## Repair Remaining Gap Classification`（10 类分类 + 依赖触发表）与
-> `## Architecture Repair Mainline Closure Readiness`（主线关闭判断）。本轮经
-> Graphify + 源码/测试核验 + 两个 fresh-context reviewer（architecture + adversarial）
-> 交叉验证；后续 RED-1、GE-1 Phase B/C、GE-2 + doc-align cluster 均已完成；
-> GE-3 rubric re-score 仍未闭合，故 `MAINLINE_CLOSE_READY = NO`。原按 Theme
-> 组织的 item 正文保留为详细背书，不删。GE-2 evidence 见
-> `docs/CAPABILITY_BOUNDARIES.md` 的 runtime fact diff table。
+> **2026-06-13 Mainline Closure 补注**：本轮在不改 North Star / Window plan /
+> Window closure audit / production code / tests 的前提下，完成 GE-3 rubric
+> re-score，并新增最终审计 `docs/06-audit/ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md`。
+> Graphify 用于 source/runtime evidence discovery；最终结论由源码、测试、closure
+> audit、golden fixture 与 docs inventory 交叉核验。RED-1、GE-1 Phase B/C、
+> GE-2 + doc-align cluster、GE-3 均已完成；12 个 North Star §20 维度复算后均为
+> 2（基本成型，未宣称 §20 full Architecture Repair Done 所需的全维 3），满足
+> §21 每维 ≥2 的主线关闭 gate。
+> `MAINLINE_CLOSE_READY = YES`；最终裁决：**ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE
+> REPAIR MAINLINE CLOSED**。剩余 SA-2 / CM-2 / MEM-2 / OD-7 / W1-D5 / FOP-1 /
+> SPR-1 / EOE-1 均为 tracked debt、deferred、blocked_by_decision、blocked_by_external
+> 或 optional/future，不阻塞当前 repair mainline。
 
 ---
 
@@ -678,32 +682,38 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   CR-2 / CR-3 / CR-4 doc-align cluster 已完成；不引入 CM-2 unified
   capability contract。
 
-### GE-3 — Rubric re-score（架构验收复算）  ·  P2  ·  `documented_pending`
+### GE-3 — Rubric re-score（架构验收复算）  ·  P2  ·  `completed-docs`
 
 - **North Star principle**：§20 Acceptance Rubric、§21 DoD。
-- **Current fact**：§20 全 12 维度当前为 `provisional`；本轮 Gap Audit 给出
-  逐维度证据，critical gates 均 = 2（基本成型，未 Done）。
-- **Target state**：SA-1 / GE-1 落地后**按真实 evidence 重新评分**：结果可维持
-  2 或达到 3，**由真实证据决定，不预先承诺升分**。Subagent critical gate 是否
-  升至 3 由 **SA-2** 单独研究决定（不在 GE-3 评分口径内）。
-- **Gap / failure mode**：不复算则 provisional 无法转为可执行验收；
-  若为提高分数伪造 provenance / 扩大 scope / 搬迁 lifecycle，会回退到 v2 的
-  governance smell（North Star B / §15）。
-- **Repair direction**：在 SA-1 与 GE-1 Phase A/B 落地后，按 §20 anchors 逐项
-  取证；SA-2（若进入 active 实施）落地后再次复算 Subagent critical gate。
+- **Current fact**：§20 原 12 维度 `provisional` 已完成逐维 evidence re-score；
+  当前全部维度实测为 **2**。这表示 Architecture Repair mainline 基本成型，
+  满足 §21 item 8 的每维 ≥2 gate；不表示已达到 §20 full Architecture
+  Repair Done 所需的全部维度 3，也不关闭 SA-2 /
+  CM-2 / MEM-2 / OD-7 / W1-D5 / FOP-1 / SPR-1 / EOE-1 等后续债务。
+- **Target state**：已完成本轮目标。分数由真实源码、测试、closure audit、golden
+  fixtures、docs inventory 与 Graphify-discovered source paths 共同背书；不为追求
+  3 伪造 provenance、扩大 scope 或搬迁 lifecycle。
+- **Gap / failure mode**：已关闭为 completed-docs。剩余 gap 均重新归类为
+  TRACKED_DEBT / DEFERRED / BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / OPTIONAL，
+  不再作为当前 architecture repair mainline 的 MUST_FIX_NOW 或 closure blocker。
+- **Repair direction**：closed；若 SA-2 或其他 deferred item 后续进入 active 实施，
+  对相关维度另行复算，不回溯本轮主线关闭。
 - **Non-goals**：
   - **不得为提高分数伪造 provenance**（B1-A 红线）；
   - **不得为提高分数扩大 scope**（本评分只接受 SA-1/GE-1 真实落地的 evidence）；
   - **不得为提高分数搬迁 lifecycle**（B1-B / SA-2 单独 spike，不在评分诱导下
     实施）；
   - 不平均分抵消 critical failure；不凭文件存在/测试数量评分。
-- **Dependencies**：SA-1、GE-1；SA-2 结论（如可获取）。
-- **Acceptance evidence**：一份逐维度证据回填的 rubric 复算，**每分附真实
-  evidence 引用**（不写无源分数）。
+- **Dependencies**：SA-1 ✓、GE-1 Phase A/B/C ✓、GE-2 doc-align ✓、suite green ✓。
+- **Acceptance evidence**：`ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md` 的
+  12 维 rubric re-score table；本 Roadmap §13 / §Architecture Repair Mainline
+  Closure Readiness 同步；golden/adversarial、docs guard、architecture boundary、
+  runtime integration、full suite 均由本轮刷新验证。
 - **Rollback boundary**：doc-only。
 - **Owner**：架构审计 owner（待指派）。
-- **Exit condition**：rubric 实测回填，critical gates 状态明确（结果 = 2 或
-  = 3 均可接受；不得为追求 3 破坏 B1-A / B / §15）。
+- **Exit condition**：**completed-docs** — rubric 实测回填，12 维均为 2；critical
+  gates 状态明确；`MAINLINE_CLOSE_READY = YES`；不得把后续 deferred/blocked
+  debt 误写为完成。
 
 ---
 
@@ -794,8 +804,8 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端到端测试。
 
 > RED-1 是审计 falsifiability 的正例：W3 closure 的 GREEN 自报曾被独立 reviewer + 本人
-> pytest 证伪；后续修复关闭了 RED-1，Step 3 又关闭 GE-2/doc-align；
-> `MAINLINE_CLOSE_READY` 仍因 GE-3 rubric re-score 未完成而为 NO。
+> pytest 证伪；后续修复关闭了 RED-1，Step 3 关闭 GE-2/doc-align，Step 4
+> 完成 GE-3 rubric re-score；当前 closure-blocking must-fix = none。
 
 ---
 
@@ -883,8 +893,8 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 
 - **P0**：无（无安全/数据/核心不可运行/未治理第二 Runtime/权限或证据边界失效项）。
 - **P1**：无 open。~~SA-1~~ 与 ~~GE-1~~ 已 completed。
-- **P2**：GE-3（rubric re-score，唯一 closure-blocking）、MEM-2（memory owner，
-  blocked_by_decision）、SA-2（deferred spike）。~~RS-1~~、~~SPA-2~~、
+- **P2**：MEM-2（memory owner，blocked_by_decision）、SA-2（deferred spike）。
+  ~~GE-3~~ 已 completed-docs；~~RS-1~~、~~SPA-2~~、
   ~~GE-2~~ 已 completed-docs；~~SPA-1~~、~~CR-1~~、~~CM-1~~ 已 completed。
 - **P3**：CM-2、SPR-1、EOE-1 与 tracked debts。~~MEM-1~~、~~CR-2~~、
   ~~CR-3~~、~~CR-4~~ 已 completed-docs/no-op。
@@ -927,7 +937,7 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 | H-1/H-2/H-3 | History | catalog extraction / D1-D3 / SoT 对齐 | **DONE** | move_to_history / protected_pending | `8be4dcb`/`a9b39ab`/`97a7bb3`/`a251306`/`5d1cdcb`；边界测试锁 | 已完成；护栏不回退 | no | 保持边界测试 |
 | **RED-1** | Docs SoT | W3 closure 裸列 stale env-var → active guard RED | **DONE** | completed (RED-1) | `WINDOW_3_CLOSURE_AUDIT.zh.md` legacy marker fix；本轮 full suite 4730 passed, 12 skipped, 26 xfailed | 已修；guard 恢复 green | no | — |
 | GE-1 Phase B/C | Golden E2E | memory/checkpoint/policy/evidence-trace + adversarial stub 无 golden | **DONE** | completed (GE-1 Phase B/C) | `test_golden_memory_checkpoint.py`、`test_golden_policy_evidence.py`、`test_minimal_policy_stub.py` + 5 fixtures；golden/adversarial 13 passed | 已修；仅新增 tests/fixtures，无 production 行为变化 | no | — |
-| GE-3 | Acceptance | §20 rubric 全 `provisional`，未复算 | **FIX_NEXT（closure-blocking）** | documented_pending (P2) | North Star §20 12 维全 provisional；§21 DoD item 8 要求每维 ≥2 *实测* | 复算须在 suite-green + SA-1/GE-1 evidence 后做；红线禁为升分伪造 | **YES（formal close, DoD 8）** | suite-green 后按 §20 anchors 逐维取证 |
+| GE-3 | Acceptance | §20 rubric 全 `provisional`，未复算 | **DONE** | completed-docs (P2) | `ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md` 逐维复算：12 维均为 2；§21 DoD item 8 满足 | 保守给 2，不伪造 provenance、不扩大 scope、不搬迁 lifecycle；后续升 3 另案 | no | — |
 | GE-2 | Docs | capability status 四方漂移 | **DONE** | completed-docs (P2) | `docs/CAPABILITY_BOUNDARIES.md` runtime fact diff table；本 Roadmap 同步 closure readiness | 已完成；不引入 CM-2 / unified `CapabilityStatus` | no | — |
 | RS-1 | Runtime Spine | North Star §7 topology 文字 vs mediated execution | **DONE** | completed-docs (P2) | `docs/CAPABILITY_BOUNDARIES.md` 记录 mediated execution 是 governed current topology；boundary tests green | current-fact docs 已对齐；North Star amendment 另案且本轮不改 | no | — |
 | SPA-2 | Safety | permission 折叠进 gate 无独立 stage | **DONE** | completed-docs (P2) | capability fact table 记录 `ToolGateHandler` / `gate_disposition` / no-execution；OD-7 deferred | doc-align 完成；未建设 production approval hook | no | — |
@@ -954,7 +964,6 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 
 | ID | Depends on | Blocked by | Trigger to revisit | Exit condition | Owner / decision needed | Recommended priority |
 |---|---|---|---|---|---|---|
-| GE-3 | SA-1 ✓、GE-1 ✓、suite green ✓ | 无（可执行） | 下一 closure step | §20 每维实测回填，每分附 evidence | 架构审计 owner | P2（DoD 8） |
 | SA-2 | SA-1 ✓（baseline） | 缺 L3 真实需求（blocked_by_evidence） | 出现 gate→3 / L3 真实需求 | spike 文档结论明确（做 or 保持 subsystem_integration） | 架构 owner | P2（spike） |
 | SPR-1 | 无 | OD-8 + 无 long-task 消费者 | 跨主机/长任务/HITL 需求 | OD-8 裁决 + canonical enum | 项目 owner（OD-8/OD-10） | P3 |
 | EOE-1 | 无 | OD-6 + 无评测消费者 | 评测 harness 消费 cost | OD-6 裁决 | 项目 owner（OD-6） | P3 |
@@ -972,30 +981,29 @@ exit = real-provider V0 payload 经 `provider_mode_allowed` 正确放行 + 端�
 > 依据 North Star §21 Definition of Done（逐项 conjunction，不取平均）逐条核验。
 
 1. **P0/P1 open 是否为 0?** —— 是。P0 = 0；P1 = 0。SA-1 与 GE-1 Phase A/B/C 均已 completed。
-2. **MUST_FIX_NOW 是否为 0?** —— 是。RED-1 已修复，当前 full suite green。
-3. **Blocker / High debt 是否为 0?** —— 是。所有 debt 为 Low（W1-D4 Medium 已 test-guarded）；三窗 review 均 0 Blocker / 0 High。
-4. **Window 1/2/3 closure 是否完整?** —— 是，三份 closure audit 存在且有 verdict；RED-1 已由后续 docs-fix 纠正。
-5. **Full suite 最近一次是否 green?** —— 是。本轮核验当前 main 为 **4730 passed, 12 skipped, 26 xfailed**。
-6. **剩余项是否都属 deferred / blocked / optional / doc-only / tracked debt?** —— **否**。GE-3 仍是唯一 closure-blocking FIX_NEXT（DoD item 8）；GE-2 + doc-align cluster 已 completed-docs（DoD item 5）。
-7. **当前是否可以关闭 architecture repair mainline?** —— 否。
-8. **若不能，少数必须修的项：**
-   - **GE-3**（DoD item 8）：§20 rubric 逐维实测 ≥2 复算。
+2. **MUST_FIX_NOW 是否为 0?** —— 是。RED-1 已修复；GE-3 已复算；当前无 must-fix closure blocker。
+3. **Blocker / High debt 是否为 0?** —— 是。三窗 closure review 均 0 Blocker / 0 High；本轮 architecture reviewer 对初稿提出的 High 为 §20/§21 阈值措辞歧义，已通过本节和 final closure audit 收紧为 mainline closure gate，不留下 open Blocker / High。
+4. **Full suite 是否 green?** —— 是。本轮刷新验证记录在最终 closure audit；最近 full suite 为 **4730 passed, 12 skipped, 26 xfailed**。
+5. **Golden E2E Phase A/B/C 是否完成?** —— 是。Phase A 覆盖 conversation/tool/subagent；Phase B/C 覆盖 memory/checkpoint/policy/evidence-trace/adversarial stub。
+6. **Docs fact alignment 是否完成?** —— 是。GE-2 + RS-1 / SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 已 completed-docs，current fact table 见 `docs/CAPABILITY_BOUNDARIES.md`。
+7. **Rubric GE-3 是否完成?** —— 是。North Star §20 12 维逐项复算，全部 after score = 2，满足 §21 item 8 每维 ≥2。
+8. **剩余项是否都属于 tracked debt / deferred / blocked / optional?** —— 是。SA-2 / CM-2 / MEM-2 / OD-7 / W1-D5 / FOP-1 / SPR-1 / EOE-1 均有 trigger / exit / owner 或外部 gate。
+9. **是否仍有 runtime-risk must-fix?** —— 否。剩余项不制造双主路径或双 source of truth，不要求本轮写 production code。
+10. **是否可以关闭 architecture repair mainline?** —— 是。
 
-> 注：DoD items 1/2/3/6/7/9 已满足（无 Blocker/High、生产路径单 spine、Medium 已治理、
-> 扩展点稳定、deferred 无双主路径/双 SoT、Open decisions 均有 owner+exit）。DoD item 4
-> 已由 GE-1 Phase B/C golden coverage 补齐；DoD item 5 已由
+> 注：DoD item 4 已由 GE-1 Phase A/B/C golden coverage 补齐；DoD item 5 已由
 > `docs/CAPABILITY_BOUNDARIES.md` runtime fact diff table + 本 Roadmap alignment
-> 补齐；未满足的是 item 8（rubric 实测）。这是 **verification / documentation
-> 完成度**，**不是 runtime/architecture risk**。
+> 补齐；DoD item 8 已由 GE-3 rubric re-score 补齐。这里的关闭判定是
+> `MAINLINE_CLOSE_READY` 的主线关闭 gate：§21 要求每维 ≥2；§20 同时把 full
+> Architecture Repair Done 保留为全维 3，本轮未宣称达到该状态。后续升 3 工作按
+> tracked debt / deferred / blocked item 单独触发。
 
-**MAINLINE_CLOSE_READY = NO**
+**MAINLINE_CLOSE_READY = YES**
 
 Remaining must-fix items:
-- GE-3：按 §20 anchors 逐维复算 rubric（DoD item 8）。
+- none
 
-> 这些都是 doc/test 完成项，无 runtime 风险、无外部 credential（除 W1-D5/real-provider）、
-> 无 owner 决策门槛（GE-3 agent 可执行）。
-> 一旦 GE-3 复算确认每维 ≥2，主线即可关闭。
+**ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE REPAIR MAINLINE CLOSED**
 
 ---
 
@@ -1009,7 +1017,7 @@ Remaining must-fix items:
 3. ~~CM-1（completed Window 3）~~
 4. ~~GE-2 + doc-align cluster（completed-docs Step 3）~~：capability docs diff-table、
    RS-1 / SPA-2 / MEM-1 / CR-2 / CR-3 / CR-4 已对齐。
-5. **GE-3**（rubric re-score）：下一 closure step，按 §20 anchors 逐维取证复算。
+5. ~~GE-3（completed-docs Step 4）~~：North Star §20 12 维逐项复算完成，全部 after score = 2；主线关闭 gate 满足。
 6. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：deferred，等真实 L3/gate→3 需求触发。
 7. ~~RS-1（completed-docs）~~：tool mediated-execution topology 已记录为 current governed path；North Star amendment 仍需另案批准。
 
@@ -1021,8 +1029,10 @@ Remaining must-fix items:
   Non-goal/Dependencies/Acceptance/Rollback/Owner/Exit。
 - completed 项（V2/D1-D3/SoT 对齐）移入 §10 History；obsolete/cosmetic（S2/S3/S4）
   不再占 active 优先级。
-- V0 wiring（SA-1）与 Golden E2E（GE-1）成为下一阶段明确主线。
-- deferred 项均已治理，不制造双主路径或双 SoT。
-- GE-2 + doc-align cluster 已 completed-docs；剩余 closure-blocking 仅 GE-3 rubric re-score。
-- 本 Roadmap 可按主题逐段生成 ce-plan，而无需现场重做架构决策。
-- 本文件仍是 draft，等待 human review；非 source-of-truth，不替代 North Star。
+- V0 wiring（SA-1）、Golden E2E（GE-1）、GE-2 doc-align、GE-3 rubric re-score 均已完成。
+- deferred / blocked / tracked debt 项均已治理，不制造双主路径或双 SoT。
+- 当前 closure-blocking must-fix = none；剩余项按 §13 触发条件独立处理。
+- 本 Roadmap 可按主题逐段生成未来 ce-plan，而无需现场重做架构决策。
+- 本文件不替代 North Star；North Star 仍是 Target / Principle authority。
+
+**ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE REPAIR MAINLINE CLOSED**

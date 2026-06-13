@@ -385,7 +385,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 7 — Safety / Policy / Approval
 
-### SPA-1 — Safe metadata ownership  ·  P2  ·  `active`
+### SPA-1 — Safe metadata ownership  ·  P2  ·  `completed`
 
 - **North Star principle**：D（Single owner）、Guardrail（§13）。
 - **Current fact**：projector `safe_metadata.py` 已覆盖 D1/D2/D3 trust boundary
@@ -407,6 +407,13 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Owner**：safe_metadata / display_events 维护者（待指派）。
 - **Exit condition**：单一 canonical masking owner，test-locked；projector 职责
   收敛为 projection。
+- **Window 2 Closure（2026-06-13）**：**completed**（Option B 批准）。Evidence：
+  - `display_events.py` 确认为 canonical secret-masking owner（`_SECRET_MASK_PATTERNS` + `mask_user_visible_secrets`）；
+  - `safe_metadata.py` 确认为 projection wrapper（thin wrapper docstring + import delegation）；
+  - `_EXTRA_REDACT_PATTERNS` 定位为 evidence_persistence boundary-local extra redaction；
+  - W2-T1/T2：11 tests GREEN（`test_safe_metadata_ownership.py`）；
+  - decision doc：`docs/06-audit/SPA1_MASKING_OWNERSHIP_DECISION.zh.md`；
+  - 延伸债务 W2-D1（`_EXTRA_REDACT_PATTERNS` 长期归属）deferred，见 §9.4。
 
 ### SPA-2 — Permission vs policy staging 口径  ·  P2  ·  `documented_pending`
 
@@ -434,7 +441,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 8 — Compatibility Retirement
 
-### CR-1 — action_scheduler governance（registered-not-routed）  ·  P2  ·  `active`
+### CR-1 — action_scheduler governance（registered-not-routed）  ·  P2  ·  `completed`
 
 - **North Star principle**：A（Simplicity）、Compatibility lifecycle（§17）。
 - **Current fact**：`action_scheduler.py`（731 行）实现 ActionNode/ActionPlan/
@@ -446,7 +453,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   无意接入 production 或向框架化漂移。
 - **Gap / failure mode**：731 行 inert 代码未标注治理状态 → framework-drift 风险
   （最接近 LangGraph 式 DAG 词汇的模块）。
-- **Repair direction**：顶部加 registered-not-routed 标注；加“无 production
+- **Repair direction**：顶部加 registered-not-routed 标注；加”无 production
   instantiation”的边界测试或等效证据（参照 V0 治理模式）。
 - **Non-goals**：**不拆、不删、不接 production**（用户裁决 #13），除非未来
   benchmark 证明需要。
@@ -456,6 +463,15 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Rollback boundary**：加标注 + 加测试，行为中性，可回退。
 - **Owner**：action_scheduler 维护者（待指派）。
 - **Exit condition**：inert 状态被标注且 test-locked。
+- **Window 2 Closure（2026-06-13）**：**completed**。Evidence：
+  - `agent/action_scheduler.py` 顶部加 CR-1 governance label（8 行中文标注）；
+  - `test_cr1_chat_default_action_scheduler_is_none`：AST 验证 `core.chat()` `action_scheduler=None`；
+  - `test_cr1_main_py_does_not_pass_action_scheduler_kwarg`：AST 验证 `main.py` 不传 `action_scheduler=`；
+  - `test_cr1_action_scheduler_not_routed_in_production`：`main.py` 不 import `agent.action_scheduler`；
+  - `test_cr1_action_scheduler_class_exists_and_is_not_wired`：class 存在 + `core.chat` 默认 None；
+  - 4 tests GREEN（`tests/test_architecture_boundaries.py`）；
+  - compat inventory：`docs/06-audit/WINDOW_2_COMPAT_INVENTORY.zh.md §5`；
+  - OD-7（接入生产）仍 deferred，见 §11 OD-7。
 
 ### CR-2 — Legacy skill tombstone wording  ·  P3  ·  `documented_pending`
 
@@ -651,13 +667,26 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 | W1-D1 | `route_from_runtime_loop` / `runtime_loop_invoked=True` 在 pre-loop seam 的命名语义债 | Low | 不影响运行，provenance 正确但名称暗示 in-loop | SA-2 | lifecycle/L3 spike | 决定保留、重命名或拆分 trusted-route 与 real-loop provenance |
 | W1-D2 | `_render_v0_delegate_result` docstring 未覆盖全部 status（仅列 success/failed/not_supported） | Low | 不影响运行，rejected/policy_blocked/skipped 也正确渲染 | Runtime docs | 下次修改该函数或 taxonomy | docstring 与真实 status 集一致 |
 | W1-D3 | payload `error` 字段作为 in-band descriptor-missing signal | Low | 安全（仅 core.py B2 设置），但 scale 差 | SubAgent contract | 出现第二种 pre-handler error 或 payload schema versioning | dedicated typed error field/schema |
-| W1-D4 | core.py fallback 对 status 使用 negative match（仅 `not_supported` 触发 fallback），而非 exhaustive match | Medium | 新增 status 可能 silent fall-through 到 `_render_v0_delegate_result` | SubAgent routing | 新增 RuntimeAction status 或再次修改 fallback 逻辑 | exhaustive status dispatch + contract tests |
+| W1-D4 | core.py fallback 对 status 使用 negative match（仅 `not_supported` 触发 fallback），而非 exhaustive match | Medium → **test-guarded（Window 2 落地）** | `test_subagent_v0_fallback_dispatch.py` 锁定 guard 语义；新增 status 仍可能 silent fall-through，但 guard 行为已 test-locked | SubAgent routing | 新增 RuntimeAction status 或再次修改 fallback 逻辑 | exhaustive status dispatch + contract tests |
 | W1-D5 | provider failure 当前仅有 integration evidence（payload 注入），尚无真实外部 provider E2E | Low/Medium | 证据覆盖 handler 逻辑但非端到端 | GE Phase B | real provider dogfood/CI credentials available | real-provider failure E2E |
 | W1-D6 | `parent_stop_condition` 仍是 policy literal（`"max_turns=1"`） | Low | 不影响运行，V0 确实只有 1 turn | SubAgent contract | parent runtime 引入真实 stop policy | 从真实 policy 传递并测试 |
 | W1-D7 | `RuntimeIdentity` 默认 `instance_id=session_id` | Low | 不影响运行，单实例场景正确 | Runtime identity | 多实例、跨 run 或独立 instance 需求 | 独立 identity source + tests |
 
 > 所有 debt 均不阻塞 Window 1 关闭。W1-D4 为 Medium 但无当前生产影响（所有现有 status
 > 均有正确处理路径）；其余均为 Low。每条都有明确 owner、trigger 和 exit condition。
+
+---
+
+## 9.4. Window 2 Deferred Debt（2026-06-13）
+
+| ID | Debt | Severity | Current impact | Owner | Trigger | Exit condition |
+|---|---|---|---|---|---|---|
+| W2-D1 | `_EXTRA_REDACT_PATTERNS` 长期归属（safe_metadata vs. display_events） | Low | 当前 boundary-local 定位清晰；仅多了一个"额外脱敏层"管理点 | safe_metadata / display_events 维护者 | trust-boundary contract 演进，或需统一 canonical masking 层时 | 明确迁移到 display_events（Option A 延迟版）或保持 boundary-local + 有 test 锁定 |
+| W2-D2 | OD-7：Human approval hook 进生产 | Low | `confirmation_required` 结果态存在且接 AWAITING_USER；强制生产 hook 待需求 | 项目 owner | 出现多用户/生产 approval 需求 | OD-7 裁决后独立窗口 |
+| W2-D3 | SPA-2：Permission vs policy staging 口径对齐 | Low | doc-only debt；gate 折叠 permission 无运行风险 | runtime_integration 维护者 | 有人误读 §4.F 5-step 独立 stage | doc-align 窗口 |
+| W2-D4 | L1 attempt dead-code removal | Low | L1 dead branch（`core.py:2217` `delegate_l1_called` check）从未执行，handler 未注册 | SubAgent routing | V0 production default-on + 独立 cleanup 窗口 | 独立 cleanup 评估 + 删除 + tests 更新 |
+
+> 所有 W2 debt 均不阻塞 Window 2 关闭。W2-D1/D3/D4 为 Low，W2-D2（OD-7）已在 §11 登记为 Open。每条均有 trigger 和 exit condition。
 
 ---
 
@@ -745,9 +774,9 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 - **P0**：无（无安全/数据/核心不可运行/未治理第二 Runtime/权限或证据边界失效项）。
 - **P1**：**SA-1**（V0 production-path completion）、**GE-1**（minimal Golden E2E）。
-- **P2**：RS-1（topology alignment）、CM-1（config spike）、SPA-1（safe-metadata ownership）、
-  SPA-2（permission staging 口径）、CR-1（action_scheduler governance）、
+- **P2**：RS-1（topology alignment）、CM-1（config spike）、SPA-2（permission staging 口径）、
   MEM-2（memory owner，blocked_by_decision）、GE-2（capability docs）、GE-3（rubric re-score）。
+  ~~SPA-1~~（completed Window 2）、~~CR-1~~（completed Window 2）。
 - **P3**：MEM-1、CM-2、SPR-1、EOE-1、CR-2、CR-3、CR-4（多为 deferred/doc-align）。
 
 ## 14. 下一批推荐主线
@@ -755,9 +784,11 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 1. **SA-1 + GE-1 Phase A** 同窗口 co-delivery：V0 wiring 迁移定义 + 最小 Golden E2E。
    GE-1 的 conversation+tool 场景独立可 green；subagent 场景先验当前 inline-local，
    SA-1 落地后重指向 V0——非循环前置，是唯一能推动 critical gate 向 3 的组合。
-2. **SPA-1**（safe-metadata ownership spike）+ **CR-1**（action_scheduler 标注）：
-   清 SoT 与 framework-drift，低风险。
+   **（Window 1 已 completed，Window 2 继续推进 SA-2 spike）**
+2. ~~SPA-1（completed Window 2）+ CR-1（completed Window 2）~~
 3. **GE-2**（capability docs diff-table）：清 Documentation critical 维度。
+4. **SA-2**（SubAgent lifecycle / L3 evidence design spike）：评估搬迁收益与风险。
+5. **RS-1**（tool mediated-execution topology alignment）：核验 gate/result/evidence 统一治理。
 
 ## 15. Final Verdict
 

@@ -1,6 +1,17 @@
 # Current Architecture Repair Roadmap (v3 — theme-organized Current→Target migration)
 
-> 状态：active — 按架构主题组织的 Current→Target 迁移路线图
+> **Status: CLOSED RECORD.**
+> Architecture Repair Mainline is closed:
+> **ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE REPAIR MAINLINE CLOSED**.
+> This document is no longer an active repair queue and must not be used to open
+> Window 4. For post-repair module work, start with
+> docs/06-audit/ARCHITECTURE_REPAIR_MAINLINE_RETROSPECTIVE.zh.md,
+> docs/06-audit/ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md, and
+> docs/CAPABILITY_BOUNDARIES.md. Use this Roadmap only as a closed historical
+> Current→Target repair record.
+
+> 状态：closed record — Architecture Repair Mainline 已关闭；本文件仅作为
+>   Current→Target 迁移历史记录
 > 重写日期：2026-06-11
 > 上位依据（本轮冻结，不修改）：`docs/architecture/ARCHITECTURE_NORTH_STAR.zh.md`
 >   sha256 `c73c2b3dbe926f30834a5d9ab20155cc947ab27158339a7c8b221d0d80568cde`

@@ -53,7 +53,7 @@ cp config/config.example.yaml config/config.yaml
 | 当前能力 | [docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md) |
 | 文档入口 | [docs/README.zh.md](docs/README.zh.md) |
 | 工程流程 | [docs/dev/AUTO_RUN_WORKFLOW.md](docs/dev/AUTO_RUN_WORKFLOW.md) |
-| 审计入口 | [docs/06-audit/CURRENT_AUDIT_STATUS.zh.md](docs/06-audit/CURRENT_AUDIT_STATUS.zh.md) |
+| 审计入口 | [docs/06-audit/README.md](docs/06-audit/README.md) |
 
 ## 测试
 

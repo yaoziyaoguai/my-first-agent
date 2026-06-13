@@ -1,10 +1,18 @@
 # Current Audit Status
 
-当前审计入口。事实源以 [Project Status](../PROJECT_STATUS.md) 和 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md) 为准。archive docs 不是当前入口。
+> **Status: superseded for post-repair navigation.**
+> Architecture Repair Mainline is closed. Use docs/06-audit/README.md,
+> ARCHITECTURE_REPAIR_MAINLINE_RETROSPECTIVE.zh.md,
+> ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md, and
+> docs/CAPABILITY_BOUNDARIES.md for current post-repair orientation. This file
+> remains historical source-of-truth cleanup context and is not an active repair
+> queue.
+
+历史审计状态入口。post-repair 阶段请先读 [Audit Documents Navigation](README.md)。事实源以 [Project Status](../PROJECT_STATUS.md) 和 [Current Capability Status](../00-overview/CURRENT_CAPABILITY_STATUS.zh.md) 为准。archive docs 不是当前入口。
 
 ## 总体结论
 
-Status: **Active — repository cleanup / source-of-truth repair**。
+Status: **Superseded — repository cleanup / source-of-truth repair history**。
 
 - 当前阶段是 **developer prototype / local development**。
 - 当前代码主线是 `main.py → agent/core.py → agent/loop.py`。

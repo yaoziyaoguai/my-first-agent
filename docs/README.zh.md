@@ -8,7 +8,7 @@
 |---|---|---|
 | 1 | [PROJECT_STATUS.md](PROJECT_STATUS.md) | 当前状态、实现地图、边界和下一步 |
 | 2 | [00-overview/CURRENT_CAPABILITY_STATUS.zh.md](00-overview/CURRENT_CAPABILITY_STATUS.zh.md) | 当前能力一页版 |
-| 3 | [06-audit/CURRENT_AUDIT_STATUS.zh.md](06-audit/CURRENT_AUDIT_STATUS.zh.md) | 当前审计口径 |
+| 3 | [06-audit/README.md](06-audit/README.md) | post-repair 审计导航；Architecture Repair 已关闭 |
 | 4 | [dev/AUTO_RUN_WORKFLOW.md](dev/AUTO_RUN_WORKFLOW.md) | 自动化工程流程和 hard stops |
 | 5 | [PROGRESS_LEDGER.md](PROGRESS_LEDGER.md) | 历史里程碑账本，仅作追溯 |
 
@@ -37,6 +37,7 @@
 |---|---|
 | [rfc/](rfc/) | Memory / Skill / SubAgent canonical RFC |
 | [design/](design/) | 当前仍有价值的架构设计；以 `PROJECT_STATUS.md` 为准 |
+| [06-audit/](06-audit/) | Architecture Repair closure evidence 与历史审计材料；不要当作 active repair queue |
 
 ## 当前规则
 

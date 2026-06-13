@@ -45,11 +45,33 @@ future work can stay scoped without relying on a giant prompt each time.
 - Skill/Subagent work must be fake-first, local-only, and fixture/sample based.
 - parent runtime remains in control for child capability/delegation boundaries.
 
+## Post-Architecture-Repair Navigation
+
+Architecture Repair Mainline is closed:
+
+**ACCEPT_WITH_TRACKED_DEBT — ARCHITECTURE REPAIR MAINLINE CLOSED**
+
+- Do not start Window 4 unless the user explicitly opens a new, documented repair
+  mainline.
+- Do not treat docs/06-audit/CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md as an
+  active repair queue. It is now a closed historical repair record.
+- For module-level hardening or Module Maturity work, read in this order:
+  1. docs/06-audit/ARCHITECTURE_REPAIR_MAINLINE_RETROSPECTIVE.zh.md
+  2. docs/06-audit/ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md
+  3. docs/CAPABILITY_BOUNDARIES.md
+  4. docs/06-audit/CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md only as a closed
+     historical record
+  5. docs/architecture/ARCHITECTURE_NORTH_STAR.zh.md as target/principle
+     authority, not as current runtime fact
+- Historical Window plans, Window closure audits, and inventories are evidence
+  files. Do not execute them as current plans unless a new user request names
+  that historical artifact explicitly.
+
 ## TDD and quality gates
 
 - For behavior changes, write Red tests first and confirm they fail for the
   intended reason.
-- Keep changes surgical and tied to the selected roadmap pack.
+- Keep changes surgical and tied to the selected user-approved scope or plan.
 - Run targeted tests for touched areas.
 - Run `git diff --check`.
 - Run `.venv/bin/ruff check .`.

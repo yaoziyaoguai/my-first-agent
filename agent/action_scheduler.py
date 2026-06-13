@@ -1,5 +1,13 @@
 """Loop 3.4 — Advanced Scheduler: runtime-owned action graph executor.
 
+CR-1 治理标注（Window 2 SPA-1/CR-1）：
+状态：registered-not-routed / inert
+- ActionScheduler class 已定义（registered），但 core.chat() 默认 action_scheduler=None。
+- main.py 的 chat() 调用不传 action_scheduler= 参数（not-routed）。
+- 生产路径中 action_scheduler 永远是 None，scheduler 逻辑不可达（inert）。
+- 不接入、不删除：接入需要 OD-7 / CR-2 专项窗口；删除需要独立 cleanup 窗口。
+- 使用 AST boundary test 锁住此状态（tests/test_architecture_boundaries.py::test_cr1_*）。
+
 中文学习说明：
 这不是 cron/定时任务/后台 daemon，也不是第二条 agent 主流程。它是统一 runtime flow
 内部的"下一步动作调度器 / action orchestration layer"。它的核心职责是：当 planner

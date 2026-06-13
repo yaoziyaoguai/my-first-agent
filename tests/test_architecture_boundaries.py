@@ -2070,3 +2070,146 @@ def test_alias_detection_positive_fixture() -> None:
     assert m["status_value"] == "running"
     assert m["mutation_kind"] == "assign"
     assert m["function"] == "handle_something"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# W2-T3: CR-1 action_scheduler injection-seam boundary tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+_REPO_ROOT = Path(__file__).parent.parent
+
+
+def test_cr1_chat_default_action_scheduler_is_none() -> None:
+    """W2-T3a: CR-1 — core.chat() 默认 action_scheduler 参数值为 None（AST 验证）。
+
+    action_scheduler 是 registered-not-routed / inert 状态：chat() 接受参数但
+    默认 None，main.py 不传此参数，因此生产路径 action_scheduler 永远是 None。
+    使用 AST（非 grep）避免 docstring :221 中字面 ActionScheduler( 的误命中。
+    """
+    core_py = _REPO_ROOT / "agent" / "core.py"
+    tree = _read_tree(core_py)
+
+    # 找 def chat(...) 的函数定义
+    chat_fn = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "chat":
+            chat_fn = node
+            break
+
+    assert chat_fn is not None, "core.py 必须定义 chat() 函数"
+
+    # 找 action_scheduler 参数及其默认值
+    # defaults 对齐到 args 末尾；kw_defaults 对齐到 kwonlyargs
+    args = chat_fn.args
+    action_scheduler_default = None
+    for i, arg in enumerate(args.args):
+        if arg.arg == "action_scheduler":
+            # positional arg：defaults 对齐末尾
+            offset = len(args.args) - len(args.defaults)
+            idx = i - offset
+            if 0 <= idx < len(args.defaults):
+                action_scheduler_default = args.defaults[idx]
+            break
+
+    # 也检查 kwonlyargs
+    if action_scheduler_default is None:
+        for i, arg in enumerate(args.kwonlyargs):
+            if arg.arg == "action_scheduler":
+                if i < len(args.kw_defaults) and args.kw_defaults[i] is not None:
+                    action_scheduler_default = args.kw_defaults[i]
+                break
+
+    assert action_scheduler_default is not None, (
+        "chat() 必须有 action_scheduler 参数（期望默认值 None）"
+    )
+    assert (
+        isinstance(action_scheduler_default, ast.Constant)
+        and action_scheduler_default.value is None
+    ), (
+        "chat() 的 action_scheduler 默认值必须是 None；"
+        f"got AST node type {type(action_scheduler_default).__name__}"
+    )
+
+
+def test_cr1_main_py_does_not_pass_action_scheduler_kwarg() -> None:
+    """W2-T3b: CR-1 — main.py 的 chat() 调用不传 action_scheduler= kwarg（AST 验证）。
+
+    main.py 是 production entry point。若 chat() 被传入 action_scheduler，
+    则 scheduler 会被激活（action_scheduler is not None 分支）。
+    本测试确认 main.py 没有传此 kwarg，确保 inert 状态。
+
+    使用 AST 而非 grep——action_scheduler.py docstring :221 包含字面字符串
+    `ActionScheduler(dispatcher=...)` 会污染 grep 结果。
+    """
+    main_py = _REPO_ROOT / "main.py"
+    tree = _read_tree(main_py)
+
+    chat_calls_with_scheduler: list[int] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # 匹配 chat(...) 或 module.chat(...) 形式
+            func = node.func
+            is_chat_call = (
+                (isinstance(func, ast.Name) and func.id == "chat")
+                or (isinstance(func, ast.Attribute) and func.attr == "chat")
+            )
+            if is_chat_call:
+                for kw in node.keywords:
+                    if kw.arg == "action_scheduler":
+                        chat_calls_with_scheduler.append(getattr(node, "lineno", -1))
+
+    assert chat_calls_with_scheduler == [], (
+        f"main.py 的 chat() 调用不应传 action_scheduler= kwarg（action_scheduler 是 inert）；"
+        f"发现 {len(chat_calls_with_scheduler)} 处调用在行：{chat_calls_with_scheduler}"
+    )
+
+
+def test_cr1_action_scheduler_not_routed_in_production() -> None:
+    """W2-T3c: CR-1 — action_scheduler 在 main.py 入口路径中不被注入（registered-not-routed）。
+
+    验证 main.py 不从 agent.action_scheduler 导入 ActionScheduler（
+    如果 main.py 注入 scheduler，则 inert 状态被打破）。
+    使用 _collect_agent_imports 基础设施（复用 :267）。
+    """
+    main_py = _REPO_ROOT / "main.py"
+    imports = _collect_agent_imports(main_py)
+
+    # main.py 不应 import agent.action_scheduler（注入端点）
+    # core.py 允许 import（参数接受），但 main.py 不应主动构造 scheduler
+    assert "agent.action_scheduler" not in imports, (
+        "main.py 不应 import agent.action_scheduler（action_scheduler 是 inert；"
+        "如果 main.py import 并构造 ActionScheduler，则 inert 状态被打破）"
+    )
+
+
+def test_cr1_action_scheduler_class_exists_and_is_not_wired() -> None:
+    """W2-T3d: CR-1 — ActionScheduler class 存在（registered）但 core 默认 None（not-routed）。
+
+    用 AST 验证 action_scheduler.py 定义了 ActionScheduler class，
+    同时 core.py chat() 函数定义处 action_scheduler 参数默认 None。
+    不用 grep 避免 docstring 误命中。
+    """
+    scheduler_py = _REPO_ROOT / "agent" / "action_scheduler.py"
+    tree = _read_tree(scheduler_py)
+
+    # 验证 ActionScheduler class 存在
+    scheduler_class = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "ActionScheduler":
+            scheduler_class = node
+            break
+
+    assert scheduler_class is not None, (
+        "agent/action_scheduler.py 必须定义 ActionScheduler class（registered 状态）"
+    )
+
+    # 验证 docstring 中有 ActionScheduler( 但这是文档用法，不影响 AST 边界
+    # （这也是为什么必须用 AST 而非 grep）
+    # 真实类定义行存在，且 core.py 默认 None = registered-not-routed
+    core_py = _REPO_ROOT / "agent" / "core.py"
+    core_src = core_py.read_text(encoding="utf-8")
+    assert "action_scheduler=None" in core_src, (
+        "core.py 必须有 action_scheduler=None 默认参数（not-routed 状态）"
+    )

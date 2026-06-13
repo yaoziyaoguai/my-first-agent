@@ -153,7 +153,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 3 — SubAgent Governance
 
-### SA-1 — SubAgent production-path completion (V0 wiring)  ·  P1  ·  `active`
+### SA-1 — SubAgent production-path completion (V0 wiring)  ·  P1  ·  `completed`
 
 - **North Star principle**：J（Bounded subagents）、B（One Runtime Spine）。
 - **Current fact**：
@@ -234,6 +234,16 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
   可观察、可回滚**——本项 **不单独宣称 SubAgent governance=3**。
   gate→3 / `harness_runtime_e2e` 证据的获取由 **SA-2**（lifecycle integration
   / L3 evidence design spike）独立研究后再决定。
+- **Window 1 Closure（2026-06-13）**：**completed**。Acceptance evidence：
+  - default-off flag（`SUBAGENT_V0_ROUTING_ENABLED`，`subagent_routing_flag.py`，core.py:2001）；
+  - flag-on 经 trusted `route_from_runtime_loop` 进入 `SUBAGENT_DELEGATE_V0`；
+  - FakeProvider → `fake_local` + V0 success（G4）；
+  - missing descriptor → `rejected` / `descriptor_not_found`，不崩溃、不执行 child（F2.1）；
+  - handler missing → `not_supported` 后受控 inline-local fallback（G6）；
+  - provider/contract business failure → `failed`，不 fallback（F3.1, G7）；
+  - RuntimeIdentity/provenance/evidence 正确（G5, G7）；
+  - pre-loop seam、L1 attempt、inline-local rollback 均保留；
+  - full suite 4686 passed, 0 failed（f5f10df）。
 
 ### SA-2 — SubAgent lifecycle integration / L3 evidence design spike  ·  P2  ·  `documented_pending`（`blocked_by_evidence`）
 
@@ -499,7 +509,7 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 
 ## Theme 9 — Golden E2E / Architecture Acceptance
 
-### GE-1 — Minimal Golden E2E suite（分阶段）  ·  P1  ·  `active`
+### GE-1 — Minimal Golden E2E suite（分阶段）  ·  P1  ·  `active`（Phase A completed）
 
 - **North Star principle**：L（Evaluation-driven evolution）。
 - **定级理由（P1 而非 P2）**：Golden E2E 是 SubAgent critical gate（SA-1）与
@@ -548,6 +558,16 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 - **Rollback boundary**：纯新增测试，可独立回退；不改 production 行为。
 - **Owner**：测试 owner（待指派）。
 - **Exit condition**：三个 Phase 套件齐备且 green；OD-5 最小定义被锁定。
+- **Window 1 Closure（2026-06-13）**：**Phase A completed**。Evidence：
+  - G1–G2 conversation/tool golden tests green；
+  - G3 flag-off inline-local characterization green；
+  - G4 flag-on V0 success + structured `provider_mode`/status 断言（F6.1）；
+  - G5 flag-off rollback proof green；
+  - G6 not_supported 先于 inline-local fallback 的顺序证明（F5.1）；
+  - G7 docstring 降级：不再作为真实 failure surface 唯一证据，
+    F3.1 通过 real Handler integration tests 覆盖 contract/provider failure；
+  - `tests/golden_e2e/` 8 passed。
+  - Phase B/C 待后续窗口。
 
 ### GE-2 — Capability documentation alignment  ·  P2  ·  `documented_pending`
 
@@ -610,6 +630,34 @@ Migration / Accepted Deferred / Open Decision / Non-goal / Completed History）�
 | H-5 | GE-1 Phase A subagent 场景先对当前路径取证，SA-1 后重指向 V0 | 同 v3 已规划；本轮把路径与 checklist 钉到 `tests/golden_e2e/`：G1 simple conversation / G2 tool success / G3 flag-off inline-local / G4 flag-on V0 / G5 rollback / G6 V0-unavailable fallback / G7 provenance assertions | 维持 co-delivery 形态；GE-1 Phase A 不要求 gate=3 |
 | H-6 | GE-3 复算目标 critical gates → 3 | 复算结果由真实 evidence 决定，**不得**为提高分数伪造 provenance / 扩大 scope / 搬迁 lifecycle | 复算结果可维持 2 或达到 3；Subagent critical gate 升分由 SA-2 单独研究决定 |
 | H-7 | 实施期由执行 Agent 直接改 Roadmap | 执行期要求 "Plan + Roadmap 都是 frozen read-only contract"；执行 Agent 不得改文档 | 由 docs-only 流程在实施独立审计后单独执行 Roadmap 状态更新；本轮不再让执行 Agent 改 Roadmap |
+
+## 9.2. Window 1 Follow-up Status（2026-06-13）
+
+| ID | 描述 | 状态 | 说明 |
+|---|---|---|---|
+| F1.1 | budget falsification / V0 single-turn contract propagation | completed | `ecfee47`, `55e5f79`, `d39bca1`; test_f1_1 in test_subagent_v0_audit_v2.py |
+| F2.1 | missing descriptor taxonomy (rejected/descriptor_not_found) | completed | `f5f10df`; TestF21MissingDescriptorTaxonomy (6 tests) + five-way discrimination (4 tests) |
+| F3.1 | real contract/provider failure evidence | completed | `f5f10df`; TestF31RealContractFailure (4 tests) + TestF31RealProviderFailure (6 tests) + discrimination (2 tests) |
+| F4.1 | SUPPORTED_PROVIDER_TYPES safety review | no-change | 复用 SUPPORTED_PROVIDER_TYPES 会扩大 real-opt-in 白名单权限；保持 handler 内独立校验 |
+| F5.1 | G6 ordering (not_supported before fallback) | completed | `ecfee47`; test_g6 strict ordering assertions |
+| F6.1 | G4 structured assertions (provider_mode/status) | completed | `ecfee47`; test_g4 structured success/provider_mode assertions |
+
+---
+
+## 9.3. Window 1 Deferred Debt
+
+| ID | Debt | Severity | Current impact | Owner | Trigger | Exit condition |
+|---|---|---|---|---|---|---|
+| W1-D1 | `route_from_runtime_loop` / `runtime_loop_invoked=True` 在 pre-loop seam 的命名语义债 | Low | 不影响运行，provenance 正确但名称暗示 in-loop | SA-2 | lifecycle/L3 spike | 决定保留、重命名或拆分 trusted-route 与 real-loop provenance |
+| W1-D2 | `_render_v0_delegate_result` docstring 未覆盖全部 status（仅列 success/failed/not_supported） | Low | 不影响运行，rejected/policy_blocked/skipped 也正确渲染 | Runtime docs | 下次修改该函数或 taxonomy | docstring 与真实 status 集一致 |
+| W1-D3 | payload `error` 字段作为 in-band descriptor-missing signal | Low | 安全（仅 core.py B2 设置），但 scale 差 | SubAgent contract | 出现第二种 pre-handler error 或 payload schema versioning | dedicated typed error field/schema |
+| W1-D4 | core.py fallback 对 status 使用 negative match（仅 `not_supported` 触发 fallback），而非 exhaustive match | Medium | 新增 status 可能 silent fall-through 到 `_render_v0_delegate_result` | SubAgent routing | 新增 RuntimeAction status 或再次修改 fallback 逻辑 | exhaustive status dispatch + contract tests |
+| W1-D5 | provider failure 当前仅有 integration evidence（payload 注入），尚无真实外部 provider E2E | Low/Medium | 证据覆盖 handler 逻辑但非端到端 | GE Phase B | real provider dogfood/CI credentials available | real-provider failure E2E |
+| W1-D6 | `parent_stop_condition` 仍是 policy literal（`"max_turns=1"`） | Low | 不影响运行，V0 确实只有 1 turn | SubAgent contract | parent runtime 引入真实 stop policy | 从真实 policy 传递并测试 |
+| W1-D7 | `RuntimeIdentity` 默认 `instance_id=session_id` | Low | 不影响运行，单实例场景正确 | Runtime identity | 多实例、跨 run 或独立 instance 需求 | 独立 identity source + tests |
+
+> 所有 debt 均不阻塞 Window 1 关闭。W1-D4 为 Medium 但无当前生产影响（所有现有 status
+> 均有正确处理路径）；其余均为 Low。每条都有明确 owner、trigger 和 exit condition。
 
 ---
 

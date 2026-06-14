@@ -39,7 +39,7 @@
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
-| T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (design spike completed) | no | 先实现 PolicyDecision golden + Tool gate integration | **yes** | no |
+| T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (golden model done) | no | 集成 Tool gate + MemoryOwner 到 PolicyDecision | **yes** | no |
 | T-CM2 (OD-2) | Capability/Config/Registry | BLOCKED_BY_DECISION | no | owner 决策 + 出现跨消费者 | **yes** | no |
 | T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION | no | owner 决策 + 消费者 | **yes** | no |
 | T-SUBAGENT-FLIP (FOP-1) | SubAgent | TRACKED_DEBT(pre-flip blocker) | no | flip 决策 + 修 FOP-1 | **yes** | yes(real provider) |

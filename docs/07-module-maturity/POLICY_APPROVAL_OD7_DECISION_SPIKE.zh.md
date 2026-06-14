@@ -186,11 +186,11 @@ PolicyDecision 作为外层 gate，可以 override 模块级 decision。
 
 ## 9. L3 Hardening Plan
 
-### Phase 1: PolicyDecision golden (docs + tests)
+### Phase 1: PolicyDecision golden (docs + tests) — **COMPLETED** (commit `e45e9d6`)
 - Scope: `agent/policy_decision.py` + `tests/test_policy_decision_golden.py`
-- Output: `PolicyDecision` enum + ALLOW/REQUIRE_APPROVAL/DENY/AUDIT_ONLY 决策矩阵
+- Output: `PolicyDecision` enum + ALLOW/REQUIRE_APPROVAL/DENY/AUDIT_ONLY 决策矩阵 + 21 golden tests
 - No runtime integration
-- Commit: `feat(policy): add PolicyDecision model and golden`
+- Commit: `test(policy): add approval decision golden model`
 
 ### Phase 2: Tool gate integration
 - Scope: Route Tool execution through PolicyDecision

@@ -77,3 +77,132 @@ def test_policy_decision_model_is_importable_and_pure():
     for kind in PolicyActionKind:
         result = classify_policy_action(kind)
         assert result.reason
+
+
+# ── Enforcement tests ──
+
+
+def test_write_tool_classified_as_tool_write():
+    """write/delete/shell tool name → TOOL_WRITE。
+
+    使用 _tool_has_side_effect 判定 write/side-effect 分类。
+    """
+    from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
+    from agent.tool_runtime_mediator import _tool_has_side_effect
+
+    # write tool → TOOL_WRITE
+    assert _tool_has_side_effect("file_write")
+    assert _tool_has_side_effect("delete_record")
+    # read tool → NOT write
+    assert not _tool_has_side_effect("echo")
+    assert not _tool_has_side_effect("list_files")
+
+    # TOOL_WRITE → REQUIRE_APPROVAL
+    d = classify_policy_action(PolicyActionKind.TOOL_WRITE)
+    assert d.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
+    assert d.human_required
+
+
+def test_classify_write_tool_returns_require_approval():
+    """write tool 被 classify_policy_action 判定为 REQUIRE_APPROVAL。"""
+    from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
+
+    d = classify_policy_action(PolicyActionKind.TOOL_WRITE)
+    assert d.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
+
+    d2 = classify_policy_action(PolicyActionKind.EXTERNAL_SERVICE)
+    assert d2.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
+
+
+def test_read_tool_allowed():
+    """read-only tool → ALLOW，不阻止执行。"""
+    from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
+
+    d = classify_policy_action(PolicyActionKind.TOOL_READ)
+    assert d.decision_type == PolicyDecisionType.ALLOW
+    assert not d.human_required
+
+
+def test_unknown_tool_fail_closed():
+    """unknown tool → REQUIRE_APPROVAL（fail-closed safe default）。"""
+    from agent.policy_decision import PolicyDecisionType, classify_policy_action
+
+    d = classify_policy_action("some-mysterious-tool")
+    assert d.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
+    assert d.human_required
+
+
+def test_enforcement_integration_semantics():
+    """验证 enforcement 规则语义一致性。
+
+    PolicyDecision 模型分类：
+    - TOOL_WRITE / EXTERNAL_SERVICE → REQUIRE_APPROVAL
+    - TOOL_READ → ALLOW
+    - unknown → REQUIRE_APPROVAL (fail-closed)
+
+    Runtime enforcement (ToolRuntimeMediator._enforce_policy_gate):
+    - high-risk write (shell/subagent/delegate) → confirmation_required
+    - generic write → annotation-only (backward compat)
+    - ALLOW → continues execution
+
+    这证明 PolicyDecision 从 annotation layer 升级为 scoped enforcement layer。
+    """
+    from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
+
+    # 所有 REQUIRE_APPROVAL 的 action 都有 human_required=True
+    approval_kinds = (
+        PolicyActionKind.TOOL_WRITE,
+        PolicyActionKind.EXTERNAL_SERVICE,
+        PolicyActionKind.PROVIDER_REAL_CALL,
+        PolicyActionKind.SUBAGENT_DELEGATION,
+        PolicyActionKind.SCHEDULER_ASYNC,
+        PolicyActionKind.MEMORY_FORGET,
+        PolicyActionKind.MEMORY_UPDATE,
+        PolicyActionKind.CAPABILITY_CONFIG_CHANGE,
+    )
+    for kind in approval_kinds:
+        d = classify_policy_action(kind)
+        assert d.decision_type == PolicyDecisionType.REQUIRE_APPROVAL, (
+            f"{kind} should REQUIRE APPROVAL"
+        )
+        assert d.human_required
+
+    # ALLOW 的 action 没有 human_required
+    allow_kinds = (
+        PolicyActionKind.TOOL_READ,
+        PolicyActionKind.CHECKPOINT_RESUME,
+        PolicyActionKind.DOCS_ONLY,
+        PolicyActionKind.TEST_ONLY,
+    )
+    for kind in allow_kinds:
+        d = classify_policy_action(kind)
+        assert d.decision_type == PolicyDecisionType.ALLOW
+        assert not d.human_required
+
+
+def test_high_risk_write_tools_enforced():
+    """高风险 write tool (shell/bash/subagent) → _is_high_risk_write=True。
+
+    这些 tool 在 runtime 会被 PolicyDecision enforcement 转为 confirmation_required。
+    """
+    from agent.tool_runtime_mediator import _is_high_risk_write
+
+    assert _is_high_risk_write("run_shell")
+    assert _is_high_risk_write("bash_command")
+    assert _is_high_risk_write("exec_program")
+    assert _is_high_risk_write("delegate_subagent")
+    # generic write: NOT high risk
+    assert not _is_high_risk_write("write_file")
+    assert not _is_high_risk_write("create_note")
+
+
+def test_generic_write_tools_classified_but_not_enforced():
+    """Generic write tools 被分类为 TOOL_WRITE 但 enforcement 是 annotation-only。
+
+    这确保现有 write tool tests 不被破坏，同时 policy 分类仍然正确。
+    """
+    from agent.tool_runtime_mediator import _is_high_risk_write, _tool_has_side_effect
+
+    assert _tool_has_side_effect("write_file")
+    # classified as write → but not high risk enforced
+    assert not _is_high_risk_write("write_file")

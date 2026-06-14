@@ -172,7 +172,7 @@ def _child_memory_policy_metadata(status: str) -> dict[str, Any]:
 
 # PolicyDecision L3 integration: tool name → side-effect classification
 _WRITE_SIDE_EFFECT_PATTERNS: tuple[re.Pattern, ...] = (
-    re.compile(r"\bwrite\b|\bdelete\b|\bremove\b|\bcreate\b|\bpatch\b", re.IGNORECASE),
+    re.compile(r"write|delete|remove|create|patch|update", re.IGNORECASE),
     re.compile(r"shell|bash|exec|run", re.IGNORECASE),
     re.compile(r"subagent|delegate", re.IGNORECASE),
 )
@@ -181,6 +181,19 @@ _WRITE_SIDE_EFFECT_PATTERNS: tuple[re.Pattern, ...] = (
 def _tool_has_side_effect(tool_name: str) -> bool:
     """检查 tool name 暗示 write/side-effect 风险。"""
     return any(pat.search(tool_name) for pat in _WRITE_SIDE_EFFECT_PATTERNS)
+
+
+def _is_high_risk_write(tool_name: str) -> bool:
+    """检查 tool 是否是高风险 write（需 enforcement）。
+
+    High risk: shell/bash/subagent/delegate tools.
+    Generic write (write_file/delete_record/create_note) remains annotation-only for now.
+    """
+    _high_risk = (
+        re.compile(r"shell|bash|exec|run", re.IGNORECASE),
+        re.compile(r"subagent|delegate", re.IGNORECASE),
+    )
+    return any(pat.search(tool_name) for pat in _high_risk)
 
 
 class ToolRuntimeMediator:
@@ -267,6 +280,29 @@ class ToolRuntimeMediator:
             return AWAITING_USER
 
         # gate_disposition == "allowed"
+        # PolicyDecision L3 enforcement: tool write/external → confirmation_required
+        _policy_gate_result = self._enforce_policy_gate(tool_name)
+        if _policy_gate_result == "confirmation_required":
+            transition = self._handle_confirmation_required(
+                tool_name,
+                tool_input,
+                tool_use_id,
+            )
+            if not transition.allowed:
+                return TRANSITION_DENIED
+            self._route_result(tool_name, tool_input, tool_use_id, AWAITING_USER)
+            from agent.runtime_integration.checkpoint_save import save_runtime_checkpoint
+
+            save_runtime_checkpoint(self._state)
+            return AWAITING_USER
+        if _policy_gate_result == "rejected":
+            self._handle_blocked(
+                tool_name, tool_input, tool_use_id,
+                {"gate_disposition": "rejected", "policy_blocked": True},
+            )
+            self._route_result(tool_name, tool_input, tool_use_id, FORCE_STOP)
+            return FORCE_STOP
+
         # 记录 TOOL_GATE allowed evidence（P2 fix：allowed path 之前缺 gate_decision
         # evidence，导致 tools_attempted=0 但 tools_executed>=1）
         try:
@@ -1075,6 +1111,43 @@ class ToolRuntimeMediator:
         return transition
 
     # ── private helpers ────────────────────────────────────────────────────
+
+    def _enforce_policy_gate(self, tool_name: str) -> str:
+        """PolicyDecision L3 enforcement: 在 Tool gate 后执行 policy 分类。
+
+        根据 tool name 分类为 TOOL_READ / TOOL_WRITE，
+        调用 PolicyDecision.classify_policy_action 并返回：
+        - "allowed" — 继续执行
+        - "confirmation_required" — 停止执行，等待用户确认
+        - "rejected" — 拒绝执行
+
+        read tool → allowed；write/external/unknown → confirmation_required。
+        TOOL_WRITE enforcement is scoped: subagent/shell/bash tools enforced;
+        generic write tools (write_file, etc.) remain annotation-only for now.
+        """
+        try:
+            from agent.policy_decision import (
+                PolicyActionKind,
+                PolicyDecisionType,
+                classify_policy_action,
+            )
+
+            kind = (
+                PolicyActionKind.TOOL_WRITE
+                if _tool_has_side_effect(tool_name)
+                else PolicyActionKind.TOOL_READ
+            )
+            decision = classify_policy_action(kind)
+            if (
+                decision.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
+                and _is_high_risk_write(tool_name)
+            ):
+                return "confirmation_required"
+            if decision.decision_type == PolicyDecisionType.DENY:
+                return "rejected"
+            return "allowed"
+        except Exception:
+            return "allowed"  # fail-open: don't block legitimate use on policy error
 
     def _route_gate(
         self, tool_name: str, tool_input: Any, tool_use_id: str

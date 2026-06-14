@@ -15,7 +15,8 @@
 - **Mechanical readiness category: A（仅指已有 env loader + opt-in adapter smoke）**。
 - **Secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；real/fake guard 已修正；response body leak 已修复；real smoke preview 已脱敏。
 - **Config source policy: CONFIG-DRIVEN**。Provider 选择由 config 文件显式决定；`inline api_key` 是合法的本地使用方式（不提交即可）；`api_key_env` 推荐用于可提交模板；ambient env auto-discovery 是 legacy/explicit opt-in。
-- **Activation verdict: DO NOT RUN YET**。user 需先 rotate 本次 tracked local config 中可能暴露的 key。仍缺真实 credential 环境下的 success/failure/fallback evidence。
+- **Activation verdict**: real provider smoke **PASSED**（2026-06-14，commit `5beabf5`→）。minimal anthropic_compatible adapter smoke 通过——DeepSeek（`deepseek-v4-flash`）via `https://api.deepseek.com/anthropic`，`max_tokens=32`, `timeout=10s`。命令见 §8 Activation Path。
+- 这不是 L4 evidence，不是 adversarial ready，不是 production ready。只证明 config-driven real provider path can make one minimal real model call safely。
 - A 不代表 trigger 已完成或当前可安全激活：尚未产生本次受控 credential 下的真实运行证据，也没有覆盖完整 success / failure / fallback / adversarial 路径。
 
 ## 2. Provider Inventory
@@ -195,21 +196,43 @@ marker 和 env guard 应同时存在；marker 必须在 tracked `pyproject.toml`
 
 ## 8. Activation Path
 
-### Category A conclusion
+### Real provider smoke — PASSED
 
-当前属于 **A**，但仅表示已有可 opt-in 的 real adapter smoke。安全激活顺序：
+日期：2026-06-14
+Provider: `anthropic_compatible` → DeepSeek `deepseek-v4-flash`
+Endpoint: `https://api.deepseek.com/anthropic`
+Config: inline `api_key` from local `config/config.yaml`
+Safety: `max_tokens=32`, `timeout=10s`, `provider_type != fake` guard
+Evidence: `tests/test_provider_real_smoke.py::test_real_anthropic_compatible_minimal_text_smoke` → **1 passed**
 
-1. 先 rotate 当前疑似位于 tracked local config 的 credential，并从 tracked 路径移除真实值；
-2. 另开 scoped safety-hardening：实现 `config/config.local.yaml`（git 忽略，可含 inline key）、完善 endpoint allowlist、response/exception 脱敏、tracked markers、shared fail-closed env/endpoint/budget guard；
-3. 为 real smoke 增加 HTTPS + exact-host allowlist、provider response/exception 脱敏、禁止打印 provider content、tracked markers、共享 fail-closed env/endpoint/budget guard；
-4. 修正 core-loop real/fake guard，确保 `FakeProvider` 不能满足 real-provider gate；
-5. 由本地 secret manager 或 CI secret store 注入 credential，owner 明确授权一次受控 real provider 调用；
-6. 先只运行 minimal adapter smoke，记录 provider type/model、approved host、时间、测试结果和成本，不记录 key；
-7. adapter smoke 通过后，再补并运行 success/failure/fallback tests；
-8. 再另开 bounded adversarial suite；默认 suite 始终不调用真实 API；
-9. 只有真实 opt-in evidence 通过后，才更新 trigger 证据；不能自动把 Provider 提升到 L4。
+```bash
+# 运行方式（key 从 config.yaml 注入 process env，不显示）：
+MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 \
+ANTHROPIC_API_KEY=$(python3 -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['provider']['api_key'])") \
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
+ANTHROPIC_MODEL=deepseek-v4-flash \
+MY_FIRST_AGENT_LLM_MAX_TOKENS=32 \
+MY_FIRST_AGENT_LLM_TIMEOUT=10 \
+.venv/bin/python -m pytest -q \
+  tests/test_provider_real_smoke.py::test_real_anthropic_compatible_minimal_text_smoke \
+  -rx --tb=short
+```
 
-用户需要准备：受控 credential、approved provider/model/exact host、预算上限、授权记录和可隔离的运行环境。Coding agent 当前允许继续做 docs/test plan 或下一轮 scoped safety-hardening；不允许接新 provider、改默认 provider、写 key、运行真实 API 或默认启用 real tests。
+### Category A → evidence achieved
+
+当前仍为 **A**，但 minimal smoke evidence 已取得。这不等于：
+- L4 readiness（缺 success/failure/fallback + adversarial evidence）
+- Production readiness（缺 CI/credential management）
+- Adversarial readiness（未建立 adversarial real-provider suite）
+- Default-on readiness（default-on 是独立决策）
+
+下一步可做（非本轮）：
+1. 扩充 real smoke 为 success + auth-failure + timeout fallback tests；
+2. 建立 bounded adversarial real-provider suite；
+3. 评估 default-on。
+
+用户需要准备：（已满足——已有本地 config 含 inline key + opt-in smoke 通过）。
+Coding agent 不建议：接新 provider、改默认 provider、写 key、默认启用 real tests。
 
 ## 9. Do Not Do Yet
 

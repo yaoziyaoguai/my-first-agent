@@ -36,7 +36,7 @@
 | Trigger ID | Module | Category | Active now? | Next action | Owner needed | External dep |
 |---|---|---|---|---|---|---|
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
-| T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | BLOCKED_BY_EXTERNAL | no(audit completed) | 先做 secret/endpoint/output safety hardening；再等 credential/CI 授权运行 | yes(授权) | **yes** |
+| T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | owner 决策 spike | **yes** | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION | no | owner/产品决策 | **yes** | no |
@@ -49,7 +49,7 @@
 | T-W2D4 (L1 dead-code) | SubAgent | TRACKED_DEBT | no | 独立 cleanup 窗口 | no | no |
 | T-NS-CLEANUP | Docs/Guardrails(North Star) | OPTIONAL_OR_FUTURE(blocked_by_approval) | no | owner 批准 amendment | **yes** | no |
 
-> **当前无 active trigger。T-SKILL-GOLDEN 已完成并关闭。** 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
+> **当前 active trigger: 无。T-SKILL-GOLDEN 已完成并关闭。T-PROVIDER-E2E minimal smoke evidence satisfied（非 L4）。** 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
 >
 > 编号说明:**OD-4**(consolidation 默认 production)有意折叠进 **T-MEM2**(与 canonical-owner OD-9 同属一次 memory 决策,不会独立 fire),不单列。roadmap §9 的 **W-Low 债务簇**(W1-D1/D2/D3/D6/D7、W2-D1、W3-D1/D2)均为已治理 Low debt,owner/trigger/exit 由 roadmap §9.3–9.5 管辖,**有意不提升为本寄存器行**(避免把 Low debt 扩成 active surface)。
 
@@ -79,9 +79,10 @@
 - **Related module**: Provider / Model Boundary(L3)
 - **Activation audit**: **COMPLETED**(2026-06-14),见 `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`。这只完成现状/安全路径审计,不关闭 trigger。
 - **Current status**: provider factory/protocol/config precedence 生产可用 + contract test;real provider(OpenAI/Anthropic)代码存在但**无真实 E2E**;`claims_real_provider_e2e=false`;FakeProvider 默认且冻结。
-- **Category**: `BLOCKED_BY_EXTERNAL`
-- **What it means**: 用真实 provider credential 跑端到端 success/failure/fallback,验证 real-call 路径(L3→L4)。
-- **Why not active now**: AGENTS.md 硬禁未授权真实 provider call;无本次受控 credential / CI secret / 稳定外部 provider evidence。现有 `tests/test_provider_real_smoke.py` 是机械上可 opt-in 的 adapter smoke,但缺安全 secret indirection、HTTPS + exact-host allowlist、provider response/exception 脱敏和 tracked fail-closed marker/guard;完整 success/failure/fallback 与 real adversarial evidence 也未建立。本地 `config/config.yaml` 还存在 tracked + skip-worktree 的疑似非占位 key 风险,需先 rotate/remove。(GE-1 Phase B golden infra 已就绪 —— roadmap L950。)
+- **Category**: `COMPLETED`（minimal smoke evidence achieved）
+- **What it means**: 用真实 provider credential 跑端到端 success/failure/fallback,验证 real-call 路径(L3→L4)。**本轮只完成 minimal adapter smoke——不是 L4**。
+- **Why not active before**: AGENTS.md 硬禁未授权真实 provider call;无本次受控 credential / CI secret / 稳定外部 provider evidence。
+- **Current evidence**: `tests/test_provider_real_smoke.py::test_real_anthropic_compatible_minimal_text_smoke` → **1 passed**（2026-06-14）。DeepSeek `deepseek-v4-flash` via `anthropic_compatible` + `https://api.deepseek.com/anthropic`，`max_tokens=32`，`timeout=10s`。
 - **Activation path**(参考):
   1. 明确 provider profile(哪个 provider/model);
   2. rotate 并移除 tracked local config 中的真实 key 风险;
@@ -353,10 +354,11 @@
 
 ## 5. What Can Be Done Now
 
-**当前无 active trigger。T-SKILL-GOLDEN 已完成并关闭。**
+**当前无 active trigger。T-SKILL-GOLDEN 已完成并关闭。T-PROVIDER-E2E minimal smoke evidence satisfied。**
 
 - 关闭证据:`tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json`。
-- 其它 trigger 状态不变,没有因本次 golden 自动激活任何后续工作。
+- T-PROVIDER-E2E minimal smoke evidence: `tests/test_provider_real_smoke.py::test_real_anthropic_compatible_minimal_text_smoke` → **1 passed**（2026-06-14）；不是 L4。
+- 其它 trigger 状态不变,没有因本次 smoke 自动激活任何后续工作。
 
 ---
 

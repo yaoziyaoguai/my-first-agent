@@ -6,6 +6,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 
 **T-PROVIDER-E2E activation audit 已完成;trigger 仍为 `BLOCKED_BY_EXTERNAL`,未运行真实 API,未产生 L4 evidence。**
 **T-PROVIDER-E2E secret safety hardening 已完成**：`api_key_env` indirection、`config.local.yaml` 本地优先、real/fake guard fix、response body leak fix、real smoke preview hardening。
+**T-PROVIDER-E2E real provider smoke PASSED**（2026-06-14）：DeepSeek `deepseek-v4-flash` via `anthropic_compatible` + `https://api.deepseek.com/anthropic`。**这不是 L4**，只是 minimal adapter smoke。
 
 - Architecture Repair Mainline 仍 CLOSED(`ACCEPT_WITH_TRACKED_DEBT`)。本目录**不是** active repair queue,不开启 Window 4。
 - 原 maturity audit 为 docs-only;T-SKILL-GOLDEN 关闭仅新增 golden test / fixture 与最小状态文档,不改 production code / North Star。

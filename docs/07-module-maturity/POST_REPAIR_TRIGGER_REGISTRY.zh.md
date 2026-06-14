@@ -49,7 +49,8 @@
 | T-W2D4 (L1 dead-code) | SubAgent | TRACKED_DEBT | no | 独立 cleanup 窗口 | no | no |
 | T-NS-CLEANUP | Docs/Guardrails(North Star) | OPTIONAL_OR_FUTURE(blocked_by_approval) | no | owner 批准 amendment | **yes** | no |
 
-> **当前 active trigger: 无。T-SKILL-GOLDEN 已完成并关闭。T-PROVIDER-E2E minimal smoke evidence satisfied（非 L4）。** 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
+> **当前 active trigger: 无。T-SKILL-GOLDEN 已完成并关闭。T-PROVIDER-E2E minimal smoke evidence satisfied（非 L4）。**
+**L3 Hardening Triage: COMPLETED（见 `L3_HARDENING_TRIAGE.zh.md`）**, recommended next target: Skill System → L3（HARDEN_NEXT, 0 blockers）。 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
 >
 > 编号说明:**OD-4**(consolidation 默认 production)有意折叠进 **T-MEM2**(与 canonical-owner OD-9 同属一次 memory 决策,不会独立 fire),不单列。roadmap §9 的 **W-Low 债务簇**(W1-D1/D2/D3/D6/D7、W2-D1、W3-D1/D2)均为已治理 Low debt,owner/trigger/exit 由 roadmap §9.3–9.5 管辖,**有意不提升为本寄存器行**(避免把 Low debt 扩成 active surface)。
 

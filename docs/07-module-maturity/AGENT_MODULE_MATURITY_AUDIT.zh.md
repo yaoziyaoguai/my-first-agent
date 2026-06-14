@@ -292,6 +292,7 @@
 - `tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json` 已锁定当前实验性本地 dispatcher/lifecycle 行为。
 - Skill System 保持 L2;本次完成不表示 production-ready、real provider E2E 或新 side-effect 能力。
 - 当前无新的 HARDEN_NEXT;其它 blocked/deferred 项状态不变。
+- **L3 Hardening Triage: COMPLETED**（`L3_HARDENING_TRIAGE.zh.md`），8 模块逐模块 triage，recommended next target: **Skill System → L3**（HARDEN_NEXT, 0 blockers）。
 
 ### 为什么没有第 2、3 个(透明过滤)
 

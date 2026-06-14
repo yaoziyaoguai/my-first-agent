@@ -129,7 +129,7 @@
 
 ### T-MEM2 — Memory canonical write owner / unfreeze(MEM-2)
 - **Related module**: Memory(L2)
-- **Current status**: 职责拆分(`memory.py` 压缩/抽取;`memory_store`/`memory_fs_store` 持久化;`memory_runtime_hooks`+`memory_policy` 触发治理);consolidation/emergence **frozen + 默认 off**;canonical write owner **未定**。**Decision spike: COMPLETED**(见 `MEMORY_OWNER_DECISION_SPIKE.zh.md`)，明确了 12 个决策域和推荐选项。
+- **Current status**: 职责拆分(`memory.py` 压缩/抽取;`memory_store`/`memory_fs_store` 持久化;`memory_runtime_hooks`+`memory_policy` 触发治理);consolidation/emergence **frozen + 默认 off**;canonical write owner **未定**。**Decision spike: COMPLETED**(见 `MEMORY_OWNER_DECISION_SPIKE.zh.md`)，明确了 12 个决策域和推荐选项。**Taxonomy mapping: COMPLETED**(见 `MEMORY_TAXONOMY_MAPPING.zh.md`)，将用户三类 memory 映射到当前实现。
 - **Category**: `BLOCKED_BY_DECISION`
 - **What it means**: 选定唯一 canonical memory write owner,并(如决定)解冻 consolidation 为生产路径。
 - **Why not active now**: owner 未决(North Star §4.D/§10.1 标 `Open:`);擅自选会破坏 SoT 单 owner 不变量、触碰 memory 路径(reopen 风险)。

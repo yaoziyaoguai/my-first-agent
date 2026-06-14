@@ -20,6 +20,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类;当前无 HARDEN_NEXT | current |
 | `POST_REPAIR_TRIGGER_REGISTRY.zh.md` | trigger 寄存器 + 激活 playbook("No trigger, no work");每个 blocked/deferred/harden 项的触发条件与开工路径 | current |
 | `MEMORY_OWNER_DECISION_SPIKE.zh.md` | MEM-2 decision spike——12 决策域拆解 + 推荐选项 + 激活路径 | current — decision spike completed;T-MEM2 remains blocked_by_decision |
+| `MEMORY_TAXONOMY_MAPPING.zh.md` | Memory taxonomy → MEM-2 mapping——user 三类 memory × source/type 双轴映射 | current — mapping completed;Memory L2;no emotion/agent-inferred path exists |
 
 ## 阅读顺序
 

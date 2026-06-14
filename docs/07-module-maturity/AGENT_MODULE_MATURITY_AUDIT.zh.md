@@ -152,7 +152,7 @@
 - **Maturity L2**:基础操作有 golden/L3 test,但 consolidation frozen + 默认 off + owner 未定(不记 L3,避免把 minimal golden 当 production owner)。
 - **Gap**:MEM-2 canonical write owner;consolidation 是否解冻为默认 production 路径(OD-4)。
 - **Runtime risk now?** no(frozen/env-gated)。**Blocks mainline?** no。**Harden next?** no。
-- **Action**:**BLOCKED_BY_DECISION**。**Why not now**:解冻/选 canonical owner 是 owner 决策,擅自做会扩 scope 且触碰 memory 路径(reopen 风险)。**Decision spike completed**——`MEMORY_OWNER_DECISION_SPIKE.zh.md` 拆解了 12 个决策域,推荐 MemoryOwner 抽象层作为 canonical write owner,owner 需审批 OD-9/OD-4。
+- **Action**:**BLOCKED_BY_DECISION**。**Why not now**:解冻/选 canonical owner 是 owner 决策,擅自做会扩 scope 且触碰 memory 路径(reopen 风险)。**Decision spike + taxonomy mapping completed**——`MEMORY_OWNER_DECISION_SPIKE.zh.md` 拆解了 12 个决策域；`MEMORY_TAXONOMY_MAPPING.zh.md` 将用户三类 memory（source=explicit/agent-inferred/implicit × type=episodic/semantic/procedural）映射到当前实现事实。
 - **Trigger**:owner 决定解冻 memory 并指定 canonical owner。**Exit**:MEM-2 owner 决策 + single-owner tests。
 - **Owner/decision**:**需要 owner(MEM-2 / OD-4)**。**Confidence**:High。
 

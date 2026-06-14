@@ -34,6 +34,6 @@ Post-repair module maturity / hardening 阶段的工作目录。
 
 - Mainline 已串通;问题是**模块成熟度不均衡**(L3 骨架/横切簇 + L3 Skill System + L2 能力簇 + L1 dormant scheduler),且不均衡几乎全是**有意 deferred/blocked**。
 - **T-MEM2 L3 achieved**: MemoryOwner wired into MemoryRuntime explicit_user_request retain path；create/noop/reject on runtime；not L4。
-- **Capability/Config/Registry L3 scoped**: 40 existing boundary tests pass; `build_decision_frame()` covers 20 branch points; PolicyDecision 13 action kinds mapped; config precedence enforced。Not L4。Debt: dynamic MCP sync, unified enum。
+- **SubAgent L3 scoped**: 38 SubAgent test files, 415 tests passed, golden delegation evidence, PolicyDecision SUBAGENT_DELEGATION mapped。FOP-1 tracked pre-flip blocker。
 - **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。

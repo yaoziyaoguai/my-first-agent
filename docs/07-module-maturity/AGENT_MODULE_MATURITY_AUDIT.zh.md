@@ -82,7 +82,7 @@
 | 3 | Tool System | **L3** | NO_ACTION | no | no | High |
 | 4 | MCP | **L2** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 5 | Memory | ~~L2~~ **L3** | NO_ACTION | no | no | High |
-| 6 | SubAgent | **L2** | TRACKED_DEBT | no | no | High |
+| 6 | SubAgent | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to local delegation contract / fake-or-local boundary / runtime dispatch evidence) | no | no | High |
 | 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 9 | Policy / Approval | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to Tool gate policy path) | no | no | High |
@@ -163,7 +163,7 @@
 - **Maturity L2**:V0 registered + contract + golden + flag-gated;默认 off,未 default-on,无 real provider E2E。
 - **Gap**:default-on flip(FOP-1 pre-flip:provider_mode_allowed 传播)、SA-2 L3 lifecycle、real provider E2E。
 - **Runtime risk now?** no。**Blocks mainline?** no(默认 off 稳定)。**Harden next?** no。
-- **Action**:**TRACKED_DEBT**。**Why not now**:default-on flip 需 owner 决策 + real provider(external);当前 default-off 有 rollback,风险可接受。
+- **Action**:NO_ACTION（L3 scoped achieved）。**Why**:38 SubAgent test files, 415 tests passed；`test_golden_subagent_delegation.py` golden locked；V0 registered + contract-verified via `subagent_routing_flag.py`；`PolicyDecision.SUBAGENT_DELEGATION → REQUIRE_APPROVAL` mapped；`build_decision_frame()` subagent branch point tracked。FOP-1 (`provider_mode_allowed` propagation) is tracked pre-flip blocker for default-on, not L3 blocker。**Not L4**:real provider-backed subagent, async multi-agent, MCP delegation。
 - **Trigger**:准备 V0 default-on / real-provider dogfood。**Exit**:provider_mode 传播 + real-provider V0 test(flip 前 FOP-1 转 blocker)。
 - **Owner/decision**:default-on flip 需 owner(+ external for real provider)。**Confidence**:High。
 

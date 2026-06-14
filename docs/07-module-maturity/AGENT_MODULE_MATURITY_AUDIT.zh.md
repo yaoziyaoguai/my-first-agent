@@ -81,7 +81,7 @@
 | 2 | RuntimeAction / Dispatcher Spine | **L3** | NO_ACTION | no | no | High |
 | 3 | Tool System | **L3** | NO_ACTION | no | no | High |
 | 4 | MCP | **L2** | BLOCKED_BY_EXTERNAL | no | no | High |
-| 5 | Memory | **L2** | BLOCKED_BY_DECISION | no | no | High |
+| 5 | Memory | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 6 | SubAgent | **L2** | TRACKED_DEBT | no | no | High |
 | 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
@@ -149,10 +149,10 @@
 - **Current fact**:基础 store/recall/retain/propose 有 runtime 路径与 targeted/L3 测试;consolidation/emergence pipeline **frozen**,`MEMORY_CONSOLIDATION_ENABLED`/`MEMORY_EMERGENCE_ENABLED` **默认 off**;golden 锁定当前 `disabled_by_env` 事实;canonical write owner **未定(MEM-2)**。
 - **North Star target**:§10/§4.I governed memory(policy gate + provenance + lifecycle + 单 canonical owner)。
 - **Evidence**:`agent/memory_runtime.py:188`、`memory_policy.py:86 DeterministicMemoryPolicy`、`memory_fs_store.py:556`、`memory_consolidation_pipeline.py`、`memory_runtime_hooks.py:33/152`(默认 off);`tests/golden_e2e/test_golden_memory_checkpoint.py`、`fixtures/memory_disabled.json`、`tests/runtime_integration/test_memory_recall_l3.py`/`test_memory_propose_l3.py`/`test_memory_shared_store_l3.py`;`docs/rfc/MEMORY_CANONICAL_RFC.md`。
-- **Maturity L2**:基础操作有 golden/L3 test,但 consolidation frozen + 默认 off + owner 未定(不记 L3,避免把 minimal golden 当 production owner)。
+- **Maturity L3**:explicit_user_request/semantic memory 主路径通过 MemoryOwner runtime integration；create/delete/noop/reject on path；confirmation flow retained；consolidation/emergence frozen；**不标 L4**。agent_suggested/emotion/procedural/update 仍 tracked debt。
 - **Gap**:MEM-2 canonical write owner;consolidation 是否解冻为默认 production 路径(OD-4)。
 - **Runtime risk now?** no(frozen/env-gated)。**Blocks mainline?** no。**Harden next?** no。
-- **Action**:**BLOCKED_BY_DECISION**。**Why not now**:解冻/选 canonical owner 是 owner 决策,擅自做会扩 scope 且触碰 memory 路径(reopen 风险)。**Decision spike + taxonomy mapping completed**——`MEMORY_OWNER_DECISION_SPIKE.zh.md` 拆解了 12 个决策域；`MEMORY_TAXONOMY_MAPPING.zh.md` 将用户三类 memory（source=explicit/agent-inferred/implicit × type=episodic/semantic/procedural）映射到当前实现事实。
+- **Action**:NO_ACTION (L3 achieved)。**Why**:MemoryOwner wired into MemoryRuntime resolve_confirmation path for explicit_user_request retain；create/delete/noop/reject semantics on runtime path；policy/privacy enforced；audit evidence per mutation；consolidation/emergence still frozen。**Not L4**:agent_suggested/emotion/procedural/update semantics/consolidation-default-on still tracked debt。
 - **Trigger**:owner 决定解冻 memory 并指定 canonical owner。**Exit**:MEM-2 owner 决策 + single-owner tests。
 - **Owner/decision**:**需要 owner(MEM-2 / OD-4)**。**Confidence**:High。
 

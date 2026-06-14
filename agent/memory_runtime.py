@@ -211,6 +211,7 @@ class MemoryRuntime:
         store: MemoryStoreProtocol | None = None,
         event_logger: MemoryEventLogger | None = None,
         suggestion_engine: DeterministicSuggestionEngine | None = None,
+        owner: Any | None = None,
     ):
         """
         参数全部 keyword-only，保证调用方显式声明注入意图。
@@ -220,11 +221,13 @@ class MemoryRuntime:
         - store: None（必须由调用方注入，否则 evaluate 只做 policy 不做写入）
         - event_logger: _noop_event_logger
         - suggestion_engine: None（不启用 agent-suggested memory）
+        - owner: None（MemoryOwner 实例，注入后在 confirmed write 路径上使用）
         """
         self._policy = policy or DeterministicMemoryPolicy()
         self._store = store
         self._log = event_logger or record_memory_runtime_event
         self._suggestion_engine = suggestion_engine
+        self._owner = owner
         # 两阶段确认缓存：key=candidate_id, value=dict(decision, confirmation_request)
         self._pending_decision: dict[str, Any] | None = None
 
@@ -584,7 +587,35 @@ class MemoryRuntime:
         )
 
         if direct_write and self._store is not None:
-            self._store.store_retained_record(candidate_payload)
+            # MemoryOwner L3: route confirmed retain through owner gate
+            if self._owner is not None:
+                from agent.memory_owner import MemoryMutationType
+
+                md = self._owner.mutate(
+                    content=content_summary,
+                    memory_type=getattr(decision.target_candidate, "memory_type", "semantic")
+                    if decision.target_candidate else "semantic",
+                    source_type="explicit_user_request",
+                    intent="retain",
+                )
+                if md.mutation_type == MemoryMutationType.REJECTED:
+                    return MemoryEvaluationResult(
+                        action=MemoryEvaluationAction.REJECTED,
+                        decision_type=decision.decision_type,
+                        candidate_id=candidate_id,
+                        content_summary=content_summary,
+                        reason=f"owner_rejected:{md.reason}",
+                    )
+                if md.mutation_type == MemoryMutationType.NOOP:
+                    return MemoryEvaluationResult(
+                        action=MemoryEvaluationAction.REJECTED,
+                        decision_type=decision.decision_type,
+                        candidate_id=candidate_id,
+                        content_summary=content_summary,
+                        reason=f"noop:{md.reason}",
+                    )
+            else:
+                self._store.store_retained_record(candidate_payload)
 
         self._log("memory.confirmation_approved", {
             "decision_type": decision.decision_type.value,

@@ -83,7 +83,7 @@
 | 4 | MCP | **L2** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 5 | Memory | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 6 | SubAgent | **L2** | TRACKED_DEBT | no | no | High |
-| 7 | Skill System | **L2** | NO_ACTION | no | no | Medium |
+| 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 9 | Policy / Approval | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 10 | Scheduler / Async | **L1** | BLOCKED_BY_DECISION | no | no | High |
@@ -167,11 +167,11 @@
 - **Trigger**:准备 V0 default-on / real-provider dogfood。**Exit**:provider_mode 传播 + real-provider V0 test(flip 前 FOP-1 转 blocker)。
 - **Owner/decision**:default-on flip 需 owner(+ external for real provider)。**Confidence**:High。
 
-### 7. Skill System — L2 — NO_ACTION
-- **Current fact**:当前能力在 `agent/skill_system/`(registry/loader/selector/lifecycle/invocation/retriever/skill_tool);turn-start probe 选 skill 作为 evidence,不直接执行工具、不写 memory;legacy `agent/skills/__init__.py` 是 fail-closed tombstone;README 标"实验性"。`tests/golden_e2e/test_golden_skill_system.py` 已用本地 sample fixture 锁定 discovery / selection metadata / direct dispatcher selection / lifecycle handoff,不是 real `core.chat` E2E 证明。
+### 7. Skill System — ~~L2~~ L3 — NO_ACTION
+- **Current fact**:当前能力在 `agent/skill_system/`(registry/loader/selector/lifecycle/invocation/retriever/skill_tool);turn-start probe 选 skill 作为 evidence,不直接执行工具、不写 memory;legacy `agent/skills/__init__.py` 是 fail-closed tombstone;README 标"实验性"。`tests/golden_e2e/test_golden_skill_system.py` 已用本地 sample fixture 锁定 discovery / selection metadata / direct dispatcher selection / lifecycle handoff。**L3 core-loop golden**: `tests/golden_e2e/test_golden_skill_l3_core_loop.py` → 2 passed（core.chat() + FakeProvider + skill registry → discovery/selection/evidence, no forbidden side effects）。
 - **North Star target**:§9 Skill = `RuntimeActionType.SKILL_SELECT` evidence,渐进能力发现,不作 side effect。
 - **Evidence**:`agent/skill_system/registry.py:26 SkillRegistry`、`loader.py:37`、`runtime_integration/skill_action.py`/`skill_lifecycle.py`/`skill_selection_probe.py`;`agent/skills/__init__.py`(tombstone, `__all__=[]`);`tests/golden_e2e/test_golden_skill_system.py`、`tests/golden_e2e/fixtures/skill_system_current_behavior.json`。
-- **Maturity L2**:registered + lifecycle/selection 有 targeted test + golden,但仍是实验性本地能力,不产生 side effect,不记 L3/L4。
+- **Maturity ~~L2~~ L3**:registered + lifecycle/selection 有 targeted test + golden + core-loop E2E golden,但仍是实验性本地能力,不产生 side effect,不记 L4。
 - **Gap**:本轮 Golden fixture 对等缺口已关闭;实验性状态不是自动 hardening trigger。
 - **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** no。
 - **Action**:NO_ACTION。**Why now**:T-SKILL-GOLDEN 已完成;没有证据或授权支持继续实现/重构 Skill System。

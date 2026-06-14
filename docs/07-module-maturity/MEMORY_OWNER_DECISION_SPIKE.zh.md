@@ -13,7 +13,7 @@
 - 本文是 decision spike，不是 implementation plan，不是 active queue item。
 - **Taxonomy mapping**: 见 `MEMORY_TAXONOMY_MAPPING.zh.md`——将用户三类 memory（explicit/agent-inferred/implicit × episodic/semantic/procedural）映射到当前实现。
 - 本轮不改 `agent/` 源码，不改 `tests/`，不新增 memory backend，不解冻 memory。
-- Memory 当前成熟度：**L2**，不宣称 production-ready、不宣称 L3/L4。
+- Memory 当前成熟度：**L3**（explicit_user_request/semantic retain-create-noop-reject runtime main path），不宣称 production-ready、不宣称 L4。MemoryOwner wired into MemoryRuntime.resolve_confirmation（commit `c41a67a`）。
 
 ## 2. Current Memory Inventory
 

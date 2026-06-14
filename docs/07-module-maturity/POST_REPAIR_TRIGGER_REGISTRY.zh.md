@@ -38,7 +38,7 @@
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
-| T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | decision spike completed；等 owner 审批 OD-9/OD-4 | **yes** | no |
+| T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION | no | owner/产品决策 | **yes** | no |
 | T-CM2 (OD-2) | Capability/Config/Registry | BLOCKED_BY_DECISION | no | owner 决策 + 出现跨消费者 | **yes** | no |
 | T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION | no | owner 决策 + 消费者 | **yes** | no |
@@ -129,29 +129,12 @@
 - **Reference evidence**: `tests/runtime_integration/test_mcp_real_external_flight.py`(docstring + `is_mcp_active` 默认 False);`docs/design/mcp-architecture.md`;maturity audit §5.4。
 
 ### T-MEM2 — Memory canonical write owner / unfreeze(MEM-2)
-- **Related module**: Memory(L2)
-- **Current status**: 职责拆分(`memory.py` 压缩/抽取;`memory_store`/`memory_fs_store` 持久化;`memory_runtime_hooks`+`memory_policy` 触发治理);consolidation/emergence **frozen + 默认 off**;canonical write owner **未定**。**Decision spike: COMPLETED**(见 `MEMORY_OWNER_DECISION_SPIKE.zh.md`)，明确了 12 个决策域和推荐选项。**Taxonomy mapping: COMPLETED**(见 `MEMORY_TAXONOMY_MAPPING.zh.md`)，将用户三类 memory 映射到当前实现。
-- **Category**: `BLOCKED_BY_DECISION`
-- **What it means**: 选定唯一 canonical memory write owner,并(如决定)解冻 consolidation 为生产路径。
-- **Why not active now**: owner 未决(North Star §4.D/§10.1 标 `Open:`);擅自选会破坏 SoT 单 owner 不变量、触碰 memory 路径(reopen 风险)。
-- **Activation path**(参考):
-  1. 决定 memory owner;
-  2. 决定 memory schema;
-  3. 决定 create/update/delete/noop 语义;
-  4. 决定 privacy boundary;
-  5. 决定 persistence backend;
-  6. 决定 replay / audit evidence;
-  7. **再写实现计划**(先 decision spike,后实现)。
-- **Required decisions**: MEM-2 canonical owner = **OD-9**(roadmap §11 本地编号);OD-4(consolidation 是否默认 production,次要)。
-- **Required external resources**: 无。
-- **Required evidence**: decision spike 文档 + 决策记录;选定后 single-owner test。
-- **Allowed work after fires**: ownership decision spike → (裁决后)single-owner 实现 + test-lock。
-- **Forbidden work before fires**: 不解冻 memory、不选 owner、不移动持久化实现、不动 provenance 格式、不接真实 LLM consolidation。
-- **Validation / exit**: canonical owner 被裁决并 test-locked。
-- **Owner needed**: 项目 owner(决策)。
-- **Risk if ignored**: SoT 维度无法到 3;memory 长期 frozen。
-- **Risk if forced early**: 双 owner / SoT 漂移、解冻引入未治理写入、扩 scope 重开 repair。
-- **Reference evidence**: roadmap MEM-2(L360-376)、§9 表 L963;`agent/memory_runtime_hooks.py:33/152`(默认 off);North Star §4.D/§10。
+- **Related module**: Memory(~~L2~~ **L3**)
+- **Current status**: MemoryOwner wired into MemoryRuntime.resolve_confirmation explicit_user_request retain path；create/noop/reject on runtime path；confirmation flow retained；consolidation/emergence still frozen。**Decision spike + taxonomy mapping + L3 main path: COMPLETED**。**Not L4**。
+- **Category**: `COMPLETED`（explicit_user_request L3 main path achieved）
+- **Remaining tracked debt**: forget runtime integration, SESSION_ONLY owner path, update semantics, public store mutation API, agent_suggested, emotion/signal, procedural, consolidation default-on, emergence, semantic search/embedding。
+- **Evidence**: `tests/test_memory_owner_l3_main_path.py` (4 passed) + `tests/test_memory_owner_runtime_integration.py` (2 passed); `agent/memory_owner.py` + `agent/memory_runtime.py` MemoryOwner integration。
+- **Reference evidence**: `agent/memory_owner.py`; `agent/memory_runtime.py:592`; `tests/test_memory_owner_l3_main_path.py`; `tests/test_memory_owner_runtime_integration.py`。
 
 ### T-OD7 — production approval hook(OD-7 / W2-D2)
 - **Related module**: Policy / Approval(L2)

@@ -33,6 +33,6 @@ Post-repair module maturity / hardening 阶段的工作目录。
 ## 关键结论(摘要)
 
 - Mainline 已串通;问题是**模块成熟度不均衡**(L3 骨架/横切簇 + L3 Skill System + L2 能力簇 + L1 dormant scheduler),且不均衡几乎全是**有意 deferred/blocked**。
-- **T-SKILL-L3 completed**: Skill System → L3, core-loop golden E2E evidence (`test_golden_skill_l3_core_loop.py` 2 passed).
+- **T-MEM2 L3 achieved**: MemoryOwner wired into MemoryRuntime explicit_user_request retain path；create/noop/reject on runtime；not L4。Tracked debt: forget/SESSION_ONLY/update/agent_suggested/emotion/procedural/consolidation/emergence。
 - **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。

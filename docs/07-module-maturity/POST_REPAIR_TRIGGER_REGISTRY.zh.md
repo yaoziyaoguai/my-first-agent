@@ -40,7 +40,7 @@
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (golden model completed) | no(READY_FOR_RUNTIME_INTEGRATION) | 集成 Tool gate → PolicyDecision | **yes** | no |
-| T-CM2 (OD-2) | Capability/Config/Registry | BLOCKED_BY_DECISION | no | owner 决策 + 出现跨消费者 | **yes** | no |
+| T-CM2 (OD-2) | Capability/Config/Registry | COMPLETED (scoped L3 for local registry/config boundary/policy alignment) | no | dynamic discovery, MCP real sync, broader enforcement | yes(已完成) | no |
 | T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION | no | owner 决策 + 消费者 | **yes** | no |
 | T-SUBAGENT-FLIP (FOP-1) | SubAgent | TRACKED_DEBT(pre-flip blocker) | no | flip 决策 + 修 FOP-1 | **yes** | yes(real provider) |
 | T-SA2 (SA-2) | SubAgent | BLOCKED_BY_EVIDENCE | no | design spike | yes(架构) | no |

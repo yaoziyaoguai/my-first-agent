@@ -90,7 +90,7 @@
 | 11 | State / Checkpoint / Resume | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 12 | Observability / Evidence | **L3** | NO_ACTION | no | no | High |
 | 13 | Security / Privacy | **L3** | NO_ACTION | no | no | High |
-| 14 | Capability / Config / Registry Boundary | **L2** | BLOCKED_BY_DECISION | no | no | High |
+| 14 | Capability / Config / Registry Boundary | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to local capability registry / config boundary / policy alignment) | no | no | High |
 | 15 | Docs / Guardrails | **L3** | NO_ACTION | no | no | High |
 
 > **没有任何模块 blocks mainline**(mainline 已 closed)。最高成熟度为 **L3**;**全仓无 L4**(real provider/MCP/CI/credential 路径被项目规则与外部条件挡住)。当前无 HARDEN_NEXT;T-SKILL-GOLDEN 已完成并关闭。
@@ -248,10 +248,10 @@
 - **Current fact**:capability status 由 `runtime_decision_frame.build_decision_frame` 表达,`capability_summary` 被 contract 锁定"永不声称 complete";config/provider import boundary 已 inventory(CM-1);状态词汇 declared/registered/routed/dormant/deferred 为**口径**而非统一 enum;**CM-2 unified capability contract 未建(blocked_by_decision)**。
 - **North Star target**:§9 统一能力模型、§16 Configuration、OD-2/CM-2。
 - **Evidence**:`agent/runtime_decision_frame.py:679 build_decision_frame`、`tests/unit/test_runtime_decision_frame.py:248 test_capability_summary_never_claims_complete`、`agent/tool_registry.py`、多 config owner(`config.py`/`provider/simple_config.py`/`profiles.py`/`mcp_config*.py`);`docs/06-audit/WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md`、`docs/design/unified-project-config-contract.md`、`docs/CAPABILITY_BOUNDARIES.md`;`tests/test_config_authority_boundaries.py`、`test_capability_boundary_contract.py`。
-- **Maturity L2**:per-surface 能力事实 + config import boundary 已 inventory 并测试,但无统一 CM-2 契约;status 非统一 enum。
+- **Maturity L3 scoped**:`build_decision_frame()` + `capability_summary()` + `StrategyFrame` + `BranchPointStatus`；40+ boundary tests；PolicyDecision 13 action kinds；config precedence chain；capability terms (declared/registered/routed/dormant/deferred) 为口径但非 enum（这是 tracked debt）。
 - **Gap**:CM-2 unified capability contract;OD-2(Tool/Skill/MCP 是否共享统一 contract)。
 - **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** no。
-- **Action**:**BLOCKED_BY_DECISION**。**Why not now**:CM-2 无当前跨 surface 消费者;贸然做会扩 scope(closure 明列 CM-2 = blocked_by_decision)。
+- **Action**:NO_ACTION (L3 scoped achieved)。**Why**:**40 existing tests** (`test_runtime_decision_frame.py` 40 passed, `test_capability_boundary_contract.py`, `test_config_authority_boundaries.py`);`build_decision_frame()` 覆盖 20 branch points + capability_summary + readiness；`PolicyDecision`/`PolicyActionKind` 映射 13 action types；config source priority 已实施。**Not L4**:dynamic remote discovery, MCP real sync, broader capability-policy enforcement。
 - **Trigger**:出现跨 Tool/Skill/MCP 消费者或 OD-2 决定统一 contract。**Exit**:CM-2 contract 决策 + tests。
 - **Owner/decision**:**CM-2/OD-2 需 owner**。**Confidence**:High。
 

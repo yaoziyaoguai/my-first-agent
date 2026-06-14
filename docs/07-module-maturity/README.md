@@ -22,7 +22,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | `L3_HARDENING_TRIAGE.zh.md` | L3 hardening triage——8 模块逐模块 triage + recommended next target | current — triage completed; Skill L3 done; recommended next: State or SubAgent FOP-1 |
 | `FREEZE_FILE_INTEGRITY_AUDIT.zh.md` | Freeze file integrity audit——验证冻结文件未被越权修改 | current — audit completed; verdict CLEAN_WITH_LOW_RISK_NOTES |
 | `MEMORY_OWNER_DECISION_SPIKE.zh.md` | MEM-2 decision spike——12 决策域拆解 + 推荐选项 + 激活路径 | current — decision spike completed;T-MEM2 remains blocked_by_decision |
-| `MEMORY_TAXONOMY_MAPPING.zh.md` | Memory taxonomy → MEM-2 mapping——user 三类 memory × source/type 双轴映射 | current — mapping completed;Memory L2;no emotion/agent-inferred path exists |
+| `POST_MEMORY_L3_NEXT_TARGET_SELECTION.zh.md` | Post-Memory-L3 next target selection——从治理文档推导下一刀 | current — selection completed; recommended: State resume golden |
 
 ## 阅读顺序
 

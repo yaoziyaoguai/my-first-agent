@@ -22,7 +22,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | `L3_HARDENING_TRIAGE.zh.md` | L3 hardening triage——8 模块逐模块 triage + recommended next target | current — triage completed; Skill L3 done; recommended next: State or SubAgent FOP-1 |
 | `FREEZE_FILE_INTEGRITY_AUDIT.zh.md` | Freeze file integrity audit——验证冻结文件未被越权修改 | current — audit completed; verdict CLEAN_WITH_LOW_RISK_NOTES |
 | `MEMORY_OWNER_DECISION_SPIKE.zh.md` | MEM-2 decision spike——12 决策域拆解 + 推荐选项 + 激活路径 | current — decision spike completed;T-MEM2 remains blocked_by_decision |
-| `POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md` | OD-7 decision spike — PolicyDecision model + action matrix + 4-phase L3 plan | current — spike completed; Policy remains L2; next: PolicyDecision golden |
+| `POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md` | OD-7 decision spike — PolicyDecision model + action matrix + 4-phase L3 plan | current — Phase 1 golden completed; Policy remains L2; next: Tool gate integration |
 
 ## 阅读顺序
 

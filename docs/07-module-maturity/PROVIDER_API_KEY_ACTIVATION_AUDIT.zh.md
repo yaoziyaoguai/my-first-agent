@@ -68,7 +68,7 @@
 | Generic overrides | `MY_FIRST_AGENT_LLM_MODEL`, `MY_FIRST_AGENT_LLM_BASE_URL`, `MY_FIRST_AGENT_LLM_AUTH_SCHEME`, `MY_FIRST_AGENT_LLM_REQUEST_PATH`, `MY_FIRST_AGENT_LLM_COMPATIBILITY_MODE`, `MY_FIRST_AGENT_LLM_MAX_TOKENS`, `MY_FIRST_AGENT_LLM_TIMEOUT` |
 | Legacy profile | `FIRST_AGENT_PROVIDER_PROFILE` |
 
-没有专用 `DEEPSEEK_API_KEY` 或 `DEEPSEEK_*` loader。DeepSeek 或其他服务只有在其 endpoint 与现有 `openai_compatible` / `anthropic_compatible` contract 兼容时才可能复用 compatible adapter；仓库没有名为 DeepSeek 的 profile 或专用实现。不要把“协议可能兼容”写成“已支持并验证”。
+没有专用 `DEEPSEEK_API_KEY` 或 `DEEPSEEK_*` loader。DeepSeek 当前通过 `anthropic_compatible` adapter 进入（`type: anthropic_compatible`, `base_url: https://api.deepseek.com/anthropic`, `api_key_env: DEEPSEEK_API_KEY`）。不要把 DeepSeek 写成 `openai_compatible`——DeepSeek 虽然也提供 OpenAI-compatible 端点，但用户当前目标路径是 Anthropic Messages 协议。仓库没有名为 DeepSeek 的 profile 或专用实现。不要把“协议兼容”写成“已支持并验证”。
 
 ### `.env` and config objects
 

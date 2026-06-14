@@ -1,0 +1,17 @@
+# Example: DeepSeek via Anthropic-compatible
+# 使用方式：cp config/examples/deepseek-anthropic-compatible.config.yaml config/config.yaml
+# 然后将 API key 设置在 .env 中，取消注释 api_key_env 行
+#
+# DeepSeek 当前推荐使用 anthropic_compatible 路径（Anthropic Messages API）。
+# 不要在此处写入真实 API key——通过 api_key_env 从环境变量读取。
+#
+# 用户只需配置 enabled/type/model/base_url 和 api_key 或 api_key_env。
+# request_path 和 auth_scheme 由 adapter 内部决定，不需要用户配置。
+
+provider:
+  enabled: true
+  type: anthropic_compatible
+  model: deepseek-v4-flash
+  base_url: https://api.deepseek.com/anthropic
+  api_key: sk-REPLACE_ME
+  # api_key_env: DEEPSEEK_API_KEY  # 推荐：从环境变量读取 key

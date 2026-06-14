@@ -3,8 +3,11 @@
 架构边界
 --------
 本模块实现 openai_compatible provider：通过 HTTP 调用 OpenAI Chat Completions
-兼容端点（DeepSeek / DashScope OpenAI-compatible / OpenRouter / vLLM / LM Studio /
+兼容端点（DashScope OpenAI-compatible / OpenRouter / vLLM / LM Studio /
 Ollama-compatible / 企业代理）。
+
+注意：DeepSeek 当前推荐使用 anthropic_compatible 路径
+（agent/provider/anthropic_http.py），而非 openai_compatible。
 
 与 Anthropic adapter 的关系：
 - 两者互不依赖，都实现 ModelProvider.create()
@@ -44,7 +47,6 @@ from agent.provider.protocol import (
     ProviderTimeoutError,
     ToolUseBlock,
 )
-
 
 # ============================================================
 # OpenAI 消息格式转换：Anthropic-style dict → OpenAI-style dict
@@ -86,7 +88,11 @@ def _extract_tool_calls_from_assistant(content: Any) -> list[dict[str, Any]]:
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_use":
             tool_input = block.get("input", {})
-            arguments = json.dumps(tool_input, ensure_ascii=False) if isinstance(tool_input, dict) else "{}"
+            arguments = (
+                json.dumps(tool_input, ensure_ascii=False)
+                if isinstance(tool_input, dict)
+                else "{}"
+            )
             tool_calls.append({
                 "id": block.get("id", ""),
                 "type": "function",

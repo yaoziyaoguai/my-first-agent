@@ -1,6 +1,7 @@
 # First Agent 统一项目配置参考
 #
 # 快速开始（推荐）：直接复制对应示例
+#   cp config/examples/deepseek-anthropic-compatible.config.yaml config/config.yaml   # DeepSeek
 #   cp config/examples/kimi-anthropic-compatible.config.yaml config/config.yaml   # Kimi K2.5
 #   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml        # GLM-5
 #   cp config/examples/fake.config.yaml config/config.yaml                         # 默认安全路径

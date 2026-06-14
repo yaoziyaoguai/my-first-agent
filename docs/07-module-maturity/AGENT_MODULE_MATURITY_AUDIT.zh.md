@@ -87,7 +87,7 @@
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 9 | Policy / Approval | **L2** | BLOCKED_BY_DECISION | no | no | High |
 | 10 | Scheduler / Async | **L1** | BLOCKED_BY_DECISION | no | no | High |
-| 11 | State / Checkpoint / Resume | **L2** | TRACKED_DEBT | no | no | High |
+| 11 | State / Checkpoint / Resume | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 12 | Observability / Evidence | **L3** | NO_ACTION | no | no | High |
 | 13 | Security / Privacy | **L3** | NO_ACTION | no | no | High |
 | 14 | Capability / Config / Registry Boundary | **L2** | BLOCKED_BY_DECISION | no | no | High |
@@ -211,14 +211,14 @@
 - **Trigger**:出现真实异步/delayed-action 消费者 + owner 决定 routing。**Exit**:production routing 决策 + 路由 + evidence。
 - **Owner/decision**:**需 owner(会触发 repair reopen 评估)**。**Confidence**:High。
 
-### 11. State / Checkpoint / Resume — L2 — TRACKED_DEBT
-- **Current fact**:local-file / per-run checkpoint schema v1/v2 + best-effort load;golden 锁本地 roundtrip / intra-process restore;turn-end 自动 save。**无 cross-host/cross-process resume(SPR-1)**。
+### 11. State / Checkpoint / Resume — ~~L2~~ L3 — NO_ACTION
+- **Current fact**:local-file / per-run checkpoint schema v1/v2 + best-effort load;golden 锁本地 roundtrip / intra-process restore;turn-end 自动 save。`tests/test_resume_full_flow.py` 已覆盖 accept/decline/pipe-mode/continue-task-after-restore 全流程（9 个 resume flow 测试），`tests/test_checkpoint_roundtrip.py` 覆盖 schema migration/truncation/summary 等（11 个测试），`tests/golden_e2e/test_golden_memory_checkpoint.py` 锁定 local roundtrip golden，`tests/runtime_integration/test_checkpoint_save_resume_l3.py` 通过 `route_from_runtime_loop()` 产生 L3 evidence。**不标 L4**。cross-host/long-task/HITL resume 仍 deferred。
 - **North Star target**:§12 checkpoint + resume + failure recovery;§4.H durable execution。
 - **Evidence**:`agent/checkpoint.py:370 save_checkpoint`/`load_checkpoint`、`agent/session.py`、`agent/state.py`、`runtime_integration/checkpoint_save.py`/`checkpoint_resume.py`;`tests/golden_e2e/test_golden_memory_checkpoint.py`、`fixtures/checkpoint_local_roundtrip.json`、`tests/runtime_integration/test_checkpoint_save_resume_l3.py`。
-- **Maturity L2**:本地 roundtrip golden + L3 test;完整 resume 协议/状态机/跨 host 未做。
+- **Maturity L3**:本地 roundtrip golden + resume flow tests + L3 dispatcher evidence。
 - **Gap**:SPR-1 cross-host/long-task/HITL resume;全局状态机 canonical 化。
 - **Runtime risk now?** no。**Blocks mainline?** no(C1:Agent Loop 可成熟而 cross-host resume deferred)。**Harden next?** no。
-- **Action**:**TRACKED_DEBT**。**Why not now**:当前本地 checkpoint 满足单进程;SPR-1 需 OD-8 决策 + 无当前消费者。
+- **Action**:NO_ACTION（L3 achieved）。**Why**:本地 roundtrip golden + resume flow 测试 + L3 dispatcher evidence 已存在；cross-host/完整状态机仍 debt 但不阻塞 L3。**Not L4**:cross-host/HITL resume,canonical global state enum。
 - **Trigger**:出现 cross-host/long-task/HITL resume 消费者。**Exit**:OD-8 决策 + canonical resume/state 协议。
 - **Owner/decision**:SPR-1/OD-8 需 owner(无当前消费者)。**Confidence**:High。
 

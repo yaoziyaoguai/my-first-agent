@@ -72,7 +72,7 @@ L3 不等于 L4。具体判据：
 | **Skill** | ~~L2~~ **L3** | L3 | production core-loop golden → **PASSED** (`test_golden_skill_l3_core_loop.py`, 2 passed) | ~~NONE~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Core-loop golden E2E~~ **Evidence achieved** | 不升 production-ready; 不把实验行为当目标 | Core-loop golden green ✓ | Medium → **High** |
 | **Policy** | L2 | L2→L3? | OD-7 production approval hook deferred；adversarial 仅 minimal stub | OWNER_DECISION | ✗ | DESIGN_SPIKE | OD-7 decision spike | 不把 policy gate 当 production approval | OD-7 裁决 + design spike | High |
 | **Scheduler** | L1 | — | production routing 无消费者 | OWNER_DECISION | ✗ | OPTIONAL_SKIP | — | 不接入 production routing | 出现 real consumer + owner decision | High |
-| **State** | L2 | L3 | 完整 resume 协议; canonical global state enum; cross-host resume deferred | TRACKED_DEBT | △ (可直接完善本地 resume golden) | HARDEN_NEXT (local resume golden only) | Local resume golden test | 不做 cross-host/cross-session | Local resume golden green | High |
+| **State** | ~~L2~~ **L3** | L3 | local resume golden + flow tests + L3 dispatcher evidence → **PASSED** (47 tests) | ~~TRACKED_DEBT~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Local resume golden~~ **Evidence achieved** | 不做 cross-host/cross-session | Local resume golden green ✓ (47 passed) | High |
 | **Capability** | L2 | L2→? | CM-2 unified contract; capability status enum | OWNER_DECISION | ✗ | DESIGN_SPIKE | CM-2/OD-2 decision spike | 不为无消费者建 contract | OD-2 裁决 | High |
 
 ### Blocker Types Legend

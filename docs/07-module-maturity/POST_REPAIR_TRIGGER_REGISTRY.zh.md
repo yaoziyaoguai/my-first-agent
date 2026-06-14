@@ -38,7 +38,7 @@
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
-| T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | owner 决策 spike | **yes** | no |
+| T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | decision spike completed；等 owner 审批 OD-9/OD-4 | **yes** | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION | no | owner/产品决策 | **yes** | no |
 | T-CM2 (OD-2) | Capability/Config/Registry | BLOCKED_BY_DECISION | no | owner 决策 + 出现跨消费者 | **yes** | no |
 | T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION | no | owner 决策 + 消费者 | **yes** | no |
@@ -129,7 +129,7 @@
 
 ### T-MEM2 — Memory canonical write owner / unfreeze(MEM-2)
 - **Related module**: Memory(L2)
-- **Current status**: 职责拆分(`memory.py` 压缩/抽取;`memory_store`/`memory_fs_store` 持久化;`memory_runtime_hooks`+`memory_policy` 触发治理);consolidation/emergence **frozen + 默认 off**;canonical write owner **未定**。
+- **Current status**: 职责拆分(`memory.py` 压缩/抽取;`memory_store`/`memory_fs_store` 持久化;`memory_runtime_hooks`+`memory_policy` 触发治理);consolidation/emergence **frozen + 默认 off**;canonical write owner **未定**。**Decision spike: COMPLETED**(见 `MEMORY_OWNER_DECISION_SPIKE.zh.md`)，明确了 12 个决策域和推荐选项。
 - **Category**: `BLOCKED_BY_DECISION`
 - **What it means**: 选定唯一 canonical memory write owner,并(如决定)解冻 consolidation 为生产路径。
 - **Why not active now**: owner 未决(North Star §4.D/§10.1 标 `Open:`);擅自选会破坏 SoT 单 owner 不变量、触碰 memory 路径(reopen 风险)。

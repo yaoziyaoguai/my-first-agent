@@ -56,7 +56,7 @@ def build_model_provider_from_env() -> ModelProvider | None:
     from agent.provider.simple_config import load_unified_provider_config
 
     unified = load_unified_provider_config()
-    if unified.source in ("config_yaml", "config_yaml_disabled"):
+    if unified.source in ("config_local", "config_yaml", "config_yaml_disabled"):
         if unified.config_error:
             # YAML 有错误 → safe fallback fake（不静默，错误会通过 diagnostics 报告）
             return FakeProvider()

@@ -28,4 +28,6 @@ node_modules/
 .tui_audit_log*
 docs/.ruff_cache/
 graphify-out/
+.opencode/
 .DS_Store
+config/config.local.yaml

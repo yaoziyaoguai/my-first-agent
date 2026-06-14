@@ -16,7 +16,7 @@
 - North Star 仍是目标模型,不是待办清单;North Star gap ≠ 自动任务。
 - T-SKILL-GOLDEN 关闭只新增 golden test / fixture 与本目录状态文档;**不改 production code / North Star**,**不开 Window 4**,**不重开 Architecture Repair**。
 - **T-PROVIDER-E2E activation audit: COMPLETED**。审计入口为 `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`;trigger 本身仍为 `BLOCKED_BY_EXTERNAL`,未运行真实 API,未产生 L4 evidence。
-- **T-PROVIDER-E2E secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；real/fake guard 已修正；response body leak 已修复；real smoke preview 已脱敏。
+- **T-PROVIDER-E2E secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；`config/config.local.yaml` 已支持（git 忽略，本地优先，可含 inline key）；real/fake guard 已修正；response body leak 已修复；real smoke preview 已脱敏。
 - **Pre-work full suite baseline**:**4730 passed, 12 skipped, 26 xfailed**。
 - **T-SKILL-GOLDEN fresh full suite**:**4731 passed, 12 skipped, 26 xfailed**。
 

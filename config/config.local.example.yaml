@@ -1,0 +1,43 @@
+# 本地未提交配置模板（git 忽略）
+# 使用方式：cp config/config.local.example.yaml config/config.local.yaml
+# config.local.yaml 优先于 config/config.yaml
+#
+# 本地 config 可以包含 inline api_key（不会提交，最安全简洁）。
+# 也可以使用 api_key_env 从环境变量读取。
+#
+# config-driven policy:
+# - provider type / model / base_url 由 config 文件显式决定
+# - 环境变量只提供 secret value，不自动选择 provider
+# - legacy ambient env 路径（MY_FIRST_AGENT_LLM_PROVIDER 等）仅为 fallback
+
+# --- DeepSeek via Anthropic-compatible（推荐） ---
+provider:
+  enabled: true
+  type: anthropic_compatible
+  model: deepseek-v4-flash
+  base_url: https://api.deepseek.com/anthropic
+  api_key: sk-REPLACE_ME
+  # api_key_env: DEEPSEEK_API_KEY  # 或从环境变量读取
+
+# --- 其他示例（注释掉） ---
+# Kimi K2.5:
+# provider:
+#   enabled: true
+#   type: anthropic_compatible
+#   model: kimi-k2.5
+#   base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+#   api_key: sk-REPLACE_ME
+
+# GLM-5:
+# provider:
+#   enabled: true
+#   type: openai_compatible
+#   model: glm-5
+#   base_url: https://coding.dashscope.aliyuncs.com/v1
+#   api_key: sk-REPLACE_ME
+
+# Fake 安全路径（默认）:
+# provider:
+#   enabled: false
+#   type: fake
+#   model: fake-llm

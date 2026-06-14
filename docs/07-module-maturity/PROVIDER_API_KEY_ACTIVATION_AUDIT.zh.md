@@ -13,8 +13,9 @@
 - 本文是 activation audit，不是 implementation，也不是 real-provider readiness 证明。
 - 本文不存储 API key；变量名和占位符不等于 credential。
 - **Mechanical readiness category: A（仅指已有 env loader + opt-in adapter smoke）**。
-- **Secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；`config/config.yaml` 推荐使用 `api_key_env` 替代 inline `api_key`；real/fake guard 已修正（`FakeProvider` 不再满足 real gate）；response body leak 已修复；real smoke preview 已脱敏。
-- **Activation verdict: DO NOT RUN YET**。user 需先 rotate 本次 tracked local config 中的真实 key,移到 `.env`,再将 `config/config.yaml` 切换为 `api_key_env` 模式。仍缺真实 credential 环境下的 success/failure/fallback evidence。
+- **Secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；real/fake guard 已修正；response body leak 已修复；real smoke preview 已脱敏。
+- **Config source policy: CONFIG-DRIVEN**。Provider 选择由 config 文件显式决定；`inline api_key` 是合法的本地使用方式（不提交即可）；`api_key_env` 推荐用于可提交模板；ambient env auto-discovery 是 legacy/explicit opt-in。
+- **Activation verdict: DO NOT RUN YET**。user 需先 rotate 本次 tracked local config 中可能暴露的 key。仍缺真实 credential 环境下的 success/failure/fallback evidence。
 - A 不代表 trigger 已完成或当前可安全激活：尚未产生本次受控 credential 下的真实运行证据，也没有覆盖完整 success / failure / fallback / adversarial 路径。
 
 ## 2. Provider Inventory
@@ -76,7 +77,7 @@
 - `main.py:main()` 会显式调用 legacy `.env` loader，把 `.env` 注入 process env；但 `config/config.yaml` 仍优先。
 - diagnostics 有 scoped / isolated dotenv loader，输出来源类别而不输出值。
 - `AgentProviderConfig.api_key` 使用 `repr=False`；`redacted_summary()` 只显示 `SET` / `empty`。
-- `config/config.yaml` loader 当前不支持 `api_key_env` 引用，只支持 inline `provider.api_key`。设计文档中“可通过 `.env` 引用”的说法没有被 `simple_config.py` 实现。
+- `config/config.yaml` loader 当前支持两种 key 来源：inline `provider.api_key`（本地未提交使用）和 `provider.api_key_env`（从 process env 读取，推荐用于可提交模板）。两者均可用，选择取决于使用场景：本地开发推荐 inline key（简洁），可提交模板推荐 api_key_env（安全）。
 
 ### Logging, snapshots, and CI
 
@@ -199,7 +200,7 @@ marker 和 env guard 应同时存在；marker 必须在 tracked `pyproject.toml`
 当前属于 **A**，但仅表示已有可 opt-in 的 real adapter smoke。安全激活顺序：
 
 1. 先 rotate 当前疑似位于 tracked local config 的 credential，并从 tracked 路径移除真实值；
-2. 另开 scoped safety-hardening：实现 ignored local secret / `api_key_env` / secret resolver 之一，删除运行时 inline-key 引导，禁止依赖 `skip-worktree`；
+2. 另开 scoped safety-hardening：实现 `config/config.local.yaml`（git 忽略，可含 inline key）、完善 endpoint allowlist、response/exception 脱敏、tracked markers、shared fail-closed env/endpoint/budget guard；
 3. 为 real smoke 增加 HTTPS + exact-host allowlist、provider response/exception 脱敏、禁止打印 provider content、tracked markers、共享 fail-closed env/endpoint/budget guard；
 4. 修正 core-loop real/fake guard，确保 `FakeProvider` 不能满足 real-provider gate；
 5. 由本地 secret manager 或 CI secret store 注入 credential，owner 明确授权一次受控 real provider 调用；

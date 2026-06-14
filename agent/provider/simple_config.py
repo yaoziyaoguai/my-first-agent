@@ -1,16 +1,18 @@
-"""Unified project config loader (config/config.yaml)。
+"""Unified project config loader (config/config.yaml, config/config.local.yaml)。
 
-本模块唯一职责：从 config/config.yaml 读取 provider section，
+本模块唯一职责：从 config 文件读取 provider section，
 转换为 AgentProviderConfig，交给 factory/runtime。
 
-配置来源（唯一入口）：
-1. config/config.yaml（唯一推荐入口）
-2. 文件不存在 → default fake
+配置来源（推荐顺序）：
+1. config/config.local.yaml（本地未提交配置，可含 inline api_key，优先）
+2. config/config.yaml（项目默认配置，committed template 只能含占位符或 api_key_env）
+3. 文件不存在 → default fake
 
 秘密管理：
-- provider.api_key 直接写在 config.yaml 中（个人本地项目）
-- config/config.yaml 不可提交 git
-- diagnostics 显示 API key: SET (inline, redacted)
+- provider.api_key 可直接写在 config.yaml 中（个人本地项目，不提交）
+- config/config.local.yaml 可含 inline api_key（git 忽略，最安全）
+- config/config.yaml 不可提交真实 key（committed template 推荐 api_key_env）
+- diagnostics 显示 API key: SET (inline, redacted) 或 SET (env, redacted; source=...)
 - 不打印 key 原文、prefix、suffix
 """
 
@@ -25,11 +27,13 @@ from agent.provider.config import SUPPORTED_PROVIDER_TYPES, AgentProviderConfig
 
 # 默认配置文件路径（相对于 project root）
 DEFAULT_CONFIG_PATH = "config/config.yaml"
+LOCAL_CONFIG_PATH = "config/config.local.yaml"  # 优先于 config.yaml，git 忽略
 
 # config source 类型
 UnifiedConfigSource = Literal[
+    "config_local",           # 来自 config/config.local.yaml 且 enabled=true
     "config_yaml",            # 来自 config/config.yaml 且 enabled=true
-    "config_yaml_disabled",   # 来自 config/config.yaml 但 enabled=false
+    "config_yaml_disabled",   # 来自 config 文件但 enabled=false
     "default_fake",           # 无任何配置
     "legacy_profile",         # FIRST_AGENT_PROVIDER_PROFILE (deferred)
     "legacy_provider_env",    # MY_FIRST_AGENT_LLM_PROVIDER (deferred)
@@ -70,24 +74,38 @@ def load_unified_provider_config(
     env: Mapping[str, str] | None = None,
     project_root: str | Path | None = None,
 ) -> UnifiedProviderConfig:
-    """从 config/config.yaml 读取 provider section。
+    """从 config 文件读取 provider section。
+
+    优先级：config/config.local.yaml > config/config.yaml > default_fake。
 
     返回 UnifiedProviderConfig，包含 AgentProviderConfig + source 信息。
 
     解析规则：
-    1. config/config.yaml 不存在 → default_fake
-    2. provider.enabled=false → config_yaml_disabled (fake)
-    3. provider.enabled=true → 必须提供 provider.api_key
-       - api_key 存在 → config_yaml (real)
-       - api_key 缺失 → config_yaml + config_error
+    1. config/config.local.yaml 存在 → 使用（优先，git 忽略）
+    2. config/config.yaml 存在 → 使用
+    3. 都不存在 → default_fake
+    4. provider.enabled=false → config_yaml_disabled (fake)
+    5. provider.enabled=true → 必须提供 api_key 或 api_key_env
     """
     root = Path(project_root) if project_root else Path.cwd()
-    config_path = root / DEFAULT_CONFIG_PATH if config_path is None else Path(config_path)
+
+    # 如果未显式指定路径，按优先级查找 local config → default config
+    if config_path is None:
+        local_path = root / LOCAL_CONFIG_PATH
+        config_path = local_path if local_path.is_file() else root / DEFAULT_CONFIG_PATH
+
+    config_path = Path(config_path)
     yaml_path_str = str(config_path.resolve())
+
+    # 判断 config source 类型
+    if str(config_path).endswith("config.local.yaml"):
+        config_source_kind: UnifiedConfigSource = "config_local"
+    else:
+        config_source_kind = "config_yaml"
 
     data = _try_read_yaml(config_path)
 
-    # config.yaml 不存在 → default_fake
+    # config 文件不存在 → default_fake
     if data is None:
         return UnifiedProviderConfig(
             config=_make_fake_config(),
@@ -111,7 +129,7 @@ def load_unified_provider_config(
             yaml_path=yaml_path_str,
         )
 
-    # enabled=true → 从 config.yaml 读取用户字段
+    # enabled=true → 从 config 文件读取用户字段
     # 用户只需配置 enabled/type/model/base_url/api_key 或 api_key_env
     # request_path 和 auth_scheme 由 provider adapter 内部决定，不在用户配置中暴露
     provider_type = str(provider_section.get("type", "fake")).strip().lower()
@@ -119,8 +137,8 @@ def load_unified_provider_config(
     base_url = _opt_str(provider_section, "base_url")
 
     # api_key 支持两种模式：
-    # 1. inline api_key（deprecated, 仅本地未提交场景）
-    # 2. api_key_env（推荐）—— 从 process env 读取 key
+    # 1. inline api_key（本地未提交 config，简洁直接）
+    # 2. api_key_env（推荐用于可提交模板）—— 从 process env 读取 key
     api_key: str | None = _opt_str(provider_section, "api_key")
     api_key_env: str | None = _opt_str(provider_section, "api_key_env")
 
@@ -128,7 +146,7 @@ def load_unified_provider_config(
     if provider_type not in SUPPORTED_PROVIDER_TYPES:
         return UnifiedProviderConfig(
             config=_make_fake_config(),
-            source="config_yaml",
+            source=config_source_kind,
             yaml_path=yaml_path_str,
             config_error=f"不支持的 provider type: {provider_type}",
         )
@@ -143,7 +161,7 @@ def load_unified_provider_config(
         if not key_value or not key_value.strip():
             return UnifiedProviderConfig(
                 config=_make_fake_config(model=model),
-                source="config_yaml",
+                source=config_source_kind,
                 yaml_path=yaml_path_str,
                 config_error=(
                     f"环境变量 {api_key_env} 未设置或为空。"
@@ -157,7 +175,7 @@ def load_unified_provider_config(
     if provider_type != "fake" and not api_key:
         return UnifiedProviderConfig(
             config=_make_fake_config(model=model),
-            source="config_yaml",
+            source=config_source_kind,
             yaml_path=yaml_path_str,
             config_error=(
                 "provider.api_key 缺失。请在 config/config.yaml 的 "
@@ -168,7 +186,7 @@ def load_unified_provider_config(
     if provider_type == "fake":
         return UnifiedProviderConfig(
             config=_make_fake_config(model=model),
-            source="config_yaml",
+            source=config_source_kind,
             yaml_path=yaml_path_str,
         )
 
@@ -190,7 +208,7 @@ def load_unified_provider_config(
 
     config = AgentProviderConfig(
         provider_type=provider_type,
-        provider_name="config_yaml",
+        provider_name=config_source_kind,
         api_key=api_key,
         api_key_env=api_key_env,
         base_url=base_url,
@@ -204,7 +222,7 @@ def load_unified_provider_config(
 
     return UnifiedProviderConfig(
         config=config,
-        source="config_yaml",
+        source=config_source_kind,
         yaml_path=yaml_path_str,
     )
 

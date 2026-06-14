@@ -28,6 +28,7 @@ ConfigSourceKind = Literal[
     "default_fake",            # 无任何配置，使用 fake 兜底
     "mixed",                   # .env 与外层 env 混合（override=False 导致外层优先）
     "unknown",                 # 无法判断来源
+    "config_local",            # 来自 config/config.local.yaml（git 忽略，优先于 config.yaml）
     "config_yaml",             # 来自 config/config.yaml（provider.enabled=true）
     "config_yaml_disabled",    # config.yaml 存在但 provider.enabled=false
     "legacy_profile",          # 来自 FIRST_AGENT_PROVIDER_PROFILE（legacy fallback）
@@ -496,10 +497,11 @@ def diagnose_provider_config_from_unified(
             dotenv_path=dotenv_path,
         )
 
-    # config.yaml 命中（config_yaml / config_yaml_disabled）
+    # config 文件命中（config_local / config_yaml / config_yaml_disabled）
     unified_config = unified.config
     config_source: ConfigSourceKind = (
-        "config_yaml" if unified.source == "config_yaml"
+        "config_local" if unified.source == "config_local"
+        else "config_yaml" if unified.source == "config_yaml"
         else "config_yaml_disabled"
     )
 
@@ -687,7 +689,7 @@ def diagnose_provider_config_isolated(
 def _render_api_key(diagnostic: ProviderDiagnostic) -> str:
     """脱敏显示 API key 状态。
 
-    对于 config_yaml 路径且 api_key_env 由用户显式配置时，
+    对于 config_local / config_yaml 路径且 api_key_env 由用户显式配置时，
     显示 SET (env, redacted; source=<VAR>)，帮助用户确认来源。
     对于 legacy env/profile 路径，只显示 SET (inline, redacted)，
     不暴露 auto-detected 的 env var 名称。
@@ -696,7 +698,7 @@ def _render_api_key(diagnostic: ProviderDiagnostic) -> str:
         return "not set"
     if (
         diagnostic.api_key_env
-        and diagnostic.config_source in ("config_yaml", "config_yaml_disabled")
+        and diagnostic.config_source in ("config_local", "config_yaml", "config_yaml_disabled")
     ):
         return f"SET (env, redacted; source={diagnostic.api_key_env})"
     return "SET (inline, redacted)"
@@ -714,7 +716,7 @@ def render_diagnostic_report(diagnostic: ProviderDiagnostic) -> str:
     # Config source 行（最优先显示，让用户知道配置来自哪里）
     _cs = diagnostic.config_source
     _yaml_path = diagnostic.config_yaml_path
-    if _cs in ("config_yaml", "config_yaml_disabled") and _yaml_path:
+    if _cs in ("config_local", "config_yaml", "config_yaml_disabled") and _yaml_path:
         source_label = f"{_cs} ({_yaml_path})"
         lines.append(f"  Config source : {source_label}")
         lines.append("  Recommended   : config/config.yaml")

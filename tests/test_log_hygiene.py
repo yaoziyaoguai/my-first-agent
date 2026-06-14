@@ -18,11 +18,11 @@ class TestLogSanitization:
 
     def test_redacts_sk_key_pattern(self) -> None:
         result = logger_module._sanitize_log_data(
-            {"api_key": "sk-sp-42c996cf76cf46eeadb91f5daabb7a7d"}
+            {"api_key": "sk-test-hygiene-fixture-do-not-use-12345678"}
         )
         assert isinstance(result, dict)
         assert "sk-***REDACTED***" in result["api_key"]
-        assert "42c996cf" not in result["api_key"]
+        assert "fixture" not in result["api_key"]
 
     def test_redacts_anthropic_key(self) -> None:
         result = logger_module._sanitize_log_data(

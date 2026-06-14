@@ -1680,9 +1680,16 @@ class TestConfigExamplesParseable:
                 assert "sk-REPLACE_ME" in content, (
                     f"{example_file.name} 应包含 api_key: sk-REPLACE_ME 占位符"
                 )
-                assert "api_key_env:" not in content, (
-                    f"{example_file.name} 不应使用 api_key_env:（已废弃）"
-                )
+                # api_key_env: 仅允许出现在注释行（# 开头），不允许作为活跃字段行
+                for line in content.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    if stripped.startswith("api_key_env:"):
+                        raise AssertionError(
+                            f"{example_file.name} 的 api_key_env: 不应作为活跃字段 "
+                            f"（仅允许在注释中作为推荐提示）。行内容: {line}"
+                        )
 
     def test_default_yaml_has_no_commented_provider_examples(self):
         """config/config.yaml 不应包含注释掉的真实 provider 示例。"""
@@ -1949,6 +1956,104 @@ class TestInlineApiKeyConfig:
             assert "ANTHROPIC_API_KEY" not in result.config_error
             assert "MY_FIRST_AGENT_LLM" not in result.config_error
         finally:
+            os.unlink(tmp_path)
+
+    def test_api_key_env_reads_from_env_var(self):
+        """api_key_env 从 process env 读取真实 key。"""
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: deepseek-v4
+                  base_url: https://api.deepseek.com/anthropic
+                  api_key_env: DEEPSEEK_API_KEY
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(
+                tmp_path,
+                env={"DEEPSEEK_API_KEY": "sk-test-deepseek-key-from-env"},
+            )
+            assert result.source == "config_yaml"
+            assert result.config_error is None
+            assert result.config.provider_type == "anthropic_compatible"
+            assert result.config.api_key == "sk-test-deepseek-key-from-env"
+            assert result.config.api_key_env == "DEEPSEEK_API_KEY"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_api_key_env_missing_var_is_config_error(self):
+        """api_key_env 指向不存在的 env var → config_error,不回退 fake。"""
+        import tempfile
+
+        from agent.provider.simple_config import load_unified_provider_config
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: deepseek-v4
+                  base_url: https://api.deepseek.com/anthropic
+                  api_key_env: DEEPSEEK_API_KEY
+            """))
+            tmp_path = tmp.name
+
+        try:
+            result = load_unified_provider_config(tmp_path, env={})
+            assert result.config_error is not None
+            assert "DEEPSEEK_API_KEY" in result.config_error
+            # source 应为 config_yaml（不是 default_fake）
+            assert result.source == "config_yaml"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_api_key_env_redacted_in_diagnostics(self):
+        """api_key_env 模式 key 值不泄露，报告显示 SET (env, redacted)。"""
+        import tempfile
+
+        from agent.provider.diagnostics import (
+            diagnose_provider_config_from_unified,
+            render_diagnostic_report,
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(textwrap.dedent("""\
+                provider:
+                  enabled: true
+                  type: anthropic_compatible
+                  model: deepseek-v4
+                  base_url: https://api.deepseek.com/anthropic
+                  api_key_env: DEEPSEEK_API_KEY
+            """))
+            tmp_path = tmp.name
+
+        import agent.provider.simple_config as sc
+
+        _orig_default = sc.DEFAULT_CONFIG_PATH
+        sc.DEFAULT_CONFIG_PATH = tmp_path
+        try:
+            diag = diagnose_provider_config_from_unified(
+                env={"DEEPSEEK_API_KEY": "sk-should-not-appear-in-diag"},
+            )
+            report = render_diagnostic_report(diag)
+            assert "sk-should-not-appear-in-diag" not in report
+            assert "SET (env, redacted" in report
+            assert "DEEPSEEK_API_KEY" in report
+        finally:
+            sc.DEFAULT_CONFIG_PATH = _orig_default
             os.unlink(tmp_path)
 
 

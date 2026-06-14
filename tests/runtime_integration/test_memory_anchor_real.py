@@ -52,18 +52,19 @@ def _is_authorized() -> bool:
 
 
 def _require_real_provider() -> Any:
-    """双门控：授权 + API key 配置检查。
+    """双门控：授权 + API key 配置检查 + real provider 验证。
 
-    中文学习边界——为什么需要双门控：
+    中文学习边界——为什么需要双门控（现在实际是三关）：
     - 第一道门（env var）防止 CI 中误调用真实 API
     - 第二道门（API key 检查）优雅降级：API key 未配置时 skip 而非 crash
-    - 两道门都通过才返回 real provider instance
+    - 第三道门（provider_type 校验）防止 FakeProvider 被当成 real evidence
+    - 三道门都通过才返回 real provider instance
 
     Returns:
-        ModelProvider instance
+        ModelProvider instance (guaranteed non-fake)
 
     Raises:
-        pytest.skip: 未授权或 API key 未配置
+        pytest.skip: 未授权、API key 未配置、或拿到的是 FakeProvider
     """
     if not _is_authorized():
         pytest.skip(_SKIP_MESSAGE)
@@ -73,13 +74,19 @@ def _require_real_provider() -> Any:
 
     # 优先使用用户显式选择的 provider type
     provider = build_model_provider_from_env()
-    if provider is not None:
+    if provider is not None and getattr(provider, "provider_type", "fake") != "fake":
         return provider
 
-    # 回退：默认 anthropic_native
+    # build_model_provider_from_env 返回了 FakeProvider（默认行为）→ 不满足 real gate
+    # 尝试用显式 env 构造 real provider
     try:
         config = load_agent_provider_config()
-        return build_model_provider(config)
+        provider = build_model_provider(config)
+        if getattr(provider, "provider_type", "fake") == "fake":
+            pytest.skip(
+                "provider_type 为 fake — real provider smoke 需要有效的 non-fake 配置"
+            )
+        return provider
     except ProviderConfigurationError:
         pytest.skip("API key not configured — real provider smoke requires valid credentials")
 

@@ -112,14 +112,17 @@ def load_unified_provider_config(
         )
 
     # enabled=true → 从 config.yaml 读取用户字段
-    # 用户只配置 enabled/type/model/base_url/api_key
+    # 用户只需配置 enabled/type/model/base_url/api_key 或 api_key_env
     # request_path 和 auth_scheme 由 provider adapter 内部决定，不在用户配置中暴露
     provider_type = str(provider_section.get("type", "fake")).strip().lower()
     model = str(provider_section.get("model", "fake-llm")).strip()
     base_url = _opt_str(provider_section, "base_url")
 
-    # 只从 config.yaml 的 provider.api_key 读取 key，不走 env
+    # api_key 支持两种模式：
+    # 1. inline api_key（deprecated, 仅本地未提交场景）
+    # 2. api_key_env（推荐）—— 从 process env 读取 key
     api_key: str | None = _opt_str(provider_section, "api_key")
+    api_key_env: str | None = _opt_str(provider_section, "api_key_env")
 
     # 校验 provider type
     if provider_type not in SUPPORTED_PROVIDER_TYPES:
@@ -130,7 +133,27 @@ def load_unified_provider_config(
             config_error=f"不支持的 provider type: {provider_type}",
         )
 
-    # enabled=true 但 api_key 缺失 → 配置错误，不回退 fake
+    # api_key_env 优先：从 process env 读取 key
+    if api_key_env and provider_type != "fake":
+        if env is None:
+            import os
+            key_value = os.environ.get(api_key_env)
+        else:
+            key_value = env.get(api_key_env)
+        if not key_value or not key_value.strip():
+            return UnifiedProviderConfig(
+                config=_make_fake_config(model=model),
+                source="config_yaml",
+                yaml_path=yaml_path_str,
+                config_error=(
+                    f"环境变量 {api_key_env} 未设置或为空。"
+                    "请在 .env 或 shell 中设置该环境变量，"
+                    "或将 config/config.yaml 中的 api_key_env 字段改为正确的变量名"
+                ),
+            )
+        api_key = key_value.strip()
+
+    # enabled=true 但 api_key 缺失（且无 api_key_env）→ 配置错误，不回退 fake
     if provider_type != "fake" and not api_key:
         return UnifiedProviderConfig(
             config=_make_fake_config(model=model),
@@ -138,7 +161,7 @@ def load_unified_provider_config(
             yaml_path=yaml_path_str,
             config_error=(
                 "provider.api_key 缺失。请在 config/config.yaml 的 "
-                "provider section 中设置 api_key 字段"
+                "provider section 中设置 api_key 字段或 api_key_env 字段"
             ),
         )
 
@@ -169,7 +192,7 @@ def load_unified_provider_config(
         provider_type=provider_type,
         provider_name="config_yaml",
         api_key=api_key,
-        api_key_env=None,
+        api_key_env=api_key_env,
         base_url=base_url,
         model=model,
         auth_scheme=auth_scheme,

@@ -106,9 +106,8 @@ class AnthropicCompatibleProvider:
                 status_code=response.status_code,
             )
         if response.status_code >= 400:
-            _resp_body = response.text[:500] if hasattr(response, "text") else ""
             raise ProviderResponseError(
-                f"http_status:{response.status_code} body:{_resp_body}",
+                f"http_status:{response.status_code}",
                 status_code=response.status_code,
             )
 

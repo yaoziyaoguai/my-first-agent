@@ -5,6 +5,12 @@
 #   cp config/examples/glm-openai-compatible.config.yaml config/config.yaml        # GLM-5
 #   cp config/examples/fake.config.yaml config/config.yaml                         # 默认安全路径
 #
+# API key 安全规则：
+#   - 永远不要将真实 API key 写入本文件或 config/config.yaml
+#   - 推荐使用 api_key_env 从环境变量读取 key（在 .env 中设置）
+#   - inline api_key 仅支持本地未提交场景（已 deprecated）
+#   - config/config.yaml 已被 .gitignore 和 skip-worktree 双重保护
+#
 # 本文件列出所有可用字段及其说明。
 
 # =============================================================================
@@ -14,7 +20,8 @@
 # type:       fake | anthropic_native | anthropic_compatible | openai_native | openai_compatible
 # model:      模型名
 # base_url:   兼容模式端点地址（native 模式不需要）
-# api_key:    真实 API key（个人本地项目可写在此处，不可提交 git）
+# api_key_env: 环境变量名，从 process env 读取 API key（推荐）
+# api_key:     inline API key（deprecated，仅本地未提交场景。推荐使用 api_key_env）
 #
 # 用户只需配置以上字段。request_path 和 auth_scheme 由 provider adapter 内部决定。
 provider:

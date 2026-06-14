@@ -77,6 +77,13 @@ def test_real_anthropic_compatible_minimal_text_smoke(monkeypatch):
     config = load_agent_provider_config()
     provider = build_model_provider(config)
 
+    # 安全门控：确认 provider 不是 FakeProvider
+    provider_type = getattr(provider, "provider_type", "unknown")
+    assert provider_type != "fake", (
+        f"real smoke 需要真实 provider，当前为 {provider_type}。"
+        "请检查环境变量配置"
+    )
+
     response = provider.create(
         system="You are a test assistant.",
         messages=[{"role": "user", "content": "Reply with exactly: provider-ok"}],
@@ -122,12 +129,11 @@ def test_real_anthropic_compatible_mcp_readonly_integration(monkeypatch):
 
     使用本地 deterministic MCP fixture（echo tool）。直调测试，不声称 E2E。
     """
-    from agent.mcp import MCPServerConfig
+    from agent.mcp import MCPServerConfig, register_mcp_tools
     from agent.mcp_stdio import StdioMCPClient
-    from agent.mcp import register_mcp_tools
-    from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools, execute_tool
     from agent.provider.config import load_agent_provider_config
     from agent.provider.factory import build_model_provider
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, get_model_visible_tools
 
     monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic_compatible")
 
@@ -203,20 +209,13 @@ def test_real_anthropic_compatible_mcp_readonly_integration(monkeypatch):
         ]
 
         if not tool_blocks:
-            print(
-                f"\n  ⚠️ [MCP E2E] 模型未选择 MCP tool "
-                f"(stop_reason={response1.stop_reason})"
-            )
-            text_blocks = [
-                b for b in response1.content
-                if getattr(b, "type", None) == "text"
-            ]
-            if text_blocks:
-                preview = text_blocks[0].text[:200] if hasattr(text_blocks[0], 'text') else str(text_blocks[0])[:200]
-                print(f"  model text preview: {preview}")
+            # 安全打印：只显示 stop_reason，不输出模型原始文本
+            # provider response content 可能包含不安全的 provider 输出
             pytest.skip(
-                "模型未选择 MCP tool——provider reachable, tools accepted, "
-                "model did not select tool"
+                f"模型未选择 MCP tool "
+                f"(stop_reason={response1.stop_reason})——"
+                f"provider reachable, tools accepted, "
+                f"model did not select tool"
             )
 
         tb = tool_blocks[0]

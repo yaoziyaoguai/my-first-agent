@@ -3,6 +3,7 @@
 **日期**: 2026-06-14  
 **性质**: T-PROVIDER-E2E activation audit；docs-only，不是 provider 实现  
 **审计边界**: 未运行真实 API，未修改 `agent/` 或 `tests/`，未写入任何 API key
+**Secret safety hardening**: 2026-06-14 完成（Commit `17ee0ae`→）。本轮新增 `api_key_env` indirection、修复 real/fake guard、修复 response body leak、hardening real smoke safety
 
 ## 1. Status
 
@@ -12,7 +13,8 @@
 - 本文是 activation audit，不是 implementation，也不是 real-provider readiness 证明。
 - 本文不存储 API key；变量名和占位符不等于 credential。
 - **Mechanical readiness category: A（仅指已有 env loader + opt-in adapter smoke）**。
-- **Activation verdict: DO NOT RUN YET**。现有 key storage、endpoint restriction 和失败输出脱敏仍有安全缺口；必须先另开 scoped safety-hardening 轮次。
+- **Secret safety hardening: COMPLETED**。`api_key_env` indirection 已实现；`config/config.yaml` 推荐使用 `api_key_env` 替代 inline `api_key`；real/fake guard 已修正（`FakeProvider` 不再满足 real gate）；response body leak 已修复；real smoke preview 已脱敏。
+- **Activation verdict: DO NOT RUN YET**。user 需先 rotate 本次 tracked local config 中的真实 key,移到 `.env`,再将 `config/config.yaml` 切换为 `api_key_env` 模式。仍缺真实 credential 环境下的 success/failure/fallback evidence。
 - A 不代表 trigger 已完成或当前可安全激活：尚未产生本次受控 credential 下的真实运行证据，也没有覆盖完整 success / failure / fallback / adversarial 路径。
 
 ## 2. Provider Inventory
@@ -184,11 +186,11 @@ marker 和 env guard 应同时存在；marker 必须在 tracked `pyproject.toml`
 ### Current local finding
 
 - 路径：`config/config.yaml`
-- 变量/字段：`provider.api_key`
+- 变量/字段：`provider.api_key` → 建议迁移到 `provider.api_key_env`
 - 风险：**High（local working tree）**。该文件与 `HEAD` 不同，并检测到疑似非占位 key；值未读取、未输出。
 - Git 状态：该路径被 Git 跟踪且标记 `skip-worktree`，普通 `git status` 不会提示本地差异。
 - 历史审计：对 `git rev-list --all -- config/config.yaml` 返回的可达 refs 做无值扫描；规则只判定 `api_key` 行是否为空或等于 `sk-REPLACE_ME`，疑似非占位命中数为 0。该结果只覆盖此字段/规则，不是全仓 secret scanner 或穷尽性无泄露证明。
-- 建议：将该 credential 视为可能暴露并 rotate；从 tracked 路径移除真实值；复核 shell history、日志和共享 artifact；保留 Git history audit 结果。不要在本轮自动删除或改写用户本地配置。
+- 建议：将该 credential 视为可能暴露并 rotate；从 tracked 路径移除真实值；迁移到 `api_key_env` + `.env`；复核 shell history、日志和共享 artifact；保留 Git history audit 结果。不要在本轮自动删除或改写用户本地配置。
 
 ## 8. Activation Path
 

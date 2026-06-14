@@ -574,7 +574,7 @@ def _build_diagnostic_from_config(
     if config.provider_type != "fake" and not api_key_present:
         issues.append(
             "provider.api_key 缺失。请在 config/config.yaml 的 "
-            "provider section 中设置 api_key 字段"
+            "provider section 中设置 api_key 或 api_key_env 字段"
         )
         suggestions.append(
             "编辑 config/config.yaml，在 provider section 添加 api_key 字段；"
@@ -685,9 +685,20 @@ def diagnose_provider_config_isolated(
 
 
 def _render_api_key(diagnostic: ProviderDiagnostic) -> str:
-    """脱敏显示 API key 状态。"""
+    """脱敏显示 API key 状态。
+
+    对于 config_yaml 路径且 api_key_env 由用户显式配置时，
+    显示 SET (env, redacted; source=<VAR>)，帮助用户确认来源。
+    对于 legacy env/profile 路径，只显示 SET (inline, redacted)，
+    不暴露 auto-detected 的 env var 名称。
+    """
     if not diagnostic.api_key_present:
         return "not set"
+    if (
+        diagnostic.api_key_env
+        and diagnostic.config_source in ("config_yaml", "config_yaml_disabled")
+    ):
+        return f"SET (env, redacted; source={diagnostic.api_key_env})"
     return "SET (inline, redacted)"
 
 

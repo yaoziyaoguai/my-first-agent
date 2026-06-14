@@ -4,6 +4,8 @@ Post-repair module maturity / hardening 阶段的工作目录。
 
 **当前状态:Module Taxonomy Gate 已通过(`MODULE_TAXONOMY_APPROVED = YES`,Option γ,15 模块)。Module Maturity Audit 已完成;T-SKILL-GOLDEN 已关闭。**
 
+**T-PROVIDER-E2E activation audit 已完成;trigger 仍为 `BLOCKED_BY_EXTERNAL`,未运行真实 API,未产生 L4 evidence。**
+
 - Architecture Repair Mainline 仍 CLOSED(`ACCEPT_WITH_TRACKED_DEBT`)。本目录**不是** active repair queue,不开启 Window 4。
 - 原 maturity audit 为 docs-only;T-SKILL-GOLDEN 关闭仅新增 golden test / fixture 与最小状态文档,不改 production code / North Star。
 - North Star 是目标模型,不是待办队列;North Star gap ≠ must-fix。
@@ -15,6 +17,7 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | `AGENT_MODULE_TAXONOMY_DECISION_REQUEST.zh.md` | 模块分法 gate 发现 + 决策(D1–D4 / C1–C2)+ 候选 option | current — 已由用户以 Option γ 批准 |
 | `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类;当前无 HARDEN_NEXT | current |
 | `POST_REPAIR_TRIGGER_REGISTRY.zh.md` | trigger 寄存器 + 激活 playbook("No trigger, no work");每个 blocked/deferred/harden 项的触发条件与开工路径 | current |
+| `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md` | Provider/API key/opt-in real test/secret safety 现状与激活路径审计 | current — audit completed;trigger remains blocked |
 
 ## 阅读顺序
 

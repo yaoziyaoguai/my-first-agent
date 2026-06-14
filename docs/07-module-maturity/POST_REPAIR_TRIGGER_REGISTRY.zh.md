@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-14
 **性质**: docs-only trigger registry / activation playbook — 非 active queue,非 repair
-**Audited HEAD**: `70354a2`(module maturity audit commit 之后)
+**Registry baseline HEAD**: `70354a2`(module maturity audit commit 之后；本次 activation audit 基于当前工作树另行核验)
 **来源**: `AGENT_MODULE_MATURITY_AUDIT.zh.md`、`ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md`、`CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md`(§10 债务表 / §11 OD 寄存器 / §9 综合分类)、`docs/CAPABILITY_BOUNDARIES.md`、North Star。
 
 ---
@@ -15,6 +15,7 @@
 - **核心原则:No trigger, no work.**(没有触发条件,不开工;触发达成后,才允许进入 scoped hardening / experiment / repair。)
 - North Star 仍是目标模型,不是待办清单;North Star gap ≠ 自动任务。
 - T-SKILL-GOLDEN 关闭只新增 golden test / fixture 与本目录状态文档;**不改 production code / North Star**,**不开 Window 4**,**不重开 Architecture Repair**。
+- **T-PROVIDER-E2E activation audit: COMPLETED**。审计入口为 `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`;trigger 本身仍为 `BLOCKED_BY_EXTERNAL`,未运行真实 API,未产生 L4 evidence。
 - **Pre-work full suite baseline**:**4730 passed, 12 skipped, 26 xfailed**。
 - **T-SKILL-GOLDEN fresh full suite**:**4731 passed, 12 skipped, 26 xfailed**。
 
@@ -34,7 +35,7 @@
 | Trigger ID | Module | Category | Active now? | Next action | Owner needed | External dep |
 |---|---|---|---|---|---|---|
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
-| T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | BLOCKED_BY_EXTERNAL | no | 等 credential/CI | yes(授权) | **yes** |
+| T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | BLOCKED_BY_EXTERNAL | no(audit completed) | 先做 secret/endpoint/output safety hardening；再等 credential/CI 授权运行 | yes(授权) | **yes** |
 | T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | BLOCKED_BY_DECISION | no | owner 决策 spike | **yes** | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION | no | owner/产品决策 | **yes** | no |
@@ -75,17 +76,20 @@
 
 ### T-PROVIDER-E2E — real provider E2E(W1-D5)
 - **Related module**: Provider / Model Boundary(L3)
+- **Activation audit**: **COMPLETED**(2026-06-14),见 `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`。这只完成现状/安全路径审计,不关闭 trigger。
 - **Current status**: provider factory/protocol/config precedence 生产可用 + contract test;real provider(OpenAI/Anthropic)代码存在但**无真实 E2E**;`claims_real_provider_e2e=false`;FakeProvider 默认且冻结。
 - **Category**: `BLOCKED_BY_EXTERNAL`
 - **What it means**: 用真实 provider credential 跑端到端 success/failure/fallback,验证 real-call 路径(L3→L4)。
-- **Why not active now**: AGENTS.md 硬禁真实 provider call;无 credential / CI secret / 稳定外部 provider。(GE-1 Phase B golden infra 已就绪 —— roadmap L950;**剩余唯一 gate 为 external credential**。)
+- **Why not active now**: AGENTS.md 硬禁未授权真实 provider call;无本次受控 credential / CI secret / 稳定外部 provider evidence。现有 `tests/test_provider_real_smoke.py` 是机械上可 opt-in 的 adapter smoke,但缺安全 secret indirection、HTTPS + exact-host allowlist、provider response/exception 脱敏和 tracked fail-closed marker/guard;完整 success/failure/fallback 与 real adversarial evidence 也未建立。本地 `config/config.yaml` 还存在 tracked + skip-worktree 的疑似非占位 key 风险,需先 rotate/remove。(GE-1 Phase B golden infra 已就绪 —— roadmap L950。)
 - **Activation path**(参考):
   1. 明确 provider profile(哪个 provider/model);
-  2. 准备 credential / secret(CI secret store 或受控本地);
-  3. 加 real-provider test marker(opt-in,默认 suite 不跑);
-  4. 明确超时 / 失败 / fallback 期望;
-  5. 先跑 opt-in test 不影响 default suite;
-  6. 通过后**再单独**考虑 default-on(不在本 trigger 内)。
+  2. rotate 并移除 tracked local config 中的真实 key 风险;
+  3. 先实现 secret indirection、endpoint allowlist、response/exception 脱敏、禁止 provider-content print、tracked marker + fail-closed guard;
+  4. 修正 real/fake guard,避免 `FakeProvider` 满足 real-provider gate;
+  5. 准备 credential / secret(CI secret store 或受控 process env);
+  6. 先运行单个 minimal adapter smoke;
+  7. 独立补 success/failure/fallback tests,再做 bounded adversarial suite,且不影响 default suite;
+  8. 通过后**再单独**考虑 default-on(不在本 trigger 内)。
 - **Required decisions**: owner 授权 real provider E2E。
 - **Required external resources**: real provider credential + CI secret + 稳定外部 provider。
 - **Required evidence**: opt-in real-provider E2E green(success + failure + fallback)。
@@ -95,7 +99,7 @@
 - **Owner needed**: 项目 owner(授权)。
 - **Risk if ignored**: 低(默认 fake/safe-local);real path 长期未端到端验证。
 - **Risk if forced early**: 泄露 secret、违反安全边界、把 fake 当 real 的 overclaim。
-- **Reference evidence**: roadmap §10 W1-D5(L767)、§9(L965);`agent/provider/factory.py`;`tests/golden_e2e/fixtures/evidence_trace.json`(`claims_real_provider_e2e=false`)。
+- **Reference evidence**: `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`;roadmap §10 W1-D5(L767)、§9(L965);`agent/provider/factory.py`;`tests/test_provider_real_smoke.py`;`tests/runtime_integration/test_memory_anchor_real.py`;`tests/golden_e2e/fixtures/evidence_trace.json`(`claims_real_provider_e2e=false`)。
 
 ### T-MCP-REAL — real external MCP(REAL-EVIDENCE-007)
 - **Related module**: MCP(L2)

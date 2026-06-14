@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import re
 from typing import Any
 
 from agent.conversation_events import append_tool_result
@@ -169,6 +170,19 @@ def _child_memory_policy_metadata(status: str) -> dict[str, Any]:
     }
 
 
+# PolicyDecision L3 integration: tool name → side-effect classification
+_WRITE_SIDE_EFFECT_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"\bwrite\b|\bdelete\b|\bremove\b|\bcreate\b|\bpatch\b", re.IGNORECASE),
+    re.compile(r"shell|bash|exec|run", re.IGNORECASE),
+    re.compile(r"subagent|delegate", re.IGNORECASE),
+)
+
+
+def _tool_has_side_effect(tool_name: str) -> bool:
+    """检查 tool name 暗示 write/side-effect 风险。"""
+    return any(pat.search(tool_name) for pat in _WRITE_SIDE_EFFECT_PATTERNS)
+
+
 class ToolRuntimeMediator:
     """Dispatcher-mediated tool execution 中介层。
 
@@ -257,6 +271,26 @@ class ToolRuntimeMediator:
         # evidence，导致 tools_attempted=0 但 tools_executed>=1）
         try:
             from agent.evidence_recorder import record_evidence
+
+            # PolicyDecision L3 integration seam: classify tool action
+            _policy_meta = {}
+            try:
+                from agent.policy_decision import PolicyActionKind, classify_policy_action
+
+                _kind = (
+                    PolicyActionKind.TOOL_WRITE
+                    if _tool_has_side_effect(tool_name)
+                    else PolicyActionKind.TOOL_READ
+                )
+                _pd = classify_policy_action(_kind)
+                _policy_meta = {
+                    "policy_decision_type": str(_pd.decision_type),
+                    "policy_audit_required": _pd.audit_required,
+                    "policy_human_required": _pd.human_required,
+                }
+            except Exception:
+                pass
+
             record_evidence(
                 subsystem="tool",
                 operation="gate_decision",
@@ -269,6 +303,7 @@ class ToolRuntimeMediator:
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
                     **_tool_input_path_metadata(tool_input),
+                    **_policy_meta,
                 },
             )
         except Exception:

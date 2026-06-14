@@ -85,7 +85,7 @@
 | 6 | SubAgent | **L2** | TRACKED_DEBT | no | no | High |
 | 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
-| 9 | Policy / Approval | **L2** | BLOCKED_BY_DECISION | no | no | High |
+| 9 | Policy / Approval | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to Tool gate policy path) | no | no | High |
 | 10 | Scheduler / Async | **L1** | BLOCKED_BY_DECISION | no | no | High |
 | 11 | State / Checkpoint / Resume | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 12 | Observability / Evidence | **L3** | NO_ACTION | no | no | High |

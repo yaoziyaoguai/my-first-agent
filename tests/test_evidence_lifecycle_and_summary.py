@@ -1964,7 +1964,7 @@ def test_mediate_route_invoke_records_evidence_not_executes_via_dispatcher():
 
     class FakeBlock:
         id = "toolu_ri_test"
-        name = "write_file"
+        name = "echo"  # read-only tool, not blocked by PolicyDecision enforcement
         input = {"path": "/tmp/test_ri.txt"}
 
     with patch("agent.tool_runtime_mediator.execute_single_tool") as mock_exec:

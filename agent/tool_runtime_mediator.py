@@ -183,19 +183,6 @@ def _tool_has_side_effect(tool_name: str) -> bool:
     return any(pat.search(tool_name) for pat in _WRITE_SIDE_EFFECT_PATTERNS)
 
 
-def _is_high_risk_write(tool_name: str) -> bool:
-    """检查 tool 是否是高风险 write（需 enforcement）。
-
-    High risk: shell/bash/subagent/delegate tools.
-    Generic write (write_file/delete_record/create_note) remains annotation-only for now.
-    """
-    _high_risk = (
-        re.compile(r"shell|bash|exec|run", re.IGNORECASE),
-        re.compile(r"subagent|delegate", re.IGNORECASE),
-    )
-    return any(pat.search(tool_name) for pat in _high_risk)
-
-
 class ToolRuntimeMediator:
     """Dispatcher-mediated tool execution 中介层。
 
@@ -1115,15 +1102,10 @@ class ToolRuntimeMediator:
     def _enforce_policy_gate(self, tool_name: str) -> str:
         """PolicyDecision L3 enforcement: 在 Tool gate 后执行 policy 分类。
 
-        根据 tool name 分类为 TOOL_READ / TOOL_WRITE，
-        调用 PolicyDecision.classify_policy_action 并返回：
-        - "allowed" — 继续执行
-        - "confirmation_required" — 停止执行，等待用户确认
-        - "rejected" — 拒绝执行
-
-        read tool → allowed；write/external/unknown → confirmation_required。
-        TOOL_WRITE enforcement is scoped: subagent/shell/bash tools enforced;
-        generic write tools (write_file, etc.) remain annotation-only for now.
+        ALL TOOL_WRITE → confirmation_required（写操作必须用户确认）
+        TOOL_READ → allowed
+        UNKNOWN → confirmation_required（fail-closed safe default）
+        policy error → confirmation_required（fail-closed）
         """
         try:
             from agent.policy_decision import (
@@ -1138,16 +1120,14 @@ class ToolRuntimeMediator:
                 else PolicyActionKind.TOOL_READ
             )
             decision = classify_policy_action(kind)
-            if (
-                decision.decision_type == PolicyDecisionType.REQUIRE_APPROVAL
-                and _is_high_risk_write(tool_name)
-            ):
+            if decision.decision_type == PolicyDecisionType.REQUIRE_APPROVAL:
                 return "confirmation_required"
             if decision.decision_type == PolicyDecisionType.DENY:
                 return "rejected"
             return "allowed"
         except Exception:
-            return "allowed"  # fail-open: don't block legitimate use on policy error
+            # fail-closed: policy error → confirmation_required
+            return "confirmation_required"  # fail-open: don't block legitimate use on policy error
 
     def _route_gate(
         self, tool_name: str, tool_input: Any, tool_use_id: str

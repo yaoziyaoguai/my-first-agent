@@ -82,20 +82,17 @@ def test_policy_decision_model_is_importable_and_pure():
 # ── Enforcement tests ──
 
 
-def test_write_tool_classified_as_tool_write():
-    """write/delete/shell tool name → TOOL_WRITE。
+def test_all_writes_require_approval():
+    """所有 write/side-effect tool name → _tool_has_side_effect → REQUIRE_APPROVAL。
 
-    使用 _tool_has_side_effect 判定 write/side-effect 分类。
+    Enforcement: ALL write tools are enforced (no annotation-only exception).
     """
     from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
     from agent.tool_runtime_mediator import _tool_has_side_effect
 
-    # write tool → TOOL_WRITE
-    assert _tool_has_side_effect("file_write")
-    assert _tool_has_side_effect("delete_record")
-    # read tool → NOT write
-    assert not _tool_has_side_effect("echo")
-    assert not _tool_has_side_effect("list_files")
+    # All these should be classified as TOOL_WRITE
+    for name in ("write_file", "delete_record", "create_note", "run_shell", "delegate_subagent"):
+        assert _tool_has_side_effect(name), f"{name} should be TOOL_WRITE"
 
     # TOOL_WRITE → REQUIRE_APPROVAL
     d = classify_policy_action(PolicyActionKind.TOOL_WRITE)
@@ -180,29 +177,21 @@ def test_enforcement_integration_semantics():
         assert not d.human_required
 
 
-def test_high_risk_write_tools_enforced():
-    """高风险 write tool (shell/bash/subagent) → _is_high_risk_write=True。
+def test_policy_enforcement_full_coverage():
+    """PolicyDecision enforcement 覆盖所有 write/external/subagent/unknown。
 
-    这些 tool 在 runtime 会被 PolicyDecision enforcement 转为 confirmation_required。
+    不再有 annotation-only exception。
     """
-    from agent.tool_runtime_mediator import _is_high_risk_write
+    from agent.policy_decision import PolicyActionKind, PolicyDecisionType, classify_policy_action
 
-    assert _is_high_risk_write("run_shell")
-    assert _is_high_risk_write("bash_command")
-    assert _is_high_risk_write("exec_program")
-    assert _is_high_risk_write("delegate_subagent")
-    # generic write: NOT high risk
-    assert not _is_high_risk_write("write_file")
-    assert not _is_high_risk_write("create_note")
-
-
-def test_generic_write_tools_classified_but_not_enforced():
-    """Generic write tools 被分类为 TOOL_WRITE 但 enforcement 是 annotation-only。
-
-    这确保现有 write tool tests 不被破坏，同时 policy 分类仍然正确。
-    """
-    from agent.tool_runtime_mediator import _is_high_risk_write, _tool_has_side_effect
-
-    assert _tool_has_side_effect("write_file")
-    # classified as write → but not high risk enforced
-    assert not _is_high_risk_write("write_file")
+    for kind in (
+        PolicyActionKind.TOOL_WRITE,
+        PolicyActionKind.EXTERNAL_SERVICE,
+        PolicyActionKind.PROVIDER_REAL_CALL,
+        PolicyActionKind.SUBAGENT_DELEGATION,
+    ):
+        d = classify_policy_action(kind)
+        assert d.decision_type == PolicyDecisionType.REQUIRE_APPROVAL, (
+            f"{kind} should REQUIRE_APPROVAL"
+        )
+        assert d.human_required

@@ -1,12 +1,12 @@
 # MCP + Scheduler Feasibility / Activation Audit
 
 **日期**: 2026-06-14
-**性质**: feasibility / activation audit，不是 closure，不是 L3 claim
+**性质**: feasibility / activation audit — MCP scoped L3 **completed**; Scheduler remains L1
 **Architecture Repair Mainline**: CLOSED
 
 ## 1. Status
 
-- 本文是前置审计，判断 MCP 和 Scheduler 是否存在本地 L3 推进路径。
+- 本文是前置审计，判断 MCP 和 Scheduler 是否存在本地 L3 推进路径。**MCP scoped L3 已完成**；Scheduler 仍为 L1。
 - 本文不是：closure audit、15/15 claim、MCP L3 claim、Scheduler L3 claim。
 - 本轮不改 `agent/` 源码，不改 `tests/`，不接真实 MCP server，不实现 Scheduler runtime。
 - Architecture Repair 仍 CLOSED。No Window 4。
@@ -17,16 +17,16 @@
 North Star §9: MCP 外部协议适配 → Tool 同 schema → Dispatcher
 North Star §5: Scheduler 横切 → Open: 是否 production-route
 Closure audit: T-MCP-REAL = BLOCKED_BY_EXTERNAL, T-SCHED-ROUTE = BLOCKED_BY_DECISION
-Maturity audit: MCP = L2 (BLOCKED_BY_EXTERNAL), Scheduler = L1 (BLOCKED_BY_DECISION)
-Trigger registry: T-MCP-REAL = BLOCKED_BY_EXTERNAL, T-SCHED-ROUTE = BLOCKED_BY_DECISION
-L3 triage: MCP = WAIT_FOR_EXTERNAL, Scheduler = OPTIONAL_SKIP
+Maturity audit: MCP = ~~L2~~ **L3 scoped** (local fake/dry_run boundary), Scheduler = L1 (BLOCKED_BY_DECISION)
+Trigger registry: T-MCP-REAL = BLOCKED_BY_EXTERNAL (local scoped L3 completed), T-SCHED-ROUTE = BLOCKED_BY_DECISION
+L3 triage: MCP = ~~WAIT_FOR_EXTERNAL~~ **COMPLETED**, Scheduler = OPTIONAL_SKIP
 ```
 
 ## 3. Current Remaining Modules
 
 | # | Module | Current Level | Trigger/Blocker |
 |---|--------|--------------|-----------------|
-| 4 | MCP | L2 | T-MCP-REAL: BLOCKED_BY_EXTERNAL |
+| 4 | MCP | ~~L2~~ **L3 scoped** | T-MCP-REAL: BLOCKED_BY_EXTERNAL (real external); local fake/dry_run boundary **completed** |
 | 10 | Scheduler / Async | L1 | T-SCHED-ROUTE: BLOCKED_BY_DECISION |
 
 当前 13/15 模块已达到 scoped L3。MCP 和 Scheduler 是最后两个 below-L3 模块。

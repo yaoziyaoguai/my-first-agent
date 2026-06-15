@@ -53,7 +53,7 @@ L3 不等于 L4。具体判据：
 
 | # | Module | Level | Blocker type | Why not L3 |
 |---|--------|-------|-------------|------------|
-| 4 | MCP | L2 | EXTERNAL_DEPENDENCY | Code path complete, real external server 未实际验证 |
+| 4 | MCP | ~~L2~~ **L3 scoped** | ~~EXTERNAL_DEPENDENCY~~ **DONE** (local fake/dry_run contract boundary) | Code path complete; real external remains BLOCKED_BY_EXTERNAL |
 | 5 | Memory | L2 | OWNER_DECISION | Canonical owner 未定；noop/update 缺；consolidation frozen |
 | 6 | SubAgent | L2 | TRACKED_DEBT | V0 default-off；FOP-1 pre-flip blocker；无 real-provider V0 evidence |
 | 7 | Skill System | L2 | NONE（可直接硬升） | 有 local sample golden；缺 production core-loop golden |
@@ -66,7 +66,7 @@ L3 不等于 L4。具体判据：
 
 | Module | Lvl | Target | Gap to L3 | Blocker | Can harden now? | Recommended Action | Next Artifact | Do-not-do-yet | Exit Criteria | Confidence |
 |--------|-----|--------|-----------|---------|-----------------|-------------------|---------------|---------------|---------------|------------|
-| **MCP** | L2 | L3 | real external server 连接未做 | EXTERNAL_DEPENDENCY | ✗ | WAIT_FOR_EXTERNAL | — | 不连真实 endpoint | REAL-EVIDENCE-007 green | High |
+| **MCP** | ~~L2~~ **L3 scoped** | L3 | ~~real external server~~ local fake/dry_run contract boundary evidence → **PASSED** (~192 tests, 198 collected) | ~~EXTERNAL_DEPENDENCY~~ **DONE** | — | ~~WAIT_FOR_EXTERNAL~~ **COMPLETED** | — | 不连真实 endpoint; 不标 L4 | REAL-EVIDENCE-007 green for real external | High |
 | **Memory** | ~~L2~~ **L3** | L3 | explicit_user_request retain-create-noop-reject runtime path → **PASSED** | ~~OWNER_DECISION~~ **DONE** | — | ~~BLOCKED_RECORD_DEBT~~ **COMPLETED** | ~~OD-9~~ **Evidence achieved** | 不解冻 consolidation/emergence；forget/SESSION_ONLY/update tracked debt | MemoryOwner runtime integration green ✓ | High |
 | **SubAgent** | L2 | L3 | FOP-1 fix; real-provider V0 smoke; L3 lifecycle evidence | TRACKED_DEBT (FOP-1 internal, real provider external) | △ (FOP-1 code-internal) | HARDEN_NEXT (FOP-1 only) | FOP-1 fix + V0 provider_mode test | 不翻默认值; 不删除 inline-local fallback | provider_mode_allowed 传播 + V0 real smoke | High |
 | **Skill** | ~~L2~~ **L3** | L3 | production core-loop golden → **PASSED** (`test_golden_skill_l3_core_loop.py`, 2 passed) | ~~NONE~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Core-loop golden E2E~~ **Evidence achieved** | 不升 production-ready; 不把实验行为当目标 | Core-loop golden green ✓ | Medium → **High** |

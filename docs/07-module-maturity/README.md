@@ -37,5 +37,6 @@ Post-repair module maturity / hardening 阶段的工作目录。
 - **SubAgent L3 scoped**: 38 SubAgent test files, 415 tests passed, golden delegation evidence, PolicyDecision SUBAGENT_DELEGATION mapped。FOP-1 tracked pre-flip blocker。
 - **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - **MCP L3 scoped**: local fake/dry_run contract boundary achieved; ~192 tests passed (198 collected, 4 skipped, 2 xfailed); `FakeMCPClient` + `dry_run=True` default + `is_mcp_active()=False`; policy/sanitizer/readiness guards tested; bridge lifecycle tested. **Not L4**; T-MCP-REAL remains BLOCKED_BY_EXTERNAL.
+- **Scheduler / Async L2**: 95+ scheduler tests passed; handler registered in dispatcher; injection seam verified; 6 no-consumer boundary tests pass; PolicyDecision SCHEDULER_ASYNC→REQUIRE_APPROVAL; RuntimeDecisionFrame reflects scheduler state. **Not L3**: no active consumer; registered-not-routed; production `chat()` calls do not pass `action_scheduler`. T-SCHED-ROUTE remains BLOCKED_BY_DECISION.
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。
-| `MCP_SCHEDULER_FEASIBILITY_AUDIT.zh.md` | MCP + Scheduler feasibility audit | current — MCP can scoped L3, Scheduler stays L1 |
+| `MCP_SCHEDULER_FEASIBILITY_AUDIT.zh.md` | MCP + Scheduler feasibility audit | current — MCP scoped L3 completed, Scheduler L2 (not L3; no consumer) |

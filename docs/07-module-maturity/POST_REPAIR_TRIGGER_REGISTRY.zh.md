@@ -41,7 +41,7 @@
 | T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (golden model completed) | no(READY_FOR_RUNTIME_INTEGRATION) | 集成 Tool gate → PolicyDecision | **yes** | no |
 | T-CM2 (OD-2) | Capability/Config/Registry | COMPLETED (scoped L3 for local registry/config boundary/policy alignment) | no | dynamic discovery, MCP real sync, broader enforcement | yes(已完成) | no |
-| T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION | no | owner 决策 + 消费者 | **yes** | no |
+| T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION (L2 achieved; no consumer; registered-not-routed) | no | owner 决策 + 消费者 | **yes** | no |
 | T-SUBAGENT-FLIP (FOP-1) | SubAgent | COMPLETED (L3 scoped for local delegation boundary; FOP-1 tracked pre-flip) | no | default-on flip 前修 FOP-1 + real-provider V0 test | yes(已完成) | no |
 | T-SA2 (SA-2) | SubAgent | BLOCKED_BY_EVIDENCE | no | design spike | yes(架构) | no |
 | T-SPR1 (SPR-1 / OD-8) | State/Checkpoint/Resume | OPTIONAL_OR_FUTURE | no | 等真实需求(任一消费者)+ OD-8 | yes(OD-8,次要) | no |

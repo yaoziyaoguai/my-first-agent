@@ -58,7 +58,7 @@ L3 不等于 L4。具体判据：
 | 6 | SubAgent | L2 | TRACKED_DEBT | V0 default-off；FOP-1 pre-flip blocker；无 real-provider V0 evidence |
 | 7 | Skill System | L2 | NONE（可直接硬升） | 有 local sample golden；缺 production core-loop golden |
 | 9 | Policy / Approval | L2 | OWNER_DECISION | OD-7 production approval hook deferred；仅 policy gate + minimal adversarial stub |
-| 10 | Scheduler / Async | L1 | OWNER_DECISION | Dormant-by-default / registered-not-routed；无消费者 |
+| 10 | Scheduler / Async | ~~L1~~ **L2** | OWNER_DECISION | dormant-by-default; registered-not-routed; no consumer; 95+ tests pass |
 | 11 | State / Checkpoint / Resume | L2 | TRACKED_DEBT | 本地 roundtrip golden；缺完整 resume 协议/canonical 状态机 |
 | 14 | Capability / Config / Registry | L2 | OWNER_DECISION | CM-2 unified contract 未建；capability status 为口径非 enum |
 
@@ -71,7 +71,7 @@ L3 不等于 L4。具体判据：
 | **SubAgent** | L2 | L3 | FOP-1 fix; real-provider V0 smoke; L3 lifecycle evidence | TRACKED_DEBT (FOP-1 internal, real provider external) | △ (FOP-1 code-internal) | HARDEN_NEXT (FOP-1 only) | FOP-1 fix + V0 provider_mode test | 不翻默认值; 不删除 inline-local fallback | provider_mode_allowed 传播 + V0 real smoke | High |
 | **Skill** | ~~L2~~ **L3** | L3 | production core-loop golden → **PASSED** (`test_golden_skill_l3_core_loop.py`, 2 passed) | ~~NONE~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Core-loop golden E2E~~ **Evidence achieved** | 不升 production-ready; 不把实验行为当目标 | Core-loop golden green ✓ | Medium → **High** |
 | **Policy** | L2 | L2→L3 | OD-7 production approval hook deferred；adversarial 仅 minimal stub | OWNER_DECISION (design spike completed) | ✗ (spike done; implementation needs scoped hardening) | DESIGN_SPIKE → **DONE**; next: HARDENING (PolicyDecision golden) | OD-7 decision spike (`POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md`) | 不把 policy gate 当 production approval | OD-7 裁决 + design spike ✓; next: PolicyDecision golden test | High |
-| **Scheduler** | L1 | — | production routing 无消费者 | OWNER_DECISION | ✗ | OPTIONAL_SKIP | — | 不接入 production routing | 出现 real consumer + owner decision | High |
+| **Scheduler** | ~~L1~~ **L2** | — | ~~production routing no consumer~~ evidence closure → **L2 PASSED** (95+ tests + 6 boundary + policy mapping + decision-frame) | ~~OWNER_DECISION~~ **L2 DONE** | — | ~~OPTIONAL_SKIP~~ **L2 COMPLETED** | — | 不接入 production routing | 出现 real consumer + owner decision | High |
 | **State** | ~~L2~~ **L3** | L3 | local resume golden + flow tests + L3 dispatcher evidence → **PASSED** (47 tests) | ~~TRACKED_DEBT~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Local resume golden~~ **Evidence achieved** | 不做 cross-host/cross-session | Local resume golden green ✓ (47 passed) | High |
 | **Capability** | L2 | L2→? | CM-2 unified contract; capability status enum | OWNER_DECISION | ✗ | DESIGN_SPIKE | CM-2/OD-2 decision spike | 不为无消费者建 contract | OD-2 裁决 | High |
 

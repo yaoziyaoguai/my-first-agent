@@ -1,12 +1,12 @@
 # MCP + Scheduler Feasibility / Activation Audit
 
 **日期**: 2026-06-14
-**性质**: feasibility / activation audit — MCP scoped L3 **completed**; Scheduler remains L1
+**性质**: feasibility / activation audit — MCP scoped L3 **completed**; Scheduler upgraded to L2 (not L3)
 **Architecture Repair Mainline**: CLOSED
 
 ## 1. Status
 
-- 本文是前置审计，判断 MCP 和 Scheduler 是否存在本地 L3 推进路径。**MCP scoped L3 已完成**；Scheduler 仍为 L1。
+- 本文是前置审计，判断 MCP 和 Scheduler 是否存在本地 L3 推进路径。**MCP scoped L3 已完成**；Scheduler 已升级为 L2（no-consumer blocker 阻止 L3）。
 - 本文不是：closure audit、15/15 claim、MCP L3 claim、Scheduler L3 claim。
 - 本轮不改 `agent/` 源码，不改 `tests/`，不接真实 MCP server，不实现 Scheduler runtime。
 - Architecture Repair 仍 CLOSED。No Window 4。
@@ -17,9 +17,9 @@
 North Star §9: MCP 外部协议适配 → Tool 同 schema → Dispatcher
 North Star §5: Scheduler 横切 → Open: 是否 production-route
 Closure audit: T-MCP-REAL = BLOCKED_BY_EXTERNAL, T-SCHED-ROUTE = BLOCKED_BY_DECISION
-Maturity audit: MCP = ~~L2~~ **L3 scoped** (local fake/dry_run boundary), Scheduler = L1 (BLOCKED_BY_DECISION)
+Maturity audit: MCP = ~~L2~~ **L3 scoped** (local fake/dry_run boundary), Scheduler = ~~L1~~ **L2** (BLOCKED_BY_DECISION; no consumer)
 Trigger registry: T-MCP-REAL = BLOCKED_BY_EXTERNAL (local scoped L3 completed), T-SCHED-ROUTE = BLOCKED_BY_DECISION
-L3 triage: MCP = ~~WAIT_FOR_EXTERNAL~~ **COMPLETED**, Scheduler = OPTIONAL_SKIP
+L3 triage: MCP = ~~WAIT_FOR_EXTERNAL~~ **COMPLETED**, Scheduler = ~~OPTIONAL_SKIP~~ **L2 COMPLETED**
 ```
 
 ## 3. Current Remaining Modules
@@ -27,9 +27,9 @@ L3 triage: MCP = ~~WAIT_FOR_EXTERNAL~~ **COMPLETED**, Scheduler = OPTIONAL_SKIP
 | # | Module | Current Level | Trigger/Blocker |
 |---|--------|--------------|-----------------|
 | 4 | MCP | ~~L2~~ **L3 scoped** | T-MCP-REAL: BLOCKED_BY_EXTERNAL (real external); local fake/dry_run boundary **completed** |
-| 10 | Scheduler / Async | L1 | T-SCHED-ROUTE: BLOCKED_BY_DECISION |
+| 10 | Scheduler / Async | ~~L1~~ **L2** | T-SCHED-ROUTE: BLOCKED_BY_DECISION (no consumer; registered-not-routed) |
 
-当前 13/15 模块已达到 scoped L3。MCP 和 Scheduler 是最后两个 below-L3 模块。
+当前 14/15 模块已达到 scoped L3 或 L2。Scheduler 是唯一 below-L3 模块（L2，no-consumer blocker）。
 
 ## 4. MCP Source / Test / Doc Surface
 
@@ -170,29 +170,26 @@ The dormancy is deliberate and documented. Creating a fake consumer to pass L3 w
 - Golden test already locks dormant-by-default behavior
 
 ### Scheduler verdict
-**Scheduler remains L1 / BLOCKED_BY_DECISION / TRACKED_DEBT.**
-This is not a failure — dormancy with test-injectable seam is the correct architectural state.
-The module can be upgraded to L2 if the existing test-injectable behavior is documented as evidence, but it cannot reach L3 without a consumer.
+**Scheduler upgraded from L1 to L2 — BLOCKED_BY_DECISION / no consumer.**
+95+ scheduler tests pass; handler registered in dispatcher; injection seam verified; 6 no-consumer boundary tests pass; PolicyDecision SCHEDULER_ASYNC→REQUIRE_APPROVAL; RuntimeDecisionFrame reflects scheduler state. **Not L3**: no active consumer; registered-not-routed ≠ production-routed; production `chat()` calls do not pass `action_scheduler`. Creating a fake consumer to pass L3 would be manufacturing evidence.
 
-If Scheduler is upgraded to L2 (not L3):
-- Evidence: `test_scheduler_main_path.py` proves injection seam works
-- `ActionScheduler` is real code, not just docs
-- Default-off / dormant-by-default is intentional
-- Remains below L3 because dormant/registered-not-routed ≠ production-routed
+If Scheduler is upgraded from L2 to L3 (not yet):
+- Requires: real consumer + owner decision for production routing
+- Cannot: manufacture consumer or route without reopening Architecture Repair
 
 ## 8. Trigger Registry Reconciliation
 
 | Trigger | Module | Current Status | Proposed After Audit |
 |---------|--------|---------------|---------------------|
 | T-MCP-REAL | MCP | BLOCKED_BY_EXTERNAL | Scoped L3: local fake/dry_run contract boundary; Real external still BLOCKED_BY_EXTERNAL |
-| T-SCHED-ROUTE | Scheduler | BLOCKED_BY_DECISION | No change — no consumer, cannot route without reopening repair |
+| T-SCHED-ROUTE | Scheduler | BLOCKED_BY_DECISION | L2 achieved (95+ tests + 6 boundary + policy mapping + decision-frame); not L3 (no consumer; registered-not-routed) |
 
 ## 9. Activation Decision
 
 | Module | Verdict | Recommended Action |
 |--------|---------|-------------------|
 | **MCP** | **CAN reach scoped L3** (local fake/dry_run boundary) | Proceed with scoped L3: record existing 313 test evidence + FakeMCPClient contract as L3, mark real external as remaining BLOCKED_BY_EXTERNAL debt |
-| **Scheduler** | **CANNOT reach L3** (no consumer, would reopen repair) | Upgrade to **L2** (not L3) based on `test_scheduler_main_path.py` evidence; keep as BLOCKED_BY_DECISION / TRACKED_DEBT |
+| **Scheduler** | **CANNOT reach L3** (no consumer, would reopen repair) | Upgrade to **L2** (not L3) based on 95+ tests + 6 boundary tests + policy mapping + decision-frame evidence; keep as BLOCKED_BY_DECISION / no consumer |
 
 ## 10. Recommended Next Module
 

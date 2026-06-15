@@ -86,7 +86,7 @@
 | 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
 | 8 | Provider / Model Boundary | **L3** | BLOCKED_BY_EXTERNAL | no | no | High |
 | 9 | Policy / Approval | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to Tool gate policy path) | no | no | High |
-| 10 | Scheduler / Async | **L1** | BLOCKED_BY_DECISION | no | no | High |
+| 10 | Scheduler / Async | ~~L1~~ **L2** | BLOCKED_BY_DECISION (no consumer; registered-not-routed) | no | no | High |
 | 11 | State / Checkpoint / Resume | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 12 | Observability / Evidence | **L3** | NO_ACTION | no | no | High |
 | 13 | Security / Privacy | **L3** | NO_ACTION | no | no | High |
@@ -200,12 +200,12 @@
 - **Trigger**:出现多用户/生产高风险 side-effect approval 需求。**Exit**:OD-7 决策 + approval-hook 实现计划。
 - **Owner/decision**:**OD-7 需 owner**。**Confidence**:High。
 
-### 10. Scheduler / Async — L1 — BLOCKED_BY_DECISION
-- **Current fact**:`ActionScheduler` 真实(含 `ActionNode`/`ActionRecoveryPolicy`/`ActionPlan`),但 **dormant-by-default / registered-not-routed**;`core.chat(..., action_scheduler=None)` 默认不注入;注入 seam 已接通且可测试(`test_scheduler_main_path` 证明非 dead code)。
+### 10. Scheduler / Async — ~~L1~~ L2 — BLOCKED_BY_DECISION
+- **Current fact**:`ActionScheduler` 真实(含 `ActionNode`/`ActionRecoveryPolicy`/`ActionPlan`),但 **dormant-by-default / registered-not-routed**;`core.chat(..., action_scheduler=None)` 默认不注入;注入 seam 已接通且可测试(`test_scheduler_main_path` 证明非 dead code)。Handler 在 `build_phase1_dispatcher()` 注册；95 个 scheduler 测试通过；6 个 no-consumer boundary 测试通过；PolicyDecision 映射 `SCHEDULER_ASYNC → REQUIRE_APPROVAL`；RuntimeDecisionFrame 反映 scheduler 状态；**production 不传 action_scheduler（main.py 两处 chat() 调用均不传）= no active consumer = registered-not-routed ≠ production-routed**。
 - **North Star target**:§5 横切;`Open:` 是否 production-route。
-- **Evidence**:`agent/action_scheduler.py:225`、`runtime_integration/action_scheduler_handler.py`、`agent/core.py:697/772`(默认 None);`tests/runtime_integration/test_scheduler_main_path.py`、`test_action_scheduler.py`。
-- **Maturity L1**:代码 + 注入 seam 存在但默认关闭、production 未 routed(registered-not-routed ≠ production routed)。
-- **Gap**:production routing(无当前消费者)。
+- **Evidence**:`agent/action_scheduler.py:225`、`runtime_integration/action_scheduler_handler.py`、`agent/core.py:697/772`(默认 None);`tests/runtime_integration/test_scheduler_main_path.py`(835 行，injection + main-path + boundary + not-fakeable + regression)、`tests/runtime_integration/test_action_scheduler.py`(979 行，core + execution + recovery + evidence + decision-frame + regression + not-fakeable + edge)、`tests/test_scheduler_boundary_l2.py`(6 no-consumer boundary tests)、`tests/unit/test_action_plan_schema.py`;`agent/policy_decision.py`(SCHEDULER_ASYNC → REQUIRE_APPROVAL);`main.py` 不引用 action_scheduler。
+- **Maturity ~~L1~~ L2**:代码 + handler 已注册 + 95+ 测试通过 + injection seam 验证 + policy mapping + decision-frame integration + 6 no-consumer boundary tests；**默认不注入/不路由 = registered-not-routed ≠ production-routed**；**L3 需要 production-routed evidence——没有 active consumer 就不能达到**。
+- **Gap**:production routing(无当前消费者) + owner decision for routing。
 - **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** no。
 - **Action**:**BLOCKED_BY_DECISION**。**Why not now**:接入 production routing 会触碰 runtime routing(closure 明列为 reopen trigger),且无当前消费者;属架构决策。
 - **Trigger**:出现真实异步/delayed-action 消费者 + owner 决定 routing。**Exit**:production routing 决策 + 路由 + evidence。

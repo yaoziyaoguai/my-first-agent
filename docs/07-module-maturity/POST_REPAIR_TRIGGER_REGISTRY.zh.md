@@ -37,7 +37,7 @@
 |---|---|---|---|---|---|---|
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
-| T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL | no | 等受控外部 server | yes(授权) | **yes** |
+| T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL (scoped L3 feasible for local fake/dry_run boundary) | no(audit completed) | scoped L3: record 313 existing test evidence; real external remains blocked | yes(授权) | **yes** |
 | T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
 | T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (golden model completed) | no(READY_FOR_RUNTIME_INTEGRATION) | 集成 Tool gate → PolicyDecision | **yes** | no |
 | T-CM2 (OD-2) | Capability/Config/Registry | COMPLETED (scoped L3 for local registry/config boundary/policy alignment) | no | dynamic discovery, MCP real sync, broader enforcement | yes(已完成) | no |

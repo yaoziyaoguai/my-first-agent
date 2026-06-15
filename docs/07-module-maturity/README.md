@@ -37,3 +37,4 @@ Post-repair module maturity / hardening 阶段的工作目录。
 - **SubAgent L3 scoped**: 38 SubAgent test files, 415 tests passed, golden delegation evidence, PolicyDecision SUBAGENT_DELEGATION mapped。FOP-1 tracked pre-flip blocker。
 - **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。
+| `MCP_SCHEDULER_FEASIBILITY_AUDIT.zh.md` | MCP + Scheduler feasibility audit | current — MCP can scoped L3, Scheduler stays L1 |

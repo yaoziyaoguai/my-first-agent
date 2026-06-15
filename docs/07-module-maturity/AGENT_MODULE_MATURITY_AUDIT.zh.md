@@ -134,7 +134,7 @@
 - **Trigger**:新增 tool execution path 风险 / CM-2。**Exit**:维持单 owner + golden。
 - **Owner/decision**:无。**Confidence**:High。
 
-### 4. MCP — L2 — BLOCKED_BY_EXTERNAL
+### 4. MCP — ~~L2~~ L3 scoped — NO_ACTION
 - **Current fact**:MCP external flight **代码语义路径已完整**(opt-in 激活、dry_run vs real 区分、`server_allowlist` 生效、destructive tool 执行前 block、discovery→`TOOL_REGISTRY`→model-visible、invocation 走 mediator→GATE/INVOKE/RESULT、dispatcher/decision-frame evidence + `mcp_available` 动态、not-fakeable guards);**默认不启用**;**未做真实外部 server 连接**(REAL-EVIDENCE-007)。
 - **North Star target**:§9/§K MCP 外部协议适配,wrap 成 Tool 同 schema 再走 dispatcher,不主导内部架构。
 - **Evidence**:`agent/mcp.py:65 FakeMCPClient`、`mcp_models.py:23 MCPServerConfig`、`mcp_bridge.py:146`、`runtime_integration/mcp_tool_orchestrator.py`、`mcp_sanitizer.py`、`mcp_policy.py`;`tests/runtime_integration/test_mcp_l3_real_core_loop.py`、`test_mcp_real_external_flight.py`(docstring 自述 code-path-complete,仅剩真实外部连接);`docs/design/mcp-architecture.md`。
@@ -145,7 +145,7 @@
 - **Trigger**:获授权的受控外部 MCP server + CI。**Exit**:REAL-EVIDENCE-007 real external green。
 - **Owner/decision**:owner 授权 real MCP + 外部环境。**Confidence**:High。
 
-### 5. Memory — L2 — BLOCKED_BY_DECISION
+### 5. Memory — ~~L2~~ L3 — NO_ACTION
 - **Current fact**:基础 store/recall/retain/propose 有 runtime 路径与 targeted/L3 测试;consolidation/emergence pipeline **frozen**,`MEMORY_CONSOLIDATION_ENABLED`/`MEMORY_EMERGENCE_ENABLED` **默认 off**;golden 锁定当前 `disabled_by_env` 事实;canonical write owner **未定(MEM-2)**。
 - **North Star target**:§10/§4.I governed memory(policy gate + provenance + lifecycle + 单 canonical owner)。
 - **Evidence**:`agent/memory_runtime.py:188`、`memory_policy.py:86 DeterministicMemoryPolicy`、`memory_fs_store.py:556`、`memory_consolidation_pipeline.py`、`memory_runtime_hooks.py:33/152`(默认 off);`tests/golden_e2e/test_golden_memory_checkpoint.py`、`fixtures/memory_disabled.json`、`tests/runtime_integration/test_memory_recall_l3.py`/`test_memory_propose_l3.py`/`test_memory_shared_store_l3.py`;`docs/rfc/MEMORY_CANONICAL_RFC.md`。
@@ -156,11 +156,11 @@
 - **Trigger**:owner 决定解冻 memory 并指定 canonical owner。**Exit**:MEM-2 owner 决策 + single-owner tests。
 - **Owner/decision**:**需要 owner(MEM-2 / OD-4)**。**Confidence**:High。
 
-### 6. SubAgent — L2 — TRACKED_DEBT
+### 6. SubAgent — ~~L2~~ L3 scoped — NO_ACTION
 - **Current fact**:V0 handler registered + contract-verified;`SUBAGENT_V0_ROUTING_ENABLED` truthy 时经 `route_from_runtime_loop` 路由 V0,**默认 off** 走 inline-local / `local_fake` fallback;evidence level 为 subsystem_integration(不伪造 core_loop)。
 - **North Star target**:§11/§4.J parent-controlled bounded delegation;目标 V0 production-routed,inline-local 退为 fallback。
 - **Evidence**:`agent/subagent_system/request.py:12`、`subagent_inline.py:37`、`runtime_integration/subagent_action.py`、`subagent_routing_flag.py`;`tests/golden_e2e/test_golden_subagent_delegation.py`、fallback dispatch guard;`docs/rfc/SUBAGENT_CANONICAL_RFC.md`。(Graphify NL 查 "SubAgent" 主要命中 decision-spine 设计文档;file/test 证据为准。)
-- **Maturity L2**:V0 registered + contract + golden + flag-gated;默认 off,未 default-on,无 real provider E2E。
+- **Maturity ~~L2~~ L3 scoped**:V0 registered + contract + golden + flag-gated + PolicyDecision mapped + build_decision_frame() branch point tracked;默认 off,未 default-on,无 real provider E2E。**L3 scoped to local delegation / fake-or-local boundary; not full L3** (no default-on, no real-provider V0 evidence)。
 - **Gap**:default-on flip(FOP-1 pre-flip:provider_mode_allowed 传播)、SA-2 L3 lifecycle、real provider E2E。
 - **Runtime risk now?** no。**Blocks mainline?** no(默认 off 稳定)。**Harden next?** no。
 - **Action**:NO_ACTION（L3 scoped achieved）。**Why**:38 SubAgent test files, 415 tests passed；`test_golden_subagent_delegation.py` golden locked；V0 registered + contract-verified via `subagent_routing_flag.py`；`PolicyDecision.SUBAGENT_DELEGATION → REQUIRE_APPROVAL` mapped；`build_decision_frame()` subagent branch point tracked。FOP-1 (`provider_mode_allowed` propagation) is tracked pre-flip blocker for default-on, not L3 blocker。**Not L4**:real provider-backed subagent, async multi-agent, MCP delegation。
@@ -189,11 +189,11 @@
 - **Trigger**:受控 credential + CI + owner 授权 real provider E2E。**Exit**:real-provider failure/success E2E green。
 - **Owner/decision**:owner 授权 + external credential。**Confidence**:High。
 
-### 9. Policy / Approval — L2 — BLOCKED_BY_DECISION
+### 9. Policy / Approval — ~~L2~~ L3 scoped — NO_ACTION
 - **Current fact**:**子边界 (a) policy gate**:`ToolGateHandler` 可拒绝 forbidden/not-allowed,`confirmation_required` 进等待态不执行;有 no-execution golden + adversarial stub。**子边界 (b) interactive confirmation flow**:`confirmation/` handlers 已 registered + 有测试。**子边界 (c) OD-7 production/multi-user approval hook**:**deferred**。
 - **North Star target**:§13 Policy/Permission/Guardrail/Human-Approval 分列;§4.F 治理次序。
 - **Evidence**:`agent/runtime_integration/tool_gate.py:32`、`agent/memory_policy.py:86`;`agent/confirmation/tool.py:34 handle_tool_confirmation`、`plan.py:61`/`:111`、`memory_interaction.py:233`;`tests/golden_e2e/test_golden_policy_evidence.py`、`tests/adversarial/test_minimal_policy_stub.py`、`test_pending_confirmation_dispatch.py`、`test_phase3_tool_confirmation_transitions.py`。
-- **Maturity L2(混合,显式标注)**:policy gate ≈ L3(golden + adversarial stub);interactive confirmation ≈ L2(有测试);**OD-7 production approval hook ≈ L1(deferred)**。模块取**保守 L2**,**不得用 policy 成熟度证明 approval production-ready**。
+- **Maturity ~~L2~~ L3 scoped**(混合,显式标注):policy gate ≈ L3(golden + adversarial stub);interactive confirmation ≈ L2(有测试);**OD-7 production approval hook ≈ L1(deferred)**。模块取**L3 scoped to Tool gate policy path**;子边界(c)仍 deferred,**不得用 policy 成熟度证明 approval production-ready**。
 - **Gap**:OD-7 production approval hook;adversarial 仅 minimal stub。
 - **Runtime risk now?** no。**Blocks mainline?** no。**Harden next?** no。
 - **Action**:**BLOCKED_BY_DECISION**。**Why not now**:OD-7 需产品/安全策略决策;当前只锁 policy gate + no-execution evidence。adversarial 扩展虽不需决策,但属可选,不在本轮当 must-fix(避免把非 gap 转成工作)。
@@ -244,7 +244,7 @@
 - **Trigger**:出现新 injection/泄露类回归或新 untrusted surface。**Exit**:维持单 owner masker + 安全测试 green。
 - **Owner/decision**:无。**Confidence**:High。
 
-### 14. Capability / Config / Registry Boundary — L2 — BLOCKED_BY_DECISION
+### 14. Capability / Config / Registry Boundary — ~~L2~~ L3 scoped — NO_ACTION
 - **Current fact**:capability status 由 `runtime_decision_frame.build_decision_frame` 表达,`capability_summary` 被 contract 锁定"永不声称 complete";config/provider import boundary 已 inventory(CM-1);状态词汇 declared/registered/routed/dormant/deferred 为**口径**而非统一 enum;**CM-2 unified capability contract 未建(blocked_by_decision)**。
 - **North Star target**:§9 统一能力模型、§16 Configuration、OD-2/CM-2。
 - **Evidence**:`agent/runtime_decision_frame.py:679 build_decision_frame`、`tests/unit/test_runtime_decision_frame.py:248 test_capability_summary_never_claims_complete`、`agent/tool_registry.py`、多 config owner(`config.py`/`provider/simple_config.py`/`profiles.py`/`mcp_config*.py`);`docs/06-audit/WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md`、`docs/design/unified-project-config-contract.md`、`docs/CAPABILITY_BOUNDARIES.md`;`tests/test_config_authority_boundaries.py`、`test_capability_boundary_contract.py`。
@@ -274,12 +274,11 @@
 
 - **Mainline wired?** 是。Core→Loop→(Decision/Plan)→Policy gate→**Dispatcher Spine**→Handler→Side effect→Evidence 这条生产主路径已串通,且有 golden(conversation/tool/subagent/memory-checkpoint/policy-evidence)与 architecture boundary 测试守护;无第二条生产主路径。
 - **Maturity uneven?** 是,且这是当前主要张力:
-  - **L3 成熟簇**(主路径骨架 + 横切守护):Agent Loop、Dispatcher Spine、Tool、Provider Boundary、Observability、Security、Docs。
-  - **L2 簇**(能力/横切,可用但受 owner·external 决策牵制):MCP、Memory、SubAgent、Skill、Policy/Approval、State/Checkpoint/Resume、Capability/Config(共 7 个,与 §4 L2 计数一致)。
-  - **L1**:Scheduler(dormant)。
+  - **L3 成熟簇**(主路径骨架 + 横切守护 + L3 scoped 能力面):Agent Loop、Dispatcher Spine、Tool、MCP(L3 scoped)、Memory、SubAgent(L3 scoped)、Skill、Provider Boundary、Policy/Approval(L3 scoped)、State/Checkpoint/Resume、Observability、Security、Capability/Config(L3 scoped)、Docs — **14/15 模块 scoped L3**。
+  - **L2**:Scheduler / Async(BLOCKED_BY_DECISION; no consumer; registered-not-routed) — **唯一 below-L3 模块**。
 - **不均衡来源**几乎全是**有意 deferred/blocked**(MEM-2、OD-7、OD-2/CM-2、W1-D5 real provider、REAL-EVIDENCE-007 real MCP、SPR-1、FOP-1、scheduler routing),不是断裂或回归。
 - **原唯一"非 owner/external 阻塞"的成熟度洞已关闭**:Skill System golden 已补齐;没有自动产生新的 HARDEN_NEXT。
-- **跨模块一致性风险(需持续守护,非现在修)**:capability status 仍是口径而非统一 enum(CM-2 未建),所以"declared/registered/routed/dormant/deferred"靠文档 + per-surface 测试维持,存在长期 drift 风险 —— 由 Docs/Guardrails(L3)与 Capability/Config(L2)共同看守,触发条件出现前不强行 CM-2。
+- **跨模块一致性风险(需持续守护,非现在修)**:capability status 仍是口径而非统一 enum(CM-2 未建),所以"declared/registered/routed/dormant/deferred"靠文档 + per-surface 测试维持,存在长期 drift 风险 —— 由 Docs/Guardrails(L3)与 Capability/Config(L3 scoped)共同看守,触发条件出现前不强行 CM-2。
 
 ---
 
@@ -290,9 +289,9 @@
 ### Completed — T-SKILL-GOLDEN
 
 - `tests/golden_e2e/test_golden_skill_system.py` + `fixtures/skill_system_current_behavior.json` 已锁定当前实验性本地 dispatcher/lifecycle 行为。
-- Skill System 保持 L2;本次完成不表示 production-ready、real provider E2E 或新 side-effect 能力。
-- 当前无新的 HARDEN_NEXT;其它 blocked/deferred 项状态不变。
-- **L3 Hardening Triage: COMPLETED**（`L3_HARDENING_TRIAGE.zh.md`），8 模块逐模块 triage，recommended next target: **Skill System → L3**（HARDEN_NEXT, 0 blockers）。
+- Skill System ~~保持 L2~~ **已升 L3**;core-loop golden 已完成;本次完成不表示 production-ready、real provider E2E 或新 side-effect 能力。
+- 当前无 HARDEN_NEXT;其它 blocked/deferred 项状态不变。
+- **L3 Hardening Triage: CLOSED**（`L3_HARDENING_TRIAGE.zh.md`），8 模块 triage 全部完成;14/15 scoped L3;Scheduler remains L2 blocked。
 
 ### 为什么没有第 2、3 个(透明过滤)
 
@@ -332,7 +331,7 @@
 - 新功能触碰 runtime routing / provider / memory / scheduler / policy / fallback / evidence 边界;
 - 评测或真实用户路径证明某 L2/L3 维度必须升级。
 
-无 trigger 时,L2/L1 模块保持 tracked debt / deferred / blocked / optional,不重开 repair、不强行 harden。
+无 trigger 时,L2 模块(Scheduler)保持 tracked debt / deferred / blocked / optional,不重开 repair、不强行 harden。
 
 ---
 

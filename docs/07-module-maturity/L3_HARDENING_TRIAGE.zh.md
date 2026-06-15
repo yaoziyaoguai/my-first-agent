@@ -54,13 +54,13 @@ L3 不等于 L4。具体判据：
 | # | Module | Level | Blocker type | Why not L3 |
 |---|--------|-------|-------------|------------|
 | 4 | MCP | ~~L2~~ **L3 scoped** | ~~EXTERNAL_DEPENDENCY~~ **DONE** (local fake/dry_run contract boundary) | Code path complete; real external remains BLOCKED_BY_EXTERNAL |
-| 5 | Memory | L2 | OWNER_DECISION | Canonical owner 未定；noop/update 缺；consolidation frozen |
-| 6 | SubAgent | L2 | TRACKED_DEBT | V0 default-off；FOP-1 pre-flip blocker；无 real-provider V0 evidence |
-| 7 | Skill System | L2 | NONE（可直接硬升） | 有 local sample golden；缺 production core-loop golden |
-| 9 | Policy / Approval | L2 | OWNER_DECISION | OD-7 production approval hook deferred；仅 policy gate + minimal adversarial stub |
+| 5 | Memory | ~~L2~~ **L3** | ~~OWNER_DECISION~~ **DONE** | MemoryOwner runtime integration for explicit_user_request; consolidation/emergence still frozen |
+| 6 | SubAgent | ~~L2~~ **L3 scoped** | ~~TRACKED_DEBT~~ **DONE** | V0 registered + contract + golden; FOP-1 tracked pre-flip; no real-provider V0 evidence |
+| 7 | Skill System | ~~L2~~ **L3** | ~~NONE~~ **DONE** | Core-loop golden E2E completed |
+| 9 | Policy / Approval | ~~L2~~ **L3 scoped** | ~~OWNER_DECISION~~ **PARTIAL** (policy gate L3 scoped; OD-7 still deferred) | Policy gate golden + adversarial; OD-7 production approval hook still deferred |
 | 10 | Scheduler / Async | ~~L1~~ **L2** | OWNER_DECISION | dormant-by-default; registered-not-routed; no consumer; 95+ tests pass |
-| 11 | State / Checkpoint / Resume | L2 | TRACKED_DEBT | 本地 roundtrip golden；缺完整 resume 协议/canonical 状态机 |
-| 14 | Capability / Config / Registry | L2 | OWNER_DECISION | CM-2 unified contract 未建；capability status 为口径非 enum |
+| 11 | State / Checkpoint / Resume | ~~L2~~ **L3** | ~~TRACKED_DEBT~~ **DONE** | Local roundtrip golden + resume flow + L3 dispatcher evidence |
+| 14 | Capability / Config / Registry | ~~L2~~ **L3 scoped** | ~~OWNER_DECISION~~ **PARTIAL** (scoped L3 for local boundary) | CM-2 unified contract not built; capability status is vocabulary not enum |
 
 ## 5. Triage Table
 
@@ -68,12 +68,12 @@ L3 不等于 L4。具体判据：
 |--------|-----|--------|-----------|---------|-----------------|-------------------|---------------|---------------|---------------|------------|
 | **MCP** | ~~L2~~ **L3 scoped** | L3 | ~~real external server~~ local fake/dry_run contract boundary evidence → **PASSED** (~192 tests, 198 collected) | ~~EXTERNAL_DEPENDENCY~~ **DONE** | — | ~~WAIT_FOR_EXTERNAL~~ **COMPLETED** | — | 不连真实 endpoint; 不标 L4 | REAL-EVIDENCE-007 green for real external | High |
 | **Memory** | ~~L2~~ **L3** | L3 | explicit_user_request retain-create-noop-reject runtime path → **PASSED** | ~~OWNER_DECISION~~ **DONE** | — | ~~BLOCKED_RECORD_DEBT~~ **COMPLETED** | ~~OD-9~~ **Evidence achieved** | 不解冻 consolidation/emergence；forget/SESSION_ONLY/update tracked debt | MemoryOwner runtime integration green ✓ | High |
-| **SubAgent** | L2 | L3 | FOP-1 fix; real-provider V0 smoke; L3 lifecycle evidence | TRACKED_DEBT (FOP-1 internal, real provider external) | △ (FOP-1 code-internal) | HARDEN_NEXT (FOP-1 only) | FOP-1 fix + V0 provider_mode test | 不翻默认值; 不删除 inline-local fallback | provider_mode_allowed 传播 + V0 real smoke | High |
+| **SubAgent** | ~~L2~~ **L3 scoped** | L3 | FOP-1 fix; real-provider V0 smoke; L3 lifecycle evidence | ~~TRACKED_DEBT~~ **DONE** (L3 scoped achieved; FOP-1 tracked pre-flip) | — | ~~HARDEN_NEXT~~ **COMPLETED** (L3 scoped) | FOP-1 fix + V0 provider_mode test (tracked pre-flip, not active) | 不翻默认值; 不删除 inline-local fallback | provider_mode_allowed 传播 + V0 real smoke | High |
 | **Skill** | ~~L2~~ **L3** | L3 | production core-loop golden → **PASSED** (`test_golden_skill_l3_core_loop.py`, 2 passed) | ~~NONE~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Core-loop golden E2E~~ **Evidence achieved** | 不升 production-ready; 不把实验行为当目标 | Core-loop golden green ✓ | Medium → **High** |
-| **Policy** | L2 | L2→L3 | OD-7 production approval hook deferred；adversarial 仅 minimal stub | OWNER_DECISION (design spike completed) | ✗ (spike done; implementation needs scoped hardening) | DESIGN_SPIKE → **DONE**; next: HARDENING (PolicyDecision golden) | OD-7 decision spike (`POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md`) | 不把 policy gate 当 production approval | OD-7 裁决 + design spike ✓; next: PolicyDecision golden test | High |
+| **Policy** | ~~L2~~ **L3 scoped** | L2→L3 | Policy gate golden + adversarial stub → **L3 scoped achieved**; OD-7 production approval hook still deferred | ~~OWNER_DECISION~~ **PARTIAL** (L3 scoped for Tool gate; OD-7 still blocked) | — | ~~DESIGN_SPIKE~~ **DONE**; next: ~~HARDENING~~ BLOCKED (T-OD7) | OD-7 decision spike (`POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md`) | 不把 policy gate 当 production approval | L3 scoped for Tool gate ✓; OD-7 still deferred | High |
 | **Scheduler** | ~~L1~~ **L2** | — | ~~production routing no consumer~~ evidence closure → **L2 PASSED** (95+ tests + 6 boundary + policy mapping + decision-frame) | ~~OWNER_DECISION~~ **L2 DONE** | — | ~~OPTIONAL_SKIP~~ **L2 COMPLETED** | — | 不接入 production routing | 出现 real consumer + owner decision | High |
 | **State** | ~~L2~~ **L3** | L3 | local resume golden + flow tests + L3 dispatcher evidence → **PASSED** (47 tests) | ~~TRACKED_DEBT~~ **DONE** | — | ~~HARDEN_NEXT~~ **COMPLETED** | ~~Local resume golden~~ **Evidence achieved** | 不做 cross-host/cross-session | Local resume golden green ✓ (47 passed) | High |
-| **Capability** | L2 | L2→? | CM-2 unified contract; capability status enum | OWNER_DECISION | ✗ | DESIGN_SPIKE | CM-2/OD-2 decision spike | 不为无消费者建 contract | OD-2 裁决 | High |
+| **Capability** | ~~L2~~ **L3 scoped** | L2→? | build_decision_frame() + 40+ boundary tests → **L3 scoped achieved**; CM-2 unified contract still deferred | ~~OWNER_DECISION~~ **PARTIAL** (L3 scoped for local boundary; CM-2 still blocked) | — | ~~DESIGN_SPIKE~~ **COMPLETED** (L3 scoped achieved); CM-2 remains BLOCKED | CM-2/OD-2 decision spike | 不为无消费者建 contract | L3 scoped ✓; OD-2/CM-2 still deferred | High |
 
 ### Blocker Types Legend
 
@@ -96,7 +96,9 @@ L3 不等于 L4。具体判据：
 
 ## 6. Recommended Next Hardening Target
 
-### **Skill System → L3** (recommended as NEXT)
+> **L3 Hardening Triage: CLOSED.** 以下历史执行顺序中的 1–3 项已完成; 4–7 项需 owner/external 决策; 第 8 项(Scheduler)为 L2 BLOCKED_BY_DECISION。14/15 模块已 scoped L3; Scheduler remains L2 (no consumer)。
+
+### ~~Skill System → L3~~ (recommended as NEXT) — **COMPLETED**
 
 **Why this one:**
 1. **Zero blocker** — 无 owner/external/credential 依赖
@@ -134,14 +136,14 @@ L3 不等于 L4。具体判据：
 ### Recommended execution order
 
 ```
-1. Skill System → L3 (HARDEN_NEXT, 0 blockers)
-2. SubAgent FOP-1 fix (HARDEN_NEXT, code-internal)
-3. State local resume golden (HARDEN_NEXT)
-4. Policy OD-7 design spike (DESIGN_SPIKE)
-5. Capability CM-2 design spike (DESIGN_SPIKE)
-6. Memory OD-9/OD-4 (BLOCKED — wait for owner)
-7. MCP real external (BLOCKED — wait for external)
-8. Scheduler (OPTIONAL_SKIP)
+1. Skill System → L3 (HARDEN_NEXT, 0 blockers) — **COMPLETED**
+2. SubAgent FOP-1 fix (HARDEN_NEXT, code-internal) — **L3 scoped achieved; FOP-1 tracked pre-flip**
+3. State local resume golden (HARDEN_NEXT) — **COMPLETED**
+4. Policy OD-7 design spike (DESIGN_SPIKE) — **L3 scoped achieved; OD-7 still deferred**
+5. Capability CM-2 design spike (DESIGN_SPIKE) — **L3 scoped achieved; CM-2 still deferred**
+6. Memory OD-9/OD-4 (BLOCKED — wait for owner) — **L3 achieved; forget/SESSION_ONLY/update tracked debt**
+7. MCP real external (BLOCKED — wait for external) — **L3 scoped achieved; T-MCP-REAL remains BLOCKED_BY_EXTERNAL**
+8. Scheduler (OPTIONAL_SKIP → L2 COMPLETED) — **L2; BLOCKED_BY_DECISION; no consumer**
 ```
 
 ## 7. Modules Not Ready Yet
@@ -150,10 +152,10 @@ L3 不等于 L4。具体判据：
 
 | Module | Level | Reason for deferral |
 |--------|-------|---------------------|
-| Scheduler / Async | L1 | Dormant, no consumer, would require architecture routing decision that reopens repair |
-| MCP | L2 | Needs external server credential + connection (AGENTS.md hard blocks) |
-| Memory (consolidation/emergence) | L2 | Frozen/env-gated; needs OD-4 + safety hardening before unfreeze |
-| Procedural Memory | L1 (conceptual) | Needs entire MemoryOwner + emergence + adoption infrastructure |
+| Scheduler / Async | L2 | Dormant, no consumer, would require architecture routing decision that reopens repair |
+| MCP (real external) | L3 scoped | Needs external server credential + connection (AGENTS.md hard blocks); local L3 scoped achieved |
+| Memory (consolidation/emergence) | L3 | Frozen/env-gated; needs OD-4 + safety hardening before unfreeze; explicit_user_request L3 achieved |
+| Procedural Memory | L3 (tracked debt) | Needs emergence + adoption infrastructure; explicit_user_request path achieved |
 
 这些模块的 deferred/blocked 状态已在 trigger registry 中记录。后续 owner 决策或 external 资源到位后再重新 triage。
 
@@ -183,6 +185,7 @@ L3 不等于 L4。具体判据：
 - Do not implement cross-host checkpoint resume without use case
 - Do not mark any module L3 without real evidence
 - Do not mark any module L4
+- Do not claim 15/15 L3
 - Do not change North Star
 - Do not rewrite maturity audit history
 

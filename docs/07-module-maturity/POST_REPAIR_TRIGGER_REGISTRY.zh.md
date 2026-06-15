@@ -37,20 +37,20 @@
 |---|---|---|---|---|---|---|
 | **T-SKILL-GOLDEN** | Skill System | COMPLETED | no(closed) | none | no | no |
 | T-PROVIDER-E2E (W1-D5) | Provider/Model Boundary | COMPLETED | no(evidence satisfied) | 后续可考虑 success/failure/fallback + adversarial real-provider suite | yes(授权) | **yes** |
-| T-MCP-REAL (REAL-EVIDENCE-007) | MCP | BLOCKED_BY_EXTERNAL (local scoped L3 completed for fake/dry_run boundary) | no | 接真实 MCP 前需 T-MCP-REAL activation + credential | yes(授权) | **yes** |
-| T-MEM2 (MEM-2) | Memory | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
-| T-OD7 (OD-7 / W2-D2) | Policy / Approval | BLOCKED_BY_DECISION (golden model completed) | no(READY_FOR_RUNTIME_INTEGRATION) | 集成 Tool gate → PolicyDecision | **yes** | no |
-| T-CM2 (OD-2) | Capability/Config/Registry | COMPLETED (scoped L3 for local registry/config boundary/policy alignment) | no | dynamic discovery, MCP real sync, broader enforcement | yes(已完成) | no |
+| T-MCP-REAL (REAL-EVIDENCE-007) | MCP(~~L2~~ L3 scoped) | BLOCKED_BY_EXTERNAL (local scoped L3 completed for fake/dry_run boundary) | no | 接真实 MCP 前需 T-MCP-REAL activation + credential | yes(授权) | **yes** |
+| T-MEM2 (MEM-2) | Memory(~~L2~~ L3) | COMPLETED | no(L3 achieved) | 记录 forget/SESSION_ONLY/update/agent_suggested/etc. as tracked debt | yes(已完成) | no |
+| T-OD7 (OD-7 / W2-D2) | Policy / Approval(~~L2~~ L3 scoped) | BLOCKED_BY_DECISION (golden model completed) | no(READY_FOR_RUNTIME_INTEGRATION) | 集成 Tool gate → PolicyDecision | **yes** | no |
+| T-CM2 (OD-2) | Capability/Config/Registry(~~L2~~ L3 scoped) | COMPLETED (scoped L3 for local registry/config boundary/policy alignment) | no | dynamic discovery, MCP real sync, broader enforcement | yes(已完成) | no |
 | T-SCHED-ROUTE (W3-D3) | Scheduler / Async | BLOCKED_BY_DECISION (L2 achieved; no consumer; registered-not-routed) | no | owner 决策 + 消费者 | **yes** | no |
-| T-SUBAGENT-FLIP (FOP-1) | SubAgent | COMPLETED (L3 scoped for local delegation boundary; FOP-1 tracked pre-flip) | no | default-on flip 前修 FOP-1 + real-provider V0 test | yes(已完成) | no |
-| T-SA2 (SA-2) | SubAgent | BLOCKED_BY_EVIDENCE | no | design spike | yes(架构) | no |
-| T-SPR1 (SPR-1 / OD-8) | State/Checkpoint/Resume | OPTIONAL_OR_FUTURE | no | 等真实需求(任一消费者)+ OD-8 | yes(OD-8,次要) | no |
+| T-SUBAGENT-FLIP (FOP-1) | SubAgent(~~L2~~ L3 scoped) | COMPLETED (L3 scoped for local delegation boundary; FOP-1 tracked pre-flip) | no | default-on flip 前修 FOP-1 + real-provider V0 test | yes(已完成) | no |
+| T-SA2 (SA-2) | SubAgent(~~L2~~ L3 scoped) | BLOCKED_BY_EVIDENCE | no | design spike | yes(架构) | no |
+| T-SPR1 (SPR-1 / OD-8) | State/Checkpoint/Resume(~~L2~~ L3) | OPTIONAL_OR_FUTURE | no | 等真实需求(任一消费者)+ OD-8 | yes(OD-8,次要) | no |
 | T-EOE1 (EOE-1 / OD-6) | Observability/Evidence | OPTIONAL_OR_FUTURE | no | OD-6 决策 + 评测消费者 | yes | no |
 | T-W2D4 (L1 dead-code) | SubAgent | TRACKED_DEBT | no | 独立 cleanup 窗口 | no | no |
 | T-NS-CLEANUP | Docs/Guardrails(North Star) | OPTIONAL_OR_FUTURE(blocked_by_approval) | no | owner 批准 amendment | **yes** | no |
 
 > **当前 active trigger: 无。T-SKILL-GOLDEN 已完成并关闭。T-PROVIDER-E2E minimal smoke evidence satisfied（非 L4）。**
-**L3 Hardening Triage: COMPLETED（见 `L3_HARDENING_TRIAGE.zh.md`）**, recommended next target: Skill System → L3（HARDEN_NEXT, 0 blockers）。 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
+> **L3 Hardening Triage: CLOSED**（见 `L3_HARDENING_TRIAGE.zh.md`），14/15 模块 scoped L3；Scheduler remains L2 blocked。 其余全部 No,且每条都有明确 trigger / owner / external 标注。已 `completed` / `completed-docs` 的历史项(RS-1 / CM-1 / SA-1 / MEM-1 / SPA-1 / SPA-2 / CR-1..4 / GE-1..3)不进本寄存器(无 trigger,已闭)。
 >
 > 编号说明:**OD-4**(consolidation 默认 production)有意折叠进 **T-MEM2**(与 canonical-owner OD-9 同属一次 memory 决策,不会独立 fire),不单列。roadmap §9 的 **W-Low 债务簇**(W1-D1/D2/D3/D6/D7、W2-D1、W3-D1/D2)均为已治理 Low debt,owner/trigger/exit 由 roadmap §9.3–9.5 管辖,**有意不提升为本寄存器行**(避免把 Low debt 扩成 active surface)。
 
@@ -105,7 +105,7 @@
 - **Reference evidence**: `PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md`;roadmap §10 W1-D5(L767)、§9(L965);`agent/provider/factory.py`;`tests/test_provider_real_smoke.py`;`tests/runtime_integration/test_memory_anchor_real.py`;`tests/golden_e2e/fixtures/evidence_trace.json`(`claims_real_provider_e2e=false`)。
 
 ### T-MCP-REAL — real external MCP(REAL-EVIDENCE-007)
-- **Related module**: MCP(L2)
+- **Related module**: MCP(~~L2~~ L3 scoped)
 - **Current status**: MCP external flight **代码路径已完整**(opt-in、allowlist、destructive block、discovery→TOOL_REGISTRY→model-visible、mediator→GATE/INVOKE/RESULT、not-fakeable guards),**默认 `is_mcp_active()=False`**;**未做真实外部 server 连接**。
 - **Category**: `BLOCKED_BY_EXTERNAL`
 - **What it means**: 连接真实外部 MCP server,验证真实 discovery/invocation/失败行为(L2→L3/L4)。
@@ -137,7 +137,7 @@
 - **Reference evidence**: `agent/memory_owner.py`; `agent/memory_runtime.py:592`; `tests/test_memory_owner_l3_main_path.py`; `tests/test_memory_owner_runtime_integration.py`。
 
 ### T-OD7 — production approval hook(OD-7 / W2-D2)
-- **Related module**: Policy / Approval(L2)
+- **Related module**: Policy / Approval(~~L2~~ L3 scoped)
 - **Current status**: policy gate(`ToolGateHandler` 可拒绝 + no-execution golden + adversarial stub)≈L3;interactive confirmation(`confirmation/` handlers + `awaiting_user_input` 状态 + 测试)≈L2 **已存在**;**production/multi-user approval hook deferred**。
 - **Category**: `BLOCKED_BY_DECISION`
 - **What it means**: 为高风险 side effect 引入生产强制 approval hook(独立于 debug 路径)。
@@ -161,7 +161,7 @@
 - **Reference evidence**: roadmap SPA-2 注(L484-485)、§10 W2-D2(L781)、§11 OD-7(L872)、§9(L964);`agent/transitions.py`(`TOOL_CONFIRMATION_REQUIRED`/`awaiting_user_input`)。
 
 ### T-CM2 — Unified Capability Contract(OD-2)
-- **Related module**: Capability / Config / Registry Boundary(L2)
+- **Related module**: Capability / Config / Registry Boundary(~~L2~~ L3 scoped)
 - **Current status**: Tool/Skill/MCP 各自 schema;`idempotency_key`/`cost_hint`/`latency_hint` 仅 North Star 文字,**无 .py 实现**;capability status 是口径(declared/registered/routed/dormant/deferred)非统一 enum;CM-1 config import boundary 已 inventory。
 - **Category**: `BLOCKED_BY_DECISION`
 - **What it means**: 让 Tool/MCP/Skill/SubAgent/Provider 共享统一 Capability Contract / status 枚举。
@@ -206,7 +206,7 @@
 - **Reference evidence**: roadmap CR-1(L492-525)、§10 W3-D3(L793);`agent/core.py:697/772`(默认 None);`agent/action_scheduler.py:225`。
 
 ### T-SUBAGENT-FLIP — SubAgent V0 default-on flip / FOP-1 pre-flip blocker
-- **Related module**: SubAgent(L2)
+- **Related module**: SubAgent(~~L2~~ L3 scoped)
 - **Current status**: V0 registered + contract + golden,flag `SUBAGENT_V0_ROUTING_ENABLED` **默认 off**,inline-local fallback;**FOP-1**:flag-on + real provider 时 V0 因 `provider_mode_allowed` 未传播(默认 `fake_only`)返回 `policy_blocked`。
 - **Category**: `TRACKED_DEBT`(pre-flip blocker;default-off 非当前风险,**P1-on-flip**)
 - **What it means**: 把 V0 routing 默认开启(inline-local 退为 fallback),前提先修 FOP-1。
@@ -229,7 +229,7 @@
 - **Reference evidence**: roadmap §9.6 FOP-1(L807-814)、§9(L966);`agent/subagent_system/v0_contract.py:322/357`;`agent/subagent_routing_flag.py`。
 
 ### T-SA2 — SubAgent lifecycle integration / L3 evidence design spike(SA-2)
-- **Related module**: SubAgent(L2)
+- **Related module**: SubAgent(~~L2~~ L3 scoped)
 - **Current status**: SA-1 落地后 live V0 真实 evidence label = `subsystem_integration`(pre-loop seam 不可伪造 `core_loop`);是否搬迁 delegation 进 `run_main_loop` 取 L3 标签**未论证**。
 - **Category**: `BLOCKED_BY_EVIDENCE`(`documented_pending`)
 - **What it means**: 出 design spike 文档,比较 L3 相对 `subsystem_integration` 的可观察收益与搬迁代价。
@@ -251,7 +251,7 @@
 - **Reference evidence**: roadmap SA-2(L290-328);`agent/runtime_integration/evidence.py`(`classify_evidence_level`)。
 
 ### T-SPR1 — 完整全局状态机 / 跨主机 resume(SPR-1 / OD-8)
-- **Related module**: State / Checkpoint / Resume(L2)
+- **Related module**: State / Checkpoint / Resume(~~L2~~ L3)
 - **Current status**: dispatcher 7 值 result 已实现;local-file checkpoint save/load/resume **已接线**(`checkpoint.py:370/466`,`main.py:731`),intra-process resume 为隐含默认;**无跨主机/跨进程 resume,无统一 global state-machine enum**。
 - **Category**: `OPTIONAL_OR_FUTURE`(主 gate 为"无 cross-host/long-task 消费者"= deferred,与 roadmap §9 L960 / closure audit 一致;OD-8 为出现需求后的次要决策 gate)
 - **What it means**: 定义完整 global state machine enum + 跨主机/跨进程 resume 协议(L2→更高)。

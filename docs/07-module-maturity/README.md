@@ -19,10 +19,10 @@ Post-repair module maturity / hardening 阶段的工作目录。
 | `AGENT_MODULE_TAXONOMY_DECISION_REQUEST.zh.md` | 模块分法 gate 发现 + 决策(D1–D4 / C1–C2)+ 候选 option | current — 已由用户以 Option γ 批准 |
 | `AGENT_MODULE_MATURITY_AUDIT.zh.md` | 15 模块 L0–L4 成熟度审计 + action 分类;当前无 HARDEN_NEXT | current |
 | `POST_REPAIR_TRIGGER_REGISTRY.zh.md` | trigger 寄存器 + 激活 playbook("No trigger, no work");每个 blocked/deferred/harden 项的触发条件与开工路径 | current |
-| `L3_HARDENING_TRIAGE.zh.md` | L3 hardening triage——8 模块逐模块 triage + recommended next target | current — triage completed; Skill L3 done; recommended next: State or SubAgent FOP-1 |
+| `L3_HARDENING_TRIAGE.zh.md` | L3 hardening triage——8 模块逐模块 triage; 14/15 scoped L3 | current — triage CLOSED; 14/15 scoped L3; Scheduler remains L2 blocked |
 | `FREEZE_FILE_INTEGRITY_AUDIT.zh.md` | Freeze file integrity audit——验证冻结文件未被越权修改 | current — audit completed; verdict CLEAN_WITH_LOW_RISK_NOTES |
 | `MEMORY_OWNER_DECISION_SPIKE.zh.md` | MEM-2 decision spike——12 决策域拆解 + 推荐选项 + 激活路径 | current — decision spike completed;T-MEM2 remains blocked_by_decision |
-| `POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md` | OD-7 decision spike — PolicyDecision model + action matrix + 4-phase L3 plan | current — Phase 1 golden completed; Policy remains L2; next: Tool gate integration |
+| `POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md` | OD-7 decision spike — PolicyDecision model + action matrix + 4-phase L3 plan | current — Policy L3 scoped (Tool gate); OD-7 production approval still deferred |
 
 ## 阅读顺序
 
@@ -32,11 +32,15 @@ Post-repair module maturity / hardening 阶段的工作目录。
 
 ## 关键结论(摘要)
 
-- Mainline 已串通;问题是**模块成熟度不均衡**(L3 骨架/横切簇 + L3 Skill System + L2 能力簇 + L1 dormant scheduler),且不均衡几乎全是**有意 deferred/blocked**。
+- Mainline 已串通;问题是**模块成熟度不均衡**(14/15 模块已 scoped L3,其中 Scheduler / Async 为 L2 BLOCKED_BY_DECISION / no consumer),且不均衡几乎全是**有意 deferred/blocked**。
 - **T-MEM2 L3 achieved**: MemoryOwner wired into MemoryRuntime explicit_user_request retain path；create/noop/reject on runtime；not L4。
 - **SubAgent L3 scoped**: 38 SubAgent test files, 415 tests passed, golden delegation evidence, PolicyDecision SUBAGENT_DELEGATION mapped。FOP-1 tracked pre-flip blocker。
 - **T-SKILL-GOLDEN 已完成并关闭**:Skill System golden 锁定当前实验性本地 dispatcher/lifecycle 行为;当前无 HARDEN_NEXT。
 - **MCP L3 scoped**: local fake/dry_run contract boundary achieved; ~192 tests passed (198 collected, 4 skipped, 2 xfailed); `FakeMCPClient` + `dry_run=True` default + `is_mcp_active()=False`; policy/sanitizer/readiness guards tested; bridge lifecycle tested. **Not L4**; T-MCP-REAL remains BLOCKED_BY_EXTERNAL.
 - **Scheduler / Async L2**: 95+ scheduler tests passed; handler registered in dispatcher; injection seam verified; 6 no-consumer boundary tests pass; PolicyDecision SCHEDULER_ASYNC→REQUIRE_APPROVAL; RuntimeDecisionFrame reflects scheduler state. **Not L3**: no active consumer; registered-not-routed; production `chat()` calls do not pass `action_scheduler`. T-SCHED-ROUTE remains BLOCKED_BY_DECISION.
 - 其余 L2/L1 模块按 BLOCKED_BY_DECISION / BLOCKED_BY_EXTERNAL / TRACKED_DEBT 管理,无 trigger 不动。
+
+**Post-Repair L3 Hardening Closure: 14/15 模块 scoped L3, Scheduler / Async remains L2 BLOCKED_BY_DECISION / no consumer. This is not 15/15 L3, not L4. Architecture Repair remains closed, no Window 4.**
+
 | `MCP_SCHEDULER_FEASIBILITY_AUDIT.zh.md` | MCP + Scheduler feasibility audit | current — MCP scoped L3 completed, Scheduler L2 (not L3; no consumer) |
+| `POST_L3_HARDENING_CLOSURE.zh.md` | Post-Repair L3 hardening closure — 14/15 scoped L3, Scheduler L2 blocker, not 15/15, not L4 | current |

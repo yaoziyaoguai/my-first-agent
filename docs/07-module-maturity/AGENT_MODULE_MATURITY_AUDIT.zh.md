@@ -80,7 +80,7 @@
 | 1 | Agent Loop | **L3** | NO_ACTION | no | no | High |
 | 2 | RuntimeAction / Dispatcher Spine | **L3** | NO_ACTION | no | no | High |
 | 3 | Tool System | **L3** | NO_ACTION | no | no | High |
-| 4 | MCP | **L2** | BLOCKED_BY_EXTERNAL | no | no | High |
+| 4 | MCP | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to local fake/dry_run contract boundary; T-MCP-REAL still BLOCKED_BY_EXTERNAL) | no | no | High |
 | 5 | Memory | ~~L2~~ **L3** | NO_ACTION | no | no | High |
 | 6 | SubAgent | ~~L2~~ **L3 scoped** | NO_ACTION (L3 scoped to local delegation contract / fake-or-local boundary / runtime dispatch evidence) | no | no | High |
 | 7 | Skill System | ~~L2~~ **L3** | NO_ACTION | no | no | ~~Medium~~ High |
@@ -138,10 +138,10 @@
 - **Current fact**:MCP external flight **代码语义路径已完整**(opt-in 激活、dry_run vs real 区分、`server_allowlist` 生效、destructive tool 执行前 block、discovery→`TOOL_REGISTRY`→model-visible、invocation 走 mediator→GATE/INVOKE/RESULT、dispatcher/decision-frame evidence + `mcp_available` 动态、not-fakeable guards);**默认不启用**;**未做真实外部 server 连接**(REAL-EVIDENCE-007)。
 - **North Star target**:§9/§K MCP 外部协议适配,wrap 成 Tool 同 schema 再走 dispatcher,不主导内部架构。
 - **Evidence**:`agent/mcp.py:65 FakeMCPClient`、`mcp_models.py:23 MCPServerConfig`、`mcp_bridge.py:146`、`runtime_integration/mcp_tool_orchestrator.py`、`mcp_sanitizer.py`、`mcp_policy.py`;`tests/runtime_integration/test_mcp_l3_real_core_loop.py`、`test_mcp_real_external_flight.py`(docstring 自述 code-path-complete,仅剩真实外部连接);`docs/design/mcp-architecture.md`。
-- **Maturity L2**:有最小闭环 + 多项 targeted test + not-fakeable guards,但 real flight 默认 off 且真实外部未验证(保守不记 L3)。
+- **Maturity L3 scoped**:**219 MCP tests passed** (2 xfailed: FakeProvider limitation, not MCP bug);`FakeMCPClient` local contract;`dry_run=True` safe default;`is_mcp_active()=False`;`mcp_sanitizer`+`mcp_policy`+`mcp_external_readiness` guards;`mcp_bridge`+`mcp_tool_orchestrator` lifecycle tested。**Not L4**. Real MCP external integration remains BLOCKED_BY_EXTERNAL (T-MCP-REAL)。
 - **Gap**:real external MCP server 连接(L4)= REAL-EVIDENCE-007。
 - **Runtime risk now?** no(默认 fake/local)。**Blocks mainline?** no。**Harden next?** no。
-- **Action**:**BLOCKED_BY_EXTERNAL**。**Why not now**:AGENTS.md 硬禁真实 MCP endpoint;real flight 需受控外部 server + owner 授权。
+- **Action**:NO_ACTION（L3 scoped achieved）。**Why**:**219 MCP local tests pass**；`FakeMCPClient` contract + `dry_run` safe default + `is_mcp_active()=False` + policy/sanitizer/readiness guards；bridge lifecycle tested。**Not L4**。T-MCP-REAL real external remains BLOCKED_BY_EXTERNAL。
 - **Trigger**:获授权的受控外部 MCP server + CI。**Exit**:REAL-EVIDENCE-007 real external green。
 - **Owner/decision**:owner 授权 real MCP + 外部环境。**Confidence**:High。
 

@@ -13,6 +13,179 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
+## S1 Development Governance
+
+This project uses a staged development governance model.
+
+- Active documentation lives under `docs/current/`.
+- Historical documentation lives under `docs/history/`.
+
+Historical documents are evidence, not routing authority. Do not use historical
+docs to override current S1 documents unless the user explicitly promotes them
+back into `docs/current/`.
+
+### Current S1 Documents
+
+The current working set is:
+
+- `docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md`
+  - Current code reality before S1 planning.
+  - Describes what the code currently does.
+  - This is not a goal document.
+- `docs/current/S1_GOAL.md`
+  - Frozen S1 goal after user approval.
+  - Defines what this stage must achieve.
+  - Do not modify this file unless the user explicitly asks to redefine or
+    update the S1 goal.
+- `docs/current/S1_GOAL_GAP.md`
+  - Gap list between current code reality and the frozen S1 goal.
+  - This is the active to-do list for the stage.
+  - Do not remove or rewrite gaps just because they are hard.
+- `docs/current/TECH_DEBT.md`
+  - Cross-stage technical debt register.
+  - Important deferred work, workarounds, dormant decisions, and out-of-stage
+    issues must be tracked here.
+- `docs/current/WORK_LOG.md`
+  - Per-agent-run execution log.
+  - Every coding-agent run must append a summary here.
+
+### Goal and Gap Rules
+
+1. `S1_GOAL.md` is frozen after user approval.
+   - Do not change the goal because implementation is hard.
+   - Do not narrow the goal silently.
+   - Do not expand the goal because a module exists.
+   - Only the user can approve goal changes.
+2. `S1_GOAL_GAP.md` is a tracked gap / to-do list.
+   - Completed gaps must be checked off with evidence.
+   - Evidence can be a commit hash, test result, log, trace, audit section, or
+     source reference.
+   - Do not delete unfinished gaps.
+   - Do not rewrite gaps just to make the stage look complete.
+3. Gaps may be struck through only when:
+   - the user explicitly changes the S1 goal;
+   - the gap is proven invalid;
+   - the gap is merged into another tracked gap;
+   - the user explicitly approves cancellation.
+4. If an important gap is confirmed out of S1 scope, move it to `TECH_DEBT.md`.
+   - Mark the original gap in `S1_GOAL_GAP.md` as moved to debt.
+   - Include the technical debt ID.
+
+Example:
+
+```
+- [>] Gap: prove X path under real provider. Moved to TECH_DEBT.md: TD-004. Reason: out of S1 scope after review.
+```
+
+### Technical Debt Rules
+
+`TECH_DEBT.md` is not a dumping ground for unfinished work.
+
+Do not add an item to technical debt merely because a task is incomplete today.
+
+Add technical debt only when the project deliberately:
+
+- defers an important issue beyond the current stage;
+- uses a workaround;
+- leaves a temporary fake/manual path;
+- keeps a capability dormant;
+- postpones a known architecture gap;
+- decides an important gap cannot be completed within S1.
+
+Each debt item must include:
+
+- ID
+- Date
+- Stage introduced
+- Area
+- Debt
+- Why deferred
+- Current impact
+- Risk level
+- Trigger to revisit
+- Status
+- Evidence
+
+### Work Log Rules
+
+Every coding-agent run must append an entry to `docs/current/WORK_LOG.md`.
+
+The entry must include:
+
+- date/time
+- task name
+- files changed
+- what was done
+- verification commands and results
+- `S1_GOAL_GAP.md` items updated
+- `TECH_DEBT.md` items added or updated
+- commit hash, if committed
+- next step only if authorized by current docs
+
+### Recommendation Rules
+
+Do not freely recommend new directions.
+
+Next-step recommendations are allowed only if they are directly grounded in:
+
+- `docs/current/S1_GOAL.md`
+- `docs/current/S1_GOAL_GAP.md`
+- `docs/current/TECH_DEBT.md`
+- `docs/current/WORK_LOG.md`
+- the user's current explicit instruction
+
+Do not invent:
+
+- new goals
+- new phases
+- new architecture documents
+- new modules
+- new roadmaps
+- new cleanup plans
+
+If no authorized next step exists in current docs, say:
+
+`No authorized next step found in current docs.`
+
+### Stage Closing Review
+
+Before closing a stage, run a Stage Closing Review:
+
+1. Review all open items in `S1_GOAL_GAP.md`.
+2. Complete any remaining item that is still feasible within the stage.
+3. Move important but unfinished out-of-stage items to `TECH_DEBT.md`.
+4. Mark moved items in `S1_GOAL_GAP.md` with the referenced debt ID.
+5. Append a stage closing entry to `WORK_LOG.md`.
+6. Do not silently delete unfinished gaps.
+
+### Provider Rules
+
+FakeProvider and RealProvider must not become two separate agents.
+
+FakeProvider:
+
+- is for deterministic tests, CI, and runtime contract verification;
+- is not the product capability ceiling;
+- must not have its own independent Agent Loop.
+
+RealProvider:
+
+- is for real model execution, manual smoke, and integration validation;
+- must not bypass the runtime spine.
+
+After entering the core runtime, FakeProvider and RealProvider should share the
+same:
+
+- action parsing;
+- dispatcher / tool mediator;
+- policy / approval;
+- tool execution path;
+- checkpoint / state path;
+- evidence / log / trace path.
+
+If a task risks splitting fake and real paths, record it in `S1_GOAL_GAP.md` or
+`TECH_DEBT.md`.
+
 ## Safety boundaries
 
 - no .env
@@ -46,6 +219,14 @@ future work can stay scoped without relying on a giant prompt each time.
 - parent runtime remains in control for child capability/delegation boundaries.
 
 ## Post-Architecture-Repair Navigation
+
+> Note (S1 governance): The documents referenced below were moved under
+> `docs/history/` (e.g. `docs/history/06-audit/...`,
+> `docs/history/CAPABILITY_BOUNDARIES.md`,
+> `docs/history/architecture/ARCHITECTURE_NORTH_STAR.zh.md`). Per **S1
+> Development Governance** above, they are historical evidence, not current
+> routing authority. Read them for background only; current work is governed by
+> the documents under `docs/current/`.
 
 Architecture Repair Mainline is closed:
 

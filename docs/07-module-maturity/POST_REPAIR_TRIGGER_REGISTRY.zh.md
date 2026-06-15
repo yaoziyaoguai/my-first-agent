@@ -185,10 +185,10 @@
 - **Reference evidence**: roadmap CM-2(L176-192)、§11 OD-2(L867)、§9(L962);`agent/runtime_decision_frame.py`;`docs/design/unified-project-config-contract.md`。
 
 ### T-SCHED-ROUTE — Scheduler production routing(W3-D3)
-- **Related module**: Scheduler / Async(L1)
+- **Related module**: Scheduler / Async(L2)
 - **Current status**: `ActionScheduler` 真实但 **dormant-by-default / registered-not-routed**;`core.chat(action_scheduler=None)` 默认不注入;注入 seam 已接通且可测试。
 - **Category**: `BLOCKED_BY_DECISION`
-- **What it means**: 把 action_scheduler 接入 production routing(L1→更高)。
+- **What it means**: 把 action_scheduler 接入 production routing(L2→L3)。
 - **Why not active now**: 无当前消费者;接入会触碰 runtime routing(closure 明列为 reopen trigger);属架构决策。
 - **Activation path**(参考):
   1. owner 决定接入 + 明确多 turn planning / delayed-action 消费者;

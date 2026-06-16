@@ -96,8 +96,9 @@
 - Current impact: full-suite 失败；**潜在隐患**——失败信息会诱导后续 agent 把 `config/config.yaml` 重新 track 来"修复"测试，从而重新引入 G-15 已消除的 config 卫生风险（当前工作树含真实长度 key）。
 - Risk level: medium
 - Revisit trigger: 下次把测试套件/安全 guard 对齐到 S1 docs+config 规制时；或在重新评估任何"跟踪 config"策略前。
-- Status: open
-- Evidence: `tests/test_config_secret_safety.py:68`；G-15（commit 68e7d76）；S1_GOAL.md AC-6；2026-06-17 独立核验 `git ls-files config/config.yaml` 为空、`git check-ignore` 命中 `.gitignore:36`。
+- Status: resolved（2026-06-17；S1 completion cleanup）
+- Resolution: `tests/test_config_secret_safety.py` 已改为验证 G-15 后策略：`config/config.yaml` 不被 git 跟踪且被 `.gitignore` 忽略；`config/config.example.yaml` 作为 tracked template 存在且不含真实 key；`.env` 不被要求恢复或 track。测试只查询 git index / ignore 规则与 tracked templates，不读取本地 ignored `config/config.yaml` 内容。
+- Evidence: `tests/test_config_secret_safety.py:68`；G-15（commit 68e7d76）；S1_GOAL.md AC-6；2026-06-17 独立核验 `git ls-files config/config.yaml` 为空、`git check-ignore` 命中 `.gitignore:36`；cleanup verification：`.venv/bin/python -m pytest tests/test_config_secret_safety.py -q -rx` → `9 passed in 0.35s`，`.venv/bin/ruff check tests/test_config_secret_safety.py` → pass。
 
 ### TD-006 — 旧 S1-前文档规制 guard 测试族过期失败
 - ID: TD-006

@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-06-17 03:59 CST (run 20) — TD-005 config secret-safety guard aligned
+
+- **date/time**: 2026-06-17 03:59 CST
+- **task name**: S1 Completion Cleanup — TD-005 only（config secret-safety guard 与 G-15 后策略对齐）。
+- **scope**: 只处理 TD-005；未处理 TD-006/TD-007；非 gap loop。
+- **files changed**:
+  - `tests/test_config_secret_safety.py`（旧 guard 从“config/config.yaml 必须被 git 追踪且为占位符”改为“runtime config 不被追踪且被忽略；tracked template 是 config/config.example.yaml”；新增 `.env` 不应被 track/要求恢复的 guard）。
+  - `docs/current/TECH_DEBT.md`（TD-005 → resolved；记录验证证据）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **what was done**:
+  - 先复现旧测试失败：`.venv/bin/python -m pytest tests/test_config_secret_safety.py -q -rx` → `1 failed, 7 passed`，失败点为 `config/config.yaml 未在 git 中追踪`。
+  - 对齐 G-15 后安全策略：测试只查询 `git ls-files` / `git check-ignore` 与 tracked template 内容，不读取本地 ignored `config/config.yaml`，不创建或恢复 `.env`。
+- **verification commands and results**:
+  - `.venv/bin/python -m pytest tests/test_config_secret_safety.py -q -rx` → `9 passed in 0.35s`。
+  - `.venv/bin/ruff check tests/test_config_secret_safety.py` → `All checks passed!`。
+  - `git diff --check` → pending pre-commit gate below.
+- **S1_GOAL_GAP.md items updated**: 无。
+- **TECH_DEBT.md items added or updated**: TD-005 marked resolved。
+- **safety confirmations**: 未读取、打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未修改 `.gitignore`、config example、AGENTS.md、docs/history、S1_GOAL.md、S_ROADMAP.md；未 push。
+- **commit hash**: 本条随 `test: align config secret safety guard with S1` 提交；精确 hash 见 `git log` / 本轮最终报告。
+- **next step**: 继续本次用户授权范围内的 TD-007。
+
+---
+
 ## 2026-06-17 (run 19) — Independent S1 completion audit + register stale-guard / AC-2 debt
 
 - **date/time**: 2026-06-17 (local)

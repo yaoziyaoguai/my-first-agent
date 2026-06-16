@@ -48,6 +48,28 @@ def _git_show_file(rel_path: str) -> str:
     return result.stdout
 
 
+def _git_path_is_tracked(rel_path: str) -> bool:
+    """只查询 git index，不读取 working copy 文件内容。"""
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", rel_path],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
+    )
+    return result.returncode == 0
+
+
+def _git_path_is_ignored(rel_path: str) -> bool:
+    """验证路径由 .gitignore 覆盖，不读取被忽略文件内容。"""
+    result = subprocess.run(
+        ["git", "check-ignore", rel_path],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
+    )
+    return result.returncode == 0
+
+
 def _contains_real_key(content: str) -> bool:
     """检查内容是否包含疑似真实 API key。
 
@@ -56,28 +78,39 @@ def _contains_real_key(content: str) -> bool:
     return any(indicator in content for indicator in REAL_KEY_INDICATORS)
 
 
-def test_committed_config_yaml_has_placeholder_key() -> None:
-    """提交版本的 config/config.yaml 必须只含占位符 key。
+def test_runtime_config_yaml_is_untracked_and_ignored() -> None:
+    """config/config.yaml 是本地 real runtime config，不能进入 git。
 
-    tracked 模板中真实 key 泄漏是最常见的 secret 泄漏路径。
-    此测试读取 git show HEAD 版本，不接触本地 dirty 工作目录。
+    G-15 后的安全策略是 tracked template + ignored local config：
+    测试只问 git index / ignore 规则，不读取本地 config/config.yaml 内容。
     """
 
-    content = _git_show_file("config/config.yaml")
-
-    assert content, "config/config.yaml 未在 git 中追踪"
-    assert not _contains_real_key(content), (
-        "config/config.yaml 的 git 追踪版本包含疑似真实 API key\n"
-        "预期：api_key: sk-REPLACE_ME（占位符）"
+    rel_path = "config/config.yaml"
+    assert not _git_path_is_tracked(rel_path), (
+        "config/config.yaml 不应被 git 追踪；"
+        "真实 runtime config 必须保持本地 ignored"
     )
-    assert "sk-REPLACE_ME" in content, (
-        "config/config.yaml 的 api_key 必须使用占位符 sk-REPLACE_ME"
+    assert _git_path_is_ignored(rel_path), (
+        "config/config.yaml 必须被 .gitignore 忽略，避免真实 key 进入 git"
+    )
+
+
+def test_dotenv_is_not_a_required_tracked_artifact() -> None:
+    """.env 只能是 ignored local artifact；测试不得要求恢复它。"""
+
+    rel_path = ".env"
+    assert not _git_path_is_tracked(rel_path), ".env 不应被 git 追踪"
+    assert _git_path_is_ignored(rel_path), (
+        ".env 必须被 .gitignore 忽略；不要为了通过测试创建或恢复 .env"
     )
 
 
 def test_config_example_yaml_has_no_real_key() -> None:
-    """config.example.yaml 不得包含真实 API key。"""
+    """config.example.yaml 是 tracked template，且不得包含真实 API key。"""
 
+    assert _git_path_is_tracked("config/config.example.yaml"), (
+        "config/config.example.yaml 必须作为 tracked template 存在"
+    )
     content = _git_show_file("config/config.example.yaml")
 
     assert content, "config/config.example.yaml 未在 git 中追踪"

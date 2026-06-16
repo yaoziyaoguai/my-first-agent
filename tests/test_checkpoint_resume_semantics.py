@@ -287,12 +287,12 @@ def test_resume_preserves_tool_use_tool_result_pairing():
     assert tool_use_ids == ["T1"]
     assert tool_result_block["type"] == "tool_result"
     assert tool_result_block["tool_use_id"] == "T1"
-    # 内容被摘要化（summary dict），不再保留 raw content，但块结构没拆。
-    assert "content" not in tool_result_block, (
-        "大 tool_result 应被摘要化，不保留 raw content"
-    )
-    assert "summary" in tool_result_block
-    assert tool_result_block["summary"]["truncated"] is True
+    # resume 形态必须保留可调用的 content，但不能恢复 raw content。
+    assert "content" in tool_result_block
+    assert isinstance(tool_result_block["content"], str)
+    assert huge not in tool_result_block["content"]
+    assert "content_persisted=false" in tool_result_block["content"]
+    assert "summary" not in tool_result_block
 
 
 # ---------------------------------------------------------------------------

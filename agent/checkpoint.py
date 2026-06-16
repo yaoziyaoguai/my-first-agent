@@ -519,6 +519,67 @@ def _resolve_checkpoint_version(checkpoint: dict[str, Any]) -> str | None:
     return None
 
 
+def _summary_to_resume_tool_result_content(summary: dict[str, Any]) -> str:
+    """把持久化 summary 转成 provider 可接受的 tool_result.content。
+
+    checkpoint 落盘不能保存大结果原文；但恢复后的 Anthropic-style messages
+    仍必须有 tool_result.content，否则下一次模型调用会拿到非法 block。
+    """
+    result_size = summary.get("result_size", "unknown")
+    result_hash = summary.get("result_hash", "")
+    preview = summary.get("preview_redacted", "")
+    reason = summary.get("reason_code", "large_tool_result")
+    return (
+        "[checkpoint tool_result summary; "
+        "raw content omitted; "
+        f"content_persisted=false; reason={reason}; "
+        f"result_size={result_size}; result_hash={result_hash}; "
+        f"preview={preview!r}]"
+    )
+
+
+def _rehydrate_tool_result_summaries_for_resume(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """将 checkpoint summary-only tool_result 恢复成 provider-callable 形态。"""
+    restored: list[dict[str, Any]] = []
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            restored.append(msg)
+            continue
+
+        new_content: list[Any] = []
+        changed = False
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and "content" not in block
+                and isinstance(block.get("summary"), dict)
+            ):
+                new_block = {
+                    key: value
+                    for key, value in block.items()
+                    if key != "summary"
+                }
+                new_block["content"] = _summary_to_resume_tool_result_content(
+                    block["summary"]
+                )
+                new_content.append(new_block)
+                changed = True
+            else:
+                new_content.append(block)
+
+        if changed:
+            new_msg = dict(msg)
+            new_msg["content"] = new_content
+            restored.append(new_msg)
+        else:
+            restored.append(msg)
+    return restored
+
+
 # 从 checkpoint 恢复到当前 state
 def load_checkpoint_to_state(state, *, path: Path | None = None):
     """
@@ -602,7 +663,9 @@ def load_checkpoint_to_state(state, *, path: Path | None = None):
 
         # 恢复 conversation.messages（append-only 事件流；tool_traces 不属于恢复语义）。
         conv_data = checkpoint.get("conversation", {}) or {}
-        state.conversation.messages = conv_data.get("messages", []) or []
+        state.conversation.messages = _rehydrate_tool_result_summaries_for_resume(
+            conv_data.get("messages", []) or []
+        )
 
         return True
 

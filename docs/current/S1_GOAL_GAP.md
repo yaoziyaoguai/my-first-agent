@@ -39,7 +39,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
 | **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 ✅ | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）；G-19 已完成（run 11：审计文档 config/secret 事实与 G-15 调和）**；P0 全部完成 |
-| **P1** | G-07b, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | 复现大结果 resume；钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
+| **P1** | G-07b ✅, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）**；待办：钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
 | **P4** | G-13, G-14, G-06(TD-002), G-11(TD-001) | dormant by design / L5 边界已满足激活留 S2 / 已确认 S1 不解决 | 见 `TECH_DEBT.md`，S2+ 重评 |
@@ -49,9 +49,9 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 11 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)** |
+| satisfied | 12 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)** |
 | partially_satisfied | 4 | G-03, G-07, G-10, G-12 |
-| unknown_needs_audit | 1 | G-07b |
+| unknown_needs_audit | 0 | — |
 | s1_blocker | 0 | — |
 | s1_gap | 1 | G-18 |
 | defer_to_tech_debt | 2 | G-06 (TD-002), G-11 (TD-001) |
@@ -138,19 +138,19 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 > 推荐执行顺序：G-07b → G-12 → G-03。
 
-### G-07b — Checkpoint 大结果 resume 形态
-- **Priority**: P1
+### G-07b — Checkpoint 大结果 resume 形态 — ✅ RESOLVED (2026-06-16 run 12)
+- **Priority**: P1（已完成）
 - **Layer**: L2
 - **S1 requirement**: checkpoint/resume 不破坏后续模型调用（支撑 AC-5）。
 - **Current evidence**: `agent/evidence_persistence.py:34 MAX_TOOL_RESULT_BYTES=2048`、`:90 summarize_content_for_persistence`、`:108/:133 content_persisted=false`；`tests/test_checkpoint_roundtrip.py`/`test_evidence_storage_hygiene.py` 提及 2048/large，但**本轮只读未确证** resume 后形态被下一轮模型调用接受。
-- **Status**: unknown_needs_audit
-- **Gap**: 大 tool_result 摘要（content_persisted=false）后，resume 的消息形态是否被 API 接受未知。
+- **Status**: satisfied（2026-06-16 run 12 完成）
+- **Gap**: ~~大 tool_result 摘要（content_persisted=false）后，resume 的消息形态是否被 API 接受未知~~ → **已解决**：checkpoint 落盘仍不保存 raw 大结果；`load_checkpoint_to_state()` 在 resume 边界把 summary-only `tool_result` rehydrate 为 provider-callable 的安全 `content` 字符串。
 - **Blocking level**: must_fix_for_s1
 - **Dependencies**: 无（其结论支撑 G-12 的 resume 验收）。
-- **Recommended execution order**: P1-1（先审计/复现）。
-- **Needed action**: 只读 + 一次本地复现验证（未来授权 run）：构造 >2048B tool_result → save → resume → 下一轮模型调用。
-- **Verification**: 上述复现不报错。
-- **Decision**: 先审计再判定 satisfied / 转 TD；本轮维持 unknown，不臆断。
+- **Recommended execution order**: P1-1（已完成）。
+- **Needed action**: ~~构造 >2048B tool_result → save → resume → 下一轮模型调用~~ 已执行，并补回归测试。
+- **Verification**（2026-06-16 run 12 实跑通过）: Red：`tests/test_checkpoint_roundtrip.py::test_large_tool_result_resume_shape_is_accepted_by_next_model_call` 在旧实现失败，恢复后的 `tool_result` 缺 `content`；Green：修复后该测试 `1 passed`。相关回归：`test_checkpoint_summarizes_large_tool_results` + `test_resume_preserves_tool_use_tool_result_pairing` → `2 passed`；`TestCheckpointSummarizesToolResults::test_checkpoint_summarizes_large_tool_result` → `1 passed`。
+- **Decision**: ✅ satisfied。G-12 可基于该结论继续做最小多步任务 + resume 验收；大结果 raw content 仍不进入 checkpoint。
 
 ### G-12 — 最小多步任务状态 / progress tracking
 - **Priority**: P1
@@ -354,7 +354,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-05 | provider 边界 | §8 Satisfied | satisfied | should_fix_for_s1 | 不变 |
 | G-06 | legacy facade | §7 P4 | defer_to_tech_debt(TD-002) | s2_or_later | 不变（已 TD） |
 | G-07 | L2 umbrella | §5 P2 | partially_satisfied | should_fix_for_s1 | 子项拆 G-07b/TD-003 |
-| G-07b | 大结果 resume | §4 P1 | unknown_needs_audit | must_fix_for_s1 | should_fix→must_fix |
+| G-07b | 大结果 resume | §4 P1 | satisfied (✅ run 12) | must_fix_for_s1 | **已完成**：大 tool_result resume 形态可被下一次本地严格 provider 调用接受 |
 | G-08 | tool/policy | §8 Satisfied | satisfied | must_fix_for_s1 | 不变 |
 | G-09 | tool result→ctx/state | §8 Satisfied | satisfied | should_fix_for_s1 | 枚举规范化 |
 | G-10 | evidence 可观测 | §5 P2 | partially_satisfied | should_fix_for_s1 | 不变 |
@@ -368,4 +368,4 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | satisfied (✅ run 11) | release_blocker | **已完成**：审计文档 config/secret 事实与 G-15 调和 |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；其余 P1 项仍待后续授权 run 按优先级执行。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；其余 P1 项仍待后续授权 run 按优先级执行。

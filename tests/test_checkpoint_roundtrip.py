@@ -13,6 +13,49 @@ import json
 import pytest
 
 
+class _StrictToolResultProvider:
+    provider_type = "fake"
+    supports_tools = False
+    supports_streaming = False
+
+    def __init__(self):
+        self.tool_result_count = 0
+
+    def create(
+        self,
+        *,
+        system,
+        messages,
+        tools,
+        model=None,
+        max_tokens=None,
+        temperature=None,
+    ):
+        from agent.provider.protocol import ProviderResponse, ProviderTextBlock
+
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    self.tool_result_count += 1
+                    assert "content" in block, (
+                        "resumed tool_result must remain provider-callable"
+                    )
+                    assert isinstance(block["content"], str)
+                    assert block["content"].strip()
+
+        return ProviderResponse(
+            content=[ProviderTextBlock(text="accepted resumed messages")],
+            stop_reason="end_turn",
+            raw_provider_name="fake",
+        )
+
+    def stream(self, *, system, messages, tools):
+        raise AssertionError("G-07b local resume verification uses create(), not stream()")
+
+
 @pytest.fixture
 def tmp_checkpoint_path(tmp_path, monkeypatch):
     """把 checkpoint 写到临时目录，不污染真实 memory/checkpoint.json。"""
@@ -142,6 +185,50 @@ def test_checkpoint_summarizes_large_tool_results(tmp_checkpoint_path):
     assert summary.get("result_size") == len(huge_result.encode("utf-8"))
     assert "result_hash" in summary
     assert len(summary.get("preview_redacted", "")) <= 200
+
+
+def test_large_tool_result_resume_shape_is_accepted_by_next_model_call(
+    tmp_checkpoint_path,
+):
+    """G-07b: 大 tool_result 摘要化后，resume 形态仍能进入下一次模型调用。
+
+    本测试不用真实 provider。严格本地 provider 只检查恢复后的 Anthropic-style
+    messages 是否仍包含合法 tool_result.content；这正是外部 API 会要求的字段。
+    """
+    from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
+    from agent.evidence_persistence import MAX_TOOL_RESULT_BYTES
+    from agent.state import create_agent_state
+
+    huge_result = "x" * (MAX_TOOL_RESULT_BYTES * 3)
+    src = create_agent_state(system_prompt="test")
+    src.conversation.messages = [
+        {"role": "user", "content": "read a large file"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "T1", "name": "read_file", "input": {}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "T1",
+                    "content": huge_result,
+                }
+            ],
+        },
+    ]
+    save_checkpoint(src)
+
+    dst = create_agent_state(system_prompt="test")
+    assert load_checkpoint_to_state(dst)
+
+    provider = _StrictToolResultProvider()
+    provider.create(system="test", messages=dst.conversation.messages, tools=[])
+
+    assert provider.tool_result_count == 1
 
 
 def test_checkpoint_truncation_config_rejects_invalid_values():

@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-06-16 22:38 CST (run 12) — G-07b checkpoint large-result resume shape
+
+- **date/time**: 2026-06-16 22:38 CST
+- **gap ID / priority**: G-07b / P1 must_fix_for_s1
+- **task name**: 验证并修复大 `tool_result` 摘要后 resume 形态。
+- **why this gap was selected**: G-15/G-16/G-17/G-19 均已完成；按 P1 推荐顺序，G-07b 是最高优先 eligible gap，且无依赖。
+- **files changed**:
+  - `agent/checkpoint.py`（resume 边界将 summary-only `tool_result` rehydrate 为 provider-callable 安全 `content` 字符串；不改变 checkpoint raw content 落盘策略）。
+  - `tests/test_checkpoint_roundtrip.py`（新增 G-07b 本地严格 provider 回归测试）。
+  - `tests/test_checkpoint_resume_semantics.py`（更新 pairing 测试对 resume 后安全 `content` 的断言）。
+  - `docs/current/S1_GOAL_GAP.md`（G-07b → satisfied；P1/status/index 同步）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 待提交前确认；未创建 scratch 文件。
+- **skills/tools used**: `graphify query`（定位 checkpoint/evidence persistence 节点）、`verification-before-completion`、`careful`。
+- **commands and results**:
+  - `graphify query "G-07b checkpoint large tool_result summarize_content_for_persistence content_persisted false resume next model call"` → 定位 `summarize_content_for_persistence()`、`summarize_messages_for_persistence()`、`_build_checkpoint_from_state()` 等节点。
+  - Red: `.venv/bin/python -m pytest tests/test_checkpoint_roundtrip.py::test_large_tool_result_resume_shape_is_accepted_by_next_model_call -q` → failed，原因：恢复后的 `tool_result` 只有 `summary`，没有 provider-callable `content`。
+  - Green: `.venv/bin/python -m pytest tests/test_checkpoint_roundtrip.py::test_large_tool_result_resume_shape_is_accepted_by_next_model_call -q` → `1 passed`。
+  - `.venv/bin/python -m pytest tests/test_checkpoint_roundtrip.py::test_checkpoint_summarizes_large_tool_results tests/test_checkpoint_resume_semantics.py::test_resume_preserves_tool_use_tool_result_pairing -q` → `2 passed`。
+  - `.venv/bin/python -m pytest tests/test_evidence_storage_hygiene.py::TestCheckpointSummarizesToolResults::test_checkpoint_summarizes_large_tool_result -q` → `1 passed`.
+  - `.venv/bin/python -m pytest tests/test_checkpoint_roundtrip.py -q` → `14 passed`。
+  - `.venv/bin/python -m pytest tests/test_checkpoint_resume_semantics.py -q` → `16 passed`。
+  - `.venv/bin/python -m pytest tests/test_evidence_storage_hygiene.py::TestCheckpointSummarizesToolResults -q` → `3 passed`。
+  - `.venv/bin/ruff check agent/checkpoint.py tests/test_checkpoint_roundtrip.py tests/test_checkpoint_resume_semantics.py` → `All checks passed!`
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 9]`，G-07b 五个文件 modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `git diff --check` → exit 0。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+  - `graphify update .` → exit 1，拒绝覆盖：new graph 17435 nodes < existing graph.json 17496；未使用 `--force`，未将 graph 输出纳入本轮。
+- **S1_GOAL_GAP.md items updated**: G-07b marked satisfied; G-12 dependency now has resolved large-result resume evidence.
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、移动、复制 secret；未修改 `config/config.yaml`；未创建 `.env`；未读取 real sessions/runs。
+- **commit hash**: 本轮将提交为 `fix: make summarized checkpoint tool results resumable`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-07b 提交后按 P1 推荐顺序继续 G-12（最小多步任务状态 / progress tracking），除非提交前验证出现阻塞。
+
+---
+
 ## 2026-06-16 22:21 CST (run 11) — G-19 reconcile audit config/secret wording
 
 - **date/time**: 2026-06-16 22:21 CST

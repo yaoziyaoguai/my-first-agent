@@ -31,3 +31,8 @@ graphify-out/
 .opencode/
 .DS_Store
 config/config.local.yaml
+# 本地真实 runtime config（含真实 api key）：只存在于工作区，不被 Git 跟踪；
+# 仓库只保留 config/config.example.yaml 模板。real provider 测试读取本地 config/config.yaml。
+config/config.yaml
+config/.local.yaml
+config/.local_backup

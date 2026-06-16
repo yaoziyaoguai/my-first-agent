@@ -10,7 +10,7 @@
 #   - 永远不要将真实 API key 写入可提交的 config 文件
 #   - 推荐：使用 api_key_env 从环境变量读取 key（适用于可提交的模板/示例）
 #   - 也可：inline api_key 写入本地 config（不提交，个人开发使用）
-#   - config/config.yaml 已被 skip-worktree 保护，不可提交真实 key
+#   - config/config.yaml 已被 .gitignore 忽略（不再被 Git 跟踪），可在本地存放真实 key 而不会被提交
 #
 # 本文件列出所有可用字段及其说明。
 

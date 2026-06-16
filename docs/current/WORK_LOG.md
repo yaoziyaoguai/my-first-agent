@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-06-16 (run 4) — G-15 config hygiene fix: untrack `config/config.yaml`, keep local real key in ignored file
+
+- **date/time**: 2026-06-16 (local)
+- **task name**: G-15 Config Hygiene Fix — 把 `config/config.yaml` 从 Git 跟踪移除并加入 `.gitignore`，保留本地真实 config 与真实 api key 供 real provider 测试（不迁移/删除/轮换 key）。
+- **files changed**（均在允许清单内）:
+  - `.gitignore`（新增 `config/config.yaml`、`config/.local.yaml`、`config/.local_backup`；`.env`、`config/config.local.yaml` 原已存在）。
+  - `config/config.example.yaml`（仅更正过时注释：skip-worktree → `.gitignore`；模板仍仅占位符，无 key 值）。
+  - `config/config.yaml`（**仅 Git index 删除该跟踪条目；本地工作树文件保留不动**）。
+  - `docs/current/S1_GOAL_GAP.md`（G-15 → satisfied + 完成证据；§2 汇总/状态分布、§9 索引同步）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **exact git/index actions performed**:
+  1. `git update-index --no-skip-worktree config/config.yaml`（解除 skip-worktree，不再依赖它）。
+  2. `git rm --cached config/config.yaml`（从 index 移除跟踪条目，**保留**本地工作树文件）。
+  3. 编辑 `.gitignore` 增加 `config/config.yaml` 等规则。
+  - 提交仅 `git add` 显式允许路径 + `git add -u config/config.yaml`（对已 untrack 的路径为 no-op，仅确认删除已暂存）；**从未** `git add config/config.yaml`（worktree 含真实 key）、**从未** `git add -A/.`。
+- **confirmation — .env**: `.env` = ENV_MISSING（开始与结束都不存在）；本轮**未读取、未恢复、未创建** `.env`；真实 key 不放入 `.env`。`.gitignore` 仍保留 `.env` 规则以防误创建后被提交。
+- **confirmation — local config.yaml present**: `test -f config/config.yaml` = LOCAL_CONFIG_EXISTS（修复后仍存在，未删除/未覆盖/未移动）。
+- **confirmation — local real key stays in ignored config.yaml**: 真实 api key 继续保留在本地 `config/config.yaml`（现已被 `.gitignore` 忽略）；**未**复制到任何新文件、**未**迁移、**未**轮换。
+- **confirmation — config.yaml ignored & untracked**: `git ls-files config/config.yaml` 为空；`git check-ignore -v config/config.yaml` 命中 `.gitignore:36`。
+- **confirmation — no real key printed or staged**: 全程仅用长度/结构掩码判断（字母→A、数字→9），**未打印明文**；config.yaml 的 staged diff 仅删除 13 字符占位符（max key len=13，无 35 字符真实 key）；独立确认真实 key 从未进入 git history（`git log --all -- config/config.yaml`：4 个 commit，run 3 扫描 `ever_long_key: no`）或 staged diff → **无需 rotate**。
+- **skills/tools used**: AGENTS.md 治理入口；`git update-index`/`git rm --cached`/`git check-ignore`/`git ls-files -v`；Python 长度&结构掩码做 secret hygiene 核验（不打印明文）；verification-before-completion 口径（先证据后断言）。
+- **verification commands and results**: `git ls-files config/config.yaml`=空；`git check-ignore -v config/config.yaml`=`.gitignore:36`；`test -f config/config.yaml`=LOCAL_CONFIG_EXISTS；`test -f .env`=ENV_MISSING；`git diff --cached -- config/config.yaml` 掩码扫描 max key len=13；禁改路径（agent/、tests/、docs/history/、AGENTS.md、CLAUDE.md、README.md、main.py、S_ROADMAP.md、S1_GOAL.md、审计文档）`git diff` 全 0；`git diff --check` 通过；安全扫描 `git grep` 未在跟踪文件出现真实长度 key。
+- **commit hash**: 本轮单次提交 `chore: untrack local runtime config`（精确 hash 见 `git log` 分支 HEAD / 运行报告）。
+- **next step**（grounded in `S1_GOAL_GAP.md` backlog）:
+  - G-15 完成解除了 G-03（real smoke）的 key-safe 前置；real provider 现可直接读本地 gitignored `config/config.yaml`。
+  - 后续授权 run 继续 P0：G-16（README 导航）、G-17（指定 acceptance 集）、G-19（调和审计文档 §0/§10.1 措辞）。本轮**不**推进这些 gap。
+
+---
+
 ## 2026-06-16 (run 3) — Independent S1 baseline audit + reorder S1_GOAL_GAP into priority release backlog
 
 - **date/time**: 2026-06-16 (local)

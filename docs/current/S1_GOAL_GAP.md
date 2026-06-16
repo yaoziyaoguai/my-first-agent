@@ -38,7 +38,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
-| **P0** | G-15, G-16, G-17, G-19 | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | untrack `config/config.yaml` + gitignore；修 README 导航；指定 acceptance 集；调和审计文档 §0/§10.1 措辞 |
+| **P0** | G-15 ✅, G-16, G-17, G-19 | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）**；待办：修 README 导航；指定 acceptance 集；调和审计文档 §0/§10.1 措辞 |
 | **P1** | G-07b, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | 复现大结果 resume；钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
@@ -49,10 +49,10 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 7 | G-01, G-02, G-04, G-05, G-08, G-09, G-14 |
+| satisfied | 8 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)** |
 | partially_satisfied | 5 | G-03, G-07, G-10, G-12, G-17 |
 | unknown_needs_audit | 1 | G-07b |
-| s1_blocker | 2 | G-15, G-16 |
+| s1_blocker | 1 | G-16 |
 | s1_gap | 2 | G-18, G-19 |
 | defer_to_tech_debt | 2 | G-06 (TD-002), G-11 (TD-001) |
 | out_of_scope | 1 | G-13 |
@@ -63,8 +63,8 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 > 推荐执行顺序：G-15 → G-16 → G-17 → G-19。
 
-### G-15 — `config/config.yaml` 被 git 跟踪（config 卫生 / 发布前必须 untrack）
-- **Priority**: P0
+### G-15 — `config/config.yaml` 被 git 跟踪（config 卫生 / 发布前必须 untrack） — ✅ RESOLVED (2026-06-16 run 4)
+- **Priority**: P0（已完成）
 - **Layer**: Cross-cutting / Security (config hygiene)
 - **S1 requirement**: 安全配置基线——会被填入真实 key 的本地配置文件不应被 git 跟踪；仓库不得提交真实 provider 密钥。
 - **Current evidence**（本轮独立核验，掩码，无明文，详见 `_tmp_s1_priority_audit/code_evidence_index.md`）:
@@ -73,14 +73,15 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
   - **HEAD 与 INDEX** 的 `api_key` 均为 **13 字符占位符**（结构 `AA-AAAAAAA_AA`）；config.yaml 历史 4 个 commit **从未**出现 ≥30 字符 key（`ever_long_key: no`）→ **真实 key 从未被提交**。
   - **工作树**当前 `api_key` 为 **35 字符真实长度 key**，被 `skip-worktree` 对 git 遮挡（`git status` 看不到）。
   - 模板 `config/config.example.yaml`、`config/config.local.example.yaml` 已存在。
-- **Status**: s1_blocker
-- **Gap**: 真实 key 此刻就在**被 git 跟踪的路径**的工作树里，仅靠脆弱的 `skip-worktree` 本地位遮挡；文件仍被跟踪 → 一旦 skip-worktree 被重置 / `git add -f` / re-clone reset，真实 key 可能被提交。**注意：当前已提交内容是占位符，没有已暴露的真实密钥。**
-- **Blocking level**: release_blocker
-- **Dependencies**: 无（其完成是 G-03 real smoke 的 key-safe 前置）。
-- **Recommended execution order**: P0-1（最先）。
-- **Needed action**: `git rm --cached config/config.yaml` 移除跟踪 + 加入 `.gitignore`；仓库保留 `config/config.example.yaml` 模板；真实 key 仅放 gitignored `.env` / `config/config.local.yaml`。**不要求轮换密钥**（无已暴露真实密钥）。（本轮按指令不处理密钥本体、不改 config，仅按授权修正优先级/证据表述。）
-- **Verification**: `git ls-files config/config.yaml` 为空；tracked tree 无真实长度 provider key；`.gitignore` 含 `config/config.yaml`。
-- **Decision**: 优先级由上一轮 must_fix_for_s1（P1）**升回** release_blocker（P0），恢复与冻结目标 `S1_GOAL.md §5 RB-1`（"必须先解决才能宣布 S1 可用"）的一致性，并据本轮 skip-worktree 新发现强化。severity 仍为「config 卫生 / 发布前 untrack」，**非**「已暴露真实密钥 / 需轮换」。留 `S1_GOAL_GAP.md`（S1 必修），不入 `TECH_DEBT.md`。审计文档 §0/§10.1 的「提交了真实密钥」强表述由 G-19 追踪调和；当前权威口径以本 gap + `WORK_LOG.md` 为准。
+- **Status**: satisfied（2026-06-16 run 4 完成）
+- **Gap**: ~~真实 key 在被跟踪路径的工作树里仅靠 `skip-worktree` 遮挡，文件仍被跟踪~~ → **已解决**：`config/config.yaml` 已从 Git 跟踪移除并被 `.gitignore` 忽略；本地文件与真实 key 保留在工作区，不再被 Git 跟踪、不再依赖 skip-worktree。
+- **Blocking level**: release_blocker（已满足）
+- **Dependencies**: 无。（其完成解除了 G-03 real smoke 的 key-safe 前置——real provider 现可直接读本地 gitignored `config/config.yaml`。）
+- **Recommended execution order**: P0-1（已完成）。
+- **Needed action**: ~~untrack + gitignore + 保留 example 模板~~ 已执行（见 Completion evidence）。
+- **Verification**（2026-06-16 run 4 实跑通过）: `git ls-files config/config.yaml` 为空；`git check-ignore -v config/config.yaml` 命中 `.gitignore:36`；`test -f config/config.yaml` = LOCAL_CONFIG_EXISTS；config.yaml staged diff 仅删除 13 字符占位符（max key len=13，无 35 字符真实 key）；`.env` = ENV_MISSING（未恢复/未创建）。
+- **Completion evidence**: 动作 = `git update-index --no-skip-worktree config/config.yaml` → `git rm --cached config/config.yaml`（保留本地文件）+ `.gitignore` 增加 `config/config.yaml`（及 `config/.local.yaml`、`config/.local_backup`）+ 同步更正 `config/config.example.yaml` 过时的 skip-worktree 注释。**用户口径**：`.env` 已过时且已删除，**不**恢复、**不**创建；真实 key 继续保留在本地 gitignored `config/config.yaml` 供 real provider 测试；**未**迁移 / 删除 / 覆盖 / 轮换 key（真实 key 从未进入 git history 或 staged diff，history `ever_long_key: no`，故确认无需轮换）。本轮提交 hash 见 `WORK_LOG.md` / `git log`。
+- **Decision**: ✅ satisfied。不再依赖 skip-worktree；仓库仅保留 `config/config.example.yaml`（占位符模板）。G-15 保留原 ID 与完成证据，不删除。审计文档 §0/§10.1「提交了真实密钥」强表述仍由 **G-19** 追踪调和（本轮不动 G-19）；当前权威口径以本 gap + `WORK_LOG.md` 为准。
 
 ### G-16 — README / quickstart 可用性
 - **Priority**: P0
@@ -354,10 +355,10 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-12 | 多步任务 | §4 P1 | partially_satisfied | must_fix_for_s1 | should_fix→must_fix（AC-5） |
 | G-13 | scheduler | §7 P4 | out_of_scope | s2_or_later | 不变 |
 | G-14 | MCP/Skill/SubAgent | §7 P4 | satisfied(边界) | s2_or_later(激活) | 边界标 satisfied |
-| G-15 | config.yaml | §3 P0 | s1_blocker | release_blocker | **must_fix→release_blocker**；补 skip-worktree 证据 |
+| G-15 | config.yaml | §3 P0 | satisfied (✅ run 4) | release_blocker | **已完成**：untrack + gitignore；真实 key 留本地 ignored 文件 |
 | G-16 | README | §3 P0 | s1_blocker | release_blocker | **must_fix→release_blocker** |
 | G-17 | acceptance | §3 P0 | partially_satisfied | release_blocker | **should_fix→release_blocker** |
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | s1_gap | release_blocker | **本轮新增** |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：G-15、G-16、G-17、G-19、G-07b、G-12、G-03。本轮按指令未改 config / README / 审计文档，仅在允许清单内（`S1_GOAL_GAP.md` / `WORK_LOG.md` / 临时目录）重排与登记。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、G-16、G-17、G-19、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；其余 P0/P1 项仍待后续授权 run 按优先级执行。

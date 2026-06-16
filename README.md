@@ -1,12 +1,12 @@
 # my-first-agent
 
-First Agent 是一个 local-first 的 Agent Runtime 实验项目。当前仓库目标是保留真实实现、测试保护网和少量准确文档，减少旧计划和错误方向对后续 Agent 的干扰。
+First Agent 是一个 local-first 的 Agent Runtime 项目。当前仓库按 S1（Baseline Usable Product / 基本可用产品版）收敛：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收并继续增强。
 
-**当前状态入口：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)**。如果其他文档与它冲突，以 `PROJECT_STATUS.md` 为准。
+**当前权威入口：[docs/current/S1_GOAL.md](docs/current/S1_GOAL.md)**。S1 未完成项以 [docs/current/S1_GOAL_GAP.md](docs/current/S1_GOAL_GAP.md) 为准。
 
 ## 当前状态
 
-- 阶段：**developer prototype / local development**，不是面向普通用户的产品。
+- 阶段：**S1 / Baseline Usable Product 收尾**，不是历史 demo、sprint 或旧 v1/v2/v3 目标。
 - 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
 - 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
 - Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
@@ -43,17 +43,18 @@ cp config/config.example.yaml config/config.yaml
 
 `--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-当前为 **safe-local** 默认阶段：默认不调用真实 API、不访问网络、不需要 API key。Skill System 仍为 **实验性**，**not a full Textual IDE**。演示 skill：`demo-note-maker`。能力状态：`CURRENT_CAPABILITY_STATUS.zh.md`。
+当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 在 S1 中只要求边界清楚，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S1_GOAL.md](docs/current/S1_GOAL.md)。
 
 ## 文档导航
 
 | 想了解 | 读这里 |
 |---|---|
-| 当前状态 | [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) |
-| 当前能力 | [docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md](docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md) |
-| 文档入口 | [docs/README.zh.md](docs/README.zh.md) |
-| 工程流程 | [docs/dev/AUTO_RUN_WORKFLOW.md](docs/dev/AUTO_RUN_WORKFLOW.md) |
-| 审计入口 | [docs/06-audit/README.md](docs/06-audit/README.md) |
+| S 系列版本语义 | [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) |
+| S1 目标 | [docs/current/S1_GOAL.md](docs/current/S1_GOAL.md) |
+| S1 release backlog | [docs/current/S1_GOAL_GAP.md](docs/current/S1_GOAL_GAP.md) |
+| 当前代码现实审计 | [docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md](docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md) |
+| 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
+| 执行日志 | [docs/current/WORK_LOG.md](docs/current/WORK_LOG.md) |
 
 ## 测试
 

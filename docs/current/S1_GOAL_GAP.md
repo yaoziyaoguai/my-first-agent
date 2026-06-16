@@ -38,7 +38,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
-| **P0** | G-15 ✅, G-16, G-17, G-19 | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）**；待办：修 README 导航；指定 acceptance 集；调和审计文档 §0/§10.1 措辞 |
+| **P0** | G-15 ✅, G-16 ✅, G-17, G-19 | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）**；待办：指定 acceptance 集；调和审计文档 §0/§10.1 措辞 |
 | **P1** | G-07b, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | 复现大结果 resume；钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
@@ -49,10 +49,10 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 8 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)** |
+| satisfied | 9 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)** |
 | partially_satisfied | 5 | G-03, G-07, G-10, G-12, G-17 |
 | unknown_needs_audit | 1 | G-07b |
-| s1_blocker | 1 | G-16 |
+| s1_blocker | 0 | — |
 | s1_gap | 2 | G-18, G-19 |
 | defer_to_tech_debt | 2 | G-06 (TD-002), G-11 (TD-001) |
 | out_of_scope | 1 | G-13 |
@@ -83,19 +83,20 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 - **Completion evidence**: 动作 = `git update-index --no-skip-worktree config/config.yaml` → `git rm --cached config/config.yaml`（保留本地文件）+ `.gitignore` 增加 `config/config.yaml`（及 `config/.local.yaml`、`config/.local_backup`）+ 同步更正 `config/config.example.yaml` 过时的 skip-worktree 注释。**用户口径**：`.env` 已过时且已删除，**不**恢复、**不**创建；真实 key 继续保留在本地 gitignored `config/config.yaml` 供 real provider 测试；**未**迁移 / 删除 / 覆盖 / 轮换 key（真实 key 从未进入 git history 或 staged diff，history `ever_long_key: no`，故确认无需轮换）。本轮提交 hash 见 `WORK_LOG.md` / `git log`。
 - **Decision**: ✅ satisfied。不再依赖 skip-worktree；仓库仅保留 `config/config.example.yaml`（占位符模板）。G-15 保留原 ID 与完成证据，不删除。审计文档 §0/§10.1「提交了真实密钥」强表述仍由 **G-19** 追踪调和（本轮不动 G-19）；当前权威口径以本 gap + `WORK_LOG.md` 为准。
 
-### G-16 — README / quickstart 可用性
-- **Priority**: P0
+### G-16 — README / quickstart 可用性 — ✅ RESOLVED (2026-06-16 run 5)
+- **Priority**: P0（已完成）
 - **Layer**: Cross-cutting / UX
 - **S1 requirement**: 使用者可按 README/quickstart 跑起来，文档导航有效（对应 AC-7）。
 - **Current evidence**（本轮独立核验）: README:17-44 有 quickstart；但导航链接 `docs/PROJECT_STATUS.md`、`docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md`、`docs/README.zh.md`、`docs/dev/AUTO_RUN_WORKFLOW.md`、`docs/06-audit/README.md` —— **逐一验证全部 MISSING**（已迁入 `docs/history/`，仅 `docs/current` 存在）；README:5/9/46 自述「以 `PROJECT_STATUS.md` 为准 / developer prototype，不是面向普通用户的产品 / safe-local 实验性」，与「基本可用产品版」定位冲突。
-- **Status**: s1_blocker
-- **Gap**: 用户面运行说明与「基本可用产品版」不一致；5 个文档导航链接全部失效。
-- **Blocking level**: release_blocker
+- **Status**: satisfied（2026-06-16 run 5 完成）
+- **Gap**: ~~用户面运行说明与「基本可用产品版」不一致；5 个文档导航链接全部失效~~ → **已解决**：README 改为 S1 / Baseline Usable Product 收尾定位，并将文档导航指向 `docs/current/` 下存在的当前权威文件。
+- **Blocking level**: release_blocker（已满足）
 - **Dependencies**: 无。
-- **Recommended execution order**: P0-2。
-- **Needed action**: 更新 README 导航指向 `docs/current/`、重述为 S1 基线定位。（本轮**禁改 README**，仅登记。）
-- **Verification**: README 所有文档链接解析到存在的文件。
-- **Decision**: 优先级由上一轮 must_fix_for_s1（P1）**升回** release_blocker（P0），恢复与 `S1_GOAL.md §5 RB-2` 一致。本轮不改，留 gap。
+- **Recommended execution order**: P0-2（已完成）。
+- **Needed action**: ~~更新 README 导航指向 `docs/current/`、重述为 S1 基线定位~~ 已执行（见 Completion evidence）。
+- **Verification**（2026-06-16 run 5 实跑通过）: README link check 检查 9 个相对 Markdown 链接，全部存在；`rg` 搜索旧失效导航与旧 prototype 表述无命中。
+- **Completion evidence**: `README.md` 顶部定位改为 S1 Baseline Usable Product 收尾；当前权威入口改为 `docs/current/S1_GOAL.md` + `docs/current/S1_GOAL_GAP.md`；文档导航改为 `docs/current/{S_ROADMAP,S1_GOAL,S1_GOAL_GAP,S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh,TECH_DEBT,WORK_LOG}.md`；safe-local 与 L5 扩展边界说明保留。
+- **Decision**: ✅ satisfied。README/quickstart 已具备当前 S1 入口与有效文档导航；G-16 保留原 ID 与完成证据，不删除。
 
 ### G-17 — 测试分层 / 指定 S1 acceptance 集
 - **Priority**: P0
@@ -356,9 +357,9 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-13 | scheduler | §7 P4 | out_of_scope | s2_or_later | 不变 |
 | G-14 | MCP/Skill/SubAgent | §7 P4 | satisfied(边界) | s2_or_later(激活) | 边界标 satisfied |
 | G-15 | config.yaml | §3 P0 | satisfied (✅ run 4) | release_blocker | **已完成**：untrack + gitignore；真实 key 留本地 ignored 文件 |
-| G-16 | README | §3 P0 | s1_blocker | release_blocker | **must_fix→release_blocker** |
+| G-16 | README | §3 P0 | satisfied (✅ run 5) | release_blocker | **已完成**：README S1 定位 + 当前文档导航 |
 | G-17 | acceptance | §3 P0 | partially_satisfied | release_blocker | **should_fix→release_blocker** |
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | s1_gap | release_blocker | **本轮新增** |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、G-16、G-17、G-19、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；其余 P0/P1 项仍待后续授权 run 按优先级执行。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、G-17、G-19、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；其余 P0/P1 项仍待后续授权 run 按优先级执行。

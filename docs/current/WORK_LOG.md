@@ -4,6 +4,58 @@
 
 ---
 
+## 2026-06-16 20:20 CST (run 6) — Commit G-16 under selected-gap gate
+
+- **date/time**: 2026-06-16 20:20 CST
+- **gap ID / priority**: G-16 / P0 release_blocker
+- **task name**: G-16 README / quickstart 可用性提交收口。
+- **why this gap was selected**: G-16 已在工作区完成且是 P0；更新后的治理目标明确 selected gap verification 是 commit gate，global ruff/full pytest 仅作 health checks。
+- **files changed**:
+  - `README.md`
+  - `docs/current/S1_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空。
+- **skills/tools used**: `verification-before-completion`、`careful`；`graphify` 已加载但本次 README 文档收口无需 graph query。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 6]`，仅 G-16 三个文件 modified，另有既有未跟踪 `.claude/settings.json`、`CLAUDE.md`（未纳入）。
+  - `git diff --check` → exit 0。
+  - README link check → `checked_links=9`，9 个链接全部 `OK`。
+  - `rg -n "docs/PROJECT_STATUS|docs/00-overview|docs/README.zh|docs/dev|docs/06-audit|PROJECT_STATUS|developer prototype|不是面向普通用户" README.md` → exit 1 / 无命中。
+  - `.venv/bin/python -m pytest tests/test_v0_3_shell_completeness.py::test_readme_startup_example_matches_current_header_shape -q` → `1 passed`.
+- **S1_GOAL_GAP.md items updated**: 无新增状态变化；沿用 run 5 对 G-16 的 satisfied 更新。
+- **TECH_DEBT.md items added or updated**: 无。
+- **commit hash**: 本轮将提交为 `docs: update README for S1 baseline usability`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-16 提交后继续 P0/G-17（指定 S1 acceptance 集），除非提交后状态显示新的未知脏 diff 或其他 stop condition。
+
+---
+
+## 2026-06-16 19:59 CST (run 5) — G-16 README / quickstart S1 usability
+
+- **date/time**: 2026-06-16 19:59 CST
+- **gap ID / priority**: G-16 / P0 release_blocker
+- **task name**: G-16 README / quickstart 可用性——把 README 从旧 prototype/失效 docs 导航改为 S1 Baseline Usable Product 入口与 `docs/current/` 当前导航。
+- **why this gap was selected**: G-15 已完成；按 `S1_GOAL_GAP.md` P0 推荐顺序，G-16 是最高优先级且无依赖的未解决 release blocker。
+- **files changed**:
+  - `README.md`（S1 定位、当前权威入口、`docs/current/` 文档导航；保留 safe-local、`demo-note-maker`、`CURRENT_CAPABILITY_STATUS.zh.md` 历史文件名和 `not a full Textual IDE` guard 文案以满足既有 README 测试契约）。
+  - `docs/current/S1_GOAL_GAP.md`（G-16 → satisfied；P0 summary、status distribution、Original ID Index 同步）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: `careful`（安全边界）、`verification-before-completion`（提交/完成前证据门禁）、`graphify` skill 已加载但本 README 文档改动未使用 graph query。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 6]`；本轮修改 `README.md`、`docs/current/S1_GOAL_GAP.md`，另有既有未跟踪 `.claude/settings.json`、`CLAUDE.md`（未纳入）。
+  - README link check（Python 本地解析 Markdown 相对链接）→ `checked_links=9`，9 个链接全部 `OK`。
+  - `rg -n "docs/PROJECT_STATUS|docs/00-overview|docs/README.zh|docs/dev|docs/06-audit|PROJECT_STATUS|developer prototype|不是面向普通用户" README.md` → exit 1 / 无命中（旧失效导航与旧 prototype 表述已清除）。
+  - `.venv/bin/python -m pytest tests/test_v0_3_shell_completeness.py::test_readme_startup_example_matches_current_header_shape -q` → `1 passed`。
+  - `git diff --check` → exit 0。
+  - `.venv/bin/ruff check .` → exit 1，发现 451 个既有 lint 问题，首项 `agent/__init__.py:8 I001`；本轮未改 Python 文件，未批量修复。
+  - `.venv/bin/python -m pytest -q -rx` → exit 1，初次 full run 为 `38 failed, 4742 passed, 12 skipped, 26 xfailed`；其中本轮直接引入的 README guard 失败已通过 targeted test 修复，其余失败涉及已迁移历史 docs 路径、evidence taxonomy guard、provider config 隔离等非 G-16 范围问题。因 ruff 已失败且 full suite 已存在范围外失败，修复后未重跑 full suite。
+- **S1_GOAL_GAP.md items updated**: G-16 marked satisfied with verification evidence; P0 summary/status table/index updated. G-17/G-19/G-07b/G-12/G-03 未推进。
+- **TECH_DEBT.md items added or updated**: 无。
+- **commit hash**: none；未提交。原因：项目级 `ruff check .` 与 full pytest 门禁失败，按用户 stop condition 和 commit rule 停止。
+- **next gap/blocker**: 阻塞于项目级门禁失败；未继续 G-17。当前 docs 仍授权的下一项是 P0/G-17，但需要先处理或明确接受上述门禁失败状态后才能按本规则提交/继续。
+
+---
+
 ## 2026-06-16 (run 4) — G-15 config hygiene fix: untrack `config/config.yaml`, keep local real key in ignored file
 
 - **date/time**: 2026-06-16 (local)

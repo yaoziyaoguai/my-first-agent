@@ -4,6 +4,97 @@
 
 ---
 
+## 2026-06-16 22:11 CST (run 10) — G-17 S1 acceptance baseline scope adjustment
+
+- **date/time**: 2026-06-16 22:11 CST
+- **gap ID / priority**: G-17 / P0 release_blocker
+- **task name**: G-17 scope 调整与 S1 acceptance baseline 定义。
+- **why this gap was selected**: 用户明确选择「调整 G-17 scope，把 real execution 归入 G-03」；按 P0 推荐顺序，G-17 仍是 G-15/G-16 后的最高优先 eligible gap。
+- **files changed**:
+  - `docs/current/S1_ACCEPTANCE_BASELINE.md`（新增 S1 acceptance baseline 权威文档）。
+  - `docs/current/S1_GOAL_GAP.md`（G-17 → satisfied；G-03 接收 real smoke Verification；P0 summary/status/index 同步）。
+  - `docs/current/WORK_LOG.md`（本条；保留 run 7-9 的历史 blocker audit 记录）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: `verification-before-completion`、`careful`；沿用 run 7 的 `graphify query` 测试定位证据，本轮无需新增 graph scratch。
+- **commands and results**:
+  - `.venv/bin/python -m pytest tests/golden_e2e -q` → `15 passed`。
+  - `.venv/bin/python -m pytest tests/smoke/test_first_usable_task_e2e.py -q` → `6 passed`。
+  - `.venv/bin/python -m pytest tests/runtime_integration/test_phase1_real_core_loop.py::TestCoreChatWiring::test_core_chat_actually_invokes_runtime_action_dispatcher_from_turn_end_hook -q` → `1 passed`。
+  - `rg -n "S1_ACCEPTANCE_BASELINE|G-03|tests/golden_e2e|test_first_usable_task_e2e|test_provider_real_smoke|MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE|real provider smoke" docs/current/S1_GOAL_GAP.md docs/current/S1_ACCEPTANCE_BASELINE.md` → exit 0，确认 baseline 与 G-03 handoff 已记录。
+  - Real provider smoke command documented for G-03 only: `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_provider_real_smoke.py -q`；本轮未运行。
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 7]`；仅 G-17 文档文件 modified/untracked，既有 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `git diff --check` → exit 0。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+- **S1_GOAL_GAP.md items updated**: G-17 marked satisfied with S1 fake/local acceptance baseline; G-03 now explicitly owns real provider smoke Verification; P0 summary/status distribution/original ID index updated.
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、移动、复制 secret；未修改 `config/config.yaml`；未创建 `.env`；未推进 G-03；未推进 G-19。
+- **commit hash**: 本轮将提交为 `docs: define S1 acceptance baseline`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: 若提交后状态无新的阻塞，按 P0 推荐顺序继续 G-19（调和审计文档 §0/§10.1 与 G-15 口径冲突）。
+
+---
+
+## 2026-06-16 20:31 CST (run 9) — G-17 blocker audit threshold reached
+
+- **date/time**: 2026-06-16 20:31 CST
+- **gap ID / priority**: G-17 / P0 release_blocker
+- **task name**: G-17 blocker audit threshold reached.
+- **why this gap was selected**: G-17 remains the highest-priority eligible unresolved P0 after G-15/G-16; G-19/P1/P2 cannot be reached without either resolving or explicitly bypassing G-17.
+- **files changed**: `docs/current/WORK_LOG.md`（本条）；未修改 `S1_GOAL_GAP.md`。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空。
+- **skills/tools used**: `verification-before-completion`、`careful`。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 7]`，`docs/current/WORK_LOG.md` modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `S1_GOAL_GAP.md` G-17 复核：verification 仍要求 fake/real `events.jsonl` 对照，且仅 `provider_type` 不同。
+  - `WORK_LOG.md` run 7/run 8 复核：fake/local 侧已有通过证据；real smoke 仍需显式 opt-in / real provider config。
+- **S1_GOAL_GAP.md items updated**: 无。G-17 保持 `partially_satisfied` / `release_blocker`。
+- **TECH_DEBT.md items added or updated**: 无。
+- **commit hash**: none。原因：G-17 verification 未通过，不能按 one-gap commit rule 提交。
+- **next gap/blocker**: Same blocking condition has now repeated across run 7, run 8, and run 9: G-17 real-provider verification requires user authorization / explicit scope change. Goal should be marked blocked until the user supplies one of the choices listed in run 8.
+
+---
+
+## 2026-06-16 20:29 CST (run 8) — G-17 blocker recheck
+
+- **date/time**: 2026-06-16 20:29 CST
+- **gap ID / priority**: G-17 / P0 release_blocker
+- **task name**: G-17 blocker recheck after goal continuation.
+- **why this gap was selected**: 按 P0 推荐顺序，G-17 仍是 G-15/G-16 后的最高优先未解决项；G-19 不能在 G-17 阻塞未处理时被跳过。
+- **files changed**: `docs/current/WORK_LOG.md`（本条）；未修改 `S1_GOAL_GAP.md`。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 未重跑；上一条 run 7 为空且本轮未创建 scratch 文件。
+- **skills/tools used**: `verification-before-completion`、`careful`。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 7]`，`docs/current/WORK_LOG.md` modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - 复读 `S1_GOAL_GAP.md` G-17：Verification 仍要求“指定集合在 fake 模式确定性通过；一次 fake run 与一次 real run 的 `events.jsonl` 经过同一事件集合、仅 `provider_type` 不同”。
+  - 复读 `WORK_LOG.md` run 7：fake/local 侧已通过（golden_e2e 15 passed、smoke 6 passed、core loop wiring 1 passed），real smoke 默认 skip（需 `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1`）。
+- **S1_GOAL_GAP.md items updated**: 无。G-17 保持 `partially_satisfied` / `release_blocker`。
+- **TECH_DEBT.md items added or updated**: 无。
+- **commit hash**: none。原因：G-17 verification 未通过，且真实 provider safety/config 需要用户明确授权。
+- **next gap/blocker**: 仍阻塞于 G-17 真实侧 verification。需要用户明确选择：授权 key-safe real provider smoke / 调整 G-17 scope 把 real execution 归入 G-03 / 或允许暂时跳过 G-17 处理 G-19。
+
+---
+
+## 2026-06-16 20:26 CST (run 7) — G-17 acceptance set investigation blocked on real-provider verification
+
+- **date/time**: 2026-06-16 20:26 CST
+- **gap ID / priority**: G-17 / P0 release_blocker
+- **task name**: G-17 测试分层 / 指定 S1 acceptance 集调查。
+- **why this gap was selected**: G-15、G-16 已完成；按 `S1_GOAL_GAP.md` P0 推荐顺序，G-17 是下一个未解决 release blocker。
+- **files changed**: `docs/current/WORK_LOG.md`（本条，记录 stop condition）；未修改 `S1_GOAL_GAP.md`，因为 G-17 verification 未完整通过。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: `graphify query`（定位 FakeProvider / acceptance / same-spine 相关测试节点）、`verification-before-completion`、`careful`。
+- **commands and results**:
+  - `graphify query "S1 acceptance tests golden_e2e same-spine FakeProvider RealProvider evidence events provider_type"` → 返回 `FakeProvider`、`tests/golden_e2e/*`、`tests/smoke/test_first_usable_task_e2e.py`、`tests/runtime_integration/test_phase1_real_core_loop.py`、`tests/test_provider_real_smoke.py` 等相关节点。
+  - `.venv/bin/python -m pytest tests/golden_e2e -q` → `15 passed`（fake deterministic acceptance 候选通过）。
+  - `.venv/bin/python -m pytest tests/smoke/test_first_usable_task_e2e.py -q` → `6 passed`（first usable task smoke 候选通过）。
+  - `.venv/bin/python -m pytest tests/runtime_integration/test_phase1_real_core_loop.py::TestCoreChatWiring::test_core_chat_actually_invokes_runtime_action_dispatcher_from_turn_end_hook -q` → `1 passed`（本地 core.chat → runtime loop → dispatcher provenance wiring 通过）。
+  - `.venv/bin/python -m pytest tests/test_provider_real_smoke.py -q` → `3 skipped`，skip reason 为 real provider smoke 需要显式 opt-in `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1`。
+- **S1_GOAL_GAP.md items updated**: 无。G-17 保持 `partially_satisfied` / `release_blocker`。
+- **TECH_DEBT.md items added or updated**: 无。
+- **commit hash**: none；未提交本条。原因：G-17 的完整 verification 要求 fake/real `events.jsonl` 对照；真实 provider smoke 需要显式 opt-in 和真实配置，本轮边界禁止擅自调用真实 provider / 读取或输出 secrets。
+- **next gap/blocker**: Stop condition：G-17 真实侧 verification 需要用户明确授权 real provider smoke 的安全配置/opt-in，或用户调整 G-17 scope 将 real execution 归入 G-03。未继续 G-19/P1/P2。
+
+---
+
 ## 2026-06-16 20:20 CST (run 6) — Commit G-16 under selected-gap gate
 
 - **date/time**: 2026-06-16 20:20 CST

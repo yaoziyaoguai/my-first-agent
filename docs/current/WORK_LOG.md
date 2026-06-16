@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-06-17 04:18 CST — TD-007 S1 fake/real core evidence smoke
+
+- **date/time**: 2026-06-17 04:18 CST
+- **task name**: S1 Completion Cleanup — TD-007 AC-2 fake/real `events.jsonl` runtime artifact comparison.
+- **scope**: 只处理 TD-007；不处理 TD-006 旧 guard 测试族；不做 scheduler/MCP/subagent/S2 工作；未修改 `config/config.yaml`、`.gitignore`、config example、`AGENTS.md`、`docs/history/`、`docs/current/S_ROADMAP.md`、`docs/current/S1_GOAL.md`。
+- **files changed**:
+  - `tests/test_s1_fake_real_core_evidence_smoke.py`（新增 opt-in smoke，证明 FakeProvider 与 real provider 都通过 `core.chat()` 并产出 `events.jsonl`）。
+  - `docs/current/TECH_DEBT.md`（TD-007 → resolved，记录非敏感 evidence）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **safety notes**:
+  - real provider smoke 使用 `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1` 显式 opt-in。
+  - 测试只用 `build_model_provider_from_env()` 读取本地 ignored runtime config；未读取、打印、复制、移动、修改、提交 `config/config.yaml` 内容或任何 secret。
+  - 测试运行前通过 git 命令确认 `config/config.yaml` 未被 tracked 且被 ignored；未创建 `.env`；未 push。
+  - 文档只记录 provider metadata、事件链路和 evidence 文件路径；不记录真实请求/响应正文或模型输出。
+- **evidence artifacts**:
+  - fake: `sessions/s1-td007-fake-eb3582f5/events.jsonl`
+  - real: `sessions/s1-td007-real-47ace4b4/events.jsonl`
+- **non-sensitive comparison result**:
+  - fake/real 都包含共享 core action set：`memory.recall`、`memory.turn_end_proposal`、`tool.gate`、`skill.select`、`checkpoint.save`。
+  - fake provider evidence: `provider_kind=fake`、`provider_external_call=False`、`core_entrypoint=core.chat`。
+  - real provider evidence: `provider_kind=real`、`provider_external_call=True`、`core_entrypoint=core.chat`。
+  - 仅比较事件骨架和 provider metadata；不要求 fake/real 输出文本一致。
+- **commands and results**:
+  - `git ls-files --error-unmatch config/config.yaml` → exit 1（未被 git tracked）。
+  - `git check-ignore config/config.yaml` → exit 0（被 `.gitignore` 忽略）。
+  - `.venv/bin/ruff check tests/test_s1_fake_real_core_evidence_smoke.py` → pass。
+  - `.venv/bin/python -m pytest tests/test_s1_fake_real_core_evidence_smoke.py -q -rx` → `1 skipped`（未 opt-in 时默认跳过）。
+  - `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 MY_FIRST_AGENT_S1_CORE_EVIDENCE_ROOT=sessions .venv/bin/python -m pytest tests/test_s1_fake_real_core_evidence_smoke.py -q -rx` → `1 passed in 0.89s`。
+  - `git diff --check` → pass（提交前复跑见本轮最终报告）。
+- **TECH_DEBT.md items added or updated**: TD-007 marked resolved with runtime artifact evidence and command.
+- **commit hash**: 本轮将提交为 `test: add S1 fake real core evidence smoke`（精确 hash 见 `git log` / 最终报告）。
+- **next step/blocker**: TD-006 旧 S1-前文档规制 guard 测试族仍保留为 S2 cleanup；本轮不扩范围修。
+
+---
+
 ## 2026-06-17 03:59 CST (run 20) — TD-005 config secret-safety guard aligned
 
 - **date/time**: 2026-06-17 03:59 CST

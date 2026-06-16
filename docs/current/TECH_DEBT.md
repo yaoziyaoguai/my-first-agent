@@ -123,8 +123,9 @@
 - Current impact: AC-2 在源码层 + provider 层满足，但在它字面命名的运行产物层未满足；"P0/P1/P2 全部完成"应带此 caveat 阅读。
 - Risk level: medium
 - Revisit trigger: 当可授权一次 real `core.chat()` 运行产出 `sessions/<id>/events.jsonl`，从而进行文档所述的 fake-vs-real 事件对照时。
-- Status: open
-- Evidence: `tests/test_provider_real_smoke.py:120-130`；WORK_LOG run 16（"现行 smoke test 不产生 sessions/<id>/events.jsonl"）；S1_GOAL.md §6 AC-2；gap G-04。
+- Status: resolved（2026-06-17；S1 completion cleanup）
+- Resolution: 新增 opt-in smoke `tests/test_s1_fake_real_core_evidence_smoke.py`，让 FakeProvider 与本地 ignored real provider runtime config 都进入 `core.chat()`，通过 `EventLogWriter` 产出 fake/real `events.jsonl`，并比较共享 core action set：`memory.recall`、`memory.turn_end_proposal`、`tool.gate`、`skill.select`、`checkpoint.save`。测试只比较事件骨架与 provider metadata，不比较模型正文。
+- Evidence: `tests/test_provider_real_smoke.py:120-130`；WORK_LOG run 16（"现行 smoke test 不产生 sessions/<id>/events.jsonl"）；S1_GOAL.md §6 AC-2；gap G-04；cleanup verification：`MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 MY_FIRST_AGENT_S1_CORE_EVIDENCE_ROOT=sessions .venv/bin/python -m pytest tests/test_s1_fake_real_core_evidence_smoke.py -q -rx` → `1 passed in 0.89s`。Evidence artifacts: `sessions/s1-td007-fake-eb3582f5/events.jsonl` and `sessions/s1-td007-real-47ace4b4/events.jsonl`; provider evidence: fake `provider_kind=fake, provider_external_call=False, core_entrypoint=core.chat`; real `provider_kind=real, provider_external_call=True, core_entrypoint=core.chat`。
 
 ---
 

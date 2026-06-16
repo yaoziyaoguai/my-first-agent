@@ -39,7 +39,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
 | **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 ✅ | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）；G-19 已完成（run 11：审计文档 config/secret 事实与 G-15 调和）**；P0 全部完成 |
-| **P1** | G-07b ✅, G-12 ✅, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已完成（run 13：legacy Plan 最小多步 plan→advance→resume→done 验收）**；待办：写 key-safe real smoke 步骤 |
+| **P1** | G-07b ✅, G-12 ✅, G-03 ✅ | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已完成（run 13：legacy Plan 最小多步 plan→advance→resume→done 验收）；G-03 已完成（run 16：key-safe opt-in real provider smoke 3 passed）**；P1 全部完成 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
 | **P4** | G-13, G-14, G-06(TD-002), G-11(TD-001) | dormant by design / L5 边界已满足激活留 S2 / 已确认 S1 不解决 | 见 `TECH_DEBT.md`，S2+ 重评 |
@@ -49,8 +49,8 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 13 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)**, **G-12 (✅ run 13)** |
-| partially_satisfied | 3 | G-03, G-07, G-10 |
+| satisfied | 14 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)**, **G-12 (✅ run 13)**, **G-03 (✅ run 16)** |
+| partially_satisfied | 2 | G-07, G-10 |
 | unknown_needs_audit | 0 | — |
 | s1_blocker | 0 | — |
 | s1_gap | 1 | G-18 |
@@ -166,19 +166,23 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 - **Verification**（2026-06-16 run 13 实跑通过）: 新增 `tests/test_checkpoint_resume_semantics.py::test_s1_legacy_plan_multistep_progress_can_resume_and_finish`，构造 2-step legacy Plan：step1 `mark_step_complete` 达阈值 → `advance_current_step_if_needed` 推进到 step2 → checkpoint save/load resume → step2 `mark_step_complete` 达阈值 → 推进到 `done`，测试 `1 passed`。相关 progress 小测 `test_advance_from_non_last_step_moves_to_next`、`test_advance_from_last_step_marks_done`、`test_is_current_step_completed_when_meta_score_meets_threshold` → `3 passed`。
 - **Decision**: ✅ satisfied。legacy Plan 路径是 S1 最小多步任务状态；durable ledger / ActionPlan Scheduler 激活仍为 S2+，不扩大本 gap。
 
-### G-03 — Real provider smoke
-- **Priority**: P1
+### G-03 — Real provider smoke — ✅ RESOLVED (2026-06-16 run 16)
+- **Priority**: P1（已完成）
 - **Layer**: L1
 - **S1 requirement**: RealProvider 可作为真实 smoke 路径（对应 AC-3，并为 AC-2 提供真实侧证据）。
-- **Current evidence**: real adapters `agent/provider/{anthropic_http,anthropic_native,openai_http,openai_native}.py`，由同一工厂构造；`tests/test_provider_real_smoke.py`、`tests/test_real_mcp_flight.py`（需 key/网络）。
-- **Status**: partially_satisfied
-- **Gap**: 缺一个 **key-safe** 的真实 smoke 步骤文档。
+- **Current evidence**: real adapters `agent/provider/{anthropic_http,anthropic_native,openai_http,openai_native}.py`，由同一工厂构造；`tests/test_provider_real_smoke.py` opt-in real smoke 在 key-safe 边界内实跑通过。
+- **Status**: satisfied (✅ run 16)
+- **Gap**: ~~缺一个 **key-safe** 的真实 smoke 步骤文档。~~ → **已解决**：G-03 使用 `docs/current/S1_ACCEPTANCE_BASELINE.md` 记录的 opt-in real smoke；用户已授权 S1 gap loop 中 real provider smoke 默认允许执行，但必须遵守 key-safe 边界。
 - **Blocking level**: must_fix_for_s1
 - **Dependencies**: **G-15**（已完成：本地真实 runtime config 已在 gitignored 路径，不再被 Git 跟踪）；**G-17**（已完成：acceptance baseline 与 G-03 handoff 已指定）。
-- **Recommended execution order**: P1-3（G-15 之后）。
-- **Needed action**: 在用户单独授权后，按 `docs/current/S1_ACCEPTANCE_BASELINE.md` 的 G-03 handoff 执行 key-safe real smoke；不得读取/打印/移动/复制 secret，不得提交 ignored runtime config。
-- **Verification**: 一次 real run 产出 `sessions/<id>/events.jsonl` 且 `provider_type` 为真实类型；再与 G-17 fake/local baseline 的事件骨架对照，证明运行路径同脊柱，差异仅限 provider 真实侧输出和 `provider_type`。
-- **Decision**: 留 S1 gap；G-15/G-17 前置均已解除，真实执行仍需后续明确授权。
+- **Recommended execution order**: P1-3（已完成）。
+- **Needed action**: 按 `docs/current/S1_ACCEPTANCE_BASELINE.md` 的 G-03 handoff 执行 key-safe real smoke；不得打印、复制、移动、修改、提交 secret；不得修改 ignored runtime config。
+- **Verification**（2026-06-16 run 16 实跑通过）:
+  - precheck: `git ls-files config/config.yaml` → 空；`git check-ignore -v config/config.yaml` → `.gitignore:36:config/config.yaml config/config.yaml`。
+  - real smoke: 通过内存 env bridge 读取 ignored `config/config.yaml` 的 runtime config，仅向子进程注入 opt-in env；`MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_provider_real_smoke.py -q -rx` → `3 passed in 6.40s`。
+  - smoke 覆盖：`provider_type != "fake"`、最小真实文本响应、model-visible tools 参数、MCP fixture registration、model 选择 MCP tool、`execute_tool`、`tool_result` 回填、第二次 provider call，并断言 key pattern 不进入 tools / response / messages。
+  - safety: 未打印、复制、移动、修改、提交 key 或请求/响应正文；未修改 `config/config.yaml`；未创建 `.env`；未 push。本次 G-03 使用测试输出作为允许证据；现行 smoke test 不产生 `sessions/<id>/events.jsonl`。
+- **Decision**: ✅ satisfied。S1 real provider smoke 主链路已在 key-safe opt-in 边界内通过；后续真实 provider smoke 在 S1 gap loop 中按用户授权默认允许，但必须继续遵守 G-03 safety 边界。
 
 ---
 
@@ -349,7 +353,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 |---|---|---|---|---|---|
 | G-01 | 入口 | §8 Satisfied | satisfied | must_fix_for_s1 | 不变 |
 | G-02 | fake 回归 | §8 Satisfied | satisfied | must_fix_for_s1 | 不变 |
-| G-03 | real smoke | §4 P1 | partially_satisfied | must_fix_for_s1 | should_fix→must_fix（AC-3） |
+| G-03 | real smoke | §4 P1 | satisfied (✅ run 16) | must_fix_for_s1 | **已完成**：key-safe opt-in real provider smoke 3 passed |
 | G-04 | same-spine | §8 Satisfied | satisfied | release_blocker | 不变（已满足） |
 | G-05 | provider 边界 | §8 Satisfied | satisfied | should_fix_for_s1 | 不变 |
 | G-06 | legacy facade | §7 P4 | defer_to_tech_debt(TD-002) | s2_or_later | 不变（已 TD） |
@@ -368,4 +372,4 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | satisfied (✅ run 11) | release_blocker | **已完成**：审计文档 config/secret 事实与 G-15 调和 |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、~~G-12~~（✅ run 13 完成）、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已于 run 13 完成（legacy Plan 最小多步 plan→advance→resume→done 验收）；其余 P1 项仍待后续授权 run 按优先级执行。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、~~G-12~~（✅ run 13 完成）、~~G-03~~（✅ run 16 完成）。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已于 run 13 完成（legacy Plan 最小多步 plan→advance→resume→done 验收）；G-03 已于 run 16 完成（key-safe opt-in real provider smoke 3 passed）；P0/P1 全部完成，剩余 eligible S1 gap 为 P2 G-10、G-07。

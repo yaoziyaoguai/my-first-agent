@@ -4,6 +4,78 @@
 
 ---
 
+## 2026-06-16 23:52 CST (run 16) — G-03 key-safe real provider smoke passed
+
+- **date/time**: 2026-06-16 23:52 CST
+- **gap ID / priority**: G-03 / P1 must_fix_for_s1
+- **task name**: G-03 authorized key-safe real provider smoke.
+- **why this gap was selected**: 用户授权执行 G-03 real provider smoke，并授权后续 S1 gap loop 中 real provider smoke 默认允许执行；G-03 是当前最高优先 eligible gap。
+- **files changed**:
+  - `docs/current/S1_GOAL_GAP.md`（G-03 → satisfied；P1/status/index 同步；记录非敏感 verification evidence）。
+  - `docs/current/WORK_LOG.md`（本条；保留 run 14/15 的授权前 blocker 与首次 skip 记录）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: `cso`（secret/config 安全边界）、`verification-before-completion`、`careful`。
+- **commands and results**:
+  - `git ls-files config/config.yaml` → 空，确认 `config/config.yaml` 未被 Git 跟踪。
+  - `git check-ignore -v config/config.yaml` → `.gitignore:36:config/config.yaml config/config.yaml`，确认仍为 ignored local runtime config。
+  - key-safe env bridge：只在内存中读取 ignored `config/config.yaml` 的 runtime config，并只向子进程注入 `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1` 与 real smoke 所需 env；未打印 config 内容、key、endpoint、请求或响应正文。
+  - `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_provider_real_smoke.py -q -rx`（通过 key-safe env bridge + 授权网络执行）→ `3 passed in 6.40s`。
+- **verification evidence**: `tests/test_provider_real_smoke.py` 断言 `provider_type != "fake"`，最小真实文本响应可用，model-visible tools 参数可被 real provider 接受，并通过本地 deterministic MCP fixture 覆盖 MCP registration → model tool selection → `execute_tool` → `tool_result` append → second provider call。测试还断言 key pattern 不进入 tools / provider response / messages。
+- **S1_GOAL_GAP.md items updated**: G-03 marked satisfied；P1 全部完成；remaining P0/P1/P2 为 P2 G-10 与 G-07。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未修改 `.gitignore`、config example、AGENTS.md、docs/history；未 push。本次 G-03 使用测试输出作为允许证据；现行 smoke test 不产生 `sessions/<id>/events.jsonl`。
+- **commit hash**: 本轮将提交为 `docs: record G-03 real provider smoke`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-03 提交后按 P2 推荐顺序继续 G-10（指定 S1 最小可观测事件集），除非提交前验证出现阻塞。
+
+---
+
+## 2026-06-16 23:21 CST (run 15) — G-03 authorized real smoke skipped by missing env preconditions
+
+- **date/time**: 2026-06-16 23:21 CST
+- **gap ID / priority**: G-03 / P1 must_fix_for_s1
+- **task name**: G-03 key-safe real provider smoke attempt after explicit authorization.
+- **why this gap was selected**: 用户明确授权执行 G-03 key-safe real provider smoke；G-03 是当前最高优先 eligible gap。
+- **files changed**: `docs/current/WORK_LOG.md`（本条失败/skip 记录）。未修改 `S1_GOAL_GAP.md`，因为 G-03 Verification 未通过。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空。
+- **skills/tools used**: `cso`（secret/config 安全边界）、`verification-before-completion`、`careful`。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 11]`，`docs/current/WORK_LOG.md` modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `git ls-files config/config.yaml` → 空，确认 `config/config.yaml` 未被 Git 跟踪。
+  - `git check-ignore -v config/config.yaml` → `.gitignore:36:config/config.yaml config/config.yaml`，确认仍为 ignored local runtime config。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+  - `env MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_provider_real_smoke.py -q -rx` → `3 skipped`；未产生 real run pass evidence。
+  - `sed -n '1,260p' tests/test_provider_real_smoke.py` → 只读测试代码，确认该 smoke 还要求 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` 三个环境变量，且拒绝已知 fake placeholder。未读取 `config/config.yaml` 内容。
+- **failure stage / non-sensitive summary**: precheck 通过；real smoke command 运行但全部 skipped。非敏感原因：测试当前只从环境变量读取 real provider 前置条件，未从 ignored `config/config.yaml` 自动导出为 `ANTHROPIC_*` env；本轮未调试 secret、未打印 config、未扩大修复范围。
+- **S1_GOAL_GAP.md items updated**: 无。G-03 保持 `partially_satisfied` / `must_fix_for_s1`。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未修改 `.gitignore`、config example、AGENTS.md、docs/history；未 push。
+- **commit hash**: none。原因：G-03 Verification 未通过（real smoke skipped，没有 real provider 主链路 evidence）。
+- **next gap/blocker**: 需要用户提供或授权一种 key-safe env bridge，让 `tests/test_provider_real_smoke.py` 能看到 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL`，且仍不打印/提交 secret；否则 G-03 不能继续，也不能跳到 P2。
+
+---
+
+## 2026-06-16 23:12 CST (run 14) — G-03 blocked pending explicit real-provider authorization
+
+- **date/time**: 2026-06-16 23:12 CST
+- **gap ID / priority**: G-03 / P1 must_fix_for_s1
+- **task name**: G-03 real provider smoke stop-condition check.
+- **why this gap was selected**: G-12 已提交；按 P1 推荐顺序，G-03 是下一项 eligible gap。
+- **files changed**: `docs/current/WORK_LOG.md`（本条 blocker 记录）。未修改 `S1_GOAL_GAP.md`，因为 G-03 Verification 未执行。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空。
+- **skills/tools used**: `verification-before-completion`、`careful`。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 11]`，仅既有未跟踪 `.claude/settings.json`、`CLAUDE.md`。
+  - `sed -n '160,188p' docs/current/S1_GOAL_GAP.md` → G-03 仍为 `partially_satisfied`，Verification 需要一次 real run 产出 `sessions/<id>/events.jsonl` 且 `provider_type` 为真实类型。
+  - `sed -n '45,75p' docs/current/S1_ACCEPTANCE_BASELINE.md` → G-03 real smoke command 已记录，前置条件包含 explicit user authorization、gitignored local config / opt-in env、不得修改/提交 secret-bearing config。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+- **S1_GOAL_GAP.md items updated**: 无。G-03 保持 `partially_satisfied` / `must_fix_for_s1`。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、移动、复制 secret；未修改 `config/config.yaml`；未创建 `.env`；未读取 real sessions/runs；未连接真实 MCP/server。
+- **commit hash**: none。原因：G-03 Verification 需要真实 provider 执行；当前没有单独的 key-safe real smoke 授权，且真实 provider safety/config 属 stop condition。
+- **next gap/blocker**: 等待用户明确授权 G-03 key-safe real provider smoke（包括允许执行 `MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_provider_real_smoke.py -q`，并确认可使用既有 gitignored local config / opt-in env 且不输出 secrets）。在 G-03 阻塞前，不应跳到 P2。
+
+---
+
 ## 2026-06-16 22:53 CST (run 13) — G-12 S1 minimal multistep task state
 
 - **date/time**: 2026-06-16 22:53 CST

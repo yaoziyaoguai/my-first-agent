@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-06-17 00:21 CST (run 18) — G-07 L2 umbrella closed
+
+- **date/time**: 2026-06-17 00:21 CST
+- **gap ID / priority**: G-07 / P2 should_fix_for_s1
+- **task name**: G-07 Context/Memory/State/Checkpoint L2 umbrella closure.
+- **why this gap was selected**: G-10 已提交后，P0/P1 完成且 P2 推荐顺序中只剩 G-07；G-07 依赖 G-07b，而 G-07b 已在 run 12 完成。
+- **files changed**:
+  - `docs/current/S1_GOAL_GAP.md`（G-07 → satisfied；P2/status/index 同步；记录 G-07b verification 复跑 evidence）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: source/doc audit by targeted `rg`/`sed`; verification-before-completion 口径；scope discipline（仅收口 umbrella，不处理 P4 TD-003）。
+- **commands and results**:
+  - `sed -n '205,222p' docs/current/S1_GOAL_GAP.md` → 确认 G-07 Needed action 为 G-07b 通过后确认 L2 umbrella satisfied，Verification 同 G-07b。
+  - `sed -n '55,78p' docs/current/TECH_DEBT.md` → 确认 TD-003 已记录 `agent/context.py:36` 非主路径 compress_history 配对守卫债务，状态 open。
+  - `.venv/bin/python -m pytest tests/test_checkpoint_roundtrip.py::test_large_tool_result_resume_shape_is_accepted_by_next_model_call tests/test_checkpoint_roundtrip.py::test_checkpoint_summarizes_large_tool_results tests/test_checkpoint_resume_semantics.py::test_resume_preserves_tool_use_tool_result_pairing -q` → `3 passed in 0.75s`。
+  - `.venv/bin/python -m pytest tests/test_evidence_storage_hygiene.py::TestCheckpointSummarizesToolResults::test_checkpoint_summarizes_large_tool_result -q` → `1 passed in 0.26s`。
+- **verification evidence**: G-07b 的大结果 checkpoint/resume 形态 verification 已复跑通过；S1 主路径 context/memory/state/checkpoint 可用性由 G-07b + 既有 L2 evidence 支撑；非主路径 `agent/context.py` 风险继续由 TD-003 跟踪，不在 S1 扩范围修。
+- **S1_GOAL_GAP.md items updated**: G-07 marked satisfied；status distribution 更新为 satisfied 16 / partially_satisfied 0；P0/P1/P2 eligible gaps 全部完成。
+- **TECH_DEBT.md items added or updated**: 无。TD-003 保持 open。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未修改 AGENTS.md、docs/history、README、TECH_DEBT 或 config example；未 push。
+- **commit hash**: 本轮将提交为 `docs: close S1 L2 umbrella gap`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: P0/P1/P2 eligible S1 gaps 已全部完成；P3/P4 未获授权，不处理。
+
+---
+
 ## 2026-06-17 00:06 CST (run 17) — G-10 S1 observability baseline defined
 
 - **date/time**: 2026-06-17 00:06 CST

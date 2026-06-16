@@ -89,6 +89,6 @@
 ---
 
 > 说明：以下**不入**技术债（按规则 3，仍是 S1 必解项，留在 `S1_GOAL_GAP.md`）：
-> - G-15 config 密钥被提交（release_blocker）
+> - G-15 `config/config.yaml` 被 git 跟踪（config 卫生 / 未来密钥泄露风险，must_fix_for_s1；经独立审计确认当前为占位符、**非**已暴露真实密钥、**无需轮换**）
 > - G-16 README/quickstart 可用性（must_fix_for_s1）
 > - G-07b checkpoint 大结果 resume 形态（unknown_needs_audit，先审计）

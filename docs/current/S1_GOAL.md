@@ -42,9 +42,9 @@
 4. 独立 durable task ledger（S1 用 checkpoint 快照作为进度记录即可）。
 5. 任何超出当前代码现实的新能力。
 
-## 5. Release blockers（必须先解决才能宣布 S1 可用）
+## 5. Release blockers / S1 必修项（必须先解决才能宣布 S1 可用）
 
-- **RB-1**：`config/config.yaml` 被 git 跟踪且含真实 provider 密钥。产品基线不得在仓库中暴露密钥。（对应 gap G-15。本轮按指令不处理密钥，仅登记为 release blocker。）
+- **RB-1（已降级：config 卫生 must-fix，非已暴露密钥）**：`config/config.yaml` 被 git 跟踪且未被 `.gitignore` 忽略。**独立审计已确认当前被跟踪的 `api_key` 是 13 字符占位符，不是真实 provider 密钥**；真实密钥当前在 gitignored 的 `.env` 中。因此本项**不是「已泄露真实密钥 / 需轮换」**，而是 **config 卫生 / 未来密钥泄露风险**：`config/config.yaml` 是后续随时可能用于真实 provider 测试的本地配置文件，被 git 跟踪意味着将来可能误把真实 key 提交进仓库。**S1 必修**：将 `config/config.yaml` 从 git 跟踪移除并加入 `.gitignore`，仓库保留 `config/config.example.yaml`（或等价模板）。（对应 gap G-15。本轮不处理密钥本体、不改 config，仅按授权修正严重级别表述。）
 - **RB-2**：面向使用者的运行说明可用。README 的文档导航当前指向已迁移到 `docs/history/` 的路径、并自述「不是面向普通用户的产品」，与「基本可用产品版」不一致。（对应 gap G-16。本轮禁改 README，仅登记。）
 
 ## 6. Acceptance criteria（S1 验收口径）
@@ -56,7 +56,7 @@ S1 视为达成，当且仅当：
 3. **AC-3 real smoke**：存在一个 key-safe 的 real provider smoke 步骤（用 gitignored `config/config.local.yaml`），产出可证明真实模型调用的 events。
 4. **AC-4 工具结果完整性**：tool result 可靠进入 context 与 task state，压缩不破坏配对。
 5. **AC-5 多步任务**：一个最小多步任务能计划、推进、完成，并能 checkpoint/resume。
-6. **AC-6 安全基线**：仓库中不存在被跟踪的真实密钥（RB-1 已解决）。
+6. **AC-6 安全基线**：`config/config.yaml` 不再被 git 跟踪且已加入 `.gitignore`，仓库仅保留 `config.example.yaml` 等模板；tracked tree 中不存在真实 provider 密钥（真实 key 仅存于 gitignored `.env`）。（RB-1 已解决）
 7. **AC-7 可用说明**：使用者能按 README/quickstart 跑起来，文档导航指向有效路径（RB-2 已解决）。
 
 > 上述验收口径的逐条差距与状态见 `S1_GOAL_GAP.md`。

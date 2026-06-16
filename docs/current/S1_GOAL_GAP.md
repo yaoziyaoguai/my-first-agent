@@ -36,7 +36,7 @@
 - **S1 requirement**: RealProvider 可作为真实 smoke 路径。
 - **Current evidence**: real adapters `agent/provider/{anthropic_http,anthropic_native,openai_http,openai_native}.py`，由同一工厂构造；`tests/test_provider_real_smoke.py`、`tests/test_real_mcp_flight.py`（需 key/网络）。
 - **Status**: partially_satisfied
-- **Gap**: 缺一个 **key-safe** 的真实 smoke 步骤文档；当前受 G-15（密钥被提交）阻塞，无法以安全方式落地。
+- **Gap**: 缺一个 **key-safe** 的真实 smoke 步骤文档。应配合 G-15：真实 key 用 gitignored `.env` / `config/config.local.yaml` 提供，而非写进被跟踪的 `config/config.yaml`。
 - **Blocking level**: should_fix_for_s1
 - **Needed action**: 用 gitignored `config/config.local.yaml` 写一份 real smoke 步骤（文档动作，未来授权 run 执行；本轮不处理密钥）。
 - **Verification**: 一次 real run 产出 `sessions/<id>/events.jsonl` 且 `provider_type` 为真实类型。
@@ -174,16 +174,16 @@
 - **Verification**: 默认 run 不启用 MCP / 不真实委派（local_fake）。
 - **Decision**: 边界 satisfied；激活留 S2+。
 
-### G-15 — config/config.yaml 被跟踪且含真实 key
-- **Layer**: Cross-cutting / Security
-- **S1 requirement**: 安全配置基线——仓库不得提交真实 provider 密钥。
-- **Current evidence**: `git ls-files config/config.yaml` = 被跟踪；该文件含 `api_key`/`sk-` 字段；`.gitignore` 仅忽略 `.env`、`config/config.local.yaml`，未忽略 `config/config.yaml`；README:32/71 自述「含真实 key 不得 commit / 不提交 config/config.yaml」（与现实矛盾）。
-- **Status**: s1_blocker
-- **Gap**: 真实密钥进入版本库。
-- **Blocking level**: release_blocker
-- **Needed action**: 将 `config/config.yaml` 从跟踪移除、改用 gitignored `config/config.local.yaml`、轮换已暴露密钥。（本轮按指令**不处理密钥**，仅登记；需用户授权的专项 run 执行。）
-- **Verification**: `git ls-files config/config.yaml` 为空，且 tracked tree 无 `sk-`。
-- **Decision**: S1 release blocker；本轮不修，留 gap。
+### G-15 — config/config.yaml 被 git 跟踪（config 卫生 / 未来密钥泄露风险）
+- **Layer**: Cross-cutting / Security (config hygiene)
+- **S1 requirement**: 安全配置基线——后续随时会被填入真实 key 的本地配置文件不应被 git 跟踪；仓库不得提交真实 provider 密钥。
+- **Current evidence**: `git ls-files config/` 显示 `config/config.yaml` **被跟踪**；`.gitignore` 仅忽略 `.env`、`config/config.local.yaml`，**未**忽略 `config/config.yaml`。**独立审计（本轮）已确认**：当前被跟踪的 `api_key` 值长 13、结构 `AA-AAAAAAA_AA`，是**占位符**，**不是真实 provider 密钥**；工作树与 HEAD 一致；config.yaml 历史中从未出现 ≥30 字符的长 key（`ever_long_key: no`）；真实长度 `sk-` 串仅出现在 `tests/` 脱敏测试夹具；真实密钥当前在 gitignored 的 `.env`。
+- **Status**: s1_gap
+- **Gap**: `config/config.yaml`（用户做真实 provider 测试时会填真实 key 的文件）被 git 跟踪且未 gitignore → **将来可能误提交真实 key**。注意：当前**没有**已暴露的真实密钥。
+- **Blocking level**: must_fix_for_s1
+- **Needed action**: 将 `config/config.yaml` 从 git 跟踪移除（`git rm --cached`）并加入 `.gitignore`；仓库保留 `config/config.example.yaml`（已存在）或等价模板供拷贝为本地配置；真实 key 仅存放于 gitignored `.env` / `config/config.local.yaml`。**不要求轮换密钥**（无已暴露真实密钥）。（本轮按指令不处理密钥本体、不改 config，仅按授权修正本 gap 的严重级别表述。）
+- **Verification**: `git ls-files config/config.yaml` 为空；tracked tree 无真实长度 provider key；`.gitignore` 含 `config/config.yaml`。
+- **Decision**: 严重级别由 release_blocker（已暴露真实密钥/需轮换）**降级**为 must_fix_for_s1（config 卫生 / 未来泄露风险）。仍留在 `S1_GOAL_GAP.md`（S1 必修），不入 `TECH_DEBT.md`。审计文档 `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` §0/§10.1 的「真实密钥/需轮换」强表述本轮不改，待后续授权 run 调和；当前权威口径以本 gap + `WORK_LOG.md` 为准。
 
 ### G-16 — README / quickstart 可用性
 - **Layer**: Cross-cutting / UX
@@ -227,9 +227,9 @@
 | satisfied | 4 | G-01, G-04, G-05, G-08 |
 | partially_satisfied | 6 | G-07, G-09, G-10, G-12, G-14, G-17 |
 | unknown_needs_audit | 1 | G-07b |
-| s1_blocker | 1 | G-15 |
-| s1_gap | 2 | G-16, G-18 |
+| s1_blocker | 0 | （无；原 G-15 经独立审计降级，见下） |
+| s1_gap | 3 | G-15, G-16, G-18 |
 | defer_to_tech_debt | 2 | G-06 (TD-002), G-11 (TD-001) |
 | out_of_scope | 1 | G-13 |
 
-Release blockers：G-15（密钥）、G-16（用户面运行说明）。本轮均按指令仅登记，未修改对应文件。
+S1 必修项（must_fix_for_s1）：G-15（`config/config.yaml` 改为不跟踪 + gitignore；**非**已暴露密钥、**无需轮换**）、G-16（用户面运行说明）。本轮按指令未改 config / README，仅按授权修正 G-15 的严重级别表述。原审计文档（本轮不在允许修改清单内）§0/§10.1 仍有「真实密钥/需轮换」强表述，待后续授权 run 调和；当前权威口径以本文件 + `WORK_LOG.md` 为准。

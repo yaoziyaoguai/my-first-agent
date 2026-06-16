@@ -38,7 +38,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
-| **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）**；待办：调和审计文档 §0/§10.1 措辞 |
+| **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 ✅ | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）；G-19 已完成（run 11：审计文档 config/secret 事实与 G-15 调和）**；P0 全部完成 |
 | **P1** | G-07b, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | 复现大结果 resume；钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
@@ -49,11 +49,11 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 10 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)** |
+| satisfied | 11 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)** |
 | partially_satisfied | 4 | G-03, G-07, G-10, G-12 |
 | unknown_needs_audit | 1 | G-07b |
 | s1_blocker | 0 | — |
-| s1_gap | 2 | G-18, G-19 |
+| s1_gap | 1 | G-18 |
 | defer_to_tech_debt | 2 | G-06 (TD-002), G-11 (TD-001) |
 | out_of_scope | 1 | G-13 |
 
@@ -118,19 +118,19 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 - **Verification**（2026-06-16 run 10 实跑通过）: `tests/golden_e2e` → `15 passed`；`tests/smoke/test_first_usable_task_e2e.py` → `6 passed`；targeted runtime integration wiring test → `1 passed`；`S1_GOAL_GAP.md` + `S1_ACCEPTANCE_BASELINE.md` 明确列出 acceptance baseline 与 G-03 handoff；`git diff --check` 通过。未运行真实 provider，未读取/打印/移动/复制 secret，未修改 `config/config.yaml`，未创建 `.env`。
 - **Decision**: ✅ satisfied。S1 acceptance baseline 已指定；G-17 不再直接要求 real execution。AC-2 的真实侧运行证据仍是 G-03 Verification，不在本 gap 内消费真实 provider key。
 
-### G-19 — 调和审计文档与 G-15 的密钥权威冲突（本轮新增）
-- **Priority**: P0
+### G-19 — 调和审计文档与 G-15 的密钥权威冲突（本轮新增） — ✅ RESOLVED (2026-06-16 run 11)
+- **Priority**: P0（已完成）
 - **Layer**: Cross-cutting / Governance (docs coherence)
 - **S1 requirement**: 当前权威文档之间不得就同一安全事实给出互相矛盾的结论，以免误导后续 coding agent。
 - **Current evidence**（本轮独立核验）: `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md §0`（约 L19）「仓库中提交了真实 provider 密钥」、`§10.1`（约 L201）「提交了真实密钥 … 当前最高优先风险」，与 G-15 + 本轮核验结论（HEAD/INDEX/历史均占位符，真实 key 从未被提交）**直接矛盾**。`WORK_LOG.md`（run 2）已把该调和列为 next step。
-- **Status**: s1_gap
-- **Gap**: 仅读审计文档的后续 agent 会误判「真实密钥已被提交、需轮换/告警」，做出错误动作。
-- **Blocking level**: release_blocker
+- **Status**: satisfied（2026-06-16 run 11 完成）
+- **Gap**: ~~仅读审计文档的后续 agent 会误判「真实密钥已被提交、需轮换/告警」，做出错误动作~~ → **已解决**：审计文档 §0、§7 config 表格、§10.1、§11 real smoke 前置均已与 G-15 口径调和。
+- **Blocking level**: release_blocker（已满足）
 - **Dependencies**: G-15（措辞应在 G-15 落定后定稿）。
-- **Recommended execution order**: P0-4（G-15 之后）。
-- **Needed action**: 后续授权 run 更新 `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md §0/§10.1`，将「提交了真实密钥/需轮换」改为「tracked `config/config.yaml` 为占位符；真实 key 在 skip-worktree 工作树/`.env`，发布前需 untrack」。**本轮禁改审计文档**，仅登记追踪。
-- **Verification**: 审计文档 §0/§10.1 与 G-15 口径一致；无「已提交真实密钥/需轮换」表述。
-- **Decision**: 按任务 P0 判据「当前文档权威冲突会直接误导后续 coding agent」登记为 P0；在未调和前，当前权威口径以 G-15 + `WORK_LOG.md` 为准。
+- **Recommended execution order**: P0-4（已完成）。
+- **Needed action**: ~~更新 `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md §0/§10.1`，将「提交了真实密钥/需轮换」改为「tracked `config/config.yaml` 为占位符；真实 key 在 skip-worktree 工作树/`.env`，发布前需 untrack」~~ 已执行，并同步同一审计事实在 §7/§11 的引用；当前口径为：Git history / HEAD / index 仅有占位符，真实 provider key 从未提交；G-15 已 untrack + gitignore，本地真实 config 留在 ignored runtime config；后续 real smoke 仍需 key-safe 授权。
+- **Verification**（2026-06-16 run 11 实跑通过）: `rg -n "提交了真实密钥|已提交真实密钥|需轮换|密钥暴露|含真实密钥且被跟踪" docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` 无命中；`rg -n "真实 provider key 从未提交|G-15 已将|untrack|gitignore|key-safe" docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` 命中调和口径；`git diff --check` 通过。
+- **Decision**: ✅ satisfied。当前权威文档不再就 G-15 config/secret 事实互相冲突。
 
 ---
 
@@ -366,6 +366,6 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-16 | README | §3 P0 | satisfied (✅ run 5) | release_blocker | **已完成**：README S1 定位 + 当前文档导航 |
 | G-17 | acceptance | §3 P0 | satisfied (✅ run 10) | release_blocker | **已完成**：S1 acceptance baseline 指定；real provider smoke 执行归 G-03 |
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
-| G-19 | 审计文档冲突 | §3 P0 | s1_gap | release_blocker | **本轮新增** |
+| G-19 | 审计文档冲突 | §3 P0 | satisfied (✅ run 11) | release_blocker | **已完成**：审计文档 config/secret 事实与 G-15 调和 |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、G-19、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；其余 P0/P1 项仍待后续授权 run 按优先级执行。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、G-07b、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；其余 P1 项仍待后续授权 run 按优先级执行。

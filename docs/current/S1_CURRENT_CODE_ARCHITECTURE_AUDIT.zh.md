@@ -16,7 +16,7 @@
 - **已真实接入主链路的能力**：tool registry + 中介执行、tool 确认/policy gate、memory recall/inline retain/turn-end 提案、checkpoint save/resume、evidence/log（`agent_log.jsonl` 全局 + `sessions/<id>/events.jsonl` 单会话）。
 - **已实现但默认不在生产主链路的能力**：MCP（默认关闭，需环境变量开启）、subagent V0 生产路由（默认关闭，源码注明 wiring 未完成，默认走本地确定性 stub）、action scheduler（dormant，生产入口 `main.py` 不注入）、本地 trace（`on_trace_event` 默认 None，opt-in）。
 - **不存在的能力**：未发现任何会真正执行查询的 SQL/数据库工具（仅有一个解析 `.sql` 文本结构的 outline 函数，且未注册）。
-- **当前最大风险**：(a) 仓库中提交了真实 provider 密钥（`config/config.yaml` 被 git 跟踪且含密钥字段）；(b) 节点很多但「已接入主链路 / 仅可配置 / 仅测试」边界容易被误读；(c) planning/compress 仍走 legacy `client.messages.create` facade，与主执行循环的 provider 协议调用是两种形态（虽指向同一 provider）；(d) evidence 能证明路径骨架，但不持久化原始模型请求/响应正文。
+- **当前最大注意点**：(a) `config/config.yaml` 曾是被 Git 跟踪的本地 runtime config 路径；后续 G-15 核验证明 Git history / HEAD / index 中仅有占位符，真实 provider key 从未提交，且 G-15 已将该路径 untrack 并加入 `.gitignore`；(b) 节点很多但「已接入主链路 / 仅可配置 / 仅测试」边界容易被误读；(c) planning/compress 仍走 legacy `client.messages.create` facade，与主执行循环的 provider 协议调用是两种形态（虽指向同一 provider）；(d) evidence 能证明路径骨架，但不持久化原始模型请求/响应正文。
 
 本文只描述现状，不定义阶段目标。
 
@@ -60,7 +60,7 @@
 - **主要入口文件**：`main.py`（767 行，CLI / 主循环 / session 启动）。
 - **核心运行时**：`agent/core.py`（2275 行，`chat()` 统一入口）、`agent/loop.py`（1061 行，`run_main_loop()`）、`agent/session.py`（832 行，session 生命周期 + resume）。
 - **测试目录**：`tests/`（约 250 个 `.py`，含 `tests/runtime_integration/`、`tests/golden_e2e/`、`tests/unit/`、`tests/smoke/`、`tests/adversarial/`、`tests/fixtures/`）。
-- **配置**：顶层 `config.py`（legacy 兼容 shim）、`config/`（`config.yaml` + 多个 `*.example.yaml`）、`.env`（仅密钥，已被 gitignore）、`.env.example`。
+- **配置**：顶层 `config.py`（legacy 兼容 shim）、`config/`（本地 gitignored `config.yaml` + 多个 `*.example.yaml`）、`.env.example`；`.env` 若存在也被 gitignore，但 G-15 后当前口径是不恢复、不创建 `.env`。
 - **运行产物 / evidence**：顶层 `agent_log.jsonl`（约 7.5MB）、`sessions/`（约 600 个会话目录，每个含 `events.jsonl`）、`memory/`（含 checkpoint）。
 - **文档制度**：`docs/current/` 为当前工作区（目前仅 `README.md` 与本文）；`docs/history/` 为历史归档。本文不展开历史文档内容。
 
@@ -159,7 +159,7 @@
 | policy / approval | `tool_registry.py:424 needs_tool_confirmation`；`tool_gate.py:32 ToolGateHandler`；`mcp_policy.py`；禁用 bash/shell tool_gate.py | active（两 provider 模式相同） | 是 | 同 | confirmation 事件 | 无顶层统一 policy 开关，逻辑分散 |
 | evidence / log / trace | `logger.py:150`→`agent_log.jsonl`；`event_log.py:153`→`sessions/<id>/events.jsonl`；`evidence_recorder.py:728/644/638` | active（log + events + record_evidence） | 是 | 同（记录 provider_type） | 见第 8 节 | local trace opt-in |
 | local trace | `agent/local_trace.py`；`loop.py:31` 守卫 | implemented-not-wired（`on_trace_event` 默认 None，opt-in） | 否（默认） | — | 默认不写 | 勿误判为默认开启 |
-| config / registry | `config/config.yaml` `simple_config.py:71` `config.py`(legacy shim) | active（config.yaml 为 provider 真源） | 是 | 决定 fake/real | session 记录 | **config.yaml 含真实密钥且被跟踪** |
+| config / registry | `config/config.yaml` `simple_config.py:71` `config.py`(legacy shim) | active（本地 gitignored config.yaml 为 provider 真源；仓库保留 example 模板） | 是 | 决定 fake/real | session 记录 | G-15 已完成 untrack + gitignore；Git history/HEAD/index 仅有占位符，真实 key 从未提交 |
 | scheduler / action plan | `agent/action_scheduler.py`（742 行）；seam `loop.py:728`(默认 None)/`loop.py:1007-1028`；`main.py` 零引用 | implemented-not-wired / dormant | 否（生产不注入） | — | — | `tests/test_scheduler_boundary_l2.py` 钉死 main.py 0 引用 |
 
 补充事实：tool registry 默认注册的工具（`agent/tools/__init__.py`）包括 `read_file`/`write_file`/`edit_file`/`run_shell`/`fetch_url`/`mark_step_complete`/`request_user_input`/memory 系列/demo 系列等；模型可见工具上限 `max_total=30`、`max_mcp=5`（tool_registry.py:205）。
@@ -198,7 +198,7 @@
 
 ## 10. Architecture Risks
 
-1. **提交了真实密钥**：`config/config.yaml` 被 git 跟踪且含 `api_key`/`sk-` 字段；`.gitignore` 仅忽略 `.env` 与 `config/config.local.yaml`，未忽略 `config/config.yaml`。属敏感信息暴露（本文不复述密钥值），是当前最高优先风险。
+1. **config 卫生历史风险已由 G-15 收口**：`config/config.yaml` 曾是被 Git 跟踪的本地 runtime config 路径，且工作树可被填入真实 key；后续 G-15 核验证明 Git history / HEAD / index 中仅有占位符，真实 provider key 从未提交，也无轮换依据。G-15 已将 `config/config.yaml` 从 Git 跟踪移除并加入 `.gitignore`；后续 real provider smoke 仍必须遵守 key-safe 边界，不读取、打印、移动、复制或提交 secret。
 2. **「有代码 ≠ 进主链路」误读风险**：MCP、subagent V0、scheduler、local trace 均已实现但默认不在生产主链路；容易被旧叙事误判为「已激活」或「未实现」。
 3. **「有测试 ≠ 生产路径」误读风险**：大量 seam/harness 测试存在，不代表该路径默认被触发。
 4. **默认关闭 ≠ 未实现**：MCP（`MY_FIRST_AGENT_MCP_ENABLE` 默认关）、subagent V0（`SUBAGENT_V0_ROUTING_ENABLED` 默认关）属「已实现可配置」。
@@ -216,7 +216,7 @@
 在确定下一阶段目标**之前**，必须先确认以下事实（本文只列事实，不在此定义任何阶段目标）：
 
 1. **主链路验收命令**：哪一条/哪一组命令（哪个 `tests/golden_e2e/*` 或 smoke）被认定为「主链路必过」的最小验收集？
-2. **real provider smoke 怎么跑**：用哪个 config/env、跑哪个测试或脚本、产物落在哪个 `sessions/<id>/events.jsonl` 可证明真实模型调用？（先解决风险 1 的密钥暴露再跑。）
+2. **real provider smoke 怎么跑**：用哪个 gitignored local config / opt-in env、跑哪个测试或脚本、产物落在哪个 `sessions/<id>/events.jsonl` 可证明真实模型调用？（G-15 已解决 config 跟踪卫生；真实执行仍需单独授权并遵守 key-safe 边界。）
 3. **fake regression 怎么跑**：哪个命令是确定性 fake 全链路回归基线？
 4. **same-spine 如何证明**：用哪次 fake run + 哪次 real run 的 `events.jsonl` 对照，证明二者经过同一组事件（TOOL_GATE/INVOKE/RESULT、checkpoint、memory），只 provider_type 不同？
 5. **provider 实例同一性**：核实 planning client 与主执行循环是否同一 provider 实例（第 5 节 unknown）。

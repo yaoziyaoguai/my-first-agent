@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-06-16 22:21 CST (run 11) — G-19 reconcile audit config/secret wording
+
+- **date/time**: 2026-06-16 22:21 CST
+- **gap ID / priority**: G-19 / P0 release_blocker
+- **task name**: 调和 `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` 与 G-15 的 config/secret 权威事实。
+- **why this gap was selected**: G-17 已提交；按 P0 推荐顺序，G-19 是下一项 eligible release blocker。审计文档仍写「仓库中提交了真实 provider 密钥 / 提交了真实密钥」，与 G-15 已核验事实冲突。
+- **files changed**:
+  - `docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md`（§0、§7 config 表格、§10.1、§11 real smoke 前置措辞调和）。
+  - `docs/current/S1_GOAL_GAP.md`（G-19 → satisfied；P0 summary/status/index 同步）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: `verification-before-completion`、`careful`；未使用 graphify，因本 gap 是已定位的文档事实冲突调和。
+- **commands and results**:
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 8]`，仅既有未跟踪 `.claude/settings.json`、`CLAUDE.md`；G-19 修改前工作区干净。
+  - `rg -n "G-19|提交了真实|真实密钥|轮换|config/config.yaml|skip-worktree" docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md docs/current/S1_GOAL_GAP.md docs/current/WORK_LOG.md` → 定位旧冲突与 G-15 证据；未读取 `config/config.yaml`。
+  - `rg -n "提交了真实密钥|已提交真实密钥|需轮换|密钥暴露|含真实密钥且被跟踪" docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` → exit 1 / 无命中。
+  - `rg -n '真实 provider key 从未提交|真实 key 从未提交|G-15 已将|untrack|gitignore|key-safe|不恢复、不创建 \`.env\`' docs/current/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md` → exit 0，命中 §0、§3、§7、§10.1、§11 的调和口径。
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 8]`，G-19 三个文档文件 modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `git diff --check` → exit 0。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+- **S1_GOAL_GAP.md items updated**: G-19 marked satisfied；P0 summary 显示 G-15/G-16/G-17/G-19 全部完成；status distribution updated。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未读取、打印、移动、复制 secret；未修改 `config/config.yaml`；未创建 `.env`；未运行 real provider；未修改 `docs/history`。
+- **commit hash**: 本轮将提交为 `docs: reconcile S1 audit config hygiene wording`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-19 提交后按 P1 推荐顺序继续 G-07b（checkpoint 大结果 resume 形态），除非提交后出现新的 stop condition。
+
+---
+
 ## 2026-06-16 22:11 CST (run 10) — G-17 S1 acceptance baseline scope adjustment
 
 - **date/time**: 2026-06-16 22:11 CST

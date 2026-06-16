@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-06-17 (run 19) — Independent S1 completion audit + register stale-guard / AC-2 debt
+
+- **date/time**: 2026-06-17 (local)
+- **task name**: Independent S1 Completion Audit and Small Fixes（独立审计，非 goal loop；交叉验证 S1 是否真正达到 Baseline Usable Product，整理剩余技术债）。
+- **files changed**（均在允许清单内）:
+  - `docs/current/TECH_DEBT.md`（新增 TD-005/TD-006/TD-007；同步结尾"S1 必解项"注记的过期状态为 ✅ satisfied + run 号）。
+  - `docs/current/WORK_LOG.md`（本条）。
+  - `docs/current/_tmp_s1_completion_audit/audit_notes.md`（中间审计产物，非权威）。
+- **未修改**: 任何代码/测试、S1_GOAL_GAP.md gap 状态、S1_GOAL.md（frozen）、S_ROADMAP.md、AGENTS.md、docs/history、README、config、`.env`。
+- **skills/tools used**: graphify query（定位 real smoke / core.chat / events.jsonl 节点）；key-safe git 核验（`git ls-files`/`check-ignore`/掩码扫描，不打印明文）；targeted pytest + full health check；verification-before-completion。
+- **what was done / 关键结论**:
+  - **S1 verdict = PASS WITH TRACKED DEBT**。6/7 acceptance criteria 独立核验通过；P0/P1/P2 gap 全部 satisfied 且证据可复跑一致。
+  - **AC-2 缝隙（TD-007）**：fake vs real `events.jsonl` 运行产物层对照从未执行——real smoke 是 provider+tool_executor 直调（源码自述"不是完整 AgentLoop"），不产 events.jsonl；same-spine 仅 G-04 源码层 + G-03 provider 层证据。
+  - **stale guard 冲突（TD-005/006）**：full-suite 37 failed 中仅 2 个由 S1 工作引入——`test_config_secret_safety.py`（被 G-15 untrack 决策反向断言，潜在诱导重新 track config.yaml）与 `test_root_readme_references_project_status`（被 G-16 删 PROJECT_STATUS 引用）；其余 35 个是 origin/main 已存在的旧文档规制 guard，均不在 G-17 acceptance gate 内。
+  - 冻结 S1_GOAL.md AC-3/AC-6 文本与落定实现有 2 处分歧（real config 用 config.yaml 而非 config.local.yaml / .env），因 frozen 仅记录不改；当前正确口径已由 G-15 / 架构审计 / GAP 承载。
+- **verification commands and results**:
+  - AC-6 key-safe: `git ls-files config/config.yaml`=空；`git check-ignore -v config/config.yaml`=`.gitignore:36`；`test -f .env`=ENV_MISSING；tracked tree 真实长度 key 扫描仅命中 `tui` 全零测试占位符。
+  - AC-1 gate: `pytest tests/golden_e2e -q`=15 passed；`tests/smoke/test_first_usable_task_e2e.py`=6 passed；core→loop→dispatcher wiring=1 passed。
+  - AC-4/5: large-result resume+summarize+pairing=3 passed；G-12 multistep resume=1 passed。
+  - G-10: `pytest tests/test_evidence_lifecycle_and_summary.py tests/test_b7_event_log.py -q`=91 passed。
+  - AC-3 key-safe: 无 opt-in env 时 `tests/test_provider_real_smoke.py`=3 skipped（本审计未重跑真实调用）。
+  - health: `ruff check .`=451 errors（既有）；`pytest -q`=37 failed / 4745 passed / 12 skipped / 26 xfailed。
+  - `git diff --check`=exit 0。
+- **S1_GOAL_GAP.md items updated**: 无（gap 状态准确，未改写；新发现以 TECH_DEBT 登记并交叉引用 gap ID）。
+- **TECH_DEBT.md items added or updated**: 新增 TD-005（config secret-safety guard 与 G-15 相反）、TD-006（旧文档规制 guard 族过期失败）、TD-007（AC-2 运行产物层对照未执行）；结尾注记状态同步。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未 push。
+- **commit hash**: 本轮将提交为 `docs: register S1 completion-audit findings`（精确 hash 见 `git log` / 运行报告）。
+- **next step**（grounded in current docs）: 由用户决定 TD-005/006/007 的处置——是否把 stale guard 测试对齐到 S1 规制、是否授权一次 real `core.chat()` 运行以补齐 AC-2 的 events.jsonl 对照。本审计不扩大范围、不改测试。
+
+---
+
 ## 2026-06-17 00:21 CST (run 18) — G-07 L2 umbrella closed
 
 - **date/time**: 2026-06-17 00:21 CST

@@ -88,7 +88,9 @@
 
 ---
 
-> 说明：以下**不入**技术债（按规则 3，仍是 S1 必解项，留在 `S1_GOAL_GAP.md`）：
-> - G-15 `config/config.yaml` 被 git 跟踪（config 卫生 / 未来密钥泄露风险，must_fix_for_s1；经独立审计确认当前为占位符、**非**已暴露真实密钥、**无需轮换**）
-> - G-16 README/quickstart 可用性（must_fix_for_s1）
-> - G-07b checkpoint 大结果 resume 形态（unknown_needs_audit，先审计）
+> 说明：以下**不入**技术债（按规则 3，仍是 S1 必解项，留在 `S1_GOAL_GAP.md`）。优先级以 `S1_GOAL_GAP.md`（已重排为 P0–P4 release backlog）为准：
+> - G-15 `config/config.yaml` 被 git 跟踪（config 卫生 / 发布前必须 untrack，**release_blocker / P0**；独立审计确认已提交内容为占位符、**非**已暴露真实密钥、**无需轮换**；2026-06-16 run 3 另发现 `skip-worktree` 工作树含真实长度 key，强化 untrack 动作）
+> - G-16 README/quickstart 可用性（**release_blocker / P0**）
+> - G-17 指定 S1 acceptance 集（**release_blocker / P0**）
+> - G-19 调和审计文档 §0/§10.1 与 G-15 的密钥权威冲突（**release_blocker / P0**，本轮新增；纯文档调和，非技术债）
+> - G-07b checkpoint 大结果 resume 形态（unknown_needs_audit / **must_fix_for_s1 / P1**，先审计）

@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-06-16 (run 3) — Independent S1 baseline audit + reorder S1_GOAL_GAP into priority release backlog
+
+- **date/time**: 2026-06-16 (local)
+- **task name**: Independent S1 Baseline Audit and Priority-Ordered Gap Review。独立二次审计 + 把 `S1_GOAL_GAP.md` 从普通 gap 清单改造为 P0–P4 release backlog（只动文档，无代码实现）。
+- **背景**: 不延续上一轮结论；独立核验当前 S1 文档与代码现实是否一致，并按优先级重排 backlog。
+- **files changed**（均在允许清单内）:
+  - `docs/current/S1_GOAL_GAP.md`（**整体重排**为 P0–P4 release backlog + 新增 Priority/Dependencies/Recommended execution order 字段 + Original ID Index；新增 G-19）。
+  - `docs/current/TECH_DEBT.md`（仅同步结尾「不入债」注记的优先级措辞，避免新造跨文档不一致；TD-001..004 正文不变）。
+  - `docs/current/WORK_LOG.md`（本条）。
+  - `docs/current/_tmp_s1_priority_audit/`（中间产物，见下）。
+- **skills/tools used**:
+  - Graphify（`graphify query` 定向入口链 / provider same-spine 节点；结论回源码核验）。
+  - `git ls-files -v` / `git show HEAD:`/`:`index / 工作树读取 + Python 长度&结构掩码（**不打印明文**）做 G-15 密钥独立核验；`git log -- config/config.yaml` 历史扫描。
+  - 定向 `grep`/`sed` 核验 factory/loop/main.py/README/tests 具体行。
+- **paths audited（只读）**: `main.py`、`agent/core.py`、`agent/loop.py`、`agent/provider/{factory,protocol}.py`、`agent/evidence_persistence.py`、`agent/evidence_recorder.py`(节点)、`config/`、`.gitignore`、`README.md`、`tests/golden_e2e/`、`tests/runtime_integration/`、`tests/smoke/`。
+- **intermediate files created under docs/current/_tmp_s1_priority_audit/**:
+  - `independent_audit_notes.md` — 文档语义/一致性核验 + 重点问题回答。
+  - `graphify_queries.md` — 本轮 Graphify 查询及用途。
+  - `code_evidence_index.md` — 第一手核验事实（带 file:line / 掩码密钥结构）。
+  - `gap_correction_candidates.md` — 逐条优先级升降与理由。
+  - `gap_priority_matrix.draft.md` — P0–P4 矩阵草稿。
+- **what was done / 关键发现**:
+  - 文档语义核验：S1=Baseline Usable Product、S≠代码 v1/v2/v3 ✓。
+  - **发现一致性偏差**：`S1_GOAL.md §5` 把 RB-1/RB-2 框定为 release blocker（"必须先解决才能宣布 S1 可用"），但旧 `S1_GOAL_GAP.md` 把 G-15/G-16 标为 must_fix_for_s1（P1）→ 不一致。重排为 P0/release_blocker **恢复**与冻结目标文档一致。
+  - **G-15 独立新发现**：`config/config.yaml` 设 `skip-worktree`；HEAD/INDEX/历史均 13 字符占位符（真实 key 从未被提交），但**工作树**含 35 字符真实长度 key（被 git 遮挡）。结论：已提交内容无泄露（上一轮「占位符/无需轮换」对已提交内容成立），但真实 key 在被跟踪路径的工作树里仅靠脆弱本地位遮挡 → untrack 动作更被强化；severity 仍是 config 卫生（非轮换）。
+  - **新增 G-19**：审计文档 `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md §0/§10.1`「提交了真实密钥」与 G-15 矛盾；本轮禁改审计文档 → 登记为 P0 gap 追踪调和。
+  - 枚举规范化：G-09 旧 Status `satisfied（context/state 路径）…`（非法枚举）→ `satisfied`。
+  - G-07b 维持 `unknown_needs_audit`（只读无法确证 resume API-valid）。
+- **gaps upgraded/downgraded/reordered**:
+  - 升级：G-15、G-16（must_fix→release_blocker/P0）、G-17（should_fix→release_blocker/P0）、G-03、G-12、G-07b（should_fix→must_fix/P1）。
+  - 降级：G-18（should_fix→optional/P3，理由：命名治理已由 S 文档收口，残留属代码层非 S1 范围）。
+  - 重分类：G-09 → Satisfied baseline（log 保真=TD-004）；G-14 边界标 satisfied、激活留 P4。
+  - 新增：G-19（P0）。无 gap 删除/合并。
+- **S1_GOAL_GAP items updated**: 全文件重排；逐条加 Priority/Dependencies/Recommended execution order；新增 §2 Executive Summary、§8 Satisfied baseline、§9 Original ID Index、G-19。
+- **TECH_DEBT items added or updated**: 无新增 TD；仅同步结尾「不入债」注记优先级措辞（G-15/G-16/G-17→P0、G-19 新增、G-07b→P1）。TD-001..004 正文不变。
+- **verification commands and results**: 见提交前验证段（`git status --short --branch --untracked-files=all`、各受限路径 `git diff`、`git diff --check`、`find docs/current/_tmp_s1_priority_audit`）。预期：仅 `docs/current/{S1_GOAL_GAP,TECH_DEBT,WORK_LOG}.md` + `_tmp_s1_priority_audit/` 变化；`agent/`、`tests/`、`docs/history/`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`config/`、`main.py`、`S_ROADMAP.md`、`S1_GOAL.md`、审计文档全部 0 diff。
+- **commit hash**: 本轮单次提交（精确 hash 见 `git log` 分支 HEAD / 运行报告）。
+- **next step**（仅限有据可依者，grounded in `S1_GOAL.md`/`S1_GOAL_GAP.md`/用户指令）:
+  - 由用户审阅本轮重排后的 release backlog。
+  - 后续授权 run 按 P0 顺序执行：G-15（untrack config.yaml + gitignore）、G-16（README 导航）、G-17（指定 acceptance 集）、G-19（调和审计文档 §0/§10.1 措辞）。
+
+---
+
 ## 2026-06-16 (run 2) — Verify S1 baseline + correct G-15/RB-1 secret severity
 
 - **date/time**: 2026-06-16 (local)

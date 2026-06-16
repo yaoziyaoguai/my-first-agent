@@ -39,7 +39,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | Priority | IDs | 为何此优先级 | 推荐下一步（授权后） |
 |---|---|---|---|
 | **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 ✅ | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）；G-19 已完成（run 11：审计文档 config/secret 事实与 G-15 调和）**；P0 全部完成 |
-| **P1** | G-07b ✅, G-12, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）**；待办：钉死 legacy Plan 为 S1 最小多步并验收；写 key-safe real smoke 步骤 |
+| **P1** | G-07b ✅, G-12 ✅, G-03 | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已完成（run 13：legacy Plan 最小多步 plan→advance→resume→done 验收）**；待办：写 key-safe real smoke 步骤 |
 | **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
 | **P4** | G-13, G-14, G-06(TD-002), G-11(TD-001) | dormant by design / L5 边界已满足激活留 S2 / 已确认 S1 不解决 | 见 `TECH_DEBT.md`，S2+ 重评 |
@@ -49,8 +49,8 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 12 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)** |
-| partially_satisfied | 4 | G-03, G-07, G-10, G-12 |
+| satisfied | 13 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)**, **G-12 (✅ run 13)** |
+| partially_satisfied | 3 | G-03, G-07, G-10 |
 | unknown_needs_audit | 0 | — |
 | s1_blocker | 0 | — |
 | s1_gap | 1 | G-18 |
@@ -152,19 +152,19 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 - **Verification**（2026-06-16 run 12 实跑通过）: Red：`tests/test_checkpoint_roundtrip.py::test_large_tool_result_resume_shape_is_accepted_by_next_model_call` 在旧实现失败，恢复后的 `tool_result` 缺 `content`；Green：修复后该测试 `1 passed`。相关回归：`test_checkpoint_summarizes_large_tool_results` + `test_resume_preserves_tool_use_tool_result_pairing` → `2 passed`；`TestCheckpointSummarizesToolResults::test_checkpoint_summarizes_large_tool_result` → `1 passed`。
 - **Decision**: ✅ satisfied。G-12 可基于该结论继续做最小多步任务 + resume 验收；大结果 raw content 仍不进入 checkpoint。
 
-### G-12 — 最小多步任务状态 / progress tracking
-- **Priority**: P1
+### G-12 — 最小多步任务状态 / progress tracking — ✅ RESOLVED (2026-06-16 run 13)
+- **Priority**: P1（已完成）
 - **Layer**: L4
 - **S1 requirement**: 存在最小多步任务状态与进度跟踪，可 checkpoint（对应 AC-5、§3.6 must-have）。
 - **Current evidence**: legacy Plan 路径 active——`state.py:192 TaskState`（current_plan/current_step_index/status）、`state.py:13 KNOWN_TASK_STATUSES`；`agent/tools/meta.py:45 mark_step_complete` + `config.py:208 STEP_COMPLETION_THRESHOLD=80`；`task_runtime.py:48 is_current_step_completed`；`transitions.py:639 advance_current_step_if_needed`；checkpoint 持久化全量 task state（`checkpoint.py:324`）。ActionPlan/Scheduler 路径 dormant（见 G-13）。
-- **Status**: partially_satisfied
-- **Gap**: 进度=checkpoint 快照，无独立 durable task ledger；ActionPlan 路径未接入。
+- **Status**: satisfied（2026-06-16 run 13 完成）
+- **Gap**: ~~进度=checkpoint 快照，无独立 durable task ledger；ActionPlan 路径未接入~~ → **已解决（按 S1 scope）**：legacy Plan (`current_plan` / `current_step_index` / `status` / `tool_execution_log`) 明确作为 S1 最小多步任务状态；checkpoint 快照是 S1 进度记录。独立 durable task ledger 与 ActionPlan/Scheduler 激活不属于 S1（见 S1_GOAL.md non-goals / G-13）。
 - **Blocking level**: must_fix_for_s1
-- **Dependencies**: G-07b（resume 形态结论）。
-- **Recommended execution order**: P1-2。
-- **Needed action**: 明确「legacy Plan 路径 = S1 的最小多步任务状态」并完成 AC-5 验收；独立 durable ledger 留 S2+（s2_or_later）。
-- **Verification**: 一个 ≥2 步任务能 plan→advance→done 并 resume（AC-5）。
-- **Decision**: legacy Plan 路径作为 S1 最小能力；durable ledger=s2_or_later。
+- **Dependencies**: G-07b（已完成；resume 形态结论可用）。
+- **Recommended execution order**: P1-2（已完成）。
+- **Needed action**: ~~明确「legacy Plan 路径 = S1 的最小多步任务状态」并完成 AC-5 验收；独立 durable ledger 留 S2+（s2_or_later）~~ 已执行。
+- **Verification**（2026-06-16 run 13 实跑通过）: 新增 `tests/test_checkpoint_resume_semantics.py::test_s1_legacy_plan_multistep_progress_can_resume_and_finish`，构造 2-step legacy Plan：step1 `mark_step_complete` 达阈值 → `advance_current_step_if_needed` 推进到 step2 → checkpoint save/load resume → step2 `mark_step_complete` 达阈值 → 推进到 `done`，测试 `1 passed`。相关 progress 小测 `test_advance_from_non_last_step_moves_to_next`、`test_advance_from_last_step_marks_done`、`test_is_current_step_completed_when_meta_score_meets_threshold` → `3 passed`。
+- **Decision**: ✅ satisfied。legacy Plan 路径是 S1 最小多步任务状态；durable ledger / ActionPlan Scheduler 激活仍为 S2+，不扩大本 gap。
 
 ### G-03 — Real provider smoke
 - **Priority**: P1
@@ -359,7 +359,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-09 | tool result→ctx/state | §8 Satisfied | satisfied | should_fix_for_s1 | 枚举规范化 |
 | G-10 | evidence 可观测 | §5 P2 | partially_satisfied | should_fix_for_s1 | 不变 |
 | G-11 | evidence 正文 | §7 P4 | defer_to_tech_debt(TD-001) | s2_or_later | 不变（已 TD） |
-| G-12 | 多步任务 | §4 P1 | partially_satisfied | must_fix_for_s1 | should_fix→must_fix（AC-5） |
+| G-12 | 多步任务 | §4 P1 | satisfied (✅ run 13) | must_fix_for_s1 | **已完成**：legacy Plan 最小多步 plan→advance→resume→done 验收 |
 | G-13 | scheduler | §7 P4 | out_of_scope | s2_or_later | 不变 |
 | G-14 | MCP/Skill/SubAgent | §7 P4 | satisfied(边界) | s2_or_later(激活) | 边界标 satisfied |
 | G-15 | config.yaml | §3 P0 | satisfied (✅ run 4) | release_blocker | **已完成**：untrack + gitignore；真实 key 留本地 ignored 文件 |
@@ -368,4 +368,4 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | satisfied (✅ run 11) | release_blocker | **已完成**：审计文档 config/secret 事实与 G-15 调和 |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、G-12、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；其余 P1 项仍待后续授权 run 按优先级执行。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、~~G-12~~（✅ run 13 完成）、G-03。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已于 run 13 完成（legacy Plan 最小多步 plan→advance→resume→done 验收）；其余 P1 项仍待后续授权 run 按优先级执行。

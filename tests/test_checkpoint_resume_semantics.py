@@ -42,6 +42,33 @@ def _save_then_load(src):
     return dst
 
 
+def _s1_two_step_legacy_plan():
+    from agent.plan_schema import Plan, PlanStep
+
+    return Plan(
+        goal="s1-minimal-multistep",
+        thinking="S1 legacy Plan baseline",
+        steps=[
+            PlanStep(step_id="s1", title="step 1", description="do first", step_type="read"),
+            PlanStep(step_id="s2", title="step 2", description="do second", step_type="report"),
+        ],
+    ).model_dump()
+
+
+def _record_step_complete(state, *, tool_use_id: str, score: int = 90):
+    state.task.tool_execution_log[tool_use_id] = {
+        "tool": "mark_step_complete",
+        "input": {
+            "completion_score": score,
+            "summary": "done",
+            "outstanding": "none",
+        },
+        "result": "",
+        "status": "meta_recorded",
+        "step_index": state.task.current_step_index,
+    }
+
+
 def test_resume_awaiting_plan_confirmation_preserves_plan():
     """awaiting_plan_confirmation resume 后 current_plan + status 都在。"""
     src = create_agent_state(system_prompt="test")
@@ -55,6 +82,41 @@ def test_resume_awaiting_plan_confirmation_preserves_plan():
     assert dst.task.current_plan == {"goal": "g", "steps": [{"title": "step1"}]}
     # plan 子状态需要 plan 才合法，task_status_requires_plan 帮 core 做自检。
     assert task_status_requires_plan(dst.task)
+
+
+def test_s1_legacy_plan_multistep_progress_can_resume_and_finish():
+    """G-12: S1 最小多步状态使用 legacy Plan，并可 checkpoint/resume。"""
+    from agent.task_runtime import advance_current_step_if_needed, is_current_step_completed
+    from agent.transitions import CheckpointAction
+
+    src = create_agent_state(system_prompt="test")
+    src.task.user_goal = "do two steps"
+    src.task.current_plan = _s1_two_step_legacy_plan()
+    src.task.current_step_index = 0
+    src.task.status = "running"
+
+    _record_step_complete(src, tool_use_id="meta-step-1")
+    assert is_current_step_completed(src) is True
+
+    first = advance_current_step_if_needed(src, owner="tests.g12.step1")
+    assert first.allowed is True
+    assert first.checkpoint_action is CheckpointAction.SAVE
+    assert src.task.status == "running"
+    assert src.task.current_step_index == 1
+
+    resumed = _save_then_load(src)
+    assert resumed.task.current_plan == src.task.current_plan
+    assert resumed.task.current_step_index == 1
+    assert resumed.task.status == "running"
+
+    _record_step_complete(resumed, tool_use_id="meta-step-2")
+    assert is_current_step_completed(resumed) is True
+
+    final = advance_current_step_if_needed(resumed, owner="tests.g12.step2")
+    assert final.allowed is True
+    assert final.checkpoint_action is CheckpointAction.CLEAR
+    assert resumed.task.status == "done"
+    assert resumed.task.current_step_index == 1
 
 
 def test_resume_awaiting_user_input_runtime_pending_is_intact():

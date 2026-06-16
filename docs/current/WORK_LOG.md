@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-06-16 22:53 CST (run 13) — G-12 S1 minimal multistep task state
+
+- **date/time**: 2026-06-16 22:53 CST
+- **gap ID / priority**: G-12 / P1 must_fix_for_s1
+- **task name**: 明确并验收 legacy Plan 作为 S1 最小多步任务状态。
+- **why this gap was selected**: G-07b 已提交；按 P1 推荐顺序，G-12 是下一项 eligible gap，且依赖的 resume 形态结论已满足。
+- **files changed**:
+  - `tests/test_checkpoint_resume_semantics.py`（新增 G-12 AC-5 验收测试）。
+  - `docs/current/S1_GOAL_GAP.md`（G-12 → satisfied；P1/status/index 同步）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 待提交前确认；未创建 scratch 文件。
+- **skills/tools used**: `graphify query`（定位 legacy Plan/progress/checkpoint 节点）、`verification-before-completion`、`careful`。
+- **commands and results**:
+  - `graphify query "G-12 legacy Plan minimal multi-step task state progress mark_step_complete advance_current_step_if_needed checkpoint resume"` → 定位 `TaskState`、`mark_step_complete`、`is_current_step_completed`、`advance_current_step_if_needed`、checkpoint/resume 相关节点。
+  - `.venv/bin/python -m pytest tests/test_checkpoint_resume_semantics.py::test_s1_legacy_plan_multistep_progress_can_resume_and_finish -q` → `1 passed`。
+  - `.venv/bin/python -m pytest tests/test_semantics.py::test_advance_from_non_last_step_moves_to_next tests/test_semantics.py::test_advance_from_last_step_marks_done tests/test_semantics.py::test_is_current_step_completed_when_meta_score_meets_threshold -q` → `3 passed`。
+  - `.venv/bin/python -m pytest tests/test_checkpoint_resume_semantics.py tests/test_semantics.py -q` → `36 passed`。
+  - `.venv/bin/ruff check tests/test_checkpoint_resume_semantics.py` → `All checks passed!`
+  - `git status --short --branch --untracked-files=all` → `main...origin/main [ahead 10]`，G-12 三个文件 modified，既有未跟踪 `.claude/settings.json`、`CLAUDE.md` 未纳入。
+  - `git diff --check` → exit 0。
+  - `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` → 空。
+  - `graphify update .` → exit 1，拒绝覆盖：new graph 17440 nodes < existing graph.json 17507；未使用 `--force`，未将 graph 输出纳入本轮。
+- **S1_GOAL_GAP.md items updated**: G-12 marked satisfied；legacy Plan 路径明确为 S1 最小多步任务状态；durable ledger / ActionPlan Scheduler 激活保留 S2+ 边界。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、移动、复制 secret；未修改 `config/config.yaml`；未创建 `.env`；未读取 real sessions/runs。
+- **commit hash**: 本轮将提交为 `test: cover S1 minimal multistep resume`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-12 提交后按 P1 推荐顺序继续 G-03；G-03 是 real provider smoke，执行需要单独 key-safe 授权和 safety 边界确认。
+
+---
+
 ## 2026-06-16 22:38 CST (run 12) — G-07b checkpoint large-result resume shape
 
 - **date/time**: 2026-06-16 22:38 CST

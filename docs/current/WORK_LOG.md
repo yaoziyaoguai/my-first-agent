@@ -4,6 +4,33 @@
 
 ---
 
+## 2026-06-17 00:06 CST (run 17) — G-10 S1 observability baseline defined
+
+- **date/time**: 2026-06-17 00:06 CST
+- **gap ID / priority**: G-10 / P2 should_fix_for_s1
+- **task name**: G-10 S1 observability minimal event set.
+- **why this gap was selected**: G-03 已提交后，P0/P1 全部完成；`S1_GOAL_GAP.md` P2 推荐顺序为 G-10 → G-07，因此 G-10 是当前最高优先 eligible gap。
+- **files changed**:
+  - `docs/current/S1_OBSERVABILITY_BASELINE.md`（新增 S1 observability baseline 权威文档）。
+  - `docs/current/S1_GOAL_GAP.md`（G-10 → satisfied；P2/status/index 同步；记录 verification evidence）。
+  - `docs/current/WORK_LOG.md`（本条）。
+- **temp files**: `find docs/current/_tmp_s1_gap_loop -maxdepth 2 -type f | sort` 输出为空；未创建 scratch 文件。
+- **skills/tools used**: source/code audit by targeted `rg`/`sed`/`nl`; verification-before-completion 口径（先跑窄验证，再标 resolved）；secret-safe doc discipline（未读取或输出 real config/secret）。
+- **commands and results**:
+  - `sed -n '185,225p' docs/current/S1_GOAL_GAP.md` → 确认 G-10 Needed action 为指定 S1 可观测最小集，Verification 为一次 run 的 `events.jsonl` 含 `provider_type` + tool 事件 + checkpoint。
+  - `rg -n "Evidence|evidence|可观测|provider type|tool gate|checkpoint|request/response|Must-have|L3" docs/current/S1_GOAL.md` → 确认 S1 只要求路径骨架级 evidence，不要求持久化模型 request/response 正文。
+  - `nl -ba agent/evidence_recorder.py | sed -n '638,865p'` → 核验 `set_session_context()`、标准 envelope、`record_evidence()`、`record_tool_result_summary()` 字段与写入路径。
+  - `nl -ba agent/event_log.py | sed -n '153,178p'` → 核验 `EventLogWriter` 写 `events.jsonl` 前执行 enrich/redact/truncate。
+  - `.venv/bin/python -m pytest tests/test_evidence_lifecycle_and_summary.py tests/test_b7_event_log.py -q` → `91 passed in 2.39s`。
+- **verification evidence**: `S1_OBSERVABILITY_BASELINE.md` 指定最小 envelope 字段、provider/tool/memory/checkpoint/event-log-safety 事件家族、非承诺范围与 G-10 verification 命令；targeted tests 证明 per-session `events.jsonl` 优先、provider metadata 传播、tool gate/result summary、memory/checkpoint lifecycle evidence、JSONL/redaction/truncation 行为。
+- **S1_GOAL_GAP.md items updated**: G-10 marked satisfied；status distribution 更新为 satisfied 15 / partially_satisfied 1；remaining P0/P1/P2 为 P2 G-07。
+- **TECH_DEBT.md items added or updated**: 无。
+- **safety confirmations**: 未运行真实 provider；未读取、打印、复制、移动、修改、提交 secret；未修改 `config/config.yaml`；未创建/恢复 `.env`；未修改 AGENTS.md、docs/history、README 或 config example；未 push。
+- **commit hash**: 本轮将提交为 `docs: define S1 observability baseline`（精确 hash 见 `git log` / 本轮运行报告）。
+- **next gap/blocker**: G-10 提交后按 P2 推荐顺序继续 G-07（L2 umbrella 收口），除非提交前验证出现阻塞。
+
+---
+
 ## 2026-06-16 23:52 CST (run 16) — G-03 key-safe real provider smoke passed
 
 - **date/time**: 2026-06-16 23:52 CST

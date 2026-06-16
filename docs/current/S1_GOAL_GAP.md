@@ -40,7 +40,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 |---|---|---|---|
 | **P0** | G-15 ✅, G-16 ✅, G-17 ✅, G-19 ✅ | 安全/config 卫生发布风险；用户无法据 README 启动；acceptance baseline 缺失；审计文档与 G-15 权威冲突 | **G-15 已完成（run 4：untrack + gitignore）；G-16 已完成（run 5：README S1 定位 + 当前文档导航）；G-17 已完成（run 10：S1 acceptance baseline 指定；real smoke 执行归 G-03）；G-19 已完成（run 11：审计文档 config/secret 事实与 G-15 调和）**；P0 全部完成 |
 | **P1** | G-07b ✅, G-12 ✅, G-03 ✅ | 大结果 resume 形态未知（AC-5）；最小多步任务（AC-5）；real smoke（AC-3，依赖 G-15） | **G-07b 已完成（run 12：大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已完成（run 13：legacy Plan 最小多步 plan→advance→resume→done 验收）；G-03 已完成（run 16：key-safe opt-in real provider smoke 3 passed）**；P1 全部完成 |
-| **P2** | G-10, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | 列「一次 run 必现事件」；G-07b 解后确认 G-07 |
+| **P2** | G-10 ✅, G-07 | 指定 S1 最小可观测事件集；L2 umbrella 待收口 | **G-10 已完成（run 17：S1 observability baseline 指定）；** G-07b 解后确认 G-07 |
 | **P3** | G-18 | 命名治理已由 S 文档收口，残留属代码层（非 S1 范围） | 维持 S 文档唯一权威，不改代码 |
 | **P4** | G-13, G-14, G-06(TD-002), G-11(TD-001) | dormant by design / L5 边界已满足激活留 S2 / 已确认 S1 不解决 | 见 `TECH_DEBT.md`，S2+ 重评 |
 | **Satisfied** | G-01, G-02, G-04, G-05, G-08, G-09 | S1 要求已满足，无开放动作 | 仅回归保护（must-not-regress） |
@@ -49,8 +49,8 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 | Status | 数量 | IDs |
 |---|---|---|
-| satisfied | 14 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)**, **G-12 (✅ run 13)**, **G-03 (✅ run 16)** |
-| partially_satisfied | 2 | G-07, G-10 |
+| satisfied | 15 | G-01, G-02, G-04, G-05, G-08, G-09, G-14, **G-15 (✅ run 4)**, **G-16 (✅ run 5)**, **G-17 (✅ run 10)**, **G-19 (✅ run 11)**, **G-07b (✅ run 12)**, **G-12 (✅ run 13)**, **G-03 (✅ run 16)**, **G-10 (✅ run 17)** |
+| partially_satisfied | 1 | G-07 |
 | unknown_needs_audit | 0 | — |
 | s1_blocker | 0 | — |
 | s1_gap | 1 | G-18 |
@@ -190,18 +190,18 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 
 > 推荐执行顺序：G-10 → G-07。
 
-### G-10 — Evidence 支撑 S1 可观测性（指定最小事件集）
+### G-10 — Evidence 支撑 S1 可观测性（指定最小事件集） — ✅ RESOLVED (2026-06-17 run 17)
 - **Priority**: P2
 - **Layer**: L3
 - **S1 requirement**: evidence 能证明一次 run 的路径骨架。
 - **Current evidence**: `logger.py:150`→`agent_log.jsonl`；`event_log.py:153`→`sessions/<id>/events.jsonl`；`evidence_recorder.py:728 record_evidence`（含 provider_type、tool gate/invoke/result、memory、checkpoint 事件）。
-- **Status**: partially_satisfied
-- **Gap**: 路径骨架可证；尚未「指定」S1 可观测最小集（哪些事件必须出现）。
+- **Status**: satisfied
+- **Gap**: ~~路径骨架可证；尚未「指定」S1 可观测最小集（哪些事件必须出现）。~~ → **已解决**：`docs/current/S1_OBSERVABILITY_BASELINE.md` 指定 S1 最小可观测事件集、必需 envelope 字段、事件家族、非承诺范围与验证命令。
 - **Blocking level**: should_fix_for_s1
-- **Dependencies**: 与 G-17 验收口径相关。
-- **Recommended execution order**: P2-1。
-- **Needed action**: 指定 S1 可观测最小集（文档动作）。
-- **Verification**: 一次 run 的 events.jsonl 含 provider_type + tool 事件 + checkpoint。
+- **Dependencies**: G-17 已完成；G-10 baseline 与 `S1_ACCEPTANCE_BASELINE.md` 的 release gate 口径一致。
+- **Recommended execution order**: P2-1（已完成）。
+- **Needed action**: ~~指定 S1 可观测最小集（文档动作）。~~ 已执行。
+- **Verification**（2026-06-17 run 17 实跑通过）: `.venv/bin/python -m pytest tests/test_evidence_lifecycle_and_summary.py tests/test_b7_event_log.py -q` → `91 passed`；`docs/current/S1_OBSERVABILITY_BASELINE.md` 明确列出 provider identity、tool gate/result summary、memory、checkpoint、event log safety 最小事件家族；`git diff --check` 通过。
 - **Decision**: 最小可观测已具备；正文保真见 G-11（TD-001，P4）。
 
 ### G-07 — Context/Memory/State/Checkpoint 基本可用（L2 umbrella）
@@ -361,7 +361,7 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-07b | 大结果 resume | §4 P1 | satisfied (✅ run 12) | must_fix_for_s1 | **已完成**：大 tool_result resume 形态可被下一次本地严格 provider 调用接受 |
 | G-08 | tool/policy | §8 Satisfied | satisfied | must_fix_for_s1 | 不变 |
 | G-09 | tool result→ctx/state | §8 Satisfied | satisfied | should_fix_for_s1 | 枚举规范化 |
-| G-10 | evidence 可观测 | §5 P2 | partially_satisfied | should_fix_for_s1 | 不变 |
+| G-10 | evidence 可观测 | §5 P2 | satisfied (✅ run 17) | should_fix_for_s1 | **已完成**：S1 observability baseline 指定 |
 | G-11 | evidence 正文 | §7 P4 | defer_to_tech_debt(TD-001) | s2_or_later | 不变（已 TD） |
 | G-12 | 多步任务 | §4 P1 | satisfied (✅ run 13) | must_fix_for_s1 | **已完成**：legacy Plan 最小多步 plan→advance→resume→done 验收 |
 | G-13 | scheduler | §7 P4 | out_of_scope | s2_or_later | 不变 |
@@ -372,4 +372,4 @@ S1 不是 demo、不是 MVP 小试、不是纯审计阶段（见 `S_ROADMAP.md �
 | G-18 | S vs v 命名 | §6 P3 | s1_gap | optional_for_s1 | should_fix→optional |
 | G-19 | 审计文档冲突 | §3 P0 | satisfied (✅ run 11) | release_blocker | **已完成**：审计文档 config/secret 事实与 G-15 调和 |
 
-> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、~~G-12~~（✅ run 13 完成）、~~G-03~~（✅ run 16 完成）。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已于 run 13 完成（legacy Plan 最小多步 plan→advance→resume→done 验收）；G-03 已于 run 16 完成（key-safe opt-in real provider smoke 3 passed）；P0/P1 全部完成，剩余 eligible S1 gap 为 P2 G-10、G-07。
+> 说明：无 gap 被删除或合并；G-19 为新增（非重命名）。S1 必修（P0+P1）：~~G-15~~（✅ run 4 完成）、~~G-16~~（✅ run 5 完成）、~~G-17~~（✅ run 10 完成）、~~G-19~~（✅ run 11 完成）、~~G-07b~~（✅ run 12 完成）、~~G-12~~（✅ run 13 完成）、~~G-03~~（✅ run 16 完成）。G-15 已于 run 4 完成（`git rm --cached config/config.yaml` + `.gitignore` 忽略；本地真实 key 保留在 ignored 的 `config/config.yaml`，未迁移/删除/轮换）；G-16 已于 run 5 完成（README S1 定位 + 当前文档导航）；G-17 已于 run 10 完成（S1 acceptance baseline 指定；real provider smoke 执行归 G-03）；G-19 已于 run 11 完成（审计文档 config/secret 事实与 G-15 调和）；G-07b 已于 run 12 完成（大 tool_result resume 形态可被下一次本地严格 provider 调用接受）；G-12 已于 run 13 完成（legacy Plan 最小多步 plan→advance→resume→done 验收）；G-03 已于 run 16 完成（key-safe opt-in real provider smoke 3 passed）；G-10 已于 run 17 完成（S1 observability baseline 指定）；P0/P1 全部完成，剩余 eligible S1 gap 为 P2 G-07。

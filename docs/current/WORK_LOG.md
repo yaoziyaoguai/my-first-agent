@@ -241,6 +241,30 @@ run.
 - Commit hash: 本轮将提交为 `feat: define S2 governed task state model`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G03 after this focused commit.
 
+### 2026-06-17 20:09 CST - Implement S2 task orchestration skeleton (S2-G03)
+
+- Task name: implement task orchestration skeleton for S2-G03.
+- Selected gap: S2-G03, because S2-G01/S2-G02 are satisfied and S2-G03 is the next P1 dependency for task context/progress work.
+- Files changed:
+  - `agent/task_orchestration.py` -> added thin S2 orchestration skeleton over existing transitions, legacy Plan, checkpoint actions, and S2 task state projection.
+  - `tests/test_s2_task_orchestration.py` -> added fake deterministic reference-task path covering receive task, plan confirmation, checkpoint, resume, step advance, second resume, and done.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G03 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added `receive_governed_task(...)`, `accept_governed_plan(...)`, `advance_governed_task_if_ready(...)`, and `resume_governed_task(...)`.
+  - Kept same-spine boundaries: orchestration delegates status changes to `agent.transitions`, derives visibility through `build_governed_task_state(...)`, and returns `CheckpointAction` without writing checkpoints itself.
+  - Kept non-goals intact: no Scheduler/L5 activation, no tool execution bypass, no plan generation, no second runtime, no real provider call.
+- Verification commands and results:
+  - `graphify query "S2-G03 task orchestration skeleton runtime loop plan execute steps checkpoint governed task state build_governed_task_state"` -> scoped runtime/checkpoint/orchestration evidence to `agent/core.py`, `agent/response_handlers.py`, `agent/transitions.py`, `agent/checkpoint.py`, and S2 state model nodes.
+  - `.venv/bin/python -m pytest tests/test_s2_task_orchestration.py -q` -> 3 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_task_orchestration.py tests/test_s2_task_state_model.py tests/test_semantics.py tests/test_phase3_task_runtime_transitions.py tests/test_checkpoint_resume_semantics.py -q` -> 53 passed.
+  - `.venv/bin/ruff check agent/task_orchestration.py tests/test_s2_task_orchestration.py` -> all checks passed after import ordering fix.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G03 -> satisfied. S2-G04 is now the next eligible P1 gap; S2-G07 remains blocked until S2-G04..S2-G06 and S2-G10 are done.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: add S2 task orchestration skeleton`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G04 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

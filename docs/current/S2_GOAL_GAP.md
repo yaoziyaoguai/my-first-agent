@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 10 | S2-G03, S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 9 | S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
 | blocked | 1 | S2-G07 (needs S2-G02..S2-G06 + S2-G10 before S2 E2E acceptance) |
 | deferred | 0 | — |
-| satisfied | 2 | S2-G01, S2-G02 |
+| satisfied | 3 | S2-G01, S2-G02, S2-G03 |
 
 ## 3. Recommended execution order
 
@@ -55,7 +55,7 @@
 
 1. **S2-G01** (P0) — satisfied: reference task & blocking open decisions resolved
 2. **S2-G02** (P1) — satisfied: governed task state model defined → S2-G03/G04/G06 解锁
-3. **S2-G03** (P1) — task orchestration skeleton（依赖 S2-G02）
+3. **S2-G03** (P1) — satisfied: task orchestration skeleton（依赖 S2-G02）
 4. **S2-G04** (P1) — task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
 5. **S2-G05** (P1) — governed tool/policy/evidence 合约
 6. **S2-G06** (P1) — task progress + human review/takeover（依赖 S2-G02/G03）
@@ -123,10 +123,14 @@
 - **Gap**: 把 legacy Plan 最小多步升级为正式 task orchestration skeleton：在同一 runtime spine 上承接 receive task → plan → execute steps → advance → done，并可 checkpoint/resume。
 - **Needed action**: 在 S2-G02 状态模型上实现 orchestration skeleton；保持 same-spine；进度可 checkpoint 持久化。
 - **Verification**: reference task（S2-G01）能走完 plan→execute→checkpoint→resume→done（fake 确定性）。
+- **Resolution evidence**:
+  - Code: `agent/task_orchestration.py` adds the S2 orchestration skeleton over existing `transitions`, legacy Plan, `CheckpointAction`, and `build_governed_task_state(...)`.
+  - Tests: `tests/test_s2_task_orchestration.py` covers receive task → plan confirmation → checkpoint → resume → execute/advance → checkpoint → resume → done.
+  - Boundary: orchestration does not generate plans, execute tools, write checkpoints, activate Scheduler/L5, or introduce a second runtime spine; callers still own model/tool/checkpoint side effects.
 - **Dependencies**: S2-G02；S2-G01（reference task）。
 - **Non-goal boundary**: 不接入 Scheduler（S3+）；不引入第二主链路。
 - **Suggested execution order**: P1-2。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: S2 没有 task 执行骨架，AC-1 无法达成。
 
 ### S2-G04 — Task context / memory / state / checkpoint coordination
@@ -289,7 +293,7 @@
 |---|---|---|---|---|---|
 | S2-G01 | Select reference task & resolve blocking open decisions | P0 | satisfied | Cross-cutting | AC-1/7 setup |
 | S2-G02 | Define governed task state model | P1 | satisfied | L4 | AC-2 |
-| S2-G03 | Implement task orchestration skeleton | P1 | open | L4 | AC-1 |
+| S2-G03 | Implement task orchestration skeleton | P1 | satisfied | L4 | AC-1 |
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | open | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | open | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | open | L4 | AC-2/9 |
@@ -316,5 +320,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01/S2-G02 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G03 开始逐 gap 推进。
+- S2-G01/S2-G02/S2-G03 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G04 开始逐 gap 推进。
 - 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

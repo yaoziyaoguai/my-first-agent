@@ -43,16 +43,22 @@
 ### TD-003 - Secondary context compression path needs reachability review
 
 - ID: TD-003
-- Title: Secondary context compression path needs reachability review.
-- Status: needs_review
+- Title: Secondary context compression path is unreachable dead code.
+- Status: open (confirmed unreachable during S2 baseline audit, 2026-06-17)
 - Priority: P3
 - Scope: L2 Context
-- Impact: Main runtime uses guarded memory compression, but `agent/context.py`
-  has an older `compress_history` shape whose reachability is not confirmed.
-- Suggested phase: S2 baseline audit or next context-module cleanup.
-- Verification: Confirm whether any active entrypoint imports or calls
-  `agent/context.py`; if reachable, compare tool-use/tool-result pairing guards
-  with `agent/memory.py`.
+- Impact: Main runtime uses guarded memory compression (`agent/memory.py:220
+  compress_history`, imported by `agent/core.py:66`, called at `core.py:1305`),
+  while the older `agent/context.py:36 compress_history` has **zero imports in
+  src** and is not reachable from any active entrypoint. It is dead code without
+  tool-use/tool-result pairing guards; safe only because it is unreachable.
+- Suggested phase: S2/Sn dead-code cleanup when `agent/context.py` or the L2
+  context module is next touched.
+- Verification: 2026-06-17 S2 baseline audit —
+  `rg "from agent\.context import|import agent\.context|from \.context import"
+  agent/ main.py` -> no matches; active compression path is `agent/memory.py:220`
+  only. Reachability question closed: path is unreachable; remaining work is dead
+  code removal, not a pairing-guard fix.
 
 ### TD-004 - Pending-tool events log omits tool output preview
 

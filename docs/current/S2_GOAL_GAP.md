@@ -32,7 +32,7 @@
 
 | Priority | 含义 | 典型判据 |
 |---|---|---|
-| **P0 Setup blocker** | 阻塞 S2 开始执行或会误导后续 agent | S2_GOAL §9 open decisions 未解决导致核心 P1 gap 无法精确化；缺 reference task 使 AC-1/AC-7 无法定义具体验收 |
+| **P0 Setup blocker** | 阻塞 S2 开始执行或会误导后续 agent | S2_GOAL §9 open decisions 未解决时会导致核心 P1 gap 无法精确化；缺 reference task 会使 AC-1/AC-7 无法定义具体验收 |
 | **P1 Must fix for S2** | S2 核心产品能力（Governed Task Agent 必达） | L4 task orchestration 正式化；L2 task 级 context/state/checkpoint；L3 governed tool/policy/evidence；reference task 端到端闭环；fake/real 覆盖关键 S2 流程 |
 | **P2 Should fix for S2** | 硬化项，建议 S2 内完成 | L5 selectively-active 候选选择与受控接入；acceptance gate 债务分类；task-level evidence 深度；guard cleanup 可控子集 |
 | **P3 Optional for S2** | 不影响 S2 核心完成 | ruff/quality gate 策略化处理（不全清零） |
@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 10 | S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
-| blocked | 3 | S2-G01 (open decisions), S2-G07 (needs S2-G01), S2-G08 (needs OD-2/S2-G01) |
+| open | 11 | S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| blocked | 1 | S2-G07 (needs S2-G02..S2-G06 + S2-G10 before S2 E2E acceptance) |
 | deferred | 0 | — |
-| satisfied | 0 | —（S2 起点无已完成的 S2 gap；S1 satisfied 项在 S1 archive） |
+| satisfied | 1 | S2-G01 |
 
 ## 3. Recommended execution order
 
@@ -78,12 +78,19 @@
 - **Baseline evidence**: S1 只有 minimal multistep（legacy Plan），无 S2 级 reference task；S2_GOAL §9 列出 6 个 open decisions 未决，其中 reference task（OD-1）、L5 选择（OD-2）、full-pytest 政策（OD-3）直接阻塞 P1 gap 的精确化。
 - **Gap**: 没有 reference task，AC-1（任务闭环）与 AC-7（fake/real 覆盖）无法定义具体验收；没有 L5 选择，S2-G08/G09 无法启动；没有 full-pytest 政策，AC-8 边界模糊。
 - **Needed action**: 用户确认 reference task 场景；确认 L5 先激活哪个；确认 full-pytest 全绿 vs targeted gate；确认 real provider 覆盖深度；确认 memory/evidence 深度（OD-5）；确认 AC-9/AC-10 是否纳入。
-- **Verification**: `S2_GOAL.md` §9 open decisions 全部有用户答复；reference task 被显式命名并写入 S2_GOAL 或本 gap。
+- **Resolution decisions（2026-06-17，用户确认）**:
+  1. Reference task = **Repo-governed improvement task**：FirstAgent 承接真实项目内任务，从读取 S2 gap / docs / code evidence 开始，制定 plan，执行小范围修复或审计，调用工具，保存 checkpoint，resume，记录 evidence，输出结果/commit；不选纯聊天任务或复杂外部业务任务。
+  2. L5 selectively-active = **Skill**：Skill 作为受控任务能力包进入 S2；不得绕过 S1 same-spine runtime、policy/evidence，必须可关闭、可回滚、可验收。MCP/SubAgent/Scheduler 不作为首个 S2 必达激活目标。
+  3. Full pytest / ruff policy：S2 不要求 full pytest 和 ruff 全绿作为产品目标；S2 release gate 以 targeted S2 acceptance gate 为准；full pytest / ruff 作为 health/debt signal 分类、记录、逐步治理；TD-006 进入 S2 cleanup，但不得吞掉 S2 产品目标。
+  4. Real provider coverage：S2 real provider 覆盖 reference task 的 smoke / E2E 主路径，证明 real provider 能进入 governed task path、产生 evidence、与 fake/local 对齐关键事件链路；不要求覆盖所有分支；必须 key-safe。
+  5. Memory / context / evidence depth：S2 做 task-level context / memory / state / checkpoint / evidence；task context 清楚，checkpoint/resume 不丢关键 provider-callable content，tool result 可摘要且可恢复，evidence 能支撑人类复盘任务，memory 读写受控；不做长期人格记忆、复杂 self-evolving memory、多 Agent 共享记忆或大型知识库。
+  6. AC-9 / AC-10：纳入 S2 acceptance。AC-9 = human review / takeover；AC-10 = quality/debt governance，必须区分 runtime regression、doc governance debt、ruff/full pytest quality debt。
+- **Verification**: satisfied — `S2_GOAL.md` §9 decisions 已由用户答复；reference task 已显式命名为 Repo-governed improvement task；首个 L5 已选 Skill。
 - **Dependencies**: 无（这是 S2 的起点）。
 - **Non-goal boundary**: 不在本 gap 里实现 reference task，只做选择与确认。
 - **Suggested execution order**: P0-1（最先）。
-- **Status**: blocked（需用户决策）。
-- **Risk if ignored**: 所有 P1 gap 只能停留在抽象描述，无法精确验收；S2 无法真正开始。
+- **Status**: satisfied（用户决策已完成）。
+- **Risk if ignored**: 已解除；后续 P1/P2 gap 必须按上述决策收敛，不得重新打开 S2 scope。
 
 ---
 
@@ -167,10 +174,10 @@
 - **Gap**: 建立 S2 reference task 的 E2E acceptance：fake 模式确定性走完任务闭环；real provider 在 key-safe opt-in 下覆盖 reference task 关键路径。
 - **Needed action**: 定义 S2 acceptance 集（fake/local 确定性 gate + real key-safe smoke 覆盖）；不把 TD-006 的红混进 runtime 验收信号（与 S2-G10 协同）。
 - **Verification**: fake reference-task E2E 确定性通过；real key-smoke 覆盖关键路径；不读取/打印/移动/提交 secret。
-- **Dependencies**: S2-G01..S2-G06（reference task + 全部 P1 能力就绪）；S2-G10（acceptance gate 分类）。
+- **Dependencies**: S2-G02..S2-G06（reference task 已由 S2-G01 决策为 Repo-governed improvement task）；S2-G10（acceptance gate 分类）。
 - **Non-goal boundary**: 不把 full pytest 全绿作为 S2 产品目标（见 S2-G10/G12）。
 - **Suggested execution order**: P1-6（S2 验收锚点，最后）。
-- **Status**: blocked（需 S2-G01 reference task）。
+- **Status**: blocked（需 S2-G02..S2-G06 与 S2-G10 完成后再建立 S2 E2E acceptance）。
 - **Risk if ignored**: S2 无法判定「完成」；AC-1/AC-7 无验收命令。
 
 ---
@@ -181,14 +188,14 @@
 - **Priority**: P2（should_fix_for_s2）
 - **Layer**: L5
 - **Related S2 Goal**: §4-L5; §5 AC-6; §9 OD-2
-- **Baseline evidence**: 全部 L5 dormant/boundary-clear（G-13/G-14）。graphify 核验：**SubAgent L1 parent-mediated 路径 wiring 最齐**（`delegate_l1`/`execute_l1`/`build_context_package`/`SubAgentRegistry` + `test_subagent_l1_parent_mediated.py` 大量 test）；MCP configurable default-off（`MY_FIRST_AGENT_MCP_ENABLE`）；Skill experimental；Scheduler dormant（main.py 0 refs）。
+- **Baseline evidence**: 全部 L5 dormant/boundary-clear（G-13/G-14）。graphify 核验：**SubAgent L1 parent-mediated 路径 wiring 最齐**（`delegate_l1`/`execute_l1`/`build_context_package`/`SubAgentRegistry` + `test_subagent_l1_parent_mediated.py` 大量 test）；MCP configurable default-off（`MY_FIRST_AGENT_MCP_ENABLE`）；Skill experimental；Scheduler dormant（main.py 0 refs）。S2-G01 用户决策已选择 **Skill** 作为首个 S2 selectively-active L5。
 - **Gap**: 选择**一个** L5 能力进入受控激活；选定后才能做 S2-G09 集成。
-- **Needed action**: 基于 OD-2 决定先激活哪个；评估各候选的 same-spine/policy/evidence/disable boundary 成本。
-- **Verification**: 选定项有书面理由 + 集成计划；未选项保持 dormant/boundary-clear。
-- **Dependencies**: S2-G01（OD-2 解决）。
+- **Needed action**: 在 Skill 已被选定的前提下，补齐 Skill same-spine / policy / evidence / disable boundary 的接入理由与集成计划；未选 MCP/SubAgent/Scheduler 保持 dormant/boundary-clear。
+- **Verification**: Skill 有书面理由 + 集成计划；未选项保持 dormant/boundary-clear。
+- **Dependencies**: S2-G01 satisfied（OD-2 已解决）。
 - **Non-goal boundary**: 不全量激活所有 L5；不选超过一个进入 S2 受控激活。
 - **Suggested execution order**: P2-1。
-- **Status**: blocked（需 OD-2）。
+- **Status**: open（OD-2 已由 S2-G01 解决；需补齐 Skill 集成计划）。
 - **Risk if ignored**: AC-6 无法达成；S2 缺少 L5 维度。
 
 ### S2-G09 — Selected L5 controlled integration
@@ -227,10 +234,10 @@
 - **Gap**: 根据 OD-5 决定「任务级 evidence」深度：是否需要触及 TD-001（正文保真）和 TD-004（pending-tool 预览）以支撑人类复盘。
 - **Needed action**: OD-5 确认后，按需推进 evidence 深度；若 OD-5 要求复盘级别，则处理 TD-001/TD-004 相关部分。
 - **Verification**: reference task evidence 能支撑人类复盘（工具、决策、失败、恢复）。
-- **Dependencies**: OD-5（S2-G01）；与 S2-G05 协同。
+- **Dependencies**: S2-G01 satisfied（OD-5 已解决）；与 S2-G05 协同。
 - **Non-goal boundary**: 不强制全正文保真（除非 OD-5 确认）；未触及的 TD 部分留 S2-G13。
 - **Suggested execution order**: P2-4。
-- **Status**: open（依赖 OD-5）。
+- **Status**: open（OD-5 已由 S2-G01 解决；需按 task-level evidence 深度实现）。
 - **Risk if ignored**: AC-5 深度不明；可能复盘能力不足或过度投资。
 
 ---
@@ -275,14 +282,14 @@
 
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
-| S2-G01 | Select reference task & resolve blocking open decisions | P0 | blocked | Cross-cutting | AC-1/7 setup |
+| S2-G01 | Select reference task & resolve blocking open decisions | P0 | satisfied | Cross-cutting | AC-1/7 setup |
 | S2-G02 | Define governed task state model | P1 | open | L4 | AC-2 |
 | S2-G03 | Implement task orchestration skeleton | P1 | open | L4 | AC-1 |
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | open | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | open | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | open | L4 | AC-2/9 |
 | S2-G07 | fake + real S2 E2E acceptance | P1 | blocked | L1 | AC-1/7 |
-| S2-G08 | Selectively-active L5 candidate selection | P2 | blocked | L5 | AC-6 |
+| S2-G08 | Selectively-active L5 candidate selection | P2 | open | L5 | AC-6 |
 | S2-G09 | Selected L5 controlled integration | P2 | open (cond.) | L5 | AC-6 |
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | open | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | open | L3 | AC-5 |
@@ -304,6 +311,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- 用户审阅本 `S2_GOAL_GAP.md`（尤其 P0/S2-G01 的 open decisions 解锁）。
-- 审阅通过后才进入 **S2 gap loop**（按 §3 执行顺序逐 gap 推进）。
-- **本任务不执行任何 gap，不改代码/tests/config，不进入 goal loop。**
+- S2-G01 已由用户决策解锁；进入 **S2 gap loop** 时按 §3 执行顺序从 S2-G02 开始逐 gap 推进。
+- 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

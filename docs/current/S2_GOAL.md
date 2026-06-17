@@ -136,11 +136,12 @@ S2 视为达成，当且仅当（草案口径，待用户确认）：
 8. **AC-8 acceptance gate 分类**：S2 acceptance gate 能明确区分 runtime regression /
    doc governance debt / quality debt，不把 TD-006/TD-007 的红混进 runtime 验收信号。
 
-可选追加（不写成不可控大工程，待用户决定是否纳入）：
+已由用户确认纳入 S2 acceptance：
 
-9. **AC-9（可选）human takeover seam**：人可在任务执行中审计并在阻塞点接管。
-10. **AC-10（可选）大结果 resume 验收**：含大 tool_result 的任务在 checkpoint/resume
-    后仍可继续执行（固化 S1 G-07b 到任务级）。
+9. **AC-9 human review / takeover**：人可在任务执行中看到任务进度、证据、失败
+   原因，并可在阻塞点接管、停止或继续。
+10. **AC-10 quality / debt governance**：S2 必须能区分 runtime regression、doc
+    governance debt、ruff/full pytest quality debt，不能把所有红点混成一个不可判断的失败。
 
 ## 6. Non-goals
 
@@ -161,7 +162,7 @@ S2 明确**不**做：
   `docs/history/S1_BASELINE_USABLE_PRODUCT/`，仅作 evidence，非 routing authority。
 - `TECH_DEBT.md` 是债务入口；**S2 gap 由 baseline vs 本 goal 生成**（在 `S2_GOAL_GAP.md`
   ，本任务不生成）。
-- `S2_GOAL_GAP.md` 当前应保持 skeleton，不被本 goal 草案填充。
+- `S2_GOAL_GAP.md` 是 S2 backlog；gap 状态只能按 baseline、本文目标与用户决策更新。
 - **real provider 可用于验收，但必须 key-safe**：opt-in、不读取/打印/复制/移动/提交
   secret、不修改 ignored `config/config.yaml`、不创建 `.env`。
 - **config/secret 不得泄露**：延续 S1 G-15 边界。
@@ -178,26 +179,19 @@ S2 明确**不**做：
   「任务级 evidence」的要求深度（§9-5 open decision）。
 - **不要把所有技术债都塞进 S2 goal。** 债务分配在 gap 阶段按 baseline vs goal 决定。
 
-## 9. Open decisions
+## 9. Resolved decisions
 
-以下问题需用户在确认本 goal 时一并回答（回答会直接 shaping gap）：
+以下 S2-G01 open decisions 已由用户在 2026-06-17 确认，后续 gap loop 以此为准：
 
-1. **reference task**：S2 选择哪个真实任务作为 reference task？（AC-1/AC-7 的锚点）
-2. **L5 selectively-active 选择**：先激活哪一个 —— **Skill / MCP / SubAgent /
-   Scheduler**？（baseline 证据：SubAgent L1 parent-mediated 路径 wiring 最齐；
-   MCP configurable default-off；Skill experimental；Scheduler dormant。）
-3. **full pytest 要求**：S2 是否要求 full pytest 全绿，还是只要求 targeted gate +
-   guard cleanup（AC-8 分类口径）？
-4. **real provider 验收覆盖度**：real provider 只覆盖 reference task 关键路径，还是
-   覆盖更多 S2 流程？
-5. **memory/context 产品边界**：AC-3/AC-5 中「受控 memory」与「任务级 evidence」要
-   求到什么深度？是否需要触及 TD-001/TD-004？
-6. **AC-9/AC-10 是否纳入**：human takeover seam 与大结果任务级 resume 是否进入 S2
-   硬验收？
+1. **Reference task**：采用 **Repo-governed improvement task**。FirstAgent 应能承接真实项目内任务，从读取 S2 gap / docs / code evidence 开始，制定 plan，执行小范围修复或审计，调用工具，保存 checkpoint，resume，记录 evidence，输出结果/commit；不选择纯聊天任务或复杂外部业务任务。
+2. **L5 selectively-active 选择**：首个 S2 L5 选择 **Skill**。Skill 作为受控任务能力包进入 S2；不得绕过 S1 same-spine runtime、policy/evidence，必须可关闭、可回滚、可验收。MCP/SubAgent/Scheduler 不作为首个 S2 必达激活目标。
+3. **Full pytest / ruff policy**：S2 不要求 full pytest 和 ruff 全绿作为产品目标。S2 release gate 以 targeted S2 acceptance gate 为准；full pytest / ruff 作为 health/debt signal 分类、记录、逐步治理；TD-006 进入 S2 cleanup，但不得吞掉 S2 产品目标。
+4. **Real provider coverage**：real provider 覆盖 reference task 的 smoke / E2E 主路径，证明 real provider 能进入 governed task path、产生 evidence、与 fake/local 对齐关键事件链路；不要求所有分支、所有测试都用 real provider 覆盖；必须 key-safe。
+5. **Memory / context / evidence depth**：S2 做 task-level context / memory / state / checkpoint / evidence；task context 清楚，checkpoint/resume 不丢关键 provider-callable content，tool result 可摘要且可恢复，evidence 能支撑人类复盘任务，memory 读写受控；不做长期人格记忆、复杂 self-evolving memory、多 Agent 共享记忆或大型知识库。
+6. **AC-9 / AC-10**：纳入 S2 acceptance。AC-9 为 human review / takeover；AC-10 为 quality/debt governance。
 
 ## 10. Next step
 
-- 用户审阅并确认（或修订）本 `S2_GOAL.md`，尤其是 §9 的 open decisions。
-- 确认后，再基于 `S2_BASELINE_STATUS.md`（现状）vs 确认后的 `S2_GOAL.md`（目标）
-  生成 `S2_GOAL_GAP.md`。
-- **本任务不生成 gap，不进入 goal loop，不改代码/tests/config。**
+- S2-G01 已解锁；后续按 `S2_GOAL_GAP.md` 推荐顺序进入 gap loop。
+- 不得借本决策扩大 S2：首个 L5 仅 Skill；MCP/SubAgent/Scheduler 保持后续候选。
+- 每个 gap 仍需 focused mini-run、验证、更新 backlog/work log，并独立提交。

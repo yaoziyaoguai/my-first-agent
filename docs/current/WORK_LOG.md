@@ -190,6 +190,32 @@ run.
 - Commit hash: 本轮将提交为 `docs: generate S2 goal gap backlog`（精确 hash 见 `git log` / 最终报告）。
 - Next step: user reviews `S2_GOAL_GAP.md` (especially P0/S2-G01 open-decision unblock); after review, enter S2 gap loop per §3 execution order. No gap execution in this run.
 
+### 2026-06-17 19:57 CST - Resolve S2 open decisions (S2-G01)
+
+- Task name: resolve S2-G01 open decisions and unlock the S2 gap loop.
+- Selected gap: S2-G01, because it is the only P0 setup blocker and §3 execution order requires it before P1/P2 work.
+- User decisions recorded:
+  - Reference task: Repo-governed improvement task.
+  - First S2 L5 selectively-active capability: Skill.
+  - Full pytest / ruff policy: health/debt signals, not S2 product-goal full-green gates; targeted S2 acceptance gate is the release signal.
+  - Real provider coverage: key-safe smoke / E2E main path for the reference task, not all branches.
+  - Memory/context/evidence depth: task-level context, memory, state, checkpoint, evidence; no long-term personality memory, self-evolving memory, multi-agent shared memory, or large knowledge base.
+  - AC-9 / AC-10: included as human review/takeover and quality/debt governance.
+- Files changed:
+  - `docs/current/S2_GOAL_GAP.md` -> S2-G01 marked satisfied; six decisions recorded; status distribution/index updated; S2-G08/S2-G11 dependency wording unlocked by S2-G01 decisions.
+  - `docs/current/S2_GOAL.md` -> §9 changed from open decisions to resolved decisions; AC-9/AC-10 and next-step wording synchronized without rewriting the goal.
+  - `docs/current/WORK_LOG.md` -> this entry.
+  - Not changed: code, tests, `config/config.yaml`, `.env`, `AGENTS.md`, `S_ROADMAP.md`, `S2_BASELINE_STATUS.md`, `TECH_DEBT.md`, `docs/history/`.
+- Verification commands and results:
+  - `rg -n "S2-G01|Reference task|Repo-governed improvement task|L5 selectively-active|Skill|Full pytest|Real provider coverage|Memory / context / evidence|AC-9 / AC-10|Status\\*\\*: satisfied|Status\\*\\*: blocked|open decisions" docs/current/S2_GOAL.md docs/current/S2_GOAL_GAP.md docs/current/WORK_LOG.md` -> confirmed S2-G01 decisions and satisfied status are present; legacy earlier work-log entries still mention pre-resolution open decisions as historical record.
+  - `git diff --check` -> clean.
+  - `git status --short --branch --untracked-files=all` -> only scoped tracked docs plus pre-existing untracked `.claude/settings.json`, `CLAUDE.md`.
+  - `docs/current/_tmp_s2_gap_loop` -> absent; no temp files created for this doc-only mini-run.
+- `S2_GOAL_GAP.md` items updated: S2-G01 -> satisfied. S2-G08 remains open and unblocked by OD-2; S2-G11 remains open with OD-5 resolved; S2-G07 remains blocked until S2-G02..S2-G06 and S2-G10 are done.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: this commit (`docs: resolve S2 open decisions`).
+- Next step: continue the S2 gap loop with S2-G02, the next eligible P1 gap in the recommended execution order.
+
 ## Standard Run Entry Template
 
 ```md

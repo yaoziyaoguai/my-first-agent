@@ -314,6 +314,31 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 governed tool contract report`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G06 after this focused commit.
 
+### 2026-06-17 20:22 CST - Add S2 task progress review seam (S2-G06)
+
+- Task name: task progress exposure and human review/takeover seam for S2-G06.
+- Selected gap: S2-G06, because S2-G01..S2-G05 are satisfied and S2-G06 completes the P1 task-state/progress prerequisites before S2-G07 acceptance.
+- Files changed:
+  - `agent/task_review.py` -> added human-visible task progress review snapshot, side-effect-free takeover decision parsing, and safe progress evidence hook.
+  - `tests/test_s2_task_review.py` -> added tests for progress/current-step/blocking visibility, continue/stop/takeover parsing, and safe evidence.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G06 satisfied, updated status distribution/index/next step; S2-G07 now remains blocked only on S2-G10.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added `TaskProgressReview` over S2 task context + governed tool report, exposing lifecycle, progress percent, current step, blocking/failure reason, and tool counts.
+  - Added `HumanTakeoverDecision` parsing for continue/stop/takeover without mutating runtime state.
+  - Added `record_task_progress_review_evidence(...)` with safe summary metadata only.
+  - Preserved non-goals: no full human-in-the-loop UI, no direct task mutation, no checkpoint writes, no automatic stop/continue execution.
+- Verification commands and results:
+  - `graphify query "S2-G06 task progress human review takeover progress display blocking reason governed task state RuntimeEvent stop continue takeover"` -> scoped progress/review evidence to S2 task state plus display/progress boundaries.
+  - `.venv/bin/python -m pytest tests/test_s2_task_review.py -q` -> 3 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_task_review.py tests/test_s2_task_tool_contract.py tests/test_s2_task_context.py tests/test_s2_task_orchestration.py tests/test_s2_task_state_model.py -q` -> 17 passed.
+  - `.venv/bin/ruff check agent/task_review.py tests/test_s2_task_review.py` -> all checks passed after import modernization fix.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G06 -> satisfied. S2-G07 remains blocked only by S2-G10; S2-G10 is now the next eligible gap.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: add S2 task progress review seam`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G10 after this focused commit, then return to S2-G07 acceptance.
+
 ## Standard Run Entry Template
 
 ```md

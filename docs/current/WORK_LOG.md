@@ -475,6 +475,29 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 task evidence report`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G12 after this focused commit.
 
+### 2026-06-17 20:56 CST - Document S2 quality gate strategy (S2-G12)
+
+- Task name: ruff / quality gate strategy for S2-G12.
+- Selected gap: S2-G12, because S2-G10 classified ruff as TD-007 quality debt and S2 needs a stable policy for new code vs historical lint debt.
+- Files changed:
+  - `docs/current/S2_QUALITY_GATE_STRATEGY.md` -> added release-gate vs health/debt policy and focused ruff rules.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G12 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Documented that targeted S2 acceptance remains the release signal.
+  - Documented focused ruff requirement for new/modified Python files.
+  - Kept project-wide `ruff check .` as TD-007 health/debt signal until a separate lint pass clears it.
+  - Kept TD-007 separate from TD-006 doc/governance guard debt and from runtime regression classification.
+- Verification commands and results:
+  - `rg -n "TD-007|ruff|quality|acceptance gate|S2 acceptance|QUALITY_DEBT" docs/current agent tests` -> confirmed existing TD-007 / S2 acceptance gate references before writing the strategy.
+  - `.venv/bin/python -m pytest tests/test_s2_acceptance_gate.py -q` -> 5 passed.
+  - `rg -n "S2_QUALITY_GATE_STRATEGY|S2-G12|TD-007|quality_debt|focused ruff|Status\\*\\*: satisfied|open \\| 1|satisfied \\| 12" docs/current/S2_GOAL_GAP.md docs/current/S2_QUALITY_GATE_STRATEGY.md docs/current/WORK_LOG.md docs/current/S2_ACCEPTANCE_GATE.md` -> confirmed S2-G12 satisfied, one remaining open gap, and TD-007 quality-debt policy references.
+  - `git diff --check` -> clean.
+- `S2_GOAL_GAP.md` items updated: S2-G12 -> satisfied. S2-G13 is now the only remaining open gap.
+- `TECH_DEBT.md` items added or updated: none. TD-007 remains open.
+- Commit hash: 本轮将提交为 `docs: document S2 quality gate strategy`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G13 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

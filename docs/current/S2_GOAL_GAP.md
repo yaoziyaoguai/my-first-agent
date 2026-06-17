@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 2 | S2-G12, S2-G13 |
+| open | 1 | S2-G13 |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 11 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10, S2-G11 |
+| satisfied | 12 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10, S2-G11, S2-G12 |
 
 ## 3. Recommended execution order
 
@@ -64,8 +64,8 @@
 9. **S2-G08** (P2) — satisfied: Skill selected + same-spine integration plan recorded
 10. **S2-G09** (P2) — satisfied: Skill controlled integration gate + evidence boundary
 11. **S2-G11** (P2) — satisfied: task-level evidence depth report
-12. **S2-G12** (P3) — ruff/quality gate 策略（下一个 eligible gap）
-13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn
+12. **S2-G12** (P3) — satisfied: ruff/quality gate strategy documented
+13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn（下一个 eligible gap）
 
 ---
 
@@ -301,10 +301,15 @@
 - **Gap**: 对 ruff/quality gate 做策略化处理（例如：新代码必须 clean、存量分批、不追求一次性全清零）。
 - **Needed action**: 制定 lint 策略；可选分批修复；不与 TD-006 混淆。
 - **Verification**: lint 策略成文；新代码 ruff clean。
+- **Resolution evidence**:
+  - Strategy: `docs/current/S2_QUALITY_GATE_STRATEGY.md` defines S2 release gate vs health/debt signals.
+  - Ruff policy: new/modified Python files must pass focused `ruff check`; project-wide `ruff check .` remains TD-007 until a separate lint pass clears it.
+  - Debt separation: TD-007 lint debt is kept separate from TD-006 doc-governance guard debt and from targeted S2 runtime acceptance.
+  - Verification: focused ruff checks have been run for all new/modified S2 code gaps in this loop; `tests/test_s2_acceptance_gate.py` classifies ruff failures as `quality_debt`.
 - **Dependencies**: 无。
 - **Non-goal boundary**: 不把 ruff 全清零作为 S2 产品目标。
 - **Suggested execution order**: P3-1（随时可做，不阻塞 S2）。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: lint 健康长期红；不影响 S2 核心能力。
 
 ---
@@ -342,7 +347,7 @@
 | S2-G09 | Selected L5 controlled integration | P2 | satisfied | L5 | AC-6 |
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | satisfied | L3 | AC-5 |
-| S2-G12 | Quality gate / ruff strategy | P3 | open | Cross-cutting | §8 |
+| S2-G12 | Quality gate / ruff strategy | P3 | satisfied | Cross-cutting | §8 |
 | S2-G13 | TECH_DEBT triage into S2/S3/Sn | P4 | open | Cross-cutting | §6/§8 |
 
 ## 10. Non-goal guardrails

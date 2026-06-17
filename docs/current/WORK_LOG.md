@@ -523,6 +523,36 @@ run.
 - Commit hash: 本轮将提交为 `docs: triage S2 technical debt into S2/S3/Sn lanes`（精确 hash 见 `git log` / 最终报告）。注：未使用指令给的 `docs: resolve S2 open decisions`，因为该 commit 已存在（`8e706b3`），重复提交会制造 no-op；本 commit 反映真实剩余工作 S2-G13。
 - Next step: S2 gap loop 已全部完成（13/13 satisfied）。S2 acceptance 的最终验证（targeted gate + real key-safe smoke 覆盖 reference task 主路径）以及是否进入 S2 release / S3 规划，需用户决定；本 run 不擅自启动。
 
+### 2026-06-17 CST - Fix S2-G09 skill gate regression (gate activation, not discovery)
+
+- Task name: fix S2-G09 runtime regression — gate S2 Skill activation without hiding registry (direction 1 chosen by user).
+- Regression discovered during S2 final acceptance: S2-G09 (`700b848`) introduced a default-off gate at the registry/discovery layer (`build_skill_registry()` returned empty `SkillRegistry(roots=[])` when `MY_FIRST_AGENT_S2_SKILL_ENABLE` unset), causing 3 S1 baseline test failures (`test_s6_skill_registry_has_demo_note_maker`, `test_golden_skill_system_locks_current_experimental_behavior`, `test_skill_l3_core_loop_discovery_and_selection`). Classified as `runtime_regression` per `S2_ACCEPTANCE_GATE.md` — a release blocker.
+- Root cause: S2-G09 conflated "activation default-off" with "registry empty". The activation-layer gate was already correct (`skill_action.py:51` rejects SKILL_SELECT; `skill_tool.py` doesn't register SKILL_SELECT; `core.py` suppresses body; `skill_lifecycle.py` clears checkpoint) — only the registry layer was wrong.
+- User decision (direction 1): S1 skill registry contract must not regress. Semantics: **discovery allowed, activation default-off, execution gated**.
+- Skills used and where:
+  - superpowers: root-cause isolation (activation gate already existed; only registry layer was wrong); verification-before-completion (ran the 4 required test groups + S1 must-not-regress full set + ruff on changed files).
+  - compound-engineering: design-decision boundary judgment (registry/discovery = metadata layer, must stay S1; activation/execution = S2 gate layer); S1-baseline must-not-regress discipline.
+  - g-stack: graphify-free targeted read of `skill_action.py` + `skill_tool.py` + `phase1_hook.py` to confirm activation gate completeness without large source reads.
+- Files changed:
+  - `agent/runtime_integration/phase1_hook.py` -> removed the registry-layer gate in `build_skill_registry()` (restored S1 behavior: always scans `skills/`); removed now-unused `is_s2_skill_enabled` import; added design-decision docstring.
+  - `tests/test_s2_skill_controlled_integration.py` -> replaced `test_s2_skill_registry_default_off_is_empty` with `test_s2_skill_registry_default_off_still_discovers_skills` (asserts demo-note-maker remains visible when disabled — discovery allowed).
+  - `tests/golden_e2e/test_golden_skill_system.py`, `tests/golden_e2e/test_golden_skill_l3_core_loop.py` -> added `monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")` with explanatory comments (these S1-era tests exercise full selection→activation, so they opt-in explicitly).
+  - `docs/current/S2_GOAL_GAP.md` -> S2-G09 Verification/Resolution evidence updated with the design decision (discovery allowed, activation default-off) and regression correction.
+  - `docs/current/WORK_LOG.md` -> this entry.
+  - Not changed: S1 history, S2_GOAL.md, S2_BASELINE_STATUS.md, S_ROADMAP.md, README.md, AGENTS.md, config/config.yaml, .env, docs/history.
+- Verification commands and results:
+  - `pytest tests/smoke/test_first_usable_task_e2e.py::test_s6_skill_registry_has_demo_note_maker -q` -> 1 passed (S1 registry contract restored).
+  - `pytest tests/golden_e2e/test_golden_skill_system.py tests/golden_e2e/test_golden_skill_l3_core_loop.py -q` -> 3 passed (golden skill tests restored).
+  - `pytest tests/test_s2_skill_controlled_integration.py -q` -> 6 passed (S2-G09 new contract: discovery allowed + activation gated).
+  - `pytest tests/test_s2_reference_task_acceptance.py -q` -> 1 passed, 1 skipped (S2 targeted acceptance gate green; real smoke opt-in skipped).
+  - S1 must-not-regress full set (golden_e2e + smoke + wiring + observability) -> 113 passed (the 3 prior failures all fixed, no new failures).
+  - `ruff check` on 5 changed files -> All checks passed!
+  - `git diff --check` -> clean.
+- `S2_GOAL_GAP.md` items updated: S2-G09 Resolution evidence updated with design decision + regression correction.
+- `TECH_DEBT.md` items added or updated: none (no misleading debt found).
+- Commit hash: 本轮将提交为 `fix: gate S2 skill activation without hiding registry`（精确 hash 见 `git log` / 最终报告）。
+- Next step: S2 final acceptance re-run (S2 acceptance gate + S1 must-not-regress) now green for the runtime path; real provider key-safe smoke for reference task remains opt-in (user authorization needed to run). No further code change unless real smoke reveals issues.
+
 ## Standard Run Entry Template
 
 ```md

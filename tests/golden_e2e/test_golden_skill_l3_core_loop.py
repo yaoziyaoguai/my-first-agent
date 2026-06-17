@@ -80,6 +80,9 @@ def test_skill_l3_core_loop_discovery_and_selection(
     3. skill.candidates.built 包含候选
     4. 结果不含 forbidden side-effect actions（tool/memory/subagent/checkpoint）
     """
+    # S2-G09 设计决策：S2 Skill activation default-off。本 golden test 验证完整
+    # selection→activation 流程，属于 activation 层行为，显式 opt-in。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
     from agent import skill_state
     from agent.runtime_integration.schema import RuntimeActionType
 

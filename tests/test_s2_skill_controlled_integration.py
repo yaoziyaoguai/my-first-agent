@@ -31,14 +31,23 @@ def test_s2_skill_gate_opt_in_registers_model_visible_tool(monkeypatch):
     assert "SKILL_SELECT" in {tool["name"] for tool in get_model_visible_tools()}
 
 
-def test_s2_skill_registry_default_off_is_empty(monkeypatch):
+def test_s2_skill_registry_default_off_still_discovers_skills(monkeypatch):
+    """设计决策（S2-G09 修正）：discovery allowed，activation default-off。
+
+    registry/discovery 层保持 S1 行为——default 即可发现 demo-note-maker；
+    S2 的 default-off gate 下沉到 activation/execution 层（见
+    test_s2_skill_runtime_action_rejected_when_disabled / SKILL_SELECT 不注册）。
+    """
     from agent.runtime_integration.phase1_hook import build_skill_registry
 
     monkeypatch.delenv(S2_SKILL_ENABLE_ENV, raising=False)
 
     registry = build_skill_registry()
 
-    assert registry.list_visible() == []
+    visible_names = {descriptor.name for descriptor in registry.list_visible()}
+    assert "demo-note-maker" in visible_names, (
+        f"demo-note-maker 应在 visible skills 中（S1 discovery 契约），实际: {visible_names}"
+    )
 
 
 def test_s2_skill_runtime_action_rejected_when_disabled(monkeypatch):

@@ -56,6 +56,11 @@ def test_golden_skill_system_locks_current_experimental_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """本地 discovery → selection → lifecycle，不夸成 production-ready。"""
+    # S2-G09 设计决策：S2 Skill activation default-off（见 agent/skill_system/gate.py）。
+    # 本 golden test 验证的是 S1 baseline 的完整 selection→activation 流程，属于
+    # activation 层行为，因此显式 opt-in S2 skill gate。default-off 的保护由
+    # tests/test_s2_skill_controlled_integration.py 覆盖。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
     from agent import skill_state
     from agent.core import _update_active_skill_from_dispatcher
     from agent.runtime_integration.phase1_hook import build_phase1_dispatcher

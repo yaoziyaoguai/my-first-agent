@@ -236,14 +236,14 @@
 - **Baseline evidence**: 见 S2-G08；所选 L5 当前为 dormant/configurable-default-off。
 - **Gap**: 把选定的 L5 能力受控接入主链路：经 dispatcher/mediator（不绕 same-spine）、经 policy/evidence、可禁用/可回滚/可验收；default-off，不激活时行为与 S1 一致。
 - **Needed action**: 实现 governed 接入；加 policy gate + evidence；加 disable 开关与回滚路径；写验收测试。
-- **Verification**: 激活路径走 same-spine 且有 evidence；disable 后行为与 S1 一致；child/MCP/skill 不绕过主 runtime。
+- **Verification**: 激活路径走 same-spine 且有 evidence；disable 后激活被拒绝；child/MCP/skill 不绕过主 runtime。
 - **Resolution evidence**:
   - Gate: `agent/skill_system/gate.py` defines default-off `MY_FIRST_AGENT_S2_SKILL_ENABLE`; enabled values are `1/true/yes/on`.
   - Model-visible tool boundary: `agent/skill_system/skill_tool.py` only registers `SKILL_SELECT` when the gate is enabled and rejects direct tool calls while disabled.
   - Runtime same-spine: `agent/runtime_integration/skill_action.py` rejects direct `RuntimeActionType.SKILL_SELECT` while disabled through dispatcher result/evidence, not via a side channel.
   - Prompt/checkpoint boundary: `agent/core.py` suppresses active skill body, candidate selection, and active-skill tool allowlist while disabled; disabled update clears active skill lifecycle/compat state; `agent/runtime_integration/skill_lifecycle.py` clears checkpoint restore while disabled.
-  - Registry boundary: `agent/runtime_integration/phase1_hook.py` returns an empty skill registry while disabled, preventing prompt metadata exposure.
-  - Tests: `tests/test_s2_skill_controlled_integration.py` covers default-off hiding, opt-in registration, empty disabled registry, dispatcher rejection evidence, no disabled prompt body injection, and disabled checkpoint restore clearing.
+  - **Design decision (S2 final acceptance correction, 2026-06-17)**: S2 Skill default-off 的语义是「discovery allowed, activation default-off, execution gated」—— **不在 registry/discovery 层关**。`build_skill_registry()` 保持 S1 行为不变（始终扫描 `skills/`，default 可发现 `demo-note-maker`）；default-off gate 只作用于 activation/execution 层（SKILL_SELECT 工具注册、`SkillRuntimeActionHandler.handle`、`core.py` body 注入、checkpoint restore）。此前 S2-G09 初版误在 `build_skill_registry()` 加 registry 层 gate，导致 S1 baseline `test_s6_skill_registry_has_demo_note_maker` + 2 个 golden skill tests 回归；已修正（`agent/runtime_integration/phase1_hook.py` 移除 registry gate）。
+  - Tests: `tests/test_s2_skill_controlled_integration.py` covers default-off discovery-still-works（registry 仍含 demo-note-maker）、default-off SKILL_SELECT hiding、opt-in registration、dispatcher rejection evidence、no disabled prompt body injection、disabled checkpoint restore clearing. S1-era golden skill tests opt-in explicitly (`monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")`) because they exercise the full selection→activation path.
 - **Dependencies**: S2-G08（选定项）；S2-G05（governed contract）。
 - **Non-goal boundary**: 不做 S3 级生态化；所选 L5 只做受控最小接入。
 - **Suggested execution order**: P2-2。

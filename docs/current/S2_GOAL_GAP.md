@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 6 | S2-G07, S2-G08, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 5 | S2-G08, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 7 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G10 |
+| satisfied | 8 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G10 |
 
 ## 3. Recommended execution order
 
@@ -60,8 +60,8 @@
 5. **S2-G05** (P1) — satisfied: governed tool/policy/evidence 合约
 6. **S2-G06** (P1) — satisfied: task progress + human review/takeover（依赖 S2-G02/G03）
 7. **S2-G10** (P2) — satisfied: acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8）
-8. **S2-G07** (P1) — fake+real S2 E2E acceptance（依赖已满足；是 S2 验收锚点）
-9. **S2-G08** (P2) — L5 candidate selection（依赖 S2-G01/OD-2）
+8. **S2-G07** (P1) — satisfied: fake+real S2 E2E acceptance set（real 为 key-safe opt-in；本地默认 skip）
+9. **S2-G08** (P2) — L5 candidate selection（依赖 S2-G01/OD-2；下一个 eligible gap）
 10. **S2-G09** (P2) — selected L5 controlled integration（依赖 S2-G08）
 11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5）
 12. **S2-G12** (P3) — ruff/quality gate 策略
@@ -195,10 +195,16 @@
 - **Gap**: 建立 S2 reference task 的 E2E acceptance：fake 模式确定性走完任务闭环；real provider 在 key-safe opt-in 下覆盖 reference task 关键路径。
 - **Needed action**: 定义 S2 acceptance 集（fake/local 确定性 gate + real key-safe smoke 覆盖）；不把 TD-006 的红混进 runtime 验收信号（与 S2-G10 协同）。
 - **Verification**: fake reference-task E2E 确定性通过；real key-smoke 覆盖关键路径；不读取/打印/移动/提交 secret。
+- **Resolution evidence**:
+  - Code/tests: `tests/test_s2_reference_task_acceptance.py` adds the targeted S2 reference-task acceptance gate.
+  - Fake/local E2E: covers governed task receive/plan-confirmation, task context, tool contract summary, progress review, safe evidence hooks, checkpoint save/load/resume, step advance, done projection, and S2 acceptance-gate classification.
+  - Real provider: adds `test_s2_reference_task_real_provider_key_safe_context_smoke`, guarded by `MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE=1`; it validates provider-callable S2 task context and then calls the configured real provider only under explicit opt-in.
+  - Runbook: `docs/current/S2_REFERENCE_TASK_ACCEPTANCE.md` documents targeted gate, real opt-in command, default skip behavior, and secret/config boundaries.
+  - Local verification: `.venv/bin/python -m pytest tests/test_s2_reference_task_acceptance.py -q` -> 1 passed, 1 skipped（real provider 未 opt-in，因此未执行真实 provider 调用）。
 - **Dependencies**: S2-G02..S2-G06（reference task 已由 S2-G01 决策为 Repo-governed improvement task）；S2-G10（acceptance gate 分类）。
 - **Non-goal boundary**: 不把 full pytest 全绿作为 S2 产品目标（见 S2-G10/G12）。
 - **Suggested execution order**: P1-6（S2 验收锚点，最后）。
-- **Status**: open（S2-G10 已完成；可建立 S2 E2E acceptance）。
+- **Status**: satisfied。
 - **Risk if ignored**: S2 无法判定「完成」；AC-1/AC-7 无验收命令。
 
 ---

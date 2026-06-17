@@ -366,6 +366,31 @@ run.
 - Commit hash: 本轮将提交为 `feat: classify S2 acceptance gate signals`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G07 acceptance.
 
+### 2026-06-17 20:33 CST - Add S2 reference task acceptance (S2-G07)
+
+- Task name: fake + real S2 E2E acceptance for S2-G07.
+- Selected gap: S2-G07, because S2-G02..S2-G06 and S2-G10 are satisfied, making the S2 reference-task acceptance anchor eligible.
+- Files changed:
+  - `tests/test_s2_reference_task_acceptance.py` -> added targeted S2 reference-task acceptance tests.
+  - `docs/current/S2_REFERENCE_TASK_ACCEPTANCE.md` -> documented the targeted gate, covered path, real-provider opt-in command, and secret/config boundaries.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G07 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added a deterministic fake/local reference-task E2E covering task receipt, plan confirmation, governed tool log summaries, task context, safe evidence hooks, human progress review, checkpoint save/load/resume, step advance, done projection, and acceptance-gate classification.
+  - Added a real-provider smoke test guarded by `MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE=1`; default local verification skips it before reading provider key variables or calling a real provider.
+  - Preserved boundaries: no L5 activation, no full pytest/ruff release-gate expansion, no `config/config.yaml` mutation, no `.env` creation, no secret printing.
+- Verification commands and results:
+  - `graphify query "S2-G07 fake real provider E2E acceptance FakeProvider real provider smoke factory provider same spine reference task acceptance"` -> scoped evidence to FakeProvider/provider factory/runtime same-spine tests before edits.
+  - `.venv/bin/python -m pytest tests/test_s2_reference_task_acceptance.py -q` -> 1 passed, 1 skipped (`MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE` not set; real provider not called).
+  - `.venv/bin/python -m pytest tests/test_s2_reference_task_acceptance.py tests/test_s2_acceptance_gate.py tests/test_s2_task_review.py tests/test_s2_task_tool_contract.py tests/test_s2_task_context.py tests/test_s2_task_orchestration.py tests/test_s2_task_state_model.py -q` -> 23 passed, 1 skipped.
+  - `.venv/bin/ruff check tests/test_s2_reference_task_acceptance.py` -> all checks passed.
+  - `git diff --check` -> clean.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G07 -> satisfied. S2-G08 is now the next eligible gap.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `test: add S2 reference task acceptance`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G08 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

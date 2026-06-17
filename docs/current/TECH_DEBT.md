@@ -40,11 +40,13 @@
 - Verification: Review `agent/provider/legacy_adapter.py` and call sites in
   `agent/core.py`.
 
-### TD-003 - Secondary context compression path needs reachability review
+### TD-003 - Secondary context compression path is unreachable dead code
 
 - ID: TD-003
-- Title: Secondary context compression path is unreachable dead code.
-- Status: open (confirmed unreachable during S2 baseline audit, 2026-06-17)
+- Title: Secondary context compression path is confirmed-unreachable dead code
+  (cleanup target, not a reachability question).
+- Status: open (confirmed unreachable during S2 baseline audit, 2026-06-17;
+  dead code not yet removed)
 - Priority: P3
 - Scope: L2 Context
 - Impact: Main runtime uses guarded memory compression (`agent/memory.py:220
@@ -74,17 +76,45 @@
 - Verification: Review `execute_pending_tool` and mediator `_route_result`
   behavior around `turn_context[tool_use_id]`.
 
-### TD-006 - Pre-S1 documentation-governance guard tests are stale
+### TD-006 - Stale guard / documentation-governance / architecture-boundary tests keep full-suite red
 
 - ID: TD-006
-- Title: Pre-S1 documentation-governance guard tests are stale.
+- Title: Stale guard / documentation-governance / architecture-boundary / taxonomy /
+  diagnostics / contract guard tests keep the full-suite health check red.
 - Status: open
 - Priority: P1
 - Scope: Cross-cutting Tests + Docs Governance
-- Impact: Full-suite health may remain red because several guard tests encode
-  pre-S1 documentation locations and README/source-of-truth expectations.
-- Suggested phase: S2 baseline audit, before relying on full-suite status as a
-  release signal.
-- Verification: Run full pytest after S2 docs settle; inspect failures in
-  documentation-governance tests and update them only against confirmed current
-  governance docs.
+- Impact: Full-suite health is red. The 36 failures span more than pre-S1 doc
+  locations: documentation-governance / source-of-truth guards
+  (`test_docs_source_of_truth.py`), architecture-boundary guards
+  (`test_v6_drift_addendum_boundary.py`, `test_architecture_boundaries.py`,
+  `test_capability_boundary_contract.py`), taxonomy guards
+  (`test_evidence_taxonomy_guard.py`), a diagnostics string/flag mismatch
+  (`test_provider_diagnostics.py`), and a guard referencing a doc moved to history
+  (`test_streaming_protocol.py`). None are in the S1 acceptance gate, observability
+  verification, or core-runtime tests, so this is a guard/governance cleanup rather
+  than a runtime regression.
+- Suggested phase: S2 baseline cleanup, or a separate Sn pass, before relying on
+  full-suite status as a release signal. Update each guard only against confirmed
+  current governance docs/contracts.
+- Verification: Run full pytest after S2 docs settle; classify each failure and
+  update the guard against current governance docs/contracts (not by weakening
+  assertions silently). See
+  `docs/current/_tmp_s2_baseline_audit/fullsuite_failures.txt` for the
+  authoritative failure list.
+
+### TD-007 - ruff full-suite lint is red with ~451 historical errors
+
+- ID: TD-007
+- Title: `ruff check .` is red with ~451 historical lint errors (import
+  organization, etc.).
+- Status: open
+- Priority: P3
+- Scope: Cross-cutting Lint / Quality gate
+- Impact: Project-level lint gate is non-green. Independent of TD-006 (different
+  source: lint style vs. doc/governance guards). Not an S2 startup blocker and not
+  a runtime regression; tracked so lint health is not silently ignored.
+- Suggested phase: S2/Sn lint pass, separate from TD-006 guard cleanup, when a
+  batched lint fix is in scope.
+- Verification: `.venv/bin/ruff check .`; target exit 0. Do not mix into TD-006
+  unless a shared root cause is proven.

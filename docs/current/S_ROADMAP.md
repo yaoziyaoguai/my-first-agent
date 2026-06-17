@@ -14,7 +14,7 @@ S 系列是 FirstAgent **重新开始之后的产品版本序列**：S1、S2、S
 - **S1 = 第一个「基本可用产品版 / Baseline Usable Product」。**
 - S1 不是 demo，不是 MVP 小试，不是一个小 sprint，也不是纯审计/纯治理阶段。
 - S1 的任务是把**当前已经存在的 FirstAgent 能力**，收敛为一个可以真实使用、可以解释、可以验收、可以继续增强的产品基线。
-- S1 的详细目标见 `docs/current/S1_GOAL.md`（用户批准后冻结）。
+- S1 的详细目标见 `docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md`（S1 已完成并归档；用户批准后冻结）。
 
 ## 3. S2 / S3 / Sn 是什么
 

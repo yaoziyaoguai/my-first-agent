@@ -15,12 +15,18 @@
   and all P2 should-fix (G-10, G-07) are satisfied per the archived
   `S1_GOAL_GAP.md`. Satisfied baselines G-01, G-02, G-04, G-05, G-08, G-09 are
   must-not-regress.
-- **Overall baseline verdict**: **S2 has a clean, usable starting point.** The S1
-  core runtime, deterministic acceptance gate, and observability baseline are green
-  and intact. The only red on the full-suite health check is documentation-governance
-  / architecture-boundary guard tests (TD-006) that still encode pre-S1 doc
-  locations; these do not block S2 startup and do not indicate any runtime
-  regression. S2 goal is not yet confirmed.
+- **Overall baseline verdict**: **S2 starts from a usable S1 runtime/acceptance
+  base, with stated caveats.** The targeted runtime path, deterministic S1
+  acceptance gate, and observability verification are green and intact, and the
+  stage switch to S2 in `docs/current/` is essentially complete. Caveats that
+  prevent declaring S2 "risk-free": (a) the full-suite health check is red due to
+  stale guard / documentation-governance / architecture-boundary / taxonomy /
+  diagnostics guard tests (TD-006), which are guard/governance failures rather
+  than runtime targeted regressions; (b) `ruff check .` is red with ~451
+  historical lint errors (TD-007); (c) a few entry documents still carried stale
+  `docs/current/S1_*` references at audit time (corrected this pass — see §6);
+  (d) **S2 goal is not yet confirmed**, so no risk verdict for S2 can be made
+  from a baseline alone.
 
 ## 1. Scope
 
@@ -35,11 +41,18 @@
 
 `docs/current/` (active workspace):
 
-- `README.md`, `S_ROADMAP.md` — stage/governance framing; not rewritten this audit.
+- `README.md`, `S_ROADMAP.md` — stage/governance framing. (Correction this pass:
+  both had stale `docs/current/S1_*` references at the first audit; root
+  `README.md` and `S_ROADMAP.md` S1 entries now point to the S1 archive, and S2
+  current entries were added. See §6.)
 - `S2_BASELINE_STATUS.md` — this file.
 - `S2_GOAL.md`, `S2_GOAL_GAP.md` — skeletons, pending goal confirmation.
-- `TECH_DEBT.md` — cross-stage open debt (TD-001, TD-002, TD-003, TD-004, TD-006).
+- `TECH_DEBT.md` — cross-stage open debt (TD-001, TD-002, TD-003, TD-004, TD-006,
+  TD-007).
 - `WORK_LOG.md` — S2 current-stage work log.
+- `_tmp_s2_baseline_audit/` — audit evidence artifacts only (this baseline's
+  intermediate notes, skill log, and the authoritative full-suite failure list).
+  Not an active authority; not a documentation entry point.
 
 Boundaries confirmed:
 
@@ -94,55 +107,67 @@ Capability matrix source-verified via graphify + S1 archived evidence.
 | S1 baseline-usable smoke | `.venv/bin/python -m pytest tests/smoke/test_first_usable_task_e2e.py -q` | **6 passed** |
 | S1 same-spine wiring | `.venv/bin/python -m pytest tests/runtime_integration/test_phase1_real_core_loop.py::TestCoreChatWiring::test_core_chat_actually_invokes_runtime_action_dispatcher_from_turn_end_hook -q` | **1 passed** |
 | S1 observability (G-10) | `.venv/bin/python -m pytest tests/test_evidence_lifecycle_and_summary.py tests/test_b7_event_log.py -q` | **91 passed** |
-| Full-suite health | `.venv/bin/python -m pytest -q` (excluding opt-in/network real tests) | 4727 passed, **36 failed**, 7 skipped, 26 xfailed |
-| Full-suite lint | `.venv/bin/ruff check .` | exit 1, **451 pre-existing errors** |
+| Full-suite health | `.venv/bin/python -m pytest -q` (no exclusions; fresh re-run this pass) | **36 failed, 4747 passed, 13 skipped, 26 xfailed** (246s) |
+| Full-suite lint | `.venv/bin/ruff check .` | exit 1, **~451 historical errors** (TD-007) |
 
 Full-suite failure breakdown (authoritative, saved in
 `docs/current/_tmp_s2_baseline_audit/fullsuite_failures.txt`):
 
 | File | Failures | Class |
 |---|---|---|
-| `tests/test_docs_source_of_truth.py` | 23 | docs-governance guard (TD-006) |
+| `tests/test_docs_source_of_truth.py` | 23 | docs-governance / source-of-truth guard (TD-006) |
 | `tests/runtime_integration/test_v6_drift_addendum_boundary.py` | 5 | architecture-boundary guard (TD-006) |
 | `tests/test_architecture_boundaries.py` | 3 | architecture-boundary guard (TD-006) |
 | `tests/test_evidence_taxonomy_guard.py` | 2 | taxonomy guard (TD-006) |
-| `tests/test_streaming_protocol.py` | 1 | references moved doc (TD-006) |
-| `tests/test_provider_diagnostics.py` | 1 | diagnostics string mismatch (TD-006) |
-| `tests/test_capability_boundary_contract.py` | 1 | capability-boundary contract (TD-006) |
+| `tests/test_streaming_protocol.py` | 1 | references a doc moved to history (TD-006) |
+| `tests/test_provider_diagnostics.py` | 1 | diagnostics string/flag mismatch (TD-006) |
+| `tests/test_capability_boundary_contract.py` | 1 | capability-boundary contract guard (TD-006) |
 
 Findings:
 
 - **Targeted acceptance and observability are fully green** and remain the trusted
-  S2-entry verification surface.
-- **All 36 full-suite failures are documentation-governance / architecture-boundary
-  / taxonomy / contract guard tests** that still encode pre-S1 documentation
-  locations moved to `docs/history/`. None are in the S1 acceptance gate,
-  observability verification, or core-runtime tests → **no S1 runtime regression**.
-  This is exactly **TD-006 (P1)**.
-- **ruff 451 errors are pre-existing full-suite historical debt** (import
-  organization etc.), not an S1 regression.
+  S2-entry verification surface for the runtime path.
+- **All 36 full-suite failures are guard / documentation-governance /
+  architecture-boundary / taxonomy / diagnostics / contract guard tests (TD-006)**.
+  They are guard/governance failures, not targeted runtime regressions: none are in
+  the S1 acceptance gate, observability verification, or core-runtime tests. Note
+  the failure causes are broader than "pre-S1 doc locations" — some are
+  architecture-boundary, taxonomy, or diagnostics-string assertions that need
+  separate review against current governance docs.
+- **ruff ~451 errors are pre-existing full-suite lint debt (TD-007)**, independent
+  of TD-006 and not an S1 regression.
 - **Real provider smoke** is satisfied per S1 G-03 (3 passed, key-safe opt-in) and
   was **not** re-run in this audit (no new real-provider authorization; safety
-  boundary). Network-dependent real tests
+  boundary). The opt-in/network real tests
   (`test_provider_real_smoke.py`, `test_real_cli_regressions.py`,
-  `test_real_mcp_flight.py`) are excluded from the full-suite health number.
+  `test_real_mcp_flight.py`) are collected by the full-suite number above; without
+  opt-in they show as skipped/passed rather than being separately excluded.
 
-Known stale guards: TD-006 (full-suite guards tied to pre-S1 doc locations) — the
-only thing that keeps full-suite non-green; resolving it is an S2-baseline cleanup
-candidate, not a runtime fix.
+Known stale guards: TD-006 is what keeps the full-suite health check red. It is an
+S2-baseline cleanup candidate, not a runtime fix. Relying on the targeted
+acceptance + observability set is the current S2-entry verification approach; it is
+**not** a substitute for eventually cleaning up TD-006.
 
 ## 6. Documentation baseline
 
-- `README.md` / `S_ROADMAP.md` — stable S-series framing; not rewritten this audit;
-  no obvious error found.
+- `README.md` / `S_ROADMAP.md` — stage/governance framing. **Correction this
+  pass:** the first audit wrongly stated "no obvious error found"; in fact both
+  files still pointed at `docs/current/S1_GOAL.md` / `S1_GOAL_GAP.md` /
+  `S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md`, which had moved to history. These
+  stale references have been corrected: S1 entries now point to
+  `docs/history/S1_BASELINE_USABLE_PRODUCT/`, and S2 current entries
+  (`S2_BASELINE_STATUS.md`, `S2_GOAL.md`, `S2_GOAL_GAP.md`) were added. The
+  framings were not rewritten beyond fixing stale S1 current refs.
 - S2 docs (`S2_BASELINE_STATUS.md`, `S2_GOAL.md`, `S2_GOAL_GAP.md`, `WORK_LOG.md`)
-  — `S2_BASELINE_STATUS.md` is now the audited baseline; `S2_GOAL.md` /
-  `S2_GOAL_GAP.md` remain skeletons as required.
+  — `S2_BASELINE_STATUS.md` is now the audited baseline (refined this pass);
+  `S2_GOAL.md` / `S2_GOAL_GAP.md` remain skeletons as required.
 - S1 history — fully archived under `docs/history/S1_BASELINE_USABLE_PRODUCT/` and
   usable as evidence.
-- Current doc conflict / gap: none within `docs/current`. The full-suite guard
-  failures (§5) reflect guard tests pointing at pre-S1 doc paths, not a conflict
-  inside current authoritative docs.
+- Remaining doc-side caveat: the full-suite guard failures (§5) reflect guard tests
+  asserting against pre-S1/pre-audit doc locations and contracts; these are tracked
+  as TD-006 and are not conflicts inside the current authoritative docs themselves,
+  but they do mean full-suite doc-governance coverage is stale until TD-006 is
+  cleaned up.
 
 ## 7. Technical debt baseline
 
@@ -151,7 +176,8 @@ is not duplicated here):
 
 | ID | Priority | Scope | Debt | Affects S2 startup? | Notes |
 |---|---|---|---|---|---|
-| TD-006 | P1 | Tests + Docs governance | Pre-S1 documentation-governance guard tests are stale (point at docs moved to history) | Indirectly — keeps full-suite non-green, not a runtime blocker | Confirmed by §5: all 36 full-suite failures are this class. Cleanup candidate for S2 baseline or a separate Sn pass. |
+| TD-006 | P1 | Tests + Docs governance | Stale guard / documentation-governance / architecture-boundary / taxonomy / diagnostics / contract guard tests keep full-suite red | Indirectly — keeps full-suite non-green; not a runtime blocker | Confirmed by §5: all 36 full-suite failures are this class. Causes are broader than "pre-S1 doc locations" (some are architecture-boundary / taxonomy / diagnostics assertions). Cleanup candidate for S2 baseline or a separate Sn pass. |
+| TD-007 | P3 | Cross-cutting Lint / Quality gate | `ruff check .` red with ~451 historical lint errors | No | New this pass. Independent of TD-006 (different source). Not an S2 startup blocker; tracked so lint health is not silently ignored. |
 | TD-001 | P2 | L3 Evidence | Evidence does not persist full model request/response body | No | G-11; S2/Sn when full-fidelity audit is required. |
 | TD-003 | P3 | L2 Context | Secondary `agent/context.py compress_history` is unreachable dead code (confirmed this audit) | No | Reachability confirmed: zero imports in src; active path is `agent/memory.py:220`. Dead-code cleanup target. |
 | TD-004 | P3 | L3 Evidence | Pending-tool `events.jsonl` tool_output preview may be empty | No | S2/Sn event-log fidelity. |
@@ -160,9 +186,10 @@ is not duplicated here):
 Debt classification:
 
 - **Affects S2 startup**: none is a hard blocker. TD-006 is the only P1 and only
-  makes full-suite status non-green; it does not block starting S2 work.
+  makes full-suite status non-green; it does not block starting S2 work. TD-007 is
+  lint-only.
 - **S2 baseline cleanup candidates**: TD-006 (and optionally TD-003 dead-code
-  removal).
+  removal, TD-007 lint pass).
 - **S2/Sn functional depth**: TD-001, TD-002, TD-004 are depth/fidelity debts,
   relevant only if the S2 goal touches those areas.
 
@@ -172,15 +199,17 @@ after `S2_GOAL.md` is confirmed.
 ## 8. Risks and unknowns
 
 - **S2 goal is not confirmed.** `S2_GOAL.md` is a skeleton; nothing here should be
-  read as a goal decision.
+  read as a goal decision, and no risk verdict for S2 follows from a baseline
+  alone.
 - **S2 gap is not generated.** `S2_GOAL_GAP.md` is a skeleton.
-- **Full-suite status is red**, but only due to TD-006 guard tests; relying on the
-  targeted acceptance + observability set is safe for S2-entry verification until
-  TD-006 is cleaned up.
+- **Full-suite status is red** due to TD-006 guard tests (and `ruff` is red due to
+  TD-007). The targeted acceptance + observability set is the current S2-entry
+  verification approach for the runtime path; this is a working reliance, not a
+  claim that full-suite health is acceptable — TD-006/TD-007 remain open cleanup.
 - **Real provider coverage** is not freshly re-verified this audit; it remains at
   the S1 G-03 satisfied state.
-- Whether TD-006 cleanup and any L5 activation belong in S2 vs a later Sn is a goal
-  decision, not decided by this baseline.
+- Whether TD-006/TD-007 cleanup and any L5 activation belong in S2 vs a later Sn is
+  a goal decision, not decided by this baseline.
 
 ## 9. Recommended next step
 

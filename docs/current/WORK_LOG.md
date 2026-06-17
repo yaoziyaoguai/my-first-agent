@@ -56,9 +56,18 @@ run.
   - `git ls-files config/config.yaml` -> empty (NOT tracked); `git check-ignore -v config/config.yaml` -> `.gitignore:36`; `.env` -> ENV_MISSING.
   - `pytest tests/golden_e2e -q` -> 15 passed; `pytest tests/smoke/test_first_usable_task_e2e.py -q` -> 6 passed; S1 same-spine wiring test -> 1 passed.
   - `pytest tests/test_evidence_lifecycle_and_summary.py tests/test_b7_event_log.py -q` -> 91 passed.
-  - `pytest -q` full-suite (excluding opt-in/network real tests) -> 4727 passed, 36 failed, 7 skipped, 26 xfailed (218s).
-  - `ruff check .` -> exit 1, 451 pre-existing errors.
-  - Full-suite 36 failures enumerated by file (authoritative list saved to `docs/current/_tmp_s2_baseline_audit/fullsuite_failures.txt`): all 36 are documentation-governance / architecture-boundary / taxonomy / contract guard tests referencing pre-S1 doc paths moved to `docs/history/` (TD-006).
+  - `pytest -q` full-suite (excluding opt-in/network real tests at first run) ->
+    4727 passed, 36 failed, 7 skipped, 26 xfailed (218s). **Corrected in the
+    second-opinion pass below:** the authoritative no-exclusion full-suite number
+    is 36 failed, 4747 passed, 13 skipped, 26 xfailed.
+  - `ruff check .` -> exit 1, ~451 pre-existing errors (tracked as TD-007 in the
+    second-opinion pass).
+  - Full-suite 36 failures enumerated by file (authoritative list saved to
+    `docs/current/_tmp_s2_baseline_audit/fullsuite_failures.txt`): all 36 are
+    guard / documentation-governance / architecture-boundary / taxonomy /
+    diagnostics / contract guard tests (TD-006). **Corrected in the
+    second-opinion pass:** the cause set is broader than "pre-S1 doc locations"
+    — see TD-006.
   - TD-003 reachability: `rg "from agent\.context import|import agent\.context|from \.context import" agent/ main.py` -> no matches; active compression = `agent/memory.py:220`.
 - Files changed:
   - `docs/current/S2_BASELINE_STATUS.md` -> filled from template into the audited S2 baseline (verdict, scope, doc layout, S1 inheritance matrix, runtime/code baseline, test/verification baseline, documentation baseline, technical-debt baseline, risks, next step).
@@ -75,8 +84,51 @@ run.
 - Verification result: see §"Commands run and results"; S1 acceptance + observability green; TD-006 isolated as the only full-suite red.
 - `S2_GOAL_GAP.md` items updated: none (S2 gap generation is out of scope for a baseline audit).
 - `TECH_DEBT.md` items added or updated: TD-003 status updated (reachability confirmed; dead-code cleanup target). TD-001/002/004/006 unchanged.
-- Commit hash: pending.
+- Commit hash: 568317e (`docs: audit S2 baseline status`).
 - Next step: discuss/confirm `S2_GOAL.md` with the user, then generate `S2_GOAL_GAP.md` from this baseline vs the confirmed goal. No authorized next step toward implementation.
+
+### 2026-06-17 CST - Second-opinion corrections for S2 baseline audit
+
+- Task name: review and apply second-opinion corrections to the S2 baseline audit
+  (focused correction pass, not a re-audit, not goal/gap design).
+- Files read: `docs/current/{S2_BASELINE_STATUS,TECH_DEBT,WORK_LOG,README,S_ROADMAP,S2_GOAL,S2_GOAL_GAP}.md`,
+  root `README.md`, `docs/history/S1_BASELINE_USABLE_PRODUCT/WORK_LOG.md`, and the
+  second-opinion report.
+- Skills used and where:
+  - superpowers: per-item review of each second-opinion claim, evidence check,
+    verification-before-completion self-check before commit.
+  - compound-engineering: baseline-statement calibration, TECH_DEBT
+    classification (TD-006 vs TD-007 source separation), S2 baseline vs S2 goal/gap
+    boundary.
+  - g-stack / targeted rg: stale-ref verification (`rg "docs/current/S1_GOAL.md"
+    README.md docs/current/S_ROADMAP.md ...`); fresh full-suite pytest re-run to
+    confirm numbers.
+- Commands run and results:
+  - `rg -n "docs/current/S1_GOAL.md|docs/current/S1_GOAL_GAP.md|S1_GOAL.md" README.md docs/current/S_ROADMAP.md docs/current/S2_BASELINE_STATUS.md docs/current/WORK_LOG.md` -> confirmed stale refs in root `README.md` (lines 5, 46, 53, 54, 55) and `docs/current/S_ROADMAP.md` (line 17); also a valid history reference in `S2_BASELINE_STATUS.md` line 48.
+  - Fresh `pytest -q` (no exclusions) -> `36 failed, 4747 passed, 13 skipped, 26 xfailed in 246s` — matches the second opinion; supersedes the prior excluded-run 4727/7.
+  - (Post-edit) `rg -n "docs/current/S1_GOAL.md|docs/current/S1_GOAL_GAP.md" README.md docs/current/S_ROADMAP.md` -> no matches (stale current refs removed; S1 now points to history).
+- Second-opinion items review (all accepted):
+  1. Over-strong language ("clean usable / only red / no doc conflict / safe for S2-entry") -> softened in baseline §0/§5/§6/§8.
+  2. Full pytest numbers -> corrected to 36 failed / 4747 passed / 13 skipped / 26 xfailed.
+  3. TD-006 scope too narrow -> broadened to stale guard / documentation-governance / architecture-boundary / taxonomy / diagnostics / contract guard cleanup; not all failures are pre-S1 doc locations.
+  4. README.md + S_ROADMAP.md stale `docs/current/S1_*` refs -> fixed (S1 -> history; S2 current entries added). Also corrects the first audit's wrong "no obvious error found" claim.
+  5. Layout missing `_tmp_s2_baseline_audit/` though §5 references it -> added to §2 as an evidence artifact (not an active authority).
+  6. WORK_LOG commit hash "pending" but 568317e exists -> updated to 568317e.
+  7. TD-003 H3 title inconsistent with confirmed-unreachable status -> title/body aligned to "confirmed-unreachable dead-code cleanup"; item kept open (dead code not removed).
+  8. ruff ~451 not in TECH_DEBT -> added TD-007 (lint/quality-gate debt), separate from TD-006.
+- Files changed:
+  - `docs/current/S2_BASELINE_STATUS.md` -> §0/§2/§5/§6/§7/§8 calibrated per items 1/2/3/5/8.
+  - `docs/current/TECH_DEBT.md` -> TD-003 title aligned; TD-006 scope broadened; TD-007 added.
+  - `docs/current/WORK_LOG.md` -> this entry; prior S2-baseline entry commit hash corrected to 568317e and its stale numbers annotated.
+  - `README.md` -> stale S1 current refs fixed (lines 5, 46, doc-nav table); S2 current entries + S1 history entry added. Framing not rewritten beyond stale-ref fixes.
+  - `docs/current/S_ROADMAP.md` -> line 17 S1 ref moved to history archive.
+  - `docs/current/_tmp_s2_baseline_audit/second_opinion_review.md` -> added (intermediate review notes, non-authoritative).
+  - Not changed: code, tests, `config/config.yaml`, `.env` (not created), `AGENTS.md`, `S2_GOAL.md`, `S2_GOAL_GAP.md` (kept skeletons), `docs/history/` S1 evidence.
+- Verification result: stale `docs/current/S1_*` refs removed from README/S_ROADMAP; fresh pytest numbers confirmed; TD-006/TD-007 separated; TD-003 title consistent; S2_GOAL/S2_GOAL_GAP still skeletons.
+- `S2_GOAL_GAP.md` items updated: none.
+- `TECH_DEBT.md` items added or updated: TD-003 title aligned; TD-006 scope broadened; TD-007 added.
+- Commit hash: 本轮将提交为 `docs: refine S2 baseline audit findings`（精确 hash 见 `git log` / 最终报告）。
+- Next step: discuss/confirm `S2_GOAL.md` with the user, then generate `S2_GOAL_GAP.md`. No authorized next step toward implementation.
 
 ## Standard Run Entry Template
 

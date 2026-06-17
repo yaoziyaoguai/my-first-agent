@@ -391,6 +391,29 @@ run.
 - Commit hash: 本轮将提交为 `test: add S2 reference task acceptance`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G08 after this focused commit.
 
+### 2026-06-17 20:37 CST - Select Skill as S2 L5 candidate (S2-G08)
+
+- Task name: L5 candidate selection and same-spine integration plan for S2-G08.
+- Selected gap: S2-G08, because S2-G01 resolved OD-2 in favor of Skill and S2-G09 needs a concrete L5 candidate before integration.
+- Files changed:
+  - `docs/current/S2_L5_SKILL_SELECTION.md` -> added the Skill selection rationale, S2-G09 integration plan, evidence references, deferred L5 candidates, and acceptance criteria.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G08 satisfied, updated status distribution/index/next step, and unblocked S2-G09.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Recorded Skill as the first S2 selectively-active L5 capability, matching the user decision from S2-G01.
+  - Grounded the choice in current Skill registry/selector/lifecycle/tool-entry evidence without activating Skill.
+  - Defined S2-G09 constraints: same-spine tool entry, explicit enable/disable gate, visible-skill policy, safe evidence, checkpoint/resume metadata, allowed-tools scope, and rollback.
+  - Preserved non-goals: MCP/SubAgent/Scheduler remain deferred candidates; no code path was activated in this gap.
+- Verification commands and results:
+  - `graphify query "S2-G08 Skill selectively-active L5 skill registry same spine policy evidence disable rollback dormant MCP SubAgent Scheduler"` -> scoped L5 selection evidence.
+  - `.venv/bin/python -m pytest tests/test_skill_selector.py tests/test_skill_registry.py tests/test_skill_progressive_disclosure.py tests/unit/test_active_skill_lifecycle.py tests/unit/test_skill_select_tool.py -q` -> 123 passed.
+  - `rg -n "S2-G08|S2_L5_SKILL_SELECTION|Skill selected|S2-G09|MCP/SubAgent/Scheduler|same-spine|enable/disable|Status\\*\\*: satisfied|Status\\*\\*: open" docs/current/S2_GOAL_GAP.md docs/current/S2_L5_SKILL_SELECTION.md docs/current/WORK_LOG.md` -> confirmed selection doc, S2-G08 satisfied, and S2-G09 open/unblocked; also surfaced stale index lines that were corrected before commit.
+  - `git diff --check` -> clean.
+- `S2_GOAL_GAP.md` items updated: S2-G08 -> satisfied. S2-G09 -> open/unblocked and next eligible.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `docs: select Skill as S2 L5 candidate`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G09 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

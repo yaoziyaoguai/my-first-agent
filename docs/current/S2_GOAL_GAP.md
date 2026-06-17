@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 5 | S2-G08, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 4 | S2-G09, S2-G11, S2-G12, S2-G13 |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 8 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G10 |
+| satisfied | 9 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G10 |
 
 ## 3. Recommended execution order
 
@@ -61,8 +61,8 @@
 6. **S2-G06** (P1) — satisfied: task progress + human review/takeover（依赖 S2-G02/G03）
 7. **S2-G10** (P2) — satisfied: acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8）
 8. **S2-G07** (P1) — satisfied: fake+real S2 E2E acceptance set（real 为 key-safe opt-in；本地默认 skip）
-9. **S2-G08** (P2) — L5 candidate selection（依赖 S2-G01/OD-2；下一个 eligible gap）
-10. **S2-G09** (P2) — selected L5 controlled integration（依赖 S2-G08）
+9. **S2-G08** (P2) — satisfied: Skill selected + same-spine integration plan recorded
+10. **S2-G09** (P2) — selected L5 controlled integration（依赖 S2-G08；下一个 eligible gap）
 11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5）
 12. **S2-G12** (P3) — ruff/quality gate 策略
 13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn
@@ -219,10 +219,14 @@
 - **Gap**: 选择**一个** L5 能力进入受控激活；选定后才能做 S2-G09 集成。
 - **Needed action**: 在 Skill 已被选定的前提下，补齐 Skill same-spine / policy / evidence / disable boundary 的接入理由与集成计划；未选 MCP/SubAgent/Scheduler 保持 dormant/boundary-clear。
 - **Verification**: Skill 有书面理由 + 集成计划；未选项保持 dormant/boundary-clear。
+- **Resolution evidence**:
+  - Decision/runbook: `docs/current/S2_L5_SKILL_SELECTION.md` records Skill as the selected L5 candidate and defines the same-spine integration plan for S2-G09.
+  - Skill evidence: registry/selector are metadata-only (`agent/skill_system/registry.py`, `agent/skill_system/selector.py`); lifecycle/task-boundary/checkpoint seams exist (`agent/skill_system/lifecycle.py`, `agent/skill_system/task_boundary.py`, `agent/runtime_integration/skill_lifecycle.py`); `SKILL_SELECT` is a model-visible tool entry (`agent/skill_system/skill_tool.py`) to be governed in S2-G09.
+  - Deferred candidates: MCP/SubAgent/Scheduler are explicitly not selected for the first S2 L5 activation; Scheduler remains dormant, MCP/SubAgent remain later candidates.
 - **Dependencies**: S2-G01 satisfied（OD-2 已解决）。
 - **Non-goal boundary**: 不全量激活所有 L5；不选超过一个进入 S2 受控激活。
 - **Suggested execution order**: P2-1。
-- **Status**: open（OD-2 已由 S2-G01 解决；需补齐 Skill 集成计划）。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-6 无法达成；S2 缺少 L5 维度。
 
 ### S2-G09 — Selected L5 controlled integration
@@ -236,7 +240,7 @@
 - **Dependencies**: S2-G08（选定项）；S2-G05（governed contract）。
 - **Non-goal boundary**: 不做 S3 级生态化；所选 L5 只做受控最小接入。
 - **Suggested execution order**: P2-2。
-- **Status**: open（条件性，需 S2-G08 先完成）。
+- **Status**: open（S2-G08 已完成；Skill 为选定 L5，S2-G09 可开始受控集成）。
 - **Risk if ignored**: AC-6 无法达成；L5 接入可能绕过 policy/evidence。
 
 ### S2-G10 — S2 acceptance gate debt classification & guard cleanup subset
@@ -320,9 +324,9 @@
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | satisfied | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | satisfied | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | satisfied | L4 | AC-2/9 |
-| S2-G07 | fake + real S2 E2E acceptance | P1 | open | L1 | AC-1/7 |
-| S2-G08 | Selectively-active L5 candidate selection | P2 | open | L5 | AC-6 |
-| S2-G09 | Selected L5 controlled integration | P2 | open (cond.) | L5 | AC-6 |
+| S2-G07 | fake + real S2 E2E acceptance | P1 | satisfied | L1 | AC-1/7 |
+| S2-G08 | Selectively-active L5 candidate selection | P2 | satisfied | L5 | AC-6 |
+| S2-G09 | Selected L5 controlled integration | P2 | open | L5 | AC-6 |
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | open | L3 | AC-5 |
 | S2-G12 | Quality gate / ruff strategy | P3 | open | Cross-cutting | §8 |

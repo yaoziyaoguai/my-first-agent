@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 3 | S2-G11, S2-G12, S2-G13 |
+| open | 2 | S2-G12, S2-G13 |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 10 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10 |
+| satisfied | 11 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10, S2-G11 |
 
 ## 3. Recommended execution order
 
@@ -63,8 +63,8 @@
 8. **S2-G07** (P1) — satisfied: fake+real S2 E2E acceptance set（real 为 key-safe opt-in；本地默认 skip）
 9. **S2-G08** (P2) — satisfied: Skill selected + same-spine integration plan recorded
 10. **S2-G09** (P2) — satisfied: Skill controlled integration gate + evidence boundary
-11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5；下一个 eligible gap）
-12. **S2-G12** (P3) — ruff/quality gate 策略
+11. **S2-G11** (P2) — satisfied: task-level evidence depth report
+12. **S2-G12** (P3) — ruff/quality gate 策略（下一个 eligible gap）
 13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn
 
 ---
@@ -277,10 +277,16 @@
 - **Gap**: 根据 OD-5 决定「任务级 evidence」深度：是否需要触及 TD-001（正文保真）和 TD-004（pending-tool 预览）以支撑人类复盘。
 - **Needed action**: OD-5 确认后，按需推进 evidence 深度；若 OD-5 要求复盘级别，则处理 TD-001/TD-004 相关部分。
 - **Verification**: reference task evidence 能支撑人类复盘（工具、决策、失败、恢复）。
+- **Resolution evidence**:
+  - Depth decision: `docs/current/S2_TASK_EVIDENCE_DEPTH.md` defines S2 task-level evidence as structured replay metadata, not byte-for-byte model/tool body persistence.
+  - Code: `agent/task_evidence_report.py` builds `TaskEvidenceReport` over task context, governed tool contract, and progress review.
+  - Evidence safety: `record_task_evidence_report(...)` records safe metadata only and keeps `content_persisted=False`.
+  - Debt boundary: TD-001 remains the explicit full-body persistence limitation; TD-004 is surfaced when blocked/pending-tool evidence depth is relevant.
+  - Tests: `tests/test_s2_task_evidence_report.py` verifies replay-ready summaries, TD-001/TD-004 refs, and no raw model/tool body in the report/envelope.
 - **Dependencies**: S2-G01 satisfied（OD-5 已解决）；与 S2-G05 协同。
 - **Non-goal boundary**: 不强制全正文保真（除非 OD-5 确认）；未触及的 TD 部分留 S2-G13。
 - **Suggested execution order**: P2-4。
-- **Status**: open（OD-5 已由 S2-G01 解决；需按 task-level evidence 深度实现）。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-5 深度不明；可能复盘能力不足或过度投资。
 
 ---
@@ -335,7 +341,7 @@
 | S2-G08 | Selectively-active L5 candidate selection | P2 | satisfied | L5 | AC-6 |
 | S2-G09 | Selected L5 controlled integration | P2 | satisfied | L5 | AC-6 |
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
-| S2-G11 | Task-level evidence depth | P2 | open | L3 | AC-5 |
+| S2-G11 | Task-level evidence depth | P2 | satisfied | L3 | AC-5 |
 | S2-G12 | Quality gate / ruff strategy | P3 | open | Cross-cutting | §8 |
 | S2-G13 | TECH_DEBT triage into S2/S3/Sn | P4 | open | Cross-cutting | §6/§8 |
 

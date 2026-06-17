@@ -448,6 +448,33 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 Skill controlled integration gate`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G11 after this focused commit.
 
+### 2026-06-17 20:53 CST - Add S2 task evidence depth report (S2-G11)
+
+- Task name: task-level evidence depth for S2-G11.
+- Selected gap: S2-G11, because S2-G01 resolved OD-5 as task-level context/memory/state/checkpoint/evidence and S2-G05/S2-G06 already expose tool/progress summaries.
+- Files changed:
+  - `agent/task_evidence_report.py` -> added safe task-level replay/evidence summary report.
+  - `tests/test_s2_task_evidence_report.py` -> added focused tests for replay readiness, TD-001/TD-004 refs, and metadata-only evidence recording.
+  - `docs/current/S2_TASK_EVIDENCE_DEPTH.md` -> documented S2 evidence depth and non-goal boundaries.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G11 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added `TaskEvidenceReport` over existing S2 task context, governed tool contract, and progress review projections.
+  - Defined S2 task-level replay as structured metadata: lifecycle/progress, provider-callable status, tool attempt/execution/block/failure counts, and known debt refs.
+  - Kept TD-001 open for full model request/response body persistence and TD-004 open for pending-tool preview fidelity; this gap surfaces them instead of silently closing them.
+  - Preserved safety boundary: no raw model body, raw tool result body, secret-like payload, or checkpoint schema change.
+- Verification commands and results:
+  - `graphify query "S2-G11 task-level evidence depth evidence recorder model request response body TD-001 pending tool output preview TD-004 task evidence human replay"` -> scoped evidence/debt/code context.
+  - `.venv/bin/python -m pytest tests/test_s2_task_evidence_report.py -q` -> 3 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_task_evidence_report.py tests/test_s2_task_tool_contract.py tests/test_s2_task_context.py tests/test_s2_task_review.py tests/test_s2_reference_task_acceptance.py -q` -> 13 passed, 1 skipped (`MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE` not set; real provider not called).
+  - `.venv/bin/ruff check agent/task_evidence_report.py tests/test_s2_task_evidence_report.py` -> all checks passed.
+  - `git diff --check` -> clean.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G11 -> satisfied. S2-G12 is now the next eligible gap.
+- `TECH_DEBT.md` items added or updated: none. TD-001/TD-004 remain open and explicitly referenced by the task evidence report.
+- Commit hash: 本轮将提交为 `feat: add S2 task evidence report`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G12 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

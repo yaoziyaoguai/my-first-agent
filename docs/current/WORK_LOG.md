@@ -265,6 +265,30 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 task orchestration skeleton`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G04 after this focused commit.
 
+### 2026-06-17 20:13 CST - Add S2 task context package (S2-G04)
+
+- Task name: task context / memory / state / checkpoint coordination for S2-G04.
+- Selected gap: S2-G04, because S2-G01..S2-G03 are satisfied and S2-G04 is the next P1 dependency for task-level context and resume safety.
+- Files changed:
+  - `agent/task_context.py` -> added task-level execution context package, memory boundary metadata, provider-callable context validation, and safe memory-boundary evidence hook.
+  - `tests/test_s2_task_context.py` -> added tests for task context construction, checkpoint resume of summary-only large `tool_result`, and memory boundary evidence safety.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G04 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added `TaskContextPackage` and `TaskMemoryBoundary` as read-only projections over existing state/context/checkpoint paths.
+  - Reused `build_execution_messages(...)` and checkpoint resume rehydration; did not rewrite compression, memory store, checkpoint schema, or TD-003 dead code.
+  - Added `record_task_memory_boundary_evidence(...)` with safe metadata only: task scope hash, booleans/counts, lifecycle, and provider-callable status; no raw memory content persisted by the new hook.
+- Verification commands and results:
+  - `graphify query "S2-G04 task context memory state checkpoint coordination resume provider-callable content memory reference tool result summary build_context_messages save_checkpoint load_checkpoint task_orchestration"` -> scoped L2 evidence to `context_builder`, `checkpoint`, `memory`, `evidence_recorder`, and S2 orchestration/state modules.
+  - `.venv/bin/python -m pytest tests/test_s2_task_context.py -q` -> 3 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_task_context.py tests/test_s2_task_orchestration.py tests/test_s2_task_state_model.py tests/test_context_builder.py tests/test_checkpoint_resume_semantics.py tests/test_checkpoint_roundtrip.py -q` -> 48 passed.
+  - `.venv/bin/ruff check agent/task_context.py tests/test_s2_task_context.py` -> all checks passed after import modernization fix.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G04 -> satisfied. S2-G05 is now the next eligible P1 gap; S2-G07 remains blocked until S2-G05/S2-G06 and S2-G10 are done.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: add S2 task context package`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G05 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

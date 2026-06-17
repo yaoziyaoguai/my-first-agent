@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 9 | S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 8 | S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
 | blocked | 1 | S2-G07 (needs S2-G02..S2-G06 + S2-G10 before S2 E2E acceptance) |
 | deferred | 0 | — |
-| satisfied | 3 | S2-G01, S2-G02, S2-G03 |
+| satisfied | 4 | S2-G01, S2-G02, S2-G03, S2-G04 |
 
 ## 3. Recommended execution order
 
@@ -56,7 +56,7 @@
 1. **S2-G01** (P0) — satisfied: reference task & blocking open decisions resolved
 2. **S2-G02** (P1) — satisfied: governed task state model defined → S2-G03/G04/G06 解锁
 3. **S2-G03** (P1) — satisfied: task orchestration skeleton（依赖 S2-G02）
-4. **S2-G04** (P1) — task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
+4. **S2-G04** (P1) — satisfied: task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
 5. **S2-G05** (P1) — governed tool/policy/evidence 合约
 6. **S2-G06** (P1) — task progress + human review/takeover（依赖 S2-G02/G03）
 7. **S2-G07** (P1) — fake+real S2 E2E acceptance（依赖 S2-G01..G06；是 S2 验收锚点）
@@ -141,10 +141,14 @@
 - **Gap**: 明确 task context / memory / state / checkpoint / evidence 职责边界；支持任务级上下文构建；resume 后不丢 provider-callable content（固化 G-07b 到任务级）；memory 写入/读取受控（可被 policy/evidence 观测）。
 - **Needed action**: 定义 task 级 context 构建路径；固化 resume 不丢 content 契约；为 memory recall/retain/proposal 加 task-scoped + 受控边界。
 - **Verification**: reference task resume 后关键上下文与 provider-callable content 完整；memory 操作有 evidence。
+- **Resolution evidence**:
+  - Code: `agent/task_context.py` adds `TaskContextPackage`, task-scoped `TaskMemoryBoundary`, provider-callable context checks, and safe memory-boundary evidence recording.
+  - Tests: `tests/test_s2_task_context.py` covers task context construction, checkpoint resume of summary-only large `tool_result` into provider-callable content, and safe memory boundary evidence.
+  - Boundary: no compression rewrite, no memory store rewrite, no TD-003 dead-code deletion, no raw memory/content persisted by the new evidence hook.
 - **Dependencies**: S2-G02, S2-G03。
 - **Non-goal boundary**: 不重写压缩主路径；不删除 TD-003 dead code（留 S2-G13）。
 - **Suggested execution order**: P1-3。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-3 无法达成；task resume 可能丢上下文。
 
 ### S2-G05 — Governed tool execution / policy / evidence contract
@@ -294,7 +298,7 @@
 | S2-G01 | Select reference task & resolve blocking open decisions | P0 | satisfied | Cross-cutting | AC-1/7 setup |
 | S2-G02 | Define governed task state model | P1 | satisfied | L4 | AC-2 |
 | S2-G03 | Implement task orchestration skeleton | P1 | satisfied | L4 | AC-1 |
-| S2-G04 | Task context/memory/state/checkpoint coordination | P1 | open | L2 | AC-3 |
+| S2-G04 | Task context/memory/state/checkpoint coordination | P1 | satisfied | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | open | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | open | L4 | AC-2/9 |
 | S2-G07 | fake + real S2 E2E acceptance | P1 | blocked | L1 | AC-1/7 |
@@ -320,5 +324,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01/S2-G02/S2-G03 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G04 开始逐 gap 推进。
+- S2-G01/S2-G02/S2-G03/S2-G04 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G05 开始逐 gap 推进。
 - 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

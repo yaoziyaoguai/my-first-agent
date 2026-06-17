@@ -130,6 +130,34 @@ run.
 - Commit hash: 本轮将提交为 `docs: refine S2 baseline audit findings`（精确 hash 见 `git log` / 最终报告）。
 - Next step: discuss/confirm `S2_GOAL.md` with the user, then generate `S2_GOAL_GAP.md`. No authorized next step toward implementation.
 
+### 2026-06-17 CST - Draft S2 Goal (Governed Task Agent)
+
+- Task name: draft `S2_GOAL.md` as Governed Task Agent (goal draft for user review, not gap analysis, not goal loop, no code change).
+- Files read:
+  - `AGENTS.md` (S1 Development Governance — goal rules), `docs/current/{S_ROADMAP,S2_BASELINE_STATUS,S2_GOAL,TECH_DEBT,WORK_LOG}.md`.
+  - S1 archive (format reference only, content not copied): `docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md`.
+- Skills used and where:
+  - superpowers: goal decomposition into §0-§10 structure; acceptance-criteria completeness check (8 ACs + 2 optional); verification-before-completion self-check before commit.
+  - compound-engineering: S2 product positioning (S1 baseline → S2 governed task agent → S3 ecosystem boundary); baseline/goal/gap discipline (no gap pre-generation); TECH_DEBT-relation framing (debt ≠ product goal).
+  - g-stack / graphify: verified L4 task-orchestration nodes and L5 selectively-active feasibility — confirmed L1 SubAgent parent-mediated path (`subagent_system/{executor,delegation,context,registry,request}.py` + `test_subagent_l1_parent_mediated.py`) is the most wiring-ready L5 candidate; L3 main chain (ToolGateHandler/RuntimeActionDispatcher) and checkpoint/evidence nodes intact. No large source reads.
+  - safety/secret: real provider / config kept as boundary description only; no secret read/printed/copied/moved/committed.
+- Files changed:
+  - `docs/current/S2_GOAL.md` -> filled from skeleton into the Governed Task Agent goal draft (§0 executive summary, §1 positioning, §2 inherited baseline summary, §3 target state, §4 L1-L5 layer goals, §5 acceptance criteria AC-1..AC-8 + AC-9/AC-10 optional, §6 non-goals, §7 boundaries, §8 tech-debt relation, §9 open decisions, §10 next step).
+  - `docs/current/_tmp_s2_goal_draft/draft_notes.md` -> added (intermediate draft notes, non-authoritative).
+  - `docs/current/WORK_LOG.md` -> this entry.
+  - Not changed: code, tests, `config/config.yaml`, `.env` (not created), `AGENTS.md`, `README.md`, `S_ROADMAP.md`, `TECH_DEBT.md`, `S2_BASELINE_STATUS.md`, `S2_GOAL_GAP.md` (kept skeleton), `docs/history/` S1 evidence.
+- Summary of S2 goal draft:
+  - Positioning: S2 = Governed Task Agent; S1 answered "can it run as baseline usable product", S2 answers "can it reliably execute governed multi-step work".
+  - Main battlefields: L2/L3/L4 coordination + productization; L5 = exactly one capability selectively-active via governed path.
+  - Inherits S1 baseline (same-spine, fake acceptance, real smoke, checkpoint/resume, minimal multistep, evidence baseline, config hygiene, dormant L5) as must-not-regress.
+  - 8 core ACs (task closed-loop; task/step state; context/memory/checkpoint/evidence boundaries; governed tool path; task-level evidence; one L5 selectively-active; fake+real coverage; acceptance-gate debt classification) + 2 optional.
+  - 6 open decisions left for user: reference task; which L5 to activate; full-pytest vs targeted gate; real-provider coverage depth; memory/evidence depth (TD-001/TD-004 touch); AC-9/AC-10 inclusion.
+- Verification: see commands below (verification-before-completion gate).
+- `S2_GOAL_GAP.md` items updated: none (gap generation is out of scope; `S2_GOAL_GAP.md` stays a skeleton).
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `docs: draft S2 governed task agent goal`（精确 hash 见 `git log` / 最终报告）。
+- Next step: user reviews/confirms `S2_GOAL.md` (especially §9 open decisions); after confirmation, generate `S2_GOAL_GAP.md` from baseline vs confirmed goal. No authorized next step toward implementation or gap generation in this run.
+
 ## Standard Run Entry Template
 
 ```md

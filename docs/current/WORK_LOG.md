@@ -289,6 +289,31 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 task context package`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G05 after this focused commit.
 
+### 2026-06-17 20:18 CST - Add S2 governed tool contract report (S2-G05)
+
+- Task name: governed tool execution / policy / evidence contract for S2-G05.
+- Selected gap: S2-G05, because S2-G01..S2-G04 are satisfied and S2-G05 is the next P1 gap before progress/human-review and E2E acceptance.
+- Files changed:
+  - `agent/task_tool_contract.py` -> added task-level governed tool contract report and safe summary evidence hook.
+  - `tests/test_s2_task_tool_contract.py` -> added tests for executed/blocked/meta decisions, bypass-shaped log violations, and summary-only evidence.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G05 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added `GovernedToolCall` and `GovernedToolContractReport` over existing `tool_execution_log` and S2 task context.
+  - Classified tool outcomes as allowed/rejected/failed/control and flagged malformed or bypass-shaped durable log entries.
+  - Added `record_tool_contract_evidence(...)` with safe counts only; no raw tool input/output persisted by the new hook.
+  - Preserved non-goals: no direct tool execution, no dispatcher/mediator rewrite, no model request/response full-body persistence; deeper evidence remains S2-G11/TD-001/TD-004 scope.
+- Verification commands and results:
+  - `graphify query "S2-G05 governed tool policy evidence contract ToolRuntimeMediator ToolGateHandler RuntimeActionDispatcher evidence recorder tool_result task_context task_orchestration"` -> scoped L3 evidence to mediator, gate, dispatcher, tool executor, evidence recorder, and S2 task context.
+  - `.venv/bin/python -m pytest tests/test_s2_task_tool_contract.py -q` -> 3 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_task_tool_contract.py tests/test_s2_task_context.py tests/test_tool_rejection_feedback.py tests/test_transition_tool_success_boundaries.py tests/test_checkpoint_resume_semantics.py -q` -> 39 passed.
+  - `.venv/bin/ruff check agent/task_tool_contract.py tests/test_s2_task_tool_contract.py` -> all checks passed after import modernization fix.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G05 -> satisfied. S2-G06 is now the next eligible P1 gap; S2-G07 remains blocked until S2-G06 and S2-G10 are done.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: add S2 governed tool contract report`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G06 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

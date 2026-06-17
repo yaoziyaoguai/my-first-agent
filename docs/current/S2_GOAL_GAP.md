@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 8 | S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 7 | S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
 | blocked | 1 | S2-G07 (needs S2-G02..S2-G06 + S2-G10 before S2 E2E acceptance) |
 | deferred | 0 | — |
-| satisfied | 4 | S2-G01, S2-G02, S2-G03, S2-G04 |
+| satisfied | 5 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05 |
 
 ## 3. Recommended execution order
 
@@ -57,7 +57,7 @@
 2. **S2-G02** (P1) — satisfied: governed task state model defined → S2-G03/G04/G06 解锁
 3. **S2-G03** (P1) — satisfied: task orchestration skeleton（依赖 S2-G02）
 4. **S2-G04** (P1) — satisfied: task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
-5. **S2-G05** (P1) — governed tool/policy/evidence 合约
+5. **S2-G05** (P1) — satisfied: governed tool/policy/evidence 合约
 6. **S2-G06** (P1) — task progress + human review/takeover（依赖 S2-G02/G03）
 7. **S2-G07** (P1) — fake+real S2 E2E acceptance（依赖 S2-G01..G06；是 S2 验收锚点）
 8. **S2-G10** (P2) — acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8，可与上面并行）
@@ -159,10 +159,14 @@
 - **Gap**: 把「工具调用走 mediator/dispatcher/policy/evidence」固化为 S2 governed contract；tool result 可摘要/可恢复/可审计；evidence 能支撑人类复盘一次任务（工具、决策、失败、恢复，不止骨架）。
 - **Needed action**: 明确 governed tool contract（任何旁路视为缺陷）；定义 task-level evidence 要求；处理 tool result 摘要/恢复（与 S2-G04 协同）。
 - **Verification**: reference task 的每次工具调用都经 governed path 且有 evidence；人能从 evidence 复盘工具决策与失败。
+- **Resolution evidence**:
+  - Code: `agent/task_tool_contract.py` adds task-level governed tool report and safe evidence summary over `tool_execution_log` + S2 task context.
+  - Tests: `tests/test_s2_task_tool_contract.py` covers executed/blocked/meta tool decisions, bypass-shaped log violations, and safe summary-only tool evidence.
+  - Boundary: no direct tool execution, no dispatcher/mediator rewrite, no model request/response full-body persistence; deeper evidence remains S2-G11/TD-001/TD-004 scope.
 - **Dependencies**: 与 S2-G04 协同；深度可能触及 TD-001/TD-004（见 S2-G11/OD-5）。
 - **Non-goal boundary**: 不要求 evidence 持久化模型 request/response 全正文（除非 OD-5 确认，见 S2-G11）。
 - **Suggested execution order**: P1-4。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-4/AC-5 无法达成；工具调用可能存在旁路。
 
 ### S2-G06 — Task progress exposure & human review/takeover seam
@@ -299,7 +303,7 @@
 | S2-G02 | Define governed task state model | P1 | satisfied | L4 | AC-2 |
 | S2-G03 | Implement task orchestration skeleton | P1 | satisfied | L4 | AC-1 |
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | satisfied | L2 | AC-3 |
-| S2-G05 | Governed tool/policy/evidence contract | P1 | open | L3 | AC-4/5 |
+| S2-G05 | Governed tool/policy/evidence contract | P1 | satisfied | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | open | L4 | AC-2/9 |
 | S2-G07 | fake + real S2 E2E acceptance | P1 | blocked | L1 | AC-1/7 |
 | S2-G08 | Selectively-active L5 candidate selection | P2 | open | L5 | AC-6 |
@@ -324,5 +328,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01/S2-G02/S2-G03/S2-G04 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G05 开始逐 gap 推进。
+- S2-G01/S2-G02/S2-G03/S2-G04/S2-G05 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G06 开始逐 gap 推进。
 - 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

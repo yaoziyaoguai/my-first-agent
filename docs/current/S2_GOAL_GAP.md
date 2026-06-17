@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 4 | S2-G09, S2-G11, S2-G12, S2-G13 |
+| open | 3 | S2-G11, S2-G12, S2-G13 |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 9 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G10 |
+| satisfied | 10 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10 |
 
 ## 3. Recommended execution order
 
@@ -62,8 +62,8 @@
 7. **S2-G10** (P2) — satisfied: acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8）
 8. **S2-G07** (P1) — satisfied: fake+real S2 E2E acceptance set（real 为 key-safe opt-in；本地默认 skip）
 9. **S2-G08** (P2) — satisfied: Skill selected + same-spine integration plan recorded
-10. **S2-G09** (P2) — selected L5 controlled integration（依赖 S2-G08；下一个 eligible gap）
-11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5）
+10. **S2-G09** (P2) — satisfied: Skill controlled integration gate + evidence boundary
+11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5；下一个 eligible gap）
 12. **S2-G12** (P3) — ruff/quality gate 策略
 13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn
 
@@ -237,10 +237,17 @@
 - **Gap**: 把选定的 L5 能力受控接入主链路：经 dispatcher/mediator（不绕 same-spine）、经 policy/evidence、可禁用/可回滚/可验收；default-off，不激活时行为与 S1 一致。
 - **Needed action**: 实现 governed 接入；加 policy gate + evidence；加 disable 开关与回滚路径；写验收测试。
 - **Verification**: 激活路径走 same-spine 且有 evidence；disable 后行为与 S1 一致；child/MCP/skill 不绕过主 runtime。
+- **Resolution evidence**:
+  - Gate: `agent/skill_system/gate.py` defines default-off `MY_FIRST_AGENT_S2_SKILL_ENABLE`; enabled values are `1/true/yes/on`.
+  - Model-visible tool boundary: `agent/skill_system/skill_tool.py` only registers `SKILL_SELECT` when the gate is enabled and rejects direct tool calls while disabled.
+  - Runtime same-spine: `agent/runtime_integration/skill_action.py` rejects direct `RuntimeActionType.SKILL_SELECT` while disabled through dispatcher result/evidence, not via a side channel.
+  - Prompt/checkpoint boundary: `agent/core.py` suppresses active skill body, candidate selection, and active-skill tool allowlist while disabled; disabled update clears active skill lifecycle/compat state; `agent/runtime_integration/skill_lifecycle.py` clears checkpoint restore while disabled.
+  - Registry boundary: `agent/runtime_integration/phase1_hook.py` returns an empty skill registry while disabled, preventing prompt metadata exposure.
+  - Tests: `tests/test_s2_skill_controlled_integration.py` covers default-off hiding, opt-in registration, empty disabled registry, dispatcher rejection evidence, no disabled prompt body injection, and disabled checkpoint restore clearing.
 - **Dependencies**: S2-G08（选定项）；S2-G05（governed contract）。
 - **Non-goal boundary**: 不做 S3 级生态化；所选 L5 只做受控最小接入。
 - **Suggested execution order**: P2-2。
-- **Status**: open（S2-G08 已完成；Skill 为选定 L5，S2-G09 可开始受控集成）。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-6 无法达成；L5 接入可能绕过 policy/evidence。
 
 ### S2-G10 — S2 acceptance gate debt classification & guard cleanup subset
@@ -326,7 +333,7 @@
 | S2-G06 | Task progress & human review/takeover seam | P1 | satisfied | L4 | AC-2/9 |
 | S2-G07 | fake + real S2 E2E acceptance | P1 | satisfied | L1 | AC-1/7 |
 | S2-G08 | Selectively-active L5 candidate selection | P2 | satisfied | L5 | AC-6 |
-| S2-G09 | Selected L5 controlled integration | P2 | open | L5 | AC-6 |
+| S2-G09 | Selected L5 controlled integration | P2 | satisfied | L5 | AC-6 |
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | open | L3 | AC-5 |
 | S2-G12 | Quality gate / ruff strategy | P3 | open | Cross-cutting | §8 |

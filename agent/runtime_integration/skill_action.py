@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.runtime_integration.dispatcher import RuntimeActionContext
 from agent.runtime_integration.schema import RuntimeActionRequest
+from agent.skill_system.gate import disabled_reason, is_s2_skill_enabled
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
 
@@ -47,6 +48,31 @@ class SkillRuntimeActionHandler:
         )
 
     def handle(self, request: RuntimeActionRequest, context: RuntimeActionContext):
+        if not is_s2_skill_enabled():
+            reason = disabled_reason()
+            _l3_observed = context.invoke_registered_target(
+                target_module="SkillLoader",
+                operation="no_suitable_skill",
+                payload={"reason": reason},
+            )
+            return context.rejected(
+                handler_name=type(self).__name__,
+                target_module="SkillLoader",
+                payload={
+                    "body_load_decision": False,
+                    "no_suitable_skill": True,
+                    "failure_reason": reason,
+                },
+                observed_call=_l3_observed,
+                evidence_extra={
+                    "body_load_decision": False,
+                    "no_suitable_skill": True,
+                    "failure_reason": reason,
+                    "s2_skill_enabled": False,
+                },
+                error_safe_preview=reason,
+            )
+
         payload = _plain_mapping(request.payload)
         metadata = _plain_mapping(payload.get("model_decision_metadata") or {})
         selected_skill_id = metadata.get("selected_skill_id")

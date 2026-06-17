@@ -81,3 +81,20 @@ S2-G09 should be accepted only when:
 - Evidence is safe and reviewable without raw secrets or raw skill body dumps.
 - Checkpoint/resume handles active skill metadata without stale or unsafe state.
 - MCP/SubAgent/Scheduler remain unactivated by the Skill integration.
+
+## S2-G09 Implementation Status
+
+Implemented gate: `MY_FIRST_AGENT_S2_SKILL_ENABLE`.
+
+- Default-off: `SKILL_SELECT` is not registered or model-visible unless the gate
+  is explicitly enabled.
+- Opt-in: values `1`, `true`, `yes`, and `on` enable Skill activation.
+- Runtime action: direct `skill.select` dispatcher calls are rejected while the
+  gate is disabled and emit safe evidence metadata.
+- Prompt boundary: disabled Skill does not inject active skill body or candidate
+  selection sections into the system prompt.
+- Registry boundary: disabled Skill uses an empty runtime registry.
+- Checkpoint/resume boundary: disabled Skill clears active skill restore instead
+  of rehydrating stale checkpoint metadata.
+- Rollback: removing the env flag returns the runtime to S1-style no-skill
+  behavior without deleting Skill code.

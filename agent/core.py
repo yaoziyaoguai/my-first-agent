@@ -305,6 +305,10 @@ def _active_skill_section(*, lifecycle=None) -> str:
 
     B7: 接受可选的 lifecycle 参数用于 per-session 隔离。
     """
+    from agent.skill_system.gate import is_s2_skill_enabled
+    if not is_s2_skill_enabled():
+        return ""
+
     _lc = lifecycle if lifecycle is not None else _get_lifecycle()
     active = _lc.get_active()
     if active is not None:
@@ -314,6 +318,10 @@ def _active_skill_section(*, lifecycle=None) -> str:
 
 def _active_skill_memory_scope(*, lifecycle=None, skill_registry=None) -> str:
     """返回当前 active Skill 的 memory_scope，无法确认时 fail-closed 为 none。"""
+    from agent.skill_system.gate import is_s2_skill_enabled
+    if not is_s2_skill_enabled():
+        return ""
+
     _lc = lifecycle if lifecycle is not None else _get_lifecycle()
     active = _lc.get_active()
     if active is None:
@@ -403,7 +411,14 @@ def _update_active_skill_from_dispatcher(dispatcher, *, session_id: str = "") ->
     Phase 4 (Plan 3): 使用 ActiveSkillLifecycle 管理状态，同时更新向后兼容 dict。
     B7: session_id 用于 per-session lifecycle 隔离。
     """
+    from agent.skill_system.gate import is_s2_skill_enabled
+
     lifecycle = _get_lifecycle(session_id)
+    if not is_s2_skill_enabled():
+        lifecycle.deactivate()
+        _skill_state.set_active_skill({})
+        return
+
     for event in reversed(getattr(dispatcher, "action_log", [])):
         if getattr(event, "action_type", None) is None:
             continue
@@ -521,10 +536,13 @@ def refresh_runtime_system_prompt(
         lifecycle=_lifecycle,
         skill_registry=skill_registry,
     )
+    from agent.skill_system.gate import is_s2_skill_enabled
+    _skill_enabled = is_s2_skill_enabled()
+    _prompt_skill_registry = skill_registry if _skill_enabled else None
 
     # Phase 3: turn-start skill candidate retrieval
     selection_section = ""
-    if user_input and skill_registry is not None:
+    if _skill_enabled and user_input and skill_registry is not None:
         # 记录 selection phase 进入 evidence
         if dispatcher is not None:
             _dispatch_skill_selection_entered(dispatcher, user_input, identity=identity)
@@ -560,7 +578,7 @@ def refresh_runtime_system_prompt(
         snapshot_item_count = int(result.payload.get("snapshot_item_count") or 0)
         system_prompt = build_system_prompt(
             memory_section=memory_section,
-            skill_registry=skill_registry,
+            skill_registry=_prompt_skill_registry,
             active_skill_section=_active_skill_section(lifecycle=_lifecycle),
             selection_section=selection_section,
         )
@@ -574,7 +592,7 @@ def refresh_runtime_system_prompt(
         snapshot_item_count = 0
         system_prompt = build_system_prompt(
             memory_snapshot=memory_snapshot,
-            skill_registry=skill_registry,
+            skill_registry=_prompt_skill_registry,
             active_skill_section=_active_skill_section(lifecycle=_lifecycle),
             selection_section=selection_section,
         )
@@ -1902,11 +1920,12 @@ def _call_model(
         # 收窄为 skill.allowed_tools + 元工具 + SKILL_SELECT。
         _skill_visible_allowlist: frozenset[str] | None = None
         try:
+            from agent.skill_system.gate import is_s2_skill_enabled
             from agent.skill_system.lifecycle import get_default_lifecycle
             _rt_id = getattr(loop_ctx, "runtime_identity", None)
             _sid = getattr(_rt_id, "session_id", "default") if _rt_id is not None else "default"
             _lc = get_default_lifecycle(session_id=_sid)
-            _active_tools = _lc.get_allowed_tools()
+            _active_tools = _lc.get_allowed_tools() if is_s2_skill_enabled() else frozenset()
             if _active_tools:
                 # 技能工具 + 元工具 + SKILL_SELECT（用于切换/退出技能）
                 _meta_tool_names = frozenset({
@@ -2187,8 +2206,13 @@ def _dispatch_or_fallback_delegation(
     # 作为最小 turn_state（delegation call sites 在 TurnState 创建之前）。
     _tool_mediator = None
     if dispatcher is not None:
+        from agent.skill_system.gate import is_s2_skill_enabled
         from agent.tool_runtime_mediator import ToolRuntimeMediator as _Tmr
-        _skill_at = _get_lifecycle(session_id).get_allowed_tools() or None
+        _skill_at = (
+            _get_lifecycle(session_id).get_allowed_tools()
+            if is_s2_skill_enabled()
+            else frozenset()
+        ) or None
         _tool_mediator = _Tmr(
             dispatcher,
             state=state,

@@ -43,6 +43,7 @@ from agent.runtime_integration.subagent_action import (
 from agent.runtime_integration.tool_gate import ToolGateHandler
 from agent.runtime_integration.tool_invoke import ToolInvokeHandler
 from agent.runtime_integration.tool_result_feedback import ToolResultFeedbackHandler
+from agent.skill_system.gate import is_s2_skill_enabled
 from agent.skill_system.loader import SkillLoader
 from agent.skill_system.registry import SkillRegistry
 from agent.subagent_system.registry import SubAgentRegistry
@@ -58,6 +59,8 @@ def build_skill_registry() -> SkillRegistry:
     旧格式 skill（缺少 version/status 必填字段）进入 _load_errors，
     不会出现在 list_visible() 中，不污染模型可见 skill 列表。
     """
+    if not is_s2_skill_enabled():
+        return SkillRegistry(roots=[])
     return SkillRegistry(roots=[Path("skills")])
 
 

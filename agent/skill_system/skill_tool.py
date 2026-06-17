@@ -13,6 +13,7 @@ pipeline：tool_use → TOOL_GATE → TOOL_INVOKE → TOOL_RESULT → conversati
 
 from __future__ import annotations
 
+from agent.skill_system.gate import disabled_reason, is_s2_skill_enabled
 from agent.tool_registry import TOOL_REGISTRY
 
 # B7: 显式 session namespace key——chat() 在工具执行前设置，
@@ -44,8 +45,12 @@ def _ensure_skill_select_registered():
     工具 schema 不含动态 enum——模型在 description 中被告知从 [Active Skills]
     列表中选择。运行时由 tool func 校验 skill_id 是否有效。
     """
+    if not is_s2_skill_enabled():
+        TOOL_REGISTRY.pop("SKILL_SELECT", None)
+        return False
+
     if "SKILL_SELECT" in TOOL_REGISTRY:
-        return
+        return True
 
     # 直接写入 TOOL_REGISTRY（不用 @register_tool 装饰器——工具 func 需要
     # 访问 SkillRegistry，该依赖在 import 时不可用，运行时 lazy import）。
@@ -78,6 +83,7 @@ def _ensure_skill_select_registered():
         "risk_level": "low",
         "output_policy": "bounded_text",
     }
+    return True
 
 
 def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
@@ -87,6 +93,9 @@ def _skill_select_tool_func(skill_id: str = "", reason: str = ""):
     校验 skill_id、加载 body、更新 _active_skill、返回激活确认。
     unknown/malformed skill_id 返回描述性错误，不 crash。
     """
+    if not is_s2_skill_enabled():
+        return f"Skill activation disabled: {disabled_reason()}"
+
     if not skill_id or not isinstance(skill_id, str):
         return (
             "SKILL_SELECT 调用缺少有效的 skill_id 参数。"

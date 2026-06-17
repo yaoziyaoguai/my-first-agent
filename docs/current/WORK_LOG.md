@@ -414,6 +414,40 @@ run.
 - Commit hash: 本轮将提交为 `docs: select Skill as S2 L5 candidate`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G09 after this focused commit.
 
+### 2026-06-17 20:44 CST - Add S2 Skill controlled integration gate (S2-G09)
+
+- Task name: selected L5 controlled integration for S2-G09.
+- Selected gap: S2-G09, because S2-G08 selected Skill and S2-G05 already established the governed tool/evidence contract.
+- Files changed:
+  - `agent/skill_system/gate.py` -> added the default-off S2 Skill gate (`MY_FIRST_AGENT_S2_SKILL_ENABLE`).
+  - `agent/skill_system/skill_tool.py` -> made `SKILL_SELECT` registration/execution respect the gate.
+  - `agent/runtime_integration/phase1_hook.py` -> made disabled Skill use an empty registry.
+  - `agent/runtime_integration/skill_action.py` -> made direct `skill.select` dispatcher calls reject with safe evidence while disabled.
+  - `agent/runtime_integration/skill_lifecycle.py` -> made checkpoint restore clear active skill state while disabled.
+  - `agent/core.py` -> suppressed active skill prompt/body/candidate/tool-scope behavior while disabled and cleared stale active state on dispatcher update.
+  - `tests/test_s2_skill_controlled_integration.py` -> added default-off/opt-in/dispatcher/prompt-boundary tests.
+  - `tests/unit/test_skill_select_tool.py`, `tests/test_tool_registry_contract.py` -> made legacy `SKILL_SELECT` contract tests opt in explicitly.
+  - `docs/current/S2_L5_SKILL_SELECTION.md` -> recorded S2-G09 implementation status.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G09 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Added a shared gate so prompt exposure, tool registration, direct tool execution, dispatcher skill.select, and runtime active-skill behavior agree.
+  - Kept Skill activation default-off and reversible; enabling requires `MY_FIRST_AGENT_S2_SKILL_ENABLE=1` or another accepted truthy value.
+  - Preserved same-spine: enabled Skill still enters through `SKILL_SELECT`/tool/dispatcher paths; disabled Skill fails closed with safe metadata.
+  - Preserved non-goals: no MCP/SubAgent/Scheduler activation, no Skill ecosystem expansion, no real provider call, no config or secret file changes.
+- Verification commands and results:
+  - `graphify query "S2-G09 Skill controlled integration SKILL_SELECT get_model_visible_tools tool registry ToolRuntimeMediator skill lifecycle active skill disable evidence checkpoint same spine"` -> scoped code evidence for Skill/tool/runtime path.
+  - `.venv/bin/python -m pytest tests/test_s2_skill_controlled_integration.py -q` -> 6 passed.
+  - `.venv/bin/python -m pytest tests/unit/test_skill_select_tool.py tests/test_tool_registry_contract.py tests/test_skill_selector.py tests/test_skill_registry.py tests/test_skill_progressive_disclosure.py tests/unit/test_active_skill_lifecycle.py -q` -> 137 passed.
+  - `.venv/bin/python -m pytest tests/test_tool_scope.py tests/test_s2_reference_task_acceptance.py tests/test_s2_acceptance_gate.py -q` -> 43 passed, 1 skipped (`MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE` not set; real provider not called).
+  - `.venv/bin/ruff check agent/skill_system/gate.py agent/skill_system/skill_tool.py agent/runtime_integration/phase1_hook.py agent/runtime_integration/skill_action.py agent/runtime_integration/skill_lifecycle.py agent/core.py tests/test_s2_skill_controlled_integration.py tests/unit/test_skill_select_tool.py tests/test_tool_registry_contract.py` -> all checks passed.
+  - `git diff --check` -> clean.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G09 -> satisfied. S2-G11 is now the next eligible gap.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: add S2 Skill controlled integration gate`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G11 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

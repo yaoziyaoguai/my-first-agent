@@ -17,6 +17,10 @@ import ast
 import importlib
 from pathlib import Path
 
+import pytest
+
+from agent.skill_system.gate import S2_SKILL_ENABLE_ENV
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_MODEL_VISIBLE_TOOLS = {
@@ -158,6 +162,11 @@ EXPECTED_INTERNAL_TOOL_SPECS = {
         "meta_tool": False,
     },
 }
+
+
+@pytest.fixture(autouse=True)
+def enable_s2_skill_for_legacy_tool_registry_contract(monkeypatch):
+    monkeypatch.setenv(S2_SKILL_ENABLE_ENV, "1")
 
 
 def _load_builtin_tools() -> None:

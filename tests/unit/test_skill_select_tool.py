@@ -6,6 +6,15 @@
 
 from __future__ import annotations
 
+import pytest
+
+from agent.skill_system.gate import S2_SKILL_ENABLE_ENV
+
+
+@pytest.fixture(autouse=True)
+def enable_s2_skill_for_legacy_skill_select_tests(monkeypatch):
+    monkeypatch.setenv(S2_SKILL_ENABLE_ENV, "1")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # R1-R2: 注册和可见性
 # ═════════════════════════════════════════════════════════════════════════════

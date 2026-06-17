@@ -64,7 +64,21 @@ def restore_skill_lifecycle_from_checkpoint(
     session_id: str = "",
 ):
     """Restore or clear active skill from the selected checkpoint."""
+    from agent.skill_system.gate import is_s2_skill_enabled
+
     lifecycle = _lifecycle_for_state(state, session_id)
+    if not is_s2_skill_enabled():
+        active = lifecycle.get_active()
+        lifecycle.deactivate()
+        if active is not None:
+            _record_skill_evidence(
+                "restore_cleared",
+                "skill="
+                f"{active.skill_id} reason=s2_skill_disabled "
+                f"source={source}",
+            )
+        return "cleared"
+
     metadata = checkpoint.get("skill") if isinstance(checkpoint, dict) else None
     if not isinstance(metadata, dict) or not metadata:
         active = lifecycle.get_active()

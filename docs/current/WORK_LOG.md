@@ -498,6 +498,31 @@ run.
 - Commit hash: 本轮将提交为 `docs: document S2 quality gate strategy`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G13 after this focused commit.
 
+### 2026-06-17 CST - Triage S2 technical debt into S2/S3/Sn lanes (S2-G13)
+
+- Task name: complete and commit S2-G13 (TECH_DEBT triage); this run also discovered a context mismatch with the incoming instruction.
+- Context mismatch discovered (reported to user, not silently acted on): the incoming instruction asked to resolve S2-G01 (record 6 open decisions, change blocked→satisfied) and commit as `docs: resolve S2 open decisions`. On inspection that work was **already done** by a prior session — commit `8e706b3 docs: resolve S2 open decisions` resolved S2-G01 with all 6 decisions recorded in `S2_GOAL.md §9 Resolved decisions`, and the entire S2 gap loop S2-G02..S2-G12 was executed (commits `3be7f4b`..`f5f0340`). Re-resolving S2-G01 would be a duplicate no-op, so this run did NOT re-do it. The only genuinely remaining work was S2-G13, which a prior session had staged (files modified/created) but neither logged nor committed.
+- Selected gap: S2-G13 (the only remaining open gap; P4).
+- Skills used and where:
+  - superpowers: verification-before-completion; state-mismatch detection before overwriting (inspected target, found it differed from instruction description, stopped and reported instead of blindly following the stale instruction).
+  - compound-engineering: confirmed S2-G13 triage matches the gap definition (assign each TD to S2/S3/Sn lane without closing debt); confirmed all 13 gaps now satisfied.
+- Files changed (all documentation; no code/tests/config/secrets):
+  - `docs/current/S2_TECH_DEBT_TRIAGE.md` (new, staged by prior session) — triage matrix assigning TD-001/002/003/004/006/007 to S2-surfaced / S2-cleanup / S2-Sn / S3-Sn lanes; deferred-architecture list (durable ledger, full L5 ecosystem, multiple active L5, broad facade cleanup → S3+); closure rule that debt remains open.
+  - `docs/current/TECH_DEBT.md` (staged by prior session) — added "S2 Triage Summary" table; all TD items remain open (no silent resolution).
+  - `docs/current/S2_GOAL_GAP.md` (staged by prior session) — S2-G13 → satisfied with resolution evidence; status distribution → 13 satisfied / 0 open; index updated.
+  - `docs/current/WORK_LOG.md` -> this entry (S2-G13 was previously unlogged; this run adds the missing entry).
+- What was done: verified the staged S2-G13 work is complete, sane, and matches the gap definition; added the missing WORK_LOG entry; committed. Did NOT modify any already-committed S2-G01..S2-G12 work, code, tests, config, AGENTS.md, S_ROADMAP.md, README.md, S2_GOAL.md, S2_BASELINE_STATUS.md, or docs/history.
+- Verification commands and results:
+  - `git status --short --branch --untracked-files=all` -> only the 3 S2-G13 doc files modified/new (+ pre-existing untracked `.claude/settings.json`, `CLAUDE.md`).
+  - `git diff --check` -> clean.
+  - `git log --oneline -12` -> confirmed S2-G01..S2-G12 already committed; S2-G13 is the only remaining work.
+  - Read `docs/current/S2_TECH_DEBT_TRIAGE.md` -> triage matrix sane; no debt silently closed; deferred items explicit.
+  - `grep "^\| S2-G" docs/current/S2_GOAL_GAP.md` -> all 13 gaps satisfied.
+- `S2_GOAL_GAP.md` items updated: S2-G13 -> satisfied. All 13 S2 gaps now satisfied (0 open, 0 blocked).
+- `TECH_DEBT.md` items added or updated: S2 Triage Summary table added (all items remain open).
+- Commit hash: 本轮将提交为 `docs: triage S2 technical debt into S2/S3/Sn lanes`（精确 hash 见 `git log` / 最终报告）。注：未使用指令给的 `docs: resolve S2 open decisions`，因为该 commit 已存在（`8e706b3`），重复提交会制造 no-op；本 commit 反映真实剩余工作 S2-G13。
+- Next step: S2 gap loop 已全部完成（13/13 satisfied）。S2 acceptance 的最终验证（targeted gate + real key-safe smoke 覆盖 reference task 主路径）以及是否进入 S2 release / S3 规划，需用户决定；本 run 不擅自启动。
+
 ## Standard Run Entry Template
 
 ```md

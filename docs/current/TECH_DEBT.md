@@ -12,6 +12,19 @@
 
 ## Open Items
 
+## S2 Triage Summary
+
+| Debt | S2/S3/Sn lane | Current disposition |
+|---|---|---|
+| TD-001 | S2 surfaced; S3/Sn full-fidelity audit if needed | Open; S2-G11 records structured task evidence, not full bodies |
+| TD-002 | S3/Sn cleanup | Open; defer until planner/compress/provider adapter refactor |
+| TD-003 | S2/Sn cleanup candidate | Open; confirmed unreachable, deletion deferred |
+| TD-004 | S2 surfaced; S2/Sn event-log fidelity cleanup | Open; S2-G11 surfaces limitation when relevant |
+| TD-006 | S2 cleanup candidate, not product release gate | Open; S2-G10 classifies as doc-governance debt |
+| TD-007 | S2/Sn lint pass, not product release gate | Open; S2-G12 requires focused ruff for new/modified Python files |
+
+See `docs/current/S2_TECH_DEBT_TRIAGE.md` for the S2-G13 triage rationale.
+
 ### TD-001 - Evidence does not persist full model request/response body
 
 - ID: TD-001

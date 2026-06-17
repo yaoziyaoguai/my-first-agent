@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 1 | S2-G13 |
+| open | 0 | — |
 | blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 12 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10, S2-G11, S2-G12 |
+| satisfied | 13 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G07, S2-G08, S2-G09, S2-G10, S2-G11, S2-G12, S2-G13 |
 
 ## 3. Recommended execution order
 
@@ -65,7 +65,7 @@
 10. **S2-G09** (P2) — satisfied: Skill controlled integration gate + evidence boundary
 11. **S2-G11** (P2) — satisfied: task-level evidence depth report
 12. **S2-G12** (P3) — satisfied: ruff/quality gate strategy documented
-13. **S2-G13** (P4) — TECH_DEBT triage into S2/S3/Sn（下一个 eligible gap）
+13. **S2-G13** (P4) — satisfied: TECH_DEBT triage into S2/S3/Sn
 
 ---
 
@@ -324,10 +324,15 @@
 - **Gap**: 把剩余 TECH_DEBT 按阶段归位：TD-002/TD-003 的 S2/Sn cleanup 判定；durable task ledger、完整 MCP/Skill/SubAgent/Scheduler 生态化明确留 S3+。
 - **Needed action**: 在 S2 推进中持续 triage；把确认 out-of-S2 的债显式标记 deferred。
 - **Verification**: 每项债务有阶段归属（S2 cleanup / S3+）；`TECH_DEBT.md` 与本文件一致。
+- **Resolution evidence**:
+  - Triage doc: `docs/current/S2_TECH_DEBT_TRIAGE.md` assigns TD-001/002/003/004/006/007 to S2 surfaced, S2 cleanup, S2/Sn, or S3/Sn lanes.
+  - Debt register: `docs/current/TECH_DEBT.md` includes the same S2 triage summary while keeping all items open.
+  - Deferred architecture: durable task ledger, full L5 ecosystem, multiple active L5 capabilities, and broad provider/planner facade cleanup are explicitly S3/Sn unless a future focused task promotes them.
+  - Boundary: no debt item was silently deleted or marked resolved.
 - **Dependencies**: 随 S2 推进更新。
 - **Non-goal boundary**: 不在 S2 做大规模清理/重构/生态化。
 - **Suggested execution order**: P4-1（贯穿 S2，按需 triage）。
-- **Status**: open（持续性 triage）。
+- **Status**: satisfied。
 - **Risk if ignored**: 债务归属模糊，误导后续 agent。
 
 ---
@@ -348,7 +353,7 @@
 | S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | satisfied | L3 | AC-5 |
 | S2-G12 | Quality gate / ruff strategy | P3 | satisfied | Cross-cutting | §8 |
-| S2-G13 | TECH_DEBT triage into S2/S3/Sn | P4 | open | Cross-cutting | §6/§8 |
+| S2-G13 | TECH_DEBT triage into S2/S3/Sn | P4 | satisfied | Cross-cutting | §6/§8 |
 
 ## 10. Non-goal guardrails
 

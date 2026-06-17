@@ -44,10 +44,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 6 | S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
-| blocked | 1 | S2-G07 (needs S2-G10 before S2 E2E acceptance) |
+| open | 6 | S2-G07, S2-G08, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| blocked | 0 | — |
 | deferred | 0 | — |
-| satisfied | 6 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06 |
+| satisfied | 7 | S2-G01, S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G10 |
 
 ## 3. Recommended execution order
 
@@ -59,8 +59,8 @@
 4. **S2-G04** (P1) — satisfied: task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
 5. **S2-G05** (P1) — satisfied: governed tool/policy/evidence 合约
 6. **S2-G06** (P1) — satisfied: task progress + human review/takeover（依赖 S2-G02/G03）
-7. **S2-G10** (P2) — acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8）
-8. **S2-G07** (P1) — fake+real S2 E2E acceptance（依赖 S2-G10；是 S2 验收锚点）
+7. **S2-G10** (P2) — satisfied: acceptance gate 债务分类 + guard cleanup 子集（支撑 AC-8）
+8. **S2-G07** (P1) — fake+real S2 E2E acceptance（依赖已满足；是 S2 验收锚点）
 9. **S2-G08** (P2) — L5 candidate selection（依赖 S2-G01/OD-2）
 10. **S2-G09** (P2) — selected L5 controlled integration（依赖 S2-G08）
 11. **S2-G11** (P2) — task-level evidence depth（依赖 OD-5）
@@ -198,7 +198,7 @@
 - **Dependencies**: S2-G02..S2-G06（reference task 已由 S2-G01 决策为 Repo-governed improvement task）；S2-G10（acceptance gate 分类）。
 - **Non-goal boundary**: 不把 full pytest 全绿作为 S2 产品目标（见 S2-G10/G12）。
 - **Suggested execution order**: P1-6（S2 验收锚点，最后）。
-- **Status**: blocked（需 S2-G10 完成后再建立 S2 E2E acceptance）。
+- **Status**: open（S2-G10 已完成；可建立 S2 E2E acceptance）。
 - **Risk if ignored**: S2 无法判定「完成」；AC-1/AC-7 无验收命令。
 
 ---
@@ -241,10 +241,15 @@
 - **Gap**: 让 S2 acceptance gate 能明确分类 runtime regression / doc governance debt / quality debt（AC-8）；清理 TD-006 中**阻塞 acceptance 信号**的可控子集（不是全量清零）。
 - **Needed action**: 定义 acceptance gate 分类口径；清理阻塞信号的 guard 子集，每个 guard 对齐当前 governance docs/contracts（不静默弱化断言）。
 - **Verification**: S2 acceptance gate 能输出 runtime-only 信号；被清理的 guard 对齐当前 docs。
+- **Resolution evidence**:
+  - Contract: `docs/current/S2_ACCEPTANCE_GATE.md`.
+  - Code: `agent/acceptance_gate.py` classifies `passed`, `runtime_regression`, `doc_governance_debt`, `quality_debt`, and `unknown_failure`.
+  - Tests: `tests/test_s2_acceptance_gate.py` verifies targeted S2 runtime failure is release-blocking, TD-006 guard failures are doc-governance debt, ruff is TD-007 quality debt, and unknown failures remain release-blocking.
+  - Boundary: TD-006/TD-007 remain open debt; S2-G10 only separates acceptance signal from health/debt signal.
 - **Dependencies**: 无（可与 P1 并行，支撑 S2-G07）。
 - **Non-goal boundary**: 不追求 TD-006 全清零作为产品目标；不做大规模 ruff 修复（见 S2-G12）。
 - **Suggested execution order**: P2-3（可与 P1 后期并行）。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: AC-8 无法达成；S2 验收信号被 guard 噪音污染。
 
 ### S2-G11 — Task-level evidence depth
@@ -309,10 +314,10 @@
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | satisfied | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | satisfied | L3 | AC-4/5 |
 | S2-G06 | Task progress & human review/takeover seam | P1 | satisfied | L4 | AC-2/9 |
-| S2-G07 | fake + real S2 E2E acceptance | P1 | blocked | L1 | AC-1/7 |
+| S2-G07 | fake + real S2 E2E acceptance | P1 | open | L1 | AC-1/7 |
 | S2-G08 | Selectively-active L5 candidate selection | P2 | open | L5 | AC-6 |
 | S2-G09 | Selected L5 controlled integration | P2 | open (cond.) | L5 | AC-6 |
-| S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | open | L1/Cross | AC-8 |
+| S2-G10 | Acceptance gate debt classification & guard cleanup subset | P2 | satisfied | L1/Cross | AC-8 |
 | S2-G11 | Task-level evidence depth | P2 | open | L3 | AC-5 |
 | S2-G12 | Quality gate / ruff strategy | P3 | open | Cross-cutting | §8 |
 | S2-G13 | TECH_DEBT triage into S2/S3/Sn | P4 | open | Cross-cutting | §6/§8 |
@@ -332,5 +337,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01..S2-G06 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G10 开始逐 gap 推进，然后回到 S2-G07。
+- S2-G01..S2-G06 and S2-G10 已完成；继续 **S2 gap loop** 时按 §3 执行顺序回到 S2-G07。
 - 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

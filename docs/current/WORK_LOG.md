@@ -339,6 +339,33 @@ run.
 - Commit hash: 本轮将提交为 `feat: add S2 task progress review seam`（精确 hash 见 `git log` / 最终报告）。
 - Next step: continue the S2 gap loop with S2-G10 after this focused commit, then return to S2-G07 acceptance.
 
+### 2026-06-17 20:26 CST - Add S2 acceptance gate classification (S2-G10)
+
+- Task name: acceptance gate debt classification and guard cleanup subset for S2-G10.
+- Selected gap: S2-G10, because S2-G01..S2-G06 are satisfied and S2-G07 acceptance was blocked on acceptance-signal classification.
+- Files changed:
+  - `agent/acceptance_gate.py` -> added S2 acceptance signal classifier and report.
+  - `tests/test_s2_acceptance_gate.py` -> added tests for runtime regression, TD-006 doc-governance debt, TD-007 quality debt, unknown failures, and aggregate reports.
+  - `docs/current/S2_ACCEPTANCE_GATE.md` -> documented S2 release vs health/debt signal rules.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G10 satisfied and unblocked S2-G07.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Defined `AcceptanceSignal` classes: `passed`, `runtime_regression`, `doc_governance_debt`, `quality_debt`, and `unknown_failure`.
+  - Classified targeted S2 runtime failures as release-blocking.
+  - Classified all-TD-006 guard failures as doc-governance debt and ruff failures as TD-007 quality debt; these are not release-blocking by themselves.
+  - Kept unknown failures release-blocking until classified.
+  - Preserved non-goals: did not full-clear TD-006, did not run/fix full ruff, did not treat full pytest/ruff green as the S2 product target.
+- Verification commands and results:
+  - `graphify query "S2-G10 acceptance gate debt classification runtime regression doc governance debt quality debt TD-006 pytest ruff guard"` -> scoped current docs/debt/guard evidence.
+  - `.venv/bin/python -m pytest tests/test_s2_acceptance_gate.py -q` -> 5 passed.
+  - `.venv/bin/python -m pytest tests/test_s2_acceptance_gate.py tests/test_health_report.py tests/test_startup_readiness.py -q` -> 37 passed, 2 xfailed.
+  - `.venv/bin/ruff check agent/acceptance_gate.py tests/test_s2_acceptance_gate.py` -> all checks passed.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G10 -> satisfied. S2-G07 -> open/unblocked.
+- `TECH_DEBT.md` items added or updated: none. TD-006 and TD-007 remain open; S2-G10 only separates their signal from runtime acceptance.
+- Commit hash: 本轮将提交为 `feat: classify S2 acceptance gate signals`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G07 acceptance.
+
 ## Standard Run Entry Template
 
 ```md

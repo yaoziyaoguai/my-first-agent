@@ -158,6 +158,38 @@ run.
 - Commit hash: 本轮将提交为 `docs: draft S2 governed task agent goal`（精确 hash 见 `git log` / 最终报告）。
 - Next step: user reviews/confirms `S2_GOAL.md` (especially §9 open decisions); after confirmation, generate `S2_GOAL_GAP.md` from baseline vs confirmed goal. No authorized next step toward implementation or gap generation in this run.
 
+### 2026-06-17 CST - Generate S2 Goal Gap backlog
+
+- Task name: generate `S2_GOAL_GAP.md` from baseline vs goal (backlog generation, not gap loop, not fix execution, no code change).
+- Files read:
+  - `AGENTS.md` (goal/gap rules), `docs/current/{S_ROADMAP,S2_BASELINE_STATUS,S2_GOAL,S2_GOAL_GAP,TECH_DEBT,WORK_LOG,README}.md`.
+  - S1 archive (format reference / evidence only, not copied into current): `docs/history/S1_BASELINE_USABLE_PRODUCT/{S1_GOAL,S1_GOAL_GAP,S1_ACCEPTANCE_BASELINE,S1_OBSERVABILITY_BASELINE}.md`.
+- Skills used and why:
+  - superpowers: gap decomposition from S2_GOAL §3-§5 targets; priority sanity (P0 not abused — only S2-G01 setup blocker); dependency ordering for §3; verification-before-completion self-check before commit.
+  - compound-engineering: baseline vs goal comparison matrix; P0-P4 grading; S2 vs S3/Sn boundary; TECH_DEBT→S2 admission rules (TD-006→P2 signal subset, TD-007→P3 strategy, TD-001/004→P2 conditional on OD-5, TD-002/003→P4 deferred).
+  - g-stack / graphify: confirmed L4 task-state nodes (legacy Plan minimal: TaskState/mark_step_complete/advance_current_step) and L5 SubAgent L1 parent-mediated wiring (delegate_l1/execute_l1/build_context_package/SubAgentRegistry) is the most activation-ready L5 candidate; L3 ToolGateHandler governed path intact. No large source reads.
+  - safety/secret: real provider / config kept as boundary description only; no secret read/printed/copied/moved/committed.
+- Gap generation method:
+  1. Extracted S2 goal targets from S2_GOAL.md §3/§4/§5/§9 (target state, L1-L5 layer goals, AC-1..AC-10, open decisions).
+  2. Extracted S2 baseline current state from S2_BASELINE_STATUS.md §3/§4/§7 (inherited capabilities, runtime/code baseline, tech-debt baseline).
+  3. Built baseline-vs-goal matrix (target → current → verdict) saved to `docs/current/_tmp_s2_goal_gap/gap_matrix.md`.
+  4. Generated 13 gaps with full fields (ID, title, priority, layer, related AC, baseline evidence, gap, needed action, verification, dependencies, non-goal boundary, execution order, status, risk).
+  5. Applied priority rules: P0=1 (setup blocker), P1=6 (core governed task agent), P2=4 (hardening), P3=1 (optional), P4=1 (deferred/triage).
+- Files changed:
+  - `docs/current/S2_GOAL_GAP.md` -> filled from skeleton into the 13-gap backlog (§0 summary, §1 priority model, §2 status distribution, §3 execution order, §4-§8 P0-P4 gaps, §9 ID index, §10 non-goal guardrails, §11 next step).
+  - `docs/current/_tmp_s2_goal_gap/gap_matrix.md` -> added (intermediate baseline-vs-goal matrix, non-authoritative).
+  - `docs/current/WORK_LOG.md` -> this entry.
+  - Not changed: code, tests, `config/config.yaml`, `.env` (not created), `AGENTS.md`, `README.md`, `S_ROADMAP.md`, `TECH_DEBT.md` (no state error found this pass), `S2_BASELINE_STATUS.md`, `S2_GOAL.md`, `docs/history/` S1 evidence.
+- Gap backlog summary:
+  - 13 gaps: P0=1 (S2-G01 reference task + open decisions, blocked), P1=6 (S2-G02 task state model, S2-G03 orchestration skeleton, S2-G04 context/state/checkpoint, S2-G05 governed tool/policy/evidence, S2-G06 progress/human review, S2-G07 fake+real E2E acceptance), P2=4 (S2-G08 L5 selection, S2-G09 L5 integration, S2-G10 acceptance gate debt classification + guard cleanup subset, S2-G11 task-level evidence depth), P3=1 (S2-G12 ruff strategy), P4=1 (S2-G13 TECH_DEBT triage).
+  - TECH_DEBT admission: TD-006→S2-G10 (P2, signal-blocking subset only); TD-007→S2-G12 (P3, strategy); TD-001/TD-004→S2-G11 (P2, conditional on OD-5); TD-002/TD-003→S2-G13 (P4, deferred).
+  - L5 control: S2-G08 (select one) → S2-G09 (governed integration, same-spine + policy/evidence + disable); graphify evidence shows SubAgent L1 parent-mediated path is most ready.
+- Verification: see commands below (verification-before-completion gate).
+- `S2_GOAL_GAP.md` items updated: this file itself was generated (all 13 gaps new).
+- `TECH_DEBT.md` items added or updated: none (no state error found; default no-change honored).
+- Commit hash: 本轮将提交为 `docs: generate S2 goal gap backlog`（精确 hash 见 `git log` / 最终报告）。
+- Next step: user reviews `S2_GOAL_GAP.md` (especially P0/S2-G01 open-decision unblock); after review, enter S2 gap loop per §3 execution order. No gap execution in this run.
+
 ## Standard Run Entry Template
 
 ```md

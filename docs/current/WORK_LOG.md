@@ -216,6 +216,31 @@ run.
 - Commit hash: this commit (`docs: resolve S2 open decisions`).
 - Next step: continue the S2 gap loop with S2-G02, the next eligible P1 gap in the recommended execution order.
 
+### 2026-06-17 20:04 CST - Define S2 governed task state model (S2-G02)
+
+- Task name: define governed task state model for S2-G02.
+- Selected gap: S2-G02, because S2-G01 is satisfied and S2-G02 is the next P1 dependency for S2-G03/S2-G04/S2-G06.
+- Files changed:
+  - `agent/task_state_model.py` -> added read-only S2 governed task state projection from legacy `TaskState` / `current_plan` / `tool_execution_log`.
+  - `tests/test_s2_task_state_model.py` -> added focused tests for task lifecycle, step status, progress, failure, done, blocking reason, and checkpoint resume projection.
+  - `docs/current/S2_TASK_STATE_MODEL.md` -> added the S2-G02 contract and non-goals.
+  - `docs/current/S2_GOAL_GAP.md` -> marked S2-G02 satisfied, updated status distribution/index/next step.
+  - `docs/current/WORK_LOG.md` -> this entry.
+- What was done:
+  - Defined `GovernedTaskLifecycle`, `GovernedStepStatus`, `GovernedTaskProgress`, `GovernedTaskState`, and `build_governed_task_state(...)`.
+  - Kept S1 legacy Plan and checkpoint schema intact: no new `TaskState` persistent fields, no durable task ledger, no L5 activation, no real provider call.
+  - Used graphify to identify the current L4 state spine (`TaskState`, `mark_step_complete`, `advance_current_step_if_needed`, checkpoint resume tests) before code edits.
+- Verification commands and results:
+  - `graphify query "S2-G02 governed task state model task step status progress failure resume done checkpoint TaskState"` -> scoped L4 evidence to `agent/state.py`, `agent/task_runtime.py`, `agent/transitions.py`, checkpoint and state tests.
+  - `.venv/bin/python -m pytest tests/test_s2_task_state_model.py -q` -> 5 passed.
+  - `.venv/bin/python -m pytest tests/test_state_invariants.py tests/test_checkpoint_resume_semantics.py tests/test_semantics.py tests/test_phase3_task_runtime_transitions.py -q` -> 56 passed.
+  - `.venv/bin/ruff check agent/task_state_model.py tests/test_s2_task_state_model.py` -> all checks passed.
+  - `graphify update .` -> failed safely: graphify refused to overwrite because the newly extracted graph had fewer nodes than existing `graph.json`; no `--force` used.
+- `S2_GOAL_GAP.md` items updated: S2-G02 -> satisfied. S2-G03 is now the next eligible P1 gap; S2-G07 remains blocked until S2-G03..S2-G06 and S2-G10 are done.
+- `TECH_DEBT.md` items added or updated: none.
+- Commit hash: 本轮将提交为 `feat: define S2 governed task state model`（精确 hash 见 `git log` / 最终报告）。
+- Next step: continue the S2 gap loop with S2-G03 after this focused commit.
+
 ## Standard Run Entry Template
 
 ```md

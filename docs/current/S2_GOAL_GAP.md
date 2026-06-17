@@ -44,17 +44,17 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 11 | S2-G02, S2-G03, S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
+| open | 10 | S2-G03, S2-G04, S2-G05, S2-G06, S2-G08, S2-G10, S2-G11, S2-G12, S2-G13, (S2-G09 conditional) |
 | blocked | 1 | S2-G07 (needs S2-G02..S2-G06 + S2-G10 before S2 E2E acceptance) |
 | deferred | 0 | — |
-| satisfied | 1 | S2-G01 |
+| satisfied | 2 | S2-G01, S2-G02 |
 
 ## 3. Recommended execution order
 
 按依赖排序（不严格等于优先级；P0 先行解锁 P1 精确化）：
 
-1. **S2-G01** (P0) — select reference task & resolve blocking open decisions → 解锁 S2-G07/S2-G08
-2. **S2-G02** (P1) — define governed task state model → S2-G03/G04/G06 依赖
+1. **S2-G01** (P0) — satisfied: reference task & blocking open decisions resolved
+2. **S2-G02** (P1) — satisfied: governed task state model defined → S2-G03/G04/G06 解锁
 3. **S2-G03** (P1) — task orchestration skeleton（依赖 S2-G02）
 4. **S2-G04** (P1) — task context/memory/state/checkpoint 协同（依赖 S2-G02/G03）
 5. **S2-G05** (P1) — governed tool/policy/evidence 合约
@@ -104,10 +104,15 @@
 - **Gap**: S2 需要正式的 task state model：task state / step state / progress / failure / resume / done 语义明确，可被人观测（AC-2）。
 - **Needed action**: 定义 governed task state model（task 级 + step 级状态、转移、失败/恢复/done 语义）；不推翻 legacy Plan，在其上形式化或演进。
 - **Verification**: 状态机有文档/契约；task/step/progress/failure/resume/done 可被测试断言。
+- **Resolution evidence**:
+  - Contract: `docs/current/S2_TASK_STATE_MODEL.md`.
+  - Code: `agent/task_state_model.py` defines `GovernedTaskLifecycle`, `GovernedStepStatus`, `GovernedTaskProgress`, `GovernedTaskState`, and `build_governed_task_state(...)`.
+  - Tests: `tests/test_s2_task_state_model.py` covers running progress, step completion evidence, blocking reason, failure/done terminal semantics, and checkpoint resume projection.
+  - Compatibility: no `TaskState` persistent fields added; no independent durable task ledger; legacy Plan/checkpoint path preserved.
 - **Dependencies**: 无（是后续 L4/L2 gap 的基础）。
 - **Non-goal boundary**: 不要求独立 durable task ledger（S3+，见 S2-G13）。
 - **Suggested execution order**: P1-1。
-- **Status**: open。
+- **Status**: satisfied。
 - **Risk if ignored**: S2 无法 claim「正式 task orchestration」；AC-2 无法验收。
 
 ### S2-G03 — Implement task orchestration skeleton
@@ -283,7 +288,7 @@
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
 | S2-G01 | Select reference task & resolve blocking open decisions | P0 | satisfied | Cross-cutting | AC-1/7 setup |
-| S2-G02 | Define governed task state model | P1 | open | L4 | AC-2 |
+| S2-G02 | Define governed task state model | P1 | satisfied | L4 | AC-2 |
 | S2-G03 | Implement task orchestration skeleton | P1 | open | L4 | AC-1 |
 | S2-G04 | Task context/memory/state/checkpoint coordination | P1 | open | L2 | AC-3 |
 | S2-G05 | Governed tool/policy/evidence contract | P1 | open | L3 | AC-4/5 |
@@ -311,5 +316,5 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01 已由用户决策解锁；进入 **S2 gap loop** 时按 §3 执行顺序从 S2-G02 开始逐 gap 推进。
+- S2-G01/S2-G02 已完成；继续 **S2 gap loop** 时按 §3 执行顺序从 S2-G03 开始逐 gap 推进。
 - 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。

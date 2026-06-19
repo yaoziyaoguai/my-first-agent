@@ -553,6 +553,112 @@ run.
 - Commit hash: 本轮将提交为 `fix: gate S2 skill activation without hiding registry`（精确 hash 见 `git log` / 最终报告）。
 - Next step: S2 final acceptance re-run (S2 acceptance gate + S1 must-not-regress) now green for the runtime path; real provider key-safe smoke for reference task remains opt-in (user authorization needed to run). No further code change unless real smoke reveals issues.
 
+### 2026-06-19 CST - S2 Release Hardening and Completion Pass
+
+- Task name: S2 release hardening / completion pass — fix findings from two
+  independent release audits; reconcile AC-7 real-provider evidence and AC-8
+  skill default-off full-suite classification; restore release doc consistency;
+  clean release hygiene. Not a goal rewrite, not S3.
+- Selected scope: P0-1 (AC-7), P0-2 (skill default-off classification), P1-1
+  (stale docs), P1-2 (untracked hygiene), P2 (final verification).
+- Skills used and where:
+  - superpowers: per-blocker decomposition + verification-before-completion
+    (each fix verified by the targeted gate before moving on); root-cause
+    isolation for the skill failures (activation-gate, not regression).
+  - compound-engineering: S2 release-gate judgment (AC-7/AC-8), TD-006 vs
+    test-contract-gap vs runtime-regression classification, S2/S3 boundary.
+  - g-stack / graphify: scoped skill-gate / provider-factory / evidence-seam
+    nodes without large source reads; confirmed same-spine + production config
+    path (build_model_provider_from_env reads config/config.yaml).
+  - safety/secret: real provider smoke ran key-safe (opt-in, no secret read/
+    print/copy/move/stage; config/config.yaml untouched; no .env created).
+- P0-2 — skill default-off full-suite reconciliation:
+  - Root cause: S2-G09 (700b848) added the default-off activation gate AFTER the
+    S2 baseline audit. The baseline's "36 TD-006 failures" never counted skill
+    tests because they passed pre-gate. Post-gate, ~37 skill activation/
+    execution tests failed (SKILL_SELECT hidden, handler rejects, checkpoint
+    restore cleared). The S2-G09 fix pass only caught the 3 registry-layer
+    regressions, not the broader activation-test set.
+  - Classification: all 37 are **test-contract gaps** (category a: activation/
+    execution tests that must opt in), NOT runtime regressions and NOT TD-006.
+    2 additional `-k skill` hits are genuine TD-006 guards
+    (`test_capability_boundary_contract`, `test_evidence_taxonomy_guard`).
+  - Contract fix: discovery/metadata tests stay opt-out (registry still scans
+    `skills/`); activation/execution tests now explicitly opt in via
+    `monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE","1")` — module-level
+    autouse fixture for pure-skill modules, per-test/class for mixed modules.
+    Files: test_skill_{model_owned_selection,checkpoint_resume_lifecycle,l3,
+    memory_scope_recall,select_pipeline_l3,selection_real_provider,
+    turn_start_selection}.py, test_runtime_action_handlers.py (6 skill fns),
+    test_b7_loop3_codex_evidence.py (2 classes), test_demo_tools_contract.py.
+  - Verification: `pytest -k skill` 139 passed with env=1 (confirmed hypothesis);
+    after in-test opt-in, full pytest 33 failed / 4782 passed — all 33 are
+    TD-006 guards (no runtime regression, no unknown failure).
+- P0-1 — AC-7 real provider governed-path evidence:
+  - Audit gap: existing smoke was a bare `provider.create()` after a detached
+    context build; it did not prove real provider enters the governed task path
+    nor produce evidence aligned with fake/local. Also used an env-only loader
+    (`load_agent_provider_config`) that could not resolve the real key (env vars
+    unset), so it always skipped.
+  - Fix: smoke now (1) enters S2 governed task path (receive/accept/context),
+    (2) resolves the provider via the PRODUCTION path
+    `build_model_provider_from_env()` (reads config/config.yaml — same source as
+    runtime, key stays in the config object), (3) records evidence through the
+    SAME seam as fake (memory/tool/task), (4) asserts subsystem set
+    {memory,tool,task} + provider_callable=True + replay_ready=True — direct
+    key-event-chain alignment with the fake E2E.
+  - Real run: `MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE=1 pytest ...::test_s2_
+    reference_task_real_provider_key_safe_context_smoke` -> **1 passed** (real
+    non-fake provider, real API reply, governed evidence recorded). Key-safe.
+- P1-1 — release doc consistency:
+  - S2_GOAL.md header: draft/pending -> confirmed/frozen for S2 execution.
+  - S2_GOAL_GAP.md next step: no longer loops back to S2-G07; states 13/13
+    satisfied + hardening done; release-archive decision is user's.
+  - S2_BASELINE_STATUS.md: clarified it is the S2 ENTRY baseline (not current
+    release status); added release-status addendum pointing to S2_GOAL_GAP/
+    ACCEPTANCE_GATE/WORK_LOG.
+  - S2_ACCEPTANCE_GATE.md: added full-pytest failure classification rule
+    (TD-006/TD-007/runtime-regression/unknown) + skill default-off test
+    contract (discovery opt-out vs activation opt-in).
+  - AGENTS.md: "Current S1 Documents" -> "Current S2 Documents" (S1 files moved
+    to history); S1_GOAL/GAP refs in goal/gap/stage-closing/provider rules ->
+    S2 equivalents.
+- P1-2 — release hygiene:
+  - Deleted scratch: diff_{baselines,other_agents,transitions}.patch,
+    full_diff.patch, output_report.md (empty).
+  - Deleted obsolete pre-S2 docs (untracked, superseded by S1->S2 archive;
+    historical versions in git history): docs/PROJECT_STATUS.md,
+    docs/PROGRESS_LEDGER.md, docs/plans/2026-06-06-*.md.
+  - .gitignore: added `.claude/` and `CLAUDE.md` (local coding-agent tooling
+    config; kept locally, not committed).
+- Verification commands and results:
+  - `git status --short --branch --untracked-files=all` -> only intended tracked
+    changes; no polluting untracked files.
+  - `git diff --check` -> clean.
+  - S2 targeted: `pytest tests/test_s2_reference_task_acceptance.py -q` -> 1
+    passed, 1 skipped (real smoke opt-in).
+  - Real smoke (opt-in): -> 1 passed (real provider, governed path).
+  - S1 must-not-regress: golden_e2e + smoke + wiring -> 22 passed.
+  - S1 observability: evidence_lifecycle + b7_event_log -> 91 passed.
+  - S2 skill gate: `pytest tests/test_s2_skill_controlled_integration.py` -> 6
+    passed.
+  - S2 acceptance gate: `pytest tests/test_s2_acceptance_gate.py` -> 5 passed.
+  - All S2 gap tests -> 32 passed, 1 skipped.
+  - Full pytest -> 33 failed, 4782 passed, 14 skipped, 26 xfailed (all 33
+    failures are TD-006 guards; no runtime regression; no unknown failure).
+  - Ruff on changed Python files -> all checks passed. (`ruff check .` remains
+    TD-007 ~451 historical, unchanged, classified as quality debt.)
+- `S2_GOAL_GAP.md` items updated: S2-G07 (real governed smoke ran + passed) and
+  S2-G09 (opt-in contract reconciled; classification corrected) release-
+  hardening notes added; no gap status changed (all remain satisfied).
+- `TECH_DEBT.md` items added or updated: TD-006 note updated — full-suite
+  failure count is now 33 (was 36) after the skill-test reconciliation; skill
+  default-off test failures are explicitly NOT TD-006 (test-contract gap class).
+- Commit hashes: 4 focused commits this pass (skill reconciliation / real
+  smoke / release docs / hygiene) — see `git log`.
+- Next step: S2 is release-ready pending user decision to enter release archive
+  / S3 planning. No authorized next step beyond user decision.
+
 ## Standard Run Entry Template
 
 ```md

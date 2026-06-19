@@ -107,6 +107,14 @@ See `docs/current/S2_TECH_DEBT_TRIAGE.md` for the S2-G13 triage rationale.
   (`test_streaming_protocol.py`). None are in the S1 acceptance gate, observability
   verification, or core-runtime tests, so this is a guard/governance cleanup rather
   than a runtime regression.
+- **Release hardening note (2026-06-19)**: after the S2-G09 skill default-off
+  test-contract reconciliation, the full-suite failure count is **33** (was 36 at
+  baseline). Skill activation/execution test failures are explicitly **NOT**
+  TD-006 — they are a separate test-contract class (activation tests must opt in
+  via `MY_FIRST_AGENT_S2_SKILL_ENABLE=1`; see `S2_ACCEPTANCE_GATE.md`). The 33
+  remaining failures are all guard/governance/architecture-boundary tests. The
+  shift from 36→33 reflects S2 gap-loop module additions changing which frozen
+  inventories the architecture-boundary guards assert against — still TD-006.
 - Suggested phase: S2 baseline cleanup, or a separate Sn pass, before relying on
   full-suite status as a release signal. Update each guard only against confirmed
   current governance docs/contracts.

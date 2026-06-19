@@ -1,11 +1,18 @@
 # S2 Baseline Status
 
 > Current authoritative document. This is the **S2 starting-state audit** result, not
-> the S2 goal and not the S2 gap. S2 goal is defined separately in `S2_GOAL.md`
-> (pending user confirmation); the S2 gap is generated only after both the baseline
-> and the goal are confirmed. Source evidence: S1 archive under
+> the S2 goal and not the S2 gap, and **not the current release status**. S2 goal is
+> defined and frozen in `S2_GOAL.md` (user-confirmed 2026-06-17); the S2 gap backlog
+> is in `S2_GOAL_GAP.md`. Source evidence: S1 archive under
 > `docs/history/S1_BASELINE_USABLE_PRODUCT/`, current code/runtime, current tests,
 > and `docs/current/TECH_DEBT.md`.
+>
+> **Release status addendum (2026-06-19):** This file documents the S2 *entry*
+> baseline as audited 2026-06-17. It does not reflect subsequent S2 work. Current
+> S2 release status: all 13 gaps satisfied (see `S2_GOAL_GAP.md`); a release
+> hardening pass reconciled the skill default-off test contract (S2-G09) and
+> produced real-provider governed-path evidence (S2-G07/AC-7). For release judgment
+> see `S2_ACCEPTANCE_GATE.md`; for the execution record see `WORK_LOG.md`.
 
 ## 0. Verdict
 

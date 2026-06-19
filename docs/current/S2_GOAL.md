@@ -1,9 +1,9 @@
 # S2 Goal — Governed Task Agent
 
-> Current authoritative document (`docs/current/`). S2 目标定义。本文为**草案，
-> 待用户确认后冻结**（见 AGENTS.md goal rules：goal 不得因实现困难而改、不得被
-> 静默收窄或扩张）。本文不展开实施步骤；可验收的差距清单见 `S2_GOAL_GAP.md`
-> （待用户确认本 goal 后再生成）。S2 起点现状见 `S2_BASELINE_STATUS.md`。
+> Current authoritative document (`docs/current/`). S2 目标定义。本文已由用户于
+> 2026-06-17 确认并**冻结用于 S2 执行**（见 §9 Resolved decisions；AGENTS.md goal
+> rules：goal 不得因实现困难而改、不得被静默收窄或扩张）。本文不展开实施步骤；
+> 可验收的差距清单见 `S2_GOAL_GAP.md`。S2 起点现状见 `S2_BASELINE_STATUS.md`。
 
 ## 0. Executive summary
 

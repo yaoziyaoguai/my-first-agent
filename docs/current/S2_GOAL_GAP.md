@@ -201,6 +201,7 @@
   - Real provider: adds `test_s2_reference_task_real_provider_key_safe_context_smoke`, guarded by `MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE=1`; it validates provider-callable S2 task context and then calls the configured real provider only under explicit opt-in.
   - Runbook: `docs/current/S2_REFERENCE_TASK_ACCEPTANCE.md` documents targeted gate, real opt-in command, default skip behavior, and secret/config boundaries.
   - Local verification: `.venv/bin/python -m pytest tests/test_s2_reference_task_acceptance.py -q` -> 1 passed, 1 skipped（real provider 未 opt-in，因此未执行真实 provider 调用）。
+  - **Release hardening (2026-06-19)**: real smoke strengthened from bare `provider.create()` to governed-path + evidence-seam alignment — it now resolves the provider via the PRODUCTION path (`build_model_provider_from_env()`, reads `config/config.yaml`), records evidence through the same memory/tool/task seam as fake, and asserts subsystem set `{memory,tool,task}` + `provider_callable=True` + `replay_ready=True`. Real run under `MY_FIRST_AGENT_RUN_S2_REAL_PROVIDER_SMOKE=1` -> **1 passed** (non-fake provider, governed evidence produced, key-safe).
 - **Dependencies**: S2-G02..S2-G06（reference task 已由 S2-G01 决策为 Repo-governed improvement task）；S2-G10（acceptance gate 分类）。
 - **Non-goal boundary**: 不把 full pytest 全绿作为 S2 产品目标（见 S2-G10/G12）。
 - **Suggested execution order**: P1-6（S2 验收锚点，最后）。
@@ -244,6 +245,7 @@
   - Prompt/checkpoint boundary: `agent/core.py` suppresses active skill body, candidate selection, and active-skill tool allowlist while disabled; disabled update clears active skill lifecycle/compat state; `agent/runtime_integration/skill_lifecycle.py` clears checkpoint restore while disabled.
   - **Design decision (S2 final acceptance correction, 2026-06-17)**: S2 Skill default-off 的语义是「discovery allowed, activation default-off, execution gated」—— **不在 registry/discovery 层关**。`build_skill_registry()` 保持 S1 行为不变（始终扫描 `skills/`，default 可发现 `demo-note-maker`）；default-off gate 只作用于 activation/execution 层（SKILL_SELECT 工具注册、`SkillRuntimeActionHandler.handle`、`core.py` body 注入、checkpoint restore）。此前 S2-G09 初版误在 `build_skill_registry()` 加 registry 层 gate，导致 S1 baseline `test_s6_skill_registry_has_demo_note_maker` + 2 个 golden skill tests 回归；已修正（`agent/runtime_integration/phase1_hook.py` 移除 registry gate）。
   - Tests: `tests/test_s2_skill_controlled_integration.py` covers default-off discovery-still-works（registry 仍含 demo-note-maker）、default-off SKILL_SELECT hiding、opt-in registration、dispatcher rejection evidence、no disabled prompt body injection、disabled checkpoint restore clearing. S1-era golden skill tests opt-in explicitly (`monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")`) because they exercise the full selection→activation path.
+  - **Release hardening reconciliation (2026-06-19)**: two release audits found ~37 full-pytest skill failures misclassified as TD-006. Root cause: S2-G09's default-off gate was added AFTER the baseline audit, so the baseline's "36 TD-006" never counted skill tests. Reconciliation: all 37 are **test-contract gaps** (activation/execution tests that must opt in), not runtime regressions and not TD-006. Contract enforced across 10 test files (module-level autouse fixture for pure-skill modules; per-test/class for mixed). Post-fix full pytest: 33 failed — all TD-006 guards; 0 skill-activation failures; 0 unknown failures.
 - **Dependencies**: S2-G08（选定项）；S2-G05（governed contract）。
 - **Non-goal boundary**: 不做 S3 级生态化；所选 L5 只做受控最小接入。
 - **Suggested execution order**: P2-2。
@@ -370,5 +372,11 @@ S2 **不做**（防止 agent 越界）：
 
 ## 11. Next step
 
-- S2-G01..S2-G06 and S2-G10 已完成；继续 **S2 gap loop** 时按 §3 执行顺序回到 S2-G07。
-- 每个 gap 仍需一轮 focused mini-run、验证、更新本文件与 `WORK_LOG.md`，并按治理规则提交。
+- S2-G01..S2-G13 全部 satisfied（13/13）。S2 gap loop 已完成。
+- S2 release hardening pass（本 pass）已修复两次独立 release audit 发现的问题：
+  - skill default-off 测试分类对账（AC-8 / S2-G09 契约：discovery 不需 opt-in，
+    activation/execution 必须显式 opt-in）；
+  - AC-7 real provider governed-path evidence 补强并实跑通过。
+- S2 已具备进入 release archive 的条件（详见 `WORK_LOG.md` release hardening 条目
+  与 `S2_ACCEPTANCE_GATE.md`）。是否进入 S2 release archive / S3 规划由用户决定；
+  本文件不擅自启动。

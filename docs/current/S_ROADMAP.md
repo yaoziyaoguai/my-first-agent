@@ -43,4 +43,4 @@ S 系列围绕同一条五层能力主线演进。各层在不同 S 版本的成
 
 - `docs/current/` 是当前权威文档区；`docs/history/` 是历史证据区（非 routing authority）。
 - 历史文档（含旧 roadmap、Window/Theme 计划、模块成熟度表）只能作为背景证据，不得作为当前 S 系列路线来源。
-- S 系列治理规则见 `AGENTS.md` 的 **S1 Development Governance**。
+- S 系列治理规则见 `AGENTS.md` 的 **Stage Development Governance**。

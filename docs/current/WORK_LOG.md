@@ -73,3 +73,55 @@
 - **Next step (authorized by current docs):** define the S3 goal with the user,
   then create `S3_GOAL.md` → `S3_GOAL_GAP.md`. No goal is chosen here.
 - **Push:** none (branch ahead of origin; push is the user's decision).
+
+## 2026-06-19 — Draft S3 goal (roadmap-grounded direction review)
+
+- **Date/time:** 2026-06-19 22:47 CST
+- **Task:** Draft `docs/current/S3_GOAL.md` after a roadmap-grounded direction
+  review. Direction evaluation + draft only — **not** S3 gap analysis, not a gap
+  loop, not feature development, not an S2 overthrow.
+- **Skills/tools used:** superpowers goal-decomposition + candidate-comparison +
+  acceptance-criteria completeness + verification-before-completion;
+  compound-engineering S-series stage-boundary reasoning (S3 vs S2/S4/Sn,
+  roadmap constraints, whether TECH_DEBT enters S3); graphify to verify the
+  current L1–L5 capability boundaries and S2 inherited capabilities at the S3
+  start point (no large source reads). Safety: config/`.env` only described as
+  boundaries — no secret read/print/copy/move.
+- **Files read:** `AGENTS.md`, `docs/current/{S_ROADMAP,S3_BASELINE_STATUS,TECH_DEBT,WORK_LOG}.md`,
+  `docs/history/S2_GOVERNED_TASK_AGENT/{S2_RELEASE_SUMMARY,S2_GOAL,S2_GOAL_GAP,S2_ACCEPTANCE_GATE,S2_TECH_DEBT_TRIAGE}.md`,
+  `docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md` (+ archive listing).
+- **Roadmap constraints applied:** S-series = product stages (≠ code v1/v2/v3);
+  S3 must inherit S1/S2 same-spine; roadmap defines only the five-layer line and
+  does not pre-commit S3 scope (`S_ROADMAP §3`); `§5` examples L5 maturation
+  (boundary-clear → selectively-active) as the S2+ evolution direction.
+- **L5 baseline facts (graphify + file):** Skill = governed-active (S2);
+  SubAgent = parent-mediated / side-effect-free / not activated (most wired);
+  MCP = configurable default-off; Scheduler = `ActionScheduler`/`ActionPlan` +
+  handler + tests but not activated in the default loop.
+- **Options considered:** A = L5 Extension Boundary Maturation (selected);
+  B = Full-suite Governance (rejected as product mainline — would make S3 an S2
+  cleanup; demoted to a supporting open decision); C = Task Intelligence
+  (demoted to a companion of A, risk of drifting into autonomous-agent scope).
+- **Selected direction:** S3 = **Extensible Governed Agent Runtime** — mature the
+  L5 extension boundary, promote 1–2 L5 capabilities to governed-active under
+  L1–L4 governance. Which 1–2 (SubAgent/MCP/Scheduler) is left as an open
+  decision; not hard-coded.
+- **Files changed (created/edited):**
+  - `docs/current/S3_GOAL.md` (created — draft, unfrozen)
+  - `docs/current/_tmp_s3_goal_draft/direction_review.md` (created)
+  - `docs/current/WORK_LOG.md` (this entry)
+  - `docs/current/S_ROADMAP.md` (minimal stale-pointer fix: "S1 Development
+    Governance" → "Stage Development Governance", matching the renamed AGENTS.md
+    section; roadmap not rewritten)
+- **Verification:** see Phase verification below in the final report —
+  `git status`, `git diff --check`, `S3_GOAL.md` exists, `S3_GOAL_GAP.md` absent,
+  candidate-directions + open-decisions present, banned-phrase rg check (only in
+  non-goal/deferred context).
+- **`S3_GOAL_GAP.md`:** not created (by design — generated only after the user
+  approves and freezes this goal).
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/002/003/004/006/007 remain
+  open, unchanged).
+- **Commit:** `docs: draft roadmap-grounded S3 goal` (this run's commit; see `git log`).
+- **Next step:** user reviews `S3_GOAL.md`; on approval + freeze, generate
+  `S3_GOAL_GAP.md`. No gap loop this run.
+- **Push:** none.

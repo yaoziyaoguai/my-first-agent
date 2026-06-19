@@ -430,3 +430,76 @@
 - **Next step (authorized by current docs):** S3-G04 (SubAgent read-only /
   audit-first / parent-mediated governed path, P1) — unblocked by G02 contract.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G04 (SubAgent read-only / parent-mediated)
+
+- **Date/time:** 2026-06-20 00:30 CST
+- **Task:** Execute S3-G04 (P1) — promote SubAgent to governed-active **read-only /
+  audit-first / parent-mediated** delegation via the G02 contract; child must not bypass
+  main Agent for tool/provider/memory; default-off can be disabled; audit replayable.
+  AC-3.
+- **Skills/tools used:** superpowers test-driven-development (RED→GREEN) +
+  verification-before-completion; compound-engineering scope boundary (SubAgent =
+  read-only parent-mediated, NOT full multi-agent ecosystem; child no second spine);
+  graphify + Explore subagent to map the current SubAgent path before deciding scope.
+  Safety: no secret/config touch.
+- **Code-fact finding (graphify + Explore, Read-only):** parent-mediated read-only
+  architecture is **fully built and tested** — `delegate_l1`/`execute_l1`/`execute_local`/
+  `build_context_package` route tools+memory through `tool_mediator`, child never holds a
+  MemoryStore, parent `adjudicate_result` decides; `tool_boundary`/`memory_boundary`/
+  `skill_boundary` are snapshot-only (no execution); `SubAgentAuditRecord`+trace+
+  `ParentAdjudicationResult` are frozen/replayable; 16-class
+  `test_subagent_l1_parent_mediated.py` proves no-bypass. → **No architectural gap**;
+  G04 = capability declaration + the MISSING default-off env gate + acceptance.
+- **TDD evidence:**
+  - RED: collection → `ModuleNotFoundError: agent.subagent_system.gate` (and the gate
+    test would fail: real_llm_readonly currently allowed without opt-in).
+  - GREEN: after gate.py + subagent_capability.py + policy.py edit, **6 passed**.
+- **What was done:**
+  - Added `agent/subagent_system/gate.py` — `SUBAGENT_ENABLE_ENV` +
+    `is_subagent_enabled()` default-off opt-in (mirrors Skill/MCP gate).
+  - Added `agent/subagent_capability.py` — `SUBAGENT_CAPABILITY` via unified contract
+    (default-off, enable_env, risk=medium + mitigations, verification, evidence
+    subsystem=task).
+  - Edited `agent/subagent_system/policy.py` `select_execution_mode` — added an S3
+    default-off env gate for governed-active modes (real_llm_readonly /
+    real_llm_tool_requesting / sandboxed_tool_capable), checked AFTER the existing
+    config gates. local modes (local_fake/local_deterministic) are NOT gated → fake-first
+    (fake E2E / deterministic tests need no opt-in). Behavior-preserving for all existing
+    tests.
+  - Added `tests/test_s3_subagent_parent_mediated_acceptance.py` — 6 tests: capability
+    declaration; default-off gate blocks governed-active modes (config-open + env-off →
+    blocked; env-on → allowed); local modes not gated; child cannot bypass parent
+    (forbidden_actions: no direct MemoryStore write / no real LLM / no shell / no nested
+    SubAgent); replayable audit (asdict round-trip + invariants); parent adjudicates.
+- **Files changed (created/edited):**
+  - `agent/subagent_system/gate.py` (created)
+  - `agent/subagent_capability.py` (created)
+  - `agent/subagent_system/policy.py` (S3 gate for governed-active modes; +import +
+    `_GOVERNED_ACTIVE_MODES`)
+  - `tests/test_s3_subagent_parent_mediated_acceptance.py` (created; I001 import-sort fixed)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G04 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_subagent_parent_mediated_acceptance.py -q`
+    → **6 passed**.
+  - Full SubAgent regression suite (execution_modes + delegation_contract +
+    parent_adjudication + l1_parent_mediated + v0_runtime_boundary): **82 passed** (no
+    regression from policy.py gate).
+  - `.venv/bin/ruff check` new files (gate.py / subagent_capability.py / test) → exit 0.
+    policy.py: pre-commit ruff gate checks the whole staged file and blocked on 3
+    pre-existing E501 (TD-007) in `select_execution_mode`'s config-gate `if` lines
+    (immediately above the new S3 gate, same function). Wrapped those 3 lines (pure
+    formatting, no logic change) to make the file ruff-clean and unblock the commit;
+    behavior unchanged (re-ran execution_modes + G04 → 10 passed).
+  - G02+G03+S2 targeted gate: passed (no regress).
+  - Boundary-guard failure count = **7** = known TD-006 set (1+6); new modules introduce
+    no new guard failure.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G04 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `feat(s3): SubAgent read-only parent-mediated governed path (S3-G04)`
+  (this run; see `git log`).
+- **Next step (authorized by current docs):** S3-G05 (extension evidence /
+  checkpoint / task-state integration, P1) — depends on G03+G04 (now both satisfied).
+- **Push:** none.

@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 9 | S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 8 | S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 3 | S3-G01（reference task runbook）；S3-G02（unified extension contract）；S3-G03（MCP governed tool source） |
+| satisfied | 4 | S3-G01；S3-G02；S3-G03；S3-G04（SubAgent read-only parent-mediated） |
 
 ## 3. Recommended execution order
 
@@ -195,7 +195,18 @@
 - **Non-goal boundary**: **不做可写 / 非 mediated 委派**；不做完整 multi-agent 生态
   （留 S4/Sn）；child 不另起 agent 主链路。
 - **Suggested execution order**: P1-3。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `agent/subagent_capability.py`（SubAgent 经 G02 统一契约声明 `SUBAGENT_CAPABILITY`：
+  kind=subagent / default-off / enable_env=`MY_FIRST_AGENT_S3_SUBAGENT_ENABLE` / risk=medium +
+  缓解 / verification / evidence subsystem=task）；`agent/subagent_system/gate.py`（新增
+  default-off env gate `is_subagent_enabled`，与 Skill/MCP gate 同语义）；`agent/subagent_system/
+  policy.py:select_execution_mode` 对 governed-active 模式（real_llm_readonly 等）追加 S3 env
+  gate（config gate 之上，local 模式不门控=fake-first）；`tests/test_s3_subagent_parent_mediated_acceptance.py`
+  6 passed（capability 声明 + default-off gate 阻 governed-active 模式 + local 不门控 + child 不绕过
+  parent[forbidden_actions] + SubAgentAuditRecord 可复盘 + parent adjudicate）。代码事实复核
+  （graphify + Explore）：parent-mediated read-only 架构已完全建成且由 16 个 L1 test class 证明
+  （child 工具/内存经 tool_mediator，不直接持 MemoryStore）；不绕过边界（tool/memory/skill_boundary
+  仅 snapshot）。Commit 见 WORK_LOG / `git log`（S3-G04）。
 - **Risk if ignored**: AC-3 无法达成；SubAgent 若可写/绕过会破坏 governance。
 
 ### S3-G05 — Extension evidence / checkpoint / task-state integration
@@ -401,7 +412,7 @@
 | S3-G01 | Define S3 reference task precisely | P0 | satisfied | Cross (L4) | AC-5/6 setup |
 | S3-G02 | Unified extension capability contract | P1 | satisfied | L5/Cross | AC-4 |
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | satisfied | L5/L3 | AC-2 |
-| S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | open | L5/L3 | AC-3 |
+| S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | satisfied | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | open | L2/L3 | AC-1/4 |
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | open | L1 | AC-6 |

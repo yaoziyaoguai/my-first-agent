@@ -6,6 +6,17 @@ from dataclasses import dataclass
 
 from agent.subagent_system.errors import SubAgentModeError
 from agent.subagent_system.execution_mode import SubAgentExecutionMode
+from agent.subagent_system.gate import is_subagent_enabled
+
+# S3 governed-active 模式：推进到 real-LLM read-only / audit-first 委派需要显式 opt-in
+# （default-off env gate，在 config gate 之上）；local 确定性模式不受影响（fake-first）。
+_GOVERNED_ACTIVE_MODES: frozenset[str] = frozenset(
+    {
+        SubAgentExecutionMode.REAL_LLM_READONLY.value,
+        SubAgentExecutionMode.REAL_LLM_TOOL_REQUESTING.value,
+        SubAgentExecutionMode.SANDBOXED_TOOL_CAPABLE.value,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -43,12 +54,25 @@ def select_execution_mode(
             message="Requested execution mode is outside descriptor.supported_modes",
             safe_preview="Requested execution mode is not supported by SubAgent",
         )
-    if requested == SubAgentExecutionMode.REAL_LLM_READONLY.value and not policy.real_llm_readonly_allowed:
+    if (
+        requested == SubAgentExecutionMode.REAL_LLM_READONLY.value
+        and not policy.real_llm_readonly_allowed
+    ):
         raise _gate_closed("REAL_LLM_READONLY_GATE_CLOSED")
-    if requested == SubAgentExecutionMode.REAL_LLM_TOOL_REQUESTING.value and not policy.real_llm_tool_requesting_allowed:
+    if (
+        requested == SubAgentExecutionMode.REAL_LLM_TOOL_REQUESTING.value
+        and not policy.real_llm_tool_requesting_allowed
+    ):
         raise _gate_closed("REAL_LLM_TOOL_REQUESTING_GATE_CLOSED")
-    if requested == SubAgentExecutionMode.SANDBOXED_TOOL_CAPABLE.value and not policy.sandboxed_tool_capable_allowed:
+    if (
+        requested == SubAgentExecutionMode.SANDBOXED_TOOL_CAPABLE.value
+        and not policy.sandboxed_tool_capable_allowed
+    ):
         raise _gate_closed("SANDBOX_GATE_CLOSED")
+    # S3 governed-active opt-in gate（default-off env）：在 config gate 之上，real-LLM
+    # read-only / audit-first 等模式的激活需要显式 S3 opt-in（MY_FIRST_AGENT_S3_SUBAGENT_ENABLE）。
+    if requested in _GOVERNED_ACTIVE_MODES and not is_subagent_enabled():
+        raise _gate_closed("SUBAGENT_S3_GATE_CLOSED")
     return SubAgentExecutionMode(requested)
 
 

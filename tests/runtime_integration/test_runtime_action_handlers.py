@@ -74,9 +74,11 @@ def _skill_request(payload: dict) -> RuntimeActionRequest:
 
 
 def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selection(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Skill handler 只验证模型结构化选择，body 在 selected_skill_id 后才加载。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")
@@ -126,9 +128,11 @@ def test_skill_select_uses_model_decision_metadata_and_loads_body_after_selectio
 
 @pytest.mark.parametrize("missing_key", ["selection_reason", "selection_confidence"])
 def test_skill_missing_selection_metadata_is_not_runtime_e2e(
-    tmp_path: Path, missing_key: str,
+    tmp_path: Path, missing_key: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """缺 selection_reason/confidence 时 handler 不得后验补字段。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")
@@ -153,8 +157,12 @@ def test_skill_missing_selection_metadata_is_not_runtime_e2e(
     assert result.payload["body_load_decision"] is False
 
 
-def test_hidden_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> None:
+def test_hidden_skill_id_in_available_metadata_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """hidden skill id 即使没有 body/status，也不能进入 model-visible metadata。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")
@@ -182,8 +190,12 @@ def test_hidden_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> No
     assert "audit_only_skill_exclusion_evidence" not in result.payload
 
 
-def test_disabled_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> None:
+def test_disabled_skill_id_in_available_metadata_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """disabled skill id 不得泄露到 available_skill_metadata。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")
@@ -211,8 +223,12 @@ def test_disabled_skill_id_in_available_metadata_is_rejected(tmp_path: Path) -> 
     assert "disabled-docs" not in str(result.evidence["audit_only_skill_exclusion_evidence"])
 
 
-def test_available_skill_metadata_must_match_registry_visible_ids(tmp_path: Path) -> None:
+def test_available_skill_metadata_must_match_registry_visible_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """metadata 不能是 registry visible list 的随意子集，否则模型看到的能力面不可信。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")
@@ -238,8 +254,12 @@ def test_available_skill_metadata_must_match_registry_visible_ids(tmp_path: Path
     )
 
 
-def test_audit_only_exclusion_evidence_not_in_payload(tmp_path: Path) -> None:
+def test_audit_only_exclusion_evidence_not_in_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """hidden/disabled 统计只进 audit evidence，不进入 model-visible payload。"""
+    # S2-G09：本测试覆盖 SKILL_SELECT activation，需显式 opt-in gate。
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     skill_root = tmp_path / "skills"
     _write_skill(skill_root, "code-review", status="active")

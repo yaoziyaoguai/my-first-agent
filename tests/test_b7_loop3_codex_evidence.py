@@ -77,6 +77,11 @@ class TestRedTurnStartIdentityMissing:
     不传入 identity → RuntimeActionEvent 的 identity 字段全为空。
     """
 
+    @pytest.fixture(autouse=True)
+    def _s2_skill_enabled_for_activation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S2-G09：覆盖 SKILL_SELECTION_ENTERED activation，需显式 opt-in gate。"""
+        monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
+
     def test_skill_selection_entered_identity_empty(self):
         """RED — SKILL_SELECTION_ENTERED 的 session_id/run_id/instance_id 为空。"""
         from agent.core import refresh_runtime_system_prompt
@@ -235,6 +240,11 @@ class TestGreenTurnStartIdentityPropagation:
     当前 identity 参数不存在 → GREEN tests skip。
     实现 identity 参数后 skip 变为 assertion。
     """
+
+    @pytest.fixture(autouse=True)
+    def _s2_skill_enabled_for_activation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S2-G09：覆盖 SKILL_SELECTION_ENTERED activation，需显式 opt-in gate。"""
+        monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
 
     def test_identity_on_skill_selection_entered(self):
         """GREEN — SKILL_SELECTION_ENTERED 携带传入的 identity。"""

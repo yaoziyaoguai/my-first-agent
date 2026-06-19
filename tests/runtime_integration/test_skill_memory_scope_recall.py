@@ -27,6 +27,16 @@ from agent.skill_system.registry import SkillRegistry
 
 
 @pytest.fixture(autouse=True)
+def _s2_skill_enabled_for_activation_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2-G09 契约：本模块覆盖 Skill activation/execution（memory scope recall），需 opt-in。
+
+    default-off gate 只作用于 activation/execution；registry discovery/metadata
+    测试不受影响。见 S2_GOAL_GAP.md S2-G09。
+    """
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
+
+
+@pytest.fixture(autouse=True)
 def _reset_lifecycle() -> None:
     reset_default_lifecycle()
     yield

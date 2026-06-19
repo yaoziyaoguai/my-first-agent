@@ -6,6 +6,8 @@ metadata 字段符合 ToolRegistryEntry 契约，且工具函数可正常调用�
 
 from __future__ import annotations
 
+import pytest
+
 # ========== 注册验证 ==========
 
 
@@ -140,8 +142,10 @@ def test_demo_tools_are_model_visible():
 # ========== UMT-P1-002: skill-aware tool visibility ==========
 
 
-def test_skill_aware_allowlist_filters_model_visible_tools():
+def test_skill_aware_allowlist_filters_model_visible_tools(monkeypatch: pytest.MonkeyPatch):
     """活跃 skill 时，模型可见工具应收窄为 skill.allowed_tools + 元工具 + SKILL_SELECT。
+
+    S2-G09：本测试覆盖 skill activation + SKILL_SELECT 注册，需显式 opt-in gate。
 
     UMT-P1-002 root cause: core.chat() 调用 get_model_visible_tools() 时未考虑活跃 skill
     的 allowed_tools，导致模型看到所有工具但只能使用 skill 允许的工具子集——
@@ -150,6 +154,7 @@ def test_skill_aware_allowlist_filters_model_visible_tools():
     修复方案：活跃 skill 时通过 explicit_allowlist 将模型可见工具收窄为
     skill.allowed_tools + 元工具 + SKILL_SELECT。
     """
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
     import agent.tools  # noqa: F401
     from agent.skill_system.lifecycle import get_default_lifecycle
 

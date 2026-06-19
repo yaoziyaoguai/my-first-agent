@@ -17,9 +17,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent.skill_system.descriptor import SkillManifest
 from agent.skill_system.registry import SkillRegistry
 from agent.skill_system.retriever import SkillCandidate, SkillCandidateRetriever
+
+
+@pytest.fixture(autouse=True)
+def _s2_skill_enabled_for_activation_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2-G09 契约：本模块覆盖 Skill activation/execution，需显式 opt-in gate。
+
+    default-off gate 只作用于 activation/execution；registry discovery/metadata
+    测试不受影响。见 S2_GOAL_GAP.md S2-G09。
+    """
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers

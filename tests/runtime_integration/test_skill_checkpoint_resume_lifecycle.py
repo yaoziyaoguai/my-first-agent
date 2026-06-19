@@ -21,6 +21,17 @@ from agent.skill_system.lifecycle import get_default_lifecycle, reset_default_li
 from agent.state import create_agent_state
 from tests.conftest import FakeAnthropicClient, text_response
 
+
+@pytest.fixture(autouse=True)
+def _s2_skill_enabled_for_activation_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2-G09 契约：本模块覆盖 Skill activation/execution（checkpoint restore），需 opt-in。
+
+    default-off gate 只作用于 activation/execution；registry discovery/metadata
+    测试不受影响。见 S2_GOAL_GAP.md S2-G09。
+    """
+    monkeypatch.setenv("MY_FIRST_AGENT_S2_SKILL_ENABLE", "1")
+
+
 RAW_MARKERS = (
     "RAW_BODY_MARKER",
     "PROMPT_MARKER",

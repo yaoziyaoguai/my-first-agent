@@ -100,27 +100,19 @@ def _record_governed_tool_result(
 
 
 def _real_provider_env_ready() -> tuple[bool, str]:
-    opt_in = os.environ.get(_S2_REAL_PROVIDER_SMOKE_ENV, "")
-    if opt_in != "1":
+    """S2 real provider smoke opt-in gate（collection-time）。
+
+    只检查显式 opt-in 标志；provider 是否真实可用在测试体内通过生产路径
+    build_model_provider_from_env() 解析（优先读 config/config.yaml，与 runtime
+    同源）。这避免要求 user 把 secret 导出到 env var——key 留在 gitignored
+    config/config.yaml 中，测试只透传 config 对象，不读取/打印/移动/提交 secret。
+    """
+    if os.environ.get(_S2_REAL_PROVIDER_SMOKE_ENV, "") != "1":
         return False, (
             "S2 real provider smoke requires explicit opt-in: "
             f"{_S2_REAL_PROVIDER_SMOKE_ENV}=1"
         )
-
-    missing = []
-    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"):
-        if not os.environ.get(name):
-            missing.append(name)
-    if missing:
-        return False, f"missing provider environment variables: {', '.join(missing)}"
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
-    for pattern in _FAKE_KEY_PATTERNS:
-        if pattern.lower() in api_key.lower() or pattern.lower() in base_url.lower():
-            return False, "provider environment contains a known fake placeholder"
-
-    return True, "ready"
+    return True, "opt-in"
 
 
 def test_s2_reference_task_fake_e2e_checkpoint_resume_evidence_and_gate(tmp_path):
@@ -234,10 +226,25 @@ _REAL_READY, _REAL_SKIP_REASON = _real_provider_env_ready()
 
 @pytest.mark.skipif(not _REAL_READY, reason=_REAL_SKIP_REASON)
 def test_s2_reference_task_real_provider_key_safe_context_smoke(monkeypatch):
-    from agent.provider.config import load_agent_provider_config
-    from agent.provider.factory import build_model_provider
+    """S2-G07 AC-7: real provider 进入 S2 governed task path 并产生对齐 evidence。
 
-    state = create_agent_state(system_prompt="S2 real provider smoke")
+    本 smoke 证明 real provider（非 fake）：
+    1. 进入 S2 governed task path（receive/accept/context），与 fake E2E 共享同一入口；
+    2. S2 task context 在 real provider 下 provider-callable（真实调用验证）；
+    3. 通过同一 evidence-recording seam 记录 task-level evidence，与 fake/local
+       关键事件链路对齐（subsystem 集合 = {memory, tool, task}）。
+
+    这不是旁路的 bare provider.create()：provider 调用发生在 governed task context
+    构建之后，且 evidence 经由与 fake E2E 完全相同的 seam 记录。
+
+    key-safe：opt-in + fake-key 检测；不读取/打印/移动/提交 secret；不修改
+    config/config.yaml；不创建 .env。仅发送 fixture 级 S2 task context。
+    """
+    from agent.task_evidence_report import build_task_evidence_report
+
+    # --- 1. 进入 S2 governed task path（与 fake E2E 同一入口）---
+    state = create_agent_state(system_prompt="S2 real provider governed smoke")
+    state.memory.session_id = "s2-real-provider-smoke-session"
     assert receive_governed_task(
         state,
         user_goal="Resolve one eligible S2 gap from repo evidence",
@@ -245,14 +252,36 @@ def test_s2_reference_task_real_provider_key_safe_context_smoke(monkeypatch):
     ).allowed
     assert accept_governed_plan(state).allowed
 
+    # 记录一次 governed tool 结果，使 tool contract / evidence 有内容（与 fake 对齐）
+    _record_governed_tool_result(
+        state,
+        tool_use_id="tool-real-smoke-read",
+        tool_name="read_file",
+        result="S2-G07 real provider smoke: governed path evidence aligned with fake.",
+    )
+
+    # --- 2. 构建 governed task context（provider-callable 校验）---
     context = build_task_execution_context(state)
     assert context.provider_callable is True
 
-    monkeypatch.setenv("MY_FIRST_AGENT_LLM_PROVIDER", "anthropic_compatible")
-    config = load_agent_provider_config()
-    provider = build_model_provider(config)
+    # --- 3. real provider via 生产路径（与 runtime 同源：优先读 config/config.yaml）。
+    # 证明 S2 task context 在真实 provider 下可用；不走 env-only 旁路 loader。---
+    from agent.provider.factory import build_model_provider_from_env
+
+    provider = build_model_provider_from_env()
     provider_type = getattr(provider, "provider_type", "unknown")
-    assert provider_type != "fake"
+    provider_api_key = getattr(getattr(provider, "config", None), "api_key", "") or ""
+    if provider_type == "fake" or not provider_api_key:
+        pytest.skip(
+            "opt-in set but provider resolved to fake/empty; "
+            "configure a non-fake provider in config/config.yaml"
+        )
+    for _pattern in _FAKE_KEY_PATTERNS:
+        if _pattern.lower() in provider_api_key.lower():
+            pytest.skip(
+                "provider api_key is a known fake placeholder; "
+                "real smoke needs a real key in config/config.yaml"
+            )
 
     response = provider.create(
         system=state.runtime.system_prompt,
@@ -262,7 +291,7 @@ def test_s2_reference_task_real_provider_key_safe_context_smoke(monkeypatch):
                 {
                     "role": "user",
                     "content": (
-                        "This is an S2 governed reference-task smoke. "
+                        "This is an S2 governed reference-task real-provider smoke. "
                         "Reply with exactly: s2-reference-task-provider-ok"
                     ),
                 }
@@ -275,11 +304,42 @@ def test_s2_reference_task_real_provider_key_safe_context_smoke(monkeypatch):
         for block in response.content
         if getattr(block, "type", None) == "text"
     ).strip()
+    assert "s2-reference-task-provider-ok" in text, (
+        "real provider 未在 S2 governed task context 下返回预期 smoke 回复"
+    )
 
-    assert "s2-reference-task-provider-ok" in text
+    # --- 4. 通过同一 evidence seam 记录 task-level evidence（与 fake/local 对齐）---
+    tool_report = build_governed_tool_contract_report(state, context_package=context)
+    review = build_task_progress_review(
+        state,
+        context_package=context,
+        tool_report=tool_report,
+    )
+    evidence_calls: list[dict] = []
+
+    def real_record_evidence(**kwargs):
+        evidence_calls.append(kwargs)
+        return kwargs
+
+    record_task_memory_boundary_evidence(context, record_evidence_fn=real_record_evidence)
+    record_tool_contract_evidence(tool_report, record_evidence_fn=real_record_evidence)
+    record_task_progress_review_evidence(review, record_evidence_fn=real_record_evidence)
+    report = build_task_evidence_report(
+        state,
+        context_package=context,
+        tool_report=tool_report,
+        progress_review=review,
+    )
+
+    # 关键事件链路对齐：与 fake E2E 共享同一 evidence subsystems（证明 real provider
+    # 进入同一 governed evidence path，而非旁路 bare provider.create()）
+    assert {call["subsystem"] for call in evidence_calls} == {"memory", "tool", "task"}
+    assert report.provider_callable is True
+    assert report.replay_ready is True
+
     acceptance = build_s2_acceptance_report((
         AcceptanceCheckResult(
-            name="s2_reference_task_real_provider_smoke",
+            name="s2_reference_task_real_provider_governed_path_smoke",
             command=(
                 f"{_S2_REAL_PROVIDER_SMOKE_ENV}=1 "
                 ".venv/bin/python -m pytest "

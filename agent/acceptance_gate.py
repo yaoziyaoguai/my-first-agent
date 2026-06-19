@@ -81,7 +81,6 @@ class S2AcceptanceReport:
 
 _DOC_GOVERNANCE_TEST_PREFIXES = (
     "tests/test_docs_source_of_truth.py::",
-    "tests/runtime_integration/test_v6_drift_addendum_boundary.py::",
     "tests/test_architecture_boundaries.py::",
     "tests/test_evidence_taxonomy_guard.py::",
     "tests/test_streaming_protocol.py::",

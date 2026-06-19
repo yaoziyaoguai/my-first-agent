@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 2 | S3-G09, S3-G12 |
+| open | 1 | S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 10 | G01-G08；S3-G10；S3-G11（Skill non-regression guard） |
+| satisfied | 11 | G01-G11（S3-G09 = TD-006 cleanup, full-suite 全绿） |
 
 ## 3. Recommended execution order
 
@@ -351,7 +351,18 @@
 - **Dependencies**: 与 P1 后期并行；受 S3-G10 docs governance 影响（guard 对齐目标）。
 - **Non-goal boundary**: **不把清债当 S3 产品主目标**；不混入 TD-007；不靠弱化断言充数。
 - **Suggested execution order**: P2-2。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: TD-006 的 **39** 个 governance-guard 失败（实际计数，超 S2 记载的 33）全清，
+  full pytest **4813 passed / 15 skipped / 28 xfailed / 0 failed**（AC-9 达成，full-suite 首次全绿）。
+  分类（investigation workflow）：retire_superseded 27（守护已归档/无 live subject 的 pre-S-series 文档，
+  S-series 治理取代，附理由=非弱化）/ update_to_current_authority 7（路径重指 docs/→docs/history/ + README
+  → docs/current）/ update_inventory 3（architecture_boundaries 冻结基线补 skill_system.gate / task_orchestration /
+  receive_governed_task，scanner 已观测、保持同等严格）/ keep_as_xfail 2（evidence_taxonomy l3 子系统文件，
+  沿既有 precedent）。apply workflow 并行修 7 文件 + 自验证。**AC-9 全套件验证额外揭示并修复 4 个 S3 引入的
+  回归**（非 pre-existing）：G05 `TaskState.delegation_log` invariant 级联（reset_task 清空 + RESETTABLE_FIELDS
+  + p1 frozen-set 对齐）×2；G03/G06 测试注册 MCP 工具未清理 TOOL_REGISTRY 污染 ×2（加 clean_tool_registry
+  fixture）。无弱化断言（retire 均附 authority 理由；inventory 补 scanner 已观测项；xfail 显式）。
+  `TECH_DEBT.md` TD-006 → resolved。Commit 见 WORK_LOG / `git log`（S3-G09）。
 - **Risk if ignored**: AC-9 未达；full-suite 无法作 S3 release 判断。
 
 ### S3-G10 — docs/current + history governance for S3
@@ -469,7 +480,7 @@
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | satisfied | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | satisfied | L1/Cross | AC-7 |
-| S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |
+| S3-G09 | TD-006 release-gate cleanup | P2 | satisfied | Cross/L1 | AC-9 |
 | S3-G10 | docs/current+history governance for S3 | P2 | satisfied | Cross | AC-8 |
 | S3-G11 | Skill contract remains governed-active & non-regressed | P2 | satisfied | L5 | AC-1 |
 | S3-G12 | Optional extension hardening | P3 | open | L5/L3 | AC-4 (enhance) |

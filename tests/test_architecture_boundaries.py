@@ -557,6 +557,10 @@ def test_core_agent_import_baseline_is_reviewed() -> None:
         "agent.skill_system.registry",
         "agent.skill_system.retriever",
         "agent.skill_system.skill_tool",
+        # S2 governed-active default-off L5 gate：core 在 turn-start 决定是否
+        # 激活 governed skill 系统。scanner 已观测此 import；登记进 frozen
+        # baseline 保持守卫同等严格，不允许再静默新增同类入口。
+        "agent.skill_system.gate",
         "agent.tool_runtime_mediator",
         "agent.transitions",
         # v1.1 Skill tool-scope fix：_call_model() 内 local import，仅用于
@@ -897,6 +901,11 @@ _RUNTIME_MUTATION_OWNER_BASELINE = {
     "agent.memory_interaction",
     "agent.response_handlers",
     "agent.session",
+    # task_orchestration.receive_governed_task 合法 mutate
+    # state.task.current_plan/current_step_index/user_goal（接收一个 governed
+    # task 时初始化 task 字段）。scanner 已观测；登记进 owner baseline 保持
+    # 守卫同等严格，不允许再静默新增 mutation owner。
+    "agent.task_orchestration",
     "agent.tool_executor",
     "agent.transitions",
 }
@@ -1035,6 +1044,25 @@ def test_runtime_state_mutation_function_inventory_is_reviewed() -> None:
         ),
         ("agent.tool_executor", "execute_single_tool", "state.task.tool_execution_log"),
         ("agent.tool_executor", "execute_pending_tool", "state.task.tool_execution_log"),
+        # task_orchestration.receive_governed_task 接收一个 governed task 时
+        # 初始化 task 字段（current_plan/current_step_index/user_goal）。
+        # scanner 已观测这三个 mutation；登记进 frozen inventory 保持守卫
+        # 同等严格，不允许再静默新增 mutation target。
+        (
+            "agent.task_orchestration",
+            "receive_governed_task",
+            "state.task.current_plan",
+        ),
+        (
+            "agent.task_orchestration",
+            "receive_governed_task",
+            "state.task.current_step_index",
+        ),
+        (
+            "agent.task_orchestration",
+            "receive_governed_task",
+            "state.task.user_goal",
+        ),
         (
             "agent.transitions",
             "advance_current_step_if_needed",
@@ -2222,9 +2250,15 @@ def test_cr1_action_scheduler_class_exists_and_is_not_wired() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# 06-audit tree 在 S1/S2 closeout 期间被迁到 docs/history/06-audit/。
+# docs/history/ 按 AGENTS.md L230-236 是“historical evidence, not current
+# routing authority”——这些 W3 inventory 是历史证据；把 Path 常量重新指向
+# 当前真实位置，不改变任何断言（CM-2 symbol ban、不可达式 overclaim ban、
+# surface 集合、owner snapshot 全部保留同等严格）。
 WINDOW3_CM1_INVENTORY_DOC = (
     _REPO_ROOT
     / "docs"
+    / "history"
     / "06-audit"
     / "WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md"
 )
@@ -2497,8 +2531,10 @@ def test_w3_scheduler_label_precision_avoids_unreachable_overclaim() -> None:
 
     checked_files = (
         AGENT_DIR / "action_scheduler.py",
-        _REPO_ROOT / "docs" / "06-audit" / "WINDOW_2_CLOSURE_AUDIT.zh.md",
-        _REPO_ROOT / "docs" / "06-audit" / "WINDOW_2_COMPAT_INVENTORY.zh.md",
+        # 06-audit 已迁到 docs/history/06-audit/（历史证据）。Path 常量重指到
+        # 当前真实位置；不可达式 overclaim 断言保留同等严格。
+        _REPO_ROOT / "docs" / "history" / "06-audit" / "WINDOW_2_CLOSURE_AUDIT.zh.md",
+        _REPO_ROOT / "docs" / "history" / "06-audit" / "WINDOW_2_COMPAT_INVENTORY.zh.md",
     )
     forbidden_phrases = {
         "scheduler 逻辑不可达",

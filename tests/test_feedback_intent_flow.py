@@ -42,20 +42,20 @@ plan / step confirmation 阶段收到的 free-form 文本"这件事写成可执�
 
 from __future__ import annotations
 
-from tests.conftest import (
+from tests.conftest import (  # noqa: F401
     FakeAnthropicClient,
     FakeResponse,
-)
-from tests.test_main_loop import (
-    _reset_core_module,
-    _register_test_tool,
+    meta_complete_response,
+    text_response,
 )
 from tests.test_complex_scenarios import (
     _plan_response,
     _tool_use_resp,
 )
-from tests.conftest import meta_complete_response, text_response  # noqa: F401
-
+from tests.test_main_loop import (
+    _register_test_tool,
+    _reset_core_module,
+)
 
 # ============================================================
 # 设计稿里规划的（尚未实现）RuntimeEvent 类型字面值。
@@ -242,7 +242,9 @@ def test_step_feedback_with_obvious_new_task_does_not_pollute_user_goal(monkeypa
 # 测试 2：模糊 feedback 不能写入 plan_feedback control event
 # ============================================================
 
-def test_step_feedback_does_not_append_plan_feedback_event_to_messages_before_user_choice(monkeypatch):
+def test_step_feedback_does_not_append_plan_feedback_event_to_messages_before_user_choice(
+    monkeypatch,
+):
     """保护边界：messages append-only，且 control event 一旦写入就再也无法
     撤销。所以"反馈归属未定"时**绝不能**写 plan_feedback——否则用户接下来
     选 [2] 切新任务时，messages 里仍会留下一条"用户对计划的修改意见：…"，
@@ -764,8 +766,9 @@ def test_p1_does_not_change_checkpoint_top_level_task_fields():
       顶层字段）。
     """
 
-    from agent.state import TaskState
     import dataclasses
+
+    from agent.state import TaskState
 
     actual = {f.name for f in dataclasses.fields(TaskState)}
     # 当前基线（HEAD 3b481f0）。如未来要扩展必须先更新此基线断言并
@@ -789,6 +792,9 @@ def test_p1_does_not_change_checkpoint_top_level_task_fields():
         "confirm_each_step",
         "tool_execution_log",
         "pending_retain_proposals",
+        # delegation_log（S3-G05）：SubAgent 委派安全投影，跨 checkpoint/resume 持久化、
+        # 随任务 reset 清空。是 S3 extension evidence/checkpoint/task-state 的合法新字段。
+        "delegation_log",
     }
     assert actual == expected, (
         f"P1 红线 #4：不允许新增/删除 TaskState 顶层字段。"

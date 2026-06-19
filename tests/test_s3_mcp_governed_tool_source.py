@@ -65,6 +65,15 @@ def capture_mcp_evidence(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def clean_tool_registry():
+    """快照全局 TOOL_REGISTRY，测试后清掉本测试注册的 MCP 工具（避免污染其他测试）。"""
+    snapshot = set(TOOL_REGISTRY.keys())
+    yield
+    for added in set(TOOL_REGISTRY.keys()) - snapshot:
+        TOOL_REGISTRY.pop(added, None)
+
+
 # ---- (a) capability 声明 ----
 
 
@@ -88,7 +97,9 @@ def test_mcp_capability_declared_via_unified_contract():
 # ---- (b) fake tool 经 governed policy gate 注册 + evidence ----
 
 
-def test_fake_mcp_tool_registered_through_governed_path_with_evidence(capture_mcp_evidence):
+def test_fake_mcp_tool_registered_through_governed_path_with_evidence(
+    capture_mcp_evidence, clean_tool_registry
+):
     """allowlisted fake MCP tool 进入同一 TOOL_REGISTRY，带 governed 属性 + mcp evidence。"""
     server, descriptor, client = _make_fake_mcp_source(
         server_name="s3-g03-demo",

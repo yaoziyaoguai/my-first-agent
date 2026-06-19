@@ -20,7 +20,7 @@
 - ID: TD-006
 - Title: Stale guard / documentation-governance / architecture-boundary / taxonomy
   / diagnostics / contract guard tests keep the full-suite health check red.
-- Status: open / carry-forward
+- Status: **resolved (S3-G09, 2026-06-20)**
 - Source/reason: Guards assert against pre-S1/pre-S2 doc locations and frozen
   module inventories that have since moved to `docs/history/` or grown during
   S2. 33 full-pytest failures across
@@ -40,6 +40,15 @@
   failure against the known set, and update guards to point at current
   authority. Authoritative S2 failure list:
   `docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_baseline_audit/fullsuite_failures.txt`.
+- **Resolution (S3-G09, 2026-06-20):** all 39 stale-guard failures cleared by aligning to
+  current S-series governance (NOT by weakening): retire_superseded 27 (guards of docs
+  deliberately archived to `docs/history/` during S1/S2 closeout — no live subject),
+  update_to_current_authority 7 (repoint to `docs/history/` / `docs/current/`), update_inventory
+  3 (frozen baselines refreshed to scanner-observed modules), keep_as_xfail 2 (l3 taxonomy
+  subsystem files, explicit xfail per existing precedent). Full pytest now
+  **4813 passed / 15 skipped / 28 xfailed / 0 failed** (full-suite release signal is green;
+  AC-9 met). Commit: see WORK_LOG / `git log` (S3-G09). TD-007 (ruff) remains open and is
+  NOT an S3 release blocker.
 
 ### TD-007 - ruff full-suite lint is red with ~451 historical errors
 

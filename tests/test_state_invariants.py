@@ -16,7 +16,6 @@ from agent.state import (
     task_status_requires_plan,
 )
 
-
 # 下面这组字段是已知"用户会话结束应该归零"的字段。
 # 如果你给 TaskState 加了新字段又应该跨任务清零，请把它加进这个列表；
 # 加进来后对应的 reset_task 也要清掉，否则测试会提醒你。
@@ -44,6 +43,7 @@ RESETTABLE_FIELDS = {
     "pending_user_input_request",
     "confirm_each_step",
     "tool_execution_log",
+    "delegation_log",
 }
 
 # 跨任务保留字段：这些 TaskState 字段在 reset_task() 中不清空。
@@ -73,6 +73,7 @@ def _set_dirty(state) -> None:
     }
     state.task.confirm_each_step = True
     state.task.tool_execution_log = {"toolu_1": {"tool": "x", "input": {}, "result": "r"}}
+    state.task.delegation_log = [{"delegation_id": "dirty"}]
 
 
 def test_reset_task_clears_all_resettable_fields():
@@ -101,6 +102,7 @@ def test_reset_task_clears_all_resettable_fields():
     assert state.task.pending_user_input_request is None
     assert state.task.confirm_each_step is False
     assert state.task.tool_execution_log == {}
+    assert state.task.delegation_log == []
 
 
 def test_resettable_fields_covers_all_task_fields():
@@ -197,7 +199,8 @@ def test_core_resets_requires_plan_status_when_plan_missing(monkeypatch, capsys)
 
 
 def test_core_does_not_reset_tool_confirmation_without_plan(monkeypatch):
-    """awaiting_tool_confirmation + pending_tool 可来自单步无 plan 任务，不应被 plan invariant reset。"""
+    """awaiting_tool_confirmation + pending_tool 可来自单步无 plan 任务，
+    不应被 plan invariant reset。"""
     from tests.conftest import FakeAnthropicClient
     from tests.test_main_loop import _reset_core_module
 

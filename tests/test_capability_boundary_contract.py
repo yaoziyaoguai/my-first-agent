@@ -16,7 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_TOMBSTONE = PROJECT_ROOT / "agent" / "skills" / "__init__.py"
 FORMAL_SKILL_SYSTEM_DIR = PROJECT_ROOT / "agent" / "skill_system"
 SUBAGENT_MODULE = PROJECT_ROOT / "agent" / "subagents" / "local.py"
-DOC_PATH = PROJECT_ROOT / "docs" / "CAPABILITY_BOUNDARIES.md"
+# S3-G09 / TD-006: 文档在 S1/S2 收尾时归档到 docs/history/。这里是历史证据
+# （AGENTS.md "Stage Development Governance"，docs/history/ 为"historical evidence,
+# not current routing authority"），不再受 S-series stage governance 守护的 live subject。
+# 重新指向归档位置，10 条边界短语断言保持原样、不放宽。
+DOC_PATH = PROJECT_ROOT / "docs" / "history" / "CAPABILITY_BOUNDARIES.md"
 
 
 def _agent_imports(path: Path) -> set[str]:

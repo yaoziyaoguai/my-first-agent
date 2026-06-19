@@ -405,6 +405,8 @@ class AgentState:
         self.task.pending_user_input_request = None
         self.task.confirm_each_step = False
         self.task.tool_execution_log = {}
+        # delegation_log（S3-G05）随任务清空：新任务的 SubAgent 委派记录从零开始。
+        self.task.delegation_log = []
         # pending_retain_proposals 不清空——它是跨 turn 的确认 memory proposal 队列，
         # 由 turn-end hook 中 MEMORY_PROPOSE dispatch 消费后清空。
 

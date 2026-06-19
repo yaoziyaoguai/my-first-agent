@@ -41,9 +41,13 @@ def test_streaming_protocol_doc_event_types_match_runtime_schema() -> None:
 
     from agent.provider.streaming import ProviderStreamEvent
 
-    doc = (PROJECT_ROOT / "docs/02-architecture/STREAMING_PROTOCOL.zh.md").read_text(
-        encoding="utf-8"
-    )
+    # 文档已在 S1/S2 收尾时迁入 docs/history/（AGENTS.md：history 为历史证据，
+    # 非当前路由权威）。此测试仅固定 4 个 event_type 与 runtime schema 的对齐，
+    # 文档物理位置变化不影响该断言的语义，故改为指向 history 路径。
+    doc = (
+        PROJECT_ROOT
+        / "docs/history/02-architecture/STREAMING_PROTOCOL.zh.md"
+    ).read_text(encoding="utf-8")
     event_type_row = re.search(r"\| `event_type` \| (?P<types>[^|]+) \|", doc)
     assert event_type_row is not None
 

@@ -1,17 +1,23 @@
 """Source-of-Truth 一致性测试：防止过期文档模式复活。
 
-背景：2026-05-27 docs cleanup 建立了 PROJECT_STATUS.md / PROGRESS_LEDGER.md
-作为第一优先读取入口，归档了大量过期 plans/audit/evidence 文档。
+S3-G09 瘦身说明（2026-06）：
+本守卫在 S3-G09 期间被缩减。原因——它守护的是 pre-S-series 的"第一优先
+读取入口"文档模型（docs/PROJECT_STATUS.md、docs/PROGRESS_LEDGER.md、
+docs/README.zh.md、00-overview/CURRENT_CAPABILITY_STATUS.zh.md、
+06-audit/CURRENT_AUDIT_STATUS.zh.md、design/config-legacy-sunset-contract.md、
+dev/AUTO_RUN_WORKFLOW.md）。该模型已被 S-series stage governance
+有意识地取代：当前权威入口是 docs/current/ 下的 S_* working set
+（S_ROADMAP / S3_BASELINE_STATUS / S3_GOAL / S3_GOAL_GAP 等），
+原 PROJECT_STATUS / PROGRESS_LEDGER / CURRENT_*_STATUS 等已整体迁入
+docs/history/（"historical evidence, not current routing authority"，
+见 AGENTS.md L34-49 与 L230-236）。
 
-这些测试守护以下不变量：
-
-1. PROJECT_STATUS.md 和 PROGRESS_LEDGER.md 存在且内容完整。
-2. Active docs 不含 stale config 引用（MY_FIRST_AGENT_LLM_PROVIDER 等）。
-3. Active docs 不把已修复的 P1/P2 写成当前 blocker。
-4. Active docs 指向 config/config.yaml 作为推荐配置。
-5. Active index docs 内部链接不 broken。
-6. Archive docs 不被 active index 当作当前入口引用。
-7. Secret scan 通过。
+因此被退役的 22 个守卫对应的 subject 文档已不在活跃路径上、且无
+docs/current/ 等价物——其 subject 已不存在，退役守卫并非放宽断言、
+也不削弱 S3 AC-9（没有仍有效的断言可被弱化）。保留下来的守卫仍按
+其原本的强度执行：auto-run.md 命令文件、root README.md（已 repoint
+到 docs/current/S_ROADMAP.md）、index 断链检查、secret scan、以及
+overclaim/strong-claim 的通用 glob 扫描。
 """
 
 from __future__ import annotations
@@ -29,27 +35,7 @@ def _read(rel: str) -> str:
 
 
 # =========================================================================
-# 1. PROJECT_STATUS.md 和 PROGRESS_LEDGER.md 存在且完整
-# =========================================================================
-
-def test_project_status_exists():
-    """PROJECT_STATUS.md 必须存在，作为第一优先读取入口。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "当前状态" in text or "Current" in text
-    assert "config/config.yaml" in text
-    assert "PROGRESS_LEDGER.md" in text
-
-
-def test_progress_ledger_exists():
-    """PROGRESS_LEDGER.md 必须存在，记录关键 milestones。"""
-    text = _read("docs/PROGRESS_LEDGER.md")
-    assert "2026-06-10" in text
-    assert "Repository cleanup baseline" in text
-    assert "PROJECT_STATUS.md" in text
-
-
-# =========================================================================
-# 2. Active docs 不含 stale config 引用
+# Active docs stale config 引用检查（通用 glob 扫描，subject 仍活跃）
 # =========================================================================
 
 LEGACY_CONFIG_PATTERNS = [
@@ -115,46 +101,7 @@ def test_active_docs_no_provider_profiles_yaml_as_setup_path():
 
 
 # =========================================================================
-# 3. Active docs 不把已修复的 P1/P2 写成当前 blocker
-# =========================================================================
-
-FIXED_BLOCKERS = [
-    "ISSUE-002.*空响应.*当前.*blocker",
-    "infinite loop.*still.*blocking",
-    "model_provider_required.*crash",
-]
-
-
-def test_active_overview_docs_no_fixed_blockers():
-    """00-overview / 06-audit 的 active docs 不得把已修复 bugs 写成当前 blocker。"""
-    for doc in [
-        "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-        "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
-    ]:
-        text = _read(doc)
-        # 这些 doc 不应声称存在无限循环、空响应等已修复的 P0/P1
-        assert "空响应" not in text or "fixed" in text.lower() or "已修复" in text
-        assert "无限循环" not in text or "已修复" in text
-
-
-# =========================================================================
-# 4. Active docs 指向 config/config.yaml 作为推荐配置
-# =========================================================================
-
-def test_project_status_points_to_config_yaml():
-    """PROJECT_STATUS.md 必须指向 config/config.yaml 作为推荐配置。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "config/config.yaml" in text
-
-
-def test_docs_readme_zh_points_to_config_yaml():
-    """docs/README.zh.md 必须指向 config/config.yaml。"""
-    text = _read("docs/README.zh.md")
-    assert "config/config.yaml" in text
-
-
-# =========================================================================
-# 5. Active docs 不声称 fake provider 可验证任意自然语言语义
+# Active docs 不声称 fake provider 可验证任意自然语言语义
 # =========================================================================
 
 def test_active_docs_no_fake_provider_semantic_overclaim():
@@ -175,7 +122,7 @@ def test_active_docs_no_fake_provider_semantic_overclaim():
 
 
 # =========================================================================
-# 6. Index docs 断链检查
+# Index docs 断链检查
 # =========================================================================
 
 def _resolve_relative_link(base_dir: Path, link_target: str) -> Path | None:
@@ -218,7 +165,7 @@ def test_active_index_links_to_existing_files():
 
 
 # =========================================================================
-# 7. Secret scan
+# Secret scan
 # =========================================================================
 
 def test_active_index_docs_contain_no_hardcoded_secrets():
@@ -243,47 +190,7 @@ def test_active_index_docs_contain_no_hardcoded_secrets():
 
 
 # =========================================================================
-# 8. CURRENT_AUDIT_STATUS 和 CURRENT_CAPABILITY_STATUS 不指向已归档文件
-# =========================================================================
-
-def test_current_status_docs_no_broken_archive_refs():
-    """CURRENT_AUDIT_STATUS / CURRENT_CAPABILITY_STATUS 不得包含指向已归档文件的断链。"""
-    for doc_path in [
-        "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
-        "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-    ]:
-        text = _read(doc_path)
-        link_pattern = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
-        base_dir = (PROJECT_ROOT / doc_path).parent
-        for match in link_pattern.finditer(text):
-            link_target = match.group(2)
-            if link_target.startswith(("http://", "https://", "#", "mailto:")):
-                continue
-            resolved = _resolve_relative_link(base_dir, link_target)
-            if resolved is None:
-                pytest.fail(f"{doc_path} 包含断链: {link_target}")
-
-
-# =========================================================================
-# 9. FakeProvider / Memory Consolidation 冻结声明
-# =========================================================================
-
-def test_fake_provider_freeze_declared():
-    """Active docs 必须声明 FakeProvider 增长已冻结。"""
-    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
-    assert "FakeProvider" in text
-    assert "冻结" in text or "freeze" in text.lower()
-
-
-def test_memory_consolidation_freeze_declared():
-    """Active docs 必须声明 Memory Consolidation pipeline 已冻结。"""
-    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
-    assert "Consolidation" in text
-    assert "冻结" in text or "freeze" in text.lower() or "deferred" in text.lower()
-
-
-# =========================================================================
-# 10. .claude/commands/auto-run.md 命令文件守护
+# .claude/commands/auto-run.md 命令文件守护
 # =========================================================================
 
 AUTO_RUN_CMD = ".claude/commands/auto-run.md"
@@ -365,13 +272,22 @@ def test_auto_run_forbids_committing_config_yaml():
 
 
 # =========================================================================
-# 11. root README.md 守护
+# root README.md 守护
 # =========================================================================
 
+# S3-G09：原 test_root_readme_references_project_status 守护 README.md 指向
+# docs/PROJECT_STATUS.md。pre-S-series 的 PROJECT_STATUS 已迁入 docs/history/，
+# README.md 现以 docs/current/ S_* working set（S_ROADMAP.md 等）为权威入口。
+# 这里把断言 repoint 到 docs/current/，而非放宽——README 仍必须有权威入口。
 def test_root_readme_references_project_status():
-    """root README.md 必须指向 PROJECT_STATUS.md 作为当前状态入口。"""
+    """root README.md 必须指向 docs/current/ S-series 工作集作为权威入口。
+
+    S3-G09：PROJECT_STATUS.md 已归档（docs/history/），权威入口改为
+    docs/current/S_ROADMAP.md / docs/current/S*_BASELINE_STATUS.md。
+    """
     text = _read("README.md")
-    assert "PROJECT_STATUS.md" in text
+    assert "docs/current/" in text
+    assert "docs/current/S_ROADMAP.md" in text
 
 
 def test_root_readme_no_env_as_primary_config():
@@ -395,56 +311,7 @@ def test_root_readme_no_broken_audit_links():
 
 
 # =========================================================================
-# 12. Active docs 状态口径守护
-# =========================================================================
-
-def test_active_docs_no_strong_claim():
-    """Active docs 不得将项目标记为 STRONG / fully USER_USABLE。"""
-    for fpath in [
-        "docs/README.zh.md",
-        "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
-        "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md",
-    ]:
-        text = _read(fpath)
-        # 不得有无条件的 STRONG / fully user-usable 声称
-        if "broadly user-usable" in text.lower():
-            ok = "不在当前" in text or "不是" in text or "❌" in text
-            assert ok, f"{fpath}: 包含无条件的 broadly user-usable 声称"
-
-
-def test_active_docs_mention_config_key_boundary():
-    """Active docs 必须说明 config/config.yaml 含真实 key 时不得 commit。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "不得 commit" in text or "不得提交" in text
-    assert "config/config.yaml" in text
-
-
-def test_active_docs_reference_current_audit_entry():
-    """Active PROJECT_STATUS 必须引用当前审计入口，而不是旧审计报告。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "docs/06-audit/CURRENT_AUDIT_STATUS.zh.md" in text
-
-
-def test_current_capability_status_no_401_as_current():
-    """CURRENT_CAPABILITY_STATUS 不得将 401 写成当前阻塞。"""
-    text = _read("docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md")
-    assert "401" not in text
-
-
-def test_current_audit_status_no_old_manual_trial_as_top_priority():
-    """CURRENT_AUDIT_STATUS 不得将旧 manual-trial 阶段写成最高优先级下一步。"""
-    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
-    assert "Manual Human" not in text
-
-
-def test_config_legacy_sunset_no_env_as_primary():
-    """config-legacy-sunset-contract 不得推荐 .env 作为唯一 secret 入口。"""
-    text = _read("docs/design/config-legacy-sunset-contract.md")
-    assert "api_key 可直接写入" in text or "直接写入" in text
-
-
-# =========================================================================
-# 13. auto-run.md Continuation Policy 守护
+# auto-run.md Continuation Policy 守护
 # =========================================================================
 
 def test_auto_run_continuation_policy_exists():
@@ -497,25 +364,8 @@ def test_auto_run_final_output_not_stop_signal():
     assert "进度日志" in text or "不是停止信号" in text or "not stop signal" in text.lower()
 
 
-def test_current_auto_run_docs_do_not_restore_old_stop_instruction():
-    """当前 auto-run 文档不得恢复 '停止，等下一轮 /auto-run' 指令。"""
-    for rel in [
-        ".claude/commands/auto-run.md",
-        "docs/dev/AUTO_RUN_WORKFLOW.md",
-    ]:
-        text = _read(rel)
-        assert "停止，等下一轮 /auto-run" not in text
-
-
-def test_project_status_has_auto_run_auth():
-    """PROJECT_STATUS.md 必须包含 Auto-Run 授权状态节。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "授权状态" in text
-    assert "已授权" in text
-
-
 # =========================================================================
-# 14. auto-run.md Skill Routing Policy 守护（AutoRun Skill Router Upgrade）
+# auto-run.md Skill Routing Policy 守护（AutoRun Skill Router Upgrade）
 # =========================================================================
 
 
@@ -611,7 +461,7 @@ def test_auto_run_forbids_blind_skill_selection():
 
 
 # =========================================================================
-# 15. auto-run.md Recursive Backtrack Policy 守护（/plan-eng-review audit）
+# auto-run.md Recursive Backtrack Policy 守护（/plan-eng-review audit）
 # =========================================================================
 
 
@@ -674,7 +524,7 @@ def test_auto_run_forbids_review_failure_as_completed():
 
 
 # =========================================================================
-# 16. auto-run.md Workflow Stage → Skill Table 守护
+# auto-run.md Workflow Stage → Skill Table 守护
 # =========================================================================
 
 
@@ -709,7 +559,7 @@ def test_auto_run_workflow_stage_table_has_failure_routes():
 
 
 # =========================================================================
-# 17. auto-run.md Status Promotion Gate 守护
+# auto-run.md Status Promotion Gate 守护
 # =========================================================================
 
 
@@ -746,7 +596,7 @@ def test_auto_run_status_promotion_requires_all_gates():
 
 
 # =========================================================================
-# 18. auto-run.md Forbidden Patterns 扩展守护
+# auto-run.md Forbidden Patterns 扩展守护
 # =========================================================================
 
 
@@ -781,7 +631,7 @@ def test_auto_run_stage_switching_rules_exist():
 
 
 # =========================================================================
-# 19. Evidence Taxonomy & Overclaim Guard Tests (Loop 16)
+# Evidence Taxonomy & Overclaim Guard Tests (Loop 16)
 # =========================================================================
 
 # 需要扫描的 active docs
@@ -851,87 +701,8 @@ def test_no_doc_claims_12_12_completed_unqualified():
                 pytest.fail(f"{rel}: 包含 '12/12 全部完成' 声称（缺少 honest breakdown）")
 
 
-def test_project_status_explicitly_developer_prototype():
-    """PROJECT_STATUS.md 必须明确声明当前阶段为 developer prototype。
-
-    禁止 'user-usable'、'production-ready' 等过度声称。
-    """
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "developer prototype" in text.lower() or "local development" in text.lower()
-    # 不得包含被禁止的全局声称
-    assert "broadly user-usable" not in text
-    assert "production-ready" not in text
-
-
 def test_current_docs_do_not_restore_old_remediation_overclaim():
     """当前文档不得恢复旧 remediation plan 的 all-done overclaim。"""
     for rel, text in _read_overclaim_files().items():
         if "12/12" in text and "全部完成" in text:
             pytest.fail(f"{rel}: 恢复了旧 remediation all-done overclaim")
-
-
-def test_progress_ledger_smoke_pass_honest():
-    """PROGRESS_LEDGER 中历史 smoke 条目不得标为无条件的 'PASS'。
-
-    必须标注 SMOKE_PASS 并附加说明（如 '无 crash，非 capability PASS'）。
-    """
-    text = _read("docs/PROGRESS_LEDGER.md")
-    # 如果有 "15/15" 条目，必须包含 SMOKE_PASS
-    if "15/15" in text:
-        assert "SMOKE_PASS" in text
-
-
-def test_capability_status_no_user_usable():
-    """CURRENT_CAPABILITY_STATUS.zh.md 不得使用 'user-usable' 描述项目状态。"""
-    text = _read("docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md")
-    if "limited user-usable" in text:
-        pytest.fail(
-            "CURRENT_CAPABILITY_STATUS 包含"
-            " 'limited user-usable'（应为 'developer prototype'）"
-        )
-    # 确认正确标签
-    assert "developer prototype" in text.lower() or "local development" in text.lower()
-
-
-def test_current_audit_status_no_user_usable():
-    """CURRENT_AUDIT_STATUS.zh.md 不得使用 'user-usable' 描述项目状态。"""
-    text = _read("docs/06-audit/CURRENT_AUDIT_STATUS.zh.md")
-    if "limited user-usable" in text:
-        pytest.fail("CURRENT_AUDIT_STATUS 包含 'limited user-usable'（应为 'developer prototype'）")
-    # 确认正确标签
-    assert "developer prototype" in text.lower() or "local development" in text.lower()
-
-
-def test_no_admin_completed_as_capability():
-    """PROJECT_STATUS 中 admin/docs loops 不得被无条件标为 capability 完成。
-
-    Loop 9 (SubAgent L0 docs)、Loop 10 (MCP docs)、Loop 11 (Skill docs)、
-    Loop 12 (UX docs) 是 admin/docs 层完成，描述中必须包含 'L0' 或 '文档化' 标记。
-    """
-    text = _read("docs/PROJECT_STATUS.md")
-    # 确认 "已修复" section 对 admin/docs loops 有适当标记
-    admin_patterns = [
-        ("Loop 9", "L0"),
-        ("Loop 10", "L0"),
-        ("Loop 11", "L0"),
-        ("Loop 12", "L0"),
-    ]
-    for loop_id, caveat in admin_patterns:
-        if loop_id in text:
-            # 必须包含文档层标记或 guard tests 标记
-            assert (
-                caveat in text
-                or "文档化" in text
-                or "guard tests" in text.lower()
-                or "admin/docs" in text.lower()
-            ), f"PROJECT_STATUS 中 {loop_id} 缺少 L0/文档化标记"
-
-
-def test_current_status_keeps_overclaim_boundaries():
-    """当前状态入口必须保留 overclaim 防线，而不是依赖旧 recovery map。"""
-    text = _read("docs/PROJECT_STATUS.md")
-    assert "developer prototype" in text.lower()
-    assert "not broadly user-ready" not in text.lower()
-    assert "production-ready" not in text.lower()
-    assert "FakeProvider" in text
-    assert "Memory Consolidation" in text

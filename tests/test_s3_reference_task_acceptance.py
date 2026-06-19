@@ -161,7 +161,18 @@ def _record_subagent_second_opinion(state, *, delegation_id) -> None:
     assert projection["adjudication_action"] == "accept_result"
 
 
-def test_s3_reference_task_fake_e2e_extension_closed_loop(tmp_path):
+@pytest.fixture
+def clean_tool_registry():
+    """快照全局 TOOL_REGISTRY，测试后清掉本测试注册的 MCP 工具（避免污染其他测试）。"""
+    from agent.tool_registry import TOOL_REGISTRY
+
+    snapshot = set(TOOL_REGISTRY.keys())
+    yield
+    for added in set(TOOL_REGISTRY.keys()) - snapshot:
+        TOOL_REGISTRY.pop(added, None)
+
+
+def test_s3_reference_task_fake_e2e_extension_closed_loop(tmp_path, clean_tool_registry):
     """S3 reference task：组合 MCP+SubAgent 的 governed 闭环 + checkpoint/resume + done。"""
     from agent.checkpoint import (
         clear_checkpoint,
@@ -285,7 +296,7 @@ _REAL_READY, _REAL_SKIP_REASON = _s3_real_provider_env_ready()
 
 
 @pytest.mark.skipif(not _REAL_READY, reason=_REAL_SKIP_REASON)
-def test_s3_reference_task_real_provider_extension_key_path_smoke():
+def test_s3_reference_task_real_provider_extension_key_path_smoke(clean_tool_registry):
     """S3-G07 AC-6：real provider 进入 extension-assisted governed path 并看到 extension evidence。
 
     证明 real provider（非 fake）：

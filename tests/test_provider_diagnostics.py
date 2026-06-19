@@ -960,22 +960,38 @@ def test_main_provider_diagnostics_isolated_flag():
     import subprocess
     import tempfile
 
-    with tempfile.TemporaryDirectory(prefix="first_agent_pdi_") as tmp_home:
-        test_env = {**os.environ, "HOME": tmp_home}
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "main.py"),
-             "provider-diagnostics", "--isolated-dotenv"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            cwd=str(PROJECT_ROOT),
-            env=test_env,
-        )
-        output = result.stdout + result.stderr
-        assert "Isolated" in output or "isolated" in output.lower(), (
-            f"应提到 isolated:\n{output[:500]}"
-        )
-        assert result.returncode in {0, 1, 2}
+    # CLI 的 --isolated-dotenv 分支检查固定的 project_root/.env（仓库根，
+    # 非 $HOME，见 agent/cli/commands.py）。该 .env 在仓库中通常 gitignored
+    # 不存在，导致 CLI 在打印 'Isolated' banner 前提前 return 2。
+    # 这里在 PROJECT_ROOT/.env 放一个空占位符（仅注释行，无任何 secret），
+    # 让 isolated 分支跑到 banner 与诊断输出，保留对 'Isolated' 断言原样不放宽。
+    dotenv_path = PROJECT_ROOT / ".env"
+    _created_dotenv = False
+    if not dotenv_path.is_file():
+        dotenv_path.write_text("# test placeholder .env — no secrets\n", encoding="utf-8")
+        _created_dotenv = True
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="first_agent_pdi_") as tmp_home:
+            test_env = {**os.environ, "HOME": tmp_home}
+            result = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "main.py"),
+                 "provider-diagnostics", "--isolated-dotenv"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                cwd=str(PROJECT_ROOT),
+                env=test_env,
+            )
+            output = result.stdout + result.stderr
+            assert "Isolated" in output or "isolated" in output.lower(), (
+                f"应提到 isolated:\n{output[:500]}"
+            )
+            assert result.returncode in {0, 1, 2}
+    finally:
+        # 只清理本测试自己创建的占位符；若仓库原本就有 .env，绝不触碰。
+        if _created_dotenv and dotenv_path.is_file():
+            dotenv_path.unlink()
 
 
 def test_provider_diagnostics_no_secret_leakage():

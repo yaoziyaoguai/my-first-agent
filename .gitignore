@@ -36,3 +36,8 @@ config/config.local.yaml
 config/config.yaml
 config/.local.yaml
 config/.local_backup
+
+# 本地 coding-agent 工具配置（opencode/claude hooks、graphify 指令等）：
+# 属于个人工作区配置，不随 release 提交，避免污染 release 判断。
+.claude/
+CLAUDE.md

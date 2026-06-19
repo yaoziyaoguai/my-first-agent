@@ -125,3 +125,57 @@
 - **Next step:** user reviews `S3_GOAL.md`; on approval + freeze, generate
   `S3_GOAL_GAP.md`. No gap loop this run.
 - **Push:** none.
+
+## 2026-06-19 — Freeze S3 goal decisions
+
+- **Date/time:** 2026-06-19 22:56 CST
+- **Task:** Freeze `docs/current/S3_GOAL.md` — write the user-confirmed S3
+  decisions back into the goal, converting it from draft to confirmed/frozen.
+  **Not** S3 gap analysis, not a gap loop, not feature development.
+- **Skills/tools used:** superpowers decision-freeze checklist +
+  verification-before-completion; compound-engineering S3-vs-S2/S4/Sn boundary
+  reasoning + open-decision resolution + roadmap constraints. L5 boundary facts
+  reused from the prior graphify verification this session (no code changed
+  since, so re-running graphify would add no signal). Safety: no secret
+  read/print/copy/move; config/`.env` only described as boundaries.
+- **Decisions applied (now §8 Resolved decisions):**
+  1. Direction: S3 = Extensible Governed Agent Runtime (L5 Extension Boundary
+     Maturation, no S1/S2 spine overthrow).
+  2. Selected L5 scope: **MCP + SubAgent** must-deliver. MCP = controlled MCP
+     tool source only (no full MCP ecosystem). SubAgent = read-only / audit-first
+     / parent-mediated (must not bypass the main Agent for tool/provider/memory).
+     Skill = maintain S2 governed-active (contract reference). Scheduler = defer
+     to S4/Sn (boundary only).
+  3. TD policy: TD-006 enters S3 release gate (AC-9 — clear to no governance
+     guard failure in full pytest); TD-007/ruff not a release blocker; cleanup is
+     not the S3 product mainline.
+  4. Reference task: Extension-assisted repo governance task.
+  5. Real provider: covers the key S3 path smoke (key-safe opt-in).
+  6. Non-goals: no full AutoGPT autonomy, no full multi-agent ecosystem, no full
+     MCP ecosystem, no full L5 activation, no extension bypass of
+     policy/evidence/checkpoint/task-state, TD-007 not a blocker, no S4/Sn start.
+- **Acceptance criteria updated:** §6 now AC-1..AC-9 — AC-1 S2 no-regress,
+  AC-2 MCP governed tool source, AC-3 SubAgent read-only/audit-first
+  parent-mediated, AC-4 extension capability metadata/enable-disable/risk/
+  verification/evidence, AC-5 reference task uses MCP+SubAgent closed loop, AC-6
+  real provider key path, AC-7 acceptance gate classifies extension/runtime/known
+  debt/unknown, AC-8 stage governance no-regress, AC-9 TD-006 release hygiene.
+- **Files changed (edited):**
+  - `docs/current/S3_GOAL.md` (draft → CONFIRMED/FROZEN; §0/§4 decisions, §5 layer
+    goals name MCP+SubAgent scope, §6 AC-1..AC-9, §7 non-goals aligned, §8
+    Open → Resolved decisions + future-deferred S4/Sn only, §9 next step =
+    generate gap).
+  - `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `git status` (only the two scoped files), `git diff --check`
+  exit 0, `S3_GOAL.md` exists, `S3_GOAL_GAP.md` absent, status-word rg check
+  (draft/open-decisions only as resolved/historical), required-term rg check
+  (MCP/SubAgent/Scheduler/TD-006/TD-007/Extension-assisted repo governance task/
+  Resolved decisions all present). Details in the final report.
+- **`S3_GOAL_GAP.md`:** not created (by design — next task).
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/002/003/004/006/007 remain
+  open, unchanged; TD-006's S3 role is recorded in S3_GOAL §0/§7/AC-9, not by
+  editing TECH_DEBT this run).
+- **Commit:** `docs: freeze S3 goal decisions` (this run's commit; see `git log`).
+- **Next step:** generate `docs/current/S3_GOAL_GAP.md` from `S3_BASELINE_STATUS.md`
+  vs this frozen goal, then enter the gap loop.
+- **Push:** none.

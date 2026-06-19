@@ -609,3 +609,49 @@
   smoke, P1) — opt-in, key-safe; adds the real-provider smoke to the S3 reference task
   (default skip).
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G07 (real provider extension key-path smoke)
+
+- **Date/time:** 2026-06-20 02:10 CST
+- **Task:** Execute S3-G07 (P1, AC-6) — opt-in, key-safe real-provider smoke covering the
+  S3 reference task's extension key path (enter extension-assisted governed path, see
+  extension evidence, align with fake/local). Default skip.
+- **Skills/tools used:** superpowers verification-before-completion (honest evidence: the
+  smoke is structurally verified + default-skip, NOT actually run — no real key, key-safe);
+  compound-engineering key-safe boundary discipline. Safety: opt-in + fake-key detection;
+  no secret read/print/copy/move; no config change; no .env; MCP fake/fixture; SubAgent
+  local_fake.
+- **What was done (test-only; appended to the G06 test file, mirroring S2's fake+real
+  same-file pattern per S3_REFERENCE_TASK.md §1/§6):**
+  - Added `test_s3_reference_task_real_provider_extension_key_path_smoke` — opt-in via
+    `MY_FIRST_AGENT_RUN_S3_REAL_PROVIDER_SMOKE=1` (collection-time skip); resolves the real
+    provider via the production path `build_model_provider_from_env()` (reads gitignored
+    config/config.yaml); fake-key detection (fake/empty/placeholder → skip); enters the
+    extension-assisted governed path (MCP result + read-only SubAgent local_fake second
+    opinion in task state) and asserts the real provider returns the smoke reply AND the
+    evidence report shows `extensions.delegations:1` (extension evidence visible, aligned
+    with fake/local).
+- **Files changed (edited):**
+  - `tests/test_s3_reference_task_acceptance.py` (added real-provider smoke + opt-in helper;
+    import-sort fixed)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G07 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_reference_task_acceptance.py -q` →
+    **1 passed (fake E2E), 1 skipped (real smoke, opt-in not set)** — correct default
+    behavior.
+  - `.venv/bin/ruff check tests/test_s3_reference_task_acceptance.py` → exit 0.
+  - **Honest evidence note:** the real-provider smoke was NOT actually executed this run
+    (no real key available; key-safe boundary means do not touch/read secrets). It is
+    structurally verified (mirrors the S2 proven key-safe real-smoke pattern + adds
+    extension-evidence assertions) and default-skips. This matches the S2 real-smoke
+    verification standard (S2's real smoke also can't run without opt-in + key).
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G07 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `test(s3): real provider extension key-path smoke (S3-G07)` (this run; see
+  `git log`).
+- **Next step (authorized by current docs):** S3-G08 (acceptance gate extension-regression
+  classification, P2, AC-7) — add extension_regression classification to the acceptance
+  gate; runs alongside G06.
+- **Push:** none.

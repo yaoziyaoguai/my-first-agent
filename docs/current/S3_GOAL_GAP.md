@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 6 | S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 5 | S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 6 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05；S3-G06（E2E reference task） |
+| satisfied | 7 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05；S3-G06；S3-G07（real provider smoke） |
 
 ## 3. Recommended execution order
 
@@ -290,7 +290,17 @@
 - **Non-goal boundary**: 不要求 real 覆盖所有分支；不连真实 MCP endpoint（fake/fixture
   MCP source）；不泄露 secret。
 - **Suggested execution order**: P1-6。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `tests/test_s3_reference_task_acceptance.py::test_s3_reference_task_real_provider_extension_key_path_smoke`
+  —— opt-in（`MY_FIRST_AGENT_RUN_S3_REAL_PROVIDER_SMOKE=1`）/ 默认 skip；走生产路径
+  `build_model_provider_from_env()`（优先读 gitignored config/config.yaml）；fake-key 检测
+  （fake/empty/placeholder → skip）；real provider 进入 extension-assisted governed path
+  （MCP 结果 + read-only SubAgent second opinion 已进 task state）并看到 extension evidence
+  （`extensions.delegations:1`），与 fake/local 链路对齐。**key-safe**：opt-in + fake-key 检测；
+  不读取/打印/复制/移动/提交 secret；不改 config/config.yaml；不创建 .env；MCP 用 fake/fixture
+  source、SubAgent 用 local_fake（不连真实 endpoint）。**诚实记录**：本次未实际执行 real 调用
+  （无 real key，key-safe 不触），默认 skip + 结构性验证（镜像 S2 real smoke 验证标准）。Commit
+  见 WORK_LOG / `git log`（S3-G07）。
 - **Risk if ignored**: AC-6 无法达成；无法证明 real provider 能进入 extension 路径。
 
 ---
@@ -435,7 +445,7 @@
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | satisfied | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | satisfied | L2/L3 | AC-1/4 |
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | satisfied | L4 | AC-1/5 |
-| S3-G07 | Real provider S3 governed extension key-path smoke | P1 | open | L1 | AC-6 |
+| S3-G07 | Real provider S3 governed extension key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | open | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |
 | S3-G10 | docs/current+history governance for S3 | P2 | open | Cross | AC-8 |

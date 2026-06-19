@@ -19,6 +19,10 @@ endpoint；fake/fixture only（`AGENTS.md` 安全边界）。
 """
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from agent.acceptance_gate import AcceptanceCheckResult, build_s2_acceptance_report
 from agent.mcp import FakeMCPClient, MCPCallResult, register_mcp_tools
 from agent.mcp_models import MCPServerConfig, MCPToolDescriptor, mcp_registry_tool_name
@@ -29,6 +33,7 @@ from agent.subagent_system.descriptor import SubAgentDescriptor
 from agent.subagent_system.executor import execute_local
 from agent.subagent_system.request import SubAgentRequest
 from agent.subagent_system.result import SubAgentRun
+from agent.task_context import build_task_execution_context
 from agent.task_delegation_evidence import record_delegation_run
 from agent.task_evidence_report import build_task_evidence_report
 from agent.task_orchestration import (
@@ -242,3 +247,144 @@ def test_s3_reference_task_fake_e2e_extension_closed_loop(tmp_path):
     assert acceptance.release_blocked is False
     assert acceptance.runtime_regressions == ()
     clear_checkpoint(path=checkpoint_path)
+
+
+# ─── S3-G07: real provider extension key-path smoke（opt-in / key-safe）───
+
+_S3_REAL_PROVIDER_SMOKE_ENV = "MY_FIRST_AGENT_RUN_S3_REAL_PROVIDER_SMOKE"
+_FAKE_KEY_PATTERNS = (
+    "test-key",
+    "sk-test-",
+    "secret-token-must-not-leak",
+    "fake",
+    "dummy",
+    "placeholder",
+    "your-api-key",
+    "your-key",
+    "changeme",
+    "example.invalid",
+)
+
+
+def _s3_real_provider_env_ready() -> tuple[bool, str]:
+    """S3 real provider smoke opt-in gate（collection-time）。
+
+    只检查显式 opt-in 标志；provider 是否真实可用由生产路径 build_model_provider_from_env()
+    解析（优先读 gitignored config/config.yaml）。不要求把 secret 导出到 env var——key 留在
+    config 中，测试只透传 provider 对象，不读取/打印/复制/移动/提交 secret。
+    """
+    if os.environ.get(_S3_REAL_PROVIDER_SMOKE_ENV, "") != "1":
+        return False, (
+            "S3 real provider smoke requires explicit opt-in: "
+            f"{_S3_REAL_PROVIDER_SMOKE_ENV}=1"
+        )
+    return True, "opt-in"
+
+
+_REAL_READY, _REAL_SKIP_REASON = _s3_real_provider_env_ready()
+
+
+@pytest.mark.skipif(not _REAL_READY, reason=_REAL_SKIP_REASON)
+def test_s3_reference_task_real_provider_extension_key_path_smoke():
+    """S3-G07 AC-6：real provider 进入 extension-assisted governed path 并看到 extension evidence。
+
+    证明 real provider（非 fake）：
+    1. 进入 S3 reference task 的 extension-assisted governed path（receive/accept/context +
+       MCP 结果 + read-only SubAgent second opinion 记录），与 fake E2E 共享同一入口；
+    2. S3 task context 在 real provider 下 provider_callable（真实调用验证）；
+    3. extension evidence 可见（extensions.delegations），与 fake/local 关键事件链路对齐。
+
+    这不是旁路 bare provider.create()：provider 调用发生在 extension-assisted governed task
+    context 构建之后。key-safe：opt-in + fake-key 检测；不读取/打印/复制/移动/提交 secret；
+    不修改 config/config.yaml；不创建 .env。MCP 用 fake/fixture source（不连真实 endpoint），
+    SubAgent 用 local_fake（确定性 second opinion）。
+    """
+    # --- 1. 进入 extension-assisted governed path（与 fake E2E 同一入口）---
+    mcp_registry_name = _register_fixture_mcp_source()
+    state = create_agent_state(system_prompt="S3 real provider extension smoke")
+    state.memory.session_id = "s3-real-provider-extension-smoke-session"
+    assert receive_governed_task(
+        state,
+        user_goal="Extension-assisted audit of fixture repo governance gap",
+        plan_payload=_s3_reference_task_plan(),
+    ).allowed
+    assert accept_governed_plan(state).allowed
+
+    # MCP 结果 + read-only SubAgent second opinion（local_fake）→ extension evidence 进 task state
+    _record_tool_result(
+        state,
+        tool_use_id="tool-real-smoke-mcp",
+        tool_name=mcp_registry_name,
+        result="S3-G07 real smoke: MCP governed path evidence aligned with fake.",
+    )
+    _record_subagent_second_opinion(state, delegation_id="s3-real-smoke-d1")
+
+    # --- 2. 构建 governed task context（provider_callable 校验）---
+    context = build_task_execution_context(state)
+    assert context.provider_callable is True
+
+    # --- 3. real provider via 生产路径（与 runtime 同源：优先读 config/config.yaml）---
+    from agent.provider.factory import build_model_provider_from_env
+
+    provider = build_model_provider_from_env()
+    provider_type = getattr(provider, "provider_type", "unknown")
+    provider_api_key = getattr(getattr(provider, "config", None), "api_key", "") or ""
+    if provider_type == "fake" or not provider_api_key:
+        pytest.skip(
+            "opt-in set but provider resolved to fake/empty; "
+            "configure a non-fake provider in config/config.yaml"
+        )
+    for _pattern in _FAKE_KEY_PATTERNS:
+        if _pattern.lower() in provider_api_key.lower():
+            pytest.skip(
+                "provider api_key is a known fake placeholder; "
+                "real smoke needs a real key in config/config.yaml"
+            )
+
+    response = provider.create(
+        system=state.runtime.system_prompt,
+        messages=(
+            list(context.model_messages)
+            + [
+                {
+                    "role": "user",
+                    "content": (
+                        "This is an S3 extension-assisted governed reference-task "
+                        "real-provider smoke. Reply with exactly: "
+                        "s3-reference-task-provider-ok"
+                    ),
+                }
+            ]
+        ),
+        tools=[],
+    )
+    text = "\n".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text"
+    ).strip()
+    assert "s3-reference-task-provider-ok" in text, (
+        "real provider 未在 S3 extension-assisted governed task context 下返回预期 smoke 回复"
+    )
+
+    # --- 4. extension evidence 可见 + 与 fake/local 链路对齐 ---
+    report = build_task_evidence_report(state, context_package=context)
+    assert any(
+        "extensions.delegations:1" in e for e in report.evidence_events
+    ), "real provider path 应看到 extension delegation evidence（与 fake 对齐）"
+    assert report.provider_callable is True
+
+    acceptance = build_s2_acceptance_report(
+        (
+            AcceptanceCheckResult(
+                name="s3_reference_task_real_provider_extension_smoke",
+                command=(
+                    f"{_S3_REAL_PROVIDER_SMOKE_ENV}=1 "
+                    ".venv/bin/python -m pytest "
+                    "tests/test_s3_reference_task_acceptance.py"
+                ),
+                exit_code=0,
+            ),
+        )
+    )
+    assert acceptance.release_blocked is False

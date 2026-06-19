@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 7 | S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 6 | S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 5 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05（extension evidence/checkpoint） |
+| satisfied | 6 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05；S3-G06（E2E reference task） |
 
 ## 3. Recommended execution order
 
@@ -260,7 +260,15 @@
 - **Dependencies**: S3-G01、S3-G03、S3-G04、S3-G05。
 - **Non-goal boundary**: 不把 full pytest 全绿当 S3 产品目标（见 §10）；不连真实 endpoint。
 - **Suggested execution order**: P1-5（S3 验收锚点）。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `tests/test_s3_reference_task_acceptance.py::test_s3_reference_task_fake_e2e_extension_closed_loop`
+  1 passed —— Extension-assisted repo governance 闭环（fake/local）：受控 MCP tool source（G03，注册进
+  同一 TOOL_REGISTRY）读 fixture 证据 → tool_execution_log；read-only SubAgent second opinion（G04）
+  → record_delegation_run 写 delegation_log（G05 seam）；checkpoint→resume 后 extension 上下文
+  （tool_execution_log + delegation_log）双双保真；advance→DONE + progress 100%；evidence report
+  呈现 extensions.delegations:1；acceptance gate 不 release-block。**AC-1**：S3+S2 验收集
+  （S3 reference/MCP/SubAgent/extension/contract + S2 reference/skill/acceptance）合跑 **33 passed,
+  1 skipped**，证明 S2 governed task path 经 extension 组合后不回归。Commit 见 WORK_LOG / `git log`（S3-G06）。
 - **Risk if ignored**: AC-5 无验收命令；S3 无法判定「完成」。
 
 ### S3-G07 — Real provider S3 governed extension key-path smoke
@@ -426,7 +434,7 @@
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | satisfied | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | satisfied | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | satisfied | L2/L3 | AC-1/4 |
-| S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-1/5 |
+| S3-G06 | Extension-assisted repo governance E2E reference task | P1 | satisfied | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | open | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | open | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |

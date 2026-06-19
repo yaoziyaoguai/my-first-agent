@@ -567,3 +567,45 @@
   E2E reference task, P1) — the S3 acceptance anchor; depends on G01/G03/G04/G05 (all
   satisfied). Will call the G05 seam in a real plan→execute→checkpoint→resume→done loop.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G06 (E2E reference task — S3 acceptance anchor)
+
+- **Date/time:** 2026-06-20 01:50 CST
+- **Task:** Execute S3-G06 (P1, AC-5/AC-1) — the S3 acceptance anchor: a fake/local E2E
+  that composes MCP tool source + read-only SubAgent inside the S2 governed task path to
+  complete Extension-assisted repo governance: plan→execute→checkpoint→resume→done. Also
+  proves S2 governed task path does not regress (AC-1).
+- **Skills/tools used:** superpowers test-driven-development + verification-before-
+  completion; compound-engineering acceptance-anchor discipline (compose G03/G04/G05 seams
+  into ONE closed loop; S2 path must-not-regress is part of the S3 acceptance set). Safety:
+  fake/fixture only, no real endpoint, no secret/config touch.
+- **What was done (test-only; no new prod code — composes G03/G04/G05 seams):**
+  - Added `tests/test_s3_reference_task_acceptance.py::
+    test_s3_reference_task_fake_e2e_extension_closed_loop` — the S3 reference-task E2E:
+    register a fake/fixture MCP tool source (G03 → same TOOL_REGISTRY, capability=mcp_tool);
+    receive/accept via S2 governed task path; execute-1 records the MCP tool result in
+    `tool_execution_log`; execute-2 delegates a read-only SubAgent second opinion
+    (execute_local + adjudicate_result) and records it via `record_delegation_run` into
+    `delegation_log` (G05 seam); checkpoint→resume preserves BOTH extension stores;
+    execute-3 advances to DONE + 100%; `build_task_evidence_report` surfaces
+    `extensions.delegations:1`; `build_s2_acceptance_report` does not release-block.
+- **Files changed (created/edited):**
+  - `tests/test_s3_reference_task_acceptance.py` (created)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G06 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_reference_task_acceptance.py -q` → **1 passed**.
+  - S3 + S2 acceptance set (S3 reference/MCP/SubAgent/extension/contract + S2 reference/
+    skill/acceptance) run together → **33 passed, 1 skipped** → **AC-1 confirmed**: the S2
+    governed task path does not regress when composed with extensions.
+  - `.venv/bin/ruff check tests/test_s3_reference_task_acceptance.py` → exit 0.
+  - Test-only gap → no new module → boundary-guard set unchanged (TD-006 still = known set).
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G06 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `test(s3): extension-assisted repo governance E2E anchor (S3-G06)` (this run;
+  see `git log`).
+- **Next step (authorized by current docs):** S3-G07 (real provider S3 extension key-path
+  smoke, P1) — opt-in, key-safe; adds the real-provider smoke to the S3 reference task
+  (default skip).
+- **Push:** none.

@@ -655,3 +655,48 @@
   classification, P2, AC-7) — add extension_regression classification to the acceptance
   gate; runs alongside G06.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G08 (acceptance gate extension-regression classification)
+
+- **Date/time:** 2026-06-20 02:35 CST
+- **Task:** Execute S3-G08 (P2, AC-7) — let the acceptance gate distinguish **extension
+  regression** (MCP/SubAgent integration failures) from runtime regression / known debt
+  (TD-006/007) / unknown failure, so extension failures are not masked. Additive only.
+- **Skills/tools used:** superpowers test-driven-development (RED→GREEN) +
+  verification-before-completion; compound-engineering additive-classification discipline
+  (do NOT weaken the existing four classes).
+- **TDD evidence:**
+  - RED: 2 failed (`AcceptanceSignal.EXTENSION_REGRESSION` missing; `extension_regressions`
+    property missing); 1 passed (existing classifications intact — proves nothing weakened).
+  - GREEN: after the enum + classifier + property, **3 passed**.
+- **What was done:**
+  - `agent/acceptance_gate.py` — added `AcceptanceSignal.EXTENSION_REGRESSION` (purely
+    additive to the enum); added `_looks_like_s3_extension_check(name, command)` (criterion:
+    text contains "s3" AND an extension marker mcp/subagent/extension/reference_task);
+    inserted the extension classification between the doc-governance-debt and S2-runtime
+    branches (release_blocking=True — an extension regression is an S3 release blocker);
+    added `S2AcceptanceReport.extension_regressions` property.
+  - `tests/test_s3_acceptance_gate_extension_classification.py` — 3 tests: S3 extension
+    failures → EXTENSION_REGRESSION + release-blocking; distinct from TD-006/007 debt (not
+    masked); existing PASSED/QUALITY_DEBT/DOC_GOVERNANCE_DEBT/RUNTIME_REGRESSION/
+    UNKNOWN_FAILURE not weakened.
+- **Files changed (created/edited):**
+  - `agent/acceptance_gate.py` (additive EXTENSION_REGRESSION + classifier + property)
+  - `tests/test_s3_acceptance_gate_extension_classification.py` (created; E501 fixed)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G08 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_acceptance_gate_extension_classification.py
+    tests/test_s2_acceptance_gate.py -q` → **8 passed** (3 new + 5 S2 gate; no regression).
+  - `.venv/bin/ruff check` on both files → exit 0.
+  - boundary guards (evidence_taxonomy + capability_boundary + architecture) = **9 failed**
+    = known TD-006 set; the new enum value introduced **no new guard failure**.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G08 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `feat(s3): acceptance gate extension-regression class (S3-G08)` (this run;
+  see `git log`).
+- **Next step (authorized by current docs):** S3-G09 (TD-006 release-gate cleanup, P2,
+  AC-9) — the largest remaining gap; clean the 33 governance-guard failures so full pytest
+  is not polluted by TD-006.
+- **Push:** none.

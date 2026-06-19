@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 5 | S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 4 | S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 7 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05；S3-G06；S3-G07（real provider smoke） |
+| satisfied | 8 | G01-G07；S3-G08（acceptance gate extension-regression 分类） |
 
 ## 3. Recommended execution order
 
@@ -323,7 +323,14 @@
 - **Dependencies**: 与 S3-G06 并行（需要 extension 路径存在以测试分类）。
 - **Non-goal boundary**: 不重写 gate 既有四类；不把 TD-007 变 blocker。
 - **Suggested execution order**: P2-1。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `agent/acceptance_gate.py` 纯新增 `AcceptanceSignal.EXTENSION_REGRESSION`（不弱化
+  既有四类）+ `_looks_like_s3_extension_check`（判据：name/command 含 s3 + extension 标记
+  mcp/subagent/extension/reference_task）+ `S2AcceptanceReport.extension_regressions` 属性；
+  `tests/test_s3_acceptance_gate_extension_classification.py` 3 passed（S3 extension 失败 →
+  EXTENSION_REGRESSION + release-blocking；与 TD-006/007 debt 区分不掩盖；既有 PASSED/
+  QUALITY_DEBT/DOC_GOVERNANCE_DEBT/RUNTIME_REGRESSION/UNKNOWN_FAILURE 不弱化）。S2 gate 测试
+  5 passed（不回归）。Commit 见 WORK_LOG / `git log`（S3-G08）。
 - **Risk if ignored**: AC-7 无法达成；extension 回归被淹没在 debt 噪音里。
 
 ### S3-G09 — TD-006 release-gate cleanup
@@ -446,7 +453,7 @@
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | satisfied | L2/L3 | AC-1/4 |
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | satisfied | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | satisfied | L1 | AC-6 |
-| S3-G08 | Acceptance gate extension-regression classification | P2 | open | L1/Cross | AC-7 |
+| S3-G08 | Acceptance gate extension-regression classification | P2 | satisfied | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |
 | S3-G10 | docs/current+history governance for S3 | P2 | open | Cross | AC-8 |
 | S3-G11 | Skill contract remains governed-active & non-regressed | P2 | open | L5 | AC-1 |

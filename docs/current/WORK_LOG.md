@@ -744,3 +744,38 @@
   workflow running; apply aligned fixes or report classified-partial. Then S3-G11 (Skill
   non-regression guard).
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G11 (Skill non-regression guard)
+
+- **Date/time:** 2026-06-20 03:05 CST
+- **Task:** Execute S3-G11 (P2, AC-1) — confirm the G02 contract abstraction did NOT regress
+  Skill's governed-active default-off semantics + add a regression guard.
+- **Skills/tools used:** superpowers verification-before-completion; compound-engineering
+  non-regression discipline (Skill = contract reference, not an S3 activation target).
+- **What was done:**
+  - Verified `agent/skill_system/` was **untouched** this session (`git diff 08049e9..HEAD
+    -- agent/skill_system/` empty) → the G02 abstraction did not alter Skill's implementation.
+  - Skill regression suite (test_s2_skill_controlled_integration +
+    test_skill_allowed_tools_lifecycle + test_skill_checkpoint_resume_lifecycle):
+    **33 passed** (no regression).
+  - Added `tests/test_s3_skill_non_regression_guard.py` — 3 tests guarding: Skill gate
+    (`is_s2_skill_enabled` / `MY_FIRST_AGENT_S2_SKILL_ENABLE`) is the activation authority
+    and default-off; the G02 contract's skill-kind reference is declarative (same env, same
+    default-off semantics, does NOT replace/bypass Skill's own gate); default-off closed →
+    no activation (behavior same as S2).
+- **Files changed (created/edited):**
+  - `tests/test_s3_skill_non_regression_guard.py` (created; import consolidated)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G11 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_skill_non_regression_guard.py -q` → 3 passed.
+  - Skill regression suite → 33 passed.
+  - `.venv/bin/ruff check` → exit 0.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G11 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `test(s3): Skill non-regression guard (S3-G11)` (this run; see `git log`).
+- **Next step (authorized by current docs):** S3-G09 (TD-006 cleanup) — investigation
+  workflow complete (39 failures; retire_superseded=27 / update=7 / inventory=3 / xfail=2;
+  weakens_forbidden=[]; tractable); apply aligned fixes serially + verify full pytest.
+- **Push:** none.

@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 3 | S3-G09, S3-G11, S3-G12 |
+| open | 2 | S3-G09, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 9 | G01-G08；S3-G10（docs/current+history governance） |
+| satisfied | 10 | G01-G08；S3-G10；S3-G11（Skill non-regression guard） |
 
 ## 3. Recommended execution order
 
@@ -395,7 +395,14 @@
 - **Dependencies**: 与 S3-G02 协同。
 - **Non-goal boundary**: 不把 Skill 作为 S3 新增激活目标；不改 Skill default-off 语义。
 - **Suggested execution order**: P2-4（贯穿 regression guard）。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `agent/skill_system/` 本 session **未触**（`git diff 08049e9..HEAD -- agent/skill_system/`
+  空）—— Skill governed-active 实现未被 G02 抽象改动；Skill 回归套件（test_s2_skill_controlled_
+  integration / test_skill_allowed_tools_lifecycle / test_skill_checkpoint_resume_lifecycle）
+  **33 passed 未回归**；`tests/test_s3_skill_non_regression_guard.py` 3 passed —— 守护 Skill 自身
+  gate（`is_s2_skill_enabled` / `MY_FIRST_AGENT_S2_SKILL_ENABLE`）仍是激活权威、default-off 不变；
+  G02 契约对 Skill 是声明性参考（同 env、同 default-off 语义，不替代/旁路 Skill gate）；default-off
+  关闭时 Skill 不激活（行为同 S2，AC-1 不回归）。Commit 见 WORK_LOG / `git log`（S3-G11）。
 - **Risk if ignored**: 抽象契约时误伤 Skill，AC-1 回归。
 
 ---
@@ -464,7 +471,7 @@
 | S3-G08 | Acceptance gate extension-regression classification | P2 | satisfied | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |
 | S3-G10 | docs/current+history governance for S3 | P2 | satisfied | Cross | AC-8 |
-| S3-G11 | Skill contract remains governed-active & non-regressed | P2 | open | L5 | AC-1 |
+| S3-G11 | Skill contract remains governed-active & non-regressed | P2 | satisfied | L5 | AC-1 |
 | S3-G12 | Optional extension hardening | P3 | open | L5/L3 | AC-4 (enhance) |
 | S3-G13 | Deferred boundaries & TECH_DEBT triage (S4/Sn) | P4 | deferred | Cross/L5 | §7/§8 |
 

@@ -856,3 +856,43 @@
 - **Next step:** S3 P0/P1/P2 gap loop COMPLETE (G01-G11). G12 (P3) / G13 (P4) not authorized.
   Final report next.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G12 (optional extension hardening) — user-authorized
+
+- **Date/time:** 2026-06-20 04:10 CST
+- **Task:** Execute S3-G12 (P3, user-authorized) — optional extension observability hardening
+  built on G02/G03/G04; must not become must-deliver, must not slip into ecosystem-building,
+  must not regress P1/P2.
+- **Skills/tools used:** superpowers test-driven-development (RED→GREEN) +
+  verification-before-completion; compound-engineering scope discipline (observability tool,
+  not ecosystem; Skill stays S2 reference, not registered as S3 extension). Built on own
+  modules (no graphify needed — extension_capability/mcp_capability/subagent_capability are
+  this-session modules).
+- **TDD evidence:**
+  - RED: `ModuleNotFoundError: agent.extension_registry`.
+  - GREEN: **5 passed**.
+- **What was done:**
+  - Added `agent/extension_registry.py` — `EXTENSION_CAPABILITIES` (MCP + SubAgent
+    governed-active; Skill NOT registered — stays S2 reference); `build_extension_capability_report()`
+    (projects AC-4 metadata → auditable entries); `check_extension_capability_health()` (id
+    uniqueness + risk/verification/evidence present + default-off + opt-in/kill-switch).
+  - Added `tests/test_s3_extension_registry.py` — 5 tests covering registry coverage, report
+    metadata, health-pass, and detection of missing-governance / duplicate-id / unkillable-enabled.
+- **Files changed (created/edited):**
+  - `agent/extension_registry.py` (created)
+  - `tests/test_s3_extension_registry.py` (created)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G12 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_extension_registry.py -q` → 5 passed.
+  - S3+S2 acceptance + G12: **44 passed, 2 skipped** (no P1/P2 regression).
+  - boundary guards (architecture + capability_boundary): 44 passed (new additive leaf module
+    introduces no new guard failure).
+  - `.venv/bin/ruff check` both files → exit 0.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G12 → satisfied (open count 1→0).
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `feat(s3): extension capability registry/report/health (S3-G12)` (this run; see
+  `git log`).
+- **Next step (authorized):** S3-G13 (deferred-to-S4/Sn triage), then whole-stage S3 audit.
+- **Push:** none.

@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 1 | S3-G12 |
+| open | 0 | —（G01-G12 satisfied；G13 deferred） |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 11 | G01-G11（S3-G09 = TD-006 cleanup, full-suite 全绿） |
+| satisfied | 12 | G01-G12（G09=TD-006 cleanup full-suite 全绿；G12=extension 可观测性增强） |
 
 ## 3. Recommended execution order
 
@@ -433,7 +433,15 @@
 - **Dependencies**: S3-G02/G03/G04（在其之上增强）。
 - **Non-goal boundary**: 不把可选增强升级为 S3 必达；不滑向生态化。
 - **Suggested execution order**: P3-1（随时可做，不阻塞）。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `agent/extension_registry.py`（可选可观测性增强：`EXTENSION_CAPABILITIES` 聚合
+  MCP+SubAgent governed-active capabilities；`build_extension_capability_report()` 投影 AC-4
+  metadata 为可审计条目；`check_extension_capability_health()` 校验治理形状——id 唯一、risk/
+  verification/evidence 齐全、default-off + opt-in 通道、default-enabled 必须有 kill switch）；
+  `tests/test_s3_extension_registry.py` 5 passed（registry 覆盖 MCP+SubAgent、report 条目携带
+  五要素、health 通过、检测缺失治理/重复 id/无 kill switch）。Skill 不注册为 S3 extension（S2
+  governed-active，contract 参考，不模糊 S2/S3 边界）。非生态化、不改 spine、不接入 runtime 主链路。
+  不回归 P1/P2（S3+S2 验收集 44 passed）。Commit 见 WORK_LOG / `git log`（S3-G12）。
 - **Risk if ignored**: 无（可选）；不影响 S3 核心完成。
 
 ---
@@ -483,7 +491,7 @@
 | S3-G09 | TD-006 release-gate cleanup | P2 | satisfied | Cross/L1 | AC-9 |
 | S3-G10 | docs/current+history governance for S3 | P2 | satisfied | Cross | AC-8 |
 | S3-G11 | Skill contract remains governed-active & non-regressed | P2 | satisfied | L5 | AC-1 |
-| S3-G12 | Optional extension hardening | P3 | open | L5/L3 | AC-4 (enhance) |
+| S3-G12 | Optional extension hardening | P3 | satisfied | L5/L3 | AC-4 (enhance) |
 | S3-G13 | Deferred boundaries & TECH_DEBT triage (S4/Sn) | P4 | deferred | Cross/L5 | §7/§8 |
 
 ## 10. Non-goal guardrails

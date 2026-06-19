@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 12 | S3-G01, S3-G02, S3-G03, S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 11 | S3-G02, S3-G03, S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 0 | —（本任务只生成 gap，不执行） |
+| satisfied | 1 | S3-G01（reference task runbook 成文，见 `S3_REFERENCE_TASK.md`） |
 
 ## 3. Recommended execution order
 
@@ -96,7 +96,11 @@
 - **Dependencies**: 无（S3 起点）。
 - **Non-goal boundary**: 不在本 gap 实现 reference task，只定义；不扩成多任务套件。
 - **Suggested execution order**: P0-1（最先）。
-- **Status**: open。
+- **Status**: satisfied（2026-06-19）。
+- **Evidence**: `docs/current/S3_REFERENCE_TASK.md`（Extension-assisted repo governance
+  精确规格/runbook 成文：场景、inputs、MCP/SubAgent 角色、closed loop 映射 S2 skeleton、
+  fake 确定性判据 §5、real key-path §6、non-goals §7）；AC-5/AC-6 可据此写出具体验收命令
+  与断言（G06/G07 落地）。Commit 见 WORK_LOG / `git log`（S3-G01）。
 - **Risk if ignored**: P1 的 G06/G07 无法精确化；AC-5/AC-6 沦为口号。
 
 ---
@@ -378,7 +382,7 @@
 
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
-| S3-G01 | Define S3 reference task precisely | P0 | open | Cross (L4) | AC-5/6 setup |
+| S3-G01 | Define S3 reference task precisely | P0 | satisfied | Cross (L4) | AC-5/6 setup |
 | S3-G02 | Unified extension capability contract | P1 | open | L5/Cross | AC-4 |
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | open | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | open | L5/L3 | AC-3 |

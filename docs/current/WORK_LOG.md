@@ -271,3 +271,47 @@
   command provided to the user for confirmation before entering the S3 gap loop
   (P0→P1→P2, one focused mini-run per gap; P3/P4 only on explicit authorization).
 - **Push:** none.
+
+## 2026-06-19 — S3 gap loop: S3-G01 (define reference task precisely)
+
+- **Date/time:** 2026-06-19 23:40 CST
+- **Task:** Execute S3-G01 (P0, setup blocker) — turn the frozen goal's named
+  reference task (**Extension-assisted repo governance task**) into an executable
+  spec / runbook so AC-5/AC-6 can be written against it. **Define only** — no
+  reference-task implementation, no MCP/SubAgent code, no test changes.
+- **Skills/tools used:** superpowers verification-before-completion (define
+  success before claiming done); compound-engineering S3-vs-S2 scope boundary
+  (reference task must extend, not replace, the S2 governed-task closed loop);
+  graphify to orient on the governance spine (dispatcher/mediator/tool_gate/
+  evidence) + SubAgent parent-mediated surface + MCP plumbing before reading the
+  S2 template. Safety: no secret/config touch; docs-only.
+- **Files read:** `AGENTS.md`, `docs/current/{S_ROADMAP,S3_BASELINE_STATUS,
+  S3_GOAL,S3_GOAL_GAP,TECH_DEBT,WORK_LOG}.md`,
+  `docs/history/S2_GOVERNED_TASK_AGENT/S2_REFERENCE_TASK_ACCEPTANCE.md`,
+  `tests/test_s2_reference_task_acceptance.py` (S2 template — fake E2E closed
+  loop + key-safe real opt-in).
+- **What was done:** Authored `docs/current/S3_REFERENCE_TASK.md` — precise spec
+  of the S3 reference task (scenario = gap-evidence audit): inputs (fixture repo
+  governance subtask + fake/fixture MCP tool source + read-only SubAgent),
+  role contracts (MCP governed tool source / SubAgent read-only parent-mediated /
+  main-agent aggregation), closed loop mapped onto the S2 governed skeleton with
+  explicit MCP+SubAgent extension at the execute stage, fake deterministic
+  success criteria (§5, 6 points incl. S2 no-regress), real-provider key-path
+  smoke (§6, opt-in key-safe), and non-goals/boundaries.
+- **Files changed (created/edited):**
+  - `docs/current/S3_REFERENCE_TASK.md` (created)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G01 → satisfied + evidence; §2 status
+    distribution 12 open→11 open / 0 satisfied→1; §9 ID index row)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:** `git status` (only the three scoped files), `git diff --check`
+  exit 0. No code/tests changed this gap → no ruff/pytest run required for G01
+  (S2 must-not-regress floor is code-untouched). Runbook is precise enough that
+  AC-5/AC-6 acceptance commands/assertions can be derived (G06/G07).
+- **`S3_GOAL_GAP.md` items updated:** S3-G01 → satisfied (evidence: runbook path).
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/002/003/004/006/007 open,
+  unchanged).
+- **Commit:** `docs(s3): define reference task spec (S3-G01)` (this run; see
+  `git log`).
+- **Next step (authorized by current docs):** S3-G02 (unified extension capability
+  contract, P1) — unblocks G03/G04.
+- **Push:** none.

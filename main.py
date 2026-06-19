@@ -584,8 +584,13 @@ def _init_mcp_bridge_if_enabled(*, session_id: str = "") -> None:
     """
     import os
 
-    enabled = os.getenv("MY_FIRST_AGENT_MCP_ENABLE", "").strip().lower()
-    if enabled not in ("1", "true", "yes", "on"):
+    # default-off 经统一 extension capability 契约评估（S3-G03）。
+    # 与既有手写 opt-in 判定（1/true/yes/on）语义一致，行为保持；让 MCP 激活
+    # 决策流经与 Skill/SubAgent 同一的 evaluate_activation 评估器（same-spine 一致）。
+    from agent.extension_capability import evaluate_activation
+    from agent.mcp_capability import MCP_CAPABILITY
+
+    if not evaluate_activation(MCP_CAPABILITY).allowed:
         return
 
     mode = os.getenv("MY_FIRST_AGENT_MCP_MODE", "registration").strip().lower()

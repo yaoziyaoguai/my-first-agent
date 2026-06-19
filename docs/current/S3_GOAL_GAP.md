@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 10 | S3-G03, S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 9 | S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 2 | S3-G01（reference task runbook）；S3-G02（unified extension contract） |
+| satisfied | 3 | S3-G01（reference task runbook）；S3-G02（unified extension contract）；S3-G03（MCP governed tool source） |
 
 ## 3. Recommended execution order
 
@@ -158,7 +158,17 @@
   **不连接真实 MCP endpoint / 不做 server reachability check**（`AGENTS.md` 安全边界）；
   不让 MCP 绕过 policy/evidence。
 - **Suggested execution order**: P1-2。
-- **Status**: open。
+- **Status**: satisfied（2026-06-19）。
+- **Evidence**: `agent/mcp_capability.py`（MCP 经 G02 统一契约声明 `MCP_CAPABILITY`：
+  kind=mcp / default-off / enable_env=`MY_FIRST_AGENT_MCP_ENABLE` / risk=high + 缓解 /
+  verification / evidence subsystem=mcp）；`main.py:_init_mcp_bridge_if_enabled` 的
+  default-off gate 对齐到 `evaluate_activation(MCP_CAPABILITY)`（行为保持，opt-in 值一致）；
+  `tests/test_s3_mcp_governed_tool_source.py` 5 passed（capability 声明 + allowlisted fake
+  tool 经 governed policy 注册进同一 TOOL_REGISTRY 并产生 mcp evidence + default-off 不暴露
+  + allowlist 外被拒 + blocked evidence + dry_run 用 FakeMCPClient 无真实 endpoint）。代码事实
+  复核（graphify + Explore）：MCP 执行期已走统一 mediator 路径（非 harness-only、不绕过
+  dispatcher）；调用期 evidence 已由 `test_mcp_real_external_flight.py::TestMCPInvocationMainPath`
+  证明。Commit 见 WORK_LOG / `git log`（S3-G03）。
 - **Risk if ignored**: AC-2 无法达成；S3 缺少 extension tool source 维度。
 
 ### S3-G04 — SubAgent read-only / audit-first parent-mediated governed path
@@ -390,7 +400,7 @@
 |---|---|---|---|---|---|
 | S3-G01 | Define S3 reference task precisely | P0 | satisfied | Cross (L4) | AC-5/6 setup |
 | S3-G02 | Unified extension capability contract | P1 | satisfied | L5/Cross | AC-4 |
-| S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | open | L5/L3 | AC-2 |
+| S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | satisfied | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | open | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | open | L2/L3 | AC-1/4 |
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-1/5 |

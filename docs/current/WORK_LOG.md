@@ -368,3 +368,65 @@
 - **Next step (authorized by current docs):** S3-G03 (MCP governed tool source, P1)
   — now unblocked by the G02 contract.
 - **Push:** none.
+
+## 2026-06-19 — S3 gap loop: S3-G03 (MCP governed tool source)
+
+- **Date/time:** 2026-06-19 (cont.) CST
+- **Task:** Execute S3-G03 (P1) — wire MCP as a **controlled governed tool source**
+  via the G02 contract; default-off + allowlist + policy/evidence; fake-first
+  (no real endpoint). AC-2.
+- **Skills/tools used:** superpowers test-driven-development (RED→GREEN) +
+  verification-before-completion; compound-engineering scope-boundary check
+  (MCP = controlled tool source, NOT full MCP ecosystem); graphify + Explore
+  subagent to map the current MCP governed path before deciding scope. Safety:
+  no real endpoint, no secret/config touch.
+- **Code-fact finding (graphify + Explore, Read-only):** MCP is **already** on the
+  unified governed path — `register_mcp_tools` (agent/mcp.py:161) lands tools in
+  the same `TOOL_REGISTRY` and execution rides `ToolRuntimeMediator`/`tool_executor`
+  (NOT harness-only, does NOT bypass dispatcher/mediator). Two-layer policy gate
+  (evaluate_server_policy/evaluate_tool_policy) + registration-time evidence
+  (mcp_audit emit_mcp_* → record_evidence(subsystem="mcp")) + allowlist
+  deny-default (mcp_policy.py) + dry_run→FakeMCPClient (no real endpoint) all
+  exist. → **No architectural gap**; G03 = capability declaration + acceptance
+  consolidation.
+- **TDD evidence:**
+  - RED: 2 capability-import tests failed `ModuleNotFoundError:
+    agent.mcp_capability` (the other 3 — registration+evidence, allowlist reject,
+    no-real-endpoint — passed immediately, confirming the plumbing exists).
+  - GREEN: after `agent/mcp_capability.py`, **5 passed**.
+- **What was done:**
+  - Added `agent/mcp_capability.py` — `MCP_CAPABILITY` declared via the unified
+    contract (kind=mcp, default-off, enable_env=MY_FIRST_AGENT_MCP_ENABLE,
+    risk=high + mitigations, verification, evidence subsystem=mcp).
+  - Reconciled `main.py:_init_mcp_bridge_if_enabled` default-off gate to
+    `evaluate_activation(MCP_CAPABILITY).allowed` (behavior-preserving: same
+    opt-in values 1/true/yes/on; now flows through the same contract evaluator
+    as Skill/SubAgent — same-spine consistency).
+  - Added `tests/test_s3_mcp_governed_tool_source.py` — consolidated S3-G03
+    acceptance: (a) capability declaration; (b) allowlisted fake tool registered
+    through governed policy into TOOL_REGISTRY (capability=mcp_tool,
+    confirmation=always) + mcp evidence; (c) default-off not exposed; (d)
+    out-of-allowlist rejected + blocked evidence; (e) dry_run→FakeMCPClient.
+- **Files changed (created/edited):**
+  - `agent/mcp_capability.py` (created)
+  - `tests/test_s3_mcp_governed_tool_source.py` (created; E501 fixed)
+  - `main.py` (default-off gate → contract evaluator; behavior-preserving)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G03 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_mcp_governed_tool_source.py -q` →
+    **5 passed**.
+  - `.venv/bin/ruff check agent/mcp_capability.py
+    tests/test_s3_mcp_governed_tool_source.py` → exit 0; main.py edited lines
+    introduce no new ruff error (pre-existing TD-007 errors untouched).
+  - Existing MCP suite (policy_gate + registration_policy + runtime_integration):
+    **55 passed**.
+  - G02 contract + S2 targeted gate: **19 passed, 1 skipped** (no regress).
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G03 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none.
+- **Commit:** `feat(s3): MCP governed tool source via unified contract (S3-G03)`
+  (this run; see `git log`).
+- **Next step (authorized by current docs):** S3-G04 (SubAgent read-only /
+  audit-first / parent-mediated governed path, P1) — unblocked by G02 contract.
+- **Push:** none.

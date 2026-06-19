@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 4 | S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 3 | S3-G09, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 8 | G01-G07；S3-G08（acceptance gate extension-regression 分类） |
+| satisfied | 9 | G01-G08；S3-G10（docs/current+history governance） |
 
 ## 3. Recommended execution order
 
@@ -369,7 +369,15 @@
 - **Dependencies**: 无（贯穿）。
 - **Non-goal boundary**: 不重写 governance 模型；不动 S1/S2 history。
 - **Suggested execution order**: P2-3（贯穿，close-out 前必查）。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: 治理不变量验证（`git diff 08049e9..HEAD`，08049e9 = S3 gap loop 起点）：
+  (1) `docs/history/`（S1/S2 归档）本 session **未触**；(2) 冻结/安全文件
+  `S3_GOAL.md` / `S3_BASELINE_STATUS.md` / `TECH_DEBT.md` / `config/config.yaml` / `.env`
+  本 session **未触**；(3) S3 stage docs 全在 `docs/current/`（S3_BASELINE_STATUS/S3_GOAL/
+  S3_GOAL_GAP/S3_REFERENCE_TASK/WORK_LOG）；(4) S1/S2 归档 + S2_RELEASE_SUMMARY 在位；
+  (5) carry-forward 债（TD-001..007）未被静默关闭（TECH_DEBT 未改）。S3 close-out checklist
+  已提供（见 WORK_LOG G10 条目；close-out 本身待 S3 全部 gap 完成后按 AGENTS.md Stage Closing
+  Review 执行，非本 gap 执行）。Commit 见 WORK_LOG / `git log`（S3-G10）。
 - **Risk if ignored**: AC-8 回退；阶段边界混乱误导后续 agent。
 
 ### S3-G11 — Skill contract remains S2 governed-active & non-regressed
@@ -455,7 +463,7 @@
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | satisfied | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |
-| S3-G10 | docs/current+history governance for S3 | P2 | open | Cross | AC-8 |
+| S3-G10 | docs/current+history governance for S3 | P2 | satisfied | Cross | AC-8 |
 | S3-G11 | Skill contract remains governed-active & non-regressed | P2 | open | L5 | AC-1 |
 | S3-G12 | Optional extension hardening | P3 | open | L5/L3 | AC-4 (enhance) |
 | S3-G13 | Deferred boundaries & TECH_DEBT triage (S4/Sn) | P4 | deferred | Cross/L5 | §7/§8 |

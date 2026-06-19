@@ -700,3 +700,47 @@
   AC-9) — the largest remaining gap; clean the 33 governance-guard failures so full pytest
   is not polluted by TD-006.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G10 (docs/current + history governance for S3)
+
+- **Date/time:** 2026-06-20 02:50 CST
+- **Task:** Execute S3-G10 (P2, AC-8) — maintain stage governance non-regression throughout
+  S3: S3 stage docs in current, S2/S1 archives untouched, carry-forward debt not silently
+  closed, WORK_LOG appended, close-out checklist provided (close-out itself not executed).
+- **Skills/tools used:** compound-engineering stage-governance boundary discipline;
+  verification-before-completion (git invariant checks).
+- **Governance invariant verification** (`git diff 080499e9..HEAD` — 08049e9 = S3 gap-loop
+  starting commit; my session = G01–G08 + this G10):
+  1. `docs/history/` (S1/S2 archives) **untouched** this session.
+  2. Frozen/safety files **untouched**: `S3_GOAL.md`, `S3_BASELINE_STATUS.md`,
+     `TECH_DEBT.md`, `config/config.yaml`, `.env` (honors goal's "do not modify
+     S3_GOAL/S3_BASELINE_STATUS" + AGENTS.md safety boundaries).
+  3. S3 stage docs all in `docs/current/` (S3_BASELINE_STATUS / S3_GOAL / S3_GOAL_GAP /
+     S3_REFERENCE_TASK / WORK_LOG).
+  4. S1/S2 archives + `S2_RELEASE_SUMMARY.md` in place.
+  5. Carry-forward debt (TD-001..007) NOT silently closed (TECH_DEBT.md unchanged).
+- **S3 close-out checklist** (provided; NOT executed this task — close-out runs when S3 is
+  fully complete, per AGENTS.md "Stage Closing Review"):
+  1. All S3 P0/P1/P2 gaps satisfied (G01–G11; G12/G13 only on explicit user authorization).
+  2. S2 targeted gate still green (AC-1): `test_s2_reference_task_acceptance` +
+     `test_s2_skill_controlled_integration` + `test_s2_acceptance_gate`.
+  3. TD-006 cleared per AC-9: full pytest has no governance-guard failure (S3-G09).
+  4. S3 acceptance set green: S3 reference/MCP/SubAgent/extension/contract/gate + S2 gate.
+  5. Real-provider extension smoke (S3-G07): opt-in run verified, or documented default-skip.
+  6. Skill non-regressed (S3-G11): skill default-off + discovery/activation/execution intact.
+  7. Archive S3 stage docs under `docs/history/S3_*/`; reset `docs/current/` to
+     `S_ROADMAP.md` + `TECH_DEBT.md`; append a stage-closing WORK_LOG entry; do NOT silently
+     delete unfinished gaps (route to TECH_DEBT if any remain).
+- **Files changed (edited):**
+  - `docs/current/S3_GOAL_GAP.md` (S3-G10 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry + close-out checklist)
+- **Verification:** `git diff --stat 08049e9..HEAD -- docs/history/ <forbidden files>` →
+  empty (invariants hold). `git diff --check` exit 0. No code/test changes (governance gap).
+- **`S3_GOAL_GAP.md` items updated:** S3-G10 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none (unchanged — carry-forward debt honored).
+- **Commit:** `docs(s3): verify docs governance + close-out checklist (S3-G10)` (this run;
+  see `git log`).
+- **Next step (authorized by current docs):** resume S3-G09 (TD-006 cleanup) — investigation
+  workflow running; apply aligned fixes or report classified-partial. Then S3-G11 (Skill
+  non-regression guard).
+- **Push:** none.

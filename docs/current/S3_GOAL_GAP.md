@@ -202,16 +202,18 @@
 ### S3-G06 — Extension-assisted repo governance E2E reference task (fake/local)
 - **Priority**: P1（must_fix_for_s3）
 - **Layer**: L4
-- **Related S3 Goal**: §0 reference task; §6 AC-5
+- **Related S3 Goal**: §0 reference task; §6 AC-5 (+ AC-1 S2 must-not-regress)
 - **Baseline evidence**: S2 `tests/test_s2_reference_task_acceptance.py` 提供 governed
   task E2E 模板（fake 确定性 + real opt-in skip），但**不使用 extension**。
 - **Gap**: 建立 S3 reference task 的 E2E：在 governed task path 内**组合 MCP tool source
   + read-only SubAgent** 完成 Extension-assisted repo governance task 的
   plan→execute→checkpoint→resume→done 闭环（fake 确定性）。
 - **Needed action**: 按 S3-G01 规格实现 fake/local E2E acceptance；组合 G03/G04/G05；
-  作为 S3 targeted gate 的核心锚点。
+  作为 S3 targeted gate 的核心锚点；并把 S2 targeted gate 纳入 S3 acceptance set，作为
+  **S2 governed task path must-not-regress** 检查（AC-1）。
 - **Verification**: fake reference-task E2E 确定性通过，且确实经 MCP+SubAgent governed
-  path；checkpoint/resume 不丢 extension 上下文。
+  path；checkpoint/resume 不丢 extension 上下文；S2 targeted gate（reference / skill /
+  acceptance）仍通过，证明 S2 governed task path 不回归（AC-1）。
 - **Dependencies**: S3-G01、S3-G03、S3-G04、S3-G05。
 - **Non-goal boundary**: 不把 full pytest 全绿当 S3 产品目标（见 §10）；不连真实 endpoint。
 - **Suggested execution order**: P1-5（S3 验收锚点）。
@@ -381,7 +383,7 @@
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | open | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | open | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | open | L2/L3 | AC-1/4 |
-| S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-5 |
+| S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | open | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | open | L1/Cross | AC-7 |
 | S3-G09 | TD-006 release-gate cleanup | P2 | open | Cross/L1 | AC-9 |

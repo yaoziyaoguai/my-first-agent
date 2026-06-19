@@ -227,3 +227,47 @@
 - **Next step:** user reviews `S3_GOAL_GAP.md`; on approval, enter the S3 gap loop
   per §3 recommended order (one focused mini-run per gap). No gap executed this run.
 - **Push:** none.
+
+## 2026-06-19 — Calibrate S3 goal gap backlog (review)
+
+- **Date/time:** 2026-06-19 23:18 CST
+- **Task:** Review `docs/current/S3_GOAL_GAP.md` for strict alignment with the
+  frozen `S3_GOAL.md` and `S3_BASELINE_STATUS.md`; apply minimal corrections if
+  needed; recommend a `/goal` command. **Not** a gap loop, not feature
+  development, not S3-G01 execution.
+- **Files read:** `AGENTS.md`, `docs/current/{S_ROADMAP,S3_BASELINE_STATUS,S3_GOAL,S3_GOAL_GAP,TECH_DEBT,WORK_LOG}.md`,
+  `docs/history/S2_GOVERNED_TASK_AGENT/{S2_RELEASE_SUMMARY,S2_ACCEPTANCE_GATE}.md`
+  (all in session context; re-read S3-G06 + ID index for exact edit anchors).
+- **Skills/tools used:** superpowers gap-review checklist + verification-before-
+  completion; compound-engineering frozen-goal alignment + P0–P4 sanity + S3-vs-
+  S4/Sn boundary + TECH_DEBT classification. L5 boundary facts reused from this
+  session's prior graphify verification (no code changed since). Safety: real
+  provider/config only as boundaries — no secret read/print/copy/move.
+- **Review verdict:** **ACCEPT WITH ONE MINOR CORRECTION.** 10-point checklist:
+  based on frozen goal ✓; AC-2..AC-9 each owned ✓; no full-MCP/multi-agent/
+  Scheduler-productionization/TD-007-full-ruff as must-deliver ✓; P0 minimal
+  (G01 only, matches the "reference task not pinned" P0 criterion) ✓; P1 covers
+  MCP/SubAgent/contract/reference-task/real-provider ✓; P2 covers acceptance-gate/
+  TD-006/docs-governance ✓; P3/P4 reasonable ✓; S3-G01 first ✓; TECH_DEBT routed
+  correctly (TD-006→P2 release gate, TD-007→P4 non-blocker, rest deferred) ✓;
+  recommended order matches the intended sequence ✓.
+- **Issue found & fixed:** AC-1 (S2 governed task path no-regress + targeted S2
+  gate still passes) had no gap that explicitly owned its verification (only
+  S3-G05 and S3-G11/Skill referenced AC-1). Minimal correction: S3-G06 (the E2E
+  acceptance anchor) now explicitly includes "S2 targeted gate stays green / S2
+  path must-not-regress" in its Needed action + Verification, and the ID-index AC
+  mapping for S3-G06 is now `AC-1/5`. Mirrors how S2-G07 owned "S1 must-not-
+  regress". No other changes.
+- **Files changed (edited):**
+  - `docs/current/S3_GOAL_GAP.md` (S3-G06 Related/Needed action/Verification +
+    ID-index row; AC-1 explicit ownership).
+  - `docs/current/WORK_LOG.md` (this entry).
+- **Not changed:** `S3_GOAL.md`, `S3_BASELINE_STATUS.md`, code/tests/config.
+- **Verification:** `git status` (only the two scoped files), `git diff --check`
+  exit 0, `S3_GOAL.md` + `S3_BASELINE_STATUS.md` unchanged, `rg "S3-G[0-9]+"`
+  still 13 IDs, banned-phrase rg only in non-goal/deferred/priority-model.
+- **Commit:** `docs: calibrate S3 goal gap backlog` (this run's commit; see `git log`).
+- **Next step:** S3_GOAL_GAP is review-clean and ready. Recommended `/goal`
+  command provided to the user for confirmation before entering the S3 gap loop
+  (P0→P1→P2, one focused mini-run per gap; P3/P4 only on explicit authorization).
+- **Push:** none.

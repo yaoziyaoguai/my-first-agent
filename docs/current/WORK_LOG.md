@@ -179,3 +179,51 @@
 - **Next step:** generate `docs/current/S3_GOAL_GAP.md` from `S3_BASELINE_STATUS.md`
   vs this frozen goal, then enter the gap loop.
 - **Push:** none.
+
+## 2026-06-19 — Generate S3 goal gap backlog
+
+- **Date/time:** 2026-06-19 23:10 CST
+- **Task:** Generate `docs/current/S3_GOAL_GAP.md` from `S3_BASELINE_STATUS.md`
+  (current) vs the frozen `S3_GOAL.md` (goal). **Generate gap only** — not a gap
+  loop, not feature development, not test-governance execution.
+- **Files read:** `AGENTS.md`, `docs/current/{S_ROADMAP,S3_BASELINE_STATUS,S3_GOAL,TECH_DEBT,WORK_LOG}.md`,
+  `docs/history/S2_GOVERNED_TASK_AGENT/{S2_RELEASE_SUMMARY,S2_GOAL,S2_GOAL_GAP,S2_ACCEPTANCE_GATE,S2_TECH_DEBT_TRIAGE}.md`
+  (all already in session context).
+- **Skills/tools used:** superpowers gap-completeness + priority-sanity +
+  verification-before-completion; compound-engineering baseline/goal/gap diff,
+  P0–P4 grading, S3-vs-S4/Sn boundary, TECH_DEBT-into-S3 judgment; graphify to
+  anchor the MCP / SubAgent / Skill / Scheduler current boundaries (no large
+  source reads). Safety: real provider / config only described as boundaries —
+  no secret read/print/copy/move.
+- **Gap generation method:** (1) extracted AC-1..AC-9 + selected scope from frozen
+  goal; (2) extracted baseline + L5 maturity from `S3_BASELINE_STATUS.md` + a
+  focused graphify pass (MCP plumbing rich but `mcp_tool_orchestrator.py`
+  HARNESS-ONLY / default-off; SubAgent `delegate_l1`/`execute_l1`/
+  `SubAgentAuditRecord`/`adjudicate_result`/`SubAgentPolicyError`, side-effect-free,
+  not activated; Scheduler implemented but not in default loop); (3) extracted
+  carry-forward debt; (4) built an AC→gap matrix
+  (`_tmp_s3_goal_gap/gap_matrix.md`); (5) emitted S3-G01..S3-G13 with the 13
+  required fields each; (6) routed only TD-006 (AC-9/release gate) into S3 (P2),
+  deferred TD-007/001/002/003/004 to S3-G13; (7) kept Scheduler and full
+  ecosystems strictly P4/non-goal.
+- **Outcome:** P0=1 (reference task spec), P1=6 (extension contract + MCP source +
+  SubAgent path + evidence/checkpoint/task-state + E2E + real smoke), P2=4
+  (acceptance-gate extension class + TD-006 cleanup + docs governance + Skill
+  non-regress), P3=1 (optional extension hardening), P4=1 (deferred + TD triage).
+  Status: 12 open, 1 deferred, 0 blocked, 0 satisfied.
+- **Files changed (created/edited):**
+  - `docs/current/S3_GOAL_GAP.md` (created)
+  - `docs/current/_tmp_s3_goal_gap/gap_matrix.md` (created)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:** `git status` (only the scoped files), `git diff --check`
+  exit 0, `S3_GOAL_GAP.md` exists, `S3_GOAL.md` + `S3_BASELINE_STATUS.md`
+  unchanged (not in diff), `rg "S3-G[0-9]+"` hits 13 IDs, banned-phrase rg
+  (full MCP ecosystem / full multi-agent / Scheduler productionization / TD-007
+  release blocker) appears only as non-goal/deferred. Details in final report.
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/002/003/004/006/007 remain
+  open, unchanged; their S3 routing is recorded in S3_GOAL_GAP, not by editing
+  TECH_DEBT this run).
+- **Commit:** `docs: generate S3 goal gap backlog` (this run's commit; see `git log`).
+- **Next step:** user reviews `S3_GOAL_GAP.md`; on approval, enter the S3 gap loop
+  per §3 recommended order (one focused mini-run per gap). No gap executed this run.
+- **Push:** none.

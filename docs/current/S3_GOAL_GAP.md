@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 8 | S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 7 | S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 4 | S3-G01；S3-G02；S3-G03；S3-G04（SubAgent read-only parent-mediated） |
+| satisfied | 5 | S3-G01；S3-G02；S3-G03；S3-G04；S3-G05（extension evidence/checkpoint） |
 
 ## 3. Recommended execution order
 
@@ -227,7 +227,19 @@
 - **Non-goal boundary**: 不要求逐字保真（TD-001）/ pending-tool 全量预览（TD-004）——
   超出 S3 evidence 深度的部分仍 deferred（见 S3-G13）；不重写 checkpoint 主路径。
 - **Suggested execution order**: P1-4。
-- **Status**: open。
+- **Status**: satisfied（2026-06-20）。
+- **Evidence**: `agent/state.py:TaskState.delegation_log`（新字段，存 SubAgent 委派安全投影；
+  经 checkpoint `_copy_state_dict`/`_filter_to_declared_fields` 自动持久化/恢复，**未重写
+  checkpoint 主路径**）；`agent/task_delegation_evidence.py:record_delegation_run`（把
+  SubAgentRun 的 audit/adjudication 安全投影写入 delegation_log，JSON-safe、非逐字=TD-001
+  deferred）；`agent/task_evidence_report.py:_evidence_events` 呈现 `extensions.delegations:N`
+  （可复盘 extension 决策）；`tests/test_s3_extension_evidence_checkpoint.py` 2 passed（MCP 结果
+  经共享 tool 路径进 tool_execution_log + SubAgent 委派进 delegation_log，checkpoint→resume
+  双双保真 + evidence report 呈现 extension 计数 + 默认空向后兼容）。代码事实复核（graphify +
+  Explore）：MCP 结果已通过共享 execute_single_tool 路径进 tool_execution_log 并跨 resume 保真
+  （零改动）；SubAgent audit 原为瞬态，本 gap 补 task-state seam。runtime 消费点
+  （execute_subagent_delegation 不接收 state）的 state 穿透由 G06 E2E 在真实循环调用本 seam
+  完成（不在本 gap 改 core.py）。Commit 见 WORK_LOG / `git log`（S3-G05）。
 - **Risk if ignored**: AC-1/AC-4 无法达成；extension 任务不可恢复/不可审计。
 
 ### S3-G06 — Extension-assisted repo governance E2E reference task (fake/local)
@@ -413,7 +425,7 @@
 | S3-G02 | Unified extension capability contract | P1 | satisfied | L5/Cross | AC-4 |
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | satisfied | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | satisfied | L5/L3 | AC-3 |
-| S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | open | L2/L3 | AC-1/4 |
+| S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | satisfied | L2/L3 | AC-1/4 |
 | S3-G06 | Extension-assisted repo governance E2E reference task | P1 | open | L4 | AC-1/5 |
 | S3-G07 | Real provider S3 governed extension key-path smoke | P1 | open | L1 | AC-6 |
 | S3-G08 | Acceptance gate extension-regression classification | P2 | open | L1/Cross | AC-7 |

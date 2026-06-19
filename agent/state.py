@@ -264,6 +264,14 @@ class TaskState:
     # confirmation_result, queued_at}
     pending_retain_proposals: list[dict[str, Any]] = field(default_factory=list)
 
+    # S3-G05: extension（SubAgent 委派）产生的安全投影，纳入 task-state 边界，使
+    # checkpoint→resume 不丢、evidence 可复盘。MCP tool 结果走共享 tool 路径落入
+    # tool_execution_log（已是 TaskState 字段），SubAgent 委派经
+    # agent.task_delegation_evidence.record_delegation_run 写入此处。
+    # 每个 entry: {delegation_id, subagent_name, status, stop_reason, execution_mode,
+    # adjudication_action, confidence, tools_executed, tools_denied}（JSON-safe 安全投影）。
+    delegation_log: list[dict[str, Any]] = field(default_factory=list)
+
 
 @dataclass
 class AgentState:

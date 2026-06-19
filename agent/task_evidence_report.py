@@ -58,7 +58,12 @@ def build_task_evidence_report(
         context_package=package,
         tool_report=tools,
     )
-    events = _evidence_events(package, tools, review)
+    events = _evidence_events(
+        package,
+        tools,
+        review,
+        delegation_count=len(getattr(state.task, "delegation_log", ()) or ()),
+    )
     debt_refs = _known_debt_refs(tools)
     replay_ready = (
         package.provider_callable
@@ -122,6 +127,8 @@ def _evidence_events(
     package: TaskContextPackage,
     tools: GovernedToolContractReport,
     review: TaskProgressReview,
+    *,
+    delegation_count: int = 0,
 ) -> tuple[str, ...]:
     events = [
         f"task.lifecycle:{package.task.lifecycle.value}",
@@ -135,6 +142,9 @@ def _evidence_events(
         events.append("task.blocking_reason:present")
     if review.failure_reason:
         events.append("task.failure_reason:present")
+    # S3-G05: 呈现 extension（SubAgent 委派）证据计数，使 evidence report 可复盘 extension 决策。
+    if delegation_count > 0:
+        events.append(f"extensions.delegations:{delegation_count}")
     return tuple(events)
 
 

@@ -503,3 +503,67 @@
 - **Next step (authorized by current docs):** S3-G05 (extension evidence /
   checkpoint / task-state integration, P1) — depends on G03+G04 (now both satisfied).
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G05 (extension evidence / checkpoint / task-state)
+
+- **Date/time:** 2026-06-20 01:15 CST
+- **Task:** Execute S3-G05 (P1) — wire MCP/SubAgent extension results into the existing
+  task evidence / checkpoint / task-state boundary: recordable, survives checkpoint→resume,
+  replayable. AC-1/AC-4.
+- **Skills/tools used:** superpowers test-driven-development (RED→GREEN) +
+  verification-before-completion; compound-engineering scope boundary (do NOT rewrite
+  checkpoint main path; TD-001 byte-fidelity + TD-004 pending-tool preview stay deferred);
+  graphify + Explore subagent to map the evidence/checkpoint flow. Safety: no
+  secret/config touch.
+- **Code-fact finding (graphify + Explore):** (i) MCP tool results already land in
+  `state.task.tool_execution_log` via the shared `execute_single_tool` path and survive
+  checkpoint/resume (zero change). (ii) SubAgent `SubAgentAuditRecord`/`ParentAdjudicationResult`
+  are **transient** — they die with the `SubAgentRun` return; `TaskState` had no field for
+  them. (iii) Checkpoint persistence is field-driven (`_copy_state_dict` serializes any
+  declared `TaskState` field; `_filter_to_declared_fields` restores it) → adding one field
+  needs NO checkpoint main-path rewrite.
+- **Scope decision:** `execute_subagent_delegation(name, task, *, ...)` does NOT receive
+  `state`; threading state into it would touch core.py delegation dispatch + change the
+  signature (invasive, regression risk). → G05 delivers the **integration seam**
+  (`TaskState.delegation_log` + `record_delegation_run` helper + evidence-report surfacing)
+  and proves checkpoint/resume; G06 E2E calls the seam in the real loop. core.py untouched.
+- **TDD evidence:**
+  - RED: collection → `ModuleNotFoundError: agent.task_delegation_evidence`.
+  - GREEN: after the field + helper + report edit, **2 passed**.
+- **What was done:**
+  - `agent/state.py:TaskState` — added `delegation_log: list[dict[str, Any]]` (default
+    empty; backward-compatible; auto-persists/restores via existing checkpoint machinery).
+  - `agent/task_delegation_evidence.py` — `record_delegation_run(state, run)` projects
+    `run.result.audit` + `run.adjudication` into a JSON-safe dict appended to
+    `state.task.delegation_log` (defensive getattr; safe-summary discipline, not
+    byte-fidelity).
+  - `agent/task_evidence_report.py` — `_evidence_events` now surfaces
+    `extensions.delegations:N` when N>0 (replayable extension decision count).
+  - `tests/test_s3_extension_evidence_checkpoint.py` — MCP result in tool_execution_log +
+    SubAgent delegation in delegation_log → checkpoint → resume → both preserved; evidence
+    report surfaces extension count; default-empty backward-compat.
+- **Files changed (created/edited):**
+  - `agent/state.py` (TaskState.delegation_log field)
+  - `agent/task_delegation_evidence.py` (created)
+  - `agent/task_evidence_report.py` (_evidence_events extension surfacing)
+  - `tests/test_s3_extension_evidence_checkpoint.py` (created; ruff-clean after fixes)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G05 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_s3_extension_evidence_checkpoint.py` → 2 passed.
+  - S2 reference task + skill + acceptance gate: **14 passed, 1 skipped** (the S2 reference
+    task uses checkpoint/resume + task evidence → confirms the TaskState field +
+    `_evidence_events` change did not regress S2).
+  - `.venv/bin/ruff check` on all 4 touched files → exit 0.
+  - evidence_taxonomy + capability_boundary + architecture boundary guards = **9 failed** =
+    known TD-006 set (2+1+6); new field/report change introduced no new guard failure.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G05 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/004 remain deferred per S3-G13;
+  the delegation projection is intentionally safe-summary, not byte-fidelity).
+- **Commit:** `feat(s3): extension evidence/checkpoint/task-state seam (S3-G05)` (this run;
+  see `git log`).
+- **Next step (authorized by current docs):** S3-G06 (Extension-assisted repo governance
+  E2E reference task, P1) — the S3 acceptance anchor; depends on G01/G03/G04/G05 (all
+  satisfied). Will call the G05 seam in a real plan→execute→checkpoint→resume→done loop.
+- **Push:** none.

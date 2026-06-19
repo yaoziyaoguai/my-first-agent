@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 11 | S3-G02, S3-G03, S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
+| open | 10 | S3-G03, S3-G04, S3-G05, S3-G06, S3-G07, S3-G08, S3-G09, S3-G10, S3-G11, S3-G12 |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
 | deferred | 1 | S3-G13 |
-| satisfied | 1 | S3-G01（reference task runbook 成文，见 `S3_REFERENCE_TASK.md`） |
+| satisfied | 2 | S3-G01（reference task runbook）；S3-G02（unified extension contract） |
 
 ## 3. Recommended execution order
 
@@ -126,7 +126,13 @@
 - **Dependencies**: 无（但解锁 G03/G04）。
 - **Non-goal boundary**: 不做插件市场 / 动态生态；不引入第二条主链路。
 - **Suggested execution order**: P1-1。
-- **Status**: open。
+- **Status**: satisfied（2026-06-19）。
+- **Evidence**: `agent/extension_capability.py`（统一契约：`ExtensionCapability` /
+  `ExtensionRisk` / `ExtensionVerification` / `ExtensionEvidenceDescriptor` /
+  `ExtensionActivationDecision` + `evaluate_activation`；五要素 metadata/enable-disable/
+  risk/verification/evidence 齐全；default-off + 显式 opt-in，与 Skill gate 同语义）；
+  `tests/test_extension_capability_contract.py` 7 passed（断言五要素字段 + MCP/SubAgent/
+  Skill 三种 capability 可按契约声明 + frozen 不变）。Commit 见 WORK_LOG / `git log`（S3-G02）。
 - **Risk if ignored**: MCP/SubAgent 各自另起接入形状，违反 same-spine 治理一致性。
 
 ### S3-G03 — MCP governed tool source (default-off / allowlist / policy / evidence)
@@ -383,7 +389,7 @@
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
 | S3-G01 | Define S3 reference task precisely | P0 | satisfied | Cross (L4) | AC-5/6 setup |
-| S3-G02 | Unified extension capability contract | P1 | open | L5/Cross | AC-4 |
+| S3-G02 | Unified extension capability contract | P1 | satisfied | L5/Cross | AC-4 |
 | S3-G03 | MCP governed tool source (default-off/allowlist/policy/evidence) | P1 | open | L5/L3 | AC-2 |
 | S3-G04 | SubAgent read-only/audit-first parent-mediated path | P1 | open | L5/L3 | AC-3 |
 | S3-G05 | Extension evidence/checkpoint/task-state integration | P1 | open | L2/L3 | AC-1/4 |

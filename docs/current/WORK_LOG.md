@@ -315,3 +315,56 @@
 - **Next step (authorized by current docs):** S3-G02 (unified extension capability
   contract, P1) — unblocks G03/G04.
 - **Push:** none.
+
+## 2026-06-19 — S3 gap loop: S3-G02 (unified extension capability contract)
+
+- **Date/time:** 2026-06-19 23:58 CST
+- **Task:** Execute S3-G02 (P1) — abstract the S2 Skill governed-activation pattern
+  into a **unified extension capability contract** so MCP / SubAgent / Skill declare
+  the same shape (metadata / enable-disable / risk / verification / evidence).
+  Contract only — real MCP/SubAgent wiring is G03/G04; do **not** rewrite Skill or
+  the runtime spine.
+- **Skills/tools used:** superpowers test-driven-development (RED first → GREEN) +
+  verification-before-completion; compound-engineering S3 scope boundary (contract
+  is data shape + activation convention, not a second spine; Skill as reference
+  model, not rewritten); graphify to map skill_system / subagent_system / mcp /
+  runtime_integration before reading the Skill reference (descriptor.py SkillDescriptor
+  + gate.py default-off env opt-in). Safety: no secret/config touch.
+- **TDD evidence:**
+  - RED: `tests/test_extension_capability_contract.py` collection →
+    `ModuleNotFoundError: No module named 'agent.extension_capability'` (fails for
+    the intended reason).
+  - GREEN: after `agent/extension_capability.py`, **7 passed**.
+- **What was done:** Added `agent/extension_capability.py` — frozen dataclasses
+  (`ExtensionCapability`, `ExtensionRisk`, `ExtensionVerification`,
+  `ExtensionEvidenceDescriptor`, `ExtensionActivationDecision`), kind/risk/state
+  Literal + frozensets (Scheduler excluded on purpose — defer S4/Sn), and
+  `evaluate_activation()` mirroring `skill_system.gate.is_s2_skill_enabled`
+  (default-off + explicit opt-in). Self-contained leaf module (no reverse coupling
+  to skill/subagent/mcp).
+- **Files changed (created/edited):**
+  - `agent/extension_capability.py` (created)
+  - `tests/test_extension_capability_contract.py` (created; SIM300 auto-fixed by ruff)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G02 → satisfied + evidence; §2 distribution;
+    §9 ID index)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `.venv/bin/python -m pytest tests/test_extension_capability_contract.py -q` →
+    **7 passed**.
+  - `.venv/bin/ruff check agent/extension_capability.py
+    tests/test_extension_capability_contract.py` → exit 0 (S2-G12 focused-ruff
+    policy for new files; SIM300 auto-fixed).
+  - S2 targeted gate (must-not-regress floor): **12 passed, 1 skipped**.
+  - Boundary-guard failure-count check: `test_capability_boundary_contract.py` +
+    `test_architecture_boundaries.py` = **7 failed** = exactly the known TD-006
+    set (1 + 6); new leaf module introduced **no new guard failure** (defer
+    cleanup to S3-G09).
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G02 → satisfied.
+- **`TECH_DEBT.md` items added/updated:** none (TD-001/002/003/004/006/007 open,
+  unchanged).
+- **Commit:** `feat(s3): unified extension capability contract (S3-G02)` (this run;
+  see `git log`).
+- **Next step (authorized by current docs):** S3-G03 (MCP governed tool source, P1)
+  — now unblocked by the G02 contract.
+- **Push:** none.

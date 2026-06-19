@@ -383,10 +383,13 @@
 - **Status**: satisfied（2026-06-20）。
 - **Evidence**: 治理不变量验证（`git diff 08049e9..HEAD`，08049e9 = S3 gap loop 起点）：
   (1) `docs/history/`（S1/S2 归档）本 session **未触**；(2) 冻结/安全文件
-  `S3_GOAL.md` / `S3_BASELINE_STATUS.md` / `TECH_DEBT.md` / `config/config.yaml` / `.env`
-  本 session **未触**；(3) S3 stage docs 全在 `docs/current/`（S3_BASELINE_STATUS/S3_GOAL/
-  S3_GOAL_GAP/S3_REFERENCE_TASK/WORK_LOG）；(4) S1/S2 归档 + S2_RELEASE_SUMMARY 在位；
-  (5) carry-forward 债（TD-001..007）未被静默关闭（TECH_DEBT 未改）。S3 close-out checklist
+  `S3_GOAL.md` / `S3_BASELINE_STATUS.md` / `config/config.yaml` / `.env` 本 session **未触**；
+  `TECH_DEBT.md` 经**授权显式债操作**修改（G09 resolve TD-006 附证据、G13 triage TD-008..011→S4/Sn），
+  非静默关闭（TD-001/002/003/004/007 保持 open/deferred）；(3) S3 stage docs 全在 `docs/current/`
+  （S3_BASELINE_STATUS/S3_GOAL/S3_GOAL_GAP/S3_REFERENCE_TASK/WORK_LOG）；(4) S1/S2 归档 +
+  S2_RELEASE_SUMMARY 在位；(5) carry-forward 债未被静默关闭：TD-006 经证据显式 resolved（G09）；
+  TD-001/002/003/004/007 保持 open/deferred；TD-008..011 显式 triage 为 S4/Sn deferred。
+  S3 close-out checklist
   已提供（见 WORK_LOG G10 条目；close-out 本身待 S3 全部 gap 完成后按 AGENTS.md Stage Closing
   Review 执行，非本 gap 执行）。Commit 见 WORK_LOG / `git log`（S3-G10）。
 - **Risk if ignored**: AC-8 回退；阶段边界混乱误导后续 agent。

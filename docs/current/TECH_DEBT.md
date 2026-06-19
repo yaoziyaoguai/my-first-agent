@@ -145,9 +145,12 @@
 - Impact: Scheduler-driven action planning is not a runtime path in S3. No regression —
   dormant, not broken.
 - Recommended stage: S4/Sn, when scheduler-driven action planning becomes a product goal.
-- Verification idea: confirm `agent/action_scheduler.py` is not imported by the live
-  runtime loop (`agent/loop.py` / `agent/core.py`); `test_scheduler_main_path.py` covers
-  the dormant surface only.
+- Verification idea: confirm the Scheduler is not **activated/routed** in the default
+  runtime loop — `chat()`/`LoopDependencies.action_scheduler` defaults to `None`, `main.py`
+  never passes the kwarg (proven by `test_cr1_*` AST boundary tests), and execution is gated
+  by `if action_scheduler is not None`. Note: `agent/planner.py` lazily imports
+  `build_action_plan_from_model_output` for plan generation, but module import ≠ scheduler
+  activation/routing; `test_scheduler_main_path.py` + `test_cr1_*` cover the dormant surface.
 
 ### TD-009 - Full MCP ecosystem deferred
 

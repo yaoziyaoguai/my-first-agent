@@ -939,3 +939,68 @@
   `git log`).
 - **Next step (authorized):** whole-stage S3 audit (16-item checklist).
 - **Push:** none.
+
+## 2026-06-20 — S3 whole-stage audit (16-item checklist) + fixes
+
+- **Date/time:** 2026-06-20 05:00 CST
+- **Task:** User-authorized whole-stage S3 audit after G12/G13. Fix fixable findings; defer
+  rest to TECH_DEBT. No S3 closeout.
+- **Method:** hard gates run directly + adversarial Workflow (6 parallel agents, read-only,
+  each independently verifying a dimension vs frozen goal + code — NOT trusting WORK_LOG
+  claims). compound-engineering + graphify used by the agents.
+- **Hard gates (all GREEN):**
+  - git clean (ahead 42); no `.env`; no secret/config pollution.
+  - **full pytest: 4818 passed / 15 skipped / 28 xfailed / 0 failed** (fresh, post-G12/G13;
+    +5 vs G09's 4813 = the G12 extension_registry tests).
+  - S3+S2 acceptance: 44 passed / 2 skipped (AC-1 no-regress).
+  - focused ruff on all 27 session-touched files: exit 0 (TD-007 untouched-files red,
+    non-blocking).
+  - non-goal leakage rg: "完整 MCP 生态/完整 multi-agent/Scheduler 生产化/TD-007 release
+    blocker" appear ONLY in boundary/non-goal/deferred/debt contexts. No leakage.
+- **Audit verdict (6 dimensions):** NO blockers, NO real_issues. S3 is structurally sound.
+  - **clean**: MCP boundary (gate #5, 7 sub-dimensions verified), SubAgent boundary (gate #6,
+    6 criteria verified), docs consistency (gate #14).
+  - **minor_issues (wording/observations, not violations)**: AC-1..9 coverage, Skill+Scheduler
+    (#7/#8), reference-task+evidence+gate (#4/#9/#10) — all underlying claims independently
+    verified TRUE; only 2 wording-precision issues + cosmetic observations.
+- **Findings FIXED (2 doc-wording precision fixes, this commit):**
+  1. **G10 evidence** (S3_GOAL_GAP.md): claimed "TECH_DEBT 未触" but TECH_DEBT was modified
+     by G09 (TD-006 resolved w/ evidence) + G13 (TD-008..011 triaged). Fixed to state
+     TECH_DEBT was modified via authorized explicit debt operations (NOT silent closure);
+     S3_GOAL/S3_BASELINE_STATUS/config/.env remain untouched. AC-8 intent holds.
+  2. **TD-008 verification** (TECH_DEBT.md): claimed action_scheduler "not imported by live
+     runtime loop" but `planner.py:348` lazily imports `build_action_plan_from_model_output`
+     for plan generation. Fixed to "not ACTIVATED/ROUTED by default" (action_scheduler
+     defaults None; main.py never passes it; execution gated by `if action_scheduler is not
+     None`; proven by test_cr1_* AST tests). Dormant status holds — import ≠ activation.
+- **Findings NOTED (no action — correct behavior / cosmetic / unreachable):**
+  - AC-6 real smoke not executed this session (no real key; default skip; honest; AC-6
+    contract met — key-safe opt-in coverage; same pattern as S2 AC-7).
+  - MCP call-time evidence uses subsystem="tool" (via tool_executor audit channel), not "mcp"
+    — consistent + documented (mcp_audit.py docstring).
+  - L1 production handler hardcodes execution_mode="local_fake" while running a real provider
+    child loop (subagent_action.py:1565) — documented V0 future wiring; child still
+    parent-mediated/read-only. Not a violation.
+  - executor.py null-mediator else-branch tags tools "executed" w/ placeholder (unreachable
+    in production — mediator always wired; tool_runtime_mediator FORCE_STOP default).
+  - S3 skill-guard test (test_s3_skill_non_regression_guard.py) would classify as
+    unknown_failure (still release-blocking) not extension_regression — CORRECT (Skill is
+    S2 governed-active, AC-7 scopes extension_regression to MCP/SubAgent); labeling nuance.
+  - test-count drift: docs record 4813 (G09-era); current post-G12 is 4818 (recorded here);
+    historical records stay accurate-at-their-time.
+- **Files changed (edited, this commit):**
+  - `docs/current/S3_GOAL_GAP.md` (G10 evidence wording fix)
+  - `docs/current/TECH_DEBT.md` (TD-008 verification wording fix)
+  - `docs/current/WORK_LOG.md` (this audit entry)
+- **Verification:** doc-only fixes (no code/test change) → no pytest/ruff needed for the
+  fixes themselves; `git diff --check` exit 0.
+- **`TECH_DEBT.md` items added/updated:** TD-008 verification wording refined (no new debt;
+  all observations above are noted here, not new TD entries — they're correct-behavior
+  nuances, not unresolved debt).
+- **Commit:** `docs(s3): audit fixes — G10 evidence + TD-008 wording precision` (this run;
+  see `git log`).
+- **Audit conclusion:** S3 stage is release-sound. All G01-G13 satisfied; AC-1..AC-9 owned +
+  evidenced + verified; S2 must-not-regress holds; MCP/SubAgent/Skill/Scheduler boundaries
+  intact; full-suite green; no secret/config pollution. No S3 closeout performed (deferred
+  to user authorization per AGENTS.md Stage Closing Review).
+- **Push:** none.

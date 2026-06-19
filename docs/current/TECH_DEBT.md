@@ -1,9 +1,10 @@
 # Technical Debt Register
 
-> Post-S2 / pre-S3 carry-forward register. S2 is complete and archived under
-> `docs/history/S2_GOVERNED_TASK_AGENT/`. This file keeps only **unresolved**
-> debt that may affect S3/Sn. Do not use this file as a general unfinished-task
-> list; do not write S3 goals here (S3 is not started).
+> Cross-stage carry-forward debt register. S2 is complete and archived under
+> `docs/history/S2_GOVERNED_TASK_AGENT/`; S3 is in progress (S3-G01..G12 satisfied
+> 2026-06-20). This file keeps **unresolved** debt that may affect S3/Sn plus
+> **S4/Sn scope boundaries** deliberately deferred by the frozen S3 goal. Do not
+> use this file as a general unfinished-task list; do not write stage goals here.
 
 ## Rules
 
@@ -106,6 +107,11 @@
   context module is next touched.
 - Verification idea: `rg "from agent\.context import|import agent\.context"
   agent/ main.py` → no matches; then delete after confirming zero reachability.
+- **Reachability re-confirmed (S3-G13 triage, 2026-06-20):** grep across `agent/`
+  + `main.py` returns **zero** `agent.context` imports; `agent/context.py:36
+  compress_history` remains present + dead. Not deleted in S3 (CLAUDE.md §3:
+  unrelated dead code is mentioned, not deleted; not S3-triggered). Ready for
+  safe deletion when the L2 context module is next touched (S4/Sn).
 
 ### TD-004 - Pending-tool events log omits tool output preview
 
@@ -118,3 +124,66 @@
 - Recommended stage: S3/Sn, when improving event-log fidelity.
 - Verification idea: Review `execute_pending_tool` and mediator `_route_result`
   behavior around `turn_context[tool_use_id]`.
+
+## Deferred to S4/Sn (frozen S3 scope boundaries)
+
+> These are **not active S3 debt** — they are scope boundaries the frozen S3 goal
+> (`S3_GOAL.md §7 Non-goals` / `§8 Future deferred decisions`; `S3_GOAL_GAP.md G13`)
+> deliberately excludes from S3. Recorded here (S3-G13 triage, 2026-06-20) so they
+> persist across the eventual S3 closeout (when `docs/current/` stage docs are
+> archived) and are not silently dropped or prematurely pulled into a later stage.
+> Each stays deferred unless a future stage's frozen goal explicitly authorizes it.
+
+### TD-008 - Scheduler productionization / main-loop activation deferred
+
+- ID: TD-008
+- Title: `ActionScheduler`/`ActionPlan` (`agent/action_scheduler.py`) + handler + tests
+  exist but are NOT activated in the default runtime loop.
+- Status: deferred (S4/Sn)
+- Source/reason: Frozen S3 goal keeps Scheduler as boundary-only (S3 does not productionize
+  it / wire it into the main loop). Capability is dormant by design.
+- Impact: Scheduler-driven action planning is not a runtime path in S3. No regression —
+  dormant, not broken.
+- Recommended stage: S4/Sn, when scheduler-driven action planning becomes a product goal.
+- Verification idea: confirm `agent/action_scheduler.py` is not imported by the live
+  runtime loop (`agent/loop.py` / `agent/core.py`); `test_scheduler_main_path.py` covers
+  the dormant surface only.
+
+### TD-009 - Full MCP ecosystem deferred
+
+- ID: TD-009
+- Title: Multi-server MCP orchestration / dynamic discovery ecosystemization.
+- Status: deferred (S4/Sn)
+- Source/reason: Frozen S3 goal limits MCP to a **controlled tool source** (S3-G03) —
+  registered via `register_mcp_tools`, governed by `mcp_policy` + allowlist + evidence,
+  default-off. Full ecosystem is a non-goal.
+- Impact: MCP is single-tool-source governed only; no multi-server orchestration.
+- Recommended stage: S4/Sn, when multi-server MCP orchestration is required.
+- Verification idea: confirm MCP stays on the governed tool path (register_mcp_tools →
+  TOOL_REGISTRY → mediator); no multi-server orchestration module in S3.
+
+### TD-010 - Full multi-agent ecosystem deferred
+
+- ID: TD-010
+- Title: Writable / non-mediated SubAgent delegation + multi-agent collaboration.
+- Status: deferred (S4/Sn)
+- Source/reason: Frozen S3 goal limits SubAgent to **read-only / audit-first /
+  parent-mediated** delegation (S3-G04). Writable or non-mediated delegation is a non-goal.
+- Impact: SubAgent is read-only second-opinion only; no writable delegation / multi-agent
+  collaboration.
+- Recommended stage: S4/Sn, when writable SubAgent delegation / multi-agent orchestration
+  is required.
+- Verification idea: confirm SubAgent stays parent-mediated (delegate_l1/execute_l1 route
+  tools+memory through tool_mediator; child holds no MemoryStore); no writable delegation path.
+
+### TD-011 - Durable task ledger deferred
+
+- ID: TD-011
+- Title: Independent durable (cross-session, crash-survivable) task ledger.
+- Status: deferred (S4/Sn)
+- Source/reason: Frozen S3 goal lists durable ledger as a non-goal / S3+ candidate
+  (also S2_TECH_DEBT_TRIAGE S3+ item). S2/S3 use checkpoint-based resume (file-scoped).
+- Impact: No durable cross-session task ledger; resume relies on checkpoint files.
+- Recommended stage: S4/Sn, when durability / compliance / crash-recovery requires it.
+- Verification idea: confirm no durable-ledger module; `agent/checkpoint.py` remains the
+  resume mechanism (save_checkpoint / load_checkpoint_to_state).

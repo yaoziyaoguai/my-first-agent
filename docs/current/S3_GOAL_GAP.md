@@ -51,10 +51,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 0 | —（G01-G12 satisfied；G13 deferred） |
+| open | 0 | —（G01-G13 全部 resolved） |
 | blocked | 0 | —（S3 open decisions 已在冻结 goal 中全部 resolved） |
-| deferred | 1 | S3-G13 |
-| satisfied | 12 | G01-G12（G09=TD-006 cleanup full-suite 全绿；G12=extension 可观测性增强） |
+| deferred | 0 | —（原 G13 deferred 项已 triage 进 TECH_DEBT TD-008..011） |
+| satisfied | 13 | G01-G13（S3 gap loop 全部 satisfied） |
 
 ## 3. Recommended execution order
 
@@ -471,7 +471,16 @@
 - **Dependencies**: 无（贯穿登记）。
 - **Non-goal boundary**: 本 gap 本身不执行任何清理/激活/生态化。
 - **Suggested execution order**: P4-1（贯穿登记，不执行）。
-- **Status**: deferred。
+- **Status**: satisfied（2026-06-20，user-authorized triage）。
+- **Evidence**: S3-G13 triage 完成（非产品工作 —— 不把 deferred 项变成 S3 实现）：S4/Sn scope
+  边界项登记为 `TECH_DEBT.md` **TD-008（Scheduler 生产化）/ TD-009（完整 MCP 生态）/ TD-010
+  （完整 multi-agent 生态）/ TD-011（durable task ledger）**，每项含 status=deferred(S4/Sn) +
+  source（frozen goal §7/§8 + G13）+ impact + recommended stage + verification idea，使它们跨 S3
+  closeout 持久（不会被归档丢弃或被后续 stage 提前塞入）。TD-003 reachability 复核（2026-06-20：
+  `agent.context` 零 import，`agent/context.py:36 compress_history` 确认 dead）写入 TD-003 证据；
+  按 CLAUDE.md §3（无关 dead code 提及不删除）+ G13=triage 规则，未删除（S4/Sn 工作）。non-goal
+  泄漏 rg 通过（"完整 MCP 生态/完整 multi-agent/Scheduler 生产化"仅出现在 boundary/non-goal/deferred
+  语境）。TECH_DEBT header 事实修正（S3 已进行）。Commit 见 WORK_LOG / `git log`（S3-G13）。
 - **Risk if ignored**: 债务/范围归属模糊，误导后续 agent 把 S4/Sn 内容塞进 S3。
 
 ---
@@ -492,7 +501,7 @@
 | S3-G10 | docs/current+history governance for S3 | P2 | satisfied | Cross | AC-8 |
 | S3-G11 | Skill contract remains governed-active & non-regressed | P2 | satisfied | L5 | AC-1 |
 | S3-G12 | Optional extension hardening | P3 | satisfied | L5/L3 | AC-4 (enhance) |
-| S3-G13 | Deferred boundaries & TECH_DEBT triage (S4/Sn) | P4 | deferred | Cross/L5 | §7/§8 |
+| S3-G13 | Deferred boundaries & TECH_DEBT triage (S4/Sn) | P4 | satisfied | Cross/L5 | §7/§8 |
 
 ## 10. Non-goal guardrails
 

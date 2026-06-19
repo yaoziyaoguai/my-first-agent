@@ -896,3 +896,46 @@
   `git log`).
 - **Next step (authorized):** S3-G13 (deferred-to-S4/Sn triage), then whole-stage S3 audit.
 - **Push:** none.
+
+## 2026-06-20 — S3 gap loop: S3-G13 (deferred-to-S4/Sn triage) — user-authorized
+
+- **Date/time:** 2026-06-20 04:30 CST
+- **Task:** Execute S3-G13 (P4, user-authorized) — triage deferred-to-S4/Sn items into clean
+  TECH_DEBT entries. NOT product work (no ecosystem building); per /goal rule, G13 output =
+  clean TECH_DEBT/S4-Sn triage.
+- **Skills/tools used:** compound-engineering S4/Sn boundary + debt-triage discipline;
+  verification-before-completion (reachability re-confirm; non-goal leakage rg).
+- **What was done (triage, no code):**
+  - Added `TECH_DEBT.md` "Deferred to S4/Sn (frozen S3 scope boundaries)" section with
+    **TD-008** (Scheduler productionization — dormant ActionScheduler, not in main loop),
+    **TD-009** (full MCP ecosystem — S3 is controlled tool source only), **TD-010** (full
+    multi-agent ecosystem — SubAgent is read-only/parent-mediated only), **TD-011** (durable
+    task ledger — checkpoint-based resume only). Each: status=deferred(S4/Sn) + source
+    (frozen goal §7/§8 + G13) + impact + recommended stage + verification idea. These now
+    persist across the eventual S3 closeout (won't be dropped when stage docs archive).
+  - Strengthened **TD-003** with fresh reachability verification (2026-06-20: `agent.context`
+    zero imports; `agent/context.py:36 compress_history` confirmed dead). NOT deleted — per
+    CLAUDE.md §3 (unrelated dead code: mention, don't delete) + G13=triage rule (deletion is
+    S4/Sn work, not S3-triggered).
+  - Updated TECH_DEBT header (factual: "pre-S3 / S3 not started" → "S3 in progress, G01-G12
+    satisfied"; register now also holds S4/Sn scope boundaries).
+  - Non-goal leakage rg: "完整 MCP 生态 / 完整 multi-agent / Scheduler 生产化" appear ONLY in
+    boundary/non-goal/deferred contexts (capability modules + tests + S3_GOAL/GAP non-goal
+    sections). No leakage into active S3 work.
+- **Files changed (edited):**
+  - `docs/current/TECH_DEBT.md` (header; TD-003 reachability; +TD-008/009/010/011)
+  - `docs/current/S3_GOAL_GAP.md` (S3-G13 → satisfied + evidence; §2; §9)
+  - `docs/current/WORK_LOG.md` (this entry)
+- **Verification:**
+  - `grep -rn "from agent\.context import|import agent\.context" agent/ main.py` → zero
+    matches (TD-003 dead-code confirmed).
+  - Non-goal leakage rg → only boundary/non-goal/deferred contexts.
+  - No code/test changes (pure triage) → no pytest/ruff run needed for G13 itself.
+  - `git diff --check` exit 0.
+- **`S3_GOAL_GAP.md` items updated:** S3-G13 → satisfied (open 0, deferred 0, satisfied 13).
+- **`TECH_DEBT.md` items added:** TD-008, TD-009, TD-010, TD-011 (all deferred S4/Sn).
+  TD-003 strengthened. TD-006 remains resolved.
+- **Commit:** `docs(s3): triage deferred S4/Sn scope into TECH_DEBT (S3-G13)` (this run; see
+  `git log`).
+- **Next step (authorized):** whole-stage S3 audit (16-item checklist).
+- **Push:** none.

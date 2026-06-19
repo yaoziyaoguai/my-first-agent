@@ -13,72 +13,73 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
-## S2 Development Governance
+## Stage Development Governance (post-S2 / pre-S3)
 
-This project uses a staged development governance model. S1 is complete and
-archived; S2 (Governed Task Agent) is the active stage.
+This project uses a staged development governance model. Stages close one at a
+time: a closed stage is archived under `docs/history/`, and `docs/current/`
+keeps only the live working set.
 
-- Active documentation lives under `docs/current/`.
-- Historical documentation lives under `docs/history/`. S1 evidence is archived
-  under `docs/history/S1_BASELINE_USABLE_PRODUCT/`.
+- S1 (Baseline Usable Product) is complete and archived under
+  `docs/history/S1_BASELINE_USABLE_PRODUCT/`.
+- S2 (Governed Task Agent) is complete and archived under
+  `docs/history/S2_GOVERNED_TASK_AGENT/`; its release record is
+  `docs/history/S2_GOVERNED_TASK_AGENT/S2_RELEASE_SUMMARY.md`.
+- **No stage is currently active. S3 has not started.** There is no
+  `S3_BASELINE_STATUS.md`, `S3_GOAL.md`, or `S3_GOAL_GAP.md` yet.
 
 Historical documents are evidence, not routing authority. Do not use historical
-docs to override current S2 documents unless the user explicitly promotes them
-back into `docs/current/`.
+docs (including archived S1/S2 stage docs) to override current work unless the
+user explicitly promotes them back into `docs/current/`.
 
-### Current S2 Documents
+### Current Documents
 
-The current working set is:
+The current working set under `docs/current/` is exactly:
 
-- `docs/current/S2_BASELINE_STATUS.md`
-  - S2 starting-state audit (the S2 entry baseline, not the current release
-    status). Describes what S2 inherited from S1.
-  - This is not a goal document.
-- `docs/current/S2_GOAL.md`
-  - Confirmed/frozen S2 goal (Governed Task Agent) after user approval.
-  - Defines what this stage must achieve.
-  - Do not modify this file unless the user explicitly asks to redefine or
-    update the S2 goal.
-- `docs/current/S2_GOAL_GAP.md`
-  - Gap list between the S2 baseline and the frozen S2 goal.
-  - This is the active to-do list for the stage.
-  - Do not remove or rewrite gaps just because they are hard.
-- `docs/current/S2_ACCEPTANCE_GATE.md`
-  - S2 release-judgment rules: targeted acceptance vs health/debt signals.
+- `docs/current/S_ROADMAP.md`
+  - Authoritative S-series version semantics and high-level direction.
+  - Does not encode a hard implementation plan for S2/S3/Sn.
 - `docs/current/TECH_DEBT.md`
-  - Cross-stage technical debt register.
-  - Important deferred work, workarounds, dormant decisions, and out-of-stage
-    issues must be tracked here.
-- `docs/current/WORK_LOG.md`
-  - Per-agent-run execution log.
-  - Every coding-agent run must append a summary here.
+  - Cross-stage carry-forward technical-debt register.
+  - Keeps only unresolved debt that may affect S3/Sn; resolved S1/S2 items live
+    in their archives, not here.
+
+When the next stage (S3) is authorized, its stage docs (baseline / goal / gap /
+work log) are created under `docs/current/` and this section is repointed to
+them. The next authorized step is an **S3 baseline audit**, grounded in
+`docs/current/S_ROADMAP.md`, the archived S2 release record, and the user's
+explicit instruction.
 
 ### Goal and Gap Rules
 
-1. `S2_GOAL.md` is frozen after user approval.
+These rules apply to whichever stage is active. No stage goal/gap is active now
+(S3 not started); they are re-instantiated when the S3 stage docs are created
+under `docs/current/`.
+
+1. The active stage `*_GOAL.md` is frozen after user approval.
    - Do not change the goal because implementation is hard.
    - Do not narrow the goal silently.
    - Do not expand the goal because a module exists.
    - Only the user can approve goal changes.
-2. `S2_GOAL_GAP.md` is a tracked gap / to-do list.
+2. The active stage `*_GOAL_GAP.md` is a tracked gap / to-do list.
    - Completed gaps must be checked off with evidence.
    - Evidence can be a commit hash, test result, log, trace, audit section, or
      source reference.
    - Do not delete unfinished gaps.
    - Do not rewrite gaps just to make the stage look complete.
 3. Gaps may be struck through only when:
-   - the user explicitly changes the S2 goal;
+   - the user explicitly changes the stage goal;
    - the gap is proven invalid;
    - the gap is merged into another tracked gap;
    - the user explicitly approves cancellation.
-4. If an important gap is confirmed out of S2 scope, move it to `TECH_DEBT.md`.
-   - Mark the original gap in `S2_GOAL_GAP.md` as moved to debt.
+4. If an important gap is confirmed out of stage scope, move it to
+   `TECH_DEBT.md`.
+   - Mark the original gap in the stage `*_GOAL_GAP.md` as moved to debt.
    - Include the technical debt ID.
 
 Example:
 
 ```
-- [>] Gap: prove X path under real provider. Moved to TECH_DEBT.md: TD-004. Reason: out of S2 scope after review.
+- [>] Gap: prove X path under real provider. Moved to TECH_DEBT.md: TD-004. Reason: out of stage scope after review.
 ```
 
 ### Technical Debt Rules
@@ -112,7 +113,8 @@ Each debt item must include:
 
 ### Work Log Rules
 
-Every coding-agent run must append an entry to `docs/current/WORK_LOG.md`.
+When a stage is active, every coding-agent run appends an entry to that stage's
+`WORK_LOG.md` (created under `docs/current/` for the active stage).
 
 The entry must include:
 
@@ -121,7 +123,7 @@ The entry must include:
 - files changed
 - what was done
 - verification commands and results
-- `S2_GOAL_GAP.md` items updated
+- stage `*_GOAL_GAP.md` items updated
 - `TECH_DEBT.md` items added or updated
 - commit hash, if committed
 - next step only if authorized by current docs
@@ -132,10 +134,9 @@ Do not freely recommend new directions.
 
 Next-step recommendations are allowed only if they are directly grounded in:
 
-- `docs/current/S2_GOAL.md`
-- `docs/current/S2_GOAL_GAP.md`
+- `docs/current/S_ROADMAP.md`
 - `docs/current/TECH_DEBT.md`
-- `docs/current/WORK_LOG.md`
+- the active stage docs (none active now; S3 not started)
 - the user's current explicit instruction
 
 Do not invent:
@@ -155,12 +156,14 @@ If no authorized next step exists in current docs, say:
 
 Before closing a stage, run a Stage Closing Review:
 
-1. Review all open items in `S2_GOAL_GAP.md`.
+1. Review all open items in the stage `*_GOAL_GAP.md`.
 2. Complete any remaining item that is still feasible within the stage.
 3. Move important but unfinished out-of-stage items to `TECH_DEBT.md`.
-4. Mark moved items in `S2_GOAL_GAP.md` with the referenced debt ID.
-5. Append a stage closing entry to `WORK_LOG.md`.
-6. Do not silently delete unfinished gaps.
+4. Mark moved items in the stage `*_GOAL_GAP.md` with the referenced debt ID.
+5. Append a stage closing entry to the stage `WORK_LOG.md`.
+6. Archive the stage docs under `docs/history/<STAGE>/` and reset
+   `docs/current/` to the roadmap + tech-debt working set.
+7. Do not silently delete unfinished gaps.
 
 ### Provider Rules
 
@@ -187,8 +190,8 @@ same:
 - checkpoint / state path;
 - evidence / log / trace path.
 
-If a task risks splitting fake and real paths, record it in `S2_GOAL_GAP.md` or
-`TECH_DEBT.md`.
+If a task risks splitting fake and real paths, record it in the active stage
+`*_GOAL_GAP.md` or `TECH_DEBT.md`.
 
 ## Safety boundaries
 

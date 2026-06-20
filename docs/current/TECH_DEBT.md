@@ -132,17 +132,27 @@
   not a live path. When S5/Sn activates L1/L2 or writable delegation, the evidence recording
   (`record_delegation_run`) must be wired into that path too, mirroring the inline-L0 wiring.
 
-### TD-011 - Durable task ledger deferred
+### TD-011 - Durable task ledger (resolved in S5)
 
 - ID: TD-011
 - Title: Independent durable (cross-session, crash-survivable) task ledger.
-- Status: deferred (S5/Sn)
-- Source/reason: Frozen S3 goal lists durable ledger as a non-goal / S3+ candidate
-  (also S2_TECH_DEBT_TRIAGE S3+ item). S2/S3 use checkpoint-based resume (file-scoped).
-- Impact: No durable cross-session task ledger; resume relies on checkpoint files.
-- Recommended stage: S5/Sn, when durability / compliance / crash-recovery requires it.
-- Verification idea: confirm no durable-ledger module; `agent/checkpoint.py` remains the
-  resume mechanism (save_checkpoint / load_checkpoint_to_state).
+- Status: resolved in S5 (retained in the live register until S5 close-out archive)
+- Source/reason: Frozen S3 goal listed the durable ledger as a non-goal / S3+ candidate.
+  S2/S3/S4 used checkpoint-based resume (file-scoped).
+- Impact: Addressed — S5 delivered a local-only, append-oriented JSONL durable ledger
+  with checkpoint-ledger cooperation and a fake/local recovery E2E.
+- Recommended stage: S5 (done).
+- Verification idea: `agent/task_ledger.py` / `agent/task_ledger_store.py` /
+  `agent/task_ledger_cooperation.py` / `agent/ledger_audit_alignment.py` /
+  `agent/ledger_summary.py`; `tests/test_s5_*.py`; full pytest green. Checkpoint
+  remains the state restoration source (`agent/checkpoint.py` save_checkpoint /
+  load_checkpoint_to_state); the ledger supplements it (not a second spine).
+- Resolution (S5, 2026-06-20): S5-G01..G11 implemented the durable governed task
+  ledger (contract + redaction + JSONL storage + checkpoint-ledger cooperation +
+  recovery E2E + audit/replay alignment + same-spine guard + durability acceptance
+  classification + extension-boundary coverage + operator summary). Per AGENTS.md,
+  resolved items are removed from this live register at stage close-out; this entry
+  is retained only because S5 close-out is not yet user-authorized.
 
 ## S4 whole-stage audit findings (2026-06-20)
 

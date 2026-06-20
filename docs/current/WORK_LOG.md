@@ -542,7 +542,42 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G11 operator-facing ledger summary`).
+  - `4957991` (`feat(s5): S5-G11 operator-facing ledger summary`).
 - Next step:
   - Final S5 audit (S5-G12 is a non-goal guardrail, not executed): run the full
     verification set, audit gap/debt consistency, and write the final report.
+
+## 2026-06-20 - S5 final audit and verification
+
+- Task name: S5 final audit (after G01-G11; G12 is a non-goal guardrail).
+- Files changed:
+  - `docs/current/TECH_DEBT.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Ran the full verification set and an independent read-only audit.
+  - Updated TD-011 to "resolved in S5" (retained in the live register until S5
+    close-out archive). TD-012 / TD-013 unchanged (open / deferred per freeze).
+- Verification commands and results:
+  - `git status --short --branch --untracked-files=all` -> clean (ahead of origin).
+  - `git diff --check` -> clean.
+  - `git ls-files config/config.yaml .env` -> empty (neither tracked).
+  - `git check-ignore -v config/config.yaml .env` -> both ignored by `.gitignore`.
+  - Focused ruff on all S5 agent modules + tests -> `All checks passed!`.
+  - Targeted gates: S1 `22 passed`; S2 `32 passed, 1 skipped`; S3 extension
+    `124 passed`; S4 `44 passed, 1 skipped`; S5 suite (subsumed by full) `68`.
+  - Full pytest `.venv/bin/python -m pytest -q -rx` -> `4935 passed, 16 skipped,
+    28 xfailed, 0 failed` (baseline `4867` + 68 new S5 = 4935; no regression).
+  - Independent read-only audit (project-auditor agent): verdict **PASS
+    (release-ready)**; no P0/P1/P2/P3 findings; AC-1..AC-10 all satisfied;
+    scope controlled; same-spine + secret-safe verified; tests use real code paths.
+- Stage gap items updated:
+  - S5-G01..G11 done with evidence; S5-G12 deferred/non-goal (guardrail, not
+    executed in the gap loop).
+- `TECH_DEBT.md` items added or updated:
+  - TD-011 -> resolved in S5 (retained until close-out archive).
+- Commit hash:
+  - Pending (`docs(s5): final audit and verification`).
+- Next step:
+  - None authorized. S5 implementation is complete and verified. S5 close-out
+    (archive to `docs/history/S5_*/`, reset `docs/current/`) awaits explicit user
+    authorization per AGENTS.md Stage Closing Review.

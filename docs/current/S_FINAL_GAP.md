@@ -29,7 +29,7 @@
 | Gap | Priority | Layer | Title | Status |
 |---|---:|---|---|---|
 | FINAL-G01 | P0 | L1-L5 | Full-suite quality gate green (TD-007) | proposed/open |
-| FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | proposed/open |
+| FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | done |
 | FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | proposed/open |
 | FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | proposed/open |
 | FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | proposed/open |
@@ -81,7 +81,14 @@
 - Non-goal boundary: Do not delete other unrelated dead code; do not refactor
   `agent/memory.py` compress (the live path).
 - Suggested order: 2
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20): the whole `agent/context.py` module was deleted (`git rm`)
+  — all 3 functions (`compress_history`, `estimate_messages_size`,
+  `_truncate_tool_result_content`) were unused duplicates of the live
+  `agent/memory.py` versions. `rg "agent\.context|from agent import context"` across
+  `agent/ main.py tests/` returns zero real references (only `agent.context_builder`,
+  a different module). Targeted pytest (memory/context/checkpoint/architecture):
+  87 passed.
 - Risk if ignored: dead code stays as a latent guard-gap.
 
 ## FINAL-G03 - Wire redaction into legacy mediator/record_evidence (TD-012)

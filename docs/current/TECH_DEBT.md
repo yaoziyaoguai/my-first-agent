@@ -22,6 +22,12 @@
 > full suite red) was **resolved in S3-G09** (full pytest green) and removed from
 > this live register at S3 close-out; its resolution record lives in
 > `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md §7`.
+>
+> TD-003 (`agent/context.py` unreachable dead code) was **resolved in S_FINAL**
+> (FINAL-G02: the whole `agent/context.py` module — all 3 functions, unused
+> duplicates of the live `agent/memory.py` versions — was deleted after
+> re-confirming zero reachability) and removed from this live register; its
+> resolution record lives in the S_FINAL release summary.
 
 ### TD-007 - ruff full-suite lint is red with 443 historical errors
 
@@ -52,26 +58,6 @@
   next refactored.
 - Verification idea: Review `agent/provider/legacy_adapter.py` and call sites
   in `agent/core.py`.
-
-### TD-003 - Secondary context compression path is unreachable dead code
-
-- ID: TD-003
-- Title: `agent/context.py:36 compress_history` is confirmed-unreachable dead
-  code (cleanup target, not a reachability question).
-- Status: open / carry-forward (confirmed unreachable during S2 baseline audit)
-- Source/reason: Main runtime uses `agent/memory.py:220 compress_history` only;
-  `agent/context.py` has zero imports in src.
-- Impact: Dead code without tool-use/tool-result pairing guards; safe only
-  because unreachable.
-- Recommended stage: S5/Sn dead-code removal when `agent/context.py` or the L2
-  context module is next touched.
-- Verification idea: `rg "from agent\.context import|import agent\.context"
-  agent/ main.py` → no matches; then delete after confirming zero reachability.
-- **Reachability re-confirmed (S3-G13 triage, 2026-06-20):** grep across `agent/`
-  + `main.py` returns **zero** `agent.context` imports; `agent/context.py:36
-  compress_history` remains present + dead. Not deleted in S3 (CLAUDE.md §3:
-  unrelated dead code is mentioned, not deleted; not S3-triggered). Ready for
-  safe deletion when the L2 context module is next touched (S5/Sn).
 
 ## Deferred to Sn / future (prior-stage scope boundaries)
 

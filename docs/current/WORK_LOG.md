@@ -262,8 +262,46 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G03 local durable ledger storage API`).
+  - `e90ca63` (`feat(s5): S5-G03 local durable ledger storage API`).
 - Next step:
   - S5-G04 — checkpoint-ledger cooperation: record ledger entries at
     checkpoint/save/recovery boundaries and add consistency checks between task
     state, checkpoint refs, and ledger records.
+
+## 2026-06-20 - S5-G04 checkpoint-ledger cooperation
+
+- Task name: S5-G04 — checkpoint-ledger cooperation (TDD).
+- Files changed:
+  - `agent/task_ledger_cooperation.py` (new)
+  - `tests/test_s5_ledger_cooperation.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added `record_checkpoint_boundary`: at a checkpoint save boundary it derives
+    lifecycle / step / checkpoint_ref records from a `GovernedTaskState` and
+    appends them via `TaskLedger.append`. It does not touch the checkpoint file
+    (AC-4) and de-duplicates unchanged lifecycle records.
+  - Added `check_recovery_consistency` + `LedgerConsistencyReport`/`Issue`:
+    flags `missing_checkpoint_ref`, `stale_ledger_entry`, `task_state_mismatch`;
+    `report.ok` drives recovery refusal (AC-5 — completed steps not silently
+    repeated).
+  - Added readers: `latest_checkpoint_ref`, `latest_ledger_lifecycle`,
+    `ledger_completed_step_count`.
+- Verification commands and results:
+  - RED first: collection failed with `ModuleNotFoundError: No module named
+    'agent.task_ledger_cooperation'`.
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_cooperation.py -q` ->
+    `8 passed`.
+  - `.venv/bin/ruff check agent/task_ledger_cooperation.py
+    tests/test_s5_ledger_cooperation.py` -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G04` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G04 checkpoint-ledger cooperation`).
+- Next step:
+  - S5-G05 — fake/local recovery E2E: a deterministic task that interrupts after
+    a durable progress point, reloads from checkpoint + ledger, continues, and
+    verifies one coherent task history.

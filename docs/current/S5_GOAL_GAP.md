@@ -19,7 +19,7 @@
 | S5-G01 | P0 | L2/L4 | Ledger contract and reference recovery task | done |
 | S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | done |
 | S5-G03 | P1 | L2 | Local durable ledger storage API | done |
-| S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | proposed/open |
+| S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | done |
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | proposed/open |
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | proposed/open |
 | S5-G07 | P1 | L1 | Same-spine durability guard | proposed/open |
@@ -160,7 +160,22 @@
 - Non-goal boundary: Do not make ledger the state restoration source; checkpoint
   remains responsible for restoring runtime state.
 - Suggested order: 4
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/task_ledger_cooperation.py` (new): `record_checkpoint_boundary` derives
+    lifecycle / step / checkpoint_ref records from a `GovernedTaskState` at the
+    checkpoint save boundary and appends them via `TaskLedger.append` (which
+    redacts + validates + enforces seq). It does NOT read or write the checkpoint
+    file — checkpoint stays the state restoration source (AC-4).
+    `check_recovery_consistency` returns a `LedgerConsistencyReport` flagging
+    `missing_checkpoint_ref`, `stale_ledger_entry`, and `task_state_mismatch`;
+    `report.ok` drives recovery refusal (AC-5). Readers: `latest_checkpoint_ref`,
+    `latest_ledger_lifecycle`, `ledger_completed_step_count`.
+  - `tests/test_s5_ledger_cooperation.py`: 8 passed (RED→GREEN). Covers matching
+    (ok), missing checkpoint ref, stale ledger (checkpoint ahead), ledger-ahead-
+    of-checkpoint (completed work would repeat), lifecycle mismatch, boundary
+    append shape, lifecycle de-duplication, and a boundary→consistency integration.
+  - Focused ruff on touched files: clean.
 - Risk if ignored: S5 could record durable-looking history that does not match
   actual recoverable state.
 

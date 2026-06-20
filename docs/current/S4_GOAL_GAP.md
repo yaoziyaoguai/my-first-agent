@@ -1,12 +1,12 @@
 # S4 Goal Gap / Release Backlog — Auditable Governed Agent Runtime
 
 > Current document (`docs/current/`). S4 gap backlog，由 `S4_BASELINE_STATUS.md`
-> （现状）vs **proposed** `S4_GOAL.md`（目标，Direction A）推导。本文是 **backlog**，
-> 不是施工结果。
+> （现状）vs **frozen** `S4_GOAL.md`（目标，Direction A，2026-06-20 confirmed）校准。
+> 本文是 **backlog**，不是施工结果。
 >
-> **Provisional**：S4_GOAL 尚为 DRAFT（pending user freeze，见 `S4_GOAL.md §8`）。本
-> backlog 假设 Direction A 被确认；若用户改选 B/C，本 backlog 需重算。**本任务只生成 gap，
-> 不修 gap、不进入 gap loop、不修改代码/tests、不 push。**
+> **已校准（calibrated to frozen goal，2026-06-20）**：方向已锁定 Direction A（不再
+> provisional）；G01-G12 的 priority / 执行顺序 / AC mapping 已据冻结 goal 复核。进入
+> gap loop 才执行——**本（冻结+校准）任务不修 gap、不进入 gap loop、不改代码/tests、不 push。**
 >
 > 规则（`AGENTS.md` goal rules）：不删未完成 gap；完成需证据；不把未承诺能力强行变 gap；
 > 不把所有 TECH_DEBT 塞成 S4 必修。保留 Gap ID 防引用断裂。
@@ -19,9 +19,11 @@
 
 - **Baseline source**: `S4_BASELINE_STATUS.md`（S3 archived；same-spine + 五层完整；
   L5 governed-active；evidence 为结构化摘要、非逐字；TD-001/TD-004 open；full-suite 绿）。
-- **Goal source**: proposed `S4_GOAL.md`（S4 = Auditable Governed Agent Runtime；
-  L3 evidence/audit fidelity maturation；faithful + secret-safe replay/verification；
-  消化 TD-001/TD-004；不激活 dormant、不扩张 L5、不激活 memory；AC-1..AC-9）。
+- **Goal source**: **frozen** `S4_GOAL.md`（S4 = Auditable Governed Agent Runtime；
+  L3 evidence/audit fidelity maturation；**redacted-faithful** + secret-safe
+  replay/verification（非 byte-for-byte，不存 secret/全量原始 payload）；消化
+  TD-001/TD-004；不激活 dormant、不扩张 L5、不激活 memory、不做 durable ledger；
+  AC-1..AC-9；§8 Resolved decisions 1-5）。
 - **Overall gap verdict**: S4 是 **L3 evidence/audit 深化**版本，不是新 runtime、不是 L5
   扩张、不是 cleanup。核心缺口：(a) 定义 fidelity contract + audit/replay reference task；
   (b) replay-faithful evidence 模型；(c) secret-safe redaction 强制；(d) pending-tool 预览
@@ -29,7 +31,8 @@
   reference task + real key-safe smoke；(g) acceptance gate evidence-fidelity 分类；
   (h) 阶段治理 + S1/S2/S3 不回归 + full-suite 绿信号维持。
 - **How to use**: §3 推荐执行顺序；§4-§8 按优先级列 gap；§9 ID 索引；§10 non-goal
-  guardrails；§11 next step。所有 gap Status=`open`（G12 `deferred`），本任务只生成不执行。
+  guardrails；§11 next step。所有 gap Status=`open`（G12 `deferred`）；goal 已冻结，
+  gap loop 尚未执行（本任务为冻结+校准，不执行 gap）。
 
 ## 1. Priority model
 
@@ -47,10 +50,10 @@
 |---|---|---|
 | open | 11 | G01-G11 |
 | deferred | 1 | G12 |
-| blocked | 0 | —（依赖在 backlog 内排序；外部阻塞仅「goal 未冻结」，属流程非 gap） |
+| blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
 | satisfied | 0 | —（未执行） |
 
-## 3. Recommended execution order（依赖排序；冻结后执行）
+## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
 1. **S4-G01** (P0) — define fidelity contract + audit/replay reference task（解锁 G02/G05/G06）
 2. **S4-G02** (P1) — replay-faithful evidence model（依赖 G01）
@@ -172,8 +175,12 @@
 - **Needed action**: 扩 real smoke 覆盖 audit key path；key-safe（opt-in、默认 skip、不读/打印/
   复制/移动/提交 secret、不改 ignored config、不创建 .env）。
 - **Verification**: opt-in 下进入 audit path 并产生可校验 evidence；默认 skip；secret 边界保持。
+- **Release gate（resolved decision 4）**: deliverable = **key-safe opt-in smoke harness +
+  structural verification**；有 key 且安全时可跑关键 smoke，无 key 时 **default skip +
+  structural verification 即满足 AC-6 real 维度**。real-key 实跑**非必需、非 release blocker**
+  （P1 = 必达「harness 就位」，非 P0 release-blocker；release-blocker 仅 P0）。
 - **Dependencies**: S4-G06。
-- **Non-goal boundary**: 不要求 real 覆盖所有分支；不泄露 secret。
+- **Non-goal boundary**: 不要求 real 覆盖所有分支；不泄露 secret；real-key 实跑不作 blocker。
 - **Status**: open。
 
 ---
@@ -292,8 +299,7 @@ S4 **不做**（防越界）：
 
 ## 11. Next step
 
-- **用户审阅 `S4_GOAL.md §8 open decisions` 并冻结 goal**；冻结后再确认本 backlog
-  （若改选方向则重算）。
-- 冻结确认后进入 **S4 gap loop**（按 §3 顺序，每 gap 独立 focused mini-run、TDD、验证、
-  更新 backlog/work log、独立提交）。
-- **本任务不执行任何 gap、不进入 gap loop、不修改代码/tests、不 push。**
+- `S4_GOAL.md` 已**冻结**（2026-06-20），本 backlog 已据冻结 goal **校准**。
+- 下一步：进入 **S4 gap loop**，从 **S4-G01**（P0）起，按 §3 顺序逐个 gap 独立 focused
+  mini-run（TDD red→green、验证、更新 backlog/work log、独立提交）。
+- **本（冻结+校准）任务不执行任何 gap、不进入 gap loop、不修改代码/tests、不 push。**

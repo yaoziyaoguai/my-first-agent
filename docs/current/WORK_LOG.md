@@ -82,3 +82,49 @@
 - **Next step:** self-review of this round's artifacts (close-out + S4
   baseline/goal/gap consistency), fix or debt-track issues, then stop. Do not
   execute the S4 gap loop.
+
+## 2026-06-20 — Freeze S4 goal + calibrate gap backlog — user-confirmed
+
+- **Task:** User confirmed the 5 S4 decisions; freeze `S4_GOAL.md` and calibrate
+  `S4_GOAL_GAP.md` to the frozen goal. No code/tests; no gap execution; no push.
+- **S4_GOAL.md → FROZEN/CONFIRMED:**
+  - Status block DRAFT/PROPOSED → **CONFIRMED / FROZEN for S4 execution** (2026-06-20).
+  - §0 TD policy "(proposed)" → "(confirmed)"; §4 "(proposed scope)" → "(frozen
+    scope)"; §6 AC "(proposed 口径)" → "(frozen 口径)".
+  - §8 Open decisions → **Resolved decisions** (1-5) recording the user's confirmation:
+    1. Direction A (Auditable Governed Agent Runtime; L3 evidence/audit fidelity);
+       not B/C; no full task-intelligence / durable-memory / platform.
+    2. Fidelity ceiling = **redacted-faithful replay** (governed/decision/tool/
+       extension chain), NOT byte-for-byte, no secret, no full raw payload.
+    3. TD-011 durable ledger = **deferred** (resume stays checkpoint-based).
+    4. Real provider audit smoke = **key-safe opt-in**; default skip + structural
+       verification when no key; **not a release blocker**; never read/print/copy/
+       move/commit key/config/.env.
+    5. **Memory not activated** in S4 (still needs future explicit user authorization).
+  - Added "Future deferred decisions (S5/Sn)" sub-section; §9 Next step → frozen.
+- **S4_GOAL_GAP.md → calibrated to frozen goal:**
+  - Removed "proposed/provisional/pending-freeze" status; header + §0 now reference
+    the **frozen** goal; §2 blocked-note and §3 order note updated (goal frozen).
+  - Re-verified G01-G12: priority (P0×1/P1×6/P2×3/P3×1/P4×1) and execution order
+    **unchanged** (already correct vs frozen goal); AC-1..AC-9 mapping intact, no
+    orphan AC; deferred items (durable ledger / memory / Scheduler / MCP-ecosystem /
+    multi-agent / byte-for-byte) stay in G12(P4)/non-goals — none promoted to must.
+  - **S4-G07** clarified: deliverable = key-safe opt-in harness + structural
+    verification; real-key run is **non-blocker** (release-blocker tier is P0 only).
+  - §11 Next step → enter gap loop from S4-G01.
+- **TECH_DEBT.md:** reviewed; **no change** — no misclassification found. TD-001/
+  TD-004 correctly stay `open` (S4 frozen goal targets them via G02/G04 but they are
+  not resolved until the gap loop runs); TD-008..011 correctly `deferred`; TD-007
+  correctly non-blocker.
+- **Files changed:** `docs/current/S4_GOAL.md`, `docs/current/S4_GOAL_GAP.md`,
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `rg` confirms no DRAFT/PROPOSED/provisional/Open-decisions as
+  current status (only a resolved/frozen historical note); scope-sensitive terms
+  (durable ledger/memory/byte-for-byte/TD-007/real provider) appear only in
+  non-goal/deferred/key-safe/quality-debt contexts; S4-G01..G12 all present;
+  `git diff --check` clean; `git ls-files config/config.yaml .env` empty.
+- **Commit:** `docs(s4): freeze S4 goal and calibrate gap backlog` (see `git log`).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step:** enter the S4 gap loop at **S4-G01** (P0): define the evidence
+  fidelity contract + audit/replay reference task spec (define-only), then proceed
+  per `S4_GOAL_GAP.md §3`. (Not executed in this task.)

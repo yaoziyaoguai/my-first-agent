@@ -1,12 +1,13 @@
 # S4 Goal — Auditable Governed Agent Runtime
 
-> Current document (`docs/current/`). **状态：DRAFT / PROPOSED — pending user
-> approval to FREEZE.** 本 goal 由 coding agent 基于 `S_ROADMAP.md`（五层主线）、
-> `S4_BASELINE_STATUS.md`（S4 起点现状）与当前 `TECH_DEBT.md` 自主拟定。
+> Current document (`docs/current/`). **状态：CONFIRMED / FROZEN for S4 execution**
+> （用户于 2026-06-20 确认 §8 Resolved decisions 并冻结本 goal）。本 goal 由
+> `S_ROADMAP.md`（五层主线）、`S4_BASELINE_STATUS.md`（S4 起点现状）与当前
+> `TECH_DEBT.md` 推导而来；候选方向对比见 §3。
 >
-> 冻结含义（`AGENTS.md` goal rules）：**只有用户能批准并冻结 goal**。在用户确认 §8
-> Open decisions 之前，本文是 proposed direction，不得据此进入 gap loop 的不可逆实现。
-> 已生成的 `S4_GOAL_GAP.md` 是 backlog，同样在用户冻结前不执行。
+> 冻结含义（`AGENTS.md` goal rules）：goal 已冻结，不得因实现困难而改、不得静默收窄或
+> 扩张；只有用户能批准 goal 变更。`S4_GOAL_GAP.md` 是据本冻结 goal 校准的 gap backlog；
+> 进入 gap loop 才执行（本任务不执行 gap）。
 
 ## 0. Executive summary
 
@@ -29,7 +30,7 @@ S4 = **Auditable Governed Agent Runtime / 可审计的受控 Agent Runtime**。�
 > S4 答「这些受控工作能否被**忠实复放与验证**——在不泄露 secret 的前提下，让人/合规
 > 能从 evidence 重建 agent 做了什么？」
 
-**TD policy（proposed）**：TD-001 / TD-004 进入 S4 范围（在 key-safe 边界内消化）；
+**TD policy（confirmed）**：TD-001 / TD-004 进入 S4 范围（在 key-safe 边界内消化）；
 TD-007（ruff）仍**不**作 release blocker；full-suite 已绿，作为 S4 release 信号。
 
 ## 1. Roadmap constraints
@@ -78,12 +79,12 @@ TD-007（ruff）仍**不**作 release blocker；full-suite 已绿，作为 S4 re
 - **Why not selected**：memory 激活需用户**显式授权**（`AGENTS.md`）；durable ledger 是较大
   infra。与 A 的「可审计」目标相关但属 L2 持久化轴，留待 S5+ 或用户另行选择。
 
-## 4. Selected S4 direction（proposed scope）
+## 4. Selected S4 direction（frozen scope）
 
-**Selected：Direction A — Auditable Governed Agent Runtime（L3 evidence/audit
-fidelity maturation）。**
+**Selected & frozen：Direction A — Auditable Governed Agent Runtime（L3 evidence/audit
+fidelity maturation）。** （用户 2026-06-20 确认，见 §8-1。）
 
-核心范围（proposed，pending user freeze）：
+核心范围（已冻结）：
 
 1. **Replay-faithful evidence** —— governed task evidence 能忠实重建一条 governed task
    （含 MCP tool 调用 + read-only SubAgent 委派）的**决策/工具/委派链路**，超出当前
@@ -110,7 +111,7 @@ fidelity maturation）。**
 - **L5 — Skill/MCP/SubAgent/Scheduler**：维持 S3 governed-active（不退化、不扩张）；
   extension 产生的 evidence 纳入 S4 保真/校验边界；Scheduler 仍 **dormant，不激活**。
 
-## 6. Acceptance criteria（proposed 口径；阈值在 gap 阶段细化，不得削弱本节）
+## 6. Acceptance criteria（frozen 口径；阈值在 gap 阶段细化，不得削弱本节）
 
 1. **AC-1（S1/S2/S3 不回归）**：same-spine / governed task path / L5 extension
    governed-active / acceptance gate 在 fake 确定性下不回归；targeted S2+S3 gate 与
@@ -149,25 +150,39 @@ S4 明确**不**做：
 - 不把 TD-007 全清当 release blocker。
 - 不开始 S5/Sn。
 
-## 8. Open decisions（pending user — 冻结前必须确认）
+## 8. Resolved decisions
 
-> 本 goal 由 agent 自主拟定。以下决策需用户确认后本 goal 方可 FREEZE；确认前不进入
-> 不可逆实现。
+> 这些条目在 draft 阶段曾是 open decisions，现已由用户于 2026-06-20 **确认并冻结
+> （resolved）**。后续 gap/实现以此为准，不得重新打开 S4 scope。
 
-1. **Selected direction**：确认 S4 = Direction A（Auditable Governed Agent Runtime），
-   而非 B（L4 task intelligence）或 C（L2 durability）。
-2. **Fidelity ceiling**：确认保真目标为「**redacted-faithful replay of the governed
-   chain**」（可复放受控决策/工具/委派链路 + secret redaction），而非「逐字原始字节」。
-3. **Durable ledger（TD-011）**：确认在 S4 **deferred**（resume 仍靠 checkpoint），不作
-   S4 必达。
-4. **Real provider audit smoke**：确认 real-provider 复放/审计 smoke 为**可选 key-safe
-   opt-in**（镜像 S3 AC-6），非必达全分支。
-5. **Memory**：确认 S4 **不**激活 memory（保持 AGENTS.md「no memory activation unless
-   explicitly authorized」）。
+1. **Selected direction（resolved）**：S4 = **Direction A — Auditable Governed Agent
+   Runtime**，核心 = L3 evidence/audit fidelity maturation。**不**做 Direction B
+   （L4 完整任务智能）或 C（L2 完整 durable memory）；**不**把 S4 扩成完整任务智能、
+   完整 durable memory、完整平台化。
+2. **Fidelity ceiling（resolved）**：保真目标 = **redacted-faithful replay**——能忠实复放
+   governed chain / decision chain / tool chain / extension chain；**不**追求 byte-for-byte
+   raw persistence、**不**保存 secret、**不**要求保存全部原始 payload。
+3. **Durable ledger（TD-011）（resolved）**：S4 **继续 defer**——不做 durable task ledger、
+   不激活重型持久化基础设施；resume 仍靠 checkpoint。
+4. **Real provider audit smoke（resolved）**：**key-safe opt-in**——有 key 且安全时可跑关键
+   smoke；无 key 时 default skip + structural verification，**不阻塞 release**。严禁读取 /
+   打印 / 复制 / 移动 / 提交 key / config / .env。
+5. **Memory（resolved）**：S4 **不**激活 memory；memory activation 仍需未来用户显式授权，
+   不混入 S4。
+
+### Future deferred decisions（S5/Sn only，不属于 S4）
+
+- Direction B（L4 governed task intelligence：re-plan / 失败自恢复 / evidence 驱动 adjudication）。
+- Direction C / L2 durability：durable cross-session task ledger（TD-011）、scoped memory
+  activation（需显式授权）。
+- Byte-for-byte 全量原始持久化（若与 secret-safe 冲突）。
+- Scheduler 生产化（TD-008）、完整 MCP 生态（TD-009）、完整 multi-agent / 可写委派（TD-010）。
+- TD-007 全量 ruff 清理（除非用户另行决定提前）。
 
 ## 9. Next step
 
-- 本 `S4_GOAL.md` 为 **proposed/draft**；**等用户确认 §8 后冻结**。
-- gap 已生成（`S4_GOAL_GAP.md`，backlog，不执行）。
-- 冻结后再进入 S4 gap loop（每个 gap 独立 focused mini-run、TDD、验证、提交）。
-- **本任务不执行任何 S4 gap、不进入 gap loop、不修改代码/tests、不 push。**
+- 本 `S4_GOAL.md` 已**冻结**（confirmed for S4 execution，2026-06-20）。
+- gap 已据本冻结 goal 校准（`S4_GOAL_GAP.md`，backlog；按 §3 推荐顺序执行）。
+- 下一步：进入 **S4 gap loop**（从 S4-G01 起，每个 gap 独立 focused mini-run、TDD、验证、
+  更新 backlog/work log、独立提交）。
+- **本（冻结+校准）任务不执行任何 S4 gap、不进入 gap loop、不修改代码/tests、不 push。**

@@ -20,7 +20,7 @@
 | S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | done |
 | S5-G03 | P1 | L2 | Local durable ledger storage API | done |
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | done |
-| S5-G05 | P1 | L4 | Fake/local recovery E2E | proposed/open |
+| S5-G05 | P1 | L4 | Fake/local recovery E2E | done |
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | proposed/open |
 | S5-G07 | P1 | L1 | Same-spine durability guard | proposed/open |
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | proposed/open |
@@ -200,7 +200,22 @@
 - Non-goal boundary: No real provider success requirement and no external
   process/service dependency.
 - Suggested order: 5
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `tests/test_s5_reference_task_acceptance.py` (new): fake/local recovery E2E
+    mirroring the S2/S4 reference-task harness, layered with the S5 ledger. Phase 1
+    runs step 0 to completion, records a checkpoint+ledger boundary, then
+    "interrupts". Phase 2 reloads from checkpoint + ledger, runs
+    `check_recovery_consistency` (ok), resumes at step 1 (step 0 NOT repeated),
+    and continues step 1 to `DONE` through the governed runtime path
+    (`receive`/`accept`/`advance`/`resume`). Asserts one coherent history:
+    completed step indices `{0, 1}`, monotonic ordering, latest checkpoint_ref
+    present. Integrated AC-7: a synthetic key in a step-0 completion summary is
+    redacted in the raw ledger file.
+  - This is an acceptance test composing the verified G01-G04 units (same pattern
+    as the S2/S4 reference-task tests); it passed on first run, which is the
+    expected outcome for an integration of already-verified units.
+  - Full S5 suite (`test_s5_*`): 44 passed. Focused ruff on touched files: clean.
 - Risk if ignored: S5 would have ledger records but no product-level recovery
   proof.
 

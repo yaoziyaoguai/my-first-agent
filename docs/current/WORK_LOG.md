@@ -300,8 +300,45 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G04 checkpoint-ledger cooperation`).
+  - `91bb453` (`feat(s5): S5-G04 checkpoint-ledger cooperation`).
 - Next step:
   - S5-G05 — fake/local recovery E2E: a deterministic task that interrupts after
     a durable progress point, reloads from checkpoint + ledger, continues, and
     verifies one coherent task history.
+
+## 2026-06-20 - S5-G05 fake/local recovery E2E
+
+- Task name: S5-G05 — fake/local recovery E2E (acceptance test composing G01-G04).
+- Files changed:
+  - `tests/test_s5_reference_task_acceptance.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added a fake/local recovery E2E mirroring the S2/S4 reference-task harness,
+    layered with the S5 ledger: phase 1 runs step 0 to completion, records a
+    checkpoint+ledger boundary, then interrupts; phase 2 reloads from checkpoint
+    + ledger, runs `check_recovery_consistency` (ok), resumes at step 1 (step 0
+    not repeated), and finishes step 1 to DONE through the governed runtime path.
+  - Asserts one coherent history (completed indices {0,1}, monotonic ordering,
+    latest checkpoint_ref present) and integrated AC-7 (synthetic key in a
+    completion summary is redacted in the raw ledger file).
+- Verification commands and results:
+  - This is an acceptance test composing the verified G01-G04 units (same pattern
+    as S2/S4 reference tasks). It passed on first run — the expected outcome for
+    an integration of already-verified units; the integration-risk areas
+    (completed-step counting, checkpoint round-trip, consistency check, integrated
+    redaction) all held.
+  - `.venv/bin/python -m pytest tests/test_s5_reference_task_acceptance.py -q` ->
+    `1 passed`.
+  - Full S5 suite (`tests/test_s5_*.py`) -> `44 passed`.
+  - `.venv/bin/ruff check tests/test_s5_reference_task_acceptance.py` -> clean.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G05` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G05 fake/local recovery E2E`).
+- Next step:
+  - S5-G06 — ledger-aware audit/replay alignment: extend audit/replay/report
+    minimally to include ledger refs/summaries while preserving S4 contracts.

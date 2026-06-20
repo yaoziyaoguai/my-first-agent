@@ -34,7 +34,7 @@
   lint style vs. doc/governance guards).
 - Impact: Project-level lint gate is non-green. Not a runtime regression. S2
   policy (S2-G12) required focused ruff for new/modified files only.
-- Recommended stage: S3/Sn batched lint pass, separate from TD-006 guard
+- Recommended stage: S4/Sn batched lint pass, separate from TD-006 guard
   cleanup.
 - Verification idea: `.venv/bin/ruff check .` exit 0. Do not mix into TD-006
   unless a shared root cause is proven.
@@ -48,7 +48,7 @@
 - Source/reason: S2-G11 delivered structured task-level evidence
   (`TaskEvidenceReport`), deliberately not byte-for-byte persistence.
 - Impact: Human replay is structured-summary level, not full audit trace.
-- Recommended stage: S3/Sn, when full-fidelity audit or compliance
+- Recommended stage: S4/Sn, when full-fidelity audit or compliance
   traceability is required.
 - Verification idea: Review `agent/evidence_recorder.py` persistence behavior;
   decide if S3 needs raw body persistence.
@@ -62,7 +62,7 @@
 - Source/reason: Legacy `agent/provider/legacy_adapter.py` facade not refactored.
 - Impact: Two call shapes for provider calls (same provider). Cosmetic
   inconsistency, not a runtime split (FakeProvider/RealProvider share one spine).
-- Recommended stage: S3/Sn, when planner/compress or `legacy_adapter.py` is
+- Recommended stage: S4/Sn, when planner/compress or `legacy_adapter.py` is
   next refactored.
 - Verification idea: Review `agent/provider/legacy_adapter.py` and call sites
   in `agent/core.py`.
@@ -77,7 +77,7 @@
   `agent/context.py` has zero imports in src.
 - Impact: Dead code without tool-use/tool-result pairing guards; safe only
   because unreachable.
-- Recommended stage: S3/Sn dead-code removal when `agent/context.py` or the L2
+- Recommended stage: S4/Sn dead-code removal when `agent/context.py` or the L2
   context module is next touched.
 - Verification idea: `rg "from agent\.context import|import agent\.context"
   agent/ main.py` → no matches; then delete after confirming zero reachability.
@@ -95,7 +95,7 @@
 - Source/reason: S2-G11 surfaced this limitation; pending-tool results are
   stored in conversation/state logs but the event-log preview route can be empty.
 - Impact: Event-log fidelity gap for pending-tool traces.
-- Recommended stage: S3/Sn, when improving event-log fidelity.
+- Recommended stage: S4/Sn, when improving event-log fidelity.
 - Verification idea: Review `execute_pending_tool` and mediator `_route_result`
   behavior around `turn_context[tool_use_id]`.
 

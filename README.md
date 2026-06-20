@@ -1,12 +1,12 @@
 # my-first-agent
 
-First Agent 是一个 local-first 的 Agent Runtime 项目。S1（Baseline Usable Product / 基本可用产品版）已完成并归档；当前进入 S2 起点：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收并继续增强。
+First Agent 是一个 local-first 的 Agent Runtime 项目。S1/S2/S3 已完成并归档；当前进入 **S4 准备阶段（Auditable Governed Agent Runtime，proposed/待冻结）**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收并继续增强。
 
-**当前权威入口：[docs/current/S2_BASELINE_STATUS.md](docs/current/S2_BASELINE_STATUS.md)**（S2 起点现状审计）。S2 目标见 [docs/current/S2_GOAL.md](docs/current/S2_GOAL.md)（待确认）；S1 已归档至 [docs/history/S1_BASELINE_USABLE_PRODUCT/](docs/history/S1_BASELINE_USABLE_PRODUCT/)。
+**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/S4_BASELINE_STATUS.md](docs/current/S4_BASELINE_STATUS.md)（S4 起点现状）。S4 目标（proposed）见 [docs/current/S4_GOAL.md](docs/current/S4_GOAL.md)；S1/S2/S3 已归档至 [docs/history/](docs/history/)。
 
 ## 当前状态
 
-- 阶段：**S1 已完成并归档；S2 起点现状已审计**（见 [docs/current/S2_BASELINE_STATUS.md](docs/current/S2_BASELINE_STATUS.md)），不是历史 demo、sprint 或旧 v1/v2/v3 目标。
+- 阶段：**S1/S2/S3 已完成并归档；S4 准备中（baseline 已审计，goal 为 proposed/待冻结）**（见 [docs/current/S4_BASELINE_STATUS.md](docs/current/S4_BASELINE_STATUS.md)），不是历史 demo、sprint 或旧 v1/v2/v3 目标。
 - 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
 - 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
 - Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
@@ -43,19 +43,19 @@ cp config/config.example.yaml config/config.yaml
 
 `--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 在 S1 中只要求边界清楚，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S2_BASELINE_STATUS.md](docs/current/S2_BASELINE_STATUS.md) 与归档 [docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md](docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md)。
+当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 在 S1 中只要求边界清楚，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S4_BASELINE_STATUS.md](docs/current/S4_BASELINE_STATUS.md) 与 [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)。
 
 ## 文档导航
 
 | 想了解 | 读这里 |
 |---|---|
 | S 系列版本语义 | [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) |
-| S2 起点现状审计 | [docs/current/S2_BASELINE_STATUS.md](docs/current/S2_BASELINE_STATUS.md) |
-| S2 目标（待确认） | [docs/current/S2_GOAL.md](docs/current/S2_GOAL.md) |
-| S2 gap（待生成） | [docs/current/S2_GOAL_GAP.md](docs/current/S2_GOAL_GAP.md) |
+| S4 起点现状审计 | [docs/current/S4_BASELINE_STATUS.md](docs/current/S4_BASELINE_STATUS.md) |
+| S4 目标（proposed/待冻结） | [docs/current/S4_GOAL.md](docs/current/S4_GOAL.md) |
+| S4 gap backlog | [docs/current/S4_GOAL_GAP.md](docs/current/S4_GOAL_GAP.md) |
 | 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
 | 执行日志 | [docs/current/WORK_LOG.md](docs/current/WORK_LOG.md) |
-| S1（已归档）目标 / backlog / 验收 / 审计 | [docs/history/S1_BASELINE_USABLE_PRODUCT/](docs/history/S1_BASELINE_USABLE_PRODUCT/) |
+| S1/S2/S3（已归档） | [docs/history/S1_BASELINE_USABLE_PRODUCT/](docs/history/S1_BASELINE_USABLE_PRODUCT/) · [docs/history/S2_GOVERNED_TASK_AGENT/](docs/history/S2_GOVERNED_TASK_AGENT/) · [docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/](docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/) |
 
 ## 测试
 

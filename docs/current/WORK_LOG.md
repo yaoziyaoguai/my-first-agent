@@ -478,8 +478,40 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`docs(s5): S5-G09 non-regression and release governance`).
+  - `432855c` (`docs(s5): S5-G09 non-regression and release governance`).
 - Next step:
   - S5-G10 — extension-boundary recovery coverage: prove durable recovery over one
     existing governed extension path (MCP and/or read-only SubAgent); Scheduler
     stays dormant.
+
+## 2026-06-20 - S5-G10 extension-boundary recovery coverage
+
+- Task name: S5-G10 — extension-boundary recovery coverage (acceptance test).
+- Files changed:
+  - `tests/test_s5_extension_recovery_coverage.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added an acceptance test proving durable recovery over a governed task step
+    that uses a read-only SubAgent delegation (`delegation_log`) + an MCP tool
+    (`tool_execution_log`) via the existing mediator/evidence path. After
+    checkpoint+ledger interrupt+reload, the delegation and MCP events survive,
+    `align_ledger_with_replay` is coherent, and `check_recovery_consistency` is ok.
+  - Added a Scheduler-dormancy assertion: the four S5 modules do not reference
+    `ActionScheduler` / `action_scheduler` (TD-008 / S5 non-goal held).
+- Verification commands and results:
+  - `.venv/bin/python -m pytest tests/test_s5_extension_recovery_coverage.py -q`
+    -> `2 passed` (passed first run; composes G01-G07 + extension events).
+  - `.venv/bin/ruff check tests/test_s5_extension_recovery_coverage.py` -> clean.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G10` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None. Scheduler productionization (`TD-008`), full MCP ecosystem (`TD-009`),
+    and writable SubAgent (`TD-010`) remain deferred — not activated by S5.
+- Commit hash:
+  - Pending (`feat(s5): S5-G10 extension-boundary recovery coverage`).
+- Next step:
+  - S5-G11 — operator-facing ledger summary: a compact safe-summary report of
+    lifecycle/checkpoint refs (no raw payloads), if it materially improves release
+    evidence.

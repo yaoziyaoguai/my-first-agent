@@ -25,7 +25,7 @@
 | S5-G07 | P1 | L1 | Same-spine durability guard | done |
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | done |
 | S5-G09 | P2 | L1-L5 | Non-regression and release governance | done |
-| S5-G10 | P2 | L5 | Extension-boundary recovery coverage | proposed/open |
+| S5-G10 | P2 | L5 | Extension-boundary recovery coverage | done |
 | S5-G11 | P3 | L3/L4 | Operator-facing ledger summary | proposed/open |
 | S5-G12 | P4 | L5/Sn | Deferred capability guardrails | deferred/non-goal |
 
@@ -389,7 +389,19 @@
 - Non-goal boundary: Do not implement Scheduler productionization, full MCP
   discovery, or writable SubAgent delegation.
 - Suggested order: 10
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `tests/test_s5_extension_recovery_coverage.py` (new): 2 tests.
+    (1) A governed task step uses a read-only SubAgent delegation
+    (`delegation_log`) + an MCP tool (`tool_execution_log`) through the existing
+    mediator/evidence path; `build_replay_chain` projects both; the ledger records
+    evidence refs aligned to the replay chain; after a checkpoint+ledger
+    interrupt+reload the delegation (`del-1`) and MCP tool (`mcp-tool-1`) events
+    survive, `align_ledger_with_replay` is coherent, and `check_recovery_consistency`
+    is ok. (2) Scheduler dormancy: the four S5 modules do not reference
+    `ActionScheduler` / `action_scheduler` (TD-008 / S5 non-goal held).
+  - Acceptance test composing G01-G07 pieces + extension events (passed first run,
+    like the S5 reference-task E2E). 2 passed. Focused ruff: clean.
 - Risk if ignored: Ledger recovery may pass only for the simplest core task path
   and miss extension-boundary regressions.
 

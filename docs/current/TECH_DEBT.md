@@ -123,19 +123,10 @@
 > wired into `tool_runtime_mediator._route_result` / `mediate_pending` `tool_output`
 > preview + `redact_metadata` into `record_evidence` metadata; TDD
 > `tests/test_final_legacy_redaction.py`) and removed from this live register.
-
-### TD-013 - Evidence verifier does not detect cross-kind duplicate refs
-
-- ID: TD-013
-- Title: `evidence_verifier._duplicate_refs` groups by kind (tool / delegation separately), so a
-  ref_id shared across kinds (e.g. `tool_use_id == delegation_id`) is not flagged —
-  `verify_replay_chain(...).ok` stays True.
-- Status: open / carry-forward (S4 audit)
-- Source/reason: S4-G05 scoped `self_consistent` to count-level consistency per
-  the archived S4 fidelity contract §5.2 (tool/delegation counts). Cross-kind duplicate detection is a
-  contract expansion not required by the frozen goal.
-- Impact: Low. `tool_use_id` and `delegation_id` come from different id spaces, so real-world
-  collision is unlikely; but it is a genuine verifier blind spot.
-- Recommended stage: S5/Sn, when hardening the verifier beyond count-level consistency.
-- Verification idea: a chain with a tool and a delegation sharing the same `ref_id` should fail
-  `self_consistent` with `duplicate_ref` (currently passes).
+>
+> TD-013 (verifier did not detect cross-kind duplicate refs) was **resolved in
+> S_FINAL** (FINAL-G04: `_duplicate_refs` now flags a `ref_id` shared across tool
+> and delegation events as `cross_kind`; TDD
+> `tests/test_final_verifier_cross_kind.py`) and removed from this live register.
+> Both S4 whole-stage audit findings are now resolved; this section is retained as
+> a historical record.

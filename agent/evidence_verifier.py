@@ -176,20 +176,32 @@ def _check_replayable(chain: ReplayChain) -> VerificationFinding:
 
 
 def _duplicate_refs(chain: ReplayChain) -> dict[str, list[str]]:
-    """返回同 kind 内重复的 ref_id（按 kind 分组）。空 dict 表示无重复。"""
+    """返回重复的 ref_id：同 kind 内重复（按 kind 分组）+ 跨 kind 重复（``cross_kind``）。
+
+    空 dict 表示无重复。跨 kind 重复指同一 ref_id 同时出现在 tool 与 delegation 事件中
+    （TD-013：原实现仅按 kind 分组，漏报跨 kind 重复）。
+    """
     result: dict[str, list[str]] = {}
-    for kind, events in (
-        ("tool", chain.tool_events),
-        ("delegation", chain.delegation_events),
-    ):
+    tool_refs = [e.ref_id for e in chain.tool_events]
+    delegation_refs = [e.ref_id for e in chain.delegation_events]
+    for kind, refs in (("tool", tool_refs), ("delegation", delegation_refs)):
         seen: set[str] = set()
         dups: list[str] = []
-        for e in events:
-            if e.ref_id in seen and e.ref_id not in dups:
-                dups.append(e.ref_id)
-            seen.add(e.ref_id)
+        for ref_id in refs:
+            if ref_id in seen and ref_id not in dups:
+                dups.append(ref_id)
+            seen.add(ref_id)
         if dups:
             result[kind] = dups
+    # TD-013：跨 kind 重复 —— 同一 ref_id 同时出现在 tool 与 delegation 事件中。
+    delegation_set = set(delegation_refs)
+    cross = [
+        ref_id
+        for ref_id in dict.fromkeys(tool_refs)
+        if ref_id and ref_id in delegation_set
+    ]
+    if cross:
+        result["cross_kind"] = cross
     return result
 
 

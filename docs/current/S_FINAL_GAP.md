@@ -31,7 +31,7 @@
 | FINAL-G01 | P0 | L1-L5 | Full-suite quality gate green (TD-007) | done |
 | FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | done |
 | FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | done |
-| FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | proposed/open |
+| FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | done |
 | FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | proposed/open |
 | FINAL-G06 | P3 | L1 | Planner/compress legacy facade (TD-002) | proposed/open (optional) |
 | FINAL-G07 | P4 | L5/Sn | Deferred scope guardrails (TD-008/009/010) | deferred/non-goal |
@@ -146,7 +146,12 @@
 - Dependencies: FINAL-G01.
 - Non-goal boundary: Do not expand verifier semantics beyond duplicate-ref detection.
 - Suggested order: 4
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20): `_duplicate_refs` now also detects cross-kind duplicates
+  (a `ref_id` shared across tool and delegation events → reported as `cross_kind`).
+  TDD `tests/test_final_verifier_cross_kind.py` (3 tests, RED->GREEN): cross-kind
+  dup now fails `self_consistent` with `duplicate_ref`; same-kind detection and
+  no-dup pass unchanged. S4 verifier suite still green.
 - Risk if ignored: a minor verifier blind spot stays open.
 
 ## FINAL-G05 - Non-regression, closure record, debt/docs governance

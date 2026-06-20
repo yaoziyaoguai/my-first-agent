@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 6 | G06-G11 |
+| open | 5 | G07-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 5 | G01（contract）；G02（chain model）；G03（redaction）；G04（pending-tool/TD-004）；G05（evidence verifier） |
+| satisfied | 6 | G01-G06（contract + chain model + redaction + pending-tool/TD-004 + verifier + audit/replay E2E anchor） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -194,7 +194,15 @@
 - **Verification**: fake E2E 确定性通过且经真实 evidence 路径复放/校验；S2/S3 gate 仍过（AC-1）。
 - **Dependencies**: S4-G01/G02/G03/G05。
 - **Non-goal boundary**: 不连真实 endpoint；不把 full pytest 全绿当唯一目标。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G06）。
+- **Evidence**: `tests/test_s4_reference_task_acceptance.py::test_s4_reference_task_audit_replay_closed_loop`
+  —— governed path（receive→accept→execute[MCP+SubAgent]→advance→done）→ record
+  （`build_task_evidence_report.replay_chain_events` 非空）→ replay（chain 重建 MCP tool +
+  SubAgent 委派，policy_outcome=accept_result）→ verify（`verify_evidence` ok=True）→
+  AC-3（注入 fake secret `sk-test-...` 在 chain preview 中被 `[REDACTED]`）→ AC-1
+  （S2/S3/S4 acceptance report `release_blocked is False`、`runtime_regressions == ()`）。
+  81 passed / 2 skipped（S4 suite + S2/S3 + evidence；real-provider opt-in）。Commit:
+  `test(s4): G06 audit/replay reference task E2E (fake/local, AC-2/3/5/6-fake/1)`。
 
 ### S4-G07 — Real provider audit key-path smoke
 - **Priority**: P1（must_fix_for_s4）
@@ -308,7 +316,7 @@
 | S4-G03 | Secret-safe redaction enforcement | P1 | satisfied | L3/Sec | AC-3 |
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | satisfied | L3 | AC-4 |
 | S4-G05 | Evidence verification / consistency check | P1 | satisfied | L3 | AC-5 |
-| S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | open | L4 | AC-1/6 |
+| S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | satisfied | L4 | AC-1/6 |
 | S4-G07 | Real provider audit key-path smoke | P1 | open | L1 | AC-6 |
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | open | L1/Cross | AC-7 |
 | S4-G09 | docs/current+history governance for S4 | P2 | open | Cross | AC-8 |

@@ -44,7 +44,8 @@
 - ID: TD-001
 - Title: Evidence records safe_summary + size metadata, but cannot replay full
   model/tool payloads byte-for-byte.
-- Status: open / carry-forward (S2 surfaced; full-fidelity deferred)
+- Status: **resolved (S4-G02/G03/G05/G06, 2026-06-20)** — kept in register until
+  S4 close-out (then moves to the S4 archive, mirroring TD-006/TD-004 handling).
 - Source/reason: S2-G11 delivered structured task-level evidence
   (`TaskEvidenceReport`), deliberately not byte-for-byte persistence.
 - Impact: Human replay is structured-summary level, not full audit trace.
@@ -52,6 +53,14 @@
   traceability is required.
 - Verification idea: Review `agent/evidence_recorder.py` persistence behavior;
   decide if S3 needs raw body persistence.
+- **Resolution (S4):** the frozen S4 goal re-scoped TD-001 from "byte-for-byte"
+  to **redacted-faithful replay** (`S4_GOAL.md §8-2`). Delivered by: replay-faithful
+  chain model (`agent/task_replay_chain.py`, G02) projecting tool/delegation/decision
+  chain at safe-summary granularity; secret-safe redaction enforcement
+  (`agent/evidence_redaction.py`, G03); evidence verifier (`agent/evidence_verifier.py`,
+  G05); and the audit/replay E2E anchor (`tests/test_s4_reference_task_acceptance.py`,
+  G06) proving execute→record→replay→verify on a governed MCP+SubAgent task. Evidence is
+  now reconstructable + verifiable (not byte-for-byte, by design — see non-goal).
 
 ### TD-002 - Planning/compress still use legacy client facade
 

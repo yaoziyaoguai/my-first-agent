@@ -296,3 +296,36 @@
 - **Next step (authorized by §3):** S4-G06 (P1) — audit/replay reference task E2E
   (fake/local): combine G02/G03/G05 into an execute→record→replay→verify closed loop on
   the governed path (MCP + SubAgent), as the S4 acceptance anchor.
+
+## 2026-06-20 — S4-G06 audit/replay reference task E2E (fake/local) — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G06 (P1): the S4 acceptance anchor — execute→record→replay→verify
+  closed loop on a governed MCP+SubAgent task (fake/local deterministic). Combines
+  G02/G03/G05. AC-2/3/5/6-fake/AC-1.
+- **Done:** new `tests/test_s4_reference_task_acceptance.py` —
+  `test_s4_reference_task_audit_replay_closed_loop`. Drives the S2 governed path
+  (receive→accept→execute[MCP tool + read-only SubAgent]→advance→done, reusing the S3
+  fixture pattern self-contained), then asserts the S4 NEW closed loop:
+  - **record**: `build_task_evidence_report.replay_chain_events` non-empty (G02).
+  - **replay**: `build_replay_chain` reconstructs the MCP tool (name/status) + SubAgent
+    delegation (ref_id/subagent_name/policy_outcome=accept_result) — beyond label level (AC-2).
+  - **verify**: `verify_evidence(state).ok is True` (G05/AC-5).
+  - **AC-3**: injected fake secret `sk-test-secret-...` in the MCP tool result is
+    `[REDACTED]` in the chain preview (not leaked).
+  - **AC-1**: S2/S3/S4 acceptance report `release_blocked is False`,
+    `runtime_regressions == ()`.
+- **Files changed:** `tests/test_s4_reference_task_acceptance.py` (new),
+  `docs/current/TECH_DEBT.md` (TD-001 → resolved), `docs/current/S4_GOAL_GAP.md`
+  (G06 → satisfied; §2; §9), `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `test_s4_reference_task_acceptance.py` 1 passed. Focused ruff clean.
+  Non-regression: S4 suite + S2/S3 reference + evidence lifecycle 81 passed / 2 skipped
+  (real-provider opt-in). `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G06 → **satisfied** (S4 acceptance anchor in place).
+- **`TECH_DEBT.md` items:** **TD-001 → resolved (S4-G02/G03/G05/G06)** — the frozen S4 goal
+  rescoped TD-001 from byte-for-byte to redacted-faithful replay; chain + redaction +
+  verifier + E2E deliver it. Kept in register until S4 close-out.
+- **Commit:** `test(s4): G06 audit/replay reference task E2E (fake/local, AC-2/3/5/6-fake/1)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged (fake secret only).
+- **Next step (authorized by §3):** S4-G07 (P1) — real provider audit key-path smoke
+  (key-safe opt-in; default skip + structural verification satisfies AC-6 real dimension;
+  real-key run non-blocker).

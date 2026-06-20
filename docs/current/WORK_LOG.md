@@ -35,3 +35,29 @@
 - **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
 - **Next step (authorized by current docs):** define the S4 goal with the user
   (2-3 candidates → select one with non-goals + AC), then derive the S4 gap.
+
+## 2026-06-20 — S4 goal (proposed/draft) — user-authorized
+
+- **Task:** Autonomously define the S4 goal from `S_ROADMAP.md` +
+  `S4_BASELINE_STATUS.md` + `TECH_DEBT.md` (list 2-3 candidates, select one). Do
+  not freeze (freeze needs user approval); do not start the gap loop.
+- **Done:** wrote `docs/current/S4_GOAL.md` (status = DRAFT / PROPOSED).
+  - Candidates: A = L3 auditable/replayable evidence (SELECTED); B = L4 governed
+    task intelligence; C = L2 durability (durable ledger / memory).
+  - **Selected A — Auditable Governed Agent Runtime** (L3 evidence/audit fidelity
+    maturation): faithful, secret-safe replay + verification of governed tasks
+    (incl. MCP/SubAgent), digesting TD-001 (fidelity) + TD-004 (pending-tool
+    preview). Rationale: lowest-risk, reuses S2/S3 evidence spine, bounded +
+    verifiable AC, activates no dormant capability, key-safe by construction.
+  - Non-goals: no raw secret persistence, no Scheduler productionization (TD-008),
+    no full MCP/multi-agent ecosystem (TD-009/010), no memory activation, no
+    durable ledger (TD-011), no same-spine rewrite, no AutoGPT autonomy.
+  - 5 open decisions recorded (direction confirm, fidelity ceiling, TD-011 defer,
+    real-smoke optional, memory off) — goal stays unfrozen pending user.
+- **Files changed:** `docs/current/S4_GOAL.md` (new), `WORK_LOG.md` (this entry).
+- **Verification:** doc-only; `git diff --check` clean. No code/test change.
+- **Commit:** `docs(s4): propose S4 goal — Auditable Governed Agent Runtime (draft)`
+  (see `git log`).
+- **Push:** none. **Secrets:** none.
+- **Next step:** generate `S4_GOAL_GAP.md` (backlog only; not executed); then
+  self-review. Freeze awaits user confirmation of §8 open decisions.

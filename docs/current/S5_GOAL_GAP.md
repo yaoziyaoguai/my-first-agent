@@ -16,7 +16,7 @@
 
 | Gap | Priority | Layer | Title | Status |
 |---|---:|---|---|---|
-| S5-G01 | P0 | L2/L4 | Ledger contract and reference recovery task | proposed/open |
+| S5-G01 | P0 | L2/L4 | Ledger contract and reference recovery task | done |
 | S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | proposed/open |
 | S5-G03 | P1 | L2 | Local durable ledger storage API | proposed/open |
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | proposed/open |
@@ -51,7 +51,17 @@
 - Non-goal boundary: Do not define a production database schema or Scheduler
   activation contract here.
 - Suggested order: 1
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/task_ledger.py`: ledger contract — 4 record kinds (task_lifecycle /
+    step_progress / checkpoint_ref / evidence_ref), required-field validation
+    (`validate_ledger_record`), per-task_id strictly-increasing seq ordering
+    (`assert_monotonic_order`), deterministic reference recovery task with
+    `REFERENCE_RESUME_AFTER_SEQ = 6`.
+  - `tests/test_s5_ledger_contract.py`: 16 passed (RED→GREEN). Covers all 4
+    kinds, the safe-summary field contract (no raw payload/secret fields), the
+    per-task_id ordering invariant, and the reference-task resume boundary.
+  - Focused ruff on both files: clean.
 - Risk if ignored: S5 implementation would be unbounded and release judgment
   would collapse into subjective "it works" claims.
 

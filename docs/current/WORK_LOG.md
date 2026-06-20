@@ -151,7 +151,44 @@
   - None. `TD-012` and `TD-013` explicitly remain open/deferred per the freeze
     resolutions.
 - Commit hash:
-  - Pending (`docs(s5): freeze S5 goal`).
+  - `8429ef5` (`docs(s5): freeze S5 goal`).
 - Next step:
   - Orient via graphify on checkpoint/task-state/evidence/replay/redaction/
     verifier/acceptance_gate/spine, then run the S5 gap loop S5-G01 → S5-G11.
+
+## 2026-06-20 - S5-G01 ledger contract and reference recovery task
+
+- Task name: S5-G01 — ledger contract + reference recovery task (TDD).
+- Files changed:
+  - `agent/task_ledger.py` (new)
+  - `tests/test_s5_ledger_contract.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Defined the narrow, safe-summary ledger contract: 4 record kinds
+    (task_lifecycle / step_progress / checkpoint_ref / evidence_ref), frozen
+    slots dataclasses with no raw-payload/secret fields (AC-2/AC-7 boundary).
+  - Added required-field validation (`validate_ledger_record`) and the
+    per-task_id strictly-increasing `seq` ordering invariant
+    (`assert_monotonic_order`).
+  - Added a deterministic fake/local reference recovery task
+    (`build_reference_recovery_records`) covering all 4 kinds with
+    `REFERENCE_RESUME_AFTER_SEQ = 6` defining the interruption/resume point.
+  - No storage I/O and no runtime wiring here (those land in S5-G03/S5-G04).
+- Verification commands and results:
+  - RED first: `tests/test_s5_ledger_contract.py` collection failed with
+    `ModuleNotFoundError: No module named 'agent.task_ledger'` (expected).
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_contract.py -q` ->
+    `16 passed`.
+  - `.venv/bin/ruff check agent/task_ledger.py tests/test_s5_ledger_contract.py`
+    -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G01` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G01 ledger contract and reference recovery task`).
+- Next step:
+  - S5-G02 — ledger safety/redaction boundary (route summaries/metadata through
+    `evidence_redaction` before any persistence; red tests with synthetic keys).

@@ -7,8 +7,7 @@
 - **Verdict**: **completed / release-ready after independent audit**
 - **Stage window**: S3 close-out → S4 baseline/goal/gap → S4 gap loop G01-G12 →
   whole-stage audit + fixes → S4 close-out (2026-06-20)
-- **Close-out commit**: the commit that adds this archive summary and moves the S4
-  working set under `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/`
+- **Close-out commit**: `d82e9cc`
 
 ## 1. S4 goal
 

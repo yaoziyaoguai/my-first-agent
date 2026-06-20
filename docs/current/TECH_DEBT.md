@@ -161,7 +161,7 @@
   The legacy mediator/`record_evidence` paths rely on pre-existing upstream
   `mask_user_visible_secrets` (failed/rejected) + safe-metadata discipline; broadening
   `redact_text` to these hot paths is regression-prone and beyond G03's frozen surgical scope.
-- Impact: `S4_FIDELITY_CONTRACT.md §1` previously overclaimed "所有 input/output 投影强制
+- Impact: the archived S4 fidelity contract §1 previously overclaimed "所有 input/output 投影强制
   redaction"; corrected in-audit to scope the hard boundary to the replay-chain surface. No
   active leak on live paths (callers pre-filter metadata; failed/rejected results are masked
   upstream), but a secret surviving upstream masking could reach the legacy event-log preview
@@ -181,7 +181,7 @@
   `verify_replay_chain(...).ok` stays True.
 - Status: open / carry-forward (S4 audit)
 - Source/reason: S4-G05 scoped `self_consistent` to count-level consistency per
-  `S4_FIDELITY_CONTRACT.md §5.2` (tool/delegation counts). Cross-kind duplicate detection is a
+  the archived S4 fidelity contract §5.2 (tool/delegation counts). Cross-kind duplicate detection is a
   contract expansion not required by the frozen goal.
 - Impact: Low. `tool_use_id` and `delegation_id` come from different id spaces, so real-world
   collision is unlikely; but it is a genuine verifier blind spot.

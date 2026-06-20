@@ -68,6 +68,31 @@
 - `TECH_DEBT.md` items added or updated:
   - None in this step.
 - Commit hash:
-  - Pending.
+  - `55f0188` (`docs(s5): generate S5 goal gap backlog`)
 - Next step:
   - Self-review S4 close-out + S5 planning docs, then fix any consistency issues.
+
+## 2026-06-20 17:32 CST - S5 planning self-review
+
+- Task name: Self-review S4 close-out and S5 planning docs.
+- Files changed:
+  - `README.md`
+  - `docs/current/TECH_DEBT.md`
+  - `docs/current/WORK_LOG.md`
+  - `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md`
+- What was done:
+  - Updated README from S4 planning links to the S5 current working set.
+  - Removed current-doc exact references to archived S4 fidelity filenames from
+    live technical debt wording.
+  - Recorded the exact S4 close-out commit in the archived S4 release summary.
+  - Confirmed S5 remains planning-only and no S5 gap was executed.
+- Verification commands and results:
+  - Pending final verification after this self-review patch.
+- Stage gap items updated:
+  - None. S5 gaps remain proposed/open or deferred/non-goal.
+- `TECH_DEBT.md` items added or updated:
+  - Wording only for TD-012 and TD-013; no debt status changed.
+- Commit hash:
+  - Pending.
+- Next step:
+  - Run final verification and report the recommended S5 gap-loop command only.

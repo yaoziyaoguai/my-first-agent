@@ -267,3 +267,32 @@
 - **Next step (authorized by §3):** S4-G05 (P1) — evidence verification / consistency
   check (verifier over the G02 replay chain: complete / self-consistent / ordered /
   replayable), aligned with the G01 contract §5.
+
+## 2026-06-20 — S4-G05 evidence verification / consistency check — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G05 (P1): provide an evidence consistency/completeness verifier
+  over the G02 replay chain (AC-5). Detects truncated/tampered/disordered evidence.
+- **Done (TDD red→green):**
+  - RED: `tests/test_s4_evidence_verifier.py` — 7 tests: complete-state passes; missing
+    tool entry / missing delegation entry → `chain_incomplete`; status tamper →
+    `count_mismatch`; seq reorder → `sequence_disorder`; empty chain → `not_replayable`;
+    duplicate ref → `duplicate_ref`. Confirmed fail (`ModuleNotFoundError`).
+  - GREEN: new `agent/evidence_verifier.py` — `verify_replay_chain(chain, *,
+    expected_tool_use_ids, expected_delegation_ids, expected_tool_counts)` +
+    `verify_evidence(state)` (builds chain + derives source reference). Four findings
+    (complete/self_consistent/ordered/replayable) each with pass + reason. Pure function,
+    no state mutation, no crypto signature (non-goal per contract §5/§7).
+- **Files changed:** `agent/evidence_verifier.py` (new), `tests/test_s4_evidence_verifier.py`
+  (new), `docs/current/S4_GOAL_GAP.md` (G05 → satisfied; §2; §9),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `test_s4_evidence_verifier.py` 7 passed. Focused ruff clean.
+  Non-regression: S4 suite + S2/S3 reference 27 passed / 2 skipped. `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G05 → **satisfied** (AC-5 met; evidence is now
+  verifiable, not merely present).
+- **`TECH_DEBT.md` items:** none changed. TD-001 (fidelity) now has chain model + redaction
+  + verifier in place; full closeout pending G06 (E2E) + audit confirmation.
+- **Commit:** `feat(s4): G05 evidence verifier (AC-5)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G06 (P1) — audit/replay reference task E2E
+  (fake/local): combine G02/G03/G05 into an execute→record→replay→verify closed loop on
+  the governed path (MCP + SubAgent), as the S4 acceptance anchor.

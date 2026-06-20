@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 7 | G05-G11 |
+| open | 6 | G06-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 4 | G01（contract）；G02（replay-faithful evidence model）；G03（redaction）；G04（pending-tool 预览 / TD-004 resolved） |
+| satisfied | 5 | G01（contract）；G02（chain model）；G03（redaction）；G04（pending-tool/TD-004）；G05（evidence verifier） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -174,7 +174,14 @@
 - **Verification**: verifier 对完整 evidence 通过、对残缺/篡改样本失败；测试覆盖两侧。
 - **Dependencies**: S4-G02。
 - **Non-goal boundary**: 不做密码学防篡改签名（除非 contract 要求）；不做外部上报。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G05）。
+- **Evidence**: `agent/evidence_verifier.py`（`verify_replay_chain` + `verify_evidence`；
+  四项 finding：complete/self_consistent/ordered/replayable，reason =
+  chain_incomplete/count_mismatch/duplicate_ref/sequence_disorder/not_replayable）。
+  `tests/test_s4_evidence_verifier.py`（7 passed：完整通过 + 残缺 tool/delegation →
+  chain_incomplete + status 篡改 → count_mismatch + seq 乱序 → sequence_disorder + 空链 →
+  not_replayable + 重复 ref → duplicate_ref）。非回归：S4 suite + S2/S3 reference
+  27 passed / 2 skipped。Commit: `feat(s4): G05 evidence verifier (AC-5)`。
 
 ### S4-G06 — Audit/replay reference task E2E (fake/local)
 - **Priority**: P1（must_fix_for_s4）
@@ -300,7 +307,7 @@
 | S4-G02 | Replay-faithful evidence model | P1 | satisfied | L3 | AC-2 |
 | S4-G03 | Secret-safe redaction enforcement | P1 | satisfied | L3/Sec | AC-3 |
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | satisfied | L3 | AC-4 |
-| S4-G05 | Evidence verification / consistency check | P1 | open | L3 | AC-5 |
+| S4-G05 | Evidence verification / consistency check | P1 | satisfied | L3 | AC-5 |
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | open | L4 | AC-1/6 |
 | S4-G07 | Real provider audit key-path smoke | P1 | open | L1 | AC-6 |
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | open | L1/Cross | AC-7 |

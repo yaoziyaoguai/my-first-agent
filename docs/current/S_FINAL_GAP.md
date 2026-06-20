@@ -32,7 +32,7 @@
 | FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | done |
 | FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | done |
 | FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | done |
-| FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | proposed/open |
+| FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | done |
 | FINAL-G06 | P3 | L1 | Planner/compress legacy facade (TD-002) | deferred (carry-forward) |
 | FINAL-G07 | P4 | L5/Sn | Deferred scope guardrails (TD-008/009/010) | deferred/non-goal |
 
@@ -176,7 +176,12 @@
 - Non-goal boundary: Do not close the roadmap by report-only changes if a selected
   behavior is not implemented and tested.
 - Suggested order: 5
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20): full-suite `ruff check .` exits 0 (TD-007 closed). Targeted
+  gates green: S1 21 / S2 32+1skip / S4 44+1skip / S5 73 passed. Full pytest
+  green (4946 passed) after all FINAL gaps. `TECH_DEBT.md` reflects what was
+  closed (TD-003/007/012/013) vs deferred (TD-002 carry-forward; TD-008/009/010
+  scope). Closure record produced as `S_FINAL_RELEASE_SUMMARY.md`.
 - Risk if ignored: closure overclaim or silent defer.
 
 ## FINAL-G06 - Planner/compress legacy facade (TD-002)
@@ -226,5 +231,12 @@
 - Dependencies: none.
 - Non-goal boundary: This is a guardrail, not a work item to execute.
 - Suggested order: 7
-- Status: deferred/non-goal
+- Status: done (guardrail verified — deferred scope stays dormant)
+- Evidence (2026-06-20): TD-008 (Scheduler), TD-009 (full MCP), TD-010 (writable
+  SubAgent) remain dormant/unactivated through the final loop. Dormancy verified
+  by `tests/runtime_integration/test_scheduler_main_path.py`,
+  `tests/test_capability_boundary_contract.py`, `tests/test_mcp_registration_policy.py`,
+  `tests/test_s5_same_spine_guard.py`, `tests/test_s5_extension_recovery_coverage.py`
+  (59 passed). No Scheduler/memory/full-MCP/writable-SubAgent activation was
+  introduced; final stayed closure/hardening, not platform expansion.
 - Risk if ignored: closure silently expands into a platform milestone.

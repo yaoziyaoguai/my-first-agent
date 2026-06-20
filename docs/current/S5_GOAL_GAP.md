@@ -21,7 +21,7 @@
 | S5-G03 | P1 | L2 | Local durable ledger storage API | done |
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | done |
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | done |
-| S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | proposed/open |
+| S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | done |
 | S5-G07 | P1 | L1 | Same-spine durability guard | proposed/open |
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | proposed/open |
 | S5-G09 | P2 | L1-L5 | Non-regression and release governance | proposed/open |
@@ -238,7 +238,23 @@
 - Non-goal boundary: Do not expand verifier semantics beyond what S5 recovery
   needs; `TD-013` can remain open unless directly required.
 - Suggested order: 6
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/ledger_audit_alignment.py` (new): `LedgerAuditAlignment` +
+    `align_ledger_with_replay`. Verifies ledger evidence/step refs are all present
+    in the S4 `ReplayChain` ref_ids; reports the latest checkpoint_ref; is
+    structurally secret-free (only refs / counts / checkpoint_ref, no summaries).
+    Read-only over the replay chain + ledger; no S4 module modified.
+  - `agent/task_ledger_cooperation.py`: added `record_evidence_ref` — the seam that
+    records a replay-chain tool/delegation event as a ledger evidence ref (redacted
+    on append).
+  - `tests/test_s5_ledger_audit_alignment.py`: 8 passed (RED→GREEN). Covers coherent
+    alignment, unaligned evidence/step refs, checkpoint-ref reporting, structural
+    secret-freedom, and that `build_replay_chain` is unaffected by ledger presence.
+  - S4 replay/verifier/audit gate (`test_s4_replay_chain.py`,
+    `test_s4_evidence_verifier.py`, `test_s4_audit_observability.py`): 19 passed —
+    S4 contracts preserved.
+  - Focused ruff on touched files: clean.
 - Risk if ignored: Durable recovery would be operationally opaque and could
   weaken the S4 audit trail.
 

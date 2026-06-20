@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from agent.task_ledger import (
     CheckpointRefRecord,
+    EvidenceRefRecord,
     LedgerRecord,
     StepProgressRecord,
     TaskLifecycleRecord,
@@ -196,3 +197,32 @@ def record_checkpoint_boundary(
         )
     )
     return appended
+
+
+def record_evidence_ref(
+    ledger: TaskLedger,
+    *,
+    task_id: str,
+    evidence_ref: str,
+    evidence_kind: str,
+    safe_summary: str | None,
+    recorded_at: str,
+) -> EvidenceRefRecord:
+    """把一条 evidence ref 记录到 ledger（S5-G06 audit/replay 对齐 seam）。
+
+    ``evidence_ref`` 通常是 replay chain 中某个 tool/delegation 事件的 ref_id；
+    ``safe_summary`` 经 ``ledger.append`` 内部 redact。返回已落盘（已 redact）的记录。
+    """
+
+    existing = ledger.read_all()
+    seq = _next_seq_for_task(existing, task_id)
+    return ledger.append(
+        EvidenceRefRecord(
+            task_id,
+            seq,
+            recorded_at,
+            evidence_ref,
+            evidence_kind,
+            safe_summary,
+        )
+    )

@@ -338,7 +338,48 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G05 fake/local recovery E2E`).
+  - `25ff358` (`feat(s5): S5-G05 fake/local recovery E2E`).
 - Next step:
   - S5-G06 — ledger-aware audit/replay alignment: extend audit/replay/report
     minimally to include ledger refs/summaries while preserving S4 contracts.
+
+## 2026-06-20 - S5-G06 ledger-aware audit/replay alignment
+
+- Task name: S5-G06 — ledger-aware audit/replay alignment (TDD).
+- Files changed:
+  - `agent/ledger_audit_alignment.py` (new)
+  - `agent/task_ledger_cooperation.py`
+  - `tests/test_s5_ledger_audit_alignment.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added `record_evidence_ref` to `agent/task_ledger_cooperation.py`: records a
+    replay-chain tool/delegation event as a ledger `EvidenceRefRecord` (redacted
+    on append).
+  - Added `agent/ledger_audit_alignment.py`: `LedgerAuditAlignment` +
+    `align_ledger_with_replay`. Verifies ledger evidence/step refs are all present
+    in the S4 `ReplayChain` ref_ids (`coherent`), reports the latest checkpoint_ref,
+    and carries no summaries (structurally secret-free). Read-only; no S4 module
+    modified, so S4 `build_replay_chain` / `render_replay_summary` contracts hold.
+- Verification commands and results:
+  - RED first: collection failed with `ModuleNotFoundError: No module named
+    'agent.ledger_audit_alignment'`.
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_audit_alignment.py
+    tests/test_s5_ledger_cooperation.py -q` -> `16 passed`.
+  - S4 replay/verifier/audit gate -> `19 passed` (S4 contracts preserved).
+  - `.venv/bin/ruff check agent/ledger_audit_alignment.py
+    agent/task_ledger_cooperation.py tests/test_s5_ledger_audit_alignment.py`
+    -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G06` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None. `TD-013` (verifier cross-kind duplicate refs) remains deferred/open per
+    the freeze resolution — ledger consistency is ledger-internal + replay-ref
+    alignment, not verifier cross-kind detection.
+- Commit hash:
+  - Pending (`feat(s5): S5-G06 ledger-aware audit/replay alignment`).
+- Next step:
+  - S5-G07 — same-spine durability guard: structural + behavioral tests proving
+    ledger writes go through existing task/checkpoint/evidence seams and introduce
+    no separate execution loop.

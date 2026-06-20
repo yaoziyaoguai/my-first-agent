@@ -61,3 +61,24 @@
 - **Push:** none. **Secrets:** none.
 - **Next step:** generate `S4_GOAL_GAP.md` (backlog only; not executed); then
   self-review. Freeze awaits user confirmation of §8 open decisions.
+
+## 2026-06-20 — S4 gap backlog (provisional) — user-authorized
+
+- **Task:** Derive the S4 gap backlog from `S4_BASELINE_STATUS.md` vs proposed
+  `S4_GOAL.md` (Direction A). Backlog only — not executed; provisional pending
+  goal freeze.
+- **Done:** wrote `docs/current/S4_GOAL_GAP.md` — 12 gaps (S4-G01..G12).
+  - Distribution: P0×1 (G01), P1×6 (G02-G07), P2×3 (G08-G10), P3×1 (G11),
+    P4×1 (G12 deferred). Status: 11 open + 1 deferred.
+  - AC coverage: AC-1 → G06/G10; AC-2 → G01/G02; AC-3 → G03; AC-4 → G04;
+    AC-5 → G05; AC-6 → G06/G07; AC-7 → G08; AC-8 → G09; AC-9 → G10. No AC orphaned.
+  - Each gap: priority / layer / related AC / baseline evidence / needed action /
+    verification / dependency / non-goal boundary / status.
+- **Files changed:** `docs/current/S4_GOAL_GAP.md` (new), `WORK_LOG.md` (this entry).
+- **Verification:** doc-only; `git diff --check` clean.
+- **Commit:** `docs(s4): generate S4 gap backlog (provisional, Direction A)` (see
+  `git log`).
+- **Push:** none. **Secrets:** none.
+- **Next step:** self-review of this round's artifacts (close-out + S4
+  baseline/goal/gap consistency), fix or debt-track issues, then stop. Do not
+  execute the S4 gap loop.

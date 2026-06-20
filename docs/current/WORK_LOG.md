@@ -96,3 +96,27 @@
   - Pending.
 - Next step:
   - Run final verification and report the recommended S5 gap-loop command only.
+- Final verification commands and results:
+  - `git status --short --branch --untracked-files=all` -> clean before final
+    verification-note patch; branch ahead of origin.
+  - `git diff --check` -> clean.
+  - `find docs/current -maxdepth 2 -type f | sort` -> S5 current working set:
+    `S_ROADMAP.md`, `TECH_DEBT.md`, `S5_BASELINE_STATUS.md`, `S5_GOAL.md`,
+    `S5_GOAL_GAP.md`, `WORK_LOG.md`.
+  - `ls docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME` -> archived S4
+    baseline, goal, gap, fidelity contract, release summary, work log.
+  - `rg -n "S4_BASELINE|S4_GOAL|S4_GOAL_GAP|S4_FIDELITY|_tmp_s4" docs/current`
+    -> no matches.
+  - `rg -n "S5_BASELINE|S5_GOAL|S5_GOAL_GAP" docs/current AGENTS.md README.md`
+    -> S5 references present in current docs, AGENTS.md, and README.md.
+  - `git ls-files config/config.yaml .env` -> no tracked files.
+  - `git check-ignore -v config/config.yaml .env || true` -> both ignored by
+    `.gitignore`.
+  - `.venv/bin/ruff check .` -> non-zero, `Found 443 errors` (`TD-007`, known
+    global lint debt; not caused by this docs-only planning work).
+  - Focused S4 ruff command -> `All checks passed!`
+  - S1 targeted gate -> `22 passed`
+  - S2 targeted gate -> `32 passed, 1 skipped`
+  - S3 targeted gate -> `30 passed, 1 skipped`
+  - S4 targeted gate -> `44 passed, 1 skipped`
+  - `.venv/bin/python -m pytest -q -rx` -> `4867 passed, 16 skipped, 28 xfailed`

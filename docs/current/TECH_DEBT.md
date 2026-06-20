@@ -25,10 +25,10 @@
 > this live register at S3 close-out; its resolution record lives in
 > `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md §7`.
 
-### TD-007 - ruff full-suite lint is red with ~451 historical errors
+### TD-007 - ruff full-suite lint is red with 443 historical errors
 
 - ID: TD-007
-- Title: `ruff check .` red with ~451 historical lint errors (import org, etc.).
+- Title: `ruff check .` red with 443 historical lint errors (import org, etc.).
 - Status: open / carry-forward
 - Source/reason: Historical lint drift, independent of TD-006 (different source:
   lint style vs. doc/governance guards).
@@ -38,6 +38,8 @@
   cleanup.
 - Verification idea: `.venv/bin/ruff check .` exit 0. Do not mix into TD-006
   unless a shared root cause is proven.
+- Latest check (S5 planning self-review, 2026-06-20):
+  `.venv/bin/ruff check .` exited non-zero with `Found 443 errors`.
 
 ### TD-002 - Planning/compress still use legacy client facade
 

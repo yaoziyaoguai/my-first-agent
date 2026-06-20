@@ -477,3 +477,33 @@
 - **Next step (authorized by §3):** S4-G12 (P4) deferred boundaries & TECH_DEBT triage
   (register-only: confirm byte-for-byte/durable-ledger/memory/Scheduler/MCP/multi-agent/
   TD-002/003/007 stay deferred and absent from S4 P0-P2).
+
+## 2026-06-20 — S4-G12 deferred boundaries & TECH_DEBT triage (register-only) — user-authorized
+
+- **Task:** Execute S4-G12 (P4): register-only triage — confirm deferred boundaries were not
+  violated by S4 and TECH_DEBT is consistent. No cleanup/activation/ecosystem work.
+- **Verified:**
+  - S4 new modules (task_replay_chain / evidence_redaction / evidence_verifier /
+    audit_observability) grep for `memory_store|action_scheduler|durable|ledger|
+    register_mcp_tools|multi.agent|activate` → **zero matches**. S4 delivered only read-only
+    projections; it did NOT activate memory, Scheduler, durable ledger, MCP ecosystem, or
+    multi-agent (all remain dormant/deferred).
+  - TECH_DEBT consistent with S4 non-goals: TD-007 open (non-blocker); TD-001/TD-004
+    resolved-in-S4 (kept in register); TD-002/003 open; TD-008/009/010/011 deferred.
+  - None of the deferred items (byte-for-byte, durable ledger TD-011, memory, Scheduler
+    TD-008, MCP ecosystem TD-009, multi-agent TD-010, TD-002/003/007) appear in the S4
+    P0-P2 must-do set. S4 stayed within Direction A (redacted-faithful).
+- **Files changed:** `docs/current/S4_GOAL_GAP.md` (G12 → satisfied register-only; §2; §9),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** register-only (no code); grep + TECH_DEBT status read-back. `git diff --check`
+  clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G12 → **satisfied (register-only triage confirmed)**.
+  Gap loop G01-G12 now **12/12** addressed (G12 register-only).
+- **`TECH_DEBT.md` items:** none changed (consistency verified, not modified).
+- **Commit:** `docs(s4): G12 deferred triage confirmed (register-only)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3 + directive):** S4 whole-stage audit (G01-G12 status/evidence,
+  AC-1..AC-9 coverage, S1/S2/S3 regression, redacted-faithful contract, secret-safe redaction,
+  pending-tool/TD-004, evidence verification, fake/local E2E, key-safe real smoke, acceptance
+  classification, docs/current consistency, WORK_LOG, TECH_DEBT, full pytest, no
+  secret/config/env pollution, clean git status). Fix if safe; debt otherwise. No S4 close-out.

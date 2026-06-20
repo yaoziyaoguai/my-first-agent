@@ -49,9 +49,9 @@
 | Status | Count | Gap IDs |
 |---|---|---|
 | open | 0 | — |
-| deferred | 1 | G12 |
+| deferred | 0 | —（G12 register-only triage confirmed；其登记的 deferred **项**在 TECH_DEBT 保持 deferred） |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 11 | G01-G11（+ optional audit observability；G12 deferred） |
+| satisfied | 12 | G01-G12（全部 gap loop 完成；G12 = register-only triage） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -346,7 +346,14 @@
 - **Verification**: 这些项不出现在 S4 P0-P2 必达集；TECH_DEBT 与本文件一致。
 - **Dependencies**: 无（贯穿登记）。
 - **Non-goal boundary**: 本 gap 不执行任何清理/激活/生态化。
-- **Status**: deferred。
+- **Status**: **satisfied（register-only triage confirmed，2026-06-20）**——本 gap 是登记/确认型，
+  不执行任何清理/激活；其所登记的 deferred **项**仍在 TECH_DEBT 中保持 deferred。
+- **Evidence**: deferred 边界未被 S4 触犯——S4 新模块（task_replay_chain/evidence_redaction/
+  evidence_verifier/audit_observability）grep `memory_store|action_scheduler|durable|ledger|
+  register_mcp_tools|multi.agent|activate` **零匹配**（全是只读投影，未激活任何 dormant 能力）；
+  TECH_DEBT 一致（TD-007 open 非 blocker；TD-001/TD-004 resolved-in-S4 仍在 register；
+  TD-002/003 open；TD-008/009/010/011 deferred）；这些项均未出现在 S4 P0-P2 必达集。S4 只做
+  redacted-faithful（Direction A）。Commit: `docs(s4): G12 deferred triage confirmed (register-only)`。
 
 ---
 
@@ -365,7 +372,7 @@
 | S4-G09 | docs/current+history governance for S4 | P2 | satisfied | Cross | AC-8 |
 | S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | satisfied | Cross/L1 | AC-1/9 |
 | S4-G11 | Optional audit observability | P3 | satisfied | L3 | AC-2/5 (enhance) |
-| S4-G12 | Deferred boundaries & TECH_DEBT triage (S5/Sn) | P4 | deferred | Cross | §7 |
+| S4-G12 | Deferred boundaries & TECH_DEBT triage (S5/Sn) | P4 | satisfied | Cross | §7 |
 
 ## 10. Non-goal guardrails
 

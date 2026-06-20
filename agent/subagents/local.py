@@ -10,15 +10,15 @@ Subagent MVP 只表达 parent-controlled delegation request/result：
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import re
 import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
-
 
 REDACTED = "<redacted>"
 SENSITIVE_PATH_NAMES = frozenset({".env", "agent_log.jsonl"})
@@ -292,7 +292,11 @@ def _validate_policy(
 ) -> SubagentValidationIssue | None:
     model = frontmatter.get("model", "fake")
     if model not in SAFE_MODELS:
-        return _issue("real_llm_delegation", "Subagent MVP 不允许真实 LLM delegation", field="model")
+        return _issue(
+            "real_llm_delegation",
+            "Subagent MVP 不允许真实 LLM delegation",
+            field="model",
+        )
     metadata = frontmatter.get("metadata", {}) or {}
     if not isinstance(metadata, Mapping):
         return _issue("invalid_profile", "metadata 必须是 object", field="metadata")
@@ -301,7 +305,11 @@ def _validate_policy(
         return _issue("external_process", "Subagent MVP 不允许外部进程入口", field="metadata")
     allowed_tools = tuple(frontmatter.get("allowed-tools", ()) or ())
     if any(tool not in SAFE_DECLARABLE_TOOLS for tool in allowed_tools):
-        return _issue("policy_bypass", "subagent allowed-tools 不能声明未授权工具", field="allowed-tools")
+        return _issue(
+            "policy_bypass",
+            "subagent allowed-tools 不能声明未授权工具",
+            field="allowed-tools",
+        )
     normalized_body = body.lower()
     if "subprocess" in normalized_body or "spawn" in normalized_body:
         return _issue("external_process", "Subagent body 不允许进程启动指令")
@@ -341,8 +349,10 @@ def _redact_text(text: str) -> str:
 def _is_secret_like(key: str, value: str) -> bool:
     normalized_key = key.upper()
     normalized_value = value.lower()
-    return any(marker in normalized_key for marker in ("TOKEN", "API_KEY", "SECRET", "PASSWORD", "AUTH")) or any(
-        marker in normalized_value for marker in ("token", "secret", "password", "api_key", "apikey")
+    key_markers = ("TOKEN", "API_KEY", "SECRET", "PASSWORD", "AUTH")
+    value_markers = ("token", "secret", "password", "api_key", "apikey")
+    return any(marker in normalized_key for marker in key_markers) or any(
+        marker in normalized_value for marker in value_markers
     )
 
 

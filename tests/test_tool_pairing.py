@@ -10,11 +10,10 @@ from __future__ import annotations
 from agent.conversation_events import has_tool_result
 from agent.memory import _find_safe_split_index
 from agent.response_handlers import (
-    _serialize_assistant_content,
     _fill_placeholder_results,
+    _serialize_assistant_content,
 )
 from tests.conftest import FakeTextBlock, FakeToolUseBlock
-
 
 # ---------- _serialize_assistant_content ----------
 

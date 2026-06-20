@@ -15,13 +15,12 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
-import uuid
 
 from agent.runtime_observer import log_event as log_runtime_event
-
 
 ToolAuditEventType = Literal[
     "tool_blocked",

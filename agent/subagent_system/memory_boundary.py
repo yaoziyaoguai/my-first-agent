@@ -40,7 +40,9 @@ class SubAgentMemoryBoundary:
     def check_proposal(self, proposal: MemoryProposal, scope: str) -> bool:
         return bool(proposal.content and proposal.category and scope == "propose")
 
-    def route_proposal(self, proposal: MemoryProposal, *, subagent_name: str) -> RoutedMemoryProposal:
+    def route_proposal(
+        self, proposal: MemoryProposal, *, subagent_name: str
+    ) -> RoutedMemoryProposal:
         return RoutedMemoryProposal(
             content=proposal.content,
             category=proposal.category,

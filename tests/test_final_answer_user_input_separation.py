@@ -26,7 +26,6 @@ from agent.model_output_resolution import (
 )
 from config import SYSTEM_PROMPT
 
-
 # ---------------------------------------------------------------------------
 # 1. SYSTEM_PROMPT 必须把「request_user_input 是 Runtime 唯一等待信号」写明
 # ---------------------------------------------------------------------------

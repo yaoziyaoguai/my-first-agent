@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from tests.conftest import (
     FakeAnthropicClient,
+    FakeResponse,
     FakeTextBlock,
     FakeToolUseBlock,
-    FakeResponse,
     text_response,
 )
 from tests.test_main_loop import (
+    _planner_no_plan_response,
     _register_test_tool,
     _reset_core_module,
-    _planner_no_plan_response,
 )
 
 
@@ -157,7 +157,8 @@ class TestMultiTurnWithTools:
             from agent.core import chat
 
             chat("第一轮")
-            # 第二轮前 messages 至少包含 user1 + assistant1(tool_use) + user2(tool_result) + assistant2
+            # 第二轮前 messages 至少包含 user1 + assistant1(tool_use)
+            # + user2(tool_result) + assistant2
             msg_count_before = len(state.conversation.messages)
             assert msg_count_before >= 3  # user + assistant(tool_use) + user(tool_result)
 

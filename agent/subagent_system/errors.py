@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _EXCEPTION_FRAMEWORK_ATTRS = frozenset({
     "__traceback__",
     "__cause__",

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import re
 
-
 # MCP description 最大长度（防止超长描述侵占模型上下文）
 MAX_MCP_DESCRIPTION_CHARS = 500
 
@@ -45,7 +44,8 @@ ADVERSARIAL_DESCRIPTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
     # 权限提升暗示
     re.compile(
-        r"(you have full access|no restrictions apply|bypass|disable safety|跳过安全|绕过限制|完全权限)",
+        r"(you have full access|no restrictions apply|bypass|disable safety"
+        r"|跳过安全|绕过限制|完全权限)",
         re.IGNORECASE,
     ),
     # 隐藏的 URL / 命令注入

@@ -27,7 +27,9 @@ class SubAgentRegistry:
         self.reload()
 
     def list_visible(self) -> tuple[SubAgentDescriptor, ...]:
-        return tuple(descriptor for descriptor in self._descriptors.values() if descriptor.is_visible())
+        return tuple(
+            descriptor for descriptor in self._descriptors.values() if descriptor.is_visible()
+        )
 
     def get_descriptor(self, name: str) -> SubAgentDescriptor | None:
         return self._descriptors.get(name)

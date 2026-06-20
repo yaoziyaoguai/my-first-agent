@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+
 import pytest
+
 import agent.confirmation.tool as _conf_tool
+
 
 def test_plan_confirmation_kind_covers_only_plan_outcomes():
     """枚举只覆盖 plan 的两类终结意图，不应混入 step/tool/user_input。"""
@@ -126,7 +129,9 @@ def test_handle_plan_confirmation_source_actually_routes_through_transition():
         )
 
 
-def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(tmp_path, monkeypatch):
+def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(
+    tmp_path, monkeypatch
+):
     """durable state 不应包含 PlanConfirmationKind / plan_confirmation_transition 字面量。
 
     通过端到端调用 handle_plan_confirmation 的接受 / 拒绝路径，序列化
@@ -173,10 +178,9 @@ def test_plan_confirmation_transition_does_not_leak_into_messages_or_checkpoint(
     )
 
     serialized_messages = json.dumps(state.conversation.messages, ensure_ascii=False)
-    if ckpt_file.exists():
-        serialized_ckpt = ckpt_file.read_text(encoding="utf-8")
-    else:
-        serialized_ckpt = ""
+    serialized_ckpt = (
+        ckpt_file.read_text(encoding="utf-8") if ckpt_file.exists() else ""
+    )
 
     for marker in (
         "PlanConfirmationKind",
@@ -896,6 +900,7 @@ def test_user_input_handler_routes_through_apply_user_replied_transition():
     保持对称"）。一旦发生，handler 就重新承担状态机职责，v0.3 的边界收益归零。
     """
     import inspect
+
     from agent import confirm_handlers as ch
 
     src = inspect.getsource(ch.handle_user_input_step)
@@ -926,6 +931,7 @@ def test_user_input_handler_does_not_inline_mutate_pending_or_status():
         守门），那是 v0.3 之前就存在的损坏态收尾，不是状态机推进。
     """
     import inspect
+
     from agent import confirm_handlers as ch
 
     src = inspect.getsource(ch.handle_user_input_step)
@@ -949,6 +955,7 @@ def test_user_input_handler_keeps_empty_input_guard_before_transition():
     到的是同一个错误提示，但底层状态已经不可恢复。
     """
     import inspect
+
     from agent import confirm_handlers as ch
 
     src = inspect.getsource(ch.handle_user_input_step)
@@ -997,7 +1004,7 @@ def _make_feedback_intent_ctx(*, choice: str, monkeypatch, with_planning_fn=True
     - start_planning_fn 用 spy lambda 记录调用顺序而不实际触发新 planner。
     """
     from agent import confirm_handlers as ch
-    from agent.checkpoint import CHECKPOINT_PATH as _orig_path  # noqa: F401
+    from agent.checkpoint import CHECKPOINT_PATH as _ORIG_PATH  # noqa: F401
     from agent.confirmation import plan as _ch_mod
     from agent.state import create_agent_state
 
@@ -1193,6 +1200,7 @@ def test_feedback_intent_as_feedback_handler_source_does_not_write_revised_goal_
     重写，源码契约更难被绕过。
     """
     import inspect
+
     from agent import confirm_handlers as ch
 
     src = inspect.getsource(ch.handle_feedback_intent_choice)
@@ -1354,6 +1362,7 @@ def test_feedback_intent_handler_routes_through_transition_factory_for_all_four_
     个被穿透。
     """
     import inspect
+
     from agent import confirm_handlers as ch
 
     src = inspect.getsource(ch.handle_feedback_intent_choice)

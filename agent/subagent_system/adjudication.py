@@ -32,10 +32,11 @@ def adjudicate_result(
         )
     if result.status == "error":
         return ParentAdjudicationResult.reject("SubAgent returned error")
-    if result.confidence < confidence_threshold and revision_count < getattr(request, "max_revisions", 0):
+    max_revisions = getattr(request, "max_revisions", 0)
+    if result.confidence < confidence_threshold and revision_count < max_revisions:
         revised = replace(
             request,
-            task=f"{getattr(request, 'task')} (revision requested: improve confidence)",
+            task=f"{request.task} (revision requested: improve confidence)",
         )
         return ParentAdjudicationResult.request_revision(
             "SubAgent confidence below threshold",

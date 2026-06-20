@@ -64,10 +64,7 @@ def build_invocation_checkpoint_note(
 def _contains_secret(data: object) -> bool:
     """递归检查 data 中是否包含疑似 secret 的模式。"""
     if isinstance(data, str):
-        for pattern in _SECRET_PATTERNS:
-            if pattern.search(data):
-                return True
-        return False
+        return any(pattern.search(data) for pattern in _SECRET_PATTERNS)
     if isinstance(data, dict):
         return any(_contains_secret(v) for v in data.values())
     if isinstance(data, (list, tuple)):
@@ -90,6 +87,4 @@ def is_checkpoint_safe(data: dict[str, object]) -> bool:
     """检查 checkpoint data 是否安全（不含 secret、不含超大 body）。"""
     if _contains_secret(data):
         return False
-    if _contains_large_body(data):
-        return False
-    return True
+    return not _contains_large_body(data)

@@ -15,7 +15,6 @@ import io
 import json
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_MODULE = PROJECT_ROOT / "agent" / "mcp_config_service.py"
 CLI_MODULE = PROJECT_ROOT / "agent" / "mcp_config_cli.py"

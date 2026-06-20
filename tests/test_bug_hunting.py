@@ -21,11 +21,10 @@ from tests.conftest import (
     text_response,
 )
 from tests.test_main_loop import (
-    _reset_core_module,
-    _register_test_tool,
     _planner_no_plan_response,
+    _register_test_tool,
+    _reset_core_module,
 )
-
 
 # ============================================================
 # Bug 候选 1：并行 tool_use 遇到 awaiting，tool_result 顺序颠倒
@@ -120,8 +119,8 @@ def test_max_loop_iterations_leaves_state_consistent(monkeypatch):
     """
     cleanup = _register_test_tool("never_end", confirmation="never", result="x")
     try:
-        from agent.response_handlers import MAX_TOOL_CALLS_PER_TURN
         from agent.core import MAX_LOOP_ITERATIONS
+        from agent.response_handlers import MAX_TOOL_CALLS_PER_TURN
 
         limit = max(MAX_LOOP_ITERATIONS, MAX_TOOL_CALLS_PER_TURN)
         canned = [_planner_no_plan_response()]
@@ -207,8 +206,8 @@ def test_tool_execution_log_cleared_between_tasks(monkeypatch):
         )
         state = _reset_core_module(monkeypatch, fake)
 
-        from agent.core import chat
         from agent.conversation_events import has_tool_result
+        from agent.core import chat
 
         chat("第一个任务")
         assert has_tool_result(state.conversation.messages, "T1")
@@ -357,8 +356,8 @@ def test_tool_use_id_with_special_chars_roundtrip(monkeypatch):
         )
         state = _reset_core_module(monkeypatch, fake)
 
-        from agent.core import chat
         from agent.conversation_events import has_tool_result
+        from agent.core import chat
 
         chat("跑个工具")
 

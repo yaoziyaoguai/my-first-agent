@@ -1,4 +1,5 @@
-"""_confirmable_noop: 安全空操作工具——仅用于 ToolRegistry gate confirmation_required branch behavior 验证。
+"""_confirmable_noop: 安全空操作工具——仅用于 ToolRegistry gate
+confirmation_required branch behavior 验证。
 
 中文学习边界：
 _confirmable_noop 与 _safe_noop 同等安全（zero-arg, no shell, no file write,

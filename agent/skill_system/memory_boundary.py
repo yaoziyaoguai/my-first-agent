@@ -78,6 +78,4 @@ def check_memory_proposal(
         return False
     if not policy.can_propose:
         return False
-    if category not in policy.approved_categories:
-        return False
-    return True
+    return category in policy.approved_categories

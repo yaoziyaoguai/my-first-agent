@@ -41,8 +41,8 @@ class SubAgentSkillBoundary:
             True,
             skill_name,
             l1_metadata=SkillL1Metadata(
-                name=getattr(skill_descriptor, "name"),
-                description=getattr(skill_descriptor, "description"),
+                name=skill_descriptor.name,
+                description=skill_descriptor.description,
                 tags=tuple(getattr(skill_descriptor, "tags", ())),
                 allowed_tools=tuple(getattr(skill_descriptor, "allowed_tools", ())),
                 memory_scope=getattr(skill_descriptor, "memory_scope", "none"),

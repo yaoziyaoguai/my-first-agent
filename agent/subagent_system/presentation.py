@@ -14,8 +14,8 @@ def format_available_subagents(descriptors: tuple[object, ...]) -> str:
     for descriptor in descriptors:
         modes = ", ".join(getattr(descriptor, "supported_modes", ()))
         lines.append(
-            f"- {getattr(descriptor, 'name')} [{getattr(descriptor, 'role')}]: "
-            f"{getattr(descriptor, 'description')} modes={modes}"
+            f"- {descriptor.name} [{descriptor.role}]: "
+            f"{descriptor.description} modes={modes}"
         )
     return "\n".join(lines)
 
@@ -31,10 +31,10 @@ def format_delegation_result(status: str, stop_reason: str, summary: str) -> str
 def format_subagent_audit(audit: object) -> str:
     tools = ",".join(getattr(audit, "tools_requested", ())) or "-"
     return (
-        f"SubAgent audit: name={getattr(audit, 'subagent_name')} "
-        f"delegation_id={getattr(audit, 'delegation_id')} "
-        f"status={getattr(audit, 'status')} stop_reason={getattr(audit, 'stop_reason')} "
-        f"iterations={getattr(audit, 'iterations_used')}/{getattr(audit, 'max_iterations')} "
+        f"SubAgent audit: name={audit.subagent_name} "
+        f"delegation_id={audit.delegation_id} "
+        f"status={audit.status} stop_reason={audit.stop_reason} "
+        f"iterations={audit.iterations_used}/{audit.max_iterations} "
         f"tools_requested={tools}"
     )
 
@@ -44,10 +44,10 @@ def format_trace_events(trace_events: tuple[object, ...]) -> str:
         return "SubAgent trace: -"
     lines = ["SubAgent trace:"]
     for event in trace_events:
-        lines.append(f"- {getattr(event, 'event_type')} delegation={getattr(event, 'delegation_id')}")
+        lines.append(f"- {event.event_type} delegation={event.delegation_id}")
     return "\n".join(lines)
 
 
 def format_adjudication(adjudication: object) -> str:
-    return f"SubAgent adjudication: action={getattr(adjudication, 'action')} reason={getattr(adjudication, 'reason')}"
+    return f"SubAgent adjudication: action={adjudication.action} reason={adjudication.reason}"
 

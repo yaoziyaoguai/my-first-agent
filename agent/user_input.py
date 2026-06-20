@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 InputMode = Literal["single_line", "multiline", "empty"]
 InputEnvelopeSource = Literal["cli", "tui"]
 InputEventType = Literal["input.submitted", "input.cancelled", "input.closed"]

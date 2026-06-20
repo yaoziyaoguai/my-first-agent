@@ -8,10 +8,10 @@ Remaining Roadmap 阶段可以继续推进 fake-first readiness，但不能把 r
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
 
 from agent.mcp_config import MCPConfigValidationResult, load_mcp_config
 

@@ -85,9 +85,12 @@ def _collect_agent_imports(path: Path) -> set[str]:
             for alias in node.names:
                 if alias.name == "agent" or alias.name.startswith("agent."):
                     found.add(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and (node.module == "agent" or node.module.startswith("agent.")):
-                found.add(node.module)
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and (node.module == "agent" or node.module.startswith("agent."))
+        ):
+            found.add(node.module)
     return found
 
 

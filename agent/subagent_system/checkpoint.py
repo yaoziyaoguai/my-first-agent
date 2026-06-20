@@ -6,9 +6,8 @@ checkpoint 的小型关联摘要，并提供 secret/large artifact safety check�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-
+from dataclasses import dataclass
 
 _SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
@@ -49,7 +48,10 @@ def is_checkpoint_safe(data: object) -> bool:
             pattern.search(data) for pattern in _SECRET_PATTERNS
         )
     if isinstance(data, dict):
-        return all(is_checkpoint_safe(key) and is_checkpoint_safe(value) for key, value in data.items())
+        return all(
+            is_checkpoint_safe(key) and is_checkpoint_safe(value)
+            for key, value in data.items()
+        )
     if isinstance(data, (list, tuple, set)):
         return all(is_checkpoint_safe(item) for item in data)
     return True

@@ -17,17 +17,16 @@
 
 from __future__ import annotations
 
+import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
-import uuid
 from typing import Any
 
 from agent.local_trace import TraceEvent, redact_trace_metadata
 from agent.runtime_trace_projection import build_tool_result_trace_event
 from agent.tool_result_contract import ToolResultEnvelope, classify_tool_result
-
 
 PROVIDER_NAME = "fake"
 DEMO_WORKSPACE_SUBDIR = ("workspace", "demo")

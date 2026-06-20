@@ -69,8 +69,15 @@ _PROCEDURAL_LIKE_PATTERNS: tuple[re.Pattern, ...] = (
 _PREFERENCE_EVOLUTION_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"(以前|之前|过去|原来|曾经).{0,40}(现在|如今|后来|改成|改为|变成|更喜欢|更倾向|转向)"),
     re.compile(r"(偏好|喜好).{0,20}从.{1,40}(变成|改成|改为|转向).{1,40}"),
-    re.compile(r"(used to prefer|previously preferred).{0,80}(now prefer|now prefers|now use|now uses)", re.IGNORECASE),
-    re.compile(r"changed\s+(my\s+|the\s+)?preference\s+from\s+.{1,40}\s+to\s+.{1,40}", re.IGNORECASE),
+    re.compile(
+        r"(used to prefer|previously preferred).{0,80}"
+        r"(now prefer|now prefers|now use|now uses)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"changed\s+(my\s+|the\s+)?preference\s+from\s+.{1,40}\s+to\s+.{1,40}",
+        re.IGNORECASE,
+    ),
     re.compile(r"no longer\s+.{1,40},?\s+now\s+.{1,40}", re.IGNORECASE),
 )
 
@@ -249,9 +256,8 @@ def _compute_recency_factor(
     newest_epoch: float | None = None
     for e in group:
         ts = _parse_created_at(e.created_at)
-        if ts is not None:
-            if newest_epoch is None or ts > newest_epoch:
-                newest_epoch = ts
+        if ts is not None and (newest_epoch is None or ts > newest_epoch):
+            newest_epoch = ts
 
     if newest_epoch is None:
         return _RECENCY_NEUTRAL
@@ -405,11 +411,10 @@ def _detect_contradiction_in_group(group: list[EpisodicEvidence]) -> bool:
             c = e.content
             if neg in c:
                 any_neg = True
-            elif pos in c:
+            elif pos in c and not any(n in c for n in all_neg_markers):
                 # 只有不包含任何否定标记时才算正面
                 # 避免 "不喜欢" 中的 "喜欢" 被误判
-                if not any(n in c for n in all_neg_markers):
-                    any_pos = True
+                any_pos = True
         if any_pos and any_neg:
             return True
     return False

@@ -13,17 +13,17 @@
 - loader 只读，不写 store，不调 detector，不调 LLM
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from agent.memory_consolidation import EpisodicEvidence
 from agent.memory_consolidation_loader import (
     SourceEvidenceLoadResult,
-    load_episodic_evidence,
     _should_skip,
     _to_episodic_evidence,
+    load_episodic_evidence,
 )
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ def _write_memory_file(
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     # MemoryRecord 强制字段的测试默认值（_record_from_frontmatter 要求非空）
-    _RECORD_DEFAULTS = {
+    _record_defaults = {
         "source_summary": "test-source",
         "safety_summary": "safe",
         "audit_id": "audit:test:0000",
@@ -59,7 +59,7 @@ def _write_memory_file(
     parts: list[str] = []
     for meta in sections:
         # 为缺失的 MemoryRecord 强制字段注入默认值，避免 _record_from_frontmatter 抛 ValueError
-        for key, default_val in _RECORD_DEFAULTS.items():
+        for key, default_val in _record_defaults.items():
             if key not in meta:
                 meta[key] = default_val
         content = meta.pop("_content", "")
@@ -649,9 +649,8 @@ class TestNoDetectorOrLLM:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imports.add(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.add(node.module)
         assert "agent.memory_consolidation_engine" not in imports
 
     def test_no_llm_import(self):
@@ -664,9 +663,8 @@ class TestNoDetectorOrLLM:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imports.add(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.add(node.module)
         assert "anthropic" not in imports
         assert "openai" not in imports
 

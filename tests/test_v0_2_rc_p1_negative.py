@@ -24,7 +24,6 @@ from agent.tool_registry import TOOL_REGISTRY, is_meta_tool
 from agent.tools.shell import check_shell_blacklist
 from agent.tools.write import _check_dangerous_content, pre_write_check
 
-
 # ---------------------------------------------------------------------------
 # §1 写入受保护源码文件 → 必须拒
 # ---------------------------------------------------------------------------
@@ -344,6 +343,7 @@ def test_force_stop_response_message_does_not_misclassify_as_user_rejection():
     """response_handlers 在 FORCE_STOP 上返回的总结字符串不能再说
     「用户连续拒绝多次操作」。"""
     import inspect
+
     from agent import response_handlers
 
     src = inspect.getsource(response_handlers)
@@ -366,6 +366,7 @@ def test_real_user_tool_rejection_path_is_separate_from_force_stop():
     这条消息（用户真正 reject 的语义），且不依赖 FORCE_STOP。
     """
     import inspect
+
     from agent import confirm_handlers
     from agent.confirmation import tool as _conf_tool
 

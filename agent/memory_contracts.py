@@ -223,7 +223,7 @@ class MemorySnapshot:
     query_context: str | None = None
 
     @classmethod
-    def empty(cls) -> "MemorySnapshot":
+    def empty(cls) -> MemorySnapshot:
         """返回空 snapshot；用于保持现有 prompt 行为。"""
 
         return cls()

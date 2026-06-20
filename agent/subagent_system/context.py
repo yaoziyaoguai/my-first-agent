@@ -52,19 +52,25 @@ def build_context_package(
     摘要化，Memory/Skill/Tool 都是上游 governance 传入的快照。
     """
 
-    task = getattr(request, "task")
+    task = request.task
     context = getattr(request, "context", {}) or {}
     memory_scope = getattr(request, "memory_scope", "none")
     allowed_skills = tuple(getattr(request, "allowed_skills", ()))
     relevant_files = tuple(getattr(request, "relevant_files", ()))
     summaries = tuple(_summarize_file(path, max_context_chars) for path in relevant_files)
-    selected_memory_context = memory_context if memory_scope in {"read_context", "propose"} else None
+    if memory_scope in {"read_context", "propose"}:
+        selected_memory_context = memory_context
+    else:
+        selected_memory_context = None
     selected_skill_metadata = tuple(skill_metadata) if allowed_skills else ()
     return SubAgentContextPackage(
         request=request,
         descriptor=descriptor,
         task=task,
-        role_prompt=f"SubAgent role: {getattr(descriptor, 'role', getattr(request, 'role', 'unknown'))}",
+        role_prompt=(
+            f"SubAgent role: "
+            f"{getattr(descriptor, 'role', getattr(request, 'role', 'unknown'))}"
+        ),
         goal=str(context.get("goal") or task),
         constraints=(
             "parent owns orchestration",
@@ -87,7 +93,7 @@ def build_context_package(
         ),
         output_schema=getattr(request, "output_schema", None),
         max_context_chars=max_context_chars,
-        max_iterations=getattr(request, "max_iterations"),
+        max_iterations=request.max_iterations,
         stop_conditions=(
             "task_completed",
             "max_iterations_exceeded",
@@ -98,7 +104,7 @@ def build_context_package(
             "error",
             "interrupted",
         ),
-        execution_mode=getattr(request, "execution_mode"),
+        execution_mode=request.execution_mode,
     )
 
 
@@ -107,7 +113,12 @@ def _summarize_file(raw_path: str, max_chars: int) -> FileSummary:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
-        return FileSummary(path=str(path), summary="<unreadable>", line_count=0, language=path.suffix.lstrip("."))
+        return FileSummary(
+            path=str(path),
+            summary="<unreadable>",
+            line_count=0,
+            language=path.suffix.lstrip("."),
+        )
     lines = text.splitlines()
     summary = text[:max_chars]
     if len(text) > max_chars:

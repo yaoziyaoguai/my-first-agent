@@ -26,7 +26,7 @@ from dataclasses import fields
 
 import pytest
 
-from agent.state import TaskState, ConversationState, create_agent_state
+from agent.state import ConversationState, TaskState, create_agent_state
 
 
 @pytest.fixture

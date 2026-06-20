@@ -261,7 +261,9 @@ def test_openai_native_malformed_json_no_leak():
         config=_config(),
         http_client=httpx.Client(
             transport=httpx.MockTransport(
-                lambda request: httpx.Response(200, content=b"not json with sk-test-openai-native-secret")
+                lambda request: httpx.Response(
+                    200, content=b"not json with sk-test-openai-native-secret"
+                )
             )
         ),
     )

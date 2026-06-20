@@ -9,11 +9,10 @@ initialize/list_tools/call_tool -> registry opt-in -> legacy ToolResult。它不
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SERVER = PROJECT_ROOT / "tests" / "fixtures" / "minimal_mcp_stdio_server.py"
@@ -216,9 +215,9 @@ def test_stdio_mcp_client_rejects_external_transports_before_process_spawn(
     validation。真实外部 MCP transport 需要后续单独授权和设计。
     """
 
+    import agent.mcp_stdio as mcp_stdio
     from agent.mcp import MCPServerConfig
     from agent.mcp_stdio import MCPTransportError, StdioMCPClient
-    import agent.mcp_stdio as mcp_stdio
 
     spawned: list[object] = []
 

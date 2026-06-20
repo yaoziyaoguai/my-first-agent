@@ -19,10 +19,10 @@ from agent.memory_confirmation_forms import (
 def test_confirmation_forms_keep_existing_t1_semantics() -> None:
     """pending_review 与 inline_confirmation 是当前唯一允许的 T1 form。"""
 
-    assert ALLOWED_MEMORY_CONFIRMATION_FORMS == frozenset({
+    assert frozenset({
         "pending_review",
         "inline_confirmation",
-    })
+    }) == ALLOWED_MEMORY_CONFIRMATION_FORMS
     validate_memory_confirmation_form("pending_review")
     validate_memory_confirmation_form("inline_confirmation")
 

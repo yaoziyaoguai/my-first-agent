@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_MODULE = PROJECT_ROOT / "agent" / "memory_contracts.py"
 

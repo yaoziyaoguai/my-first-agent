@@ -1,6 +1,6 @@
 import json
-from config import ENABLE_REVIEW, SHOW_REVIEW_DETAILS
 
+from config import ENABLE_REVIEW, SHOW_REVIEW_DETAILS
 
 CURRENT_TASK_REQUEST = None
 
@@ -40,10 +40,7 @@ def truncate_for_review(value, max_len=800):
 def should_review_turn(tool_traces):
     if not ENABLE_REVIEW:
         return False
-    for trace in tool_traces:
-        if trace.get("tool") == "write_file":
-            return True
-    return False
+    return any(trace.get("tool") == "write_file" for trace in tool_traces)
 
 
 def print_review_summary(review):

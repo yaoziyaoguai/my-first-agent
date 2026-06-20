@@ -232,6 +232,7 @@ def test_log_cleanup_module_does_not_import_dotenv_or_secrets(tmp_path):
     """
     import ast
     import inspect
+
     from agent import log_cleanup
 
     tree = ast.parse(inspect.getsource(log_cleanup))
@@ -440,6 +441,7 @@ def test_archive_module_does_not_open_or_read_log_content():
     """
     import ast
     import inspect
+
     from agent import log_cleanup
 
     src = inspect.getsource(log_cleanup.archive_agent_log)
@@ -470,6 +472,7 @@ def test_main_logs_cleanup_apply_flag_routes_to_archive(
     """
     import io
     import sys
+
     import main as main_module
 
     # 模拟 stdin EOF：替换 sys.stdin 为空 StringIO

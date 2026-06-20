@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from agent.conversation_events import append_control_event
 from agent.context_builder import build_execution_messages, build_planning_messages
+from agent.conversation_events import append_control_event
 
 
 def _find_step_block_index(msgs: list[dict]) -> int:

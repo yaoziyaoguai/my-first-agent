@@ -28,7 +28,6 @@ from agent.memory_fs_store import FilesystemMemoryStore
 from agent.memory_l2 import L2TriggerGuard, run_l2_inline_extraction
 from agent.memory_store import InMemoryMemoryStore
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # L2TriggerGuard 测试 — RFC §11.3 触发约束
 # ═══════════════════════════════════════════════════════════════════════════════

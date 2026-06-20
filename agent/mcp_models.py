@@ -11,10 +11,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
-from typing import Any, Mapping, Protocol, Sequence
-
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 MCP_TRANSPORTS = frozenset({"stdio", "http", "sse", "streamable_http"})
 

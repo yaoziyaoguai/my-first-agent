@@ -32,7 +32,6 @@ from typing import Any
 from agent.pending_requests import PendingUserInputRequest
 from agent.runtime_observer import log_resolution
 
-
 COLLECT_INPUT_ANSWER = "collect_input_answer"
 RUNTIME_USER_INPUT_ANSWER = "runtime_user_input_answer"
 EMPTY_USER_INPUT = "empty_user_input"

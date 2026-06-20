@@ -116,6 +116,7 @@ class TestDemoSubagentRegistry:
     def test_registry_has_demo_stat(self):
         """SubAgentRegistry 使用 tests/fixtures/subagents root 时包含 demo-stat。"""
         from pathlib import Path
+
         from agent.subagent_system.registry import SubAgentRegistry
 
         root = Path("tests/fixtures/subagents")
@@ -130,6 +131,7 @@ class TestDemoSubagentRegistry:
     def test_demo_stat_descriptor_fields(self):
         """demo-stat descriptor 各字段合法。"""
         from pathlib import Path
+
         from agent.subagent_system.registry import SubAgentRegistry
 
         root = Path("tests/fixtures/subagents")
@@ -264,9 +266,10 @@ class TestDelegateOnceHandler:
     def test_delegate_once_ok(self):
         """常规任务返回 ok + deterministic summary。"""
         from pathlib import Path
+
+        from agent.subagent_system.delegation import delegate_once
         from agent.subagent_system.registry import SubAgentRegistry
         from agent.subagent_system.request import SubAgentRequest
-        from agent.subagent_system.delegation import delegate_once
 
         root = Path("tests/fixtures/subagents")
         if not root.exists():
@@ -292,9 +295,10 @@ class TestDelegateOnceHandler:
     def test_delegate_once_shell_blocked(self):
         """shell 任务被 L0 策略阻止。"""
         from pathlib import Path
+
+        from agent.subagent_system.delegation import delegate_once
         from agent.subagent_system.registry import SubAgentRegistry
         from agent.subagent_system.request import SubAgentRequest
-        from agent.subagent_system.delegation import delegate_once
 
         root = Path("tests/fixtures/subagents")
         if not root.exists():
@@ -318,9 +322,10 @@ class TestDelegateOnceHandler:
     def test_delegate_once_max_iterations_exceeded(self):
         """'loop until max' 任务触发 max_iterations_exceeded。"""
         from pathlib import Path
+
+        from agent.subagent_system.delegation import delegate_once
         from agent.subagent_system.registry import SubAgentRegistry
         from agent.subagent_system.request import SubAgentRequest
-        from agent.subagent_system.delegation import delegate_once
 
         root = Path("tests/fixtures/subagents")
         if not root.exists():

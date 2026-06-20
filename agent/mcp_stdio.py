@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 import json
-from json import JSONDecodeError
 import os
 import subprocess
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from json import JSONDecodeError
+from typing import Any
 
 from agent.mcp import MCPCallResult
 from agent.mcp_models import MCPServerConfig, MCPToolDescriptor

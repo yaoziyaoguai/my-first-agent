@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from agent.subagent_system.result import ToolSnapshot
 
@@ -38,7 +39,9 @@ class SubAgentToolBoundary:
             bool(entry.get("meta_tool", False)) or bool(entry.get("is_hidden", False))
         ):
             return ToolCheckResult(False, tool_name, deny_reason="hidden_tool")
-        effective = set(getattr(descriptor, "allowed_tools", ())) & set(getattr(request, "allowed_tools", ()))
+        effective = set(getattr(descriptor, "allowed_tools", ())) & set(
+            getattr(request, "allowed_tools", ())
+        )
         if tool_name not in effective:
             return ToolCheckResult(False, tool_name, deny_reason="tool_not_allowed")
         if entry is None:
@@ -55,10 +58,17 @@ class SubAgentToolBoundary:
         """Return model-visible tool metadata after hidden and upper-bound filters."""
 
         snapshots: list[ToolSnapshot] = []
-        effective = sorted(set(getattr(descriptor, "allowed_tools", ())) & set(getattr(request, "allowed_tools", ())))
+        effective = sorted(
+            set(getattr(descriptor, "allowed_tools", ()))
+            & set(getattr(request, "allowed_tools", ()))
+        )
         for tool_name in effective:
             entry = self._tool_registry.get(tool_name)
-            if entry is None or bool(entry.get("meta_tool", False)) or bool(entry.get("is_hidden", False)):
+            if (
+                entry is None
+                or bool(entry.get("meta_tool", False))
+                or bool(entry.get("is_hidden", False))
+            ):
                 continue
             confirmation = entry.get("confirmation")
             snapshots.append(

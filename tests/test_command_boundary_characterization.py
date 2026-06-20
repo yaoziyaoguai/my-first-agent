@@ -35,7 +35,7 @@ class TestCommandCategoryTypedClassification:
         assert intent.category == "read_only"
         assert intent.label == "show memories"
         # frozen: 不可修改
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 frozen
             intent.category = "mutating"  # type: ignore[misc]
 
     def test_command_intent_classifies_each_command_type(self):
@@ -63,6 +63,7 @@ class TestDetectFunctionsArePure:
     def test_detect_show_memories_is_pure(self):
         """detect_show_memories 不产生副作用。"""
         import os
+
         from agent.cli_commands import detect_show_memories
 
         env_before = dict(os.environ)
@@ -77,6 +78,7 @@ class TestDetectFunctionsArePure:
     def test_detect_forget_memory_is_pure(self):
         """detect_forget_memory 不产生副作用。"""
         import os
+
         from agent.cli_commands import detect_forget_memory
 
         env_before = dict(os.environ)
@@ -91,6 +93,7 @@ class TestDetectFunctionsArePure:
     def test_detect_show_subagents_is_pure(self):
         """detect_show_subagents 不产生副作用。"""
         import os
+
         from agent.cli_commands import detect_show_subagents
 
         env_before = dict(os.environ)
@@ -105,6 +108,7 @@ class TestDetectFunctionsArePure:
     def test_detect_nl_delegation_is_pure(self):
         """detect_nl_delegation 不产生副作用。"""
         import os
+
         from agent.cli_commands import detect_nl_delegation
 
         env_before = dict(os.environ)
@@ -246,7 +250,9 @@ class TestCommandShortcutAllowlist:
 
         known = cli_mod.get_known_command_shortcuts()
         all_names = set(dir(cli_mod))
-        detect_fns = {n for n in all_names if n.startswith("detect_") and callable(getattr(cli_mod, n))}
+        detect_fns = {
+            n for n in all_names if n.startswith("detect_") and callable(getattr(cli_mod, n))
+        }
 
         unregistered = detect_fns - known
         assert not unregistered, (

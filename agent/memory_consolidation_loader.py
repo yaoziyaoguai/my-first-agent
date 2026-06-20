@@ -132,10 +132,7 @@ def _to_episodic_evidence(record) -> EpisodicEvidence:
     scope = getattr(record, "scope", None)
     if scope is not None:
         # MemoryScope 等枚举类型通过 .value 获取字符串值
-        if hasattr(scope, "value"):
-            scope_str = str(scope.value)
-        else:
-            scope_str = str(scope)
+        scope_str = str(scope.value) if hasattr(scope, "value") else str(scope)
 
     created_at = _get_metadata_field(record, "created_at")
     confidence = _get_metadata_field(record, "confidence")

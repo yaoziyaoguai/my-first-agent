@@ -98,15 +98,15 @@ def build_memory_snapshot_from_store(
 
     # ── 字符预算强制截断 (RFC §13.2, Appendix H.4 SB2/SB3) ──
     # Per-item: ≤500 chars, 超过截断加 … 标记
-    PER_ITEM_CHAR_LIMIT = 500
-    TOTAL_CHAR_LIMIT = 2500
+    per_item_char_limit = 500
+    total_char_limit = 2500
     char_truncated = 0
 
     truncated_items: list[MemorySnapshotItem] = []
     for item in items:
         content = item.content
-        if len(content) > PER_ITEM_CHAR_LIMIT:
-            content = content[:PER_ITEM_CHAR_LIMIT - 1] + "…"
+        if len(content) > per_item_char_limit:
+            content = content[:per_item_char_limit - 1] + "…"
             char_truncated += 1
         truncated_items.append(MemorySnapshotItem(
             content=content,
@@ -120,7 +120,7 @@ def build_memory_snapshot_from_store(
     # Total char budget: ≤2500 chars. 超过时从最低优先级 item 开始移除
     # 移除顺序: 最低 ranking episodic → 低 confidence semantic → 旧 semantic
     total_chars = sum(len(item.content) for item in items)
-    while total_chars > TOTAL_CHAR_LIMIT and len(items) > 1:
+    while total_chars > total_char_limit and len(items) > 1:
         # 从末尾移除最低优先级 item (非 procedural 且非最前)
         items.pop()
         total_chars = sum(len(item.content) for item in items)

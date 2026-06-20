@@ -25,7 +25,6 @@ from tests.test_main_input import _silent_writer
 from tests.test_main_loop import _reset_core_module
 from tests.test_meta_tool import _request_user_input_response
 
-
 TRAVEL_DETAILS = (
     "北京出发\n"
     "偏好高铁\n"
@@ -172,7 +171,9 @@ def test_request_user_input_travel_details_project_to_step_input_and_execution_m
             assert keyword in text
 
 
-def test_final_answer_followup_does_not_pause_for_user_input(fresh_state, two_step_plan, monkeypatch):
+def test_final_answer_followup_does_not_pause_for_user_input(
+    fresh_state, two_step_plan, monkeypatch
+):
     """完整答案后的开放式 follow-up 是非阻塞收尾，不应切 awaiting_user_input。"""
     from agent import response_handlers
     from agent.model_output_resolution import resolve_end_turn_output

@@ -44,7 +44,10 @@ def test_select_execution_mode_allows_descriptor_bounded_local_mode() -> None:
         delegation_reason="review",
     )
 
-    assert select_execution_mode(request, descriptor, SubAgentPolicy()) == SubAgentExecutionMode.LOCAL_DETERMINISTIC
+    assert (
+        select_execution_mode(request, descriptor, SubAgentPolicy())
+        == SubAgentExecutionMode.LOCAL_DETERMINISTIC
+    )
 
 
 def test_gated_modes_are_blocked_when_config_gate_is_closed() -> None:

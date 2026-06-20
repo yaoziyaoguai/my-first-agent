@@ -16,7 +16,6 @@ from agent.memory_consolidation import (
 )
 from agent.memory_extraction import SuggestedAction
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _valid_candidate(**overrides) -> ConsolidationCandidate:

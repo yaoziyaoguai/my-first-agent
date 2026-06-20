@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-
 from tests.conftest import (
     FakeAnthropicClient,
     FakeResponse,
@@ -22,10 +21,9 @@ from tests.conftest import (
     meta_complete_response,
 )
 from tests.test_main_loop import (
-    _reset_core_module,
     _register_test_tool,
+    _reset_core_module,
 )
-
 
 # ============================================================
 # 辅助函数
@@ -386,7 +384,7 @@ def test_user_input_variations_handled_gracefully(monkeypatch):
             ]
         )
 
-        EXEC_STATUSES = {"running", "awaiting_step_confirmation", "awaiting_tool_confirmation"}
+        exec_statuses = {"running", "awaiting_step_confirmation", "awaiting_tool_confirmation"}
 
         # Round 1：标准 "y"
         state = _reset_core_module(monkeypatch, fake)
@@ -395,7 +393,7 @@ def test_user_input_variations_handled_gracefully(monkeypatch):
         assert state.task.status == "awaiting_plan_confirmation"
         chat("y")
         assert state.task.current_plan is not None, "'y' 后 plan 不应被清"
-        assert state.task.status in EXEC_STATUSES, (
+        assert state.task.status in exec_statuses, (
             f"'y' 应当被识别为接受进入执行态，实际 status={state.task.status}"
         )
 
@@ -405,7 +403,7 @@ def test_user_input_variations_handled_gracefully(monkeypatch):
         assert state.task.status == "awaiting_plan_confirmation"
         chat("Y")
         assert state.task.current_plan is not None
-        assert state.task.status in EXEC_STATUSES, (
+        assert state.task.status in exec_statuses, (
             f"'Y' 应当被识别为接受（lower 处理），实际 status={state.task.status}"
         )
 
@@ -415,7 +413,7 @@ def test_user_input_variations_handled_gracefully(monkeypatch):
         assert state.task.status == "awaiting_plan_confirmation"
         chat("  y  ")
         assert state.task.current_plan is not None
-        assert state.task.status in EXEC_STATUSES, (
+        assert state.task.status in exec_statuses, (
             f"' y ' 应当被识别为接受（strip 处理），实际 status={state.task.status}"
         )
     finally:

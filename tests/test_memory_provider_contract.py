@@ -19,7 +19,6 @@ from agent.memory_contracts import (
     MemorySource,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROVIDER_MODULE = PROJECT_ROOT / "agent" / "memory_provider.py"
 

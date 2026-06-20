@@ -9,11 +9,14 @@ by state in core.py.
 
 from typing import Any
 
-
 Message = dict[str, Any]
 
 
-def append_control_event(messages: list[Message], event_type: str, payload: dict[str, Any] | None = None) -> None:
+def append_control_event(
+    messages: list[Message],
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
     """Append a semantic control event to conversation messages.
 
     Raw control inputs such as y/n should not be written directly into the

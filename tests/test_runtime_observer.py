@@ -22,8 +22,8 @@ def _read_jsonl(path):
 
 
 def test_log_event_outputs_event_fields(monkeypatch, capsys):
-    from agent.runtime_observer import log_event
     import agent.runtime_observer as observer
+    from agent.runtime_observer import log_event
 
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
@@ -69,8 +69,8 @@ def test_log_event_persists_short_payload_without_full_text(monkeypatch, tmp_pat
 
 
 def test_log_resolution_outputs_resolution_kind_and_simple_details(monkeypatch, capsys):
-    from agent.runtime_observer import log_resolution
     import agent.runtime_observer as observer
+    from agent.runtime_observer import log_resolution
 
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
@@ -88,8 +88,8 @@ def test_log_resolution_outputs_resolution_kind_and_simple_details(monkeypatch, 
 
 
 def test_log_transition_outputs_state_fields(monkeypatch, capsys):
-    from agent.runtime_observer import log_transition
     import agent.runtime_observer as observer
+    from agent.runtime_observer import log_transition
 
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 
@@ -107,8 +107,8 @@ def test_log_transition_outputs_state_fields(monkeypatch, capsys):
 
 
 def test_log_actions_outputs_action_names(monkeypatch, capsys):
-    from agent.runtime_observer import log_actions
     import agent.runtime_observer as observer
+    from agent.runtime_observer import log_actions
 
     monkeypatch.setattr(observer, "RUNTIME_DEBUG_LOGS", True)
 

@@ -9,11 +9,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from agent.provider.protocol import ProviderResponse, ProviderResponseError, ProviderTextBlock
-
 
 _SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]{8,}"),
@@ -49,7 +48,9 @@ class ProviderStreamEvent:
     error: str | None = None
 
     @classmethod
-    def delta(cls, *, sequence: int, text_delta: str, source: str = "provider") -> "ProviderStreamEvent":
+    def delta(
+        cls, *, sequence: int, text_delta: str, source: str = "provider"
+    ) -> ProviderStreamEvent:
         return cls(
             event_type="text_delta",
             sequence=sequence,
@@ -58,15 +59,17 @@ class ProviderStreamEvent:
         )
 
     @classmethod
-    def tool_request(cls, *, sequence: int, source: str = "provider") -> "ProviderStreamEvent":
+    def tool_request(cls, *, sequence: int, source: str = "provider") -> ProviderStreamEvent:
         return cls(event_type="tool_request", sequence=sequence, source=source)
 
     @classmethod
-    def final(cls, *, sequence: int, source: str = "provider") -> "ProviderStreamEvent":
+    def final(cls, *, sequence: int, source: str = "provider") -> ProviderStreamEvent:
         return cls(event_type="final", sequence=sequence, source=source, is_final=True)
 
     @classmethod
-    def error_event(cls, *, sequence: int, error: str, source: str = "provider") -> "ProviderStreamEvent":
+    def error_event(
+        cls, *, sequence: int, error: str, source: str = "provider"
+    ) -> ProviderStreamEvent:
         return cls(
             event_type="error",
             sequence=sequence,

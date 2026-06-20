@@ -28,7 +28,7 @@ class MemoryProviderProtocol(Protocol):
 
     provider_name: str
 
-    def list_candidates(self) -> tuple["MemoryProviderCandidate", ...]:
+    def list_candidates(self) -> tuple[MemoryProviderCandidate, ...]:
         """返回 provider 候选输入，不做 policy decision。"""
 
     def get_snapshot(self, *, selection_reason: str) -> MemorySnapshot:

@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-
+from config import STEP_COMPLETION_THRESHOLD
 from tests.conftest import (
     FakeAnthropicClient,
     FakeResponse,
@@ -18,10 +18,8 @@ from tests.conftest import (
     meta_complete_response,
     text_response,
 )
-from tests.test_main_loop import _reset_core_module, _register_test_tool
 from tests.test_complex_scenarios import _plan_response, _tool_use_resp
-from config import STEP_COMPLETION_THRESHOLD
-
+from tests.test_main_loop import _register_test_tool, _reset_core_module
 
 # ============================================================
 # 1. 元工具达阈值：正常推进

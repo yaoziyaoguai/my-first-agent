@@ -15,10 +15,10 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import tempfile
-import os
 
 import pytest
 
@@ -35,7 +35,6 @@ from agent.mcp_policy import (
 )
 from agent.mcp_stdio import StdioMCPClient
 from agent.tool_registry import TOOL_REGISTRY, get_tool_definitions
-
 
 # npx 完整路径（pytest 环境可能不继承 nvm PATH）
 _NPX_PATH = shutil.which("npx") or "/Users/jinkun.wang/.nvm/versions/node/v20.20.2/bin/npx"
@@ -179,7 +178,9 @@ def test_flight_stage4_realserver_tools_list():
                     f"tool {desc.name} 的 sanitized description 缺少来源标记"
                 )
 
-        assert blocked_count >= 4, f"至少应有 4 个 destructive tool 被 blocked，实际: {blocked_count}"
+        assert blocked_count >= 4, (
+            f"至少应有 4 个 destructive tool 被 blocked，实际: {blocked_count}"
+        )
         assert safe_count >= 8, f"至少应有 8 个 safe tool 通过，实际: {safe_count}"
         print(f"  safe: {safe_count}, blocked: {blocked_count}")
     finally:
@@ -493,9 +494,9 @@ def test_flight_fetch_readonly_call_success():
     server = _fetch_server_config()
     client = StdioMCPClient(timeout_seconds=5)
 
-    from agent.tool_registry import register_tool
     from agent.mcp_models import mcp_registry_tool_name
     from agent.mcp_policy import evaluate_tool_policy
+    from agent.tool_registry import register_tool
 
     descriptors = client.list_tools(server)
     fetch_desc = [d for d in descriptors if d.name == "safe_fetch"][0]

@@ -38,7 +38,6 @@ from agent.user_input import (
     submitted_input_event,
 )
 
-
 NUMBERED_PASTE = "\n".join(
     [
         "1. 北京出发",

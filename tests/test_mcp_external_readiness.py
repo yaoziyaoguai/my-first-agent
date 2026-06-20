@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = PROJECT_ROOT / "agent" / "mcp_external_readiness.py"
 

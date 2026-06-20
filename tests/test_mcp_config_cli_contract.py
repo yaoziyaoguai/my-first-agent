@@ -14,7 +14,6 @@ import ast
 import io
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_MODULE = PROJECT_ROOT / "agent" / "mcp_config_cli.py"
 SERVICE_MODULE = PROJECT_ROOT / "agent" / "mcp_config_service.py"

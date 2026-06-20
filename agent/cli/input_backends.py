@@ -8,15 +8,16 @@ UserInputEvent 和上层 Runtime 分派处理。
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import os
+from collections.abc import Callable
 
 from agent.input_backends.simple import (
     read_user_input_event as read_simple_user_input_event,
+)
+from agent.input_backends.simple import (
     read_user_input_text,
 )
 from agent.user_input import UserInputEvent
-
 
 INPUT_BACKEND_ENV = "MY_FIRST_AGENT_INPUT_BACKEND"
 

@@ -32,7 +32,6 @@ from agent.local_artifacts import (
     inventory_known_artifact,
 )
 
-
 # ============================================================
 # 基础功能：count / total_bytes / mtime range 正确
 # ============================================================
@@ -56,7 +55,7 @@ def test_inventory_returns_immutable_dataclass(tmp_path: Path) -> None:
     """
     inv = inventory_artifact_directory(tmp_path, kind="sessions")
     assert isinstance(inv, ArtifactInventory)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 frozen
         # frozen dataclass 应抛 FrozenInstanceError；用 Exception 兜底
         # 避免 dataclass 内部异常类型变化导致测试脆弱
         inv.file_count = 999  # type: ignore[misc]
@@ -298,9 +297,8 @@ def test_local_artifacts_module_does_not_import_dotenv_or_secrets() -> None:
             for alias in node.names:
                 if alias.name in forbidden_modules:
                     bad.append(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and node.module in forbidden_modules:
-                bad.append(node.module)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module in forbidden_modules:
+            bad.append(node.module)
     assert not bad, (
         f"agent/local_artifacts.py 不应 import 敏感配置/凭据模块：{bad}"
     )

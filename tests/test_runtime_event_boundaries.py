@@ -20,7 +20,6 @@ import pytest
 
 from agent.state import create_agent_state
 
-
 # ---------------------------------------------------------------------------
 # 1. 临时事件类型必须 frozen
 # ---------------------------------------------------------------------------
@@ -130,8 +129,8 @@ def test_runtime_observer_log_event_does_not_mutate_state(monkeypatch, tmp_path)
     使用 tmp_path 把 agent_log.jsonl 重定向到临时目录，避免污染仓库根目录的
     log 文件。
     """
-    from agent import runtime_observer
     from agent import logger as agent_logger
+    from agent import runtime_observer
 
     monkeypatch.setattr(agent_logger, "LOG_FILE", tmp_path / "agent_log.jsonl")
 

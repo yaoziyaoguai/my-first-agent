@@ -75,7 +75,9 @@ def extract_yaml_outline(content):
         key_part = candidate.split(":", 1)[0].strip()
         if not key_part:
             continue
-        if " " in key_part and not (key_part.startswith('"') and key_part.endswith('"')) and not (key_part.startswith("'") and key_part.endswith("'")):
+        double_quoted = key_part.startswith('"') and key_part.endswith('"')
+        single_quoted = key_part.startswith("'") and key_part.endswith("'")
+        if " " in key_part and not double_quoted and not single_quoted:
             continue
         indent = len(line) - len(line.lstrip(" "))
         outline.append(f"Line {idx}: Y{indent // 2 + 1} {key_part}")

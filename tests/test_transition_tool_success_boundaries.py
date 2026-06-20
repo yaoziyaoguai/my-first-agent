@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+
 def test_tool_outcome_transition_distinguishes_success_failure_rejected_by_check() -> None:
     """slice 4 入口契约：success / failure / rejected_by_check 必须各有去向。
 
@@ -61,8 +62,8 @@ def test_tool_success_transition_real_path_keeps_protocol_unchanged(
       草案，不允许污染 messages 或 checkpoint。
     """
 
-    from agent import checkpoint
     import agent.tool_executor as te
+    from agent import checkpoint
     from agent.conversation_events import has_tool_result
     from agent.state import create_agent_state
 
@@ -164,10 +165,10 @@ def test_pending_tool_success_transition_real_path_after_confirmed_execution(
       照原样写入；TransitionResult 不能进 messages / checkpoint。
     """
 
-    from agent import checkpoint
     import agent.confirm_handlers as ch
-    from agent.confirm_handlers import ConfirmationContext
     import agent.tool_executor as te
+    from agent import checkpoint
+    from agent.confirm_handlers import ConfirmationContext
     from agent.conversation_events import has_tool_result
     from agent.state import create_agent_state
 
@@ -258,8 +259,8 @@ def test_rejected_by_check_real_path_still_uses_fallback_display_event(
     安全语义偷偷合并掉。
     """
 
-    from agent import checkpoint
     import agent.tool_executor as te
+    from agent import checkpoint
     from agent.state import create_agent_state
 
     checkpoint_path = tmp_path / "checkpoint.json"
@@ -330,8 +331,8 @@ def test_execute_single_tool_emits_tool_result_visible_runtime_event(
     on_runtime_event 监听者（TUI / CLI / observer）投射一条用户可见摘要。
     这条路径与已有 DisplayEvent（on_display_event）并存，互不替代。
     """
-    from agent import checkpoint
     import agent.tool_executor as te
+    from agent import checkpoint
     from agent.display_events import EVENT_TOOL_RESULT_VISIBLE
     from agent.state import create_agent_state
 
@@ -381,9 +382,10 @@ def test_execute_single_tool_emits_tool_result_visible_runtime_event(
     )
 
     visible_events = [e for e in runtime_captured if e.event_type == EVENT_TOOL_RESULT_VISIBLE]
+    captured_summary = [(e.event_type, getattr(e, "text", "")[:40]) for e in runtime_captured]
     assert len(visible_events) == 1, (
         f"execute_single_tool 成功后必须发射恰好 1 条 {EVENT_TOOL_RESULT_VISIBLE}，"
-        f" 实际 runtime_captured={[(e.event_type, getattr(e,'text','')[:40]) for e in runtime_captured]}"
+        f" 实际 runtime_captured={captured_summary}"
     )
     ev = visible_events[0]
     assert ev.event_type == EVENT_TOOL_RESULT_VISIBLE
@@ -393,8 +395,8 @@ def test_execute_single_tool_emits_tool_result_visible_runtime_event(
 
 def test_execute_single_tool_omits_runtime_event_when_no_sink(tmp_path, monkeypatch) -> None:
     """on_runtime_event 为 None 时不应崩溃——向后兼容无 RuntimeEvent sink 的调用方。"""
-    from agent import checkpoint
     import agent.tool_executor as te
+    from agent import checkpoint
     from agent.state import create_agent_state
 
     checkpoint_path = tmp_path / "checkpoint.json"
@@ -419,6 +421,10 @@ def test_execute_single_tool_omits_runtime_event_when_no_sink(tmp_path, monkeypa
     block = SimpleNamespace(id="t1", name="read_file", input={})
     # 不应抛异常
     result = te.execute_single_tool(
-        block, state=state, turn_state=turn_state, turn_context={}, messages=state.conversation.messages,
+        block,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=state.conversation.messages,
     )
     assert result is None

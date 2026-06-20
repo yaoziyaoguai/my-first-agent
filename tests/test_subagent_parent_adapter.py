@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent.subagent_system.descriptor import SubAgentDescriptor
 from agent.subagent_system.delegation import delegate_once
+from agent.subagent_system.descriptor import SubAgentDescriptor
 from agent.subagent_system.registry import SubAgentRegistry
 from agent.subagent_system.request import SubAgentRequest
 

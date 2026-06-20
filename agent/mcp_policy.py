@@ -33,17 +33,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Mapping, Sequence, Literal
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Literal
 
 from agent.mcp_models import MCPServerConfig, MCPToolDescriptor
 from agent.mcp_sanitizer import (
-    scan_adversarial_patterns,
     sanitize_description,
+    scan_adversarial_patterns,
 )
 from agent.tool_registry import TOOL_REGISTRY
-
 
 # ============================================================================
 # 安全常量（policy 层，非 sanitizer 层）

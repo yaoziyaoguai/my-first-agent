@@ -98,8 +98,8 @@ def _temp_sandbox() -> pathlib.Path:
 
 def test_mcp_model_tools_param_includes_mcp_tool():
     """验证 get_model_visible_tools 包含注册后的 MCP tool。（直调测试）"""
-    from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
+    from agent.mcp_stdio import StdioMCPClient
     from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
 
     server_name = "e2e_fs"
@@ -130,8 +130,8 @@ def test_mcp_model_tools_param_includes_mcp_tool():
 
 def test_mcp_tool_in_registry_after_registration():
     """注册后的 MCP tool 在 TOOL_REGISTRY 中。（直调测试）"""
-    from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
+    from agent.mcp_stdio import StdioMCPClient
     from agent.tool_registry import TOOL_REGISTRY
 
     server_name = "e2e_reg"
@@ -158,8 +158,8 @@ def test_mcp_tool_in_registry_after_registration():
 
 def test_mcp_no_key_leak_in_registry_or_tools():
     """TOOL_REGISTRY 和 model-visible tools 不含 API key。（直调测试）"""
-    from agent.mcp_stdio import StdioMCPClient
     from agent.mcp import register_mcp_tools
+    from agent.mcp_stdio import StdioMCPClient
     from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
 
     server_name = "e2e_leak"
@@ -201,9 +201,8 @@ def test_real_llm_receives_mcp_tool_in_tools_param():
 
     验证：MCP registration → tool exposure → model select MCP tool。（直调，不经 core.chat()）
     """
-    from agent.mcp import MCPServerConfig
+    from agent.mcp import MCPServerConfig, register_mcp_tools
     from agent.mcp_stdio import StdioMCPClient
-    from agent.mcp import register_mcp_tools
     from agent.tool_registry import TOOL_REGISTRY, get_model_visible_tools
 
     sandbox = _temp_sandbox()
@@ -292,7 +291,9 @@ def test_real_llm_receives_mcp_tool_in_tools_param():
                 b for b in response.content if getattr(b, "type", None) == "text"
             ]
             if text_blocks:
-                preview = str(text_blocks[0].text)[:200] if hasattr(text_blocks[0], 'text') else str(text_blocks[0])[:200]
+                first_block = text_blocks[0]
+                text_value = first_block.text if hasattr(first_block, "text") else first_block
+                preview = str(text_value)[:200]
                 print(f"  model text: {preview}")
 
         # 6. 验证 response 不含 key

@@ -320,7 +320,8 @@ def test_in_progress_plan_checkpoint_is_actionable():
         "current_plan": {"steps": [{"action": "x"}]},
         "current_step_index": 1,
     }
-    assert _checkpoint_has_actionable_resume(task, {"messages": [{"role": "user", "content": "x"}]}) is True
+    conv = {"messages": [{"role": "user", "content": "x"}]}
+    assert _checkpoint_has_actionable_resume(task, conv) is True
 
 
 def test_non_idle_with_messages_is_actionable():
@@ -332,7 +333,7 @@ def test_non_idle_with_messages_is_actionable():
     assert _checkpoint_has_actionable_resume(task, conv) is True
 
 
-# ===================== M7-B: 四类输出区分（policy / user / pre-check / fail / success） =====================
+# ===== M7-B: 四类输出区分（policy / user / pre-check / fail / success） =====
 
 def test_policy_denial_emits_tool_rejected_with_specific_reason(monkeypatch):
     """confirmation == 'block'（如 read_file ~/.env / .pem）必须 emit
@@ -341,8 +342,8 @@ def test_policy_denial_emits_tool_rejected_with_specific_reason(monkeypatch):
     真实 main.py smoke 发现旧版 block 分支不 emit 任何 display event，
     用户只看到下游 FORCE_STOP 的「具体拒绝原因见上方工具消息」，但「上方」
     其实空无一物。"""
-    import agent.tools  # noqa: F401  ensure TOOL_REGISTRY populated
     import agent.tool_executor as te
+    import agent.tools  # noqa: F401  ensure TOOL_REGISTRY populated
 
     monkeypatch.setattr(te, "save_checkpoint", lambda s: None)
 
@@ -397,8 +398,8 @@ def test_policy_denial_emits_tool_rejected_with_specific_reason(monkeypatch):
 def test_policy_denial_does_not_leak_file_contents_in_display_event(monkeypatch, tmp_path):
     """display event 的 body 来源于 _describe_policy_denial，
     后者只读路径名/扩展名，绝不读取被拒文件内容。"""
-    import agent.tools  # noqa: F401
     import agent.tool_executor as te
+    import agent.tools  # noqa: F401
 
     secret = tmp_path / "secret.pem"
     secret.write_text("BEGIN PRIVATE KEY\nSUPER_SECRET_VALUE\nEND PRIVATE KEY")
@@ -448,10 +449,9 @@ def test_user_rejection_emits_user_rejected_event_with_distinct_text(monkeypatch
     """用户输入 n 拒绝工具调用时必须 emit tool.user_rejected，
     与 tool.rejected（安全检查）/tool.failed（运行报错）区分语义，
     避免 CLI 用户「按了 n 之后什么都没看到」的体验。"""
-    from agent.confirm_handlers import handle_tool_confirmation, ConfirmationContext
-    from agent.conversation_events import has_tool_result
-
     import agent.confirmation.tool as _conf_tool
+    from agent.confirm_handlers import ConfirmationContext, handle_tool_confirmation
+    from agent.conversation_events import has_tool_result
     monkeypatch.setattr(_conf_tool, "save_checkpoint", lambda s: None)
 
     class _TaskState:
@@ -468,7 +468,17 @@ def test_user_rejection_emits_user_rejected_event_with_distinct_text(monkeypatch
     class _ConvState:
         def __init__(self):
             self.messages = [
-                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_user_rej", "name": "write_file", "input": {}}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_user_rej",
+                            "name": "write_file",
+                            "input": {},
+                        }
+                    ],
+                },
             ]
 
     class _State:

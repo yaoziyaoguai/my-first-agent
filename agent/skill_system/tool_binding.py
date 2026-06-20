@@ -15,7 +15,6 @@ from typing import Protocol
 
 from agent.skill_system.descriptor import SkillDescriptor
 
-
 # ---- ToolRegistry 接口（Protocol，不依赖具体实现） ----
 
 
@@ -85,7 +84,10 @@ class SkillToolBinding:
                 allowed=False,
                 risk_level="unknown",
                 requires_confirmation=False,
-                reason=f"工具 '{tool_name}' 不在 Skill '{self._descriptor.name}' 的 allowed_tools 中",
+                reason=(
+                    f"工具 '{tool_name}' 不在 Skill "
+                    f"'{self._descriptor.name}' 的 allowed_tools 中"
+                ),
             )
 
         # Step 2: ToolRegistry 注册检查

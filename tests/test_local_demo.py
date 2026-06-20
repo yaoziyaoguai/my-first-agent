@@ -9,8 +9,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -23,7 +23,6 @@ from agent.local_demo import (
     run_demo_cli,
     run_local_demo,
 )
-
 
 # ---------- happy path / fake provider ---------------------------------------
 

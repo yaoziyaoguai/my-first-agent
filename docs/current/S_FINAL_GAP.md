@@ -28,7 +28,7 @@
 
 | Gap | Priority | Layer | Title | Status |
 |---|---:|---|---|---|
-| FINAL-G01 | P0 | L1-L5 | Full-suite quality gate green (TD-007) | proposed/open |
+| FINAL-G01 | P0 | L1-L5 | Full-suite quality gate green (TD-007) | done |
 | FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | done |
 | FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | proposed/open |
 | FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | proposed/open |
@@ -58,7 +58,10 @@
 - Non-goal boundary: Do not change runtime behavior to satisfy lint; do not weaken
   tests; do not touch secrets/config.
 - Suggested order: 1
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20): `.venv/bin/ruff check .` exits 0 (443 -> 0). 269 safe
+  ruff auto-fixes + manual fixes across 62 files (E501 / N803 / SIM / B / N),
+  behavior-preserving; full pytest `4940 passed, 0 failed`.
 - Risk if ignored: the red gate keeps the project looking unfinished and masks any
   future real lint regression.
 

@@ -30,8 +30,8 @@ def test_run_shell_is_only_shell_like_builtin_and_no_bash_alias() -> None:
 
     _load_builtin_tools()
 
-    from agent.tool_registry import TOOL_REGISTRY, execute_tool, get_tool_definitions
     from agent.tool_executor import _classify_tool_outcome
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, get_tool_definitions
 
     visible_tools = {definition["name"] for definition in get_tool_definitions()}
     forbidden_aliases = {"bash", "shell", "run_bash", "python_exec", "run_python"}

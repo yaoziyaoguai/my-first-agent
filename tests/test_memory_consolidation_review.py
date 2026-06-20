@@ -26,7 +26,6 @@ from agent.memory_review import (
 )
 from agent.memory_store import MemoryStoreApplyStatus
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -738,9 +737,9 @@ class TestNoLLMOrRuntime:
     def test_module_does_not_import_llm(self):
         """AST 级验证不 import anthropic 或 LLM 相关模块。"""
         import ast
-        from pathlib import Path as P
+        from pathlib import Path
 
-        src = P("agent/memory_consolidation_review.py").read_text(encoding="utf-8")
+        src = Path("agent/memory_consolidation_review.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -748,25 +747,23 @@ class TestNoLLMOrRuntime:
                     assert "anthropic" not in alias.name.lower(), (
                         f"禁止 import LLM 模块: {alias.name}"
                     )
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    assert "anthropic" not in node.module.lower(), (
-                        f"禁止 import LLM 模块: {node.module}"
-                    )
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                assert "anthropic" not in node.module.lower(), (
+                    f"禁止 import LLM 模块: {node.module}"
+                )
 
     def test_module_does_not_import_store_write(self):
         """验证不 import store 写相关模块。"""
         import ast
-        from pathlib import Path as P
+        from pathlib import Path
 
-        src = P("agent/memory_consolidation_review.py").read_text(encoding="utf-8")
+        src = Path("agent/memory_consolidation_review.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module:
-                    assert "memory_fs_store" not in node.module, (
-                        "dispatch 模块不应 import FS store"
-                    )
+            if isinstance(node, ast.ImportFrom) and node.module:
+                assert "memory_fs_store" not in node.module, (
+                    "dispatch 模块不应 import FS store"
+                )
 
     def test_does_not_call_llm(self, tmp_path: Path):
         """dispatch 时不对真实 LLM 做网络调用（无 monkeypatch 也能运行）。"""
@@ -822,7 +819,7 @@ class TestDispatchResult:
             warnings=(),
             proposal_filepaths=(),
         )
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - frozen-dataclass setattr rejection
             r.dispatched = 5  # type: ignore
 
     def test_result_fields_accessible(self, tmp_path: Path):

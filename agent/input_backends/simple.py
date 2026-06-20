@@ -56,7 +56,6 @@ from agent.user_input import (
     submitted_input_event,
 )
 
-
 MULTI_START = "/multi"
 MULTI_DONE = "/done"
 MULTI_CANCEL = "/cancel"

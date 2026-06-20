@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from agent.tool_registry import register_tool
 
-
-_MARK_STEP_COMPLETE_DESCRIPTION = """当你判断本步骤的工作已经收尾（无论是完全达成还是部分达成）时，**必须调用此工具**声明结束。
+_MARK_STEP_COMPLETE_DESCRIPTION = """当你判断本步骤的工作已经收尾（无论是完全达成还是部分达成）时，
+**必须调用此工具**声明结束。
 
 请**严格、客观**地对本步骤完成度打分（integer，0–100）：
   - 90–100：完全达成步骤目标，关键产出齐全
@@ -77,7 +77,8 @@ def mark_step_complete(completion_score: int, summary: str, outstanding: str) ->
     return ""
 
 
-_REQUEST_USER_INPUT_DESCRIPTION = """当你在执行某个步骤的过程中，发现**缺少关键用户信息且无法通过推理或读取上下文继续**时，调用此工具向用户提一个问题。
+_REQUEST_USER_INPUT_DESCRIPTION = """当你在执行某个步骤的过程中，
+发现**缺少关键用户信息且无法通过推理或读取上下文继续**时，调用此工具向用户提一个问题。
 
 **何时调用**：
   - 路径 / 参数 / 标识不明确，且无法从已有 messages 或代码里推断
@@ -95,7 +96,8 @@ _REQUEST_USER_INPUT_DESCRIPTION = """当你在执行某个步骤的过程中，�
   - 调用本工具时，**不要同轮混用普通业务工具**（先暂停等用户）
   - options 若无明确候选传 `[]`；context 若无相关信息摘要传空字符串
 
-调用本工具会让系统暂停 loop、把问题展示给用户。用户回复后，系统会把答复以普通文本形式注入下一轮上下文，你可以继续执行当前步骤。
+调用本工具会让系统暂停 loop、把问题展示给用户。用户回复后，系统会把答复以普通文本形式
+注入下一轮上下文，你可以继续执行当前步骤。
 """
 
 

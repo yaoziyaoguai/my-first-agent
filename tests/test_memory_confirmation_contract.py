@@ -22,7 +22,6 @@ from agent.memory_contracts import (
 )
 from agent.memory_policy import DeterministicMemoryPolicy
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIRMATION_MODULE = PROJECT_ROOT / "agent" / "memory_confirmation.py"
 BOUNDARY_FILES = (

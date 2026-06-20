@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from agent.tool_registry import register_tool
-from agent.security import is_protected_source_file
 from agent.checks import run_linter
+from agent.security import is_protected_source_file
+from agent.tool_registry import register_tool
 from agent.tools.path_safety import is_path_inside_project, project_boundary_rejection
 from config import ENABLE_REVIEW
 
@@ -52,9 +52,15 @@ def post_edit_check(tool_name, tool_input, result):
         if linter_result:
             result += f"\n\n{linter_result}"
         if ENABLE_REVIEW:
-            result += "\n\n[系统指令] 文件已编辑。请停止当前操作，向用户报告本次操作的结果。不要询问用户是否继续，不要自行继续创建更多文件。"
+            result += (
+                "\n\n[系统指令] 文件已编辑。请停止当前操作，向用户报告本次操作的结果。"
+                "不要询问用户是否继续，不要自行继续创建更多文件。"
+            )
         else:
-            result += "\n\n[系统指令] 文件已编辑。请停止当前操作，将结果报告给用户，并询问用户是否继续下一步。不要自行继续创建更多文件。"
+            result += (
+                "\n\n[系统指令] 文件已编辑。请停止当前操作，将结果报告给用户，"
+                "并询问用户是否继续下一步。不要自行继续创建更多文件。"
+            )
 
     return result
 
@@ -97,7 +103,10 @@ def edit_file(path, old, new):
 
         match_count = content.count(old)
         if match_count > 1:
-            return f"匹配到多处相同内容（共 {match_count} 处），无法确定替换位置，请提供更精确的 old 内容"
+            return (
+                f"匹配到多处相同内容（共 {match_count} 处），"
+                "无法确定替换位置，请提供更精确的 old 内容"
+            )
 
         backup_path = file_path.with_suffix(file_path.suffix + ".bak")
         backup_path.write_text(content, encoding="utf-8")

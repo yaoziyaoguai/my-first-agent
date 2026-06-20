@@ -375,7 +375,7 @@ def _truncate(text: str, max_len: int) -> str:
 
 
 def _derive_id(category: str, content: str) -> str:
-    digest = sha256(f"{category}:{content}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{category}:{content}".encode()).hexdigest()
     return f"suggestion:{category}:{digest[:16]}"
 
 

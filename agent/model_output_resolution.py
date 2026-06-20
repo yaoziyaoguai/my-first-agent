@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 EVENT_MODEL_REQUESTED_USER_INPUT = "model.requested_user_input"
 EVENT_MODEL_TEXT_REQUESTED_USER_INPUT = "model.text_requested_user_input"
 EVENT_MODEL_COMPLETED_STEP = "model.completed_step"

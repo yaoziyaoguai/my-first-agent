@@ -32,7 +32,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 InputIntentKind = Literal[
     "normal_message",
     "plan_confirmation",

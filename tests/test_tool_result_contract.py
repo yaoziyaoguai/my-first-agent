@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -48,8 +47,8 @@ def test_success_result_is_currently_model_visible_string() -> None:
     这不是最终 ToolResult 设计；它是后续结构化迁移前的基线。
     """
 
-    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
     from agent.tool_executor import _classify_tool_outcome
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
 
     @register_tool(
         name="contract_dict_tool",
@@ -80,8 +79,8 @@ def test_unknown_tool_is_failure_like_string_not_success() -> None:
     runtime 不能把它误报为执行成功；后续可以改成结构化 failure，但不能回退成 success。
     """
 
-    from agent.tool_registry import execute_tool
     from agent.tool_executor import _classify_tool_outcome
+    from agent.tool_registry import execute_tool
 
     result = execute_tool("totally_unknown_contract_tool", {})
 
@@ -100,8 +99,8 @@ def test_missing_required_argument_is_failure_like_string() -> None:
     测试反向固化进基础工具集。
     """
 
-    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
     from agent.tool_executor import _classify_tool_outcome
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
 
     @register_tool(
         name="contract_required_arg_tool",
@@ -130,8 +129,8 @@ def test_rejected_by_check_prefix_is_not_classified_as_success() -> None:
     denial、user rejection 分开。
     """
 
-    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
     from agent.tool_executor import _classify_tool_outcome
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
 
     @register_tool(
         name="contract_rejected_tool",
@@ -367,8 +366,8 @@ def test_existing_output_size_policies_are_tool_local_characterization(
     不要求本轮抽象。
     """
 
-    from agent.tools.file_ops import FILE_CONTENT_LIMIT, read_file
     import agent.tools.shell as shell_tool
+    from agent.tools.file_ops import FILE_CONTENT_LIMIT, read_file
 
     large_file = tmp_path / "large.txt"
     large_file.write_text("x" * (FILE_CONTENT_LIMIT + 1), encoding="utf-8")

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # Exception 框架需要设置的特殊属性名
 _EXCEPTION_FRAMEWORK_ATTRS = frozenset({
     "__traceback__", "__cause__", "__context__", "__suppress_context__",
@@ -50,9 +49,7 @@ class SkillLoadError(Exception):
 
     def __setattr__(self, name: str, value: object) -> None:
         """构造后不可修改（Exception 框架属性除外）。"""
-        if name in _EXCEPTION_FRAMEWORK_ATTRS:
-            object.__setattr__(self, name, value)
-        elif not hasattr(self, "_locked") or not self._locked:
+        if name in _EXCEPTION_FRAMEWORK_ATTRS or not hasattr(self, "_locked") or not self._locked:
             object.__setattr__(self, name, value)
         else:
             raise AttributeError(f"SkillLoadError 不可变，禁止设置 '{name}'")

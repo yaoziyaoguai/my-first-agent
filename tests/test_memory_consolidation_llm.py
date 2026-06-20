@@ -29,8 +29,8 @@ from agent.memory_consolidation import (
     EpisodicEvidence,
 )
 from agent.memory_consolidation_llm import (
-    LLMConsolidationContentGenerator,
     FakeLLMConsolidationContentGenerator,
+    LLMConsolidationContentGenerator,
     _build_evidence_context,
     _is_llm_consolidation_enabled,
     _is_procedural_like_content,
@@ -41,7 +41,6 @@ from agent.memory_consolidation_pipeline import (
     ConsolidationPipelineResult,
 )
 from agent.provider.protocol import ProviderResponse, ProviderTextBlock
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -560,6 +559,7 @@ class TestArchitectureBoundaries:
     def test_llm_module_no_store_import(self):
         """LLM 模块不导入 store 模块。"""
         import inspect
+
         import agent.memory_consolidation_llm as llm_mod
         src = inspect.getsource(llm_mod)
         assert "memory_store" not in src.lower()
@@ -568,6 +568,7 @@ class TestArchitectureBoundaries:
     def test_llm_module_no_runtime_import(self):
         """LLM 模块不导入 runtime 模块。"""
         import inspect
+
         import agent.memory_consolidation_llm as llm_mod
         src = inspect.getsource(llm_mod)
         assert "memory_runtime" not in src.lower()
@@ -575,6 +576,7 @@ class TestArchitectureBoundaries:
     def test_llm_module_no_env_direct_read(self):
         """LLM 模块不直接读取环境变量（通过 create_llm_content_generator 间接）。"""
         import inspect
+
         import agent.memory_consolidation_llm as llm_mod
         src = inspect.getsource(llm_mod.LLMConsolidationContentGenerator.enhance)
         assert "os.environ" not in src
@@ -592,6 +594,7 @@ class TestArchitectureBoundaries:
     def test_no_agent_log_read(self):
         """LLM 模块不读取 agent_log.jsonl。"""
         import inspect
+
         import agent.memory_consolidation_llm as llm_mod
         src = inspect.getsource(llm_mod)
         assert "agent_log" not in src

@@ -14,8 +14,8 @@ import pytest
 from agent.tool_registry import (
     TOOL_REGISTRY,
     get_model_visible_tool_limits,
-    get_tool_definitions,
     get_model_visible_tools,
+    get_tool_definitions,
     set_model_visible_tool_limits,
 )
 

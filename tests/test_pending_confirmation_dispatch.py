@@ -60,6 +60,8 @@ runtime 行为**——只钉住 5 条分支之间的"互斥与优先级"baseline
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 import agent.core as core
@@ -256,10 +258,8 @@ def test_dispatch_skips_tool_branch_when_pending_tool_is_none(
     # 该路径需要 fake client，本测试只断言 dispatch_probe 没记录 'tool'。
     # 用 pytest.raises 包住 chat() 调用以隔离 fallthrough 路径所需的运行时；
     # 关键不变量是 dispatch 没把 user_input 投给 tool handler。
-    try:
+    with contextlib.suppress(Exception):
         core.chat("y")
-    except Exception:
-        pass
     assert [c[0] for c in dispatch_probe] == [], (
         "pending_tool=None 时不能调用任何 confirmation handler；"
         "tool 分支守卫被破坏会让 user_input='y' 被错路由。"
@@ -282,10 +282,8 @@ def test_dispatch_skips_user_input_branch_when_neither_plan_nor_pending_request(
     state.task.current_plan = None
     state.task.pending_user_input_request = None
     _install_state(monkeypatch, state)
-    try:
+    with contextlib.suppress(Exception):
         core.chat("hello")
-    except Exception:
-        pass
     assert [c[0] for c in dispatch_probe] == [], (
         "无 current_plan 且无 pending_user_input_request 时不应路由到任何"
         " confirmation handler；user_input 应当作新一轮对话处理。"
@@ -308,10 +306,8 @@ def test_dispatch_skips_plan_branch_when_current_plan_is_none(
     state.task.current_plan = None
     state.task.status = "awaiting_plan_confirmation"
     _install_state(monkeypatch, state)
-    try:
+    with contextlib.suppress(Exception):
         core.chat("y")
-    except Exception:
-        pass
     assert "plan" not in [c[0] for c in dispatch_probe], (
         "current_plan=None 时不应路由到 plan handler；守卫缺失会让 plan handler"
         " 在 plan 字段缺失时被错调用。"

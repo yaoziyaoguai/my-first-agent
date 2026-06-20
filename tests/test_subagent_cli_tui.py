@@ -55,7 +55,9 @@ def test_presentation_formats_status_audit_adjudication_and_trace() -> None:
     status = format_delegation_status("running", "local_fake", "review")
     result = format_delegation_result("ok", "task_completed", "summary")
     audit_text = format_subagent_audit(audit)
-    adjudication = format_adjudication(ParentAdjudicationResult.accept("ok", merged_summary="summary"))
+    adjudication = format_adjudication(
+        ParentAdjudicationResult.accept("ok", merged_summary="summary")
+    )
     trace = format_trace_events((
         make_trace_event(
             "delegation_started",

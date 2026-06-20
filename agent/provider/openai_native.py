@@ -21,7 +21,6 @@ from agent.provider.openai_http import (
     convert_tools_to_openai,
     normalize_openai_response,
 )
-from agent.provider.streaming import ProviderStreamEvent
 from agent.provider.protocol import (
     ProviderAuthError,
     ProviderCapabilityError,
@@ -29,6 +28,7 @@ from agent.provider.protocol import (
     ProviderResponseError,
     ProviderTimeoutError,
 )
+from agent.provider.streaming import ProviderStreamEvent
 
 _DEFAULT_BASE_URL = "https://api.openai.com"
 

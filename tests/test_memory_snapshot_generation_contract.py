@@ -15,7 +15,6 @@ from agent.memory_contracts import MemoryScope, MemorySensitivity, MemorySnapsho
 from agent.memory_operations import MemoryOperationType
 from agent.memory_store import InMemoryMemoryStore, MemoryRecord
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR_MODULE = PROJECT_ROOT / "agent" / "memory_snapshot_generator.py"
 PROMPT_BUILDER = PROJECT_ROOT / "agent" / "prompt_builder.py"
@@ -269,7 +268,7 @@ def test_prompt_builder_still_cannot_directly_read_memory_store() -> None:
     assert "agent.memory_snapshot_generator" not in _agent_imports(PROMPT_BUILDER)
 
 
-def test_snapshot_generator_module_has_no_runtime_policy_confirmation_io_network_or_mcp_dependency() -> None:
+def test_snapshot_generator_module_has_no_runtime_policy_confirmation_io_network_or_mcp_dependency() -> None:  # noqa: E501
     """generator 是 store-to-snapshot bridge，不是 policy/runtime/provider。"""
 
     imports = _agent_imports(GENERATOR_MODULE)

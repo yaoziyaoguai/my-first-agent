@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.skill_system.descriptor import SkillDescriptor, MemoryScope
+from agent.skill_system.descriptor import MemoryScope, SkillDescriptor
 
 
 @dataclass(frozen=True)

@@ -35,7 +35,6 @@ from agent.memory_consolidation_loader import (
     load_episodic_evidence,
 )
 
-
 # ── 候选校验（fail-closed 防御层）───────────────────────────────────────────
 
 

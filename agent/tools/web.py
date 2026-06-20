@@ -1,7 +1,9 @@
 import hashlib
 from pathlib import Path
+
 import httpx
 from bs4 import BeautifulSoup
+
 from agent.tool_registry import register_tool
 
 FETCH_TIMEOUT = 15
@@ -10,7 +12,10 @@ FETCH_MAX_CHARS = 10000
 
 @register_tool(
     name="fetch_url",
-    description="读取一个网页的文本内容。仅在用户明确提供 URL 或要求访问网页时使用。不要主动搜索或猜测 URL。",
+    description=(
+        "读取一个网页的文本内容。仅在用户明确提供 URL 或要求访问网页时使用。"
+        "不要主动搜索或猜测 URL。"
+    ),
     parameters={
         "url": {
             "type": "string",
@@ -57,7 +62,8 @@ def fetch_url(url):
                 f"本地文件: {save_path}\n\n"
                 f"[开头预览（前 3000 字符）]\n"
                 f"{preview}\n\n"
-                f"[说明] 完整内容已保存到 {save_path}。如需查看具体部分，请使用 read_file_lines 工具读取该文件。"
+                f"[说明] 完整内容已保存到 {save_path}。"
+                "如需查看具体部分，请使用 read_file_lines 工具读取该文件。"
             )
         return (
             f"[读取成功]\n"

@@ -1,8 +1,9 @@
 import re
 import subprocess
 from pathlib import Path
+
+from agent.security import _extract_script_path, is_sensitive_file
 from agent.tool_registry import register_tool
-from agent.security import is_sensitive_file, _extract_script_path
 from config import PROJECT_DIR
 
 SHELL_BLACKLIST = [
@@ -30,7 +31,7 @@ SHELL_BLACKLIST = [
 
 # 只读命令白名单——这些命令不会修改系统状态
 READONLY_COMMANDS = {
-    "ls", "cat", "find", "grep", "wc", "head", 
+    "ls", "cat", "find", "grep", "wc", "head",
     "tail", "pwd", "which", "echo", "tree", "file",
     "ruff", "python -c",
 }
@@ -39,13 +40,9 @@ def _check_shell_confirmation(tool_input):
     """shell 命令的智能确认规则"""
     command = tool_input.get("command", "").strip()
     first_word = command.split()[0] if command.split() else ""
-    
-    # 只读命令：静默执行
-    if first_word in READONLY_COMMANDS:
-        return False
-    
-    # 其他命令：需要确认
-    return True
+
+    # 只读命令：静默执行（不需要确认）；其他命令：需要确认
+    return first_word not in READONLY_COMMANDS
 
 
 
@@ -104,7 +101,11 @@ def check_shell_blacklist(command):
 
 @register_tool(
     name="run_shell",
-    description="在项目目录下执行一条 Shell 命令。仅在用户明确要求执行命令时使用。不要主动执行命令来探索文件系统——使用 read_file 代替。危险命令（如 rm -rf、sudo）会被自动拦截。",
+    description=(
+        "在项目目录下执行一条 Shell 命令。仅在用户明确要求执行命令时使用。"
+        "不要主动执行命令来探索文件系统——使用 read_file 代替。"
+        "危险命令（如 rm -rf、sudo）会被自动拦截。"
+    ),
     parameters={
         "command": {
             "type": "string",
@@ -138,7 +139,10 @@ def run_shell(command):
                 script_content = script_file.read_text(encoding="utf-8", errors="replace")
                 blocked_pattern = check_shell_blacklist(script_content)
                 if blocked_pattern:
-                    return f"拒绝执行：脚本文件 '{script_path}' 内容匹配危险模式 '{blocked_pattern}'，禁止运行。"
+                    return (
+                        f"拒绝执行：脚本文件 '{script_path}' 内容匹配危险模式 "
+                        f"'{blocked_pattern}'，禁止运行。"
+                    )
             except Exception:
                 pass
 

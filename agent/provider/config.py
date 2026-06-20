@@ -10,11 +10,10 @@ legacy ``config.py`` 的 import-time 常量，也不要读取 ``agent/local_conf
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from agent.provider.protocol import ProviderConfigurationError
-
 
 PROVIDER_ENV = "MY_FIRST_AGENT_LLM_PROVIDER"
 PROVIDER_NAME_ENV = "MY_FIRST_AGENT_LLM_PROVIDER_NAME"

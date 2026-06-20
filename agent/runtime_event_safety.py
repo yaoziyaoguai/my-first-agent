@@ -8,6 +8,8 @@ RuntimeEvent sink 是 UI projection 边界。sink 抛错不能跳过 Runtime 下
 
 from __future__ import annotations
 
+import contextlib
+
 from agent.display_events import RuntimeEvent, RuntimeEventSink, render_runtime_event_for_cli
 from agent.runtime_observer import log_event as log_runtime_event
 
@@ -26,7 +28,7 @@ def safe_emit_runtime_event(
     try:
         sink(event)
     except Exception as exc:
-        try:
+        with contextlib.suppress(Exception):
             log_runtime_event(
                 "runtime_event_sink.failed",
                 event_source="runtime",
@@ -36,6 +38,4 @@ def safe_emit_runtime_event(
                 },
                 event_channel="display",
             )
-        except Exception:
-            pass
         print(f"{fallback_prefix}{render_runtime_event_for_cli(event)}")

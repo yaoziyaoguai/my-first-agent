@@ -6,7 +6,6 @@ from agent.subagent_system.descriptor import SubAgentDescriptor
 from agent.subagent_system.request import SubAgentRequest
 from agent.subagent_system.tool_boundary import SubAgentToolBoundary
 
-
 TOOL_REGISTRY = {
     "read_file": {
         "name": "read_file",

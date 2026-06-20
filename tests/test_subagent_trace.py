@@ -13,13 +13,13 @@ from agent.subagent_system.trace import (
 def test_l0_trace_event_set_matches_minimum_required_subset() -> None:
     """L0 只要求最小 trace subset，完整 production model 留给 gated/future。"""
 
-    assert L0_TRACE_EVENTS == {
+    assert {
         "delegation_started",
         "context_packaged",
         "result_returned",
         "result_adjudicated",
         "delegation_failed",
-    }
+    } == L0_TRACE_EVENTS
 
 
 def test_trace_event_is_frozen_and_sanitizes_payload() -> None:

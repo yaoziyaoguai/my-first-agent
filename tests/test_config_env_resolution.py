@@ -248,7 +248,7 @@ class TestRequireConfig:
 
         try:
             require_config()
-            assert False, "应该抛出 ValueError"
+            raise AssertionError("应该抛出 ValueError")
         except ValueError as e:
             msg = str(e)
             assert "MODEL_NAME" in msg

@@ -6,8 +6,8 @@ tool_use block、stop_reason 和 usage 摘要，不应该直接依赖某个 SDK 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 

@@ -158,7 +158,11 @@ class SkillLoader:
 
         # 禁止路径逃逸
         parts = normalized.parts
-        if ".." in parts or any(p.startswith(".") and p not in (".",) for p in parts if p.startswith(".")):
+        if ".." in parts or any(
+            p.startswith(".") and p not in (".",)
+            for p in parts
+            if p.startswith(".")
+        ):
             if ".." in parts:
                 raise SkillLoadError(
                     code=CODE_UNSAFE_PATH,
@@ -181,13 +185,13 @@ class SkillLoader:
         # 二次确认解析后的路径仍在 skill root 内
         try:
             full_path.relative_to(descriptor.root.resolve())
-        except ValueError:
+        except ValueError as exc:
             raise SkillLoadError(
                 code=CODE_UNSAFE_PATH,
                 message=f"资源路径逃逸出 skill 目录: {resource_path} → {full_path}",
                 recoverable=False,
                 safe_preview="资源路径无效",
-            )
+            ) from exc
 
         if not full_path.is_file():
             raise SkillLoadError(

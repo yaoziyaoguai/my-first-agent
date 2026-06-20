@@ -28,22 +28,12 @@
 > duplicates of the live `agent/memory.py` versions — was deleted after
 > re-confirming zero reachability) and removed from this live register; its
 > resolution record lives in the S_FINAL release summary.
-
-### TD-007 - ruff full-suite lint is red with 443 historical errors
-
-- ID: TD-007
-- Title: `ruff check .` red with 443 historical lint errors (import org, etc.).
-- Status: open / carry-forward
-- Source/reason: Historical lint drift, independent of TD-006 (different source:
-  lint style vs. doc/governance guards).
-- Impact: Project-level lint gate is non-green. Not a runtime regression. S2
-  policy (S2-G12) required focused ruff for new/modified files only.
-- Recommended stage: S5/Sn batched lint pass, separate from TD-006 guard
-  cleanup.
-- Verification idea: `.venv/bin/ruff check .` exit 0. Do not mix into TD-006
-  unless a shared root cause is proven.
-- Latest check (S5 planning self-review, 2026-06-20):
-  `.venv/bin/ruff check .` exited non-zero with `Found 443 errors`.
+>
+> TD-007 (full-suite `ruff check .` red, 443 historical lint errors) was
+> **resolved in S_FINAL** (FINAL-G01: `.venv/bin/ruff check .` now exits 0 via
+> 269 safe auto-fixes + manual fixes across 62 files — E501 / N803 / SIM / B / N
+> — with full pytest `4940 passed` and behavior preserved) and removed from this
+> live register.
 
 ### TD-002 - Planning/compress still use legacy client facade
 

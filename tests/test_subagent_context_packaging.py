@@ -68,7 +68,9 @@ def test_build_context_package_summarizes_files_and_enforces_budget(tmp_path: Pa
     assert "line 79" not in summary.summary
 
 
-def test_build_context_package_overflow_truncates_without_leaking_full_content(tmp_path: Path) -> None:
+def test_build_context_package_overflow_truncates_without_leaking_full_content(
+    tmp_path: Path,
+) -> None:
     """超预算 synthetic input 必须被截断，不能把完整上下文泄漏给 L0 executor。"""
 
     target = tmp_path / "large_context.py"

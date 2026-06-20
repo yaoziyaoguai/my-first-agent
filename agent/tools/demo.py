@@ -22,16 +22,13 @@ demo.write_demo_note (confirmation="always"):
 
 from __future__ import annotations
 
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
-
 
 # ---------------------------------------------------------------------------
 # demo.echo_task_summary
 # ---------------------------------------------------------------------------
-
-
 from agent.tool_registry import register_tool
 
 
@@ -138,10 +135,7 @@ def demo_write_demo_note(path: str = "", content: str = "") -> str:
     所有参数均可选（兼容 turn-end hook 的 tool_input={}）。
     不传参数时使用安全默认值，写入 workspace/demo/<timestamp>/note.md。
     """
-    if not path:
-        target = _default_demo_note_path()
-    else:
-        target = Path(path)
+    target = _default_demo_note_path() if not path else Path(path)
 
     if not content:
         content = (

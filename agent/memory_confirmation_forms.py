@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-
 MemoryConfirmationForm = Literal["pending_review", "inline_confirmation"]
 
 ALLOWED_MEMORY_CONFIRMATION_FORMS: frozenset[str] = frozenset({

@@ -25,7 +25,6 @@ from agent.memory_extraction_bridge import (
 )
 from agent.memory_store import InMemoryMemoryStore
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # helpers
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from agent.state import create_agent_state
@@ -27,8 +26,8 @@ class TestResumeFullFlow:
     def test_resume_accept_restores_state(self, tmp_checkpoint_path, monkeypatch):
         """接受 resume 后 state 正确恢复。"""
         from agent.checkpoint import save_checkpoint
-        from agent.session import try_resume_from_checkpoint, handle_resume_choice
         from agent.core import get_state
+        from agent.session import handle_resume_choice, try_resume_from_checkpoint
 
         # 1. 创建带进行中任务的 state 并保存 checkpoint
         src = create_agent_state(system_prompt="test")
@@ -115,7 +114,7 @@ class TestResumeFullFlow:
         monkeypatch.setattr(session_mod, "clear_checkpoint", real_clear)
 
         # 3. try_resume_from_checkpoint 应设 awaiting_resume_choice
-        from agent.session import try_resume_from_checkpoint, handle_resume_choice
+        from agent.session import handle_resume_choice, try_resume_from_checkpoint
         try_resume_from_checkpoint()
         assert fresh.task.status == "awaiting_resume_choice"
 
@@ -162,8 +161,8 @@ class TestResumeFullFlow:
     def test_resume_continue_task_after_restore(self, tmp_checkpoint_path, monkeypatch):
         """resume 后能继续执行任务（新 chat 调用正常处理）。"""
         from agent.checkpoint import save_checkpoint
-        from agent.session import try_resume_from_checkpoint, handle_resume_choice
         from agent.core import get_state
+        from agent.session import handle_resume_choice, try_resume_from_checkpoint
 
         # 1. 保存 running 状态 checkpoint
         src = create_agent_state(system_prompt="test")
@@ -211,7 +210,7 @@ class TestInterruptChoiceFlow:
 
     def test_interrupt_choice_continue(self, monkeypatch):
         """选择 1（继续）后 status 回到 running。"""
-        from agent.session import handle_interrupt_with_checkpoint, handle_interrupt_choice
+        from agent.session import handle_interrupt_choice, handle_interrupt_with_checkpoint
 
         # 模拟 running 状态的 state
         from agent.state import create_agent_state
@@ -253,7 +252,7 @@ class TestInterruptChoiceFlow:
 
     def test_interrupt_choice_abandon(self, monkeypatch):
         """选择 2（放弃）后 reset_task，status 回到 idle。"""
-        from agent.session import handle_interrupt_with_checkpoint, handle_interrupt_choice
+        from agent.session import handle_interrupt_choice, handle_interrupt_with_checkpoint
         from agent.state import create_agent_state
 
         state = create_agent_state(system_prompt="test")
@@ -286,7 +285,7 @@ class TestInterruptChoiceFlow:
 
     def test_interrupt_choice_exit(self, monkeypatch):
         """选择 3（退出）返回 True。"""
-        from agent.session import handle_interrupt_with_checkpoint, handle_interrupt_choice
+        from agent.session import handle_interrupt_choice, handle_interrupt_with_checkpoint
         from agent.state import create_agent_state
 
         state = create_agent_state(system_prompt="test")

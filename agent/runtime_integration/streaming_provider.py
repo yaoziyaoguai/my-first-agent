@@ -53,7 +53,8 @@ class StreamingEventHandler:
     """处理单个 STREAMING_EVENT——per-event 验证和 evidence 收集。
 
     与 StreamingProviderCallHandler 的区别：
-    - StreamingProviderCallHandler：整轮 event 列表 → collect_stream_response 聚合 → 单次 L3 evidence
+    - StreamingProviderCallHandler：整轮 event 列表 → collect_stream_response 聚合
+      → 单次 L3 evidence
     - StreamingEventHandler：单 event → validate_stream_event 验证 → per-event evidence
 
     两者共享同一 RuntimeAction 类型族（streaming.*），但 handler/target 不同。
@@ -178,7 +179,11 @@ class StreamingProviderCallHandler:
             "silent_fallback_used": False,
             "fake_final_event_generated": False,
             "events_tied_to_action_id": [context.action_id for _ in events],
-            "final_text_preview": getattr(observed.value.content[0], "text", "")[:200] if observed.value.content else "",
+            "final_text_preview": (
+                getattr(observed.value.content[0], "text", "")[:200]
+                if observed.value.content
+                else ""
+            ),
         }
         evidence_extra = dict(result_payload)
         if disqualified:
@@ -199,11 +204,17 @@ def _event_from_payload(item: Any) -> ProviderStreamEvent:
     event_type = data.get("event_type")
     sequence = int(data.get("sequence", 0))
     if event_type == "text_delta":
-        return ProviderStreamEvent.delta(sequence=sequence, text_delta=str(data.get("text_delta") or ""))
+        return ProviderStreamEvent.delta(
+            sequence=sequence,
+            text_delta=str(data.get("text_delta") or ""),
+        )
     if event_type == "final":
         return ProviderStreamEvent.final(sequence=sequence)
     if event_type == "error":
-        return ProviderStreamEvent.error_event(sequence=sequence, error=str(data.get("error") or "error"))
+        return ProviderStreamEvent.error_event(
+            sequence=sequence,
+            error=str(data.get("error") or "error"),
+        )
     if event_type == "tool_request":
         return ProviderStreamEvent.tool_request(sequence=sequence)
     raise ValueError(f"unsupported streaming event_type: {event_type}")

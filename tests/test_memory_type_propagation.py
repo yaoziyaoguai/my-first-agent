@@ -35,11 +35,12 @@ from agent.memory_store import (
     _record_from_intent,
 )
 
-
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
-def _candidate_with_metadata(memory_type: str, source_type: str = "agent_suggested") -> MemoryCandidate:
+def _candidate_with_metadata(
+    memory_type: str, source_type: str = "agent_suggested"
+) -> MemoryCandidate:
     """构造携带 metadata 的 candidate，模拟 suggestion engine 的输出。"""
     return MemoryCandidate(
         id=f"candidate:test:{memory_type}",

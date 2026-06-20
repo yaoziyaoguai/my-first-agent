@@ -11,16 +11,15 @@ from __future__ import annotations
 
 from agent.mcp import MCPServerConfig, MCPToolDescriptor
 from agent.mcp_policy import (
+    evaluate_mcp_policy,
     evaluate_server_policy,
     evaluate_tool_policy,
-    evaluate_mcp_policy,
 )
 from agent.mcp_sanitizer import (
-    scan_adversarial_patterns,
-    sanitize_description,
     MAX_MCP_DESCRIPTION_CHARS,
+    sanitize_description,
+    scan_adversarial_patterns,
 )
-
 
 # ============================================================================
 # server 策略测试
@@ -113,7 +112,9 @@ def _safe_server(name: str = "test_server") -> MCPServerConfig:
     return MCPServerConfig(name=name, command="echo", enabled=True)
 
 
-def _safe_descriptor(name: str = "test_tool", description: str = "A test tool") -> MCPToolDescriptor:
+def _safe_descriptor(
+    name: str = "test_tool", description: str = "A test tool"
+) -> MCPToolDescriptor:
     return MCPToolDescriptor(
         server_name="test_server",
         name=name,

@@ -20,7 +20,9 @@ class _SkillDescriptor:
 class _SkillSystem:
     def __init__(self) -> None:
         self._items = {
-            "review-skill": _SkillDescriptor("review-skill", "Review safely", ("review",), ("read_file",)),
+            "review-skill": _SkillDescriptor(
+                "review-skill", "Review safely", ("review",), ("read_file",)
+            ),
         }
 
     def get_descriptor(self, name: str) -> _SkillDescriptor | None:

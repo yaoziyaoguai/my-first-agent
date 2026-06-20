@@ -11,14 +11,14 @@ runtime 入口。它只读取调用方显式传入的 safe fixture/tmp path 或 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
-import tempfile
 from types import MappingProxyType
-from typing import Any, Mapping
-
+from typing import Any
 
 SUPPORTED_TRANSPORTS = frozenset({"stdio", "http", "sse", "streamable_http"})
 SENSITIVE_PATH_NAMES = frozenset({".env", "agent_log.jsonl"})
@@ -59,7 +59,7 @@ class SecretValueRef:
     redacted: bool = False
 
     @classmethod
-    def from_env_value(cls, key: str, value: str) -> "SecretValueRef":
+    def from_env_value(cls, key: str, value: str) -> SecretValueRef:
         if _is_secret_like(key, value):
             return cls(display_value=REDACTED, redacted=True)
         return cls(display_value=value, redacted=False)

@@ -31,15 +31,15 @@ from agent.memory_operations import (
     build_memory_audit_summary,
     build_memory_operation_intent,
 )
+from agent.memory_snapshot_generator import (
+    MemorySnapshotBuildOptions,
+    build_memory_snapshot_from_store,
+)
 from agent.memory_store import (
     InMemoryMemoryStore,
     MemoryRecord,
     MemoryStoreApplyStatus,
     _record_from_intent,
-)
-from agent.memory_snapshot_generator import (
-    MemorySnapshotBuildOptions,
-    build_memory_snapshot_from_store,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -153,12 +153,11 @@ class TestImportBoundaries:
         )
         llm_extractor_imported = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module == "agent.memory_extraction":
-                    for alias in node.names:
-                        if alias.name == "LLMMemoryExtractor":
-                            llm_extractor_imported = True
-                            break
+            if isinstance(node, ast.ImportFrom) and node.module == "agent.memory_extraction":
+                for alias in node.names:
+                    if alias.name == "LLMMemoryExtractor":
+                        llm_extractor_imported = True
+                        break
         assert not llm_extractor_imported, (
             "extract_memories_from_session 不得直接 import LLMMemoryExtractor。"
             "应通过 create_extractor() factory seam 创建 extractor。"
@@ -167,12 +166,11 @@ class TestImportBoundaries:
         # ── 确认 factory create_extractor 被 import ──
         factory_imported = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module == "agent.memory_extraction":
-                    for alias in node.names:
-                        if alias.name == "create_extractor":
-                            factory_imported = True
-                            break
+            if isinstance(node, ast.ImportFrom) and node.module == "agent.memory_extraction":
+                for alias in node.names:
+                    if alias.name == "create_extractor":
+                        factory_imported = True
+                        break
         assert factory_imported, (
             "extract_memories_from_session 应 import create_extractor factory seam"
         )
@@ -557,8 +555,8 @@ class TestFilesystemStoreGuardrails:
         - frontmatter 中 approval_status="auto_retained"
         - memory_type="episodic"，source_type="agent_suggested"
         """
-        from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
 
         store = FilesystemMemoryStore(root_dir=tmp_path)
 
@@ -608,8 +606,8 @@ class TestFilesystemStoreGuardrails:
         验证 write → read round-trip 后 memory_type / source_type /
         approval_status / scope 完整保留。
         """
-        from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
 
         store = FilesystemMemoryStore(root_dir=tmp_path)
         messages = [
@@ -639,9 +637,9 @@ class TestFilesystemStoreGuardrails:
 
         相同 transcript → 相同数量的 T2 auto_retained records → 相同 content。
         """
+        from agent.memory import extract_memories_from_session
         from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory_store import InMemoryMemoryStore
-        from agent.memory import extract_memories_from_session
 
         messages = [
             {"role": "user",
@@ -694,8 +692,8 @@ class TestT1PendingPersistence:
         使用 tmp_path 作为 MEMORY_STORE_ROOT，验证 _pending/ 目录下
         生成 JSON 文件且包含完整 metadata。
         """
-        from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
 
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
@@ -744,8 +742,8 @@ class TestT1PendingPersistence:
         模拟 session 结束后重新打开 store 的场景：重建 FilesystemMemoryStore
         后 _pending/ 目录中的文件仍然存在且可被读取。
         """
-        from agent.memory_fs_store import FilesystemMemoryStore
         from agent.memory import extract_memories_from_session
+        from agent.memory_fs_store import FilesystemMemoryStore
 
         monkeypatch.setenv("MEMORY_STORE_ROOT", str(tmp_path))
 
@@ -803,7 +801,7 @@ class TestMetadataFallbackPrevention:
         for filepath in files_to_check:
             tree = ast.parse(filepath.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
+                if isinstance(node, ast.Call):  # noqa: SIM102
                     # 匹配 getattr(xxx, "memory_type", ...)
                     if (
                         isinstance(node.func, ast.Name)

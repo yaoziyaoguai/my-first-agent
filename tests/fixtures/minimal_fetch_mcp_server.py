@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 # 只允许这些 URL（read-only, safe）
 _ALLOWED_URLS = frozenset({

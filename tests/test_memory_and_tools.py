@@ -9,9 +9,7 @@
 
 from __future__ import annotations
 
-
 from tests.conftest import FakeAnthropicClient, FakeResponse, FakeTextBlock
-
 
 # ---------- compress_history ----------
 
@@ -120,7 +118,7 @@ def test_compress_history_preserves_tool_pairing_boundary(monkeypatch):
 # ---------- tool_registry ----------
 
 def test_needs_confirmation_never_returns_false():
-    from agent.tool_registry import TOOL_REGISTRY, register_tool, needs_tool_confirmation
+    from agent.tool_registry import TOOL_REGISTRY, needs_tool_confirmation, register_tool
 
     @register_tool(
         name="never_tool",
@@ -138,7 +136,7 @@ def test_needs_confirmation_never_returns_false():
 
 
 def test_needs_confirmation_always_returns_true():
-    from agent.tool_registry import TOOL_REGISTRY, register_tool, needs_tool_confirmation
+    from agent.tool_registry import TOOL_REGISTRY, needs_tool_confirmation, register_tool
 
     @register_tool(
         name="always_tool",
@@ -157,7 +155,7 @@ def test_needs_confirmation_always_returns_true():
 
 def test_needs_confirmation_callable_by_input():
     """callable confirmation 按 input 动态决定。"""
-    from agent.tool_registry import TOOL_REGISTRY, register_tool, needs_tool_confirmation
+    from agent.tool_registry import TOOL_REGISTRY, needs_tool_confirmation, register_tool
 
     @register_tool(
         name="callable_tool",
@@ -187,7 +185,7 @@ def test_execute_tool_catches_exception():
     回归防护：如果异常冒上去，会留下悬空 tool_use（没写 tool_result），
     下次 API 调用 400。
     """
-    from agent.tool_registry import TOOL_REGISTRY, register_tool, execute_tool
+    from agent.tool_registry import TOOL_REGISTRY, execute_tool, register_tool
 
     @register_tool(
         name="boom_tool",

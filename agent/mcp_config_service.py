@@ -11,18 +11,19 @@ Safe Apply + Governance pack 的受控 apply。
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass, field
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from agent.mcp_config import (
+    REDACTED,
     MCPConfigPathPolicy,
     MCPConfigValidationIssue,
     MCPConfigValidationResult,
     MCPServerEntry,
-    REDACTED,
     SecretValueRef,
     load_mcp_config,
 )

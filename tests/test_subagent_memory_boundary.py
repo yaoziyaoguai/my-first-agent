@@ -11,7 +11,12 @@ def test_memory_scope_none_blocks_read_and_proposal() -> None:
     boundary = SubAgentMemoryBoundary(approved_context="private context")
 
     assert boundary.read_context("none") is None
-    assert boundary.check_proposal(MemoryProposal(content="remember me", category="fact"), "none") is False
+    assert (
+        boundary.check_proposal(
+            MemoryProposal(content="remember me", category="fact"), "none"
+        )
+        is False
+    )
 
 
 def test_read_context_returns_read_only_snapshot_but_blocks_write() -> None:
@@ -20,7 +25,12 @@ def test_read_context_returns_read_only_snapshot_but_blocks_write() -> None:
     boundary = SubAgentMemoryBoundary(approved_context="approved summary")
 
     assert boundary.read_context("read_context") == "approved summary"
-    assert boundary.check_proposal(MemoryProposal(content="remember me", category="fact"), "read_context") is False
+    assert (
+        boundary.check_proposal(
+            MemoryProposal(content="remember me", category="fact"), "read_context"
+        )
+        is False
+    )
     assert not hasattr(boundary, "memory_store")
 
 

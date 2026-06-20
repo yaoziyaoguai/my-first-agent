@@ -11,7 +11,6 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-
 _EXCLUDED_NAMES = {".env", "agent_log.jsonl", "sessions", "runs"}
 
 

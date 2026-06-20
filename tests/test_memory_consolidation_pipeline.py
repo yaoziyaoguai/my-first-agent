@@ -13,17 +13,17 @@
 - 确定性（幂等）
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from agent.memory_consolidation import ConsolidationCandidate, ConsolidationType
 from agent.memory_consolidation_engine import DeterministicConsolidationDetector
 from agent.memory_consolidation_pipeline import (
     ConsolidationPipelineResult,
-    run_consolidation_pipeline,
     _validate_candidate,
+    run_consolidation_pipeline,
 )
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ def _write_memory_file(
     每个 section 是一个 dict，特殊键 '_content' 为 body 文本。
     自动注入 MemoryRecord 强制字段的测试默认值。
     """
-    _RECORD_DEFAULTS = {
+    _record_defaults = {
         "source_summary": "test-source",
         "safety_summary": "safe",
         "audit_id": "audit:test:0000",
@@ -49,7 +49,7 @@ def _write_memory_file(
 
     parts: list[str] = []
     for meta in sections:
-        for key, default_val in _RECORD_DEFAULTS.items():
+        for key, default_val in _record_defaults.items():
             if key not in meta:
                 meta[key] = default_val
         content = meta.pop("_content", "")
@@ -445,7 +445,11 @@ class TestPipelineReadOnly:
     def test_store_unchanged_after_pipeline(self, store_three_episodic):
         """pipeline 运行后 store 内容不变。"""
         record_count_before = len(store_three_episodic.list_records())
-        index_before = dict(store_three_episodic._index) if hasattr(store_three_episodic, "_index") else None
+        index_before = (
+            dict(store_three_episodic._index)
+            if hasattr(store_three_episodic, "_index")
+            else None
+        )
 
         run_consolidation_pipeline(store_three_episodic)
 
@@ -549,9 +553,8 @@ class TestNoLLMOrRuntime:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imports.add(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.add(node.module)
         assert "anthropic" not in imports
         assert "openai" not in imports
 
@@ -565,9 +568,8 @@ class TestNoLLMOrRuntime:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    imports.add(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports.add(node.module)
         forbidden = {"agent.runtime", "agent.session", "agent.core", "agent.memory_runtime"}
         assert not (imports & forbidden), f"Forbidden imports: {imports & forbidden}"
 
@@ -705,7 +707,7 @@ class TestDeterministic:
         assert r1.candidate_count == r2.candidate_count
         assert r1.evidence_count == r2.evidence_count
         assert r1.skipped_count == r2.skipped_count
-        for a, b in zip(r1.candidates, r2.candidates):
+        for a, b in zip(r1.candidates, r2.candidates, strict=True):
             assert a.content == b.content
             assert a.confidence == b.confidence
             assert a.consolidation_type == b.consolidation_type

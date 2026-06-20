@@ -25,8 +25,8 @@ from agent.memory_emergence import (
     _DISALLOWED_CONFIRMATION_FORMS,
     CorrectionEvidence,
     DeterministicEmergenceDetector,
-    InlineConfirmationResponse,
     InlineConfirmationRequest,
+    InlineConfirmationResponse,
     ProceduralCandidate,
     _compute_procedural_identity,
     _normalize_correction_pattern,
@@ -43,7 +43,6 @@ from agent.memory_review import (
     reject_pending_proposal,
     skip_pending_proposal,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 测试 fixture
@@ -1510,11 +1509,11 @@ class TestAcceptInlineConfirmation:
         explicit human confirmation，不是 silent retain，也不是 auto approve。
         T2 governed auto-retain 仍只适用于 episodic。
         """
-        from agent.memory_contracts import MemoryDecisionType, MemoryScope
         from agent.memory_confirmation import (
             MemoryConfirmationChoice,
             MemoryConfirmationStatus,
         )
+        from agent.memory_contracts import MemoryDecisionType, MemoryScope
         from agent.memory_operations import (
             MemoryOperationIntent,
             MemoryOperationType,

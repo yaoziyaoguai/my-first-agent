@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -24,20 +23,20 @@ class PlanStep(BaseModel):
     step_type: str = Field(..., description="步骤类型")
 
     # 建议使用的工具名；如果没有明确工具，可为 None
-    suggested_tool: Optional[str] = Field(
+    suggested_tool: str | None = Field(
         None,
         description="建议使用的工具名，没有则为 null",
     )
 
     # 这一步完成后的预期结果
-    expected_outcome: Optional[str] = Field(
+    expected_outcome: str | None = Field(
         None,
         description="该步骤完成后的预期结果",
     )
 
     # 该步骤的完成判定标准
     # 用于后续判断“当前 step 是否真的完成”
-    completion_criteria: Optional[str] = Field(
+    completion_criteria: str | None = Field(
         None,
         description="该步骤的完成判定标准",
     )
@@ -53,13 +52,13 @@ class Plan(BaseModel):
     goal: str = Field(..., description="当前任务目标")
 
     # 简短规划思路，可选
-    thinking: Optional[str] = Field(
+    thinking: str | None = Field(
         None,
         description="简短规划思路",
     )
 
     # 计划步骤列表
-    steps: List[PlanStep] = Field(
+    steps: list[PlanStep] = Field(
         default_factory=list,
         description="执行步骤列表",
     )
@@ -81,13 +80,13 @@ class PlannerOutput(BaseModel):
     steps_estimate: int = Field(..., description="任务预估步骤数")
 
     # 当前任务目标；单步任务时可为空
-    goal: Optional[str] = Field(
+    goal: str | None = Field(
         None,
         description="当前任务目标",
     )
 
     # 简短规划思路；可为空
-    thinking: Optional[str] = Field(
+    thinking: str | None = Field(
         None,
         description="简短规划思路",
     )
@@ -99,7 +98,7 @@ class PlannerOutput(BaseModel):
     )
 
     # 多步任务的步骤列表；单步任务时可为空列表
-    steps: List[PlanStep] = Field(
+    steps: list[PlanStep] = Field(
         default_factory=list,
         description="执行步骤列表",
     )

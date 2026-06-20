@@ -8,14 +8,13 @@ recorder：不读取真实 agent_log.jsonl、不扫描 sessions/runs、不连接
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field, replace
 import json
-from pathlib import Path
 import re
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Literal
-
 
 TraceSpanType = Literal[
     "model_call",
@@ -108,7 +107,7 @@ class TraceEvent:
             if not getattr(self, field_name):
                 raise ValueError(f"{field_name} is required")
 
-    def with_sequence(self, sequence: int) -> "TraceEvent":
+    def with_sequence(self, sequence: int) -> TraceEvent:
         """返回带 recorder sequence 的副本，避免原 event 被 recorder mutate。"""
 
         return replace(self, sequence=sequence)

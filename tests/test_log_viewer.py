@@ -237,7 +237,12 @@ def test_format_entry_does_not_dump_nested_dicts():
 
 def test_render_logs_tail_truncates(tmp_path):
     entries = [
-        {"timestamp": f"t{i}", "event": "user_input", "session_id": "abc12345", "data": {"content": "x"}}
+        {
+            "timestamp": f"t{i}",
+            "event": "user_input",
+            "session_id": "abc12345",
+            "data": {"content": "x"},
+        }
         for i in range(20)
     ]
     p = _write_log(tmp_path, entries)
@@ -270,7 +275,12 @@ def test_main_logs_subcommand_runs(monkeypatch, capsys, tmp_path):
     fake_log = _write_log(
         tmp_path,
         [
-            {"timestamp": "t", "session_id": "abc12345", "event": "user_input", "data": {"content": "hi"}},
+            {
+                "timestamp": "t",
+                "session_id": "abc12345",
+                "event": "user_input",
+                "data": {"content": "hi"},
+            },
         ],
     )
     monkeypatch.setattr(log_viewer, "LOG_FILE", str(fake_log))

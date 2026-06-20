@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -31,7 +31,6 @@ from agent.memory_operations import (
     MemoryOperationType,
     build_memory_audit_summary,
 )
-
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -80,7 +79,7 @@ def tmp_store_dir():
 # ── lazy import (避免模块不存在时 import 失败) ────────────────────────────
 
 @pytest.fixture
-def FSStore(tmp_store_dir):
+def fs_store(tmp_store_dir):
     """返回 FilesystemMemoryStore 实例（如果模块存在）。"""
     try:
         from agent.memory_fs_store import FilesystemMemoryStore
@@ -90,7 +89,7 @@ def FSStore(tmp_store_dir):
 
 
 @pytest.fixture
-def FSParser():
+def fs_parser():
     """返回 frontmatter parser 函数。"""
     try:
         from agent.memory_fs_store import parse_frontmatter
@@ -106,7 +105,7 @@ def FSParser():
 class TestParseFrontmatter:
     """YAML frontmatter parser — 只依赖 stdlib，不引入 pyyaml。"""
 
-    def test_parse_valid(self, FSParser):
+    def test_parse_valid(self, fs_parser):
         text = """---
 id: "mem:abc123"
 memory_type: "semantic"
@@ -114,46 +113,46 @@ scope: "user"
 ---
 
 用户喜欢用 pytest。"""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert meta["id"] == "mem:abc123"
         assert meta["memory_type"] == "semantic"
         assert meta["scope"] == "user"
         assert "pytest" in body
 
-    def test_parse_no_frontmatter(self, FSParser):
-        meta, body = FSParser("只是一段纯文本，没有 frontmatter。")
+    def test_parse_no_frontmatter(self, fs_parser):
+        meta, body = fs_parser("只是一段纯文本，没有 frontmatter。")
         assert meta == {}
         assert "纯文本" in body
 
-    def test_parse_empty(self, FSParser):
-        meta, body = FSParser("")
+    def test_parse_empty(self, fs_parser):
+        meta, body = fs_parser("")
         assert meta == {}
         assert body == ""
 
-    def test_parse_only_dashes(self, FSParser):
-        meta, body = FSParser("---\n---")
+    def test_parse_only_dashes(self, fs_parser):
+        meta, body = fs_parser("---\n---")
         assert meta == {}
         assert body == ""
 
-    def test_parse_numeric_values(self, FSParser):
+    def test_parse_numeric_values(self, fs_parser):
         text = """---
 id: "mem:001"
 confidence: 0.85
 ---
 高置信度记忆。"""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert meta["confidence"] == 0.85
 
-    def test_parse_boolean_values(self, FSParser):
+    def test_parse_boolean_values(self, fs_parser):
         text = """---
 id: "mem:001"
 sensitive_redacted: false
 ---
 安全内容。"""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert meta["sensitive_redacted"] is False
 
-    def test_parse_multi_section_file(self, FSParser, tmp_store_dir):
+    def test_parse_multi_section_file(self, fs_parser, tmp_store_dir):
         """一个文件包含多个 --- 分隔的 memory section。"""
         from agent.memory_fs_store import write_memory_section
         filepath = tmp_store_dir / "test.md"
@@ -204,7 +203,7 @@ sensitive_redacted: false
         assert all(r["memory_type"] == "semantic" for r in records)
         assert filepath.read_text(encoding="utf-8").count("---") >= 48
 
-    def test_parse_chinese_content(self, FSParser):
+    def test_parse_chinese_content(self, fs_parser):
         text = """---
 id: "mem:cn"
 memory_type: "procedural"
@@ -212,39 +211,39 @@ scope: "user"
 ---
 
 用户要求所有解释用简体中文，但代码保持英文。"""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert "简体中文" in body
         assert meta["memory_type"] == "procedural"
 
-    def test_parse_special_characters(self, FSParser):
+    def test_parse_special_characters(self, fs_parser):
         text = """---
 id: "mem:spec"
 memory_type: "semantic"
 ---
 
 Content with: colons, "quotes", 'apostrophes', dashes -- and arrows ->."""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert "colons" in body
         assert "quotes" in body
 
-    def test_malformed_frontmatter_no_closing(self, FSParser):
+    def test_malformed_frontmatter_no_closing(self, fs_parser):
         """只有开头的 --- 没有结尾的 ---."""
         text = """---
 id: "mem:bad"
 memory_type: "semantic"
 scope: "user"
 没有结尾的 frontmatter。"""
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         # 应该返回空 meta，所有内容视为 body
         assert "id" not in meta or meta == {}
 
-    def test_empty_frontmatter_body(self, FSParser):
+    def test_empty_frontmatter_body(self, fs_parser):
         text = """---
 id: "mem:empty"
 ---
 
 """
-        meta, body = FSParser(text)
+        meta, body = fs_parser(text)
         assert meta["id"] == "mem:empty"
         assert body.strip() == ""
 
@@ -270,7 +269,7 @@ id: "mem:empty"
 class TestIndex:
     """Index build / rebuild / consistency。"""
 
-    def test_build_index_from_empty_dir(self, FSStore, tmp_store_dir):
+    def test_build_index_from_empty_dir(self, fs_store, tmp_store_dir):
         from agent.memory_fs_store import build_fs_index
         index = build_fs_index(tmp_store_dir)
         assert index == {}
@@ -281,7 +280,7 @@ class TestIndex:
         payload = json.loads(index_path.read_text())
         assert payload["total"] == 0
 
-    def test_build_index_from_files(self, FSStore, tmp_store_dir):
+    def test_build_index_from_files(self, fs_store, tmp_store_dir):
         """从已存在的 .md 文件重建 index。"""
         # 先写入几个 memory section
         from agent.memory_fs_store import write_memory_section
@@ -313,7 +312,7 @@ class TestIndex:
         assert "mem:b" in index
         assert index["mem:a"]["file"] == "semantic/user_preferences.md"
 
-    def test_index_json_written_on_build(self, FSStore, tmp_store_dir):
+    def test_index_json_written_on_build(self, fs_store, tmp_store_dir):
         """build_fs_index 应写出 _meta/index.json。"""
         from agent.memory_fs_store import build_fs_index, write_memory_section
         filepath = tmp_store_dir / "semantic" / "user_facts.md"
@@ -333,7 +332,7 @@ class TestIndex:
         loaded = json.loads(index_path.read_text())
         assert loaded["total"] == 1
 
-    def test_rebuild_index_repairs_corruption(self, FSStore, tmp_store_dir):
+    def test_rebuild_index_repairs_corruption(self, fs_store, tmp_store_dir):
         """如果 index.json 被破坏，rebuild 应从 .md 文件恢复。"""
         from agent.memory_fs_store import build_fs_index, write_memory_section
         # 创建 memory 文件
@@ -367,35 +366,35 @@ class TestIndex:
 class TestStoreOperations:
     """apply_operation_intent / get_record / list_records。"""
 
-    def test_retain_creates_file(self, FSStore):
+    def test_retain_creates_file(self, fs_store):
         intent = _make_intent(content="用户偏好 pytest", scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         assert result.status.value == "applied"
 
         # 验证文件已创建
-        records = FSStore.list_records()
+        records = fs_store.list_records()
         assert len(records) == 1
         assert "pytest" in records[0].content
 
-    def test_get_record(self, FSStore):
+    def test_get_record(self, fs_store):
         intent = _make_intent(content="用户是数据工程师", scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         record_id = result.record.id
-        retrieved = FSStore.get_record(record_id)
+        retrieved = fs_store.get_record(record_id)
         assert retrieved is not None
         assert "数据工程师" in retrieved.content
 
-    def test_get_record_not_found(self, FSStore):
-        assert FSStore.get_record("nonexistent") is None
+    def test_get_record_not_found(self, fs_store):
+        assert fs_store.get_record("nonexistent") is None
 
-    def test_forget_removes_record(self, FSStore):
+    def test_forget_removes_record(self, fs_store):
         intent = _make_intent(content="临时信息")
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         record_id = result.record.id
-        assert FSStore.get_record(record_id) is not None
+        assert fs_store.get_record(record_id) is not None
 
         forget_intent = _make_intent(
             operation_type=MemoryOperationType.FORGET,
@@ -403,15 +402,15 @@ class TestStoreOperations:
             source_summary="test source",
         )
         forget_audit = _make_audit(forget_intent, user_choice="accept")
-        forget_result = FSStore.apply_operation_intent(forget_intent, forget_audit)
+        forget_result = fs_store.apply_operation_intent(forget_intent, forget_audit)
 
         assert forget_result.status.value == "applied"
-        assert FSStore.get_record(record_id) is None
+        assert fs_store.get_record(record_id) is None
 
-    def test_update_modifies_content(self, FSStore):
+    def test_update_modifies_content(self, fs_store):
         intent = _make_intent(content="原始内容", scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         record_id = result.record.id
 
         update_intent = _make_intent(
@@ -421,14 +420,14 @@ class TestStoreOperations:
             source_summary="test source",
         )
         update_audit = _make_audit(update_intent, user_choice="accept")
-        update_result = FSStore.apply_operation_intent(update_intent, update_audit)
+        update_result = fs_store.apply_operation_intent(update_intent, update_audit)
 
         assert update_result.status.value == "applied"
-        updated = FSStore.get_record(record_id)
+        updated = fs_store.get_record(record_id)
         assert updated is not None
         assert "更新后" in updated.content
 
-    def test_use_once_stores_session_only(self, FSStore):
+    def test_use_once_stores_session_only(self, fs_store):
         intent = _make_intent(
             operation_type=MemoryOperationType.USE_ONCE,
             content="仅本次会话",
@@ -436,11 +435,11 @@ class TestStoreOperations:
             user_choice=MemoryConfirmationChoice.SESSION_ONLY,
         )
         audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.SESSION_ONLY.value)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         assert result.status.value == "applied"
         assert result.record.approval_status == "session_only"
 
-    def test_use_once_respects_memory_type(self, FSStore):
+    def test_use_once_respects_memory_type(self, fs_store):
         """USE_ONCE 写入时使用 intent 的实际 memory_type，不硬编码 semantic。"""
         intent = _make_intent(
             operation_type=MemoryOperationType.USE_ONCE,
@@ -452,13 +451,13 @@ class TestStoreOperations:
         object.__setattr__(intent, "memory_type", "procedural")
         object.__setattr__(intent, "source_type", "agent_suggested")
         audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.SESSION_ONLY.value)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         assert result.status.value == "applied"
         # 验证 memory_type 被正确传播到 record
         assert result.record.memory_type == "procedural"
         # 验证 index 中的 memory_type 不是硬编码的 semantic
         import json
-        index_path = FSStore.root_dir / "_meta" / "index.json"
+        index_path = fs_store.root_dir / "_meta" / "index.json"
         index_data = json.loads(index_path.read_text(encoding="utf-8"))
         stored = index_data["records"][result.record.id]
         assert stored["memory_type"] == "procedural"
@@ -514,14 +513,14 @@ class TestStoreOperations:
         assert len(records) == 1
         assert "跨实例持久化" in records[0].content
 
-    def test_skip_non_writing_operations(self, FSStore):
+    def test_skip_non_writing_operations(self, fs_store):
         intent = _make_intent(operation_type=MemoryOperationType.REJECT, content="不应该写入",
                               user_choice=MemoryConfirmationChoice.REJECT)
         audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.REJECT.value)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         assert result.status.value == "skipped"
 
-    def test_reject_mutating_without_approval(self, FSStore):
+    def test_reject_mutating_without_approval(self, fs_store):
         intent = _make_intent(
             operation_type=MemoryOperationType.RETAIN,
             content="未批准",
@@ -538,7 +537,7 @@ class TestStoreOperations:
             sensitive_redacted=audit.sensitive_redacted,
             user_choice=MemoryConfirmationChoice.CLARIFY.value,
         )
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         assert result.status.value == "rejected"
 
 
@@ -568,7 +567,7 @@ class TestRejectedIntentBackendConsistency:
         assert result.record is None
         assert store.list_records() == ()
 
-    def test_filesystem_rejected_mutating_intent_does_not_write(self, FSStore):
+    def test_filesystem_rejected_mutating_intent_does_not_write(self, fs_store):
         intent = _make_intent(
             operation_type=MemoryOperationType.RETAIN,
             content="不应写入 filesystem 的 rejected intent",
@@ -577,11 +576,11 @@ class TestRejectedIntentBackendConsistency:
         )
         audit = _make_audit(intent, user_choice=MemoryConfirmationChoice.REJECT.value)
 
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
 
         assert result.status.value == "rejected"
         assert result.record is None
-        assert FSStore.list_records() == ()
+        assert fs_store.list_records() == ()
 
     def test_in_memory_approved_intent_still_writes(self):
         from agent.memory_store import InMemoryMemoryStore
@@ -600,7 +599,7 @@ class TestRejectedIntentBackendConsistency:
         assert result.record is not None
         assert store.list_records() == (result.record,)
 
-    def test_filesystem_approved_intent_still_writes(self, FSStore):
+    def test_filesystem_approved_intent_still_writes(self, fs_store):
         intent = _make_intent(
             content="approved intent 仍应写入 filesystem store",
             confirmation=MemoryConfirmationStatus.APPROVED,
@@ -608,13 +607,13 @@ class TestRejectedIntentBackendConsistency:
         )
         audit = _make_audit(intent)
 
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
 
         assert result.status.value == "applied"
         assert result.record is not None
-        assert FSStore.list_records() == (result.record,)
+        assert fs_store.list_records() == (result.record,)
 
-    def test_edit_and_accept_approved_intent_still_writes(self, FSStore):
+    def test_edit_and_accept_approved_intent_still_writes(self, fs_store):
         intent = _make_intent(
             content="用户编辑后确认的内容",
             confirmation=MemoryConfirmationStatus.APPROVED,
@@ -625,13 +624,13 @@ class TestRejectedIntentBackendConsistency:
             user_choice=MemoryConfirmationChoice.EDIT_AND_ACCEPT.value,
         )
 
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
 
         assert result.status.value == "applied"
         assert result.record is not None
         assert result.record.content == "用户编辑后确认的内容"
 
-    def test_episodic_t2_auto_retained_still_writes(self, FSStore):
+    def test_episodic_t2_auto_retained_still_writes(self, fs_store):
         intent = _make_intent(
             content="synthetic episodic T2 auto-retain evidence",
             confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
@@ -642,7 +641,7 @@ class TestRejectedIntentBackendConsistency:
         object.__setattr__(intent, "source_type", "agent_suggested")
         audit = _make_audit(intent)
 
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
 
         assert result.status.value == "applied"
         assert result.record is not None
@@ -668,11 +667,46 @@ class TestRecall:
         store = FilesystemMemoryStore(root_dir=tmp_store_dir)
 
         memories = [
-            (_make_intent(content="用户喜欢 pytest", scope=MemoryScope.USER, source_summary="偏好 pytest"), None),
-            (_make_intent(content="项目禁止 any type", scope=MemoryScope.PROJECT, source_summary="禁止 any"), None),
-            (_make_intent(content="repo 用 black 格式化", scope=MemoryScope.REPO, source_summary="black 格式化"), None),
-            (_make_intent(content="用户用 macOS", scope=MemoryScope.USER, source_summary="macOS 偏好"), None),
-            (_make_intent(content="项目选 FastAPI", scope=MemoryScope.PROJECT, source_summary="FastAPI 选择"), None),
+            (
+                _make_intent(
+                    content="用户喜欢 pytest",
+                    scope=MemoryScope.USER,
+                    source_summary="偏好 pytest",
+                ),
+                None,
+            ),
+            (
+                _make_intent(
+                    content="项目禁止 any type",
+                    scope=MemoryScope.PROJECT,
+                    source_summary="禁止 any",
+                ),
+                None,
+            ),
+            (
+                _make_intent(
+                    content="repo 用 black 格式化",
+                    scope=MemoryScope.REPO,
+                    source_summary="black 格式化",
+                ),
+                None,
+            ),
+            (
+                _make_intent(
+                    content="用户用 macOS",
+                    scope=MemoryScope.USER,
+                    source_summary="macOS 偏好",
+                ),
+                None,
+            ),
+            (
+                _make_intent(
+                    content="项目选 FastAPI",
+                    scope=MemoryScope.PROJECT,
+                    source_summary="FastAPI 选择",
+                ),
+                None,
+            ),
         ]
         for intent, _ in memories:
             audit = _make_audit(intent)
@@ -707,7 +741,9 @@ class TestRecall:
         assert created_ats == sorted(created_ats, reverse=True)
 
     def test_recall_hybrid(self, populated_store):
-        results = populated_store.recall(scope=MemoryScope.PROJECT, memory_type="semantic", max_items=5)
+        results = populated_store.recall(
+            scope=MemoryScope.PROJECT, memory_type="semantic", max_items=5
+        )
         assert len(results) == 2
         for r in results:
             assert r.scope == MemoryScope.PROJECT
@@ -721,16 +757,16 @@ class TestRecall:
 class TestProtocolCompatibility:
     """确保 FS store 可以作为 drop-in replacement for InMemoryMemoryStore。"""
 
-    def test_conforms_to_protocol(self, FSStore):
+    def test_conforms_to_protocol(self, fs_store):
         # MemoryStoreProtocol is not @runtime_checkable, verify duck-typing
-        assert hasattr(FSStore, "apply_operation_intent")
-        assert hasattr(FSStore, "get_record")
-        assert hasattr(FSStore, "list_records")
-        assert callable(FSStore.apply_operation_intent)
-        assert callable(FSStore.get_record)
-        assert callable(FSStore.list_records)
+        assert hasattr(fs_store, "apply_operation_intent")
+        assert hasattr(fs_store, "get_record")
+        assert hasattr(fs_store, "list_records")
+        assert callable(fs_store.apply_operation_intent)
+        assert callable(fs_store.get_record)
+        assert callable(fs_store.list_records)
 
-    def test_works_with_snapshot_generator(self, FSStore):
+    def test_works_with_snapshot_generator(self, fs_store):
         """确保 build_memory_snapshot_from_store 可以消费 FS store。"""
         from agent.memory_snapshot_generator import (
             MemorySnapshotBuildOptions,
@@ -739,16 +775,16 @@ class TestProtocolCompatibility:
 
         intent = _make_intent(content="快照测试内容", scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        FSStore.apply_operation_intent(intent, audit)
+        fs_store.apply_operation_intent(intent, audit)
 
         options = MemorySnapshotBuildOptions(selection_reason="test", max_items=10)
-        snapshot = build_memory_snapshot_from_store(FSStore, options)
+        snapshot = build_memory_snapshot_from_store(fs_store, options)
         assert len(snapshot.items) == 1
         assert "快照测试" in snapshot.items[0].content
 
-    def test_list_records_signature_match(self, FSStore):
+    def test_list_records_signature_match(self, fs_store):
         """list_records 返回类型应兼容现有调用方。"""
-        records = FSStore.list_records()
+        records = fs_store.list_records()
         assert isinstance(records, tuple)
         for r in records:
             from agent.memory_store import MemoryRecord
@@ -762,31 +798,31 @@ class TestProtocolCompatibility:
 class TestTopicRouting:
     """memory 按 memory_type + scope 路由到正确的 grouped topic file。"""
 
-    def test_semantic_user_routes_to_user_preferences(self, FSStore, tmp_store_dir):
+    def test_semantic_user_routes_to_user_preferences(self, fs_store, tmp_store_dir):
         intent = _make_intent(content="用户喜欢 pytest", scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        FSStore.apply_operation_intent(intent, audit)
+        fs_store.apply_operation_intent(intent, audit)
         assert (tmp_store_dir / "semantic" / "user_preferences.md").exists()
 
-    def test_semantic_project_routes_to_project_rules(self, FSStore, tmp_store_dir):
+    def test_semantic_project_routes_to_project_rules(self, fs_store, tmp_store_dir):
         intent = _make_intent(content="项目禁止 any type", scope=MemoryScope.PROJECT)
         audit = _make_audit(intent)
-        FSStore.apply_operation_intent(intent, audit)
+        fs_store.apply_operation_intent(intent, audit)
         assert (tmp_store_dir / "semantic" / "project_rules.md").exists()
 
-    def test_semantic_repo_routes_to_repo_conventions(self, FSStore, tmp_store_dir):
+    def test_semantic_repo_routes_to_repo_conventions(self, fs_store, tmp_store_dir):
         intent = _make_intent(content="用 black 格式化", scope=MemoryScope.REPO)
         audit = _make_audit(intent)
-        FSStore.apply_operation_intent(intent, audit)
+        fs_store.apply_operation_intent(intent, audit)
         assert (tmp_store_dir / "semantic" / "repo_conventions.md").exists()
 
-    def test_episodic_routes_to_date_file(self, FSStore):
+    def test_episodic_routes_to_date_file(self, fs_store):
         from agent.memory_fs_store import _route_topic
         path = _route_topic("episodic", MemoryScope.PROJECT)
         assert path.startswith("episodic/")
         assert path.endswith(".md")
 
-    def test_procedural_routes_to_learned(self, FSStore):
+    def test_procedural_routes_to_learned(self, fs_store):
         from agent.memory_fs_store import _route_topic
         path = _route_topic("procedural", MemoryScope.USER)
         assert path == "procedural/learned.md"
@@ -799,8 +835,8 @@ class TestTopicRouting:
 class TestEdgeCases:
     """边界和异常场景。"""
 
-    def test_empty_store_list(self, FSStore):
-        records = FSStore.list_records()
+    def test_empty_store_list(self, fs_store):
+        records = fs_store.list_records()
         assert records == ()
 
     def test_non_existent_dir_created(self, tmp_store_dir):
@@ -812,38 +848,38 @@ class TestEdgeCases:
         FilesystemMemoryStore(root_dir=new_dir)
         assert new_dir.exists()
 
-    def test_utf8_content(self, FSStore):
+    def test_utf8_content(self, fs_store):
         content = "用户喜欢用 🦀 Rust 写系统工具，但日常用 🐍 Python。"
         intent = _make_intent(content=content, scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
         assert "🦀" in record.content or "Rust" in record.content
 
-    def test_very_long_content(self, FSStore):
+    def test_very_long_content(self, fs_store):
         content = "长内容。" * 500  # ~2000 chars
         intent = _make_intent(content=content, scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
         assert len(record.content) > 1000
 
-    def test_special_yaml_chars_in_content(self, FSStore):
+    def test_special_yaml_chars_in_content(self, fs_store):
         """content 中的 : # { } [ ] 不应破坏 YAML parsing。"""
         content = '用户说: "用 dict[key] = {a: 1, b: 2} 这种写法" — 注意冒号和花括号。'
         intent = _make_intent(content=content, scope=MemoryScope.USER)
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
         assert "dict[key]" in record.content
 
-    def test_forget_then_rebuild_index(self, FSStore, tmp_store_dir):
+    def test_forget_then_rebuild_index(self, fs_store, tmp_store_dir):
         """删除后 rebuild index，确认记录消失。"""
         from agent.memory_fs_store import build_fs_index
 
         intent = _make_intent(content="待删除内容")
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         record_id = result.record.id
 
         forget_intent = _make_intent(
@@ -852,7 +888,7 @@ class TestEdgeCases:
             source_summary="test source",
         )
         forget_audit = _make_audit(forget_intent, user_choice="accept")
-        FSStore.apply_operation_intent(forget_intent, forget_audit)
+        fs_store.apply_operation_intent(forget_intent, forget_audit)
 
         # rebuild index
         index = build_fs_index(tmp_store_dir)
@@ -875,7 +911,7 @@ class TestEdgeCases:
 class TestConfidenceMetadataContinuity:
     """验证 confidence 从 MemoryOperationIntent 到 filesystem 落盘的连续性。"""
 
-    def test_t2_confidence_preserved_in_frontmatter(self, FSStore):
+    def test_t2_confidence_preserved_in_frontmatter(self, fs_store):
         """T2 auto-retained intent 的 confidence=0.65 落到 frontmatter 中保持 0.65。
 
         Slice 1 P1-1 修复前：store 对 auto_retained 硬编码 confidence=0.5。
@@ -886,40 +922,40 @@ class TestConfidenceMetadataContinuity:
             confidence=0.65,
         )
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
         # metadata 中的 confidence 应为传入的真实值
         assert record.metadata.get("confidence") == 0.65, (
             f"frontmatter confidence 应保持 0.65，实际 {record.metadata.get('confidence')}"
         )
 
-    def test_t2_confidence_preserved_in_index(self, FSStore):
+    def test_t2_confidence_preserved_in_index(self, fs_store):
         """index entry 中的 confidence 也应为传入的真实值 0.65。"""
         intent = _make_intent(
             confirmation=MemoryConfirmationStatus.AUTO_RETAINED,
             confidence=0.65,
         )
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
+        result = fs_store.apply_operation_intent(intent, audit)
         # 直接从 index 读取
-        entry = FSStore._index.get(result.record.id)
+        entry = fs_store._index.get(result.record.id)
         assert entry is not None, "index 中应有对应 entry"
         assert entry.get("confidence") == 0.65, (
             f"index confidence 应保持 0.65，实际 {entry.get('confidence')}"
         )
 
-    def test_approved_confidence_preserved(self, FSStore):
+    def test_approved_confidence_preserved(self, fs_store):
         """T1 approved intent 的 confidence=0.85 落到存储中保持 0.85。"""
         intent = _make_intent(
             confirmation=MemoryConfirmationStatus.APPROVED,
             confidence=0.85,
         )
         audit = _make_audit(intent)
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
         assert record.metadata.get("confidence") == 0.85
 
-    def test_legacy_fallback_when_confidence_none(self, FSStore):
+    def test_legacy_fallback_when_confidence_none(self, fs_store):
         """intent.confidence=None 时使用 legacy fallback（向后兼容）。
 
         旧路径（如 explicit_user_request）不携带 confidence，
@@ -934,8 +970,8 @@ class TestConfidenceMetadataContinuity:
             source_summary="legacy approved source",
         )
         audit = _make_audit(intent_approved)
-        result = FSStore.apply_operation_intent(intent_approved, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent_approved, audit)
+        record = fs_store.get_record(result.record.id)
         assert record.metadata.get("confidence") == 0.85, (
             "approved + confidence=None → legacy fallback 应为 0.85"
         )
@@ -948,13 +984,13 @@ class TestConfidenceMetadataContinuity:
             source_summary="auto retained legacy source",
         )
         audit2 = _make_audit(intent_t2)
-        result2 = FSStore.apply_operation_intent(intent_t2, audit2)
-        record2 = FSStore.get_record(result2.record.id)
+        result2 = fs_store.apply_operation_intent(intent_t2, audit2)
+        record2 = fs_store.get_record(result2.record.id)
         assert record2.metadata.get("confidence") == 0.5, (
             "auto_retained + confidence=None → legacy fallback 应为 0.5"
         )
 
-    def test_fake_marker_t2_confidence_continuity(self, FSStore):
+    def test_fake_marker_t2_confidence_continuity(self, fs_store):
         """端到端：Fake marker [t2] → extraction(0.65) → intent(0.65) → store(0.65)。
 
         不走 fake 直调，而是构造 intent 模拟 T2 auto-retain 写入路径。
@@ -988,15 +1024,15 @@ class TestConfidenceMetadataContinuity:
             sensitive_redacted=intent.sensitive_redacted,
             user_visible_summary=intent.user_visible_summary,
         )
-        result = FSStore.apply_operation_intent(intent, audit)
-        record = FSStore.get_record(result.record.id)
+        result = fs_store.apply_operation_intent(intent, audit)
+        record = fs_store.get_record(result.record.id)
 
         # frontmatter confidence
         assert record.metadata.get("confidence") == 0.65, (
             f"frontmatter confidence 应保持 0.65，实际 {record.metadata.get('confidence')}"
         )
         # index confidence
-        entry = FSStore._index.get(result.record.id)
+        entry = fs_store._index.get(result.record.id)
         assert entry.get("confidence") == 0.65, (
             f"index confidence 应保持 0.65，实际 {entry.get('confidence')}"
         )

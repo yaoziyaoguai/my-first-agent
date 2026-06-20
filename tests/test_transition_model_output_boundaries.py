@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+
 def test_model_output_kind_enum_covers_known_dispatch_branches() -> None:
     """ModelOutputKind 必须显式覆盖 core.py 当前 dispatcher 的 4 类结果。
 
@@ -165,8 +166,8 @@ def test_classify_model_output_does_not_leak_into_durable_state(
     Runtime 内部决策，不会泄漏到 durable state。
     """
 
-    from agent import checkpoint
     import agent.tool_executor as te
+    from agent import checkpoint
     from agent.state import create_agent_state
 
     checkpoint_path = tmp_path / "checkpoint.json"

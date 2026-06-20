@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 from agent.state import create_agent_state
 
-
 # ---------------------------------------------------------------------------
 # §1 阈值常量回归（防止有人偷偷改大/改小）
 # ---------------------------------------------------------------------------
@@ -27,12 +26,12 @@ def test_loop_guard_thresholds_are_documented_values():
 
     任何调阈值的 PR 都会让本测试 red，提醒同步更新文档与人工 LLM smoke。
     """
-    from config import MAX_CONTINUE_ATTEMPTS
     from agent.core import MAX_LOOP_ITERATIONS
     from agent.response_handlers import (
-        MAX_TOOL_CALLS_PER_TURN,
         MAX_REPEATED_TOOL_INPUTS,
+        MAX_TOOL_CALLS_PER_TURN,
     )
+    from config import MAX_CONTINUE_ATTEMPTS
 
     assert MAX_LOOP_ITERATIONS == 50
     assert MAX_CONTINUE_ATTEMPTS == 3
@@ -122,7 +121,7 @@ def test_loop_guard_counters_persist_across_checkpoint_roundtrip(
 ):
     """resume 后保留累积计数，防止用户通过 Ctrl+C 重启绕过 guard。"""
     from agent import checkpoint as checkpoint_module
-    from agent.checkpoint import save_checkpoint, load_checkpoint_to_state
+    from agent.checkpoint import load_checkpoint_to_state, save_checkpoint
 
     monkeypatch.setattr(
         checkpoint_module, "CHECKPOINT_PATH", tmp_path / "checkpoint.json"
@@ -157,8 +156,8 @@ def test_fill_placeholder_results_preserves_pairing_with_short_safe_text():
     - 不暴露 tool 名 / tool 入参 / API key / 内部计数 / 异常 stack
     - 内容是固定短文案 `[系统] {reason}。`
     """
-    from agent.response_handlers import _fill_placeholder_results
     from agent.conversation_events import has_tool_result
+    from agent.response_handlers import _fill_placeholder_results
 
     blocks = [
         SimpleNamespace(id="T1", name="echo", input={"secret_key": "sk-abcdef"}),
@@ -182,8 +181,8 @@ def test_fill_placeholder_results_preserves_pairing_with_short_safe_text():
 
 def test_fill_placeholder_results_skips_already_paired_tool_use():
     """已经有 tool_result 的 tool_use 不应被再次写 placeholder（防双写破坏配对）。"""
-    from agent.response_handlers import _fill_placeholder_results
     from agent.conversation_events import append_tool_result
+    from agent.response_handlers import _fill_placeholder_results
 
     messages: list[dict] = []
     append_tool_result(messages, "T1", "real result")
@@ -261,6 +260,7 @@ def test_meta_tool_use_clears_no_progress_counter_semantics():
     # 内并配合 early return，consecutive_end_turn_without_progress 永远不会
     # 被清零，no_progress 兜底就会持续误触发）。
     import inspect
+
     from agent.response_handlers import handle_tool_use_response
 
     source = inspect.getsource(handle_tool_use_response)

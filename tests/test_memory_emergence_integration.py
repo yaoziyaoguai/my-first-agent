@@ -25,12 +25,12 @@ from pathlib import Path
 import pytest
 
 from agent.memory_emergence import (
+    _DISALLOWED_CONFIRMATION_FORMS,
     CorrectionEvidence,
     DeterministicEmergenceDetector,
-    InlineConfirmationResponse,
     InlineConfirmationRequest,
+    InlineConfirmationResponse,
     ProceduralCandidate,
-    _DISALLOWED_CONFIRMATION_FORMS,
     _validate_confirmation_form,
     accept_inline_confirmation,
     apply_inline_confirmation_response,
@@ -45,7 +45,6 @@ from agent.memory_review import (
     skip_pending_proposal,
 )
 from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -97,7 +96,8 @@ def _make_candidate(
 
 
 class TestEmergenceFailClosed:
-    """active_records <50 → fail closed — 不产生 candidate, 不写 pending, 不写 store。（直调测试）"""
+    """active_records <50 → fail closed — 不产生 candidate, 不写 pending, 不写 store。
+    （直调测试）"""
 
     def test_fail_closed_no_candidates(self):
         """active_records=17, 3 条证据 — gate 关闭，无 candidate。"""
@@ -185,17 +185,38 @@ class TestEmergenceFullChain:
         """不同 correction_type + scope 产生不同 candidate。"""
         evidence = [
             # Group 1: behavioral_rule + git_operations
-            _make_evidence("e1", "以后请先检查 git status", correction_type="behavioral_rule", scope="git_operations"),
-            _make_evidence("e2", "下次先检查 git status", correction_type="behavioral_rule", scope="git_operations"),
-            _make_evidence("e3", "记得先检查 git status", correction_type="behavioral_rule", scope="git_operations"),
+            _make_evidence(
+                "e1", "以后请先检查 git status",
+                correction_type="behavioral_rule", scope="git_operations",
+            ),
+            _make_evidence(
+                "e2", "下次先检查 git status",
+                correction_type="behavioral_rule", scope="git_operations",
+            ),
+            _make_evidence(
+                "e3", "记得先检查 git status",
+                correction_type="behavioral_rule", scope="git_operations",
+            ),
             # Group 2: behavioral_rule + debugging
-            _make_evidence("e4", "以后请先读日志再分析", correction_type="behavioral_rule", scope="debugging"),
-            _make_evidence("e5", "下次先读日志", correction_type="behavioral_rule", scope="debugging"),
-            _make_evidence("e6", "记得先读日志再分析", correction_type="behavioral_rule", scope="debugging"),
+            _make_evidence(
+                "e4", "以后请先读日志再分析", correction_type="behavioral_rule", scope="debugging"
+            ),
+            _make_evidence(
+                "e5", "下次先读日志", correction_type="behavioral_rule", scope="debugging"
+            ),
+            _make_evidence(
+                "e6", "记得先读日志再分析", correction_type="behavioral_rule", scope="debugging"
+            ),
             # Group 3: code_quality + code_review (different type)
-            _make_evidence("e7", "请始终用 ruff 做 lint", correction_type="code_quality", scope="code_review"),
-            _make_evidence("e8", "必须先跑 ruff 再提交", correction_type="code_quality", scope="code_review"),
-            _make_evidence("e9", "千万不要跳过 lint", correction_type="code_quality", scope="code_review"),
+            _make_evidence(
+                "e7", "请始终用 ruff 做 lint", correction_type="code_quality", scope="code_review"
+            ),
+            _make_evidence(
+                "e8", "必须先跑 ruff 再提交", correction_type="code_quality", scope="code_review"
+            ),
+            _make_evidence(
+                "e9", "千万不要跳过 lint", correction_type="code_quality", scope="code_review"
+            ),
         ]
         detector = DeterministicEmergenceDetector()
         result = detector.detect(evidence, active_records_count=60)

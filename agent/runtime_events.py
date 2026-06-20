@@ -523,7 +523,8 @@ def feedback_intent_transition(kind: FeedbackIntentKind) -> TransitionResult:
                 " write current_plan/index, save_checkpoint, emit plan_confirmation",
                 "revised_goal is local input to planner only; user_goal is NEVER"
                 " written back (pinned by"
-                " test_feedback_intent_as_feedback_handler_source_does_not_write_revised_goal_back)",
+                " test_feedback_intent_as_feedback_handler_source_does_not"
+                "_write_revised_goal_back)",
             ),
         )
     if kind == FeedbackIntentKind.AS_NEW_TASK:

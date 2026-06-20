@@ -31,10 +31,14 @@ from agent.memory_store import InMemoryMemoryStore, MemoryStoreApplyStatus
 from agent.skill_system.descriptor import SkillDescriptor
 from agent.skill_system.memory_boundary import (
     MemoryProposal as SkillMemoryProposal,
+)
+from agent.skill_system.memory_boundary import (
     SkillMemoryBoundary,
 )
 from agent.subagent_system.memory_boundary import (
     MemoryProposal as SubAgentMemoryProposal,
+)
+from agent.subagent_system.memory_boundary import (
     SubAgentMemoryBoundary,
 )
 

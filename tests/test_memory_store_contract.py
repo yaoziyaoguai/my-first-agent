@@ -28,7 +28,6 @@ from agent.memory_operations import (
 )
 from agent.memory_policy import DeterministicMemoryPolicy
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STORE_MODULE = PROJECT_ROOT / "agent" / "memory_store.py"
 PROMPT_BUILDER = PROJECT_ROOT / "agent" / "prompt_builder.py"

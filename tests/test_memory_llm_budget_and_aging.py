@@ -13,13 +13,15 @@ from agent.memory_consolidation import EpisodicEvidence
 from agent.memory_consolidation_engine import compute_recency_factor
 from agent.memory_consolidation_llm import (
     EvidenceBudgetConfig,
-    apply_evidence_budget,
     _build_evidence_context,
+    apply_evidence_budget,
 )
 from agent.memory_fs_store import parse_memory_file, write_memory_section
 
 
-def _evidence(record_id: str, content: str, created_at: str = "2026-05-16T00:00:00Z") -> EpisodicEvidence:
+def _evidence(
+    record_id: str, content: str, created_at: str = "2026-05-16T00:00:00Z"
+) -> EpisodicEvidence:
     return EpisodicEvidence(
         record_id=record_id,
         content=content,
@@ -59,7 +61,9 @@ def test_build_evidence_context_uses_budgeted_source_evidence_only():
 
     context = _build_evidence_context(
         evidence,
-        budget=EvidenceBudgetConfig(max_evidence_items=2, max_chars_per_evidence=12, max_total_chars=30),
+        budget=EvidenceBudgetConfig(
+            max_evidence_items=2, max_chars_per_evidence=12, max_total_chars=30
+        ),
     )
 
     assert "record_id=ep0" in context
@@ -85,7 +89,9 @@ def test_recency_factor_newer_evidence_scores_higher_than_older():
     newer = [_evidence("new", "new", created_at="2026-05-16T00:00:00Z")]
     older = [_evidence("old", "old", created_at="2025-05-16T00:00:00Z")]
 
-    assert compute_recency_factor(newer, now_epoch=now) > compute_recency_factor(older, now_epoch=now)
+    assert compute_recency_factor(newer, now_epoch=now) > compute_recency_factor(
+        older, now_epoch=now
+    )
     assert 0.0 <= compute_recency_factor(older, now_epoch=now) <= 1.0
 
 

@@ -25,7 +25,6 @@ from enum import StrEnum
 
 from agent.memory_extraction import MemoryCandidateProposal, SuggestedAction
 
-
 # ── Detector Input Contract ─────────────────────────────────────────────────
 
 

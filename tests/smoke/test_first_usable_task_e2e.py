@@ -19,7 +19,7 @@ import pytest
 
 from agent.cli_renderer import render_onboarding
 from agent.core import chat
-from agent.local_demo import run_local_demo, format_demo_result
+from agent.local_demo import format_demo_result, run_local_demo
 from agent.provider.fake_provider import FakeProvider
 from agent.runtime_integration.phase1_hook import build_skill_registry
 

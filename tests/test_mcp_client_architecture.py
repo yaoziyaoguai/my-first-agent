@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -250,7 +249,12 @@ def test_mcp_architecture_seam_does_not_import_runtime_or_real_transport() -> No
     # mcp_policy / mcp_audit / mcp_models 是 MCP 层内部模块，不是 runtime 层，
     # 它们在 register_mcp_tools 内通过懒 import 使用，不倒灌 runtime。
     # mcp_models 提供共享数据类，打破 mcp ↔ mcp_policy 循环导入。
-    assert agent_imports == {"agent.tool_registry", "agent.mcp_policy", "agent.mcp_audit", "agent.mcp_models"}
+    assert agent_imports == {
+        "agent.tool_registry",
+        "agent.mcp_policy",
+        "agent.mcp_audit",
+        "agent.mcp_models",
+    }
     assert {
         "agent.core",
         "agent.tool_executor",

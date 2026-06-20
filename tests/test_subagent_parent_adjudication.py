@@ -75,7 +75,9 @@ def test_adjudication_rejects_error_result() -> None:
 def test_adjudication_requests_revision_for_low_confidence_within_bound() -> None:
     """revision loop 受 max_revisions 约束。"""
 
-    decision = adjudicate_result(_result(confidence=0.2), _request(max_revisions=1), revision_count=0)
+    decision = adjudicate_result(
+        _result(confidence=0.2), _request(max_revisions=1), revision_count=0
+    )
 
     assert decision.action == "request_revision"
     assert decision.revised_request is not None
@@ -84,8 +86,12 @@ def test_adjudication_requests_revision_for_low_confidence_within_bound() -> Non
 def test_adjudication_asks_user_for_confirmation_or_clarification() -> None:
     """Ask User 是 human-control boundary，不能被 SubAgent 绕过。"""
 
-    confirmation = adjudicate_result(_result(status="needs_confirmation"), _request(), revision_count=0)
-    clarification = adjudicate_result(_result(status="needs_clarification"), _request(), revision_count=0)
+    confirmation = adjudicate_result(
+        _result(status="needs_confirmation"), _request(), revision_count=0
+    )
+    clarification = adjudicate_result(
+        _result(status="needs_clarification"), _request(), revision_count=0
+    )
 
     assert confirmation.action == "ask_user"
     assert clarification.action == "ask_user"

@@ -1,0 +1,102 @@
+"""S4-G04 pending-tool event fidelity 测试（TD-004 / AC-4）。
+
+验证 pending tool 确认执行后，TOOL_RESULT dispatch 的 ``tool_output`` 预览**非空**且包含
+执行结果（与 execute_single_tool 非 pending 路径 parity）。
+
+根因（TD-004）：``mediate_pending`` Step 4 读 ``self._turn_context.get(tool_use_id, "")``
+构造预览，但 ``execute_pending_tool`` 从不写 ``turn_context[tool_use_id]``（非 pending 的
+``execute_single_tool`` 在 tool_executor.py:543 写），导致预览恒为空。
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import agent.tool_runtime_mediator as tmr_mod
+from agent.runtime_integration.schema import RuntimeActionType
+
+
+def _make_mediator_with_pending(pending: dict) -> tuple:
+    state = SimpleNamespace()
+    state.task = SimpleNamespace()
+    state.task.tool_execution_log = {}
+    state.task.current_step_index = 1
+    turn_state = SimpleNamespace()
+    turn_state.round_tool_traces = []
+    turn_state.on_display_event = None
+    fake_dispatcher = MagicMock()
+    mediator = tmr_mod.ToolRuntimeMediator(
+        fake_dispatcher,
+        state=state,
+        turn_state=turn_state,
+        turn_context={},
+        messages=[],
+    )
+    return mediator, fake_dispatcher, pending
+
+
+def _tool_result_payload(fake_dispatcher, tool_use_id: str) -> dict:
+    """从 dispatcher 捕获的调用中找到该 tool_use_id 的 TOOL_RESULT payload。"""
+    result_payloads = []
+    for call in fake_dispatcher.route_from_runtime_loop.call_args_list:
+        req = call[0][0]
+        if req.action_type == RuntimeActionType.TOOL_RESULT and req.parent_trace_id == tool_use_id:
+            result_payloads.append(req.payload)
+    assert result_payloads, f"未捕获 tool_use_id={tool_use_id} 的 TOOL_RESULT dispatch"
+    return result_payloads[-1]
+
+
+def test_mediate_pending_tool_output_preview_is_nonempty():
+    """TD-004 核心：pending tool 执行后 tool_output 预览非空且含结果。"""
+    pending = {
+        "tool_use_id": "toolu_td004_ok",
+        "tool": "write_file",
+        "input": {"path": "t.txt", "content": "hi"},
+    }
+    mediator, fake_dispatcher, _ = _make_mediator_with_pending(pending)
+    known_result = "执行完成：写入 2 行。"
+
+    with patch.object(tmr_mod, "execute_pending_tool", return_value=known_result):
+        mediator.mediate_pending(pending)
+
+    payload = _tool_result_payload(fake_dispatcher, "toolu_td004_ok")
+    assert payload["tool_output"], "tool_output 预览不得为空（TD-004）"
+    assert known_result in payload["tool_output"]
+    assert payload["from_pending_tool"] is True
+
+
+def test_mediate_pending_preview_truncated_to_safe_length():
+    """pending tool 预览应截断到 safe 长度（与非 pending _route_result 的 [:500] parity）。"""
+    pending = {
+        "tool_use_id": "toolu_td004_long",
+        "tool": "read_file",
+        "input": {"path": "big.txt"},
+    }
+    mediator, fake_dispatcher, _ = _make_mediator_with_pending(pending)
+    long_result = "X" * 2000
+
+    with patch.object(tmr_mod, "execute_pending_tool", return_value=long_result):
+        mediator.mediate_pending(pending)
+
+    payload = _tool_result_payload(fake_dispatcher, "toolu_td004_long")
+    assert payload["tool_output"], "预览不得为空"
+    assert len(payload["tool_output"]) <= 500, "预览应截断到 <=500（safe-summary）"
+    assert long_result not in payload["tool_output"]
+
+
+def test_mediate_pending_empty_result_does_not_crash():
+    """空结果（falsy）也不应 crash；预览允许为空字符串但流程必须完成。"""
+    pending = {
+        "tool_use_id": "toolu_td004_empty",
+        "tool": "write_file",
+        "input": {"path": "t.txt"},
+    }
+    mediator, fake_dispatcher, _ = _make_mediator_with_pending(pending)
+
+    with patch.object(tmr_mod, "execute_pending_tool", return_value=""):
+        result = mediator.mediate_pending(pending)
+
+    assert result == ""
+    # 流程仍应发出 TOOL_RESULT dispatch（不因空结果中断）
+    payload = _tool_result_payload(fake_dispatcher, "toolu_td004_empty")
+    assert "tool_output" in payload

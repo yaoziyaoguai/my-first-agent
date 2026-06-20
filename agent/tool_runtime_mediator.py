@@ -659,6 +659,13 @@ class ToolRuntimeMediator:
         )
 
         # Step 4: TOOL_RESULT dispatch
+        # S4-G04（TD-004）：execute_pending_tool 不写 turn_context[tool_use_id]（不像
+        # execute_single_tool 在 tool_executor.py 写），导致下面读到的 tool_output 预览
+        # 恒为空。这里用执行结果补写，使 TOOL_RESULT 的 tool_output 预览非空、与非
+        # pending 的 _route_result 路径 parity。result 已在 execute_pending_tool 内对
+        # failed/rejected 结果做过 mask_user_visible_secrets，语义不变。
+        if result:
+            self._turn_context[tool_use_id] = result
         with contextlib.suppress(Exception):
             result_text = str(self._turn_context.get(tool_use_id, ""))[:500]
             safe_input_metadata = _safe_tool_input_metadata(tool_name, tool_input)

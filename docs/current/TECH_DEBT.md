@@ -91,13 +91,23 @@
 
 - ID: TD-004
 - Title: Pending-tool `events.jsonl` may show an empty `tool_output` preview.
-- Status: open / carry-forward (S2 surfaced)
+- Status: **resolved (S4-G04, 2026-06-20)** — kept in register until S4 close-out
+  (then moves to the S4 archive, mirroring TD-006 handling).
 - Source/reason: S2-G11 surfaced this limitation; pending-tool results are
   stored in conversation/state logs but the event-log preview route can be empty.
 - Impact: Event-log fidelity gap for pending-tool traces.
 - Recommended stage: S4/Sn, when improving event-log fidelity.
 - Verification idea: Review `execute_pending_tool` and mediator `_route_result`
   behavior around `turn_context[tool_use_id]`.
+- **Resolution (S4-G04):** root cause = `mediate_pending` (Step 4) read
+  `turn_context[tool_use_id]` for the TOOL_RESULT `tool_output` preview, but
+  `execute_pending_tool` never wrote it (unlike `execute_single_tool` at
+  `tool_executor.py:543`), so the preview was always empty. Fix: populate
+  `self._turn_context[tool_use_id] = result` in `mediate_pending` before the
+  TOOL_RESULT dispatch (parity with the non-pending `_route_result` path; result
+  already masked for failed/rejected outcomes — no execution-semantics change).
+  Evidence: `tests/test_s4_pending_tool_preview.py` (3 passed) asserts non-empty
+  preview + safe truncation; S2/S3 + subagent mediator tests non-regressed.
 
 ## Deferred to S4/Sn (frozen S3 scope boundaries)
 

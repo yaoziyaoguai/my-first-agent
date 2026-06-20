@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 8 | G04-G11 |
+| open | 7 | G05-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 3 | G01（contract）；G02（replay-faithful evidence model）；G03（secret-safe redaction） |
+| satisfied | 4 | G01（contract）；G02（replay-faithful evidence model）；G03（redaction）；G04（pending-tool 预览 / TD-004 resolved） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -154,7 +154,14 @@
 - **Verification**: pending-tool 流程产生非空 tool_output 预览；TD-004 → resolved。
 - **Dependencies**: 可与 G02 并行（共享 redaction=G03）。
 - **Non-goal boundary**: 不改 tool 执行语义；只补 evidence 预览。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G04）。
+- **Evidence**: `agent/tool_runtime_mediator.py:mediate_pending` Step 4 前补写
+  `self._turn_context[tool_use_id] = result`（根因：`execute_pending_tool` 不写
+  turn_context，导致 TOOL_RESULT `tool_output` 预览恒空；与非 pending `_route_result`
+  parity；result 已对 failed/rejected mask，语义不变）。`tests/test_s4_pending_tool_preview.py`
+  （3 passed：非空预览 + 截断 + 空结果不 crash）。非回归：S2/S3 reference + subagent
+  mediator 8 passed / 2 skipped。**TD-004 → resolved**（见 TECH_DEBT.md）。Commit:
+  `fix(s4): G04 pending-tool event tool_output preview (TD-004)`。
 
 ### S4-G05 — Evidence verification / consistency check
 - **Priority**: P1（must_fix_for_s4）
@@ -292,7 +299,7 @@
 | S4-G01 | Define fidelity contract + audit/replay reference task | P0 | satisfied | L3/Cross | AC-2/5/6 setup |
 | S4-G02 | Replay-faithful evidence model | P1 | satisfied | L3 | AC-2 |
 | S4-G03 | Secret-safe redaction enforcement | P1 | satisfied | L3/Sec | AC-3 |
-| S4-G04 | Pending-tool event fidelity (TD-004) | P1 | open | L3 | AC-4 |
+| S4-G04 | Pending-tool event fidelity (TD-004) | P1 | satisfied | L3 | AC-4 |
 | S4-G05 | Evidence verification / consistency check | P1 | open | L3 | AC-5 |
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | open | L4 | AC-1/6 |
 | S4-G07 | Real provider audit key-path smoke | P1 | open | L1 | AC-6 |

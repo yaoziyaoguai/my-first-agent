@@ -235,3 +235,35 @@
 - **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
 - **Next step (authorized by §3):** S4-G04 (P1) — pending-tool event fidelity (TD-004):
   fill the non-empty tool_output preview in the pending-tool event path.
+
+## 2026-06-20 — S4-G04 pending-tool event fidelity (TD-004) — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G04 (P1): fill the pending-tool `tool_output` preview (non-empty,
+  safe-summary). Digests/resolves TD-004 (AC-4).
+- **Root cause (confirmed via graphify + targeted read):** `mediate_pending` Step 4 reads
+  `self._turn_context.get(tool_use_id, "")` to build the TOOL_RESULT `tool_output` preview,
+  but `execute_pending_tool` never writes `turn_context[tool_use_id]` (unlike
+  `execute_single_tool` at `tool_executor.py:543`), so the preview was always empty.
+- **Done (TDD red→green):**
+  - RED: `tests/test_s4_pending_tool_preview.py` — 3 tests asserting non-empty preview,
+    safe (<=500) truncation, empty-result no-crash. Confirmed fail (`tool_output == ''`).
+  - GREEN: 1-line enforcement in `agent/tool_runtime_mediator.py:mediate_pending` —
+    populate `self._turn_context[tool_use_id] = result` before the TOOL_RESULT dispatch
+    (parity with non-pending `_route_result`; result already masked for failed/rejected
+    outcomes in `execute_pending_tool`, so no execution-semantics change, no new secret
+    surface beyond the existing model-visible result).
+- **Files changed:** `agent/tool_runtime_mediator.py` (mediate_pending preview fix),
+  `tests/test_s4_pending_tool_preview.py` (new), `docs/current/TECH_DEBT.md`
+  (TD-004 → resolved + evidence), `docs/current/S4_GOAL_GAP.md` (G04 → satisfied;
+  §2; §9), `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `test_s4_pending_tool_preview.py` + `test_evidence_lifecycle_and_summary.py`
+  53 passed (mediator behavior non-regressed). Focused ruff clean. Non-regression:
+  S2/S3 reference + subagent parent-mediated 8 passed / 2 skipped. `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G04 → **satisfied** (AC-4 met).
+- **`TECH_DEBT.md` items:** **TD-004 → resolved (S4-G04)** with root cause + fix + evidence;
+  kept in register until S4 close-out (mirrors TD-006 handling).
+- **Commit:** `fix(s4): G04 pending-tool event tool_output preview (TD-004)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G05 (P1) — evidence verification / consistency
+  check (verifier over the G02 replay chain: complete / self-consistent / ordered /
+  replayable), aligned with the G01 contract §5.

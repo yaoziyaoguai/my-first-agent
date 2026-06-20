@@ -394,3 +394,31 @@
 - **Next step (authorized by §3):** S4-G09 (P2) — docs/current + history governance for S4
   (S4 docs in current, S1/S2/S3 archive untouched, carry-forward debt not silently closed,
   close-out checklist).
+
+## 2026-06-20 — S4-G09 docs/current + history governance — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G09 (P2): maintain stage governance non-regression + provide an S4
+  close-out checklist (NOT executing close-out). AC-8.
+- **Governance invariants verified:**
+  - `docs/current/` holds S_ROADMAP + S4 stage docs (S4_BASELINE_STATUS/GOAL/GOAL_GAP/
+    FIDELITY_CONTRACT/WORK_LOG) + TECH_DEBT.
+  - `docs/history/` S1/S2/S3 archives **git-clean** (untouched this stage).
+  - TECH_DEBT statuses correct: TD-001/TD-004 resolved-in-S4 (kept in register, not silently
+    closed — will move to S4 archive at close-out); TD-002/003/007 open; TD-008-011 deferred.
+- **Done:** added `S4_GOAL_GAP.md §12 S4 Close-out Checklist` — 19 items covering Stage
+  Closing Review (AGENTS.md), AC-1..AC-9 acceptance, debt closeout (TD-001/TD-004 removal),
+  and archive steps. Explicitly marked as a governance artifact for FUTURE close-out (user-
+  authorized only); this task does NOT close out or archive. Refreshed §11 Next step to
+  reflect the gap loop is executing (the original "freeze+calibrate does not execute gaps"
+  note is superseded).
+- **Files changed:** `docs/current/S4_GOAL_GAP.md` (G09 → satisfied; §11 refresh; §12
+  checklist; §2; §9), `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** doc-only governance; `git status docs/history/` clean; `git diff --check`
+  clean; S4 docs present in `docs/current/`.
+- **`S4_GOAL_GAP.md` items updated:** S4-G09 → **satisfied** (AC-8 governance non-regression
+  held; close-out checklist provided).
+- **`TECH_DEBT.md` items:** none changed (status correctness verified, not modified).
+- **Commit:** `docs(s4): G09 docs governance + close-out checklist (AC-8)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G10 (P2) — S1/S2/S3 non-regression + full-suite green
+  signal (S2/S3/S4 acceptance set + full pytest 0 failed + focused ruff touched files).

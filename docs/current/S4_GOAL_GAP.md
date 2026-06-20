@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 3 | G09-G11 |
+| open | 2 | G10-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 8 | G01-G08（+ acceptance gate evidence-fidelity 分类） |
+| satisfied | 9 | G01-G09（+ docs governance + close-out checklist） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -271,7 +271,12 @@
 - **Verification**: 归档未改；TECH_DEBT 不被静默关闭；S4 docs 在 current；close-out 可过治理检查。
 - **Dependencies**: 无（贯穿）。
 - **Non-goal boundary**: 不重写 governance 模型；不动历史。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G09）。
+- **Evidence**: 治理不变量核实（S4 docs 在 `docs/current/`；`docs/history/` S1/S2/S3 git-clean 未动；
+  TECH_DEBT 状态正确——TD-001/TD-004 resolved-in-S4 仍在 register 未静默关闭、TD-002/003/007 open、
+  TD-008-011 deferred）；新增 `S4_GOAL_GAP.md §12 S4 Close-out Checklist`（governance artifact，
+  19 项：Stage Closing Review + AC-1..AC-9 + debt 收尾 + archive；**本任务不执行 close-out**）。
+  Commit: `docs(s4): G09 docs governance + close-out checklist (AC-8)`。
 
 ### S4-G10 — S1/S2/S3 non-regression + full-suite green release signal
 - **Priority**: P2（should_fix_for_s4）
@@ -339,7 +344,7 @@
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | satisfied | L4 | AC-1/6 |
 | S4-G07 | Real provider audit key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | satisfied | L1/Cross | AC-7 |
-| S4-G09 | docs/current+history governance for S4 | P2 | open | Cross | AC-8 |
+| S4-G09 | docs/current+history governance for S4 | P2 | satisfied | Cross | AC-8 |
 | S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | open | Cross/L1 | AC-1/9 |
 | S4-G11 | Optional audit observability | P3 | open | L3 | AC-2/5 (enhance) |
 | S4-G12 | Deferred boundaries & TECH_DEBT triage (S5/Sn) | P4 | deferred | Cross | §7 |
@@ -360,6 +365,48 @@ S4 **不做**（防越界）：
 ## 11. Next step
 
 - `S4_GOAL.md` 已**冻结**（2026-06-20），本 backlog 已据冻结 goal **校准**。
-- 下一步：进入 **S4 gap loop**，从 **S4-G01**（P0）起，按 §3 顺序逐个 gap 独立 focused
-  mini-run（TDD red→green、验证、更新 backlog/work log、独立提交）。
-- **本（冻结+校准）任务不执行任何 gap、不进入 gap loop、不修改代码/tests、不 push。**
+- **S4 gap loop 正在执行**（2026-06-20 起）：按 §3 顺序逐个 gap 独立 focused mini-run
+  （TDD red→green、验证、更新 backlog/work log、独立提交）。进度见各 gap 的 Status/evidence
+  与 `WORK_LOG.md`。
+- **冻结+校准阶段**（本文件最初成文时）不执行 gap；该约束已被 gap loop 执行取代。
+
+## 12. S4 Close-out Checklist（governance artifact — 本任务**不执行** close-out/archive）
+
+> 由 S4-G09 产出。这是**未来** S4 close-out（仅当用户授权时）的检查项，**不是**当前执行项。
+> 依据 `AGENTS.md` Stage Closing Review + S4 frozen goal AC-1..AC-9。close-out 前必须全部成立。
+
+**Stage Closing Review（AGENTS.md）：**
+
+1. 复核 `S4_GOAL_GAP.md` 所有 open/deferred 项：G09-G11 应已 satisfied（或显式 deferred），
+   G12（P4 deferred）确认仍 deferred。
+2. 完成所有仍在 stage 范围内可行的 gap；不可行的移 TECH_DEBT（附 ID）。
+3. 重要但越 stage 的未完成项移 `TECH_DEBT.md`，并在本文件标 moved-to-debt + debt ID。
+4. 不静默删除未完成 gap；完成项需证据（commit/test/audit section/source ref）。
+
+**S4 acceptance（AC-1..AC-9）：**
+
+5. AC-1：S2/S3 targeted gate + full pytest 绿（same-spine/governed task/L5 governed-active/
+   acceptance gate 在 fake 确定性下不回归）。
+6. AC-2：replay-faithful evidence（`build_replay_chain` 重建 MCP+SubAgent 链路，超出标签级）。
+7. AC-3：secret-safe redaction（注入 fake secret 不入 evidence；有断言）。
+8. AC-4：pending-tool 预览非空（TD-004 resolved）。
+9. AC-5：evidence verifier（完整通过 / 残缺·篡改·乱序失败）。
+10. AC-6：reference task E2E（fake/local 闭环）+ real key-safe smoke harness（opt-in/默认 skip）。
+11. AC-7：acceptance gate evidence-fidelity 分类（不弱化既有类）。
+12. AC-8：治理不回退（S1/S2/S3 归档不动；carry-forward 债不静默关闭；S4 docs 在 current）。
+13. AC-9：full pytest 绿作 release 信号；TD-007（ruff）非 blocker。
+
+**Debt 收尾：**
+
+14. TD-001 / TD-004（resolved-in-S4，仍在 register）→ 从 `TECH_DEBT.md` 移除，resolution 记入
+    S4 archive（镜像 TD-006/TD-001/TD-004 处理）。
+15. TD-002/003/007（open）/ TD-008-011（deferred）状态确认无误，不被静默关闭。
+
+**Archive（仅 close-out 时）：**
+
+16. S4 stage docs（`S4_BASELINE_STATUS/GOAL/GOAL_GAP/FIDELITY_CONTRACT/WORK_LOG`）+
+    scratch evidence（`_tmp_*`）归档到 `docs/history/S4_*/`（镜像 S2/S3 布局）。
+17. `docs/current/` reset 到 S_ROADMAP + TECH_DEBT + 下一阶段 baseline。
+18. `AGENTS.md` stage status 更新为 S4-closed / S5-preparing。
+19. 不 push（除非用户显式授权）；不读/打印/复制/移动/提交 secret；不动 `config/config.yaml`；
+    不创建 `.env`。

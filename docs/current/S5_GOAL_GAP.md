@@ -1,8 +1,8 @@
 # S5 Goal Gap Backlog
 
-> Status: **proposed / not executed**. This backlog is derived from
-> `S5_BASELINE_STATUS.md` and the proposed `S5_GOAL.md`. It must not be executed
-> until the S5 goal is explicitly approved/frozen by the user.
+> Status: **executed (G01-G11 done; G12 deferred/non-goal)**. This backlog was
+> derived from `S5_BASELINE_STATUS.md` and the frozen `S5_GOAL.md`. The S5 gap
+> loop has run with evidence; S5 is implemented and pending close-out.
 
 ## Priority Model
 
@@ -168,9 +168,15 @@
     redacts + validates + enforces seq). It does NOT read or write the checkpoint
     file — checkpoint stays the state restoration source (AC-4).
     `check_recovery_consistency` returns a `LedgerConsistencyReport` flagging
-    `missing_checkpoint_ref`, `stale_ledger_entry`, and `task_state_mismatch`;
-    `report.ok` drives recovery refusal (AC-5). Readers: `latest_checkpoint_ref`,
-    `latest_ledger_lifecycle`, `ledger_completed_step_count`.
+    `missing_checkpoint_ref`, `stale_ledger_entry`, and `task_state_mismatch`.
+    `report.ok` is a callable consistency signal / diagnostic a recovery flow
+    *can* consult; it is NOT auto-wired as a production resume gate — S5 added
+    no runtime hook that blocks resume on `report.ok` (such a gate would need
+    careful design against `S5_GOAL.md §9` "checkpoint remains the source of
+    recovery truth"). AC-5 (completed steps not silently repeated) is satisfied
+    by checkpoint + governed-runtime semantics and proven in the S5-G05 E2E,
+    not by `report.ok`. Readers: `latest_checkpoint_ref`, `latest_ledger_lifecycle`,
+    `ledger_completed_step_count`.
   - `tests/test_s5_ledger_cooperation.py`: 8 passed (RED→GREEN). Covers matching
     (ok), missing checkpoint ref, stale ledger (checkpoint ahead), ledger-ahead-
     of-checkpoint (completed work would repeat), lifecycle mismatch, boundary
@@ -282,7 +288,7 @@
 - Status: done
 - Evidence (2026-06-20):
   - `tests/test_s5_same_spine_guard.py` (new): invariant/guard suite (same nature
-    as `test_architecture_boundaries.py`). (1) AST scan: the four ledger modules
+    as `test_architecture_boundaries.py`). (1) AST scan: the five ledger modules
     import no execution-spine module (`tool_executor` / `tool_registry` / `core` /
     `loop` / `action_scheduler` / `checkpoint` / `evidence_recorder`) and nothing
     under `agent.provider` / `agent.runtime_integration`. Mutation-verified:
@@ -398,7 +404,7 @@
     evidence refs aligned to the replay chain; after a checkpoint+ledger
     interrupt+reload the delegation (`del-1`) and MCP tool (`mcp-tool-1`) events
     survive, `align_ledger_with_replay` is coherent, and `check_recovery_consistency`
-    is ok. (2) Scheduler dormancy: the four S5 modules do not reference
+    is ok. (2) Scheduler dormancy: the five S5 modules do not reference
     `ActionScheduler` / `action_scheduler` (TD-008 / S5 non-goal held).
   - Acceptance test composing G01-G07 pieces + extension events (passed first run,
     like the S5 reference-task E2E). 2 passed. Focused ruff: clean.

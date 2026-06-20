@@ -145,3 +145,16 @@ def test_store_uses_injected_local_path_only(tmp_path):
     # tmp_path 下除 ledger 文件外不应有其它意外产物。
     files = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert files == [nested]
+
+
+def test_read_all_tolerates_half_written_tail(tmp_path):
+    # crash-survivable tail：最后一行是半写/截断 JSON，持久前缀仍可读。
+    path = tmp_path / "ledger.jsonl"
+    good = json.dumps(
+        ledger_record_to_dict(
+            TaskLifecycleRecord("t1", 1, "r1", "running", "running", "g", None)
+        )
+    )
+    path.write_text(good + "\n" + '{"kind": "task_lifecycle", "task_i', encoding="utf-8")
+    records = TaskLedger(path).read_all()
+    assert [r.seq for r in records] == [1]

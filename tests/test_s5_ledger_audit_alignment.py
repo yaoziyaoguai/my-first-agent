@@ -160,3 +160,44 @@ def test_replay_chain_still_builds_on_ledger_equipped_state(tmp_path):
         )
     # 再次构建 chain 仍一致（ledger 记录未污染 task-state 投影）。
     assert build_replay_chain(state).events == chain.events
+
+
+def test_align_delegation_evidence_kind(tmp_path):
+    # delegation evidence_kind：把 replay chain 的 delegation 事件记为 ledger evidence
+    # ref，仍能与 replay chain 对齐（AC-8 覆盖 delegation kind，不只是 tool）。
+    state = create_agent_state(system_prompt="S5 delegation alignment")
+    state.memory.session_id = "s5-delegation-align"
+    receive_governed_task(
+        state,
+        user_goal="delegation align",
+        plan_payload={
+            "goal": "d",
+            "steps": [
+                {"step_id": "sd", "title": "delegate", "description": "d", "step_type": "read"},
+            ],
+        },
+    )
+    accept_governed_plan(state)
+    state.task.delegation_log.append(
+        {
+            "delegation_id": "del-x",
+            "subagent_name": "reviewer",
+            "status": "delegated",
+            "step_index": 0,
+            "stop_reason": "second opinion",
+            "adjudication_action": "accept",
+        }
+    )
+    chain = build_replay_chain(state)
+    assert any(event.kind == "delegation" and event.ref_id == "del-x" for event in chain.events)
+    ledger = TaskLedger(tmp_path / "l.jsonl")
+    record_evidence_ref(
+        ledger,
+        task_id="t1",
+        evidence_ref="del-x",
+        evidence_kind="delegation",
+        safe_summary="delegation review",
+        recorded_at="r1",
+    )
+    alignment = align_ledger_with_replay(chain, ledger.read_all())
+    assert alignment.coherent

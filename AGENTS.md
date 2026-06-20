@@ -13,7 +13,7 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
-## Stage Development Governance (S4 closed / S5 preparing)
+## Stage Development Governance (S4 closed / S5 implemented, pending close-out)
 
 This project uses a staged development governance model. Stages close one at a
 time: a closed stage is archived under `docs/history/`, and `docs/current/`
@@ -33,11 +33,13 @@ keeps only the live working set.
   `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md`
   (G01-G12 satisfied; independent close-out audit passed; full pytest green in
   the S4 audit record).
-- **S5 is the active stage, in preparation/planning.** Its baseline/goal/gap are
-  authored under `docs/current/` (`S5_BASELINE_STATUS.md` → `S5_GOAL.md` →
-  `S5_GOAL_GAP.md`, plus a fresh `WORK_LOG.md`). **S5 is NOT implemented** — no
-  S5 gap loop has run. Do not treat any S5 capability as built until its gap
-  loop executes with evidence.
+- **S5 (Durable Governed Task Recovery) is implemented and pending close-out.**
+  Its baseline/goal/gap live under `docs/current/`
+  (`S5_BASELINE_STATUS.md` → `S5_GOAL.md` → `S5_GOAL_GAP.md`, plus `WORK_LOG.md`).
+  The S5 gap loop G01-G11 has executed with evidence (G12 is a deferred/non-goal
+  guardrail); full pytest is green. S5 close-out (archive under
+  `docs/history/S5_*/`) is not yet performed. Do not treat any S5 capability as
+  built until its gap loop has executed with evidence — which it now has.
 
 Historical documents are evidence, not routing authority. Do not use historical
 docs (including archived S1/S2 stage docs) to override current work unless the
@@ -69,9 +71,9 @@ the S2/S3/S4 archive layout).
 
 ### Goal and Gap Rules
 
-These rules apply to whichever stage is active. **S5 is active (in preparation)**:
-`S5_GOAL.md` is frozen once the user approves it, and `S5_GOAL_GAP.md` is the live
-gap register under `docs/current/`.
+These rules apply to whichever stage is active. **S5 is implemented and pending
+close-out**: `S5_GOAL.md` is frozen and `S5_GOAL_GAP.md` is the executed gap
+register under `docs/current/`.
 
 1. The active stage `*_GOAL.md` is frozen after user approval.
    - Do not change the goal because implementation is hard.

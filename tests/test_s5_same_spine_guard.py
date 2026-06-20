@@ -31,6 +31,7 @@ _LEDGER_MODULES = (
     "agent.task_ledger_store",
     "agent.task_ledger_cooperation",
     "agent.ledger_audit_alignment",
+    "agent.ledger_summary",
 )
 
 # 这些模块属于执行主链路 / 状态恢复源 / evidence 写入路径——ledger 模块不得导入它们
@@ -117,3 +118,19 @@ def test_ledger_recording_does_not_drive_governed_stepping(tmp_path):
     assert before == after
     # 但 ledger 确实落盘了记录（supplemental，不是 no-op）。
     assert len(ledger.read_all()) >= 1
+
+
+def test_ledger_modules_do_not_use_dynamic_import():
+    # 守卫强化：ledger 模块不得用 __import__ / importlib.import_module 绕过静态 import
+    # 扫描（否则 AST Import 扫描可被动态导入规避）。
+    for module_name in _LEDGER_MODULES:
+        module = importlib.import_module(module_name)
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "__import__":
+                raise AssertionError(f"{module_name} uses __import__()")
+            if isinstance(func, ast.Attribute) and func.attr == "import_module":
+                raise AssertionError(f"{module_name} uses dynamic import_module()")

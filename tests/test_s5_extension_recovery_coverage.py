@@ -169,6 +169,7 @@ def test_s5_recovery_modules_do_not_activate_scheduler():
         "agent.task_ledger_store",
         "agent.task_ledger_cooperation",
         "agent.ledger_audit_alignment",
+        "agent.ledger_summary",
     )
     for module_name in s5_modules:
         source = inspect.getsource(importlib.import_module(module_name))

@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import json
+
 from agent.ledger_summary import ledger_summary_stats, render_ledger_summary
 from agent.task_ledger import (
     CheckpointRefRecord,
@@ -83,3 +85,15 @@ def test_render_ledger_summary_excludes_raw_secrets(tmp_path):
     # 摘要结构上只用 refs/counts/lifecycle —— 不含 secret。
     text = render_ledger_summary(records)
     assert _SECRET not in text
+
+
+def test_ledger_summary_stats_structurally_excludes_secret_payload(tmp_path):
+    # 结构断言：stats 只聚合 refs/counts/lifecycle；即便记录 safe_summary 含 secret，
+    # append 已 redact，且 stats JSON 不含 summary/preview/content/result 字段。
+    ledger = TaskLedger(tmp_path / "l.jsonl")
+    ledger.append(EvidenceRefRecord("t1", 1, "r1", "ev-1", "tool", f"preview {_SECRET}"))
+    stats = ledger_summary_stats(ledger.read_all())
+    blob = json.dumps(stats, default=str)
+    assert _SECRET not in blob
+    forbidden_keys = {"safe_summary", "summary", "preview", "content", "payload", "result"}
+    assert not (set(stats["t1"]) & forbidden_keys)

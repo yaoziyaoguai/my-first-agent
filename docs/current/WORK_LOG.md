@@ -282,9 +282,12 @@
     appends them via `TaskLedger.append`. It does not touch the checkpoint file
     (AC-4) and de-duplicates unchanged lifecycle records.
   - Added `check_recovery_consistency` + `LedgerConsistencyReport`/`Issue`:
-    flags `missing_checkpoint_ref`, `stale_ledger_entry`, `task_state_mismatch`;
-    `report.ok` drives recovery refusal (AC-5 — completed steps not silently
-    repeated).
+    flags `missing_checkpoint_ref`, `stale_ledger_entry`, `task_state_mismatch`.
+    `report.ok` is a callable consistency signal / diagnostic; it is NOT
+    auto-wired as a production resume gate (correction of an earlier overclaim —
+    S5 added no runtime hook that blocks resume on `report.ok`). AC-5 (completed
+    steps not silently repeated) is satisfied by checkpoint + governed-runtime
+    semantics, proven in the S5-G05 E2E.
   - Added readers: `latest_checkpoint_ref`, `latest_ledger_lifecycle`,
     `ledger_completed_step_count`.
 - Verification commands and results:
@@ -393,7 +396,7 @@
   - `docs/current/WORK_LOG.md`
 - What was done:
   - Added a guard suite (same nature as `test_architecture_boundaries.py`):
-    (1) AST scan asserting the four ledger modules import no execution-spine
+    (1) AST scan asserting the five ledger modules import no execution-spine
     module and nothing under `agent.provider` / `agent.runtime_integration`;
     (2) `TaskLedger` public-method allowlist `{append, read_all}` (no state
     restoration / execution method — checkpoint stays sole restoration source);
@@ -497,7 +500,7 @@
     (`tool_execution_log`) via the existing mediator/evidence path. After
     checkpoint+ledger interrupt+reload, the delegation and MCP events survive,
     `align_ledger_with_replay` is coherent, and `check_recovery_consistency` is ok.
-  - Added a Scheduler-dormancy assertion: the four S5 modules do not reference
+  - Added a Scheduler-dormancy assertion: the five S5 modules do not reference
     `ActionScheduler` / `action_scheduler` (TD-008 / S5 non-goal held).
 - Verification commands and results:
   - `.venv/bin/python -m pytest tests/test_s5_extension_recovery_coverage.py -q`
@@ -581,3 +584,42 @@
   - None authorized. S5 implementation is complete and verified. S5 close-out
     (archive to `docs/history/S5_*/`, reset `docs/current/`) awaits explicit user
     authorization per AGENTS.md Stage Closing Review.
+
+## 2026-06-20 - S5 independent audit findings addressed
+
+- Task name: Phase 1 — fix S5 independent audit findings (MEDIUM-1/2/3 + LOW).
+- Files changed:
+  - `tests/test_s5_same_spine_guard.py`, `tests/test_s5_extension_recovery_coverage.py`,
+    `tests/test_s5_ledger_contract.py`, `tests/test_s5_ledger_redaction.py`,
+    `tests/test_s5_ledger_store.py`, `tests/test_s5_ledger_audit_alignment.py`,
+    `tests/test_s5_ledger_summary.py`
+  - `docs/current/S5_GOAL_GAP.md`, `docs/current/WORK_LOG.md`, `README.md`, `AGENTS.md`
+- What was done:
+  - MEDIUM-1 (overclaim): corrected "`report.ok` drives recovery refusal" →
+    "callable consistency signal / diagnostic; NOT auto-wired as a production
+    resume gate" in S5_GOAL_GAP G04 evidence + WORK_LOG G04 entry. AC-5 is
+    satisfied by checkpoint + governed-runtime semantics (proven in S5-G05 E2E).
+  - MEDIUM-2 (guard coverage): added `agent.ledger_summary` to the same-spine
+    guard `_LEDGER_MODULES` and the scheduler-dormancy `s5_modules`; updated
+    "four ledger/S5 modules" → "five" in S5_GOAL_GAP G07/G10 evidence + WORK_LOG.
+  - MEDIUM-3 (stale status): S5_GOAL_GAP header → executed; README + AGENTS →
+    "S5 implemented and pending close-out".
+  - LOW (test hardening, all fixed in-place; none deferred): expanded
+    forbidden-field aliases (test_s5_ledger_contract); added ghp_/AKIA/xox/AIza/
+    password secret-pattern coverage (test_s5_ledger_redaction); half-written-tail
+    crash case (test_s5_ledger_store); delegation evidence_kind alignment
+    (test_s5_ledger_audit_alignment); dynamic-import guard
+    (test_s5_same_spine_guard); summary-stats structural secret-exclusion
+    (test_s5_ledger_summary).
+- Verification commands and results:
+  - `.venv/bin/python -m pytest tests/test_s5_*.py -q` -> `73 passed`
+    (68 prior + 5 new LOW tests).
+  - `.venv/bin/ruff check tests/test_s5_*.py` -> `All checks passed!`.
+- Stage gap items updated:
+  - None (S5 gaps unchanged; this is audit-findings remediation).
+- `TECH_DEBT.md` items added or updated:
+  - None (all LOW items fixed in-place; none deferred to debt).
+- Commit hash:
+  - Pending (`fix/test/docs: address S5 independent audit findings`).
+- Next step:
+  - Phase 2 — S5 close-out (archive + release summary + clean docs/current + debt).

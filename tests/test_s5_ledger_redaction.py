@@ -109,3 +109,21 @@ def test_redacted_reference_records_summary_contains_no_secret():
     blob = json.dumps([dataclasses.asdict(r) for r in redacted], default=str)
     assert _SECRET not in blob
     assert "[REDACTED]" in blob
+
+
+def test_redact_covers_known_secret_literal_patterns():
+    # 拓宽合成 secret 形态覆盖：GitHub PAT / AWS / Slack / Google / password kv。
+    cases = [
+        ("ghp_" + "A" * 16, "github pat"),
+        ("AKIA" + "B" * 16, "aws access key id"),
+        ("xoxb-" + "c" * 11, "slack token"),
+        ("AIza" + "D" * 20, "google api key"),
+        ("password=hunter2", "password kv"),
+    ]
+    for secret, label in cases:
+        record = EvidenceRefRecord(
+            "t1", 1, "r1", "ev-1", "tool", f"preview {secret}"
+        )
+        safe = redact_ledger_record(record)
+        assert secret not in (safe.safe_summary or ""), f"{label} not redacted"
+        assert "[REDACTED]" in safe.safe_summary

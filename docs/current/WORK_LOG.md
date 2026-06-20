@@ -128,3 +128,37 @@
 - **Next step:** enter the S4 gap loop at **S4-G01** (P0): define the evidence
   fidelity contract + audit/replay reference task spec (define-only), then proceed
   per `S4_GOAL_GAP.md §3`. (Not executed in this task.)
+
+## 2026-06-20 — S4-G01 fidelity contract + audit/replay reference task (define-only) — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G01 (P0): author the evidence fidelity contract + audit/replay
+  reference task runbook (define-only; no code/tests). Unblocks G02/G04/G05/G06/G07.
+- **Done:** wrote `docs/current/S4_FIDELITY_CONTRACT.md`:
+  - §1 fidelity ceiling = **redacted-faithful** (replayable / redacted / not byte-for-byte /
+    key-safe), grounded in frozen `S4_GOAL.md §8-2`.
+  - §2 baseline facts: replay data **already exists** in task-state
+    (`tool_execution_log` / `delegation_log` / `transitions`); the TD-001 gap is that
+    `TaskEvidenceReport.evidence_events` reduces it to opaque string labels.
+  - §3 replay-chain contract (G02 target): ordered `ReplayEvent` (decision/tool/delegation)
+    at safe-summary granularity, redacted, no new data source, no spine rewrite.
+  - §4 pending-tool preview contract (G04 / TD-004); §5 evidence verification criteria
+    (complete / self-consistent / ordered / replayable) for G05.
+  - §6 audit/replay reference task runbook (execute→record→replay→verify closed loop) +
+    targeted gate + fake deterministic criteria (AC-2/3/5/6-fake) + real key-safe smoke
+    (AC-6-real, opt-in, non-blocker) for G06/G07.
+  - §7 non-goals: no byte-for-byte, no raw secret, no second spine, no crypto signature,
+    no memory/durable-ledger/Scheduler/MCP/multi-agent ecosystem.
+- **Files changed:** `docs/current/S4_FIDELITY_CONTRACT.md` (new),
+  `docs/current/S4_GOAL_GAP.md` (G01 → satisfied + evidence; §2 distribution; §9 index),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** doc-only define task; grounded via graphify orientation
+  (evidence_recorder / task_evidence_report / state.py / tool_executor.execute_pending_tool /
+  acceptance_gate) before reading source. `git diff --check` clean.
+  `git ls-files config/config.yaml .env` empty; both gitignored.
+- **`S4_GOAL_GAP.md` items updated:** S4-G01 → **satisfied** (P0 unblock done).
+- **`TECH_DEBT.md` items:** none changed.
+- **Commit:** `docs(s4): G01 fidelity contract + audit/replay reference task (define-only)`
+  (see `git log`).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G02 (P1) — replay-faithful evidence model on the
+  existing evidence seam (TDD red→green), per this contract §3.

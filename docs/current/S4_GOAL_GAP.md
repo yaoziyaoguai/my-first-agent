@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 11 | G01-G11 |
+| open | 10 | G02-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 0 | —（未执行） |
+| satisfied | 1 | G01（fidelity contract + reference task runbook，define-only） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -87,7 +87,11 @@
 - **Verification**: contract + runbook 成文；AC-2/5/6 可据此写出具体验收。
 - **Dependencies**: 无（S4 起点）。
 - **Non-goal boundary**: 不实现；不扩成多任务套件；不承诺逐字 secret 持久化。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G01）。
+- **Evidence**: `docs/current/S4_FIDELITY_CONTRACT.md`（fidelity ceiling redacted-faithful +
+  replay chain 契约 §3 + pending-tool 预览契约 §4 + evidence 校验判据 §5 + audit/replay
+  reference task runbook §6 + non-goals §7）。已为 G02/G04/G05/G06/G07 写出可验收口径。
+  Commit: `docs(s4): G01 fidelity contract + audit/replay reference task (define-only)`。
 
 ---
 
@@ -271,7 +275,7 @@
 
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
-| S4-G01 | Define fidelity contract + audit/replay reference task | P0 | open | L3/Cross | AC-2/5/6 setup |
+| S4-G01 | Define fidelity contract + audit/replay reference task | P0 | satisfied | L3/Cross | AC-2/5/6 setup |
 | S4-G02 | Replay-faithful evidence model | P1 | open | L3 | AC-2 |
 | S4-G03 | Secret-safe redaction enforcement | P1 | open | L3/Sec | AC-3 |
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | open | L3 | AC-4 |

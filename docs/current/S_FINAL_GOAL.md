@@ -1,10 +1,21 @@
 # S_FINAL Goal — Roadmap Mainline Closure
 
-> Status: **proposed** (roadmap final goal, not yet frozen). This is **not** a new
-> product stage (no S6) and **not** capability expansion. It defines how the
-> S-series roadmap mainline closes after S1-S5 are archived, derived from
-> `S_ROADMAP.md`, `S_FINAL_BASELINE_STATUS.md`, and `TECH_DEBT.md`. The final gap
-> loop is **not** executed by this document.
+> Status: **frozen** (roadmap final goal, frozen 2026-06-20 via explicit user
+> `/goal` authorization). This is **not** a new product stage (no S6) and **not**
+> capability expansion. It defines how the S-series roadmap mainline closes after
+> S1-S5 are archived, derived from `S_ROADMAP.md`, `S_FINAL_BASELINE_STATUS.md`,
+> and `TECH_DEBT.md`. The final gap loop is now authorized to execute in order.
+>
+> Frozen decisions (2026-06-20):
+> - Final closes the roadmap mainline (closure / hardening / debt cleanup), not a
+>   new capability stage.
+> - Safe hardening + quality cleanup are authorized.
+> - TD-002 / TD-003 / TD-007 / TD-012 / TD-013: fix if safe; record residual with
+>   rationale if any cannot be safely fixed.
+> - TD-008 / TD-009 / TD-010: fix only if safe WITHOUT activating Scheduler /
+>   memory / full-MCP / writable-SubAgent; otherwise keep deferred with rationale.
+>   Productionizing these would activate them = capability expansion = out of final
+>   closure scope, so they stay deferred.
 
 ## 1. Executive Summary
 

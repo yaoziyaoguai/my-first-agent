@@ -1075,3 +1075,34 @@
   and `.env` untouched and gitignored.
 - **Next step:** await user authorization for the S3 Stage Closing Review (close-out). No
   further code changes authorized.
+
+## 2026-06-20 — S3 Stage Closing Review (close-out) — user-authorized
+
+- **Task:** Execute the AGENTS.md Stage Closing Review for S3 and archive the stage. This is
+  the final S3 WORK_LOG entry before this file is moved to the S3 history archive.
+- **Pre-close-out confirmation:**
+  - S3-G01..G13 all `satisfied` (see `S3_GOAL_GAP.md §2`); evidence is source + test refs.
+  - Independent-audit findings resolved: H1 wired (runtime delegation evidence) + M1
+    (AGENTS.md) + L2 (MCP default-off e2e test); L1 (_tmp archival) handled by this close-out;
+    L3 no-op.
+  - Full pytest re-run (2026-06-20): **4823 passed, 15 skipped, 28 xfailed, 0 failed**.
+- **Close-out actions (this entry):**
+  1. Wrote `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md`.
+  2. `git mv` S3 stage docs → `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/`:
+     `S3_BASELINE_STATUS.md`, `S3_GOAL.md`, `S3_GOAL_GAP.md`, `S3_REFERENCE_TASK.md`,
+     `WORK_LOG.md` (this file).
+  3. `git mv` S3 scratch evidence → `.../S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/_review_artifacts/`:
+     `_tmp_s3_baseline_audit/`, `_tmp_s3_goal_draft/`, `_tmp_s3_goal_gap/`.
+  4. `TECH_DEBT.md`: removed resolved TD-006 (recorded in the S3 archive release summary);
+     kept open TD-001/002/003/004/007 + deferred TD-008..011; refreshed header to
+     S3-archived / S4-preparing.
+  5. `AGENTS.md`: stage status → S3 closed & archived, S4 preparing (not S4-implemented).
+  6. `docs/current/` reset to the S4-entry working set (S_ROADMAP + TECH_DEBT), then S4
+     stage docs created (baseline → goal → gap + fresh S4 WORK_LOG).
+- **Unfinished gaps moved to debt:** none — all S3 gaps satisfied; no S3 gap left open. The
+  TD-008..011 deferred items are S3 non-goals (frozen-goal scope boundaries), already triaged
+  in S3-G13, and persist in `TECH_DEBT.md` across this archival.
+- **Verification:** see the S4 WORK_LOG close-out/verify entry + `git log`. `git diff --check`
+  clean; `git ls-files config/config.yaml .env` empty (untouched, gitignored).
+- **Commit:** `chore(s3): close out S3 — archive stage docs + release summary` (see `git log`).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.

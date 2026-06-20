@@ -1,10 +1,14 @@
 # Technical Debt Register
 
-> Cross-stage carry-forward debt register. S2 is complete and archived under
-> `docs/history/S2_GOVERNED_TASK_AGENT/`; S3 is in progress (S3-G01..G12 satisfied
-> 2026-06-20). This file keeps **unresolved** debt that may affect S3/Sn plus
-> **S4/Sn scope boundaries** deliberately deferred by the frozen S3 goal. Do not
-> use this file as a general unfinished-task list; do not write stage goals here.
+> Cross-stage carry-forward debt register. S2 and S3 are complete and archived
+> under `docs/history/S2_GOVERNED_TASK_AGENT/` and
+> `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/`; **S4 is preparing**. This
+> file keeps **unresolved** debt that may affect S4/Sn plus **S4/Sn scope
+> boundaries** deliberately deferred by the frozen S3 goal. Resolved items live in
+> their stage archive (e.g. TD-006 was resolved in S3-G09 — see
+> `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md §7`),
+> not here. Do not use this file as a general unfinished-task list; do not write
+> stage goals here.
 
 ## Rules
 
@@ -16,40 +20,10 @@
 
 ## Open / Carry-forward items
 
-### TD-006 - Stale guard / governance / architecture-boundary tests keep full-suite red
-
-- ID: TD-006
-- Title: Stale guard / documentation-governance / architecture-boundary / taxonomy
-  / diagnostics / contract guard tests keep the full-suite health check red.
-- Status: **resolved (S3-G09, 2026-06-20)**
-- Source/reason: Guards assert against pre-S1/pre-S2 doc locations and frozen
-  module inventories that have since moved to `docs/history/` or grown during
-  S2. 33 full-pytest failures across
-  `test_docs_source_of_truth.py` (17), `test_architecture_boundaries.py` (6),
-  `test_v6_drift_addendum_boundary.py` (5), `test_evidence_taxonomy_guard.py` (2),
-  `test_provider_diagnostics.py` (1), `test_streaming_protocol.py` (1),
-  `test_capability_boundary_contract.py` (1).
-- Impact: Full-suite health check is red. None are in the S1/S2 acceptance
-  gate, observability, or core-runtime tests, so this is guard/governance
-  cleanup, not a runtime regression. Note: S2 skill default-off test failures
-  are a **separate test-contract class** (activation tests opt in via
-  `MY_FIRST_AGENT_S2_SKILL_ENABLE=1`), NOT TD-006.
-- Recommended stage: S3/Sn guard cleanup, before relying on full-suite status
-  as a release signal. Update each guard against current governance docs/
-  contracts (not by weakening assertions silently).
-- Verification idea: After S3 docs settle, run full pytest, classify each
-  failure against the known set, and update guards to point at current
-  authority. Authoritative S2 failure list:
-  `docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_baseline_audit/fullsuite_failures.txt`.
-- **Resolution (S3-G09, 2026-06-20):** all 39 stale-guard failures cleared by aligning to
-  current S-series governance (NOT by weakening): retire_superseded 27 (guards of docs
-  deliberately archived to `docs/history/` during S1/S2 closeout — no live subject),
-  update_to_current_authority 7 (repoint to `docs/history/` / `docs/current/`), update_inventory
-  3 (frozen baselines refreshed to scanner-observed modules), keep_as_xfail 2 (l3 taxonomy
-  subsystem files, explicit xfail per existing precedent). Full pytest now
-  **4813 passed / 15 skipped / 28 xfailed / 0 failed** (full-suite release signal is green;
-  AC-9 met). Commit: see WORK_LOG / `git log` (S3-G09). TD-007 (ruff) remains open and is
-  NOT an S3 release blocker.
+> TD-006 (stale guard / doc-governance / architecture-boundary tests keeping the
+> full suite red) was **resolved in S3-G09** (full pytest green) and removed from
+> this live register at S3 close-out; its resolution record lives in
+> `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md §7`.
 
 ### TD-007 - ruff full-suite lint is red with ~451 historical errors
 

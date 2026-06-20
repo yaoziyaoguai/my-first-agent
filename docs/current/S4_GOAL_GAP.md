@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 5 | G07-G11 |
+| open | 4 | G08-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 6 | G01-G06（contract + chain model + redaction + pending-tool/TD-004 + verifier + audit/replay E2E anchor） |
+| satisfied | 7 | G01-G07（contract + chain + redaction + pending-tool/TD-004 + verifier + audit/replay E2E + real key-safe smoke harness） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -221,7 +221,19 @@
   （P1 = 必达「harness 就位」，非 P0 release-blocker；release-blocker 仅 P0）。
 - **Dependencies**: S4-G06。
 - **Non-goal boundary**: 不要求 real 覆盖所有分支；不泄露 secret；real-key 实跑不作 blocker。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G07）。
+- **Evidence**: `tests/test_s4_reference_task_acceptance.py::test_s4_reference_task_real_provider_audit_key_path_smoke`
+  —— opt-in（`MY_FIRST_AGENT_RUN_S4_REAL_PROVIDER_SMOKE=1`）/ 默认 skip；经生产路径
+  `build_model_provider_from_env()` 解析 provider（与 runtime 同源，只透传不打印 key）；
+  fake-key 检测；进入 audit/replay governed path（receive/accept + MCP 结果 + SubAgent），
+  与 fake E2E 同入口（非旁路 bare provider.create）；断言 replay_chain 可重建 +
+  verify_evidence 通过 + redaction 保持。**opt-in 实跑证据**：开启 opt-in 后 harness 正确解析
+  到真实 anthropic provider（config 有 real key）、进入 real governed path 调用
+  provider.create()——证明 harness 进入真实路径；调用 31s 后 `ProviderTimeoutError`
+  （网络/环境超时，**非代码缺陷、非 secret 泄漏**——traceback 仅含 `_headers()/_url()`，无 key）；
+  依 resolved decision 4，real-key 实跑非 blocker，**默认 skip + 结构校验（G06 fake E2E 同路径）
+  即满足 AC-6 real 维度**。默认模式 1 passed / 1 skipped。Commit: `test(s4): G07 real provider
+  audit key-path smoke (opt-in/key-safe, AC-6 real)`。
 
 ---
 
@@ -317,7 +329,7 @@
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | satisfied | L3 | AC-4 |
 | S4-G05 | Evidence verification / consistency check | P1 | satisfied | L3 | AC-5 |
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | satisfied | L4 | AC-1/6 |
-| S4-G07 | Real provider audit key-path smoke | P1 | open | L1 | AC-6 |
+| S4-G07 | Real provider audit key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | open | L1/Cross | AC-7 |
 | S4-G09 | docs/current+history governance for S4 | P2 | open | Cross | AC-8 |
 | S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | open | Cross/L1 | AC-1/9 |

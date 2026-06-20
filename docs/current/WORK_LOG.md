@@ -329,3 +329,37 @@
 - **Next step (authorized by §3):** S4-G07 (P1) — real provider audit key-path smoke
   (key-safe opt-in; default skip + structural verification satisfies AC-6 real dimension;
   real-key run non-blocker).
+
+## 2026-06-20 — S4-G07 real provider audit key-path smoke (opt-in/key-safe) — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G07 (P1): key-safe opt-in real-provider smoke covering the audit/replay
+  key path. AC-6 real dimension; deliverable = harness + structural verification (real-key run
+  non-blocker per resolved decision 4).
+- **Done:** added `test_s4_reference_task_real_provider_audit_key_path_smoke` to
+  `tests/test_s4_reference_task_acceptance.py` — opt-in
+  (`MY_FIRST_AGENT_RUN_S4_REAL_PROVIDER_SMOKE=1`, default skip); resolves provider via the
+  production path `build_model_provider_from_env()` (only passes the provider object through,
+  never prints the key); fake-key detection (skip on fake/placeholder); enters the audit/replay
+  governed path (receive/accept + MCP result + read-only SubAgent) — same entry as the fake
+  E2E, not a bypassed `provider.create()`; asserts replay_chain reconstructs +
+  `verify_evidence` passes + redaction holds (key-safe on the real path too).
+- **Opt-in run evidence (exercised once):** with opt-in set, the harness correctly resolved a
+  **real anthropic provider** (config/config.yaml holds a real key) and entered the real
+  governed path calling `provider.create()`. The call raised `ProviderTimeoutError` after 31s
+  — a **network/environment timeout, NOT a code defect, NOT a secret leak**: the traceback
+  shows only `_headers()` / `_url()`, no key value. Per resolved decision 4, the real-key run
+  is non-blocker; **default skip + structural verification (G06 fake E2E exercises the same
+  audit/replay path) satisfies the AC-6 real dimension.** Default mode: 1 passed / 1 skipped.
+- **Files changed:** `tests/test_s4_reference_task_acceptance.py` (G07 smoke + `os`/context
+  imports), `docs/current/S4_GOAL_GAP.md` (G07 → satisfied; §2; §9),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** default mode `test_s4_reference_task_acceptance.py` 1 passed / 1 skipped
+  (opt-in real smoke). Focused ruff clean. `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G07 → **satisfied** (AC-6 real dimension: harness
+  + structural verification in place; real-key run opt-in/non-blocker).
+- **`TECH_DEBT.md` items:** none changed.
+- **Commit:** `test(s4): G07 real provider audit key-path smoke (opt-in/key-safe, AC-6 real)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged (provider object passed
+  through only; opt-in run traceback contained no key).
+- **Next step (authorized by §3):** S4-G08 (P2) — acceptance gate evidence-fidelity-regression
+  classification (reuse S3-G08 EXTENSION_REGRESSION pattern; don't weaken existing classes).

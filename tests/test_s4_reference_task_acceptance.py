@@ -15,6 +15,8 @@ endpoint；fake/fixture only（`AGENTS.md` 安全边界）。
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from agent.acceptance_gate import AcceptanceCheckResult, build_s2_acceptance_report
@@ -28,6 +30,7 @@ from agent.subagent_system.descriptor import SubAgentDescriptor
 from agent.subagent_system.executor import execute_local
 from agent.subagent_system.request import SubAgentRequest
 from agent.subagent_system.result import SubAgentRun
+from agent.task_context import build_task_execution_context
 from agent.task_delegation_evidence import record_delegation_run
 from agent.task_evidence_report import build_task_evidence_report
 from agent.task_orchestration import (
@@ -267,3 +270,148 @@ def test_s4_reference_task_audit_replay_closed_loop(clean_tool_registry):
     )
     assert acceptance.release_blocked is False
     assert acceptance.runtime_regressions == ()
+
+
+# ─── S4-G07: real provider audit/replay key-path smoke（opt-in / key-safe）───
+
+_S4_REAL_PROVIDER_SMOKE_ENV = "MY_FIRST_AGENT_RUN_S4_REAL_PROVIDER_SMOKE"
+_FAKE_KEY_PATTERNS = (
+    "test-key",
+    "sk-test-",
+    "secret-token-must-not-leak",
+    "fake",
+    "dummy",
+    "placeholder",
+    "your-api-key",
+    "your-key",
+    "changeme",
+    "example.invalid",
+)
+
+
+def _s4_real_provider_env_ready() -> tuple[bool, str]:
+    """S4 real provider smoke opt-in gate（collection-time）。
+
+    只检查显式 opt-in 标志；provider 是否真实可用由生产路径 build_model_provider_from_env()
+    解析（优先读 gitignored config/config.yaml）。不要求把 secret 导出到 env var——key
+    留在 config 中，测试只透传 provider 对象，不读取/打印/复制/移动/提交 secret。
+    """
+    if os.environ.get(_S4_REAL_PROVIDER_SMOKE_ENV, "") != "1":
+        return False, (
+            "S4 real provider smoke requires explicit opt-in: "
+            f"{_S4_REAL_PROVIDER_SMOKE_ENV}=1"
+        )
+    return True, "opt-in"
+
+
+_S4_REAL_READY, _S4_REAL_SKIP_REASON = _s4_real_provider_env_ready()
+
+
+@pytest.mark.skipif(not _S4_REAL_READY, reason=_S4_REAL_SKIP_REASON)
+def test_s4_reference_task_real_provider_audit_key_path_smoke(clean_tool_registry):
+    """S4-G07 AC-6（real）：real provider 进入 audit/replay governed path 并产出可校验 evidence。
+
+    证明 real provider（非 fake）：
+    1. 进入 S4 audit/replay governed path（receive/accept + MCP 结果 + read-only SubAgent），
+       与 fake E2E（G06）共享同一入口——不是旁路 bare provider.create()；
+    2. real provider 在 governed task context 下 provider_callable；
+    3. audit/replay evidence 与 fake/local 链路对齐：replay_chain 可重建、verify_evidence 通过、
+       redaction 保持（key-safe）。
+
+    release gate（resolved decision 4）：deliverable = key-safe opt-in harness + 结构校验；
+    有 key 且安全时可跑关键 smoke，无 key 时 default skip + 结构校验（G06 fake E2E）即满足
+    AC-6 real 维度。real-key 实跑**非必需、非 release blocker**。
+    key-safe：opt-in + fake-key 检测；不读取/打印/复制/移动/提交 secret；不改 config/config.yaml；
+    不创建 .env。MCP 用 fake/fixture source（不连真实 endpoint），SubAgent 用 local_fake。
+    """
+    # --- 1. 进入 audit/replay governed path（与 fake E2E 同一入口）---
+    mcp_registry_name = _register_fixture_mcp_source()
+    state = create_agent_state(system_prompt="S4 real provider audit/replay smoke")
+    state.memory.session_id = "s4-real-provider-audit-smoke-session"
+    assert receive_governed_task(
+        state,
+        user_goal="Audit/replay of fixture repo governance gap",
+        plan_payload=_s4_reference_task_plan(),
+    ).allowed
+    assert accept_governed_plan(state).allowed
+    _record_mcp_result(
+        state,
+        tool_use_id="tool-s4-real-smoke-mcp",
+        tool_name=mcp_registry_name,
+        result=f"S4-G07 real smoke: evidence aligned with fake; token={_FAKE_SECRET_IN_RESULT}",
+    )
+    _record_subagent_second_opinion(state, delegation_id="s4-real-smoke-d1")
+
+    # --- 2. governed task context（provider_callable 校验）---
+    context = build_task_execution_context(state)
+    assert context.provider_callable is True
+
+    # --- 3. real provider via 生产路径（与 runtime 同源：优先读 config/config.yaml）---
+    from agent.provider.factory import build_model_provider_from_env
+
+    provider = build_model_provider_from_env()
+    provider_type = getattr(provider, "provider_type", "unknown")
+    provider_api_key = getattr(getattr(provider, "config", None), "api_key", "") or ""
+    if provider_type == "fake" or not provider_api_key:
+        pytest.skip(
+            "opt-in set but provider resolved to fake/empty; "
+            "configure a non-fake provider in config/config.yaml"
+        )
+    for _pattern in _FAKE_KEY_PATTERNS:
+        if _pattern.lower() in provider_api_key.lower():
+            pytest.skip(
+                "provider api_key is a known fake placeholder; "
+                "real smoke needs a real key in config/config.yaml"
+            )
+
+    response = provider.create(
+        system=state.runtime.system_prompt,
+        messages=(
+            list(context.model_messages)
+            + [
+                {
+                    "role": "user",
+                    "content": (
+                        "This is an S4 audit/replay governed reference-task real-provider "
+                        "smoke. Reply with exactly: s4-reference-task-provider-ok"
+                    ),
+                }
+            ]
+        ),
+        tools=[],
+    )
+    text = "\n".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text"
+    ).strip()
+    assert "s4-reference-task-provider-ok" in text, (
+        "real provider 未在 S4 audit/replay governed task context 下返回预期 smoke 回复"
+    )
+
+    # --- 4. audit/replay evidence 与 fake/local 链路对齐 + key-safe ---
+    report = build_task_evidence_report(state, context_package=context)
+    assert len(report.replay_chain_events) > 0
+    chain = build_replay_chain(state)
+    # MCP tool + SubAgent 委派可重建
+    assert any(e.ref_id == "tool-s4-real-smoke-mcp" for e in chain.tool_events)
+    assert any(e.ref_id == "s4-real-smoke-d1" for e in chain.delegation_events)
+    # verify 通过
+    assert verify_evidence(state).ok is True
+    # key-safe：fake secret 在 chain preview 中被 redacted（AC-3 在 real path 也成立）
+    mcp_evt = next(e for e in chain.tool_events if e.ref_id == "tool-s4-real-smoke-mcp")
+    assert _FAKE_SECRET_IN_RESULT not in mcp_evt.output_preview
+
+    acceptance = build_s2_acceptance_report(
+        (
+            AcceptanceCheckResult(
+                name="s4_reference_task_real_provider_audit_smoke",
+                command=(
+                    f"{_S4_REAL_PROVIDER_SMOKE_ENV}=1 "
+                    ".venv/bin/python -m pytest tests/test_s4_reference_task_acceptance.py"
+                ),
+                exit_code=0,
+            ),
+        )
+    )
+    assert acceptance.release_blocked is False

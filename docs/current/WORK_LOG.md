@@ -510,8 +510,39 @@
   - None. Scheduler productionization (`TD-008`), full MCP ecosystem (`TD-009`),
     and writable SubAgent (`TD-010`) remain deferred — not activated by S5.
 - Commit hash:
-  - Pending (`feat(s5): S5-G10 extension-boundary recovery coverage`).
+  - `ceb88a3` (`feat(s5): S5-G10 extension-boundary recovery coverage`).
 - Next step:
   - S5-G11 — operator-facing ledger summary: a compact safe-summary report of
     lifecycle/checkpoint refs (no raw payloads), if it materially improves release
     evidence.
+
+## 2026-06-20 - S5-G11 operator-facing ledger summary
+
+- Task name: S5-G11 — operator-facing ledger summary (TDD).
+- Files changed:
+  - `agent/ledger_summary.py` (new)
+  - `tests/test_s5_ledger_summary.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added `render_ledger_summary` (human-readable per-task view: lifecycle chain,
+    checkpoint refs, completed-step / evidence-ref counts) and `ledger_summary_stats`
+    (structured). Both use only refs / counts / lifecycle values — structurally
+    secret-free (no summary/preview text rendered).
+- Verification commands and results:
+  - RED first: collection failed with `ModuleNotFoundError: No module named
+    'agent.ledger_summary'`.
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_summary.py -q` ->
+    `5 passed`.
+  - `.venv/bin/ruff check agent/ledger_summary.py tests/test_s5_ledger_summary.py`
+    -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G11` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G11 operator-facing ledger summary`).
+- Next step:
+  - Final S5 audit (S5-G12 is a non-goal guardrail, not executed): run the full
+    verification set, audit gap/debt consistency, and write the final report.

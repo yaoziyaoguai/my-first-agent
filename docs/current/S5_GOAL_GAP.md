@@ -26,7 +26,7 @@
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | done |
 | S5-G09 | P2 | L1-L5 | Non-regression and release governance | done |
 | S5-G10 | P2 | L5 | Extension-boundary recovery coverage | done |
-| S5-G11 | P3 | L3/L4 | Operator-facing ledger summary | proposed/open |
+| S5-G11 | P3 | L3/L4 | Operator-facing ledger summary | done |
 | S5-G12 | P4 | L5/Sn | Deferred capability guardrails | deferred/non-goal |
 
 ## S5-G01 - Ledger contract and reference recovery task
@@ -424,7 +424,17 @@
 - Dependencies: S5-G03, S5-G06
 - Non-goal boundary: No UI/dashboard/demo.
 - Suggested order: 11
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/ledger_summary.py` (new): `render_ledger_summary` (human-readable,
+    per-task lifecycle chain + checkpoint refs + completed-step / evidence-ref
+    counts) + `ledger_summary_stats` (structured). Uses only refs / counts /
+    lifecycle values — structurally secret-free (no summary/preview text rendered).
+  - `tests/test_s5_ledger_summary.py`: 5 passed (RED→GREEN). Covers lifecycle +
+    checkpoint rendering, stats counts, empty ledger, multi-task grouping, and
+    secret exclusion (a synthetic key in `safe_summary` is redacted on append and
+    absent from the rendered summary).
+  - Focused ruff on touched files: clean.
 - Risk if ignored: Lower operator ergonomics, but not a blocker if audit/replay
   evidence is otherwise clear.
 

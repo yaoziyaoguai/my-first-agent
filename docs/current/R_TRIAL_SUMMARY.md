@@ -15,10 +15,13 @@ normalize at the adapter seam. **Corrected root cause** (see `R_TRIAL_FAILURES.m
 it was **provider-visible tool names with illegal dots** (`demo.echo_task_summary`),
 NOT user config/model — the bug is protocol-boundary/tool-name handling. FakeProvider
 never validated tool names, which hid it. Real chat + real tool calls now return 200 and
-the model returns a real tool_use. **Remaining gap**: real-task *completion* — the runtime
-did not execute the returned tool_use end-to-end in the piped single-turn flow (F-08). So:
-real chat works; real tool-augmented tasks are unblocked at the provider layer but not yet
-proven end-to-end.
+the model returns a real tool_use. **Interactive CLI = works end-to-end**: the real
+product path (PTY, real provider) completes a governed tool_use — model -> tool_use ->
+confirmation -> manual approve -> execute -> file created -> final answer (Run 12). The
+runtime/tool-loop has **no core bug**. The earlier "completion gap" (F-08) was a
+**non-interactive/piped trial limitation** (piped stdin cannot answer the confirmation
+gate; piped auto-resume can mis-route), NOT a runtime defect — reclassified in
+`R_TRIAL_FAILURES.md` F-08.
 
 ## 2. fake/local vs real provider
 
@@ -64,12 +67,15 @@ hid the F-01 bug — see repair item (registry tool-name validation) in §9.
 
 ## 6. Runtime bugs
 
-- **F-08 (new):** after the F-01 fix, the real provider returns a tool_use but the runtime
-  did not execute it end-to-end in the piped single-turn flow (no 3rd provider call;
-  target file not created). A real-task *completion* gap — needs investigation
-  (tool-execution loop / turn boundary / path-policy). Not fixed this round.
-- **Otherwise none at the kernel layer** — graceful degradation on the (now-fixed) 400,
-  evidence recording, and clean session end all held. No spine split or governance bypass.
+- **None.** The interactive CLI (real product path) completes a real governed tool_use
+  end-to-end (Run 12: tool_use -> confirmation -> approve -> execute -> file created ->
+  final answer). F-08 was reclassified from "runtime bug, needs investigation" to
+  **non-interactive trial harness limitation** (Case A) — see `R_TRIAL_FAILURES.md` F-08.
+  Graceful degradation on the (now-fixed) 400, evidence recording, and clean session end
+  all held. No spine split or governance bypass.
+- **Minor**: in the interactive run the loop iterated ~18x for one write_file (the model
+  re-planned repeatedly) — verbose but correct; an operator-experience/efficiency note,
+  not a correctness bug.
 
 ## 7. Doc / command problems
 

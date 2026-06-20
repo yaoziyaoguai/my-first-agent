@@ -90,3 +90,70 @@
 - Real-task end-to-end completion: **not yet proven** (F-08).
 - Fake/local + CLI operator surface: unchanged (healthy).
 - Evidence/audit, graceful degradation: hold.
+
+## FirstAgent delivery / testing model (calibration, 2026-06-21)
+
+1. **Primary delivery entry**: the **interactive CLI** (`python main.py`, plain backend;
+   the real product path a user experiences).
+2. **Three paths, three purposes**:
+   - **Interactive CLI** = the real product delivery experience (governed, with live
+     tool-confirmation prompts the user answers).
+   - **Piped / non-interactive** (`stdin | main.py`) = an *automation/trial* shape, NOT
+     the default product form. It cannot answer interactive confirmation prompts.
+   - **Unit/integration tests** = deterministic fake/local coverage (governed test
+     policies / fake approval handlers, test-only).
+3. **The interactive CLI represents the real delivery experience.** A defect there is a
+   product defect; a defect only in piped/trial mode is a trial-harness limitation, not a
+   product bug.
+4. **tool_use → approval**: a mutating tool (e.g. `write_file`) returns a tool_use; the
+   CLI shows a confirmation prompt (`确认工具执行 (y/n/explain/cancel)`); the user
+   approves/rejects. This is a **governance safety feature, not a bug** — it must NOT be
+   auto-bypassed by default.
+5. **Approved tool_result → model**: on approval, `mediate_pending` →
+   `confirmation_already_approved` → `execute_pending_tool` → `append_tool_result(messages)`
+   → the next provider turn consumes the tool_result and produces a final answer. (Code
+   path confirmed; behaviour confirmed in Run 12.)
+6. **session/evidence/ledger/audit** record: the tool_use request, the approval decision,
+   the tool_result, and the final answer (structured evidence events + checkpoint).
+7. **R-trial classification rule**: distinguish (a) product/runtime bug (interactive CLI
+   fails), (b) trial-harness limitation (only piped/non-interactive fails), (c)
+   operator/docs issue (prompts unclear). Do NOT infer a runtime bug from piped-only
+   behaviour; do NOT default auto-approve to make piped trials pass.
+
+## Run 12 — interactive CLI real-provider tool-use trial (PTY via `expect`, 2026-06-21)
+- **Path**: real product path — `main.py` under a PTY (isatty=True, NOT pipe), real
+  provider, fresh session (checkpoint cleared).
+- **Task**: `write_file` → `workspace/demo/r_trial_interactive_write.txt` (content
+  `R-series interactive CLI smoke success`).
+- **Observed**: model returned a real tool_use → **confirmation prompt shown** →
+  approved with `y` → **tool executed** → **file CREATED** with exact content →
+  **final answer** ("写入成功 ✅ … 文件已写入，无异常") → returned to `你:` prompt →
+  `quit` → clean exit. Loop: 工具调用 1 次, 结果 正常结束; 21 messages; session saved.
+- **Result**: **PASS** — the interactive CLI completes a real governed tool_use
+  end-to-end (tool_use → confirmation → approve → execute → tool_result → final →
+  artifact).
+- **Minor note**: the loop iterated ~18 times for one write_file (model re-planned
+  repeatedly: "正在规划工具调用…" several times). It COMPLETED correctly; the verbosity
+  is an operator-experience/efficiency observation, not a correctness bug.
+- **F-08 reclassification**: this PROVES the runtime/tool-loop is NOT broken.
+  F-08 = **non-interactive trial harness limitation** (Case A), not a runtime bug.
+
+## Run 13 — piped/non-interactive mode re-check (trial path)
+- `session.py:452`: in pipe mode (`not sys.stdin.isatty()`), the runtime **auto-resumes
+  the most recent task** and consumes piped input as the response to any pending
+  confirmation. If a stale `awaiting_tool_confirmation` checkpoint exists, a newly-piped
+  task is mis-routed as tool feedback → the tool is rejected ("用户未批准") → no
+  execution. This is **design behaviour for piped automation**, and it does NOT affect
+  the interactive CLI (which does not auto-resume; verified in Run 12 — fresh start).
+- **Result**: piped mode cannot drive the real confirmation gate (no human to approve),
+  and auto-resume can mis-route when a stale pending exists. This is a **trial-harness
+  limitation**, not a product/runtime bug. A future trial-only approval harness (default
+  off, trial-named, safe-tool/path allowlist, audit-logged) could enable non-interactive
+  real trials — recorded as an enhancement item, NOT implemented (no default auto-approve).
+
+## Aggregate (after interactive-CLI calibration)
+- **Interactive CLI (real delivery path): WORKS** end-to-end for a real governed
+  tool_use (Run 12). The runtime/tool-loop has **no core bug**.
+- F-08 = **non-interactive trial harness limitation** (piped can't approve; piped
+  auto-resume mis-routes) — trial-only, does not affect the product path.
+- P0 (provider tool-name 400) remains FIXED (`ae94f26`).

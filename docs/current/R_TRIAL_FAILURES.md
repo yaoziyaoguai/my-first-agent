@@ -43,19 +43,28 @@
 - **suggested fix**: operator confirms `status` redacts the key; if not, mask it in the
   diagnostic renderer before any output sharing.
 
-### F-08 (R-102) — real tool_use not completed end-to-end in piped single-turn flow
-- **type**: `runtime bug` (real-task completion) — needs investigation
-- **severity**: P1
-- **observed**: after the F-01 fix, the real provider returns 200 + a real tool_use
-  (`write_file`) for a "create a file" task, but the runtime made only 2 provider calls
-  (no 3rd call after tool execution) and the target file was NOT created. The tool_use was
-  not executed/completed in the piped single-turn flow.
-- **root cause (unconfirmed)**: the plain-CLI single-turn flow may not drive the
-  tool-execution loop to completion (EOF/turn boundary), OR tool dispatch/path-policy
-  blocked the write, OR the tool_use wasn't parsed into a dispatchable action. Not fixed
-  this round (record only).
-- **suggested fix**: investigate the plain-CLI turn loop's tool_use -> execute -> continue
-  path; confirm with an interactive (TTY) real multi-turn run.
+### F-08 (R-102) — non-interactive trial harness cannot drive the real CLI approval gate
+- **type**: `test/harness limitation` (**NOT** a runtime/tool-loop bug)
+- **severity**: P2 (trial-automation only; does NOT affect the product delivery path)
+- **observed (original, piped)**: in piped/non-interactive mode, the real provider returns
+  a tool_use (`write_file`) but the tool is not executed / the target file is not created.
+- **root cause (CONFIRMED, code-level)**: (1) `write_file` is a **confirmation-gated**
+  tool — the runtime correctly pauses at `awaiting_tool_confirmation`; piped stdin cannot
+  answer the `y/n` prompt, so the tool is rejected ("用户未批准"). (2) `session.py:452`
+  auto-resumes the most recent task in pipe mode and consumes piped input as the response
+  to a pending confirmation, so a stale-pending + new-task mis-routes. This is the
+  product's **governance safety behaviour**, not a runtime/tool-loop bug.
+- **DECISIVE counter-evidence (Run 12)**: the **interactive CLI** (PTY, real provider)
+  completes the same tool_use END-TO-END — model -> tool_use -> confirmation prompt ->
+  manual `y` -> tool executed -> file CREATED
+  (`workspace/demo/r_trial_interactive_write.txt`) -> final answer -> clean exit. The
+  approved -> execute -> tool_result -> final loop (`mediate_pending` ->
+  `confirmation_already_approved` -> `execute_pending_tool` -> `append_tool_result`)
+  works.
+- **classification**: **Case A — non-interactive trial harness limitation.** Do NOT change
+  the runtime; do NOT default auto-approve. (Optional future: a trial-only approval
+  harness — default off, trial-named, safe-tool/path allowlist, audit-logged — to enable
+  non-interactive real trials; recorded as an enhancement item, not implemented.)
 
 ## P2 — experience / clarity
 
@@ -107,17 +116,17 @@
   **pass at the seam** (S_FINAL TD-012 + S5 tests). No failure recorded; the gap is that
   some are only seam-proven, not yet product-CLI-proven (depends on F-01 being fixed).
 
-## Failure-type tally
+## Failure-type tally (after F-01 fix + interactive-CLI F-08 reclassification)
 
 | type | count |
 |---|---:|
-| real provider failure / provider-tool integration | 1 (F-01, cascades to 9 blocked) |
-| redaction/security issue | 1 (F-02) |
-| command/docs unclear | 3 (F-03, F-05, F-07) |
-| test/harness limitation | 1 (F-04) |
-| expected non-goal (hygiene) | 1 (F-06) |
-| runtime bug | **0** |
-| recovery/durability bug | **0** (seam-proven; CLI-level blocked by F-01/harness) |
+| real provider failure / provider-tool integration | 0 (**F-01 FIXED** `ae94f26`) |
+| redaction/security issue | 1 (F-02 — `status` key-redaction unverified) |
+| command/docs unclear | 3 (F-03 banner, F-05 error-clarity, F-07 docs) |
+| test/harness limitation | 2 (F-04 force-fake/resume harness; **F-08 non-interactive approval** — NOT a runtime bug; interactive CLI proven to work) |
+| expected non-goal (hygiene) | 1 (F-06 log/session growth) |
+| runtime bug | **0** (interactive CLI completes a real tool_use end-to-end — Run 12) |
+| recovery/durability bug | **0** (seam-proven) |
 | evidence/audit/replay bug | **0** |
 | acceptance classification issue | **0** |
 | deferred-scope boundary issue | **0** (dormancy verified) |

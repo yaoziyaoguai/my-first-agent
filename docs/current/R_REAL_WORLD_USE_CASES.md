@@ -46,7 +46,7 @@ adapter regardless of config.
 ## Category 5 — Tool / provider behavior
 
 - **R-101** | provider | real | real provider smoke (single turn) | model replies | **FAIL http_status:400** (reproduced twice). Root cause: `anthropic_compatible` adapter → `api.deepseek.com/anthropic` with model `deepseek-v4-flash`; that model is **not valid for DeepSeek's Anthropic-compatible endpoint** (expects `deepseek-chat` / `deepseek-reasoner`) → 400 Bad Request. | **fail** | provider/tool integration issue | **P0** | run log; `config/config.yaml` non-secret fields | correct model name (e.g. `deepseek-chat`) or endpoint; verify adapter request shape
-- **R-102** | provider | real | real multi-step grounded task | agent completes multi-step | **blocked by R-101** (no successful single turn) | **blocked** | real provider failure | P0 | R-101 | —
+- **R-102** | provider | real | real multi-step grounded task (interactive CLI) | agent completes multi-step | **PASS (interactive CLI, Run 12)**: model → tool_use `write_file` → confirmation → approve → execute → file created (`workspace/demo/r_trial_interactive_write.txt`) → final answer. Piped/non-interactive = trial limitation (F-08, NOT a runtime bug). | **pass (interactive)** | — | — | workspace/demo/r_trial_interactive_write.txt | —
 - **R-103** | provider | fake/local | fake/local tool execution | tool runs, artifact written | `main.py demo` wrote `note.md` via `demo.write_demo_note` | **pass** | — | — | workspace/demo | —
 - **R-104** | provider | real | tool result preview redaction | secret redacted in preview | seam-proven by TD-012 wiring (mediator + record_evidence) | **pass (seam)** | — | — | `tests/test_final_legacy_redaction.py` | —
 - **R-105** | provider | real | tool failure / malformed output handling | graceful degrade | the 400 response path degraded gracefully (R-034); timeout/retry paths not triggered (400 is fast) | **partial pass** | — | P3 | run log | trial timeout/retry once provider works
@@ -70,13 +70,13 @@ adapter regardless of config.
 
 - **Cases designed: 33** across all 7 categories.
 - **Run / observable: 16** (added the post-fix real validation).
-- **pass: 11** (R-001/002/003/005/031/034/052 + **R-006/R-101 now pass** after `ae94f26`;
-  plus seam-proven R-021/022/023/032/033/040/041/042/043).
-- **fail: 2** (R-106 banner mismatch; R-051 error-clarity). (R-006/R-101 **fixed** — were
-  the P0.)
-- **partial: 1** (R-102 real multi-step — provider now 200 + returns tool_use, but
-  end-to-end completion gap F-08).
-- **blocked: 8** (R-004 status-verify; R-010..014 coding-real — now unblocked at the
-  provider layer but not re-run end-to-end; R-015 unified-fake; R-020 CLI-resume).
+- **pass: 12** (R-001/002/003/005/031/034/052 + R-006/R-101 (after `ae94f26`) + **R-102
+  interactive CLI** (Run 12); plus seam-proven R-021/022/023/032/033/040/041/042/043).
+- **fail: 2** (R-106 banner mismatch; R-051 error-clarity).
+- **partial: 0** (R-102 moved to pass — interactive CLI completes end-to-end).
+- **blocked: 8** (R-004 status-verify; R-010..014 coding-real — unblocked at the provider
+  layer, not re-run end-to-end; R-015 unified-fake; R-020 CLI-resume).
+- **F-08 reclassified**: non-interactive trial harness limitation (NOT a runtime bug);
+  interactive CLI works. P0 FIXED.
 - **P0 (provider tool-name 400) FIXED** (`ae94f26`); new top issue = F-08 real-task
   completion.

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from agent.cli_commands import (
@@ -40,8 +41,16 @@ def execute_subagent_delegation(
     *,
     delegation_reason: str = "CLI meta-command delegation",
     on_runtime_event: Callable | None = None,
+    state: Any = None,
 ) -> str:
-    """执行一次子代理委托并返回渲染后的用户可见结果。"""
+    """执行一次子代理委托并返回渲染后的用户可见结果。
+
+    state（S3-G05 / 审计 H1 修复）：传入 runtime AgentState 时，把成功委派的安全投影
+    经 `record_delegation_run` 写入 `state.task.delegation_log`，使 SubAgent
+    second-opinion 结果进入 checkpoint/evidence report（`extensions.delegations`）。
+    不传则行为同旧版（只渲染、不记录）——既有 CLI/测试调用向后兼容。
+    parent-mediated 不变：投影只记录已发生的 parent adjudication，不赋予 child 旁路。
+    """
     try:
         registry = SubAgentRegistry(roots=[Path("agent/subagent_system/descriptors")])
     except Exception:
@@ -81,6 +90,14 @@ def execute_subagent_delegation(
             fallback_prefix="\n",
         )
         return render_delegate_error(subagent_name, str(exc))
+
+    # S3-G05 / 审计 H1：成功委派后把安全投影写入 task-state delegation_log，
+    # 使 SubAgent second-opinion 进入 checkpoint/evidence report。record_delegation_run
+    # 防御性读取 run.result.audit / run.adjudication，只记录已发生的 parent adjudication。
+    if state is not None:
+        from agent.task_delegation_evidence import record_delegation_run
+
+        record_delegation_run(state, run)
 
     result = run.result
     status = getattr(result, "status", "unknown") if result else "unknown"

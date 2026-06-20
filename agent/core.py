@@ -2198,6 +2198,7 @@ def _dispatch_or_fallback_delegation(
                     subagent_name, task,
                     delegation_reason=delegation_reason,
                     on_runtime_event=on_runtime_event,
+                    state=state,
                 )
             return _render_v0_delegate_result(subagent_name, v0_result)
 
@@ -2253,6 +2254,7 @@ def _dispatch_or_fallback_delegation(
         subagent_name, task,
         delegation_reason=delegation_reason,
         on_runtime_event=on_runtime_event,
+        state=state,
     )
 
 

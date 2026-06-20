@@ -378,8 +378,43 @@
     the freeze resolution — ledger consistency is ledger-internal + replay-ref
     alignment, not verifier cross-kind detection.
 - Commit hash:
-  - Pending (`feat(s5): S5-G06 ledger-aware audit/replay alignment`).
+  - `a2fce9e` (`feat(s5): S5-G06 ledger-aware audit/replay alignment`).
 - Next step:
   - S5-G07 — same-spine durability guard: structural + behavioral tests proving
     ledger writes go through existing task/checkpoint/evidence seams and introduce
     no separate execution loop.
+
+## 2026-06-20 - S5-G07 same-spine durability guard
+
+- Task name: S5-G07 — same-spine durability guard (invariant/guard test suite).
+- Files changed:
+  - `tests/test_s5_same_spine_guard.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added a guard suite (same nature as `test_architecture_boundaries.py`):
+    (1) AST scan asserting the four ledger modules import no execution-spine
+    module and nothing under `agent.provider` / `agent.runtime_integration`;
+    (2) `TaskLedger` public-method allowlist `{append, read_all}` (no state
+    restoration / execution method — checkpoint stays sole restoration source);
+    (3) behavioral assertion that `record_checkpoint_boundary` does not advance
+    the task step.
+  - No production code changed — the ledger already honors the invariant; this
+    gap locks it as a regression guard.
+- Verification commands and results:
+  - Mutation proof: temporarily injecting `import agent.checkpoint` into
+    `agent.task_ledger_cooperation.py` made
+    `test_ledger_modules_do_not_import_execution_spine` FAIL with the exact
+    diagnostic; reverting restored `3 passed`.
+  - `.venv/bin/python -m pytest tests/test_s5_same_spine_guard.py -q` -> `3 passed`.
+  - `.venv/bin/ruff check tests/test_s5_same_spine_guard.py` -> clean.
+  - `git diff --check` -> clean; working tree has only the new test untracked.
+- Stage gap items updated:
+  - `S5-G07` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G07 same-spine durability guard`).
+- Next step:
+  - S5-G08 — durability regression acceptance signal: add a `DURABILITY_REGRESSION`
+    classification to `acceptance_gate.py` without weakening existing classes.

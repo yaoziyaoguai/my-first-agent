@@ -22,7 +22,7 @@
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | done |
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | done |
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | done |
-| S5-G07 | P1 | L1 | Same-spine durability guard | proposed/open |
+| S5-G07 | P1 | L1 | Same-spine durability guard | done |
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | proposed/open |
 | S5-G09 | P2 | L1-L5 | Non-regression and release governance | proposed/open |
 | S5-G10 | P2 | L5 | Extension-boundary recovery coverage | proposed/open |
@@ -279,7 +279,20 @@
 - Non-goal boundary: Do not refactor the full runtime spine to make ledger
   integration "cleaner".
 - Suggested order: 7
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `tests/test_s5_same_spine_guard.py` (new): invariant/guard suite (same nature
+    as `test_architecture_boundaries.py`). (1) AST scan: the four ledger modules
+    import no execution-spine module (`tool_executor` / `tool_registry` / `core` /
+    `loop` / `action_scheduler` / `checkpoint` / `evidence_recorder`) and nothing
+    under `agent.provider` / `agent.runtime_integration`. Mutation-verified:
+    injecting `import agent.checkpoint` made the test FAIL with the exact
+    diagnostic; reverting made it PASS. (2) `TaskLedger` public-method allowlist
+    is exactly `{append, read_all}` — no `restore_state` / `execute` / `step`
+    method, so checkpoint stays the sole state-restoration source (AC-4/AC-6).
+    (3) Behavioral: `record_checkpoint_boundary` does not advance the task step —
+    stepping is done only by the governed runtime (`advance_governed_task_if_ready`).
+  - 3 passed. Focused ruff on the file: clean.
 - Risk if ignored: S5 could regress the project's core same-spine invariant.
 
 ## S5-G08 - Durability regression acceptance signal

@@ -6,12 +6,19 @@
 
 ## 1. How real-world-usable is FirstAgent right now?
 
-**Structurally complete and fake/local-proven; real-world-usable = NO, blocked at the
-first real turn.** The governed kernel (L1-L5), governance, audit/replay, redaction,
-and durable recovery all hold and are seam-tested green. But the **real provider path
-returns HTTP 400 on every call**, so the unified runtime (`core.chat()` via `main.py`)
-cannot complete even a single real model turn. The `main.py demo` path works because it
-is a **fake** local adapter (despite advertising "real API").
+**Structurally complete, fake/local-proven, and — after the R-series F-01 fix — the real
+provider path now accepts tool calls.** The governed kernel (L1-L5), governance,
+audit/replay, redaction, and durable recovery all hold and are seam-tested green. The
+real provider (configured `anthropic_compatible` → DeepSeek) previously returned HTTP 400
+on every tool call; that **P0 is FIXED** (`ae94f26`) — a protocol-generic tool-name
+normalize at the adapter seam. **Corrected root cause** (see `R_TRIAL_FAILURES.md` F-01):
+it was **provider-visible tool names with illegal dots** (`demo.echo_task_summary`),
+NOT user config/model — the bug is protocol-boundary/tool-name handling. FakeProvider
+never validated tool names, which hid it. Real chat + real tool calls now return 200 and
+the model returns a real tool_use. **Remaining gap**: real-task *completion* — the runtime
+did not execute the returned tool_use end-to-end in the piped single-turn flow (F-08). So:
+real chat works; real tool-augmented tasks are unblocked at the provider layer but not yet
+proven end-to-end.
 
 ## 2. fake/local vs real provider
 
@@ -19,11 +26,12 @@ is a **fake** local adapter (despite advertising "real API").
 |---|---|
 | **fake/local demo** (`main.py demo`) | **works** — deterministic, writes real artifacts (`workspace/demo/*/note.md`), 2 events |
 | **fake/local unified** (`core.chat()` loop) | not triallable via CLI (config forces real); proven at the seam by S-series integration suites |
-| **real unified** (`main.py`, configured `anthropic_compatible`→DeepSeek) | **broken** — HTTP 400 every call |
-| **real multi-step / coding** | **blocked** — depends on a working real single turn |
+| **real unified** (`main.py`, configured `anthropic_compatible`→DeepSeek) | **works** (after F-01 fix) — no-tools 200; tools call 200 (was 400); model returns real tool_use (`write_file`) |
+| **real multi-step / coding completion** | **partially** — provider accepts tools + returns tool_use, but the runtime did not complete tool execution end-to-end in the piped flow (F-08) |
 
-The split is decisive: everything fake/local is healthy; everything real is blocked by
-one config/integration fault.
+The provider tool-name bug (F-01) is FIXED. The remaining real gap is task *completion*
+(F-08), not provider connectivity. Note: FakeProvider never validated tool names, which
+hid the F-01 bug — see repair item (registry tool-name validation) in §9.
 
 ## 3. What runs reliably (real)
 
@@ -56,14 +64,18 @@ one config/integration fault.
 
 ## 6. Runtime bugs
 
-- **None found.** The runtime behaved correctly throughout: it called the provider,
-  received a 400, degraded gracefully, recorded evidence, and ended cleanly. No kernel
-  crash, no spine split, no governance bypass observed.
+- **F-08 (new):** after the F-01 fix, the real provider returns a tool_use but the runtime
+  did not execute it end-to-end in the piped single-turn flow (no 3rd provider call;
+  target file not created). A real-task *completion* gap — needs investigation
+  (tool-execution loop / turn boundary / path-policy). Not fixed this round.
+- **Otherwise none at the kernel layer** — graceful degradation on the (now-fixed) 400,
+  evidence recording, and clean session end all held. No spine split or governance bypass.
 
 ## 7. Doc / command problems
 
 - Banner/onboarding/demo provider-mode inconsistency (F-03).
-- 400 error message not actionable — no hint to check model/endpoint config (F-05).
+- Provider-error messages not actionable — on the (now-fixed) 400 there was no hint it
+  was a tool-name/protocol issue (F-05).
 - `status` undocumented; no real-provider setup/troubleshoot in README/AGENTS (F-07).
 
 ## 8. Deferred / non-goal (do NOT "fix" by activating)
@@ -75,32 +87,43 @@ one config/integration fault.
 
 ## 9. What to fix first (next batch, priority order)
 
-1. **(P0) Fix the real provider config** — correct the model (`deepseek-v4-flash` → a
-   valid DeepSeek Anthropic-compat model, e.g. `deepseek-chat`) or the endpoint, then
-   verify the `anthropic_compatible` adapter request shape. This **unblocks 9 of 10
-   blocked cases** by itself. (Config + adapter verification, **not** a kernel change.)
-2. **(P1) Verify `main.py status` redacts the api_key** (F-02) — mask if needed.
-3. **(P2) Make banner/onboarding/demo reflect the actual provider path** (F-03); make
-   the 400 (4xx) error actionable (F-05).
-4. **(P2) Add a force-fake CLI flag + an interruptible resume harness** (F-04) so
-   safe-local + recovery trials can run at the product level.
-5. **(P3) Docs: document `status`, add real-provider troubleshooting** (F-07); plan
+1. **(P0, DONE)** ~~Fix real provider tool calls~~ — FIXED (`ae94f26`): protocol-generic
+   tool-name normalize at the `anthropic_compatible` seam. Real provider tools call now
+   200. (This was NEVER a config/model issue.)
+2. **(P1) Real-task completion (F-08)** — investigate why the runtime did not execute the
+   returned tool_use end-to-end in the piped single-turn flow; prove a real grounded task
+   completes (file written, multi-step). Now the top real-world gap.
+3. **(P1) Verify `main.py status` redacts the api_key** (F-02) — mask if needed.
+4. **(P2) Make banner/onboarding/demo reflect the actual provider path** (F-03); make
+   provider-error messages actionable (F-05).
+5. **(P2) Add a force-fake CLI flag + an interruptible resume harness** (F-04) so
+   safe-local + recovery trials run at the product level.
+6. **(P2, repair item) Registry tool-name validation** — add provider-visible tool-name
+   validation so fake/local catches illegal names (the dotted demo tools hid F-01). Hard
+   enforcement needs renaming the namespaced demo tools first; deferred this round.
+7. **(P3) Docs: document `status`, add real-provider troubleshooting** (F-07); plan
    log/session rotation (F-06).
+8. **(design note) Streaming** — `AnthropicCompatibleProvider.supports_streaming = False`;
+   `stream()` is a `create()`-delegating shim (sanitize+restore inherited via `create`;
+   stream events carry no tool names, so restore is not independently asserted there). Not
+   a bug.
 
 ## 10. Enter R-series repair batch — or formal goal/gap?
 
-**Yes — enter a small R-series *repair batch*, spike-first, not a full goal/gap yet.**
+**The P0 is fixed; continue a focused R repair batch centered on real-task completion
+(F-08), not a full goal/gap yet.**
 
-Rationale: the dominant finding (P0 provider 400) is a **config/integration** fault, not
-a kernel capability gap. The right next move is a **time-boxed spike**: fix the provider
-config + adapter, then re-run the real trials (R-006/R-101/R-102 and the blocked coding
-cases). Only after the real single-turn + multi-step trials actually run will the *real*
-capability boundary be visible — at that point a frozen **R goal/gap** is worth writing.
-Writing a full R goal/gap now would be premature: the real failure surface is still
-almost entirely hidden behind one config fault.
+Rationale: the provider connectivity bug (F-01) is FIXED and the real provider now
+accepts tool calls + returns tool_use. The next blocker is **real-task completion**
+(F-08) — whether the runtime executes the tool_use and finishes a grounded task
+end-to-end. That must be proven before the real capability boundary is knowable. So:
+continue the repair batch (F-08 investigation + the P1–P3 items), re-run the real trials,
+and only then decide whether a frozen **R goal/gap** is warranted. A formal R goal/gap is
+still premature until real multi-step completion is proven.
 
 **Proposed sequencing:**
-1. R-repair spike: provider config + adapter fix → re-trial real single + multi-step.
+1. R repair: investigate + fix F-08 (real tool_use completion) → prove a real grounded
+   task completes end-to-end.
 2. If real tasks then run: write `R_BASELINE_STATUS.md` → `R_GOAL.md` → `R_GAP.md`
    grounded in *real* observed behaviour.
 3. If real tasks still fail after the config fix: the R goal becomes "make the real

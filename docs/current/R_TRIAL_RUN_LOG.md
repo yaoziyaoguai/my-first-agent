@@ -69,3 +69,24 @@
 - CLI operator surface (help/health/logs): works; minor inconsistency + hygiene warns.
 - Evidence/audit: working even on the failed real turn.
 - Graceful degradation: runtime survives provider failure.
+
+## Run 11 — provider tool-name fix + real validation (2026-06-21, after `ae94f26`)
+- **Fix**: protocol-generic tool-name normalize at the `anthropic_compatible` seam
+  (`agent/provider/anthropic_http.py`); dotted internal names → provider-safe on send,
+  restored on the tool_use response; collision-safe. Tests:
+  `tests/test_r_provider_tool_names.py` (7 pass).
+- **Real provider no-tools call**: status **200** (basic path always worked).
+- **Real provider tools call (13 tools)**: status **200** (was 400). Sent tool names all
+  match `^[a-zA-Z0-9_-]+$` (no dots). Model returned a real **tool_use `write_file`**.
+- **Real grounded task completion**: PARTIAL — the model called `write_file` but the
+  runtime made only 2 provider calls (no tool-execution follow-up) and the target file was
+  NOT created → new finding **F-08** (real-task completion gap), recorded, not fixed.
+- **Corrected root cause**: the 400 was provider-visible dotted tool names (protocol
+  boundary), NOT user config/model. FakeProvider hid it.
+- Result: **P0 FIXED**; new top issue = F-08.
+
+## Aggregate (after fix rerun)
+- Real provider path: **works** for chat + tool calls (200 + tool_use); P0 fixed.
+- Real-task end-to-end completion: **not yet proven** (F-08).
+- Fake/local + CLI operator surface: unchanged (healthy).
+- Evidence/audit, graceful degradation: hold.

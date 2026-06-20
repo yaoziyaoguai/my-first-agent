@@ -6,19 +6,31 @@
 
 ## P0 — blocks all real-world use
 
-### F-01 (R-006 / R-101) — real provider HTTP 400 on every unified-runtime call
-- **type**: `real provider failure` / `provider/tool integration issue`
-- **severity**: P0
-- **observed**: `printf '<turn>\n' | python main.py` → `[Provider 错误] 模型调用失败：http_status:400`, every call (reproduced twice). No real turn ever completes.
-- **root cause**: provider config mismatch — `anthropic_compatible` adapter →
-  `https://api.deepseek.com/anthropic` with model `deepseek-v4-flash`, which is **not a
-  valid model for that endpoint** (DeepSeek's Anthropic-compat endpoint expects
-  `deepseek-chat` / `deepseek-reasoner`). Bad Request, not auth. (Not a kernel bug.)
-- **suggested fix (repair batch)**: correct the model (e.g. `deepseek-chat`) or endpoint
-  in `config/config.yaml`; then verify the `anthropic_compatible` adapter request shape
-  against DeepSeek's `/anthropic` schema. Re-run R-006/R-101/R-102.
-- **note**: this single failure **cascades into 9 of 10 blocked cases** (all real coding
-  tasks R-010..014, real multi-step R-102, real tool/timeout trials).
+### F-01 (R-006 / R-101) — real provider tools call HTTP 400 — FIXED
+- **type**: `provider/tool integration issue` (protocol-boundary tool-name handling)
+- **severity**: P0 (was) → **FIXED** (commit `ae94f26`)
+- **observed (original)**: unified-runtime tools call → `http_status:400` every call
+  (no-tools call was already 200).
+- **CORRECTED root cause** (an earlier draft of this register wrongly blamed config/model
+  — that was wrong; **user config is correct**): provider-visible tool names violated the
+  anthropic-compatible tool/function-name constraint `^[a-zA-Z0-9_-]+$`. Internal
+  namespaced tools use dots (`demo.echo_task_summary`, `demo.write_demo_note`); the
+  `anthropic_compatible` adapter sent them verbatim. DeepSeek's `/anthropic` endpoint
+  (Anthropic-style protocol) rejected the dotted names — a **protocol-boundary /
+  tool-name handling bug, not user config**. FakeProvider never validated tool names, so
+  the bug was hidden in fake/local. Evidence: server error `Invalid 'tools[0].function.name':
+  string does not match pattern '^[a-zA-Z0-9_-]+$'` (the `function.name` path is the
+  server's internal Anthropic→OpenAI mapping; the sent schema is top-level Anthropic-style
+  `{name, description, input_schema}` — confirmed via request capture).
+- **fix**: protocol-generic normalize at the `anthropic_compatible` seam — send-time map
+  internal name → provider-safe name (illegal chars → `_`, collision-safe stable
+  `_2`/`_3` suffixing so `demo.a_b` ≠ `demo.a.b`); response tool_use restore → internal
+  name. **No Claude/DeepSeek/model-name special-casing; no config change; no endpoint
+  rewrite.** Tests: `tests/test_r_provider_tool_names.py` (7, incl. collision + structure
+  guard + stream-shim). Verified on real provider: no-tools 200, tools call **200** (was
+  400), model returns a real tool_use (`write_file`).
+- **note**: the original "9 of 10 blocked" cascade is now UNBLOCKED at the provider layer;
+  see **F-08** for the remaining real-task *completion* gap.
 
 ## P1 — category-blocking / security-verify
 
@@ -30,6 +42,20 @@
   which the safety classifier denied — not worked around).
 - **suggested fix**: operator confirms `status` redacts the key; if not, mask it in the
   diagnostic renderer before any output sharing.
+
+### F-08 (R-102) — real tool_use not completed end-to-end in piped single-turn flow
+- **type**: `runtime bug` (real-task completion) — needs investigation
+- **severity**: P1
+- **observed**: after the F-01 fix, the real provider returns 200 + a real tool_use
+  (`write_file`) for a "create a file" task, but the runtime made only 2 provider calls
+  (no 3rd call after tool execution) and the target file was NOT created. The tool_use was
+  not executed/completed in the piped single-turn flow.
+- **root cause (unconfirmed)**: the plain-CLI single-turn flow may not drive the
+  tool-execution loop to completion (EOF/turn boundary), OR tool dispatch/path-policy
+  blocked the write, OR the tool_use wasn't parsed into a dispatchable action. Not fixed
+  this round (record only).
+- **suggested fix**: investigate the plain-CLI turn loop's tool_use -> execute -> continue
+  path; confirm with an interactive (TTY) real multi-turn run.
 
 ## P2 — experience / clarity
 

@@ -62,14 +62,21 @@ adapter regardless of config.
 ## Category 7 — Operator experience
 
 - **R-050** | operator | n/a | entry discoverability | clear commands | `--help` lists demo/health/logs/interactive; `status` undocumented in help | **partial pass** | command/docs unclear | P3 | stdout | document `status` + its key-handling
-- **R-051** | operator | real | error understandability | 400 message actionable | message is `[Provider 错误] 模型调用失败：http_status:400` — **no hint that it's a model/endpoint config problem** | **fail** | command/docs unclear | P2 | run log | surface "check provider model/endpoint config" on 4xx
+- **R-051** | operator | real | error understandability | 400 message actionable | message was `[Provider 错误] 模型调用失败：http_status:400` — **no hint it was a tool-name/protocol issue** (root cause was dotted tool names, NOT config — fixed in `ae94f26`) | **fail** | command/docs unclear | P2 | run log | surface tool-name/protocol hint on 4xx
 - **R-052** | operator | n/a | run-log auditability | events inspectable | `logs --tail` shows structured events with session_id; `logs --session <id> --include-observer` hinted | **pass** | — | — | stdout | —
 - **R-053** | operator | n/a | docs guide real use | README/AGENTS tell how to run real | docs describe entries; **no real-provider troubleshooting** for the 400 case | **partial pass** | command/docs unclear | P3 | README/AGENTS | add real-provider setup/troubleshoot section
 
-## Summary counts
+## Summary counts (after provider tool-name fix rerun, 2026-06-21)
 
 - **Cases designed: 33** across all 7 categories.
-- **Run / observable this trial: 15** (CLI entries + both provider paths + degradation + evidence).
-- **pass: 9** (R-001, R-002-warn, R-003, R-005, R-031, R-034, R-052; plus seam-proven R-021/022/023/032/033/040/041/042/043 counted as pass-seam).
-- **fail: 3** (R-006 provider 400, R-101 provider 400 root, R-106 banner mismatch; plus R-051 error-clarity).
-- **blocked: 10** (R-004 status-verify, R-010..014 coding-real, R-015 unified-fake, R-020 CLI-resume, R-102 real-multi-step) — **9 of 10 blocked trace to the single P0 provider 400**.
+- **Run / observable: 16** (added the post-fix real validation).
+- **pass: 11** (R-001/002/003/005/031/034/052 + **R-006/R-101 now pass** after `ae94f26`;
+  plus seam-proven R-021/022/023/032/033/040/041/042/043).
+- **fail: 2** (R-106 banner mismatch; R-051 error-clarity). (R-006/R-101 **fixed** — were
+  the P0.)
+- **partial: 1** (R-102 real multi-step — provider now 200 + returns tool_use, but
+  end-to-end completion gap F-08).
+- **blocked: 8** (R-004 status-verify; R-010..014 coding-real — now unblocked at the
+  provider layer but not re-run end-to-end; R-015 unified-fake; R-020 CLI-resume).
+- **P0 (provider tool-name 400) FIXED** (`ae94f26`); new top issue = F-08 real-task
+  completion.

@@ -33,7 +33,7 @@
 | FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | done |
 | FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | done |
 | FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | proposed/open |
-| FINAL-G06 | P3 | L1 | Planner/compress legacy facade (TD-002) | proposed/open (optional) |
+| FINAL-G06 | P3 | L1 | Planner/compress legacy facade (TD-002) | deferred (carry-forward) |
 | FINAL-G07 | P4 | L5/Sn | Deferred scope guardrails (TD-008/009/010) | deferred/non-goal |
 
 ## FINAL-G01 - Full-suite quality gate green (TD-007)
@@ -197,7 +197,15 @@
 - Dependencies: FINAL-G01.
 - Non-goal boundary: Do not force a provider-facade refactor; this is optional.
 - Suggested order: 6
-- Status: proposed/open (optional)
+- Status: deferred (carry-forward)
+- Evidence / rationale (2026-06-20): S_FINAL triaged TD-002 as **not safely
+  fixable within closure scope**. Consolidating the second provider-call shape
+  requires refactoring planner/compress provider-call paths (L1/L2 hot paths) for
+  a purely cosmetic benefit (same provider underneath; no runtime spine split per
+  the baseline). The FINAL-G01 ruff cleanup did not naturally touch the facade.
+  Per the frozen goal's "fix only if safe", this stays carry-forward to a future
+  stage that legitimately refactors `agent/provider/legacy_adapter.py` or
+  planner/compress. TD-002 remains live in `TECH_DEBT.md`.
 - Risk if ignored: cosmetic inconsistency remains (acceptable).
 
 ## FINAL-G07 - Deferred scope guardrails (TD-008/009/010)

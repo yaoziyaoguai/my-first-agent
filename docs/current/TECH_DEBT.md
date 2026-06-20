@@ -48,6 +48,11 @@
   next refactored.
 - Verification idea: Review `agent/provider/legacy_adapter.py` and call sites
   in `agent/core.py`.
+- **S_FINAL triage (2026-06-20):** deferred (carry-forward). Consolidating the
+  second call shape would refactor L1/L2 provider-call hot paths for a cosmetic
+  benefit only (same provider, no spine split); not safely fixable within the
+  closure/hardening scope. Stays live here for a future stage that legitimately
+  refactors the facade.
 
 ## Deferred to Sn / future (prior-stage scope boundaries)
 

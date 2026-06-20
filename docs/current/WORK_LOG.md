@@ -225,7 +225,45 @@
   - None. `TD-012` remains open per the freeze resolution (ledger never sources a
     persisted field from the legacy preview path).
 - Commit hash:
-  - Pending (`feat(s5): S5-G02 ledger safety/redaction boundary`).
+  - `beec6b5` (`feat(s5): S5-G02 ledger safety/redaction boundary`).
 - Next step:
   - S5-G03 — local durable ledger storage API (JSONL append/read, validation,
     local path injection; calls `redact_ledger_record` before persisting).
+
+## 2026-06-20 - S5-G03 local durable ledger storage API
+
+- Task name: S5-G03 — local JSONL ledger store (TDD).
+- Files changed:
+  - `agent/task_ledger.py`
+  - `agent/task_ledger_store.py` (new)
+  - `tests/test_s5_ledger_store.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added kind-tagged record serialization to `agent/task_ledger.py`
+    (`ledger_record_kind` / `ledger_record_to_dict` / `ledger_record_from_dict`
+    + `_RECORD_CLASSES_BY_KIND`).
+  - Added `agent/task_ledger_store.py` `TaskLedger`: append-only JSONL. `append`
+    validates required fields, enforces per-task_id strictly-increasing seq at
+    write time, redacts before persisting, writes one line; `read_all` is
+    crash-survivable (skips empty / half-written / malformed lines). Caller
+    injects the path; no DB / network / home-config (AC-3).
+- Verification commands and results:
+  - RED first: collection failed with `ImportError: cannot import name
+    'ledger_record_from_dict'` / `No module named 'agent.task_ledger_store'`.
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_store.py
+    tests/test_s5_ledger_redaction.py tests/test_s5_ledger_contract.py -q` ->
+    `35 passed`.
+  - `.venv/bin/ruff check agent/task_ledger.py agent/task_ledger_store.py
+    tests/test_s5_ledger_store.py` -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G03` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G03 local durable ledger storage API`).
+- Next step:
+  - S5-G04 — checkpoint-ledger cooperation: record ledger entries at
+    checkpoint/save/recovery boundaries and add consistency checks between task
+    state, checkpoint refs, and ledger records.

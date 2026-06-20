@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 
 from agent.evidence_redaction import redact_text
@@ -95,6 +95,58 @@ class EvidenceRefRecord:
 LedgerRecord = (
     TaskLifecycleRecord | StepProgressRecord | CheckpointRefRecord | EvidenceRefRecord
 )
+
+
+# S5-G03 序列化：记录↔dict（JSONL 一行一条）。kind 标签区分四种记录。
+_RECORD_CLASSES_BY_KIND: dict[LedgerRecordKind, type] = {
+    LedgerRecordKind.TASK_LIFECYCLE: TaskLifecycleRecord,
+    LedgerRecordKind.STEP_PROGRESS: StepProgressRecord,
+    LedgerRecordKind.CHECKPOINT_REF: CheckpointRefRecord,
+    LedgerRecordKind.EVIDENCE_REF: EvidenceRefRecord,
+}
+
+
+def ledger_record_kind(record: LedgerRecord) -> LedgerRecordKind:
+    """返回一条记录对应的 kind 标签（序列化/反序列化用）。"""
+
+    if isinstance(record, TaskLifecycleRecord):
+        return LedgerRecordKind.TASK_LIFECYCLE
+    if isinstance(record, StepProgressRecord):
+        return LedgerRecordKind.STEP_PROGRESS
+    if isinstance(record, CheckpointRefRecord):
+        return LedgerRecordKind.CHECKPOINT_REF
+    if isinstance(record, EvidenceRefRecord):
+        return LedgerRecordKind.EVIDENCE_REF
+    raise LedgerValidationError(f"unknown ledger record type: {type(record)!r}")
+
+
+def ledger_record_to_dict(record: LedgerRecord) -> dict:
+    """把一条记录序列化为带 ``kind`` 标签的 dict（JSONL 持久化用）。"""
+
+    payload = {field.name: getattr(record, field.name) for field in fields(record)}
+    payload["kind"] = ledger_record_kind(record).value
+    return payload
+
+
+def ledger_record_from_dict(data: dict) -> LedgerRecord:
+    """从 dict 反序列化一条记录；未知 kind / 字段缺失抛 LedgerValidationError。"""
+
+    if not isinstance(data, dict):
+        raise LedgerValidationError("ledger record payload must be a dict")
+    kind_value = data.get("kind")
+    try:
+        kind = LedgerRecordKind(kind_value)
+    except ValueError as exc:
+        raise LedgerValidationError(
+            f"unknown ledger record kind: {kind_value!r}"
+        ) from exc
+    record_cls = _RECORD_CLASSES_BY_KIND[kind]
+    allowed = {field.name for field in fields(record_cls)}
+    payload = {key: value for key, value in data.items() if key in allowed}
+    try:
+        return record_cls(**payload)
+    except TypeError as exc:
+        raise LedgerValidationError(f"malformed {kind.value} record: {exc}") from exc
 
 
 def validate_ledger_record(record: LedgerRecord) -> None:

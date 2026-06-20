@@ -18,7 +18,7 @@
 |---|---:|---|---|---|
 | S5-G01 | P0 | L2/L4 | Ledger contract and reference recovery task | done |
 | S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | done |
-| S5-G03 | P1 | L2 | Local durable ledger storage API | proposed/open |
+| S5-G03 | P1 | L2 | Local durable ledger storage API | done |
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | proposed/open |
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | proposed/open |
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | proposed/open |
@@ -121,7 +121,22 @@
 - Non-goal boundary: Do not add a production database, network storage, or user
   home config write path.
 - Suggested order: 3
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/task_ledger.py`: `ledger_record_kind` / `ledger_record_to_dict` /
+    `ledger_record_from_dict` + `_RECORD_CLASSES_BY_KIND` — kind-tagged record
+    serialization (one JSON object per JSONL line).
+  - `agent/task_ledger_store.py` (new): `TaskLedger` — append-only JSONL store.
+    `append` validates required fields, enforces per-task_id strictly-increasing
+    seq at write time, routes through `redact_ledger_record` before persistence,
+    and writes one line. `read_all` is crash-survivable (skips empty / half-written
+    / malformed lines so the durable prefix stays recoverable). Caller injects the
+    file path; no DB / network / home-config write (AC-3).
+  - `tests/test_s5_ledger_store.py`: 11 passed (RED→GREEN). Covers roundtrip +
+    type preservation, redaction-before-persist (raw bytes + read-back), monotonic
+    seq enforcement at write time, required-field validation, missing-file → empty,
+    malformed-line tolerance, and local-path-only isolation.
+  - Focused ruff on touched files: clean.
 - Risk if ignored: Recovery logic would keep relying on checkpoint-only state and
   fail to address `TD-011`.
 

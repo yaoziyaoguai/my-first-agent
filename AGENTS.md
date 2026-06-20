@@ -157,7 +157,7 @@ Next-step recommendations are allowed only if they are directly grounded in:
 
 - `docs/current/S_ROADMAP.md`
 - `docs/current/TECH_DEBT.md`
-- the active stage docs (`docs/current/S5_*`; S5 active, in preparation)
+- the active item docs (`docs/current/S_FINAL_*`; roadmap final audit in preparation)
 - the user's current explicit instruction
 
 Do not invent:

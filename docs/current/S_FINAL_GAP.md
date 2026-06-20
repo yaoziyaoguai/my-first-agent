@@ -145,8 +145,8 @@
   loop does not overclaim or silently defer.
 - Needed action: Run S1-S5 targeted gates + full pytest + ruff before closure;
   keep `TECH_DEBT.md` / `docs/current/` reflecting what was closed vs deferred;
-  produce a roadmap closure summary (final pytest/ruff/targeted state, resolved
-  debt, remaining debt, no-push/no-secrets).
+  produce a roadmap closure record mirroring the S1-S5 release summaries (final
+  pytest/ruff/targeted state, resolved debt, remaining debt, no-push/no-secrets).
 - Verification: work log/commits record commands + results; full pytest + ruff
   green; statuses carry evidence; unresolved items are either open here or carried
   to `TECH_DEBT.md`.

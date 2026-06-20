@@ -24,7 +24,7 @@
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | done |
 | S5-G07 | P1 | L1 | Same-spine durability guard | done |
 | S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | done |
-| S5-G09 | P2 | L1-L5 | Non-regression and release governance | proposed/open |
+| S5-G09 | P2 | L1-L5 | Non-regression and release governance | done |
 | S5-G10 | P2 | L5 | Extension-boundary recovery coverage | proposed/open |
 | S5-G11 | P3 | L3/L4 | Operator-facing ledger summary | proposed/open |
 | S5-G12 | P4 | L5/Sn | Deferred capability guardrails | deferred/non-goal |
@@ -355,7 +355,17 @@
 - Non-goal boundary: Do not close S5 by report-only changes if the selected
   behavior is not implemented and tested.
 - Suggested order: 9
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20, mid-loop non-regression checkpoint after G01-G08):
+  - `S5_GOAL_GAP.md` / `WORK_LOG.md` / `TECH_DEBT.md` kept current every gap
+    (status + evidence + commit hash per gap).
+  - Targeted gates: S1 `22 passed`; S2 `32 passed, 1 skipped`; S3 extension
+    boundary `124 passed`; S4 `44 passed, 1 skipped`; S5 `61 passed`.
+  - Full pytest `.venv/bin/python -m pytest -q -rx` -> `4928 passed, 16 skipped,
+    28 xfailed, 0 failed`. Baseline was `4867 passed` → `4867 + 61` new S5 tests =
+    `4928`; skips/xfails unchanged → no regression from G01-G08.
+  - This is a mid-loop governance checkpoint (not stage close-out); G10/G11 still
+    pending, and a final full pytest runs again at the S5 audit.
 - Risk if ignored: S5 could repeat historical overclaim patterns and undermine
   stage governance.
 

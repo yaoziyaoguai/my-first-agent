@@ -450,7 +450,36 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G08 durability regression acceptance signal`).
+  - `de854cc` (`feat(s5): S5-G08 durability regression acceptance signal`).
 - Next step:
   - S5-G09 — non-regression + release governance: run targeted S1-S5 gates + full
     pytest before close-out; keep gap/work-log/debt current.
+
+## 2026-06-20 - S5-G09 non-regression and release governance (mid-loop)
+
+- Task name: S5-G09 — non-regression + release governance checkpoint after G01-G08.
+- Files changed:
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Ran the staged acceptance gates and full pytest to confirm G01-G08 introduced
+    no regression; recorded evidence. Gap/work-log/debt were already kept current
+    every gap.
+- Verification commands and results:
+  - S1 targeted -> `22 passed`.
+  - S2 targeted (`tests/test_s2_*.py`) -> `32 passed, 1 skipped`.
+  - S3 extension boundary (mcp/subagent/skill/scheduler/capability) -> `124 passed`.
+  - S4 targeted (`tests/test_s4_*.py`) -> `44 passed, 1 skipped`.
+  - S5 targeted (`tests/test_s5_*.py`) -> `61 passed`.
+  - Full pytest `.venv/bin/python -m pytest -q -rx` -> `4928 passed, 16 skipped,
+    28 xfailed, 0 failed` (baseline `4867 passed` + 61 new S5 = 4928; no regression).
+- Stage gap items updated:
+  - `S5-G09` -> done (mid-loop checkpoint; final full pytest re-runs at the S5 audit).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`docs(s5): S5-G09 non-regression and release governance`).
+- Next step:
+  - S5-G10 — extension-boundary recovery coverage: prove durable recovery over one
+    existing governed extension path (MCP and/or read-only SubAgent); Scheduler
+    stays dormant.

@@ -363,3 +363,34 @@
   through only; opt-in run traceback contained no key).
 - **Next step (authorized by §3):** S4-G08 (P2) — acceptance gate evidence-fidelity-regression
   classification (reuse S3-G08 EXTENSION_REGRESSION pattern; don't weaken existing classes).
+
+## 2026-06-20 — S4-G08 acceptance gate evidence-fidelity classification — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G08 (P2): let the acceptance gate distinguish evidence-fidelity
+  regression from existing classes without weakening them (AC-7). Reuses S3-G08 pattern.
+- **Done (TDD red→green):**
+  - RED: `tests/test_s4_acceptance_gate_evidence_classification.py` — 9 tests: S4
+    replay/verifier/reference-task/redaction failures → EVIDENCE_FIDELITY_REGRESSION
+    (release-blocking); S2 runtime / S3 extension / ruff / passed classifications NOT
+    weakened; report surfaces `evidence_fidelity_regressions`. Confirmed fail
+    (`AcceptanceSignal has no attribute EVIDENCE_FIDELITY_REGRESSION`).
+  - GREEN: `agent/acceptance_gate.py` — added `EVIDENCE_FIDELITY_REGRESSION` enum value,
+    `_looks_like_s4_evidence_fidelity_check` predicate ("s4" + evidence marker:
+    replay/verifier/evidence/redaction/pending_tool/audit/reference_task), a classification
+    branch (release_blocking=True), and `S2AcceptanceReport.evidence_fidelity_regressions`.
+    Purely additive — existing S2/S3/debt branches untouched. S4 test names contain "s4"
+    not "s3"/"s2", so no cross-misclassification.
+- **Files changed:** `agent/acceptance_gate.py` (additive: enum + predicate + branch +
+  property), `tests/test_s4_acceptance_gate_evidence_classification.py` (new),
+  `docs/current/S4_GOAL_GAP.md` (G08 → satisfied; §2; §9), `docs/current/WORK_LOG.md`.
+- **Verification:** `test_s4_acceptance_gate_evidence_classification.py` 9 passed. Focused
+  ruff clean. Non-regression: S2 + S3 gate classification tests 17 passed (existing classes
+  not weakened). `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G08 → **satisfied** (AC-7 met; evidence-fidelity
+  regressions now classifiable, not conflated with debt/runtime/extension).
+- **`TECH_DEBT.md` items:** none changed.
+- **Commit:** `feat(s4): G08 acceptance gate evidence-fidelity classification (AC-7)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G09 (P2) — docs/current + history governance for S4
+  (S4 docs in current, S1/S2/S3 archive untouched, carry-forward debt not silently closed,
+  close-out checklist).

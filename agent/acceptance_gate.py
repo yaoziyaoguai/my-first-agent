@@ -17,6 +17,7 @@ class AcceptanceSignal(str, Enum):
     PASSED = "passed"
     RUNTIME_REGRESSION = "runtime_regression"
     EXTENSION_REGRESSION = "extension_regression"
+    EVIDENCE_FIDELITY_REGRESSION = "evidence_fidelity_regression"
     DOC_GOVERNANCE_DEBT = "doc_governance_debt"
     QUALITY_DEBT = "quality_debt"
     UNKNOWN_FAILURE = "unknown_failure"
@@ -70,6 +71,15 @@ class S2AcceptanceReport:
         )
 
     @property
+    def evidence_fidelity_regressions(self) -> tuple[ClassifiedAcceptanceCheck, ...]:
+        """S4-G08: evidence-fidelity（replay/redaction/verifier/audit-replay）回归，单独可见。"""
+        return tuple(
+            check
+            for check in self.checks
+            if check.signal is AcceptanceSignal.EVIDENCE_FIDELITY_REGRESSION
+        )
+
+    @property
     def debt_signals(self) -> tuple[ClassifiedAcceptanceCheck, ...]:
         return tuple(
             check
@@ -120,6 +130,14 @@ def classify_acceptance_check(
             signal=AcceptanceSignal.DOC_GOVERNANCE_DEBT,
             release_blocking=False,
             reason="all pytest failures are TD-006 doc/governance guard debt",
+        )
+
+    if _looks_like_s4_evidence_fidelity_check(name, command):
+        return ClassifiedAcceptanceCheck(
+            result=result,
+            signal=AcceptanceSignal.EVIDENCE_FIDELITY_REGRESSION,
+            release_blocking=True,
+            reason="S4 evidence-fidelity (replay/redaction/verifier/audit-replay) failed",
         )
 
     if _looks_like_s3_extension_check(name, command):
@@ -178,4 +196,28 @@ def _looks_like_s3_extension_check(name: str, command: str) -> bool:
     return any(
         marker in text
         for marker in ("mcp", "subagent", "extension", "reference_task")
+    )
+
+
+def _looks_like_s4_evidence_fidelity_check(name: str, command: str) -> bool:
+    """S4-G08：判定一个失败是否来自 S4 evidence-fidelity（replay/redaction/verifier/audit）路径。
+
+    判据：名字或命令同时含 ``s4`` 与 evidence 标记（replay / verifier / evidence /
+    redaction / pending_tool / audit）。纯新增口径，不影响既有分类——S4 测试名含 ``s4`` 不含
+    ``s3``/``s2``（不会误命中 extension/runtime；S2/S3 测试名不含 ``s4``，不会被此命中）。
+    """
+    text = f"{name} {command}".lower()
+    if "s4" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "replay",
+            "verifier",
+            "evidence",
+            "redaction",
+            "pending_tool",
+            "audit",
+            "reference_task",
+        )
     )

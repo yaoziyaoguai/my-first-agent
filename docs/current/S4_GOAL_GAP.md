@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 4 | G08-G11 |
+| open | 3 | G09-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 7 | G01-G07（contract + chain + redaction + pending-tool/TD-004 + verifier + audit/replay E2E + real key-safe smoke harness） |
+| satisfied | 8 | G01-G08（+ acceptance gate evidence-fidelity 分类） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -250,7 +250,15 @@
 - **Verification**: gate 对 evidence-fidelity 失败给对应信号；既有类不弱化。
 - **Dependencies**: 与 S4-G06 并行。
 - **Non-goal boundary**: 不重写既有类；不把 TD-007 变 blocker。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G08）。
+- **Evidence**: `agent/acceptance_gate.py` 加 `EVIDENCE_FIDELITY_REGRESSION` 枚举 +
+  `_looks_like_s4_evidence_fidelity_check`（"s4" + evidence 标记 replay/verifier/evidence/
+  redaction/pending_tool/audit/reference_task）+ 分类分支（release_blocking=True）+
+  `S2AcceptanceReport.evidence_fidelity_regressions` 属性。纯新增，不弱化既有 S2/S3/debt
+  分类。`tests/test_s4_acceptance_gate_evidence_classification.py`（9 passed：S4 replay/
+  verifier/reference_task/redaction 失败 → EVIDENCE_FIDELITY_REGRESSION；S2 runtime/S3
+  extension/ruff/passed 既有分类不弱化；report 聚合可见 + release-block）。非回归：S2/S3 gate
+  分类测试 17 passed。Commit: `feat(s4): G08 acceptance gate evidence-fidelity classification (AC-7)`。
 
 ### S4-G09 — docs/current + history governance for S4
 - **Priority**: P2（should_fix_for_s4）
@@ -330,7 +338,7 @@
 | S4-G05 | Evidence verification / consistency check | P1 | satisfied | L3 | AC-5 |
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | satisfied | L4 | AC-1/6 |
 | S4-G07 | Real provider audit key-path smoke | P1 | satisfied | L1 | AC-6 |
-| S4-G08 | Acceptance gate evidence-fidelity classification | P2 | open | L1/Cross | AC-7 |
+| S4-G08 | Acceptance gate evidence-fidelity classification | P2 | satisfied | L1/Cross | AC-7 |
 | S4-G09 | docs/current+history governance for S4 | P2 | open | Cross | AC-8 |
 | S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | open | Cross/L1 | AC-1/9 |
 | S4-G11 | Optional audit observability | P3 | open | L3 | AC-2/5 (enhance) |

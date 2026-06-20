@@ -178,6 +178,12 @@
   is required.
 - Verification idea: confirm SubAgent stays parent-mediated (delegate_l1/execute_l1 route
   tools+memory through tool_mediator; child holds no MemoryStore); no writable delegation path.
+- Note (S3 audit H1 fix, 2026-06-20): the **live** delegation path is inline-L0
+  (`subagent_inline.execute_subagent_delegation`), which now records delegation evidence into
+  `state.task.delegation_log` (checkpoint/evidence). The L1/L2 dispatcher delegation paths
+  (`delegate_l1`/`delegate_l2`) currently have **no registered handler** (frozen), so they are
+  not a live path. When S4/Sn activates L1/L2 or writable delegation, the evidence recording
+  (`record_delegation_run`) must be wired into that path too, mirroring the inline-L0 wiring.
 
 ### TD-011 - Durable task ledger deferred
 

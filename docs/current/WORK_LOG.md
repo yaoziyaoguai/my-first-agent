@@ -1004,3 +1004,74 @@
   intact; full-suite green; no secret/config pollution. No S3 closeout performed (deferred
   to user authorization per AGENTS.md Stage Closing Review).
 - **Push:** none.
+
+## 2026-06-20 — S3 independent-audit fixes (H1 + M1 + Low) — pre-close-out, user-authorized
+
+- **Task:** Apply the fixes a second independent S3 audit required before close-out:
+  H1 (SubAgent delegation evidence seam had no runtime producer), M1 (AGENTS.md stage status
+  stale), and Low cleanup items. **No S3 close-out / archival performed** (per instruction).
+- **H1 — wire SubAgent delegation evidence into the runtime path (chosen: wiring, NOT the
+  fallback doc-downgrade):**
+  - Root cause (audit): `record_delegation_run` was only ever called by tests; the live
+    runtime delegation `agent/subagent_inline.py:execute_subagent_delegation` did not receive
+    `state`, so real SubAgent second-opinions never reached `delegation_log` / checkpoint /
+    evidence report. The prior G05/G06 evidence claim "state 穿透由 G06 在真实循环完成" was
+    inaccurate (G06 calls the seam directly; core.py was never wired).
+  - Fix: `execute_subagent_delegation` gains an optional `state` param; after a successful
+    `delegate_once` it calls `record_delegation_run(state, run)` (defensive, JSON-safe
+    projection; parent-mediated unchanged — only records the parent adjudication that already
+    happened). `agent/core.py` `_dispatch_or_fallback_delegation` passes `state=state` (the
+    runtime singleton `state` already used by that function's tool mediator) at both inline-L0
+    call sites. Default `state=None` keeps every existing CLI/test call backward-compatible.
+  - Live-path note: L1/L2 dispatcher delegation has no registered handler (frozen); the live
+    route falls back to inline-L0, which is now wired. Future L1/L2 activation must wire the
+    same recording (logged under TECH_DEBT TD-010).
+- **M1 — refresh AGENTS.md stage status:** replaced stale "No stage is currently active / S3
+  has not started / next step is an S3 baseline audit / none active now" with the real state:
+  **S3 active, implementation-complete through G01-G13, pending close-out**; "Current
+  Documents" now lists the S3 working set under `docs/current/` plus the close-out/archival
+  rule. Not written as closed-out.
+- **Low items:**
+  - L1 (`_tmp_s3_*` tracked under `docs/current/`): NOT deleted now; recorded as a close-out
+    action — archive to `docs/history/S3_*/_review_artifacts/` at Stage Closing Review
+    (mirrors S2). See S3 close-out checklist below + AGENTS.md Current Documents note.
+  - L2 (MCP default-off only proven at decision layer): added end-to-end gate test
+    `tests/test_s3_mcp_init_bridge_gate.py` (default-off → `run_mcp_bridge` not called;
+    opt-in=1 → called). Resolved (no debt needed).
+  - L3 (S_ROADMAP cosmetic drift): re-checked — `S_ROADMAP.md:46` already reads "Stage
+    Development Governance"; the baseline's stale-name note was itself outdated. No change.
+- **Files changed:** `agent/subagent_inline.py`, `agent/core.py`,
+  `tests/test_s3_subagent_runtime_delegation_evidence.py` (new),
+  `tests/test_s3_mcp_init_bridge_gate.py` (new), `AGENTS.md`,
+  `docs/current/S3_GOAL_GAP.md` (G05 evidence corrected), `docs/current/TECH_DEBT.md`
+  (TD-010 note), `docs/current/WORK_LOG.md` (this entry).
+- **Verification:**
+  - RED→GREEN (TDD): new runtime-delegation test failed first with
+    `TypeError: ... unexpected keyword 'state'` (feature missing) → GREEN after wiring.
+  - `tests/test_s3_subagent_runtime_delegation_evidence.py` → **3 passed**;
+    `tests/test_s3_mcp_init_bridge_gate.py` → **2 passed**.
+  - SubAgent boundary / inline / governed non-regression → **112 passed**;
+    architecture-boundary + legacy-inventory + subagent refs → **95 passed**.
+  - S3 targeted acceptance (8 files) → **32 passed, 1 skipped**; S2 must-not-regress →
+    **7 passed, 1 skipped**.
+  - Focused ruff on touched files (`subagent_inline.py` / `core.py` / both new tests) →
+    **All checks passed**.
+  - **Full pytest** → **4823 passed, 15 skipped, 28 xfailed, 0 failed, exit 0** (was 4818
+    passed pre-fix; +5 = the 5 new tests; 28 xfailed unchanged = no hidden regression).
+  - `git diff --check` clean; `git ls-files config/config.yaml .env` empty (gitignored,
+    untouched).
+- **`S3_GOAL_GAP.md` items updated:** G05 evidence corrected (runtime wiring now real; prior
+  "在真实循环" overclaim retracted + fixed). No gap status changed (all remain satisfied).
+- **`TECH_DEBT.md` items updated:** TD-010 gains a note that inline-L0 delegation now records
+  evidence and L1/L2 activation must do the same. No new debt opened (H1/M1/L2 resolved).
+- **S3 close-out checklist (for the eventual Stage Closing Review — NOT executed now):**
+  1. Archive `docs/current/_tmp_s3_baseline_audit/` `_tmp_s3_goal_draft/` `_tmp_s3_goal_gap/`
+     to `docs/history/S3_*/_review_artifacts/` (L1).
+  2. Move S3 stage docs to `docs/history/S3_*/`; reset `docs/current/` to roadmap + tech-debt.
+  3. Repoint AGENTS.md "Current Documents" to the post-S3 working set.
+  4. Confirm TD-008..011 (S4/Sn deferred) persist in `TECH_DEBT.md` after archival.
+- **Commits:** see `git log` (3 focused commits: fix / AGENTS.md / docs+test cleanup).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged; `config/config.yaml`
+  and `.env` untouched and gitignored.
+- **Next step:** await user authorization for the S3 Stage Closing Review (close-out). No
+  further code changes authorized.

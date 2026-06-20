@@ -237,9 +237,22 @@
   经共享 tool 路径进 tool_execution_log + SubAgent 委派进 delegation_log，checkpoint→resume
   双双保真 + evidence report 呈现 extension 计数 + 默认空向后兼容）。代码事实复核（graphify +
   Explore）：MCP 结果已通过共享 execute_single_tool 路径进 tool_execution_log 并跨 resume 保真
-  （零改动）；SubAgent audit 原为瞬态，本 gap 补 task-state seam。runtime 消费点
-  （execute_subagent_delegation 不接收 state）的 state 穿透由 G06 E2E 在真实循环调用本 seam
-  完成（不在本 gap 改 core.py）。Commit 见 WORK_LOG / `git log`（S3-G05）。
+  （零改动）；SubAgent audit 原为瞬态，本 gap 补 task-state seam。Commit 见 WORK_LOG /
+  `git log`（S3-G05）。
+- **Runtime wiring 更正（独立审计 H1 修复，2026-06-20）**：S3-G05/G06 原 evidence 曾表述
+  「runtime state 穿透由 G06 E2E 在真实循环调用本 seam 完成」——这**不准确**：独立审计核验
+  `record_delegation_run` 当时仅被测试调用，真实 runtime 委派 `agent/subagent_inline.py:
+  execute_subagent_delegation` 不接收 state、不写 delegation_log（G06 也未驱动 core.py 真实
+  循环）。**已修复**：`execute_subagent_delegation` 新增可选 `state` 参数，成功委派后调用
+  `record_delegation_run`；`agent/core.py` 两个 inline-L0 委派 call site 传入运行时全局
+  `state`（与同函数既用的单例 `state` 一致），使真实运行时委派（非仅测试）把安全投影写入
+  `delegation_log` → checkpoint → evidence report。新测试
+  `tests/test_s3_subagent_runtime_delegation_evidence.py` 3 passed（runtime path 记录 +
+  evidence `extensions.delegations:1` + checkpoint→resume 保真 + 不传 state 向后兼容）。
+  注：L1/L2 dispatcher 委派路径当前无注册 handler（frozen，见
+  `tests/runtime_integration/test_subagent_inline_local_live.py`），live 路径全部回退
+  inline-L0（已接入）；若 S4/Sn 激活可写/L1 委派，需在该路径同样接入记录（见 TECH_DEBT
+  TD-010）。
 - **Risk if ignored**: AC-1/AC-4 无法达成；extension 任务不可恢复/不可审计。
 
 ### S3-G06 — Extension-assisted repo governance E2E reference task (fake/local)

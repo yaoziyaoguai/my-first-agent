@@ -18,6 +18,7 @@ class AcceptanceSignal(str, Enum):
     RUNTIME_REGRESSION = "runtime_regression"
     EXTENSION_REGRESSION = "extension_regression"
     EVIDENCE_FIDELITY_REGRESSION = "evidence_fidelity_regression"
+    DURABILITY_REGRESSION = "durability_regression"
     DOC_GOVERNANCE_DEBT = "doc_governance_debt"
     QUALITY_DEBT = "quality_debt"
     UNKNOWN_FAILURE = "unknown_failure"
@@ -80,6 +81,15 @@ class S2AcceptanceReport:
         )
 
     @property
+    def durability_regressions(self) -> tuple[ClassifiedAcceptanceCheck, ...]:
+        """S5-G08: durability（ledger/recovery/checkpoint-ledger）回归，单独可见。"""
+        return tuple(
+            check
+            for check in self.checks
+            if check.signal is AcceptanceSignal.DURABILITY_REGRESSION
+        )
+
+    @property
     def debt_signals(self) -> tuple[ClassifiedAcceptanceCheck, ...]:
         return tuple(
             check
@@ -130,6 +140,14 @@ def classify_acceptance_check(
             signal=AcceptanceSignal.DOC_GOVERNANCE_DEBT,
             release_blocking=False,
             reason="all pytest failures are TD-006 doc/governance guard debt",
+        )
+
+    if _looks_like_s5_durability_check(name, command):
+        return ClassifiedAcceptanceCheck(
+            result=result,
+            signal=AcceptanceSignal.DURABILITY_REGRESSION,
+            release_blocking=True,
+            reason="S5 durability (ledger/recovery/checkpoint-ledger) failed",
         )
 
     if _looks_like_s4_evidence_fidelity_check(name, command):
@@ -196,6 +214,23 @@ def _looks_like_s3_extension_check(name: str, command: str) -> bool:
     return any(
         marker in text
         for marker in ("mcp", "subagent", "extension", "reference_task")
+    )
+
+
+def _looks_like_s5_durability_check(name: str, command: str) -> bool:
+    """S5-G08：判定一个失败是否来自 S5 durability（ledger/recovery/checkpoint-ledger）路径。
+
+    判据：名字或命令同时含 ``s5`` 与 durability 标记（ledger / recovery / durability /
+    cooperation / checkpoint）。纯新增口径——S5 测试名含 ``s5`` 不含 ``s2``/``s3``/``s4``，
+    不会误命中既有分类。置于 s2 runtime 判定之前，避免 s2 的裸 ``runtime`` 关键词误捕
+    含 ``runtime`` 的 S5 durability 测试。
+    """
+    text = f"{name} {command}".lower()
+    if "s5" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in ("ledger", "recovery", "durability", "cooperation", "checkpoint")
     )
 
 

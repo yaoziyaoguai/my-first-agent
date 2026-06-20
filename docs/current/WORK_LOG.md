@@ -414,7 +414,43 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G07 same-spine durability guard`).
+  - `450b689` (`feat(s5): S5-G07 same-spine durability guard`).
 - Next step:
   - S5-G08 — durability regression acceptance signal: add a `DURABILITY_REGRESSION`
     classification to `acceptance_gate.py` without weakening existing classes.
+
+## 2026-06-20 - S5-G08 durability regression acceptance signal
+
+- Task name: S5-G08 — durability acceptance classification (TDD).
+- Files changed:
+  - `agent/acceptance_gate.py`
+  - `tests/test_s5_acceptance_gate_durability_classification.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added `AcceptanceSignal.DURABILITY_REGRESSION` and `_looks_like_s5_durability_check`
+    (requires `s5` + a durability marker: ledger / recovery / durability /
+    cooperation / checkpoint) to `agent/acceptance_gate.py`.
+  - Added the classify branch BEFORE the S4/S2 checks so the S2 bare-`runtime`
+    keyword cannot misclassify an S5 durability test that happens to contain
+    "runtime". Added `S2AcceptanceReport.durability_regressions`. Pure additive —
+    no existing class weakened (per the frozen-goal resolution: a new class parallel
+    to S4's `EVIDENCE_FIDELITY_REGRESSION`).
+- Verification commands and results:
+  - RED first: 4 failures with `AttributeError: ... has no attribute
+    'DURABILITY_REGRESSION'` / `'durability_regressions'`.
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_acceptance_gate_durability_classification.py
+    tests/test_s2_acceptance_gate.py tests/test_s4_acceptance_gate_evidence_classification.py
+    -q` -> `20 passed` (S2/S4 acceptance classification unchanged — no weakening).
+  - `.venv/bin/ruff check agent/acceptance_gate.py
+    tests/test_s5_acceptance_gate_durability_classification.py` -> clean.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G08` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None.
+- Commit hash:
+  - Pending (`feat(s5): S5-G08 durability regression acceptance signal`).
+- Next step:
+  - S5-G09 — non-regression + release governance: run targeted S1-S5 gates + full
+    pytest before close-out; keep gap/work-log/debt current.

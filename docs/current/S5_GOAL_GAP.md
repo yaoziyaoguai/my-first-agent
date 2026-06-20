@@ -23,7 +23,7 @@
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | done |
 | S5-G06 | P1 | L3 | Ledger-aware audit/replay alignment | done |
 | S5-G07 | P1 | L1 | Same-spine durability guard | done |
-| S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | proposed/open |
+| S5-G08 | P2 | L3/L4 | Durability regression acceptance signal | done |
 | S5-G09 | P2 | L1-L5 | Non-regression and release governance | proposed/open |
 | S5-G10 | P2 | L5 | Extension-boundary recovery coverage | proposed/open |
 | S5-G11 | P3 | L3/L4 | Operator-facing ledger summary | proposed/open |
@@ -314,7 +314,23 @@
 - Non-goal boundary: Do not turn acceptance gate into a broad product-health
   dashboard.
 - Suggested order: 8
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/acceptance_gate.py`: added `AcceptanceSignal.DURABILITY_REGRESSION` +
+    `_looks_like_s5_durability_check` (requires `s5` + a durability marker:
+    ledger / recovery / durability / cooperation / checkpoint) + a classify branch
+    placed before the S4/S2 checks (so the S2 bare-`runtime` keyword cannot
+    misclassify an S5 durability test) + `S2AcceptanceReport.durability_regressions`.
+    Pure additive — no existing runtime/extension/evidence-fidelity/debt class
+    weakened (the frozen-goal resolution: new `DURABILITY_REGRESSION` class, parallel
+    to S4's `EVIDENCE_FIDELITY_REGRESSION`).
+  - `tests/test_s5_acceptance_gate_durability_classification.py`: 6 passed
+    (RED→GREEN). Covers durability→`DURABILITY_REGRESSION` (release-blocking),
+    passed→`PASSED`, non-durability S5 failure not misclassified, and s2/s3/s4
+    failures still classify to their own signals (no weakening).
+  - S2 + S4 acceptance-gate suites still green (20 passed total across the three
+    files).
+  - Focused ruff on touched files: clean.
 - Risk if ignored: Durability failures could be misreported as generic runtime
   failures or hidden behind known debt.
 

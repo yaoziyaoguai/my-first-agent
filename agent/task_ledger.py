@@ -18,8 +18,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+
+from agent.evidence_redaction import redact_text
 
 
 class LedgerRecordKind(str, Enum):
@@ -187,3 +189,38 @@ def build_reference_recovery_records() -> list[LedgerRecord]:
             "reference: durable recovery demo", "reference-plan",
         ),
     ]
+
+
+# S5-G02 redaction 边界：每种记录类型的 free-text 字段（必须 redact）。
+# 其余字段为结构化 id / path / 受控词表，按构造契约不携带 secret，故不 redact
+# ——redact 它们会破坏 recovery 所需的精确 checkpoint_ref / step_id / ref 匹配。
+_FREE_TEXT_FIELDS: dict[type, tuple[str, ...]] = {
+    TaskLifecycleRecord: ("user_goal", "plan_goal"),
+    StepProgressRecord: ("completion_summary",),
+    EvidenceRefRecord: ("safe_summary",),
+    CheckpointRefRecord: (),
+}
+
+
+def _redact_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return redact_text(value)
+
+
+def redact_ledger_record(record: LedgerRecord) -> LedgerRecord:
+    """返回一条新的 ledger 记录，其 free-text 字段经 ``redact_text`` 脱敏。
+
+    这是 ledger 持久化 (S5-G03) 与 summary 投影 (S5-G11) 之前的脱敏硬边界
+    (AC-7)。即便调用方误把合成 key 放进 user_goal / completion_summary /
+    safe_summary / plan_goal，本层也会先剥离。结构化字段（id / path / seq /
+    受控词表）原样保留——它们由构造契约保证安全，且 recovery/ref 匹配需要精确值。
+
+    不可变：返回新记录，原记录不变。
+    """
+
+    redact_fields = _FREE_TEXT_FIELDS.get(type(record), ())
+    if not redact_fields:
+        return record
+    changes = {name: _redact_optional(getattr(record, name)) for name in redact_fields}
+    return replace(record, **changes)

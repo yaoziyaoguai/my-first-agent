@@ -17,7 +17,7 @@
 | Gap | Priority | Layer | Title | Status |
 |---|---:|---|---|---|
 | S5-G01 | P0 | L2/L4 | Ledger contract and reference recovery task | done |
-| S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | proposed/open |
+| S5-G02 | P0 | L2/L3 | Ledger safety/redaction boundary | done |
 | S5-G03 | P1 | L2 | Local durable ledger storage API | proposed/open |
 | S5-G04 | P1 | L2/L4 | Checkpoint-ledger cooperation | proposed/open |
 | S5-G05 | P1 | L4 | Fake/local recovery E2E | proposed/open |
@@ -87,7 +87,19 @@
 - Non-goal boundary: Do not claim that every legacy event-log projection is
   globally redacted unless `TD-012` is actually closed with tests.
 - Suggested order: 2
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20):
+  - `agent/task_ledger.py`: `redact_ledger_record` + `_FREE_TEXT_FIELDS` rule.
+    Free-text fields (user_goal / plan_goal / completion_summary / safe_summary)
+    are routed through `evidence_redaction.redact_text`; structural fields
+    (task_id / seq / step_id / checkpoint_ref / evidence_ref / controlled vocab)
+    are preserved exactly so recovery (AC-4) and ref matching (AC-8) still work.
+  - `tests/test_s5_ledger_redaction.py`: 8 passed (RED→GREEN). Synthetic keys
+    injected into task input, plan goal, step/tool preview, and evidence summary;
+    asserts `[REDACTED]` present + secret absent, structural fields preserved,
+    `None` preserved, original record immutable, and a whole-summary JSON
+    projection is secret-free (AC-7).
+  - Focused ruff on touched files: clean.
 - Risk if ignored: A durable ledger could become a long-lived secret leak surface.
 
 ## S5-G03 - Local durable ledger storage API

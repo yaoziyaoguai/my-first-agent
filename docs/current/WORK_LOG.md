@@ -188,7 +188,44 @@
 - `TECH_DEBT.md` items added or updated:
   - None.
 - Commit hash:
-  - Pending (`feat(s5): S5-G01 ledger contract and reference recovery task`).
+  - `80028cf` (`feat(s5): S5-G01 ledger contract and reference recovery task`).
 - Next step:
   - S5-G02 — ledger safety/redaction boundary (route summaries/metadata through
     `evidence_redaction` before any persistence; red tests with synthetic keys).
+
+## 2026-06-20 - S5-G02 ledger safety/redaction boundary
+
+- Task name: S5-G02 — ledger redaction boundary (TDD).
+- Files changed:
+  - `agent/task_ledger.py`
+  - `tests/test_s5_ledger_redaction.py` (new)
+  - `docs/current/S5_GOAL_GAP.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Added `redact_ledger_record(record)` + the `_FREE_TEXT_FIELDS` rule table to
+    `agent/task_ledger.py`. Free-text fields (user_goal / plan_goal /
+    completion_summary / safe_summary) are routed through the already-wired S4
+    `evidence_redaction.redact_text`; structural fields (task_id / seq / step_id
+    / checkpoint_ref / evidence_ref / controlled vocab) are preserved exactly.
+  - Immutable: returns a new record via `dataclasses.replace`.
+  - This is the AC-7 hard boundary for the ledger surface; it does NOT touch the
+    legacy mediator `TOOL_RESULT` / `record_evidence` preview path, so `TD-012`
+    remains out of the critical path per the freeze resolution.
+- Verification commands and results:
+  - RED first: `tests/test_s5_ledger_redaction.py` collection failed with
+    `ImportError: cannot import name 'redact_ledger_record'` (expected).
+  - GREEN: `.venv/bin/python -m pytest tests/test_s5_ledger_redaction.py
+    tests/test_s5_ledger_contract.py -q` -> `24 passed`.
+  - `.venv/bin/ruff check agent/task_ledger.py tests/test_s5_ledger_redaction.py`
+    -> `All checks passed!`.
+  - `git diff --check` -> clean.
+- Stage gap items updated:
+  - `S5-G02` -> done (table row + per-gap status/evidence).
+- `TECH_DEBT.md` items added or updated:
+  - None. `TD-012` remains open per the freeze resolution (ledger never sources a
+    persisted field from the legacy preview path).
+- Commit hash:
+  - Pending (`feat(s5): S5-G02 ledger safety/redaction boundary`).
+- Next step:
+  - S5-G03 — local durable ledger storage API (JSONL append/read, validation,
+    local path injection; calls `redact_ledger_record` before persisting).

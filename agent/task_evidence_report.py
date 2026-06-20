@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.task_context import TaskContextPackage, build_task_execution_context
-from agent.task_replay_chain import ReplayEvent, build_replay_chain
+from agent.task_replay_chain import build_replay_chain
 from agent.task_review import TaskProgressReview, build_task_progress_review
 from agent.task_tool_contract import (
     GovernedToolContractReport,
@@ -23,10 +23,11 @@ class TaskEvidenceReport:
     enough structure for human review while keeping TD-001/TD-004 as explicit
     debt instead of silently persisting raw request/response/tool bodies.
 
-    S4-G02: ``replay_chain_events`` carries the ordered, reconstructable
-    decision/tool/delegation chain (redacted-faithful, safe-summary granularity)
-    so the report exceeds the prior label-only ``evidence_events`` level (TD-001).
-    Default empty keeps the report backward-compatible for S2/S3 callers.
+    S4-G02: the reconstructable replay chain is a **separate** projection
+    (``agent.task_replay_chain.build_replay_chain``) — it is NOT embedded here,
+    because this report is a safe summary whose ``str()`` must never contain raw
+    tool/model content (S2 contract). ``replay_chain_event_count`` is a safe
+    integer indicator that a replay chain is available, without leaking content.
     """
 
     task_scope_id: str
@@ -40,7 +41,7 @@ class TaskEvidenceReport:
     evidence_events: tuple[str, ...]
     known_debt_refs: tuple[str, ...]
     replay_ready: bool
-    replay_chain_events: tuple[ReplayEvent, ...] = ()
+    replay_chain_event_count: int = 0
 
 
 RecordEvidenceFn = Callable[..., dict[str, Any]]
@@ -78,8 +79,9 @@ def build_task_evidence_report(
         and bool(events)
         and review.total_steps > 0
     )
-    # S4-G02: 投影 replay chain（redacted-faithful），使报告超出 evidence_events 标签级。
-    replay_chain = build_replay_chain(state)
+    # S4-G02: replay chain 是独立投影（build_replay_chain），不嵌入 safe-summary report；
+    # 这里只记一个安全 count，反映 chain 可用，不泄露 raw content（守 S2 契约）。
+    replay_chain_event_count = len(build_replay_chain(state).events)
     return TaskEvidenceReport(
         task_scope_id=package.memory_boundary.task_scope_id,
         lifecycle=review.lifecycle,
@@ -92,7 +94,7 @@ def build_task_evidence_report(
         evidence_events=events,
         known_debt_refs=debt_refs,
         replay_ready=replay_ready,
-        replay_chain_events=replay_chain.events,
+        replay_chain_event_count=replay_chain_event_count,
     )
 
 
@@ -129,6 +131,7 @@ def record_task_evidence_report(
             "evidence_event_count": len(report.evidence_events),
             "known_debt_refs": list(report.known_debt_refs),
             "replay_ready": report.replay_ready,
+            "replay_chain_event_count": report.replay_chain_event_count,
         },
     )
 

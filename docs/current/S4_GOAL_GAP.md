@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 2 | G10-G11 |
+| open | 1 | G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 9 | G01-G09（+ docs governance + close-out checklist） |
+| satisfied | 10 | G01-G10（+ full-suite green signal；S2 回归已捕获并修复） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -290,7 +290,20 @@
 - **Verification**: 每 S4 gap 后 targeted S2/S3 gate + full pytest 绿；touched-file ruff 过。
 - **Dependencies**: 贯穿。
 - **Non-goal boundary**: 不把 TD-007 全清作 blocker；不弱化既有断言充数。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G10）。
+- **Evidence**:
+  - **Full pytest（release 信号, AC-9）**: `4861 passed, 16 skipped, 28 xfailed, 0 failed,
+    exit 0`（211.87s）。28 xfail 为既有文档化项（FakeProvider 语义/config.yaml 隔离/未写 RFC），
+    非 hidden failure。
+  - **回归捕获 + 修复**: full pytest 抓到 G02 引入的 S2 契约回归——
+    `test_s2_task_evidence_report_is_replay_ready_without_full_body_persistence` 断言
+    `"raw tool output" not in str(report)`，因 G02 把带 content preview 的 `replay_chain_events`
+    嵌入 safe-summary report 而破坏。**架构修复**：replay chain 改为独立投影
+    （`build_replay_chain`，G03/G05/G06 已用它），report 只带安全整数 `replay_chain_event_count`
+    （不嵌入 content），守 S2 safe-summary 契约。修复后 full pytest 绿。
+  - **S1/S2/S3/S4 acceptance set**: 59 passed / 4 skipped（real-provider opt-in，预期）。
+  - **focused ruff（touched files）**: 全 clean。global ruff 仍 ~443（TD-007，非 blocker）。
+  - Commit: `fix(s4): G10 S2 evidence-report safe-summary regression + full-suite green (AC-1/9)`。
 
 ---
 
@@ -345,7 +358,7 @@
 | S4-G07 | Real provider audit key-path smoke | P1 | satisfied | L1 | AC-6 |
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | satisfied | L1/Cross | AC-7 |
 | S4-G09 | docs/current+history governance for S4 | P2 | satisfied | Cross | AC-8 |
-| S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | open | Cross/L1 | AC-1/9 |
+| S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | satisfied | Cross/L1 | AC-1/9 |
 | S4-G11 | Optional audit observability | P3 | open | L3 | AC-2/5 (enhance) |
 | S4-G12 | Deferred boundaries & TECH_DEBT triage (S5/Sn) | P4 | deferred | Cross | §7 |
 

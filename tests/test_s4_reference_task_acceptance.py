@@ -218,9 +218,11 @@ def test_s4_reference_task_audit_replay_closed_loop(clean_tool_registry):
     assert completed.snapshot.lifecycle is GovernedTaskLifecycle.DONE
     assert completed.snapshot.progress.percent == 100.0
 
-    # ─── record：build_task_evidence_report 携带 replay_chain_events（G02）───
+    # ─── record：build_task_evidence_report 反映 replay chain 可用（安全 count，G02）───
+    # replay chain 是独立投影（build_replay_chain），不嵌入 safe-summary report；
+    # report 只带安全 count，str(report) 不泄露 raw content（守 S2 契约）。
     report = build_task_evidence_report(state)
-    assert len(report.replay_chain_events) > 0, "evidence report 必须携带 replay_chain_events"
+    assert report.replay_chain_event_count > 0, "evidence report 必须反映 replay chain 可用"
 
     # ─── replay：build_replay_chain 重建 MCP tool + SubAgent 委派链路（AC-2）───
     chain = build_replay_chain(state)

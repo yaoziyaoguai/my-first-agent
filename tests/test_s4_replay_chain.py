@@ -15,7 +15,6 @@ from agent.state import create_agent_state
 from agent.task_replay_chain import (
     PREVIEW_MAX,
     ReplayChain,
-    ReplayEvent,
     build_replay_chain,
 )
 
@@ -222,12 +221,17 @@ def test_empty_state_yields_empty_chain_not_crash():
 
 
 def test_task_evidence_report_carries_replay_chain():
-    """build_task_evidence_report 必须把 replay_chain 投影进报告（向后兼容默认空）。"""
+    """build_task_evidence_report 必须反映 replay chain 可用（安全 count，不嵌入 content）。
+
+    中文注释：replay chain 是独立投影（build_replay_chain），不嵌入 safe-summary report——
+    report 只带一个安全整数 count，使 str(report) 不泄露 raw tool/model content（守 S2 契约）。
+    """
     from agent.task_evidence_report import build_task_evidence_report
 
     state = _state_with_chain()
     report = build_task_evidence_report(state)
-    chain_events = getattr(report, "replay_chain_events", None)
-    assert chain_events is not None, "TaskEvidenceReport 必须携带 replay_chain_events"
-    assert len(chain_events) >= 3  # 至少 tool+delegation+decision
-    assert all(isinstance(e, ReplayEvent) for e in chain_events)
+    # report 反映 chain 可用（count > 0），但不嵌入 content events
+    assert report.replay_chain_event_count >= 3  # 至少 tool+delegation+decision
+    assert not hasattr(report, "replay_chain_events"), (
+        "report 不应嵌入 replay_chain_events（会违反 safe-summary 契约）"
+    )

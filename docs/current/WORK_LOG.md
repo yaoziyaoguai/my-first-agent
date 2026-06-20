@@ -422,3 +422,36 @@
 - **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
 - **Next step (authorized by §3):** S4-G10 (P2) — S1/S2/S3 non-regression + full-suite green
   signal (S2/S3/S4 acceptance set + full pytest 0 failed + focused ruff touched files).
+
+## 2026-06-20 — S4-G10 S1/S2/S3 non-regression + full-suite green — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G10 (P2): S1/S2/S3/S4 non-regression + full-suite green release signal
+  (AC-1/AC-9). Mandated to run full pytest and catch any regression from S4 evidence changes.
+- **Regression caught + fixed (the core G10 value):** full pytest surfaced **1 failure** —
+  `tests/test_s2_task_evidence_report.py::test_task_evidence_report_is_replay_ready_without_full_body_persistence`
+  asserting `"raw tool output" not in str(report)`. Root cause: G02 embedded
+  `replay_chain_events` (carrying tool-result content previews) into `TaskEvidenceReport`,
+  violating the S2 safe-summary contract (the report's `str()` must never contain raw
+  tool/model content — TD-001 discipline).
+  - **Architectural fix:** the replay chain is now a **separate projection**
+    (`build_replay_chain(state)`) — NOT embedded in the safe-summary report. G03/G05/G06
+    already consume it via `build_replay_chain`, so they are unaffected. The report carries
+    only a safe integer `replay_chain_event_count` (no content), preserving the S2 contract.
+    Updated `test_s4_replay_chain.py` + `test_s4_reference_task_acceptance.py` accordingly.
+- **Verification (post-fix):**
+  - **Full pytest (release signal, AC-9):** `4861 passed, 16 skipped, 28 xfailed, 0 failed,
+    exit 0` (211.87s). 28 xfail are pre-existing documented (FakeProvider semantics /
+    config.yaml isolation / unwritten RFC) — not hidden failures.
+  - **S1/S2/S3/S4 acceptance set:** 59 passed / 4 skipped (real-provider opt-in, expected).
+  - **Focused ruff (all touched files):** clean. Global ruff remains ~443 = TD-007 (non-blocker).
+- **Files changed:** `agent/task_evidence_report.py` (replay_chain_events → safe
+  replay_chain_event_count; chain is separate projection), `tests/test_s4_replay_chain.py`
+  (report test → safe count), `tests/test_s4_reference_task_acceptance.py` (record step →
+  count), `docs/current/S4_GOAL_GAP.md` (G10 → satisfied; §2; §9), `docs/current/WORK_LOG.md`.
+- **`S4_GOAL_GAP.md` items updated:** S4-G10 → **satisfied** (AC-1/AC-9; full-suite green;
+  S2 regression caught + fixed).
+- **`TECH_DEBT.md` items:** none changed (TD-007 confirmed non-blocker, ~443 global).
+- **Commit:** `fix(s4): G10 S2 evidence-report safe-summary regression + full-suite green (AC-1/9)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G11 (P3) — optional audit observability
+  (human-readable replay summary view); then S4-G12 (P4) deferred triage; then whole-stage audit.

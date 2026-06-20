@@ -1,9 +1,10 @@
 # S5 Goal - Durable Governed Task Recovery
 
-> Status: **proposed / not frozen**. This document recommends an S5 direction
-> from the current roadmap, S5 baseline, and live technical debt. It becomes
-> frozen only after explicit user approval. Do not execute the S5 gap loop until
-> the goal is approved.
+> Status: **frozen (approved)**. The user approved/froze this S5 goal on
+> 2026-06-20 via explicit `/goal` authorization. The selected direction is
+> **Durable Governed Task Recovery**. This goal is now frozen: per `AGENTS.md`
+> Goal Rules it changes only on a future explicit user decision. The S5 gap loop
+> may now execute `S5_GOAL_GAP.md` in recommended order.
 
 ## 1. Executive Summary
 
@@ -263,18 +264,39 @@ reflect what was actually implemented, deferred, or left open.
 
 ## 9. Decisions
 
-### Open decisions
+> The four open decisions below were resolved at goal freeze (2026-06-20) so the
+> S5 gap loop has a single, consistent interpretation. Each resolution stays
+> within the roadmap/baseline: no Scheduler/memory/full-MCP/writable-SubAgent
+> activation, no production database, no secret/config surface.
 
-- Exact ledger storage shape: JSONL, structured directory, or another local
-  fixture-friendly format.
-- Whether durability acceptance should extend `acceptance_gate.py` with a new
-  classification or reuse an existing runtime/evidence category.
-- Whether `TD-012` must be partially closed to make ledger previews safe, or can
-  remain out of the critical path if ledger records never use legacy previews.
-- Whether `TD-013` is required for ledger consistency checks or remains a later
-  verifier-hardening item.
+### Resolved decisions (resolved at freeze, 2026-06-20)
 
-### Resolved decisions
+- **Ledger storage shape = JSONL.** The durable ledger is a local-only,
+  append-oriented, line-delimited JSON file: one record per line, record types
+  for lifecycle / step / checkpoint-ref / evidence-ref. Rationale: append-oriented
+  and auditable per §5, fixture-friendly and deterministic in tests, no schema
+  migration tooling, trivial line-by-line diff. A production database, network
+  storage, and home-config write path remain non-goals.
+- **Durability acceptance classification = new `DURABILITY_REGRESSION` class.**
+  `acceptance_gate.py` gains a dedicated durability/recovery category, parallel
+  to the S4 `EVIDENCE_FIDELITY_REGRESSION` precedent, instead of reusing an
+  existing runtime/evidence category. This satisfies AC-9 (a stable signal
+  without weakening existing runtime/extension/evidence-fidelity/debt classes).
+  Implementation lands in S5-G08.
+- **`TD-012` stays out of the S5 critical path.** Ledger records are
+  safe-summary only and must never use the legacy mediator `TOOL_RESULT` preview
+  or `record_evidence` metadata as the source of any persisted field. Any
+  preview-like content the ledger surfaces goes through the already-wired S4
+  `evidence_redaction` helpers (replay-chain surface), not the legacy preview
+  path. `TD-012` therefore remains open/debted; it re-enters scope only if a
+  concrete ledger surface is later proven to require the legacy preview.
+- **`TD-013` stays deferred/open.** Ledger consistency checks are ledger-internal
+  (task/step/checkpoint-ref/evidence-ref ordering and checkpoint-ref match); they
+  do not require the evidence verifier's cross-kind duplicate-ref detection.
+  `TD-013` only re-enters scope if S5-G06 proves recovered-task replay
+  verification needs cross-kind detection, which the current design does not.
+
+### Resolved decisions (inherited from draft)
 
 - S5 should not activate Scheduler or memory as a primary goal.
 - S5 should not use durable ledger work to introduce a production database.
@@ -289,6 +311,7 @@ reflect what was actually implemented, deferred, or left open.
 
 ## 10. Next Step
 
-Generate `S5_GOAL_GAP.md` from this goal and `S5_BASELINE_STATUS.md`. Mark all
-items as proposed/open and do not execute any gap until the user approves or
-freezes the S5 goal.
+The S5 goal is frozen. Execute `S5_GOAL_GAP.md` in recommended order
+(S5-G01 → S5-G11; S5-G12 is a non-goal guardrail, not executed). Each gap runs
+as a focused mini-run with TDD red→green for behavior changes, a focused commit,
+and `S5_GOAL_GAP.md` + `WORK_LOG.md` evidence updates.

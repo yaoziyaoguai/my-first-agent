@@ -120,3 +120,38 @@
   - S3 targeted gate -> `30 passed, 1 skipped`
   - S4 targeted gate -> `44 passed, 1 skipped`
   - `.venv/bin/python -m pytest -q -rx` -> `4867 passed, 16 skipped, 28 xfailed`
+
+## 2026-06-20 - S5 goal freeze
+
+- Task name: Freeze S5 goal = Durable Governed Task Recovery (user `/goal`
+  authorization).
+- Files changed:
+  - `docs/current/S5_GOAL.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Changed S5 goal status from `proposed / not frozen` to `frozen (approved)`.
+  - Resolved the four §9 open decisions at freeze so the gap loop has one
+    consistent interpretation:
+    - ledger storage shape = local-only append-oriented JSONL;
+    - durability acceptance = new `DURABILITY_REGRESSION` class in
+      `acceptance_gate.py` (parallel to S4 `EVIDENCE_FIDELITY_REGRESSION`),
+      implemented in S5-G08;
+    - `TD-012` stays out of the critical path (ledger never sources a persisted
+      field from the legacy mediator/`record_evidence` preview);
+    - `TD-013` stays deferred/open (ledger consistency is ledger-internal).
+  - Updated §10 next step: the S5 gap loop is now authorized in order.
+  - All resolutions stay within roadmap/baseline: no Scheduler/memory/full-MCP/
+    writable-SubAgent activation, no production database, no secret/config surface.
+- Verification commands and results:
+  - Document-only change; no pytest/ruff applicable. Diff discipline
+    (`git diff --check`) is checked at the gap-loop commits.
+- Stage gap items updated:
+  - None executed in this step; the gap loop starts at S5-G01 next.
+- `TECH_DEBT.md` items added or updated:
+  - None. `TD-012` and `TD-013` explicitly remain open/deferred per the freeze
+    resolutions.
+- Commit hash:
+  - Pending (`docs(s5): freeze S5 goal`).
+- Next step:
+  - Orient via graphify on checkpoint/task-state/evidence/replay/redaction/
+    verifier/acceptance_gate/spine, then run the S5 gap loop S5-G01 → S5-G11.

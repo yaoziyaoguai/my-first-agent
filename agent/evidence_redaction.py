@@ -5,7 +5,9 @@ secret / API key / 完整凭证。本模块提供可复用的 redaction 层：
 
 - ``redact_text(text)``：脱敏字符串中的常见 secret 形态（OpenAI/GitHub/AWS/Slack/Google
   key、Bearer token、敏感键赋值）。
-- ``redact_metadata(mapping)``：递归脱敏 dict 中的字符串值（供 evidence 写入路径调用）。
+- ``redact_metadata(mapping)``：递归脱敏 dict 中的字符串值。当前由 replay-chain/audit
+  投影路径间接复用（经 ``redact_text``）；legacy ``record_evidence`` metadata 写入路径尚未
+  接入（见 TECH_DEBT TD-012）——勿据此 docstring 误以为 record_evidence metadata 已脱敏。
 
 设计原则（`S4_FIDELITY_CONTRACT.md §1/§4`）：保真提升**绝不**以泄露 secret 为代价；
 redaction **宁可误伤（over-redact）也不漏过**。本模块只检测 fake/已知形态，**绝不**读取或

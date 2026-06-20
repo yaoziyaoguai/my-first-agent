@@ -100,3 +100,66 @@ def test_mediate_pending_empty_result_does_not_crash():
     # 流程仍应发出 TOOL_RESULT dispatch（不因空结果中断）
     payload = _tool_result_payload(fake_dispatcher, "toolu_td004_empty")
     assert "tool_output" in payload
+
+
+def test_mediate_pending_failure_status_propagated_to_dispatch():
+    """AC-4 fidelity：失败的 pending tool 不得报告 executed/success（whole-stage audit HIGH）。
+
+    修复前 mediate_pending 硬编码 status='executed'/execution_status='success'，无论底层
+    execute_pending_tool 是否失败/被拒——破坏 S4 审计轨迹保真。execute_pending_tool 已把真实
+    envelope.status 写入 tool_execution_log[tool_use_id]['status']；修复后 mediate_pending 从
+    该处取真实状态，使 failed/rejected_by_check → status='failed'/'rejected_by_check'、
+    execution_status='error'。
+
+    本测试模拟真实 execute_pending_tool 在失败时写入的 tool_execution_log（patch 掉执行器本身，
+    只验证 mediate_pending 的状态推导）。
+    """
+    pending = {
+        "tool_use_id": "toolu_pending_fail_status",
+        "tool": "shell_command",
+        "input": {"cmd": "rm -rf /"},
+    }
+    mediator, fake_dispatcher, _ = _make_mediator_with_pending(pending)
+    # 模拟真实 execute_pending_tool 在 rejected_by_check 时写入的状态
+    mediator._state.task.tool_execution_log["toolu_pending_fail_status"] = {
+        "tool": "shell_command",
+        "status": "rejected_by_check",
+        "input": pending["input"],
+        "result": "拒绝执行：路径不在白名单",
+        "step_index": 1,
+    }
+
+    with patch.object(
+        tmr_mod, "execute_pending_tool", return_value="拒绝执行：路径不在白名单"
+    ):
+        mediator.mediate_pending(pending)
+
+    payload = _tool_result_payload(fake_dispatcher, "toolu_pending_fail_status")
+    assert payload["status"] != "executed", "失败的 pending tool 不得报告 status=executed"
+    assert payload["execution_status"] == "error", (
+        "失败的 pending tool 须报告 execution_status=error"
+    )
+
+
+def test_mediate_pending_success_status_remains_executed():
+    """成功（executed）的 pending tool 仍报告 executed/success——修复不得破坏成功路径。"""
+    pending = {
+        "tool_use_id": "toolu_pending_ok_status",
+        "tool": "write_file",
+        "input": {"path": "t.txt"},
+    }
+    mediator, fake_dispatcher, _ = _make_mediator_with_pending(pending)
+    mediator._state.task.tool_execution_log["toolu_pending_ok_status"] = {
+        "tool": "write_file",
+        "status": "executed",
+        "input": pending["input"],
+        "result": "ok",
+        "step_index": 1,
+    }
+
+    with patch.object(tmr_mod, "execute_pending_tool", return_value="ok"):
+        mediator.mediate_pending(pending)
+
+    payload = _tool_result_payload(fake_dispatcher, "toolu_pending_ok_status")
+    assert payload["status"] == "executed"
+    assert payload["execution_status"] == "success"

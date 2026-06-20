@@ -6,7 +6,8 @@ MCP tool source + read-only SubAgent 委派，完成 **「执行 → 记录 → 
 
 闭环（对齐 S4_FIDELITY_CONTRACT.md §6）：
 - receive/accept/execute(MCP+SubAgent)/advance/done：governed path 不回归（AC-1）；
-- record：build_task_evidence_report 携带 replay_chain_events（G02）；
+- record：build_task_evidence_report 反映 replay chain 可用（安全 count，G02；chain 本身是
+  独立 build_replay_chain 投影，不嵌入 safe-summary report——G10 审计修正）；
 - replay：build_replay_chain 重建 MCP tool + SubAgent 委派链路（AC-2，超出标签级）；
 - verify：verify_evidence 通过（AC-5）；注入 fake secret 在 chain 中被 redacted（AC-3）。
 
@@ -296,7 +297,8 @@ def _s4_real_provider_env_ready() -> tuple[bool, str]:
 
     只检查显式 opt-in 标志；provider 是否真实可用由生产路径 build_model_provider_from_env()
     解析（优先读 gitignored config/config.yaml）。不要求把 secret 导出到 env var——key
-    留在 config 中，测试只透传 provider 对象，不读取/打印/复制/移动/提交 secret。
+    留在 config 中，测试只透传 provider 对象，不打印/复制/移动/提交/持久化 secret（api_key
+    仅在进程内瞬态读取用于 fake-key 检测，绝不外泄）。
     """
     if os.environ.get(_S4_REAL_PROVIDER_SMOKE_ENV, "") != "1":
         return False, (
@@ -323,7 +325,8 @@ def test_s4_reference_task_real_provider_audit_key_path_smoke(clean_tool_registr
     release gate（resolved decision 4）：deliverable = key-safe opt-in harness + 结构校验；
     有 key 且安全时可跑关键 smoke，无 key 时 default skip + 结构校验（G06 fake E2E）即满足
     AC-6 real 维度。real-key 实跑**非必需、非 release blocker**。
-    key-safe：opt-in + fake-key 检测；不读取/打印/复制/移动/提交 secret；不改 config/config.yaml；
+    key-safe：opt-in + fake-key 检测；不打印/复制/移动/提交/持久化 secret（api_key 仅在
+    进程内瞬态读取用于 fake-key 检测，绝不外泄）；不改 config/config.yaml；
     不创建 .env。MCP 用 fake/fixture source（不连真实 endpoint），SubAgent 用 local_fake。
     """
     # --- 1. 进入 audit/replay governed path（与 fake E2E 同一入口）---
@@ -393,7 +396,7 @@ def test_s4_reference_task_real_provider_audit_key_path_smoke(clean_tool_registr
 
     # --- 4. audit/replay evidence 与 fake/local 链路对齐 + key-safe ---
     report = build_task_evidence_report(state, context_package=context)
-    assert len(report.replay_chain_events) > 0
+    assert report.replay_chain_event_count > 0
     chain = build_replay_chain(state)
     # MCP tool + SubAgent 委派可重建
     assert any(e.ref_id == "tool-s4-real-smoke-mcp" for e in chain.tool_events)

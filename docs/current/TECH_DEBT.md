@@ -189,3 +189,50 @@
 - Recommended stage: S4/Sn, when durability / compliance / crash-recovery requires it.
 - Verification idea: confirm no durable-ledger module; `agent/checkpoint.py` remains the
   resume mechanism (save_checkpoint / load_checkpoint_to_state).
+
+## S4 whole-stage audit findings (2026-06-20)
+
+> Surfaced by the S4 whole-stage audit (multi-dimension adversarial review). Each is real but
+> out-of-scope/risky to fix within S4's surgical boundaries; recorded here per `AGENTS.md`
+> Technical Debt Rules. The audit's HIGH finding (pending-tool status fidelity, AC-4) was
+> **fixed in-audit** (not debt) — see `WORK_LOG.md` S4 whole-stage audit entry.
+
+### TD-012 - G03 redaction not wired into legacy mediator/evidence-recorder preview paths
+
+- ID: TD-012
+- Title: `evidence_redaction.redact_text`/`redact_metadata` is wired into the S4 replay-chain
+  projection (`build_replay_chain`, `audit_observability`) but NOT into the legacy
+  `tool_runtime_mediator._route_result`/`mediate_pending` TOOL_RESULT `tool_output` preview
+  (`str(...)[:500]` with no redact pass) nor `evidence_recorder.record_evidence` metadata.
+- Status: open / carry-forward (S4 audit)
+- Source/reason: S4-G03 scoped redaction to the new higher-fidelity surface (replay chain).
+  The legacy mediator/`record_evidence` paths rely on pre-existing upstream
+  `mask_user_visible_secrets` (failed/rejected) + safe-metadata discipline; broadening
+  `redact_text` to these hot paths is regression-prone and beyond G03's frozen surgical scope.
+- Impact: `S4_FIDELITY_CONTRACT.md §1` previously overclaimed "所有 input/output 投影强制
+  redaction"; corrected in-audit to scope the hard boundary to the replay-chain surface. No
+  active leak on live paths (callers pre-filter metadata; failed/rejected results are masked
+  upstream), but a secret surviving upstream masking could reach the legacy event-log preview
+  unredacted. `redact_metadata` is currently dead code on the write path (docstring corrected).
+- Recommended stage: S4/Sn, when the mediator TOOL_RESULT preview or `record_evidence` metadata
+  path is next touched (wire `redact_text`/`redact_metadata` at both projection points + tests).
+- Verification idea: grep `redact_text|redact_metadata` call sites; currently only
+  `task_replay_chain.py` + `audit_observability.py`. After wiring: a fake secret injected into
+  a tool result must not appear in the mediator TOOL_RESULT `tool_output` nor `record_evidence`
+  metadata.
+
+### TD-013 - Evidence verifier does not detect cross-kind duplicate refs
+
+- ID: TD-013
+- Title: `evidence_verifier._duplicate_refs` groups by kind (tool / delegation separately), so a
+  ref_id shared across kinds (e.g. `tool_use_id == delegation_id`) is not flagged —
+  `verify_replay_chain(...).ok` stays True.
+- Status: open / carry-forward (S4 audit)
+- Source/reason: S4-G05 scoped `self_consistent` to count-level consistency per
+  `S4_FIDELITY_CONTRACT.md §5.2` (tool/delegation counts). Cross-kind duplicate detection is a
+  contract expansion not required by the frozen goal.
+- Impact: Low. `tool_use_id` and `delegation_id` come from different id spaces, so real-world
+  collision is unlikely; but it is a genuine verifier blind spot.
+- Recommended stage: S4/Sn, when hardening the verifier beyond count-level consistency.
+- Verification idea: a chain with a tool and a delegation sharing the same `ref_id` should fail
+  `self_consistent` with `duplicate_ref` (currently passes).

@@ -116,7 +116,8 @@
 - **Evidence**: `agent/task_replay_chain.py`（`ReplayEvent`/`ReplayChain`/`build_replay_chain`，
   只读投影 tool_execution_log + delegation_log + plan steps 成有序可复放链路，safe-summary
   截断；不写 state、不改 checkpoint、不新增数据源）+ `agent/task_evidence_report.py`
-  （`TaskEvidenceReport.replay_chain_events` 带默认值，向后兼容，报告超出标签级）。
+  （`TaskEvidenceReport.replay_chain_event_count` 安全整数，向后兼容；replay chain 本身是
+  独立投影 `build_replay_chain`，不嵌入 safe-summary report——G10 审计修正）。
   `tests/test_s4_replay_chain.py`（8 passed）。非回归：S2/S3 reference + evidence
   52 passed / 2 skipped（real-provider opt-in）。Commit: `feat(s4): G02 replay-faithful
   evidence model (redacted-faithful chain projection)`。
@@ -197,7 +198,8 @@
 - **Status**: **satisfied**（2026-06-20，S4 gap loop G06）。
 - **Evidence**: `tests/test_s4_reference_task_acceptance.py::test_s4_reference_task_audit_replay_closed_loop`
   —— governed path（receive→accept→execute[MCP+SubAgent]→advance→done）→ record
-  （`build_task_evidence_report.replay_chain_events` 非空）→ replay（chain 重建 MCP tool +
+  （`build_task_evidence_report.replay_chain_event_count > 0`，反映 chain 可用；chain 本身经
+  独立 `build_replay_chain` 投影，不嵌入 report——G10 审计修正）→ replay（chain 重建 MCP tool +
   SubAgent 委派，policy_outcome=accept_result）→ verify（`verify_evidence` ok=True）→
   AC-3（注入 fake secret `sk-test-...` 在 chain preview 中被 `[REDACTED]`）→ AC-1
   （S2/S3/S4 acceptance report `release_blocked is False`、`runtime_regressions == ()`）。
@@ -402,7 +404,7 @@ S4 **不做**（防越界）：
 
 **Stage Closing Review（AGENTS.md）：**
 
-1. 复核 `S4_GOAL_GAP.md` 所有 open/deferred 项：G09-G11 应已 satisfied（或显式 deferred），
+1. 复核 `S4_GOAL_GAP.md` 所有 gap 状态：G01-G11 应保持 satisfied（无回退），
    G12（P4 deferred）确认仍 deferred。
 2. 完成所有仍在 stage 范围内可行的 gap；不可行的移 TECH_DEBT（附 ID）。
 3. 重要但越 stage 的未完成项移 `TECH_DEBT.md`，并在本文件标 moved-to-debt + debt ID。

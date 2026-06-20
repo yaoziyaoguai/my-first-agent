@@ -31,8 +31,13 @@ persistence、**不**保存 secret、**不**要求保存全部原始 payload。
 1. **可复放（replayable）**：仅凭 evidence（不访问原始 model request/response body、不访问
    raw tool payload）即可重建一条 governed task 的 **有序决策/工具/委派链路**，回答「agent 按
    什么顺序、对什么对象、做了什么、得到什么结果」。
-2. **redacted**：更高保真 **绝不**以泄露 secret 为代价。所有 input/output 投影在 **持久化前**
-   强制 redaction（mask + 截断），raw API key / secret / 完整凭证 **绝不**进入 evidence。
+2. **redacted**：更高保真 **绝不**以泄露 secret 为代价。**S4 replay-chain 投影**（G02/G03 的
+   `input_preview`/`output_preview`）在持久化前强制 redaction（mask + 截断），raw API key /
+   secret / 完整凭证 **绝不**进入该 chain/evidence（G03 测试断言）。
+   > 范围注记（whole-stage audit）：该 redaction 硬边界作用于 **S4 新增高保真面（replay chain）**。
+   > legacy 投影（mediator TOOL_RESULT 的 `tool_output` 预览、`record_evidence` metadata）依赖既有
+   > 上游 `mask_user_visible_secrets`（failed/rejected 路径），未额外接入 `redact_text`——与既有
+   > 非 pending 路径 parity。将 redaction 拓宽到这些 legacy 路径见 TECH_DEBT TD-012（非 S4 blocker）。
 3. **非逐字（not byte-for-byte）**：投影粒度是 **safe-summary**（名称 + 截断/脱敏的 input
    preview + 截断/脱敏的 output preview + status + policy 结果），不是原始字节。这是 TD-001
    的「保真提升」边界，不是「全量持久化」。
@@ -91,6 +96,11 @@ delegation_log + transitions 投影为一条统一的、有序的、可校验的
   fake secret 不出现在 chain/evidence 中（AC-3）。
 - **不新增数据源**：只投影 §2 列出的既有 task-state 字段；不要求 raw model body、不要求
   pending-tool 之外的旁路。
+
+> 保真天花板（whole-stage audit 注记，非缺陷）：(a) 步内（同 `step_index`）事件按 `ref_id`
+> 排序而非执行时序——`tool_execution_log` 是插入序 dict 无时间戳，chain 不发明缺失数据；
+> (b) delegation 的 `input_preview` 为空、`output_preview` 投影 `stop_reason`——`delegation_log`
+> 无 query 字段。两者受「不新增数据源」边界约束，是 redacted-faithful 的已知结构限，非逐字复放。
 
 ## 4. Pending-tool 预览契约（G04 / TD-004）
 

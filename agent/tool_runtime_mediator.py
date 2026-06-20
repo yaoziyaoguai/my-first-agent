@@ -666,6 +666,13 @@ class ToolRuntimeMediator:
         # failed/rejected 结果做过 mask_user_visible_secrets，语义不变。
         if result:
             self._turn_context[tool_use_id] = result
+        # S4 whole-stage audit（AC-4 fidelity）：execute_pending_tool 已把真实 envelope.status
+        # 写入 tool_execution_log[tool_use_id]['status']。这里据此推导 dispatch 状态，而非
+        # 硬编码 executed/success——否则 failed/rejected_by_check 的 pending tool 会被误报为
+        # 成功，破坏审计轨迹保真。缺条目（如被 mock 的执行器）回落 executed/success。
+        log_entry = self._state.task.tool_execution_log.get(tool_use_id, {})
+        log_status = str((log_entry or {}).get("status", "executed") or "executed")
+        dispatch_status, execution_status = _pending_dispatch_status(log_status)
         with contextlib.suppress(Exception):
             result_text = str(self._turn_context.get(tool_use_id, ""))[:500]
             safe_input_metadata = _safe_tool_input_metadata(tool_name, tool_input)
@@ -677,9 +684,9 @@ class ToolRuntimeMediator:
                     payload={
                         "tool_name": tool_name,
                         "safe_tool_input": safe_input_metadata,
-                        "status": "executed",
+                        "status": dispatch_status,
                         "tool_output": result_text,
-                        "execution_status": "success",
+                        "execution_status": execution_status,
                         **safe_input_metadata,
                         "from_pending_tool": True,
                     },
@@ -1330,6 +1337,25 @@ class ToolRuntimeMediator:
                 runtime_hook_name="handle_tool_use_response",
                 identity=self._identity,
             )
+
+
+def _pending_dispatch_status(log_status: str) -> tuple[str, str]:
+    """把 tool_execution_log 中的 pending tool 真实 status 映射为 dispatch 状态。
+
+    返回 (dispatch_status, execution_status)：
+    - failed / rejected_by_check → ('failed'/'rejected_by_check', 'error')
+    - blocked_by_policy → ('blocked_by_policy', 'blocked')
+    - 其余（executed / meta_recorded / skipped / 未知）→ ('executed', 'success')
+
+    中文学习边界：修复 whole-stage audit 发现的 AC-4 保真缺陷——此前 mediate_pending 硬编码
+    executed/success，failed/rejected 的 pending tool 被误报成功。这里据 execute_pending_tool
+    已写入的真实状态推导，使审计轨迹忠实。
+    """
+    if log_status in ("failed", "rejected_by_check"):
+        return (log_status, "error")
+    if log_status == "blocked_by_policy":
+        return ("blocked_by_policy", "blocked")
+    return ("executed", "success")
 
 
 def _memory_tool_operation(tool_name: str) -> str:

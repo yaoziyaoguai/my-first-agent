@@ -507,3 +507,60 @@
   pending-tool/TD-004, evidence verification, fake/local E2E, key-safe real smoke, acceptance
   classification, docs/current consistency, WORK_LOG, TECH_DEBT, full pytest, no
   secret/config/env pollution, clean git status). Fix if safe; debt otherwise. No S4 close-out.
+
+## 2026-06-20 — S4 whole-stage audit (G01-G12) — user-authorized
+
+- **Task:** Whole-stage audit per directive: 5-dimension adversarial review + objective gates.
+  Fix issues if safe; debt otherwise. No S4 close-out/archive.
+- **Method:** (a) Objective gates: full pytest (twice — once after G10 incl G11, once after
+  audit fixes), git status/diff-check, focused ruff on all touched files, secret/config/env
+  safety. (b) Multi-dimension adversarial Workflow (8 agents: 5 dimension reviewers +
+  3 adversarial verifiers) over contract-fidelity/secret-safety, non-regression/scope,
+  verifier/pending-tool, AC-coverage/docs-consistency, real-smoke/gate-classification.
+- **Verdict: S4 PASS.** Full pytest green (4867 passed / 0 failed / exit 0, incl G11 + audit
+  fixes); AC-1..AC-9 all covered by satisfied gaps with evidence; scope boundaries held (no
+  dormant capability activated — grep zero matches; spine untouched across 12 commits); the one
+  S4-introduced S2 regression (G02 embedding raw content in the report) was already caught +
+  fixed in G10; TD-001/TD-004 resolved-in-S4 (kept in register); no secret/config/env pollution
+  (`git ls-files config/config.yaml .env` empty; both gitignored); clean git status.
+- **Findings & disposition:**
+  - **HIGH (AC-4, FIXED in-audit):** `mediate_pending` hardcoded TOOL_RESULT
+    `status="executed"/execution_status="success"` regardless of whether the confirmed pending
+    tool actually failed/was-rejected — an audit-trail fidelity defect (a failed pending tool
+    reported as success). Surfaced/loaded by G04's preview fix (pre-existing hardcoding, now
+    observable). **Fix:** derive dispatch status from `tool_execution_log[tool_use_id]["status"]`
+    (which `execute_pending_tool` already writes correctly) via new `_pending_dispatch_status`
+    helper; graceful fallback to executed/success when the entry is absent. TDD: 2 new tests
+    (failure → status≠executed/execution_status=error; success unchanged). Mediator tests
+    non-regressed (55 passed). Fix A.
+  - **Latent G07 bug (FIXED):** the opt-in real-provider smoke (default-skip, so hidden from
+    full pytest) still asserted `report.replay_chain_events` after G10 renamed it. Fixed to
+    `replay_chain_event_count` (would have failed on opt-in).
+  - **Docs consistency (FIXED, AC-8/AC-6/AC-3):** G02/G06 gap-evidence + G06 test docstring
+    cited the removed `replay_chain_events` field → updated to `replay_chain_event_count` +
+    separate `build_replay_chain` projection; §12 close-out checklist item 1 wording clarified
+    (re-check G01-G11, not just G09-G11); smoke docstring "不读取 secret" overclaim tightened
+    (api_key is transiently read in-process for fake-key detection, never exfiltrated);
+    `redact_metadata` docstring corrected (not yet wired into `record_evidence`); fidelity
+    contract §1 redaction scope + §3 fidelity-ceiling (intra-step order by ref_id; delegation
+    input_preview empty) noted accurately.
+  - **DEBTED (TECH_DEBT):** TD-012 — G03 redaction not wired into legacy mediator TOOL_RESULT
+    preview / `record_evidence` metadata (consistent with pre-existing path; broadening
+    regression-prone); TD-013 — verifier cross-kind duplicate-ref blind spot (AC-5; contract
+    scoped to count-level). (LOW/accept: delegation intent projection / intra-step temporal
+    order — structural limit, noted in contract §3, no data source.)
+- **Files changed:** `agent/tool_runtime_mediator.py` (pending status derivation +
+  `_pending_dispatch_status`), `agent/evidence_redaction.py` (docstring), `tests/test_s4_*
+  {pending_tool_preview,reference_task_acceptance}.py` (Fix A tests + G07 latent fix + docstring),
+  `docs/current/{S4_GOAL_GAP,S4_FIDELITY_CONTRACT,TECH_DEBT,WORK_LOG}.md`.
+- **Verification:** final full pytest **4867 passed / 16 skipped / 28 xfailed / 0 failed / exit 0**;
+  focused ruff (all touched files) clean; `git diff --check` clean; `git ls-files config/config.yaml
+  .env` empty; both gitignored; S1/S2/S3/S4 acceptance 59 passed / 4 skipped (opt-in).
+- **`S4_GOAL_GAP.md` items:** G01-G12 all satisfied (12/12); audit complete. No close-out.
+- **`TECH_DEBT.md` items:** +TD-012, +TD-013 (audit findings); TD-001/TD-004 resolved-in-S4 unchanged.
+- **Commit:** `fix(s4): whole-stage audit — pending status fidelity + doc/debt triage`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged (api_key only transiently
+  in-process for the opt-in fake-key gate; never printed).
+- **Next step:** S4 gap loop complete (12/12 + audit). Close-out awaits explicit user
+  authorization (per AGENTS.md Stage Closing Review + S4_GOAL_GAP.md §12 checklist). No
+  authorized next step in current docs beyond close-out.

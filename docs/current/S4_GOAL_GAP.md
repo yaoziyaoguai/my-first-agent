@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 9 | G03-G11 |
+| open | 8 | G04-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 2 | G01（fidelity contract + reference task runbook）；G02（replay-faithful evidence model） |
+| satisfied | 3 | G01（contract）；G02（replay-faithful evidence model）；G03（secret-safe redaction） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -133,7 +133,14 @@
 - **Verification**: redaction 单测（fake secret 不入 evidence）；real path opt-in/默认 skip。
 - **Dependencies**: S4-G02（协同）。
 - **Non-goal boundary**: 不以泄露 secret 换保真；不读取/打印真实 secret。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G03）。
+- **Evidence**: `agent/evidence_redaction.py`（`redact_text`/`redact_metadata`，覆盖
+  OpenAI/GitHub/AWS/Slack/Google key + Bearer + 敏感键赋值；over-redact 不漏过）+ 在
+  `agent/task_replay_chain.py` 的 preview 投影点强制应用（**先 redact 再 truncate**）。
+  `tests/test_s4_evidence_redaction.py`（10 passed：注入 fake sk-/ghp_/AKIA/Bearer/kv →
+  断言被 `[REDACTED]` 且原文不出现；replay chain preview 不泄漏注入 secret）。非回归：
+  S2/S3 reference + evidence 52 passed / 2 skipped。Commit: `feat(s4): G03 secret-safe
+  redaction enforcement (AC-3 hard boundary)`。
 
 ### S4-G04 — Pending-tool event fidelity (TD-004)
 - **Priority**: P1（must_fix_for_s4）
@@ -284,7 +291,7 @@
 |---|---|---|---|---|---|
 | S4-G01 | Define fidelity contract + audit/replay reference task | P0 | satisfied | L3/Cross | AC-2/5/6 setup |
 | S4-G02 | Replay-faithful evidence model | P1 | satisfied | L3 | AC-2 |
-| S4-G03 | Secret-safe redaction enforcement | P1 | open | L3/Sec | AC-3 |
+| S4-G03 | Secret-safe redaction enforcement | P1 | satisfied | L3/Sec | AC-3 |
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | open | L3 | AC-4 |
 | S4-G05 | Evidence verification / consistency check | P1 | open | L3 | AC-5 |
 | S4-G06 | Audit/replay reference task E2E (fake/local) | P1 | open | L4 | AC-1/6 |

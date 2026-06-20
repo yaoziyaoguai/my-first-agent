@@ -201,3 +201,37 @@
 - **Next step (authorized by §3):** S4-G03 (P1) — secret-safe redaction enforcement on
   the evidence write path (inject fake secret → assert not persisted), coordinating with
   this chain model.
+
+## 2026-06-20 — S4-G03 secret-safe redaction enforcement — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G03 (P1): enforce redaction so higher-fidelity evidence never
+  persists/exposes raw secret/key/credential (AC-3 hard boundary). Coordinates with G02.
+- **Done (TDD red→green):**
+  - RED: `tests/test_s4_evidence_redaction.py` — 10 tests: redact_text on OpenAI/GitHub/
+    AWS/Slack/Google-style keys + Bearer + sensitive kv-assignment; redact_metadata
+    nested; replay chain preview does not leak injected fake secret; non-secret content
+    preserved. Confirmed fail (`ModuleNotFoundError: agent.evidence_redaction`).
+  - GREEN: new `agent/evidence_redaction.py` — `redact_text` (regex redaction of known
+    high-entropy key forms + bearer + sensitive-key value assignment; over-redact policy)
+    + `redact_metadata` (recursive; sensitive-key values wholesale `[REDACTED]`). All
+    secrets are FAKE/synthetic — never reads/matches real production credentials.
+  - Enforcement point: wired `redact_text` into `agent/task_replay_chain.py` preview
+    projection (**redact-then-truncate**) at decision/tool/delegation preview sites, so
+    the G02 replay chain — the new higher-fidelity surface — never exposes raw secrets.
+- **Files changed:** `agent/evidence_redaction.py` (new), `agent/task_replay_chain.py`
+  (preview redaction enforcement), `tests/test_s4_evidence_redaction.py` (new),
+  `docs/current/S4_GOAL_GAP.md` (G03 → satisfied + evidence; §2; §9),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `test_s4_evidence_redaction.py` + `test_s4_replay_chain.py` 18 passed.
+  Focused ruff clean. Non-regression: S2/S3 reference + evidence 52 passed / 2 skipped.
+  `git diff --check` clean. No real secret read/printed/staged (all FAKE patterns).
+- **`S4_GOAL_GAP.md` items updated:** S4-G03 → **satisfied** (AC-3 enforced on new surface).
+- **`TECH_DEBT.md` items:** none changed (TD-001 closeout still pending G05/G06).
+  - Scope note: broad redaction of the legacy `record_evidence` write path is intentionally
+    NOT done (existing `mask_user_visible_secrets` + safe_summary discipline + the new
+    chain redaction cover the higher-fidelity surface; broad change risks regression).
+    Will revisit at whole-stage audit; debt if a gap is found.
+- **Commit:** `feat(s4): G03 secret-safe redaction enforcement (AC-3 hard boundary)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G04 (P1) — pending-tool event fidelity (TD-004):
+  fill the non-empty tool_output preview in the pending-tool event path.

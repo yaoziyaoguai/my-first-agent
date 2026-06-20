@@ -7,8 +7,8 @@ task 的决策/工具/委派链路可忠实重建——超出 S3「tools.execute
 设计边界（`docs/current/S4_FIDELITY_CONTRACT.md §2/§3`）：
 - 不新增数据源：只读投影 `state.task` 既有字段，不写 state、不改 checkpoint、不重写 spine。
 - safe-summary 粒度：input/output preview 截断到 PREVIEW_MAX。
-- secret redaction 的**强制断言**属 G03（evidence 写入路径强制）；本模块只做长度边界，
-  不承担「检测并脱敏任意 secret」的全部责任。调用方持久化时必须经 G03 redaction。
+- secret redaction（G03）：preview 投影点强制经 ``evidence_redaction.redact_text``
+  脱敏（**先 redact 再 truncate**），使更高保真 chain 绝不暴露 raw secret（AC-3）。
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from typing import Any
+
+from agent.evidence_redaction import redact_text
 
 # safe-summary 截断长度，与 evidence_recorder / user_input content_preview 一致。
 PREVIEW_MAX = 200
@@ -132,7 +134,7 @@ def _decision_events(plan: Any, current_step_index: int, status: str) -> list[Re
                 name=name,
                 status=step_status,
                 input_preview="",
-                output_preview=_truncate(str(step.get("description") or "")),
+                output_preview=_truncate(redact_text(str(step.get("description") or ""))),
                 policy_outcome="plan_step",
             )
         )
@@ -153,8 +155,8 @@ def _tool_events(tool_log: dict[str, Any]) -> list[ReplayEvent]:
                 ref_id=str(tool_use_id),
                 name=str(entry.get("tool", "unknown")),
                 status=tool_status,
-                input_preview=_truncate(_stringify(entry.get("input"))),
-                output_preview=_truncate(_stringify(entry.get("result"))),
+                input_preview=_truncate(redact_text(_stringify(entry.get("input")))),
+                output_preview=_truncate(redact_text(_stringify(entry.get("result")))),
                 policy_outcome=_tool_policy_outcome(tool_status),
             )
         )
@@ -176,7 +178,7 @@ def _delegation_events(delegation_log: list[Any], current_step_index: int) -> li
                 name=str(entry.get("subagent_name", "subagent")),
                 status=str(entry.get("status", "delegated") or "delegated"),
                 input_preview="",
-                output_preview=_truncate(_stringify(entry.get("stop_reason", ""))),
+                output_preview=_truncate(redact_text(_stringify(entry.get("stop_reason", "")))),
                 policy_outcome=adjudication or "delegate",
             )
         )

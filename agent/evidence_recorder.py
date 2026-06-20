@@ -53,6 +53,7 @@ from agent.evidence_persistence import (
     summarize_content_for_persistence,
     summarize_tool_result_for_persistence,
 )
+from agent.evidence_redaction import redact_metadata
 
 SCHEMA_VERSION = "1.0"
 MEMORY_EVENT_VERSION = "1.0"
@@ -721,7 +722,10 @@ def _build_envelope(
         "content_persisted": content_persisted,
         "content_redacted": content_redacted,
         "sensitive": sensitive,
-        "metadata": {k: _summarize_metadata_value(v) for k, v in (metadata or {}).items()},
+        "metadata": {
+            k: _summarize_metadata_value(v)
+            for k, v in redact_metadata(metadata or {}).items()
+        },
     }
 
 

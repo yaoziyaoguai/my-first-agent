@@ -30,7 +30,7 @@
 |---|---:|---|---|---|
 | FINAL-G01 | P0 | L1-L5 | Full-suite quality gate green (TD-007) | done |
 | FINAL-G02 | P1 | L2 | Remove confirmed-safe dead code (TD-003) | done |
-| FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | proposed/open |
+| FINAL-G03 | P2 | L3 | Wire redaction into legacy mediator/record_evidence (TD-012) | done |
 | FINAL-G04 | P2 | L3 | Verifier cross-kind duplicate-ref detection (TD-013) | proposed/open |
 | FINAL-G05 | P2 | L1-L5 | Non-regression, closure record, debt/docs governance | proposed/open |
 | FINAL-G06 | P3 | L1 | Planner/compress legacy facade (TD-002) | proposed/open (optional) |
@@ -118,7 +118,14 @@
 - Non-goal boundary: Do not broaden to byte-for-byte replay or raw-payload
   persistence; do not regress the hot path.
 - Suggested order: 3
-- Status: proposed/open
+- Status: done
+- Evidence (2026-06-20): `redact_text` wired into the 3 mediator TOOL_RESULT preview
+  sites (`tool_runtime_mediator._route_result` x2 + `mediate_pending` x1) and
+  `redact_metadata` into `evidence_recorder.record_evidence` metadata (via
+  `_build_envelope`). TDD `tests/test_final_legacy_redaction.py` (3 tests, RED->GREEN):
+  a synthetic secret in a tool result / evidence metadata is absent from the
+  dispatched `tool_output` / recorded metadata. S4 evidence/redaction/mediator
+  suites still green.
 - Risk if ignored: a genuine (low-probability) legacy leak surface stays open.
 
 ## FINAL-G04 - Verifier cross-kind duplicate-ref detection (TD-013)

@@ -30,6 +30,7 @@ import re
 from typing import Any
 
 from agent.conversation_events import append_tool_result
+from agent.evidence_redaction import redact_text
 from agent.runtime_integration.schema import RuntimeActionRequest, RuntimeActionType
 from agent.tool_executor import (
     AWAITING_USER,
@@ -674,7 +675,7 @@ class ToolRuntimeMediator:
         log_status = str((log_entry or {}).get("status", "executed") or "executed")
         dispatch_status, execution_status = _pending_dispatch_status(log_status)
         with contextlib.suppress(Exception):
-            result_text = str(self._turn_context.get(tool_use_id, ""))[:500]
+            result_text = redact_text(str(self._turn_context.get(tool_use_id, "")))[:500]
             safe_input_metadata = _safe_tool_input_metadata(tool_name, tool_input)
             self._dispatcher.route_from_runtime_loop(
                 RuntimeActionRequest(
@@ -1269,12 +1270,12 @@ class ToolRuntimeMediator:
         safe_context = self._turn_context.get(f"_safe_tool_result:{tool_use_id}")
         safe_tool_metadata: dict[str, Any] = {}
         if isinstance(safe_context, dict):
-            result_text = str(safe_context.get("tool_output") or "")[:500]
+            result_text = redact_text(str(safe_context.get("tool_output") or ""))[:500]
             metadata = safe_context.get("metadata") or {}
             if isinstance(metadata, dict):
                 safe_tool_metadata = dict(metadata)
         else:
-            result_text = str(self._turn_context.get(tool_use_id, ""))[:500]
+            result_text = redact_text(str(self._turn_context.get(tool_use_id, "")))[:500]
         if result is None:
             status = "executed"
         elif result == FORCE_STOP:

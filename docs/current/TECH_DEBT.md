@@ -117,30 +117,12 @@
 > Technical Debt Rules. The audit's HIGH finding (pending-tool status fidelity, AC-4) was
 > **fixed in-audit** (not debt) — see the S4 archive work log
 > (`docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/`).
-
-### TD-012 - G03 redaction not wired into legacy mediator/evidence-recorder preview paths
-
-- ID: TD-012
-- Title: `evidence_redaction.redact_text`/`redact_metadata` is wired into the S4 replay-chain
-  projection (`build_replay_chain`, `audit_observability`) but NOT into the legacy
-  `tool_runtime_mediator._route_result`/`mediate_pending` TOOL_RESULT `tool_output` preview
-  (`str(...)[:500]` with no redact pass) nor `evidence_recorder.record_evidence` metadata.
-- Status: open / carry-forward (S4 audit)
-- Source/reason: S4-G03 scoped redaction to the new higher-fidelity surface (replay chain).
-  The legacy mediator/`record_evidence` paths rely on pre-existing upstream
-  `mask_user_visible_secrets` (failed/rejected) + safe-metadata discipline; broadening
-  `redact_text` to these hot paths is regression-prone and beyond G03's frozen surgical scope.
-- Impact: the archived S4 fidelity contract §1 previously overclaimed "所有 input/output 投影强制
-  redaction"; corrected in-audit to scope the hard boundary to the replay-chain surface. No
-  active leak on live paths (callers pre-filter metadata; failed/rejected results are masked
-  upstream), but a secret surviving upstream masking could reach the legacy event-log preview
-  unredacted. `redact_metadata` is currently dead code on the write path (docstring corrected).
-- Recommended stage: S5/Sn, when the mediator TOOL_RESULT preview or `record_evidence` metadata
-  path is next touched (wire `redact_text`/`redact_metadata` at both projection points + tests).
-- Verification idea: grep `redact_text|redact_metadata` call sites; currently only
-  `task_replay_chain.py` + `audit_observability.py`. After wiring: a fake secret injected into
-  a tool result must not appear in the mediator TOOL_RESULT `tool_output` nor `record_evidence`
-  metadata.
+>
+> TD-012 (redaction not wired into legacy mediator TOOL_RESULT preview /
+> `record_evidence` metadata) was **resolved in S_FINAL** (FINAL-G03: `redact_text`
+> wired into `tool_runtime_mediator._route_result` / `mediate_pending` `tool_output`
+> preview + `redact_metadata` into `record_evidence` metadata; TDD
+> `tests/test_final_legacy_redaction.py`) and removed from this live register.
 
 ### TD-013 - Evidence verifier does not detect cross-kind duplicate refs
 

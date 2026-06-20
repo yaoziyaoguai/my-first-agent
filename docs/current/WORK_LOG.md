@@ -23,6 +23,29 @@
 - `TECH_DEBT.md` items added or updated:
   - None in this step.
 - Commit hash:
-  - Pending.
+  - `e2c9cba` (`docs(s5): audit S5 baseline`)
 - Next step:
   - Draft `S5_GOAL.md` from the roadmap, baseline, and live debt.
+
+## 2026-06-20 17:32 CST - S5 goal draft
+
+- Task name: S5 goal draft from roadmap and baseline.
+- Files changed:
+  - `docs/current/S5_GOAL.md`
+  - `docs/current/WORK_LOG.md`
+- What was done:
+  - Evaluated candidate S5 directions from roadmap, S5 baseline, and live debt.
+  - Recommended Durable Governed Task Recovery as the selected S5 direction.
+  - Marked the goal as proposed / not frozen pending explicit user approval.
+  - Wrote acceptance criteria, non-goals, and open/deferred decisions.
+- Verification commands and results:
+  - Not yet run for this document-only step; final planning verification will run
+    after goal/gap/self-review are complete.
+- Stage gap items updated:
+  - None. `S5_GOAL_GAP.md` is not generated yet.
+- `TECH_DEBT.md` items added or updated:
+  - None in this step.
+- Commit hash:
+  - Pending.
+- Next step:
+  - Generate `S5_GOAL_GAP.md` without executing any S5 gap.

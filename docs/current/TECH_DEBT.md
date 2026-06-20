@@ -78,10 +78,16 @@
 - Recommended stage: S5/Sn, when scheduler-driven action planning becomes a product goal.
 - Verification idea: confirm the Scheduler is not **activated/routed** in the default
   runtime loop — `chat()`/`LoopDependencies.action_scheduler` defaults to `None`, `main.py`
-  never passes the kwarg (proven by `test_cr1_*` AST boundary tests), and execution is gated
-  by `if action_scheduler is not None`. Note: `agent/planner.py` lazily imports
-  `build_action_plan_from_model_output` for plan generation, but module import ≠ scheduler
-  activation/routing; `test_scheduler_main_path.py` + `test_cr1_*` cover the dormant surface.
+  never passes the kwarg (proven by AST boundary tests
+  `tests/test_architecture_boundaries.py::test_cr1_chat_default_action_scheduler_is_none`
+  and
+  `tests/test_architecture_boundaries.py::test_cr1_main_py_does_not_pass_action_scheduler_kwarg`),
+  and execution is gated by `if action_scheduler is not None`. Note: `agent/planner.py`
+  lazily imports `build_action_plan_from_model_output` for plan generation, but module
+  import ≠ scheduler activation/routing; `tests/runtime_integration/test_action_scheduler.py`
+  and the two `tests/test_architecture_boundaries.py` cr1 boundary tests
+  (`test_cr1_chat_default_action_scheduler_is_none`,
+  `test_cr1_main_py_does_not_pass_action_scheduler_kwarg`) cover the dormant surface.
 
 ### TD-009 - Full MCP ecosystem deferred
 

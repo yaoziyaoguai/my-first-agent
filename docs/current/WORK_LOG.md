@@ -162,3 +162,42 @@
 - **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
 - **Next step (authorized by §3):** S4-G02 (P1) — replay-faithful evidence model on the
   existing evidence seam (TDD red→green), per this contract §3.
+
+## 2026-06-20 — S4-G02 replay-faithful evidence model — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G02 (P1): project a replay-faithful evidence chain on the existing
+  evidence seam (TDD red→green). Digests TD-001 (evidence not byte-for-byte → at least
+  reconstructable chain).
+- **Done (TDD red→green):**
+  - RED: `tests/test_s4_replay_chain.py` — 8 tests asserting projection/ordering/
+    truncation/reconstructability + `TaskEvidenceReport.replay_chain_events`. Confirmed
+    fail (`ModuleNotFoundError: agent.task_replay_chain`) for the intended reason.
+  - GREEN: new `agent/task_replay_chain.py` — `ReplayEvent`/`ReplayChain`/
+    `build_replay_chain(state)`. Read-only projection of `tool_execution_log` +
+    `delegation_log` + plan steps into an ordered, reconstructable chain at
+    safe-summary granularity (PREVIEW_MAX truncation). Decision events derived from
+    plan steps (advanced/in_progress/planned) since task-state persists no transition
+    history. Does NOT mutate state, does NOT change checkpoint, adds NO new data source,
+    does NOT rewrite spine (per contract §2/§3). Secret redaction enforcement is G03's
+    job; this module only does length-bounded previews.
+  - Wired `replay_chain_events: tuple[ReplayEvent, ...] = ()` (default → backward
+    compatible) into `agent/task_evidence_report.py:TaskEvidenceReport`, populated in
+    `build_task_evidence_report` so the report exceeds the prior label-only level.
+- **Files changed:** `agent/task_replay_chain.py` (new), `agent/task_evidence_report.py`
+  (replay_chain_events field + populate), `tests/test_s4_replay_chain.py` (new),
+  `docs/current/S4_GOAL_GAP.md` (G02 → satisfied + evidence; §2 distribution; §9 index),
+  `docs/current/WORK_LOG.md` (this entry).
+- **Verification:** `tests/test_s4_replay_chain.py` 8 passed. Focused ruff
+  (`agent/task_replay_chain.py`, `agent/task_evidence_report.py`) clean. Non-regression:
+  S2 + S3 reference task acceptance + evidence lifecycle 52 passed / 2 skipped
+  (real-provider opt-in, expected). `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G02 → **satisfied** (AC-2 basis in place).
+- **`TECH_DEBT.md` items:** TD-001 not yet marked resolved — G03 (redaction) + G05
+  (verifier) + G06 (E2E) still needed to fully close the fidelity contract; will
+  revisit at whole-stage audit.
+- **Commit:** `feat(s4): G02 replay-faithful evidence model (redacted-faithful chain
+  projection)` (see `git log`).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step (authorized by §3):** S4-G03 (P1) — secret-safe redaction enforcement on
+  the evidence write path (inject fake secret → assert not persisted), coordinating with
+  this chain model.

@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 10 | G02-G11 |
+| open | 9 | G03-G11 |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 1 | G01（fidelity contract + reference task runbook，define-only） |
+| satisfied | 2 | G01（fidelity contract + reference task runbook）；G02（replay-faithful evidence model） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -112,7 +112,14 @@
   不回归。
 - **Dependencies**: S4-G01。
 - **Non-goal boundary**: 不持久化 raw secret（见 G03）；不做 durable ledger；不逐字存一切。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G02）。
+- **Evidence**: `agent/task_replay_chain.py`（`ReplayEvent`/`ReplayChain`/`build_replay_chain`，
+  只读投影 tool_execution_log + delegation_log + plan steps 成有序可复放链路，safe-summary
+  截断；不写 state、不改 checkpoint、不新增数据源）+ `agent/task_evidence_report.py`
+  （`TaskEvidenceReport.replay_chain_events` 带默认值，向后兼容，报告超出标签级）。
+  `tests/test_s4_replay_chain.py`（8 passed）。非回归：S2/S3 reference + evidence
+  52 passed / 2 skipped（real-provider opt-in）。Commit: `feat(s4): G02 replay-faithful
+  evidence model (redacted-faithful chain projection)`。
 
 ### S4-G03 — Secret-safe redaction enforcement
 - **Priority**: P1（must_fix_for_s4）
@@ -276,7 +283,7 @@
 | ID | Title | Priority | Status | Layer | Related AC |
 |---|---|---|---|---|---|
 | S4-G01 | Define fidelity contract + audit/replay reference task | P0 | satisfied | L3/Cross | AC-2/5/6 setup |
-| S4-G02 | Replay-faithful evidence model | P1 | open | L3 | AC-2 |
+| S4-G02 | Replay-faithful evidence model | P1 | satisfied | L3 | AC-2 |
 | S4-G03 | Secret-safe redaction enforcement | P1 | open | L3/Sec | AC-3 |
 | S4-G04 | Pending-tool event fidelity (TD-004) | P1 | open | L3 | AC-4 |
 | S4-G05 | Evidence verification / consistency check | P1 | open | L3 | AC-5 |

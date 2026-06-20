@@ -48,10 +48,10 @@
 
 | Status | Count | Gap IDs |
 |---|---|---|
-| open | 1 | G11 |
+| open | 0 | — |
 | deferred | 1 | G12 |
 | blocked | 0 | —（goal 已冻结；无外部阻塞；依赖在 backlog 内按 §3 排序） |
-| satisfied | 10 | G01-G10（+ full-suite green signal；S2 回归已捕获并修复） |
+| satisfied | 11 | G01-G11（+ optional audit observability；G12 deferred） |
 
 ## 3. Recommended execution order（依赖排序；goal 已冻结，按此顺序执行）
 
@@ -319,7 +319,12 @@
 - **Verification**: 增强项有测试/证据；不回归 P1/P2。
 - **Dependencies**: S4-G02/G05。
 - **Non-goal boundary**: 不升级为必达；不滑向外部上报/生态化。
-- **Status**: open。
+- **Status**: **satisfied**（2026-06-20，S4 gap loop G11，P3 增强）。
+- **Evidence**: `agent/audit_observability.py`（`render_replay_summary(chain)` 人读审计视图 +
+  `replay_summary_stats(chain)` 结构化计数；preview 已在 chain 投影点 G03 redacted，本模块再过
+  redact_text 作 defense-in-depth；不采集/不持久化/不外部上报）。`tests/test_s4_audit_observability.py`
+  （4 passed：人读可读 + fake secret 不出现 + 计数无 content 泄漏 + 空链不 crash）。Commit:
+  `feat(s4): G11 optional audit observability (human-readable replay view, P3)`。
 
 ---
 
@@ -359,7 +364,7 @@
 | S4-G08 | Acceptance gate evidence-fidelity classification | P2 | satisfied | L1/Cross | AC-7 |
 | S4-G09 | docs/current+history governance for S4 | P2 | satisfied | Cross | AC-8 |
 | S4-G10 | S1/S2/S3 non-regression + full-suite green signal | P2 | satisfied | Cross/L1 | AC-1/9 |
-| S4-G11 | Optional audit observability | P3 | open | L3 | AC-2/5 (enhance) |
+| S4-G11 | Optional audit observability | P3 | satisfied | L3 | AC-2/5 (enhance) |
 | S4-G12 | Deferred boundaries & TECH_DEBT triage (S5/Sn) | P4 | deferred | Cross | §7 |
 
 ## 10. Non-goal guardrails

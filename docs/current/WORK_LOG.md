@@ -455,3 +455,25 @@
 - **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
 - **Next step (authorized by §3):** S4-G11 (P3) — optional audit observability
   (human-readable replay summary view); then S4-G12 (P4) deferred triage; then whole-stage audit.
+
+## 2026-06-20 — S4-G11 optional audit observability — user-authorized (S4 gap loop)
+
+- **Task:** Execute S4-G11 (P3, optional): human-readable audit view / replay summary. Enhances
+  AC-2/AC-5; non-blocking.
+- **Done:** new `agent/audit_observability.py` — `render_replay_summary(chain)` (one line per
+  replay event: seq/step/kind/name/status/policy + redacted preview) +
+  `replay_summary_stats(chain)` (integer counts, no content). Previews are already redacted at
+  the chain projection (G03); this module passes them through `redact_text` again as
+  defense-in-depth. Read-only renderer — no collection, no persistence, no external reporting.
+- **Files changed:** `agent/audit_observability.py` (new), `tests/test_s4_audit_observability.py`
+  (new), `docs/current/S4_GOAL_GAP.md` (G11 → satisfied; §2; §9), `docs/current/WORK_LOG.md`.
+- **Verification:** `test_s4_audit_observability.py` 4 passed (human-readable; injected fake
+  secret absent; stats no content leak; empty chain no crash). Focused ruff clean.
+  `git diff --check` clean.
+- **`S4_GOAL_GAP.md` items updated:** S4-G11 → **satisfied** (P3 enhancement in place).
+- **`TECH_DEBT.md` items:** none changed.
+- **Commit:** `feat(s4): G11 optional audit observability (human-readable replay view, P3)`.
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged (fake secret only).
+- **Next step (authorized by §3):** S4-G12 (P4) deferred boundaries & TECH_DEBT triage
+  (register-only: confirm byte-for-byte/durable-ledger/memory/Scheduler/MCP/multi-agent/
+  TD-002/003/007 stay deferred and absent from S4 P0-P2).

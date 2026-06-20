@@ -13,7 +13,7 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
-## Stage Development Governance (S4 closed / S5 implemented, pending close-out)
+## Stage Development Governance (S1-S5 closed/archived; roadmap final audit preparing)
 
 This project uses a staged development governance model. Stages close one at a
 time: a closed stage is archived under `docs/history/`, and `docs/current/`
@@ -33,13 +33,16 @@ keeps only the live working set.
   `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md`
   (G01-G12 satisfied; independent close-out audit passed; full pytest green in
   the S4 audit record).
-- **S5 (Durable Governed Task Recovery) is implemented and pending close-out.**
-  Its baseline/goal/gap live under `docs/current/`
-  (`S5_BASELINE_STATUS.md` → `S5_GOAL.md` → `S5_GOAL_GAP.md`, plus `WORK_LOG.md`).
-  The S5 gap loop G01-G11 has executed with evidence (G12 is a deferred/non-goal
-  guardrail); full pytest is green. S5 close-out (archive under
-  `docs/history/S5_*/`) is not yet performed. Do not treat any S5 capability as
-  built until its gap loop has executed with evidence — which it now has.
+- S5 (Durable Governed Task Recovery) is complete and archived under
+  `docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/`; its release record is
+  `docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md`
+  (G01-G11 satisfied; G12 deferred/non-goal guardrail; full pytest green;
+  independent audit passed with all findings fixed).
+- **Roadmap final audit is preparing.** With S1-S5 closed, the active working set
+  under `docs/current/` is the roadmap final baseline/goal/gap
+  (`S_FINAL_BASELINE_STATUS.md` → `S_FINAL_GOAL.md` → `S_FINAL_GAP.md`) plus the
+  cross-stage `S_ROADMAP.md` and `TECH_DEBT.md`. The final gap loop is **NOT**
+  executed; this is roadmap收尾 planning, not a new product stage (no S6).
 
 Historical documents are evidence, not routing authority. Do not use historical
 docs (including archived S1/S2 stage docs) to override current work unless the
@@ -47,33 +50,31 @@ user explicitly promotes them back into `docs/current/`.
 
 ### Current Documents
 
-The current working set under `docs/current/` is the active S5 planning set plus
-the cross-stage roadmap / debt registers:
+The current working set under `docs/current/` is the roadmap final planning set
+plus the cross-stage roadmap / debt registers (S1-S5 are archived under
+`docs/history/`):
 
 - `docs/current/S_ROADMAP.md`
   - Authoritative S-series version semantics and high-level direction.
   - Does not encode a hard implementation plan for S2/S3/Sn.
 - `docs/current/TECH_DEBT.md`
   - Cross-stage carry-forward technical-debt register.
-  - Keeps only unresolved debt that may affect S5/Sn; resolved items live in their
-    stage archives, not here.
-- `docs/current/S5_BASELINE_STATUS.md` — S5 starting facts (post-S4 baseline).
-- `docs/current/S5_GOAL.md` — S5 goal (frozen once the user approves; goal rules
-  below).
-- `docs/current/S5_GOAL_GAP.md` — S5 gap backlog (not executed yet).
-- `docs/current/WORK_LOG.md` — S5 work log (append per run).
+  - Keeps only unresolved carry-forward debt; resolved items live in their stage
+    archives.
+- `docs/current/S_FINAL_BASELINE_STATUS.md` — roadmap final baseline audit
+  (post-S5, roadmap收尾).
+- `docs/current/S_FINAL_GOAL.md` — roadmap final goal (mainline closure).
+- `docs/current/S_FINAL_GAP.md` — roadmap final gap backlog (NOT executed).
 
-At S5 close-out (only on user authorization), the S5 stage docs are archived
-under `docs/history/S5_*/` per the **Stage Closing Review**, and this section is
-reset to the post-S5 roadmap + tech-debt working set. Stage scratch evidence
-(`_tmp_*`) is archived to the stage's `_review_artifacts/` at close-out (mirrors
-the S2/S3/S4 archive layout).
+Stage scratch evidence (`_tmp_*`) is archived to the relevant stage's
+`_review_artifacts/` at close-out (mirrors the S2/S3/S4/S5 archive layout).
 
 ### Goal and Gap Rules
 
-These rules apply to whichever stage is active. **S5 is implemented and pending
-close-out**: `S5_GOAL.md` is frozen and `S5_GOAL_GAP.md` is the executed gap
-register under `docs/current/`.
+These rules apply to whichever stage/goal is active. **S5 is closed/archived**;
+the active item is the **roadmap final goal** (`S_FINAL_GOAL.md`), with
+`S_FINAL_GAP.md` as the live gap register under `docs/current/`. The final goal is
+roadmap mainline closure — not a new product stage.
 
 1. The active stage `*_GOAL.md` is frozen after user approval.
    - Do not change the goal because implementation is hard.

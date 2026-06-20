@@ -1,12 +1,12 @@
 # my-first-agent
 
-First Agent 是一个 local-first 的 Agent Runtime 项目。S1/S2/S3/S4 已完成并归档；**S5（Durable Governed Task Recovery）已实现并待 close-out（G01-G11 done、G12 non-goal，full pytest green）**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收并继续增强。
+First Agent 是一个 local-first 的 Agent Runtime 项目。S1/S2/S3/S4/S5 已完成并归档；当前进入 **roadmap 收尾审计（roadmap final audit，preparing）**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收。
 
-**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/S5_BASELINE_STATUS.md](docs/current/S5_BASELINE_STATUS.md)（S5 起点现状）。S5 目标（frozen）见 [docs/current/S5_GOAL.md](docs/current/S5_GOAL.md)，gap backlog（executed）见 [docs/current/S5_GOAL_GAP.md](docs/current/S5_GOAL_GAP.md)；S1/S2/S3/S4 已归档至 [docs/history/](docs/history/)。
+**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1/S2/S3/S4/S5 已归档至 [docs/history/](docs/history/)（S5 release summary 见 [docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md](docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md)）。
 
 ## 当前状态
 
-- 阶段：**S1/S2/S3/S4 已完成并归档；S5（Durable Governed Task Recovery）已实现并待 close-out（G01-G11 done、G12 non-goal，full pytest green）**（见 [docs/current/S5_BASELINE_STATUS.md](docs/current/S5_BASELINE_STATUS.md)），不是历史 demo、sprint 或旧 v1/v2/v3 目标。
+- 阶段：**S1/S2/S3/S4/S5 已完成并归档；roadmap final audit 准备中（S_FINAL baseline/goal/gap 待生成，final gap loop 未执行）**，不是历史 demo、sprint 或旧 v1/v2/v3 目标。
 - 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
 - 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
 - Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
@@ -50,12 +50,8 @@ cp config/config.example.yaml config/config.yaml
 | 想了解 | 读这里 |
 |---|---|
 | S 系列版本语义 | [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) |
-| S5 起点现状审计 | [docs/current/S5_BASELINE_STATUS.md](docs/current/S5_BASELINE_STATUS.md) |
-| S5 目标（frozen） | [docs/current/S5_GOAL.md](docs/current/S5_GOAL.md) |
-| S5 gap backlog（executed） | [docs/current/S5_GOAL_GAP.md](docs/current/S5_GOAL_GAP.md) |
 | 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
-| 执行日志 | [docs/current/WORK_LOG.md](docs/current/WORK_LOG.md) |
-| S1/S2/S3/S4（已归档） | [docs/history/S1_BASELINE_USABLE_PRODUCT/](docs/history/S1_BASELINE_USABLE_PRODUCT/) · [docs/history/S2_GOVERNED_TASK_AGENT/](docs/history/S2_GOVERNED_TASK_AGENT/) · [docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/](docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/) · [docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/](docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/) |
+| S1/S2/S3/S4/S5（已归档） | [docs/history/](docs/history/) · S5 release summary 见 [docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md](docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md) |
 
 ## 测试
 

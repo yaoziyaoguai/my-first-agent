@@ -1,14 +1,12 @@
 # Technical Debt Register
 
-> Cross-stage carry-forward debt register. S2, S3, and S4 are complete and
-> archived under `docs/history/`. **S5 is preparing**. This file keeps
-> **unresolved** debt that may affect S5/Sn plus S5/Sn scope boundaries
-> deliberately deferred by prior frozen goals. Resolved items live in their stage
-> archive (e.g. TD-006 was resolved in S3-G09; TD-001/TD-004 were resolved in S4
-> and recorded in
-> `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md`), not
-> here. Do not use this file as a general unfinished-task list; do not write stage
-> goals here.
+> Cross-stage carry-forward debt register. S1-S5 are complete and archived under
+> `docs/history/`. This file keeps only **unresolved** carry-forward debt plus
+> scope boundaries deliberately deferred to Sn/future by prior frozen goals.
+> Resolved items live in their stage archive (e.g. TD-006 resolved in S3-G09;
+> TD-001/TD-004 resolved in S4; TD-011 resolved in S5) and are recorded in the
+> relevant `docs/history/<STAGE>/<STAGE>_RELEASE_SUMMARY.md`, not here. Do not use
+> this file as a general unfinished-task list; do not write stage goals here.
 
 ## Rules
 
@@ -75,11 +73,15 @@
   unrelated dead code is mentioned, not deleted; not S3-triggered). Ready for
   safe deletion when the L2 context module is next touched (S5/Sn).
 
-## Deferred to S5/Sn (prior-stage scope boundaries)
+## Deferred to Sn / future (prior-stage scope boundaries)
 
 > These are scope boundaries deliberately excluded from prior frozen goals and
-> carried forward for S5/Sn consideration. Each stays deferred unless a future
+> carried forward for Sn/future consideration. Each stays deferred unless a future
 > stage's frozen goal explicitly authorizes it.
+>
+> TD-011 (durable task ledger) was **resolved in S5** (S5-G01..G11) and removed
+> from this live register at S5 close-out; its resolution record lives in
+> `docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md`.
 
 ### TD-008 - Scheduler productionization / main-loop activation deferred
 
@@ -132,34 +134,13 @@
   not a live path. When S5/Sn activates L1/L2 or writable delegation, the evidence recording
   (`record_delegation_run`) must be wired into that path too, mirroring the inline-L0 wiring.
 
-### TD-011 - Durable task ledger (resolved in S5)
-
-- ID: TD-011
-- Title: Independent durable (cross-session, crash-survivable) task ledger.
-- Status: resolved in S5 (retained in the live register until S5 close-out archive)
-- Source/reason: Frozen S3 goal listed the durable ledger as a non-goal / S3+ candidate.
-  S2/S3/S4 used checkpoint-based resume (file-scoped).
-- Impact: Addressed — S5 delivered a local-only, append-oriented JSONL durable ledger
-  with checkpoint-ledger cooperation and a fake/local recovery E2E.
-- Recommended stage: S5 (done).
-- Verification idea: `agent/task_ledger.py` / `agent/task_ledger_store.py` /
-  `agent/task_ledger_cooperation.py` / `agent/ledger_audit_alignment.py` /
-  `agent/ledger_summary.py`; `tests/test_s5_*.py`; full pytest green. Checkpoint
-  remains the state restoration source (`agent/checkpoint.py` save_checkpoint /
-  load_checkpoint_to_state); the ledger supplements it (not a second spine).
-- Resolution (S5, 2026-06-20): S5-G01..G11 implemented the durable governed task
-  ledger (contract + redaction + JSONL storage + checkpoint-ledger cooperation +
-  recovery E2E + audit/replay alignment + same-spine guard + durability acceptance
-  classification + extension-boundary coverage + operator summary). Per AGENTS.md,
-  resolved items are removed from this live register at stage close-out; this entry
-  is retained only because S5 close-out is not yet user-authorized.
-
 ## S4 whole-stage audit findings (2026-06-20)
 
 > Surfaced by the S4 whole-stage audit (multi-dimension adversarial review). Each is real but
 > out-of-scope/risky to fix within S4's surgical boundaries; recorded here per `AGENTS.md`
 > Technical Debt Rules. The audit's HIGH finding (pending-tool status fidelity, AC-4) was
-> **fixed in-audit** (not debt) — see `WORK_LOG.md` S4 whole-stage audit entry.
+> **fixed in-audit** (not debt) — see the S4 archive work log
+> (`docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/`).
 
 ### TD-012 - G03 redaction not wired into legacy mediator/evidence-recorder preview paths
 

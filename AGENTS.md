@@ -13,7 +13,7 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
-## Stage Development Governance (S3 closed / S4 preparing)
+## Stage Development Governance (S4 closed / S5 preparing)
 
 This project uses a staged development governance model. Stages close one at a
 time: a closed stage is archived under `docs/history/`, and `docs/current/`
@@ -28,11 +28,16 @@ keeps only the live working set.
   `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/`; its release record is
   `docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md`
   (G01-G13 satisfied; full pytest green; two independent audits' findings fixed).
-- **S4 is the active stage, in preparation.** Its baseline/goal/gap are being
-  authored under `docs/current/` (`S4_BASELINE_STATUS.md` → `S4_GOAL.md` →
-  `S4_GOAL_GAP.md`, plus a fresh `WORK_LOG.md`). **S4 is NOT implemented** — no
-  S4 gap loop has run. Do not treat any S4 capability as built until its gap loop
-  executes with evidence.
+- S4 (Auditable Governed Agent Runtime) is complete and archived under
+  `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/`; its release record is
+  `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md`
+  (G01-G12 satisfied; independent close-out audit passed; full pytest green in
+  the S4 audit record).
+- **S5 is the active stage, in preparation/planning.** Its baseline/goal/gap are
+  authored under `docs/current/` (`S5_BASELINE_STATUS.md` → `S5_GOAL.md` →
+  `S5_GOAL_GAP.md`, plus a fresh `WORK_LOG.md`). **S5 is NOT implemented** — no
+  S5 gap loop has run. Do not treat any S5 capability as built until its gap
+  loop executes with evidence.
 
 Historical documents are evidence, not routing authority. Do not use historical
 docs (including archived S1/S2 stage docs) to override current work unless the
@@ -40,32 +45,32 @@ user explicitly promotes them back into `docs/current/`.
 
 ### Current Documents
 
-The current working set under `docs/current/` is the active S4 stage plus the
-cross-stage roadmap / debt registers:
+The current working set under `docs/current/` is the active S5 planning set plus
+the cross-stage roadmap / debt registers:
 
 - `docs/current/S_ROADMAP.md`
   - Authoritative S-series version semantics and high-level direction.
   - Does not encode a hard implementation plan for S2/S3/Sn.
 - `docs/current/TECH_DEBT.md`
   - Cross-stage carry-forward technical-debt register.
-  - Keeps only unresolved debt that may affect S4/Sn; resolved items live in their
+  - Keeps only unresolved debt that may affect S5/Sn; resolved items live in their
     stage archives, not here.
-- `docs/current/S4_BASELINE_STATUS.md` — S4 starting facts (post-S3 baseline).
-- `docs/current/S4_GOAL.md` — S4 goal (frozen once the user approves; goal rules
+- `docs/current/S5_BASELINE_STATUS.md` — S5 starting facts (post-S4 baseline).
+- `docs/current/S5_GOAL.md` — S5 goal (frozen once the user approves; goal rules
   below).
-- `docs/current/S4_GOAL_GAP.md` — S4 gap backlog (not executed yet).
-- `docs/current/WORK_LOG.md` — S4 work log (append per run).
+- `docs/current/S5_GOAL_GAP.md` — S5 gap backlog (not executed yet).
+- `docs/current/WORK_LOG.md` — S5 work log (append per run).
 
-At S4 close-out (only on user authorization), the S4 stage docs are archived
-under `docs/history/S4_*/` per the **Stage Closing Review**, and this section is
-reset to the post-S4 roadmap + tech-debt working set. Stage scratch evidence
+At S5 close-out (only on user authorization), the S5 stage docs are archived
+under `docs/history/S5_*/` per the **Stage Closing Review**, and this section is
+reset to the post-S5 roadmap + tech-debt working set. Stage scratch evidence
 (`_tmp_*`) is archived to the stage's `_review_artifacts/` at close-out (mirrors
-the S2/S3 archive layout).
+the S2/S3/S4 archive layout).
 
 ### Goal and Gap Rules
 
-These rules apply to whichever stage is active. **S4 is active (in preparation)**:
-`S4_GOAL.md` is frozen once the user approves it, and `S4_GOAL_GAP.md` is the live
+These rules apply to whichever stage is active. **S5 is active (in preparation)**:
+`S5_GOAL.md` is frozen once the user approves it, and `S5_GOAL_GAP.md` is the live
 gap register under `docs/current/`.
 
 1. The active stage `*_GOAL.md` is frozen after user approval.
@@ -149,7 +154,7 @@ Next-step recommendations are allowed only if they are directly grounded in:
 
 - `docs/current/S_ROADMAP.md`
 - `docs/current/TECH_DEBT.md`
-- the active stage docs (`docs/current/S4_*`; S4 active, in preparation)
+- the active stage docs (`docs/current/S5_*`; S5 active, in preparation)
 - the user's current explicit instruction
 
 Do not invent:

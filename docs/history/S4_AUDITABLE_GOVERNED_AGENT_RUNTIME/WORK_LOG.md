@@ -564,3 +564,29 @@
 - **Next step:** S4 gap loop complete (12/12 + audit). Close-out awaits explicit user
   authorization (per AGENTS.md Stage Closing Review + S4_GOAL_GAP.md §12 checklist). No
   authorized next step in current docs beyond close-out.
+
+## 2026-06-20 — S4 close-out + archive — user-authorized
+
+- **Task:** Independent S4 audit verdict was PASS; close out S4 and archive the
+  S4 working set. Do not push. Do not execute S5 gaps.
+- **Done:**
+  - Archived S4 stage docs to `docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/`:
+    `S4_BASELINE_STATUS.md`, `S4_GOAL.md`, `S4_GOAL_GAP.md`,
+    `S4_FIDELITY_CONTRACT.md`, and this `WORK_LOG.md`.
+  - Added `S4_RELEASE_SUMMARY.md`.
+  - Cleaned live `TECH_DEBT.md`: TD-001 and TD-004 removed from the live register
+    because they are resolved-in-S4 and recorded in the release summary; open /
+    deferred / carry-forward items remain.
+  - Reset `docs/current/` toward the next-stage working set.
+- **Verification before archive:** S4 suite `44 passed, 1 skipped`; S1 targeted
+  `22 passed`; S2 targeted `32 passed, 1 skipped`; S3 targeted `30 passed,
+  1 skipped`; focused ruff on S4-touched Python/test files clean; safety checks
+  showed `config/config.yaml` and `.env` untracked + gitignored.
+- **`S4_GOAL_GAP.md` items updated:** none; G01-G12 were already satisfied and
+  audited before close-out.
+- **`TECH_DEBT.md` items:** TD-001 and TD-004 resolved-in-S4 removed from live
+  register; TD-002/003/007/012/013 open, TD-008/009/010/011 deferred.
+- **Commit:** close-out commit (see `git log` for this entry's archive move).
+- **Push:** none. **Secrets:** none read/printed/copied/moved/staged.
+- **Next step:** create S5 baseline, goal, and gap docs under `docs/current/`
+  without executing any S5 gap.

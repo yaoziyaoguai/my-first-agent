@@ -1,8 +1,9 @@
 # Technical Debt Register
 
-> Cross-stage carry-forward debt register. S1-S5 are complete and archived under
-> `docs/history/`. This file keeps only **unresolved** carry-forward debt plus
-> scope boundaries deliberately deferred to Sn/future by prior frozen goals.
+> Cross-stage carry-forward debt register. S1-S5 + S_FINAL are complete and
+> archived under `docs/history/`; the S-series roadmap mainline is closed. This
+> file keeps only **unresolved** carry-forward debt plus scope boundaries
+> deliberately deferred to Sn/future by prior frozen goals.
 > Resolved items live in their stage archive (e.g. TD-006 resolved in S3-G09;
 > TD-001/TD-004 resolved in S4; TD-011 resolved in S5) and are recorded in the
 > relevant `docs/history/<STAGE>/<STAGE>_RELEASE_SUMMARY.md`, not here. Do not use

@@ -1,8 +1,9 @@
 # S_FINAL Gap Backlog — Roadmap Mainline Closure
 
-> Status: **proposed / not executed**. Derived from `S_FINAL_BASELINE_STATUS.md`
-> and the proposed `S_FINAL_GOAL.md`. This is the **last** gap document. The final
-> gap loop is **not** executed by this document (and not authorized here).
+> Status: **executed (G01-G05 done; G06 deferred carry-forward; G07 guardrail
+> verified)**. Derived from `S_FINAL_BASELINE_STATUS.md` and the frozen
+> `S_FINAL_GOAL.md`. The final gap loop has run with evidence; roadmap mainline
+> closure is complete.
 
 ## Priority Model
 

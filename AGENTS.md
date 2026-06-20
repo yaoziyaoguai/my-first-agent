@@ -13,7 +13,7 @@ future work can stay scoped without relying on a giant prompt each time.
 - `v0.8.0` is the Memory architecture foundation release. Do not create,
   delete, retarget, or push tags without explicit user authorization.
 
-## Stage Development Governance (S1-S5 closed/archived; roadmap final audit preparing)
+## Stage Development Governance (S1-S5 + S_FINAL closed; roadmap mainline closed)
 
 This project uses a staged development governance model. Stages close one at a
 time: a closed stage is archived under `docs/history/`, and `docs/current/`
@@ -38,11 +38,13 @@ keeps only the live working set.
   `docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md`
   (G01-G11 satisfied; G12 deferred/non-goal guardrail; full pytest green;
   independent audit passed with all findings fixed).
-- **Roadmap final audit is preparing.** With S1-S5 closed, the active working set
-  under `docs/current/` is the roadmap final baseline/goal/gap
-  (`S_FINAL_BASELINE_STATUS.md` → `S_FINAL_GOAL.md` → `S_FINAL_GAP.md`) plus the
-  cross-stage `S_ROADMAP.md` and `TECH_DEBT.md`. The final gap loop is **NOT**
-  executed; this is roadmap收尾 planning, not a new product stage (no S6).
+- **S_FINAL (Roadmap Mainline Closure) is complete and archived** under
+  `docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/`; its release record is
+  `docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md`
+  (FINAL-G01..G05 done; G06 deferred carry-forward; G07 guardrail verified;
+  full-suite ruff green; full pytest green). **The S-series roadmap mainline is
+  closed.** There is no active stage; any next work is a new, separately-authorized
+  direction (no S6).
 
 Historical documents are evidence, not routing authority. Do not use historical
 docs (including archived S1/S2 stage docs) to override current work unless the
@@ -50,8 +52,8 @@ user explicitly promotes them back into `docs/current/`.
 
 ### Current Documents
 
-The current working set under `docs/current/` is the roadmap final planning set
-plus the cross-stage roadmap / debt registers (S1-S5 are archived under
+With the S-series roadmap mainline closed, `docs/current/` holds only the
+cross-stage roadmap + debt registers (S1-S5 + S_FINAL are archived under
 `docs/history/`):
 
 - `docs/current/S_ROADMAP.md`
@@ -59,22 +61,19 @@ plus the cross-stage roadmap / debt registers (S1-S5 are archived under
   - Does not encode a hard implementation plan for S2/S3/Sn.
 - `docs/current/TECH_DEBT.md`
   - Cross-stage carry-forward technical-debt register.
-  - Keeps only unresolved carry-forward debt; resolved items live in their stage
-    archives.
-- `docs/current/S_FINAL_BASELINE_STATUS.md` — roadmap final baseline audit
-  (post-S5, roadmap收尾).
-- `docs/current/S_FINAL_GOAL.md` — roadmap final goal (mainline closure).
-- `docs/current/S_FINAL_GAP.md` — roadmap final gap backlog (NOT executed).
+  - Keeps only unresolved carry-forward / deferred debt; resolved items live in
+    their stage archives.
 
 Stage scratch evidence (`_tmp_*`) is archived to the relevant stage's
 `_review_artifacts/` at close-out (mirrors the S2/S3/S4/S5 archive layout).
 
 ### Goal and Gap Rules
 
-These rules apply to whichever stage/goal is active. **S5 is closed/archived**;
-the active item is the **roadmap final goal** (`S_FINAL_GOAL.md`), with
-`S_FINAL_GAP.md` as the live gap register under `docs/current/`. The final goal is
-roadmap mainline closure — not a new product stage.
+These rules apply to whichever stage/goal is active. **The S-series roadmap
+mainline is closed** (S1-S5 + S_FINAL all archived under `docs/history/`); there is
+no active stage or live gap register under `docs/current/`. Any new stage work
+requires a new, explicitly-authorized goal before `docs/current/` stage docs are
+recreated.
 
 1. The active stage `*_GOAL.md` is frozen after user approval.
    - Do not change the goal because implementation is hard.
@@ -157,7 +156,10 @@ Next-step recommendations are allowed only if they are directly grounded in:
 
 - `docs/current/S_ROADMAP.md`
 - `docs/current/TECH_DEBT.md`
-- the active item docs (`docs/current/S_FINAL_*`; roadmap final audit in preparation)
+- the cross-stage current docs (`docs/current/S_ROADMAP.md`,
+  `docs/current/TECH_DEBT.md`); the roadmap mainline is closed and there is no
+  active stage. Archived stage docs under `docs/history/` are evidence, not
+  routing authority.
 - the user's current explicit instruction
 
 Do not invent:

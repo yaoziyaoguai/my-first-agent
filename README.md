@@ -1,12 +1,12 @@
 # my-first-agent
 
-First Agent 是一个 local-first 的 Agent Runtime 项目。S1/S2/S3/S4/S5 已完成并归档；当前进入 **roadmap 收尾审计（roadmap final audit，preparing）**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收。
+First Agent 是一个 local-first 的 Agent Runtime 项目。**S1-S5 + roadmap final closure 已全部完成并归档，roadmap 主线已收尾**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收。
 
-**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1/S2/S3/S4/S5 已归档至 [docs/history/](docs/history/)（S5 release summary 见 [docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md](docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md)）。
+**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1-S5 及 roadmap final closure 均已归档至 [docs/history/](docs/history/)（closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md)）。
 
 ## 当前状态
 
-- 阶段：**S1/S2/S3/S4/S5 已完成并归档；roadmap final audit（S_FINAL baseline/goal/gap 已生成，final gap loop 未执行）**，不是历史 demo、sprint 或旧 v1/v2/v3 目标。
+- 阶段：**roadmap 主线已收尾（S1-S5 + S_FINAL closure 全部完成并归档，无 active S 阶段）**，不是历史 demo、sprint 或旧 v1/v2/v3 目标。
 - 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
 - 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
 - Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
@@ -43,7 +43,7 @@ cp config/config.example.yaml config/config.yaml
 
 `--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 仍按当前阶段文档约束，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S_FINAL_BASELINE_STATUS.md](docs/current/S_FINAL_BASELINE_STATUS.md) 与 [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)。
+当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 仍按当前阶段文档约束，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。
 
 ## 文档导航
 
@@ -51,10 +51,7 @@ cp config/config.example.yaml config/config.yaml
 |---|---|
 | S 系列版本语义 | [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) |
 | 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
-| Roadmap final baseline | [docs/current/S_FINAL_BASELINE_STATUS.md](docs/current/S_FINAL_BASELINE_STATUS.md) |
-| Roadmap final goal | [docs/current/S_FINAL_GOAL.md](docs/current/S_FINAL_GOAL.md) |
-| Roadmap final gap | [docs/current/S_FINAL_GAP.md](docs/current/S_FINAL_GAP.md) |
-| S1/S2/S3/S4/S5（已归档） | [docs/history/](docs/history/) · S5 release summary 见 [docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md](docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md) |
+| S1-S5 + S_FINAL closure（已归档） | [docs/history/](docs/history/) · closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md) |
 
 ## 测试
 

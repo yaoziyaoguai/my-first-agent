@@ -24,8 +24,13 @@ keeps only the live working set.
 - S2 (Governed Task Agent) is complete and archived under
   `docs/history/S2_GOVERNED_TASK_AGENT/`; its release record is
   `docs/history/S2_GOVERNED_TASK_AGENT/S2_RELEASE_SUMMARY.md`.
-- **No stage is currently active. S3 has not started.** There is no
-  `S3_BASELINE_STATUS.md`, `S3_GOAL.md`, or `S3_GOAL_GAP.md` yet.
+- **S3 (Extensible Governed Agent Runtime) is the active stage.** Its frozen
+  goal and gap loop are **implementation-complete through S3-G01..G13**; the
+  stage is **pending close-out** (an independent audit's fixes have been applied;
+  close-out / archival is NOT done yet). S3 stage docs live under
+  `docs/current/` (`S3_BASELINE_STATUS.md`, `S3_GOAL.md`, `S3_GOAL_GAP.md`,
+  `S3_REFERENCE_TASK.md`, `WORK_LOG.md`). Do **not** treat S3 as closed out or
+  archive it until the user authorizes the Stage Closing Review.
 
 Historical documents are evidence, not routing authority. Do not use historical
 docs (including archived S1/S2 stage docs) to override current work unless the
@@ -33,7 +38,8 @@ user explicitly promotes them back into `docs/current/`.
 
 ### Current Documents
 
-The current working set under `docs/current/` is exactly:
+The current working set under `docs/current/` is the active S3 stage plus the
+cross-stage roadmap / debt registers:
 
 - `docs/current/S_ROADMAP.md`
   - Authoritative S-series version semantics and high-level direction.
@@ -42,18 +48,23 @@ The current working set under `docs/current/` is exactly:
   - Cross-stage carry-forward technical-debt register.
   - Keeps only unresolved debt that may affect S3/Sn; resolved S1/S2 items live
     in their archives, not here.
+- `docs/current/S3_BASELINE_STATUS.md` — S3 starting facts (frozen baseline).
+- `docs/current/S3_GOAL.md` — frozen S3 goal (do not edit; goal rules below).
+- `docs/current/S3_GOAL_GAP.md` — S3 gap backlog (G01-G13 satisfied).
+- `docs/current/S3_REFERENCE_TASK.md` — extension-assisted repo governance spec.
+- `docs/current/WORK_LOG.md` — S3 work log (append per run).
+- `docs/current/_tmp_s3_*` — S3 scratch evidence; archive to the S3 history
+  `_review_artifacts/` at close-out (mirrors the S2 archive layout).
 
-When the next stage (S3) is authorized, its stage docs (baseline / goal / gap /
-work log) are created under `docs/current/` and this section is repointed to
-them. The next authorized step is an **S3 baseline audit**, grounded in
-`docs/current/S_ROADMAP.md`, the archived S2 release record, and the user's
-explicit instruction.
+At S3 close-out (only on user authorization), the S3 stage docs are archived
+under `docs/history/S3_*/` per the **Stage Closing Review**, and this section is
+reset to the post-S3 roadmap + tech-debt working set.
 
 ### Goal and Gap Rules
 
-These rules apply to whichever stage is active. No stage goal/gap is active now
-(S3 not started); they are re-instantiated when the S3 stage docs are created
-under `docs/current/`.
+These rules apply to whichever stage is active. **S3 is active**: its
+`S3_GOAL.md` is frozen and its `S3_GOAL_GAP.md` is the live gap register under
+`docs/current/`.
 
 1. The active stage `*_GOAL.md` is frozen after user approval.
    - Do not change the goal because implementation is hard.
@@ -136,7 +147,7 @@ Next-step recommendations are allowed only if they are directly grounded in:
 
 - `docs/current/S_ROADMAP.md`
 - `docs/current/TECH_DEBT.md`
-- the active stage docs (none active now; S3 not started)
+- the active stage docs (`docs/current/S3_*`; S3 active, pending close-out)
 - the user's current explicit instruction
 
 Do not invent:

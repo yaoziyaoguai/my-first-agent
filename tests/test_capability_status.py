@@ -30,11 +30,19 @@ from agent.capability_status import (  # noqa: E402
 _SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{12,}")
 
 
-def test_no_module_is_l5_or_l6():
-    """Baseline invariant: no module is operator-ready or released yet."""
+def test_no_module_is_l6_and_only_foundation_is_l5():
+    """Invariant: no module is L6 (released); only the operator-ready foundation
+    (core spine + CLI/operator) is L5. operator_ready iff level == L5."""
+    l5_modules = {"Core governed runtime spine", "Interactive CLI / operator workflow"}
     for cs in CAPABILITY_STATUSES:
-        assert cs.level not in {"L5", "L6"}, f"{cs.module} must not be L5/L6"
-        assert cs.operator_ready is False, f"{cs.module} operator_ready must be False"
+        assert cs.level != "L6", f"{cs.module} must not be L6 (released)"
+        if cs.level == "L5":
+            assert cs.module in l5_modules, f"unexpected L5: {cs.module}"
+            assert cs.operator_ready is True
+        else:
+            assert cs.operator_ready is False, (
+                f"{cs.module} ({cs.level}) must not be operator_ready"
+            )
 
 
 def test_dormant_and_fake_local_modules_labeled():

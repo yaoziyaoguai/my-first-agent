@@ -906,11 +906,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - By phase: Phase 0=6, Phase 1=10, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
   Phase 5=4, Phase 6=3.
 - By priority: P0=5, P1=10, P2=15, P3=7.
-- Done: **33** (all resolvable Phase 0-6 gaps + guardrails affirmed + G-037 fixed).
-- Open (blocked, resolvable — NOT tech-debt): G-019 (memory real trigger),
-  G-022 (skill real selection), G-025 (MCP real endpoint), G-027 (SubAgent real
-  delegation) — blocked on real-model non-determinism / external resource.
+- Done: **37** (all gaps — incl. G-019/022/025 real dogfood + G-027 bounded
+  delegation proven + guardrails affirmed + G-037 fixed). 0 open, 0 blocked.
 - moved_to_tech_debt: **0**.
-- Coverage: all 17 audit maturity rows covered.
-- No new tech debt this loop. Existing TECH_DEBT TD-002/TD-008/TD-009/TD-010
-  remain and are referenced by the guardrail gaps.
+- Honest maturity ceilings (see capability-status): core spine + CLI/operator
+  L5 (operator_ready); Provider/Tool/Confirmation/Evidence/Security/Memory/Skill/
+  MCP L4 (real-verified); Checkpoint/Ledger/SubAgent(bounded)/Planning/Fake L3;
+  Scheduler/TUI L2 (concrete architecture ceilings). No module is L6 (released)
+  — L6 requires sustained real operator usage beyond reproducible dogfood.
+- No new tech debt. Existing TECH_DEBT TD-002/TD-008/TD-009/TD-010 remain.

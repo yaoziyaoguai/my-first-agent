@@ -35,10 +35,12 @@ class CapabilityStatus:
 # Keep in sync via the G-003 authority-consistency check at each phase exit.
 CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     CapabilityStatus(
-        "Core governed runtime spine", "L4", "active", True, False,
-        "Real provider -> interactive CLI -> governed tool_use (write_file) -> "
-        "confirmation -> execution -> evidence/checkpoint (R-series Run 12). "
-        "Promote to L5 only after operator workflow + capability status close.",
+        "Core governed runtime spine", "L5", "active", True, True,
+        "operator_ready: real provider -> interactive CLI -> governed tool_use -> "
+        "evidence/checkpoint (R-series Run 12 + reproducible G-010/G-015 dogfood). "
+        "Operator surface complete: capability-status command + OPERATOR_GUIDE + "
+        "troubleshooting + consistent onboarding (G-037 fixed). L6 (released) "
+        "needs sustained real operator usage beyond reproducible dogfood.",
     ),
     CapabilityStatus(
         "Provider/model boundary", "L4", "active", True, False,
@@ -46,9 +48,11 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "config-exists (~L2); GLM openai_compatible streaming is fail-closed.",
     ),
     CapabilityStatus(
-        "Interactive CLI / operator workflow", "L4", "active", True, False,
-        "Gating module for any L5 promotion. No consolidated troubleshooting "
-        "runbook yet (Phase 1 closes this).",
+        "Interactive CLI / operator workflow", "L5", "active", True, True,
+        "operator_ready: the operator surface itself (capability-status command, "
+        "OPERATOR_GUIDE runbook + provider/evidence/governance/tool matrices, "
+        "status/health/logs/sessions, reproducible dogfood, G-037 onboarding fix). "
+        "An operator can self-serve run/status/diagnostics/troubleshooting.",
     ),
     CapabilityStatus(
         "Tool runtime and registry", "L4", "active", True, False,

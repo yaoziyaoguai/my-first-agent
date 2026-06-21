@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from agent.evidence_redaction import redact_text
 from agent.provider.config import AgentProviderConfig
 from agent.provider.normalize import normalize_anthropic_response
 from agent.provider.protocol import (
@@ -55,6 +56,28 @@ def _provider_tool_name_pairs(original_names: list[str]) -> list[tuple[str, str]
         used.add(candidate)
         pairs.append((original, candidate))
     return pairs
+
+
+def _provider_error_hint(status_code: int, body_preview: str) -> str:
+    """Protocol-generic actionable hint for a provider HTTP error (R-051).
+
+    No vendor/model special-casing — hints are based on HTTP status + body keywords only.
+    Helps the operator distinguish protocol/tool-name/model/auth issues without leaking
+    secrets (body_preview is already redacted by the caller).
+    """
+
+    if status_code in {401, 403}:
+        return "auth/key issue — verify api_key is valid for this endpoint and provider_type"
+    if status_code == 429:
+        return "rate limit — retry after a delay"
+    if status_code >= 500:
+        return "server error — retry or check endpoint availability"
+    lowered = body_preview.lower()
+    if "tool" in lowered and ("name" in lowered or "pattern" in lowered):
+        return "tool-name/protocol mismatch — tool names must match ^[a-zA-Z0-9_-]+$"
+    if "model" in lowered:
+        return "model/endpoint mismatch — verify model name is valid for this endpoint"
+    return "protocol/request mismatch — check provider_type, request body, model, endpoint"
 
 
 class AnthropicCompatibleProvider:
@@ -149,13 +172,19 @@ class AnthropicCompatibleProvider:
             raise ProviderResponseError("http_error") from exc
 
         if response.status_code in {401, 403}:
+            raw_body = response.text[:300] if response.text else ""
+            redacted_body = redact_text(raw_body)
+            hint = _provider_error_hint(response.status_code, redacted_body)
             raise ProviderAuthError(
-                f"http_status:{response.status_code}",
+                f"http_status:{response.status_code} | {hint} | body: {redacted_body[:200]}",
                 status_code=response.status_code,
             )
         if response.status_code >= 400:
+            raw_body = response.text[:300] if response.text else ""
+            redacted_body = redact_text(raw_body)
+            hint = _provider_error_hint(response.status_code, redacted_body)
             raise ProviderResponseError(
-                f"http_status:{response.status_code}",
+                f"http_status:{response.status_code} | {hint} | body: {redacted_body[:200]}",
                 status_code=response.status_code,
             )
 

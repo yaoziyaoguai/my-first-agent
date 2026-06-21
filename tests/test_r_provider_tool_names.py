@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from agent.provider.anthropic_http import AnthropicCompatibleProvider
 from agent.provider.config import AgentProviderConfig
-from agent.provider.protocol import ToolUseBlock
+from agent.provider.protocol import ProviderResponseError, ToolUseBlock
 
 _VALID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -179,3 +181,29 @@ def test_stream_path_sanitizes_and_completes():
     assert events, "stream should yield events (create restored the tool_use)"
     # stream yields a tool_request for the (restored) tool_use + a final marker
     assert any(getattr(e, "event_type", None) for e in events)
+
+
+def test_provider_4xx_error_includes_actionable_hint_and_body():
+    """R-051: a 4xx error must include an actionable hint + redacted body preview."""
+
+    class _ErrResp:
+        status_code = 400
+        text = '{"error":{"message":"Invalid tools[0].function.name: pattern"}}'
+
+        def json(self):
+            return {}
+
+    class _ErrClient:
+        captured: dict = {}
+
+        def post(self, url, *, headers=None, json=None, **kw):  # noqa: ANN001
+            return _ErrResp()
+
+    provider = AnthropicCompatibleProvider(config=_config(), http_client=_ErrClient())
+    with pytest.raises(ProviderResponseError) as exc_info:
+        provider.create(system="s", messages=[{"role": "user", "content": "c"}], tools=[])
+    error_msg = str(exc_info.value)
+    assert "http_status:400" in error_msg
+    assert "tool-name" in error_msg.lower() or "protocol" in error_msg.lower()
+    assert "body:" in error_msg
+    assert "pattern" in error_msg

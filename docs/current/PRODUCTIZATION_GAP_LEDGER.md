@@ -246,8 +246,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   evidence per module.
 - safety_constraints: no secret in status output; no dormant module shown as
   released.
-- status: open.
-- owner_or_next_action: design the status schema; wire from the audit table.
+- status: **done** (Phase 1, this commit). Evidence: `agent/capability_status.py`
+  data module + `python main.py capability-status` CLI (default + `--json`);
+  `tests/test_capability_status.py` 7 passed; labels dormant/fake-local; no
+  module L5/L6; no secret in output.
+- owner_or_next_action: keep in sync with audit via G-003 at each phase exit.
 - tech_debt_policy: not debt.
 
 ### G-008 — Operator status/health/logs/troubleshooting runbook

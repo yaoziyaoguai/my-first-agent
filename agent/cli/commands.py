@@ -71,6 +71,19 @@ def dispatch_maintenance_command(
             return 1
         return 0
 
+    # capability-status 命令：能力真相表（G-007）。纯只读报告，不触 Runtime 状态。
+    if argv and argv[0] == "capability-status":
+        from agent.capability_status import (
+            capability_status_json,
+            render_capability_status,
+        )
+
+        if "--json" in argv[1:]:
+            print(capability_status_json(), end="")
+        else:
+            print(render_capability_status(), end="")
+        return 0
+
     # provider-diagnostics 命令：增强的 provider 配置诊断（支持 isolated dotenv）
     if argv and argv[0] == "provider-diagnostics":
         from agent.provider.diagnostics import (

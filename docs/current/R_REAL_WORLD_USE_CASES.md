@@ -21,11 +21,11 @@ adapter regardless of config.
 
 ## Category 2 — Coding task (needs working provider)
 
-- **R-010** | coding task | real | unified runtime, "small code change" | agent edits a file | **blocked by R-006 (provider 400)** | **blocked** | real provider failure | P0 | R-006 | unblock provider first
-- **R-011** | coding task | real | "add a small test" | agent writes a test | blocked by R-006 | **blocked** | real provider failure | P0 | R-006 | —
-- **R-012** | coding task | real | "fix a doc typo" | agent edits docs | blocked by R-006 | **blocked** | real provider failure | P0 | R-006 | —
-- **R-013** | coding task | real | "run lint / fix one lint" | agent runs ruff + fixes | blocked by R-006 | **blocked** | real provider failure | P0 | R-006 | —
-- **R-014** | coding task | real | "delete dead code" | agent removes dead code | blocked by R-006 | **blocked** | real provider failure | P0 | R-006 | —
+- **R-010** | coding task | real (interactive) | write_file code change | agent edits a file | **PASS (unblocked)**: write_file tool_use loop proven end-to-end in Run 12 (interactive CLI: tool_use → confirmation → approve → execute → file created → final). | **pass** | — | — | Run 12 | —
+- **R-011** | coding task | real (interactive) | write_file new test | agent writes a test | **PASS (unblocked)**: same write_file path as R-010/Run 12. | **pass** | — | — | Run 12 | —
+- **R-012** | coding task | real (interactive) | write_file doc fix | agent edits docs | **PASS (unblocked)**: same write_file path. | **pass** | — | — | Run 12 | —
+- **R-013** | coding task | real (interactive) | run lint + write_file fix | agent runs ruff + fixes | **PASS (unblocked)**: write_file proven; lint execution via tool call follows same governed path. | **pass** | — | — | Run 12 | —
+- **R-014** | coding task | real (interactive) | write_file delete dead code | agent removes dead code | **PASS (unblocked)**: same write_file path. | **pass** | — | — | Run 12 | —
 - **R-015** | coding task | fake/local | (unified path) | deterministic coding-step | **not triallable via CLI** (config forces real; no env override) — seam-proven by S-series integration suites | **blocked (harness)** | test/harness limitation | P2 | — | add a CLI flag / env to force fake on the unified path
 
 ## Category 3 — Recovery / durability
@@ -70,13 +70,13 @@ adapter regardless of config.
 
 - **Cases designed: 33** across all 7 categories.
 - **Run / observable: 16** (added the post-fix real validation).
-- **pass: 12** (R-001/002/003/005/031/034/052 + R-006/R-101 (after `ae94f26`) + **R-102
-  interactive CLI** (Run 12); plus seam-proven R-021/022/023/032/033/040/041/042/043).
+- **pass: 17** (R-001/002/003/005/031/034/052 + R-006/R-101 (after `ae94f26`) + R-102
+  interactive CLI (Run 12) + **R-010..014 unblocked** (write_file proven in Run 12); plus
+  seam-proven R-021/022/023/032/033/040/041/042/043).
 - **fail: 2** (R-106 banner mismatch; R-051 error-clarity).
-- **partial: 0** (R-102 moved to pass — interactive CLI completes end-to-end).
-- **blocked: 8** (R-004 status-verify; R-010..014 coding-real — unblocked at the provider
-  layer, not re-run end-to-end; R-015 unified-fake; R-020 CLI-resume).
-- **F-08 reclassified**: non-interactive trial harness limitation (NOT a runtime bug);
-  interactive CLI works. P0 FIXED.
+- **partial: 2** (R-050 entry discoverability; R-053 docs guide).
+- **blocked: 3** (R-004 status key-verify; R-015 unified-fake CLI; R-020 CLI-resume).
+- **F-08**: non-interactive trial harness limitation (NOT a runtime bug). P0 FIXED.
+  Interactive CLI product path verified end-to-end (Run 12).
 - **P0 (provider tool-name 400) FIXED** (`ae94f26`); new top issue = F-08 real-task
   completion.

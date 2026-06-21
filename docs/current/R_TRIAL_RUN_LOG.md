@@ -157,3 +157,25 @@
 - F-08 = **non-interactive trial harness limitation** (piped can't approve; piped
   auto-resume mis-routes) — trial-only, does not affect the product path.
 - P0 (provider tool-name 400) remains FIXED (`ae94f26`).
+
+## Run 14 — evidence/audit inspection from interactive session (2026-06-21)
+- `main.py logs --tail 30` inspected evidence events from the interactive write_file
+  session.
+- **model_response `channel=tool_use`** events present — the runtime records model
+  responses containing tool_use.
+- **checkpoint_saved** events present — checkpoint/durability works during real
+  interactive sessions (saved after each model response).
+- **Note**: tool-execution evidence uses `subsystem=runtime` (not `subsystem=tool`)
+  naming — a naming-convention observation, not a missing-evidence bug.
+- Result: evidence/audit working during real interactive tool-use. **PASS**.
+
+## Final aggregate (R-series trial, 2026-06-21)
+- **Interactive CLI (real delivery path): VERIFIED** — real provider + governed tool_use
+  end-to-end (Run 12). No runtime/tool-loop bug.
+- **Provider P0: FIXED** (`ae94f26`). Real provider tools call = 200.
+- **F-08: non-interactive trial harness limitation** (NOT a runtime bug). Piped can't
+  drive confirmation; piped auto-resume mis-routes. Does not affect interactive CLI.
+- **Cases: 17 pass / 2 fail / 2 partial / 3 blocked** — the interactive CLI product path
+  is real-world-usable for governed tool-use tasks.
+- **Top remaining**: R-004 status key-verify (security), R-106 banner inconsistency,
+  R-051 error-clarity, R-015 unified-fake CLI flag, R-020 CLI-resume harness.

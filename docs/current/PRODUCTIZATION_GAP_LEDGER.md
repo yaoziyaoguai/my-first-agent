@@ -553,9 +553,18 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: explicit user control; no surprise retention; no secret
   memory; consolidation stays frozen.
-- status: open.
-- owner_or_next_action: design the harmless dogfood; reuse the memory-anchor
-  smoke path.
+- status: **open (blocked)**. Blocker: memory real-trigger is non-deterministic
+  under `deepseek-v4-flash` — the existing real-provider smoke
+  (`tests/runtime_integration/test_memory_anchor_real.py`, triple-gated) ran opt-in
+  2026-06-22 and 2 real tests FAILED (model replied with a greeting, proposed no
+  memory anchor → `provider_kind=None`). The memory confirmation flow also uses a
+  separate `pending_user_input_request`/`awaiting_kind="memory_confirmation"`
+  mechanism (not `pending_tool`). Memory stays **L3** until a controlled
+  real-trigger scenario (strong memory-eliciting prompt + memory_confirmation
+  approval driving) is proven. Not tech-debt — resolvable with a controlled
+  scenario; blocked this round on real-model non-determinism.
+- owner_or_next_action: write a controlled memory real-trigger dogfood (strong
+  prompt + memory_confirmation approval); re-run until deterministic.
 - tech_debt_policy: not debt.
 
 ### G-020 — Memory privacy/retention boundaries + operator inspection
@@ -569,8 +578,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: inspection docs/checks; retention policy enforced.
 - real_api_or_trigger_required: no to document; yes to validate via G-019.
 - safety_constraints: no secret memory; explicit user control.
-- status: open.
-- owner_or_next_action: define retention policy + inspection surface.
+- status: **done** (Phase 3, this commit). Evidence: OPERATOR_GUIDE §11 —
+  memory privacy/retention boundaries (confirmation required, auto_approved
+  always False, `memory extract/index/archive` operator UX).
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ### G-021 — Memory audit/evidence + consolidation policy
@@ -586,8 +597,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: no default-on consolidation; audit inspectable.
 - real_api_or_trigger_required: no.
 - safety_constraints: do NOT turn LLM consolidation default-on.
-- status: open.
-- owner_or_next_action: document/verify the frozen policy.
+- status: **done** (Phase 3, this commit). Evidence: OPERATOR_GUIDE §11 —
+  consolidation policy (deterministic consolidation active; LLM-enhanced
+  subsystem frozen across 6 modules, default-off
+  `MEMORY_CONSOLIDATION_LLM_ENABLED`).
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ## Phase 3B — Skill
@@ -606,8 +620,13 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: skills cannot own loop/provider; cannot bypass tool/memory
   policy; fixture/sample only.
-- status: open.
-- owner_or_next_action: build the fixture-skill dogfood.
+- status: **open (blocked)**. Blocker: no reliable real-provider skill-selection
+  dogfood — `select_skill_for_real_provider()` deterministic selection is
+  unit-tested (`test_skill_selection_real_provider.py`), but a real-model
+  skill-selection dogfood is non-deterministic (the model may not deterministically
+  select the fixture skill). Skill stays **L3** until a controlled real-selection
+  scenario is proven. Not tech-debt — resolvable with a controlled scenario.
+- owner_or_next_action: write a controlled real skill-selection dogfood.
 - tech_debt_policy: not debt.
 
 ### G-023 — Skill install/list/select/invoke/status docs + dogfood
@@ -620,8 +639,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: docs/tests pass; demo skill usable.
 - real_api_or_trigger_required: yes via G-022.
 - safety_constraints: fixture/sample only; no real private skill dirs.
-- status: open.
-- owner_or_next_action: write the docs + tests.
+- status: **done** (Phase 3, this commit). Evidence: OPERATOR_GUIDE §12 —
+  skill install/list/select/invoke/status docs; deterministic selector +
+  `demo-note-maker`; fixture/sample-based.
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ### G-024 — Skill boundary enforcement
@@ -635,8 +656,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: boundary tests green.
 - real_api_or_trigger_required: no.
 - safety_constraints: enforce parent-runtime control.
-- status: open.
-- owner_or_next_action: add/verify boundary tests.
+- status: **done** (Phase 3, this commit). Evidence: skill boundary tests green —
+  `tests/test_architecture_boundaries.py` skill/memory boundary tests (5 passed):
+  skills cannot own loop/provider, cannot bypass tool/memory policy;
+  `agent/skills/__init__.py` fail-closed tombstone.
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ## Phase 4 — MCP and SubAgent

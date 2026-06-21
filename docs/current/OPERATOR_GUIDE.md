@@ -193,3 +193,72 @@ docs/status + per-tool failure runbook still incomplete).
 surfaces any tool name invalid for `^[a-zA-Z0-9_-]+$`; the adapter sanitizes
 dotted names at the seam (`ae94f26`) and restores them on response. An operator
 can run `main.py status` to check tool-name validity without a real call.
+
+## 11. Memory (G-019 / G-020 / G-021)
+
+Memory tools (`MEMORY_REMEMBER_REQUEST`, `MEMORY_LIST`, `MEMORY_FORGET_REQUEST`)
+are model-invocable and request-only: `MEMORY_REMEMBER_REQUEST` never commits
+memory directly — it sets `pending_user_input_request` with
+`awaiting_kind="memory_confirmation"`, and the operator approves/rejects via the
+confirmation flow.
+
+Operator UX:
+
+```bash
+.venv/bin/python main.py memory extract      # review pending memory proposals
+.venv/bin/python main.py memory index        # inspect saved memory index (metadata)
+.venv/bin/python main.py memory archive      # archive memory records
+```
+
+Privacy / retention boundaries (G-020):
+
+- Memory writes require explicit user confirmation (`memory_confirmation`); no
+  auto-approve (the memory anchor real smoke asserts `auto_approved` is always
+  False across all disposition branches).
+- Inspect/review pending proposals via `memory extract`; never read raw hidden
+  scratchpad into a prompt.
+- Retention is user-controlled; `MEMORY_FORGET_REQUEST` removes a record by id.
+
+Consolidation policy (G-021):
+
+- The deterministic consolidation detector + pending-review pipeline is the
+  active path; the LLM-enhanced consolidation subsystem is **frozen/deferred
+  across all 6 consolidation modules** (`memory_consolidation.py` header) and is
+  default-off (`MEMORY_CONSOLIDATION_LLM_ENABLED`). Do NOT turn it on by default.
+
+Real-trigger status (G-019): Memory is **L3**. The real-provider memory-anchor
+smoke (`tests/runtime_integration/test_memory_anchor_real.py`, triple-gated
+opt-in) is non-deterministic under `deepseek-v4-flash` (the model does not
+reliably propose a memory anchor for soft prompts) and the memory confirmation
+flow uses a separate `pending_user_input_request` mechanism. A reliable
+real-trigger dogfood (G-019) is **open/blocked** on this non-determinism; Memory
+stays L3 until a controlled real-trigger scenario is proven.
+
+## 12. Skill system (G-022 / G-023 / G-024)
+
+Skills are fixture/sample-based (`skills/blog-writing`, `skills/demo-note-maker`,
+`skills/evil-skill`). The skill system (`agent/skill_system/`) provides registry,
+loader, lifecycle, selector. `agent/skills/__init__.py` is a fail-closed
+tombstone (no live skill import from there); live skills load via `skill_system`.
+
+Operator UX (G-023):
+
+- The deterministic real-provider fallback selector
+  (`select_skill_for_real_provider()`) matches by name/description/tag keywords
+  (unit-tested in `test_skill_selection_real_provider.py`).
+- `demo-note-maker` is the demo skill; invoke via the runtime with a
+  demo-relevant prompt.
+
+Boundary enforcement (G-024):
+
+- Skills cannot own the loop/provider and cannot bypass tool/memory policy
+  (pinned by `tests/test_architecture_boundaries.py` skill-boundary tests:
+  `test_skill_system_does_not_import_legacy_skills`,
+  `test_default_tool_entrypoint_does_not_import_skill_or_subagent_prototypes`).
+- Fake-first, fixture/sample based; do NOT wire real private skill directories.
+
+Real-selection status (G-022): Skill is **L3**. Deterministic selection is
+unit-tested; a reliable real-provider skill-selection dogfood is **open/blocked**
+on real-model non-determinism (the model may not deterministically select the
+fixture skill). Skill stays L3 until a controlled real-selection scenario is
+proven.

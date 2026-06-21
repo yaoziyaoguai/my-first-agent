@@ -1,0 +1,158 @@
+# FirstAgent Operator Guide
+
+Date: 2026-06-21 (Phase 1)
+
+Operator-facing guide for running, checking, inspecting, and recovering
+FirstAgent without reading source. Source of truth for maturity ratings:
+[PRODUCT_CAPABILITY_AUDIT.md](PRODUCT_CAPABILITY_AUDIT.md). Live status command:
+`python main.py capability-status` (G-007). Work intake:
+[PRODUCTIZATION_GAP_LEDGER.md](PRODUCTIZATION_GAP_LEDGER.md).
+
+This guide closes Phase 1 operator-foundation gaps: G-008 (runbook), G-009
+(evidence inspection), G-011 (provider readiness matrix), G-012 (checkpoint/resume
+UX), G-013 (ledger UX), G-014 (governance matrix).
+
+## 1. Quick start and how to run (G-008)
+
+```bash
+.venv/bin/python main.py --plain      # interactive CLI (default product surface)
+.venv/bin/python main.py --tui        # Textual TUI (companion; L2, not primary)
+.venv/bin/python main.py --provider fake   # force safe FakeProvider (no network)
+```
+
+Default config is safe-local unless `config/config.yaml` enables a real provider.
+The onboarding banner prints the active provider mode (e.g.
+`[provider] mode=anthropic_compatible`). If a real provider is enabled, governed
+tool use requires interactive confirmation (see §8).
+
+## 2. Capability status (G-007)
+
+```bash
+.venv/bin/python main.py capability-status        # human-readable truth table
+.venv/bin/python main.py capability-status --json  # machine-readable
+```
+
+Output labels every module with its level (L0-L6), state (active/dormant/
+fake-local/seam), real-API-verified flag, and operator-ready flag. No module is
+L5/L6 today; dormant/fake-local modules are labeled as such.
+
+## 3. Provider / API readiness matrix (G-011)
+
+| Provider | api_type | Readiness | Notes |
+|---|---|---|---|
+| DeepSeek | `anthropic_compatible` | **real-API verified** (L4) | Proven via R-series Run 12 + reproducible G-010 dogfood + opt-in smokes. |
+| Kimi | `anthropic_compatible` | config-exists only (~L2) | `kimi-k2.5` via DashScope; no real smoke. |
+| GLM | `openai_compatible` | config-exists only (~L2) | `glm-5`; `.stream()` is fail-closed (`openai_http.py`). |
+| Fake | `fake` | default-safe (L3) | Deterministic; not a real ceiling. |
+
+Readiness tiers: config-exists → provider-construction-works → real-API-call-
+verified → module-trigger-verified → operator-ready. Only DeepSeek
+`anthropic_compatible` is real-API-verified. Do NOT treat config examples as
+production-ready providers.
+
+## 4. Status, health, logs, troubleshooting (G-008)
+
+```bash
+.venv/bin/python main.py status                 # provider config diagnostic (redacted)
+.venv/bin/python main.py provider-diagnostics   # enhanced diagnostic (supports --isolated-dotenv)
+.venv/bin/python main.py health                 # workspace/log/session/tool/MCP readiness checks
+.venv/bin/python main.py health --json          # machine-readable
+.venv/bin/python main.py logs --tail 50         # safe log summary (no raw secret bodies)
+.venv/bin/python main.py logs --session <id> --include-observer
+.venv/bin/python main.py logs cleanup           # dry-run archive of oversized agent_log.jsonl
+.venv/bin/python main.py sessions inventory     # read-only session metadata inventory
+.venv/bin/python main.py runs inventory
+```
+
+Troubleshooting:
+
+- **Provider 401/403**: check `main.py status` (api_key_present, api_key_env);
+  the key lives in gitignored `config/config.yaml` or an env var. Never print
+  the key; `status` shows only `api_key_present: bool`.
+- **Provider 4xx with body preview**: provider errors include actionable hints
+  + a redacted body preview (R-series fix `5154d92`).
+- **Tool-name 400**: `status` runs a provider-visible tool-name diagnostic; the
+  adapter sanitizes dotted names at the seam (`ae94f26`).
+- **`health` warns on log_size / session_accumulation**: run `logs cleanup` and
+  `sessions inventory` to review; these are local hygiene, not runtime errors.
+
+## 5. Safe evidence inspection (G-009)
+
+Evidence is written to `<session_dir>/events.jsonl` via the single
+`record_evidence` entry point; secrets are redacted (`evidence_redaction`,
+`event_log` regexes for key/bearer/env-assign/JWT/hex/base64).
+
+Safe inspection:
+
+```bash
+.venv/bin/python main.py logs --tail 50 --session <id>   # sanitized summary
+```
+
+To verify the evidence chain on a real run (opt-in, sanitized):
+
+```bash
+MY_FIRST_AGENT_RUN_REAL_PROVIDER_SMOKE=1 .venv/bin/python -m pytest tests/test_g010_real_dogfood.py -q
+```
+
+This reproduces the real governed tool-use spine and records
+`provider_kind=real`, `provider_external_call=True` evidence. Never read raw
+`events.jsonl` containing tool output into a prompt or commit it; use the
+redacted `logs` summary. The evidence WRITE path is real-verified (L4); the
+operator INSPECTION path is L3 (use the redacted `logs` surface).
+
+## 6. Checkpoint / session / resume UX (G-012)
+
+The runtime checkpoints turn state; on restart it offers to resume:
+
+- On startup, if a resumable checkpoint exists, the CLI prompts
+  `要继续这个任务吗？(y/n)` (awaiting_resume_choice).
+- During a turn, Ctrl+C offers an interrupt menu (awaiting_interrupt_choice).
+- Resume is covered by a contract + CLI subprocess test (R-G03). Complex
+  mid-flight interruption (active provider call in flight) is NOT PTY-validated
+  (R-series caveat) — finish or cleanly interrupt a turn before resuming.
+
+Caveat: checkpoint save is proven; full interrupted-session resume dogfood is
+L3, not L4. Do not treat a checkpoint as a guarantee of full mid-flight recovery.
+
+## 7. Durable ledger / recovery UX (G-013)
+
+The task ledger (`agent/task_ledger*.py`) is a safe-summary durability record,
+**not** canonical runtime state. S5 closed durable recovery (TD-011 resolved).
+
+- Inspect via `main.py logs` / `main.py sessions inventory` (metadata only).
+- The ledger records task progress for audit continuity; it must not be read as
+  the source of truth for current task state (the live `state.task` is).
+- No real-provider recovery trial exists yet (L3).
+
+## 8. Confirmation / governance matrix (G-014)
+
+Every mutating/external tool goes through the governed gate
+(`tool_runtime_mediator` → TOOL_GATE → confirmation → TOOL_INVOKE → executor →
+TOOL_RESULT). Approval states:
+
+| State | Meaning |
+|---|---|
+| `awaiting_tool_confirmation` | A governed tool needs explicit approval. |
+| trial auto-approve | Only when `FIRSTAGENT_TRIAL_APPROVAL_POLICY=safe` AND tool in {write_file, read_file, edit_file} AND path under workspace//tmp/. Default OFF. |
+| `n` / rejected | Tool rejected; feedback returned to the model. |
+| `explain` | Show why confirmation is required. |
+
+Hard rules:
+
+- **No default auto-approve.** Trial-approval is opt-in (`safe` policy) and
+  allowlist+path restricted; every auto-approval is audit-logged.
+- **No confirmation bypass.** The TOOL_INVOKE dispatcher path is evidence-only
+  (AST-pinned); real execution is exclusively behind the mediator/executor.
+- Sensitive paths (source `.py`, system/home/config paths) are rejected by path
+  safety regardless of approval.
+- Only the `write_file` approval gate is real-proven once (R-series Run 12 /
+  G-010); the full matrix (rejection escalation, force_stop, plan/step/user-input
+  confirmation) is contract-proven. Broaden real-proven coverage in Phase 2.
+
+## 9. Diagnostic-output secret safety (G-036)
+
+`status` redaction is real-config-verified (G-004). Broad diagnostic-output
+hardening (no raw config/header/error bodies from any diagnostic path) is
+guarded by a contract test (`tests/test_g036_diagnostic_secret_safety.py`). Do
+not extend the "real-config-verified" claim to diagnostic paths beyond `status`
+until G-036's real-key variant is added.

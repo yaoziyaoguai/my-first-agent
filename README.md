@@ -50,6 +50,9 @@ cp config/config.example.yaml config/config.yaml
 | 想了解 | 读这里 |
 |---|---|
 | 产品能力审计 | [docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md) |
+| 产品化 Roadmap | [docs/current/PRODUCTIZATION_ROADMAP.md](docs/current/PRODUCTIZATION_ROADMAP.md) |
+| Gap Ledger（工作入口） | [docs/current/PRODUCTIZATION_GAP_LEDGER.md](docs/current/PRODUCTIZATION_GAP_LEDGER.md) |
+| Operator 指南（怎么用/查/恢复） | [docs/current/OPERATOR_GUIDE.md](docs/current/OPERATOR_GUIDE.md) |
 | 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
 | S 系列版本语义（已归档） | [docs/archive/s-series-runtime-kernel/S_ROADMAP.md](docs/archive/s-series-runtime-kernel/S_ROADMAP.md) |
 | S1-S5 + S_FINAL closure（已归档） | [docs/history/](docs/history/) · closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md) |

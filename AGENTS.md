@@ -65,6 +65,9 @@ authority).
   - Phased productization roadmap (Phase 0-6) derived from the audit.
 - `docs/current/PRODUCTIZATION_GAP_LEDGER.md`
   - Single intake for all productization work. New tasks enter here as gaps.
+- `docs/current/OPERATOR_GUIDE.md`
+  - Operator-facing runbook: how to run, check status, inspect evidence, resume,
+    and the confirmation/governance matrix (Phase 1 foundation).
 - `docs/current/TECH_DEBT.md`
   - Carry-forward / deferred debt only. Gaps enter the ledger first; only
     genuinely blocked items move here.

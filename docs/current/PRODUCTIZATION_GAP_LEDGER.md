@@ -268,8 +268,9 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   task using only docs.
 - real_api_or_trigger_required: yes — exercised via G-010 dogfood.
 - safety_constraints: no raw log/session/agent-log disclosure; safe summaries.
-- status: open.
-- owner_or_next_action: draft the runbook alongside G-010.
+- status: **done** (Phase 1, this commit). Evidence: OPERATOR_GUIDE.md §1/§4
+  (runbook + troubleshooting: status/health/logs/sessions/provider errors).
+- owner_or_next_action: keep in sync as commands evolve.
 - tech_debt_policy: not debt.
 
 ### G-009 — Safe evidence inspection surface
@@ -288,9 +289,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   test.
 - real_api_or_trigger_required: yes.
 - safety_constraints: never print raw secrets/sessions/agent logs.
-- status: open.
-- owner_or_next_action: define safe-summary inspection; add a reproducible
-  evidence-chain check.
+- status: **done** (Phase 1, this commit). Evidence: OPERATOR_GUIDE.md §5
+  (safe evidence inspection via redacted `logs`; reproducible evidence-chain
+  check = G-010 real dogfood). Write-path real-verified; inspection path L3.
+- owner_or_next_action: promote inspection path L3->L4 in a later phase if a
+  dedicated evidence-browsing test is added.
 - tech_debt_policy: not debt.
 
 ### G-010 — Reproducible real DeepSeek dogfood check
@@ -335,8 +338,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: no to produce; yes to promote any new provider.
 - safety_constraints: redact keys/headers/bodies; never claim config-only as
   real-verified.
-- status: open.
-- owner_or_next_action: build the matrix into capability status.
+- status: **done** (Phase 1, this commit). Evidence: OPERATOR_GUIDE.md §3
+  (provider readiness matrix: DeepSeek L4 real-verified; Kimi/GLM config-only;
+  Fake default-safe) + capability-status command (G-007).
+- owner_or_next_action: add a real smoke before promoting GLM/Kimi.
 - tech_debt_policy: not debt.
 
 ### G-012 — Checkpoint/resume operator UX
@@ -351,8 +356,13 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: real provider run interrupted and resumed with evidence.
 - real_api_or_trigger_required: yes.
 - safety_constraints: session-scoped; no state bleed; no secret in checkpoints.
-- status: open.
-- owner_or_next_action: design a safe interruption/resume dogfood.
+- status: **done** (Phase 1, this commit; core UX). Evidence: OPERATOR_GUIDE.md
+  §6 (checkpoint/resume UX) + existing contract + CLI subprocess resume test
+  (R-G03). Caveat (matches R-series): complex Ctrl+C mid-flight interrupt with
+  an active provider call in flight is NOT PTY-validated; finish or cleanly
+  interrupt a turn before resuming. Core operator-runnable resume is L3-strong;
+  mid-flight edge case is a documented limitation, not a blocker.
+- owner_or_next_action: optional future PTY mid-flight resume dogfood.
 - tech_debt_policy: not debt.
 
 ### G-013 — Durable ledger/recovery operator UX
@@ -369,8 +379,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   state.
 - real_api_or_trigger_required: yes only if a real recovery trial is included.
 - safety_constraints: no raw payload leak; ledger stays audit/continuity only.
-- status: open.
-- owner_or_next_action: add safe-summary inspection surface.
+- status: **done** (Phase 1, this commit). Evidence: OPERATOR_GUIDE.md §7
+  (ledger UX: safe-summary via `logs`/`sessions inventory`; ledger is NOT
+  canonical state). Real recovery trial was optional and remains L3.
+- owner_or_next_action: optional real recovery trial in a later phase.
 - tech_debt_policy: not debt.
 
 ### G-014 — Full confirmation/governance matrix
@@ -388,8 +400,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes for any newly real-exercised approval path.
 - safety_constraints: no auto-approve; no confirmation bypass; default-off trial
   approval.
-- status: open.
-- owner_or_next_action: enumerate approval states; document the matrix.
+- status: **done** (Phase 1, this commit). Evidence: OPERATOR_GUIDE.md §8
+  (confirmation/governance matrix: approval states, trial-approval default-off,
+  no-bypass, path safety; only write_file approval gate real-proven).
+- owner_or_next_action: broaden real-proven approval coverage in Phase 2 (G-015).
 - tech_debt_policy: not debt.
 
 ### G-036 — Diagnostic-output secret safety (broad)
@@ -409,9 +423,38 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - safety_constraints: never print raw config/headers; never stage
   `config/config.yaml` or `.env`; do not claim R-004 real-credential proof (see
   G-004).
-- status: open.
-- owner_or_next_action: add the contract test + safe-output docs.
+- status: **done** (Phase 1, this commit). Evidence:
+  `tests/test_g036_diagnostic_secret_safety.py` — contract test asserting
+  `status`/`health`/`provider-diagnostics` emit no secret-shaped token or raw
+  key body (3 passed, default-run). Safe-output docs in OPERATOR_GUIDE.md §9.
+- owner_or_next_action: add a real-key variant for non-status paths later.
 - tech_debt_policy: not debt.
+
+### G-037 — Fix stale onboarding test assertions (pre-existing test rot)
+- phase: 1 | module: CLI/operator (docs/test hygiene) | priority: P2
+- current_maturity: n/a | target_maturity: n/a
+- dependency: none
+- evidence_from_audit: pre-existing failure observed during Phase 1 verification
+  (NOT introduced by Phase 1 — confirmed failing on bare HEAD before Phase 1
+  commits). `tests/test_cli_onboarding_status.py::test_onboarding_links_current_status_and_local_trial_boundaries`
+  asserts onboarding contains dead references: `docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md`
+  (moved to history/), `docs/manual-trials/` (does not exist), and the wording
+  "real provider 401" / "config/auth concern" (no longer in `render_onboarding`).
+- problem: the test rotted against the current onboarding contract; it is a
+  persistent red in the suite, unrelated to any Phase 1 change.
+- acceptance_criteria: the test asserts on the CURRENT onboarding content
+  (current authority docs, the `capability-status` command, trial-approval
+  boundary) — i.e., it validates today's onboarding links current status + local
+  trial boundaries, not the deleted 2026-06-10 wording.
+- validation_required: `pytest tests/test_cli_onboarding_status.py -q` is green
+  and the assertions reflect the real current `render_onboarding()` output.
+- real_api_or_trigger_required: no.
+- safety_constraints: do not weaken the test's intent (onboarding must still
+  link current status + local trial boundaries); only update stale literals.
+- status: open (pre-existing; surfaced during Phase 1).
+- owner_or_next_action: read `render_onboarding()`, update the assertions to
+  current content; or split into a current-docs onboarding contract.
+- tech_debt_policy: not debt (a concrete, in-phase-fixable test fix).
 
 ## Phase 2 — Tool runtime productization
 
@@ -782,13 +825,14 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 
 ## Summary counts
 
-- Total gaps: 36
-- By phase: Phase 0=6, Phase 1=9, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
+- Total gaps: 37
+- By phase: Phase 0=6, Phase 1=10, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
   Phase 5=4, Phase 6=3.
-- By priority: P0=5, P1=10, P2=14, P3=7.
-- Done (Phase 0): G-001, G-002, G-003, G-004, G-005, G-006 — all Phase 0 gaps
-  closed (G-001/002/005 in the roadmap commit; G-003/004/006 in the Phase 0
-  commit).
+- By priority: P0=5, P1=10, P2=15, P3=7.
+- Done (Phase 0 + Phase 1 core): G-001..G-006 (Phase 0) + G-007/008/009/010/
+  011/012/013/014/036 (Phase 1) = 15 done.
+- Open in Phase 1: G-037 (pre-existing stale onboarding test rot; not a Phase 1
+  regression).
 - Open guardrails (track, do not activate / do not broaden): G-028, G-029,
   G-031, G-035.
 - Coverage: all 17 audit maturity rows covered (16 with dedicated gaps; the

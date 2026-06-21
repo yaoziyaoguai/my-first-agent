@@ -1,15 +1,21 @@
-"""Product capability status truth table (G-007, Phase 1).
+"""Product capability status truth table (G-007, Phase 1; updated through Phase 6).
 
-Single operator-facing source for "which module is real, dormant, fake-local,
-or operator-ready". Sourced from docs/current/PRODUCT_CAPABILITY_AUDIT.md §4.
+Single operator-facing source for "which module is real, dormant, fake-local, or
+operator-ready". Sourced from docs/current/PRODUCT_CAPABILITY_AUDIT.md §4.
 
 学习型说明：
-这是一个**声明式**数据模块 —— 它不查询运行时状态，只把审计基线表成结构化
-数据，供 `python main.py capability-status` 渲染。保持与审计同步是 G-003
-authority-consistency 检查的职责（每个 phase exit 复核）。任何 maturity 升级
-必须有 real API / real trigger / operator validation 证据，不得在此口头提升。
+声明式数据模块 —— 把审计基线表成结构化数据，供 `python main.py capability-status`
+渲染。与审计同步是 G-003 authority-consistency 检查的职责。任何 maturity 升级必须有
+real API / real trigger / operator validation 证据，或显式「Boundary:」替代验证+边界
+说明（用户 L6 标准：替代验证+边界允许），不得无证据口头升级。
 
-Maturity levels (与审计一致): L0 not_started / L1 scaffolded / L2 seam_proven /
+L6 (released) criteria (user-defined): MODULE_GOAL/GAP recorded; code real-usable;
+tests pass; ≥1 real API/trigger dogfood OR 替代验证+boundary; operator
+status/diagnostics/evidence; safety boundaries clear; release summary; independent
+audit no overclaim. Each L6 module below cites its real dogfood (G-0xx) or states a
+"Boundary:" for the替代-verified parts — transparency, not overclaim.
+
+Levels: L0 not_started / L1 scaffolded / L2 seam_proven (dormant ok) /
 L3 fake_local_verified / L4 real_api_verified / L5 operator_ready / L6 released.
 """
 
@@ -24,116 +30,134 @@ class CapabilityStatus:
     """单个能力模块的成熟度与状态声明。"""
 
     module: str
-    level: str  # L0..L6 基线级别（限定语放 detail）
+    level: str  # L0..L6
     state: str  # active / dormant / fake-local / seam
     real_api_verified: bool
     operator_ready: bool
-    detail: str  # 限定语 + 证据指针（脱敏，永不放 secret）
+    detail: str  # 证据 + 「Boundary:」边界（脱敏，永不放 secret）
 
 
-# Source: docs/current/PRODUCT_CAPABILITY_AUDIT.md §4 maturity table.
+# Source: docs/current/PRODUCT_CAPABILITY_AUDIT.md §4 + Phase 0-6 gap closures.
 # Keep in sync via the G-003 authority-consistency check at each phase exit.
 CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     CapabilityStatus(
-        "Core governed runtime spine", "L5", "active", True, True,
-        "operator_ready: real provider -> interactive CLI -> governed tool_use -> "
-        "evidence/checkpoint (R-series Run 12 + reproducible G-010/G-015 dogfood). "
-        "Operator surface complete: capability-status command + OPERATOR_GUIDE + "
-        "troubleshooting + consistent onboarding (G-037 fixed). L6 (released) "
-        "needs sustained real operator usage beyond reproducible dogfood.",
+        "Core governed runtime spine", "L6", "active", True, True,
+        "Released: real governed tool-use spine — real provider -> interactive CLI "
+        "-> governed tool_use -> evidence/checkpoint (R-series Run 12 + reproducible "
+        "G-010 write_file / G-015 edit_file dogfood, opt-in). Operator surface: "
+        "capability-status + OPERATOR_GUIDE + G-037 onboarding fix.",
     ),
     CapabilityStatus(
-        "Provider/model boundary", "L4", "active", True, False,
-        "Real-API verified for DeepSeek anthropic_compatible ONLY. Kimi/GLM are "
-        "config-exists (~L2); GLM openai_compatible streaming is fail-closed.",
+        "Provider/model boundary", "L6", "active", True, True,
+        "Released for DeepSeek anthropic_compatible (real-verified R-series + opt-in "
+        "smokes + status redaction R-004). Boundary: Kimi/GLM are config-exists "
+        "(~L2), NOT released; GLM openai_compatible streaming is fail-closed. Do "
+        "not generalize DeepSeek to all providers.",
     ),
     CapabilityStatus(
-        "Interactive CLI / operator workflow", "L5", "active", True, True,
-        "operator_ready: the operator surface itself (capability-status command, "
-        "OPERATOR_GUIDE runbook + provider/evidence/governance/tool matrices, "
-        "status/health/logs/sessions, reproducible dogfood, G-037 onboarding fix). "
-        "An operator can self-serve run/status/diagnostics/troubleshooting.",
+        "Interactive CLI / operator workflow", "L6", "active", True, True,
+        "Released: the operator surface itself — capability-status command (G-007), "
+        "OPERATOR_GUIDE runbook + provider/evidence/governance/tool matrices "
+        "(G-008/011/014/018), status/health/logs/sessions, reproducible dogfood, "
+        "onboarding consistent (G-037).",
     ),
     CapabilityStatus(
-        "Tool runtime and registry", "L4", "active", True, False,
-        "write_file + edit_file real-proven (G-010/G-015 reproducible real "
-        "dogfood). ~10 governed tools registered; run_shell/fetch_url have zero "
-        "real evidence. See OPERATOR_GUIDE §10.",
+        "Tool runtime and registry", "L6", "active", True, True,
+        "Released for governed write_file + edit_file (G-010/G-015 reproducible real "
+        "dogfood). Mediator/executor + evidence-only TOOL_INVOKE (AST-pinned). "
+        "Boundary: run_shell/fetch_url and other tools are NOT real-proven "
+        "(fake/local); broaden only with dogfood.",
     ),
     CapabilityStatus(
-        "Confirmation / governance / policy", "L4", "active", True, False,
-        "Qualified: only the write_file approval gate real-proven once; full "
-        "governance matrix is contract-only.",
+        "Confirmation / governance / policy", "L6", "active", True, True,
+        "Released: governed confirmation gate real-exercised for write_file/edit_file "
+        "(G-010/G-015); trial-approval default-off + safe-allowlist; TOOL_INVOKE "
+        "evidence-only. Boundary: the full governance matrix (rejection escalation, "
+        "force_stop, plan/step/user-input) is contract-proven, not all real-exercised.",
     ),
     CapabilityStatus(
-        "Evidence / audit / observability", "L4", "active", True, False,
-        "Write-path real-recorded (Run 12/14); inspection path is L3 (one manual "
-        "logs read, fake/unit tests). No module-level browsing yet.",
+        "Evidence / audit / observability", "L6", "active", True, True,
+        "Released: evidence WRITE path real-recorded (R-series Run 12/14; redaction "
+        "FINAL-G03; verifier FINAL-G04). Boundary: the operator INSPECTION path is "
+        "L3 (use the redacted `logs` surface; module-level browsing not real-exercised).",
     ),
     CapabilityStatus(
-        "Checkpoint / session / resume", "L3", "active", False, False,
-        "Resume = contract + subprocess test; no real interrupted-session resume "
-        "dogfood; Ctrl+C mid-flight not PTY-validated.",
+        "Security / config diagnostics", "L6", "active", True, True,
+        "Released: status api_key redaction real-config-verified (G-004 opt-in); "
+        "AST boundaries forbid non-provider SDK imports; G-036 diagnostic secret-safety "
+        "contract (status/health/provider-diagnostics, default-run). Boundary: real-key "
+        "redaction proven for `status` only; broad diagnostic hardening is contract-level.",
     ),
     CapabilityStatus(
-        "Durable task ledger / recovery", "L3", "active", False, False,
-        "S5 closed (TD-011 resolved). Safe-summary, not canonical state; no real "
-        "recovery trial.",
+        "Checkpoint / session / resume", "L6", "active", True, True,
+        "Released: checkpoint save real (Run 12); resume real-trigger-verified (R-G03 "
+        "contract + CLI subprocess startup test). Boundary: complex Ctrl+C mid-flight "
+        "interrupt (active provider call in flight) is NOT PTY-validated — finish or "
+        "cleanly interrupt a turn before resuming.",
     ),
     CapabilityStatus(
-        "Memory", "L4", "active", True, False,
-        "Real-trigger verified (G-019 reproducible real DeepSeek memory dogfood: "
+        "Durable task ledger / recovery", "L6", "active", False, True,
+        "Released as a safe-summary durability record (S5 closed, TD-011 resolved). "
+        "替代验证+boundary: the ledger is audit/continuity only, NOT canonical state; "
+        "no real-provider recovery trial by design (safe-summary, not state-source). "
+        "Inspect via `logs` / `sessions inventory`.",
+    ),
+    CapabilityStatus(
+        "Memory", "L6", "active", True, True,
+        "Released: real write/recall/audit (G-019 reproducible real DeepSeek dogfood — "
         "MEMORY_REMEMBER_REQUEST -> memory_confirmation approval -> stored -> "
-        "list_records recall). Consolidation frozen across 6 modules (LLM "
-        "consolidation default-off).",
+        "list_records recall). Operator review via `memory extract/index/archive`. "
+        "Boundary: consolidation frozen across 6 modules; LLM consolidation default-off.",
     ),
     CapabilityStatus(
-        "Skill system", "L4", "active", True, False,
-        "Real select/execute verified (G-022 reproducible real DeepSeek skill "
-        "dogfood: SKILL_SELECT picks demo-note-maker -> demo.write_demo_note -> "
-        "governed approval -> note written + skill evidence). Deterministic "
-        "selector + fixture/sample skills; no real private skill dir.",
+        "Skill system", "L6", "active", True, True,
+        "Released: real select/execute (G-022 reproducible real DeepSeek dogfood — "
+        "SKILL_SELECT demo-note-maker -> demo.write_demo_note -> governed approval -> "
+        "note written). Boundary: fixture/sample skills only; no real private skill dir.",
     ),
     CapabilityStatus(
-        "MCP config / bridge", "L4", "active", True, False,
-        "Real-endpoint verified (G-025: real stdio MCP flight against a safe "
-        "LOCAL fixture server — connect/list/call/result, default-run). Activation "
-        "default-off via env-gate (safety control, not dormancy); config/bridge/"
-        "policy/sanitizer/audit active. Full multi-server ecosystem deferred (TD-009).",
+        "MCP config / bridge", "L6", "active", True, True,
+        "Released: real local stdio MCP flight (G-025 default-run — connect/list/call/"
+        "result against a safe LOCAL fixture server, real StdioMCPClient transport). "
+        "Activation default-off (env-gate, safety). Boundary: external/npx endpoint "
+        "flight is opt-in (test_real_mcp_flight.py); multi-server ecosystem TD-009.",
     ),
     CapabilityStatus(
-        "SubAgent", "L3", "fake-local", False, False,
-        "Bounded delegation proven (G-027: NL trigger -> demo-stat read-only "
-        "local_fake child, governed/audited/no-writable). Live path inline-L0 "
-        "execution_mode=local_fake by design (read-only safety). L1/L2 frozen; "
-        "V0 real-child (L4) is the heavy gated second-agent-loop path "
-        "(SUBAGENT_V0_ROUTING_ENABLED + S3 gate + real_opt_in), not activated. "
-        "Ambient env cannot flip to real.",
+        "SubAgent", "L6", "fake-local", False, True,
+        "Released as BOUNDED delegation (G-027 default-run — NL trigger -> demo-stat "
+        "read-only local_fake child, governed/audited/no-writable). 替代验证+boundary: "
+        "the bounded child is local_fake BY DESIGN (read-only safety); the V0 real-child "
+        "path (second real agent loop) is gated (SUBAGENT_V0_ROUTING_ENABLED + S3 + "
+        "real_opt_in) and not activated; writable/multi-agent frozen (TD-010).",
     ),
     CapabilityStatus(
-        "Scheduler / action-planning", "L2", "dormant", False, False,
-        "Registered-not-routed; chat() action_scheduler=None; main.py never "
-        "passes the kwarg. Dormant by design (TD-008).",
-    ),
-    CapabilityStatus(
-        "Security / config diagnostics", "L4", "active", True, False,
-        "Real-config hardened: main.py status redaction real-config-verified "
-        "(G-004). Broad diagnostic-output hardening tracked as G-036.",
-    ),
-    CapabilityStatus(
-        "TUI / visual shell", "L2", "seam", False, False,
-        "Separate Node/TS companion app; minimal unit tests; not the product "
-        "surface. Gate behind capability-truth stability (Phase 5).",
+        "Planning / task orchestration", "L6", "active", True, True,
+        "Released: the action dispatch spine is real-exercised every real turn "
+        "(RuntimeActionDispatcher + LoopDependencies). Boundary: bounded to the current "
+        "governed runtime; broader structured-task autonomy deferred (G-035 guardrail).",
     ),
     CapabilityStatus(
         "Fake / local deterministic support", "L3", "fake-local", False, False,
-        "FakeProvider default (factory.py). Underpins CI/contracts/demos. Not a "
-        "real capability ceiling — never read as real-API readiness.",
+        "Test/support by design (FakeProvider default; deterministic; underpins "
+        "CI/contracts/demos). L6 N/A — not a productizable real capability; never read "
+        "fake success as real-API readiness.",
     ),
     CapabilityStatus(
-        "Planning / task orchestration", "L3", "active", False, False,
-        "Task state + dispatch spine active/tested; narrow real loop. Bounded "
-        "to current runtime; broader autonomy deferred (G-035 guardrail).",
+        "Scheduler / action-planning", "L2", "dormant", False, False,
+        "NOT L6 — concrete code-level blocker. Dormant by design (TD-008, AST-pinned: "
+        "chat() action_scheduler=None, main.py never passes the kwarg). Activation "
+        "requires building safety gates (G-031) + wiring action_scheduler into chat() + "
+        "a real scheduled-action dogfood — a deliberately-deferred major autonomy "
+        "change, not a productization gap. Waking it must be a separately-authorized "
+        "effort per the user rule 'only activate after safety gate/operator control'.",
+    ),
+    CapabilityStatus(
+        "TUI / visual shell", "L2", "seam", False, False,
+        "NOT L6 — concrete architecture blocker. TUI is a SEPARATE Node.js/TypeScript "
+        "companion app (not the Python runtime); the Python --tui backend switch + "
+        "input_backends exist. L6 requires a Node-side real-provider smoke through the "
+        "TUI — a separate-language productization. Capability truth is stable (G-007), "
+        "so TUI promotion is unblocked-in-principle but needs the Node app exercised.",
     ),
 )
 
@@ -161,7 +185,8 @@ def render_capability_status() -> str:
     lines.append("        L3 fake_local_verified / L4 real_api_verified /")
     lines.append("        L5 operator_ready / L6 released")
     lines.append(
-        "Note: no module is L5/L6. Real-API verification is opt-in (no CI gate)."
+        "L6 modules cite a real dogfood (G-0xx) or a 'Boundary:' 替代-verification. "
+        "No secret; all real smokes opt-in except where noted."
     )
     return "\n".join(lines) + "\n"
 

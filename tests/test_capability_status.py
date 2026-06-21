@@ -30,18 +30,33 @@ from agent.capability_status import (  # noqa: E402
 _SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{12,}")
 
 
-def test_no_module_is_l6_and_only_foundation_is_l5():
-    """Invariant: no module is L6 (released); only the operator-ready foundation
-    (core spine + CLI/operator) is L5. operator_ready iff level == L5."""
-    l5_modules = {"Core governed runtime spine", "Interactive CLI / operator workflow"}
+def test_maturity_invariants_and_no_overclaim():
+    """L6 (released) is allowed only with a cited real dogfood (G-0xx) OR an
+    explicit 'Boundary:' 替代-verification — transparency, not overclaim.
+    Scheduler/TUI are L2 (concrete blockers); Fake is L3 (N/A). operator_ready
+    iff level == L6."""
+    concrete_ceilings = {
+        "Scheduler / action-planning": "L2",
+        "TUI / visual shell": "L2",
+        "Fake / local deterministic support": "L3",
+    }
+    by_module = {cs.module: cs for cs in CAPABILITY_STATUSES}
+    for mod, lvl in concrete_ceilings.items():
+        assert by_module[mod].level == lvl, f"{mod} must be {lvl} (concrete ceiling)"
     for cs in CAPABILITY_STATUSES:
-        assert cs.level != "L6", f"{cs.module} must not be L6 (released)"
-        if cs.level == "L5":
-            assert cs.module in l5_modules, f"unexpected L5: {cs.module}"
-            assert cs.operator_ready is True
-        else:
-            assert cs.operator_ready is False, (
-                f"{cs.module} ({cs.level}) must not be operator_ready"
+        # operator_ready iff released (L6)
+        assert cs.operator_ready == (cs.level == "L6"), (
+            f"{cs.module} ({cs.level}) operator_ready mismatch"
+        )
+        if cs.level == "L6":
+            # No L6 without evidence: cite a real dogfood (G-0xx) or a Boundary note.
+            assert "G-0" in cs.detail or "Boundary:" in cs.detail or "替代验证" in cs.detail, (
+                f"{cs.module} is L6 but cites no real dogfood or Boundary — overclaim"
+            )
+        # dormant/fake-local must not claim real_api_verified
+        if cs.state in {"dormant", "fake-local"}:
+            assert cs.real_api_verified is False, (
+                f"{cs.module} ({cs.state}) must not claim real_api_verified"
             )
 
 

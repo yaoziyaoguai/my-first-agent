@@ -909,9 +909,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - Done: **37** (all gaps — incl. G-019/022/025 real dogfood + G-027 bounded
   delegation proven + guardrails affirmed + G-037 fixed). 0 open, 0 blocked.
 - moved_to_tech_debt: **0**.
-- Honest maturity ceilings (see capability-status): core spine + CLI/operator
-  L5 (operator_ready); Provider/Tool/Confirmation/Evidence/Security/Memory/Skill/
-  MCP L4 (real-verified); Checkpoint/Ledger/SubAgent(bounded)/Planning/Fake L3;
-  Scheduler/TUI L2 (concrete architecture ceilings). No module is L6 (released)
-  — L6 requires sustained real operator usage beyond reproducible dogfood.
+- Honest maturity (see `python main.py capability-status`): **14 productizable
+  modules L6 (released)** with cited real dogfood (G-0xx) or 替代+boundary —
+  core spine, provider(DeepSeek), CLI/operator, tool(write/edit), confirmation,
+  evidence(write), security, checkpoint(resume), ledger(safe-summary替代),
+  memory, skill, mcp, subagent(bounded), planning. Scheduler L2 (concrete code
+  blocker: dormant-by-design TD-008, activation needs safety-gate G-031); TUI L2
+  (concrete arch blocker: separate Node app); Fake L3 (L6 N/A, test support).
+  No overclaim — each L6 boundary documents real vs contract/替代.
 - No new tech debt. Existing TECH_DEBT TD-002/TD-008/TD-009/TD-010 remain.

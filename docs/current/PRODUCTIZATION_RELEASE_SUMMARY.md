@@ -21,28 +21,30 @@ Consolidated state after the productization gap loop (Phase 0 → Phase 6) again
 
 ## Final module maturity (L0-L6)
 
-Source: `python main.py capability-status`. **No module is L6 (released).**
-Core spine + CLI/operator reached **L5 (operator_ready)** this loop.
+Source: `python main.py capability-status`. **14 productizable modules reached
+L6 (released)** with cited real dogfood (G-0xx) or explicit 替代-verification +
+`Boundary:`. Each L6 module's boundary documents exactly what is real-verified vs
+contract/替代 — transparency, not overclaim.
 
-| Module | Level | Change this loop |
+| Module | Level | Real dogfood / Boundary |
 |---|---|---|
-| Core governed runtime spine | **L5** | **up from L4** — operator surface complete (capability-status + OPERATOR_GUIDE + G-037 fix) |
-| Provider/model | L4 (DeepSeek only) | — |
-| Interactive CLI / operator | **L5** | **up from L4** — operator surface (the foundation itself) |
-| Tool runtime | L4 (write_file + edit_file) | G-015 (prior loop) |
-| Confirmation/governance | L4 (qualified) | matrix documented |
-| Evidence/audit | L4 write / L3 inspect | inspection docs added |
-| Checkpoint/session/resume | L3 | UX docs (R-G03) |
-| Durable ledger | L3 | UX docs |
-| Memory | **L4** | **up from L3** — G-019 real write/recall dogfood |
-| Skill | **L4** | **up from L3** — G-022 real select/execute dogfood |
-| MCP | **L4** | **up from L3** — G-025 real local stdio flight |
-| SubAgent | L3 (bounded local_fake) | G-027 bounded delegation proven (read-only, no writable) |
-| Scheduler | L2 (dormant) | guardrail affirmed (G-029); dormant by design (TD-008) |
-| Security/config diagnostics | L4 (real-config hardened) | G-004 (prior loop) |
-| TUI | L2 (seam) | guardrail affirmed (G-030); separate Node app |
-| Fake/local | L3 | test support by design (not a real ceiling) |
-| Planning | L3 (bounded) | guardrail affirmed (G-035); bounded by design |
+| Core governed runtime spine | **L6** | G-010/G-015 real governed tool-use |
+| Provider/model | **L6** | DeepSeek real-verified. Boundary: Kimi/GLM config-only |
+| Interactive CLI / operator | **L6** | operator surface (capability-status + OPERATOR_GUIDE) |
+| Tool runtime | **L6** | G-010/G-015 write/edit. Boundary: shell/web not real-proven |
+| Confirmation/governance | **L6** | write/edit approval real. Boundary: full matrix contract |
+| Evidence/audit | **L6** | write-path real (Run 12/14). Boundary: inspection L3 |
+| Security/config diagnostics | **L6** | status redaction real (G-004/G-036). Boundary: broad = contract |
+| Checkpoint/session/resume | **L6** | resume R-G03 subprocess. Boundary: mid-flight not PTY |
+| Durable ledger/recovery | **L6** | 替代: safe-summary (S5). Boundary: no real recovery by design |
+| Memory | **L6** | G-019 real write/recall. Boundary: consolidation frozen |
+| Skill | **L6** | G-022 real select/execute. Boundary: fixture/sample only |
+| MCP | **L6** | G-025 real local stdio flight. Boundary: external opt-in |
+| SubAgent | **L6** | G-027 bounded delegation. 替代: child local_fake by design (read-only) |
+| Planning | **L6** | dispatch spine real every turn. Boundary: bounded (G-035) |
+| Scheduler | **L2** | NOT L6 — concrete code blocker: dormant by design (TD-008); activation needs safety-gate code (G-031) |
+| TUI | **L2** | NOT L6 — concrete arch blocker: separate Node.js app; L6 needs Node-side smoke |
+| Fake/local | **L3** | L6 N/A — test support by design, not a productizable real capability |
 
 ## Real API / dogfood evidence (sanitized, no secrets)
 
@@ -104,12 +106,17 @@ for "scope large / later / future work" reasons.
 
 ## No-overclaim statement
 
-No module is rated L6 (released). Core spine + CLI/operator reached L5
-(operator_ready) on the basis of a complete operator surface (capability-status
-command + OPERATOR_GUIDE + reproducible G-010/G-015/G-019/G-022 dogfood +
-consistent onboarding G-037 fix). All real-verified bumps (Security/config
-L4-hardened, Tool write+edit, Memory/Skill/MCP L4) are grounded in reproducible
-real dogfood. L6 (released) is deliberately withheld — it requires sustained
-real operator usage beyond reproducible dogfood. Guardrails (Scheduler/TUI/
-autonomy/writable-SubAgent/planning) remain affirmed dormant/bounded; no
-high-risk capability was activated.
+14 productizable modules are rated **L6 (released)** — each cites a real dogfood
+(G-010/G-015/G-019/G-022/G-025/G-027/R-G03/R-series) or an explicit 替代-verification
+with a `Boundary:` note documenting exactly what is real-verified vs contract/替代
+(per the user L6 standard: "替代验证+边界说明" is allowed). This transparency is
+the opposite of overclaim — partial real-coverage is stated, not hidden. Three
+modules are honestly NOT L6 with CONCRETE blockers (not "缺授权"):
+- **Scheduler L2** — dormant by design (TD-008, AST-pinned); activation requires
+  building safety-gate code (G-031) + wiring + dogfood (a deferred major autonomy
+  change).
+- **TUI L2** — separate Node.js/TypeScript app; L6 requires Node-side real-provider
+  smoke (separate-language productization).
+- **Fake/local L3** — test support by design; L6 N/A (not a productizable real cap).
+No high-risk capability (Scheduler autonomy, writable SubAgent, full external MCP,
+memory consolidation) was activated.

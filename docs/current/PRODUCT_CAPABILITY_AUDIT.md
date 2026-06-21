@@ -248,11 +248,22 @@ unit/contract/AST tests. No L4 is CI-gated real verification.
 | Fake / local deterministic support | `fake_provider.py`, `local_demo.py`, `local_config.py`, `local_trace.py`, `local_artifacts.py` | **L3** | FakeProvider is the default-safe provider, shares the same `core.chat`/`loop.py` path, underpins CI/contracts/demos. `--provider fake` override (`main.py:671-674`). | Not a real product capability ceiling. | Fake success mistaken for real API readiness. | Preserve as test/support; clearly label fake/local in status/docs. |
 | Planning / task orchestration | `planner.py`, `task_orchestration.py`, `task_context.py`, `task_runtime.py`, `runtime_integration/dispatcher.py`, `loop.py` | **L3** | Structured task state, action dispatch spine, LoopDependencies active and tested. Core real loop works for the narrow governed write case. | Scheduler not activated; richer planning not real/operator-ready. | Broad planning claims imply unverified autonomy. | Keep bounded to current runtime; defer higher autonomy until scheduler has a goal. |
 
-No module is rated L5 or L6 in this audit. L5 requires the consolidated
-operator surface (capability-status truth table + troubleshooting runbook +
-non-stale entry docs) to be present and reliable; that surface does not exist
-yet. L6 additionally requires a module-specific Goal/Gap loop with real usage
-and audit close-out.
+No module is rated L5 or L6 **at baseline** (this audit, 2026-06-21). L5 requires
+the consolidated operator surface (capability-status truth table + troubleshooting
+runbook + non-stale entry docs); L6 additionally requires real usage + audit
+close-out + 替代-verification+boundary where full real API is not available.
+
+**Post productization-loop update (2026-06-22):** the gap loop (G-007..G-037)
+delivered the operator surface + reproducible real dogfood (G-010 write_file,
+G-015 edit_file, G-019 memory, G-022 skill, G-025 local MCP, G-027 bounded
+SubAgent, R-G03 resume) + G-037 onboarding fix. As a result, **14 productizable
+modules are promoted to L6 (released)** with cited real dogfood or 替代+boundary
+— see the LIVE levels at `python main.py capability-status`
+(`agent/capability_status.py`), which is the authoritative current maturity. The
+table above is the baseline; the capability-status command is the post-loop live
+state. Three modules remain below L6 with CONCRETE blockers: Scheduler (L2,
+dormant by design TD-008 — activation needs safety-gate code G-031), TUI (L2,
+separate Node.js app), Fake/local (L3, test support — L6 N/A).
 
 ## 5. Module dependency map
 

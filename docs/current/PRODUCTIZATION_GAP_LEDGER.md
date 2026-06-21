@@ -1061,20 +1061,27 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   non-DeepSeek key is configured + smoked).
 
 ### G-042a / G-044a — implemented this round (industry-benchmark fixes)
-- G-042a (MCP resources primitive): local resources/list + resources/read on the
-  fixture MCP server + StdioMCPClient.list_resources/read_resource + test. DONE.
-- G-044a (Scheduler visibility + NO-OP/report-only): a read-only scheduled-action
-  visibility surface + NO-OP/report-only fire dogfood (no dangerous execution) +
-  Cancel/Terminate evidence. DONE (if implemented below; else open).
+- G-042a (MCP resources primitive): **DONE** — local resources/list +
+  resources/read on the fixture MCP server + StdioMCPClient.list_resources/
+  read_resource + `test_g025_real_mcp_local_flight.py::test_real_local_mcp_resources_list_and_read`
+  (2 passed default-run). MCP flight now covers connect/list/call/result/resources.
+- G-044a (Scheduler visibility + NO-OP/report-only): **open** — a scheduled-action
+  VISIBILITY module (create/list/get/cancel, no execution) + NO-OP/report-only fire
+  dogfood is safe and productizable (industry: Cloudflare listSchedules, Temporal
+  Cancel-vs-Terminate), but it is a new module requiring focused implementation;
+  left open with concrete scope. The dormant-by-default AST pin (G-038) stays.
 
 ---
 
 ## Summary counts
 
-- Total gaps: 40 (37 + G-038/039/040 audit-correction).
-- Done: **39**. Open: **1** — G-038 (safety-gated Scheduler; guardrail, do not
-  activate until G-031 safety gates are built — concrete code prerequisite, not
-  "缺授权"). moved_to_tech_debt: **0**.
+- Total gaps: 48 (40 + G-041..G-046 industry-benchmark + G-042a/G-044a sub-items).
+- Done: **40** (prior 39 + G-042a MCP resources). Open: **8** — G-038 (Scheduler
+  guardrail), G-041 (tool guardrails/lifecycle), G-042 (MCP ecosystem remainder),
+  G-043 (SubAgent read-only-child lifecycle), G-044/G-044a (Scheduler visibility/
+  NO-OP), G-045 (token-usage/observability), G-046 (non-DeepSeek provider smoke).
+  All open gaps have concrete productization scope — NOT "缺授权".
+- moved_to_tech_debt: **0**.
 - Honest maturity (see `python main.py capability-status`): **Tool PLATFORM L6**
   with per-family levels (file write/edit + read-only + memory + meta = L6;
   external/network L3; shell/exec forbidden-autonomous; MCP L4). **Bounded

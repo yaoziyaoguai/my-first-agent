@@ -70,19 +70,34 @@ are backed by reproducible real evidence, not overclaim.
 
 ## Open / blocked gaps
 
-**None.** All 37 gaps are done (0 open, 0 blocked, 0 moved_to_tech_debt). The
-four gaps previously blocked on "non-determinism / external resource" were
-resolved this loop with real dogfood:
-- **G-019** (memory real trigger) — resolved: real DeepSeek MEMORY_REMEMBER_REQUEST
-  -> memory_confirmation approval -> stored -> recall (Memory L3->L4).
-- **G-022** (skill real selection) — resolved: real DeepSeek SKILL_SELECT ->
-  demo.write_demo_note -> governed approval -> note written (Skill L3->L4).
-- **G-025** (MCP real endpoint) — resolved: real local stdio MCP flight against a
-  safe fixture server — connect/list/call/result (MCP L3->L4).
-- **G-027** (SubAgent real delegation) — resolved: bounded delegation proven
-  (read-only local_fake child, governed/audited/no-writable). SubAgent stays L3
-  (bounded child is local_fake by design; V0 real-child is the heavy gated
-  second-agent-loop path, not activated).
+The 4 prior "blocked" gaps (G-019/022/025/027) were resolved with real dogfood
+(see maturity table). **Phase 7 industry-benchmark (2026-06-22)** opened 6 new
+productization gaps (G-041..G-046) + G-042a done. Current: **40 done, 8 open,
+0 moved_to_tech_debt**. Open gaps have concrete productization scope (NOT
+"缺授权"): G-038 (Scheduler guardrail), G-041 (tool guardrails/lifecycle),
+G-042 (MCP ecosystem remainder), G-043 (SubAgent read-only-child lifecycle),
+G-044/G-044a (Scheduler visibility/NO-OP), G-045 (token-usage observability),
+G-046 (non-DeepSeek provider smoke).
+
+## Remaining L6 scope — industry-benchmark boundaries (research-backed)
+
+Benchmarked vs OpenAI Agents SDK, Anthropic MCP spec, Claude Code, LangGraph,
+CrewAI, AutoGen, Temporal/Inngest/DBOS, LiteLLM, Codex CLI. Each non-L6 scope
+below has a concrete industry delta + reason it is NOT L6 (not "缺授权", not overclaim):
+
+| Scope | Level | Industry delta (sources) | Why not L6 / boundary |
+|---|---|---|---|
+| Tool: external/network (fetch_url) | L3 | Claude Code/Codex: network OFF-by-default + domain allowlist + egress proxy | Not real-proven; needs domain allowlist + secret-scrub + timeout (G-041, safe) |
+| Tool: shell/exec (run_shell) | forbidden | Claude Code seatbelt / Codex sandbox / Landlock+bubblewrap; denylist-only is insufficient | Forbidden for autonomous use by design; needs OS-level sandbox safety-gate (future) |
+| Provider: Kimi/GLM | ~L2 | LiteLLM/LangChain: per-provider real smoke + capability/streaming negotiation | No credential configured for those providers (concrete config gap); GLM streaming fail-closed (G-046) |
+| MCP: full ecosystem | open G-042 | MCP spec: remote HTTP, resources/prompts/completions, client caps, multi-server registry, tool-poisoning defense | Local stdio+resources L6; multi-server/HTTP/client-caps open (G-042); sampling/elicitation forbidden (server-driven autonomy) |
+| SubAgent: writable/multi-agent | not released | OpenAI handoffs / LangGraph swarm / CrewAI hierarchical = higher-autonomy tier | Separate tier; needs safety gates + tool scoping + cancel/timeout + failure-recovery (G-043, future) |
+| SubAgent: real read-only child | open G-043 | Claude Code/OpenAI/AutoGen: per-child allowlist + max_turns + terminate/stop/abort + context isolation + timeout | Bounded child is local_fake by design (L6); a REAL read-only child needs the lifecycle contract (G-043, safe) |
+| Scheduler: execution | L2 dormant | Temporal/Cloudflare/Inngest: CRUD + visibility + Cancel/Terminate + idempotency; scheduling≠workflows | Dormant by design (TD-008); visibility/NO-OP safe (G-044a open); execution needs durable-timer+approval+fail-closed (future) |
+| TUI | L2 | Codex/Claude Code TUI = streaming+approval UX; Langfuse/Phoenix = observability platform | Companion Node.js app; CLI (capability-status+logs+health) IS the operator surface; TUI not current-release scope (boundary) |
+| Fake/local | L3 | n/a (test support) | L6 N/A — FakeProvider is test infrastructure, not a productizable real capability |
+| Observability: token usage | open G-045 | Langfuse/LangSmith/Phoenix: token/cost spans; Codex /status | Usage parsed at provider seam but DROPPED — concrete bug (G-045, safe to fix) |
+
 
 ## Guardrails affirmed (track, do not activate)
 

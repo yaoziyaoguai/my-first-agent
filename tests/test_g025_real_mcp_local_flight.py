@@ -90,4 +90,3 @@ def test_real_local_mcp_resources_list_and_read() -> None:
     assert any("hello from local MCP resource" in t for t in texts), (
         f"resource read did not return the greeting; got {texts!r}"
     )
-

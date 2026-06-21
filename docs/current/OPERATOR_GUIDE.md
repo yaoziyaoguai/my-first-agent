@@ -226,13 +226,13 @@ Consolidation policy (G-021):
   across all 6 consolidation modules** (`memory_consolidation.py` header) and is
   default-off (`MEMORY_CONSOLIDATION_LLM_ENABLED`). Do NOT turn it on by default.
 
-Real-trigger status (G-019): Memory is **L3**. The real-provider memory-anchor
-smoke (`tests/runtime_integration/test_memory_anchor_real.py`, triple-gated
-opt-in) is non-deterministic under `deepseek-v4-flash` (the model does not
-reliably propose a memory anchor for soft prompts) and the memory confirmation
-flow uses a separate `pending_user_input_request` mechanism. A reliable
-real-trigger dogfood (G-019) is **open/blocked** on this non-determinism; Memory
-stays L3 until a controlled real-trigger scenario is proven.
+Real-trigger status (G-019): Memory is **L4**. Real-trigger verified by the
+reproducible real DeepSeek memory dogfood (`tests/test_g019_real_memory_dogfood.py`,
+opt-in): the model calls `MEMORY_REMEMBER_REQUEST` -> `memory_confirmation` ->
+`chat("y")` approval -> record stored -> `list_records` recall. (The earlier
+`test_memory_anchor_real.py` soft-prompt smoke was non-deterministic; the direct
+tool-use instruction in G-019 makes the trigger reliable.) Consolidation stays
+frozen; LLM consolidation remains default-off and not real-verified.
 
 ## 12. Skill system (G-022 / G-023 / G-024)
 

@@ -556,18 +556,15 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: explicit user control; no surprise retention; no secret
   memory; consolidation stays frozen.
-- status: **open (blocked)**. Blocker: memory real-trigger is non-deterministic
-  under `deepseek-v4-flash` — the existing real-provider smoke
-  (`tests/runtime_integration/test_memory_anchor_real.py`, triple-gated) ran opt-in
-  2026-06-22 and 2 real tests FAILED (model replied with a greeting, proposed no
-  memory anchor → `provider_kind=None`). The memory confirmation flow also uses a
-  separate `pending_user_input_request`/`awaiting_kind="memory_confirmation"`
-  mechanism (not `pending_tool`). Memory stays **L3** until a controlled
-  real-trigger scenario (strong memory-eliciting prompt + memory_confirmation
-  approval driving) is proven. Not tech-debt — resolvable with a controlled
-  scenario; blocked this round on real-model non-determinism.
-- owner_or_next_action: write a controlled memory real-trigger dogfood (strong
-  prompt + memory_confirmation approval); re-run until deterministic.
+- status: **done** (Phase 3, this commit). Evidence:
+  `tests/test_g019_real_memory_dogfood.py` — reproducible real DeepSeek memory
+  dogfood (1 passed opt-in): model calls MEMORY_REMEMBER_REQUEST ->
+  memory_confirmation -> chat("y") approval -> record stored -> list_records
+  recall carries the fact; provider_kind=real; no secret. Memory **L3 -> L4**.
+  (Resolves the prior non-determinism blocker: a direct tool-use instruction
+  makes the trigger reliable; the separate memory_confirmation pending is
+  approved programmatically.)
+- owner_or_next_action: keep opt-in test green; keep consolidation frozen.
 - tech_debt_policy: not debt.
 
 ### G-020 — Memory privacy/retention boundaries + operator inspection

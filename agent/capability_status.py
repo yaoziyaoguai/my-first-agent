@@ -77,9 +77,11 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "recovery trial.",
     ),
     CapabilityStatus(
-        "Memory", "L3", "active", False, False,
-        "Retain/recall/forget fake/local-tested; opt-in real-provider anchor "
-        "smoke exists but skip-by-default. Consolidation frozen across 6 modules.",
+        "Memory", "L4", "active", True, False,
+        "Real-trigger verified (G-019 reproducible real DeepSeek memory dogfood: "
+        "MEMORY_REMEMBER_REQUEST -> memory_confirmation approval -> stored -> "
+        "list_records recall). Consolidation frozen across 6 modules (LLM "
+        "consolidation default-off).",
     ),
     CapabilityStatus(
         "Skill system", "L3", "active", False, False,

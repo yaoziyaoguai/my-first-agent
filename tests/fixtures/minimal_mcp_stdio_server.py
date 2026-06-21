@@ -24,7 +24,7 @@ def main() -> int:
     if method == "initialize":
         result = {
             "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
+            "capabilities": {"tools": {}, "resources": {}},
             "serverInfo": {"name": "minimal-local-mcp", "version": "test"},
         }
     elif method == "tools/list":
@@ -63,6 +63,32 @@ def main() -> int:
                 ],
                 "isError": True,
             }
+    elif method == "resources/list":
+        # G-042a: MCP resources primitive (local, no file/network).
+        result = {
+            "resources": [
+                {
+                    "uri": "greeting://hello",
+                    "name": "hello",
+                    "description": "A static local greeting resource",
+                    "mimeType": "text/plain",
+                }
+            ]
+        }
+    elif method == "resources/read":
+        uri = params.get("uri", "")
+        if uri == "greeting://hello":
+            result = {
+                "contents": [
+                    {
+                        "uri": "greeting://hello",
+                        "mimeType": "text/plain",
+                        "text": "hello from local MCP resource",
+                    }
+                ]
+            }
+        else:
+            result = {"contents": []}
     else:
         print(json.dumps({
             "jsonrpc": "2.0",

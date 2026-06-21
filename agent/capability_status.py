@@ -122,9 +122,11 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     CapabilityStatus(
         "MCP config / bridge", "L6", "active", True, True,
         "Released: real local stdio MCP flight (G-025 default-run — connect/list/call/"
-        "result against a safe LOCAL fixture server, real StdioMCPClient transport). "
-        "Activation default-off (env-gate, safety). Boundary: external/npx endpoint "
-        "flight is opt-in (test_real_mcp_flight.py); multi-server ecosystem TD-009.",
+        "result + G-042a resources/list/read against a safe LOCAL fixture server, real "
+        "StdioMCPClient transport). Activation default-off (env-gate, safety). Boundary: "
+        "external/npx endpoint flight is opt-in; full ecosystem (multi-server registry, "
+        "Streamable HTTP, client caps roots/sampling/elicitation) is G-042 open, NOT "
+        "released; multi-server ecosystem TD-009.",
     ),
     CapabilityStatus(
         "SubAgent (bounded delegation)", "L6", "fake-local", False, True,

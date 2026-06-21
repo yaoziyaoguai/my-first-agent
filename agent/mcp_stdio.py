@@ -82,6 +82,28 @@ class StdioMCPClient:
             is_error=bool(result.get("isError", False)),
         )
 
+    def list_resources(self, server: MCPServerConfig) -> Sequence[Mapping[str, Any]]:
+        """G-042a: MCP resources/list — return server-declared resources.
+
+        Resources are context data (not tools); the operator decides whether to
+        surface them. Local-only here; no file/network access in the fixture.
+        """
+        result = self._send_request(server, "resources/list", {})
+        resources = result.get("resources", ())
+        if not isinstance(resources, list):
+            raise MCPTransportError("MCP resources/list result.resources must be a list")
+        return tuple(resources)
+
+    def read_resource(
+        self, server: MCPServerConfig, uri: str
+    ) -> Sequence[Mapping[str, Any]]:
+        """G-042a: MCP resources/read — read a resource by uri (local fixture)."""
+        result = self._send_request(server, "resources/read", {"uri": uri})
+        contents = result.get("contents", ())
+        if not isinstance(contents, list):
+            raise MCPTransportError("MCP resources/read result.contents must be a list")
+        return tuple(contents)
+
     def _send_request(
         self,
         server: MCPServerConfig,

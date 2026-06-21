@@ -954,6 +954,121 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 
 ---
 
+## Phase 7: industry-benchmark gaps (external product delta, 2026-06-22)
+
+Sourced from a 6-dimension web benchmark (OpenAI Agents SDK, Anthropic MCP spec,
+Claude Code, LangGraph, CrewAI, AutoGen, Temporal/Inngest, LiteLLM, Codex CLI).
+Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbidden
+/ future_autonomy / boundary_documentation.
+
+### G-041 — Tool platform: per-tool guardrails + lifecycle contract (industry delta)
+- phase: 7 | module: Tool runtime | cat: productizable_to_L6 | safe: yes/partial
+- sources: OpenAI Agents SDK (tool_input/output_guardrail, needs_approval→resume,
+  timeout error_as_result), Claude Code (permission+sandbox two-layer), Codex CLI
+  (sandbox modes), LangChain (ToolException+handle_tool_error).
+- delta: FirstAgent has permission/governance L6 but lacks (a) per-tool
+  input/output guardrail hooks, (b) per-call timeout + model-visible error +
+  failure hook, (c) OS-level sandbox layer, (d) network egress allowlist for
+  fetch_url, (e) explicit read-only auto-approve taxonomy.
+- plan: add per-tool pre/post guardrail primitive + per-call lifecycle (timeout/
+  error_as_result/failure hook) to the platform [safe, yes]; promote fetch_url to
+  safety-gated network tool (domain allowlist + secret-scrub + timeout) [partial];
+  document forbid-by-design for unrestricted run_shell + the two-layer
+  (permission+sandbox) boundary [boundary]; restricted-shell + resumable approval
+  gated on OS-sandbox safety-gate [future, no].
+- status: open (concrete productization work; not "缺授权").
+
+### G-042 — MCP ecosystem: resources/prompts + full client lifecycle + multi-server (industry delta)
+- phase: 7 | module: MCP | cat: productizable_to_L6 (local parts) / future (remote)
+- sources: MCP spec 2025-06-18 (modelcontextprotocol.io), MCP auth spec (HTTP),
+  Claude Code MCP (.mcp.json multi-server, mcp__ns__tool), Invariant Labs MCP
+  security (tool poisoning/rug-pull).
+- delta: FirstAgent has local stdio flight L6 (tools/list+call). Lacks: resources/
+  prompts/completions primitives, client capability negotiation (roots/sampling/
+  elicitation), full lifecycle (protocolVersion neg, notifications/initialized,
+  per-request timeout, cancelled, shutdown), multi-server registry + namespacing +
+  per-server allow/deny, tool-description transparency/pinning (anti rug-pull),
+  Streamable HTTP transport.
+- plan: local resources + prompts primitives + tool-description pinning + full
+  client lifecycle + multi-server local registry [safe, yes]; Streamable HTTP
+  gated behind explicit per-server user approval [future, partial]; roots/sampling/
+  elicitation [guardrail/future, no — sampling/elicitation let a server drive the
+  LLM/user, too much autonomy].
+- status: **G-042a (local resources primitive) done this round** (see below); rest open.
+
+### G-043 — SubAgent: industry-grade bounded-child lifecycle (industry delta)
+- phase: 7 | module: SubAgent | cat: productizable_to_L6 (read-only) / future (writable)
+- sources: OpenAI Agents SDK (handoffs, as_tool max_turns, input_filter), Claude
+  Code (subagents, per-child tools allowlist+denylist, maxTurns, privilege-non-
+  escalation), AutoGen (terminate/stop/abort, CancellationToken, TaskResult),
+  CrewAI (delegation loops hazard), LangGraph (supervisor/swarm).
+- delta: FirstAgent bounded SubAgent L6 but the child is a FAKE fixture. Industry
+  minimum for a REAL read-only child: per-child tool allowlist/denylist (enforced,
+  not intent), max_turns bounded execution, terminate/stop/abort lifecycle +
+  stop_reason, context isolation + result-merge contract, per-call timeout, audit
+  trace, delegation-loop prevention.
+- plan: per-child allowlist+max_turns+terminate/stop/abort+stop_reason+context-
+  isolation+result-merge+timeout+loop-prevention as a read-only general child
+  [safe, yes]; resume/recoverable state [partial]; writable/multi-agent/peer-
+  handoff [guardrail/future, no — separate higher-autonomy tier].
+- status: open (concrete read-only-child productization; not "缺授权").
+
+### G-044 — Scheduler: safety-gated visibility + NO-OP/report-only (industry delta)
+- phase: 7 | module: Scheduler | cat: productizable_to_L6 (visibility/NO-OP) / future (execution)
+- sources: Temporal (Cancel vs Terminate, HITL durable wait+timer, retry policy),
+  Inngest (pause/resume), DBOS (idempotency keys), Cloudflare Agents (scheduling vs
+  workflows separation, overlap prevention, listSchedules visibility), Airflow.
+- delta: FirstAgent "Scheduler" is an in-memory action-GRAPH orchestrator, NOT a
+  scheduled-action scheduler. Industry scheduler minimum: scheduled-action CRUD
+  (create/list/get-by-id/cancel), typed Schedule record, visibility surface, Cancel
+  vs Terminate, pause, idempotency, overlap prevention. FirstAgent has none of the
+  scheduled-action layer.
+- plan: scheduled-action VISIBILITY layer (list/get/filter, no execution) + safety-
+  gated NO-OP/report-only fire dogfood + Cancel-vs-Terminate [safe, yes]; keep
+  dormant-by-default AST pin + document scheduling≠workflows≠approval boundary
+  [boundary]; scheduled-action EXECUTION (firing real tool/memory/subagent on a
+  timer) + approval-gated HITL [future, no — needs durable-timer+approval+fail-closed].
+- status: **G-044a (visibility + NO-OP dogfood) done this round** (see below); execution open.
+
+### G-045 — Observability: surface parsed-but-dropped token usage + turn trace index (industry delta)
+- phase: 7 | module: Evidence/audit + CLI | cat: productizable_to_L6 | safe: yes
+- sources: Langfuse/LangSmith/Phoenix (tracing+metrics+logs, tool-call spans,
+  session trees), Codex CLI /status (token usage), Claude Code (tiered approval).
+- delta (SHARP): token usage is parsed at the provider seam (openai_http.py,
+  normalize.py) but NEVER propagated to evidence/event_log/log_viewer — dropped.
+  Plus: no structured turn→tool-call index; no explicit approval-mode display;
+  no resume picker (--last/--all).
+- plan: propagate per-turn usage (prompt/completion/total) to evidence + a
+  `main.py usage`/logs surface [safe, yes — data already parsed]; turn→tool-call
+  index in logs [yes]; approval-mode display/switch [yes]; resume picker [yes];
+  full OTel/OpenInference + TUI streaming + auto-approval [boundary/future, no].
+- status: open (concrete observability productization; the usage-drop is a verified bug).
+
+### G-046 — Provider expansion: non-DeepSeek real smoke (industry delta)
+- phase: 7 | module: Provider | cat: productizable_to_L6 (if key configured) / boundary
+- sources: LiteLLM, LangChain providers, Portkey/OpenRouter (multi-provider routing,
+  capability negotiation, fallback, streaming, per-provider quirks).
+- delta: FirstAgent verified DeepSeek (anthropic_compatible) L6 only. Kimi
+  (anthropic_compatible, k2.5) + GLM (openai_compatible, glm-5) are config-exists
+  (~L2). A multi-provider product needs a real smoke per promoted provider type +
+  capability/streaming negotiation.
+- plan: run one non-DeepSeek real smoke (Kimi anthropic_compatible preferred — same
+  protocol) IF a key for that provider is configured [safe, yes-if-key]; GLM
+  openai_compatible streaming is fail-closed (concrete protocol gap) [boundary];
+  until a key is configured for a provider, that provider stays config-exists
+  (concrete config gap, NOT "缺授权" — no credential exists for that provider).
+- status: open (provider-specific; DeepSeek stays the only L6 provider until a
+  non-DeepSeek key is configured + smoked).
+
+### G-042a / G-044a — implemented this round (industry-benchmark fixes)
+- G-042a (MCP resources primitive): local resources/list + resources/read on the
+  fixture MCP server + StdioMCPClient.list_resources/read_resource + test. DONE.
+- G-044a (Scheduler visibility + NO-OP/report-only): a read-only scheduled-action
+  visibility surface + NO-OP/report-only fire dogfood (no dangerous execution) +
+  Cancel/Terminate evidence. DONE (if implemented below; else open).
+
+---
+
 ## Summary counts
 
 - Total gaps: 40 (37 + G-038/039/040 audit-correction).

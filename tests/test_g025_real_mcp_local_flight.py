@@ -69,3 +69,25 @@ def test_real_local_mcp_connect_list_call_result() -> None:
     assert "g025-local-ok" in content_text, (
         f"echo result did not carry the message; got {content_text!r}"
     )
+
+
+def test_real_local_mcp_resources_list_and_read() -> None:
+    """G-042a: MCP resources primitive — resources/list + resources/read (local)."""
+    assert _FIXTURE_SERVER.is_file()
+    server = _local_echo_server()
+    client = StdioMCPClient(timeout_seconds=10.0)
+
+    resources = client.list_resources(server)
+    uris = [r.get("uri") for r in resources if isinstance(r, dict)]
+    assert "greeting://hello" in uris, f"greeting resource not listed; got {uris}"
+
+    contents = client.read_resource(server, "greeting://hello")
+    texts = [
+        c.get("text", "")
+        for c in contents
+        if isinstance(c, dict)
+    ]
+    assert any("hello from local MCP resource" in t for t in texts), (
+        f"resource read did not return the greeting; got {texts!r}"
+    )
+

@@ -80,6 +80,22 @@ def _provider_error_hint(status_code: int, body_preview: str) -> str:
     return "protocol/request mismatch — check provider_type, request body, model, endpoint"
 
 
+def validate_provider_tool_names(tools: list[dict[str, Any]]) -> list[str]:
+    """Return tool names that contain characters invalid for the provider pattern
+    ``^[a-zA-Z0-9_-]+$`` (R-G05).
+
+    These names need the adapter's sanitize+restore mapping at the provider seam. Use this
+    in fake/local diagnostics to surface the issue early — FakeProvider never validated
+    tool names, which hid the F-01 bug (dotted names → real provider 400).
+    """
+
+    return [
+        str(tool.get("name", ""))
+        for tool in tools
+        if _PROVIDER_TOOL_NAME_INVALID_RE.search(str(tool.get("name", "")))
+    ]
+
+
 class AnthropicCompatibleProvider:
     provider_type = "anthropic_compatible"
     supports_tools = True

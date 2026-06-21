@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-from agent.provider.anthropic_http import AnthropicCompatibleProvider
+from agent.provider.anthropic_http import AnthropicCompatibleProvider, validate_provider_tool_names
 from agent.provider.config import AgentProviderConfig
 from agent.provider.protocol import ProviderResponseError, ToolUseBlock
 
@@ -207,3 +207,19 @@ def test_provider_4xx_error_includes_actionable_hint_and_body():
     assert "tool-name" in error_msg.lower() or "protocol" in error_msg.lower()
     assert "body:" in error_msg
     assert "pattern" in error_msg
+
+
+def test_validate_provider_tool_names_flags_invalid():
+    """R-G05: validation flags tool names with illegal characters (e.g. dots)."""
+    tools = [
+        {"name": "write_file", "description": "d", "input_schema": {}},
+        {"name": "demo.write_demo_note", "description": "d", "input_schema": {}},
+    ]
+    invalid = validate_provider_tool_names(tools)
+    assert invalid == ["demo.write_demo_note"]
+
+
+def test_validate_provider_tool_names_all_clean():
+    """R-G05: no invalid names → empty list."""
+    tools = [{"name": "write_file"}, {"name": "read_file"}]
+    assert validate_provider_tool_names(tools) == []

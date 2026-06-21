@@ -314,3 +314,35 @@ real-delegation scenario is proven.
 Writable / multi-agent SubAgent (G-028): **guardrail — track, do not activate.**
 Writable/non-mediated delegation is deferred (TECH_DEBT TD-010); it must remain
 frozen until an explicit user-authorized gap opens it.
+
+## 15. Scheduler, TUI, and higher autonomy (G-029 / G-030 / G-031 / G-035)
+
+These are **guardrails by design** — Phase 5 affirms they stay dormant/bounded
+unless an explicit user-authorized gap opens them. Do NOT activate.
+
+- **Scheduler (G-029)**: `ActionScheduler` is registered-not-routed. `chat()`
+  `action_scheduler=None` default; `main.py` never passes the kwarg. Dormancy is
+  AST-pinned (`test_cr1_chat_default_action_scheduler_is_none`,
+  `test_cr1_main_py_does_not_pass_action_scheduler_kwarg`,
+  `test_cr1_action_scheduler_not_routed_in_production`;
+  `test_scheduler_boundary_l2.py`). No threading/async in the scheduler source.
+  TECH_DEBT TD-008. Activation requires a new explicit gap + user authorization +
+  confirmation/cancellation/evidence/operator controls (G-031).
+
+- **Planning / orchestration (G-035)**: stays bounded to the current governed
+  runtime; any broadening of structured task autonomy requires an explicit
+  user-authorized gap (mirrors the Scheduler guardrail).
+
+- **TUI (G-030)**: `tui/` is a separate Node.js/TypeScript companion app; the
+  Python `--tui` backend switch exists. TUI is L2 and must NOT advance to a
+  primary surface until the capability truth table is stable, then a real-
+  provider smoke through TUI.
+
+- **Higher autonomy (G-031)**: no autonomy (scheduler activation, multi-step
+  planning, writable SubAgent) ships without explicit safety gates
+  (confirmation/cancellation/evidence/operator-controls) and explicit user
+  authorization.
+
+Phase 5 verification: scheduler/capability/subagent boundary tests green
+(50 passed, `test_architecture_boundaries.py` + `test_scheduler_boundary_l2.py`
++ `test_capability_boundary_contract.py`). No dormant module was activated.

@@ -762,9 +762,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   harmless no-op).
 - safety_constraints: default-off; no hidden side effects; cancellation +
   audit mandatory.
-- status: open (guardrail — track, do not activate).
-- owner_or_next_action: keep dormant; open an explicit activation gap only with
-  user authorization.
+- status: **done (guardrail affirmed, Phase 5)**. Dormancy verified —
+  `test_architecture_boundaries.py` cr1 tests + `test_scheduler_boundary_l2.py`
+  green (50 passed): `chat()` `action_scheduler=None`, `main.py` never passes the
+  kwarg, scheduler not routed in production. The guardrail PERSISTS (reaffirmed
+  each phase exit); activation still requires an explicit user-authorized gap.
+- owner_or_next_action: keep dormant; reaffirm at each phase exit.
 - tech_debt_policy: already TECH_DEBT TD-008; this gap is the guardrail tracker.
 
 ### G-030 — TUI advancement gate
@@ -781,8 +784,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   capability.
 - real_api_or_trigger_required: yes (TUI smoke, after gate).
 - safety_constraints: same confirmation/governance as CLI.
-- status: open (gated).
-- owner_or_next_action: wait for G-007/G-018; then scope TUI smoke.
+- status: **done (guardrail affirmed, Phase 5)**. TUI stays L2 and is NOT a
+  primary surface; the capability truth table is now stable (G-007). Advancing
+  TUI still requires a real-provider smoke through TUI as a separate
+  user-authorized step.
+- owner_or_next_action: scope a TUI smoke only if TUI promotion is authorized.
 - tech_debt_policy: not debt.
 
 ### G-031 — Higher-autonomy safety gates
@@ -798,8 +804,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: no to build gates; yes to exercise under
   autonomy.
 - safety_constraints: default-off; auditable; cancellable.
-- status: open (guardrail).
-- owner_or_next_action: define the gate set before any Phase 5 activation.
+- status: **done (guardrail affirmed, Phase 5)**. No autonomy shipped: scheduler
+  dormant (G-029), planning bounded (G-035), writable SubAgent frozen (G-028).
+  Confirmation/cancellation/evidence/operator-controls are the preconditions for
+  any future autonomy; none activated this round.
+- owner_or_next_action: define the gate set before any future autonomy activation.
 - tech_debt_policy: not debt.
 
 ### G-035 — Planning/orchestration boundary guardrail
@@ -819,8 +828,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   added.
 - real_api_or_trigger_required: no (guardrail).
 - safety_constraints: default bounded; parent runtime in control; auditable.
-- status: open (guardrail — track, do not broaden).
-- owner_or_next_action: keep bounded; re-affirm at each phase exit.
+- status: **done (guardrail affirmed, Phase 5)**. Planning/orchestration stays
+  bounded to the current governed runtime; no broadening this round. The
+  guardrail persists; broadening requires an explicit user-authorized gap.
+- owner_or_next_action: keep bounded; reaffirm at each phase exit.
 - tech_debt_policy: not debt.
 
 ## Phase 6 — Release audit and dogfood loop

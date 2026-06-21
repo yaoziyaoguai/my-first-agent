@@ -1,10 +1,10 @@
 # Next Roadmap Direction Recommendation (post-S-series closure)
 
-> Status: **direction recommendation only**. Not a frozen goal, not a gap register,
-> not an authorization to implement. S-series roadmap mainline is **closed**; there
-> is **no active S stage** and this document does **not** open S6. It recommends the
-> next *major* roadmap direction for user decision. Naming proposals (e.g. R-series)
-> are suggestions with rationale, not commitments.
+> Status: **R-series COMPLETED (2026-06-21).** The R-series recommendation below was
+> executed and clean-closed; see `docs/archive/r-series-real-world-validation/`. This
+> doc's R-series analysis is retained as historical evidence. The **current next step**
+> is building a Product Capability Map and selecting the next module to productionize
+> (Memory / Scheduler / MCP / SubAgent / Product polish). Do NOT re-do R-series.
 >
 > Scope rule: this is discovery + architecture reasoning. No code, no tests, no new
 > stage docs beyond this recommendation. The user must explicitly authorize any next
@@ -183,11 +183,10 @@ major direction (or first only if R is blocked), gated behind R by dependency.
 
 In order (only on explicit user authorization to open R-series):
 
-1. `docs/current/R_REAL_PROVIDER_SPIKE.md` — time-boxed real-provider capability
-   spike/audit (discover real failure modes before freezing a goal).
-2. `docs/current/R_BASELINE_STATUS.md` — post-spike real-validation baseline.
-3. `docs/current/R_GOAL.md` — frozen R-series goal (real-world grounded validation).
-4. `docs/current/R_GAP.md` — R gap backlog.
+1. ~~`R_REAL_PROVIDER_SPIKE.md`~~ — superseded (R-series done; see archive).
+2. ~~`R_BASELINE_STATUS.md`~~ — superseded (R-series trial docs serve as the baseline).
+3. `docs/archive/r-series-real-world-validation/R_GOAL.md` — R-series goal (COMPLETED).
+4. `docs/archive/r-series-real-world-validation/R_GAP.md` — R gap backlog (COMPLETED).
 
 Naming is a suggestion; the **spike-first** ordering and the **real-validation-first**
 dependency are the load-bearing recommendations.

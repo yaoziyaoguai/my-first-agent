@@ -151,8 +151,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   each phase exit.
 - real_api_or_trigger_required: no.
 - safety_constraints: docs-only.
-- status: open.
-- owner_or_next_action: define the checklist; run it at Phase 0 exit.
+- status: **done** (Phase 0, this commit). Evidence: checklist defined in
+  PRODUCTIZATION_ROADMAP.md cross-phase rules (5 concrete checks); run at
+  Phase 0 exit — AGENTS.md/README/docs/current/graphify all consistent.
+- owner_or_next_action: re-run at each subsequent phase exit.
 - tech_debt_policy: not debt; recurring process gate.
 
 ### G-004 — R-004 real-credential status redaction: verification strategy
@@ -175,9 +177,14 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   real `status` run (sanitized assertion only, key never printed/logged).
 - safety_constraints: never print/log/commit the key; opt-in only; never stage
   `config/config.yaml`.
-- status: open.
-- owner_or_next_action: decide path (a) vs (b); if (b), record the cap and
-  remove overclaim wording.
+- status: **done** (Phase 0, this commit; path (a) chosen). Evidence: real-config
+  status redaction verified 2026-06-21 — `main.py status` run against the real
+  configured key (len 35, prefix `sk-`); key ABSENT from output; reproducible
+  opt-in test `tests/test_r004_real_config_status_redaction.py` (1 passed opt-in,
+  1 skipped default). Audit Security/config row updated L4-soft -> L4
+  real-config hardened.
+- owner_or_next_action: keep the opt-in test green; extend real-config proof to
+  other diagnostic paths via G-036.
 - tech_debt_policy: may move to debt ONLY if path (a) is deemed too risky and
   the project accepts synthetic proof as the permanent ceiling — then it becomes
   a documented ceiling (debt) with a future trigger (e.g., a safe redaction
@@ -211,8 +218,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   current after subsequent reorgs.
 - real_api_or_trigger_required: no.
 - safety_constraints: graphify-out is gitignored.
-- status: open.
-- owner_or_next_action: document the practice; consider hook automation later.
+- status: **done** (Phase 0, this commit). Evidence: practice documented in
+  AGENTS.md graphify section — run `graphify update . --force` after any
+  docs/current reorg or file move; graphify-out refreshed this commit (stale
+  current refs cleared).
+- owner_or_next_action: consider pre-commit hook automation later (low priority).
 - tech_debt_policy: not debt.
 
 ## Phase 1 — Operator workflow and capability status foundation
@@ -765,7 +775,9 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - By phase: Phase 0=6, Phase 1=9, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
   Phase 5=4, Phase 6=3.
 - By priority: P0=5, P1=10, P2=14, P3=7.
-- Done this commit: G-001, G-002, G-005.
+- Done (Phase 0): G-001, G-002, G-003, G-004, G-005, G-006 — all Phase 0 gaps
+  closed (G-001/002/005 in the roadmap commit; G-003/004/006 in the Phase 0
+  commit).
 - Open guardrails (track, do not activate / do not broaden): G-028, G-029,
   G-031, G-035.
 - Coverage: all 17 audit maturity rows covered (16 with dedicated gaps; the

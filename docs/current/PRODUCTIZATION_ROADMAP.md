@@ -53,8 +53,18 @@ side-effect risk and go last. Release audit (Phase 6) runs across all phases.
   SubAgent, Memory LLM consolidation) without an explicitly opened,
   user-authorized gap.
 - **Dormant modules are not broken.** Do not "fix" dormancy by routing it.
-- **Each phase closes with** an authority-consistency check (README, AGENTS.md,
-  docs/current, graphify aligned) and a no-overclaim audit.
+- **Each phase closes with** an authority-consistency check and a no-overclaim
+  audit. The authority-consistency check (G-003) is concrete:
+  1. `docs/current/` holds exactly the live authority set (audit + roadmap + gap
+     ledger + tech_debt; no closed/phase docs left behind).
+  2. `AGENTS.md` "Current Documents" + "Recommendation Rules" point only at files
+     that exist in `docs/current/` (`rg "docs/current/S_ROADMAP" AGENTS.md` is
+     empty; every cited path resolves).
+  3. `README.md` current-entry pointers resolve to existing files.
+  4. `graphify-out/graph.json` has no references to moved/removed current files
+     (run `graphify update . --force` if stale — see G-006).
+  5. No current doc describes a resolved defect as still-live, and no doc
+     claims a maturity rating without evidence (overclaim check).
 
 ## Phase 0 — Baseline and authority cleanup
 

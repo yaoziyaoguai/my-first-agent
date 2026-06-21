@@ -281,14 +281,13 @@ Dry-run operator UX (G-026):
   redacts; `mcp_audit` records.
 - Multi-server orchestration / dynamic discovery is OUT OF SCOPE (TD-009).
 
-Real-endpoint status (G-025): MCP is **L3**. The opt-in real npx flight smoke
-(`tests/test_real_mcp_flight.py`) is skip-by-default and requires an explicitly
-authorized endpoint. **G-025 is open/blocked**: no authorized external MCP
-endpoint is available this round, so real reachability cannot be verified. MCP
-stays L3 (config/bridge/dry-run verified) until an authorized endpoint smoke is
-run. Not tech-debt (the broader ecosystem is already TD-009); this is the
-single-source authorized-reachability sub-item, blocked on external resource
-availability.
+Real-endpoint status (G-025): MCP is **L4**. Real-endpoint verified by a real
+stdio MCP flight against a safe LOCAL fixture server
+(`tests/test_g025_real_mcp_local_flight.py`, default-run): StdioMCPClient
+initialize (connect) -> list_tools (echo) -> call_tool -> result. (A safe local
+MCP server is built/used per the user authorization; the real npx/external
+endpoint flight in `test_real_mcp_flight.py` remains opt-in.) Activation stays
+default-off (env-gate); full multi-server ecosystem deferred (TD-009).
 
 ## 14. SubAgent (G-027 / G-028)
 

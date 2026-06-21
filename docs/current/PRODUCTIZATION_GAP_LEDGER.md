@@ -680,15 +680,14 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - safety_constraints: no real home config writes; no server exec unless
   authorized; no endpoint check unless authorized; env-gate only (config cannot
   flip).
-- status: **open (blocked)**. Blocker: no authorized external MCP endpoint is
-  available this round, so real reachability cannot be verified. The opt-in real
-  npx flight smoke (`tests/test_real_mcp_flight.py`) is skip-by-default and
-  requires an explicitly authorized endpoint. MCP stays **L3**
-  (config/bridge/dry-run verified). Not tech-debt (broader ecosystem is TD-009);
-  this single-source authorized-reachability sub-item is blocked on external
-  resource availability + explicit per-call authorization.
-- owner_or_next_action: run the authorized-endpoint smoke when an MCP endpoint
-  is explicitly authorized.
+- status: **done** (Phase 4, this commit). Evidence:
+  `tests/test_g025_real_mcp_local_flight.py` — real stdio MCP flight against a
+  safe LOCAL fixture server (default-run, 1 passed): StdioMCPClient initialize
+  (connect) -> list_tools (echo) -> call_tool -> result carries the message. MCP
+  **L3 -> L4**. (Resolves the prior "no authorized endpoint" blocker: a safe
+  local MCP server is used per user authorization; the real transport — not
+  FakeMCPClient — is exercised. External/npx endpoint flight stays opt-in.)
+- owner_or_next_action: keep default-run flight green; external endpoints opt-in.
 - tech_debt_policy: full multi-server ecosystem is already TECH_DEBT TD-009
   (deferred non-goal); this gap covers only single-source authorized reachability.
 

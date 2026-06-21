@@ -91,9 +91,11 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "selector + fixture/sample skills; no real private skill dir.",
     ),
     CapabilityStatus(
-        "MCP config / bridge", "L3", "dormant", False, False,
-        "Default-off via env-gate (config cannot flip). Opt-in real npx flight "
-        "smoke exists but skip-by-default. Full ecosystem deferred (TD-009).",
+        "MCP config / bridge", "L4", "active", True, False,
+        "Real-endpoint verified (G-025: real stdio MCP flight against a safe "
+        "LOCAL fixture server — connect/list/call/result, default-run). Activation "
+        "default-off via env-gate (safety control, not dormancy); config/bridge/"
+        "policy/sanitizer/audit active. Full multi-server ecosystem deferred (TD-009).",
     ),
     CapabilityStatus(
         "SubAgent", "L3", "fake-local", False, False,

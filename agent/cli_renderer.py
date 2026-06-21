@@ -189,6 +189,10 @@ def render_provider_mode_banner() -> str:
     """
     import os
 
+    # R-G02: forced fake mode (--provider fake)
+    if os.getenv("MY_FIRST_AGENT_FORCE_FAKE") == "1":
+        return "[provider] mode=fake (forced by --provider fake — safe trial, no real API)"
+
     # 优先从 config/config.yaml 读取
     try:
         from agent.provider.simple_config import load_unified_provider_config

@@ -52,6 +52,12 @@ def build_model_provider_from_env() -> ModelProvider | None:
     """
     from agent.provider.fake_provider import FakeProvider
 
+    # R-G02: explicit force-fake CLI trial mode (--provider fake). Default OFF — only
+    # active when MY_FIRST_AGENT_FORCE_FAKE=1 is set by the CLI flag. Does NOT modify
+    # config.yaml; does NOT affect the default provider selection path.
+    if os.environ.get("MY_FIRST_AGENT_FORCE_FAKE") == "1":
+        return FakeProvider()
+
     # 1. config/config.yaml (推荐入口)
     from agent.provider.simple_config import load_unified_provider_config
 

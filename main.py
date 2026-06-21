@@ -650,6 +650,16 @@ def main(argv: list[str] | None = None) -> int:
 
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # R-G02: --provider fake forces FakeProvider (safe trial mode; default unchanged).
+    if "--provider" in argv:
+        _pi = argv.index("--provider")
+        if _pi + 1 < len(argv) and argv[_pi + 1].lower() == "fake":
+            import os as _os_rg02
+
+            _os_rg02.environ["MY_FIRST_AGENT_FORCE_FAKE"] = "1"
+            argv.pop(_pi + 1)
+            argv.pop(_pi)
+
     # ── 入口命令解析（Entry Command Clarification, 2026-06-03）──
     # --plain     → simple/plain CLI backend（默认，无需特殊处理）
     # --tui       → Textual TUI backend（候选 v1 TUI 主入口）

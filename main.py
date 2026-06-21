@@ -385,6 +385,23 @@ def main_loop(event_log_writer: Any = None, *, session_id: str = ""):
                 )
                 _tnetwork = "fetch" in _tname.lower()
 
+                # R-G04: trial-only auto-approval (default OFF; safe allowlist only).
+                from agent.trial_approval import can_trial_approve, record_trial_approval
+                if can_trial_approve(_tname, _tinput):
+                    record_trial_approval(_tname, _tinput)
+                    print(f"[trial] auto-approved: {_tname}")
+                    reply, new_latest_output = _run_chat_for_backend(
+                        "y",
+                        backend=backend,
+                        event_log_writer=event_log_writer,
+                        session_id=session_id,
+                    )
+                    if new_latest_output:
+                        latest_output = new_latest_output
+                    if reply:
+                        print(reply)
+                    continue
+
                 print()
                 print("━" * 55)
                 print("需要你确认工具执行：")

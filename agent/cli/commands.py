@@ -47,6 +47,24 @@ def dispatch_maintenance_command(
             dotenv_path=project_root / ".env",
         )
         print(render_diagnostic_report(diagnostic))
+
+        # R-G05: provider-visible tool-name diagnostic (surfaces dotted names to operator)
+        try:
+            import agent.tools  # noqa: F401  ensure tools registered
+            from agent.provider.anthropic_http import validate_provider_tool_names
+            from agent.tool_registry import get_model_visible_tools
+            _invalid_names = validate_provider_tool_names(
+                get_model_visible_tools(max_mcp_tools=5)
+            )
+            if _invalid_names:
+                print()
+                print("⚠️ Provider tool-name diagnostic:")
+                for _n in _invalid_names:
+                    print(f"   {_n}: chars invalid for ^[a-zA-Z0-9_-]+$")
+                print("   (adapter auto-sanitizes at the seam; informational)")
+        except Exception:
+            pass
+
         if diagnostic.status == "error":
             return 2
         if diagnostic.status == "warn":

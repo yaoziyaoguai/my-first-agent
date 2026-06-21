@@ -223,3 +223,13 @@ def test_validate_provider_tool_names_all_clean():
     """R-G05: no invalid names → empty list."""
     tools = [{"name": "write_file"}, {"name": "read_file"}]
     assert validate_provider_tool_names(tools) == []
+
+
+def test_diagnostic_finds_real_registry_invalid_names():
+    """R-G05: the diagnostic surfaces real registry tools with invalid names."""
+    import agent.tools  # noqa: F401  triggers @register_tool registrations
+    from agent.tool_registry import get_model_visible_tools
+
+    invalid = validate_provider_tool_names(get_model_visible_tools(max_mcp_tools=5))
+    # demo.echo_task_summary + demo.write_demo_note have dots → should be flagged.
+    assert any("demo." in name for name in invalid)

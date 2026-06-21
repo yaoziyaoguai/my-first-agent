@@ -52,8 +52,9 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     ),
     CapabilityStatus(
         "Tool runtime and registry", "L4", "active", True, False,
-        "Narrow: only write_file real-proven. ~10 governed tools registered; "
-        "run_shell/fetch_url have zero real evidence (Phase 2).",
+        "write_file + edit_file real-proven (G-010/G-015 reproducible real "
+        "dogfood). ~10 governed tools registered; run_shell/fetch_url have zero "
+        "real evidence. See OPERATOR_GUIDE §10.",
     ),
     CapabilityStatus(
         "Confirmation / governance / policy", "L4", "active", True, False,

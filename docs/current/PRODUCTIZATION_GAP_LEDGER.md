@@ -472,9 +472,13 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: mediator/executor only; TOOL_INVOKE stays evidence-only;
   dangerous tools gated.
-- status: open.
-- owner_or_next_action: pick representative safe tools; add reproducible
-  tool-use checks.
+- status: **done** (Phase 2, this commit). Evidence:
+  `tests/test_g015_real_edit_file_dogfood.py` — reproducible real DeepSeek
+  governed `edit_file` dogfood (1 passed opt-in, 1 skipped default): model
+  proposed edit_file, governed approval resolved, file content changed to the
+  new value, provider_kind=real. Tool runtime now real-proven for write_file
+  (G-010) + edit_file.
+- owner_or_next_action: broaden further only with explicit dogfood.
 - tech_debt_policy: not debt.
 
 ### G-016 — Tool safety/result/error/status productization
@@ -490,8 +494,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   proven tool.
 - real_api_or_trigger_required: no to document; yes to validate failure paths.
 - safety_constraints: dangerous tools require confirmation + path safety.
-- status: open.
-- owner_or_next_action: draft the per-tool matrix and safe-failure docs.
+- status: **done** (Phase 2, this commit). Evidence: OPERATOR_GUIDE §10
+  per-tool confirmation/safety matrix (TOOL_GATE/confirmation/executor,
+  trial-approval allowlist, path safety, dangerous-substring rejection,
+  evidence-only TOOL_INVOKE).
+- owner_or_next_action: extend safe-failure docs as new tools are added.
 - tech_debt_policy: not debt.
 
 ### G-017 — Provider-visible tool diagnostics operator usability
@@ -508,8 +515,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   via status.
 - real_api_or_trigger_required: no (diagnostic; static).
 - safety_constraints: no secret leak in diagnostics.
-- status: open.
-- owner_or_next_action: usability pass + docs.
+- status: **done** (Phase 2, this commit). Evidence: OPERATOR_GUIDE §10
+  provider-visible tool diagnostics — `validate_provider_tool_names()` wired
+  into `main.py status` (R-G05); operator can check tool-name validity without
+  a real call.
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ### G-018 — Tool dogfood matrix
@@ -522,8 +532,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: matrix matches real evidence.
 - real_api_or_trigger_required: derived.
 - safety_constraints: none beyond secret safety.
-- status: open.
-- owner_or_next_action: produce the matrix from G-015 evidence.
+- status: **done** (Phase 2, this commit). Evidence: OPERATOR_GUIDE §10
+  real-proven vs fake/local tool matrix (write_file/edit_file real-proven;
+  read_file/run_shell/fetch_url/others fake/local).
+- owner_or_next_action: keep matrix in sync as tools gain real evidence.
 - tech_debt_policy: not debt.
 
 ## Phase 3A — Memory

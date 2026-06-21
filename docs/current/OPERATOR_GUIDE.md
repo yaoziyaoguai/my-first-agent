@@ -156,3 +156,40 @@ hardening (no raw config/header/error bodies from any diagnostic path) is
 guarded by a contract test (`tests/test_g036_diagnostic_secret_safety.py`). Do
 not extend the "real-config-verified" claim to diagnostic paths beyond `status`
 until G-036's real-key variant is added.
+
+## 10. Tool runtime matrix (G-015 / G-016 / G-017 / G-018)
+
+### Real-proven vs fake/local (G-018 dogfood matrix)
+
+| Tool | Real-proven? | Evidence |
+|---|---|---|
+| `write_file` | **yes** | G-010 reproducible real DeepSeek governed dogfood (opt-in). |
+| `edit_file` | **yes** | G-015 reproducible real DeepSeek governed dogfood (opt-in). |
+| `read_file` | fake/local | safe-allowlist (trial-safe); no real smoke. |
+| `run_shell` | **no** (fake/local) | dangerous; zero real evidence; confirmation-gated + path/blacklist safety. |
+| `fetch_url` | **no** (fake/local) | network; zero real evidence; confirmation-gated. |
+| memory/skill/demo tools | fake/local | exercised via fake/local contract tests. |
+
+Two governed mutating tools (`write_file`, `edit_file`) are real-proven through
+the governed confirmation -> executor spine. Others remain fake/local. Tool
+runtime is **L4 (write_file + edit_file real-proven)** — not L5 (broad catalog
+docs/status + per-tool failure runbook still incomplete).
+
+### Per-tool confirmation / safety matrix (G-016)
+
+- All mutating/external tools go through TOOL_GATE -> confirmation -> TOOL_INVOKE
+  -> executor -> TOOL_RESULT.
+- Trial-approval (default OFF) auto-approves only `write_file`/`read_file`/
+  `edit_file` on workspace//tmp paths; everything else needs interactive `y`.
+- Path safety rejects source `.py`, system/home/config paths regardless of
+  approval; dangerous tool-name substrings (shell/exec/fetch/...) are always
+  rejected by trial-approval even if allowlisted.
+- TOOL_INVOKE dispatcher is evidence-only (AST-pinned); execution is exclusively
+  behind the mediator/executor.
+
+### Provider-visible tool diagnostics (G-017)
+
+`validate_provider_tool_names()` is wired into `main.py status` (R-G05): it
+surfaces any tool name invalid for `^[a-zA-Z0-9_-]+$`; the adapter sanitizes
+dotted names at the seam (`ae94f26`) and restores them on response. An operator
+can run `main.py status` to check tool-name validity without a real call.

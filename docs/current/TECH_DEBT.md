@@ -17,6 +17,24 @@
 - Each item states: ID, title, status, source/reason, impact, recommended
   stage, and a verification idea.
 
+### Productization gap intake (gaps-first)
+
+Productization work enters `docs/current/PRODUCTIZATION_GAP_LEDGER.md` first.
+`TECH_DEBT.md` is **not** a dumping ground for ordinary gaps.
+
+An item may move from the gap ledger to `TECH_DEBT.md` only when ALL of these
+hold:
+
+1. it is genuinely blocked in its current phase by a concrete
+   code/architecture/external dependency blocker (not "large scope");
+2. it has a clear future trigger that would reopen it;
+3. it does not block the current phase exit;
+4. the `TECH_DEBT.md` entry records the blocker, the phase impact, the future
+   trigger, and a verification idea.
+
+"Large scope", "later", or "future work" are NOT valid debt reasons. When a gap
+moves to debt, mark the ledger gap `moved_to_tech_debt` with the debt ID.
+
 ## Open / Carry-forward items
 
 > TD-006 (stale guard / doc-governance / architecture-boundary tests keeping the

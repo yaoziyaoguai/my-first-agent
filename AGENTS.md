@@ -52,17 +52,22 @@ user explicitly promotes them back into `docs/current/`.
 
 ### Current Documents
 
-With the S-series roadmap mainline closed, `docs/current/` holds only the
-cross-stage roadmap + debt registers (S1-S5 + S_FINAL are archived under
-`docs/history/`):
+The S-series roadmap mainline is closed (S1-S5 + S_FINAL archived under
+`docs/history/`). `docs/current/` now holds the productization working set
+only. The closed `S_ROADMAP.md` lives at
+`docs/archive/s-series-runtime-kernel/S_ROADMAP.md` (history, not current
+authority).
 
-- `docs/current/S_ROADMAP.md`
-  - Authoritative S-series version semantics and high-level direction.
-  - Does not encode a hard implementation plan for S2/S3/Sn.
+- `docs/current/PRODUCT_CAPABILITY_AUDIT.md`
+  - Baseline module maturity audit (L0-L6). Source of truth for maturity
+    ratings; later work must not override ratings without new evidence.
+- `docs/current/PRODUCTIZATION_ROADMAP.md`
+  - Phased productization roadmap (Phase 0-6) derived from the audit.
+- `docs/current/PRODUCTIZATION_GAP_LEDGER.md`
+  - Single intake for all productization work. New tasks enter here as gaps.
 - `docs/current/TECH_DEBT.md`
-  - Cross-stage carry-forward technical-debt register.
-  - Keeps only unresolved carry-forward / deferred debt; resolved items live in
-    their stage archives.
+  - Carry-forward / deferred debt only. Gaps enter the ledger first; only
+    genuinely blocked items move here.
 
 Stage scratch evidence (`_tmp_*`) is archived to the relevant stage's
 `_review_artifacts/` at close-out (mirrors the S2/S3/S4/S5 archive layout).
@@ -105,6 +110,13 @@ Example:
 ### Technical Debt Rules
 
 `TECH_DEBT.md` is not a dumping ground for unfinished work.
+
+Productization work enters `docs/current/PRODUCTIZATION_GAP_LEDGER.md` first.
+An item moves to `TECH_DEBT.md` only when it is genuinely blocked (concrete
+code/architecture/external dependency), has a clear future trigger, does not
+block the current phase exit, and the debt entry records blocker + impact +
+trigger + verification idea. "Large scope", "later", or "future work" are not
+valid debt reasons.
 
 Do not add an item to technical debt merely because a task is incomplete today.
 
@@ -154,12 +166,14 @@ Do not freely recommend new directions.
 
 Next-step recommendations are allowed only if they are directly grounded in:
 
-- `docs/current/S_ROADMAP.md`
+- `docs/current/PRODUCT_CAPABILITY_AUDIT.md`
+- `docs/current/PRODUCTIZATION_ROADMAP.md`
+- `docs/current/PRODUCTIZATION_GAP_LEDGER.md`
 - `docs/current/TECH_DEBT.md`
-- the cross-stage current docs (`docs/current/S_ROADMAP.md`,
-  `docs/current/TECH_DEBT.md`); the roadmap mainline is closed and there is no
-  active stage. Archived stage docs under `docs/history/` are evidence, not
-  routing authority.
+- the current docs above; the S-series roadmap mainline is closed and there is
+  no active stage. The closed `S_ROADMAP.md` is at
+  `docs/archive/s-series-runtime-kernel/S_ROADMAP.md` (history, not authority).
+  Archived stage docs under `docs/history/` are evidence, not routing authority.
 - the user's current explicit instruction
 
 Do not invent:

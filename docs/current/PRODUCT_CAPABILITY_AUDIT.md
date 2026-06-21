@@ -9,6 +9,15 @@ re-grounded against code, tests, config, and the R-series archive. It is also
 more conservative than the prior draft: the core spine is downgraded L5 -> L4,
 and several L4 ratings are qualified or split.
 
+## Baseline status
+
+This audit is the **baseline** for `PRODUCTIZATION_ROADMAP.md` and
+`PRODUCTIZATION_GAP_LEDGER.md`. Later module work must not override the maturity
+ratings here without new evidence. Any maturity upgrade (for example L3 -> L4 or
+L4 -> L5) requires real-API / real-trigger / operator-validation evidence — not
+code existence, unit or fake-local test success, config presence, or a single
+manual run. See the Global evidence caveat in section 4.
+
 ## 1. Executive summary
 
 FirstAgent has exactly one proven product-capability spine: a real provider can
@@ -47,11 +56,17 @@ Two real authority-state defects were found that the prior audit missed:
   was moved to `docs/archive/s-series-runtime-kernel/S_ROADMAP.md` and no longer
   exists in `docs/current/`. `README.md` was updated on 2026-06-21; `AGENTS.md`
   was not. This is the single most important authority defect: the agent-routing
-  doc tells agents to read a closed, moved file as if it were live.
+  doc tells agents to read a closed, moved file as if it were live. (This was
+  the state at audit time; **remediated in the productization-roadmap commit —
+  see G-001**: AGENTS.md now lists the live current docs and no longer points at
+  `docs/current/S_ROADMAP.md`.)
 - `graphify-out/graph.json` is stale: it still contains nodes referencing
   `docs/current/R_GAP.md` and `docs/current/R_GOAL.md`, which were moved to
   `docs/archive/r-series-real-world-validation/`. `graphify query` therefore
   returns thin/stale doc-routing nodes; run `graphify update .` to refresh.
+  (State at audit time; **remediated in the productization-roadmap commit via
+  `graphify update . --force` — see G-002**: the refreshed graph no longer
+  references the moved paths.)
 
 Recommended next module: productize the **CLI/operator workflow and capability
 status foundation** first. It is the lowest-risk next Goal/Gap loop, it is the

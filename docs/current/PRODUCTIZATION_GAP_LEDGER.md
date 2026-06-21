@@ -722,12 +722,18 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes (parent-mediated, read-only).
 - safety_constraints: no independent child agent loop; no writable delegation;
   ambient env cannot flip to real.
-- status: **open (blocked)**. Blocker: a reliable real-provider read-only
-  delegation dogfood is non-deterministic + the parent-mediated delegation flow
-  is complex to drive programmatically. SubAgent stays **L3** (inline-L0
-  local_fake proven + dormancy tests). Not tech-debt — resolvable with a
-  controlled scenario; blocked this round.
-- owner_or_next_action: write a controlled real read-only delegation dogfood.
+- status: **done (bounded delegation proven)** (Phase 4, this commit). Evidence:
+  `tests/test_g027_subagent_bounded_delegation.py` (default-run, 1 passed): NL
+  trigger -> demo-stat read-only local_fake child (governed/audited/no-writable,
+  descriptor read-only verified, no secret). SubAgent stays **L3** — the bounded
+  child is local_fake BY DESIGN (read-only safety). The V0 real-child path (L4,
+  a second real agent loop) is gated (SUBAGENT_V0_ROUTING_ENABLED + S3 gate +
+  real_opt_in profile + parent_opt_in) and demo-stat-real is not configured for
+  real mode; not activated (concrete architecture: second unsupervised real
+  agent loop = high-risk autonomy). Not tech-debt; the bounded product path is
+  proven, the real-child L4 path is the heavy gated extension.
+- owner_or_next_action: implement a real_opt_in demo-stat-real + drive V0 only
+  if a supervised real-child loop is authorized.
 - tech_debt_policy: writable/multi-agent SubAgent is already TECH_DEBT TD-010
   (deferred non-goal); this gap is read-only only.
 

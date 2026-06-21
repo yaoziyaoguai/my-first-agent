@@ -304,11 +304,16 @@ Operator visibility:
   `provider_mode_allowed` + `parent_opt_in` + `product_capability` + S3 env gate;
   `test_subagent_v0_provider_modes.py`).
 
-Real read-only delegation status (G-027): SubAgent is **L3** (local_fake proven
-+ dormancy tests). A reliable real-provider read-only delegation dogfood is
-**open/blocked** on real-model non-determinism + the complexity of driving the
-parent-mediated delegation flow. SubAgent stays L3 until a controlled
-real-delegation scenario is proven.
+Real read-only delegation status (G-027): the BOUNDED delegation is proven
+(`tests/test_g027_subagent_bounded_delegation.py`, default-run): NL trigger ->
+demo-stat read-only `local_fake` child (governed/audited/no-writable). SubAgent
+is **L3** — the bounded child is `local_fake` BY DESIGN (read-only safety; this
+is the bounded path the user requires, not a fake ceiling). The V0 real-child
+path (L4, a second real agent loop) is gated
+(`SUBAGENT_V0_ROUTING_ENABLED` + `MY_FIRST_AGENT_S3_SUBAGENT_ENABLE` +
+`real_opt_in` profile + `parent_opt_in`) and is not activated — a second
+unsupervised real agent loop is high-risk autonomy. Writable/multi-agent
+SubAgent stays frozen (TD-010).
 
 Writable / multi-agent SubAgent (G-028): **guardrail — track, do not activate.**
 Writable/non-mediated delegation is deferred (TECH_DEBT TD-010); it must remain

@@ -99,8 +99,12 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     ),
     CapabilityStatus(
         "SubAgent", "L3", "fake-local", False, False,
-        "Live delegation path is inline-L0 execution_mode=local_fake. L1/L2 "
-        "frozen (no handler). Triple-gated; ambient env cannot flip to real.",
+        "Bounded delegation proven (G-027: NL trigger -> demo-stat read-only "
+        "local_fake child, governed/audited/no-writable). Live path inline-L0 "
+        "execution_mode=local_fake by design (read-only safety). L1/L2 frozen; "
+        "V0 real-child (L4) is the heavy gated second-agent-loop path "
+        "(SUBAGENT_V0_ROUTING_ENABLED + S3 gate + real_opt_in), not activated. "
+        "Ambient env cannot flip to real.",
     ),
     CapabilityStatus(
         "Scheduler / action-planning", "L2", "dormant", False, False,

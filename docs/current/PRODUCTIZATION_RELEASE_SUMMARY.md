@@ -21,17 +21,21 @@ Consolidated state after the productization gap loop (Phase 0 → Phase 6) again
 
 ## Final module maturity (L0-L6)
 
-Source: `python main.py capability-status`. **14 productizable modules reached
-L6 (released)** with cited real dogfood (G-0xx) or explicit 替代-verification +
-`Boundary:`. Each L6 module's boundary documents exactly what is real-verified vs
-contract/替代 — transparency, not overclaim.
+Source: `python main.py capability-status`. **14 productizable modules/scopes
+are L6 (released)** with cited real dogfood (G-0xx) or explicit 替代-verification
++ `Boundary:`. **Post-audit correction (2026-06-22, G-039/G-040):** Tool is L6
+as a PLATFORM with per-FAMILY levels (not "all tools L6" — only write/edit +
+read-only + memory + meta families are L6; external/network L3; shell/exec
+forbidden-autonomous; MCP L4). SubAgent is L6 only as BOUNDED delegation
+(writable/general + multi-agent are NOT released). Each L6 boundary documents
+exactly what is real-verified vs contract/替代 — transparency, not overclaim.
 
 | Module | Level | Real dogfood / Boundary |
 |---|---|---|
 | Core governed runtime spine | **L6** | G-010/G-015 real governed tool-use |
 | Provider/model | **L6** | DeepSeek real-verified. Boundary: Kimi/GLM config-only |
 | Interactive CLI / operator | **L6** | operator surface (capability-status + OPERATOR_GUIDE) |
-| Tool runtime | **L6** | G-010/G-015 write/edit. Boundary: shell/web not real-proven |
+| Tool runtime | **L6** (platform) | platform L6; families: write/edit + read-only(G-039) + memory + meta = L6; external/network L3; shell/exec forbidden-autonomous; MCP L4 |
 | Confirmation/governance | **L6** | write/edit approval real. Boundary: full matrix contract |
 | Evidence/audit | **L6** | write-path real (Run 12/14). Boundary: inspection L3 |
 | Security/config diagnostics | **L6** | status redaction real (G-004/G-036). Boundary: broad = contract |
@@ -40,7 +44,7 @@ contract/替代 — transparency, not overclaim.
 | Memory | **L6** | G-019 real write/recall. Boundary: consolidation frozen |
 | Skill | **L6** | G-022 real select/execute. Boundary: fixture/sample only |
 | MCP | **L6** | G-025 real local stdio flight. Boundary: external opt-in |
-| SubAgent | **L6** | G-027 bounded delegation. 替代: child local_fake by design (read-only) |
+| SubAgent (bounded) | **L6** | G-027 bounded delegation L6 (read-only local_fake). Writable/general + multi-agent NOT released (TD-010) |
 | Planning | **L6** | dispatch spine real every turn. Boundary: bounded (G-035) |
 | Scheduler | **L2** | NOT L6 — concrete code blocker: dormant by design (TD-008); activation needs safety-gate code (G-031) |
 | TUI | **L2** | NOT L6 — concrete arch blocker: separate Node.js app; L6 needs Node-side smoke |

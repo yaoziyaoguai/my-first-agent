@@ -900,21 +900,71 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 
 ---
 
+## Phase 6 audit-correction gaps (independent L6 audit, 2026-06-22)
+
+### G-038 — Safety-gated Scheduler activation gap (opened, not activated)
+- phase: 5 | module: Scheduler | priority: P3
+- current_maturity: L2 (dormant) | target_maturity: dormant until safety-gated
+- dependency: G-031 (autonomy safety gates) must be built first
+- evidence_from_audit: independent audit §D; user rule "Scheduler 只有 safety gate/operator control 完成后才能激活".
+- problem: Scheduler is dormant by design (TD-008). This gap explicitly records
+  that activation is blocked on building the safety-gate/operator-control
+  prerequisites (confirmation/cancellation/evidence/operator-controls) — a
+  concrete code-level prerequisite, not "缺授权".
+- acceptance_criteria: IF a user authorizes scheduler autonomy: build safety
+  gates (G-031) + wire action_scheduler into chat() + real scheduled-action
+  dogfood + docs. Until then: stays dormant.
+- status: **open (guardrail — do not activate until G-031 safety gates are built)**.
+- owner_or_next_action: build G-031 first if scheduler autonomy is authorized.
+- tech_debt_policy: dormancy already TD-008; this gap is the activation tracker.
+
+### G-039 — Tool system platform/family split + read-only & shell-governance dogfood
+- phase: 6 | module: Tool runtime | priority: P1
+- current_maturity: L6 platform | target_maturity: L6 platform + per-family levels
+- dependency: G-010/G-015
+- evidence_from_audit: independent audit §B (Tool overclaim: 2 tools != whole system).
+- problem: "Tool runtime L6" from write_file/edit_file generalized the whole tool
+  system — overclaim. Tool PLATFORM vs tool FAMILIES must be split; only some
+  families are real-proven.
+- acceptance_criteria: platform L6; per-family levels documented; read-only family
+  real-proven; shell/exec governance-pinned (forbidden autonomous).
+- validation_required: read_file real dogfood + run_shell governance test.
+- status: **done** (this audit). Evidence: capability_status Tool row split;
+  OPERATOR_GUIDE §10 family table; `tests/test_g039_tool_family_read_and_shell.py`
+  (read_file real opt-in pass + run_shell governance default pass).
+- owner_or_next_action: broaden external/network family (fetch_url) dogfood later.
+- tech_debt_policy: not debt.
+
+### G-040 — SubAgent capability split (bounded L6 / writable+multi-agent not released)
+- phase: 6 | module: SubAgent | priority: P1
+- current_maturity: bounded L6 | target_maturity: bounded L6; writable/multi-agent not released
+- dependency: G-027
+- evidence_from_audit: independent audit §C (SubAgent overclaim: bounded demo generalized).
+- problem: "SubAgent L6 (bounded)" generalized to the whole SubAgent capability —
+  overclaim. Must split bounded (L6) vs writable/general (not released) vs
+  multi-agent (not released), with an industry-grade bounded capability checklist.
+- acceptance_criteria: bounded SubAgent L6 (released); writable/general + multi-
+  agent explicitly NOT released; industry-grade checklist documents cancel/timeout/
+  failure-recovery as not-claimed for the bounded path.
+- status: **done** (this audit). Evidence: capability_status row renamed
+  "SubAgent (bounded delegation)" with split; OPERATOR_GUIDE §14 industry-grade
+  checklist (lifecycle/cancel/timeout/failure-recovery/context-isolation).
+- owner_or_next_action: writable/general SubAgent stays TD-010 (not released).
+- tech_debt_policy: writable SubAgent already TD-010; bounded is released.
+
+---
+
 ## Summary counts
 
-- Total gaps: 37
-- By phase: Phase 0=6, Phase 1=10, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
-  Phase 5=4, Phase 6=3.
-- By priority: P0=5, P1=10, P2=15, P3=7.
-- Done: **37** (all gaps — incl. G-019/022/025 real dogfood + G-027 bounded
-  delegation proven + guardrails affirmed + G-037 fixed). 0 open, 0 blocked.
-- moved_to_tech_debt: **0**.
-- Honest maturity (see `python main.py capability-status`): **14 productizable
-  modules L6 (released)** with cited real dogfood (G-0xx) or 替代+boundary —
-  core spine, provider(DeepSeek), CLI/operator, tool(write/edit), confirmation,
-  evidence(write), security, checkpoint(resume), ledger(safe-summary替代),
-  memory, skill, mcp, subagent(bounded), planning. Scheduler L2 (concrete code
-  blocker: dormant-by-design TD-008, activation needs safety-gate G-031); TUI L2
-  (concrete arch blocker: separate Node app); Fake L3 (L6 N/A, test support).
-  No overclaim — each L6 boundary documents real vs contract/替代.
+- Total gaps: 40 (37 + G-038/039/040 audit-correction).
+- Done: **39**. Open: **1** — G-038 (safety-gated Scheduler; guardrail, do not
+  activate until G-031 safety gates are built — concrete code prerequisite, not
+  "缺授权"). moved_to_tech_debt: **0**.
+- Honest maturity (see `python main.py capability-status`): **Tool PLATFORM L6**
+  with per-family levels (file write/edit + read-only + memory + meta = L6;
+  external/network L3; shell/exec forbidden-autonomous; MCP L4). **Bounded
+  SubAgent L6** (writable/general + multi-agent NOT released). Core spine,
+  provider(DeepSeek-only), CLI/operator, confirmation, evidence(write), security,
+  checkpoint(resume), ledger(safe-summary替代), memory, skill, mcp, planning = L6.
+  Scheduler L2 (G-038 guardrail); TUI L2 (separate Node app); Fake L3 (N/A).
 - No new tech debt. Existing TECH_DEBT TD-002/TD-008/TD-009/TD-010 remain.

@@ -65,7 +65,7 @@ def test_dormant_and_fake_local_modules_labeled():
     by_module = {cs.module: cs for cs in CAPABILITY_STATUSES}
     assert by_module["Scheduler / action-planning"].state == "dormant"
     assert by_module["MCP config / bridge"].state == "active"
-    assert by_module["SubAgent"].state == "fake-local"
+    assert by_module["SubAgent (bounded delegation)"].state == "fake-local"
     assert by_module["Fake / local deterministic support"].state == "fake-local"
     # Dormant/fake-local modules are NOT real_api_verified.
     for cs in CAPABILITY_STATUSES:

@@ -157,23 +157,29 @@ guarded by a contract test (`tests/test_g036_diagnostic_secret_safety.py`). Do
 not extend the "real-config-verified" claim to diagnostic paths beyond `status`
 until G-036's real-key variant is added.
 
-## 10. Tool runtime matrix (G-015 / G-016 / G-017 / G-018)
+## 10. Tool runtime matrix (G-015 / G-016 / G-017 / G-018 / G-039)
 
-### Real-proven vs fake/local (G-018 dogfood matrix)
+### Platform vs families (post-audit correction: do NOT generalize 2 tools to the whole system)
 
-| Tool | Real-proven? | Evidence |
-|---|---|---|
-| `write_file` | **yes** | G-010 reproducible real DeepSeek governed dogfood (opt-in). |
-| `edit_file` | **yes** | G-015 reproducible real DeepSeek governed dogfood (opt-in). |
-| `read_file` | fake/local | safe-allowlist (trial-safe); no real smoke. |
-| `run_shell` | **no** (fake/local) | dangerous; zero real evidence; confirmation-gated + path/blacklist safety. |
-| `fetch_url` | **no** (fake/local) | network; zero real evidence; confirmation-gated. |
-| memory/skill/demo tools | fake/local | exercised via fake/local contract tests. |
+The **tool PLATFORM** (registry, schema, provider-visible name, mediator,
+executor, result/error, diagnostics, governance, audit, evidence-only
+TOOL_INVOKE) is **L6** — real-exercised every governed turn. Individual tool
+**FAMILIES** have separate levels:
 
-Two governed mutating tools (`write_file`, `edit_file`) are real-proven through
-the governed confirmation -> executor spine. Others remain fake/local. Tool
-runtime is **L4 (write_file + edit_file real-proven)** — not L5 (broad catalog
-docs/status + per-tool failure runbook still incomplete).
+| Family | Tools | Status | Level |
+|---|---|---|---|
+| file write/edit | write_file, edit_file, demo.write_demo_note | supported, real-proven | **L6** (G-010/G-015/G-022) |
+| read-only | read_file, read_file_lines | supported, real-proven | **L6** (G-039 read_file real) |
+| memory tools | MEMORY_REMEMBER/LIST/FORGET_REQUEST | supported, real-proven | **L6** (G-019) |
+| meta/system | mark_step_complete, request_user_input, demo.echo, _safe_noop | supported, system-handled | **L6** (real every turn) |
+| MCP tools | (via MCP bridge) | supported, local-real | **L4** (G-025 local stdio; external opt-in) |
+| external/network | fetch_url, install_skill | partially supported, NOT real-proven | **L3** (confirmation=always; no real smoke) |
+| shell/exec | run_shell | dangerous — forbidden for autonomous use | **not released** (confirmation=always + high-risk, G-039 governance-pinned; never auto-executed) |
+| destructive | (none beyond shell) | forbidden | n/a |
+
+The platform is L6 because the governed execution spine is real-verified; but
+only the safe families above are L6-verified. External/network is L3 (not
+real-proven) and shell/exec is NOT released for autonomous use (governed only).
 
 ### Per-tool confirmation / safety matrix (G-016)
 
@@ -304,16 +310,41 @@ Operator visibility:
   `provider_mode_allowed` + `parent_opt_in` + `product_capability` + S3 env gate;
   `test_subagent_v0_provider_modes.py`).
 
-Real read-only delegation status (G-027): the BOUNDED delegation is proven
-(`tests/test_g027_subagent_bounded_delegation.py`, default-run): NL trigger ->
-demo-stat read-only `local_fake` child (governed/audited/no-writable). SubAgent
-is **L3** — the bounded child is `local_fake` BY DESIGN (read-only safety; this
-is the bounded path the user requires, not a fake ceiling). The V0 real-child
-path (L4, a second real agent loop) is gated
-(`SUBAGENT_V0_ROUTING_ENABLED` + `MY_FIRST_AGENT_S3_SUBAGENT_ENABLE` +
-`real_opt_in` profile + `parent_opt_in`) and is not activated — a second
-unsupervised real agent loop is high-risk autonomy. Writable/multi-agent
-SubAgent stays frozen (TD-010).
+SubAgent scope split (post-audit correction: do NOT generalize the bounded demo
+to "SubAgent L6"). Three distinct capabilities:
+
+- **Bounded SubAgent — L6 (released).** Parent->child delegation contract, NL/CLI
+  trigger, read-only `local_fake` child, governed/audited/no-writable
+  (`tests/test_g027_subagent_bounded_delegation.py`, default-run). This narrow
+  bounded path is released.
+- **Writable / general SubAgent — NOT released.** Frozen (TD-010); no registered
+  L1/L2 handler; live path never invokes a writable child.
+- **Multi-agent autonomy — NOT released.** No independent child agent loop; the
+  V0 real-child path (second real agent loop) is gated and not activated.
+
+Industry-grade bounded-SubAgent capability checklist (what the L6 bounded path
+satisfies vs what is NOT claimed):
+
+| Capability | Bounded L6 status |
+|---|---|
+| parent->child delegation contract | ✅ (NL/CLI -> dispatcher -> inline-L0) |
+| task boundary | ✅ (single bounded task, demo-stat) |
+| context isolation / handoff | ✅ partial — child holds no MemoryStore; no cross-session bleed (AST-pinned) |
+| tool permission scoping | ✅ (child allowed_tools read-only; no writable) |
+| read-only vs writable boundary | ✅ read-only enforced; writable forbidden |
+| lifecycle: start/result | ✅ (delegation start + result + run_summary subagent_delegations) |
+| lifecycle: error | ✅ partial (delegate_not_found render; local_fake deterministic) |
+| lifecycle: cancel/timeout | ⚠️ not exercised (local_fake child is synchronous, no cancel/timeout path) |
+| evidence/audit trace | ✅ (delegation evidence; evidence_level asserted not-real_api) |
+| result merge | ✅ (delegation result rendered to parent) |
+| failure recovery | ⚠️ partial (deterministic local_fake; no retry/recovery contract) |
+| human confirmation/governance | ✅ (parent-mediated; no auto-wakeup; ambient env cannot flip) |
+| no hidden autonomy | ✅ (parent runtime in control; AST-pinned) |
+| no secret leakage | ✅ (no provider call on the bounded path; no key in result) |
+
+The bounded path is L6 for what it is (a governed read-only delegation). The
+⚠️ items (cancel/timeout, failure-recovery for a REAL child) are NOT claimed —
+they belong to the not-released writable/real-child path.
 
 Writable / multi-agent SubAgent (G-028): **guardrail — track, do not activate.**
 Writable/non-mediated delegation is deferred (TECH_DEBT TD-010); it must remain

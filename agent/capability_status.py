@@ -63,10 +63,14 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
     ),
     CapabilityStatus(
         "Tool runtime and registry", "L6", "active", True, True,
-        "Released for governed write_file + edit_file (G-010/G-015 reproducible real "
-        "dogfood). Mediator/executor + evidence-only TOOL_INVOKE (AST-pinned). "
-        "Boundary: run_shell/fetch_url and other tools are NOT real-proven "
-        "(fake/local); broaden only with dogfood.",
+        "Tool PLATFORM L6: registry/schema/provider-visible-name/mediator/executor/"
+        "result/error/diagnostics/governance/audit — real-exercised (evidence-only "
+        "TOOL_INVOKE AST-pinned). Tool FAMILIES (per-family, NOT all L6): file "
+        "write/edit L6 (G-010/G-015), read-only L6 (G-039 read_file real), memory "
+        "L6 (G-019), meta/system L6; external/network (fetch_url/install_skill) L3 "
+        "(NOT real-proven); shell/exec (run_shell) forbidden for autonomous use "
+        "(confirmation=always+high-risk, G-039 governance-pinned); MCP tools L4 "
+        "(G-025). See OPERATOR_GUIDE §10 family table.",
     ),
     CapabilityStatus(
         "Confirmation / governance / policy", "L6", "active", True, True,
@@ -123,12 +127,13 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "flight is opt-in (test_real_mcp_flight.py); multi-server ecosystem TD-009.",
     ),
     CapabilityStatus(
-        "SubAgent", "L6", "fake-local", False, True,
-        "Released as BOUNDED delegation (G-027 default-run — NL trigger -> demo-stat "
-        "read-only local_fake child, governed/audited/no-writable). 替代验证+boundary: "
-        "the bounded child is local_fake BY DESIGN (read-only safety); the V0 real-child "
-        "path (second real agent loop) is gated (SUBAGENT_V0_ROUTING_ENABLED + S3 + "
-        "real_opt_in) and not activated; writable/multi-agent frozen (TD-010).",
+        "SubAgent (bounded delegation)", "L6", "fake-local", False, True,
+        "BOUNDED SubAgent L6: parent->child delegation, read-only local_fake child, "
+        "governed/audited/no-writable (G-027 default-run). Boundary: the bounded "
+        "child is local_fake BY DESIGN (read-only safety). NOT released: writable/"
+        "general SubAgent (frozen TD-010) and multi-agent autonomy — see OPERATOR_"
+        "GUIDE §14 industry-grade checklist (lifecycle/cancel/timeout/failure-"
+        "recovery/context-isolation not full for a real child).",
     ),
     CapabilityStatus(
         "Planning / task orchestration", "L6", "active", True, True,

@@ -15,11 +15,11 @@ def test_onboarding_links_current_status_and_local_trial_boundaries() -> None:
 
     output = render_onboarding()
 
-    assert "docs/00-overview/CURRENT_CAPABILITY_STATUS.zh.md" in output
+    assert "docs/current/PRODUCT_CAPABILITY_AUDIT.md" in output
+    assert "capability-status" in output
     assert "developer prototype / local development" in output
-    assert "docs/manual-trials/" in output
-    assert "real provider 401" in output
-    assert "config/auth concern" in output
+    assert "docs/current/OPERATOR_GUIDE.md" in output
+    assert "401 属配置/认证问题" in output
 
 
 def test_onboarding_names_core_user_surfaces_without_overclaiming() -> None:

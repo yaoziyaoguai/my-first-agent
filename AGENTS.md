@@ -68,6 +68,9 @@ authority).
 - `docs/current/OPERATOR_GUIDE.md`
   - Operator-facing runbook: how to run, check status, inspect evidence, resume,
     and the confirmation/governance matrix (Phase 1 foundation).
+- `docs/current/PRODUCTIZATION_RELEASE_SUMMARY.md`
+  - Consolidated Phase 0-6 loop state, final maturity, real-dogfood evidence,
+    open/blocked gaps, guardrails, no-overclaim statement.
 - `docs/current/TECH_DEBT.md`
   - Carry-forward / deferred debt only. Gaps enter the ledger first; only
     genuinely blocked items move here.

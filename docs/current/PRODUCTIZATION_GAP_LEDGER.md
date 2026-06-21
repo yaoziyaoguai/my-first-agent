@@ -451,9 +451,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: no.
 - safety_constraints: do not weaken the test's intent (onboarding must still
   link current status + local trial boundaries); only update stale literals.
-- status: open (pre-existing; surfaced during Phase 1).
-- owner_or_next_action: read `render_onboarding()`, update the assertions to
-  current content; or split into a current-docs onboarding contract.
+- status: **done** (Phase 6, this commit). Fixed: `render_onboarding()` dead
+  references (`docs/00-overview/`, `docs/manual-trials/`) now point to current
+  authority (`docs/current/PRODUCT_CAPABILITY_AUDIT.md` +
+  `capability-status` + `docs/current/OPERATOR_GUIDE.md`); the test asserts
+  current onboarding content. `test_cli_onboarding_status.py` 2 passed.
+- owner_or_next_action: keep onboarding + test in sync with current docs.
 - tech_debt_policy: not debt (a concrete, in-phase-fixable test fix).
 
 ## Phase 2 — Tool runtime productization
@@ -742,8 +745,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: dormancy tests stay green.
 - real_api_or_trigger_required: no.
 - safety_constraints: no hidden second agent path.
-- status: open (guardrail — track, do not activate).
-- owner_or_next_action: keep dormant; re-affirm at each phase exit.
+- status: **done (guardrail affirmed, Phase 4/5)**. Writable/multi-agent
+  SubAgent stays frozen; L1/L2 handlers have no registered handler; live path is
+  inline-L0 local_fake; ambient env cannot flip to real. TECH_DEBT TD-010. The
+  guardrail persists; writable delegation requires an explicit user-authorized
+  gap.
+- owner_or_next_action: keep frozen; reaffirm at each phase exit.
 - tech_debt_policy: already TECH_DEBT TD-010; this gap is the guardrail tracker.
 
 ## Phase 5 — Scheduler, TUI, higher autonomy
@@ -847,8 +854,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: audit report with evidence per claim.
 - real_api_or_trigger_required: derived (depends on phase).
 - safety_constraints: no overclaim; dormant modules not released.
-- status: open.
-- owner_or_next_action: run at Phase 0 and Phase 1 exit.
+- status: **done** (Phase 6, this commit). Evidence: per-phase independent
+  audits ran at each phase exit (overclaim/secret/test/doc-consistency); final
+  regression sweep 149 passed + 3 opt-in skipped; G-037 fixed.
+- owner_or_next_action: re-run per-phase audit on any future phase.
 - tech_debt_policy: not debt.
 
 ### G-033 — Per-module release summary + real dogfood evidence archive
@@ -862,8 +871,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: evidence reproducible (not one-off).
 - real_api_or_trigger_required: yes.
 - safety_constraints: no secret in archived evidence.
-- status: open.
-- owner_or_next_action: template the release summary.
+- status: **done** (Phase 6, this commit). Evidence:
+  `docs/current/PRODUCTIZATION_RELEASE_SUMMARY.md` — consolidated Phase 0-6
+  state, final maturity table, real-dogfood evidence archive (sanitized),
+  open/blocked gaps, guardrails, no-overclaim statement.
+- owner_or_next_action: keep updated as future phases close.
 - tech_debt_policy: not debt.
 
 ### G-034 — Final current cleanup after each phase
@@ -877,8 +889,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - validation_required: docs/current inventory matches the expected live set.
 - real_api_or_trigger_required: no.
 - safety_constraints: archive, do not delete history.
-- status: open.
-- owner_or_next_action: run at each phase exit.
+- status: **done** (Phase 6, this commit). Evidence: docs/current holds only the
+  live authority set (audit, roadmap, ledger, operator guide, release summary,
+  tech_debt); G-003 authority-consistency check passes; phase artifacts archived.
+- owner_or_next_action: run at each future phase exit.
 - tech_debt_policy: not debt.
 
 ---
@@ -889,15 +903,11 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - By phase: Phase 0=6, Phase 1=10, Phase 2=4, Phase 3A=3, Phase 3B=3, Phase 4=4,
   Phase 5=4, Phase 6=3.
 - By priority: P0=5, P1=10, P2=15, P3=7.
-- Done (Phase 0 + Phase 1 core): G-001..G-006 (Phase 0) + G-007/008/009/010/
-  011/012/013/014/036 (Phase 1) = 15 done.
-- Open in Phase 1: G-037 (pre-existing stale onboarding test rot; not a Phase 1
-  regression).
-- Open guardrails (track, do not activate / do not broaden): G-028, G-029,
-  G-031, G-035.
-- Coverage: all 17 audit maturity rows covered (16 with dedicated gaps; the
-  core spine is implicit — its L5 promotion is an explicit Phase 1 exit
-  criterion).
-- No new tech debt added this round. Existing TECH_DEBT TD-002/TD-008/TD-009/
-  TD-010 remain and are referenced by G-028/G-029 (and the full-MCP-ecosystem +
-  writable-SubAgent non-goals).
+- Done: **33** (all resolvable Phase 0-6 gaps + guardrails affirmed + G-037 fixed).
+- Open (blocked, resolvable — NOT tech-debt): G-019 (memory real trigger),
+  G-022 (skill real selection), G-025 (MCP real endpoint), G-027 (SubAgent real
+  delegation) — blocked on real-model non-determinism / external resource.
+- moved_to_tech_debt: **0**.
+- Coverage: all 17 audit maturity rows covered.
+- No new tech debt this loop. Existing TECH_DEBT TD-002/TD-008/TD-009/TD-010
+  remain and are referenced by the guardrail gaps.

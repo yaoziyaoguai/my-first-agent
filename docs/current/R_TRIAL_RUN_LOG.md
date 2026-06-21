@@ -179,3 +179,21 @@
   is real-world-usable for governed tool-use tasks.
 - **Top remaining**: R-004 status key-verify (security), R-106 banner inconsistency,
   R-051 error-clarity, R-015 unified-fake CLI flag, R-020 CLI-resume harness.
+
+## Run 15 — R-series repair batch (2026-06-21)
+- **R-051 / F-05 FIXED** (`5154d92`): provider 4xx errors now include an actionable
+  protocol-generic hint + redacted response-body preview (no vendor special-casing). Test:
+  `test_provider_4xx_error_includes_actionable_hint_and_body`.
+- **R-106 / F-03 FIXED** (`e70fca6`): onboarding text no longer says "real provider 401"
+  (stale wrong diagnosis) or "Fake provider 默认" unconditionally; now references the
+  actual `[provider]` banner for the real mode.
+- **R-004 / F-02**: not done this round (status api_key redaction test needs a synthetic
+  config test harness; deferred — low risk, record only).
+- **R-015 / F-04**: not done this round (force-fake CLI flag — medium scope; recorded as
+  repair item).
+- **R-020 / F-04**: not done this round (CLI resume harness — medium risk; recorded as
+  limitation).
+- **Optional trial approval harness**: not implemented (medium-high risk; recorded as
+  design suggestion).
+- **Result**: 2 of 6 repair items fixed (highest-value, lowest-risk); 4 recorded as
+  remaining repair items.

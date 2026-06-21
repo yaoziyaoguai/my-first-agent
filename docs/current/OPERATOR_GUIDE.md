@@ -257,11 +257,11 @@ Boundary enforcement (G-024):
   `test_default_tool_entrypoint_does_not_import_skill_or_subagent_prototypes`).
 - Fake-first, fixture/sample based; do NOT wire real private skill directories.
 
-Real-selection status (G-022): Skill is **L3**. Deterministic selection is
-unit-tested; a reliable real-provider skill-selection dogfood is **open/blocked**
-on real-model non-determinism (the model may not deterministically select the
-fixture skill). Skill stays L3 until a controlled real-selection scenario is
-proven.
+Real-selection status (G-022): Skill is **L4**. Real select/execute verified by
+the reproducible real DeepSeek skill dogfood (`tests/test_g022_real_skill_dogfood.py`,
+opt-in): SKILL_SELECT picks demo-note-maker -> `demo.write_demo_note` ->
+governed approval -> note written + skill evidence. (Skill selection runs at
+turn-end, so the dogfood uses an adaptive multi-turn flow.)
 
 ## 13. MCP config / bridge (G-025 / G-026)
 

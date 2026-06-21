@@ -84,9 +84,11 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "consolidation default-off).",
     ),
     CapabilityStatus(
-        "Skill system", "L3", "active", False, False,
-        "Registry/lifecycle/invocation fake/local-tested; demo-note-maker. No "
-        "real external skill dir / operator install-use flow.",
+        "Skill system", "L4", "active", True, False,
+        "Real select/execute verified (G-022 reproducible real DeepSeek skill "
+        "dogfood: SKILL_SELECT picks demo-note-maker -> demo.write_demo_note -> "
+        "governed approval -> note written + skill evidence). Deterministic "
+        "selector + fixture/sample skills; no real private skill dir.",
     ),
     CapabilityStatus(
         "MCP config / bridge", "L3", "dormant", False, False,

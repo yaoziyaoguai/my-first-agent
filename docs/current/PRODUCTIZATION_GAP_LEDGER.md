@@ -620,13 +620,14 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: skills cannot own loop/provider; cannot bypass tool/memory
   policy; fixture/sample only.
-- status: **open (blocked)**. Blocker: no reliable real-provider skill-selection
-  dogfood — `select_skill_for_real_provider()` deterministic selection is
-  unit-tested (`test_skill_selection_real_provider.py`), but a real-model
-  skill-selection dogfood is non-deterministic (the model may not deterministically
-  select the fixture skill). Skill stays **L3** until a controlled real-selection
-  scenario is proven. Not tech-debt — resolvable with a controlled scenario.
-- owner_or_next_action: write a controlled real skill-selection dogfood.
+- status: **done** (Phase 3, this commit). Evidence:
+  `tests/test_g022_real_skill_dogfood.py` — reproducible real DeepSeek skill
+  dogfood (1 passed opt-in): SKILL_SELECT picks demo-note-maker ->
+  demo.write_demo_note -> governed approval -> note written + skill evidence;
+  provider_kind=real; no secret. Skill **L3 -> L4**. (Resolves the prior
+  non-determinism blocker via an adaptive multi-turn flow: skill selects at
+  turn-end, tool invoked next turn.)
+- owner_or_next_action: keep opt-in test green; keep fixture/sample-only.
 - tech_debt_policy: not debt.
 
 ### G-023 — Skill install/list/select/invoke/status docs + dogfood

@@ -2,7 +2,7 @@
 
 First Agent 是一个 local-first 的 Agent Runtime 项目。**S1-S5 + roadmap final closure 已全部完成并归档，roadmap 主线已收尾**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收。
 
-**当前权威入口：[docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1-S5 及 roadmap final closure 均已归档至 [docs/history/](docs/history/)（closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md)）。
+**当前权威入口：[docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1-S5 及 roadmap final closure 均已归档至 [docs/history/](docs/history/)（closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md)）。
 
 ## 当前状态
 
@@ -43,14 +43,15 @@ cp config/config.example.yaml config/config.yaml
 
 `--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
 
-当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 仍按当前阶段文档约束，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。
+当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 仍按当前产品能力审计约束，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md) 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。
 
 ## 文档导航
 
 | 想了解 | 读这里 |
 |---|---|
-| S 系列版本语义 | [docs/current/S_ROADMAP.md](docs/current/S_ROADMAP.md) |
+| 产品能力审计 | [docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md) |
 | 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
+| S 系列版本语义（已归档） | [docs/archive/s-series-runtime-kernel/S_ROADMAP.md](docs/archive/s-series-runtime-kernel/S_ROADMAP.md) |
 | S1-S5 + S_FINAL closure（已归档） | [docs/history/](docs/history/) · closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md) |
 
 ## 测试

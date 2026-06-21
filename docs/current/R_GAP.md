@@ -9,9 +9,9 @@
 |---|---:|---|---|
 | R-G01 | P1 | Status api_key redaction synthetic test | **done** (`0abcc6d`) |
 | R-G02 | P2 | Explicit fake/local CLI trial mode | **done** (`d2cb909`) |
-| R-G03 | P2 | CLI checkpoint/resume product-level validation | **done** (`988353e`) |
-| R-G04 | P2/P3 | Trial-only approval harness | **done** (`df68bad`) — module+tests; main.py wiring needs interactive regression |
-| R-G05 | P2 | Provider-visible tool-name validation alignment | **done** (`0abcc6d`) |
+| R-G03 | P2 | CLI checkpoint/resume product-level validation | **partial** — checkpoint contract test done; CLI-level PTY interrupt/resume not validated |
+| R-G04 | P2/P3 | Trial-only approval harness | **partial** — safety module + tests done; main.py product wiring pending |
+| R-G05 | P2 | Provider-visible tool-name validation alignment | **partial** — adapter sanitize/restore done+live; diagnostic helper test-only, not wired |
 | R-G06 | P2 | Operator docs / troubleshooting | **done** (below §6) |
 | R-G07 | P2 | Interactive CLI smoke command documentation | **done** (below §7) |
 | R-G08 | final | R-series release summary | **done** (below §8) |
@@ -27,14 +27,14 @@
   Banner shows "forced by --provider fake — safe trial, no real API". Default behavior
   unchanged. Tests: `tests/test_r_force_fake.py` (3). Commit `d2cb909`.
 
-## R-G03 — CLI checkpoint/resume product-level validation — DONE
+## R-G03 — CLI checkpoint/resume product-level validation — PARTIAL
 - **Evidence**: `tests/test_r_cli_resume.py` (2 tests) validates the checkpoint save →
   load → state-restored contract using real `create_agent_state` + `save_checkpoint` +
   `load_checkpoint_to_state` (the same functions the CLI uses). Interactive CLI resume
   validated manually (Run 12: clean session save/exit). Seam-level recovery proven by
   S5 E2E. Commit `988353e`.
 
-## R-G04 — Trial-only approval harness — DONE (module + tests; wiring needs regression)
+## R-G04 — Trial-only approval harness — PARTIAL
 - **Evidence**: `agent/trial_approval.py` — safety module with `is_trial_approval_enabled`
   (env `FIRSTAGENT_TRIAL_APPROVAL_POLICY=safe`, default off), `can_trial_approve`
   (safe-allowlist tools only: write_file/read_file/edit_file; safe paths only:
@@ -48,7 +48,7 @@
   validation. This is a code-level blocking reason (confirmation-block restructure
   risk), not a defer-for-later.
 
-## R-G05 — Provider-visible tool-name validation alignment — DONE
+## R-G05 — Provider-visible tool-name validation alignment — PARTIAL (adapter done+live; diagnostic helper test-only)
 - **Evidence**: `validate_provider_tool_names()` in `agent/provider/anthropic_http.py`.
   Flags tool names with illegal chars (dots etc.). Tests:
   `test_validate_provider_tool_names_flags_invalid` + `_all_clean`. Commit `0abcc6d`.
@@ -123,9 +123,13 @@ product path (interactive CLI). No runtime/tool-loop core bug found.
 - Status redaction guard (`0abcc6d`): synthetic test verifies api_key never printed.
 - Tool-name validation (`0abcc6d`): `validate_provider_tool_names()` aligns fake/local.
 
-**All R-series gaps closed.** R-G01..R-G08 all done. R-G04's main.py wiring has a
-documented code-level blocking reason (confirmation-block restructure risk), not a
-defer-for-later — the safety module + tests are implemented and ready to wire.
+**Core product path proven; R-G03/R-G04/R-G05 have documented partial boundaries.**
+R-G01/R-G02/R-G06/R-G07 fully done. R-G03 (CLI resume) = partial (contract test done;
+CLI-level PTY resume not validated). R-G04 (trial approval) = partial (module+tests done;
+main.py wiring pending). R-G05 (tool-name validation) = partial (adapter sanitize/restore
+done+live; diagnostic helper test-only, not wired into diagnostics). R-G08 (this summary)
+= done. These partial boundaries are honest: they do not overclaim and do not block the
+core product path (interactive CLI + real provider + governed tool_use end-to-end).
 
 **Safety statement:**
 - No push performed. No secrets/keys printed/committed. config.yaml/.env gitignored.

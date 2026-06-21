@@ -262,3 +262,55 @@ unit-tested; a reliable real-provider skill-selection dogfood is **open/blocked*
 on real-model non-determinism (the model may not deterministically select the
 fixture skill). Skill stays L3 until a controlled real-selection scenario is
 proven.
+
+## 13. MCP config / bridge (G-025 / G-026)
+
+MCP is a governed single tool source, **default-off** via an env gate
+(`MY_FIRST_AGENT_MCP_ENABLE`; `evaluate_activation(MCP_CAPABILITY)` reads
+`os.environ` only — config cannot flip it). Even when enabled, it is fake-first
+(`MY_FIRST_AGENT_MCP_DRY_RUN=1` default → `FakeMCPClient`).
+
+Dry-run operator UX (G-026):
+
+```bash
+.venv/bin/python main.py mcp config <subcommand>   # validate/list/inspect/plan/apply (dry-run default)
+```
+
+- Validate a sample MCP config without executing server commands.
+- `mcp_policy` + allowlist + evidence govern tool registration; `mcp_sanitizer`
+  redacts; `mcp_audit` records.
+- Multi-server orchestration / dynamic discovery is OUT OF SCOPE (TD-009).
+
+Real-endpoint status (G-025): MCP is **L3**. The opt-in real npx flight smoke
+(`tests/test_real_mcp_flight.py`) is skip-by-default and requires an explicitly
+authorized endpoint. **G-025 is open/blocked**: no authorized external MCP
+endpoint is available this round, so real reachability cannot be verified. MCP
+stays L3 (config/bridge/dry-run verified) until an authorized endpoint smoke is
+run. Not tech-debt (the broader ecosystem is already TD-009); this is the
+single-source authorized-reachability sub-item, blocked on external resource
+availability.
+
+## 14. SubAgent (G-027 / G-028)
+
+The live delegation path is inline-L0 with `execution_mode='local_fake'`
+(deterministic, no real child loop). L1/L2 dispatcher paths are frozen (no
+registered handler). V0 is registered-but-not-production-routed. Read-only /
+audit-first / parent-mediated only (S3-G04).
+
+Operator visibility:
+
+- Delegation evidence records `evidence_level` (asserted NOT in real_api_levels
+  for the live path — `test_subagent_runtime_truth.py`).
+- Ambient `ANTHROPIC_API_KEY` cannot flip SubAgent to real (triple-gated:
+  `provider_mode_allowed` + `parent_opt_in` + `product_capability` + S3 env gate;
+  `test_subagent_v0_provider_modes.py`).
+
+Real read-only delegation status (G-027): SubAgent is **L3** (local_fake proven
++ dormancy tests). A reliable real-provider read-only delegation dogfood is
+**open/blocked** on real-model non-determinism + the complexity of driving the
+parent-mediated delegation flow. SubAgent stays L3 until a controlled
+real-delegation scenario is proven.
+
+Writable / multi-agent SubAgent (G-028): **guardrail — track, do not activate.**
+Writable/non-mediated delegation is deferred (TECH_DEBT TD-010); it must remain
+frozen until an explicit user-authorized gap opens it.

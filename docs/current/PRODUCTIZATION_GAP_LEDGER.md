@@ -679,8 +679,15 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - safety_constraints: no real home config writes; no server exec unless
   authorized; no endpoint check unless authorized; env-gate only (config cannot
   flip).
-- status: open.
-- owner_or_next_action: define the authorized-endpoint smoke under strict gates.
+- status: **open (blocked)**. Blocker: no authorized external MCP endpoint is
+  available this round, so real reachability cannot be verified. The opt-in real
+  npx flight smoke (`tests/test_real_mcp_flight.py`) is skip-by-default and
+  requires an explicitly authorized endpoint. MCP stays **L3**
+  (config/bridge/dry-run verified). Not tech-debt (broader ecosystem is TD-009);
+  this single-source authorized-reachability sub-item is blocked on external
+  resource availability + explicit per-call authorization.
+- owner_or_next_action: run the authorized-endpoint smoke when an MCP endpoint
+  is explicitly authorized.
 - tech_debt_policy: full multi-server ecosystem is already TECH_DEBT TD-009
   (deferred non-goal); this gap covers only single-source authorized reachability.
 
@@ -695,8 +702,10 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
   executing server commands.
 - real_api_or_trigger_required: no (dry-run).
 - safety_constraints: dry-run default; no server exec.
-- status: open.
-- owner_or_next_action: write the dry-run docs.
+- status: **done** (Phase 4, this commit). Evidence: OPERATOR_GUIDE §13 — MCP
+  dry-run operator UX (`mcp config` validate/list/inspect/plan/apply; dry-run
+  default; governed single tool source; default-off env gate).
+- owner_or_next_action: none.
 - tech_debt_policy: not debt.
 
 ### G-027 — SubAgent read-only real delegation (L3 -> L4)
@@ -713,8 +722,12 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes (parent-mediated, read-only).
 - safety_constraints: no independent child agent loop; no writable delegation;
   ambient env cannot flip to real.
-- status: open.
-- owner_or_next_action: design the read-only delegation dogfood.
+- status: **open (blocked)**. Blocker: a reliable real-provider read-only
+  delegation dogfood is non-deterministic + the parent-mediated delegation flow
+  is complex to drive programmatically. SubAgent stays **L3** (inline-L0
+  local_fake proven + dormancy tests). Not tech-debt — resolvable with a
+  controlled scenario; blocked this round.
+- owner_or_next_action: write a controlled real read-only delegation dogfood.
 - tech_debt_policy: writable/multi-agent SubAgent is already TECH_DEBT TD-010
   (deferred non-goal); this gap is read-only only.
 

@@ -308,8 +308,16 @@ Secret/auto-approve/external-API/autonomy gaps carry explicit safety constraints
 - real_api_or_trigger_required: yes.
 - safety_constraints: opt-in only; no secret output; no auto-approve; sanitize
   evidence before archiving.
-- status: open.
-- owner_or_next_action: wrap the Run 12 flow into a reproducible opt-in check.
+- status: **done** (Phase 1, this commit). Evidence: `tests/test_g010_real_dogfood.py`
+  — opt-in reproducible real DeepSeek `anthropic_compatible` governed tool-use
+  dogfood (1 passed opt-in, 1 skipped default). Drives `core.chat()` (prompt ->
+  chat("y") approval) and asserts: real provider call (provider_kind=real,
+  provider_external_call=True), the real model proposed write_file, and the
+  governed approval resolved (state advanced past awaiting_tool_confirmation).
+  Note: the file side-effect is model-path-dependent and not hard-asserted; the
+  governed spine is the authoritative reproducible proof (replaces one-off Run 12).
+- owner_or_next_action: keep opt-in test green; harden the file side-effect in
+  Phase 2 (G-015 broadens real-proven tool coverage).
 - tech_debt_policy: not debt.
 
 ### G-011 — Provider/API readiness reporting

@@ -1077,8 +1077,15 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
 - plan: implement openai_compatible streaming OR document it as a permanent
   protocol-path capability boundary [productizable/boundary]; add a real
   openai_compatible smoke once streaming is decided [if implemented].
-- status: open (protocol-path capability gap; openai_compatible stays L4 until
-  streaming is resolved + a profile is smoked).
+- status: **done (boundary documented)** (this commit). The fail-closed behavior
+  (`openai_http.py:420` raises `ProviderCapabilityError` for `.stream()`) is a
+  DELIBERATE safety choice — the adapter refuses to stream rather than silently
+  degrade. This is documented in the `PROVIDER_PROTOCOL_MATRIX`
+  (streaming="fail_closed"), the PROVIDER_ABSTRACTION_AUDIT §6, and OPERATOR_GUIDE
+  §3. Implementing openai_compatible streaming remains a future enhancement if a
+  use case requires it, but the current boundary is explicit and honest (not a
+  bug, not an overclaim). openai_compatible stays L4 (non-streaming real-verified
+  path once a profile is smoked via G-046).
 
 ### G-048 — Provider: config schema normalization (protocol/name/capabilities)
 - phase: 7 | module: Provider config | cat: boundary_documentation / productizable

@@ -1102,7 +1102,11 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   openai_compatible streaming fail-closed (G-047) is not surfaced.
 - plan: expose a per-protocol-path capability matrix in `capability-status`/`status`
   (read-only) so operators see protocol-path limits [safe, yes].
-- status: open (operator-visibility productization).
+- status: **done** (this commit). Evidence: `PROVIDER_PROTOCOL_MATRIX` in
+  `agent/capability_status.py`; `capability-status` CLI renders the matrix
+  (protocol × level × tool_calling × streaming × usage × validated_profile);
+  JSON output includes `provider_protocol_matrix` (5 entries). Operators can now
+  see per-protocol-path capabilities BEFORE choosing an endpoint profile.
 
 
 ### G-042a / G-044a — implemented this round (industry-benchmark fixes)

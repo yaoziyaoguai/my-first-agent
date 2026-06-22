@@ -172,11 +172,69 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
 )
 
 
+# G-049: Provider protocol-path capability matrix (protocol-centric, not vendor).
+# Source: docs/current/PROVIDER_ABSTRACTION_AUDIT.md §6.
+PROVIDER_PROTOCOL_MATRIX: tuple[dict[str, str], ...] = (
+    {
+        "protocol": "anthropic_compatible",
+        "level": "L6",
+        "tool_calling": "yes",
+        "streaming": "yes",
+        "usage": "yes",
+        "validated_profile": "DeepSeek (validated)",
+    },
+    {
+        "protocol": "openai_compatible",
+        "level": "L4",
+        "tool_calling": "yes",
+        "streaming": "fail_closed",
+        "usage": "yes",
+        "validated_profile": "none (G-046/G-047)",
+    },
+    {
+        "protocol": "anthropic_native",
+        "level": "L2",
+        "tool_calling": "yes",
+        "streaming": "yes",
+        "usage": "yes",
+        "validated_profile": "none (no credential)",
+    },
+    {
+        "protocol": "openai_native",
+        "level": "L2",
+        "tool_calling": "yes",
+        "streaming": "yes",
+        "usage": "yes",
+        "validated_profile": "none (no credential)",
+    },
+    {
+        "protocol": "fake",
+        "level": "L3",
+        "tool_calling": "yes",
+        "streaming": "yes",
+        "usage": "no",
+        "validated_profile": "n/a (test support)",
+    },
+)
+
+
 def render_capability_status() -> str:
     """渲染人类可读的能力真相表。永不输出 secret。"""
     lines: list[str] = []
     lines.append("FirstAgent Product Capability Status")
     lines.append("Source: docs/current/PRODUCT_CAPABILITY_AUDIT.md (baseline)")
+    lines.append("")
+    # G-049: Provider protocol-path capability matrix (protocol-centric, not vendor).
+    lines.append("Provider Protocol-Path Matrix:")
+    lines.append(
+        f"  {'Protocol':<26} {'Level':<6} {'Tool':<5} {'Stream':<12} "
+        f"{'Usage':<6} {'Validated Profile':<20}"
+    )
+    for pm in PROVIDER_PROTOCOL_MATRIX:
+        lines.append(
+            f"  {pm['protocol']:<26} {pm['level']:<6} {pm['tool_calling']:<5} "
+            f"{pm['streaming']:<12} {pm['usage']:<6} {pm['validated_profile']}"
+        )
     lines.append("")
     header = (
         f"{'Module':<38} {'Level':<6} {'State':<11} "
@@ -207,6 +265,7 @@ def capability_status_json() -> str:
         {
             "source": "docs/current/PRODUCT_CAPABILITY_AUDIT.md",
             "capabilities": [asdict(cs) for cs in CAPABILITY_STATUSES],
+            "provider_protocol_matrix": list(PROVIDER_PROTOCOL_MATRIX),
         },
         indent=2,
         ensure_ascii=False,

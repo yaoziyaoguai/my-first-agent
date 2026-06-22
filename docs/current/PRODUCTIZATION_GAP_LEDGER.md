@@ -1121,11 +1121,12 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   resources/read on the fixture MCP server + StdioMCPClient.list_resources/
   read_resource + `test_g025_real_mcp_local_flight.py::test_real_local_mcp_resources_list_and_read`
   (2 passed default-run). MCP flight now covers connect/list/call/result/resources.
-- G-044a (Scheduler visibility + NO-OP/report-only): **open** — a scheduled-action
-  VISIBILITY module (create/list/get/cancel, no execution) + NO-OP/report-only fire
-  dogfood is safe and productizable (industry: Cloudflare listSchedules, Temporal
-  Cancel-vs-Terminate), but it is a new module requiring focused implementation;
-  left open with concrete scope. The dormant-by-default AST pin (G-038) stays.
+- G-044a (Scheduler visibility + NO-OP/report-only): **DONE** —
+  `agent/scheduled_action_registry.py` (create/list/get/cancel/fire_noop, NO-OP
+  only — no tool/memory/subagent execution) + `tests/test_g044a_scheduler_visibility.py`
+  (9 passed). Safety: create() rejects execution types; fire_noop() records
+  evidence without side effects; cancel() is graceful. The dormant-by-default AST
+  pin (G-038) stays.
 
 ---
 

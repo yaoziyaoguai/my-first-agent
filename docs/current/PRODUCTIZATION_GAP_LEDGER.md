@@ -1044,21 +1044,58 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   full OTel/OpenInference + TUI streaming + auto-approval [boundary/future, no].
 - status: open (concrete observability productization; the usage-drop is a verified bug).
 
-### G-046 — Provider expansion: non-DeepSeek real smoke (industry delta)
+### G-046 — Provider: endpoint-profile smoke to prove protocol-path generalization (reframed protocol-centric)
 - phase: 7 | module: Provider | cat: productizable_to_L6 (if key configured) / boundary
-- sources: LiteLLM, LangChain providers, Portkey/OpenRouter (multi-provider routing,
-  capability negotiation, fallback, streaming, per-provider quirks).
-- delta: FirstAgent verified DeepSeek (anthropic_compatible) L6 only. Kimi
-  (anthropic_compatible, k2.5) + GLM (openai_compatible, glm-5) are config-exists
-  (~L2). A multi-provider product needs a real smoke per promoted provider type +
-  capability/streaming negotiation.
-- plan: run one non-DeepSeek real smoke (Kimi anthropic_compatible preferred — same
-  protocol) IF a key for that provider is configured [safe, yes-if-key]; GLM
-  openai_compatible streaming is fail-closed (concrete protocol gap) [boundary];
-  until a key is configured for a provider, that provider stays config-exists
-  (concrete config gap, NOT "缺授权" — no credential exists for that provider).
-- status: open (provider-specific; DeepSeek stays the only L6 provider until a
-  non-DeepSeek key is configured + smoked).
+- sources: DeepSeek dual-protocol docs, LiteLLM/OpenRouter, Kimi/Qwen/GLM/vLLM/Ollama
+  OpenAI-compat; see docs/current/PROVIDER_ABSTRACTION_AUDIT.md.
+- delta (protocol-centric): the `anthropic_compatible` protocol PATH is L6, validated
+  by the DeepSeek endpoint profile. Kimi/GLM use SUPPORTED protocols (anthropic_/
+  openai_compatible) — NO adapter gap. They lack ENDPOINT-PROFILE validation
+  (credential + smoke + capability). Validating a SECOND endpoint profile on an
+  already-L6 protocol path proves the path generalizes beyond one vendor.
+- plan: validate a 2nd endpoint profile on the L6 `anthropic_compatible` path
+  (Kimi K2.5 anthropic_compatible, or DeepSeek via its openai_compatible endpoint)
+  once a credential for that profile is configured [safe, yes-if-key]; until then,
+  Kimi/GLM profiles stay config-exists (concrete credential gap, NOT "缺授权" — no
+  credential exists for those profiles).
+- status: open (protocol-path is L6 via DeepSeek; 2nd-profile validation pending
+  a configured credential).
+
+### G-047 — Provider: openai_compatible protocol-path capability gap (streaming fail-closed)
+- phase: 7 | module: Provider (openai_compatible path) | cat: productizable_to_L6 / boundary
+- sources: repo `agent/provider/openai_http.py:420` (`.stream()` raises
+  ProviderCapabilityError); test_provider_contract.py:541; PROVIDER_ABSTRACTION_AUDIT §6.
+- delta: the `openai_compatible` PROTOCOL PATH (not a vendor) has streaming =
+  fail-closed. This caps any openai_compatible endpoint profile (GLM, Kimi-via-OAI,
+  vLLM, Ollama, OpenRouter) to non-streaming. It is a protocol-path capability gap,
+  not a Kimi/GLM-specific bug.
+- plan: implement openai_compatible streaming OR document it as a permanent
+  protocol-path capability boundary [productizable/boundary]; add a real
+  openai_compatible smoke once streaming is decided [if implemented].
+- status: open (protocol-path capability gap; openai_compatible stays L4 until
+  streaming is resolved + a profile is smoked).
+
+### G-048 — Provider: config schema normalization (protocol/name/capabilities)
+- phase: 7 | module: Provider config | cat: boundary_documentation / productizable
+- sources: LiteLLM/SDK base_url+api_key+model pattern; PROVIDER_ABSTRACTION_AUDIT §4-5.
+- delta: current schema (`enabled, type, model, base_url, api_key[_env]`) is already
+  protocol-centric but does not formalize `name` (endpoint profile id) or capability
+  metadata (`capabilities`, `streaming_mode`, `tool_name_policy`, `fail_closed_flags`).
+- plan: document `protocol`/`name`/`capabilities`/`streaming_mode`/`tool_name_policy`/
+  `fail_closed_flags` as optional profile metadata (docs-level; operator-visible);
+  keep `type` as config alias for back-compat [docs, yes].
+- status: open (docs-level normalization; PROVIDER_ABSTRACTION_AUDIT §5 is the spec).
+
+### G-049 — Provider: capability matrix surface in capability-status/status
+- phase: 7 | module: Provider + CLI | cat: productizable_to_L6
+- sources: LiteLLM capability negotiation; PROVIDER_ABSTRACTION_AUDIT §7.
+- delta: an operator cannot currently SEE per-protocol-path capabilities
+  (tool_calling/streaming/usage/structured) before choosing an endpoint. The
+  openai_compatible streaming fail-closed (G-047) is not surfaced.
+- plan: expose a per-protocol-path capability matrix in `capability-status`/`status`
+  (read-only) so operators see protocol-path limits [safe, yes].
+- status: open (operator-visibility productization).
+
 
 ### G-042a / G-044a — implemented this round (industry-benchmark fixes)
 - G-042a (MCP resources primitive): **DONE** — local resources/list +
@@ -1075,12 +1112,14 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
 
 ## Summary counts
 
-- Total gaps: 48 (40 + G-041..G-046 industry-benchmark + G-042a/G-044a sub-items).
-- Done: **40** (prior 39 + G-042a MCP resources). Open: **8** — G-038 (Scheduler
-  guardrail), G-041 (tool guardrails/lifecycle), G-042 (MCP ecosystem remainder),
-  G-043 (SubAgent read-only-child lifecycle), G-044/G-044a (Scheduler visibility/
-  NO-OP), G-045 (token-usage/observability), G-046 (non-DeepSeek provider smoke).
-  All open gaps have concrete productization scope — NOT "缺授权".
+- Total gaps: 51 (48 + G-047/048/049 provider-abstraction).
+- Done: **40**. Open: **11** — G-038 (Scheduler guardrail), G-041 (tool
+  guardrails/lifecycle), G-042 (MCP ecosystem), G-043 (SubAgent read-only-child),
+  G-044/G-044a (Scheduler visibility/NO-OP), G-045 (token-usage observability),
+  G-046 (2nd endpoint-profile smoke), G-047 (openai_compatible streaming
+  capability), G-048 (provider config schema normalization), G-049 (provider
+  capability matrix surface). All open gaps have concrete productization scope —
+  NOT "缺授权".
 - moved_to_tech_debt: **0**.
 - Honest maturity (see `python main.py capability-status`): **Tool PLATFORM L6**
   with per-family levels (file write/edit + read-only + memory + meta = L6;

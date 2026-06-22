@@ -79,7 +79,7 @@ def test_expected_modules_present():
     modules = {cs.module for cs in CAPABILITY_STATUSES}
     for name in (
         "Core governed runtime spine",
-        "Provider/model boundary",
+        "Provider/model boundary (protocol-centric)",
         "Scheduler / action-planning",
         "Security / config diagnostics",
         "Fake / local deterministic support",

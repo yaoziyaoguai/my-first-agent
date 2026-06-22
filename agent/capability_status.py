@@ -48,11 +48,14 @@ CAPABILITY_STATUSES: tuple[CapabilityStatus, ...] = (
         "capability-status + OPERATOR_GUIDE + G-037 onboarding fix.",
     ),
     CapabilityStatus(
-        "Provider/model boundary", "L6", "active", True, True,
-        "Released for DeepSeek anthropic_compatible (real-verified R-series + opt-in "
-        "smokes + status redaction R-004). Boundary: Kimi/GLM are config-exists "
-        "(~L2), NOT released; GLM openai_compatible streaming is fail-closed. Do "
-        "not generalize DeepSeek to all providers.",
+        "Provider/model boundary (protocol-centric)", "L6", "active", True, True,
+        "PROTOCOL-CENTRIC (see PROVIDER_ABSTRACTION_AUDIT.md): anthropic_compatible "
+        "path L6 (DeepSeek endpoint profile smoke-validated: R-series + G-010/015/"
+        "019/022 + R-004 redaction). openai_compatible path L4 (adapter+contract "
+        "proven; streaming fail-closed G-047; no real smoke). *_native paths L2. "
+        "Boundary: Kimi/GLM use SUPPORTED protocols — NO adapter gap, only "
+        "endpoint-profile validation gap (credential+smoke, G-046); one profile "
+        "(DeepSeek) does NOT generalize to all vendors.",
     ),
     CapabilityStatus(
         "Interactive CLI / operator workflow", "L6", "active", True, True,

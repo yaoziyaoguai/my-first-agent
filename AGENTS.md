@@ -71,6 +71,10 @@ authority).
 - `docs/current/PRODUCTIZATION_RELEASE_SUMMARY.md`
   - Consolidated Phase 0-6 loop state, final maturity, real-dogfood evidence,
     open/blocked gaps, guardrails, no-overclaim statement.
+- `docs/current/PROVIDER_ABSTRACTION_AUDIT.md`
+  - Protocol-centric provider abstraction: protocol adapter + endpoint profile +
+    capability matrix (not vendor-centric). Reframes "DeepSeek L6" to
+    "anthropic_compatible protocol path L6 + DeepSeek endpoint profile validated".
 - `docs/current/TECH_DEBT.md`
   - Carry-forward / deferred debt only. Gaps enter the ledger first; only
     genuinely blocked items move here.

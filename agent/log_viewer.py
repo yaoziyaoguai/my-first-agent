@@ -198,6 +198,20 @@ def _format_data_summary(event: str, data: dict[str, Any]) -> str:
     if event == "llm_response":
         return f"stop={data.get('stop_reason', '?')}"
 
+    if event == "llm_usage":
+        # G-045: per-turn token usage surfaced from the provider seam.
+        inp = data.get("input_tokens")
+        out = data.get("output_tokens")
+        tot = data.get("total_tokens")
+        bits = []
+        if inp is not None:
+            bits.append(f"in={inp}")
+        if out is not None:
+            bits.append(f"out={out}")
+        if tot is not None:
+            bits.append(f"total={tot}")
+        return " ".join(bits) if bits else ""
+
     if event == "checkpoint_saved":
         return (
             f"step={data.get('current_step_index', '?')} "

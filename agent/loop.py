@@ -1028,6 +1028,26 @@ def run_main_loop(
                 # fall through to model call
 
         response = dependencies.call_model(turn_state, loop_ctx)
+        # G-045: surface token usage to the operator log. Usage is parsed at the
+        # provider seam (openai_http/normalize) but was previously dropped here.
+        # Safe: usage contains only integer token counts (no prompt/completion
+        # text); FakeProvider returns empty dict (guarded by `if _turn_usage`).
+        _turn_usage = getattr(response, "usage", None) or {}
+        if _turn_usage:
+            try:
+                from agent.logger import log_event
+
+                log_event("llm_usage", {
+                    "input_tokens": _turn_usage.get(
+                        "input_tokens", _turn_usage.get("prompt_tokens")
+                    ),
+                    "output_tokens": _turn_usage.get(
+                        "output_tokens", _turn_usage.get("completion_tokens")
+                    ),
+                    "total_tokens": _turn_usage.get("total_tokens"),
+                })
+            except Exception:
+                pass  # 日志发射异常不阻塞 loop
         _cached_loop_iterations = state.task.loop_iterations
         _cached_tool_calls = state.task.tool_call_count
         result = dependencies.dispatch_model_output(response)

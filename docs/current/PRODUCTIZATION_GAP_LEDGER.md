@@ -1042,7 +1042,12 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   `main.py usage`/logs surface [safe, yes — data already parsed]; turn→tool-call
   index in logs [yes]; approval-mode display/switch [yes]; resume picker [yes];
   full OTel/OpenInference + TUI streaming + auto-approval [boundary/future, no].
-- status: open (concrete observability productization; the usage-drop is a verified bug).
+- status: **done** (this commit). Evidence: `agent/loop.py:1030` captures
+  `response.usage` + emits `llm_usage` log_event per turn; `agent/log_viewer.py`
+  renders `llm_usage` (in/out/total tokens); `tests/test_g045_token_usage.py`
+  5 passed (rendering + partial/empty + ProviderResponse usage field). The
+  verified usage-drop bug is fixed; usage flows provider → loop → event log →
+  operator `logs` surface.
 
 ### G-046 — Provider: endpoint-profile smoke to prove protocol-path generalization (reframed protocol-centric)
 - phase: 7 | module: Provider | cat: productizable_to_L6 (if key configured) / boundary

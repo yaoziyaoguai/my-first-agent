@@ -976,7 +976,13 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
   document forbid-by-design for unrestricted run_shell + the two-layer
   (permission+sandbox) boundary [boundary]; restricted-shell + resumable approval
   gated on OS-sandbox safety-gate [future, no].
-- status: open (concrete productization work; not "缺授权").
+- status: **partially done** (this commit). Evidence: `agent/tool_guardrails.py`
+  (extensible per-tool input/output guardrail registry — default input secret
+  detection + output scrubbing; custom per-tool guardrails via register_*); 8
+  tests pass. The guardrail MODULE + tests exist; wiring into the mediator's
+  TOOL_GATE path (so guardrails run on every production tool call) is a follow-up
+  requiring careful review of the 100KB+ mediator. The error/result contract
+  (model-facing retry hints + failure masking) already exists in tool_executor.
 
 ### G-042 — MCP ecosystem: resources/prompts + full client lifecycle + multi-server (industry delta)
 - phase: 7 | module: MCP | cat: productizable_to_L6 (local parts) / future (remote)

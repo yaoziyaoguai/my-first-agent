@@ -1089,7 +1089,10 @@ Each gap cites the industry delta; `cat` = productizable_to_L6 / guardrail_forbi
 - plan: document `protocol`/`name`/`capabilities`/`streaming_mode`/`tool_name_policy`/
   `fail_closed_flags` as optional profile metadata (docs-level; operator-visible);
   keep `type` as config alias for back-compat [docs, yes].
-- status: open (docs-level normalization; PROVIDER_ABSTRACTION_AUDIT §5 is the spec).
+- status: **done** (this commit). Evidence: `config/config.example.yaml` comments
+  now document the protocol-centric schema (protocol vs vendor distinction,
+  capability matrix per protocol path, endpoint profile framing). The `type` field
+  is documented as `protocol` (config alias retained for back-compat).
 
 ### G-049 — Provider: capability matrix surface in capability-status/status
 - phase: 7 | module: Provider + CLI | cat: productizable_to_L6

@@ -15,16 +15,31 @@
 # 本文件列出所有可用字段及其说明。
 
 # =============================================================================
-# Provider 配置
+# Provider 配置（protocol-centric — see PROVIDER_ABSTRACTION_AUDIT.md）
 # =============================================================================
+# Provider 抽象以 PROTOCOL 为核心，不是以厂商为核心：
+#   - type (protocol): 决定请求/响应适配器（openai/anthropic/fake 路径）
+#   - base_url + model: 决定具体 endpoint/vendor（DeepSeek/Kimi/GLM/vLLM/Ollama…）
+#   - 能力差异（streaming/tool_calling/usage）是 protocol-path 属性，不是 vendor 属性
+#
+# 例如：DeepSeek 可通过 anthropic_compatible 或 openai_compatible 两种协议接入；
+#       Kimi/Qwen/GLM/vLLM/Ollama 均通过 openai_compatible 接入，只换 base_url+key+model。
+#       同一 protocol path 的 maturity 不因 vendor 不同而改变。
+#
 # enabled:    true=启用真实 LLM / false=本地 fake 安全路径
-# type:       fake | anthropic_native | anthropic_compatible | openai_native | openai_compatible
-# model:      模型名
-# base_url:   兼容模式端点地址（native 模式不需要）
+# type:       protocol: fake | anthropic_native | anthropic_compatible | openai_native | openai_compatible
+# model:      模型名（如 deepseek-v4-flash / kimi-k2.5 / glm-5）
+# base_url:   endpoint 地址（compatible 模式必填；native 模式不需要）
 # api_key_env: 环境变量名，从 process env 读取 API key（推荐用于可提交模板）
 # api_key:     inline API key（本地未提交场景可用，简洁直接）
 #
-# 用户只需配置以上字段。request_path 和 auth_scheme 由 provider adapter 内部决定。
+# 能力矩阵（由 protocol adapter 决定，非 vendor）：
+#   - anthropic_compatible: tool_calling=yes, streaming=yes, usage=yes (L6 path)
+#   - openai_compatible:    tool_calling=yes, streaming=fail_closed, usage=yes (L4)
+#   - *_native:             factory-wired, 需官方 credential (L2)
+#   - fake:                 确定性, 无网络 (L3 test support)
+#
+# 用户只需配置以上字段。request_path 和 auth_scheme 由 protocol adapter 内部决定。
 provider:
   enabled: false
   type: fake

@@ -138,6 +138,7 @@ def build_composition(
     workspace_scope_digest: str = "",
     provider_descriptor: ProviderDescriptor | None = None,
     control_inbox: ControlInbox | None = None,
+    strict_control_schema: bool = False,
 ) -> Composition:
     control_inbox = control_inbox or ControlInbox()
     tool_runtime = KernelToolRuntime(tool_registrations)
@@ -167,6 +168,7 @@ def build_composition(
         sources=sources,
         workspace_scope_digest=workspace_scope_digest,
         authority_snapshot=authority_snapshot,
+        strict_control_schema=strict_control_schema,
     )
     runtime = AgentRuntime(
         provider=provider,

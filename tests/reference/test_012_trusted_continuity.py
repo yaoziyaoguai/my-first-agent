@@ -572,14 +572,23 @@ def test_j6_plain_done_and_model_supplied_admission_cannot_fake_completion() -> 
         goal=_goal(),
     )
     store = InMemoryCheckpointStore(state)
-    provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    provider = ScriptedProvider(
+        ModelResponse((ModelTextBlock("done"),)),
+        ModelResponse((ModelTextBlock("done"),)),
+    )
     result = _runtime(provider, store).run_turn(
         _submit(state, "verify", run_id="false-run"),
         store.load(),
     )
-    assert result.status is RunStatus.COMPLETED
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "invalid_model_control"
     assert store.state.goal is not None
     assert store.state.goal.status is GoalStatus.GOAL_READY
+    assert [
+        fact.content.get("code")
+        for fact in store.state.facts
+        if fact.content.get("code") == "active_goal_requires_control"
+    ] == ["active_goal_requires_control"]
 
     forged_goal = replace(
         _goal(),

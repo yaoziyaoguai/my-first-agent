@@ -23,7 +23,7 @@ from agent.runtime.contracts import (
 
 # 012 的 reserved control schema 是 mandatory pinned context。这里的测试仍然只测
 # history/group 淘汰边界，因此在旧的相对预算上显式加回这项固定成本。
-CONTROL_SCHEMA_BUDGET = 970
+CONTROL_SCHEMA_BUDGET = 998
 
 
 def _fact(fact_id: str, kind: FactKind, **content):

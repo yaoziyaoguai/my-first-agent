@@ -54,6 +54,7 @@ def build_child_runtime(
     *,
     conversation_id: str,
     invocation_id_factory: Callable[[], str] | None = None,
+    strict_control_schema: bool = False,
 ) -> tuple[AgentRuntime, InMemoryCheckpointStore]:
     """构造与父侧同类、本次调用存活的 child AgentRuntime + 其 in-memory store。
 
@@ -73,6 +74,7 @@ def build_child_runtime(
         ),
         sources=(),
         workspace_scope_digest=profile.workspace_scope_digest,
+        strict_control_schema=strict_control_schema,
     )
     from agent.runtime.tools import KernelToolRuntime
 
@@ -133,6 +135,8 @@ def build_child_provider(spec) -> object:
             credential=os.environ.get(spec.credential_env_name),
             timeout=spec.timeout if spec.timeout is not None else 30.0,
             thinking_mode=spec.thinking_mode,
+            request_path=spec.request_path,
+            strict_tools=spec.strict_tools,
         )
         return build_model_provider(config)
 

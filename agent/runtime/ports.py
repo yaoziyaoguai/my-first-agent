@@ -27,6 +27,10 @@ class RetryableProviderError(RuntimeError):
     """Provider 端口的可重试失败标记，不依赖任何具体 adapter。"""
 
 
+class InvalidProviderResponseError(RuntimeError):
+    """远端响应无法安全归一化；允许 Runtime 做零副作用的有界重试。"""
+
+
 class CheckpointCASConflictError(RuntimeError):
     """CAS loser 可返回已经在同一次比较中读到的当前 snapshot。"""
 

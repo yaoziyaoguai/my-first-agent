@@ -28,6 +28,12 @@ from agent.runtime.loop import AgentRuntime
 from agent.runtime.ports import CheckpointStore
 from agent.runtime.views import GoalView, project_goal_view
 
+_AFFIRMATIVE = frozenset({"y", "yes", "是", "允许"})
+_NEGATIVE = frozenset({"n", "no", "否", "不允许"})
+_RECOVERY_SUCCEEDED = frozenset({"已成功", "成功", "succeeded", "success"})
+_RECOVERY_FAILED = frozenset({"未成功", "失败", "failed", "failure"})
+_RECOVERY_STOP = frozenset({"先停止", "停止", "stop"})
+
 
 def run_headless(
     runtime: AgentRuntime,
@@ -67,6 +73,10 @@ def run_repl(
             continue
 
         snapshot = store.load()
+        contextual_exit = _contextual_exit_message(raw, snapshot.state)
+        if contextual_exit is not None:
+            write_fn(contextual_exit)
+            return 0
         action, error = _parse_action(raw, snapshot.state, make_run_id)
         if error is not None:
             write_fn(error)
@@ -95,6 +105,59 @@ def _parse_action(
         "expected_revision": state.revision,
     }
     command, separator, argument = raw.partition(" ")
+    normalized = raw.strip().casefold()
+
+    disclosure = state.provider_disclosure_request
+    if (
+        disclosure is not None
+        and state.active_run is not None
+        and state.active_run.status is ActiveRunStatus.AWAITING_DISCLOSURE
+        and normalized in _AFFIRMATIVE
+    ):
+        return (
+            AcknowledgeProviderDisclosure(
+                **common,
+                request_digest=disclosure.request_digest,
+                acknowledged_at="operator-confirmed",
+            ),
+            None,
+        )
+
+    approval = _approval_request(state)
+    if approval is not None and normalized in _AFFIRMATIVE | _NEGATIVE:
+        return (
+            ResolveApproval(
+                **common,
+                request_id=approval.request_id,
+                binding_digest=approval.binding_digest,
+                approved=normalized in _AFFIRMATIVE,
+            ),
+            None,
+        )
+
+    recovery = _recovery_request(state)
+    if recovery is not None:
+        resolution = None
+        if normalized in _RECOVERY_SUCCEEDED:
+            resolution = RecoveryResolution.MARK_SUCCEEDED
+        elif normalized in _RECOVERY_FAILED:
+            resolution = RecoveryResolution.MARK_FAILED
+        if resolution is not None:
+            return (
+                ResolveUnknownToolOutcome(
+                    **common,
+                    request_id=recovery.request_id,
+                    binding_digest=recovery.binding_digest,
+                    resolution=resolution,
+                ),
+                None,
+            )
+        if not command.startswith("/"):
+            return (
+                None,
+                "The previous operation has an unknown outcome. "
+                "Reply with 'success', 'failed', or 'stop'.",
+            )
 
     if command == "/ack-provider":
         request = state.provider_disclosure_request
@@ -199,3 +262,20 @@ def _recovery_request(state: ConversationState) -> RecoveryRequest | None:
     if active is None or active.status is not ActiveRunStatus.AWAITING_RECOVERY:
         return None
     return active.pending_request if isinstance(active.pending_request, RecoveryRequest) else None
+
+
+def _contextual_exit_message(raw: str, state: ConversationState) -> str | None:
+    """拒绝 disclosure 或停止 unknown-outcome 时安全退出，且不伪造状态变更。"""
+
+    normalized = raw.strip().casefold()
+    active = state.active_run
+    if (
+        state.provider_disclosure_request is not None
+        and active is not None
+        and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+        and normalized in _NEGATIVE
+    ):
+        return "Nothing was sent."
+    if _recovery_request(state) is not None and normalized in _RECOVERY_STOP:
+        return "Stopped without classifying or retrying the previous operation."
+    return None

@@ -4,12 +4,12 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalPolicy,
+    BlockedClaim,
     ConversationState,
     FactKind,
     KnownExecutedError,
     KnownNotExecuted,
     ModelResponse,
-    ModelTextBlock,
     ModelToolCall,
     OutputPolicy,
     ResolveApproval,
@@ -78,6 +78,20 @@ def _submit(state: ConversationState) -> SubmitMessage:
     )
 
 
+def _blocked_response(correlation_id: str, message: str) -> ModelResponse:
+    return ModelResponse(
+        (),
+        control=BlockedClaim(
+            correlation_id=correlation_id,
+            goal_id="goal-1",
+            goal_revision=1,
+            blocker=message,
+            safe_attempts=("classified the tool outcome",),
+            resume_condition="provide a closed completion oracle",
+        ),
+    )
+
+
 def test_known_not_executed_advances_cursor_without_recovery() -> None:
     def maybe_write(intent) -> KnownNotExecuted:
         # effect 之前证明 precondition 漂移，副作用没有发生。
@@ -90,7 +104,7 @@ def test_known_not_executed_advances_cursor_without_recovery() -> None:
         (RegisteredTool(_write_spec("guarded_write"), maybe_write),),
         (
             ModelResponse((ModelToolCall("call-1", "guarded_write", {}),)),
-            ModelResponse((ModelTextBlock("done"),)),
+            _blocked_response("known-not-executed-blocked", "done"),
         ),
     )
 
@@ -169,7 +183,7 @@ def test_stale_approval_is_nonfatal_nonexecution() -> None:
         (registration,),
         (
             ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
-            ModelResponse((ModelTextBlock("done after mismatch"),)),
+            _blocked_response("stale-approval-blocked", "done after mismatch"),
         ),
     )
 
@@ -214,7 +228,7 @@ def test_known_executed_errors_are_not_success() -> None:
         (RegisteredTool(_write_spec("remote_tool"), remote_failure),),
         (
             ModelResponse((ModelToolCall("call-1", "remote_tool", {}),)),
-            ModelResponse((ModelTextBlock("done"),)),
+            _blocked_response("known-executed-error-blocked", "done"),
         ),
     )
     result = runtime.run_turn(_submit(store.state), store.load())

@@ -20,6 +20,7 @@ import pytest
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BlockedClaim,
     ClarificationRequest,
     ConversationState,
     FactKind,
@@ -237,7 +238,17 @@ def test_explicit_task_persists_goal_before_rebuilding_context() -> None:
     provider = ScriptedProvider(
         ModelResponse((), control=GoalProposal("control-goal-1", _goal_frame())),
         ModelResponse((ModelToolCall("call-1", "write_note", {"path": "notes/todo.md"}),)),
-        ModelResponse((ModelTextBlock("note written"),)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="control-goal-1-blocked",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="note written; completion evidence is unavailable",
+                safe_attempts=("wrote the requested note",),
+                resume_condition="provide a closed verification oracle",
+            ),
+        ),
     )
     runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
 
@@ -344,8 +355,8 @@ def test_unknown_or_malformed_control_never_mutates_state() -> None:
 
 
 def test_active_goal_plain_done_text_cannot_end_goal() -> None:
-    # U3B 语义边界:纯文本 "done" 只能结束一次 run,不构成 Goal 完成验证;
-    # VERIFIED_DONE 必须经由 completion claim + 逐条 mandatory criterion 证据。
+    # U3B 语义边界:活跃 Goal 下纯文本不能结束 run；一次 repair 后重复纯文本
+    # 必须 fail closed，VERIFIED_DONE 仍只能来自 completion + closed evidence。
     timeline: list[tuple[str, object]] = []
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
     executions: list[str] = []
@@ -356,31 +367,21 @@ def test_active_goal_plain_done_text_cannot_end_goal() -> None:
     )
     runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
 
-    first = runtime.run_turn(
+    result = runtime.run_turn(
         _submit(store.state, "Write a note file notes/todo.md with my plan"),
         store.load(),
     )
 
-    assert first.status is RunStatus.COMPLETED
-    goal_after_first = store.state.goal
-    assert goal_after_first is not None, "first turn must durably create the Goal"
-
-    second = runtime.run_turn(_submit(store.state, "done"), store.load())
-
-    assert second.status is RunStatus.COMPLETED
-    assert second.message == "done"
-    goal_after_second = store.state.goal
-    assert goal_after_second is not None, "plain done text must not drop the durable Goal"
-    assert goal_after_second.goal_id == goal_after_first.goal_id
-    assert goal_after_second.revision == goal_after_first.revision
-    assert goal_after_second.status is goal_after_first.status
-    assert goal_after_second.status is GoalStatus.GOAL_READY, (
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "invalid_model_control"
+    goal = store.state.goal
+    assert goal is not None, "plain done text must not drop the durable Goal"
+    assert goal.status is GoalStatus.GOAL_READY, (
         "the Goal must stay active; plain text cannot advance its lifecycle"
     )
-    assert goal_after_second.status is not GoalStatus.VERIFIED_DONE, (
+    assert goal.status is not GoalStatus.VERIFIED_DONE, (
         "plain done text must never yield VERIFIED_DONE"
     )
-    assert goal_after_second.admitted_criteria == goal_after_first.admitted_criteria
     assert store.state.evidence_records == (), (
         "plain text must not fabricate verification evidence"
     )
@@ -388,6 +389,11 @@ def test_active_goal_plain_done_text_cannot_end_goal() -> None:
         "plain text must not create a completion claim"
     )
     assert len(provider.calls) == 3
+    assert [
+        fact.content.get("code")
+        for fact in store.state.facts
+        if fact.content.get("code") == "active_goal_requires_control"
+    ] == ["active_goal_requires_control"]
     assert [entry for entry in timeline if entry[0].startswith("tool_")] == []
     assert executions == []
 
@@ -412,48 +418,38 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     )
     provider = ScriptedProvider(
         ModelResponse((), control=GoalProposal("control-goal-progress-setup", _goal_frame())),
-        ModelResponse((ModelTextBlock("Goal accepted."),)),
         ModelResponse((), control=progress),
-        ModelResponse((ModelTextBlock("Progress recorded; continuing the note task."),)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="control-progress-blocked",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="the note body still needs a user-provided source",
+                safe_attempts=("recorded the verified progress",),
+                resume_condition="provide the note source",
+            ),
+        ),
     )
     runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
 
-    setup = runtime.run_turn(
+    result = runtime.run_turn(
         _submit(store.state, "Write a note file notes/todo.md with my plan"),
         store.load(),
     )
 
-    assert setup.status is RunStatus.COMPLETED
-    goal_after_setup = store.state.goal
-    assert goal_after_setup is not None, "setup turn must durably create the active Goal"
-    calls_after_setup = len(provider.calls)
-    proposal_receipts_after_setup = [
-        receipt
-        for receipt in store.state.control_receipts
-        if receipt.control_kind == "goal_proposal"
-    ]
-    assert len(proposal_receipts_after_setup) == 1
-
-    result = runtime.run_turn(
-        _submit(store.state, "Work on the admitted note task now."),
-        store.load(),
-    )
-
-    # 单个观察 run 必须自己消化 progress 并继续:恰好两次新增 provider 调用,
-    # 以最终文本 COMPLETED,证明不需要第三条用户动作。
+    # 单个观察 run 必须自己消化 proposal/progress 并继续到结构化 blocked
+    # 终态，不需要额外的用户 continue 动作。
     assert result.status is RunStatus.COMPLETED
-    assert result.message == "Progress recorded; continuing the note task."
-    assert len(provider.calls) == calls_after_setup + 2
+    assert result.message == "the note body still needs a user-provided source"
+    assert len(provider.calls) == 3
 
     goal = store.state.goal
     assert goal is not None, "accepted progress must not drop the durable Goal"
-    assert goal.goal_id == goal_after_setup.goal_id
-    assert goal.revision == goal_after_setup.revision
-    assert goal.status is GoalStatus.EXECUTING, (
-        "accepted progress must durably move the active Goal to EXECUTING"
-    )
+    assert goal.goal_id == "goal-1"
+    assert goal.status is GoalStatus.BLOCKED
     assert goal.progress_summary == _PROGRESS_SUMMARY
-    assert goal.next_step == _PROGRESS_NEXT_STEP
+    assert goal.next_step == "provide the note source"
 
     progress_receipts = [
         receipt
@@ -468,11 +464,11 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     assert progress_receipt.goal_id == goal.goal_id
     assert progress_receipt.goal_revision == goal.revision
     assert progress_receipt.payload_digest
-    assert [
+    assert len([
         receipt
         for receipt in store.state.control_receipts
         if receipt.control_kind == "goal_proposal"
-    ] == proposal_receipts_after_setup, "the earlier GoalProposal receipt must be preserved"
+    ]) == 1, "the earlier GoalProposal receipt must be preserved"
 
     user_messages = [
         fact.content["text"]
@@ -481,8 +477,7 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     ]
     assert user_messages == [
         "Write a note file notes/todo.md with my plan",
-        "Work on the admitted note task now.",
-    ], "only the two real user actions may exist in the conversation"
+    ], "only the real user action may exist in the conversation"
     assert all(str(text).strip().lower() != "continue" for text in user_messages), (
         "continuation must not be driven by a synthetic continue user message"
     )

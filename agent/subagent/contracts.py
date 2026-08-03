@@ -75,6 +75,8 @@ class ChildProviderSpec:
     credential_env_name: str | None = None
     timeout: float | None = None
     thinking_mode: str | None = None
+    request_path: str | None = None
+    strict_tools: bool = False
 
 
 @dataclass(frozen=True, slots=True)

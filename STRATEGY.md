@@ -1,6 +1,6 @@
 ---
 name: my-first-agent
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 authority: product-strategy
 ---
 
@@ -71,11 +71,11 @@ First Agent 不建设含义模糊的“三层 Memory”。三类事实分别由�
 
 只有前述连续性、授权和验证边界稳定后，才逐步扩展到更广本机任务。First Agent 不通过环境监控学习用户，也不默认接管整台电脑。
 
-## Current milestone
+## Completed foundation
 
 ### 012 Trusted Continuity MVP — 从对话到可验证行动
 
-012 只交付一条冻结旅程：
+012 已交付并通过离线、真实 Provider E3 与独立 review 的冻结旅程：
 
 1. 用户在默认或明确 workspace 启动 First Agent，看到 workspace、Provider disclosure、authority 与 Memory 状态。
 2. 简单问题直接回答，不建立虚假 Goal。
@@ -88,9 +88,30 @@ First Agent 不建设含义模糊的“三层 Memory”。三类事实分别由�
 
 012 明确不实现动态 multi-root、运行中热加载工具、自动学习、replay/canary/promotion、后台常驻服务、跨设备同步或环境活动监控。
 
+### 013 Everyday Workspace Agent — 从可靠内核到日常可用入口（已交付并验证）
+
+013 没有扩大 Agent 权限，而是把 012 已有能力收束成默认产品路径，并已完成交付验证：
+
+1. 用户一次保存不含秘密的 Provider profile（含显式 `request_path`/`strict_tools` opt-in），此后在空或已有目录只运行 `first-agent`。
+2. 用户只用自然语言提问、讨论或委托当前 workspace 内的文件任务，不选择 chat/task/code 模式。
+3. 简单问题和讨论不制造 Goal；明确产物先持久化 Goal，再持续推进到真实安全边界或验证完成。
+4. disclosure、approval、recovery 和多候选恢复用可读语境交互，用户无需复制 digest/request ID。
+5. 默认输出只显示用户需要知道的回答、决定、进展、证据和 blocker，不暴露内部协议噪音。
+6. 空目录建产物、讨论转产物、已有目录精确修改三条真实 Provider journey 在官方 DeepSeek
+   OpenAI-compatible strict endpoint 连续三次未插桩通过（12/12 receipt claims 全 true）。
+
+013 仍不实现 shell、web、browser、动态 multi-root、整机活动监控、后台 daemon 或自主优化。完整合同见
+`docs/architecture/013_EVERYDAY_WORKSPACE_AGENT_DESIGN.md`，验收证据见
+`docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md`。
+
+## Current milestone
+
+013 已交付并验证（见上）。下一里程碑尚未启动；按 capability tracks 的顺序与现有稳定边界另行
+批准，不因 013 完成而隐式扩权。
+
 ## Success metrics
 
-- 冻结 012 reference suite 的合同测试必须 100% 通过。
+- 冻结 012 与当前 013 reference suite 的合同测试必须 100% 通过。
 - 未经授权或重复 effect、错误跨 workspace task-fact recall、Memory/文件/网页扩大权限、false `VERIFIED_DONE`：任一非零即 stop-ship。
 - 必要询问召回率和无效询问率同时报告，不能靠“从不问”或“什么都问”刷分。
 - 跨重启成功必须证明没有要求用户复述、没有重复已完成步骤、没有盲目重放 unknown effect。

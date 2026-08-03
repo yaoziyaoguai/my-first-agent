@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    AdmittedCriterion,
     ContextCandidate,
     ContextSourceSnapshot,
     ConversationFact,
     ConversationState,
+    EvidenceOracleKind,
     FactKind,
     GoalFrame,
     GoalStatus,
@@ -89,7 +93,30 @@ def _action(state: ConversationState) -> SubmitMessage:
 
 
 def test_active_goal_is_trusted_pinned_bounded_core_context() -> None:
-    state = _state()
+    goal = _goal()
+    criterion_id = goal.proposed_criteria[0].criterion_id
+    state = ConversationState(
+        conversation_id="conversation-1",
+        revision=4,
+        next_action_seq=2,
+        replay_floor=2,
+        facts=_state().facts,
+        goal=replace(
+            goal,
+            admitted_criteria=(
+                AdmittedCriterion(
+                    criterion_id=criterion_id,
+                    description="report exists",
+                    source_fact_id="user-1",
+                    oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                    predicate={"path": "reports/final.md", "sha256": "a" * 64},
+                    required_evidence_class="filesystem",
+                    admission_digest="admission-1",
+                    mandatory=True,
+                ),
+            ),
+        ),
+    )
     pack = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=2_000, output_reserve=100),
@@ -106,6 +133,9 @@ def test_active_goal_is_trusted_pinned_bounded_core_context() -> None:
     assert goal_blocks[0]["goal_revision"] == 1
     assert goal_blocks[0]["user_outcome"] == "write the exact report"
     assert goal_blocks[0]["targets"] == ["reports/final.md"]
+    assert goal_blocks[0]["expected_completion_evidence_refs"] == [
+        "evidence:goal-1:1:criterion-1"
+    ]
     assert "goal:goal-1:1" in pack.budget.included_ids
 
 

@@ -110,6 +110,12 @@ def canonical_json_digest(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def closed_evidence_id(goal_id: str, goal_revision: int, criterion_id: str) -> str:
+    """叶子合同层拥有 deterministic evidence identity，避免领域模块反向依赖。"""
+
+    return f"evidence:{goal_id}:{goal_revision}:{criterion_id}"
+
+
 class ActiveRunStatus(StrEnum):
     RUNNABLE = "runnable"
     AWAITING_APPROVAL = "awaiting_approval"

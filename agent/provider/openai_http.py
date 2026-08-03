@@ -76,9 +76,15 @@ class OpenAICompatibleProvider:
         }
         if self._config.thinking_mode is not None:
             body["thinking"] = {"type": self._config.thinking_mode}
-        tools = context_tools_to_openai(context)
+        tools = context_tools_to_openai(context, strict=self._config.strict_tools)
         if tools:
             body["tools"] = tools
+        if self._config.strict_tools:
+            # Agent control 优先确定性；strict schema 负责形状，temperature=0
+            # 降低在多个合法 control 之间无意义漂移。active Goal 不允许 prose 结束。
+            body["temperature"] = 0
+            if context.control_schema is not None and context.goal_bootstrap is None:
+                body["tool_choice"] = "required"
 
         try:
             with self._client().stream(

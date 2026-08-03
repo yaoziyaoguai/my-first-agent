@@ -36,6 +36,89 @@ def _argv(
     ]
 
 
+def _real_provider_argv(tmp_path: Path, *, strict: bool) -> list[str]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    state_root = tmp_path / "state-root"
+    state_root.mkdir(mode=0o700, exist_ok=True)
+    argv = [
+        "--workspace",
+        str(workspace),
+        "--state-root",
+        str(state_root),
+        "--schedule-id",
+        "strict-schedule",
+        "--occurrence-id",
+        "2026-08-03T00:00:00Z",
+        "--scheduled-for",
+        "2026-08-03T00:00:00Z",
+        "--message",
+        "answer briefly without tools",
+        "--provider",
+        "openai_compatible",
+        "--model",
+        "fixture-model",
+        "--base-url",
+        "https://provider.invalid",
+        "--credential-env",
+        "FIXTURE_PROVIDER_KEY",
+        "--thinking-mode",
+        "disabled",
+        "--request-path",
+        "/chat/completions",
+    ]
+    if strict:
+        argv.append("--strict-tools")
+    return argv
+
+
+def _run_schedule_capturing_composition(
+    tmp_path: Path, monkeypatch, *, strict: bool
+) -> tuple[int, list[str], dict]:
+    # remote provider 的新 occurrence 在首次外发前停在 disclosure(needs_human,零发送),
+    # 因此在该停点前捕获 composition 实参即可离线锁定 strict 组合合同。
+    monkeypatch.setenv("FIXTURE_PROVIDER_KEY", "fixture-secret")
+    captured: dict = {}
+    real_build = entrypoint.build_composition
+
+    def capture(**kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return real_build(**kwargs)
+
+    monkeypatch.setattr(entrypoint, "build_composition", capture)
+    output: list[str] = []
+    code = entrypoint.run_schedule(
+        _real_provider_argv(tmp_path, strict=strict), write_fn=output.append
+    )
+    return code, output, captured
+
+
+def test_schedule_strict_tools_composes_strict_control_schema(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # F2 回归:schedule 入口启用 --strict-tools 时,composition 也必须请求
+    # strict control schema,否则 strict wire 在首次组包即 missing_strict_control_schema。
+    code, output, captured = _run_schedule_capturing_composition(
+        tmp_path, monkeypatch, strict=True
+    )
+
+    assert code == 2, output
+    assert '"run_status": "awaiting_disclosure"' in output[-1]
+    assert captured.get("strict_control_schema") is True
+
+
+def test_schedule_without_strict_tools_keeps_portable_control_schema(
+    tmp_path: Path, monkeypatch
+) -> None:
+    code, output, captured = _run_schedule_capturing_composition(
+        tmp_path, monkeypatch, strict=False
+    )
+
+    assert code == 2, output
+    assert '"run_status": "awaiting_disclosure"' in output[-1]
+    assert captured.get("strict_control_schema", False) is False
+
+
 def test_first_schedule_run_completes(tmp_path: Path) -> None:
     output: list[str] = []
     code = entrypoint.run_schedule(_argv(tmp_path), write_fn=output.append)

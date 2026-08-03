@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    BlockedClaim,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -56,7 +57,17 @@ def test_parent_delegates_and_uses_child_finding() -> None:
                 ),
             )
         ),
-        ModelResponse((ModelTextBlock("Risk: SECRET-OMEGA confirmed"),)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="subagent-finding-blocked",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="Risk: SECRET-OMEGA confirmed",
+                safe_attempts=("delegated the bounded review",),
+                resume_condition="provide a closed completion oracle",
+            ),
+        ),
     )
     # subagent__delegate 是 EXTERNAL effectful 工具：合法路径是 Goal 准入之后执行，
     # 所以 parent checkpoint 从已有 durable Goal 的状态起步。

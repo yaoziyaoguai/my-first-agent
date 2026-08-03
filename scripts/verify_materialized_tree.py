@@ -72,6 +72,8 @@ DENIED_PREFIXES = (
     "build/",
     "dist/",
     ".codex/",
+    # loop 约定的仓库根临时 prompt/log 前缀;保持窄范围,不隐藏普通用户文件。
+    ".codex-tmp-",
     ".opencode/",
     ".git-credentials",
     ".netrc",

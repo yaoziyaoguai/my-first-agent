@@ -12,6 +12,7 @@ from agent.provider.normalize import (
     context_to_anthropic_messages,
     context_tools_to_anthropic,
     normalize_anthropic_response,
+    trusted_system_projection,
 )
 from agent.provider.protocol import (
     ProviderAuthError,
@@ -73,7 +74,9 @@ class AnthropicCompatibleProvider:
         body: dict[str, Any] = {
             "model": self._config.model,
             "max_tokens": self._config.max_tokens,
-            "system": context.system,
+            # 已受理回执与 context.system 共用同一 trusted system 投影,
+            # 绝不回放进 messages(与 OpenAI 适配器语义对称)。
+            "system": trusted_system_projection(context),
             "messages": context_to_anthropic_messages(context),
         }
         tools = context_tools_to_anthropic(context)

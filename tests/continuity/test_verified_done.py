@@ -94,9 +94,9 @@ def _claim() -> CompletionClaim:
     )
 
 
-def _runtime(state: ConversationState, response: ModelResponse):
+def _runtime(state: ConversationState, *responses: ModelResponse):
     store = InMemoryCheckpointStore(state)
-    provider = ScriptedProvider(response)
+    provider = ScriptedProvider(*responses)
     runtime = AgentRuntime(
         provider=provider,
         context_manager=KernelContextManager(
@@ -123,11 +123,13 @@ def test_text_done_and_model_completion_claim_cannot_self_verify() -> None:
     runtime, store, action = _runtime(
         _state(),
         ModelResponse((ModelTextBlock("done"),)),
+        ModelResponse((ModelTextBlock("done"),)),
     )
 
     result = runtime.run_turn(action, store.load())
 
-    assert result.status is RunStatus.COMPLETED
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "invalid_model_control"
     assert store.state.goal.status is GoalStatus.GOAL_READY
     assert store.state.evidence_records == ()
 

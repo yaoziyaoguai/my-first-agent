@@ -7,6 +7,7 @@ from dataclasses import replace
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRun,
+    ApprovalPolicy,
     BlockedClaim,
     CancelGoal,
     ContinuationPhase,
@@ -17,11 +18,17 @@ from agent.runtime.contracts import (
     GoalStatus,
     ModelResponse,
     ModelTextBlock,
+    ModelToolCall,
+    OutputPolicy,
     PauseGoal,
     ResumeGoal,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
+    ToolDefinition,
+    ToolRisk,
+    ToolSpec,
 )
 from agent.runtime.control import (
     ControlBinding,
@@ -30,7 +37,7 @@ from agent.runtime.control import (
     ControlRequestKind,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
-from agent.runtime.tools import KernelToolRuntime
+from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from tests.kernel.fakes import (
     CollectingSink,
     InMemoryCheckpointStore,
@@ -345,3 +352,154 @@ def test_blocked_claim_projects_exact_resume_condition_and_stops() -> None:
     assert store.state.goal.next_step == "provide the named configuration value"
     assert store.state.active_run is None
     assert store.state.facts[-1].content["code"] == "blocked_claim"
+
+
+# F3(fresh review 78c54a88):PAUSED Goal 的安全合同。暂停后普通问答仍然可用;
+# 任何任务推进(goal 控制)或 effectful tool 都必须先显式 ResumeGoal;
+# prose 只结束本次 run,不得改变仍然暂停的 Goal。
+
+
+def _paused_state():
+    state = conversation_with_active_goal()
+    assert state.goal is not None
+    return replace(state, goal=replace(state.goal, status=GoalStatus.PAUSED))
+
+
+def _submit_text(state, message: str = "What is this workspace for?") -> SubmitMessage:
+    return SubmitMessage(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        run_id="run-paused-qa",
+        message=message,
+    )
+
+
+def _paused_runtime(state, *responses, registrations=()):
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(*responses)
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=4_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(registrations),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-paused",
+    )
+    return runtime, store, provider
+
+
+def test_paused_goal_still_answers_plain_questions_without_goal_mutation() -> None:
+    state = _paused_state()
+    runtime, store, provider = _paused_runtime(
+        state,
+        ModelResponse((ModelTextBlock("paused answer"),)),
+        ModelResponse((ModelTextBlock("paused answer"),)),
+    )
+
+    result = runtime.run_turn(_submit_text(state), store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "paused answer"
+    # 一次提问恰好一次模型调用:没有 active_goal_requires_control 修复循环。
+    assert len(provider.calls) == 1
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.PAUSED
+    assert store.state.goal.revision == state.goal.revision
+
+
+def test_paused_goal_rejects_model_progress_until_explicit_resume() -> None:
+    state = _paused_state()
+    runtime, store, provider = _paused_runtime(
+        state,
+        ModelResponse(
+            (),
+            control=GoalProgress(
+                correlation_id="ctl-paused-progress",
+                goal_id=state.goal.goal_id,
+                goal_revision=state.goal.revision,
+                summary="silently resuming the task",
+                next_step="keep going",
+            ),
+        ),
+        ModelResponse((ModelTextBlock("understood, the task stays paused"),)),
+    )
+
+    result = runtime.run_turn(_submit_text(state), store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.PAUSED
+    assert store.state.goal.next_step != "keep going"
+    assert all(
+        receipt.correlation_id != "ctl-paused-progress"
+        for receipt in store.state.control_receipts
+    )
+
+
+def test_paused_goal_fails_closed_before_effectful_tool_prepare() -> None:
+    executed: list[str] = []
+    spec = ToolSpec(
+        name="write_fixture",
+        version="1",
+        description="Write a fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "required": ["content"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=50,
+    )
+    state = _paused_state()
+    runtime, store, provider = _paused_runtime(
+        state,
+        ModelResponse((ModelToolCall("call-paused-1", "write_fixture", {"content": "x"}),)),
+        registrations=(
+            RegisteredTool(spec, lambda intent: executed.append("ran") or "written"),
+        ),
+    )
+
+    result = runtime.run_turn(_submit_text(state, "please continue the task"), store.load())
+
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "effectful_tool_requires_resumed_goal"
+    assert executed == []
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.PAUSED
+
+
+def test_paused_goal_context_hides_effectful_tools_and_control_schema() -> None:
+    state = _paused_state()
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+    )
+    read_definition = ToolDefinition(
+        name="read_file",
+        description="Read one bounded file",
+        input_schema={"type": "object"},
+        side_effect=SideEffectClass.READ_ONLY,
+    )
+    write_definition = ToolDefinition(
+        name="write_file",
+        description="Write one bounded file",
+        input_schema={"type": "object"},
+        side_effect=SideEffectClass.WRITE,
+    )
+
+    pack = manager.build(state, _submit_text(state), (read_definition, write_definition))
+
+    # 模型可见能力层:暂停时 effectful callable 与 goal 控制 schema 都不可见,
+    # strict adapter 因而不会强制 tool_choice,普通问答可以 prose 收尾。
+    assert tuple(tool.name for tool in pack.tools) == ("read_file",)
+    assert pack.control_schema is None

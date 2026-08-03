@@ -25,6 +25,7 @@ class AgentProviderConfig:
     auth_scheme: str | None = None
     request_path: str | None = None
     thinking_mode: str | None = None
+    strict_tools: bool = False
 
     def __post_init__(self) -> None:
         provider_type = self.provider_type.strip().lower()
@@ -33,6 +34,8 @@ class AgentProviderConfig:
         if not self.model.strip():
             raise ProviderConfigurationError()
         if self.max_tokens < 1 or self.timeout <= 0:
+            raise ProviderConfigurationError()
+        if not isinstance(self.strict_tools, bool):
             raise ProviderConfigurationError()
 
         object.__setattr__(self, "provider_type", provider_type)
@@ -45,6 +48,7 @@ class AgentProviderConfig:
                 self.auth_scheme is not None
                 or self.request_path is not None
                 or self.thinking_mode is not None
+                or self.strict_tools
             ):
                 raise ProviderConfigurationError()
             return
@@ -55,6 +59,8 @@ class AgentProviderConfig:
         if self.thinking_mode is not None and (
             provider_type != "openai_compatible" or self.thinking_mode != "disabled"
         ):
+            raise ProviderConfigurationError()
+        if self.strict_tools and provider_type != "openai_compatible":
             raise ProviderConfigurationError()
 
         if not self.base_url:
@@ -73,14 +79,22 @@ class AgentProviderConfig:
             else "/v1/chat/completions"
         )
         request_path = self.request_path or default_path
-        if not request_path.startswith("/"):
-            request_path = f"/{request_path}"
+        if (
+            not request_path.startswith("/")
+            or request_path.startswith("//")
+            or any(ch.isspace() or ord(ch) < 0x20 for ch in request_path)
+            or "?" in request_path
+            or "#" in request_path
+        ):
+            raise ProviderConfigurationError()
         object.__setattr__(self, "request_path", request_path)
 
     @property
     def endpoint(self) -> str:
         if self.provider_type == "fake" or self.base_url is None:
             raise ProviderConfigurationError()
+        if self.base_url.endswith("/v1") and self.request_path.startswith("/v1/"):
+            return f"{self.base_url}{self.request_path[3:]}"
         return f"{self.base_url}{self.request_path}"
 
     def descriptor(self) -> ProviderDescriptor:

@@ -53,6 +53,8 @@ class WorkspaceSession:
 class SessionCandidate:
     conversation_id: str
     checkpoint_path: Path
+    state_revision: int
+    next_action_seq: int
     goal_id: str | None
     goal_revision: int | None
     goal_status: GoalStatus | None
@@ -255,6 +257,8 @@ def _candidate(path: Path, snapshot: LoadedSnapshot) -> SessionCandidate:
     return SessionCandidate(
         conversation_id=snapshot.state.conversation_id,
         checkpoint_path=path,
+        state_revision=snapshot.state.revision,
+        next_action_seq=snapshot.state.next_action_seq,
         goal_id=goal.goal_id if goal is not None else None,
         goal_revision=goal.revision if goal is not None else None,
         goal_status=goal.status if goal is not None else None,

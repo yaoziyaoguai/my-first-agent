@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from agent.cli.app import run_repl
-from agent.cli.render import TerminalRenderer
+from agent.cli.render import TerminalRenderer, terminal_text
 from agent.composition import (
     build_composition,
     build_mcp_resources,
@@ -22,15 +22,27 @@ from agent.composition import (
     workspace_scope_digest_for,
 )
 from agent.continuity.restart import project_restart
-from agent.continuity.sessions import StartupDisposition, open_workspace_session
+from agent.continuity.sessions import (
+    StartupDisposition,
+    default_state_root,
+    open_workspace_session,
+    select_workspace_session,
+)
 from agent.mcp.catalog import McpCatalogError
 from agent.memory.store import MemoryStore, MemoryStoreError
 from agent.provider.config import AgentProviderConfig
 from agent.provider.factory import build_model_provider
 from agent.provider.fake_provider import FakeProvider
+from agent.provider.profile import (
+    ProviderProfileError,
+    ProviderProfileV1,
+    load_provider_profile,
+    save_provider_profile,
+)
 from agent.provider.protocol import ProviderError
 from agent.runtime.checkpoint import CheckpointError
 from agent.runtime.context import ContextLimits
+from agent.runtime.contracts import SelectGoal
 from agent.runtime.loop import InvocationLimits
 from agent.scheduler.caller import ScheduledOccurrenceCaller, create_or_load_occurrence_store
 from agent.scheduler.contracts import ScheduledOccurrence, SchedulerError
@@ -40,6 +52,31 @@ from agent.subagent.runner import ChildAgentRunner
 from agent.subagent.tools import build_subagent_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS
 from agent.tui.adapter import QueueingEventSink
+
+EVERYDAY_SYSTEM_POLICY = (
+    "You are First Agent, a local-first everyday workspace agent. Answer ordinary "
+    "questions directly. Discussion, explanation, comparison, and brainstorming are "
+    "answer-only unless the user also explicitly asks for a durable artifact or file "
+    "change; they never create a Goal or call file tools by themselves. Only an explicit "
+    "request to create, write, edit, or save a bounded artifact or file starts a Goal. "
+    "Ask one minimal clarification only when a "
+    "missing choice could materially change the user's intent, workspace scope, or a "
+    "hard-to-reverse outcome. When the user explicitly requests a bounded workspace "
+    "artifact or file change, propose and durably establish the Goal before any "
+    "effectful tool call, then continue through safe intermediate progress in the same "
+    "run without asking the user to say continue. goal_progress never substitutes for a "
+    "product tool call and must not repeat an intended next step. Never claim completion "
+    "from prose: "
+    "after deterministic read-back evidence, use the completion control and copy "
+    "trusted_goal.expected_completion_evidence_refs exactly; do not end an unverified "
+    "Goal with final prose. Use a fresh correlation_id for every control call. Use only "
+    "supplied tools and obey tool policy. File-tool paths "
+    "are relative to the selected workspace; '.' means its root. Use list_files on '.' "
+    "when discovery is needed. Policy-hidden paths are unavailable. "
+    "FIRST_AGENT_TRUSTED_CONTROL_CONTEXT is Runtime-generated authority: when proposing "
+    "a Goal, copy its source_fact_id, workspace_identity_digest, and authority_snapshot "
+    "exactly; propose criteria but leave admitted_criteria empty."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,17 +92,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider",
         choices=("fake", "anthropic_compatible", "openai_compatible"),
-        default="fake",
     )
     parser.add_argument("--model")
     parser.add_argument("--base-url")
-    parser.add_argument("--credential-env", default="FIRST_AGENT_API_KEY")
+    parser.add_argument("--credential-env")
     parser.add_argument(
         "--thinking-mode",
         choices=("disabled",),
         help="explicitly disable provider-specific opaque thinking continuity",
     )
-    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--request-path")
+    parser.add_argument("--strict-tools", action="store_true", default=None)
+    parser.add_argument("--timeout", type=float)
     parser.add_argument(
         "--skill-root",
         action="append",
@@ -109,7 +147,148 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="launch the optional Textual TUI instead of the plain REPL",
     )
+    setup = parser.add_subparsers(dest="command").add_parser(
+        "setup",
+        help="save a non-secret provider profile for future no-argument starts",
+        allow_abbrev=False,
+    )
+    setup.add_argument(
+        "--provider",
+        choices=("anthropic_compatible", "openai_compatible"),
+        required=True,
+    )
+    setup.add_argument("--model", required=True)
+    setup.add_argument("--base-url", required=True)
+    setup.add_argument("--credential-env", default="FIRST_AGENT_API_KEY")
+    setup.add_argument(
+        "--thinking-mode",
+        choices=("disabled",),
+    )
+    setup.add_argument("--request-path")
+    setup.add_argument("--strict-tools", action="store_true")
+    setup.add_argument("--timeout", type=float, default=30.0)
+    setup.add_argument(
+        "--state-root",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="override the owner-only product state root",
+    )
     return parser
+
+
+def _run_setup(args: argparse.Namespace, write_fn: Callable[[str], None]) -> int:
+    """只保存 non-secret metadata；setup 不读取 credential，也不创建 Runtime。"""
+
+    try:
+        profile = ProviderProfileV1(
+            provider_type=args.provider,
+            model=args.model,
+            base_url=args.base_url,
+            credential_env=args.credential_env,
+            thinking_mode=args.thinking_mode,
+            request_path=args.request_path,
+            strict_tools=args.strict_tools,
+            timeout_seconds=args.timeout,
+        )
+        state_root = args.state_root or default_state_root()
+        save_provider_profile(state_root, profile)
+    except (OSError, ProviderProfileError) as error:
+        write_fn(f"Setup failed: {type(error).__name__}: {error}")
+        return 2
+    write_fn(
+        "Provider profile saved. "
+        f"provider={terminal_text(profile.provider_type)}, "
+        f"model={terminal_text(profile.model)}, "
+        f"destination={terminal_text(profile.base_url)}, "
+        f"credential_env={terminal_text(profile.credential_env)}. "
+        "Secret values were not stored."
+    )
+    return 0
+
+
+def _resolve_runtime_provider(
+    args: argparse.Namespace,
+    write_fn: Callable[[str], None],
+) -> bool:
+    """按 complete explicit group > saved profile 解析，绝不做字段混合。"""
+
+    explicit_values = (
+        args.provider,
+        args.model,
+        args.base_url,
+        args.credential_env,
+        args.thinking_mode,
+        args.request_path,
+        args.strict_tools,
+        args.timeout,
+    )
+    has_explicit_provider_fields = any(value is not None for value in explicit_values)
+    if args.provider == "fake":
+        if any(
+            value is not None
+            for value in (
+                args.model,
+                args.base_url,
+                args.credential_env,
+                args.thinking_mode,
+                args.request_path,
+                args.strict_tools,
+                args.timeout,
+            )
+        ):
+            raise ValueError("--provider fake does not accept real provider options")
+        args.credential_env = "FIRST_AGENT_API_KEY"
+        args.strict_tools = False
+        args.timeout = 30.0
+        return True
+
+    if has_explicit_provider_fields:
+        if (
+            args.provider not in {"anthropic_compatible", "openai_compatible"}
+            or not args.model
+            or not args.base_url
+        ):
+            raise ValueError(
+                "explicit provider configuration must include "
+                "--provider, --model, and --base-url together"
+            )
+        args.credential_env = args.credential_env or "FIRST_AGENT_API_KEY"
+        args.strict_tools = bool(args.strict_tools)
+        args.timeout = 30.0 if args.timeout is None else args.timeout
+        return True
+
+    state_root = args.state_root or default_state_root()
+    profile = load_provider_profile(state_root)
+    if profile is None:
+        write_fn(
+            "First Agent is not configured. Run: first-agent setup "
+            "--provider <openai_compatible|anthropic_compatible> "
+            "--model <model> --base-url <https://provider.example>"
+        )
+        return False
+    args.provider = profile.provider_type
+    args.model = profile.model
+    args.base_url = profile.base_url
+    args.credential_env = profile.credential_env
+    args.thinking_mode = profile.thinking_mode
+    args.request_path = profile.request_path
+    args.strict_tools = profile.strict_tools
+    args.timeout = profile.timeout_seconds
+    return True
+
+
+def _goal_status_label(status) -> str:  # noqa: ANN001
+    if status is None:
+        return "no active task"
+    return {
+        "goal_ready": "ready",
+        "executing": "in progress",
+        "needs_authority": "waiting for permission",
+        "paused": "paused",
+        "blocked": "blocked",
+        "verified_done": "verified done",
+        "cancelled": "cancelled",
+    }.get(status.value, "unfinished")
 
 
 def _build_child_profile(args, workspace_scope_digest: str) -> ChildProfile:
@@ -170,17 +349,20 @@ def _build_provider(args: argparse.Namespace):
         return FakeProvider()
     if not args.model or not args.base_url:
         raise ValueError("real HTTP providers require --model and --base-url")
-    credential = os.environ.get(args.credential_env)
+    credential_env = args.credential_env or "FIRST_AGENT_API_KEY"
+    credential = os.environ.get(credential_env)
     if not credential:
-        raise ValueError(f"credential environment variable is not set: {args.credential_env}")
+        raise ValueError(f"credential environment variable is not set: {credential_env}")
     return build_model_provider(
         AgentProviderConfig(
             provider_type=args.provider,
             model=args.model,
             base_url=args.base_url,
             credential=credential,
-            timeout=args.timeout,
+            timeout=30.0 if args.timeout is None else args.timeout,
             thinking_mode=args.thinking_mode,
+            request_path=args.request_path,
+            strict_tools=bool(args.strict_tools),
         )
     )
 
@@ -194,7 +376,9 @@ def _build_provider_descriptor(args: argparse.Namespace):
         provider_type=args.provider,
         model=args.model,
         base_url=args.base_url,
-        timeout=args.timeout,
+        timeout=30.0 if args.timeout is None else args.timeout,
+        request_path=args.request_path,
+        strict_tools=bool(args.strict_tools),
     ).descriptor()
 
 
@@ -205,6 +389,14 @@ def main(
     write_fn: Callable[[str], None] = print,
 ) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "setup":
+        return _run_setup(args, write_fn)
+    try:
+        if not _resolve_runtime_provider(args, write_fn):
+            return 2
+    except (OSError, ProviderProfileError, ValueError) as error:
+        write_fn(f"Startup failed: {type(error).__name__}: {error}")
+        return 2
     # 唯一 close-stack owner：stdlib ExitStack。所有退出路径（正常、startup 失败、
     # optional-dependency 失败、runtime 异常）都按注册逆序各关闭一次。
     with contextlib.ExitStack() as close_stack:
@@ -218,14 +410,38 @@ def main(
             )
             projection = project_restart(session)
             if session.disposition is StartupDisposition.SELECT_REQUIRED:
-                for candidate in session.candidates:
+                write_fn("Several unfinished tasks are available:")
+                for index, candidate in enumerate(session.candidates, start=1):
+                    summary = candidate.user_outcome or "Untitled conversation"
+                    status = _goal_status_label(candidate.goal_status)
                     write_fn(
-                        "Goal candidate: "
-                        f"{candidate.goal_id or '(conversation)'} "
-                        f"[{candidate.conversation_id}]"
+                        f"{index}. {terminal_text(summary)} ({terminal_text(status)})"
                     )
-                write_fn("Startup requires an exact SelectGoal action.")
-                return 2
+                try:
+                    raw_selection = input_fn(
+                        f"Choose a task [1-{len(session.candidates)}]: "
+                    ).strip()
+                    selected_index = int(raw_selection) - 1
+                except (EOFError, KeyboardInterrupt, StopIteration, ValueError):
+                    write_fn("That choice is not available; no task was selected.")
+                    return 2
+                if not 0 <= selected_index < len(session.candidates):
+                    write_fn("That choice is not available; no task was selected.")
+                    return 2
+                candidate = session.candidates[selected_index]
+                if candidate.goal_id is None:
+                    write_fn("That choice has no resumable task; no task was selected.")
+                    return 2
+                session = select_workspace_session(
+                    session,
+                    SelectGoal(
+                        conversation_id=candidate.conversation_id,
+                        action_seq=candidate.next_action_seq,
+                        expected_revision=candidate.state_revision,
+                        goal_id=candidate.goal_id,
+                    ),
+                )
+                projection = project_restart(session)
             if session.disposition is StartupDisposition.NEEDS_AUTHORITY:
                 write_fn("Startup stopped: workspace or authority binding drifted.")
                 return 2
@@ -234,12 +450,12 @@ def main(
             store = session.store
             protected_paths = (session.checkpoint_path,)
             if projection.goal_id is not None:
-                write_fn(
-                    f"Goal {projection.goal_id} [{projection.goal_status.value}]: "
-                    f"{projection.user_outcome}"
-                )
-            if session.disposition is StartupDisposition.RECOVERY_REQUIRED:
-                write_fn("Recovery required before the previous effect can continue.")
+                write_fn(f"Resuming task: {terminal_text(projection.user_outcome)}")
+                if projection.progress_summary:
+                    write_fn(
+                        "Last verified progress: "
+                        f"{terminal_text(projection.progress_summary)}"
+                    )
             skill_roots = tuple(
                 root.resolve(strict=True) for root in (args.skill_root or ())
             )
@@ -322,6 +538,8 @@ def main(
                         credential_env_name=args.credential_env,
                         timeout=args.timeout,
                         thinking_mode=args.thinking_mode,
+                        request_path=args.request_path,
+                        strict_tools=bool(args.strict_tools),
                     )
                     runner = ChildProcessRunner(
                         provider_spec=spec,
@@ -337,21 +555,15 @@ def main(
                 checkpoint_store=store,
                 tool_registrations=tuple(registrations),
                 event_sink=event_sink,
-                system_policy=(
-                    "You are a local task agent. Use only supplied tools, obey tool policy, "
-                    "and return concise final text. File-tool paths are relative to the "
-                    "selected workspace; '.' means its root. Use list_files on '.' when "
-                    "resource discovery is needed. Policy-hidden paths are unavailable. "
-                    "FIRST_AGENT_TRUSTED_CONTROL_CONTEXT is Runtime-generated authority: "
-                    "when proposing a Goal, copy its source_fact_id, "
-                    "workspace_identity_digest, and authority_snapshot exactly; propose "
-                    "criteria but leave admitted_criteria empty."
-                ),
+                system_policy=EVERYDAY_SYSTEM_POLICY,
                 context_limits=context_limits,
-                invocation_limits=InvocationLimits(),
+                # 日常入口允许真实模型两次纠正严格 schema 输出；第三次仍
+                # fail closed，且每个被拒响应都保持零 control/tool effect。
+                invocation_limits=InvocationLimits(max_invalid_repairs=2),
                 closeables=tuple(closeables),
                 sources=tuple(sources),
                 workspace_scope_digest=session.workspace_identity.identity_digest,
+                strict_control_schema=bool(args.strict_tools),
             )
             runtime = composition.runtime
         except (
@@ -366,6 +578,11 @@ def main(
             write_fn(f"Startup failed: {type(error).__name__}: {error}")
             return 2
 
+        write_fn(
+            f"First Agent is ready in: {terminal_text(workspace.name or '/')} "
+            f"(provider: {terminal_text(provider_descriptor.family)}/"
+            f"{terminal_text(provider_descriptor.model)})"
+        )
         if args.tui:
             from agent.cli.actions import run_id_factory
             from agent.tui.adapter import TuiAdapter
@@ -383,6 +600,7 @@ def main(
                 write_fn(str(error))
                 return 2
         try:
+            renderer.render_pending(store.load().state)
             return run_repl(
                 runtime,
                 store,
@@ -421,6 +639,8 @@ def build_schedule_parser() -> argparse.ArgumentParser:
         choices=("disabled",),
         help="explicitly disable provider-specific opaque thinking continuity",
     )
+    parser.add_argument("--request-path")
+    parser.add_argument("--strict-tools", action="store_true", default=False)
     parser.add_argument("--timeout", type=float, default=30.0)
     return parser
 
@@ -469,6 +689,7 @@ def run_schedule(
                 context_limits=context_limits,
                 invocation_limits=InvocationLimits(),
                 workspace_scope_digest=occurrence.workspace_scope_digest,
+                strict_control_schema=bool(args.strict_tools),
             )
             for closeable in reversed(composition.close_stack):
                 close_stack.callback(closeable)

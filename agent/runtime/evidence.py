@@ -14,6 +14,7 @@ from agent.runtime.contracts import (
     EvidenceRecord,
     FactKind,
     canonical_json_digest,
+    closed_evidence_id,
 )
 
 
@@ -125,7 +126,7 @@ class ClosedEvidenceRegistry:
 
     @staticmethod
     def evidence_id(goal_id: str, goal_revision: int, criterion_id: str) -> str:
-        return f"evidence:{goal_id}:{goal_revision}:{criterion_id}"
+        return closed_evidence_id(goal_id, goal_revision, criterion_id)
 
     def _filesystem_digest(
         self,

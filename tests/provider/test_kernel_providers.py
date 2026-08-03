@@ -240,6 +240,48 @@ def test_openai_provider_can_explicitly_disable_opaque_thinking_mode() -> None:
     assert json.loads(requests[0].content)["thinking"] == {"type": "disabled"}
 
 
+def test_openai_strict_tools_are_explicit_and_deterministic() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "done"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid/beta",
+        request_path="/chat/completions",
+        credential="fixture-secret",
+        strict_tools=True,
+    )
+    context = _context()
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        OpenAICompatibleProvider(config=config, http_client=client).generate(context)
+
+    body = json.loads(requests[0].content)
+    assert body["temperature"] == 0
+    assert body["tools"][0]["function"]["strict"] is True
+    assert config.endpoint == "https://provider.invalid/beta/chat/completions"
+
+
+@pytest.mark.parametrize("provider_type", ["fake", "anthropic_compatible"])
+def test_strict_tools_are_rejected_outside_openai_compatible(provider_type: str) -> None:
+    kwargs = {} if provider_type == "fake" else {"base_url": "https://provider.invalid"}
+    with pytest.raises(ProviderConfigurationError):
+        AgentProviderConfig(provider_type=provider_type, strict_tools=True, **kwargs)
+
+
 @pytest.mark.parametrize("provider_type", ["fake", "anthropic_compatible"])
 def test_thinking_mode_is_rejected_outside_openai_compatible(provider_type: str) -> None:
     kwargs = (

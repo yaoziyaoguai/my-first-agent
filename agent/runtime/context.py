@@ -21,11 +21,13 @@ from agent.runtime.contracts import (
     ConversationState,
     FactKind,
     GoalBootstrap,
+    GoalStatus,
     JSONValue,
     ModelMessage,
     SideEffectClass,
     SubmitMessage,
     ToolDefinition,
+    closed_evidence_id,
 )
 from agent.runtime.ports import ContextSource, RetryableContextSourceError
 
@@ -46,7 +48,9 @@ _CONTROL_KINDS = (
 )
 
 
-def _reserved_control_schema(*, goal_present: bool = False) -> dict[str, JSONValue]:
+def _reserved_control_schema(
+    *, goal_present: bool = False, strict: bool = False
+) -> dict[str, JSONValue]:
     # 真实模型必须能从 wire schema 独立构造完整控制消息；只暴露 kind/correlation_id
     # 会让 mock parser Green、真实 Provider 却稳定产出 malformed control。
     # 每次 build 构造独立副本，避免跨 ContextPack 共享可变嵌套结构。
@@ -168,12 +172,73 @@ def _reserved_control_schema(*, goal_present: bool = False) -> dict[str, JSONVal
         if not (goal_present and kind == "goal_proposal")
     )
     lifecycle_description = (
-        " A trusted_goal already exists, so goal_proposal is unavailable; continue with "
-        "goal progress, completion, blockage, clarification, or correction controls."
+        " A trusted_goal already exists, so goal_proposal is unavailable. goal_progress "
+        "records only material progress already achieved; it is not a planning loop and "
+        "must not repeat an intended next step. If a supplied product tool can perform "
+        "the next concrete action, call that product tool now. Use completion only after "
+        "the required evidence exists; otherwise use blockage, clarification, or correction."
         if goal_present
-        else " goal_proposal is available only for the current trusted_goal_bootstrap."
+        else (
+            " goal_proposal is available only for the current trusted_goal_bootstrap. "
+            "Do not use goal_proposal for questions, explanations, or discussion; use it "
+            "only for an explicit bounded task, artifact, or file change."
+        )
     )
-    return {
+    strict_updates = {
+        **goal_delta["properties"]["updates"],
+        "required": list(goal_delta["properties"]["updates"]["properties"]),
+    }
+    strict_goal_delta = {
+        **goal_delta,
+        "properties": {
+            **goal_delta["properties"],
+            "updates": strict_updates,
+        },
+    }
+    strict_fields = {
+        "clarification_request": {
+            "question": string,
+            "boundary_code": string,
+            "missing_fields": string_array,
+            "safe_assumptions": string_array,
+        },
+        "goal_proposal": {"goal_frame": goal_frame},
+        "goal_progress": {
+            "goal_id": string,
+            "goal_revision": {"type": "integer", "minimum": 1},
+            "summary": string,
+            "next_step": string,
+        },
+        "goal_delta_proposal": {"delta": strict_goal_delta},
+        "completion_claim": {
+            "goal_id": string,
+            "goal_revision": {"type": "integer", "minimum": 1},
+            "criterion_evidence_refs": string_array,
+        },
+        "blocked_claim": {
+            "goal_id": string,
+            "goal_revision": {"type": "integer", "minimum": 1},
+            "blocker": string,
+            "safe_attempts": string_array,
+            "resume_condition": string,
+        },
+    }
+    strict_variants = []
+    for kind in allowed_kinds:
+        properties = {
+            "kind": {"type": "string", "enum": [kind]},
+            "correlation_id": string,
+            **strict_fields[kind],
+        }
+        strict_variants.append(
+            {
+                "type": "object",
+                "properties": properties,
+                "required": list(properties),
+                "additionalProperties": False,
+            }
+        )
+    schema = {
         "name": RESERVED_CONTROL_NAME,
         "description": (
             "Reserved continuity control channel; never a product tool. Required payloads: "
@@ -217,6 +282,16 @@ def _reserved_control_schema(*, goal_present: bool = False) -> dict[str, JSONVal
             "additionalProperties": False,
         },
     }
+    if strict:
+        # Strict Tool Calls 要求顶层仍为 object；payload 内的 anyOf 才表达
+        # kind-specific exact schema。普通兼容端点不携带也不为它支付上下文预算。
+        schema["strict_input_schema"] = {
+            "type": "object",
+            "properties": {"payload": {"anyOf": strict_variants}},
+            "required": ["payload"],
+            "additionalProperties": False,
+        }
+    return schema
 
 
 def _receipt_continuity_payload(receipt: ControlReceipt) -> dict[str, JSONValue]:
@@ -274,6 +349,7 @@ class KernelContextManager:
         workspace_scope_digest: str = "",
         authority_snapshot: str = "fixed-composition",
         source_item_cap: int = 8,
+        strict_control_schema: bool = False,
     ) -> None:
         if not system_policy.strip():
             raise ValueError("system_policy must not be empty")
@@ -283,6 +359,7 @@ class KernelContextManager:
         self._workspace_scope_digest = workspace_scope_digest
         self._authority_snapshot = authority_snapshot
         self._source_item_cap = source_item_cap
+        self._strict_control_schema = strict_control_schema
 
     def build(
         self,
@@ -295,9 +372,11 @@ class KernelContextManager:
 
         # 初始 no-Goal 阶段在模型可见能力层就移除 effectful callable；Runtime
         # 的 prepare 前检查仍保留为第二道 fail-closed 防线，防止模型臆造隐藏工具名。
+        # PAUSED Goal 同样只暴露只读能力：任务推进/effect 必须先显式 ResumeGoal。
+        goal_paused = state.goal is not None and state.goal.status is GoalStatus.PAUSED
         exposed_tools = (
             tools
-            if state.goal is not None
+            if state.goal is not None and not goal_paused
             else tuple(
                 tool for tool in tools if tool.side_effect is SideEffectClass.READ_ONLY
             )
@@ -317,10 +396,19 @@ class KernelContextManager:
 
         # 控制 schema 与全部回执是 mandatory pinned fixed cost：不参与淘汰，
         # 也绝不降级为 user text；放不下只能走下方的 ContextLimitError。
-        control_schema = _reserved_control_schema(goal_present=state.goal is not None)
+        # 暂停的 Goal 不是 active control surface：不下发 goal 控制 schema，
+        # strict adapter 因而不会强制 tool_choice，普通问答可以 prose 收尾。
+        control_schema = (
+            None
+            if goal_paused
+            else _reserved_control_schema(
+                goal_present=state.goal is not None,
+                strict=self._strict_control_schema,
+            )
+        )
         fixed_cost = (
             self._estimate(self._system_policy)
-            + self._estimate_json(control_schema)
+            + (0 if control_schema is None else self._estimate_json(control_schema))
             + sum(
                 self._estimate_json(_receipt_continuity_payload(receipt))
                 for receipt in state.control_receipts
@@ -520,6 +608,18 @@ class KernelContextManager:
                 criterion_id
                 for criterion_id in admitted_ids
                 if criterion_id not in evidenced_ids
+            ],
+            # evidence id 是 Runtime 内部闭合命名；真实模型不应猜测其格式。
+            # 这里仅投影 claim 应引用的 ID，oracle 仍会从 durable raw facts 独立重算，
+            # 因而知道 ID 不等于拥有完成证明。
+            "expected_completion_evidence_refs": [
+                closed_evidence_id(
+                    goal.goal_id,
+                    goal.revision,
+                    criterion.criterion_id,
+                )
+                for criterion in goal.admitted_criteria
+                if criterion.mandatory
             ],
         }
         return _ContextGroup(

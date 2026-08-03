@@ -47,6 +47,8 @@ def test_http_child_spec_preserves_explicit_thinking_mode_without_credential() -
         credential_env_name="FIRST_AGENT_API_KEY",
         timeout=30.0,
         thinking_mode="disabled",
+        request_path="/chat/completions",
+        strict_tools=True,
     )
 
     raw = _spec_to_dict(original)

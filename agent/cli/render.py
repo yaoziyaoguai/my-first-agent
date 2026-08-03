@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from agent.runtime.contracts import RunResult, RunStatus, RuntimeEvent, RuntimeEventKind
+from agent.runtime.contracts import (
+    ActiveRunStatus,
+    ApprovalRequest,
+    ConversationState,
+    RecoveryRequest,
+    RunResult,
+    RunStatus,
+    RuntimeEvent,
+    RuntimeEventKind,
+)
 
 
 class TerminalRenderer:
@@ -23,52 +32,85 @@ class TerminalRenderer:
     def render_result(self, result: RunResult) -> None:
         message = self._result_message(result)
         if message is not None:
-            self._write(_terminal_text(message, allow_newlines=True))
+            self._write(terminal_text(message, allow_newlines=True))
         for warning in result.delivery_warnings:
-            self._write(f"Warning: {_terminal_text(warning)}")
+            self._write(f"Warning: {terminal_text(warning)}")
+
+    def render_pending(self, state: ConversationState) -> None:
+        """重启时只读重放 exact durable decision；绝不暴露内部 request identity。"""
+
+        active = state.active_run
+        if active is None:
+            return
+        if (
+            active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+            and state.provider_disclosure_request is not None
+        ):
+            request = state.provider_disclosure_request
+            self._write(
+                self._disclosure_message(
+                    destination=request.canonical_destination,
+                    model=request.model,
+                    data_classes=request.data_classes,
+                )
+            )
+            return
+        if (
+            active.status is ActiveRunStatus.AWAITING_APPROVAL
+            and isinstance(active.pending_request, ApprovalRequest)
+        ):
+            request = active.pending_request
+            self._write(
+                self._approval_message(
+                    tool_name=request.tool_name or "unknown",
+                    risk=request.risk or "unknown",
+                    side_effect=request.side_effect or "unknown",
+                    preview=request.preview,
+                )
+            )
+            return
+        if (
+            active.status is ActiveRunStatus.AWAITING_RECOVERY
+            and isinstance(active.pending_request, RecoveryRequest)
+        ):
+            self._write(self._recovery_message(active.pending_request.summary))
+            return
+        if active.status is ActiveRunStatus.PAUSED_LIMIT:
+            self._write(self._result_message_for_limit())
+        elif active.status is ActiveRunStatus.PAUSED_RETRYABLE:
+            self._write(self._result_message_for_retryable())
 
     @staticmethod
     def _event_message(event: RuntimeEvent) -> str | None:
         payload = event.payload
         if event.kind is RuntimeEventKind.APPROVAL_REQUESTED:
-            request_id = _terminal_text(payload.get("request_id", ""))
-            return (
-                "Approval required\n"
-                f"tool: {_terminal_text(payload.get('tool_name', 'unknown'))}\n"
-                f"risk/effect: {_terminal_text(payload.get('risk', 'unknown'))}/"
-                f"{_terminal_text(payload.get('side_effect', 'unknown'))}\n"
-                f"preview: {_terminal_text(payload.get('preview', 'unavailable'))}\n"
-                f"request: {request_id} (short: {request_id[:12]})\n"
-                f"Use /approve {request_id} or /reject {request_id}; rejection executes nothing."
+            return TerminalRenderer._approval_message(
+                tool_name=payload.get("tool_name", "unknown"),
+                risk=payload.get("risk", "unknown"),
+                side_effect=payload.get("side_effect", "unknown"),
+                preview=payload.get("preview", "unavailable"),
             )
         if event.kind is RuntimeEventKind.RECOVERY_REQUESTED:
-            request_id = _terminal_text(payload.get("request_id", ""))
-            return (
-                "Unknown tool outcome: "
-                f"{_terminal_text(payload.get('summary', 'classification required'))}\n"
-                f"Use /resolve-success {request_id} or /resolve-failed {request_id}."
+            return TerminalRenderer._recovery_message(
+                payload.get("summary", "classification required")
             )
         if event.kind is RuntimeEventKind.DISCLOSURE_REQUESTED:
-            digest = _terminal_text(payload.get("request_digest", ""))
             classes = payload.get("data_classes", [])
-            data_summary = ", ".join(classes) if isinstance(classes, list) else classes
-            return (
-                "Remote provider disclosure required\n"
-                f"destination: {_terminal_text(payload.get('destination', 'unknown'))}\n"
-                f"model: {_terminal_text(payload.get('model', 'unknown'))}\n"
-                f"data: {_terminal_text(data_summary)}\n"
-                f"Use /ack-provider {digest} to acknowledge this exact request."
+            return TerminalRenderer._disclosure_message(
+                destination=payload.get("destination", "unknown"),
+                model=payload.get("model", "unknown"),
+                data_classes=classes,
             )
         if event.kind is RuntimeEventKind.LIMIT_REACHED:
-            return "Invocation limit reached; use /resume when the run remains resumable."
+            return TerminalRenderer._result_message_for_limit()
         if event.kind is RuntimeEventKind.WARNING:
-            return f"Warning: {_terminal_text(payload.get('message', 'runtime warning'))}"
-        if event.kind is RuntimeEventKind.MODEL_PROGRESS:
-            return "Model request in progress."
-        if event.kind is RuntimeEventKind.TOOL_REQUESTED:
-            return f"Tool requested: {_terminal_text(payload.get('tool_name', 'unknown'))}"
-        if event.kind is RuntimeEventKind.TOOL_RESULT:
-            return f"Tool result recorded: {_terminal_text(payload.get('tool_call_id', 'unknown'))}"
+            return f"Warning: {terminal_text(payload.get('message', 'runtime warning'))}"
+        if event.kind in {
+            RuntimeEventKind.MODEL_PROGRESS,
+            RuntimeEventKind.TOOL_REQUESTED,
+            RuntimeEventKind.TOOL_RESULT,
+        }:
+            return None
         return None
 
     @staticmethod
@@ -84,19 +126,63 @@ class TerminalRenderer:
         if result.status is RunStatus.CANCELLED:
             return "Run cancelled."
         if result.status is RunStatus.LIMIT_REACHED:
-            return "Run paused at an invocation limit. Use /resume or /cancel."
+            return TerminalRenderer._result_message_for_limit()
         if result.status is RunStatus.CONVERSATION_LIMIT_REACHED:
             return "Conversation capacity reached. Start a new conversation."
         if result.status is RunStatus.FAILED_RETRYABLE:
-            return "Provider failed transiently. Use /resume or /cancel."
+            return TerminalRenderer._result_message_for_retryable()
         if result.status is RunStatus.FAILED_FATAL:
             return f"Run failed: {result.error_code or 'fatal_error'}"
         if result.status is RunStatus.CONFLICT:
             return "State conflict: restart or reload this CLI before continuing."
         return None
 
+    @staticmethod
+    def _approval_message(
+        *, tool_name: object, risk: object, side_effect: object, preview: object
+    ) -> str:
+        return (
+            "Approval required\n"
+            f"tool: {terminal_text(tool_name)}\n"
+            f"risk/effect: {terminal_text(risk)}/{terminal_text(side_effect)}\n"
+            f"preview: {terminal_text(preview)}\n"
+            "Execute this operation? [y/N]"
+        )
 
-def _terminal_text(value: object, *, allow_newlines: bool = False) -> str:
+    @staticmethod
+    def _recovery_message(summary: object) -> str:
+        return (
+            f"Unknown tool outcome: {terminal_text(summary)}\n"
+            "Reply with 'success', 'failed', or 'stop'."
+        )
+
+    @staticmethod
+    def _disclosure_message(
+        *, destination: object, model: object, data_classes: object
+    ) -> str:
+        data_summary = (
+            ", ".join(str(item) for item in data_classes)
+            if isinstance(data_classes, (list, tuple))
+            else data_classes
+        )
+        return (
+            "Remote provider disclosure required\n"
+            f"destination: {terminal_text(destination)}\n"
+            f"model: {terminal_text(model)}\n"
+            f"data: {terminal_text(data_summary)}\n"
+            "Allow this information to be sent? [y/N]"
+        )
+
+    @staticmethod
+    def _result_message_for_limit() -> str:
+        return "Task paused at a safe execution limit. Run /resume to continue or /cancel."
+
+    @staticmethod
+    def _result_message_for_retryable() -> str:
+        return "The provider failed transiently. Run /resume to retry or /cancel."
+
+
+def terminal_text(value: object, *, allow_newlines: bool = False) -> str:
     text = str(value)
     return "".join(
         character

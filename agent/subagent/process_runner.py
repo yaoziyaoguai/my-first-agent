@@ -242,6 +242,8 @@ def _spec_to_dict(spec: ChildProviderSpec) -> dict:
         "credential_env_name": spec.credential_env_name,
         "timeout": spec.timeout,
         "thinking_mode": spec.thinking_mode,
+        "request_path": spec.request_path,
+        "strict_tools": spec.strict_tools,
     }
 
 

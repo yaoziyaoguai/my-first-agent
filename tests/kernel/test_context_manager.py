@@ -17,7 +17,7 @@ from agent.runtime.contracts import (
     canonical_json_digest,
 )
 
-CONTROL_SCHEMA_BUDGET = 970
+CONTROL_SCHEMA_BUDGET = 999
 
 
 def _fact(fact_id: str, kind: FactKind, **content):

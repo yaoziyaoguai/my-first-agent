@@ -168,6 +168,7 @@ def _validate_trusted_control_context(
         "proposed_criteria",
         "admitted_criteria",
         "evidence_gaps",
+        "expected_completion_evidence_refs",
     }
     if set(block) != required:
         raise _fail("malformed_context_block")
@@ -192,9 +193,15 @@ def _validate_trusted_control_context(
         "proposed_criteria",
         "admitted_criteria",
         "evidence_gaps",
+        "expected_completion_evidence_refs",
     ):
         if not isinstance(block.get(key), list):
             raise _fail("malformed_context_block")
+    if any(
+        not isinstance(item, str) or not item
+        for item in block["expected_completion_evidence_refs"]
+    ):
+        raise _fail("malformed_context_block")
     for key in ("progress_summary", "next_step"):
         value = block.get(key)
         if value is not None and not isinstance(value, str):
@@ -206,7 +213,7 @@ def _canonical_json(value: object) -> str:
 
 
 def _control_receipt_projection(receipt: ControlReceipt) -> dict[str, Any]:
-    # closed projection:只回放 ControlReceipt 的持久字段,summary/next_step
+    # closed projection:只携带 ControlReceipt 的持久字段,summary/next_step
     # 等易变叙述永不进入 wire,保证回执可由 durable tuple 逐字节重建。
     return {
         "kind": "control_receipt",
@@ -220,14 +227,23 @@ def _control_receipt_projection(receipt: ControlReceipt) -> dict[str, Any]:
     }
 
 
-def _control_receipt_result_json(receipt: ControlReceipt) -> str:
-    return _canonical_json(
-        {
-            "accepted": True,
-            "correlation_id": receipt.correlation_id,
-            "receipt_digest": receipt.receipt_digest,
-        }
+_TRUSTED_RECEIPT_PREFIX = "FIRST_AGENT_TRUSTED_CONTROL_RECEIPT"
+
+
+def trusted_system_projection(context: ContextPack) -> str:
+    """把 context.system 与已受理回执的 canonical 行按序拼成 trusted system 文本。
+
+    回执是 runtime 生成的封闭 durable tuple,只能以 SYSTEM 权威下发;一旦回放成
+    历史 assistant tool call/result 对,严格 Tool Calls 模型会模仿历史调用形状,
+    把回执当成新的可调用工具。两种协议适配器必须共用这一投影。
+    """
+
+    parts = [context.system] if context.system else []
+    parts.extend(
+        _TRUSTED_RECEIPT_PREFIX + " " + _canonical_json(_control_receipt_projection(receipt))
+        for receipt in context.control_receipts
     )
+    return "\n\n".join(parts)
 
 
 def _policy_text(block: dict[str, Any]) -> str:
@@ -279,35 +295,6 @@ def context_to_anthropic_messages(context: ContextPack) -> list[dict[str, Any]]:
             else:
                 content.append({"type": "text", "text": _policy_text(block)})
         messages.append({"role": message.role, "content": content})
-
-    # 已受理控制回执按 durable tuple 顺序回放为相邻原生原子对,
-    # 独立成对追加,绝不摊平进产品消息文本。
-    for receipt in context.control_receipts:
-        messages.append(
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": receipt.correlation_id,
-                        "name": RESERVED_CONTROL_NAME,
-                        "input": _control_receipt_projection(receipt),
-                    }
-                ],
-            }
-        )
-        messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": receipt.correlation_id,
-                        "content": _control_receipt_result_json(receipt),
-                    }
-                ],
-            }
-        )
     return messages
 
 
@@ -335,8 +322,9 @@ def context_tools_to_anthropic(context: ContextPack) -> list[dict[str, Any]]:
 def context_to_openai_messages(context: ContextPack) -> list[dict[str, Any]]:
     validate_context_pack(context)
     messages: list[dict[str, Any]] = []
-    if context.system:
-        messages.append({"role": "system", "content": context.system})
+    system_text = trusted_system_projection(context)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
 
     for message in context.messages:
         text_parts: list[str] = []
@@ -390,58 +378,40 @@ def context_to_openai_messages(context: ContextPack) -> list[dict[str, Any]]:
         if tool_calls:
             projected["tool_calls"] = tool_calls
         messages.append(projected)
-
-    # 已受理控制回执按 durable tuple 顺序回放为相邻原生原子对,
-    # 独立成对追加,绝不出现在普通 user/system 文本里。
-    for receipt in context.control_receipts:
-        messages.append(
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": receipt.correlation_id,
-                        "type": "function",
-                        "function": {
-                            "name": RESERVED_CONTROL_NAME,
-                            "arguments": _canonical_json(_control_receipt_projection(receipt)),
-                        },
-                    }
-                ],
-            }
-        )
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": receipt.correlation_id,
-                "content": _control_receipt_result_json(receipt),
-            }
-        )
     return messages
 
 
-def context_tools_to_openai(context: ContextPack) -> list[dict[str, Any]]:
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.input_schema,
-            },
+def context_tools_to_openai(
+    context: ContextPack, *, strict: bool = False
+) -> list[dict[str, Any]]:
+    tools = []
+    for tool in context.tools:
+        function = {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.input_schema,
         }
-        for tool in context.tools
-    ]
+        if strict:
+            function["strict"] = True
+        tools.append({"type": "function", "function": function})
     # 控制 schema 只在 wire 层并入 tools,ContextPack.tools 保持纯产品面。
     if context.control_schema is not None:
+        parameters = context.control_schema["input_schema"]
+        if strict:
+            parameters = context.control_schema.get("strict_input_schema")
+            if not isinstance(parameters, dict):
+                raise _fail("missing_strict_control_schema")
+        function = {
+            "name": context.control_schema["name"],
+            "description": context.control_schema["description"],
+            "parameters": parameters,
+        }
+        if strict:
+            function["strict"] = True
         tools.append(
             {
                 "type": "function",
-                "function": {
-                    "name": context.control_schema["name"],
-                    "description": context.control_schema["description"],
-                    "parameters": context.control_schema["input_schema"],
-                },
+                "function": function,
             }
         )
     return tools
@@ -654,8 +624,8 @@ def _decode_blocked_claim(arguments: dict[str, Any]) -> BlockedClaim:
 
 _COMMON_CONTROL_KEYS = frozenset({"kind", "correlation_id"})
 
-# 闭合的六种模型上报控制变体。control_receipt 只存在于上行回放,模型侧
-# 发出即违例;不在表内的 kind(含 control_receipt)一律拒收。
+# 闭合的六种模型上报控制变体。control_receipt 只存在于 trusted system 投影,
+# 模型侧发出即违例;不在表内的 kind(含 control_receipt)一律拒收。
 _CONTROL_DECODERS: dict[
     str, tuple[frozenset[str], Callable[[dict[str, Any]], ModelControlBlock]]
 ] = {
@@ -688,6 +658,8 @@ def _decode_reserved_control(arguments: dict[str, Any]) -> ModelControlBlock:
     ValueError、TypeError、KeyError 收敛为 ProviderProtocolError,不向上泄漏。
     """
 
+    if set(arguments) == {"payload"}:
+        arguments = _control_json_object(arguments["payload"])
     kind = arguments.get("kind")
     entry = _CONTROL_DECODERS.get(kind) if isinstance(kind, str) else None
     if entry is None:
@@ -869,5 +841,6 @@ __all__ = [
     "latest_user_text",
     "normalize_anthropic_response",
     "normalize_openai_response",
+    "trusted_system_projection",
     "validate_context_pack",
 ]

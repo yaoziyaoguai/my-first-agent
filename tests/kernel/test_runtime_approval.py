@@ -3,8 +3,8 @@ from __future__ import annotations
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BlockedClaim,
     ModelResponse,
-    ModelTextBlock,
     ModelToolCall,
     OutputPolicy,
     ResolveApproval,
@@ -46,7 +46,17 @@ def test_approval_pause_is_durable_and_exact_resume_executes_once() -> None:
     )
     provider = ScriptedProvider(
         ModelResponse((ModelToolCall("call-1", "write_fixture", {"content": "hello"}),)),
-        ModelResponse((ModelTextBlock("done"),)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="approval-fixture-blocked",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="done",
+                safe_attempts=("executed the approved fixture write",),
+                resume_condition="provide a closed completion oracle",
+            ),
+        ),
     )
     store = InMemoryCheckpointStore(conversation_with_active_goal())
     sink = CollectingSink()

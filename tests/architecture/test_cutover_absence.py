@@ -37,6 +37,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/provider/fake_provider.py",
         "agent/provider/normalize.py",
         "agent/provider/openai_http.py",
+        "agent/provider/profile.py",
         "agent/provider/protocol.py",
         "agent/runtime/__init__.py",
         "agent/runtime/checkpoint.py",

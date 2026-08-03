@@ -367,6 +367,7 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
         workspace_scope_digest="workspace-schema",
         authority_snapshot="authority-schema",
+        strict_control_schema=True,
     ).build(
         state,
         SubmitMessage(
@@ -385,6 +386,9 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert context.goal_bootstrap.workspace_identity_digest == "workspace-schema"
     assert context.goal_bootstrap.authority_snapshot == "authority-schema"
     assert "goal_bootstrap" in context.data_classes
+    description = context.control_schema["description"]
+    assert "Do not use goal_proposal for questions, explanations, or discussion" in description
+    assert "explicit bounded task, artifact, or file change" in description
     schema = context.control_schema["input_schema"]
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
@@ -445,6 +449,96 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert "admitted_criteria" not in delta_updates["properties"]
     assert "authority_snapshot" not in delta_updates["properties"]
 
+    strict_schema = context.control_schema["strict_input_schema"]
+    assert strict_schema["type"] == "object"
+    assert strict_schema["required"] == ["payload"]
+    assert strict_schema["additionalProperties"] is False
+    variants = strict_schema["properties"]["payload"]["anyOf"]
+    assert {
+        variant["properties"]["kind"]["enum"][0] for variant in variants
+    } == set(schema["properties"]["kind"]["enum"])
+
+    def assert_strict_objects(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "object":
+                properties = value.get("properties", {})
+                assert set(value.get("required", [])) == set(properties)
+                assert value.get("additionalProperties") is False
+            for child in value.values():
+                assert_strict_objects(child)
+        elif isinstance(value, list):
+            for child in value:
+                assert_strict_objects(child)
+
+    assert_strict_objects(strict_schema)
+
+
+def test_openai_strict_control_wire_uses_schema_and_unwraps_exact_payload() -> None:
+    state = ConversationState(
+        conversation_id="strict-control-conversation",
+        facts=(
+            ConversationFact("action:1:user", FactKind.USER_MESSAGE, {"text": "continue"}),
+        ),
+        goal=_EXPECTED_GOAL_FRAME,
+    )
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        workspace_scope_digest="workspace-schema",
+        authority_snapshot="authority-schema",
+        strict_control_schema=True,
+    ).build(
+        state,
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="strict-control-run",
+            message="continue",
+        ),
+        _context().tools,
+    )
+    context = replace(context, control_receipts=(_control_receipt(),))
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json=_openai_tool_call_payload(
+                RESERVED_CONTROL_NAME,
+                {"payload": dict(_GOAL_PROGRESS_ARGUMENTS)},
+            ),
+        )
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid/beta",
+        request_path="/chat/completions",
+        credential="fixture-secret",
+        strict_tools=True,
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = OpenAICompatibleProvider(config=config, http_client=client).generate(context)
+
+    assert response.control == _EXPECTED_CONTROL
+    body = requests[0]
+    assert body["tool_choice"] == "required"
+    functions = {tool["function"]["name"]: tool["function"] for tool in body["tools"]}
+    assert all(function["strict"] is True for function in functions.values())
+    assert functions[RESERVED_CONTROL_NAME]["parameters"] == context.control_schema[
+        "strict_input_schema"
+    ]
+    assert set(functions) == {"read_file", RESERVED_CONTROL_NAME}
+    # strict 模式下回执同样只进 trusted system,不得回放成历史 tool_calls,
+    # 否则严格 Tool Calls 模型会模仿历史调用并把回执当成新的可调用工具。
+    system_message = body["messages"][0]
+    assert system_message["role"] == "system"
+    assert _trusted_receipt_line(_control_receipt()) in system_message["content"]
+    assert not any(message.get("tool_calls") for message in body["messages"])
+    assert all(message.get("role") != "tool" for message in body["messages"])
+
 
 def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> None:
     state = ConversationState(
@@ -486,11 +580,18 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
         "blocked_claim",
     }
     assert "goal_proposal is unavailable" in context.control_schema["description"]
+    description = context.control_schema["description"]
+    assert "goal_progress records only material progress already achieved" in description
+    assert "call that product tool now" in context.control_schema["description"]
 
 
-# U3C-R1B2B:控制回执的 Anthropic 上行 wire 合同。已受理回执必须回放为
-# 相邻的原生 tool_use/tool_result 原子对,控制 schema 只在 wire 层并入 tools,
-# 不允许把回执摊平成普通文本块或单独 system/user text。
+# U3C-R1B2B(013 修订):控制回执的上行 wire 合同。已受理回执是 runtime 生成的
+# durable tuple,必须投影进 trusted SYSTEM 上下文(稳定前缀 + canonical JSON,
+# 与 context.system 保序拼接),绝不回放成历史 assistant tool call/result 对——
+# 严格 Tool Calls 模型(如 DeepSeek)会模仿历史调用形状,把回执当成新的可调用工具。
+_TRUSTED_RECEIPT_PREFIX = "FIRST_AGENT_TRUSTED_CONTROL_RECEIPT"
+
+
 def _content_blocks(message: dict[str, object]) -> list[dict[str, object]]:
     content = message.get("content")
     if not isinstance(content, list):
@@ -498,203 +599,144 @@ def _content_blocks(message: dict[str, object]) -> list[dict[str, object]]:
     return [block for block in content if isinstance(block, dict)]
 
 
-def test_anthropic_control_receipt_round_trips_as_native_atomic_pair() -> None:
-    requests: list[dict[str, object]] = []
-    responses = (
-        _anthropic_tool_call_payload(RESERVED_CONTROL_NAME, dict(_GOAL_PROGRESS_ARGUMENTS)),
-        {
-            "content": [{"type": "text", "text": "continuing after receipt"}],
-            "stop_reason": "end_turn",
-            "usage": {"input_tokens": 13, "output_tokens": 7},
-        },
+def _trusted_receipt_line(receipt: ControlReceipt) -> str:
+    # closed projection:恰好 kind + ControlReceipt 七个持久字段,
+    # 不携带 summary/next_step 等易变叙述,可由 durable tuple 逐字节重建。
+    return (
+        _TRUSTED_RECEIPT_PREFIX
+        + " "
+        + json.dumps(
+            {
+                "kind": "control_receipt",
+                "correlation_id": receipt.correlation_id,
+                "control_kind": receipt.control_kind,
+                "goal_id": receipt.goal_id,
+                "goal_revision": receipt.goal_revision,
+                "accepted_state_revision": receipt.accepted_state_revision,
+                "payload_digest": receipt.payload_digest,
+                "receipt_digest": receipt.receipt_digest,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, json=responses[len(requests) - 1])
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        provider = AnthropicCompatibleProvider(
-            config=_config("anthropic_compatible"), http_client=client
-        )
-        first_response = provider.generate(_context())
-
-        receipt = _control_receipt()
-        second_context = replace(
-            _context(),
-            control_schema=_control_schema(),
-            control_receipts=(receipt,),
-        )
-        second_response = provider.generate(second_context)
-
-    assert len(requests) == 2
-    # 控制面不污染产品工具面:ContextPack.tools 仍只有产品工具,
-    # wire 层 tools 恰好多出保留控制名。
-    assert tuple(tool.name for tool in second_context.tools) == ("read_file",)
-    second_request = requests[1]
-    assert {tool["name"] for tool in second_request["tools"]} == {
-        "read_file",
-        RESERVED_CONTROL_NAME,
-    }
-
-    messages = second_request["messages"]
-    reserved_indexes = [
-        index
-        for index, message in enumerate(messages)
-        if message.get("role") == "assistant"
-        and any(
-            block.get("type") == "tool_use" and block.get("name") == RESERVED_CONTROL_NAME
-            for block in _content_blocks(message)
-        )
-    ]
-    assert len(reserved_indexes) == 1
-    assistant_index = reserved_indexes[0]
-
-    reserved_uses = [
-        block
-        for block in _content_blocks(messages[assistant_index])
-        if block.get("type") == "tool_use" and block.get("name") == RESERVED_CONTROL_NAME
-    ]
-    assert len(reserved_uses) == 1
-    tool_use = reserved_uses[0]
-    assert tool_use["id"] == receipt.correlation_id
-    # closed projection:仅由 ControlReceipt 的七个持久字段可重建,
-    # 不携带 summary/next_step 等易变叙述。
-    assert tool_use["input"] == {
-        "kind": "control_receipt",
-        "correlation_id": receipt.correlation_id,
-        "control_kind": receipt.control_kind,
-        "goal_id": receipt.goal_id,
-        "goal_revision": receipt.goal_revision,
-        "accepted_state_revision": receipt.accepted_state_revision,
-        "payload_digest": receipt.payload_digest,
-        "receipt_digest": receipt.receipt_digest,
-    }
-
-    # 原子对:回执的 tool_result 必须紧邻其 tool_use,由下一条 user message 携带。
-    assert assistant_index + 1 < len(messages)
-    follower = messages[assistant_index + 1]
-    assert follower.get("role") == "user"
-    tool_results = [
-        block for block in _content_blocks(follower) if block.get("type") == "tool_result"
-    ]
-    assert len(tool_results) == 1
-    tool_result = tool_results[0]
-    assert tool_result["tool_use_id"] == tool_use["id"]
-    result_payload = json.loads(tool_result["content"])
-    assert result_payload["accepted"] is True
-    assert result_payload["correlation_id"] == receipt.correlation_id
-    assert result_payload["receipt_digest"] == receipt.receipt_digest
-
-    # parser 断言后置:先暴露 seam/wire Red,不被第一轮归一化 Red 掩盖。
-    assert first_response.control == _EXPECTED_CONTROL
-    assert second_response.control is None
-    assert ModelTextBlock("continuing after receipt") in second_response.blocks
-
-
-# U3C-R1B2C:控制回执的 OpenAI 上行 wire 合同,与 Anthropic 版本语义对称。
-# 已受理回执必须回放为相邻的原生 assistant tool_calls / tool message 原子对,
-# 控制 schema 只在 wire 层并入 tools,不允许摊平进普通 user/system 文本。
-def test_openai_control_receipt_round_trips_as_native_atomic_pair() -> None:
-    requests: list[dict[str, object]] = []
-    responses = (
-        _openai_tool_call_payload(RESERVED_CONTROL_NAME, dict(_GOAL_PROGRESS_ARGUMENTS)),
-        {
-            "choices": [
-                {
-                    "message": {"role": "assistant", "content": "continuing after receipt"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 13, "completion_tokens": 7},
-        },
+def _second_control_receipt() -> ControlReceipt:
+    return ControlReceipt.create(
+        correlation_id="ctl-002",
+        control_kind="completion_claim",
+        goal_id="goal-1",
+        goal_revision=2,
+        accepted_state_revision=9,
+        payload_digest=canonical_json_digest({"criterion_evidence_refs": ["evid-1"]}),
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, json=responses[len(requests) - 1])
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        provider = OpenAICompatibleProvider(config=_config("openai_compatible"), http_client=client)
-        first_response = provider.generate(_context())
-
-        receipt = _control_receipt()
-        second_context = replace(
-            _context(),
-            control_schema=_control_schema(),
-            control_receipts=(receipt,),
-        )
-        second_response = provider.generate(second_context)
-
-    assert len(requests) == 2
-    # 控制面不污染产品工具面:ContextPack.tools 仍只有产品工具,
-    # wire 层 tools 恰好多出保留控制名。
-    assert tuple(tool.name for tool in second_context.tools) == ("read_file",)
-    second_request = requests[1]
-    assert {tool["function"]["name"] for tool in second_request["tools"]} == {
-        "read_file",
-        RESERVED_CONTROL_NAME,
-    }
-
-    messages = second_request["messages"]
-    reserved_indexes = [
-        index
-        for index, message in enumerate(messages)
-        if message.get("role") == "assistant"
-        and any(
-            call.get("function", {}).get("name") == RESERVED_CONTROL_NAME
-            for call in message.get("tool_calls") or []
-            if isinstance(call, dict)
-        )
-    ]
-    assert len(reserved_indexes) == 1
-    assistant_index = reserved_indexes[0]
-
-    reserved_calls = [
-        call
-        for call in messages[assistant_index].get("tool_calls") or []
-        if isinstance(call, dict) and call.get("function", {}).get("name") == RESERVED_CONTROL_NAME
-    ]
-    assert len(reserved_calls) == 1
-    tool_call = reserved_calls[0]
-    assert tool_call["id"] == receipt.correlation_id
-    arguments = json.loads(tool_call["function"]["arguments"])
-    # closed projection:仅由 ControlReceipt 的七个持久字段可重建,
-    # 不携带 summary/next_step 等易变叙述。
-    assert arguments == {
-        "kind": "control_receipt",
-        "correlation_id": receipt.correlation_id,
-        "control_kind": receipt.control_kind,
-        "goal_id": receipt.goal_id,
-        "goal_revision": receipt.goal_revision,
-        "accepted_state_revision": receipt.accepted_state_revision,
-        "payload_digest": receipt.payload_digest,
-        "receipt_digest": receipt.receipt_digest,
-    }
-
-    # 原子对:回执结果必须紧邻其 assistant 调用,由下一条 tool message 携带。
-    assert assistant_index + 1 < len(messages)
-    follower = messages[assistant_index + 1]
-    assert follower.get("role") == "tool"
-    assert follower.get("tool_call_id") == tool_call["id"]
-    result_payload = json.loads(follower["content"])
-    assert result_payload["accepted"] is True
-    assert result_payload["correlation_id"] == receipt.correlation_id
-    assert result_payload["receipt_digest"] == receipt.receipt_digest
-
-    # 回执只允许存在于该原生 assistant-call/tool-result 对,
-    # 不得摊平进普通 user/system 文本。
+def _assert_no_receipt_replay_in_messages(
+    messages: list[dict[str, object]], receipts: tuple[ControlReceipt, ...]
+) -> None:
+    # 历史消息里不允许出现任何形态的回执 replay:没有 tool 角色消息、
+    # 没有 assistant tool_calls/tool_use/tool_result,也没有摊平的回执文本。
     for message in messages:
-        if message.get("role") not in {"user", "system"}:
-            continue
-        content_text = json.dumps(message.get("content"))
-        assert receipt.correlation_id not in content_text
-        assert receipt.receipt_digest not in content_text
+        assert message.get("role") != "tool"
+        assert not message.get("tool_calls")
+        for block in _content_blocks(message):
+            assert block.get("type") not in {"tool_use", "tool_result"}
+        text = json.dumps(message, sort_keys=True)
+        assert _TRUSTED_RECEIPT_PREFIX not in text
+        for receipt in receipts:
+            assert receipt.receipt_digest not in text
+            assert receipt.correlation_id not in text
 
-    # parser 断言后置:先暴露 seam/wire Red,不被第一轮归一化 Red 掩盖。
-    assert second_response.control is None
-    assert ModelTextBlock("continuing after receipt") in second_response.blocks
-    assert first_response.control == _EXPECTED_CONTROL
+
+def test_anthropic_control_receipts_project_into_trusted_system_context() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "continuing after receipt"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 13, "output_tokens": 7},
+            },
+        )
+
+    receipts = (_control_receipt(), _second_control_receipt())
+    context = replace(
+        _context(),
+        control_schema=_control_schema(),
+        control_receipts=receipts,
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(
+            config=_config("anthropic_compatible"), http_client=client
+        ).generate(context)
+
+    assert len(requests) == 1
+    body = requests[0]
+    # trusted 投影只进 system:context.system 在前,回执行按 durable 顺序在后。
+    assert body["system"] == "\n\n".join(
+        [context.system, *(_trusted_receipt_line(receipt) for receipt in receipts)]
+    )
+    # 当前可调用工具面不变:产品工具 + 保留控制名,永远没有可模仿的回执名。
+    assert {tool["name"] for tool in body["tools"]} == {"read_file", RESERVED_CONTROL_NAME}
+    _assert_no_receipt_replay_in_messages(body["messages"], receipts)
+    assert response.control is None
+    assert ModelTextBlock("continuing after receipt") in response.blocks
+
+
+# U3C-R1B2C(013 修订):控制回执的 OpenAI 上行 wire 合同,与 Anthropic 版本
+# 语义对称。回执投影必须由第一条 system message 携带,消息历史不得包含
+# 任何 assistant tool_calls / tool message 形态的回执 replay。
+def test_openai_control_receipts_project_into_trusted_system_context() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "continuing after receipt"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 13, "completion_tokens": 7},
+            },
+        )
+
+    receipts = (_control_receipt(), _second_control_receipt())
+    context = replace(
+        _context(),
+        control_schema=_control_schema(),
+        control_receipts=receipts,
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = OpenAICompatibleProvider(
+            config=_config("openai_compatible"), http_client=client
+        ).generate(context)
+
+    assert len(requests) == 1
+    body = requests[0]
+    messages = body["messages"]
+    # trusted 投影只进第一条 system message,与 context.system 保序拼接。
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "\n\n".join(
+        [context.system, *(_trusted_receipt_line(receipt) for receipt in receipts)]
+    )
+    # 当前可调用工具面不变:产品工具 + 保留控制名,永远没有可模仿的回执名。
+    assert {tool["function"]["name"] for tool in body["tools"]} == {
+        "read_file",
+        RESERVED_CONTROL_NAME,
+    }
+    _assert_no_receipt_replay_in_messages(messages[1:], receipts)
+    assert response.control is None
+    assert ModelTextBlock("continuing after receipt") in response.blocks
 
 
 # U3C-G2T1:六个合法 control 变体的归一化合同。wire 形状规则:kind 与

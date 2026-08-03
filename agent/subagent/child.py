@@ -32,7 +32,8 @@ def main(argv: list[str] | None = None) -> int:
         from agent.subagent.runtime_factory import compose_child_prompt, derive_child_identity
 
         config = _load_config(config_path)
-        provider = build_child_provider(_spec_from_config(config["spec"]))
+        spec = _spec_from_config(config["spec"])
+        provider = build_child_provider(spec)
         profile = _profile_from_config(config["profile"])
         objective = str(config["objective"])
         handoff = str(config["handoff"])
@@ -43,7 +44,12 @@ def main(argv: list[str] | None = None) -> int:
     from agent.runtime.contracts import SubmitMessage
 
     child_conversation_id, child_run_id = derive_child_identity(parent_key)
-    runtime, store = build_child_runtime(provider, profile, conversation_id=child_conversation_id)
+    runtime, store = build_child_runtime(
+        provider,
+        profile,
+        conversation_id=child_conversation_id,
+        strict_control_schema=spec.strict_tools,
+    )
     action = SubmitMessage(
         conversation_id=child_conversation_id,
         action_seq=1,
@@ -133,6 +139,8 @@ def _spec_from_config(raw: dict):
         credential_env_name=raw.get("credential_env_name"),
         timeout=raw.get("timeout"),
         thinking_mode=raw.get("thinking_mode"),
+        request_path=raw.get("request_path"),
+        strict_tools=raw.get("strict_tools", False) is True,
     )
 
 

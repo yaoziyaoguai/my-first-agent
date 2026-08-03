@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import asdict, replace
 
 from agent.runtime.contracts import (
@@ -171,6 +170,10 @@ def record_goal_progress(
         raise GoalRevisionConflictError("goal revision mismatch")
     if goal.status in {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}:
         raise ValueError("terminal goal cannot accept progress")
+    if goal.status is GoalStatus.PAUSED:
+        # 进度会把 Goal 翻回 EXECUTING;暂停状态只能被显式 ResumeGoal 解除,
+        # 不允许模型上报的 progress 静默恢复任务。
+        raise ValueError("paused goal requires an explicit resume before progress")
     if any(
         receipt.correlation_id == progress.correlation_id
         for receipt in state.control_receipts
@@ -975,7 +978,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 approved_request_ids=(*active.approved_request_ids, pending.request_id),
             )
             updated_state = replace(state, active_run=updated)
-            return _admit_approved_write_criterion(
+            return _admit_approved_file_criterion(
                 updated_state,
                 action=action,
                 active=active,
@@ -1072,21 +1075,26 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
     raise TypeError(f"unsupported action: {type(action).__name__}")
 
 
-def _admit_approved_write_criterion(
+def _admit_approved_file_criterion(
     state: ConversationState,
     *,
     action: ResolveApproval,
     active: ActiveRun,
 ) -> ConversationState:
-    """审批 exact write 时由 Runtime 铸造 deterministic read-back criterion。"""
+    """审批 exact 文件写入时由 Runtime 铸造 deterministic read-back criterion。"""
 
     goal = state.goal
     if goal is None or active.batch_cursor >= len(active.tool_calls):
         return state
     call = active.tool_calls[active.batch_cursor]
+    pending = active.pending_request
     path = call.arguments.get("path")
-    content = call.arguments.get("content")
-    if call.name != "write_file" or not isinstance(path, str) or not isinstance(content, str):
+    if (
+        call.name not in {"write_file", "edit_file"}
+        or not isinstance(path, str)
+        or not isinstance(pending, ApprovalRequest)
+        or pending.new_content_digest is None
+    ):
         return state
     criterion_id = (
         goal.proposed_criteria[0].criterion_id
@@ -1111,7 +1119,7 @@ def _admit_approved_write_criterion(
     )
     predicate = {
         "path": path,
-        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "sha256": pending.new_content_digest,
     }
     binding = CriterionAdmissionBinding.create(
         binding_id=f"criterion-admission:approval:{action.action_seq}:{call.tool_call_id}",

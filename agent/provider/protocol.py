@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agent.runtime.ports import (
+    InvalidProviderResponseError,
     ModelProvider,
 )
 from agent.runtime.ports import (
@@ -41,7 +42,7 @@ class ProviderAuthError(ProviderFatalError):
     code = "provider_auth_error"
 
 
-class ProviderProtocolError(ProviderFatalError):
+class ProviderProtocolError(ProviderFatalError, InvalidProviderResponseError):
     code = "provider_protocol_error"
 
     def __init__(self, reason: str) -> None:

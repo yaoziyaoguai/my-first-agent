@@ -1,8 +1,8 @@
 # my-first-agent
 
-一个刻意保持很小的本地 Agent Runtime Kernel。
+一个从当前目录开始工作的 local-first 日常 Agent。
 
-它不是“已经具备所有能力的通用 Agent”，而是后续能力可以安全接入的基础：一个模型循环、一个上下文管理器、一个受治理的工具执行路径，以及可恢复的状态机。
+它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机；当前不宣称拥有 shell、网页、浏览器或整机控制能力。
 
 ## 当前能力
 
@@ -27,19 +27,30 @@ Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的
 
 ## 快速开始
 
+先把凭据放进你选择的环境变量，再一次性保存不含秘密的 Provider profile：
+
 ```bash
 python -m pip install -e .
-first-agent --provider fake
+export FIRST_AGENT_API_KEY='set-in-your-shell'
+first-agent setup \
+  --provider openai_compatible \
+  --model your-model \
+  --base-url https://provider.example
+
+cd /path/to/any-empty-or-existing-directory
+first-agent
 ```
+
+setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
+strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复
+Provider flags，也不会静默 fallback 到 FakeProvider。
 
 默认启动即持久化：状态保存在 workspace 之外的 owner-only 产品目录
 `~/.local/state/my-first-agent/v1`（目录 `0700`、文件 `0600`），按 workspace identity
 确定性选择会话。重启后唯一安全候选自动恢复；多个候选要求显式选择，workspace 被替换或
-存在结果未知的 effect 时准确停下，不自动调用 Provider/Tool。FakeProvider 会原样返回
-最近一条用户文本，适合验证安装与 CLI。
+存在结果未知的 effect 时准确停下，不自动调用 Provider/Tool。
 
-需要隔离状态（例如测试）时用显式 `--state-root` 覆盖默认根目录；它同样必须位于
-workspace 之外：
+开发或测试时仍可显式选择 FakeProvider；它不会成为保存的日常 profile：
 
 ```bash
 first-agent \
@@ -48,10 +59,15 @@ first-agent \
   --provider fake
 ```
 
+需要隔离真实配置时，在 setup 和日常启动两边使用同一个显式 `--state-root`；它必须位于 workspace
+之外。
+
 旧的 `--state` / `--resume` 手动 checkpoint 工作流已按 012 合同移除；旧 v1 state 文件
 不再被加载（strict schema v2 fail closed，不做静默迁移）。
 
-保留命令只有：
+日常安全决定直接在当前提示下回答：Provider disclosure 和文件审批用 `yes/no`（也支持
+`y/n/是/否/允许/不允许`）；unknown outcome 必须明确回答 `success`、`failed` 或 `stop`。用户无需复制
+digest/request ID。以下 slash command 只保留为高级精确接口：
 
 - `/ack-provider DIGEST`
 - `/approve ID`、`/reject ID`
@@ -71,7 +87,7 @@ evidence，才表示 Goal 已验收。模型说“done”不会改变 Goal 状�
 
 ## HTTP Provider
 
-凭据由组合根从指定环境变量读取，不读取 `.env`，也不会进入 checkpoint、事件或模型上下文：
+凭据由组合根从 profile 指定的环境变量读取，不读取 `.env`，也不会进入 profile、checkpoint、事件或模型上下文。日常推荐使用上面的 setup；完整显式参数仍可用于临时覆盖：
 
 ```bash
 export FIRST_AGENT_API_KEY='...'
@@ -81,22 +97,34 @@ first-agent \
   --base-url https://provider.example
 ```
 
-DeepSeek 官方 OpenAI-compatible 入口使用显式非思考模式，避免把 provider-specific opaque
-`reasoning_content` 引入 checkpoint/replay 合同：
+DeepSeek 官方 OpenAI-compatible 入口推荐使用 strict Tool Calls（beta）配置：strict 模式在合同上
+保证工具参数与 schema 一致（普通模式没有这一承诺），同时用显式非思考模式避免把
+provider-specific opaque `reasoning_content` 引入 checkpoint/replay 合同（官方文档：
+[Tool Calls](https://api-docs.deepseek.com/zh-cn/guides/tool_calls/)、
+[Create Chat Completion](https://api-docs.deepseek.com/api/create-chat-completion/)）：
 
 ```bash
 export FIRST_AGENT_API_KEY='set-in-your-shell'
-first-agent \
+first-agent setup \
   --provider openai_compatible \
   --model deepseek-v4-flash \
-  --base-url https://api.deepseek.com \
+  --base-url https://api.deepseek.com/beta \
+  --request-path /chat/completions \
+  --strict-tools \
   --thinking-mode disabled
+
+cd /path/to/any-directory
+first-agent
 ```
+
+`--request-path` 与 `--strict-tools` 都是显式 opt-in；产品不会按 base URL 或 model 名猜测 strict
+模式。013 的真实验收即在此配置下连续三次通过（见
+[`docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md`](docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md)）。
 
 也可使用 `anthropic_compatible`。两个 adapter 都是有限时、非流式的一次请求路径；具体 endpoint
 可由兼容服务的 base URL 决定。第一次外发以及 destination/model/data-class 变化时，Runtime 会先
-显示 destination、model、data classes 和 exact digest；只有输入 `/ack-provider DIGEST` 后才发送。
-ack receipt 持久化在 checkpoint，配置或实际数据类别漂移会自动失效。
+显示 destination、model 和 data classes；用户在当前提示下确认后才发送，内部 acknowledgement 仍精确
+绑定 digest。ack receipt 持久化在 checkpoint，配置或实际数据类别漂移会自动失效。
 
 ## Skills
 

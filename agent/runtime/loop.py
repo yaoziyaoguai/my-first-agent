@@ -58,6 +58,7 @@ from agent.runtime.ports import (
     CheckpointStore,
     ContextManager,
     EventSink,
+    InvalidProviderResponseError,
     ModelProvider,
     RetryableContextSourceError,
     RetryableProviderError,
@@ -417,6 +418,34 @@ class AgentRuntime:
                         message="Effectful task tools require a durable Goal first.",
                         outcome_state=failed,
                     )
+                if (
+                    current.state.goal is not None
+                    and current.state.goal.status is GoalStatus.PAUSED
+                    and self._is_effectful_tool(call.name)
+                ):
+                    # F3:暂停的 Goal 在 prepare 之前 fail closed,连 approval
+                    # prompt 都不允许出现;effect 必须先显式 ResumeGoal。
+                    failed = fail_run(
+                        current.state,
+                        code="effectful_tool_requires_resumed_goal",
+                        message=(
+                            "The Goal is paused; resume it explicitly before any "
+                            "effectful tool."
+                        ),
+                    )
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.FAILED_FATAL,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.FAILED,
+                        error_code="effectful_tool_requires_resumed_goal",
+                        message=(
+                            "The Goal is paused; resume it explicitly before any "
+                            "effectful tool."
+                        ),
+                        outcome_state=failed,
+                    )
                 prepared = self._tool_runtime.prepare(
                     call,
                     ToolPrepareContext(
@@ -670,6 +699,55 @@ class AgentRuntime:
             input_tokens += context.budget.estimated_input_tokens
             try:
                 response = self._provider.generate(context)
+            except InvalidProviderResponseError as error:
+                # 归一化失败意味着本次响应的任何 tool/control 都未被接纳，
+                # 所以可以在相同 trusted context 上做有界重试；绝不宽松解析。
+                if invalid_repairs < self._limits.max_invalid_repairs:
+                    invalid_repairs += 1
+                    reason = str(error)
+                    if reason not in {
+                        "malformed_control",
+                        "malformed_response",
+                        "malformed_tool_call",
+                        "response_too_large",
+                        "unsupported_response_block",
+                    }:
+                        reason = "invalid_provider_response"
+                    if reason == "malformed_control":
+                        repair_message = (
+                            "Previous response was rejected (malformed_control). Return "
+                            "exactly one reserved control call, include every required "
+                            "field for its selected kind, and use valid JSON arguments."
+                        )
+                    else:
+                        repair_message = (
+                            f"Previous response was rejected ({reason}). Return exactly "
+                            "one response matching the supplied text, tool, or reserved "
+                            "control schema, using valid JSON arguments."
+                        )
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="invalid_provider_response",
+                            message=repair_message,
+                        ),
+                    )
+                    continue
+                failed = fail_run(
+                    current.state,
+                    code="invalid_provider_response",
+                    message="Provider repeated an invalid response after repair allowance.",
+                )
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.FAILED_FATAL,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.FAILED,
+                    error_code="invalid_provider_response",
+                    outcome_state=failed,
+                )
             except RetryableProviderError as error:
                 paused = pause_for_retryable(current.state)
                 return self._finish(
@@ -729,6 +807,44 @@ class AgentRuntime:
                 )
 
             control = response.control
+            if (
+                control is not None
+                and not isinstance(control, ClarificationRequest)
+                and current.state.goal is not None
+                and current.state.goal.status is GoalStatus.PAUSED
+            ):
+                # F3:暂停的 Goal 不接受任何 goal 控制(进度/修订/完成/阻塞),
+                # 任务推进必须先显式 ResumeGoal;交互级澄清不受影响。
+                if invalid_repairs >= self._limits.max_invalid_repairs:
+                    failed = fail_run(
+                        current.state,
+                        code="invalid_model_control",
+                        message=(
+                            "Provider repeated goal controls while the Goal is paused."
+                        ),
+                    )
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.FAILED_FATAL,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.FAILED,
+                        error_code="invalid_model_control",
+                        outcome_state=failed,
+                    )
+                invalid_repairs += 1
+                current = self._save(
+                    current,
+                    append_policy_result(
+                        current.state,
+                        code="paused_goal_requires_resume",
+                        message=(
+                            "The Goal is paused. Answer the user directly; task "
+                            "progression requires an explicit resume first."
+                        ),
+                    ),
+                )
+                continue
             if isinstance(control, ClarificationRequest):
                 # 澄清边界:一次模型调用、零工具效果;先 CAS 持久化 CLARIFYING
                 # receipt,再以边界问题本身作为该 run 唯一 assistant 回答收尾。
@@ -839,6 +955,38 @@ class AgentRuntime:
                         ),
                     )
                     continue
+                except ValueError as error:
+                    # 已成功解码但不满足当前 trusted state 的 control（例如复用
+                    # correlation_id）属于模型可修复输入，不应把用户任务升级为
+                    # runtime_failure。修复次数仍受同一个 hard limit 约束。
+                    if invalid_repairs >= self._limits.max_invalid_repairs:
+                        failed = fail_run(
+                            current.state,
+                            code="invalid_model_control",
+                            message="Provider repeated an invalid control after repair allowance.",
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.FAILED_FATAL,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.FAILED,
+                            error_code="invalid_model_control",
+                            outcome_state=failed,
+                        )
+                    invalid_repairs += 1
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="invalid_model_control",
+                            message=(
+                                "Control rejected by current trusted state: "
+                                f"{error}. Use trusted_goal values and a new correlation_id."
+                            ),
+                        ),
+                    )
+                    continue
                 run_id = active.run_id
                 completed = complete_run(
                     current.state,
@@ -902,6 +1050,47 @@ class AgentRuntime:
                 continue
 
             final_text = "\n".join(texts)
+            goal = current.state.goal
+            # PAUSED 与终态一样允许 prose 收尾:暂停下的普通问答只结束本次 run,
+            # 不触碰仍然暂停的 Goal;推进必须先显式 ResumeGoal。
+            if goal is not None and goal.status not in {
+                GoalStatus.PAUSED,
+                GoalStatus.BLOCKED,
+                GoalStatus.VERIFIED_DONE,
+                GoalStatus.CANCELLED,
+            }:
+                if invalid_repairs >= self._limits.max_invalid_repairs:
+                    failed = fail_run(
+                        current.state,
+                        code="invalid_model_control",
+                        message=(
+                            "Provider repeated final prose while the durable Goal "
+                            "still required a control decision."
+                        ),
+                    )
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.FAILED_FATAL,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.FAILED,
+                        error_code="invalid_model_control",
+                        outcome_state=failed,
+                    )
+                invalid_repairs += 1
+                current = self._save(
+                    current,
+                    append_policy_result(
+                        current.state,
+                        code="active_goal_requires_control",
+                        message=(
+                            "A nonterminal Goal cannot end with final prose. Continue with "
+                            "goal progress, a tool call, a blocked claim, or a verifiable "
+                            "completion control."
+                        ),
+                    ),
+                )
+                continue
             run_id = active.run_id
             completed = complete_run(current.state, message=final_text)
             return self._finish(

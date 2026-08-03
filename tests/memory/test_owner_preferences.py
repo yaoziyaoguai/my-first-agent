@@ -15,6 +15,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalGrant,
     ApprovalRequired,
+    BlockedClaim,
     ContextQuery,
     ContextSourceLimits,
     ConversationFact,
@@ -24,7 +25,6 @@ from agent.runtime.contracts import (
     GoalProposal,
     GoalStatus,
     ModelResponse,
-    ModelTextBlock,
     ModelToolCall,
     PreferenceAdmissionBinding,
     ProposedCriterion,
@@ -318,7 +318,17 @@ def test_runtime_derives_preference_admission_from_exact_durable_user_fact(tmp_p
                 ),
             )
         ),
-        ModelResponse((ModelTextBlock("preference stored"),)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="preference-stored-blocked",
+                goal_id="goal-preference-1",
+                goal_revision=1,
+                blocker="preference stored; no closed completion oracle is configured",
+                safe_attempts=("stored the confirmed owner preference",),
+                resume_condition="configure a closed preference evidence oracle",
+            ),
+        ),
     )
     checkpoint = InMemoryCheckpointStore(state)
     runtime = AgentRuntime(

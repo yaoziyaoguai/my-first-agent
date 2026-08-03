@@ -11,8 +11,8 @@ import pytest
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BlockedClaim,
     ModelResponse,
-    ModelTextBlock,
     ModelToolCall,
     OutputPolicy,
     RunStatus,
@@ -62,6 +62,20 @@ def _run_id_factory() -> Callable[[], str]:
     return factory
 
 
+def _blocked_response(correlation_id: str, message: str) -> ModelResponse:
+    return ModelResponse(
+        (),
+        control=BlockedClaim(
+            correlation_id=correlation_id,
+            goal_id="goal-1",
+            goal_revision=1,
+            blocker=message,
+            safe_attempts=("resolved the exact approval request",),
+            resume_condition="provide a closed completion oracle",
+        ),
+    )
+
+
 def test_pending_reopen_keyboard_journey_and_shared_lifecycle(tmp_path: Path) -> None:
     """F6/R19-R20: TUI must complete submit → approval → keyboard approve → terminal
     using real Pilot key presses, with focus on the approval form and authoritative
@@ -73,7 +87,7 @@ def test_pending_reopen_keyboard_journey_and_shared_lifecycle(tmp_path: Path) ->
     store = InMemoryCheckpointStore(conversation_with_active_goal("tui-1"))
     provider = ScriptedProvider(
         ModelResponse((ModelToolCall("c1", "write_fixture", {}),)),
-        ModelResponse((ModelTextBlock("approved and done"),)),
+        _blocked_response("tui-approved-blocked", "approved and done"),
     )
     runtime = AgentRuntime(
         provider=provider,
@@ -139,7 +153,7 @@ def test_pilot_reject_keyboard_journey_executes_nothing(tmp_path: Path) -> None:
     store = InMemoryCheckpointStore(conversation_with_active_goal("tui-reject"))
     provider = ScriptedProvider(
         ModelResponse((ModelToolCall("c1", "write_fixture", {}),)),
-        ModelResponse((ModelTextBlock("rejected and done"),)),
+        _blocked_response("tui-rejected-blocked", "rejected and done"),
     )
     tool_calls_made: list[int] = []
 

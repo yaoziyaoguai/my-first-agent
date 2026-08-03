@@ -1,9 +1,0 @@
-{
-  "input_kind": "forbidden_tool_name_safe_stub",
-  "mediator_result": "__force_stop__",
-  "force_stop": "__force_stop__",
-  "gate_status": "rejected",
-  "rejection_reason": "shell-like tool is out of scope",
-  "dangerous_tool_function_invoked": false,
-  "tool_invoke_event_count": 0
-}

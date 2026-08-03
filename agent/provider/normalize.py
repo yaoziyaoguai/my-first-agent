@@ -1,81 +1,873 @@
-"""Normalize provider-specific responses into AgentLoop blocks."""
+"""Kernel ContextPack 与两种 HTTP 协议之间的严格投影。"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
-from agent.provider.protocol import ProviderResponse, ProviderTextBlock, ToolUseBlock
+from agent.provider.protocol import ProviderProtocolError
+from agent.runtime.contracts import (
+    RESERVED_CONTROL_NAME,
+    AdmittedCriterion,
+    BlockedClaim,
+    ClarificationRequest,
+    CompletionClaim,
+    ContextPack,
+    ControlReceipt,
+    EvidenceOracleKind,
+    GoalDelta,
+    GoalDeltaProposal,
+    GoalFrame,
+    GoalProgress,
+    GoalProposal,
+    GoalStatus,
+    ModelControlBlock,
+    ModelResponse,
+    ModelTextBlock,
+    ModelToolCall,
+    ProposedCriterion,
+)
+
+_CONTEXT_BLOCK_TYPES = {
+    "text",
+    "tool_call",
+    "tool_result",
+    "policy_result",
+    "context",
+    "trusted_goal_bootstrap",
+    "trusted_goal",
+}
+_OPAQUE_ENVELOPE_FIELDS = {
+    "control",
+    "encrypted",
+    "encrypted_content",
+    "reasoning",
+    "reasoning_content",
+}
 
 
-def _value(obj: Any, key: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _fail(reason: str) -> ProviderProtocolError:
+    return ProviderProtocolError(reason)
 
 
-def _normalize_tool_input(raw_input: Any) -> dict[str, Any]:
-    if isinstance(raw_input, dict):
-        return raw_input
-    if isinstance(raw_input, str):
-        try:
-            parsed = json.loads(raw_input)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(parsed, dict):
-            return parsed
-    return {}
+def _string(value: object, *, reason: str, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not allow_empty and not value):
+        raise _fail(reason)
+    return value
 
 
-def _normalize_usage(raw_usage: Any) -> dict[str, Any]:
-    if raw_usage is None:
-        return {}
-    names = (
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-    )
-    if isinstance(raw_usage, dict):
-        return {name: raw_usage[name] for name in names if name in raw_usage}
-    usage: dict[str, Any] = {}
-    for name in names:
-        value = getattr(raw_usage, name, None)
-        if value is not None:
-            usage[name] = value
-    return usage
+def _object(value: object, *, reason: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _fail(reason)
+    return value
 
 
-def normalize_anthropic_response(
-    raw_response: Any,
+def _token_count(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise _fail("malformed_usage")
+    return value
+
+
+def _reject_opaque_envelope_fields(value: dict[str, Any]) -> None:
+    if set(value).intersection(_OPAQUE_ENVELOPE_FIELDS):
+        raise _fail("unsupported_response_block")
+
+
+def validate_context_pack(context: ContextPack) -> None:
+    """只接受 Kernel v1 明确定义的文本、工具和已知 policy-result 投影。"""
+
+    for message in context.messages:
+        if message.role not in {"user", "assistant"}:
+            raise _fail("unsupported_context_role")
+        for raw_block in message.content:
+            block = _object(raw_block, reason="malformed_context_block")
+            block_type = block.get("type")
+            if block_type not in _CONTEXT_BLOCK_TYPES:
+                raise _fail("unsupported_context_block")
+            if block_type == "text":
+                _string(block.get("text"), reason="malformed_context_block", allow_empty=True)
+            elif block_type == "tool_call":
+                if message.role != "assistant":
+                    raise _fail("malformed_tool_continuity")
+                _string(block.get("tool_call_id"), reason="malformed_tool_continuity")
+                _string(block.get("name"), reason="malformed_tool_call")
+                _object(block.get("arguments"), reason="malformed_tool_call")
+            elif block_type == "tool_result":
+                if message.role != "user":
+                    raise _fail("malformed_tool_continuity")
+                _string(block.get("tool_call_id"), reason="malformed_tool_continuity")
+                _string(
+                    block.get("text"),
+                    reason="malformed_tool_result",
+                    allow_empty=True,
+                )
+                if "is_error" in block and not isinstance(block["is_error"], bool):
+                    raise _fail("malformed_tool_result")
+            elif block_type == "context":
+                # untrusted ContextSource 候选：只能作为 user 文本，永不 system/pinned。
+                if message.role != "user":
+                    raise _fail("malformed_context_block")
+                if block.get("untrusted") is not True:
+                    raise _fail("malformed_context_block")
+                _string(block.get("source"), reason="malformed_context_block")
+                _string(block.get("candidate_id"), reason="malformed_context_block")
+                _string(block.get("digest"), reason="malformed_context_block")
+                _string(block.get("text"), reason="malformed_context_block", allow_empty=True)
+            elif block_type in {"trusted_goal_bootstrap", "trusted_goal"}:
+                _validate_trusted_control_context(block, block_type=block_type)
+            else:
+                if message.role != "user":
+                    raise _fail("malformed_policy_result")
+                _string(block.get("code"), reason="malformed_policy_result")
+                _string(
+                    block.get("text"),
+                    reason="malformed_policy_result",
+                    allow_empty=True,
+                )
+
+
+def _validate_trusted_control_context(
+    block: dict[str, Any],
     *,
-    raw_provider_name: str | None = None,
-) -> ProviderResponse:
-    """Normalize Anthropic Messages-style content blocks.
+    block_type: str,
+) -> None:
+    if block.get("trusted") is not True:
+        raise _fail("malformed_context_block")
+    if block_type == "trusted_goal_bootstrap":
+        if set(block) != {
+            "type",
+            "trusted",
+            "source_fact_id",
+            "workspace_identity_digest",
+            "authority_snapshot",
+        }:
+            raise _fail("malformed_context_block")
+        for key in ("source_fact_id", "workspace_identity_digest", "authority_snapshot"):
+            _string(block.get(key), reason="malformed_context_block")
+        return
+    required = {
+        "type",
+        "trusted",
+        "goal_id",
+        "goal_revision",
+        "workspace_identity_digest",
+        "user_outcome",
+        "beneficiary",
+        "targets",
+        "scope",
+        "non_goals",
+        "assumptions",
+        "authority_snapshot",
+        "status",
+        "interaction_state",
+        "progress_summary",
+        "next_step",
+        "proposed_criteria",
+        "admitted_criteria",
+        "evidence_gaps",
+    }
+    if set(block) != required:
+        raise _fail("malformed_context_block")
+    for key in (
+        "goal_id",
+        "workspace_identity_digest",
+        "user_outcome",
+        "beneficiary",
+        "authority_snapshot",
+        "status",
+        "interaction_state",
+    ):
+        _string(block.get(key), reason="malformed_context_block")
+    revision = block.get("goal_revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        raise _fail("malformed_context_block")
+    for key in (
+        "targets",
+        "scope",
+        "non_goals",
+        "assumptions",
+        "proposed_criteria",
+        "admitted_criteria",
+        "evidence_gaps",
+    ):
+        if not isinstance(block.get(key), list):
+            raise _fail("malformed_context_block")
+    for key in ("progress_summary", "next_step"):
+        value = block.get(key)
+        if value is not None and not isinstance(value, str):
+            raise _fail("malformed_context_block")
 
-    Compatible endpoints often return dicts while the official SDK returns objects.
-    This function accepts both so AgentLoop sees one stable internal shape.
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _control_receipt_projection(receipt: ControlReceipt) -> dict[str, Any]:
+    # closed projection:只回放 ControlReceipt 的持久字段,summary/next_step
+    # 等易变叙述永不进入 wire,保证回执可由 durable tuple 逐字节重建。
+    return {
+        "kind": "control_receipt",
+        "correlation_id": receipt.correlation_id,
+        "control_kind": receipt.control_kind,
+        "goal_id": receipt.goal_id,
+        "goal_revision": receipt.goal_revision,
+        "accepted_state_revision": receipt.accepted_state_revision,
+        "payload_digest": receipt.payload_digest,
+        "receipt_digest": receipt.receipt_digest,
+    }
+
+
+def _control_receipt_result_json(receipt: ControlReceipt) -> str:
+    return _canonical_json(
+        {
+            "accepted": True,
+            "correlation_id": receipt.correlation_id,
+            "receipt_digest": receipt.receipt_digest,
+        }
+    )
+
+
+def _policy_text(block: dict[str, Any]) -> str:
+    code = _string(block.get("code"), reason="malformed_policy_result")
+    text = _string(
+        block.get("text"),
+        reason="malformed_policy_result",
+        allow_empty=True,
+    )
+    return f"Policy result ({code}): {text}"
+
+
+def _trusted_control_text(block: dict[str, Any]) -> str:
+    return "FIRST_AGENT_TRUSTED_CONTROL_CONTEXT " + _canonical_json(block)
+
+
+def context_to_anthropic_messages(context: ContextPack) -> list[dict[str, Any]]:
+    validate_context_pack(context)
+    messages: list[dict[str, Any]] = []
+    for message in context.messages:
+        content: list[dict[str, Any]] = []
+        for raw_block in message.content:
+            block = dict(raw_block)
+            block_type = block["type"]
+            if block_type == "text":
+                content.append({"type": "text", "text": block["text"]})
+            elif block_type == "tool_call":
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": block["tool_call_id"],
+                        "name": block["name"],
+                        "input": block["arguments"],
+                    }
+                )
+            elif block_type == "tool_result":
+                projected = {
+                    "type": "tool_result",
+                    "tool_use_id": block["tool_call_id"],
+                    "content": block["text"],
+                }
+                if block.get("is_error") is True:
+                    projected["is_error"] = True
+                content.append(projected)
+            elif block_type == "context":
+                content.append({"type": "text", "text": block["text"]})
+            elif block_type in {"trusted_goal_bootstrap", "trusted_goal"}:
+                content.append({"type": "text", "text": _trusted_control_text(block)})
+            else:
+                content.append({"type": "text", "text": _policy_text(block)})
+        messages.append({"role": message.role, "content": content})
+
+    # 已受理控制回执按 durable tuple 顺序回放为相邻原生原子对,
+    # 独立成对追加,绝不摊平进产品消息文本。
+    for receipt in context.control_receipts:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": receipt.correlation_id,
+                        "name": RESERVED_CONTROL_NAME,
+                        "input": _control_receipt_projection(receipt),
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": receipt.correlation_id,
+                        "content": _control_receipt_result_json(receipt),
+                    }
+                ],
+            }
+        )
+    return messages
+
+
+def context_tools_to_anthropic(context: ContextPack) -> list[dict[str, Any]]:
+    tools = [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+        }
+        for tool in context.tools
+    ]
+    # 控制 schema 只在 wire 层并入 tools,ContextPack.tools 保持纯产品面。
+    if context.control_schema is not None:
+        tools.append(
+            {
+                "name": context.control_schema["name"],
+                "description": context.control_schema["description"],
+                "input_schema": context.control_schema["input_schema"],
+            }
+        )
+    return tools
+
+
+def context_to_openai_messages(context: ContextPack) -> list[dict[str, Any]]:
+    validate_context_pack(context)
+    messages: list[dict[str, Any]] = []
+    if context.system:
+        messages.append({"role": "system", "content": context.system})
+
+    for message in context.messages:
+        text_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        tool_results: list[dict[str, Any]] = []
+        for raw_block in message.content:
+            block = dict(raw_block)
+            block_type = block["type"]
+            if block_type == "text":
+                text_parts.append(str(block["text"]))
+            elif block_type == "tool_call":
+                tool_calls.append(
+                    {
+                        "id": block["tool_call_id"],
+                        "type": "function",
+                        "function": {
+                            "name": block["name"],
+                            "arguments": json.dumps(
+                                block["arguments"],
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                )
+            elif block_type == "tool_result":
+                tool_results.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": block["tool_call_id"],
+                        "content": block["text"],
+                    }
+                )
+            elif block_type == "context":
+                text_parts.append(str(block["text"]))
+            elif block_type in {"trusted_goal_bootstrap", "trusted_goal"}:
+                text_parts.append(_trusted_control_text(block))
+            else:
+                text_parts.append(_policy_text(block))
+
+        if tool_results:
+            messages.extend(tool_results)
+            if text_parts:
+                messages.append({"role": "user", "content": "\n".join(text_parts)})
+            continue
+        projected: dict[str, Any] = {
+            "role": message.role,
+            "content": "\n".join(text_parts) if text_parts else None,
+        }
+        if tool_calls:
+            projected["tool_calls"] = tool_calls
+        messages.append(projected)
+
+    # 已受理控制回执按 durable tuple 顺序回放为相邻原生原子对,
+    # 独立成对追加,绝不出现在普通 user/system 文本里。
+    for receipt in context.control_receipts:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": receipt.correlation_id,
+                        "type": "function",
+                        "function": {
+                            "name": RESERVED_CONTROL_NAME,
+                            "arguments": _canonical_json(_control_receipt_projection(receipt)),
+                        },
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": receipt.correlation_id,
+                "content": _control_receipt_result_json(receipt),
+            }
+        )
+    return messages
+
+
+def context_tools_to_openai(context: ContextPack) -> list[dict[str, Any]]:
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            },
+        }
+        for tool in context.tools
+    ]
+    # 控制 schema 只在 wire 层并入 tools,ContextPack.tools 保持纯产品面。
+    if context.control_schema is not None:
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": context.control_schema["name"],
+                    "description": context.control_schema["description"],
+                    "parameters": context.control_schema["input_schema"],
+                },
+            }
+        )
+    return tools
+
+
+# ---------------------------------------------------------------------------
+# U3C-G2:保留控制通道的严格 provider-neutral 解码层。两种协议归一化器必须
+# 共用这一层;任何形状/类型/枚举/不变量违例都收敛为 ProviderProtocolError,
+# 畸形保留调用绝不允许降级成普通 ModelToolCall。
+
+_MALFORMED_CONTROL = "malformed_control"
+
+
+def _control_str(value: object) -> str:
+    if not isinstance(value, str):
+        raise _fail(_MALFORMED_CONTROL)
+    return value
+
+
+def _control_nullable_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return _control_str(value)
+
+
+def _control_int(value: object) -> int:
+    # bool 是 int 的子类:wire 上 True/False 永远不是合法整数字段。
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise _fail(_MALFORMED_CONTROL)
+    return value
+
+
+def _control_bool(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise _fail(_MALFORMED_CONTROL)
+    return value
+
+
+def _control_json_object(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _fail(_MALFORMED_CONTROL)
+    return value
+
+
+def _control_tuple(value: object, decode_item: Callable[[object], Any]) -> tuple[Any, ...]:
+    # tuple 形字段在 wire 上必须是 JSON 数组,元素逐个严格解码。
+    if not isinstance(value, list):
+        raise _fail(_MALFORMED_CONTROL)
+    return tuple(decode_item(item) for item in value)
+
+
+def _control_exact_keys(value: dict[str, Any], expected: frozenset[str]) -> None:
+    # 每一层都要求精确键集:缺键与未知键同样 fail closed。
+    if set(value) != expected:
+        raise _fail(_MALFORMED_CONTROL)
+
+
+_PROPOSED_CRITERION_KEYS = frozenset({"criterion_id", "description"})
+_ADMITTED_CRITERION_KEYS = frozenset(
+    {
+        "criterion_id",
+        "description",
+        "source_fact_id",
+        "oracle_kind",
+        "predicate",
+        "required_evidence_class",
+        "admission_digest",
+        "mandatory",
+    }
+)
+_GOAL_FRAME_KEYS = frozenset(
+    {
+        "goal_id",
+        "revision",
+        "created_from_fact_ids",
+        "workspace_identity_digest",
+        "user_outcome",
+        "beneficiary",
+        "targets",
+        "scope",
+        "non_goals",
+        "assumptions",
+        "proposed_criteria",
+        "admitted_criteria",
+        "authority_snapshot",
+        "status",
+        "created_at",
+        "updated_at",
+        "progress_summary",
+        "next_step",
+    }
+)
+_GOAL_DELTA_KEYS = frozenset({"goal_id", "expected_revision", "reason", "updates", "updated_at"})
+
+
+def _decode_proposed_criterion(value: object) -> ProposedCriterion:
+    criterion = _control_json_object(value)
+    _control_exact_keys(criterion, _PROPOSED_CRITERION_KEYS)
+    return ProposedCriterion(
+        criterion_id=_control_str(criterion["criterion_id"]),
+        description=_control_str(criterion["description"]),
+    )
+
+
+def _decode_admitted_criterion(value: object) -> AdmittedCriterion:
+    criterion = _control_json_object(value)
+    _control_exact_keys(criterion, _ADMITTED_CRITERION_KEYS)
+    return AdmittedCriterion(
+        criterion_id=_control_str(criterion["criterion_id"]),
+        description=_control_str(criterion["description"]),
+        source_fact_id=_control_str(criterion["source_fact_id"]),
+        oracle_kind=EvidenceOracleKind(_control_str(criterion["oracle_kind"])),
+        predicate=_control_json_object(criterion["predicate"]),
+        required_evidence_class=_control_str(criterion["required_evidence_class"]),
+        admission_digest=_control_str(criterion["admission_digest"]),
+        mandatory=_control_bool(criterion["mandatory"]),
+    )
+
+
+def _decode_goal_frame(value: object) -> GoalFrame:
+    frame = _control_json_object(value)
+    _control_exact_keys(frame, _GOAL_FRAME_KEYS)
+    return GoalFrame(
+        goal_id=_control_str(frame["goal_id"]),
+        revision=_control_int(frame["revision"]),
+        created_from_fact_ids=_control_tuple(frame["created_from_fact_ids"], _control_str),
+        workspace_identity_digest=_control_str(frame["workspace_identity_digest"]),
+        user_outcome=_control_str(frame["user_outcome"]),
+        beneficiary=_control_str(frame["beneficiary"]),
+        targets=_control_tuple(frame["targets"], _control_str),
+        scope=_control_tuple(frame["scope"], _control_str),
+        non_goals=_control_tuple(frame["non_goals"], _control_str),
+        assumptions=_control_tuple(frame["assumptions"], _control_str),
+        proposed_criteria=_control_tuple(frame["proposed_criteria"], _decode_proposed_criterion),
+        admitted_criteria=_control_tuple(frame["admitted_criteria"], _decode_admitted_criterion),
+        authority_snapshot=_control_str(frame["authority_snapshot"]),
+        status=GoalStatus(_control_str(frame["status"])),
+        created_at=_control_str(frame["created_at"]),
+        updated_at=_control_str(frame["updated_at"]),
+        progress_summary=_control_nullable_str(frame["progress_summary"]),
+        next_step=_control_nullable_str(frame["next_step"]),
+    )
+
+
+def _decode_goal_delta(value: object) -> GoalDelta:
+    delta = _control_json_object(value)
+    _control_exact_keys(delta, _GOAL_DELTA_KEYS)
+    return GoalDelta(
+        goal_id=_control_str(delta["goal_id"]),
+        expected_revision=_control_int(delta["expected_revision"]),
+        reason=_control_str(delta["reason"]),
+        updates=_control_json_object(delta["updates"]),
+        updated_at=_control_nullable_str(delta["updated_at"]),
+    )
+
+
+def _decode_clarification_request(arguments: dict[str, Any]) -> ClarificationRequest:
+    return ClarificationRequest(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        question=_control_str(arguments["question"]),
+        boundary_code=_control_str(arguments["boundary_code"]),
+        missing_fields=_control_tuple(arguments["missing_fields"], _control_str),
+        safe_assumptions=_control_tuple(arguments["safe_assumptions"], _control_str),
+    )
+
+
+def _decode_goal_proposal(arguments: dict[str, Any]) -> GoalProposal:
+    return GoalProposal(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        goal_frame=_decode_goal_frame(arguments["goal_frame"]),
+    )
+
+
+def _decode_goal_progress(arguments: dict[str, Any]) -> GoalProgress:
+    return GoalProgress(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        goal_id=_control_str(arguments["goal_id"]),
+        goal_revision=_control_int(arguments["goal_revision"]),
+        summary=_control_str(arguments["summary"]),
+        next_step=_control_str(arguments["next_step"]),
+    )
+
+
+def _decode_goal_delta_proposal(arguments: dict[str, Any]) -> GoalDeltaProposal:
+    return GoalDeltaProposal(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        delta=_decode_goal_delta(arguments["delta"]),
+    )
+
+
+def _decode_completion_claim(arguments: dict[str, Any]) -> CompletionClaim:
+    return CompletionClaim(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        goal_id=_control_str(arguments["goal_id"]),
+        goal_revision=_control_int(arguments["goal_revision"]),
+        criterion_evidence_refs=_control_tuple(arguments["criterion_evidence_refs"], _control_str),
+    )
+
+
+def _decode_blocked_claim(arguments: dict[str, Any]) -> BlockedClaim:
+    return BlockedClaim(
+        correlation_id=_control_str(arguments["correlation_id"]),
+        goal_id=_control_str(arguments["goal_id"]),
+        goal_revision=_control_int(arguments["goal_revision"]),
+        blocker=_control_str(arguments["blocker"]),
+        safe_attempts=_control_tuple(arguments["safe_attempts"], _control_str),
+        resume_condition=_control_str(arguments["resume_condition"]),
+    )
+
+
+_COMMON_CONTROL_KEYS = frozenset({"kind", "correlation_id"})
+
+# 闭合的六种模型上报控制变体。control_receipt 只存在于上行回放,模型侧
+# 发出即违例;不在表内的 kind(含 control_receipt)一律拒收。
+_CONTROL_DECODERS: dict[
+    str, tuple[frozenset[str], Callable[[dict[str, Any]], ModelControlBlock]]
+] = {
+    "clarification_request": (
+        _COMMON_CONTROL_KEYS | {"question", "boundary_code", "missing_fields", "safe_assumptions"},
+        _decode_clarification_request,
+    ),
+    "goal_proposal": (_COMMON_CONTROL_KEYS | {"goal_frame"}, _decode_goal_proposal),
+    "goal_progress": (
+        _COMMON_CONTROL_KEYS | {"goal_id", "goal_revision", "summary", "next_step"},
+        _decode_goal_progress,
+    ),
+    "goal_delta_proposal": (_COMMON_CONTROL_KEYS | {"delta"}, _decode_goal_delta_proposal),
+    "completion_claim": (
+        _COMMON_CONTROL_KEYS | {"goal_id", "goal_revision", "criterion_evidence_refs"},
+        _decode_completion_claim,
+    ),
+    "blocked_claim": (
+        _COMMON_CONTROL_KEYS
+        | {"goal_id", "goal_revision", "blocker", "safe_attempts", "resume_condition"},
+        _decode_blocked_claim,
+    ),
+}
+
+
+def _decode_reserved_control(arguments: dict[str, Any]) -> ModelControlBlock:
+    """把一次保留控制调用的 arguments 严格解码为唯一 typed control。
+
+    契约不变量仍由 immutable dataclass 把关;这里统一把解码/构造/枚举的
+    ValueError、TypeError、KeyError 收敛为 ProviderProtocolError,不向上泄漏。
     """
 
-    raw_content = _value(raw_response, "content", [])
-    content: list[ProviderTextBlock | ToolUseBlock] = []
-    for block in raw_content:
-        block_type = _value(block, "type")
+    kind = arguments.get("kind")
+    entry = _CONTROL_DECODERS.get(kind) if isinstance(kind, str) else None
+    if entry is None:
+        raise _fail(_MALFORMED_CONTROL)
+    expected_keys, decode = entry
+    _control_exact_keys(arguments, expected_keys)
+    try:
+        return decode(arguments)
+    except ProviderProtocolError:
+        # 已是最终 fail-closed 分类,原样上抛,不二次包装。
+        raise
+    except (KeyError, TypeError, ValueError) as error:
+        raise _fail(_MALFORMED_CONTROL) from error
+
+
+_RESERVED_CONTROL_CONFLICT = "reserved_control_conflict"
+
+
+class _ResponseAccumulator:
+    """两种协议共享的响应块累积器:text/普通调用保序,保留调用最多一次。
+
+    冲突判定集中在这一条路径:第二次保留调用,或保留调用与普通产品调用
+    混排(无论先后顺序),都立即 fail closed;畸形保留调用只会从解码器
+    抛出 ProviderProtocolError,永远不会降级成普通 ModelToolCall。
+    """
+
+    def __init__(self) -> None:
+        self.blocks: list[ModelTextBlock | ModelToolCall] = []
+        self.control: ModelControlBlock | None = None
+        self._has_ordinary_call = False
+
+    def add_text(self, text: str) -> None:
+        if text:
+            self.blocks.append(ModelTextBlock(text))
+
+    def add_tool_call(self, tool_call_id: str, name: str, arguments: dict[str, Any]) -> None:
+        if name == RESERVED_CONTROL_NAME:
+            if self.control is not None or self._has_ordinary_call:
+                raise _fail(_RESERVED_CONTROL_CONFLICT)
+            self.control = _decode_reserved_control(arguments)
+            return
+        if self.control is not None:
+            raise _fail(_RESERVED_CONTROL_CONFLICT)
+        self._has_ordinary_call = True
+        self.blocks.append(ModelToolCall(tool_call_id, name, arguments))
+
+
+def normalize_anthropic_response(raw_response: object) -> ModelResponse:
+    payload = _object(raw_response, reason="malformed_response")
+    _reject_opaque_envelope_fields(payload)
+    raw_content = payload.get("content")
+    if not isinstance(raw_content, list):
+        raise _fail("malformed_response")
+
+    accumulator = _ResponseAccumulator()
+    for raw_block in raw_content:
+        block = _object(raw_block, reason="malformed_response")
+        block_type = block.get("type")
         if block_type == "text":
-            text = _value(block, "text", "") or ""
-            if text:
-                content.append(ProviderTextBlock(text=text))
-        elif block_type == "tool_use":
-            content.append(
-                ToolUseBlock(
-                    id=str(_value(block, "id", "")),
-                    name=str(_value(block, "name", "")),
-                    input=_normalize_tool_input(_value(block, "input", {})),
-                )
+            text = _string(
+                block.get("text"),
+                reason="malformed_response",
+                allow_empty=True,
             )
-    return ProviderResponse(
-        content=content,
-        stop_reason=_value(raw_response, "stop_reason"),
-        usage=_normalize_usage(_value(raw_response, "usage")),
-        raw_provider_name=raw_provider_name,
+            accumulator.add_text(text)
+        elif block_type == "tool_use":
+            tool_call_id = _string(
+                block.get("id"),
+                reason="malformed_tool_continuity",
+            )
+            name = _string(block.get("name"), reason="malformed_tool_call")
+            arguments = _object(block.get("input"), reason="malformed_tool_call")
+            accumulator.add_tool_call(tool_call_id, name, arguments)
+        else:
+            raise _fail("unsupported_response_block")
+
+    usage = payload.get("usage")
+    if usage is None:
+        usage_object: dict[str, Any] = {}
+    else:
+        usage_object = _object(usage, reason="malformed_usage")
+    stop_reason = payload.get("stop_reason")
+    if stop_reason is not None and not isinstance(stop_reason, str):
+        raise _fail("malformed_response")
+    return ModelResponse(
+        blocks=tuple(accumulator.blocks),
+        control=accumulator.control,
+        stop_reason=stop_reason,
+        input_tokens=_token_count(usage_object.get("input_tokens")),
+        output_tokens=_token_count(usage_object.get("output_tokens")),
     )
+
+
+def normalize_openai_response(raw_response: object) -> ModelResponse:
+    payload = _object(raw_response, reason="malformed_response")
+    _reject_opaque_envelope_fields(payload)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise _fail("malformed_response")
+    choice = _object(choices[0], reason="malformed_response")
+    _reject_opaque_envelope_fields(choice)
+    message = _object(choice.get("message"), reason="malformed_response")
+
+    allowed_message_fields = {"role", "content", "tool_calls"}
+    if set(message).difference(allowed_message_fields):
+        raise _fail("unsupported_response_block")
+    if message.get("role") not in {None, "assistant"}:
+        raise _fail("malformed_response")
+
+    accumulator = _ResponseAccumulator()
+    content = message.get("content")
+    if content is not None:
+        if not isinstance(content, str):
+            raise _fail("unsupported_response_block")
+        accumulator.add_text(content)
+
+    raw_tool_calls = message.get("tool_calls", [])
+    if not isinstance(raw_tool_calls, list):
+        raise _fail("malformed_response")
+    for raw_tool_call in raw_tool_calls:
+        tool_call = _object(raw_tool_call, reason="malformed_tool_call")
+        if tool_call.get("type", "function") != "function":
+            raise _fail("unsupported_response_block")
+        tool_call_id = _string(
+            tool_call.get("id"),
+            reason="malformed_tool_continuity",
+        )
+        function = _object(tool_call.get("function"), reason="malformed_tool_call")
+        name = _string(function.get("name"), reason="malformed_tool_call")
+        raw_arguments = function.get("arguments")
+        if not isinstance(raw_arguments, str):
+            raise _fail("malformed_tool_call")
+        try:
+            arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            raise _fail("malformed_tool_call") from None
+        arguments = _object(arguments, reason="malformed_tool_call")
+        accumulator.add_tool_call(tool_call_id, name, arguments)
+
+    raw_stop_reason = choice.get("finish_reason")
+    if raw_stop_reason is not None and not isinstance(raw_stop_reason, str):
+        raise _fail("malformed_response")
+    stop_reason = {
+        "stop": "end_turn",
+        "tool_calls": "tool_use",
+        "length": "max_tokens",
+    }.get(raw_stop_reason, raw_stop_reason)
+
+    usage = payload.get("usage")
+    if usage is None:
+        usage_object: dict[str, Any] = {}
+    else:
+        usage_object = _object(usage, reason="malformed_usage")
+    return ModelResponse(
+        blocks=tuple(accumulator.blocks),
+        control=accumulator.control,
+        stop_reason=stop_reason,
+        input_tokens=_token_count(usage_object.get("prompt_tokens")),
+        output_tokens=_token_count(usage_object.get("completion_tokens")),
+    )
+
+
+def latest_user_text(context: ContextPack) -> str:
+    validate_context_pack(context)
+    for message in reversed(context.messages):
+        if message.role != "user":
+            continue
+        parts = [str(block["text"]) for block in message.content if block.get("type") == "text"]
+        if parts:
+            return "\n".join(parts)
+    return ""
+
+
+__all__ = [
+    "context_to_anthropic_messages",
+    "context_to_openai_messages",
+    "context_tools_to_anthropic",
+    "context_tools_to_openai",
+    "latest_user_text",
+    "normalize_anthropic_response",
+    "normalize_openai_response",
+    "validate_context_pack",
+]

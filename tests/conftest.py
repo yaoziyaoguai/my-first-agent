@@ -1,257 +1,29 @@
-"""Pytest fixtures and a fake Anthropic client.
+"""全套件测试护栏：任何测试都不得写入用户真实默认 state root。
 
-The fake client lets tests drive the agent loop without real network calls and
-without real model behavior. Each test pre-canned the responses it expects the
-"model" to emit, in order, and asserts on what the agent does in response.
+产品默认 root 派生自 owner home（``~/.local/state/my-first-agent/v1``）。测试必须注入
+显式 ``--state-root``、fixture home 或自行 monkeypatch ``default_state_root``；
+否则这里 fail loud，防止测试污染真实用户状态。这是 test-only seam，不是产品行为。
 """
 
 from __future__ import annotations
 
-import os
-import sys
-from dataclasses import dataclass, field
-
-# 用 setdefault 兜底测试替身值——setdefault 不会覆盖已存在的 env vars。
-# 不调用 load_dotenv()：真实 provider 测试通过显式 opt-in gate 运行，
-# 普通测试不应自动加载 .env 中的真实 key。
-
-# 让测试在没有真实 .env 时也能 import agent.core
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
-os.environ.setdefault("ANTHROPIC_BASE_URL", "https://example.invalid")
-os.environ.setdefault("MODEL_NAME", "test-model")
-
-# 保证 tests/ 能 import 仓库根下的 agent/
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
 
 import pytest
 
-# ---------- fake SDK block / response 对象 ----------
+from agent.continuity import sessions
 
-@dataclass
-class FakeTextBlock:
-    text: str
-    type: str = "text"
-
-
-@dataclass
-class FakeToolUseBlock:
-    id: str
-    name: str
-    input: dict
-    type: str = "tool_use"
-
-
-@dataclass
-class FakeUsage:
-    input_tokens: int = 100
-    output_tokens: int = 50
-    cache_read_input_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-
-
-@dataclass
-class FakeResponse:
-    content: list
-    stop_reason: str
-    usage: FakeUsage = field(default_factory=FakeUsage)
-
-
-# ---------- fake stream（模拟 client.messages.stream 返回的对象）----------
-
-class FakeStream:
-    def __init__(self, response: FakeResponse):
-        self._response = response
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def __iter__(self):
-        # 本版测试不需要逐 event 驱动，流内部直接为空
-        return iter([])
-
-    def get_final_message(self):
-        return self._response
-
-
-# ---------- fake client ----------
-
-class FakeAnthropicClient:
-    """按预置顺序返回 response 的假 client。
-
-    用法:
-        fc = FakeAnthropicClient(responses=[resp1, resp2, ...])
-        # 然后把它装进 core.client
-
-    生产代码已经封死 legacy SDK stream fallback。测试 fake client 仍保留
-    Anthropic-style ``messages`` 形状给 planner/context 使用，但执行主循环必须
-    通过 ``provider`` facade 进入 ModelProvider 边界，避免测试继续依赖旧绕路。
-    """
-
-    def __init__(self, responses: list[FakeResponse]):
-        self.responses = list(responses)
-        self.requests: list[dict] = []           # 记录每次 stream 被调用时的参数
-        self.create_requests: list[dict] = []    # 记录 messages.create（planner 用）
-
-        client_self = self
-
-        class _Messages:
-            def stream(self, **kwargs):
-                client_self.requests.append(kwargs)
-                if not client_self.responses:
-                    raise AssertionError(
-                        "FakeAnthropicClient: stream called but no canned "
-                        "responses left. 说明测试用例的 responses 列表给短了。"
-                    )
-                return FakeStream(client_self.responses.pop(0))
-
-            def create(self, **kwargs):
-                client_self.create_requests.append(kwargs)
-                if not client_self.responses:
-                    raise AssertionError(
-                        "FakeAnthropicClient: create called but no canned "
-                        "responses left."
-                    )
-                return client_self.responses.pop(0)
-
-        self.messages = _Messages()
-
-        class _ProviderFacade:
-            provider_type = "test_fake"
-            supports_tools = True
-            supports_streaming = False
-
-            def create(
-                self,
-                *,
-                system,
-                messages,
-                tools,
-                model=None,
-                max_tokens=None,
-                temperature=None,
-            ):
-                request = {
-                    "model": model or "test-model",
-                    "system": system,
-                    "messages": messages,
-                    "tools": tools,
-                }
-                if max_tokens is not None:
-                    request["max_tokens"] = max_tokens
-                if temperature is not None:
-                    request["temperature"] = temperature
-                client_self.requests.append(request)
-                if not client_self.responses:
-                    raise AssertionError(
-                        "FakeAnthropicClient provider: create called but no canned "
-                        "responses left. 说明测试用例的 responses 列表给短了。"
-                    )
-                return client_self.responses.pop(0)
-
-        self.provider = _ProviderFacade()
-
-
-# ---------- 便捷构造器 ----------
-
-def text_response(text: str, stop: str = "end_turn") -> FakeResponse:
-    return FakeResponse(content=[FakeTextBlock(text=text)], stop_reason=stop)
-
-
-def tool_use_response(
-    tool_name: str, tool_input: dict, tool_id: str = "toolu_test_1", text: str | None = None
-) -> FakeResponse:
-    blocks: list = []
-    if text:
-        blocks.append(FakeTextBlock(text=text))
-    blocks.append(FakeToolUseBlock(id=tool_id, name=tool_name, input=tool_input))
-    return FakeResponse(content=blocks, stop_reason="tool_use")
-
-
-_META_TOOL_ID_COUNTER = {"n": 0}
-
-
-def meta_complete_response(
-    score: int = 90,
-    summary: str = "本步骤已完成",
-    outstanding: str = "无",
-    text: str | None = None,
-    tool_id: str | None = None,
-) -> FakeResponse:
-    """便捷构造器：模拟模型在收尾本步骤时调用 mark_step_complete。
-
-    新协议下，模型必须**通过工具调用**声明步骤完成（不再认关键词）。
-    这个 helper 把"text 总结 + mark_step_complete tool_use"打包成一个 tool_use 响应。
-
-    score 默认 90 是为了**走通"达阈值"路径**——大多数测试想验证"步骤完成后的行为"，
-    若想测"低分继续"路径，显式传 score=50 之类。
-    """
-    if tool_id is None:
-        _META_TOOL_ID_COUNTER["n"] += 1
-        tool_id = f"meta_test_{_META_TOOL_ID_COUNTER['n']}"
-
-    blocks: list = []
-    if text:
-        blocks.append(FakeTextBlock(text=text))
-    blocks.append(FakeToolUseBlock(
-        id=tool_id,
-        name="mark_step_complete",
-        input={
-            "completion_score": score,
-            "summary": summary,
-            "outstanding": outstanding,
-        },
-    ))
-    return FakeResponse(content=blocks, stop_reason="tool_use")
-
-
-# ---------- fixture ----------
-
-@pytest.fixture
-def fresh_state():
-    """返回一个全新的 AgentState，不和 core 模块的全局 state 共享。"""
-    from agent.state import create_agent_state
-    return create_agent_state(system_prompt="test system prompt")
+_REAL_DEFAULT_STATE_ROOT = sessions.default_state_root
 
 
 @pytest.fixture(autouse=True)
-def reset_global_runtime_configs():
-    """隔离模块级 runtime 配置，避免一个测试的覆盖值泄漏到下一例。
+def _guard_real_default_state_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    def guarded(home: Path | None = None) -> Path:
+        if home is None:
+            raise AssertionError(
+                "test derived the real user default state root; "
+                "inject --state-root / fixture home instead"
+            )
+        return _REAL_DEFAULT_STATE_ROOT(home)
 
-    这里只 reset 本地纯配置，不读真实 HOME、sessions/runs 或 provider env；
-    checkpoint/tool registry 的安全过滤仍由生产代码执行。
-    """
-    from agent.checkpoint import reset_checkpoint_truncation_config
-    from agent.tool_registry import reset_model_visible_tool_limits
-
-    reset_checkpoint_truncation_config()
-    reset_model_visible_tool_limits()
-    yield
-    reset_checkpoint_truncation_config()
-    reset_model_visible_tool_limits()
-
-
-@pytest.fixture
-def two_step_plan():
-    """返回一个标准的两步 plan（dict 形态）。"""
-    from agent.plan_schema import Plan, PlanStep
-    return Plan(
-        goal="测试目标",
-        thinking="测试思路",
-        steps=[
-            PlanStep(
-                step_id="step-1",
-                title="读取项目结构",
-                description="用 ls 查看当前目录",
-                step_type="read",
-            ),
-            PlanStep(
-                step_id="step-2",
-                title="生成报告",
-                description="综合结论",
-                step_type="report",
-            ),
-        ],
-    ).model_dump()
+    monkeypatch.setattr(sessions, "default_state_root", guarded)

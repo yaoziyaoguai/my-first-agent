@@ -1,149 +1,255 @@
+"""Composition of the four workspace-scoped Kernel file tools."""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-from agent.tool_registry import register_tool
-from config import PROJECT_DIR
-
-FILE_CONTENT_LIMIT = 50000
-
-
-def _check_read_permission(tool_input):
-    """read_file 的确认规则"""
-    from agent.security import is_sensitive_file
-
-    path = tool_input.get("path", "")
-
-    # 敏感文件：直接拦截
-    if is_sensitive_file(path):
-        return "block"
-
-    # 项目内：静默执行
-    file_path = Path(path).resolve()
-    # 项目外：需确认（非项目内则确认）
-    return not file_path.is_relative_to(PROJECT_DIR)
-
-
-@register_tool(
-    name="read_file",
-    description=(
-        "读取一个文件的内容。如果文件较大（超过10000字符），会返回文件概览而非完整内容，"
-        "此时请使用 read_file_lines 按行读取具体部分，不要重复调用 read_file 尝试不同路径。"
-    ),
-    parameters={
-        "path": {
-            "type": "string",
-            "description": "文件路径，可以是相对路径或绝对路径"
-        }
-    },
-    confirmation=_check_read_permission,
-    capability="file_read",
-    risk_level="medium",
-    output_policy="bounded_text",
+from agent.runtime.contracts import (
+    ApprovalPolicy,
+    OutputPolicy,
+    PolicyDecision,
+    SideEffectClass,
+    ToolRisk,
+    ToolSpec,
 )
-def read_file(path):
-    try:
-        file_path = Path(path)
-        # UMT-P3-001: 无后缀文件名友好处理。
-        # 精确路径不存在时，尝试追加常见文档后缀寻找匹配文件。
-        # 只对不包含已知敏感路径段的文件名生效（不扩展 config/.env）。
-        if not file_path.exists():
-            original_name = file_path.name
-            sensitive_names = frozenset({
-                "config", ".env", "credentials", "secret", "token", "key",
-            })
-            # 不含点说明无后缀（如 README、Makefile），且不匹配敏感名时才尝试扩展
-            if ("." not in original_name
-                    and original_name.lower() not in sensitive_names
-                    and original_name != original_name.upper()):  # 不是全大写（LICENSE 等）
-                safe_extensions = (".md", ".txt", ".rst")
-                parent = file_path.parent
-                for ext in safe_extensions:
-                    candidate = parent / f"{original_name}{ext}"
-                    if candidate.exists():
-                        file_path = candidate
-                        break
+from agent.runtime.tools import DefaultToolPolicy, KernelToolRuntime, RegisteredTool
+from agent.tools.edit import edit_file, prepare_edit_binding
+from agent.tools.path_safety import WorkspaceBoundary, WorkspaceSecurityError
+from agent.tools.write import prepare_write_binding, write_file
 
-        if not file_path.exists():
-            return f"错误：文件 '{path}' 不存在"
-
-        content = file_path.read_text(encoding="utf-8", errors="replace")
-        total_lines = len(content.splitlines())
-
-        if len(content) <=FILE_CONTENT_LIMIT:
-            return content
-
-        from agent.tools.outline import extract_file_outline
-
-        preview = content[:3000]
-        suffix = file_path.suffix.lower()
-        outline = extract_file_outline(content, suffix)
-        outline_text = "\n".join(outline[:200])
-
-        return (
-            f"[读取成功 - 文件较大，以下为概览]\n"
-            f"路径: {path}\n"
-            f"文件类型: {suffix or '(无后缀)'}\n"
-            f"总字符数: {len(content)}\n"
-            f"总行数: {total_lines}\n\n"
-            f"[开头预览（前 3000 字符）]\n"
-            f"{preview}\n\n"
-            f"[文件结构目录]\n"
-            f"{outline_text}\n\n"
-            f"[说明] 文件已成功读取。以上是概览信息。如需查看具体行范围，"
-            f"请使用 read_file_lines 工具。不要重复调用 read_file。"
-        )
-    except Exception as e:
-        return f"读取错误：{e}"
-
-
-@register_tool(
-    name="read_file_lines",
-    description=(
-        "按指定行号范围读取文件内容。适合在 read_file 查看概览后，"
-        "进一步查看某一段代码或文本。"
-    ),
-    parameters={
-        "path": {
-            "type": "string",
-            "description": "文件路径，可以是相对路径或绝对路径"
-        },
-        "start_line": {
-            "type": "integer",
-            "description": "起始行号（从 1 开始）"
-        },
-        "end_line": {
-            "type": "integer",
-            "description": "结束行号（从 1 开始，且必须 >= start_line）"
-        },
-    },
-    confirmation=_check_read_permission,
-    capability="file_read",
-    risk_level="medium",
-    output_policy="bounded_text",
+DEFAULT_FILE_LIMIT_BYTES = 200_000
+DEFAULT_LIST_LIMIT = 500
+DEFAULT_PRIVATE_ROOTS = (
+    ".ua",
+    "graphify-out",
+    ".claude",
+    ".codex",
+    ".opencode",
+    "config",
+    "session_snapshots",
+    "sessions",
+    "runs",
+    "workspace",
+    "memory",
+    "skills",
+    "node_modules",
+    "agent_log.jsonl",
+    "state.json",
+    "pytest.ini",
+    "CLAUDE.md",
 )
-def read_file_lines(path, start_line, end_line):
-    try:
-        file_path = Path(path)
-        if not file_path.exists():
-            return f"错误：文件 '{path}' 不存在"
-        if start_line < 1 or end_line < 1:
-            return "错误：start_line 和 end_line 必须 >= 1"
-        if start_line > end_line:
-            return "错误：start_line 不能大于 end_line"
-        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        total_lines = len(lines)
-        if start_line > total_lines:
-            return f"错误：start_line={start_line} 超出文件总行数 {total_lines}"
-        actual_end = min(end_line, total_lines)
-        selected = lines[start_line - 1:actual_end]
-        numbered_content = "\n".join(
-            f"{idx}: {line}" for idx, line in enumerate(selected, start=start_line)
+
+
+class _WorkspaceFilePolicy(DefaultToolPolicy):
+    identity = "workspace-file-policy-v1"
+
+    def evaluate(self, spec, arguments, binding):
+        if binding.get("denied") is True:
+            return PolicyDecision.DENY
+        return super().evaluate(spec, arguments, binding)
+
+
+def build_file_tool_registrations(
+    workspace_root: Path,
+    *,
+    protected_paths: tuple[Path, ...] = (),
+    private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+    max_file_bytes: int = DEFAULT_FILE_LIMIT_BYTES,
+    max_list_entries: int = DEFAULT_LIST_LIMIT,
+) -> tuple[RegisteredTool, ...]:
+    """返回四个 workspace-scoped 文件工具的 registrations。
+
+    capability factory 只贡献 registrations；composition root 显式拼接成唯一
+    `KernelToolRuntime`。每个 registration 绑定自己的 `ToolPolicy`，不按工具名路由。
+    """
+    if max_file_bytes < 1 or max_list_entries < 1:
+        raise ValueError("file tool limits must be positive")
+    boundary = WorkspaceBoundary(
+        workspace_root,
+        protected_paths=protected_paths,
+        private_roots=private_roots,
+    )
+
+    def safe_binding(operation):
+        def prepare(arguments):
+            try:
+                return operation(arguments)
+            except (OSError, UnicodeError, ValueError, WorkspaceSecurityError):
+                return {"denied": True, "reason": "workspace_file_policy"}
+
+        return prepare
+
+    file_policy = _WorkspaceFilePolicy()
+    return (
+        RegisteredTool(
+            _read_spec(),
+            lambda intent: boundary.read_text(
+                intent.arguments["path"], max_bytes=max_file_bytes
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: _inspect_read(boundary, arguments["path"])
+            ),
+            policy=file_policy,
+        ),
+        RegisteredTool(
+            _list_spec(),
+            lambda intent: "\n".join(
+                boundary.list_entries(
+                    intent.arguments["path"], max_entries=max_list_entries
+                )
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: _inspect_list(boundary, arguments["path"])
+            ),
+            policy=file_policy,
+        ),
+        RegisteredTool(
+            _write_spec(),
+            lambda intent: write_file(
+                boundary,
+                path=intent.arguments["path"],
+                content=intent.arguments["content"],
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: prepare_write_binding(
+                    boundary,
+                    path=arguments["path"],
+                    content=arguments["content"],
+                    max_bytes=max_file_bytes,
+                )
+            ),
+            policy=file_policy,
+        ),
+        RegisteredTool(
+            _edit_spec(),
+            lambda intent: edit_file(
+                boundary,
+                path=intent.arguments["path"],
+                old_text=intent.arguments["old_text"],
+                new_text=intent.arguments["new_text"],
+                max_bytes=max_file_bytes,
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: prepare_edit_binding(
+                    boundary,
+                    path=arguments["path"],
+                    old_text=arguments["old_text"],
+                    new_text=arguments["new_text"],
+                    max_bytes=max_file_bytes,
+                )
+            ),
+            policy=file_policy,
+        ),
+    )
+
+
+def build_file_tool_runtime(
+    workspace_root: Path,
+    *,
+    protected_paths: tuple[Path, ...] = (),
+    private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+    max_file_bytes: int = DEFAULT_FILE_LIMIT_BYTES,
+    max_list_entries: int = DEFAULT_LIST_LIMIT,
+) -> KernelToolRuntime:
+    """文件工具的独立 `KernelToolRuntime`，主要供测试与无 composition 的调用使用。
+
+    production 路径应通过 `agent.composition` 把 registrations 拼进唯一 runtime。
+    """
+    return KernelToolRuntime(
+        build_file_tool_registrations(
+            workspace_root,
+            protected_paths=protected_paths,
+            private_roots=private_roots,
+            max_file_bytes=max_file_bytes,
+            max_list_entries=max_list_entries,
         )
-        return (
-            f"[按行读取]\n"
-            f"路径: {path}\n"
-            f"范围: 第 {start_line} 行 - 第 {actual_end} 行\n"
-            f"总行数: {total_lines}\n\n"
-            f"{numbered_content}"
-        )
-    except Exception as e:
-        return f"读取错误：{e}"
+    )
+
+
+def _inspect_read(boundary: WorkspaceBoundary, path: str) -> dict:
+    boundary.inspect_readable(path)
+    return {"workspace_scoped": True}
+
+
+def _inspect_list(boundary: WorkspaceBoundary, path: str) -> dict:
+    boundary.inspect_directory(path)
+    return {"workspace_scoped": True}
+
+
+def _schema(properties: dict, required: list[str]) -> dict:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _read_spec() -> ToolSpec:
+    return ToolSpec(
+        name="read_file",
+        version="1",
+        description="Read one bounded UTF-8 workspace file.",
+        input_schema=_schema({"path": {"type": "string"}}, ["path"]),
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={"workspace_scoped": True, "sensitive_paths_denied": True},
+        output_limit_chars=DEFAULT_FILE_LIMIT_BYTES,
+    )
+
+
+def _list_spec() -> ToolSpec:
+    return ToolSpec(
+        name="list_files",
+        version="1",
+        description="List bounded non-sensitive entries in one workspace directory.",
+        input_schema=_schema({"path": {"type": "string"}}, ["path"]),
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={"workspace_scoped": True, "sensitive_names_redacted": True},
+        output_limit_chars=50_000,
+    )
+
+
+def _write_spec() -> ToolSpec:
+    return ToolSpec(
+        name="write_file",
+        version="1",
+        description="Atomically create or replace one bounded workspace file.",
+        input_schema=_schema(
+            {"path": {"type": "string"}, "content": {"type": "string"}},
+            ["path", "content"],
+        ),
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={"workspace_scoped": True, "atomic_replace": True},
+        output_limit_chars=1_000,
+    )
+
+
+def _edit_spec() -> ToolSpec:
+    return ToolSpec(
+        name="edit_file",
+        version="1",
+        description="Atomically replace one unique text occurrence in a workspace file.",
+        input_schema=_schema(
+            {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            ["path", "old_text", "new_text"],
+        ),
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={"workspace_scoped": True, "unique_match": True},
+        output_limit_chars=1_000,
+    )

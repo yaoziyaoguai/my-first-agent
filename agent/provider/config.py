@@ -1,196 +1,103 @@
-"""AgentLoop provider/API configuration authority.
-
-本模块只描述真实/兼容 provider 的 API 配置：provider_type、provider_name、
-api key env、base_url、model、auth scheme、request path 和 streaming 能力。
-dogfood real-api path 与 AgentLoop provider factory 以这里为权威；不要回退到
-legacy ``config.py`` 的 import-time 常量，也不要读取 ``agent/local_config.py``
-里的本地 customization metadata。
-"""
+"""Minimal Runtime Kernel 的显式 Provider 配置。"""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from agent.provider.protocol import ProviderConfigurationError
+from agent.runtime.contracts import ProviderDescriptor
 
-PROVIDER_ENV = "MY_FIRST_AGENT_LLM_PROVIDER"
-PROVIDER_NAME_ENV = "MY_FIRST_AGENT_LLM_PROVIDER_NAME"
-GENERIC_MODEL_ENV = "MY_FIRST_AGENT_LLM_MODEL"
-GENERIC_BASE_URL_ENV = "MY_FIRST_AGENT_LLM_BASE_URL"
-AUTH_SCHEME_ENV = "MY_FIRST_AGENT_LLM_AUTH_SCHEME"
-REQUEST_PATH_ENV = "MY_FIRST_AGENT_LLM_REQUEST_PATH"
-COMPATIBILITY_MODE_ENV = "MY_FIRST_AGENT_LLM_COMPATIBILITY_MODE"
-MAX_TOKENS_ENV = "MY_FIRST_AGENT_LLM_MAX_TOKENS"
-TIMEOUT_ENV = "MY_FIRST_AGENT_LLM_TIMEOUT"
-
-SUPPORTED_PROVIDER_TYPES = {
-    "anthropic_native",
-    "anthropic_compatible",
-    "openai_native",
-    "openai_compatible",
-    "fake",
-}
+SUPPORTED_PROVIDER_TYPES = frozenset(
+    {"fake", "anthropic_compatible", "openai_compatible"}
+)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AgentProviderConfig:
+    """Composition root 注入的配置；本模块不读取环境或持久化 credential。"""
+
     provider_type: str
-    provider_name: str | None = None
-    api_key: str | None = field(default=None, repr=False, compare=False)
-    api_key_env: str | None = None
+    model: str = "fake"
     base_url: str | None = None
-    model: str | None = None
+    credential: str | None = field(default=None, repr=False, compare=False)
     max_tokens: int = 4096
     timeout: float = 30.0
-    supports_tools: bool = True
-    supports_streaming: bool = False
-    auth_scheme: str = "auto"
-    request_path: str = "/v1/messages"
-    compatibility_mode: str = "anthropic_messages"
+    auth_scheme: str | None = None
+    request_path: str | None = None
+    thinking_mode: str | None = None
 
     def __post_init__(self) -> None:
         provider_type = self.provider_type.strip().lower()
         if provider_type not in SUPPORTED_PROVIDER_TYPES:
-            raise ProviderConfigurationError("unknown_provider")
+            raise ProviderConfigurationError()
+        if not self.model.strip():
+            raise ProviderConfigurationError()
+        if self.max_tokens < 1 or self.timeout <= 0:
+            raise ProviderConfigurationError()
+
         object.__setattr__(self, "provider_type", provider_type)
-        provider_name = (self.provider_name or provider_type).strip()
-        if not provider_name:
-            provider_name = provider_type
-        object.__setattr__(self, "provider_name", provider_name)
-        if self.auth_scheme not in {"auto", "x-api-key", "bearer"}:
-            raise ProviderConfigurationError("unsupported_auth_scheme")
-        if self.max_tokens <= 0:
-            raise ProviderConfigurationError("invalid_max_tokens")
-        if self.timeout <= 0:
-            raise ProviderConfigurationError("invalid_timeout")
+        object.__setattr__(self, "model", self.model.strip())
+        if self.base_url is not None:
+            object.__setattr__(self, "base_url", self.base_url.rstrip("/"))
 
-    def redacted_summary(self) -> dict[str, object]:
-        """Return diagnostic config without exposing secret values."""
+        if provider_type == "fake":
+            if (
+                self.auth_scheme is not None
+                or self.request_path is not None
+                or self.thinking_mode is not None
+            ):
+                raise ProviderConfigurationError()
+            return
 
-        return {
-            "provider_type": self.provider_type,
-            "provider_name": self.provider_name,
-            "api_key": "SET" if self.api_key else "empty",
-            "api_key_env": self.api_key_env,
-            "base_url": "SET" if self.base_url else "empty",
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "timeout": self.timeout,
-            "supports_tools": self.supports_tools,
-            "supports_streaming": self.supports_streaming,
-            "auth_scheme": self.auth_scheme,
-            "request_path": self.request_path,
-            "compatibility_mode": self.compatibility_mode,
-        }
+        # Kernel v1 不持久化 provider-specific opaque reasoning continuity。
+        # 仅允许 OpenAI-compatible composition 显式请求关闭这类输出；默认不向
+        # 其他兼容端点添加 vendor-specific 字段，也不允许启用无法安全回放的模式。
+        if self.thinking_mode is not None and (
+            provider_type != "openai_compatible" or self.thinking_mode != "disabled"
+        ):
+            raise ProviderConfigurationError()
 
-
-def _env_get(env: Mapping[str, str], name: str) -> str | None:
-    value = env.get(name)
-    if value is None:
-        return None
-    value = value.strip()
-    return value or None
-
-
-def _first_env(env: Mapping[str, str], names: tuple[str, ...]) -> tuple[str | None, str | None]:
-    for name in names:
-        value = _env_get(env, name)
-        if value:
-            return value, name
-    return None, None
-
-
-def _int_env(env: Mapping[str, str], name: str, default: int) -> int:
-    value = _env_get(env, name)
-    if not value:
-        return default
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise ProviderConfigurationError("invalid_max_tokens") from exc
-    return parsed
-
-
-def _float_env(env: Mapping[str, str], name: str, default: float) -> float:
-    value = _env_get(env, name)
-    if not value:
-        return default
-    try:
-        parsed = float(value)
-    except ValueError as exc:
-        raise ProviderConfigurationError("invalid_timeout") from exc
-    return parsed
-
-
-def load_agent_provider_config(
-    provider_type: str | None = None,
-    *,
-    env: Mapping[str, str] | None = None,
-) -> AgentProviderConfig:
-    """Load provider config from environment without reading .env files."""
-
-    if env is None:
-        env = os.environ
-    selected = (provider_type or _env_get(env, PROVIDER_ENV) or "anthropic_native").lower()
-    if selected not in SUPPORTED_PROVIDER_TYPES:
-        raise ProviderConfigurationError("unknown_provider")
-
-    if selected in {"anthropic_native", "anthropic_compatible"}:
-        key, key_env = _first_env(env, ("ANTHROPIC_API_KEY",))
-        model, _model_env = _first_env(
-            env,
-            ("ANTHROPIC_MODEL", "MODEL_NAME", GENERIC_MODEL_ENV),
+        if not self.base_url:
+            raise ProviderConfigurationError()
+        default_scheme = (
+            "x-api-key" if provider_type == "anthropic_compatible" else "bearer"
         )
-        base_url, _base_url_env = _first_env(
-            env,
-            ("ANTHROPIC_BASE_URL", GENERIC_BASE_URL_ENV),
+        auth_scheme = self.auth_scheme or default_scheme
+        if auth_scheme not in {"bearer", "x-api-key"}:
+            raise ProviderConfigurationError()
+        object.__setattr__(self, "auth_scheme", auth_scheme)
+
+        default_path = (
+            "/v1/messages"
+            if provider_type == "anthropic_compatible"
+            else "/v1/chat/completions"
         )
-        supports_streaming = selected == "anthropic_native"
-        auth_scheme = _env_get(env, AUTH_SCHEME_ENV) or "auto"
-        request_path = _env_get(env, REQUEST_PATH_ENV) or "/v1/messages"
-        compatibility_mode = _env_get(env, COMPATIBILITY_MODE_ENV) or "anthropic_messages"
-        requires_base_url = selected == "anthropic_compatible"
-    elif selected in {"openai_native", "openai_compatible"}:
-        key, key_env = _first_env(env, ("OPENAI_API_KEY",))
-        model, _model_env = _first_env(env, ("OPENAI_MODEL", GENERIC_MODEL_ENV))
-        base_url, _base_url_env = _first_env(env, ("OPENAI_BASE_URL", GENERIC_BASE_URL_ENV))
-        supports_streaming = False
-        auth_scheme = _env_get(env, AUTH_SCHEME_ENV) or "bearer"
-        request_path = _env_get(env, REQUEST_PATH_ENV) or "/v1/chat/completions"
-        compatibility_mode = _env_get(env, COMPATIBILITY_MODE_ENV) or "openai"
-        requires_base_url = selected == "openai_compatible"
-    else:
-        key = None
-        key_env = None
-        model, _model_env = _first_env(env, ("LLM_FAKE_MODEL", GENERIC_MODEL_ENV))
-        base_url = None
-        supports_streaming = False
-        auth_scheme = "auto"
-        request_path = ""
-        compatibility_mode = "fake"
-        requires_base_url = False
+        request_path = self.request_path or default_path
+        if not request_path.startswith("/"):
+            request_path = f"/{request_path}"
+        object.__setattr__(self, "request_path", request_path)
 
-    if selected != "fake" and not key:
-        raise ProviderConfigurationError("api_key_missing")
-    if selected != "fake" and not model:
-        raise ProviderConfigurationError("model_missing")
-    if requires_base_url and not base_url:
-        raise ProviderConfigurationError("base_url_missing")
+    @property
+    def endpoint(self) -> str:
+        if self.provider_type == "fake" or self.base_url is None:
+            raise ProviderConfigurationError()
+        return f"{self.base_url}{self.request_path}"
 
-    return AgentProviderConfig(
-        provider_type=selected,
-        provider_name=_env_get(env, PROVIDER_NAME_ENV) or selected,
-        api_key=key,
-        api_key_env=key_env,
-        base_url=base_url,
-        model=model or "fake-llm",
-        max_tokens=_int_env(env, MAX_TOKENS_ENV, 4096),
-        timeout=_float_env(env, TIMEOUT_ENV, 30.0),
-        supports_tools=selected != "fake",
-        supports_streaming=supports_streaming,
-        auth_scheme=auth_scheme,
-        request_path=request_path,
-        compatibility_mode=compatibility_mode,
-    )
+    def descriptor(self) -> ProviderDescriptor:
+        if self.provider_type == "fake":
+            return ProviderDescriptor(
+                family="fake",
+                model=self.model,
+                canonical_destination="http://127.0.0.1/fake",
+                trust_profile="local-no-network-v1",
+                remote=False,
+            )
+        return ProviderDescriptor(
+            family=self.provider_type,
+            model=self.model,
+            canonical_destination=self.endpoint,
+            trust_profile="remote-https-v1",
+            remote=True,
+        )
+
+__all__ = ["AgentProviderConfig", "SUPPORTED_PROVIDER_TYPES"]

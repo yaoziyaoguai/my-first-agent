@@ -1,0 +1,23 @@
+{
+  "schema": "first-agent-012-e3-receipt-v1",
+  "observed_at": "2026-08-02T16:44:33.636792+00:00",
+  "provider": {
+    "family": "openai_compatible",
+    "model": "deepseek-v4-flash",
+    "destination_digest": "7f7852e00ad2ecf276e5427a4774765fbd3c9bb1c26ede293f7c2566590c6ad0"
+  },
+  "request_count": 5,
+  "goal_id": "e3-report-create",
+  "goal_revision": 1,
+  "checkpoint_token": "sha256:8e691ed7ae23af99cc4d3e3ea0a9982a911ed2ed129d2dd4128deaa3151a8a7c",
+  "artifact_digest": "d65d8c0bcb5f6b41efd711394821891b2af2918d494af071aa2091b7648a6585",
+  "claims": {
+    "disclosure_zero_before_ack": true,
+    "direct_answer_has_no_goal": true,
+    "goal_persisted_before_effect": true,
+    "approved_effect_exactly_once": true,
+    "deterministic_evidence_verified_done": true,
+    "restart_same_goal_without_send": true,
+    "checkpoint_excludes_secret_header_and_system_prompt": true
+  }
+}

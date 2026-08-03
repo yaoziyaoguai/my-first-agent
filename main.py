@@ -1,799 +1,490 @@
-"""程序入口：输入循环 + 调用 session 模块。"""
+"""`first-agent` 的最小组合根；业务语义全部由 Runtime Kernel 拥有。"""
+
+from __future__ import annotations
+
+import argparse
 import contextlib
-import io
+import os
 import sys
-import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
 
-from agent.checkpoint import load_checkpoint
-from agent.cli.commands import dispatch_maintenance_command
-from agent.cli.display import (
-    _forward_runtime_event_to_legacy_callbacks,
-    _merge_chat_outputs,
-    _render_runtime_event_for_simple_cli,
-    _textual_stdout_fallback_output,
+from agent.cli.app import run_repl
+from agent.cli.render import TerminalRenderer
+from agent.composition import (
+    build_composition,
+    build_mcp_resources,
+    build_memory_resources,
+    build_owner_preference_resources,
+    build_tool_registrations,
+    load_mcp_catalog_file,
+    provider_trust_profile,
+    workspace_scope_digest_for,
 )
-from agent.cli.input_backends import (
-    INPUT_BACKEND_ENV,  # noqa: F401 - 保持 main.INPUT_BACKEND_ENV 兼容测试/旧入口
-    _selected_input_backend,
-    read_user_input,  # noqa: F401 - main.read_user_input 是既有 public seam
-    read_user_input_event,
-)
-from agent.cli_renderer import render_onboarding, render_provider_mode_banner, render_status_line
-from agent.core import chat, get_state
-from agent.display_events import (
-    EVENT_ASSISTANT_DELTA,
-    DisplayEvent,
-    RuntimeEvent,
-    render_runtime_event_for_cli,
-)
-from agent.event_log import EventLogWriter
-from agent.input_intents import classify_user_input
-from agent.memory_review import run_pending_review_cli
-from agent.session import (
-    finalize_session,
-    handle_double_interrupt,
-    handle_interrupt_choice,
-    handle_interrupt_with_checkpoint,
-    handle_interrupt_without_checkpoint,
-    handle_resume_choice,
-    init_session,
-    summarize_session_status,
-    try_resume_from_checkpoint,
-)
-from config import load_legacy_dotenv_config
-
-CTRL_C_DOUBLE_PRESS_WINDOW = 1.0  # 秒
+from agent.continuity.restart import project_restart
+from agent.continuity.sessions import StartupDisposition, open_workspace_session
+from agent.mcp.catalog import McpCatalogError
+from agent.memory.store import MemoryStore, MemoryStoreError
+from agent.provider.config import AgentProviderConfig
+from agent.provider.factory import build_model_provider
+from agent.provider.fake_provider import FakeProvider
+from agent.provider.protocol import ProviderError
+from agent.runtime.checkpoint import CheckpointError
+from agent.runtime.context import ContextLimits
+from agent.runtime.loop import InvocationLimits
+from agent.scheduler.caller import ScheduledOccurrenceCaller, create_or_load_occurrence_store
+from agent.scheduler.contracts import ScheduledOccurrence, SchedulerError
+from agent.skill.catalog import SkillCatalogError
+from agent.subagent.contracts import ChildProfile
+from agent.subagent.runner import ChildAgentRunner
+from agent.subagent.tools import build_subagent_tool_registrations
+from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS
+from agent.tui.adapter import QueueingEventSink
 
 
-def _run_textual_runtime_turn(
-    user_input: str,
+def build_parser() -> argparse.ArgumentParser:
+    # allow_abbrev=False：--state/--resume 已按 012 合同移除；禁止 argparse 前缀缩写
+    # 把 --state 静默复活为 --state-root 的兼容别名。
+    parser = argparse.ArgumentParser(prog="first-agent", allow_abbrev=False)
+    parser.add_argument(
+        "--state-root",
+        type=Path,
+        help="override the owner-only product state root",
+    )
+    parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--provider",
+        choices=("fake", "anthropic_compatible", "openai_compatible"),
+        default="fake",
+    )
+    parser.add_argument("--model")
+    parser.add_argument("--base-url")
+    parser.add_argument("--credential-env", default="FIRST_AGENT_API_KEY")
+    parser.add_argument(
+        "--thinking-mode",
+        choices=("disabled",),
+        help="explicitly disable provider-specific opaque thinking continuity",
+    )
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--skill-root",
+        action="append",
+        default=[],
+        type=Path,
+        help="explicit trusted Skill root directory (repeatable)",
+    )
+    parser.add_argument(
+        "--mcp-catalog",
+        type=Path,
+        help="explicit operator-approved MCP stdio catalog JSON",
+    )
+    parser.add_argument(
+        "--mcp-safety-state",
+        type=Path,
+        help="owner-only durable MCP safety latch state path",
+    )
+    memory = parser.add_mutually_exclusive_group()
+    memory.add_argument(
+        "--memory-create",
+        type=Path,
+        help="exclusively create a new workspace Memory store",
+    )
+    memory.add_argument(
+        "--memory-store",
+        type=Path,
+        help="load an existing workspace Memory store",
+    )
+    parser.add_argument(
+        "--memory-profile",
+        default="default",
+        help="non-secret provider trust profile id bound to the Memory store",
+    )
+    parser.add_argument(
+        "--subagent",
+        action="store_true",
+        help="enable the bounded subagent__delegate tool using the same provider",
+    )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="launch the optional Textual TUI instead of the plain REPL",
+    )
+    return parser
+
+
+def _build_child_profile(args, workspace_scope_digest: str) -> ChildProfile:
+    import hashlib
+
+    max_input = 4_000
+    max_output = 1_000
+    # child hard deadline：一次有限时 provider call（≤ args.timeout）加有界本地处理余量。
+    # 进程隔离路径以此为 wall-clock cap；同步路径用它校验 provider deadline 不超 child cap。
+    hard_deadline_seconds = args.timeout + 10.0
+    limits_digest = hashlib.sha256(
+        f"{max_input}:{max_output}:{hard_deadline_seconds}".encode()
+    ).hexdigest()
+    return ChildProfile(
+        runner_version="subagent-v1",
+        provider_profile_id=args.memory_profile,
+        provider_destination=args.base_url or "local",
+        workspace_scope_digest=workspace_scope_digest,
+        max_input_tokens=max_input,
+        max_output_tokens=max_output,
+        limits_digest=limits_digest,
+        hard_deadline_seconds=hard_deadline_seconds,
+    )
+
+
+def _open_memory_store(args, workspace):
+    scope = workspace_scope_digest_for(workspace)
+    destination = args.base_url or "local"
+    profile = provider_trust_profile(
+        profile_id=args.memory_profile,
+        provider_family=args.provider,
+        destination=destination,
+    )
+    selected = args.memory_create or args.memory_store
+    if selected is None:
+        return None, scope
+    resolved = selected.resolve(strict=False)
+    if resolved == workspace or resolved.is_relative_to(workspace):
+        raise ValueError("memory store must remain outside the tool workspace")
+    if args.memory_create is not None:
+        return (
+            MemoryStore.create(resolved, workspace_scope_digest=scope, profile=profile),
+            scope,
+        )
+    return (
+        MemoryStore.load(resolved, workspace_scope_digest=scope, profile=profile),
+        scope,
+    )
+
+
+def _mcp_env_provider(forwarded):
+    # catalog 的 env_names 就是 operator 批准的转发 allowlist；只转发存在的项。
+    return {name: os.environ[name] for name in forwarded if name in os.environ}
+
+
+def _build_provider(args: argparse.Namespace):
+    if args.provider == "fake":
+        return FakeProvider()
+    if not args.model or not args.base_url:
+        raise ValueError("real HTTP providers require --model and --base-url")
+    credential = os.environ.get(args.credential_env)
+    if not credential:
+        raise ValueError(f"credential environment variable is not set: {args.credential_env}")
+    return build_model_provider(
+        AgentProviderConfig(
+            provider_type=args.provider,
+            model=args.model,
+            base_url=args.base_url,
+            credential=credential,
+            timeout=args.timeout,
+            thinking_mode=args.thinking_mode,
+        )
+    )
+
+
+def _build_provider_descriptor(args: argparse.Namespace):
+    if args.provider == "fake":
+        return AgentProviderConfig(provider_type="fake").descriptor()
+    if not args.model or not args.base_url:
+        raise ValueError("real HTTP providers require --model and --base-url")
+    return AgentProviderConfig(
+        provider_type=args.provider,
+        model=args.model,
+        base_url=args.base_url,
+        timeout=args.timeout,
+    ).descriptor()
+
+
+def main(
+    argv: Sequence[str] | None = None,
     *,
-    on_output_chunk: Callable[[str], None] | None = None,
-    on_display_event: Callable[[DisplayEvent], None] | None = None,
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-    event_log_writer: Any = None,
-    session_id: str = "",
-) -> tuple[str, str]:
-    """执行一轮 Textual 产品主路径，并返回 latest_output fallback。
-
-    这是 TUI-first 第一刀的边界函数：Textual 是正式产品交互路径，必须优先消费
-    RuntimeEvent，而不是把旧 CLI 的 print/stdout 当主语义。本阶段进一步收窄旧
-    callback 补丁：这里总是以 `on_runtime_event` 调用 core.chat，再把事件集中转发给
-    deprecated callback；不再把 `on_output_chunk` / `on_display_event` 直接作为
-    Textual 调 Runtime 的入口。stdout capture 仍保留，是为了兼容未迁移的 print-era
-    输出与旧测试；它不能继续扩大，也不能承载 RuntimeEvent 以外的输入协议、checkpoint、
-    runtime_observer、conversation.messages、Anthropic API messages、TaskState 状态机、
-    debug print、terminal observer log 或 simple CLI fallback 语义。
-
-    关键边界：streaming chunk 已经进入 TUI 后，final return / stdout capture
-    不能再作为第二条 Assistant 正文追加，否则长任务结束时会重复显示最后一条
-    assistant 消息。这里切断的是输出写入路径，不改变 Runtime 状态推进。
-    """
-
-    captured = io.StringIO()
-    runtime_event_outputs: list[str] = []
-    emitted_runtime_event = False
-    streamed_any_chunk = False
-
-    def forward_runtime_event(event: RuntimeEvent) -> None:
-        """记录并转发 RuntimeEvent，替代 stdout-era 输出猜测。
-
-        main.py 只做 I/O 适配：它不解释 Runtime 状态，不写 checkpoint，也不把
-        runtime_observer debug event 混进 TUI。这里保留旧 callback 转发，是为了
-        让未迁移的调用方继续工作；新 Textual Shell 会直接传 on_runtime_event，
-        simple CLI 也使用 RuntimeEvent renderer。旧 callback 在这里是 deprecated
-        compatibility bridge，不能继续成为新功能入口。
-        本阶段删除了 Textual 直接把旧 callback 传给 core.chat 的分支：core 只看见
-        RuntimeEvent sink，旧 callback 只在 main.py 这一层兼容转发。删除条件是旧
-        callback 调用方和 stdout fallback 都迁移到 RuntimeEvent iterator。
-        一旦本轮已经有 RuntimeEvent，stdout capture 就只能作为无事件旧路径的
-        兜底，不能再把同一条用户可见语义作为 completion 返回给 Textual。
-        """
-
-        nonlocal emitted_runtime_event, streamed_any_chunk
-        emitted_runtime_event = True
-        if on_runtime_event is not None:
-            on_runtime_event(event)
-            return
-
-        streamed_any_chunk = (
-            _forward_runtime_event_to_legacy_callbacks(
-                event,
-                on_output_chunk=on_output_chunk,
-                on_display_event=on_display_event,
-            )
-            or streamed_any_chunk
-        )
-
-        if on_output_chunk is None and on_display_event is None:
-            rendered = render_runtime_event_for_cli(event)
-            if rendered:
-                runtime_event_outputs.append(rendered)
-
-    with contextlib.redirect_stdout(captured):
-        reply = chat(
-            user_input,
-            on_runtime_event=forward_runtime_event,
-            event_log_writer=event_log_writer,
-            session_id=session_id,
-        )
-    if emitted_runtime_event and runtime_event_outputs:
-        latest_output = _merge_chat_outputs(
-            reply,
-            "".join(runtime_event_outputs),
-        )
-        return reply, latest_output
-    if emitted_runtime_event and on_runtime_event is not None:
-        # Textual 主路径已经通过 on_runtime_event 实时追加了用户可见内容。这里不再
-        # 合并 captured stdout，避免旧 print-era 文案把同一语义作为 final reply
-        # 再盖到 Assistant 占位上。若本轮完全没有 RuntimeEvent，后面的 stdout
-        # fallback 仍会兜住尚未迁移的 session/异常旧输出。
-        return reply, reply.strip()
-    if streamed_any_chunk:
-        # 已经通过 output.chunk 进入 conversation view，stdout capture 只保留
-        # 非 assistant 的控制型返回；避免同一 assistant 文本再走 completion。
-        return reply, reply.strip()
-    latest_output = _textual_stdout_fallback_output(reply, captured.getvalue())
-    return reply, latest_output
-
-
-def _run_simple_cli_runtime_turn(
-    user_input: str, *, event_log_writer: Any = None, session_id: str = ""
-) -> tuple[str, str]:
-    """执行一轮 simple CLI fallback adapter。
-
-    simple CLI 现在也通过 RuntimeEvent renderer 接收用户可见输出，但它不是产品能力
-    的源头，也不能反过来决定 Textual TUI 的输入/确认/取消语义。这里保留 direct
-    print 是终端 adapter 的渲染行为；它不写 checkpoint、runtime_observer、
-    conversation.messages、Anthropic API messages 或 TaskState，也不把 simple CLI 的
-    `/multi`、EOF、KeyboardInterrupt 等输入协议混进 RuntimeEvent 输出边界。
-    """
-
-    simple_streamed_any_chunk = False
-    simple_assistant_parts: list[str] = []
-
-    def forward_simple_runtime_event(event: RuntimeEvent) -> None:
-        """simple CLI 主输出桥，避免 RuntimeEvent 又回落到 core.py print fallback。
-
-        这是第四阶段的收口点：simple CLI 与 Textual 一样消费 RuntimeEvent，只是渲染
-        目标不同。这里记录 assistant.delta 是为了防止 final return 又把已经流式输出
-        的正文打印一遍；这是兼容旧 return-value 语义的防重复保护，不应继续扩展成
-        新状态机，也不能塞入 checkpoint、runtime_observer、conversation.messages、
-        Anthropic API messages 或 TaskState 本体。
-        """
-
-        nonlocal simple_streamed_any_chunk
-        if event.event_type == EVENT_ASSISTANT_DELTA:
-            simple_assistant_parts.append(event.text)
-        simple_streamed_any_chunk = (
-            _render_runtime_event_for_simple_cli(event)
-            or simple_streamed_any_chunk
-        )
-
-    reply = chat(
-        user_input,
-        on_runtime_event=forward_simple_runtime_event,
-        event_log_writer=event_log_writer,
-        session_id=session_id,
-    )
-    if simple_streamed_any_chunk:
-        # core.py 在无 sink 时代负责补这个换行；simple CLI 接管 RuntimeEvent 后，
-        # 换行也必须留在 I/O adapter。这里不是业务输出，不能变成 RuntimeEvent。
-        print()
-
-    reply_text = reply.strip()
-    streamed_text = "".join(simple_assistant_parts).strip()
-    if simple_streamed_any_chunk and reply_text and reply_text == streamed_text:
-        return "", streamed_text
-    return reply, reply_text or streamed_text
-
-
-def _run_chat_for_backend(
-    user_input: str,
-    *,
-    backend: str,
-    on_output_chunk: Callable[[str], None] | None = None,
-    on_display_event: Callable[[DisplayEvent], None] | None = None,
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-    event_log_writer: Any = None,
-    session_id: str = "",
-) -> tuple[str, str]:
-    """按 UI adapter 分派一轮 Runtime 调用。
-
-    这是为了兼容现有测试和调用方保留的薄 dispatcher，不再承载具体交互语义。
-    Textual 产品路径和 simple CLI fallback 已拆到独立函数，避免 main.py 继续把
-    terminal input()/print 时代的行为当成 TUI 主路径。这里不能新增 RuntimeEvent 类型、
-    InputIntent、checkpoint 写入、状态机判断或新的 stdout 字符串过滤。
-    """
-
-    # user_input 通过统一 evidence recorder 写入，不再使用 legacy log_event。
-    # record_evidence 自动补齐 session_id / provider / entry / envelope 上下文，
-    # summary 以 evidence.recorded 路径为主事实源。
-    try:
-        from agent.evidence_recorder import record_evidence
-
-        _source = "unknown"
-        if backend == "textual":
-            _source = "tui"
-        elif not sys.stdin.isatty():
-            _source = "pipe"
-        else:
-            _source = "interactive"
-
-        _input_len = len(user_input)
-        _preview = user_input[:200] if _input_len <= 200 else user_input[:197] + "..."
-
-        record_evidence(
-            subsystem="session",
-            operation="user_input",
-            phase="input",
-            status="ok",
-            safe_summary=f"input len={_input_len} src={_source}",
-            content_persisted=False,
-            sensitive=False,
-            metadata={
-                "input_length": _input_len,
-                "backend": backend,
-                "source": _source,
-                "content_preview": _preview,
-            },
-        )
-    except Exception:
-        pass
-
-    if backend == "textual":
-        return _run_textual_runtime_turn(
-            user_input,
-            on_output_chunk=on_output_chunk,
-            on_display_event=on_display_event,
-            on_runtime_event=on_runtime_event,
-            event_log_writer=event_log_writer,
-            session_id=session_id,
-        )
-
-    return _run_simple_cli_runtime_turn(
-        user_input, event_log_writer=event_log_writer, session_id=session_id
-    )
-
-
-def _handle_textual_shell_input(
-    user_input: str,
-    on_output_chunk: Callable[[str], None] | None = None,
-    on_display_event: Callable[[DisplayEvent], None] | None = None,
-    on_runtime_event: Callable[[RuntimeEvent], None] | None = None,
-    *,
-    event_log_writer: Any = None,
-    session_id: str = "",
-) -> str:
-    """处理常驻 Textual Shell 提交的文本，并返回用户可见输出。
-
-    这里是 main.py 的 I/O 桥接层：TUI 不 import Runtime state，也不
-    save_checkpoint；main 负责复用现有 chat 流程，再把可展示文本交还给
-    conversation view。stdout capture 仍保留，是为了兜住尚未迁移的 print-era
-    session/异常/旧调用方文案；已经事件化的 assistant.delta、plan confirmation、
-    request_user_input、DisplayEvent 和工具 lifecycle 不应再依赖这层 capture。
-
-    本轮（slash command 整体下线）：以 `/` 起头的输入不再走 CommandRegistry/
-    handle_slash_command 分流，而是按普通自然语言输入交给 chat()。后续如要
-    补回类似能力，应通过自然语言归一 InputIntent + 明确 RuntimeEvent 用户确认
-    流来表达，不再恢复 `/xxx` 字符串协议。
-    """
-
-    intent = classify_user_input(
-        user_input,
-        source="tui",
-        state=get_state(),
-    )
-    # InputIntent 是 TUI adapter 进入 Runtime 前的只读分类：这里只用它集中
-    # empty/exit 这类 UI 控制输入，confirmation/request_user_input 仍交给
-    # core.chat() 按 TaskState 分派。不要把 intent 写进 checkpoint、messages、
-    # RuntimeEvent 或 Anthropic API messages，也不要把它扩展成状态机本体。
-    text = intent.normalized_text
-    if intent.kind == "empty":
-        return ""
-
-    if intent.kind == "exit":
-        return "[系统] 常驻 TUI 请按 Ctrl+Q 退出并保存会话。"
-
-    _reply, latest_output = _run_chat_for_backend(
-        text,
-        backend="textual",
-        on_output_chunk=on_output_chunk,
-        on_display_event=on_display_event,
-        on_runtime_event=on_runtime_event,
-        event_log_writer=event_log_writer,
-        session_id=session_id,
-    )
-    return latest_output
-
-
-def run_textual_main_loop(event_log_writer: Any = None, *, session_id: str = "") -> None:
-    """运行常驻 Textual backend。
-
-    one-shot TUI 的闪退闪回来自"提交即 app.exit，再由 main 重建 App"。这里改成
-    一个常驻 I/O Shell：Textual 只显示/收集 I/O，Runtime 仍通过 main 调用
-    chat()，checkpoint 仍由既有 Runtime/session 逻辑负责。
-    """
-
-    from functools import partial
-
-    from agent.input_backends.textual import run_textual_io_shell
-
-    handler = partial(
-        _handle_textual_shell_input,
-        event_log_writer=event_log_writer,
-        session_id=session_id,
-    )
-    run_textual_io_shell(chat_handler=handler)
-    finalize_session()
-
-
-def main_loop(event_log_writer: Any = None, *, session_id: str = ""):
-    last_interrupt_time = 0
-    latest_output = ""
-    last_status_line = ""
-
-    while True:
+    input_fn: Callable[[str], str] = input,
+    write_fn: Callable[[str], None] = print,
+) -> int:
+    args = build_parser().parse_args(argv)
+    # 唯一 close-stack owner：stdlib ExitStack。所有退出路径（正常、startup 失败、
+    # optional-dependency 失败、runtime 异常）都按注册逆序各关闭一次。
+    with contextlib.ExitStack() as close_stack:
         try:
-            backend = _selected_input_backend()
-            if backend in ("", "simple"):
-                status_line = render_status_line(summarize_session_status(get_state()))
-                if status_line != last_status_line:
-                    print(f"\n{status_line}")
-                    last_status_line = status_line
-
-            # P2 修复：resume / interrupt 选择不再在 session.py 里裸调 input()，
-            # 改为由 main_loop 通过正常输入后端收口读取。
-            state = get_state()
-            if state.task.status == "awaiting_resume_choice":
-                event = read_user_input_event(
-                    prompt_text="要继续这个任务吗？(y/n): ",
-                    latest_output="",
-                )
-                if event.envelope is not None:
-                    handle_resume_choice(event.envelope.raw_text)
-                continue
-
-            if state.task.status == "awaiting_interrupt_choice":
-                # 菜单已由 handle_interrupt_with_checkpoint 打印。
-                event = read_user_input_event(
-                    prompt_text="请选择 (1/2/3): ",
-                    latest_output="",
-                )
-                if event.envelope is not None:
-                    should_exit = handle_interrupt_choice(event.envelope.raw_text)
-                    if should_exit:
-                        break
-                continue
-
-            # v1.1 工具确认 UX 增强：awaiting_tool_confirmation 时展示
-            # 工具名、路径、操作、风险等上下文信息，让用户明确知道系统在等什么。
-            # 空输入时必须重提示选项，不能当作普通对话继续。
-            if state.task.status == "awaiting_tool_confirmation" and state.task.pending_tool:
-                _pending = state.task.pending_tool
-                _tname = _pending.get("tool", "?")
-                _tinput = _pending.get("input") or {}
-                _tpath = _tinput.get("path") or _tinput.get("file_path") or ""
-                _tcontent = _tinput.get("content")
-                _twrites = (
-                    "write" in _tname.lower()
-                    or "edit" in _tname.lower()
-                )
-                _tnetwork = "fetch" in _tname.lower()
-
-                # R-G04: trial-only auto-approval (default OFF; safe allowlist only).
-                from agent.trial_approval import can_trial_approve, record_trial_approval
-                if can_trial_approve(_tname, _tinput):
-                    record_trial_approval(_tname, _tinput)
-                    print(f"[trial] auto-approved: {_tname}")
-                    reply, new_latest_output = _run_chat_for_backend(
-                        "y",
-                        backend=backend,
-                        event_log_writer=event_log_writer,
-                        session_id=session_id,
+            workspace = args.workspace.resolve(strict=True)
+            if not workspace.is_dir():
+                raise ValueError("workspace must be a directory")
+            session = open_workspace_session(
+                workspace,
+                state_root=args.state_root,
+            )
+            projection = project_restart(session)
+            if session.disposition is StartupDisposition.SELECT_REQUIRED:
+                for candidate in session.candidates:
+                    write_fn(
+                        "Goal candidate: "
+                        f"{candidate.goal_id or '(conversation)'} "
+                        f"[{candidate.conversation_id}]"
                     )
-                    if new_latest_output:
-                        latest_output = new_latest_output
-                    if reply:
-                        print(reply)
-                    continue
-
-                print()
-                print("━" * 55)
-                print("需要你确认工具执行：")
-                print(f"  工具：{_tname}")
-                if _tpath:
-                    print(f"  路径：{_tpath}")
-                if isinstance(_tcontent, str):
-                    preview = _tcontent[:120].replace("\n", "\\n")
-                    if len(_tcontent) > 120:
-                        preview += f"...(共 {len(_tcontent)} 字符)"
-                    print(f"  内容预览：{preview}")
-                if _twrites:
-                    print("  风险：会写入文件")
-                if _tnetwork:
-                    print("  风险：会访问网络")
-                print()
-                print("请输入：")
-                print("  y       = 执行")
-                print("  n       = 拒绝")
-                print("  explain = 查看为什么需要确认")
-                print("  cancel  = 取消本轮工具调用")
-                print("━" * 55)
-
-                event = read_user_input_event(
-                    prompt_text="确认工具执行 (y/n/explain/cancel): ",
-                    latest_output="",
+                write_fn("Startup requires an exact SelectGoal action.")
+                return 2
+            if session.disposition is StartupDisposition.NEEDS_AUTHORITY:
+                write_fn("Startup stopped: workspace or authority binding drifted.")
+                return 2
+            if session.store is None or session.checkpoint_path is None:
+                raise ValueError("startup did not select a checkpoint")
+            store = session.store
+            protected_paths = (session.checkpoint_path,)
+            if projection.goal_id is not None:
+                write_fn(
+                    f"Goal {projection.goal_id} [{projection.goal_status.value}]: "
+                    f"{projection.user_outcome}"
                 )
-                intent = classify_user_input(
-                    event.envelope.raw_text if event.envelope is not None else None,
-                    source=event.event_source,
-                    state=get_state(),
-                    event_type=event.event_type,
-                )
-
-                if intent.kind == "cancel":
-                    raise KeyboardInterrupt
-                if intent.kind == "eof":
-                    finalize_session()
-                    break
-                if event.envelope is None:
-                    continue
-                user_input = intent.normalized_text
-
-                # 空输入重提示选项，不能当作普通对话继续
-                if intent.kind == "empty":
-                    print("(请选择 y / n / explain / cancel)")
-                    continue
-
-                if intent.kind == "exit":
-                    finalize_session()
-                    break
-
-                reply, new_latest_output = _run_chat_for_backend(
-                    user_input,
-                    backend=backend,
-                    event_log_writer=event_log_writer,
-                    session_id=session_id,
-                )
-                if new_latest_output:
-                    latest_output = new_latest_output
-                if reply:
-                    print(reply)
-                if backend in ("", "simple"):
-                    status_line = render_status_line(summarize_session_status(get_state()))
-                    if status_line != last_status_line:
-                        print(f"\n{status_line}")
-                        last_status_line = status_line
-                continue
-
-            event = read_user_input_event(latest_output=latest_output)
-            intent = classify_user_input(
-                event.envelope.raw_text if event.envelope is not None else None,
-                source=event.event_source,
-                state=get_state(),
-                event_type=event.event_type,
+            if session.disposition is StartupDisposition.RECOVERY_REQUIRED:
+                write_fn("Recovery required before the previous effect can continue.")
+            skill_roots = tuple(
+                root.resolve(strict=True) for root in (args.skill_root or ())
             )
-            # main_loop 是 simple CLI fallback 和 legacy one-shot textual backend 的调度层。
-            # InputIntent 只帮助这里统一 cancel/eof/empty/exit 的输入边界；
-            # plan/tool/request_user_input 等 Runtime 语义仍由 chat() 的 TaskState 分派处理。
-            # 不能把 intent 持久化，也不能把它混进 RuntimeEvent 输出边界。
-
-            # cancelled 复用现有 Ctrl+C interrupt 流程；它不是空输入。
-            if intent.kind == "cancel":
-                raise KeyboardInterrupt
-
-            # closed 表示输入会话结束/EOF，不进入 chat，也不触发 empty guard。
-            if intent.kind == "eof":
-                finalize_session()
-                break
-
-            if event.envelope is None:
-                continue
-
-            user_input = intent.normalized_text
-
-            # 空输入过滤
-            if intent.kind == "empty":
-                continue
-
-            if intent.kind == "exit":
-                finalize_session()
-                break
-
-            # Phase 5a T1 pending review CLI trigger（RFC §11.4 / §15.2）
-            # slash command 已整体下线，这里用普通文本触发 review。
-            # 这不是通用 command registry，只是 Phase 5a 的最小可用入口。
-            if user_input.strip().lower() in (
-                "review memory", "查看待确认记忆", "memory review", "review pending",
-            ):
-                print()
-                run_pending_review_cli()
-                continue
-
-            # WP3 onboarding：用户输入 help/帮助/onboarding 时展示能力与限制。
-            if user_input.strip().lower() in ("help", "帮助", "onboarding", "?"):
-                print()
-                print(render_onboarding())
-                continue
-
-            reply, new_latest_output = _run_chat_for_backend(
-                user_input,
-                backend=backend,
-                event_log_writer=event_log_writer,
-                session_id=session_id,
+            renderer = TerminalRenderer(write_fn)
+            context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
+            registrations = list(
+                build_tool_registrations(
+                    workspace=workspace,
+                    skill_roots=skill_roots,
+                    protected_paths=protected_paths,
+                    private_roots=DEFAULT_PRIVATE_ROOTS,
+                    max_tool_result_chars=context_limits.max_tool_result_chars,
+                )
             )
-            if new_latest_output:
-                latest_output = new_latest_output
-            if reply:
-                print(reply)
-            if backend in ("", "simple"):
-                status_line = render_status_line(summarize_session_status(get_state()))
-                if status_line != last_status_line:
-                    print(f"\n{status_line}")
-                    last_status_line = status_line
+            closeables: list[Callable[[], None]] = []
+            sources: list = []
+            workspace_scope_digest = workspace_scope_digest_for(workspace)
+            provider_descriptor = _build_provider_descriptor(args)
+            preference_resources = build_owner_preference_resources(
+                session.state_root / "owner-preferences.json",
+                provider_trust_digest=provider_descriptor.identity_digest,
+            )
+            registrations.extend(preference_resources.registrations)
+            sources.append(preference_resources.source)
+            if (args.mcp_catalog is None) != (args.mcp_safety_state is None):
+                raise ValueError("--mcp-catalog and --mcp-safety-state must be used together")
+            if args.mcp_catalog is not None:
+                mcp_resources = build_mcp_resources(
+                    load_mcp_catalog_file(args.mcp_catalog.resolve(strict=True)),
+                    # safety latch 由首次 invocation 惰性创建（文件缺失即 clear），
+                    # 不得要求 composition 时已存在——与 memory store 一样用 strict=False。
+                    args.mcp_safety_state.resolve(strict=False),
+                    env_provider=_mcp_env_provider,
+                )
+                registrations.extend(mcp_resources.registrations)
+                closeables.extend(mcp_resources.closeables)
+                # 立即注册进 close-stack：即使后续 startup 步骤失败也会逆序关闭。
+                for closeable in mcp_resources.closeables:
+                    close_stack.callback(closeable)
+            memory_store, memory_scope = _open_memory_store(args, workspace)
+            if memory_store is not None:
+                workspace_scope_digest = memory_scope
+                memory_resources = build_memory_resources(
+                    memory_store, workspace_scope_digest=workspace_scope_digest
+                )
+                registrations.extend(memory_resources.registrations)
+                sources.append(memory_resources.source)
+            provider = _build_provider(args)
+            if args.subagent:
+                from agent.subagent.contracts import (
+                    ChildProviderSpec,
+                    ProviderDeadlineCapability,
+                )
 
-        except KeyboardInterrupt:
-            now = time.time()
+                cap = ProviderDeadlineCapability.from_provider(provider)
+                if cap is not None and cap.receipt_type == "synchronous":
+                    # provider 结构化保证 generate 同步返回（如本地确定性 provider）→
+                    # in-process runner，synchronous receipt。
+                    runner = ChildAgentRunner(
+                        provider=provider,
+                        profile=_build_child_profile(args, workspace_scope_digest),
+                    )
+                else:
+                    # production HTTP provider 无 synchronous deadline_contract；socket
+                    # timeout 不能证明 provider 已终止，故走进程隔离 hard-deadline 路径：
+                    # child 在独立进程运行同一个 AgentRuntime，parent 拥有 process group 并
+                    # 在 hard_deadline 后 killpg + 确认退出。credential 仅按 env name 在子进程
+                    # 内读取，不跨进程序列化。
+                    from agent.subagent.process_runner import ChildProcessRunner
 
-            if now - last_interrupt_time < CTRL_C_DOUBLE_PRESS_WINDOW:
-                handle_double_interrupt()
-                break
+                    if args.provider != "fake" and (not args.model or not args.base_url):
+                        raise ValueError(
+                            "SubAgent over HTTP requires --model and --base-url"
+                        )
+                    spec = ChildProviderSpec(
+                        kind="http",
+                        provider_type=args.provider,
+                        model=args.model or "fake",
+                        base_url=args.base_url,
+                        credential_env_name=args.credential_env,
+                        timeout=args.timeout,
+                        thinking_mode=args.thinking_mode,
+                    )
+                    runner = ChildProcessRunner(
+                        provider_spec=spec,
+                        profile=_build_child_profile(args, workspace_scope_digest),
+                    )
+                registrations.extend(build_subagent_tool_registrations(runner))
+            # TUI 与 Runtime 共享同一个 QueueingEventSink；terminal renderer 不作
+            # runtime sink，故 model/tool progress 不写入 terminal writer。
+            event_sink = QueueingEventSink() if args.tui else renderer
+            composition = build_composition(
+                provider=provider,
+                provider_descriptor=provider_descriptor,
+                checkpoint_store=store,
+                tool_registrations=tuple(registrations),
+                event_sink=event_sink,
+                system_policy=(
+                    "You are a local task agent. Use only supplied tools, obey tool policy, "
+                    "and return concise final text. File-tool paths are relative to the "
+                    "selected workspace; '.' means its root. Use list_files on '.' when "
+                    "resource discovery is needed. Policy-hidden paths are unavailable. "
+                    "FIRST_AGENT_TRUSTED_CONTROL_CONTEXT is Runtime-generated authority: "
+                    "when proposing a Goal, copy its source_fact_id, "
+                    "workspace_identity_digest, and authority_snapshot exactly; propose "
+                    "criteria but leave admitted_criteria empty."
+                ),
+                context_limits=context_limits,
+                invocation_limits=InvocationLimits(),
+                closeables=tuple(closeables),
+                sources=tuple(sources),
+                workspace_scope_digest=session.workspace_identity.identity_digest,
+            )
+            runtime = composition.runtime
+        except (
+            CheckpointError,
+            OSError,
+            ProviderError,
+            ValueError,
+            SkillCatalogError,
+            McpCatalogError,
+            MemoryStoreError,
+        ) as error:
+            write_fn(f"Startup failed: {type(error).__name__}: {error}")
+            return 2
 
-            last_interrupt_time = now
+        if args.tui:
+            from agent.cli.actions import run_id_factory
+            from agent.tui.adapter import TuiAdapter
+            from agent.tui.app import TextualNotInstalledError, run_tui
 
-            if load_checkpoint():
-                should_exit = handle_interrupt_with_checkpoint()
-            else:
-                should_exit = handle_interrupt_without_checkpoint()
-
-            if should_exit:
-                break
-
-
-def _try_dispatch_mcp_bridge_lifecycle(report, mode: str, dry_run: bool) -> None:
-    """通过 disposable dispatcher 记录 MCP bridge lifecycle evidence。
-
-    模式与 session.py _try_dispatch_checkpoint_resume() 一致：
-    dispatcher 按需构建，仅用于 evidence recording。构建失败时静默跳过。
-    """
-    try:
-        from agent.runtime_integration.phase1_hook import build_phase1_dispatcher
-        from agent.runtime_integration.schema import (
-            RuntimeActionRequest,
-            RuntimeActionType,
-        )
-
-        dispatcher = build_phase1_dispatcher()
-        dispatcher.route(RuntimeActionRequest(
-            action_type=RuntimeActionType.MCP_BRIDGE_LIFECYCLE,
-            source="main.mcp_bridge",
-            parent_trace_id="",
-            payload={
-                "mode": mode,
-                "dry_run": dry_run,
-                "servers_configured": report.servers_configured,
-                "servers_evaluated": report.servers_evaluated,
-                "tools_discovered": report.tools_discovered,
-                "tools_registered": report.tools_registered,
-                "overall_decision": report.overall_decision,
-                "errors": report.errors,
-            },
-        ))
-    except Exception:
-        pass
+            adapter = TuiAdapter(
+                runtime,
+                store,
+                event_sink=event_sink,
+                control_inbox=composition.control_inbox,
+            )
+            try:
+                return run_tui(adapter, run_id_factory=run_id_factory("tui-run"))
+            except TextualNotInstalledError as error:
+                write_fn(str(error))
+                return 2
+        try:
+            return run_repl(
+                runtime,
+                store,
+                input_fn=input_fn,
+                write_fn=write_fn,
+                renderer=renderer,
+            )
+        except (CheckpointError, OSError) as error:
+            write_fn(f"Runtime state failed: {type(error).__name__}")
+            return 2
 
 
-def _init_mcp_bridge_if_enabled(*, session_id: str = "") -> None:
-    """MCP bridge thin wrapper：只在 MY_FIRST_AGENT_MCP_ENABLE=1 时运行。
-
-    不修改 core.py、不绕过 policy gate、默认 disabled。
-    bridge 在 init_session 之前运行，将 MCP tools 注册到 TOOL_REGISTRY。
-    Loop 2.4: bridge report 生成后通过 disposable dispatcher 记录
-    MCP_BRIDGE_LIFECYCLE evidence。
-    Loop 3.3: 支持 server_allowlist / config_path 显式传入；
-    bridge 成功后通过 set_mcp_bridge_result() 更新决策脊柱 mcp_available。
-    B7: session_id 用于 per-session MCP bridge state 隔离。
-    """
-    import os
-
-    # default-off 经统一 extension capability 契约评估（S3-G03）。
-    # 与既有手写 opt-in 判定（1/true/yes/on）语义一致，行为保持；让 MCP 激活
-    # 决策流经与 Skill/SubAgent 同一的 evaluate_activation 评估器（same-spine 一致）。
-    from agent.extension_capability import evaluate_activation
-    from agent.mcp_capability import MCP_CAPABILITY
-
-    if not evaluate_activation(MCP_CAPABILITY).allowed:
-        return
-
-    mode = os.getenv("MY_FIRST_AGENT_MCP_MODE", "registration").strip().lower()
-    dry_run = os.getenv("MY_FIRST_AGENT_MCP_DRY_RUN", "1").strip().lower() in (
-        "1", "true", "yes",
+def build_schedule_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="first-agent-schedule")
+    parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--state-root",
+        type=Path,
+        required=True,
+        help="scheduler state root outside workspace",
     )
-
-    # Loop 3.3: server_allowlist 从 env var 显式传入
-    raw_allowlist = os.getenv("MY_FIRST_AGENT_MCP_SERVER_ALLOWLIST", "").strip()
-    server_allowlist: frozenset[str] | None = None
-    if raw_allowlist:
-        server_allowlist = frozenset(
-            name.strip() for name in raw_allowlist.split(",") if name.strip()
-        )
-
-    # Loop 3.3: config_path 从 env var 显式传入（而非仅在 _load_mcp_config 内部读取）
-    config_path = os.getenv("MY_FIRST_AGENT_MCP_CONFIG", "") or None
-
-    try:
-        from agent.mcp_bridge import run_mcp_bridge, set_mcp_bridge_result
-
-        report = run_mcp_bridge(
-            mode=mode,  # type: ignore[arg-type]
-            config_path=config_path,
-            server_allowlist=server_allowlist,
-            dry_run=dry_run,
-        )
-        # Loop 3.3: 更新决策脊柱 mcp_available 状态
-        set_mcp_bridge_result(report.tools_registered, session_id=session_id)
-
-        # Loop 2.4: 通过 disposable dispatcher 记录 MCP_BRIDGE_LIFECYCLE evidence
-        _try_dispatch_mcp_bridge_lifecycle(report, mode, dry_run)
-        # bridge report 只打印短摘要，不打印 raw descriptor / raw result
-        print(
-            f"\n[MCP Bridge] mode={report.mode} "
-            f"servers={report.servers_evaluated}/{report.servers_configured} "
-            f"tools_discovered={report.tools_discovered} "
-            f"tools_blocked={report.tools_blocked} "
-            f"tools_registered={report.tools_registered} "
-            f"decision={report.overall_decision}"
-        )
-        if report.errors:
-            for err in report.errors:
-                print(f"  [MCP Bridge error] {err}")
-    except Exception as e:
-        print(f"[MCP Bridge] 初始化异常（已跳过）: {e}")
-
-
-def main(argv: list[str] | None = None) -> int:
-    # legacy CLI 入口显式 opt-in 读取项目 .env；普通 import config 不再产生
-    # os.environ 副作用，provider/real-api 路径继续走 scoped loader。
-    load_legacy_dotenv_config(project_root=Path(__file__).resolve().parent)
-
-    # PF-01: 启动时输出 provider mode 横幅，让用户明确当前是 fake/local 还是 real provider。
-    # local trial 第一 blocker——用户必须知道当前模式。
-    print(render_provider_mode_banner(), file=sys.stderr)
-
-    argv = list(sys.argv[1:] if argv is None else argv)
-
-    # R-G02: --provider fake forces FakeProvider (safe trial mode; default unchanged).
-    if "--provider" in argv:
-        _pi = argv.index("--provider")
-        if _pi + 1 < len(argv) and argv[_pi + 1].lower() == "fake":
-            import os as _os_rg02
-
-            _os_rg02.environ["MY_FIRST_AGENT_FORCE_FAKE"] = "1"
-            argv.pop(_pi + 1)
-            argv.pop(_pi)
-
-    # ── 入口命令解析（Entry Command Clarification, 2026-06-03）──
-    # --plain     → simple/plain CLI backend（默认，无需特殊处理）
-    # --tui       → Textual TUI backend（候选 v1 TUI 主入口）
-    # --textual   → --tui alias
-    # --shell     → deprecated（向后兼容：仍走 plain CLI，输出迁移提示）
-    _selected_entry = ""
-    if argv and argv[0] in {"--plain", "--tui", "--textual", "--shell", "shell"}:
-        _selected_entry = argv.pop(0).lstrip("-")
-
-    if _selected_entry in {"shell"}:
-        print(
-            "[entry] --shell is deprecated. Use --plain for CLI or --tui for Textual TUI.",
-            file=sys.stderr,
-        )
-        # 向后兼容：--shell 仍走 plain CLI，不突然改变行为
-        _selected_entry = ""
-
-    if _selected_entry in {"tui", "textual"}:
-        import os as _os
-        _os.environ[INPUT_BACKEND_ENV] = "textual"
-
-    if argv and argv[0] in {"--help", "-h", "help"}:
-        print(render_onboarding())
-        return 0
-
-    command_result = dispatch_maintenance_command(
-        argv,
-        project_root=Path(__file__).resolve().parent,
+    parser.add_argument("--schedule-id", required=True)
+    parser.add_argument("--occurrence-id", required=True)
+    parser.add_argument("--scheduled-for", required=True, help="canonical UTC time ...Z")
+    parser.add_argument("--message", required=True)
+    parser.add_argument(
+        "--provider",
+        choices=("fake", "anthropic_compatible", "openai_compatible"),
+        default="fake",
     )
-    if command_result is not None:
-        return command_result
-
-    # B7: session_id 在 main() startup 时生成（非 import-time），
-    # 必须在 MCP bridge 初始化之前生成，以确保 per-session MCP state 隔离。
-    _session_id = str(uuid4())
-
-    # MCP bridge：受控 readiness 层，默认 disabled。
-    # 设置 MY_FIRST_AGENT_MCP_ENABLE=1 后才在 session 初始化前运行。
-    # bridge 不进入 core loop、不改 checkpoint、不绕过 policy gate。
-    _init_mcp_bridge_if_enabled(session_id=_session_id)
-    _entry = _selected_entry or "plain"
-    _project_dir = Path(__file__).resolve().parent
-
-    # ── Evidence context 必须在 init_session 之前注入 ──
-    # init_session() 内部会调用 record_evidence(session.start)，
-    # 如果 _session_context 和 _event_log_writer 尚未注入，
-    # record_evidence 的 envelope 会缺少 session_id / provider / entry，
-    # 且 per-session events.jsonl 不会收到 session.start 事件。
-    _provider_info = {}
-    try:
-        from agent.session import _detect_provider_info
-        _provider_info = _detect_provider_info()
-    except Exception:
-        pass
-
-    try:
-        from agent.evidence_recorder import set_session_context
-        set_session_context(
-            session_id=_session_id,
-            entry=_entry,
-            provider_type=_provider_info.get("provider_type", "unknown"),
-            provider_model=_provider_info.get("model", "unknown"),
-        )
-    except Exception:
-        pass
-
-    # B7 Slice 4: per-session event log writer
-    _event_log_writer = EventLogWriter(session_dir=_project_dir / "sessions" / _session_id)
-
-    # Evidence storage hygiene: 将 EventLogWriter 注入 logger 模块，
-    # 使 save_session_snapshot 能将 session_snapshot_saved 事件写入 events.jsonl。
-    from agent.logger import set_session_event_log_writer
-    set_session_event_log_writer(_event_log_writer)
-
-    # Evidence recorder wiring: 注入 EventLogWriter 到 evidence_recorder，
-    # 使 record_evidence() 可自动写入 per-session events.jsonl。
-    try:
-        from agent.evidence_recorder import set_event_log_writer
-        set_event_log_writer(_event_log_writer)
-    except Exception:
-        pass
-
-    init_session(session_id=_session_id, entry=_entry)
-    try_resume_from_checkpoint()
-
-    # session.start 已由 init_session() 内 record_evidence(subsystem="session",
-    # operation="start") 统一写入 per-session events.jsonl。不再 duplicate direct
-    # append——每 session 只允许一个 logical session.start。
-
-    # Evidence readiness (2026-06-05): 每次 interactive run 启动时打印 session_id
-    # 和 evidence query command，使用户在复测 G1-G5 golden E2E 后可快速定位证据。
-    print(
-        f"\n[evidence] session={_session_id[:8]}  "
-        f"entry={_entry}  "
-        f"query: python main.py logs --session {_session_id[:8]} --include-observer",
-        file=sys.stderr,
+    parser.add_argument("--model")
+    parser.add_argument("--base-url")
+    parser.add_argument("--credential-env", default="FIRST_AGENT_API_KEY")
+    parser.add_argument(
+        "--thinking-mode",
+        choices=("disabled",),
+        help="explicitly disable provider-specific opaque thinking continuity",
     )
+    parser.add_argument("--timeout", type=float, default=30.0)
+    return parser
 
-    # P2 修复：try_resume_from_checkpoint 可能将 status 设为
-    # awaiting_resume_choice。进入 main_loop / textual shell 前必须先解析。
-    state = get_state()
-    if state.task.status == "awaiting_resume_choice":
-        if _selected_input_backend() == "textual":
-            # Textual 后端尚未初始化，用 raw input() 做一次性解析。
-            # Textual 是 TTY-only，不存在管道 stdin 抢占问题。
-            choice = input("要继续这个任务吗？(y/n): ").strip().lower()
-            handle_resume_choice(choice)
-        else:
-            # simple 后端：交给 main_loop 通过正常输入后端收口。
-            pass
 
-    if _selected_input_backend() == "textual":
-        run_textual_main_loop(event_log_writer=_event_log_writer, session_id=_session_id)
-    else:
-        main_loop(event_log_writer=_event_log_writer, session_id=_session_id)
-    return 0
+def run_schedule(
+    argv: Sequence[str] | None = None,
+    *,
+    write_fn: Callable[[str], None] = print,
+) -> int:
+    args = build_schedule_parser().parse_args(argv)
+    # 唯一 close-stack owner：与 main() 同一模式，逆序关闭一次。
+    with contextlib.ExitStack() as close_stack:
+        try:
+            workspace = args.workspace.resolve(strict=True)
+            if not workspace.is_dir():
+                raise ValueError("workspace must be a directory")
+            # state-root 在首次触发时可能尚不存在；由 checkpoint
+            # store 在 initialize 时创建并锁定为 0700 owner-only。overlap guard 必须在任何
+            # 创建之前用非严格 resolve 完成：一个尚不存在但词法上落在 workspace 内的路径
+            # 也要被拒绝，不能等到创建后才发现。已存在的目录仍须自身是 0700 owner 目录，
+            # 否则 store fail closed。
+            state_root = args.state_root.resolve(strict=False)
+            if state_root == workspace or state_root.is_relative_to(workspace):
+                raise ValueError("scheduler state root must remain outside the tool workspace")
+            occurrence = ScheduledOccurrence(
+                schedule_id=args.schedule_id,
+                occurrence_id=args.occurrence_id,
+                scheduled_for_utc=args.scheduled_for,
+                message=args.message,
+                workspace_scope_digest=workspace_scope_digest_for(workspace),
+            )
+            store, snapshot = create_or_load_occurrence_store(occurrence, state_root=state_root)
+            context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
+            composition = build_composition(
+                provider=_build_provider(args),
+                provider_descriptor=_build_provider_descriptor(args),
+                checkpoint_store=store,
+                tool_registrations=build_tool_registrations(
+                    workspace=workspace,
+                    protected_paths=(),
+                    private_roots=DEFAULT_PRIVATE_ROOTS,
+                    max_tool_result_chars=context_limits.max_tool_result_chars,
+                ),
+                event_sink=TerminalRenderer(write_fn),
+                system_policy="You are a scheduled task agent. Return concise final text.",
+                context_limits=context_limits,
+                invocation_limits=InvocationLimits(),
+                workspace_scope_digest=occurrence.workspace_scope_digest,
+            )
+            for closeable in reversed(composition.close_stack):
+                close_stack.callback(closeable)
+            report = ScheduledOccurrenceCaller(
+                composition.runtime, store, snapshot, occurrence
+            ).run_once()
+        except (CheckpointError, OSError, ProviderError, ValueError, SchedulerError) as error:
+            write_fn(f"Schedule failed: {type(error).__name__}: {error}")
+            return 2
+        write_fn(report.to_json())
+        if report.occurrence_status == "completed":
+            return 0
+        if report.occurrence_status == "needs_human":
+            return 1
+        return 2
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

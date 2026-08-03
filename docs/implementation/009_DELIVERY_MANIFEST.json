@@ -1,0 +1,7106 @@
+{
+  "schema": "my-first-agent/delivery-manifest/v2",
+  "baseline_commit": "7d935ac4af7121c54e1bdcc600763c3f0fbf54c2",
+  "entries": [
+    {
+      "path": ".gitignore",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a9e3809025e036cb531ffc681830789396157b55f18bdf6d8a0dff693346ffdc",
+      "git_mode": "100644"
+    },
+    {
+      "path": "AGENTS.md",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "7722cb5afd295c3c1ce75d9965660024120167c65ff2123fabb67f71975a3d94",
+      "git_mode": "100644"
+    },
+    {
+      "path": "README.md",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "783703d0a6082052280bbea8be15572496d8752d133d787dab178e567481e293",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/__init__.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1678c49e623bd77af5667daa5773cf0d5af6798826e51e3b2d8d2de5182d3279",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/acceptance_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/action_scheduler.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/audit_observability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/capability_status.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/checkpoint.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/checks.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/cli/__init__.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c81276e4b5ac210cf6866b54674d4ddffe4fa0d9c594cf43ce37caaf07c418df",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/cli/actions.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "96ec953b8e12f83ac37c4cdba4cd7936b86923150658211a8719499a71ebefaa",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/cli/app.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "0d62117d17b5a03c20f14d8d07198acf51969e24bb3d48e78dc45867721c7770",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/cli/commands.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/cli/display.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/cli/input_backends.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/cli/render.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9d126e1b784bf241ecb3abfaaef336c239e66eb5f17cf708316c53eeac1fb528",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/cli_commands.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/cli_renderer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/composition.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b395518c4c37c07d931fd374bbd61a8fd03e6c13a5bf5d40a190d4a43a20d2ed",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/confirm_handlers.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/dispatcher.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/memory.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/plan.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/tool.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/confirmation/user_input.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/context_builder.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/conversation_events.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/core.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/core_contexts.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/display_events.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/evaluation_honesty.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/event_log.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/evidence_persistence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/evidence_recorder.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/evidence_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/evidence_verifier.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/extension_capability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/extension_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/health_check.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/health_report.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/input_backends/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/input_backends/simple.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/input_backends/textual.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/input_intents.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/input_resolution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/ledger_audit_alignment.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/ledger_summary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/local_artifacts.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/local_config.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/local_demo.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/local_trace.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/log_cleanup.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/log_viewer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/logger.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/loop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/loop_context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp/bridge.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "42f3771036d8bc756aa930686d7207c806b5004c29bf657b4702c038bc7e4d5e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp/catalog.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "ccfd3c4d2586675ae029b872ddff9bd30cbbd0d7c902a1750c5e3ff1ac89fffd",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp/contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f68871961cff6ae09cd944d65fac1014b3cea2e9f13e4c7e4cbcc142bffac799",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp/safety.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "77437c925f08c352cd7998b729c2798ff39de518043a27532f62ae2388d67c8c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp/tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c3aaee4c0f0ff5e9700c2be32a473ab5f3f87c60f4f6572996eaf95673068ad2",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/mcp_audit.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_bridge.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_capability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_config.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_config_cli.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_config_presenter.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_config_service.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_external_readiness.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_models.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_sanitizer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/mcp_stdio.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/memory/contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "73d8891e611214f656166dce46b98416999892abee5117ed9fa12d85ad414fe7",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/memory/source.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "bb94133aeb8ae036c8b4b5d38fb23d8b1ec82d3a0bf97d653c9a70143a31d7c2",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/memory/store.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "664a07968ce177da27be8b898eddfd98b02c6f17803b5d6e0cb6dbd6a94206a5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/memory/tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "070026b90117832fbc9680f62a428f16d0adf2b889f401edfb44608407fff32c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/memory_archive.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_confirmation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_confirmation_forms.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation_engine.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation_llm.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation_loader.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation_pipeline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_consolidation_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_contracts.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_emergence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_extraction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_extraction_bridge.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_extraction_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_fs_store.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_index.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_interaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_l2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_maintenance_cli.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_operations.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_owner.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_provider.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_runtime.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_runtime_hooks.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_snapshot_generator.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_store.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/memory_suggestions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/model_call.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/model_output_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/model_output_resolution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/pending_confirmation_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/pending_requests.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/plan_schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/planner.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/policy_decision.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/prompt_builder.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/protocol_debug.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/__init__.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1e3e842b31b8933b1ea784d503f189803828ec314c5158118201548fe11e8a0b",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/anthropic_http.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "3b02a1b3ca86cd2fe5387ddc18309821d743edf07629d3b15302cb2c26d8ad39",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/anthropic_native.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/config.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "41ab9274b5346197e01f51fdf17f2c23503a8974558f2650fbb41c230b9d355e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/diagnostics.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/factory.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "93f9baf9e4a075f4fc35cb4b2d904c4f0f914bbce937c9dc630dd12834fa39f4",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/fake_provider.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "920f0cac606c7c17966b38db3a544468824013174430715fbf5cd7bd048a274c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/legacy_adapter.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/normalize.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "00d47b6692abd56e5d867fc65658dfc4b2f5b7234b13e0eaa31b5c8db0844ab5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/openai_http.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "3af1a356eb089a23ac8da3246b255160be532d30e69610efa38eaa0551882c27",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/openai_native.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/profiles.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/protocol.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "67879c353af36c61d42581feb95677ce9c9ed165ad1a8ec69f9f0307606cd607",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/provider/simple_config.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider/streaming.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/provider_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/response_handlers.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "bd427dd70ad8742ba48517c16e216214728b97d3a10cfd71c91a9a8e78fcce74",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/checkpoint.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "752a3cf78ee9b7198b99c7997429ff5de52c5f91857fd15d1a725ce3ba6d2a96",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "19b2cafadf188e5336c8677f2ad00de2061aa7775bfa76e9498628afb6e6a64a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e9c97bab9230cd3470d093e3bbab338d89c80e1e7907b87bef5b7f01d17ee456",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/events.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f0919ec4de7b532c7a7a7acb48b16952d0dbd6ef6b11d626d47fedfa9106463d",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "eefa51399727c3a03d421a0616640f5f6e5688262b5ead7477705015b7827cef",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/ports.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "54c51bafcf4313a55b358a2f0a8c9f876d7ea74bdcc934857c7d002540066ea0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5259dd432e37050ee217a3842ba4e5452176460062b8db991913db325d20a2e5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime/tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "54e800731711d9eb2b7622da6976fc18d14b508e3d611af549feaf3cd6e3bb7c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/runtime_decision_frame.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_event_safety.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_events.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_identity.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/action_scheduler_handler.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/checkpoint_resume.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/checkpoint_save.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/checkpoint_summary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/cli_handlers.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/dispatcher.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/mcp_bridge_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/mcp_tool_orchestrator.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/memory_consolidate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/memory_forget.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/memory_hook.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/memory_recall.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/memory_retain.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/phase1_hook.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/safe_metadata.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/skill_action.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/skill_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/skill_selection_probe.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/streaming_provider.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/subagent_action.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/subagent_delegate_l2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/target_catalog.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/tool_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/tool_invoke.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_integration/tool_result_feedback.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_loop_fields.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_observer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_trace_emitter.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/runtime_trace_projection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/scheduled_action_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/scheduler/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/scheduler/caller.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "be4804b153aab01ef3829be935e1152ce7947aecee15b38377be72ca5eb5236a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/scheduler/contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fb0dbe2befefb9672054a2e5d6dabc4c2123490ca837db127c3b04af6cd247fd",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/security.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/session.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/skill/catalog.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fabb42837bf06fb00fdd74b3a97c8b5d84bc6df34691c965c707336b4f117da9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/skill/tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "ba3d8d999bb8fe3d433d73f97d671fb8b86011a7384b016d8697659f1aea8739",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/skill_selection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_state.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/checkpoint.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/checkpoint_restore.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/descriptor.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/errors.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/invocation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/loader.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/memory_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/presentation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/prompt_section.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/result.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/retriever.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/selector.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/skill_tool.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/task_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skill_system/tool_binding.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/skills/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/state.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f657c6288e621b943cfbc983126e7f1b18342bb868fa8aefd6d16a813ace4beb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/runner.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "7a4b27daf70c01d4ce89d9f7bc9f0f8ea3ef52c62f7cc6f820f1696679a3a11f",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "37119add4cf6850e469b1e7fdbe26df3b4cfb084b07218c538204144be6b4f30",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent_capability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_inline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_routing_flag.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/adjudication.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/checkpoint.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/delegation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/descriptor.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/descriptors/code-reviewer/SUBAGENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/descriptors/demo-stat-real/SUBAGENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/descriptors/demo-stat/SUBAGENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/errors.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/execution_mode.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/executor.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/memory_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/presentation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/request.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/result.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/runtime.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/skill_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/tool_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/trace.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagent_system/v0_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagents/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/subagents/local.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_delegation_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_evidence_report.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_ledger.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_ledger_cooperation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_ledger_store.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_orchestration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_replay_chain.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_runtime.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_state_model.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/task_tool_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_audit.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_executor.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_guardrails.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_result_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_runtime_mediator.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tool_scope.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/__init__.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b89ff4faa1f7e38b9e73111a69fb1abc14aed54f7c863c7c4a52668dde5f552e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tools/confirmable_noop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/demo.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/edit.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9358c741acaa16288f08dbe5501c8ebd63b6347ec738ad29cb890bebc6bd67b7",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tools/file_ops.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "cf17a3674a097c8037374813a6cdf1780a8200909c90d26fd16f74392bb17899",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tools/install_skill.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/memory.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/meta.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/outline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/path_safety.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "aaa0f168ac3db70bbea33dfad3ed80dae68d981f82ef7036f747d1cb4a994482",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tools/safe_noop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/shell.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/skill.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/update_skill.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/web.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tools/write.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "d7c9966df8983a7a78242d253de1c4ad004610cd20f7dc5066debcb6f732046a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/trial_approval.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "agent/tui/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tui/adapter.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "994da3efb6949bcb232df587ce71bc1155899d385d01b6337851c6c4b06823c2",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tui/app.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f5dc17c57a8afb9817c18e4d66fa0b8e41fb2b341e4ba1b7f594f4823bbe83ed",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/tui/render.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9d7d238dacc9cbe1e1cc290fe5f96e38ef085978ece3e6e03b27accf93c27735",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/user_input.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/config.example.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/config.local.example.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/examples/deepseek-anthropic-compatible.config.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/examples/fake.config.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/examples/glm-openai-compatible.config.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "config/examples/kimi-anthropic-compatible.config.yaml",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/acceptance/CAPABILITY_REFERENCE_TASK_PROTOCOL.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "72cb20fe5196f563118862d676d6383b7c0dc0b43871c16d7c8564ead422f2c1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/CAPABILITY_EVIDENCE_CLOSURE_CONTRACT.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a87a0e63979cfa818bc61bcbc82bc29b211fd04cf98ed35efea3f502981bea6e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/CAPABILITY_REINTRODUCTION_ROADMAP.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2d1a0bc9f50433549f329f505a09f03a5cfbfa1767e694e102675c1b8a49d3ad",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/EXTENSION_CONTRACTS.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c4e6149970f3bcb017ddb9d79cb88594cb88e16b30d77ca6d55ff4bf823f4dff",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/KERNEL_ARCHITECTURE.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2aaed9f5341b4fe7ebd62b6ef31fde4957cab2086e3e2754c181f0cb607ad1dc",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/MCP_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9630f2e5d00da969984c79c85f5468804782af2f55e2b8c8130f765ced4201f1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/MEMORY_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "13d8f954ddeeae60e909db0417a24013f3c7d891b82c7571829ad10966c487c6",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/SCHEDULER_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "721fd73175062f5b6842f326a6f4cd04694c177c64f1697d0a82296513541213",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/SKILL_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9ae1e4c58a69aba06d7f64a1c6cac40a11b72974511e7c8ee8223537ce8ade82",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/SUBAGENT_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "31aea2975d486dc15583fb9f4aa0f07173f7837845eb963239ff87855e009fad",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/architecture/capabilities/TUI_DESIGN.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2a4b4d67508f521d38e31b13c88beab28f16eac95b05e4df4f20be411b4160f1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_REAL_WORLD_USE_CASES.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_SERIES_TRIAL_PLAN.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_TRIAL_FAILURES.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_TRIAL_RUN_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/r-series-real-world-validation/R_TRIAL_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/roadmap-history/CURRENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/roadmap-history/NEXT_ROADMAP_DIRECTION.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/archive/s-series-runtime-kernel/S_ROADMAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/audits/2026-07-19-capability-reintroduction-audit.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2116e362174ad5c239bc1ac9d143f536c4da7d02d849c2e0b4f7dec977cc81a0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/audits/2026-07-20-009-document-review.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "485cedffd6dac288e30c3ae41afc8e106887ec7896957d930c2676d6fe6fbcf1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/audits/2026-07-20-capability-evidence-closure-audit.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "98cc75159c7cd4b3a88afe06841175ae1772a302b6dcb381549239bc967c4cfd",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/audits/2026-07-21-009-u8a-executor-report-audit.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "ed97ea69dd49188a31af30251359620003feadb36e10194689ae16ad85832605",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/current/OPERATOR_GUIDE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/PRODUCTIZATION_GAP_LEDGER.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/PRODUCTIZATION_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/PRODUCTIZATION_ROADMAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/PRODUCT_CAPABILITY_AUDIT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/PROVIDER_ABSTRACTION_AUDIT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/current/TECH_DEBT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/00-overview/ARCHITECTURE_MAP.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/00-overview/CAPABILITY_MATRIX.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/00-overview/CURRENT_CAPABILITY_STATUS.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/00-overview/FIRST_AGENT_OVERVIEW.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/01-getting-started/GETTING_STARTED.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/02-architecture/STREAMING_PROTOCOL.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/ARCHITECTURE_REPAIR_MAINLINE_CLOSURE_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/ARCHITECTURE_REPAIR_MAINLINE_RETROSPECTIVE.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/CURRENT_ARCHITECTURE_REPAIR_ROADMAP.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/CURRENT_AUDIT_STATUS.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/CURRENT_CAPABILITY_DRIFT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/POST_REPAIR_AUDIT_DELTA.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/SPA1_MASKING_OWNERSHIP_DECISION.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/TARGET_CATALOG_REEXPORT_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/V0_WIRING_DECISION.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/WINDOW_1_CLOSURE_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/WINDOW_2_CLOSURE_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/WINDOW_2_COMPAT_INVENTORY.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/WINDOW_3_CLOSURE_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/06-audit/WINDOW_3_CM1_CONFIG_IMPORT_BOUNDARY_INVENTORY.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/AGENT_MODULE_MATURITY_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/AGENT_MODULE_TAXONOMY_DECISION_REQUEST.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/ARCHITECTURE_GOAL_RECONCILIATION_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/FREEZE_FILE_INTEGRITY_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/L3_HARDENING_TRIAGE.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/MCP_SCHEDULER_FEASIBILITY_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/MEMORY_OWNER_DECISION_SPIKE.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/MEMORY_TAXONOMY_MAPPING.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/POLICY_APPROVAL_OD7_DECISION_SPIKE.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/POST_L3_HARDENING_CLOSURE.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/POST_MEMORY_L3_NEXT_TARGET_SELECTION.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/POST_REPAIR_TRIGGER_REGISTRY.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/PROVIDER_API_KEY_ACTIVATION_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/07-module-maturity/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/08-global-audit/GLOBAL_AGENT_REALITY_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/CAPABILITY_BOUNDARIES.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/CURRENT_DOCS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/PROGRESS_LEDGER.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/PROJECT_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/README.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/S1_ACCEPTANCE_BASELINE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/S1_CURRENT_CODE_ARCHITECTURE_AUDIT.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/S1_GOAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/S1_OBSERVABILITY_BASELINE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/WORK_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_baseline/code_audit_notes.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_baseline/gap_candidates.draft.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_baseline/graphify_queries.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_baseline/s1_readiness_matrix.draft.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_completion_audit/audit_notes.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_gap_loop/.gitkeep",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_priority_audit/code_evidence_index.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_priority_audit/gap_correction_candidates.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_priority_audit/gap_priority_matrix.draft.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_priority_audit/graphify_queries.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S1_BASELINE_USABLE_PRODUCT/_tmp_s1_priority_audit/independent_audit_notes.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_ACCEPTANCE_GATE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_BASELINE_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_GOAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_L5_SKILL_SELECTION.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_QUALITY_GATE_STRATEGY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_REFERENCE_TASK_ACCEPTANCE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_TASK_EVIDENCE_DEPTH.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_TASK_STATE_MODEL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/S2_TECH_DEBT_TRIAGE.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/WORK_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_baseline_audit/audit_notes.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_baseline_audit/fullsuite_failures.txt",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_baseline_audit/second_opinion_review.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_goal_draft/draft_notes.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S2_GOVERNED_TASK_AGENT/_review_artifacts/_tmp_s2_goal_gap/gap_matrix.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_BASELINE_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_GOAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_REFERENCE_TASK.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/S3_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/WORK_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/_review_artifacts/_tmp_s3_baseline_audit/audit_evidence.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/_review_artifacts/_tmp_s3_goal_draft/direction_review.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S3_EXTENSIBLE_GOVERNED_AGENT_RUNTIME/_review_artifacts/_tmp_s3_goal_gap/gap_matrix.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_BASELINE_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_FIDELITY_CONTRACT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_GOAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/S4_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S4_AUDITABLE_GOVERNED_AGENT_RUNTIME/WORK_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_BASELINE_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_GOAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/S5_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S5_DURABLE_GOVERNED_TASK_RECOVERY/WORK_LOG.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_BASELINE_STATUS.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_GAP.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_GOAL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/architecture/ARCHITECTURE_NORTH_STAR.zh.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/config-legacy-sunset-contract.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/fake-provider-scripted-scenario-contract.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/mcp-architecture.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/runtime-decision-spine.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/skill-system-architecture.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/subagent-boundary-architecture.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/design/unified-project-config-contract.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/dev/AUTO_RUN_WORKFLOW.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/dev/ENGINEERING_WORKFLOW.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/plans/2026-06-12-001-fix-architecture-repair-sot-truth-plan.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/plans/2026-06-12-002-feat-subagent-v0-production-routing-plan.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/plans/2026-06-13-001-window-2-spa1-cr1-plan.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/plans/2026-06-13-002-window-3-cm1-capability-boundary-plan.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/plans/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/real-e2e/UNIFIED_RUNTIME_FLOW_CONTRACT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/rfc/MEMORY_CANONICAL_RFC.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/rfc/SKILL_CANONICAL_RFC.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/history/rfc/SUBAGENT_CANONICAL_RFC.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/implementation/008_CODING_AGENT_HANDOFF.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c6afea78b343ee62c4143071fa6bcba65df566b59dd3109fe8dec96681d046a8",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/008_INTENDED_TREE_MANIFEST.json",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9d222eac603e190565fd089c5de41ea63aef8e03606e0f41ecc233e769a912c0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/008_STABILIZATION_EXECUTION_LOG.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5037f9e379bddd30089c00262a16b053b5b60d14aa889dabbe87ccd618e3e3e9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/009_CODING_AGENT_HANDOFF.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "8dbc4b4f6aedae74e5b001163b7976f15bc679fcea3f40e4dddb443ec6dfe963",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/CAPABILITY_REINTRODUCTION_WORKLOG.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e060ed9d02ef9f6f71ca3076b319fd4563ba96536da42971374c45036abd18a9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-001-refactor-minimal-runtime-kernel-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "96ed730256de06d863a9c2cf78b2ee8fce2276c1198919a48ea01fc39e674cfc",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-002-feat-governed-skill-source-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b4eaafe1fcc013ea948bac33769b988b908403b1cc95c88193de62fa3c11392d",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-003-feat-governed-mcp-tools-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5db4e75384913a02d5f3dfd433383760391c163d943045b0e35ef96d91ff7661",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-004-feat-budgeted-memory-source-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "7ac4e01ca5e1216884cbfb4d3de1fb8916281bd92c0c8d60dd66360fa3aa97da",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-005-feat-bounded-subagent-delegation-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "0f9e41e7a7eccb0eca50a4dea48b37dc850764ba2486fc8fbc4aacdd75f17a7e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-006-feat-scheduler-external-caller-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "abcc5fabbbeecf594f8a3d7f9ebeb7d0130024c8c3bb797fc2f3c5443e4dc2d8",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-18-007-feat-tui-runtime-adapter-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "dc74af382322c6940b7b1a98b088aa6510af01ffaf6805f9c25a8e274327704e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-19-008-stabilize-capability-reintroduction-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1cde03b319f475350fe307aad299344559672ce73c207fac16d363a45923b3f2",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-20-009-close-capability-evidence-gaps-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "040d2dd863b8e86e5f668a832104ad84702f12da0eae0530c2858f48c6fd9195",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/plans/2026-07-25-010-feat-general-workspace-agent-plan.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "7b42fd974d00027833bb0c00381d2407a533f62f8f294d5b8beb8689f2e333c5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "main.py",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1bb732f616c766c196a5cd11be15579aba44f30ba3d2bb17ee47d553d11ade26",
+      "git_mode": "100644"
+    },
+    {
+      "path": "pyproject.toml",
+      "operation": "modify",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "92ac3c144e60e57ec2f297d695b9c20a7d8956ede9539860c23d36f3f2f08931",
+      "git_mode": "100644"
+    },
+    {
+      "path": "requirements.txt",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "scripts/check_provider_config.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "scripts/check_startup_readiness.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "scripts/verify_materialized_tree.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "cd99f54688ab4107af50bc020a00b9ec56a90736b052895d5582c1bf720990e5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/README.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/adversarial/test_minimal_policy_stub.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/architecture/test_capability_claims.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "ccb536721a628978d25f068fa2c7888b6c92fdd2a03d25f0bbc0b7d16cd4fa51",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/architecture/test_cutover_absence.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "ce8602601132f5bad5a0eec0be6f0f0340a6dc08ff81437c414f861ba1075822",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/architecture/test_delivery_manifest.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c99add272afababe0f8925699cf712c022e128a3bd6f15c1cf0d27d52b19d7fe",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/architecture/test_delivery_manifest_v2.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1c0bd35653bc67fce4766265b27dbfc8fb3ddceb59d5d4026e61adacb7534c10",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/architecture/test_dependency_dag.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "707e8a0b338d36706ef6b85fb5dd9e47c7f153969a935f5b5fd60ba3b3950eba",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/cli/test_commands.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "0c5bbc1b9a26a7376f9bc74d03636a2a10cce7a561774698ca748eaa3737a7eb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/cli/test_entrypoint.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "52cd6e4782b5e9e0e5e44f75fa9fbe702da54faa08b86b450203d7721d85a23e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/cli/test_headless.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "71ab8fc989100df3d2e6afc8f730de60852dc96965386d6f727d1050c5c4b77b",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/cli/test_render.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e79e295019d806a126bc9b0b028cfe6a83c8d3c8754727db28604d3d195ef451",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/cli/test_walking_skeleton.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "d269ef4f38dfe08b0e950aa04f9fdb9995a275068971787ee8e629cb4c835e9a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/conftest.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/local_config/agent.local.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/mcp/stdio_server.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5960002b3eea193e49db6926af870c3db7211d0545a280fef6f561440290abbe",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/fixtures/mcp/behavior_server.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "160bde0167f6fd9a5e362f96ea2d010f1894fe95521b59335a9e44876f58b380",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/fixtures/mcp_config/safe-mcp.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/minimal_fetch_mcp_server.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/minimal_mcp_stdio_server.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/skills/safe-writer/SKILL.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/subagents/code-reviewer/SUBAGENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/fixtures/subagents/demo-stat/SUBAGENT.md",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/conftest.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/adversarial_stub.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/checkpoint_local_roundtrip.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/evidence_trace.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/memory_disabled.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/policy_rejected.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/skill_l3_core_loop_evidence.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/fixtures/skill_system_current_behavior.json",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_memory_checkpoint.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_policy_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_simple_conversation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_skill_l3_core_loop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_skill_system.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_subagent_delegation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/golden_e2e/test_golden_tool_success.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/kernel/fakes.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "33c7be4330dda0998549d04c291403bc55e1ed4263f4d30b438268908564860c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_action_legality.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "eed91f3613a34f0cbca734ae7a6559c6813b7e47b9b76ba3bbc04f14655d8036",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_checkpoint_corruption.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "91125a3b08542379e501a5dfc7c92b5586c066c8c9088de160cdfcd431e818a9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_checkpoint_recovery.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c82bb1057778c00e54faf93bdbc202945a97fb40fbb6ea94c95decb29b339a73",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_checkpoint_store.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fa44d8a0c1e2dc63daa134ed3206c258e5b56a291ff93760ef618732008c5094",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_context_budgeting.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2949e1d56e079ecbc3762bcaa1fa7d35d1f82a5802f68445f384522533a0a8a3",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_context_manager.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b6972ff8a2fdea7f776b047a14b546c9fbd1df802478b8432371240302e105e0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "64a678973b5f37ac5ea43539e1151e603349db49c264c7f03af7d9876a225613",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_effect_ordering.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a224be2a2c6c02354dcf1c63dce2bdcf9eb86391bd04ec0154b973bf58ff9610",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_event_ordering.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "4bef0cb911904a6c152213f430f54c95d2a75a3c61b46e0e46ac07ad97f875ec",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_revision_conflicts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "39a814c5f5146c4a76d17e2baf9534af020cd0a921ce6c0d233dc9502f44822e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_runtime_approval.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5a1ed60ccc86e21f2813c5b91f381f20b3354b14e569b0043c259f63bb99a61c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_runtime_errors.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "162101f521bf32406b0afd8a642d1f6353e939110b94819d8d995b19e9061420",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_runtime_limits.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9b4b88f796dcbcbd68a98a34dd1669f0a9e621513ce5cd5cc21d2bd8df3590cc",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_runtime_recovery.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "baaffd505995dbcda4565613495e5f5a1532541905307ac2f95ad7d71e08fbc3",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_runtime_turn.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "6acc472a45b495e17f7f134225388ff4510ffecfbe28714174d193dd30be2cc3",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_state_transitions.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fe3fb34b3bbf51dc00ef4ec6169b896b909f9311eead73aa3530b845526e5678",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_tool_outcomes.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "04133842d5dca9e2e988bc55ba205c09ab3b6ebafc74d7224815ce056e801354",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_tool_policy.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "05a616d4179531780473920a6c4e2e1635307e568a7efe268f413ae1cb7f8bb0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_tool_registration_composition.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "848007fa3e3eaab603101fa9775958bb3cb42710ac76f2bbd1738d62f6e7cde4",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/kernel/test_tool_runtime.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "765c74b2eddb09111e1d5178a26f1320887ef7853a0948a6b8aa120773d27d42",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_bridge.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "0c7bce45bad226f172df1e66c837bc25c82b103b8ef0af01d8e8caf41d4b95e4",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_catalog.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c922b2fa3a090960dfac0d5e21c93c6a360f01a148db5e0d1144ceae903e35a5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_integration.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fbfe9375bc410420c7e94e630572827e7626b303a5217f6b37262f6edd647bea",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_safety.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "522e271fcfaa68735f472370c73328d0d0d7401d17e2429ec02a557862f55363",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_session.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "d67d8c4aba2ecc066684009b0c88514b7911062cb6b79c5fc54d837191098f62",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_session_behavior.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "6d4558aac411e19cf75d6d74dac2ec8f3990f9fec31a9d0558b3dee2c566f3d1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/mcp/test_tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "3913de38621fa83582be49583c39dab26cf04724927299e33b67fd32a81e1922",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/memory/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/memory/test_integration.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "14007f12db0bc65def78bcf49735334fa0aace3e4ee43258b078173aab78c57f",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/memory/test_source.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "954a0e659cb8b007e9c0459db29c598fa63637633750afda66c1dfa82cb314ac",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/memory/test_store.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "0c9393ac7e4d1d35cecc8a745043ee900266ed9b925cc3b0af18be25583df76e",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/memory/test_tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9cd6a98e6488e27556c2031d9a4c931b1553005bdd5c1020e515e0db065d37de",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/provider/test_kernel_providers.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1341b9ae8d23adb6292d2a71ee8c4ceb2f471be4da1f1288c239d391696b986f",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/provider/test_memory_context_projection.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "88eefd95778e7360f12b8f8cc618b2b4c29db3a464e4f35ece52d171c075b996",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/runtime_integration/__init__.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/conftest.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/subagent_v0_contract_helpers.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_action_scheduler.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_b7_checkpoint_namespace.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_b7_identity_foundation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_b7_namespace_injection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_backend_provider_guardrail_hardening.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_checkpoint_dispatcher_mediation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_checkpoint_save_resume_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_cli_meta_command_handler_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_demo_tool_pipeline_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_legacy_path_inventory.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_local_trace_runtime_wiring.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_mcp_audit_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_mcp_bridge_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_mcp_l3_real_core_loop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_mcp_real_external_flight.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_mcp_runtime_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_anchor_fake.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_anchor_real.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_checkpoint_consistency.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_consolidate_branch_behavior.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_consolidate_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_consolidation_truth.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_event_log_visibility.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_evidence_schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_forget_l2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_l2_inline_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_lifecycle_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_model_visible_tools.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_propose_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_recall_branch_behavior.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_recall_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_retain_branch_behavior.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_session_end_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_shared_store_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_memory_summary_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_phase1_real_core_loop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_runtime_action_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_runtime_action_deferred_ownership.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_runtime_action_handlers.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_safe_metadata_leak_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_safe_metadata_ownership.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_safe_metadata_projector.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_scheduler_main_path.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_allowed_tools_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_checkpoint_resume_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_l2_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_memory_scope_recall.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_model_owned_selection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_select_pipeline_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_selection_real_provider.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_tool_enforcement.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_skill_turn_start_selection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_streaming_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_guardrail_hardening.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_inline_local_live.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_l1_parent_mediated.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_l2_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_runtime_truth.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_audit_v2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_context_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_evidence_logging.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_failure_taxonomy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_fallback_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_live_route.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_memory_checkpoint_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_parent_decision.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_provider_and_descriptor.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_provider_modes.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_runtime_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_tool_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_subagent_v0_trusted_routing_inheritance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_target_catalog_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_target_catalog_extraction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_anchor_fake.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_blocked_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_branch_confirmation_required.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_gate_not_found_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_invoke_branch_behavior.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_invoke_error_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_invoke_not_found_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_mediator_child_evidence_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_pipeline_l3_completion.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_request_l3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/runtime_integration/test_tool_result_feedback_branch_behavior.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/scheduler/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/scheduler/test_caller.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a5dbb5ed59d8a8de49d81e9bf9c44c3cda1869ad8f21c14490994dbfcd9d73fb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/scheduler/test_cli.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "5ba1c60a8eebfa7605e7d275608aca45468134c19737c6a927b38495156a8de2",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/scheduler/test_contracts.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "13a87a5cc35527840cad718cc6360d6a1b894e4b0609129c89b8fa3b37bac9c6",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/skill/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/skill/test_catalog.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a3573e7ae76aab60a24e0f64def3583e14f810ba5d7f36d4e3b920e95e94a75f",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/skill/test_integration.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "9676ac79770c18ab16a87f94f08f576c2fafa2cb7f33b8177d3498118bcaf909",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/skill/test_reference_task.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "fa58dc8d8b0aec0ac4cbbaf0f92eee95530cca0e23b33ffd712e4b51deec299b",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/skill/test_tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "906c2f7553f18470ed2f031e714d7970798ab4de2cdda02359c7d324fca0c827",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/smoke/test_first_usable_task_e2e.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/subagent/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/subagent/test_integration.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "844dbfa29d8ec7984fbbf63d1402822ae40421679c6b75803e0efe67fe3fe770",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/subagent/test_receipt_contract.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "96456637a5749fd5d37826f30227807b8022a08eca46bfdac989fa0ee6c4bb91",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/subagent/test_runner.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "afbcb5ce43dc898e00e72c9d288f86929f3bfa842395caee6a6b970cb830a74c",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/subagent/test_tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "996b8a8d00a909342373ed5a9e1af3e266b8d5464d2adb566ac2b8c9c0ebbff0",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/test_agent_guidance_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_agentloop_mcp_e2e.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_api_projection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_architecture_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_b7_event_log.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_b7_loop3_codex_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_b7_multi_instance_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_b7_namespace_isolation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_bug_hunting.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_capability_boundary_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_capability_status.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_chat_provider_injection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_checkpoint_ownership.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_checkpoint_resume_semantics.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_checkpoint_roundtrip.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_checkpoint_scope_selection.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_checkpoint_v2_namespace.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_cli_onboarding_status.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_cli_output_ux.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_cli_renderer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_command_boundary_characterization.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_completion_handoff.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_complex_scenarios.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_config_authority_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_config_env_resolution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_config_secret_safety.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_confirm_handlers_unit.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_confirmation_flow.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_confirmation_observer_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_context_builder.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_core_loop_terminal_prints.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_demo_tools_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_display_event_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_docs_source_of_truth.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_entry_commands.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_event_type_normalization.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_evidence_lifecycle_and_summary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_evidence_storage_hygiene.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_evidence_taxonomy_guard.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_executor_audit_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_extension_capability_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_fake_provider_decision.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_feedback_intent_flow.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_file_tool_safety_parity.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_final_answer_user_input_separation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_final_legacy_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_final_verifier_cross_kind.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g010_real_dogfood.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g015_real_edit_file_dogfood.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g019_real_memory_dogfood.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g022_real_skill_dogfood.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g025_real_mcp_local_flight.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g027_subagent_bounded_delegation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g036_diagnostic_secret_safety.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g039_tool_family_read_and_shell.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g041_tool_guardrails.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g044a_scheduler_visibility.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_g045_token_usage.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_gitignore_runtime_artifacts.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_hardcore_round2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_hardcore_scenarios.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_health_report.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_health_subcommand.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_input_backend_user_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_input_backends_simple.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_input_backends_textual.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_input_intents.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_input_resolution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_local_artifacts_inventory.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_local_config_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_local_demo.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_log_cleanup.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_log_event_signature_collision.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_log_hygiene.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_log_viewer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_long_running.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_main_input.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_main_loop.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_boundary_isolation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_bridge.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_client_architecture.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_config_apply_governance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_config_cli_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_config_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_external_readiness.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_policy_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_registration_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_mcp_stdio_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_and_tools.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_array_filesystem_e2e.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_confirmation_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_confirmation_forms.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation_engine.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation_llm.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation_loader.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation_pipeline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_consolidation_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_contracts.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_discovery_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_emergence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_emergence_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_extraction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_extraction_bridge.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_extraction_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_fs_store.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_governance_flows.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_guardrails.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_interaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_interactive_confirmation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_l2_inline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_llm_budget_and_aging.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_operation_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_owner_l3_main_path.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_owner_runtime_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_p3_hardening.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_provider_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_recall_injection_baseline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_runtime_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_session_hook.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_session_isolation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_snapshot_generation_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_snapshot_prompt_builder.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_stabilization_m1.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_store_backend.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_store_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_suggestions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_type_propagation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_memory_user_facing.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_meta_tool.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_model_output_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_model_output_resolution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_multi_turn_context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_observability_local_trace_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_pending_confirmation_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase2_human_waiting_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase3_memory_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase3_planning_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase3_task_runtime_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase3_tool_confirmation_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_phase4_session_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_policy_decision_golden.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_policy_tool_gate_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_agentloop_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_anthropic_http.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_anthropic_normalize.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_diagnostics.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_openai_http.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_openai_native.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_real_smoke.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_provider_tool_call_normalization_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r004_real_config_status_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_cli_resume.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_cli_resume_subprocess.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_force_fake.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_provider_tool_names.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_status_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_r_trial_approval.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_real_cli_regressions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_real_mcp_flight.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_resume_full_flow.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_resume_pending_confirmation_dispatch.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_run_summary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_error_recovery.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_event_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_loop_fields.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_observability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_observer.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_state_machine_invariants.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_runtime_trace_optional_sink_rfc.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s1_fake_real_core_evidence_smoke.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_acceptance_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_reference_task_acceptance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_skill_controlled_integration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_context.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_evidence_report.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_orchestration.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_review.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_state_model.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s2_task_tool_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_acceptance_gate_extension_classification.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_extension_evidence_checkpoint.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_extension_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_mcp_governed_tool_source.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_mcp_init_bridge_gate.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_reference_task_acceptance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_skill_non_regression_guard.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_subagent_parent_mediated_acceptance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s3_subagent_runtime_delegation_evidence.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_acceptance_gate_evidence_classification.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_audit_observability.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_evidence_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_evidence_verifier.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_pending_tool_preview.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_reference_task_acceptance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s4_replay_chain.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_acceptance_gate_durability_classification.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_extension_recovery_coverage.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_audit_alignment.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_cooperation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_redaction.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_store.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_ledger_summary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_reference_task_acceptance.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_s5_same_spine_guard.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_scheduler_boundary_l2.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_security_baseline.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_semantics.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_session_summary_and_header.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_shell_tool_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_checkpoint_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_cli_tui.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_invocation.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_local_mvp_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_memory_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_progressive_disclosure.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_selector.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_skill_tool_binding.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_startup_readiness.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_state_invariants.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_streaming_protocol.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_bounded_execution.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_checkpoint_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_cli_tui.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_context_packaging.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_delegation_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_descriptor_schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_execution_modes.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_local_mvp_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_memory_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_parent_adapter.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_parent_adjudication.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_registry.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_skill_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_tool_boundary.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_trace.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_user_facing.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_subagent_v0_profile_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_exposure.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_output_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_pairing.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_path_unification_l1_3.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_registry_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_rejection_feedback.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_responsibility_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_result_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_scope.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tool_sensitive_path_policy.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_transition_checkpoint_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_transition_model_output_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_transition_pending_confirmation_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_transition_tool_success_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_tui_dependency_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_user_input.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_user_input_contract.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_user_replied_transition.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_v0_2_rc_automated_smoke.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_v0_2_rc_p1_negative.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_v0_3_shell_completeness.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/test_v0_4_transition_boundaries.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/tools/test_file_tools.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c6d1bd4339dab1fb49b8e3a9b24d9b9e7e4fd6d4983871c655389201841f5517",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tools/test_path_safety.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1b0feda327d68a3f809ec314063fa6d057d90b50098a5b9cf10ee75d2bb6fbe3",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/__init__.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_actions.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "3ba60d5b033a761735a7a919a730ef8f2cb1977394f960555bbd7a57057b7df1",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_adapter.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "cef00058a9cba7a3e4c5e85ba0c572a563fa3d897f17b325c651707198876e32",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_app.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "7dbf10ccaea57e35d8532906a3208fe629cf084a69c49cd8deed714e411c4881",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_approval_journey.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2f947cc986e78b481eec443f9b5b90fa0c1f086bff6b52b8aa5a4e80dd606c09",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_optional_dependency.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b260401c04fb607f8a50260d326452a723dbd033cb08f0d38049cb8967eba32a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/tui/test_render.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "db1c27e372be0fb742136cc5ff668fe6f264259a1f37cc7993fe72b9eff36196",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/unit/test_action_plan_schema.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_active_skill_lifecycle.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_evaluation_honesty.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_evidence_kind_classification.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_provider_evidence_metadata.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_runtime_decision_frame.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_skill_manifest.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_skill_retriever.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_skill_select_tool.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "tests/unit/test_task_transitions.py",
+      "operation": "delete",
+      "owner_units": [
+        "audited-baseline"
+      ]
+    },
+    {
+      "path": "docs/implementation/GENERAL_AGENT_COMPLETION_HANDOFF.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f2ccf693b83fd83272a123889545c28edfc075fe0f7bd960965d650d811800c9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/G0_G6_CLOSURE_EXECUTION_LOG.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "68b2b1daad58f14c21c5b1e0b66ae814a79170b2ec3af5c00e147cc73836b2ee",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/009_G0_G7_PROMOTION_REVIEW.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "37088b508a725c1e5c96e8480b40060c2d38b455ce24c5d21267629fa6d89b1f",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/child.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a96c8ff7583b7210db564483545c4590a1aeba64f9cbc031d7394f09c582513a",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/process_runner.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2fc30400bebbf666f3f76b003e87242f53577f03ca7c00826c2926bc3524c584",
+      "git_mode": "100644"
+    },
+    {
+      "path": "agent/subagent/runtime_factory.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b58d4dfe1d52ac08b03e8aa39ec6b951f8cb4f1e6913ae4771587e34b9563a84",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/G8_SUBAGENT_HARD_DEADLINE_EXECUTION_LOG.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "546bce1eba172beaf67032145768a2ed7f1a38de5fc149cdd97f48dc056c62f9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "tests/subagent/test_process_runner.py",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "67c3f6cf2c6284fc1930866f5f7439c63b42666fde9eac4f0d9272ba7f4c6417",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/implementation/009_G8_SUBAGENT_PROMOTION_REVIEW.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "a8302f97244e853db67e161b30e0aa7608f8fa1be83314b776f927eced01ab85",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-kernel-multi-turn-file-tools.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "1250d1a5d9455f77f7f59c03cc9fa529c43ccf7d83521bd0e59cf19993d21155",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-mcp-governed-stdio-effect.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2a81f8e6ffd038db4fb57187e56faee4baa8f4a83e1049b0b27a4859185ad48b",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-memory-cross-conversation-recall.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "b22b87d8ff071e5c87e8b1b38f9c326fe8ec792db6c20db40e2ebd94853f25f6",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-scheduler-external-caller-replay.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "3f27f458317eb38d5ae67d466d4aa06b3d3dda5ffe343a7a5eb2c619af371ef5",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-skill-governed-activation.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "c13f4dd2f8e0af56d8a85777859cc85cd51f7122b457e25fba9c8288fcd127e9",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-subagent-process-isolated-review.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "125a8ffc343120c8cd486eb66cb35c98e0eb8ae58d151a9eb85cc5766ea261ac",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/records/2026-07-25-tui-keyboard-parity-restart.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "f2d3fbd877ddd2e99455f36a9e796313efefbdb5c751ccebac50481f6acf39db",
+      "git_mode": "100644"
+    },
+    {
+      "path": "docs/acceptance/2026-07-25-E3_INDEPENDENT_REVIEW.md",
+      "operation": "add",
+      "owner_units": [
+        "audited-baseline"
+      ],
+      "sha256": "2bfb9308b42c9e7ca50687a81d52929d2d3cf15ab461a0844764764837e35a24",
+      "git_mode": "100644"
+    }
+  ],
+  "control_files": [
+    {
+      "path": "docs/implementation/009_DELIVERY_MANIFEST.json",
+      "role": "manifest-root-of-trust",
+      "sha256_policy": "self-digest-forbidden"
+    },
+    {
+      "path": "docs/implementation/009_EXECUTION_LOG.md",
+      "role": "post-content-gate-evidence",
+      "sha256": "0c0a103b82c3200c2a23c020635ade2b72411b93e34ad389e0c77b2f48e85499",
+      "seal_state": "sealed-u8"
+    },
+    {
+      "path": "docs/architecture/CURRENT_CAPABILITY_STATUS.md",
+      "role": "post-content-gate-claim",
+      "sha256": "0943b0efbe34ca4c1f8c2107ebf9e4583be57846949d614da0f864940de5e4df",
+      "seal_state": "sealed-u8"
+    },
+    {
+      "path": "docs/implementation/009_INDEPENDENT_REVIEW.md",
+      "role": "post-review-receipt",
+      "sha256": "377ce540051619c95ef5593a58111fb7483eae7c8489d5764901669d619ca585",
+      "seal_state": "sealed-u8"
+    },
+    {
+      "path": "docs/implementation/009_G0_G7_PROMOTION_REVIEW.md",
+      "role": "post-review-receipt",
+      "sha256": "37088b508a725c1e5c96e8480b40060c2d38b455ce24c5d21267629fa6d89b1f",
+      "seal_state": "sealed-u8"
+    },
+    {
+      "path": "docs/implementation/009_G8_SUBAGENT_PROMOTION_REVIEW.md",
+      "role": "post-review-receipt",
+      "sha256": "a8302f97244e853db67e161b30e0aa7608f8fa1be83314b776f927eced01ab85",
+      "seal_state": "sealed-u8"
+    }
+  ],
+  "excluded_classes": [
+    "tui/ runtime logs and state",
+    "ignored private/runtime data",
+    "credentials and environment files",
+    "unowned user files",
+    ".ua/ coding agent artifacts",
+    "graphify-out/ code understanding tool output"
+  ],
+  "entry_contract": {
+    "path": "repo-relative normalized path",
+    "operation": "add | modify | delete",
+    "sha256": "required for add/modify; absent for delete",
+    "owner_units": "ordered non-empty array drawn from: audited-baseline | U1 | U2 | U3 | U4 | U5 | U6 | U7 | U8A | U8B",
+    "control_rule": "manifest self-digest is forbidden; post-gate control digests are written only after content gate and verified by --control-seal"
+  }
+}

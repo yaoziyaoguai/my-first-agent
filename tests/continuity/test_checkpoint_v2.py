@@ -1,0 +1,138 @@
+import json
+from dataclasses import replace
+
+import pytest
+
+from agent.runtime.checkpoint import (
+    CheckpointCapacityError,
+    CheckpointInvariantError,
+    CheckpointVersionError,
+    LocalCheckpointStore,
+)
+from agent.runtime.contracts import (
+    CompletionClaim,
+    ControlReceipt,
+    ConversationState,
+    EvidenceRecord,
+    InteractionState,
+    ProviderDescriptor,
+    ProviderDisclosureRequest,
+    canonical_json_digest,
+)
+from tests.continuity.test_contracts import _goal
+
+
+def test_goal_control_disclosure_and_evidence_round_trip_in_v2(tmp_path) -> None:
+    descriptor = ProviderDescriptor(
+        family="openai",
+        model="example-model",
+        canonical_destination="https://api.example.com/v1",
+        trust_profile="remote-https-v1",
+        remote=True,
+    )
+    disclosure = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure:1",
+        provider_descriptor_digest=descriptor.identity_digest,
+        canonical_destination=descriptor.canonical_destination,
+        model=descriptor.model,
+        data_classes=("goal_facts", "user_message"),
+    )
+    receipt = disclosure.acknowledge(
+        receipt_id="disclosure-receipt:1",
+        acknowledged_action_seq=2,
+        acknowledged_at="2026-08-02T00:00:30Z",
+    )
+    control_receipt = ControlReceipt.create(
+        correlation_id="control:progress:1",
+        control_kind="goal_progress",
+        goal_id="goal:1",
+        goal_revision=1,
+        accepted_state_revision=4,
+        payload_digest="b" * 64,
+    )
+    goal = _goal()
+    criterion = goal.admitted_criteria[0]
+    evidence = EvidenceRecord(
+        evidence_id="evidence:1",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        criterion_id=criterion.criterion_id,
+        oracle_kind=criterion.oracle_kind,
+        predicate_digest=canonical_json_digest(criterion.predicate),
+        source_fact_ids=("fact:tool:1",),
+        source_digest="c" * 64,
+        oracle_identity="filesystem-digest:v1",
+        passed=True,
+        observed_at="2026-08-02T00:01:00Z",
+    )
+    claim = CompletionClaim(
+        correlation_id="control:claim:1",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        criterion_evidence_refs=(evidence.evidence_id,),
+    )
+    state = ConversationState(
+        conversation_id="conversation:1",
+        revision=5,
+        goal=replace(goal, progress_summary="报告已生成", next_step="验证报告"),
+        interaction_state=InteractionState.CLARIFYING,
+        provider_disclosure_request=disclosure,
+        provider_disclosure_receipt=receipt,
+        control_receipts=(control_receipt,),
+        evidence_records=(evidence,),
+        completion_claim=claim,
+    )
+
+    store = LocalCheckpointStore.initialize(tmp_path / "conversation.json", state)
+
+    assert store.load().state == state
+
+
+def test_v1_checkpoint_is_rejected_without_mutating_source(tmp_path) -> None:
+    path = tmp_path / "conversation.json"
+    LocalCheckpointStore.initialize(path, ConversationState.new("conversation:1"))
+    document = json.loads(path.read_text())
+    document["schema_version"] = 1
+    source = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    path.write_bytes(source)
+
+    with pytest.raises(CheckpointVersionError, match="schema version: 1"):
+        LocalCheckpointStore(path).load()
+
+    assert path.read_bytes() == source
+
+
+def test_unknown_fields_and_invalid_goal_invariants_fail_closed(tmp_path) -> None:
+    path = tmp_path / "conversation.json"
+    LocalCheckpointStore.initialize(
+        path,
+        ConversationState(conversation_id="conversation:1", goal=_goal()),
+    )
+    valid_document = json.loads(path.read_text())
+
+    unknown = json.loads(json.dumps(valid_document))
+    unknown["state"]["goal"]["unexpected"] = True
+    path.write_text(json.dumps(unknown, sort_keys=True, separators=(",", ":")))
+    with pytest.raises(CheckpointVersionError, match="unknown fields"):
+        LocalCheckpointStore(path).load()
+
+    invalid = json.loads(json.dumps(valid_document))
+    invalid["state"]["goal"]["revision"] = 0
+    path.write_text(json.dumps(invalid, sort_keys=True, separators=(",", ":")))
+    with pytest.raises(CheckpointInvariantError, match="goal revision"):
+        LocalCheckpointStore(path).load()
+
+
+def test_checkpoint_capacity_counts_new_bounded_fields(tmp_path) -> None:
+    LocalCheckpointStore.initialize(
+        tmp_path / "empty.json",
+        ConversationState.new("conversation:1"),
+        max_state_bytes=800,
+    )
+
+    with pytest.raises(CheckpointCapacityError):
+        LocalCheckpointStore.initialize(
+            tmp_path / "goal.json",
+            ConversationState(conversation_id="conversation:1", goal=_goal()),
+            max_state_bytes=800,
+        )

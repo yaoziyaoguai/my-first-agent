@@ -1,64 +1,195 @@
 # my-first-agent
 
-First Agent 是一个 local-first 的 Agent Runtime 项目。**S1-S5 + roadmap final closure 已全部完成并归档，roadmap 主线已收尾**：保留真实 runtime 主链路、测试保护网和当前权威文档，让现有能力可以运行、解释、验收。
+一个刻意保持很小的本地 Agent Runtime Kernel。
 
-**当前权威入口：[docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md)** 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。S1-S5 及 roadmap final closure 均已归档至 [docs/history/](docs/history/)（closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md)）。
+它不是“已经具备所有能力的通用 Agent”，而是后续能力可以安全接入的基础：一个模型循环、一个上下文管理器、一个受治理的工具执行路径，以及可恢复的状态机。
 
-## 当前状态
+## 当前能力
 
-- 阶段：**roadmap 主线已收尾（S1-S5 + S_FINAL closure 全部完成并归档，无 active S 阶段）**，不是历史 demo、sprint 或旧 v1/v2/v3 目标。
-- 主入口：`main.py` → `agent/core.py` → `agent/loop.py`。
-- 工具执行：`agent/tool_runtime_mediator.py` → `agent/tool_executor.py`。`TOOL_INVOKE` dispatcher path 只记录 evidence，不直接执行工具。
-- Memory v0：`agent/memory_runtime.py` / `agent/memory_contracts.py` / `agent/evidence_recorder.py`。
-- Skill lifecycle：`agent/skill_system/` + `agent/runtime_integration/skill_lifecycle.py`。
-- Sub-agent v0：`agent/runtime_integration/subagent_action.py` + `agent/subagent_system/v0_contract.py`。
-- Legacy L1/L2 subagent route 保留为 compatibility/frozen，不是当前 production route。
+- 多轮文本对话
+- 确定性、限额明确的上下文构建
+- 串行工具调用与精确审批
+- `read_file`、`list_files`、`write_file`、`edit_file`
+- 本地 v1 checkpoint、暂停、恢复与未知工具结果处置
+- FakeProvider，以及 Anthropic-compatible / OpenAI-compatible 非流式 HTTP adapter
+- 同一套 typed action / event / result 合同下的 CLI 与 headless 调用
+- 同一自然语言入口中的直接回答、最小澄清与 durable Goal
+- Goal pause/resume/cancel/correction、确定性重启与 unknown-effect recovery
+- remote Provider 外发前的精确 disclosure acknowledgement
+- Runtime-owned evidence gate：只有满足 admitted criteria 才显示 `VERIFIED_DONE`
+- 有来源、可纠正、可停止未来召回的 owner preference
+
+Memory、Skill、MCP、SubAgent、Scheduler 和 TUI 不属于 Kernel v1 核心；当前工作树已有六项 implementation candidate，但 2026-07-20 follow-up audit 证明 008 的 delivery final gate 未实现，并发现多项测试只覆盖 source shape、局部 happy path 或安全拒绝，不能宣称全部重接完成。当前声明见 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)，证据与修复合同见 [Evidence Closure Audit](docs/audits/2026-07-20-capability-evidence-closure-audit.md)、[Evidence Closure Contract](docs/architecture/CAPABILITY_EVIDENCE_CLOSURE_CONTRACT.md)、[009 Closure Plan](docs/plans/2026-07-20-009-close-capability-evidence-gaps-plan.md) 和 [009 Document Review](docs/audits/2026-07-20-009-document-review.md)。008 artifacts 保留为历史，不再作为晋级依据。
+
+2026-07-25 已在用户授权的真实 provider（`anthropic_compatible` / `glm-5.2` @ `open.bigmodel.cn/api/anthropic`）下完成七项 capability 的 E3 reference task（Kernel / Skill / MCP / Memory / SubAgent / Scheduler / TUI），全部 pass，bounded 证据见 `docs/acceptance/records/2026-07-25-*.md`；其中 MCP 的真实入口暴露并修复了 `main.py` 的 `--mcp-safety-state` 首次启动 `FileNotFoundError` 缺陷。2026-07-25 经非实现 session 的独立 review（receipt：`docs/acceptance/2026-07-25-E3_INDEPENDENT_REVIEW.md`）通过，七项 capability 已晋级 `accepted`（v1 reference task；非 production-ready，不等于任意 MCP/Skill、语义 Memory、并发 SubAgent、Scheduler CRUD 或跨平台已验证）。
+
+Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的辅助工具，不是 `my-first-agent` 的运行时能力或依赖。
 
 ## 快速开始
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-.venv/bin/python main.py --plain
+python -m pip install -e .
+first-agent --provider fake
 ```
 
-配置模板：
+默认启动即持久化：状态保存在 workspace 之外的 owner-only 产品目录
+`~/.local/state/my-first-agent/v1`（目录 `0700`、文件 `0600`），按 workspace identity
+确定性选择会话。重启后唯一安全候选自动恢复；多个候选要求显式选择，workspace 被替换或
+存在结果未知的 effect 时准确停下，不自动调用 Provider/Tool。FakeProvider 会原样返回
+最近一条用户文本，适合验证安装与 CLI。
+
+需要隔离状态（例如测试）时用显式 `--state-root` 覆盖默认根目录；它同样必须位于
+workspace 之外：
 
 ```bash
-cp config/config.example.yaml config/config.yaml
+first-agent \
+  --workspace "$PWD" \
+  --state-root /tmp/first-agent-state \
+  --provider fake
 ```
 
-更多配置示例在 `config/examples/`。`config/config.yaml` 是个人本地配置入口；如果包含真实 key，**不得 commit**。.env / legacy provider profile 只作为历史兼容语境，不是推荐主路径。
+旧的 `--state` / `--resume` 手动 checkpoint 工作流已按 012 合同移除；旧 v1 state 文件
+不再被加载（strict schema v2 fail closed，不做静默迁移）。
 
-## 常用命令
+保留命令只有：
+
+- `/ack-provider DIGEST`
+- `/approve ID`、`/reject ID`
+- `/resolve-success ID`、`/resolve-failed ID`
+- `/pause`、`/resume`、`/cancel`、`/exit`
+
+普通文本永远走同一个入口：简单问题直接回答；只有会改变 outcome、target、scope、authority、
+重大成本或不可逆后果的缺失信息才澄清；明确任务先持久化 Goal，再允许 effectful tool。
+用户不需要输入“继续”推动模型内部 progression。自然语言 correction 仍作为普通文本进入同一
+Runtime；它会使旧 next step、completion claim 和 evidence binding 失效，再停在准确权限边界。
+
+`RunStatus.COMPLETED` 只表示本次调用安全停止，不表示任务完成。只有状态投影明确显示
+`VERIFIED_DONE`，且每个 mandatory criterion 都有 Runtime 从 durable raw facts 重新推导的
+evidence，才表示 Goal 已验收。模型说“done”不会改变 Goal 状态。
+
+`/exit`、EOF 和空闲时的 Ctrl-C 只退出当前 CLI，不会伪造一次运行取消。
+
+## HTTP Provider
+
+凭据由组合根从指定环境变量读取，不读取 `.env`，也不会进入 checkpoint、事件或模型上下文：
 
 ```bash
-.venv/bin/python main.py --plain
-.venv/bin/python main.py --tui
-.venv/bin/python main.py health
-.venv/bin/python main.py logs --tail 50
-.venv/bin/python -m pytest tests/ -q
+export FIRST_AGENT_API_KEY='...'
+first-agent \
+  --provider openai_compatible \
+  --model your-model \
+  --base-url https://provider.example
 ```
 
-`--shell` 已弃用，只保留兼容。Health: python main.py health；Logs: python main.py logs --tail 50。
+DeepSeek 官方 OpenAI-compatible 入口使用显式非思考模式，避免把 provider-specific opaque
+`reasoning_content` 引入 checkpoint/replay 合同：
 
-当前为 **safe-local** 默认：默认不调用真实 API、不访问网络、不需要 API key。Skill / MCP / SubAgent / Scheduler 仍按当前产品能力审计约束，不默认全量生产激活，not a full Textual IDE；演示 skill：`demo-note-maker`；历史能力状态文件名为 `CURRENT_CAPABILITY_STATUS.zh.md`，当前权威口径见 [docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md) 与 [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md)。
+```bash
+export FIRST_AGENT_API_KEY='set-in-your-shell'
+first-agent \
+  --provider openai_compatible \
+  --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
+  --thinking-mode disabled
+```
 
-## 文档导航
+也可使用 `anthropic_compatible`。两个 adapter 都是有限时、非流式的一次请求路径；具体 endpoint
+可由兼容服务的 base URL 决定。第一次外发以及 destination/model/data-class 变化时，Runtime 会先
+显示 destination、model、data classes 和 exact digest；只有输入 `/ack-provider DIGEST` 后才发送。
+ack receipt 持久化在 checkpoint，配置或实际数据类别漂移会自动失效。
 
-| 想了解 | 读这里 |
-|---|---|
-| 产品能力审计 | [docs/current/PRODUCT_CAPABILITY_AUDIT.md](docs/current/PRODUCT_CAPABILITY_AUDIT.md) |
-| 产品化 Roadmap | [docs/current/PRODUCTIZATION_ROADMAP.md](docs/current/PRODUCTIZATION_ROADMAP.md) |
-| Gap Ledger（工作入口） | [docs/current/PRODUCTIZATION_GAP_LEDGER.md](docs/current/PRODUCTIZATION_GAP_LEDGER.md) |
-| Operator 指南（怎么用/查/恢复） | [docs/current/OPERATOR_GUIDE.md](docs/current/OPERATOR_GUIDE.md) |
-| Provider 抽象审计（protocol-centric） | [docs/current/PROVIDER_ABSTRACTION_AUDIT.md](docs/current/PROVIDER_ABSTRACTION_AUDIT.md) |
-| 技术债 | [docs/current/TECH_DEBT.md](docs/current/TECH_DEBT.md) |
-| S 系列版本语义（已归档） | [docs/archive/s-series-runtime-kernel/S_ROADMAP.md](docs/archive/s-series-runtime-kernel/S_ROADMAP.md) |
-| S1-S5 + S_FINAL closure（已归档） | [docs/history/](docs/history/) · closure summary 见 [docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md](docs/history/S_FINAL_ROADMAP_MAINLINE_CLOSURE/S_FINAL_RELEASE_SUMMARY.md) |
+## Skills
 
-## 测试
+Skill v1 是 operator-trusted 的只读 governed 工具，不是 system prompt hook。每个 Skill 是显式 trust root 下的一级目录，目录名必须等于 `SKILL.md` frontmatter 里的 `name`：
+
+```bash
+python -m pip install -e ".[skill]"   # 提供严格 YAML 解析
+mkdir -p /tmp/skills/code-review
+cat > /tmp/skills/code-review/SKILL.md <<'EOF'
+---
+name: code-review
+description: Review a diff before approving it.
+---
+Check correctness, tests, and risks; summarize before approving.
+EOF
+
+first-agent --provider fake --skill-root /tmp/skills
+```
+
+模型按需调用 `skill__code-review` 激活完整 body，或用共享的 `skill__read_resource` 读取该 Skill 的 `references/`、`assets/`。`scripts/`、远程 registry、自动激活、`allowed-tools` 授权、prompt hook 和默认目录扫描都不在 v1 中；scan 后内容漂移会让旧 activation 失效（要求重启重建 catalog）。未配置 `--skill-root` 时 Kernel 行为与基线完全一致，且 base 安装不依赖 PyYAML。
+
+## MCP tools
+
+MCP v1 把 operator-approved 的固定 stdio tool descriptor 映射为具体的 `mcp__<server>__<tool>` governed tool（HIGH + EXTERNAL，每次都需审批）。catalog 是显式 JSON，不含 credential value；transport 由本项目持有 process group 与 commit receipt，并通过 SDK public `ClientSession` 驱动一次有限时 session：`spawn → initialize → tools/list → descriptor verify → tools/call → close`。call 后无法确认结果的失败进入人类 unknown-outcome recovery，绝不自动重试。
+
+```bash
+python -m pip install -e ".[mcp]"
+first-agent --provider fake \
+  --mcp-catalog /tmp/mcp-catalog.json \
+  --mcp-safety-state /tmp/mcp-safety/latch.json
+```
+
+`--mcp-catalog` 与 `--mcp-safety-state` 必须一起使用。durable safety latch 记录每次调用的 arm/clear；若上次调用留下未清除 marker（例如宿主 crash），下一次 startup fail closed，只能由 operator offline recovery 解除。未配置 MCP 时 Kernel 行为与基线一致，base 安装不引入 MCP SDK。
+
+## Memory
+
+Memory v1 在 conversation 之间保留 operator 显式批准的信息，并让 ContextManager 在当前预算内决定是否召回。store 是显式路径、owner-only、revision CAS 的本地明文 JSON；首次使用互斥二选一：
+
+```bash
+first-agent --provider fake --memory-create /tmp/first-agent-memory/store.json
+# 之后会话：
+first-agent --provider fake --memory-store /tmp/first-agent-memory/store.json
+```
+
+store header 绑定 canonical workspace scope 与非秘密 provider trust profile（`--memory-profile`，默认 `default`）；scope/profile 不匹配时 startup fail closed。模型用 `memory_search`/`memory_get`（只读）与 `memory_remember`/`memory_update`/`memory_forget`（每次审批）修改；召回内容作为 untrusted context 块进入模型上下文，永不提升为 system 权威，也不会挤掉 system/current/pending core。conversation checkpoint 不保存 Memory 快照。未配置 Memory 时 Kernel 行为与基线一致。
+
+owner preference 与 workspace Memory 分权：它使用默认 state root 下固定的
+`owner-preferences.json`，只有当前 durable user fact 的 exact 文本才能经 governed tool + approval
+确认或纠正；project/web/tool/model 内容不能晋升为跨 workspace preference。forget 只停止未来本机
+active recall，并保留 tombstone/provenance；不声称擦除历史或已发送给 remote Provider 的副本。
+
+## 012 验收状态
+
+离线 reference suite 覆盖 answer/clarify、task→approval→restart→read-back→`VERIFIED_DONE`、
+unknown effect、multiple-candidate selection、Goal controls、真实 HTTP adapter 的 disclosure send-count、
+owner preference poisoning/correct/forget 和 false-completion mutation oracle。真实 Provider E3 必须另行用
+四个显式 `FIRST_AGENT_E3_*` 环境变量运行 `scripts/run_012_e3.py`；Mock/Fake 结果不能冒充 E3，
+也不能据此宣称 production-ready。操作步骤见
+[`docs/acceptance/012_TRUSTED_CONTINUITY_E3.md`](docs/acceptance/012_TRUSTED_CONTINUITY_E3.md)。
+
+## SubAgent delegation
+
+`--subagent` 开启 `subagent__delegate`（HIGH + EXTERNAL，每次审批）。它把一个 bounded 只读 objective 交给一个 isolated child：child 复用同一个 `AgentRuntime.run_turn` 实现，但拥有独立 in-memory state、空 ToolRuntime、无 ContextSource、最多一次 model call，且不继承 parent history/Memory/Skill/MCP/workspace/credential。只有 child 返回 `COMPLETED` 才是成功；其他明确终态成为已知失败，runner/provider 无法分类的异常进入 parent unknown-outcome recovery。
+
+## Scheduler（external caller）
+
+`first-agent-schedule` 是无内置时钟的 occurrence adapter，供 cron/launchd/CI 调用。每次 occurrence 映射为独立 conversation/checkpoint，提交一次确定性 `SubmitMessage`，并输出 machine-readable JSON report：
+
+```bash
+first-agent-schedule \
+  --workspace "$PWD" \
+  --state-root /tmp/first-agent-schedule \
+  --schedule-id nightly-build \
+  --occurrence-id '2026-07-19T00:00:00Z' \
+  --scheduled-for '2026-07-19T00:00:00Z' \
+  --message 'run the benign nightly check' \
+  --provider fake
+```
+
+exit class 只有 `completed`(0) / `needs_human`(1) / `fatal_conflict`(2)。duplicate fire 走 action replay（provider/effect 不重复）；approval/recovery/limit/retryable 一律报告 `needs_human`，交还人类。`--state-root` 必须在 workspace 之外。
+
+## TUI（optional Textual adapter）
+
+`--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示，不提供伪造的 in-flight 取消。
+
+```bash
+python -m pip install -e ".[tui]"
+first-agent --provider fake --tui
+```
+
+未安装 Textual 时 `--tui` 给出明确安装提示，base 安装、普通 CLI 与 headless 都不依赖 Textual。所有外部可控文本统一 literal 渲染（`markup=False`，ANSI/C0/C1/bidi 显示为可见 escape）。
+
+## 开发验证
 
 ```bash
 .venv/bin/ruff check .
@@ -66,9 +197,4 @@ cp config/config.example.yaml config/config.yaml
 git diff --check
 ```
 
-## 安全边界
-
-- 不读取或提交真实 `.env`、`agent_log.jsonl`、sessions/runs、真实 MCP config、真实 skill/subagent 目录或 private data。
-- 不输出 secret，不展开环境变量里的 secret。
-- 不默认调用真实 provider、真实 MCP endpoint 或真实外部服务。
-- 不提交 `config/config.yaml`、`.codex/hooks.json`、`graphify-out/` 或本地 generated artifacts。
+架构与状态语义见 [Kernel Architecture](docs/architecture/KERNEL_ARCHITECTURE.md)。此次重建是 breaking change：旧 CLI、旧状态格式和旧 Python 接口均不兼容，也不会被自动发现或迁移；未跟踪的旧运行数据保持原样。

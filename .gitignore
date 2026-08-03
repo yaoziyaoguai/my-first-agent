@@ -1,4 +1,4 @@
-.env
+# Python / build
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -8,36 +8,44 @@ __pycache__/
 htmlcov/
 build/
 dist/
-.venv
-.codex/hooks.json
-pytest.ini
-.README.md*
-agent_log.jsonl
-session_snapshots/
-sessions/
-workspace/
-memory/
-skills/
-blog/
-summary.md
-state.json
-runs/
-agent_log.archived-*.jsonl
-tui/node_modules/
-node_modules/
-.tui_audit_log*
-docs/.ruff_cache/
-graphify-out/
-.opencode/
-.DS_Store
-config/config.local.yaml
-# 本地真实 runtime config（含真实 api key）：只存在于工作区，不被 Git 跟踪；
-# 仓库只保留 config/config.example.yaml 模板。real provider 测试读取本地 config/config.yaml。
+*.egg-info/
+.venv/
+
+# Secrets and private local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.netrc
+.git-credentials
+config.local.*
 config/config.yaml
 config/.local.yaml
 config/.local_backup
 
-# 本地 coding-agent 工具配置（opencode/claude hooks、graphify 指令等）：
-# 属于个人工作区配置，不随 release 提交，避免污染 release 判断。
+# Runtime state: Kernel v1 only opens an explicitly supplied path.
+# 锚定到仓库根目录，避免吞掉同名源码/测试目录（如 agent/memory、tests/memory）。
+/agent_log.jsonl
+/agent_log.archived-*.jsonl
+/session_snapshots/
+/sessions/
+/runs/
+/state.json
+/workspace/
+/memory/
+/skills/
+
+# Coding Agent / local developer aids (not product capabilities)
+.ua/
+graphify-out/
 .claude/
 CLAUDE.md
+.codex/
+.opencode/
+pytest.ini
+
+# OS / UI residue
+.DS_Store
+node_modules/
+.tui_audit_log*

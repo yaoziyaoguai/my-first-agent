@@ -19,18 +19,24 @@ from agent.cli.actions import (
     build_cancel,
     build_cancel_goal,
     build_pause_goal,
+    build_recover_unknown_observation,
     build_resolve_approval,
     build_resolve_recovery,
     build_resume,
     build_resume_goal,
+    build_revoke_process_authority,
     build_submit,
+    parse_artifact_confirmation,
+    utc_now_rfc3339,
 )
 from agent.runtime.contracts import (
     Action,
     ControlRequestKind,
     ConversationState,
     RecoveryResolution,
+    ResolveApproval,
 )
+from agent.runtime.views import project_visible_source_views
 from agent.tui.adapter import TuiAdapter
 from agent.tui.render import (
     SafeDisplayTooLargeError,
@@ -50,6 +56,65 @@ _PREVIEW_DISPLAY_CAP = 4_000
 
 class TextualNotInstalledError(RuntimeError):
     """未安装 Textual 时给出明确安装提示。"""
+
+
+def parse_process_command(
+    value: str,
+    state,
+    *,
+    approval_time_factory: Callable[[], str] = utc_now_rfc3339,
+) -> tuple | None:  # noqa: ANN001
+    """F5/R11：TUI 输入的 process-authority 命令翻译（纯函数，adapter 自有层）。
+
+    返回 ``("action", RevokeProcessAuthority)`` / ``("leases", views)`` /
+    ``("error", message)``；普通消息返回 ``None``（走 submit 路径）。与 CLI 共用
+    ``build_revoke_process_authority`` typed builder 与 ``project_process_leases``
+    投影——同一 reducer 入口，不复制状态机。
+    """
+
+    from agent.runtime.views import project_process_leases
+
+    text = value.strip()
+    if not text.startswith("/"):
+        return None
+    command, _, argument = text.partition(" ")
+    if command == "/approve-artifact":
+        active = state.active_run
+        request = active.pending_request if active is not None else None
+        requirement = getattr(request, "artifact_confirmation_requirement", None)
+        if requirement is None:
+            return ("error", "The pending approval has no artifact requirement.")
+        try:
+            path, sha256 = parse_artifact_confirmation(argument)
+        except ValueError as error:
+            return ("error", str(error))
+        if path != requirement.artifact_path:
+            return ("error", "Artifact path must exactly match the pending requirement.")
+        return (
+            "action",
+            build_resolve_approval(
+                state,
+                request_id=request.request_id,
+                binding_digest=request.binding_digest,
+                approved=True,
+                approved_at=approval_time_factory(),
+                confirmed_artifact_path=path,
+                confirmed_artifact_sha256=sha256,
+            ),
+        )
+    if command == "/leases":
+        advanced = argument.strip() == "--advanced"
+        return ("leases", project_process_leases(state, advanced=advanced))
+    if command == "/revoke":
+        target_text = argument.strip()
+        if not target_text:
+            return ("error", "Use /revoke <lease_id> or /revoke all.")
+        target = None if target_text == "all" else target_text
+        try:
+            return ("action", build_revoke_process_authority(state, lease_id=target))
+        except ValueError as error:
+            return ("error", str(error))
+    return None
 
 
 def _bounded_worker_error(error: BaseException) -> str:
@@ -77,6 +142,7 @@ def build_app(
     *,
     run_id_factory: Callable[[], str],
     close_deadline_seconds: float = 30.0,
+    approval_time_factory: Callable[[], str] = utc_now_rfc3339,
 ):
     _require_textual()
     from textual import work
@@ -96,10 +162,12 @@ def build_app(
             ("r", "reject", "Reject"),
             ("s", "mark_succeeded", "Mark Succeeded"),
             ("f", "mark_failed", "Mark Failed"),
+            ("o", "record_observation_unknown", "Record Observation Unknown"),
             ("u", "resume", "Resume"),
             ("p", "pause_goal", "Pause Goal"),
             ("c", "cancel", "Cancel"),
             ("d", "ack_provider", "Acknowledge Provider"),
+            ("f2", "toggle_source_refs", "Toggle Source Refs"),
         ]
 
         def __init__(self) -> None:
@@ -113,6 +181,7 @@ def build_app(
             self._last_worker_error: str | None = None
             # approval preview 是否超过显示 cap：True 时 approve 被 fail-closed gate 屏蔽。
             self._preview_too_large: bool = False
+            self._advanced_sources: bool = False
             # lifecycle：active worker 收到 quit 后进入 closing_requested；不能安全收口则
             # shutdown_blocked，且不提前关闭 resources。
             self.closing_requested = False
@@ -148,6 +217,26 @@ def build_app(
             if result is not None:
                 label = run_status_label(result.status)
                 main_text = f"{label}: {result.message or projection.main_text}"
+            sources = (
+                project_visible_source_views(view.snapshot.state, advanced=True)
+                if self._advanced_sources
+                else projection.sources
+            )
+            if sources:
+                source_lines = ["Sources:"]
+                source_lines.extend(
+                    (
+                        f"- {source.source_kind} · {source.title} · {source.locator} · "
+                        f"{source.observed_at} · {source.status}"
+                        + (
+                            f" · {source.source_ref}"
+                            if self._advanced_sources and source.source_ref is not None
+                            else ""
+                        )
+                    )
+                    for source in sources
+                )
+                main_text = f"{main_text}\n" + "\n".join(source_lines)
             if worker_error is not None:
                 # 用户可见的有界失败提示（不含原始异常敏感内容）；状态来自 authoritative
                 # checkpoint 重新投影（action 未推进）。
@@ -178,7 +267,9 @@ def build_app(
 
             msg_input = self.query_one("#message", Input)
             if (
-                "submit" in projection.actions or "correct_goal" in projection.actions
+                "submit" in projection.actions
+                or "correct_goal" in projection.actions
+                or projection.focus == "input"
             ) and not self.closing_requested:
                 msg_input.disabled = False
                 msg_input.value = ""
@@ -214,6 +305,7 @@ def build_app(
                 "reject": "r: reject",
                 "mark_succeeded": "s: mark succeeded",
                 "mark_failed": "f: mark failed",
+                "record_observation_unknown": "o: record observation unknown",
                 "resume": "u: resume",
                 "cancel": "c: cancel",
                 "pause_goal": "p: pause goal",
@@ -239,6 +331,23 @@ def build_app(
             state = self._adapter.load_view().snapshot.state
             projection = project(state)
             if name not in projection.actions:
+                return None
+            return state
+
+        def _permitted_artifact_approval_state(self) -> ConversationState | None:
+            """typed artifact approval 复用 approval preview 的同一 fail-closed gate。"""
+
+            if (
+                self.closing_requested
+                or self.shutdown_blocked
+                or self._adapter.is_active
+                or self._preview_too_large
+            ):
+                return None
+            state = self._adapter.load_view().snapshot.state
+            active = state.active_run
+            request = active.pending_request if active is not None else None
+            if getattr(request, "artifact_confirmation_requirement", None) is None:
                 return None
             return state
 
@@ -303,6 +412,46 @@ def build_app(
                         message=event.value,
                     )
                 return
+            if self.closing_requested or self.shutdown_blocked:
+                return
+            state = self._adapter.load_view().snapshot.state
+            command_result = parse_process_command(
+                event.value,
+                state,
+                approval_time_factory=approval_time_factory,
+            )
+            if command_result is not None:
+                kind, payload = command_result
+                if kind == "action":
+                    if (
+                        isinstance(payload, ResolveApproval)
+                        and self._permitted_artifact_approval_state() is None
+                    ):
+                        return
+                    self._run_action(payload)
+                elif kind == "leases":
+                    from rich.text import Text
+
+                    lines = ["Active process leases:"]
+                    for index, lease in enumerate(payload):
+                        lines.append(
+                            f"[{index}] {lease.readable_command} · "
+                            f"profile={lease.resource_profile} · "
+                            f"uses left={lease.remaining_uses} · "
+                            f"expires={lease.expires_at}"
+                        )
+                    lines.append(
+                        "Revoke with /revoke <lease_id> or /revoke all "
+                        "(ids via /leases --advanced)."
+                    )
+                    self.query_one("#status", Static).update(
+                        Text(safe_display("\n".join(lines)))
+                    )
+                else:
+                    from rich.text import Text
+
+                    self.query_one("#status", Static).update(Text(safe_display(payload)))
+                return
             state = self._permitted_state("submit")
             if state is None:
                 state = self._permitted_state("correct_goal")
@@ -328,6 +477,7 @@ def build_app(
                     request_id=req.request_id,
                     binding_digest=req.binding_digest,
                     approved=True,
+                    approved_at=approval_time_factory(),
                 )
             )
 
@@ -373,6 +523,12 @@ def build_app(
                 )
             )
 
+        async def action_record_observation_unknown(self) -> None:
+            state = self._permitted_state("record_observation_unknown")
+            if state is None:
+                return
+            self._run_action(build_recover_unknown_observation(state))
+
         async def action_resume(self) -> None:
             state = self._permitted_state("resume_goal")
             if state is not None:
@@ -410,6 +566,10 @@ def build_app(
                 self._run_action(
                     build_ack_provider(state, acknowledged_at="operator-confirmed")
                 )
+
+        def action_toggle_source_refs(self) -> None:
+            self._advanced_sources = not self._advanced_sources
+            self._refresh()
 
     return FirstAgentTui()
 

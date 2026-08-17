@@ -51,3 +51,31 @@ def test_sensitive_exact_names_reject_case_variants(tmp_path: Path) -> None:
             boundary.validate_relative(variant)
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "subproject/.claude/settings.json",
+        "subproject/.codex/config.json",
+        "subproject/.opencode/state.json",
+        "subproject/.aws/sso/cache/session.json",
+        "subproject/.kube/config",
+        "subproject/.docker/config.json",
+        "subproject/.gnupg/private-keys-v1.d/key",
+        "subproject/.ssh/id_custom",
+        "subproject/.config/gh/hosts.yml",
+        "subproject/node_modules/package/index.js",
+        ".npmrc",
+        ".pypirc",
+    ),
+)
+def test_sensitive_components_are_denied_at_every_depth(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    boundary = WorkspaceBoundary(workspace)
+
+    with pytest.raises(WorkspaceSecurityError):
+        boundary.validate_relative(path)
+

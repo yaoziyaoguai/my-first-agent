@@ -7,15 +7,15 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agent.memory.store import MemoryStore
 from agent.runtime.contracts import (
     ContextCandidate,
     ContextQuery,
     ContextSourceSnapshot,
+    context_source_snapshot_digest,
 )
 
 _ASCII_RUN = re.compile(r"[A-Za-z0-9]+")
@@ -73,8 +73,14 @@ class MemoryContextSource:
                 item.candidate.candidate_id,
             )
         )
-        candidates = tuple(item.candidate for item in scored if item.score > 0)
-        digest = _snapshot_digest(self.name, self._store.revision, candidates)
+        candidates = _bounded_candidates(
+            tuple(item.candidate for item in scored if item.score > 0),
+            max_items=query.source_limits.max_items,
+            max_tokens=query.source_limits.max_tokens,
+        )
+        digest = context_source_snapshot_digest(
+            self.name, self._store.revision, candidates
+        )
         return ContextSourceSnapshot(
             source_name=self.name,
             revision=self._store.revision,
@@ -105,13 +111,30 @@ def _unique_tokens(text: str) -> set[str]:
     return tokens
 
 
-def _snapshot_digest(source_name: str, revision: int, candidates) -> str:
-    payload = {
-        "source": source_name,
-        "revision": revision,
-        "candidates": [
-            (candidate.candidate_id, candidate.content_digest) for candidate in candidates
-        ],
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+def _bounded_candidates(
+    candidates: tuple[ContextCandidate, ...],
+    *,
+    max_items: int,
+    max_tokens: int,
+) -> tuple[ContextCandidate, ...]:
+    remaining_chars = max_tokens * 4
+    selected: list[ContextCandidate] = []
+    for candidate in candidates[:max_items]:
+        if remaining_chars <= 0:
+            break
+        content = candidate.content[:remaining_chars]
+        remaining_chars -= len(content)
+        if content != candidate.content:
+            candidate = replace(
+                candidate,
+                content=content,
+                content_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                provenance={
+                    **candidate.provenance,
+                    "original_content_digest": candidate.content_digest,
+                    "truncated": True,
+                    "truncation_reason": "context_source_token_limit",
+                },
+            )
+        selected.append(candidate)
+    return tuple(selected)

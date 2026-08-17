@@ -12,6 +12,7 @@ from pathlib import Path
 from agent.runtime.checkpoint import CheckpointConflictError, LocalCheckpointStore
 from agent.runtime.contracts import (
     ConversationState,
+    ConversationWorkspaceBindingV1,
     LoadedSnapshot,
     RunStatus,
     SubmitMessage,
@@ -28,10 +29,14 @@ def create_or_load_occurrence_store(
     occurrence: ScheduledOccurrence,
     *,
     state_root: Path,
+    workspace_binding: ConversationWorkspaceBindingV1 | None = None,
 ) -> tuple[LocalCheckpointStore, LoadedSnapshot]:
     """排他创建或加载 occurrence checkpoint。conversation identity 不匹配即 conflict。"""
     path = state_root / occurrence.checkpoint_relative_path
-    state = ConversationState.new(occurrence.conversation_id)
+    state = ConversationState.new(
+        occurrence.conversation_id,
+        workspace_binding=workspace_binding,
+    )
     try:
         store = LocalCheckpointStore.initialize(path, state)
     except CheckpointConflictError:

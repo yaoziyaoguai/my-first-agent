@@ -13,8 +13,13 @@ import os
 import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
+
+from agent.history.catalog import HistoryCatalog
+from agent.history.tools import build_history_tool_registrations
 from agent.mcp.bridge import McpAsyncBridge, SessionTimeouts
 from agent.mcp.catalog import McpCatalogError, build_mcp_catalog
 from agent.mcp.safety import McpSafetyLatch
@@ -28,8 +33,14 @@ from agent.memory.preferences import (
 from agent.memory.source import MemoryContextSource
 from agent.memory.store import MemoryStore
 from agent.memory.tools import build_memory_tool_registrations
+from agent.process.tools import build_local_process_registration
+from agent.research.tools import build_research_tool_registrations
 from agent.runtime.context import ContextLimits, KernelContextManager
-from agent.runtime.contracts import ProviderDescriptor, canonical_json_digest
+from agent.runtime.contracts import (
+    ConversationWorkspaceBindingV1,
+    ProviderDescriptor,
+    canonical_json_digest,
+)
 from agent.runtime.control import ControlInbox
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.ports import CheckpointStore, EventSink, ModelProvider
@@ -37,6 +48,10 @@ from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from agent.skill.catalog import SkillLimits, build_skill_catalog
 from agent.skill.tools import build_skill_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS, build_file_tool_registrations
+from agent.tools.path_safety import WorkspaceBoundary
+from agent.web.client import TavilyClient
+from agent.web.profile import WebProfileV1
+from agent.web.tools import build_web_tool_registrations
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +86,45 @@ class MemoryResources:
 
     source: object
     registrations: tuple[RegisteredTool, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WebResources:
+    """固定 Tavily client 的 registrations 与有序 closeables。"""
+
+    registrations: tuple[RegisteredTool, ...]
+    closeables: tuple[Callable[[], None], ...]
+
+
+def build_web_resources(
+    profile: WebProfileV1 | None,
+    *,
+    credential: str | None,
+    http_client: httpx.Client | None = None,
+    clock: Callable[[], str] | None = None,
+) -> WebResources:
+    """未配置时显式关闭；配置后 key 只进入 client 内存。"""
+    if profile is None:
+        if credential is not None:
+            raise ValueError("Web credential cannot be supplied without a profile")
+        return WebResources((), ())
+    if not credential:
+        raise ValueError(
+            "Web profile credential environment variable is not set: "
+            f"{profile.credential_env}"
+        )
+    client = TavilyClient(profile, api_key=credential, http_client=http_client)
+    observed_at = clock or (
+        lambda: datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
+    return WebResources(
+        registrations=build_web_tool_registrations(
+            client,
+            profile,
+            clock=observed_at,
+        ),
+        closeables=(client.close,) if client.owns_client else (),
+    )
 
 
 def build_mcp_resources(
@@ -135,18 +189,25 @@ def build_composition(
     invocation_limits: InvocationLimits,
     closeables: tuple[Callable[[], None], ...] = (),
     sources: tuple = (),
-    workspace_scope_digest: str = "",
+    workspace_identity_digest: str = "",
+    context_scope_digest: str = "",
     provider_descriptor: ProviderDescriptor | None = None,
     control_inbox: ControlInbox | None = None,
     strict_control_schema: bool = False,
+    workspace_binding: ConversationWorkspaceBindingV1 | None = None,
 ) -> Composition:
+    if workspace_binding is not None and (
+        workspace_binding.workspace_identity_digest != workspace_identity_digest
+        or workspace_binding.workspace_scope_digest != context_scope_digest
+    ):
+        raise ValueError("composition workspace binding does not match its identity inputs")
     control_inbox = control_inbox or ControlInbox()
     tool_runtime = KernelToolRuntime(tool_registrations)
     definitions = tool_runtime.definitions()
     authority_snapshot = canonical_json_digest(
         {
             "version": "fixed-composition-v1",
-            "workspace_identity_digest": workspace_scope_digest,
+            "workspace_identity_digest": workspace_identity_digest,
             "provider_descriptor_digest": (
                 provider_descriptor.identity_digest
                 if provider_descriptor is not None
@@ -157,6 +218,8 @@ def build_composition(
                     "name": definition.name,
                     "input_schema": definition.input_schema,
                     "side_effect": definition.side_effect.value,
+                    "egress": definition.egress.value,
+                    "execution_authority": definition.execution_authority.value,
                 }
                 for definition in definitions
             ],
@@ -166,7 +229,8 @@ def build_composition(
         system_policy=system_policy,
         limits=context_limits,
         sources=sources,
-        workspace_scope_digest=workspace_scope_digest,
+        workspace_identity_digest=workspace_identity_digest,
+        context_scope_digest=context_scope_digest,
         authority_snapshot=authority_snapshot,
         strict_control_schema=strict_control_schema,
     )
@@ -179,6 +243,7 @@ def build_composition(
         limits=invocation_limits,
         provider_descriptor=provider_descriptor,
         control_inbox=control_inbox,
+        workspace_binding=workspace_binding,
     )
     return Composition(
         runtime=runtime,
@@ -227,9 +292,9 @@ def build_owner_preference_resources(
 
 
 def workspace_scope_digest_for(workspace: Path) -> str:
-    import hashlib
+    from agent.continuity.identity import WorkspaceIdentityV1
 
-    return hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()
+    return WorkspaceIdentityV1.resolve(workspace).scope_digest
 
 
 def provider_trust_profile(
@@ -246,6 +311,8 @@ def build_tool_registrations(
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
     max_tool_result_chars: int,
     skill_limits: SkillLimits | None = None,
+    history_catalog: HistoryCatalog | None = None,
+    captured_path: str | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """显式拼接当前真实消费者需要的 tool registrations。
 
@@ -262,6 +329,9 @@ def build_tool_registrations(
             private_roots=private_roots,
         )
     )
+    registrations.extend(build_research_tool_registrations())
+    if history_catalog is not None:
+        registrations.extend(build_history_tool_registrations(history_catalog))
     if skill_roots:
         catalog = build_skill_catalog(skill_roots, limits=skill_limits)
         registrations.extend(
@@ -269,4 +339,25 @@ def build_tool_registrations(
                 catalog, max_tool_result_chars=max_tool_result_chars
             )
         )
+    # 015 governed local action：仅在支持 POSIX process lifecycle 的平台静态注册
+    # local_process（默认可发现、默认无执行权）。未支持平台不注册，不 shell fallback。
+    if _posix_process_lifecycle_available():
+        process_boundary = WorkspaceBoundary(
+            workspace,
+            protected_paths=protected_paths,
+            private_roots=private_roots,
+        )
+        registrations.append(
+            build_local_process_registration(
+                workspace=workspace,
+                captured_path=captured_path or os.environ.get("PATH", ""),
+                workspace_boundary=process_boundary,
+            )
+        )
     return tuple(registrations)
+
+
+def _posix_process_lifecycle_available() -> bool:
+    """仅当平台提供 bounded POSIX process-group lifecycle（killpg/setsid/no-follow）时注册。"""
+
+    return all(hasattr(os, attr) for attr in ("killpg", "setsid", "O_NOFOLLOW"))

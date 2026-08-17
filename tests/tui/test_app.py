@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 
@@ -29,7 +30,9 @@ from agent.runtime.state import (
     start_tool_batch,
 )
 from agent.runtime.tools import KernelToolRuntime
+from agent.runtime.views import SourceView
 from agent.tui.adapter import TuiAdapter
+from agent.tui.render import TuiProjection
 from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
 
 
@@ -166,6 +169,53 @@ def test_pilot_submit_completes() -> None:
     asyncio.run(scenario())
 
 
+def test_pilot_can_toggle_advanced_source_refs_without_runtime_action(
+    monkeypatch,
+) -> None:
+    pytest.importorskip("textual")
+    import agent.tui.app as tui_app
+
+    default_source = SourceView(
+        source_kind="workspace_excerpt",
+        locator="notes.md#L1",
+        title="Workspace excerpt",
+        observed_at="2026-08-05T00:00:00Z",
+        status="complete",
+        truncated=False,
+    )
+    advanced_source = replace(
+        default_source,
+        source_ref="source-ref:v1:" + "a" * 64,
+    )
+    projection = TuiProjection(
+        main_text="ready",
+        form_kind=None,
+        actions=("submit",),
+        focus="input",
+        terminal_message=None,
+        sources=(default_source,),
+    )
+    monkeypatch.setattr(tui_app, "project", lambda *_args, **_kwargs: projection)
+    monkeypatch.setattr(
+        tui_app,
+        "project_visible_source_views",
+        lambda _state, *, advanced=False: (advanced_source if advanced else default_source,),
+    )
+
+    async def scenario() -> None:
+        app = tui_app.build_app(_adapter(), run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            status = str(pilot.app.query_one("#status").render())
+            assert "source-ref:v1:" not in status
+            await pilot.press("f2")
+            await pilot.pause(delay=0.05)
+            advanced_status = str(pilot.app.query_one("#status").render())
+            assert "source-ref:v1:" in advanced_status
+            assert app._advanced_sources is True
+
+    asyncio.run(scenario())
+
+
 def test_worker_exception_refreshes_from_authoritative_checkpoint() -> None:
     """R21 / TUI_DESIGN(44,109): 当 ``execute_once`` 抛出（store.load 失败或 run_turn 的
     invariant re-raise），worker 仍必须回到 app 线程从 authoritative checkpoint 重新投影；
@@ -292,6 +342,40 @@ def test_pilot_oversized_approval_preview_blocks_approve_but_allows_reject() -> 
                 if recording.actions:
                     break
             assert len(recording.actions) == 1
+
+    asyncio.run(scenario())
+
+
+def test_pilot_oversized_artifact_preview_blocks_typed_approval(tmp_path) -> None:
+    """`/approve-artifact` 与键盘 approve 共用 preview cap，不能从输入命令绕过。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+    from tests.process.test_artifact_approval_contract import (
+        _awaiting_state,
+        _prepare_artifact_request,
+    )
+
+    criterion, request = _prepare_artifact_request(tmp_path)
+    request = replace(request, preview="SENSITIVE-EFFECT-DETAIL-" * 5000)
+    store = InMemoryCheckpointStore(_awaiting_state(request, criterion))
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert app._preview_too_large is True
+            message = app.query_one("#message")
+            message.disabled = False
+            message.value = "/approve-artifact " + "a" * 64 + " artifact.out"
+            await pilot.press("enter")
+            await pilot.pause(delay=0.05)
+            assert recording.actions == []
 
     asyncio.run(scenario())
 
@@ -609,10 +693,15 @@ def test_tui_approve_keyboard_action_matches_cli_builder_fields() -> None:
         request_id=req.request_id,
         binding_digest=req.binding_digest,
         approved=True,
+        approved_at="2026-08-16T12:00:00Z",
     )
 
     async def scenario() -> None:
-        app = build_app(adapter, run_id_factory=_run_id_factory())
+        app = build_app(
+            adapter,
+            run_id_factory=_run_id_factory(),
+            approval_time_factory=lambda: "2026-08-16T12:00:00Z",
+        )
         async with app.run_test() as pilot:
             for _ in range(50):
                 await pilot.pause(delay=0.02)
@@ -633,5 +722,6 @@ def test_tui_approve_keyboard_action_matches_cli_builder_fields() -> None:
             assert dispatched.request_id == cli_action.request_id
             assert dispatched.binding_digest == cli_action.binding_digest
             assert dispatched.approved == cli_action.approved
+            assert dispatched.approved_at == "2026-08-16T12:00:00Z"
 
     asyncio.run(scenario())

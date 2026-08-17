@@ -173,10 +173,12 @@ CompletionClaim，直到：
 - 遇到真实 config/authority/capacity/provider failure；
 - 被用户 pause/cancel。
 
-阶段性进度文字不能结束 active Goal，也不能要求用户输入“继续”。invocation limit、provider outage、unknown
-effect 和新的权限边界属于真实停止条件；UI 必须说明事实和可恢复动作，不能假装已经完成。
+阶段性进度文字不能结束 active Goal，也不能要求用户输入“继续”。Everyday composition 不设置累计
+model/tool/input/output 任务上限；只要仍有真实进展就继续。provider outage、conversation capacity、unknown
+effect、新权限边界、用户控制或紧急停滞熔断属于真实停止条件；UI 必须说明事实和可恢复动作，不能假装已经完成。
 
-不通过 CLI 外层自动反复提交 `Resume` 来绕过 Runtime limits，也不新增后台 loop。
+显式使用有限 `InvocationLimits` 的 Scheduler/SubAgent 等 caller 仍可得到 `PAUSED_LIMIT`；CLI 外层不自动反复
+提交 `Resume` 来绕过这些 caller 选择，也不新增后台 loop。
 
 ### 7.1 真实模型控制修复
 
@@ -188,8 +190,10 @@ durable raw facts 独立重算证明。知道引用名不等于拥有完成证�
 trusted state 冲突的 completion control 只能在同一个 `run_turn` 内得到有界 repair；repair 仍失败则
 fail closed。Provider 响应若无法严格归一化，所有 tool/control 均为零接纳、零执行；Runtime 可在相同可信
 上下文上有界重试，超过限额则以 `invalid_provider_response` 终止。everyday composition 显式使用
-`InvocationLimits(max_invalid_repairs=2)`（kernel 默认仍为 1）。任何 repair 都不得宽松解析 JSON、
-伪造 evidence、重放 effect 或要求用户输入“继续”。
+`max_invalid_repairs=4`，只约束严格协议/control 修复；任务停滞独立使用
+`max_no_progress_replans=16`。后者按连续独立 model response 的相同语义指纹计数，同一并行 tool batch 只算一次；
+换策略、真实 tool result 或新增 evidence 会重置。任何 repair 都不得宽松解析 JSON、伪造 evidence、重放 effect
+或要求用户输入“继续”。
 
 ### 7.2 Strict 控制通道与 trusted SYSTEM 回执投影
 

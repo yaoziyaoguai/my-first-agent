@@ -13,15 +13,17 @@ from typing import TYPE_CHECKING
 
 from agent.runtime.contracts import (
     ActiveRunStatus,
+    ApprovalRequest,
     ContinuationPhase,
     ConversationState,
+    EgressClass,
     RunResult,
     RunStatus,
 )
-from agent.runtime.views import GoalView, project_goal_view
+from agent.runtime.views import GoalView, SourceView, project_goal_view
 
 if TYPE_CHECKING:
-    from agent.runtime.contracts import ApprovalRequest, RecoveryRequest
+    from agent.runtime.contracts import RecoveryRequest
 
 # Unicode bidi / format controls that must always render as visible escapes.
 _BIDI_CONTROLS = frozenset(
@@ -70,6 +72,7 @@ class TuiProjection:
     # approval/recovery 表单的真实 pending-request 字段（label, value）；events 不参与。
     form_fields: tuple[tuple[str, str], ...] = ()
     goal: GoalView | None = None
+    sources: tuple[SourceView, ...] = ()
 
 
 def project(state: ConversationState, result: RunResult | None = None) -> TuiProjection:
@@ -89,18 +92,43 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             focus="input" if "submit" in actions or "correct_goal" in actions else "goal",
             terminal_message=terminal,
             goal=goal_view,
+            sources=goal_view.sources,
         )
     if active.status is ActiveRunStatus.AWAITING_APPROVAL:
+        requirement = (
+            active.pending_request.artifact_confirmation_requirement
+            if isinstance(active.pending_request, ApprovalRequest)
+            else None
+        )
         return TuiProjection(
             main_text="awaiting approval",
             form_kind="approval",
-            actions=("approve", "reject"),
-            focus="approval",
+            # artifact approval 必须在输入框中显式给出 path + digest；键盘 a 不能绕过。
+            actions=("reject",) if requirement is not None else ("approve", "reject"),
+            focus="input" if requirement is not None else "approval",
             terminal_message=None,
             form_fields=_approval_fields(active.pending_request),
             goal=goal_view,
+            sources=goal_view.sources,
         )
     if active.status is ActiveRunStatus.AWAITING_RECOVERY:
+        if (
+            active.executing_intent is not None
+            and active.executing_intent.egress is EgressClass.PUBLIC_NETWORK
+        ):
+            return TuiProjection(
+                main_text=(
+                    "public observation outcome unknown; record no evidence and continue; "
+                    "the request will not retry automatically"
+                ),
+                form_kind="observation_recovery",
+                actions=("record_observation_unknown",),
+                focus="recovery",
+                terminal_message=None,
+                form_fields=_recovery_fields(active.pending_request),
+                goal=goal_view,
+                sources=goal_view.sources,
+            )
         return TuiProjection(
             main_text="awaiting recovery",
             form_kind="recovery",
@@ -109,6 +137,7 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             terminal_message=None,
             form_fields=_recovery_fields(active.pending_request),
             goal=goal_view,
+            sources=goal_view.sources,
         )
     if active.status is ActiveRunStatus.AWAITING_DISCLOSURE:
         request = state.provider_disclosure_request
@@ -128,6 +157,7 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             terminal_message=None,
             form_fields=fields,
             goal=goal_view,
+            sources=goal_view.sources,
         )
     if active.phase is ContinuationPhase.EXECUTING:
         # 重开 EXECUTING checkpoint：工具 effect 可能已发生（unknown），只能 Resume
@@ -139,6 +169,7 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             focus="resume",
             terminal_message=None,
             goal=goal_view,
+            sources=goal_view.sources,
         )
     # PAUSED_LIMIT / PAUSED_RETRYABLE / RUNNABLE（MODEL/TOOL phase）：worker 已返回的 paused 状态。
     return TuiProjection(
@@ -148,6 +179,7 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
         focus="resume",
         terminal_message=None,
         goal=goal_view,
+        sources=goal_view.sources,
     )
 
 
@@ -162,6 +194,16 @@ def _approval_fields(req: ApprovalRequest | None) -> tuple[tuple[str, str], ...]
     fields.append(("risk", req.risk if req.risk else "unknown"))
     fields.append(("side effect", req.side_effect if req.side_effect else "unknown"))
     fields.append(("binding", req.binding_digest))
+    requirement = req.artifact_confirmation_requirement
+    if requirement is not None:
+        fields.append(("artifact path", requirement.artifact_path))
+        fields.append(
+            (
+                "approval command",
+                "/approve-artifact <64-lowercase-hex-sha256> "
+                f"{requirement.artifact_path}",
+            )
+        )
     return tuple(fields)
 
 

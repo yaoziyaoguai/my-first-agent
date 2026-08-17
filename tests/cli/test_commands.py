@@ -11,6 +11,7 @@ from agent.runtime.contracts import (
     ContinuationPhase,
     ConversationState,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     GoalStatus,
     LoadedSnapshot,
     PauseGoal,
@@ -107,6 +108,7 @@ def test_recovery_and_resume_commands_map_to_typed_actions() -> None:
             phase=ContinuationPhase.EXECUTING,
             pending_request=request,
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="call-1",
                 intent_digest="binding-1",
                 idempotency_key="key-1",

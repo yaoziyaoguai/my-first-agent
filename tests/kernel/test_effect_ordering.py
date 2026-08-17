@@ -4,6 +4,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     ConversationState,
+    ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -26,6 +27,7 @@ from tests.kernel.fakes import (
 
 def _runtime(store, provider, callable_):
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
         version="1",
         description="Write fixture",

@@ -18,15 +18,19 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ContinuationPhase,
     ConversationState,
+    EgressClass,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     LoadedSnapshot,
     ProviderDisclosureRequest,
+    RecoverUnknownObservation,
     RecoveryRequest,
     RecoveryResolution,
     ResolveApproval,
     ResolveUnknownToolOutcome,
     RunResult,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -119,6 +123,7 @@ def _recovery_state() -> tuple[ConversationState, RecoveryRequest]:
             phase=ContinuationPhase.EXECUTING,
             pending_request=request,
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="call-1",
                 intent_digest="recovery-binding",
                 idempotency_key="idempotency-1",
@@ -127,6 +132,29 @@ def _recovery_state() -> tuple[ConversationState, RecoveryRequest]:
         ),
     )
     return state, request
+
+
+def _public_observation_recovery_state() -> ConversationState:
+    state, request = _recovery_state()
+    assert state.active_run is not None
+    return replace(
+        state,
+        active_run=replace(
+            state.active_run,
+            pending_request=replace(request, summary="public observation outcome is unknown"),
+            executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                tool_call_id="call-1",
+                intent_digest="recovery-binding",
+                idempotency_key="request-1",
+                side_effect=SideEffectClass.READ_ONLY,
+                egress=EgressClass.PUBLIC_NETWORK,
+                operation="search",
+                request_identity="request-1",
+            ),
+            tool_calls=(ToolCall("call-1", "web_search", {}),),
+        ),
+    )
 
 
 @pytest.mark.parametrize("answer", ["y", "YES", "是", "允许"])
@@ -204,6 +232,33 @@ def test_ambiguous_yes_does_not_classify_unknown_outcome() -> None:
     assert any("success" in message.lower() and "failed" in message.lower() for message in output)
 
 
+@pytest.mark.parametrize("answer", ["continue", "继续"])
+def test_public_observation_recovery_records_unknown_without_guess_or_retry(
+    answer: str,
+) -> None:
+    state = _public_observation_recovery_state()
+    runtime, _, _ = _run(state, answer, "/exit")
+
+    action = runtime.actions[0]
+    assert isinstance(action, RecoverUnknownObservation)
+    assert action.tool_call_id == "call-1"
+    assert action.intent_digest == "recovery-binding"
+
+
+def test_public_observation_recovery_rejects_success_guess() -> None:
+    runtime, output, _ = _run(
+        _public_observation_recovery_state(),
+        "success",
+        "/exit",
+    )
+
+    assert runtime.actions == []
+    assert any(
+        "continue" in message.lower() and "not retry" in message.lower()
+        for message in output
+    )
+
+
 @pytest.mark.parametrize("text", ["yes", "no", "是", "否"])
 def test_same_text_without_pending_decision_is_an_ordinary_message(text: str) -> None:
     state = ConversationState.new("conversation-1")
@@ -236,7 +291,11 @@ def test_restart_redisplays_exact_pending_decision_without_provider_or_effect(
     else:
         pending = _recovery_state()[0]
         expected = "Unknown tool outcome: the write outcome is unknown"
-    pending = replace(pending, conversation_id=opened.snapshot.state.conversation_id)
+    pending = replace(
+        pending,
+        conversation_id=opened.snapshot.state.conversation_id,
+        workspace_binding=opened.snapshot.state.workspace_binding,
+    )
     lease = opened.store.try_acquire(pending.conversation_id)
     assert lease is not None
     try:

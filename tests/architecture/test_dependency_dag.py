@@ -27,6 +27,8 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
     state_imports = _imports(ROOT / "agent/runtime/state.py")
     port_imports = _imports(ROOT / "agent/runtime/ports.py")
     context_imports = _imports(ROOT / "agent/runtime/context.py")
+    context_control_imports = _imports(ROOT / "agent/runtime/context_control.py")
+    context_source_imports = _imports(ROOT / "agent/runtime/context_source.py")
 
     leaf_only = {"agent.runtime.contracts"}
     assert {name for name in state_imports if name.startswith("agent.")} <= leaf_only
@@ -34,8 +36,16 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
     # context/tools 是领域层，可依赖叶子合同与 ports（ContextSource 等）。
     assert {name for name in context_imports if name.startswith("agent.")} <= {
         "agent.runtime.contracts",
+        "agent.runtime.context_control",
+        "agent.runtime.context_source",
         "agent.runtime.ports",
     }
+    assert {
+        name for name in context_control_imports if name.startswith("agent.")
+    } <= leaf_only
+    assert {
+        name for name in context_source_imports if name.startswith("agent.")
+    } <= leaf_only
     all_imports = state_imports | port_imports | context_imports
     assert "agent.core" not in all_imports
     assert "agent.state" not in all_imports

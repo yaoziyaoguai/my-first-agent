@@ -14,6 +14,7 @@ from agent.runtime.contracts import (
     ApprovalPolicy,
     ContextQuery,
     ContextSourceLimits,
+    ExecutionAuthorityClass,
     JSONValue,
     KnownNotExecuted,
     OutputPolicy,
@@ -76,6 +77,7 @@ def _read_schema(properties: dict, required: list[str]) -> dict:
 
 def _search_spec(scope: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_search",
         version="1",
         description="Search approved workspace memory by lexical relevance.",
@@ -94,6 +96,7 @@ def _search_spec(scope: str) -> ToolSpec:
 
 def _get_spec(scope: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_get",
         version="1",
         description="Read one approved workspace memory record by ID.",
@@ -109,6 +112,7 @@ def _get_spec(scope: str) -> ToolSpec:
 
 def _remember_spec(scope: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_remember",
         version="1",
         description="Persist one approved workspace memory record.",
@@ -124,6 +128,7 @@ def _remember_spec(scope: str) -> ToolSpec:
 
 def _update_spec(scope: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_update",
         version="1",
         description="Update one approved workspace memory record under exact precondition.",
@@ -147,6 +152,7 @@ def _update_spec(scope: str) -> ToolSpec:
 
 def _forget_spec(scope: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_forget",
         version="1",
         description="Forget one approved workspace memory record under exact precondition.",

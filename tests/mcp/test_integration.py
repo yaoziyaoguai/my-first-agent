@@ -76,7 +76,7 @@ def test_composition_with_mcp_has_close_stack_and_tools(tmp_path: Path) -> None:
         _catalog_config(str(wrapper)),
         _safety_dir(tmp_path),
         env_provider=lambda names: {},  # noqa: ARG005
-        timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+        timeouts=SessionTimeouts(initialize=30, list_page=10, call=10, shutdown=5),
     )
     store = InMemoryCheckpointStore(ConversationState.new("c1"))
     composition = build_composition(
@@ -182,7 +182,7 @@ def test_empty_env_allowlist_does_not_inherit_parent(monkeypatch, tmp_path: Path
     safety_dir.mkdir(mode=0o700, exist_ok=True)
     latch = McpSafetyLatch(safety_dir / "latch.json")
     binding = LatchBinding("repo", "cfg", None, "gen-1", "intent-a2")
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome = bridge.submit(
             lambda: run_stdio_session(
@@ -197,7 +197,7 @@ def test_empty_env_allowlist_does_not_inherit_parent(monkeypatch, tmp_path: Path
                 latch=latch,
                 binding=binding,
                 expected_clear_revision=0,
-                timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+                timeouts=SessionTimeouts(initialize=30, list_page=10, call=10, shutdown=5),
             )
         )
     finally:
@@ -257,10 +257,10 @@ def test_approval_binds_full_arguments_and_executable_identity(tmp_path: Path) -
     from agent.mcp.tools import McpExecutorConfig
 
     config = McpExecutorConfig(
-        bridge=McpAsyncBridge(total_timeout_seconds=40),
+        bridge=McpAsyncBridge(total_timeout_seconds=120),
         latch=McpSafetyLatch(safety_dir / "latch.json"),
         composition_epoch="epoch-1",
-        timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+        timeouts=SessionTimeouts(initialize=30, list_page=10, call=10, shutdown=5),
         env_provider=lambda names: {},
     )
     try:

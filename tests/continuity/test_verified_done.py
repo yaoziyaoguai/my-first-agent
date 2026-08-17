@@ -14,6 +14,7 @@ from agent.runtime.contracts import (
     ConversationState,
     EvidenceOracleKind,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     FactKind,
     GoalStatus,
     ModelResponse,
@@ -21,10 +22,12 @@ from agent.runtime.contracts import (
     RunStatus,
     SubmitMessage,
     ToolCall,
+    ToolPrepareContext,
 )
 from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
+from agent.tools.file_ops import build_file_tool_runtime
 from tests.continuity.test_contracts import _goal
 from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
 
@@ -158,6 +161,70 @@ def test_filesystem_oracle_rederives_exact_path_and_content_digest_from_raw_fact
     assert records[0].oracle_identity == "filesystem-digest:v1"
 
 
+def test_filesystem_oracle_uses_original_bytes_digest_for_binary_artifact(tmp_path) -> None:
+    payload = b"%PDF-1.7\x00\xff\xfe\n"
+    (tmp_path / "artifact.pdf").write_bytes(payload)
+    runtime = build_file_tool_runtime(tmp_path)
+    intent = runtime.prepare(
+        ToolCall("read-binary", "read_file", {"path": "artifact.pdf"}),
+        ToolPrepareContext(
+            conversation_id="conversation-1",
+            run_id="run-binary",
+            state_revision=0,
+            goal_id="goal:1",
+            goal_revision=1,
+            workspace_identity_digest="workspace-digest-1",
+        ),
+    )
+    result = runtime.invoke(intent)
+    facts = (
+        ConversationFact(
+            fact_id="fact:calls:binary",
+            kind=FactKind.TOOL_CALLS,
+            content={
+                "calls": [
+                    {
+                        "tool_call_id": "read-binary",
+                        "name": "read_file",
+                        "arguments": {"path": "artifact.pdf"},
+                    }
+                ]
+            },
+        ),
+        ConversationFact(
+            fact_id="fact:result:binary",
+            kind=FactKind.TOOL_RESULT,
+            content={
+                "tool_call_id": result.tool_call_id,
+                "text": result.content,
+                "is_error": result.is_error,
+                "executed": result.executed,
+                "metadata": result.metadata,
+            },
+        ),
+    )
+    goal = _goal()
+    criterion = replace(
+        goal.admitted_criteria[0],
+        predicate={
+            "path": "artifact.pdf",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        },
+    )
+    state = ConversationState(
+        conversation_id="conversation-1",
+        facts=facts,
+        goal=replace(goal, admitted_criteria=(criterion,)),
+    )
+
+    records = ClosedEvidenceRegistry().derive(
+        state,
+        _claim(),
+        observed_at="2026-08-02T02:00:00Z",
+    )
+    assert records[0].passed is True
+
+
 def test_missing_failed_stale_or_tampered_evidence_rejects_verified_done() -> None:
     bad_claim = CompletionClaim(
         correlation_id="claim-bad",
@@ -211,6 +278,7 @@ def test_unknown_effect_blocks_verified_done() -> None:
                 ToolCall("write-1", "write_file", {"path": "reports/final.md"}),
             ),
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="write-1",
                 intent_digest="intent-1",
                 idempotency_key="key-1",

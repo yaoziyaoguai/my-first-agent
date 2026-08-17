@@ -23,6 +23,8 @@ from agent.runtime.contracts import (
     BlockedClaim,
     ClarificationRequest,
     ConversationState,
+    EvidenceOracleKind,
+    ExecutionAuthorityClass,
     FactKind,
     GoalFrame,
     GoalProgress,
@@ -99,6 +101,7 @@ class RecordingToolRuntime:
 
 def _task_tool(executions: list[str]) -> RegisteredTool:
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_note",
         version="1",
         description="Write a note into the workspace",
@@ -136,7 +139,14 @@ def _goal_frame() -> GoalFrame:
         scope=("workspace/notes",),
         non_goals=(),
         assumptions=(),
-        proposed_criteria=(ProposedCriterion("criterion-1", "note exists"),),
+        proposed_criteria=(
+            ProposedCriterion(
+                "criterion-1",
+                "note exists",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="notes/todo.md",
+            ),
+        ),
         admitted_criteria=(),
         authority_snapshot="authority-1",
         status=GoalStatus.GOAL_READY,
@@ -162,8 +172,8 @@ def _runtime(provider, store, timeline, tools=()) -> AgentRuntime:
         context_manager=RecordingContextManager(
             KernelContextManager(
                 system_policy="Be concise.",
-                limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
-                workspace_scope_digest="workspace-digest-1",
+                limits=ContextLimits(max_input_tokens=2_400, output_reserve=200),
+                workspace_identity_digest="workspace-digest-1",
                 authority_snapshot="authority-1",
             ),
             store,
@@ -418,6 +428,9 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     )
     provider = ScriptedProvider(
         ModelResponse((), control=GoalProposal("control-goal-progress-setup", _goal_frame())),
+        ModelResponse(
+            (ModelToolCall("write-before-progress", "write_note", {"path": "notes/todo.md"}),)
+        ),
         ModelResponse((), control=progress),
         ModelResponse(
             (),
@@ -442,7 +455,8 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     # 终态，不需要额外的用户 continue 动作。
     assert result.status is RunStatus.COMPLETED
     assert result.message == "the note body still needs a user-provided source"
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
+    assert executions == ["notes/todo.md"]
 
     goal = store.state.goal
     assert goal is not None, "accepted progress must not drop the durable Goal"
@@ -478,9 +492,100 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     assert user_messages == [
         "Write a note file notes/todo.md with my plan",
     ], "only the real user action may exist in the conversation"
-    assert all(str(text).strip().lower() != "continue" for text in user_messages), (
-        "continuation must not be driven by a synthetic continue user message"
+
+
+def test_repeated_goal_progress_requires_a_product_action_before_more_progress() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    first_progress = GoalProgress(
+        correlation_id="control-progress-first",
+        goal_id="goal-1",
+        goal_revision=1,
+        summary="Prepared the next safe step.",
+        next_step="Write notes/todo.md.",
+    )
+    repeated_progress = GoalProgress(
+        correlation_id="control-progress-repeated",
+        goal_id="goal-1",
+        goal_revision=1,
+        summary="Still preparing the next safe step.",
+        next_step="Write notes/todo.md.",
+    )
+    provider = ScriptedProvider(
+        ModelResponse((), control=GoalProposal("control-goal-progress", _goal_frame())),
+        ModelResponse(
+            (ModelToolCall("write-before-progress", "write_note", {"path": "notes/first.md"}),)
+        ),
+        ModelResponse((), control=first_progress),
+        ModelResponse((), control=repeated_progress),
+        ModelResponse(
+            (ModelToolCall("write-after-replan", "write_note", {"path": "notes/todo.md"}),)
+        ),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="control-progress-blocked-after-tool",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="closed verification evidence is unavailable",
+                safe_attempts=("wrote the requested note",),
+                resume_condition="provide a closed verification oracle",
+            ),
+        ),
+    )
+    runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
+
+    result = runtime.run_turn(
+        _submit(store.state, "Write a note file notes/todo.md with my plan"),
+        store.load(),
     )
 
+    assert result.status is RunStatus.COMPLETED
+    assert executions == ["notes/first.md", "notes/todo.md"]
+    progress_receipts = [
+        receipt
+        for receipt in store.state.control_receipts
+        if receipt.control_kind == "goal_progress"
+    ]
+    assert [receipt.correlation_id for receipt in progress_receipts] == [
+        "control-progress-first"
+    ]
+    assert any(
+        fact.content.get("code") == "no_progress_replan_required"
+        for fact in store.state.facts
+    )
+
+
+def test_persistent_goal_progress_without_product_action_fails_closed() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    progresses = tuple(
+        GoalProgress(
+            correlation_id=f"control-progress-stalled-{index}",
+            goal_id="goal-1",
+            goal_revision=1,
+            summary=f"Narrated progress {index}.",
+            next_step="Write notes/todo.md.",
+        )
+        for index in range(3)
+    )
+    provider = ScriptedProvider(
+        ModelResponse((), control=GoalProposal("control-goal-stalled", _goal_frame())),
+        *(ModelResponse((), control=progress) for progress in progresses),
+    )
+    runtime = _runtime(provider, store, timeline, (_task_tool([]),))
+
+    result = runtime.run_turn(
+        _submit(store.state, "Write a note file notes/todo.md with my plan"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "no_progress"
+    assert len(provider.calls) == 3
+    assert sum(
+        fact.content.get("code") == "no_progress_replan_required"
+        for fact in store.state.facts
+    ) == 1
     assert [entry for entry in timeline if entry[0].startswith("tool_")] == []
-    assert executions == []

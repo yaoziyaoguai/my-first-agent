@@ -53,6 +53,18 @@ sequenceDiagram
 
 `ContinuationPhase.EXECUTING` 也是共享 action legality 的安全边界：durable active run 处于该 phase 时，`CancelRun` 必须由 reducer 拒绝且 state 不变；所有 CLI/headless/TUI caller 都只能提交一次 `Resume`，让同一个 Runtime 生成 `AWAITING_RECOVERY` request。进入 `AWAITING_RECOVERY` 后只接受 exact `ResolveUnknownToolOutcome`，不能再用 Resume/Cancel 绕过分类。adapter 隐藏按钮不能替代这条 Kernel 合同。
 
+## 调用预算与收敛
+
+`InvocationLimits` 的 model/tool/input/output 累计上限是 caller 可选的暂停策略；显式整数仍产生可恢复的
+`PAUSED_LIMIT`，`None` 表示该 caller 不按任务累计量中断。Everyday composition 使用 `None`，因此一个仍在产生
+新事实、改变策略或完成子目标的任务不会因为调用次数或累计 token 要求用户反复 `/resume`。这不取消单次
+`ContextManager` 窗口、provider 单次输出、工具 I/O、deadline、checkpoint 容量或 effect approval 的有限边界。
+
+协议/结构错误与任务停滞是两个独立熔断器。`max_invalid_repairs` 约束无法严格归一化或不合法的 control；
+`max_no_progress_replans` 只累计连续独立 model response 中语义相同的停滞指纹。同一 response 的并行 tool batch
+只提供一次 replan opportunity，不能在模型看到 ToolResult 前耗尽 allowance；换工具/参数/错误原因、产生真实
+产品结果或新增验证 evidence 都重置停滞指纹。默认 Everyday 的 16 次相同停滞是紧急熔断，不是正常调用预算。
+
 ## 上下文管理
 
 `KernelContextManager` 统一预算 system policy、当前输入、历史、未解决请求、工具 schema 与工具结果，并保留输出空间。裁剪是确定性的：先限制过大的工具结果，再按最旧的完整原子组淘汰；tool call 与对应 result 不会被拆开。固定核心仍装不下时，会在 provider 调用前返回 limit，而不是悄悄丢失安全事实。

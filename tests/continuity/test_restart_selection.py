@@ -13,6 +13,7 @@ from agent.runtime.contracts import (
     ContinuationPhase,
     ConversationFact,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     FactKind,
     Resume,
     RunStatus,
@@ -96,6 +97,7 @@ def test_executing_checkpoint_enters_existing_unknown_effect_recovery(
             "call:1",
             "intent:write:1",
             "idempotency:write:1",
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         ),
         tool_calls=(call,),
     )

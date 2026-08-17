@@ -298,7 +298,8 @@ def run_e3(config: E3Config) -> dict[str, object]:
                 system_policy=_SYSTEM_POLICY,
                 context_limits=limits,
                 invocation_limits=InvocationLimits(max_model_calls=12, max_tool_calls=8),
-                workspace_scope_digest=session.workspace_identity.identity_digest,
+                workspace_identity_digest=session.workspace_identity.identity_digest,
+                context_scope_digest=session.workspace_identity.scope_digest,
             )
             runtime = composition.runtime
 

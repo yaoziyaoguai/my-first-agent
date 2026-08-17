@@ -2,7 +2,7 @@
 
 一个从当前目录开始工作的 local-first 日常 Agent。
 
-它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机；当前不宣称拥有 shell、网页、浏览器或整机控制能力。
+它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案）。任意网页直连、浏览器自动化、整机控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
 ## 当前能力
 
@@ -10,6 +10,11 @@
 - 确定性、限额明确的上下文构建
 - 串行工具调用与精确审批
 - `read_file`、`list_files`、`write_file`、`edit_file`
+- 经 exact approval 的结构化 `local_process`；Goal-scoped 权限租约可过期、限次并可撤销
+- 当前 workspace 内的有界路径、全文和分段检索
+- 当前 exact workspace 中 First Agent 自己保存的历史检索；不观察其他本机活动
+- 固定 Tavily Search/Extract 公开 Web 工具：每次 exact query/URL batch 单独批准
+- Runtime 铸造的来源回执、统一 Sources 视图、citation sidecar 与 provenance evidence
 - 本地 v1 checkpoint、暂停、恢复与未知工具结果处置
 - FakeProvider，以及 Anthropic-compatible / OpenAI-compatible 非流式 HTTP adapter
 - 同一套 typed action / event / result 合同下的 CLI 与 headless 调用
@@ -18,6 +23,9 @@
 - remote Provider 外发前的精确 disclosure acknowledgement
 - Runtime-owned evidence gate：只有满足 admitted criteria 才显示 `VERIFIED_DONE`
 - 有来源、可纠正、可停止未来召回的 owner preference
+
+history、workspace 文件和 Web 内容都作为 untrusted data 进入模型上下文。来源回执证明的是“观察来自哪里、
+内容与哪次 receipt/digest 绑定”，不证明内容在语义上必然正确，也不代表用户已经接受结果。
 
 Memory、Skill、MCP、SubAgent、Scheduler 和 TUI 不属于 Kernel v1 核心；当前工作树已有六项 implementation candidate，但 2026-07-20 follow-up audit 证明 008 的 delivery final gate 未实现，并发现多项测试只覆盖 source shape、局部 happy path 或安全拒绝，不能宣称全部重接完成。当前声明见 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)，证据与修复合同见 [Evidence Closure Audit](docs/audits/2026-07-20-capability-evidence-closure-audit.md)、[Evidence Closure Contract](docs/architecture/CAPABILITY_EVIDENCE_CLOSURE_CONTRACT.md)、[009 Closure Plan](docs/plans/2026-07-20-009-close-capability-evidence-gaps-plan.md) 和 [009 Document Review](docs/audits/2026-07-20-009-document-review.md)。008 artifacts 保留为历史，不再作为晋级依据。
 
@@ -40,6 +48,19 @@ first-agent setup \
 cd /path/to/any-empty-or-existing-directory
 first-agent
 ```
+
+公开 Web 是可选能力。需要时先保存不含秘密的固定 Tavily profile；key 仍只放在你选择的环境变量里：
+
+```bash
+export FIRST_AGENT_WEB_API_KEY='set-in-your-shell'
+first-agent setup-web \
+  --credential-env FIRST_AGENT_WEB_API_KEY \
+  --timeout 10 \
+  --max-results 5
+```
+
+`setup-web` 不读取或保存 key，只保存固定 destination、credential 环境变量名、timeout、结果上限和第三方
+处理告知的摘要。未运行 `setup-web` 时，普通对话、历史和 workspace 文件能力照常工作，不会自动联网。
 
 setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
 strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复
@@ -73,6 +94,7 @@ digest/request ID。以下 slash command 只保留为高级精确接口：
 - `/approve ID`、`/reject ID`
 - `/resolve-success ID`、`/resolve-failed ID`
 - `/pause`、`/resume`、`/cancel`、`/exit`
+- `/sources`、`/sources --advanced`（只读查看当前来源；advanced 才显示 opaque source ref）
 
 普通文本永远走同一个入口：简单问题直接回答；只有会改变 outcome、target、scope、authority、
 重大成本或不可逆后果的缺失信息才澄清；明确任务先持久化 Goal，再允许 effectful tool。
@@ -84,6 +106,40 @@ Runtime；它会使旧 next step、completion claim 和 evidence binding 失效�
 evidence，才表示 Goal 已验收。模型说“done”不会改变 Goal 状态。
 
 `/exit`、EOF 和空闲时的 Ctrl-C 只退出当前 CLI，不会伪造一次运行取消。
+
+## 有依据的 workspace 知识
+
+First Agent 会按当前问题需要调用 `history_search` / `history_get`、`search_paths` / `search_text` /
+`read_file_chunk`，而不是把全部历史或整个目录自动塞进 prompt。历史范围只限当前路径 scope 与 exact
+filesystem identity 都匹配的 First Agent canonical checkpoint；legacy unbound、其他 workspace、Claude/Codex
+会话、Graphify/UA 产物和用户在 First Agent 之外的活动都不属于可召回历史。
+
+Web 只连接 `https://api.tavily.com`。Search 和 Extract 分别展示 exact query 或已由 Search receipt 授权的
+公开 URL batch，得到用户批准后才发送；产品不会直连目标网页、继承 ambient proxy/cookie/netrc，也不会登录
+或操作浏览器。公开 query 和 URL 会由 Tavily 按其条款处理；First Agent 不承诺第三方 zero retention、
+training exclusion 或 deletion。
+
+复杂研究可以把 history、workspace 与 extracted Web receipts 绑定到本地产物和
+`CitationManifestV1` sidecar。只有产物与 sidecar 都经过写入批准、read-back，且 Runtime 从 durable raw facts
+重新验证 source linkage 后，Goal 才可能显示 `VERIFIED_DONE`。默认 Sources 视图显示可读 locator、title、
+时间、完整/截断/失败状态；`/sources --advanced` 只用于诊断。
+
+014 已完成当前物化树的离线 gates、真实 Model + Tavily 三连 E3、mandatory held-out value journey 与 fresh
+review；权威证据见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。FakeProvider 或 MockTransport 仍不能替代
+这些真实边界证据。
+
+## 里程碑：受治理的本机行动
+
+015 已让 First Agent 在同一个自然语言入口中请求并运行结构化本机程序，以便完成构建、测试、文档转换、
+数据处理和其他当前 workspace 任务。每个新 command identity 都必须先展示 exact executable、arguments、cwd、
+资源限制、环境策略以及 same-UID 风险；批准只产生 Goal-scoped、有限次数、会过期、可撤销的精确权限租约。
+真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过；该能力已晋级为已交付，最终证据见
+`docs/implementation/015_EXECUTION_LOG.md`。
+
+这不是 shell。015 不接受命令字符串、pipeline、redirection、interactive TTY 或后台任务，也不宣称能阻止获批
+子进程读取同一用户可访问的文件、联网或派生子进程。已交付结论只覆盖
+`docs/plans/2026-08-09-001-feat-governed-local-action-plan.md` 冻结的 POSIX/macOS-first 合同，不扩大为
+OS sandbox、任意 shell 或整机控制。
 
 ## HTTP Provider
 

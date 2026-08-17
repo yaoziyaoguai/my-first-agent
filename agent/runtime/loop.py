@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from agent.runtime.context import ContextLimitError
@@ -19,9 +22,12 @@ from agent.runtime.contracts import (
     ClarificationRequest,
     CompletionClaim,
     ConfirmCriterion,
+    ContextPack,
     ContinuationPhase,
     ConversationFact,
     ConversationState,
+    ConversationWorkspaceBindingV1,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     FactAdmissionBinding,
     FactAdmissionClass,
@@ -30,6 +36,7 @@ from agent.runtime.contracts import (
     GoalProgress,
     GoalProposal,
     GoalStatus,
+    JSONValue,
     LoadedSnapshot,
     ModelTextBlock,
     ModelToolCall,
@@ -46,6 +53,9 @@ from agent.runtime.contracts import (
     RuntimeEvent,
     RuntimeEventKind,
     SideEffectClass,
+    SourceAuthorityBinding,
+    SourceKind,
+    SourceReceiptV1,
     ToolCall,
     ToolPrepareContext,
     ToolResult,
@@ -70,6 +80,7 @@ from agent.runtime.state import (
     accept_clarification_request,
     accept_goal_delta_proposal,
     accept_goal_proposal,
+    admit_process_receipt_criterion,
     append_policy_result,
     apply_control_request,
     claim_run,
@@ -92,15 +103,21 @@ from agent.runtime.state import (
     verify_goal_completion,
 )
 
+_WORKSPACE_OBSERVATION_TOOLS = frozenset(
+    {"read_file", "read_file_chunk", "list_files", "search_paths", "search_text"}
+)
+_WORKSPACE_MUTATION_TOOLS = frozenset({"write_file", "edit_file"})
+
 
 @dataclass(frozen=True, slots=True)
 class InvocationLimits:
-    max_model_calls: int = 16
-    max_tool_calls: int = 32
-    max_input_tokens: int = 100_000
-    max_output_tokens: int = 20_000
+    max_model_calls: int | None = 16
+    max_tool_calls: int | None = 32
+    max_input_tokens: int | None = 100_000
+    max_output_tokens: int | None = 20_000
     max_invalid_repairs: int = 1
     durable_effect_reserve_bytes: int = 65_536
+    max_no_progress_replans: int = 1
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -108,12 +125,55 @@ class InvocationLimits:
             ("max_tool_calls", self.max_tool_calls),
             ("max_input_tokens", self.max_input_tokens),
             ("max_output_tokens", self.max_output_tokens),
-            ("durable_effect_reserve_bytes", self.durable_effect_reserve_bytes),
         ):
-            if value < 1:
-                raise ValueError(f"{name} must be positive")
+            if value is not None and value < 1:
+                raise ValueError(f"{name} must be positive or None")
+        if self.durable_effect_reserve_bytes < 1:
+            raise ValueError("durable_effect_reserve_bytes must be positive")
         if self.max_invalid_repairs < 0:
             raise ValueError("max_invalid_repairs must be non-negative")
+        if self.max_no_progress_replans < 0:
+            raise ValueError("max_no_progress_replans must be non-negative")
+
+
+@dataclass(slots=True)
+class _NoProgressTracker:
+    """只让连续重复的同一种停滞消耗 repair allowance。"""
+
+    signature: tuple[str, ...] | None = None
+    repairs: int = 0
+    observation_id: int | None = None
+
+    def begin(self, signature: tuple[str, ...], *, observation_id: int) -> None:
+        self.signature = signature
+        self.repairs = 0
+        self.observation_id = observation_id
+
+    def same_replan_opportunity(self, observation_id: int) -> bool:
+        return self.observation_id == observation_id
+
+    def repair_exhausted(
+        self,
+        signature: tuple[str, ...],
+        *,
+        allowance: int,
+        observation_id: int,
+    ) -> bool:
+        if self.same_replan_opportunity(observation_id):
+            return False
+        self.observation_id = observation_id
+        if signature != self.signature:
+            self.signature = signature
+            self.repairs = 0
+        if self.repairs >= allowance:
+            return True
+        self.repairs += 1
+        return False
+
+    def reset(self) -> None:
+        self.signature = None
+        self.repairs = 0
+        self.observation_id = None
 
 
 class AgentRuntime:
@@ -130,6 +190,8 @@ class AgentRuntime:
         control_inbox: ControlInbox | None = None,
         provider_descriptor: ProviderDescriptor | None = None,
         evidence_registry: ClosedEvidenceRegistry | None = None,
+        evidence_time_factory: Callable[[], str] | None = None,
+        workspace_binding: ConversationWorkspaceBindingV1 | None = None,
     ) -> None:
         self._provider = provider
         self._context_manager = context_manager
@@ -141,6 +203,10 @@ class AgentRuntime:
         self._control_inbox = control_inbox
         self._provider_descriptor = provider_descriptor
         self._evidence_registry = evidence_registry or ClosedEvidenceRegistry()
+        self._evidence_time_factory = evidence_time_factory or (
+            lambda: datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        )
+        self._workspace_binding = workspace_binding
         self._event_buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar(
             "agent_runtime_event_buffer",
             default=None,
@@ -190,7 +256,11 @@ class AgentRuntime:
         warnings: list[str] = []
         current = snapshot
         try:
-            transition = accept_action(snapshot.state, action)
+            binding_result = self._ensure_workspace_binding(current)
+            if isinstance(binding_result, RunResult):
+                return binding_result
+            current = binding_result
+            transition = accept_action(current.state, action)
             if transition.disposition is ActionDisposition.CONFLICT:
                 return RunResult(
                     status=RunStatus.CONFLICT,
@@ -374,6 +444,42 @@ class AgentRuntime:
                 delivery_warnings=tuple(warnings),
             )
 
+    def _ensure_workspace_binding(
+        self,
+        snapshot: LoadedSnapshot,
+    ) -> LoadedSnapshot | RunResult:
+        expected = self._workspace_binding
+        if expected is None:
+            return snapshot
+        current = snapshot.state.workspace_binding
+        if current is not None:
+            if current != expected:
+                return RunResult(
+                    status=RunStatus.CONFLICT,
+                    state=snapshot.state,
+                    error_code="workspace_binding_mismatch",
+                )
+            return snapshot
+        goal = snapshot.state.goal
+        if goal is None:
+            return RunResult(
+                status=RunStatus.CONFLICT,
+                state=snapshot.state,
+                error_code="legacy_workspace_unbound",
+            )
+        if goal.workspace_identity_digest != expected.workspace_identity_digest:
+            return RunResult(
+                status=RunStatus.CONFLICT,
+                state=snapshot.state,
+                error_code="workspace_binding_mismatch",
+            )
+        # Schema migration 不改变产品 revision/action sequence；CAS token 仍会变化，
+        # 因而 crash 前保持原 v2、成功后单向成为 v3，同一用户 action 可继续受理。
+        return self._save(
+            snapshot,
+            replace(snapshot.state, workspace_binding=expected),
+        )
+
     def _drive(
         self,
         action: Action,
@@ -385,6 +491,12 @@ class AgentRuntime:
         input_tokens = 0
         output_tokens = 0
         invalid_repairs = 0
+        no_progress = _NoProgressTracker()
+        no_progress_since_product_action = False
+        (
+            successful_product_requests,
+            successful_workspace_observations,
+        ) = self._successful_product_request_inventory(current.state)
 
         while True:
             active = current.state.active_run
@@ -446,12 +558,80 @@ class AgentRuntime:
                         ),
                         outcome_state=failed,
                     )
+                request_digest = self._product_request_digest(call.name, call.arguments)
+                if (
+                    request_digest in successful_product_requests
+                    and not self._is_lease_governed_tool(call.name)
+                ):
+                    duplicate = ToolResult(
+                        tool_call_id=call.tool_call_id,
+                        content=(
+                            "Duplicate request suppressed: the same product tool input "
+                            "already succeeded in this run."
+                        ),
+                        is_error=True,
+                        executed=False,
+                    )
+                    fact = self._tool_result_fact(current.state, duplicate)
+                    current = self._save(
+                        current,
+                        record_nonexecuted_tool_result(current.state, fact),
+                    )
+                    warnings.extend(
+                        self._emit(
+                            current.state,
+                            RuntimeEventKind.TOOL_RESULT,
+                            causation_id=call.tool_call_id,
+                            payload={"tool_call_id": call.tool_call_id, "is_error": True},
+                        )
+                    )
+                    same_replan_opportunity = no_progress.same_replan_opportunity(
+                        model_calls
+                    )
+                    if no_progress.repair_exhausted(
+                        ("duplicate_product_request", request_digest),
+                        allowance=self._limits.max_no_progress_replans,
+                        observation_id=model_calls,
+                    ):
+                        return self._finish_no_progress(
+                            current,
+                            action,
+                            warnings,
+                            message=(
+                                "Provider repeated a product tool request that had already "
+                                "succeeded in the current run."
+                            ),
+                        )
+                    no_progress_since_product_action = True
+                    if same_replan_opportunity:
+                        continue
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="no_progress_replan_required",
+                            message=(
+                                "That exact product tool request already succeeded in this "
+                                "run and was not executed again. Do not repeat it. Choose a "
+                                "materially different tool, input, or source; complete with "
+                                "evidence; or send blocked_claim if no safe action can "
+                                "advance the Goal."
+                            ),
+                        ),
+                    )
+                    continue
                 prepared = self._tool_runtime.prepare(
                     call,
                     ToolPrepareContext(
                         conversation_id=current.state.conversation_id,
                         run_id=active.run_id,
                         state_revision=current.state.revision,
+                        approval_basis_revision=(
+                            active.approval_grant.approval_basis_revision
+                            if active.approval_grant is not None
+                            and active.approval_grant.approval_basis_revision is not None
+                            else current.state.revision
+                        ),
                         goal_id=(
                             current.state.goal.goal_id
                             if current.state.goal is not None
@@ -479,6 +659,16 @@ class AgentRuntime:
                             current.state,
                             call,
                         ),
+                        source_authority=self._source_authority_for(
+                            current.state,
+                            call,
+                        ),
+                        process_leases=current.state.process_leases,
+                        proposed_criteria=(
+                            current.state.goal.proposed_criteria
+                            if current.state.goal is not None
+                            else ()
+                        ),
                     ),
                     approval=active.approval_grant,
                 )
@@ -491,6 +681,17 @@ class AgentRuntime:
                         outcome_state=paused,
                     )
                 if isinstance(prepared, ToolResult):
+                    no_progress_signature = (
+                        "nonexecuted_tool",
+                        request_digest,
+                        canonical_json_digest(
+                            {
+                                "content": prepared.content,
+                                "is_error": prepared.is_error,
+                                "metadata": prepared.metadata,
+                            }
+                        ),
+                    )
                     fact = self._tool_result_fact(current.state, prepared)
                     current = self._save(
                         current,
@@ -504,10 +705,52 @@ class AgentRuntime:
                             payload={"tool_call_id": call.tool_call_id, "is_error": True},
                         )
                     )
+                    if no_progress_since_product_action:
+                        same_replan_opportunity = no_progress.same_replan_opportunity(
+                            model_calls
+                        )
+                        if no_progress.repair_exhausted(
+                            no_progress_signature,
+                            allowance=self._limits.max_no_progress_replans,
+                            observation_id=model_calls,
+                        ):
+                            return self._finish_no_progress(
+                                current,
+                                action,
+                                warnings,
+                                message=(
+                                    "Provider repeated non-executed tool attempts without "
+                                    "a successful product action."
+                                ),
+                            )
+                        if same_replan_opportunity:
+                            continue
+                        current = self._save(
+                            current,
+                            append_policy_result(
+                                current.state,
+                                code="no_progress_replan_required",
+                                message=(
+                                    "The attempted tool was not executed and no product "
+                                    "progress has occurred. Re-read the exact ToolResult, "
+                                    "choose a materially different valid action, or send "
+                                    "blocked_claim if no safe action can advance the Goal."
+                                ),
+                            ),
+                        )
+                    else:
+                        no_progress.begin(
+                            no_progress_signature,
+                            observation_id=model_calls,
+                        )
+                        no_progress_since_product_action = True
                     continue
                 if not isinstance(prepared, ExecutionIntent):
                     raise RuntimeError("Tool Runtime returned an unsupported preparation")
-                if tool_calls >= self._limits.max_tool_calls:
+                if (
+                    self._limits.max_tool_calls is not None
+                    and tool_calls >= self._limits.max_tool_calls
+                ):
                     paused = pause_for_limit(current.state)
                     return self._finish(
                         current,
@@ -543,6 +786,18 @@ class AgentRuntime:
                     tool_call_id=prepared.tool_call_id,
                     intent_digest=prepared.intent_digest,
                     idempotency_key=prepared.idempotency_key,
+                    side_effect=prepared.side_effect,
+                    egress=prepared.egress,
+                    operation=prepared.operation or prepared.tool_name,
+                    request_identity=(
+                        prepared.request_identity or prepared.idempotency_key
+                    ),
+                    execution_authority=prepared.execution_authority,
+                    process_lease_id=(
+                        prepared.process_lease.lease_id
+                        if prepared.process_lease is not None
+                        else None
+                    ),
                 )
                 current = self._save(current, executing)
                 try:
@@ -565,14 +820,32 @@ class AgentRuntime:
                 tool_calls += 1
                 fact = self._tool_result_fact(current.state, tool_result)
                 try:
-                    current = self._save(
-                        current,
-                        record_tool_result(
-                            current.state,
-                            fact,
-                            intent_digest=prepared.intent_digest,
-                        ),
+                    post_result_state = record_tool_result(
+                        current.state,
+                        fact,
+                        intent_digest=prepared.intent_digest,
                     )
+                    # J1：成功 process receipt → 同一 transition 内铸造 TOOL_RECEIPT criterion。
+                    _meta = (
+                        tool_result.metadata
+                        if isinstance(tool_result.metadata, dict)
+                        else {}
+                    )
+                    if (
+                        _meta.get("process_receipt_kind") == "process_v1"
+                        and _meta.get("outcome") == "exited"
+                        and _meta.get("exit_code") == 0
+                        and _meta.get("receipt_digest")
+                        and _meta.get("command_fingerprint")
+                    ):
+                        post_result_state = admit_process_receipt_criterion(
+                            post_result_state,
+                            tool_call_id=prepared.tool_call_id,
+                            receipt_digest=_meta["receipt_digest"],
+                            command_fingerprint=_meta["command_fingerprint"],
+                            action_seq=action.action_seq,
+                        )
+                    current = self._save(current, post_result_state)
                 except Exception:
                     request = RecoveryRequest(
                         request_id=f"recovery-{prepared.intent_digest[:16]}",
@@ -599,11 +872,28 @@ class AgentRuntime:
                         },
                     )
                 )
+                if tool_result.executed and not tool_result.is_error:
+                    if call.name in _WORKSPACE_MUTATION_TOOLS:
+                        # Workspace 发生真实 mutation 后，先前的本地观察已经过期；
+                        # 允许同参数 read/search 重新执行并取得新 snapshot。外部 Web、
+                        # history 与 effectful 请求仍保留 exact dedup。
+                        successful_product_requests.difference_update(
+                            successful_workspace_observations
+                        )
+                        successful_workspace_observations.clear()
+                    successful_product_requests.add(request_digest)
+                    if call.name in _WORKSPACE_OBSERVATION_TOOLS:
+                        successful_workspace_observations.add(request_digest)
+                no_progress.reset()
+                no_progress_since_product_action = False
                 continue
 
             if active.phase is not ContinuationPhase.MODEL:
                 raise RuntimeError("EXECUTING continuation must enter recovery before resume")
-            if model_calls >= self._limits.max_model_calls:
+            if (
+                self._limits.max_model_calls is not None
+                and model_calls >= self._limits.max_model_calls
+            ):
                 paused = pause_for_limit(current.state)
                 return self._finish(
                     current,
@@ -664,7 +954,11 @@ class AgentRuntime:
                     message="remote provider disclosure acknowledgement required",
                     outcome_state=paused,
                 )
-            if input_tokens + context.budget.estimated_input_tokens > self._limits.max_input_tokens:
+            if (
+                self._limits.max_input_tokens is not None
+                and input_tokens + context.budget.estimated_input_tokens
+                > self._limits.max_input_tokens
+            ):
                 paused = pause_for_limit(current.state)
                 return self._finish(
                     current,
@@ -714,11 +1008,30 @@ class AgentRuntime:
                     }:
                         reason = "invalid_provider_response"
                     if reason == "malformed_control":
-                        repair_message = (
-                            "Previous response was rejected (malformed_control). Return "
-                            "exactly one reserved control call, include every required "
-                            "field for its selected kind, and use valid JSON arguments."
-                        )
+                        allowed_control_text = ", ".join(
+                            sorted(self._advertised_control_kinds(context))
+                        ) or "none"
+                        if current.state.goal is not None:
+                            repair_message = (
+                                "Previous response was rejected (malformed_control). A "
+                                "trusted_goal already exists, so goal_proposal is "
+                                "unavailable. Allowed control kinds now: "
+                                + allowed_control_text
+                                + ". If trusted_goal already matches the user request, do "
+                                "not send another goal_proposal or goal_delta_proposal: use "
+                                "a currently advertised product tool. Use goal_delta_proposal "
+                                "only for a real conflict with the user's requested Goal. "
+                                "Otherwise use one of the other allowed controls only when "
+                                "its terminal or clarification condition is true, include "
+                                "every required field, and use valid JSON arguments."
+                            )
+                        else:
+                            repair_message = (
+                                "Previous response was rejected (malformed_control). Return "
+                                "exactly one currently advertised reserved control call, "
+                                "include every required field for its selected kind, and "
+                                "use valid JSON arguments."
+                            )
                     else:
                         repair_message = (
                             f"Previous response was rejected ({reason}). Return exactly "
@@ -778,7 +1091,10 @@ class AgentRuntime:
                 )
 
             output_tokens += response.bounded_output_tokens
-            if output_tokens > self._limits.max_output_tokens:
+            if (
+                self._limits.max_output_tokens is not None
+                and output_tokens > self._limits.max_output_tokens
+            ):
                 paused = pause_for_limit(current.state)
                 return self._finish(
                     current,
@@ -807,6 +1123,78 @@ class AgentRuntime:
                 )
 
             control = response.control
+            if control is not None:
+                control_kind = self._control_kind(control)
+                advertised_control_kinds = self._advertised_control_kinds(context)
+                if control_kind not in advertised_control_kinds:
+                    # goal_progress 只有在当前 run 已产生真实产品结果时才会被
+                    # advertised。模型继续发送它不是新的进度，而是 stalled
+                    # narration：给一次可执行的 replan 反馈，持续重复再按
+                    # no-progress fail closed，且绝不让隐藏 control 改写 Goal。
+                    if isinstance(control, GoalProgress):
+                        if no_progress.repair_exhausted(
+                            ("unavailable_goal_progress",),
+                            allowance=self._limits.max_no_progress_replans,
+                            observation_id=model_calls,
+                        ):
+                            return self._finish_no_progress(
+                                current,
+                                action,
+                                warnings,
+                                message=(
+                                    "Provider repeated GoalProgress without a newly "
+                                    "successful product tool result."
+                                ),
+                            )
+                        no_progress_since_product_action = True
+                        current = self._save(
+                            current,
+                            append_policy_result(
+                                current.state,
+                                code="no_progress_replan_required",
+                                message=(
+                                    "goal_progress is not currently available because no "
+                                    "new successful product tool result supports it. Do not "
+                                    "narrate progress. Use an advertised product tool, "
+                                    "complete with closed evidence, or send blocked_claim "
+                                    "when no safe action can advance the Goal."
+                                ),
+                            ),
+                        )
+                        continue
+                    if invalid_repairs >= self._limits.max_invalid_repairs:
+                        failed = fail_run(
+                            current.state,
+                            code="invalid_model_control",
+                            message=(
+                                "Provider repeatedly used a control kind that was not "
+                                "available in the current model context."
+                            ),
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.FAILED_FATAL,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.FAILED,
+                            error_code="invalid_model_control",
+                            outcome_state=failed,
+                        )
+                    invalid_repairs += 1
+                    allowed = ", ".join(sorted(advertised_control_kinds)) or "none"
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="invalid_model_control",
+                            message=(
+                                f"Control kind {control_kind} is not currently available "
+                                f"and was not accepted. Allowed control kinds now: {allowed}. "
+                                "Use an advertised product tool when concrete work remains."
+                            ),
+                        ),
+                    )
+                    continue
             if (
                 control is not None
                 and not isinstance(control, ClarificationRequest)
@@ -867,25 +1255,134 @@ class AgentRuntime:
             if isinstance(control, GoalProposal):
                 # Goal 先经 CAS 落盘,再让同一个循环重建上下文,保证任何任务
                 # 工具效果都发生在 durable Goal 之后(goal_cas < context_rebuild)。
-                current = self._save(
-                    current,
-                    accept_goal_proposal(current.state, control, context.goal_bootstrap),
-                )
+                try:
+                    transition_state = accept_goal_proposal(
+                        current.state, control, context.goal_bootstrap
+                    )
+                except ValueError as error:
+                    # 提案通过 normalize 但违反 reducer 校验（bootstrap binding /
+                    # 预铸 admitted criteria / source fact 权威性等）：这是模型可
+                    # 修复的控制参数错误，与 malformed_control 同类——不是
+                    # provider/infra 故障。给既有 invalid_repairs 预算内的一次
+                    # 修复机会；接受条件零放宽（被拒提案不创建 Goal）。
+                    if invalid_repairs >= self._limits.max_invalid_repairs:
+                        failed = fail_run(
+                            current.state,
+                            code="invalid_goal_proposal",
+                            message=(
+                                "Provider repeated an invalid GoalProposal after "
+                                f"repair allowance: {error}"
+                            ),
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.FAILED_FATAL,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.FAILED,
+                            error_code="invalid_goal_proposal",
+                            outcome_state=failed,
+                        )
+                    invalid_repairs += 1
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="invalid_goal_proposal",
+                            message=(
+                                "The goal_proposal was not accepted: "
+                                f"{error}. Copy trusted_goal_bootstrap fields "
+                                "exactly (created_from_fact_ids, "
+                                "workspace_identity_digest, authority_snapshot), "
+                                "leave admitted_criteria empty, and resend a "
+                                "corrected goal_proposal."
+                            ),
+                        ),
+                    )
+                    continue
+                current = self._save(current, transition_state)
+                no_progress.reset()
+                # Goal 建立的是控制边界，不是任务进展；下一步必须产生真实产品
+                # 动作，不能先用 GoalProgress 把计划叙述成已完成的工作。
+                no_progress_since_product_action = True
                 continue
             if isinstance(control, GoalProgress):
                 # 进度是活跃 Goal 的中间态:reducer 校验并落盘 EXECUTING 与
                 # correlation receipt 后,同一循环重建上下文继续,不依赖用户
                 # 再提交合成 "continue" 消息。
+                if no_progress_since_product_action:
+                    if no_progress.repair_exhausted(
+                        ("goal_progress_without_product_action",),
+                        allowance=self._limits.max_no_progress_replans,
+                        observation_id=model_calls,
+                    ):
+                        return self._finish_no_progress(
+                            current,
+                            action,
+                            warnings,
+                            message=(
+                                "Provider repeated GoalProgress without a product tool "
+                                "action or new verification evidence."
+                            ),
+                        )
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="no_progress_replan_required",
+                            message=(
+                                "No product action or verification evidence was added "
+                                "since the previous GoalProgress. Do not narrate more "
+                                "progress. Call the concrete tools needed for trusted_goal."
+                                "next_step, or send blocked_claim if no safe action can "
+                                "advance it."
+                            ),
+                        ),
+                    )
+                    continue
                 current = self._save(
                     current,
                     record_goal_progress(current.state, control),
                 )
+                no_progress_since_product_action = True
                 continue
             if isinstance(control, GoalDeltaProposal):
+                if self._goal_delta_is_noop(current.state, control):
+                    if no_progress.repair_exhausted(
+                        ("noop_goal_delta",),
+                        allowance=self._limits.max_no_progress_replans,
+                        observation_id=model_calls,
+                    ):
+                        return self._finish_no_progress(
+                            current,
+                            action,
+                            warnings,
+                            message=(
+                                "Provider repeated GoalDeltaProposal without changing the "
+                                "current Goal."
+                            ),
+                        )
+                    no_progress_since_product_action = True
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="no_progress_replan_required",
+                            message=(
+                                "That goal_delta_proposal restates trusted_goal and was not "
+                                "accepted. Do not narrate a no-op correction. Use an "
+                                "advertised product tool now, or send blocked_claim only if "
+                                "no safe action can advance the unchanged Goal."
+                            ),
+                        ),
+                    )
+                    continue
                 current = self._save(
                     current,
                     accept_goal_delta_proposal(current.state, control),
                 )
+                no_progress.reset()
+                no_progress_since_product_action = False
                 if (
                     current.state.goal is not None
                     and current.state.goal.status is GoalStatus.NEEDS_AUTHORITY
@@ -924,7 +1421,7 @@ class AgentRuntime:
                     records = self._evidence_registry.derive(
                         current.state,
                         control,
-                        observed_at="runtime-verified",
+                        observed_at=self._evidence_time_factory(),
                     )
                     existing_ids = {
                         record.evidence_id for record in current.state.evidence_records
@@ -937,6 +1434,7 @@ class AgentRuntime:
                             current,
                             record_evidence(current.state, fresh),
                         )
+                        no_progress.reset()
                     current = self._save(
                         current,
                         record_completion_claim(current.state, control),
@@ -946,12 +1444,36 @@ class AgentRuntime:
                         verify_goal_completion(current.state),
                     )
                 except EvidenceVerificationError as error:
+                    if no_progress.repair_exhausted(
+                        (
+                            "unverified_completion",
+                            str(error),
+                            canonical_json_digest(
+                                list(control.criterion_evidence_refs)
+                            ),
+                        ),
+                        allowance=self._limits.max_no_progress_replans,
+                        observation_id=model_calls,
+                    ):
+                        return self._finish_no_progress(
+                            current,
+                            action,
+                            warnings,
+                            message=(
+                                "Provider repeated completion claims without adding "
+                                "the required verification evidence."
+                            ),
+                        )
+                    no_progress_since_product_action = True
                     current = self._save(
                         current,
                         append_policy_result(
                             current.state,
                             code="completion_not_verified",
-                            message=str(error),
+                            message=(
+                                f"{error} "
+                                + self._evidence_repair_instruction(str(error))
+                            ),
                         ),
                     )
                     continue
@@ -1035,6 +1557,51 @@ class AgentRuntime:
                 )
 
             if model_tools:
+                advertised_names = {tool.name for tool in context.tools}
+                registered_names = {
+                    tool.name for tool in self._tool_runtime.definitions()
+                }
+                unavailable_names = sorted(
+                    {
+                        block.name
+                        for block in model_tools
+                        if block.name in registered_names
+                        and block.name not in advertised_names
+                        and not self._is_effectful_tool(block.name)
+                    }
+                )
+                if unavailable_names:
+                    if no_progress.repair_exhausted(
+                        ("unavailable_tool", *unavailable_names),
+                        allowance=self._limits.max_no_progress_replans,
+                        observation_id=model_calls,
+                    ):
+                        return self._finish_no_progress(
+                            current,
+                            action,
+                            warnings,
+                            message=(
+                                "Provider repeatedly called a registered tool that was not "
+                                "available in the current model context."
+                            ),
+                        )
+                    no_progress_since_product_action = True
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="no_progress_replan_required",
+                            message=(
+                                "The requested tool is registered but not currently "
+                                "available: "
+                                + ", ".join(unavailable_names)
+                                + ". It was not executed. Use only tools advertised in "
+                                "the current context, complete with existing evidence, or "
+                                "send blocked_claim if no safe action can advance the Goal."
+                            ),
+                        ),
+                    )
+                    continue
                 calls = tuple(
                     ToolCall(block.tool_call_id, block.name, block.arguments)
                     for block in model_tools
@@ -1196,6 +1763,203 @@ class AgentRuntime:
             outcome_state=state,
         )
 
+    def _finish_no_progress(
+        self,
+        current: LoadedSnapshot,
+        action: Action,
+        warnings: list[str],
+        *,
+        message: str,
+    ) -> RunResult:
+        failed = fail_run(current.state, code="no_progress", message=message)
+        return self._finish(
+            current,
+            action,
+            status=RunStatus.FAILED_FATAL,
+            warnings=warnings,
+            event_kind=RuntimeEventKind.FAILED,
+            error_code="no_progress",
+            message=message,
+            outcome_state=failed,
+        )
+
+    @staticmethod
+    def _advertised_control_kinds(context: ContextPack) -> set[str]:
+        schema = context.control_schema
+        if not isinstance(schema, dict):
+            return set()
+        input_schema = schema.get("input_schema")
+        properties = (
+            input_schema.get("properties") if isinstance(input_schema, dict) else None
+        )
+        kind = properties.get("kind") if isinstance(properties, dict) else None
+        values = kind.get("enum") if isinstance(kind, dict) else None
+        if not isinstance(values, list):
+            return set()
+        return {value for value in values if isinstance(value, str)}
+
+    @staticmethod
+    def _control_kind(control: object) -> str:
+        if isinstance(control, ClarificationRequest):
+            return "clarification_request"
+        if isinstance(control, GoalProposal):
+            return "goal_proposal"
+        if isinstance(control, GoalProgress):
+            return "goal_progress"
+        if isinstance(control, GoalDeltaProposal):
+            return "goal_delta_proposal"
+        if isinstance(control, CompletionClaim):
+            return "completion_claim"
+        if isinstance(control, BlockedClaim):
+            return "blocked_claim"
+        raise TypeError("unsupported model control")
+
+    @staticmethod
+    def _goal_delta_is_noop(
+        state: ConversationState,
+        proposal: GoalDeltaProposal,
+    ) -> bool:
+        goal = state.goal
+        updates = proposal.delta.updates
+        if goal is None or {"admitted_criteria", "authority_snapshot"} & updates.keys():
+            return False
+        for name, proposed in updates.items():
+            current: object = getattr(goal, name)
+            if name == "proposed_criteria":
+                current = [
+                    {
+                        "criterion_id": item.criterion_id,
+                        "description": item.description,
+                        "oracle_kind": (
+                            item.oracle_kind.value
+                            if item.oracle_kind is not None
+                            else None
+                        ),
+                        "artifact_path": item.artifact_path or "",
+                    }
+                    for item in goal.proposed_criteria
+                ]
+            if canonical_json_digest(current) != canonical_json_digest(proposed):
+                return False
+        return True
+
+    @staticmethod
+    def _evidence_repair_instruction(reason: str) -> str:
+        if reason == "no exact read-back fact proves the research artifact":
+            return (
+                "Do not repeat completion. Call read_file for the artifact, pass that "
+                "exact read-back text to build_citation_manifest with the existing source "
+                "refs, rewrite the citation sidecar with its canonical JSON, then read "
+                "both files back before a new completion claim."
+            )
+        if reason == "citation sidecar target requires admitted research provenance":
+            return (
+                "Do not repeat completion. Rebuild the citation manifest from current-Goal "
+                "source refs, write its canonical JSON to the exact .citations.json target "
+                "with approval, and read both artifact and sidecar back before retrying."
+            )
+        if "required source kind must contain extracted web content" in reason:
+            return (
+                "Do not repeat completion. Fetch an unattempted source_ref from the current "
+                "Web Search, then rebuild and rewrite the citation sidecar using the "
+                "extracted receipt before retrying."
+            )
+        if reason == "source receipt is not bound to the current Goal":
+            return (
+                "Do not repeat completion. Some cited retrieval happened before this Goal. "
+                "Run materially different history, workspace, and Web source queries now "
+                "under trusted_goal, rebuild the report and citation manifest only from "
+                "those current-Goal source refs, rewrite both targets, and read both back."
+            )
+        if reason == "artifact contains an invented URL":
+            return (
+                "Do not repeat completion or fetch unrelated sources. Use edit_file on the "
+                "artifact to remove every literal URL that is not exactly a cited current-Goal "
+                "web_extracted_content origin_locator. Then read_file the changed artifact, "
+                "rebuild and rewrite the citation sidecar from that exact text and existing "
+                "source refs, read both targets back, and retry completion."
+            )
+        if reason in {
+            "required source class is not cited",
+            "required source kind is not cited",
+        }:
+            return (
+                "Do not repeat completion. If the needed current-Goal source class already "
+                "exists in FIRST_AGENT_RUNTIME_SOURCE_REFS, do not retrieve it again: remap "
+                "each valid marker to a distinct source of the required source class. Only "
+                "retrieve a new source when that "
+                "class is genuinely absent; then retrieve a new history or workspace source "
+                "and use its new source ref. Rebuild the report and citation manifest, rewrite "
+                "both targets, and read both back before retrying."
+            )
+        return (
+            "Do not repeat completion. Call the concrete tools needed to create the "
+            "missing evidence, or send blocked_claim if no safe action can advance the Goal."
+        )
+
+    @staticmethod
+    def _product_request_digest(
+        tool_name: str,
+        arguments: dict[str, JSONValue],
+    ) -> str:
+        return canonical_json_digest(
+            {
+                "tool_name": tool_name,
+                "arguments": arguments,
+            }
+        )
+
+    @classmethod
+    def _successful_product_request_inventory(
+        cls,
+        state: ConversationState,
+    ) -> tuple[set[str], set[str]]:
+        active = state.active_run
+        if active is None:
+            return set(), set()
+        run_prefix = f"run:{active.run_id}:"
+        request_by_call_id: dict[str, tuple[str, str]] = {}
+        successful: set[str] = set()
+        workspace_observations: set[str] = set()
+        for fact in state.facts:
+            if not fact.fact_id.startswith(run_prefix):
+                continue
+            if fact.kind is FactKind.TOOL_CALLS:
+                raw_calls = fact.content.get("calls")
+                if not isinstance(raw_calls, list):
+                    continue
+                for raw_call in raw_calls:
+                    if not isinstance(raw_call, dict):
+                        continue
+                    call_id = raw_call.get("tool_call_id")
+                    name = raw_call.get("name")
+                    arguments = raw_call.get("arguments")
+                    if (
+                        isinstance(call_id, str)
+                        and isinstance(name, str)
+                        and isinstance(arguments, dict)
+                    ):
+                        request_by_call_id[call_id] = (
+                            cls._product_request_digest(name, arguments),
+                            name,
+                        )
+                continue
+            if (
+                fact.kind is FactKind.TOOL_RESULT
+                and fact.content.get("executed") is True
+                and fact.content.get("is_error") is False
+            ):
+                call_id = fact.content.get("tool_call_id")
+                if isinstance(call_id, str) and call_id in request_by_call_id:
+                    request_digest, tool_name = request_by_call_id[call_id]
+                    if tool_name in _WORKSPACE_MUTATION_TOOLS:
+                        successful.difference_update(workspace_observations)
+                        workspace_observations.clear()
+                    successful.add(request_digest)
+                    if tool_name in _WORKSPACE_OBSERVATION_TOOLS:
+                        workspace_observations.add(request_digest)
+        return successful, workspace_observations
+
     def _finish(
         self,
         current: LoadedSnapshot,
@@ -1244,6 +2008,9 @@ class AgentRuntime:
                 )
             if isinstance(request, RecoveryRequest):
                 payload["summary"] = request.summary
+                active = state.active_run
+                if active is not None and active.executing_intent is not None:
+                    payload["egress"] = active.executing_intent.egress.value
             causation_id = request.request_id
         if event_kind is RuntimeEventKind.DISCLOSURE_REQUESTED:
             disclosure = state.provider_disclosure_request
@@ -1286,6 +2053,17 @@ class AgentRuntime:
         return any(
             definition.name == tool_name
             and definition.side_effect is not SideEffectClass.READ_ONLY
+            for definition in self._tool_runtime.definitions()
+        )
+
+    def _is_lease_governed_tool(self, tool_name: str) -> bool:
+        # 015：LOCAL_SAME_UID_PROCESS 工具的 exact reuse 由 durable lease 治理（F2/R9，
+        # 8 uses），不适用 read-only/source 的 product-request dedup——重复 exact command
+        # 是合法的 lease reuse，不是 no-progress 重复。
+        return any(
+            definition.name == tool_name
+            and definition.execution_authority
+            is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS
             for definition in self._tool_runtime.definitions()
         )
 
@@ -1338,7 +2116,7 @@ class AgentRuntime:
             (
                 fact
                 for fact in reversed(state.facts)
-                if fact.kind in {FactKind.USER_MESSAGE, FactKind.TOOL_RESULT}
+                if fact.kind is FactKind.USER_MESSAGE
                 and fact.content.get("text") == content
             ),
             None,
@@ -1358,6 +2136,115 @@ class AgentRuntime:
             goal_revision=goal.revision,
             admission_class=FactAdmissionClass.WORKSPACE_FACT,
         )
+
+    @staticmethod
+    def _source_authority_for(
+        state: ConversationState,
+        call: ToolCall,
+    ) -> SourceAuthorityBinding | None:
+        if call.name != "web_fetch":
+            return None
+        source_ref = call.arguments.get("source_ref")
+        prefix = "source-ref:v1:"
+        if not isinstance(source_ref, str) or not source_ref.startswith(prefix):
+            return None
+        receipt_digest = source_ref[len(prefix) :]
+        if (
+            len(receipt_digest) != 64
+            or any(character not in "0123456789abcdef" for character in receipt_digest)
+        ):
+            return None
+        for fact in reversed(state.facts):
+            if (
+                fact.kind is not FactKind.TOOL_RESULT
+                or fact.content.get("is_error") is not False
+                or fact.content.get("executed") is not True
+            ):
+                continue
+            metadata = fact.content.get("metadata")
+            raw_receipts = (
+                metadata.get("source_receipts") if isinstance(metadata, dict) else None
+            )
+            source_refs = metadata.get("source_refs") if isinstance(metadata, dict) else None
+            if not isinstance(raw_receipts, list) or not isinstance(source_refs, list):
+                continue
+            if not any(
+                isinstance(item, dict)
+                and item.get("source_ref") == source_ref
+                and item.get("receipt_digest") == receipt_digest
+                for item in source_refs
+            ):
+                continue
+            for raw_receipt in raw_receipts:
+                try:
+                    receipt = SourceReceiptV1.from_json(raw_receipt)
+                except ValueError:
+                    continue
+                if (
+                    receipt.receipt_digest != receipt_digest
+                    or receipt.source_kind is not SourceKind.WEB_SEARCH_SNIPPET
+                    or receipt.conversation_id != state.conversation_id
+                    or receipt.request_identity is None
+                ):
+                    continue
+                canonical_url = receipt.origin_locator
+                if receipt.request_identity.startswith("tavily-search:v1:"):
+                    resolved_url = AgentRuntime._url_from_tavily_search_result(
+                        fact,
+                        receipt,
+                    )
+                    if resolved_url is None:
+                        continue
+                    canonical_url = resolved_url
+                return SourceAuthorityBinding.create(
+                    source_fact_id=fact.fact_id,
+                    receipt_digest=receipt.receipt_digest,
+                    conversation_id=state.conversation_id,
+                    request_identity=receipt.request_identity,
+                    canonical_url=canonical_url,
+                )
+        return None
+
+    @staticmethod
+    def _url_from_tavily_search_result(
+        fact: ConversationFact,
+        receipt: SourceReceiptV1,
+    ) -> str | None:
+        """从 receipt digest 绑定的 durable result 恢复完整公开 URL。
+
+        receipt locator 故意移除了 query；完整 URL 只作为 source result 数据保存，
+        并同时受 content digest 与 origin request digest 约束。任何 mutation 都
+        使 source_ref 失效，而不是让模型提供一个替代 URL。
+        """
+        raw_text = fact.content.get("text")
+        if not isinstance(raw_text, str) or receipt.origin_request_digest is None:
+            return None
+        try:
+            document = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(document, dict):
+            return None
+        results = document.get("results")
+        if not isinstance(results, list) or len(results) > 16:
+            return None
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            if canonical_json_digest(item) != receipt.content_digest:
+                continue
+            url = item.get("url")
+            locator = item.get("locator")
+            if (
+                not isinstance(url, str)
+                or not isinstance(locator, str)
+                or locator != receipt.origin_locator
+                or hashlib.sha256(url.encode("utf-8")).hexdigest()
+                != receipt.origin_request_digest
+            ):
+                continue
+            return url
+        return None
 
     @staticmethod
     def _preference_admission_for(

@@ -9,6 +9,7 @@ import stat
 from collections.abc import Callable
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
@@ -19,6 +20,7 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ContinuationPhase,
     ConversationState,
+    ConversationWorkspaceBindingV1,
     GoalStatus,
     LoadedSnapshot,
     SelectGoal,
@@ -28,6 +30,8 @@ _CONVERSATION_FILE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$"
 )
 _TERMINAL_GOAL_STATUSES = {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
+DEFAULT_ACTIVE_CANDIDATE_LIMIT = 16
+WORKSPACE_HISTORY_CAPACITY = 256
 
 
 class StartupDisposition(StrEnum):
@@ -36,6 +40,7 @@ class StartupDisposition(StrEnum):
     SELECT_REQUIRED = "select_required"
     NEEDS_AUTHORITY = "needs_authority"
     RECOVERY_REQUIRED = "recovery_required"
+    HISTORY_CAPACITY_EXCEEDED = "history_capacity_exceeded"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +52,11 @@ class WorkspaceSession:
     store: LocalCheckpointStore | None
     snapshot: LoadedSnapshot | None
     candidates: tuple[SessionCandidate, ...] = ()
+    workspace_binding: ConversationWorkspaceBindingV1 | None = None
+    legacy_unbound_count: int = 0
+    total_checkpoint_count: int = 0
+    total_active_count: int = 0
+    history_incomplete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,10 +82,16 @@ def open_workspace_session(
     state_root: Path | None = None,
     home: Path | None = None,
     conversation_id_factory: Callable[[], str] | None = None,
-    max_candidates: int = 16,
+    max_candidates: int = DEFAULT_ACTIVE_CANDIDATE_LIMIT,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+    bound_at_factory: Callable[[], str] | None = None,
 ) -> WorkspaceSession:
     if max_candidates < 1:
         raise ValueError("max_candidates must be positive")
+    if max_history_checkpoints < 1 or max_candidates > max_history_checkpoints:
+        raise ValueError(
+            "max_history_checkpoints must be positive and cover max_candidates"
+        )
     identity = WorkspaceIdentityV1.resolve(workspace)
     root = (
         default_state_root(home) if state_root is None else Path(state_root)
@@ -98,6 +114,8 @@ def open_workspace_session(
             workspace_root=workspace_root,
             conversation_id_factory=conversation_id_factory,
             max_candidates=max_candidates,
+            max_history_checkpoints=max_history_checkpoints,
+            bound_at_factory=bound_at_factory,
         )
 
 
@@ -108,14 +126,41 @@ def _open_workspace_session_locked(
     workspace_root: Path,
     conversation_id_factory: Callable[[], str] | None,
     max_candidates: int,
+    max_history_checkpoints: int,
+    bound_at_factory: Callable[[], str] | None,
 ) -> WorkspaceSession:
-    loaded = _load_candidates(workspace_root, max_candidates=max_candidates)
-    active = tuple(item for item in loaded if _is_nonterminal(item[1].state))
+    loaded = _load_candidates(
+        workspace_root,
+        max_history_checkpoints=max_history_checkpoints,
+    )
+    desired_binding = ConversationWorkspaceBindingV1.create(
+        workspace_scope_digest=identity.scope_digest,
+        workspace_identity_digest=identity.identity_digest,
+        bound_at=(bound_at_factory or _canonical_now)(),
+    )
+    legacy_unbound = tuple(
+        item
+        for item in loaded
+        if item[1].state.workspace_binding is None and item[1].state.goal is None
+    )
+    active = tuple(
+        item
+        for item in loaded
+        if item not in legacy_unbound and _is_nonterminal(item[1].state)
+    )
     if len(active) == 1:
         path, snapshot = active[0]
         candidate = _candidate(path, snapshot)
+        state_binding = snapshot.state.workspace_binding
         goal = snapshot.state.goal
-        if goal is not None and goal.workspace_identity_digest != identity.identity_digest:
+        if state_binding is not None and (
+            state_binding.workspace_scope_digest != identity.scope_digest
+            or state_binding.workspace_identity_digest != identity.identity_digest
+        ) or (
+            state_binding is None
+            and goal is not None
+            and goal.workspace_identity_digest != identity.identity_digest
+        ):
             disposition = StartupDisposition.NEEDS_AUTHORITY
         elif _has_unknown_effect(snapshot.state):
             disposition = StartupDisposition.RECOVERY_REQUIRED
@@ -129,8 +174,13 @@ def _open_workspace_session_locked(
             store=LocalCheckpointStore(path),
             snapshot=snapshot,
             candidates=(candidate,),
+            workspace_binding=(state_binding or desired_binding),
+            legacy_unbound_count=len(legacy_unbound),
+            total_checkpoint_count=len(loaded),
+            total_active_count=1,
         )
     if len(active) > 1:
+        visible = active[:max_candidates]
         return WorkspaceSession(
             disposition=StartupDisposition.SELECT_REQUIRED,
             state_root=root,
@@ -138,7 +188,25 @@ def _open_workspace_session_locked(
             checkpoint_path=None,
             store=None,
             snapshot=None,
-            candidates=tuple(_candidate(path, snapshot) for path, snapshot in active),
+            candidates=tuple(_candidate(path, snapshot) for path, snapshot in visible),
+            workspace_binding=desired_binding,
+            legacy_unbound_count=len(legacy_unbound),
+            total_checkpoint_count=len(loaded),
+            total_active_count=len(active),
+            history_incomplete=len(active) > len(visible),
+        )
+
+    if len(loaded) >= max_history_checkpoints:
+        return WorkspaceSession(
+            disposition=StartupDisposition.HISTORY_CAPACITY_EXCEEDED,
+            state_root=root,
+            workspace_identity=identity,
+            checkpoint_path=None,
+            store=None,
+            snapshot=None,
+            workspace_binding=desired_binding,
+            legacy_unbound_count=len(legacy_unbound),
+            total_checkpoint_count=len(loaded),
         )
 
     conversation_id = (conversation_id_factory or (lambda: str(uuid4())))()
@@ -147,7 +215,10 @@ def _open_workspace_session_locked(
     checkpoint_path = workspace_root / f"{conversation_id}.json"
     store = LocalCheckpointStore.initialize(
         checkpoint_path,
-        ConversationState.new(conversation_id),
+        ConversationState.new(
+            conversation_id,
+            workspace_binding=desired_binding,
+        ),
     )
     return WorkspaceSession(
         disposition=StartupDisposition.CREATED,
@@ -156,6 +227,10 @@ def _open_workspace_session_locked(
         checkpoint_path=checkpoint_path,
         store=store,
         snapshot=store.load(),
+        workspace_binding=desired_binding,
+        legacy_unbound_count=len(legacy_unbound),
+        total_checkpoint_count=len(loaded) + 1,
+        total_active_count=1,
     )
 
 
@@ -184,7 +259,12 @@ def select_workspace_session(
         or goal.goal_id != action.goal_id
     ):
         raise ValueError("SelectGoal does not bind the exact candidate revision")
-    if goal.workspace_identity_digest != selection.workspace_identity.identity_digest:
+    binding = snapshot.state.workspace_binding
+    if binding is not None and (
+        binding.workspace_scope_digest != selection.workspace_identity.scope_digest
+        or binding.workspace_identity_digest
+        != selection.workspace_identity.identity_digest
+    ) or goal.workspace_identity_digest != selection.workspace_identity.identity_digest:
         disposition = StartupDisposition.NEEDS_AUTHORITY
     elif _has_unknown_effect(snapshot.state):
         disposition = StartupDisposition.RECOVERY_REQUIRED
@@ -198,19 +278,28 @@ def select_workspace_session(
         store=store,
         snapshot=snapshot,
         candidates=(candidate,),
+        workspace_binding=(snapshot.state.workspace_binding or selection.workspace_binding),
+        legacy_unbound_count=selection.legacy_unbound_count,
+        total_checkpoint_count=selection.total_checkpoint_count,
+        total_active_count=selection.total_active_count,
+        history_incomplete=selection.history_incomplete,
     )
+
+
+def _canonical_now() -> str:
+    return datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _load_candidates(
     workspace_root: Path,
     *,
-    max_candidates: int,
+    max_history_checkpoints: int,
 ) -> tuple[tuple[Path, LoadedSnapshot], ...]:
     checkpoint_paths: list[Path] = []
     lock_names: set[str] = set()
     with os.scandir(workspace_root) as entries:
         for index, entry in enumerate(entries, start=1):
-            if index > max_candidates * 2 + 1:
+            if index > max_history_checkpoints * 2 + 1:
                 raise ValueError("workspace state enumeration exceeds its bound")
             if entry.name == ".bootstrap.lock":
                 lock_names.add(entry.name)
@@ -223,8 +312,8 @@ def _load_candidates(
             ):
                 raise ValueError("workspace state directory contains an unknown entry")
             checkpoint_paths.append(workspace_root / entry.name)
-            if len(checkpoint_paths) > max_candidates:
-                raise ValueError("workspace state candidate count exceeds its bound")
+            if len(checkpoint_paths) > max_history_checkpoints:
+                raise ValueError("workspace history capacity exceeds its safety bound")
     checkpoint_names = {path.name for path in checkpoint_paths}
     expected_locks = {f".{name}.lock" for name in checkpoint_names}
     unknown_locks = lock_names - expected_locks - {".bootstrap.lock"}
@@ -238,6 +327,23 @@ def _load_candidates(
             raise ValueError("checkpoint filename does not match conversation identity")
         loaded.append((path, snapshot))
     return tuple(loaded)
+
+
+def load_workspace_checkpoints(
+    workspace_root: Path,
+    *,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+) -> tuple[tuple[Path, LoadedSnapshot], ...]:
+    """只读加载一个已经由 startup 确定的 workspace state directory。"""
+    if max_history_checkpoints < 1:
+        raise ValueError("max_history_checkpoints must be positive")
+    root = Path(workspace_root).absolute()
+    _reject_symlink_components(root, label="workspace state directory")
+    _ensure_owner_directory(root, create=False, label="workspace state directory")
+    return _load_candidates(
+        root,
+        max_history_checkpoints=max_history_checkpoints,
+    )
 
 
 def _is_nonterminal(state: ConversationState) -> bool:

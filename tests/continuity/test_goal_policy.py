@@ -8,6 +8,7 @@ from agent.runtime.contracts import (
     ApprovalPolicy,
     ApprovalRequired,
     AuthoritySourceKind,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     GoalAuthorizationBinding,
     OutputPolicy,
@@ -27,6 +28,7 @@ def _spec(
     workspace_scoped: bool = True,
 ) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=name,
         version="1",
         description="test governed effect",

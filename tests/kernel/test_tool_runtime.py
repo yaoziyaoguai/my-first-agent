@@ -4,6 +4,7 @@ import pytest
 
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     OutputPolicy,
     SideEffectClass,
@@ -22,6 +23,7 @@ def _spec(
     side_effect: SideEffectClass = SideEffectClass.READ_ONLY,
 ) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=name,
         version="1",
         description="Read a deterministic fixture",

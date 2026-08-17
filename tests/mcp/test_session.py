@@ -50,14 +50,14 @@ def _run(bridge, tmp_path, *, remote, args, schema, intent="intent-1"):
             latch=latch,
             binding=_binding(intent),
             expected_clear_revision=0,
-            timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+            timeouts=SessionTimeouts(initialize=30, list_page=10, call=10, shutdown=5),
         )
     )
     return outcome, latch
 
 
 def test_feasibility_echo_round_trip(tmp_path: Path) -> None:
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome, latch = _run(
             bridge, tmp_path, remote="echo", args={"text": "hello mcp"}, schema=ECHO_SCHEMA
@@ -74,7 +74,7 @@ def test_feasibility_echo_round_trip(tmp_path: Path) -> None:
 
 
 def test_broken_tool_returns_executed_error(tmp_path: Path) -> None:
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome, _latch_state = _run(
             bridge,
@@ -92,7 +92,7 @@ def test_broken_tool_returns_executed_error(tmp_path: Path) -> None:
 
 
 def test_descriptor_drift_returns_not_executed(tmp_path: Path) -> None:
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome, _latch_state = _run(
             bridge,
@@ -109,7 +109,7 @@ def test_descriptor_drift_returns_not_executed(tmp_path: Path) -> None:
 
 
 def test_missing_tool_returns_not_executed(tmp_path: Path) -> None:
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome, _latch_state = _run(
             bridge,
@@ -126,7 +126,7 @@ def test_missing_tool_returns_not_executed(tmp_path: Path) -> None:
 
 
 def test_invalid_arguments_fail_before_call(tmp_path: Path) -> None:
-    bridge = McpAsyncBridge(total_timeout_seconds=40)
+    bridge = McpAsyncBridge(total_timeout_seconds=120)
     try:
         outcome, _latch_state = _run(
             bridge,

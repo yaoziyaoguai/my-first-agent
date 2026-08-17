@@ -73,7 +73,8 @@ def build_child_runtime(
             output_reserve=min(200, profile.max_output_tokens),
         ),
         sources=(),
-        workspace_scope_digest=profile.workspace_scope_digest,
+        workspace_identity_digest=profile.workspace_scope_digest,
+        context_scope_digest=profile.workspace_scope_digest,
         strict_control_schema=strict_control_schema,
     )
     from agent.runtime.tools import KernelToolRuntime

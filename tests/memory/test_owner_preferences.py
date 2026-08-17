@@ -123,7 +123,8 @@ def test_current_user_and_goal_override_conflicting_preference(tmp_path) -> None
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=3_000, output_reserve=200),
         sources=(OwnerPreferenceSource(store),),
-        workspace_scope_digest="workspace-digest-1",
+        workspace_identity_digest="workspace-digest-1",
+        context_scope_digest="workspace-digest-1",
     ).build(state, action, ())
     blocks = [block for message in pack.messages for block in message.content]
 
@@ -337,7 +338,8 @@ def test_runtime_derives_preference_admission_from_exact_durable_user_fact(tmp_p
             system_policy="policy",
             limits=ContextLimits(max_input_tokens=4_000, output_reserve=200),
             sources=(OwnerPreferenceSource(preference_store),),
-            workspace_scope_digest="workspace-1",
+            workspace_identity_digest="workspace-1",
+            context_scope_digest="workspace-1",
         ),
         tool_runtime=KernelToolRuntime(
             build_owner_preference_tool_registrations(preference_store)

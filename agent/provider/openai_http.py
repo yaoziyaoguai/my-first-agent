@@ -81,9 +81,11 @@ class OpenAICompatibleProvider:
             body["tools"] = tools
         if self._config.strict_tools:
             # Agent control 优先确定性；strict schema 负责形状，temperature=0
-            # 降低在多个合法 control 之间无意义漂移。active Goal 不允许 prose 结束。
+            # 降低在多个合法 control 之间无意义漂移。control_schema 存在的每个轮次都
+            # 强制 typed control（tool_choice=required）：提案轮（goal_bootstrap present）
+            # 也必须发 control 而非 prose，否则真实 model 发文本不构造 GoalProposal。
             body["temperature"] = 0
-            if context.control_schema is not None and context.goal_bootstrap is None:
+            if context.control_schema is not None:
                 body["tool_choice"] = "required"
 
         try:

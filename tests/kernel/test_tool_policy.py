@@ -4,6 +4,7 @@ from agent.runtime.contracts import (
     ApprovalGrant,
     ApprovalPolicy,
     ApprovalRequired,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     OutputPolicy,
     PolicyDecision,
@@ -19,6 +20,7 @@ from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 
 def _write_spec() -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
         version="1",
         description="Write a deterministic fixture",

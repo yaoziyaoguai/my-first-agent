@@ -26,6 +26,7 @@ from agent.mcp.contracts import McpOutcomeClassification
 from agent.mcp.safety import LatchBinding, McpSafetyLatch, SafetyLatchError
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     KnownExecutedError,
     KnownNotExecuted,
     OutputPolicy,
@@ -89,6 +90,7 @@ def _build_spec(
     composition_epoch: str,
 ) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=descriptor.local_name,
         version="1",
         description=descriptor.description,

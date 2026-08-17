@@ -6,6 +6,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     ConversationState,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     ModelResponse,
     ModelTextBlock,
@@ -372,6 +373,7 @@ def _write_spec():
     from agent.runtime.contracts import OutputPolicy, ToolSpec
 
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
         version="1",
         description="fixture write",

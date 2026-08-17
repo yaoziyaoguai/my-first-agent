@@ -4,6 +4,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     ConversationState,
+    ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -67,6 +68,7 @@ def test_tool_result_rebuilds_context_before_final_response() -> None:
         return "content:" + path
 
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_fixture",
         version="1",
         description="Read a fixture",
@@ -104,6 +106,7 @@ def test_tool_result_rebuilds_context_before_final_response() -> None:
 
 def test_text_with_tool_call_is_preamble_not_completion() -> None:
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_fixture",
         version="1",
         description="Read a fixture",

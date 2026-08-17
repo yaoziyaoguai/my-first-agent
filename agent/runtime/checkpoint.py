@@ -20,21 +20,27 @@ from agent.runtime.contracts import (
     AdmittedCriterion,
     ApprovalGrant,
     ApprovalRequest,
+    ArtifactConfirmationRequirementV1,
     AuthoritySourceKind,
     CompletionClaim,
     ContinuationPhase,
     ControlReceipt,
     ConversationFact,
     ConversationState,
+    ConversationWorkspaceBindingV1,
+    EgressClass,
     EvidenceOracleKind,
     EvidenceRecord,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     FactKind,
     GoalAuthorizationBinding,
     GoalFrame,
     GoalStatus,
     InteractionState,
     LoadedSnapshot,
+    ProcessAuthorityCandidateV1,
+    ProcessAuthorityLeaseV1,
     ProposedCriterion,
     ProviderDisclosureReceipt,
     ProviderDisclosureRequest,
@@ -42,11 +48,19 @@ from agent.runtime.contracts import (
     RecoveryRequest,
     ReplayRecord,
     RunStatus,
+    SideEffectClass,
     ToolCall,
 )
 from agent.runtime.ports import CheckpointCASConflictError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 6
+# v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
+# artifact confirmation。v6 绑定 candidate/lease 全部 immutable authority 字段，并把
+# readable command 持久化到 lease。旧版本显式重算收窄后的 digest；v6 漂移 fail closed。
+PROCESS_MIGRATION_VERSION = 3
+PREVIOUS_SCHEMA_VERSION = 4
+ARTIFACT_SCHEMA_VERSION = 5
+LEGACY_SCHEMA_VERSION = 2
 DEFAULT_MAX_STATE_BYTES = 2_000_000
 
 
@@ -212,6 +226,11 @@ class LocalCheckpointStore:
             )
         if current.conversation_id != new_state.conversation_id:
             raise CheckpointConflictError("conversation identity cannot change")
+        if (
+            current.workspace_binding is not None
+            and new_state.workspace_binding != current.workspace_binding
+        ):
+            raise CheckpointInvariantError("workspace binding cannot change")
 
         data = _encode_state(new_state)
         if len(data) > self._max_state_bytes:
@@ -351,6 +370,11 @@ class InMemoryCheckpointStore:
             raise CheckpointConflictError("snapshot revision changed", self.load())
         if new_state.conversation_id != self._state.conversation_id:
             raise CheckpointConflictError("conversation identity cannot change")
+        if (
+            self._state.workspace_binding is not None
+            and new_state.workspace_binding != self._state.workspace_binding
+        ):
+            raise CheckpointInvariantError("workspace binding cannot change")
         encoded = _encode_state(new_state)
         if len(encoded) > self._max_state_bytes:
             raise CheckpointCapacityError("checkpoint exceeds configured capacity")
@@ -400,7 +424,28 @@ def _token(data: bytes) -> str:
 
 
 def _encode_state(state: ConversationState) -> bytes:
-    document = {"schema_version": SCHEMA_VERSION, "state": _state_to_dict(state)}
+    has_structured_proposal = state.goal is not None and any(
+        criterion.oracle_kind is not None or criterion.artifact_path is not None
+        for criterion in state.goal.proposed_criteria
+    )
+    version = (
+        SCHEMA_VERSION
+        if (
+            state.workspace_binding is not None
+            or state.active_run is not None
+            or state.process_leases
+            or has_structured_proposal
+        )
+        else LEGACY_SCHEMA_VERSION
+    )
+    document = {
+        "schema_version": version,
+        "state": _state_to_dict(
+            state,
+            include_workspace_binding=version == SCHEMA_VERSION,
+            include_proposed_contract=version == SCHEMA_VERSION,
+        ),
+    }
     return (
         json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         .encode("utf-8")
@@ -415,18 +460,35 @@ def _decode_state(data: bytes) -> ConversationState:
     document = _object(document, "document")
     _expect_keys(document, {"schema_version", "state"}, "document")
     version = document["schema_version"]
-    if version != SCHEMA_VERSION:
+    if version not in {
+        LEGACY_SCHEMA_VERSION,
+        PROCESS_MIGRATION_VERSION,
+        PREVIOUS_SCHEMA_VERSION,
+        ARTIFACT_SCHEMA_VERSION,
+        SCHEMA_VERSION,
+    }:
         raise CheckpointVersionError(f"unsupported checkpoint schema version: {version}")
     try:
-        return _state_from_dict(_object(document["state"], "state"))
+        return _state_from_dict(
+            _object(document["state"], "state"),
+            include_workspace_binding=version != LEGACY_SCHEMA_VERSION,
+            process_migration=version == PROCESS_MIGRATION_VERSION,
+            proposed_contract_current=version in {ARTIFACT_SCHEMA_VERSION, SCHEMA_VERSION},
+            process_contract_current=version == SCHEMA_VERSION,
+        )
     except CheckpointVersionError:
         raise
     except (KeyError, TypeError, ValueError) as error:
         raise CheckpointInvariantError(f"checkpoint state invariant failed: {error}") from error
 
 
-def _state_to_dict(state: ConversationState) -> dict:
-    return {
+def _state_to_dict(
+    state: ConversationState,
+    *,
+    include_workspace_binding: bool,
+    include_proposed_contract: bool,
+) -> dict:
+    value = {
         "conversation_id": state.conversation_id,
         "revision": state.revision,
         "next_action_seq": state.next_action_seq,
@@ -435,7 +497,10 @@ def _state_to_dict(state: ConversationState) -> dict:
         "facts": [_fact_to_dict(fact) for fact in state.facts],
         "active_run": _active_to_dict(state.active_run),
         "last_safe_result": _result_to_dict(state.last_safe_result),
-        "goal": _goal_to_dict(state.goal),
+        "goal": _goal_to_dict(
+            state.goal,
+            include_proposed_contract=include_proposed_contract,
+        ),
         "goal_authorizations": [
             _goal_authorization_to_dict(binding)
             for binding in state.goal_authorizations
@@ -454,10 +519,23 @@ def _state_to_dict(state: ConversationState) -> dict:
         "control_receipts": [
             _control_receipt_to_dict(receipt) for receipt in state.control_receipts
         ],
+        "process_leases": [_process_lease_to_dict(lease) for lease in state.process_leases],
     }
+    if include_workspace_binding:
+        value["workspace_binding"] = _workspace_binding_to_dict(
+            state.workspace_binding
+        )
+    return value
 
 
-def _state_from_dict(value: dict) -> ConversationState:
+def _state_from_dict(
+    value: dict,
+    *,
+    include_workspace_binding: bool,
+    process_migration: bool = False,
+    proposed_contract_current: bool = False,
+    process_contract_current: bool = False,
+) -> ConversationState:
     keys = {
         "conversation_id",
         "revision",
@@ -476,9 +554,22 @@ def _state_from_dict(value: dict) -> ConversationState:
         "provider_disclosure_receipt",
         "control_receipts",
     }
+    if include_workspace_binding:
+        keys.add("workspace_binding")
+        if not process_migration:
+            # v4/v5：process_leases 必备（缺失 → version error，fail closed）。
+            keys.add("process_leases")
+    # migration（v3）：process_leases 缺失按空迁移；v2 legacy 同样允许缺失。
+    if "process_leases" in value:
+        keys.add("process_leases")
     _expect_keys(value, keys, "state")
     return ConversationState(
         conversation_id=_string(value["conversation_id"], "conversation_id"),
+        workspace_binding=(
+            _workspace_binding_from_dict(value["workspace_binding"])
+            if include_workspace_binding
+            else None
+        ),
         revision=_integer(value["revision"], "revision"),
         next_action_seq=_integer(value["next_action_seq"], "next_action_seq"),
         replay_floor=_integer(value["replay_floor"], "replay_floor"),
@@ -490,9 +581,17 @@ def _state_from_dict(value: dict) -> ConversationState:
             _fact_from_dict(_object(item, "fact"))
             for item in _array(value["facts"], "facts")
         ),
-        active_run=_active_from_dict(value["active_run"]),
+        active_run=_active_from_dict(
+            value["active_run"],
+            strict_current=include_workspace_binding and not process_migration,
+            strict_artifact_contract=proposed_contract_current,
+            process_contract_current=process_contract_current,
+        ),
         last_safe_result=_result_from_dict(value["last_safe_result"]),
-        goal=_goal_from_dict(value["goal"]),
+        goal=_goal_from_dict(
+            value["goal"],
+            proposed_contract_current=proposed_contract_current,
+        ),
         goal_authorizations=tuple(
             _goal_authorization_from_dict(_object(item, "goal_authorization"))
             for item in _array(value["goal_authorizations"], "goal_authorizations")
@@ -515,10 +614,68 @@ def _state_from_dict(value: dict) -> ConversationState:
             _control_receipt_from_dict(_object(item, "control_receipt"))
             for item in _array(value["control_receipts"], "control_receipts")
         ),
+        # v3-v5 的 process authority 没有 v6 不可变 digest 合同。迁移时
+        # 必须撤销而不是以当前代码重签，否则被改写的旧文档会获得新权限。
+        process_leases=(
+            tuple(
+                _process_lease_from_dict(
+                    _object(item, "process_lease"),
+                    contract_current=True,
+                )
+                for item in _array(value.get("process_leases", []), "process_leases")
+            )
+            if process_contract_current
+            else ()
+        ),
     )
 
 
-def _goal_to_dict(goal: GoalFrame | None) -> dict | None:
+def _workspace_binding_to_dict(
+    binding: ConversationWorkspaceBindingV1 | None,
+) -> dict | None:
+    if binding is None:
+        return None
+    return {
+        "workspace_scope_digest": binding.workspace_scope_digest,
+        "workspace_identity_digest": binding.workspace_identity_digest,
+        "bound_at": binding.bound_at,
+        "binding_digest": binding.binding_digest,
+    }
+
+
+def _workspace_binding_from_dict(value) -> ConversationWorkspaceBindingV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "workspace_binding")
+    keys = {
+        "workspace_scope_digest",
+        "workspace_identity_digest",
+        "bound_at",
+        "binding_digest",
+    }
+    _expect_keys(value, keys, "workspace_binding")
+    return ConversationWorkspaceBindingV1(
+        workspace_scope_digest=_string(
+            value["workspace_scope_digest"],
+            "workspace_binding.workspace_scope_digest",
+        ),
+        workspace_identity_digest=_string(
+            value["workspace_identity_digest"],
+            "workspace_binding.workspace_identity_digest",
+        ),
+        bound_at=_string(value["bound_at"], "workspace_binding.bound_at"),
+        binding_digest=_string(
+            value["binding_digest"],
+            "workspace_binding.binding_digest",
+        ),
+    )
+
+
+def _goal_to_dict(
+    goal: GoalFrame | None,
+    *,
+    include_proposed_contract: bool,
+) -> dict | None:
     if goal is None:
         return None
     return {
@@ -533,7 +690,20 @@ def _goal_to_dict(goal: GoalFrame | None) -> dict | None:
         "non_goals": list(goal.non_goals),
         "assumptions": list(goal.assumptions),
         "proposed_criteria": [
-            {"criterion_id": item.criterion_id, "description": item.description}
+            {
+                "criterion_id": item.criterion_id,
+                "description": item.description,
+                **(
+                    {
+                        "oracle_kind": (
+                            item.oracle_kind.value if item.oracle_kind is not None else None
+                        ),
+                        "artifact_path": item.artifact_path,
+                    }
+                    if include_proposed_contract
+                    else {}
+                ),
+            }
             for item in goal.proposed_criteria
         ],
         "admitted_criteria": [
@@ -612,7 +782,11 @@ def _goal_authorization_from_dict(value: dict) -> GoalAuthorizationBinding:
     )
 
 
-def _goal_from_dict(value) -> GoalFrame | None:
+def _goal_from_dict(
+    value,
+    *,
+    proposed_contract_current: bool = False,
+) -> GoalFrame | None:
     if value is None:
         return None
     value = _object(value, "goal")
@@ -640,11 +814,26 @@ def _goal_from_dict(value) -> GoalFrame | None:
     proposed = []
     for raw in _array(value["proposed_criteria"], "goal.proposed_criteria"):
         item = _object(raw, "proposed_criterion")
-        _expect_keys(item, {"criterion_id", "description"}, "proposed_criterion")
+        proposed_keys = {"criterion_id", "description"}
+        if proposed_contract_current:
+            proposed_keys.update({"oracle_kind", "artifact_path"})
+        _expect_keys(item, proposed_keys, "proposed_criterion")
+        raw_oracle = item.get("oracle_kind")
         proposed.append(
             ProposedCriterion(
                 criterion_id=_string(item["criterion_id"], "criterion_id"),
                 description=_string(item["description"], "criterion.description"),
+                oracle_kind=(
+                    None
+                    if raw_oracle is None
+                    else EvidenceOracleKind(
+                        _string(raw_oracle, "criterion.oracle_kind")
+                    )
+                ),
+                artifact_path=_optional_string(
+                    item.get("artifact_path"),
+                    "criterion.artifact_path",
+                ),
             )
         )
     admitted = []
@@ -993,7 +1182,13 @@ def _active_to_dict(active: ActiveRun | None) -> dict | None:
     }
 
 
-def _active_from_dict(value) -> ActiveRun | None:
+def _active_from_dict(
+    value,
+    *,
+    strict_current: bool = False,
+    strict_artifact_contract: bool = False,
+    process_contract_current: bool = False,
+) -> ActiveRun | None:
     if value is None:
         return None
     value = _object(value, "active_run")
@@ -1020,8 +1215,14 @@ def _active_from_dict(value) -> ActiveRun | None:
             "active_run.owner_invocation_id",
         ),
         batch_cursor=_integer(value["batch_cursor"], "active_run.batch_cursor"),
-        pending_request=_pending_from_dict(value["pending_request"]),
-        executing_intent=_executing_from_dict(value["executing_intent"]),
+        pending_request=_pending_from_dict(
+            value["pending_request"],
+            strict_artifact_contract=strict_artifact_contract,
+            process_contract_current=process_contract_current,
+        ),
+        executing_intent=_executing_from_dict(
+            value["executing_intent"], strict_current=strict_current
+        ),
         tool_calls=tuple(
             _tool_call_from_dict(_object(item, "tool_call"))
             for item in _array(value["tool_calls"], "active_run.tool_calls")
@@ -1051,6 +1252,7 @@ def _pending_to_dict(pending) -> dict | None:
             "preview": pending.preview,
             "tool_name": pending.tool_name,
             "state_revision": pending.state_revision,
+            "approval_basis_revision": pending.approval_basis_revision,
             "arguments_digest": pending.arguments_digest,
             "policy_identity": pending.policy_identity,
             "risk": pending.risk,
@@ -1058,6 +1260,21 @@ def _pending_to_dict(pending) -> dict | None:
             "target_digest": pending.target_digest,
             "precondition_digest": pending.precondition_digest,
             "new_content_digest": pending.new_content_digest,
+            "egress": pending.egress,
+            "operation": pending.operation,
+            "request_identity": pending.request_identity,
+            "destination_digest": pending.destination_digest,
+            "cost_class": pending.cost_class,
+            "trust_notice_id": pending.trust_notice_id,
+            "trust_notice_digest": pending.trust_notice_digest,
+            "process_authority_candidate": _process_authority_candidate_to_dict(
+                pending.process_authority_candidate
+            ),
+            "artifact_confirmation_requirement": (
+                _artifact_confirmation_requirement_to_dict(
+                    pending.artifact_confirmation_requirement
+                )
+            ),
         }
     return {
         "type": "recovery",
@@ -1069,13 +1286,18 @@ def _pending_to_dict(pending) -> dict | None:
     }
 
 
-def _pending_from_dict(value):
+def _pending_from_dict(
+    value,
+    *,
+    strict_artifact_contract: bool = False,
+    process_contract_current: bool = True,
+):
     if value is None:
         return None
     value = _object(value, "pending_request")
     request_type = value.get("type")
     if request_type == "approval":
-        keys = {
+        legacy_keys = {
             "type",
             "request_id",
             "run_id",
@@ -1092,8 +1314,32 @@ def _pending_from_dict(value):
             "precondition_digest",
             "new_content_digest",
         }
-        _expect_keys(value, keys, "approval_request")
+        keys = {
+            *legacy_keys,
+            "approval_basis_revision",
+            "egress",
+            "operation",
+            "request_identity",
+            "destination_digest",
+            "cost_class",
+            "trust_notice_id",
+            "trust_notice_digest",
+        }
+        actual_keys = frozenset(value)
+        basis_keys = {*legacy_keys, "approval_basis_revision"}
+        process_keys = {*keys, "process_authority_candidate"}
+        artifact_keys = {*process_keys, "artifact_confirmation_requirement"}
+        known_key_sets = {
+            frozenset(legacy_keys),
+            frozenset(basis_keys),
+            frozenset(keys),
+            frozenset(process_keys),
+            frozenset(artifact_keys),
+        }
+        if strict_artifact_contract or actual_keys not in known_key_sets:
+            _expect_keys(value, artifact_keys, "approval_request")
         state_revision = value["state_revision"]
+        approval_basis_revision = value.get("approval_basis_revision")
         return ApprovalRequest(
             request_id=_string(value["request_id"], "request_id"),
             run_id=_string(value["run_id"], "run_id"),
@@ -1103,6 +1349,11 @@ def _pending_from_dict(value):
             tool_name=_optional_string(value["tool_name"], "tool_name"),
             state_revision=(
                 None if state_revision is None else _integer(state_revision, "state_revision")
+            ),
+            approval_basis_revision=(
+                None
+                if approval_basis_revision is None
+                else _integer(approval_basis_revision, "approval_basis_revision")
             ),
             arguments_digest=_optional_string(value["arguments_digest"], "arguments_digest"),
             policy_identity=_optional_string(value["policy_identity"], "policy_identity"),
@@ -1116,6 +1367,38 @@ def _pending_from_dict(value):
             new_content_digest=_optional_string(
                 value["new_content_digest"],
                 "new_content_digest",
+            ),
+            egress=_optional_string(value.get("egress"), "egress"),
+            operation=_optional_string(value.get("operation"), "operation"),
+            request_identity=_optional_string(
+                value.get("request_identity"), "request_identity"
+            ),
+            destination_digest=_optional_string(
+                value.get("destination_digest"), "destination_digest"
+            ),
+            cost_class=_optional_string(value.get("cost_class"), "cost_class"),
+            trust_notice_id=_optional_string(
+                value.get("trust_notice_id"), "trust_notice_id"
+            ),
+            trust_notice_digest=_optional_string(
+                value.get("trust_notice_digest"), "trust_notice_digest"
+            ),
+            # pre-v6 candidate 同样没有可验证的 immutable digest：恢复后
+            # 丢弃并要求重新 prepare/approval，绝不为旧数据重签。
+            process_authority_candidate=(
+                _process_authority_candidate_from_dict(
+                    value.get("process_authority_candidate"),
+                    contract_current=True,
+                )
+                if process_contract_current
+                else None
+            ),
+            artifact_confirmation_requirement=(
+                _artifact_confirmation_requirement_from_dict(
+                    value.get("artifact_confirmation_requirement")
+                )
+                if process_contract_current
+                else None
             ),
         )
     if request_type == "recovery":
@@ -1138,19 +1421,294 @@ def _executing_to_dict(value: ExecutingIntentRecord | None) -> dict | None:
         "tool_call_id": value.tool_call_id,
         "intent_digest": value.intent_digest,
         "idempotency_key": value.idempotency_key,
+        "side_effect": value.side_effect.value,
+        "egress": value.egress.value,
+        "execution_authority": value.execution_authority.value,
+        "operation": value.operation,
+        "request_identity": value.request_identity,
     }
 
 
-def _executing_from_dict(value) -> ExecutingIntentRecord | None:
+def _executing_from_dict(
+    value, *, strict_current: bool = False
+) -> ExecutingIntentRecord | None:
     if value is None:
         return None
     value = _object(value, "executing_intent")
-    _expect_keys(value, {"tool_call_id", "intent_digest", "idempotency_key"}, "executing")
+    legacy_keys = {"tool_call_id", "intent_digest", "idempotency_key"}
+    pre_015_keys = {
+        *legacy_keys,
+        "side_effect",
+        "egress",
+        "operation",
+        "request_identity",
+    }
+    current_keys = {*pre_015_keys, "execution_authority"}
+    # versioned migration（F2/KTD12）：只有 pre-v4 文档（v2/v3）可把缺
+    # execution_authority 的旧 executing record 完整迁移为 IN_PROCESS；v4 current
+    # 缺失/未知成员 strict fail closed。
+    if frozenset(value) not in {
+        frozenset(legacy_keys),
+        frozenset(pre_015_keys),
+        frozenset(current_keys),
+    }:
+        _expect_keys(value, current_keys, "executing")
+    if "execution_authority" not in value and strict_current:
+        _expect_keys(value, current_keys, "executing")
+    if "execution_authority" in value:
+        execution_authority = ExecutionAuthorityClass(
+            _string(value["execution_authority"], "execution_authority")
+        )
+    else:
+        execution_authority = ExecutionAuthorityClass.IN_PROCESS
     return ExecutingIntentRecord(
-        _string(value["tool_call_id"], "tool_call_id"),
-        _string(value["intent_digest"], "intent_digest"),
-        _string(value["idempotency_key"], "idempotency_key"),
+        tool_call_id=_string(value["tool_call_id"], "tool_call_id"),
+        intent_digest=_string(value["intent_digest"], "intent_digest"),
+        idempotency_key=_string(value["idempotency_key"], "idempotency_key"),
+        side_effect=(
+            SideEffectClass(_string(value["side_effect"], "side_effect"))
+            if "side_effect" in value
+            else SideEffectClass.WRITE
+        ),
+        egress=(
+            EgressClass(_string(value["egress"], "egress"))
+            if "egress" in value
+            else EgressClass.NONE
+        ),
+        execution_authority=execution_authority,
+        operation=(
+            _string(value["operation"], "operation")
+            if "operation" in value
+            else "legacy_effect"
+        ),
+        request_identity=(
+            _optional_string(value["request_identity"], "request_identity")
+            if "request_identity" in value
+            else None
+        ),
     )
+
+
+def _process_authority_candidate_to_dict(value: ProcessAuthorityCandidateV1 | None) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "candidate_id": value.candidate_id,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "workspace_identity_digest": value.workspace_identity_digest,
+        "command_fingerprint": value.command_fingerprint,
+        "readable_command": value.readable_command,
+        "executable_digest": value.executable_digest,
+        "argv_digest": value.argv_digest,
+        "cwd_digest": value.cwd_digest,
+        "resource_profile": value.resource_profile,
+        "environment_policy_digest": value.environment_policy_digest,
+        "execution_authority": value.execution_authority.value,
+        "trust_notice_digest": value.trust_notice_digest,
+        "issued_at": value.issued_at,
+        "max_uses": value.max_uses,
+        "expiry_minutes": value.expiry_minutes,
+        "expected_artifact_path": value.expected_artifact_path,
+        "expected_artifact_sha256": value.expected_artifact_sha256,
+    }
+
+
+def _process_authority_candidate_from_dict(
+    value,
+    *,
+    contract_current: bool = True,
+) -> ProcessAuthorityCandidateV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "process_authority_candidate")
+    keys = {
+        "candidate_id",
+        "candidate_digest",
+        "goal_id",
+        "goal_revision",
+        "workspace_identity_digest",
+        "command_fingerprint",
+        "readable_command",
+        "executable_digest",
+        "argv_digest",
+        "cwd_digest",
+        "resource_profile",
+        "environment_policy_digest",
+        "execution_authority",
+        "trust_notice_digest",
+        "issued_at",
+        "max_uses",
+        "expiry_minutes",
+        "expected_artifact_path",
+        "expected_artifact_sha256",
+    }
+    _expect_keys(value, keys, "process_authority_candidate")
+    constructor = (
+        ProcessAuthorityCandidateV1
+        if contract_current
+        else ProcessAuthorityCandidateV1.create
+    )
+    kwargs = dict(
+        candidate_id=_string(value["candidate_id"], "candidate_id"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        workspace_identity_digest=_string(
+            value["workspace_identity_digest"], "workspace_identity_digest"
+        ),
+        command_fingerprint=_string(value["command_fingerprint"], "command_fingerprint"),
+        readable_command=_string(value["readable_command"], "readable_command"),
+        executable_digest=_string(value["executable_digest"], "executable_digest"),
+        argv_digest=_string(value["argv_digest"], "argv_digest"),
+        cwd_digest=_string(value["cwd_digest"], "cwd_digest"),
+        resource_profile=_string(value["resource_profile"], "resource_profile"),
+        environment_policy_digest=_string(
+            value["environment_policy_digest"], "environment_policy_digest"
+        ),
+        execution_authority=ExecutionAuthorityClass(
+            _string(value["execution_authority"], "execution_authority")
+        ),
+        trust_notice_digest=_string(value["trust_notice_digest"], "trust_notice_digest"),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        max_uses=_integer(value["max_uses"], "max_uses"),
+        expiry_minutes=_integer(value["expiry_minutes"], "expiry_minutes"),
+        expected_artifact_path=_optional_string(
+            value["expected_artifact_path"], "expected_artifact_path"
+        ),
+        expected_artifact_sha256=_optional_string(
+            value["expected_artifact_sha256"], "expected_artifact_sha256"
+        ),
+    )
+    if contract_current:
+        kwargs["candidate_digest"] = _string(
+            value["candidate_digest"], "candidate_digest"
+        )
+    return constructor(**kwargs)
+
+
+def _artifact_confirmation_requirement_to_dict(
+    value: ArtifactConfirmationRequirementV1 | None,
+) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "criterion_id": value.criterion_id,
+        "artifact_path": value.artifact_path,
+    }
+
+
+def _artifact_confirmation_requirement_from_dict(
+    value,
+) -> ArtifactConfirmationRequirementV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "artifact_confirmation_requirement")
+    _expect_keys(
+        value,
+        {"criterion_id", "artifact_path"},
+        "artifact_confirmation_requirement",
+    )
+    return ArtifactConfirmationRequirementV1(
+        criterion_id=_string(value["criterion_id"], "criterion_id"),
+        artifact_path=_string(value["artifact_path"], "artifact_path"),
+    )
+
+
+def _process_lease_to_dict(value: ProcessAuthorityLeaseV1) -> dict:
+    return {
+        "lease_id": value.lease_id,
+        "lease_digest": value.lease_digest,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "workspace_identity_digest": value.workspace_identity_digest,
+        "command_fingerprint": value.command_fingerprint,
+        "readable_command": value.readable_command,
+        "executable_digest": value.executable_digest,
+        "argv_digest": value.argv_digest,
+        "cwd_digest": value.cwd_digest,
+        "resource_profile": value.resource_profile,
+        "environment_policy_digest": value.environment_policy_digest,
+        "execution_authority": value.execution_authority.value,
+        "approved_request_identity": value.approved_request_identity,
+        "issued_at": value.issued_at,
+        "expires_at": value.expires_at,
+        "max_uses": value.max_uses,
+        "uses_consumed": value.uses_consumed,
+    }
+
+
+def _process_lease_from_dict(
+    value,
+    *,
+    contract_current: bool = True,
+) -> ProcessAuthorityLeaseV1:
+    value = _object(value, "process_lease")
+    keys = {
+        "lease_id",
+        "lease_digest",
+        "candidate_digest",
+        "goal_id",
+        "goal_revision",
+        "workspace_identity_digest",
+        "command_fingerprint",
+        "readable_command",
+        "executable_digest",
+        "argv_digest",
+        "cwd_digest",
+        "resource_profile",
+        "environment_policy_digest",
+        "execution_authority",
+        "approved_request_identity",
+        "issued_at",
+        "expires_at",
+        "max_uses",
+        "uses_consumed",
+    }
+    if contract_current:
+        _expect_keys(value, keys, "process_lease")
+    else:
+        legacy_keys = keys - {"readable_command"}
+        if set(value) not in {frozenset(keys), frozenset(legacy_keys)}:
+            _expect_keys(value, legacy_keys, "process_lease")
+    readable_command = value.get("readable_command")
+    if readable_command is None:
+        fingerprint = _string(value["command_fingerprint"], "command_fingerprint")
+        profile = _string(value["resource_profile"], "resource_profile")
+        readable_command = f"{fingerprint[:12]} profile={profile}"
+    constructor = ProcessAuthorityLeaseV1 if contract_current else ProcessAuthorityLeaseV1.create
+    kwargs = dict(
+        lease_id=_string(value["lease_id"], "lease_id"),
+        candidate_digest=_string(value["candidate_digest"], "candidate_digest"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        workspace_identity_digest=_string(
+            value["workspace_identity_digest"], "workspace_identity_digest"
+        ),
+        command_fingerprint=_string(value["command_fingerprint"], "command_fingerprint"),
+        readable_command=_string(readable_command, "readable_command"),
+        executable_digest=_string(value["executable_digest"], "executable_digest"),
+        argv_digest=_string(value["argv_digest"], "argv_digest"),
+        cwd_digest=_string(value["cwd_digest"], "cwd_digest"),
+        resource_profile=_string(value["resource_profile"], "resource_profile"),
+        environment_policy_digest=_string(
+            value["environment_policy_digest"], "environment_policy_digest"
+        ),
+        execution_authority=ExecutionAuthorityClass(
+            _string(value["execution_authority"], "execution_authority")
+        ),
+        approved_request_identity=_string(
+            value["approved_request_identity"], "approved_request_identity"
+        ),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        expires_at=_string(value["expires_at"], "expires_at"),
+        max_uses=_integer(value["max_uses"], "max_uses"),
+        uses_consumed=_integer(value["uses_consumed"], "uses_consumed"),
+    )
+    if contract_current:
+        kwargs["lease_digest"] = _string(value["lease_digest"], "lease_digest")
+    return constructor(**kwargs)
 
 
 def _tool_call_to_dict(value: ToolCall) -> dict:
@@ -1173,17 +1731,30 @@ def _tool_call_from_dict(value: dict) -> ToolCall:
 def _approval_grant_to_dict(value: ApprovalGrant | None) -> dict | None:
     if value is None:
         return None
-    return {"request_id": value.request_id, "binding_digest": value.binding_digest}
+    return {
+        "request_id": value.request_id,
+        "binding_digest": value.binding_digest,
+        "approval_basis_revision": value.approval_basis_revision,
+    }
 
 
 def _approval_grant_from_dict(value) -> ApprovalGrant | None:
     if value is None:
         return None
     value = _object(value, "approval_grant")
-    _expect_keys(value, {"request_id", "binding_digest"}, "approval_grant")
+    legacy_keys = {"request_id", "binding_digest"}
+    current_keys = {*legacy_keys, "approval_basis_revision"}
+    if frozenset(value) not in {frozenset(legacy_keys), frozenset(current_keys)}:
+        _expect_keys(value, current_keys, "approval_grant")
     return ApprovalGrant(
         _string(value["request_id"], "request_id"),
         _string(value["binding_digest"], "binding_digest"),
+        (
+            None
+            if "approval_basis_revision" not in value
+            or value["approval_basis_revision"] is None
+            else _integer(value["approval_basis_revision"], "approval_basis_revision")
+        ),
     )
 
 

@@ -12,6 +12,7 @@ from agent.runtime.contracts import (
     CancelGoal,
     ContinuationPhase,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     GoalDelta,
     GoalDeltaProposal,
     GoalProgress,
@@ -128,6 +129,7 @@ def test_cancel_during_executing_cannot_bypass_unknown_effect_recovery() -> None
             phase=ContinuationPhase.EXECUTING,
             owner_invocation_id="dead-invocation",
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="call-1",
                 intent_digest="intent-digest",
                 idempotency_key="idempotency-1",
@@ -308,6 +310,70 @@ def test_goal_delta_control_invalidates_stale_work_and_stops_before_effect() -> 
     assert len(provider.calls) == 1
 
 
+def test_noop_goal_delta_replans_without_requesting_user_authority() -> None:
+    state = conversation_with_active_goal()
+    assert state.goal is not None
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=GoalDeltaProposal(
+                correlation_id="delta-noop",
+                delta=GoalDelta(
+                    goal_id=state.goal.goal_id,
+                    expected_revision=state.goal.revision,
+                    reason="the Goal already matches",
+                    updates={"targets": list(state.goal.targets)},
+                ),
+            ),
+        ),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="blocked-after-noop-delta",
+                goal_id=state.goal.goal_id,
+                goal_revision=state.goal.revision,
+                blocker="required fixture source is unavailable",
+                safe_attempts=("kept the trusted Goal unchanged",),
+                resume_condition="provide the fixture source",
+            ),
+        ),
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+    )
+    action = SubmitMessage(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        run_id="run-delta-noop",
+        message="continue the existing goal",
+    )
+
+    result = runtime.run_turn(action, store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert store.state.goal is not None
+    assert store.state.goal.revision == state.goal.revision
+    assert store.state.goal.status is GoalStatus.BLOCKED
+    assert any(
+        fact.content.get("code") == "no_progress_replan_required"
+        for fact in store.state.facts
+    )
+    assert all(
+        receipt.control_kind != "goal_delta_proposal"
+        for receipt in store.state.control_receipts
+    )
+
+
 def test_blocked_claim_projects_exact_resume_condition_and_stops() -> None:
     state = conversation_with_active_goal()
     assert state.goal is not None
@@ -444,6 +510,7 @@ def test_paused_goal_rejects_model_progress_until_explicit_resume() -> None:
 def test_paused_goal_fails_closed_before_effectful_tool_prepare() -> None:
     executed: list[str] = []
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
         version="1",
         description="Write a fixture",
@@ -485,12 +552,14 @@ def test_paused_goal_context_hides_effectful_tools_and_control_schema() -> None:
         limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
     )
     read_definition = ToolDefinition(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_file",
         description="Read one bounded file",
         input_schema={"type": "object"},
         side_effect=SideEffectClass.READ_ONLY,
     )
     write_definition = ToolDefinition(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_file",
         description="Write one bounded file",
         input_schema={"type": "object"},

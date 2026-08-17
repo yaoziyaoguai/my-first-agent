@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     KnownExecutedError,
     OutputPolicy,
     RunStatus,
@@ -36,6 +37,7 @@ def build_subagent_tool_registrations(
 ) -> tuple[RegisteredTool, ...]:
     profile = runner.profile
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="subagent__delegate",
         version="1",
         description="Delegate one bounded read-only review to an isolated child agent.",

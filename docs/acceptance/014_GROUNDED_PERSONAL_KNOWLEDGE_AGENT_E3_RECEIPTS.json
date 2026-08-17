@@ -1,0 +1,190 @@
+{
+  "schema": "first-agent-014-e3-receipt-set-v1",
+  "acceptance": {
+    "status": "accepted",
+    "required_consecutive_successes": 3,
+    "observed_consecutive_successes": 3,
+    "claims_per_run": 19,
+    "observed_at_window": "2026-08-05T08:52:28.809281+00:00 .. 2026-08-05T08:55:39.352168+00:00",
+    "status_note": "Accepted on the current materialized tree: three consecutive real Model (openai_compatible / deepseek-v4-flash) + Tavily E3 runs, each with a new temp HOME/state/workspace, exit 0, 19/19 claims true, all journeys passed. Code tree, provider family/model, Model destination digest and Tavily destination digest are identical across the three runs. Receipts are secret-free (no key, Authorization/header/body/query, absolute temp path, or checkpoint content; long hex strings are opaque sha256 digests)."
+  },
+  "current_tree_real_e3": {
+    "status": "verified_three_consecutive",
+    "provider_family": "openai_compatible",
+    "provider_model": "deepseek-v4-flash",
+    "model_destination_digest": "9ccd2042a57f20af02bfba1eb6c3e82f12cb03c495c8321b4a30bc26c74ce6cd",
+    "web_destination": "https://api.tavily.com",
+    "web_destination_digest": "088debf43e9156779928af390825f9e74a539b024e331eebe3b957dd4399067f",
+    "flakiness_note": "The hosted model is nondeterministic even at temperature=0 (the production adapter already forces temperature=0). Across the attempts needed to obtain three consecutive passes, some non-consecutive runs failed on real-model flakiness — malformed_control (strict 18-key goal_frame), product_no_progress (16-response stagnation circuit), or an explicit BlockedClaim on the restarted three-source journey. All such failures were correctly handled by the unchanged product code and were NOT counted as passes; no acceptance, decoder strictness, no-progress threshold, safety/approval/restart oracle, or 19 claims were loosened. The three runs below are the first three consecutive successes."
+  },
+  "runs": [
+    {
+      "artifact_digest": "3743d8aa5efcfef9b3e85e17096dcdc0058c3cecfd059d5bfe0ae7b709cefeec",
+      "claims": {
+        "artifact_and_manifest_are_read_back_with_three_source_kinds": true,
+        "citation_oracle_rederives_all_linkages": true,
+        "cross_workspace_and_private_history_are_absent": true,
+        "goal_is_durable_before_artifact_write": true,
+        "goal_is_verified_done_only_after_citation_evidence": true,
+        "history_is_current_workspace_and_identity_bound": true,
+        "hostile_source_changes_no_authority_or_admission": true,
+        "model_send_waits_for_source_data_class_disclosure": true,
+        "profiles_are_non_secret_and_fixed_destination": true,
+        "receipt_and_default_output_expose_no_secret_or_private_path": true,
+        "restart_reuses_only_persisted_observations": true,
+        "search_and_extract_receipt_kinds_are_distinct": true,
+        "successful_journeys_require_no_mode_or_continue_action": true,
+        "tavily_is_the_only_web_destination": true,
+        "web_approval_discloses_third_party_handling_and_notice_drift_invalidates_binding": true,
+        "web_extract_has_zero_calls_before_exact_approval": true,
+        "web_search_has_zero_calls_before_exact_approval": true,
+        "workspace_search_is_bounded_and_source_receipted": true,
+        "workspace_sentinels_are_unchanged": true
+      },
+      "goal_opaque_digest": "f444e9add9e85d599d745c89b2ae0c8f11729e803189ef2a96a20267d4411b33",
+      "journeys": {
+        "current_workspace_history": "passed",
+        "disabled_source_baseline": "passed",
+        "hostile_source_negative": "live_product_source_passed",
+        "network_unknown_restart": "passed_without_resend",
+        "restarted_three_source_artifact": "passed",
+        "workspace_and_live_web": "passed",
+        "write_executing_restart": "passed_without_invoke"
+      },
+      "manifest_digest": "0e8114f0aaf0176131626615a60f33c1edc3e07ecb3f8e4492a8df798681364a",
+      "model_request_count": 39,
+      "observed_at": "2026-08-05T08:52:28.809281+00:00",
+      "offline_gate_identities": [
+        "tests/reference/test_014_grounded_personal_knowledge.py",
+        "tests/continuity/test_research_evidence.py",
+        "tests/architecture/test_014_delivery_layer.py"
+      ],
+      "provider": {
+        "destination_digest": "9ccd2042a57f20af02bfba1eb6c3e82f12cb03c495c8321b4a30bc26c74ce6cd",
+        "family": "openai_compatible",
+        "model": "deepseek-v4-flash"
+      },
+      "schema": "first-agent-014-e3-receipt-v1",
+      "sentinel_set_digest": "5ccc53010136f551f602eb51d1bd935ae720a0dfaed6f0440e8c6bbbe82a5368",
+      "web": {
+        "destination_digest": "088debf43e9156779928af390825f9e74a539b024e331eebe3b957dd4399067f",
+        "extract_count": 3,
+        "request_count": 7,
+        "search_count": 4
+      },
+      "workspace_scope_digest": "6cde349520f3d867cd918b6afb2c93d71dad275a69b7d1a0505d7c767fe54d0d"
+    },
+    {
+      "artifact_digest": "32d3aa318c9a0476d0669a630a99df2540eb9d2625d215f2f7b017bf2e0b8ca7",
+      "claims": {
+        "artifact_and_manifest_are_read_back_with_three_source_kinds": true,
+        "citation_oracle_rederives_all_linkages": true,
+        "cross_workspace_and_private_history_are_absent": true,
+        "goal_is_durable_before_artifact_write": true,
+        "goal_is_verified_done_only_after_citation_evidence": true,
+        "history_is_current_workspace_and_identity_bound": true,
+        "hostile_source_changes_no_authority_or_admission": true,
+        "model_send_waits_for_source_data_class_disclosure": true,
+        "profiles_are_non_secret_and_fixed_destination": true,
+        "receipt_and_default_output_expose_no_secret_or_private_path": true,
+        "restart_reuses_only_persisted_observations": true,
+        "search_and_extract_receipt_kinds_are_distinct": true,
+        "successful_journeys_require_no_mode_or_continue_action": true,
+        "tavily_is_the_only_web_destination": true,
+        "web_approval_discloses_third_party_handling_and_notice_drift_invalidates_binding": true,
+        "web_extract_has_zero_calls_before_exact_approval": true,
+        "web_search_has_zero_calls_before_exact_approval": true,
+        "workspace_search_is_bounded_and_source_receipted": true,
+        "workspace_sentinels_are_unchanged": true
+      },
+      "goal_opaque_digest": "f444e9add9e85d599d745c89b2ae0c8f11729e803189ef2a96a20267d4411b33",
+      "journeys": {
+        "current_workspace_history": "passed",
+        "disabled_source_baseline": "passed",
+        "hostile_source_negative": "live_product_source_passed",
+        "network_unknown_restart": "passed_without_resend",
+        "restarted_three_source_artifact": "passed",
+        "workspace_and_live_web": "passed",
+        "write_executing_restart": "passed_without_invoke"
+      },
+      "manifest_digest": "7176e100a46b75d49b95e9f39aa40278f5321852f5a0e5326db565735641c61d",
+      "model_request_count": 39,
+      "observed_at": "2026-08-05T08:54:00.995922+00:00",
+      "offline_gate_identities": [
+        "tests/reference/test_014_grounded_personal_knowledge.py",
+        "tests/continuity/test_research_evidence.py",
+        "tests/architecture/test_014_delivery_layer.py"
+      ],
+      "provider": {
+        "destination_digest": "9ccd2042a57f20af02bfba1eb6c3e82f12cb03c495c8321b4a30bc26c74ce6cd",
+        "family": "openai_compatible",
+        "model": "deepseek-v4-flash"
+      },
+      "schema": "first-agent-014-e3-receipt-v1",
+      "sentinel_set_digest": "5ccc53010136f551f602eb51d1bd935ae720a0dfaed6f0440e8c6bbbe82a5368",
+      "web": {
+        "destination_digest": "088debf43e9156779928af390825f9e74a539b024e331eebe3b957dd4399067f",
+        "extract_count": 4,
+        "request_count": 7,
+        "search_count": 3
+      },
+      "workspace_scope_digest": "e27d458e80be8160ef04ebc6fe16ee0cc95b15ae6d6beffe827f119fcb6b9877"
+    },
+    {
+      "artifact_digest": "0de49a7ad3b52a330d23084dd1de72fdd31451a5b8d0b4586860ca4dc94c6a18",
+      "claims": {
+        "artifact_and_manifest_are_read_back_with_three_source_kinds": true,
+        "citation_oracle_rederives_all_linkages": true,
+        "cross_workspace_and_private_history_are_absent": true,
+        "goal_is_durable_before_artifact_write": true,
+        "goal_is_verified_done_only_after_citation_evidence": true,
+        "history_is_current_workspace_and_identity_bound": true,
+        "hostile_source_changes_no_authority_or_admission": true,
+        "model_send_waits_for_source_data_class_disclosure": true,
+        "profiles_are_non_secret_and_fixed_destination": true,
+        "receipt_and_default_output_expose_no_secret_or_private_path": true,
+        "restart_reuses_only_persisted_observations": true,
+        "search_and_extract_receipt_kinds_are_distinct": true,
+        "successful_journeys_require_no_mode_or_continue_action": true,
+        "tavily_is_the_only_web_destination": true,
+        "web_approval_discloses_third_party_handling_and_notice_drift_invalidates_binding": true,
+        "web_extract_has_zero_calls_before_exact_approval": true,
+        "web_search_has_zero_calls_before_exact_approval": true,
+        "workspace_search_is_bounded_and_source_receipted": true,
+        "workspace_sentinels_are_unchanged": true
+      },
+      "goal_opaque_digest": "f444e9add9e85d599d745c89b2ae0c8f11729e803189ef2a96a20267d4411b33",
+      "journeys": {
+        "current_workspace_history": "passed",
+        "disabled_source_baseline": "passed",
+        "hostile_source_negative": "live_product_source_passed",
+        "network_unknown_restart": "passed_without_resend",
+        "restarted_three_source_artifact": "passed",
+        "workspace_and_live_web": "passed",
+        "write_executing_restart": "passed_without_invoke"
+      },
+      "manifest_digest": "1f329006ed97598901ceb02b4d5792c5b43c7c8e88732e57fca1d5711f39edce",
+      "model_request_count": 41,
+      "observed_at": "2026-08-05T08:55:39.352168+00:00",
+      "offline_gate_identities": [
+        "tests/reference/test_014_grounded_personal_knowledge.py",
+        "tests/continuity/test_research_evidence.py",
+        "tests/architecture/test_014_delivery_layer.py"
+      ],
+      "provider": {
+        "destination_digest": "9ccd2042a57f20af02bfba1eb6c3e82f12cb03c495c8321b4a30bc26c74ce6cd",
+        "family": "openai_compatible",
+        "model": "deepseek-v4-flash"
+      },
+      "schema": "first-agent-014-e3-receipt-v1",
+      "sentinel_set_digest": "5ccc53010136f551f602eb51d1bd935ae720a0dfaed6f0440e8c6bbbe82a5368",
+      "web": {
+        "destination_digest": "088debf43e9156779928af390825f9e74a539b024e331eebe3b957dd4399067f",
+        "extract_count": 4,
+        "request_count": 7,
+        "search_count": 3
+      },
+      "workspace_scope_digest": "a018e8d667bc332ab5d7699d838980a815a993bb37e0bd7a92c013b1418daf00"
+    }
+  ]
+}

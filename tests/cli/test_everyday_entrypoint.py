@@ -8,6 +8,7 @@ import pytest
 
 import main as entrypoint
 from agent.continuity import sessions
+from agent.memory.store import MemoryStore
 from agent.provider.fake_provider import FakeProvider
 from agent.provider.profile import (
     ProviderProfileV1,
@@ -163,12 +164,64 @@ def test_no_argument_start_uses_saved_profile_and_cwd(
     assert captured[0].request_path == "/v1/chat/completions"
     assert captured[0].strict_tools is False
     assert len(captured_limits) == 1
-    assert captured_limits[0].max_invalid_repairs == 2
+    assert captured_limits[0].max_invalid_repairs == 4
     assert tuple(state_root.glob("workspaces/*/*.json"))
     rendered = "\n".join(output)
     assert "First Agent is ready in: daily-workspace" in rendered
     assert "openai_compatible" in rendered and "saved-model" in rendered
     assert str(state_root) not in rendered
+
+
+def test_main_composition_uses_memory_scope_without_weakening_workspace_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    memory_path = tmp_path / "memory" / "store.json"
+    memory_path.parent.mkdir(mode=0o700)
+    context_scope = entrypoint.workspace_scope_digest_for(workspace)
+    store = MemoryStore.create(
+        memory_path,
+        workspace_scope_digest=context_scope,
+        profile=entrypoint.provider_trust_profile(
+            profile_id="default",
+            provider_family="fake",
+            destination="local",
+        ),
+    )
+    store.remember("the release marker is ORCHID-014")
+
+    contexts = []
+    original_generate = FakeProvider.generate
+
+    def capture_generate(self, context):
+        contexts.append(context)
+        return original_generate(self, context)
+
+    monkeypatch.setattr(FakeProvider, "generate", capture_generate)
+    inputs = iter(("what is the release marker", "/exit"))
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+            "--memory-store",
+            str(memory_path),
+        ],
+        input_fn=lambda _prompt: next(inputs),
+        write_fn=lambda _message: None,
+    )
+
+    assert exit_code == 0
+    assert len(contexts) == 1
+    assert "ORCHID-014" in repr(contexts[0].messages)
+    assert contexts[0].goal_bootstrap is not None
+    assert contexts[0].goal_bootstrap.workspace_identity_digest.startswith("workspace:v1:")
 
 
 @pytest.mark.parametrize(

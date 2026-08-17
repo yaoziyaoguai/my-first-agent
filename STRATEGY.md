@@ -1,6 +1,6 @@
 ---
 name: my-first-agent
-last_updated: 2026-08-03
+last_updated: 2026-08-09
 authority: product-strategy
 ---
 
@@ -71,6 +71,12 @@ First Agent 不建设含义模糊的“三层 Memory”。三类事实分别由�
 
 只有前述连续性、授权和验证边界稳定后，才逐步扩展到更广本机任务。First Agent 不通过环境监控学习用户，也不默认接管整台电脑。
 
+### 6. Grounded personal knowledge
+
+在扩大本机 action authority 之前，First Agent 先学会安全地找依据：按需检索当前 workspace 中由自己
+canonical checkpoint 保存的共同经历，理解当前 workspace，并经精确批准查询公开 Web。历史、文件和网页
+都只是带 provenance 的不可信来源；它们不能授予权限、晋级个人偏好或替 Agent 宣布完成。
+
 ## Completed foundation
 
 ### 012 Trusted Continuity MVP — 从对话到可验证行动
@@ -104,10 +110,36 @@ First Agent 不建设含义模糊的“三层 Memory”。三类事实分别由�
 `docs/architecture/013_EVERYDAY_WORKSPACE_AGENT_DESIGN.md`，验收证据见
 `docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md`。
 
+### 014 Grounded Workspace Knowledge Agent — 当前 workspace 的有依据知识闭环（已交付并验证）
+
+014 已在 013 的默认入口上闭合当前 exact workspace 历史、workspace intelligence、固定 Tavily Search/Extract、
+统一来源回执、citation sidecar 与 research provenance evidence。真实 DeepSeek Model + Tavily E3 已连续三次
+19/19 claims 全 true，mandatory held-out value journey 已通过，最终完整 gates 为 925 tests，fresh reviewer 无
+P0/P1/P2。权威状态与残余限制见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。
+
+014 仍不实现跨 workspace history、shell/process、multi-root、authenticated Web/browser、外部写入、后台
+crawler/scheduler 或自我优化。
+
 ## Current milestone
 
-013 已交付并验证（见上）。下一里程碑尚未启动；按 capability tracks 的顺序与现有稳定边界另行
-批准，不因 013 完成而隐式扩权。
+### 015 Governed Local Action — 目标级权限租约与受治理的本机执行（已交付并验证）
+
+015 在 014 的知识闭环上增加一项受治理的本机行动能力：
+
+1. 用户仍只在当前目录运行 `first-agent` 并描述目标；Agent 先使用只读能力调查，不要求切换到 code/task 模式。
+2. 确实需要本机程序时，模型只能请求结构化 `executable + argv + cwd`，不能提交 shell 字符串、pipeline、
+   redirection、TTY 或后台任务。
+3. 用户在既有 approval 流中看到 exact command、cwd、时间/输出限制、环境策略和 same-UID 风险；批准后形成
+   Goal/revision/workspace/command 精确绑定、有限次数、可过期、可撤销的 durable lease。
+4. 所有执行仍由唯一 `KernelToolRuntime` 在 `EXECUTING` checkpoint 后启动；超时、进程组终止、bounded output、
+   crash/restart unknown-outcome 与 no-auto-retry 由 Runtime 合同闭合。
+5. `VERIFIED_DONE` 只接受 Runtime 铸造的 process receipt 和必要的文件 read-back；exit 0 或模型自报不能单独
+   证明任意任务语义已完成。
+
+015 是 POSIX/macOS-first、operator-trusted same-UID 执行，不宣称 OS sandbox。它不实现任意 shell、sudo、
+interactive/TTY、后台 daemon、authenticated browser、整机控制、动态 tool registry、并行 worker 或自主优化。
+完整合同见 `docs/plans/2026-08-09-001-feat-governed-local-action-plan.md`；真实三连 E3、materialized tree、
+独立评审与 Codex 终裁证据见 `docs/implementation/015_EXECUTION_LOG.md`。
 
 ## Success metrics
 

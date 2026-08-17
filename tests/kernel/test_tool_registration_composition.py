@@ -4,6 +4,7 @@ import pytest
 
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     OutputPolicy,
     PolicyDecision,
@@ -18,6 +19,7 @@ from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 
 def _spec(name: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=name,
         version="1",
         description="fixture tool",

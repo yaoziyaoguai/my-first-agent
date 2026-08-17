@@ -18,6 +18,7 @@ from agent.runtime.contracts import (
     ContextQuery,
     ContextSourceSnapshot,
     ConversationFact,
+    ExecutionAuthorityClass,
     FactKind,
     KnownNotExecuted,
     OutputPolicy,
@@ -26,6 +27,7 @@ from agent.runtime.contracts import (
     ToolRisk,
     ToolSpec,
     canonical_json_digest,
+    context_source_snapshot_digest,
 )
 from agent.runtime.tools import RegisteredTool
 
@@ -265,8 +267,8 @@ class OwnerPreferenceSource:
         return ContextSourceSnapshot(
             source_name=self.name,
             revision=self._store.revision,
-            snapshot_digest=canonical_json_digest(
-                [(item.candidate_id, item.content_digest) for item in candidates]
+            snapshot_digest=context_source_snapshot_digest(
+                self.name, self._store.revision, candidates
             ),
             candidates=candidates,
         )
@@ -312,6 +314,7 @@ def _preference_spec(name: str, *, read_only: bool = False) -> ToolSpec:
         properties["content"] = {"type": "string"}
         required.append("content")
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=name,
         version="1",
         description=f"Governed owner preference operation: {name}.",

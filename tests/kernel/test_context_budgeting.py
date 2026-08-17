@@ -13,6 +13,7 @@ from agent.runtime.contracts import (
     ConversationFact,
     ConversationState,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     FactKind,
     RecoveryRequest,
     Resume,
@@ -23,7 +24,7 @@ from agent.runtime.contracts import (
 
 # 012 的 reserved control schema 是 mandatory pinned context。这里的测试仍然只测
 # history/group 淘汰边界，因此在旧的相对预算上显式加回这项固定成本。
-CONTROL_SCHEMA_BUDGET = 998
+CONTROL_SCHEMA_BUDGET = 1_164
 
 
 def _fact(fact_id: str, kind: FactKind, **content):
@@ -80,6 +81,7 @@ def test_pending_recovery_tool_group_is_pinned_under_pressure() -> None:
                 summary="unknown outcome",
             ),
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="call-1",
                 intent_digest="intent-1",
                 idempotency_key="key-1",

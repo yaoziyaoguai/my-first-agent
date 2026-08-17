@@ -33,6 +33,7 @@ from agent.runtime.contracts import (
     ConversationFact,
     ConversationState,
     EvidenceOracleKind,
+    ExecutionAuthorityClass,
     FactKind,
     GoalDelta,
     GoalDeltaProposal,
@@ -83,6 +84,7 @@ def _context() -> ContextPack:
         ),
         tools=(
             ToolDefinition(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 name="read_file",
                 description="Read one bounded fixture file",
                 input_schema={
@@ -365,7 +367,7 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     context = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
-        workspace_scope_digest="workspace-schema",
+        workspace_identity_digest="workspace-schema",
         authority_snapshot="authority-schema",
         strict_control_schema=True,
     ).build(
@@ -396,10 +398,6 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert set(schema["properties"]["kind"]["enum"]) == {
         "clarification_request",
         "goal_proposal",
-        "goal_progress",
-        "goal_delta_proposal",
-        "completion_claim",
-        "blocked_claim",
     }
     assert set(schema["properties"]) == {
         "kind",
@@ -445,6 +443,13 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert "must be empty" in goal_schema["properties"]["admitted_criteria"]["description"]
     assert goal_schema["properties"]["status"]["enum"] == ["goal_ready"]
     assert goal_schema["additionalProperties"] is False
+    proposed = goal_schema["properties"]["proposed_criteria"]["items"]
+    assert set(proposed["required"]) == {
+        "criterion_id",
+        "description",
+        "oracle_kind",
+        "artifact_path",
+    }
     delta_updates = schema["properties"]["delta"]["properties"]["updates"]
     assert "admitted_criteria" not in delta_updates["properties"]
     assert "authority_snapshot" not in delta_updates["properties"]
@@ -484,7 +489,7 @@ def test_openai_strict_control_wire_uses_schema_and_unwraps_exact_payload() -> N
     context = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
-        workspace_scope_digest="workspace-schema",
+        workspace_identity_digest="workspace-schema",
         authority_snapshot="authority-schema",
         strict_control_schema=True,
     ).build(
@@ -555,7 +560,7 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
     context = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
-        workspace_scope_digest="workspace-schema",
+        workspace_identity_digest="workspace-schema",
         authority_snapshot="authority-schema",
     ).build(
         state,
@@ -574,15 +579,54 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
     assert "goal_proposal" not in kinds
     assert set(kinds) == {
         "clarification_request",
-        "goal_progress",
         "goal_delta_proposal",
         "completion_claim",
         "blocked_claim",
     }
     assert "goal_proposal is unavailable" in context.control_schema["description"]
     description = context.control_schema["description"]
-    assert "goal_progress records only material progress already achieved" in description
+    assert "goal_progress is currently unavailable" in description
     assert "call that product tool now" in context.control_schema["description"]
+
+
+def test_source_result_in_same_user_action_hides_goal_proposal_until_fresh_action(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent.runtime.context.source_result_since_latest_user",
+        lambda _state: True,
+    )
+    state = ConversationState(
+        conversation_id="source-answer-conversation",
+        facts=(
+            ConversationFact(
+                "action:1:user",
+                FactKind.USER_MESSAGE,
+                {"text": "answer from a source"},
+            ),
+        ),
+    )
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        workspace_identity_digest="workspace-schema",
+        authority_snapshot="authority-schema",
+    ).build(
+        state,
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="source-answer-run",
+            message="answer from a source",
+        ),
+        (),
+    )
+
+    assert context.control_schema is not None
+    kinds = context.control_schema["input_schema"]["properties"]["kind"]["enum"]
+    assert kinds == ["clarification_request"]
+    assert "fresh user action" in context.control_schema["description"]
 
 
 # U3C-R1B2B(013 修订):控制回执的上行 wire 合同。已受理回执是 runtime 生成的
@@ -771,7 +815,14 @@ _GOAL_FRAME_WIRE: dict[str, object] = {
     "scope": ["notes/"],
     "non_goals": ["no repo-wide rewrite"],
     "assumptions": ["fixture file stays readable"],
-    "proposed_criteria": [{"criterion_id": "crit-1", "description": "summary file exists"}],
+    "proposed_criteria": [
+        {
+            "criterion_id": "crit-1",
+            "description": "summary file exists",
+            "oracle_kind": "filesystem_digest",
+            "artifact_path": "notes/summary.md",
+        }
+    ],
     "admitted_criteria": [
         {
             "criterion_id": "crit-2",
@@ -803,7 +854,14 @@ _EXPECTED_GOAL_FRAME = GoalFrame(
     scope=("notes/",),
     non_goals=("no repo-wide rewrite",),
     assumptions=("fixture file stays readable",),
-    proposed_criteria=(ProposedCriterion("crit-1", "summary file exists"),),
+    proposed_criteria=(
+        ProposedCriterion(
+            "crit-1",
+            "summary file exists",
+            oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+            artifact_path="notes/summary.md",
+        ),
+    ),
     admitted_criteria=(
         AdmittedCriterion(
             criterion_id="crit-2",
@@ -880,7 +938,7 @@ def test_production_http_adapters_project_trusted_goal_as_closed_text_context(
     context = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
-        workspace_scope_digest="ws-digest-1",
+        workspace_identity_digest="ws-digest-1",
         authority_snapshot="auth-digest-1",
     ).build(
         state,
@@ -1062,6 +1120,16 @@ _MALFORMED_CONTROL_ARGUMENT_CASES = [
     pytest.param(
         _mutated_goal_proposal(lambda frame: frame["proposed_criteria"][0].pop("description")),
         id="proposed-criterion-missing-description",
+    ),
+    pytest.param(
+        _mutated_goal_proposal(lambda frame: frame["proposed_criteria"][0].pop("oracle_kind")),
+        id="proposed-criterion-missing-oracle",
+    ),
+    pytest.param(
+        _mutated_goal_proposal(
+            lambda frame: frame["proposed_criteria"][0].update(artifact_path="../escape")
+        ),
+        id="proposed-criterion-unsafe-artifact-path",
     ),
     pytest.param(
         _mutated_goal_proposal(lambda frame: frame["admitted_criteria"][0].update(weight=1)),

@@ -11,13 +11,15 @@ import pytest
 import main as entrypoint
 from agent.continuity import sessions
 from agent.continuity.sessions import (
+    DEFAULT_ACTIVE_CANDIDATE_LIMIT,
+    WORKSPACE_HISTORY_CAPACITY,
     StartupDisposition,
     open_workspace_session,
     select_workspace_session,
 )
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.contracts import ConversationFact, ConversationState, FactKind, SelectGoal
-from agent.runtime.state import create_goal
+from agent.runtime.state import cancel_goal, create_goal
 from tests.continuity.test_contracts import _goal
 
 
@@ -46,6 +48,8 @@ def test_default_start_creates_owner_only_product_state_root_outside_workspace(
     assert stat.S_IMODE(opened.checkpoint_path.stat().st_mode) == 0o600
     assert opened.snapshot is not None
     assert opened.snapshot.state.conversation_id == "00000000-0000-4000-8000-000000000001"
+    assert DEFAULT_ACTIVE_CANDIDATE_LIMIT == 16
+    assert WORKSPACE_HISTORY_CAPACITY == 256
 
 
 def test_explicit_state_root_override_is_owner_only_and_no_follow(tmp_path: Path) -> None:
@@ -252,22 +256,184 @@ def test_bounded_workspace_state_enumeration_rejects_unknown_entries_and_overflo
     with pytest.raises(ValueError, match="unknown entry"):
         open_workspace_session(workspace, state_root=unknown_root)
 
-    overflow_root = tmp_path / "overflow-root"
+    bounded_root = tmp_path / "bounded-root"
     first = open_workspace_session(
         workspace,
-        state_root=overflow_root,
+        state_root=bounded_root,
         conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000011",
     )
-    assert first.checkpoint_path is not None
-    for suffix in (12, 13):
+    assert first.checkpoint_path is not None and first.workspace_binding is not None
+    for suffix in range(12, 29):
         conversation_id = f"00000000-0000-4000-8000-{suffix:012d}"
+        source = ConversationFact(
+            fact_id="fact:user:1",
+            kind=FactKind.USER_MESSAGE,
+            content={"text": f"terminal task {suffix}"},
+        )
+        state = create_goal(
+            ConversationState(
+                conversation_id=conversation_id,
+                workspace_binding=first.workspace_binding,
+                facts=(source,),
+            ),
+            _goal(
+                goal_id=f"goal:{suffix}",
+                user_outcome=f"terminal task {suffix}",
+                workspace_identity_digest=first.workspace_identity.identity_digest,
+            ),
+        )
+        state = cancel_goal(
+            state,
+            goal_id=state.goal.goal_id,
+            expected_revision=state.goal.revision,
+        )
         LocalCheckpointStore.initialize(
             first.checkpoint_path.parent / f"{conversation_id}.json",
-            ConversationState.new(conversation_id),
+            state,
         )
 
-    with pytest.raises(ValueError, match="candidate count"):
-        open_workspace_session(workspace, state_root=overflow_root, max_candidates=2)
+    reopened = open_workspace_session(
+        workspace,
+        state_root=bounded_root,
+        max_candidates=2,
+    )
+
+    assert reopened.disposition is StartupDisposition.RESUMED
+    assert reopened.total_checkpoint_count == 18
+    assert reopened.total_active_count == 1
+    assert not reopened.history_incomplete
+
+
+def test_active_display_is_bounded_without_discarding_history(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    first = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000030",
+    )
+    assert first.checkpoint_path is not None and first.workspace_binding is not None
+    for suffix in (31, 32, 33):
+        conversation_id = f"00000000-0000-4000-8000-{suffix:012d}"
+        source = ConversationFact(
+            fact_id="fact:user:1",
+            kind=FactKind.USER_MESSAGE,
+            content={"text": f"active task {suffix}"},
+        )
+        state = create_goal(
+            ConversationState(
+                conversation_id=conversation_id,
+                workspace_binding=first.workspace_binding,
+                facts=(source,),
+            ),
+            _goal(
+                goal_id=f"goal:{suffix}",
+                user_outcome=f"active task {suffix}",
+                workspace_identity_digest=first.workspace_identity.identity_digest,
+            ),
+        )
+        LocalCheckpointStore.initialize(
+            first.checkpoint_path.parent / f"{conversation_id}.json",
+            state,
+        )
+
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        max_candidates=2,
+    )
+
+    assert opened.disposition is StartupDisposition.SELECT_REQUIRED
+    assert len(opened.candidates) == 2
+    assert opened.total_checkpoint_count == 4
+    assert opened.total_active_count == 4
+    assert opened.history_incomplete
+
+
+def test_full_history_preserves_existing_session_but_blocks_new_conversation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    first = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000040",
+        max_candidates=2,
+        max_history_checkpoints=3,
+    )
+    assert first.store is not None and first.snapshot is not None
+    assert first.workspace_binding is not None and first.checkpoint_path is not None
+    source = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "capacity task"},
+    )
+    active = create_goal(
+        replace(first.snapshot.state, facts=(source,)),
+        _goal(workspace_identity_digest=first.workspace_identity.identity_digest),
+    )
+    for suffix in (41, 42):
+        conversation_id = f"00000000-0000-4000-8000-{suffix:012d}"
+        terminal = create_goal(
+            ConversationState(
+                conversation_id=conversation_id,
+                workspace_binding=first.workspace_binding,
+                facts=(source,),
+            ),
+            _goal(
+                goal_id=f"goal:{suffix}",
+                workspace_identity_digest=first.workspace_identity.identity_digest,
+            ),
+        )
+        terminal = cancel_goal(
+            terminal,
+            goal_id=terminal.goal.goal_id,
+            expected_revision=terminal.goal.revision,
+        )
+        LocalCheckpointStore.initialize(
+            first.checkpoint_path.parent / f"{conversation_id}.json",
+            terminal,
+        )
+
+    lease = first.store.try_acquire(first.snapshot.state.conversation_id)
+    assert lease is not None
+    try:
+        first.store.compare_and_swap(first.snapshot, active)
+    finally:
+        lease.release()
+    resumed = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        max_candidates=2,
+        max_history_checkpoints=3,
+    )
+    assert resumed.disposition is StartupDisposition.RESUMED
+
+    resumed_snapshot = resumed.store.load()
+    cancelled = cancel_goal(
+        resumed_snapshot.state,
+        goal_id=resumed_snapshot.state.goal.goal_id,
+        expected_revision=resumed_snapshot.state.goal.revision,
+    )
+    lease = resumed.store.try_acquire(resumed_snapshot.state.conversation_id)
+    assert lease is not None
+    try:
+        resumed.store.compare_and_swap(resumed_snapshot, cancelled)
+    finally:
+        lease.release()
+
+    full = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        max_candidates=2,
+        max_history_checkpoints=3,
+    )
+    assert full.disposition is StartupDisposition.HISTORY_CAPACITY_EXCEEDED
+    assert full.total_checkpoint_count == 3
+    assert len(tuple(first.checkpoint_path.parent.glob("*.json"))) == 3
 
 
 def test_concurrent_first_start_creates_one_valid_checkpoint_per_identity(

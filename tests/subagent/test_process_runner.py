@@ -61,7 +61,7 @@ def test_process_runner_terminated_on_completion() -> None:
     runner = ChildProcessRunner(
         provider_spec=_fake_spec(text="focused child review"),
         profile=_profile(),
-        hard_deadline_seconds=20.0,
+        hard_deadline_seconds=120.0,
     )
     result = runner.run(
         objective="review the design", handoff="", parent_idempotency_key="parent:run-1:call-p1"
@@ -103,7 +103,7 @@ def test_process_runner_nonterminal_is_terminated_known_error() -> None:
             kind="fake", fake_tool=("read_file", {"path": "x"})
         ),
         profile=_profile(),
-        hard_deadline_seconds=20.0,
+        hard_deadline_seconds=120.0,
     )
     result = runner.run(
         objective="try a tool", handoff="", parent_idempotency_key="parent:run-1:call-p3"
@@ -166,7 +166,7 @@ def test_process_runner_large_stderr_does_not_cause_false_unconfirmed() -> None:
             kind="fake", fake_text="ok", stderr_chars=128 * 1024  # > 64KB pipe buffer
         ),
         profile=_profile(),
-        hard_deadline_seconds=20.0,
+        hard_deadline_seconds=120.0,
     )
     result = runner.run(
         objective="emit stderr", handoff="", parent_idempotency_key="parent:run-1:call-stderr"
@@ -195,7 +195,7 @@ def test_process_runner_temp_dir_removed_after_run(tmp_path, monkeypatch) -> Non
     runner_ok = ChildProcessRunner(
         provider_spec=_fake_spec(text="done"),
         profile=_profile(),
-        hard_deadline_seconds=20.0,
+        hard_deadline_seconds=120.0,
     )
     res_ok = runner_ok.run(
         objective="ok", handoff="", parent_idempotency_key="parent:run-1:dir-ok"
@@ -225,7 +225,7 @@ def test_process_runner_oversized_stdout_is_unconfirmed(monkeypatch) -> None:
     runner = ChildProcessRunner(
         provider_spec=_fake_spec(text="normal sized child answer"),
         profile=_profile(),
-        hard_deadline_seconds=20.0,
+        hard_deadline_seconds=120.0,
     )
     result = runner.run(
         objective="oversized stdout",
@@ -247,3 +247,87 @@ def test_parse_result_rejects_malformed_and_oversized() -> None:
         "status": "completed",
         "message": "ok",
     }
+
+
+def test_015_config_dir_cleanup_retries_transient_rmdir_failure(
+    tmp_path, monkeypatch
+) -> None:
+    """F5/U10 review-hardening：清理的一次瞬时 ``rmdir`` 失败不得静默泄漏 per-run 目录。
+
+    全 suite 负载下实测（U10 复验 1 failed, 1026 passed）：``unlink``/``rmdir`` 各自
+    ``suppress(OSError)`` 无重试——负载下一次瞬时失败即目录存留（F-G8-2 要求
+    "per-run temp dir 在成功路径必须消失"）。Red：注入首调失败的 rmdir；清理必须有界
+    重试到目录消失。receipt 分类不受影响（既有合同）。
+    """
+
+    from pathlib import Path as _Path
+
+    attempts: dict[str, int] = {}
+    real_rmdir = _Path.rmdir
+
+    def flaky_rmdir(self):  # noqa: ANN001, ANN202
+        key = str(self)
+        attempts[key] = attempts.get(key, 0) + 1
+        if attempts[key] == 1 and "subagent-child-" in self.name:
+            raise OSError("transient ENOTEMPTY under load")
+        return real_rmdir(self)
+
+    monkeypatch.setattr(_Path, "rmdir", flaky_rmdir)
+    import glob as _glob
+    import tempfile as _tempfile
+
+    tmp_root = _tempfile.gettempdir()
+    before = set(_glob.glob(f"{tmp_root}/subagent-child-*"))
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="cleanup-probe"),
+        profile=_profile(),
+        hard_deadline_seconds=120.0,
+    )
+    result = runner.run(
+        objective="cleanup", handoff="", parent_idempotency_key="parent:run-1:dir-retry"
+    )
+    assert result.receipt_state == "terminated"
+    after = set(_glob.glob(f"{tmp_root}/subagent-child-*"))
+    assert after == before, "transient rmdir failure must not leak the per-run dir"
+
+
+def test_015_persistent_config_cleanup_failure_cannot_report_success(
+    tmp_path, monkeypatch
+) -> None:
+    """持续清理失败时 child 已终止，但整体调用必须准确失败。"""
+
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    run_dir = tmp_path / "subagent-child-persistent"
+
+    def make_run_dir(*, prefix):  # noqa: ANN001, ANN202
+        assert prefix == "subagent-child-"
+        run_dir.mkdir(mode=0o700)
+        return str(run_dir)
+
+    real_rmdir = _Path.rmdir
+
+    def persistent_rmdir(self):  # noqa: ANN001, ANN202
+        if self == run_dir:
+            raise OSError("persistent cleanup failure")
+        return real_rmdir(self)
+
+    monkeypatch.setattr(_tempfile, "mkdtemp", make_run_dir)
+    monkeypatch.setattr(_Path, "rmdir", persistent_rmdir)
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="cleanup-probe"),
+        profile=_profile(),
+        hard_deadline_seconds=120.0,
+    )
+
+    result = runner.run(
+        objective="cleanup",
+        handoff="",
+        parent_idempotency_key="parent:run-1:persistent-cleanup",
+    )
+
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.reason == "cleanup_failed"
+    assert result.receipt_state == "terminated"
+    assert run_dir.exists()

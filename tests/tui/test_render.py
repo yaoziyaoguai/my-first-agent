@@ -5,9 +5,11 @@ from dataclasses import replace
 from agent.runtime.contracts import (
     ApprovalRequest,
     ConversationState,
+    EgressClass,
     RecordedRunResult,
     RecoveryRequest,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -108,6 +110,32 @@ def test_projection_approval_and_recovery_forms() -> None:
     recovery = _recovery_state()
     assert project(recovery).form_kind == "recovery"
     assert project(recovery).actions == ("mark_succeeded", "mark_failed")
+
+
+def test_public_observation_recovery_never_asks_user_to_guess_success() -> None:
+    recovery = _recovery_state()
+    assert recovery.active_run is not None
+    intent = recovery.active_run.executing_intent
+    assert intent is not None
+    public = replace(
+        recovery,
+        active_run=replace(
+            recovery.active_run,
+            executing_intent=replace(
+                intent,
+                side_effect=SideEffectClass.READ_ONLY,
+                egress=EgressClass.PUBLIC_NETWORK,
+                operation="search",
+                request_identity="request-1",
+            ),
+        ),
+    )
+
+    view = project(public)
+
+    assert view.form_kind == "observation_recovery"
+    assert view.actions == ("record_observation_unknown",)
+    assert "not retry" in view.main_text
 
 
 def test_projection_reopened_executing_is_unknown_effect_resume_only() -> None:

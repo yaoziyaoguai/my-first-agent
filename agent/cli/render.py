@@ -8,11 +8,18 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalRequest,
     ConversationState,
+    EgressClass,
     RecoveryRequest,
     RunResult,
     RunStatus,
     RuntimeEvent,
     RuntimeEventKind,
+)
+from agent.runtime.views import (
+    SourceView,
+    project_goal_view,
+    project_process_leases,
+    project_visible_source_views,
 )
 
 
@@ -33,6 +40,9 @@ class TerminalRenderer:
         message = self._result_message(result)
         if message is not None:
             self._write(terminal_text(message, allow_newlines=True))
+        sources = project_goal_view(result.state).sources
+        if sources:
+            self._write(self._sources_message(sources))
         for warning in result.delivery_warnings:
             self._write(f"Warning: {terminal_text(warning)}")
 
@@ -73,12 +83,49 @@ class TerminalRenderer:
             active.status is ActiveRunStatus.AWAITING_RECOVERY
             and isinstance(active.pending_request, RecoveryRequest)
         ):
-            self._write(self._recovery_message(active.pending_request.summary))
+            self._write(
+                self._recovery_message(
+                    active.pending_request.summary,
+                    observation_unknown=(
+                        active.executing_intent is not None
+                        and active.executing_intent.egress is EgressClass.PUBLIC_NETWORK
+                    ),
+                )
+            )
             return
         if active.status is ActiveRunStatus.PAUSED_LIMIT:
             self._write(self._result_message_for_limit())
         elif active.status is ActiveRunStatus.PAUSED_RETRYABLE:
             self._write(self._result_message_for_retryable())
+
+    def render_sources(self, state: ConversationState, *, advanced: bool = False) -> None:
+        sources = project_visible_source_views(state, advanced=advanced)
+        if not sources:
+            self._write("No sources recorded for the current answer or task.")
+            return
+        self._write(self._sources_message(sources, advanced=advanced))
+
+    def render_leases(self, state: ConversationState, *, advanced: bool = False) -> None:
+        """F5/R11：active process authority lease 的 readable 摘要（默认隐藏 digest）。"""
+
+        leases = project_process_leases(state, advanced=advanced)
+        if not leases:
+            self._write("No active process lease.")
+            return
+        lines = ["Active process leases:"]
+        for index, lease in enumerate(leases):
+            lines.append(
+                f"[{index}] {lease.readable_command} · profile={lease.resource_profile} "
+                f"· uses left={lease.remaining_uses} "
+                f"· expires={lease.expires_at}"
+                + (
+                    f" · id={lease.lease_id} · digest={lease.lease_digest}"
+                    if advanced
+                    else ""
+                )
+            )
+        lines.append("Revoke with /revoke <lease_id> or /revoke all (ids via --advanced).")
+        self._write("\n".join(lines))
 
     @staticmethod
     def _event_message(event: RuntimeEvent) -> str | None:
@@ -92,7 +139,8 @@ class TerminalRenderer:
             )
         if event.kind is RuntimeEventKind.RECOVERY_REQUESTED:
             return TerminalRenderer._recovery_message(
-                payload.get("summary", "classification required")
+                payload.get("summary", "classification required"),
+                observation_unknown=payload.get("egress") == "public_network",
             )
         if event.kind is RuntimeEventKind.DISCLOSURE_REQUESTED:
             classes = payload.get("data_classes", [])
@@ -150,7 +198,17 @@ class TerminalRenderer:
         )
 
     @staticmethod
-    def _recovery_message(summary: object) -> str:
+    def _recovery_message(
+        summary: object,
+        *,
+        observation_unknown: bool = False,
+    ) -> str:
+        if observation_unknown:
+            return (
+                f"Unknown public observation: {terminal_text(summary)}\n"
+                "Reply with 'continue' to record no evidence and proceed, or 'stop'. "
+                "The request will not retry automatically."
+            )
         return (
             f"Unknown tool outcome: {terminal_text(summary)}\n"
             "Reply with 'success', 'failed', or 'stop'."
@@ -180,6 +238,23 @@ class TerminalRenderer:
     @staticmethod
     def _result_message_for_retryable() -> str:
         return "The provider failed transiently. Run /resume to retry or /cancel."
+
+    @staticmethod
+    def _sources_message(
+        sources: tuple[SourceView, ...], *, advanced: bool = False
+    ) -> str:
+        lines = ["Sources:"]
+        for source in sources:
+            detail = (
+                f"{source.source_kind} · {source.title} · {source.locator} · "
+                f"{source.observed_at} · {source.status}"
+            )
+            if source.failure_code is not None:
+                detail = f"{detail} ({source.failure_code})"
+            if advanced and source.source_ref is not None:
+                detail = f"{detail} · {source.source_ref}"
+            lines.append(f"- {terminal_text(detail)}")
+        return "\n".join(lines)
 
 
 def terminal_text(value: object, *, allow_newlines: bool = False) -> str:

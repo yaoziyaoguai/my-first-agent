@@ -26,8 +26,10 @@ from agent.runtime.contracts import (
     ContinuationPhase,
     ConversationFact,
     ConversationState,
+    ConversationWorkspaceBindingV1,
     EvidenceOracleKind,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     FactKind,
     GoalDelta,
     GoalDeltaProposal,
@@ -79,7 +81,12 @@ def _goal(*, workspace_digest: str = "workspace-1") -> GoalFrame:
         non_goals=("no external publication",),
         assumptions=(),
         proposed_criteria=(
-            ProposedCriterion("criterion-reference-file", "exact report content reads back"),
+            ProposedCriterion(
+                "criterion-reference-file",
+                "exact report content reads back",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="reports/final.md",
+            ),
         ),
         admitted_criteria=(),
         authority_snapshot="fixed-composition",
@@ -97,7 +104,8 @@ def _runtime(provider, store, *, tools=(), sources=(), descriptor=None) -> Agent
             system_policy="policy",
             limits=ContextLimits(max_input_tokens=8_000, output_reserve=400),
             sources=tuple(sources),
-            workspace_scope_digest="workspace-1",
+            workspace_identity_digest="workspace-1",
+            context_scope_digest="workspace-1",
         ),
         tool_runtime=KernelToolRuntime(tuple(tools)),
         checkpoint_store=store,
@@ -258,6 +266,7 @@ def test_j2_interrupted_executing_checkpoint_requires_unknown_effect_recovery(tm
                 ),
             ),
             executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
                 tool_call_id="write-unknown",
                 intent_digest="intent-unknown",
                 idempotency_key="idempotency-unknown",
@@ -289,9 +298,11 @@ def _candidate_state(
     *,
     workspace_digest: str,
     goal_id: str,
+    workspace_binding: ConversationWorkspaceBindingV1 | None = None,
 ) -> ConversationState:
     return ConversationState(
         conversation_id=conversation_id,
+        workspace_binding=workspace_binding,
         revision=1,
         next_action_seq=2,
         replay_floor=2,
@@ -322,10 +333,12 @@ def test_j3_multiple_candidates_require_explicit_selection(tmp_path) -> None:
     )
     assert opened.store is not None and opened.snapshot is not None
     assert opened.workspace_identity is not None and opened.checkpoint_path is not None
+    assert opened.workspace_binding is not None
     first_state = _candidate_state(
         first_id,
         workspace_digest=opened.workspace_identity.identity_digest,
         goal_id="goal-reference-first",
+        workspace_binding=opened.workspace_binding,
     )
     lease = opened.store.try_acquire(first_id)
     assert lease is not None
@@ -339,6 +352,7 @@ def test_j3_multiple_candidates_require_explicit_selection(tmp_path) -> None:
             second_id,
             workspace_digest=opened.workspace_identity.identity_digest,
             goal_id="goal-reference-second",
+            workspace_binding=opened.workspace_binding,
         ),
     )
 

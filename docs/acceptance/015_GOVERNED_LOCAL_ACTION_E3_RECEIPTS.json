@@ -1,0 +1,264 @@
+{
+  "acceptance_status": "accepted",
+  "attempts": [
+    {
+      "artifact_digest": "d71b65cfdd1785d39054d28d1eb9fbebc46617cc78ea1d5f7d5638bdbaf45ff2",
+      "attempt_id": "attempt-0",
+      "claims": {
+        "approval_preview_exact_and_informed": true,
+        "artifact_requires_process_and_readback_evidence": true,
+        "changed_command_requires_reapproval": true,
+        "closed_environment_secret_free": true,
+        "closed_resource_profile_bound": true,
+        "durable_goal_before_process": true,
+        "exact_reuse_without_reapproval": true,
+        "executing_checkpoint_precedes_spawn": true,
+        "kernel_tool_runtime_used": true,
+        "lease_goal_revision_workspace_bound": true,
+        "materialized_source_parity": true,
+        "no_false_sandbox_claim": true,
+        "output_bounded_and_untrusted": true,
+        "process_receipt_kernel_minted": true,
+        "production_composition_used": true,
+        "real_model_adapter_used": true,
+        "rejected_command_zero_spawn": true,
+        "restart_zero_duplicate_model_or_process": true,
+        "shell_metacharacters_literal": true,
+        "single_runtime_loop_preserved": true,
+        "timeout_group_cleanup_confirmed": true,
+        "timeout_not_verified_done": true,
+        "typed_same_uid_execution_authority_bound": true,
+        "unknown_recovery_requires_user": true,
+        "zero_process_side_effect_before_approval": true,
+        "zero_spawn_before_approval": true
+      },
+      "ended_at": "2026-08-16T08:12:11Z",
+      "fixture_invocation_count": 6,
+      "journey_verdicts": {
+        "j1": "verified_done",
+        "j2": "verified_done",
+        "j3": "goal_ready",
+        "j4": "goal_ready",
+        "j5": "verified_done"
+      },
+      "model_send_count": 23,
+      "process_output_digests": [
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "79ba5354b420efedf534655f715642c93e2af10c78349039cb6b04a2b0f1ec09",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "6b8e8fae83ade2c64acf4814d5dcb69c5af38c0c2a660e7f5ab966442ef926f3",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "36531f17758493c0f4876a3c7d6beef707159eb3af2406fc1d2d0ddd653397a2",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "daf7f42b62b2b5cef5e7b303010fbbbeeec69511f78ff4c5f980f01ec3c3370e",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "4a2610b7312c4fd91ca70cb9c1cd3d8821a9dc8d9cb1375590b9010a2b1e93fa",
+          "stdout_truncated": false
+        }
+      ],
+      "process_receipt_digest": "777570393e4d897e3fd6db471c176ef843848969fcaeb6bd6a9252f8c23e4dd4",
+      "started_at": "2026-08-16T08:11:15Z"
+    },
+    {
+      "artifact_digest": "d71b65cfdd1785d39054d28d1eb9fbebc46617cc78ea1d5f7d5638bdbaf45ff2",
+      "attempt_id": "attempt-1",
+      "claims": {
+        "approval_preview_exact_and_informed": true,
+        "artifact_requires_process_and_readback_evidence": true,
+        "changed_command_requires_reapproval": true,
+        "closed_environment_secret_free": true,
+        "closed_resource_profile_bound": true,
+        "durable_goal_before_process": true,
+        "exact_reuse_without_reapproval": true,
+        "executing_checkpoint_precedes_spawn": true,
+        "kernel_tool_runtime_used": true,
+        "lease_goal_revision_workspace_bound": true,
+        "materialized_source_parity": true,
+        "no_false_sandbox_claim": true,
+        "output_bounded_and_untrusted": true,
+        "process_receipt_kernel_minted": true,
+        "production_composition_used": true,
+        "real_model_adapter_used": true,
+        "rejected_command_zero_spawn": true,
+        "restart_zero_duplicate_model_or_process": true,
+        "shell_metacharacters_literal": true,
+        "single_runtime_loop_preserved": true,
+        "timeout_group_cleanup_confirmed": true,
+        "timeout_not_verified_done": true,
+        "typed_same_uid_execution_authority_bound": true,
+        "unknown_recovery_requires_user": true,
+        "zero_process_side_effect_before_approval": true,
+        "zero_spawn_before_approval": true
+      },
+      "ended_at": "2026-08-16T08:13:04Z",
+      "fixture_invocation_count": 6,
+      "journey_verdicts": {
+        "j1": "verified_done",
+        "j2": "verified_done",
+        "j3": "goal_ready",
+        "j4": "goal_ready",
+        "j5": "verified_done"
+      },
+      "model_send_count": 23,
+      "process_output_digests": [
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "79ba5354b420efedf534655f715642c93e2af10c78349039cb6b04a2b0f1ec09",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "6b8e8fae83ade2c64acf4814d5dcb69c5af38c0c2a660e7f5ab966442ef926f3",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "36531f17758493c0f4876a3c7d6beef707159eb3af2406fc1d2d0ddd653397a2",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "daf7f42b62b2b5cef5e7b303010fbbbeeec69511f78ff4c5f980f01ec3c3370e",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "4a2610b7312c4fd91ca70cb9c1cd3d8821a9dc8d9cb1375590b9010a2b1e93fa",
+          "stdout_truncated": false
+        }
+      ],
+      "process_receipt_digest": "c7a7fb4762096b679f1a2181e628d1d5b05002c23214e0d519e1104d225b1629",
+      "started_at": "2026-08-16T08:12:11Z"
+    },
+    {
+      "artifact_digest": "d71b65cfdd1785d39054d28d1eb9fbebc46617cc78ea1d5f7d5638bdbaf45ff2",
+      "attempt_id": "attempt-2",
+      "claims": {
+        "approval_preview_exact_and_informed": true,
+        "artifact_requires_process_and_readback_evidence": true,
+        "changed_command_requires_reapproval": true,
+        "closed_environment_secret_free": true,
+        "closed_resource_profile_bound": true,
+        "durable_goal_before_process": true,
+        "exact_reuse_without_reapproval": true,
+        "executing_checkpoint_precedes_spawn": true,
+        "kernel_tool_runtime_used": true,
+        "lease_goal_revision_workspace_bound": true,
+        "materialized_source_parity": true,
+        "no_false_sandbox_claim": true,
+        "output_bounded_and_untrusted": true,
+        "process_receipt_kernel_minted": true,
+        "production_composition_used": true,
+        "real_model_adapter_used": true,
+        "rejected_command_zero_spawn": true,
+        "restart_zero_duplicate_model_or_process": true,
+        "shell_metacharacters_literal": true,
+        "single_runtime_loop_preserved": true,
+        "timeout_group_cleanup_confirmed": true,
+        "timeout_not_verified_done": true,
+        "typed_same_uid_execution_authority_bound": true,
+        "unknown_recovery_requires_user": true,
+        "zero_process_side_effect_before_approval": true,
+        "zero_spawn_before_approval": true
+      },
+      "ended_at": "2026-08-16T08:13:56Z",
+      "fixture_invocation_count": 6,
+      "journey_verdicts": {
+        "j1": "verified_done",
+        "j2": "verified_done",
+        "j3": "blocked",
+        "j4": "goal_ready",
+        "j5": "verified_done"
+      },
+      "model_send_count": 22,
+      "process_output_digests": [
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "79ba5354b420efedf534655f715642c93e2af10c78349039cb6b04a2b0f1ec09",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "6b8e8fae83ade2c64acf4814d5dcb69c5af38c0c2a660e7f5ab966442ef926f3",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "36531f17758493c0f4876a3c7d6beef707159eb3af2406fc1d2d0ddd653397a2",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "daf7f42b62b2b5cef5e7b303010fbbbeeec69511f78ff4c5f980f01ec3c3370e",
+          "stdout_truncated": false
+        },
+        {
+          "stderr_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_truncated": false,
+          "stdout_digest": "4a2610b7312c4fd91ca70cb9c1cd3d8821a9dc8d9cb1375590b9010a2b1e93fa",
+          "stdout_truncated": false
+        }
+      ],
+      "process_receipt_digest": "c3def929e87631eb7fd5af3cdb59763342d18df88e0b92af4d46acd294fa16d4",
+      "started_at": "2026-08-16T08:13:04Z"
+    }
+  ],
+  "contract_version": "015-e3/v1",
+  "delivery_seal_sha256": "8c4e309e5866616e7aea1ac261d14d8b9d7bfa06c2c2bfef312592cfb01e8095",
+  "destination_digest": "a34e2a4708ed1c61008a151688838dcf1c44d4e7f08054633e72ba7c0b16cfc1",
+  "fixture_identity_digest": "4edda81ca74ab4a889976931b17641a00142cb32aa692dd7e1de4b214d355e97",
+  "materialized_identity": {
+    "composition_under_install": true,
+    "entry_count": 199,
+    "install_root_digest": "ac3e3e5a3bfe2389a7ec0fd153daa4137bc76dd9e7dedc1c450b748bd019ce49",
+    "overlay_root_sha256": "39644cf831a942430a801b0f5ce1ebfaa142d35d1470da31b2642a67a77d0fd7"
+  },
+  "model": "deepseek-v4-flash",
+  "provider_family": "openai_compatible",
+  "reviewer_handoff": "015-fresh-reviewer/v1"
+}

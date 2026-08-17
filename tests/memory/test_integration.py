@@ -66,7 +66,8 @@ def test_memory_candidate_appears_as_untrusted_context_under_budget(tmp_path: Pa
         system_policy="policy",
         limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
         sources=(source,),
-        workspace_scope_digest=SCOPE,
+        workspace_identity_digest=SCOPE,
+        context_scope_digest=SCOPE,
     )
     state = ConversationState.new("c1")
     action = SubmitMessage(

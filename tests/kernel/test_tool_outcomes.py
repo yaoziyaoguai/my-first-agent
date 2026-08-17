@@ -6,6 +6,7 @@ from agent.runtime.contracts import (
     ApprovalPolicy,
     BlockedClaim,
     ConversationState,
+    ExecutionAuthorityClass,
     FactKind,
     KnownExecutedError,
     KnownNotExecuted,
@@ -31,6 +32,7 @@ from tests.kernel.fakes import (
 
 def _write_spec(name: str) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=name,
         version="1",
         description="fixture write tool",
@@ -162,6 +164,7 @@ def test_stale_approval_is_nonfatal_nonexecution() -> None:
         return "written"
 
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
         version="1",
         description="fixture write",

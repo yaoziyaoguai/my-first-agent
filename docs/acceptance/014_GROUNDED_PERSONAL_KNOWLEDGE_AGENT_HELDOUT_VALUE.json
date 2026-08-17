@@ -1,0 +1,39 @@
+{
+  "schema": "first-agent-014-heldout-value-verdict-v1",
+  "authority": "014-u10-heldout-value",
+  "observed_at": "2026-08-05",
+  "verdict": "passed",
+  "note": "U10 mandatory held-out value journey (acceptance §8 / plan U10). A fresh independent reviewer selected novel topics NOT present in the frozen fixture/runner prompts; the executor then ran ONE same-budget production value journey via no-argument product composition + production DeepSeek openai_compatible adapter + production Tavily adapter + real ToolRuntime approval/checkpoint/evidence (no mock/script/fake; no loosening of safety/approval/oracle/budget). It demonstrates the agent generalizes to novel content — history recall via a novel paraphrase and Web grounding on a novel public topic — rather than overfitting to frozen keywords. This does NOT modify or overwrite the frozen E3 receipt (attempts #7-#9 remain the accepted frozen E3). Output is secret-free.",
+  "provider_family": "openai_compatible",
+  "provider_model": "deepseek-v4-flash",
+  "topics": {
+    "decision_path": "decisions/logging-default.md",
+    "decision_text": "The runtime default log level must remain WARN to avoid leaking verbose output during local runs.\n",
+    "recall_token": "WARN",
+    "history_query": "default log level",
+    "history_paraphrase": "Relying solely on First Agent history for this exact workspace, recover the verified choice we previously recorded about which severity the runtime should emit by default. Since history_search performs literal lexical matching, make the first history_search query exactly 'default log level', then use history_get as needed. State whether the supporting evidence is verified delivery, and do not use Web or create files.",
+    "web_question": "When did the IETF publish RFC 9114 defining HTTP/3?",
+    "constraint_keyword": "RFC number"
+  },
+  "claims": {
+    "profiles_non_secret": true,
+    "decision_verified": true,
+    "history_recall_ok": true,
+    "history_used_only_current_workspace": true,
+    "web_grounded_ok": true,
+    "web_zero_calls_before_exact_approval": true,
+    "tavily_is_the_only_web_destination": true,
+    "no_extra_goal_or_files_in_web_probe": true,
+    "within_budget": true,
+    "receipt_and_output_expose_no_secret": true
+  },
+  "model_request_count": 11,
+  "web_request_count": 2,
+  "web_search_count": 1,
+  "web_extract_count": 1,
+  "tavily_destination_digest": "088debf43e9156779928af390825f9e74a539b024e331eebe3b957dd4399067f",
+  "budget_limits": {
+    "model_request_limit": 128,
+    "web_request_limit": 64
+  }
+}

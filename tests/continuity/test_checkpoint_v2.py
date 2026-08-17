@@ -10,13 +10,23 @@ from agent.runtime.checkpoint import (
     LocalCheckpointStore,
 )
 from agent.runtime.contracts import (
+    ActiveRun,
+    ActiveRunStatus,
     CompletionClaim,
+    ContinuationPhase,
     ControlReceipt,
     ConversationState,
+    EgressClass,
     EvidenceRecord,
+    ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     InteractionState,
+    ProposedCriterion,
     ProviderDescriptor,
     ProviderDisclosureRequest,
+    RecoveryRequest,
+    SideEffectClass,
+    ToolCall,
     canonical_json_digest,
 )
 from tests.continuity.test_contracts import _goal
@@ -50,7 +60,14 @@ def test_goal_control_disclosure_and_evidence_round_trip_in_v2(tmp_path) -> None
         accepted_state_revision=4,
         payload_digest="b" * 64,
     )
-    goal = _goal()
+    current_goal = _goal()
+    goal = replace(
+        current_goal,
+        proposed_criteria=tuple(
+            ProposedCriterion(item.criterion_id, item.description)
+            for item in current_goal.proposed_criteria
+        ),
+    )
     criterion = goal.admitted_criteria[0]
     evidence = EvidenceRecord(
         evidence_id="evidence:1",
@@ -86,6 +103,8 @@ def test_goal_control_disclosure_and_evidence_round_trip_in_v2(tmp_path) -> None
     store = LocalCheckpointStore.initialize(tmp_path / "conversation.json", state)
 
     assert store.load().state == state
+    document = json.loads((tmp_path / "conversation.json").read_text())
+    assert document["schema_version"] == 2
 
 
 def test_v1_checkpoint_is_rejected_without_mutating_source(tmp_path) -> None:
@@ -136,3 +155,44 @@ def test_checkpoint_capacity_counts_new_bounded_fields(tmp_path) -> None:
             ConversationState(conversation_id="conversation:1", goal=_goal()),
             max_state_bytes=800,
         )
+
+
+def test_public_network_executing_identity_round_trips(tmp_path) -> None:
+    state = ConversationState(
+        conversation_id="conversation:1",
+        revision=4,
+        active_run=ActiveRun(
+            run_id="run:1",
+            status=ActiveRunStatus.AWAITING_RECOVERY,
+            phase=ContinuationPhase.EXECUTING,
+            tool_calls=(ToolCall("call:1", "web_search", {"query": "bounded"}),),
+            executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                tool_call_id="call:1",
+                intent_digest="intent:1",
+                idempotency_key="idempotency:1",
+                side_effect=SideEffectClass.READ_ONLY,
+                egress=EgressClass.PUBLIC_NETWORK,
+                operation="search",
+                request_identity="request:1",
+            ),
+            pending_request=RecoveryRequest(
+                request_id="recovery:1",
+                run_id="run:1",
+                tool_call_id="call:1",
+                binding_digest="intent:1",
+                summary="observation outcome unknown",
+            ),
+        ),
+    )
+
+    store = LocalCheckpointStore.initialize(tmp_path / "public-network.json", state)
+
+    restored = store.load().state
+    document = json.loads((tmp_path / "public-network.json").read_text())
+    # 015 review hardening：current process contract 使用 v6 immutable digests。
+    assert document["schema_version"] == 6
+    assert restored == state
+    assert restored.active_run is not None
+    assert restored.active_run.executing_intent is not None
+    assert restored.active_run.executing_intent.egress is EgressClass.PUBLIC_NETWORK

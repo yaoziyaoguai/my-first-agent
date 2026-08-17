@@ -5,30 +5,75 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from typing import Protocol
 
+from agent.process.contracts import (
+    ProcessDraftOutcome,
+    ProcessExecutionDraftV1,
+    ResourceProfile,
+    ResourceProfileV1,
+)
 from agent.runtime.contracts import (
     ApprovalGrant,
     ApprovalPolicy,
     ApprovalRequest,
     ApprovalRequired,
+    ArtifactConfirmationRequirementV1,
+    EgressClass,
+    EvidenceOracleKind,
+    ExecutionAuthorityClass,
     ExecutionIntent,
     JSONValue,
     KnownExecutedError,
     KnownNotExecuted,
     PolicyDecision,
+    ProcessAuthorityCandidateV1,
+    ProcessAuthorityLeaseV1,
+    ProcessOutcome,
+    ProcessReceiptV1,
     SideEffectClass,
+    SourceAuthorityBinding,
+    SourceReceiptV1,
     ToolCall,
     ToolDefinition,
+    ToolExecutionOutput,
     ToolPreparation,
     ToolPrepareContext,
     ToolResult,
     ToolSpec,
 )
 
+
+def _default_utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_zoned_rfc3339(value: str) -> datetime | None:
+    """严格解析带时区 RFC3339；naive/malformed → None（调用方 fail closed）。"""
+
+    if not isinstance(value, str):
+        return None
+    # fromisoformat 接受 space 分隔等非 RFC3339 宽松形式；authority 时间戳只信任
+    # 本代码库铸造的 ``T`` 分隔形式，其余一律 fail closed。
+    if len(value) < 20 or value[10] != "T":
+        return None
+    try:
+        parsed = datetime.fromisoformat(
+            value[:-1] + "+00:00" if value.endswith("Z") else value
+        )
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
 ToolCallable = Callable[..., object]
 BindingPreparer = Callable[[dict[str, JSONValue]], dict[str, JSONValue]]
+AuthorityBindingPreparer = Callable[
+    [dict[str, JSONValue], SourceAuthorityBinding], dict[str, JSONValue]
+]
 
 
 class IntentConflictError(RuntimeError):
@@ -69,6 +114,7 @@ class RegisteredTool:
     spec: ToolSpec
     func: ToolCallable
     prepare_binding: BindingPreparer | None = None
+    prepare_authority_binding: AuthorityBindingPreparer | None = None
     policy: ToolPolicy | None = None
 
 
@@ -78,6 +124,7 @@ class KernelToolRuntime:
         registrations: tuple[RegisteredTool, ...],
         *,
         policy: ToolPolicy | None = None,
+        clock: Callable[[], str] | None = None,
     ) -> None:
         self._tools: dict[str, RegisteredTool] = {}
         for registration in registrations:
@@ -86,6 +133,7 @@ class KernelToolRuntime:
             self._tools[registration.spec.name] = registration
         self._default_policy = policy or DefaultToolPolicy()
         self._invoked_keys: set[str] = set()
+        self._clock = clock or _default_utc_now
 
     def _policy_for(self, registration: RegisteredTool) -> ToolPolicy:
         # 每个 registration 可绑定自己的 policy identity；未绑定则回退到 runtime 默认策略。
@@ -112,11 +160,20 @@ class KernelToolRuntime:
         if validation_error is not None:
             return self._error(call.tool_call_id, "invalid_arguments", validation_error)
 
+        source_authority_required = (
+            registration.spec.safety_policy.get("source_authority_required") is True
+        )
+        if source_authority_required and context.source_authority is None:
+            return self._error(
+                call.tool_call_id,
+                "source_authority_required",
+                "This tool requires a Runtime-verified source reference.",
+            )
         try:
-            binding = (
-                registration.prepare_binding(arguments)
-                if registration.prepare_binding is not None
-                else {}
+            binding = self._prepare_binding(
+                registration,
+                arguments,
+                source_authority=context.source_authority,
             )
             _canonical_json(binding)
         except Exception:
@@ -138,6 +195,10 @@ class KernelToolRuntime:
             )
         if decision is PolicyDecision.DENY:
             return self._error(call.tool_call_id, "policy_denied", "Tool policy denied the call.")
+        if registration.spec.egress is EgressClass.PUBLIC_NETWORK:
+            # PUBLIC_NETWORK 的用户可见外发不能被 registration 自定义 policy
+            # 或 Goal authorization 降级；首次 prepare 必须形成 durable approval。
+            decision = PolicyDecision.REQUIRE_APPROVAL
         if (
             registration.spec.safety_policy.get("kind") == "memory_remember"
             and context.goal_id is not None
@@ -165,6 +226,25 @@ class KernelToolRuntime:
         ):
             decision = PolicyDecision.ALLOW
 
+        process_candidate: ProcessAuthorityCandidateV1 | None = None
+        process_lease: ProcessAuthorityLeaseV1 | None = None
+        if registration.spec.execution_authority is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS:
+            if not (
+                context.goal_id
+                and context.goal_revision
+                and context.workspace_identity_digest
+            ):
+                return self._error(
+                    call.tool_call_id,
+                    "process_requires_goal",
+                    "local_process requires a durable Goal before any execution.",
+                )
+            process_candidate = self._build_process_candidate(binding, context)
+            if decision is PolicyDecision.REQUIRE_APPROVAL:
+                process_lease = self._match_process_lease(process_candidate, context)
+                if process_lease is not None:
+                    decision = PolicyDecision.ALLOW
+
         intent = self._make_intent(
             call,
             context,
@@ -172,9 +252,50 @@ class KernelToolRuntime:
             arguments,
             binding,
             self._policy_for(registration).identity,
+            process_lease=process_lease,
         )
         if decision is PolicyDecision.REQUIRE_APPROVAL:
             request = self._approval_request(intent, registration.spec, context)
+            if process_candidate is not None:
+                # F1（P1 review finding 2026-08-16）：LOCAL_SAME_UID_PROCESS 的
+                # authority 只能来自 exact active durable lease（ResolveApproval 铸造）。
+                # ApprovalGrant 本身不可授权进程执行——revoke/expiry/clock rollback 后
+                # 的 stale grant 必须 fail closed：重新 approval（新 candidate → 新
+                # lease），绝不 mint 无 lease 的可执行 intent。
+                try:
+                    requirement = self._artifact_confirmation_requirement(context)
+                except ValueError as error:
+                    return self._error(
+                        call.tool_call_id,
+                        "artifact_requirement_ambiguous",
+                        str(error),
+                    )
+                if requirement is not None:
+                    binding_digest = _digest_json(
+                        {
+                            "intent_digest": intent.intent_digest,
+                            "artifact_confirmation_requirement": asdict(requirement),
+                        }
+                    )
+                    request = replace(
+                        request,
+                        request_id=f"approval-{binding_digest[:16]}",
+                        binding_digest=binding_digest,
+                        preview=(
+                            request.preview
+                            + "\nartifact verification required: "
+                            + requirement.artifact_path
+                            + "\nplain yes/approve only authorizes the effect and is disabled "
+                            "for this request; use /approve-artifact <sha256> <path>"
+                        ),
+                    )
+                return ApprovalRequired(
+                    replace(
+                        request,
+                        process_authority_candidate=process_candidate,
+                        artifact_confirmation_requirement=requirement,
+                    )
+                )
             if approval is None:
                 return ApprovalRequired(request)
             if (
@@ -188,6 +309,29 @@ class KernelToolRuntime:
                 )
         return intent
 
+    @staticmethod
+    def _artifact_confirmation_requirement(
+        context: ToolPrepareContext,
+    ) -> ArtifactConfirmationRequirementV1 | None:
+        proposed = tuple(
+            item
+            for item in context.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        )
+        if len(proposed) > 1:
+            raise ValueError(
+                "one local_process approval can bind at most one artifact requirement"
+            )
+        if not proposed:
+            return None
+        criterion = proposed[0]
+        if criterion.artifact_path is None:
+            raise ValueError("filesystem criterion is missing artifact_path")
+        return ArtifactConfirmationRequirementV1(
+            criterion_id=criterion.criterion_id,
+            artifact_path=criterion.artifact_path,
+        )
+
     def invoke(self, intent: ExecutionIntent) -> ToolResult:
         registration = self._tools.get(intent.tool_name)
         if registration is None:
@@ -198,11 +342,25 @@ class KernelToolRuntime:
             raise IntentConflictError("tool identity changed after preparation")
         if _digest_json(intent.arguments) != intent.arguments_digest:
             raise IntentConflictError("intent arguments digest does not match")
+        if (
+            registration.spec.execution_authority
+            is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS
+            and intent.process_lease is None
+        ):
+            # F1：无 exact durable lease 的 process intent 一律拒绝（defense in
+            # depth——prepare 已不 mint 此形状，伪造/旧形状同样零 spawn）。
+            raise IntentConflictError(
+                "process authority intent requires an exact active durable lease"
+            )
+        if intent.process_lease is not None and not self._lease_is_active_now(
+            intent.process_lease
+        ):
+            raise IntentConflictError("process authority lease expired before invocation")
 
-        current_binding = (
-            registration.prepare_binding(intent.arguments)
-            if registration.prepare_binding is not None
-            else {}
+        current_binding = self._prepare_binding(
+            registration,
+            intent.arguments,
+            source_authority=intent.source_authority,
         )
         if current_binding != intent.safety_binding:
             raise IntentConflictError("tool safety preconditions changed after preparation")
@@ -222,10 +380,12 @@ class KernelToolRuntime:
             conversation_id=intent.conversation_id,
             run_id=intent.run_id,
             state_revision=0,
+            approval_basis_revision=intent.approval_basis_revision,
             goal_id=intent.goal_id,
             goal_revision=intent.goal_revision,
             workspace_identity_digest=intent.workspace_identity_digest,
             goal_authorization=intent.goal_authorization,
+            source_authority=intent.source_authority,
         )
         if (
             decision is PolicyDecision.REQUIRE_APPROVAL
@@ -238,9 +398,28 @@ class KernelToolRuntime:
         ):
             raise IntentConflictError("goal authorization changed after preparation")
 
+        # binding 哈希或 policy 重验可能跨过 lease 过期边界。在真正
+        # callable/spawn 之前最后重验，不允许已铸 intent 消费过期权限。
+        if intent.process_lease is not None and not self._lease_is_active_now(
+            intent.process_lease
+        ):
+            raise IntentConflictError("process authority lease expired before invocation")
+
         self._invoked_keys.add(intent.idempotency_key)
         try:
             raw_result = registration.func(intent)
+            if isinstance(raw_result, ProcessExecutionDraftV1):
+                return self._process_outcome(intent, registration.spec, raw_result)
+            if registration.spec.source_kinds:
+                return self._source_result(intent, registration.spec, raw_result)
+            if isinstance(raw_result, ToolExecutionOutput | ToolResult):
+                return ToolResult(
+                    tool_call_id=intent.tool_call_id,
+                    content="Tool returned an output contract it is not authorized to use.",
+                    is_error=True,
+                    executed=True,
+                    metadata={"code": "source_contract_mismatch"},
+                )
             if isinstance(raw_result, KnownExecutedError):
                 # effect 已发生但明确失败：known-executed error，不能展平为 success（A18/R27）。
                 return ToolResult(
@@ -268,7 +447,10 @@ class KernelToolRuntime:
                 )
             content = _normalize_output(raw_result)
         except Exception:
-            if registration.spec.side_effect is not SideEffectClass.READ_ONLY:
+            if (
+                registration.spec.side_effect is not SideEffectClass.READ_ONLY
+                or registration.spec.egress is EgressClass.PUBLIC_NETWORK
+            ):
                 # 写入/外部效果可能已经发生；必须由上层进入 unknown-outcome 恢复态。
                 raise
             return ToolResult(
@@ -287,6 +469,27 @@ class KernelToolRuntime:
             },
         )
 
+    @staticmethod
+    def _prepare_binding(
+        registration: RegisteredTool,
+        arguments: dict[str, JSONValue],
+        *,
+        source_authority: SourceAuthorityBinding | None,
+    ) -> dict[str, JSONValue]:
+        binding = (
+            registration.prepare_binding(arguments)
+            if registration.prepare_binding is not None
+            else {}
+        )
+        if registration.prepare_authority_binding is None:
+            return binding
+        if source_authority is None:
+            raise ValueError("source authority is required for URL binding")
+        return {
+            **binding,
+            **registration.prepare_authority_binding(arguments, source_authority),
+        }
+
     def _make_intent(
         self,
         call: ToolCall,
@@ -295,6 +498,8 @@ class KernelToolRuntime:
         arguments: dict[str, JSONValue],
         binding: dict[str, JSONValue],
         policy_identity: str,
+        *,
+        process_lease: ProcessAuthorityLeaseV1 | None = None,
     ) -> ExecutionIntent:
         intent = ExecutionIntent(
             tool_call_id=call.tool_call_id,
@@ -310,6 +515,22 @@ class KernelToolRuntime:
             conversation_id=context.conversation_id,
             run_id=context.run_id,
             side_effect=spec.side_effect,
+            egress=spec.egress,
+            execution_authority=spec.execution_authority,
+            operation=(
+                binding.get("operation")
+                if isinstance(binding.get("operation"), str)
+                else spec.name
+            ),
+            request_identity=(
+                binding.get("request_identity")
+                if isinstance(binding.get("request_identity"), str)
+                else (
+                    f"{context.conversation_id}:{context.run_id}:{call.tool_call_id}"
+                )
+            ),
+            approval_basis_revision=context.approval_basis_revision,
+            source_authority=context.source_authority,
             safety_binding=binding,
             goal_id=context.goal_id,
             goal_revision=context.goal_revision,
@@ -317,10 +538,23 @@ class KernelToolRuntime:
             goal_authorization=context.goal_authorization,
             fact_admission=context.fact_admission,
             preference_admission=context.preference_admission,
+            process_lease=process_lease,
         )
         return replace(
             intent,
             intent_digest=self._intent_digest(intent),
+        )
+
+    def _lease_is_active_now(self, lease: ProcessAuthorityLeaseV1) -> bool:
+        now = _parse_zoned_rfc3339(self._clock())
+        issued = _parse_zoned_rfc3339(lease.issued_at)
+        expires = _parse_zoned_rfc3339(lease.expires_at)
+        return (
+            now is not None
+            and issued is not None
+            and expires is not None
+            and issued <= now < expires
+            and lease.remaining_uses > 0
         )
 
     def _intent_digest(self, intent: ExecutionIntent) -> str:
@@ -335,6 +569,16 @@ class KernelToolRuntime:
                 "conversation_id": intent.conversation_id,
                 "run_id": intent.run_id,
                 "side_effect": intent.side_effect.value,
+                "egress": intent.egress.value,
+                "execution_authority": intent.execution_authority.value,
+                "operation": intent.operation,
+                "request_identity": intent.request_identity,
+                "approval_basis_revision": intent.approval_basis_revision,
+                "source_authority_digest": (
+                    intent.source_authority.binding_digest
+                    if intent.source_authority is not None
+                    else None
+                ),
                 "safety_binding": intent.safety_binding,
                 "goal_id": intent.goal_id,
                 "goal_revision": intent.goal_revision,
@@ -352,6 +596,11 @@ class KernelToolRuntime:
                 "preference_admission_digest": (
                     intent.preference_admission.binding_digest
                     if intent.preference_admission is not None
+                    else None
+                ),
+                "process_lease_digest": (
+                    intent.process_lease.lease_digest
+                    if intent.process_lease is not None
                     else None
                 ),
             }
@@ -402,6 +651,7 @@ class KernelToolRuntime:
             preview=preview,
             tool_name=spec.name,
             state_revision=context.state_revision,
+            approval_basis_revision=context.approval_basis_revision,
             arguments_digest=intent.arguments_digest,
             policy_identity=intent.policy_identity,
             risk=spec.risk.value,
@@ -409,6 +659,371 @@ class KernelToolRuntime:
             target_digest=_optional_string(binding.get("target_digest")),
             precondition_digest=_optional_string(binding.get("precondition_digest")),
             new_content_digest=_optional_string(binding.get("new_content_digest")),
+            egress=spec.egress.value,
+            operation=intent.operation,
+            request_identity=intent.request_identity,
+            destination_digest=_optional_string(binding.get("destination_digest")),
+            cost_class=_optional_string(binding.get("cost_class")),
+            trust_notice_id=_optional_string(binding.get("trust_notice_id")),
+            trust_notice_digest=_optional_string(binding.get("trust_notice_digest")),
+        )
+
+    def _build_process_candidate(
+        self,
+        binding: dict[str, JSONValue],
+        context: ToolPrepareContext,
+    ) -> ProcessAuthorityCandidateV1:
+        command_fingerprint = binding["command_fingerprint"]
+        candidate_id = f"candidate:{command_fingerprint[:16]}"
+        ea_path = binding.get("expected_artifact_path")
+        ea_sha = binding.get("expected_artifact_sha256")
+        # candidate/lease 的时钟取 prepare 时刻的 runtime clock——**不进入 binding**
+        # （F1 review finding：binding 必须对同一 arguments 确定性，否则 prepare→invoke
+        # 跨秒边界的全等比较会抛 IntentConflictError → 假 unknown + 烧 lease use）。
+        issued_at = self._clock()
+        return ProcessAuthorityCandidateV1.create(
+            candidate_id=candidate_id,
+            goal_id=context.goal_id,
+            goal_revision=context.goal_revision,
+            workspace_identity_digest=context.workspace_identity_digest,
+            command_fingerprint=command_fingerprint,
+            readable_command=binding["effect_preview"],
+            executable_digest=binding["executable_digest"],
+            argv_digest=binding["argv_digest"],
+            cwd_digest=binding["cwd_digest"],
+            resource_profile=binding["resource_profile"],
+            environment_policy_digest=binding["environment_policy_digest"],
+            execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
+            trust_notice_digest=binding["trust_notice_digest"],
+            issued_at=issued_at,
+            max_uses=8,
+            expiry_minutes=60,
+            expected_artifact_path=ea_path,
+            expected_artifact_sha256=ea_sha,
+        )
+
+    def _match_process_lease(
+        self,
+        candidate: ProcessAuthorityCandidateV1,
+        context: ToolPrepareContext,
+    ) -> ProcessAuthorityLeaseV1 | None:
+        # Codex 终审 P1：lease 时效必须用严格 zoned RFC3339 数值比较（design §5.4）。
+        # 字符串比较在 clock rollback / malformed / naive 时间戳下会错误接受旧
+        # authority；任何一侧不可解析 → fail closed（无匹配 → 重新批准）。
+        now_dt = _parse_zoned_rfc3339(self._clock())
+        if now_dt is None:
+            return None
+        for lease in context.process_leases:
+            issued_dt = _parse_zoned_rfc3339(lease.issued_at)
+            expires_dt = _parse_zoned_rfc3339(lease.expires_at)
+            if (
+                issued_dt is not None
+                and expires_dt is not None
+                and lease.command_fingerprint == candidate.command_fingerprint
+                and lease.goal_id == candidate.goal_id
+                and lease.goal_revision == candidate.goal_revision
+                and lease.workspace_identity_digest == candidate.workspace_identity_digest
+                and lease.remaining_uses > 0
+                and issued_dt <= now_dt < expires_dt
+            ):
+                return lease
+        return None
+
+    def _process_outcome(
+        self,
+        intent: ExecutionIntent,
+        spec: ToolSpec,
+        draft: ProcessExecutionDraftV1,
+    ) -> ToolResult:
+        if spec.execution_authority is not ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Ordinary tool returned a process draft it is not authorized to use.",
+                is_error=True,
+                executed=True,
+                metadata={
+                    "code": "process_draft_forgery",
+                    "tool_identity": spec.identity_digest,
+                },
+            )
+        if draft.outcome is ProcessDraftOutcome.SPAWN_FAILED:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="local_process failed before spawn.",
+                is_error=True,
+                executed=False,
+                metadata={
+                    "code": draft.error_code or "spawn_failed",
+                    "tool_identity": spec.identity_digest,
+                },
+            )
+        self._validate_process_draft(draft, intent)
+        receipt = self._mint_process_receipt(intent, spec, draft)
+        success = draft.outcome is ProcessDraftOutcome.EXITED and draft.exit_code == 0
+        projections = [draft.stdout_projection]
+        if draft.stderr_projection:
+            if draft.stdout_projection:
+                projections.append("\n[stderr]\n")
+            projections.append(draft.stderr_projection)
+        rendered = "".join(projections)
+        content = (
+            rendered[: spec.output_limit_chars]
+            if rendered
+            else f"local_process {draft.outcome.value}"
+        )
+        return ToolResult(
+            tool_call_id=intent.tool_call_id,
+            content=content,
+            is_error=not success,
+            executed=True,
+            metadata={
+                "process_receipt_kind": "process_v1",
+                "process_receipt": receipt.to_json(),
+                "receipt_digest": receipt.receipt_digest,
+                "execution_authority": spec.execution_authority.value,
+                "outcome": draft.outcome.value,
+                "exit_code": draft.exit_code,
+                "command_fingerprint": intent.safety_binding.get("command_fingerprint"),
+                "stdout_truncated": draft.stdout_truncated,
+                "stderr_truncated": draft.stderr_truncated,
+                "duration_seconds": draft.duration_seconds,
+                "resource_profile": intent.safety_binding.get("process_profile"),
+                "stdout_digest": draft.stdout_digest,
+                "stderr_digest": draft.stderr_digest,
+                "lease_id": receipt.lease_id,
+                "use_ordinal": receipt.use_ordinal,
+                "tool_identity": spec.identity_digest,
+                # child stdout/stderr 是数据，不是指令或新的 authority。
+                "untrusted_output": True,
+            },
+        )
+
+    @staticmethod
+    def _validate_process_draft(
+        draft: ProcessExecutionDraftV1, intent: ExecutionIntent
+    ) -> None:
+        """P3（冻结合同 / KTD8）：Kernel 铸 receipt 前校验 runner draft 的 closed bounds。
+
+        draft 是 runner 的私有输出合同，但 invoke 是唯一铸造 durable receipt 的层——
+        越界 draft（超 profile caps、outcome 与 exit/signal/reap 形状不符、非 64-hex
+        digest、超预算时长/投影）必须 fail closed（EXTERNAL → unknown recovery），
+        不得盲信 process callable。"""
+
+        profile_name = intent.safety_binding.get("resource_profile")
+        profile = ResourceProfileV1.for_profile(ResourceProfile(str(profile_name)))
+        violations: list[str] = []
+        if draft.outcome is ProcessDraftOutcome.EXITED and (
+            not isinstance(draft.exit_code, int) or isinstance(draft.exit_code, bool)
+        ):
+            violations.append("exited requires an integer exit_code")
+        if draft.outcome is ProcessDraftOutcome.SIGNALED and (
+            not isinstance(draft.signal, str) or not draft.signal
+        ):
+            violations.append("signaled requires a signal name")
+        if draft.outcome is ProcessDraftOutcome.SIGNALED and draft.exit_code is not None:
+            violations.append("signaled must not pin exit_code")
+        if draft.outcome is ProcessDraftOutcome.TIMED_OUT_REAPED:
+            if draft.exit_code is not None:
+                violations.append("timed_out_reaped must not pin exit_code")
+            if not draft.group_reaped:
+                violations.append("timed_out_reaped requires confirmed group reap")
+        if not isinstance(draft.pid, int) or not isinstance(
+            draft.process_group_id, int
+        ):
+            violations.append("post-spawn draft requires pid and process group identity")
+        if draft.duration_seconds < 0:
+            violations.append("duration must be non-negative")
+        allowed_seconds = (
+            profile.wall_deadline_seconds
+            + profile.term_grace_seconds
+            + profile.kill_grace_seconds
+            + 12.0
+        )
+        if draft.duration_seconds > allowed_seconds:
+            violations.append("duration exceeds the profile cleanup budget")
+        if draft.stdout_bytes > profile.stdout_cap_bytes:
+            violations.append("stdout bytes exceed the profile cap")
+        if draft.stderr_bytes > profile.stderr_cap_bytes:
+            violations.append("stderr bytes exceed the profile cap")
+        if draft.stdout_bytes + draft.stderr_bytes > profile.combined_cap_bytes:
+            violations.append("combined output bytes exceed the profile cap")
+        for label, value in (
+            ("stdout_digest", draft.stdout_digest),
+            ("stderr_digest", draft.stderr_digest),
+        ):
+            if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                violations.append(f"{label} must be 64 lowercase hex")
+        if len(draft.stdout_projection) > profile.rendered_chars:
+            violations.append("stdout projection exceeds rendered chars")
+        if len(draft.stderr_projection) > profile.rendered_chars:
+            violations.append("stderr projection exceeds rendered chars")
+        if violations:
+            raise ValueError(
+                "process draft violated closed bounds: " + "; ".join(violations)
+            )
+
+    def _mint_process_receipt(
+        self,
+        intent: ExecutionIntent,
+        spec: ToolSpec,
+        draft: ProcessExecutionDraftV1,
+    ) -> ProcessReceiptV1:
+        binding = intent.safety_binding
+        lease = intent.process_lease
+        if lease is None:
+            # F1（P1 review finding 2026-08-16）：pseudo lease receipt（fallback
+            # lease_id / use_ordinal=0）删除——无 exact durable lease 不得铸造
+            # process receipt。
+            raise IntentConflictError(
+                "process receipt requires an exact durable lease identity"
+            )
+        lease_id = lease.lease_id
+        lease_digest = lease.lease_digest
+        use_ordinal = lease.uses_consumed + 1
+        outcome = ProcessOutcome(draft.outcome.value)
+        goal_id = intent.goal_id or ""
+        goal_revision = intent.goal_revision or 0
+        workspace = intent.workspace_identity_digest or ""
+        return ProcessReceiptV1.create(
+            lease_id=lease_id,
+            lease_digest=lease_digest,
+            use_ordinal=use_ordinal,
+            goal_id=goal_id,
+            goal_revision=goal_revision,
+            workspace_identity_digest=workspace,
+            tool_identity=spec.identity_digest,
+            intent_digest=intent.intent_digest,
+            executable_digest=binding["executable_digest"],
+            argv_digest=binding["argv_digest"],
+            cwd_digest=binding["cwd_digest"],
+            resource_profile=binding["resource_profile"],
+            environment_policy_digest=binding["environment_policy_digest"],
+            execution_authority=spec.execution_authority,
+            outcome=outcome,
+            exit_code=draft.exit_code,
+            signal=draft.signal,
+            started_at=str(draft.started_at_monotonic),
+            ended_at=str(draft.ended_at_monotonic),
+            stdout_digest=draft.stdout_digest,
+            stderr_digest=draft.stderr_digest,
+            stdout_bytes=draft.stdout_bytes,
+            stderr_bytes=draft.stderr_bytes,
+            stdout_truncated=draft.stdout_truncated,
+            stderr_truncated=draft.stderr_truncated,
+            group_cleanup_claim="reaped" if draft.group_reaped else "unconfirmed",
+            command_fingerprint=str(binding["command_fingerprint"]),
+            duration_seconds=draft.duration_seconds,
+        )
+
+    @staticmethod
+    def _source_result(
+        intent: ExecutionIntent,
+        spec: ToolSpec,
+        raw_result: object,
+    ) -> ToolResult:
+        if not isinstance(raw_result, ToolExecutionOutput):
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool returned an invalid output contract.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_output_required"},
+            )
+        if len(raw_result.content) > spec.output_limit_chars:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool output exceeded the configured limit.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_output_oversized"},
+            )
+        allowed_metadata = spec.safety_policy.get("source_metadata_keys", [])
+        if not isinstance(allowed_metadata, list) or any(
+            not isinstance(key, str) for key in allowed_metadata
+        ):
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool metadata policy is malformed.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_metadata_policy_invalid"},
+            )
+        if set(raw_result.metadata) - set(allowed_metadata):
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool returned unauthorized metadata.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_metadata_invalid"},
+            )
+        metadata_bytes = _canonical_json(raw_result.metadata).encode("utf-8")
+        if len(metadata_bytes) > min(spec.output_limit_chars, 8_192):
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool metadata exceeded the configured limit.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_metadata_oversized"},
+            )
+        if len(raw_result.source_receipts) > 16:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Source tool returned too many receipts.",
+                is_error=True,
+                executed=True,
+                metadata={"code": "source_receipts_oversized"},
+            )
+        receipts: list[SourceReceiptV1] = []
+        for draft in raw_result.source_receipts:
+            if draft.source_kind not in spec.source_kinds:
+                return ToolResult(
+                    tool_call_id=intent.tool_call_id,
+                    content="Source tool returned an unauthorized source kind.",
+                    is_error=True,
+                    executed=True,
+                    metadata={"code": "source_kind_invalid"},
+                )
+            bounded_strings = (
+                draft.origin_locator,
+                draft.observed_at,
+                draft.title or "",
+                draft.content,
+            )
+            if any(len(value) > spec.output_limit_chars for value in bounded_strings):
+                return ToolResult(
+                    tool_call_id=intent.tool_call_id,
+                    content="Source receipt draft exceeded the configured limit.",
+                    is_error=True,
+                    executed=True,
+                    metadata={"code": "source_receipt_oversized"},
+                )
+            receipts.append(SourceReceiptV1.create(draft, intent))
+        metadata = {
+            **raw_result.metadata,
+            "tool_identity": spec.identity_digest,
+            "source_receipts": [
+                {
+                    **asdict(receipt),
+                    "source_kind": receipt.source_kind.value,
+                }
+                for receipt in receipts
+            ],
+            "data_classes": sorted({receipt.data_class for receipt in receipts}),
+            "source_refs": [
+                {
+                    "source_ref": f"source-ref:v1:{receipt.receipt_digest}",
+                    "receipt_digest": receipt.receipt_digest,
+                }
+                for receipt in receipts
+            ],
+            "truncated": any(receipt.truncated for receipt in receipts),
+        }
+        return ToolResult(
+            tool_call_id=intent.tool_call_id,
+            content=raw_result.content,
+            is_error=raw_result.is_error,
+            executed=raw_result.executed,
+            metadata=metadata,
         )
 
     @staticmethod

@@ -4,6 +4,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     ConversationState,
+    ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -22,6 +23,7 @@ from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, Scripted
 
 def test_invocation_limit_pauses_and_resume_gets_fresh_budget() -> None:
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_fixture",
         version="1",
         description="Read fixture",
@@ -72,6 +74,68 @@ def test_invocation_limit_pauses_and_resume_gets_fresh_budget() -> None:
     assert completed.message == "final"
 
 
+def test_unbounded_cumulative_limits_allow_a_progressing_model_tool_loop() -> None:
+    calls: list[str] = []
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="read_fixture",
+        version="1",
+        description="Read fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={},
+        output_limit_chars=10,
+    )
+    provider = ScriptedProvider(
+        ModelResponse((ModelToolCall("call-1", "read_fixture", {"path": "one"}),)),
+        ModelResponse((ModelToolCall("call-2", "read_fixture", {"path": "two"}),)),
+        ModelResponse((ModelTextBlock("final"),), output_tokens=100),
+    )
+    store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (RegisteredTool(spec, lambda intent: calls.append(intent.arguments["path"]) or "ok"),)
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(
+            max_model_calls=None,
+            max_tool_calls=None,
+            max_input_tokens=None,
+            max_output_tokens=None,
+        ),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+
+    result = runtime.run_turn(
+        SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=1,
+            expected_revision=0,
+            run_id="run-1",
+            message="read twice",
+        ),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "final"
+    assert calls == ["one", "two"]
+
+
 def test_conversation_capacity_stops_before_provider_effect() -> None:
     provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not run"),)))
     store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
@@ -112,10 +176,16 @@ def test_tool_call_limit_pauses_before_the_next_callable() -> None:
         return "ok"
 
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_fixture",
         version="1",
         description="Read fixture",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
         risk=ToolRisk.LOW,
         side_effect=SideEffectClass.READ_ONLY,
         output_policy=OutputPolicy.BOUNDED_TEXT,
@@ -126,8 +196,8 @@ def test_tool_call_limit_pauses_before_the_next_callable() -> None:
     provider = ScriptedProvider(
         ModelResponse(
             (
-                ModelToolCall("call-1", "read_fixture", {}),
-                ModelToolCall("call-2", "read_fixture", {}),
+                ModelToolCall("call-1", "read_fixture", {"path": "one"}),
+                ModelToolCall("call-2", "read_fixture", {"path": "two"}),
             )
         )
     )

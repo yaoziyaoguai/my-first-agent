@@ -106,15 +106,26 @@ class ChildProcessRunner:
         config = _ChildConfig(self._spec, self._profile, objective, handoff, parent_idempotency_key)
         config_path = self._write_config(config)
         config_dir = config_path.parent
+        cleanup_succeeded = False
         try:
             outcome = self._run_child(config_path)
         finally:
             # F-G8-2：安全移除 per-run 目录（先删 config.json 再 rmdir 空目录），不跟随 symlink、
-            # 不删除宽泛/未解析路径。任何失败都不得影响 receipt 分类。
-            with __import__("contextlib").suppress(OSError):
-                config_path.unlink()
-            with __import__("contextlib").suppress(OSError):
-                config_dir.rmdir()
+            # 不删除宽泛/未解析路径。任何失败都不得影响 receipt 分类——但单次 unlink/rmdir
+            # 的瞬时失败（全 suite 负载下实测）会静默泄漏目录，违反"必须消失"合同，
+            # 故有界重试到目录真正消失或预算耗尽。
+            cleanup_succeeded = _remove_run_dir(config_path, config_dir)
+
+        if not cleanup_succeeded:
+            return ChildRunResult(
+                status=RunStatus.FAILED_FATAL,
+                run_id=child_run_id,
+                message="",
+                reason="cleanup_failed",
+                model_calls=1 if outcome is not None else 0,
+                tool_calls=0,
+                receipt_state=TerminationReceiptState.TERMINATED,
+            )
 
         if outcome is not None:
             status = _status_from_name(outcome.get("status"))
@@ -227,6 +238,31 @@ class ChildProcessRunner:
         finally:
             os.close(fd)
         return config_path
+
+
+def _remove_run_dir(config_path: Path, config_dir: Path) -> bool:
+    """有界重试地移除 per-run 目录（F-G8-2 + U10 复验实测的负载竞态加固）。
+
+    先 unlink config.json 再 rmdir 空目录；两者任一瞬时失败（全 suite 负载下实测）
+    在小预算内重试。预算耗尽返回 ``False``，caller 必须把整体调用标为失败，不能在
+    owner-only config 目录仍残留时报告成功。
+    """
+
+    import time as _time
+
+    for _ in range(5):
+        with __import__("contextlib").suppress(OSError):
+            config_path.unlink()
+        try:
+            config_dir.rmdir()
+            return True
+        except OSError:
+            _time.sleep(0.02)
+    try:
+        config_dir.rmdir()
+    except OSError:
+        return False
+    return True
 
 
 def _spec_to_dict(spec: ChildProviderSpec) -> dict:

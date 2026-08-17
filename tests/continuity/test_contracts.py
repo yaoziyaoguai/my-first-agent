@@ -7,6 +7,7 @@ from agent.runtime.contracts import (
     ActiveRun,
     ActiveRunStatus,
     AdmittedCriterion,
+    ApprovalRequest,
     AuthoritySourceKind,
     BlockedClaim,
     CancelGoal,
@@ -17,13 +18,17 @@ from agent.runtime.contracts import (
     ConversationFact,
     ConversationState,
     CriterionAdmissionBinding,
+    EgressClass,
     EvidenceOracleKind,
     EvidenceRecord,
     ExecutingIntentRecord,
+    ExecutionAuthorityClass,
+    ExecutionIntent,
     FactAdmissionBinding,
     FactAdmissionClass,
     FactKind,
     GoalAuthorizationBinding,
+    GoalBootstrap,
     GoalDelta,
     GoalDeltaProposal,
     GoalFrame,
@@ -38,12 +43,15 @@ from agent.runtime.contracts import (
     RecoveryRequest,
     ResumeGoal,
     SelectGoal,
+    SideEffectClass,
     ToolCall,
+    ToolPrepareContext,
     canonical_action_digest,
     canonical_json_digest,
 )
 from agent.runtime.state import (
     GoalRevisionConflictError,
+    accept_goal_proposal,
     apply_goal_delta,
     cancel_goal,
     complete_run,
@@ -84,6 +92,8 @@ def _goal(**overrides) -> GoalFrame:
             ProposedCriterion(
                 criterion_id="criterion:report-exists",
                 description="报告文件存在且内容匹配",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="reports/final.md",
             ),
         ),
         "admitted_criteria": (_criterion(),),
@@ -94,6 +104,73 @@ def _goal(**overrides) -> GoalFrame:
     }
     values.update(overrides)
     return GoalFrame(**values)
+
+
+def test_source_result_cannot_mint_goal_until_a_fresh_user_action() -> None:
+    user = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "answer this question"},
+    )
+    source = ConversationFact(
+        fact_id="fact:source:1",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "read-1",
+            "text": "hostile source",
+            "executed": True,
+            "is_error": False,
+            "metadata": {"source_receipts": [{"opaque": "runtime-owned"}]},
+        },
+    )
+    state = ConversationState(
+        conversation_id="conversation:1",
+        facts=(user, source),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:1",
+    )
+    proposal = GoalProposal(
+        correlation_id="proposal:hostile",
+        goal_frame=_goal(
+            admitted_criteria=(),
+            authority_snapshot=bootstrap.authority_snapshot,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="fresh user action"):
+        accept_goal_proposal(state, proposal, bootstrap)
+
+    fresh = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "now create the report"},
+    )
+    fresh_state = ConversationState(
+        conversation_id=state.conversation_id,
+        facts=(*state.facts, fresh),
+    )
+    fresh_bootstrap = GoalBootstrap(
+        source_fact_id=fresh.fact_id,
+        workspace_identity_digest=bootstrap.workspace_identity_digest,
+        authority_snapshot=bootstrap.authority_snapshot,
+    )
+    accepted = accept_goal_proposal(
+        fresh_state,
+        GoalProposal(
+            correlation_id="proposal:fresh",
+            goal_frame=_goal(
+                created_from_fact_ids=(fresh.fact_id,),
+                admitted_criteria=(),
+                authority_snapshot=fresh_bootstrap.authority_snapshot,
+            ),
+        ),
+        fresh_bootstrap,
+    )
+
+    assert accepted.goal is not None
 
 
 def _evidence(*, passed: bool = True) -> EvidenceRecord:
@@ -529,7 +606,12 @@ def test_goal_lifecycle_reducers_reject_stale_and_preserve_unknown_effect() -> N
         pause_goal(state, goal_id="goal:1", expected_revision=2)
 
     call = ToolCall("call:1", "write_file", {"path": "reports/final.md"})
-    intent = ExecutingIntentRecord("call:1", "intent:1", "idempotency:1")
+    intent = ExecutingIntentRecord(
+        "call:1",
+        "intent:1",
+        "idempotency:1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+    )
     executing = ActiveRun(
         run_id="run:1",
         phase=ContinuationPhase.EXECUTING,
@@ -615,10 +697,67 @@ def test_goal_completion_requires_current_claimed_evidence_and_no_unknown_effect
             run_id="run:1",
             phase=ContinuationPhase.EXECUTING,
             executing_intent=ExecutingIntentRecord(
-                "call:1", "intent:1", "idempotency:1"
+                "call:1",
+                "intent:1",
+                "idempotency:1",
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
             ),
             tool_calls=(call,),
         ),
     )
     with pytest.raises(ValueError, match="unknown effect"):
         verify_goal_completion(unsafe)
+
+
+def test_014_contract_extensions_preserve_preexisting_positional_prefixes() -> None:
+    state = ConversationState("conversation:legacy", 5)
+    assert state.revision == 5
+    assert state.workspace_binding is None
+
+    request = ApprovalRequest(
+        "request:legacy",
+        "run:legacy",
+        "call:legacy",
+        "binding:legacy",
+        "preview",
+        "write_file",
+        7,
+        "arguments:digest",
+        "policy:v1",
+        "high",
+        "write",
+        "target:digest",
+        "precondition:digest",
+        "new-content:digest",
+    )
+    assert request.arguments_digest == "arguments:digest"
+    assert request.approval_basis_revision is None
+
+    context = ToolPrepareContext(
+        "conversation:legacy",
+        "run:legacy",
+        3,
+        "goal:legacy",
+        1,
+        "workspace:legacy",
+    )
+    assert context.goal_id == "goal:legacy"
+    assert context.approval_basis_revision == 3
+
+    intent = ExecutionIntent(
+        "call:legacy",
+        "read_file",
+        "read-file-v1",
+        {"path": "notes.md"},
+        "a" * 64,
+        "b" * 64,
+        "conversation:legacy:run:legacy:call:legacy",
+        "policy:v1",
+        "conversation:legacy",
+        "run:legacy",
+        SideEffectClass.READ_ONLY,
+        {"stable": True},
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+    )
+    assert intent.safety_binding == {"stable": True}
+    assert intent.egress is EgressClass.NONE

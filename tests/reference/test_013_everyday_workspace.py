@@ -14,6 +14,7 @@ from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
     CompletionClaim,
     ConversationState,
+    EvidenceOracleKind,
     GoalProposal,
     GoalStatus,
     ModelResponse,
@@ -40,7 +41,8 @@ def _composition(provider, store, workspace: Path, output: list[str]):
         system_policy=EVERYDAY_SYSTEM_POLICY,
         context_limits=ContextLimits(max_input_tokens=8_000, output_reserve=400),
         invocation_limits=InvocationLimits(),
-        workspace_scope_digest="workspace-1",
+        workspace_identity_digest="workspace-1",
+        context_scope_digest="workspace-1",
     )
     return composition.runtime, renderer
 
@@ -57,6 +59,8 @@ def _authority_snapshot(workspace: Path) -> str:
                     "name": definition.name,
                     "input_schema": definition.input_schema,
                     "side_effect": definition.side_effect.value,
+                    "egress": definition.egress.value,
+                    "execution_authority": definition.execution_authority.value,
                 }
                 for definition in definitions
             ],
@@ -81,7 +85,12 @@ def _artifact_goal(
         user_outcome=outcome,
         targets=(path,),
         proposed_criteria=(
-            ProposedCriterion(criterion_id, f"{path} reads back with the requested content"),
+            ProposedCriterion(
+                criterion_id,
+                f"{path} reads back with the requested content",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=path,
+            ),
         ),
         admitted_criteria=(),
         authority_snapshot=authority_snapshot,

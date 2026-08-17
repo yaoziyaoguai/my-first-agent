@@ -4,6 +4,7 @@ import pytest
 
 from agent.cli.actions import (
     build_cancel,
+    build_recover_unknown_observation,
     build_resolve_approval,
     build_resolve_recovery,
     build_resume,
@@ -13,8 +14,11 @@ from agent.runtime.contracts import (
     ActionDisposition,
     ApprovalRequest,
     ConversationState,
+    EgressClass,
+    RecoverUnknownObservation,
     RecoveryRequest,
     RecoveryResolution,
+    SideEffectClass,
     ToolCall,
 )
 from agent.runtime.state import (
@@ -107,3 +111,35 @@ def test_resume_into_recovery_then_only_exact_resolution_progresses() -> None:
         resolution=RecoveryResolution.MARK_FAILED,
     )
     assert accept_action(recovering, resolve).disposition is ActionDisposition.ACCEPTED
+
+
+def test_public_observation_recovery_builder_binds_persisted_executing_intent() -> None:
+    started = accept_action(None, build_submit(_ready(), message="hi", run_id="run-1")).state
+    batched = start_tool_batch(started, (ToolCall("call-1", "web_search", {}),))
+    executing = mark_executing(
+        batched,
+        tool_call_id="call-1",
+        intent_digest="public-intent",
+        idempotency_key="request-1",
+        side_effect=SideEffectClass.READ_ONLY,
+        egress=EgressClass.PUBLIC_NETWORK,
+        operation="search",
+        request_identity="request-1",
+    )
+    recovering = pause_for_recovery(
+        executing,
+        RecoveryRequest(
+            request_id="recovery-1",
+            run_id="run-1",
+            tool_call_id="call-1",
+            binding_digest="public-intent",
+            summary="public observation outcome unknown",
+        ),
+    )
+
+    action = build_recover_unknown_observation(recovering)
+
+    assert isinstance(action, RecoverUnknownObservation)
+    assert action.tool_call_id == "call-1"
+    assert action.intent_digest == "public-intent"
+    assert accept_action(recovering, action).disposition is ActionDisposition.ACCEPTED

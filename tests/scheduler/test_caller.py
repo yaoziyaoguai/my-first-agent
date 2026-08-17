@@ -8,6 +8,7 @@ from agent.composition import build_composition
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -44,6 +45,7 @@ def _gated_read_registration() -> RegisteredTool:
     # 工具会在 prepare 前 fail closed。本测试只关心 approval pause/duplicate 语义，
     # 所以用诚实的 READ_ONLY + ALWAYS 审批工具触发同样的 pause 路径。
     spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="read_gated_fixture",
         version="1",
         description="read-only fixture tool that always requires approval",

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    ExecutionAuthorityClass,
     KnownNotExecuted,
     OutputPolicy,
     PolicyDecision,
@@ -81,6 +82,7 @@ def _activation_spec(
     max_tool_result_chars: int,
 ) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=f"skill__{descriptor.name}",
         version="1",
         description=_bounded_description(descriptor),
@@ -106,6 +108,7 @@ def _activation_spec(
 
 def _resource_spec(catalog: SkillCatalog, max_tool_result_chars: int) -> ToolSpec:
     return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name=RESOURCE_TOOL,
         version="1",
         description="Read one bounded resource (references/ or assets/) of an activated skill.",

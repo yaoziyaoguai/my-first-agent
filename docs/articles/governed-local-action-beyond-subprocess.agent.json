@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "sourceRepository": "https://github.com/yaoziyaoguai/my-first-agent",
+  "sources": [
+    {
+      "path": "agent/process/tools.py",
+      "kind": "code",
+      "label": "local_process 工具与执行前重验",
+      "sectionAnchor": "第一层：模型只能描述结构化命令"
+    },
+    {
+      "path": "agent/process/admission.py",
+      "kind": "code",
+      "label": "Executable 与环境准入",
+      "sectionAnchor": "第二层：批准绑定命令身份"
+    },
+    {
+      "path": "agent/process/contracts.py",
+      "kind": "code",
+      "label": "进程命令、资源与回执前合同",
+      "sectionAnchor": "第二层：批准绑定命令身份"
+    },
+    {
+      "path": "tests/kernel/test_runtime_process_authority.py",
+      "kind": "code",
+      "label": "Goal 级权限租约测试",
+      "sectionAnchor": "授权不是 yes，而是一份短租约"
+    },
+    {
+      "path": "agent/process/runner.py",
+      "kind": "code",
+      "label": "有界 POSIX 进程生命周期",
+      "sectionAnchor": "执行不是 subprocess.run，而是受控生命周期"
+    },
+    {
+      "path": "tests/process/test_process_cleanup_recovery.py",
+      "kind": "code",
+      "label": "清理失败与 unknown outcome 回归测试",
+      "sectionAnchor": "不知道结果时，不重试"
+    },
+    {
+      "path": "tests/process/test_j1_production_verified_done.py",
+      "kind": "code",
+      "label": "本地产物 VERIFIED_DONE 证据测试",
+      "sectionAnchor": "完成不能靠模型自报"
+    },
+    {
+      "path": "docs/acceptance/015_GOVERNED_LOCAL_ACTION_E3.md",
+      "kind": "documentation",
+      "label": "真实 Provider E3 验收合同",
+      "sectionAnchor": "验证这套边界，而不是验证 demo"
+    }
+  ],
+  "excluded": [
+    {
+      "path": "agent/runtime/contracts.py",
+      "reason": "运行时总合同超过单个 source 的 20 KiB 上限；文章所需租约行为由聚焦测试快照支撑"
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "reason": "状态机文件过大且包含大量与本文无关的能力，纳入会稀释当前文章上下文"
+    },
+    {
+      "path": "docs/architecture/015_GOVERNED_LOCAL_ACTION_DESIGN.md",
+      "reason": "完整设计文档超过单 source 上限，公开文章已提炼与主题直接相关的边界"
+    },
+    {
+      "path": "docs/implementation/015_EXECUTION_LOG.md",
+      "reason": "实施日志包含大量过程噪音且超过上限，不作为访客问答的默认上下文"
+    }
+  ],
+  "canaryQuestion": "为什么同一次批准不能用于另一组 argv，而且本地程序超时或崩溃后系统也不能直接自动重试？"
+}
